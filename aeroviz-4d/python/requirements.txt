@@ -1,0 +1,20 @@
+# Core scientific stack
+openap>=1.3.0          # aircraft performance model (climb/cruise/descent envelopes)
+pandas>=2.0.0          # data manipulation (OurAirports CSV processing)
+numpy>=1.24.0          # numerical arrays and math
+scipy>=1.10.0          # interpolation, optimization helpers
+
+# Geometry and coordinate math
+pyproj>=3.5.0          # geodetic projections and coordinate transforms
+shapely>=2.0.0         # 2D polygon operations (for protection area geometry)
+
+# Scheduling / optimisation (for your MILP algorithm)
+pulp>=2.7.0            # LP/MILP modelling and solver interface
+
+# Optional: live API endpoint (uncomment if you want a FastAPI server)
+# fastapi>=0.100.0
+# uvicorn>=0.23.0
+
+# Development / testing
+pytest>=7.4.0
+pytest-cov>=4.1.0      # coverage report: pytest --cov=. --cov-report=html
