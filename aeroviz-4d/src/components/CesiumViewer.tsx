@@ -19,8 +19,8 @@
 
 import { useRef } from "react";
 import { useCesiumViewer } from "../hooks/useCesiumViewer";
-import { useRunwayLayer } from "../hooks/useRunwayLayer";
-import { useWaypointLayer } from "../hooks/useWaypointLayer";
+// import { useRunwayLayer } from "../hooks/useRunwayLayer";
+// import { useWaypointLayer } from "../hooks/useWaypointLayer";
 import { useCzmlLoader } from "../hooks/useCzmlLoader";
 
 /** Path to the CZML trajectory file (served from public/) */
@@ -40,18 +40,18 @@ export default function CesiumViewerComponent() {
 
   // ── Activate data layers ───────────────────────────────────────────────────
   // Each hook runs its own useEffect and manages its own cleanup.
-  useRunwayLayer();
-  useWaypointLayer();
+  // useRunwayLayer();
+  // useWaypointLayer();
   // TODO — uncomment once you have implemented useOcsLayer:
   // useOcsLayer();
 
-  const { isLoaded, flightIds, error } = useCzmlLoader(CZML_URL);
+  // const { isLoaded, flightIds, error } = useCzmlLoader(CZML_URL);
 
   // Log loading status to the browser console during development.
-  if (import.meta.env.DEV) {
-    if (error) console.error("[CZML]", error);
-    if (isLoaded) console.log("[CZML] loaded flights:", flightIds);
-  }
+  // if (import.meta.env.DEV) {
+  //   if (error) console.error("[CZML]", error);
+  //   if (isLoaded) console.log("[CZML] loaded flights:", flightIds);
+  // }
 
   return (
     <div

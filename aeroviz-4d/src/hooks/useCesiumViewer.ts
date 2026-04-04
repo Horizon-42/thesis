@@ -20,7 +20,7 @@ import { useApp } from "../context/AppContext";
 // Replace the placeholder with your own token from https://cesium.com/ion/tokens
 // A free "Community" tier token is sufficient for this project.
 // ─────────────────────────────────────────────────────────────────────────────
-const CESIUM_ION_TOKEN = import.meta.env.VITE_CESIUM_ION_TOKEN
+const CESIUM_ION_TOKEN = import.meta.env.VITE_CESIUM_ION_TOKEN;
 
 /** WGS84 coordinates for the initial camera target (default: Kelowna CYLW) */
 export const DEFAULT_AIRPORT = {
@@ -48,6 +48,10 @@ export function useCesiumViewer(
     // Guard: only run once, and only after the DOM node exists.
     if (!containerRef.current || viewerRef.current) return;
 
+    if (!CESIUM_ION_TOKEN) {
+      throw new Error("Missing VITE_CESIUM_ION_TOKEN in .env");
+    }
+
     // ── Step 1: Set the Ion access token ─────────────────────────────────────
     Cesium.Ion.defaultAccessToken = CESIUM_ION_TOKEN;
 
@@ -68,7 +72,7 @@ export function useCesiumViewer(
     // Without it, mountains look flat and grey.
     //
     // Reference: docs/01-cesium-viewer.md § "Viewer options"
-    const viewer = new Cesium.Viewer("cesiumContainer", {
+    const viewer = new Cesium.Viewer(containerRef.current, {
       terrain: Cesium.Terrain.fromWorldTerrain({ requestVertexNormals: true, requestWaterMask: true }),
       baseLayerPicker: false,
       geocoder: false,
