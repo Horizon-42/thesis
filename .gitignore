@@ -1,2 +1,9 @@
 *.pdf
 .DS_Store
+
+
+# node 
+node_modules
+
+
+data
