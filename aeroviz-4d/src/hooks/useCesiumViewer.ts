@@ -20,7 +20,7 @@ import { useApp } from "../context/AppContext";
 // Replace the placeholder with your own token from https://cesium.com/ion/tokens
 // A free "Community" tier token is sufficient for this project.
 // ─────────────────────────────────────────────────────────────────────────────
-const CESIUM_ION_TOKEN = "YOUR_CESIUM_ION_TOKEN_HERE";
+const CESIUM_ION_TOKEN = import.meta.env.VITE_CESIUM_ION_TOKEN
 
 /** WGS84 coordinates for the initial camera target (default: Kelowna CYLW) */
 export const DEFAULT_AIRPORT = {
@@ -52,7 +52,7 @@ export function useCesiumViewer(
     Cesium.Ion.defaultAccessToken = CESIUM_ION_TOKEN;
 
     // ── Step 2: Create the Viewer ─────────────────────────────────────────────
-    // TODO ① — Create `new Cesium.Viewer(...)` with the following settings:
+    // ① — Create `new Cesium.Viewer(...)` with the following settings:
     //   • terrain:             Cesium.Terrain.fromWorldTerrain({ requestVertexNormals: true, requestWaterMask: true })
     //   • baseLayerPicker:     false   (hide the base layer picker button)
     //   • geocoder:            false   (hide the search bar)
@@ -68,28 +68,39 @@ export function useCesiumViewer(
     // Without it, mountains look flat and grey.
     //
     // Reference: docs/01-cesium-viewer.md § "Viewer options"
-    const viewer = null as unknown as Cesium.Viewer; // ← replace this line
+    const viewer = new Cesium.Viewer("cesiumContainer", {
+      terrain: Cesium.Terrain.fromWorldTerrain({ requestVertexNormals: true, requestWaterMask: true }),
+      baseLayerPicker: false,
+      geocoder: false,
+      homeButton: false,
+      sceneModePicker: false,
+      navigationHelpButton: false,
+      animation: true,
+      timeline: true,
+      skyAtmosphere: new Cesium.SkyAtmosphere()
+    });
+    // const viewer = null as unknown as Cesium.Viewer; // ← replace this line
 
     viewerRef.current = viewer;
 
     // ── Step 3: Enable terrain lighting ───────────────────────────────────────
-    // TODO ② — Enable the globe's built-in directional lighting:
-    //   viewer.scene.globe.enableLighting = ???;
+    // ② — Enable the globe's built-in directional lighting:
+    viewer.scene.globe.enableLighting = true;
     //
     // Hint: set it to `true`.  The sun's position is computed from the
     // simulation clock time, so you'll see day/night and mountain shadows.
 
     // ── Step 4: Set initial camera view ───────────────────────────────────────
-    // TODO ③ — Fly the camera to DEFAULT_AIRPORT using viewer.camera.setView().
+    // ③ — Fly the camera to DEFAULT_AIRPORT using viewer.camera.setView().
     //
-    //   viewer.camera.setView({
-    //     destination: Cesium.Cartesian3.fromDegrees(lon, lat, height),
-    //     orientation: {
-    //       heading: Cesium.Math.toRadians(???),   // compass bearing (0 = north)
-    //       pitch:   Cesium.Math.toRadians(???),   // tilt angle (negative = look down)
-    //       roll:    ???,                          // bank angle (0 = level)
-    //     },
-    //   });
+    viewer.camera.setView({
+      destination: Cesium.Cartesian3.fromDegrees(DEFAULT_AIRPORT.lon, DEFAULT_AIRPORT.lat, DEFAULT_AIRPORT.height),
+      orientation: {
+        heading: Cesium.Math.toRadians(0),   // compass bearing (0 = north)
+        pitch:   Cesium.Math.toRadians(-45),   // tilt angle (negative = look down)
+        roll:    0,                          // bank angle (0 = level)
+      },
+    });
     //
     // Hint: a pitch of -45° gives a nice oblique view; -90° is straight down.
     // Reference: docs/01-cesium-viewer.md § "Camera orientation"
