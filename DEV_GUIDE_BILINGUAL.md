@@ -2152,6 +2152,35 @@ Day 13  可用性优化: 移动端适配、对比度检查、截图审阅
 - 图例颜色与 `useRunwayLayer.ts` 实际渲染颜色一致。
 - 1920x1080 与常见移动端宽度下均不遮挡核心控件。
 
+### 10.4 后续开发计划：METAR/QNH 压力高度校正
+
+**目标**
+- 在保持原始轨迹可追溯的前提下，引入基于 METAR/QNH 的压力高度改正。
+- 降低低空进近阶段 barometric altitude 与机场场高之间的系统偏差。
+- 将校正过程参数化并写入元数据，满足研究复现与审计要求。
+
+**实现范围（MVP）**
+- 在 OpenSky 轨迹预处理模块增加高度模式：
+  - `raw`：不改动原始高度（研究基线）
+  - `metar_qnh`：按时间匹配的 METAR QNH 进行压力高度改正
+- 按机场与时刻抓取 METAR（至少覆盖：报告时间、QNH、风场可选）。
+- 对每条航迹逐点计算修正高度，并保留原始高度字段。
+- 在导出 JSON 中写入：数据源、QNH、改正公式版本、质量标记。
+
+**推荐执行顺序**
+```
+Day 14  数据接入: 建立 METAR 拉取与缓存层（按机场+小时索引）
+Day 15  算法实现: 按时间对齐 QNH，完成 barometric altitude -> corrected altitude
+Day 16  质量控制: 缺测回退策略、异常QNH阈值检查、元数据输出
+Day 17  结果评估: 统计触地点高度误差分布，生成对比图（raw vs corrected）
+```
+
+**验收标准**
+- `raw` 模式输出与原始 OpenSky 高度一致（无隐式改动）。
+- `metar_qnh` 模式下，每条航迹都包含可追溯校正元数据。
+- 含落地样本的航迹中，触地点高度中位误差相对场高显著下降。
+- 缺少 METAR 时自动回退 `raw`，并在质量标记中注明原因。
+
 <!-- LANG:EN -->
 ## 10. Development Execution Roadmap
 
@@ -2209,6 +2238,35 @@ Day 13  Usability polish: mobile layout, contrast checks, screenshot review
 - First-time users can understand both runway zones within 3 seconds.
 - Legend colors match runtime colors in `useRunwayLayer.ts`.
 - No overlap with primary controls at 1920x1080 and common mobile widths.
+
+### 10.4 Follow-up Plan: METAR/QNH Pressure Altitude Correction
+
+**Goal**
+- Introduce METAR/QNH-based pressure altitude correction while preserving raw trajectory traceability.
+- Reduce systematic low-altitude bias between OpenSky barometric altitude and airport field elevation.
+- Make correction parameters explicit and auditable for research reproducibility.
+
+**MVP Scope**
+- Add altitude handling modes in trajectory preprocessing:
+  - `raw`: keep original altitude unchanged (research baseline)
+  - `metar_qnh`: apply pressure-altitude correction using time-aligned METAR QNH
+- Fetch METAR by airport and timestamp (minimum fields: report time, QNH).
+- Compute corrected altitude per waypoint while retaining raw altitude values.
+- Export correction metadata: source, QNH, formula version, and quality flags.
+
+**Recommended Execution Order**
+```
+Day 14  Data layer: implement METAR fetch + cache (airport + hourly index)
+Day 15  Core algorithm: align waypoint time with QNH and compute corrected altitude
+Day 16  QA rules: fallback behavior, abnormal-QNH thresholds, metadata output
+Day 17  Evaluation: touchdown altitude error distribution (raw vs corrected)
+```
+
+**Acceptance Criteria**
+- `raw` mode remains bitwise-consistent with original OpenSky altitude.
+- `metar_qnh` mode outputs per-flight auditable correction metadata.
+- For flights with touchdown samples, median touchdown altitude error vs field elevation is significantly reduced.
+- When METAR is unavailable, pipeline falls back to `raw` with explicit quality flag.
 
 ---
 
