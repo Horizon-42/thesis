@@ -19,12 +19,12 @@
 
 import { useRef } from "react";
 import { useCesiumViewer } from "../hooks/useCesiumViewer";
-// import { useRunwayLayer } from "../hooks/useRunwayLayer";
+import { useRunwayLayer } from "../hooks/useRunwayLayer";
 // import { useWaypointLayer } from "../hooks/useWaypointLayer";
-import { useCzmlLoader } from "../hooks/useCzmlLoader";
+// import { useCzmlLoader } from "../hooks/useCzmlLoader";
 
 /** Path to the CZML trajectory file (served from public/) */
-const CZML_URL = "/data/trajectories.czml";
+// const CZML_URL = "/data/trajectories.czml";
 
 export default function CesiumViewerComponent() {
   // This ref is the DOM anchor for the Cesium canvas.
@@ -40,7 +40,7 @@ export default function CesiumViewerComponent() {
 
   // ── Activate data layers ───────────────────────────────────────────────────
   // Each hook runs its own useEffect and manages its own cleanup.
-  // useRunwayLayer();
+  useRunwayLayer();
   // useWaypointLayer();
   // TODO — uncomment once you have implemented useOcsLayer:
   // useOcsLayer();

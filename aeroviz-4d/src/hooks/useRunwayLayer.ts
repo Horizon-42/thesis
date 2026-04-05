@@ -30,7 +30,7 @@ export function useRunwayLayer(): void {
     const dataSource = new Cesium.GeoJsonDataSource("runways");
 
     // ── Step 2: Load the GeoJSON file ─────────────────────────────────────────
-    // TODO ① — Call `dataSource.load(url, options)` with:
+    // ① — Call `dataSource.load(url, options)` with:
     //   url:     "/data/runway.geojson"   (served from public/data/)
     //   options:
     //     • clampToGround: true
@@ -42,24 +42,44 @@ export function useRunwayLayer(): void {
     // Then chain `.then(ds => { ... })` to do steps 3-4.
     //
     // Reference: docs/02-runway-layer.md § "GeoJsonDataSource options"
+    dataSource.load("/data/runway.geojson", {
+      clampToGround: true,
+      fill: new Cesium.Color(0.15, 0.15, 0.15, 0.9),
+      stroke: Cesium.Color.YELLOW,
+      strokeWidth: 2
+    }).then(ds => {
+      // ── Step 3 (inside .then): Add the data source to the viewer ─────────────
+      // ② — Call `viewer.dataSources.add(ds)`.
+      // This callback runs after the GeoJSON is loaded and parsed into entities.
+      // The `ds` argument is the same DataSource we created above, but now it
+      // contains entities representing the runway polygons.
+      viewer.dataSources.add(ds);
 
-    // ── Step 3 (inside .then): Add the data source to the viewer ─────────────
-    // TODO ② — Call `viewer.dataSources.add(ds)`.
+      // ── Step 4 (inside .then): Set ClassificationType on each entity ──────────
+      // ③ — Loop over `ds.entities.values`.  For each entity, if
+      //   `entity.polygon` exists, set:
+      //     entity.polygon.classificationType =
+      //       new Cesium.ConstantProperty(Cesium.ClassificationType.TERRAIN);
+      //
+      // Why: ClassificationType.TERRAIN means the polygon only drapes on terrain
+      // and does NOT occlude 3D Tileset buildings or aircraft models.
+      //
+      // Hint: ConstantProperty wraps a static value for Cesium's property system.
+      ds.entities.values.forEach(entity => {
+        if (entity.polygon) {
+          entity.polygon.classificationType = new Cesium.ConstantProperty(Cesium.ClassificationType.TERRAIN);
+        }
+      });
 
-    // ── Step 4 (inside .then): Set ClassificationType on each entity ──────────
-    // TODO ③ — Loop over `ds.entities.values`.  For each entity, if
-    //   `entity.polygon` exists, set:
-    //     entity.polygon.classificationType =
-    //       new Cesium.ConstantProperty(Cesium.ClassificationType.TERRAIN);
-    //
-    // Why: ClassificationType.TERRAIN means the polygon only drapes on terrain
-    // and does NOT occlude 3D Tileset buildings or aircraft models.
-    //
-    // Hint: ConstantProperty wraps a static value for Cesium's property system.
+    }).catch(error => {
+      console.error("[RunwayLayer] Failed to load runway.geojson:", error);
+    });
+
+
 
     // ── Step 5: Respect the layer visibility flag ─────────────────────────────
-    // TODO ④ — After adding the DataSource, set its `show` property:
-    //   ds.show = layers.runways;
+    // ④ — After adding the DataSource, set its `show` property:
+    dataSource.show = layers.runways;
     //
     // This way, toggling layers.runways in ControlPanel will hide/show runways.
 
@@ -78,7 +98,8 @@ export function useRunwayLayer(): void {
     if (!viewer) return;
     const ds = viewer.dataSources.getByName("runways")[0];
     if (ds) {
-      // TODO ⑤ — Set `ds.show = layers.runways;`
+      // ⑤ — Set `ds.show = layers.runways;`
+      ds.show = layers.runways;
     }
   }, [viewer, layers.runways]);
 }
