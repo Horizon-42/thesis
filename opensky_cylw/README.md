@@ -25,6 +25,13 @@ This will:
 2. create CZML-input JSON under `opensky_cylw/outputs/`
 3. update `aeroviz-4d/public/data/trajectories.czml`
 
+Altitude handling (research note):
+
+- Default is `--altitude-mode raw`, which preserves OpenSky track altitude as-is.
+- Optional `--altitude-mode touchdown-bias` applies a per-flight constant offset
+  estimated from near-runway on-ground samples. This is transparent and leaves
+  the trajectory shape unchanged.
+
 By default, only trajectories that include touchdown near the airport are kept,
 so landing process is preserved.
 
@@ -35,6 +42,24 @@ To switch airport (example CYLW):
   /Users/liudongxu/Desktop/studys/thesis/opensky_cylw/fetch_cylw_opensky.py \
   --airport CYLW \
   --mode live \
+  --to-czml
+
+# Keep raw altitude (default)
+/Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
+  /Users/liudongxu/Desktop/studys/thesis/opensky_cylw/fetch_cylw_opensky.py \
+  --mode live \
+  --airport CYYC \
+  --altitude-mode raw \
+  --to-czml
+
+# Apply touchdown-bias altitude correction (optional)
+/Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
+  /Users/liudongxu/Desktop/studys/thesis/opensky_cylw/fetch_cylw_opensky.py \
+  --mode live \
+  --airport CYYC \
+  --altitude-mode touchdown-bias \
+  --min-ground-samples 2 \
+  --max-altitude-bias-m 400 \
   --to-czml
 ```
 

@@ -346,6 +346,9 @@ def track_to_czml_flight(
     require_landing: bool,
     landing_radius_km: float,
     max_end_distance_km: float,
+    altitude_mode: str,
+    min_ground_samples: int,
+    max_altitude_bias_m: float,
     approach_alt_buffer_m: float,
     approach_window_min: int,
     include_ground: bool,
@@ -359,16 +362,43 @@ def track_to_czml_flight(
         if not wp or len(wp) < 6:
             continue
         t, lat, lon, alt_m, _trk, on_ground = wp
-        if t is None or lat is None or lon is None:
+        if t is None or lat is None or lon is None or alt_m is None:
             continue
-        alt = float(alt_m) if alt_m is not None else 0.0
+        alt = float(alt_m)
+        if math.isnan(alt):
+            continue
         dist_km = haversine_km(float(lat), float(lon), airport_lat, airport_lon)
+
         parsed.append((int(t), float(lon), float(lat), alt, bool(on_ground), dist_km))
 
     if len(parsed) < 2:
         return None
 
     parsed.sort(key=lambda x: x[0])
+
+    bias_m = 0.0
+    bias_applied = False
+    ground_samples = 0
+    if altitude_mode == "touchdown-bias":
+        touchdown_alts = [
+            alt
+            for _t, _lon, _lat, alt, gnd, d in parsed
+            if gnd and d <= landing_radius_km
+        ]
+        ground_samples = len(touchdown_alts)
+        if ground_samples >= min_ground_samples:
+            touchdown_alts_sorted = sorted(touchdown_alts)
+            median_alt = touchdown_alts_sorted[ground_samples // 2]
+            candidate_bias = airport_elev_m - median_alt
+            if abs(candidate_bias) <= max_altitude_bias_m:
+                bias_m = candidate_bias
+                bias_applied = True
+
+    if bias_applied:
+        parsed = [
+            (t, lon, lat, alt + bias_m, gnd, d)
+            for t, lon, lat, alt, gnd, d in parsed
+        ]
 
     # Airport relevance: at least one point near target airport.
     min_dist = min(
@@ -466,6 +496,11 @@ def track_to_czml_flight(
         "id": flight_id,
         "callsign": callsign,
         "type": "UNK",
+        "altitude_source": "opensky_tracks_all_baro_altitude_m",
+        "altitude_correction_mode": altitude_mode,
+        "altitude_bias_m": round(bias_m, 3),
+        "altitude_bias_applied": bias_applied,
+        "altitude_ground_samples": ground_samples,
         "waypoints": rel,
     }
 
@@ -480,6 +515,9 @@ def convert_tracks_to_czml_input(
     require_landing: bool,
     landing_radius_km: float,
     max_end_distance_km: float,
+    altitude_mode: str,
+    min_ground_samples: int,
+    max_altitude_bias_m: float,
     approach_alt_buffer_m: float,
     approach_window_min: int,
     include_ground: bool,
@@ -498,6 +536,9 @@ def convert_tracks_to_czml_input(
             require_landing=require_landing,
             landing_radius_km=landing_radius_km,
             max_end_distance_km=max_end_distance_km,
+            altitude_mode=altitude_mode,
+            min_ground_samples=min_ground_samples,
+            max_altitude_bias_m=max_altitude_bias_m,
             approach_alt_buffer_m=approach_alt_buffer_m,
             approach_window_min=approach_window_min,
             include_ground=include_ground,
@@ -559,7 +600,15 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--match-radius-km", type=float, default=35.0, help="Track is accepted only if it comes within this distance of airport")
     parser.add_argument("--landing-radius-km", type=float, default=15.0, help="Touchdown (on_ground) must appear within this distance when landing is required")
-    parser.add_argument("--max-end-distance-km", type=float, default=8.0, help="Final approach anchor point must be within this distance of airport")
+    parser.add_argument("--max-end-distance-km", type=float, default=2.5, help="Final approach anchor point must be within this distance of airport")
+    parser.add_argument(
+        "--altitude-mode",
+        choices=["raw", "touchdown-bias"],
+        default="raw",
+        help="Altitude handling: raw keeps OpenSky barometric altitude; touchdown-bias applies a constant offset estimated from near-runway on-ground points",
+    )
+    parser.add_argument("--min-ground-samples", type=int, default=2, help="Minimum near-runway on-ground points needed for touchdown-bias estimation")
+    parser.add_argument("--max-altitude-bias-m", type=float, default=400.0, help="Reject touchdown-bias estimates whose absolute value exceeds this threshold")
     parser.add_argument("--approach-alt-buffer-m", type=float, default=450.0, help="If on_ground is missing, accept near-airport low-altitude segment below airport_elevation + this buffer")
     parser.add_argument("--approach-window-min", type=int, default=20, help="Keep only this many minutes before landing/closest-approach")
     parser.add_argument("--radius-km", type=float, default=None, help=argparse.SUPPRESS)
@@ -606,6 +655,7 @@ def main() -> None:
         "airport": args.airport.upper(),
         "airport_center": {"lat": airport_lat, "lon": airport_lon},
         "airport_elevation_m": airport_elev_m,
+        "altitude_mode": args.altitude_mode,
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -712,6 +762,9 @@ def main() -> None:
         require_landing=not args.allow_partial,
         landing_radius_km=args.landing_radius_km,
         max_end_distance_km=args.max_end_distance_km,
+        altitude_mode=args.altitude_mode,
+        min_ground_samples=args.min_ground_samples,
+        max_altitude_bias_m=args.max_altitude_bias_m,
         approach_alt_buffer_m=args.approach_alt_buffer_m,
         approach_window_min=args.approach_window_min,
         include_ground=not args.exclude_ground,
@@ -728,6 +781,9 @@ def main() -> None:
             require_landing=False,
             landing_radius_km=args.landing_radius_km,
             max_end_distance_km=args.max_end_distance_km,
+            altitude_mode=args.altitude_mode,
+            min_ground_samples=args.min_ground_samples,
+            max_altitude_bias_m=args.max_altitude_bias_m,
             approach_alt_buffer_m=args.approach_alt_buffer_m,
             approach_window_min=args.approach_window_min,
             include_ground=not args.exclude_ground,
