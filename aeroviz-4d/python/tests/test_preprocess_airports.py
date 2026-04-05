@@ -17,6 +17,8 @@ from preprocess_airports import (
     runway_bearing_rad,
     offset_point_deg,
     runway_to_polygon,
+    landing_zone_polygon,
+    build_runway_geojson,
     RunwayEnds,
     METRES_PER_DEG_LAT,
     metres_per_deg_lon,
@@ -43,6 +45,17 @@ RWY_EW = RunwayEnds(
     le_elevation_ft=1400, he_elevation_ft=1400,
     length_ft=9000, width_ft=200,
     surface="CON", lighted=1,
+)
+
+RWY_WITH_DISPLACED = RunwayEnds(
+    le_ident="16", he_ident="34",
+    le_lon=-119.3789978, le_lat=49.9660988,
+    he_lon=-119.3759995, he_lat=49.9462013,
+    le_elevation_ft=1421, he_elevation_ft=1370,
+    length_ft=8900, width_ft=200,
+    surface="ASP", lighted=1,
+    le_displaced_threshold_ft=1200,
+    he_displaced_threshold_ft=400,
 )
 
 PRECISION = 3  # decimal places for floating-point assertions
@@ -137,3 +150,31 @@ class TestRunwayToPolygon:
             assert isinstance(point, (list, tuple))
             assert len(point) == 2
             assert all(isinstance(coord, float) for coord in point)
+
+    def test_displaced_thresholds_expand_surface_polygon(self):
+        landing_ring = landing_zone_polygon(RWY_WITH_DISPLACED)
+        surface_ring = runway_to_polygon(RWY_WITH_DISPLACED)
+
+        # Compare centerline lengths (metres) from LE/HE center points.
+        landing_le = ((landing_ring[0][0] + landing_ring[1][0]) / 2, (landing_ring[0][1] + landing_ring[1][1]) / 2)
+        landing_he = ((landing_ring[2][0] + landing_ring[3][0]) / 2, (landing_ring[2][1] + landing_ring[3][1]) / 2)
+        surface_le = ((surface_ring[0][0] + surface_ring[1][0]) / 2, (surface_ring[0][1] + surface_ring[1][1]) / 2)
+        surface_he = ((surface_ring[2][0] + surface_ring[3][0]) / 2, (surface_ring[2][1] + surface_ring[3][1]) / 2)
+
+        def flat_dist_m(a, b):
+            lat = (a[1] + b[1]) / 2
+            dx = (b[0] - a[0]) * metres_per_deg_lon(lat)
+            dy = (b[1] - a[1]) * METRES_PER_DEG_LAT
+            return math.hypot(dx, dy)
+
+        assert flat_dist_m(surface_le, surface_he) > flat_dist_m(landing_le, landing_he)
+
+
+class TestRunwayGeojson:
+    def test_outputs_two_polygons_per_runway(self):
+        fc = build_runway_geojson([RWY_NS], airport_ident="CYLW")
+        assert fc["type"] == "FeatureCollection"
+        assert len(fc["features"]) == 2
+
+        zone_types = {f["properties"]["zone_type"] for f in fc["features"]}
+        assert zone_types == {"runway_surface", "landing_zone"}

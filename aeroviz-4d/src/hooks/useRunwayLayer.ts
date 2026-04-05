@@ -18,6 +18,11 @@ import { useEffect } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 
+const RUNWAY_SURFACE_FILL = new Cesium.Color(0.15, 0.15, 0.15, 0.85);
+const RUNWAY_SURFACE_STROKE = Cesium.Color.YELLOW;
+const LANDING_ZONE_FILL = new Cesium.Color(0.65, 0.9, 0.65, 0.35);
+const LANDING_ZONE_STROKE = new Cesium.Color(0.3, 0.7, 0.3, 0.9);
+
 export function useRunwayLayer(): void {
   const { viewer, layers } = useApp();
 
@@ -44,8 +49,8 @@ export function useRunwayLayer(): void {
     // Reference: docs/02-runway-layer.md § "GeoJsonDataSource options"
     dataSource.load("/data/runway.geojson", {
       clampToGround: true,
-      fill: new Cesium.Color(0.15, 0.15, 0.15, 0.9),
-      stroke: Cesium.Color.YELLOW,
+      fill: RUNWAY_SURFACE_FILL,
+      stroke: RUNWAY_SURFACE_STROKE,
       strokeWidth: 2
     }).then(ds => {
       // ── Step 3 (inside .then): Add the data source to the viewer ─────────────
@@ -67,6 +72,18 @@ export function useRunwayLayer(): void {
       // Hint: ConstantProperty wraps a static value for Cesium's property system.
       ds.entities.values.forEach(entity => {
         if (entity.polygon) {
+          const zoneType = entity.properties?.zone_type?.getValue(Cesium.JulianDate.now());
+          const isLandingZone = zoneType === "landing_zone";
+
+          entity.polygon.material = new Cesium.ColorMaterialProperty(
+            isLandingZone ? LANDING_ZONE_FILL : RUNWAY_SURFACE_FILL
+          );
+          entity.polygon.outline = new Cesium.ConstantProperty(true);
+          entity.polygon.outlineColor = new Cesium.ConstantProperty(
+            isLandingZone ? LANDING_ZONE_STROKE : RUNWAY_SURFACE_STROKE
+          );
+          // Draw landing zone above the runway surface where they overlap.
+          entity.polygon.zIndex = new Cesium.ConstantProperty(isLandingZone ? 2 : 1);
           entity.polygon.classificationType = new Cesium.ConstantProperty(Cesium.ClassificationType.TERRAIN);
         }
       });

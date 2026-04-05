@@ -5,7 +5,7 @@ One-time preprocessing script: converts OurAirports CSV data into the
 GeoJSON files expected by the frontend.
 
 Outputs (written to ../aeroviz-4d/public/data/):
-  runway.geojson   — runway polygons, one Feature per runway
+    runway.geojson   — runway polygons (runway surface + landing zone)
   waypoints.geojson — NOT produced here; comes from ARINC 424 / CIFP parsing
 
 Data source:
@@ -148,19 +148,29 @@ def runway_to_polygon(runway: RunwayEnds) -> list[list[float]]:
     #
     # ⚠ GeoJSON uses [longitude, latitude] order — NOT [lat, lon]!
 
+    return build_runway_ring(runway, include_displaced=True)
+
+
+def landing_zone_polygon(runway: RunwayEnds) -> list[list[float]]:
+    """Polygon for the touchdown-allowed region between displaced thresholds."""
+    return build_runway_ring(runway, include_displaced=False)
+
+
+def build_runway_ring(runway: RunwayEnds, include_displaced: bool) -> list[list[float]]:
+    """Build a runway-width polygon ring using threshold centres or physical ends."""
     bearing = runway_bearing_rad(runway.le_lon, runway.le_lat, runway.he_lon, runway.he_lat)
 
-    # OurAirports coordinates are threshold positions; extend to physical runway
-    # ends when displaced-threshold metadata is present.
+    # Threshold coordinates describe the operational landing thresholds.
+    # Extend outwards to the physical pavement ends when requested.
     le_center = (runway.le_lon, runway.le_lat)
     he_center = (runway.he_lon, runway.he_lat)
-
-    le_disp_m = runway.le_displaced_threshold_ft * METRES_PER_FOOT
-    he_disp_m = runway.he_displaced_threshold_ft * METRES_PER_FOOT
-    if le_disp_m > 0:
-        le_center = offset_point_deg(le_center[0], le_center[1], bearing + math.pi, le_disp_m)
-    if he_disp_m > 0:
-        he_center = offset_point_deg(he_center[0], he_center[1], bearing, he_disp_m)
+    if include_displaced:
+        le_disp_m = runway.le_displaced_threshold_ft * METRES_PER_FOOT
+        he_disp_m = runway.he_displaced_threshold_ft * METRES_PER_FOOT
+        if le_disp_m > 0:
+            le_center = offset_point_deg(le_center[0], le_center[1], bearing + math.pi, le_disp_m)
+        if he_disp_m > 0:
+            he_center = offset_point_deg(he_center[0], he_center[1], bearing, he_disp_m)
 
     perp_left = bearing - math.pi / 2 # left perpendicular of the centreline
     perp_right = bearing + math.pi / 2 # right perpendicular of the centreline
@@ -208,9 +218,9 @@ def load_runways(csv_path: Path, airport_ident: str) -> list[RunwayEnds]:
 def build_runway_geojson(runways: list[RunwayEnds], airport_ident: str) -> dict:
     """Convert parsed runway data to a GeoJSON FeatureCollection."""
     features = []
-    for rwy in runways:
-        coords = runway_to_polygon(rwy)
-        features.append({
+
+    def make_feature(rwy: RunwayEnds, coords: list[list[float]], zone_type: str) -> dict:
+        return {
             "type": "Feature",
             "geometry": {
                 "type": "Polygon",
@@ -218,6 +228,8 @@ def build_runway_geojson(runways: list[RunwayEnds], airport_ident: str) -> dict:
             },
             "properties": {
                 "airport_ident": airport_ident,
+                "runway_ident": f"{rwy.le_ident}/{rwy.he_ident}",
+                "zone_type": zone_type,
                 "le_ident": rwy.le_ident,
                 "he_ident": rwy.he_ident,
                 "length_ft": rwy.length_ft,
@@ -226,8 +238,15 @@ def build_runway_geojson(runways: list[RunwayEnds], airport_ident: str) -> dict:
                 "lighted": rwy.lighted,
                 "le_elevation_ft": rwy.le_elevation_ft,
                 "he_elevation_ft": rwy.he_elevation_ft,
+                "le_displaced_threshold_ft": rwy.le_displaced_threshold_ft,
+                "he_displaced_threshold_ft": rwy.he_displaced_threshold_ft,
             },
-        })
+        }
+
+    for rwy in runways:
+        features.append(make_feature(rwy, runway_to_polygon(rwy), "runway_surface"))
+        features.append(make_feature(rwy, landing_zone_polygon(rwy), "landing_zone"))
+
     return {"type": "FeatureCollection", "features": features}
 
 

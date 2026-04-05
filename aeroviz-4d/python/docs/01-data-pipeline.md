@@ -10,7 +10,7 @@ The Python side of this project has two jobs:
 
 | Script | Input | Output |
 |--------|-------|--------|
-| `preprocess_airports.py` | OurAirports `runways.csv` | `runway.geojson` |
+| `preprocess_airports.py` | OurAirports `runways.csv` | `runway.geojson` (two polygons per runway) |
 | `generate_czml.py` | Scheduling algorithm output | `trajectories.czml` |
 
 Both outputs land in `aeroviz-4d/public/data/` where the Vite dev server
@@ -31,6 +31,8 @@ end, with columns:
 | `airport_ident` | CYLW | ICAO airport code |
 | `le_ident` | 16 | Lower-end runway identifier, magnetic heading/10 |
 | `he_ident` | 34 | Higher-end identifier |
+| `le_displaced_threshold_ft` | 1200 | LE threshold displacement (feet) |
+| `he_displaced_threshold_ft` | 400 | HE threshold displacement (feet) |
 | `le_longitude_deg` | -119.38 | Lower-end threshold longitude |
 | `le_latitude_deg` | 49.92 | Lower-end threshold latitude |
 | `he_longitude_deg` | -119.38 | Higher-end threshold longitude |
@@ -113,6 +115,21 @@ Quick intuition:
 - Runway polygon = forward endpoints shifted sideways by half width.
 
 ⚠️ GeoJSON polygon rings use `[longitude, latitude]` order, NOT `[lat, lon]`!
+
+### Dual polygon output (important)
+
+`runway.geojson` now emits **two Features per runway**:
+
+1. `zone_type = "runway_surface"`
+    Uses displaced-threshold values to extend from threshold positions to the
+    physical pavement ends.
+
+2. `zone_type = "landing_zone"`
+    Uses threshold-to-threshold geometry (the touchdown-allowed region).
+
+Frontend rendering can then style these differently, e.g.:
+- runway surface: dark grey
+- landing zone: light green
 
 ### Running the tests
 

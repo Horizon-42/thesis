@@ -7,6 +7,9 @@
 ## What you will implement
 
 - Runway polygons loaded from GeoJSON, clamped to the real terrain surface
+- Dual runway zoning style:
+  - `runway_surface` (dark grey)
+  - `landing_zone` (light green overlay)
 - Approach waypoints displayed as 3D cylinder markers with text labels
 - Layer visibility toggled by the ControlPanel checkboxes
 
@@ -32,6 +35,18 @@ ds.load("/data/runway.geojson", {
   strokeWidth: 2,
 }).then(ds => {
   viewer.dataSources.add(ds);
+
+  // Style per-feature by properties.zone_type
+  ds.entities.values.forEach((entity) => {
+    if (!entity.polygon) return;
+    const zoneType = entity.properties?.zone_type?.getValue(Cesium.JulianDate.now());
+    const isLandingZone = zoneType === "landing_zone";
+    entity.polygon.material = new Cesium.ColorMaterialProperty(
+      isLandingZone
+        ? new Cesium.Color(0.65, 0.9, 0.65, 0.35)
+        : new Cesium.Color(0.15, 0.15, 0.15, 0.85)
+    );
+  });
 });
 ```
 
