@@ -30,6 +30,9 @@ export function useRunwayLayer(): void {
     // Don't do anything until the Viewer is ready.
     if (!viewer) return;
 
+    let cancelled = false;
+    let added = false;
+
     // ── Step 1: Create a named DataSource container ───────────────────────────
     // Naming it "runways" lets us find and remove it precisely later.
     const dataSource = new Cesium.GeoJsonDataSource("runways");
@@ -53,12 +56,15 @@ export function useRunwayLayer(): void {
       stroke: RUNWAY_SURFACE_STROKE,
       strokeWidth: 2
     }).then(ds => {
+      if (cancelled) return;
       // ── Step 3 (inside .then): Add the data source to the viewer ─────────────
       // ② — Call `viewer.dataSources.add(ds)`.
       // This callback runs after the GeoJSON is loaded and parsed into entities.
       // The `ds` argument is the same DataSource we created above, but now it
       // contains entities representing the runway polygons.
       viewer.dataSources.add(ds);
+      added = true;
+      ds.show = layers.runways;
 
       // ── Step 4 (inside .then): Set ClassificationType on each entity ──────────
       // ③ — Loop over `ds.entities.values`.  For each entity, if
@@ -102,9 +108,12 @@ export function useRunwayLayer(): void {
 
     // ── Cleanup ───────────────────────────────────────────────────────────────
     return () => {
+      cancelled = true;
       // Remove the DataSource (and all its entities) when the hook unmounts
       // or when `viewer` changes.
-      viewer.dataSources.remove(dataSource, true);
+      if (added) {
+        viewer.dataSources.remove(dataSource, true);
+      }
     };
   }, [viewer]); // Re-run if the Viewer instance changes
 
@@ -113,10 +122,9 @@ export function useRunwayLayer(): void {
   // GeoJSON from the network — it just flips the DataSource's show flag.
   useEffect(() => {
     if (!viewer) return;
-    const ds = viewer.dataSources.getByName("runways")[0];
-    if (ds) {
-      // ⑤ — Set `ds.show = layers.runways;`
+    const allRunwaySources = viewer.dataSources.getByName("runways");
+    allRunwaySources.forEach((ds) => {
       ds.show = layers.runways;
-    }
+    });
   }, [viewer, layers.runways]);
 }

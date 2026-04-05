@@ -26,8 +26,17 @@ const WAYPOINT_COLORS: Record<string, Cesium.Color> = {
 };
 const DEFAULT_COLOR = Cesium.Color.WHITE.withAlpha(0.7);
 
-/** Container name used to look up and remove the layer */
-const LAYER_NAME = "waypoints";
+interface WaypointFeature {
+  geometry: {
+    type: string;
+    coordinates: [number, number, number?];
+  };
+  properties: WaypointProperties;
+}
+
+interface WaypointFeatureCollection {
+  features: WaypointFeature[];
+}
 
 export function useWaypointLayer(): void {
   const { viewer, layers } = useApp();
@@ -35,45 +44,57 @@ export function useWaypointLayer(): void {
   useEffect(() => {
     if (!viewer) return;
 
+    let cancelled = false;
+
     // We collect the entity IDs we add so we can clean up precisely.
     const addedIds: string[] = [];
 
     fetch("/data/waypoints.geojson")
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status} loading waypoints.geojson`);
-        return r.json() as Promise<GeoJSON.FeatureCollection>;
+        return r.json() as Promise<WaypointFeatureCollection>;
       })
       .then((geojson) => {
-        geojson.features.forEach((feature) => {
+        if (cancelled) return;
+        geojson.features.forEach((feature, index) => {
           // GeoJSON Point geometry: [longitude, latitude, altitude_metres]
-          const [lon, lat, altM] = feature.geometry.type === "Point"
-            ? (feature.geometry.coordinates as [number, number, number])
-            : [0, 0, 0];
+          if (feature.geometry.type !== "Point") {
+            return;
+          }
 
-          const props = feature.properties as WaypointProperties;
+          const [lon, lat, altMaybe] = feature.geometry.coordinates;
+          const altM = altMaybe ?? 0;
 
-          // TODO ① — Add an entity with:
-          //   id:       `waypoint-${props.name}`
-          //   name:     props.name
-          //   position: Cesium.Cartesian3.fromDegrees(lon, lat, altM)
-          //   cylinder: { length: 400, topRadius: 200, bottomRadius: 200,
-          //               material: WAYPOINT_COLORS[props.type] ?? DEFAULT_COLOR }
-          //   label:    { text: props.name, font: "14px monospace",
-          //               fillColor: Cesium.Color.WHITE,
-          //               style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-          //               outlineWidth: 2,
-          //               verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-          //               pixelOffset: new Cesium.Cartesian2(0, -30) }
-          //
-          // After calling viewer.entities.add(...), push the id to addedIds[].
-          //
-          // Hint: Cesium.Cartesian3.fromDegrees expects (longitude, latitude, height).
-          // Altitude from GeoJSON is in metres — pass it directly.
+          const props = feature.properties;
+
+          const id = `waypoint-${props.name}-${index}`;
+          viewer.entities.add({
+            id,
+            name: props.name,
+            position: Cesium.Cartesian3.fromDegrees(lon, lat, altM),
+            cylinder: {
+              length: 400,
+              topRadius: 200,
+              bottomRadius: 200,
+              material: WAYPOINT_COLORS[props.type] ?? DEFAULT_COLOR,
+            },
+            label: {
+              text: props.name,
+              font: "14px monospace",
+              fillColor: Cesium.Color.WHITE,
+              style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+              outlineWidth: 2,
+              verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+              pixelOffset: new Cesium.Cartesian2(0, -30),
+            },
+          });
+          addedIds.push(id);
         });
       })
       .catch(console.error);
 
     return () => {
+      cancelled = true;
       // Remove only the entities this hook added — don't wipe the whole scene.
       addedIds.forEach((id) => viewer.entities.removeById(id));
     };
@@ -82,9 +103,11 @@ export function useWaypointLayer(): void {
   // Sync visibility
   useEffect(() => {
     if (!viewer) return;
-    // TODO ② — Loop over viewer.entities.values and for each entity whose
-    // id starts with "waypoint-", set entity.show = layers.waypoints.
-    //
-    // Hint: id.startsWith("waypoint-")
+    viewer.entities.values.forEach((entity) => {
+      const id = String(entity.id);
+      if (id.startsWith("waypoint-")) {
+        entity.show = layers.waypoints;
+      }
+    });
   }, [viewer, layers.waypoints]);
 }

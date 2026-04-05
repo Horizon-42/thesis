@@ -12,9 +12,14 @@
 
 import CesiumViewerComponent from "./components/CesiumViewer";
 import ControlPanel from "./components/ControlPanel";
-// import FlightTable from "./components/FlightTable";
+import FlightTable from "./components/FlightTable";
+import { useCzmlLoader } from "./hooks/useCzmlLoader";
+
+const CZML_URL = "/data/trajectories.czml";
 
 export default function App() {
+  const { flightIds } = useCzmlLoader(CZML_URL);
+
   return (
     <>
       {/* Layer 0: the 3D globe canvas */}
@@ -22,7 +27,7 @@ export default function App() {
 
       {/* Layer 1: floating UI panels — these render OVER the canvas */}
       <ControlPanel />
-      {/* <FlightTable /> */}
+      <FlightTable flightIds={flightIds} />
     </>
   );
 }

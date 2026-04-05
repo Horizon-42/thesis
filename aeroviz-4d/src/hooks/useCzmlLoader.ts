@@ -26,6 +26,8 @@ import { useEffect, useState } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 
+const LAYER_NAME = "czml-trajectories";
+
 // ── Return type ───────────────────────────────────────────────────────────────
 export interface CzmlLoaderState {
   isLoaded: boolean;
@@ -52,61 +54,52 @@ export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
 
     // We need to hold a reference to the DataSource so we can clean it up.
     let dataSource: Cesium.CzmlDataSource | undefined;
+    let cancelled = false;
+
+    setState({ isLoaded: false, flightIds: [], error: null });
 
     // ── Step 1: Load the CZML file ────────────────────────────────────────────
-    // TODO ① — Call `Cesium.CzmlDataSource.load(czmlUrl)`.
-    //   This is a STATIC method that returns a Promise<CzmlDataSource>.
-    //   Chain `.then(ds => { ... })` for the happy path and
-    //   `.catch(err => { ... })` for error handling.
-    //
-    // In the .catch handler, call:
-    //   setState({ isLoaded: false, flightIds: [], error: err.message });
-    //
-    // Reference: docs/04-czml-loader.md § "Loading CZML"
+    const ds = new Cesium.CzmlDataSource(LAYER_NAME);
+    ds.load(czmlUrl)
+      .then((loadedDs) => {
+        if (cancelled) return;
 
-    // ── Inside .then(ds => { ... }): ─────────────────────────────────────────
+        // ── Inside .then(ds => { ... }): ─────────────────────────────────────────
 
-    // TODO ② — Store the DataSource and add it to the viewer:
-    //   dataSource = ds;
-    //   viewer.dataSources.add(ds);
+        dataSource = loadedDs;
+        viewer.dataSources.add(loadedDs);
+        loadedDs.show = layers.trajectories;
 
-    // TODO ③ — Synchronise the viewer clock with the CZML time window.
-    //
-    //   The CZML "document" packet embeds a clock interval.  After loading,
-    //   `ds.clock` exposes startTime and stopTime as Cesium.JulianDate objects.
-    //   You must copy these into `viewer.clock` so the timeline bar is correct.
-    //
-    //   Required assignments:
-    //     viewer.clock.startTime   = ds.clock.startTime.clone();
-    //     viewer.clock.stopTime    = ds.clock.stopTime.clone();
-    //     viewer.clock.currentTime = ds.clock.startTime.clone();
-    //     viewer.clock.clockRange  = Cesium.ClockRange.LOOP_STOP;
-    //     viewer.clock.multiplier  = 60;   // 60× speed (1 real sec = 1 sim min)
-    //     viewer.clock.shouldAnimate = true;
-    //
-    //   Then tell the timeline UI to zoom to match:
-    //     viewer.timeline.zoomTo(viewer.clock.startTime, viewer.clock.stopTime);
-    //
-    // Hint: `ds.clock` is a DataSourceClock, NOT a Cesium.Clock — they have
-    // the same shape but are different types.  Always `.clone()` JulianDate
-    // values before assigning them to avoid aliasing bugs.
+        if (loadedDs.clock) {
+          viewer.clock.startTime = loadedDs.clock.startTime.clone();
+          viewer.clock.stopTime = loadedDs.clock.stopTime.clone();
+          viewer.clock.currentTime = loadedDs.clock.startTime.clone();
+          viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP;
+          viewer.clock.multiplier = 60;
+          viewer.clock.shouldAnimate = true;
+          viewer.timeline?.zoomTo(viewer.clock.startTime, viewer.clock.stopTime);
+        }
 
-    // TODO ④ — Collect entity IDs (skip "document"):
-    //   const ids = ds.entities.values
-    //     .filter(e => e.id !== "document")
-    //     .map(e => e.id);
+        const ids = loadedDs.entities.values
+          .filter((e) => e.id !== "document")
+          .map((e) => e.id);
 
-    // TODO ⑤ — Track the first aircraft with the camera (optional but cool):
-    //   if (ids.length > 0) {
-    //     viewer.trackedEntity = ds.entities.getById(ids[0]) ?? undefined;
-    //     setSelectedFlightId(ids[0]);
-    //   }
+        // Keep camera fixed at the airport by default; tracking starts only
+        // when the user clicks a flight row in FlightTable.
+        viewer.trackedEntity = undefined;
+        setSelectedFlightId(null);
 
-    // TODO ⑥ — Update state:
-    //   setState({ isLoaded: true, flightIds: ids, error: null });
+        setState({ isLoaded: true, flightIds: ids, error: null });
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : String(err);
+        setState({ isLoaded: false, flightIds: [], error: message });
+      });
 
     // ── Cleanup ───────────────────────────────────────────────────────────────
     return () => {
+      cancelled = true;
       if (dataSource) {
         viewer.dataSources.remove(dataSource, true);
         viewer.trackedEntity = undefined;
@@ -117,9 +110,9 @@ export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
   // ── Sync visibility ───────────────────────────────────────────────────────
   useEffect(() => {
     if (!viewer) return;
-    const ds = viewer.dataSources.getByName("czml-trajectories")[0];
+    const ds = viewer.dataSources.getByName(LAYER_NAME)[0];
     if (ds) ds.show = layers.trajectories;
-  }, [viewer, layers.trajectories]);
+  }, [viewer, layers.trajectories, state.isLoaded]);
 
   return state;
 }

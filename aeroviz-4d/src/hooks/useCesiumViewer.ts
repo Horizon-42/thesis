@@ -22,11 +22,11 @@ import { useApp } from "../context/AppContext";
 // ─────────────────────────────────────────────────────────────────────────────
 const CESIUM_ION_TOKEN = import.meta.env.VITE_CESIUM_ION_TOKEN;
 
-/** WGS84 coordinates for the initial camera target (default: Kelowna CYLW) */
+/** WGS84 coordinates for the initial camera target (default: Calgary CYYC) */
 export const DEFAULT_AIRPORT = {
-  code: "CYLW",
-  lon: -119.3775,
-  lat: 49.9561,
+  code: "CYYC",
+  lon: -114.009933,
+  lat: 51.118822,
   /** Initial camera altitude in metres */
   height: 15_000,
 } as const;
@@ -87,6 +87,126 @@ export function useCesiumViewer(
     // const viewer = null as unknown as Cesium.Viewer; // ← replace this line
 
     viewerRef.current = viewer;
+
+    // ── Custom mouse mapping ───────────────────────────────────────────────────
+    // Keep wheel zoom, but repurpose right-drag for camera orientation control.
+    const controller = viewer.scene.screenSpaceCameraController;
+    controller.zoomEventTypes = [
+      Cesium.CameraEventType.WHEEL,
+      Cesium.CameraEventType.PINCH,
+    ];
+
+    // Disable built-in right-drag camera actions; we provide custom behavior.
+    controller.tiltEventTypes = [
+      {
+        eventType: Cesium.CameraEventType.MIDDLE_DRAG,
+      },
+      {
+        eventType: Cesium.CameraEventType.PINCH,
+      },
+      {
+        eventType: Cesium.CameraEventType.LEFT_DRAG,
+        modifier: Cesium.KeyboardEventModifier.CTRL,
+      },
+      {
+        eventType: Cesium.CameraEventType.RIGHT_DRAG,
+        modifier: Cesium.KeyboardEventModifier.CTRL,
+      },
+    ];
+    controller.lookEventTypes = [];
+
+    const canvas = viewer.scene.canvas;
+    const PITCH_SENSITIVITY = 0.005;
+    const HEADING_SENSITIVITY = 0.005;
+    let pointerDragging = false;
+    let activePointerId: number | null = null;
+    let lastX = 0;
+    let lastY = 0;
+
+    const isRightLikeButton = (event: PointerEvent): boolean => {
+      return event.button === 2 || (event.button === 0 && event.ctrlKey);
+    };
+
+    const isRightLikePressed = (event: PointerEvent): boolean => {
+      const rightPressed = (event.buttons & 2) !== 0;
+      const ctrlLeftPressed = (event.buttons & 1) !== 0 && event.ctrlKey;
+      return rightPressed || ctrlLeftPressed;
+    };
+
+    const onContextMenu = (event: MouseEvent) => {
+      event.preventDefault();
+    };
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (!isRightLikeButton(event)) return;
+      pointerDragging = true;
+      activePointerId = event.pointerId;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      canvas.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    };
+
+    const onPointerUp = (event: PointerEvent) => {
+      if (!pointerDragging) return;
+      if (activePointerId !== null && event.pointerId !== activePointerId) return;
+      pointerDragging = false;
+      if (activePointerId !== null && canvas.hasPointerCapture(activePointerId)) {
+        canvas.releasePointerCapture(activePointerId);
+      }
+      activePointerId = null;
+    };
+
+    const onPointerCancel = (event: PointerEvent) => {
+      if (!pointerDragging) return;
+      if (activePointerId !== null && event.pointerId !== activePointerId) return;
+      pointerDragging = false;
+      activePointerId = null;
+    };
+
+    const onPointerMove = (event: PointerEvent) => {
+      if (!pointerDragging) return;
+      if (activePointerId !== null && event.pointerId !== activePointerId) return;
+      if (!isRightLikePressed(event)) return;
+
+      const dx = event.clientX - lastX;
+      const dy = event.clientY - lastY;
+      lastX = event.clientX;
+      lastY = event.clientY;
+
+      const camera = viewer.camera;
+      if (event.shiftKey) {
+        const nextHeading = camera.heading - dx * HEADING_SENSITIVITY;
+        camera.setView({
+          orientation: {
+            heading: nextHeading,
+            pitch: camera.pitch,
+            roll: camera.roll,
+          },
+        });
+      } else {
+        const nextPitch = Cesium.Math.clamp(
+          camera.pitch + dy * PITCH_SENSITIVITY,
+          Cesium.Math.toRadians(-89),
+          Cesium.Math.toRadians(-5)
+        );
+        camera.setView({
+          orientation: {
+            heading: camera.heading,
+            pitch: nextPitch,
+            roll: camera.roll,
+          },
+        });
+      }
+
+      event.preventDefault();
+    };
+
+    canvas.addEventListener("contextmenu", onContextMenu);
+    canvas.addEventListener("pointerdown", onPointerDown);
+    canvas.addEventListener("pointermove", onPointerMove);
+    canvas.addEventListener("pointerup", onPointerUp);
+    canvas.addEventListener("pointercancel", onPointerCancel);
 
     // ── Step 3: Enable terrain lighting ───────────────────────────────────────
     // ② — Enable the globe's built-in directional lighting:
@@ -163,6 +283,12 @@ export function useCesiumViewer(
     // ── Cleanup: destroy the Viewer when the component unmounts ───────────────
     // This releases WebGL resources and prevents memory leaks.
     return () => {
+      canvas.removeEventListener("contextmenu", onContextMenu);
+      canvas.removeEventListener("pointerdown", onPointerDown);
+      canvas.removeEventListener("pointermove", onPointerMove);
+      canvas.removeEventListener("pointerup", onPointerUp);
+      canvas.removeEventListener("pointercancel", onPointerCancel);
+
       viewerRef.current?.destroy();
       viewerRef.current = null;
     };

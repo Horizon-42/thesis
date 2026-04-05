@@ -11,6 +11,7 @@
  */
 
 import { useApp } from "../context/AppContext";
+import type * as Cesium from "cesium";
 
 interface FlightTableProps {
   /** Flight IDs from useCzmlLoader */
@@ -23,21 +24,18 @@ export default function FlightTable({ flightIds }: FlightTableProps) {
   if (flightIds.length === 0) return null; // hide if no data loaded
 
   function handleRowClick(id: string) {
-    // TODO ① — When a row is clicked:
-    //   1. Call setSelectedFlightId(id)
-    //   2. If viewer is available, find the entity and set viewer.trackedEntity:
-    //        viewer.trackedEntity = viewer.dataSources
-    //          .getByName("...")[0]?.entities.getById(id) ?? undefined;
-    //
-    // Hint: CZML entities live inside a CzmlDataSource, not in viewer.entities.
-    // You need to search dataSources.  The CzmlDataSource doesn't have a fixed name
-    // unless you set one — you may need to loop over viewer.dataSources to find it.
-    //
-    // Alternative approach: search ALL dataSources:
-    //   for (let i = 0; i < viewer.dataSources.length; i++) {
-    //     const entity = viewer.dataSources.get(i).entities.getById(id);
-    //     if (entity) { viewer.trackedEntity = entity; break; }
-    //   }
+    setSelectedFlightId(id);
+    if (!viewer) return;
+
+    let found: Cesium.Entity | undefined;
+    for (let i = 0; i < viewer.dataSources.length; i += 1) {
+      const entity = viewer.dataSources.get(i).entities.getById(id);
+      if (entity) {
+        found = entity;
+        break;
+      }
+    }
+    viewer.trackedEntity = found;
   }
 
   return (
@@ -60,8 +58,7 @@ export default function FlightTable({ flightIds }: FlightTableProps) {
             >
               <td>{index + 1}</td>
               <td>{id}</td>
-              {/* TODO ② — Add a "Tracking" badge when id === selectedFlightId */}
-              <td>{id === selectedFlightId ? "📡 tracking" : ""}</td>
+              <td>{id === selectedFlightId ? "Tracking" : ""}</td>
             </tr>
           ))}
         </tbody>

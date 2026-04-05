@@ -12,6 +12,7 @@
  */
 
 import { useApp, type LayerKey } from "../context/AppContext";
+import { useEffect, useState } from "react";
 
 /** Predefined speed options shown as buttons */
 const SPEED_OPTIONS: Array<{ label: string; value: number }> = [
@@ -31,40 +32,52 @@ const LAYER_LABELS: Record<LayerKey, string> = {
   trajectories: "Trajectories",
 };
 
+const ACTIVE_LAYER_KEYS: LayerKey[] = ["terrain", "runways", "trajectories"];
+
 export default function ControlPanel() {
   const { viewer, layers, toggleLayer, playbackSpeed, setPlaybackSpeed } = useApp();
+  const [isAnimating, setIsAnimating] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!viewer) {
+      setIsAnimating(false);
+      return;
+    }
+
+    setIsAnimating(viewer.clock.shouldAnimate);
+    const removeListener = viewer.clock.onTick.addEventListener(() => {
+      const next = viewer.clock.shouldAnimate;
+      setIsAnimating((prev) => (prev === next ? prev : next));
+    });
+
+    return () => {
+      removeListener();
+    };
+  }, [viewer]);
 
   // ── Clock control handlers ─────────────────────────────────────────────────
 
   /** Change the simulation speed */
   function handleSpeedChange(speed: number) {
-    // TODO ① — Set viewer.clock.multiplier = speed, then call setPlaybackSpeed(speed).
-    //
-    // Hint: check `if (!viewer) return;` first — the viewer may not be ready yet.
-    //
-    // Why update both?
-    //   viewer.clock.multiplier  → actually changes the animation speed in Cesium
-    //   setPlaybackSpeed(speed)  → updates React state so the active button re-renders
+    setPlaybackSpeed(speed);
+    if (!viewer) return;
+    viewer.clock.multiplier = speed;
   }
 
   /** Toggle play / pause */
   function handlePlayPause() {
-    // TODO ② — Toggle `viewer.clock.shouldAnimate`.
-    //
-    // Hint: viewer.clock.shouldAnimate = !viewer.clock.shouldAnimate;
-    //
-    // Note: This doesn't need React state because the button label doesn't
-    // need to change here (you can add that as an improvement later).
+    if (!viewer) return;
+    const next = !viewer.clock.shouldAnimate;
+    viewer.clock.shouldAnimate = next;
+    setIsAnimating(next);
   }
 
   /** Reset the clock to the start of the simulation */
   function handleReset() {
-    // TODO ③ — Set viewer.clock.currentTime = viewer.clock.startTime.clone()
-    //           and set shouldAnimate = false.
-    //
-    // Why .clone()?  Cesium's JulianDate is mutable.  Assigning without cloning
-    // would make currentTime and startTime point to the same object, so any
-    // later mutation of currentTime would silently corrupt startTime.
+    if (!viewer) return;
+    viewer.clock.currentTime = viewer.clock.startTime.clone();
+    viewer.clock.shouldAnimate = false;
+    setIsAnimating(false);
   }
 
   return (
@@ -74,7 +87,7 @@ export default function ControlPanel() {
       {/* ── Playback controls ────────────────────────────────────────────── */}
       <section>
         <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-          <button onClick={handlePlayPause}>▶ / ⏸</button>
+          <button onClick={handlePlayPause}>{isAnimating ? "⏸ Pause" : "▶ Play"}</button>
           <button onClick={handleReset}>⏮ Reset</button>
         </div>
 
@@ -94,7 +107,7 @@ export default function ControlPanel() {
       {/* ── Layer toggles ────────────────────────────────────────────────── */}
       <section>
         <h4>Layers</h4>
-        {(Object.keys(layers) as LayerKey[]).map((key) => (
+        {ACTIVE_LAYER_KEYS.map((key) => (
           <label key={key}>
             <input
               type="checkbox"
