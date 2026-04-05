@@ -16,7 +16,7 @@ Data source:
 
 How to run:
   cd python
-  python preprocess_airports.py --airport CYLW
+    python preprocess_airports.py --airport CYYC
 """
 
 import argparse
@@ -276,6 +276,15 @@ def load_runways(csv_path: Path, airport_ident: str) -> list[RunwayEnds]:
 
     runways = []
 
+    def parse_float(value: object, default: float) -> float:
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return default
+        if math.isnan(v):
+            return default
+        return v
+
     def parse_optional_float(value: object) -> float | None:
         try:
             v = float(value)
@@ -289,20 +298,20 @@ def load_runways(csv_path: Path, airport_ident: str) -> list[RunwayEnds]:
         runways.append(RunwayEnds(
             le_ident=str(row.get("le_ident", "")),
             he_ident=str(row.get("he_ident", "")),
-            le_lon=float(row["le_longitude_deg"]),
-            le_lat=float(row["le_latitude_deg"]),
-            he_lon=float(row["he_longitude_deg"]),
-            he_lat=float(row["he_latitude_deg"]),
-            le_elevation_ft=float(row.get("le_elevation_ft", 0) or 0),
-            he_elevation_ft=float(row.get("he_elevation_ft", 0) or 0),
-            length_ft=float(row.get("length_ft", 0) or 0),
-            width_ft=float(row.get("width_ft", 150) or 150),
+            le_lon=parse_float(row.get("le_longitude_deg"), 0.0),
+            le_lat=parse_float(row.get("le_latitude_deg"), 0.0),
+            he_lon=parse_float(row.get("he_longitude_deg"), 0.0),
+            he_lat=parse_float(row.get("he_latitude_deg"), 0.0),
+            le_elevation_ft=parse_float(row.get("le_elevation_ft"), 0.0),
+            he_elevation_ft=parse_float(row.get("he_elevation_ft"), 0.0),
+            length_ft=parse_float(row.get("length_ft"), 0.0),
+            width_ft=parse_float(row.get("width_ft"), 150.0),
             surface=str(row.get("surface", "ASP") or "ASP"),
-            lighted=int(row.get("lighted", 0) or 0),
+            lighted=int(parse_float(row.get("lighted"), 0.0)),
             le_heading_degT=parse_optional_float(row.get("le_heading_degT")),
             he_heading_degT=parse_optional_float(row.get("he_heading_degT")),
-            le_displaced_threshold_ft=float(row.get("le_displaced_threshold_ft", 0) or 0),
-            he_displaced_threshold_ft=float(row.get("he_displaced_threshold_ft", 0) or 0),
+            le_displaced_threshold_ft=parse_float(row.get("le_displaced_threshold_ft"), 0.0),
+            he_displaced_threshold_ft=parse_float(row.get("he_displaced_threshold_ft"), 0.0),
         ))
     return runways
 
@@ -364,8 +373,8 @@ def main() -> None:
         description="Preprocess OurAirports CSV into GeoJSON for AeroViz-4D"
     )
     parser.add_argument(
-        "--airport", default="CYLW",
-        help="ICAO airport code to process (default: CYLW)"
+        "--airport", default="CYYC",
+        help="ICAO airport code to process (default: CYYC)"
     )
     parser.add_argument(
         "--runways-csv", default="runways.csv",
@@ -393,7 +402,7 @@ def main() -> None:
 
     geojson = build_runway_geojson(runways, args.airport, lateral_offset_m=args.lateral_offset_m)
     out_path = OUTPUT_DIR / "runway.geojson"
-    out_path.write_text(json.dumps(geojson, indent=2))
+    out_path.write_text(json.dumps(geojson, indent=2, allow_nan=False), encoding="utf-8")
     print(f"  ✓ Written: {out_path}")
 
 
