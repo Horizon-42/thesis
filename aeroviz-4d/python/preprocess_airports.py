@@ -51,6 +51,8 @@ class RunwayEnds(NamedTuple):
     width_ft: float
     surface: str
     lighted: int
+    le_heading_degT: float | None = None
+    he_heading_degT: float | None = None
     le_displaced_threshold_ft: float = 0.0
     he_displaced_threshold_ft: float = 0.0
 
@@ -60,6 +62,30 @@ class RunwayEnds(NamedTuple):
 def metres_per_deg_lon(lat_deg: float) -> float:
     """Metres per degree of longitude at the given latitude."""
     return METRES_PER_DEG_LAT * math.cos(math.radians(lat_deg))
+
+
+def lonlat_to_local_m(
+    lon: float,
+    lat: float,
+    ref_lon: float,
+    ref_lat: float,
+) -> tuple[float, float]:
+    """Convert lon/lat to local East/North metres in a flat tangent plane."""
+    east_m = (lon - ref_lon) * metres_per_deg_lon(ref_lat)
+    north_m = (lat - ref_lat) * METRES_PER_DEG_LAT
+    return east_m, north_m
+
+
+def local_m_to_lonlat(
+    east_m: float,
+    north_m: float,
+    ref_lon: float,
+    ref_lat: float,
+) -> tuple[float, float]:
+    """Convert local East/North metres back to lon/lat."""
+    lon = ref_lon + east_m / metres_per_deg_lon(ref_lat)
+    lat = ref_lat + north_m / METRES_PER_DEG_LAT
+    return lon, lat
 
 
 def runway_bearing_rad(
@@ -88,6 +114,21 @@ def runway_bearing_rad(
     return math.atan2(dx, dy)
 
 
+def runway_bearing_from_metadata(runway: RunwayEnds) -> float:
+    """Prefer declared runway heading; fallback to coordinate-derived bearing."""
+    if runway.le_heading_degT is not None:
+        return math.radians(runway.le_heading_degT % 360)
+    return runway_bearing_rad(runway.le_lon, runway.le_lat, runway.he_lon, runway.he_lat)
+
+
+def flat_distance_m(lon_a: float, lat_a: float, lon_b: float, lat_b: float) -> float:
+    """Approximate ground distance for short segments (< 20 km)."""
+    mid_lat = (lat_a + lat_b) / 2
+    dx = (lon_b - lon_a) * metres_per_deg_lon(mid_lat)
+    dy = (lat_b - lat_a) * METRES_PER_DEG_LAT
+    return math.hypot(dx, dy)
+
+
 def offset_point_deg(
     lon: float, lat: float,
     bearing_rad: float,
@@ -110,7 +151,7 @@ def offset_point_deg(
     new_lat = lat + (distance_m * math.cos(bearing_rad)) / METRES_PER_DEG_LAT
     return new_lon, new_lat
 
-def runway_to_polygon(runway: RunwayEnds) -> list[list[float]]:
+def runway_to_polygon(runway: RunwayEnds, lateral_offset_m: float = 0.0) -> list[list[float]]:
     """
     Convert a runway (defined by two centreline endpoints) into a 4-corner
     polygon accounting for runway width.
@@ -148,38 +189,89 @@ def runway_to_polygon(runway: RunwayEnds) -> list[list[float]]:
     #
     # ⚠ GeoJSON uses [longitude, latitude] order — NOT [lat, lon]!
 
-    return build_runway_ring(runway, include_displaced=True)
+    return build_runway_ring(runway, include_displaced=True, lateral_offset_m=lateral_offset_m)
 
 
-def landing_zone_polygon(runway: RunwayEnds) -> list[list[float]]:
+def landing_zone_polygon(runway: RunwayEnds, lateral_offset_m: float = 0.0) -> list[list[float]]:
     """Polygon for the touchdown-allowed region between displaced thresholds."""
-    return build_runway_ring(runway, include_displaced=False)
+    return build_runway_ring(runway, include_displaced=False, lateral_offset_m=lateral_offset_m)
 
 
-def build_runway_ring(runway: RunwayEnds, include_displaced: bool) -> list[list[float]]:
+def build_runway_ring(
+    runway: RunwayEnds,
+    include_displaced: bool,
+    lateral_offset_m: float = 0.0,
+) -> list[list[float]]:
     """Build a runway-width polygon ring using threshold centres or physical ends."""
-    bearing = runway_bearing_rad(runway.le_lon, runway.le_lat, runway.he_lon, runway.he_lat)
+    bearing = runway_bearing_from_metadata(runway)
 
-    # Threshold coordinates describe the operational landing thresholds.
-    # Extend outwards to the physical pavement ends when requested.
-    le_center = (runway.le_lon, runway.le_lat)
-    he_center = (runway.he_lon, runway.he_lat)
+    le_disp_m = runway.le_displaced_threshold_ft * METRES_PER_FOOT
+    he_disp_m = runway.he_displaced_threshold_ft * METRES_PER_FOOT
+
+    # Use declared dimensions when available to avoid endpoint coordinate noise.
+    raw_threshold_len_m = flat_distance_m(runway.le_lon, runway.le_lat, runway.he_lon, runway.he_lat)
+    declared_len_m = runway.length_ft * METRES_PER_FOOT if runway.length_ft > 0 else 0.0
+    declared_landing_len_m = declared_len_m - le_disp_m - he_disp_m
+    landing_len_m = declared_landing_len_m if declared_landing_len_m > 0 else raw_threshold_len_m
+
+    ref_lon = (runway.le_lon + runway.he_lon) / 2
+    ref_lat = (runway.le_lat + runway.he_lat) / 2
+
+    # Local unit vectors: forward along runway heading, right perpendicular.
+    fwd_e = math.sin(bearing)
+    fwd_n = math.cos(bearing)
+    right_e = fwd_n
+    right_n = -fwd_e
+
+    half_landing_m = landing_len_m / 2
+    le_center_e = -fwd_e * half_landing_m
+    le_center_n = -fwd_n * half_landing_m
+    he_center_e = fwd_e * half_landing_m
+    he_center_n = fwd_n * half_landing_m
+
+    # Expand from thresholds to pavement ends only for runway_surface.
     if include_displaced:
-        le_disp_m = runway.le_displaced_threshold_ft * METRES_PER_FOOT
-        he_disp_m = runway.he_displaced_threshold_ft * METRES_PER_FOOT
-        if le_disp_m > 0:
-            le_center = offset_point_deg(le_center[0], le_center[1], bearing + math.pi, le_disp_m)
-        if he_disp_m > 0:
-            he_center = offset_point_deg(he_center[0], he_center[1], bearing, he_disp_m)
+        le_center_e -= fwd_e * le_disp_m
+        le_center_n -= fwd_n * le_disp_m
+        he_center_e += fwd_e * he_disp_m
+        he_center_n += fwd_n * he_disp_m
 
-    perp_left = bearing - math.pi / 2 # left perpendicular of the centreline
-    perp_right = bearing + math.pi / 2 # right perpendicular of the centreline
+    # Optional fine-tuning for imagery alignment.
+    # Positive value shifts polygon to the right side of runway bearing.
+    if lateral_offset_m != 0:
+        le_center_e += right_e * lateral_offset_m
+        le_center_n += right_n * lateral_offset_m
+        he_center_e += right_e * lateral_offset_m
+        he_center_n += right_n * lateral_offset_m
+
     half_width_m = (runway.width_ft * METRES_PER_FOOT) / 2
+    left_e = -right_e
+    left_n = -right_n
 
-    le_left = offset_point_deg(le_center[0], le_center[1], perp_left, half_width_m)
-    le_right = offset_point_deg(le_center[0], le_center[1], perp_right, half_width_m)
-    he_right = offset_point_deg(he_center[0], he_center[1], perp_right, half_width_m)
-    he_left = offset_point_deg(he_center[0], he_center[1], perp_left, half_width_m)
+    le_left = local_m_to_lonlat(
+        le_center_e + left_e * half_width_m,
+        le_center_n + left_n * half_width_m,
+        ref_lon,
+        ref_lat,
+    )
+    le_right = local_m_to_lonlat(
+        le_center_e + right_e * half_width_m,
+        le_center_n + right_n * half_width_m,
+        ref_lon,
+        ref_lat,
+    )
+    he_right = local_m_to_lonlat(
+        he_center_e + right_e * half_width_m,
+        he_center_n + right_n * half_width_m,
+        ref_lon,
+        ref_lat,
+    )
+    he_left = local_m_to_lonlat(
+        he_center_e + left_e * half_width_m,
+        he_center_n + left_n * half_width_m,
+        ref_lon,
+        ref_lat,
+    )
 
     return [list(le_left), list(le_right), list(he_right), list(he_left), list(le_left)]
 
@@ -195,6 +287,16 @@ def load_runways(csv_path: Path, airport_ident: str) -> list[RunwayEnds]:
     )
 
     runways = []
+
+    def parse_optional_float(value: object) -> float | None:
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return None
+        if math.isnan(v):
+            return None
+        return v
+
     for _, row in subset.iterrows():
         runways.append(RunwayEnds(
             le_ident=str(row.get("le_ident", "")),
@@ -209,13 +311,19 @@ def load_runways(csv_path: Path, airport_ident: str) -> list[RunwayEnds]:
             width_ft=float(row.get("width_ft", 150) or 150),
             surface=str(row.get("surface", "ASP") or "ASP"),
             lighted=int(row.get("lighted", 0) or 0),
+            le_heading_degT=parse_optional_float(row.get("le_heading_degT")),
+            he_heading_degT=parse_optional_float(row.get("he_heading_degT")),
             le_displaced_threshold_ft=float(row.get("le_displaced_threshold_ft", 0) or 0),
             he_displaced_threshold_ft=float(row.get("he_displaced_threshold_ft", 0) or 0),
         ))
     return runways
 
 
-def build_runway_geojson(runways: list[RunwayEnds], airport_ident: str) -> dict:
+def build_runway_geojson(
+    runways: list[RunwayEnds],
+    airport_ident: str,
+    lateral_offset_m: float = 0.0,
+) -> dict:
     """Convert parsed runway data to a GeoJSON FeatureCollection."""
     features = []
 
@@ -240,12 +348,25 @@ def build_runway_geojson(runways: list[RunwayEnds], airport_ident: str) -> dict:
                 "he_elevation_ft": rwy.he_elevation_ft,
                 "le_displaced_threshold_ft": rwy.le_displaced_threshold_ft,
                 "he_displaced_threshold_ft": rwy.he_displaced_threshold_ft,
+                "lateral_offset_m": lateral_offset_m,
             },
         }
 
     for rwy in runways:
-        features.append(make_feature(rwy, runway_to_polygon(rwy), "runway_surface"))
-        features.append(make_feature(rwy, landing_zone_polygon(rwy), "landing_zone"))
+        features.append(
+            make_feature(
+                rwy,
+                runway_to_polygon(rwy, lateral_offset_m=lateral_offset_m),
+                "runway_surface",
+            )
+        )
+        features.append(
+            make_feature(
+                rwy,
+                landing_zone_polygon(rwy, lateral_offset_m=lateral_offset_m),
+                "landing_zone",
+            )
+        )
 
     return {"type": "FeatureCollection", "features": features}
 
@@ -262,6 +383,12 @@ def main() -> None:
         "--runways-csv", default="runways.csv",
         help="Path to OurAirports runways.csv (default: ./runways.csv)"
     )
+    parser.add_argument(
+        "--lateral-offset-m",
+        type=float,
+        default=0.0,
+        help="Optional sideways shift (metres) to align polygons with imagery; positive shifts to runway right",
+    )
     args = parser.parse_args()
 
     runways_path = Path(args.runways_csv)
@@ -276,7 +403,7 @@ def main() -> None:
     runways = load_runways(runways_path, args.airport)
     print(f"  Found {len(runways)} runway(s)")
 
-    geojson = build_runway_geojson(runways, args.airport)
+    geojson = build_runway_geojson(runways, args.airport, lateral_offset_m=args.lateral_offset_m)
     out_path = OUTPUT_DIR / "runway.geojson"
     out_path.write_text(json.dumps(geojson, indent=2))
     print(f"  ✓ Written: {out_path}")

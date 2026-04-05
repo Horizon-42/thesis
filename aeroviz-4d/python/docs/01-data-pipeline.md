@@ -31,6 +31,8 @@ end, with columns:
 | `airport_ident` | CYLW | ICAO airport code |
 | `le_ident` | 16 | Lower-end runway identifier, magnetic heading/10 |
 | `he_ident` | 34 | Higher-end identifier |
+| `le_heading_degT` | 175 | True heading (degrees) from LE toward HE |
+| `he_heading_degT` | 355 | True heading (degrees) from HE toward LE |
 | `le_displaced_threshold_ft` | 1200 | LE threshold displacement (feet) |
 | `he_displaced_threshold_ft` | 400 | HE threshold displacement (feet) |
 | `le_longitude_deg` | -119.38 | Lower-end threshold longitude |
@@ -49,6 +51,11 @@ You need to implement three functions:
 
 Compute the bearing from the LE threshold to the HE threshold.
 This is the SAME formula as `bearingRad()` in the TypeScript code.
+
+Implementation note:
+- In production preprocessing, prefer `le_heading_degT` when available,
+  and use this coordinate-derived formula as fallback. This is usually more
+  stable against small endpoint coordinate noise.
 
 **Pseudocode:**
 ```
@@ -137,6 +144,20 @@ Frontend rendering can then style these differently, e.g.:
 cd python
 pytest tests/test_preprocess_airports.py -v
 ```
+
+### Optional alignment tuning
+
+If runway polygons are parallel but slightly shifted left/right from imagery,
+use lateral offset tuning (metres):
+
+```bash
+python preprocess_airports.py --airport CYLW --runways-csv ./runways.csv --lateral-offset-m -6
+```
+
+Notes:
+- Positive `--lateral-offset-m` shifts polygons to the **right** side of runway bearing.
+- Negative value shifts to the left.
+- Start with small values (`±2` to `±10` m) and iterate visually.
 
 ---
 

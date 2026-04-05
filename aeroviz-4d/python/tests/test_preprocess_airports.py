@@ -15,6 +15,7 @@ import math
 import pytest
 from preprocess_airports import (
     runway_bearing_rad,
+    runway_bearing_from_metadata,
     offset_point_deg,
     runway_to_polygon,
     landing_zone_polygon,
@@ -86,6 +87,19 @@ class TestRunwayBearingRad:
         assert fwd is not None and rev is not None  
         assert math.isclose((fwd - rev) % (2 * math.pi), math.pi, abs_tol=10**(-PRECISION))
 
+    def test_metadata_heading_overrides_coordinate_bearing(self):
+        rwy = RunwayEnds(
+            le_ident="16", he_ident="34",
+            le_lon=-119.38, le_lat=49.92,
+            he_lon=-119.36, he_lat=49.98,
+            le_elevation_ft=0, he_elevation_ft=0,
+            length_ft=8000, width_ft=150,
+            surface="ASP", lighted=1,
+            le_heading_degT=175.0,
+        )
+        bearing = runway_bearing_from_metadata(rwy)
+        assert math.isclose(bearing, math.radians(175.0), abs_tol=10**(-PRECISION))
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 class TestOffsetPointDeg:
@@ -139,7 +153,8 @@ class TestRunwayToPolygon:
         le_right = ring[1]  # [lon, lat]
         lat = le_left[1]  # latitude of the corners (should be the same)
         actual_width_m = abs(le_left[0] - le_right[0]) * metres_per_deg_lon(lat)
-        assert math.isclose(actual_width_m, expected_width_m, abs_tol=10**(-PRECISION))
+        # Flat-plane conversion introduces centimetre-level rounding differences.
+        assert math.isclose(actual_width_m, expected_width_m, abs_tol=0.02)
 
     def test_polygon_points_contain_lon_lat_pairs(self):
         ring = runway_to_polygon(RWY_NS)
