@@ -64,18 +64,6 @@ def metres_per_deg_lon(lat_deg: float) -> float:
     return METRES_PER_DEG_LAT * math.cos(math.radians(lat_deg))
 
 
-def lonlat_to_local_m(
-    lon: float,
-    lat: float,
-    ref_lon: float,
-    ref_lat: float,
-) -> tuple[float, float]:
-    """Convert lon/lat to local East/North metres in a flat tangent plane."""
-    east_m = (lon - ref_lon) * metres_per_deg_lon(ref_lat)
-    north_m = (lat - ref_lat) * METRES_PER_DEG_LAT
-    return east_m, north_m
-
-
 def local_m_to_lonlat(
     east_m: float,
     north_m: float,
