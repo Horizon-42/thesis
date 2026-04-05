@@ -24,6 +24,7 @@ const CESIUM_ION_TOKEN = import.meta.env.VITE_CESIUM_ION_TOKEN;
 
 /** WGS84 coordinates for the initial camera target (default: Kelowna CYLW) */
 export const DEFAULT_AIRPORT = {
+  code: "CYLW",
   lon: -119.3775,
   lat: 49.9561,
   /** Initial camera altitude in metres */
@@ -94,15 +95,58 @@ export function useCesiumViewer(
     // Hint: set it to `true`.  The sun's position is computed from the
     // simulation clock time, so you'll see day/night and mountain shadows.
 
+    // set current clock to mid-afternoon
+    // viewer.clock.currentTime = Cesium.JulianDate.fromDate(new Date("2026-01-01T21:00:00Z"));
+
     // ── Step 4: Set initial camera view ───────────────────────────────────────
     // ③ — Fly the camera to DEFAULT_AIRPORT using viewer.camera.setView().
     //
-    viewer.camera.setView({
-      destination: Cesium.Cartesian3.fromDegrees(DEFAULT_AIRPORT.lon, DEFAULT_AIRPORT.lat, DEFAULT_AIRPORT.height),
-      orientation: {
-        heading: Cesium.Math.toRadians(0),   // compass bearing (0 = north)
-        pitch:   Cesium.Math.toRadians(-45),   // tilt angle (negative = look down)
-        roll:    0,                          // bank angle (0 = level)
+    // viewer.camera.setView({
+    //   destination: Cesium.Cartesian3.fromDegrees(DEFAULT_AIRPORT.lon, DEFAULT_AIRPORT.lat, DEFAULT_AIRPORT.height),
+    //   orientation: {
+    //     heading: Cesium.Math.toRadians(0),   // compass bearing (0 = north)
+    //     pitch:   Cesium.Math.toRadians(-42),   // tilt angle (negative = look down)
+    //     roll:    0,                          // bank angle (0 = level)
+    //   },
+    // });
+    viewer.camera.flyToBoundingSphere(
+      new Cesium.BoundingSphere(
+        Cesium.Cartesian3.fromDegrees(DEFAULT_AIRPORT.lon, DEFAULT_AIRPORT.lat, 0),
+        DEFAULT_AIRPORT.height
+      ),
+      {
+        duration: 0, // seconds; set to 0 for no animation
+        offset: new Cesium.HeadingPitchRange(
+          Cesium.Math.toRadians(0),   // heading (compass bearing)
+          Cesium.Math.toRadians(-42),   // pitch (tilt angle)
+          DEFAULT_AIRPORT.height       // range (distance from target)
+        ),
+      }
+    );
+
+    // ── Step 5: Add an airport marker so the target spot is obvious ──────────
+    viewer.entities.add({
+      id: `airport-${DEFAULT_AIRPORT.code}`,
+      position: Cesium.Cartesian3.fromDegrees(DEFAULT_AIRPORT.lon, DEFAULT_AIRPORT.lat),
+      point: {
+        pixelSize: 12,
+        color: Cesium.Color.fromCssColorString("#ff4d4f"),
+        outlineColor: Cesium.Color.WHITE,
+        outlineWidth: 2,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+      label: {
+        text: DEFAULT_AIRPORT.code,
+        font: "bold 14px sans-serif",
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        fillColor: Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 3,
+        pixelOffset: new Cesium.Cartesian2(0, -22),
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
     });
     //

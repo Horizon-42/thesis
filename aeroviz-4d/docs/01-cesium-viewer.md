@@ -87,24 +87,24 @@ magic numbers).
 
 Open `src/hooks/useCesiumViewer.ts` and complete these three TODOs in order:
 
-### TODO ① — Create the Viewer
+### ① — Create the Viewer
 
 Replace the placeholder `null as unknown as Cesium.Viewer` with a real
 `new Cesium.Viewer(containerRef.current!, { ... })` call using the options
 documented in the file.
 
 **Checklist after completing ①:**
-- [ ] The page shows a 3D globe (may take a few seconds to load imagery tiles)
-- [ ] No `Missing Ion access token` console error (you filled in your token)
-- [ ] The timeline bar and animation wheel are visible at the bottom
+- [x] The page shows a 3D globe (may take a few seconds to load imagery tiles)
+- [x] No `Missing Ion access token` console error (you filled in your token)
+- [x] The timeline bar and animation wheel are visible at the bottom
 
-### TODO ② — Enable terrain lighting
+### ② — Enable terrain lighting
 
 One line: `viewer.scene.globe.enableLighting = true;`
 
 **Checklist after completing ②:**
-- [ ] Mountains show darker shadows on slopes facing away from the sun
-- [ ] The effect is more visible when you set `viewer.clock.currentTime` to a
+- [x] Mountains show darker shadows on slopes facing away from the sun
+- [x] The effect is more visible when you set `viewer.clock.currentTime` to a
       mid-afternoon time
 
 ### TODO ③ — Set the initial camera view
