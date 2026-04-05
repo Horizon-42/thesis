@@ -107,13 +107,13 @@ One line: `viewer.scene.globe.enableLighting = true;`
 - [x] The effect is more visible when you set `viewer.clock.currentTime` to a
       mid-afternoon time
 
-### TODO ③ — Set the initial camera view
+### ③ — Set the initial camera view
 
 Use `viewer.camera.setView(...)` with the `DEFAULT_AIRPORT` constants.
 
 **Checklist after completing ③:**
-- [ ] The globe opens looking at your target airport, not at 0°N 0°E
-- [ ] The view is tilted (oblique), not straight down
+- [x] The globe opens looking at your target airport, not at 0°N 0°E
+- [x] The view is tilted (oblique), not straight down
 
 ---
 

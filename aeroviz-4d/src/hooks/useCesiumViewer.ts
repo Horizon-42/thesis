@@ -115,7 +115,7 @@ export function useCesiumViewer(
         DEFAULT_AIRPORT.height
       ),
       {
-        duration: 0, // seconds; set to 0 for no animation
+        duration: 1, // seconds; set to 0 for no animation
         offset: new Cesium.HeadingPitchRange(
           Cesium.Math.toRadians(0),   // heading (compass bearing)
           Cesium.Math.toRadians(-42),   // pitch (tilt angle)
@@ -152,6 +152,10 @@ export function useCesiumViewer(
     //
     // Hint: a pitch of -45° gives a nice oblique view; -90° is straight down.
     // Reference: docs/01-cesium-viewer.md § "Camera orientation"
+
+    // cinematic rendering
+    viewer.scene.postProcessStages.fxaa.enabled = true; // anti-aliasing
+    // viewer.scene.fog.enabled = true;
 
     // Share the Viewer with the rest of the app via context.
     setViewer(viewer);
