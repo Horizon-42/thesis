@@ -85,7 +85,7 @@ export function bearingRad(
   lonA: number, latA: number,
   lonB: number, latB: number
 ): number {
-  // TODO ① — Implement this formula.
+  // ① — Implement this formula.
   //
   // Step-by-step:
   //   1. dx = (lonB - lonA) * metresPerDegLon(latA)
@@ -99,7 +99,9 @@ export function bearingRad(
   // Hint: atan2(y, x) but here we want atan2(east_component, north_component)
   // so the argument ORDER is atan2(dx, dy) — east first, north second.
 
-  throw new Error("TODO: implement bearingRad");
+  let dx: number = (lonB - lonA) * metresPerDegLon(latA);
+  let dy: number = (latB - latA) * METRES_PER_DEG_LAT;
+  return Math.atan2(dx, dy);
 }
 
 /**
@@ -119,7 +121,7 @@ export function offsetPoint(
   bearingRadians: number,
   distanceM: number
 ): GeoPoint3D {
-  // TODO ② — Implement the flat-Earth offset formula above.
+  // ② — Implement the flat-Earth offset formula above.
   //
   // Example:
   //   offsetPoint(-119.38, 49.95, 3000, Math.PI / 2, 1000)
@@ -128,7 +130,11 @@ export function offsetPoint(
   //   → lat stays the same
   //   → altM stays the same
 
-  throw new Error("TODO: implement offsetPoint");
+  let newLon: number = lon + (distanceM * Math.sin(bearingRadians)) / metresPerDegLon(lat);
+  let newLat: number = lat + (distanceM * Math.cos(bearingRadians)) / METRES_PER_DEG_LAT;
+  let newAlt: number = altM;
+
+  return { lon: newLon, lat: newLat, altM: newAlt };
 }
 
 /**

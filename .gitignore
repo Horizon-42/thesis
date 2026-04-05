@@ -7,3 +7,9 @@ node_modules
 
 
 data
+
+.vscode
+
+
+# python 
+__pycache__

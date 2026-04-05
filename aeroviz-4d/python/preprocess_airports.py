@@ -70,7 +70,7 @@ def runway_bearing_rad(
     Uses the same flat-Earth approximation as the TypeScript ocsGeometry.ts.
     Returns bearing in radians, range (−π, π].
     """
-    # TODO ① — Implement this function.
+    # ① — Implement this function.
     #
     # Formula:
     #   dx = (he_lon - le_lon) * metres_per_deg_lon(le_lat)
@@ -80,7 +80,10 @@ def runway_bearing_rad(
     # This is identical to the TypeScript bearingRad() — implement both
     # together so you understand the formula in one place.
 
-    raise NotImplementedError("TODO: implement runway_bearing_rad")
+    dx = (he_lon - le_lon) * metres_per_deg_lon(le_lat)
+    dy = (he_lat - le_lat) * METRES_PER_DEG_LAT
+
+    return math.atan2(dx, dy)
 
 
 def offset_point_deg(
@@ -97,13 +100,13 @@ def offset_point_deg(
       new_lon = lon + (distance_m × sin(bearing)) / metres_per_deg_lon(lat)
       new_lat = lat + (distance_m × cos(bearing)) / METRES_PER_DEG_LAT
     """
-    # TODO ② — Implement this function.
+    # ② — Implement this function.
     #
     # Hint: this is the Python equivalent of offsetPoint() in ocsGeometry.ts.
     # Implement them together — the math is identical.
-
-    raise NotImplementedError("TODO: implement offset_point_deg")
-
+    new_lon = lon + (distance_m * math.sin(bearing_rad)) / metres_per_deg_lon(lat)
+    new_lat = lat + (distance_m * math.cos(bearing_rad)) / METRES_PER_DEG_LAT
+    return new_lon, new_lat
 
 def runway_to_polygon(runway: RunwayEnds) -> list[list[float]]:
     """
@@ -124,7 +127,7 @@ def runway_to_polygon(runway: RunwayEnds) -> list[list[float]]:
             |   centreline →         |
         LE_right ───────────────  HE_right
     """
-    # TODO ③ — Implement this function using runway_bearing_rad() and offset_point_deg().
+    # ③ — Implement this function using runway_bearing_rad() and offset_point_deg().
     #
     # Steps:
     #   bearing    = runway_bearing_rad(le_lon, le_lat, he_lon, he_lat)
@@ -143,8 +146,17 @@ def runway_to_polygon(runway: RunwayEnds) -> list[list[float]]:
     #
     # ⚠ GeoJSON uses [longitude, latitude] order — NOT [lat, lon]!
 
-    raise NotImplementedError("TODO: implement runway_to_polygon")
+    bearing = runway_bearing_rad(runway.le_lon, runway.le_lat, runway.he_lon, runway.he_lat)
+    perp_left = bearing - math.pi / 2 # left perpendicular of the centreline
+    perp_right = bearing + math.pi / 2 # right perpendicular of the centreline
+    half_width_m = (runway.width_ft * METRES_PER_FOOT) / 2
 
+    le_left = offset_point_deg(runway.le_lon, runway.le_lat, perp_left, half_width_m)
+    le_right = offset_point_deg(runway.le_lon, runway.le_lat, perp_right, half_width_m)
+    he_right = offset_point_deg(runway.he_lon, runway.he_lat, perp_right, half_width_m)
+    he_left = offset_point_deg(runway.he_lon, runway.he_lat, perp_left, half_width_m)
+
+    return [list(le_left), list(le_right), list(he_right), list(he_left), list(le_left)]
 
 # ── Main pipeline ─────────────────────────────────────────────────────────────
 

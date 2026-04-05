@@ -29,7 +29,7 @@ end, with columns:
 | Column | Example | Meaning |
 |--------|---------|---------|
 | `airport_ident` | CYLW | ICAO airport code |
-| `le_ident` | 16 | Lower-end runway identifier |
+| `le_ident` | 16 | Lower-end runway identifier, magnetic heading/10 |
 | `he_ident` | 34 | Higher-end identifier |
 | `le_longitude_deg` | -119.38 | Lower-end threshold longitude |
 | `le_latitude_deg` | 49.92 | Lower-end threshold latitude |
@@ -54,6 +54,19 @@ dx = (he_lon - le_lon) × metres_per_deg_lon(le_lat)
 dy = (he_lat - le_lat) × 111320
 return atan2(dx, dy)
 ```
+
+**What this means (intuition):**
+- `bearing` is the direction from LE to HE, measured clockwise from north.
+- `dx` is the east-west component in metres.
+- `dy` is the north-south component in metres.
+- `atan2(dx, dy)` converts those two components into one heading angle (radians).
+
+Why scale longitude by latitude?
+- One degree of longitude is not a constant distance on Earth.
+- At latitude `φ`, an approximation is:
+    `metres_per_deg_lon(φ) ≈ 111320 × cos(φ)`
+- So `dx` must use `metres_per_deg_lon(le_lat)`; otherwise east-west distance is wrong,
+    especially at higher latitudes.
 
 #### `offset_point_deg(lon, lat, bearing_rad, distance_m)`
 
@@ -80,6 +93,24 @@ Steps:
 4. `half_w_m   = (width_ft × 0.3048) / 2`
 5. Offset each threshold end left and right by `half_w_m`
 6. Return the 5-point closed ring: `[LE_left, LE_right, HE_right, HE_left, LE_left]`
+
+What does `perp` mean?
+- `perp` is short for **perpendicular** (90° to the centreline direction).
+- The runway centreline uses `bearing` (LE -> HE).
+- To move sideways from the centreline (to get runway edges), you need a direction
+    that is exactly perpendicular to that bearing.
+
+Why `± π/2`?
+- `π/2` radians = 90°.
+- `bearing - π/2` rotates the heading 90° to one side (left).
+- `bearing + π/2` rotates the heading 90° to the other side (right).
+- Those two perpendicular directions are then used in `offset_point_deg(...)`
+    to compute left/right edge points at each runway end.
+
+Quick intuition:
+- Centreline direction tells you "forward".
+- Perpendicular directions tell you "sideways left" and "sideways right".
+- Runway polygon = forward endpoints shifted sideways by half width.
 
 ⚠️ GeoJSON polygon rings use `[longitude, latitude]` order, NOT `[lat, lon]`!
 
