@@ -100,26 +100,17 @@ def build_position_property(
     CZML interprets this with Lagrange interpolation between samples.
     The `epoch` key is the ISO string of epoch_dt.
     """
-    # TODO ① — Build the flat `cartographicDegrees` list.
-    #
-    # Steps:
-    #   flat = []
-    #   for (offset_sec, lon, lat, alt_m) in waypoints:
-    #       flat.extend([offset_sec, lon, lat, alt_m])
-    #
-    # Then return:
-    #   {
-    #     "epoch": epoch_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    #     "cartographicDegrees": flat,
-    #     "interpolationAlgorithm": "LAGRANGE",
-    #     "interpolationDegree": 3,
-    #     "forwardExtrapolationType": "HOLD",
-    #   }
-    #
-    # Example: waypoints = [(0, -119.38, 49.95, 4500)]
-    # Expected: {"epoch": "...", "cartographicDegrees": [0, -119.38, 49.95, 4500], ...}
+    flat: list[float] = []
+    for offset_sec, lon, lat, alt_m in waypoints:
+        flat.extend([offset_sec, lon, lat, alt_m])
 
-    raise NotImplementedError("TODO: implement build_position_property")
+    return {
+        "epoch": epoch_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "cartographicDegrees": flat,
+        "interpolationAlgorithm": "LAGRANGE",
+        "interpolationDegree": 3,
+        "forwardExtrapolationType": "HOLD",
+    }
 
 
 def build_flight_packet(
@@ -142,50 +133,41 @@ def build_flight_packet(
     epoch_dt      : simulation start time (all offsets relative to this)
     color_rgba    : (R, G, B, A) each 0–255 for the trail polyline
     """
-    # TODO ② — Build and return the entity packet dict.
-    #
-    # Required keys:
-    #
-    #   "id":          flight_id
-    #   "name":        callsign
-    #   "description": f"<b>{callsign}</b><br/>Type: {aircraft_type}"
-    #
-    #   "model": {
-    #       "gltf":             "/models/aircraft.glb",
-    #       "scale":            3.0,
-    #       "minimumPixelSize": 32,
-    #       "maximumScale":     20000,
-    #       "runAnimations":    True,
-    #   }
-    #
-    #   "position": build_position_property(epoch_dt, waypoints)
-    #
-    #   "orientation": { "velocityReference": f"#{flight_id}.position" }
-    #
-    #   "path": {
-    #       "show":      True,
-    #       "leadTime":  0,
-    #       "trailTime": 300,
-    #       "width":     2,
-    #       "material":  {
-    #           "solidColor": {
-    #               "color": { "rgba": list(color_rgba) }
-    #           }
-    #       }
-    #   }
-    #
-    #   "label": {
-    #       "text":          callsign,
-    #       "font":          "12px sans-serif",
-    #       "fillColor":     {"rgba": [255, 255, 255, 255]},
-    #       "outlineColor":  {"rgba": [0, 0, 0, 255]},
-    #       "outlineWidth":  2,
-    #       "style":         "FILL_AND_OUTLINE",
-    #       "verticalOrigin": "BOTTOM",
-    #       "pixelOffset":   {"cartesian2": [0, -30]},
-    #   }
-
-    raise NotImplementedError("TODO: implement build_flight_packet")
+    return {
+        "id": flight_id,
+        "name": callsign,
+        "description": f"<b>{callsign}</b><br/>Type: {aircraft_type}",
+        "model": {
+            "gltf": "/models/aircraft.glb",
+            "scale": 3.0,
+            "minimumPixelSize": 32,
+            "maximumScale": 20000,
+            "runAnimations": True,
+        },
+        "position": build_position_property(epoch_dt, waypoints),
+        "orientation": {"velocityReference": f"#{flight_id}.position"},
+        "path": {
+            "show": True,
+            "leadTime": 0,
+            "trailTime": 300,
+            "width": 2,
+            "material": {
+                "solidColor": {
+                    "color": {"rgba": list(color_rgba)}
+                }
+            },
+        },
+        "label": {
+            "text": callsign,
+            "font": "12px sans-serif",
+            "fillColor": {"rgba": [255, 255, 255, 255]},
+            "outlineColor": {"rgba": [0, 0, 0, 255]},
+            "outlineWidth": 2,
+            "style": "FILL_AND_OUTLINE",
+            "verticalOrigin": "BOTTOM",
+            "pixelOffset": {"cartesian2": [0, -30]},
+        },
+    }
 
 
 # ── Top-level assembler ───────────────────────────────────────────────────────
@@ -206,30 +188,27 @@ def build_czml(
 
     Returns a CZML array: [document_packet, entity_packet, entity_packet, ...]
     """
-    # TODO ③ — Implement this function.
-    #
-    # Steps:
-    #   1. Find the maximum offset_sec across ALL flights to compute end_dt:
-    #        max_offset = max(wp[0] for f in flights for wp in f["waypoints"])
-    #        end_dt = start_dt + timedelta(seconds=max_offset)
-    #
-    #   2. Build the document packet:
-    #        doc = build_document_packet(start_dt, end_dt, multiplier)
-    #
-    #   3. Build one entity packet per flight:
-    #        for i, flight in enumerate(flights):
-    #            color = TRAIL_COLORS[i % len(TRAIL_COLORS)]
-    #            packet = build_flight_packet(
-    #                flight["id"], flight["callsign"], flight["type"],
-    #                [tuple(wp) for wp in flight["waypoints"]],
-    #                start_dt, color
-    #            )
-    #
-    #   4. Return [doc, *entity_packets]
-    #
-    # Hint: `timedelta(seconds=...)` adds seconds to a datetime object.
+    max_offset = max(
+        (float(wp[0]) for flight in flights for wp in flight.get("waypoints", [])),
+        default=0.0,
+    )
+    end_dt = start_dt + timedelta(seconds=max_offset)
+    doc = build_document_packet(start_dt, end_dt, multiplier)
 
-    raise NotImplementedError("TODO: implement build_czml")
+    entity_packets: list[dict[str, Any]] = []
+    for i, flight in enumerate(flights):
+        color = TRAIL_COLORS[i % len(TRAIL_COLORS)]
+        packet = build_flight_packet(
+            str(flight["id"]),
+            str(flight["callsign"]),
+            str(flight["type"]),
+            [tuple(wp) for wp in flight["waypoints"]],
+            start_dt,
+            color,
+        )
+        entity_packets.append(packet)
+
+    return [doc, *entity_packets]
 
 
 # ── Mock data (for front-end integration testing) ─────────────────────────────

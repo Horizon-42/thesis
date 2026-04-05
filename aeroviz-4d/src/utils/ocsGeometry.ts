@@ -156,7 +156,7 @@ export function offsetPoint(
  *   to zero clearance at the outer edge.  The 7:1 ratio encodes this.
  */
 export function buildFinalApproachOCS(params: OCSParams): OCSGeometry {
-  const { faf, threshold, primaryHalfWidthM, secondaryWidthM } = params;
+  void params;
 
   // TODO ③ — Implement this function using bearingRad() and offsetPoint().
   //

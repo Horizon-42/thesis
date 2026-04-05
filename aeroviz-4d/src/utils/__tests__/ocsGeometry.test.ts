@@ -133,7 +133,7 @@ describe("buildFinalApproachOCS", () => {
   });
 
   it("secondary polygons are outboard of the primary edge", () => {
-    const { primaryPolygon, secondaryLeft, secondaryRight } = buildFinalApproachOCS(params);
+    const { secondaryLeft, secondaryRight } = buildFinalApproachOCS(params);
     // The outer edge of the secondary area should be 150 m from the centreline
     // (primaryHalfWidthM + secondaryWidthM = 75 + 75).
     // That's approximately 0.00209° at lat 49.95.

@@ -91,25 +91,18 @@ export function buildSampledPosition(
   epoch: string,
   waypoints: Waypoint4D[]
 ): CzmlSampledPosition {
-  // TODO ① — Build the `cartographicDegrees` flat array.
-  //
-  // Steps:
-  //   1. Create an empty array: const flat: number[] = [];
-  //   2. For each waypoint, push four values in this order:
-  //        flat.push(wp.offsetSec, wp.lon, wp.lat, wp.altM);
-  //   3. Return the CzmlSampledPosition object with:
-  //        epoch, cartographicDegrees: flat,
-  //        interpolationAlgorithm: "LAGRANGE",
-  //        interpolationDegree: 3,
-  //        forwardExtrapolationType: "HOLD"
-  //
-  // Example input: waypoints = [{ offsetSec: 0, lon: -119.38, lat: 49.95, altM: 4500 }]
-  // Expected flat: [0, -119.38, 49.95, 4500]
-  //
-  // Hint: If waypoints is empty, return a position with cartographicDegrees: []
-  //       (Cesium will simply not render the entity).
+  const flat: number[] = [];
+  waypoints.forEach((wp) => {
+    flat.push(wp.offsetSec, wp.lon, wp.lat, wp.altM);
+  });
 
-  throw new Error("TODO: implement buildSampledPosition");
+  return {
+    epoch,
+    cartographicDegrees: flat,
+    interpolationAlgorithm: "LAGRANGE",
+    interpolationDegree: 3,
+    forwardExtrapolationType: "HOLD",
+  };
 }
 
 // ── Entity packet ─────────────────────────────────────────────────────────────
@@ -129,45 +122,45 @@ export function buildFlightPacket(
 ): CzmlEntityPacket {
   const color = flight.trailColor ?? [255, 165, 0, 200]; // default orange
 
-  // TODO ② — Return a CzmlEntityPacket with these fields:
-  //
-  //   id:          flight.id
-  //   name:        flight.callsign
-  //   description: a short HTML string, e.g. `<b>${callsign}</b><br/>Type: ${type}`
-  //
-  //   model: {
-  //     gltf:            "/models/aircraft.glb",
-  //     scale:           3.0,
-  //     minimumPixelSize: 32,
-  //     maximumScale:    20_000,
-  //     runAnimations:   true,
-  //   }
-  //
-  //   position: buildSampledPosition(epochIso, flight.waypoints)
-  //
-  //   orientation: { velocityReference: `#${flight.id}.position` }
-  //   (This tells Cesium to compute heading/pitch from the velocity vector automatically)
-  //
-  //   path: {
-  //     show:      true,
-  //     leadTime:  0,          // don't draw ahead of current time
-  //     trailTime: 300,        // draw 300 s of past trail
-  //     width:     2,
-  //     material:  { solidColor: { color: { rgba: color } } }
-  //   }
-  //
-  //   label: {
-  //     text:          flight.callsign,
-  //     font:          "12px sans-serif",
-  //     fillColor:     { rgba: [255, 255, 255, 255] },
-  //     outlineColor:  { rgba: [0, 0, 0, 255] },
-  //     outlineWidth:  2,
-  //     style:         "FILL_AND_OUTLINE",
-  //     verticalOrigin: "BOTTOM",
-  //     pixelOffset:   { cartesian2: [0, -30] }
-  //   }
-
-  throw new Error("TODO: implement buildFlightPacket");
+  return {
+    id: flight.id,
+    name: flight.callsign,
+    description: `<b>${flight.callsign}</b><br/>Type: ${flight.type}`,
+    model: {
+      gltf: "/models/aircraft.glb",
+      scale: 3.0,
+      minimumPixelSize: 32,
+      maximumScale: 20_000,
+      runAnimations: true,
+    },
+    position: buildSampledPosition(epochIso, flight.waypoints),
+    orientation: {
+      velocityReference: `#${flight.id}.position`,
+    },
+    path: {
+      show: true,
+      leadTime: 0,
+      trailTime: 300,
+      width: 2,
+      material: {
+        solidColor: {
+          color: {
+            rgba: color,
+          },
+        },
+      },
+    },
+    label: {
+      text: flight.callsign,
+      font: "12px sans-serif",
+      fillColor: { rgba: [255, 255, 255, 255] },
+      outlineColor: { rgba: [0, 0, 0, 255] },
+      outlineWidth: 2,
+      style: "FILL_AND_OUTLINE",
+      verticalOrigin: "BOTTOM",
+      pixelOffset: { cartesian2: [0, -30] },
+    },
+  };
 }
 
 // ── Top-level builder ─────────────────────────────────────────────────────────
@@ -187,11 +180,7 @@ export function buildCzml(
   endIso: string,
   multiplier = 60
 ): [CzmlDocumentPacket, ...CzmlEntityPacket[]] {
-  // TODO ③ — Compose the result using buildDocumentPacket and buildFlightPacket.
-  //
-  //   const doc = buildDocumentPacket(startIso, endIso, multiplier);
-  //   const entities = flights.map(f => buildFlightPacket(f, startIso));
-  //   return [doc, ...entities];
-
-  throw new Error("TODO: implement buildCzml");
+  const doc = buildDocumentPacket(startIso, endIso, multiplier);
+  const entities = flights.map((f) => buildFlightPacket(f, startIso));
+  return [doc, ...entities];
 }
