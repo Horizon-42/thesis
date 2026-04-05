@@ -51,6 +51,8 @@ class RunwayEnds(NamedTuple):
     width_ft: float
     surface: str
     lighted: int
+    le_displaced_threshold_ft: float = 0.0
+    he_displaced_threshold_ft: float = 0.0
 
 
 # ── Geometry helpers ──────────────────────────────────────────────────────────
@@ -147,14 +149,27 @@ def runway_to_polygon(runway: RunwayEnds) -> list[list[float]]:
     # ⚠ GeoJSON uses [longitude, latitude] order — NOT [lat, lon]!
 
     bearing = runway_bearing_rad(runway.le_lon, runway.le_lat, runway.he_lon, runway.he_lat)
+
+    # OurAirports coordinates are threshold positions; extend to physical runway
+    # ends when displaced-threshold metadata is present.
+    le_center = (runway.le_lon, runway.le_lat)
+    he_center = (runway.he_lon, runway.he_lat)
+
+    le_disp_m = runway.le_displaced_threshold_ft * METRES_PER_FOOT
+    he_disp_m = runway.he_displaced_threshold_ft * METRES_PER_FOOT
+    if le_disp_m > 0:
+        le_center = offset_point_deg(le_center[0], le_center[1], bearing + math.pi, le_disp_m)
+    if he_disp_m > 0:
+        he_center = offset_point_deg(he_center[0], he_center[1], bearing, he_disp_m)
+
     perp_left = bearing - math.pi / 2 # left perpendicular of the centreline
     perp_right = bearing + math.pi / 2 # right perpendicular of the centreline
     half_width_m = (runway.width_ft * METRES_PER_FOOT) / 2
 
-    le_left = offset_point_deg(runway.le_lon, runway.le_lat, perp_left, half_width_m)
-    le_right = offset_point_deg(runway.le_lon, runway.le_lat, perp_right, half_width_m)
-    he_right = offset_point_deg(runway.he_lon, runway.he_lat, perp_right, half_width_m)
-    he_left = offset_point_deg(runway.he_lon, runway.he_lat, perp_left, half_width_m)
+    le_left = offset_point_deg(le_center[0], le_center[1], perp_left, half_width_m)
+    le_right = offset_point_deg(le_center[0], le_center[1], perp_right, half_width_m)
+    he_right = offset_point_deg(he_center[0], he_center[1], perp_right, half_width_m)
+    he_left = offset_point_deg(he_center[0], he_center[1], perp_left, half_width_m)
 
     return [list(le_left), list(le_right), list(he_right), list(he_left), list(le_left)]
 
@@ -184,6 +199,8 @@ def load_runways(csv_path: Path, airport_ident: str) -> list[RunwayEnds]:
             width_ft=float(row.get("width_ft", 150) or 150),
             surface=str(row.get("surface", "ASP") or "ASP"),
             lighted=int(row.get("lighted", 0) or 0),
+            le_displaced_threshold_ft=float(row.get("le_displaced_threshold_ft", 0) or 0),
+            he_displaced_threshold_ft=float(row.get("he_displaced_threshold_ft", 0) or 0),
         ))
     return runways
 
