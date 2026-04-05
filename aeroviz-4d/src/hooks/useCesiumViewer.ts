@@ -211,6 +211,9 @@ export function useCesiumViewer(
     // ── Step 3: Enable terrain lighting ───────────────────────────────────────
     // ② — Enable the globe's built-in directional lighting:
     viewer.scene.globe.enableLighting = true;
+    // Ensure entities behind terrain are depth-tested to prevent view-angle
+    // dependent visual drifting against runway polygons.
+    viewer.scene.globe.depthTestAgainstTerrain = true;
     //
     // Hint: set it to `true`.  The sun's position is computed from the
     // simulation clock time, so you'll see day/night and mountain shadows.
