@@ -19,6 +19,19 @@ Design a trajectory planning and prediction framework for approach operations th
 
 The framework should select one feasible path from candidate approach paths, optimize along that path, and compare results to baseline methods.
 
+### CTA Description (Controlled Time of Arrival)
+CTA is the target time assigned by ATC for an aircraft to cross a designated fix
+or reach the runway threshold. In this project, CTA converts time coordination
+from a qualitative requirement into explicit constraints on trajectory time
+stamps.
+
+Typical modeling forms:
+- Time-window form: t_i(fix_k) in [CTA_i,k - delta_i,k, CTA_i,k + delta_i,k]
+- Sequencing form: t_j(fix_k) - t_i(fix_k) >= spacing_min
+
+This ensures the trajectory is not only spatially safe (3D) but also temporally
+coordinated (4D) for approach sequencing.
+
 
 ## 3. Multi-Layer Optimization View
 Treat the problem as stacked constraint and decision layers.
