@@ -240,7 +240,7 @@ export function useCesiumViewer(
       {
         duration: 1, // seconds; set to 0 for no animation
         offset: new Cesium.HeadingPitchRange(
-          Cesium.Math.toRadians(0),   // heading (compass bearing)
+          Cesium.Math.toRadians(-45),   // heading (compass bearing)
           Cesium.Math.toRadians(-42),   // pitch (tilt angle)
           DEFAULT_AIRPORT.height       // range (distance from target)
         ),
