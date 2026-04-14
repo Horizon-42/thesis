@@ -22,7 +22,7 @@
  * 📖 Tutorial: see docs/04-czml-loader.md
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 
@@ -43,6 +43,9 @@ export interface CzmlLoaderState {
  */
 export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
   const { viewer, layers, setSelectedFlightId } = useApp();
+  // Hold a direct reference — the CZML document packet can overwrite the
+  // datasource name, making getByName() unreliable for visibility sync.
+  const dsRef = useRef<Cesium.CzmlDataSource | null>(null);
   const [state, setState] = useState<CzmlLoaderState>({
     isLoaded: false,
     flightIds: [],
@@ -67,6 +70,7 @@ export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
         // ── Inside .then(ds => { ... }): ─────────────────────────────────────────
 
         dataSource = loadedDs;
+        dsRef.current = loadedDs;
         viewer.dataSources.add(loadedDs);
         loadedDs.show = layers.trajectories;
 
@@ -100,6 +104,7 @@ export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
     // ── Cleanup ───────────────────────────────────────────────────────────────
     return () => {
       cancelled = true;
+      dsRef.current = null;
       if (dataSource) {
         viewer.dataSources.remove(dataSource, true);
         viewer.trackedEntity = undefined;
@@ -109,10 +114,8 @@ export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
 
   // ── Sync visibility ───────────────────────────────────────────────────────
   useEffect(() => {
-    if (!viewer) return;
-    const ds = viewer.dataSources.getByName(LAYER_NAME)[0];
-    if (ds) ds.show = layers.trajectories;
-  }, [viewer, layers.trajectories, state.isLoaded]);
+    if (dsRef.current) dsRef.current.show = layers.trajectories;
+  }, [layers.trajectories, state.isLoaded]);
 
   return state;
 }

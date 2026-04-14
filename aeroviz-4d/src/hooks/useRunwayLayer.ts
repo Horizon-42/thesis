@@ -14,7 +14,7 @@
  * 📖 Tutorial: see docs/02-runway-layer.md
  */
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 
@@ -25,6 +25,9 @@ const LANDING_ZONE_STROKE = new Cesium.Color(0.3, 0.7, 0.3, 0.9);
 
 export function useRunwayLayer(): void {
   const { viewer, layers } = useApp();
+  // Hold a direct reference — GeoJsonDataSource.load() overwrites the name
+  // from the URL, so getByName() is unreliable for visibility sync.
+  const dsRef = useRef<Cesium.GeoJsonDataSource | null>(null);
 
   useEffect(() => {
     // Don't do anything until the Viewer is ready.
@@ -64,6 +67,7 @@ export function useRunwayLayer(): void {
       // contains entities representing the runway polygons.
       viewer.dataSources.add(ds);
       added = true;
+      dsRef.current = ds;
       ds.show = layers.runways;
 
       // ── Step 4 (inside .then): Set ClassificationType on each entity ──────────
@@ -109,8 +113,7 @@ export function useRunwayLayer(): void {
     // ── Cleanup ───────────────────────────────────────────────────────────────
     return () => {
       cancelled = true;
-      // Remove the DataSource (and all its entities) when the hook unmounts
-      // or when `viewer` changes.
+      dsRef.current = null;
       if (added) {
         viewer.dataSources.remove(dataSource, true);
       }
@@ -118,13 +121,7 @@ export function useRunwayLayer(): void {
   }, [viewer]); // Re-run if the Viewer instance changes
 
   // ── Separate effect: sync visibility when the layer flag changes ───────────
-  // We split this into its own effect so toggling a layer does NOT reload the
-  // GeoJSON from the network — it just flips the DataSource's show flag.
   useEffect(() => {
-    if (!viewer) return;
-    const allRunwaySources = viewer.dataSources.getByName("runways");
-    allRunwaySources.forEach((ds) => {
-      ds.show = layers.runways;
-    });
-  }, [viewer, layers.runways]);
+    if (dsRef.current) dsRef.current.show = layers.runways;
+  }, [layers.runways]);
 }
