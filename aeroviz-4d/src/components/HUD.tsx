@@ -75,7 +75,7 @@ interface CamState {
 }
 
 export default function HUD() {
-  const { viewer } = useApp();
+  const { viewer, setSelectedFlightId } = useApp();
   const [cam, setCam] = useState<CamState | null>(null);
   const lastUpdateRef = useRef<number>(0);
 
@@ -168,6 +168,8 @@ export default function HUD() {
   // Fly back to the airport at the same angle used on startup.
   function resetView() {
     if (!viewer) return;
+    viewer.trackedEntity = undefined;  // stop following any plane
+    setSelectedFlightId(null);         // clear the table selection
     viewer.camera.flyToBoundingSphere(
       new Cesium.BoundingSphere(
         Cesium.Cartesian3.fromDegrees(DEFAULT_AIRPORT.lon, DEFAULT_AIRPORT.lat, 0),
