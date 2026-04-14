@@ -13,6 +13,7 @@
 
 import CesiumViewerComponent from "./components/CesiumViewer";
 import ControlPanel from "./components/ControlPanel";
+import HUD from "./components/HUD";
 import FlightTable from "./components/FlightTable";
 import { useCzmlLoader } from "./hooks/useCzmlLoader";
 
@@ -29,6 +30,7 @@ export default function App() {
       {/* Layer 1: overlay grid — panels anchored to corners, clicks pass through */}
       <div className="cesium-overlay-container">
         <ControlPanel />
+        <HUD />
         <FlightTable flightIds={flightIds} />
       </div>
     </>

@@ -77,19 +77,154 @@
   cursor: pointer;
 }
 
-/* ── HUD (camera info overlay) ───────────────────────────────────────────── */
+/* ── HUD (camera info + controls overlay) ────────────────────────────────── */
 .hud {
   grid-area: hud;
   align-self: start;
   justify-self: end;
   pointer-events: auto;
-  background: rgba(20, 24, 35, 0.7);
-  color: #8ab4e8;
-  padding: 8px 14px;
-  border-radius: 6px;
-  font-family: "Courier New", monospace;
+  background: rgba(20, 24, 35, 0.88);
+  backdrop-filter: blur(6px);
+  color: #c8d8ec;
+  border-radius: 8px;
+  padding: 12px 14px;
+  width: 210px;
+  font-family: "Inter", "Segoe UI", sans-serif;
   font-size: 12px;
-  line-height: 1.6;
+  user-select: none;
+}
+
+/* Title */
+.hud-title {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #7eb8f7;
+}
+
+/* Section wrapper + label */
+.hud-section       { margin-bottom: 8px; }
+.hud-section-label {
+  margin: 0 0 5px;
+  font-size: 10px;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8898aa;
+}
+
+/* Compass row: [◁] [svg + hdg value] [▷] */
+.hud-compass-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.hud-compass-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+}
+.hud-compass-svg { display: block; }
+.hud-hdg-value {
+  font-family: "Courier New", monospace;
+  font-size: 14px;
+  font-weight: 700;
+  color: #7eb8f7;
+  letter-spacing: 0.1em;
+  line-height: 1;
+}
+
+/* Pitch & altitude control rows: [▲/−] [value] [▼/+] */
+.hud-ctrl-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.hud-ctrl-value {
+  flex: 1;
+  text-align: center;
+  font-family: "Courier New", monospace;
+  font-size: 13px;
+  color: #c8d8ec;
+}
+.hud-alt-value { color: #7eb8f7; font-weight: 600; }
+
+/* Buttons */
+.hud-btn {
+  background: #1e2840;
+  border: 1px solid #3a4a6a;
+  color: #c8d8ec;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  line-height: 1;
+  font-family: inherit;
+}
+.hud-btn:hover  { background: #2a3f6a; border-color: #5a7ab8; }
+.hud-btn:active { background: #1a5fb4; }
+
+/* Arrow buttons (tall to align with compass SVG) */
+.hud-arrow-btn {
+  width: 26px;
+  height: 72px;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+/* Small square buttons for pitch / zoom */
+.hud-sm-btn {
+  width: 26px;
+  height: 26px;
+  font-size: 14px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+/* Full-width reset button */
+.hud-reset-btn {
+  width: 100%;
+  padding: 6px 0;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-align: center;
+  justify-content: center;
+}
+
+/* Divider between controls and position readout */
+.hud-divider {
+  border: none;
+  border-top: 1px solid #2a3550;
+  margin: 8px 0;
+}
+
+/* Lat / lon readout */
+.hud-readout       { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }
+.hud-readout-row   { display: flex; align-items: center; gap: 6px; }
+.hud-readout-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8898aa;
+  width: 26px;
+  flex-shrink: 0;
+}
+.hud-readout-val {
+  font-family: "Courier New", monospace;
+  font-size: 11px;
+  color: #a0b8d0;
 }
 
 /* ── Flight table ─────────────────────────────────────────────────────────── */
