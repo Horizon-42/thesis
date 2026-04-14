@@ -9,7 +9,7 @@
  * so the display stays live without hammering React's reconciler.
  */
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { DEFAULT_AIRPORT } from "../hooks/useCesiumViewer";
@@ -111,22 +111,26 @@ export default function HUD() {
   }, [viewer]);
 
   // ── Camera controls ──────────────────────────────────────────────────────
-  const rotateHeading = useCallback((deltaDeg: number) => {
+  function rotateHeading(deltaDeg: number) {
     if (!viewer) return;
     const c = viewer.camera;
-    c.setView({
+    c.flyTo({
+      destination: c.position.clone(),
       orientation: {
         heading: c.heading + Cesium.Math.toRadians(deltaDeg),
         pitch:   c.pitch,
         roll:    c.roll,
       },
+      duration: 0.35,
+      easingFunction: Cesium.EasingFunction.CUBIC_OUT,
     });
-  }, [viewer]);
+  }
 
-  const adjustPitch = useCallback((deltaDeg: number) => {
+  function adjustPitch(deltaDeg: number) {
     if (!viewer) return;
     const c = viewer.camera;
-    c.setView({
+    c.flyTo({
+      destination: c.position.clone(),
       orientation: {
         heading: c.heading,
         pitch: Cesium.Math.clamp(
@@ -136,20 +140,33 @@ export default function HUD() {
         ),
         roll: c.roll,
       },
+      duration: 0.35,
+      easingFunction: Cesium.EasingFunction.CUBIC_OUT,
     });
-  }, [viewer]);
+  }
 
   // Zoom proportionally to current altitude so each click feels consistent
   // at any scale (100 m minimum to avoid floating-point weirdness).
-  const zoom = useCallback((dir: "in" | "out") => {
+  function zoom(dir: "in" | "out") {
     if (!viewer) return;
-    const pos = Cesium.Cartographic.fromCartesian(viewer.camera.position);
-    const amount = Math.max(100, pos.height * 0.35);
-    dir === "in" ? viewer.camera.zoomIn(amount) : viewer.camera.zoomOut(amount);
-  }, [viewer]);
+    const c = viewer.camera;
+    const pos = Cesium.Cartographic.fromCartesian(c.position);
+    const amount = Math.max(100, pos.height * 0.35) * (dir === "in" ? 1 : -1);
+    const newPosition = Cesium.Cartesian3.add(
+      c.position,
+      Cesium.Cartesian3.multiplyByScalar(c.direction, amount, new Cesium.Cartesian3()),
+      new Cesium.Cartesian3(),
+    );
+    c.flyTo({
+      destination: newPosition,
+      orientation: { heading: c.heading, pitch: c.pitch, roll: c.roll },
+      duration: 0.35,
+      easingFunction: Cesium.EasingFunction.CUBIC_OUT,
+    });
+  }
 
   // Fly back to the airport at the same angle used on startup.
-  const resetView = useCallback(() => {
+  function resetView() {
     if (!viewer) return;
     viewer.camera.flyToBoundingSphere(
       new Cesium.BoundingSphere(
@@ -165,7 +182,7 @@ export default function HUD() {
         ),
       },
     );
-  }, [viewer]);
+  }
 
   // ── Formatting helpers ────────────────────────────────────────────────────
   function fmtAlt(m: number): string {
