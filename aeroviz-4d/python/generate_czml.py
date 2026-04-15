@@ -23,6 +23,7 @@ Input JSON format (when using --input):
 """
 
 import json
+import math
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,9 @@ from typing import Any
 OUTPUT_DIR = Path(__file__).parent.parent / "public" / "data"
 DEFAULT_OUTPUT = OUTPUT_DIR / "trajectories.czml"
 
+# Default input: real OpenSky data downloaded by opensky_cylw/fetch_cylw_opensky.py
+DEFAULT_INPUT = Path(__file__).parent.parent.parent / "opensky_cylw" / "outputs" / "cylw_czml_input_20260405T223356Z.json"
+
 # Colour palette for trail polylines (RGBA 0-255)
 TRAIL_COLORS = [
     (255, 140,   0, 200),   # orange
@@ -40,6 +44,180 @@ TRAIL_COLORS = [
     (255,  20, 147, 200),   # deep pink
     (138,  43, 226, 200),   # blue violet
 ]
+
+
+# ── Velocity / orientation math ───────────────────────────────────────────────
+# All helpers are pure math — no external dependencies beyond the stdlib.
+
+_EARTH_RADIUS_M = 6_371_000  # mean Earth radius in metres
+
+
+def _great_circle_bearing(
+    lon1_deg: float, lat1_deg: float,
+    lon2_deg: float, lat2_deg: float,
+) -> float:
+    """
+    Initial bearing from point 1 to point 2 on a sphere.
+
+    Returns radians, 0 = North, positive = clockwise (East).
+    """
+    lon1, lat1 = math.radians(lon1_deg), math.radians(lat1_deg)
+    lon2, lat2 = math.radians(lon2_deg), math.radians(lat2_deg)
+    dlon = lon2 - lon1
+    y = math.sin(dlon) * math.cos(lat2)
+    x = (math.cos(lat1) * math.sin(lat2)
+         - math.sin(lat1) * math.cos(lat2) * math.cos(dlon))
+    return math.atan2(y, x)
+
+
+def _haversine_distance(
+    lon1_deg: float, lat1_deg: float,
+    lon2_deg: float, lat2_deg: float,
+) -> float:
+    """Great-circle distance between two points, in metres."""
+    lon1, lat1 = math.radians(lon1_deg), math.radians(lat1_deg)
+    lon2, lat2 = math.radians(lon2_deg), math.radians(lat2_deg)
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = (math.sin(dlat / 2) ** 2
+         + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2)
+    return 2 * _EARTH_RADIUS_M * math.asin(math.sqrt(a))
+
+
+def compute_velocity_orientation(
+    waypoints: list[tuple[float, float, float, float]],
+) -> list[tuple[float, float]]:
+    """
+    Derive heading and pitch at each waypoint from the 3-D velocity vector.
+
+    Parameters
+    ----------
+    waypoints : list of (offset_sec, lon_deg, lat_deg, alt_m)
+
+    Returns
+    -------
+    list of (heading_rad, pitch_rad) per waypoint.
+    heading: 0 = North, positive = clockwise (East).
+    pitch:   positive = climbing.
+    """
+    n = len(waypoints)
+    if n == 0:
+        return []
+    if n == 1:
+        return [(0.0, 0.0)]
+
+    result: list[tuple[float, float]] = []
+    for idx in range(n):
+        # Forward difference for all but last; backward for last.
+        if idx < n - 1:
+            i, j = idx, idx + 1
+        else:
+            i, j = idx - 1, idx
+
+        _, lon1, lat1, alt1 = waypoints[i]
+        _, lon2, lat2, alt2 = waypoints[j]
+
+        heading = _great_circle_bearing(lon1, lat1, lon2, lat2)
+        horiz = _haversine_distance(lon1, lat1, lon2, lat2)
+        pitch = math.atan2(alt2 - alt1, horiz) if horiz > 1e-6 else 0.0
+
+        result.append((heading, pitch))
+    return result
+
+
+# ── Matrix / quaternion helpers ──────────────────────────────────────────────
+
+def _mat3_multiply(
+    a: list[list[float]], b: list[list[float]],
+) -> list[list[float]]:
+    """Multiply two 3×3 row-major matrices."""
+    return [
+        [sum(a[i][k] * b[k][j] for k in range(3)) for j in range(3)]
+        for i in range(3)
+    ]
+
+
+def _mat3_to_quaternion(m: list[list[float]]) -> tuple[float, float, float, float]:
+    """
+    Convert a 3×3 rotation matrix to a unit quaternion (x, y, z, w).
+
+    Uses Shepperd's method for numerical stability.
+    """
+    trace = m[0][0] + m[1][1] + m[2][2]
+    if trace > 0:
+        s = 0.5 / math.sqrt(trace + 1.0)
+        w = 0.25 / s
+        x = (m[2][1] - m[1][2]) * s
+        y = (m[0][2] - m[2][0]) * s
+        z = (m[1][0] - m[0][1]) * s
+    elif m[0][0] > m[1][1] and m[0][0] > m[2][2]:
+        s = 2.0 * math.sqrt(1.0 + m[0][0] - m[1][1] - m[2][2])
+        w = (m[2][1] - m[1][2]) / s
+        x = 0.25 * s
+        y = (m[0][1] + m[1][0]) / s
+        z = (m[0][2] + m[2][0]) / s
+    elif m[1][1] > m[2][2]:
+        s = 2.0 * math.sqrt(1.0 + m[1][1] - m[0][0] - m[2][2])
+        w = (m[0][2] - m[2][0]) / s
+        x = (m[0][1] + m[1][0]) / s
+        y = 0.25 * s
+        z = (m[1][2] + m[2][1]) / s
+    else:
+        s = 2.0 * math.sqrt(1.0 + m[2][2] - m[0][0] - m[1][1])
+        w = (m[1][0] - m[0][1]) / s
+        x = (m[0][2] + m[2][0]) / s
+        y = (m[1][2] + m[2][1]) / s
+        z = 0.25 * s
+    return (x, y, z, w)
+
+
+def _hpr_to_ecef_quaternion(
+    heading: float, pitch: float,
+    lon_deg: float, lat_deg: float,
+) -> tuple[float, float, float, float]:
+    """
+    Compute an ECEF orientation quaternion for an aircraft at (lon, lat)
+    with given heading and pitch (roll = 0, level flight).
+
+    Coordinate conventions
+    ----------------------
+    ENU local frame: X = East, Y = North, Z = Up.
+    Model axes:      +X = forward (nose), +Y = left, +Z = up.
+    heading:         0 = North, positive = clockwise (toward East).
+    pitch:           positive = climbing.
+
+    Steps
+    -----
+    1. Build a model-to-ENU rotation from heading and pitch.
+    2. Multiply by the ENU-to-ECEF rotation at (lon, lat).
+    3. Convert the combined matrix to a unit quaternion.
+    """
+    lon = math.radians(lon_deg)
+    lat = math.radians(lat_deg)
+    ch, sh = math.cos(heading), math.sin(heading)
+    cp, sp = math.cos(pitch), math.sin(pitch)
+
+    # Model-to-ENU  (model +X = forward/nose → heading direction in ENU)
+    #   Column 0: model +X (forward) → ENU
+    #   Column 1: model +Y (left)    → ENU
+    #   Column 2: model +Z (up)      → ENU
+    m_model = [
+        [ sh * cp,  -ch,  -sh * sp],
+        [ ch * cp,   sh,  -ch * sp],
+        [ sp,        0.0,  cp     ],
+    ]
+
+    # ENU-to-ECEF at (lon, lat)
+    slon, clon = math.sin(lon), math.cos(lon)
+    slat, clat = math.sin(lat), math.cos(lat)
+    m_enu = [
+        [-slon,  -slat * clon,  clat * clon],
+        [ clon,  -slat * slon,  clat * slon],
+        [ 0.0,    clat,         slat       ],
+    ]
+
+    m_ecef = _mat3_multiply(m_enu, m_model)
+    return _mat3_to_quaternion(m_ecef)
 
 
 # ── CZML packet builders ──────────────────────────────────────────────────────
@@ -113,6 +291,32 @@ def build_position_property(
     }
 
 
+def build_orientation_property(
+    epoch_dt: datetime,
+    waypoints: list[tuple[float, float, float, float]],
+) -> dict[str, Any]:
+    """
+    Build the CZML ``orientation`` property with explicit unitQuaternion
+    samples derived from the 3-D velocity vector between consecutive
+    waypoints.
+
+    Each sample is [offset_sec, x, y, z, w] in CZML's ``unitQuaternion``
+    flat array.  Cesium interpolates between samples using SLERP.
+    """
+    orientations = compute_velocity_orientation(waypoints)
+
+    flat: list[float] = []
+    for (offset, lon, lat, _alt), (heading, pitch) in zip(waypoints, orientations):
+        x, y, z, w = _hpr_to_ecef_quaternion(heading, pitch, lon, lat)
+        flat.extend([offset, x, y, z, w])
+
+    return {
+        "epoch": epoch_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "unitQuaternion": flat,
+        "interpolationAlgorithm": "LINEAR",
+    }
+
+
 def build_flight_packet(
     flight_id: str,
     callsign: str,
@@ -145,7 +349,7 @@ def build_flight_packet(
             "runAnimations": True,
         },
         "position": build_position_property(epoch_dt, waypoints),
-        "orientation": {"velocityReference": f"#{flight_id}.position"},
+        "orientation": build_orientation_property(epoch_dt, waypoints),
         "path": {
             "show": True,
             "leadTime": 0,
@@ -211,60 +415,25 @@ def build_czml(
     return [doc, *entity_packets]
 
 
-# ── Mock data (for front-end integration testing) ─────────────────────────────
-
-MOCK_FLIGHTS = [
-    {
-        "id": "UAL123",
-        "callsign": "United 123",
-        "type": "B738",
-        # Each waypoint: [offset_seconds, longitude, latitude, altitude_metres]
-        # This represents a straight inbound approach to CYLW runway 34
-        "waypoints": [
-            [0,    -119.10, 50.20, 5500],
-            [180,  -119.20, 50.10, 4800],
-            [360,  -119.30, 50.00, 4000],
-            [540,  -119.36, 49.97, 3200],
-            [660,  -119.38, 49.96, 2500],
-            [780,  -119.385, 49.957, 1800],
-            [900,  -119.390, 49.955, 600],
-        ],
-    },
-    {
-        "id": "WJA456",
-        "callsign": "WestJet 456",
-        "type": "B737",
-        # This flight is delayed by ~240 s (4 min) to maintain separation
-        "waypoints": [
-            [0,    -119.05, 50.30, 6000],
-            [240,  -119.15, 50.15, 5200],
-            [480,  -119.28, 50.02, 4200],
-            [720,  -119.35, 49.98, 3300],
-            [900,  -119.37, 49.96, 2600],
-            [1020, -119.382, 49.958, 1900],
-            [1140, -119.390, 49.955, 600],
-        ],
-    },
-]
-
-
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="Generate CZML trajectory file")
-    parser.add_argument("--input",  default=None, help="JSON file with flight data")
+    parser.add_argument("--input",  default=str(DEFAULT_INPUT), help="JSON file with flight data")
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT), help="Output CZML path")
     parser.add_argument("--multiplier", type=int, default=60, help="Clock speed multiplier")
     args = parser.parse_args()
 
-    if args.input:
-        with open(args.input) as f:
-            flights = json.load(f)
-    else:
-        print("No --input provided; using built-in mock data.")
-        flights = MOCK_FLIGHTS
+    input_path = Path(args.input)
+    if not input_path.exists():
+        print(f"✗ Input file not found: {input_path}")
+        print("  Run opensky_cylw/fetch_cylw_opensky.py first to download real flight data.")
+        raise SystemExit(1)
+
+    with open(input_path) as f:
+        flights = json.load(f)
 
     start_dt = datetime(2026, 4, 1, 8, 0, 0, tzinfo=timezone.utc)
     czml = build_czml(flights, start_dt, args.multiplier)
@@ -274,6 +443,7 @@ def main() -> None:
     output_path.write_text(json.dumps(czml, indent=2, ensure_ascii=False))
 
     print(f"✓ Generated CZML for {len(flights)} flight(s)")
+    print(f"  Input:  {input_path}")
     print(f"  Output: {output_path}")
 
 

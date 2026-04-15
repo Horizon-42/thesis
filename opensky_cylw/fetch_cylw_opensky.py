@@ -18,12 +18,11 @@ Main capabilities
 3) Writes:
    - raw OpenSky payloads (debug)
    - normalized CZML input JSON for aeroviz-4d
-4) Optional: run `generate_czml.py` directly.
 
 Usage examples
 --------------
 # Live data around CYYC (anonymous)
-python fetch_cylw_opensky.py --mode live --to-czml
+python fetch_cylw_opensky.py --mode live
 
 # Historical data (requires OAuth client_id/client_secret)
 python fetch_cylw_opensky.py \
@@ -31,8 +30,7 @@ python fetch_cylw_opensky.py \
   --begin "2026-04-05T00:00:00Z" \
   --end   "2026-04-06T00:00:00Z" \
   --client-id "$OPENSKY_CLIENT_ID" \
-  --client-secret "$OPENSKY_CLIENT_SECRET" \
-  --to-czml
+    --client-secret "$OPENSKY_CLIENT_SECRET"
 """
 
 from __future__ import annotations
@@ -40,10 +38,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import math
 import os
-import subprocess
-import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
@@ -52,6 +47,8 @@ from typing import Any
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
+
+from trajectory_normalization import convert_tracks_to_czml_input
 
 
 API_ROOT = "https://opensky-network.org/api"
@@ -138,21 +135,6 @@ def parse_time_to_unix(value: str) -> int:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return int(dt.timestamp())
-
-
-def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    r = 6371.0
-    phi1 = math.radians(lat1)
-    phi2 = math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlambda = math.radians(lon2 - lon1)
-    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
-    return 2 * r * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-
-def sanitize_callsign(value: str | None, fallback: str) -> str:
-    text = (value or "").strip()
-    return text if text else fallback.upper()
 
 
 def default_outputs_root(script_path: Path) -> Path:
@@ -336,253 +318,6 @@ def fetch_historical_tracks(
     return arrivals, departures, tracks
 
 
-def track_to_czml_flight(
-    track: dict[str, Any],
-    *,
-    airport_lat: float,
-    airport_lon: float,
-    airport_elev_m: float,
-    match_radius_km: float,
-    require_landing: bool,
-    landing_radius_km: float,
-    max_end_distance_km: float,
-    altitude_mode: str,
-    min_ground_samples: int,
-    max_altitude_bias_m: float,
-    approach_alt_buffer_m: float,
-    approach_window_min: int,
-    include_ground: bool,
-) -> dict[str, Any] | None:
-    path = track.get("path") or []
-    if not path:
-        return None
-
-    parsed: list[tuple[int, float, float, float, bool, float]] = []
-    for wp in path:
-        if not wp or len(wp) < 6:
-            continue
-        t, lat, lon, alt_m, _trk, on_ground = wp
-        if t is None or lat is None or lon is None or alt_m is None:
-            continue
-        alt = float(alt_m)
-        if math.isnan(alt):
-            continue
-        dist_km = haversine_km(float(lat), float(lon), airport_lat, airport_lon)
-
-        parsed.append((int(t), float(lon), float(lat), alt, bool(on_ground), dist_km))
-
-    if len(parsed) < 2:
-        return None
-
-    parsed.sort(key=lambda x: x[0])
-
-    bias_m = 0.0
-    bias_applied = False
-    ground_samples = 0
-    if altitude_mode == "touchdown-bias":
-        touchdown_alts = [
-            alt
-            for _t, _lon, _lat, alt, gnd, d in parsed
-            if gnd and d <= landing_radius_km
-        ]
-        ground_samples = len(touchdown_alts)
-        if ground_samples >= min_ground_samples:
-            touchdown_alts_sorted = sorted(touchdown_alts)
-            median_alt = touchdown_alts_sorted[ground_samples // 2]
-            candidate_bias = airport_elev_m - median_alt
-            if abs(candidate_bias) <= max_altitude_bias_m:
-                bias_m = candidate_bias
-                bias_applied = True
-
-    if bias_applied:
-        parsed = [
-            (t, lon, lat, alt + bias_m, gnd, d)
-            for t, lon, lat, alt, gnd, d in parsed
-        ]
-
-    # Airport relevance: at least one point near target airport.
-    min_dist = min(
-        d
-        for _t, _lon, _lat, _alt, _gnd, d in parsed
-    )
-    if min_dist > match_radius_km:
-        return None
-
-    closest_idx = min(range(len(parsed)), key=lambda i: parsed[i][5])
-    closest_dist_km = parsed[closest_idx][5]
-    if closest_dist_km > max_end_distance_km:
-        return None
-
-    landing_reference_t: int | None = None
-
-    if require_landing:
-        touchdown_times = [
-            t
-            for t, _lon, _lat, _alt, gnd, d in parsed
-            if gnd and d <= landing_radius_km
-        ]
-
-        landing_ok = False
-
-        if touchdown_times:
-            first_touchdown_t = min(touchdown_times)
-            airborne_before = any((not gnd) and t < first_touchdown_t for t, _lon, _lat, _alt, gnd, _d in parsed)
-            landing_ok = airborne_before
-            if landing_ok:
-                landing_reference_t = first_touchdown_t
-
-        if not landing_ok:
-            low_alt_threshold = airport_elev_m + approach_alt_buffer_m
-            near_low_points = [
-                (t, alt)
-                for t, _lon, _lat, alt, _gnd, d in parsed
-                if d <= landing_radius_km and alt <= low_alt_threshold
-            ]
-            if near_low_points:
-                first_near_low_t = min(t for t, _alt in near_low_points)
-                had_higher_before = any(
-                    t < first_near_low_t and alt >= low_alt_threshold + 250.0
-                    for t, _lon, _lat, alt, _gnd, _d in parsed
-                )
-                landing_ok = had_higher_before
-                if landing_ok:
-                    landing_reference_t = parsed[closest_idx][0]
-
-        if not landing_ok:
-            return None
-
-    if landing_reference_t is None:
-        # Fallback: use closest point to airport as approach anchor.
-        landing_reference_t = parsed[closest_idx][0]
-
-    # Keep only the final approach window before landing/closest approach.
-    windowed = parsed
-    if approach_window_min > 0:
-        window_sec = approach_window_min * 60
-        window_start_t = landing_reference_t - window_sec
-        windowed = [row for row in parsed if window_start_t <= row[0] <= landing_reference_t]
-
-        # If sampling is sparse, keep a bounded local segment near closest approach.
-        if len(windowed) < 2:
-            local_start = max(0, closest_idx - 40)
-            local_rows = parsed[local_start : closest_idx + 1]
-            windowed = [
-                row for row in local_rows
-                if (landing_reference_t - window_sec) <= row[0] <= landing_reference_t
-            ]
-
-        if len(windowed) < 2:
-            return None
-
-    # Convert to CZML waypoints and optionally remove ground points.
-    waypoints_abs: list[tuple[int, float, float, float]] = []
-    for t, lon, lat, alt, gnd, _dist_km in windowed:
-        if not include_ground and gnd:
-            continue
-        waypoints_abs.append((t, lon, lat, alt))
-
-    if len(waypoints_abs) < 2:
-        return None
-
-    waypoints_abs.sort(key=lambda x: x[0])
-    t0 = waypoints_abs[0][0]
-    rel = [[t - t0, lon, lat, alt] for t, lon, lat, alt in waypoints_abs]
-
-    icao24 = (track.get("icao24") or "unknown").lower()
-    callsign = sanitize_callsign(track.get("callsign"), fallback=icao24)
-    flight_id = callsign.replace(" ", "")[:16] or icao24
-
-    return {
-        "id": flight_id,
-        "callsign": callsign,
-        "type": "UNK",
-        "altitude_source": "opensky_tracks_all_baro_altitude_m",
-        "altitude_correction_mode": altitude_mode,
-        "altitude_bias_m": round(bias_m, 3),
-        "altitude_bias_applied": bias_applied,
-        "altitude_ground_samples": ground_samples,
-        "waypoints": rel,
-    }
-
-
-def convert_tracks_to_czml_input(
-    tracks: list[dict[str, Any]],
-    *,
-    airport_lat: float,
-    airport_lon: float,
-    airport_elev_m: float,
-    match_radius_km: float,
-    require_landing: bool,
-    landing_radius_km: float,
-    max_end_distance_km: float,
-    altitude_mode: str,
-    min_ground_samples: int,
-    max_altitude_bias_m: float,
-    approach_alt_buffer_m: float,
-    approach_window_min: int,
-    include_ground: bool,
-    limit_flights: int,
-) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
-    used_ids: set[str] = set()
-
-    for track in tracks:
-        item = track_to_czml_flight(
-            track,
-            airport_lat=airport_lat,
-            airport_lon=airport_lon,
-            airport_elev_m=airport_elev_m,
-            match_radius_km=match_radius_km,
-            require_landing=require_landing,
-            landing_radius_km=landing_radius_km,
-            max_end_distance_km=max_end_distance_km,
-            altitude_mode=altitude_mode,
-            min_ground_samples=min_ground_samples,
-            max_altitude_bias_m=max_altitude_bias_m,
-            approach_alt_buffer_m=approach_alt_buffer_m,
-            approach_window_min=approach_window_min,
-            include_ground=include_ground,
-        )
-        if not item:
-            continue
-
-        # Avoid duplicate IDs.
-        base = item["id"]
-        if base in used_ids:
-            suffix = 2
-            while f"{base}_{suffix}" in used_ids:
-                suffix += 1
-            item["id"] = f"{base}_{suffix}"
-        used_ids.add(item["id"])
-
-        out.append(item)
-        if len(out) >= limit_flights:
-            break
-
-    return out
-
-
-def run_generate_czml(
-    *,
-    aeroviz_root: Path,
-    czml_input_path: Path,
-    czml_output_path: Path,
-) -> None:
-    generator = aeroviz_root / "python" / "generate_czml.py"
-    if not generator.exists():
-        raise RuntimeError(f"Cannot find generator script: {generator}")
-
-    cmd = [
-        sys.executable,
-        str(generator),
-        "--input",
-        str(czml_input_path),
-        "--output",
-        str(czml_output_path),
-    ]
-    subprocess.run(cmd, check=True)
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Download recent airport trajectories from OpenSky")
 
@@ -603,9 +338,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-end-distance-km", type=float, default=2.5, help="Final approach anchor point must be within this distance of airport")
     parser.add_argument(
         "--altitude-mode",
-        choices=["raw", "touchdown-bias"],
+        choices=["raw", "touchdown-bias", "approach-bias", "auto-bias"],
         default="raw",
-        help="Altitude handling: raw keeps OpenSky barometric altitude; touchdown-bias applies a constant offset estimated from near-runway on-ground points",
+        help=(
+            "Altitude handling: raw keeps OpenSky barometric altitude; "
+            "touchdown-bias estimates a constant offset from near-runway on-ground points; "
+            "approach-bias estimates from low-altitude samples near runway; "
+            "auto-bias tries touchdown-bias first, then approach-bias"
+        ),
     )
     parser.add_argument("--min-ground-samples", type=int, default=2, help="Minimum near-runway on-ground points needed for touchdown-bias estimation")
     parser.add_argument("--max-altitude-bias-m", type=float, default=400.0, help="Reject touchdown-bias estimates whose absolute value exceeds this threshold")
@@ -620,7 +360,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--exclude-ground", action="store_true", help="Exclude on-ground points from exported trajectory")
 
     parser.add_argument("--output-root", default=None, help="Folder for outputs (default: ./outputs next to script)")
-    parser.add_argument("--to-czml", action="store_true", help="Run aeroviz-4d/python/generate_czml.py after download")
     parser.add_argument("--aeroviz-root", default=None, help="Path to aeroviz-4d folder")
 
     return parser.parse_args()
@@ -807,15 +546,6 @@ def main() -> None:
     print(f"[OpenSky] flights exported for CZML: {len(flights)}")
     print(f"[OpenSky] raw output: {raw_path}")
     print(f"[OpenSky] czml input: {czml_input_path}")
-
-    if args.to_czml:
-        czml_output_path = aeroviz_root / "public" / "data" / "trajectories.czml"
-        run_generate_czml(
-            aeroviz_root=aeroviz_root,
-            czml_input_path=czml_input_path,
-            czml_output_path=czml_output_path,
-        )
-        print(f"[OpenSky] generated CZML: {czml_output_path}")
 
 
 if __name__ == "__main__":
