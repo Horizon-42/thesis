@@ -13,6 +13,7 @@ stays low-coupling when fetch options evolve.
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -47,7 +48,12 @@ def _latest_matching_file(folder: Path, pattern: str, before: set[Path]) -> Path
 
 def parse_args() -> tuple[argparse.Namespace, list[str]]:
     parser = argparse.ArgumentParser(
-        description="Run OpenSky fetch and CZML generation in one command"
+        description="Run fetch/normalization and CZML generation in one command",
+        epilog=(
+            "Any unknown arguments are forwarded to opensky_cylw/fetch_cylw_opensky.py.\n"
+            "Common forwarded options include: --mode, --allow-partial, --approach-window-min, --altitude-mode."
+        ),
+        formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
         "--airport",
@@ -74,6 +80,20 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
         type=int,
         default=None,
         help="Optional CZML clock multiplier passed to generate_czml.py",
+    )
+    parser.add_argument(
+        "--input-json",
+        default=None,
+        help=(
+            "Existing JSON to bypass live fetch. Accepts either:\n"
+            "- *_raw_*.json: runs normalization/conversion then CZML generation\n"
+            "- *_czml_input_*.json: skips straight to CZML generation"
+        ),
+    )
+    parser.add_argument(
+        "--disable-normalization",
+        action="store_true",
+        help="Forwarded to fetch stage: export raw track waypoints without normalization/filtering",
     )
 
     # Everything not recognized here is forwarded to fetch_cylw_opensky.py.
@@ -104,30 +124,83 @@ def main() -> None:
 
     output_root.mkdir(parents=True, exist_ok=True)
 
-    fetch_cmd = [sys.executable, str(fetch_script)]
-    if not _has_flag(fetch_passthrough, "--airport"):
-        fetch_cmd.extend(["--airport", args.airport])
-    if not _has_flag(fetch_passthrough, "--output-root"):
-        fetch_cmd.extend(["--output-root", str(output_root)])
-    if not _has_flag(fetch_passthrough, "--aeroviz-root"):
-        fetch_cmd.extend(["--aeroviz-root", str(aeroviz_root)])
-    fetch_cmd.extend(fetch_passthrough)
+    czml_input_path: Path
+    effective_airport = args.airport.upper()
 
-    effective_airport = _extract_option(fetch_cmd, "--airport", args.airport).upper()
-    airport_tag = effective_airport.lower()
-    pattern = f"{airport_tag}_czml_input_*.json"
+    if args.input_json:
+        input_json_path = Path(args.input_json)
+        if not input_json_path.exists():
+            raise RuntimeError(f"Input JSON not found: {input_json_path}")
 
-    existing = {p.resolve() for p in output_root.glob(pattern)}
+        loaded = json.loads(input_json_path.read_text(encoding="utf-8"))
 
-    print("[Pipeline] Running fetch stage...")
-    subprocess.run(fetch_cmd, check=True)
+        if isinstance(loaded, list):
+            # Already in CZML-input schema, so go directly to generator.
+            czml_input_path = input_json_path
+            print("[Pipeline] Fetch stage bypassed: using existing CZML-input JSON.")
+        elif isinstance(loaded, dict) and isinstance(loaded.get("tracks"), list):
+            # Reuse existing raw payload and run conversion/normalization only.
+            effective_airport = str(loaded.get("airport") or args.airport).upper()
+            airport_tag = effective_airport.lower()
+            pattern = f"{airport_tag}_czml_input_*.json"
+            existing = {p.resolve() for p in output_root.glob(pattern)}
 
-    czml_input_path = _latest_matching_file(output_root, pattern, existing)
-    if not czml_input_path:
-        raise RuntimeError(
-            f"No CZML input JSON produced for airport {effective_airport}. "
-            f"Checked pattern {pattern} under {output_root}."
-        )
+            fetch_cmd = [
+                sys.executable,
+                str(fetch_script),
+                "--input-raw-json",
+                str(input_json_path),
+            ]
+            if not _has_flag(fetch_passthrough, "--airport"):
+                fetch_cmd.extend(["--airport", effective_airport])
+            if not _has_flag(fetch_passthrough, "--output-root"):
+                fetch_cmd.extend(["--output-root", str(output_root)])
+            if not _has_flag(fetch_passthrough, "--aeroviz-root"):
+                fetch_cmd.extend(["--aeroviz-root", str(aeroviz_root)])
+            if args.disable_normalization and not _has_flag(fetch_passthrough, "--disable-normalization"):
+                fetch_cmd.append("--disable-normalization")
+            fetch_cmd.extend(fetch_passthrough)
+
+            print("[Pipeline] Running normalization stage from existing raw JSON...")
+            subprocess.run(fetch_cmd, check=True)
+
+            czml_input_path = _latest_matching_file(output_root, pattern, existing)
+            if not czml_input_path:
+                raise RuntimeError(
+                    f"No CZML input JSON produced for airport {effective_airport}. "
+                    f"Checked pattern {pattern} under {output_root}."
+                )
+        else:
+            raise RuntimeError(
+                "--input-json must be either a raw payload object (with key 'tracks') "
+                "or a CZML-input list of flight records."
+            )
+    else:
+        fetch_cmd = [sys.executable, str(fetch_script)]
+        if not _has_flag(fetch_passthrough, "--airport"):
+            fetch_cmd.extend(["--airport", args.airport])
+        if not _has_flag(fetch_passthrough, "--output-root"):
+            fetch_cmd.extend(["--output-root", str(output_root)])
+        if not _has_flag(fetch_passthrough, "--aeroviz-root"):
+            fetch_cmd.extend(["--aeroviz-root", str(aeroviz_root)])
+        if args.disable_normalization and not _has_flag(fetch_passthrough, "--disable-normalization"):
+            fetch_cmd.append("--disable-normalization")
+        fetch_cmd.extend(fetch_passthrough)
+
+        effective_airport = _extract_option(fetch_cmd, "--airport", args.airport).upper()
+        airport_tag = effective_airport.lower()
+        pattern = f"{airport_tag}_czml_input_*.json"
+        existing = {p.resolve() for p in output_root.glob(pattern)}
+
+        print("[Pipeline] Running fetch stage...")
+        subprocess.run(fetch_cmd, check=True)
+
+        czml_input_path = _latest_matching_file(output_root, pattern, existing)
+        if not czml_input_path:
+            raise RuntimeError(
+                f"No CZML input JSON produced for airport {effective_airport}. "
+                f"Checked pattern {pattern} under {output_root}."
+            )
 
     generate_cmd = [
         sys.executable,

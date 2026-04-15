@@ -366,6 +366,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Bypass normalization/filtering and export raw OpenSky tracks directly to CZML input schema",
     )
+    parser.add_argument(
+        "--input-raw-json",
+        default=None,
+        help="Existing *_raw_*.json file; bypass network fetch and run conversion/normalization from its tracks",
+    )
 
     parser.add_argument("--output-root", default=None, help="Folder for outputs (default: ./outputs next to script)")
     parser.add_argument("--aeroviz-root", default=None, help="Path to aeroviz-4d folder")
@@ -378,28 +383,50 @@ def main() -> None:
     script_path = Path(__file__).resolve()
 
     aeroviz_root = Path(args.aeroviz_root) if args.aeroviz_root else default_aeroviz_root(script_path)
-    airport_lat, airport_lon, airport_elev_m = resolve_airport_profile(args.airport, aeroviz_root)
+
+    source_raw_path: Path | None = None
+    source_raw_payload: dict[str, Any] | None = None
+    selected_airport = args.airport.upper()
+
+    if args.input_raw_json:
+        source_raw_path = Path(args.input_raw_json)
+        if not source_raw_path.exists():
+            raise RuntimeError(f"Input raw JSON not found: {source_raw_path}")
+
+        loaded = json.loads(source_raw_path.read_text(encoding="utf-8"))
+        if not isinstance(loaded, dict):
+            raise RuntimeError("Input raw JSON must be an object with key 'tracks'")
+        if not isinstance(loaded.get("tracks"), list):
+            raise RuntimeError("Input raw JSON is missing a valid 'tracks' array")
+
+        source_raw_payload = loaded
+        selected_airport = str(loaded.get("airport") or selected_airport).upper()
+
+    airport_lat, airport_lon, airport_elev_m = resolve_airport_profile(selected_airport, aeroviz_root)
 
     output_root = Path(args.output_root) if args.output_root else default_outputs_root(script_path)
     output_root.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    airport_tag = args.airport.lower()
+    airport_tag = selected_airport.lower()
     raw_path = output_root / f"{airport_tag}_raw_{timestamp}.json"
     czml_input_path = output_root / f"{airport_tag}_czml_input_{timestamp}.json"
 
-    client = OpenSkyClient(
-        client_id=args.client_id,
-        client_secret=args.client_secret,
-    )
-
     mode = args.mode
-    if mode == "auto":
-        mode = "historical" if client.has_oauth else "live"
+    if source_raw_payload is not None:
+        mode = str(source_raw_payload.get("mode") or "offline")
+    else:
+        client = OpenSkyClient(
+            client_id=args.client_id,
+            client_secret=args.client_secret,
+        )
+
+        if mode == "auto":
+            mode = "historical" if client.has_oauth else "live"
 
     payload: dict[str, Any] = {
         "mode": mode,
-        "airport": args.airport.upper(),
+        "airport": selected_airport,
         "airport_center": {"lat": airport_lat, "lon": airport_lon},
         "airport_elevation_m": airport_elev_m,
         "altitude_mode": args.altitude_mode,
@@ -407,7 +434,27 @@ def main() -> None:
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
     }
 
-    if mode == "historical":
+    if source_raw_payload is not None:
+        tracks = source_raw_payload.get("tracks") or []
+        payload.update(
+            {
+                "source_raw_json": str(source_raw_path),
+                "tracks_count": len(tracks),
+                "tracks": tracks,
+            }
+        )
+        for key in (
+            "begin",
+            "end",
+            "flights_all_count",
+            "related_flights_count",
+            "arrivals_count",
+            "departures_count",
+            "bbox",
+        ):
+            if key in source_raw_payload:
+                payload[key] = source_raw_payload[key]
+    elif mode == "historical":
         if not client.has_oauth:
             raise RuntimeError(
                 "Historical mode requires OAuth credentials. Set OPENSKY_CLIENT_ID/OPENSKY_CLIENT_SECRET "
@@ -426,7 +473,7 @@ def main() -> None:
 
         arrivals, departures, tracks = fetch_historical_tracks(
             client,
-            airport=args.airport,
+            airport=selected_airport,
             begin=begin,
             end=end,
             max_tracks=args.max_tracks,
@@ -446,7 +493,7 @@ def main() -> None:
     else:
         flights_all, related_flights, tracks = fetch_recent_airport_tracks_anonymous(
             client,
-            airport=args.airport,
+            airport=selected_airport,
             window_hours=args.live_window_hours,
             max_tracks=args.max_tracks,
         )
@@ -562,6 +609,8 @@ def main() -> None:
     print(f"[OpenSky] flights exported for CZML: {len(flights)}")
     print(f"[OpenSky] raw output: {raw_path}")
     print(f"[OpenSky] czml input: {czml_input_path}")
+    if source_raw_path is not None:
+        print(f"[OpenSky] source raw input: {source_raw_path}")
 
 
 if __name__ == "__main__":

@@ -46,6 +46,13 @@ To run both stages in one command, use the root-level pipeline script:
   --mode live \
   --airport CYYC \
   --altitude-mode auto-bias
+
+# Reuse existing JSON and bypass live fetch:
+# 1) existing *_raw_*.json -> run normalization/conversion + generate
+# 2) existing *_czml_input_*.json -> run generate directly
+/Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
+  /Users/liudongxu/Desktop/studys/thesis/run_fetch_and_generate.py \
+  --input-json /Users/liudongxu/Desktop/studys/thesis/opensky_cylw/outputs/cyyc_raw_20260415T152417Z.json
 ```
 
 Altitude handling (research note):
