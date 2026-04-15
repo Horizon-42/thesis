@@ -31,6 +31,63 @@ def sanitize_callsign(value: str | None, fallback: str) -> str:
     return text if text else fallback.upper()
 
 
+def track_to_raw_czml_flight(
+    track: dict[str, Any],
+    *,
+    include_ground: bool,
+) -> dict[str, Any] | None:
+    """Convert one OpenSky track into a raw (non-normalized) flight record."""
+    path = track.get("path") or []
+    if not path:
+        return None
+
+    parsed: list[tuple[int, float, float, float, bool]] = []
+    for wp in path:
+        if not wp or len(wp) < 6:
+            continue
+        t, lat, lon, alt_m, _trk, on_ground = wp
+        if t is None or lat is None or lon is None or alt_m is None:
+            continue
+        alt = float(alt_m)
+        if math.isnan(alt):
+            continue
+        parsed.append((int(t), float(lon), float(lat), alt, bool(on_ground)))
+
+    if not parsed:
+        return None
+
+    parsed.sort(key=lambda x: x[0])
+
+    waypoints_abs: list[tuple[int, float, float, float]] = []
+    for t, lon, lat, alt, gnd in parsed:
+        if not include_ground and gnd:
+            continue
+        waypoints_abs.append((t, lon, lat, alt))
+
+    if not waypoints_abs:
+        return None
+
+    t0 = waypoints_abs[0][0]
+    rel = [[t - t0, lon, lat, alt] for t, lon, lat, alt in waypoints_abs]
+
+    icao24 = (track.get("icao24") or "unknown").lower()
+    callsign = sanitize_callsign(track.get("callsign"), fallback=icao24)
+    flight_id = callsign.replace(" ", "")[:16] or icao24
+
+    return {
+        "id": flight_id,
+        "callsign": callsign,
+        "type": "UNK",
+        "altitude_source": "opensky_tracks_all_baro_altitude_m",
+        "altitude_correction_mode": "raw-pass-through",
+        "altitude_bias_m": 0.0,
+        "altitude_bias_applied": False,
+        "altitude_bias_source": "none",
+        "altitude_bias_scope": "none",
+        "waypoints": rel,
+    }
+
+
 def track_to_czml_flight(
     track: dict[str, Any],
     *,
@@ -72,6 +129,31 @@ def track_to_czml_flight(
 
     parsed.sort(key=lambda x: x[0])
 
+    # Reject clearly non-physical trajectories (for example stale tracks with
+    # all sampled altitudes at 0 m and no meaningful vertical profile).
+    if max(row[3] for row in parsed) <= 1.0:
+        return None
+
+    def apply_uniform_altitude_bias(
+        rows: list[tuple[int, float, float, float, bool, float]],
+        bias: float,
+    ) -> list[tuple[int, float, float, float, bool, float]]:
+        """Apply one constant altitude shift to every waypoint in the track."""
+        if abs(bias) <= 1e-12:
+            return rows
+
+        shifted = [
+            (t, lon, lat, alt + bias, gnd, d)
+            for t, lon, lat, alt, gnd, d in rows
+        ]
+
+        # Invariant: correction must be uniform for all waypoints.
+        for src, dst in zip(rows, shifted):
+            delta = dst[3] - src[3]
+            if abs(delta - bias) > 1e-9:
+                raise RuntimeError("Non-uniform altitude correction detected")
+        return shifted
+
     def median(values: list[float]) -> float:
         ordered = sorted(values)
         n = len(ordered)
@@ -83,6 +165,7 @@ def track_to_czml_flight(
     bias_m = 0.0
     bias_applied = False
     bias_source = "none"
+    bias_scope = "none"
     ground_samples = 0
     approach_samples = 0
 
@@ -113,14 +196,17 @@ def track_to_czml_flight(
         ]
         approach_samples = len(near_low_alts)
         if approach_samples >= min_ground_samples:
-            candidate_bias = airport_elev_m - median(near_low_alts)
-            try_apply_bias(candidate_bias, source="approach")
+            # Fallback without touchdown evidence is intentionally conservative:
+            # use the lowest near-airport altitude as touchdown proxy and avoid
+            # downward corrections that can push paths under terrain.
+            reference_alt = min(near_low_alts)
+            candidate_bias = airport_elev_m - reference_alt
+            if candidate_bias >= 0.0:
+                try_apply_bias(candidate_bias, source="approach")
 
     if bias_applied:
-        parsed = [
-            (t, lon, lat, alt + bias_m, gnd, d)
-            for t, lon, lat, alt, gnd, d in parsed
-        ]
+        parsed = apply_uniform_altitude_bias(parsed, bias_m)
+        bias_scope = "uniform-all-waypoints"
 
     # Airport relevance: at least one point near target airport.
     min_dist = min(
@@ -223,6 +309,7 @@ def track_to_czml_flight(
         "altitude_bias_m": round(bias_m, 3),
         "altitude_bias_applied": bias_applied,
         "altitude_bias_source": bias_source,
+        "altitude_bias_scope": bias_scope,
         "altitude_ground_samples": ground_samples,
         "altitude_approach_samples": approach_samples,
         "waypoints": rel,
@@ -266,6 +353,40 @@ def convert_tracks_to_czml_input(
             max_altitude_bias_m=max_altitude_bias_m,
             approach_alt_buffer_m=approach_alt_buffer_m,
             approach_window_min=approach_window_min,
+            include_ground=include_ground,
+        )
+        if not item:
+            continue
+
+        # Avoid duplicate IDs.
+        base = item["id"]
+        if base in used_ids:
+            suffix = 2
+            while f"{base}_{suffix}" in used_ids:
+                suffix += 1
+            item["id"] = f"{base}_{suffix}"
+        used_ids.add(item["id"])
+
+        out.append(item)
+        if len(out) >= limit_flights:
+            break
+
+    return out
+
+
+def convert_tracks_to_raw_czml_input(
+    tracks: list[dict[str, Any]],
+    *,
+    include_ground: bool,
+    limit_flights: int,
+) -> list[dict[str, Any]]:
+    """Convert OpenSky tracks into raw pass-through CZML-input flight records."""
+    out: list[dict[str, Any]] = []
+    used_ids: set[str] = set()
+
+    for track in tracks:
+        item = track_to_raw_czml_flight(
+            track,
             include_ground=include_ground,
         )
         if not item:

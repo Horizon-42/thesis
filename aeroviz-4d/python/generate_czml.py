@@ -275,7 +275,8 @@ def build_position_property(
     A dict with key "cartographicDegrees" containing the flat array:
       [t0, lon0, lat0, alt0,  t1, lon1, lat1, alt1, ...]
 
-    CZML interprets this with Lagrange interpolation between samples.
+    CZML interprets this with linear interpolation between samples to
+    preserve the sampled geometry without polynomial overshoot.
     The `epoch` key is the ISO string of epoch_dt.
     """
     flat: list[float] = []
@@ -285,8 +286,7 @@ def build_position_property(
     return {
         "epoch": epoch_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "cartographicDegrees": flat,
-        "interpolationAlgorithm": "LAGRANGE",
-        "interpolationDegree": 3,
+        "interpolationAlgorithm": "LINEAR",
         "forwardExtrapolationType": "HOLD",
     }
 

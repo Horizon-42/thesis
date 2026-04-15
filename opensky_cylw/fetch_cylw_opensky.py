@@ -48,7 +48,10 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
-from trajectory_normalization import convert_tracks_to_czml_input
+from trajectory_normalization import (
+    convert_tracks_to_czml_input,
+    convert_tracks_to_raw_czml_input,
+)
 
 
 API_ROOT = "https://opensky-network.org/api"
@@ -358,6 +361,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-flights", type=int, default=16)
     parser.add_argument("--min-flights", type=int, default=3, help="If strict landing filter yields fewer than this count, fill with partial approach tracks")
     parser.add_argument("--exclude-ground", action="store_true", help="Exclude on-ground points from exported trajectory")
+    parser.add_argument(
+        "--disable-normalization",
+        action="store_true",
+        help="Bypass normalization/filtering and export raw OpenSky tracks directly to CZML input schema",
+    )
 
     parser.add_argument("--output-root", default=None, help="Folder for outputs (default: ./outputs next to script)")
     parser.add_argument("--aeroviz-root", default=None, help="Path to aeroviz-4d folder")
@@ -395,6 +403,7 @@ def main() -> None:
         "airport_center": {"lat": airport_lat, "lon": airport_lon},
         "airport_elevation_m": airport_elev_m,
         "altitude_mode": args.altitude_mode,
+        "normalization_enabled": (not args.disable_normalization),
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -492,32 +501,20 @@ def main() -> None:
 
     match_radius_km = args.radius_km if args.radius_km is not None else args.match_radius_km
 
-    flights = convert_tracks_to_czml_input(
-        payload.get("tracks", []),
-        airport_lat=airport_lat,
-        airport_lon=airport_lon,
-        airport_elev_m=airport_elev_m,
-        match_radius_km=match_radius_km,
-        require_landing=not args.allow_partial,
-        landing_radius_km=args.landing_radius_km,
-        max_end_distance_km=args.max_end_distance_km,
-        altitude_mode=args.altitude_mode,
-        min_ground_samples=args.min_ground_samples,
-        max_altitude_bias_m=args.max_altitude_bias_m,
-        approach_alt_buffer_m=args.approach_alt_buffer_m,
-        approach_window_min=args.approach_window_min,
-        include_ground=not args.exclude_ground,
-        limit_flights=args.max_flights,
-    )
-
-    if (not args.allow_partial) and len(flights) < max(1, args.min_flights):
-        relaxed = convert_tracks_to_czml_input(
+    if args.disable_normalization:
+        flights = convert_tracks_to_raw_czml_input(
+            payload.get("tracks", []),
+            include_ground=not args.exclude_ground,
+            limit_flights=args.max_flights,
+        )
+    else:
+        flights = convert_tracks_to_czml_input(
             payload.get("tracks", []),
             airport_lat=airport_lat,
             airport_lon=airport_lon,
             airport_elev_m=airport_elev_m,
             match_radius_km=match_radius_km,
-            require_landing=False,
+            require_landing=not args.allow_partial,
             landing_radius_km=args.landing_radius_km,
             max_end_distance_km=args.max_end_distance_km,
             altitude_mode=args.altitude_mode,
@@ -529,14 +526,33 @@ def main() -> None:
             limit_flights=args.max_flights,
         )
 
-        used_ids = {item["id"] for item in flights}
-        for item in relaxed:
-            if item["id"] in used_ids:
-                continue
-            flights.append(item)
-            used_ids.add(item["id"])
-            if len(flights) >= args.max_flights:
-                break
+        if (not args.allow_partial) and len(flights) < max(1, args.min_flights):
+            relaxed = convert_tracks_to_czml_input(
+                payload.get("tracks", []),
+                airport_lat=airport_lat,
+                airport_lon=airport_lon,
+                airport_elev_m=airport_elev_m,
+                match_radius_km=match_radius_km,
+                require_landing=False,
+                landing_radius_km=args.landing_radius_km,
+                max_end_distance_km=args.max_end_distance_km,
+                altitude_mode=args.altitude_mode,
+                min_ground_samples=args.min_ground_samples,
+                max_altitude_bias_m=args.max_altitude_bias_m,
+                approach_alt_buffer_m=args.approach_alt_buffer_m,
+                approach_window_min=args.approach_window_min,
+                include_ground=not args.exclude_ground,
+                limit_flights=args.max_flights,
+            )
+
+            used_ids = {item["id"] for item in flights}
+            for item in relaxed:
+                if item["id"] in used_ids:
+                    continue
+                flights.append(item)
+                used_ids.add(item["id"])
+                if len(flights) >= args.max_flights:
+                    break
 
     raw_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     czml_input_path.write_text(json.dumps(flights, indent=2), encoding="utf-8")

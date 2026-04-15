@@ -56,6 +56,11 @@ Altitude handling (research note):
 - `--altitude-mode auto-bias` tries touchdown-bias first, then approach-bias.
 - All bias modes preserve trajectory shape and only shift altitude.
 
+Normalization switch (debug note):
+
+- `--disable-normalization` bypasses airport/landing filtering and bias correction, and exports raw OpenSky `tracks/all` waypoints directly into CZML-input schema.
+- Use this mode when you want to verify whether empty or distorted output comes from normalization logic vs source track data quality.
+
 By default, only trajectories that include touchdown near the airport are kept,
 so landing process is preserved.
 
@@ -92,6 +97,20 @@ To switch airport (example CYLW):
   --min-ground-samples 2 \
   --max-altitude-bias-m 400 \
   --approach-alt-buffer-m 450
+
+# Disable normalization to export raw tracks for debugging
+/Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
+  /Users/liudongxu/Desktop/studys/thesis/opensky_cylw/fetch_cylw_opensky.py \
+  --mode live \
+  --airport CYYC \
+  --disable-normalization
+
+# Same via one-command pipeline wrapper
+/Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
+  /Users/liudongxu/Desktop/studys/thesis/run_fetch_and_generate.py \
+  --mode live \
+  --airport CYYC \
+  --disable-normalization
 ```
 
 ### 2) Historical mode (recommended, requires OpenSky OAuth credentials)

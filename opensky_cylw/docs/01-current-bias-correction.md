@@ -11,7 +11,8 @@ OpenSky track waypoints provide barometric altitude. In practice, this can be of
 The method is intentionally simple:
 - keep trajectory shape unchanged
 - estimate one constant bias per flight
-- use robust statistics (median) for sample aggregation
+- apply that single bias uniformly to all waypoints or apply no correction
+- use robust statistics for sample aggregation
 - reject extreme bias values
 
 ## Data Inputs Used
@@ -51,7 +52,10 @@ The CLI option --altitude-mode supports four modes:
   - distance_to_airport <= landing_radius_km
   - altitude <= airport_elev_m + approach_alt_buffer_m
 - Compute candidate bias:
-  - bias_m = airport_elev_m - median(near_low_altitudes)
+  - choose the minimum value of near_low_altitudes as a touchdown proxy
+  - bias_m = airport_elev_m - reference_altitude
+- Conservative guard:
+  - skip this fallback correction if candidate bias is negative (no downward fallback shift without touchdown evidence)
 - Apply only when:
   - sample_count >= min_ground_samples
   - abs(bias_m) <= max_altitude_bias_m
@@ -61,21 +65,26 @@ The CLI option --altitude-mode supports four modes:
 - If not applied, try approach-bias.
 
 ## Formula
-For a chosen sample set S = {h1, h2, ..., hn}:
+For a chosen reference altitude h_ref from sampled near-airport points:
 
-bias_m = airport_elev_m - median(S)
+bias_m = airport_elev_m - h_ref
 
 For each waypoint altitude h:
 
 h_corrected = h + bias_m
 
-## Why Median
-Median is more robust than mean under outliers and sparse noise spikes in ADS-B derived tracks. This reduces instability when a few sample points are bad.
+Uniformity invariant:
+- if correction is enabled for a flight, every waypoint receives the exact same additive bias value
+- there is no per-segment or per-waypoint local adjustment
+
+## Why Robust Aggregation
+Robust references (median for touchdown mode, lower-tail reference for fallback approach mode) are less sensitive to outliers and sparse noise spikes in ADS-B derived tracks.
 
 ## Guard Rails
 The implementation includes practical safety checks:
 - min_ground_samples: minimum support needed to trust the estimate
 - max_altitude_bias_m: hard cap to reject unrealistic corrections
+- reject clearly non-physical tracks whose sampled altitude stays at 0 m
 - no correction when conditions are not met
 
 ## Output Metadata in CZML Input JSON
@@ -85,6 +94,7 @@ Each exported flight includes:
 - altitude_bias_m
 - altitude_bias_applied
 - altitude_bias_source
+- altitude_bias_scope ("uniform-all-waypoints" or "none")
 - altitude_ground_samples
 - altitude_approach_samples
 
