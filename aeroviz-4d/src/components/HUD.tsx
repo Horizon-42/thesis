@@ -77,6 +77,8 @@ interface CamState {
 export default function HUD() {
   const { viewer, setSelectedFlightId } = useApp();
   const [cam, setCam] = useState<CamState | null>(null);
+  const [lighting, setLighting] = useState(true);
+  const [exaggeration, setExaggeration] = useState(1);
   const lastUpdateRef = useRef<number>(0);
 
   // ── Live readout (throttled to ~10 Hz) ───────────────────────────────────
@@ -109,6 +111,20 @@ export default function HUD() {
     read();
     return () => remove();
   }, [viewer]);
+
+  // ── Scene toggles ────────────────────────────────────────────────────────
+  function toggleLighting() {
+    if (!viewer) return;
+    const next = !viewer.scene.globe.enableLighting;
+    viewer.scene.globe.enableLighting = next;
+    setLighting(next);
+  }
+
+  function changeExaggeration(value: number) {
+    if (!viewer) return;
+    (viewer.scene.globe as any).terrainExaggeration = value;
+    setExaggeration(value);
+  }
 
   // ── Camera controls ──────────────────────────────────────────────────────
   function rotateHeading(deltaDeg: number) {
@@ -261,6 +277,33 @@ export default function HUD() {
             onClick={() => zoom("in")}
             title="Zoom in"
           >+</button>
+        </div>
+      </div>
+
+      {/* ── Scene controls ──────────────────────────────────────────────── */}
+      <div className="hud-section">
+        <h4 className="hud-section-label">Scene</h4>
+        <label className="hud-toggle-row" title="Sun-based terrain lighting">
+          <input
+            type="checkbox"
+            checked={lighting}
+            onChange={toggleLighting}
+          />
+          <span className="hud-toggle-label">Lighting</span>
+        </label>
+        <div className="hud-slider-row">
+          <span className="hud-toggle-label">Terrain</span>
+          <input
+            type="range"
+            min="1"
+            max="10"
+            step="0.5"
+            value={exaggeration}
+            onChange={(e) => changeExaggeration(Number(e.target.value))}
+            className="hud-slider"
+            title="Terrain height exaggeration"
+          />
+          <span className="hud-slider-value">{exaggeration}x</span>
         </div>
       </div>
 
