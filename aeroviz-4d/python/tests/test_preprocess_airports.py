@@ -20,6 +20,8 @@ from preprocess_airports import (
     runway_to_polygon,
     landing_zone_polygon,
     build_runway_geojson,
+    load_airport_config,
+    write_airport_config,
     RunwayEnds,
     METRES_PER_DEG_LAT,
     metres_per_deg_lon,
@@ -193,3 +195,47 @@ class TestRunwayGeojson:
 
         zone_types = {f["properties"]["zone_type"] for f in fc["features"]}
         assert zone_types == {"runway_surface", "landing_zone"}
+
+
+class TestAirportConfig:
+    def test_load_airport_config_reads_lon_lat_from_airports_csv(self, tmp_path):
+        csv_path = tmp_path / "airports.csv"
+        csv_path.write_text(
+            "\n".join([
+                '"id","ident","latitude_deg","longitude_deg","gps_code","icao_code"',
+                '1,"CYYC",51.118822,-114.009933,"CYYC","CYYC"',
+            ]),
+            encoding="utf-8",
+        )
+
+        airport = load_airport_config(csv_path, "CYYC", height_m=15000)
+
+        assert airport == {
+            "code": "CYYC",
+            "lon": -114.009933,
+            "lat": 51.118822,
+            "height": 15000,
+        }
+
+    def test_write_airport_config_writes_json(self, tmp_path):
+        csv_path = tmp_path / "airports.csv"
+        out_path = tmp_path / "airport.json"
+        csv_path.write_text(
+            "\n".join([
+                '"id","ident","latitude_deg","longitude_deg","gps_code","icao_code"',
+                '1,"CYVR",49.193901,-123.183998,"CYVR","CYVR"',
+            ]),
+            encoding="utf-8",
+        )
+
+        airport = write_airport_config(csv_path, "cyvr", out_path, height_m=12000)
+
+        assert airport["code"] == "CYVR"
+        assert out_path.read_text(encoding="utf-8") == (
+            '{\n'
+            '  "code": "CYVR",\n'
+            '  "lon": -123.183998,\n'
+            '  "lat": 49.193901,\n'
+            '  "height": 12000\n'
+            '}'
+        )

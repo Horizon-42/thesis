@@ -13,7 +13,7 @@
 
 import { useEffect, useRef } from "react";
 import * as Cesium from "cesium";
-import { useApp } from "../context/AppContext";
+import { useApp, type AirportConfig } from "../context/AppContext";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONFIGURATION CONSTANTS
@@ -21,15 +21,31 @@ import { useApp } from "../context/AppContext";
 // A free "Community" tier token is sufficient for this project.
 // ─────────────────────────────────────────────────────────────────────────────
 const CESIUM_ION_TOKEN = import.meta.env.VITE_CESIUM_ION_TOKEN;
+const AIRPORT_CONFIG_URL = "/data/airport.json";
 
-/** WGS84 coordinates for the initial camera target (default: Calgary CYYC) */
-export const DEFAULT_AIRPORT = {
-  code: "CYYC",
-  lon: -114.009933,
-  lat: 51.118822,
-  /** Initial camera altitude in metres */
-  height: 15_000,
-} as const;
+function isAirportConfig(value: unknown): value is AirportConfig {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.code === "string" &&
+    typeof candidate.lon === "number" &&
+    typeof candidate.lat === "number" &&
+    typeof candidate.height === "number"
+  );
+}
+
+async function loadAirportConfig(): Promise<AirportConfig> {
+  const response = await fetch(AIRPORT_CONFIG_URL);
+  if (!response.ok) {
+    throw new Error(`Failed to load ${AIRPORT_CONFIG_URL}: ${response.status}`);
+  }
+
+  const airport = await response.json();
+  if (!isAirportConfig(airport)) {
+    throw new Error(`${AIRPORT_CONFIG_URL} is not a valid airport config`);
+  }
+  return airport;
+}
 
 /**
  * Initialise a Cesium Viewer mounted inside `containerRef`.
@@ -43,7 +59,7 @@ export function useCesiumViewer(
   // We store the Viewer in a local ref (not state) to avoid React re-renders
   // when the Viewer object changes internally.
   const viewerRef = useRef<Cesium.Viewer | null>(null);
-  const { setViewer } = useApp();
+  const { setViewer, setAirport } = useApp();
 
   useEffect(() => {
     // Guard: only run once, and only after the DOM node exists.
@@ -56,45 +72,57 @@ export function useCesiumViewer(
     // ── Step 1: Set the Ion access token ─────────────────────────────────────
     Cesium.Ion.defaultAccessToken = CESIUM_ION_TOKEN;
 
-    // ── Step 2: Create the Viewer ─────────────────────────────────────────────
-    // ① — Create `new Cesium.Viewer(...)` with the following settings:
-    //   • terrain:             Cesium.Terrain.fromWorldTerrain({ requestVertexNormals: true, requestWaterMask: true })
-    //   • baseLayerPicker:     false   (hide the base layer picker button)
-    //   • geocoder:            false   (hide the search bar)
-    //   • homeButton:          false
-    //   • sceneModePicker:     false
-    //   • navigationHelpButton: false
-    //   • animation:           true    (keep the animation widget — needed for 4D playback)
-    //   • timeline:            true    (keep the timeline bar)
-    //   • skyAtmosphere:       new Cesium.SkyAtmosphere()
-    //
-    // Hint: `requestVertexNormals: true` tells Cesium to download slope data
-    // alongside elevation so the terrain shader can compute light/shadow.
-    // Without it, mountains look flat and grey.
-    //
-    // Reference: docs/01-cesium-viewer.md § "Viewer options"
-    const viewer = new Cesium.Viewer(containerRef.current, {
-      terrain: Cesium.Terrain.fromWorldTerrain({ requestVertexNormals: true, requestWaterMask: true }),
-      baseLayerPicker: false,
-      geocoder: false,
-      homeButton: false,
-      sceneModePicker: false,
-      navigationHelpButton: false,
-      animation: true,
-      timeline: true,
-      skyAtmosphere: new Cesium.SkyAtmosphere()
-    });
-    // const viewer = null as unknown as Cesium.Viewer; // ← replace this line
+    let cancelled = false;
+    let cleanupViewer: (() => void) | undefined;
 
-    viewerRef.current = viewer;
+    void loadAirportConfig()
+      .then((defaultAirport) => {
+        if (cancelled || !containerRef.current || viewerRef.current) return;
 
-    // ── Custom mouse mapping ───────────────────────────────────────────────────
-    // Keep wheel zoom, but repurpose right-drag for camera orientation control.
-    const controller = viewer.scene.screenSpaceCameraController;
-    controller.zoomEventTypes = [
-      Cesium.CameraEventType.WHEEL,
-      Cesium.CameraEventType.PINCH,
-    ];
+        setAirport(defaultAirport);
+
+        // ── Step 2: Create the Viewer ─────────────────────────────────────────
+        // ① — Create `new Cesium.Viewer(...)` with the following settings:
+        //   • terrain:             Cesium.Terrain.fromWorldTerrain({ requestVertexNormals: true, requestWaterMask: true })
+        //   • baseLayerPicker:     false   (hide the base layer picker button)
+        //   • geocoder:            false   (hide the search bar)
+        //   • homeButton:          false
+        //   • sceneModePicker:     false
+        //   • navigationHelpButton: false
+        //   • animation:           true    (keep the animation widget — needed for 4D playback)
+        //   • timeline:            true    (keep the timeline bar)
+        //   • skyAtmosphere:       new Cesium.SkyAtmosphere()
+        //
+        // Hint: `requestVertexNormals: true` tells Cesium to download slope data
+        // alongside elevation so the terrain shader can compute light/shadow.
+        // Without it, mountains look flat and grey.
+        //
+        // Reference: docs/01-cesium-viewer.md § "Viewer options"
+        const viewer = new Cesium.Viewer(containerRef.current, {
+          terrain: Cesium.Terrain.fromWorldTerrain({
+            requestVertexNormals: true,
+            requestWaterMask: true,
+          }),
+          baseLayerPicker: false,
+          geocoder: false,
+          homeButton: false,
+          sceneModePicker: false,
+          navigationHelpButton: false,
+          animation: true,
+          timeline: true,
+          skyAtmosphere: new Cesium.SkyAtmosphere(),
+        });
+        // const viewer = null as unknown as Cesium.Viewer; // ← replace this line
+
+        viewerRef.current = viewer;
+
+        // ── Custom mouse mapping ───────────────────────────────────────────────
+        // Keep wheel zoom, but repurpose right-drag for camera orientation control.
+        const controller = viewer.scene.screenSpaceCameraController;
+        controller.zoomEventTypes = [
+          Cesium.CameraEventType.WHEEL,
+          Cesium.CameraEventType.PINCH,
+        ];
 
     // Disable built-in right-drag camera actions; we provide custom behavior.
     controller.tiltEventTypes = [
@@ -222,10 +250,10 @@ export function useCesiumViewer(
     // viewer.clock.currentTime = Cesium.JulianDate.fromDate(new Date("2026-01-01T21:00:00Z"));
 
     // ── Step 4: Set initial camera view ───────────────────────────────────────
-    // ③ — Fly the camera to DEFAULT_AIRPORT using viewer.camera.setView().
+    // ③ — Fly the camera to the loaded airport using viewer.camera.setView().
     //
     // viewer.camera.setView({
-    //   destination: Cesium.Cartesian3.fromDegrees(DEFAULT_AIRPORT.lon, DEFAULT_AIRPORT.lat, DEFAULT_AIRPORT.height),
+    //   destination: Cesium.Cartesian3.fromDegrees(defaultAirport.lon, defaultAirport.lat, defaultAirport.height),
     //   orientation: {
     //     heading: Cesium.Math.toRadians(0),   // compass bearing (0 = north)
     //     pitch:   Cesium.Math.toRadians(-42),   // tilt angle (negative = look down)
@@ -234,23 +262,23 @@ export function useCesiumViewer(
     // });
     viewer.camera.flyToBoundingSphere(
       new Cesium.BoundingSphere(
-        Cesium.Cartesian3.fromDegrees(DEFAULT_AIRPORT.lon, DEFAULT_AIRPORT.lat, 0),
-        DEFAULT_AIRPORT.height
+        Cesium.Cartesian3.fromDegrees(defaultAirport.lon, defaultAirport.lat, 0),
+        defaultAirport.height
       ),
       {
         duration: 1, // seconds; set to 0 for no animation
         offset: new Cesium.HeadingPitchRange(
           Cesium.Math.toRadians(-45),   // heading (compass bearing)
           Cesium.Math.toRadians(-42),   // pitch (tilt angle)
-          DEFAULT_AIRPORT.height       // range (distance from target)
+          defaultAirport.height       // range (distance from target)
         ),
       }
     );
 
     // ── Step 5: Add an airport marker so the target spot is obvious ──────────
     viewer.entities.add({
-      id: `airport-${DEFAULT_AIRPORT.code}`,
-      position: Cesium.Cartesian3.fromDegrees(DEFAULT_AIRPORT.lon, DEFAULT_AIRPORT.lat),
+      id: `airport-${defaultAirport.code}`,
+      position: Cesium.Cartesian3.fromDegrees(defaultAirport.lon, defaultAirport.lat),
       point: {
         pixelSize: 12,
         color: Cesium.Color.fromCssColorString("#ff4d4f"),
@@ -260,7 +288,7 @@ export function useCesiumViewer(
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
       label: {
-        text: DEFAULT_AIRPORT.code,
+        text: defaultAirport.code,
         font: "bold 14px sans-serif",
         style: Cesium.LabelStyle.FILL_AND_OUTLINE,
         fillColor: Cesium.Color.WHITE,
@@ -283,17 +311,26 @@ export function useCesiumViewer(
     // Share the Viewer with the rest of the app via context.
     setViewer(viewer);
 
-    // ── Cleanup: destroy the Viewer when the component unmounts ───────────────
-    // This releases WebGL resources and prevents memory leaks.
-    return () => {
-      canvas.removeEventListener("contextmenu", onContextMenu);
-      canvas.removeEventListener("pointerdown", onPointerDown);
-      canvas.removeEventListener("pointermove", onPointerMove);
-      canvas.removeEventListener("pointerup", onPointerUp);
-      canvas.removeEventListener("pointercancel", onPointerCancel);
+        // ── Cleanup: destroy the Viewer when the component unmounts ───────────
+        // This releases WebGL resources and prevents memory leaks.
+        cleanupViewer = () => {
+          canvas.removeEventListener("contextmenu", onContextMenu);
+          canvas.removeEventListener("pointerdown", onPointerDown);
+          canvas.removeEventListener("pointermove", onPointerMove);
+          canvas.removeEventListener("pointerup", onPointerUp);
+          canvas.removeEventListener("pointercancel", onPointerCancel);
 
-      viewerRef.current?.destroy();
-      viewerRef.current = null;
+          viewerRef.current?.destroy();
+          viewerRef.current = null;
+        };
+      })
+      .catch((error) => {
+        console.error("[CesiumViewer] Failed to initialise:", error);
+      });
+
+    return () => {
+      cancelled = true;
+      cleanupViewer?.();
     };
-  }, [containerRef, setViewer]);
+  }, [containerRef, setAirport, setViewer]);
 }

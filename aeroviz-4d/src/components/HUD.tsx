@@ -12,7 +12,6 @@
 import { useEffect, useRef, useState } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
-import { DEFAULT_AIRPORT } from "../hooks/useCesiumViewer";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const HDG_STEP   = 15;  // degrees per heading button click
@@ -75,7 +74,7 @@ interface CamState {
 }
 
 export default function HUD() {
-  const { viewer, setSelectedFlightId } = useApp();
+  const { viewer, airport, setSelectedFlightId } = useApp();
   const [cam, setCam] = useState<CamState | null>(null);
   const [lighting, setLighting] = useState(true);
   const [exaggeration, setExaggeration] = useState(1);
@@ -183,20 +182,20 @@ export default function HUD() {
 
   // Fly back to the airport at the same angle used on startup.
   function resetView() {
-    if (!viewer) return;
+    if (!viewer || !airport) return;
     viewer.trackedEntity = undefined;  // stop following any plane
     setSelectedFlightId(null);         // clear the table selection
     viewer.camera.flyToBoundingSphere(
       new Cesium.BoundingSphere(
-        Cesium.Cartesian3.fromDegrees(DEFAULT_AIRPORT.lon, DEFAULT_AIRPORT.lat, 0),
-        DEFAULT_AIRPORT.height,
+        Cesium.Cartesian3.fromDegrees(airport.lon, airport.lat, 0),
+        airport.height,
       ),
       {
         duration: 1.5,
         offset: new Cesium.HeadingPitchRange(
           Cesium.Math.toRadians(-45),
           Cesium.Math.toRadians(-42),
-          DEFAULT_AIRPORT.height,
+          airport.height,
         ),
       },
     );

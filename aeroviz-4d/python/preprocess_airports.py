@@ -6,6 +6,7 @@ GeoJSON files expected by the frontend.
 
 Outputs (written to ../aeroviz-4d/public/data/):
     runway.geojson   — runway polygons (runway surface + landing zone)
+    airport.json     — selected airport camera target
   waypoints.geojson — NOT produced here; comes from ARINC 424 / CIFP parsing
 
 Data source:
@@ -33,6 +34,7 @@ METRES_PER_FOOT = 0.3048
 METRES_PER_DEG_LAT = 111_320.0  # approximately constant globally
 
 OUTPUT_DIR = Path(__file__).parent.parent / "public" / "data"
+DEFAULT_CAMERA_HEIGHT_M = 15_000
 
 
 # ── Data types ────────────────────────────────────────────────────────────────
@@ -265,6 +267,75 @@ def build_runway_ring(
 
 # ── Main pipeline ─────────────────────────────────────────────────────────────
 
+def build_airport_config(
+    code: str,
+    lon: float,
+    lat: float,
+    height_m: float = DEFAULT_CAMERA_HEIGHT_M,
+) -> dict:
+    """Build the frontend airport camera config object."""
+    height = int(height_m) if float(height_m).is_integer() else height_m
+    return {
+        "code": code,
+        "lon": lon,
+        "lat": lat,
+        "height": height,
+    }
+
+
+def load_airport_config(
+    csv_path: Path,
+    airport_ident: str,
+    height_m: float = DEFAULT_CAMERA_HEIGHT_M,
+) -> dict:
+    """Load one airport's lon/lat camera target from OurAirports airports.csv."""
+    df = pd.read_csv(csv_path)
+    required = {"ident", "latitude_deg", "longitude_deg"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"{csv_path} is missing required columns: {sorted(missing)}")
+
+    normalized_ident = airport_ident.upper()
+    ident_match = df["ident"].astype(str).str.upper() == normalized_ident
+    code_match = pd.Series(False, index=df.index)
+    for optional_col in ("gps_code", "icao_code", "local_code"):
+        if optional_col in df.columns:
+            code_match = code_match | (df[optional_col].astype(str).str.upper() == normalized_ident)
+
+    subset = df[ident_match | code_match].dropna(subset=["latitude_deg", "longitude_deg"])
+    if subset.empty:
+        raise ValueError(f"Airport {airport_ident} not found in {csv_path}")
+
+    row = subset.iloc[0]
+    return build_airport_config(
+        code=normalized_ident,
+        lon=float(row["longitude_deg"]),
+        lat=float(row["latitude_deg"]),
+        height_m=height_m,
+    )
+
+
+def write_airport_config(
+    airports_csv_path: Path,
+    airport_ident: str,
+    output_path: Path,
+    height_m: float = DEFAULT_CAMERA_HEIGHT_M,
+) -> dict:
+    """Write public/data/airport.json for the selected airport and return it."""
+    airport = load_airport_config(airports_csv_path, airport_ident, height_m)
+    output_path.write_text(json.dumps(airport, indent=2, allow_nan=False), encoding="utf-8")
+    return airport
+
+
+def resolve_input_csv(path: Path) -> Path:
+    """Resolve a CSV path, falling back to public/data for repo-local data."""
+    if path.exists():
+        return path
+    fallback = OUTPUT_DIR / path.name
+    if fallback.exists():
+        return fallback
+    return path
+
 def load_runways(csv_path: Path, airport_ident: str) -> list[RunwayEnds]:
     """Load and parse runway rows for a single airport from OurAirports CSV."""
     df = pd.read_csv(csv_path)
@@ -381,6 +452,16 @@ def main() -> None:
         help="Path to OurAirports runways.csv (default: ./runways.csv)"
     )
     parser.add_argument(
+        "--airports-csv", default="airports.csv",
+        help="Path to OurAirports airports.csv (default: ./airports.csv)"
+    )
+    parser.add_argument(
+        "--camera-height-m",
+        type=float,
+        default=DEFAULT_CAMERA_HEIGHT_M,
+        help=f"Initial camera altitude/range in metres (default: {DEFAULT_CAMERA_HEIGHT_M})",
+    )
+    parser.add_argument(
         "--lateral-offset-m",
         type=float,
         default=0.0,
@@ -388,13 +469,33 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    runways_path = Path(args.runways_csv)
+    runways_path = resolve_input_csv(Path(args.runways_csv))
     if not runways_path.exists():
         print(f"ERROR: {runways_path} not found.")
         print("Download from: https://ourairports.com/data/runways.csv")
         raise SystemExit(1)
 
+    airports_path = resolve_input_csv(Path(args.airports_csv))
+    if not airports_path.exists():
+        print(f"ERROR: {airports_path} not found.")
+        print("Download from: https://ourairports.com/data/airports.csv")
+        raise SystemExit(1)
+
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    print(f"Processing airport camera config for {args.airport}...")
+    airport_out_path = OUTPUT_DIR / "airport.json"
+    airport = write_airport_config(
+        airports_path,
+        args.airport,
+        airport_out_path,
+        height_m=args.camera_height_m,
+    )
+    print(
+        f"  Found {airport['code']} at "
+        f"({airport['lat']:.6f}, {airport['lon']:.6f})"
+    )
+    print(f"  ✓ Written: {airport_out_path}")
 
     print(f"Processing runways for {args.airport}...")
     runways = load_runways(runways_path, args.airport)

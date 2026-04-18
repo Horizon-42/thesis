@@ -6,6 +6,7 @@
  * What lives here (and why):
  *   - `viewer`           — the CesiumJS Viewer instance.  Shared so any hook
  *                          or component can add entities without prop-drilling.
+ *   - `airport`          — the loaded camera target and airport marker config.
  *   - `selectedFlightId` — which callsign is highlighted in the table and
  *                          tracked by the camera.
  *   - `layers`           — boolean flags that hooks read to show/hide their
@@ -35,11 +36,23 @@ export type LayerKey =
   | "ocsSurfaces"
   | "trajectories";
 
+export interface AirportConfig {
+  code: string;
+  lon: number;
+  lat: number;
+  /** Initial camera altitude/range in metres */
+  height: number;
+}
+
 // ── Context shape ────────────────────────────────────────────────────────────
 interface AppState {
   /** The live CesiumJS Viewer, or null before it is mounted */
   viewer: Cesium.Viewer | null;
   setViewer: (v: Cesium.Viewer) => void;
+
+  /** Airport camera target loaded from public/data/airport.json */
+  airport: AirportConfig | null;
+  setAirport: (airport: AirportConfig) => void;
 
   /** The currently tracked/selected flight callsign */
   selectedFlightId: string | null;
@@ -62,6 +75,7 @@ const AppContext = createContext<AppState | null>(null);
 // ── Provider ──────────────────────────────────────────────────────────────────
 export function AppProvider({ children }: { children: ReactNode }) {
   const [viewer, setViewerState] = useState<Cesium.Viewer | null>(null);
+  const [airport, setAirport] = useState<AirportConfig | null>(null);
   const [selectedFlightId, setSelectedFlightId] = useState<string | null>(null);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(60);
 
@@ -90,6 +104,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       value={{
         viewer,
         setViewer,
+        airport,
+        setAirport,
         selectedFlightId,
         setSelectedFlightId,
         layers,
