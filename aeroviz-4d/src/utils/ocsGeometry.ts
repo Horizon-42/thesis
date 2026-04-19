@@ -156,36 +156,53 @@ export function offsetPoint(
  *   to zero clearance at the outer edge.  The 7:1 ratio encodes this.
  */
 export function buildFinalApproachOCS(params: OCSParams): OCSGeometry {
-  void params;
+  const { faf, threshold, primaryHalfWidthM, secondaryWidthM } = params;
 
-  // TODO ③ — Implement this function using bearingRad() and offsetPoint().
-  //
-  // Suggested steps:
-  //
-  //   A. Compute the bearing from FAF → threshold (the approach centreline).
-  //      bearing = bearingRad(faf.lon, faf.lat, threshold.lon, threshold.lat)
-  //
-  //   B. Compute the perpendicular (left and right) bearings:
-  //      perpLeft  = bearing - Math.PI / 2
-  //      perpRight = bearing + Math.PI / 2
-  //
-  //   C. Compute the 4 corners of the PRIMARY polygon:
-  //      fafLeft      = offsetPoint(faf.lon,       faf.lat,       faf.altM,       perpLeft,  primaryHalfWidthM)
-  //      fafRight     = offsetPoint(faf.lon,       faf.lat,       faf.altM,       perpRight, primaryHalfWidthM)
-  //      threshLeft   = offsetPoint(threshold.lon, threshold.lat, threshold.altM, perpLeft,  primaryHalfWidthM)
-  //      threshRight  = offsetPoint(threshold.lon, threshold.lat, threshold.altM, perpRight, primaryHalfWidthM)
-  //
-  //   D. Compute the OUTER edge of the secondary areas.
-  //      The outer altitude at FAF is: faf.altM - secondaryWidthM / 7
-  //      (it sinks by 1 m for every 7 m of horizontal outward offset)
-  //
-  //      secFafLeft   = offsetPoint(faf.lon,       faf.lat,       faf.altM - secondaryWidthM/7, perpLeft,  primaryHalfWidthM + secondaryWidthM)
-  //      (similar for secFafRight, secThreshLeft, secThreshRight — threshold altitude = threshold.altM, no slope)
-  //
-  //   E. Return the three polygons.
-  //
-  // Hint: at the threshold, the secondary area height equals threshold.altM
-  // because the OCS slope meets the ground exactly at the threshold elevation.
+  // A. Approach centreline bearing (FAF → threshold).
+  const bearing = bearingRad(faf.lon, faf.lat, threshold.lon, threshold.lat);
 
-  throw new Error("TODO: implement buildFinalApproachOCS");
+  // B. Perpendiculars to the centreline.
+  const perpLeft = bearing - Math.PI / 2;
+  const perpRight = bearing + Math.PI / 2;
+
+  // C. Primary polygon corners — flat slab at FAF/threshold altitudes.
+  const fafLeft = offsetPoint(
+    faf.lon, faf.lat, faf.altM, perpLeft, primaryHalfWidthM,
+  );
+  const fafRight = offsetPoint(
+    faf.lon, faf.lat, faf.altM, perpRight, primaryHalfWidthM,
+  );
+  const thrLeft = offsetPoint(
+    threshold.lon, threshold.lat, threshold.altM, perpLeft, primaryHalfWidthM,
+  );
+  const thrRight = offsetPoint(
+    threshold.lon, threshold.lat, threshold.altM, perpRight, primaryHalfWidthM,
+  );
+
+  // D. Secondary outer corners — drop by secondaryWidthM/7 at FAF,
+  // land at threshold elevation at the threshold end.
+  const outerAltAtFaf = faf.altM - secondaryWidthM / 7;
+  const outerAltAtThr = threshold.altM;
+  const outerOffset = primaryHalfWidthM + secondaryWidthM;
+
+  const secFafLeft = offsetPoint(
+    faf.lon, faf.lat, outerAltAtFaf, perpLeft, outerOffset,
+  );
+  const secFafRight = offsetPoint(
+    faf.lon, faf.lat, outerAltAtFaf, perpRight, outerOffset,
+  );
+  const secThrLeft = offsetPoint(
+    threshold.lon, threshold.lat, outerAltAtThr, perpLeft, outerOffset,
+  );
+  const secThrRight = offsetPoint(
+    threshold.lon, threshold.lat, outerAltAtThr, perpRight, outerOffset,
+  );
+
+  return {
+    // Primary: ordered FAF-left → FAF-right → threshold-right → threshold-left
+    primaryPolygon: [fafLeft, fafRight, thrRight, thrLeft],
+    // Secondary left: inner FAF edge → outer FAF edge → outer threshold edge → inner threshold edge
+    secondaryLeft: [fafLeft, secFafLeft, secThrLeft, thrLeft],
+    secondaryRight: [fafRight, secFafRight, secThrRight, thrRight],
+  };
 }

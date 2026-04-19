@@ -42,6 +42,7 @@ const ACTIVE_LAYER_KEYS: LayerKey[] = [
   "trajectories",
   "obstacles",
   "procedures",
+  "ocsSurfaces",
 ];
 
 export default function ControlPanel() {
