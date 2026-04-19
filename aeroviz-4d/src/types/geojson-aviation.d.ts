@@ -88,3 +88,82 @@ export interface ObstacleProperties {
   /** Data source tag */
   source: string;
 }
+
+/** One sampled point along a procedure route, used for 4D gates/profile data. */
+export interface ProcedureRouteSample {
+  sequence: number;
+  fixIdent: string;
+  legType: string;
+  role: string;
+  altitudeFt: number | null;
+  geometryAltitudeFt: number;
+  distanceFromStartM: number;
+  timeSeconds: number;
+  sourceLine: number;
+}
+
+/** Shared properties for CIFP-derived procedure features. */
+export interface ProcedureBaseProperties {
+  featureType: "procedure-route" | "procedure-fix";
+  airport: string;
+  procedureType: string;
+  procedureIdent: string;
+  procedureName: string;
+  branch: string;
+  runway: string | null;
+  routeId: string;
+  source: string;
+  sourceCycle: string | null;
+  researchUseOnly: boolean;
+}
+
+/** Properties on each LineString feature in procedures.geojson. */
+export interface ProcedureRouteProperties extends ProcedureBaseProperties {
+  featureType: "procedure-route";
+  nominalSpeedKt: number;
+  tunnel: {
+    lateralHalfWidthNm: number;
+    verticalHalfHeightFt: number;
+    sampleSpacingM: number;
+  };
+  samples: ProcedureRouteSample[];
+  warnings: string[];
+}
+
+/** Properties on each Point feature in procedures.geojson. */
+export interface ProcedureFixProperties extends ProcedureBaseProperties {
+  featureType: "procedure-fix";
+  name: string;
+  sequence: number;
+  legType: string;
+  role: string;
+  altitudeFt: number | null;
+  geometryAltitudeFt: number;
+  distanceFromStartM: number;
+  timeSeconds: number;
+  sourceLine: number;
+}
+
+export type ProcedureFeatureProperties =
+  | ProcedureRouteProperties
+  | ProcedureFixProperties;
+
+export interface ProcedureFeature {
+  type: "Feature";
+  geometry:
+    | {
+        type: "LineString";
+        coordinates: Array<[number, number, number]>;
+      }
+    | {
+        type: "Point";
+        coordinates: [number, number, number];
+      };
+  properties: ProcedureFeatureProperties;
+}
+
+export interface ProcedureFeatureCollection {
+  type: "FeatureCollection";
+  metadata?: Record<string, unknown>;
+  features: ProcedureFeature[];
+}

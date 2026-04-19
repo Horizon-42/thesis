@@ -36,7 +36,8 @@ export type LayerKey =
   | "waypoints"
   | "ocsSurfaces"
   | "trajectories"
-  | "obstacles";
+  | "obstacles"
+  | "procedures";
 
 export interface AirportConfig {
   code: string;
@@ -83,13 +84,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // All layers start visible; hooks respect these flags.
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
-    terrain: true,
-    dsmTerrain: true,
+    terrain: false,
+    dsmTerrain: false,
     runways: true,
     waypoints: true,
     ocsSurfaces: true,
     trajectories: true,
     obstacles: true,
+    procedures: true,
   });
 
   // Store the Viewer reference.

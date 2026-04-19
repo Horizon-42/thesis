@@ -32,9 +32,17 @@ const LAYER_LABELS: Record<LayerKey, string> = {
   ocsSurfaces:  "OCS Surfaces",
   trajectories: "Trajectories",
   obstacles:    "Obstacles",
+  procedures:   "RNAV Procedures",
 };
 
-const ACTIVE_LAYER_KEYS: LayerKey[] = ["terrain", "dsmTerrain", "runways", "trajectories", "obstacles"];
+const ACTIVE_LAYER_KEYS: LayerKey[] = [
+  "terrain",
+  "dsmTerrain",
+  "runways",
+  "trajectories",
+  "obstacles",
+  "procedures",
+];
 
 export default function ControlPanel() {
   const { viewer, layers, toggleLayer, playbackSpeed, setPlaybackSpeed } = useApp();
