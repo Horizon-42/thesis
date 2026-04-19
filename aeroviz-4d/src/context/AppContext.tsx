@@ -35,7 +35,8 @@ export type LayerKey =
   | "runways"
   | "waypoints"
   | "ocsSurfaces"
-  | "trajectories";
+  | "trajectories"
+  | "obstacles";
 
 export interface AirportConfig {
   code: string;
@@ -88,6 +89,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     waypoints: true,
     ocsSurfaces: true,
     trajectories: true,
+    obstacles: true,
   });
 
   // Store the Viewer reference.

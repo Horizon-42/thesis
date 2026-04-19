@@ -31,9 +31,10 @@ const LAYER_LABELS: Record<LayerKey, string> = {
   waypoints:    "Waypoints",
   ocsSurfaces:  "OCS Surfaces",
   trajectories: "Trajectories",
+  obstacles:    "Obstacles",
 };
 
-const ACTIVE_LAYER_KEYS: LayerKey[] = ["terrain", "dsmTerrain", "runways", "trajectories"];
+const ACTIVE_LAYER_KEYS: LayerKey[] = ["terrain", "dsmTerrain", "runways", "trajectories", "obstacles"];
 
 export default function ControlPanel() {
   const { viewer, layers, toggleLayer, playbackSpeed, setPlaybackSpeed } = useApp();

@@ -22,6 +22,7 @@ import { useCesiumViewer } from "../hooks/useCesiumViewer";
 import { useRunwayLayer } from "../hooks/useRunwayLayer";
 import { useTerrainLayer } from "../hooks/useTerrainLayer";
 import { useDsmTerrainLayer } from "../hooks/useDsmTerrainLayer";
+import { useObstacleLayer } from "../hooks/useObstacleLayer";
 import { useApp } from "../context/AppContext";
 
 export default function CesiumViewerComponent() {
@@ -42,6 +43,7 @@ export default function CesiumViewerComponent() {
   useTerrainLayer();
   useDsmTerrainLayer({ enabled: layers.dsmTerrain });
   useRunwayLayer();
+  useObstacleLayer();
   // Waypoint rendering is intentionally disabled for now.
   // Keep the hook implementation for future use.
   // useWaypointLayer();
