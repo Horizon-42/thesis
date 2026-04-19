@@ -27,6 +27,9 @@ For departures, the aerodrome operating visibility is the lowest of the followin
 - Any reported RVR 
 - Pilot visibility
 
+### 2.1.2 Obstacle clearance
+Minimum altitudes meet obstacle clearance requirements under ISA conditions. The transition altitude is 18,000' within Southern Domestic Airspace. Below this altitude, the pilot must set the aircraft altimeter in accordance with CAR 602.35. In Canada, this area is known as the Altimeter Setting Region.
+
 # 3. Multi aircrafts secedule
 ## Arrival Sequencing and Scheduling
 

@@ -3,7 +3,7 @@
 Run the OpenSky fetch stage and CZML generation stage as two decoupled steps.
 
 This script intentionally orchestrates through CLI boundaries:
-1) opensky_cylw/fetch_cylw_opensky.py
+1) opensky_data_query/fetch_cylw_opensky.py
 2) aeroviz-4d/python/generate_czml.py
 
 All unknown CLI arguments are forwarded to the fetch script so this wrapper
@@ -50,7 +50,7 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
     parser = argparse.ArgumentParser(
         description="Run fetch/normalization and CZML generation in one command",
         epilog=(
-            "Any unknown arguments are forwarded to opensky_cylw/fetch_cylw_opensky.py.\n"
+            "Any unknown arguments are forwarded to opensky_data_query/fetch_cylw_opensky.py.\n"
             "Common forwarded options include: --mode, --allow-partial, --approach-window-min, --altitude-mode."
         ),
         formatter_class=argparse.RawTextHelpFormatter,
@@ -63,7 +63,7 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
     parser.add_argument(
         "--output-root",
         default=None,
-        help="Output folder for fetch stage (defaults to opensky_cylw/outputs)",
+        help="Output folder for fetch stage (defaults to opensky_data_query/outputs)",
     )
     parser.add_argument(
         "--aeroviz-root",
@@ -105,10 +105,10 @@ def main() -> None:
     args, fetch_passthrough = parse_args()
 
     repo_root = Path(__file__).resolve().parent
-    fetch_script = repo_root / "opensky_cylw" / "fetch_cylw_opensky.py"
+    fetch_script = repo_root / "opensky_data_query" / "fetch_cylw_opensky.py"
 
     aeroviz_root = Path(args.aeroviz_root) if args.aeroviz_root else repo_root / "aeroviz-4d"
-    output_root = Path(args.output_root) if args.output_root else repo_root / "opensky_cylw" / "outputs"
+    output_root = Path(args.output_root) if args.output_root else repo_root / "opensky_data_query" / "outputs"
 
     generator_script = aeroviz_root / "python" / "generate_czml.py"
     czml_output_path = (
