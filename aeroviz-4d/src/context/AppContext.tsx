@@ -65,6 +65,11 @@ interface AppState {
   layers: Record<LayerKey, boolean>;
   toggleLayer: (key: LayerKey) => void;
 
+  /** Per-route visibility for CIFP procedure features */
+  procedureVisibility: Record<string, boolean>;
+  setProcedureRouteVisible: (routeId: string, visible: boolean) => void;
+  setProcedureRoutesVisible: (routeIds: string[], visible: boolean) => void;
+
   /** Current Cesium clock multiplier (mirrors viewer.clock.multiplier) */
   playbackSpeed: number;
   setPlaybackSpeed: (speed: number) => void;
@@ -81,6 +86,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [airport, setAirport] = useState<AirportConfig | null>(null);
   const [selectedFlightId, setSelectedFlightId] = useState<string | null>(null);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(60);
+  const [procedureVisibility, setProcedureVisibility] = useState<Record<string, boolean>>({});
 
   // All layers start visible; hooks respect these flags.
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
@@ -105,6 +111,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setLayers((prev) => ({ ...prev, [key]: !prev[key] }));
   }, []);
 
+  const setProcedureRouteVisible = useCallback((routeId: string, visible: boolean) => {
+    setProcedureVisibility((prev) => ({ ...prev, [routeId]: visible }));
+  }, []);
+
+  const setProcedureRoutesVisible = useCallback((routeIds: string[], visible: boolean) => {
+    setProcedureVisibility((prev) => {
+      const next = { ...prev };
+      routeIds.forEach((routeId) => {
+        next[routeId] = visible;
+      });
+      return next;
+    });
+  }, []);
+
   return (
     <AppContext.Provider
       value={{
@@ -116,6 +136,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setSelectedFlightId,
         layers,
         toggleLayer,
+        procedureVisibility,
+        setProcedureRouteVisible,
+        setProcedureRoutesVisible,
         playbackSpeed,
         setPlaybackSpeed,
       }}

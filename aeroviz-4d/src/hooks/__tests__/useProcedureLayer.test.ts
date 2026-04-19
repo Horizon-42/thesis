@@ -6,13 +6,17 @@ const {
   mockViewer,
   getProceduresVisible,
   setProceduresVisible,
+  getProcedureVisibility,
+  setProcedureRouteVisible,
   fetchMock,
 } = vi.hoisted(() => {
   const entities: any[] = [];
   let proceduresVisible = true;
+  let procedureVisibility: Record<string, boolean> = {};
   const mockViewer = {
     entities: {
       values: entities,
+      getById: vi.fn((id: string) => entities.find((entity) => entity.id === id)),
       add: vi.fn((entity: any) => {
         entities.push(entity);
         return entity;
@@ -32,6 +36,10 @@ const {
     getProceduresVisible: () => proceduresVisible,
     setProceduresVisible: (value: boolean) => {
       proceduresVisible = value;
+    },
+    getProcedureVisibility: () => procedureVisibility,
+    setProcedureRouteVisible: (routeId: string, visible: boolean) => {
+      procedureVisibility = { ...procedureVisibility, [routeId]: visible };
     },
     fetchMock,
   };
@@ -80,6 +88,7 @@ vi.mock("../../context/AppContext", () => ({
   useApp: () => ({
     viewer: mockViewer,
     layers: { procedures: getProceduresVisible() },
+    procedureVisibility: getProcedureVisibility(),
   }),
 }));
 
@@ -102,6 +111,7 @@ const sampleGeoJson = {
         featureType: "procedure-route",
         routeId: "KRDU-R05LY-R",
         procedureName: "RNAV(GPS) Y RW05L",
+        defaultVisible: true,
         nominalSpeedKt: 140,
         tunnel: {
           lateralHalfWidthNm: 0.3,
@@ -132,7 +142,9 @@ describe("useProcedureLayer", () => {
     entities.length = 0;
     mockViewer.entities.add.mockClear();
     mockViewer.entities.removeById.mockClear();
+    mockViewer.entities.getById.mockClear();
     setProceduresVisible(true);
+    setProcedureRouteVisible("KRDU-R05LY-R", true);
     fetchMock.mockReset();
     fetchMock.mockResolvedValue({
       ok: true,
@@ -160,6 +172,17 @@ describe("useProcedureLayer", () => {
     await waitFor(() => expect(mockViewer.entities.add).toHaveBeenCalled());
 
     setProceduresVisible(false);
+    rerender();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(entities.every((entity) => entity.show === false)).toBe(true);
+  });
+
+  it("syncs individual route visibility without reloading data", async () => {
+    const { rerender } = renderHook(() => useProcedureLayer());
+    await waitFor(() => expect(mockViewer.entities.add).toHaveBeenCalled());
+
+    setProcedureRouteVisible("KRDU-R05LY-R", false);
     rerender();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);

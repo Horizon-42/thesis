@@ -110,7 +110,12 @@ export interface ProcedureBaseProperties {
   procedureIdent: string;
   procedureName: string;
   branch: string;
+  branchIdent?: string;
+  branchType?: "final" | "transition" | "missed" | string;
+  procedureFamily?: "RNAV_GPS" | "RNAV_RNP" | "ILS" | "LOC" | "UNKNOWN" | string;
+  procedureVariant?: string | null;
   runway: string | null;
+  runwayIdent?: string | null;
   routeId: string;
   source: string;
   sourceCycle: string | null;
@@ -120,11 +125,19 @@ export interface ProcedureBaseProperties {
 /** Properties on each LineString feature in procedures.geojson. */
 export interface ProcedureRouteProperties extends ProcedureBaseProperties {
   featureType: "procedure-route";
+  defaultVisible?: boolean;
+  legCoverage?: {
+    parsedLegTypes: string[];
+    renderedLegTypes: string[];
+    skippedLegTypes: string[];
+    simplifiedLegTypes: string[];
+  };
   nominalSpeedKt: number;
   tunnel: {
     lateralHalfWidthNm: number;
     verticalHalfHeightFt: number;
     sampleSpacingM: number;
+    mode?: string;
   };
   samples: ProcedureRouteSample[];
   warnings: string[];
@@ -164,6 +177,17 @@ export interface ProcedureFeature {
 
 export interface ProcedureFeatureCollection {
   type: "FeatureCollection";
-  metadata?: Record<string, unknown>;
+  metadata?: {
+    airport?: string;
+    procedureType?: string;
+    procedureFamilies?: string[];
+    procedureIdents?: string[];
+    runwayIdents?: string[];
+    sourceCycle?: string | null;
+    generatedAt?: string | null;
+    researchUseOnly?: boolean;
+    warnings?: string[];
+    [key: string]: unknown;
+  };
   features: ProcedureFeature[];
 }

@@ -115,28 +115,47 @@ function addTunnelSegment(
   });
 }
 
-function applyProcedureVisibility(viewer: Cesium.Viewer, visible: boolean): void {
-  viewer.entities.values.forEach((entity) => {
-    if (String(entity.id).startsWith(PROCEDURE_ENTITY_PREFIX)) {
-      entity.show = visible;
-    }
-  });
-}
-
 export function useProcedureLayer(): void {
-  const { viewer, layers } = useApp();
+  const { viewer, layers, procedureVisibility } = useApp();
   const visibleRef = useRef(layers.procedures);
+  const procedureVisibilityRef = useRef(procedureVisibility);
+  const routeEntityIdsRef = useRef<Record<string, string[]>>({});
+  const routeDefaultsRef = useRef<Record<string, boolean>>({});
 
   useEffect(() => {
     visibleRef.current = layers.procedures;
-    if (viewer) applyProcedureVisibility(viewer, layers.procedures);
-  }, [viewer, layers.procedures]);
+    procedureVisibilityRef.current = procedureVisibility;
+
+    if (!viewer) return;
+    Object.entries(routeEntityIdsRef.current).forEach(([routeId, entityIds]) => {
+      const routeVisible =
+        procedureVisibility[routeId] ?? routeDefaultsRef.current[routeId] ?? true;
+      entityIds.forEach((entityId) => {
+        const entity = viewer.entities.getById(entityId);
+        if (entity) entity.show = layers.procedures && routeVisible;
+      });
+    });
+  }, [viewer, layers.procedures, procedureVisibility]);
 
   useEffect(() => {
     if (!viewer) return;
 
     let cancelled = false;
     const addedIds: string[] = [];
+    routeEntityIdsRef.current = {};
+    routeDefaultsRef.current = {};
+
+    const addRouteEntityId = (routeId: string, entityId: string) => {
+      addedIds.push(entityId);
+      const existing = routeEntityIdsRef.current[routeId] ?? [];
+      routeEntityIdsRef.current[routeId] = [...existing, entityId];
+    };
+
+    const isRouteVisible = (routeId: string) => {
+      const routeVisible =
+        procedureVisibilityRef.current[routeId] ?? routeDefaultsRef.current[routeId] ?? true;
+      return visibleRef.current && routeVisible;
+    };
 
     fetch("/data/procedures.geojson")
       .then((response) => {
@@ -157,7 +176,8 @@ export function useProcedureLayer(): void {
             return;
           }
 
-          const visible = visibleRef.current;
+          routeDefaultsRef.current[routeId] = feature.properties.defaultVisible ?? true;
+          const visible = isRouteVisible(routeId);
           const lineId = `${baseId}-line`;
           viewer.entities.add({
             id: lineId,
@@ -169,7 +189,7 @@ export function useProcedureLayer(): void {
               material: ROUTE_COLOR,
             },
           });
-          addedIds.push(lineId);
+          addRouteEntityId(routeId, lineId);
 
           const tunnel = feature.properties.tunnel;
           const routePoints = coordinates.map(toProcedurePoint);
@@ -192,7 +212,7 @@ export function useProcedureLayer(): void {
               tunnelSections[index + 1],
               visible,
             );
-            addedIds.push(...segmentIds);
+            segmentIds.forEach((entityId) => addRouteEntityId(routeId, entityId));
           }
         });
 
@@ -203,7 +223,7 @@ export function useProcedureLayer(): void {
           viewer.entities.add({
             id,
             name: props.name,
-            show: visibleRef.current,
+            show: isRouteVisible(props.routeId),
             position: Cesium.Cartesian3.fromDegrees(lon, lat, altM),
             point: {
               pixelSize: props.role === "MAPt" ? 13 : 11,
@@ -222,7 +242,7 @@ export function useProcedureLayer(): void {
               distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 80000),
             },
           });
-          addedIds.push(id);
+          addRouteEntityId(props.routeId, id);
         });
       })
       .catch((error) => {
@@ -239,6 +259,8 @@ export function useProcedureLayer(): void {
     return () => {
       cancelled = true;
       addedIds.forEach((id) => viewer.entities.removeById(id));
+      routeEntityIdsRef.current = {};
+      routeDefaultsRef.current = {};
     };
   }, [viewer]);
 }

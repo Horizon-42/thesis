@@ -10,6 +10,7 @@ from preprocess_procedures import (
     build_route_points,
     decode_cifp_coordinate,
     generate_procedure_geojson,
+    generate_procedures_geojson,
     procedure_exists,
 )
 
@@ -58,7 +59,72 @@ def test_generate_krdu_r05ly_geojson() -> None:
     assert route_features[0]["geometry"]["coordinates"][0][0] == pytest.approx(-78.9264722)
     assert route_features[0]["properties"]["samples"][0]["fixIdent"] == "SCHOO"
     assert route_features[0]["properties"]["samples"][-1]["fixIdent"] == "RW05L"
+    assert route_features[0]["properties"]["runwayIdent"] == "RW05L"
+    assert route_features[0]["properties"]["procedureFamily"] == "RNAV_GPS"
+    assert route_features[0]["properties"]["branchType"] == "final"
+    assert route_features[0]["properties"]["legCoverage"]["skippedLegTypes"] == ["CA", "DF", "HM"]
     assert route_features[0]["properties"]["warnings"]
+
+
+def test_generate_multi_runway_rnav_geojson() -> None:
+    collection = generate_procedures_geojson(
+        cifp_root=CIFP_ROOT,
+        airport="KRDU",
+        procedure_type="SIAP",
+        procedures=["R05LY", "R05RY", "R23LY", "R23RY", "R32"],
+        include_transitions=False,
+        branch="R",
+        nominal_speed_kt=140.0,
+        tunnel_half_width_nm=0.3,
+        tunnel_half_height_ft=300.0,
+        sample_spacing_m=250.0,
+    )
+
+    route_features = [
+        feature
+        for feature in collection["features"]
+        if feature["properties"]["featureType"] == "procedure-route"
+    ]
+    route_ids = [feature["properties"]["routeId"] for feature in route_features]
+    runways = {feature["properties"]["runwayIdent"] for feature in route_features}
+
+    assert len(route_features) == 5
+    assert route_ids == [
+        "KRDU-R05LY-R",
+        "KRDU-R05RY-R",
+        "KRDU-R23LY-R",
+        "KRDU-R23RY-R",
+        "KRDU-R32-R",
+    ]
+    assert runways == {"RW05L", "RW05R", "RW23L", "RW23R", "RW32"}
+    assert collection["metadata"]["procedureFamilies"] == ["RNAV_GPS"]
+
+
+def test_generate_transitions_hidden_by_default() -> None:
+    collection = generate_procedures_geojson(
+        cifp_root=CIFP_ROOT,
+        airport="KRDU",
+        procedure_type="SIAP",
+        procedures=["R05LY"],
+        include_transitions=True,
+        branch="R",
+        nominal_speed_kt=140.0,
+        tunnel_half_width_nm=0.3,
+        tunnel_half_height_ft=300.0,
+        sample_spacing_m=250.0,
+    )
+
+    route_features = [
+        feature
+        for feature in collection["features"]
+        if feature["properties"]["featureType"] == "procedure-route"
+    ]
+    by_branch = {feature["properties"]["branchIdent"]: feature for feature in route_features}
+
+    assert list(by_branch) == ["R", "ACHWDR", "AOTTOS"]
+    assert by_branch["R"]["properties"]["defaultVisible"] is True
+    assert by_branch["ACHWDR"]["properties"]["defaultVisible"] is False
+    assert by_branch["AOTTOS"]["properties"]["branchType"] == "transition"
 
 
 def test_unresolved_fix_is_warned_and_skipped() -> None:
