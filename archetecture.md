@@ -2,6 +2,31 @@
 
 # 2. 4D trajectory prediction for single aircraft with constrains
 
+## 2.1 Regulations
+### 2.1.1 Aerodrome Operating Restrictions - Visibility
+- RVR 2600(1/2 NM)
+
+#### Aerodrome Operating Visibility
+##### With Air Traffic Control Tower
+For arrivals and departures, the aerodrome operating visibility is in accordance with the following hierarchy: 
+1. Runway Visual Range (RVR) for the runway of intended use 
+2. Ground visibility (METAR) 
+3. Tower visibility 
+4. Pilot visibility
+
+**Note** :  Tower visibility  normally just considered as advisory, only replace ground visibility when it is not available or non-representative
+
+##### Without Air traffic Tower
+outside ATC operating hours, MF, Unicom, CARS, or advisory sites, etc
+For arrivals, the aerodrome operating visibility is in accordance with the following hierarchy: 
+1. Runway Visual Range (RVR) for the runway of intended use 
+2. Ground visibility (METAR) 
+3. Pilot visibility 
+For departures, the aerodrome operating visibility is the lowest of the following visibilities: 
+- Ground visibility (METAR) 
+- Any reported RVR 
+- Pilot visibility
+
 # 3. Multi aircrafts secedule
 ## Arrival Sequencing and Scheduling
 
