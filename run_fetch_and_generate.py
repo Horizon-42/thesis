@@ -16,6 +16,7 @@ import argparse
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -95,14 +96,59 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
         action="store_true",
         help="Forwarded to fetch stage: export raw track waypoints without normalization/filtering",
     )
+    parser.add_argument(
+        "--hours-ago",
+        type=float,
+        default=None,
+        help=(
+            "Historical window start offset in hours before now (decimal, e.g. 2.5). "
+            "Must be paired with --range-hours. Triggers --mode historical on the fetch stage."
+        ),
+    )
+    parser.add_argument(
+        "--range-hours",
+        type=float,
+        default=None,
+        help="Historical window duration in hours (decimal, e.g. 1.5). Must be paired with --hours-ago.",
+    )
 
     # Everything not recognized here is forwarded to fetch_cylw_opensky.py.
     args, fetch_passthrough = parser.parse_known_args()
     return args, fetch_passthrough
 
 
+def _resolve_historical_window(args: argparse.Namespace) -> tuple[int, int] | None:
+    """Translate --hours-ago/--range-hours into (begin, end) unix seconds, or return None."""
+    if args.hours_ago is None and args.range_hours is None:
+        return None
+    if args.hours_ago is None or args.range_hours is None:
+        raise RuntimeError("--hours-ago and --range-hours must be provided together.")
+    if args.hours_ago <= 0 or args.range_hours <= 0:
+        raise RuntimeError("--hours-ago and --range-hours must be positive decimals.")
+
+    now = int(time.time())
+    begin = now - int(round(args.hours_ago * 3600))
+    end = begin + int(round(args.range_hours * 3600))
+    if end <= begin:
+        raise RuntimeError("Computed historical window is empty; check --range-hours.")
+    return begin, end
+
+
 def main() -> None:
     args, fetch_passthrough = parse_args()
+
+    historical_window = _resolve_historical_window(args)
+    if historical_window is not None:
+        if args.input_json:
+            raise RuntimeError(
+                "--hours-ago/--range-hours cannot be combined with --input-json (fetch stage is bypassed)."
+            )
+        for conflicting in ("--mode", "--begin", "--end"):
+            if _has_flag(fetch_passthrough, conflicting):
+                raise RuntimeError(
+                    f"--hours-ago/--range-hours conflicts with forwarded {conflicting}; "
+                    "remove one of them."
+                )
 
     repo_root = Path(__file__).resolve().parent
     fetch_script = repo_root / "opensky_data_query" / "fetch_cylw_opensky.py"
@@ -185,6 +231,17 @@ def main() -> None:
             fetch_cmd.extend(["--aeroviz-root", str(aeroviz_root)])
         if args.disable_normalization and not _has_flag(fetch_passthrough, "--disable-normalization"):
             fetch_cmd.append("--disable-normalization")
+        if historical_window is not None:
+            begin_unix, end_unix = historical_window
+            fetch_cmd.extend([
+                "--mode", "historical",
+                "--begin", str(begin_unix),
+                "--end", str(end_unix),
+            ])
+            print(
+                f"[Pipeline] Historical window: {args.hours_ago}h ago for {args.range_hours}h "
+                f"(begin={begin_unix}, end={end_unix})."
+            )
         fetch_cmd.extend(fetch_passthrough)
 
         effective_airport = _extract_option(fetch_cmd, "--airport", args.airport).upper()

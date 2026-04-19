@@ -125,9 +125,35 @@ class OpenSkyClient:
                 return json.loads(raw) if raw else None
         except HTTPError as e:
             body = e.read().decode("utf-8", errors="replace")
+            # OpenSky convention: /flights/* and /tracks return 404 with an empty
+            # body (or "[]") to signal "no results". Treat that as None so callers
+            # can fall back to `or []` instead of raising.
+            if e.code == 404 and body.strip() in ("", "[]", "{}"):
+                return None
             raise RuntimeError(f"HTTP {e.code} for {url}: {body[:300]}") from e
         except URLError as e:
             raise RuntimeError(f"Network error for {url}: {e}") from e
+
+
+def load_credentials_file(path: Path) -> tuple[str | None, str | None]:
+    """Return (client_id, client_secret) parsed from a JSON credentials file.
+
+    Accepts both camelCase (clientId/clientSecret) — as exported by the OpenSky
+    web UI — and snake_case (client_id/client_secret) key styles.
+    """
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as e:
+        raise RuntimeError(f"Failed to read credentials file {path}: {e}") from e
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"Credentials file {path} is not valid JSON: {e}") from e
+    if not isinstance(data, dict):
+        raise RuntimeError(f"Credentials file {path} must contain a JSON object")
+    client_id = data.get("clientId") or data.get("client_id")
+    client_secret = data.get("clientSecret") or data.get("client_secret")
+    return (client_id, client_secret)
 
 
 def parse_time_to_unix(value: str) -> int:
@@ -332,6 +358,16 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--client-id", default=os.getenv("OPENSKY_CLIENT_ID"))
     parser.add_argument("--client-secret", default=os.getenv("OPENSKY_CLIENT_SECRET"))
+    parser.add_argument(
+        "--credentials-file",
+        default=None,
+        help=(
+            "Path to a JSON file with OpenSky OAuth credentials. "
+            "Accepts keys {clientId, clientSecret} or {client_id, client_secret}. "
+            "Defaults to credentials.json next to this script. "
+            "Used only when --client-id/--client-secret (and env vars) are absent."
+        ),
+    )
 
     parser.add_argument("--bbox-lat-pad", type=float, default=0.30, help="Live mode latitude half-span around selected airport")
     parser.add_argument("--bbox-lon-pad", type=float, default=0.45, help="Live mode longitude half-span around selected airport")
@@ -416,9 +452,26 @@ def main() -> None:
     if source_raw_payload is not None:
         mode = str(source_raw_payload.get("mode") or "offline")
     else:
+        client_id = args.client_id
+        client_secret = args.client_secret
+        if not (client_id and client_secret):
+            credentials_path = (
+                Path(args.credentials_file)
+                if args.credentials_file
+                else script_path.parent / "credentials.json"
+            )
+            if credentials_path.exists():
+                file_id, file_secret = load_credentials_file(credentials_path)
+                client_id = client_id or file_id
+                client_secret = client_secret or file_secret
+                if file_id or file_secret:
+                    print(f"[OpenSky] Loaded OAuth credentials from {credentials_path}")
+            elif args.credentials_file:
+                raise RuntimeError(f"Credentials file not found: {credentials_path}")
+
         client = OpenSkyClient(
-            client_id=args.client_id,
-            client_secret=args.client_secret,
+            client_id=client_id,
+            client_secret=client_secret,
         )
 
         if mode == "auto":
