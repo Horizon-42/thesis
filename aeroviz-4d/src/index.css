@@ -1,5 +1,165 @@
 /* Global styles shared across all components */
 
+html,
+body,
+#root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* ── DSM demo page ────────────────────────────────────────────────────────── */
+.dsm-demo-page {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: #0b1117;
+  color: #ecfdf5;
+  font-family: "Inter", "Segoe UI", sans-serif;
+}
+
+.dsm-demo-viewer {
+  position: absolute;
+  inset: 0;
+}
+
+.dsm-demo-panel {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  z-index: 10;
+  width: min(320px, calc(100vw - 36px));
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.84);
+  backdrop-filter: blur(8px);
+  box-sizing: border-box;
+}
+
+.dsm-demo-panel h1 {
+  margin: 10px 0 6px;
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.dsm-demo-panel p {
+  margin: 0 0 14px;
+  color: #a7f3d0;
+  font-size: 13px;
+}
+
+.dsm-demo-panel dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.dsm-demo-panel dl div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dsm-demo-panel dt {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.dsm-demo-panel dd {
+  margin: 0;
+  color: #f8fafc;
+  font-family: "Courier New", monospace;
+  font-size: 12px;
+  text-align: right;
+}
+
+.dsm-demo-link {
+  color: #67e8f9;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.dsm-demo-link:hover {
+  text-decoration: underline;
+}
+
+.dsm-demo-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.dsm-terrain-panel {
+  width: min(360px, calc(100vw - 36px));
+}
+
+.dsm-demo-panel .dsm-terrain-note {
+  margin-top: 14px;
+  margin-bottom: 0;
+  color: #bae6fd;
+  line-height: 1.45;
+}
+
+.dsm-layer-toggles {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(148, 163, 184, 0.24);
+}
+
+.dsm-layer-toggles h2 {
+  margin: 0 0 2px;
+  color: #e2e8f0;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.dsm-layer-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #dbeafe;
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.dsm-layer-toggle input {
+  width: 14px;
+  height: 14px;
+  accent-color: #22d3ee;
+}
+
+.dsm-demo-legend {
+  position: absolute;
+  left: 18px;
+  bottom: 18px;
+  z-index: 10;
+  display: grid;
+  grid-template-columns: auto minmax(160px, 22vw) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.84);
+  color: #d1fae5;
+  font-size: 12px;
+}
+
+.dsm-demo-legend div {
+  height: 10px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #1e56a8 0%, #22ad7e 35%, #f5c447 66%, #c63734 100%);
+}
+
+.dsm-terrain-legend {
+  left: auto;
+  right: 18px;
+}
+
 /* ── Overlay grid container ───────────────────────────────────────────────── */
 /*
  *  Stretches over the Cesium canvas; panels sit in named grid areas.

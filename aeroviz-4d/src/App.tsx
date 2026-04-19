@@ -13,13 +13,15 @@
 
 import CesiumViewerComponent from "./components/CesiumViewer";
 import ControlPanel from "./components/ControlPanel";
+import DsmDemoPage from "./components/DsmDemoPage";
+import DsmTerrainDemoPage from "./components/DsmTerrainDemoPage";
 import HUD from "./components/HUD";
 import FlightTable from "./components/FlightTable";
 import { useCzmlLoader } from "./hooks/useCzmlLoader";
 
 const CZML_URL = "/data/trajectories.czml";
 
-export default function App() {
+function FlightApp() {
   const { flightIds } = useCzmlLoader(CZML_URL);
 
   return (
@@ -35,4 +37,17 @@ export default function App() {
       </div>
     </>
   );
+}
+
+export default function App() {
+  const isDsmDemo =
+    window.location.pathname === "/dsm-demo" || window.location.hash === "#dsm-demo";
+  const isDsmTerrainDemo =
+    window.location.pathname === "/dsm-terrain-demo" ||
+    window.location.hash === "#dsm-terrain-demo";
+
+  if (isDsmDemo) return <DsmDemoPage />;
+  if (isDsmTerrainDemo) return <DsmTerrainDemoPage />;
+
+  return <FlightApp />;
 }

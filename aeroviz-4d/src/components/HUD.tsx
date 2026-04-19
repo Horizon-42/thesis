@@ -83,6 +83,8 @@ export default function HUD() {
   // ── Live readout (throttled to ~10 Hz) ───────────────────────────────────
   useEffect(() => {
     if (!viewer) return;
+    setLighting(viewer.scene.globe.enableLighting);
+    setExaggeration(viewer.scene.verticalExaggeration);
 
     const read = () => {
       const now = Date.now();
@@ -121,7 +123,7 @@ export default function HUD() {
 
   function changeExaggeration(value: number) {
     if (!viewer) return;
-    (viewer.scene.globe as any).terrainExaggeration = value;
+    viewer.scene.verticalExaggeration = value;
     setExaggeration(value);
   }
 
@@ -295,7 +297,7 @@ export default function HUD() {
           <input
             type="range"
             min="1"
-            max="10"
+            max="60"
             step="0.5"
             value={exaggeration}
             onChange={(e) => changeExaggeration(Number(e.target.value))}
