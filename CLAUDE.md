@@ -60,7 +60,8 @@ Global state lives in `AppContext` (context + useState, no Redux). Key state: `v
 Components read context via `useApp()` hook. CesiumJS logic is encapsulated in custom hooks:
 - `useCesiumViewer` — initializes Viewer, loads airport.json, sets camera
 - `useCzmlLoader` — loads CZML data source, syncs Cesium clock
-- `useRunwayLayer` / `useTerrainLayer` / `useDsmTerrainLayer` — data layer management
+- `useRunwayLayer` / `useTerrainLayer` — data layer management
+- `useDsmTerrainLayer` — loads preprocessed `.f32` heightmap tiles via `terrain/dsmHeightmapTerrain.ts`; returns `{ status, metadata, provider, error }` so consumers can display terrain info or manage toggling; controlled by `layers.dsmTerrain` toggle in the main app
 
 UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via CSS grid with `pointer-events: none`.
 
@@ -102,3 +103,13 @@ This is a thesis research project. Key aviation concepts in the code:
 - **CTA** (Controlled Time of Arrival) — ATC-assigned time slot at a fix point
 
 The project serves dual purposes: thesis visualization/validation, and reusable research component library.
+
+## Changelog
+
+### 2026-04-19 — Refactor DSM terrain into reusable hook
+
+Rewrote `useDsmTerrainLayer` to use the preprocessed heightmap pipeline (`terrain/dsmHeightmapTerrain.ts`) instead of decoding raw GeoTIFF in the browser. The hook now returns `{ status, metadata, provider, error }` and can be dropped into any page.
+
+- `DsmTerrainDemoPage` delegates terrain loading to the hook (keeps its own overlay/camera logic)
+- `CesiumViewer` wires the hook so DSM terrain is available in the main flight view
+- Added `dsmTerrain` to `LayerKey` with a toggle in `ControlPanel`

@@ -31,6 +31,7 @@ import type * as Cesium from "cesium";
 // Extend this union if you add new data layers.
 export type LayerKey =
   | "terrain"
+  | "dsmTerrain"
   | "runways"
   | "waypoints"
   | "ocsSurfaces"
@@ -82,6 +83,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // All layers start visible; hooks respect these flags.
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
     terrain: true,
+    dsmTerrain: true,
     runways: true,
     waypoints: true,
     ocsSurfaces: true,

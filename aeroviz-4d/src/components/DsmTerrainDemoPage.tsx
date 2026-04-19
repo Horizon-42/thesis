@@ -2,10 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import HUD from "./HUD";
-import {
-  loadDsmHeightmapTerrain,
-  type DsmHeightmapTerrainMetadata,
-} from "../terrain/dsmHeightmapTerrain";
+import { useDsmTerrainLayer } from "../hooks/useDsmTerrainLayer";
+import type { DsmHeightmapTerrainMetadata } from "../terrain/dsmHeightmapTerrain";
 
 const TERRAIN_VERTICAL_EXAGGERATION = 25;
 const SATELLITE_IMAGERY_URL =
@@ -130,14 +128,16 @@ async function addOriginalTifHeatmap(
 export default function DsmTerrainDemoPage() {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<Cesium.Viewer | null>(null);
-  const dsmTerrainProviderRef = useRef<Cesium.CustomHeightmapTerrainProvider | null>(null);
   const flatTerrainProviderRef = useRef<Cesium.EllipsoidTerrainProvider | null>(null);
   const satelliteLayerRef = useRef<Cesium.ImageryLayer | null>(null);
   const terrainTintLayerRef = useRef<Cesium.ImageryLayer | null>(null);
   const originalTifHeatmapLayerRef = useRef<Cesium.ImageryLayer | null>(null);
   const layerStateRef = useRef<LayerToggleState>(DEFAULT_LAYER_STATE);
   const { setAirport, setViewer } = useApp();
-  const [state, setState] = useState<DsmTerrainDemoState>({
+
+  const terrain = useDsmTerrainLayer();
+
+  const [displayState, setDisplayState] = useState<DsmTerrainDemoState>({
     status: "Loading preprocessed DSM terrain",
     rasterSize: "",
     sourceTiles: "",
@@ -160,6 +160,7 @@ export default function DsmTerrainDemoPage() {
     });
   }
 
+  // ── Sync layer visibility toggles ─────────────────────────────────────────
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer || viewer.isDestroyed()) return;
@@ -171,7 +172,7 @@ export default function DsmTerrainDemoPage() {
     }
 
     const terrainProvider = layers.terrain
-      ? dsmTerrainProviderRef.current
+      ? terrain.provider
       : flatTerrainProviderRef.current;
     if (terrainProvider) {
       viewer.scene.terrainProvider = terrainProvider;
@@ -179,12 +180,12 @@ export default function DsmTerrainDemoPage() {
     }
 
     viewer.scene.requestRender();
-  }, [layers]);
+  }, [layers, terrain.provider]);
 
+  // ── Create Viewer ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (!containerRef.current) return;
 
-    let cancelled = false;
     const viewer = new Cesium.Viewer(containerRef.current, {
       baseLayer: false,
       baseLayerPicker: false,
@@ -208,10 +209,6 @@ export default function DsmTerrainDemoPage() {
     viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString("#1f4f46");
     viewer.scene.globe.depthTestAgainstTerrain = true;
     viewer.scene.screenSpaceCameraController.enableCollisionDetection = false;
-
-    // The DSM heights are real metres, so the terrain relief is only a few
-    // metres at airport scale. Exaggeration is view-only: the preprocessed
-    // height tiles stay unmodified and can still be inspected as real heights.
     viewer.scene.verticalExaggeration = TERRAIN_VERTICAL_EXAGGERATION;
     viewer.scene.verticalExaggerationRelativeHeight = 0;
 
@@ -219,78 +216,79 @@ export default function DsmTerrainDemoPage() {
     satelliteLayer.show = layerStateRef.current.satellite;
     satelliteLayerRef.current = satelliteLayer;
 
-    loadDsmHeightmapTerrain()
-      .then(async ({ metadata, provider }) => {
-        if (cancelled || viewer.isDestroyed()) return;
-
-        // This is the important difference from the GLB/B3DM demo: Cesium now
-        // receives a TerrainProvider, so clamped geometry and globe terrain LOD
-        // use these height tiles instead of treating the DSM as a separate model.
-        dsmTerrainProviderRef.current = provider;
-        const flatTerrainProvider =
-          flatTerrainProviderRef.current ?? new Cesium.EllipsoidTerrainProvider();
-        flatTerrainProviderRef.current = flatTerrainProvider;
-        viewer.scene.terrainProvider = layerStateRef.current.terrain ? provider : flatTerrainProvider;
-        viewer.scene.globe.depthTestAgainstTerrain = layerStateRef.current.terrain;
-
-        const originalTifHeatmapLayer = await addOriginalTifHeatmap(viewer, metadata);
-        if (originalTifHeatmapLayer) {
-          originalTifHeatmapLayer.show = layerStateRef.current.originalTifHeatmap;
-          originalTifHeatmapLayerRef.current = originalTifHeatmapLayer;
-        }
-
-        const terrainTintLayer = await addDsmHeightTint(viewer, metadata);
-        if (terrainTintLayer) {
-          terrainTintLayer.show = layerStateRef.current.terrainTint;
-          terrainTintLayerRef.current = terrainTintLayer;
-        }
-        if (cancelled || viewer.isDestroyed()) return;
-
-        const center = centerOfBounds(metadata);
-        setAirport({
-          code: "CYVR DSM",
-          lon: center.lon,
-          lat: center.lat,
-          height: 4300,
-        });
-        const focus = Cesium.Cartesian3.fromDegrees(
-          center.lon,
-          center.lat,
-          Math.max(120, metadata.stats.max * TERRAIN_VERTICAL_EXAGGERATION)
-        );
-        viewer.camera.lookAt(
-          focus,
-          new Cesium.HeadingPitchRange(
-            Cesium.Math.toRadians(-38),
-            Cesium.Math.toRadians(-62),
-            4300
-          )
-        );
-        viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
-        viewer.scene.requestRender();
-        setState(describeMetadata(metadata));
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        console.error("[DsmTerrainDemoPage] Failed to load DSM heightmap terrain:", error);
-        setState((current) => ({
-          ...current,
-          status: "DSM heightmap terrain failed to load",
-          source: "Failed",
-        }));
-      });
-
     return () => {
-      cancelled = true;
       satelliteLayerRef.current = null;
       terrainTintLayerRef.current = null;
       originalTifHeatmapLayerRef.current = null;
-      dsmTerrainProviderRef.current = null;
       flatTerrainProviderRef.current = null;
       viewerRef.current = null;
       viewer.destroy();
     };
-  }, [setAirport, setViewer]);
+  }, [setViewer]);
+
+  // ── Set up overlays and camera once terrain metadata is available ─────────
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer || viewer.isDestroyed() || !terrain.metadata) return;
+
+    let cancelled = false;
+    const metadata = terrain.metadata;
+
+    (async () => {
+      const originalTifHeatmapLayer = await addOriginalTifHeatmap(viewer, metadata);
+      if (cancelled || viewer.isDestroyed()) return;
+      if (originalTifHeatmapLayer) {
+        originalTifHeatmapLayer.show = layerStateRef.current.originalTifHeatmap;
+        originalTifHeatmapLayerRef.current = originalTifHeatmapLayer;
+      }
+
+      const terrainTintLayer = await addDsmHeightTint(viewer, metadata);
+      if (cancelled || viewer.isDestroyed()) return;
+      if (terrainTintLayer) {
+        terrainTintLayer.show = layerStateRef.current.terrainTint;
+        terrainTintLayerRef.current = terrainTintLayer;
+      }
+
+      const center = centerOfBounds(metadata);
+      setAirport({
+        code: "CYVR DSM",
+        lon: center.lon,
+        lat: center.lat,
+        height: 4300,
+      });
+      const focus = Cesium.Cartesian3.fromDegrees(
+        center.lon,
+        center.lat,
+        Math.max(120, metadata.stats.max * TERRAIN_VERTICAL_EXAGGERATION)
+      );
+      viewer.camera.lookAt(
+        focus,
+        new Cesium.HeadingPitchRange(
+          Cesium.Math.toRadians(-38),
+          Cesium.Math.toRadians(-62),
+          4300
+        )
+      );
+      viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+      viewer.scene.requestRender();
+      setDisplayState(describeMetadata(metadata));
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [terrain.metadata, setAirport]);
+
+  // ── Update display when terrain status changes ────────────────────────────
+  useEffect(() => {
+    if (terrain.status === "error") {
+      setDisplayState((current) => ({
+        ...current,
+        status: "DSM heightmap terrain failed to load",
+        source: "Failed",
+      }));
+    }
+  }, [terrain.status]);
 
   return (
     <main className="dsm-demo-page">
@@ -304,39 +302,39 @@ export default function DsmTerrainDemoPage() {
           <a href="/dsm-demo" className="dsm-demo-link">3D Tiles demo</a>
         </nav>
         <h1>CYVR DSM Terrain</h1>
-        <p>{state.status}</p>
+        <p>{displayState.status}</p>
         <dl>
           <div>
             <dt>Raster</dt>
-            <dd>{state.rasterSize || "Pending"}</dd>
+            <dd>{displayState.rasterSize || "Pending"}</dd>
           </div>
           <div>
             <dt>Source TIFFs</dt>
-            <dd>{state.sourceTiles || "Pending"}</dd>
+            <dd>{displayState.sourceTiles || "Pending"}</dd>
           </div>
           <div>
             <dt>Tile grid</dt>
-            <dd>{state.tileSize || "Pending"}</dd>
+            <dd>{displayState.tileSize || "Pending"}</dd>
           </div>
           <div>
             <dt>Levels</dt>
-            <dd>{state.levels || "Pending"}</dd>
+            <dd>{displayState.levels || "Pending"}</dd>
           </div>
           <div>
             <dt>Tiles</dt>
-            <dd>{state.tiles || "Pending"}</dd>
+            <dd>{displayState.tiles || "Pending"}</dd>
           </div>
           <div>
             <dt>Heights</dt>
-            <dd>{state.heights || "Pending"}</dd>
+            <dd>{displayState.heights || "Pending"}</dd>
           </div>
           <div>
             <dt>Center</dt>
-            <dd>{state.center || "Pending"}</dd>
+            <dd>{displayState.center || "Pending"}</dd>
           </div>
           <div>
             <dt>Provider</dt>
-            <dd>{state.source}</dd>
+            <dd>{displayState.source}</dd>
           </div>
         </dl>
         <div className="dsm-layer-toggles" aria-label="DSM layer toggles">
@@ -382,9 +380,9 @@ export default function DsmTerrainDemoPage() {
         </p>
       </section>
       <div className="dsm-demo-legend dsm-terrain-legend">
-        <span>{state.heightMin || "Low"}</span>
+        <span>{displayState.heightMin || "Low"}</span>
         <div />
-        <span>{state.heightMax || "High"}</span>
+        <span>{displayState.heightMax || "High"}</span>
       </div>
     </main>
   );

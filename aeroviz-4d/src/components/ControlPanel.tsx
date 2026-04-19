@@ -26,13 +26,14 @@ const SPEED_OPTIONS: Array<{ label: string; value: number }> = [
 /** Human-readable names for each layer toggle */
 const LAYER_LABELS: Record<LayerKey, string> = {
   terrain:      "Terrain",
+  dsmTerrain:   "DSM Terrain",
   runways:      "Runways",
   waypoints:    "Waypoints",
   ocsSurfaces:  "OCS Surfaces",
   trajectories: "Trajectories",
 };
 
-const ACTIVE_LAYER_KEYS: LayerKey[] = ["terrain", "runways", "trajectories"];
+const ACTIVE_LAYER_KEYS: LayerKey[] = ["terrain", "dsmTerrain", "runways", "trajectories"];
 
 export default function ControlPanel() {
   const { viewer, layers, toggleLayer, playbackSpeed, setPlaybackSpeed } = useApp();

@@ -21,12 +21,15 @@ import { useRef } from "react";
 import { useCesiumViewer } from "../hooks/useCesiumViewer";
 import { useRunwayLayer } from "../hooks/useRunwayLayer";
 import { useTerrainLayer } from "../hooks/useTerrainLayer";
+import { useDsmTerrainLayer } from "../hooks/useDsmTerrainLayer";
+import { useApp } from "../context/AppContext";
 
 export default function CesiumViewerComponent() {
   // This ref is the DOM anchor for the Cesium canvas.
   // IMPORTANT: the div must be in the DOM before useCesiumViewer runs —
   // that's why we pass the ref to the hook rather than accessing the node directly.
   const containerRef = useRef<HTMLDivElement>(null);
+  const { layers } = useApp();
 
   // ── Initialise the 3D globe ────────────────────────────────────────────────
   // This hook creates the Viewer and stores it in AppContext.
@@ -37,6 +40,7 @@ export default function CesiumViewerComponent() {
   // ── Activate data layers ───────────────────────────────────────────────────
   // Each hook runs its own useEffect and manages its own cleanup.
   useTerrainLayer();
+  useDsmTerrainLayer({ enabled: layers.dsmTerrain });
   useRunwayLayer();
   // Waypoint rendering is intentionally disabled for now.
   // Keep the hook implementation for future use.
