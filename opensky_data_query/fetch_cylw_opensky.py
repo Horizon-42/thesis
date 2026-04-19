@@ -40,9 +40,11 @@ import csv
 import json
 import os
 import time
-from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from threading import Lock
 from typing import Any
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -75,6 +77,7 @@ class OpenSkyClient:
 
     _token: str | None = None
     _token_expiry: float = 0.0
+    _token_lock: Lock = field(default_factory=Lock)
 
     @property
     def has_oauth(self) -> bool:
@@ -106,7 +109,9 @@ class OpenSkyClient:
         if not self.has_oauth:
             return {}
         if not self._token or time.time() >= self._token_expiry:
-            self._refresh_token()
+            with self._token_lock:
+                if not self._token or time.time() >= self._token_expiry:
+                    self._refresh_token()
         return {"Authorization": f"Bearer {self._token}"}
 
     def get(self, endpoint: str, params: dict[str, Any] | None = None, authenticated: bool = False) -> Any:
@@ -311,6 +316,7 @@ def fetch_historical_tracks(
     begin: int,
     end: int,
     max_tracks: int,
+    track_workers: int,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     arrivals = client.get(
         "/flights/arrival",
@@ -319,16 +325,24 @@ def fetch_historical_tracks(
     ) or []
     departures: list[dict[str, Any]] = []
     candidates = arrivals
-    tracks: list[dict[str, Any]] = []
+    tracks_with_index: list[tuple[int, dict[str, Any]]] = []
 
-    # Retrieve track around flight timestamp.
-    for flight in candidates:
+    print(
+        f"[OpenSky] historical arrivals found: {len(candidates)} "
+        f"({datetime.fromtimestamp(begin, timezone.utc).isoformat()} to "
+        f"{datetime.fromtimestamp(end, timezone.utc).isoformat()})",
+        flush=True,
+    )
+    if not candidates:
+        return arrivals, departures, []
+
+    def fetch_one(index: int, flight: dict[str, Any]) -> tuple[int, dict[str, Any] | None]:
         icao24 = (flight.get("icao24") or "").lower()
         if not icao24:
-            continue
+            return index, None
         t_ref = int(flight.get("lastSeen") or flight.get("firstSeen") or 0)
         if t_ref <= 0:
-            continue
+            return index, None
 
         try:
             track = client.get(
@@ -337,13 +351,60 @@ def fetch_historical_tracks(
                 authenticated=True,
             )
             if track and track.get("path"):
-                tracks.append(track)
+                return index, track
         except RuntimeError:
-            continue
+            return index, None
 
-        if len(tracks) >= max_tracks:
-            break
+        return index, None
 
+    worker_count = max(1, min(track_workers, len(candidates), max_tracks))
+    if worker_count == 1:
+        for index, flight in enumerate(candidates, start=1):
+            _idx, track = fetch_one(index, flight)
+            if track:
+                tracks_with_index.append((index, track))
+            print(
+                f"[OpenSky] historical tracks checked: {index}/{len(candidates)} "
+                f"downloaded={len(tracks_with_index)}/{max_tracks}",
+                flush=True,
+            )
+            if len(tracks_with_index) >= max_tracks:
+                break
+
+        tracks_with_index.sort(key=lambda item: item[0])
+        return arrivals, departures, [track for _, track in tracks_with_index]
+
+    print(
+        f"[OpenSky] fetching historical tracks with {worker_count} workers...",
+        flush=True,
+    )
+    executor = ThreadPoolExecutor(max_workers=worker_count)
+    futures = {
+        executor.submit(fetch_one, index, flight): index
+        for index, flight in enumerate(candidates, start=1)
+    }
+    checked = 0
+    try:
+        for future in as_completed(futures):
+            checked += 1
+            index, track = future.result()
+            if track:
+                tracks_with_index.append((index, track))
+            print(
+                f"[OpenSky] historical tracks checked: {checked}/{len(candidates)} "
+                f"downloaded={len(tracks_with_index)}/{max_tracks}",
+                flush=True,
+            )
+            if len(tracks_with_index) >= max_tracks:
+                for pending in futures:
+                    if not pending.done():
+                        pending.cancel()
+                break
+    finally:
+        executor.shutdown(wait=True, cancel_futures=True)
+
+    tracks_with_index.sort(key=lambda item: item[0])
+    tracks = [track for _, track in tracks_with_index[:max_tracks]]
     return arrivals, departures, tracks
 
 
@@ -394,6 +455,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--allow-partial", action="store_true", help="Allow tracks that do not contain landing/touchdown near airport")
     parser.add_argument("--live-window-hours", type=int, default=12, help="Look back this many hours for /flights/all in live mode")
     parser.add_argument("--max-tracks", type=int, default=80)
+    parser.add_argument(
+        "--track-workers",
+        type=int,
+        default=4,
+        help=(
+            "Concurrent /tracks/all requests in historical mode. "
+            "Use 1 for the old serial behavior. Default: 4."
+        ),
+    )
     parser.add_argument("--max-flights", type=int, default=16)
     parser.add_argument("--min-flights", type=int, default=3, help="If strict landing filter yields fewer than this count, fill with partial approach tracks")
     parser.add_argument("--exclude-ground", action="store_true", help="Exclude on-ground points from exported trajectory")
@@ -530,6 +600,7 @@ def main() -> None:
             begin=begin,
             end=end,
             max_tracks=args.max_tracks,
+            track_workers=args.track_workers,
         )
         payload.update(
             {

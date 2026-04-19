@@ -33,6 +33,8 @@ export interface CzmlLoaderState {
   isLoaded: boolean;
   /** IDs of all aircraft entities found in the CZML (excludes "document") */
   flightIds: string[];
+  /** Non-fatal data issue that should be shown to the user. */
+  warning: string | null;
   error: string | null;
 }
 
@@ -49,6 +51,7 @@ export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
   const [state, setState] = useState<CzmlLoaderState>({
     isLoaded: false,
     flightIds: [],
+    warning: null,
     error: null,
   });
 
@@ -59,7 +62,7 @@ export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
     let dataSource: Cesium.CzmlDataSource | undefined;
     let cancelled = false;
 
-    setState({ isLoaded: false, flightIds: [], error: null });
+    setState({ isLoaded: false, flightIds: [], warning: null, error: null });
 
     // ── Step 1: Load the CZML file ────────────────────────────────────────────
     const ds = new Cesium.CzmlDataSource(LAYER_NAME);
@@ -69,36 +72,59 @@ export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
 
         // ── Inside .then(ds => { ... }): ─────────────────────────────────────────
 
+        const ids = loadedDs.entities.values
+          .filter((e) => e.id !== "document")
+          .map((e) => e.id);
+
+        if (ids.length === 0) {
+          const warning =
+            `No trajectory entities were found in ${czmlUrl}. ` +
+            "The globe will stay open, but playback is disabled until CZML data is generated.";
+
+          console.warn(`[useCzmlLoader] ${warning}`);
+          viewer.trackedEntity = undefined;
+          setSelectedFlightId(null);
+          setState({ isLoaded: true, flightIds: [], warning, error: null });
+          return;
+        }
+
         dataSource = loadedDs;
         dsRef.current = loadedDs;
         viewer.dataSources.add(loadedDs);
         loadedDs.show = layers.trajectories;
 
+        let warning: string | null = null;
         if (loadedDs.clock) {
-          viewer.clock.startTime = loadedDs.clock.startTime.clone();
-          viewer.clock.stopTime = loadedDs.clock.stopTime.clone();
-          viewer.clock.currentTime = loadedDs.clock.startTime.clone();
-          viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP;
-          viewer.clock.multiplier = 60;
-          viewer.clock.shouldAnimate = true;
-          viewer.timeline?.zoomTo(viewer.clock.startTime, viewer.clock.stopTime);
-        }
+          const startTime = loadedDs.clock.startTime.clone();
+          const stopTime = loadedDs.clock.stopTime.clone();
 
-        const ids = loadedDs.entities.values
-          .filter((e) => e.id !== "document")
-          .map((e) => e.id);
+          if (Cesium.JulianDate.lessThan(startTime, stopTime)) {
+            viewer.clock.startTime = startTime;
+            viewer.clock.stopTime = stopTime;
+            viewer.clock.currentTime = startTime.clone();
+            viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP;
+            viewer.clock.multiplier = 60;
+            viewer.clock.shouldAnimate = true;
+            viewer.timeline?.zoomTo(viewer.clock.startTime, viewer.clock.stopTime);
+          } else {
+            warning =
+              `The CZML clock interval in ${czmlUrl} has no duration. ` +
+              "Trajectory entities were loaded, but playback timing was not changed.";
+            console.warn(`[useCzmlLoader] ${warning}`);
+          }
+        }
 
         // Keep camera fixed at the airport by default; tracking starts only
         // when the user clicks a flight row in FlightTable.
         viewer.trackedEntity = undefined;
         setSelectedFlightId(null);
 
-        setState({ isLoaded: true, flightIds: ids, error: null });
+        setState({ isLoaded: true, flightIds: ids, warning, error: null });
       })
       .catch((err: unknown) => {
         if (cancelled) return;
         const message = err instanceof Error ? err.message : String(err);
-        setState({ isLoaded: false, flightIds: [], error: message });
+        setState({ isLoaded: false, flightIds: [], warning: null, error: message });
       });
 
     // ── Cleanup ───────────────────────────────────────────────────────────────

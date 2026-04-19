@@ -181,6 +181,32 @@ body,
   grid-template-rows: auto 1fr auto;
 }
 
+.czml-status {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, calc(100vw - 32px));
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(250, 204, 21, 0.55);
+  background: rgba(24, 28, 36, 0.92);
+  color: #f8fafc;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  font-family: "Inter", "Segoe UI", sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  pointer-events: auto;
+}
+
+.czml-status-warning {
+  border-color: rgba(250, 204, 21, 0.65);
+}
+
+.czml-status-error {
+  border-color: rgba(248, 113, 113, 0.7);
+}
+
 /* ── Control Panel overlay ────────────────────────────────────────────────── */
 .control-panel {
   grid-area: ctrl;

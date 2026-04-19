@@ -240,7 +240,8 @@ def main() -> None:
             ])
             print(
                 f"[Pipeline] Historical window: {args.hours_ago}h ago for {args.range_hours}h "
-                f"(begin={begin_unix}, end={end_unix})."
+                f"(begin={begin_unix}, end={end_unix}).",
+                flush=True,
             )
         fetch_cmd.extend(fetch_passthrough)
 
@@ -249,7 +250,7 @@ def main() -> None:
         pattern = f"{airport_tag}_czml_input_*.json"
         existing = {p.resolve() for p in output_root.glob(pattern)}
 
-        print("[Pipeline] Running fetch stage...")
+        print("[Pipeline] Running fetch stage...", flush=True)
         subprocess.run(fetch_cmd, check=True)
 
         czml_input_path = _latest_matching_file(output_root, pattern, existing)
@@ -270,7 +271,7 @@ def main() -> None:
     if args.multiplier is not None:
         generate_cmd.extend(["--multiplier", str(args.multiplier)])
 
-    print("[Pipeline] Running CZML generation stage...")
+    print("[Pipeline] Running CZML generation stage...", flush=True)
     subprocess.run(generate_cmd, check=True)
 
     print(f"[Pipeline] airport:      {effective_airport}")

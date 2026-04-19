@@ -22,7 +22,8 @@ import { useCzmlLoader } from "./hooks/useCzmlLoader";
 const CZML_URL = "/data/trajectories.czml";
 
 function FlightApp() {
-  const { flightIds } = useCzmlLoader(CZML_URL);
+  const { flightIds, warning, error } = useCzmlLoader(CZML_URL);
+  const czmlStatus = error ?? warning;
 
   return (
     <>
@@ -32,6 +33,16 @@ function FlightApp() {
       {/* Layer 1: overlay grid — panels anchored to corners, clicks pass through */}
       <div className="cesium-overlay-container">
         <ControlPanel />
+        {czmlStatus ? (
+          <div
+            className={`czml-status ${
+              error ? "czml-status-error" : "czml-status-warning"
+            }`}
+            role="alert"
+          >
+            {czmlStatus}
+          </div>
+        ) : null}
         <HUD />
         <FlightTable flightIds={flightIds} />
       </div>
