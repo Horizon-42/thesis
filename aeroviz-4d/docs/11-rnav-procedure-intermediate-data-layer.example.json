@@ -1,0 +1,540 @@
+{
+  "schemaVersion": "1.0.0",
+  "modelType": "rnav-procedure-runway",
+  "procedureUid": "KRDU-R05LY-RW05L",
+  "provenance": {
+    "assemblyMode": "cifp_primary_chart_crosscheck",
+    "researchUseOnly": true,
+    "sources": [
+      {
+        "sourceId": "src:cifp-index",
+        "kind": "FAA_CIFP_INDEX",
+        "cycle": "2603",
+        "path": "data/CIFP/CIFP_260319/IN_CIFP.txt"
+      },
+      {
+        "sourceId": "src:cifp-detail",
+        "kind": "FAA_CIFP",
+        "cycle": "2603",
+        "path": "data/CIFP/CIFP_260319/FAACIFP18"
+      },
+      {
+        "sourceId": "src:chart",
+        "kind": "FAA_IAP_CHART",
+        "procedureTitle": "RNAV(GPS) Y RW05L",
+        "usedFor": [
+          "validation",
+          "manual_completion"
+        ]
+      },
+      {
+        "sourceId": "src:hybrid-nav-fix",
+        "kind": "HYBRID_FIX_RESOLUTION",
+        "usedFor": [
+          "missed_approach_fix_completion"
+        ]
+      }
+    ],
+    "warnings": [
+      "For KRDU R05LY, branch R contains both final and missed-approach legs.",
+      "DUHAM is not resolved by the current airport-local fix index; this example shows how the intermediate layer can still preserve it via hybrid fix resolution."
+    ]
+  },
+  "airport": {
+    "icao": "KRDU",
+    "faa": "RDU",
+    "name": "Raleigh-Durham International"
+  },
+  "runway": {
+    "ident": "RW05L",
+    "landingThresholdFixRef": "fix:RW05L",
+    "threshold": {
+      "lon": -78.80196389,
+      "lat": 35.87445,
+      "elevationFt": 798
+    }
+  },
+  "procedure": {
+    "procedureType": "SIAP",
+    "procedureFamily": "RNAV_GPS",
+    "procedureIdent": "R05LY",
+    "chartName": "RNAV(GPS) Y RW05L",
+    "variant": "Y",
+    "runwayIdent": "RW05L",
+    "baseBranchIdent": "R",
+    "approachModes": [
+      "LPV",
+      "LNAV_VNAV",
+      "LNAV"
+    ]
+  },
+  "fixes": [
+    {
+      "fixId": "fix:CHWDR",
+      "ident": "CHWDR",
+      "kind": "named_fix",
+      "position": {
+        "lon": -79.010375,
+        "lat": 35.70511111
+      },
+      "elevationFt": null,
+      "roleHints": [
+        "IAF"
+      ],
+      "sourceRefs": [
+        "src:cifp-detail"
+      ]
+    },
+    {
+      "fixId": "fix:BOULE",
+      "ident": "BOULE",
+      "kind": "named_fix",
+      "position": {
+        "lon": -78.96490833,
+        "lat": 35.74214722
+      },
+      "elevationFt": null,
+      "roleHints": [
+        "IF"
+      ],
+      "sourceRefs": [
+        "src:cifp-detail"
+      ]
+    },
+    {
+      "fixId": "fix:SCHOO",
+      "ident": "SCHOO",
+      "kind": "named_fix",
+      "position": {
+        "lon": -78.92647222,
+        "lat": 35.77341389
+      },
+      "elevationFt": null,
+      "roleHints": [
+        "IF"
+      ],
+      "sourceRefs": [
+        "src:cifp-detail"
+      ]
+    },
+    {
+      "fixId": "fix:WEPAS",
+      "ident": "WEPAS",
+      "kind": "named_fix",
+      "position": {
+        "lon": -78.88295556,
+        "lat": 35.80876667
+      },
+      "elevationFt": null,
+      "roleHints": [
+        "FAF"
+      ],
+      "sourceRefs": [
+        "src:cifp-detail"
+      ]
+    },
+    {
+      "fixId": "fix:RW05L",
+      "ident": "RW05L",
+      "kind": "runway_threshold",
+      "position": {
+        "lon": -78.80196389,
+        "lat": 35.87445
+      },
+      "elevationFt": 798,
+      "roleHints": [
+        "MAPt"
+      ],
+      "sourceRefs": [
+        "src:cifp-detail"
+      ]
+    },
+    {
+      "fixId": "fix:DUHAM",
+      "ident": "DUHAM",
+      "kind": "missed_hold_fix",
+      "position": {
+        "lon": -78.83451389,
+        "lat": 36.05165556
+      },
+      "elevationFt": null,
+      "roleHints": [
+        "MAHF"
+      ],
+      "sourceRefs": [
+        "src:hybrid-nav-fix"
+      ]
+    }
+  ],
+  "branches": [
+    {
+      "branchId": "branch:ACHWDR",
+      "branchIdent": "ACHWDR",
+      "branchRole": "transition",
+      "sequenceOrder": 1,
+      "mergeFixRef": "fix:SCHOO",
+      "continuesWithBranchId": "branch:R",
+      "defaultVisible": false,
+      "warnings": [],
+      "legs": [
+        {
+          "legId": "leg:ACHWDR:010",
+          "sequence": 10,
+          "segmentType": "initial",
+          "path": {
+            "pathTerminator": "IF",
+            "constructionMethod": "if_to_fix",
+            "startFixRef": null,
+            "endFixRef": "fix:CHWDR"
+          },
+          "termination": {
+            "kind": "fix",
+            "fixRef": "fix:CHWDR"
+          },
+          "constraints": {
+            "altitude": {
+              "qualifier": "at",
+              "valueFt": 5000,
+              "rawText": "+ 05000"
+            },
+            "speedKt": null,
+            "geometryAltitudeFt": 5000
+          },
+          "roleAtEnd": "IAF",
+          "sourceRefs": [
+            "src:cifp-detail"
+          ],
+          "quality": {
+            "status": "exact",
+            "sourceLine": 300780
+          }
+        },
+        {
+          "legId": "leg:ACHWDR:020",
+          "sequence": 20,
+          "segmentType": "intermediate",
+          "path": {
+            "pathTerminator": "TF",
+            "constructionMethod": "track_to_fix",
+            "startFixRef": "fix:CHWDR",
+            "endFixRef": "fix:BOULE"
+          },
+          "termination": {
+            "kind": "fix",
+            "fixRef": "fix:BOULE"
+          },
+          "constraints": {
+            "altitude": {
+              "qualifier": "at",
+              "valueFt": 4000,
+              "rawText": "+ 04000"
+            },
+            "speedKt": null,
+            "geometryAltitudeFt": 4000
+          },
+          "roleAtEnd": "IF",
+          "sourceRefs": [
+            "src:cifp-detail"
+          ],
+          "quality": {
+            "status": "exact",
+            "sourceLine": 300781
+          }
+        },
+        {
+          "legId": "leg:ACHWDR:030",
+          "sequence": 30,
+          "segmentType": "intermediate",
+          "path": {
+            "pathTerminator": "TF",
+            "constructionMethod": "track_to_fix",
+            "startFixRef": "fix:BOULE",
+            "endFixRef": "fix:SCHOO"
+          },
+          "termination": {
+            "kind": "fix",
+            "fixRef": "fix:SCHOO"
+          },
+          "constraints": {
+            "altitude": {
+              "qualifier": "at",
+              "valueFt": 3000,
+              "rawText": "+ 03000"
+            },
+            "speedKt": null,
+            "geometryAltitudeFt": 3000
+          },
+          "roleAtEnd": "IF",
+          "sourceRefs": [
+            "src:cifp-detail"
+          ],
+          "quality": {
+            "status": "exact",
+            "sourceLine": 300782
+          }
+        }
+      ]
+    },
+    {
+      "branchId": "branch:R",
+      "branchIdent": "R",
+      "branchRole": "base_final",
+      "sequenceOrder": 0,
+      "mergeFixRef": null,
+      "continuesWithBranchId": null,
+      "defaultVisible": true,
+      "warnings": [],
+      "legs": [
+        {
+          "legId": "leg:R:010",
+          "sequence": 10,
+          "segmentType": "intermediate",
+          "path": {
+            "pathTerminator": "IF",
+            "constructionMethod": "if_to_fix",
+            "startFixRef": null,
+            "endFixRef": "fix:SCHOO"
+          },
+          "termination": {
+            "kind": "fix",
+            "fixRef": "fix:SCHOO"
+          },
+          "constraints": {
+            "altitude": {
+              "qualifier": "at_or_above",
+              "valueFt": 3000,
+              "rawText": "+ 03000 18000"
+            },
+            "speedKt": null,
+            "geometryAltitudeFt": 3000
+          },
+          "roleAtEnd": "IF",
+          "sourceRefs": [
+            "src:cifp-detail"
+          ],
+          "quality": {
+            "status": "exact",
+            "sourceLine": 300787
+          }
+        },
+        {
+          "legId": "leg:R:020",
+          "sequence": 20,
+          "segmentType": "final",
+          "path": {
+            "pathTerminator": "TF",
+            "constructionMethod": "track_to_fix",
+            "startFixRef": "fix:SCHOO",
+            "endFixRef": "fix:WEPAS"
+          },
+          "termination": {
+            "kind": "fix",
+            "fixRef": "fix:WEPAS"
+          },
+          "constraints": {
+            "altitude": {
+              "qualifier": "at",
+              "valueFt": 2200,
+              "rawText": "+ 02200"
+            },
+            "speedKt": null,
+            "geometryAltitudeFt": 2200
+          },
+          "roleAtEnd": "FAF",
+          "sourceRefs": [
+            "src:cifp-detail"
+          ],
+          "quality": {
+            "status": "exact",
+            "sourceLine": 300788
+          }
+        },
+        {
+          "legId": "leg:R:030",
+          "sequence": 30,
+          "segmentType": "final",
+          "path": {
+            "pathTerminator": "TF",
+            "constructionMethod": "track_to_fix",
+            "startFixRef": "fix:WEPAS",
+            "endFixRef": "fix:RW05L"
+          },
+          "termination": {
+            "kind": "fix",
+            "fixRef": "fix:RW05L"
+          },
+          "constraints": {
+            "altitude": {
+              "qualifier": "at",
+              "valueFt": 424,
+              "rawText": "00424"
+            },
+            "speedKt": null,
+            "geometryAltitudeFt": 798
+          },
+          "roleAtEnd": "MAPt",
+          "sourceRefs": [
+            "src:cifp-detail"
+          ],
+          "quality": {
+            "status": "exact",
+            "sourceLine": 300790
+          }
+        },
+        {
+          "legId": "leg:R:040",
+          "sequence": 40,
+          "segmentType": "missed",
+          "path": {
+            "pathTerminator": "CA",
+            "constructionMethod": "course_to_altitude",
+            "startFixRef": "fix:RW05L",
+            "endFixRef": null,
+            "courseDegMag": 54.1
+          },
+          "termination": {
+            "kind": "altitude",
+            "altitudeFt": 1000
+          },
+          "constraints": {
+            "altitude": {
+              "qualifier": "terminate_at",
+              "valueFt": 1000,
+              "rawText": "+ 01000"
+            },
+            "speedKt": null,
+            "geometryAltitudeFt": 1000
+          },
+          "roleAtEnd": "Route",
+          "sourceRefs": [
+            "src:cifp-detail"
+          ],
+          "quality": {
+            "status": "exact",
+            "sourceLine": 300791
+          }
+        },
+        {
+          "legId": "leg:R:050",
+          "sequence": 50,
+          "segmentType": "missed",
+          "path": {
+            "pathTerminator": "DF",
+            "constructionMethod": "direct_to_fix",
+            "startFixRef": null,
+            "endFixRef": "fix:DUHAM"
+          },
+          "termination": {
+            "kind": "fix",
+            "fixRef": "fix:DUHAM"
+          },
+          "constraints": {
+            "altitude": {
+              "qualifier": "at_or_above",
+              "valueFt": 2200,
+              "rawText": "+ 02200"
+            },
+            "speedKt": null,
+            "geometryAltitudeFt": 2200
+          },
+          "roleAtEnd": "MAHF",
+          "sourceRefs": [
+            "src:cifp-detail",
+            "src:hybrid-nav-fix"
+          ],
+          "quality": {
+            "status": "exact_geometry_requires_non_local_fix_lookup",
+            "sourceLine": 300792
+          }
+        },
+        {
+          "legId": "leg:R:060",
+          "sequence": 60,
+          "segmentType": "missed",
+          "path": {
+            "pathTerminator": "HM",
+            "constructionMethod": "hold",
+            "startFixRef": "fix:DUHAM",
+            "endFixRef": "fix:DUHAM",
+            "rawPathToken": "17290040"
+          },
+          "termination": {
+            "kind": "hold",
+            "fixRef": "fix:DUHAM"
+          },
+          "constraints": {
+            "altitude": {
+              "qualifier": "at_or_above",
+              "valueFt": 2200,
+              "rawText": "+ 02200"
+            },
+            "speedKt": null,
+            "geometryAltitudeFt": 2200
+          },
+          "roleAtEnd": "MAHF",
+          "sourceRefs": [
+            "src:cifp-detail",
+            "src:hybrid-nav-fix"
+          ],
+          "quality": {
+            "status": "partial_hold_geometry_needs_full_hm_parser",
+            "sourceLine": 300793
+          }
+        }
+      ]
+    }
+  ],
+  "verticalProfiles": [
+    {
+      "profileId": "profile:final-default",
+      "appliesToModes": [
+        "LPV",
+        "LNAV_VNAV",
+        "LNAV"
+      ],
+      "branchId": "branch:R",
+      "fromFixRef": "fix:WEPAS",
+      "toFixRef": "fix:RW05L",
+      "basis": "constraint_interpolation",
+      "glidepathAngleDeg": null,
+      "thresholdCrossingHeightFt": null,
+      "constraintSamples": [
+        {
+          "fixRef": "fix:WEPAS",
+          "publishedAltitudeFt": 2200,
+          "geometryAltitudeFt": 2200
+        },
+        {
+          "fixRef": "fix:RW05L",
+          "publishedAltitudeFt": 424,
+          "geometryAltitudeFt": 798
+        }
+      ],
+      "warnings": [
+        "Replace with CIFP P-record or chart-derived glidepath data when available."
+      ]
+    }
+  ],
+  "validation": {
+    "expectedRunwayIdent": "RW05L",
+    "expectedIF": "SCHOO",
+    "expectedFAF": "WEPAS",
+    "expectedMAPt": "RW05L",
+    "expectedMissedHoldFix": "DUHAM",
+    "knownSimplifications": [
+      "Hold geometry for HM leg is preserved semantically but not fully expanded."
+    ]
+  },
+  "displayHints": {
+    "nominalSpeedKt": 140,
+    "defaultVisibleBranchIds": [
+      "branch:R"
+    ],
+    "tunnelDefaults": {
+      "lateralHalfWidthNm": 0.3,
+      "verticalHalfHeightFt": 300,
+      "sampleSpacingM": 250,
+      "mode": "visualApproximation"
+    }
+  }
+}
