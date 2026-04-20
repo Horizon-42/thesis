@@ -271,7 +271,7 @@ body,
   grid-area: proc;
   align-self: start;
   width: var(--overlay-left-width);
-  max-height: 100%;
+  height: min(38vh, 450px);
   min-height: 0;
   overflow: auto;
   pointer-events: auto;
@@ -624,7 +624,7 @@ body,
   color: #c8d8ec;
   border-radius: 8px;
   padding: 8px 10px;
-  width: clamp(240px, 20vw, 300px);
+  width: clamp(190px, 15vw, 230px);
   max-height: min(38vh, 280px);
   overflow: auto;
   box-sizing: border-box;
