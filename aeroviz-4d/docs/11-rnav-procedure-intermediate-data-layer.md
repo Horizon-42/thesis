@@ -211,6 +211,30 @@ Optional fields:
 - `tchFt`
 - `runwayLengthFt`
 
+**Explanation**:
+
+- `landingThresholdFixRef`
+  This is a reference into the shared `fixes[]` catalog. In simple words, it
+  says: "the landing threshold for this procedure is that fix over there."
+  We keep it as a reference so every branch and leg can point to the same
+  runway-threshold object instead of repeating the same coordinates many
+  times.
+
+- `threshold`
+  This is the physical runway-threshold data itself: longitude, latitude, and
+  elevation. Think of `landingThresholdFixRef` as the link, and `threshold` as
+  the actual location details. Keeping both is useful:
+  - the reference keeps the model normalized and consistent
+  - the inline threshold block makes downstream geometry work easier for final
+    approach, tunnel generation, OCS generation, and validation
+
+For a beginner, a good mental model is:
+
+- `landingThresholdFixRef` answers: "which fix object is the runway threshold?"
+- `threshold` answers: "where exactly is that threshold in the world?"
+
+In a well-formed document, these two should agree with each other.
+
 ### `procedure`
 
 This is the published identity block.
@@ -232,6 +256,87 @@ Recommended shape:
 
 This object should capture chart/CIFP identity once, instead of duplicating it
 on every output feature.
+
+**Explanation**:
+
+- `procedureFamily`
+  This is the broad navigation family of the procedure. It tells us what kind
+  of procedure we are dealing with before we look at the exact runway or
+  variant.
+
+  In this project, the main values are:
+  - `RNAV_GPS`
+    Standard RNAV approach based on GNSS/GPS-style navigation, such as
+    `RNAV(GPS) Y RW05L`.
+  - `RNAV_RNP`
+    RNP-style RNAV approach, usually with tighter coded path requirements and
+    sometimes more advanced leg types such as `RF`.
+  - `ILS`
+    Included for completeness even though it is not an RNAV procedure.
+  - `LOC`
+    Included for completeness even though it is not an RNAV procedure.
+  - `UNKNOWN`
+    Safe fallback when the family cannot yet be classified.
+
+  For the thesis work here, the most important families are `RNAV_GPS` and
+  `RNAV_RNP`.
+
+- `procedureIdent`
+  This is the compact machine-friendly published identifier used in CIFP. It is
+  not the full chart title.
+
+  Example:
+  - `R05LY`
+
+  In the current project conventions, we read that as:
+  - `R`: RNAV(GPS)-family approach
+  - `05L`: runway 05 Left
+  - `Y`: one specific published variant for that runway
+
+  The full human-readable chart title for that example is
+  `RNAV(GPS) Y RW05L`.
+
+  So a useful beginner rule is:
+  - `procedureIdent` is the short coded name used by the database
+  - `chartName` is the full chart-facing label a pilot would recognize
+
+- `variant`
+  This distinguishes multiple different procedures to the same runway inside
+  the same family. Common letters are `Y` and `Z`.
+
+  Important point:
+  - `Y` and `Z` do not mean "better" or "worse"
+  - they simply distinguish different published procedure designs
+
+  Example:
+  - `R05LY` has variant `Y`
+  - `H05LZ` would have variant `Z`
+  - `R32` has no suffix, so `variant` can be `null`
+
+- `approachModes`
+  This lists the published operating/minima modes associated with the
+  procedure. These are not separate branches; they are different ways the same
+  procedure may be flown, especially in the vertical guidance and minima sense.
+
+  Common values in RNAV approach charts are:
+  - `LPV`
+    Localizer Performance with Vertical guidance. Practically, this is the
+    precision-like vertically guided mode many pilots expect on an RNAV(GPS)
+    chart.
+  - `LNAV_VNAV`
+    Lateral navigation plus vertical navigation. This also gives vertical
+    guidance, but it is a different mode from LPV.
+  - `LNAV`
+    Lateral navigation only. This gives left-right guidance but no coded
+    vertical guidance path in the same way as LPV or LNAV/VNAV.
+
+  A helpful beginner summary is:
+  - `LPV`, `LNAV_VNAV`, `LNAV` usually share the same lateral path
+  - what changes is mostly the vertical guidance and the published minima
+
+  This field exists because one procedure document may need to say:
+  "these are the published modes supported by this approach," even if the
+  branch geometry is the same.
 
 ### `fixes`
 
@@ -272,6 +377,51 @@ Recommended shape:
   "sourceRefs": ["src:cifp-detail"]
 }
 ```
+
+**Explanation**:
+
+The `kind` field tells us what a fix *means* in the procedure, not just that it
+has coordinates.
+
+Recommended kinds:
+
+- `named_fix`
+  A normal published waypoint such as `WEPAS` or `SCHOO`. This is the most
+  common kind.
+
+- `runway_threshold`
+  The physical runway threshold point. Use this when the point is literally the
+  runway end that the approach is built toward.
+
+- `mapt`
+  Missed Approach Point as a semantic object. Sometimes the MAPt is located at
+  the runway threshold, but its *role* is different: it marks the point where
+  the missed-approach decision/procedure starts. If the project needs to keep
+  that meaning explicit, using `mapt` as a separate kind can be useful.
+
+- `missed_hold_fix`
+  A fix that anchors the missed-approach hold, such as a MAHF. This kind is
+  useful because missed-approach logic is often special and should not be mixed
+  up with normal enroute or final-approach fixes.
+
+- `center_fix`
+  A geometric center point used for curved path construction, especially for
+  `RF` arcs or similar turn geometry. This point may matter for geometry even
+  if it is not emphasized on the chart like a normal waypoint.
+
+- `virtual_fix`
+  A synthetic point created by our own pipeline, not necessarily a named
+  published fix. We use this when the procedure logic needs an explicit point
+  for geometry or sequencing, but the source only gave an instruction such as
+  "fly course to altitude."
+
+Beginner-friendly rule:
+
+- if the point is published and named, start with `named_fix`
+- if it is literally the runway end, use `runway_threshold`
+- if it exists mainly to explain missed-approach logic, use `mapt` or
+  `missed_hold_fix`
+- if we invented it to make geometry explicit, use `virtual_fix`
 
 ### `branches`
 
@@ -330,6 +480,49 @@ Recommended leg skeleton:
 }
 ```
 
+**Explanation**:
+
+- `roleAtEnd`
+  This tells us what the endpoint of the leg *means in the procedure*.
+
+  This is very important for beginners because `roleAtEnd` is **not** the same
+  thing as the path terminator:
+  - `path.pathTerminator` says how the aircraft gets there
+  - `roleAtEnd` says what that endpoint means operationally
+
+  Example:
+  - a `TF` leg can end at the `FAF`
+  - another `TF` leg can end at the `MAPt`
+
+  Same leg type, different role.
+
+  Typical values might be:
+  - `IAF`
+  - `IF`
+  - `FAF`
+  - `MAPt`
+  - `MAHF`
+  - `Route`
+
+  So `roleAtEnd` is mainly about semantics, display, and validation.
+
+- `constraints`
+  This groups the published rules attached to this leg or its endpoint. In
+  plain language, constraints answer questions such as:
+  - how high must the aircraft be here?
+  - is there a speed limit here?
+  - what altitude should our 3D geometry use if we want to draw this leg?
+
+  This grouping matters because the chart/CIFP may tell us several different
+  things at once:
+  - a published altitude restriction
+  - maybe a speed restriction
+  - a geometry altitude we choose for rendering or tunnel construction
+
+  In other words:
+  - `roleAtEnd` says what the point is
+  - `constraints` says what rules apply there
+
 #### `path`
 
 `path` describes how to construct the leg in plan view.
@@ -386,6 +579,33 @@ Examples:
 - `CA 1000 ft` -> `kind: altitude`
 - `HM at DUHAM` -> `kind: hold`
 
+**Explanation**:
+
+`termination` answers a simple but very important question:
+
+"What condition tells us this leg is finished?"
+
+This is different from `path`.
+
+- `path` tells us how we travel
+- `termination` tells us when we stop that leg
+
+Examples:
+
+- If the leg ends when we reach `WEPAS`, then termination is `kind: fix`
+- If the leg ends when we climb to `1000 ft`, then termination is
+  `kind: altitude`
+- If the leg ends by entering or establishing a hold, then termination is
+  `kind: hold`
+
+This separation keeps the model cleaner. A leg such as `CA` is not really
+"to a fix"; it is "fly a course until an altitude condition is met." That is
+why `termination` deserves its own object instead of being hidden inside the
+path text.
+
+For manual authoring, if the exact coded termination is unknown, `kind: manual`
+is acceptable as long as a warning explains the limitation.
+
 #### `constraints`
 
 Keep published constraints separate from geometry.
@@ -419,6 +639,46 @@ allowed to differ from the published altitude constraint. That is already true
 in the current pipeline at `RW05L`, where the published altitude is `424 ft`
 while the geometry altitude comes from runway elevation `798 ft`.
 
+**Explanation**:
+
+`constraints` is where we preserve the published operational limits from the
+source.
+
+For beginners, the most important idea is:
+
+- published constraint altitude and drawn geometry altitude are related, but
+  they are not always identical
+
+Why can they differ?
+
+- the chart/CIFP may publish a crossing altitude or minimum altitude
+- but the geometry we draw in 3D may need the physical runway elevation or a
+  derived altitude so the line/tunnel is visually meaningful
+
+That is exactly why this schema keeps:
+
+- `altitude`
+  the published operational rule
+- `geometryAltitudeFt`
+  the altitude we actually use to place the point/segment in 3D
+
+Example:
+
+- At `RW05L`, the published altitude in the current pipeline is `424 ft`
+- but the 3D geometry altitude is `798 ft`, because that matches the runway
+  threshold elevation used for drawing
+
+So when reading this object:
+
+- trust `altitude` for procedure semantics
+- trust `geometryAltitudeFt` for rendering and downstream geometry generation
+
+If later we add more detail, this section is also the natural place for:
+
+- speed windows
+- climb/descent gradient notes
+- raw chart text preserved for auditability
+
 ### `verticalProfiles`
 
 This section is where future CIFP `P` records or chart-derived glidepath data
@@ -445,6 +705,71 @@ Recommended `basis` values:
 
 If `P` records are not yet parsed, the model can still carry a placeholder
 profile so the gap is explicit instead of hidden.
+
+**Explanation**:
+
+`verticalProfiles` describes the procedure in the vertical dimension: height
+versus distance along the approach.
+
+That is different from the lateral path:
+
+- branches and legs tell us where the aircraft goes on the map
+- vertical profile tells us how high it should be while going there
+
+For a beginner, think of it this way:
+
+- `branches[].legs[]` describe the route drawn from above
+- `verticalProfiles[]` describe the side-view descent/climb story
+
+Why do we need a separate section?
+
+- altitude constraints at fixes are only *discrete checkpoints*
+- a vertical profile is a more continuous description of the descent or climb
+  between those checkpoints
+
+### Do we have vertical profile data today?
+
+Not really, at least not in a fully parsed form in this repo.
+
+Current situation in AeroViz-4D:
+
+- we do have some altitude information from the leg records we already parse
+- we do **not** yet build a full authoritative continuous vertical profile
+- we therefore use placeholders such as `constraint_interpolation` when needed
+
+### Does CIFP contain vertical-profile data?
+
+Potentially yes, but the answer is subtle:
+
+- FAA CIFP can contain more vertical information than we currently use
+- in the current docs and plan, this is described as future `P` profile record
+  support
+- our current parser mainly reads a subset of procedure-leg records, so that
+  richer vertical data is not yet normalized into this model
+
+So the practical answer is:
+
+- it is not correct to simply say "CIFP has no vertical data"
+- it is more accurate to say "our current pipeline does not yet parse and use
+  the richer vertical-profile data"
+
+### Why keep this section now if it is not fully populated yet?
+
+Because the schema should describe the *complete target model*, not only the
+subset we have already implemented.
+
+Keeping `verticalProfiles[]` now gives us a clean place for future data such as:
+
+- glidepath angle
+- threshold crossing height
+- mode-specific vertical behavior
+- chart-derived descent profile information
+
+Until that parser work exists, the field can:
+
+- be empty
+- contain a placeholder profile with `basis: constraint_interpolation`
+- or contain manual chart-derived profile data when available
 
 ### `validation`
 
