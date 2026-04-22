@@ -13,6 +13,7 @@ Testing approach:
 
 import math
 import pytest
+from data_layout import airport_data_path, upsert_airports_index
 from preprocess_airports import (
     runway_bearing_rad,
     runway_bearing_from_metadata,
@@ -239,3 +240,29 @@ class TestAirportConfig:
             '  "height": 12000\n'
             '}'
         )
+
+    def test_airport_data_path_uses_airport_scoped_layout(self):
+        path = airport_data_path("krdu", "airport.json")
+        assert path.as_posix().endswith("/public/data/airports/KRDU/airport.json")
+
+    def test_upsert_airports_index_writes_sorted_manifest_and_preserves_default(self, tmp_path):
+        index_path = tmp_path / "index.json"
+
+        upsert_airports_index(
+            airport_code="KRDU",
+            airport_name="Raleigh-Durham International Airport",
+            lat=35.878659,
+            lon=-78.7873,
+            default_airport="KRDU",
+            index_path=index_path,
+        )
+        manifest = upsert_airports_index(
+            airport_code="CYVR",
+            airport_name="Vancouver International Airport",
+            lat=49.193901,
+            lon=-123.183998,
+            index_path=index_path,
+        )
+
+        assert manifest["defaultAirport"] == "KRDU"
+        assert [airport["code"] for airport in manifest["airports"]] == ["CYVR", "KRDU"]

@@ -4,7 +4,7 @@ preprocess_airports.py
 One-time preprocessing script: converts OurAirports CSV data into the
 GeoJSON files expected by the frontend.
 
-Outputs (written to ../aeroviz-4d/public/data/):
+Outputs (written to ../aeroviz-4d/public/data/airports/<ICAO>/):
     runway.geojson   — runway polygons (runway surface + landing zone)
     airport.json     — selected airport camera target
   waypoints.geojson — NOT produced here; comes from ARINC 424 / CIFP parsing
@@ -21,19 +21,25 @@ How to run:
 """
 
 import argparse
+import csv
 import json
 import math
 from pathlib import Path
 from typing import NamedTuple
 
-import pandas as pd
+from data_layout import (
+    airport_data_path,
+    find_airport_record,
+    normalize_airport_code,
+    resolve_common_csv,
+    upsert_airports_index,
+)
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
 METRES_PER_FOOT = 0.3048
 METRES_PER_DEG_LAT = 111_320.0  # approximately constant globally
 
-OUTPUT_DIR = Path(__file__).parent.parent / "public" / "data"
 DEFAULT_CAMERA_HEIGHT_M = 15_000
 
 
@@ -289,28 +295,11 @@ def load_airport_config(
     height_m: float = DEFAULT_CAMERA_HEIGHT_M,
 ) -> dict:
     """Load one airport's lon/lat camera target from OurAirports airports.csv."""
-    df = pd.read_csv(csv_path)
-    required = {"ident", "latitude_deg", "longitude_deg"}
-    missing = required - set(df.columns)
-    if missing:
-        raise ValueError(f"{csv_path} is missing required columns: {sorted(missing)}")
-
-    normalized_ident = airport_ident.upper()
-    ident_match = df["ident"].astype(str).str.upper() == normalized_ident
-    code_match = pd.Series(False, index=df.index)
-    for optional_col in ("gps_code", "icao_code", "local_code"):
-        if optional_col in df.columns:
-            code_match = code_match | (df[optional_col].astype(str).str.upper() == normalized_ident)
-
-    subset = df[ident_match | code_match].dropna(subset=["latitude_deg", "longitude_deg"])
-    if subset.empty:
-        raise ValueError(f"Airport {airport_ident} not found in {csv_path}")
-
-    row = subset.iloc[0]
+    row = find_airport_record(csv_path, airport_ident)
     return build_airport_config(
-        code=normalized_ident,
-        lon=float(row["longitude_deg"]),
-        lat=float(row["latitude_deg"]),
+        code=row["code"],
+        lon=float(row["lon"]),
+        lat=float(row["lat"]),
         height_m=height_m,
     )
 
@@ -321,30 +310,13 @@ def write_airport_config(
     output_path: Path,
     height_m: float = DEFAULT_CAMERA_HEIGHT_M,
 ) -> dict:
-    """Write public/data/airport.json for the selected airport and return it."""
+    """Write public/data/airports/<ICAO>/airport.json and return it."""
     airport = load_airport_config(airports_csv_path, airport_ident, height_m)
     output_path.write_text(json.dumps(airport, indent=2, allow_nan=False), encoding="utf-8")
     return airport
 
-
-def resolve_input_csv(path: Path) -> Path:
-    """Resolve a CSV path, falling back to public/data for repo-local data."""
-    if path.exists():
-        return path
-    fallback = OUTPUT_DIR / path.name
-    if fallback.exists():
-        return fallback
-    return path
-
 def load_runways(csv_path: Path, airport_ident: str) -> list[RunwayEnds]:
     """Load and parse runway rows for a single airport from OurAirports CSV."""
-    df = pd.read_csv(csv_path)
-    # Filter to the target airport; drop rows with missing coordinate data
-    subset = df[df["airport_ident"] == airport_ident].dropna(
-        subset=["le_longitude_deg", "le_latitude_deg",
-                "he_longitude_deg", "he_latitude_deg"]
-    )
-
     runways = []
 
     def parse_float(value: object, default: float) -> float:
@@ -365,25 +337,41 @@ def load_runways(csv_path: Path, airport_ident: str) -> list[RunwayEnds]:
             return None
         return v
 
-    for _, row in subset.iterrows():
-        runways.append(RunwayEnds(
-            le_ident=str(row.get("le_ident", "")),
-            he_ident=str(row.get("he_ident", "")),
-            le_lon=parse_float(row.get("le_longitude_deg"), 0.0),
-            le_lat=parse_float(row.get("le_latitude_deg"), 0.0),
-            he_lon=parse_float(row.get("he_longitude_deg"), 0.0),
-            he_lat=parse_float(row.get("he_latitude_deg"), 0.0),
-            le_elevation_ft=parse_float(row.get("le_elevation_ft"), 0.0),
-            he_elevation_ft=parse_float(row.get("he_elevation_ft"), 0.0),
-            length_ft=parse_float(row.get("length_ft"), 0.0),
-            width_ft=parse_float(row.get("width_ft"), 150.0),
-            surface=str(row.get("surface", "ASP") or "ASP"),
-            lighted=int(parse_float(row.get("lighted"), 0.0)),
-            le_heading_degT=parse_optional_float(row.get("le_heading_degT")),
-            he_heading_degT=parse_optional_float(row.get("he_heading_degT")),
-            le_displaced_threshold_ft=parse_float(row.get("le_displaced_threshold_ft"), 0.0),
-            he_displaced_threshold_ft=parse_float(row.get("he_displaced_threshold_ft"), 0.0),
-        ))
+    with csv_path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            if str(row.get("airport_ident", "")).upper() != airport_ident.upper():
+                continue
+
+            if any(
+                not row.get(field)
+                for field in (
+                    "le_longitude_deg",
+                    "le_latitude_deg",
+                    "he_longitude_deg",
+                    "he_latitude_deg",
+                )
+            ):
+                continue
+
+            runways.append(RunwayEnds(
+                le_ident=str(row.get("le_ident", "")),
+                he_ident=str(row.get("he_ident", "")),
+                le_lon=parse_float(row.get("le_longitude_deg"), 0.0),
+                le_lat=parse_float(row.get("le_latitude_deg"), 0.0),
+                he_lon=parse_float(row.get("he_longitude_deg"), 0.0),
+                he_lat=parse_float(row.get("he_latitude_deg"), 0.0),
+                le_elevation_ft=parse_float(row.get("le_elevation_ft"), 0.0),
+                he_elevation_ft=parse_float(row.get("he_elevation_ft"), 0.0),
+                length_ft=parse_float(row.get("length_ft"), 0.0),
+                width_ft=parse_float(row.get("width_ft"), 150.0),
+                surface=str(row.get("surface", "ASP") or "ASP"),
+                lighted=int(parse_float(row.get("lighted"), 0.0)),
+                le_heading_degT=parse_optional_float(row.get("le_heading_degT")),
+                he_heading_degT=parse_optional_float(row.get("he_heading_degT")),
+                le_displaced_threshold_ft=parse_float(row.get("le_displaced_threshold_ft"), 0.0),
+                he_displaced_threshold_ft=parse_float(row.get("he_displaced_threshold_ft"), 0.0),
+            ))
     return runways
 
 
@@ -469,25 +457,27 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    runways_path = resolve_input_csv(Path(args.runways_csv))
+    airport_code = normalize_airport_code(args.airport)
+    runways_path = resolve_common_csv(Path(args.runways_csv))
     if not runways_path.exists():
         print(f"ERROR: {runways_path} not found.")
         print("Download from: https://ourairports.com/data/runways.csv")
         raise SystemExit(1)
 
-    airports_path = resolve_input_csv(Path(args.airports_csv))
+    airports_path = resolve_common_csv(Path(args.airports_csv))
     if not airports_path.exists():
         print(f"ERROR: {airports_path} not found.")
         print("Download from: https://ourairports.com/data/airports.csv")
         raise SystemExit(1)
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    airport_out_path = airport_data_path(airport_code, "airport.json")
+    runway_out_path = airport_data_path(airport_code, "runway.geojson")
+    airport_out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"Processing airport camera config for {args.airport}...")
-    airport_out_path = OUTPUT_DIR / "airport.json"
+    print(f"Processing airport camera config for {airport_code}...")
     airport = write_airport_config(
         airports_path,
-        args.airport,
+        airport_code,
         airport_out_path,
         height_m=args.camera_height_m,
     )
@@ -497,14 +487,22 @@ def main() -> None:
     )
     print(f"  ✓ Written: {airport_out_path}")
 
-    print(f"Processing runways for {args.airport}...")
-    runways = load_runways(runways_path, args.airport)
+    airport_record = find_airport_record(airports_path, airport_code)
+    upsert_airports_index(
+        airport_code=airport_record["code"],
+        airport_name=airport_record["name"],
+        lat=airport_record["lat"],
+        lon=airport_record["lon"],
+        default_airport=None,
+    )
+
+    print(f"Processing runways for {airport_code}...")
+    runways = load_runways(runways_path, airport_code)
     print(f"  Found {len(runways)} runway(s)")
 
-    geojson = build_runway_geojson(runways, args.airport, lateral_offset_m=args.lateral_offset_m)
-    out_path = OUTPUT_DIR / "runway.geojson"
-    out_path.write_text(json.dumps(geojson, indent=2, allow_nan=False), encoding="utf-8")
-    print(f"  ✓ Written: {out_path}")
+    geojson = build_runway_geojson(runways, airport_code, lateral_offset_m=args.lateral_offset_m)
+    runway_out_path.write_text(json.dumps(geojson, indent=2, allow_nan=False), encoding="utf-8")
+    print(f"  ✓ Written: {runway_out_path}")
 
 
 if __name__ == "__main__":

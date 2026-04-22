@@ -10,6 +10,7 @@ are caught here, not in the browser.
 
 from datetime import datetime, timezone
 import math
+from pathlib import Path
 
 from generate_czml import (
     build_document_packet,
@@ -18,6 +19,8 @@ from generate_czml import (
     build_flight_packet,
     build_czml,
     compute_velocity_orientation,
+    default_input_path,
+    default_output_path,
 )
 
 START_DT = datetime(2026, 4, 1, 8, 0, 0, tzinfo=timezone.utc)
@@ -187,3 +190,26 @@ class TestBuildOrientationProperty:
             x, y, z, w = arr[i + 1], arr[i + 2], arr[i + 3], arr[i + 4]
             norm = math.sqrt(x*x + y*y + z*z + w*w)
             assert abs(norm - 1.0) < 1e-9, f"Quaternion at index {i} not unit: {norm}"
+
+
+class TestDefaultPaths:
+    def test_default_output_path_is_airport_scoped(self):
+        output_path = default_output_path("krdu")
+        assert output_path.as_posix().endswith("/public/data/airports/KRDU/trajectories.czml")
+
+    def test_default_input_path_prefers_latest_airport_output(self, monkeypatch, tmp_path):
+        airport_dir = tmp_path / "krdu"
+        airport_dir.mkdir(parents=True)
+        older = airport_dir / "krdu_czml_input_20260401T080000Z.json"
+        newer = airport_dir / "krdu_czml_input_20260402T080000Z.json"
+        older.write_text("[]", encoding="utf-8")
+        newer.write_text("[]", encoding="utf-8")
+
+        monkeypatch.setattr("generate_czml.OPENSKY_OUTPUT_ROOT", tmp_path)
+
+        assert default_input_path("KRDU") == newer
+
+    def test_default_input_path_falls_back_to_airport_specific_placeholder(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("generate_czml.OPENSKY_OUTPUT_ROOT", tmp_path)
+
+        assert default_input_path("CYVR") == Path(tmp_path) / "cyvr" / "cyvr_czml_input_latest.json"

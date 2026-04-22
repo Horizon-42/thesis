@@ -1,7 +1,7 @@
 """
 preprocess_waypoints.py
 =======================
-Builds public/data/waypoints.geojson from OpenNav waypoint listings.
+Builds public/data/airports/<ICAO>/waypoints.geojson from OpenNav waypoint listings.
 
 Default behavior:
 - Downloads Canada waypoints from OpenNav
@@ -26,13 +26,13 @@ from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
 
+from data_layout import airport_data_path, find_airport_record, resolve_common_csv
+
 DEFAULT_SOURCE_URL = "https://opennav.com/waypoint/CA"
-DEFAULT_CENTER_LON = -119.3775
-DEFAULT_CENTER_LAT = 49.9561
+DEFAULT_AIRPORT = "CYLW"
 DEFAULT_RADIUS_KM = 120.0
 DEFAULT_MAX_WAYPOINTS = 30
 DEFAULT_PROCEDURE = "OpenNav Canada waypoint sample"
-DEFAULT_OUTPUT = Path(__file__).parent.parent / "public" / "data" / "waypoints.geojson"
 
 ROW_RE = re.compile(
     r'<tr><td><a href="/waypoint/[^"]+">([^<]+)</a></td>'
@@ -215,31 +215,56 @@ def build_waypoint_geojson(
     }
 
 
+def resolve_waypoint_center(
+    airport_code: str,
+    airports_csv: Path,
+    center_lon: float | None,
+    center_lat: float | None,
+) -> tuple[float, float]:
+    airport_record = find_airport_record(resolve_common_csv(airports_csv), airport_code)
+    resolved_lon = center_lon if center_lon is not None else airport_record["lon"]
+    resolved_lat = center_lat if center_lat is not None else airport_record["lat"]
+    return resolved_lon, resolved_lat
+
+
+def resolve_waypoint_output_path(airport_code: str, output: str | None) -> Path:
+    return Path(output) if output else airport_data_path(airport_code, "waypoints.geojson")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate waypoints.geojson from OpenNav waypoints")
+    parser.add_argument("--airport", default=DEFAULT_AIRPORT, help="Airport code used for default center/output")
+    parser.add_argument("--airports-csv", default="airports.csv", help="OurAirports airports.csv path")
     parser.add_argument("--source-url", default=DEFAULT_SOURCE_URL, help="OpenNav waypoint page URL")
-    parser.add_argument("--center-lon", type=float, default=DEFAULT_CENTER_LON, help="Reference longitude")
-    parser.add_argument("--center-lat", type=float, default=DEFAULT_CENTER_LAT, help="Reference latitude")
+    parser.add_argument("--center-lon", type=float, default=None, help="Reference longitude")
+    parser.add_argument("--center-lat", type=float, default=None, help="Reference latitude")
     parser.add_argument("--radius-km", type=float, default=DEFAULT_RADIUS_KM, help="Filter radius in kilometers")
     parser.add_argument("--max-waypoints", type=int, default=DEFAULT_MAX_WAYPOINTS, help="Maximum output features")
     parser.add_argument("--procedure", default=DEFAULT_PROCEDURE, help="Procedure label in feature properties")
-    parser.add_argument("--output", default=str(DEFAULT_OUTPUT), help="Output GeoJSON path")
+    parser.add_argument("--output", default=None, help="Output GeoJSON path")
     parser.add_argument("--timeout", type=int, default=30, help="HTTP timeout in seconds")
     args = parser.parse_args()
+
+    center_lon, center_lat = resolve_waypoint_center(
+        args.airport,
+        Path(args.airports_csv),
+        args.center_lon,
+        args.center_lat,
+    )
 
     with urlopen(args.source_url, timeout=args.timeout) as response:
         page_html = response.read().decode("utf-8", errors="replace")
 
     collection = build_waypoint_geojson(
         page_html=page_html,
-        center_lon=args.center_lon,
-        center_lat=args.center_lat,
+        center_lon=center_lon,
+        center_lat=center_lat,
         radius_km=args.radius_km,
         max_waypoints=args.max_waypoints,
         procedure=args.procedure,
     )
 
-    output_path = Path(args.output)
+    output_path = resolve_waypoint_output_path(args.airport, args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(collection, indent=2), encoding="utf-8")
 

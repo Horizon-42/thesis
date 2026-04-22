@@ -2,7 +2,7 @@
 preprocess_procedures.py
 ========================
 Extracts a display-oriented RNAV procedure path from FAA CIFP and writes
-public/data/procedures.geojson for AeroViz-4D.
+public/data/airports/<ICAO>/procedures.geojson for AeroViz-4D.
 
 Default example:
   python aeroviz-4d/python/preprocess_procedures.py \
@@ -30,10 +30,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from data_layout import airport_data_path
+
 FEET_TO_METRES = 0.3048
 NM_TO_METRES = 1852.0
 DEFAULT_CIFP_ROOT = Path(__file__).parents[2] / "data" / "CIFP" / "CIFP_260319"
-DEFAULT_OUTPUT = Path(__file__).parent.parent / "public" / "data" / "procedures.geojson"
+DEFAULT_AIRPORT = "KRDU"
 DEFAULT_RNAV_PROCEDURES = ["R05LY", "R05RY", "R23LY", "R23RY", "R32"]
 RUNWAY_ORDER = ["RW05L", "RW05R", "RW23L", "RW23R", "RW32"]
 SUPPORTED_ROUTE_LEGS = {"IF", "TF"}
@@ -776,7 +778,7 @@ def generate_procedures_geojson(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate procedures.geojson from FAA CIFP")
     parser.add_argument("--cifp-root", default=str(DEFAULT_CIFP_ROOT), help="CIFP cycle directory")
-    parser.add_argument("--airport", default="KRDU", help="Airport ICAO code")
+    parser.add_argument("--airport", default=DEFAULT_AIRPORT, help="Airport ICAO code")
     parser.add_argument("--procedure-type", default="SIAP", help="CIFP procedure type")
     parser.add_argument("--procedure", default="R05LY", help="Procedure ident, e.g. R05LY")
     parser.add_argument(
@@ -798,7 +800,7 @@ def main() -> None:
     parser.add_argument("--tunnel-half-width-nm", type=float, default=0.3, help="Tunnel half-width")
     parser.add_argument("--tunnel-half-height-ft", type=float, default=300.0, help="Tunnel half-height")
     parser.add_argument("--sample-spacing-m", type=float, default=250.0, help="Tunnel sample spacing")
-    parser.add_argument("--output", default=str(DEFAULT_OUTPUT), help="Output GeoJSON path")
+    parser.add_argument("--output", default=None, help="Output GeoJSON path")
     args = parser.parse_args()
 
     if args.include_all_rnav:
@@ -821,7 +823,7 @@ def main() -> None:
         sample_spacing_m=args.sample_spacing_m,
     )
 
-    output_path = Path(args.output)
+    output_path = Path(args.output) if args.output else airport_data_path(args.airport, "procedures.geojson")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
         json.dumps(collection, indent=2, sort_keys=True) + "\n",

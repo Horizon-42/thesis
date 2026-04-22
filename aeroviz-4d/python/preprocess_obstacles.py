@@ -8,7 +8,7 @@ Default behavior:
 - Reads a single DOF .Dat file (e.g. 37-NC.Dat for North Carolina)
 - Filters to verified obstacles within 20 km of the airport center
 - Converts DMS coordinates to decimal degrees, feet to metres
-- Writes GeoJSON FeatureCollection with Point features to public/data/
+- Writes GeoJSON FeatureCollection with Point features to public/data/airports/<ICAO>/
 
 Radius selection (--radius-km, default 20 km / ~10.8 NM):
   The default covers the full instrument approach corridor: initial approach
@@ -45,13 +45,12 @@ import json
 import math
 from pathlib import Path
 
+from data_layout import airport_data_path, normalize_airport_code
+
 # ── Defaults ──────────────────────────────────────────────────────────────────
 
-DEFAULT_CENTER_LON = -78.7873
-DEFAULT_CENTER_LAT = 35.878659
+DEFAULT_AIRPORT_CODE = "KRDU"
 DEFAULT_RADIUS_KM = 20.0
-DEFAULT_OUTPUT = Path(__file__).parent.parent / "public" / "data" / "obstacles.geojson"
-AIRPORT_JSON = Path(__file__).parent.parent / "public" / "data" / "airport.json"
 
 HEADER_LINES = 4
 FEET_TO_METRES = 0.3048
@@ -162,6 +161,35 @@ def load_airport_center(airport_json_path: Path) -> tuple[float, float]:
     return data["lon"], data["lat"]
 
 
+def resolve_airport_config_path(
+    airport_code: str,
+    airport_config: str | None = None,
+) -> Path:
+    return (
+        Path(airport_config)
+        if airport_config
+        else airport_data_path(airport_code, "airport.json")
+    )
+
+
+def resolve_obstacle_center(
+    center_lon: float | None,
+    center_lat: float | None,
+    airport_json_path: Path,
+) -> tuple[float, float]:
+    if center_lon is None and center_lat is None:
+        return load_airport_center(airport_json_path)
+
+    if center_lon is None or center_lat is None:
+        raise ValueError("Provide both --center-lon and --center-lat, or neither.")
+
+    return center_lon, center_lat
+
+
+def resolve_obstacle_output_path(airport_code: str, output: str | None) -> Path:
+    return Path(output) if output else airport_data_path(airport_code, "obstacles.geojson")
+
+
 # ── GeoJSON builder ──────────────────────────────────────────────────────────
 
 
@@ -212,16 +240,27 @@ def main() -> None:
         help="Path to DOF .Dat file (e.g. 37-NC.Dat or Canada.Dat)",
     )
     parser.add_argument(
+        "--airport-code",
+        default=DEFAULT_AIRPORT_CODE,
+        help=f"Airport code used for default airport.json/output paths (default: {DEFAULT_AIRPORT_CODE})",
+    )
+    parser.add_argument(
+        "--airport-config",
+        type=str,
+        default=None,
+        help="Path to airport.json used when auto-reading center coordinates",
+    )
+    parser.add_argument(
         "--center-lon",
         type=float,
-        default=DEFAULT_CENTER_LON,
-        help=f"Reference longitude (default: {DEFAULT_CENTER_LON})",
+        default=None,
+        help="Reference longitude (defaults to the airport.json center)",
     )
     parser.add_argument(
         "--center-lat",
         type=float,
-        default=DEFAULT_CENTER_LAT,
-        help=f"Reference latitude (default: {DEFAULT_CENTER_LAT})",
+        default=None,
+        help="Reference latitude (defaults to the airport.json center)",
     )
     parser.add_argument(
         "--radius-km",
@@ -232,7 +271,7 @@ def main() -> None:
     parser.add_argument(
         "--airport",
         action="store_true",
-        help="Auto-read center from public/data/airport.json",
+        help="Compatibility alias: auto-read center from airport.json for --airport-code",
     )
     parser.add_argument(
         "--include-unverified",
@@ -242,16 +281,28 @@ def main() -> None:
     parser.add_argument(
         "--output",
         type=str,
-        default=str(DEFAULT_OUTPUT),
-        help=f"Output GeoJSON path (default: {DEFAULT_OUTPUT})",
+        default=None,
+        help="Output GeoJSON path",
     )
     args = parser.parse_args()
 
+    airport_code = normalize_airport_code(args.airport_code)
+    airport_config_path = resolve_airport_config_path(airport_code, args.airport_config)
+
     # Resolve center
-    center_lon = args.center_lon
-    center_lat = args.center_lat
-    if args.airport:
-        center_lon, center_lat = load_airport_center(AIRPORT_JSON)
+    center_loaded_from_airport = False
+    try:
+        center_lon, center_lat = resolve_obstacle_center(
+            args.center_lon,
+            args.center_lat,
+            airport_config_path,
+        )
+        center_loaded_from_airport = args.center_lon is None and args.center_lat is None
+    except ValueError as error:
+        print(f"Error: {error}")
+        return
+
+    if center_loaded_from_airport or args.airport or args.airport_config:
         print(f"Airport center from airport.json: lon={center_lon}, lat={center_lat}")
 
     # Parse DOF file
@@ -297,7 +348,7 @@ def main() -> None:
 
     # Build and write GeoJSON
     geojson = build_obstacle_geojson(obstacles)
-    output_path = Path(args.output)
+    output_path = resolve_obstacle_output_path(airport_code, args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w") as f:
         json.dump(geojson, f, indent=2)
