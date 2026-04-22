@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,17 +10,15 @@ import * as Cesium from "cesium";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
-const defaultInput = path.resolve(
-  repoRoot,
-  "../data/DSM/CYVR/bc_092g015_3_3_3_xli1m_utm10_20240217_20250425.tif"
-);
+const AIRPORT_CODE = (cliOption("--airport") ?? "CYVR").toUpperCase();
+const defaultInputDir = path.resolve(repoRoot, `public/data/airports/${AIRPORT_CODE}/dsm/source`);
 const fallbackInput = path.resolve(
   repoRoot,
-  "public/data/DSM/CYVR/bc_092g015_3_3_3_xli1m_utm10_20240217_20250425.tif"
+  `public/data/DSM/${AIRPORT_CODE}/bc_092g015_3_3_3_xli1m_utm10_20240217_20250425.tif`
 );
-const outputDir = path.resolve(repoRoot, "public/data/DSM/CYVR/3dtiles");
+const outputDir = path.resolve(repoRoot, `public/data/airports/${AIRPORT_CODE}/dsm/3dtiles`);
 
-const UTM_ZONE = 10;
+let UTM_ZONE = Number(cliOption("--utm-zone") ?? Number.NaN);
 const GRID_SIZE = 513;
 const OVERLAY_MAX_WIDTH = 1024;
 const MAX_ERROR_M = 0.08;
@@ -32,6 +30,77 @@ const WGS84_A = 6378137.0;
 const WGS84_F = 1 / 298.257223563;
 const WGS84_E2 = WGS84_F * (2 - WGS84_F);
 const WGS84_EP2 = WGS84_E2 / (1 - WGS84_E2);
+
+function cliOption(name) {
+  const index = process.argv.indexOf(name);
+  if (index !== -1) return process.argv[index + 1];
+
+  const prefix = `${name}=`;
+  const value = process.argv.find((arg) => arg.startsWith(prefix));
+  return value ? value.slice(prefix.length) : undefined;
+}
+
+async function resolveInputPath() {
+  const requestedInput = cliOption("--input");
+  if (requestedInput) {
+    return path.resolve(process.cwd(), requestedInput);
+  }
+
+  const requestedInputDir = cliOption("--input-dir");
+  const inputDir = requestedInputDir
+    ? path.resolve(process.cwd(), requestedInputDir)
+    : defaultInputDir;
+  if (existsSync(inputDir)) {
+    const entries = await readdir(inputDir, { withFileTypes: true });
+    const tiffPaths = entries
+      .filter((entry) => entry.isFile() && /\.tiff?$/i.test(entry.name))
+      .map((entry) => path.join(inputDir, entry.name))
+      .sort((left, right) => left.localeCompare(right));
+    if (tiffPaths.length > 0) return tiffPaths[0];
+  }
+
+  return fallbackInput;
+}
+
+function inferUtmZoneFromGeoKeys(geoKeys) {
+  const projectedCode =
+    Number(geoKeys?.ProjectedCSTypeGeoKey) ||
+    Number(geoKeys?.ProjectedCRSGeoKey) ||
+    Number.NaN;
+  if (!Number.isFinite(projectedCode)) return null;
+
+  for (const base of [32600, 32700, 26900]) {
+    const zone = projectedCode - base;
+    if (zone >= 1 && zone <= 60) return zone;
+  }
+
+  return null;
+}
+
+function inferUtmZoneFromPath(filePath) {
+  const match = String(filePath).match(/[_-]utm(\d{1,2})(?:[_./-]|$)/i);
+  if (!match) return null;
+
+  const zone = Number(match[1]);
+  if (zone >= 1 && zone <= 60) return zone;
+  return null;
+}
+
+function resolveUtmZone(geoKeys, filePath) {
+  if (Number.isFinite(UTM_ZONE) && UTM_ZONE >= 1 && UTM_ZONE <= 60) {
+    return UTM_ZONE;
+  }
+
+  const inferredZone = inferUtmZoneFromGeoKeys(geoKeys);
+  if (inferredZone) return inferredZone;
+
+  const zoneFromPath = inferUtmZoneFromPath(filePath);
+  if (zoneFromPath) return zoneFromPath;
+
+  throw new Error(
+    `Could not infer a UTM zone from ${filePath}. Pass --utm-zone <zone> explicitly.`
+  );
+}
 
 function centralMeridianRad(zone) {
   return Cesium.Math.toRadians((zone - 1) * 6 - 180 + 3);
@@ -316,9 +385,9 @@ async function createExactOverlayGlb(overlayPng, cornersLocal) {
     .setIndices(indexAccessor)
     .setMode(Primitive.Mode.TRIANGLES)
     .setMaterial(material);
-  const mesh = doc.createMesh("CYVR DSM exact overlay").addPrimitive(primitive);
+  const mesh = doc.createMesh(`${AIRPORT_CODE} DSM exact overlay`).addPrimitive(primitive);
   const scene = doc.createScene("DSM Exact Overlay Scene");
-  scene.addChild(doc.createNode("CYVR DSM exact overlay").setMesh(mesh));
+  scene.addChild(doc.createNode(`${AIRPORT_CODE} DSM exact overlay`).setMesh(mesh));
   doc.getRoot().setDefaultScene(scene);
   return new NodeIO().writeBinary(doc);
 }
@@ -415,9 +484,10 @@ function computeNormals(positions, indices) {
 }
 
 async function main() {
-  const inputPath = existsSync(defaultInput) ? defaultInput : fallbackInput;
+  const inputPath = await resolveInputPath();
   const tiff = await fromFile(inputPath);
   const image = await tiff.getImage();
+  UTM_ZONE = resolveUtmZone(image.getGeoKeys ? image.getGeoKeys() : {}, inputPath);
   const width = image.getWidth();
   const height = image.getHeight();
   const origin = image.getOrigin();
@@ -519,9 +589,9 @@ async function main() {
     .setIndices(indexAccessor)
     .setMode(Primitive.Mode.TRIANGLES)
     .setMaterial(material);
-  const meshNode = doc.createMesh("CYVR DSM").addPrimitive(primitive);
+  const meshNode = doc.createMesh(`${AIRPORT_CODE} DSM`).addPrimitive(primitive);
   const scene = doc.createScene("DSM Scene");
-  scene.addChild(doc.createNode("CYVR DSM").setMesh(meshNode));
+  scene.addChild(doc.createNode(`${AIRPORT_CODE} DSM`).setMesh(meshNode));
   doc.getRoot().setDefaultScene(scene);
 
   const glb = await new NodeIO().writeBinary(doc);
@@ -608,14 +678,14 @@ async function main() {
         input: path.relative(repoRoot, inputPath),
         raster: { width, height },
         overlay: {
-          url: "/data/DSM/CYVR/3dtiles/dsm_overlay.png",
+          url: `/data/airports/${AIRPORT_CODE}/dsm/3dtiles/dsm_overlay.png`,
           width: overlay.width,
           height: overlay.height,
         },
         exactOverlay: {
-          url: "/data/DSM/CYVR/3dtiles/dsm_overlay_exact.glb",
+          url: `/data/airports/${AIRPORT_CODE}/dsm/3dtiles/dsm_overlay_exact.glb`,
           heightAboveBaseM: exactOverlayHeight,
-          note: "Textured overlay plane generated from the same EPSG:3157 corner transform as the DSM mesh.",
+          note: "Textured overlay plane generated from the same projected-corner transform as the DSM mesh.",
         },
         center: { lon: centerLon, lat: centerLat },
         corners: Object.fromEntries(
@@ -623,7 +693,7 @@ async function main() {
         ),
         bounds,
         projectedBounds: {
-          crs: "EPSG:3157",
+          crs: `UTM zone ${UTM_ZONE} projected metres`,
           west: westEasting,
           south: southNorthing,
           east: eastEasting,
@@ -636,8 +706,8 @@ async function main() {
         triangles: mesh.triangles.length / 3,
         stats,
         modelAxes: {
-          x: "local ENU east, computed by EPSG:3157 -> lon/lat -> ECEF -> ENU",
-          y: "local ENU north, computed by EPSG:3157 -> lon/lat -> ECEF -> ENU",
+          x: "local ENU east, computed by projected metres -> lon/lat -> ECEF -> ENU",
+          y: "local ENU north, computed by projected metres -> lon/lat -> ECEF -> ENU",
           z: "local ENU up, vertically exaggerated DSM height above min",
           cesiumUpAxis: "Z",
           cesiumForwardAxis: "X",

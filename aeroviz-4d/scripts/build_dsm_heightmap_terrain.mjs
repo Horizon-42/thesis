@@ -8,16 +8,20 @@ import * as Cesium from "cesium";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
-const defaultInputDir = path.resolve(repoRoot, "../data/bc_lidar/CYVR/dsm");
-const fallbackInputDir = path.resolve(repoRoot, "public/data/DSM/CYVR");
+const AIRPORT_CODE = (cliOption("--airport") ?? "CYVR").toUpperCase();
+const defaultInputDir = path.resolve(repoRoot, `public/data/airports/${AIRPORT_CODE}/dsm/source`);
+const fallbackInputDir = path.resolve(repoRoot, `public/data/DSM/${AIRPORT_CODE}`);
 const legacySingleInput = path.resolve(
   repoRoot,
-  "../data/DSM/CYVR/bc_092g015_3_3_3_xli1m_utm10_20240217_20250425.tif"
+  `../data/DSM/${AIRPORT_CODE}/bc_092g015_3_3_3_xli1m_utm10_20240217_20250425.tif`
 );
-const outputDir = path.resolve(repoRoot, "public/data/DSM/CYVR/heightmap-terrain");
+const outputDir = path.resolve(
+  repoRoot,
+  `public/data/airports/${AIRPORT_CODE}/dsm/heightmap-terrain`
+);
 const tilesDir = path.join(outputDir, "tiles");
 
-const UTM_ZONE = 10;
+let UTM_ZONE = Number(cliOption("--utm-zone") ?? Number.NaN);
 const TILE_SIZE = 129;
 const MIN_LEVEL = 0;
 const MAX_LEVEL = 16;
@@ -47,6 +51,46 @@ function cliOption(name) {
   const prefix = `${name}=`;
   const value = process.argv.find((arg) => arg.startsWith(prefix));
   return value ? value.slice(prefix.length) : undefined;
+}
+
+function inferUtmZoneFromGeoKeys(geoKeys) {
+  const projectedCode =
+    Number(geoKeys?.ProjectedCSTypeGeoKey) ||
+    Number(geoKeys?.ProjectedCRSGeoKey) ||
+    Number.NaN;
+  if (!Number.isFinite(projectedCode)) return null;
+
+  for (const base of [32600, 32700, 26900]) {
+    const zone = projectedCode - base;
+    if (zone >= 1 && zone <= 60) return zone;
+  }
+
+  return null;
+}
+
+function inferUtmZoneFromPath(filePath) {
+  const match = String(filePath).match(/[_-]utm(\d{1,2})(?:[_./-]|$)/i);
+  if (!match) return null;
+
+  const zone = Number(match[1]);
+  if (zone >= 1 && zone <= 60) return zone;
+  return null;
+}
+
+function resolveUtmZone(geoKeys, filePath) {
+  if (Number.isFinite(UTM_ZONE) && UTM_ZONE >= 1 && UTM_ZONE <= 60) {
+    return UTM_ZONE;
+  }
+
+  const inferredZone = inferUtmZoneFromGeoKeys(geoKeys);
+  if (inferredZone) return inferredZone;
+
+  const zoneFromPath = inferUtmZoneFromPath(filePath);
+  if (zoneFromPath) return zoneFromPath;
+
+  throw new Error(
+    `Could not infer a UTM zone from ${filePath}. Pass --utm-zone <zone> explicitly.`
+  );
 }
 
 function resolveInputDir() {
@@ -221,7 +265,7 @@ function combineProjectedBounds(tiles) {
 }
 
 function projectedBoundsToObject([west, south, east, north]) {
-  return { crs: "EPSG:3157", west, south, east, north };
+  return { crs: `UTM zone ${UTM_ZONE} projected metres`, west, south, east, north };
 }
 
 function mosaicRasterDescriptor(projectedBounds, resolution) {
@@ -251,6 +295,7 @@ async function readDsmSourceTile(filePath, index) {
     origin: image.getOrigin(),
     resolution: image.getResolution(),
     projectedBounds: image.getBoundingBox(),
+    geoKeys: image.getGeoKeys ? image.getGeoKeys() : {},
     noData,
     raster,
     stats: rasterStats(raster, noData),
@@ -629,6 +674,7 @@ async function main() {
     }
   }
 
+  UTM_ZONE = resolveUtmZone(sourceTiles[0]?.geoKeys, sourceTiles[0]?.path ?? inputDir);
   const dataset = createDsmDataset(sourceTiles, inputDir);
   const { bounds, corners } = lonLatBoundsFromProjectedBounds(dataset.projectedBounds);
   const stats = dataset.stats;
@@ -688,15 +734,15 @@ async function main() {
         tileWidth: TILE_SIZE,
         tileHeight: TILE_SIZE,
         tilingScheme: "geographic",
-        tilesBaseUrl: "/data/DSM/CYVR/heightmap-terrain/tiles",
+        tilesBaseUrl: `/data/airports/${AIRPORT_CODE}/dsm/heightmap-terrain/tiles`,
         overlay: {
-          url: "/data/DSM/CYVR/heightmap-terrain/dsm_height_overlay.png",
+          url: `/data/airports/${AIRPORT_CODE}/dsm/heightmap-terrain/dsm_height_overlay.png`,
           width: overlay.width,
           height: overlay.height,
           note: "Height tint for visual inspection; the terrain provider still supplies the actual heights.",
         },
         originalTifHeatmap: {
-          url: "/data/DSM/CYVR/heightmap-terrain/dsm_original_tif_heatmap.png",
+          url: `/data/airports/${AIRPORT_CODE}/dsm/heightmap-terrain/dsm_original_tif_heatmap.png`,
           width: originalTifHeatmap.width,
           height: originalTifHeatmap.height,
           note:
@@ -714,7 +760,7 @@ async function main() {
           noData: sourceTiles[0].noData,
         },
         sourceCrs: {
-          horizontal: "EPSG:3157 NAD83(CSRS) / UTM zone 10N",
+          horizontal: `UTM zone ${UTM_ZONE} projected metres`,
           vertical: "CGVD2013(CGG2013), used directly as metres for this demo",
         },
         projectedBounds: projectedBoundsToObject(dataset.projectedBounds),
