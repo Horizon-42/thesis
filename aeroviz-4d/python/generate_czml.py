@@ -28,13 +28,13 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 
+from data_layout import airport_data_path
+
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-OUTPUT_DIR = Path(__file__).parent.parent / "public" / "data"
-DEFAULT_OUTPUT = OUTPUT_DIR / "trajectories.czml"
-
-# Default input: real OpenSky data downloaded by opensky_cylw/fetch_cylw_opensky.py
-DEFAULT_INPUT = Path(__file__).parent.parent.parent / "opensky_cylw" / "outputs" / "cylw_czml_input_20260405T223356Z.json"
+DEFAULT_AIRPORT = "KRDU"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+OPENSKY_OUTPUT_ROOT = REPO_ROOT / "opensky_data_query" / "outputs"
 
 # Colour palette for trail polylines (RGBA 0-255)
 TRAIL_COLORS = [
@@ -44,6 +44,24 @@ TRAIL_COLORS = [
     (255,  20, 147, 200),   # deep pink
     (138,  43, 226, 200),   # blue violet
 ]
+
+
+def default_input_path(airport_code: str) -> Path:
+    airport_tag = airport_code.strip().lower()
+    airport_output_dir = OPENSKY_OUTPUT_ROOT / airport_tag
+    if airport_output_dir.exists():
+        candidates = sorted(
+            airport_output_dir.glob(f"{airport_tag}_czml_input_*.json"),
+            key=lambda path: path.stat().st_mtime,
+        )
+        if candidates:
+            return candidates[-1]
+
+    return airport_output_dir / f"{airport_tag}_czml_input_latest.json"
+
+
+def default_output_path(airport_code: str) -> Path:
+    return airport_data_path(airport_code, "trajectories.czml")
 
 
 # ── Velocity / orientation math ───────────────────────────────────────────────
@@ -421,15 +439,20 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="Generate CZML trajectory file")
-    parser.add_argument("--input",  default=str(DEFAULT_INPUT), help="JSON file with flight data")
-    parser.add_argument("--output", default=str(DEFAULT_OUTPUT), help="Output CZML path")
+    parser.add_argument("--airport", default=DEFAULT_AIRPORT, help="Airport ICAO for default output path")
+    parser.add_argument(
+        "--input",
+        default=None,
+        help="JSON file with flight data (defaults to the latest OpenSky pipeline output for --airport)",
+    )
+    parser.add_argument("--output", default=None, help="Output CZML path")
     parser.add_argument("--multiplier", type=int, default=60, help="Clock speed multiplier")
     args = parser.parse_args()
 
-    input_path = Path(args.input)
+    input_path = Path(args.input) if args.input else default_input_path(args.airport)
     if not input_path.exists():
         print(f"✗ Input file not found: {input_path}")
-        print("  Run opensky_cylw/fetch_cylw_opensky.py first to download real flight data.")
+        print("  Run opensky_data_query/fetch_cylw_opensky.py or run_fetch_and_generate.py first.")
         raise SystemExit(1)
 
     with open(input_path) as f:
@@ -438,7 +461,7 @@ def main() -> None:
     start_dt = datetime(2026, 4, 1, 8, 0, 0, tzinfo=timezone.utc)
     czml = build_czml(flights, start_dt, args.multiplier)
 
-    output_path = Path(args.output)
+    output_path = Path(args.output) if args.output else default_output_path(args.airport)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(czml, indent=2, ensure_ascii=False))
 
