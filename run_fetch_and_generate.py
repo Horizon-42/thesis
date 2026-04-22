@@ -47,6 +47,14 @@ def _latest_matching_file(folder: Path, pattern: str, before: set[Path]) -> Path
     return None
 
 
+def _airport_output_dir(output_root: Path, airport: str) -> Path:
+    return output_root / airport.lower()
+
+
+def _default_czml_output(aeroviz_root: Path, airport: str) -> Path:
+    return aeroviz_root / "public" / "data" / "airports" / airport.upper() / "trajectories.czml"
+
+
 def parse_args() -> tuple[argparse.Namespace, list[str]]:
     parser = argparse.ArgumentParser(
         description="Run fetch/normalization and CZML generation in one command",
@@ -74,7 +82,7 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
     parser.add_argument(
         "--czml-output",
         default=None,
-        help="Output CZML path (defaults to <aeroviz-root>/public/data/trajectories.czml)",
+        help="Output CZML path (defaults to <aeroviz-root>/public/data/airports/<AIRPORT>/trajectories.czml)",
     )
     parser.add_argument(
         "--multiplier",
@@ -157,11 +165,6 @@ def main() -> None:
     output_root = Path(args.output_root) if args.output_root else repo_root / "opensky_data_query" / "outputs"
 
     generator_script = aeroviz_root / "python" / "generate_czml.py"
-    czml_output_path = (
-        Path(args.czml_output)
-        if args.czml_output
-        else aeroviz_root / "public" / "data" / "trajectories.czml"
-    )
 
     if not fetch_script.exists():
         raise RuntimeError(f"Fetch script not found: {fetch_script}")
@@ -189,7 +192,8 @@ def main() -> None:
             effective_airport = str(loaded.get("airport") or args.airport).upper()
             airport_tag = effective_airport.lower()
             pattern = f"{airport_tag}_czml_input_*.json"
-            existing = {p.resolve() for p in output_root.glob(pattern)}
+            airport_output_dir = _airport_output_dir(output_root, effective_airport)
+            existing = {p.resolve() for p in airport_output_dir.glob(pattern)}
 
             fetch_cmd = [
                 sys.executable,
@@ -210,11 +214,11 @@ def main() -> None:
             print("[Pipeline] Running normalization stage from existing raw JSON...")
             subprocess.run(fetch_cmd, check=True)
 
-            czml_input_path = _latest_matching_file(output_root, pattern, existing)
+            czml_input_path = _latest_matching_file(airport_output_dir, pattern, existing)
             if not czml_input_path:
                 raise RuntimeError(
                     f"No CZML input JSON produced for airport {effective_airport}. "
-                    f"Checked pattern {pattern} under {output_root}."
+                    f"Checked pattern {pattern} under {airport_output_dir}."
                 )
         else:
             raise RuntimeError(
@@ -248,21 +252,30 @@ def main() -> None:
         effective_airport = _extract_option(fetch_cmd, "--airport", args.airport).upper()
         airport_tag = effective_airport.lower()
         pattern = f"{airport_tag}_czml_input_*.json"
-        existing = {p.resolve() for p in output_root.glob(pattern)}
+        airport_output_dir = _airport_output_dir(output_root, effective_airport)
+        existing = {p.resolve() for p in airport_output_dir.glob(pattern)}
 
         print("[Pipeline] Running fetch stage...", flush=True)
         subprocess.run(fetch_cmd, check=True)
 
-        czml_input_path = _latest_matching_file(output_root, pattern, existing)
+        czml_input_path = _latest_matching_file(airport_output_dir, pattern, existing)
         if not czml_input_path:
             raise RuntimeError(
                 f"No CZML input JSON produced for airport {effective_airport}. "
-                f"Checked pattern {pattern} under {output_root}."
+                f"Checked pattern {pattern} under {airport_output_dir}."
             )
+
+    czml_output_path = (
+        Path(args.czml_output)
+        if args.czml_output
+        else _default_czml_output(aeroviz_root, effective_airport)
+    )
 
     generate_cmd = [
         sys.executable,
         str(generator_script),
+        "--airport",
+        effective_airport,
         "--input",
         str(czml_input_path),
         "--output",
