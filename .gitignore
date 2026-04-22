@@ -7,6 +7,23 @@ node_modules
 
 
 data
+!aeroviz-4d/public/data/
+aeroviz-4d/public/data/*
+!aeroviz-4d/public/data/common/
+!aeroviz-4d/public/data/common/airports.csv
+!aeroviz-4d/public/data/common/runways.csv
+# !aeroviz-4d/public/data/airports/
+# aeroviz-4d/public/data/airports/*
+# !aeroviz-4d/public/data/airports/index.json
+# !aeroviz-4d/public/data/airports/*/
+# aeroviz-4d/public/data/airports/*/*
+# !aeroviz-4d/public/data/airports/*/airport.json
+# !aeroviz-4d/public/data/airports/*/runway.geojson
+# !aeroviz-4d/public/data/airports/*/waypoints.geojson
+# !aeroviz-4d/public/data/airports/*/procedures.geojson
+# !aeroviz-4d/public/data/airports/*/obstacles.geojson
+# !aeroviz-4d/public/data/airports/*/trajectories.czml
+# !aeroviz-4d/public/data/airports/*/trajectories.czml.backup
 
 .vscode
 
