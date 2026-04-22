@@ -46,7 +46,16 @@ const ACTIVE_LAYER_KEYS: LayerKey[] = [
 ];
 
 export default function ControlPanel() {
-  const { viewer, layers, toggleLayer, playbackSpeed, setPlaybackSpeed } = useApp();
+  const {
+    viewer,
+    layers,
+    toggleLayer,
+    playbackSpeed,
+    setPlaybackSpeed,
+    airports,
+    activeAirportCode,
+    setActiveAirportCode,
+  } = useApp();
   const [isAnimating, setIsAnimating] = useState<boolean>(false);
 
   useEffect(() => {
@@ -94,6 +103,24 @@ export default function ControlPanel() {
   return (
     <div className="control-panel">
       <h3>AeroViz-4D</h3>
+
+      <section>
+        <h4>Airport</h4>
+        <label>
+          <span>Active Airport</span>
+          <select
+            value={activeAirportCode}
+            onChange={(event) => setActiveAirportCode(event.target.value)}
+            disabled={airports.length === 0}
+          >
+            {airports.map((airport) => (
+              <option key={airport.code} value={airport.code}>
+                {airport.code} - {airport.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </section>
 
       {/* ── Playback controls ────────────────────────────────────────────── */}
       <section>

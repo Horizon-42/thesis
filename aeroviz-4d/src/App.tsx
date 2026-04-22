@@ -18,12 +18,16 @@ import DsmTerrainDemoPage from "./components/DsmTerrainDemoPage";
 import HUD from "./components/HUD";
 import FlightTable from "./components/FlightTable";
 import ProcedurePanel from "./components/ProcedurePanel";
+import { useApp } from "./context/AppContext";
+import { airportDataUrl } from "./data/airportData";
 import { useCzmlLoader } from "./hooks/useCzmlLoader";
 
-const CZML_URL = "/data/trajectories.czml";
-
 function FlightApp() {
-  const { flightIds, warning, error } = useCzmlLoader(CZML_URL);
+  const { activeAirportCode } = useApp();
+  const czmlUrl = activeAirportCode
+    ? airportDataUrl(activeAirportCode, "trajectories.czml")
+    : "";
+  const { flightIds, warning, error } = useCzmlLoader(czmlUrl);
   const czmlStatus = error ?? warning;
 
   return (
