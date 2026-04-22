@@ -5,7 +5,7 @@
  * derived from procedure FAF → threshold pairs.
  *
  * Data source:
- *   public/data/procedures.geojson   (produced by preprocess_procedures.py)
+ *   public/data/airports/<ICAO>/procedures.geojson   (produced by preprocess_procedures.py)
  *
  * For every `procedure-route` feature we:
  *   1. Locate the FAF sample and the runway/MAPt sample in `properties.samples`
@@ -20,6 +20,7 @@
 import { useEffect } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
+import { airportDataUrl } from "../data/airportData";
 import {
   buildFinalApproachOCS,
   type GeoPoint3D,
@@ -130,16 +131,17 @@ function addOcsPolygon(
 // ── Hook ────────────────────────────────────────────────────────────────────
 
 export function useOcsLayer(): void {
-  const { viewer, layers } = useApp();
+  const { viewer, layers, activeAirportCode } = useApp();
 
   // Effect 1 — load procedures.geojson, build OCS entities.
   useEffect(() => {
-    if (!viewer) return;
+    if (!viewer || !activeAirportCode) return;
 
     let cancelled = false;
     const addedIds: string[] = [];
+    const proceduresUrl = airportDataUrl(activeAirportCode, "procedures.geojson");
 
-    fetch("/data/procedures.geojson")
+    fetch(proceduresUrl)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status} loading procedures.geojson`);
         return r.json() as Promise<ProcedureFeatureCollection>;
@@ -233,7 +235,7 @@ export function useOcsLayer(): void {
     // layers.ocsSurfaces is intentionally NOT in the dep list — toggling
     // visibility is handled by Effect 2 without rebuilding geometry.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewer]);
+  }, [viewer, activeAirportCode]);
 
   // Effect 2 — sync visibility when the layer toggle changes.
   useEffect(() => {

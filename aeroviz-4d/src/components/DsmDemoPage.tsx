@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as Cesium from "cesium";
+import { useApp } from "../context/AppContext";
+import { airportDsm3DTilesUrl } from "../data/airportData";
 
 interface DsmDemoState {
   status: string;
@@ -11,12 +13,9 @@ interface DsmDemoState {
   overlay: string;
 }
 
-const DSM_METADATA_URL = "/data/DSM/CYVR/3dtiles/metadata.json";
-const DSM_TILESET_URL = "/data/DSM/CYVR/3dtiles/tileset.json";
-const DSM_GLB_URL = "/data/DSM/CYVR/3dtiles/dsm.glb";
-
 export default function DsmDemoPage() {
   const containerRef = useRef<HTMLDivElement>(null);
+  const { activeAirportCode } = useApp();
   const [state, setState] = useState<DsmDemoState>({
     status: "Loading DSM 3D Tiles",
     rasterSize: "",
@@ -28,7 +27,11 @@ export default function DsmDemoPage() {
   });
 
   useEffect(() => {
-    if (!containerRef.current) return;
+    if (!containerRef.current || !activeAirportCode) return;
+
+    const metadataUrl = airportDsm3DTilesUrl(activeAirportCode, "metadata.json");
+    const tilesetUrl = airportDsm3DTilesUrl(activeAirportCode, "tileset.json");
+    const glbUrl = airportDsm3DTilesUrl(activeAirportCode, "dsm.glb");
 
     let cancelled = false;
     let fallbackTimer: number | undefined;
@@ -66,7 +69,7 @@ export default function DsmDemoPage() {
         console.warn("[DsmDemoPage] Natural Earth imagery failed:", error);
       });
 
-    fetch(DSM_METADATA_URL)
+    fetch(metadataUrl)
       .then((response) => response.json())
       .then(async (metadata) => {
         if (cancelled || viewer.isDestroyed()) return;
@@ -108,7 +111,7 @@ export default function DsmDemoPage() {
         }
 
         const modelHeight = (metadata.stats.max - metadata.stats.min) * metadata.verticalExaggeration;
-        const tileset = await Cesium.Cesium3DTileset.fromUrl(DSM_TILESET_URL, {
+        const tileset = await Cesium.Cesium3DTileset.fromUrl(tilesetUrl, {
           modelUpAxis: Cesium.Axis.Z,
           modelForwardAxis: Cesium.Axis.X,
           backFaceCulling: false,
@@ -136,7 +139,7 @@ export default function DsmDemoPage() {
 
           console.warn("[DsmDemoPage] 3D Tiles produced no draw commands; showing direct GLB fallback.");
           const model = await Cesium.Model.fromGltfAsync({
-            url: DSM_GLB_URL,
+            url: glbUrl,
             modelMatrix,
             upAxis: Cesium.Axis.Z,
             forwardAxis: Cesium.Axis.X,
@@ -204,14 +207,14 @@ export default function DsmDemoPage() {
       if (fallbackTimer !== undefined) window.clearTimeout(fallbackTimer);
       viewer.destroy();
     };
-  }, []);
+  }, [activeAirportCode]);
 
   return (
     <main className="dsm-demo-page">
       <div ref={containerRef} className="dsm-demo-viewer" />
       <section className="dsm-demo-panel">
         <a href="/" className="dsm-demo-link">Flight view</a>
-        <h1>CYVR DSM</h1>
+        <h1>{activeAirportCode || "Airport"} DSM</h1>
         <p>{state.status}</p>
         <dl>
           <div>

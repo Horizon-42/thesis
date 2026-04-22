@@ -17,6 +17,7 @@
 import { useEffect, useRef } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
+import { airportDataUrl } from "../data/airportData";
 
 const RUNWAY_SURFACE_FILL = new Cesium.Color(0.15, 0.15, 0.15, 0.85);
 const RUNWAY_SURFACE_STROKE = Cesium.Color.YELLOW;
@@ -24,17 +25,18 @@ const LANDING_ZONE_FILL = new Cesium.Color(0.65, 0.9, 0.65, 0.35);
 const LANDING_ZONE_STROKE = new Cesium.Color(0.3, 0.7, 0.3, 0.9);
 
 export function useRunwayLayer(): void {
-  const { viewer, layers } = useApp();
+  const { viewer, layers, activeAirportCode } = useApp();
   // Hold a direct reference — GeoJsonDataSource.load() overwrites the name
   // from the URL, so getByName() is unreliable for visibility sync.
   const dsRef = useRef<Cesium.GeoJsonDataSource | null>(null);
 
   useEffect(() => {
     // Don't do anything until the Viewer is ready.
-    if (!viewer) return;
+    if (!viewer || !activeAirportCode) return;
 
     let cancelled = false;
     let added = false;
+    const runwayUrl = airportDataUrl(activeAirportCode, "runway.geojson");
 
     // ── Step 1: Create a named DataSource container ───────────────────────────
     // Naming it "runways" lets us find and remove it precisely later.
@@ -42,7 +44,7 @@ export function useRunwayLayer(): void {
 
     // ── Step 2: Load the GeoJSON file ─────────────────────────────────────────
     // ① — Call `dataSource.load(url, options)` with:
-    //   url:     "/data/runway.geojson"   (served from public/data/)
+    //   url:     "/data/airports/<ICAO>/runway.geojson"   (served from public/data/)
     //   options:
     //     • clampToGround: true
     //     • fill:          a dark-grey Color with ~0.9 alpha
@@ -53,7 +55,7 @@ export function useRunwayLayer(): void {
     // Then chain `.then(ds => { ... })` to do steps 3-4.
     //
     // Reference: docs/02-runway-layer.md § "GeoJsonDataSource options"
-    dataSource.load("/data/runway.geojson", {
+    dataSource.load(runwayUrl, {
       clampToGround: true,
       fill: RUNWAY_SURFACE_FILL,
       stroke: RUNWAY_SURFACE_STROKE,
@@ -118,7 +120,7 @@ export function useRunwayLayer(): void {
         viewer.dataSources.remove(dataSource, true);
       }
     };
-  }, [viewer]); // Re-run if the Viewer instance changes
+  }, [viewer, activeAirportCode]); // Re-run if the Viewer instance changes
 
   // ── Separate effect: sync visibility when the layer flag changes ───────────
   useEffect(() => {

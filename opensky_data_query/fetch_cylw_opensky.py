@@ -176,14 +176,16 @@ def default_outputs_root(script_path: Path) -> Path:
 
 
 def default_aeroviz_root(script_path: Path) -> Path:
-    # sibling: thesis/opensky_cylw + thesis/aeroviz-4d
+    # sibling: thesis/opensky_data_query + thesis/aeroviz-4d
     return script_path.parent.parent / "aeroviz-4d"
 
 
 def resolve_airport_profile(airport: str, aeroviz_root: Path) -> tuple[float, float, float]:
     airport = airport.upper()
 
-    csv_path = aeroviz_root / "public" / "data" / "airports.csv"
+    csv_path = aeroviz_root / "public" / "data" / "common" / "airports.csv"
+    if not csv_path.exists():
+        csv_path = aeroviz_root / "public" / "data" / "airports.csv"
     if csv_path.exists():
         with csv_path.open("r", encoding="utf-8", newline="") as f:
             reader = csv.DictReader(f)
@@ -204,7 +206,7 @@ def resolve_airport_profile(airport: str, aeroviz_root: Path) -> tuple[float, fl
 
     raise RuntimeError(
         f"Cannot resolve center for airport {airport}. "
-        f"Provide airports.csv under {aeroviz_root / 'public' / 'data'} or add a hint."
+        f"Provide airports.csv under {aeroviz_root / 'public' / 'data' / 'common'} or add a hint."
     )
 
 
@@ -515,8 +517,10 @@ def main() -> None:
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     airport_tag = selected_airport.lower()
-    raw_path = output_root / f"{airport_tag}_raw_{timestamp}.json"
-    czml_input_path = output_root / f"{airport_tag}_czml_input_{timestamp}.json"
+    airport_output_root = output_root / airport_tag
+    airport_output_root.mkdir(parents=True, exist_ok=True)
+    raw_path = airport_output_root / f"{airport_tag}_raw_{timestamp}.json"
+    czml_input_path = airport_output_root / f"{airport_tag}_czml_input_{timestamp}.json"
 
     mode = args.mode
     if source_raw_payload is not None:

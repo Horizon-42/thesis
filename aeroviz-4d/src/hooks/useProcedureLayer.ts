@@ -1,13 +1,14 @@
 /**
  * useProcedureLayer.ts
  * --------------------
- * Loads public/data/procedures.geojson and renders procedure routes, fixes,
+ * Loads public/data/airports/<ICAO>/procedures.geojson and renders procedure routes, fixes,
  * and an approximate 3D RNAV tunnel in Cesium.
  */
 
 import { useEffect, useRef } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
+import { airportDataUrl } from "../data/airportData";
 import {
   DEFAULT_NOMINAL_SPEED_KT,
   DEFAULT_TUNNEL_HALF_HEIGHT_M,
@@ -116,7 +117,7 @@ function addTunnelSegment(
 }
 
 export function useProcedureLayer(): void {
-  const { viewer, layers, procedureVisibility } = useApp();
+  const { viewer, layers, procedureVisibility, activeAirportCode } = useApp();
   const visibleRef = useRef(layers.procedures);
   const procedureVisibilityRef = useRef(procedureVisibility);
   const routeEntityIdsRef = useRef<Record<string, string[]>>({});
@@ -138,10 +139,11 @@ export function useProcedureLayer(): void {
   }, [viewer, layers.procedures, procedureVisibility]);
 
   useEffect(() => {
-    if (!viewer) return;
+    if (!viewer || !activeAirportCode) return;
 
     let cancelled = false;
     const addedIds: string[] = [];
+    const proceduresUrl = airportDataUrl(activeAirportCode, "procedures.geojson");
     routeEntityIdsRef.current = {};
     routeDefaultsRef.current = {};
 
@@ -157,7 +159,7 @@ export function useProcedureLayer(): void {
       return visibleRef.current && routeVisible;
     };
 
-    fetch("/data/procedures.geojson")
+    fetch(proceduresUrl)
       .then((response) => {
         if (!response.ok) {
           throw new Error(`HTTP ${response.status} loading procedures.geojson`);
@@ -262,5 +264,5 @@ export function useProcedureLayer(): void {
       routeEntityIdsRef.current = {};
       routeDefaultsRef.current = {};
     };
-  }, [viewer]);
+  }, [viewer, activeAirportCode]);
 }

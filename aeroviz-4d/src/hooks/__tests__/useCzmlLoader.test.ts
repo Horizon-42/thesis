@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 
+const CZML_URL = "/data/airports/KRDU/trajectories.czml";
+
 const {
   loadCzml,
   mockViewer,
@@ -116,10 +118,11 @@ describe("useCzmlLoader", () => {
       clock: { startTime: makeTime(5), stopTime: makeTime(5) },
     });
 
-    const { result } = renderHook(() => useCzmlLoader("/data/trajectories.czml"));
+    const { result } = renderHook(() => useCzmlLoader(CZML_URL));
 
     await waitFor(() => expect(result.current.isLoaded).toBe(true));
 
+    expect(loadCzml).toHaveBeenCalledWith(CZML_URL);
     expect(result.current.flightIds).toEqual([]);
     expect(result.current.warning).toContain("No trajectory entities");
     expect(mockViewer.dataSources.add).not.toHaveBeenCalled();
@@ -133,10 +136,11 @@ describe("useCzmlLoader", () => {
       clock: { startTime: makeTime(8), stopTime: makeTime(8) },
     });
 
-    const { result } = renderHook(() => useCzmlLoader("/data/trajectories.czml"));
+    const { result } = renderHook(() => useCzmlLoader(CZML_URL));
 
     await waitFor(() => expect(result.current.isLoaded).toBe(true));
 
+    expect(loadCzml).toHaveBeenCalledWith(CZML_URL);
     expect(result.current.flightIds).toEqual(["flight-1"]);
     expect(result.current.warning).toContain("has no duration");
     expect(mockViewer.dataSources.add).toHaveBeenCalledTimes(1);
@@ -149,10 +153,11 @@ describe("useCzmlLoader", () => {
       clock: { startTime: makeTime(10), stopTime: makeTime(70) },
     });
 
-    const { result } = renderHook(() => useCzmlLoader("/data/trajectories.czml"));
+    const { result } = renderHook(() => useCzmlLoader(CZML_URL));
 
     await waitFor(() => expect(result.current.isLoaded).toBe(true));
 
+    expect(loadCzml).toHaveBeenCalledWith(CZML_URL);
     expect(result.current.flightIds).toEqual(["flight-1", "flight-2"]);
     expect(result.current.warning).toBeNull();
     expect(mockViewer.clock.startTime.seconds).toBe(10);

@@ -15,6 +15,7 @@
 import { useEffect } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
+import { airportDataUrl } from "../data/airportData";
 import type { WaypointProperties } from "../types/geojson-aviation";
 
 /** Cylinder colour per waypoint type */
@@ -39,17 +40,18 @@ interface WaypointFeatureCollection {
 }
 
 export function useWaypointLayer(): void {
-  const { viewer, layers } = useApp();
+  const { viewer, layers, activeAirportCode } = useApp();
 
   useEffect(() => {
-    if (!viewer) return;
+    if (!viewer || !activeAirportCode) return;
 
     let cancelled = false;
+    const waypointUrl = airportDataUrl(activeAirportCode, "waypoints.geojson");
 
     // We collect the entity IDs we add so we can clean up precisely.
     const addedIds: string[] = [];
 
-    fetch("/data/waypoints.geojson")
+    fetch(waypointUrl)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status} loading waypoints.geojson`);
         return r.json() as Promise<WaypointFeatureCollection>;
@@ -98,7 +100,7 @@ export function useWaypointLayer(): void {
       // Remove only the entities this hook added — don't wipe the whole scene.
       addedIds.forEach((id) => viewer.entities.removeById(id));
     };
-  }, [viewer]);
+  }, [viewer, activeAirportCode]);
 
   // Sync visibility
   useEffect(() => {

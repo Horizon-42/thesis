@@ -41,7 +41,7 @@ export interface CzmlLoaderState {
 /**
  * Load a CZML trajectory file and drive the Cesium clock from it.
  *
- * @param czmlUrl - path to the CZML file, e.g. "/data/trajectories.czml"
+ * @param czmlUrl - path to the CZML file, e.g. "/data/airports/KRDU/trajectories.czml"
  */
 export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
   const { viewer, layers, setSelectedFlightId } = useApp();
@@ -56,7 +56,10 @@ export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
   });
 
   useEffect(() => {
-    if (!viewer) return;
+    if (!viewer || !czmlUrl) {
+      setState({ isLoaded: false, flightIds: [], warning: null, error: null });
+      return;
+    }
 
     // We need to hold a reference to the DataSource so we can clean it up.
     let dataSource: Cesium.CzmlDataSource | undefined;

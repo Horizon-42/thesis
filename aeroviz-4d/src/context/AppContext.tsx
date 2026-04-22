@@ -23,9 +23,18 @@ import {
   useContext,
   useState,
   useCallback,
+  useEffect,
   type ReactNode,
 } from "react";
 import type * as Cesium from "cesium";
+import {
+  AIRPORTS_INDEX_URL,
+  isAirportsIndexManifest,
+  normalizeAirportCode,
+  sortAirportCatalog,
+  type AirportCatalogItem,
+  type AirportConfig,
+} from "../data/airportData";
 
 // ── Layer names ──────────────────────────────────────────────────────────────
 // Extend this union if you add new data layers.
@@ -39,23 +48,21 @@ export type LayerKey =
   | "obstacles"
   | "procedures";
 
-export interface AirportConfig {
-  code: string;
-  lon: number;
-  lat: number;
-  /** Initial camera altitude/range in metres */
-  height: number;
-}
-
 // ── Context shape ────────────────────────────────────────────────────────────
 interface AppState {
   /** The live CesiumJS Viewer, or null before it is mounted */
   viewer: Cesium.Viewer | null;
   setViewer: (v: Cesium.Viewer) => void;
 
-  /** Airport camera target loaded from public/data/airport.json */
+  /** Available airport folders exposed by public/data/airports/index.json */
+  airports: AirportCatalogItem[];
+  /** Active airport folder key, e.g. KRDU */
+  activeAirportCode: string;
+  setActiveAirportCode: (code: string) => void;
+
+  /** Airport camera target loaded from public/data/airports/<ICAO>/airport.json */
   airport: AirportConfig | null;
-  setAirport: (airport: AirportConfig) => void;
+  setAirport: (airport: AirportConfig | null) => void;
 
   /** The currently tracked/selected flight callsign */
   selectedFlightId: string | null;
@@ -83,6 +90,8 @@ const AppContext = createContext<AppState | null>(null);
 // ── Provider ──────────────────────────────────────────────────────────────────
 export function AppProvider({ children }: { children: ReactNode }) {
   const [viewer, setViewerState] = useState<Cesium.Viewer | null>(null);
+  const [airports, setAirports] = useState<AirportCatalogItem[]>([]);
+  const [activeAirportCode, setActiveAirportCodeState] = useState<string>("");
   const [airport, setAirport] = useState<AirportConfig | null>(null);
   const [selectedFlightId, setSelectedFlightId] = useState<string | null>(null);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(60);
@@ -106,6 +115,44 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setViewerState(v);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    fetch(AIRPORTS_INDEX_URL)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Failed to load ${AIRPORTS_INDEX_URL}: ${response.status}`);
+        }
+        return response.json();
+      })
+      .then((manifest: unknown) => {
+        if (cancelled) return;
+        if (!isAirportsIndexManifest(manifest)) {
+          throw new Error(`${AIRPORTS_INDEX_URL} is not a valid airport manifest`);
+        }
+
+        const nextAirports = sortAirportCatalog(manifest.airports);
+        const defaultAirport = normalizeAirportCode(manifest.defaultAirport);
+        setAirports(nextAirports);
+        setActiveAirportCodeState((current) => {
+          if (current && nextAirports.some((airportItem) => airportItem.code === current)) {
+            return current;
+          }
+          if (nextAirports.some((airportItem) => airportItem.code === defaultAirport)) {
+            return defaultAirport;
+          }
+          return nextAirports[0]?.code ?? defaultAirport;
+        });
+      })
+      .catch((error) => {
+        console.error("[AppContext] Failed to load airport manifest:", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Flip a single layer's visibility.
   const toggleLayer = useCallback((key: LayerKey) => {
     setLayers((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -125,11 +172,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const setActiveAirportCode = useCallback(
+    (code: string) => {
+      const normalizedCode = normalizeAirportCode(code);
+      if (!normalizedCode || normalizedCode === activeAirportCode) return;
+
+      if (viewer && !viewer.isDestroyed()) {
+        viewer.trackedEntity = undefined;
+      }
+      setSelectedFlightId(null);
+      setProcedureVisibility({});
+      setAirport(null);
+      setActiveAirportCodeState(normalizedCode);
+    },
+    [activeAirportCode, viewer],
+  );
+
   return (
     <AppContext.Provider
       value={{
         viewer,
         setViewer,
+        airports,
+        activeAirportCode,
+        setActiveAirportCode,
         airport,
         setAirport,
         selectedFlightId,

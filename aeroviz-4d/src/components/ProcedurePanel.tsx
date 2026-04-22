@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "../context/AppContext";
+import { airportDataUrl } from "../data/airportData";
 import type {
   ProcedureFeatureCollection,
   ProcedureRouteProperties,
@@ -100,15 +101,28 @@ export default function ProcedurePanel() {
     procedureVisibility,
     setProcedureRouteVisible,
     setProcedureRoutesVisible,
+    activeAirportCode,
   } = useApp();
   const [routes, setRoutes] = useState<ProcedureRouteItem[]>([]);
   const [sourceCycle, setSourceCycle] = useState<string | null>(null);
+  const [sourceAirport, setSourceAirport] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [expandedRunways, setExpandedRunways] = useState<Set<string>>(new Set());
 
   useEffect(() => {
+    if (!activeAirportCode) {
+      setRoutes([]);
+      setSourceCycle(null);
+      setSourceAirport(null);
+      setLoadError(null);
+      setExpandedRunways(new Set());
+      return;
+    }
+
     let cancelled = false;
-    fetch("/data/procedures.geojson")
+    const proceduresUrl = airportDataUrl(activeAirportCode, "procedures.geojson");
+    setLoadError(null);
+    fetch(proceduresUrl)
       .then((response) => {
         if (!response.ok) {
           throw new Error(`HTTP ${response.status} loading procedures.geojson`);
@@ -124,6 +138,8 @@ export default function ProcedurePanel() {
         setRoutes(routeItems);
         const cycle = geojson.metadata?.sourceCycle;
         setSourceCycle(typeof cycle === "string" ? cycle : null);
+        const airport = geojson.metadata?.airport;
+        setSourceAirport(typeof airport === "string" ? airport : activeAirportCode);
         const firstRunway = buildGroups(routeItems)[0]?.runwayIdent;
         setExpandedRunways(firstRunway ? new Set([firstRunway]) : new Set());
       })
@@ -134,7 +150,7 @@ export default function ProcedurePanel() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [activeAirportCode]);
 
   const groups = useMemo(() => buildGroups(routes), [routes]);
   const totalWarnings = routes.reduce((sum, route) => sum + route.warnings.length, 0);
@@ -160,7 +176,7 @@ export default function ProcedurePanel() {
       <header className="procedure-panel-header">
         <div>
           <h3>Procedures</h3>
-          <p>KRDU CIFP {sourceCycle ?? "unknown"}</p>
+          <p>{(sourceAirport ?? activeAirportCode) || "Unknown"} CIFP {sourceCycle ?? "unknown"}</p>
         </div>
         <label className="procedure-master-toggle">
           <input

@@ -1,7 +1,9 @@
 import * as Cesium from "cesium";
+import { airportDsmHeightmapTerrainUrl } from "../data/airportData";
 
-export const DSM_HEIGHTMAP_TERRAIN_METADATA_URL =
-  "/data/DSM/CYVR/heightmap-terrain/metadata.json";
+export function dsmHeightmapTerrainMetadataUrl(airportCode: string): string {
+  return airportDsmHeightmapTerrainUrl(airportCode, "metadata.json");
+}
 
 export interface DsmTerrainBounds {
   west: number;
@@ -128,7 +130,7 @@ async function fetchHeightTile(
 }
 
 export async function loadDsmHeightmapTerrain(
-  metadataUrl: string = DSM_HEIGHTMAP_TERRAIN_METADATA_URL
+  metadataUrl: string
 ): Promise<DsmHeightmapTerrain> {
   const response = await fetch(metadataUrl);
   if (!response.ok) {

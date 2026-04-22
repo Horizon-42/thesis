@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
+import { dsmHeightmapTerrainMetadataUrl } from "../terrain/dsmHeightmapTerrain";
 import {
   loadDsmHeightmapTerrain,
-  DSM_HEIGHTMAP_TERRAIN_METADATA_URL,
   type DsmHeightmapTerrainMetadata,
 } from "../terrain/dsmHeightmapTerrain";
 
@@ -26,7 +26,7 @@ export interface UseDsmTerrainLayerOptions {
  * Load preprocessed DSM heightmap terrain into the Cesium Viewer.
  *
  * Uses pre-built `.f32` height tiles produced by `npm run build:dsm-heightmap-terrain`
- * and served from `public/data/DSM/`. The browser fetches only the tiles it needs
+ * and served from `public/data/airports/<ICAO>/dsm/heightmap-terrain/`. The browser fetches only the tiles it needs
  * instead of decoding a full GeoTIFF.
  *
  * Returns metadata and loading status so callers can display terrain info if desired.
@@ -35,9 +35,11 @@ export interface UseDsmTerrainLayerOptions {
 export function useDsmTerrainLayer(
   options: UseDsmTerrainLayerOptions = {},
 ): DsmTerrainState {
-  const { viewer } = useApp();
+  const { viewer, activeAirportCode } = useApp();
   const enabled = options.enabled ?? true;
-  const metadataUrl = options.metadataUrl ?? DSM_HEIGHTMAP_TERRAIN_METADATA_URL;
+  const metadataUrl = options.metadataUrl ?? (
+    activeAirportCode ? dsmHeightmapTerrainMetadataUrl(activeAirportCode) : null
+  );
 
   const [state, setState] = useState<DsmTerrainState>({
     status: "idle",
@@ -51,7 +53,7 @@ export function useDsmTerrainLayer(
 
   // ── Load terrain provider ───────────────────────────────────────────────
   useEffect(() => {
-    if (!viewer || !enabled) {
+    if (!viewer || !enabled || !metadataUrl) {
       setState({ status: "idle", metadata: null, provider: null, error: null });
       return;
     }

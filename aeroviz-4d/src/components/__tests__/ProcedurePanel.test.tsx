@@ -29,6 +29,7 @@ const {
 vi.mock("../../context/AppContext", () => ({
   useApp: () => ({
     layers: { procedures: true },
+    activeAirportCode: "KRDU",
     toggleLayer,
     procedureVisibility: getProcedureVisibility(),
     setProcedureRouteVisible,
@@ -117,6 +118,7 @@ describe("ProcedurePanel", () => {
 
     await waitFor(() => expect(screen.getByText("RW05L")).toBeTruthy());
 
+    expect(fetchMock).toHaveBeenCalledWith("/data/airports/KRDU/procedures.geojson");
     expect(screen.getByText("KRDU CIFP 2603")).toBeTruthy();
     expect(screen.getByText("3 branches")).toBeTruthy();
     expect(screen.getByText("2 runways")).toBeTruthy();
@@ -128,6 +130,8 @@ describe("ProcedurePanel", () => {
   it("updates route visibility when branch checkbox changes", async () => {
     render(<ProcedurePanel />);
     await waitFor(() => expect(screen.getByText("AOTTOS")).toBeTruthy());
+
+    expect(fetchMock).toHaveBeenCalledWith("/data/airports/KRDU/procedures.geojson");
 
     const labels = screen.getAllByText("AOTTOS");
     const label = labels[0].closest("label");

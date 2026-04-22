@@ -16,7 +16,7 @@ table of tile polygons. The important fields in that table are:
 So this script does the same work a user would do manually:
 
 1. Resolve input, for example airport code CYVR -> latitude/longitude from
-   aeroviz-4d/public/data/airports.csv.
+   aeroviz-4d/public/data/common/airports.csv.
 2. Query the ArcGIS layer for DEM and/or DSM records near that coordinate.
 3. Write a CSV manifest so you can inspect exactly what matched.
 4. Download each returned s3Url concurrently.
@@ -165,8 +165,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--airport-csv",
         type=Path,
-        default=Path("aeroviz-4d/public/data/airports.csv"),
-        help="Airport CSV path. Default: aeroviz-4d/public/data/airports.csv.",
+        default=Path("aeroviz-4d/public/data/common/airports.csv"),
+        help="Airport CSV path. Default: aeroviz-4d/public/data/common/airports.csv.",
     )
     parser.add_argument(
         "--airport-radius-km",

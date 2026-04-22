@@ -4,7 +4,7 @@
  * Custom hook: render FAA DOF obstacles (towers, windmills, buildings, etc.)
  * as 3D cylinder markers with text labels in the Cesium scene.
  *
- * Data source: public/data/obstacles.geojson, produced by
+ * Data source: public/data/airports/<ICAO>/obstacles.geojson, produced by
  *   python preprocess_obstacles.py --input <DOF .Dat file> --airport
  *
  * Follows the same dual-useEffect pattern as useWaypointLayer:
@@ -15,6 +15,7 @@
 import { useEffect } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
+import { airportDataUrl } from "../data/airportData";
 import type { ObstacleProperties } from "../types/geojson-aviation";
 
 // ── Colour by obstacle type ─────────────────────────────────────────────────
@@ -62,16 +63,17 @@ const MIN_CYLINDER_LENGTH = 10; // metres — minimum visible height
 // ── Hook ────────────────────────────────────────────────────────────────────
 
 export function useObstacleLayer(): void {
-  const { viewer, layers } = useApp();
+  const { viewer, layers, activeAirportCode } = useApp();
 
   // Effect 1: Load GeoJSON, create entities
   useEffect(() => {
-    if (!viewer) return;
+    if (!viewer || !activeAirportCode) return;
 
     let cancelled = false;
     const addedIds: string[] = [];
+    const obstacleUrl = airportDataUrl(activeAirportCode, "obstacles.geojson");
 
-    fetch("/data/obstacles.geojson")
+    fetch(obstacleUrl)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status} loading obstacles.geojson`);
         return r.json() as Promise<ObstacleFeatureCollection>;
@@ -145,7 +147,7 @@ export function useObstacleLayer(): void {
       cancelled = true;
       addedIds.forEach((id) => viewer.entities.removeById(id));
     };
-  }, [viewer]);
+  }, [viewer, activeAirportCode]);
 
   // Effect 2: Sync visibility with layer toggle
   useEffect(() => {

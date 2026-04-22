@@ -133,7 +133,7 @@ export default function DsmTerrainDemoPage() {
   const terrainTintLayerRef = useRef<Cesium.ImageryLayer | null>(null);
   const originalTifHeatmapLayerRef = useRef<Cesium.ImageryLayer | null>(null);
   const layerStateRef = useRef<LayerToggleState>(DEFAULT_LAYER_STATE);
-  const { setAirport, setViewer } = useApp();
+  const { setAirport, setViewer, activeAirportCode } = useApp();
 
   const terrain = useDsmTerrainLayer();
 
@@ -251,7 +251,7 @@ export default function DsmTerrainDemoPage() {
 
       const center = centerOfBounds(metadata);
       setAirport({
-        code: "CYVR DSM",
+        code: activeAirportCode || "DSM",
         lon: center.lon,
         lat: center.lat,
         height: 4300,
@@ -277,7 +277,7 @@ export default function DsmTerrainDemoPage() {
     return () => {
       cancelled = true;
     };
-  }, [terrain.metadata, setAirport]);
+  }, [terrain.metadata, setAirport, activeAirportCode]);
 
   // ── Update display when terrain status changes ────────────────────────────
   useEffect(() => {
@@ -301,7 +301,7 @@ export default function DsmTerrainDemoPage() {
           <a href="/" className="dsm-demo-link">Flight view</a>
           <a href="/dsm-demo" className="dsm-demo-link">3D Tiles demo</a>
         </nav>
-        <h1>CYVR DSM Terrain</h1>
+        <h1>{activeAirportCode || "Airport"} DSM Terrain</h1>
         <p>{displayState.status}</p>
         <dl>
           <div>

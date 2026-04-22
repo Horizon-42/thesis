@@ -87,6 +87,7 @@ vi.mock("cesium", () => {
 vi.mock("../../context/AppContext", () => ({
   useApp: () => ({
     viewer: mockViewer,
+    activeAirportCode: "KRDU",
     layers: { procedures: getProceduresVisible() },
     procedureVisibility: getProcedureVisibility(),
   }),
@@ -162,6 +163,7 @@ describe("useProcedureLayer", () => {
 
     await waitFor(() => expect(mockViewer.entities.add).toHaveBeenCalled());
 
+    expect(fetchMock).toHaveBeenCalledWith("/data/airports/KRDU/procedures.geojson");
     expect(entities.some((entity) => String(entity.id).endsWith("-line"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-tunnel-"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-fix-"))).toBe(true);
