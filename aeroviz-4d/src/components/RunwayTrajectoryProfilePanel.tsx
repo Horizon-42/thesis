@@ -7,7 +7,11 @@ import {
   useRunwayTrajectoryProfile,
   type ProfileAircraftTrack,
 } from "../hooks/useRunwayTrajectoryProfile";
-import type { HorizontalPlateRoute, RunwayProfilePoint } from "../utils/runwayProfileGeometry";
+import type {
+  HorizontalPlateRoute,
+  RunwayProfilePoint,
+  RunwayReferenceMark,
+} from "../utils/runwayProfileGeometry";
 
 interface PlotDomain {
   minX: number;
@@ -22,6 +26,7 @@ interface ProfilePlotProps {
   mode: "side" | "top";
   tracks: ProfileAircraftTrack[];
   plateRoutes: HorizontalPlateRoute[];
+  referenceMarks: RunwayReferenceMark[];
 }
 
 function formatIsoTime(iso: string | null): string {
@@ -33,6 +38,7 @@ function collectViewDomain(
   mode: "side" | "top",
   tracks: ProfileAircraftTrack[],
   plateRoutes: HorizontalPlateRoute[],
+  referenceMarks: RunwayReferenceMark[],
 ): PlotDomain {
   const xValues = [0];
   const yValues = [0];
@@ -52,6 +58,10 @@ function collectViewDomain(
       xValues.push(point.xM);
       yValues.push(mode === "side" ? point.zM : point.yM);
     });
+  });
+
+  referenceMarks.forEach((mark) => {
+    xValues.push(mark.xM);
   });
 
   const minX = Math.min(...xValues, -250);
@@ -84,6 +94,44 @@ function formatMeters(value: number): string {
   return `${Math.round(value).toLocaleString()} m`;
 }
 
+function niceTickStep(span: number, targetTickCount: number): number {
+  const rough = Math.max(1, span / Math.max(1, targetTickCount));
+  const power = 10 ** Math.floor(Math.log10(rough));
+  const scaled = rough / power;
+  const niceScaled = scaled <= 1 ? 1 : scaled <= 2 ? 2 : scaled <= 5 ? 5 : 10;
+  return niceScaled * power;
+}
+
+function buildLinearTicks(min: number, max: number, targetTickCount: number): number[] {
+  const step = niceTickStep(Math.max(1, max - min), targetTickCount);
+  const start = Math.ceil(min / step) * step;
+  const ticks: number[] = [];
+  for (let value = start; value <= max + step * 0.25; value += step) {
+    ticks.push(Number(value.toFixed(6)));
+  }
+  return ticks;
+}
+
+function selectVisibleReferenceMarks(
+  marks: RunwayReferenceMark[],
+  plotX: (value: number) => number,
+): RunwayReferenceMark[] {
+  const accepted: RunwayReferenceMark[] = [];
+
+  marks.forEach((mark) => {
+    const pixelX = plotX(mark.xM);
+    const conflicts = accepted.some((acceptedMark) => {
+      const acceptedPixelX = plotX(acceptedMark.xM);
+      return Math.abs(pixelX - acceptedPixelX) < 44;
+    });
+    if (!conflicts) {
+      accepted.push(mark);
+    }
+  });
+
+  return [...accepted].sort((left, right) => right.xM - left.xM);
+}
+
 function plotPointPath(
   points: RunwayProfilePoint[],
   domain: PlotDomain,
@@ -109,18 +157,25 @@ function plotPointPath(
     .join(" ");
 }
 
-function ProfilePlot({ title, subtitle, mode, tracks, plateRoutes }: ProfilePlotProps) {
+function ProfilePlot({
+  title,
+  subtitle,
+  mode,
+  tracks,
+  plateRoutes,
+  referenceMarks,
+}: ProfilePlotProps) {
   const width = 760;
-  const height = 280;
+  const height = 340;
   const marginLeft = 60;
   const marginRight = 18;
   const marginTop = 22;
-  const marginBottom = 42;
+  const marginBottom = 126;
   const plotWidth = width - marginLeft - marginRight;
   const plotHeight = height - marginTop - marginBottom;
   const domain = useMemo(
-    () => collectViewDomain(mode, tracks, plateRoutes),
-    [mode, plateRoutes, tracks],
+    () => collectViewDomain(mode, tracks, plateRoutes, referenceMarks),
+    [mode, plateRoutes, referenceMarks, tracks],
   );
 
   const xSpan = Math.max(1, domain.maxX - domain.minX);
@@ -130,6 +185,14 @@ function ProfilePlot({ title, subtitle, mode, tracks, plateRoutes }: ProfilePlot
   const zeroX = plotX(0);
   const zeroY = plotY(0);
   const yScale = plotHeight / ySpan;
+  const xTicks = useMemo(
+    () => buildLinearTicks(domain.minX, domain.maxX, 7),
+    [domain.maxX, domain.minX],
+  );
+  const visibleReferenceMarks = useMemo(
+    () => selectVisibleReferenceMarks(referenceMarks, plotX),
+    [referenceMarks, plotX],
+  );
 
   return (
     <section className="runway-profile-plot">
@@ -167,6 +230,36 @@ function ProfilePlot({ title, subtitle, mode, tracks, plateRoutes }: ProfilePlot
           y2={marginTop + plotHeight}
           className="runway-profile-axis"
         />
+
+        {xTicks.map((tick) => {
+          const tickX = plotX(tick);
+          return (
+            <g key={`x-tick-${mode}-${tick}`}>
+              <line
+                x1={tickX}
+                y1={marginTop}
+                x2={tickX}
+                y2={marginTop + plotHeight}
+                className="runway-profile-grid-line"
+              />
+              <line
+                x1={tickX}
+                y1={marginTop + plotHeight}
+                x2={tickX}
+                y2={marginTop + plotHeight + 6}
+                className="runway-profile-axis"
+              />
+              <text
+                x={tickX}
+                y={marginTop + plotHeight + 22}
+                textAnchor="middle"
+                className="runway-profile-axis-tick"
+              >
+                {formatMeters(tick)}
+              </text>
+            </g>
+          );
+        })}
 
         <line
           x1={zeroX}
@@ -206,6 +299,38 @@ function ProfilePlot({ title, subtitle, mode, tracks, plateRoutes }: ProfilePlot
             </text>
           </>
         )}
+
+        {visibleReferenceMarks.map((mark) => {
+          const markX = plotX(mark.xM);
+          const label = `${mark.label} · ${mark.detail}`;
+          return (
+            <g key={`${mode}-mark-${mark.label}-${mark.detail}-${Math.round(mark.xM)}`}>
+              <line
+                x1={markX}
+                y1={marginTop}
+                x2={markX}
+                y2={marginTop + plotHeight}
+                className="runway-profile-reference-line"
+              />
+              <line
+                x1={markX}
+                y1={marginTop + plotHeight}
+                x2={markX}
+                y2={marginTop + plotHeight + 20}
+                className="runway-profile-reference-tick"
+              />
+              <text
+                x={markX + 4}
+                y={marginTop + plotHeight + 56}
+                transform={`rotate(-28 ${markX + 4} ${marginTop + plotHeight + 56})`}
+                textAnchor="start"
+                className="runway-profile-reference-label"
+              >
+                {label}
+              </text>
+            </g>
+          );
+        })}
 
         {plateRoutes.map((route) => {
           const d = plotPointPath(
@@ -275,7 +400,7 @@ function ProfilePlot({ title, subtitle, mode, tracks, plateRoutes }: ProfilePlot
 
         <text
           x={marginLeft + plotWidth / 2}
-          y={height - 10}
+          y={height - 12}
           textAnchor="middle"
           className="runway-profile-axis-label"
         >
@@ -291,17 +416,6 @@ function ProfilePlot({ title, subtitle, mode, tracks, plateRoutes }: ProfilePlot
           {mode === "side" ? "z: height above threshold" : "y: lateral offset from centerline"}
         </text>
 
-        <text x={marginLeft} y={height - 24} className="runway-profile-axis-tick">
-          {formatMeters(domain.maxX)}
-        </text>
-        <text
-          x={marginLeft + plotWidth}
-          y={height - 24}
-          textAnchor="end"
-          className="runway-profile-axis-tick"
-        >
-          {formatMeters(domain.minX)}
-        </text>
         <text x={18} y={marginTop + 10} className="runway-profile-axis-tick">
           {formatMeters(domain.maxY)}
         </text>
@@ -405,6 +519,7 @@ export default function RunwayTrajectoryProfilePanel() {
               mode="side"
               tracks={profile.aircraftTracks}
               plateRoutes={profile.plateRoutes}
+              referenceMarks={profile.referenceMarks}
             />
           ) : null}
           {runwayProfileViewMode !== "side-xz" ? (
@@ -414,6 +529,7 @@ export default function RunwayTrajectoryProfilePanel() {
               mode="top"
               tracks={profile.aircraftTracks}
               plateRoutes={profile.plateRoutes}
+              referenceMarks={profile.referenceMarks}
             />
           ) : null}
         </div>

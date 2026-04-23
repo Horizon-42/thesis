@@ -6,10 +6,12 @@ import type { ProcedureFeatureCollection } from "../types/geojson-aviation";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 import {
   buildHorizontalPlateRoutes,
+  buildRunwayReferenceMarks,
   buildRunwayFrame,
   pointIsInsideHorizontalPlate,
   projectPositionToRunwayFrame,
   type HorizontalPlateRoute,
+  type RunwayReferenceMark,
   type RunwayFeatureCollection,
   type RunwayFrame,
   type RunwayProfilePoint,
@@ -37,6 +39,7 @@ export interface RunwayTrajectoryProfileState {
   currentTimeIso: string | null;
   runwayFrame: RunwayFrame | null;
   plateRoutes: HorizontalPlateRoute[];
+  referenceMarks: RunwayReferenceMark[];
   procedureNames: string[];
   sourceCycle: string | null;
   aircraftTracks: ProfileAircraftTrack[];
@@ -45,6 +48,7 @@ export interface RunwayTrajectoryProfileState {
 interface LoadedProfileData {
   runwayFrame: RunwayFrame;
   plateRoutes: HorizontalPlateRoute[];
+  referenceMarks: RunwayReferenceMark[];
   procedureNames: string[];
   sourceCycle: string | null;
 }
@@ -145,11 +149,17 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
           runwayFrame,
           selectedProfileRunwayIdent,
         );
+        const referenceMarks = buildRunwayReferenceMarks(
+          procedureCollection,
+          runwayFrame,
+          selectedProfileRunwayIdent,
+        );
         const procedureNames = [...new Set(plateRoutes.map((route) => route.procedureName))];
 
         setLoadedData({
           runwayFrame,
           plateRoutes,
+          referenceMarks,
           procedureNames,
           sourceCycle:
             typeof procedureCollection.metadata?.sourceCycle === "string"
@@ -242,6 +252,7 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
     currentTimeIso: currentTime ? formatJulianTime(currentTime) : null,
     runwayFrame: loadedData?.runwayFrame ?? null,
     plateRoutes: loadedData?.plateRoutes ?? [],
+    referenceMarks: loadedData?.referenceMarks ?? [],
     procedureNames: loadedData?.procedureNames ?? [],
     sourceCycle: loadedData?.sourceCycle ?? null,
     aircraftTracks,

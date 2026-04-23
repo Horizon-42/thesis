@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildHorizontalPlateRoutes,
+  buildRunwayReferenceMarks,
   buildRunwayFrame,
   pointIsInsideHorizontalPlate,
   projectPositionToRunwayFrame,
@@ -79,7 +80,41 @@ const procedureCollection: ProcedureFeatureCollection = {
           verticalHalfHeightFt: 300,
           sampleSpacingM: 250,
         },
-        samples: [],
+        samples: [
+          {
+            sequence: 10,
+            fixIdent: "SCHOO",
+            legType: "IF",
+            role: "IF",
+            altitudeFt: 1600,
+            geometryAltitudeFt: 1600,
+            distanceFromStartM: 0,
+            timeSeconds: 0,
+            sourceLine: 1,
+          },
+          {
+            sequence: 20,
+            fixIdent: "WEPAS",
+            legType: "TF",
+            role: "FAF",
+            altitudeFt: 900,
+            geometryAltitudeFt: 900,
+            distanceFromStartM: 500,
+            timeSeconds: 50,
+            sourceLine: 2,
+          },
+          {
+            sequence: 30,
+            fixIdent: "RW09",
+            legType: "TF",
+            role: "MAPt",
+            altitudeFt: 110,
+            geometryAltitudeFt: 110,
+            distanceFromStartM: 1000,
+            timeSeconds: 100,
+            sourceLine: 3,
+          },
+        ],
         warnings: [],
       },
     },
@@ -107,5 +142,14 @@ describe("runwayProfileGeometry", () => {
     expect(routes).toHaveLength(1);
     expect(pointIsInsideHorizontalPlate(inside, routes)).toBe(true);
     expect(pointIsInsideHorizontalPlate(outside, routes)).toBe(false);
+  });
+
+  it("builds x-axis reference marks from important runway procedure fixes", () => {
+    const frame = buildRunwayFrame(runwayCollection, "RW09");
+    const marks = buildRunwayReferenceMarks(procedureCollection, frame, "RW09");
+
+    expect(marks.some((mark) => mark.label === "RW09" && mark.detail === "Threshold")).toBe(true);
+    expect(marks.some((mark) => mark.label === "RW09" && mark.detail === "MAPt")).toBe(true);
+    expect(marks.some((mark) => mark.label === "WEPAS" && mark.detail === "FAF")).toBe(true);
   });
 });

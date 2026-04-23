@@ -1,6 +1,7 @@
 import type {
   ProcedureFeature,
   ProcedureFeatureCollection,
+  ProcedureFixProperties,
   ProcedureRouteProperties,
   RunwayProperties,
 } from "../types/geojson-aviation";
@@ -53,6 +54,13 @@ export interface HorizontalPlateRoute {
   branchType: string;
   halfWidthM: number;
   points: RunwayProfilePoint[];
+}
+
+export interface RunwayReferenceMark {
+  xM: number;
+  label: string;
+  detail: string;
+  priority: number;
 }
 
 function toRadians(value: number): number {
@@ -217,6 +225,65 @@ function isProcedureRouteFeature(feature: ProcedureFeature): feature is Procedur
   );
 }
 
+function isProcedureFixFeature(feature: ProcedureFeature): feature is ProcedureFeature & {
+  geometry: { type: "Point"; coordinates: [number, number, number] };
+  properties: ProcedureFixProperties;
+} {
+  return (
+    feature.geometry.type === "Point" &&
+    feature.properties.featureType === "procedure-fix"
+  );
+}
+
+function isSelectedRnavRunwayFeature(
+  props: { runwayIdent?: string | null; runway?: string | null; procedureFamily?: string; branchType?: string },
+  runwayIdent: string,
+): boolean {
+  if (normalizeRunwayIdent(props.runwayIdent ?? props.runway ?? "") !== runwayIdent) {
+    return false;
+  }
+  if (!(props.procedureFamily ?? "UNKNOWN").toUpperCase().startsWith("RNAV")) {
+    return false;
+  }
+  return (props.branchType ?? "final").toLowerCase() !== "missed";
+}
+
+function priorityForFixRole(role: string, branchType?: string): number {
+  const normalizedRole = role.toUpperCase();
+  const rolePriority =
+    normalizedRole === "FAF"
+      ? 6
+      : normalizedRole === "MAPT"
+        ? 5
+        : normalizedRole === "IF"
+          ? 4
+          : normalizedRole === "IAF"
+            ? 3
+            : 2;
+  return rolePriority + ((branchType ?? "final").toLowerCase() === "final" ? 1 : 0);
+}
+
+function upsertReferenceMark(
+  marksByKey: Map<string, RunwayReferenceMark>,
+  mark: RunwayReferenceMark,
+): void {
+  const bucketX = Math.round(mark.xM / 75);
+  const key = `${mark.label}|${mark.detail}|${bucketX}`;
+  const existing = marksByKey.get(key);
+
+  if (!existing) {
+    marksByKey.set(key, mark);
+    return;
+  }
+
+  marksByKey.set(key, {
+    xM: (existing.xM + mark.xM) / 2,
+    label: mark.label,
+    detail: mark.detail,
+    priority: Math.max(existing.priority, mark.priority),
+  });
+}
+
 function pointInsidePlateRoute(
   point: Pick<RunwayProfilePoint, "xM" | "yM">,
   route: HorizontalPlateRoute,
@@ -313,16 +380,7 @@ export function buildHorizontalPlateRoutes(
   const normalizedRunway = normalizeRunwayIdent(runwayIdent);
   return procedureCollection.features
     .filter(isProcedureRouteFeature)
-    .filter((feature) => {
-      const props = feature.properties;
-      if (normalizeRunwayIdent(props.runwayIdent ?? props.runway ?? "") !== normalizedRunway) {
-        return false;
-      }
-      if (!(props.procedureFamily ?? "UNKNOWN").toUpperCase().startsWith("RNAV")) {
-        return false;
-      }
-      return (props.branchType ?? "final").toLowerCase() !== "missed";
-    })
+    .filter((feature) => isSelectedRnavRunwayFeature(feature.properties, normalizedRunway))
     .map((feature) => ({
       routeId: feature.properties.routeId,
       procedureName: feature.properties.procedureName,
@@ -334,6 +392,65 @@ export function buildHorizontalPlateRoutes(
       ),
     }))
     .filter((route) => route.points.length >= 2);
+}
+
+export function buildRunwayReferenceMarks(
+  procedureCollection: ProcedureFeatureCollection,
+  frame: RunwayFrame,
+  runwayIdent: string,
+): RunwayReferenceMark[] {
+  const normalizedRunway = normalizeRunwayIdent(runwayIdent);
+  const marksByKey = new Map<string, RunwayReferenceMark>();
+
+  procedureCollection.features
+    .filter(isProcedureFixFeature)
+    .filter((feature) => isSelectedRnavRunwayFeature(feature.properties, normalizedRunway))
+    .forEach((feature) => {
+      const [lon, lat, altM] = feature.geometry.coordinates;
+      const projected = projectPositionToRunwayFrame(frame, lon, lat, altM ?? frame.thresholdAltM);
+      const label = feature.properties.name;
+      const detail = feature.properties.role;
+      const priority = priorityForFixRole(detail, feature.properties.branchType);
+      upsertReferenceMark(marksByKey, {
+        xM: projected.xM,
+        label,
+        detail,
+        priority,
+      });
+    });
+
+  procedureCollection.features
+    .filter(isProcedureRouteFeature)
+    .filter((feature) => isSelectedRnavRunwayFeature(feature.properties, normalizedRunway))
+    .forEach((feature) => {
+      feature.properties.samples.forEach((sample, index) => {
+        const coordinate = feature.geometry.coordinates[index];
+        if (!coordinate) return;
+        const [lon, lat, altM] = coordinate;
+        const projected = projectPositionToRunwayFrame(frame, lon, lat, altM ?? frame.thresholdAltM);
+        upsertReferenceMark(marksByKey, {
+          xM: projected.xM,
+          label: sample.fixIdent,
+          detail: sample.role,
+          priority: priorityForFixRole(sample.role, feature.properties.branchType),
+        });
+      });
+    });
+
+  const thresholdKey = `${normalizedRunway}|Threshold|0`;
+  if (!marksByKey.has(thresholdKey)) {
+    marksByKey.set(thresholdKey, {
+      xM: 0,
+      label: normalizedRunway,
+      detail: "Threshold",
+      priority: 10,
+    });
+  }
+
+  return [...marksByKey.values()].sort((left, right) => {
+    if (left.priority === right.priority) return right.xM - left.xM;
+    return right.priority - left.priority;
+  });
 }
 
 export function pointIsInsideHorizontalPlate(

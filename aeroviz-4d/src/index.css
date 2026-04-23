@@ -449,10 +449,10 @@ body,
 /* ── Runway profile panel ────────────────────────────────────────────────── */
 .runway-profile-panel {
   position: absolute;
-  top: 76px;
+  top: 42px;
   left: calc(var(--overlay-left-width) + 34px);
   right: clamp(240px, 18vw, 292px);
-  bottom: 136px;
+  bottom: 92px;
   z-index: 110;
   pointer-events: auto;
   display: grid;
@@ -558,12 +558,12 @@ body,
   min-height: 0;
   display: grid;
   gap: 12px;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .runway-profile-plots-split {
   grid-template-columns: 1fr;
-  grid-template-rows: repeat(2, minmax(240px, 1fr));
+  grid-template-rows: repeat(2, minmax(300px, 1fr));
 }
 
 .runway-profile-plots-side-xz,
@@ -600,7 +600,7 @@ body,
 .runway-profile-svg {
   width: 100%;
   height: 100%;
-  min-height: 240px;
+  min-height: 300px;
 }
 
 .runway-profile-plot-frame {
@@ -614,13 +614,21 @@ body,
 .runway-profile-centerline,
 .runway-profile-ground-line,
 .runway-profile-route-line,
-.runway-profile-route-band {
+.runway-profile-route-band,
+.runway-profile-grid-line,
+.runway-profile-reference-line,
+.runway-profile-reference-tick {
   fill: none;
 }
 
 .runway-profile-axis {
   stroke: rgba(148, 163, 184, 0.45);
   stroke-width: 1.2;
+}
+
+.runway-profile-grid-line {
+  stroke: rgba(148, 163, 184, 0.13);
+  stroke-width: 1;
 }
 
 .runway-profile-threshold-line {
@@ -650,11 +658,23 @@ body,
   stroke-linejoin: round;
 }
 
+.runway-profile-reference-line {
+  stroke: rgba(167, 243, 208, 0.22);
+  stroke-width: 1;
+  stroke-dasharray: 3 6;
+}
+
+.runway-profile-reference-tick {
+  stroke: rgba(167, 243, 208, 0.9);
+  stroke-width: 1.4;
+}
+
 .runway-profile-axis-label,
 .runway-profile-axis-tick,
 .runway-profile-threshold-label,
 .runway-profile-centerline-label,
-.runway-profile-flight-label {
+.runway-profile-flight-label,
+.runway-profile-reference-label {
   font-family: "Inter", "Segoe UI", sans-serif;
 }
 
@@ -680,11 +700,17 @@ body,
   font-weight: 600;
 }
 
+.runway-profile-reference-label {
+  fill: #d1fae5;
+  font-size: 10px;
+}
+
 @media (max-width: 1320px) {
   .runway-profile-panel {
-    top: 92px;
+    top: 56px;
     right: 16px;
     left: calc(var(--overlay-left-width) + 24px);
+    bottom: 96px;
   }
 }
 
@@ -694,6 +720,10 @@ body,
     right: 16px;
     top: 150px;
     bottom: 132px;
+  }
+
+  .runway-profile-plots {
+    overflow: auto;
   }
 
   .runway-profile-panel-header,
