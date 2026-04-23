@@ -118,6 +118,64 @@ const procedureCollection: ProcedureFeatureCollection = {
         warnings: [],
       },
     },
+    {
+      type: "Feature",
+      geometry: {
+        type: "LineString",
+        coordinates: [
+          [-0.015, 0.0002, 0],
+          [-0.010, 0.0, 500],
+        ],
+      },
+      properties: {
+        featureType: "procedure-route",
+        airport: "TEST",
+        procedureType: "SIAP",
+        procedureIdent: "R09",
+        procedureName: "RNAV(GPS) RW09",
+        branch: "TRANS",
+        branchIdent: "TRANS",
+        branchType: "transition",
+        procedureFamily: "RNAV_GPS",
+        runway: "RW09",
+        runwayIdent: "RW09",
+        routeId: "TEST-R09-TRANS",
+        source: "FAA-CIFP",
+        sourceCycle: "2603",
+        researchUseOnly: true,
+        nominalSpeedKt: 140,
+        tunnel: {
+          lateralHalfWidthNm: 0.3,
+          verticalHalfHeightFt: 300,
+          sampleSpacingM: 250,
+        },
+        samples: [
+          {
+            sequence: 5,
+            fixIdent: "CONCA",
+            legType: "IF",
+            role: "IF",
+            altitudeFt: null,
+            geometryAltitudeFt: 0,
+            distanceFromStartM: 0,
+            timeSeconds: 0,
+            sourceLine: 4,
+          },
+          {
+            sequence: 10,
+            fixIdent: "SCHOO",
+            legType: "TF",
+            role: "IF",
+            altitudeFt: 1600,
+            geometryAltitudeFt: 1600,
+            distanceFromStartM: 500,
+            timeSeconds: 40,
+            sourceLine: 5,
+          },
+        ],
+        warnings: [],
+      },
+    },
   ],
 };
 
@@ -139,7 +197,7 @@ describe("runwayProfileGeometry", () => {
     const inside = projectPositionToRunwayFrame(frame, -0.0045, 0.00003, 220);
     const outside = projectPositionToRunwayFrame(frame, -0.0045, 0.008, 220);
 
-    expect(routes).toHaveLength(1);
+    expect(routes).toHaveLength(2);
     expect(pointIsInsideHorizontalPlate(inside, routes)).toBe(true);
     expect(pointIsInsideHorizontalPlate(outside, routes)).toBe(false);
   });
@@ -151,5 +209,18 @@ describe("runwayProfileGeometry", () => {
     expect(marks.some((mark) => mark.label === "RW09" && mark.detail === "Threshold")).toBe(true);
     expect(marks.some((mark) => mark.label === "RW09" && mark.detail === "MAPt")).toBe(true);
     expect(marks.some((mark) => mark.label === "WEPAS" && mark.detail === "FAF")).toBe(true);
+    expect(
+      marks.some((mark) => mark.label === "CONCA" && mark.detail === "IF" && mark.zM > 400),
+    ).toBe(true);
+  });
+
+  it("fills unknown zero-altitude transition endpoints from nearby valid route heights", () => {
+    const frame = buildRunwayFrame(runwayCollection, "RW09");
+    const routes = buildHorizontalPlateRoutes(procedureCollection, frame, "RW09");
+    const transitionRoute = routes.find((route) => route.routeId === "TEST-R09-TRANS");
+
+    expect(transitionRoute).toBeTruthy();
+    expect(transitionRoute?.points[0].zM).toBeCloseTo(transitionRoute?.points[1].zM ?? 0, 6);
+    expect(transitionRoute?.points[0].zM ?? 0).toBeGreaterThan(400);
   });
 });

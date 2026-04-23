@@ -669,6 +669,12 @@ body,
   stroke-width: 1.4;
 }
 
+.runway-profile-reference-point {
+  fill: #d1fae5;
+  stroke: rgba(15, 23, 42, 0.92);
+  stroke-width: 1.4;
+}
+
 .runway-profile-axis-label,
 .runway-profile-axis-tick,
 .runway-profile-threshold-label,

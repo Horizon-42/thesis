@@ -1,7 +1,6 @@
 import type {
   ProcedureFeature,
   ProcedureFeatureCollection,
-  ProcedureFixProperties,
   ProcedureRouteProperties,
   RunwayProperties,
 } from "../types/geojson-aviation";
@@ -58,6 +57,8 @@ export interface HorizontalPlateRoute {
 
 export interface RunwayReferenceMark {
   xM: number;
+  yM: number;
+  zM: number;
   label: string;
   detail: string;
   priority: number;
@@ -225,16 +226,6 @@ function isProcedureRouteFeature(feature: ProcedureFeature): feature is Procedur
   );
 }
 
-function isProcedureFixFeature(feature: ProcedureFeature): feature is ProcedureFeature & {
-  geometry: { type: "Point"; coordinates: [number, number, number] };
-  properties: ProcedureFixProperties;
-} {
-  return (
-    feature.geometry.type === "Point" &&
-    feature.properties.featureType === "procedure-fix"
-  );
-}
-
 function isSelectedRnavRunwayFeature(
   props: { runwayIdent?: string | null; runway?: string | null; procedureFamily?: string; branchType?: string },
   runwayIdent: string,
@@ -278,10 +269,71 @@ function upsertReferenceMark(
 
   marksByKey.set(key, {
     xM: (existing.xM + mark.xM) / 2,
+    yM: (existing.yM + mark.yM) / 2,
+    zM: (existing.zM + mark.zM) / 2,
     label: mark.label,
     detail: mark.detail,
     priority: Math.max(existing.priority, mark.priority),
   });
+}
+
+function preferredRouteAltitudeM(
+  coordsAltitudeM: number | undefined,
+  sample: ProcedureRouteProperties["samples"][number] | undefined,
+): number | null {
+  if (typeof coordsAltitudeM === "number" && Number.isFinite(coordsAltitudeM) && coordsAltitudeM > 0) {
+    return coordsAltitudeM;
+  }
+  const geometryAltitudeFt = sample?.geometryAltitudeFt;
+  if (typeof geometryAltitudeFt === "number" && Number.isFinite(geometryAltitudeFt) && geometryAltitudeFt > 0) {
+    return geometryAltitudeFt * 0.3048;
+  }
+  const altitudeFt = sample?.altitudeFt;
+  if (typeof altitudeFt === "number" && Number.isFinite(altitudeFt) && altitudeFt > 0) {
+    return altitudeFt * 0.3048;
+  }
+  return null;
+}
+
+function fillMissingAltitudes(altitudesM: Array<number | null>): number[] {
+  const known = altitudesM
+    .map((altitudeM, index) => ({ altitudeM, index }))
+    .filter((entry): entry is { altitudeM: number; index: number } => entry.altitudeM !== null);
+
+  if (known.length === 0) {
+    return altitudesM.map(() => 0);
+  }
+
+  return altitudesM.map((altitudeM, index) => {
+    if (altitudeM !== null) return altitudeM;
+
+    const previous = [...known].reverse().find((entry) => entry.index < index);
+    const next = known.find((entry) => entry.index > index);
+
+    if (previous && next) {
+      const ratio = (index - previous.index) / (next.index - previous.index);
+      return previous.altitudeM + (next.altitudeM - previous.altitudeM) * ratio;
+    }
+    return previous?.altitudeM ?? next?.altitudeM ?? 0;
+  });
+}
+
+function buildProjectedRoutePoints(
+  feature: ProcedureFeature & {
+    geometry: { type: "LineString"; coordinates: Array<[number, number, number]> };
+    properties: ProcedureRouteProperties;
+  },
+  frame: RunwayFrame,
+): RunwayProfilePoint[] {
+  const preferredAltitudesM = fillMissingAltitudes(
+    feature.geometry.coordinates.map((coords, index) =>
+      preferredRouteAltitudeM(coords[2], feature.properties.samples[index]),
+    ),
+  );
+
+  return feature.geometry.coordinates.map(([lon, lat], index) =>
+    projectPositionToRunwayFrame(frame, lon, lat, preferredAltitudesM[index]),
+  );
 }
 
 function pointInsidePlateRoute(
@@ -387,9 +439,7 @@ export function buildHorizontalPlateRoutes(
       procedureFamily: feature.properties.procedureFamily ?? "UNKNOWN",
       branchType: feature.properties.branchType ?? "final",
       halfWidthM: (feature.properties.tunnel?.lateralHalfWidthNm ?? 0.3) * 1852,
-      points: feature.geometry.coordinates.map(([lon, lat, altM]) =>
-        projectPositionToRunwayFrame(frame, lon, lat, altM ?? frame.thresholdAltM),
-      ),
+      points: buildProjectedRoutePoints(feature, frame),
     }))
     .filter((route) => route.points.length >= 2);
 }
@@ -403,33 +453,17 @@ export function buildRunwayReferenceMarks(
   const marksByKey = new Map<string, RunwayReferenceMark>();
 
   procedureCollection.features
-    .filter(isProcedureFixFeature)
-    .filter((feature) => isSelectedRnavRunwayFeature(feature.properties, normalizedRunway))
-    .forEach((feature) => {
-      const [lon, lat, altM] = feature.geometry.coordinates;
-      const projected = projectPositionToRunwayFrame(frame, lon, lat, altM ?? frame.thresholdAltM);
-      const label = feature.properties.name;
-      const detail = feature.properties.role;
-      const priority = priorityForFixRole(detail, feature.properties.branchType);
-      upsertReferenceMark(marksByKey, {
-        xM: projected.xM,
-        label,
-        detail,
-        priority,
-      });
-    });
-
-  procedureCollection.features
     .filter(isProcedureRouteFeature)
     .filter((feature) => isSelectedRnavRunwayFeature(feature.properties, normalizedRunway))
     .forEach((feature) => {
+      const projectedPoints = buildProjectedRoutePoints(feature, frame);
       feature.properties.samples.forEach((sample, index) => {
-        const coordinate = feature.geometry.coordinates[index];
-        if (!coordinate) return;
-        const [lon, lat, altM] = coordinate;
-        const projected = projectPositionToRunwayFrame(frame, lon, lat, altM ?? frame.thresholdAltM);
+        const projected = projectedPoints[index];
+        if (!projected) return;
         upsertReferenceMark(marksByKey, {
           xM: projected.xM,
+          yM: projected.yM,
+          zM: projected.zM,
           label: sample.fixIdent,
           detail: sample.role,
           priority: priorityForFixRole(sample.role, feature.properties.branchType),
@@ -441,6 +475,8 @@ export function buildRunwayReferenceMarks(
   if (!marksByKey.has(thresholdKey)) {
     marksByKey.set(thresholdKey, {
       xM: 0,
+      yM: 0,
+      zM: 0,
       label: normalizedRunway,
       detail: "Threshold",
       priority: 10,

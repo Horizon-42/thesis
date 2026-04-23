@@ -302,6 +302,7 @@ function ProfilePlot({
 
         {visibleReferenceMarks.map((mark) => {
           const markX = plotX(mark.xM);
+          const markY = plotY(mode === "side" ? mark.zM : mark.yM);
           const label = `${mark.label} · ${mark.detail}`;
           return (
             <g key={`${mode}-mark-${mark.label}-${mark.detail}-${Math.round(mark.xM)}`}>
@@ -311,6 +312,12 @@ function ProfilePlot({
                 x2={markX}
                 y2={marginTop + plotHeight}
                 className="runway-profile-reference-line"
+              />
+              <circle
+                cx={markX}
+                cy={markY}
+                r={4.1}
+                className="runway-profile-reference-point"
               />
               <line
                 x1={markX}
