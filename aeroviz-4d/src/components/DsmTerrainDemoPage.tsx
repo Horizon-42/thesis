@@ -291,15 +291,14 @@ export default function DsmTerrainDemoPage() {
   }, [terrain.status]);
 
   return (
-    <main className="dsm-demo-page">
-      <div ref={containerRef} className="dsm-demo-viewer" />
+    <main className="dsm-terrain-page">
+      <div ref={containerRef} className="dsm-terrain-viewer" />
       <div className="cesium-overlay-container dsm-terrain-hud-layer">
         <HUD />
       </div>
-      <section className="dsm-demo-panel dsm-terrain-panel">
-        <nav className="dsm-demo-nav">
-          <a href="/" className="dsm-demo-link">Flight view</a>
-          <a href="/dsm-demo" className="dsm-demo-link">3D Tiles demo</a>
+      <section className="dsm-terrain-panel">
+        <nav className="dsm-terrain-nav">
+          <a href="/" className="dsm-terrain-link">Flight view</a>
         </nav>
         <h1>{activeAirportCode || "Airport"} DSM Terrain</h1>
         <p>{displayState.status}</p>
@@ -379,7 +378,7 @@ export default function DsmTerrainDemoPage() {
           exaggeration is {TERRAIN_VERTICAL_EXAGGERATION}x; tile heights remain real DSM metres.
         </p>
       </section>
-      <div className="dsm-demo-legend dsm-terrain-legend">
+      <div className="dsm-terrain-legend">
         <span>{displayState.heightMin || "Low"}</span>
         <div />
         <span>{displayState.heightMax || "High"}</span>

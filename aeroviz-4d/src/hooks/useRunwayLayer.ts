@@ -82,7 +82,7 @@ export function useRunwayLayer(): void {
       //       new Cesium.ConstantProperty(Cesium.ClassificationType.TERRAIN);
       //
       // Why: ClassificationType.TERRAIN means the polygon only drapes on terrain
-      // and does NOT occlude 3D Tileset buildings or aircraft models.
+      // and does NOT occlude aircraft models or other scene primitives.
       //
       // Hint: ConstantProperty wraps a static value for Cesium's property system.
       ds.entities.values.forEach(entity => {

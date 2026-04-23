@@ -1,5 +1,5 @@
 import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
@@ -9,6 +9,7 @@ import * as Cesium from "cesium";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
 const AIRPORT_CODE = (cliOption("--airport") ?? "CYVR").toUpperCase();
+const rawLidarInputDir = path.resolve(repoRoot, `../data/bc_lidar/${AIRPORT_CODE}/dsm`);
 const defaultInputDir = path.resolve(repoRoot, `public/data/airports/${AIRPORT_CODE}/dsm/source`);
 const fallbackInputDir = path.resolve(repoRoot, `public/data/DSM/${AIRPORT_CODE}`);
 const legacySingleInput = path.resolve(
@@ -99,9 +100,22 @@ function resolveInputDir() {
     return path.resolve(process.cwd(), requestedInputDir);
   }
 
-  if (existsSync(defaultInputDir)) return defaultInputDir;
-  if (existsSync(fallbackInputDir)) return fallbackInputDir;
+  if (directoryHasGeoTiffs(rawLidarInputDir)) return rawLidarInputDir;
+  if (directoryHasGeoTiffs(defaultInputDir)) return defaultInputDir;
+  if (directoryHasGeoTiffs(fallbackInputDir)) return fallbackInputDir;
   return path.dirname(legacySingleInput);
+}
+
+function directoryHasGeoTiffs(inputDir) {
+  if (!existsSync(inputDir)) return false;
+
+  try {
+    return readdirSync(inputDir, { withFileTypes: true }).some(
+      (entry) => entry.isFile() && /\.tiff?$/i.test(entry.name)
+    );
+  } catch {
+    return false;
+  }
 }
 
 async function listGeoTiffPaths(inputDir) {

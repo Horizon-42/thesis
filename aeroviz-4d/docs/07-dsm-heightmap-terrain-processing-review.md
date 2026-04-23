@@ -8,11 +8,16 @@ This is a review note only. It does not propose a final fix yet.
 
 ## Current Input
 
-The script now reads all GeoTIFF files from:
+By default, the script now reads all GeoTIFF files from the raw LiDAR DSM folder
+when it exists:
 
 ```text
 ../data/bc_lidar/CYVR/dsm
 ```
+
+Explicit `--input` / `--input-dir` still override this default. If the raw
+LiDAR folder is unavailable, the script falls back to the smaller per-airport
+public source folder.
 
 The current generated metadata reports:
 
@@ -35,7 +40,7 @@ The source CRS is treated as:
 The script writes into:
 
 ```text
-public/data/DSM/CYVR/heightmap-terrain
+public/data/airports/CYVR/dsm/heightmap-terrain
 ```
 
 Important outputs:
