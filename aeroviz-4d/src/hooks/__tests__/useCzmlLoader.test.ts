@@ -18,6 +18,7 @@ const {
   setTrajectoriesVisible,
   getTrajectoriesVisible,
   setSelectedFlightId,
+  setTrajectoryDataSource,
   makeTime,
 } = vi.hoisted(() => {
   const makeTime = (seconds: number): any => ({
@@ -27,6 +28,7 @@ const {
 
   const loadCzml = vi.fn();
   const setSelectedFlightId = vi.fn();
+  const setTrajectoryDataSource = vi.fn();
   let trajectoriesVisible = true;
 
   const mockViewer = {
@@ -56,6 +58,7 @@ const {
     },
     getTrajectoriesVisible: () => trajectoriesVisible,
     setSelectedFlightId,
+    setTrajectoryDataSource,
     makeTime,
   };
 });
@@ -88,6 +91,7 @@ vi.mock("../../context/AppContext", () => ({
     viewer: mockViewer,
     layers: { trajectories: getTrajectoriesVisible() },
     setSelectedFlightId,
+    setTrajectoryDataSource,
   }),
 }));
 
@@ -105,6 +109,7 @@ function resetViewer() {
   mockViewer.dataSources.remove.mockClear();
   mockViewer.timeline.zoomTo.mockClear();
   setSelectedFlightId.mockClear();
+  setTrajectoryDataSource.mockClear();
   setTrajectoriesVisible(true);
 }
 
@@ -140,6 +145,7 @@ describe("useCzmlLoader", () => {
     expect(result.current.warning).toContain("No trajectory entities");
     expect(mockViewer.dataSources.add).not.toHaveBeenCalled();
     expect(mockViewer.timeline.zoomTo).not.toHaveBeenCalled();
+    expect(setTrajectoryDataSource).toHaveBeenCalledWith(null);
     expect(warnSpy).toHaveBeenCalled();
   });
 
@@ -157,6 +163,9 @@ describe("useCzmlLoader", () => {
     expect(result.current.flightIds).toEqual(["flight-1"]);
     expect(result.current.warning).toContain("has no duration");
     expect(mockViewer.dataSources.add).toHaveBeenCalledTimes(1);
+    expect(setTrajectoryDataSource).toHaveBeenLastCalledWith(expect.objectContaining({
+      entities: { values: [{ id: "flight-1" }] },
+    }));
     expect(mockViewer.timeline.zoomTo).not.toHaveBeenCalled();
   });
 
@@ -176,6 +185,9 @@ describe("useCzmlLoader", () => {
     expect(mockViewer.clock.startTime.seconds).toBe(10);
     expect(mockViewer.clock.stopTime.seconds).toBe(70);
     expect(mockViewer.clock.shouldAnimate).toBe(true);
+    expect(setTrajectoryDataSource).toHaveBeenLastCalledWith(expect.objectContaining({
+      entities: { values: [{ id: "flight-1" }, { id: "flight-2" }] },
+    }));
     expect(mockViewer.timeline.zoomTo).toHaveBeenCalledWith(
       mockViewer.clock.startTime,
       mockViewer.clock.stopTime,

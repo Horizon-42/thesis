@@ -103,6 +103,10 @@ export default function ProcedurePanel() {
     setProcedureRouteVisible,
     setProcedureRoutesVisible,
     activeAirportCode,
+    selectedProfileRunwayIdent,
+    setSelectedProfileRunwayIdent,
+    isRunwayProfileOpen,
+    setRunwayProfileOpen,
   } = useApp();
   const [routes, setRoutes] = useState<ProcedureRouteItem[]>([]);
   const [sourceCycle, setSourceCycle] = useState<string | null>(null);
@@ -176,6 +180,15 @@ export default function ProcedurePanel() {
     });
   };
 
+  const toggleRunwayProfile = (runwayIdent: string) => {
+    if (isRunwayProfileOpen && selectedProfileRunwayIdent === runwayIdent) {
+      setRunwayProfileOpen(false);
+      return;
+    }
+    setSelectedProfileRunwayIdent(runwayIdent);
+    setRunwayProfileOpen(true);
+  };
+
   return (
     <aside className="procedure-panel" aria-label="RNAV procedure controls">
       <header className="procedure-panel-header">
@@ -218,6 +231,19 @@ export default function ProcedurePanel() {
                   aria-expanded={isExpanded}
                 >
                   {isExpanded ? "Hide" : "Show"}
+                </button>
+                <button
+                  type="button"
+                  className={
+                    isRunwayProfileOpen && selectedProfileRunwayIdent === group.runwayIdent
+                      ? "procedure-runway-profile-button active"
+                      : "procedure-runway-profile-button"
+                  }
+                  onClick={() => toggleRunwayProfile(group.runwayIdent)}
+                >
+                  {isRunwayProfileOpen && selectedProfileRunwayIdent === group.runwayIdent
+                    ? "Profile On"
+                    : "Profile"}
                 </button>
                 <label>
                   <input

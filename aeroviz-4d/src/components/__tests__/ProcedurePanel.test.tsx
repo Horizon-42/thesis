@@ -15,8 +15,14 @@ const {
   setProcedureRouteVisible,
   setProcedureRoutesVisible,
   getProcedureVisibility,
+  setSelectedProfileRunwayIdent,
+  setRunwayProfileOpen,
+  getSelectedProfileRunwayIdent,
+  getRunwayProfileOpen,
 } = vi.hoisted(() => {
   let procedureVisibility: Record<string, boolean> = {};
+  let selectedProfileRunwayIdent: string | null = null;
+  let isRunwayProfileOpen = false;
   return {
     fetchMock: vi.fn(),
     toggleLayer: vi.fn(),
@@ -30,7 +36,15 @@ const {
       });
       procedureVisibility = next;
     }),
+    setSelectedProfileRunwayIdent: vi.fn((runwayIdent: string | null) => {
+      selectedProfileRunwayIdent = runwayIdent;
+    }),
+    setRunwayProfileOpen: vi.fn((open: boolean) => {
+      isRunwayProfileOpen = open;
+    }),
     getProcedureVisibility: () => procedureVisibility,
+    getSelectedProfileRunwayIdent: () => selectedProfileRunwayIdent,
+    getRunwayProfileOpen: () => isRunwayProfileOpen,
   };
 });
 
@@ -42,6 +56,10 @@ vi.mock("../../context/AppContext", () => ({
     procedureVisibility: getProcedureVisibility(),
     setProcedureRouteVisible,
     setProcedureRoutesVisible,
+    selectedProfileRunwayIdent: getSelectedProfileRunwayIdent(),
+    setSelectedProfileRunwayIdent,
+    isRunwayProfileOpen: getRunwayProfileOpen(),
+    setRunwayProfileOpen,
   }),
 }));
 
@@ -110,6 +128,8 @@ describe("ProcedurePanel", () => {
     toggleLayer.mockClear();
     setProcedureRouteVisible.mockClear();
     setProcedureRoutesVisible.mockClear();
+    setSelectedProfileRunwayIdent.mockClear();
+    setRunwayProfileOpen.mockClear();
     fetchMock.mockResolvedValue(jsonResponse(sampleGeoJson));
     vi.stubGlobal("fetch", fetchMock);
   });
@@ -146,5 +166,15 @@ describe("ProcedurePanel", () => {
     fireEvent.click(checkbox as HTMLInputElement);
 
     expect(setProcedureRouteVisible).toHaveBeenCalledWith("KRDU-R05LY-AOTTOS", true);
+  });
+
+  it("opens the runway trajectory profile for a runway group", async () => {
+    render(<ProcedurePanel />);
+    await waitFor(() => expect(screen.getByText("RW05L")).toBeTruthy());
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Profile" })[0]);
+
+    expect(setSelectedProfileRunwayIdent).toHaveBeenCalledWith("RW05L");
+    expect(setRunwayProfileOpen).toHaveBeenCalledWith(true);
   });
 });

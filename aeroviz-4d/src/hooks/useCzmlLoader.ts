@@ -45,7 +45,7 @@ export interface CzmlLoaderState {
  * @param czmlUrl - path to the CZML file, e.g. "/data/airports/KRDU/trajectories.czml"
  */
 export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
-  const { viewer, layers, setSelectedFlightId } = useApp();
+  const { viewer, layers, setSelectedFlightId, setTrajectoryDataSource } = useApp();
   // Hold a direct reference — the CZML document packet can overwrite the
   // datasource name, making getByName() unreliable for visibility sync.
   const dsRef = useRef<Cesium.CzmlDataSource | null>(null);
@@ -58,6 +58,7 @@ export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
 
   useEffect(() => {
     if (!viewer || !czmlUrl) {
+      setTrajectoryDataSource(null);
       setState({ isLoaded: false, flightIds: [], warning: null, error: null });
       return;
     }
@@ -67,6 +68,7 @@ export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
     let cancelled = false;
 
     setState({ isLoaded: false, flightIds: [], warning: null, error: null });
+    setTrajectoryDataSource(null);
 
     // ── Step 1: Preflight the CZML URL so missing files don't parse index.html.
     const ds = new Cesium.CzmlDataSource(LAYER_NAME);
@@ -89,6 +91,7 @@ export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
           console.warn(`[useCzmlLoader] ${warning}`);
           viewer.trackedEntity = undefined;
           setSelectedFlightId(null);
+          setTrajectoryDataSource(null);
           setState({ isLoaded: true, flightIds: [], warning, error: null });
           return;
         }
@@ -96,6 +99,7 @@ export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
         dataSource = loadedDs;
         dsRef.current = loadedDs;
         viewer.dataSources.add(loadedDs);
+        setTrajectoryDataSource(loadedDs);
         loadedDs.show = layers.trajectories;
 
         let warning: string | null = null;
@@ -135,11 +139,13 @@ export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
           console.warn(`[useCzmlLoader] ${warning}`);
           viewer.trackedEntity = undefined;
           setSelectedFlightId(null);
+          setTrajectoryDataSource(null);
           setState({ isLoaded: true, flightIds: [], warning, error: null });
           return;
         }
 
         const message = err instanceof Error ? err.message : String(err);
+        setTrajectoryDataSource(null);
         setState({ isLoaded: false, flightIds: [], warning: null, error: message });
       });
 
@@ -147,12 +153,13 @@ export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
     return () => {
       cancelled = true;
       dsRef.current = null;
+      setTrajectoryDataSource(null);
       if (dataSource) {
         viewer.dataSources.remove(dataSource, true);
         viewer.trackedEntity = undefined;
       }
     };
-  }, [viewer, czmlUrl, setSelectedFlightId]);
+  }, [viewer, czmlUrl, setSelectedFlightId, setTrajectoryDataSource]);
 
   // ── Sync visibility ───────────────────────────────────────────────────────
   useEffect(() => {

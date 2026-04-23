@@ -17,6 +17,7 @@ import DsmTerrainDemoPage from "./components/DsmTerrainDemoPage";
 import HUD from "./components/HUD";
 import FlightTable from "./components/FlightTable";
 import ProcedurePanel from "./components/ProcedurePanel";
+import RunwayTrajectoryProfilePanel from "./components/RunwayTrajectoryProfilePanel";
 import { useApp } from "./context/AppContext";
 import { airportDataUrl } from "./data/airportData";
 import { useCzmlLoader } from "./hooks/useCzmlLoader";
@@ -38,6 +39,7 @@ function FlightApp() {
       <div className="cesium-overlay-container">
         <ControlPanel />
         <ProcedurePanel />
+        <RunwayTrajectoryProfilePanel />
         {czmlStatus ? (
           <div
             className={`czml-status ${

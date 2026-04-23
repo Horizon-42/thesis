@@ -49,6 +49,8 @@ export type LayerKey =
   | "obstacles"
   | "procedures";
 
+export type RunwayProfileViewMode = "split" | "side-xz" | "top-xy";
+
 // ── Context shape ────────────────────────────────────────────────────────────
 interface AppState {
   /** The live CesiumJS Viewer, or null before it is mounted */
@@ -69,6 +71,10 @@ interface AppState {
   selectedFlightId: string | null;
   setSelectedFlightId: (id: string | null) => void;
 
+  /** The loaded CZML datasource for trajectory sampling and profile views */
+  trajectoryDataSource: Cesium.CzmlDataSource | null;
+  setTrajectoryDataSource: (dataSource: Cesium.CzmlDataSource | null) => void;
+
   /** Visibility flags for each data layer */
   layers: Record<LayerKey, boolean>;
   toggleLayer: (key: LayerKey) => void;
@@ -81,6 +87,14 @@ interface AppState {
   /** Current Cesium clock multiplier (mirrors viewer.clock.multiplier) */
   playbackSpeed: number;
   setPlaybackSpeed: (speed: number) => void;
+
+  /** Selected runway for the 2D runway profile overlay */
+  selectedProfileRunwayIdent: string | null;
+  setSelectedProfileRunwayIdent: (runwayIdent: string | null) => void;
+  isRunwayProfileOpen: boolean;
+  setRunwayProfileOpen: (open: boolean) => void;
+  runwayProfileViewMode: RunwayProfileViewMode;
+  setRunwayProfileViewMode: (mode: RunwayProfileViewMode) => void;
 }
 
 // ── Create context ────────────────────────────────────────────────────────────
@@ -95,8 +109,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [activeAirportCode, setActiveAirportCodeState] = useState<string>("");
   const [airport, setAirport] = useState<AirportConfig | null>(null);
   const [selectedFlightId, setSelectedFlightId] = useState<string | null>(null);
+  const [trajectoryDataSource, setTrajectoryDataSource] =
+    useState<Cesium.CzmlDataSource | null>(null);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(60);
   const [procedureVisibility, setProcedureVisibility] = useState<Record<string, boolean>>({});
+  const [selectedProfileRunwayIdent, setSelectedProfileRunwayIdent] = useState<string | null>(
+    null,
+  );
+  const [isRunwayProfileOpen, setRunwayProfileOpen] = useState(false);
+  const [runwayProfileViewMode, setRunwayProfileViewMode] =
+    useState<RunwayProfileViewMode>("split");
 
   // All layers start visible; hooks respect these flags.
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
@@ -176,7 +198,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         viewer.trackedEntity = undefined;
       }
       setSelectedFlightId(null);
+      setTrajectoryDataSource(null);
       setProcedureVisibility({});
+      setSelectedProfileRunwayIdent(null);
+      setRunwayProfileOpen(false);
       setAirport(null);
       setActiveAirportCodeState(normalizedCode);
     },
@@ -195,6 +220,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setAirport,
         selectedFlightId,
         setSelectedFlightId,
+        trajectoryDataSource,
+        setTrajectoryDataSource,
         layers,
         toggleLayer,
         procedureVisibility,
@@ -202,6 +229,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setProcedureRoutesVisible,
         playbackSpeed,
         setPlaybackSpeed,
+        selectedProfileRunwayIdent,
+        setSelectedProfileRunwayIdent,
+        isRunwayProfileOpen,
+        setRunwayProfileOpen,
+        runwayProfileViewMode,
+        setRunwayProfileViewMode,
       }}
     >
       {children}
