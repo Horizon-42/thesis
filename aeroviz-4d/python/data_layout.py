@@ -32,6 +32,22 @@ def airport_data_path(airport_code: str, file_name: str) -> Path:
     return airport_data_dir(airport_code) / file_name
 
 
+def airport_procedure_details_dir(airport_code: str) -> Path:
+    return airport_data_dir(airport_code) / "procedure-details"
+
+
+def airport_procedure_details_path(airport_code: str, file_name: str) -> Path:
+    return airport_procedure_details_dir(airport_code) / file_name
+
+
+def airport_charts_dir(airport_code: str) -> Path:
+    return airport_data_dir(airport_code) / "charts"
+
+
+def airport_chart_path(airport_code: str, file_name: str) -> Path:
+    return airport_charts_dir(airport_code) / file_name
+
+
 def airport_dsm_dir(airport_code: str) -> Path:
     return airport_data_dir(airport_code) / "dsm"
 
@@ -93,6 +109,8 @@ def find_airport_record(csv_path: Path, airport_code: str) -> dict[str, Any]:
             )
             return {
                 "code": normalize_airport_code(row.get("ident") or normalized_code),
+                "icao_code": normalize_airport_code(row.get("icao_code") or row.get("ident") or normalized_code),
+                "faa_code": (row.get("local_code") or row.get("iata_code") or normalized_code).strip().upper(),
                 "name": (row.get("name") or normalized_code).strip(),
                 "lat": float(lat_raw),
                 "lon": float(lon_raw),

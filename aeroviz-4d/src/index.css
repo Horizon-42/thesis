@@ -970,3 +970,450 @@ body,
 }
 
 .flight-table tr.selected td { background: #1a3a6a; }
+
+.control-panel-link-button {
+  width: 100%;
+  margin-top: 8px;
+}
+
+/* ── Procedure details page ──────────────────────────────────────────────── */
+.procedure-details-page {
+  height: 100dvh;
+  min-height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 28px clamp(20px, 3vw, 42px) 40px;
+  background:
+    radial-gradient(circle at top left, rgba(88, 162, 255, 0.12), transparent 28%),
+    radial-gradient(circle at top right, rgba(70, 210, 190, 0.12), transparent 26%),
+    linear-gradient(180deg, #0a1321 0%, #111d2e 42%, #0f1725 100%);
+  color: #e5edf7;
+  box-sizing: border-box;
+  font-family: "Inter", "Segoe UI", sans-serif;
+}
+
+.procedure-details-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 24px;
+  margin-bottom: 18px;
+}
+
+.procedure-details-eyebrow {
+  margin: 0 0 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #79c0ff;
+}
+
+.procedure-details-header h1 {
+  margin: 0 0 10px;
+  font-size: clamp(28px, 4vw, 42px);
+  line-height: 1.05;
+}
+
+.procedure-details-intro {
+  max-width: 760px;
+  margin: 0;
+  color: #b9c7da;
+  line-height: 1.6;
+}
+
+.procedure-details-header-actions {
+  display: grid;
+  gap: 12px;
+  justify-items: end;
+}
+
+.procedure-details-nav-button,
+.procedure-details-link-button {
+  border: 1px solid rgba(135, 163, 196, 0.35);
+  border-radius: 999px;
+  background: rgba(22, 36, 56, 0.88);
+  color: #edf4ff;
+  padding: 10px 16px;
+  text-decoration: none;
+  cursor: pointer;
+  font: inherit;
+  transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+}
+
+.procedure-details-nav-button:hover,
+.procedure-details-link-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(121, 192, 255, 0.68);
+  background: rgba(31, 53, 81, 0.92);
+}
+
+.procedure-details-link-button.is-secondary {
+  background: rgba(13, 23, 36, 0.84);
+}
+
+.procedure-details-airport-select {
+  display: grid;
+  gap: 6px;
+  min-width: min(280px, 100%);
+}
+
+.procedure-details-airport-select span {
+  font-size: 12px;
+  color: #9eb0c8;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.procedure-details-airport-select select {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(135, 163, 196, 0.25);
+  background: rgba(12, 24, 39, 0.9);
+  color: #edf4ff;
+  padding: 10px 12px;
+  font: inherit;
+}
+
+.procedure-details-note,
+.procedure-details-loading,
+.procedure-details-error,
+.procedure-details-empty-state {
+  border-radius: 18px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+  background: rgba(15, 26, 39, 0.82);
+  border: 1px solid rgba(135, 163, 196, 0.18);
+}
+
+.procedure-details-error {
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #ffd5d5;
+}
+
+.procedure-details-empty-state h2 {
+  margin: 0 0 8px;
+}
+
+.procedure-details-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 280px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.procedure-details-sidebar,
+.procedure-details-main {
+  display: grid;
+  gap: 18px;
+}
+
+.procedure-details-sidebar-card,
+.procedure-details-card {
+  background: rgba(12, 21, 34, 0.84);
+  border: 1px solid rgba(135, 163, 196, 0.18);
+  border-radius: 22px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.22);
+}
+
+.procedure-details-sidebar-card {
+  padding: 16px;
+}
+
+.procedure-details-card {
+  padding: 18px;
+}
+
+.procedure-details-sidebar-card h2,
+.procedure-details-sidebar-card h3,
+.procedure-details-card h3 {
+  margin: 0 0 10px;
+}
+
+.procedure-details-sidebar-meta,
+.procedure-details-section-intro,
+.procedure-details-muted {
+  margin: 0;
+  color: #aebed2;
+  line-height: 1.55;
+}
+
+.procedure-details-runway-list,
+.procedure-details-procedure-list,
+.procedure-details-reference-list {
+  display: grid;
+  gap: 10px;
+}
+
+.procedure-details-runway-button,
+.procedure-details-procedure-button {
+  width: 100%;
+  text-align: left;
+  border-radius: 16px;
+  border: 1px solid rgba(135, 163, 196, 0.16);
+  background: rgba(20, 33, 50, 0.72);
+  color: #edf4ff;
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+}
+
+.procedure-details-runway-button:hover,
+.procedure-details-procedure-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(121, 192, 255, 0.52);
+}
+
+.procedure-details-runway-button.is-active,
+.procedure-details-procedure-button.is-active {
+  background: rgba(24, 65, 112, 0.72);
+  border-color: rgba(121, 192, 255, 0.8);
+}
+
+.procedure-details-runway-button span,
+.procedure-details-procedure-button span {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.procedure-details-runway-button small,
+.procedure-details-procedure-button small {
+  color: #a8bad0;
+}
+
+.procedure-details-overview {
+  display: grid;
+  gap: 18px;
+}
+
+.procedure-details-overview-label,
+.procedure-details-key {
+  display: block;
+  margin-bottom: 6px;
+  color: #8ea5c2;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.procedure-details-overview h2 {
+  margin: 0 0 6px;
+  font-size: clamp(24px, 3vw, 34px);
+}
+
+.procedure-details-overview-meta {
+  margin: 0;
+  color: #c1d0e1;
+}
+
+.procedure-details-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.procedure-details-overview-grid strong {
+  display: block;
+  color: #f8fbff;
+}
+
+.procedure-details-chart-grid,
+.procedure-details-dual-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.procedure-details-chart-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.procedure-details-chart-title {
+  font-size: 18px;
+  fill: #eef5ff;
+  font-weight: 700;
+}
+
+.procedure-details-chart-subtitle {
+  font-size: 12px;
+  fill: #9db0c9;
+}
+
+.procedure-details-grid-line {
+  stroke: rgba(141, 165, 193, 0.18);
+  stroke-width: 1;
+}
+
+.procedure-details-axis-label {
+  fill: #93a8c2;
+  font-size: 11px;
+  text-anchor: end;
+}
+
+.procedure-details-axis-label.is-centered {
+  text-anchor: middle;
+}
+
+.procedure-details-branch-line {
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.procedure-details-branch-final {
+  stroke: #7dd3fc;
+}
+
+.procedure-details-branch-transition {
+  stroke: #f59e0b;
+  stroke-dasharray: 10 8;
+}
+
+.procedure-details-runway-bar {
+  stroke: #f8fafc;
+  stroke-width: 6;
+  stroke-linecap: round;
+}
+
+.procedure-details-fix-point {
+  fill: #ffffff;
+  stroke: rgba(12, 21, 34, 0.9);
+  stroke-width: 2;
+  cursor: pointer;
+}
+
+.procedure-details-fix-point.is-selected {
+  fill: #f59e0b;
+}
+
+.procedure-details-fix-label {
+  fill: #dbe9f8;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.procedure-details-fix-label.is-centered {
+  text-anchor: middle;
+}
+
+.procedure-details-fix-label.is-selected {
+  fill: #ffe0a6;
+}
+
+.procedure-details-empty-chart {
+  min-height: 240px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  color: #aebed2;
+}
+
+.procedure-details-table-wrap {
+  overflow: auto;
+}
+
+.procedure-details-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.procedure-details-table th,
+.procedure-details-table td {
+  border-bottom: 1px solid rgba(135, 163, 196, 0.12);
+  padding: 10px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.procedure-details-table th {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8ea5c2;
+}
+
+.procedure-details-table tbody tr {
+  cursor: pointer;
+}
+
+.procedure-details-table tbody tr.is-selected {
+  background: rgba(29, 78, 137, 0.28);
+}
+
+.procedure-details-fix-inspector h4 {
+  margin: 0 0 8px;
+  font-size: 24px;
+}
+
+.procedure-details-definition-list {
+  display: grid;
+  gap: 10px;
+}
+
+.procedure-details-definition-list div {
+  display: grid;
+  gap: 4px;
+}
+
+.procedure-details-definition-list dt {
+  color: #8ea5c2;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.procedure-details-definition-list dd {
+  margin: 0;
+  color: #eef5ff;
+}
+
+.procedure-details-glossary-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.procedure-details-glossary-list li {
+  display: grid;
+  gap: 4px;
+}
+
+.procedure-details-glossary-list strong {
+  color: #edf4ff;
+}
+
+.procedure-details-glossary-list span {
+  color: #b7c7da;
+  line-height: 1.5;
+}
+
+@media (max-width: 1180px) {
+  .procedure-details-layout,
+  .procedure-details-chart-grid,
+  .procedure-details-dual-grid,
+  .procedure-details-overview-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .procedure-details-page {
+    padding: 18px 14px 26px;
+  }
+
+  .procedure-details-header {
+    grid-template-columns: 1fr;
+    display: grid;
+  }
+
+  .procedure-details-header-actions {
+    justify-items: stretch;
+  }
+}

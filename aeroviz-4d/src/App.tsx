@@ -16,11 +16,13 @@ import ControlPanel from "./components/ControlPanel";
 import DsmTerrainDemoPage from "./components/DsmTerrainDemoPage";
 import HUD from "./components/HUD";
 import FlightTable from "./components/FlightTable";
+import ProcedureDetailsPage from "./components/ProcedureDetailsPage";
 import ProcedurePanel from "./components/ProcedurePanel";
 import RunwayTrajectoryProfilePanel from "./components/RunwayTrajectoryProfilePanel";
 import { useApp } from "./context/AppContext";
 import { airportDataUrl } from "./data/airportData";
 import { useCzmlLoader } from "./hooks/useCzmlLoader";
+import { useEffect, useState } from "react";
 
 function FlightApp() {
   const { activeAirportCode } = useApp();
@@ -58,11 +60,35 @@ function FlightApp() {
 }
 
 export default function App() {
+  const [locationState, setLocationState] = useState(() => ({
+    pathname: window.location.pathname,
+    hash: window.location.hash,
+  }));
+
+  useEffect(() => {
+    const syncLocation = () => {
+      setLocationState({
+        pathname: window.location.pathname,
+        hash: window.location.hash,
+      });
+    };
+
+    window.addEventListener("popstate", syncLocation);
+    window.addEventListener("hashchange", syncLocation);
+    return () => {
+      window.removeEventListener("popstate", syncLocation);
+      window.removeEventListener("hashchange", syncLocation);
+    };
+  }, []);
+
+  const routeToken = locationState.hash.split("?")[0];
   const isDsmTerrainDemo =
-    window.location.pathname === "/dsm-terrain-demo" ||
-    window.location.hash === "#dsm-terrain-demo";
+    locationState.pathname === "/dsm-terrain-demo" || routeToken === "#dsm-terrain-demo";
+  const isProcedureDetails =
+    locationState.pathname === "/procedure-details" || routeToken === "#procedure-details";
 
   if (isDsmTerrainDemo) return <DsmTerrainDemoPage />;
+  if (isProcedureDetails) return <ProcedureDetailsPage />;
 
   return <FlightApp />;
 }

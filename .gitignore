@@ -7,6 +7,8 @@ node_modules
 
 
 data
+!aeroviz-4d/src/data/
+!aeroviz-4d/src/data/**
 !aeroviz-4d/public/data/
 aeroviz-4d/public/data/*
 !aeroviz-4d/public/data/common/

@@ -1,17 +1,23 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
+import preprocess_procedures as procedures_module
 from preprocess_procedures import (
     FixRecord,
     ProcedureLeg,
     build_route_points,
+    build_procedure_detail_document,
     decode_cifp_coordinate,
     generate_procedure_geojson,
     generate_procedures_geojson,
+    infer_chart_targets,
+    publish_procedure_details_assets,
     procedure_exists,
+    sanitize_public_chart_filename,
 )
 
 
@@ -153,3 +159,96 @@ def test_unresolved_fix_is_warned_and_skipped() -> None:
 
     assert route_points == []
     assert any("unresolved fix MISSING" in warning for warning in warnings)
+
+
+def test_build_krdu_r05ly_procedure_detail_document() -> None:
+    document = build_procedure_detail_document(
+        cifp_root=CIFP_ROOT,
+        airport="KRDU",
+        procedure_type="SIAP",
+        procedure="R05LY",
+        nominal_speed_kt=140.0,
+        tunnel_half_width_nm=0.3,
+        tunnel_half_height_ft=300.0,
+        sample_spacing_m=250.0,
+    )
+
+    assert document["procedureUid"] == "KRDU-R05LY-RW05L"
+    assert document["airport"]["faa"] == "RDU"
+    assert document["procedure"]["chartName"] == "RNAV(GPS) Y RWY 05L"
+    assert document["runway"]["ident"] == "RW05L"
+    assert document["runway"]["threshold"]["elevationFt"] == 798
+    assert len(document["branches"]) >= 3
+    assert any(branch["branchRole"] == "final" for branch in document["branches"])
+    assert document["verticalProfiles"][0]["glidepathAngleDeg"] is None
+    assert document["validation"]["expectedFAF"] == "fix:WEPAS"
+    assert document["displayHints"]["defaultVisibleBranchIds"] == ["branch:R"]
+
+
+def test_chart_filename_inference_and_sanitizing() -> None:
+    assert infer_chart_targets("00516RY5L.PDF#nameddest=(RDU).pdf") == ("R05LY", "RW05L")
+    assert infer_chart_targets("00516R32.PDF#nameddest=(RDU).pdf") == ("R32", "RW32")
+    assert sanitize_public_chart_filename("00516RY5L.PDF#nameddest=(RDU).pdf") == (
+        "00516RY5L.PDF-nameddest-RDU.pdf"
+    )
+
+
+def test_publish_procedure_details_assets_writes_manifest_and_chart_links(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    detail_root = tmp_path / "procedure-details"
+    chart_root = tmp_path / "charts"
+    source_chart_root = tmp_path / "chart-source" / "KRDU"
+    source_chart_root.mkdir(parents=True)
+    (source_chart_root / "00516RY5L.PDF#nameddest=(RDU).pdf").write_bytes(
+        b"%PDF-1.4\n% fake chart for test\n"
+    )
+
+    monkeypatch.setattr(
+        procedures_module,
+        "airport_procedure_details_dir",
+        lambda airport: detail_root,
+    )
+    monkeypatch.setattr(
+        procedures_module,
+        "airport_procedure_details_path",
+        lambda airport, file_name: detail_root / file_name,
+    )
+    monkeypatch.setattr(
+        procedures_module,
+        "airport_charts_dir",
+        lambda airport: chart_root,
+    )
+    monkeypatch.setattr(
+        procedures_module,
+        "airport_chart_path",
+        lambda airport, file_name: chart_root / file_name,
+    )
+
+    result = publish_procedure_details_assets(
+        cifp_root=CIFP_ROOT,
+        airport="KRDU",
+        procedure_type="SIAP",
+        procedures=["R05LY"],
+        nominal_speed_kt=140.0,
+        tunnel_half_width_nm=0.3,
+        tunnel_half_height_ft=300.0,
+        sample_spacing_m=250.0,
+        chart_root=tmp_path / "chart-source",
+    )
+
+    assert result["procedureCount"] == 1
+    assert result["chartCount"] == 1
+    assert result["procedureIndexPath"].exists()
+    assert result["chartIndexPath"].exists()
+    assert (detail_root / "KRDU-R05LY-RW05L.json").exists()
+
+    index = json.loads(result["procedureIndexPath"].read_text(encoding="utf-8"))
+    chart_index = json.loads(result["chartIndexPath"].read_text(encoding="utf-8"))
+
+    assert index["airport"] == "KRDU"
+    assert index["runways"][0]["runwayIdent"] == "RW05L"
+    assert index["runways"][0]["procedures"][0]["procedureUid"] == "KRDU-R05LY-RW05L"
+    assert chart_index["charts"][0]["procedureUid"] == "KRDU-R05LY-RW05L"
+    assert chart_index["charts"][0]["url"].endswith("00516RY5L.PDF-nameddest-RDU.pdf")

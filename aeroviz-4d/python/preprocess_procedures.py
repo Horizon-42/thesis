@@ -26,21 +26,33 @@ import argparse
 import json
 import math
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from data_layout import airport_data_path
+from data_layout import (
+    airport_chart_path,
+    airport_charts_dir,
+    airport_data_path,
+    airport_procedure_details_dir,
+    airport_procedure_details_path,
+    common_data_path,
+    find_airport_record,
+)
 
 FEET_TO_METRES = 0.3048
 NM_TO_METRES = 1852.0
 DEFAULT_CIFP_ROOT = Path(__file__).parents[2] / "data" / "CIFP" / "CIFP_260319"
+DEFAULT_RNAV_CHARTS_ROOT = Path(__file__).parents[2] / "data" / "RNAV_CHARTS"
 DEFAULT_AIRPORT = "KRDU"
 DEFAULT_RNAV_PROCEDURES = ["R05LY", "R05RY", "R23LY", "R23RY", "R32"]
 RUNWAY_ORDER = ["RW05L", "RW05R", "RW23L", "RW23R", "RW32"]
 SUPPORTED_ROUTE_LEGS = {"IF", "TF"}
 COORD_PAIR_RE = re.compile(r"([NS]\d{8,10})([EW]\d{9,11})")
 LEG_TYPE_RE = re.compile(r"(?<![A-Z])(IF|TF|DF|CA|CF|HM|HF|RF|VI|VA|FA)(?![A-Z])")
+CHART_PROCEDURE_RE = re.compile(r"R([YZ])?(\d{1,2})([LRC]?)")
+SAFE_FILE_CHARS_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 @dataclass(frozen=True)
@@ -775,6 +787,693 @@ def generate_procedures_geojson(
     )
 
 
+def runway_label(runway_ident: str | None) -> str:
+    if not runway_ident:
+        return "Unknown runway"
+    normalized = runway_ident.upper()
+    if normalized.startswith("RW"):
+        return f"RWY {normalized[2:]}"
+    return normalized
+
+
+def procedure_chart_name(procedure: str, runway: str | None) -> str:
+    family = procedure_family(procedure)
+    variant = procedure_variant(procedure)
+    variant_suffix = f" {variant}" if variant else ""
+    if family == "RNAV_GPS":
+        return f"RNAV(GPS){variant_suffix} {runway_label(runway)}"
+    if family == "RNAV_RNP":
+        return f"RNAV(RNP){variant_suffix} {runway_label(runway)}"
+    return procedure_display_name(procedure, runway)
+
+
+def normalize_fix_ref(fix_ident: str) -> str:
+    return f"fix:{fix_ident.upper()}"
+
+
+def normalize_branch_ref(branch_ident: str) -> str:
+    return f"branch:{branch_ident.upper()}"
+
+
+def approach_modes_for(procedure: str) -> list[str]:
+    family = procedure_family(procedure)
+    if family == "RNAV_GPS":
+        return ["LPV", "LNAV/VNAV", "LNAV"]
+    if family == "RNAV_RNP":
+        return ["RNP AR"]
+    return []
+
+
+def path_construction_method(leg_type: str) -> str:
+    return {
+        "IF": "if_to_fix",
+        "TF": "track_to_fix",
+        "DF": "direct_to_fix",
+        "CF": "course_to_fix",
+        "CA": "course_to_altitude",
+        "FA": "course_to_altitude",
+        "HM": "hold_to_manual",
+        "HF": "hold_to_fix",
+        "RF": "radius_to_fix",
+        "VI": "heading_to_intercept",
+        "VA": "heading_to_altitude",
+    }.get(leg_type.upper(), "procedure_leg")
+
+
+def segment_type_for_leg(leg: ProcedureLeg, *, has_crossed_threshold: bool) -> str:
+    if has_crossed_threshold:
+        return "missed"
+    if leg.fix_ident.startswith("RW") or leg.role.upper() in {"FAF", "MAPT"}:
+        return "final"
+    if leg.role.upper() == "IAF":
+        return "initial"
+    if leg.role.upper() == "IF":
+        return "intermediate"
+    return "route"
+
+
+def preferred_geometry_altitude_ft(
+    leg: ProcedureLeg,
+    fix: FixRecord | None,
+) -> int | None:
+    if leg.fix_ident.startswith("RW") and fix is not None and fix.altitude_ft is not None:
+        return fix.altitude_ft
+    if leg.altitude_ft is not None:
+        return leg.altitude_ft
+    if fix is not None and fix.altitude_ft is not None:
+        return fix.altitude_ft
+    return None
+
+
+def dedupe_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return ordered
+
+
+def build_fix_catalog(
+    *,
+    ordered_fix_idents: list[str],
+    fix_records: dict[str, FixRecord],
+    role_hints_by_fix: dict[str, list[str]],
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for fix_ident in ordered_fix_idents:
+        fix = fix_records.get(fix_ident)
+        role_hints = dedupe_preserve_order(role_hints_by_fix.get(fix_ident, []))
+        if fix_ident.startswith("RW"):
+            kind = "runway_threshold"
+        elif "FAF" in role_hints:
+            kind = "final_approach_fix"
+        elif "MAPT" in {item.upper() for item in role_hints}:
+            kind = "missed_approach_point"
+        elif "IAF" in role_hints:
+            kind = "initial_approach_fix"
+        else:
+            kind = "named_fix"
+
+        items.append(
+            {
+                "fixId": normalize_fix_ref(fix_ident),
+                "ident": fix_ident,
+                "kind": kind,
+                "position": (
+                    {
+                        "lon": round(fix.lon, 8),
+                        "lat": round(fix.lat, 8),
+                    }
+                    if fix is not None
+                    else None
+                ),
+                "elevationFt": None if fix is None else fix.altitude_ft,
+                "roleHints": role_hints,
+                "sourceRefs": ["src:cifp-detail"],
+            }
+        )
+    return items
+
+
+def merge_fix_ref_for_branch(
+    branch_legs: list[ProcedureLeg],
+    final_fix_idents: set[str],
+    final_branch_ident: str,
+    branch_ident: str,
+) -> str | None:
+    if branch_ident.upper() == final_branch_ident.upper():
+        return None
+    for leg in branch_legs:
+        if leg.fix_ident in final_fix_idents:
+            return normalize_fix_ref(leg.fix_ident)
+    return None
+
+
+def route_points_by_sequence(route_points: list[RoutePoint]) -> dict[int, RoutePoint]:
+    return {point.sequence: point for point in route_points}
+
+
+def build_branch_document(
+    *,
+    branch_ident: str,
+    branch_order: int,
+    final_branch_ident: str,
+    branch_legs: list[ProcedureLeg],
+    branch_route_points: list[RoutePoint],
+    fix_records: dict[str, FixRecord],
+    branch_warnings: list[str],
+    final_fix_idents: set[str],
+) -> dict[str, Any]:
+    points_by_sequence = route_points_by_sequence(branch_route_points)
+    has_crossed_threshold = False
+    leg_documents: list[dict[str, Any]] = []
+
+    for index, leg in enumerate(branch_legs):
+        fix = fix_records.get(leg.fix_ident)
+        geometry_altitude_ft = preferred_geometry_altitude_ft(leg, fix)
+        previous_fix_ident = branch_legs[index - 1].fix_ident if index > 0 else None
+        segment_type = segment_type_for_leg(leg, has_crossed_threshold=has_crossed_threshold)
+        point = points_by_sequence.get(leg.sequence)
+        quality_status = "exact" if fix is not None else "incomplete"
+
+        leg_documents.append(
+            {
+                "legId": f"leg:{branch_ident.upper()}:{leg.sequence:03d}",
+                "sequence": leg.sequence,
+                "segmentType": segment_type,
+                "path": {
+                    "pathTerminator": leg.leg_type,
+                    "constructionMethod": path_construction_method(leg.leg_type),
+                    "startFixRef": None if previous_fix_ident is None else normalize_fix_ref(previous_fix_ident),
+                    "endFixRef": normalize_fix_ref(leg.fix_ident),
+                },
+                "termination": {
+                    "kind": "fix",
+                    "fixRef": normalize_fix_ref(leg.fix_ident),
+                },
+                "constraints": {
+                    "altitude": (
+                        {
+                            "qualifier": "at",
+                            "valueFt": leg.altitude_ft,
+                            "rawText": f"{leg.altitude_ft} ft",
+                        }
+                        if leg.altitude_ft is not None
+                        else None
+                    ),
+                    "speedKt": None,
+                    "geometryAltitudeFt": geometry_altitude_ft,
+                },
+                "roleAtEnd": leg.role,
+                "sourceRefs": ["src:cifp-detail"],
+                "quality": {
+                    "status": quality_status,
+                    "sourceLine": leg.source_line,
+                    "renderedInPlanView": point is not None,
+                },
+            }
+        )
+
+        if leg.fix_ident.startswith("RW"):
+            has_crossed_threshold = True
+
+    branch_role = "final" if branch_ident.upper() == final_branch_ident.upper() else "transition"
+
+    return {
+        "branchId": normalize_branch_ref(branch_ident),
+        "branchIdent": branch_ident.upper(),
+        "branchRole": branch_role,
+        "sequenceOrder": branch_order,
+        "mergeFixRef": merge_fix_ref_for_branch(
+            branch_legs,
+            final_fix_idents,
+            final_branch_ident=final_branch_ident,
+            branch_ident=branch_ident,
+        ),
+        "continuesWithBranchId": (
+            normalize_branch_ref(final_branch_ident)
+            if branch_ident.upper() != final_branch_ident.upper()
+            else None
+        ),
+        "defaultVisible": branch_ident.upper() == final_branch_ident.upper(),
+        "warnings": branch_warnings,
+        "legs": leg_documents,
+    }
+
+
+def build_vertical_profile_document(
+    *,
+    procedure: str,
+    runway: str | None,
+    final_branch_ident: str,
+    branch_legs: list[ProcedureLeg],
+    branch_route_points: list[RoutePoint],
+    fix_records: dict[str, FixRecord],
+) -> list[dict[str, Any]]:
+    if not branch_legs or not branch_route_points:
+        return []
+
+    points_by_sequence = route_points_by_sequence(branch_route_points)
+    constraint_samples: list[dict[str, Any]] = []
+    warnings: list[str] = []
+
+    for point in branch_route_points:
+        leg = next((candidate for candidate in branch_legs if candidate.sequence == point.sequence), None)
+        if leg is None:
+            continue
+        fix = fix_records.get(point.fix_ident)
+        geometry_altitude_ft = preferred_geometry_altitude_ft(leg, fix)
+        if geometry_altitude_ft is None:
+            warnings.append(
+                f"{point.fix_ident}: altitude unavailable in CIFP detail; frontend will interpolate for display"
+            )
+
+        constraint_samples.append(
+            {
+                "fixRef": normalize_fix_ref(point.fix_ident),
+                "ident": point.fix_ident,
+                "role": leg.role,
+                "distanceFromStartM": round(point.distance_from_start_m, 1),
+                "altitudeFt": leg.altitude_ft,
+                "geometryAltitudeFt": geometry_altitude_ft,
+                "sourceLine": point.source_line,
+            }
+        )
+
+    if not constraint_samples:
+        return []
+
+    return [
+        {
+            "profileId": f"profile:{procedure.upper()}:{(runway or 'UNKNOWN').upper()}",
+            "appliesToModes": approach_modes_for(procedure),
+            "branchId": normalize_branch_ref(final_branch_ident),
+            "fromFixRef": constraint_samples[0]["fixRef"],
+            "toFixRef": constraint_samples[-1]["fixRef"],
+            "basis": "cifp_leg_constraints",
+            "glidepathAngleDeg": None,
+            "thresholdCrossingHeightFt": None,
+            "constraintSamples": constraint_samples,
+            "warnings": dedupe_preserve_order(warnings),
+        }
+    ]
+
+
+def build_validation_block(
+    *,
+    runway: str | None,
+    branches: list[dict[str, Any]],
+    warnings: list[str],
+) -> dict[str, Any]:
+    final_branch = next((branch for branch in branches if branch["branchRole"] == "final"), None)
+    final_legs = [] if final_branch is None else final_branch["legs"]
+    expected_if = next(
+        (leg["path"]["endFixRef"] for leg in final_legs if leg.get("roleAtEnd") == "IF"),
+        None,
+    )
+    expected_faf = next(
+        (leg["path"]["endFixRef"] for leg in final_legs if leg.get("roleAtEnd") == "FAF"),
+        None,
+    )
+    expected_mapt = next(
+        (
+            leg["path"]["endFixRef"]
+            for leg in final_legs
+            if str(leg["path"]["endFixRef"]).endswith((runway or "").upper())
+        ),
+        None,
+    )
+    threshold_seen = False
+    expected_missed_fix = None
+    for leg in final_legs:
+        fix_ref = leg["path"]["endFixRef"]
+        if runway and str(fix_ref).endswith(runway.upper()):
+            threshold_seen = True
+            continue
+        if threshold_seen:
+            expected_missed_fix = fix_ref
+            break
+
+    return {
+        "expectedRunwayIdent": runway,
+        "expectedIF": expected_if,
+        "expectedFAF": expected_faf,
+        "expectedMAPt": expected_mapt,
+        "expectedMissedHoldFix": expected_missed_fix,
+        "knownSimplifications": dedupe_preserve_order(warnings),
+    }
+
+
+def load_airport_details(airport: str) -> dict[str, Any]:
+    return find_airport_record(common_data_path("airports.csv"), airport)
+
+
+def build_procedure_detail_document(
+    *,
+    cifp_root: Path,
+    airport: str,
+    procedure_type: str,
+    procedure: str,
+    nominal_speed_kt: float,
+    tunnel_half_width_nm: float,
+    tunnel_half_height_ft: float,
+    sample_spacing_m: float,
+) -> dict[str, Any]:
+    faacifp_path = cifp_root / "FAACIFP18"
+    source_cycle = parse_source_cycle(faacifp_path)
+    airport_details = load_airport_details(airport)
+    fix_records = build_fix_index(faacifp_path, airport)
+    available_branches = parse_available_branches(faacifp_path, airport, procedure)
+    final_branch_ident = final_branch_for_procedure(procedure)
+    if final_branch_ident not in available_branches:
+        available_branches = [final_branch_ident, *available_branches]
+
+    runway = runway_from_procedure_ident(procedure)
+    ordered_fix_idents: list[str] = []
+    role_hints_by_fix: dict[str, list[str]] = {}
+    branch_documents: list[dict[str, Any]] = []
+    branch_route_points_by_ident: dict[str, list[RoutePoint]] = {}
+    warnings: list[str] = []
+
+    for branch_order, branch_ident in enumerate(available_branches, start=1):
+        branch_legs = parse_procedure_legs(faacifp_path, airport, procedure, branch_ident)
+        branch_route_points, branch_warnings = build_route_points(branch_legs, fix_records, nominal_speed_kt)
+        branch_route_points_by_ident[branch_ident.upper()] = branch_route_points
+        warnings.extend(f"[{branch_ident}] {warning}" for warning in branch_warnings)
+
+        ordered_fix_idents.extend(leg.fix_ident for leg in branch_legs if leg.fix_ident)
+        for leg in branch_legs:
+            role_hints_by_fix.setdefault(leg.fix_ident, []).append(leg.role)
+
+        branch_documents.append(
+            build_branch_document(
+                branch_ident=branch_ident,
+                branch_order=branch_order,
+                final_branch_ident=final_branch_ident,
+                branch_legs=branch_legs,
+                branch_route_points=branch_route_points,
+                fix_records=fix_records,
+                branch_warnings=branch_warnings,
+                final_fix_idents={point.fix_ident for point in branch_route_points_by_ident.get(final_branch_ident, [])},
+            )
+        )
+
+    ordered_fix_idents = dedupe_preserve_order(ordered_fix_idents)
+    fix_catalog = build_fix_catalog(
+        ordered_fix_idents=ordered_fix_idents,
+        fix_records=fix_records,
+        role_hints_by_fix=role_hints_by_fix,
+    )
+
+    threshold_fix = fix_records.get(runway or "")
+    chart_name = procedure_chart_name(procedure, runway)
+    final_branch_legs = parse_procedure_legs(faacifp_path, airport, procedure, final_branch_ident)
+    vertical_profiles = build_vertical_profile_document(
+        procedure=procedure,
+        runway=runway,
+        final_branch_ident=final_branch_ident,
+        branch_legs=final_branch_legs,
+        branch_route_points=branch_route_points_by_ident.get(final_branch_ident, []),
+        fix_records=fix_records,
+    )
+
+    research_warnings = dedupe_preserve_order(warnings)
+    procedure_uid = f"{airport.upper()}-{procedure.upper()}-{(runway or 'UNKNOWN').upper()}"
+    return {
+        "schemaVersion": "1.0.0",
+        "modelType": "rnav-procedure-runway",
+        "procedureUid": procedure_uid,
+        "provenance": {
+            "assemblyMode": "cifp_primary_export",
+            "researchUseOnly": True,
+            "sources": [
+                {
+                    "sourceId": "src:cifp-index",
+                    "kind": "FAA_CIFP_INDEX",
+                    "cycle": source_cycle,
+                    "path": str(cifp_root / "IN_CIFP.txt"),
+                },
+                {
+                    "sourceId": "src:cifp-detail",
+                    "kind": "FAA_CIFP",
+                    "cycle": source_cycle,
+                    "path": str(cifp_root / "FAACIFP18"),
+                },
+            ],
+            "warnings": research_warnings,
+        },
+        "airport": {
+            "icao": airport_details["icao_code"],
+            "faa": airport_details["faa_code"],
+            "name": airport_details["name"],
+        },
+        "runway": {
+            "ident": runway,
+            "landingThresholdFixRef": None if runway is None else normalize_fix_ref(runway),
+            "threshold": (
+                {
+                    "lon": round(threshold_fix.lon, 8),
+                    "lat": round(threshold_fix.lat, 8),
+                    "elevationFt": threshold_fix.altitude_ft,
+                }
+                if threshold_fix is not None
+                else None
+            ),
+        },
+        "procedure": {
+            "procedureType": procedure_type.upper(),
+            "procedureFamily": procedure_family(procedure),
+            "procedureIdent": procedure.upper(),
+            "chartName": chart_name,
+            "variant": procedure_variant(procedure),
+            "runwayIdent": runway,
+            "baseBranchIdent": final_branch_ident,
+            "approachModes": approach_modes_for(procedure),
+        },
+        "fixes": fix_catalog,
+        "branches": branch_documents,
+        "verticalProfiles": vertical_profiles,
+        "validation": build_validation_block(
+            runway=runway,
+            branches=branch_documents,
+            warnings=research_warnings,
+        ),
+        "displayHints": {
+            "nominalSpeedKt": nominal_speed_kt,
+            "defaultVisibleBranchIds": [
+                branch["branchId"] for branch in branch_documents if branch["defaultVisible"]
+            ],
+            "tunnelDefaults": {
+                "lateralHalfWidthNm": tunnel_half_width_nm,
+                "verticalHalfHeightFt": tunnel_half_height_ft,
+                "sampleSpacingM": sample_spacing_m,
+                "mode": "visualApproximation",
+            },
+        },
+    }
+
+
+def sanitize_public_chart_filename(file_name: str) -> str:
+    original = Path(file_name).name
+    suffix = Path(original).suffix.lower() or ".pdf"
+    stem = original[: -len(Path(original).suffix)] if Path(original).suffix else original
+    cleaned = SAFE_FILE_CHARS_RE.sub("-", stem).strip("-.")
+    cleaned = re.sub(r"-{2,}", "-", cleaned) or "chart"
+    return f"{cleaned}{suffix}"
+
+
+def infer_chart_targets(file_name: str) -> tuple[str | None, str | None]:
+    match = CHART_PROCEDURE_RE.search(file_name.upper())
+    if not match:
+        return None, None
+    variant = match.group(1) or ""
+    runway_number = match.group(2).zfill(2)
+    runway_side = match.group(3)
+    runway_ident = f"RW{runway_number}{runway_side}"
+    procedure_ident = f"R{runway_number}{runway_side}{variant}" if variant else f"R{runway_number}{runway_side}"
+    return procedure_ident, runway_ident
+
+
+def build_procedure_details_index(
+    *,
+    airport: str,
+    airport_name: str,
+    source_cycle: str | None,
+    documents: list[dict[str, Any]],
+) -> dict[str, Any]:
+    runways: dict[str, dict[str, Any]] = {}
+    for document in documents:
+        procedure = document["procedure"]
+        runway_ident = procedure["runwayIdent"] or "UNKNOWN"
+        runway_entry = runways.setdefault(
+            runway_ident,
+            {
+                "runwayIdent": runway_ident,
+                "chartName": procedure["chartName"],
+                "procedureUids": [],
+                "procedures": [],
+            },
+        )
+        runway_entry["procedureUids"].append(document["procedureUid"])
+        runway_entry["procedures"].append(
+            {
+                "procedureUid": document["procedureUid"],
+                "procedureIdent": procedure["procedureIdent"],
+                "chartName": procedure["chartName"],
+                "procedureFamily": procedure["procedureFamily"],
+                "variant": procedure["variant"],
+                "approachModes": procedure["approachModes"],
+                "runwayIdent": runway_ident,
+                "defaultBranchId": document["procedure"]["baseBranchIdent"],
+            }
+        )
+
+    runway_entries = sorted(
+        runways.values(),
+        key=lambda item: RUNWAY_ORDER.index(item["runwayIdent"]) if item["runwayIdent"] in RUNWAY_ORDER else 999,
+    )
+
+    return {
+        "airport": airport.upper(),
+        "airportName": airport_name,
+        "sourceCycle": source_cycle,
+        "researchUseOnly": True,
+        "runways": runway_entries,
+    }
+
+
+def publish_local_chart_manifest(
+    *,
+    airport: str,
+    chart_root: Path,
+    documents: list[dict[str, Any]],
+) -> dict[str, Any]:
+    by_procedure_ident = {
+        document["procedure"]["procedureIdent"]: document
+        for document in documents
+    }
+    by_runway_ident = {
+        document["procedure"]["runwayIdent"]: document
+        for document in documents
+        if document["procedure"]["runwayIdent"]
+    }
+    chart_dir = airport_charts_dir(airport)
+    chart_dir.mkdir(parents=True, exist_ok=True)
+    entries: list[dict[str, Any]] = []
+
+    source_dir = chart_root / airport.upper()
+    if not source_dir.exists():
+        return {"airport": airport.upper(), "researchUseOnly": True, "charts": []}
+
+    used_names: set[str] = set()
+    for source_path in sorted(source_dir.glob("*.pdf")):
+        procedure_ident, runway_ident = infer_chart_targets(source_path.name)
+        target_document = None
+        if procedure_ident and procedure_ident in by_procedure_ident:
+            target_document = by_procedure_ident[procedure_ident]
+        elif runway_ident and runway_ident in by_runway_ident:
+            target_document = by_runway_ident[runway_ident]
+
+        safe_name = sanitize_public_chart_filename(source_path.name)
+        if safe_name in used_names:
+            safe_stem = Path(safe_name).stem
+            safe_suffix = Path(safe_name).suffix
+            counter = 2
+            while f"{safe_stem}-{counter}{safe_suffix}" in used_names:
+                counter += 1
+            safe_name = f"{safe_stem}-{counter}{safe_suffix}"
+        used_names.add(safe_name)
+
+        target_path = airport_chart_path(airport, safe_name)
+        shutil.copyfile(source_path, target_path)
+
+        procedure_uid = None if target_document is None else target_document["procedureUid"]
+        title = (
+            source_path.stem
+            if target_document is None
+            else target_document["procedure"]["chartName"]
+        )
+        entries.append(
+            {
+                "chartId": f"chart:{airport.upper()}:{safe_name}",
+                "procedureUid": procedure_uid,
+                "procedureIdent": procedure_ident,
+                "runwayIdent": runway_ident,
+                "title": title,
+                "originalFileName": source_path.name,
+                "sourcePath": str(source_path),
+                "url": f"/data/airports/{airport.upper()}/charts/{safe_name}",
+            }
+        )
+
+    return {
+        "airport": airport.upper(),
+        "researchUseOnly": True,
+        "charts": entries,
+    }
+
+
+def publish_procedure_details_assets(
+    *,
+    cifp_root: Path,
+    airport: str,
+    procedure_type: str,
+    procedures: list[str],
+    nominal_speed_kt: float,
+    tunnel_half_width_nm: float,
+    tunnel_half_height_ft: float,
+    sample_spacing_m: float,
+    chart_root: Path,
+) -> dict[str, Any]:
+    airport_details = load_airport_details(airport)
+    source_cycle = parse_source_cycle(cifp_root / "FAACIFP18")
+    documents: list[dict[str, Any]] = []
+    procedure_dir = airport_procedure_details_dir(airport)
+    procedure_dir.mkdir(parents=True, exist_ok=True)
+
+    for procedure in sorted({item.upper() for item in procedures}, key=procedure_sort_key):
+        document = build_procedure_detail_document(
+            cifp_root=cifp_root,
+            airport=airport,
+            procedure_type=procedure_type,
+            procedure=procedure,
+            nominal_speed_kt=nominal_speed_kt,
+            tunnel_half_width_nm=tunnel_half_width_nm,
+            tunnel_half_height_ft=tunnel_half_height_ft,
+            sample_spacing_m=sample_spacing_m,
+        )
+        documents.append(document)
+        detail_path = airport_procedure_details_path(airport, f"{document['procedureUid']}.json")
+        detail_path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+
+    index_manifest = build_procedure_details_index(
+        airport=airport,
+        airport_name=airport_details["name"],
+        source_cycle=source_cycle,
+        documents=documents,
+    )
+    index_path = airport_procedure_details_path(airport, "index.json")
+    index_path.write_text(json.dumps(index_manifest, indent=2) + "\n", encoding="utf-8")
+
+    chart_manifest = publish_local_chart_manifest(
+        airport=airport,
+        chart_root=chart_root,
+        documents=documents,
+    )
+    chart_index_path = airport_chart_path(airport, "index.json")
+    chart_index_path.write_text(json.dumps(chart_manifest, indent=2) + "\n", encoding="utf-8")
+
+    return {
+        "procedureIndexPath": index_path,
+        "chartIndexPath": chart_index_path,
+        "procedureCount": len(documents),
+        "chartCount": len(chart_manifest["charts"]),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate procedures.geojson from FAA CIFP")
     parser.add_argument("--cifp-root", default=str(DEFAULT_CIFP_ROOT), help="CIFP cycle directory")
@@ -800,6 +1499,16 @@ def main() -> None:
     parser.add_argument("--tunnel-half-width-nm", type=float, default=0.3, help="Tunnel half-width")
     parser.add_argument("--tunnel-half-height-ft", type=float, default=300.0, help="Tunnel half-height")
     parser.add_argument("--sample-spacing-m", type=float, default=250.0, help="Tunnel sample spacing")
+    parser.add_argument(
+        "--charts-root",
+        default=str(DEFAULT_RNAV_CHARTS_ROOT),
+        help="Local RNAV chart directory to publish into public/data/airports/<ICAO>/charts",
+    )
+    parser.add_argument(
+        "--skip-procedure-details",
+        action="store_true",
+        help="Skip publishing browser-ready procedure detail JSON and chart manifests",
+    )
     parser.add_argument("--output", default=None, help="Output GeoJSON path")
     args = parser.parse_args()
 
@@ -830,6 +1539,20 @@ def main() -> None:
         encoding="utf-8",
     )
 
+    detail_publish_result = None
+    if not args.skip_procedure_details:
+        detail_publish_result = publish_procedure_details_assets(
+            cifp_root=Path(args.cifp_root),
+            airport=args.airport,
+            procedure_type=args.procedure_type,
+            procedures=selected_procedures,
+            nominal_speed_kt=args.nominal_speed_kt,
+            tunnel_half_width_nm=args.tunnel_half_width_nm,
+            tunnel_half_height_ft=args.tunnel_half_height_ft,
+            sample_spacing_m=args.sample_spacing_m,
+            chart_root=Path(args.charts_root),
+        )
+
     route_features = [
         feature
         for feature in collection["features"]
@@ -845,6 +1568,11 @@ def main() -> None:
     print(f"  Fix points:        {point_count}")
     print(f"  Warnings:          {warning_count}")
     print(f"  Output:            {output_path}")
+    if detail_publish_result is not None:
+        print(f"  Detail index:      {detail_publish_result['procedureIndexPath']}")
+        print(f"  Chart index:       {detail_publish_result['chartIndexPath']}")
+        print(f"  Detail docs:       {detail_publish_result['procedureCount']}")
+        print(f"  Published charts:  {detail_publish_result['chartCount']}")
 
 
 if __name__ == "__main__":

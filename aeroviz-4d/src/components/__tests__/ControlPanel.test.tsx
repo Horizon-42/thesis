@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
-const { toggleLayer, setPlaybackSpeed, setActiveAirportCode } = vi.hoisted(() => ({
+const { navigateWithinApp, toggleLayer, setPlaybackSpeed, setActiveAirportCode } = vi.hoisted(() => ({
+  navigateWithinApp: vi.fn(),
   toggleLayer: vi.fn(),
   setPlaybackSpeed: vi.fn(),
   setActiveAirportCode: vi.fn(),
@@ -32,6 +33,10 @@ vi.mock("../../context/AppContext", () => ({
   }),
 }));
 
+vi.mock("../../utils/navigation", () => ({
+  navigateWithinApp,
+}));
+
 import ControlPanel from "../ControlPanel";
 
 describe("ControlPanel", () => {
@@ -43,5 +48,13 @@ describe("ControlPanel", () => {
     });
 
     expect(setActiveAirportCode).toHaveBeenCalledWith("CYVR");
+  });
+
+  it("opens the procedure details page for the active airport", () => {
+    render(<ControlPanel />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Procedure Details" }));
+
+    expect(navigateWithinApp).toHaveBeenCalledWith("/procedure-details?airport=KRDU");
   });
 });
