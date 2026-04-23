@@ -434,7 +434,7 @@ body,
   color: #c8d8ec;
   border-radius: 8px;
   padding: 12px 14px;
-  width: 210px;
+  width: clamp(190px, 15vw, 230px);
   font-family: "Inter", "Segoe UI", sans-serif;
   font-size: 12px;
   user-select: none;
