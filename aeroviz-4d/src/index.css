@@ -258,6 +258,23 @@ body,
   cursor: pointer;
 }
 
+.control-panel-airport-selector {
+  display: grid;
+  gap: 4px;
+  align-items: start;
+  width: 100%;
+  margin-bottom: 8px;
+  cursor: default;
+}
+
+.control-panel-airport-selector-input {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding-right: 2.25rem;
+}
+
 /* ── Procedure Panel overlay ─────────────────────────────────────────────── */
 .procedure-panel {
   grid-area: proc;

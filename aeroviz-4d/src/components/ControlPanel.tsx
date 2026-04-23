@@ -106,9 +106,10 @@ export default function ControlPanel() {
 
       <section>
         <h4>Airport</h4>
-        <label>
+        <label className="control-panel-airport-selector">
           <span>Active Airport</span>
           <select
+            className="control-panel-airport-selector-input"
             value={activeAirportCode}
             onChange={(event) => setActiveAirportCode(event.target.value)}
             disabled={airports.length === 0}
