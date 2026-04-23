@@ -19,6 +19,7 @@ import {
   isAirportConfig,
   type AirportConfig,
 } from "../data/airportData";
+import { fetchJson } from "../utils/fetchJson";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONFIGURATION CONSTANTS
@@ -30,12 +31,7 @@ const AIRPORT_ENTITY_PREFIX = "airport-";
 
 async function loadAirportConfig(airportCode: string): Promise<AirportConfig> {
   const airportConfigUrl = airportDataUrl(airportCode, "airport.json");
-  const response = await fetch(airportConfigUrl);
-  if (!response.ok) {
-    throw new Error(`Failed to load ${airportConfigUrl}: ${response.status}`);
-  }
-
-  const airport = await response.json();
+  const airport = await fetchJson<unknown>(airportConfigUrl);
   if (!isAirportConfig(airport)) {
     throw new Error(`${airportConfigUrl} is not a valid airport config`);
   }
@@ -147,6 +143,7 @@ export function useCesiumViewer(
       homeButton: false,
       sceneModePicker: false,
       navigationHelpButton: false,
+      infoBox: false,
       animation: true,
       timeline: true,
       skyAtmosphere: new Cesium.SkyAtmosphere(),

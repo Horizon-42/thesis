@@ -17,6 +17,7 @@ import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { airportDataUrl } from "../data/airportData";
 import type { WaypointProperties } from "../types/geojson-aviation";
+import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 
 /** Cylinder colour per waypoint type */
 const WAYPOINT_COLORS: Record<string, Cesium.Color> = {
@@ -51,11 +52,7 @@ export function useWaypointLayer(): void {
     // We collect the entity IDs we add so we can clean up precisely.
     const addedIds: string[] = [];
 
-    fetch(waypointUrl)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status} loading waypoints.geojson`);
-        return r.json() as Promise<WaypointFeatureCollection>;
-      })
+    fetchJson<WaypointFeatureCollection>(waypointUrl)
       .then((geojson) => {
         if (cancelled) return;
         geojson.features.forEach((feature, index) => {
@@ -93,7 +90,16 @@ export function useWaypointLayer(): void {
           addedIds.push(id);
         });
       })
-      .catch(console.error);
+      .catch((error) => {
+        if (isMissingJsonAsset(error)) {
+          console.warn(
+            `[useWaypointLayer] ${waypointUrl} not found. ` +
+              "Run: python aeroviz-4d/python/preprocess_waypoints.py --airport <ICAO>",
+          );
+        } else {
+          console.error("[useWaypointLayer]", error);
+        }
+      });
 
     return () => {
       cancelled = true;

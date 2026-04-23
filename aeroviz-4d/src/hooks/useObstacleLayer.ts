@@ -17,6 +17,7 @@ import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { airportDataUrl } from "../data/airportData";
 import type { ObstacleProperties } from "../types/geojson-aviation";
+import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 
 // ── Colour by obstacle type ─────────────────────────────────────────────────
 
@@ -73,11 +74,7 @@ export function useObstacleLayer(): void {
     const addedIds: string[] = [];
     const obstacleUrl = airportDataUrl(activeAirportCode, "obstacles.geojson");
 
-    fetch(obstacleUrl)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status} loading obstacles.geojson`);
-        return r.json() as Promise<ObstacleFeatureCollection>;
-      })
+    fetchJson<ObstacleFeatureCollection>(obstacleUrl)
       .then((geojson) => {
         if (cancelled) return;
 
@@ -133,10 +130,10 @@ export function useObstacleLayer(): void {
       .catch((err) => {
         // Graceful degradation: if obstacles.geojson doesn't exist yet,
         // just log a warning — the user hasn't run preprocess_obstacles.py.
-        if (err instanceof Error && err.message.includes("404")) {
+        if (isMissingJsonAsset(err)) {
           console.warn(
-            "[useObstacleLayer] obstacles.geojson not found. " +
-              "Run: python preprocess_obstacles.py --input <DOF .Dat> --airport",
+            `[useObstacleLayer] ${obstacleUrl} not found. ` +
+              "Run: python preprocess_obstacles.py --input <DOF .Dat> --airport-code <ICAO>",
           );
         } else {
           console.error("[useObstacleLayer]", err);

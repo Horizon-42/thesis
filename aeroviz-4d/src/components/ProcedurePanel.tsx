@@ -5,6 +5,7 @@ import type {
   ProcedureFeatureCollection,
   ProcedureRouteProperties,
 } from "../types/geojson-aviation";
+import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 
 const RUNWAY_ORDER = ["RW05L", "RW05R", "RW23L", "RW23R", "RW32"];
 
@@ -122,13 +123,7 @@ export default function ProcedurePanel() {
     let cancelled = false;
     const proceduresUrl = airportDataUrl(activeAirportCode, "procedures.geojson");
     setLoadError(null);
-    fetch(proceduresUrl)
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status} loading procedures.geojson`);
-        }
-        return response.json() as Promise<ProcedureFeatureCollection>;
-      })
+    fetchJson<ProcedureFeatureCollection>(proceduresUrl)
       .then((geojson) => {
         if (cancelled) return;
         const routeItems = geojson.features
@@ -144,7 +139,17 @@ export default function ProcedurePanel() {
         setExpandedRunways(firstRunway ? new Set([firstRunway]) : new Set());
       })
       .catch((error) => {
-        if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error));
+        if (cancelled) return;
+
+        setRoutes([]);
+        setSourceCycle(null);
+        setSourceAirport(activeAirportCode);
+        setExpandedRunways(new Set());
+        if (isMissingJsonAsset(error)) {
+          setLoadError(`No procedures.geojson for ${activeAirportCode}`);
+        } else {
+          setLoadError(error instanceof Error ? error.message : String(error));
+        }
       });
 
     return () => {

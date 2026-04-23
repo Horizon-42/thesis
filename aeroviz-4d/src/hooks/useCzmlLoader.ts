@@ -25,6 +25,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
+import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 
 const LAYER_NAME = "czml-trajectories";
 
@@ -67,9 +68,10 @@ export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
 
     setState({ isLoaded: false, flightIds: [], warning: null, error: null });
 
-    // ── Step 1: Load the CZML file ────────────────────────────────────────────
+    // ── Step 1: Preflight the CZML URL so missing files don't parse index.html.
     const ds = new Cesium.CzmlDataSource(LAYER_NAME);
-    ds.load(czmlUrl)
+    fetchJson<unknown>(czmlUrl)
+      .then(() => ds.load(czmlUrl))
       .then((loadedDs) => {
         if (cancelled) return;
 
@@ -126,6 +128,17 @@ export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
+        if (isMissingJsonAsset(err)) {
+          const warning =
+            `${czmlUrl} was not found. ` +
+            "The globe will stay open, but playback is disabled until CZML data is generated.";
+          console.warn(`[useCzmlLoader] ${warning}`);
+          viewer.trackedEntity = undefined;
+          setSelectedFlightId(null);
+          setState({ isLoaded: true, flightIds: [], warning, error: null });
+          return;
+        }
+
         const message = err instanceof Error ? err.message : String(err);
         setState({ isLoaded: false, flightIds: [], warning: null, error: message });
       });

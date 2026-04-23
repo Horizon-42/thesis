@@ -6,6 +6,7 @@ import {
   loadDsmHeightmapTerrain,
   type DsmHeightmapTerrainMetadata,
 } from "../terrain/dsmHeightmapTerrain";
+import { isMissingJsonAsset } from "../utils/fetchJson";
 
 export type DsmTerrainStatus = "idle" | "loading" | "active" | "error";
 
@@ -76,6 +77,12 @@ export function useDsmTerrainLayer(
       })
       .catch((error) => {
         if (cancelled) return;
+        if (isMissingJsonAsset(error)) {
+          console.warn(`[useDsmTerrainLayer] ${metadataUrl} not found.`);
+          setState({ status: "idle", metadata: null, provider: null, error: null });
+          return;
+        }
+
         const message =
           error instanceof Error ? error.message : String(error);
         console.error("[useDsmTerrainLayer] Failed to load DSM terrain:", error);

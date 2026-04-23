@@ -9,6 +9,7 @@ import { useEffect, useRef } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { airportDataUrl } from "../data/airportData";
+import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 import {
   DEFAULT_NOMINAL_SPEED_KT,
   DEFAULT_TUNNEL_HALF_HEIGHT_M,
@@ -159,13 +160,7 @@ export function useProcedureLayer(): void {
       return visibleRef.current && routeVisible;
     };
 
-    fetch(proceduresUrl)
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status} loading procedures.geojson`);
-        }
-        return response.json() as Promise<ProcedureFeatureCollection>;
-      })
+    fetchJson<ProcedureFeatureCollection>(proceduresUrl)
       .then((geojson) => {
         if (cancelled) return;
 
@@ -248,10 +243,10 @@ export function useProcedureLayer(): void {
         });
       })
       .catch((error) => {
-        if (error instanceof Error && error.message.includes("404")) {
+        if (isMissingJsonAsset(error)) {
           console.warn(
-            "[useProcedureLayer] procedures.geojson not found. " +
-              "Run: python aeroviz-4d/python/preprocess_procedures.py",
+            `[useProcedureLayer] ${proceduresUrl} not found. ` +
+              "Run: python aeroviz-4d/python/preprocess_procedures.py --airport <ICAO>",
           );
         } else {
           console.error("[useProcedureLayer]", error);

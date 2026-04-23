@@ -21,6 +21,7 @@ import { useEffect } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { airportDataUrl } from "../data/airportData";
+import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 import {
   buildFinalApproachOCS,
   type GeoPoint3D,
@@ -141,11 +142,7 @@ export function useOcsLayer(): void {
     const addedIds: string[] = [];
     const proceduresUrl = airportDataUrl(activeAirportCode, "procedures.geojson");
 
-    fetch(proceduresUrl)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status} loading procedures.geojson`);
-        return r.json() as Promise<ProcedureFeatureCollection>;
-      })
+    fetchJson<ProcedureFeatureCollection>(proceduresUrl)
       .then((geojson) => {
         if (cancelled) return;
 
@@ -218,10 +215,10 @@ export function useOcsLayer(): void {
         });
       })
       .catch((err) => {
-        if (err instanceof Error && err.message.includes("404")) {
+        if (isMissingJsonAsset(err)) {
           console.warn(
-            "[useOcsLayer] procedures.geojson not found. " +
-              "Run: python aeroviz-4d/python/preprocess_procedures.py",
+            `[useOcsLayer] ${proceduresUrl} not found. ` +
+              "Run: python aeroviz-4d/python/preprocess_procedures.py --airport <ICAO>",
           );
         } else {
           console.error("[useOcsLayer]", err);

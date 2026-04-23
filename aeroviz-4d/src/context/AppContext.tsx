@@ -35,6 +35,7 @@ import {
   type AirportCatalogItem,
   type AirportConfig,
 } from "../data/airportData";
+import { fetchJson } from "../utils/fetchJson";
 
 // ── Layer names ──────────────────────────────────────────────────────────────
 // Extend this union if you add new data layers.
@@ -118,13 +119,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
 
-    fetch(AIRPORTS_INDEX_URL)
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`Failed to load ${AIRPORTS_INDEX_URL}: ${response.status}`);
-        }
-        return response.json();
-      })
+    fetchJson<unknown>(AIRPORTS_INDEX_URL)
       .then((manifest: unknown) => {
         if (cancelled) return;
         if (!isAirportsIndexManifest(manifest)) {

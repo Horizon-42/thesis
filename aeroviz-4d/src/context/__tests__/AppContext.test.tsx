@@ -6,12 +6,19 @@ import { AppProvider, useApp } from "../AppContext";
 
 const fetchMock = vi.fn();
 
+function jsonResponse(body: unknown) {
+  return {
+    ok: true,
+    headers: { get: () => "application/json" },
+    text: async () => JSON.stringify(body),
+  };
+}
+
 describe("AppContext", () => {
   beforeEach(() => {
     fetchMock.mockReset();
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => ({
+    fetchMock.mockResolvedValue(
+      jsonResponse({
         defaultAirport: "KRDU",
         airports: [
           {
@@ -28,7 +35,7 @@ describe("AppContext", () => {
           },
         ],
       }),
-    });
+    );
     vi.stubGlobal("fetch", fetchMock);
   });
 

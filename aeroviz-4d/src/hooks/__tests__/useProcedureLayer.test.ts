@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 
+function jsonResponse(body: unknown) {
+  return {
+    ok: true,
+    headers: { get: () => "application/json" },
+    text: async () => JSON.stringify(body),
+  };
+}
+
 const {
   entities,
   mockViewer,
@@ -147,10 +155,7 @@ describe("useProcedureLayer", () => {
     setProceduresVisible(true);
     setProcedureRouteVisible("KRDU-R05LY-R", true);
     fetchMock.mockReset();
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => sampleGeoJson,
-    });
+    fetchMock.mockResolvedValue(jsonResponse(sampleGeoJson));
     vi.stubGlobal("fetch", fetchMock);
   });
 

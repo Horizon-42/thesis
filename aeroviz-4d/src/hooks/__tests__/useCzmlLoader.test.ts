@@ -2,6 +2,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 
 const CZML_URL = "/data/airports/KRDU/trajectories.czml";
+const fetchMock = vi.fn();
+
+function jsonResponse(body: unknown) {
+  return {
+    ok: true,
+    headers: { get: () => "application/json" },
+    text: async () => JSON.stringify(body),
+  };
+}
 
 const {
   loadCzml,
@@ -104,12 +113,16 @@ describe("useCzmlLoader", () => {
 
   beforeEach(() => {
     resetViewer();
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(jsonResponse([{ id: "document" }]));
+    vi.stubGlobal("fetch", fetchMock);
     loadCzml.mockReset();
     warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
   });
 
   afterEach(() => {
     warnSpy.mockRestore();
+    vi.unstubAllGlobals();
   });
 
   it("warns and skips Cesium clock work when the CZML has no trajectory entities", async () => {

@@ -18,6 +18,7 @@ import { useEffect, useRef } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { airportDataUrl } from "../data/airportData";
+import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 
 const RUNWAY_SURFACE_FILL = new Cesium.Color(0.15, 0.15, 0.15, 0.85);
 const RUNWAY_SURFACE_STROKE = Cesium.Color.YELLOW;
@@ -55,12 +56,14 @@ export function useRunwayLayer(): void {
     // Then chain `.then(ds => { ... })` to do steps 3-4.
     //
     // Reference: docs/02-runway-layer.md § "GeoJsonDataSource options"
-    dataSource.load(runwayUrl, {
+    fetchJson<unknown>(runwayUrl)
+      .then(() => dataSource.load(runwayUrl, {
       clampToGround: true,
       fill: RUNWAY_SURFACE_FILL,
       stroke: RUNWAY_SURFACE_STROKE,
       strokeWidth: 2
-    }).then(ds => {
+    }))
+    .then(ds => {
       if (cancelled) return;
       // ── Step 3 (inside .then): Add the data source to the viewer ─────────────
       // ② — Call `viewer.dataSources.add(ds)`.
@@ -101,7 +104,11 @@ export function useRunwayLayer(): void {
       });
 
     }).catch(error => {
-      console.error("[RunwayLayer] Failed to load runway.geojson:", error);
+      if (isMissingJsonAsset(error)) {
+        console.warn(`[RunwayLayer] ${runwayUrl} not found.`);
+      } else {
+        console.error("[RunwayLayer] Failed to load runway.geojson:", error);
+      }
     });
 
 

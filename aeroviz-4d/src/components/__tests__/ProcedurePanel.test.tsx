@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
+function jsonResponse(body: unknown) {
+  return {
+    ok: true,
+    headers: { get: () => "application/json" },
+    text: async () => JSON.stringify(body),
+  };
+}
+
 const {
   fetchMock,
   toggleLayer,
@@ -102,10 +110,7 @@ describe("ProcedurePanel", () => {
     toggleLayer.mockClear();
     setProcedureRouteVisible.mockClear();
     setProcedureRoutesVisible.mockClear();
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => sampleGeoJson,
-    });
+    fetchMock.mockResolvedValue(jsonResponse(sampleGeoJson));
     vi.stubGlobal("fetch", fetchMock);
   });
 

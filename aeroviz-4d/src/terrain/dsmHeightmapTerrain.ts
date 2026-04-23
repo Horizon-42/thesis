@@ -1,5 +1,6 @@
 import * as Cesium from "cesium";
 import { airportDsmHeightmapTerrainUrl } from "../data/airportData";
+import { fetchJson } from "../utils/fetchJson";
 
 export function dsmHeightmapTerrainMetadataUrl(airportCode: string): string {
   return airportDsmHeightmapTerrainUrl(airportCode, "metadata.json");
@@ -132,12 +133,7 @@ async function fetchHeightTile(
 export async function loadDsmHeightmapTerrain(
   metadataUrl: string
 ): Promise<DsmHeightmapTerrain> {
-  const response = await fetch(metadataUrl);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch DSM terrain metadata: ${response.status}`);
-  }
-
-  const metadata = (await response.json()) as DsmHeightmapTerrainMetadata;
+  const metadata = await fetchJson<DsmHeightmapTerrainMetadata>(metadataUrl);
   const tilingScheme = new Cesium.GeographicTilingScheme();
   const tileCache = new Map<string, Promise<Float32Array>>();
   const flatTile = createFlatHeightTile(metadata);

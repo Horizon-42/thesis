@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { airportDsm3DTilesUrl } from "../data/airportData";
+import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 
 interface DsmDemoState {
   status: string;
@@ -69,8 +70,7 @@ export default function DsmDemoPage() {
         console.warn("[DsmDemoPage] Natural Earth imagery failed:", error);
       });
 
-    fetch(metadataUrl)
-      .then((response) => response.json())
+    fetchJson<any>(metadataUrl)
       .then(async (metadata) => {
         if (cancelled || viewer.isDestroyed()) return;
 
@@ -190,6 +190,19 @@ export default function DsmDemoPage() {
       })
       .catch((error) => {
         if (cancelled) return;
+        if (isMissingJsonAsset(error)) {
+          setState({
+            status: `No DSM 3D Tiles metadata for ${activeAirportCode}`,
+            rasterSize: "",
+            meshSize: "",
+            triangles: "",
+            renderer: "Not available",
+            location: "",
+            overlay: "",
+          });
+          return;
+        }
+
         console.error("[DsmDemoPage] Failed to load DSM demo:", error);
         setState({
           status: "DSM demo load failed",
