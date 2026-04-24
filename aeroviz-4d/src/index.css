@@ -1241,6 +1241,11 @@ body,
   line-height: 1.5;
 }
 
+.procedure-details-fix-inspector .procedure-details-term-chip-row {
+  margin-top: 6px;
+  margin-bottom: 14px;
+}
+
 .procedure-details-inspector .procedure-details-explorer-card {
   display: grid;
   gap: 10px;
