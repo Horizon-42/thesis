@@ -162,13 +162,6 @@ function branchRoleLabel(branchRole: string): string {
   return branchRole === "final" ? "Final segment" : "Transition segment";
 }
 
-function procedureFamilyDescription(procedureFamily: string): string {
-  if (procedureFamily === "RNAV_GPS") {
-    return "GPS-based instrument approach with coded lateral guidance.";
-  }
-  return "Published coded procedure family from the intermediate RNAV export.";
-}
-
 function isImportantFixRole(role: string): boolean {
   return IMPORTANT_FIX_ROLES.has(role.toUpperCase());
 }
@@ -755,15 +748,33 @@ export default function ProcedureDetailsPage() {
   return (
     <div className="procedure-details-page">
       <header className="procedure-details-header">
-        <div>
+        <div className="procedure-details-header-title">
           <p className="procedure-details-eyebrow">AeroViz-4D Research Companion</p>
           <h1>Procedure Details</h1>
-          <p className="procedure-details-intro">
-            This page turns the intermediate RNAV procedure data into a user-friendly briefing view.
-            It is designed to explain what the approach is asking an aircraft to do, not to replace
-            official flight documents.
-          </p>
         </div>
+
+        <label className="procedure-details-airport-select">
+          <span>Airport</span>
+          <select
+            value={selectedAirportCode}
+            onChange={(event) => {
+              const nextAirport = event.target.value;
+              setSelectedAirportCode(nextAirport);
+              setSelectedRunwayIdent(null);
+              setSelectedProcedureUid(null);
+              setSelectedFixId(null);
+              setSelectedBranchId(null);
+              setSelectedGlossaryTerm(null);
+              clearPreview();
+            }}
+          >
+            {airports.map((airport) => (
+              <option key={airport.code} value={airport.code}>
+                {airport.code} - {airport.name}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <div className="procedure-details-header-actions">
           <button
@@ -773,35 +784,8 @@ export default function ProcedureDetailsPage() {
           >
             Back To 3D Scene
           </button>
-
-          <label className="procedure-details-airport-select">
-            <span>Airport</span>
-            <select
-              value={selectedAirportCode}
-              onChange={(event) => {
-                const nextAirport = event.target.value;
-                setSelectedAirportCode(nextAirport);
-                setSelectedRunwayIdent(null);
-                setSelectedProcedureUid(null);
-                setSelectedFixId(null);
-                setSelectedBranchId(null);
-                setSelectedGlossaryTerm(null);
-                clearPreview();
-              }}
-            >
-              {airports.map((airport) => (
-                <option key={airport.code} value={airport.code}>
-                  {airport.code} - {airport.name}
-                </option>
-              ))}
-            </select>
-          </label>
         </div>
       </header>
-
-      <section className="procedure-details-note" role="note">
-        Research use only. Always use the official FAA or local published chart for operational decisions.
-      </section>
 
       {isLoadingIndex ? <div className="procedure-details-loading">Loading procedure details…</div> : null}
       {indexError ? <div className="procedure-details-error">{indexError}</div> : null}
@@ -817,185 +801,170 @@ export default function ProcedureDetailsPage() {
       ) : null}
 
       {!isLoadingIndex && !isMissingIndex && indexManifest ? (
-        <div className="procedure-details-layout">
+        <div className="procedure-details-workspace">
+          <aside className="procedure-details-sidebar">
+            <section className="procedure-details-card procedure-details-selector-card">
+              <p className="procedure-details-overview-label">Airport Context</p>
+              <h2>{indexManifest.airportName}</h2>
+              <p className="procedure-details-sidebar-meta">
+                {indexManifest.airport} · cycle {indexManifest.sourceCycle ?? "Unknown"}
+              </p>
+            </section>
+
+            <section className="procedure-details-card procedure-details-selector-card">
+              <div className="procedure-details-card-head">
+                <h3>Runways</h3>
+                <span className="procedure-details-meta-pill">
+                  {indexManifest.runways.length}
+                </span>
+              </div>
+              <div className="procedure-details-runway-list">
+                {indexManifest.runways.map((runway) => (
+                  <button
+                    type="button"
+                    key={runway.runwayIdent}
+                    className={`procedure-details-runway-button ${
+                      runway.runwayIdent === selectedRunwayIdent ? "is-active" : ""
+                    }`}
+                    onClick={() => {
+                      setSelectedRunwayIdent(runway.runwayIdent);
+                      setSelectedProcedureUid(runway.procedures[0]?.procedureUid ?? null);
+                      setSelectedBranchId(null);
+                      setSelectedFixId(null);
+                      clearPreview();
+                    }}
+                  >
+                    <span>{formatRunway(runway.runwayIdent)}</span>
+                    <small>
+                      {runway.procedures.length}{" "}
+                      {runway.procedures.length === 1 ? "procedure" : "procedures"}
+                    </small>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="procedure-details-card procedure-details-selector-card">
+              <div className="procedure-details-card-head">
+                <h3>Procedures</h3>
+                {selectedRunway ? (
+                  <span className="procedure-details-meta-pill">
+                    {formatRunway(selectedRunway.runwayIdent)}
+                  </span>
+                ) : null}
+              </div>
+              <div className="procedure-details-procedure-list">
+                {selectedRunway?.procedures.map((procedure) => (
+                  <button
+                    type="button"
+                    key={procedure.procedureUid}
+                    className={`procedure-details-procedure-button ${
+                      procedure.procedureUid === selectedProcedureUid ? "is-active" : ""
+                    }`}
+                    onClick={() => {
+                      setSelectedProcedureUid(procedure.procedureUid);
+                      setSelectedBranchId(null);
+                      setSelectedFixId(null);
+                      clearPreview();
+                    }}
+                  >
+                    <span>{procedure.chartName}</span>
+                    <small>
+                      {procedure.approachModes.join(" / ") || "Mode data unavailable"}
+                    </small>
+                  </button>
+                )) ?? <p>Select a runway to see its procedures.</p>}
+              </div>
+            </section>
+
+            {procedureDocument ? (
+              <section className="procedure-details-card procedure-details-reference-card">
+                <h3>Reference Links</h3>
+                <div className="procedure-details-reference-list">
+                  <a
+                    href={buildFaaChartUrl(researchAirportCode)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="procedure-details-link-button"
+                  >
+                    Open FAA Procedure Search
+                  </a>
+                  {localChart ? (
+                    <a
+                      href={localChart.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="procedure-details-link-button is-secondary"
+                    >
+                      Open Local Chart PDF
+                    </a>
+                  ) : (
+                    <p className="procedure-details-muted">
+                      No local chart PDF published yet.
+                    </p>
+                  )}
+                </div>
+              </section>
+            ) : null}
+
+            {procedureDocument &&
+            (procedureDocument.validation.knownSimplifications.length > 0 ||
+              procedureDocument.provenance.warnings.length > 0 ||
+              (focusedBranch?.warnings.length ?? 0) > 0) ? (
+              <section className="procedure-details-card procedure-details-reference-card">
+                <p className="procedure-details-overview-label">Data Notes</p>
+                <ul className="procedure-details-note-list">
+                  {focusedBranch?.warnings.map((warning) => (
+                    <li key={`branch-${warning}`}>{warning}</li>
+                  ))}
+                  {procedureDocument.provenance.warnings.map((warning) => (
+                    <li key={`provenance-${warning}`}>{warning}</li>
+                  ))}
+                  {procedureDocument.validation.knownSimplifications.map((warning) => (
+                    <li key={`simplification-${warning}`}>{warning}</li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+          </aside>
+
           <main className="procedure-details-main">
             {procedureError ? <div className="procedure-details-error">{procedureError}</div> : null}
             {!procedureDocument ? (
               <div className="procedure-details-loading">Loading selected procedure…</div>
             ) : (
               <>
-                <section className="procedure-details-control-grid">
-                  <section className="procedure-details-card procedure-details-selector-card">
-                    <p className="procedure-details-overview-label">Airport Context</p>
-                    <h2>{indexManifest.airportName}</h2>
-                    <p className="procedure-details-sidebar-meta">
-                      {indexManifest.airport} procedure cycle {indexManifest.sourceCycle ?? "Unknown"}
-                    </p>
-                    <p className="procedure-details-muted">
-                      Pick a runway first, then a specific RNAV sheet. The larger charts below will
-                      respond to the branch and fix you focus on.
-                    </p>
-                  </section>
-
-                  <section className="procedure-details-card procedure-details-selector-card">
-                    <div className="procedure-details-card-head">
-                      <h3>Runways</h3>
-                      <span className="procedure-details-meta-pill">
-                        {indexManifest.runways.length} total
-                      </span>
-                    </div>
-                    <div className="procedure-details-runway-list">
-                      {indexManifest.runways.map((runway) => (
-                        <button
-                          type="button"
-                          key={runway.runwayIdent}
-                          className={`procedure-details-runway-button ${
-                            runway.runwayIdent === selectedRunwayIdent ? "is-active" : ""
-                          }`}
-                          onClick={() => {
-                            setSelectedRunwayIdent(runway.runwayIdent);
-                            setSelectedProcedureUid(runway.procedures[0]?.procedureUid ?? null);
-                            setSelectedBranchId(null);
-                            setSelectedFixId(null);
-                            clearPreview();
-                          }}
-                        >
-                          <span>{formatRunway(runway.runwayIdent)}</span>
-                          <small>
-                            {runway.procedures.length}{" "}
-                            {runway.procedures.length === 1 ? "procedure" : "procedures"}
-                          </small>
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-
-                  <section className="procedure-details-card procedure-details-selector-card">
-                    <div className="procedure-details-card-head">
-                      <h3>Procedures</h3>
-                      {selectedRunway ? (
-                        <span className="procedure-details-meta-pill">
-                          {formatRunway(selectedRunway.runwayIdent)}
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="procedure-details-procedure-list">
-                      {selectedRunway?.procedures.map((procedure) => (
-                        <button
-                          type="button"
-                          key={procedure.procedureUid}
-                          className={`procedure-details-procedure-button ${
-                            procedure.procedureUid === selectedProcedureUid ? "is-active" : ""
-                          }`}
-                          onClick={() => {
-                            setSelectedProcedureUid(procedure.procedureUid);
-                            setSelectedBranchId(null);
-                            setSelectedFixId(null);
-                            clearPreview();
-                          }}
-                        >
-                          <span>{procedure.chartName}</span>
-                          <small>
-                            {procedure.approachModes.join(" / ") || "Mode data unavailable"}
-                          </small>
-                        </button>
-                      )) ?? <p>Select a runway to see its procedures.</p>}
-                    </div>
-                  </section>
-                </section>
-
-                <section className="procedure-details-card procedure-details-overview">
-                  <div>
+                <section className="procedure-details-procedure-bar">
+                  <div className="procedure-details-procedure-bar-title">
                     <p className="procedure-details-overview-label">Selected Procedure</p>
                     <h2>{procedureDocument.procedure.chartName}</h2>
-                    <p className="procedure-details-overview-meta">
-                      {formatRunway(procedureDocument.runway.ident)} ·{" "}
-                      {procedureDocument.procedure.approachModes.join(" / ") || "Modes unavailable"}
-                    </p>
                   </div>
-
-                  <div className="procedure-details-overview-grid">
-                    <div>
-                      <span className="procedure-details-key">Procedure family</span>
-                      <strong>{procedureDocument.procedure.procedureFamily}</strong>
-                      <p className="procedure-details-muted">
-                        {procedureFamilyDescription(procedureDocument.procedure.procedureFamily)}
-                      </p>
-                    </div>
-                    <div>
-                      <span className="procedure-details-key">Threshold elevation</span>
-                      <strong>{formatAltitudeFt(procedureDocument.runway.threshold?.elevationFt)}</strong>
-                    </div>
-                    <div>
-                      <span className="procedure-details-key">Base branch</span>
-                      <strong>{procedureDocument.procedure.baseBranchIdent}</strong>
-                    </div>
-                    <div>
-                      <span className="procedure-details-key">Known simplifications</span>
-                      <strong>{procedureDocument.validation.knownSimplifications.length}</strong>
-                    </div>
-                    <div>
-                      <span className="procedure-details-key">Current focus</span>
-                      <strong>{focusedFix?.ident ?? "None selected"}</strong>
-                    </div>
+                  <div className="procedure-details-procedure-bar-facts">
+                    <span>
+                      <em>Runway</em>
+                      {formatRunway(procedureDocument.runway.ident)}
+                    </span>
+                    <span>
+                      <em>Modes</em>
+                      {procedureDocument.procedure.approachModes.join(" / ") || "Unavailable"}
+                    </span>
+                    <span>
+                      <em>Family</em>
+                      {procedureDocument.procedure.procedureFamily}
+                    </span>
+                    <span>
+                      <em>Threshold</em>
+                      {formatAltitudeFt(procedureDocument.runway.threshold?.elevationFt)}
+                    </span>
+                    <span>
+                      <em>Base branch</em>
+                      {procedureDocument.procedure.baseBranchIdent}
+                    </span>
+                    <span>
+                      <em>Focus</em>
+                      {focusedFix?.ident ?? "—"}
+                    </span>
                   </div>
-                </section>
-
-                <section className="procedure-details-card procedure-details-explorer-card">
-                  <div className="procedure-details-explorer-head">
-                    <div>
-                      <p className="procedure-details-overview-label">Interactive Explorer</p>
-                      <h3>Reveal the next layer only when you focus on something</h3>
-                      <p className="procedure-details-section-intro">
-                        Hover or click a branch or fix. The charts, focused sequence, and glossary
-                        cards below will update together.
-                      </p>
-                    </div>
-                    <div className="procedure-details-focus-pill-wrap">
-                      <span className="procedure-details-focus-pill">
-                        {isPreviewMode ? "Previewing" : "Focused"}{" "}
-                        {focusedFix?.ident ?? focusedBranch?.branchIdent ?? "procedure"}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="procedure-details-branch-pills">
-                    {procedureDocument.branches.map((branch) => (
-                      <button
-                        type="button"
-                        key={branch.branchId}
-                        className={`procedure-details-branch-pill ${
-                          branch.branchId === focusedBranchId ? "is-active" : ""
-                        }`}
-                        onMouseEnter={() => setPreviewBranchId(branch.branchId)}
-                        onMouseLeave={clearPreview}
-                        onClick={() => handleSelectBranch(branch.branchId)}
-                      >
-                        <strong>{branch.branchIdent}</strong>
-                        <span>{branchRoleLabel(branch.branchRole)}</span>
-                      </button>
-                    ))}
-                  </div>
-
-                  {focusedPolyline ? (
-                    <div className="procedure-details-fix-strip">
-                      {focusedPolyline.points.map((point) => (
-                        <button
-                          type="button"
-                          key={`${point.branchId}-${point.fixId}`}
-                          className={`procedure-details-fix-chip ${
-                            point.fixId === focusedFixId ? "is-active" : ""
-                          }`}
-                          onMouseEnter={() => handlePreviewFix(point.fixId, point.branchId)}
-                          onMouseLeave={clearPreview}
-                          onClick={() => handleSelectFix(point.fixId, point.branchId)}
-                        >
-                          <strong>{point.ident}</strong>
-                          <span>{displayTerm(point.role)}</span>
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
                 </section>
 
                 <section className="procedure-details-chart-stack">
@@ -1060,74 +1029,7 @@ export default function ProcedureDetailsPage() {
                   </div>
                 </section>
 
-                <section className="procedure-details-detail-grid">
-                  <section className="procedure-details-card procedure-details-focus-card">
-                    <div className="procedure-details-card-head">
-                      <div>
-                        <p className="procedure-details-overview-label">Focused Fix</p>
-                        <h3>{focusedFix?.ident ?? "Choose a fix"}</h3>
-                      </div>
-                      {focusedFix ? (
-                        <span className="procedure-details-meta-pill">
-                          {isPreviewMode ? "Preview" : "Locked"}
-                        </span>
-                      ) : null}
-                    </div>
-
-                    {focusedFix ? (
-                      <div className="procedure-details-fix-inspector">
-                        <p>{roleMeaning(focusedFix.roleHints[0] ?? focusedFix.kind)}</p>
-                        <div className="procedure-details-term-chip-row">
-                          {focusedFix.roleHints.map((role) => (
-                            <button
-                              key={role}
-                              type="button"
-                              className={`procedure-details-term-chip ${
-                                activeGlossaryTerm === role ? "is-active" : ""
-                              }`}
-                              onClick={() => setSelectedGlossaryTerm(role)}
-                            >
-                              {displayTerm(role)}
-                            </button>
-                          ))}
-                        </div>
-
-                        <dl className="procedure-details-definition-list">
-                          <div>
-                            <dt>Kind</dt>
-                            <dd>{focusedFix.kind}</dd>
-                          </div>
-                          <div>
-                            <dt>Latitude</dt>
-                            <dd>{formatCoordinate(focusedFix.position?.lat)}</dd>
-                          </div>
-                          <div>
-                            <dt>Longitude</dt>
-                            <dd>{formatCoordinate(focusedFix.position?.lon)}</dd>
-                          </div>
-                          <div>
-                            <dt>Elevation</dt>
-                            <dd>{formatAltitudeFt(focusedFix.elevationFt)}</dd>
-                          </div>
-                          <div>
-                            <dt>Role hints</dt>
-                            <dd>{focusedFix.roleHints.join(", ") || "Not available"}</dd>
-                          </div>
-                          <div>
-                            <dt>Used by branches</dt>
-                            <dd>
-                              {focusedFixBranches.map((branch) => branch.branchIdent).join(", ") ||
-                                "No branch mapping"}
-                            </dd>
-                          </div>
-                        </dl>
-                      </div>
-                    ) : (
-                      <p>Hover or click a fix to inspect it here.</p>
-                    )}
-                  </section>
-
-                  <section className="procedure-details-card procedure-details-sequence-card">
+                <section className="procedure-details-card procedure-details-sequence-card">
                     <div className="procedure-details-card-head">
                       <div>
                         <p className="procedure-details-overview-label">Focused Sequence</p>
@@ -1192,92 +1094,164 @@ export default function ProcedureDetailsPage() {
                     ) : (
                       <p>Select a branch to see its coded flow.</p>
                     )}
-                  </section>
-
-                  <section className="procedure-details-card procedure-details-terms-card">
-                    <h3>Key Terms</h3>
-                    <p className="procedure-details-section-intro">
-                      The page keeps the glossary compact. Pick a term only when you need the full
-                      explanation.
-                    </p>
-                    <div className="procedure-details-term-chip-row">
-                      {glossaryTerms.map((term) => (
-                        <button
-                          key={term}
-                          type="button"
-                          className={`procedure-details-term-chip ${
-                            activeGlossaryTerm === term ? "is-active" : ""
-                          }`}
-                          onClick={() => setSelectedGlossaryTerm(term)}
-                        >
-                          {displayTerm(term)}
-                        </button>
-                      ))}
-                    </div>
-                    {activeGlossaryTerm ? (
-                      <div className="procedure-details-term-definition">
-                        <strong>{displayTerm(activeGlossaryTerm)}</strong>
-                        <p>{termMeaning(activeGlossaryTerm)}</p>
-                      </div>
-                    ) : null}
-                  </section>
-
-                  <section className="procedure-details-card procedure-details-reference-card">
-                    <h3>Reference Links</h3>
-                    <p className="procedure-details-section-intro">
-                      Use the official chart source for operational work. The local PDF is a convenience
-                      copy when one has been published into the browser-ready dataset.
-                    </p>
-                    <div className="procedure-details-reference-list">
-                      <a
-                        href={buildFaaChartUrl(researchAirportCode)}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="procedure-details-link-button"
-                      >
-                        Open FAA Procedure Search
-                      </a>
-                      {localChart ? (
-                        <a
-                          href={localChart.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="procedure-details-link-button is-secondary"
-                        >
-                          Open Local Chart PDF
-                        </a>
-                      ) : (
-                        <p className="procedure-details-muted">
-                          No local chart PDF has been published for this procedure yet.
-                        </p>
-                      )}
-                    </div>
-
-                    {(procedureDocument.validation.knownSimplifications.length > 0 ||
-                      procedureDocument.provenance.warnings.length > 0 ||
-                      (focusedBranch?.warnings.length ?? 0) > 0) ? (
-                      <div className="procedure-details-data-notes">
-                        <p className="procedure-details-overview-label">Data Notes</p>
-                        <ul className="procedure-details-note-list">
-                          {focusedBranch?.warnings.map((warning) => (
-                            <li key={`branch-${warning}`}>{warning}</li>
-                          ))}
-                          {procedureDocument.provenance.warnings.map((warning) => (
-                            <li key={`provenance-${warning}`}>{warning}</li>
-                          ))}
-                          {procedureDocument.validation.knownSimplifications.map((warning) => (
-                            <li key={`simplification-${warning}`}>{warning}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                  </section>
                 </section>
               </>
             )}
           </main>
+
+          {procedureDocument ? (
+            <aside className="procedure-details-inspector">
+              <section className="procedure-details-card procedure-details-focus-card">
+                <div className="procedure-details-card-head">
+                  <div>
+                    <p className="procedure-details-overview-label">Focused Fix</p>
+                    <h3>{focusedFix?.ident ?? "Choose a fix"}</h3>
+                  </div>
+                  {focusedFix ? (
+                    <span className="procedure-details-meta-pill">
+                      {isPreviewMode ? "Preview" : "Locked"}
+                    </span>
+                  ) : null}
+                </div>
+
+                {focusedFix ? (
+                  <div className="procedure-details-fix-inspector">
+                    <p>{roleMeaning(focusedFix.roleHints[0] ?? focusedFix.kind)}</p>
+                    <div className="procedure-details-term-chip-row">
+                      {focusedFix.roleHints.map((role) => (
+                        <button
+                          key={role}
+                          type="button"
+                          className={`procedure-details-term-chip ${
+                            activeGlossaryTerm === role ? "is-active" : ""
+                          }`}
+                          onClick={() => setSelectedGlossaryTerm(role)}
+                        >
+                          {displayTerm(role)}
+                        </button>
+                      ))}
+                    </div>
+
+                    <dl className="procedure-details-definition-list">
+                      <div>
+                        <dt>Kind</dt>
+                        <dd>{focusedFix.kind}</dd>
+                      </div>
+                      <div>
+                        <dt>Latitude</dt>
+                        <dd>{formatCoordinate(focusedFix.position?.lat)}</dd>
+                      </div>
+                      <div>
+                        <dt>Longitude</dt>
+                        <dd>{formatCoordinate(focusedFix.position?.lon)}</dd>
+                      </div>
+                      <div>
+                        <dt>Elevation</dt>
+                        <dd>{formatAltitudeFt(focusedFix.elevationFt)}</dd>
+                      </div>
+                      <div>
+                        <dt>Role hints</dt>
+                        <dd>{focusedFix.roleHints.join(", ") || "Not available"}</dd>
+                      </div>
+                      <div>
+                        <dt>Used by branches</dt>
+                        <dd>
+                          {focusedFixBranches.map((branch) => branch.branchIdent).join(", ") ||
+                            "No branch mapping"}
+                        </dd>
+                      </div>
+                    </dl>
+                  </div>
+                ) : (
+                  <p>Hover or click a fix to inspect it here.</p>
+                )}
+              </section>
+
+              <section className="procedure-details-card procedure-details-explorer-card">
+                <div className="procedure-details-explorer-head">
+                  <div>
+                    <p className="procedure-details-overview-label">Interactive Explorer</p>
+                    <h3>Focus a branch or fix</h3>
+                  </div>
+                  <span className="procedure-details-focus-pill">
+                    {isPreviewMode ? "Preview" : "Focus"}{" "}
+                    {focusedFix?.ident ?? focusedBranch?.branchIdent ?? "—"}
+                  </span>
+                </div>
+
+                <div className="procedure-details-branch-pills">
+                  {procedureDocument.branches.map((branch) => (
+                    <button
+                      type="button"
+                      key={branch.branchId}
+                      className={`procedure-details-branch-pill ${
+                        branch.branchId === focusedBranchId ? "is-active" : ""
+                      }`}
+                      onMouseEnter={() => setPreviewBranchId(branch.branchId)}
+                      onMouseLeave={clearPreview}
+                      onClick={() => handleSelectBranch(branch.branchId)}
+                    >
+                      <strong>{branch.branchIdent}</strong>
+                      <span>{branchRoleLabel(branch.branchRole)}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {focusedPolyline ? (
+                  <div className="procedure-details-fix-strip">
+                    {focusedPolyline.points.map((point) => (
+                      <button
+                        type="button"
+                        key={`${point.branchId}-${point.fixId}`}
+                        className={`procedure-details-fix-chip ${
+                          point.fixId === focusedFixId ? "is-active" : ""
+                        }`}
+                        onMouseEnter={() => handlePreviewFix(point.fixId, point.branchId)}
+                        onMouseLeave={clearPreview}
+                        onClick={() => handleSelectFix(point.fixId, point.branchId)}
+                      >
+                        <strong>{point.ident}</strong>
+                        <span>{displayTerm(point.role)}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+
+              <section className="procedure-details-card procedure-details-terms-card">
+                <h3>Key Terms</h3>
+                <p className="procedure-details-section-intro">
+                  Pick a term only when you need the full explanation.
+                </p>
+                <div className="procedure-details-term-chip-row">
+                  {glossaryTerms.map((term) => (
+                    <button
+                      key={term}
+                      type="button"
+                      className={`procedure-details-term-chip ${
+                        activeGlossaryTerm === term ? "is-active" : ""
+                      }`}
+                      onClick={() => setSelectedGlossaryTerm(term)}
+                    >
+                      {displayTerm(term)}
+                    </button>
+                  ))}
+                </div>
+                {activeGlossaryTerm ? (
+                  <div className="procedure-details-term-definition">
+                    <strong>{displayTerm(activeGlossaryTerm)}</strong>
+                    <p>{termMeaning(activeGlossaryTerm)}</p>
+                  </div>
+                ) : null}
+              </section>
+            </aside>
+          ) : null}
         </div>
       ) : null}
+
+      <footer className="procedure-details-footer" role="contentinfo">
+        Research use only. Always use the official FAA or local published chart for operational decisions.
+      </footer>
     </div>
   );
 }
