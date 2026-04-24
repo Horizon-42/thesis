@@ -6,6 +6,7 @@ import type {
   ProcedureRouteProperties,
 } from "../types/geojson-aviation";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
+import { navigateWithinApp } from "../utils/navigation";
 
 const RUNWAY_ORDER = ["RW05L", "RW05R", "RW23L", "RW23R", "RW32"];
 
@@ -303,6 +304,18 @@ export default function ProcedurePanel() {
             </section>
           );
         })}
+      </div>
+
+      <div className="procedure-panel-footer">
+        <button
+          type="button"
+          className="procedure-panel-details-button"
+          onClick={() =>
+            navigateWithinApp(`/procedure-details?airport=${encodeURIComponent(activeAirportCode)}`)
+          }
+        >
+          Procedure Details
+        </button>
       </div>
     </aside>
   );

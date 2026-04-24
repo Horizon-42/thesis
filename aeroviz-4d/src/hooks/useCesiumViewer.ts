@@ -20,6 +20,7 @@ import {
   type AirportConfig,
 } from "../data/airportData";
 import { fetchJson } from "../utils/fetchJson";
+import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONFIGURATION CONSTANTS
@@ -301,14 +302,18 @@ export function useCesiumViewer(
       canvas.removeEventListener("pointerup", onPointerUp);
       canvas.removeEventListener("pointercancel", onPointerCancel);
 
-      viewerRef.current?.destroy();
+      if (isCesiumViewerUsable(viewerRef.current)) {
+        viewerRef.current.destroy();
+      }
       viewerRef.current = null;
+      setViewer(null);
+      setAirport(null);
     };
 
     return () => {
       cleanupViewer?.();
     };
-  }, [containerRef, setViewer]);
+  }, [containerRef, setAirport, setViewer]);
 
   useEffect(() => {
     const viewer = viewerRef.current;
@@ -318,7 +323,7 @@ export function useCesiumViewer(
 
     void loadAirportConfig(activeAirportCode)
       .then((nextAirport) => {
-        if (cancelled || viewer.isDestroyed()) return;
+        if (cancelled || !isCesiumViewerUsable(viewer)) return;
 
         setAirport(nextAirport);
         viewer.trackedEntity = undefined;

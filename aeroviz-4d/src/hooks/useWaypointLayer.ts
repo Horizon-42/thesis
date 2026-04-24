@@ -18,6 +18,7 @@ import { useApp } from "../context/AppContext";
 import { airportDataUrl } from "../data/airportData";
 import type { WaypointProperties } from "../types/geojson-aviation";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
+import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 
 /** Cylinder colour per waypoint type */
 const WAYPOINT_COLORS: Record<string, Cesium.Color> = {
@@ -54,7 +55,7 @@ export function useWaypointLayer(): void {
 
     fetchJson<WaypointFeatureCollection>(waypointUrl)
       .then((geojson) => {
-        if (cancelled) return;
+        if (cancelled || !isCesiumViewerUsable(viewer)) return;
         geojson.features.forEach((feature, index) => {
           // GeoJSON Point geometry: [longitude, latitude, altitude_metres]
           if (feature.geometry.type !== "Point") {
@@ -104,13 +105,15 @@ export function useWaypointLayer(): void {
     return () => {
       cancelled = true;
       // Remove only the entities this hook added — don't wipe the whole scene.
-      addedIds.forEach((id) => viewer.entities.removeById(id));
+      if (isCesiumViewerUsable(viewer)) {
+        addedIds.forEach((id) => viewer.entities.removeById(id));
+      }
     };
   }, [viewer, activeAirportCode]);
 
   // Sync visibility
   useEffect(() => {
-    if (!viewer) return;
+    if (!isCesiumViewerUsable(viewer)) return;
     viewer.entities.values.forEach((entity) => {
       const id = String(entity.id);
       if (id.startsWith("waypoint-")) {

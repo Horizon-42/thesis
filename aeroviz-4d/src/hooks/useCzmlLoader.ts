@@ -26,6 +26,7 @@ import { useEffect, useRef, useState } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
+import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 
 const LAYER_NAME = "czml-trajectories";
 
@@ -154,7 +155,7 @@ export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
       cancelled = true;
       dsRef.current = null;
       setTrajectoryDataSource(null);
-      if (dataSource) {
+      if (dataSource && isCesiumViewerUsable(viewer)) {
         viewer.dataSources.remove(dataSource, true);
         viewer.trackedEntity = undefined;
       }

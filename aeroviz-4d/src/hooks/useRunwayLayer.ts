@@ -19,6 +19,7 @@ import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { airportDataUrl } from "../data/airportData";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
+import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 
 const RUNWAY_SURFACE_FILL = new Cesium.Color(0.15, 0.15, 0.15, 0.85);
 const RUNWAY_SURFACE_STROKE = Cesium.Color.YELLOW;
@@ -123,7 +124,7 @@ export function useRunwayLayer(): void {
     return () => {
       cancelled = true;
       dsRef.current = null;
-      if (added) {
+      if (added && isCesiumViewerUsable(viewer)) {
         viewer.dataSources.remove(dataSource, true);
       }
     };

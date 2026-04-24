@@ -11,6 +11,7 @@ function jsonResponse(body: unknown) {
 
 const {
   fetchMock,
+  navigateWithinApp,
   toggleLayer,
   setProcedureRouteVisible,
   setProcedureRoutesVisible,
@@ -25,6 +26,7 @@ const {
   let isRunwayProfileOpen = false;
   return {
     fetchMock: vi.fn(),
+    navigateWithinApp: vi.fn(),
     toggleLayer: vi.fn(),
     setProcedureRouteVisible: vi.fn((routeId: string, visible: boolean) => {
       procedureVisibility = { ...procedureVisibility, [routeId]: visible };
@@ -61,6 +63,10 @@ vi.mock("../../context/AppContext", () => ({
     isRunwayProfileOpen: getRunwayProfileOpen(),
     setRunwayProfileOpen,
   }),
+}));
+
+vi.mock("../../utils/navigation", () => ({
+  navigateWithinApp,
 }));
 
 import ProcedurePanel from "../ProcedurePanel";
@@ -130,6 +136,7 @@ describe("ProcedurePanel", () => {
     setProcedureRoutesVisible.mockClear();
     setSelectedProfileRunwayIdent.mockClear();
     setRunwayProfileOpen.mockClear();
+    navigateWithinApp.mockClear();
     fetchMock.mockResolvedValue(jsonResponse(sampleGeoJson));
     vi.stubGlobal("fetch", fetchMock);
   });
@@ -176,5 +183,14 @@ describe("ProcedurePanel", () => {
 
     expect(setSelectedProfileRunwayIdent).toHaveBeenCalledWith("RW05L");
     expect(setRunwayProfileOpen).toHaveBeenCalledWith(true);
+  });
+
+  it("opens procedure details from the panel footer", async () => {
+    render(<ProcedurePanel />);
+    await waitFor(() => expect(screen.getByText("RW05L")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Procedure Details" }));
+
+    expect(navigateWithinApp).toHaveBeenCalledWith("/procedure-details?airport=KRDU");
   });
 });

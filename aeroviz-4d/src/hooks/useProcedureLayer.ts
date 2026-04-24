@@ -10,6 +10,7 @@ import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { airportDataUrl } from "../data/airportData";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
+import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import {
   DEFAULT_NOMINAL_SPEED_KT,
   DEFAULT_TUNNEL_HALF_HEIGHT_M,
@@ -128,7 +129,7 @@ export function useProcedureLayer(): void {
     visibleRef.current = layers.procedures;
     procedureVisibilityRef.current = procedureVisibility;
 
-    if (!viewer) return;
+    if (!isCesiumViewerUsable(viewer)) return;
     Object.entries(routeEntityIdsRef.current).forEach(([routeId, entityIds]) => {
       const routeVisible =
         procedureVisibility[routeId] ?? routeDefaultsRef.current[routeId] ?? true;
@@ -162,7 +163,7 @@ export function useProcedureLayer(): void {
 
     fetchJson<ProcedureFeatureCollection>(proceduresUrl)
       .then((geojson) => {
-        if (cancelled) return;
+        if (cancelled || !isCesiumViewerUsable(viewer)) return;
 
         geojson.features.filter(isRouteFeature).forEach((feature, routeIndex) => {
           const routeId = feature.properties.routeId ?? `route-${routeIndex}`;
@@ -255,7 +256,9 @@ export function useProcedureLayer(): void {
 
     return () => {
       cancelled = true;
-      addedIds.forEach((id) => viewer.entities.removeById(id));
+      if (isCesiumViewerUsable(viewer)) {
+        addedIds.forEach((id) => viewer.entities.removeById(id));
+      }
       routeEntityIdsRef.current = {};
       routeDefaultsRef.current = {};
     };

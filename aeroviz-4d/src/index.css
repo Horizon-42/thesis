@@ -364,6 +364,22 @@ body,
   color: #fecaca;
 }
 
+.procedure-panel-footer {
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(126, 184, 247, 0.14);
+}
+
+.procedure-panel-details-button {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 14px;
+  font-weight: 600;
+  text-align: center;
+}
+
 .procedure-runway-list,
 .procedure-list,
 .procedure-branch-list {
@@ -970,11 +986,6 @@ body,
 }
 
 .flight-table tr.selected td { background: #1a3a6a; }
-
-.control-panel-link-button {
-  width: 100%;
-  margin-top: 8px;
-}
 
 /* ── Procedure details page ──────────────────────────────────────────────── */
 .procedure-details-page {

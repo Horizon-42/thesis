@@ -22,6 +22,7 @@ import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { airportDataUrl } from "../data/airportData";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
+import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import {
   buildFinalApproachOCS,
   type GeoPoint3D,
@@ -144,7 +145,7 @@ export function useOcsLayer(): void {
 
     fetchJson<ProcedureFeatureCollection>(proceduresUrl)
       .then((geojson) => {
-        if (cancelled) return;
+        if (cancelled || !isCesiumViewerUsable(viewer)) return;
 
         geojson.features.filter(isRouteFeature).forEach((feature, routeIndex) => {
           const props = feature.properties;
@@ -227,7 +228,9 @@ export function useOcsLayer(): void {
 
     return () => {
       cancelled = true;
-      addedIds.forEach((id) => viewer.entities.removeById(id));
+      if (isCesiumViewerUsable(viewer)) {
+        addedIds.forEach((id) => viewer.entities.removeById(id));
+      }
     };
     // layers.ocsSurfaces is intentionally NOT in the dep list — toggling
     // visibility is handled by Effect 2 without rebuilding geometry.
@@ -236,7 +239,7 @@ export function useOcsLayer(): void {
 
   // Effect 2 — sync visibility when the layer toggle changes.
   useEffect(() => {
-    if (!viewer) return;
+    if (!isCesiumViewerUsable(viewer)) return;
     viewer.entities.values.forEach((entity) => {
       if (String(entity.id).startsWith(OCS_ENTITY_PREFIX)) {
         entity.show = layers.ocsSurfaces;

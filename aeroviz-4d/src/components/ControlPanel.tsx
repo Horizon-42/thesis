@@ -13,7 +13,6 @@
 
 import { useApp, type LayerKey } from "../context/AppContext";
 import { useEffect, useState } from "react";
-import { navigateWithinApp } from "../utils/navigation";
 
 /** Predefined speed options shown as buttons */
 const SPEED_OPTIONS: Array<{ label: string; value: number }> = [
@@ -122,15 +121,6 @@ export default function ControlPanel() {
             ))}
           </select>
         </label>
-        <button
-          type="button"
-          className="control-panel-link-button"
-          onClick={() =>
-            navigateWithinApp(`/procedure-details?airport=${encodeURIComponent(activeAirportCode)}`)
-          }
-        >
-          Procedure Details
-        </button>
       </section>
 
       {/* ── Playback controls ────────────────────────────────────────────── */}

@@ -18,6 +18,7 @@ import { useApp } from "../context/AppContext";
 import { airportDataUrl } from "../data/airportData";
 import type { ObstacleProperties } from "../types/geojson-aviation";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
+import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 
 // ── Colour by obstacle type ─────────────────────────────────────────────────
 
@@ -76,7 +77,7 @@ export function useObstacleLayer(): void {
 
     fetchJson<ObstacleFeatureCollection>(obstacleUrl)
       .then((geojson) => {
-        if (cancelled) return;
+        if (cancelled || !isCesiumViewerUsable(viewer)) return;
 
         geojson.features.forEach((feature, index) => {
           if (feature.geometry.type !== "Point") return;
@@ -142,13 +143,15 @@ export function useObstacleLayer(): void {
 
     return () => {
       cancelled = true;
-      addedIds.forEach((id) => viewer.entities.removeById(id));
+      if (isCesiumViewerUsable(viewer)) {
+        addedIds.forEach((id) => viewer.entities.removeById(id));
+      }
     };
   }, [viewer, activeAirportCode]);
 
   // Effect 2: Sync visibility with layer toggle
   useEffect(() => {
-    if (!viewer) return;
+    if (!isCesiumViewerUsable(viewer)) return;
     viewer.entities.values.forEach((entity) => {
       const id = String(entity.id);
       if (id.startsWith("obstacle-")) {

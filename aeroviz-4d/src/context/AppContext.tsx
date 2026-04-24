@@ -36,6 +36,7 @@ import {
   type AirportConfig,
 } from "../data/airportData";
 import { fetchJson } from "../utils/fetchJson";
+import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 
 // ── Layer names ──────────────────────────────────────────────────────────────
 // Extend this union if you add new data layers.
@@ -55,7 +56,7 @@ export type RunwayProfileViewMode = "split" | "side-xz" | "top-xy";
 interface AppState {
   /** The live CesiumJS Viewer, or null before it is mounted */
   viewer: Cesium.Viewer | null;
-  setViewer: (v: Cesium.Viewer) => void;
+  setViewer: (v: Cesium.Viewer | null) => void;
 
   /** Available airport folders exposed by public/data/airports/index.json */
   airports: AirportCatalogItem[];
@@ -134,7 +135,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Store the Viewer reference.
   // useCallback prevents creating a new function reference on every render.
-  const setViewer = useCallback((v: Cesium.Viewer) => {
+  const setViewer = useCallback((v: Cesium.Viewer | null) => {
     setViewerState(v);
   }, []);
 
@@ -194,7 +195,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const normalizedCode = normalizeAirportCode(code);
       if (!normalizedCode || normalizedCode === activeAirportCode) return;
 
-      if (viewer && !viewer.isDestroyed()) {
+      if (isCesiumViewerUsable(viewer)) {
         viewer.trackedEntity = undefined;
       }
       setSelectedFlightId(null);
