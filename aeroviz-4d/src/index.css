@@ -1107,35 +1107,49 @@ body,
 
 .procedure-details-layout {
   display: grid;
-  grid-template-columns: minmax(240px, 280px) minmax(0, 1fr);
   gap: 18px;
-  align-items: start;
 }
 
-.procedure-details-sidebar,
-.procedure-details-main {
+.procedure-details-main,
+.procedure-details-control-grid,
+.procedure-details-chart-stack,
+.procedure-details-detail-grid {
   display: grid;
   gap: 18px;
 }
 
-.procedure-details-sidebar-card,
+.procedure-details-control-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr) minmax(0, 1.35fr);
+  align-items: start;
+}
+
+.procedure-details-detail-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .procedure-details-card {
   background: rgba(12, 21, 34, 0.84);
   border: 1px solid rgba(135, 163, 196, 0.18);
   border-radius: 22px;
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.22);
-}
-
-.procedure-details-sidebar-card {
-  padding: 16px;
-}
-
-.procedure-details-card {
   padding: 18px;
 }
 
-.procedure-details-sidebar-card h2,
-.procedure-details-sidebar-card h3,
+.procedure-details-card-head,
+.procedure-details-chart-frame-head,
+.procedure-details-explorer-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 16px;
+}
+
+.procedure-details-card-head {
+  margin-bottom: 12px;
+}
+
+.procedure-details-selector-card h2,
+.procedure-details-selector-card h3,
 .procedure-details-card h3 {
   margin: 0 0 10px;
 }
@@ -1148,15 +1162,48 @@ body,
   line-height: 1.55;
 }
 
+.procedure-details-meta-pill,
+.procedure-details-focus-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(121, 192, 255, 0.24);
+  background: rgba(20, 38, 58, 0.9);
+  color: #dbe9f8;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.procedure-details-focus-pill-wrap {
+  display: flex;
+  align-items: flex-start;
+}
+
 .procedure-details-runway-list,
 .procedure-details-procedure-list,
-.procedure-details-reference-list {
+.procedure-details-reference-list,
+.procedure-details-branch-pills,
+.procedure-details-fix-strip,
+.procedure-details-term-chip-row {
   display: grid;
   gap: 10px;
 }
 
+.procedure-details-branch-pills,
+.procedure-details-fix-strip,
+.procedure-details-term-chip-row {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  align-items: start;
+}
+
 .procedure-details-runway-button,
-.procedure-details-procedure-button {
+.procedure-details-procedure-button,
+.procedure-details-branch-pill,
+.procedure-details-fix-chip,
+.procedure-details-term-chip,
+.procedure-details-leg-card {
   width: 100%;
   text-align: left;
   border-radius: 16px;
@@ -1169,13 +1216,21 @@ body,
 }
 
 .procedure-details-runway-button:hover,
-.procedure-details-procedure-button:hover {
+.procedure-details-procedure-button:hover,
+.procedure-details-branch-pill:hover,
+.procedure-details-fix-chip:hover,
+.procedure-details-term-chip:hover,
+.procedure-details-leg-card:hover {
   transform: translateY(-1px);
   border-color: rgba(121, 192, 255, 0.52);
 }
 
 .procedure-details-runway-button.is-active,
-.procedure-details-procedure-button.is-active {
+.procedure-details-procedure-button.is-active,
+.procedure-details-branch-pill.is-active,
+.procedure-details-fix-chip.is-active,
+.procedure-details-term-chip.is-active,
+.procedure-details-leg-card.is-active {
   background: rgba(24, 65, 112, 0.72);
   border-color: rgba(121, 192, 255, 0.8);
 }
@@ -1189,6 +1244,20 @@ body,
 
 .procedure-details-runway-button small,
 .procedure-details-procedure-button small {
+  color: #a8bad0;
+}
+
+.procedure-details-branch-pill strong,
+.procedure-details-fix-chip strong {
+  display: block;
+  font-size: 14px;
+  color: #f8fbff;
+}
+
+.procedure-details-branch-pill span,
+.procedure-details-fix-chip span {
+  display: block;
+  font-size: 12px;
   color: #a8bad0;
 }
 
@@ -1219,7 +1288,7 @@ body,
 
 .procedure-details-overview-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 14px;
 }
 
@@ -1228,28 +1297,57 @@ body,
   color: #f8fbff;
 }
 
-.procedure-details-chart-grid,
-.procedure-details-dual-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
+.procedure-details-explorer-card {
+  gap: 16px;
+}
+
+.procedure-details-explorer-card .procedure-details-section-intro {
+  max-width: 720px;
+}
+
+.procedure-details-chart-card {
+  padding: 20px 20px 22px;
+}
+
+.procedure-details-chart-frame-head {
+  margin-bottom: 14px;
+}
+
+.procedure-details-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px 14px;
+}
+
+.procedure-details-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #aebed2;
+  font-size: 12px;
+}
+
+.procedure-details-legend-item i {
+  width: 20px;
+  height: 3px;
+  border-radius: 999px;
+  background: #79c0ff;
+}
+
+.procedure-details-legend-item i.is-transition {
+  background: #f59e0b;
+}
+
+.procedure-details-legend-item i.is-runway {
+  height: 6px;
+  background: #f8fafc;
 }
 
 .procedure-details-chart-svg {
   width: 100%;
   height: auto;
   display: block;
-}
-
-.procedure-details-chart-title {
-  font-size: 18px;
-  fill: #eef5ff;
-  font-weight: 700;
-}
-
-.procedure-details-chart-subtitle {
-  font-size: 12px;
-  fill: #9db0c9;
 }
 
 .procedure-details-grid-line {
@@ -1269,9 +1367,10 @@ body,
 
 .procedure-details-branch-line {
   fill: none;
-  stroke-width: 3;
+  stroke-width: 3.5;
   stroke-linecap: round;
   stroke-linejoin: round;
+  transition: opacity 0.16s ease, stroke-width 0.16s ease;
 }
 
 .procedure-details-branch-final {
@@ -1289,15 +1388,32 @@ body,
   stroke-linecap: round;
 }
 
+.procedure-details-branch-line.is-focused {
+  opacity: 1;
+}
+
+.procedure-details-branch-line.is-muted {
+  opacity: 0.22;
+}
+
 .procedure-details-fix-point {
   fill: #ffffff;
   stroke: rgba(12, 21, 34, 0.9);
   stroke-width: 2;
   cursor: pointer;
+  transition: opacity 0.16s ease, r 0.16s ease, fill 0.16s ease;
 }
 
 .procedure-details-fix-point.is-selected {
   fill: #f59e0b;
+}
+
+.procedure-details-fix-point.is-muted {
+  opacity: 0.28;
+}
+
+.procedure-details-fix-point.is-focused {
+  opacity: 1;
 }
 
 .procedure-details-fix-label {
@@ -1305,6 +1421,7 @@ body,
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+  transition: opacity 0.16s ease, fill 0.16s ease;
 }
 
 .procedure-details-fix-label.is-centered {
@@ -1315,6 +1432,14 @@ body,
   fill: #ffe0a6;
 }
 
+.procedure-details-fix-label.is-muted {
+  opacity: 0.28;
+}
+
+.procedure-details-fix-label.is-focused {
+  opacity: 1;
+}
+
 .procedure-details-empty-chart {
   min-height: 240px;
   display: grid;
@@ -1323,37 +1448,73 @@ body,
   color: #aebed2;
 }
 
-.procedure-details-table-wrap {
-  overflow: auto;
+.procedure-details-fix-inspector p {
+  margin: 0 0 14px;
+  color: #c5d4e4;
 }
 
-.procedure-details-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
+.procedure-details-leg-stack {
+  display: grid;
+  gap: 12px;
 }
 
-.procedure-details-table th,
-.procedure-details-table td {
-  border-bottom: 1px solid rgba(135, 163, 196, 0.12);
-  padding: 10px 8px;
-  text-align: left;
-  vertical-align: top;
+.procedure-details-leg-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px;
+  padding: 14px 16px;
 }
 
-.procedure-details-table th {
+.procedure-details-leg-seq {
+  display: inline-grid;
+  place-items: center;
+  min-width: 36px;
+  min-height: 36px;
+  border-radius: 12px;
+  background: rgba(79, 121, 171, 0.18);
+  color: #f8fbff;
+  font-weight: 700;
+}
+
+.procedure-details-leg-main {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.procedure-details-leg-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.procedure-details-leg-title-row strong {
+  color: #f8fbff;
+}
+
+.procedure-details-leg-main p {
+  margin: 0;
+  color: #afc0d4;
+  line-height: 1.5;
+}
+
+.procedure-details-leg-role {
+  color: #ffe0a6;
   font-size: 12px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #8ea5c2;
+  letter-spacing: 0.05em;
 }
 
-.procedure-details-table tbody tr {
-  cursor: pointer;
-}
-
-.procedure-details-table tbody tr.is-selected {
-  background: rgba(29, 78, 137, 0.28);
+.procedure-details-leg-meta {
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+  color: #9fb2c9;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .procedure-details-fix-inspector h4 {
@@ -1383,34 +1544,51 @@ body,
   color: #eef5ff;
 }
 
-.procedure-details-glossary-list {
-  list-style: none;
+.procedure-details-term-definition,
+.procedure-details-data-notes {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(135, 163, 196, 0.14);
+  background: rgba(17, 30, 47, 0.72);
+}
+
+.procedure-details-term-definition strong {
+  display: block;
+  color: #f8fbff;
+  margin-bottom: 6px;
+}
+
+.procedure-details-term-definition p {
   margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 12px;
-}
-
-.procedure-details-glossary-list li {
-  display: grid;
-  gap: 4px;
-}
-
-.procedure-details-glossary-list strong {
-  color: #edf4ff;
-}
-
-.procedure-details-glossary-list span {
   color: #b7c7da;
-  line-height: 1.5;
+  line-height: 1.6;
+}
+
+.procedure-details-note-list {
+  margin: 0;
+  padding-left: 18px;
+  color: #c3d0df;
+  display: grid;
+  gap: 8px;
 }
 
 @media (max-width: 1180px) {
   .procedure-details-layout,
-  .procedure-details-chart-grid,
-  .procedure-details-dual-grid,
+  .procedure-details-control-grid,
+  .procedure-details-detail-grid,
   .procedure-details-overview-grid {
     grid-template-columns: 1fr;
+  }
+
+  .procedure-details-chart-frame-head,
+  .procedure-details-explorer-head,
+  .procedure-details-card-head {
+    display: grid;
+  }
+
+  .procedure-details-chart-legend {
+    justify-content: flex-start;
   }
 }
 
@@ -1426,5 +1604,13 @@ body,
 
   .procedure-details-header-actions {
     justify-items: stretch;
+  }
+
+  .procedure-details-leg-card {
+    grid-template-columns: 1fr;
+  }
+
+  .procedure-details-leg-meta {
+    justify-items: start;
   }
 }

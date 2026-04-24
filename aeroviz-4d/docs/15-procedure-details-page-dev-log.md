@@ -66,3 +66,55 @@
 - Add a small documented regeneration command to the user-facing docs or README section for the page, then extend the page with one or both of:
   - a branch-specific filter/legend toggle
   - a tighter FAA-like profile annotation layer for minima, missed-approach transition, and threshold markers
+
+## 2026-04-24 15:55 CEST
+
+### Goal Of This Session
+- Redesign the `Procedure Details` page so it feels more like an interactive explorer than a static report.
+- Reduce always-visible dense detail blocks.
+- Enlarge the plan view and vertical profile, and move them into a stacked up-down layout.
+
+### Facts Discovered
+- The original page structure was readable but too flat: sidebar + two medium charts + long always-visible leg/glossary lists.
+- The existing procedure-detail data already had enough structure to support focus-driven interactions without changing the data pipeline: branches, per-leg endpoints, role hints, and chart point geometry were already available.
+- The current SVG charts became much easier to read once labels were shown mainly for the focused branch/fix and important role points instead of every point all at once.
+
+### Decisions Locked
+- The page now uses a single-column main reading flow instead of a sidebar-led layout so the charts can take substantially more width.
+- The interaction model is now “focus-driven”: branch pills, fix chips, chart points, and leg cards all feed one shared focused branch/fix state.
+- Detailed procedure content is now layered:
+  - overview is always visible
+  - branch/fix explorer is always visible
+  - focused sequence, focused fix metadata, and glossary explanation respond to current focus
+  - the full always-open leg ladder and full glossary list are removed from the default page surface
+- Plan view and vertical profile remain SVG-based for now, but are deliberately larger and stacked vertically.
+
+### Files Changed
+- `src/components/ProcedureDetailsPage.tsx`
+- `src/index.css`
+
+### Commands Run / Checks Passed
+- `npm run build`
+- `npm test -- --run src/components/__tests__/ProcedureDetailsPage.test.tsx`
+- `npm test -- --run`
+
+### Current Status
+- The page now opens with airport/runway/procedure selection cards at the top, a larger overview, an interactive branch/fix explorer strip, and two enlarged charts stacked vertically.
+- Fix and branch focus now drives:
+  - chart emphasis
+  - fix inspector content
+  - focused branch sequence cards
+  - glossary chip definition
+- The leg ladder has been replaced by a focused sequence card deck, so the user sees only the currently relevant procedure path instead of a long global table.
+- The glossary is now layered behind term chips instead of rendering every definition at once.
+
+### Known Blockers
+- The charts are larger and more interactive, but still intentionally lightweight SVG renderings rather than a full FAA-sheet recreation.
+- Focus is currently driven by hover/click state only; there is not yet a pinned multi-fix comparison mode.
+- Chart annotations are still intentionally selective; additional altitude callouts, minima, or missed-approach-specific symbols would require another visual pass.
+
+### Exact Next Recommended Step
+- Add one deeper annotation layer to the enlarged charts, prioritizing one of:
+  - threshold / FAF / MAPt callout badges directly in the plan/profile views
+  - branch merge markers and missed-approach continuation cues
+  - a compact “compare branches” toggle that temporarily shows more than one branch at full emphasis
