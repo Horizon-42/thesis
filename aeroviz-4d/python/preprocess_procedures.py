@@ -46,7 +46,6 @@ NM_TO_METRES = 1852.0
 DEFAULT_CIFP_ROOT = Path(__file__).parents[2] / "data" / "CIFP" / "CIFP_260319"
 DEFAULT_RNAV_CHARTS_ROOT = Path(__file__).parents[2] / "data" / "RNAV_CHARTS"
 DEFAULT_AIRPORT = "KRDU"
-DEFAULT_RNAV_PROCEDURES = ["R05LY", "R05RY", "R23LY", "R23RY", "R32"]
 RUNWAY_ORDER = ["RW05L", "RW05R", "RW23L", "RW23R", "RW32"]
 SUPPORTED_ROUTE_LEGS = {"IF", "TF"}
 COORD_PAIR_RE = re.compile(r"([NS]\d{8,10})([EW]\d{9,11})")
@@ -62,6 +61,8 @@ class FixRecord:
     lat: float
     altitude_ft: int | None
     source_line: int
+    region_code: str | None = None
+    source_kind: str = "airport-local-cifp"
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,7 @@ class ProcedureLeg:
     role: str
     altitude_ft: int | None
     source_line: int
+    fix_region_code: str | None = None
 
 
 @dataclass(frozen=True)
@@ -124,13 +126,17 @@ def decode_coordinate_pair(lat_token: str, lon_token: str) -> tuple[float, float
 
 def parse_signed_altitude_ft(text: str) -> int | None:
     """Parse the first ARINC-style five-digit altitude in a text slice."""
-    match = re.search(r"([+\-V]?)\s*(\d{5})", text)
+    match = re.search(r"([+\-V])\s*(\d{5})", text)
+    if match:
+        altitude = int(match.group(2))
+        if match.group(1) == "-":
+            altitude *= -1
+        return altitude
+
+    match = re.search(r"(?<!\d)(\d{5})(?!\d)", text)
     if not match:
         return None
-    altitude = int(match.group(2))
-    if match.group(1) == "-":
-        altitude *= -1
-    return altitude
+    return int(match.group(1))
 
 
 def procedure_exists(index_path: Path, airport: str, procedure_type: str, procedure: str) -> bool:
@@ -147,6 +153,29 @@ def procedure_exists(index_path: Path, airport: str, procedure_type: str, proced
             ):
                 return True
     return False
+
+
+def discover_rnav_procedures(index_path: Path, airport: str, procedure_type: str) -> list[str]:
+    """Return RNAV/RNP approach idents listed for one airport in IN_CIFP.txt."""
+    procedures: list[str] = []
+    seen: set[str] = set()
+    with index_path.open(encoding="ascii", errors="replace") as f:
+        for line in f:
+            fields = line.strip().split()
+            if len(fields) < 3:
+                continue
+            if fields[0].upper() != airport.upper() or fields[1].upper() != procedure_type.upper():
+                continue
+
+            procedure = fields[2].upper()
+            if procedure_family(procedure) not in {"RNAV_GPS", "RNAV_RNP"}:
+                continue
+            if procedure in seen:
+                continue
+            procedures.append(procedure)
+            seen.add(procedure)
+
+    return sorted(procedures, key=procedure_sort_key)
 
 
 def parse_procedure_list(raw_value: str) -> list[str]:
@@ -177,6 +206,8 @@ def procedure_variant(procedure: str) -> str | None:
 def procedure_family(procedure: str) -> str:
     """Classify procedure family from CIFP ident prefix."""
     ident = procedure.upper()
+    if ident.startswith("RNV"):
+        return "RNAV_GPS"
     if ident.startswith("R"):
         return "RNAV_GPS"
     if ident.startswith("H"):
@@ -232,14 +263,20 @@ def parse_fix_ident(line: str) -> str:
     return line[13:19].strip().upper()
 
 
+def parse_fix_region_code(line: str) -> str | None:
+    """Extract the two-character ARINC region code associated with a fix."""
+    region_code = line[19:21].strip().upper()
+    return region_code or None
+
+
 def parse_fix_altitude(line: str, coord_end: int) -> int | None:
     """Parse runway/fix elevation when it is encoded immediately after coordinates."""
     after_coords = line[coord_end : min(coord_end + 25, len(line))]
     return parse_signed_altitude_ft(after_coords)
 
 
-def build_fix_index(faacifp_path: Path, airport: str) -> dict[str, FixRecord]:
-    """Collect local CIFP coordinate records for one airport."""
+def build_airport_fix_index(faacifp_path: Path, airport: str) -> dict[str, FixRecord]:
+    """Collect airport-local CIFP coordinate records from SUSAP <airport> records."""
     fixes: dict[str, FixRecord] = {}
     airport_prefix = f"SUSAP {airport.upper()}"
 
@@ -265,8 +302,98 @@ def build_fix_index(faacifp_path: Path, airport: str) -> dict[str, FixRecord]:
                 lat=lat,
                 altitude_ft=altitude_ft,
                 source_line=line_number,
+                region_code=parse_fix_region_code(line),
+                source_kind="airport-local-cifp",
             )
 
+    return fixes
+
+
+def preferred_region_codes_by_fix(legs: list[ProcedureLeg]) -> dict[str, set[str]]:
+    """Return region-code hints from procedure legs for non-local fix fallback."""
+    regions: dict[str, set[str]] = {}
+    for leg in legs:
+        if not leg.fix_ident or leg.fix_region_code is None:
+            continue
+        regions.setdefault(leg.fix_ident, set()).add(leg.fix_region_code)
+    return regions
+
+
+def build_global_fix_fallback_index(
+    faacifp_path: Path,
+    airport: str,
+    missing_idents: set[str],
+    preferred_regions: dict[str, set[str]],
+) -> dict[str, FixRecord]:
+    """Resolve missing fixes from non-airport CIFP records using ident + region."""
+    if not missing_idents:
+        return {}
+
+    airport_prefix = f"SUSAP {airport.upper()}"
+    candidates: dict[str, tuple[int, FixRecord]] = {}
+
+    with faacifp_path.open(encoding="ascii", errors="replace") as f:
+        for line_number, raw_line in enumerate(f, start=1):
+            line = raw_line.rstrip("\n\r")
+            if line.startswith(airport_prefix):
+                continue
+
+            match = COORD_PAIR_RE.search(line)
+            if not match:
+                continue
+
+            ident = parse_fix_ident(line)
+            if ident not in missing_idents:
+                continue
+
+            region_code = parse_fix_region_code(line)
+            expected_regions = preferred_regions.get(ident, set())
+            if expected_regions and region_code not in expected_regions:
+                continue
+
+            lon, lat = decode_coordinate_pair(match.group(1), match.group(2))
+            altitude_ft = parse_fix_altitude(line, match.end())
+            score = 0 if region_code in expected_regions else 1
+            existing = candidates.get(ident)
+            if existing is not None and existing[0] <= score:
+                continue
+
+            candidates[ident] = (
+                score,
+                FixRecord(
+                    ident=ident,
+                    lon=lon,
+                    lat=lat,
+                    altitude_ft=altitude_ft,
+                    source_line=line_number,
+                    region_code=region_code,
+                    source_kind="global-cifp-fallback",
+                ),
+            )
+
+    return {ident: record for ident, (_, record) in candidates.items()}
+
+
+def build_fix_index(
+    faacifp_path: Path,
+    airport: str,
+    procedure_legs: list[ProcedureLeg] | None = None,
+) -> dict[str, FixRecord]:
+    """Collect airport-local fixes and fill missing procedure fixes from global CIFP."""
+    fixes = build_airport_fix_index(faacifp_path, airport)
+    if procedure_legs is None:
+        return fixes
+
+    required_idents = {leg.fix_ident for leg in procedure_legs if leg.fix_ident}
+    missing_idents = required_idents - set(fixes)
+    fixes.update(
+        build_global_fix_fallback_index(
+            faacifp_path=faacifp_path,
+            airport=airport,
+            missing_idents=missing_idents,
+            preferred_regions=preferred_region_codes_by_fix(procedure_legs),
+        )
+    )
     return fixes
 
 
@@ -281,6 +408,8 @@ def parse_leg_role(line: str, leg_type: str, fix_ident: str, sequence: int) -> s
     waypoint_description = line[42].strip().upper() if len(line) > 42 else ""
     if fix_ident.startswith("RW"):
         return "MAPt"
+    if leg_type in {"HM", "HF"}:
+        return "MAHF"
     if waypoint_description == "F":
         return "FAF"
     if waypoint_description == "I" or leg_type == "IF":
@@ -332,6 +461,7 @@ def parse_procedure_legs(
                     role=role,
                     altitude_ft=altitude_ft,
                     source_line=line_number,
+                    fix_region_code=line[34:36].strip().upper() or None,
                 )
             )
 
@@ -643,11 +773,11 @@ def generate_procedure_geojson(
     if not procedure_exists(index_path, airport, procedure_type, procedure):
         raise ValueError(f"{airport} {procedure_type} {procedure} not found in {index_path}")
 
-    fixes = build_fix_index(faacifp_path, airport)
     legs = parse_procedure_legs(faacifp_path, airport, procedure, branch)
     if not legs:
         raise ValueError(f"No CIFP procedure legs found for {airport} {procedure} branch {branch}")
 
+    fixes = build_fix_index(faacifp_path, airport, procedure_legs=legs)
     route_points, warnings = build_route_points(legs, fixes, nominal_speed_kt)
     source_cycle = parse_source_cycle(faacifp_path)
     return build_procedure_geojson(
@@ -888,6 +1018,8 @@ def build_fix_catalog(
         role_hints = dedupe_preserve_order(role_hints_by_fix.get(fix_ident, []))
         if fix_ident.startswith("RW"):
             kind = "runway_threshold"
+        elif "MAHF" in role_hints:
+            kind = "missed_hold_fix"
         elif "FAF" in role_hints:
             kind = "final_approach_fix"
         elif "MAPT" in {item.upper() for item in role_hints}:
@@ -912,7 +1044,11 @@ def build_fix_catalog(
                 ),
                 "elevationFt": None if fix is None else fix.altitude_ft,
                 "roleHints": role_hints,
-                "sourceRefs": ["src:cifp-detail"],
+                "sourceRefs": (
+                    ["src:cifp-detail", "src:cifp-global-fix"]
+                    if fix is not None and fix.source_kind == "global-cifp-fallback"
+                    else ["src:cifp-detail"]
+                ),
             }
         )
     return items
@@ -1113,9 +1249,13 @@ def build_validation_block(
         if runway and str(fix_ref).endswith(runway.upper()):
             threshold_seen = True
             continue
-        if threshold_seen:
+        if not threshold_seen or fix_ref == "fix:":
+            continue
+        if leg["path"]["pathTerminator"] in {"HM", "HF"}:
             expected_missed_fix = fix_ref
             break
+        if expected_missed_fix is None:
+            expected_missed_fix = fix_ref
 
     return {
         "expectedRunwayIdent": runway,
@@ -1145,11 +1285,23 @@ def build_procedure_detail_document(
     faacifp_path = cifp_root / "FAACIFP18"
     source_cycle = parse_source_cycle(faacifp_path)
     airport_details = load_airport_details(airport)
-    fix_records = build_fix_index(faacifp_path, airport)
     available_branches = parse_available_branches(faacifp_path, airport, procedure)
     final_branch_ident = final_branch_for_procedure(procedure)
     if final_branch_ident not in available_branches:
         available_branches = [final_branch_ident, *available_branches]
+    branch_legs_by_ident = {
+        branch_ident.upper(): parse_procedure_legs(faacifp_path, airport, procedure, branch_ident)
+        for branch_ident in available_branches
+    }
+    fix_records = build_fix_index(
+        faacifp_path,
+        airport,
+        procedure_legs=[
+            leg
+            for branch_legs in branch_legs_by_ident.values()
+            for leg in branch_legs
+        ],
+    )
 
     runway = runway_from_procedure_ident(procedure)
     ordered_fix_idents: list[str] = []
@@ -1159,7 +1311,7 @@ def build_procedure_detail_document(
     warnings: list[str] = []
 
     for branch_order, branch_ident in enumerate(available_branches, start=1):
-        branch_legs = parse_procedure_legs(faacifp_path, airport, procedure, branch_ident)
+        branch_legs = branch_legs_by_ident[branch_ident.upper()]
         branch_route_points, branch_warnings = build_route_points(branch_legs, fix_records, nominal_speed_kt)
         branch_route_points_by_ident[branch_ident.upper()] = branch_route_points
         warnings.extend(f"[{branch_ident}] {warning}" for warning in branch_warnings)
@@ -1190,7 +1342,7 @@ def build_procedure_detail_document(
 
     threshold_fix = fix_records.get(runway or "")
     chart_name = procedure_chart_name(procedure, runway)
-    final_branch_legs = parse_procedure_legs(faacifp_path, airport, procedure, final_branch_ident)
+    final_branch_legs = branch_legs_by_ident.get(final_branch_ident.upper(), [])
     vertical_profiles = build_vertical_profile_document(
         procedure=procedure,
         runway=runway,
@@ -1219,6 +1371,12 @@ def build_procedure_detail_document(
                 {
                     "sourceId": "src:cifp-detail",
                     "kind": "FAA_CIFP",
+                    "cycle": source_cycle,
+                    "path": str(cifp_root / "FAACIFP18"),
+                },
+                {
+                    "sourceId": "src:cifp-global-fix",
+                    "kind": "FAA_CIFP_ENROUTE_OR_GLOBAL_FIX",
                     "cycle": source_cycle,
                     "path": str(cifp_root / "FAACIFP18"),
                 },
@@ -1487,7 +1645,7 @@ def main() -> None:
     parser.add_argument(
         "--include-all-rnav",
         action="store_true",
-        help="Generate the default KRDU RNAV/GPS set: R05LY,R05RY,R23LY,R23RY,R32",
+        help="Generate all RNAV/RNP approach procedures listed for the selected airport",
     )
     parser.add_argument(
         "--include-transitions",
@@ -1512,8 +1670,13 @@ def main() -> None:
     parser.add_argument("--output", default=None, help="Output GeoJSON path")
     args = parser.parse_args()
 
+    index_path = Path(args.cifp_root) / "IN_CIFP.txt"
     if args.include_all_rnav:
-        selected_procedures = DEFAULT_RNAV_PROCEDURES
+        selected_procedures = discover_rnav_procedures(index_path, args.airport, args.procedure_type)
+        if not selected_procedures:
+            raise ValueError(
+                f"No RNAV/RNP {args.procedure_type.upper()} procedures found for {args.airport.upper()} in {index_path}"
+            )
     elif args.procedures:
         selected_procedures = parse_procedure_list(args.procedures)
     else:

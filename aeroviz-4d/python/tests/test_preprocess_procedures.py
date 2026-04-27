@@ -12,6 +12,7 @@ from preprocess_procedures import (
     build_route_points,
     build_procedure_detail_document,
     decode_cifp_coordinate,
+    discover_rnav_procedures,
     generate_procedure_geojson,
     generate_procedures_geojson,
     infer_chart_targets,
@@ -33,6 +34,28 @@ def test_decode_cifp_coordinate() -> None:
 
 def test_krdu_r05ly_exists_in_cifp_index() -> None:
     assert procedure_exists(CIFP_ROOT / "IN_CIFP.txt", "KRDU", "SIAP", "R05LY")
+
+
+def test_discover_rnav_procedures_is_airport_specific() -> None:
+    assert discover_rnav_procedures(CIFP_ROOT / "IN_CIFP.txt", "KRDU", "SIAP") == [
+        "H05LZ",
+        "R05LY",
+        "H05RZ",
+        "R05RY",
+        "H23LZ",
+        "R23LY",
+        "H23RZ",
+        "R23RY",
+        "R32",
+    ]
+    assert discover_rnav_procedures(CIFP_ROOT / "IN_CIFP.txt", "KAAA", "SIAP") == [
+        "R03",
+        "R21",
+    ]
+    assert discover_rnav_procedures(CIFP_ROOT / "IN_CIFP.txt", "KAFN", "SIAP") == [
+        "RNV-B",
+        "RNV-C",
+    ]
 
 
 def test_generate_krdu_r05ly_geojson() -> None:

@@ -1482,16 +1482,24 @@ body,
   width: 20px;
   height: 3px;
   border-radius: 999px;
-  background: #79c0ff;
+  background: #e8f3ff;
 }
 
 .procedure-details-legend-item i.is-transition {
-  background: #f59e0b;
+  background: #f6b74d;
+}
+
+.procedure-details-legend-item i.is-missed {
+  background: repeating-linear-gradient(
+    90deg,
+    #ffffff 0 7px,
+    transparent 7px 12px
+  );
 }
 
 .procedure-details-legend-item i.is-runway {
-  height: 6px;
-  background: #f8fafc;
+  height: 8px;
+  background: linear-gradient(#ffffff 0 25%, #111827 25% 75%, #ffffff 75%);
 }
 
 .procedure-details-chart-svg {
@@ -1505,6 +1513,22 @@ body,
   stroke-width: 1;
 }
 
+.procedure-details-plot-frame {
+  fill: none;
+  stroke: rgba(141, 165, 193, 0.28);
+  stroke-width: 1;
+}
+
+.procedure-details-axis-line {
+  stroke: rgba(219, 233, 248, 0.55);
+  stroke-width: 1.4;
+}
+
+.procedure-details-axis-tick {
+  stroke: rgba(219, 233, 248, 0.55);
+  stroke-width: 1.2;
+}
+
 .procedure-details-axis-label {
   fill: #93a8c2;
   font-size: 11px;
@@ -1515,27 +1539,67 @@ body,
   text-anchor: middle;
 }
 
+.procedure-details-axis-title {
+  fill: #aebed2;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-anchor: end;
+  text-transform: uppercase;
+}
+
+.procedure-details-axis-title.is-vertical {
+  text-anchor: start;
+}
+
 .procedure-details-branch-line {
   fill: none;
-  stroke-width: 3.5;
+  stroke-width: 4;
   stroke-linecap: round;
   stroke-linejoin: round;
   transition: opacity 0.16s ease, stroke-width 0.16s ease;
+  cursor: pointer;
 }
 
 .procedure-details-branch-final {
-  stroke: #7dd3fc;
+  stroke: #e8f3ff;
 }
 
 .procedure-details-branch-transition {
-  stroke: #f59e0b;
-  stroke-dasharray: 10 8;
+  stroke: #f6b74d;
+}
+
+.procedure-details-branch-missed,
+.procedure-details-missed-line {
+  stroke: #ffffff;
+  stroke-dasharray: 14 10;
+}
+
+.procedure-details-missed-line.is-outbound {
+  stroke-width: 5;
+  stroke-dasharray: 18 11;
+}
+
+.procedure-details-arrowhead {
+  fill: context-stroke;
 }
 
 .procedure-details-runway-bar {
-  stroke: #f8fafc;
-  stroke-width: 6;
+  stroke: #111827;
+  stroke-width: 10;
+  stroke-linecap: butt;
+}
+
+.procedure-details-runway-casing {
+  stroke: #ffffff;
+  stroke-width: 16;
   stroke-linecap: round;
+}
+
+.procedure-details-runway-threshold {
+  fill: #ffffff;
+  stroke: #111827;
+  stroke-width: 2.5;
 }
 
 .procedure-details-branch-line.is-focused {
@@ -1547,15 +1611,15 @@ body,
 }
 
 .procedure-details-fix-point {
-  fill: #ffffff;
-  stroke: rgba(12, 21, 34, 0.9);
+  fill: transparent;
+  stroke: #ffffff;
   stroke-width: 2;
   cursor: pointer;
-  transition: opacity 0.16s ease, r 0.16s ease, fill 0.16s ease;
+  transition: opacity 0.16s ease, stroke 0.16s ease;
 }
 
 .procedure-details-fix-point.is-selected {
-  fill: #f59e0b;
+  stroke: #f59e0b;
 }
 
 .procedure-details-fix-point.is-muted {
@@ -1563,6 +1627,27 @@ body,
 }
 
 .procedure-details-fix-point.is-focused {
+  opacity: 1;
+}
+
+.procedure-details-fix-center {
+  fill: #ffffff;
+  stroke: rgba(12, 21, 34, 0.9);
+  stroke-width: 1.4;
+  cursor: pointer;
+  transition: opacity 0.16s ease, fill 0.16s ease, stroke 0.16s ease;
+}
+
+.procedure-details-fix-center.is-selected {
+  fill: #f59e0b;
+  stroke: #111827;
+}
+
+.procedure-details-fix-center.is-muted {
+  opacity: 0.28;
+}
+
+.procedure-details-fix-center.is-focused {
   opacity: 1;
 }
 

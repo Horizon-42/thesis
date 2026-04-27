@@ -30,10 +30,15 @@ import {
 } from "../utils/procedureDetailsGeometry";
 
 const SVG_WIDTH = 1120;
-const PLAN_SVG_HEIGHT = 520;
+const PLAN_SVG_HEIGHT = 680;
 const PROFILE_SVG_HEIGHT = 420;
 const SVG_PADDING_X = 64;
 const SVG_PADDING_Y = 44;
+const PLAN_AXIS_TICK_COUNT = 6;
+const PLAN_FIX_SYMBOL_SIZE = 7;
+const PLAN_SELECTED_FIX_SYMBOL_SIZE = 8;
+const MISSED_OUTBOUND_ARROW_START_GAP_PX = 92;
+const MISSED_OUTBOUND_PROJECTED_LENGTH_M = 6400;
 const IMPORTANT_FIX_ROLES = new Set(["IAF", "IF", "FAF", "MAPT", "MAHF"]);
 
 const TERM_EXPLANATIONS: Record<string, string> = {
@@ -146,6 +151,56 @@ function chartDomain(values: number[], paddingRatio = 0.08): { min: number; max:
   };
 }
 
+function equalAspectChartDomains(
+  xDomain: { min: number; max: number },
+  yDomain: { min: number; max: number },
+  plotWidth: number,
+  plotHeight: number,
+): { xDomain: { min: number; max: number }; yDomain: { min: number; max: number } } {
+  const xSpan = Math.max(xDomain.max - xDomain.min, 1);
+  const ySpan = Math.max(yDomain.max - yDomain.min, 1);
+  const metersPerPixel = Math.max(xSpan / plotWidth, ySpan / plotHeight);
+  const targetXSpan = metersPerPixel * plotWidth;
+  const targetYSpan = metersPerPixel * plotHeight;
+  const xCenter = (xDomain.min + xDomain.max) / 2;
+  const yCenter = (yDomain.min + yDomain.max) / 2;
+
+  return {
+    xDomain: {
+      min: xCenter - targetXSpan / 2,
+      max: xCenter + targetXSpan / 2,
+    },
+    yDomain: {
+      min: yCenter - targetYSpan / 2,
+      max: yCenter + targetYSpan / 2,
+    },
+  };
+}
+
+function niceChartStep(span: number, tickCount: number): number {
+  const roughStep = Math.max(span, 1) / Math.max(tickCount, 1);
+  const magnitude = 10 ** Math.floor(Math.log10(roughStep));
+  const residual = roughStep / magnitude;
+  const niceResidual = residual <= 1 ? 1 : residual <= 2 ? 2 : residual <= 5 ? 5 : 10;
+  return niceResidual * magnitude;
+}
+
+function chartTicksByStep(domain: { min: number; max: number }, step: number): number[] {
+  const start = Math.ceil(domain.min / step) * step;
+  const end = Math.floor(domain.max / step) * step;
+  const ticks: number[] = [];
+
+  for (let tick = start; tick <= end + step * 0.5; tick += step) {
+    ticks.push(Math.round(tick * 1000) / 1000);
+  }
+
+  return ticks;
+}
+
+function formatMeters(value: number): string {
+  return `${Math.round(value).toLocaleString()} m`;
+}
+
 function displayTerm(term: string): string {
   return term.replace("_TERMINATOR", "");
 }
@@ -176,6 +231,118 @@ function shouldShowPointLabel(
     point.branchId === focusedBranchId ||
     isImportantFixRole(point.role)
   );
+}
+
+function pointRole(point: ProcedureChartPoint): string {
+  return point.role.toUpperCase();
+}
+
+function splitPlanBranchPoints(branch: ProcedureBranchPolyline): {
+  approachPoints: ProcedureChartPoint[];
+  missedPoints: ProcedureChartPoint[];
+} {
+  if (branch.branchRole.toLowerCase() === "missed") {
+    return { approachPoints: [], missedPoints: branch.points };
+  }
+
+  const missedStartIndex = branch.points.findIndex((point) => pointRole(point) === "MAPT");
+  if (missedStartIndex < 0 || missedStartIndex === branch.points.length - 1) {
+    return { approachPoints: branch.points, missedPoints: [] };
+  }
+
+  return {
+    approachPoints: branch.points.slice(0, missedStartIndex + 1),
+    missedPoints: branch.points.slice(missedStartIndex),
+  };
+}
+
+function planSegments(
+  points: ProcedureChartPoint[],
+): Array<{ from: ProcedureChartPoint; to: ProcedureChartPoint; isOutbound: boolean }> {
+  return points.slice(1).map((point, index) => ({
+    from: points[index],
+    to: point,
+    isOutbound: index === points.length - 2,
+  }));
+}
+
+function clippedSegmentCoords(
+  from: { xM: number; yM: number },
+  to: { xM: number; yM: number },
+  scaleX: (value: number) => number,
+  scaleY: (value: number) => number,
+  endGap = 15,
+  startGap = 8,
+): { x1: number; y1: number; x2: number; y2: number } {
+  const rawX1 = scaleX(from.xM);
+  const rawY1 = scaleY(from.yM);
+  const rawX2 = scaleX(to.xM);
+  const rawY2 = scaleY(to.yM);
+  const dx = rawX2 - rawX1;
+  const dy = rawY2 - rawY1;
+  const length = Math.hypot(dx, dy);
+
+  if (length <= 4) {
+    return { x1: rawX1, y1: rawY1, x2: rawX2, y2: rawY2 };
+  }
+
+  const ux = dx / length;
+  const uy = dy / length;
+  const effectiveStartGap = Math.min(startGap, length * 0.35);
+  const effectiveEndGap = Math.min(endGap, length * 0.35);
+
+  return {
+    x1: rawX1 + ux * effectiveStartGap,
+    y1: rawY1 + uy * effectiveStartGap,
+    x2: rawX2 - ux * effectiveEndGap,
+    y2: rawY2 - uy * effectiveEndGap,
+  };
+}
+
+function missedOutboundArrowForPoints(
+  missedPoints: ProcedureChartPoint[],
+): {
+  anchor: ProcedureChartPoint;
+  target: { xM: number; yM: number };
+  hasTerminalFix: boolean;
+} | null {
+  if (missedPoints.length < 2) return null;
+
+  const startsAtMapt = pointRole(missedPoints[0]) === "MAPT";
+  const anchorIndex = startsAtMapt ? 1 : 0;
+  const anchor = missedPoints[anchorIndex];
+  const procedureTarget = missedPoints[anchorIndex + 1];
+
+  if (procedureTarget) {
+    return { anchor, target: procedureTarget, hasTerminalFix: true };
+  }
+
+  const previous = missedPoints[anchorIndex - 1];
+  if (!previous) return null;
+
+  const dx = anchor.xM - previous.xM;
+  const dy = anchor.yM - previous.yM;
+  const length = Math.hypot(dx, dy);
+  if (length === 0) return null;
+
+  const ux = dx / length;
+  const uy = dy / length;
+  return {
+    anchor,
+    target: {
+      xM: anchor.xM + ux * MISSED_OUTBOUND_PROJECTED_LENGTH_M,
+      yM: anchor.yM + uy * MISSED_OUTBOUND_PROJECTED_LENGTH_M,
+    },
+    hasTerminalFix: false,
+  };
+}
+
+function missedInboundSegments(
+  segments: Array<{ from: ProcedureChartPoint; to: ProcedureChartPoint; isOutbound: boolean }>,
+  arrow: ReturnType<typeof missedOutboundArrowForPoints>,
+): Array<{ from: ProcedureChartPoint; to: ProcedureChartPoint; isOutbound: boolean }> {
+  if (!arrow) return segments;
+  return segments.filter((segment) => segment.to.fixId === arrow.anchor.fixId);
 }
 
 function summaryTerms(document: ProcedureDetailDocument | null): string[] {
@@ -253,8 +420,22 @@ function ProcedurePlanView({
     );
   }
 
-  const xDomain = chartDomain(allPoints.map((point) => point.xM), 0.12);
-  const yDomain = chartDomain(allPoints.map((point) => point.yM), 0.12);
+  const missedOutboundArrowTargets = polylines.flatMap((branch) => {
+    const { missedPoints } = splitPlanBranchPoints(branch);
+    const arrow = missedOutboundArrowForPoints(missedPoints);
+    return arrow ? [arrow.target] : [];
+  });
+  const domainPoints = [...allPoints, ...missedOutboundArrowTargets];
+  const plotWidth = SVG_WIDTH - SVG_PADDING_X * 2;
+  const plotHeight = PLAN_SVG_HEIGHT - SVG_PADDING_Y * 2;
+  const rawXDomain = chartDomain(domainPoints.map((point) => point.xM), 0.18);
+  const rawYDomain = chartDomain(domainPoints.map((point) => point.yM), 0.18);
+  const { xDomain, yDomain } = equalAspectChartDomains(
+    rawXDomain,
+    rawYDomain,
+    plotWidth,
+    plotHeight,
+  );
   const scaleX = chartScale(
     [xDomain.min, xDomain.max],
     SVG_PADDING_X,
@@ -265,6 +446,14 @@ function ProcedurePlanView({
     PLAN_SVG_HEIGHT - SVG_PADDING_Y,
     SVG_PADDING_Y,
   );
+  const planTickStep = niceChartStep(
+    Math.max(xDomain.max - xDomain.min, yDomain.max - yDomain.min),
+    PLAN_AXIS_TICK_COUNT,
+  );
+  const xTicks = chartTicksByStep(xDomain, planTickStep);
+  const yTicks = chartTicksByStep(yDomain, planTickStep);
+  const zeroY = yDomain.min <= 0 && yDomain.max >= 0 ? scaleY(0) : null;
+  const zeroX = xDomain.min <= 0 && xDomain.max >= 0 ? scaleX(0) : null;
 
   return (
     <svg
@@ -277,56 +466,274 @@ function ProcedurePlanView({
         onPreviewBranch(null);
       }}
     >
-      {runwayMarker ? (
+      <defs>
+        <marker
+          id="procedure-details-arrowhead"
+          viewBox="0 0 10 10"
+          refX="8"
+          refY="5"
+          markerWidth="5"
+          markerHeight="5"
+          orient="auto-start-reverse"
+        >
+          <path d="M 0 0 L 10 5 L 0 10 z" className="procedure-details-arrowhead" />
+        </marker>
+        <marker
+          id="procedure-details-missed-outbound-arrowhead"
+          viewBox="0 0 12 12"
+          refX="9"
+          refY="6"
+          markerWidth="5.8"
+          markerHeight="5.8"
+          orient="auto-start-reverse"
+        >
+          <path d="M 1 1 L 11 6 L 1 11 z" className="procedure-details-arrowhead" />
+        </marker>
+      </defs>
+
+      <rect
+        x={SVG_PADDING_X}
+        y={SVG_PADDING_Y}
+        width={plotWidth}
+        height={plotHeight}
+        className="procedure-details-plot-frame"
+      />
+
+      {xTicks.map((tick) => {
+        const x = scaleX(tick);
+        return (
+          <g key={`plan-x-${tick}`}>
+            <line
+              x1={x}
+              y1={SVG_PADDING_Y}
+              x2={x}
+              y2={PLAN_SVG_HEIGHT - SVG_PADDING_Y}
+              className="procedure-details-grid-line"
+            />
+            <line
+              x1={x}
+              y1={PLAN_SVG_HEIGHT - SVG_PADDING_Y}
+              x2={x}
+              y2={PLAN_SVG_HEIGHT - SVG_PADDING_Y + 6}
+              className="procedure-details-axis-tick"
+            />
+            <text
+              x={x}
+              y={PLAN_SVG_HEIGHT - SVG_PADDING_Y + 24}
+              className="procedure-details-axis-label is-centered"
+            >
+              {formatMeters(tick)}
+            </text>
+          </g>
+        );
+      })}
+
+      {yTicks.map((tick) => {
+        const y = scaleY(tick);
+        return (
+          <g key={`plan-y-${tick}`}>
+            <line
+              x1={SVG_PADDING_X}
+              y1={y}
+              x2={SVG_WIDTH - SVG_PADDING_X}
+              y2={y}
+              className="procedure-details-grid-line"
+            />
+            <line
+              x1={SVG_PADDING_X - 6}
+              y1={y}
+              x2={SVG_PADDING_X}
+              y2={y}
+              className="procedure-details-axis-tick"
+            />
+            <text x={SVG_PADDING_X - 12} y={y + 4} className="procedure-details-axis-label">
+              {formatMeters(tick)}
+            </text>
+          </g>
+        );
+      })}
+
+      {zeroY !== null ? (
         <line
-          x1={scaleX(runwayMarker.x1)}
-          y1={scaleY(runwayMarker.y1)}
-          x2={scaleX(runwayMarker.x2)}
-          y2={scaleY(runwayMarker.y2)}
-          className="procedure-details-runway-bar"
+          x1={SVG_PADDING_X}
+          y1={zeroY}
+          x2={SVG_WIDTH - SVG_PADDING_X}
+          y2={zeroY}
+          className="procedure-details-axis-line"
         />
+      ) : null}
+      {zeroX !== null ? (
+        <line
+          x1={zeroX}
+          y1={SVG_PADDING_Y}
+          x2={zeroX}
+          y2={PLAN_SVG_HEIGHT - SVG_PADDING_Y}
+          className="procedure-details-axis-line"
+        />
+      ) : null}
+
+      <text
+        x={SVG_WIDTH - SVG_PADDING_X}
+        y={PLAN_SVG_HEIGHT - 10}
+        className="procedure-details-axis-title"
+      >
+        East offset from origin (m)
+      </text>
+      <text
+        x={18}
+        y={SVG_PADDING_Y}
+        transform={`rotate(-90 18 ${SVG_PADDING_Y})`}
+        className="procedure-details-axis-title is-vertical"
+      >
+        North offset from origin (m)
+      </text>
+
+      {polylines.map((branch) => {
+        const isFocused = !focusedBranchId || branch.branchId === focusedBranchId;
+        const { approachPoints, missedPoints } = splitPlanBranchPoints(branch);
+        const approachSegments = planSegments(approachPoints);
+        const missedSegments = planSegments(missedPoints);
+        const missedOutboundArrow = missedOutboundArrowForPoints(missedPoints);
+        const missedLinkSegments = missedInboundSegments(missedSegments, missedOutboundArrow);
+
+        return (
+          <g key={branch.branchId}>
+            {approachSegments.map((segment, index) => (
+              (() => {
+                const coords = clippedSegmentCoords(segment.from, segment.to, scaleX, scaleY, 28, 14);
+                return (
+                  <line
+                    key={`${branch.branchId}-approach-${segment.from.fixId}-${segment.to.fixId}-${index}`}
+                    x1={coords.x1}
+                    y1={coords.y1}
+                    x2={coords.x2}
+                    y2={coords.y2}
+                    className={`procedure-details-branch-line procedure-details-branch-${branch.branchRole} ${
+                      isFocused ? "is-focused" : "is-muted"
+                    }`}
+                    markerEnd="url(#procedure-details-arrowhead)"
+                    onMouseEnter={() => onPreviewBranch(branch.branchId)}
+                    onClick={() => onSelectBranch(branch.branchId)}
+                  />
+                );
+              })()
+            ))}
+            {missedLinkSegments.map((segment, index) => {
+              const coords = clippedSegmentCoords(
+                segment.from,
+                segment.to,
+                scaleX,
+                scaleY,
+                28,
+                18,
+              );
+              return (
+                <line
+                  key={`${branch.branchId}-missed-${segment.from.fixId}-${segment.to.fixId}-${index}`}
+                  x1={coords.x1}
+                  y1={coords.y1}
+                  x2={coords.x2}
+                  y2={coords.y2}
+                  className={`procedure-details-branch-line procedure-details-missed-line ${
+                    isFocused ? "is-focused" : "is-muted"
+                  }`}
+                  onMouseEnter={() => onPreviewBranch(branch.branchId)}
+                  onClick={() => onSelectBranch(branch.branchId)}
+                />
+              );
+            })}
+            {missedOutboundArrow
+              ? (() => {
+                  const coords = clippedSegmentCoords(
+                    missedOutboundArrow.anchor,
+                    missedOutboundArrow.target,
+                    scaleX,
+                    scaleY,
+                    missedOutboundArrow.hasTerminalFix ? 28 : 0,
+                    MISSED_OUTBOUND_ARROW_START_GAP_PX,
+                  );
+                  return (
+                    <line
+                      key={`${branch.branchId}-missed-outbound-arrow`}
+                      x1={coords.x1}
+                      y1={coords.y1}
+                      x2={coords.x2}
+                      y2={coords.y2}
+                      className={`procedure-details-branch-line procedure-details-missed-line is-outbound ${
+                        isFocused ? "is-focused" : "is-muted"
+                      }`}
+                      markerEnd="url(#procedure-details-missed-outbound-arrowhead)"
+                      onMouseEnter={() => onPreviewBranch(branch.branchId)}
+                      onClick={() => onSelectBranch(branch.branchId)}
+                    />
+                  );
+                })()
+              : null}
+          </g>
+        );
+      })}
+
+      {runwayMarker ? (
+        <g className="procedure-details-runway">
+          <line
+            x1={scaleX(runwayMarker.x1)}
+            y1={scaleY(runwayMarker.y1)}
+            x2={scaleX(runwayMarker.x2)}
+            y2={scaleY(runwayMarker.y2)}
+            className="procedure-details-runway-casing"
+          />
+          <line
+            x1={scaleX(runwayMarker.x1)}
+            y1={scaleY(runwayMarker.y1)}
+            x2={scaleX(runwayMarker.x2)}
+            y2={scaleY(runwayMarker.y2)}
+            className="procedure-details-runway-bar"
+          />
+          <circle
+            cx={scaleX(runwayMarker.centerX)}
+            cy={scaleY(runwayMarker.centerY)}
+            r={5}
+            className="procedure-details-runway-threshold"
+          />
+        </g>
       ) : null}
 
       {polylines.map((branch) => {
         const isFocused = !focusedBranchId || branch.branchId === focusedBranchId;
-        const pathD = branch.points
-          .map(
-            (point, index) =>
-              `${index === 0 ? "M" : "L"} ${scaleX(point.xM)} ${scaleY(point.yM)}`,
-          )
-          .join(" ");
-
         return (
-          <g key={branch.branchId}>
-            <path
-              d={pathD}
-              className={`procedure-details-branch-line procedure-details-branch-${branch.branchRole} ${
-                isFocused ? "is-focused" : "is-muted"
-              }`}
-              onMouseEnter={() => onPreviewBranch(branch.branchId)}
-              onClick={() => onSelectBranch(branch.branchId)}
-            />
+          <g key={`${branch.branchId}-fixes`}>
             {branch.points.map((point) => {
               const selected = point.fixId === focusedFixId;
               const showLabel = shouldShowPointLabel(point, focusedFixId, focusedBranchId);
+              const x = scaleX(point.xM);
+              const y = scaleY(point.yM);
               return (
                 <g
                   key={`${branch.branchId}-${point.fixId}`}
                   onMouseEnter={() => onPreviewFix(point.fixId, point.branchId)}
                   onClick={() => onSelectFix(point.fixId, point.branchId)}
                 >
-                  <circle
-                    cx={scaleX(point.xM)}
-                    cy={scaleY(point.yM)}
-                    r={selected ? 6 : 4}
+                  <rect
+                    x={x - (selected ? PLAN_SELECTED_FIX_SYMBOL_SIZE : PLAN_FIX_SYMBOL_SIZE)}
+                    y={y - (selected ? PLAN_SELECTED_FIX_SYMBOL_SIZE : PLAN_FIX_SYMBOL_SIZE)}
+                    width={(selected ? PLAN_SELECTED_FIX_SYMBOL_SIZE : PLAN_FIX_SYMBOL_SIZE) * 2}
+                    height={(selected ? PLAN_SELECTED_FIX_SYMBOL_SIZE : PLAN_FIX_SYMBOL_SIZE) * 2}
                     className={`procedure-details-fix-point ${selected ? "is-selected" : ""} ${
+                      isFocused ? "is-focused" : "is-muted"
+                    }`}
+                  />
+                  <circle
+                    cx={x}
+                    cy={y}
+                    r={selected ? 7 : 6.1}
+                    className={`procedure-details-fix-center ${selected ? "is-selected" : ""} ${
                       isFocused ? "is-focused" : "is-muted"
                     }`}
                   />
                   {showLabel ? (
                     <text
-                      x={scaleX(point.xM) + 8}
-                      y={scaleY(point.yM) - 8}
+                      x={x + 10}
+                      y={y - 10}
                       className={`procedure-details-fix-label ${selected ? "is-selected" : ""} ${
                         isFocused ? "is-focused" : "is-muted"
                       }`}
@@ -975,7 +1382,8 @@ export default function ProcedureDetailsPage() {
                         <h3>Horizontal layout of the published approach</h3>
                         <p className="procedure-details-section-intro">
                           Transition branches stay visible, but the focused branch and fix are
-                          emphasized so the geometry is easier to read.
+                          emphasized so the geometry is easier to read. Grid labels show
+                          east/north meter offsets from the local origin.
                         </p>
                       </div>
 
@@ -987,6 +1395,10 @@ export default function ProcedureDetailsPage() {
                         <span className="procedure-details-legend-item">
                           <i className="is-transition" />
                           Transition
+                        </span>
+                        <span className="procedure-details-legend-item">
+                          <i className="is-missed" />
+                          Missed
                         </span>
                         <span className="procedure-details-legend-item">
                           <i className="is-runway" />
