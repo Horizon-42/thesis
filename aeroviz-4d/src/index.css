@@ -1348,6 +1348,53 @@ body,
   align-items: start;
 }
 
+.procedure-details-term-groups {
+  display: grid;
+  gap: 16px;
+}
+
+.procedure-details-term-group {
+  display: grid;
+  gap: 8px;
+}
+
+.procedure-details-term-group h4 {
+  margin: 0;
+  color: #8ea5c2;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.procedure-details-term-card {
+  overflow: hidden;
+  border: 1px solid rgba(135, 163, 196, 0.16);
+  border-radius: 16px;
+  background: rgba(20, 33, 50, 0.72);
+  transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+}
+
+.procedure-details-term-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(121, 192, 255, 0.52);
+}
+
+.procedure-details-term-card.is-active {
+  grid-column: 1 / -1;
+  border-color: rgba(121, 192, 255, 0.8);
+  background: rgba(24, 65, 112, 0.56);
+}
+
+.procedure-details-term-card.is-identifier {
+  border-color: rgba(255, 224, 166, 0.28);
+  background: rgba(255, 224, 166, 0.08);
+}
+
+.procedure-details-term-card.is-identifier.is-active {
+  border-color: rgba(255, 224, 166, 0.74);
+  background: rgba(166, 113, 24, 0.3);
+}
+
 .procedure-details-runway-button,
 .procedure-details-procedure-button,
 .procedure-details-branch-pill,
@@ -1383,6 +1430,55 @@ body,
 .procedure-details-leg-card.is-active {
   background: rgba(24, 65, 112, 0.72);
   border-color: rgba(121, 192, 255, 0.8);
+}
+
+.procedure-details-term-chip {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.procedure-details-term-card .procedure-details-term-chip {
+  display: grid;
+  gap: 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 11px 12px;
+  transform: none;
+}
+
+.procedure-details-term-card .procedure-details-term-chip:hover {
+  border-color: transparent;
+  transform: none;
+}
+
+.procedure-details-term-chip span {
+  color: #f8fbff;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.procedure-details-term-chip small {
+  color: #aebed2;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.procedure-details-term-card.is-identifier .procedure-details-term-chip span,
+.procedure-details-term-card.is-identifier .procedure-details-term-chip small {
+  color: #ffe0a6;
+}
+
+.procedure-details-term-chip.is-identifier {
+  color: #ffe0a6;
+  border-color: rgba(255, 224, 166, 0.28);
+  background: rgba(255, 224, 166, 0.08);
+}
+
+.procedure-details-term-chip.is-identifier.is-active {
+  color: #fff4d2;
+  border-color: rgba(255, 224, 166, 0.74);
+  background: rgba(166, 113, 24, 0.36);
 }
 
 .procedure-details-runway-button span,
@@ -1688,9 +1784,26 @@ body,
   color: #c5d4e4;
 }
 
+.procedure-details-fix-inspector .procedure-details-fix-data-note {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 224, 166, 0.28);
+  border-radius: 12px;
+  background: rgba(255, 224, 166, 0.08);
+  color: #ffe0a6;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .procedure-details-leg-stack {
   display: grid;
   gap: 12px;
+}
+
+.procedure-details-sequence-card .procedure-details-leg-stack {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(135, 163, 196, 0.14);
 }
 
 .procedure-details-leg-card {
@@ -1779,7 +1892,7 @@ body,
   color: #eef5ff;
 }
 
-.procedure-details-term-definition,
+.procedure-details-term-inline-definition,
 .procedure-details-data-notes {
   margin-top: 16px;
   padding: 14px 16px;
@@ -1788,16 +1901,43 @@ body,
   background: rgba(17, 30, 47, 0.72);
 }
 
-.procedure-details-term-definition strong {
-  display: block;
-  color: #f8fbff;
-  margin-bottom: 6px;
+.procedure-details-term-inline-definition {
+  margin: 0;
+  border-width: 1px 0 0;
+  border-radius: 0;
+  background: rgba(5, 12, 22, 0.22);
 }
 
-.procedure-details-term-definition p {
+.procedure-details-term-inline-definition p {
   margin: 0;
   color: #b7c7da;
   line-height: 1.6;
+}
+
+.procedure-details-term-references {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  color: #8ea5c2;
+  font-size: 12px;
+}
+
+.procedure-details-term-references span {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.procedure-details-term-references a {
+  color: #bfe3ff;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(191, 227, 255, 0.42);
+}
+
+.procedure-details-term-references a:hover {
+  color: #ffffff;
+  border-bottom-color: rgba(255, 255, 255, 0.72);
 }
 
 .procedure-details-note-list {

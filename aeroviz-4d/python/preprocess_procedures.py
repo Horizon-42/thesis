@@ -139,6 +139,21 @@ def parse_signed_altitude_ft(text: str) -> int | None:
     return int(match.group(1))
 
 
+def parse_leg_altitude_ft(line: str) -> int | None:
+    """Parse altitude constraints from the CIFP procedure leg altitude fields."""
+    primary_altitude = parse_signed_altitude_ft(line[70:90])
+    if primary_altitude is not None:
+        return primary_altitude
+
+    # Some CIFP legs encode altitude 2 immediately before the speed limit field,
+    # e.g. "18000210" for 18,000 ft and 210 kt. Parse it by column, not regex.
+    secondary_altitude = line[94:99].strip()
+    if len(secondary_altitude) == 5 and secondary_altitude.isdigit():
+        return int(secondary_altitude)
+
+    return None
+
+
 def procedure_exists(index_path: Path, airport: str, procedure_type: str, procedure: str) -> bool:
     """Return true when IN_CIFP.txt lists the requested airport/procedure."""
     with index_path.open(encoding="ascii", errors="replace") as f:
@@ -451,7 +466,7 @@ def parse_procedure_legs(
 
             sequence = int(sequence_text)
             role = parse_leg_role(line, leg_type, fix_ident, sequence)
-            altitude_ft = parse_signed_altitude_ft(line[70:90])
+            altitude_ft = parse_leg_altitude_ft(line)
             legs.append(
                 ProcedureLeg(
                     sequence=sequence,
@@ -763,36 +778,25 @@ def generate_procedure_geojson(
     tunnel_half_height_ft: float,
     sample_spacing_m: float,
 ) -> dict[str, Any]:
-    """High-level extraction entrypoint used by the CLI and tests."""
-    index_path = cifp_root / "IN_CIFP.txt"
-    faacifp_path = cifp_root / "FAACIFP18"
-    if not index_path.exists():
-        raise FileNotFoundError(f"Missing CIFP index: {index_path}")
-    if not faacifp_path.exists():
-        raise FileNotFoundError(f"Missing CIFP detail file: {faacifp_path}")
-    if not procedure_exists(index_path, airport, procedure_type, procedure):
-        raise ValueError(f"{airport} {procedure_type} {procedure} not found in {index_path}")
-
-    legs = parse_procedure_legs(faacifp_path, airport, procedure, branch)
-    if not legs:
-        raise ValueError(f"No CIFP procedure legs found for {airport} {procedure} branch {branch}")
-
-    fixes = build_fix_index(faacifp_path, airport, procedure_legs=legs)
-    route_points, warnings = build_route_points(legs, fixes, nominal_speed_kt)
-    source_cycle = parse_source_cycle(faacifp_path)
-    return build_procedure_geojson(
+    """Build the legacy GeoJSON view from the canonical procedure-detail document."""
+    documents = build_procedure_detail_documents(
+        cifp_root=cifp_root,
         airport=airport,
         procedure_type=procedure_type,
-        procedure=procedure,
-        branch=branch,
-        source_cycle=source_cycle,
-        legs=legs,
-        route_points=route_points,
-        warnings=warnings,
+        procedures=[procedure],
         nominal_speed_kt=nominal_speed_kt,
         tunnel_half_width_nm=tunnel_half_width_nm,
         tunnel_half_height_ft=tunnel_half_height_ft,
         sample_spacing_m=sample_spacing_m,
+    )
+    source_cycle = parse_source_cycle(cifp_root / "FAACIFP18")
+    return procedure_detail_documents_to_geojson(
+        airport=airport,
+        procedure_type=procedure_type,
+        source_cycle=source_cycle,
+        documents=documents,
+        include_transitions=False,
+        branch=branch,
     )
 
 
@@ -869,51 +873,25 @@ def generate_procedures_geojson(
     tunnel_half_height_ft: float,
     sample_spacing_m: float,
 ) -> dict[str, Any]:
-    """Generate a merged collection for multiple procedures and branches."""
-    faacifp_path = cifp_root / "FAACIFP18"
-    source_cycle = parse_source_cycle(faacifp_path)
-    collections: list[dict[str, Any]] = []
-
-    for procedure in sorted({item.upper() for item in procedures}, key=procedure_sort_key):
-        available_branches = parse_available_branches(faacifp_path, airport, procedure)
-        if include_transitions:
-            branches = available_branches
-        else:
-            requested_branch = branch.upper() if branch else final_branch_for_procedure(procedure)
-            branches = [requested_branch]
-
-        for branch_ident in branches:
-            collection = generate_procedure_geojson(
-                cifp_root=cifp_root,
-                airport=airport,
-                procedure_type=procedure_type,
-                procedure=procedure,
-                branch=branch_ident,
-                nominal_speed_kt=nominal_speed_kt,
-                tunnel_half_width_nm=tunnel_half_width_nm,
-                tunnel_half_height_ft=tunnel_half_height_ft,
-                sample_spacing_m=sample_spacing_m,
-            )
-            route_features = [
-                feature
-                for feature in collection["features"]
-                if feature["properties"]["featureType"] == "procedure-route"
-            ]
-            has_valid_route = any(
-                len(feature["geometry"]["coordinates"]) >= 2 for feature in route_features
-            )
-            if not has_valid_route:
-                collection["features"] = []
-                collection["metadata"]["warnings"].append(
-                    f"Skipped branch {branch_ident}: fewer than two supported route points"
-                )
-            collections.append(collection)
-
-    return merge_feature_collections(
+    """Generate the legacy GeoJSON projection from canonical detail documents."""
+    source_cycle = parse_source_cycle(cifp_root / "FAACIFP18")
+    documents = build_procedure_detail_documents(
+        cifp_root=cifp_root,
+        airport=airport,
+        procedure_type=procedure_type,
+        procedures=procedures,
+        nominal_speed_kt=nominal_speed_kt,
+        tunnel_half_width_nm=tunnel_half_width_nm,
+        tunnel_half_height_ft=tunnel_half_height_ft,
+        sample_spacing_m=sample_spacing_m,
+    )
+    return procedure_detail_documents_to_geojson(
         airport=airport,
         procedure_type=procedure_type,
         source_cycle=source_cycle,
-        collections=collections,
+        documents=documents,
+        include_transitions=include_transitions,
+        branch=branch,
     )
 
 
@@ -1094,6 +1072,10 @@ def build_branch_document(
         segment_type = segment_type_for_leg(leg, has_crossed_threshold=has_crossed_threshold)
         point = points_by_sequence.get(leg.sequence)
         quality_status = "exact" if fix is not None else "incomplete"
+        if point is not None and geometry_altitude_ft is None:
+            branch_warnings.append(
+                f"Sequence {leg.sequence:03d} {leg.fix_ident}: altitude constraint missing in CIFP; profile may interpolate or use nearest available altitude"
+            )
 
         leg_documents.append(
             {
@@ -1434,6 +1416,281 @@ def build_procedure_detail_document(
     }
 
 
+def build_procedure_detail_documents(
+    *,
+    cifp_root: Path,
+    airport: str,
+    procedure_type: str,
+    procedures: list[str],
+    nominal_speed_kt: float,
+    tunnel_half_width_nm: float,
+    tunnel_half_height_ft: float,
+    sample_spacing_m: float,
+) -> list[dict[str, Any]]:
+    """Build canonical procedure documents used by every downstream view."""
+    index_path = cifp_root / "IN_CIFP.txt"
+    faacifp_path = cifp_root / "FAACIFP18"
+    if not index_path.exists():
+        raise FileNotFoundError(f"Missing CIFP index: {index_path}")
+    if not faacifp_path.exists():
+        raise FileNotFoundError(f"Missing CIFP detail file: {faacifp_path}")
+
+    documents: list[dict[str, Any]] = []
+    for procedure in sorted({item.upper() for item in procedures}, key=procedure_sort_key):
+        if not procedure_exists(index_path, airport, procedure_type, procedure):
+            raise ValueError(f"{airport} {procedure_type} {procedure} not found in {index_path}")
+        documents.append(
+            build_procedure_detail_document(
+                cifp_root=cifp_root,
+                airport=airport,
+                procedure_type=procedure_type,
+                procedure=procedure,
+                nominal_speed_kt=nominal_speed_kt,
+                tunnel_half_width_nm=tunnel_half_width_nm,
+                tunnel_half_height_ft=tunnel_half_height_ft,
+                sample_spacing_m=sample_spacing_m,
+            )
+        )
+    return documents
+
+
+def detail_fix_index(document: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {fix["fixId"]: fix for fix in document.get("fixes", [])}
+
+
+def detail_leg_is_renderable(leg: dict[str, Any], fix: dict[str, Any] | None) -> bool:
+    if leg.get("quality", {}).get("renderedInPlanView") is not True:
+        return False
+    position = None if fix is None else fix.get("position")
+    return (
+        isinstance(position, dict)
+        and isinstance(position.get("lon"), (int, float))
+        and isinstance(position.get("lat"), (int, float))
+    )
+
+
+def detail_leg_geometry_altitude_ft(leg: dict[str, Any], fix: dict[str, Any] | None) -> int:
+    constraints = leg.get("constraints", {})
+    geometry_altitude_ft = constraints.get("geometryAltitudeFt")
+    if isinstance(geometry_altitude_ft, (int, float)):
+        return int(round(geometry_altitude_ft))
+
+    altitude = constraints.get("altitude")
+    if isinstance(altitude, dict) and isinstance(altitude.get("valueFt"), (int, float)):
+        return int(round(altitude["valueFt"]))
+
+    if fix is not None and isinstance(fix.get("elevationFt"), (int, float)):
+        return int(round(fix["elevationFt"]))
+
+    return 0
+
+
+def detail_branch_leg_coverage(branch: dict[str, Any]) -> dict[str, list[str]]:
+    parsed = sorted({leg["path"]["pathTerminator"] for leg in branch.get("legs", [])})
+    rendered = sorted(
+        {
+            leg["path"]["pathTerminator"]
+            for leg in branch.get("legs", [])
+            if leg.get("quality", {}).get("renderedInPlanView") is True
+        }
+    )
+    skipped = sorted(set(parsed) - set(rendered))
+    return {
+        "parsedLegTypes": parsed,
+        "renderedLegTypes": rendered,
+        "skippedLegTypes": skipped,
+        "simplifiedLegTypes": skipped,
+    }
+
+
+def build_geojson_route_from_detail_branch(
+    *,
+    document: dict[str, Any],
+    branch: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Project one canonical detail branch into the legacy GeoJSON feature shape."""
+    fix_by_id = detail_fix_index(document)
+    procedure = document["procedure"]
+    airport = document["airport"]["icao"]
+    route_id = f"{airport}-{procedure['procedureIdent']}-{branch['branchIdent']}"
+    defaults = document["displayHints"]["tunnelDefaults"]
+    nominal_speed_kt = document["displayHints"]["nominalSpeedKt"]
+    speed_mps = nominal_speed_kt * NM_TO_METRES / 3600.0
+    warnings = list(branch.get("warnings", []))
+
+    points: list[dict[str, Any]] = []
+    cumulative_distance_m = 0.0
+    elapsed_seconds = 0.0
+    previous_point: dict[str, Any] | None = None
+
+    for leg in branch.get("legs", []):
+        fix_ref = leg["path"]["endFixRef"]
+        fix = fix_by_id.get(fix_ref)
+        if not detail_leg_is_renderable(leg, fix):
+            continue
+
+        position = fix["position"]
+        geometry_altitude_ft = detail_leg_geometry_altitude_ft(leg, fix)
+        if previous_point is not None:
+            leg_distance_m = distance_m(
+                previous_point["lon"],
+                previous_point["lat"],
+                position["lon"],
+                position["lat"],
+            )
+            cumulative_distance_m += leg_distance_m
+            elapsed_seconds += leg_distance_m / speed_mps
+
+        altitude = leg.get("constraints", {}).get("altitude")
+        altitude_ft = altitude.get("valueFt") if isinstance(altitude, dict) else None
+        point = {
+            "sequence": leg["sequence"],
+            "fixIdent": fix["ident"],
+            "legType": leg["path"]["pathTerminator"],
+            "role": leg["roleAtEnd"],
+            "lon": round(position["lon"], 8),
+            "lat": round(position["lat"], 8),
+            "altitudeFt": altitude_ft,
+            "geometryAltitudeFt": geometry_altitude_ft,
+            "distanceFromStartM": round(cumulative_distance_m, 1),
+            "timeSeconds": round(elapsed_seconds, 1),
+            "sourceLine": leg["quality"]["sourceLine"],
+        }
+        points.append(point)
+        previous_point = point
+
+    if len(points) < 2:
+        warnings.append(f"Skipped branch {branch['branchIdent']}: fewer than two supported route points")
+        return None
+
+    coordinates = [
+        [point["lon"], point["lat"], round(point["geometryAltitudeFt"] * FEET_TO_METRES, 2)]
+        for point in points
+    ]
+    samples = [
+        {
+            "sequence": point["sequence"],
+            "fixIdent": point["fixIdent"],
+            "legType": point["legType"],
+            "role": point["role"],
+            "altitudeFt": point["altitudeFt"],
+            "geometryAltitudeFt": point["geometryAltitudeFt"],
+            "distanceFromStartM": point["distanceFromStartM"],
+            "timeSeconds": point["timeSeconds"],
+            "sourceLine": point["sourceLine"],
+        }
+        for point in points
+    ]
+    common_props = {
+        "airport": airport,
+        "procedureType": procedure["procedureType"],
+        "procedureIdent": procedure["procedureIdent"],
+        "procedureName": procedure["chartName"],
+        "branch": branch["branchIdent"],
+        "branchIdent": branch["branchIdent"],
+        "branchType": branch["branchRole"],
+        "procedureFamily": procedure["procedureFamily"],
+        "procedureVariant": procedure["variant"],
+        "runway": procedure["runwayIdent"],
+        "runwayIdent": procedure["runwayIdent"],
+        "routeId": route_id,
+        "source": "procedure-details",
+        "sourceCycle": document["provenance"]["sources"][0]["cycle"],
+        "researchUseOnly": True,
+    }
+
+    features = [
+        {
+            "type": "Feature",
+            "geometry": {"type": "LineString", "coordinates": coordinates},
+            "properties": {
+                **common_props,
+                "featureType": "procedure-route",
+                "defaultVisible": branch["defaultVisible"],
+                "legCoverage": detail_branch_leg_coverage(branch),
+                "nominalSpeedKt": nominal_speed_kt,
+                "tunnel": defaults,
+                "samples": samples,
+                "warnings": warnings,
+            },
+        }
+    ]
+
+    for point, coordinates_item in zip(points, coordinates):
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": coordinates_item},
+                "properties": {
+                    **common_props,
+                    "featureType": "procedure-fix",
+                    "name": point["fixIdent"],
+                    "sequence": point["sequence"],
+                    "legType": point["legType"],
+                    "role": point["role"],
+                    "altitudeFt": point["altitudeFt"],
+                    "geometryAltitudeFt": point["geometryAltitudeFt"],
+                    "distanceFromStartM": point["distanceFromStartM"],
+                    "timeSeconds": point["timeSeconds"],
+                    "sourceLine": point["sourceLine"],
+                },
+            }
+        )
+
+    return {
+        "metadata": {
+            "procedureFamily": procedure["procedureFamily"],
+            "procedureIdent": procedure["procedureIdent"],
+            "runwayIdent": procedure["runwayIdent"],
+            "warnings": warnings,
+        },
+        "features": features,
+    }
+
+
+def procedure_detail_documents_to_geojson(
+    *,
+    airport: str,
+    procedure_type: str,
+    source_cycle: str | None,
+    documents: list[dict[str, Any]],
+    include_transitions: bool,
+    branch: str,
+) -> dict[str, Any]:
+    """Project canonical procedure details into the legacy GeoJSON compatibility layer."""
+    collections: list[dict[str, Any]] = []
+    requested_branch = branch.upper() if branch else None
+    warnings: list[str] = []
+
+    for document in documents:
+        for branch_document in document["branches"]:
+            if not include_transitions:
+                target_branch = requested_branch or document["procedure"]["baseBranchIdent"]
+                if branch_document["branchIdent"].upper() != target_branch.upper():
+                    continue
+            collection = build_geojson_route_from_detail_branch(
+                document=document,
+                branch=branch_document,
+            )
+            if collection is None:
+                warnings.append(
+                    f"{document['procedure']['procedureIdent']}:{branch_document['branchIdent']} skipped in GeoJSON projection"
+                )
+                continue
+            collections.append(collection)
+
+    merged = merge_feature_collections(
+        airport=airport,
+        procedure_type=procedure_type,
+        source_cycle=source_cycle,
+        collections=collections,
+    )
+    merged["metadata"]["canonicalDataLayer"] = "procedure-details"
+    merged["metadata"]["projection"] = "procedures.geojson"
+    merged["metadata"]["warnings"].extend(warnings)
+    return merged
+
+
 def sanitize_public_chart_filename(file_name: str) -> str:
     original = Path(file_name).name
     suffix = Path(original).suffix.lower() or ".pdf"
@@ -1588,22 +1845,20 @@ def publish_procedure_details_assets(
 ) -> dict[str, Any]:
     airport_details = load_airport_details(airport)
     source_cycle = parse_source_cycle(cifp_root / "FAACIFP18")
-    documents: list[dict[str, Any]] = []
+    documents = build_procedure_detail_documents(
+        cifp_root=cifp_root,
+        airport=airport,
+        procedure_type=procedure_type,
+        procedures=procedures,
+        nominal_speed_kt=nominal_speed_kt,
+        tunnel_half_width_nm=tunnel_half_width_nm,
+        tunnel_half_height_ft=tunnel_half_height_ft,
+        sample_spacing_m=sample_spacing_m,
+    )
     procedure_dir = airport_procedure_details_dir(airport)
     procedure_dir.mkdir(parents=True, exist_ok=True)
 
-    for procedure in sorted({item.upper() for item in procedures}, key=procedure_sort_key):
-        document = build_procedure_detail_document(
-            cifp_root=cifp_root,
-            airport=airport,
-            procedure_type=procedure_type,
-            procedure=procedure,
-            nominal_speed_kt=nominal_speed_kt,
-            tunnel_half_width_nm=tunnel_half_width_nm,
-            tunnel_half_height_ft=tunnel_half_height_ft,
-            sample_spacing_m=sample_spacing_m,
-        )
-        documents.append(document)
+    for document in documents:
         detail_path = airport_procedure_details_path(airport, f"{document['procedureUid']}.json")
         detail_path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
 
@@ -1682,17 +1937,23 @@ def main() -> None:
     else:
         selected_procedures = [args.procedure.upper()]
 
-    collection = generate_procedures_geojson(
+    canonical_documents = build_procedure_detail_documents(
         cifp_root=Path(args.cifp_root),
         airport=args.airport,
         procedure_type=args.procedure_type,
         procedures=selected_procedures,
-        include_transitions=args.include_transitions,
-        branch=args.branch,
         nominal_speed_kt=args.nominal_speed_kt,
         tunnel_half_width_nm=args.tunnel_half_width_nm,
         tunnel_half_height_ft=args.tunnel_half_height_ft,
         sample_spacing_m=args.sample_spacing_m,
+    )
+    collection = procedure_detail_documents_to_geojson(
+        airport=args.airport,
+        procedure_type=args.procedure_type,
+        source_cycle=parse_source_cycle(Path(args.cifp_root) / "FAACIFP18"),
+        documents=canonical_documents,
+        include_transitions=args.include_transitions,
+        branch=args.branch,
     )
 
     output_path = Path(args.output) if args.output else airport_data_path(args.airport, "procedures.geojson")
@@ -1704,17 +1965,35 @@ def main() -> None:
 
     detail_publish_result = None
     if not args.skip_procedure_details:
-        detail_publish_result = publish_procedure_details_assets(
-            cifp_root=Path(args.cifp_root),
+        airport_details = load_airport_details(args.airport)
+        procedure_dir = airport_procedure_details_dir(args.airport)
+        procedure_dir.mkdir(parents=True, exist_ok=True)
+        for document in canonical_documents:
+            detail_path = airport_procedure_details_path(args.airport, f"{document['procedureUid']}.json")
+            detail_path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+
+        index_manifest = build_procedure_details_index(
             airport=args.airport,
-            procedure_type=args.procedure_type,
-            procedures=selected_procedures,
-            nominal_speed_kt=args.nominal_speed_kt,
-            tunnel_half_width_nm=args.tunnel_half_width_nm,
-            tunnel_half_height_ft=args.tunnel_half_height_ft,
-            sample_spacing_m=args.sample_spacing_m,
-            chart_root=Path(args.charts_root),
+            airport_name=airport_details["name"],
+            source_cycle=parse_source_cycle(Path(args.cifp_root) / "FAACIFP18"),
+            documents=canonical_documents,
         )
+        index_path = airport_procedure_details_path(args.airport, "index.json")
+        index_path.write_text(json.dumps(index_manifest, indent=2) + "\n", encoding="utf-8")
+
+        chart_manifest = publish_local_chart_manifest(
+            airport=args.airport,
+            chart_root=Path(args.charts_root),
+            documents=canonical_documents,
+        )
+        chart_index_path = airport_chart_path(args.airport, "index.json")
+        chart_index_path.write_text(json.dumps(chart_manifest, indent=2) + "\n", encoding="utf-8")
+        detail_publish_result = {
+            "procedureIndexPath": index_path,
+            "chartIndexPath": chart_index_path,
+            "procedureCount": len(canonical_documents),
+            "chartCount": len(chart_manifest["charts"]),
+        }
 
     route_features = [
         feature

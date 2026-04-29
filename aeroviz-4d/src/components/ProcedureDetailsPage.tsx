@@ -4,7 +4,6 @@ import { useApp } from "../context/AppContext";
 import type {
   ProcedureChartManifestEntry,
   ProcedureChartsManifest,
-  ProcedureDetailBranch,
   ProcedureDetailDocument,
   ProcedureDetailFix,
   ProcedureDetailLeg,
@@ -16,6 +15,16 @@ import {
   procedureDetailsDocumentUrl,
   procedureDetailsIndexUrl,
 } from "../data/procedureDetails";
+import {
+  contextualTermDetails,
+  contextualTerms,
+  formatContextualTermMeaning,
+  formatTermBrief,
+  groupedTerms,
+  isKnownGlossaryTerm,
+  isSpecificFixRole,
+  termDetails,
+} from "../data/procedureTerms";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 import { navigateWithinApp } from "../utils/navigation";
 import {
@@ -34,26 +43,12 @@ const PLAN_SVG_HEIGHT = 680;
 const PROFILE_SVG_HEIGHT = 420;
 const SVG_PADDING_X = 64;
 const SVG_PADDING_Y = 44;
-const PLAN_AXIS_TICK_COUNT = 6;
+const PLAN_AXIS_TICK_COUNT = 10;
 const PLAN_FIX_SYMBOL_SIZE = 7;
 const PLAN_SELECTED_FIX_SYMBOL_SIZE = 8;
 const MISSED_OUTBOUND_ARROW_START_GAP_PX = 92;
 const MISSED_OUTBOUND_PROJECTED_LENGTH_M = 6400;
 const IMPORTANT_FIX_ROLES = new Set(["IAF", "IF", "FAF", "MAPT", "MAHF"]);
-
-const TERM_EXPLANATIONS: Record<string, string> = {
-  IAF: "Initial Approach Fix: where an aircraft can join the published approach from the wider route network.",
-  IF: "Intermediate Fix: a point that lines the aircraft up and settles it before final approach.",
-  FAF: "Final Approach Fix: the point where the final descent toward the runway is established.",
-  MAPT: "Missed Approach Point: if the runway is not safely in view here, the published missed approach begins.",
-  MAHF: "Missed Approach Holding Fix: the protected holding point used after a missed approach.",
-  LPV: "Localizer Performance with Vertical guidance: a GPS-based approach mode with precise lateral and vertical guidance.",
-  "LNAV/VNAV":
-    "Lateral Navigation / Vertical Navigation: GPS-guided lateral path with approved vertical guidance.",
-  LNAV: "Lateral Navigation only: the aircraft follows the lateral path and pilots manage the descent profile.",
-  IF_TERMINATOR: "IF path terminator: start the published segment at that named fix.",
-  TF_TERMINATOR: "TF path terminator: fly a straight published track to the next fix.",
-};
 
 function readRouteParams(): {
   airport: string | null;
@@ -102,17 +97,11 @@ function formatFixRef(fixRef: string | null | undefined): string {
 }
 
 function roleMeaning(role: string): string {
-  return (
-    TERM_EXPLANATIONS[role.toUpperCase()] ??
-    "Published role in the approach sequence. It helps explain where this fix sits in the procedure."
-  );
+  return termDetails(role.toUpperCase()).definition;
 }
 
 function terminatorMeaning(pathTerminator: string): string {
-  return (
-    TERM_EXPLANATIONS[`${pathTerminator.toUpperCase()}_TERMINATOR`] ??
-    "Published path instruction from the procedure coding."
-  );
+  return termDetails(`${pathTerminator.toUpperCase()}_TERMINATOR`).definition;
 }
 
 function localChartForProcedure(
@@ -181,7 +170,10 @@ function niceChartStep(span: number, tickCount: number): number {
   const roughStep = Math.max(span, 1) / Math.max(tickCount, 1);
   const magnitude = 10 ** Math.floor(Math.log10(roughStep));
   const residual = roughStep / magnitude;
-  const niceResidual = residual <= 1 ? 1 : residual <= 2 ? 2 : residual <= 5 ? 5 : 10;
+  const niceResiduals = [1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 7.5, 10];
+  const niceResidual =
+    niceResiduals.find((candidate) => residual <= candidate) ??
+    niceResiduals[niceResiduals.length - 1];
   return niceResidual * magnitude;
 }
 
@@ -201,16 +193,41 @@ function formatMeters(value: number): string {
   return `${Math.round(value).toLocaleString()} m`;
 }
 
-function displayTerm(term: string): string {
-  return term.replace("_TERMINATOR", "");
+function hasNamedLegEndpoint(leg: ProcedureDetailLeg): boolean {
+  const endFix = leg.path.endFixRef;
+  return Boolean(endFix && formatFixRef(endFix).trim());
 }
 
-function termMeaning(term: string): string {
-  return (
-    TERM_EXPLANATIONS[term] ??
-    TERM_EXPLANATIONS[term.toUpperCase()] ??
-    "Procedure coding term used by the chart and the intermediate dataset."
+function legActionLabel(leg: ProcedureDetailLeg): string {
+  const pathTerminator = leg.path.pathTerminator.toUpperCase();
+  const altitudeText = formatAltitudeFt(
+    leg.constraints.geometryAltitudeFt ?? leg.constraints.altitude?.valueFt,
   );
+
+  if (pathTerminator === "CA") return `Course to ${altitudeText}`;
+  if (pathTerminator === "VA") return `Heading to ${altitudeText}`;
+  if (pathTerminator === "FA") return `Fix to ${altitudeText}`;
+  if (pathTerminator === "DF") return "Direct to fix";
+  if (pathTerminator === "CF") return "Course to fix";
+  if (pathTerminator === "TF") return "Track to fix";
+  if (pathTerminator === "IF") return "Initial fix";
+  if (pathTerminator === "HM") return "Hold to manual termination";
+  if (pathTerminator === "HF") return "Hold to fix";
+  if (pathTerminator === "HA") return "Hold to altitude";
+  return `${pathTerminator} leg`;
+}
+
+function legEndpointLabel(leg: ProcedureDetailLeg, endFix: ProcedureDetailFix | null): string {
+  if (endFix) return endFix.ident;
+  if (hasNamedLegEndpoint(leg)) {
+    return formatFixRef(leg.path.endFixRef);
+  }
+  return legActionLabel(leg);
+}
+
+function legRoleLabel(leg: ProcedureDetailLeg): string {
+  if (isSpecificFixRole(leg.roleAtEnd)) return formatTermBrief(leg.roleAtEnd);
+  return legActionLabel(leg);
 }
 
 function branchRoleLabel(branchRole: string): string {
@@ -345,37 +362,13 @@ function missedInboundSegments(
   return segments.filter((segment) => segment.to.fixId === arrow.anchor.fixId);
 }
 
-function summaryTerms(document: ProcedureDetailDocument | null): string[] {
-  if (!document) return ["IAF", "IF", "FAF", "MAPt", "LPV", "LNAV/VNAV", "LNAV"];
-  const terms = new Set(["IAF", "IF", "FAF", "MAPt", "LPV", "LNAV/VNAV", "LNAV"]);
-  document.procedure.approachModes.forEach((mode) => terms.add(mode));
-  document.branches.forEach((branch) =>
-    branch.legs.forEach((leg) => {
-      if (leg.roleAtEnd) terms.add(leg.roleAtEnd);
-      if (leg.path.pathTerminator) terms.add(`${leg.path.pathTerminator}_TERMINATOR`);
-    }),
-  );
-  return [...terms];
-}
-
-function contextualTerms(
-  document: ProcedureDetailDocument | null,
-  focusedFix: ProcedureDetailFix | null,
-  focusedBranch: ProcedureDetailBranch | null,
-): string[] {
-  const terms = new Set(summaryTerms(document));
-  focusedFix?.roleHints.forEach((role) => terms.add(role));
-  focusedBranch?.legs.forEach((leg) => {
-    if (leg.roleAtEnd) terms.add(leg.roleAtEnd);
-    if (leg.path.pathTerminator) terms.add(`${leg.path.pathTerminator}_TERMINATOR`);
-  });
-  return [...terms];
-}
-
 function focusedLegDescription(leg: ProcedureDetailLeg): string {
   const pathTermMeaning = terminatorMeaning(leg.path.pathTerminator);
-  if (leg.roleAtEnd) {
+  if (isSpecificFixRole(leg.roleAtEnd)) {
     return `${pathTermMeaning} This leg ends at the ${leg.roleAtEnd} point.`;
+  }
+  if (!hasNamedLegEndpoint(leg)) {
+    return `${pathTermMeaning} This leg does not terminate at a named fix.`;
   }
   return pathTermMeaning;
 }
@@ -470,10 +463,10 @@ function ProcedurePlanView({
         <marker
           id="procedure-details-arrowhead"
           viewBox="0 0 10 10"
-          refX="8"
+          refX="7"
           refY="5"
-          markerWidth="5"
-          markerHeight="5"
+          markerWidth="3.4"
+          markerHeight="3.4"
           orient="auto-start-reverse"
         >
           <path d="M 0 0 L 10 5 L 0 10 z" className="procedure-details-arrowhead" />
@@ -481,10 +474,10 @@ function ProcedurePlanView({
         <marker
           id="procedure-details-missed-outbound-arrowhead"
           viewBox="0 0 12 12"
-          refX="9"
+          refX="8.5"
           refY="6"
-          markerWidth="5.8"
-          markerHeight="5.8"
+          markerWidth="3.8"
+          markerHeight="3.8"
           orient="auto-start-reverse"
         >
           <path d="M 1 1 L 11 6 L 1 11 z" className="procedure-details-arrowhead" />
@@ -843,24 +836,50 @@ function ProcedureVerticalProfile({
 
       {polylines.map((branch) => {
         const isFocused = !focusedBranchId || branch.branchId === focusedBranchId;
-        const pathD = branch.points
-          .map((point, index) => {
-            const x = scaleX(point.distanceM);
-            const y = scaleY(point.altitudeFt ?? 0);
-            return `${index === 0 ? "M" : "L"} ${x} ${y}`;
-          })
-          .join(" ");
+        const { approachPoints, missedPoints } = splitPlanBranchPoints(branch);
+        const profilePath = (points: ProcedureChartPoint[]) =>
+          points
+            .map((point, index) => {
+              const x = scaleX(point.distanceM);
+              const y = scaleY(point.altitudeFt ?? 0);
+              return `${index === 0 ? "M" : "L"} ${x} ${y}`;
+            })
+            .join(" ");
+        const approachPathD = profilePath(approachPoints);
+        const missedPathD = profilePath(missedPoints);
 
         return (
           <g key={branch.branchId}>
-            <path
-              d={pathD}
-              className={`procedure-details-branch-line procedure-details-branch-${branch.branchRole} ${
-                isFocused ? "is-focused" : "is-muted"
-              }`}
-              onMouseEnter={() => onPreviewBranch(branch.branchId)}
-              onClick={() => onSelectBranch(branch.branchId)}
-            />
+            {approachPoints.length >= 2 ? (
+              <path
+                d={approachPathD}
+                className={`procedure-details-branch-line procedure-details-branch-${branch.branchRole} ${
+                  isFocused ? "is-focused" : "is-muted"
+                }`}
+                onMouseEnter={() => onPreviewBranch(branch.branchId)}
+                onClick={() => onSelectBranch(branch.branchId)}
+              />
+            ) : null}
+            {missedPoints.length >= 2 ? (
+              <path
+                d={missedPathD}
+                className={`procedure-details-branch-line procedure-details-missed-line ${
+                  isFocused ? "is-focused" : "is-muted"
+                }`}
+                onMouseEnter={() => onPreviewBranch(branch.branchId)}
+                onClick={() => onSelectBranch(branch.branchId)}
+              />
+            ) : null}
+            {approachPoints.length < 2 && missedPoints.length < 2 ? (
+              <path
+                d={profilePath(branch.points)}
+                className={`procedure-details-branch-line procedure-details-branch-${branch.branchRole} ${
+                  isFocused ? "is-focused" : "is-muted"
+                }`}
+                onMouseEnter={() => onPreviewBranch(branch.branchId)}
+                onClick={() => onSelectBranch(branch.branchId)}
+              />
+            ) : null}
             {branch.points.map((point) => {
               const selected = point.fixId === focusedFixId;
               const showLabel = shouldShowPointLabel(point, focusedFixId, focusedBranchId);
@@ -1092,21 +1111,48 @@ export default function ProcedureDetailsPage() {
     () => polylines.find((branch) => branch.branchId === focusedBranchId) ?? null,
     [focusedBranchId, polylines],
   );
+  const focusedBranchWarnings = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...(focusedBranch?.warnings ?? []),
+          ...(focusedPolyline?.warnings ?? []),
+        ]),
+      ),
+    [focusedBranch?.warnings, focusedPolyline?.warnings],
+  );
   const focusedLegs = focusedBranch?.legs ?? [];
+  const focusedFixTerminalLeg = useMemo(
+    () =>
+      focusedLegs.find(
+        (leg) =>
+          leg.path.endFixRef === focusedFixId || leg.termination.fixRef === focusedFixId,
+      ) ?? null,
+    [focusedFixId, focusedLegs],
+  );
   const focusedLeg = useMemo(
     () =>
+      focusedFixTerminalLeg ??
       focusedLegs.find(
         (leg) =>
           leg.path.endFixRef === focusedFixId ||
           leg.path.startFixRef === focusedFixId ||
           leg.termination.fixRef === focusedFixId,
       ) ?? null,
-    [focusedFixId, focusedLegs],
+    [focusedFixId, focusedFixTerminalLeg, focusedLegs],
   );
+  const focusedFixProcedureAltitudeFt =
+    focusedFixTerminalLeg?.constraints.altitude?.valueFt ?? null;
+  const focusedFixProfileAltitudeFt =
+    focusedFixTerminalLeg?.constraints.geometryAltitudeFt ?? focusedFixProcedureAltitudeFt;
+  const focusedFixHasProfileRepair =
+    typeof focusedFixProfileAltitudeFt === "number" &&
+    focusedFixProfileAltitudeFt !== focusedFixProcedureAltitudeFt;
   const glossaryTerms = useMemo(
     () => contextualTerms(procedureDocument, focusedFix, focusedBranch),
     [procedureDocument, focusedFix, focusedBranch],
   );
+  const glossaryTermGroups = useMemo(() => groupedTerms(glossaryTerms), [glossaryTerms]);
 
   useEffect(() => {
     if (glossaryTerms.length === 0) {
@@ -1317,11 +1363,11 @@ export default function ProcedureDetailsPage() {
             {procedureDocument &&
             (procedureDocument.validation.knownSimplifications.length > 0 ||
               procedureDocument.provenance.warnings.length > 0 ||
-              (focusedBranch?.warnings.length ?? 0) > 0) ? (
+              focusedBranchWarnings.length > 0) ? (
               <section className="procedure-details-card procedure-details-reference-card">
                 <p className="procedure-details-overview-label">Data Notes</p>
                 <ul className="procedure-details-note-list">
-                  {focusedBranch?.warnings.map((warning) => (
+                  {focusedBranchWarnings.map((warning) => (
                     <li key={`branch-${warning}`}>{warning}</li>
                   ))}
                   {procedureDocument.provenance.warnings.map((warning) => (
@@ -1460,11 +1506,30 @@ export default function ProcedureDetailsPage() {
                       ) : null}
                     </div>
 
+                    <div className="procedure-details-branch-pills">
+                      {procedureDocument.branches.map((branch) => (
+                        <button
+                          type="button"
+                          key={branch.branchId}
+                          className={`procedure-details-branch-pill ${
+                            branch.branchId === focusedBranchId ? "is-active" : ""
+                          }`}
+                          onMouseEnter={() => setPreviewBranchId(branch.branchId)}
+                          onMouseLeave={clearPreview}
+                          onClick={() => handleSelectBranch(branch.branchId)}
+                        >
+                          <strong>{branch.branchIdent}</strong>
+                          <span>{branchRoleLabel(branch.branchRole)}</span>
+                        </button>
+                      ))}
+                    </div>
+
                     {focusedBranch ? (
                       <div className="procedure-details-leg-stack">
                         {focusedLegs.map((leg) => {
                           const endFix = findFix(procedureDocument, leg.path.endFixRef);
                           const isActive = leg.path.endFixRef === focusedFixId;
+                          const roleLabel = legRoleLabel(leg);
                           return (
                             <button
                               type="button"
@@ -1483,9 +1548,9 @@ export default function ProcedureDetailsPage() {
                               <span className="procedure-details-leg-seq">{leg.sequence}</span>
                               <div className="procedure-details-leg-main">
                                 <div className="procedure-details-leg-title-row">
-                                  <strong>{endFix?.ident ?? formatFixRef(leg.path.endFixRef)}</strong>
+                                  <strong>{legEndpointLabel(leg, endFix)}</strong>
                                   <span className="procedure-details-leg-role">
-                                    {displayTerm(leg.roleAtEnd)}
+                                    {roleLabel}
                                   </span>
                                 </div>
                                 <p>{focusedLegDescription(leg)}</p>
@@ -1539,7 +1604,7 @@ export default function ProcedureDetailsPage() {
                           }`}
                           onClick={() => setSelectedGlossaryTerm(role)}
                         >
-                          {displayTerm(role)}
+                          {formatTermBrief(role)}
                         </button>
                       ))}
                     </div>
@@ -1558,9 +1623,19 @@ export default function ProcedureDetailsPage() {
                         <dd>{formatCoordinate(focusedFix.position?.lon)}</dd>
                       </div>
                       <div>
-                        <dt>Elevation</dt>
+                        <dt>Surveyed elevation</dt>
                         <dd>{formatAltitudeFt(focusedFix.elevationFt)}</dd>
                       </div>
+                      <div>
+                        <dt>Procedure altitude</dt>
+                        <dd>{formatAltitudeFt(focusedFixProcedureAltitudeFt)}</dd>
+                      </div>
+                      {focusedFixHasProfileRepair ? (
+                        <div>
+                          <dt>Profile altitude</dt>
+                          <dd>{formatAltitudeFt(focusedFixProfileAltitudeFt)}</dd>
+                        </div>
+                      ) : null}
                       <div>
                         <dt>Role hints</dt>
                         <dd>{focusedFix.roleHints.join(", ") || "Not available"}</dd>
@@ -1573,88 +1648,75 @@ export default function ProcedureDetailsPage() {
                         </dd>
                       </div>
                     </dl>
+                    {focusedFix.elevationFt === null &&
+                    typeof focusedFixProcedureAltitudeFt === "number" ? (
+                      <p className="procedure-details-fix-data-note">
+                        This fix has no surveyed elevation in the fix coordinate record. The
+                        vertical profile uses the published procedure altitude constraint instead.
+                      </p>
+                    ) : null}
                   </div>
                 ) : (
                   <p>Hover or click a fix to inspect it here.</p>
                 )}
               </section>
 
-              <section className="procedure-details-card procedure-details-explorer-card">
-                <div className="procedure-details-explorer-head">
-                  <div>
-                    <p className="procedure-details-overview-label">Interactive Explorer</p>
-                    <h3>Focus a branch or fix</h3>
-                  </div>
-                  <span className="procedure-details-focus-pill">
-                    {isPreviewMode ? "Preview" : "Focus"}{" "}
-                    {focusedFix?.ident ?? focusedBranch?.branchIdent ?? "—"}
-                  </span>
-                </div>
-
-                <div className="procedure-details-branch-pills">
-                  {procedureDocument.branches.map((branch) => (
-                    <button
-                      type="button"
-                      key={branch.branchId}
-                      className={`procedure-details-branch-pill ${
-                        branch.branchId === focusedBranchId ? "is-active" : ""
-                      }`}
-                      onMouseEnter={() => setPreviewBranchId(branch.branchId)}
-                      onMouseLeave={clearPreview}
-                      onClick={() => handleSelectBranch(branch.branchId)}
-                    >
-                      <strong>{branch.branchIdent}</strong>
-                      <span>{branchRoleLabel(branch.branchRole)}</span>
-                    </button>
-                  ))}
-                </div>
-
-                {focusedPolyline ? (
-                  <div className="procedure-details-fix-strip">
-                    {focusedPolyline.points.map((point) => (
-                      <button
-                        type="button"
-                        key={`${point.branchId}-${point.fixId}`}
-                        className={`procedure-details-fix-chip ${
-                          point.fixId === focusedFixId ? "is-active" : ""
-                        }`}
-                        onMouseEnter={() => handlePreviewFix(point.fixId, point.branchId)}
-                        onMouseLeave={clearPreview}
-                        onClick={() => handleSelectFix(point.fixId, point.branchId)}
-                      >
-                        <strong>{point.ident}</strong>
-                        <span>{displayTerm(point.role)}</span>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </section>
-
               <section className="procedure-details-card procedure-details-terms-card">
                 <h3>Key Terms</h3>
                 <p className="procedure-details-section-intro">
-                  Pick a term only when you need the full explanation.
+                  Terms are grouped by chart role, procedure capability, and coded path behavior.
                 </p>
-                <div className="procedure-details-term-chip-row">
-                  {glossaryTerms.map((term) => (
-                    <button
-                      key={term}
-                      type="button"
-                      className={`procedure-details-term-chip ${
-                        activeGlossaryTerm === term ? "is-active" : ""
-                      }`}
-                      onClick={() => setSelectedGlossaryTerm(term)}
-                    >
-                      {displayTerm(term)}
-                    </button>
+                <div className="procedure-details-term-groups">
+                  {glossaryTermGroups.map((group) => (
+                    <div key={group.id} className="procedure-details-term-group">
+                      <h4>{group.title}</h4>
+                      <div className="procedure-details-term-chip-row">
+                        {group.terms.map((term) => {
+                          const isActiveTerm = activeGlossaryTerm === term;
+                          const hasDefinition = isKnownGlossaryTerm(term);
+                          const details = contextualTermDetails(term, procedureDocument);
+                          return (
+                            <article
+                              key={`${group.id}-${term}`}
+                              className={`procedure-details-term-card ${
+                                isActiveTerm ? "is-active" : ""
+                              } ${hasDefinition ? "" : "is-identifier"}`}
+                            >
+                              <button
+                                type="button"
+                                className="procedure-details-term-chip"
+                                onClick={() => setSelectedGlossaryTerm(term)}
+                              >
+                                <span>{formatTermBrief(term)}</span>
+                                <small>{formatContextualTermMeaning(term, procedureDocument)}</small>
+                              </button>
+                              {isActiveTerm ? (
+                                <div className="procedure-details-term-inline-definition">
+                                  <p>{details.definition}</p>
+                                  {details.references.length > 0 ? (
+                                    <div className="procedure-details-term-references">
+                                      <span>References</span>
+                                      {details.references.map((reference) => (
+                                        <a
+                                          key={`${term}-${reference.url}`}
+                                          href={reference.url}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                        >
+                                          {reference.label}
+                                        </a>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                            </article>
+                          );
+                        })}
+                      </div>
+                    </div>
                   ))}
                 </div>
-                {activeGlossaryTerm ? (
-                  <div className="procedure-details-term-definition">
-                    <strong>{displayTerm(activeGlossaryTerm)}</strong>
-                    <p>{termMeaning(activeGlossaryTerm)}</p>
-                  </div>
-                ) : null}
               </section>
             </aside>
           ) : null}

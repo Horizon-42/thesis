@@ -16,6 +16,8 @@ from preprocess_procedures import (
     generate_procedure_geojson,
     generate_procedures_geojson,
     infer_chart_targets,
+    parse_leg_altitude_ft,
+    procedure_detail_documents_to_geojson,
     publish_procedure_details_assets,
     procedure_exists,
     sanitize_public_chart_filename,
@@ -30,6 +32,33 @@ def test_decode_cifp_coordinate() -> None:
     assert decode_cifp_coordinate("W078525864") == pytest.approx(-78.8829556)
     assert decode_cifp_coordinate("N3552280160") == pytest.approx(35.8744489)
     assert decode_cifp_coordinate("W07848070690") == pytest.approx(-78.8019630)
+
+
+def test_parse_leg_altitude_reads_second_cifp_altitude_field() -> None:
+    line = (
+        "SUSAP KRDUK7FR32   ACONCA 010CONCAK7PC0E  A    IF"
+        "                                             18000                 A JS   008442407"
+    )
+
+    assert parse_leg_altitude_ft(line) == 18000
+
+
+def test_parse_leg_altitude_reads_second_altitude_before_speed_field() -> None:
+    line = (
+        "SUSAP KRDUK7FR23LY ADUWON 010DUWONK7PC0E  A    IF"
+        "                                             18000210              A-JS   008112102"
+    )
+
+    assert parse_leg_altitude_ft(line) == 18000
+
+
+def test_parse_leg_altitude_prefers_signed_constraint_over_hold_course() -> None:
+    line = (
+        "SUSAP KRDUK7FR32   R      070DUHAMK7EA0EE  R   HM"
+        "                     17290040    + 02200                           A JS   008562407"
+    )
+
+    assert parse_leg_altitude_ft(line) == 2200
 
 
 def test_krdu_r05ly_exists_in_cifp_index() -> None:
@@ -93,6 +122,71 @@ def test_generate_krdu_r05ly_geojson() -> None:
     assert route_features[0]["properties"]["branchType"] == "final"
     assert route_features[0]["properties"]["legCoverage"]["skippedLegTypes"] == ["CA", "DF", "HM"]
     assert route_features[0]["properties"]["warnings"]
+
+
+def test_geojson_projection_uses_procedure_detail_document_as_source() -> None:
+    document = build_procedure_detail_document(
+        cifp_root=CIFP_ROOT,
+        airport="KRDU",
+        procedure_type="SIAP",
+        procedure="R32",
+        nominal_speed_kt=140.0,
+        tunnel_half_width_nm=0.3,
+        tunnel_half_height_ft=300.0,
+        sample_spacing_m=250.0,
+    )
+
+    collection = procedure_detail_documents_to_geojson(
+        airport="KRDU",
+        procedure_type="SIAP",
+        source_cycle="2603",
+        documents=[document],
+        include_transitions=False,
+        branch="R",
+    )
+
+    route_feature = next(
+        feature
+        for feature in collection["features"]
+        if feature["properties"]["featureType"] == "procedure-route"
+    )
+    fix_features = [
+        feature
+        for feature in collection["features"]
+        if feature["properties"]["featureType"] == "procedure-fix"
+    ]
+    fix_by_id = {fix["fixId"]: fix for fix in document["fixes"]}
+    final_branch = next(branch for branch in document["branches"] if branch["branchIdent"] == "R")
+    rendered_legs = [
+        leg
+        for leg in final_branch["legs"]
+        if leg["quality"].get("renderedInPlanView") is True
+    ]
+
+    assert collection["metadata"]["canonicalDataLayer"] == "procedure-details"
+    assert route_feature["properties"]["source"] == "procedure-details"
+    assert route_feature["properties"]["samples"] == [
+        {
+            "sequence": leg["sequence"],
+            "fixIdent": fix_by_id[leg["path"]["endFixRef"]]["ident"],
+            "legType": leg["path"]["pathTerminator"],
+            "role": leg["roleAtEnd"],
+            "altitudeFt": (
+                None
+                if leg["constraints"]["altitude"] is None
+                else leg["constraints"]["altitude"]["valueFt"]
+            ),
+            "geometryAltitudeFt": leg["constraints"]["geometryAltitudeFt"],
+            "distanceFromStartM": sample["distanceFromStartM"],
+            "timeSeconds": sample["timeSeconds"],
+            "sourceLine": leg["quality"]["sourceLine"],
+        }
+        for leg, sample in zip(rendered_legs, route_feature["properties"]["samples"])
+    ]
+    assert [
+        [fix_by_id[leg["path"]["endFixRef"]]["position"]["lon"], fix_by_id[leg["path"]["endFixRef"]]["position"]["lat"]]
+        for leg in rendered_legs
+    ] == [[feature["geometry"]["coordinates"][0], feature["geometry"]["coordinates"][1]] for feature in fix_features]
 
 
 def test_generate_multi_runway_rnav_geojson() -> None:

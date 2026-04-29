@@ -53,24 +53,46 @@ function toRadians(value: number): number {
   return (value * Math.PI) / 180;
 }
 
-function fillMissingNumbers(values: Array<number | null>): number[] {
+function fillMissingNumbers(values: Array<number | null>): {
+  values: number[];
+  repairedIndexes: number[];
+  repairMethod: "interpolated" | "nearest" | "zero-fallback" | null;
+} {
   const known = values
     .map((value, index) => ({ value, index }))
     .filter((entry): entry is { value: number; index: number } => entry.value !== null);
 
-  if (known.length === 0) return values.map(() => 0);
+  if (known.length === 0) {
+    return {
+      values: values.map(() => 0),
+      repairedIndexes: values.map((_, index) => index),
+      repairMethod: values.length > 0 ? "zero-fallback" : null,
+    };
+  }
 
-  return values.map((value, index) => {
+  const repairedIndexes: number[] = [];
+  let usedInterpolation = false;
+  const repairedValues = values.map((value, index) => {
     if (value !== null) return value;
 
     const previous = [...known].reverse().find((entry) => entry.index < index);
     const next = known.find((entry) => entry.index > index);
     if (previous && next) {
+      repairedIndexes.push(index);
+      usedInterpolation = true;
       const ratio = (index - previous.index) / (next.index - previous.index);
       return previous.value + (next.value - previous.value) * ratio;
     }
+    repairedIndexes.push(index);
     return previous?.value ?? next?.value ?? 0;
   });
+
+  return {
+    values: repairedValues,
+    repairedIndexes,
+    repairMethod:
+      repairedIndexes.length === 0 ? null : usedInterpolation ? "interpolated" : "nearest",
+  };
 }
 
 function pointToEastNorth(
@@ -195,7 +217,17 @@ export function buildProcedureBranchPolylines(
   return document.branches
     .map((branch) => {
       const rawPoints = rawBranchPoints(branch, branchById, fixById, rawCache);
-      const repairedAltitudesFt = fillMissingNumbers(rawPoints.map((point) => point.altitudeFt));
+      const altitudeRepair = fillMissingNumbers(rawPoints.map((point) => point.altitudeFt));
+      const repairedAltitudeWarnings = altitudeRepair.repairedIndexes.map((index) => {
+        const point = rawPoints[index];
+        const method =
+          altitudeRepair.repairMethod === "interpolated"
+            ? "interpolated from neighboring altitude constraints"
+            : altitudeRepair.repairMethod === "nearest"
+              ? "filled from the nearest available altitude constraint"
+              : "defaulted to 0 because no altitude constraints were available";
+        return `${point.ident}: altitude missing in procedure constraints; profile altitude was ${method}.`;
+      });
 
       let cumulativeDistanceM = 0;
       let previousLocal: { east: number; north: number } | null = null;
@@ -215,7 +247,7 @@ export function buildProcedureBranchPolylines(
           branchRole: branch.branchRole,
           lon: point.lon,
           lat: point.lat,
-          altitudeFt: repairedAltitudesFt[index] ?? 0,
+          altitudeFt: altitudeRepair.values[index] ?? 0,
           xM: local.east,
           yM: local.north,
           distanceM: cumulativeDistanceM,
@@ -227,7 +259,7 @@ export function buildProcedureBranchPolylines(
         branchIdent: branch.branchIdent,
         branchRole: branch.branchRole,
         defaultVisible: branch.defaultVisible,
-        warnings: branch.warnings,
+        warnings: [...branch.warnings, ...repairedAltitudeWarnings],
         points: dedupeSequential(points, (point) => point.fixId),
       };
     })
