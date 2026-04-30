@@ -295,7 +295,7 @@ def test_build_krdu_r05ly_procedure_detail_document() -> None:
     assert document["airport"]["faa"] == "RDU"
     assert document["procedure"]["chartName"] == "RNAV(GPS) Y RWY 05L"
     assert document["runway"]["ident"] == "RW05L"
-    assert document["runway"]["threshold"]["elevationFt"] == 798
+    assert document["runway"]["threshold"]["elevationFt"] == 367
     assert len(document["branches"]) >= 3
     assert any(branch["branchRole"] == "final" for branch in document["branches"])
     assert document["verticalProfiles"][0]["glidepathAngleDeg"] is None

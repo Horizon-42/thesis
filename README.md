@@ -67,3 +67,30 @@ aeroviz-4d/public/data/airports/<ICAO>/
 The chart manifest generator recognizes FAA RNAV(GPS) filenames such as
 `00516RY5L.PDF` and RNAV(RNP) filenames such as `00516RRZ23L.PDF`, then maps
 them to the corresponding generated procedure reference.
+
+### Validate CIFP Parser Packages
+
+The production AeroViz parser lives in:
+
+```text
+aeroviz-4d/python/cifp_parser.py
+```
+
+To compare it against third-party parser packages, run:
+
+```bash
+/Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
+  aeroviz-4d/python/validate_cifp_parser_packages.py --airport KRDU
+```
+
+The validator compares:
+
+- local fixed-width parser output
+- `arinc424` record-level decoding
+- `cifparse` structured CIFP objects
+
+Current KRDU result: `cifparse` is the best candidate for a future primary
+parser because it matches procedure legs and required fix coordinates while
+providing higher-level procedure, runway, terminal-waypoint, and enroute-waypoint
+objects. Keep `arinc424` as an audit/cross-check decoder because it is closer to
+raw ARINC 424 records.

@@ -51,7 +51,7 @@
     "threshold": {
       "lon": -78.80196389,
       "lat": 35.87445,
-      "elevationFt": 798
+      "elevationFt": 367
     }
   },
   "procedure": {
@@ -141,7 +141,7 @@
         "lon": -78.80196389,
         "lat": 35.87445
       },
-      "elevationFt": 798,
+      "elevationFt": 367,
       "roleHints": [
         "MAPt"
       ],
@@ -370,7 +370,7 @@
               "rawText": "00424"
             },
             "speedKt": null,
-            "geometryAltitudeFt": 798
+            "geometryAltitudeFt": 367
           },
           "roleAtEnd": "MAPt",
           "sourceRefs": [
@@ -507,7 +507,7 @@
         {
           "fixRef": "fix:RW05L",
           "publishedAltitudeFt": 424,
-          "geometryAltitudeFt": 798
+          "geometryAltitudeFt": 367
         }
       ],
       "warnings": [

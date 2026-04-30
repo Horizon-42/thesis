@@ -18,3 +18,7 @@ pulp>=2.7.0            # LP/MILP modelling and solver interface
 # Development / testing
 pytest>=7.4.0
 pytest-cov>=4.1.0      # coverage report: pytest --cov=. --cov-report=html
+
+# Optional CIFP parser cross-validation
+arinc424>=0.3.0
+cifparse>=2.0.9
