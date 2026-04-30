@@ -18,6 +18,7 @@ from preprocess_procedures import (
     infer_chart_targets,
     parse_leg_altitude_ft,
     procedure_detail_documents_to_geojson,
+    publish_local_chart_manifest,
     publish_procedure_details_assets,
     procedure_exists,
     sanitize_public_chart_filename,
@@ -304,6 +305,7 @@ def test_build_krdu_r05ly_procedure_detail_document() -> None:
 
 def test_chart_filename_inference_and_sanitizing() -> None:
     assert infer_chart_targets("00516RY5L.PDF#nameddest=(RDU).pdf") == ("R05LY", "RW05L")
+    assert infer_chart_targets("00516RRZ23L.PDF#nameddest=(RDU).pdf") == ("H23LZ", "RW23L")
     assert infer_chart_targets("00516R32.PDF#nameddest=(RDU).pdf") == ("R32", "RW32")
     assert sanitize_public_chart_filename("00516RY5L.PDF#nameddest=(RDU).pdf") == (
         "00516RY5L.PDF-nameddest-RDU.pdf"
@@ -369,3 +371,48 @@ def test_publish_procedure_details_assets_writes_manifest_and_chart_links(
     assert index["runways"][0]["procedures"][0]["procedureUid"] == "KRDU-R05LY-RW05L"
     assert chart_index["charts"][0]["procedureUid"] == "KRDU-R05LY-RW05L"
     assert chart_index["charts"][0]["url"].endswith("00516RY5L.PDF-nameddest-RDU.pdf")
+
+
+def test_publish_chart_manifest_links_existing_public_rnp_chart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chart_dir = tmp_path / "public-charts"
+    chart_dir.mkdir(parents=True)
+    (chart_dir / "00516RRZ23L.PDF").write_bytes(b"%PDF-1.4\n% fake public RNP chart\n")
+
+    monkeypatch.setattr(
+        procedures_module,
+        "airport_charts_dir",
+        lambda airport: chart_dir,
+    )
+    monkeypatch.setattr(
+        procedures_module,
+        "airport_chart_path",
+        lambda airport, file_name: chart_dir / file_name,
+    )
+
+    manifest = publish_local_chart_manifest(
+        airport="KRDU",
+        chart_root=tmp_path / "empty-source",
+        documents=[
+            {
+                "procedureUid": "KRDU-H23LZ-RW23L",
+                "procedure": {
+                    "procedureIdent": "H23LZ",
+                    "runwayIdent": "RW23L",
+                    "chartName": "RNAV(RNP) Z RWY 23L",
+                },
+                "runway": {"ident": "RW23L"},
+            }
+        ],
+    )
+
+    assert len(manifest["charts"]) == 1
+    chart = manifest["charts"][0]
+    assert chart["procedureUid"] == "KRDU-H23LZ-RW23L"
+    assert chart["procedureIdent"] == "H23LZ"
+    assert chart["runwayIdent"] == "RW23L"
+    assert chart["title"] == "RNAV(RNP) Z RWY 23L"
+    assert chart["originalFileName"] == "00516RRZ23L.PDF"
+    assert chart["url"] == "/data/airports/KRDU/charts/00516RRZ23L.pdf"

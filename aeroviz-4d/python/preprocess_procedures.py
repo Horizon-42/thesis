@@ -50,7 +50,8 @@ RUNWAY_ORDER = ["RW05L", "RW05R", "RW23L", "RW23R", "RW32"]
 SUPPORTED_ROUTE_LEGS = {"IF", "TF"}
 COORD_PAIR_RE = re.compile(r"([NS]\d{8,10})([EW]\d{9,11})")
 LEG_TYPE_RE = re.compile(r"(?<![A-Z])(IF|TF|DF|CA|CF|HM|HF|RF|VI|VA|FA)(?![A-Z])")
-CHART_PROCEDURE_RE = re.compile(r"R([YZ])?(\d{1,2})([LRC]?)")
+RNAV_RNP_CHART_PROCEDURE_RE = re.compile(r"RR([YZ])(\d{1,2})([LRC]?)")
+RNAV_GPS_CHART_PROCEDURE_RE = re.compile(r"R([YZ])?(\d{1,2})([LRC]?)")
 SAFE_FILE_CHARS_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
@@ -1701,7 +1702,16 @@ def sanitize_public_chart_filename(file_name: str) -> str:
 
 
 def infer_chart_targets(file_name: str) -> tuple[str | None, str | None]:
-    match = CHART_PROCEDURE_RE.search(file_name.upper())
+    normalized_name = file_name.upper()
+    rnp_match = RNAV_RNP_CHART_PROCEDURE_RE.search(normalized_name)
+    if rnp_match:
+        variant = rnp_match.group(1)
+        runway_number = rnp_match.group(2).zfill(2)
+        runway_side = rnp_match.group(3)
+        runway_ident = f"RW{runway_number}{runway_side}"
+        return f"H{runway_number}{runway_side}{variant}", runway_ident
+
+    match = RNAV_GPS_CHART_PROCEDURE_RE.search(normalized_name)
     if not match:
         return None, None
     variant = match.group(1) or ""
@@ -1780,11 +1790,23 @@ def publish_local_chart_manifest(
     entries: list[dict[str, Any]] = []
 
     source_dir = chart_root / airport.upper()
-    if not source_dir.exists():
-        return {"airport": airport.upper(), "researchUseOnly": True, "charts": []}
+    def pdf_paths(directory: Path) -> list[Path]:
+        if not directory.exists():
+            return []
+        return sorted(path for path in directory.iterdir() if path.is_file() and ".PDF" in path.name.upper())
 
+    source_paths = pdf_paths(source_dir)
+    public_paths = pdf_paths(chart_dir)
     used_names: set[str] = set()
-    for source_path in sorted(source_dir.glob("*.pdf")):
+    used_procedure_uids: set[str] = set()
+    seen_sources: set[Path] = set()
+
+    for source_path in [*source_paths, *public_paths]:
+        resolved_source = source_path.resolve()
+        if resolved_source in seen_sources:
+            continue
+        seen_sources.add(resolved_source)
+
         procedure_ident, runway_ident = infer_chart_targets(source_path.name)
         target_document = None
         if procedure_ident and procedure_ident in by_procedure_ident:
@@ -1792,20 +1814,25 @@ def publish_local_chart_manifest(
         elif runway_ident and runway_ident in by_runway_ident:
             target_document = by_runway_ident[runway_ident]
 
+        procedure_uid = None if target_document is None else target_document["procedureUid"]
+        if procedure_uid is not None and procedure_uid in used_procedure_uids:
+            continue
+
         safe_name = sanitize_public_chart_filename(source_path.name)
         if safe_name in used_names:
-            safe_stem = Path(safe_name).stem
-            safe_suffix = Path(safe_name).suffix
-            counter = 2
-            while f"{safe_stem}-{counter}{safe_suffix}" in used_names:
-                counter += 1
-            safe_name = f"{safe_stem}-{counter}{safe_suffix}"
+            continue
         used_names.add(safe_name)
+        if procedure_uid is not None:
+            used_procedure_uids.add(procedure_uid)
 
         target_path = airport_chart_path(airport, safe_name)
-        shutil.copyfile(source_path, target_path)
+        try:
+            is_same_file = source_path.samefile(target_path)
+        except FileNotFoundError:
+            is_same_file = False
+        if not is_same_file:
+            shutil.copyfile(source_path, target_path)
 
-        procedure_uid = None if target_document is None else target_document["procedureUid"]
         title = (
             source_path.stem
             if target_document is None
