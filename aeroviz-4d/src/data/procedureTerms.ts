@@ -48,7 +48,16 @@ const DEFAULT_IDENTIFIER_DETAILS: TermDetails = {
 };
 
 const FIX_ROLE_TERMS = ["IAF", "IF", "FAF", "MAPT", "MAHF"];
-const PROCEDURE_MODE_TERMS = ["LPV", "LNAV/VNAV", "LNAV", "RNAV", "RNP", "RNP AR"];
+const PROCEDURE_MODE_TERMS = [
+  "LPV",
+  "LNAV/VNAV",
+  "LNAV",
+  "RNAV",
+  "RNP",
+  "RNP AR",
+  "RNAV(GPS)",
+  "RNAV(RNP)",
+];
 
 const TERM_DISPLAY_NAMES: Record<string, string> = {
   IAF: "Initial Approach Fix (IAF)",
@@ -60,6 +69,8 @@ const TERM_DISPLAY_NAMES: Record<string, string> = {
   "LNAV/VNAV": "Lateral Navigation / Vertical Navigation (LNAV/VNAV)",
   LNAV: "Lateral Navigation (LNAV)",
   RNAV: "Area Navigation (RNAV)",
+  "RNAV(GPS)": "Area Navigation using GPS/WAAS (RNAV(GPS))",
+  "RNAV(RNP)": "Area Navigation with Required Navigation Performance (RNAV(RNP))",
   RNP: "Required Navigation Performance (RNP)",
   "RNP AR": "Required Navigation Performance Authorization Required (RNP AR)",
   IF_TERMINATOR: "Initial Fix Path Terminator (IF)",
@@ -134,6 +145,16 @@ const TERM_DETAILS: Record<string, TermDetails> = {
     definition:
       "Area Navigation lets aircraft fly a desired path without flying directly over ground-based navigation aids.",
     references: [FAA_AIM_PBN_REFERENCE],
+  },
+  "RNAV(GPS)": {
+    definition:
+      "Area Navigation using GPS/WAAS is a satellite-based approach procedure. It uses GPS, and when available the WAAS augmentation system, to guide the aircraft along the published lateral path; WAAS-enabled minima such as LPV can also provide approved vertical guidance.",
+    references: [FAA_AIM_PBN_REFERENCE, FAA_AIM_APPROACH_REFERENCE],
+  },
+  "RNAV(RNP)": {
+    definition:
+      "Area Navigation with Required Navigation Performance is an RNAV approach built around a required navigation accuracy. In modern U.S. charting, RNAV(RNP) procedures often imply onboard performance monitoring and may include authorization-required design features.",
+    references: [FAA_AIM_PBN_REFERENCE, FAA_AIM_APPROACH_REFERENCE],
   },
   RNP: {
     definition:
@@ -289,10 +310,18 @@ export function isSpecificFixRole(role: string | null | undefined): boolean {
   return role.toUpperCase() !== "ROUTE";
 }
 
+function procedureFamilyTerm(procedureFamily: string | null | undefined): string | null {
+  if (procedureFamily === "RNAV_GPS") return "RNAV(GPS)";
+  if (procedureFamily === "RNAV_RNP") return "RNAV(RNP)";
+  return null;
+}
+
 export function summaryTerms(document: ProcedureDetailDocument | null): string[] {
   if (!document) return ["IAF", "IF", "FAF", "MAPT", "LPV", "LNAV/VNAV", "LNAV"];
   const terms = new Set(["IAF", "IF", "FAF", "MAPT", "LPV", "LNAV/VNAV", "LNAV"]);
   terms.add(document.procedure.chartName);
+  const familyTerm = procedureFamilyTerm(document.procedure.procedureFamily);
+  if (familyTerm) terms.add(familyTerm);
   document.procedure.approachModes.forEach((mode) => terms.add(mode));
   document.branches.forEach((branch) => {
     terms.add(branch.branchIdent);
