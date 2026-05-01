@@ -19,6 +19,7 @@ from preprocess_procedures import (
     generate_procedures_geojson,
     infer_chart_targets,
     parse_leg_altitude_ft,
+    parse_leg_course_deg,
     parse_procedure_legs,
     procedure_detail_documents_to_geojson,
     publish_local_chart_manifest,
@@ -63,6 +64,15 @@ def test_parse_leg_altitude_prefers_signed_constraint_over_hold_course() -> None
     )
 
     assert parse_leg_altitude_ft(line) == 2200
+
+
+def test_parse_leg_course_reads_ca_course_field() -> None:
+    line = (
+        "SUSAP 00R K4FR30   R      040         0  M     CA"
+        "                     3050        + 01000                           B PS   785032404"
+    )
+
+    assert parse_leg_course_deg(line) == pytest.approx(305.0)
 
 
 def test_krdu_r05ly_exists_in_cifp_index() -> None:
@@ -332,6 +342,38 @@ def test_branch_document_exports_rf_path_metadata() -> None:
     assert rf_path["arcRadiusNm"] == 2.0
     assert rf_path["centerLatDeg"] == 35.82
     assert rf_path["centerLonDeg"] == -78.86
+
+
+def test_branch_document_exports_course_path_metadata() -> None:
+    legs = [
+        ProcedureLeg(
+            sequence=10,
+            branch="R",
+            fix_ident="RW",
+            leg_type="CA",
+            role="Route",
+            altitude_ft=1000,
+            source_line=1,
+            course_deg=305.0,
+        ),
+    ]
+    fixes = {
+        "RW": FixRecord("RW", -78.9, 35.8, 800, 1),
+    }
+
+    branch = build_branch_document(
+        branch_ident="R",
+        branch_order=1,
+        final_branch_ident="R",
+        branch_legs=legs,
+        branch_route_points=[],
+        fix_records=fixes,
+        branch_warnings=[],
+        final_fix_idents={"RW"},
+    )
+
+    assert branch["legs"][0]["path"]["pathTerminator"] == "CA"
+    assert branch["legs"][0]["path"]["courseDeg"] == 305.0
 
 
 def test_cifparse_rf_leg_metadata_resolves_center_fix() -> None:

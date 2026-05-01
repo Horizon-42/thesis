@@ -53,6 +53,7 @@ class ProcedureLeg:
     center_fix_region_code: str | None = None
     center_lat_deg: float | None = None
     center_lon_deg: float | None = None
+    course_deg: float | None = None
 
 
 def decode_cifp_coordinate(token: str) -> float:
@@ -141,6 +142,13 @@ def parse_rf_center_fix_ident(line: str) -> str | None:
 def parse_rf_center_fix_region(line: str) -> str | None:
     text = line[112:114].strip().upper()
     return text or None
+
+
+def parse_leg_course_deg(line: str) -> float | None:
+    text = line[70:74].strip()
+    if len(text) != 4 or not text.isdigit():
+        return None
+    return int(text) / 10.0
 
 
 def rf_related_fix_idents(legs: list[ProcedureLeg]) -> set[str]:
@@ -488,6 +496,7 @@ def parse_procedure_legs(
             role = parse_leg_role(line, leg_type, fix_ident, sequence)
             altitude_ft = parse_leg_altitude_ft(line)
             is_rf = leg_type == "RF"
+            has_course = leg_type in {"CA", "CF", "FA"}
             legs.append(
                 ProcedureLeg(
                     sequence=sequence,
@@ -504,6 +513,7 @@ def parse_procedure_legs(
                     arc_radius_nm=parse_rf_arc_radius_nm(line) if is_rf else None,
                     center_fix_ident=parse_rf_center_fix_ident(line) if is_rf else None,
                     center_fix_region_code=parse_rf_center_fix_region(line) if is_rf else None,
+                    course_deg=parse_leg_course_deg(line) if has_course else None,
                 )
             )
 

@@ -54,6 +54,7 @@ from cifp_parser import (
     final_branch_for_procedure,
     parse_available_branches,
     parse_leg_altitude_ft,
+    parse_leg_course_deg,
     parse_procedure_legs,
     parse_procedure_list,
     parse_source_cycle,
@@ -657,6 +658,8 @@ def route_points_by_sequence(route_points: list[RoutePoint]) -> dict[int, RouteP
 
 def rf_path_metadata(leg: ProcedureLeg, fix_records: dict[str, FixRecord]) -> dict[str, Any]:
     metadata: dict[str, Any] = {}
+    if leg.course_deg is not None:
+        metadata["courseDeg"] = leg.course_deg
     if leg.turn_direction is not None:
         metadata["turnDirection"] = leg.turn_direction
     if leg.arc_radius_nm is not None:

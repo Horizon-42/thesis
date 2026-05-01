@@ -320,6 +320,42 @@ describe("normalizeProcedurePackage", () => {
     );
   });
 
+  it("passes exported course metadata through to CA package legs", () => {
+    const caDocument: ProcedureDetailDocument = {
+      ...sampleDocument,
+      branches: [
+        {
+          ...sampleDocument.branches[0],
+          legs: [
+            {
+              ...sampleDocument.branches[0].legs[2],
+              legId: "leg:R:040",
+              sequence: 40,
+              segmentType: "missed",
+              path: {
+                ...sampleDocument.branches[0].legs[2].path,
+                pathTerminator: "CA",
+                constructionMethod: "course_to_altitude",
+                startFixRef: "fix:RW05L",
+                endFixRef: "fix:RW05L",
+                courseDeg: 305,
+              },
+              roleAtEnd: "Route",
+            },
+          ],
+        },
+      ],
+    };
+
+    const pkg = normalizeProcedurePackage(caDocument);
+    const caLeg = pkg.legs.find((leg) => leg.legType === "CA");
+
+    expect(caLeg).toMatchObject({
+      legType: "CA",
+      outboundCourseDeg: 305,
+    });
+  });
+
   it("splits missed approach legs into section one and section two at the hold boundary", () => {
     const missedDocument: ProcedureDetailDocument = {
       ...sampleDocument,

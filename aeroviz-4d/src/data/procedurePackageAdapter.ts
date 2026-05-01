@@ -367,6 +367,7 @@ function normalizeLeg(
     rawPathTerminator: leg.path.pathTerminator,
     startFixId: leg.path.startFixRef,
     endFixId: leg.path.endFixRef,
+    outboundCourseDeg: leg.path.courseDeg,
     turnDirection: leg.path.turnDirection,
     arcRadiusNm: leg.path.arcRadiusNm,
     centerLatDeg: leg.path.centerLatDeg,

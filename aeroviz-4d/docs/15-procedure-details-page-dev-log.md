@@ -1035,3 +1035,38 @@
 - CA course-to-altitude geometry is still not implemented.
 - Holding legs (`HM`/`HA`/`HF`) remain semantic markers plus diagnostics.
 - Full FAA missed section 1/2 surface construction and turning missed wind spiral remain future work.
+
+## 2026-05-02 01:12 CEST
+
+### Goal Of This Session
+- Add source-data plumbing needed for future CA course-to-altitude geometry.
+
+### Decisions Locked
+- CIFP CA/CF/FA course is parsed from the ARINC course field as tenths of a degree.
+- Procedure-detail leg paths now export `courseDeg` when available.
+- `ProcedurePackageLeg.outboundCourseDeg` is populated from exported `courseDeg`.
+- No CA geometry is constructed in this phase because climb/termination distance rules still need explicit design.
+
+### Files Changed
+- `python/cifp_parser.py`
+- `python/preprocess_procedures.py`
+- `python/tests/test_preprocess_procedures.py`
+- `src/data/procedureDetails.ts`
+- `src/data/procedurePackageAdapter.ts`
+- `src/data/__tests__/procedurePackageAdapter.test.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `conda run -n aviation pytest python/tests/test_preprocess_procedures.py -k "course or branch_document_exports_course"`
+- `npm test -- --run src/data/__tests__/procedurePackageAdapter.test.ts`
+- `npm run build`
+
+### Current Status
+- Future CA geometry builders can now consume real course metadata instead of guessing heading from adjacent fixes.
+
+### Known Blockers
+- CA termination still needs a validated endpoint model.
+- Real procedure-detail public assets must be regenerated before app data contains CA course metadata.
+
+### Exact Next Recommended Step
+- Design and implement a conservative CA debug geometry that shows course direction and altitude termination semantics without pretending to know certified endpoint distance.
