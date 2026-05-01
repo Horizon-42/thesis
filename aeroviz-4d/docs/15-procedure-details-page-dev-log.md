@@ -118,3 +118,53 @@
   - threshold / FAF / MAPt callout badges directly in the plan/profile views
   - branch merge markers and missed-approach continuation cues
   - a compact “compare branches” toggle that temporarily shows more than one branch at full emphasis
+
+## 2026-05-01 23:11 CEST
+
+### Goal Of This Session
+- Continue the v3 protected-geometry migration after identifying that turn areas were visually discontinuous.
+- Add a modular baseline for TF turn junction continuity without pretending to implement full FAA FB/FO/RF turn construction.
+- Preserve the migration discipline: small geometry kernel first, render integration second, then log the design boundary.
+
+### Facts Discovered
+- The v3 visualization spec already says intermediate-to-final transitions are not simple line joins; they require taper or offset construction, and G-09 requires continuous boundaries.
+- The current kernel still only supports TF centerlines and straight offset envelopes. This creates visible discontinuities or misleading kinks at turn junctions.
+- Final segments with multiple TF legs can reveal turns that should be flagged, because LNAV final should not silently accept TF turns as compliant protected geometry.
+
+### Decisions Locked
+- `procedureTurnGeometry.ts` is a Cesium-independent module.
+- The new TF turn patch is explicitly marked `VISUAL_FILL_ONLY`.
+- The patch is allowed to improve visual continuity, but it is not a certified FB/FO/RF construction.
+- If a final segment contains a TF turn junction, the geometry bundle emits `FINAL_HAS_TURN` diagnostic.
+- Full compliance remains future work:
+  - RF true arc centerline and parallel OEA;
+  - FB turn construction with DTA, bisector, and boundary arcs;
+  - FO construction with reaction/roll distance and 30-degree taper;
+  - offset intermediate-to-final debug primitives.
+
+### Files Changed
+- `src/utils/procedureTurnGeometry.ts`
+- `src/utils/__tests__/procedureTurnGeometry.test.ts`
+- `src/utils/procedureSegmentGeometry.ts`
+- `src/utils/__tests__/procedureSegmentGeometry.test.ts`
+- `src/hooks/useProcedureSegmentLayer.ts`
+- `src/hooks/__tests__/useProcedureSegmentLayer.test.ts`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/utils/__tests__/procedureTurnGeometry.test.ts`
+- `npm test -- --run src/utils/__tests__/procedureSegmentGeometry.test.ts src/utils/__tests__/procedureTurnGeometry.test.ts src/hooks/__tests__/useProcedureSegmentLayer.test.ts src/data/__tests__/procedureRenderBundle.test.ts`
+- `npm test -- --run`
+- `npm run build`
+
+### Current Status
+- Protected mode now renders visual turn-fill patches at detected TF turn junctions.
+- The patches are drawn as independent 3D entities above the base envelope surfaces so turn discontinuities are easier to see.
+- Segment diagnostics now distinguish “visual continuity fill” from proper final-segment turn authorization.
+
+### Known Blockers
+- This does not yet satisfy G-04, G-05, or G-06; those need actual FB/FO/RF algorithms and source metadata.
+- Source procedure-detail JSON does not yet expose enough FB/FO/RF metadata for full turn construction.
+- Some discontinuities between different segment objects may still need branch-level junction construction, especially outside the final connector region.
+
+### Exact Next Recommended Step
+- Add branch-level turn junction construction between adjacent segment bundles, then start RF support only when radius/center data is available or exported.
