@@ -21,6 +21,7 @@ import {
   buildTfTurnJunctions,
   type TurnJunctionGeometry,
 } from "./procedureTurnGeometry";
+import { buildRfLeg } from "./procedureRfGeometry";
 
 export type { CartesianPoint, GeoPoint } from "./procedureGeoMath";
 
@@ -213,22 +214,28 @@ export function buildSegmentGeometryBundle(
   ctx: GeometryBuildContext = DEFAULT_GEOMETRY_BUILD_CONTEXT,
 ): SegmentGeometryBundle {
   const diagnostics: BuildDiagnostic[] = [];
-  const tfLegs = legs.filter((leg) => leg.segmentId === segment.segmentId && leg.legType === "TF");
+  const segmentLegs = legs.filter((leg) => leg.segmentId === segment.segmentId);
+  const constructibleLegs = segmentLegs.filter(
+    (leg) => leg.legType === "TF" || leg.legType === "RF",
+  );
 
-  if (tfLegs.length === 0) {
+  if (constructibleLegs.length === 0) {
     diagnostics.push(
       diagnostic(
         "UNSUPPORTED_LEG_TYPE",
-        `${segment.segmentId}: initial segment geometry kernel only builds TF centerlines.`,
+        `${segment.segmentId}: segment geometry kernel requires at least one TF or RF leg.`,
         "WARN",
         segment.segmentId,
       ),
     );
   }
 
-  const legGeometries = tfLegs
+  const legGeometries = constructibleLegs
     .map((leg) => {
-      const result = buildTfLeg(leg, fixes, ctx);
+      const result =
+        leg.legType === "RF"
+          ? buildRfLeg(leg, fixes, ctx)
+          : buildTfLeg(leg, fixes, ctx);
       diagnostics.push(...result.diagnostics);
       return result.geometry;
     })
@@ -242,11 +249,11 @@ export function buildSegmentGeometryBundle(
     geoPositions,
     worldPositions,
     geodesicLengthNm: Math.max(0, legGeometries.reduce((sum, geometry) => sum + geometry.geodesicLengthNm, 0)),
-    isArc: false,
+    isArc: legGeometries.some((geometry) => geometry.isArc),
   };
   const stationAxis = computeStationAxis(centerline);
   const turnJunctions =
-    geoPositions.length >= 3
+    geoPositions.length >= 3 && !centerline.isArc
       ? buildTfTurnJunctions(
           segment.segmentId,
           centerline,

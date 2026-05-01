@@ -10,6 +10,8 @@ import {
   buildTfLeg,
   computeStationAxis,
 } from "../procedureSegmentGeometry";
+import { buildRfLeg } from "../procedureRfGeometry";
+import { METERS_PER_NM, distanceNm, offsetPoint } from "../procedureGeoMath";
 
 const fixes = new Map<string, ProcedurePackageFix>([
   [
@@ -111,6 +113,88 @@ const secondTfLeg: ProcedurePackageLeg = {
   },
 };
 
+const rfCenter = { lonDeg: -78.86, latDeg: 35.84, altM: 0 };
+const rfStart = offsetPoint(rfCenter, Math.PI / 2, 2 * METERS_PER_NM);
+const rfEnd = offsetPoint(rfCenter, 0, 2 * METERS_PER_NM);
+const rfFixes = new Map<string, ProcedurePackageFix>([
+  [
+    "fix:RF_START",
+    {
+      fixId: "fix:RF_START",
+      ident: "RFSTART",
+      role: ["IF"],
+      lonDeg: rfStart.lonDeg,
+      latDeg: rfStart.latDeg,
+      altFtMsl: 3000,
+      annotations: [],
+      sourceRefs: [],
+    },
+  ],
+  [
+    "fix:RF_END",
+    {
+      fixId: "fix:RF_END",
+      ident: "RFEND",
+      role: ["FAF"],
+      lonDeg: rfEnd.lonDeg,
+      latDeg: rfEnd.latDeg,
+      altFtMsl: 2200,
+      annotations: [],
+      sourceRefs: [],
+    },
+  ],
+]);
+
+const rfLeg: ProcedurePackageLeg = {
+  legId: "leg:R:RF",
+  segmentId: "segment:rf",
+  legType: "RF",
+  rawPathTerminator: "RF",
+  startFixId: "fix:RF_START",
+  endFixId: "fix:RF_END",
+  turnDirection: "LEFT",
+  arcRadiusNm: 2,
+  centerLatDeg: rfCenter.latDeg,
+  centerLonDeg: rfCenter.lonDeg,
+  requiredAltitude: null,
+  requiredSpeed: null,
+  navSpecAtLeg: "RNP_APCH",
+  xttNm: 0.3,
+  attNm: 0.3,
+  secondaryEnabled: true,
+  notes: [],
+  sourceRefs: [],
+  legacy: {
+    sequence: 10,
+    constructionMethod: "radius_to_fix",
+    roleAtEnd: "IF",
+    qualityStatus: "exact",
+    renderedInPlanView: true,
+  },
+};
+
+const rfSegment: ProcedureSegment = {
+  segmentId: "segment:rf",
+  branchId: "branch:R",
+  segmentType: "INTERMEDIATE",
+  navSpec: "RNP_APCH",
+  startFixId: "fix:RF_START",
+  endFixId: "fix:RF_END",
+  legIds: ["leg:R:RF"],
+  xttNm: 0.3,
+  attNm: 0.3,
+  secondaryEnabled: true,
+  widthChangeMode: "NONE",
+  transitionRule: null,
+  verticalRule: { kind: "LEVEL_ROC" },
+  constructionFlags: {},
+  sourceRefs: [],
+  legacy: {
+    rawSegmentType: "intermediate",
+    sequenceRange: [10, 10],
+  },
+};
+
 describe("procedure segment geometry kernel", () => {
   it("builds a sampled geodesic TF centerline without Cesium", () => {
     const result = buildTfLeg(tfLeg, fixes, {
@@ -151,6 +235,53 @@ describe("procedure segment geometry kernel", () => {
     expect(envelope.halfWidthNmSamples.every((sample) => sample.halfWidthNm === 0.6)).toBe(true);
   });
 
+  it("builds a sampled RF arc when radius, center, and direction metadata are present", () => {
+    const result = buildRfLeg(rfLeg, rfFixes, {
+      samplingStepNm: 0.5,
+    });
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.geometry).not.toBeNull();
+    if (!result.geometry) return;
+
+    expect(result.geometry.isArc).toBe(true);
+    expect(result.geometry.geodesicLengthNm).toBeCloseTo(Math.PI, 2);
+    expect(result.geometry.geoPositions.length).toBeGreaterThan(4);
+    expect(result.geometry.geoPositions[0].lonDeg).toBeCloseTo(rfStart.lonDeg, 8);
+    expect(result.geometry.geoPositions[0].latDeg).toBeCloseTo(rfStart.latDeg, 8);
+    const lastPoint = result.geometry.geoPositions[result.geometry.geoPositions.length - 1];
+    expect(lastPoint.lonDeg).toBeCloseTo(rfEnd.lonDeg, 8);
+    expect(lastPoint.latDeg).toBeCloseTo(rfEnd.latDeg, 8);
+
+    const maxRadiusErrorNm = Math.max(
+      ...result.geometry.geoPositions.map((point) =>
+        Math.abs(distanceNm({ ...rfCenter, altM: point.altM }, point) - 2),
+      ),
+    );
+    expect(maxRadiusErrorNm).toBeLessThan(0.005);
+  });
+
+  it("returns RF diagnostics instead of constructing arcs without required metadata", () => {
+    const result = buildRfLeg(
+      {
+        ...rfLeg,
+        arcRadiusNm: undefined,
+      },
+      rfFixes,
+      {
+        samplingStepNm: 0.5,
+      },
+    );
+
+    expect(result.geometry).toBeNull();
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "RF_RADIUS_MISSING",
+        severity: "ERROR",
+      }),
+    ]);
+  });
+
   it("builds a first-pass segment bundle for TF-only final segments", () => {
     const bundle = buildSegmentGeometryBundle(
       finalSegment,
@@ -169,6 +300,25 @@ describe("procedure segment geometry kernel", () => {
     expect(bundle.primaryEnvelope?.halfWidthNmSamples[0].halfWidthNm).toBe(0.6);
     expect(bundle.secondaryEnvelope?.halfWidthNmSamples[0].halfWidthNm).toBeCloseTo(0.9, 8);
     expect(bundle.turnJunctions).toHaveLength(1);
+  });
+
+  it("integrates RF legs into segment bundles without adding TF visual turn fills", () => {
+    const bundle = buildSegmentGeometryBundle(
+      rfSegment,
+      [rfLeg],
+      rfFixes,
+      {
+        samplingStepNm: 0.5,
+        enableDebugPrimitives: false,
+      },
+    );
+
+    expect(bundle.diagnostics).toEqual([]);
+    expect(bundle.centerline.isArc).toBe(true);
+    expect(bundle.centerline.geodesicLengthNm).toBeCloseTo(Math.PI, 2);
+    expect(bundle.primaryEnvelope).toBeDefined();
+    expect(bundle.secondaryEnvelope).toBeDefined();
+    expect(bundle.turnJunctions).toEqual([]);
   });
 
   it("marks visual turn-fill patches inside final segments as diagnostics", () => {
