@@ -53,6 +53,7 @@ const PROFILE_SELECTED_FIX_SYMBOL_SIZE = 7;
 const MISSED_OUTBOUND_ARROW_START_GAP_PX = 92;
 const MISSED_OUTBOUND_PROJECTED_LENGTH_M = 6400;
 const IMPORTANT_FIX_ROLES = new Set(["IAF", "IF", "FAF", "MAPT", "MAHF"]);
+const METERS_PER_NM = 1852;
 
 function readRouteParams(): {
   airport: string | null;
@@ -193,11 +194,13 @@ function chartTicksByStep(domain: { min: number; max: number }, step: number): n
   return ticks;
 }
 
-function formatMeters(value: number): string {
-  return `${Math.round(value).toLocaleString()} m`;
+function formatSignedNm(valueM: number): string {
+  const valueNm = nmFromMeters(valueM);
+  if (Math.abs(valueNm) < 0.05) return "0.0 NM";
+  return `${valueNm > 0 ? "+" : ""}${valueNm.toFixed(1)} NM`;
 }
 
-function formatSignedNm(valueM: number): string {
+function formatPlanNm(valueM: number): string {
   const valueNm = nmFromMeters(valueM);
   if (Math.abs(valueNm) < 0.05) return "0.0 NM";
   return `${valueNm > 0 ? "+" : ""}${valueNm.toFixed(1)} NM`;
@@ -485,9 +488,9 @@ function ProcedurePlanView({
     SVG_PADDING_Y,
   );
   const planTickStep = niceChartStep(
-    Math.max(xDomain.max - xDomain.min, yDomain.max - yDomain.min),
+    Math.max(xDomain.max - xDomain.min, yDomain.max - yDomain.min) / METERS_PER_NM,
     PLAN_AXIS_TICK_COUNT,
-  );
+  ) * METERS_PER_NM;
   const xTicks = chartTicksByStep(xDomain, planTickStep);
   const yTicks = chartTicksByStep(yDomain, planTickStep);
   const zeroY = yDomain.min <= 0 && yDomain.max >= 0 ? scaleY(0) : null;
@@ -560,7 +563,7 @@ function ProcedurePlanView({
               y={PLAN_SVG_HEIGHT - SVG_PADDING_Y + 24}
               className="procedure-details-axis-label is-centered"
             >
-              {formatMeters(tick)}
+              {formatPlanNm(tick)}
             </text>
           </g>
         );
@@ -585,7 +588,7 @@ function ProcedurePlanView({
               className="procedure-details-axis-tick"
             />
             <text x={SVG_PADDING_X - 12} y={y + 4} className="procedure-details-axis-label">
-              {formatMeters(tick)}
+              {formatPlanNm(tick)}
             </text>
           </g>
         );
@@ -615,7 +618,7 @@ function ProcedurePlanView({
         y={PLAN_SVG_HEIGHT - 10}
         className="procedure-details-axis-title"
       >
-        East offset from origin (m)
+        East offset from origin (NM)
       </text>
       <text
         x={18}
@@ -623,7 +626,7 @@ function ProcedurePlanView({
         transform={`rotate(-90 18 ${SVG_PADDING_Y})`}
         className="procedure-details-axis-title is-vertical"
       >
-        North offset from origin (m)
+        North offset from origin (NM)
       </text>
 
       {polylines.map((branch) => {
@@ -1544,7 +1547,7 @@ export default function ProcedureDetailsPage() {
                         <p className="procedure-details-section-intro">
                           Transition branches stay visible, but the focused branch and fix are
                           emphasized so the geometry is easier to read. Grid labels show
-                          east/north meter offsets from the local origin.
+                          east/north offsets in nautical miles from the local origin.
                         </p>
                       </div>
 
@@ -1583,12 +1586,13 @@ export default function ProcedureDetailsPage() {
                     <div className="procedure-details-chart-frame-head">
                       <div>
                         <p className="procedure-details-overview-label">Vertical Profile</p>
-                        <h3>Side view aligned to the runway/MAPT</h3>
+                        <h3>Vertical profile aligned to the runway/MAPT</h3>
                         <p className="procedure-details-section-intro">
                           The horizontal axis is rebased at the runway/MAPT: approach fixes are
-                          shown inbound on the negative side, and missed-approach fixes continue
-                          outbound on the positive side. Heights are repaired for display when
-                          source altitude constraints are missing.
+                          shown inbound on the negative side in nautical miles, and
+                          missed-approach fixes continue outbound on the positive side. Altitudes
+                          are shown in feet and repaired for display when source altitude
+                          constraints are missing.
                         </p>
                       </div>
                     </div>

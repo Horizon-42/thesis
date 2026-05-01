@@ -564,6 +564,7 @@ body,
 
 .runway-profile-empty {
   color: #cbd5e1;
+  padding-bottom: 10px;
 }
 
 .runway-profile-error {

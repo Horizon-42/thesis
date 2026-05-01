@@ -13,6 +13,9 @@ import type {
   RunwayReferenceMark,
 } from "../utils/runwayProfileGeometry";
 
+const METERS_PER_NM = 1852;
+const METERS_PER_FOOT = 0.3048;
+
 interface PlotDomain {
   minX: number;
   maxX: number;
@@ -90,8 +93,17 @@ function collectViewDomain(
   };
 }
 
-function formatMeters(value: number): string {
-  return `${Math.round(value).toLocaleString()} m`;
+function formatNm(valueM: number): string {
+  const valueNm = valueM / METERS_PER_NM;
+  return `${Math.abs(valueNm) < 0.05 ? "0.0" : valueNm.toFixed(1)} NM`;
+}
+
+function formatFeet(valueM: number): string {
+  return `${Math.round(valueM / METERS_PER_FOOT).toLocaleString()} ft`;
+}
+
+function formatProfileAxisValue(mode: "side" | "top", valueM: number): string {
+  return mode === "side" ? formatFeet(valueM) : formatNm(valueM);
 }
 
 function routeLabel(route: HorizontalPlateRoute): string {
@@ -109,12 +121,19 @@ function niceTickStep(span: number, targetTickCount: number): number {
   return niceScaled * power;
 }
 
-function buildLinearTicks(min: number, max: number, targetTickCount: number): number[] {
-  const step = niceTickStep(Math.max(1, max - min), targetTickCount);
-  const start = Math.ceil(min / step) * step;
+function buildLinearUnitTicks(
+  minM: number,
+  maxM: number,
+  targetTickCount: number,
+  unitM: number,
+): number[] {
+  const minUnit = minM / unitM;
+  const maxUnit = maxM / unitM;
+  const stepUnit = niceTickStep(Math.max(1, maxUnit - minUnit), targetTickCount);
+  const startUnit = Math.ceil(minUnit / stepUnit) * stepUnit;
   const ticks: number[] = [];
-  for (let value = start; value <= max + step * 0.25; value += step) {
-    ticks.push(Number(value.toFixed(6)));
+  for (let valueUnit = startUnit; valueUnit <= maxUnit + stepUnit * 0.25; valueUnit += stepUnit) {
+    ticks.push(Number((valueUnit * unitM).toFixed(6)));
   }
   return ticks;
 }
@@ -137,6 +156,46 @@ function selectVisibleReferenceMarks(
   });
 
   return [...accepted].sort((left, right) => right.xM - left.xM);
+}
+
+function referenceMarkKey(mark: RunwayReferenceMark): string {
+  return `${mark.label}|${mark.detail}|${Math.round(mark.xM)}|${Math.round(mark.yM)}|${Math.round(mark.zM)}`;
+}
+
+function referencePriority(role: string, branchType?: string): number {
+  const normalizedRole = role.toUpperCase();
+  const rolePriority =
+    normalizedRole === "FAF"
+      ? 6
+      : normalizedRole === "MAPT"
+        ? 5
+        : normalizedRole === "IF"
+          ? 4
+          : normalizedRole === "IAF"
+            ? 3
+            : 2;
+  return rolePriority + ((branchType ?? "final").toLowerCase() === "final" ? 1 : 0);
+}
+
+function buildSideReferenceMarks(
+  routes: HorizontalPlateRoute[],
+  thresholdMarks: RunwayReferenceMark[],
+): RunwayReferenceMark[] {
+  const routeMarks = routes.flatMap((route) =>
+    route.points.map((point) => ({
+      xM: point.xM,
+      yM: point.yM,
+      zM: point.zM,
+      label: point.fixIdent,
+      detail: point.role,
+      priority: referencePriority(point.role, route.branchType),
+    })),
+  );
+
+  return [...thresholdMarks, ...routeMarks].sort((left, right) => {
+    if (left.priority === right.priority) return right.xM - left.xM;
+    return right.priority - left.priority;
+  });
 }
 
 function plotPointPath(
@@ -192,9 +251,19 @@ function ProfilePlot({
     },
     [mode, plateRoutes],
   );
+  const displayedReferenceMarks = useMemo(
+    () => {
+      if (mode !== "side") return referenceMarks;
+      return buildSideReferenceMarks(
+        displayedPlateRoutes,
+        referenceMarks.filter((mark) => mark.detail === "Threshold"),
+      );
+    },
+    [displayedPlateRoutes, mode, referenceMarks],
+  );
   const domain = useMemo(
-    () => collectViewDomain(mode, tracks, displayedPlateRoutes, referenceMarks),
-    [displayedPlateRoutes, mode, referenceMarks, tracks],
+    () => collectViewDomain(mode, tracks, displayedPlateRoutes, displayedReferenceMarks),
+    [displayedPlateRoutes, displayedReferenceMarks, mode, tracks],
   );
 
   const xSpan = Math.max(1, domain.maxX - domain.minX);
@@ -205,12 +274,24 @@ function ProfilePlot({
   const zeroY = plotY(0);
   const yScale = plotHeight / ySpan;
   const xTicks = useMemo(
-    () => buildLinearTicks(domain.minX, domain.maxX, 7),
+    () => buildLinearUnitTicks(domain.minX, domain.maxX, 7, METERS_PER_NM),
     [domain.maxX, domain.minX],
   );
   const visibleReferenceMarks = useMemo(
-    () => selectVisibleReferenceMarks(referenceMarks, plotX),
-    [referenceMarks, plotX],
+    () => selectVisibleReferenceMarks(displayedReferenceMarks, plotX),
+    [displayedReferenceMarks, plotX],
+  );
+  const labeledReferenceMarkKeys = useMemo(
+    () => new Set(visibleReferenceMarks.map(referenceMarkKey)),
+    [visibleReferenceMarks],
+  );
+  const routeLabelReferenceMarks = useMemo(
+    () =>
+      visibleReferenceMarks.filter((mark) => mark.detail !== "Threshold"),
+    [visibleReferenceMarks],
+  );
+  const plottedReferenceMarks = displayedReferenceMarks.filter(
+    (mark) => mark.detail === "Threshold",
   );
 
   return (
@@ -274,7 +355,7 @@ function ProfilePlot({
                 textAnchor="middle"
                 className="runway-profile-axis-tick"
               >
-                {formatMeters(tick)}
+                {formatNm(tick)}
               </text>
             </g>
           );
@@ -319,12 +400,13 @@ function ProfilePlot({
           </>
         )}
 
-        {visibleReferenceMarks.map((mark) => {
+        {plottedReferenceMarks.map((mark) => {
           const markX = plotX(mark.xM);
           const markY = plotY(mode === "side" ? mark.zM : mark.yM);
           const label = `${mark.label} · ${mark.detail}`;
+          const shouldLabel = labeledReferenceMarkKeys.has(referenceMarkKey(mark));
           return (
-            <g key={`${mode}-mark-${mark.label}-${mark.detail}-${Math.round(mark.xM)}`}>
+            <g key={`${mode}-mark-${referenceMarkKey(mark)}`}>
               <line
                 x1={markX}
                 y1={marginTop}
@@ -337,6 +419,41 @@ function ProfilePlot({
                 cy={markY}
                 r={4.1}
                 className="runway-profile-reference-point"
+                data-fix-ident={mark.label}
+              />
+              <line
+                x1={markX}
+                y1={marginTop + plotHeight}
+                x2={markX}
+                y2={marginTop + plotHeight + 20}
+                className="runway-profile-reference-tick"
+              />
+              {shouldLabel ? (
+                <text
+                  x={markX + 4}
+                  y={marginTop + plotHeight + 56}
+                  transform={`rotate(-28 ${markX + 4} ${marginTop + plotHeight + 56})`}
+                  textAnchor="start"
+                  className="runway-profile-reference-label"
+                >
+                  {label}
+                </text>
+              ) : null}
+            </g>
+          );
+        })}
+
+        {routeLabelReferenceMarks.map((mark) => {
+          const markX = plotX(mark.xM);
+          const label = `${mark.label} · ${mark.detail}`;
+          return (
+            <g key={`${mode}-route-label-${referenceMarkKey(mark)}`}>
+              <line
+                x1={markX}
+                y1={marginTop}
+                x2={markX}
+                y2={marginTop + plotHeight}
+                className="runway-profile-reference-line"
               />
               <line
                 x1={markX}
@@ -388,6 +505,17 @@ function ProfilePlot({
                   isTransition ? "is-transition" : "is-final"
                 }`}
               />
+              {route.points.map((point, index) => (
+                <circle
+                  key={`${route.routeId}-point-${point.fixIdent}-${index}`}
+                  cx={plotX(point.xM)}
+                  cy={plotY(mode === "side" ? point.zM : point.yM)}
+                  r={4.1}
+                  className="runway-profile-reference-point"
+                  data-route-id={route.routeId}
+                  data-fix-ident={point.fixIdent}
+                />
+              ))}
               {mode === "top" && isTransition ? (
                 <text
                   x={labelX + 7}
@@ -448,7 +576,7 @@ function ProfilePlot({
           textAnchor="middle"
           className="runway-profile-axis-label"
         >
-          x: approach distance from threshold
+          x: approach distance from threshold (NM)
         </text>
         <text
           x={18}
@@ -457,14 +585,16 @@ function ProfilePlot({
           transform={`rotate(-90 18 ${marginTop + plotHeight / 2})`}
           className="runway-profile-axis-label"
         >
-          {mode === "side" ? "z: height above threshold" : "y: lateral offset from centerline"}
+          {mode === "side"
+            ? "z: height above threshold (ft)"
+            : "y: lateral offset from centerline (NM)"}
         </text>
 
         <text x={18} y={marginTop + 10} className="runway-profile-axis-tick">
-          {formatMeters(domain.maxY)}
+          {formatProfileAxisValue(mode, domain.maxY)}
         </text>
         <text x={18} y={marginTop + plotHeight} className="runway-profile-axis-tick">
-          {formatMeters(domain.minY)}
+          {formatProfileAxisValue(mode, domain.minY)}
         </text>
       </svg>
     </section>
@@ -487,8 +617,8 @@ export default function RunwayTrajectoryProfilePanel() {
 
   const viewModes: Array<{ label: string; value: RunwayProfileViewMode }> = [
     { label: "Split", value: "split" },
-    { label: "Side", value: "side-xz" },
-    { label: "Top", value: "top-xy" },
+    { label: "Vertical", value: "side-xz" },
+    { label: "Plan", value: "top-xy" },
   ];
 
   const routeCount = profile.plateRoutes.length;
@@ -558,7 +688,7 @@ export default function RunwayTrajectoryProfilePanel() {
         >
           {runwayProfileViewMode !== "top-xy" ? (
             <ProfilePlot
-              title="Side view"
+              title="Vertical profile"
               subtitle="Runway-aligned x-z profile: follows the active procedure branch selected in the 3D procedure panel"
               mode="side"
               tracks={profile.aircraftTracks}
@@ -568,7 +698,7 @@ export default function RunwayTrajectoryProfilePanel() {
           ) : null}
           {runwayProfileViewMode !== "side-xz" ? (
             <ProfilePlot
-              title="Top view"
+              title="Plan view"
               subtitle="Runway-centered x-y plate: shows active procedure branches selected in the 3D procedure panel"
               mode="top"
               tracks={profile.aircraftTracks}
