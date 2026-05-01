@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   useApp,
   type RunwayProfileViewMode,
@@ -16,6 +16,8 @@ import type {
 const METERS_PER_NM = 1852;
 const METERS_PER_FOOT = 0.3048;
 
+type DistanceUnit = "nm" | "m";
+
 interface PlotDomain {
   minX: number;
   maxX: number;
@@ -27,6 +29,7 @@ interface ProfilePlotProps {
   title: string;
   subtitle: string;
   mode: "side" | "top";
+  distanceUnit: DistanceUnit;
   tracks: ProfileAircraftTrack[];
   plateRoutes: HorizontalPlateRoute[];
   referenceMarks: RunwayReferenceMark[];
@@ -98,12 +101,28 @@ function formatNm(valueM: number): string {
   return `${Math.abs(valueNm) < 0.05 ? "0.0" : valueNm.toFixed(1)} NM`;
 }
 
+function formatMeters(valueM: number): string {
+  return `${Math.abs(valueM) < 0.5 ? "0" : Math.round(valueM).toLocaleString()} m`;
+}
+
 function formatFeet(valueM: number): string {
   return `${Math.round(valueM / METERS_PER_FOOT).toLocaleString()} ft`;
 }
 
-function formatProfileAxisValue(mode: "side" | "top", valueM: number): string {
-  return mode === "side" ? formatFeet(valueM) : formatNm(valueM);
+function formatDistance(valueM: number, unit: DistanceUnit): string {
+  return unit === "nm" ? formatNm(valueM) : formatMeters(valueM);
+}
+
+function distanceUnitLabel(unit: DistanceUnit): string {
+  return unit === "nm" ? "NM" : "m";
+}
+
+function formatProfileAxisValue(
+  mode: "side" | "top",
+  valueM: number,
+  distanceUnit: DistanceUnit,
+): string {
+  return mode === "side" ? formatFeet(valueM) : formatDistance(valueM, distanceUnit);
 }
 
 function routeLabel(route: HorizontalPlateRoute): string {
@@ -227,6 +246,7 @@ function ProfilePlot({
   title,
   subtitle,
   mode,
+  distanceUnit,
   tracks,
   plateRoutes,
   referenceMarks,
@@ -273,9 +293,10 @@ function ProfilePlot({
   const zeroX = plotX(0);
   const zeroY = plotY(0);
   const yScale = plotHeight / ySpan;
+  const horizontalTickUnitM = distanceUnit === "nm" ? METERS_PER_NM : 1;
   const xTicks = useMemo(
-    () => buildLinearUnitTicks(domain.minX, domain.maxX, 7, METERS_PER_NM),
-    [domain.maxX, domain.minX],
+    () => buildLinearUnitTicks(domain.minX, domain.maxX, 7, horizontalTickUnitM),
+    [domain.maxX, domain.minX, horizontalTickUnitM],
   );
   const visibleReferenceMarks = useMemo(
     () => selectVisibleReferenceMarks(displayedReferenceMarks, plotX),
@@ -355,7 +376,7 @@ function ProfilePlot({
                 textAnchor="middle"
                 className="runway-profile-axis-tick"
               >
-                {formatNm(tick)}
+                {formatDistance(tick, distanceUnit)}
               </text>
             </g>
           );
@@ -576,7 +597,7 @@ function ProfilePlot({
           textAnchor="middle"
           className="runway-profile-axis-label"
         >
-          x: approach distance from threshold (NM)
+          x: approach distance from threshold ({distanceUnitLabel(distanceUnit)})
         </text>
         <text
           x={18}
@@ -587,14 +608,14 @@ function ProfilePlot({
         >
           {mode === "side"
             ? "z: height above threshold (ft)"
-            : "y: lateral offset from centerline (NM)"}
+            : `y: lateral offset from centerline (${distanceUnitLabel(distanceUnit)})`}
         </text>
 
         <text x={18} y={marginTop + 10} className="runway-profile-axis-tick">
-          {formatProfileAxisValue(mode, domain.maxY)}
+          {formatProfileAxisValue(mode, domain.maxY, distanceUnit)}
         </text>
         <text x={18} y={marginTop + plotHeight} className="runway-profile-axis-tick">
-          {formatProfileAxisValue(mode, domain.minY)}
+          {formatProfileAxisValue(mode, domain.minY, distanceUnit)}
         </text>
       </svg>
     </section>
@@ -612,6 +633,7 @@ export default function RunwayTrajectoryProfilePanel() {
     trajectoryDataSource,
   } = useApp();
   const profile = useRunwayTrajectoryProfile();
+  const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>("nm");
 
   if (!isRunwayProfileOpen || !selectedProfileRunwayIdent) return null;
 
@@ -647,6 +669,18 @@ export default function RunwayTrajectoryProfilePanel() {
                 onClick={() => setRunwayProfileViewMode(mode.value)}
               >
                 {mode.label}
+              </button>
+            ))}
+          </div>
+          <div className="runway-profile-unit-switch" role="group" aria-label="Distance unit">
+            {(["nm", "m"] as const).map((unit) => (
+              <button
+                key={unit}
+                type="button"
+                className={distanceUnit === unit ? "active" : ""}
+                onClick={() => setDistanceUnit(unit)}
+              >
+                {unit === "nm" ? "NM" : "m"}
               </button>
             ))}
           </div>
@@ -691,6 +725,7 @@ export default function RunwayTrajectoryProfilePanel() {
               title="Vertical profile"
               subtitle="Runway-aligned x-z profile: follows the active procedure branch selected in the 3D procedure panel"
               mode="side"
+              distanceUnit={distanceUnit}
               tracks={profile.aircraftTracks}
               plateRoutes={profile.plateRoutes}
               referenceMarks={profile.referenceMarks}
@@ -701,6 +736,7 @@ export default function RunwayTrajectoryProfilePanel() {
               title="Plan view"
               subtitle="Runway-centered x-y plate: shows active procedure branches selected in the 3D procedure panel"
               mode="top"
+              distanceUnit={distanceUnit}
               tracks={profile.aircraftTracks}
               plateRoutes={profile.plateRoutes}
               referenceMarks={profile.referenceMarks}

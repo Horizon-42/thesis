@@ -55,6 +55,8 @@ const MISSED_OUTBOUND_PROJECTED_LENGTH_M = 6400;
 const IMPORTANT_FIX_ROLES = new Set(["IAF", "IF", "FAF", "MAPT", "MAHF"]);
 const METERS_PER_NM = 1852;
 
+type DistanceUnit = "nm" | "m";
+
 function readRouteParams(): {
   airport: string | null;
   runway: string | null;
@@ -194,16 +196,27 @@ function chartTicksByStep(domain: { min: number; max: number }, step: number): n
   return ticks;
 }
 
-function formatSignedNm(valueM: number): string {
+function formatSignedMeters(valueM: number): string {
+  if (Math.abs(valueM) < 0.5) return "0 m";
+  return `${valueM > 0 ? "+" : ""}${Math.round(valueM).toLocaleString()} m`;
+}
+
+function formatSignedDistance(valueM: number, unit: DistanceUnit): string {
+  if (unit === "m") return formatSignedMeters(valueM);
   const valueNm = nmFromMeters(valueM);
   if (Math.abs(valueNm) < 0.05) return "0.0 NM";
   return `${valueNm > 0 ? "+" : ""}${valueNm.toFixed(1)} NM`;
 }
 
-function formatPlanNm(valueM: number): string {
-  const valueNm = nmFromMeters(valueM);
-  if (Math.abs(valueNm) < 0.05) return "0.0 NM";
-  return `${valueNm > 0 ? "+" : ""}${valueNm.toFixed(1)} NM`;
+function distanceUnitLabel(unit: DistanceUnit): string {
+  return unit === "nm" ? "NM" : "m";
+}
+
+function horizontalTickStepM(spanM: number, tickCount: number, unit: DistanceUnit): number {
+  if (unit === "nm") {
+    return niceChartStep(spanM / METERS_PER_NM, tickCount) * METERS_PER_NM;
+  }
+  return niceChartStep(spanM, tickCount);
 }
 
 function hasNamedLegEndpoint(leg: ProcedureDetailLeg): boolean {
@@ -436,6 +449,7 @@ interface SvgChartProps {
   runwayMarker: ProcedureRunwayMarker | null;
   focusedFixId: string | null;
   focusedBranchId: string | null;
+  distanceUnit: DistanceUnit;
   onPreviewFix: (fixId: string | null, branchId: string | null) => void;
   onSelectFix: (fixId: string, branchId: string) => void;
   onPreviewBranch: (branchId: string | null) => void;
@@ -447,6 +461,7 @@ function ProcedurePlanView({
   runwayMarker,
   focusedFixId,
   focusedBranchId,
+  distanceUnit,
   onPreviewFix,
   onSelectFix,
   onPreviewBranch,
@@ -487,10 +502,11 @@ function ProcedurePlanView({
     PLAN_SVG_HEIGHT - SVG_PADDING_Y,
     SVG_PADDING_Y,
   );
-  const planTickStep = niceChartStep(
-    Math.max(xDomain.max - xDomain.min, yDomain.max - yDomain.min) / METERS_PER_NM,
+  const planTickStep = horizontalTickStepM(
+    Math.max(xDomain.max - xDomain.min, yDomain.max - yDomain.min),
     PLAN_AXIS_TICK_COUNT,
-  ) * METERS_PER_NM;
+    distanceUnit,
+  );
   const xTicks = chartTicksByStep(xDomain, planTickStep);
   const yTicks = chartTicksByStep(yDomain, planTickStep);
   const zeroY = yDomain.min <= 0 && yDomain.max >= 0 ? scaleY(0) : null;
@@ -563,7 +579,7 @@ function ProcedurePlanView({
               y={PLAN_SVG_HEIGHT - SVG_PADDING_Y + 24}
               className="procedure-details-axis-label is-centered"
             >
-              {formatPlanNm(tick)}
+              {formatSignedDistance(tick, distanceUnit)}
             </text>
           </g>
         );
@@ -588,7 +604,7 @@ function ProcedurePlanView({
               className="procedure-details-axis-tick"
             />
             <text x={SVG_PADDING_X - 12} y={y + 4} className="procedure-details-axis-label">
-              {formatPlanNm(tick)}
+              {formatSignedDistance(tick, distanceUnit)}
             </text>
           </g>
         );
@@ -618,7 +634,7 @@ function ProcedurePlanView({
         y={PLAN_SVG_HEIGHT - 10}
         className="procedure-details-axis-title"
       >
-        East offset from origin (NM)
+        East offset from origin ({distanceUnitLabel(distanceUnit)})
       </text>
       <text
         x={18}
@@ -626,7 +642,7 @@ function ProcedurePlanView({
         transform={`rotate(-90 18 ${SVG_PADDING_Y})`}
         className="procedure-details-axis-title is-vertical"
       >
-        North offset from origin (NM)
+        North offset from origin ({distanceUnitLabel(distanceUnit)})
       </text>
 
       {polylines.map((branch) => {
@@ -796,6 +812,7 @@ function ProcedureVerticalProfile({
   polylines,
   focusedFixId,
   focusedBranchId,
+  distanceUnit,
   onPreviewFix,
   onSelectFix,
   onPreviewBranch,
@@ -820,9 +837,10 @@ function ProcedureVerticalProfile({
     branch.stationedPoints.map((entry) => entry.stationM),
   );
   const stationDomain = chartDomain(allStations.length > 0 ? allStations : [0], 0.1);
-  const stationTickStep = niceChartStep(
+  const stationTickStep = horizontalTickStepM(
     stationDomain.max - stationDomain.min,
     PROFILE_AXIS_TICK_COUNT,
+    distanceUnit,
   );
   const stationTicks = chartTicksByStep(stationDomain, stationTickStep);
   const scaleX = chartScale(
@@ -888,7 +906,7 @@ function ProcedureVerticalProfile({
               y={PROFILE_SVG_HEIGHT - SVG_PADDING_Y + 22}
               className="procedure-details-axis-label is-centered"
             >
-              {formatSignedNm(tick)}
+              {formatSignedDistance(tick, distanceUnit)}
             </text>
           </g>
         );
@@ -918,7 +936,7 @@ function ProcedureVerticalProfile({
         y={PROFILE_SVG_HEIGHT - 10}
         className="procedure-details-axis-title"
       >
-        Along-track distance from MAPT / runway
+        Along-track distance from MAPT / runway ({distanceUnitLabel(distanceUnit)})
       </text>
       <text
         x={18}
@@ -1053,6 +1071,7 @@ export default function ProcedureDetailsPage() {
   const [previewFixId, setPreviewFixId] = useState<string | null>(null);
   const [previewBranchId, setPreviewBranchId] = useState<string | null>(null);
   const [selectedGlossaryTerm, setSelectedGlossaryTerm] = useState<string | null>(null);
+  const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>("nm");
   const [indexManifest, setIndexManifest] = useState<ProcedureDetailsIndexManifest | null>(null);
   const [chartsManifest, setChartsManifest] = useState<ProcedureChartsManifest | null>(null);
   const [procedureDocument, setProcedureDocument] = useState<ProcedureDetailDocument | null>(null);
@@ -1536,6 +1555,18 @@ export default function ProcedureDetailsPage() {
                       {focusedFix?.ident ?? "—"}
                     </span>
                   </div>
+                  <div className="procedure-details-unit-switch" role="group" aria-label="Distance unit">
+                    {(["nm", "m"] as const).map((unit) => (
+                      <button
+                        key={unit}
+                        type="button"
+                        className={distanceUnit === unit ? "is-active" : ""}
+                        onClick={() => setDistanceUnit(unit)}
+                      >
+                        {unit === "nm" ? "NM" : "m"}
+                      </button>
+                    ))}
+                  </div>
                 </section>
 
                 <section className="procedure-details-chart-stack">
@@ -1547,7 +1578,7 @@ export default function ProcedureDetailsPage() {
                         <p className="procedure-details-section-intro">
                           Transition branches stay visible, but the focused branch and fix are
                           emphasized so the geometry is easier to read. Grid labels show
-                          east/north offsets in nautical miles from the local origin.
+                          east/north offsets in {distanceUnit === "nm" ? "nautical miles" : "meters"} from the local origin.
                         </p>
                       </div>
 
@@ -1575,6 +1606,7 @@ export default function ProcedureDetailsPage() {
                       runwayMarker={runwayMarker}
                       focusedFixId={focusedFixId}
                       focusedBranchId={focusedBranchId}
+                      distanceUnit={distanceUnit}
                       onPreviewFix={handlePreviewFix}
                       onSelectFix={handleSelectFix}
                       onPreviewBranch={setPreviewBranchId}
@@ -1589,7 +1621,7 @@ export default function ProcedureDetailsPage() {
                         <h3>Vertical profile aligned to the runway/MAPT</h3>
                         <p className="procedure-details-section-intro">
                           The horizontal axis is rebased at the runway/MAPT: approach fixes are
-                          shown inbound on the negative side in nautical miles, and
+                          shown inbound on the negative side in {distanceUnit === "nm" ? "nautical miles" : "meters"}, and
                           missed-approach fixes continue outbound on the positive side. Altitudes
                           are shown in feet and repaired for display when source altitude
                           constraints are missing.
@@ -1600,6 +1632,7 @@ export default function ProcedureDetailsPage() {
                       polylines={polylines}
                       focusedFixId={focusedFixId}
                       focusedBranchId={focusedBranchId}
+                      distanceUnit={distanceUnit}
                       onPreviewFix={handlePreviewFix}
                       onSelectFix={handleSelectFix}
                       onPreviewBranch={setPreviewBranchId}

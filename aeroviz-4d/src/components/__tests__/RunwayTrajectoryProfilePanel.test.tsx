@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { RunwayTrajectoryProfileState } from "../../hooks/useRunwayTrajectoryProfile";
 import RunwayTrajectoryProfilePanel from "../RunwayTrajectoryProfilePanel";
 
@@ -120,5 +120,16 @@ describe("RunwayTrajectoryProfilePanel", () => {
     expect(container.querySelectorAll('[data-fix-ident="WARMS"]')).toHaveLength(1);
     expect(container.textContent).toContain("BUTTS");
     expect(container.textContent).not.toContain("WARMS");
+  });
+
+  it("switches profile distance axes from nautical miles to metres", () => {
+    const { container } = render(<RunwayTrajectoryProfilePanel />);
+
+    expect(container.textContent).toContain("x: approach distance from threshold (NM)");
+
+    fireEvent.click(screen.getByRole("button", { name: "m" }));
+
+    expect(container.textContent).toContain("x: approach distance from threshold (m)");
+    expect(container.textContent).toContain("m");
   });
 });

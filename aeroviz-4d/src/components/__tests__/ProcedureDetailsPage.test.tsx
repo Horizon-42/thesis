@@ -289,6 +289,27 @@ describe("ProcedureDetailsPage", () => {
     expect(await screen.findByText("final_approach_fix")).toBeTruthy();
   });
 
+  it("switches procedure-details distance axes from nautical miles to metres", async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith("/procedure-details/index.json")) return Promise.resolve(jsonResponse(sampleIndex));
+      if (url.endsWith("/charts/index.json")) return Promise.resolve(jsonResponse(sampleCharts));
+      if (url.endsWith("/procedure-details/KRDU-R05LY-RW05L.json")) {
+        return Promise.resolve(jsonResponse(sampleDocument));
+      }
+      return Promise.resolve(notFoundResponse());
+    });
+
+    render(<ProcedureDetailsPage />);
+
+    expect(await screen.findByText("East offset from origin (NM)")).toBeTruthy();
+    expect(screen.getByText("Along-track distance from MAPT / runway (NM)")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "m" }));
+
+    expect(screen.getByText("East offset from origin (m)")).toBeTruthy();
+    expect(screen.getByText("Along-track distance from MAPT / runway (m)")).toBeTruthy();
+  });
+
   it("shows a friendly empty state when the richer dataset is missing", async () => {
     appState.activeAirportCode = "CYVR";
     fetchMock.mockResolvedValue(notFoundResponse());
