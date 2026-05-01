@@ -73,7 +73,7 @@ function diagnostic(
   return { code, message, severity, segmentId, sourceRefs };
 }
 
-function sampleStationValues(startStationNm: number, endStationNm: number, stepNm: number): number[] {
+export function sampleStationValues(startStationNm: number, endStationNm: number, stepNm: number): number[] {
   const safeStepNm = Math.max(stepNm, 0.01);
   const count = Math.max(1, Math.ceil((endStationNm - startStationNm) / safeStepNm));
   return Array.from({ length: count + 1 }, (_, index) => {
@@ -115,7 +115,7 @@ function pointAfterEnd(centerline: GeoPoint[], thresholdStationNm: number, stati
   return offsetPoint(last, bearingRad(prev, last), (stationNm - thresholdStationNm) * METERS_PER_NM);
 }
 
-function buildSampledCenterline(
+export function buildSampledCenterline(
   source: PolylineGeometry3D,
   startStationNm: number,
   endStationNm: number,
@@ -148,7 +148,7 @@ function primaryHalfWidthAtStation(
   );
 }
 
-function buildRibbon(
+export function buildVariableWidthRibbon(
   geometryId: string,
   centerline: PolylineGeometry3D,
   stations: number[],
@@ -224,13 +224,13 @@ export function buildLnavFinalOea(
     endStationNm,
     opts.samplingStepNm,
   );
-  const primary = buildRibbon(
+  const primary = buildVariableWidthRibbon(
     `${segment.segmentId}:lnav-oea-primary`,
     oeaCenterline,
     stations,
     (stationNm) => primaryHalfWidthAtStation(stationNm, opts),
   );
-  const secondaryOuter = buildRibbon(
+  const secondaryOuter = buildVariableWidthRibbon(
     `${segment.segmentId}:lnav-oea-secondary-outer`,
     oeaCenterline,
     stations,
