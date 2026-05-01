@@ -10,7 +10,7 @@ import {
   buildTfLeg,
   computeStationAxis,
 } from "../procedureSegmentGeometry";
-import { buildRfLeg } from "../procedureRfGeometry";
+import { buildRfLeg, buildRfParallelEnvelope } from "../procedureRfGeometry";
 import { METERS_PER_NM, distanceNm, offsetPoint } from "../procedureGeoMath";
 
 const fixes = new Map<string, ProcedurePackageFix>([
@@ -318,6 +318,13 @@ describe("procedure segment geometry kernel", () => {
     expect(bundle.centerline.geodesicLengthNm).toBeCloseTo(Math.PI, 2);
     expect(bundle.primaryEnvelope).toBeDefined();
     expect(bundle.secondaryEnvelope).toBeDefined();
+    expect(bundle.primaryEnvelope?.constructionKind).toBe("RF_PARALLEL_ARC");
+    expect(bundle.primaryEnvelope?.rfEnvelopeCase).toBe("RF_CASE_1");
+    expect(bundle.primaryEnvelope?.radialBoundsNm).toEqual({
+      innerRadiusNm: 1.4,
+      outerRadiusNm: 2.6,
+      nominalRadiusNm: 2,
+    });
     const leftRadiusErrors = bundle.primaryEnvelope?.leftGeoBoundary.map((point) =>
       Math.abs(distanceNm({ ...rfCenter, altM: point.altM }, point) - 1.4),
     ) ?? [];
@@ -327,6 +334,88 @@ describe("procedure segment geometry kernel", () => {
     expect(Math.max(...leftRadiusErrors)).toBeLessThan(0.005);
     expect(Math.max(...rightRadiusErrors)).toBeLessThan(0.005);
     expect(bundle.turnJunctions).toEqual([]);
+  });
+
+  it("keeps RF Case 2 inner envelope geometry finite when the inside radius collapses", () => {
+    const case2Center = { lonDeg: -78.86, latDeg: 35.84, altM: 0 };
+    const case2Start = offsetPoint(case2Center, Math.PI / 2, 0.5 * METERS_PER_NM);
+    const case2End = offsetPoint(case2Center, 0, 0.5 * METERS_PER_NM);
+    const case2Fixes = new Map<string, ProcedurePackageFix>([
+      [
+        "fix:CASE2_START",
+        {
+          fixId: "fix:CASE2_START",
+          ident: "CASE2START",
+          role: ["IF"],
+          lonDeg: case2Start.lonDeg,
+          latDeg: case2Start.latDeg,
+          altFtMsl: 3000,
+          annotations: [],
+          sourceRefs: [],
+        },
+      ],
+      [
+        "fix:CASE2_END",
+        {
+          fixId: "fix:CASE2_END",
+          ident: "CASE2END",
+          role: ["FAF"],
+          lonDeg: case2End.lonDeg,
+          latDeg: case2End.latDeg,
+          altFtMsl: 2200,
+          annotations: [],
+          sourceRefs: [],
+        },
+      ],
+    ]);
+    const case2Leg: ProcedurePackageLeg = {
+      ...rfLeg,
+      startFixId: "fix:CASE2_START",
+      endFixId: "fix:CASE2_END",
+      arcRadiusNm: 0.5,
+      centerLatDeg: case2Center.latDeg,
+      centerLonDeg: case2Center.lonDeg,
+    };
+    const centerline = buildRfLeg(case2Leg, case2Fixes, {
+      samplingStepNm: 0.25,
+    }).geometry;
+    expect(centerline).not.toBeNull();
+    if (!centerline) return;
+
+    const envelope = buildRfParallelEnvelope(
+      "segment:rf-case2:primary",
+      "PRIMARY",
+      centerline,
+      0.6,
+    );
+
+    expect(envelope).not.toBeNull();
+    if (!envelope) return;
+    expect(envelope.rfEnvelopeCase).toBe("RF_CASE_2_INNER_COLLAPSED");
+    expect(envelope.radialBoundsNm).toEqual({
+      innerRadiusNm: 0,
+      outerRadiusNm: 1.1,
+      nominalRadiusNm: 0.5,
+    });
+    expect(
+      envelope.leftGeoBoundary.every((point) =>
+        Number.isFinite(point.lonDeg) && Number.isFinite(point.latDeg),
+      ),
+    ).toBe(true);
+    expect(
+      Math.max(
+        ...envelope.leftGeoBoundary.map((point) =>
+          distanceNm({ ...case2Center, altM: point.altM }, point),
+        ),
+      ),
+    ).toBeLessThan(0.005);
+    expect(
+      Math.max(
+        ...envelope.rightGeoBoundary.map((point) =>
+          Math.abs(distanceNm({ ...case2Center, altM: point.altM }, point) - 1.1),
+        ),
+      ),
+    ).toBeLessThan(0.005);
   });
 
   it("marks visual turn-fill patches inside final segments as diagnostics", () => {

@@ -56,6 +56,13 @@ export interface WidthSample {
 export interface LateralEnvelopeGeometry {
   geometryId: string;
   envelopeType: "PRIMARY" | "SECONDARY";
+  constructionKind?: "STRAIGHT_OFFSET" | "RF_PARALLEL_ARC";
+  rfEnvelopeCase?: "RF_CASE_1" | "RF_CASE_2_INNER_COLLAPSED";
+  radialBoundsNm?: {
+    innerRadiusNm: number;
+    outerRadiusNm: number;
+    nominalRadiusNm: number;
+  };
   leftBoundary: CartesianPoint[];
   rightBoundary: CartesianPoint[];
   leftGeoBoundary: GeoPoint[];
@@ -201,6 +208,7 @@ export function buildStraightEnvelope(
   return {
     geometryId,
     envelopeType,
+    constructionKind: "STRAIGHT_OFFSET",
     leftBoundary: leftGeoBoundary.map(toCartesian),
     rightBoundary: rightGeoBoundary.map(toCartesian),
     leftGeoBoundary,

@@ -117,10 +117,14 @@ export function buildRfParallelEnvelope(
 
   const inwardRadiusNm = centerline.arcRadiusNm - halfWidthNm;
   const outwardRadiusNm = centerline.arcRadiusNm + halfWidthNm;
-  if (inwardRadiusNm <= 0) return null;
+  const clampedInwardRadiusNm = Math.max(0, inwardRadiusNm);
+  const rfEnvelopeCase =
+    inwardRadiusNm > 0 ? "RF_CASE_1" : "RF_CASE_2_INNER_COLLAPSED";
 
-  const leftRadiusNm = centerline.turnDirection === "LEFT" ? inwardRadiusNm : outwardRadiusNm;
-  const rightRadiusNm = centerline.turnDirection === "LEFT" ? outwardRadiusNm : inwardRadiusNm;
+  const leftRadiusNm =
+    centerline.turnDirection === "LEFT" ? clampedInwardRadiusNm : outwardRadiusNm;
+  const rightRadiusNm =
+    centerline.turnDirection === "LEFT" ? outwardRadiusNm : clampedInwardRadiusNm;
   const sampleCount = centerline.geoPositions.length - 1;
   const leftGeoBoundary = centerline.geoPositions.map((point, index) =>
     pointOnCircle(
@@ -144,6 +148,13 @@ export function buildRfParallelEnvelope(
   return {
     geometryId,
     envelopeType,
+    constructionKind: "RF_PARALLEL_ARC",
+    rfEnvelopeCase,
+    radialBoundsNm: {
+      innerRadiusNm: clampedInwardRadiusNm,
+      outerRadiusNm: outwardRadiusNm,
+      nominalRadiusNm: centerline.arcRadiusNm,
+    },
     leftBoundary: leftGeoBoundary.map(toCartesian),
     rightBoundary: rightGeoBoundary.map(toCartesian),
     leftGeoBoundary,

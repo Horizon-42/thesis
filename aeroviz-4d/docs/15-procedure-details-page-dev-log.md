@@ -528,3 +528,38 @@
 
 ### Exact Next Recommended Step
 - Add RF envelope case metadata and Case 1/Case 2 acceptance tests in the TypeScript geometry kernel.
+
+## 2026-05-01 23:55 CEST
+
+### Goal Of This Session
+- Add explicit RF envelope case metadata and prevent inner-side RF envelope collapse from breaking geometry construction.
+
+### Decisions Locked
+- `LateralEnvelopeGeometry` now identifies whether an envelope was built as `STRAIGHT_OFFSET` or `RF_PARALLEL_ARC`.
+- RF envelopes now carry:
+  - `rfEnvelopeCase`;
+  - nominal radius;
+  - inner radius;
+  - outer radius.
+- Case 1 means the inside parallel radius remains positive.
+- Case 2 currently means the inside parallel radius collapses to the RF center and stays finite/renderable. This is a first acceptance-safe geometry guard, not a full FAA Figure 1-2-11 construction claim.
+
+### Files Changed
+- `src/utils/procedureRfGeometry.ts`
+- `src/utils/procedureSegmentGeometry.ts`
+- `src/utils/__tests__/procedureSegmentGeometry.test.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/utils/__tests__/procedureSegmentGeometry.test.ts`
+
+### Current Status
+- RF parallel envelopes no longer fall back to straight offsets when the inside radius is zero or negative.
+- Tests cover both RF Case 1 metadata and finite Case 2 inner-collapsed geometry.
+
+### Known Blockers
+- This is still a conservative Case 2 rendering guard, not the full FAA RF OEA Case 2 construction.
+- Mixed TF/RF stitching still needs explicit transition geometry.
+
+### Exact Next Recommended Step
+- Use the RF case metadata in render-bundle/debug output, then continue segment-level trajectory assessment for the 2D profile.
