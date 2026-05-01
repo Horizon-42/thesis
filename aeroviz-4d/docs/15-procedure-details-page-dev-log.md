@@ -309,3 +309,56 @@
 
 ### Exact Next Recommended Step
 - Inspect real cifparse procedure-record keys for RF legs, map the verified radius/center/direction fields into `ProcedureLeg`, and regenerate a procedure-detail fixture that exercises the RF kernel from exported data.
+
+## 2026-05-01 23:38 CEST
+
+### Goal Of This Session
+- Populate RF metadata from real CIFP/cifparse procedure records instead of synthetic test-only data.
+- Resolve RF center fixes into exported procedure-detail JSON so frontend RF construction can receive center coordinates.
+
+### Facts Discovered
+- The `aviation` environment has a PATH issue: `conda run -n aviation python` resolves to Homebrew Python, but `conda run -n aviation pytest` uses the correct conda environment interpreter.
+- Real cifparse RF procedure records expose:
+  - `turn_direction`
+  - `arc_radius`
+  - `center_fix`
+  - `center_fix_region`
+- KATL `ZELAN4` branch `4RW27R` has a real RF leg suitable for regression coverage.
+
+### Decisions Locked
+- `ProcedureLeg` now stores both RF source identifiers and resolved metadata:
+  - `turn_direction`
+  - `arc_radius_nm`
+  - `center_fix_ident`
+  - `center_fix_region_code`
+  - optional resolved center lat/lon.
+- `build_fix_index(...)` includes RF center fixes when resolving the procedure fix catalog.
+- Exported procedure-detail path metadata now includes `centerFixRef` plus `centerLatDeg/centerLonDeg` when the center fix resolves.
+- `agent.md` now documents the explicit conda environment Python path and recommends `conda run -n aviation pytest ...` for Python tests.
+
+### Files Changed
+- `python/cifp_parser.py`
+- `python/preprocess_procedures.py`
+- `python/tests/test_preprocess_procedures.py`
+- `src/data/procedureDetails.ts`
+- `agent.md`
+
+### Commands Run / Checks Passed
+- `conda run -n aviation pytest python/tests/test_preprocess_procedures.py`
+- `conda run -n aviation pytest python/tests`
+- `npm test -- --run src/data/__tests__/procedurePackageAdapter.test.ts src/utils/__tests__/procedureSegmentGeometry.test.ts src/data/__tests__/procedureRenderBundle.test.ts`
+- `npm run build`
+- `npm test -- --run`
+
+### Current Status
+- Real CIFP RF fields now flow into the Python procedure model.
+- RF center fixes are included in fix resolution and exported as center coordinates in procedure-detail JSON.
+- Python tests now cover a real KATL RF leg through parser, fix resolution, and branch document export.
+
+### Known Blockers
+- Generated public procedure-detail assets still need regeneration to contain the new RF metadata.
+- KRDU may not contain RF legs in the current selected RNAV procedures, so RF validation may need a non-KRDU fixture or a synthetic exported fixture for frontend acceptance.
+- RF protected envelope construction is still sampled straight-ribbon geometry rather than full RF Case 1/Case 2 OEA.
+
+### Exact Next Recommended Step
+- Regenerate procedure-detail assets for an RF-containing airport/procedure fixture, then add an end-to-end frontend render-bundle test proving exported RF metadata reaches `buildRfLeg(...)`.
