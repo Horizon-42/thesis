@@ -53,4 +53,30 @@ describe("procedure segment assessment", () => {
     expect(assessment?.activeSegmentId).toBe("branch:R:profile-segment:2");
     expect(Math.abs(assessment?.crossTrackErrorM ?? 0)).toBeCloseTo(700, 6);
   });
+
+  it("uses render-bundle assessment segment widths when they are available", () => {
+    const assessment = classifyPointAgainstHorizontalPlateRoutes(
+      { xM: 7_500, yM: 700 },
+      [
+        {
+          ...route,
+          assessmentSegments: [
+            {
+              segmentId: "TEST-R23RY:branch:R:segment:final:1",
+              primaryHalfWidthM: 500,
+              secondaryHalfWidthM: 900,
+              points: [
+                { xM: 10_000, yM: 0, zM: 1_000 },
+                { xM: 0, yM: 0, zM: 0 },
+              ],
+            },
+          ],
+        },
+      ],
+    );
+
+    expect(assessment?.activeSegmentId).toBe("TEST-R23RY:branch:R:segment:final:1");
+    expect(assessment?.containment).toBe("SECONDARY");
+    expect(Math.abs(assessment?.crossTrackErrorM ?? 0)).toBeCloseTo(700, 6);
+  });
 });

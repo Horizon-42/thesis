@@ -1,4 +1,5 @@
 import type { ProcedureRouteViewModel } from "../data/procedureRoutes";
+import type { ProcedureRenderBundle } from "../data/procedureRenderBundle";
 import type { RunwayProperties } from "../types/geojson-aviation";
 
 const EARTH_RADIUS_M = 6_378_137;
@@ -47,9 +48,18 @@ export interface HorizontalPlateRoutePoint extends RunwayProfilePoint {
   role: string;
 }
 
+export interface HorizontalPlateAssessmentSegment {
+  segmentId: string;
+  primaryHalfWidthM: number;
+  secondaryHalfWidthM: number | null;
+  points: RunwayProfilePoint[];
+}
+
 export interface HorizontalPlateRoute {
   routeId: string;
   branchId: string;
+  procedureUid?: string;
+  branchKey?: string;
   procedureName: string;
   procedureFamily: string;
   procedureIdent: string;
@@ -59,6 +69,7 @@ export interface HorizontalPlateRoute {
   defaultVisible: boolean;
   halfWidthM: number;
   points: HorizontalPlateRoutePoint[];
+  assessmentSegments?: HorizontalPlateAssessmentSegment[];
 }
 
 export interface RunwayReferenceMark {
@@ -383,6 +394,8 @@ export function buildHorizontalPlateRoutes(
     .map((route) => ({
       routeId: route.routeId,
       branchId: route.branchId,
+      procedureUid: route.procedureUid,
+      branchKey: route.branchKey,
       procedureName: route.procedureName,
       procedureIdent: route.procedureIdent,
       procedureFamily: route.procedureFamily ?? "UNKNOWN",
@@ -394,6 +407,64 @@ export function buildHorizontalPlateRoutes(
       points: buildProjectedRoutePoints(route, frame),
     }))
     .filter((route) => route.points.length >= 2);
+}
+
+function maxHalfWidthM(samples: Array<{ halfWidthNm: number }> | undefined): number | null {
+  if (!samples || samples.length === 0) return null;
+  return Math.max(...samples.map((sample) => sample.halfWidthNm)) * 1852;
+}
+
+function renderBundleBranchKey(packageId: string, branchKey: string): string {
+  return `${packageId}:branch:${branchKey.toUpperCase()}`;
+}
+
+export function attachRenderBundleAssessmentSegments(
+  routes: HorizontalPlateRoute[],
+  renderBundles: ProcedureRenderBundle[],
+  frame: RunwayFrame,
+  runwayIdent: string,
+): HorizontalPlateRoute[] {
+  const normalizedRunway = normalizeRunwayIdent(runwayIdent);
+  const segmentsByRouteKey = new Map<string, HorizontalPlateAssessmentSegment[]>();
+
+  renderBundles.forEach((bundle) => {
+    bundle.branchBundles
+      .filter((branch) => normalizeRunwayIdent(branch.runwayId ?? "") === normalizedRunway)
+      .forEach((branch) => {
+        const assessmentSegments = branch.segmentBundles
+          .map((segmentBundle): HorizontalPlateAssessmentSegment | null => {
+            const centerline = segmentBundle.segmentGeometry.centerline;
+            if (centerline.geoPositions.length < 2) return null;
+
+            const primaryHalfWidthM =
+              maxHalfWidthM(segmentBundle.segmentGeometry.primaryEnvelope?.halfWidthNmSamples) ??
+              segmentBundle.segment.xttNm * 2 * 1852;
+            const secondaryHalfWidthM =
+              maxHalfWidthM(segmentBundle.segmentGeometry.secondaryEnvelope?.halfWidthNmSamples) ??
+              (segmentBundle.segment.secondaryEnabled ? segmentBundle.segment.xttNm * 3 * 1852 : null);
+
+            return {
+              segmentId: segmentBundle.segment.segmentId,
+              primaryHalfWidthM,
+              secondaryHalfWidthM,
+              points: centerline.geoPositions.map((point) =>
+                projectPositionToRunwayFrame(frame, point.lonDeg, point.latDeg, point.altM),
+              ),
+            };
+          })
+          .filter((segment): segment is HorizontalPlateAssessmentSegment => segment !== null);
+
+        if (assessmentSegments.length === 0) return;
+        segmentsByRouteKey.set(branch.branchId, assessmentSegments);
+      });
+  });
+
+  return routes.map((route) => {
+    if (!route.procedureUid || !route.branchKey) return route;
+    const routeKey = renderBundleBranchKey(route.procedureUid, route.branchKey);
+    const assessmentSegments = segmentsByRouteKey.get(routeKey);
+    return assessmentSegments ? { ...route, assessmentSegments } : route;
+  });
 }
 
 export function buildRunwayReferenceMarks(

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  attachRenderBundleAssessmentSegments,
   buildHorizontalPlateRoutes,
   buildRunwayReferenceMarks,
   buildRunwayFrame,
@@ -236,5 +237,88 @@ describe("runwayProfileGeometry", () => {
     expect(transitionRoute).toBeTruthy();
     expect(transitionRoute?.points[0].zM).toBeCloseTo(transitionRoute?.points[1].zM ?? 0, 6);
     expect(transitionRoute?.points[0].zM ?? 0).toBeGreaterThan(400);
+  });
+
+  it("attaches render-bundle segment geometry for profile assessment without replacing fix display points", () => {
+    const frame = buildRunwayFrame(runwayCollection, "RW09");
+    const routes = buildHorizontalPlateRoutes(procedureRoutes, frame, "RW09");
+    const enriched = attachRenderBundleAssessmentSegments(
+      routes,
+      [
+        {
+          packageId: "TEST-R09-RW09",
+          procedureId: "R09",
+          procedureName: "RNAV(GPS) RW09",
+          airportId: "TEST",
+          diagnostics: [],
+          branchBundles: [
+            {
+              branchId: "TEST-R09-RW09:branch:R",
+              branchName: "R",
+              branchRole: "STRAIGHT_IN",
+              runwayId: "RW09",
+              turnJunctions: [],
+              segmentBundles: [
+                {
+                  segment: {
+                    segmentId: "TEST-R09-RW09:branch:R:segment:final:1",
+                    xttNm: 0.3,
+                    secondaryEnabled: true,
+                  },
+                  legs: [],
+                  diagnostics: [],
+                  finalOea: null,
+                  alignedConnector: null,
+                  segmentGeometry: {
+                    segmentId: "TEST-R09-RW09:branch:R:segment:final:1",
+                    centerline: {
+                      geoPositions: [
+                        { lonDeg: -0.005, latDeg: 0, altM: 300 },
+                        { lonDeg: 0, latDeg: 0, altM: 35 },
+                      ],
+                      worldPositions: [],
+                      geodesicLengthNm: 0.3,
+                      isArc: false,
+                    },
+                    stationAxis: { samples: [], totalLengthNm: 0.3 },
+                    primaryEnvelope: {
+                      geometryId: "primary",
+                      envelopeType: "PRIMARY",
+                      leftBoundary: [],
+                      rightBoundary: [],
+                      leftGeoBoundary: [],
+                      rightGeoBoundary: [],
+                      halfWidthNmSamples: [{ stationNm: 0, halfWidthNm: 0.6 }],
+                    },
+                    secondaryEnvelope: {
+                      geometryId: "secondary",
+                      envelopeType: "SECONDARY",
+                      leftBoundary: [],
+                      rightBoundary: [],
+                      leftGeoBoundary: [],
+                      rightGeoBoundary: [],
+                      halfWidthNmSamples: [{ stationNm: 0, halfWidthNm: 0.9 }],
+                    },
+                    turnJunctions: [],
+                    diagnostics: [],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ] as any,
+      frame,
+      "RW09",
+    );
+    const finalRoute = enriched.find((route) => route.branchId === "branch:R");
+
+    expect(finalRoute?.points).toHaveLength(3);
+    expect(finalRoute?.assessmentSegments).toHaveLength(1);
+    expect(finalRoute?.assessmentSegments?.[0]).toMatchObject({
+      segmentId: "TEST-R09-RW09:branch:R:segment:final:1",
+      primaryHalfWidthM: 1111.2,
+      secondaryHalfWidthM: 1666.8,
+    });
   });
 });

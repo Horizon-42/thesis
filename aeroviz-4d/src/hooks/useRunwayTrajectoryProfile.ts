@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { airportDataUrl } from "../data/airportData";
+import { loadProcedureRenderBundleData } from "../data/procedureRenderBundle";
 import { loadProcedureRouteData } from "../data/procedureRoutes";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 import {
+  attachRenderBundleAssessmentSegments,
   buildHorizontalPlateRoutes,
   buildRunwayReferenceMarksFromPlateRoutes,
   buildRunwayFrame,
@@ -150,13 +152,19 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
     Promise.all([
       fetchJson<RunwayFeatureCollection>(airportDataUrl(activeAirportCode, "runway.geojson")),
       loadProcedureRouteData(activeAirportCode),
+      loadProcedureRenderBundleData(activeAirportCode),
     ])
-      .then(([runwayCollection, procedureRouteData]) => {
+      .then(([runwayCollection, procedureRouteData, procedureRenderData]) => {
         if (cancelled) return;
 
         const runwayFrame = buildRunwayFrame(runwayCollection, selectedProfileRunwayIdent);
-        const plateRoutes = buildHorizontalPlateRoutes(
-          procedureRouteData.routes,
+        const plateRoutes = attachRenderBundleAssessmentSegments(
+          buildHorizontalPlateRoutes(
+            procedureRouteData.routes,
+            runwayFrame,
+            selectedProfileRunwayIdent,
+          ),
+          procedureRenderData.renderBundles,
           runwayFrame,
           selectedProfileRunwayIdent,
         );

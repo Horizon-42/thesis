@@ -600,3 +600,41 @@
 
 ### Exact Next Recommended Step
 - Feed profile assessment from `ProcedureRenderBundle` envelopes so primary/secondary/outside can be classified against the same geometry used by Procedure Details and 3D protected mode.
+
+## 2026-05-02 00:04 CEST
+
+### Goal Of This Session
+- Feed the 2D runway profile assessment from `ProcedureRenderBundle` segment geometry while preserving the existing readable fix-based profile display.
+
+### Decisions Locked
+- `HorizontalPlateRoute` now has optional `assessmentSegments`.
+- Display points remain the existing route/fix points, so the profile does not render dense geometry samples as fix markers.
+- Assessment segments are attached from `ProcedureRenderBundle` by matching `procedureUid + branchKey` to the scoped v3 branch id.
+- Containment now supports:
+  - `PRIMARY`;
+  - `SECONDARY`;
+  - `OUTSIDE`.
+- If render-bundle assessment segments are absent, the profile falls back to the existing route segment geometry.
+
+### Files Changed
+- `src/utils/runwayProfileGeometry.ts`
+- `src/utils/procedureSegmentAssessment.ts`
+- `src/utils/__tests__/runwayProfileGeometry.test.ts`
+- `src/utils/__tests__/procedureSegmentAssessment.test.ts`
+- `src/hooks/useRunwayTrajectoryProfile.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/utils/__tests__/procedureSegmentAssessment.test.ts src/utils/__tests__/runwayProfileGeometry.test.ts src/components/__tests__/RunwayTrajectoryProfilePanel.test.tsx`
+- `npm run build`
+
+### Current Status
+- 2D trajectory filtering and sample annotation can now use the same v3 segment centerlines and primary/secondary widths built for protected geometry.
+- The UI still keeps compact readable fix labels instead of dense sampled geometry labels.
+
+### Known Blockers
+- The hook currently loads both route data and render-bundle data, which duplicates some procedure-detail fetching.
+- Vertical error and event marker output are still not part of `SegmentAssessment`.
+
+### Exact Next Recommended Step
+- Refactor profile loading so one procedure-detail fetch builds both display routes and render bundles, then add vertical error/event markers for trajectory validation.
