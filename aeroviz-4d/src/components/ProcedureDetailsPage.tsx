@@ -33,6 +33,7 @@ import {
   buildRunwayMarker,
   findFix,
   nmFromMeters,
+  pointToEastNorth,
   procedureBranchForFix,
   type ProcedureBranchPolyline,
   type ProcedureChartPoint,
@@ -457,6 +458,72 @@ function legRfMetadataLabels(leg: ProcedureDetailLeg): string[] {
   return labels;
 }
 
+interface RfPlanMarker {
+  branchId: string;
+  legId: string;
+  centerX: number;
+  centerY: number;
+  endpointX: number;
+  endpointY: number;
+  radiusM: number;
+  label: string;
+}
+
+function buildRfPlanMarkers(
+  document: ProcedureDetailDocument | null,
+  polylines: ProcedureBranchPolyline[],
+): RfPlanMarker[] {
+  if (!document) return [];
+  const origin =
+    document.runway.threshold ??
+    document.fixes.find((fix) => fix.position)?.position ?? {
+      lon: 0,
+      lat: 0,
+    };
+  const pointByBranchAndFix = new Map(
+    polylines.flatMap((branch) =>
+      branch.points.map((point) => [`${branch.branchId}:${point.fixId}`, point] as const),
+    ),
+  );
+
+  return document.branches.flatMap((branch) =>
+    branch.legs.flatMap((leg): RfPlanMarker[] => {
+      if (
+        leg.path.pathTerminator.toUpperCase() !== "RF" ||
+        typeof leg.path.centerLatDeg !== "number" ||
+        !Number.isFinite(leg.path.centerLatDeg) ||
+        typeof leg.path.centerLonDeg !== "number" ||
+        !Number.isFinite(leg.path.centerLonDeg) ||
+        typeof leg.path.arcRadiusNm !== "number" ||
+        !Number.isFinite(leg.path.arcRadiusNm)
+      ) {
+        return [];
+      }
+      const endpoint = pointByBranchAndFix.get(`${branch.branchId}:${leg.path.endFixRef}`);
+      if (!endpoint) return [];
+
+      const center = pointToEastNorth(
+        leg.path.centerLonDeg,
+        leg.path.centerLatDeg,
+        origin.lon,
+        origin.lat,
+      );
+      return [
+        {
+          branchId: branch.branchId,
+          legId: leg.legId,
+          centerX: center.east,
+          centerY: center.north,
+          endpointX: endpoint.xM,
+          endpointY: endpoint.yM,
+          radiusM: leg.path.arcRadiusNm * METERS_PER_NM,
+          label: leg.path.centerFixRef ? formatFixRef(leg.path.centerFixRef) : "RF center",
+        },
+      ];
+    }),
+  );
+}
+
 function selectedBranchDefaultId(document: ProcedureDetailDocument | null): string | null {
   if (!document) return null;
   return (
@@ -470,6 +537,7 @@ function selectedBranchDefaultId(document: ProcedureDetailDocument | null): stri
 interface SvgChartProps {
   polylines: ProcedureBranchPolyline[];
   runwayMarker: ProcedureRunwayMarker | null;
+  rfMarkers: RfPlanMarker[];
   focusedFixId: string | null;
   focusedBranchId: string | null;
   distanceUnit: DistanceUnit;
@@ -482,6 +550,7 @@ interface SvgChartProps {
 function ProcedurePlanView({
   polylines,
   runwayMarker,
+  rfMarkers,
   focusedFixId,
   focusedBranchId,
   distanceUnit,
@@ -504,7 +573,14 @@ function ProcedurePlanView({
     const arrow = missedOutboundArrowForPoints(missedPoints);
     return arrow ? [arrow.target] : [];
   });
-  const domainPoints = [...allPoints, ...missedOutboundArrowTargets];
+  const rfDomainPoints = rfMarkers.flatMap((marker) => [
+    { xM: marker.centerX, yM: marker.centerY },
+    { xM: marker.centerX - marker.radiusM, yM: marker.centerY },
+    { xM: marker.centerX + marker.radiusM, yM: marker.centerY },
+    { xM: marker.centerX, yM: marker.centerY - marker.radiusM },
+    { xM: marker.centerX, yM: marker.centerY + marker.radiusM },
+  ]);
+  const domainPoints = [...allPoints, ...missedOutboundArrowTargets, ...rfDomainPoints];
   const plotWidth = SVG_WIDTH - SVG_PADDING_X * 2;
   const plotHeight = PLAN_SVG_HEIGHT - SVG_PADDING_Y * 2;
   const rawXDomain = chartDomain(domainPoints.map((point) => point.xM), 0.18);
@@ -778,6 +854,48 @@ function ProcedurePlanView({
         </g>
       ) : null}
 
+      {rfMarkers.map((marker) => {
+        const isFocused = !focusedBranchId || marker.branchId === focusedBranchId;
+        const centerX = scaleX(marker.centerX);
+        const centerY = scaleY(marker.centerY);
+        const endpointX = scaleX(marker.endpointX);
+        const endpointY = scaleY(marker.endpointY);
+        const radiusPx = Math.abs(scaleX(marker.centerX + marker.radiusM) - centerX);
+        return (
+          <g
+            key={marker.legId}
+            className={`procedure-details-rf-marker ${isFocused ? "is-focused" : "is-muted"}`}
+          >
+            <circle
+              cx={centerX}
+              cy={centerY}
+              r={radiusPx}
+              className="procedure-details-rf-radius"
+            />
+            <line
+              x1={centerX}
+              y1={centerY}
+              x2={endpointX}
+              y2={endpointY}
+              className="procedure-details-rf-radius-line"
+            />
+            <circle
+              cx={centerX}
+              cy={centerY}
+              r={5.5}
+              className="procedure-details-rf-center"
+            />
+            <text
+              x={centerX + 9}
+              y={centerY - 9}
+              className="procedure-details-rf-label"
+            >
+              RF center {marker.label}
+            </text>
+          </g>
+        );
+      })}
+
       {polylines.map((branch) => {
         const isFocused = !focusedBranchId || branch.branchId === focusedBranchId;
         return (
@@ -840,7 +958,7 @@ function ProcedureVerticalProfile({
   onSelectFix,
   onPreviewBranch,
   onSelectBranch,
-}: Omit<SvgChartProps, "runwayMarker">) {
+}: Omit<SvgChartProps, "runwayMarker" | "rfMarkers">) {
   const allPoints = polylines.flatMap((branch) => branch.points);
   if (allPoints.length === 0) {
     return (
@@ -1230,6 +1348,10 @@ export default function ProcedureDetailsPage() {
   );
   const runwayMarker = useMemo(
     () => (procedureDocument ? buildRunwayMarker(procedureDocument, polylines) : null),
+    [procedureDocument, polylines],
+  );
+  const rfMarkers = useMemo(
+    () => buildRfPlanMarkers(procedureDocument, polylines),
     [procedureDocument, polylines],
   );
   const selectedFixBranches = useMemo(
@@ -1627,6 +1749,7 @@ export default function ProcedureDetailsPage() {
                     <ProcedurePlanView
                       polylines={polylines}
                       runwayMarker={runwayMarker}
+                      rfMarkers={rfMarkers}
                       focusedFixId={focusedFixId}
                       focusedBranchId={focusedBranchId}
                       distanceUnit={distanceUnit}

@@ -352,6 +352,7 @@ describe("ProcedureDetailsPage", () => {
     expect(screen.getByText("Turn LEFT")).toBeTruthy();
     expect(screen.getByText("Radius 2.00 NM")).toBeTruthy();
     expect(screen.getByText("Center CENTER")).toBeTruthy();
+    expect(screen.getByText("RF center CENTER")).toBeTruthy();
   });
 
   it("shows a friendly empty state when the richer dataset is missing", async () => {

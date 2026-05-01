@@ -66,7 +66,7 @@ function toRadians(value: number): number {
   return (value * Math.PI) / 180;
 }
 
-function pointToEastNorth(
+export function pointToEastNorth(
   lon: number,
   lat: number,
   originLon: number,
