@@ -168,3 +168,46 @@
 
 ### Exact Next Recommended Step
 - Add branch-level turn junction construction between adjacent segment bundles, then start RF support only when radius/center data is available or exported.
+
+## 2026-05-01 23:17 CEST
+
+### Goal Of This Session
+- Continue the turn-continuity migration by covering discontinuities between adjacent segment objects on the same protected-geometry branch.
+- Keep the implementation modular: geometry kernel stays Cesium-independent, render-bundle assembly owns branch-level joins, and Cesium layer only renders prepared geometry.
+
+### Facts Discovered
+- Intra-segment TF turn patches do not cover joins where the procedure adapter splits an approach into separate intermediate/final/missed segment records.
+- The new inter-segment kernel can safely build a small visual patch only when the two segment endpoints are adjacent within a tight gap tolerance.
+- The render bundle is the right boundary for these joins because it has ordered branch segment bundles and can attach branch-level diagnostics before rendering.
+
+### Decisions Locked
+- Branch-level turn junctions are stored on `BranchGeometryBundle.turnJunctions`.
+- Each built inter-segment junction emits `TURN_VISUAL_FILL_ONLY`.
+- Width selection uses the wider adjacent segment tolerance so the fill does not under-cover either side of the join.
+- The Cesium procedure layer renders these patches under the branch visibility map, so procedure selection and protected-mode visibility stay canonical.
+- These patches remain visual continuity fills only; they are not FAA-compliant FB/FO/RF construction.
+
+### Files Changed
+- `src/data/procedurePackage.ts`
+- `src/data/procedureRenderBundle.ts`
+- `src/data/__tests__/procedureRenderBundle.test.ts`
+- `src/hooks/useProcedureSegmentLayer.ts`
+- `src/hooks/__tests__/useProcedureSegmentLayer.test.ts`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/data/__tests__/procedureRenderBundle.test.ts src/hooks/__tests__/useProcedureSegmentLayer.test.ts src/utils/__tests__/procedureTurnGeometry.test.ts`
+- `npm run build`
+- `npm test -- --run`
+
+### Current Status
+- Protected procedure rendering now has visual turn-fill coverage both inside multi-leg TF segments and between adjacent segment bundles on the same branch.
+- Branch-level turn patches are branch-scoped and follow the canonical v3 branch identifiers.
+- The implementation should reduce the visible gaps around intermediate-to-final or other split-segment turns, while preserving diagnostics that the construction is not yet compliant turn protection.
+
+### Known Blockers
+- Full G-04/G-05/G-06 acceptance still needs true RF arc handling and FB/FO turn construction from source metadata.
+- The current inter-segment patch intentionally refuses joins with larger endpoint gaps instead of inventing missing path geometry.
+- The procedure exporter may still need to expose richer turn metadata before compliant RF/FB/FO geometry can be built.
+
+### Exact Next Recommended Step
+- Implement RF geometry support when `arcRadiusNm` and center/turn metadata are available, then add acceptance tests for continuous RF centerline and parallel protected boundaries.
