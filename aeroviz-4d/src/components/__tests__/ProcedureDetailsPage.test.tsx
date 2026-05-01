@@ -313,6 +313,7 @@ describe("ProcedureDetailsPage", () => {
 
     fireEvent.click(screen.getAllByText("WEPAS")[0]);
     expect(await screen.findByText("final_approach_fix")).toBeTruthy();
+    expect(screen.getAllByText(/DEFAULT_TOLERANCE/).length).toBeGreaterThan(0);
   });
 
   it("switches procedure-details distance axes from nautical miles to metres", async () => {

@@ -761,3 +761,32 @@
 
 ### Exact Next Recommended Step
 - Surface segment diagnostics in Procedure Details so unsupported sections and RF/turn limitations are visible in the validation workspace.
+
+## 2026-05-02 00:18 CEST
+
+### Goal Of This Session
+- Surface v3 render-bundle diagnostics in Procedure Details.
+
+### Decisions Locked
+- Procedure Details now derives a `ProcedureRenderBundle` from the selected `ProcedureDetailDocument`.
+- Data Notes includes diagnostics relevant to the focused branch/legs.
+- Diagnostics are displayed with severity and code so unsupported geometry, default tolerances, RF gaps, and turn limitations are visible in the validation workspace.
+
+### Files Changed
+- `src/components/ProcedureDetailsPage.tsx`
+- `src/components/__tests__/ProcedureDetailsPage.test.tsx`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/components/__tests__/ProcedureDetailsPage.test.tsx`
+- `npm run build`
+
+### Current Status
+- Procedure Details is now a better validation workbench: source notes and geometry/render diagnostics are visible together.
+
+### Known Blockers
+- Diagnostics are text-only; selecting a diagnostic does not yet focus the related segment/leg on the chart.
+- Full advanced geometry items remain incomplete: CA/DF/HM, FB/FO turns, LPV/GLS surfaces, RNP AR templates, and turning missed approach.
+
+### Exact Next Recommended Step
+- Add a final validation run across Python tests, frontend tests, and build, then summarize remaining v3 migration gaps clearly.

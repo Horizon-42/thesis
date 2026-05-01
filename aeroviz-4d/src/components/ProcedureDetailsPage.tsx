@@ -11,6 +11,8 @@ import type {
   ProcedureDetailsIndexManifest,
   ProcedureDetailsIndexRunwaySummary,
 } from "../data/procedureDetails";
+import { normalizeProcedurePackage } from "../data/procedurePackageAdapter";
+import { buildProcedureRenderBundle } from "../data/procedureRenderBundle";
 import {
   procedureChartsIndexUrl,
   procedureDetailsDocumentUrl,
@@ -1354,6 +1356,13 @@ export default function ProcedureDetailsPage() {
     () => buildRfPlanMarkers(procedureDocument, polylines),
     [procedureDocument, polylines],
   );
+  const procedureRenderBundle = useMemo(
+    () =>
+      procedureDocument
+        ? buildProcedureRenderBundle(normalizeProcedurePackage(procedureDocument))
+        : null,
+    [procedureDocument],
+  );
   const selectedFixBranches = useMemo(
     () => procedureBranchForFix(procedureDocument ?? null, selectedFixId),
     [procedureDocument, selectedFixId],
@@ -1404,6 +1413,22 @@ export default function ProcedureDetailsPage() {
     [focusedBranch?.warnings, focusedPolyline?.warnings],
   );
   const focusedLegs = focusedBranch?.legs ?? [];
+  const focusedScopedBranchId =
+    procedureDocument && focusedBranch
+      ? `${procedureDocument.procedureUid}:branch:${(
+          focusedBranch.branchKey ?? focusedBranch.branchIdent
+        ).toUpperCase()}`
+      : null;
+  const focusedRenderDiagnostics = useMemo(() => {
+    if (!procedureRenderBundle) return [];
+    if (!focusedScopedBranchId) return procedureRenderBundle.diagnostics;
+    const focusedLegIds = new Set(focusedLegs.map((leg) => leg.legId));
+    return procedureRenderBundle.diagnostics.filter((diagnostic) => {
+      if (diagnostic.segmentId?.startsWith(focusedScopedBranchId)) return true;
+      if (diagnostic.legId && focusedLegIds.has(diagnostic.legId)) return true;
+      return !diagnostic.segmentId && !diagnostic.legId;
+    });
+  }, [focusedLegs, focusedScopedBranchId, procedureRenderBundle]);
   const focusedFixTerminalLeg = useMemo(
     () =>
       focusedLegs.find(
@@ -1645,7 +1670,8 @@ export default function ProcedureDetailsPage() {
             {procedureDocument &&
             (procedureDocument.validation.knownSimplifications.length > 0 ||
               procedureDocument.provenance.warnings.length > 0 ||
-              focusedBranchWarnings.length > 0) ? (
+              focusedBranchWarnings.length > 0 ||
+              focusedRenderDiagnostics.length > 0) ? (
               <section className="procedure-details-card procedure-details-reference-card">
                 <p className="procedure-details-overview-label">Data Notes</p>
                 <ul className="procedure-details-note-list">
@@ -1657,6 +1683,14 @@ export default function ProcedureDetailsPage() {
                   ))}
                   {procedureDocument.validation.knownSimplifications.map((warning) => (
                     <li key={`simplification-${warning}`}>{warning}</li>
+                  ))}
+                  {focusedRenderDiagnostics.map((diagnostic, index) => (
+                    <li key={`diagnostic-${diagnostic.code}-${diagnostic.segmentId ?? ""}-${diagnostic.legId ?? ""}-${index}`}>
+                      <strong>
+                        {diagnostic.severity} {diagnostic.code}
+                      </strong>
+                      : {diagnostic.message}
+                    </li>
                   ))}
                 </ul>
               </section>
