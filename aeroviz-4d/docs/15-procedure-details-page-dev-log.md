@@ -362,3 +362,36 @@
 
 ### Exact Next Recommended Step
 - Regenerate procedure-detail assets for an RF-containing airport/procedure fixture, then add an end-to-end frontend render-bundle test proving exported RF metadata reaches `buildRfLeg(...)`.
+
+## 2026-05-01 23:40 CEST
+
+### Goal Of This Session
+- Close the frontend RF metadata test gap by proving exported procedure-detail style RF path metadata reaches render-bundle geometry construction.
+
+### Decisions Locked
+- The frontend regression test starts at `ProcedureDetailDocument`, not a prebuilt `ProcedurePackage`, so it covers:
+  - procedure-detail schema;
+  - `normalizeProcedurePackage(...)`;
+  - `buildProcedureRenderBundle(...)`;
+  - RF centerline construction.
+- The test asserts RF metadata does not emit `RF_RADIUS_MISSING` and produces an arc centerline.
+
+### Files Changed
+- `src/data/__tests__/procedureRenderBundle.test.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/data/__tests__/procedureRenderBundle.test.ts src/data/__tests__/procedurePackageAdapter.test.ts src/utils/__tests__/procedureSegmentGeometry.test.ts`
+- `npm test -- --run`
+- `npm run build`
+
+### Current Status
+- Frontend RF metadata path is now covered from exported JSON shape through render-bundle geometry.
+- Test count is now 86 frontend tests, all passing.
+
+### Known Blockers
+- This is still a synthetic frontend fixture; generated public RF procedure-detail assets have not been regenerated or committed.
+- RF protected-area envelope construction remains future work.
+
+### Exact Next Recommended Step
+- Add RF-specific protected envelope construction for sampled RF centerlines, starting with a conservative parallel ribbon test and then separating full RF OEA Case 1/Case 2 behavior.
