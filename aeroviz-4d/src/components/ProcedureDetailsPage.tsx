@@ -12,7 +12,10 @@ import type {
   ProcedureDetailsIndexRunwaySummary,
 } from "../data/procedureDetails";
 import { normalizeProcedurePackage } from "../data/procedurePackageAdapter";
-import { buildProcedureRenderBundle } from "../data/procedureRenderBundle";
+import {
+  buildProcedureRenderBundle,
+  type ProcedureRenderBundle,
+} from "../data/procedureRenderBundle";
 import {
   procedureChartsIndexUrl,
   procedureDetailsDocumentUrl,
@@ -471,6 +474,13 @@ interface RfPlanMarker {
   label: string;
 }
 
+interface MissedSectionMarker {
+  branchId: string;
+  segmentId: string;
+  point: ProcedureChartPoint;
+  label: string;
+}
+
 function buildRfPlanMarkers(
   document: ProcedureDetailDocument | null,
   polylines: ProcedureBranchPolyline[],
@@ -526,6 +536,43 @@ function buildRfPlanMarkers(
   );
 }
 
+function scopedBranchIdFor(document: ProcedureDetailDocument, branch: ProcedureBranchPolyline): string {
+  return `${document.procedureUid}:branch:${branch.branchKey.toUpperCase()}`;
+}
+
+function buildMissedSectionMarkers(
+  document: ProcedureDetailDocument | null,
+  renderBundle: ProcedureRenderBundle | null,
+  polylines: ProcedureBranchPolyline[],
+): MissedSectionMarker[] {
+  if (!document || !renderBundle) return [];
+  const branchByScopedId = new Map(
+    polylines.map((branch) => [scopedBranchIdFor(document, branch), branch]),
+  );
+
+  return renderBundle.branchBundles.flatMap((branchBundle) => {
+    const branch = branchByScopedId.get(branchBundle.branchId);
+    if (!branch) return [];
+
+    return branchBundle.segmentBundles.flatMap((segmentBundle): MissedSectionMarker[] => {
+      if (segmentBundle.segment.segmentType !== "MISSED_S2") return [];
+      const splitFixId = segmentBundle.segment.startFixId;
+      if (!splitFixId) return [];
+      const point = branch.points.find((candidate) => candidate.fixId === splitFixId);
+      if (!point) return [];
+
+      return [
+        {
+          branchId: branch.branchId,
+          segmentId: segmentBundle.segment.segmentId,
+          point,
+          label: "S1/S2",
+        },
+      ];
+    });
+  });
+}
+
 function selectedBranchDefaultId(document: ProcedureDetailDocument | null): string | null {
   if (!document) return null;
   return (
@@ -540,6 +587,7 @@ interface SvgChartProps {
   polylines: ProcedureBranchPolyline[];
   runwayMarker: ProcedureRunwayMarker | null;
   rfMarkers: RfPlanMarker[];
+  missedSectionMarkers: MissedSectionMarker[];
   focusedFixId: string | null;
   focusedBranchId: string | null;
   distanceUnit: DistanceUnit;
@@ -553,6 +601,7 @@ function ProcedurePlanView({
   polylines,
   runwayMarker,
   rfMarkers,
+  missedSectionMarkers,
   focusedFixId,
   focusedBranchId,
   distanceUnit,
@@ -582,7 +631,12 @@ function ProcedurePlanView({
     { xM: marker.centerX, yM: marker.centerY - marker.radiusM },
     { xM: marker.centerX, yM: marker.centerY + marker.radiusM },
   ]);
-  const domainPoints = [...allPoints, ...missedOutboundArrowTargets, ...rfDomainPoints];
+  const domainPoints = [
+    ...allPoints,
+    ...missedOutboundArrowTargets,
+    ...rfDomainPoints,
+    ...missedSectionMarkers.map((marker) => marker.point),
+  ];
   const plotWidth = SVG_WIDTH - SVG_PADDING_X * 2;
   const plotHeight = PLAN_SVG_HEIGHT - SVG_PADDING_Y * 2;
   const rawXDomain = chartDomain(domainPoints.map((point) => point.xM), 0.18);
@@ -831,6 +885,25 @@ function ProcedurePlanView({
         );
       })}
 
+      {missedSectionMarkers.map((marker) => {
+        const isFocused = !focusedBranchId || marker.branchId === focusedBranchId;
+        const x = scaleX(marker.point.xM);
+        const y = scaleY(marker.point.yM);
+        return (
+          <g
+            key={`missed-section-${marker.segmentId}`}
+            className={`procedure-details-missed-section-marker ${
+              isFocused ? "is-focused" : "is-muted"
+            }`}
+            onMouseEnter={() => onPreviewFix(marker.point.fixId, marker.branchId)}
+            onClick={() => onSelectFix(marker.point.fixId, marker.branchId)}
+          >
+            <circle cx={x} cy={y} r={8} />
+            <text x={x + 11} y={y - 10}>{marker.label}</text>
+          </g>
+        );
+      })}
+
       {runwayMarker ? (
         <g className="procedure-details-runway">
           <line
@@ -953,6 +1026,7 @@ function ProcedurePlanView({
 
 function ProcedureVerticalProfile({
   polylines,
+  missedSectionMarkers,
   focusedFixId,
   focusedBranchId,
   distanceUnit,
@@ -1190,6 +1264,26 @@ function ProcedureVerticalProfile({
                 </g>
               );
             })}
+            {missedSectionMarkers
+              .filter((marker) => marker.branchId === branch.branchId)
+              .map((marker) => {
+                const isFocusedMarker = !focusedBranchId || marker.branchId === focusedBranchId;
+                const x = scaleX(stationForPoint(marker.point));
+                const y = scaleY(marker.point.altitudeFt ?? 0);
+                return (
+                  <g
+                    key={`profile-missed-section-${marker.segmentId}`}
+                    className={`procedure-details-missed-section-marker ${
+                      isFocusedMarker ? "is-focused" : "is-muted"
+                    }`}
+                    onMouseEnter={() => onPreviewFix(marker.point.fixId, marker.branchId)}
+                    onClick={() => onSelectFix(marker.point.fixId, marker.branchId)}
+                  >
+                    <circle cx={x} cy={y} r={7} />
+                    <text x={x + 10} y={y - 10}>{marker.label}</text>
+                  </g>
+                );
+              })}
           </g>
         );
       })}
@@ -1362,6 +1456,10 @@ export default function ProcedureDetailsPage() {
         ? buildProcedureRenderBundle(normalizeProcedurePackage(procedureDocument))
         : null,
     [procedureDocument],
+  );
+  const missedSectionMarkers = useMemo(
+    () => buildMissedSectionMarkers(procedureDocument, procedureRenderBundle, polylines),
+    [polylines, procedureDocument, procedureRenderBundle],
   );
   const selectedFixBranches = useMemo(
     () => procedureBranchForFix(procedureDocument ?? null, selectedFixId),
@@ -1784,6 +1882,7 @@ export default function ProcedureDetailsPage() {
                       polylines={polylines}
                       runwayMarker={runwayMarker}
                       rfMarkers={rfMarkers}
+                      missedSectionMarkers={missedSectionMarkers}
                       focusedFixId={focusedFixId}
                       focusedBranchId={focusedBranchId}
                       distanceUnit={distanceUnit}
@@ -1810,6 +1909,7 @@ export default function ProcedureDetailsPage() {
                     </div>
                     <ProcedureVerticalProfile
                       polylines={polylines}
+                      missedSectionMarkers={missedSectionMarkers}
                       focusedFixId={focusedFixId}
                       focusedBranchId={focusedBranchId}
                       distanceUnit={distanceUnit}

@@ -273,6 +273,79 @@ const rfSampleDocument = {
   ],
 };
 
+const missedSectionDocument = {
+  ...sampleDocument,
+  fixes: [
+    ...sampleDocument.fixes,
+    {
+      fixId: "fix:MIS1",
+      ident: "MIS1",
+      kind: "named_fix",
+      position: { lon: -78.76, lat: 35.9 },
+      elevationFt: null,
+      roleHints: ["UNKNOWN"],
+      sourceRefs: ["src:cifp-detail"],
+    },
+    {
+      fixId: "fix:HOLD",
+      ident: "HOLD",
+      kind: "missed_hold_fix",
+      position: { lon: -78.7, lat: 35.95 },
+      elevationFt: null,
+      roleHints: ["MAHF"],
+      sourceRefs: ["src:cifp-detail"],
+    },
+  ],
+  branches: [
+    {
+      ...sampleDocument.branches[0],
+      legs: [
+        ...sampleDocument.branches[0].legs,
+        {
+          legId: "leg:R:040",
+          sequence: 40,
+          segmentType: "missed",
+          path: {
+            pathTerminator: "DF",
+            constructionMethod: "direct_to_fix",
+            startFixRef: "fix:RW05L",
+            endFixRef: "fix:MIS1",
+          },
+          termination: { kind: "fix", fixRef: "fix:MIS1" },
+          constraints: {
+            altitude: { qualifier: "at", valueFt: 1500, rawText: "1500 ft" },
+            speedKt: null,
+            geometryAltitudeFt: 1500,
+          },
+          roleAtEnd: "UNKNOWN",
+          sourceRefs: ["src:cifp-detail"],
+          quality: { status: "exact", sourceLine: 4, renderedInPlanView: true },
+        },
+        {
+          legId: "leg:R:050",
+          sequence: 50,
+          segmentType: "missed",
+          path: {
+            pathTerminator: "HM",
+            constructionMethod: "hold_to_manual",
+            startFixRef: "fix:MIS1",
+            endFixRef: "fix:HOLD",
+          },
+          termination: { kind: "fix", fixRef: "fix:HOLD" },
+          constraints: {
+            altitude: { qualifier: "at", valueFt: 3000, rawText: "3000 ft" },
+            speedKt: null,
+            geometryAltitudeFt: 3000,
+          },
+          roleAtEnd: "MAHF",
+          sourceRefs: ["src:cifp-detail"],
+          quality: { status: "exact", sourceLine: 5, renderedInPlanView: false },
+        },
+      ],
+    },
+  ],
+};
+
 describe("ProcedureDetailsPage", () => {
   beforeEach(() => {
     fetchMock.mockReset();
@@ -354,6 +427,22 @@ describe("ProcedureDetailsPage", () => {
     expect(screen.getByText("Radius 2.00 NM")).toBeTruthy();
     expect(screen.getByText("Center CENTER")).toBeTruthy();
     expect(screen.getByText("RF center CENTER")).toBeTruthy();
+  });
+
+  it("marks the missed approach section split in plan and profile views", async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith("/procedure-details/index.json")) return Promise.resolve(jsonResponse(sampleIndex));
+      if (url.endsWith("/charts/index.json")) return Promise.resolve(jsonResponse(sampleCharts));
+      if (url.endsWith("/procedure-details/KRDU-R05LY-RW05L.json")) {
+        return Promise.resolve(jsonResponse(missedSectionDocument));
+      }
+      return Promise.resolve(notFoundResponse());
+    });
+
+    render(<ProcedureDetailsPage />);
+
+    expect((await screen.findAllByText("S1/S2")).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText(/WARN UNSUPPORTED_LEG_TYPE/).length).toBeGreaterThan(0);
   });
 
   it("shows a friendly empty state when the richer dataset is missing", async () => {

@@ -817,3 +817,35 @@
 - DF/CA/HM/HA/HF geometry is preserved and diagnosed but not constructed.
 - LPV/GLS W/X/Y, LNAV/VNAV vertical surfaces, RNP AR templates, and turning missed approach wind spiral remain future work.
 - Diagnostic selection does not yet focus the related segment or leg on the Procedure Details charts.
+
+## 2026-05-02 00:32 CEST
+
+### Goal Of This Session
+- Improve missed approach readability by making the `MISSED_S1` / `MISSED_S2` split visible in Procedure Details.
+
+### Decisions Locked
+- Missed section markers are derived from the selected procedure's `ProcedureRenderBundle`, not from ad hoc string parsing in the SVG layer.
+- A `MISSED_S2` marker anchors at the segment start fix when that fix is visible in the current procedure-detail polyline.
+- The same marker is drawn in both plan view and vertical profile so the section split is visible horizontally and vertically.
+- Unsupported DF/HM missed geometry remains diagnosed in Data Notes; the marker only identifies the section transition.
+
+### Files Changed
+- `src/components/ProcedureDetailsPage.tsx`
+- `src/components/__tests__/ProcedureDetailsPage.test.tsx`
+- `src/index.css`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/components/__tests__/ProcedureDetailsPage.test.tsx`
+- `npm run build`
+
+### Current Status
+- Procedure Details now visually distinguishes the missed approach section split with an `S1/S2` marker.
+- Regression coverage verifies the marker appears in both plan/profile contexts for a missed approach with a hold-boundary section split.
+
+### Known Blockers
+- Missed section surfaces are still not constructed.
+- CA first-leg rendering and turning missed debug primitives remain future work.
+
+### Exact Next Recommended Step
+- Add explicit CA/DF/HM missed-leg badges/markers in the Procedure Details sequence and chart views before implementing their full geometry builders.
