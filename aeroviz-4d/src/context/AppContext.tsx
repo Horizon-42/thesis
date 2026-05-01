@@ -127,7 +127,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dsmTerrain: false,
     runways: true,
     waypoints: true,
-    ocsSurfaces: true,
+    ocsSurfaces: false,
     trajectories: true,
     obstacles: true,
     procedures: true,
