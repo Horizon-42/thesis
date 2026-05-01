@@ -8,7 +8,6 @@ import {
   buildHorizontalPlateRoutes,
   buildRunwayReferenceMarksFromPlateRoutes,
   buildRunwayFrame,
-  pointIsInsideHorizontalPlate,
   projectPositionToRunwayFrame,
   type HorizontalPlateRoute,
   type RunwayReferenceMark,
@@ -16,6 +15,10 @@ import {
   type RunwayFrame,
   type RunwayProfilePoint,
 } from "../utils/runwayProfileGeometry";
+import {
+  classifyPointAgainstHorizontalPlateRoutes,
+  type HorizontalPlateSegmentAssessment,
+} from "../utils/procedureSegmentAssessment";
 
 const TICK_THROTTLE_MS = 120;
 const TRAIL_LOOKBACK_SECONDS = 150;
@@ -23,6 +26,7 @@ const TRAIL_SAMPLE_STEP_SECONDS = 5;
 
 export interface ProfileAircraftSample extends RunwayProfilePoint {
   timeIso: string;
+  segmentAssessment: HorizontalPlateSegmentAssessment;
 }
 
 export interface ProfileAircraftTrack {
@@ -200,7 +204,11 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
       .map((entity) => {
         const currentPoint = sampleRunwayPoint(entity, currentTime, loadedData.runwayFrame);
         if (!currentPoint) return null;
-        if (!pointIsInsideHorizontalPlate(currentPoint, activePlateRoutes)) {
+        const currentAssessment = classifyPointAgainstHorizontalPlateRoutes(
+          currentPoint,
+          activePlateRoutes,
+        );
+        if (!currentAssessment || currentAssessment.containment !== "PRIMARY") {
           return null;
         }
 
@@ -217,16 +225,22 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
           );
           const samplePoint = sampleRunwayPoint(entity, sampleTime, loadedData.runwayFrame);
           if (!samplePoint) continue;
-          if (!pointIsInsideHorizontalPlate(samplePoint, activePlateRoutes)) continue;
+          const sampleAssessment = classifyPointAgainstHorizontalPlateRoutes(
+            samplePoint,
+            activePlateRoutes,
+          );
+          if (!sampleAssessment || sampleAssessment.containment !== "PRIMARY") continue;
           trail.push({
             ...samplePoint,
             timeIso: formatJulianTime(sampleTime),
+            segmentAssessment: sampleAssessment,
           });
         }
 
         trail.push({
           ...currentPoint,
           timeIso: currentTimeIso,
+          segmentAssessment: currentAssessment,
         });
 
         return {
@@ -235,6 +249,7 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
           current: {
             ...currentPoint,
             timeIso: currentTimeIso,
+            segmentAssessment: currentAssessment,
           },
           trail,
           isSelected: entity.id === selectedFlightId,

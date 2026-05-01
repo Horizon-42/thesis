@@ -54,6 +54,7 @@ const shorterRoute = {
 
 function makeProfileState(
   plateRoutes: RunwayTrajectoryProfileState["plateRoutes"],
+  aircraftTracks: RunwayTrajectoryProfileState["aircraftTracks"] = [],
 ): RunwayTrajectoryProfileState {
   return {
     isLoading: false,
@@ -69,7 +70,7 @@ function makeProfileState(
     ],
     procedureNames: ["RNAV(GPS) Y RWY 23R"],
     sourceCycle: "2603",
-    aircraftTracks: [],
+    aircraftTracks,
   };
 }
 
@@ -133,5 +134,57 @@ describe("RunwayTrajectoryProfilePanel", () => {
 
     expect(container.textContent).toContain("x: approach distance from threshold (m)");
     expect(container.textContent).toContain("m");
+  });
+
+  it("shows segment assessment for the selected aircraft", () => {
+    profileMock.state = makeProfileState([closeXRoute], [
+      {
+        flightId: "AAL123",
+        color: "#38bdf8",
+        isSelected: true,
+        current: {
+          xM: 20_000,
+          yM: 185.2,
+          zM: 900,
+          timeIso: "2026-05-01T00:00:00.000Z",
+          segmentAssessment: {
+            routeId: "KRDU-R23RY-ABUTTS",
+            branchId: "branch:ABUTTS",
+            activeSegmentId: "branch:ABUTTS:profile-segment:2",
+            segmentIndex: 1,
+            stationM: 9_260,
+            crossTrackErrorM: 185.2,
+            containment: "PRIMARY",
+            closestPoint: { xM: 20_000, yM: 0, zM: 900 },
+          },
+        },
+        trail: [
+          {
+            xM: 20_000,
+            yM: 185.2,
+            zM: 900,
+            timeIso: "2026-05-01T00:00:00.000Z",
+            segmentAssessment: {
+              routeId: "KRDU-R23RY-ABUTTS",
+              branchId: "branch:ABUTTS",
+              activeSegmentId: "branch:ABUTTS:profile-segment:2",
+              segmentIndex: 1,
+              stationM: 9_260,
+              crossTrackErrorM: 185.2,
+              containment: "PRIMARY",
+              closestPoint: { xM: 20_000, yM: 0, zM: 900 },
+            },
+          },
+        ],
+      },
+    ]);
+
+    render(<RunwayTrajectoryProfilePanel />);
+
+    expect(screen.getByText(/AAL123:/).textContent).toContain(
+      "branch:ABUTTS:profile-segment:2",
+    );
+    expect(screen.getByText(/AAL123:/).textContent).toContain("station 5.0 NM");
+    expect(screen.getByText(/AAL123:/).textContent).toContain("xtrack +0.1 NM");
   });
 });

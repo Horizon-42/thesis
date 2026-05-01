@@ -1,0 +1,56 @@
+import { describe, expect, it } from "vitest";
+import type { HorizontalPlateRoute } from "../runwayProfileGeometry";
+import {
+  classifyPointAgainstHorizontalPlateRoutes,
+  projectPointToHorizontalPlateRoute,
+} from "../procedureSegmentAssessment";
+
+const route: HorizontalPlateRoute = {
+  routeId: "KRDU-R23RY-R",
+  branchId: "branch:R",
+  procedureName: "RNAV(GPS) Y RWY 23R",
+  procedureFamily: "RNAV_GPS",
+  procedureIdent: "R23RY",
+  branchIdent: "R",
+  transitionIdent: null,
+  branchType: "final",
+  defaultVisible: true,
+  halfWidthM: 500,
+  points: [
+    { xM: 10_000, yM: 0, zM: 1_000, fixIdent: "IF", role: "IF" },
+    { xM: 5_000, yM: 0, zM: 500, fixIdent: "FAF", role: "FAF" },
+    { xM: 0, yM: 0, zM: 0, fixIdent: "RW23R", role: "MAPt" },
+  ],
+};
+
+describe("procedure segment assessment", () => {
+  it("projects a profile point onto the nearest horizontal plate segment", () => {
+    const assessment = projectPointToHorizontalPlateRoute({ xM: 4_000, yM: 120 }, route);
+
+    expect(assessment).toMatchObject({
+      routeId: "KRDU-R23RY-R",
+      branchId: "branch:R",
+      activeSegmentId: "branch:R:profile-segment:2",
+      segmentIndex: 1,
+      containment: "PRIMARY",
+    });
+    expect(assessment?.stationM).toBeCloseTo(6_000, 6);
+    expect(Math.abs(assessment?.crossTrackErrorM ?? 0)).toBeCloseTo(120, 6);
+    expect(assessment?.closestPoint).toMatchObject({
+      xM: 4_000,
+      yM: 0,
+      zM: 400,
+    });
+  });
+
+  it("classifies outside points while still returning nearest segment context", () => {
+    const assessment = classifyPointAgainstHorizontalPlateRoutes(
+      { xM: 4_000, yM: 700 },
+      [route],
+    );
+
+    expect(assessment?.containment).toBe("OUTSIDE");
+    expect(assessment?.activeSegmentId).toBe("branch:R:profile-segment:2");
+    expect(Math.abs(assessment?.crossTrackErrorM ?? 0)).toBeCloseTo(700, 6);
+  });
+});

@@ -113,6 +113,11 @@ function formatDistance(valueM: number, unit: DistanceUnit): string {
   return unit === "nm" ? formatNm(valueM) : formatMeters(valueM);
 }
 
+function formatSignedDistance(valueM: number, unit: DistanceUnit): string {
+  const prefix = valueM > 0 ? "+" : "";
+  return `${prefix}${formatDistance(valueM, unit)}`;
+}
+
 function distanceUnitLabel(unit: DistanceUnit): string {
   return unit === "nm" ? "NM" : "m";
 }
@@ -645,6 +650,8 @@ export default function RunwayTrajectoryProfilePanel() {
 
   const routeCount = profile.plateRoutes.length;
   const trackCount = profile.aircraftTracks.length;
+  const assessmentTrack =
+    profile.aircraftTracks.find((track) => track.isSelected) ?? profile.aircraftTracks[0];
 
   return (
     <aside className="runway-profile-panel" aria-label="Runway trajectory profile">
@@ -694,6 +701,17 @@ export default function RunwayTrajectoryProfilePanel() {
         <span>{routeCount} active RNAV branches in plate</span>
         <span>{trackCount} aircraft currently inside plate</span>
         <span>{trajectoryDataSource ? "CZML linked" : "CZML missing"}</span>
+        {assessmentTrack ? (
+          <span>
+            {assessmentTrack.flightId}: {assessmentTrack.current.segmentAssessment.activeSegmentId} ·
+            station {formatDistance(assessmentTrack.current.segmentAssessment.stationM, distanceUnit)} ·
+            xtrack{" "}
+            {formatSignedDistance(
+              assessmentTrack.current.segmentAssessment.crossTrackErrorM,
+              distanceUnit,
+            )}
+          </span>
+        ) : null}
       </div>
 
       {profile.procedureNames.length > 0 ? (

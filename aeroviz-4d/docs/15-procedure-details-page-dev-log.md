@@ -563,3 +563,40 @@
 
 ### Exact Next Recommended Step
 - Use the RF case metadata in render-bundle/debug output, then continue segment-level trajectory assessment for the 2D profile.
+
+## 2026-05-01 23:59 CEST
+
+### Goal Of This Session
+- Start migrating the 2D runway trajectory profile from boolean horizontal-plate inclusion to segment-level assessment output.
+
+### Decisions Locked
+- Added `procedureSegmentAssessment.ts` as a standalone service-style utility.
+- The first implementation consumes existing projected `HorizontalPlateRoute` data, but returns the v3-style fields needed by the UI:
+  - `activeSegmentId`;
+  - station;
+  - cross-track error;
+  - containment.
+- The hook now filters aircraft with segment assessment rather than a plain `pointIsInsideHorizontalPlate(...)` boolean.
+- The panel summary shows the selected aircraft assessment so users can inspect segment/station/cross-track without opening debug tools.
+
+### Files Changed
+- `src/utils/procedureSegmentAssessment.ts`
+- `src/utils/__tests__/procedureSegmentAssessment.test.ts`
+- `src/hooks/useRunwayTrajectoryProfile.ts`
+- `src/components/RunwayTrajectoryProfilePanel.tsx`
+- `src/components/__tests__/RunwayTrajectoryProfilePanel.test.tsx`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/utils/__tests__/procedureSegmentAssessment.test.ts src/components/__tests__/RunwayTrajectoryProfilePanel.test.tsx`
+
+### Current Status
+- The 2D profile now carries per-aircraft segment assessment metadata through the hook into the UI.
+- Unit tests cover nearest-segment projection, outside classification with retained context, and selected-aircraft assessment display.
+
+### Known Blockers
+- The assessment still uses the projected route/plate representation, not `ProcedureRenderBundle` segment envelopes.
+- Only `PRIMARY` vs `OUTSIDE` is available because the current profile data does not yet carry secondary envelope widths.
+
+### Exact Next Recommended Step
+- Feed profile assessment from `ProcedureRenderBundle` envelopes so primary/secondary/outside can be classified against the same geometry used by Procedure Details and 3D protected mode.
