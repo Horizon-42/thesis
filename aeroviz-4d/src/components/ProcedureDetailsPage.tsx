@@ -481,6 +481,15 @@ interface MissedSectionMarker {
   label: string;
 }
 
+interface MissedLegMarker {
+  branchId: string;
+  legId: string;
+  point: ProcedureChartPoint;
+  label: string;
+}
+
+const MISSED_LEG_MARKER_TYPES = new Set(["CA", "DF", "HM", "HA", "HF"]);
+
 function buildRfPlanMarkers(
   document: ProcedureDetailDocument | null,
   polylines: ProcedureBranchPolyline[],
@@ -530,6 +539,44 @@ function buildRfPlanMarkers(
           endpointY: endpoint.yM,
           radiusM: leg.path.arcRadiusNm * METERS_PER_NM,
           label: leg.path.centerFixRef ? formatFixRef(leg.path.centerFixRef) : "RF center",
+        },
+      ];
+    }),
+  );
+}
+
+function buildMissedLegMarkers(
+  document: ProcedureDetailDocument | null,
+  polylines: ProcedureBranchPolyline[],
+): MissedLegMarker[] {
+  if (!document) return [];
+  const pointByBranchAndFix = new Map(
+    polylines.flatMap((branch) =>
+      branch.points.map((point) => [`${branch.branchId}:${point.fixId}`, point] as const),
+    ),
+  );
+
+  return document.branches.flatMap((branch) =>
+    branch.legs.flatMap((leg): MissedLegMarker[] => {
+      const pathTerminator = leg.path.pathTerminator.toUpperCase();
+      const isMissedLeg =
+        leg.segmentType.toLowerCase().includes("missed") ||
+        leg.roleAtEnd.toUpperCase() === "MAHF";
+      if (!isMissedLeg || !MISSED_LEG_MARKER_TYPES.has(pathTerminator)) return [];
+
+      const anchorPoint =
+        pointByBranchAndFix.get(`${branch.branchId}:${leg.path.endFixRef}`) ??
+        (leg.path.startFixRef
+          ? pointByBranchAndFix.get(`${branch.branchId}:${leg.path.startFixRef}`)
+          : undefined);
+      if (!anchorPoint) return [];
+
+      return [
+        {
+          branchId: branch.branchId,
+          legId: leg.legId,
+          point: anchorPoint,
+          label: `${pathTerminator} leg`,
         },
       ];
     }),
@@ -588,6 +635,7 @@ interface SvgChartProps {
   runwayMarker: ProcedureRunwayMarker | null;
   rfMarkers: RfPlanMarker[];
   missedSectionMarkers: MissedSectionMarker[];
+  missedLegMarkers: MissedLegMarker[];
   focusedFixId: string | null;
   focusedBranchId: string | null;
   distanceUnit: DistanceUnit;
@@ -602,6 +650,7 @@ function ProcedurePlanView({
   runwayMarker,
   rfMarkers,
   missedSectionMarkers,
+  missedLegMarkers,
   focusedFixId,
   focusedBranchId,
   distanceUnit,
@@ -636,6 +685,7 @@ function ProcedurePlanView({
     ...missedOutboundArrowTargets,
     ...rfDomainPoints,
     ...missedSectionMarkers.map((marker) => marker.point),
+    ...missedLegMarkers.map((marker) => marker.point),
   ];
   const plotWidth = SVG_WIDTH - SVG_PADDING_X * 2;
   const plotHeight = PLAN_SVG_HEIGHT - SVG_PADDING_Y * 2;
@@ -904,6 +954,25 @@ function ProcedurePlanView({
         );
       })}
 
+      {missedLegMarkers.map((marker) => {
+        const isFocused = !focusedBranchId || marker.branchId === focusedBranchId;
+        const x = scaleX(marker.point.xM);
+        const y = scaleY(marker.point.yM);
+        return (
+          <g
+            key={`missed-leg-${marker.legId}`}
+            className={`procedure-details-missed-leg-marker ${
+              isFocused ? "is-focused" : "is-muted"
+            }`}
+            onMouseEnter={() => onPreviewFix(marker.point.fixId, marker.branchId)}
+            onClick={() => onSelectFix(marker.point.fixId, marker.branchId)}
+          >
+            <rect x={x - 14} y={y + 11} width={54} height={18} rx={4} />
+            <text x={x - 8} y={y + 24}>{marker.label}</text>
+          </g>
+        );
+      })}
+
       {runwayMarker ? (
         <g className="procedure-details-runway">
           <line
@@ -1027,6 +1096,7 @@ function ProcedurePlanView({
 function ProcedureVerticalProfile({
   polylines,
   missedSectionMarkers,
+  missedLegMarkers,
   focusedFixId,
   focusedBranchId,
   distanceUnit,
@@ -1284,6 +1354,26 @@ function ProcedureVerticalProfile({
                   </g>
                 );
               })}
+            {missedLegMarkers
+              .filter((marker) => marker.branchId === branch.branchId)
+              .map((marker) => {
+                const isFocusedMarker = !focusedBranchId || marker.branchId === focusedBranchId;
+                const x = scaleX(stationForPoint(marker.point));
+                const y = scaleY(marker.point.altitudeFt ?? 0);
+                return (
+                  <g
+                    key={`profile-missed-leg-${marker.legId}`}
+                    className={`procedure-details-missed-leg-marker ${
+                      isFocusedMarker ? "is-focused" : "is-muted"
+                    }`}
+                    onMouseEnter={() => onPreviewFix(marker.point.fixId, marker.branchId)}
+                    onClick={() => onSelectFix(marker.point.fixId, marker.branchId)}
+                  >
+                    <rect x={x - 14} y={y + 10} width={54} height={18} rx={4} />
+                    <text x={x - 8} y={y + 23}>{marker.label}</text>
+                  </g>
+                );
+              })}
           </g>
         );
       })}
@@ -1460,6 +1550,10 @@ export default function ProcedureDetailsPage() {
   const missedSectionMarkers = useMemo(
     () => buildMissedSectionMarkers(procedureDocument, procedureRenderBundle, polylines),
     [polylines, procedureDocument, procedureRenderBundle],
+  );
+  const missedLegMarkers = useMemo(
+    () => buildMissedLegMarkers(procedureDocument, polylines),
+    [polylines, procedureDocument],
   );
   const selectedFixBranches = useMemo(
     () => procedureBranchForFix(procedureDocument ?? null, selectedFixId),
@@ -1883,6 +1977,7 @@ export default function ProcedureDetailsPage() {
                       runwayMarker={runwayMarker}
                       rfMarkers={rfMarkers}
                       missedSectionMarkers={missedSectionMarkers}
+                      missedLegMarkers={missedLegMarkers}
                       focusedFixId={focusedFixId}
                       focusedBranchId={focusedBranchId}
                       distanceUnit={distanceUnit}
@@ -1910,6 +2005,7 @@ export default function ProcedureDetailsPage() {
                     <ProcedureVerticalProfile
                       polylines={polylines}
                       missedSectionMarkers={missedSectionMarkers}
+                      missedLegMarkers={missedLegMarkers}
                       focusedFixId={focusedFixId}
                       focusedBranchId={focusedBranchId}
                       distanceUnit={distanceUnit}

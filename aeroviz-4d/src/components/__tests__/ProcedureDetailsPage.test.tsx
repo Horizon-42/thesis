@@ -442,6 +442,8 @@ describe("ProcedureDetailsPage", () => {
     render(<ProcedureDetailsPage />);
 
     expect((await screen.findAllByText("S1/S2")).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("DF leg").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("HM leg").length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText(/WARN UNSUPPORTED_LEG_TYPE/).length).toBeGreaterThan(0);
   });
 

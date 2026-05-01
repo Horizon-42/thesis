@@ -849,3 +849,38 @@
 
 ### Exact Next Recommended Step
 - Add explicit CA/DF/HM missed-leg badges/markers in the Procedure Details sequence and chart views before implementing their full geometry builders.
+
+## 2026-05-02 00:38 CEST
+
+### Goal Of This Session
+- Make preserved missed approach leg semantics visible before full CA/DF/HM geometry construction exists.
+
+### Decisions Locked
+- Missed leg markers are derived from `ProcedureDetailDocument.branches[].legs[]`.
+- CA/DF/HM/HA/HF legs in missed approach context are labeled on the nearest positioned start/end fix.
+- Markers are rendered in both plan view and vertical profile.
+- These markers are semantic badges only; unsupported geometry still emits diagnostics and no misleading envelope.
+
+### Files Changed
+- `src/components/ProcedureDetailsPage.tsx`
+- `src/components/__tests__/ProcedureDetailsPage.test.tsx`
+- `src/index.css`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/components/__tests__/ProcedureDetailsPage.test.tsx`
+- `npm run build`
+
+### Current Status
+- Procedure Details now distinguishes missed approach visually with:
+  - dashed missed path;
+  - outbound arrow;
+  - `S1/S2` section split marker;
+  - DF/HM/CA-style missed leg badges when those legs are present.
+
+### Known Blockers
+- CA/DF/HM/HA/HF geometry builders remain future work.
+- Turning missed approach debug primitives remain future work.
+
+### Exact Next Recommended Step
+- Start implementing the first constructible missed approach geometry path, beginning with straight DF missed section support and tests.
