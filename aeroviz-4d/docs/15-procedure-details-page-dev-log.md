@@ -395,3 +395,40 @@
 
 ### Exact Next Recommended Step
 - Add RF-specific protected envelope construction for sampled RF centerlines, starting with a conservative parallel ribbon test and then separating full RF OEA Case 1/Case 2 behavior.
+
+## 2026-05-01 23:42 CEST
+
+### Goal Of This Session
+- Improve RF protected ribbon geometry so pure RF segments use parallel circular boundaries instead of generic sampled-polyline offsets.
+
+### Decisions Locked
+- RF centerline geometry now preserves arc metadata:
+  - center point;
+  - radius;
+  - start angle;
+  - sweep angle;
+  - turn direction.
+- Pure RF segment envelopes use concentric left/right boundary arcs at `radius +/- halfWidth`.
+- Mixed TF/RF segments continue to fall back to the existing generic sampled offset path until multi-leg RF/TF composition is designed.
+
+### Files Changed
+- `src/utils/procedureRfGeometry.ts`
+- `src/utils/procedureSegmentGeometry.ts`
+- `src/utils/__tests__/procedureSegmentGeometry.test.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/utils/__tests__/procedureSegmentGeometry.test.ts src/data/__tests__/procedureRenderBundle.test.ts`
+- `npm run build`
+- `npm test -- --run`
+
+### Current Status
+- Pure RF segment primary/secondary ribbons now preserve constant radial offset from the RF center.
+- Unit tests verify the RF primary boundary radii against expected `center radius +/- halfWidth`.
+
+### Known Blockers
+- This is still not full FAA RF OEA Case 1/Case 2 construction.
+- Mixed TF/RF protected area stitching still needs explicit transition rules.
+
+### Exact Next Recommended Step
+- Add RF debug/inspection primitives or diagnostics for RF metadata in the procedure panel/details view, then design full RF OEA Case 1/Case 2 acceptance tests.
