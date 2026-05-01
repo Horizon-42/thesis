@@ -15,11 +15,23 @@ const PROCEDURE_SEGMENT_ENTITY_PREFIX = "procedure-segment-";
 const CENTERLINE_COLOR = Cesium.Color.CYAN.withAlpha(0.95);
 const PRIMARY_COLOR = Cesium.Color.DEEPSKYBLUE.withAlpha(0.18);
 const SECONDARY_COLOR = Cesium.Color.YELLOW.withAlpha(0.1);
-const CONNECTOR_COLOR = Cesium.Color.ORANGE.withAlpha(0.14);
+const CONNECTOR_COLOR = Cesium.Color.ORANGE.withAlpha(0.32);
+const CONNECTOR_LINE_COLOR = Cesium.Color.ORANGE.withAlpha(0.92);
 const OUTLINE_COLOR = Cesium.Color.CYAN.withAlpha(0.28);
+const ENVELOPE_HEIGHT_OFFSET_M = 8;
+const OEA_HEIGHT_OFFSET_M = 18;
+const CONNECTOR_HEIGHT_OFFSET_M = 45;
 
-function geoToCartesian(point: GeoPoint): Cesium.Cartesian3 {
-  return Cesium.Cartesian3.fromDegrees(point.lonDeg, point.latDeg, point.altM);
+function elevatedPoint(point: GeoPoint, altitudeOffsetM: number): GeoPoint {
+  return { ...point, altM: point.altM + altitudeOffsetM };
+}
+
+function geoToCartesian(point: GeoPoint, altitudeOffsetM = 0): Cesium.Cartesian3 {
+  return Cesium.Cartesian3.fromDegrees(
+    point.lonDeg,
+    point.latDeg,
+    point.altM + altitudeOffsetM,
+  );
 }
 
 function addPolyline(
@@ -53,6 +65,7 @@ function addRibbonPolygon(
   ribbon: VariableWidthRibbonGeometry | undefined,
   visible: boolean,
   material: Cesium.Color,
+  altitudeOffsetM = 0,
 ): void {
   if (!ribbon || ribbon.leftGeoBoundary.length < 2 || ribbon.rightGeoBoundary.length < 2) return;
   const polygonPoints = [...ribbon.leftGeoBoundary, ...ribbon.rightGeoBoundary.slice().reverse()];
@@ -61,13 +74,48 @@ function addRibbonPolygon(
     name,
     show: visible,
     polygon: {
-      hierarchy: new Cesium.PolygonHierarchy(polygonPoints.map(geoToCartesian)),
+      hierarchy: new Cesium.PolygonHierarchy(
+        polygonPoints.map((point) => geoToCartesian(point, altitudeOffsetM)),
+      ),
       material,
       perPositionHeight: true,
       outline: true,
       outlineColor: OUTLINE_COLOR,
     },
   });
+}
+
+function addRibbonBoundaryPolylines(
+  viewer: Cesium.Viewer,
+  id: string,
+  name: string,
+  ribbon: VariableWidthRibbonGeometry | undefined,
+  visible: boolean,
+  material: Cesium.Color,
+  altitudeOffsetM: number,
+): string[] {
+  if (!ribbon || ribbon.leftGeoBoundary.length < 2 || ribbon.rightGeoBoundary.length < 2) return [];
+  const leftId = `${id}-left`;
+  const rightId = `${id}-right`;
+  addPolyline(
+    viewer,
+    leftId,
+    `${name} left boundary`,
+    ribbon.leftGeoBoundary.map((point) => elevatedPoint(point, altitudeOffsetM)),
+    visible,
+    3,
+    material,
+  );
+  addPolyline(
+    viewer,
+    rightId,
+    `${name} right boundary`,
+    ribbon.rightGeoBoundary.map((point) => elevatedPoint(point, altitudeOffsetM)),
+    visible,
+    3,
+    material,
+  );
+  return [leftId, rightId];
 }
 
 function addSegmentEntities(
@@ -100,6 +148,7 @@ function addSegmentEntities(
     segmentBundle.segmentGeometry.primaryEnvelope,
     visible,
     PRIMARY_COLOR,
+    ENVELOPE_HEIGHT_OFFSET_M,
   );
   ids.push(primaryId);
 
@@ -111,6 +160,7 @@ function addSegmentEntities(
     segmentBundle.segmentGeometry.secondaryEnvelope,
     visible,
     SECONDARY_COLOR,
+    ENVELOPE_HEIGHT_OFFSET_M,
   );
   ids.push(secondaryId);
 
@@ -123,6 +173,7 @@ function addSegmentEntities(
       segmentBundle.finalOea.primary,
       visible,
       PRIMARY_COLOR,
+      OEA_HEIGHT_OFFSET_M,
     );
     ids.push(oeaPrimaryId);
 
@@ -134,6 +185,7 @@ function addSegmentEntities(
       segmentBundle.finalOea.secondaryOuter,
       visible,
       SECONDARY_COLOR,
+      OEA_HEIGHT_OFFSET_M,
     );
     ids.push(oeaSecondaryId);
   }
@@ -147,6 +199,7 @@ function addSegmentEntities(
       segmentBundle.alignedConnector.primary,
       visible,
       CONNECTOR_COLOR,
+      CONNECTOR_HEIGHT_OFFSET_M,
     );
     ids.push(connectorPrimaryId);
 
@@ -158,8 +211,30 @@ function addSegmentEntities(
       segmentBundle.alignedConnector.secondaryOuter,
       visible,
       CONNECTOR_COLOR,
+      CONNECTOR_HEIGHT_OFFSET_M,
     );
     ids.push(connectorSecondaryId);
+
+    ids.push(
+      ...addRibbonBoundaryPolylines(
+        viewer,
+        `${baseId}-connector-primary-boundary`,
+        `${segmentName} aligned connector primary`,
+        segmentBundle.alignedConnector.primary,
+        visible,
+        CONNECTOR_LINE_COLOR,
+        CONNECTOR_HEIGHT_OFFSET_M,
+      ),
+      ...addRibbonBoundaryPolylines(
+        viewer,
+        `${baseId}-connector-secondary-boundary`,
+        `${segmentName} aligned connector secondary`,
+        segmentBundle.alignedConnector.secondaryOuter,
+        visible,
+        CONNECTOR_LINE_COLOR,
+        CONNECTOR_HEIGHT_OFFSET_M,
+      ),
+    );
   }
 
   return ids;
@@ -169,15 +244,15 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
   const { viewer, layers, procedureVisibility, activeAirportCode } = useApp();
   const visibleRef = useRef(layers.procedures);
   const procedureVisibilityRef = useRef(procedureVisibility);
-  const branchEntityIdsRef = useRef<Record<string, string[]>>({});
+  const routeEntityIdsRef = useRef<Record<string, string[]>>({});
 
   useEffect(() => {
     visibleRef.current = layers.procedures;
     procedureVisibilityRef.current = procedureVisibility;
 
     if (!enabled || !isCesiumViewerUsable(viewer)) return;
-    Object.entries(branchEntityIdsRef.current).forEach(([branchId, entityIds]) => {
-      const branchVisible = procedureVisibility[branchId] ?? true;
+    Object.entries(routeEntityIdsRef.current).forEach(([routeId, entityIds]) => {
+      const branchVisible = procedureVisibility[routeId] ?? true;
       entityIds.forEach((entityId) => {
         const entity = viewer.entities.getById(entityId);
         if (entity) entity.show = layers.procedures && branchVisible;
@@ -191,12 +266,12 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
 
     let cancelled = false;
     const addedIds: string[] = [];
-    branchEntityIdsRef.current = {};
+    routeEntityIdsRef.current = {};
 
-    const addBranchEntityIds = (branchId: string, entityIds: string[]) => {
+    const addRouteEntityIds = (routeId: string, entityIds: string[]) => {
       addedIds.push(...entityIds);
-      const existing = branchEntityIdsRef.current[branchId] ?? [];
-      branchEntityIdsRef.current[branchId] = [...existing, ...entityIds];
+      const existing = routeEntityIdsRef.current[routeId] ?? [];
+      routeEntityIdsRef.current[routeId] = [...existing, ...entityIds];
     };
 
     loadProcedureRenderBundleData(activeAirportCode)
@@ -205,10 +280,10 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
 
         renderBundles.forEach((bundle) => {
           bundle.branchBundles.forEach((branchBundle) => {
-            const visible = visibleRef.current && (procedureVisibilityRef.current[branchBundle.branchId] ?? true);
+            const visible = visibleRef.current && (procedureVisibilityRef.current[branchBundle.routeId] ?? true);
             branchBundle.segmentBundles.forEach((segmentBundle) => {
-              addBranchEntityIds(
-                branchBundle.branchId,
+              addRouteEntityIds(
+                branchBundle.routeId,
                 addSegmentEntities(viewer, bundle, segmentBundle, visible),
               );
             });
@@ -231,7 +306,7 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
       if (isCesiumViewerUsable(viewer)) {
         addedIds.forEach((id) => viewer.entities.removeById(id));
       }
-      branchEntityIdsRef.current = {};
+      routeEntityIdsRef.current = {};
     };
   }, [enabled, viewer, activeAirportCode]);
 }

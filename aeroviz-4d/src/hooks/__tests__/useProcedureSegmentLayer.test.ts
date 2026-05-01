@@ -117,6 +117,7 @@ const renderBundleData = {
       branchBundles: [
         {
           branchId: "branch:R",
+          routeId: "KRDU-R05LY-R",
           branchName: "RW05L",
           branchRole: "STRAIGHT_IN",
           runwayId: "RW05L",
@@ -163,7 +164,7 @@ describe("useProcedureSegmentLayer", () => {
     vi.mocked(loadProcedureRenderBundleData).mockReset();
     vi.mocked(loadProcedureRenderBundleData).mockResolvedValue(renderBundleData as any);
     setProceduresVisible(true);
-    setProcedureBranchVisible("branch:R", true);
+    setProcedureBranchVisible("KRDU-R05LY-R", true);
   });
 
   it("renders segment centerline, envelopes, OEA, and connector entities", async () => {
@@ -176,6 +177,7 @@ describe("useProcedureSegmentLayer", () => {
     expect(entities.some((entity) => String(entity.id).includes("-envelope-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-oea-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-connector-primary"))).toBe(true);
+    expect(entities.some((entity) => String(entity.id).includes("-connector-primary-boundary"))).toBe(true);
   });
 
   it("syncs layer visibility without reloading render bundle data", async () => {
@@ -183,6 +185,17 @@ describe("useProcedureSegmentLayer", () => {
     await waitFor(() => expect(mockViewer.entities.add).toHaveBeenCalled());
 
     setProceduresVisible(false);
+    rerender();
+
+    expect(loadProcedureRenderBundleData).toHaveBeenCalledTimes(1);
+    expect(entities.every((entity) => entity.show === false)).toBe(true);
+  });
+
+  it("uses the legacy route id so Procedure Panel branch selection works in protected mode", async () => {
+    const { rerender } = renderHook(() => useProcedureSegmentLayer());
+    await waitFor(() => expect(mockViewer.entities.add).toHaveBeenCalled());
+
+    setProcedureBranchVisible("KRDU-R05LY-R", false);
     rerender();
 
     expect(loadProcedureRenderBundleData).toHaveBeenCalledTimes(1);
