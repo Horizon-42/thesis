@@ -259,3 +259,53 @@
 
 ### Exact Next Recommended Step
 - Upgrade the procedure-detail/export schema to carry RF radius, center, and turn direction from CIFP/source data, then add a fixture that proves an exported RF leg reaches the new kernel without synthetic test-only data.
+
+## 2026-05-01 23:24 CEST
+
+### Goal Of This Session
+- Add schema plumbing so RF metadata can travel from the Python procedure model through exported procedure-detail JSON into the canonical frontend `ProcedurePackage`.
+- Avoid guessing CIFP RF fields until the parser mapping is verified against source records.
+
+### Facts Discovered
+- `ProcedurePackageLeg` already had optional RF fields, but `ProcedureDetailLeg.path` and the Python export document did not.
+- The current parser still produces `ProcedureLeg` records without populated RF radius/center/direction fields.
+- The frontend adapter previously emitted `RF_RADIUS_MISSING` for every RF leg even if metadata were supplied.
+
+### Decisions Locked
+- RF metadata is carried on the procedure-detail leg `path` object:
+  - `turnDirection`
+  - `arcRadiusNm`
+  - `centerLatDeg`
+  - `centerLonDeg`
+- The adapter promotes those fields onto canonical `ProcedurePackageLeg`.
+- `RF_RADIUS_MISSING` is emitted only when RF center/radius fields are absent.
+- Parser-level extraction remains a separate step because column/key mapping must be verified against real CIFP/cifparse records.
+
+### Files Changed
+- `python/cifp_parser.py`
+- `python/preprocess_procedures.py`
+- `python/tests/test_preprocess_procedures.py`
+- `src/data/procedureDetails.ts`
+- `src/data/procedurePackageAdapter.ts`
+- `src/data/__tests__/procedurePackageAdapter.test.ts`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/data/__tests__/procedurePackageAdapter.test.ts src/utils/__tests__/procedureSegmentGeometry.test.ts`
+- `python -m pytest python/tests/test_preprocess_procedures.py` failed because this Python environment does not have `pytest` installed.
+- `python -m py_compile python/cifp_parser.py python/preprocess_procedures.py python/tests/test_preprocess_procedures.py`
+- Python RF schema smoke test via direct `build_branch_document(...)` call.
+- `npm test -- --run`
+- `npm run build`
+
+### Current Status
+- The RF metadata path exists end-to-end once parser/exporter code can populate the fields.
+- The TypeScript adapter no longer blocks RF legs that already include radius and center metadata.
+- Python tests have a new RF metadata assertion, but full pytest execution still needs a Python environment with `pytest`.
+
+### Known Blockers
+- Real CIFP RF radius/center/direction parsing is not implemented yet.
+- Existing generated KRDU procedure-detail JSON must be regenerated after parser/export changes before real RF metadata can appear in the app.
+- RF protected envelope construction remains a straight sampled-ribbon approximation until RF-specific OEA cases are implemented.
+
+### Exact Next Recommended Step
+- Inspect real cifparse procedure-record keys for RF legs, map the verified radius/center/direction fields into `ProcedureLeg`, and regenerate a procedure-detail fixture that exercises the RF kernel from exported data.
