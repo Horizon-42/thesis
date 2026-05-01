@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchJson } from "../../utils/fetchJson";
+import { METERS_PER_NM, offsetPoint } from "../../utils/procedureGeoMath";
 import type { ProcedureDetailDocument, ProcedureDetailsIndexManifest } from "../procedureDetails";
 import type { ProcedurePackage } from "../procedurePackage";
+import { normalizeProcedurePackage } from "../procedurePackageAdapter";
 import { buildProcedureRenderBundle, loadProcedureRenderBundleData } from "../procedureRenderBundle";
 
 vi.mock("../../utils/fetchJson", () => ({
@@ -279,6 +281,109 @@ const twoSegmentTurnPackage: ProcedurePackage = {
   ],
 };
 
+const rfCenter = { lonDeg: -78.86, latDeg: 35.84, altM: 0 };
+const rfStart = offsetPoint(rfCenter, Math.PI / 2, 2 * METERS_PER_NM);
+const rfEnd = offsetPoint(rfCenter, 0, 2 * METERS_PER_NM);
+
+const rfDocument: ProcedureDetailDocument = {
+  ...sampleDocument,
+  procedureUid: "KRDU-RFTEST-RW05L",
+  procedure: {
+    ...sampleDocument.procedure,
+    procedureIdent: "RFTEST",
+    chartName: "RNAV RF TEST",
+  },
+  fixes: [
+    {
+      fixId: "fix:RFSTART",
+      ident: "RFSTART",
+      kind: "named_fix",
+      position: { lon: rfStart.lonDeg, lat: rfStart.latDeg },
+      elevationFt: 3000,
+      roleHints: ["IF"],
+      sourceRefs: [],
+    },
+    {
+      fixId: "fix:RFEND",
+      ident: "RFEND",
+      kind: "named_fix",
+      position: { lon: rfEnd.lonDeg, lat: rfEnd.latDeg },
+      elevationFt: 2200,
+      roleHints: ["FAF"],
+      sourceRefs: [],
+    },
+    {
+      fixId: "fix:CENTER",
+      ident: "CENTER",
+      kind: "rf_center",
+      position: { lon: rfCenter.lonDeg, lat: rfCenter.latDeg },
+      elevationFt: null,
+      roleHints: [],
+      sourceRefs: [],
+    },
+  ],
+  branches: [
+    {
+      branchId: "branch:R",
+      branchKey: "R",
+      branchIdent: "R",
+      branchRole: "final",
+      sequenceOrder: 1,
+      mergeFixRef: null,
+      continuesWithBranchId: null,
+      defaultVisible: true,
+      warnings: [],
+      legs: [
+        {
+          legId: "leg:R:010",
+          sequence: 10,
+          segmentType: "intermediate",
+          path: {
+            pathTerminator: "IF",
+            constructionMethod: "if_to_fix",
+            startFixRef: null,
+            endFixRef: "fix:RFSTART",
+          },
+          termination: { kind: "fix", fixRef: "fix:RFSTART" },
+          constraints: {
+            altitude: { qualifier: "at", valueFt: 3000, rawText: "3000 ft" },
+            speedKt: null,
+            geometryAltitudeFt: 3000,
+          },
+          roleAtEnd: "IF",
+          sourceRefs: [],
+          quality: { status: "exact", sourceLine: 1, renderedInPlanView: true },
+        },
+        {
+          legId: "leg:R:020",
+          sequence: 20,
+          segmentType: "intermediate",
+          path: {
+            pathTerminator: "RF",
+            constructionMethod: "radius_to_fix",
+            startFixRef: "fix:RFSTART",
+            endFixRef: "fix:RFEND",
+            turnDirection: "LEFT",
+            arcRadiusNm: 2,
+            centerFixRef: "fix:CENTER",
+            centerLatDeg: rfCenter.latDeg,
+            centerLonDeg: rfCenter.lonDeg,
+          },
+          termination: { kind: "fix", fixRef: "fix:RFEND" },
+          constraints: {
+            altitude: { qualifier: "at", valueFt: 2200, rawText: "2200 ft" },
+            speedKt: null,
+            geometryAltitudeFt: 2200,
+          },
+          roleAtEnd: "FAF",
+          sourceRefs: [],
+          quality: { status: "exact", sourceLine: 2, renderedInPlanView: true },
+        },
+      ],
+    },
+  ],
+};
+
 describe("procedure render bundle", () => {
   beforeEach(() => {
     vi.mocked(fetchJson).mockReset();
@@ -325,6 +430,22 @@ describe("procedure render bundle", () => {
         }),
       ]),
     );
+  });
+
+  it("builds RF arc geometry from procedure-detail RF path metadata", () => {
+    const pkg = normalizeProcedurePackage(rfDocument);
+    const bundle = buildProcedureRenderBundle(pkg, {
+      samplingStepNm: 0.5,
+      enableDebugPrimitives: false,
+    });
+    const segmentBundle = bundle.branchBundles[0].segmentBundles[0];
+
+    expect(pkg.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain(
+      "RF_RADIUS_MISSING",
+    );
+    expect(segmentBundle.segmentGeometry.centerline.isArc).toBe(true);
+    expect(segmentBundle.segmentGeometry.centerline.geodesicLengthNm).toBeCloseTo(Math.PI, 2);
+    expect(segmentBundle.segmentGeometry.turnJunctions).toEqual([]);
   });
 
   it("loads procedure details through the package normalizer and render bundle builder", async () => {
