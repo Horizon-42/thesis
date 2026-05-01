@@ -500,3 +500,31 @@
 
 ### Exact Next Recommended Step
 - Create or regenerate an RF-containing procedure-detail fixture and use it for manual visual validation, then start full RF OEA Case 1/Case 2 acceptance tests.
+
+## 2026-05-01 23:52 CEST
+
+### Goal Of This Session
+- Turn the manually verified KATL ZELAN4 RF export path into an automated regression test.
+
+### Decisions Locked
+- The test uses the full `build_procedure_detail_document(...)` path instead of only `build_branch_document(...)`.
+- KATL `ZELAN4` is retained as the real CIFP RF fixture because it has a populated RF leg from `CPARK` to `MPASS` with center fix `CFZJF`.
+- The fixture remains test-only; no large generated public procedure-detail asset is committed in this phase.
+
+### Files Changed
+- `python/tests/test_preprocess_procedures.py`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `conda run -n aviation pytest python/tests/test_preprocess_procedures.py -k katl_zelan4`
+
+### Current Status
+- Full procedure-detail document generation now proves real RF metadata survives parser, fix resolution, branch assembly, and JSON document construction.
+- The regression asserts RF start/end fix refs, turn direction, radius, center fix ref, and resolved center coordinates.
+
+### Known Blockers
+- This still does not publish a browser-visible RF public data fixture.
+- RF protected-area Case 1/Case 2 construction remains incomplete.
+
+### Exact Next Recommended Step
+- Add RF envelope case metadata and Case 1/Case 2 acceptance tests in the TypeScript geometry kernel.

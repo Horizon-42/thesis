@@ -371,6 +371,38 @@ def test_cifparse_rf_leg_metadata_resolves_center_fix() -> None:
     assert rf_path["centerLonDeg"] == pytest.approx(fix_records["CFZJF"].lon)
 
 
+def test_build_katl_zelan4_procedure_detail_document_exports_real_rf_metadata() -> None:
+    document = build_procedure_detail_document(
+        cifp_root=CIFP_ROOT,
+        airport="KATL",
+        procedure_type="SID",
+        procedure="ZELAN4",
+        nominal_speed_kt=180.0,
+        tunnel_half_width_nm=0.3,
+        tunnel_half_height_ft=300.0,
+        sample_spacing_m=250.0,
+    )
+
+    rf_legs = [
+        leg
+        for branch in document["branches"]
+        for leg in branch["legs"]
+        if leg["path"]["pathTerminator"] == "RF"
+    ]
+
+    assert document["procedureUid"] == "KATL-ZELAN4-UNKNOWN"
+    assert len(rf_legs) == 1
+
+    rf_path = rf_legs[0]["path"]
+    assert rf_path["startFixRef"] == "fix:CPARK"
+    assert rf_path["endFixRef"] == "fix:MPASS"
+    assert rf_path["turnDirection"] == "RIGHT"
+    assert rf_path["arcRadiusNm"] == pytest.approx(3.46)
+    assert rf_path["centerFixRef"] == "fix:CFZJF"
+    assert rf_path["centerLatDeg"] == pytest.approx(33.692475)
+    assert rf_path["centerLonDeg"] == pytest.approx(-84.5128917)
+
+
 def test_build_krdu_r05ly_procedure_detail_document() -> None:
     document = build_procedure_detail_document(
         cifp_root=CIFP_ROOT,
