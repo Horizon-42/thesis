@@ -790,3 +790,30 @@
 
 ### Exact Next Recommended Step
 - Add a final validation run across Python tests, frontend tests, and build, then summarize remaining v3 migration gaps clearly.
+
+## 2026-05-02 00:23 CEST
+
+### Goal Of This Session
+- Run full validation after the RF, segment assessment, missed-section, and diagnostics stages.
+
+### Commands Run / Checks Passed
+- `conda run -n aviation pytest python/tests`
+  - 73 passed.
+- `npm test -- --run`
+  - 95 passed.
+- `npm run build`
+  - TypeScript compile and Vite production build passed.
+
+### Current Status
+- Real RF metadata is tested from CIFP parser through full procedure-detail document export.
+- RF centerline, RF parallel envelope metadata, and finite Case 2 inner-collapse handling are covered.
+- 2D profile assessment now uses render-bundle segment geometry when available and reports station, cross-track, containment, vertical error, and basic events.
+- Missed approach legs can be sectioned into `MISSED_S1` and `MISSED_S2`.
+- Procedure Details surfaces render/geometry diagnostics in Data Notes.
+
+### Remaining v3 Migration Gaps
+- Full FAA RF OEA Case 1/Case 2 construction is not complete; the current Case 2 behavior is a conservative finite-geometry guard.
+- FB/FO turn construction remains visual-fill only.
+- DF/CA/HM/HA/HF geometry is preserved and diagnosed but not constructed.
+- LPV/GLS W/X/Y, LNAV/VNAV vertical surfaces, RNP AR templates, and turning missed approach wind spiral remain future work.
+- Diagnostic selection does not yet focus the related segment or leg on the Procedure Details charts.
