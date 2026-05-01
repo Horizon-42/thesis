@@ -1,10 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
-const { toggleLayer, setPlaybackSpeed, setActiveAirportCode } = vi.hoisted(() => ({
+const {
+  toggleLayer,
+  setPlaybackSpeed,
+  setActiveAirportCode,
+  setProcedureVisualizationMode,
+} = vi.hoisted(() => ({
   toggleLayer: vi.fn(),
   setPlaybackSpeed: vi.fn(),
   setActiveAirportCode: vi.fn(),
+  setProcedureVisualizationMode: vi.fn(),
 }));
 
 vi.mock("../../context/AppContext", () => ({
@@ -29,6 +35,8 @@ vi.mock("../../context/AppContext", () => ({
     ],
     activeAirportCode: "KRDU",
     setActiveAirportCode,
+    procedureVisualizationMode: "legacy",
+    setProcedureVisualizationMode,
   }),
 }));
 
@@ -43,5 +51,13 @@ describe("ControlPanel", () => {
     });
 
     expect(setActiveAirportCode).toHaveBeenCalledWith("CYVR");
+  });
+
+  it("switches procedure visualization mode", () => {
+    render(<ControlPanel />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Protected" }));
+
+    expect(setProcedureVisualizationMode).toHaveBeenCalledWith("protected");
   });
 });

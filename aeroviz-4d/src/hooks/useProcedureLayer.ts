@@ -92,7 +92,7 @@ function addTunnelSegment(
   });
 }
 
-export function useProcedureLayer(): void {
+export function useProcedureLayer({ enabled = true }: { enabled?: boolean } = {}): void {
   const { viewer, layers, procedureVisibility, activeAirportCode } = useApp();
   const visibleRef = useRef(layers.procedures);
   const procedureVisibilityRef = useRef(procedureVisibility);
@@ -103,7 +103,7 @@ export function useProcedureLayer(): void {
     visibleRef.current = layers.procedures;
     procedureVisibilityRef.current = procedureVisibility;
 
-    if (!isCesiumViewerUsable(viewer)) return;
+    if (!enabled || !isCesiumViewerUsable(viewer)) return;
     Object.entries(routeEntityIdsRef.current).forEach(([routeId, entityIds]) => {
       const routeVisible =
         procedureVisibility[routeId] ?? routeDefaultsRef.current[routeId] ?? true;
@@ -112,9 +112,10 @@ export function useProcedureLayer(): void {
         if (entity) entity.show = layers.procedures && routeVisible;
       });
     });
-  }, [viewer, layers.procedures, procedureVisibility]);
+  }, [enabled, viewer, layers.procedures, procedureVisibility]);
 
   useEffect(() => {
+    if (!enabled) return;
     if (!viewer || !activeAirportCode) return;
 
     let cancelled = false;
@@ -234,5 +235,5 @@ export function useProcedureLayer(): void {
       routeEntityIdsRef.current = {};
       routeDefaultsRef.current = {};
     };
-  }, [viewer, activeAirportCode]);
+  }, [enabled, viewer, activeAirportCode]);
 }

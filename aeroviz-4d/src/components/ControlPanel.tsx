@@ -11,7 +11,7 @@
  * the rendering engine.
  */
 
-import { useApp, type LayerKey } from "../context/AppContext";
+import { useApp, type LayerKey, type ProcedureVisualizationMode } from "../context/AppContext";
 import { useEffect, useState } from "react";
 
 /** Predefined speed options shown as buttons */
@@ -45,6 +45,14 @@ const ACTIVE_LAYER_KEYS: LayerKey[] = [
   "ocsSurfaces",
 ];
 
+const PROCEDURE_VISUALIZATION_MODES: Array<{
+  label: string;
+  value: ProcedureVisualizationMode;
+}> = [
+  { label: "Legacy", value: "legacy" },
+  { label: "Protected", value: "protected" },
+];
+
 export default function ControlPanel() {
   const {
     viewer,
@@ -55,6 +63,8 @@ export default function ControlPanel() {
     airports,
     activeAirportCode,
     setActiveAirportCode,
+    procedureVisualizationMode,
+    setProcedureVisualizationMode,
   } = useApp();
   const [isAnimating, setIsAnimating] = useState<boolean>(false);
 
@@ -156,6 +166,22 @@ export default function ControlPanel() {
             {LAYER_LABELS[key]}
           </label>
         ))}
+      </section>
+
+      <section>
+        <h4>Procedure View</h4>
+        <div className="procedure-mode-buttons">
+          {PROCEDURE_VISUALIZATION_MODES.map((mode) => (
+            <button
+              key={mode.value}
+              type="button"
+              className={procedureVisualizationMode === mode.value ? "active" : ""}
+              onClick={() => setProcedureVisualizationMode(mode.value)}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
       </section>
     </div>
   );

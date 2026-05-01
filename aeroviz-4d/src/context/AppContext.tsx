@@ -51,6 +51,7 @@ export type LayerKey =
   | "procedures";
 
 export type RunwayProfileViewMode = "split" | "side-xz" | "top-xy";
+export type ProcedureVisualizationMode = "legacy" | "protected";
 
 // ── Context shape ────────────────────────────────────────────────────────────
 interface AppState {
@@ -84,6 +85,8 @@ interface AppState {
   procedureVisibility: Record<string, boolean>;
   setProcedureRouteVisible: (routeId: string, visible: boolean) => void;
   setProcedureRoutesVisible: (routeIds: string[], visible: boolean) => void;
+  procedureVisualizationMode: ProcedureVisualizationMode;
+  setProcedureVisualizationMode: (mode: ProcedureVisualizationMode) => void;
 
   /** Current Cesium clock multiplier (mirrors viewer.clock.multiplier) */
   playbackSpeed: number;
@@ -120,6 +123,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [isRunwayProfileOpen, setRunwayProfileOpen] = useState(false);
   const [runwayProfileViewMode, setRunwayProfileViewMode] =
     useState<RunwayProfileViewMode>("split");
+  const [procedureVisualizationMode, setProcedureVisualizationMode] =
+    useState<ProcedureVisualizationMode>("legacy");
 
   // All layers start visible; hooks respect these flags.
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
@@ -228,6 +233,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         procedureVisibility,
         setProcedureRouteVisible,
         setProcedureRoutesVisible,
+        procedureVisualizationMode,
+        setProcedureVisualizationMode,
         playbackSpeed,
         setPlaybackSpeed,
         selectedProfileRunwayIdent,

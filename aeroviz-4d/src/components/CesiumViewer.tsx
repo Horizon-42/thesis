@@ -14,6 +14,7 @@
  *         (useRunwayLayer)       loads runway.geojson
  *         (useWaypointLayer)     loads waypoints.geojson
  *         (useProcedureLayer)    loads procedure-details
+ *         (useProcedureSegmentLayer) loads v3 procedure render bundles
  *         (useOcsLayer)          builds OCS geometry
  *         (useCzmlLoader)        loads trajectories.czml
  */
@@ -25,6 +26,7 @@ import { useTerrainLayer } from "../hooks/useTerrainLayer";
 import { useDsmTerrainLayer } from "../hooks/useDsmTerrainLayer";
 import { useObstacleLayer } from "../hooks/useObstacleLayer";
 import { useProcedureLayer } from "../hooks/useProcedureLayer";
+import { useProcedureSegmentLayer } from "../hooks/useProcedureSegmentLayer";
 import { useOcsLayer } from "../hooks/useOcsLayer";
 import { useApp } from "../context/AppContext";
 
@@ -33,7 +35,7 @@ export default function CesiumViewerComponent() {
   // IMPORTANT: the div must be in the DOM before useCesiumViewer runs —
   // that's why we pass the ref to the hook rather than accessing the node directly.
   const containerRef = useRef<HTMLDivElement>(null);
-  const { layers } = useApp();
+  const { layers, procedureVisualizationMode } = useApp();
 
   // ── Initialise the 3D globe ────────────────────────────────────────────────
   // This hook creates the Viewer and stores it in AppContext.
@@ -47,7 +49,8 @@ export default function CesiumViewerComponent() {
   useDsmTerrainLayer({ enabled: layers.dsmTerrain });
   useRunwayLayer();
   useObstacleLayer();
-  useProcedureLayer();
+  useProcedureLayer({ enabled: procedureVisualizationMode === "legacy" });
+  useProcedureSegmentLayer({ enabled: procedureVisualizationMode === "protected" });
   useOcsLayer();
   // Waypoint rendering is intentionally disabled for now.
   // Keep the hook implementation for future use.

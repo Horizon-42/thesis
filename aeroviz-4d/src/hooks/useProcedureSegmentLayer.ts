@@ -165,7 +165,7 @@ function addSegmentEntities(
   return ids;
 }
 
-export function useProcedureSegmentLayer(): void {
+export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean } = {}): void {
   const { viewer, layers, procedureVisibility, activeAirportCode } = useApp();
   const visibleRef = useRef(layers.procedures);
   const procedureVisibilityRef = useRef(procedureVisibility);
@@ -175,7 +175,7 @@ export function useProcedureSegmentLayer(): void {
     visibleRef.current = layers.procedures;
     procedureVisibilityRef.current = procedureVisibility;
 
-    if (!isCesiumViewerUsable(viewer)) return;
+    if (!enabled || !isCesiumViewerUsable(viewer)) return;
     Object.entries(branchEntityIdsRef.current).forEach(([branchId, entityIds]) => {
       const branchVisible = procedureVisibility[branchId] ?? true;
       entityIds.forEach((entityId) => {
@@ -183,9 +183,10 @@ export function useProcedureSegmentLayer(): void {
         if (entity) entity.show = layers.procedures && branchVisible;
       });
     });
-  }, [viewer, layers.procedures, procedureVisibility]);
+  }, [enabled, viewer, layers.procedures, procedureVisibility]);
 
   useEffect(() => {
+    if (!enabled) return;
     if (!viewer || !activeAirportCode) return;
 
     let cancelled = false;
@@ -232,5 +233,5 @@ export function useProcedureSegmentLayer(): void {
       }
       branchEntityIdsRef.current = {};
     };
-  }, [viewer, activeAirportCode]);
+  }, [enabled, viewer, activeAirportCode]);
 }
