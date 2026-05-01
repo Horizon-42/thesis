@@ -1,11 +1,24 @@
 import type {
   BuildDiagnostic,
+  ProcedurePackageFix,
+  ProcedurePackageLeg,
   ProcedureSegment,
 } from "../data/procedurePackage";
+import {
+  FEET_TO_METERS,
+  METERS_PER_NM,
+  offsetPoint,
+  toCartesian,
+  toRadians,
+  type CartesianPoint,
+  type GeoPoint,
+} from "./procedureGeoMath";
 import type {
   LateralEnvelopeGeometry,
   SegmentGeometryBundle,
 } from "./procedureSegmentGeometry";
+
+const DEFAULT_CA_COURSE_GUIDE_LENGTH_NM = 3;
 
 export type MissedSectionSurfaceType =
   | "MISSED_SECTION1_ENVELOPE"
@@ -16,6 +29,19 @@ export interface MissedSectionSurfaceGeometry {
   surfaceType: MissedSectionSurfaceType;
   primary: LateralEnvelopeGeometry;
   secondaryOuter: LateralEnvelopeGeometry | null;
+}
+
+export interface MissedCourseGuideGeometry {
+  segmentId: string;
+  legId: string;
+  legType: "CA";
+  startFixId: string;
+  courseDeg: number;
+  guideLengthNm: number;
+  requiredAltitudeFtMsl: number | null;
+  constructionStatus: "COURSE_DIRECTION_ONLY";
+  geoPositions: [GeoPoint, GeoPoint];
+  worldPositions: [CartesianPoint, CartesianPoint];
 }
 
 function diagnostic(
@@ -29,6 +55,42 @@ function diagnostic(
     message,
     sourceRefs: segment.sourceRefs,
   };
+}
+
+function legDiagnostic(
+  segment: ProcedureSegment,
+  leg: ProcedurePackageLeg,
+  message: string,
+): BuildDiagnostic {
+  return {
+    severity: "WARN",
+    segmentId: segment.segmentId,
+    legId: leg.legId,
+    code: "SOURCE_INCOMPLETE",
+    message,
+    sourceRefs: leg.sourceRefs,
+  };
+}
+
+function pointFromFix(fix: ProcedurePackageFix): GeoPoint | null {
+  if (fix.latDeg === null || fix.lonDeg === null) return null;
+  return {
+    lonDeg: fix.lonDeg,
+    latDeg: fix.latDeg,
+    altM: (fix.altFtMsl ?? 0) * FEET_TO_METERS,
+  };
+}
+
+function altitudeTargetFt(leg: ProcedurePackageLeg): number | null {
+  const altitude = leg.requiredAltitude;
+  if (!altitude) return null;
+  if (typeof altitude.minFtMsl === "number" && Number.isFinite(altitude.minFtMsl)) {
+    return altitude.minFtMsl;
+  }
+  if (typeof altitude.maxFtMsl === "number" && Number.isFinite(altitude.maxFtMsl)) {
+    return altitude.maxFtMsl;
+  }
+  return null;
 }
 
 export function buildMissedSectionSurface(
@@ -75,4 +137,71 @@ export function buildMissedSectionSurface(
     },
     diagnostics: [],
   };
+}
+
+export function buildMissedCourseGuides(
+  segment: ProcedureSegment,
+  legs: ProcedurePackageLeg[],
+  fixes: Map<string, ProcedurePackageFix>,
+  guideLengthNm = DEFAULT_CA_COURSE_GUIDE_LENGTH_NM,
+): { geometries: MissedCourseGuideGeometry[]; diagnostics: BuildDiagnostic[] } {
+  if (segment.segmentType !== "MISSED_S1" && segment.segmentType !== "MISSED_S2") {
+    return { geometries: [], diagnostics: [] };
+  }
+
+  const diagnostics: BuildDiagnostic[] = [];
+  const geometries: MissedCourseGuideGeometry[] = [];
+  const segmentLegs = legs.filter((leg) => leg.segmentId === segment.segmentId);
+
+  segmentLegs.forEach((leg) => {
+    if (leg.legType !== "CA") return;
+
+    const courseDeg = leg.outboundCourseDeg;
+    if (typeof courseDeg !== "number" || !Number.isFinite(courseDeg)) {
+      diagnostics.push(
+        legDiagnostic(
+          segment,
+          leg,
+          `${leg.legId}: CA course guide requires outbound course metadata.`,
+        ),
+      );
+      return;
+    }
+
+    const startFixId = leg.startFixId ?? leg.endFixId;
+    const startFix = startFixId ? fixes.get(startFixId) : undefined;
+    const start = startFix ? pointFromFix(startFix) : null;
+    if (!startFixId || !start) {
+      diagnostics.push(
+        legDiagnostic(
+          segment,
+          leg,
+          `${leg.legId}: CA course guide requires a positioned start fix.`,
+        ),
+      );
+      return;
+    }
+
+    const target = offsetPoint(
+      start,
+      toRadians(courseDeg),
+      guideLengthNm * METERS_PER_NM,
+    );
+    const geoPositions: [GeoPoint, GeoPoint] = [start, target];
+
+    geometries.push({
+      segmentId: segment.segmentId,
+      legId: leg.legId,
+      legType: "CA",
+      startFixId,
+      courseDeg,
+      guideLengthNm,
+      requiredAltitudeFtMsl: altitudeTargetFt(leg),
+      constructionStatus: "COURSE_DIRECTION_ONLY",
+      geoPositions,
+      worldPositions: [toCartesian(geoPositions[0]), toCartesian(geoPositions[1])],
+    });
+  });
+
+  return { geometries, diagnostics };
 }

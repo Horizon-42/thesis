@@ -25,7 +25,9 @@ import {
 } from "../utils/procedureConnectorGeometry";
 import { buildLnavFinalOea, type LnavFinalOeaGeometry } from "../utils/procedureSurfaceGeometry";
 import {
+  buildMissedCourseGuides,
   buildMissedSectionSurface,
+  type MissedCourseGuideGeometry,
   type MissedSectionSurfaceGeometry,
 } from "../utils/procedureMissedGeometry";
 import {
@@ -65,6 +67,7 @@ export interface ProcedureSegmentRenderBundle {
   finalOea: LnavFinalOeaGeometry | null;
   alignedConnector: AlignedLnavConnectorGeometry | null;
   missedSectionSurface: MissedSectionSurfaceGeometry | null;
+  missedCourseGuides: MissedCourseGuideGeometry[];
   diagnostics: BuildDiagnostic[];
 }
 
@@ -162,6 +165,8 @@ export function buildProcedureRenderBundle(
 
         const missedSurfaceResult = buildMissedSectionSurface(segment, segmentGeometry);
         segmentDiagnostics.push(...missedSurfaceResult.diagnostics);
+        const missedCourseGuideResult = buildMissedCourseGuides(segment, segmentLegs, fixes);
+        segmentDiagnostics.push(...missedCourseGuideResult.diagnostics);
         diagnostics.push(...segmentDiagnostics);
 
         return {
@@ -171,6 +176,7 @@ export function buildProcedureRenderBundle(
           finalOea: finalOeaResult.geometry,
           alignedConnector: connectorResult.geometry,
           missedSectionSurface: missedSurfaceResult.geometry,
+          missedCourseGuides: missedCourseGuideResult.geometries,
           diagnostics: segmentDiagnostics,
         };
       })

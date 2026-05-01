@@ -454,6 +454,41 @@ const missedDfDocument: ProcedureDetailDocument = {
   ],
 };
 
+const missedCaDocument: ProcedureDetailDocument = {
+  ...missedDfDocument,
+  procedureUid: "KRDU-MISSEDCA-RW05L",
+  procedure: {
+    ...missedDfDocument.procedure,
+    procedureIdent: "MISSEDCA",
+    chartName: "RNAV MISSED CA TEST",
+  },
+  branches: [
+    {
+      ...missedDfDocument.branches[0],
+      legs: [
+        {
+          ...missedDfDocument.branches[0].legs[0],
+          legId: "leg:R:035",
+          sequence: 35,
+          path: {
+            pathTerminator: "CA",
+            constructionMethod: "course_to_altitude",
+            startFixRef: "fix:RW05L",
+            endFixRef: "fix:RW05L",
+            courseDeg: 305,
+          },
+          termination: { kind: "fix", fixRef: "fix:RW05L" },
+          constraints: {
+            altitude: { qualifier: "at", valueFt: 1000, rawText: "1000 ft" },
+            speedKt: null,
+            geometryAltitudeFt: 1000,
+          },
+        },
+      ],
+    },
+  ],
+};
+
 describe("procedure render bundle", () => {
   beforeEach(() => {
     vi.mocked(fetchJson).mockReset();
@@ -537,6 +572,33 @@ describe("procedure render bundle", () => {
     });
     expect(bundle.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain(
       "UNSUPPORTED_LEG_TYPE",
+    );
+  });
+
+  it("exports CA missed course guides through render bundles", () => {
+    const pkg = normalizeProcedurePackage(missedCaDocument);
+    const bundle = buildProcedureRenderBundle(pkg, {
+      samplingStepNm: 0.5,
+      enableDebugPrimitives: false,
+    });
+    const segmentBundle = bundle.branchBundles[0].segmentBundles[0];
+
+    expect(segmentBundle.segment.segmentType).toBe("MISSED_S1");
+    expect(segmentBundle.segmentGeometry.centerline.geoPositions).toEqual([]);
+    expect(segmentBundle.missedCourseGuides).toHaveLength(1);
+    expect(segmentBundle.missedCourseGuides[0]).toMatchObject({
+      legId: "leg:R:035",
+      courseDeg: 305,
+      requiredAltitudeFtMsl: 1000,
+      constructionStatus: "COURSE_DIRECTION_ONLY",
+    });
+    expect(bundle.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "UNSUPPORTED_LEG_TYPE",
+          legId: "leg:R:035",
+        }),
+      ]),
     );
   });
 

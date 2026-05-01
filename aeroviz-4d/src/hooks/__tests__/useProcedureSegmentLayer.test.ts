@@ -199,6 +199,7 @@ const renderBundleData = {
                 primary: ribbon,
                 secondaryOuter: ribbon,
               },
+              missedCourseGuides: [],
             },
           ],
         },

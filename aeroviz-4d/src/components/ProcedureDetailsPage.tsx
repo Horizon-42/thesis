@@ -490,7 +490,6 @@ interface MissedLegMarker {
 }
 
 const MISSED_LEG_MARKER_TYPES = new Set(["CA", "DF", "HM", "HA", "HF"]);
-const CA_DEBUG_RAY_LENGTH_M = 3 * METERS_PER_NM;
 
 function buildRfPlanMarkers(
   document: ProcedureDetailDocument | null,
@@ -549,56 +548,80 @@ function buildRfPlanMarkers(
 
 function buildMissedLegMarkers(
   document: ProcedureDetailDocument | null,
+  renderBundle: ProcedureRenderBundle | null,
   polylines: ProcedureBranchPolyline[],
 ): MissedLegMarker[] {
-  if (!document) return [];
+  if (!document || !renderBundle) return [];
+  const origin =
+    document.runway.threshold ??
+    document.fixes.find((fix) => fix.position)?.position ?? {
+      lon: 0,
+      lat: 0,
+    };
+  const branchByScopedId = new Map(
+    polylines.map((branch) => [scopedBranchIdFor(document, branch), branch]),
+  );
   const pointByBranchAndFix = new Map(
     polylines.flatMap((branch) =>
       branch.points.map((point) => [`${branch.branchId}:${point.fixId}`, point] as const),
     ),
   );
 
-  return document.branches.flatMap((branch) =>
-    branch.legs.flatMap((leg): MissedLegMarker[] => {
-      const pathTerminator = leg.path.pathTerminator.toUpperCase();
-      const isMissedLeg =
-        leg.segmentType.toLowerCase().includes("missed") ||
-        leg.roleAtEnd.toUpperCase() === "MAHF";
-      if (!isMissedLeg || !MISSED_LEG_MARKER_TYPES.has(pathTerminator)) return [];
+  return renderBundle.branchBundles.flatMap((branchBundle) => {
+    const branch = branchByScopedId.get(branchBundle.branchId);
+    if (!branch) return [];
 
-      const anchorPoint =
-        pointByBranchAndFix.get(`${branch.branchId}:${leg.path.endFixRef}`) ??
-        (leg.path.startFixRef
-          ? pointByBranchAndFix.get(`${branch.branchId}:${leg.path.startFixRef}`)
-          : undefined);
-      if (!anchorPoint) return [];
-      const courseDeg = leg.path.courseDeg;
-      const courseTarget =
-        pathTerminator === "CA" && typeof courseDeg === "number" && Number.isFinite(courseDeg)
-          ? {
-              xM: anchorPoint.xM + Math.sin((courseDeg * Math.PI) / 180) * CA_DEBUG_RAY_LENGTH_M,
-              yM: anchorPoint.yM + Math.cos((courseDeg * Math.PI) / 180) * CA_DEBUG_RAY_LENGTH_M,
-            }
-          : undefined;
+    return branchBundle.segmentBundles.flatMap((segmentBundle): MissedLegMarker[] => {
+      if (
+        segmentBundle.segment.segmentType !== "MISSED_S1" &&
+        segmentBundle.segment.segmentType !== "MISSED_S2"
+      ) {
+        return [];
+      }
 
-      return [
-        {
-          branchId: branch.branchId,
-          legId: leg.legId,
-          point: anchorPoint,
-          label:
-            pathTerminator === "CA" && typeof courseDeg === "number" && Number.isFinite(courseDeg)
-              ? `CA ${courseDeg.toFixed(0)} deg`
-              : `${pathTerminator} leg`,
-          courseTarget,
-        },
-      ];
-    }),
-  );
+      const courseGuideByLegId = new Map(
+        segmentBundle.missedCourseGuides.map((guide) => [guide.legId, guide] as const),
+      );
+
+      return segmentBundle.legs.flatMap((leg): MissedLegMarker[] => {
+        if (!MISSED_LEG_MARKER_TYPES.has(leg.legType)) return [];
+
+        const anchorPoint =
+          (leg.endFixId ? pointByBranchAndFix.get(`${branch.branchId}:${leg.endFixId}`) : undefined) ??
+          (leg.startFixId ? pointByBranchAndFix.get(`${branch.branchId}:${leg.startFixId}`) : undefined);
+        if (!anchorPoint) return [];
+
+        const courseGuide = courseGuideByLegId.get(leg.legId);
+        const projectedTarget = courseGuide
+          ? pointToEastNorth(
+              courseGuide.geoPositions[1].lonDeg,
+              courseGuide.geoPositions[1].latDeg,
+              origin.lon,
+              origin.lat,
+            )
+          : null;
+
+        return [
+          {
+            branchId: branch.branchId,
+            legId: leg.legId,
+            point: anchorPoint,
+            label: courseGuide ? `CA ${courseGuide.courseDeg.toFixed(0)} deg` : `${leg.legType} leg`,
+            courseTarget: projectedTarget
+              ? { xM: projectedTarget.east, yM: projectedTarget.north }
+              : undefined,
+          },
+        ];
+      });
+    });
+  });
 }
 
 function scopedBranchIdFor(document: ProcedureDetailDocument, branch: ProcedureBranchPolyline): string {
-  return `${document.procedureUid}:branch:${branch.branchKey.toUpperCase()}`;
+  const packageId = `${document.airport.icao.toUpperCase()}-${document.procedure.procedureIdent.toUpperCase()}-${
+    document.runway.ident ?? "UNKNOWN"
+  }`;
+  return `${packageId}:branch:${branch.branchKey.toUpperCase()}`;
 }
 
 function buildMissedSectionMarkers(
@@ -1579,8 +1602,8 @@ export default function ProcedureDetailsPage() {
     [polylines, procedureDocument, procedureRenderBundle],
   );
   const missedLegMarkers = useMemo(
-    () => buildMissedLegMarkers(procedureDocument, polylines),
-    [polylines, procedureDocument],
+    () => buildMissedLegMarkers(procedureDocument, procedureRenderBundle, polylines),
+    [polylines, procedureDocument, procedureRenderBundle],
   );
   const selectedFixBranches = useMemo(
     () => procedureBranchForFix(procedureDocument ?? null, selectedFixId),

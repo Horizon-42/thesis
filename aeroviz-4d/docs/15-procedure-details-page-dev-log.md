@@ -1100,3 +1100,44 @@
 
 ### Exact Next Recommended Step
 - Promote CA debug/course metadata into a dedicated geometry helper and render-bundle object so 2D/3D views can consume the same conservative semantics without duplicating UI-only logic.
+
+## 2026-05-02 01:45 CEST
+
+### Goal Of This Session
+- Promote CA missed-approach course direction from UI-local logic into a shared render-bundle geometry object.
+
+### Decisions Locked
+- Added `MissedCourseGuideGeometry` for preserved CA legs in missed approach segments.
+- The guide stores:
+  - segment/leg identity;
+  - positioned start fix;
+  - outbound course;
+  - required altitude metadata;
+  - a fixed-length guide line marked `COURSE_DIRECTION_ONLY`.
+- Procedure Details now consumes CA course guide geometry from `ProcedureRenderBundle` instead of recomputing the ray inside the component.
+- Missing CA course or start-fix position is diagnosed as `SOURCE_INCOMPLETE`.
+
+### Files Changed
+- `src/utils/procedureMissedGeometry.ts`
+- `src/utils/__tests__/procedureMissedGeometry.test.ts`
+- `src/data/procedureRenderBundle.ts`
+- `src/data/__tests__/procedureRenderBundle.test.ts`
+- `src/components/ProcedureDetailsPage.tsx`
+- `src/hooks/__tests__/useProcedureSegmentLayer.test.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/utils/__tests__/procedureMissedGeometry.test.ts`
+- `npm test -- --run src/data/__tests__/procedureRenderBundle.test.ts`
+- `npm test -- --run src/components/__tests__/ProcedureDetailsPage.test.tsx`
+- `npm run build`
+
+### Current Status
+- CA first-leg visibility is now backed by render-bundle geometry and can be reused by other views.
+
+### Known Blockers
+- The CA guide remains a semantic/debug guide, not a certified course-to-altitude endpoint or surface.
+- 3D protected mode does not render the CA guide yet.
+
+### Exact Next Recommended Step
+- Render CA course guides in 3D protected mode with a distinct diagnostic style and tests.
