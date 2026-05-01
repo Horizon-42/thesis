@@ -49,6 +49,8 @@ class ProcedureLeg:
     transition_ident: str | None = None
     turn_direction: str | None = None
     arc_radius_nm: float | None = None
+    center_fix_ident: str | None = None
+    center_fix_region_code: str | None = None
     center_lat_deg: float | None = None
     center_lon_deg: float | None = None
 
@@ -113,6 +115,40 @@ def parse_leg_altitude_ft(line: str) -> int | None:
         return int(secondary_altitude)
 
     return None
+
+
+def normalize_turn_direction(value: Any) -> str | None:
+    text = str(value or "").strip().upper()
+    if text in {"L", "LEFT"}:
+        return "LEFT"
+    if text in {"R", "RIGHT"}:
+        return "RIGHT"
+    return None
+
+
+def parse_rf_arc_radius_nm(line: str) -> float | None:
+    text = line[56:61].strip()
+    if len(text) != 5 or not text.isdigit():
+        return None
+    return int(text) / 100.0
+
+
+def parse_rf_center_fix_ident(line: str) -> str | None:
+    text = line[106:111].strip().upper()
+    return text or None
+
+
+def parse_rf_center_fix_region(line: str) -> str | None:
+    text = line[112:114].strip().upper()
+    return text or None
+
+
+def rf_related_fix_idents(legs: list[ProcedureLeg]) -> set[str]:
+    return {
+        leg.center_fix_ident
+        for leg in legs
+        if leg.leg_type == "RF" and leg.center_fix_ident
+    }
 
 
 def procedure_exists(index_path: Path, airport: str, procedure_type: str, procedure: str) -> bool:
@@ -310,9 +346,10 @@ def preferred_region_codes_by_fix(legs: list[ProcedureLeg]) -> dict[str, set[str
     """Return region-code hints from procedure legs for non-local fix fallback."""
     regions: dict[str, set[str]] = {}
     for leg in legs:
-        if not leg.fix_ident or leg.fix_region_code is None:
-            continue
-        regions.setdefault(leg.fix_ident, set()).add(leg.fix_region_code)
+        if leg.fix_ident and leg.fix_region_code is not None:
+            regions.setdefault(leg.fix_ident, set()).add(leg.fix_region_code)
+        if leg.center_fix_ident and leg.center_fix_region_code is not None:
+            regions.setdefault(leg.center_fix_ident, set()).add(leg.center_fix_region_code)
     return regions
 
 
@@ -382,6 +419,7 @@ def build_fix_index(
         return fixes
 
     required_idents = {leg.fix_ident for leg in procedure_legs if leg.fix_ident}
+    required_idents.update(rf_related_fix_idents(procedure_legs))
     missing_idents = required_idents - set(fixes)
     fixes.update(
         build_global_fix_fallback_index(
@@ -449,6 +487,7 @@ def parse_procedure_legs(
             sequence = int(sequence_text)
             role = parse_leg_role(line, leg_type, fix_ident, sequence)
             altitude_ft = parse_leg_altitude_ft(line)
+            is_rf = leg_type == "RF"
             legs.append(
                 ProcedureLeg(
                     sequence=sequence,
@@ -461,6 +500,10 @@ def parse_procedure_legs(
                     fix_region_code=line[34:36].strip().upper() or None,
                     procedure_type=target_branch[0] if len(target_branch) > 5 else target_branch,
                     transition_ident=target_branch[1:] if len(target_branch) > 5 else None,
+                    turn_direction=normalize_turn_direction(line[43]) if is_rf else None,
+                    arc_radius_nm=parse_rf_arc_radius_nm(line) if is_rf else None,
+                    center_fix_ident=parse_rf_center_fix_ident(line) if is_rf else None,
+                    center_fix_region_code=parse_rf_center_fix_region(line) if is_rf else None,
                 )
             )
 
@@ -597,6 +640,20 @@ def normalize_int(value: Any) -> int | None:
     return None
 
 
+def normalize_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
 def cifparse_branch(primary: dict[str, Any], procedure: str) -> str:
     """Return AeroViz's stable internal branch key."""
     transition_id = str(primary.get("transition_id") or "").strip().upper()
@@ -699,6 +756,10 @@ def parse_procedure_legs(
                 fix_region_code=str(primary.get("fix_region") or "").strip().upper() or None,
                 procedure_type=str(primary.get("procedure_type") or "").strip().upper() or None,
                 transition_ident=cifparse_transition_ident(primary),
+                turn_direction=normalize_turn_direction(primary.get("turn_direction")),
+                arc_radius_nm=normalize_float(primary.get("arc_radius")),
+                center_fix_ident=str(primary.get("center_fix") or "").strip().upper() or None,
+                center_fix_region_code=str(primary.get("center_fix_region") or "").strip().upper() or None,
             )
         )
 
@@ -763,7 +824,9 @@ def build_fix_index(
     if procedure_legs is None:
         return fixes
 
-    missing_idents = {leg.fix_ident for leg in procedure_legs if leg.fix_ident} - set(fixes)
+    required_idents = {leg.fix_ident for leg in procedure_legs if leg.fix_ident}
+    required_idents.update(rf_related_fix_idents(procedure_legs))
+    missing_idents = required_idents - set(fixes)
     preferred_regions = preferred_region_codes_by_fix(procedure_legs)
     for primary in data.enroute_waypoints:
         ident = str(primary.get("waypoint_id") or "").strip().upper()

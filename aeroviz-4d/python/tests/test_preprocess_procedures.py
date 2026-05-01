@@ -9,6 +9,7 @@ import preprocess_procedures as procedures_module
 from preprocess_procedures import (
     FixRecord,
     ProcedureLeg,
+    build_fix_index,
     build_route_points,
     build_branch_document,
     build_procedure_detail_document,
@@ -18,6 +19,7 @@ from preprocess_procedures import (
     generate_procedures_geojson,
     infer_chart_targets,
     parse_leg_altitude_ft,
+    parse_procedure_legs,
     procedure_detail_documents_to_geojson,
     publish_local_chart_manifest,
     publish_procedure_details_assets,
@@ -330,6 +332,43 @@ def test_branch_document_exports_rf_path_metadata() -> None:
     assert rf_path["arcRadiusNm"] == 2.0
     assert rf_path["centerLatDeg"] == 35.82
     assert rf_path["centerLonDeg"] == -78.86
+
+
+def test_cifparse_rf_leg_metadata_resolves_center_fix() -> None:
+    legs = parse_procedure_legs(
+        CIFP_ROOT / "FAACIFP18",
+        airport="KATL",
+        procedure="ZELAN4",
+        branch="4RW27R",
+    )
+    rf_leg = next(leg for leg in legs if leg.leg_type == "RF")
+
+    assert rf_leg.fix_ident == "MPASS"
+    assert rf_leg.turn_direction == "RIGHT"
+    assert rf_leg.arc_radius_nm == pytest.approx(3.46)
+    assert rf_leg.center_fix_ident == "CFZJF"
+    assert rf_leg.center_fix_region_code == "K7"
+
+    fix_records = build_fix_index(CIFP_ROOT / "FAACIFP18", "KATL", legs)
+    assert "CFZJF" in fix_records
+
+    branch = build_branch_document(
+        branch_ident="4RW27R",
+        branch_order=1,
+        final_branch_ident="4RW27R",
+        branch_legs=legs,
+        branch_route_points=[],
+        fix_records=fix_records,
+        branch_warnings=[],
+        final_fix_idents={leg.fix_ident for leg in legs},
+    )
+    rf_path = next(leg["path"] for leg in branch["legs"] if leg["path"]["pathTerminator"] == "RF")
+
+    assert rf_path["turnDirection"] == "RIGHT"
+    assert rf_path["arcRadiusNm"] == pytest.approx(3.46)
+    assert rf_path["centerFixRef"] == "fix:CFZJF"
+    assert rf_path["centerLatDeg"] == pytest.approx(fix_records["CFZJF"].lat)
+    assert rf_path["centerLonDeg"] == pytest.approx(fix_records["CFZJF"].lon)
 
 
 def test_build_krdu_r05ly_procedure_detail_document() -> None:
