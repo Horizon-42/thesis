@@ -8,7 +8,10 @@ original local fixed-width parser as `local_*` functions in
 
 The production exporter now follows the `cifparse` model for branch concepts:
 
-- `procedure_type` and `transition_id` are separate concepts.
+- `procedure_type` and `transition_id` are separate fields in `cifparse`.
+- For Airport Approach (`PF`) records, the `cifparse` `procedure_type` field
+  is ARINC 424 Section 5.7 Route Type, interpreted with Table 5-8
+  Airport Approach (`PF`) and Heliport Approach (`HF`) Records.
 - `branchKey` is kept as a stable internal key for existing branch references.
 - `branchIdent` is the transition identifier when one exists.
 - `ProcedureLeg.source_line` points back to the raw `FAACIFP18` line when possible.
@@ -37,7 +40,7 @@ No adapter rewrite is required for procedure IDs.
 
 This is the main mismatch.
 
-FAA fixed-width PF records encode route type and transition together in columns
+FAA fixed-width PF records encode approach route type and transition together in columns
 `19:26`. For example:
 
 ```text
@@ -51,10 +54,10 @@ H
 
 | Meaning | Local fixed-width parser branch | `cifparse` fields | AeroViz output |
 |---|---|---|---|
-| RNAV/RNP transition via CHWDR | `ACHWDR` | `procedure_type = "A"`, `transition_id = "CHWDR"` | `branchKey = "ACHWDR"`, `procedureType = "A"`, `transitionIdent = "CHWDR"`, `branchIdent = "CHWDR"` |
-| RNAV/RNP transition via OTTOS | `AOTTOS` | `procedure_type = "A"`, `transition_id = "OTTOS"` | `branchKey = "AOTTOS"`, `procedureType = "A"`, `transitionIdent = "OTTOS"`, `branchIdent = "OTTOS"` |
-| RNAV(GPS) final branch | `R` | `procedure_type = "R"`, `transition_id = None` or empty | `branchKey = "R"`, `procedureType = "R"`, `transitionIdent = null`, `branchIdent = "R"` |
-| RNAV(RNP) final branch | `H` | `procedure_type = "H"`, `transition_id = None` or empty | `branchKey = "H"`, `procedureType = "H"`, `transitionIdent = null`, `branchIdent = "H"` |
+| approach transition via CHWDR | `ACHWDR` | `procedure_type = "A"`, `transition_id = "CHWDR"` | `branchKey = "ACHWDR"`, `procedureType = "A"`, `transitionIdent = "CHWDR"`, `branchIdent = "CHWDR"` |
+| approach transition via OTTOS | `AOTTOS` | `procedure_type = "A"`, `transition_id = "OTTOS"` | `branchKey = "AOTTOS"`, `procedureType = "A"`, `transitionIdent = "OTTOS"`, `branchIdent = "OTTOS"` |
+| RNAV(GPS) approach route | `R` | `procedure_type = "R"`, `transition_id = None` or empty | `branchKey = "R"`, `procedureType = "R"`, `transitionIdent = null`, `branchIdent = "R"` |
+| RNAV(RNP) approach route | `H` | `procedure_type = "H"`, `transition_id = None` or empty | `branchKey = "H"`, `procedureType = "H"`, `transitionIdent = null`, `branchIdent = "H"` |
 
 Adapter function:
 
@@ -68,23 +71,31 @@ Rules:
    the internal `branchKey`.
 2. If `transition_id` exists, combine `procedure_type + transition_id` only for
    the internal `branchKey`.
-3. Preserve `procedure_type` and `transition_id` separately on generated branch
-   records.
+3. Preserve the `cifparse` `procedure_type` value and `transition_id`
+   separately on generated branch records. In Airport Approach records, this
+   value should be displayed as an Approach Route Type, not as a generic
+   procedure category.
 4. Return the stable branch key to `parse_available_branches()` and
    `parse_procedure_legs()`.
 
 This keeps existing route references stable while allowing the UI and key terms
-panel to explain `procedure_type` as a generalized procedure-route concept.
+panel to explain the branch-level value as an ARINC approach route type.
 
-Important: do not treat `procedure_type` as just an identifier prefix. It is a
-general ARINC/CIFP route-type concept that can be reused across procedures.
+Important: do not treat `procedure_type` as just an identifier prefix, and do
+not use ARINC Route Type tables for other record classes. For the AeroViz
+approach pipeline, these are Airport Approach (`PF`) records, so Section 5.7
+Table 5-8 applies. The local reference is
+`data/CIFP/ARINC424-23.pdf`, Section 5.7, Table 5-8. The browser-served
+summary used by the UI is
+`aeroviz-4d/public/data/reference/arinc424-approach-route-types.md`.
+
 Examples used by this project:
 
-| Procedure Type | General Meaning |
+| Approach Route Type | Table 5-8 Meaning |
 |---|---|
-| `A` | approach transition route into a common final approach |
-| `R` | area-navigation final approach route |
-| `H` | required-navigation-performance final approach route |
+| `A` | Approach Transition |
+| `R` | Area Navigation (RNAV) Approach |
+| `H` | Area Navigation (RNAV) Approach with Required Navigation Performance (RNP) |
 
 ### Fix Identifiers
 
@@ -177,6 +188,10 @@ This is a compatibility key only. It prevents branch references from breaking,
 but the user-facing model should use separated `procedureType` and
 `transitionIdent` fields.
 
+Naming note: the generated JSON still uses `procedureType` for compatibility
+with the current TypeScript model. Treat that branch-level field as
+`approachRouteType` in UI copy and documentation.
+
 ### `role_from_cifparse(primary, leg_type, fix_ident, sequence)`
 
 Converts `cifparse` procedure leg metadata into the simplified AeroViz role
@@ -205,7 +220,8 @@ Builds `ProcedureLeg` objects from `cifparse` procedure records while preserving
 
 - sequence number
 - stable branch key
-- procedure type
+- approach route type, currently stored in the compatibility field
+  `procedureType`
 - transition identifier
 - fix ID
 - path terminator
