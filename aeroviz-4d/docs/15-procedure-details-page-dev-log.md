@@ -1141,3 +1141,32 @@
 
 ### Exact Next Recommended Step
 - Render CA course guides in 3D protected mode with a distinct diagnostic style and tests.
+
+## 2026-05-02 02:00 CEST
+
+### Goal Of This Session
+- Render shared CA missed-approach course guides in the 3D protected-procedure layer.
+
+### Decisions Locked
+- `useProcedureSegmentLayer` now renders each `missedCourseGuide` as an independent high-offset polyline.
+- CA guide entities use a `-ca-course-guide-` id suffix so they remain separate from centerline, envelope, OEA, connector, and missed-surface entities.
+- The visual remains diagnostic/semantic: a course-direction guide only, not a CA endpoint, surface, or containment object.
+
+### Files Changed
+- `src/hooks/useProcedureSegmentLayer.ts`
+- `src/hooks/__tests__/useProcedureSegmentLayer.test.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/hooks/__tests__/useProcedureSegmentLayer.test.ts`
+- `npm run build`
+
+### Current Status
+- CA first-leg direction can now be inspected in both Procedure Details 2D plan view and 3D protected mode.
+
+### Known Blockers
+- Full CA course-to-altitude termination geometry remains unresolved.
+- CA guides are not yet surfaced in validation metrics; they are visual/semantic primitives only.
+
+### Exact Next Recommended Step
+- Add a data regeneration test path for `run_asd-b_fetch_and_generate.py` so real exported procedure assets can carry `courseDeg` into the app.

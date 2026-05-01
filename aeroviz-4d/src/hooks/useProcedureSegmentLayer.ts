@@ -20,11 +20,13 @@ const TURN_FILL_COLOR = Cesium.Color.ORANGE.withAlpha(0.22);
 const CONNECTOR_COLOR = Cesium.Color.ORANGE.withAlpha(0.32);
 const CONNECTOR_LINE_COLOR = Cesium.Color.ORANGE.withAlpha(0.92);
 const MISSED_SURFACE_COLOR = Cesium.Color.YELLOW.withAlpha(0.24);
+const CA_COURSE_GUIDE_COLOR = Cesium.Color.ORANGE.withAlpha(0.98);
 const OUTLINE_COLOR = Cesium.Color.CYAN.withAlpha(0.28);
 const ENVELOPE_HEIGHT_OFFSET_M = 8;
 const OEA_HEIGHT_OFFSET_M = 18;
 const CONNECTOR_HEIGHT_OFFSET_M = 45;
 const MISSED_SURFACE_HEIGHT_OFFSET_M = 58;
+const CA_COURSE_GUIDE_HEIGHT_OFFSET_M = 82;
 
 function elevatedPoint(point: GeoPoint, altitudeOffsetM: number): GeoPoint {
   return { ...point, altM: point.altM + altitudeOffsetM };
@@ -294,6 +296,20 @@ function addSegmentEntities(
     );
     ids.push(missedSecondaryId);
   }
+
+  segmentBundle.missedCourseGuides.forEach((guide) => {
+    const guideId = `${baseId}-ca-course-guide-${guide.legId}`;
+    addPolyline(
+      viewer,
+      guideId,
+      `${segmentName} CA course guide ${Math.round(guide.courseDeg)} deg`,
+      guide.geoPositions.map((point) => elevatedPoint(point, CA_COURSE_GUIDE_HEIGHT_OFFSET_M)),
+      visible,
+      5,
+      CA_COURSE_GUIDE_COLOR,
+    );
+    ids.push(guideId);
+  });
 
   return ids;
 }

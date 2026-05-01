@@ -199,7 +199,20 @@ const renderBundleData = {
                 primary: ribbon,
                 secondaryOuter: ribbon,
               },
-              missedCourseGuides: [],
+              missedCourseGuides: [
+                {
+                  segmentId: "segment:final",
+                  legId: "leg:missed:ca",
+                  legType: "CA",
+                  startFixId: "fix:RW",
+                  courseDeg: 305,
+                  guideLengthNm: 3,
+                  requiredAltitudeFtMsl: 1000,
+                  constructionStatus: "COURSE_DIRECTION_ONLY",
+                  geoPositions,
+                  worldPositions: [],
+                },
+              ],
             },
           ],
         },
@@ -232,6 +245,7 @@ describe("useProcedureSegmentLayer", () => {
     expect(entities.some((entity) => String(entity.id).includes("-connector-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-connector-primary-boundary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-missed-surface-primary"))).toBe(true);
+    expect(entities.some((entity) => String(entity.id).includes("-ca-course-guide-"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-turn-1-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes(":junction:"))).toBe(true);
   });
