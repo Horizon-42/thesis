@@ -47,6 +47,9 @@ const SVG_PADDING_Y = 44;
 const PLAN_AXIS_TICK_COUNT = 10;
 const PLAN_FIX_SYMBOL_SIZE = 7;
 const PLAN_SELECTED_FIX_SYMBOL_SIZE = 8;
+const PROFILE_AXIS_TICK_COUNT = 8;
+const PROFILE_FIX_SYMBOL_SIZE = 6;
+const PROFILE_SELECTED_FIX_SYMBOL_SIZE = 7;
 const MISSED_OUTBOUND_ARROW_START_GAP_PX = 92;
 const MISSED_OUTBOUND_PROJECTED_LENGTH_M = 6400;
 const IMPORTANT_FIX_ROLES = new Set(["IAF", "IF", "FAF", "MAPT", "MAHF"]);
@@ -194,6 +197,12 @@ function formatMeters(value: number): string {
   return `${Math.round(value).toLocaleString()} m`;
 }
 
+function formatSignedNm(valueM: number): string {
+  const valueNm = nmFromMeters(valueM);
+  if (Math.abs(valueNm) < 0.05) return "0.0 NM";
+  return `${valueNm > 0 ? "+" : ""}${valueNm.toFixed(1)} NM`;
+}
+
 function hasNamedLegEndpoint(leg: ProcedureDetailLeg): boolean {
   const endFix = leg.path.endFixRef;
   return Boolean(endFix && formatFixRef(endFix).trim());
@@ -265,6 +274,29 @@ function shouldShowPointLabel(
 
 function pointRole(point: ProcedureChartPoint): string {
   return point.role.toUpperCase();
+}
+
+function profileAnchorIndex(points: ProcedureChartPoint[]): number {
+  const maptIndex = points.findIndex((point) => pointRole(point) === "MAPT");
+  if (maptIndex >= 0) return maptIndex;
+  return points.reduce((bestIndex, point, index) => {
+    const best = points[bestIndex];
+    return Math.hypot(point.xM, point.yM) < Math.hypot(best.xM, best.yM) ? index : bestIndex;
+  }, 0);
+}
+
+interface StationedProfilePoint {
+  point: ProcedureChartPoint;
+  stationM: number;
+}
+
+function stationedProfilePoints(points: ProcedureChartPoint[]): StationedProfilePoint[] {
+  if (points.length === 0) return [];
+  const anchor = points[profileAnchorIndex(points)];
+  return points.map((point) => ({
+    point,
+    stationM: point.distanceM - anchor.distanceM,
+  }));
 }
 
 function splitPlanBranchPoints(branch: ProcedureBranchPolyline): {
@@ -777,9 +809,21 @@ function ProcedureVerticalProfile({
 
   const rawAltitudes = allPoints.map((point) => point.altitudeFt ?? 0);
   const altitudeDomain = chartDomain(rawAltitudes, 0.14);
-  const maxDistanceM = Math.max(...allPoints.map((point) => point.distanceM), 1);
+  const stationedBranches = polylines.map((branch) => ({
+    branch,
+    stationedPoints: stationedProfilePoints(branch.points),
+  }));
+  const allStations = stationedBranches.flatMap((branch) =>
+    branch.stationedPoints.map((entry) => entry.stationM),
+  );
+  const stationDomain = chartDomain(allStations.length > 0 ? allStations : [0], 0.1);
+  const stationTickStep = niceChartStep(
+    stationDomain.max - stationDomain.min,
+    PROFILE_AXIS_TICK_COUNT,
+  );
+  const stationTicks = chartTicksByStep(stationDomain, stationTickStep);
   const scaleX = chartScale(
-    [0, maxDistanceM],
+    [stationDomain.min, stationDomain.max],
     SVG_PADDING_X,
     SVG_WIDTH - SVG_PADDING_X,
   );
@@ -791,6 +835,8 @@ function ProcedureVerticalProfile({
   const axisTicks = 5;
   const minAltitudeFt = Math.max(0, altitudeDomain.min);
   const maxAltitudeFt = altitudeDomain.max;
+  const zeroStationX =
+    stationDomain.min <= 0 && stationDomain.max >= 0 ? scaleX(0) : null;
 
   return (
     <svg
@@ -823,12 +869,10 @@ function ProcedureVerticalProfile({
         );
       })}
 
-      {Array.from({ length: axisTicks + 1 }, (_, index) => {
-        const ratio = index / axisTicks;
-        const x = SVG_PADDING_X + ratio * (SVG_WIDTH - SVG_PADDING_X * 2);
-        const distanceNm = nmFromMeters(maxDistanceM * ratio);
+      {stationTicks.map((tick) => {
+        const x = scaleX(tick);
         return (
-          <g key={`x-${index}`}>
+          <g key={`profile-x-${tick}`}>
             <line
               x1={x}
               y1={SVG_PADDING_Y}
@@ -841,19 +885,63 @@ function ProcedureVerticalProfile({
               y={PROFILE_SVG_HEIGHT - SVG_PADDING_Y + 22}
               className="procedure-details-axis-label is-centered"
             >
-              {distanceNm.toFixed(1)} NM
+              {formatSignedNm(tick)}
             </text>
           </g>
         );
       })}
 
-      {polylines.map((branch) => {
+      {zeroStationX !== null ? (
+        <g>
+          <line
+            x1={zeroStationX}
+            y1={SVG_PADDING_Y}
+            x2={zeroStationX}
+            y2={PROFILE_SVG_HEIGHT - SVG_PADDING_Y}
+            className="procedure-details-axis-line procedure-details-profile-threshold-line"
+          />
+          <text
+            x={zeroStationX + 8}
+            y={SVG_PADDING_Y + 18}
+            className="procedure-details-axis-title"
+          >
+            MAPT / RWY
+          </text>
+        </g>
+      ) : null}
+
+      <text
+        x={SVG_WIDTH - SVG_PADDING_X}
+        y={PROFILE_SVG_HEIGHT - 10}
+        className="procedure-details-axis-title"
+      >
+        Along-track distance from MAPT / runway
+      </text>
+      <text
+        x={18}
+        y={SVG_PADDING_Y}
+        transform={`rotate(-90 18 ${SVG_PADDING_Y})`}
+        className="procedure-details-axis-title is-vertical"
+      >
+        Procedure altitude (ft)
+      </text>
+
+      {stationedBranches.map(({ branch, stationedPoints }) => {
         const isFocused = !focusedBranchId || branch.branchId === focusedBranchId;
         const { approachPoints, missedPoints } = splitPlanBranchPoints(branch);
+        const stationByPointKey = new Map(
+          stationedPoints.map((entry) => [
+            `${entry.point.branchId}-${entry.point.fixId}-${entry.point.distanceM}`,
+            entry.stationM,
+          ]),
+        );
+        const stationForPoint = (point: ProcedureChartPoint) =>
+          stationByPointKey.get(`${point.branchId}-${point.fixId}-${point.distanceM}`) ??
+          point.distanceM;
         const profilePath = (points: ProcedureChartPoint[]) =>
           points
             .map((point, index) => {
-              const x = scaleX(point.distanceM);
+              const x = scaleX(stationForPoint(point));
               const y = scaleY(point.altitudeFt ?? 0);
               return `${index === 0 ? "M" : "L"} ${x} ${y}`;
             })
@@ -896,24 +984,38 @@ function ProcedureVerticalProfile({
             {branch.points.map((point) => {
               const selected = point.fixId === focusedFixId;
               const showLabel = shouldShowPointLabel(point, focusedFixId, focusedBranchId);
+              const symbolSize = selected
+                ? PROFILE_SELECTED_FIX_SYMBOL_SIZE
+                : PROFILE_FIX_SYMBOL_SIZE;
+              const x = scaleX(stationForPoint(point));
+              const y = scaleY(point.altitudeFt ?? 0);
               return (
                 <g
                   key={`${branch.branchId}-${point.fixId}`}
                   onMouseEnter={() => onPreviewFix(point.fixId, point.branchId)}
                   onClick={() => onSelectFix(point.fixId, point.branchId)}
                 >
-                  <circle
-                    cx={scaleX(point.distanceM)}
-                    cy={scaleY(point.altitudeFt ?? 0)}
-                    r={selected ? 6 : 4}
+                  <rect
+                    x={x - symbolSize}
+                    y={y - symbolSize}
+                    width={symbolSize * 2}
+                    height={symbolSize * 2}
                     className={`procedure-details-fix-point ${selected ? "is-selected" : ""} ${
+                      isFocused ? "is-focused" : "is-muted"
+                    }`}
+                  />
+                  <circle
+                    cx={x}
+                    cy={y}
+                    r={selected ? 6.2 : 5.4}
+                    className={`procedure-details-fix-center ${selected ? "is-selected" : ""} ${
                       isFocused ? "is-focused" : "is-muted"
                     }`}
                   />
                   {showLabel ? (
                     <text
-                      x={scaleX(point.distanceM)}
-                      y={scaleY(point.altitudeFt ?? 0) - 10}
+                      x={x}
+                      y={y - 12}
                       className={`procedure-details-fix-label is-centered ${
                         selected ? "is-selected" : ""
                       } ${isFocused ? "is-focused" : "is-muted"}`}
@@ -1260,8 +1362,8 @@ export default function ProcedureDetailsPage() {
           <h2>No procedure-details dataset yet for {selectedAirportCode}</h2>
           <p>
             This airport already exists in the airport catalog, but the richer per-procedure export has
-            not been generated yet. The page is intentionally not falling back to the flatter
-            <code>procedures.geojson</code> file so the user experience stays consistent.
+            not been generated yet. The route, profile, and details views all use this canonical
+            data layer so the user experience stays consistent.
           </p>
         </div>
       ) : null}
@@ -1481,10 +1583,12 @@ export default function ProcedureDetailsPage() {
                     <div className="procedure-details-chart-frame-head">
                       <div>
                         <p className="procedure-details-overview-label">Vertical Profile</p>
-                        <h3>Altitude versus along-track distance</h3>
+                        <h3>Side view aligned to the runway/MAPT</h3>
                         <p className="procedure-details-section-intro">
-                          Heights are repaired for display when the intermediate data leaves a fix
-                          altitude unknown, so the descent picture stays readable.
+                          The horizontal axis is rebased at the runway/MAPT: approach fixes are
+                          shown inbound on the negative side, and missed-approach fixes continue
+                          outbound on the positive side. Heights are repaired for display when
+                          source altitude constraints are missing.
                         </p>
                       </div>
                     </div>

@@ -111,6 +111,9 @@ export interface ProcedureBaseProperties {
   procedureName: string;
   branch: string;
   branchIdent?: string;
+  branchKey?: string;
+  branchProcedureType?: string | null;
+  branchTransitionIdent?: string | null;
   branchType?: "final" | "transition" | "missed" | string;
   procedureFamily?: "RNAV_GPS" | "RNAV_RNP" | "ILS" | "LOC" | "UNKNOWN" | string;
   procedureVariant?: string | null;
@@ -185,6 +188,8 @@ export interface ProcedureFeatureCollection {
     runwayIdents?: string[];
     sourceCycle?: string | null;
     generatedAt?: string | null;
+    canonicalDataLayer?: string;
+    projection?: string;
     researchUseOnly?: boolean;
     warnings?: string[];
     [key: string]: unknown;

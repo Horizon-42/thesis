@@ -5,11 +5,11 @@
  * derived from procedure FAF → threshold pairs.
  *
  * Data source:
- *   public/data/airports/<ICAO>/procedures.geojson   (produced by preprocess_procedures.py)
+ *   public/data/airports/<ICAO>/procedure-details/*.json
  *
- * For every `procedure-route` feature we:
- *   1. Locate the FAF sample and the runway/MAPt sample in `properties.samples`
- *   2. Read their (lon, lat, altM) from the matching LineString vertices
+ * For every final approach route we:
+ *   1. Locate the FAF point and the runway/MAPt point in the canonical route model
+ *   2. Read their (lon, lat, altM) from procedure-details-derived points
  *   3. Call `buildFinalApproachOCS()` with primary + secondary widths derived
  *      from the route's tunnel descriptor (fallback to PANS-OPS defaults)
  *   4. Draw three semi-transparent polygons (primary + left/right secondary)
@@ -20,19 +20,14 @@
 import { useEffect } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
-import { airportDataUrl } from "../data/airportData";
-import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
+import { loadProcedureRouteData, type ProcedureRouteViewModel } from "../data/procedureRoutes";
+import { isMissingJsonAsset } from "../utils/fetchJson";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import {
   buildFinalApproachOCS,
   type GeoPoint3D,
   type Polygon3D,
 } from "../utils/ocsGeometry";
-import type {
-  ProcedureFeature,
-  ProcedureFeatureCollection,
-  ProcedureRouteProperties,
-} from "../types/geojson-aviation";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -57,20 +52,8 @@ const SECONDARY_OUTLINE_COLOR = Cesium.Color.ORANGE.withAlpha(0.85);
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function isRouteFeature(
-  feature: ProcedureFeature,
-): feature is ProcedureFeature & {
-  geometry: { type: "LineString"; coordinates: Array<[number, number, number]> };
-  properties: ProcedureRouteProperties;
-} {
-  return (
-    feature.geometry.type === "LineString" &&
-    feature.properties.featureType === "procedure-route"
-  );
-}
-
-function coordToPoint(coord: [number, number, number]): GeoPoint3D {
-  return { lon: coord[0], lat: coord[1], altM: coord[2] ?? 0 };
+function routePointToGeoPoint(point: ProcedureRouteViewModel["points"][number]): GeoPoint3D {
+  return { lon: point.lon, lat: point.lat, altM: point.altM };
 }
 
 /**
@@ -81,12 +64,10 @@ function coordToPoint(coord: [number, number, number]): GeoPoint3D {
  * If no MAPt is present we fall back to the final sample.
  */
 function findFafAndThreshold(
-  props: ProcedureRouteProperties,
-  coords: Array<[number, number, number]>,
+  route: ProcedureRouteViewModel,
 ): { faf: GeoPoint3D; threshold: GeoPoint3D } | null {
-  const samples = props.samples;
-  if (!samples || samples.length < 2) return null;
-  if (samples.length !== coords.length) return null;
+  const samples = route.points;
+  if (samples.length < 2) return null;
 
   const fafIdx = samples.findIndex((s) => s.role === "FAF");
   if (fafIdx < 0) return null;
@@ -96,8 +77,8 @@ function findFafAndThreshold(
   if (thrIdx <= fafIdx) return null;
 
   return {
-    faf: coordToPoint(coords[fafIdx]),
-    threshold: coordToPoint(coords[thrIdx]),
+    faf: routePointToGeoPoint(samples[fafIdx]),
+    threshold: routePointToGeoPoint(samples[thrIdx]),
   };
 }
 
@@ -135,90 +116,90 @@ function addOcsPolygon(
 export function useOcsLayer(): void {
   const { viewer, layers, activeAirportCode } = useApp();
 
-  // Effect 1 — load procedures.geojson, build OCS entities.
+  // Effect 1 — load canonical procedure details, build OCS entities.
   useEffect(() => {
     if (!viewer || !activeAirportCode) return;
 
     let cancelled = false;
     const addedIds: string[] = [];
-    const proceduresUrl = airportDataUrl(activeAirportCode, "procedures.geojson");
 
-    fetchJson<ProcedureFeatureCollection>(proceduresUrl)
-      .then((geojson) => {
+    loadProcedureRouteData(activeAirportCode)
+      .then(({ routes }) => {
         if (cancelled || !isCesiumViewerUsable(viewer)) return;
 
-        geojson.features.filter(isRouteFeature).forEach((feature, routeIndex) => {
-          const props = feature.properties;
-          const routeId = props.routeId ?? `route-${routeIndex}`;
-          const pair = findFafAndThreshold(props, feature.geometry.coordinates);
-          if (!pair) {
-            console.warn(
-              `[useOcsLayer] Skipping ${routeId}: could not resolve FAF→threshold pair`,
+        routes
+          .filter((route) => route.branchType.toLowerCase() === "final")
+          .forEach((route, routeIndex) => {
+            const routeId = route.routeId ?? `route-${routeIndex}`;
+            const pair = findFafAndThreshold(route);
+            if (!pair) {
+              console.warn(
+                `[useOcsLayer] Skipping ${routeId}: could not resolve FAF→threshold pair`,
+              );
+              return;
+            }
+
+            // Derive widths from the published tunnel descriptor when available.
+            // `lateralHalfWidthNm` is the navigation tunnel half-width; we use it
+            // as the PRIMARY half-width (full containment) and extend by the same
+            // amount to form the SECONDARY (7:1) fringe.
+            const tunnelHalfWidthM = route.tunnel?.lateralHalfWidthNm
+              ? route.tunnel.lateralHalfWidthNm * NAUTICAL_MILE_M
+              : DEFAULT_PRIMARY_HALF_WIDTH_M;
+
+            const geom = buildFinalApproachOCS({
+              faf: pair.faf,
+              threshold: pair.threshold,
+              primaryHalfWidthM: tunnelHalfWidthM,
+              secondaryWidthM: tunnelHalfWidthM > 0
+                ? tunnelHalfWidthM
+                : DEFAULT_SECONDARY_WIDTH_M,
+            });
+
+            const visible = layers.ocsSurfaces;
+            const baseId = `${OCS_ENTITY_PREFIX}${routeId}`;
+
+            const primaryId = `${baseId}-primary`;
+            addOcsPolygon(
+              viewer,
+              primaryId,
+              `${route.procedureName} OCS primary`,
+              geom.primaryPolygon,
+              PRIMARY_FILL_COLOR,
+              PRIMARY_OUTLINE_COLOR,
+              visible,
             );
-            return;
-          }
+            addedIds.push(primaryId);
 
-          // Derive widths from the published tunnel descriptor when available.
-          // `lateralHalfWidthNm` is the navigation tunnel half-width; we use it
-          // as the PRIMARY half-width (full containment) and extend by the same
-          // amount to form the SECONDARY (7:1) fringe.
-          const tunnelHalfWidthM = props.tunnel?.lateralHalfWidthNm
-            ? props.tunnel.lateralHalfWidthNm * NAUTICAL_MILE_M
-            : DEFAULT_PRIMARY_HALF_WIDTH_M;
+            const leftId = `${baseId}-secondary-left`;
+            addOcsPolygon(
+              viewer,
+              leftId,
+              `${route.procedureName} OCS secondary (L)`,
+              geom.secondaryLeft,
+              SECONDARY_FILL_COLOR,
+              SECONDARY_OUTLINE_COLOR,
+              visible,
+            );
+            addedIds.push(leftId);
 
-          const geom = buildFinalApproachOCS({
-            faf: pair.faf,
-            threshold: pair.threshold,
-            primaryHalfWidthM: tunnelHalfWidthM,
-            secondaryWidthM: tunnelHalfWidthM > 0
-              ? tunnelHalfWidthM
-              : DEFAULT_SECONDARY_WIDTH_M,
+            const rightId = `${baseId}-secondary-right`;
+            addOcsPolygon(
+              viewer,
+              rightId,
+              `${route.procedureName} OCS secondary (R)`,
+              geom.secondaryRight,
+              SECONDARY_FILL_COLOR,
+              SECONDARY_OUTLINE_COLOR,
+              visible,
+            );
+            addedIds.push(rightId);
           });
-
-          const visible = layers.ocsSurfaces;
-          const baseId = `${OCS_ENTITY_PREFIX}${routeId}`;
-
-          const primaryId = `${baseId}-primary`;
-          addOcsPolygon(
-            viewer,
-            primaryId,
-            `${props.procedureName} OCS primary`,
-            geom.primaryPolygon,
-            PRIMARY_FILL_COLOR,
-            PRIMARY_OUTLINE_COLOR,
-            visible,
-          );
-          addedIds.push(primaryId);
-
-          const leftId = `${baseId}-secondary-left`;
-          addOcsPolygon(
-            viewer,
-            leftId,
-            `${props.procedureName} OCS secondary (L)`,
-            geom.secondaryLeft,
-            SECONDARY_FILL_COLOR,
-            SECONDARY_OUTLINE_COLOR,
-            visible,
-          );
-          addedIds.push(leftId);
-
-          const rightId = `${baseId}-secondary-right`;
-          addOcsPolygon(
-            viewer,
-            rightId,
-            `${props.procedureName} OCS secondary (R)`,
-            geom.secondaryRight,
-            SECONDARY_FILL_COLOR,
-            SECONDARY_OUTLINE_COLOR,
-            visible,
-          );
-          addedIds.push(rightId);
-        });
       })
       .catch((err) => {
         if (isMissingJsonAsset(err)) {
           console.warn(
-            `[useOcsLayer] ${proceduresUrl} not found. ` +
+            `[useOcsLayer] procedure-details data for ${activeAirportCode} not found. ` +
               "Run: python aeroviz-4d/python/preprocess_procedures.py --airport <ICAO>",
           );
         } else {

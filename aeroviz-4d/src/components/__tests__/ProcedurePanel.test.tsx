@@ -71,61 +71,191 @@ vi.mock("../../utils/navigation", () => ({
 
 import ProcedurePanel from "../ProcedurePanel";
 
-const sampleGeoJson = {
-  type: "FeatureCollection",
-  metadata: {
-    sourceCycle: "2603",
-  },
-  features: [
+const sampleIndex = {
+  airport: "KRDU",
+  airportName: "Raleigh Durham Intl",
+  sourceCycle: "2603",
+  researchUseOnly: true,
+  runways: [
     {
-      type: "Feature",
-      geometry: { type: "LineString", coordinates: [] },
-      properties: {
-        featureType: "procedure-route",
-        routeId: "KRDU-R05LY-R",
-        runwayIdent: "RW05L",
-        procedureIdent: "R05LY",
-        procedureName: "RNAV(GPS) Y RW05L",
-        procedureFamily: "RNAV_GPS",
+      runwayIdent: "RW05L",
+      chartName: "RW05L",
+      procedureUids: ["KRDU-R05LY-RW05L"],
+      procedures: [
+        {
+          procedureUid: "KRDU-R05LY-RW05L",
+          procedureIdent: "R05LY",
+          chartName: "RNAV(GPS) Y RW05L",
+          procedureFamily: "RNAV_GPS",
+          variant: "Y",
+          approachModes: ["GPS"],
+          runwayIdent: "RW05L",
+          defaultBranchId: "branch:R",
+        },
+      ],
+    },
+    {
+      runwayIdent: "RW23R",
+      chartName: "RW23R",
+      procedureUids: ["KRDU-R23RY-RW23R"],
+      procedures: [
+        {
+          procedureUid: "KRDU-R23RY-RW23R",
+          procedureIdent: "R23RY",
+          chartName: "RNAV(GPS) Y RW23R",
+          procedureFamily: "RNAV_GPS",
+          variant: "Y",
+          approachModes: ["GPS"],
+          runwayIdent: "RW23R",
+          defaultBranchId: "branch:R",
+        },
+      ],
+    },
+  ],
+};
+
+function makeLeg(sequence: number, fixId: string, role: string) {
+  return {
+    legId: `leg:${sequence}`,
+    sequence,
+    segmentType: "final",
+    path: {
+      pathTerminator: sequence === 10 ? "IF" : "TF",
+      constructionMethod: "track",
+      startFixRef: null,
+      endFixRef: fixId,
+    },
+    termination: { kind: "fix", fixRef: fixId },
+    constraints: {
+      altitude: { qualifier: "AT", valueFt: 2000 - sequence, rawText: String(2000 - sequence) },
+      speedKt: null,
+      geometryAltitudeFt: 2000 - sequence,
+    },
+    roleAtEnd: role,
+    sourceRefs: [],
+    quality: { status: "parsed", sourceLine: sequence, renderedInPlanView: true },
+  };
+}
+
+function makeDocument(options: {
+  procedureUid: string;
+  runwayIdent: string;
+  procedureIdent: string;
+  chartName: string;
+  branches: Array<{
+    branchIdent: string;
+    branchRole: string;
+    defaultVisible: boolean;
+    warnings: string[];
+  }>;
+}) {
+  const fixes = [
+    {
+      fixId: "fix:A",
+      ident: "FIXA",
+      kind: "waypoint",
+      position: { lon: -78.9, lat: 35.7 },
+      elevationFt: null,
+      roleHints: ["IF"],
+      sourceRefs: [],
+    },
+    {
+      fixId: "fix:B",
+      ident: options.runwayIdent,
+      kind: "runway",
+      position: { lon: -78.8, lat: 35.8 },
+      elevationFt: 400,
+      roleHints: ["MAPt"],
+      sourceRefs: [],
+    },
+  ];
+
+  return {
+    schemaVersion: "1.0",
+    modelType: "procedure-detail",
+    procedureUid: options.procedureUid,
+    provenance: {
+      assemblyMode: "test",
+      researchUseOnly: true,
+      sources: [{ sourceId: "cifp", kind: "CIFP", cycle: "2603" }],
+      warnings: [],
+    },
+    airport: { icao: "KRDU", faa: "RDU", name: "Raleigh Durham Intl" },
+    runway: {
+      ident: options.runwayIdent,
+      landingThresholdFixRef: "fix:B",
+      threshold: { lon: -78.8, lat: 35.8, elevationFt: 400 },
+    },
+    procedure: {
+      procedureType: "R",
+      procedureFamily: "RNAV_GPS",
+      procedureIdent: options.procedureIdent,
+      chartName: options.chartName,
+      variant: "Y",
+      runwayIdent: options.runwayIdent,
+      baseBranchIdent: "R",
+      approachModes: ["GPS"],
+    },
+    fixes,
+    branches: options.branches.map((branch, index) => ({
+      branchId: `branch:${branch.branchIdent}`,
+      branchKey: branch.branchIdent,
+      branchIdent: branch.branchIdent,
+      procedureType: "R",
+      transitionIdent: branch.branchRole === "transition" ? branch.branchIdent : null,
+      branchRole: branch.branchRole,
+      sequenceOrder: index,
+      mergeFixRef: null,
+      continuesWithBranchId: null,
+      defaultVisible: branch.defaultVisible,
+      warnings: branch.warnings,
+      legs: [makeLeg(10, "fix:A", "IF"), makeLeg(20, "fix:B", "MAPt")],
+    })),
+    verticalProfiles: [],
+    validation: {
+      expectedRunwayIdent: options.runwayIdent,
+      expectedIF: null,
+      expectedFAF: null,
+      expectedMAPt: options.runwayIdent,
+      expectedMissedHoldFix: null,
+      knownSimplifications: [],
+    },
+    displayHints: {
+      nominalSpeedKt: 140,
+      defaultVisibleBranchIds: ["branch:R"],
+      tunnelDefaults: {
+        lateralHalfWidthNm: 0.3,
+        verticalHalfHeightFt: 300,
+        sampleSpacingM: 10000,
+        mode: "visualApproximation",
+      },
+    },
+  };
+}
+
+const sampleDocuments = {
+  "KRDU-R05LY-RW05L": makeDocument({
+    procedureUid: "KRDU-R05LY-RW05L",
+    runwayIdent: "RW05L",
+    procedureIdent: "R05LY",
+    chartName: "RNAV(GPS) Y RW05L",
+    branches: [
+      {
         branchIdent: "R",
-        branchType: "final",
+        branchRole: "final",
         defaultVisible: true,
         warnings: ["Skipped unsupported leg CA at sequence 040"],
       },
-    },
-    {
-      type: "Feature",
-      geometry: { type: "LineString", coordinates: [] },
-      properties: {
-        featureType: "procedure-route",
-        routeId: "KRDU-R05LY-AOTTOS",
-        runwayIdent: "RW05L",
-        procedureIdent: "R05LY",
-        procedureName: "RNAV(GPS) Y RW05L",
-        procedureFamily: "RNAV_GPS",
-        branchIdent: "AOTTOS",
-        branchType: "transition",
-        defaultVisible: false,
-        warnings: [],
-      },
-    },
-    {
-      type: "Feature",
-      geometry: { type: "LineString", coordinates: [] },
-      properties: {
-        featureType: "procedure-route",
-        routeId: "KRDU-R23RY-R",
-        runwayIdent: "RW23R",
-        procedureIdent: "R23RY",
-        procedureName: "RNAV(GPS) Y RW23R",
-        procedureFamily: "RNAV_GPS",
-        branchIdent: "R",
-        branchType: "final",
-        defaultVisible: true,
-        warnings: [],
-      },
-    },
-  ],
+      { branchIdent: "AOTTOS", branchRole: "transition", defaultVisible: false, warnings: [] },
+    ],
+  }),
+  "KRDU-R23RY-RW23R": makeDocument({
+    procedureUid: "KRDU-R23RY-RW23R",
+    runwayIdent: "RW23R",
+    procedureIdent: "R23RY",
+    chartName: "RNAV(GPS) Y RW23R",
+    branches: [{ branchIdent: "R", branchRole: "final", defaultVisible: true, warnings: [] }],
+  }),
 };
 
 describe("ProcedurePanel", () => {
@@ -137,7 +267,15 @@ describe("ProcedurePanel", () => {
     setSelectedProfileRunwayIdent.mockClear();
     setRunwayProfileOpen.mockClear();
     navigateWithinApp.mockClear();
-    fetchMock.mockResolvedValue(jsonResponse(sampleGeoJson));
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith("/procedure-details/index.json")) return Promise.resolve(jsonResponse(sampleIndex));
+      const match = url.match(/\/procedure-details\/(.+)\.json$/);
+      if (match) {
+        const document = sampleDocuments[match[1] as keyof typeof sampleDocuments];
+        if (document) return Promise.resolve(jsonResponse(document));
+      }
+      return Promise.reject(new Error(`Unexpected URL ${url}`));
+    });
     vi.stubGlobal("fetch", fetchMock);
   });
 
@@ -150,7 +288,7 @@ describe("ProcedurePanel", () => {
 
     await waitFor(() => expect(screen.getByText("RW05L")).toBeTruthy());
 
-    expect(fetchMock).toHaveBeenCalledWith("/data/airports/KRDU/procedures.geojson");
+    expect(fetchMock).toHaveBeenCalledWith("/data/airports/KRDU/procedure-details/index.json");
     expect(screen.getByText("KRDU CIFP 2603")).toBeTruthy();
     expect(screen.getByText("3 branches")).toBeTruthy();
     expect(screen.getByText("2 runways")).toBeTruthy();
@@ -163,7 +301,7 @@ describe("ProcedurePanel", () => {
     render(<ProcedurePanel />);
     await waitFor(() => expect(screen.getByText("AOTTOS")).toBeTruthy());
 
-    expect(fetchMock).toHaveBeenCalledWith("/data/airports/KRDU/procedures.geojson");
+    expect(fetchMock).toHaveBeenCalledWith("/data/airports/KRDU/procedure-details/index.json");
 
     const labels = screen.getAllByText("AOTTOS");
     const label = labels[0].closest("label");

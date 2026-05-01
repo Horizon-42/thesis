@@ -669,9 +669,26 @@ body,
 .runway-profile-route-line {
   stroke: rgba(34, 211, 238, 0.82);
   stroke-width: 1.8;
-  stroke-dasharray: 7 5;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.runway-profile-route-line.is-transition {
+  stroke: rgba(246, 183, 77, 0.78);
+}
+
+.runway-profile-route-label {
+  fill: #dbeafe;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  paint-order: stroke;
+  stroke: rgba(15, 23, 42, 0.9);
+  stroke-width: 3px;
+}
+
+.runway-profile-route-label.is-transition {
+  fill: #ffd38a;
 }
 
 .runway-profile-reference-line {
@@ -1618,6 +1635,11 @@ body,
 .procedure-details-axis-line {
   stroke: rgba(219, 233, 248, 0.55);
   stroke-width: 1.4;
+}
+
+.procedure-details-profile-threshold-line {
+  stroke: rgba(255, 255, 255, 0.82);
+  stroke-dasharray: 5 5;
 }
 
 .procedure-details-axis-tick {

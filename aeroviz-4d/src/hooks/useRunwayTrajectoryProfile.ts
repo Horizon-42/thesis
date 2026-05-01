@@ -2,11 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { airportDataUrl } from "../data/airportData";
-import type { ProcedureFeatureCollection } from "../types/geojson-aviation";
+import { loadProcedureRouteData } from "../data/procedureRoutes";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 import {
   buildHorizontalPlateRoutes,
-  buildRunwayReferenceMarks,
+  buildRunwayReferenceMarksFromPlateRoutes,
   buildRunwayFrame,
   pointIsInsideHorizontalPlate,
   projectPositionToRunwayFrame,
@@ -48,7 +48,6 @@ export interface RunwayTrajectoryProfileState {
 interface LoadedProfileData {
   runwayFrame: RunwayFrame;
   plateRoutes: HorizontalPlateRoute[];
-  referenceMarks: RunwayReferenceMark[];
   procedureNames: string[];
   sourceCycle: string | null;
 }
@@ -90,10 +89,18 @@ function sampleRunwayPoint(
   );
 }
 
+function routeIsActive(
+  route: HorizontalPlateRoute,
+  procedureVisibility: Record<string, boolean>,
+): boolean {
+  return procedureVisibility[route.routeId] ?? route.defaultVisible;
+}
+
 export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
   const {
     viewer,
     activeAirportCode,
+    procedureVisibility,
     selectedProfileRunwayIdent,
     isRunwayProfileOpen,
     trajectoryDataSource,
@@ -138,19 +145,14 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
 
     Promise.all([
       fetchJson<RunwayFeatureCollection>(airportDataUrl(activeAirportCode, "runway.geojson")),
-      fetchJson<ProcedureFeatureCollection>(airportDataUrl(activeAirportCode, "procedures.geojson")),
+      loadProcedureRouteData(activeAirportCode),
     ])
-      .then(([runwayCollection, procedureCollection]) => {
+      .then(([runwayCollection, procedureRouteData]) => {
         if (cancelled) return;
 
         const runwayFrame = buildRunwayFrame(runwayCollection, selectedProfileRunwayIdent);
         const plateRoutes = buildHorizontalPlateRoutes(
-          procedureCollection,
-          runwayFrame,
-          selectedProfileRunwayIdent,
-        );
-        const referenceMarks = buildRunwayReferenceMarks(
-          procedureCollection,
+          procedureRouteData.routes,
           runwayFrame,
           selectedProfileRunwayIdent,
         );
@@ -159,19 +161,15 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
         setLoadedData({
           runwayFrame,
           plateRoutes,
-          referenceMarks,
           procedureNames,
-          sourceCycle:
-            typeof procedureCollection.metadata?.sourceCycle === "string"
-              ? procedureCollection.metadata.sourceCycle
-              : null,
+          sourceCycle: procedureRouteData.index.sourceCycle ?? null,
         });
         setIsLoading(false);
       })
       .catch((loadError) => {
         if (cancelled) return;
         const message = isMissingJsonAsset(loadError)
-          ? `Missing runway or procedures data for ${activeAirportCode}`
+          ? `Missing runway or procedure-details data for ${activeAirportCode}`
           : loadError instanceof Error
             ? loadError.message
             : String(loadError);
@@ -185,8 +183,13 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
     };
   }, [activeAirportCode, isRunwayProfileOpen, selectedProfileRunwayIdent]);
 
+  const activePlateRoutes = useMemo(
+    () => loadedData?.plateRoutes.filter((route) => routeIsActive(route, procedureVisibility)) ?? [],
+    [loadedData, procedureVisibility],
+  );
+
   const aircraftTracks = useMemo<ProfileAircraftTrack[]>(() => {
-    if (!trajectoryDataSource || !currentTime || !loadedData || loadedData.plateRoutes.length === 0) {
+    if (!trajectoryDataSource || !currentTime || !loadedData || activePlateRoutes.length === 0) {
       return [];
     }
 
@@ -197,7 +200,7 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
       .map((entity) => {
         const currentPoint = sampleRunwayPoint(entity, currentTime, loadedData.runwayFrame);
         if (!currentPoint) return null;
-        if (!pointIsInsideHorizontalPlate(currentPoint, loadedData.plateRoutes)) {
+        if (!pointIsInsideHorizontalPlate(currentPoint, activePlateRoutes)) {
           return null;
         }
 
@@ -214,7 +217,7 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
           );
           const samplePoint = sampleRunwayPoint(entity, sampleTime, loadedData.runwayFrame);
           if (!samplePoint) continue;
-          if (!pointIsInsideHorizontalPlate(samplePoint, loadedData.plateRoutes)) continue;
+          if (!pointIsInsideHorizontalPlate(samplePoint, activePlateRoutes)) continue;
           trail.push({
             ...samplePoint,
             timeIso: formatJulianTime(sampleTime),
@@ -244,15 +247,23 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
         }
         return left.isSelected ? -1 : 1;
       });
-  }, [currentTime, loadedData, selectedFlightId, trajectoryDataSource]);
+  }, [activePlateRoutes, currentTime, loadedData, selectedFlightId, trajectoryDataSource]);
+
+  const activeReferenceMarks = useMemo(
+    () =>
+      loadedData && selectedProfileRunwayIdent
+        ? buildRunwayReferenceMarksFromPlateRoutes(activePlateRoutes, selectedProfileRunwayIdent)
+        : [],
+    [activePlateRoutes, loadedData, selectedProfileRunwayIdent],
+  );
 
   return {
     isLoading,
     error,
     currentTimeIso: currentTime ? formatJulianTime(currentTime) : null,
     runwayFrame: loadedData?.runwayFrame ?? null,
-    plateRoutes: loadedData?.plateRoutes ?? [],
-    referenceMarks: loadedData?.referenceMarks ?? [],
+    plateRoutes: activePlateRoutes,
+    referenceMarks: activeReferenceMarks,
     procedureNames: loadedData?.procedureNames ?? [],
     sourceCycle: loadedData?.sourceCycle ?? null,
     aircraftTracks,

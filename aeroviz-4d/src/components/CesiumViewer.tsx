@@ -13,7 +13,7 @@
  *         (useCesiumViewer)      initialises Viewer, stores in context
  *         (useRunwayLayer)       loads runway.geojson
  *         (useWaypointLayer)     loads waypoints.geojson
- *         (useProcedureLayer)    loads procedures.geojson
+ *         (useProcedureLayer)    loads procedure-details
  *         (useOcsLayer)          builds OCS geometry
  *         (useCzmlLoader)        loads trajectories.czml
  */

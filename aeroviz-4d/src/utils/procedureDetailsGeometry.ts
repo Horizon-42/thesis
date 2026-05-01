@@ -1,9 +1,13 @@
 import type {
-  ProcedureDetailBranch,
   ProcedureDetailDocument,
   ProcedureDetailFix,
-  ProcedureDetailLeg,
+  ProcedureDetailBranch,
 } from "../data/procedureDetails";
+import {
+  buildProcedureRoutes,
+  procedureRouteBranchLookup,
+  procedureRouteFixLookup,
+} from "../data/procedureRoutes";
 
 const EARTH_RADIUS_M = 6_378_137;
 
@@ -14,9 +18,21 @@ export interface ProcedureChartPoint {
   branchId: string;
   branchIdent: string;
   branchRole: string;
+  routeId: string;
+  branchKey: string;
+  transitionIdent: string | null;
+  procedureIdent: string;
+  procedureName: string;
+  procedureFamily: string;
   lon: number;
   lat: number;
   altitudeFt: number | null;
+  geometryAltitudeFt: number;
+  altM: number;
+  sequence: number;
+  legType: string;
+  sourceLine: number;
+  timeSeconds: number;
   xM: number;
   yM: number;
   distanceM: number;
@@ -26,6 +42,12 @@ export interface ProcedureBranchPolyline {
   branchId: string;
   branchIdent: string;
   branchRole: string;
+  routeId: string;
+  branchKey: string;
+  transitionIdent: string | null;
+  procedureIdent: string;
+  procedureName: string;
+  procedureFamily: string;
   defaultVisible: boolean;
   warnings: string[];
   points: ProcedureChartPoint[];
@@ -40,59 +62,8 @@ export interface ProcedureRunwayMarker {
   y2: number;
 }
 
-interface RawBranchPoint {
-  fixId: string;
-  ident: string;
-  role: string;
-  lon: number;
-  lat: number;
-  altitudeFt: number | null;
-}
-
 function toRadians(value: number): number {
   return (value * Math.PI) / 180;
-}
-
-function fillMissingNumbers(values: Array<number | null>): {
-  values: number[];
-  repairedIndexes: number[];
-  repairMethod: "interpolated" | "nearest" | "zero-fallback" | null;
-} {
-  const known = values
-    .map((value, index) => ({ value, index }))
-    .filter((entry): entry is { value: number; index: number } => entry.value !== null);
-
-  if (known.length === 0) {
-    return {
-      values: values.map(() => 0),
-      repairedIndexes: values.map((_, index) => index),
-      repairMethod: values.length > 0 ? "zero-fallback" : null,
-    };
-  }
-
-  const repairedIndexes: number[] = [];
-  let usedInterpolation = false;
-  const repairedValues = values.map((value, index) => {
-    if (value !== null) return value;
-
-    const previous = [...known].reverse().find((entry) => entry.index < index);
-    const next = known.find((entry) => entry.index > index);
-    if (previous && next) {
-      repairedIndexes.push(index);
-      usedInterpolation = true;
-      const ratio = (index - previous.index) / (next.index - previous.index);
-      return previous.value + (next.value - previous.value) * ratio;
-    }
-    repairedIndexes.push(index);
-    return previous?.value ?? next?.value ?? 0;
-  });
-
-  return {
-    values: repairedValues,
-    repairedIndexes,
-    repairMethod:
-      repairedIndexes.length === 0 ? null : usedInterpolation ? "interpolated" : "nearest",
-  };
 }
 
 function pointToEastNorth(
@@ -110,160 +81,69 @@ function pointToEastNorth(
   };
 }
 
-function distance2d(
-  left: { east: number; north: number },
-  right: { east: number; north: number },
-): number {
-  return Math.hypot(right.east - left.east, right.north - left.north);
-}
-
-function dedupeSequential<T>(items: T[], keyFn: (item: T) => string): T[] {
-  return items.filter((item, index) => {
-    if (index === 0) return true;
-    return keyFn(item) !== keyFn(items[index - 1]);
-  });
-}
-
 export function fixLookup(document: ProcedureDetailDocument): Map<string, ProcedureDetailFix> {
-  return new Map(document.fixes.map((fix) => [fix.fixId, fix]));
-}
-
-function altitudeForLeg(leg: ProcedureDetailLeg, fix: ProcedureDetailFix | undefined): number | null {
-  return (
-    leg.constraints.geometryAltitudeFt ??
-    leg.constraints.altitude?.valueFt ??
-    fix?.elevationFt ??
-    null
-  );
-}
-
-function positionedFixPoint(
-  leg: ProcedureDetailLeg,
-  fix: ProcedureDetailFix | undefined,
-): RawBranchPoint | null {
-  if (!fix?.position) return null;
-  return {
-    fixId: fix.fixId,
-    ident: fix.ident,
-    role: leg.roleAtEnd,
-    lon: fix.position.lon,
-    lat: fix.position.lat,
-    altitudeFt: altitudeForLeg(leg, fix),
-  };
-}
-
-function ownBranchPoints(
-  branch: ProcedureDetailBranch,
-  fixById: Map<string, ProcedureDetailFix>,
-): RawBranchPoint[] {
-  return dedupeSequential(
-    branch.legs
-      .map((leg) => positionedFixPoint(leg, fixById.get(leg.path.endFixRef)))
-      .filter((point): point is RawBranchPoint => point !== null),
-    (point) => point.fixId,
-  );
-}
-
-function rawBranchPoints(
-  branch: ProcedureDetailBranch,
-  branchById: Map<string, ProcedureDetailBranch>,
-  fixById: Map<string, ProcedureDetailFix>,
-  cache: Map<string, RawBranchPoint[]>,
-): RawBranchPoint[] {
-  const cached = cache.get(branch.branchId);
-  if (cached) return cached;
-
-  const ownPoints = ownBranchPoints(branch, fixById);
-  const continuationBranch =
-    branch.continuesWithBranchId === null ? undefined : branchById.get(branch.continuesWithBranchId);
-
-  let combined = ownPoints;
-  if (continuationBranch) {
-    const continuation = rawBranchPoints(continuationBranch, branchById, fixById, cache);
-    let continuationStart = 0;
-    if (branch.mergeFixRef) {
-      const mergeIndex = continuation.findIndex((point) => point.fixId === branch.mergeFixRef);
-      continuationStart = mergeIndex >= 0 ? mergeIndex : 0;
-    }
-    const continuationPoints = continuation.slice(continuationStart);
-    if (
-      combined.length > 0 &&
-      continuationPoints.length > 0 &&
-      combined[combined.length - 1].fixId === continuationPoints[0].fixId
-    ) {
-      combined = [...combined, ...continuationPoints.slice(1)];
-    } else {
-      combined = [...combined, ...continuationPoints];
-    }
-  }
-
-  cache.set(branch.branchId, combined);
-  return combined;
+  return procedureRouteFixLookup(document);
 }
 
 export function buildProcedureBranchPolylines(
   document: ProcedureDetailDocument,
 ): ProcedureBranchPolyline[] {
-  const fixById = fixLookup(document);
-  const branchById = new Map(document.branches.map((branch) => [branch.branchId, branch]));
+  const routes = buildProcedureRoutes([document]);
   const origin =
     document.runway.threshold ??
     document.fixes.find((fix) => fix.position)?.position ?? {
       lon: 0,
       lat: 0,
     };
-  const rawCache = new Map<string, RawBranchPoint[]>();
 
-  return document.branches
-    .map((branch) => {
-      const rawPoints = rawBranchPoints(branch, branchById, fixById, rawCache);
-      const altitudeRepair = fillMissingNumbers(rawPoints.map((point) => point.altitudeFt));
-      const repairedAltitudeWarnings = altitudeRepair.repairedIndexes.map((index) => {
-        const point = rawPoints[index];
-        const method =
-          altitudeRepair.repairMethod === "interpolated"
-            ? "interpolated from neighboring altitude constraints"
-            : altitudeRepair.repairMethod === "nearest"
-              ? "filled from the nearest available altitude constraint"
-              : "defaulted to 0 because no altitude constraints were available";
-        return `${point.ident}: altitude missing in procedure constraints; profile altitude was ${method}.`;
-      });
-
-      let cumulativeDistanceM = 0;
-      let previousLocal: { east: number; north: number } | null = null;
-      const points = rawPoints.map((point, index) => {
+  return routes
+    .map((route) => {
+      const points = route.points.map((point) => {
         const local = pointToEastNorth(point.lon, point.lat, origin.lon, origin.lat);
-        if (previousLocal) {
-          cumulativeDistanceM += distance2d(previousLocal, local);
-        }
-        previousLocal = local;
 
         return {
           fixId: point.fixId,
-          ident: point.ident,
+          ident: point.fixIdent,
           role: point.role,
-          branchId: branch.branchId,
-          branchIdent: branch.branchIdent,
-          branchRole: branch.branchRole,
+          branchId: route.branchId,
+          branchIdent: route.branchIdent,
+          branchRole: route.branchType,
+          routeId: route.routeId,
+          branchKey: route.branchKey,
+          transitionIdent: route.transitionIdent,
+          procedureIdent: route.procedureIdent,
+          procedureName: route.procedureName,
+          procedureFamily: route.procedureFamily,
           lon: point.lon,
           lat: point.lat,
-          altitudeFt: altitudeRepair.values[index] ?? 0,
+          altitudeFt: point.geometryAltitudeFt,
+          geometryAltitudeFt: point.geometryAltitudeFt,
+          altM: point.altM,
+          sequence: point.sequence,
+          legType: point.legType,
+          sourceLine: point.sourceLine,
+          timeSeconds: point.timeSeconds,
           xM: local.east,
           yM: local.north,
-          distanceM: cumulativeDistanceM,
+          distanceM: point.distanceFromStartM,
         };
       });
 
       return {
-        branchId: branch.branchId,
-        branchIdent: branch.branchIdent,
-        branchRole: branch.branchRole,
-        defaultVisible: branch.defaultVisible,
-        warnings: [...branch.warnings, ...repairedAltitudeWarnings],
-        points: dedupeSequential(points, (point) => point.fixId),
+        branchId: route.branchId,
+        branchIdent: route.branchIdent,
+        branchRole: route.branchType,
+        routeId: route.routeId,
+        branchKey: route.branchKey,
+        transitionIdent: route.transitionIdent,
+        procedureIdent: route.procedureIdent,
+        procedureName: route.procedureName,
+        procedureFamily: route.procedureFamily,
+        defaultVisible: route.defaultVisible,
+        warnings: route.warnings,
+        points,
       };
     })
-    .filter((branch) => branch.points.length >= 1)
     .sort((left, right) => {
       if (left.branchRole === right.branchRole) {
         return left.branchIdent.localeCompare(right.branchIdent);
@@ -319,9 +199,11 @@ export function procedureBranchForFix(
   fixId: string | null,
 ): ProcedureDetailBranch[] {
   if (!document || !fixId) return [];
-  return document.branches.filter((branch) =>
-    branch.legs.some((leg) => leg.path.endFixRef === fixId),
-  );
+  const branchById = procedureRouteBranchLookup(document);
+  return buildProcedureRoutes([document])
+    .filter((route) => route.points.some((point) => point.fixId === fixId))
+    .map((route) => branchById.get(route.branchId))
+    .filter((branch): branch is ProcedureDetailBranch => branch !== undefined);
 }
 
 export function nmFromMeters(valueM: number): number {

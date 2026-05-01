@@ -1,15 +1,15 @@
 /**
  * useProcedureLayer.ts
  * --------------------
- * Loads public/data/airports/<ICAO>/procedures.geojson and renders procedure routes, fixes,
- * and an approximate 3D RNAV tunnel in Cesium.
+ * Loads public/data/airports/<ICAO>/procedure-details/*.json and renders procedure routes,
+ * fixes, and an approximate 3D RNAV tunnel in Cesium.
  */
 
 import { useEffect, useRef } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
-import { airportDataUrl } from "../data/airportData";
-import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
+import { loadProcedureRouteData, type ProcedureRouteViewModel } from "../data/procedureRoutes";
+import { isMissingJsonAsset } from "../utils/fetchJson";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import {
   DEFAULT_NOMINAL_SPEED_KT,
@@ -20,12 +20,6 @@ import {
   type ProcedurePoint3D,
   type TunnelSection,
 } from "../utils/procedureGeometry";
-import type {
-  ProcedureFeature,
-  ProcedureFeatureCollection,
-  ProcedureFixProperties,
-  ProcedureRouteProperties,
-} from "../types/geojson-aviation";
 
 const PROCEDURE_ENTITY_PREFIX = "procedure-";
 const ROUTE_COLOR = Cesium.Color.CYAN.withAlpha(0.95);
@@ -33,35 +27,15 @@ const FIX_COLOR = Cesium.Color.YELLOW.withAlpha(0.95);
 const TUNNEL_COLOR = Cesium.Color.DEEPSKYBLUE.withAlpha(0.16);
 const TUNNEL_OUTLINE_COLOR = Cesium.Color.CYAN.withAlpha(0.25);
 
-function isRouteFeature(feature: ProcedureFeature): feature is ProcedureFeature & {
-  geometry: { type: "LineString"; coordinates: Array<[number, number, number]> };
-  properties: ProcedureRouteProperties;
-} {
-  return (
-    feature.geometry.type === "LineString" &&
-    feature.properties.featureType === "procedure-route"
-  );
-}
-
-function isFixFeature(feature: ProcedureFeature): feature is ProcedureFeature & {
-  geometry: { type: "Point"; coordinates: [number, number, number] };
-  properties: ProcedureFixProperties;
-} {
-  return (
-    feature.geometry.type === "Point" &&
-    feature.properties.featureType === "procedure-fix"
-  );
-}
-
 function toCartesian(point: ProcedurePoint3D): Cesium.Cartesian3 {
   return Cesium.Cartesian3.fromDegrees(point.lon, point.lat, point.altM);
 }
 
-function toProcedurePoint(coords: [number, number, number]): ProcedurePoint3D {
+function toProcedurePoint(point: ProcedureRouteViewModel["points"][number]): ProcedurePoint3D {
   return {
-    lon: coords[0],
-    lat: coords[1],
-    altM: coords[2] ?? 0,
+    lon: point.lon,
+    lat: point.lat,
+    altM: point.altM,
   };
 }
 
@@ -145,7 +119,6 @@ export function useProcedureLayer(): void {
 
     let cancelled = false;
     const addedIds: string[] = [];
-    const proceduresUrl = airportDataUrl(activeAirportCode, "procedures.geojson");
     routeEntityIdsRef.current = {};
     routeDefaultsRef.current = {};
 
@@ -161,36 +134,37 @@ export function useProcedureLayer(): void {
       return visibleRef.current && routeVisible;
     };
 
-    fetchJson<ProcedureFeatureCollection>(proceduresUrl)
-      .then((geojson) => {
+    loadProcedureRouteData(activeAirportCode)
+      .then(({ routes }) => {
         if (cancelled || !isCesiumViewerUsable(viewer)) return;
 
-        geojson.features.filter(isRouteFeature).forEach((feature, routeIndex) => {
-          const routeId = feature.properties.routeId ?? `route-${routeIndex}`;
+        routes.forEach((route, routeIndex) => {
+          const routeId = route.routeId ?? `route-${routeIndex}`;
           const baseId = `${PROCEDURE_ENTITY_PREFIX}${routeId}`;
-          const coordinates = feature.geometry.coordinates;
-          if (coordinates.length < 2) {
+          if (route.points.length < 2) {
             console.warn(`[useProcedureLayer] Skipping ${routeId}: fewer than two points`);
             return;
           }
 
-          routeDefaultsRef.current[routeId] = feature.properties.defaultVisible ?? true;
+          routeDefaultsRef.current[routeId] = route.defaultVisible;
           const visible = isRouteVisible(routeId);
           const lineId = `${baseId}-line`;
           viewer.entities.add({
             id: lineId,
-            name: feature.properties.procedureName,
+            name: route.procedureName,
             show: visible,
             polyline: {
-              positions: Cesium.Cartesian3.fromDegreesArrayHeights(coordinates.flat()),
+              positions: Cesium.Cartesian3.fromDegreesArrayHeights(
+                route.points.flatMap((point) => [point.lon, point.lat, point.altM]),
+              ),
               width: 5,
               material: ROUTE_COLOR,
             },
           });
           addRouteEntityId(routeId, lineId);
 
-          const tunnel = feature.properties.tunnel;
-          const routePoints = coordinates.map(toProcedurePoint);
+          const tunnel = route.tunnel;
+          const routePoints = route.points.map(toProcedurePoint);
           const tunnelSections = buildTunnelSections(routePoints, {
             halfWidthM: tunnel?.lateralHalfWidthNm
               ? tunnel.lateralHalfWidthNm * 1852
@@ -199,7 +173,7 @@ export function useProcedureLayer(): void {
               ? tunnel.verticalHalfHeightFt * 0.3048
               : DEFAULT_TUNNEL_HALF_HEIGHT_M,
             sampleSpacingM: tunnel?.sampleSpacingM ?? DEFAULT_TUNNEL_SAMPLE_SPACING_M,
-            nominalSpeedKt: feature.properties.nominalSpeedKt ?? DEFAULT_NOMINAL_SPEED_KT,
+            nominalSpeedKt: route.nominalSpeedKt ?? DEFAULT_NOMINAL_SPEED_KT,
           });
 
           for (let index = 0; index < tunnelSections.length - 1; index++) {
@@ -210,43 +184,41 @@ export function useProcedureLayer(): void {
               tunnelSections[index + 1],
               visible,
             );
-            segmentIds.forEach((entityId) => addRouteEntityId(routeId, entityId));
+              segmentIds.forEach((entityId) => addRouteEntityId(routeId, entityId));
           }
-        });
 
-        geojson.features.filter(isFixFeature).forEach((feature, index) => {
-          const [lon, lat, altM] = feature.geometry.coordinates;
-          const props = feature.properties;
-          const id = `${PROCEDURE_ENTITY_PREFIX}${props.routeId}-fix-${props.sequence}-${index}`;
-          viewer.entities.add({
-            id,
-            name: props.name,
-            show: isRouteVisible(props.routeId),
-            position: Cesium.Cartesian3.fromDegrees(lon, lat, altM),
-            point: {
-              pixelSize: props.role === "MAPt" ? 13 : 11,
-              color: props.role === "FAF" ? Cesium.Color.ORANGE.withAlpha(0.95) : FIX_COLOR,
-              outlineColor: Cesium.Color.BLACK,
-              outlineWidth: 2,
-            },
-            label: {
-              text: `${props.name}\n${props.role}`,
-              font: "13px monospace",
-              fillColor: Cesium.Color.WHITE,
-              style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-              outlineWidth: 2,
-              verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-              pixelOffset: new Cesium.Cartesian2(0, -18),
-              distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 80000),
-            },
+          route.points.forEach((point, index) => {
+            const id = `${PROCEDURE_ENTITY_PREFIX}${route.routeId}-fix-${point.sequence}-${index}`;
+            viewer.entities.add({
+              id,
+              name: point.fixIdent,
+              show: isRouteVisible(route.routeId),
+              position: Cesium.Cartesian3.fromDegrees(point.lon, point.lat, point.altM),
+              point: {
+                pixelSize: point.role === "MAPt" ? 13 : 11,
+                color: point.role === "FAF" ? Cesium.Color.ORANGE.withAlpha(0.95) : FIX_COLOR,
+                outlineColor: Cesium.Color.BLACK,
+                outlineWidth: 2,
+              },
+              label: {
+                text: `${point.fixIdent}\n${point.role}`,
+                font: "13px monospace",
+                fillColor: Cesium.Color.WHITE,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                outlineWidth: 2,
+                verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                pixelOffset: new Cesium.Cartesian2(0, -18),
+                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 80000),
+              },
+            });
+            addRouteEntityId(route.routeId, id);
           });
-          addRouteEntityId(props.routeId, id);
         });
       })
       .catch((error) => {
         if (isMissingJsonAsset(error)) {
           console.warn(
-            `[useProcedureLayer] ${proceduresUrl} not found. ` +
+            `[useProcedureLayer] procedure-details data for ${activeAirportCode} not found. ` +
               "Run: python aeroviz-4d/python/preprocess_procedures.py --airport <ICAO>",
           );
         } else {

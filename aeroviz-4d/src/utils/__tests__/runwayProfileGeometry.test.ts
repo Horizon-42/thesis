@@ -7,7 +7,7 @@ import {
   projectPositionToRunwayFrame,
   type RunwayFeatureCollection,
 } from "../runwayProfileGeometry";
-import type { ProcedureFeatureCollection } from "../../types/geojson-aviation";
+import type { ProcedureRouteViewModel } from "../../data/procedureRoutes";
 
 const runwayCollection: RunwayFeatureCollection = {
   type: "FeatureCollection",
@@ -41,143 +41,157 @@ const runwayCollection: RunwayFeatureCollection = {
   ],
 };
 
-const procedureCollection: ProcedureFeatureCollection = {
-  type: "FeatureCollection",
-  metadata: {
-    airport: "TEST",
-    sourceCycle: "2603",
+const baseRoute = {
+  airport: "TEST",
+  procedureUid: "TEST-R09-RW09",
+  procedureType: "R",
+  procedureIdent: "R09",
+  procedureName: "RNAV(GPS) RW09",
+  procedureFamily: "RNAV_GPS",
+  procedureVariant: null,
+  runwayIdent: "RW09",
+  branchProcedureType: "R",
+  nominalSpeedKt: 140,
+  tunnel: {
+    lateralHalfWidthNm: 0.3,
+    verticalHalfHeightFt: 300,
+    sampleSpacingM: 250,
   },
-  features: [
-    {
-      type: "Feature",
-      geometry: {
-        type: "LineString",
-        coordinates: [
-          [-0.010, 0.0, 500],
-          [-0.005, 0.0, 300],
-          [0.0, 0.0, 35],
-        ],
-      },
-      properties: {
-        featureType: "procedure-route",
-        airport: "TEST",
-        procedureType: "SIAP",
-        procedureIdent: "R09",
-        procedureName: "RNAV(GPS) RW09",
-        branch: "R",
-        branchIdent: "R",
-        branchType: "final",
-        procedureFamily: "RNAV_GPS",
-        runway: "RW09",
-        runwayIdent: "RW09",
-        routeId: "TEST-R09-R",
-        source: "FAA-CIFP",
-        sourceCycle: "2603",
-        researchUseOnly: true,
-        nominalSpeedKt: 140,
-        tunnel: {
-          lateralHalfWidthNm: 0.3,
-          verticalHalfHeightFt: 300,
-          sampleSpacingM: 250,
-        },
-        samples: [
-          {
-            sequence: 10,
-            fixIdent: "SCHOO",
-            legType: "IF",
-            role: "IF",
-            altitudeFt: 1600,
-            geometryAltitudeFt: 1600,
-            distanceFromStartM: 0,
-            timeSeconds: 0,
-            sourceLine: 1,
-          },
-          {
-            sequence: 20,
-            fixIdent: "WEPAS",
-            legType: "TF",
-            role: "FAF",
-            altitudeFt: 900,
-            geometryAltitudeFt: 900,
-            distanceFromStartM: 500,
-            timeSeconds: 50,
-            sourceLine: 2,
-          },
-          {
-            sequence: 30,
-            fixIdent: "RW09",
-            legType: "TF",
-            role: "MAPt",
-            altitudeFt: 110,
-            geometryAltitudeFt: 110,
-            distanceFromStartM: 1000,
-            timeSeconds: 100,
-            sourceLine: 3,
-          },
-        ],
-        warnings: [],
-      },
-    },
-    {
-      type: "Feature",
-      geometry: {
-        type: "LineString",
-        coordinates: [
-          [-0.015, 0.0002, 0],
-          [-0.010, 0.0, 500],
-        ],
-      },
-      properties: {
-        featureType: "procedure-route",
-        airport: "TEST",
-        procedureType: "SIAP",
-        procedureIdent: "R09",
-        procedureName: "RNAV(GPS) RW09",
-        branch: "TRANS",
-        branchIdent: "TRANS",
-        branchType: "transition",
-        procedureFamily: "RNAV_GPS",
-        runway: "RW09",
-        runwayIdent: "RW09",
-        routeId: "TEST-R09-TRANS",
-        source: "FAA-CIFP",
-        sourceCycle: "2603",
-        researchUseOnly: true,
-        nominalSpeedKt: 140,
-        tunnel: {
-          lateralHalfWidthNm: 0.3,
-          verticalHalfHeightFt: 300,
-          sampleSpacingM: 250,
-        },
-        samples: [
-          {
-            sequence: 5,
-            fixIdent: "CONCA",
-            legType: "IF",
-            role: "IF",
-            altitudeFt: null,
-            geometryAltitudeFt: 0,
-            distanceFromStartM: 0,
-            timeSeconds: 0,
-            sourceLine: 4,
-          },
-          {
-            sequence: 10,
-            fixIdent: "SCHOO",
-            legType: "TF",
-            role: "IF",
-            altitudeFt: 1600,
-            geometryAltitudeFt: 1600,
-            distanceFromStartM: 500,
-            timeSeconds: 40,
-            sourceLine: 5,
-          },
-        ],
-        warnings: [],
-      },
-    },
-  ],
 };
+
+const procedureRoutes: ProcedureRouteViewModel[] = [
+  {
+    ...baseRoute,
+    routeId: "TEST-R09-R",
+    branchId: "branch:R",
+    branchKey: "R",
+    branchIdent: "R",
+    transitionIdent: null,
+    branchType: "final",
+    defaultVisible: true,
+    warnings: [],
+    points: [
+      {
+        fixId: "fix:SCHOO",
+        fixIdent: "SCHOO",
+        sequence: 10,
+        legType: "IF",
+        role: "IF",
+        lon: -0.010,
+        lat: 0.0,
+        altitudeFt: 1600,
+        geometryAltitudeFt: 1600,
+        altM: 500,
+        distanceFromStartM: 0,
+        timeSeconds: 0,
+        sourceLine: 1,
+      },
+      {
+        fixId: "fix:WEPAS",
+        fixIdent: "WEPAS",
+        sequence: 20,
+        legType: "TF",
+        role: "FAF",
+        lon: -0.005,
+        lat: 0.0,
+        altitudeFt: 900,
+        geometryAltitudeFt: 900,
+        altM: 300,
+        distanceFromStartM: 500,
+        timeSeconds: 50,
+        sourceLine: 2,
+      },
+      {
+        fixId: "fix:RW09",
+        fixIdent: "RW09",
+        sequence: 30,
+        legType: "TF",
+        role: "MAPt",
+        lon: 0.0,
+        lat: 0.0,
+        altitudeFt: 110,
+        geometryAltitudeFt: 110,
+        altM: 35,
+        distanceFromStartM: 1000,
+        timeSeconds: 100,
+        sourceLine: 3,
+      },
+    ],
+  },
+  {
+    ...baseRoute,
+    routeId: "TEST-R09-TRANS",
+    branchId: "branch:TRANS",
+    branchKey: "TRANS",
+    branchIdent: "TRANS",
+    transitionIdent: "TRANS",
+    branchType: "transition",
+    defaultVisible: false,
+    warnings: [],
+    points: [
+      {
+        fixId: "fix:CONCA",
+        fixIdent: "CONCA",
+        sequence: 5,
+        legType: "IF",
+        role: "IF",
+        lon: -0.015,
+        lat: 0.0002,
+        altitudeFt: null,
+        geometryAltitudeFt: 1600,
+        altM: 500,
+        distanceFromStartM: 0,
+        timeSeconds: 0,
+        sourceLine: 4,
+      },
+      {
+        fixId: "fix:SCHOO",
+        fixIdent: "SCHOO",
+        sequence: 10,
+        legType: "TF",
+        role: "IF",
+        lon: -0.010,
+        lat: 0.0,
+        altitudeFt: 1600,
+        geometryAltitudeFt: 1600,
+        altM: 500,
+        distanceFromStartM: 500,
+        timeSeconds: 40,
+        sourceLine: 5,
+      },
+      {
+        fixId: "fix:WEPAS",
+        fixIdent: "WEPAS",
+        sequence: 20,
+        legType: "TF",
+        role: "FAF",
+        lon: -0.005,
+        lat: 0.0,
+        altitudeFt: 900,
+        geometryAltitudeFt: 900,
+        altM: 300,
+        distanceFromStartM: 1000,
+        timeSeconds: 90,
+        sourceLine: 2,
+      },
+      {
+        fixId: "fix:RW09",
+        fixIdent: "RW09",
+        sequence: 30,
+        legType: "TF",
+        role: "MAPt",
+        lon: 0.0,
+        lat: 0.0,
+        altitudeFt: 110,
+        geometryAltitudeFt: 110,
+        altM: 35,
+        distanceFromStartM: 1500,
+        timeSeconds: 140,
+        sourceLine: 3,
+      },
+    ],
+  },
+];
 
 describe("runwayProfileGeometry", () => {
   it("builds a runway frame with threshold-centered runway coordinates", () => {
@@ -192,7 +206,7 @@ describe("runwayProfileGeometry", () => {
 
   it("filters points by the RNAV horizontal plate around the selected runway", () => {
     const frame = buildRunwayFrame(runwayCollection, "RW09");
-    const routes = buildHorizontalPlateRoutes(procedureCollection, frame, "RW09");
+    const routes = buildHorizontalPlateRoutes(procedureRoutes, frame, "RW09");
 
     const inside = projectPositionToRunwayFrame(frame, -0.0045, 0.00003, 220);
     const outside = projectPositionToRunwayFrame(frame, -0.0045, 0.008, 220);
@@ -204,7 +218,7 @@ describe("runwayProfileGeometry", () => {
 
   it("builds x-axis reference marks from important runway procedure fixes", () => {
     const frame = buildRunwayFrame(runwayCollection, "RW09");
-    const marks = buildRunwayReferenceMarks(procedureCollection, frame, "RW09");
+    const marks = buildRunwayReferenceMarks(procedureRoutes, frame, "RW09");
 
     expect(marks.some((mark) => mark.label === "RW09" && mark.detail === "Threshold")).toBe(true);
     expect(marks.some((mark) => mark.label === "RW09" && mark.detail === "MAPt")).toBe(true);
@@ -216,7 +230,7 @@ describe("runwayProfileGeometry", () => {
 
   it("fills unknown zero-altitude transition endpoints from nearby valid route heights", () => {
     const frame = buildRunwayFrame(runwayCollection, "RW09");
-    const routes = buildHorizontalPlateRoutes(procedureCollection, frame, "RW09");
+    const routes = buildHorizontalPlateRoutes(procedureRoutes, frame, "RW09");
     const transitionRoute = routes.find((route) => route.routeId === "TEST-R09-TRANS");
 
     expect(transitionRoute).toBeTruthy();

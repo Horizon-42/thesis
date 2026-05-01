@@ -103,47 +103,183 @@ vi.mock("../../context/AppContext", () => ({
 
 import { useProcedureLayer } from "../useProcedureLayer";
 
-const sampleGeoJson = {
-  type: "FeatureCollection",
-  features: [
+const sampleIndex = {
+  airport: "KRDU",
+  airportName: "Raleigh Durham Intl",
+  sourceCycle: "2603",
+  researchUseOnly: true,
+  runways: [
     {
-      type: "Feature",
-      geometry: {
-        type: "LineString",
-        coordinates: [
-          [-78.9251472, 35.7734139, 914.4],
-          [-78.8829556, 35.8087667, 670.56],
-          [-78.8019631, 35.87445, 243.23],
-        ],
-      },
-      properties: {
-        featureType: "procedure-route",
-        routeId: "KRDU-R05LY-R",
-        procedureName: "RNAV(GPS) Y RW05L",
-        defaultVisible: true,
-        nominalSpeedKt: 140,
-        tunnel: {
-          lateralHalfWidthNm: 0.3,
-          verticalHalfHeightFt: 300,
-          sampleSpacingM: 10000,
+      runwayIdent: "RW05L",
+      chartName: "RW05L",
+      procedureUids: ["KRDU-R05LY-RW05L"],
+      procedures: [
+        {
+          procedureUid: "KRDU-R05LY-RW05L",
+          procedureIdent: "R05LY",
+          chartName: "RNAV(GPS) Y RW05L",
+          procedureFamily: "RNAV_GPS",
+          variant: "Y",
+          approachModes: ["GPS"],
+          runwayIdent: "RW05L",
+          defaultBranchId: "branch:R",
         },
-      },
-    },
-    {
-      type: "Feature",
-      geometry: {
-        type: "Point",
-        coordinates: [-78.8829556, 35.8087667, 670.56],
-      },
-      properties: {
-        featureType: "procedure-fix",
-        routeId: "KRDU-R05LY-R",
-        name: "WEPAS",
-        sequence: 20,
-        role: "FAF",
-      },
+      ],
     },
   ],
+};
+
+const sampleDocument = {
+  schemaVersion: "1.0",
+  modelType: "procedure-detail",
+  procedureUid: "KRDU-R05LY-RW05L",
+  provenance: {
+    assemblyMode: "test",
+    researchUseOnly: true,
+    sources: [{ sourceId: "cifp", kind: "CIFP", cycle: "2603" }],
+    warnings: [],
+  },
+  airport: { icao: "KRDU", faa: "RDU", name: "Raleigh Durham Intl" },
+  runway: {
+    ident: "RW05L",
+    landingThresholdFixRef: "fix:RW05L",
+    threshold: { lon: -78.8019631, lat: 35.87445, elevationFt: 435 },
+  },
+  procedure: {
+    procedureType: "R",
+    procedureFamily: "RNAV_GPS",
+    procedureIdent: "R05LY",
+    chartName: "RNAV(GPS) Y RW05L",
+    variant: "Y",
+    runwayIdent: "RW05L",
+    baseBranchIdent: "R",
+    approachModes: ["GPS"],
+  },
+  fixes: [
+    {
+      fixId: "fix:SCHOO",
+      ident: "SCHOO",
+      kind: "waypoint",
+      position: { lon: -78.9251472, lat: 35.7734139 },
+      elevationFt: null,
+      roleHints: ["IF"],
+      sourceRefs: [],
+    },
+    {
+      fixId: "fix:WEPAS",
+      ident: "WEPAS",
+      kind: "waypoint",
+      position: { lon: -78.8829556, lat: 35.8087667 },
+      elevationFt: null,
+      roleHints: ["FAF"],
+      sourceRefs: [],
+    },
+    {
+      fixId: "fix:RW05L",
+      ident: "RW05L",
+      kind: "runway",
+      position: { lon: -78.8019631, lat: 35.87445 },
+      elevationFt: 435,
+      roleHints: ["MAPt"],
+      sourceRefs: [],
+    },
+  ],
+  branches: [
+    {
+      branchId: "branch:R",
+      branchKey: "R",
+      branchIdent: "R",
+      procedureType: "R",
+      transitionIdent: null,
+      branchRole: "final",
+      sequenceOrder: 0,
+      mergeFixRef: null,
+      continuesWithBranchId: null,
+      defaultVisible: true,
+      warnings: [],
+      legs: [
+        {
+          legId: "leg:10",
+          sequence: 10,
+          segmentType: "final",
+          path: {
+            pathTerminator: "IF",
+            constructionMethod: "track",
+            startFixRef: null,
+            endFixRef: "fix:SCHOO",
+          },
+          termination: { kind: "fix", fixRef: "fix:SCHOO" },
+          constraints: {
+            altitude: { qualifier: "AT", valueFt: 3000, rawText: "3000" },
+            speedKt: null,
+            geometryAltitudeFt: 3000,
+          },
+          roleAtEnd: "IF",
+          sourceRefs: [],
+          quality: { status: "parsed", sourceLine: 10, renderedInPlanView: true },
+        },
+        {
+          legId: "leg:20",
+          sequence: 20,
+          segmentType: "final",
+          path: {
+            pathTerminator: "TF",
+            constructionMethod: "track",
+            startFixRef: "fix:SCHOO",
+            endFixRef: "fix:WEPAS",
+          },
+          termination: { kind: "fix", fixRef: "fix:WEPAS" },
+          constraints: {
+            altitude: { qualifier: "AT", valueFt: 2200, rawText: "2200" },
+            speedKt: null,
+            geometryAltitudeFt: 2200,
+          },
+          roleAtEnd: "FAF",
+          sourceRefs: [],
+          quality: { status: "parsed", sourceLine: 20, renderedInPlanView: true },
+        },
+        {
+          legId: "leg:30",
+          sequence: 30,
+          segmentType: "final",
+          path: {
+            pathTerminator: "TF",
+            constructionMethod: "track",
+            startFixRef: "fix:WEPAS",
+            endFixRef: "fix:RW05L",
+          },
+          termination: { kind: "fix", fixRef: "fix:RW05L" },
+          constraints: {
+            altitude: { qualifier: "AT", valueFt: 798, rawText: "798" },
+            speedKt: null,
+            geometryAltitudeFt: 798,
+          },
+          roleAtEnd: "MAPt",
+          sourceRefs: [],
+          quality: { status: "parsed", sourceLine: 30, renderedInPlanView: true },
+        },
+      ],
+    },
+  ],
+  verticalProfiles: [],
+  validation: {
+    expectedRunwayIdent: "RW05L",
+    expectedIF: "SCHOO",
+    expectedFAF: "WEPAS",
+    expectedMAPt: "RW05L",
+    expectedMissedHoldFix: null,
+    knownSimplifications: [],
+  },
+  displayHints: {
+    nominalSpeedKt: 140,
+    defaultVisibleBranchIds: ["branch:R"],
+    tunnelDefaults: {
+      lateralHalfWidthNm: 0.3,
+      verticalHalfHeightFt: 300,
+      sampleSpacingM: 10000,
+      mode: "visualApproximation",
+    },
+  },
 };
 
 describe("useProcedureLayer", () => {
@@ -155,7 +291,13 @@ describe("useProcedureLayer", () => {
     setProceduresVisible(true);
     setProcedureRouteVisible("KRDU-R05LY-R", true);
     fetchMock.mockReset();
-    fetchMock.mockResolvedValue(jsonResponse(sampleGeoJson));
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith("/procedure-details/index.json")) return Promise.resolve(jsonResponse(sampleIndex));
+      if (url.endsWith("/procedure-details/KRDU-R05LY-RW05L.json")) {
+        return Promise.resolve(jsonResponse(sampleDocument));
+      }
+      return Promise.reject(new Error(`Unexpected URL ${url}`));
+    });
     vi.stubGlobal("fetch", fetchMock);
   });
 
@@ -168,7 +310,10 @@ describe("useProcedureLayer", () => {
 
     await waitFor(() => expect(mockViewer.entities.add).toHaveBeenCalled());
 
-    expect(fetchMock).toHaveBeenCalledWith("/data/airports/KRDU/procedures.geojson");
+    expect(fetchMock).toHaveBeenCalledWith("/data/airports/KRDU/procedure-details/index.json");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/data/airports/KRDU/procedure-details/KRDU-R05LY-RW05L.json",
+    );
     expect(entities.some((entity) => String(entity.id).endsWith("-line"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-tunnel-"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-fix-"))).toBe(true);
@@ -181,7 +326,7 @@ describe("useProcedureLayer", () => {
     setProceduresVisible(false);
     rerender();
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(entities.every((entity) => entity.show === false)).toBe(true);
   });
 
@@ -192,7 +337,7 @@ describe("useProcedureLayer", () => {
     setProcedureRouteVisible("KRDU-R05LY-R", false);
     rerender();
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(entities.every((entity) => entity.show === false)).toBe(true);
   });
 

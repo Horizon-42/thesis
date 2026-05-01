@@ -1,9 +1,5 @@
-import type {
-  ProcedureFeature,
-  ProcedureFeatureCollection,
-  ProcedureRouteProperties,
-  RunwayProperties,
-} from "../types/geojson-aviation";
+import type { ProcedureRouteViewModel } from "../data/procedureRoutes";
+import type { RunwayProperties } from "../types/geojson-aviation";
 
 const EARTH_RADIUS_M = 6_378_137;
 
@@ -46,13 +42,22 @@ export interface RunwayProfilePoint {
   zM: number;
 }
 
+export interface HorizontalPlateRoutePoint extends RunwayProfilePoint {
+  fixIdent: string;
+  role: string;
+}
+
 export interface HorizontalPlateRoute {
   routeId: string;
   procedureName: string;
   procedureFamily: string;
+  procedureIdent: string;
+  branchIdent: string;
+  transitionIdent: string | null;
   branchType: string;
+  defaultVisible: boolean;
   halfWidthM: number;
-  points: RunwayProfilePoint[];
+  points: HorizontalPlateRoutePoint[];
 }
 
 export interface RunwayReferenceMark {
@@ -216,21 +221,11 @@ function findRunwaySurfaceFeature(
   return feature;
 }
 
-function isProcedureRouteFeature(feature: ProcedureFeature): feature is ProcedureFeature & {
-  geometry: { type: "LineString"; coordinates: Array<[number, number, number]> };
-  properties: ProcedureRouteProperties;
-} {
-  return (
-    feature.geometry.type === "LineString" &&
-    feature.properties.featureType === "procedure-route"
-  );
-}
-
 function isSelectedRnavRunwayFeature(
-  props: { runwayIdent?: string | null; runway?: string | null; procedureFamily?: string; branchType?: string },
+  props: { runwayIdent?: string | null; procedureFamily?: string; branchType?: string },
   runwayIdent: string,
 ): boolean {
-  if (normalizeRunwayIdent(props.runwayIdent ?? props.runway ?? "") !== runwayIdent) {
+  if (normalizeRunwayIdent(props.runwayIdent ?? "") !== runwayIdent) {
     return false;
   }
   if (!(props.procedureFamily ?? "UNKNOWN").toUpperCase().startsWith("RNAV")) {
@@ -277,63 +272,15 @@ function upsertReferenceMark(
   });
 }
 
-function preferredRouteAltitudeM(
-  coordsAltitudeM: number | undefined,
-  sample: ProcedureRouteProperties["samples"][number] | undefined,
-): number | null {
-  if (typeof coordsAltitudeM === "number" && Number.isFinite(coordsAltitudeM) && coordsAltitudeM > 0) {
-    return coordsAltitudeM;
-  }
-  const geometryAltitudeFt = sample?.geometryAltitudeFt;
-  if (typeof geometryAltitudeFt === "number" && Number.isFinite(geometryAltitudeFt) && geometryAltitudeFt > 0) {
-    return geometryAltitudeFt * 0.3048;
-  }
-  const altitudeFt = sample?.altitudeFt;
-  if (typeof altitudeFt === "number" && Number.isFinite(altitudeFt) && altitudeFt > 0) {
-    return altitudeFt * 0.3048;
-  }
-  return null;
-}
-
-function fillMissingAltitudes(altitudesM: Array<number | null>): number[] {
-  const known = altitudesM
-    .map((altitudeM, index) => ({ altitudeM, index }))
-    .filter((entry): entry is { altitudeM: number; index: number } => entry.altitudeM !== null);
-
-  if (known.length === 0) {
-    return altitudesM.map(() => 0);
-  }
-
-  return altitudesM.map((altitudeM, index) => {
-    if (altitudeM !== null) return altitudeM;
-
-    const previous = [...known].reverse().find((entry) => entry.index < index);
-    const next = known.find((entry) => entry.index > index);
-
-    if (previous && next) {
-      const ratio = (index - previous.index) / (next.index - previous.index);
-      return previous.altitudeM + (next.altitudeM - previous.altitudeM) * ratio;
-    }
-    return previous?.altitudeM ?? next?.altitudeM ?? 0;
-  });
-}
-
 function buildProjectedRoutePoints(
-  feature: ProcedureFeature & {
-    geometry: { type: "LineString"; coordinates: Array<[number, number, number]> };
-    properties: ProcedureRouteProperties;
-  },
+  route: ProcedureRouteViewModel,
   frame: RunwayFrame,
-): RunwayProfilePoint[] {
-  const preferredAltitudesM = fillMissingAltitudes(
-    feature.geometry.coordinates.map((coords, index) =>
-      preferredRouteAltitudeM(coords[2], feature.properties.samples[index]),
-    ),
-  );
-
-  return feature.geometry.coordinates.map(([lon, lat], index) =>
-    projectPositionToRunwayFrame(frame, lon, lat, preferredAltitudesM[index]),
-  );
+): HorizontalPlateRoutePoint[] {
+  return route.points.map((point) => ({
+    ...projectPositionToRunwayFrame(frame, point.lon, point.lat, point.altM),
+    fixIdent: point.fixIdent,
+    role: point.role,
+  }));
 }
 
 function pointInsidePlateRoute(
@@ -425,51 +372,57 @@ export function projectPositionToRunwayFrame(
 }
 
 export function buildHorizontalPlateRoutes(
-  procedureCollection: ProcedureFeatureCollection,
+  procedureRoutes: ProcedureRouteViewModel[],
   frame: RunwayFrame,
   runwayIdent: string,
 ): HorizontalPlateRoute[] {
   const normalizedRunway = normalizeRunwayIdent(runwayIdent);
-  return procedureCollection.features
-    .filter(isProcedureRouteFeature)
-    .filter((feature) => isSelectedRnavRunwayFeature(feature.properties, normalizedRunway))
-    .map((feature) => ({
-      routeId: feature.properties.routeId,
-      procedureName: feature.properties.procedureName,
-      procedureFamily: feature.properties.procedureFamily ?? "UNKNOWN",
-      branchType: feature.properties.branchType ?? "final",
-      halfWidthM: (feature.properties.tunnel?.lateralHalfWidthNm ?? 0.3) * 1852,
-      points: buildProjectedRoutePoints(feature, frame),
+  return procedureRoutes
+    .filter((route) => isSelectedRnavRunwayFeature(route, normalizedRunway))
+    .map((route) => ({
+      routeId: route.routeId,
+      procedureName: route.procedureName,
+      procedureIdent: route.procedureIdent,
+      procedureFamily: route.procedureFamily ?? "UNKNOWN",
+      branchIdent: route.branchIdent,
+      transitionIdent: route.transitionIdent ?? null,
+      branchType: route.branchType ?? "final",
+      defaultVisible: route.defaultVisible,
+      halfWidthM: (route.tunnel?.lateralHalfWidthNm ?? 0.3) * 1852,
+      points: buildProjectedRoutePoints(route, frame),
     }))
     .filter((route) => route.points.length >= 2);
 }
 
 export function buildRunwayReferenceMarks(
-  procedureCollection: ProcedureFeatureCollection,
+  procedureRoutes: ProcedureRouteViewModel[],
   frame: RunwayFrame,
+  runwayIdent: string,
+): RunwayReferenceMark[] {
+  const plateRoutes = buildHorizontalPlateRoutes(procedureRoutes, frame, runwayIdent);
+
+  return buildRunwayReferenceMarksFromPlateRoutes(plateRoutes, runwayIdent);
+}
+
+export function buildRunwayReferenceMarksFromPlateRoutes(
+  plateRoutes: HorizontalPlateRoute[],
   runwayIdent: string,
 ): RunwayReferenceMark[] {
   const normalizedRunway = normalizeRunwayIdent(runwayIdent);
   const marksByKey = new Map<string, RunwayReferenceMark>();
 
-  procedureCollection.features
-    .filter(isProcedureRouteFeature)
-    .filter((feature) => isSelectedRnavRunwayFeature(feature.properties, normalizedRunway))
-    .forEach((feature) => {
-      const projectedPoints = buildProjectedRoutePoints(feature, frame);
-      feature.properties.samples.forEach((sample, index) => {
-        const projected = projectedPoints[index];
-        if (!projected) return;
-        upsertReferenceMark(marksByKey, {
-          xM: projected.xM,
-          yM: projected.yM,
-          zM: projected.zM,
-          label: sample.fixIdent,
-          detail: sample.role,
-          priority: priorityForFixRole(sample.role, feature.properties.branchType),
-        });
+  plateRoutes.forEach((route) => {
+    route.points.forEach((sample) => {
+      upsertReferenceMark(marksByKey, {
+        xM: sample.xM,
+        yM: sample.yM,
+        zM: sample.zM,
+        label: sample.fixIdent,
+        detail: sample.role,
+        priority: priorityForFixRole(sample.role, route.branchType),
       });
     });
+  });
 
   const thresholdKey = `${normalizedRunway}|Threshold|0`;
   if (!marksByKey.has(thresholdKey)) {

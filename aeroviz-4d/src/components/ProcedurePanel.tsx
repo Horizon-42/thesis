@@ -1,11 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "../context/AppContext";
-import { airportDataUrl } from "../data/airportData";
-import type {
-  ProcedureFeatureCollection,
-  ProcedureRouteProperties,
-} from "../types/geojson-aviation";
-import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
+import { loadProcedureRouteData, type ProcedureRouteViewModel } from "../data/procedureRoutes";
+import { isMissingJsonAsset } from "../utils/fetchJson";
 import { navigateWithinApp } from "../utils/navigation";
 
 const RUNWAY_ORDER = ["RW05L", "RW05R", "RW23L", "RW23R", "RW32"];
@@ -45,17 +41,17 @@ function routeIsVisible(
   return procedureVisibility[route.routeId] ?? route.defaultVisible;
 }
 
-function asRouteItem(props: ProcedureRouteProperties): ProcedureRouteItem {
+function asRouteItem(route: ProcedureRouteViewModel): ProcedureRouteItem {
   return {
-    routeId: props.routeId,
-    runwayIdent: props.runwayIdent ?? props.runway ?? "Unassigned",
-    procedureIdent: props.procedureIdent,
-    procedureName: props.procedureName,
-    procedureFamily: props.procedureFamily ?? "UNKNOWN",
-    branchIdent: props.branchIdent ?? props.branch,
-    branchType: props.branchType ?? "final",
-    defaultVisible: props.defaultVisible ?? true,
-    warnings: props.warnings ?? [],
+    routeId: route.routeId,
+    runwayIdent: route.runwayIdent ?? "Unassigned",
+    procedureIdent: route.procedureIdent,
+    procedureName: route.procedureName,
+    procedureFamily: route.procedureFamily ?? "UNKNOWN",
+    branchIdent: route.branchIdent,
+    branchType: route.branchType ?? "final",
+    defaultVisible: route.defaultVisible,
+    warnings: route.warnings ?? [],
   };
 }
 
@@ -126,20 +122,15 @@ export default function ProcedurePanel() {
     }
 
     let cancelled = false;
-    const proceduresUrl = airportDataUrl(activeAirportCode, "procedures.geojson");
     setLoadError(null);
-    fetchJson<ProcedureFeatureCollection>(proceduresUrl)
-      .then((geojson) => {
+    loadProcedureRouteData(activeAirportCode)
+      .then(({ index, routes: loadedRoutes }) => {
         if (cancelled) return;
-        const routeItems = geojson.features
-          .filter((feature) => feature.properties.featureType === "procedure-route")
-          .map((feature) => asRouteItem(feature.properties as ProcedureRouteProperties));
+        const routeItems = loadedRoutes.map(asRouteItem);
 
         setRoutes(routeItems);
-        const cycle = geojson.metadata?.sourceCycle;
-        setSourceCycle(typeof cycle === "string" ? cycle : null);
-        const airport = geojson.metadata?.airport;
-        setSourceAirport(typeof airport === "string" ? airport : activeAirportCode);
+        setSourceCycle(index.sourceCycle ?? null);
+        setSourceAirport(index.airport || activeAirportCode);
         const firstRunway = buildGroups(routeItems)[0]?.runwayIdent;
         setExpandedRunways(firstRunway ? new Set([firstRunway]) : new Set());
       })
@@ -151,7 +142,7 @@ export default function ProcedurePanel() {
         setSourceAirport(activeAirportCode);
         setExpandedRunways(new Set());
         if (isMissingJsonAsset(error)) {
-          setLoadError(`No procedures.geojson for ${activeAirportCode}`);
+          setLoadError(`No procedure-details data for ${activeAirportCode}`);
         } else {
           setLoadError(error instanceof Error ? error.message : String(error));
         }

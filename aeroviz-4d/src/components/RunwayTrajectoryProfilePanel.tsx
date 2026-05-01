@@ -94,6 +94,13 @@ function formatMeters(value: number): string {
   return `${Math.round(value).toLocaleString()} m`;
 }
 
+function routeLabel(route: HorizontalPlateRoute): string {
+  if (route.branchType.toLowerCase() === "transition") {
+    return `${route.transitionIdent ?? route.branchIdent} transition`;
+  }
+  return `${route.procedureName} final`;
+}
+
 function niceTickStep(span: number, targetTickCount: number): number {
   const rough = Math.max(1, span / Math.max(1, targetTickCount));
   const power = 10 ** Math.floor(Math.log10(rough));
@@ -173,9 +180,21 @@ function ProfilePlot({
   const marginBottom = 126;
   const plotWidth = width - marginLeft - marginRight;
   const plotHeight = height - marginTop - marginBottom;
+  const displayedPlateRoutes = useMemo(
+    () => {
+      if (mode !== "side") return plateRoutes;
+      const selectedTransitions = plateRoutes.filter(
+        (route) => route.branchType.toLowerCase() === "transition",
+      );
+      return selectedTransitions.length > 0
+        ? selectedTransitions
+        : plateRoutes.filter((route) => route.branchType.toLowerCase() === "final");
+    },
+    [mode, plateRoutes],
+  );
   const domain = useMemo(
-    () => collectViewDomain(mode, tracks, plateRoutes, referenceMarks),
-    [mode, plateRoutes, referenceMarks, tracks],
+    () => collectViewDomain(mode, tracks, displayedPlateRoutes, referenceMarks),
+    [displayedPlateRoutes, mode, referenceMarks, tracks],
   );
 
   const xSpan = Math.max(1, domain.maxX - domain.minX);
@@ -339,7 +358,7 @@ function ProfilePlot({
           );
         })}
 
-        {plateRoutes.map((route) => {
+        {displayedPlateRoutes.map((route) => {
           const d = plotPointPath(
             route.points,
             domain,
@@ -350,6 +369,10 @@ function ProfilePlot({
             mode,
           );
           const bandWidth = mode === "top" ? Math.max(2, route.halfWidthM * yScale * 2) : 2;
+          const labelPoint = route.points[Math.max(0, Math.floor((route.points.length - 1) / 2))];
+          const labelX = labelPoint ? plotX(labelPoint.xM) : 0;
+          const labelY = labelPoint ? plotY(mode === "side" ? labelPoint.zM : labelPoint.yM) : 0;
+          const isTransition = route.branchType.toLowerCase() === "transition";
           return (
             <g key={`${mode}-${route.routeId}`}>
               {mode === "top" ? (
@@ -359,7 +382,21 @@ function ProfilePlot({
                   style={{ strokeWidth: bandWidth }}
                 />
               ) : null}
-              <path d={d} className="runway-profile-route-line" />
+              <path
+                d={d}
+                className={`runway-profile-route-line ${
+                  isTransition ? "is-transition" : "is-final"
+                }`}
+              />
+              {mode === "top" && isTransition ? (
+                <text
+                  x={labelX + 7}
+                  y={labelY - 7}
+                  className="runway-profile-route-label is-transition"
+                >
+                  {routeLabel(route)}
+                </text>
+              ) : null}
             </g>
           );
         })}
@@ -490,7 +527,7 @@ export default function RunwayTrajectoryProfilePanel() {
       </header>
 
       <div className="runway-profile-summary">
-        <span>{routeCount} RNAV branches in plate</span>
+        <span>{routeCount} active RNAV branches in plate</span>
         <span>{trackCount} aircraft currently inside plate</span>
         <span>{trajectoryDataSource ? "CZML linked" : "CZML missing"}</span>
       </div>
@@ -522,7 +559,7 @@ export default function RunwayTrajectoryProfilePanel() {
           {runwayProfileViewMode !== "top-xy" ? (
             <ProfilePlot
               title="Side view"
-              subtitle="Dynamic x-z projection driven by simulation time"
+              subtitle="Runway-aligned x-z profile: follows the active procedure branch selected in the 3D procedure panel"
               mode="side"
               tracks={profile.aircraftTracks}
               plateRoutes={profile.plateRoutes}
@@ -532,7 +569,7 @@ export default function RunwayTrajectoryProfilePanel() {
           {runwayProfileViewMode !== "side-xz" ? (
             <ProfilePlot
               title="Top view"
-              subtitle="Dynamic x-y projection with RNAV horizontal plate and centerline"
+              subtitle="Runway-centered x-y plate: shows active procedure branches selected in the 3D procedure panel"
               mode="top"
               tracks={profile.aircraftTracks}
               plateRoutes={profile.plateRoutes}
