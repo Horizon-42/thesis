@@ -51,7 +51,6 @@ export type LayerKey =
   | "procedures";
 
 export type RunwayProfileViewMode = "split" | "side-xz" | "top-xy";
-export type ProcedureVisualizationMode = "legacy" | "protected";
 
 // ── Context shape ────────────────────────────────────────────────────────────
 interface AppState {
@@ -81,12 +80,10 @@ interface AppState {
   layers: Record<LayerKey, boolean>;
   toggleLayer: (key: LayerKey) => void;
 
-  /** Per-route visibility for CIFP procedure features */
+  /** Per-branch visibility for v3 procedure features */
   procedureVisibility: Record<string, boolean>;
-  setProcedureRouteVisible: (routeId: string, visible: boolean) => void;
-  setProcedureRoutesVisible: (routeIds: string[], visible: boolean) => void;
-  procedureVisualizationMode: ProcedureVisualizationMode;
-  setProcedureVisualizationMode: (mode: ProcedureVisualizationMode) => void;
+  setProcedureBranchVisible: (branchId: string, visible: boolean) => void;
+  setProcedureBranchesVisible: (branchIds: string[], visible: boolean) => void;
 
   /** Current Cesium clock multiplier (mirrors viewer.clock.multiplier) */
   playbackSpeed: number;
@@ -123,8 +120,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [isRunwayProfileOpen, setRunwayProfileOpen] = useState(false);
   const [runwayProfileViewMode, setRunwayProfileViewMode] =
     useState<RunwayProfileViewMode>("split");
-  const [procedureVisualizationMode, setProcedureVisualizationMode] =
-    useState<ProcedureVisualizationMode>("legacy");
 
   // All layers start visible; hooks respect these flags.
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
@@ -181,15 +176,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setLayers((prev) => ({ ...prev, [key]: !prev[key] }));
   }, []);
 
-  const setProcedureRouteVisible = useCallback((routeId: string, visible: boolean) => {
-    setProcedureVisibility((prev) => ({ ...prev, [routeId]: visible }));
+  const setProcedureBranchVisible = useCallback((branchId: string, visible: boolean) => {
+    setProcedureVisibility((prev) => ({ ...prev, [branchId]: visible }));
   }, []);
 
-  const setProcedureRoutesVisible = useCallback((routeIds: string[], visible: boolean) => {
+  const setProcedureBranchesVisible = useCallback((branchIds: string[], visible: boolean) => {
     setProcedureVisibility((prev) => {
       const next = { ...prev };
-      routeIds.forEach((routeId) => {
-        next[routeId] = visible;
+      branchIds.forEach((branchId) => {
+        next[branchId] = visible;
       });
       return next;
     });
@@ -231,10 +226,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         layers,
         toggleLayer,
         procedureVisibility,
-        setProcedureRouteVisible,
-        setProcedureRoutesVisible,
-        procedureVisualizationMode,
-        setProcedureVisualizationMode,
+        setProcedureBranchVisible,
+        setProcedureBranchesVisible,
         playbackSpeed,
         setPlaybackSpeed,
         selectedProfileRunwayIdent,

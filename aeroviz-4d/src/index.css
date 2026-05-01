@@ -248,8 +248,7 @@ body,
 .control-panel button:hover  { background: #3a4f78; }
 .control-panel button.active { background: #1a5fb4; color: #fff; border-color: #4a8fe8; }
 
-.speed-buttons,
-.procedure-mode-buttons {
+.speed-buttons {
   display: flex;
   gap: 4px;
   flex-wrap: wrap;

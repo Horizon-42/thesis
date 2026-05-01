@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "../context/AppContext";
-import { loadProcedureRouteData, type ProcedureRouteViewModel } from "../data/procedureRoutes";
+import {
+  loadProcedureRenderBundleData,
+  type ProcedureRenderBundleData,
+} from "../data/procedureRenderBundle";
 import { isMissingJsonAsset } from "../utils/fetchJson";
 import { navigateWithinApp } from "../utils/navigation";
 
 const RUNWAY_ORDER = ["RW05L", "RW05R", "RW23L", "RW23R", "RW32"];
 
-interface ProcedureRouteItem {
-  routeId: string;
+interface ProcedureBranchItem {
+  branchId: string;
   runwayIdent: string;
   procedureIdent: string;
   procedureName: string;
@@ -21,7 +24,7 @@ interface ProcedureRouteItem {
 interface ProcedureGroup {
   procedureIdent: string;
   procedureName: string;
-  routes: ProcedureRouteItem[];
+  branches: ProcedureBranchItem[];
 }
 
 interface RunwayGroup {
@@ -29,37 +32,56 @@ interface RunwayGroup {
   procedures: ProcedureGroup[];
 }
 
-function routeSortKey(route: ProcedureRouteItem): string {
-  const branchRank = route.branchType === "final" ? "0" : "1";
-  return `${branchRank}-${route.branchIdent}`;
+function branchSortKey(branch: ProcedureBranchItem): string {
+  const branchRank = branch.branchType === "STRAIGHT_IN" ? "0" : "1";
+  return `${branchRank}-${branch.branchIdent}`;
 }
 
-function routeIsVisible(
-  route: ProcedureRouteItem,
+function branchIsVisible(
+  branch: ProcedureBranchItem,
   procedureVisibility: Record<string, boolean>,
 ): boolean {
-  return procedureVisibility[route.routeId] ?? route.defaultVisible;
+  return procedureVisibility[branch.branchId] ?? branch.defaultVisible;
 }
 
-function asRouteItem(route: ProcedureRouteViewModel): ProcedureRouteItem {
-  return {
-    routeId: route.routeId,
-    runwayIdent: route.runwayIdent ?? "Unassigned",
-    procedureIdent: route.procedureIdent,
-    procedureName: route.procedureName,
-    procedureFamily: route.procedureFamily ?? "UNKNOWN",
-    branchIdent: route.branchIdent,
-    branchType: route.branchType ?? "final",
-    defaultVisible: route.defaultVisible,
-    warnings: route.warnings ?? [],
-  };
+function diagnosticMessages(data: ProcedureRenderBundleData, branchId: string): string[] {
+  const renderBundle = data.renderBundles.find((bundle) =>
+    bundle.branchBundles.some((branch) => branch.branchId === branchId),
+  );
+  const branchBundle = renderBundle?.branchBundles.find((branch) => branch.branchId === branchId);
+  const sourceWarnings =
+    data.documents
+      .flatMap((document) => document.branches)
+      .find((branch) => branch.branchId === branchId)
+      ?.warnings ?? [];
+  const geometryWarnings =
+    branchBundle?.segmentBundles.flatMap((segment) =>
+      segment.diagnostics.map((diagnostic) => diagnostic.message),
+    ) ?? [];
+  return [...sourceWarnings, ...geometryWarnings];
 }
 
-function buildGroups(routes: ProcedureRouteItem[]): RunwayGroup[] {
-  const byRunway = new Map<string, ProcedureRouteItem[]>();
-  routes.forEach((route) => {
-    const existing = byRunway.get(route.runwayIdent) ?? [];
-    byRunway.set(route.runwayIdent, [...existing, route]);
+function branchItemsFromRenderData(data: ProcedureRenderBundleData): ProcedureBranchItem[] {
+  return data.packages.flatMap((pkg) =>
+    pkg.branches.map((branch) => ({
+      branchId: branch.branchId,
+      runwayIdent: branch.runwayId ?? "Unassigned",
+      procedureIdent: pkg.procedureId,
+      procedureName: pkg.procedureName,
+      procedureFamily: pkg.procedureFamily,
+      branchIdent: branch.legacy.branchIdent,
+      branchType: branch.branchRole,
+      defaultVisible: branch.legacy.defaultVisible,
+      warnings: diagnosticMessages(data, branch.branchId),
+    })),
+  );
+}
+
+function buildGroups(branches: ProcedureBranchItem[]): RunwayGroup[] {
+  const byRunway = new Map<string, ProcedureBranchItem[]>();
+  branches.forEach((branch) => {
+    const existing = byRunway.get(branch.runwayIdent) ?? [];
+    byRunway.set(branch.runwayIdent, [...existing, branch]);
   });
 
   return [...byRunway.entries()]
@@ -68,23 +90,23 @@ function buildGroups(routes: ProcedureRouteItem[]): RunwayGroup[] {
       const rightIndex = RUNWAY_ORDER.indexOf(right);
       return (leftIndex < 0 ? 999 : leftIndex) - (rightIndex < 0 ? 999 : rightIndex);
     })
-    .map(([runwayIdent, runwayRoutes]) => {
-      const byProcedure = new Map<string, ProcedureRouteItem[]>();
-      runwayRoutes.forEach((route) => {
-        const existing = byProcedure.get(route.procedureIdent) ?? [];
-        byProcedure.set(route.procedureIdent, [...existing, route]);
+    .map(([runwayIdent, runwayBranches]) => {
+      const byProcedure = new Map<string, ProcedureBranchItem[]>();
+      runwayBranches.forEach((branch) => {
+        const existing = byProcedure.get(branch.procedureIdent) ?? [];
+        byProcedure.set(branch.procedureIdent, [...existing, branch]);
       });
 
       const procedures = [...byProcedure.entries()]
         .sort(([left], [right]) => left.localeCompare(right))
-        .map(([procedureIdent, procedureRoutes]) => {
-          const sortedRoutes = [...procedureRoutes].sort((a, b) =>
-            routeSortKey(a).localeCompare(routeSortKey(b)),
+        .map(([procedureIdent, procedureBranches]) => {
+          const sortedBranches = [...procedureBranches].sort((a, b) =>
+            branchSortKey(a).localeCompare(branchSortKey(b)),
           );
           return {
             procedureIdent,
-            procedureName: sortedRoutes[0]?.procedureName ?? procedureIdent,
-            routes: sortedRoutes,
+            procedureName: sortedBranches[0]?.procedureName ?? procedureIdent,
+            branches: sortedBranches,
           };
         });
 
@@ -97,15 +119,15 @@ export default function ProcedurePanel() {
     layers,
     toggleLayer,
     procedureVisibility,
-    setProcedureRouteVisible,
-    setProcedureRoutesVisible,
+    setProcedureBranchVisible,
+    setProcedureBranchesVisible,
     activeAirportCode,
     selectedProfileRunwayIdent,
     setSelectedProfileRunwayIdent,
     isRunwayProfileOpen,
     setRunwayProfileOpen,
   } = useApp();
-  const [routes, setRoutes] = useState<ProcedureRouteItem[]>([]);
+  const [branches, setBranches] = useState<ProcedureBranchItem[]>([]);
   const [sourceCycle, setSourceCycle] = useState<string | null>(null);
   const [sourceAirport, setSourceAirport] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -113,7 +135,7 @@ export default function ProcedurePanel() {
 
   useEffect(() => {
     if (!activeAirportCode) {
-      setRoutes([]);
+      setBranches([]);
       setSourceCycle(null);
       setSourceAirport(null);
       setLoadError(null);
@@ -123,21 +145,21 @@ export default function ProcedurePanel() {
 
     let cancelled = false;
     setLoadError(null);
-    loadProcedureRouteData(activeAirportCode)
-      .then(({ index, routes: loadedRoutes }) => {
+    loadProcedureRenderBundleData(activeAirportCode)
+      .then((data) => {
         if (cancelled) return;
-        const routeItems = loadedRoutes.map(asRouteItem);
+        const branchItems = branchItemsFromRenderData(data);
 
-        setRoutes(routeItems);
-        setSourceCycle(index.sourceCycle ?? null);
-        setSourceAirport(index.airport || activeAirportCode);
-        const firstRunway = buildGroups(routeItems)[0]?.runwayIdent;
+        setBranches(branchItems);
+        setSourceCycle(data.index.sourceCycle ?? null);
+        setSourceAirport(data.index.airport || activeAirportCode);
+        const firstRunway = buildGroups(branchItems)[0]?.runwayIdent;
         setExpandedRunways(firstRunway ? new Set([firstRunway]) : new Set());
       })
       .catch((error) => {
         if (cancelled) return;
 
-        setRoutes([]);
+        setBranches([]);
         setSourceCycle(null);
         setSourceAirport(activeAirportCode);
         setExpandedRunways(new Set());
@@ -153,12 +175,12 @@ export default function ProcedurePanel() {
     };
   }, [activeAirportCode]);
 
-  const groups = useMemo(() => buildGroups(routes), [routes]);
-  const totalWarnings = routes.reduce((sum, route) => sum + route.warnings.length, 0);
+  const groups = useMemo(() => buildGroups(branches), [branches]);
+  const totalWarnings = branches.reduce((sum, branch) => sum + branch.warnings.length, 0);
 
-  const setRoutesVisible = (targetRoutes: ProcedureRouteItem[], visible: boolean) => {
-    setProcedureRoutesVisible(
-      targetRoutes.map((route) => route.routeId),
+  const setBranchesVisible = (targetBranches: ProcedureBranchItem[], visible: boolean) => {
+    setProcedureBranchesVisible(
+      targetBranches.map((branch) => branch.branchId),
       visible,
     );
   };
@@ -201,16 +223,16 @@ export default function ProcedurePanel() {
       {loadError ? <p className="procedure-panel-error">{loadError}</p> : null}
 
       <div className="procedure-panel-summary">
-        <span>{routes.length} branches</span>
+        <span>{branches.length} branches</span>
         <span>{groups.length} runways</span>
         <span>{totalWarnings} warnings</span>
       </div>
 
       <div className="procedure-runway-list">
         {groups.map((group) => {
-          const runwayRoutes = group.procedures.flatMap((procedure) => procedure.routes);
-          const runwayVisible = runwayRoutes.every((route) =>
-            routeIsVisible(route, procedureVisibility),
+          const runwayBranches = group.procedures.flatMap((procedure) => procedure.branches);
+          const runwayVisible = runwayBranches.every((branch) =>
+            branchIsVisible(branch, procedureVisibility),
           );
           const isExpanded = expandedRunways.has(group.runwayIdent);
 
@@ -241,7 +263,7 @@ export default function ProcedurePanel() {
                   <input
                     type="checkbox"
                     checked={runwayVisible}
-                    onChange={() => setRoutesVisible(runwayRoutes, !runwayVisible)}
+                    onChange={() => setBranchesVisible(runwayBranches, !runwayVisible)}
                   />
                   {group.runwayIdent}
                 </label>
@@ -250,11 +272,11 @@ export default function ProcedurePanel() {
               {isExpanded ? (
                 <div className="procedure-list">
                   {group.procedures.map((procedure) => {
-                    const procedureVisible = procedure.routes.every((route) =>
-                      routeIsVisible(route, procedureVisibility),
+                    const procedureVisible = procedure.branches.every((branch) =>
+                      branchIsVisible(branch, procedureVisibility),
                     );
-                    const warningCount = procedure.routes.reduce(
-                      (sum, route) => sum + route.warnings.length,
+                    const warningCount = procedure.branches.reduce(
+                      (sum, branch) => sum + branch.warnings.length,
                       0,
                     );
 
@@ -264,7 +286,7 @@ export default function ProcedurePanel() {
                           <input
                             type="checkbox"
                             checked={procedureVisible}
-                            onChange={() => setRoutesVisible(procedure.routes, !procedureVisible)}
+                            onChange={() => setBranchesVisible(procedure.branches, !procedureVisible)}
                           />
                           <span>{procedure.procedureName}</span>
                           {warningCount > 0 ? (
@@ -273,17 +295,17 @@ export default function ProcedurePanel() {
                         </label>
 
                         <div className="procedure-branch-list">
-                          {procedure.routes.map((route) => (
-                            <label key={route.routeId}>
+                          {procedure.branches.map((branch) => (
+                            <label key={branch.branchId}>
                               <input
                                 type="checkbox"
-                                checked={routeIsVisible(route, procedureVisibility)}
+                                checked={branchIsVisible(branch, procedureVisibility)}
                                 onChange={(event) =>
-                                  setProcedureRouteVisible(route.routeId, event.target.checked)
+                                  setProcedureBranchVisible(branch.branchId, event.target.checked)
                                 }
                               />
-                              <span>{route.branchType}</span>
-                              <code>{route.branchIdent}</code>
+                              <span>{branch.branchType}</span>
+                              <code>{branch.branchIdent}</code>
                             </label>
                           ))}
                         </div>

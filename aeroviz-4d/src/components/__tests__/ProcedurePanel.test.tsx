@@ -13,8 +13,8 @@ const {
   fetchMock,
   navigateWithinApp,
   toggleLayer,
-  setProcedureRouteVisible,
-  setProcedureRoutesVisible,
+  setProcedureBranchVisible,
+  setProcedureBranchesVisible,
   getProcedureVisibility,
   setSelectedProfileRunwayIdent,
   setRunwayProfileOpen,
@@ -28,13 +28,13 @@ const {
     fetchMock: vi.fn(),
     navigateWithinApp: vi.fn(),
     toggleLayer: vi.fn(),
-    setProcedureRouteVisible: vi.fn((routeId: string, visible: boolean) => {
-      procedureVisibility = { ...procedureVisibility, [routeId]: visible };
+    setProcedureBranchVisible: vi.fn((branchId: string, visible: boolean) => {
+      procedureVisibility = { ...procedureVisibility, [branchId]: visible };
     }),
-    setProcedureRoutesVisible: vi.fn((routeIds: string[], visible: boolean) => {
+    setProcedureBranchesVisible: vi.fn((branchIds: string[], visible: boolean) => {
       const next = { ...procedureVisibility };
-      routeIds.forEach((routeId) => {
-        next[routeId] = visible;
+      branchIds.forEach((branchId) => {
+        next[branchId] = visible;
       });
       procedureVisibility = next;
     }),
@@ -56,8 +56,8 @@ vi.mock("../../context/AppContext", () => ({
     activeAirportCode: "KRDU",
     toggleLayer,
     procedureVisibility: getProcedureVisibility(),
-    setProcedureRouteVisible,
-    setProcedureRoutesVisible,
+    setProcedureBranchVisible,
+    setProcedureBranchesVisible,
     selectedProfileRunwayIdent: getSelectedProfileRunwayIdent(),
     setSelectedProfileRunwayIdent,
     isRunwayProfileOpen: getRunwayProfileOpen(),
@@ -262,8 +262,8 @@ describe("ProcedurePanel", () => {
   beforeEach(() => {
     fetchMock.mockReset();
     toggleLayer.mockClear();
-    setProcedureRouteVisible.mockClear();
-    setProcedureRoutesVisible.mockClear();
+    setProcedureBranchVisible.mockClear();
+    setProcedureBranchesVisible.mockClear();
     setSelectedProfileRunwayIdent.mockClear();
     setRunwayProfileOpen.mockClear();
     navigateWithinApp.mockClear();
@@ -283,7 +283,7 @@ describe("ProcedurePanel", () => {
     vi.unstubAllGlobals();
   });
 
-  it("groups procedure routes by runway and exposes branch toggles", async () => {
+  it("groups procedure branches by runway and exposes branch toggles", async () => {
     render(<ProcedurePanel />);
 
     await waitFor(() => expect(screen.getByText("RW05L")).toBeTruthy());
@@ -292,7 +292,7 @@ describe("ProcedurePanel", () => {
     expect(screen.getByText("KRDU CIFP 2603")).toBeTruthy();
     expect(screen.getByText("3 branches")).toBeTruthy();
     expect(screen.getByText("2 runways")).toBeTruthy();
-    expect(screen.getByText("1 warnings")).toBeTruthy();
+    expect(screen.getByText("5 warnings")).toBeTruthy();
     expect(screen.getByText("RNAV(GPS) Y RW05L")).toBeTruthy();
     expect(screen.getByText("AOTTOS")).toBeTruthy();
   });
@@ -310,7 +310,7 @@ describe("ProcedurePanel", () => {
 
     fireEvent.click(checkbox as HTMLInputElement);
 
-    expect(setProcedureRouteVisible).toHaveBeenCalledWith("KRDU-R05LY-AOTTOS", true);
+    expect(setProcedureBranchVisible).toHaveBeenCalledWith("branch:AOTTOS", true);
   });
 
   it("opens the runway trajectory profile for a runway group", async () => {

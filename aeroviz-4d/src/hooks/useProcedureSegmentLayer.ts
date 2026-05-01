@@ -244,15 +244,15 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
   const { viewer, layers, procedureVisibility, activeAirportCode } = useApp();
   const visibleRef = useRef(layers.procedures);
   const procedureVisibilityRef = useRef(procedureVisibility);
-  const routeEntityIdsRef = useRef<Record<string, string[]>>({});
+  const branchEntityIdsRef = useRef<Record<string, string[]>>({});
 
   useEffect(() => {
     visibleRef.current = layers.procedures;
     procedureVisibilityRef.current = procedureVisibility;
 
     if (!enabled || !isCesiumViewerUsable(viewer)) return;
-    Object.entries(routeEntityIdsRef.current).forEach(([routeId, entityIds]) => {
-      const branchVisible = procedureVisibility[routeId] ?? true;
+    Object.entries(branchEntityIdsRef.current).forEach(([branchId, entityIds]) => {
+      const branchVisible = procedureVisibility[branchId] ?? true;
       entityIds.forEach((entityId) => {
         const entity = viewer.entities.getById(entityId);
         if (entity) entity.show = layers.procedures && branchVisible;
@@ -266,12 +266,12 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
 
     let cancelled = false;
     const addedIds: string[] = [];
-    routeEntityIdsRef.current = {};
+    branchEntityIdsRef.current = {};
 
-    const addRouteEntityIds = (routeId: string, entityIds: string[]) => {
+    const addBranchEntityIds = (branchId: string, entityIds: string[]) => {
       addedIds.push(...entityIds);
-      const existing = routeEntityIdsRef.current[routeId] ?? [];
-      routeEntityIdsRef.current[routeId] = [...existing, ...entityIds];
+      const existing = branchEntityIdsRef.current[branchId] ?? [];
+      branchEntityIdsRef.current[branchId] = [...existing, ...entityIds];
     };
 
     loadProcedureRenderBundleData(activeAirportCode)
@@ -280,10 +280,10 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
 
         renderBundles.forEach((bundle) => {
           bundle.branchBundles.forEach((branchBundle) => {
-            const visible = visibleRef.current && (procedureVisibilityRef.current[branchBundle.routeId] ?? true);
+            const visible = visibleRef.current && (procedureVisibilityRef.current[branchBundle.branchId] ?? true);
             branchBundle.segmentBundles.forEach((segmentBundle) => {
-              addRouteEntityIds(
-                branchBundle.routeId,
+              addBranchEntityIds(
+                branchBundle.branchId,
                 addSegmentEntities(viewer, bundle, segmentBundle, visible),
               );
             });
@@ -306,7 +306,7 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
       if (isCesiumViewerUsable(viewer)) {
         addedIds.forEach((id) => viewer.entities.removeById(id));
       }
-      routeEntityIdsRef.current = {};
+      branchEntityIdsRef.current = {};
     };
   }, [enabled, viewer, activeAirportCode]);
 }

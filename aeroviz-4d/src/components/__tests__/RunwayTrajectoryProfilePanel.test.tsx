@@ -25,6 +25,7 @@ vi.mock("../../context/AppContext", () => ({
 
 const closeXRoute = {
   routeId: "KRDU-R23RY-ABUTTS",
+  branchId: "branch:ABUTTS",
   procedureName: "RNAV(GPS) Y RWY 23R",
   procedureFamily: "RNAV_GPS",
   procedureIdent: "R23RY",
@@ -44,6 +45,7 @@ const closeXRoute = {
 const shorterRoute = {
   ...closeXRoute,
   routeId: "KRDU-R23RY-DABKE",
+  branchId: "branch:DABKE",
   points: [
     { xM: 20500, yM: 0, zM: 1200, fixIdent: "DABKE", role: "IF" },
     { xM: 0, yM: 0, zM: 0, fixIdent: "RW23R", role: "MAPt" },

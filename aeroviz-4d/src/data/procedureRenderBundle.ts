@@ -43,7 +43,6 @@ export interface ProcedureRenderBundleData {
 
 export interface BranchGeometryBundle {
   branchId: string;
-  routeId: string;
   branchName: string;
   branchRole: ProcedurePackageBranch["branchRole"];
   runwayId: string | null;
@@ -65,10 +64,6 @@ function isLnavFinal(segment: ProcedureSegment): boolean {
 
 function shouldBuildAlignedConnector(segment: ProcedureSegment): boolean {
   return segment.transitionRule?.kind === "INTERMEDIATE_TO_FINAL_LNAV";
-}
-
-function routeIdFor(pkg: ProcedurePackage, branch: ProcedurePackageBranch): string {
-  return `${pkg.airportId.toUpperCase()}-${pkg.procedureId.toUpperCase()}-${branch.legacy.branchKey.toUpperCase()}`;
 }
 
 export function buildProcedureRenderBundle(
@@ -124,7 +119,6 @@ export function buildProcedureRenderBundle(
 
     return {
       branchId: branch.branchId,
-      routeId: routeIdFor(pkg, branch),
       branchName: branch.branchName,
       branchRole: branch.branchRole,
       runwayId: branch.runwayId,

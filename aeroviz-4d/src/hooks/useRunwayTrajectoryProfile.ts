@@ -93,7 +93,7 @@ function routeIsActive(
   route: HorizontalPlateRoute,
   procedureVisibility: Record<string, boolean>,
 ): boolean {
-  return procedureVisibility[route.routeId] ?? route.defaultVisible;
+  return procedureVisibility[route.branchId] ?? route.defaultVisible;
 }
 
 export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {

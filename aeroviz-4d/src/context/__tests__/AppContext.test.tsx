@@ -61,7 +61,7 @@ describe("AppContext", () => {
       result.current.setViewer(viewer);
       result.current.setAirport({ code: "KRDU", lon: -78.7873, lat: 35.878659, height: 15000 });
       result.current.setSelectedFlightId("flight-1");
-      result.current.setProcedureRouteVisible("KRDU-R05LY-R", true);
+      result.current.setProcedureBranchVisible("branch:R", true);
       result.current.setPlaybackSpeed(120);
     });
 

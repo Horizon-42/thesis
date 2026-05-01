@@ -218,7 +218,6 @@ describe("procedure render bundle", () => {
 
     expect(bundle.packageId).toBe("KRDU-R05LY-RW05L");
     expect(bundle.branchBundles).toHaveLength(1);
-    expect(bundle.branchBundles[0].routeId).toBe("KRDU-R05LY-R");
     const segmentBundle = bundle.branchBundles[0].segmentBundles[0];
     expect(segmentBundle.segment.segmentId).toBe("segment:final");
     expect(segmentBundle.segmentGeometry.centerline.geoPositions.length).toBeGreaterThan(2);
