@@ -19,10 +19,12 @@ const SECONDARY_COLOR = Cesium.Color.YELLOW.withAlpha(0.1);
 const TURN_FILL_COLOR = Cesium.Color.ORANGE.withAlpha(0.22);
 const CONNECTOR_COLOR = Cesium.Color.ORANGE.withAlpha(0.32);
 const CONNECTOR_LINE_COLOR = Cesium.Color.ORANGE.withAlpha(0.92);
+const MISSED_SURFACE_COLOR = Cesium.Color.YELLOW.withAlpha(0.24);
 const OUTLINE_COLOR = Cesium.Color.CYAN.withAlpha(0.28);
 const ENVELOPE_HEIGHT_OFFSET_M = 8;
 const OEA_HEIGHT_OFFSET_M = 18;
 const CONNECTOR_HEIGHT_OFFSET_M = 45;
+const MISSED_SURFACE_HEIGHT_OFFSET_M = 58;
 
 function elevatedPoint(point: GeoPoint, altitudeOffsetM: number): GeoPoint {
   return { ...point, altM: point.altM + altitudeOffsetM };
@@ -265,6 +267,32 @@ function addSegmentEntities(
         CONNECTOR_HEIGHT_OFFSET_M,
       ),
     );
+  }
+
+  if (segmentBundle.missedSectionSurface) {
+    const missedPrimaryId = `${baseId}-missed-surface-primary`;
+    addRibbonPolygon(
+      viewer,
+      missedPrimaryId,
+      `${segmentName} missed section primary`,
+      segmentBundle.missedSectionSurface.primary,
+      visible,
+      MISSED_SURFACE_COLOR,
+      MISSED_SURFACE_HEIGHT_OFFSET_M,
+    );
+    ids.push(missedPrimaryId);
+
+    const missedSecondaryId = `${baseId}-missed-surface-secondary`;
+    addRibbonPolygon(
+      viewer,
+      missedSecondaryId,
+      `${segmentName} missed section secondary`,
+      segmentBundle.missedSectionSurface.secondaryOuter ?? undefined,
+      visible,
+      MISSED_SURFACE_COLOR,
+      MISSED_SURFACE_HEIGHT_OFFSET_M,
+    );
+    ids.push(missedSecondaryId);
   }
 
   return ids;

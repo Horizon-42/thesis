@@ -193,6 +193,12 @@ const renderBundleData = {
                 primary: ribbon,
                 secondaryOuter: ribbon,
               },
+              missedSectionSurface: {
+                segmentId: "segment:final",
+                surfaceType: "MISSED_SECTION1_ENVELOPE",
+                primary: ribbon,
+                secondaryOuter: ribbon,
+              },
             },
           ],
         },
@@ -224,6 +230,7 @@ describe("useProcedureSegmentLayer", () => {
     expect(entities.some((entity) => String(entity.id).includes("-oea-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-connector-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-connector-primary-boundary"))).toBe(true);
+    expect(entities.some((entity) => String(entity.id).includes("-missed-surface-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-turn-1-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes(":junction:"))).toBe(true);
   });

@@ -981,3 +981,34 @@
 
 ### Exact Next Recommended Step
 - Render `missedSectionSurface` in `useProcedureSegmentLayer` with distinct missed-approach styling and tests.
+
+## 2026-05-02 00:57 CEST
+
+### Goal Of This Session
+- Render missed section surface objects in the 3D protected-geometry layer.
+
+### Decisions Locked
+- `useProcedureSegmentLayer` now renders `missedSectionSurface.primary` and optional `secondaryOuter` as independent Cesium polygon entities.
+- Missed section surfaces use separate entity ids:
+  - `-missed-surface-primary`;
+  - `-missed-surface-secondary`.
+- Missed section surfaces are vertically offset above generic envelopes so they can be inspected as distinct protected-geometry objects.
+
+### Files Changed
+- `src/hooks/useProcedureSegmentLayer.ts`
+- `src/hooks/__tests__/useProcedureSegmentLayer.test.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/hooks/__tests__/useProcedureSegmentLayer.test.ts`
+- `npm run build`
+
+### Current Status
+- 3D protected mode can now render missed section surfaces independently from generic segment envelopes.
+
+### Known Blockers
+- Styling is still first-pass and not yet split by missed section 1 vs straight section 2 vs turning section 2.
+- Full FAA missed section surface geometry remains future work.
+
+### Exact Next Recommended Step
+- Add final targeted/full validation, then continue with CA course-to-altitude geometry design in the next phase.
