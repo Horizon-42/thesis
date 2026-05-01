@@ -638,3 +638,31 @@
 
 ### Exact Next Recommended Step
 - Refactor profile loading so one procedure-detail fetch builds both display routes and render bundles, then add vertical error/event markers for trajectory validation.
+
+## 2026-05-02 00:07 CEST
+
+### Goal Of This Session
+- Remove duplicated procedure-detail loading from the runway trajectory profile data path.
+
+### Decisions Locked
+- `useRunwayTrajectoryProfile` now loads `ProcedureRenderBundleData` once.
+- Display routes are rebuilt from `procedureRenderData.documents` with `buildProcedureRoutes(...)`.
+- Assessment segments continue to come from `procedureRenderData.renderBundles`.
+
+### Files Changed
+- `src/hooks/useRunwayTrajectoryProfile.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm run build`
+
+### Current Status
+- The profile has one procedure-detail/render-bundle fetch path instead of separate route and render-bundle loaders.
+- This keeps display routes and assessment geometry tied to the same document snapshot.
+
+### Known Blockers
+- Vertical validation metrics still need to be added to the segment assessment payload.
+- There is no hook-level test for the single-load behavior yet.
+
+### Exact Next Recommended Step
+- Add vertical error and event-marker fields to `HorizontalPlateSegmentAssessment`, then expose them in the selected aircraft summary.

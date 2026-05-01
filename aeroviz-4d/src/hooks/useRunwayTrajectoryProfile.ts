@@ -3,7 +3,7 @@ import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { airportDataUrl } from "../data/airportData";
 import { loadProcedureRenderBundleData } from "../data/procedureRenderBundle";
-import { loadProcedureRouteData } from "../data/procedureRoutes";
+import { buildProcedureRoutes } from "../data/procedureRoutes";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 import {
   attachRenderBundleAssessmentSegments,
@@ -151,16 +151,16 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
 
     Promise.all([
       fetchJson<RunwayFeatureCollection>(airportDataUrl(activeAirportCode, "runway.geojson")),
-      loadProcedureRouteData(activeAirportCode),
       loadProcedureRenderBundleData(activeAirportCode),
     ])
-      .then(([runwayCollection, procedureRouteData, procedureRenderData]) => {
+      .then(([runwayCollection, procedureRenderData]) => {
         if (cancelled) return;
 
         const runwayFrame = buildRunwayFrame(runwayCollection, selectedProfileRunwayIdent);
+        const procedureRoutes = buildProcedureRoutes(procedureRenderData.documents);
         const plateRoutes = attachRenderBundleAssessmentSegments(
           buildHorizontalPlateRoutes(
-            procedureRouteData.routes,
+            procedureRoutes,
             runwayFrame,
             selectedProfileRunwayIdent,
           ),
@@ -174,7 +174,7 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
           runwayFrame,
           plateRoutes,
           procedureNames,
-          sourceCycle: procedureRouteData.index.sourceCycle ?? null,
+          sourceCycle: procedureRenderData.index.sourceCycle ?? null,
         });
         setIsLoading(false);
       })
