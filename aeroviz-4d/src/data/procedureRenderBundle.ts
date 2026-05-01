@@ -24,6 +24,10 @@ import {
   type AlignedLnavConnectorGeometry,
 } from "../utils/procedureConnectorGeometry";
 import { buildLnavFinalOea, type LnavFinalOeaGeometry } from "../utils/procedureSurfaceGeometry";
+import {
+  buildInterSegmentTurnJunction,
+  type InterSegmentTurnJunctionGeometry,
+} from "../utils/procedureTurnGeometry";
 
 export interface ProcedureRenderBundle {
   packageId: string;
@@ -47,6 +51,7 @@ export interface BranchGeometryBundle {
   branchRole: ProcedurePackageBranch["branchRole"];
   runwayId: string | null;
   segmentBundles: ProcedureSegmentRenderBundle[];
+  turnJunctions: InterSegmentTurnJunctionGeometry[];
 }
 
 export interface ProcedureSegmentRenderBundle {
@@ -64,6 +69,51 @@ function isLnavFinal(segment: ProcedureSegment): boolean {
 
 function shouldBuildAlignedConnector(segment: ProcedureSegment): boolean {
   return segment.transitionRule?.kind === "INTERMEDIATE_TO_FINAL_LNAV";
+}
+
+function buildBranchTurnJunctions(
+  branch: ProcedurePackageBranch,
+  segmentBundles: ProcedureSegmentRenderBundle[],
+): {
+  turnJunctions: InterSegmentTurnJunctionGeometry[];
+  diagnostics: BuildDiagnostic[];
+} {
+  const turnJunctions: InterSegmentTurnJunctionGeometry[] = [];
+  const diagnostics: BuildDiagnostic[] = [];
+
+  for (let index = 0; index < segmentBundles.length - 1; index += 1) {
+    const fromBundle = segmentBundles[index];
+    const toBundle = segmentBundles[index + 1];
+    const junction = buildInterSegmentTurnJunction(
+      branch.branchId,
+      fromBundle.segment.segmentId,
+      toBundle.segment.segmentId,
+      fromBundle.segmentGeometry.centerline,
+      toBundle.segmentGeometry.centerline,
+      Math.max(fromBundle.segment.xttNm, toBundle.segment.xttNm) * 2,
+      fromBundle.segment.secondaryEnabled || toBundle.segment.secondaryEnabled
+        ? Math.max(fromBundle.segment.xttNm, toBundle.segment.xttNm) * 3
+        : null,
+    );
+
+    if (!junction) continue;
+
+    turnJunctions.push(junction);
+    diagnostics.push({
+      severity: "WARN",
+      segmentId: fromBundle.segment.segmentId,
+      code: "TURN_VISUAL_FILL_ONLY",
+      message:
+        `${branch.branchId}: visual fill was built between ${fromBundle.segment.segmentId} ` +
+        `and ${toBundle.segment.segmentId}; this is not a compliant turn construction.`,
+      sourceRefs: [
+        ...fromBundle.segment.sourceRefs,
+        ...toBundle.segment.sourceRefs,
+      ],
+    });
+  }
+
+  return { turnJunctions, diagnostics };
 }
 
 export function buildProcedureRenderBundle(
@@ -117,12 +167,16 @@ export function buildProcedureRenderBundle(
       })
       .filter((bundle): bundle is ProcedureSegmentRenderBundle => bundle !== null);
 
+    const branchTurnResult = buildBranchTurnJunctions(branch, segmentBundles);
+    diagnostics.push(...branchTurnResult.diagnostics);
+
     return {
       branchId: branch.branchId,
       branchName: branch.branchName,
       branchRole: branch.branchRole,
       runwayId: branch.runwayId,
       segmentBundles,
+      turnJunctions: branchTurnResult.turnJunctions,
     };
   });
 

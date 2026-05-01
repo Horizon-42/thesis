@@ -248,7 +248,8 @@ export interface BuildDiagnostic {
     | "DEFAULT_NAV_SPEC"
     | "DEFAULT_TOLERANCE"
     | "MODE_COLLAPSED_TO_LNAV"
-    | "UNSUPPORTED_LEG_TYPE";
+    | "UNSUPPORTED_LEG_TYPE"
+    | "TURN_VISUAL_FILL_ONLY";
   message: string;
   sourceRefs: SourceRef[];
 }

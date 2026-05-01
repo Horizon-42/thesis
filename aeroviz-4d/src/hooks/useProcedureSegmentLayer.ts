@@ -3,6 +3,7 @@ import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import {
   loadProcedureRenderBundleData,
+  type BranchGeometryBundle,
   type ProcedureRenderBundle,
   type ProcedureSegmentRenderBundle,
 } from "../data/procedureRenderBundle";
@@ -269,6 +270,48 @@ function addSegmentEntities(
   return ids;
 }
 
+function addBranchTurnJunctionEntities(
+  viewer: Cesium.Viewer,
+  bundle: ProcedureRenderBundle,
+  branchBundle: BranchGeometryBundle,
+  visible: boolean,
+): string[] {
+  const ids: string[] = [];
+
+  branchBundle.turnJunctions.forEach((junction) => {
+    const baseId = `${PROCEDURE_SEGMENT_ENTITY_PREFIX}${bundle.packageId}-${junction.geometryId}`;
+    const junctionName = `${bundle.procedureName} visual inter-segment turn fill`;
+
+    const primaryId = `${baseId}-primary`;
+    addRibbonPolygon(
+      viewer,
+      primaryId,
+      `${junctionName} primary`,
+      junction.primaryPatch.ribbon,
+      visible,
+      TURN_FILL_COLOR,
+      CONNECTOR_HEIGHT_OFFSET_M,
+    );
+    ids.push(primaryId);
+
+    if (junction.secondaryPatch) {
+      const secondaryId = `${baseId}-secondary`;
+      addRibbonPolygon(
+        viewer,
+        secondaryId,
+        `${junctionName} secondary`,
+        junction.secondaryPatch.ribbon,
+        visible,
+        TURN_FILL_COLOR,
+        CONNECTOR_HEIGHT_OFFSET_M,
+      );
+      ids.push(secondaryId);
+    }
+  });
+
+  return ids;
+}
+
 export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean } = {}): void {
   const { viewer, layers, procedureVisibility, activeAirportCode } = useApp();
   const visibleRef = useRef(layers.procedures);
@@ -316,6 +359,10 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
                 addSegmentEntities(viewer, bundle, segmentBundle, visible),
               );
             });
+            addBranchEntityIds(
+              branchBundle.branchId,
+              addBranchTurnJunctionEntities(viewer, bundle, branchBundle, visible),
+            );
           });
         });
       })

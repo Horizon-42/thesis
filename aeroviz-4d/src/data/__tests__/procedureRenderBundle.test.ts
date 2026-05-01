@@ -206,6 +206,79 @@ const sampleDocument: ProcedureDetailDocument = {
   },
 };
 
+const twoSegmentTurnPackage: ProcedurePackage = {
+  ...samplePackage,
+  branches: [
+    {
+      ...samplePackage.branches[0],
+      segmentIds: ["segment:intermediate", "segment:final"],
+    },
+  ],
+  segments: [
+    {
+      segmentId: "segment:intermediate",
+      branchId: "branch:R",
+      segmentType: "INTERMEDIATE",
+      navSpec: "RNP_APCH",
+      startFixId: "fix:IF",
+      endFixId: "fix:FAF",
+      legIds: ["leg:R:020"],
+      xttNm: 0.3,
+      attNm: 0.3,
+      secondaryEnabled: true,
+      widthChangeMode: "LINEAR_TAPER",
+      transitionRule: null,
+      verticalRule: { kind: "LEVEL_ROC" },
+      constructionFlags: {},
+      sourceRefs: [],
+      legacy: {
+        rawSegmentType: "intermediate",
+        sequenceRange: [20, 20],
+      },
+    },
+    samplePackage.segments[0],
+  ],
+  legs: [
+    {
+      legId: "leg:R:020",
+      segmentId: "segment:intermediate",
+      legType: "TF",
+      rawPathTerminator: "TF",
+      startFixId: "fix:IF",
+      endFixId: "fix:FAF",
+      requiredAltitude: null,
+      requiredSpeed: null,
+      navSpecAtLeg: "RNP_APCH",
+      xttNm: 0.3,
+      attNm: 0.3,
+      secondaryEnabled: true,
+      notes: [],
+      sourceRefs: [],
+      legacy: {
+        sequence: 20,
+        constructionMethod: "track_to_fix",
+        roleAtEnd: "IF",
+        qualityStatus: "exact",
+        renderedInPlanView: true,
+      },
+    },
+    samplePackage.legs[0],
+  ],
+  sharedFixes: [
+    {
+      fixId: "fix:IF",
+      ident: "IF",
+      role: ["IF"],
+      lonDeg: -78.88,
+      latDeg: 35.84,
+      altFtMsl: 2400,
+      annotations: [],
+      sourceRefs: [],
+    },
+    ...samplePackage.sharedFixes,
+  ],
+};
+
 describe("procedure render bundle", () => {
   beforeEach(() => {
     vi.mocked(fetchJson).mockReset();
@@ -226,7 +299,32 @@ describe("procedure render bundle", () => {
     expect(segmentBundle.alignedConnector?.connectorType).toBe(
       "ALIGNED_LNAV_INTERMEDIATE_TO_FINAL",
     );
+    expect(bundle.branchBundles[0].turnJunctions).toEqual([]);
     expect(bundle.diagnostics).toEqual([]);
+  });
+
+  it("adds visual inter-segment turn junctions at adjacent segment joins", () => {
+    const bundle = buildProcedureRenderBundle(twoSegmentTurnPackage, {
+      samplingStepNm: 0.5,
+      enableDebugPrimitives: false,
+    });
+
+    expect(bundle.branchBundles[0].turnJunctions).toHaveLength(1);
+    expect(bundle.branchBundles[0].turnJunctions[0]).toMatchObject({
+      branchId: "branch:R",
+      fromSegmentId: "segment:intermediate",
+      toSegmentId: "segment:final",
+      constructionStatus: "VISUAL_FILL_ONLY",
+    });
+    expect(bundle.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "TURN_VISUAL_FILL_ONLY",
+          severity: "WARN",
+          segmentId: "segment:intermediate",
+        }),
+      ]),
+    );
   });
 
   it("loads procedure details through the package normalizer and render bundle builder", async () => {

@@ -125,6 +125,29 @@ const turnJunction = {
   },
 };
 
+const interSegmentTurnJunction = {
+  geometryId: "KRDU-R05LY-RW05L:branch:R:junction:segment:intermediate->segment:final",
+  branchId: "KRDU-R05LY-RW05L:branch:R",
+  fromSegmentId: "segment:intermediate",
+  toSegmentId: "segment:final",
+  joinGapNm: 0,
+  turnAngleDeg: 35,
+  turnDirection: "RIGHT",
+  constructionStatus: "VISUAL_FILL_ONLY",
+  primaryPatch: {
+    geometryId: "inter-turn-primary",
+    envelopeType: "PRIMARY",
+    ribbon,
+    halfWidthNm: 0.6,
+  },
+  secondaryPatch: {
+    geometryId: "inter-turn-secondary",
+    envelopeType: "SECONDARY",
+    ribbon,
+    halfWidthNm: 0.9,
+  },
+};
+
 const renderBundleData = {
   index: {},
   documents: [],
@@ -142,6 +165,7 @@ const renderBundleData = {
           branchName: "RW05L",
           branchRole: "STRAIGHT_IN",
           runwayId: "RW05L",
+          turnJunctions: [interSegmentTurnJunction],
           segmentBundles: [
             {
               segment: { segmentId: "segment:final", segmentType: "FINAL_LNAV" },
@@ -201,6 +225,7 @@ describe("useProcedureSegmentLayer", () => {
     expect(entities.some((entity) => String(entity.id).includes("-connector-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-connector-primary-boundary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-turn-1-primary"))).toBe(true);
+    expect(entities.some((entity) => String(entity.id).includes(":junction:"))).toBe(true);
   });
 
   it("syncs layer visibility without reloading render bundle data", async () => {
