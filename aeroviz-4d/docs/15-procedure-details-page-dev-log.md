@@ -211,3 +211,51 @@
 
 ### Exact Next Recommended Step
 - Implement RF geometry support when `arcRadiusNm` and center/turn metadata are available, then add acceptance tests for continuous RF centerline and parallel protected boundaries.
+
+## 2026-05-01 23:21 CEST
+
+### Goal Of This Session
+- Add the first RF-capable geometry kernel without changing the current exporter contract or inventing missing RF metadata.
+- Integrate RF centerlines into the segment geometry builder only when the canonical `ProcedurePackageLeg` already carries the required radius, center, and turn direction.
+
+### Facts Discovered
+- Current `ProcedureDetailDocument` records still do not expose RF `arcRadiusNm`, `centerLatDeg`, or `centerLonDeg`.
+- The canonical package schema already has optional RF fields, so RF support can be implemented behind that boundary before the exporter is upgraded.
+- TF visual turn-fill detection must not run over sampled RF arcs, otherwise normal arc curvature can be misdiagnosed as a sequence of TF corner turns.
+
+### Decisions Locked
+- `procedureRfGeometry.ts` owns RF centerline construction and remains independent of Cesium.
+- RF construction requires:
+  - positioned start and end fixes;
+  - `arcRadiusNm`;
+  - `centerLatDeg` and `centerLonDeg`;
+  - explicit `turnDirection`.
+- Missing RF center/radius metadata returns `RF_RADIUS_MISSING`.
+- Missing direction or inconsistent radius/fix geometry returns `SOURCE_INCOMPLETE`.
+- Segment bundles may now contain RF centerlines and straight offset ribbons, but RF-specific parallel OEA/Case 1/Case 2 protected-area construction is still future work.
+
+### Files Changed
+- `src/utils/procedureRfGeometry.ts`
+- `src/utils/procedureSegmentGeometry.ts`
+- `src/utils/__tests__/procedureSegmentGeometry.test.ts`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/utils/__tests__/procedureSegmentGeometry.test.ts src/data/__tests__/procedureRenderBundle.test.ts src/hooks/__tests__/useProcedureSegmentLayer.test.ts`
+- `npm run build`
+- `npm test -- --run src/components/__tests__/ProcedurePanel.test.tsx src/utils/__tests__/procedureSegmentGeometry.test.ts`
+- `npm test -- --run`
+- `npm run build`
+
+### Current Status
+- Synthetic RF legs with complete metadata now build sampled circular centerlines with radial error covered by unit tests.
+- Segment geometry integrates TF and RF legs in order.
+- RF segments do not receive TF visual turn-fill patches.
+- Real exported documents will still report missing RF metadata until the Python/export schema is upgraded.
+
+### Known Blockers
+- RF envelope support is still a straight offset ribbon over sampled centerline, not the full RF parallel OEA construction required by G-06.
+- The exporter/parser does not yet populate RF radius/center/direction fields.
+- DF/CA/HM/HA/HF remain unsupported by the protected geometry kernel.
+
+### Exact Next Recommended Step
+- Upgrade the procedure-detail/export schema to carry RF radius, center, and turn direction from CIFP/source data, then add a fixture that proves an exported RF leg reaches the new kernel without synthetic test-only data.
