@@ -6,6 +6,14 @@ import type {
   ProcedureSegment,
 } from "./procedurePackage";
 import {
+  type ProcedureDetailDocument,
+  type ProcedureDetailsIndexManifest,
+  procedureDetailsDocumentUrl,
+  procedureDetailsIndexUrl,
+} from "./procedureDetails";
+import { normalizeProcedurePackage } from "./procedurePackageAdapter";
+import { fetchJson } from "../utils/fetchJson";
+import {
   DEFAULT_GEOMETRY_BUILD_CONTEXT,
   buildSegmentGeometryBundle,
   type GeometryBuildContext,
@@ -24,6 +32,13 @@ export interface ProcedureRenderBundle {
   airportId: string;
   branchBundles: BranchGeometryBundle[];
   diagnostics: BuildDiagnostic[];
+}
+
+export interface ProcedureRenderBundleData {
+  index: ProcedureDetailsIndexManifest;
+  documents: ProcedureDetailDocument[];
+  packages: ProcedurePackage[];
+  renderBundles: ProcedureRenderBundle[];
 }
 
 export interface BranchGeometryBundle {
@@ -118,5 +133,29 @@ export function buildProcedureRenderBundle(
     airportId: pkg.airportId,
     branchBundles,
     diagnostics,
+  };
+}
+
+export async function loadProcedureRenderBundleData(
+  airportCode: string,
+  ctx: GeometryBuildContext = DEFAULT_GEOMETRY_BUILD_CONTEXT,
+): Promise<ProcedureRenderBundleData> {
+  const index = await fetchJson<ProcedureDetailsIndexManifest>(procedureDetailsIndexUrl(airportCode));
+  const procedureUids = index.runways.flatMap((runway) =>
+    runway.procedures.map((procedure) => procedure.procedureUid),
+  );
+  const uniqueProcedureUids = [...new Set(procedureUids)];
+  const documents = await Promise.all(
+    uniqueProcedureUids.map((procedureUid) =>
+      fetchJson<ProcedureDetailDocument>(procedureDetailsDocumentUrl(airportCode, procedureUid)),
+    ),
+  );
+  const packages = documents.map(normalizeProcedurePackage);
+
+  return {
+    index,
+    documents,
+    packages,
+    renderBundles: packages.map((pkg) => buildProcedureRenderBundle(pkg, ctx)),
   };
 }

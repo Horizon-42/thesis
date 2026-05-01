@@ -1,6 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fetchJson } from "../../utils/fetchJson";
+import type { ProcedureDetailDocument, ProcedureDetailsIndexManifest } from "../procedureDetails";
 import type { ProcedurePackage } from "../procedurePackage";
-import { buildProcedureRenderBundle } from "../procedureRenderBundle";
+import { buildProcedureRenderBundle, loadProcedureRenderBundleData } from "../procedureRenderBundle";
+
+vi.mock("../../utils/fetchJson", () => ({
+  fetchJson: vi.fn(),
+}));
 
 const samplePackage: ProcedurePackage = {
   packageId: "KRDU-R05LY-RW05L",
@@ -124,7 +130,86 @@ const samplePackage: ProcedurePackage = {
   },
 };
 
+const sampleIndex: ProcedureDetailsIndexManifest = {
+  airport: "KRDU",
+  airportName: "Raleigh-Durham International Airport",
+  sourceCycle: "2501",
+  researchUseOnly: true,
+  runways: [
+    {
+      runwayIdent: "RW05L",
+      chartName: "RW05L",
+      procedureUids: ["KRDU-R05LY-RW05L"],
+      procedures: [
+        {
+          procedureUid: "KRDU-R05LY-RW05L",
+          procedureIdent: "R05LY",
+          chartName: "RNAV(GPS) Y RW05L",
+          procedureFamily: "RNAV_GPS",
+          variant: "Y",
+          approachModes: ["LNAV"],
+          runwayIdent: "RW05L",
+          defaultBranchId: "branch:R",
+        },
+      ],
+    },
+  ],
+};
+
+const sampleDocument: ProcedureDetailDocument = {
+  schemaVersion: "1.0.0",
+  modelType: "rnav-procedure-runway",
+  procedureUid: "KRDU-R05LY-RW05L",
+  provenance: {
+    assemblyMode: "cifp_primary_export",
+    researchUseOnly: true,
+    sources: [],
+    warnings: [],
+  },
+  airport: { icao: "KRDU", faa: "RDU", name: "Raleigh-Durham International Airport" },
+  runway: {
+    ident: "RW05L",
+    landingThresholdFixRef: null,
+    threshold: null,
+  },
+  procedure: {
+    procedureType: "SIAP",
+    procedureFamily: "RNAV_GPS",
+    procedureIdent: "R05LY",
+    chartName: "RNAV(GPS) Y RW05L",
+    variant: "Y",
+    runwayIdent: "RW05L",
+    baseBranchIdent: "R",
+    approachModes: ["LNAV"],
+  },
+  fixes: [],
+  branches: [],
+  verticalProfiles: [],
+  validation: {
+    expectedRunwayIdent: "RW05L",
+    expectedIF: null,
+    expectedFAF: null,
+    expectedMAPt: null,
+    expectedMissedHoldFix: null,
+    knownSimplifications: [],
+  },
+  displayHints: {
+    nominalSpeedKt: 140,
+    defaultVisibleBranchIds: [],
+    tunnelDefaults: {
+      lateralHalfWidthNm: 0.3,
+      verticalHalfHeightFt: 300,
+      sampleSpacingM: 250,
+      mode: "visualApproximation",
+    },
+  },
+};
+
 describe("procedure render bundle", () => {
+  beforeEach(() => {
+    vi.mocked(fetchJson).mockReset();
+  });
+
   it("aggregates segment, OEA, and aligned connector geometry from a ProcedurePackage", () => {
     const bundle = buildProcedureRenderBundle(samplePackage, {
       samplingStepNm: 0.5,
@@ -141,5 +226,24 @@ describe("procedure render bundle", () => {
       "ALIGNED_LNAV_INTERMEDIATE_TO_FINAL",
     );
     expect(bundle.diagnostics).toEqual([]);
+  });
+
+  it("loads procedure details through the package normalizer and render bundle builder", async () => {
+    vi.mocked(fetchJson)
+      .mockResolvedValueOnce(sampleIndex)
+      .mockResolvedValueOnce(sampleDocument);
+
+    const data = await loadProcedureRenderBundleData("krdu", {
+      samplingStepNm: 0.5,
+      enableDebugPrimitives: false,
+    });
+
+    expect(fetchJson).toHaveBeenCalledWith("/data/airports/KRDU/procedure-details/index.json");
+    expect(fetchJson).toHaveBeenCalledWith(
+      "/data/airports/KRDU/procedure-details/KRDU-R05LY-RW05L.json",
+    );
+    expect(data.documents).toEqual([sampleDocument]);
+    expect(data.packages[0].packageId).toBe("KRDU-R05LY-RW05L");
+    expect(data.renderBundles[0].procedureId).toBe("R05LY");
   });
 });
