@@ -116,6 +116,8 @@ function segmentTypeFor(
   rawSegmentType: string,
 ): ProcedureSegment["segmentType"] {
   const normalized = rawSegmentType.toLowerCase();
+  if (normalized.includes("missed_s2")) return "MISSED_S2";
+  if (normalized.includes("missed_s1")) return "MISSED_S1";
   if (normalized.includes("missed") || branch.branchRole.toLowerCase() === "missed") {
     return "MISSED_S1";
   }
@@ -194,6 +196,40 @@ interface SegmentDraft {
   sourceLegs: ProcedureDetailLeg[];
 }
 
+function legStartsMissedSectionTwo(leg: ProcedureDetailLeg): boolean {
+  const terminator = leg.path.pathTerminator.toUpperCase();
+  const role = leg.roleAtEnd.toUpperCase();
+  return terminator === "HM" || terminator === "HA" || terminator === "HF" || role === "MAHF";
+}
+
+function splitMissedGroup(group: {
+  rawSegmentType: string;
+  legs: ProcedureDetailLeg[];
+}): Array<{ rawSegmentType: string; legs: ProcedureDetailLeg[] }> {
+  if (group.rawSegmentType.toLowerCase() !== "missed") return [group];
+
+  const sectionTwoIndex = group.legs.findIndex(legStartsMissedSectionTwo);
+  if (sectionTwoIndex <= 0) {
+    return [
+      {
+        rawSegmentType: sectionTwoIndex === 0 ? "missed_s2" : "missed_s1",
+        legs: group.legs,
+      },
+    ];
+  }
+
+  return [
+    {
+      rawSegmentType: "missed_s1",
+      legs: group.legs.slice(0, sectionTwoIndex),
+    },
+    {
+      rawSegmentType: "missed_s2",
+      legs: group.legs.slice(sectionTwoIndex),
+    },
+  ];
+}
+
 function groupBranchSegments(
   document: ProcedureDetailDocument,
   branch: ProcedureDetailBranch,
@@ -211,7 +247,9 @@ function groupBranchSegments(
     }
   });
 
-  return groups.map((group, index) => {
+  const sectionGroups = groups.flatMap(splitMissedGroup);
+
+  return sectionGroups.map((group, index) => {
     const segmentType = segmentTypeFor(document, branch, group.rawSegmentType);
     const segmentId = segmentIdFor(branchId, segmentType, index);
     const navSpec = navSpecFor(segmentType);

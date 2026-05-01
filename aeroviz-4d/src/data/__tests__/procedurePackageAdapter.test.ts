@@ -320,6 +320,103 @@ describe("normalizeProcedurePackage", () => {
     );
   });
 
+  it("splits missed approach legs into section one and section two at the hold boundary", () => {
+    const missedDocument: ProcedureDetailDocument = {
+      ...sampleDocument,
+      fixes: [
+        ...sampleDocument.fixes,
+        {
+          fixId: "fix:MIS1",
+          ident: "MIS1",
+          kind: "named_fix",
+          position: { lon: -78.76, lat: 35.9 },
+          elevationFt: null,
+          roleHints: ["UNKNOWN"],
+          sourceRefs: ["src:cifp-detail:4"],
+        },
+        {
+          fixId: "fix:HOLD",
+          ident: "HOLD",
+          kind: "missed_hold_fix",
+          position: { lon: -78.7, lat: 35.95 },
+          elevationFt: null,
+          roleHints: ["MAHF"],
+          sourceRefs: ["src:cifp-detail:5"],
+        },
+      ],
+      branches: [
+        {
+          ...sampleDocument.branches[0],
+          legs: [
+            ...sampleDocument.branches[0].legs,
+            {
+              legId: "leg:R:040",
+              sequence: 40,
+              segmentType: "missed",
+              path: {
+                pathTerminator: "DF",
+                constructionMethod: "direct_to_fix",
+                startFixRef: "fix:RW05L",
+                endFixRef: "fix:MIS1",
+              },
+              termination: { kind: "fix", fixRef: "fix:MIS1" },
+              constraints: {
+                altitude: { qualifier: "at", valueFt: 1500, rawText: "1500 ft" },
+                speedKt: null,
+                geometryAltitudeFt: 1500,
+              },
+              roleAtEnd: "UNKNOWN",
+              sourceRefs: ["src:cifp-detail:4"],
+              quality: { status: "exact", sourceLine: 4, renderedInPlanView: true },
+            },
+            {
+              legId: "leg:R:050",
+              sequence: 50,
+              segmentType: "missed",
+              path: {
+                pathTerminator: "HM",
+                constructionMethod: "hold_to_manual",
+                startFixRef: "fix:MIS1",
+                endFixRef: "fix:HOLD",
+              },
+              termination: { kind: "fix", fixRef: "fix:HOLD" },
+              constraints: {
+                altitude: { qualifier: "at", valueFt: 3000, rawText: "3000 ft" },
+                speedKt: null,
+                geometryAltitudeFt: 3000,
+              },
+              roleAtEnd: "MAHF",
+              sourceRefs: ["src:cifp-detail:5"],
+              quality: { status: "exact", sourceLine: 5, renderedInPlanView: false },
+            },
+          ],
+        },
+      ],
+    };
+
+    const pkg = normalizeProcedurePackage(missedDocument);
+    const missedSegments = pkg.segments.filter((segment) =>
+      segment.segmentType.startsWith("MISSED"),
+    );
+
+    expect(missedSegments.map((segment) => ({
+      segmentId: segment.segmentId,
+      segmentType: segment.segmentType,
+      legIds: segment.legIds,
+    }))).toEqual([
+      {
+        segmentId: "KRDU-R05LY-RW05L:branch:R:segment:missed_s1:3",
+        segmentType: "MISSED_S1",
+        legIds: ["leg:R:040"],
+      },
+      {
+        segmentId: "KRDU-R05LY-RW05L:branch:R:segment:missed_s2:4",
+        segmentType: "MISSED_S2",
+        legIds: ["leg:R:050"],
+      },
+    ]);
+  });
+
   it("scopes straight-in branch ids by procedure and runway", () => {
     const rw05Package = normalizeProcedurePackage(sampleDocument);
     const rw32Package = normalizeProcedurePackage({

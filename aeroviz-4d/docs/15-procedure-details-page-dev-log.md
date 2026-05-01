@@ -700,3 +700,35 @@
 
 ### Exact Next Recommended Step
 - Add missed approach sectionization (`MISSED_S1` / `MISSED_S2`) so post-threshold trajectory validation can stop treating missed approach as a generic continuation.
+
+## 2026-05-02 00:13 CEST
+
+### Goal Of This Session
+- Add the first missed approach sectionization pass in the v3 package adapter.
+
+### Decisions Locked
+- Missed groups are split at the first hold/MAHF-style boundary:
+  - before the boundary: `MISSED_S1`;
+  - from the hold/MAHF boundary onward: `MISSED_S2`.
+- If no hold/MAHF boundary is present, missed legs remain `MISSED_S1`.
+- If the missed group starts with a hold/MAHF leg, it is classified as `MISSED_S2`.
+- This is section typing only; no missed approach protected-surface or turning missed wind spiral is claimed yet.
+
+### Files Changed
+- `src/data/procedurePackageAdapter.ts`
+- `src/data/__tests__/procedurePackageAdapter.test.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/data/__tests__/procedurePackageAdapter.test.ts`
+
+### Current Status
+- The canonical package can now represent `MISSED_S1` and `MISSED_S2` instead of collapsing every missed leg into a single generic missed segment.
+- Regression coverage verifies the split at a hold/MAHF boundary.
+
+### Known Blockers
+- CA/DF missed geometry remains unsupported by the segment geometry kernel.
+- Turning missed approach protection and wind spiral debug geometry remain future work.
+
+### Exact Next Recommended Step
+- Add CA/DF missed-leg preservation diagnostics in render bundles and prevent unsupported missed sections from emitting misleading protected geometry.
