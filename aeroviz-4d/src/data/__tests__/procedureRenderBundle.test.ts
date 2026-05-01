@@ -530,6 +530,11 @@ describe("procedure render bundle", () => {
     expect(segmentBundle.segmentGeometry.centerline.geoPositions.length).toBeGreaterThan(2);
     expect(segmentBundle.segmentGeometry.primaryEnvelope).toBeDefined();
     expect(segmentBundle.segmentGeometry.secondaryEnvelope).toBeDefined();
+    expect(segmentBundle.missedSectionSurface).toMatchObject({
+      surfaceType: "MISSED_SECTION1_ENVELOPE",
+      primary: expect.any(Object),
+      secondaryOuter: expect.any(Object),
+    });
     expect(bundle.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain(
       "UNSUPPORTED_LEG_TYPE",
     );

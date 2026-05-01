@@ -948,3 +948,36 @@
 
 ### Exact Next Recommended Step
 - Add a lightweight missed section surface/ribbon classification object so `MISSED_S1` and straight `MISSED_S2` can become independent renderable objects beyond centerline/envelope.
+
+## 2026-05-02 00:52 CEST
+
+### Goal Of This Session
+- Add a lightweight missed section surface object to the render-bundle pipeline.
+
+### Decisions Locked
+- New `procedureMissedGeometry.ts` owns missed section surface classification.
+- `MISSED_S1` with a primary envelope becomes `MISSED_SECTION1_ENVELOPE`.
+- Straight `MISSED_S2` with a primary envelope becomes `MISSED_SECTION2_STRAIGHT_ENVELOPE`.
+- Turning `MISSED_S2` is explicitly diagnosed instead of being represented as a straight surface.
+- This remains an envelope/surface classification layer, not full FAA missed approach section surface construction.
+
+### Files Changed
+- `src/utils/procedureMissedGeometry.ts`
+- `src/utils/__tests__/procedureMissedGeometry.test.ts`
+- `src/data/procedureRenderBundle.ts`
+- `src/data/__tests__/procedureRenderBundle.test.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/utils/__tests__/procedureMissedGeometry.test.ts src/data/__tests__/procedureRenderBundle.test.ts`
+- `npm run build`
+
+### Current Status
+- Render bundles can now expose missed section surfaces as independent objects, separate from generic segment envelopes.
+
+### Known Blockers
+- The 3D layer does not yet render missed section surfaces with distinct styling.
+- Full section 1 / section 2 FAA construction is still future work.
+
+### Exact Next Recommended Step
+- Render `missedSectionSurface` in `useProcedureSegmentLayer` with distinct missed-approach styling and tests.
