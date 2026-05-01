@@ -1170,3 +1170,37 @@
 
 ### Exact Next Recommended Step
 - Add a data regeneration test path for `run_asd-b_fetch_and_generate.py` so real exported procedure assets can carry `courseDeg` into the app.
+
+## 2026-05-02 02:15 CEST
+
+### Goal Of This Session
+- Add a root-pipeline procedure regeneration path so exported app assets can carry parsed CA `courseDeg` metadata without requiring a separate manual command.
+
+### Decisions Locked
+- `run_asd-b_fetch_and_generate.py` now supports `--generate-procedures`.
+- When enabled, the root pipeline runs `aeroviz-4d/python/preprocess_procedures.py` after CZML generation with:
+  - `--include-all-rnav`;
+  - configurable `--cifp-root`;
+  - configurable `--procedure-output`;
+  - optional `--include-procedure-transitions`;
+  - optional `--procedure-charts-root`.
+- Added a Python test that imports the root script and verifies the generated subprocess command without running network fetches or real asset generation.
+
+### Files Changed
+- `../run_asd-b_fetch_and_generate.py`
+- `python/tests/test_run_asd_b_pipeline.py`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `conda run -n aviation pytest python/tests/test_run_asd_b_pipeline.py`
+- `conda run -n aviation pytest python/tests/test_preprocess_procedures.py -k "course or branch_document_exports_course" python/tests/test_run_asd_b_pipeline.py`
+
+### Current Status
+- The main root pipeline can now regenerate RNAV/RNP procedure assets and procedure-details JSON after trajectory CZML generation.
+
+### Known Blockers
+- The new pipeline option is opt-in; existing invocations do not regenerate procedure data unless `--generate-procedures` is provided.
+- The test validates command construction, not the full external CIFP preprocessing output.
+
+### Exact Next Recommended Step
+- Run full frontend and Python validation before continuing into the next unresolved v3 design item.

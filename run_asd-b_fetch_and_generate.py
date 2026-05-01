@@ -55,6 +55,14 @@ def _default_czml_output(aeroviz_root: Path, airport: str) -> Path:
     return aeroviz_root / "public" / "data" / "airports" / airport.upper() / "trajectories.czml"
 
 
+def _default_procedure_output(aeroviz_root: Path, airport: str) -> Path:
+    return aeroviz_root / "public" / "data" / "airports" / airport.upper() / "procedures.geojson"
+
+
+def _default_cifp_root(repo_root: Path) -> Path:
+    return repo_root / "data" / "CIFP" / "CIFP_260319"
+
+
 def parse_args() -> tuple[argparse.Namespace, list[str]]:
     parser = argparse.ArgumentParser(
         description="Run fetch/normalization and CZML generation in one command",
@@ -119,6 +127,42 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
         default=None,
         help="Historical window duration in hours (decimal, e.g. 1.5). Must be paired with --hours-ago.",
     )
+    parser.add_argument(
+        "--generate-procedures",
+        action="store_true",
+        help=(
+            "Also regenerate AeroViz RNAV/RNP procedure assets after CZML generation. "
+            "This runs aeroviz-4d/python/preprocess_procedures.py with --include-all-rnav."
+        ),
+    )
+    parser.add_argument(
+        "--cifp-root",
+        default=None,
+        help="CIFP cycle directory for --generate-procedures (defaults to ./data/CIFP/CIFP_260319).",
+    )
+    parser.add_argument(
+        "--procedure-type",
+        default="SIAP",
+        help="CIFP procedure type for --generate-procedures (default: SIAP).",
+    )
+    parser.add_argument(
+        "--procedure-output",
+        default=None,
+        help=(
+            "Output GeoJSON path for --generate-procedures "
+            "(defaults to <aeroviz-root>/public/data/airports/<AIRPORT>/procedures.geojson)."
+        ),
+    )
+    parser.add_argument(
+        "--include-procedure-transitions",
+        action="store_true",
+        help="Pass --include-transitions to procedure preprocessing.",
+    )
+    parser.add_argument(
+        "--procedure-charts-root",
+        default=None,
+        help="Optional charts root forwarded to procedure preprocessing as --charts-root.",
+    )
 
     # Everything not recognized here is forwarded to fetch_cylw_opensky.py.
     args, fetch_passthrough = parser.parse_known_args()
@@ -170,6 +214,9 @@ def main() -> None:
         raise RuntimeError(f"Fetch script not found: {fetch_script}")
     if not generator_script.exists():
         raise RuntimeError(f"CZML generator script not found: {generator_script}")
+    procedure_script = aeroviz_root / "python" / "preprocess_procedures.py"
+    if args.generate_procedures and not procedure_script.exists():
+        raise RuntimeError(f"Procedure preprocessing script not found: {procedure_script}")
 
     output_root.mkdir(parents=True, exist_ok=True)
 
@@ -287,9 +334,38 @@ def main() -> None:
     print("[Pipeline] Running CZML generation stage...", flush=True)
     subprocess.run(generate_cmd, check=True)
 
+    if args.generate_procedures:
+        procedure_output_path = (
+            Path(args.procedure_output)
+            if args.procedure_output
+            else _default_procedure_output(aeroviz_root, effective_airport)
+        )
+        procedure_cmd = [
+            sys.executable,
+            str(procedure_script),
+            "--cifp-root",
+            str(Path(args.cifp_root) if args.cifp_root else _default_cifp_root(repo_root)),
+            "--airport",
+            effective_airport,
+            "--procedure-type",
+            args.procedure_type,
+            "--include-all-rnav",
+            "--output",
+            str(procedure_output_path),
+        ]
+        if args.include_procedure_transitions:
+            procedure_cmd.append("--include-transitions")
+        if args.procedure_charts_root:
+            procedure_cmd.extend(["--charts-root", args.procedure_charts_root])
+
+        print("[Pipeline] Running procedure asset generation stage...", flush=True)
+        subprocess.run(procedure_cmd, check=True)
+
     print(f"[Pipeline] airport:      {effective_airport}")
     print(f"[Pipeline] czml input:   {czml_input_path}")
     print(f"[Pipeline] czml output:  {czml_output_path}")
+    if args.generate_procedures:
+        print(f"[Pipeline] procedures:   {procedure_output_path}")
 
 
 if __name__ == "__main__":
