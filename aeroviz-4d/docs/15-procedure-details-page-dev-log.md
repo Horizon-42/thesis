@@ -916,3 +916,35 @@
 
 ### Exact Next Recommended Step
 - Add render-bundle coverage for DF missed geometry and ensure Procedure Details diagnostics no longer report DF as unsupported when a positioned DF leg is present.
+
+## 2026-05-02 00:47 CEST
+
+### Goal Of This Session
+- Cover DF missed geometry through the full procedure-detail normalizer and render-bundle path.
+
+### Decisions Locked
+- The regression starts from `ProcedureDetailDocument` shape rather than a hand-built `ProcedurePackage`.
+- A positioned DF missed leg must produce:
+  - `MISSED_S1` segment type;
+  - sampled centerline;
+  - primary envelope;
+  - secondary envelope.
+- Render diagnostics must not classify positioned DF as `UNSUPPORTED_LEG_TYPE`.
+
+### Files Changed
+- `src/data/__tests__/procedureRenderBundle.test.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/data/__tests__/procedureRenderBundle.test.ts src/components/__tests__/ProcedureDetailsPage.test.tsx`
+- `npm run build`
+
+### Current Status
+- DF missed approach geometry is covered from source document through canonical package and render bundle.
+
+### Known Blockers
+- CA and holding missed geometry remain unsupported.
+- Missed section surfaces remain future work.
+
+### Exact Next Recommended Step
+- Add a lightweight missed section surface/ribbon classification object so `MISSED_S1` and straight `MISSED_S2` can become independent renderable objects beyond centerline/envelope.

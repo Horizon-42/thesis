@@ -384,6 +384,76 @@ const rfDocument: ProcedureDetailDocument = {
   ],
 };
 
+const missedDfDocument: ProcedureDetailDocument = {
+  ...sampleDocument,
+  procedureUid: "KRDU-MISSEDDF-RW05L",
+  procedure: {
+    ...sampleDocument.procedure,
+    procedureIdent: "MISSEDDF",
+    chartName: "RNAV MISSED DF TEST",
+  },
+  runway: {
+    ident: "RW05L",
+    landingThresholdFixRef: "fix:RW05L",
+    threshold: { lon: -78.8, lat: 35.87, elevationFt: 800 },
+  },
+  fixes: [
+    {
+      fixId: "fix:RW05L",
+      ident: "RW05L",
+      kind: "runway_threshold",
+      position: { lon: -78.8, lat: 35.87 },
+      elevationFt: 800,
+      roleHints: ["MAPt"],
+      sourceRefs: [],
+    },
+    {
+      fixId: "fix:MIS1",
+      ident: "MIS1",
+      kind: "named_fix",
+      position: { lon: -78.74, lat: 35.91 },
+      elevationFt: 1800,
+      roleHints: ["UNKNOWN"],
+      sourceRefs: [],
+    },
+  ],
+  branches: [
+    {
+      branchId: "branch:R",
+      branchKey: "R",
+      branchIdent: "R",
+      branchRole: "final",
+      sequenceOrder: 1,
+      mergeFixRef: null,
+      continuesWithBranchId: null,
+      defaultVisible: true,
+      warnings: [],
+      legs: [
+        {
+          legId: "leg:R:040",
+          sequence: 40,
+          segmentType: "missed",
+          path: {
+            pathTerminator: "DF",
+            constructionMethod: "direct_to_fix",
+            startFixRef: "fix:RW05L",
+            endFixRef: "fix:MIS1",
+          },
+          termination: { kind: "fix", fixRef: "fix:MIS1" },
+          constraints: {
+            altitude: { qualifier: "at", valueFt: 1800, rawText: "1800 ft" },
+            speedKt: null,
+            geometryAltitudeFt: 1800,
+          },
+          roleAtEnd: "UNKNOWN",
+          sourceRefs: [],
+          quality: { status: "exact", sourceLine: 40, renderedInPlanView: true },
+        },
+      ],
+    },
+  ],
+};
+
 describe("procedure render bundle", () => {
   beforeEach(() => {
     vi.mocked(fetchJson).mockReset();
@@ -446,6 +516,23 @@ describe("procedure render bundle", () => {
     expect(segmentBundle.segmentGeometry.centerline.isArc).toBe(true);
     expect(segmentBundle.segmentGeometry.centerline.geodesicLengthNm).toBeCloseTo(Math.PI, 2);
     expect(segmentBundle.segmentGeometry.turnJunctions).toEqual([]);
+  });
+
+  it("builds DF missed approach geometry from procedure-detail path metadata", () => {
+    const pkg = normalizeProcedurePackage(missedDfDocument);
+    const bundle = buildProcedureRenderBundle(pkg, {
+      samplingStepNm: 0.5,
+      enableDebugPrimitives: false,
+    });
+    const segmentBundle = bundle.branchBundles[0].segmentBundles[0];
+
+    expect(segmentBundle.segment.segmentType).toBe("MISSED_S1");
+    expect(segmentBundle.segmentGeometry.centerline.geoPositions.length).toBeGreaterThan(2);
+    expect(segmentBundle.segmentGeometry.primaryEnvelope).toBeDefined();
+    expect(segmentBundle.segmentGeometry.secondaryEnvelope).toBeDefined();
+    expect(bundle.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain(
+      "UNSUPPORTED_LEG_TYPE",
+    );
   });
 
   it("loads procedure details through the package normalizer and render bundle builder", async () => {
