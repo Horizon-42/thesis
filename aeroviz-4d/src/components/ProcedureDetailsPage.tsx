@@ -434,6 +434,29 @@ function focusedLegDescription(leg: ProcedureDetailLeg): string {
   return pathTermMeaning;
 }
 
+function legRfMetadataLabels(leg: ProcedureDetailLeg): string[] {
+  if (leg.path.pathTerminator.toUpperCase() !== "RF") return [];
+
+  const labels: string[] = [];
+  if (leg.path.turnDirection) labels.push(`Turn ${leg.path.turnDirection}`);
+  if (typeof leg.path.arcRadiusNm === "number" && Number.isFinite(leg.path.arcRadiusNm)) {
+    labels.push(`Radius ${leg.path.arcRadiusNm.toFixed(2)} NM`);
+  }
+  if (leg.path.centerFixRef) {
+    labels.push(`Center ${formatFixRef(leg.path.centerFixRef)}`);
+  } else if (
+    typeof leg.path.centerLatDeg === "number" &&
+    Number.isFinite(leg.path.centerLatDeg) &&
+    typeof leg.path.centerLonDeg === "number" &&
+    Number.isFinite(leg.path.centerLonDeg)
+  ) {
+    labels.push(
+      `Center ${formatCoordinate(leg.path.centerLatDeg)}, ${formatCoordinate(leg.path.centerLonDeg)}`,
+    );
+  }
+  return labels;
+}
+
 function selectedBranchDefaultId(document: ProcedureDetailDocument | null): string | null {
   if (!document) return null;
   return (
@@ -1684,6 +1707,7 @@ export default function ProcedureDetailsPage() {
                           const endFix = findFix(procedureDocument, leg.path.endFixRef);
                           const isActive = leg.path.endFixRef === focusedFixId;
                           const roleLabel = legRoleLabel(leg);
+                          const rfMetadataLabels = legRfMetadataLabels(leg);
                           return (
                             <button
                               type="button"
@@ -1717,6 +1741,9 @@ export default function ProcedureDetailsPage() {
                                       leg.constraints.altitude?.valueFt,
                                   )}
                                 </span>
+                                {rfMetadataLabels.map((label) => (
+                                  <span key={label}>{label}</span>
+                                ))}
                               </div>
                             </button>
                           );

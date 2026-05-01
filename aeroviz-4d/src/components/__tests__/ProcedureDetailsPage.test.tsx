@@ -247,6 +247,32 @@ const sampleDocument = {
   },
 };
 
+const rfSampleDocument = {
+  ...sampleDocument,
+  branches: [
+    {
+      ...sampleDocument.branches[0],
+      legs: sampleDocument.branches[0].legs.map((leg) =>
+        leg.legId === "leg:R:020"
+          ? {
+              ...leg,
+              path: {
+                ...leg.path,
+                pathTerminator: "RF",
+                constructionMethod: "radius_to_fix",
+                turnDirection: "LEFT",
+                arcRadiusNm: 2,
+                centerFixRef: "fix:CENTER",
+                centerLatDeg: 35.82,
+                centerLonDeg: -78.86,
+              },
+            }
+          : leg,
+      ),
+    },
+  ],
+};
+
 describe("ProcedureDetailsPage", () => {
   beforeEach(() => {
     fetchMock.mockReset();
@@ -308,6 +334,24 @@ describe("ProcedureDetailsPage", () => {
 
     expect(screen.getByText("East offset from origin (m)")).toBeTruthy();
     expect(screen.getByText("Along-track distance from MAPT / runway (m)")).toBeTruthy();
+  });
+
+  it("shows RF radius, turn direction, and center metadata in the focused sequence", async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith("/procedure-details/index.json")) return Promise.resolve(jsonResponse(sampleIndex));
+      if (url.endsWith("/charts/index.json")) return Promise.resolve(jsonResponse(sampleCharts));
+      if (url.endsWith("/procedure-details/KRDU-R05LY-RW05L.json")) {
+        return Promise.resolve(jsonResponse(rfSampleDocument));
+      }
+      return Promise.resolve(notFoundResponse());
+    });
+
+    render(<ProcedureDetailsPage />);
+
+    expect((await screen.findAllByText("RF")).length).toBeGreaterThan(0);
+    expect(screen.getByText("Turn LEFT")).toBeTruthy();
+    expect(screen.getByText("Radius 2.00 NM")).toBeTruthy();
+    expect(screen.getByText("Center CENTER")).toBeTruthy();
   });
 
   it("shows a friendly empty state when the richer dataset is missing", async () => {
