@@ -510,7 +510,8 @@ body,
   gap: 8px;
 }
 
-.runway-profile-view-modes {
+.runway-profile-view-modes,
+.runway-profile-unit-switch {
   display: flex;
   gap: 6px;
 }
@@ -564,11 +565,15 @@ body,
 
 .runway-profile-empty {
   color: #cbd5e1;
-  padding-bottom: 10px;
+  padding-bottom: 16px;
 }
 
 .runway-profile-error {
   color: #fecaca;
+}
+
+.runway-profile-empty + .runway-profile-plots {
+  margin-top: 8px;
 }
 
 .runway-profile-plots {
@@ -1101,6 +1106,39 @@ body,
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+}
+
+.procedure-details-unit-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid rgba(121, 192, 255, 0.18);
+  background: rgba(15, 28, 45, 0.72);
+}
+
+.procedure-details-unit-switch button {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #b8c8dd;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 7px 10px;
+}
+
+.procedure-details-unit-switch button:hover {
+  border-color: rgba(121, 192, 255, 0.24);
+  color: #f3f8ff;
+}
+
+.procedure-details-unit-switch button.is-active {
+  background: #0f766e;
+  border-color: #5eead4;
+  color: #f0fdfa;
 }
 
 .procedure-details-eyebrow {
