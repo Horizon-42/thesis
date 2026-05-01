@@ -432,3 +432,36 @@
 
 ### Exact Next Recommended Step
 - Add RF debug/inspection primitives or diagnostics for RF metadata in the procedure panel/details view, then design full RF OEA Case 1/Case 2 acceptance tests.
+
+## 2026-05-01 23:44 CEST
+
+### Goal Of This Session
+- Surface RF source metadata in the Procedure Details focused sequence so the user can inspect turn direction, radius, and center without opening raw JSON.
+
+### Decisions Locked
+- RF leg cards now display:
+  - `Turn LEFT/RIGHT`
+  - `Radius <n> NM`
+  - `Center <fix>` or center coordinates when no center fix is available.
+- This stays in the focused sequence metadata row so it supports validation without adding another panel.
+
+### Files Changed
+- `src/components/ProcedureDetailsPage.tsx`
+- `src/components/__tests__/ProcedureDetailsPage.test.tsx`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/components/__tests__/ProcedureDetailsPage.test.tsx`
+- `npm test -- --run`
+- `npm run build`
+
+### Current Status
+- Procedure Details now exposes RF metadata in the UI.
+- Frontend test count is now 87 tests, all passing.
+
+### Known Blockers
+- RF metadata visibility is currently textual; there are no plan-view RF center/radius debug primitives yet.
+- Full RF OEA Case 1/Case 2 acceptance remains future work.
+
+### Exact Next Recommended Step
+- Add optional plan-view RF center/radius markers for RF legs, then define the full RF OEA Case 1/Case 2 geometry acceptance fixtures.
