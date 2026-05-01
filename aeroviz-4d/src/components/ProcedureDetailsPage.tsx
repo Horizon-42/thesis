@@ -4,6 +4,7 @@ import { useApp } from "../context/AppContext";
 import type {
   ProcedureChartManifestEntry,
   ProcedureChartsManifest,
+  ProcedureDetailBranch,
   ProcedureDetailDocument,
   ProcedureDetailFix,
   ProcedureDetailLeg,
@@ -232,6 +233,18 @@ function legRoleLabel(leg: ProcedureDetailLeg): string {
 
 function branchRoleLabel(branchRole: string): string {
   return branchRole === "final" ? "Final segment" : "Transition segment";
+}
+
+function branchDisplayLabel(branch: ProcedureDetailBranch): string {
+  if (branch.transitionIdent) return branch.transitionIdent;
+  return branch.branchIdent;
+}
+
+function branchTypeDisplayLabel(branch: ProcedureDetailBranch): string {
+  const typePrefix = branch.procedureType
+    ? `Approach route type ${branch.procedureType}`
+    : "Approach route type";
+  return `${typePrefix} · ${branchRoleLabel(branch.branchRole)}`;
 }
 
 function isImportantFixRole(role: string): boolean {
@@ -1493,8 +1506,8 @@ export default function ProcedureDetailsPage() {
                         <p className="procedure-details-overview-label">Focused Sequence</p>
                         <h3>
                           {focusedBranch
-                            ? `${focusedBranch.branchIdent} · ${branchRoleLabel(
-                                focusedBranch.branchRole,
+                            ? `${branchDisplayLabel(focusedBranch)} · ${branchTypeDisplayLabel(
+                                focusedBranch,
                               )}`
                             : "Choose a branch"}
                         </h3>
@@ -1518,8 +1531,8 @@ export default function ProcedureDetailsPage() {
                           onMouseLeave={clearPreview}
                           onClick={() => handleSelectBranch(branch.branchId)}
                         >
-                          <strong>{branch.branchIdent}</strong>
-                          <span>{branchRoleLabel(branch.branchRole)}</span>
+                          <strong>{branchDisplayLabel(branch)}</strong>
+                          <span>{branchTypeDisplayLabel(branch)}</span>
                         </button>
                       ))}
                     </div>
@@ -1643,7 +1656,7 @@ export default function ProcedureDetailsPage() {
                       <div>
                         <dt>Used by branches</dt>
                         <dd>
-                          {focusedFixBranches.map((branch) => branch.branchIdent).join(", ") ||
+                          {focusedFixBranches.map((branch) => branchDisplayLabel(branch)).join(", ") ||
                             "No branch mapping"}
                         </dd>
                       </div>

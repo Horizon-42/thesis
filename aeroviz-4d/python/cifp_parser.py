@@ -45,6 +45,8 @@ class ProcedureLeg:
     altitude_ft: int | None
     source_line: int
     fix_region_code: str | None = None
+    procedure_type: str | None = None
+    transition_ident: str | None = None
 
 
 def decode_cifp_coordinate(token: str) -> float:
@@ -453,6 +455,8 @@ def parse_procedure_legs(
                     altitude_ft=altitude_ft,
                     source_line=line_number,
                     fix_region_code=line[34:36].strip().upper() or None,
+                    procedure_type=target_branch[0] if len(target_branch) > 5 else target_branch,
+                    transition_ident=target_branch[1:] if len(target_branch) > 5 else None,
                 )
             )
 
@@ -590,11 +594,17 @@ def normalize_int(value: Any) -> int | None:
 
 
 def cifparse_branch(primary: dict[str, Any], procedure: str) -> str:
+    """Return AeroViz's stable internal branch key."""
     transition_id = str(primary.get("transition_id") or "").strip().upper()
     if not transition_id:
         return final_branch_for_procedure(procedure)
     route_type = str(primary.get("procedure_type") or "").strip().upper()
     return f"{route_type}{transition_id}" if route_type else transition_id
+
+
+def cifparse_transition_ident(primary: dict[str, Any]) -> str | None:
+    transition_id = str(primary.get("transition_id") or "").strip().upper()
+    return transition_id or None
 
 
 def role_from_cifparse(primary: dict[str, Any], leg_type: str, fix_ident: str, sequence: int) -> str:
@@ -683,6 +693,8 @@ def parse_procedure_legs(
                 altitude_ft=altitude_ft,
                 source_line=cifparse_source_line(primary.get("record_number"), data.header_line_count),
                 fix_region_code=str(primary.get("fix_region") or "").strip().upper() or None,
+                procedure_type=str(primary.get("procedure_type") or "").strip().upper() or None,
+                transition_ident=cifparse_transition_ident(primary),
             )
         )
 

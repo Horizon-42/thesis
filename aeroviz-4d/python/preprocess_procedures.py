@@ -501,6 +501,33 @@ def normalize_branch_ref(branch_ident: str) -> str:
     return f"branch:{branch_ident.upper()}"
 
 
+def branch_procedure_type(branch_ident: str, branch_legs: list[ProcedureLeg]) -> str:
+    for leg in branch_legs:
+        if leg.procedure_type:
+            return leg.procedure_type.upper()
+    return branch_ident[:1].upper()
+
+
+def branch_transition_ident(
+    branch_ident: str,
+    branch_legs: list[ProcedureLeg],
+    final_branch_ident: str,
+) -> str | None:
+    for leg in branch_legs:
+        if leg.transition_ident:
+            return leg.transition_ident.upper()
+    if branch_ident.upper() == final_branch_ident.upper():
+        return None
+    return branch_ident[1:].upper() if len(branch_ident) > 1 else branch_ident.upper()
+
+
+def branch_display_ident(branch_ident: str, branch_legs: list[ProcedureLeg], final_branch_ident: str) -> str:
+    transition_ident = branch_transition_ident(branch_ident, branch_legs, final_branch_ident)
+    if transition_ident:
+        return transition_ident
+    return final_branch_ident.upper()
+
+
 def approach_modes_for(procedure: str) -> list[str]:
     family = procedure_family(procedure)
     if family == "RNAV_GPS":
@@ -697,10 +724,16 @@ def build_branch_document(
             has_crossed_threshold = True
 
     branch_role = "final" if branch_ident.upper() == final_branch_ident.upper() else "transition"
+    procedure_type = branch_procedure_type(branch_ident, branch_legs)
+    transition_ident = branch_transition_ident(branch_ident, branch_legs, final_branch_ident)
+    display_ident = branch_display_ident(branch_ident, branch_legs, final_branch_ident)
 
     return {
         "branchId": normalize_branch_ref(branch_ident),
-        "branchIdent": branch_ident.upper(),
+        "branchKey": branch_ident.upper(),
+        "branchIdent": display_ident,
+        "procedureType": procedure_type,
+        "transitionIdent": transition_ident,
         "branchRole": branch_role,
         "sequenceOrder": branch_order,
         "mergeFixRef": merge_fix_ref_for_branch(
@@ -1090,7 +1123,8 @@ def build_geojson_route_from_detail_branch(
     fix_by_id = detail_fix_index(document)
     procedure = document["procedure"]
     airport = document["airport"]["icao"]
-    route_id = f"{airport}-{procedure['procedureIdent']}-{branch['branchIdent']}"
+    branch_key = branch.get("branchKey", branch["branchIdent"])
+    route_id = f"{airport}-{procedure['procedureIdent']}-{branch_key}"
     defaults = document["displayHints"]["tunnelDefaults"]
     nominal_speed_kt = document["displayHints"]["nominalSpeedKt"]
     speed_mps = nominal_speed_kt * NM_TO_METRES / 3600.0
@@ -1164,8 +1198,11 @@ def build_geojson_route_from_detail_branch(
         "procedureType": procedure["procedureType"],
         "procedureIdent": procedure["procedureIdent"],
         "procedureName": procedure["chartName"],
-        "branch": branch["branchIdent"],
+        "branch": branch_key,
         "branchIdent": branch["branchIdent"],
+        "branchKey": branch_key,
+        "branchProcedureType": branch.get("procedureType"),
+        "branchTransitionIdent": branch.get("transitionIdent"),
         "branchType": branch["branchRole"],
         "procedureFamily": procedure["procedureFamily"],
         "procedureVariant": procedure["variant"],
@@ -1244,7 +1281,8 @@ def procedure_detail_documents_to_geojson(
         for branch_document in document["branches"]:
             if not include_transitions:
                 target_branch = requested_branch or document["procedure"]["baseBranchIdent"]
-                if branch_document["branchIdent"].upper() != target_branch.upper():
+                branch_key = branch_document.get("branchKey", branch_document["branchIdent"])
+                if branch_key.upper() != target_branch.upper():
                     continue
             collection = build_geojson_route_from_detail_branch(
                 document=document,

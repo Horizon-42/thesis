@@ -243,9 +243,12 @@ def test_generate_transitions_hidden_by_default() -> None:
         for feature in collection["features"]
         if feature["properties"]["featureType"] == "procedure-route"
     ]
-    by_branch = {feature["properties"]["branchIdent"]: feature for feature in route_features}
+    by_branch = {feature["properties"]["branchKey"]: feature for feature in route_features}
 
     assert list(by_branch) == ["R", "ACHWDR", "AOTTOS"]
+    assert by_branch["ACHWDR"]["properties"]["branchIdent"] == "CHWDR"
+    assert by_branch["ACHWDR"]["properties"]["branchProcedureType"] == "A"
+    assert by_branch["ACHWDR"]["properties"]["branchTransitionIdent"] == "CHWDR"
     assert by_branch["R"]["properties"]["defaultVisible"] is True
     assert by_branch["ACHWDR"]["properties"]["defaultVisible"] is False
     assert by_branch["AOTTOS"]["properties"]["branchType"] == "transition"

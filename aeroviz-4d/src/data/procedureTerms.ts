@@ -36,6 +36,10 @@ const FAA_CIFP_REFERENCE: TermReference = {
   label: "FAA CIFP / ARINC 424",
   url: "https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/cifp/",
 };
+const LOCAL_ARINC_APPROACH_ROUTE_TYPE_REFERENCE: TermReference = {
+  label: "Local ARINC 424-23 Table 5-8 note",
+  url: "/data/reference/arinc424-approach-route-types.md",
+};
 const FAA_RNAV_LEG_TYPES_REFERENCE: TermReference = {
   label: "FAA RNAV leg types",
   url: "https://www.faa.gov/air_traffic/publications/atpubs/atbarc/03-5.htm",
@@ -58,6 +62,7 @@ const PROCEDURE_MODE_TERMS = [
   "RNAV(GPS)",
   "RNAV(RNP)",
 ];
+const APPROACH_ROUTE_TYPE_TERMS = ["A", "H", "R"];
 
 const TERM_DISPLAY_NAMES: Record<string, string> = {
   IAF: "Initial Approach Fix (IAF)",
@@ -80,6 +85,9 @@ const TERM_DISPLAY_NAMES: Record<string, string> = {
   CF_TERMINATOR: "Course to Fix Path Terminator (CF)",
   HM_TERMINATOR: "Hold to Manual Termination Path Terminator (HM)",
   HF_TERMINATOR: "Hold to Fix Path Terminator (HF)",
+  A: "Approach Route Type A",
+  H: "Approach Route Type H",
+  R: "Approach Route Type R",
 };
 
 const TERM_DETAILS: Record<string, TermDetails> = {
@@ -203,6 +211,21 @@ const TERM_DETAILS: Record<string, TermDetails> = {
     definition: "The Hold to Fix path terminator flies a holding pattern terminating at a fix.",
     references: [FAA_CIFP_REFERENCE, FAA_RNAV_LEG_TYPES_REFERENCE],
   },
+  A: {
+    definition:
+      "Approach Route Type A means Approach Transition for Airport Approach (PF) and Heliport Approach (HF) records. In this procedure view, it marks an entry route from a named transition fix into the shared final approach route.",
+    references: [LOCAL_ARINC_APPROACH_ROUTE_TYPE_REFERENCE, FAA_CIFP_REFERENCE],
+  },
+  H: {
+    definition:
+      "Approach Route Type H means Area Navigation (RNAV) Approach with Required Navigation Performance (RNP) for Airport Approach (PF) and Heliport Approach (HF) records. In this procedure view, it identifies the RNAV(RNP)-style approach route rather than a transition branch.",
+    references: [LOCAL_ARINC_APPROACH_ROUTE_TYPE_REFERENCE, FAA_CIFP_REFERENCE, FAA_AIM_PBN_REFERENCE],
+  },
+  R: {
+    definition:
+      "Approach Route Type R means Area Navigation (RNAV) Approach for Airport Approach (PF) and Heliport Approach (HF) records. In this procedure view, it identifies the RNAV approach route that carries the final approach and missed-approach coding, separate from optional transition routes.",
+    references: [LOCAL_ARINC_APPROACH_ROUTE_TYPE_REFERENCE, FAA_CIFP_REFERENCE, FAA_AIM_PBN_REFERENCE],
+  },
 };
 
 export function normalizeTermKey(term: string): string {
@@ -229,7 +252,31 @@ export function formatTermMeaning(term: string): string {
 
 export function branchIdentifierLabel(branch: ProcedureDetailBranch): string {
   if (branch.branchRole === "final") return "Final approach branch";
-  return "Transition branch";
+  return "Transition identifier";
+}
+
+function approachRouteTypeTerm(routeType: string | null | undefined): string | null {
+  const normalized = normalizeTermKey(routeType ?? "");
+  if (!normalized) return null;
+  if (!APPROACH_ROUTE_TYPE_TERMS.includes(normalized)) return null;
+  return normalized;
+}
+
+function approachRouteTypeContextMeaning(routeType: string | null | undefined): string {
+  const normalized = normalizeTermKey(routeType ?? "");
+  if (normalized === "A") {
+    return " Approach Route Type A means Approach Transition for Airport Approach records: an entry route from an initial fix or feeder path into the shared final approach.";
+  }
+  if (normalized === "R") {
+    return " Approach Route Type R means Area Navigation (RNAV) Approach for Airport Approach records: the RNAV route that contains the final approach and missed-approach coding.";
+  }
+  if (normalized === "H") {
+    return " Approach Route Type H means Area Navigation (RNAV) Approach with Required Navigation Performance (RNP) for Airport Approach records.";
+  }
+  if (normalized) {
+    return ` Approach Route Type ${normalized} is an ARINC/CIFP Airport Approach route type. Its meaning depends on the PF/HF approach-record table, not the enroute airway table.`;
+  }
+  return "";
 }
 
 function formatFixRef(fixRef: string | null | undefined): string {
@@ -278,11 +325,12 @@ export function contextualTermDetails(
   if (branch) {
     const branchType = branchIdentifierLabel(branch).toLowerCase();
     const targetFix = branch.mergeFixRef ? formatFixRef(branch.mergeFixRef) : null;
+    const routeType = approachRouteTypeContextMeaning(branch.procedureType);
     return {
       definition:
         branch.branchRole === "final"
-          ? `${term} is the coded final approach branch for this procedure. It contains the legs that line up with the runway, continue to the missed approach point, and then describe the missed approach.`
-          : `${term} is a ${branchType}. It is an entry path from the named fix or feeder route into the common final approach${targetFix ? ` near ${targetFix}` : ""}.`,
+          ? `${term} is the final-branch identifier for this procedure. It contains the legs that line up with the runway, continue to the missed approach point, and then describe the missed approach.${routeType}`
+          : `${term} is a ${branchType}. It names the entry route into the common final approach${targetFix ? ` near ${targetFix}` : ""}.${routeType}`,
       references: [],
     };
   }
@@ -325,6 +373,8 @@ export function summaryTerms(document: ProcedureDetailDocument | null): string[]
   document.procedure.approachModes.forEach((mode) => terms.add(mode));
   document.branches.forEach((branch) => {
     terms.add(branch.branchIdent);
+    const routeTypeTerm = approachRouteTypeTerm(branch.procedureType);
+    if (routeTypeTerm) terms.add(routeTypeTerm);
     branch.legs.forEach((leg) => {
       if (isSpecificFixRole(leg.roleAtEnd)) terms.add(leg.roleAtEnd);
       if (leg.path.pathTerminator) terms.add(`${leg.path.pathTerminator}_TERMINATOR`);
@@ -341,6 +391,8 @@ export function contextualTerms(
   const terms = new Set(summaryTerms(document));
   if (focusedFix) terms.add(focusedFix.ident);
   if (focusedBranch) terms.add(focusedBranch.branchIdent);
+  const focusedProcedureTypeTerm = approachRouteTypeTerm(focusedBranch?.procedureType);
+  if (focusedProcedureTypeTerm) terms.add(focusedProcedureTypeTerm);
   focusedFix?.roleHints.forEach((role) => terms.add(role));
   focusedBranch?.legs.forEach((leg) => {
     if (isSpecificFixRole(leg.roleAtEnd)) terms.add(leg.roleAtEnd);
@@ -351,25 +403,28 @@ export function contextualTerms(
 
 export function groupedTerms(terms: string[]): TermGroup[] {
   const uniqueTerms = Array.from(new Set(terms));
-  const fixRoles = uniqueTerms.filter((term) =>
-    FIX_ROLE_TERMS.includes(normalizeTermKey(term)),
-  );
-  const pathTerminators = uniqueTerms.filter((term) =>
-    normalizeTermKey(term).endsWith("_TERMINATOR"),
-  );
-  const procedureModes = uniqueTerms.filter((term) =>
-    PROCEDURE_MODE_TERMS.includes(normalizeTermKey(term)),
-  );
+  const isFixRole = (term: string) => FIX_ROLE_TERMS.includes(normalizeTermKey(term));
+  const isPathTerminator = (term: string) => normalizeTermKey(term).endsWith("_TERMINATOR");
+  const isProcedureMode = (term: string) => PROCEDURE_MODE_TERMS.includes(normalizeTermKey(term));
+  const isApproachRouteType = (term: string) =>
+    APPROACH_ROUTE_TYPE_TERMS.includes(normalizeTermKey(term));
+
+  const fixRoles = uniqueTerms.filter(isFixRole);
+  const pathTerminators = uniqueTerms.filter(isPathTerminator);
+  const procedureModes = uniqueTerms.filter(isProcedureMode);
+  const approachRouteTypes = uniqueTerms.filter(isApproachRouteType);
   const identifiers = uniqueTerms.filter(
     (term) =>
-      !fixRoles.includes(term) &&
-      !pathTerminators.includes(term) &&
-      !procedureModes.includes(term),
+      !isFixRole(term) &&
+      !isPathTerminator(term) &&
+      !isProcedureMode(term) &&
+      !isApproachRouteType(term),
   );
 
   return [
     { id: "fix-roles", title: "Fix Roles", terms: fixRoles },
     { id: "procedure-modes", title: "Procedure Modes", terms: procedureModes },
+    { id: "approach-route-types", title: "Approach Route Types", terms: approachRouteTypes },
     { id: "path-terminators", title: "Path Terminators", terms: pathTerminators },
     { id: "identifiers", title: "Names And Identifiers", terms: identifiers },
   ].filter((group) => group.terms.length > 0);

@@ -91,7 +91,10 @@ export interface ProcedureDetailLeg {
 
 export interface ProcedureDetailBranch {
   branchId: string;
+  branchKey?: string;
   branchIdent: string;
+  procedureType?: string;
+  transitionIdent?: string | null;
   branchRole: string;
   sequenceOrder: number;
   mergeFixRef: string | null;
