@@ -1012,3 +1012,26 @@
 
 ### Exact Next Recommended Step
 - Add final targeted/full validation, then continue with CA course-to-altitude geometry design in the next phase.
+
+## 2026-05-02 01:03 CEST
+
+### Goal Of This Session
+- Validate the missed-approach visual/geometry stages before moving into CA course-to-altitude design.
+
+### Commands Run / Checks Passed
+- `npm test -- --run`
+  - 100 passed.
+- `conda run -n aviation pytest python/tests`
+  - 73 passed.
+- `npm run build`
+  - TypeScript compile and Vite production build passed.
+
+### Current Status
+- Missed approach is now visibly differentiated in Procedure Details and independently represented in protected-geometry render bundles.
+- DF missed legs with positioned fixes can construct centerline/envelope geometry.
+- Missed section surfaces render in 3D protected mode as independent objects.
+
+### Remaining v3 Migration Gaps
+- CA course-to-altitude geometry is still not implemented.
+- Holding legs (`HM`/`HA`/`HF`) remain semantic markers plus diagnostics.
+- Full FAA missed section 1/2 surface construction and turning missed wind spiral remain future work.
