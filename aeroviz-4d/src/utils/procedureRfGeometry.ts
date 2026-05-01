@@ -4,7 +4,11 @@ import type {
   ProcedurePackageLeg,
   SourceRef,
 } from "../data/procedurePackage";
-import type { PolylineGeometry3D } from "./procedureSegmentGeometry";
+import type {
+  LateralEnvelopeGeometry,
+  PolylineGeometry3D,
+  WidthSample,
+} from "./procedureSegmentGeometry";
 import {
   FEET_TO_METERS,
   METERS_PER_NM,
@@ -78,6 +82,74 @@ function pointOnCircle(
     bearing,
     Math.hypot(eastM, northM),
   );
+}
+
+function cumulativeWidthSamples(centerline: PolylineGeometry3D, halfWidthNm: number): WidthSample[] {
+  let stationNm = 0;
+  return centerline.geoPositions.map((point, index) => {
+    if (index > 0) {
+      stationNm += distanceNm(centerline.geoPositions[index - 1], point);
+    }
+    return {
+      stationNm,
+      halfWidthNm,
+    };
+  });
+}
+
+export function buildRfParallelEnvelope(
+  geometryId: string,
+  envelopeType: "PRIMARY" | "SECONDARY",
+  centerline: PolylineGeometry3D,
+  halfWidthNm: number,
+): LateralEnvelopeGeometry | null {
+  if (
+    !centerline.isArc ||
+    !centerline.arcCenter ||
+    centerline.arcRadiusNm === undefined ||
+    centerline.arcStartAngleRad === undefined ||
+    centerline.arcSweepRad === undefined ||
+    !centerline.turnDirection ||
+    centerline.geoPositions.length < 2
+  ) {
+    return null;
+  }
+
+  const inwardRadiusNm = centerline.arcRadiusNm - halfWidthNm;
+  const outwardRadiusNm = centerline.arcRadiusNm + halfWidthNm;
+  if (inwardRadiusNm <= 0) return null;
+
+  const leftRadiusNm = centerline.turnDirection === "LEFT" ? inwardRadiusNm : outwardRadiusNm;
+  const rightRadiusNm = centerline.turnDirection === "LEFT" ? outwardRadiusNm : inwardRadiusNm;
+  const sampleCount = centerline.geoPositions.length - 1;
+  const leftGeoBoundary = centerline.geoPositions.map((point, index) =>
+    pointOnCircle(
+      centerline.arcCenter as GeoPoint,
+      (centerline.arcStartAngleRad as number) +
+        (centerline.arcSweepRad as number) * (index / sampleCount),
+      leftRadiusNm,
+      point.altM,
+    ),
+  );
+  const rightGeoBoundary = centerline.geoPositions.map((point, index) =>
+    pointOnCircle(
+      centerline.arcCenter as GeoPoint,
+      (centerline.arcStartAngleRad as number) +
+        (centerline.arcSweepRad as number) * (index / sampleCount),
+      rightRadiusNm,
+      point.altM,
+    ),
+  );
+
+  return {
+    geometryId,
+    envelopeType,
+    leftBoundary: leftGeoBoundary.map(toCartesian),
+    rightBoundary: rightGeoBoundary.map(toCartesian),
+    leftGeoBoundary,
+    rightGeoBoundary,
+    halfWidthNmSamples: cumulativeWidthSamples(centerline, halfWidthNm),
+  };
 }
 
 export function buildRfLeg(
@@ -201,6 +273,11 @@ export function buildRfLeg(
       geoPositions,
       geodesicLengthNm: arcLengthNm,
       isArc: true,
+      arcCenter: center,
+      arcRadiusNm,
+      arcStartAngleRad: startAngle,
+      arcSweepRad: sweepRad,
+      turnDirection: leg.turnDirection,
     },
     diagnostics,
   };

@@ -318,6 +318,14 @@ describe("procedure segment geometry kernel", () => {
     expect(bundle.centerline.geodesicLengthNm).toBeCloseTo(Math.PI, 2);
     expect(bundle.primaryEnvelope).toBeDefined();
     expect(bundle.secondaryEnvelope).toBeDefined();
+    const leftRadiusErrors = bundle.primaryEnvelope?.leftGeoBoundary.map((point) =>
+      Math.abs(distanceNm({ ...rfCenter, altM: point.altM }, point) - 1.4),
+    ) ?? [];
+    const rightRadiusErrors = bundle.primaryEnvelope?.rightGeoBoundary.map((point) =>
+      Math.abs(distanceNm({ ...rfCenter, altM: point.altM }, point) - 2.6),
+    ) ?? [];
+    expect(Math.max(...leftRadiusErrors)).toBeLessThan(0.005);
+    expect(Math.max(...rightRadiusErrors)).toBeLessThan(0.005);
     expect(bundle.turnJunctions).toEqual([]);
   });
 

@@ -21,7 +21,7 @@ import {
   buildTfTurnJunctions,
   type TurnJunctionGeometry,
 } from "./procedureTurnGeometry";
-import { buildRfLeg } from "./procedureRfGeometry";
+import { buildRfLeg, buildRfParallelEnvelope } from "./procedureRfGeometry";
 
 export type { CartesianPoint, GeoPoint } from "./procedureGeoMath";
 
@@ -30,6 +30,11 @@ export interface PolylineGeometry3D {
   geoPositions: GeoPoint[];
   geodesicLengthNm: number;
   isArc: boolean;
+  arcCenter?: GeoPoint;
+  arcRadiusNm?: number;
+  arcStartAngleRad?: number;
+  arcSweepRad?: number;
+  turnDirection?: "LEFT" | "RIGHT";
 }
 
 export interface StationAxisSample {
@@ -207,6 +212,18 @@ export function buildStraightEnvelope(
   };
 }
 
+function buildSegmentEnvelope(
+  geometryId: string,
+  envelopeType: "PRIMARY" | "SECONDARY",
+  centerline: PolylineGeometry3D,
+  halfWidthNm: number,
+): LateralEnvelopeGeometry {
+  return (
+    buildRfParallelEnvelope(geometryId, envelopeType, centerline, halfWidthNm) ??
+    buildStraightEnvelope(geometryId, envelopeType, centerline, halfWidthNm)
+  );
+}
+
 export function buildSegmentGeometryBundle(
   segment: ProcedureSegment,
   legs: ProcedurePackageLeg[],
@@ -250,6 +267,15 @@ export function buildSegmentGeometryBundle(
     worldPositions,
     geodesicLengthNm: Math.max(0, legGeometries.reduce((sum, geometry) => sum + geometry.geodesicLengthNm, 0)),
     isArc: legGeometries.some((geometry) => geometry.isArc),
+    ...(legGeometries.length === 1 && legGeometries[0].isArc
+      ? {
+          arcCenter: legGeometries[0].arcCenter,
+          arcRadiusNm: legGeometries[0].arcRadiusNm,
+          arcStartAngleRad: legGeometries[0].arcStartAngleRad,
+          arcSweepRad: legGeometries[0].arcSweepRad,
+          turnDirection: legGeometries[0].turnDirection,
+        }
+      : {}),
   };
   const stationAxis = computeStationAxis(centerline);
   const turnJunctions =
@@ -280,10 +306,10 @@ export function buildSegmentGeometryBundle(
     centerline,
     stationAxis,
     primaryEnvelope: geoPositions.length >= 2
-      ? buildStraightEnvelope(`${segment.segmentId}:primary`, "PRIMARY", centerline, segment.xttNm * 2)
+      ? buildSegmentEnvelope(`${segment.segmentId}:primary`, "PRIMARY", centerline, segment.xttNm * 2)
       : undefined,
     secondaryEnvelope: geoPositions.length >= 2 && segment.secondaryEnabled
-      ? buildStraightEnvelope(
+      ? buildSegmentEnvelope(
           `${segment.segmentId}:secondary`,
           "SECONDARY",
           centerline,
