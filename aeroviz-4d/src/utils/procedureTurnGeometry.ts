@@ -30,14 +30,29 @@ export interface TurnJunctionGeometry {
   secondaryPatch?: TurnJunctionPatch;
 }
 
+export interface InterSegmentTurnJunctionGeometry {
+  geometryId: string;
+  branchId: string;
+  fromSegmentId: string;
+  toSegmentId: string;
+  joinGapNm: number;
+  turnAngleDeg: number;
+  turnDirection: "LEFT" | "RIGHT";
+  constructionStatus: "VISUAL_FILL_ONLY";
+  primaryPatch: TurnJunctionPatch;
+  secondaryPatch?: TurnJunctionPatch;
+}
+
 export interface TurnJunctionBuildOptions {
   insetNm?: number;
   minTurnAngleDeg?: number;
+  maxJoinGapNm?: number;
 }
 
 const DEFAULT_TURN_JUNCTION_OPTIONS: Required<TurnJunctionBuildOptions> = {
   insetNm: 0.5,
   minTurnAngleDeg: 3,
+  maxJoinGapNm: 0.05,
 };
 
 function toDegrees(value: number): number {
@@ -168,4 +183,85 @@ export function buildTfTurnJunctions(
   }
 
   return turnJunctions;
+}
+
+export function buildInterSegmentTurnJunction(
+  branchId: string,
+  fromSegmentId: string,
+  toSegmentId: string,
+  fromCenterline: PolylineGeometry3D,
+  toCenterline: PolylineGeometry3D,
+  primaryHalfWidthNm: number,
+  secondaryOuterHalfWidthNm: number | null,
+  options: TurnJunctionBuildOptions = {},
+): InterSegmentTurnJunctionGeometry | null {
+  if (fromCenterline.geoPositions.length < 2 || toCenterline.geoPositions.length < 2) return null;
+
+  const opts = { ...DEFAULT_TURN_JUNCTION_OPTIONS, ...options };
+  const fromPoints = fromCenterline.geoPositions;
+  const toPoints = toCenterline.geoPositions;
+  const previous = fromPoints[fromPoints.length - 2];
+  const fromEnd = fromPoints[fromPoints.length - 1];
+  const toStart = toPoints[0];
+  const next = toPoints[1];
+  const joinGapNm = distanceNm(fromEnd, toStart);
+
+  if (joinGapNm > opts.maxJoinGapNm) return null;
+
+  const turnPoint = joinGapNm <= 1e-6
+    ? fromEnd
+    : interpolateGreatCircle(fromEnd, toStart, 0.5);
+  const inboundBearing = bearingRad(previous, fromEnd);
+  const outboundBearing = bearingRad(toStart, next);
+  const signedTurnAngleDeg = signedAngleDifferenceDeg(inboundBearing, outboundBearing);
+  const turnAngleDeg = Math.abs(signedTurnAngleDeg);
+
+  if (turnAngleDeg < opts.minTurnAngleDeg) return null;
+
+  const inboundLengthNm = distanceNm(previous, fromEnd);
+  const outboundLengthNm = distanceNm(toStart, next);
+  const insetNm = Math.min(opts.insetNm, inboundLengthNm / 2, outboundLengthNm / 2);
+  if (insetNm <= 1 / METERS_PER_NM) return null;
+
+  const patchGeoPositions = [
+    pointBeforeTurn(previous, fromEnd, insetNm),
+    turnPoint,
+    pointAfterTurn(toStart, next, insetNm),
+  ];
+  const patchStationsNm = [-insetNm, 0, insetNm];
+  const patchCenterline: PolylineGeometry3D = {
+    geoPositions: patchGeoPositions,
+    worldPositions: [],
+    geodesicLengthNm: insetNm * 2,
+    isArc: false,
+  };
+  const geometryId = `${branchId}:junction:${fromSegmentId}->${toSegmentId}`;
+
+  return {
+    geometryId,
+    branchId,
+    fromSegmentId,
+    toSegmentId,
+    joinGapNm,
+    turnAngleDeg,
+    turnDirection: signedTurnAngleDeg > 0 ? "RIGHT" : "LEFT",
+    constructionStatus: "VISUAL_FILL_ONLY",
+    primaryPatch: buildPatch(
+      `${geometryId}:primary`,
+      "PRIMARY",
+      patchCenterline,
+      patchStationsNm,
+      primaryHalfWidthNm,
+    ),
+    secondaryPatch:
+      secondaryOuterHalfWidthNm === null
+        ? undefined
+        : buildPatch(
+            `${geometryId}:secondary`,
+            "SECONDARY",
+            patchCenterline,
+            patchStationsNm,
+            secondaryOuterHalfWidthNm,
+          ),
+  };
 }
