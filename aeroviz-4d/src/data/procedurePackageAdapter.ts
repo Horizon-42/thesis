@@ -86,6 +86,14 @@ function branchKey(branch: ProcedureDetailBranch): string {
   return (branch.branchKey ?? branch.branchIdent).toUpperCase();
 }
 
+function packageIdFor(document: ProcedureDetailDocument): string {
+  return `${document.airport.icao.toUpperCase()}-${document.procedure.procedureIdent.toUpperCase()}-${document.runway.ident ?? "UNKNOWN"}`;
+}
+
+function scopedBranchId(document: ProcedureDetailDocument, branch: ProcedureDetailBranch): string {
+  return `${packageIdFor(document)}:branch:${branchKey(branch)}`;
+}
+
 function packageBranchRole(
   branch: ProcedureDetailBranch,
 ): ProcedurePackageBranch["branchRole"] {
@@ -174,11 +182,11 @@ function altitudeConstraint(leg: ProcedureDetailLeg): AltitudeConstraint | null 
 }
 
 function segmentIdFor(
-  branch: ProcedureDetailBranch,
+  branchId: string,
   segmentType: ProcedureSegment["segmentType"],
   index: number,
 ): string {
-  return `${branch.branchId}:segment:${segmentType.toLowerCase()}:${index + 1}`;
+  return `${branchId}:segment:${segmentType.toLowerCase()}:${index + 1}`;
 }
 
 interface SegmentDraft {
@@ -191,6 +199,7 @@ function groupBranchSegments(
   branch: ProcedureDetailBranch,
   diagnostics: BuildDiagnostic[],
 ): SegmentDraft[] {
+  const branchId = scopedBranchId(document, branch);
   const groups: Array<{ rawSegmentType: string; legs: ProcedureDetailLeg[] }> = [];
 
   branch.legs.forEach((leg) => {
@@ -204,7 +213,7 @@ function groupBranchSegments(
 
   return groups.map((group, index) => {
     const segmentType = segmentTypeFor(document, branch, group.rawSegmentType);
-    const segmentId = segmentIdFor(branch, segmentType, index);
+    const segmentId = segmentIdFor(branchId, segmentType, index);
     const navSpec = navSpecFor(segmentType);
     const xttNm = xttFor(segmentType);
     const attNm = attFor(segmentType);
@@ -246,7 +255,7 @@ function groupBranchSegments(
     return {
       segment: {
         segmentId,
-        branchId: branch.branchId,
+        branchId,
         segmentType,
         navSpec,
         startFixId: firstLeg.path.startFixRef,
@@ -336,6 +345,7 @@ function normalizeLeg(
 
 export function normalizeProcedurePackage(document: ProcedureDetailDocument): ProcedurePackage {
   const diagnostics: BuildDiagnostic[] = [];
+  const packageId = packageIdFor(document);
   const segmentDrafts = document.branches.flatMap((branch) =>
     groupBranchSegments(document, branch, diagnostics),
   );
@@ -344,24 +354,34 @@ export function normalizeProcedurePackage(document: ProcedureDetailDocument): Pr
     draft.sourceLegs.forEach((leg) => segmentByLegId.set(leg.legId, draft.segment));
   });
 
-  const branches: ProcedurePackageBranch[] = document.branches.map((branch) => ({
-    branchId: branch.branchId,
-    runwayId: document.runway.ident,
-    branchName: branch.transitionIdent ?? branch.branchIdent,
-    branchRole: packageBranchRole(branch),
-    segmentIds: segmentDrafts
-      .map((draft) => draft.segment)
-      .filter((segment) => segment.branchId === branch.branchId)
-      .map((segment) => segment.segmentId),
-    mergeToBranchId: branch.continuesWithBranchId ?? undefined,
-    legacy: {
-      branchIdent: branch.branchIdent,
-      branchKey: branchKey(branch),
-      defaultVisible: branch.defaultVisible,
-      mergeFixRef: branch.mergeFixRef,
-      continuesWithBranchId: branch.continuesWithBranchId,
-    },
-  }));
+  const branchIdBySourceId = new Map(
+    document.branches.map((branch) => [branch.branchId, scopedBranchId(document, branch)]),
+  );
+
+  const branches: ProcedurePackageBranch[] = document.branches.map((branch) => {
+    const branchId = scopedBranchId(document, branch);
+    return {
+      branchId,
+      runwayId: document.runway.ident,
+      branchName: branch.transitionIdent ?? branch.branchIdent,
+      branchRole: packageBranchRole(branch),
+      segmentIds: segmentDrafts
+        .map((draft) => draft.segment)
+        .filter((segment) => segment.branchId === branchId)
+        .map((segment) => segment.segmentId),
+      mergeToBranchId: branch.continuesWithBranchId
+        ? branchIdBySourceId.get(branch.continuesWithBranchId)
+        : undefined,
+      legacy: {
+        sourceBranchId: branch.branchId,
+        branchIdent: branch.branchIdent,
+        branchKey: branchKey(branch),
+        defaultVisible: branch.defaultVisible,
+        mergeFixRef: branch.mergeFixRef,
+        continuesWithBranchId: branch.continuesWithBranchId,
+      },
+    };
+  });
 
   const legs = document.branches.flatMap((branch) =>
     branch.legs.map((leg) => {
@@ -391,7 +411,7 @@ export function normalizeProcedurePackage(document: ProcedureDetailDocument): Pr
   });
 
   return {
-    packageId: `${document.airport.icao.toUpperCase()}-${document.procedure.procedureIdent.toUpperCase()}-${document.runway.ident ?? "UNKNOWN"}`,
+    packageId,
     airportId: document.airport.icao.toUpperCase(),
     runwayId: document.runway.ident,
     procedureId: document.procedure.procedureIdent,

@@ -204,6 +204,7 @@ export interface ProcedurePackageBranch {
   mergeToBranchId?: string;
   divergesFromBranchId?: string;
   legacy: {
+    sourceBranchId: string;
     branchIdent: string;
     branchKey: string;
     defaultVisible: boolean;

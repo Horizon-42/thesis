@@ -310,7 +310,10 @@ describe("ProcedurePanel", () => {
 
     fireEvent.click(checkbox as HTMLInputElement);
 
-    expect(setProcedureBranchVisible).toHaveBeenCalledWith("branch:AOTTOS", true);
+    expect(setProcedureBranchVisible).toHaveBeenCalledWith(
+      "KRDU-R05LY-RW05L:branch:AOTTOS",
+      true,
+    );
   });
 
   it("opens the runway trajectory profile for a runway group", async () => {

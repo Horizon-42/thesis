@@ -44,7 +44,11 @@ function branchIsVisible(
   return procedureVisibility[branch.branchId] ?? branch.defaultVisible;
 }
 
-function diagnosticMessages(data: ProcedureRenderBundleData, branchId: string): string[] {
+function diagnosticMessages(
+  data: ProcedureRenderBundleData,
+  branchId: string,
+  sourceBranchId: string,
+): string[] {
   const renderBundle = data.renderBundles.find((bundle) =>
     bundle.branchBundles.some((branch) => branch.branchId === branchId),
   );
@@ -52,7 +56,7 @@ function diagnosticMessages(data: ProcedureRenderBundleData, branchId: string): 
   const sourceWarnings =
     data.documents
       .flatMap((document) => document.branches)
-      .find((branch) => branch.branchId === branchId)
+      .find((branch) => branch.branchId === sourceBranchId)
       ?.warnings ?? [];
   const geometryWarnings =
     branchBundle?.segmentBundles.flatMap((segment) =>
@@ -72,7 +76,7 @@ function branchItemsFromRenderData(data: ProcedureRenderBundleData): ProcedureBr
       branchIdent: branch.legacy.branchIdent,
       branchType: branch.branchRole,
       defaultVisible: branch.legacy.defaultVisible,
-      warnings: diagnosticMessages(data, branch.branchId),
+      warnings: diagnosticMessages(data, branch.branchId, branch.legacy.sourceBranchId),
     })),
   );
 }

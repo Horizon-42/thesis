@@ -30,6 +30,7 @@ const samplePackage: ProcedurePackage = {
       branchRole: "STRAIGHT_IN",
       segmentIds: ["segment:final"],
       legacy: {
+        sourceBranchId: "branch:R",
         branchIdent: "R",
         branchKey: "R",
         defaultVisible: true,

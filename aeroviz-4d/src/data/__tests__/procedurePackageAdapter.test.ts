@@ -188,12 +188,15 @@ describe("normalizeProcedurePackage", () => {
     ]);
     expect(pkg.branches).toEqual([
       expect.objectContaining({
-        branchId: "branch:R",
+        branchId: "KRDU-R05LY-RW05L:branch:R",
         branchRole: "STRAIGHT_IN",
         segmentIds: [
-          "branch:R:segment:intermediate:1",
-          "branch:R:segment:final_lnav:2",
+          "KRDU-R05LY-RW05L:branch:R:segment:intermediate:1",
+          "KRDU-R05LY-RW05L:branch:R:segment:final_lnav:2",
         ],
+        legacy: expect.objectContaining({
+          sourceBranchId: "branch:R",
+        }),
       }),
     ]);
     expect(pkg.segments.map((segment) => ({
@@ -205,7 +208,7 @@ describe("normalizeProcedurePackage", () => {
       verticalRule: segment.verticalRule?.kind,
     }))).toEqual([
       {
-        segmentId: "branch:R:segment:intermediate:1",
+        segmentId: "KRDU-R05LY-RW05L:branch:R:segment:intermediate:1",
         segmentType: "INTERMEDIATE",
         legIds: ["leg:R:010"],
         xttNm: 1,
@@ -213,7 +216,7 @@ describe("normalizeProcedurePackage", () => {
         verticalRule: "NONE",
       },
       {
-        segmentId: "branch:R:segment:final_lnav:2",
+        segmentId: "KRDU-R05LY-RW05L:branch:R:segment:final_lnav:2",
         segmentType: "FINAL_LNAV",
         legIds: ["leg:R:020", "leg:R:030"],
         xttNm: 0.3,
@@ -229,7 +232,7 @@ describe("normalizeProcedurePackage", () => {
     }))).toEqual([
       {
         legId: "leg:R:010",
-        segmentId: "branch:R:segment:intermediate:1",
+        segmentId: "KRDU-R05LY-RW05L:branch:R:segment:intermediate:1",
         legType: "IF",
         altitude: {
           kind: "AT",
@@ -240,7 +243,7 @@ describe("normalizeProcedurePackage", () => {
       },
       {
         legId: "leg:R:020",
-        segmentId: "branch:R:segment:final_lnav:2",
+        segmentId: "KRDU-R05LY-RW05L:branch:R:segment:final_lnav:2",
         legType: "TF",
         altitude: {
           kind: "AT",
@@ -251,7 +254,7 @@ describe("normalizeProcedurePackage", () => {
       },
       {
         legId: "leg:R:030",
-        segmentId: "branch:R:segment:final_lnav:2",
+        segmentId: "KRDU-R05LY-RW05L:branch:R:segment:final_lnav:2",
         legType: "TF",
         altitude: null,
       },
@@ -274,5 +277,30 @@ describe("normalizeProcedurePackage", () => {
       pkg.diagnostics.find((diagnostic) => diagnostic.code === "MODE_COLLAPSED_TO_LNAV")
         ?.message,
     ).toContain("LPV / LNAV/VNAV / LNAV");
+  });
+
+  it("scopes straight-in branch ids by procedure and runway", () => {
+    const rw05Package = normalizeProcedurePackage(sampleDocument);
+    const rw32Package = normalizeProcedurePackage({
+      ...sampleDocument,
+      procedureUid: "KRDU-R32-RW32",
+      runway: {
+        ...sampleDocument.runway,
+        ident: "RW32",
+        landingThresholdFixRef: "fix:RW32",
+      },
+      procedure: {
+        ...sampleDocument.procedure,
+        procedureIdent: "R32",
+        chartName: "RNAV(GPS) RWY 32",
+        runwayIdent: "RW32",
+      },
+    });
+
+    expect(rw05Package.branches[0].legacy.sourceBranchId).toBe("branch:R");
+    expect(rw32Package.branches[0].legacy.sourceBranchId).toBe("branch:R");
+    expect(rw05Package.branches[0].branchId).toBe("KRDU-R05LY-RW05L:branch:R");
+    expect(rw32Package.branches[0].branchId).toBe("KRDU-R32-RW32:branch:R");
+    expect(rw05Package.branches[0].branchId).not.toBe(rw32Package.branches[0].branchId);
   });
 });
