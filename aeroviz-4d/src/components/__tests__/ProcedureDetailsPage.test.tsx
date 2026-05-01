@@ -302,6 +302,27 @@ const missedSectionDocument = {
       legs: [
         ...sampleDocument.branches[0].legs,
         {
+          legId: "leg:R:035",
+          sequence: 35,
+          segmentType: "missed",
+          path: {
+            pathTerminator: "CA",
+            constructionMethod: "course_to_altitude",
+            startFixRef: "fix:RW05L",
+            endFixRef: "fix:RW05L",
+            courseDeg: 305,
+          },
+          termination: { kind: "fix", fixRef: "fix:RW05L" },
+          constraints: {
+            altitude: { qualifier: "at", valueFt: 1000, rawText: "1000 ft" },
+            speedKt: null,
+            geometryAltitudeFt: 1000,
+          },
+          roleAtEnd: "UNKNOWN",
+          sourceRefs: ["src:cifp-detail"],
+          quality: { status: "exact", sourceLine: 35, renderedInPlanView: true },
+        },
+        {
           legId: "leg:R:040",
           sequence: 40,
           segmentType: "missed",
@@ -442,6 +463,7 @@ describe("ProcedureDetailsPage", () => {
     render(<ProcedureDetailsPage />);
 
     expect((await screen.findAllByText("S1/S2")).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("CA 305 deg").length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText("DF leg").length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText("HM leg").length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText(/WARN UNSUPPORTED_LEG_TYPE/).length).toBeGreaterThan(0);

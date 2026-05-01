@@ -486,9 +486,11 @@ interface MissedLegMarker {
   legId: string;
   point: ProcedureChartPoint;
   label: string;
+  courseTarget?: { xM: number; yM: number };
 }
 
 const MISSED_LEG_MARKER_TYPES = new Set(["CA", "DF", "HM", "HA", "HF"]);
+const CA_DEBUG_RAY_LENGTH_M = 3 * METERS_PER_NM;
 
 function buildRfPlanMarkers(
   document: ProcedureDetailDocument | null,
@@ -570,13 +572,25 @@ function buildMissedLegMarkers(
           ? pointByBranchAndFix.get(`${branch.branchId}:${leg.path.startFixRef}`)
           : undefined);
       if (!anchorPoint) return [];
+      const courseDeg = leg.path.courseDeg;
+      const courseTarget =
+        pathTerminator === "CA" && typeof courseDeg === "number" && Number.isFinite(courseDeg)
+          ? {
+              xM: anchorPoint.xM + Math.sin((courseDeg * Math.PI) / 180) * CA_DEBUG_RAY_LENGTH_M,
+              yM: anchorPoint.yM + Math.cos((courseDeg * Math.PI) / 180) * CA_DEBUG_RAY_LENGTH_M,
+            }
+          : undefined;
 
       return [
         {
           branchId: branch.branchId,
           legId: leg.legId,
           point: anchorPoint,
-          label: `${pathTerminator} leg`,
+          label:
+            pathTerminator === "CA" && typeof courseDeg === "number" && Number.isFinite(courseDeg)
+              ? `CA ${courseDeg.toFixed(0)} deg`
+              : `${pathTerminator} leg`,
+          courseTarget,
         },
       ];
     }),
@@ -686,6 +700,7 @@ function ProcedurePlanView({
     ...rfDomainPoints,
     ...missedSectionMarkers.map((marker) => marker.point),
     ...missedLegMarkers.map((marker) => marker.point),
+    ...missedLegMarkers.flatMap((marker) => marker.courseTarget ? [marker.courseTarget] : []),
   ];
   const plotWidth = SVG_WIDTH - SVG_PADDING_X * 2;
   const plotHeight = PLAN_SVG_HEIGHT - SVG_PADDING_Y * 2;
@@ -958,6 +973,9 @@ function ProcedurePlanView({
         const isFocused = !focusedBranchId || marker.branchId === focusedBranchId;
         const x = scaleX(marker.point.xM);
         const y = scaleY(marker.point.yM);
+        const courseTarget = marker.courseTarget
+          ? { x: scaleX(marker.courseTarget.xM), y: scaleY(marker.courseTarget.yM) }
+          : null;
         return (
           <g
             key={`missed-leg-${marker.legId}`}
@@ -967,6 +985,15 @@ function ProcedurePlanView({
             onMouseEnter={() => onPreviewFix(marker.point.fixId, marker.branchId)}
             onClick={() => onSelectFix(marker.point.fixId, marker.branchId)}
           >
+            {courseTarget ? (
+              <line
+                x1={x}
+                y1={y}
+                x2={courseTarget.x}
+                y2={courseTarget.y}
+                className="procedure-details-ca-course-ray"
+              />
+            ) : null}
             <rect x={x - 14} y={y + 11} width={54} height={18} rx={4} />
             <text x={x - 8} y={y + 24}>{marker.label}</text>
           </g>

@@ -1070,3 +1070,33 @@
 
 ### Exact Next Recommended Step
 - Design and implement a conservative CA debug geometry that shows course direction and altitude termination semantics without pretending to know certified endpoint distance.
+
+## 2026-05-02 01:20 CEST
+
+### Goal Of This Session
+- Make preserved missed-approach CA first-leg course semantics visible in Procedure Details while keeping it clearly separate from certified CA endpoint/surface construction.
+
+### Decisions Locked
+- CA missed-leg markers now include the parsed outbound course when available, for example `CA 305 deg`.
+- The 2D Procedure Details plan view draws a short dashed CA course ray from the positioned CA anchor fix.
+- The ray is intentionally fixed-length debug geometry; it communicates course direction only and does not claim a CA termination point, climb distance, or protected missed-approach surface.
+
+### Files Changed
+- `src/components/ProcedureDetailsPage.tsx`
+- `src/components/__tests__/ProcedureDetailsPage.test.tsx`
+- `src/index.css`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/components/__tests__/ProcedureDetailsPage.test.tsx`
+- `npm run build`
+
+### Current Status
+- Procedure Details can now visually distinguish the CA first leg in missed approach with both semantic labeling and course-direction context.
+
+### Known Blockers
+- CA course-to-altitude endpoint construction still needs a validated termination model.
+- The CA debug ray is not yet a reusable geometry object in the render-bundle layer.
+
+### Exact Next Recommended Step
+- Promote CA debug/course metadata into a dedicated geometry helper and render-bundle object so 2D/3D views can consume the same conservative semantics without duplicating UI-only logic.

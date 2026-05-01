@@ -1782,6 +1782,12 @@ body,
   letter-spacing: 0.02em;
 }
 
+.procedure-details-ca-course-ray {
+  stroke: rgba(248, 250, 252, 0.86);
+  stroke-width: 2.2;
+  stroke-dasharray: 8 7;
+}
+
 .procedure-details-arrowhead {
   fill: context-stroke;
 }
