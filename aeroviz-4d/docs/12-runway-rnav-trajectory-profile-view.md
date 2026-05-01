@@ -1,5 +1,75 @@
 # Runway RNAV Trajectory Profile View
 
+## Dev Log
+
+### 2026-05-01: RW23R Side-View Isolated Fix Marker
+
+#### Symptom
+
+In the `RW23R` side view, one fix marker could appear by itself, not lying on
+any visible branch line. This was most obvious when multiple RW23R procedure
+branches were active or when a transition branch was selected in the procedure
+selector.
+
+#### Root Cause
+
+The side-view route line and the side-view fix markers were derived from two
+different display layers:
+
+- Route lines came from `displayedPlateRoutes`, which intentionally filters the
+  side view to the currently displayed branch set. When a transition is active,
+  the side view prioritizes transition routes because those routes already
+  include the continued final segment.
+- Fix markers came from `referenceMarks`, which are aggregated across active
+  routes. `referenceMarks` uses `upsertReferenceMark()` to merge the same
+  fix/role bucket across routes.
+
+For RW23R, several branches share fixes such as `DABKE`, `PRSTN`, `BODLY`, and
+`RW23R`, but the same named fix can be present in different active route
+contexts. After aggregation, the marker position could represent a merged
+average instead of the exact point on the displayed branch line. In side view
+this looked like an isolated fix.
+
+#### Fix
+
+Procedure fix markers are now rendered directly inside the SVG group for each
+route in `displayedPlateRoutes`. This means every non-threshold fix marker is
+mounted and unmounted with the route line that owns it in both side and top
+views.
+
+The threshold marker is still preserved from the existing runway reference marks
+so the real selected runway label, such as `RW23R · Threshold`, remains stable.
+The top view keeps using the aggregated reference-mark behavior because the
+top-view chart is intended to summarize the active horizontal plate and avoid
+over-labeling dense shared fixes.
+
+Fix labels and vertical ticks still use de-conflicted reference marks, but those
+labels no longer own the fix circles. This keeps labels readable while
+preventing stale or orphaned fix dots after a procedure branch is selected and
+then unselected. It also prevents close fixes such as `BUTTS` / `WARMS` from
+disappearing in the top view just because one of their labels was suppressed.
+
+#### Implementation
+
+The fix lives in `src/components/RunwayTrajectoryProfilePanel.tsx`:
+
+- `displayedReferenceMarks` now branches by view mode.
+- For side view, `buildSideReferenceMarks()` creates marks from
+  `displayedPlateRoutes.flatMap(route.points)`.
+- Route points are rendered in the same keyed `<g>` as their route
+  line, and include `data-route-id` / `data-fix-ident` debug attributes.
+- Top view still uses `referenceMarks` for label/tick de-conflict, but route
+  fix circles come from the exact active route points.
+
+#### Verification
+
+Checks run after the fix:
+
+```sh
+npm test -- --run src/components/__tests__/RunwayTrajectoryProfilePanel.test.tsx src/utils/__tests__/runwayProfileGeometry.test.ts src/components/__tests__/ProcedurePanel.test.tsx src/hooks/__tests__/useProcedureLayer.test.ts src/components/__tests__/ProcedureDetailsPage.test.tsx
+npm run build
+```
+
 ## Purpose
 
 Add a runway-scoped 2D trajectory profile panel that opens for a selected
@@ -78,13 +148,15 @@ These are the few terms that matter most for this feature.
   An aircraft that is currently inside the selected runway's RNAV horizontal
   plate. Only these aircraft appear in the panel.
 
-- `Side view`
+- `Vertical profile`
   A 2D view of `x` and `z`. In plain words: how far the aircraft is along the
-  runway approach, and how high it is.
+  runway approach, and how high it is. It is displayed as nautical miles on
+  `x` and feet on `z`.
 
-- `Top view`
+- `Plan view`
   A 2D view of `x` and `y`. In plain words: how far the aircraft is along the
-  runway approach, and how far left/right it is from the centerline.
+  runway approach, and how far left/right it is from the centerline. It is
+  displayed in nautical miles.
 
 - `Time t`
   The current simulation time from the Cesium clock. It drives the moving point
@@ -119,9 +191,9 @@ Recommended convention:
 
 ```text
 t = current Cesium clock time
-x = distance to threshold along the inbound final approach course, metres
-y = lateral offset from centerline, metres
-z = altitude, metres MSL
+x = distance to threshold along the inbound final approach course, stored in metres and displayed in nautical miles
+y = lateral offset from centerline, stored in metres and displayed in nautical miles
+z = height above threshold, stored in metres and displayed in feet
 ```
 
 In this convention:
@@ -367,10 +439,10 @@ The panel should be a floating overlay, similar to other AeroViz panels:
 | Runway RW05L RNAV Profile                           [x]  |
 | Time 2026-...Z | 3 aircraft inside plate                 |
 | Procedure plate: RNAV(GPS) Y RW05L + ...                 |
-| [Side x-z] [Top x-y] [Split]                             |
+| [Vertical] [Plan] [Split]                                |
 |                                                          |
-| Side view: x-z over t                                    |
-| z altitude (m)                                           |
+| Vertical profile: x-z over t                             |
+| z height above threshold (ft)                            |
 |   ^                                                      |
 |   |       UAL123 --> trail over t                        |
 |   |             DAL456                                   |
@@ -379,8 +451,8 @@ The panel should be a floating overlay, similar to other AeroViz panels:
 |   +-------------------------------------------------> x  |
 |      15 NM          10 NM          5 NM          THR      |
 |                                                          |
-| Top view: x-y over t                                     |
-| y lateral offset (m)                                     |
+| Plan view: x-y over t                                    |
+| y lateral offset (NM)                                    |
 |   ^ right                                                |
 |   |      RNAV boundary                                   |
 |   |        UAL123 --> trail over t                       |
@@ -420,12 +492,12 @@ Recommended visible information:
 
 The panel should support one of these layouts:
 
-- `Side x-z`: runway side view with `x` and `z` spatial axes.
-- `Top x-y`: runway top view with `x` and `y` spatial axes.
+- `Vertical`: runway vertical profile with `x` and `z` spatial axes.
+- `Plan`: runway plan view with `x` and `y` spatial axes.
 - `Split`: both views stacked or side-by-side, depending on available panel
   width.
 
-Version 1 can default to `Split` on desktop and `Side x-z` on narrow screens.
+Version 1 can default to `Split` on desktop and `Vertical` on narrow screens.
 The two views must share the same filtering, current time `t`, runway frame,
 and aircraft point list.
 
