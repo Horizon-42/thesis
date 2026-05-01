@@ -10,6 +10,7 @@ from preprocess_procedures import (
     FixRecord,
     ProcedureLeg,
     build_route_points,
+    build_branch_document,
     build_procedure_detail_document,
     decode_cifp_coordinate,
     discover_rnav_procedures,
@@ -280,6 +281,55 @@ def test_unresolved_fix_is_warned_and_skipped() -> None:
 
     assert route_points == []
     assert any("unresolved fix MISSING" in warning for warning in warnings)
+
+
+def test_branch_document_exports_rf_path_metadata() -> None:
+    legs = [
+        ProcedureLeg(
+            sequence=10,
+            branch="R",
+            fix_ident="START",
+            leg_type="IF",
+            role="IF",
+            altitude_ft=3000,
+            source_line=1,
+        ),
+        ProcedureLeg(
+            sequence=20,
+            branch="R",
+            fix_ident="END",
+            leg_type="RF",
+            role="FAF",
+            altitude_ft=2200,
+            source_line=2,
+            turn_direction="LEFT",
+            arc_radius_nm=2.0,
+            center_lat_deg=35.82,
+            center_lon_deg=-78.86,
+        ),
+    ]
+    fixes = {
+        "START": FixRecord("START", -78.9, 35.8, 3000, 1),
+        "END": FixRecord("END", -78.84, 35.84, 2200, 2),
+    }
+
+    branch = build_branch_document(
+        branch_ident="R",
+        branch_order=1,
+        final_branch_ident="R",
+        branch_legs=legs,
+        branch_route_points=[],
+        fix_records=fixes,
+        branch_warnings=[],
+        final_fix_idents={"START", "END"},
+    )
+
+    rf_path = branch["legs"][1]["path"]
+    assert rf_path["pathTerminator"] == "RF"
+    assert rf_path["turnDirection"] == "LEFT"
+    assert rf_path["arcRadiusNm"] == 2.0
+    assert rf_path["centerLatDeg"] == 35.82
+    assert rf_path["centerLonDeg"] == -78.86
 
 
 def test_build_krdu_r05ly_procedure_detail_document() -> None:

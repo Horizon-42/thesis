@@ -66,6 +66,10 @@ export interface ProcedureDetailLeg {
     constructionMethod: string;
     startFixRef: string | null;
     endFixRef: string;
+    turnDirection?: "LEFT" | "RIGHT";
+    arcRadiusNm?: number;
+    centerLatDeg?: number;
+    centerLonDeg?: number;
   };
   termination: {
     kind: string;

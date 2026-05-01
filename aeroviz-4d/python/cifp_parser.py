@@ -47,6 +47,10 @@ class ProcedureLeg:
     fix_region_code: str | None = None
     procedure_type: str | None = None
     transition_ident: str | None = None
+    turn_direction: str | None = None
+    arc_radius_nm: float | None = None
+    center_lat_deg: float | None = None
+    center_lon_deg: float | None = None
 
 
 def decode_cifp_coordinate(token: str) -> float:

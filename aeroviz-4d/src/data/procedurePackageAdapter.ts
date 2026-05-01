@@ -306,14 +306,20 @@ function normalizeLeg(
     });
   }
   if (normalizedLegType === "RF") {
-    diagnostics.push({
-      severity: "ERROR",
-      segmentId: segment.segmentId,
-      legId: leg.legId,
-      code: "RF_RADIUS_MISSING",
-      message: `${leg.legId}: RF leg requires radius and center fields before geometry can be constructed.`,
-      sourceRefs: sourceRefs(leg.sourceRefs),
-    });
+    const hasRfGeometry =
+      leg.path.arcRadiusNm !== undefined &&
+      leg.path.centerLatDeg !== undefined &&
+      leg.path.centerLonDeg !== undefined;
+    if (!hasRfGeometry) {
+      diagnostics.push({
+        severity: "ERROR",
+        segmentId: segment.segmentId,
+        legId: leg.legId,
+        code: "RF_RADIUS_MISSING",
+        message: `${leg.legId}: RF leg requires radius and center fields before geometry can be constructed.`,
+        sourceRefs: sourceRefs(leg.sourceRefs),
+      });
+    }
   }
 
   return {
@@ -323,6 +329,10 @@ function normalizeLeg(
     rawPathTerminator: leg.path.pathTerminator,
     startFixId: leg.path.startFixRef,
     endFixId: leg.path.endFixRef,
+    turnDirection: leg.path.turnDirection,
+    arcRadiusNm: leg.path.arcRadiusNm,
+    centerLatDeg: leg.path.centerLatDeg,
+    centerLonDeg: leg.path.centerLonDeg,
     requiredAltitude: altitudeConstraint(leg),
     requiredSpeed: leg.constraints.speedKt
       ? { maxKias: leg.constraints.speedKt, sourceText: `${leg.constraints.speedKt} kt` }

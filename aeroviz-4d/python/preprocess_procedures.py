@@ -655,6 +655,19 @@ def route_points_by_sequence(route_points: list[RoutePoint]) -> dict[int, RouteP
     return {point.sequence: point for point in route_points}
 
 
+def rf_path_metadata(leg: ProcedureLeg) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    if leg.turn_direction is not None:
+        metadata["turnDirection"] = leg.turn_direction
+    if leg.arc_radius_nm is not None:
+        metadata["arcRadiusNm"] = leg.arc_radius_nm
+    if leg.center_lat_deg is not None:
+        metadata["centerLatDeg"] = leg.center_lat_deg
+    if leg.center_lon_deg is not None:
+        metadata["centerLonDeg"] = leg.center_lon_deg
+    return metadata
+
+
 def build_branch_document(
     *,
     branch_ident: str,
@@ -692,6 +705,7 @@ def build_branch_document(
                     "constructionMethod": path_construction_method(leg.leg_type),
                     "startFixRef": None if previous_fix_ident is None else normalize_fix_ref(previous_fix_ident),
                     "endFixRef": normalize_fix_ref(leg.fix_ident),
+                    **rf_path_metadata(leg),
                 },
                 "termination": {
                     "kind": "fix",

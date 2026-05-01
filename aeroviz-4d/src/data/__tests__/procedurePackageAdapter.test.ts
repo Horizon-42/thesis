@@ -279,6 +279,47 @@ describe("normalizeProcedurePackage", () => {
     ).toContain("LPV / LNAV/VNAV / LNAV");
   });
 
+  it("passes exported RF metadata through to the canonical package leg", () => {
+    const rfDocument: ProcedureDetailDocument = {
+      ...sampleDocument,
+      branches: [
+        {
+          ...sampleDocument.branches[0],
+          legs: [
+            sampleDocument.branches[0].legs[0],
+            {
+              ...sampleDocument.branches[0].legs[1],
+              legId: "leg:R:020",
+              path: {
+                ...sampleDocument.branches[0].legs[1].path,
+                pathTerminator: "RF",
+                constructionMethod: "radius_to_fix",
+                turnDirection: "LEFT",
+                arcRadiusNm: 2,
+                centerLatDeg: 35.82,
+                centerLonDeg: -78.86,
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const pkg = normalizeProcedurePackage(rfDocument);
+    const rfLeg = pkg.legs.find((leg) => leg.legType === "RF");
+
+    expect(rfLeg).toMatchObject({
+      legType: "RF",
+      turnDirection: "LEFT",
+      arcRadiusNm: 2,
+      centerLatDeg: 35.82,
+      centerLonDeg: -78.86,
+    });
+    expect(pkg.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain(
+      "RF_RADIUS_MISSING",
+    );
+  });
+
   it("scopes straight-in branch ids by procedure and runway", () => {
     const rw05Package = normalizeProcedurePackage(sampleDocument);
     const rw32Package = normalizeProcedurePackage({
