@@ -884,3 +884,35 @@
 
 ### Exact Next Recommended Step
 - Start implementing the first constructible missed approach geometry path, beginning with straight DF missed section support and tests.
+
+## 2026-05-02 00:43 CEST
+
+### Goal Of This Session
+- Add the first constructible missed approach geometry path: positioned DF direct-to-fix legs.
+
+### Decisions Locked
+- DF is treated as a straight fix-to-fix geodesic when both start and end fixes are positioned.
+- DF can now participate in segment centerline and primary/secondary envelope construction.
+- CA/HM/HA/HF remain unsupported geometry and continue to emit diagnostics.
+- The existing `buildTfLeg` path is generalized to accept TF/DF because both first-pass implementations are positioned fix-to-fix paths.
+
+### Files Changed
+- `src/utils/procedureSegmentGeometry.ts`
+- `src/utils/__tests__/procedureSegmentGeometry.test.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/utils/__tests__/procedureSegmentGeometry.test.ts`
+- `npm run build`
+
+### Current Status
+- Straight DF missed sections can now be rendered as protected segment geometry when source fixes are available.
+- Unsupported missed geometry diagnostics now focus on CA/HM/HA/HF rather than all missed leg types.
+
+### Known Blockers
+- CA course-to-altitude geometry is still not constructible.
+- HM/HA/HF hold geometry is still not constructible.
+- Straight missed section 1/2 surface rules are not yet implemented beyond centerline/envelope.
+
+### Exact Next Recommended Step
+- Add render-bundle coverage for DF missed geometry and ensure Procedure Details diagnostics no longer report DF as unsupported when a positioned DF leg is present.

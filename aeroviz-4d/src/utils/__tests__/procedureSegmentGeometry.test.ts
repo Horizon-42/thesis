@@ -450,12 +450,12 @@ describe("procedure segment geometry kernel", () => {
     expect(bundle.diagnostics.map((diagnostic) => diagnostic.code)).toContain("FINAL_HAS_TURN");
   });
 
-  it("diagnoses preserved but unsupported missed approach leg geometry", () => {
+  it("builds straight DF missed approach geometry when start and end fixes are positioned", () => {
     const missedSegment: ProcedureSegment = {
       ...rfSegment,
       segmentId: "segment:missed-s1",
       segmentType: "MISSED_S1",
-      legIds: ["leg:R:040", "leg:R:050"],
+      legIds: ["leg:R:040"],
       startFixId: "fix:RW",
       endFixId: "fix:B",
       xttNm: 1,
@@ -479,19 +479,62 @@ describe("procedure segment geometry kernel", () => {
         constructionMethod: "direct_to_fix",
       },
     };
+
+    const bundle = buildSegmentGeometryBundle(missedSegment, [dfLeg], fixes, {
+      samplingStepNm: 1,
+      enableDebugPrimitives: false,
+    });
+
+    expect(bundle.diagnostics).toEqual([]);
+    expect(bundle.centerline.geoPositions.length).toBeGreaterThan(2);
+    expect(bundle.centerline.geoPositions[0].lonDeg).toBeCloseTo(fixes.get("fix:RW")?.lonDeg ?? 0, 8);
+    expect(bundle.centerline.geoPositions[0].latDeg).toBeCloseTo(fixes.get("fix:RW")?.latDeg ?? 0, 8);
+    expect(bundle.primaryEnvelope).toBeDefined();
+    expect(bundle.secondaryEnvelope).toBeDefined();
+  });
+
+  it("diagnoses preserved but unsupported missed approach leg geometry", () => {
+    const missedSegment: ProcedureSegment = {
+      ...rfSegment,
+      segmentId: "segment:missed-s1",
+      segmentType: "MISSED_S1",
+      legIds: ["leg:R:040", "leg:R:050"],
+      startFixId: "fix:RW",
+      endFixId: "fix:B",
+      xttNm: 1,
+      attNm: 1,
+      legacy: {
+        rawSegmentType: "missed_s1",
+        sequenceRange: [40, 50],
+      },
+    };
+    const caLeg: ProcedurePackageLeg = {
+      ...tfLeg,
+      legId: "leg:R:040",
+      segmentId: "segment:missed-s1",
+      legType: "CA",
+      rawPathTerminator: "CA",
+      startFixId: "fix:RW",
+      endFixId: "fix:B",
+      legacy: {
+        ...tfLeg.legacy,
+        sequence: 40,
+        constructionMethod: "course_to_altitude",
+      },
+    };
     const hmLeg: ProcedurePackageLeg = {
-      ...dfLeg,
+      ...caLeg,
       legId: "leg:R:050",
       legType: "HM",
       rawPathTerminator: "HM",
       legacy: {
-        ...dfLeg.legacy,
+        ...caLeg.legacy,
         sequence: 50,
         constructionMethod: "hold_to_manual",
       },
     };
 
-    const bundle = buildSegmentGeometryBundle(missedSegment, [dfLeg, hmLeg], fixes, {
+    const bundle = buildSegmentGeometryBundle(missedSegment, [caLeg, hmLeg], fixes, {
       samplingStepNm: 1,
       enableDebugPrimitives: false,
     });
@@ -503,7 +546,7 @@ describe("procedure segment geometry kernel", () => {
       "UNSUPPORTED_LEG_TYPE",
       "UNSUPPORTED_LEG_TYPE",
     ]);
-    expect(bundle.diagnostics[0].message).toContain("DF is preserved");
+    expect(bundle.diagnostics[0].message).toContain("CA is preserved");
     expect(bundle.diagnostics[1].message).toContain("HM is preserved");
   });
 });

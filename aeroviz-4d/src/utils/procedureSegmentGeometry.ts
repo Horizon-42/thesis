@@ -121,11 +121,11 @@ export function buildTfLeg(
 ): { geometry: PolylineGeometry3D | null; diagnostics: BuildDiagnostic[] } {
   const diagnostics: BuildDiagnostic[] = [];
 
-  if (leg.legType !== "TF") {
+  if (leg.legType !== "TF" && leg.legType !== "DF") {
     diagnostics.push(
       diagnostic(
         "UNSUPPORTED_LEG_TYPE",
-        `${leg.legId}: buildTfLeg only accepts TF legs; received ${leg.legType}.`,
+        `${leg.legId}: buildTfLeg only accepts TF/DF legs; received ${leg.legType}.`,
         "ERROR",
         leg.segmentId,
         leg.legId,
@@ -144,7 +144,7 @@ export function buildTfLeg(
     diagnostics.push(
       diagnostic(
         "SOURCE_INCOMPLETE",
-        `${leg.legId}: TF geometry requires positioned start and end fixes.`,
+        `${leg.legId}: ${leg.legType} geometry requires positioned start and end fixes.`,
         "ERROR",
         leg.segmentId,
         leg.legId,
@@ -241,10 +241,14 @@ export function buildSegmentGeometryBundle(
   const diagnostics: BuildDiagnostic[] = [];
   const segmentLegs = legs.filter((leg) => leg.segmentId === segment.segmentId);
   const constructibleLegs = segmentLegs.filter(
-    (leg) => leg.legType === "TF" || leg.legType === "RF",
+    (leg) => leg.legType === "TF" || leg.legType === "RF" || leg.legType === "DF",
   );
   const unsupportedGeometryLegs = segmentLegs.filter(
-    (leg) => leg.legType !== "TF" && leg.legType !== "RF" && leg.legType !== "IF",
+    (leg) =>
+      leg.legType !== "TF" &&
+      leg.legType !== "RF" &&
+      leg.legType !== "DF" &&
+      leg.legType !== "IF",
   );
 
   unsupportedGeometryLegs.forEach((leg) => {
