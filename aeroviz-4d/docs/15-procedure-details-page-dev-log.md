@@ -465,3 +465,38 @@
 
 ### Exact Next Recommended Step
 - Add optional plan-view RF center/radius markers for RF legs, then define the full RF OEA Case 1/Case 2 geometry acceptance fixtures.
+
+## 2026-05-01 23:46 CEST
+
+### Goal Of This Session
+- Add plan-view RF debug markers so RF center and radius can be inspected visually in Procedure Details.
+
+### Decisions Locked
+- RF markers are derived from procedure-detail RF path metadata and rendered only when center coordinates and radius are present.
+- The plan-view domain includes RF center/radius extents so the marker is not clipped out of the SVG.
+- The marker includes:
+  - a dashed radius circle;
+  - a dashed line from center to RF endpoint;
+  - a center marker and label.
+
+### Files Changed
+- `src/components/ProcedureDetailsPage.tsx`
+- `src/components/__tests__/ProcedureDetailsPage.test.tsx`
+- `src/utils/procedureDetailsGeometry.ts`
+- `src/index.css`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/components/__tests__/ProcedureDetailsPage.test.tsx`
+- `npm test -- --run`
+- `npm run build`
+
+### Current Status
+- Procedure Details now exposes RF metadata both as focused-sequence text and as plan-view center/radius debug geometry.
+
+### Known Blockers
+- RF debug marker is inspection geometry, not the final RF OEA Case 1/Case 2 protected-area implementation.
+- The app still needs a generated RF-containing public fixture for browser-level manual validation.
+
+### Exact Next Recommended Step
+- Create or regenerate an RF-containing procedure-detail fixture and use it for manual visual validation, then start full RF OEA Case 1/Case 2 acceptance tests.
