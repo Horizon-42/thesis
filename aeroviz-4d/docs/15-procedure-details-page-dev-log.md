@@ -666,3 +666,37 @@
 
 ### Exact Next Recommended Step
 - Add vertical error and event-marker fields to `HorizontalPlateSegmentAssessment`, then expose them in the selected aircraft summary.
+
+## 2026-05-02 00:10 CEST
+
+### Goal Of This Session
+- Add vertical validation output and basic event markers to runway profile segment assessment.
+
+### Decisions Locked
+- `HorizontalPlateSegmentAssessment` now includes:
+  - `verticalErrorM`;
+  - `events`.
+- Vertical error is measured against the interpolated segment centerline/profile height. This is an assessment reference, not yet a full vertical protection surface.
+- Event markers currently include lateral containment and vertical deviation beyond 100 ft.
+- The selected aircraft summary now displays vertical error in feet.
+
+### Files Changed
+- `src/utils/procedureSegmentAssessment.ts`
+- `src/utils/__tests__/procedureSegmentAssessment.test.ts`
+- `src/components/RunwayTrajectoryProfilePanel.tsx`
+- `src/components/__tests__/RunwayTrajectoryProfilePanel.test.tsx`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/utils/__tests__/procedureSegmentAssessment.test.ts src/components/__tests__/RunwayTrajectoryProfilePanel.test.tsx`
+- `npm run build`
+
+### Current Status
+- 2D profile validation now reports horizontal segment context, lateral containment, cross-track error, vertical error, and basic events for the selected aircraft.
+
+### Known Blockers
+- Vertical error is centerline/profile-relative only; it is not LPV/GLS/LNAV/VNAV surface validation.
+- Events are point-local markers; temporal enter/exit event derivation still needs trail/time-series processing.
+
+### Exact Next Recommended Step
+- Add missed approach sectionization (`MISSED_S1` / `MISSED_S2`) so post-threshold trajectory validation can stop treating missed approach as a generic continuation.

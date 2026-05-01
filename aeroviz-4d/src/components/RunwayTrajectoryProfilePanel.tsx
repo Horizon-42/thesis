@@ -109,6 +109,11 @@ function formatFeet(valueM: number): string {
   return `${Math.round(valueM / METERS_PER_FOOT).toLocaleString()} ft`;
 }
 
+function formatSignedFeet(valueM: number): string {
+  const prefix = valueM > 0 ? "+" : "";
+  return `${prefix}${formatFeet(valueM)}`;
+}
+
 function formatDistance(valueM: number, unit: DistanceUnit): string {
   return unit === "nm" ? formatNm(valueM) : formatMeters(valueM);
 }
@@ -710,6 +715,11 @@ export default function RunwayTrajectoryProfilePanel() {
               assessmentTrack.current.segmentAssessment.crossTrackErrorM,
               distanceUnit,
             )}
+            {assessmentTrack.current.segmentAssessment.verticalErrorM !== null
+              ? ` · verr ${formatSignedFeet(
+                  assessmentTrack.current.segmentAssessment.verticalErrorM,
+                )}`
+              : ""}
           </span>
         ) : null}
       </div>

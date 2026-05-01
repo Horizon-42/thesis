@@ -5,6 +5,13 @@ import type {
 } from "./runwayProfileGeometry";
 
 export type HorizontalPlateContainment = "PRIMARY" | "SECONDARY" | "OUTSIDE";
+export type SegmentAssessmentEventKind = "LATERAL_CONTAINMENT" | "VERTICAL_DEVIATION";
+
+export interface SegmentAssessmentEvent {
+  kind: SegmentAssessmentEventKind;
+  label: string;
+  valueM?: number;
+}
 
 export interface HorizontalPlateSegmentAssessment {
   routeId: string;
@@ -13,8 +20,10 @@ export interface HorizontalPlateSegmentAssessment {
   segmentIndex: number;
   stationM: number;
   crossTrackErrorM: number;
+  verticalErrorM: number | null;
   containment: HorizontalPlateContainment;
   closestPoint: RunwayProfilePoint;
+  events: SegmentAssessmentEvent[];
 }
 
 interface CandidateAssessment extends HorizontalPlateSegmentAssessment {
@@ -26,8 +35,35 @@ function segmentIdFor(route: HorizontalPlateRoute, segmentIndex: number): string
   return `${route.branchId}:profile-segment:${segmentIndex + 1}`;
 }
 
+const VERTICAL_DEVIATION_EVENT_THRESHOLD_M = 30.48;
+
+function assessmentEvents(
+  containment: HorizontalPlateContainment,
+  verticalErrorM: number | null,
+): SegmentAssessmentEvent[] {
+  const events: SegmentAssessmentEvent[] = [
+    {
+      kind: "LATERAL_CONTAINMENT",
+      label: containment,
+    },
+  ];
+
+  if (
+    verticalErrorM !== null &&
+    Math.abs(verticalErrorM) > VERTICAL_DEVIATION_EVENT_THRESHOLD_M
+  ) {
+    events.push({
+      kind: "VERTICAL_DEVIATION",
+      label: verticalErrorM > 0 ? "ABOVE_PROFILE" : "BELOW_PROFILE",
+      valueM: verticalErrorM,
+    });
+  }
+
+  return events;
+}
+
 function projectPointToSegment(
-  point: Pick<RunwayProfilePoint, "xM" | "yM">,
+  point: Pick<RunwayProfilePoint, "xM" | "yM"> & Partial<Pick<RunwayProfilePoint, "zM">>,
   route: HorizontalPlateRoute,
   segmentId: string,
   segmentPoints: RunwayProfilePoint[],
@@ -68,6 +104,9 @@ function projectPointToSegment(
       : secondaryHalfWidthM !== null && distanceToSegmentM <= secondaryHalfWidthM
         ? "SECONDARY"
         : "OUTSIDE";
+  const verticalErrorM = Number.isFinite(point.zM)
+    ? (point.zM as number) - closestPoint.zM
+    : null;
 
   return {
     routeId: route.routeId,
@@ -76,15 +115,17 @@ function projectPointToSegment(
     segmentIndex,
     stationM: stationOffsetM + alongRatio * lengthM,
     crossTrackErrorM,
+    verticalErrorM,
     containment,
     closestPoint,
+    events: assessmentEvents(containment, verticalErrorM),
     absoluteCrossTrackM,
     distanceToSegmentM,
   };
 }
 
 function projectPointToAssessmentSegment(
-  point: Pick<RunwayProfilePoint, "xM" | "yM">,
+  point: Pick<RunwayProfilePoint, "xM" | "yM"> & Partial<Pick<RunwayProfilePoint, "zM">>,
   route: HorizontalPlateRoute,
   assessmentSegment: HorizontalPlateAssessmentSegment,
   segmentOffset: number,
@@ -142,7 +183,7 @@ function fallbackAssessmentSegments(route: HorizontalPlateRoute): HorizontalPlat
 }
 
 export function projectPointToHorizontalPlateRoute(
-  point: Pick<RunwayProfilePoint, "xM" | "yM">,
+  point: Pick<RunwayProfilePoint, "xM" | "yM"> & Partial<Pick<RunwayProfilePoint, "zM">>,
   route: HorizontalPlateRoute,
 ): HorizontalPlateSegmentAssessment | null {
   const assessmentSegments = route.assessmentSegments ?? fallbackAssessmentSegments(route);
@@ -190,7 +231,7 @@ export function projectPointToHorizontalPlateRoute(
 }
 
 export function classifyPointAgainstHorizontalPlateRoutes(
-  point: Pick<RunwayProfilePoint, "xM" | "yM">,
+  point: Pick<RunwayProfilePoint, "xM" | "yM"> & Partial<Pick<RunwayProfilePoint, "zM">>,
   routes: HorizontalPlateRoute[],
 ): HorizontalPlateSegmentAssessment | null {
   const assessments = routes

@@ -25,7 +25,7 @@ const route: HorizontalPlateRoute = {
 
 describe("procedure segment assessment", () => {
   it("projects a profile point onto the nearest horizontal plate segment", () => {
-    const assessment = projectPointToHorizontalPlateRoute({ xM: 4_000, yM: 120 }, route);
+    const assessment = projectPointToHorizontalPlateRoute({ xM: 4_000, yM: 120, zM: 460 }, route);
 
     expect(assessment).toMatchObject({
       routeId: "KRDU-R23RY-R",
@@ -41,6 +41,12 @@ describe("procedure segment assessment", () => {
       yM: 0,
       zM: 400,
     });
+    expect(assessment?.verticalErrorM).toBeCloseTo(60, 6);
+    expect(assessment?.events).toContainEqual({
+      kind: "VERTICAL_DEVIATION",
+      label: "ABOVE_PROFILE",
+      valueM: 60,
+    });
   });
 
   it("classifies outside points while still returning nearest segment context", () => {
@@ -52,6 +58,10 @@ describe("procedure segment assessment", () => {
     expect(assessment?.containment).toBe("OUTSIDE");
     expect(assessment?.activeSegmentId).toBe("branch:R:profile-segment:2");
     expect(Math.abs(assessment?.crossTrackErrorM ?? 0)).toBeCloseTo(700, 6);
+    expect(assessment?.events).toContainEqual({
+      kind: "LATERAL_CONTAINMENT",
+      label: "OUTSIDE",
+    });
   });
 
   it("uses render-bundle assessment segment widths when they are available", () => {

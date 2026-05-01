@@ -154,8 +154,10 @@ describe("RunwayTrajectoryProfilePanel", () => {
             segmentIndex: 1,
             stationM: 9_260,
             crossTrackErrorM: 185.2,
+            verticalErrorM: 30.48,
             containment: "PRIMARY",
             closestPoint: { xM: 20_000, yM: 0, zM: 900 },
+            events: [{ kind: "LATERAL_CONTAINMENT", label: "PRIMARY" }],
           },
         },
         trail: [
@@ -171,8 +173,10 @@ describe("RunwayTrajectoryProfilePanel", () => {
               segmentIndex: 1,
               stationM: 9_260,
               crossTrackErrorM: 185.2,
+              verticalErrorM: 30.48,
               containment: "PRIMARY",
               closestPoint: { xM: 20_000, yM: 0, zM: 900 },
+              events: [{ kind: "LATERAL_CONTAINMENT", label: "PRIMARY" }],
             },
           },
         ],
@@ -186,5 +190,6 @@ describe("RunwayTrajectoryProfilePanel", () => {
     );
     expect(screen.getByText(/AAL123:/).textContent).toContain("station 5.0 NM");
     expect(screen.getByText(/AAL123:/).textContent).toContain("xtrack +0.1 NM");
+    expect(screen.getByText(/AAL123:/).textContent).toContain("verr +100 ft");
   });
 });
