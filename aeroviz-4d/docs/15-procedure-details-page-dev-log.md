@@ -732,3 +732,32 @@
 
 ### Exact Next Recommended Step
 - Add CA/DF missed-leg preservation diagnostics in render bundles and prevent unsupported missed sections from emitting misleading protected geometry.
+
+## 2026-05-02 00:15 CEST
+
+### Goal Of This Session
+- Make unsupported preserved missed approach legs explicit in geometry diagnostics.
+
+### Decisions Locked
+- The v3 package may preserve DF/CA/HM/HA/HF legs, but the current segment geometry kernel only constructs TF and RF.
+- Non-constructible leg types now produce `UNSUPPORTED_LEG_TYPE` diagnostics instead of being silently ignored.
+- If a missed section has only unsupported geometry legs, it emits diagnostics and no primary/secondary envelope.
+
+### Files Changed
+- `src/utils/procedureSegmentGeometry.ts`
+- `src/utils/__tests__/procedureSegmentGeometry.test.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/utils/__tests__/procedureSegmentGeometry.test.ts`
+
+### Current Status
+- Missed approach sections can be semantically represented without misleading protected geometry.
+- Tests cover DF/HM preserved-leg diagnostics and the no-envelope outcome for unsupported missed geometry.
+
+### Known Blockers
+- DF/CA/HM geometry construction remains future work.
+- Procedure Details does not yet surface segment diagnostics as a dedicated validation table.
+
+### Exact Next Recommended Step
+- Surface segment diagnostics in Procedure Details so unsupported sections and RF/turn limitations are visible in the validation workspace.

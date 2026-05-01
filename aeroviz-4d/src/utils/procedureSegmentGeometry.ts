@@ -243,6 +243,22 @@ export function buildSegmentGeometryBundle(
   const constructibleLegs = segmentLegs.filter(
     (leg) => leg.legType === "TF" || leg.legType === "RF",
   );
+  const unsupportedGeometryLegs = segmentLegs.filter(
+    (leg) => leg.legType !== "TF" && leg.legType !== "RF" && leg.legType !== "IF",
+  );
+
+  unsupportedGeometryLegs.forEach((leg) => {
+    diagnostics.push(
+      diagnostic(
+        "UNSUPPORTED_LEG_TYPE",
+        `${leg.legId}: ${leg.legType} is preserved in the v3 package but is not constructible by the segment geometry kernel yet.`,
+        "WARN",
+        segment.segmentId,
+        leg.legId,
+        sourceRefsFor(leg),
+      ),
+    );
+  });
 
   if (constructibleLegs.length === 0) {
     diagnostics.push(
