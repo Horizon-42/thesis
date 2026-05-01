@@ -163,10 +163,43 @@ describe("procedure segment geometry kernel", () => {
     );
 
     expect(bundle.segmentId).toBe("segment:final");
-    expect(bundle.diagnostics).toEqual([]);
+    expect(bundle.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(["FINAL_HAS_TURN"]);
     expect(bundle.centerline.geodesicLengthNm).toBeGreaterThan(6);
     expect(bundle.stationAxis.totalLengthNm).toBeCloseTo(bundle.centerline.geodesicLengthNm, 3);
     expect(bundle.primaryEnvelope?.halfWidthNmSamples[0].halfWidthNm).toBe(0.6);
     expect(bundle.secondaryEnvelope?.halfWidthNmSamples[0].halfWidthNm).toBeCloseTo(0.9, 8);
+    expect(bundle.turnJunctions).toHaveLength(1);
+  });
+
+  it("marks visual turn-fill patches inside final segments as diagnostics", () => {
+    const sharpTurnFixes = new Map(fixes);
+    sharpTurnFixes.set("fix:C", {
+      fixId: "fix:C",
+      ident: "C",
+      role: ["MAP"],
+      lonDeg: -78.84,
+      latDeg: 35.9,
+      altFtMsl: 1000,
+      annotations: [],
+      sourceRefs: [],
+    });
+    const sharpSecondLeg: ProcedurePackageLeg = {
+      ...secondTfLeg,
+      endFixId: "fix:C",
+    };
+
+    const bundle = buildSegmentGeometryBundle(
+      finalSegment,
+      [tfLeg, sharpSecondLeg],
+      sharpTurnFixes,
+      {
+        samplingStepNm: 10,
+        enableDebugPrimitives: false,
+      },
+    );
+
+    expect(bundle.turnJunctions).toHaveLength(1);
+    expect(bundle.turnJunctions[0].constructionStatus).toBe("VISUAL_FILL_ONLY");
+    expect(bundle.diagnostics.map((diagnostic) => diagnostic.code)).toContain("FINAL_HAS_TURN");
   });
 });

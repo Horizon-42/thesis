@@ -15,6 +15,7 @@ const PROCEDURE_SEGMENT_ENTITY_PREFIX = "procedure-segment-";
 const CENTERLINE_COLOR = Cesium.Color.CYAN.withAlpha(0.95);
 const PRIMARY_COLOR = Cesium.Color.DEEPSKYBLUE.withAlpha(0.18);
 const SECONDARY_COLOR = Cesium.Color.YELLOW.withAlpha(0.1);
+const TURN_FILL_COLOR = Cesium.Color.ORANGE.withAlpha(0.22);
 const CONNECTOR_COLOR = Cesium.Color.ORANGE.withAlpha(0.32);
 const CONNECTOR_LINE_COLOR = Cesium.Color.ORANGE.withAlpha(0.92);
 const OUTLINE_COLOR = Cesium.Color.CYAN.withAlpha(0.28);
@@ -163,6 +164,34 @@ function addSegmentEntities(
     ENVELOPE_HEIGHT_OFFSET_M,
   );
   ids.push(secondaryId);
+
+  segmentBundle.segmentGeometry.turnJunctions.forEach((junction) => {
+    const turnPrimaryId = `${baseId}-turn-${junction.turnPointIndex}-primary`;
+    addRibbonPolygon(
+      viewer,
+      turnPrimaryId,
+      `${segmentName} visual turn fill primary`,
+      junction.primaryPatch.ribbon,
+      visible,
+      TURN_FILL_COLOR,
+      CONNECTOR_HEIGHT_OFFSET_M,
+    );
+    ids.push(turnPrimaryId);
+
+    if (junction.secondaryPatch) {
+      const turnSecondaryId = `${baseId}-turn-${junction.turnPointIndex}-secondary`;
+      addRibbonPolygon(
+        viewer,
+        turnSecondaryId,
+        `${segmentName} visual turn fill secondary`,
+        junction.secondaryPatch.ribbon,
+        visible,
+        TURN_FILL_COLOR,
+        CONNECTOR_HEIGHT_OFFSET_M,
+      );
+      ids.push(turnSecondaryId);
+    }
+  });
 
   if (segmentBundle.finalOea) {
     const oeaPrimaryId = `${baseId}-oea-primary`;

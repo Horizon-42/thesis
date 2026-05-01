@@ -17,6 +17,10 @@ import {
   type CartesianPoint,
   type GeoPoint,
 } from "./procedureGeoMath";
+import {
+  buildTfTurnJunctions,
+  type TurnJunctionGeometry,
+} from "./procedureTurnGeometry";
 
 export type { CartesianPoint, GeoPoint } from "./procedureGeoMath";
 
@@ -59,6 +63,7 @@ export interface SegmentGeometryBundle {
   stationAxis: StationAxis;
   primaryEnvelope?: LateralEnvelopeGeometry;
   secondaryEnvelope?: LateralEnvelopeGeometry;
+  turnJunctions: TurnJunctionGeometry[];
   diagnostics: BuildDiagnostic[];
 }
 
@@ -240,6 +245,28 @@ export function buildSegmentGeometryBundle(
     isArc: false,
   };
   const stationAxis = computeStationAxis(centerline);
+  const turnJunctions =
+    geoPositions.length >= 3
+      ? buildTfTurnJunctions(
+          segment.segmentId,
+          centerline,
+          segment.xttNm * 2,
+          segment.secondaryEnabled ? segment.xttNm * 3 : null,
+        )
+      : [];
+
+  if (segment.segmentType.startsWith("FINAL") && turnJunctions.length > 0) {
+    diagnostics.push(
+      diagnostic(
+        "FINAL_HAS_TURN",
+        `${segment.segmentId}: TF turn junctions were detected inside a final segment; visual fill patches are not a compliant final turn construction.`,
+        "WARN",
+        segment.segmentId,
+        undefined,
+        segment.sourceRefs,
+      ),
+    );
+  }
 
   return {
     segmentId: segment.segmentId,
@@ -256,6 +283,7 @@ export function buildSegmentGeometryBundle(
           segment.xttNm * 3,
         )
       : undefined,
+    turnJunctions,
     diagnostics,
   };
 }

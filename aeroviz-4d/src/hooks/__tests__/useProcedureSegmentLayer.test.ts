@@ -103,6 +103,28 @@ const ribbon = {
   halfWidthNmSamples: [],
 };
 
+const turnJunction = {
+  geometryId: "turn",
+  segmentId: "segment:final",
+  turnPointIndex: 1,
+  stationNm: 1,
+  turnAngleDeg: 45,
+  turnDirection: "LEFT",
+  constructionStatus: "VISUAL_FILL_ONLY",
+  primaryPatch: {
+    geometryId: "turn-primary",
+    envelopeType: "PRIMARY",
+    ribbon,
+    halfWidthNm: 0.6,
+  },
+  secondaryPatch: {
+    geometryId: "turn-secondary",
+    envelopeType: "SECONDARY",
+    ribbon,
+    halfWidthNm: 0.9,
+  },
+};
+
 const renderBundleData = {
   index: {},
   documents: [],
@@ -136,6 +158,7 @@ const renderBundleData = {
                 stationAxis: { samples: [], totalLengthNm: 3 },
                 primaryEnvelope: ribbon,
                 secondaryEnvelope: ribbon,
+                turnJunctions: [turnJunction],
                 diagnostics: [],
               },
               finalOea: {
@@ -177,6 +200,7 @@ describe("useProcedureSegmentLayer", () => {
     expect(entities.some((entity) => String(entity.id).includes("-oea-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-connector-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-connector-primary-boundary"))).toBe(true);
+    expect(entities.some((entity) => String(entity.id).includes("-turn-1-primary"))).toBe(true);
   });
 
   it("syncs layer visibility without reloading render bundle data", async () => {
