@@ -3,6 +3,7 @@ export type ProcedureAnnotationKind =
   | "SEGMENT_CENTERLINE"
   | "SEGMENT_ENVELOPE_PRIMARY"
   | "SEGMENT_ENVELOPE_SECONDARY"
+  | "SEGMENT_VERTICAL_PROFILE"
   | "FINAL_OEA"
   | "FINAL_VERTICAL_REFERENCE"
   | "ALTITUDE_CONSTRAINT"
@@ -106,6 +107,7 @@ export function procedureAnnotationDisplayLevel(
     annotation.kind === "LNAV_VNAV_OCS" ||
     annotation.kind === "ALIGNED_CONNECTOR" ||
     annotation.kind === "FINAL_VERTICAL_REFERENCE" ||
+    annotation.kind === "SEGMENT_VERTICAL_PROFILE" ||
     annotation.kind === "CA_CENTERLINE" ||
     annotation.kind === "CA_ENDPOINT" ||
     (annotation.kind === "SEGMENT_CENTERLINE" && annotation.status === "ESTIMATED") ||
@@ -153,6 +155,9 @@ export function procedureAnnotationMeaning(
   }
   if (kind === "SEGMENT_ENVELOPE_SECONDARY") {
     return "Secondary lateral area outside the primary envelope. It helps show the outer buffer or taper where available.";
+  }
+  if (kind === "SEGMENT_VERTICAL_PROFILE") {
+    return "Estimated vertical profile surface connecting adjacent procedure fixes. Its lateral width follows the primary protected area.";
   }
   if (kind === "FINAL_OEA") {
     return "Final-segment obstacle evaluation area used as the lateral reference for final protected-area visualization.";

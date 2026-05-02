@@ -46,6 +46,7 @@ const LNAV_VNAV_OCS_COLOR = Cesium.Color.LIME.withAlpha(0.2);
 const PRECISION_FINAL_SURFACE_COLOR = Cesium.Color.MAGENTA.withAlpha(0.18);
 const FINAL_VERTICAL_REFERENCE_COLOR = Cesium.Color.CYAN.withAlpha(0.88);
 const FINAL_VERTICAL_REFERENCE_BAND_COLOR = Cesium.Color.CYAN.withAlpha(0.16);
+const SEGMENT_VERTICAL_PROFILE_SURFACE_COLOR = Cesium.Color.DEEPSKYBLUE.withAlpha(0.13);
 const TURN_FILL_COLOR = Cesium.Color.ORANGE.withAlpha(0.22);
 const CONNECTOR_COLOR = Cesium.Color.ORANGE.withAlpha(0.32);
 const CONNECTOR_LINE_COLOR = Cesium.Color.ORANGE.withAlpha(0.92);
@@ -64,6 +65,7 @@ const LNAV_VNAV_OCS_HEIGHT_OFFSET_M = 28;
 const PRECISION_FINAL_SURFACE_HEIGHT_OFFSET_M = 34;
 const FINAL_VERTICAL_REFERENCE_HEIGHT_OFFSET_M = 40;
 const FINAL_VERTICAL_REFERENCE_BAND_HEIGHT_OFFSET_M = 38;
+const SEGMENT_VERTICAL_PROFILE_HEIGHT_OFFSET_M = 44;
 const FINAL_ALTITUDE_CONSTRAINT_HEIGHT_OFFSET_M = 46;
 const ALTITUDE_CONSTRAINT_LINK_HEIGHT_OFFSET_M = 12;
 const FINAL_VERTICAL_REFERENCE_DEFAULT_HALF_WIDTH_NM = 0.15;
@@ -301,6 +303,85 @@ function buildFinalVerticalReferenceRibbon(
         FINAL_VERTICAL_REFERENCE_DEFAULT_HALF_WIDTH_NM,
         nearestProtectionHalfWidthNm(stationNm) * FINAL_VERTICAL_REFERENCE_PROTECTION_WIDTH_RATIO,
       ),
+  );
+}
+
+interface SegmentVerticalProfilePoint extends GeoPoint {
+  fixIdent: string;
+  altitudeFtMsl: number;
+}
+
+function segmentVerticalProfilePoints(
+  segmentBundle: ProcedureSegmentRenderBundle,
+  pkg: ProcedurePackage | null,
+): SegmentVerticalProfilePoint[] {
+  if (!pkg) return [];
+  const fixById = new Map(pkg.sharedFixes.map((fix) => [fix.fixId, fix]));
+  const points = segmentBundle.legs
+    .map((leg) => {
+      const fix = leg.endFixId ? fixById.get(leg.endFixId) : undefined;
+      if (!fix || fix.lonDeg === null || fix.latDeg === null) return null;
+      const altitudeFtMsl = altitudeConstraintReferenceFt(leg.requiredAltitude) ?? fix.altFtMsl;
+      if (altitudeFtMsl === null || !Number.isFinite(altitudeFtMsl)) return null;
+      return {
+        lonDeg: fix.lonDeg,
+        latDeg: fix.latDeg,
+        altM: altitudeFtMsl * 0.3048,
+        fixIdent: fix.ident,
+        altitudeFtMsl,
+      };
+    })
+    .filter((point): point is SegmentVerticalProfilePoint => point !== null);
+
+  return points.filter(
+    (point, index) =>
+      index === 0 ||
+      point.fixIdent !== points[index - 1].fixIdent ||
+      distanceNm(point, points[index - 1]) > 1e-5,
+  );
+}
+
+function buildSegmentVerticalProfileRibbon(
+  segmentBundle: ProcedureSegmentRenderBundle,
+  points: SegmentVerticalProfilePoint[],
+): VariableWidthRibbonGeometry | null {
+  if (points.length < 2) return null;
+
+  const stations: number[] = [];
+  let cumulativeNm = 0;
+  points.forEach((point, index) => {
+    if (index > 0) {
+      cumulativeNm += distanceNm(points[index - 1], point);
+    }
+    stations.push(cumulativeNm);
+  });
+
+  const protectionWidthSamples =
+    segmentBundle.finalOea?.primary.halfWidthNmSamples ??
+    segmentBundle.segmentGeometry.primaryEnvelope?.halfWidthNmSamples ??
+    [];
+  const halfWidthAtStation = (stationNm: number) => {
+    const nearest = protectionWidthSamples.reduce<
+      { stationNm: number; halfWidthNm: number } | null
+    >((best, sample) => {
+      if (!best) return sample;
+      return Math.abs(sample.stationNm - stationNm) < Math.abs(best.stationNm - stationNm)
+        ? sample
+        : best;
+    }, null);
+    return nearest?.halfWidthNm ?? FINAL_VERTICAL_REFERENCE_DEFAULT_HALF_WIDTH_NM * 2;
+  };
+
+  return buildVariableWidthRibbon(
+    `${segmentBundle.segment.segmentId}:vertical-profile`,
+    {
+      geoPositions: points,
+      worldPositions: [],
+      geodesicLengthNm: cumulativeNm,
+      isArc: false,
+    },
+    stations,
+    halfWidthAtStation,
   );
 }
 
@@ -556,6 +637,41 @@ function addSegmentEntities(
     procedureEntityShow(visible, centerlineAnnotation, displayLevel, true, annotationVisible),
   );
   if (centerlineLabelId) ids.push(centerlineLabelId);
+
+  const verticalProfilePoints = segmentVerticalProfilePoints(segmentBundle, pkg);
+  const verticalProfileRibbon = buildSegmentVerticalProfileRibbon(segmentBundle, verticalProfilePoints);
+  if (verticalProfileRibbon) {
+    const verticalProfileId = `${baseId}-vertical-profile`;
+    const verticalProfileAnnotation = annotationBase({
+      entityId: verticalProfileId,
+      label: "Fix vertical profile",
+      title: `${segmentName} fix vertical profile`,
+      kind: "SEGMENT_VERTICAL_PROFILE",
+      status: "ESTIMATED",
+      bundle,
+      branchBundle,
+      segment: segmentBundle.segment,
+      legs: segmentBundle.legs,
+      parameters: [
+        ...segmentParams(segmentBundle.segment, segmentBundle.legs),
+        param("Fixes", verticalProfilePoints.map((point) => point.fixIdent).join(" -> ")),
+        param("Width basis", segmentBundle.finalOea ? "Final OEA primary" : "Primary envelope"),
+      ],
+      diagnostics: segmentDiagnostics,
+      sourceRefs: sourceRefsFromLegs(segmentBundle.legs),
+    });
+    addRibbonPolygon(
+      viewer,
+      verticalProfileId,
+      `${segmentName} fix vertical profile`,
+      verticalProfileRibbon,
+      procedureEntityShow(visible, verticalProfileAnnotation, displayLevel),
+      SEGMENT_VERTICAL_PROFILE_SURFACE_COLOR,
+      SEGMENT_VERTICAL_PROFILE_HEIGHT_OFFSET_M,
+      verticalProfileAnnotation,
+    );
+    ids.push(verticalProfileId);
+  }
 
   if (isFinalSegment(segmentBundle.segment)) {
     const verticalReferencePoints = finalVerticalReferencePoints(segmentBundle);

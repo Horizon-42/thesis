@@ -476,6 +476,19 @@ describe("useProcedureSegmentLayer", () => {
     expect(entities.some((entity) => String(entity.id).includes("-lnav-vnav-ocs-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-final-vertical-reference-band"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-final-vertical-reference"))).toBe(true);
+    expect(entities.some((entity) => String(entity.id).includes("-vertical-profile"))).toBe(true);
+    expect(
+      entities.some(
+        (entity) =>
+          String(entity.id).includes("-vertical-profile") &&
+          entity.polygon.material.name === "DEEPSKYBLUE" &&
+          entity.__aeroVizProcedureAnnotation?.kind === "SEGMENT_VERTICAL_PROFILE",
+      ),
+    ).toBe(true);
+    const finalVerticalProfile = entities.find((entity) =>
+      String(entity.id).includes("segment:final-vertical-profile"),
+    );
+    expect(finalVerticalProfile?.polygon.hierarchy.positions).toHaveLength(4);
     expect(
       entities.some(
         (entity) =>
@@ -592,6 +605,7 @@ describe("useProcedureSegmentLayer", () => {
     const ocs = entities.find((entity) => String(entity.id).includes("-lnav-vnav-ocs-primary"));
     const finalVerticalReference = entities.find((entity) => String(entity.id).endsWith("-final-vertical-reference"));
     const finalVerticalBand = entities.find((entity) => String(entity.id).endsWith("-final-vertical-reference-band"));
+    const verticalProfile = entities.find((entity) => String(entity.id).endsWith("-vertical-profile"));
     const finalAltitude = entities.find((entity) => String(entity.id).includes("-altitude-leg:final:faf"));
     const turnFill = entities.find((entity) => String(entity.id).includes("-turn-1-primary"));
     const debugSurface = entities.find((entity) => String(entity.id).includes("-precision-lpv-w"));
@@ -601,6 +615,7 @@ describe("useProcedureSegmentLayer", () => {
     expect(ocs.show).toBe(false);
     expect(finalVerticalReference.show).toBe(false);
     expect(finalVerticalBand.show).toBe(false);
+    expect(verticalProfile.show).toBe(false);
     expect(turnFill.show).toBe(false);
     expect(debugSurface.show).toBe(false);
 
@@ -610,6 +625,7 @@ describe("useProcedureSegmentLayer", () => {
     expect(ocs.show).toBe(true);
     expect(finalVerticalReference.show).toBe(true);
     expect(finalVerticalBand.show).toBe(true);
+    expect(verticalProfile.show).toBe(true);
     expect(turnFill.show).toBe(false);
     expect(debugSurface.show).toBe(false);
 

@@ -40,6 +40,9 @@ describe("procedureAnnotations", () => {
     expect(procedureAnnotationMeaning("LNAV_VNAV_OCS", "ESTIMATED")).toContain(
       "Sloping LNAV/VNAV",
     );
+    expect(procedureAnnotationMeaning("SEGMENT_VERTICAL_PROFILE", "ESTIMATED")).toContain(
+      "adjacent procedure fixes",
+    );
   });
 
   it("resolves annotations from picked Cesium entities", () => {
@@ -62,6 +65,13 @@ describe("procedureAnnotations", () => {
       procedureAnnotationDisplayLevel({
         ...annotation,
         kind: "SEGMENT_ENVELOPE_PRIMARY",
+        status: "ESTIMATED",
+      }),
+    ).toBe("ESTIMATED");
+    expect(
+      procedureAnnotationDisplayLevel({
+        ...annotation,
+        kind: "SEGMENT_VERTICAL_PROFILE",
         status: "ESTIMATED",
       }),
     ).toBe("ESTIMATED");
