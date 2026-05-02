@@ -1418,3 +1418,32 @@
 
 ### Exact Next Recommended Step
 - Surface final approach missing-surface status in Procedure Details Data Notes and the focused sequence context.
+
+## 2026-05-02 10:40 CEST
+
+### Goal Of This Session
+- Surface structured final approach surface status in Procedure Details.
+
+### Decisions Locked
+- Focused Sequence now shows built final surface types and missing final surface types for the focused branch.
+- Data Notes now includes a structured final surface status line when mode-specific surfaces are missing.
+- The existing `FINAL_VERTICAL_SURFACE_UNIMPLEMENTED` diagnostic remains visible alongside the structured summary.
+
+### Files Changed
+- `src/components/ProcedureDetailsPage.tsx`
+- `src/components/__tests__/ProcedureDetailsPage.test.tsx`
+- `src/index.css`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/components/__tests__/ProcedureDetailsPage.test.tsx`
+- `npm run build`
+
+### Current Status
+- Users can now see that LNAV baseline is built while LPV W/X/Y and LNAV/VNAV OCS are missing for collapsed multimode procedures.
+
+### Known Blockers
+- This is still status/diagnostic UI only; mode-specific vertical surfaces are not constructed yet.
+
+### Exact Next Recommended Step
+- Add a small 3D placeholder/status primitive for missing final vertical surfaces so protected mode can reveal collapsed final modes without drawing fake W/X/Y geometry.

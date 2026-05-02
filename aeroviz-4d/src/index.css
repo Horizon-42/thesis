@@ -1392,6 +1392,39 @@ body,
   align-items: flex-start;
 }
 
+.procedure-details-surface-status-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.procedure-details-surface-status {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid rgba(34, 211, 238, 0.22);
+  background: rgba(14, 165, 233, 0.08);
+  border-radius: 8px;
+}
+
+.procedure-details-surface-status.has-missing {
+  border-color: rgba(250, 204, 21, 0.38);
+  background: rgba(250, 204, 21, 0.08);
+}
+
+.procedure-details-surface-status strong {
+  color: #e5f3ff;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.procedure-details-surface-status span {
+  color: #cbd5e1;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .procedure-details-runway-list,
 .procedure-details-procedure-list,
 .procedure-details-reference-list,

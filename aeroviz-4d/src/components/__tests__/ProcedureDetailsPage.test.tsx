@@ -408,6 +408,9 @@ describe("ProcedureDetailsPage", () => {
     fireEvent.click(screen.getAllByText("WEPAS")[0]);
     expect(await screen.findByText("final_approach_fix")).toBeTruthy();
     expect(screen.getAllByText(/DEFAULT_TOLERANCE/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Final surfaces").length).toBeGreaterThan(0);
+    expect(screen.getByText(/Missing LPV_W, LPV_X, LPV_Y, LNAV_VNAV_OCS/)).toBeTruthy();
+    expect(screen.getByText(/FINAL_VERTICAL_SURFACE_UNIMPLEMENTED/)).toBeTruthy();
   });
 
   it("switches procedure-details distance axes from nautical miles to metres", async () => {

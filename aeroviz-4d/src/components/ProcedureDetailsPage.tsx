@@ -99,6 +99,10 @@ function formatAltitudeFt(value: number | null | undefined): string {
   return `${Math.round(value).toLocaleString()} ft`;
 }
 
+function formatSurfaceTypes(types: string[]): string {
+  return types.length > 0 ? types.join(", ") : "None";
+}
+
 function formatCoordinate(value: number | undefined): string {
   if (typeof value !== "number" || !Number.isFinite(value)) return "Not available";
   return value.toFixed(6);
@@ -1767,6 +1771,21 @@ export default function ProcedureDetailsPage() {
       return !diagnostic.segmentId && !diagnostic.legId;
     });
   }, [focusedLegs, focusedScopedBranchId, procedureRenderBundle]);
+  const focusedFinalSurfaceStatuses = useMemo(() => {
+    if (!procedureRenderBundle) return [];
+    return procedureRenderBundle.branchBundles
+      .filter((branchBundle) =>
+        focusedScopedBranchId ? branchBundle.branchId === focusedScopedBranchId : true,
+      )
+      .flatMap((branchBundle) =>
+        branchBundle.segmentBundles
+          .map((segmentBundle) => segmentBundle.finalSurfaceStatus)
+          .filter((status): status is NonNullable<typeof status> => status !== null),
+      );
+  }, [focusedScopedBranchId, procedureRenderBundle]);
+  const focusedMissingFinalSurfaceStatuses = focusedFinalSurfaceStatuses.filter(
+    (status) => status.missingSurfaceTypes.length > 0,
+  );
   const focusedFixTerminalLeg = useMemo(
     () =>
       focusedLegs.find(
@@ -2009,6 +2028,7 @@ export default function ProcedureDetailsPage() {
             (procedureDocument.validation.knownSimplifications.length > 0 ||
               procedureDocument.provenance.warnings.length > 0 ||
               focusedBranchWarnings.length > 0 ||
+              focusedMissingFinalSurfaceStatuses.length > 0 ||
               focusedRenderDiagnostics.length > 0) ? (
               <section className="procedure-details-card procedure-details-reference-card">
                 <p className="procedure-details-overview-label">Data Notes</p>
@@ -2021,6 +2041,13 @@ export default function ProcedureDetailsPage() {
                   ))}
                   {procedureDocument.validation.knownSimplifications.map((warning) => (
                     <li key={`simplification-${warning}`}>{warning}</li>
+                  ))}
+                  {focusedMissingFinalSurfaceStatuses.map((status) => (
+                    <li key={`surface-status-${status.segmentId}`}>
+                      <strong>Final surface status</strong>
+                      : constructed {formatSurfaceTypes(status.constructedSurfaceTypes)}; missing{" "}
+                      {formatSurfaceTypes(status.missingSurfaceTypes)}
+                    </li>
                   ))}
                   {focusedRenderDiagnostics.map((diagnostic, index) => (
                     <li key={`diagnostic-${diagnostic.code}-${diagnostic.segmentId ?? ""}-${diagnostic.legId ?? ""}-${index}`}>
@@ -2201,6 +2228,29 @@ export default function ProcedureDetailsPage() {
                         </button>
                       ))}
                     </div>
+
+                    {focusedFinalSurfaceStatuses.length > 0 ? (
+                      <div className="procedure-details-surface-status-row">
+                        {focusedFinalSurfaceStatuses.map((status) => (
+                          <div
+                            key={status.segmentId}
+                            className={`procedure-details-surface-status ${
+                              status.missingSurfaceTypes.length > 0 ? "has-missing" : ""
+                            }`}
+                          >
+                            <strong>Final surfaces</strong>
+                            <span>
+                              Built {formatSurfaceTypes(status.constructedSurfaceTypes)}
+                            </span>
+                            {status.missingSurfaceTypes.length > 0 ? (
+                              <span>
+                                Missing {formatSurfaceTypes(status.missingSurfaceTypes)}
+                              </span>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
 
                     {focusedBranch ? (
                       <div className="procedure-details-leg-stack">
