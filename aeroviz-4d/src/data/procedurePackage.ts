@@ -252,7 +252,8 @@ export interface BuildDiagnostic {
     | "TURN_VISUAL_FILL_ONLY"
     | "TURNING_MISSED_UNIMPLEMENTED"
     | "FINAL_VERTICAL_SURFACE_UNIMPLEMENTED"
-    | "CA_ENDPOINT_NOT_CONSTRUCTIBLE";
+    | "CA_ENDPOINT_NOT_CONSTRUCTIBLE"
+    | "ESTIMATED_CA_GEOMETRY";
   message: string;
   sourceRefs: SourceRef[];
 }

@@ -1768,3 +1768,37 @@
 
 ### Exact Next Recommended Step
 - Backfill CA-only missed segment geometry from estimated CA centerlines, filtering obsolete unsupported-CA diagnostics while preserving estimated-status diagnostics.
+
+## 2026-05-02 11:21 CEST
+
+### Goal Of This Session
+- Backfill CA-only missed segment geometry from estimated CA centerlines.
+
+### Decisions Locked
+- Added `buildMissedCaSegmentGeometry` as a missed-geometry helper instead of folding estimated CA behavior into the generic TF/RF/DF segment kernel.
+- Backfill only applies when the missed segment's non-IF geometry legs are all CA and all CA centerlines are constructible.
+- Backfilled CA geometry builds a straight estimated centerline plus primary/secondary envelopes, allowing section 1 missed surfaces to be produced.
+- Obsolete `UNSUPPORTED_LEG_TYPE` diagnostics for backfilled CA legs are filtered.
+- The replacement emits `ESTIMATED_CA_GEOMETRY` so the UI/data layer still states that this is debug geometry derived from a climb model, not certified source protection.
+
+### Files Changed
+- `src/data/procedurePackage.ts`
+- `src/data/procedureRenderBundle.ts`
+- `src/data/__tests__/procedureRenderBundle.test.ts`
+- `src/utils/procedureMissedGeometry.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/data/__tests__/procedureRenderBundle.test.ts src/utils/__tests__/procedureMissedGeometry.test.ts`
+- `npm run build`
+
+### Current Status
+- CA-only missed section 1 segments can now participate in the core render-bundle geometry path with centerline, envelope, and missed section surface.
+- CA course guides, estimated endpoints, and estimated centerlines remain separately visible diagnostic primitives.
+
+### Known Blockers
+- Mixed CA/HM/HA/HF turning missed sections are still not backfilled as straight CA segments.
+- The CA endpoint still uses the documented climb model and is not certified source geometry.
+
+### Exact Next Recommended Step
+- Add explicit Procedure Details/3D styling for estimated CA missed surfaces so users can distinguish CA-estimated protection from source-backed DF/TF/RF protection.

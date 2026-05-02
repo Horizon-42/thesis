@@ -31,6 +31,7 @@ import {
 } from "../utils/procedureSurfaceGeometry";
 import {
   buildMissedCaCenterlines,
+  buildMissedCaSegmentGeometry,
   buildMissedCaEndpoints,
   buildMissedCourseGuides,
   buildMissedSectionSurface,
@@ -157,8 +158,26 @@ export function buildProcedureRenderBundle(
         const segmentLegs = segment.legIds
           .map((legId) => legsById.get(legId))
           .filter((leg): leg is ProcedurePackageLeg => leg !== undefined);
-        const segmentGeometry = buildSegmentGeometryBundle(segment, segmentLegs, fixes, ctx);
-        const segmentDiagnostics: BuildDiagnostic[] = [...segmentGeometry.diagnostics];
+        const baseSegmentGeometry = buildSegmentGeometryBundle(segment, segmentLegs, fixes, ctx);
+
+        const missedCourseGuideResult = buildMissedCourseGuides(segment, segmentLegs, fixes);
+        const missedCaEndpointResult = buildMissedCaEndpoints(segment, segmentLegs, fixes);
+        const missedCaCenterlines = buildMissedCaCenterlines(
+          missedCaEndpointResult.geometries,
+          { samplingStepNm: ctx.samplingStepNm },
+        );
+        const caSegmentGeometryResult = buildMissedCaSegmentGeometry(
+          segment,
+          segmentLegs,
+          baseSegmentGeometry,
+          missedCaCenterlines,
+        );
+        const segmentGeometry = caSegmentGeometryResult.geometry;
+        const segmentDiagnostics: BuildDiagnostic[] = [
+          ...segmentGeometry.diagnostics,
+          ...missedCourseGuideResult.diagnostics,
+          ...missedCaEndpointResult.diagnostics,
+        ];
 
         const finalOeaResult =
           isLnavFinal(segment) && segmentGeometry.centerline.geoPositions.length >= 2
@@ -185,14 +204,6 @@ export function buildProcedureRenderBundle(
 
         const missedSurfaceResult = buildMissedSectionSurface(segment, segmentGeometry);
         segmentDiagnostics.push(...missedSurfaceResult.diagnostics);
-        const missedCourseGuideResult = buildMissedCourseGuides(segment, segmentLegs, fixes);
-        segmentDiagnostics.push(...missedCourseGuideResult.diagnostics);
-        const missedCaEndpointResult = buildMissedCaEndpoints(segment, segmentLegs, fixes);
-        segmentDiagnostics.push(...missedCaEndpointResult.diagnostics);
-        const missedCaCenterlines = buildMissedCaCenterlines(
-          missedCaEndpointResult.geometries,
-          { samplingStepNm: ctx.samplingStepNm },
-        );
         const missedTurnDebugResult = buildMissedTurnDebugPoint(segment, segmentLegs, fixes);
         segmentDiagnostics.push(...missedTurnDebugResult.diagnostics);
         diagnostics.push(...segmentDiagnostics);

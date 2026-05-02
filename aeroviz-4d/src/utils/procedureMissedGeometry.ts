@@ -20,6 +20,10 @@ import type {
   PolylineGeometry3D,
   SegmentGeometryBundle,
 } from "./procedureSegmentGeometry";
+import {
+  buildStraightEnvelope,
+  computeStationAxis,
+} from "./procedureSegmentGeometry";
 
 const DEFAULT_CA_COURSE_GUIDE_LENGTH_NM = 3;
 const DEFAULT_CA_CLIMB_GRADIENT_FT_PER_NM = 200;
@@ -83,6 +87,12 @@ export interface MissedCaCenterlineGeometry extends PolylineGeometry3D {
 
 export interface MissedCaCenterlineOptions {
   samplingStepNm?: number;
+}
+
+export interface MissedCaSegmentGeometryResult {
+  geometry: SegmentGeometryBundle;
+  backfilled: boolean;
+  diagnostics: BuildDiagnostic[];
 }
 
 export interface MissedTurnDebugPointGeometry {
@@ -424,6 +434,107 @@ export function buildMissedCaCenterlines(
       isArc: false,
     };
   });
+}
+
+function isMissedSegment(segment: ProcedureSegment): boolean {
+  return segment.segmentType === "MISSED_S1" || segment.segmentType === "MISSED_S2";
+}
+
+function filterBackfilledCaDiagnostics(
+  baseGeometry: SegmentGeometryBundle,
+  caLegIds: Set<string>,
+): BuildDiagnostic[] {
+  return baseGeometry.diagnostics.filter((diagnostic) => {
+    if (diagnostic.code !== "UNSUPPORTED_LEG_TYPE") return true;
+    if (diagnostic.legId && caLegIds.has(diagnostic.legId)) return false;
+    if (!diagnostic.legId && diagnostic.segmentId === baseGeometry.segmentId) return false;
+    return true;
+  });
+}
+
+export function buildMissedCaSegmentGeometry(
+  segment: ProcedureSegment,
+  legs: ProcedurePackageLeg[],
+  baseGeometry: SegmentGeometryBundle,
+  centerlines: MissedCaCenterlineGeometry[],
+): MissedCaSegmentGeometryResult {
+  if (!isMissedSegment(segment) || centerlines.length === 0) {
+    return { geometry: baseGeometry, backfilled: false, diagnostics: [] };
+  }
+
+  const segmentLegs = legs.filter((leg) => leg.segmentId === segment.segmentId);
+  const geometryLegs = segmentLegs.filter((leg) => leg.legType !== "IF");
+  const caLegs = geometryLegs.filter((leg) => leg.legType === "CA");
+  if (geometryLegs.length === 0 || caLegs.length !== geometryLegs.length) {
+    return { geometry: baseGeometry, backfilled: false, diagnostics: [] };
+  }
+
+  const centerlineByLegId = new Map(centerlines.map((centerline) => [centerline.legId, centerline]));
+  const orderedCenterlines = caLegs
+    .map((leg) => centerlineByLegId.get(leg.legId))
+    .filter((centerline): centerline is MissedCaCenterlineGeometry => centerline !== undefined);
+
+  if (orderedCenterlines.length !== caLegs.length) {
+    return { geometry: baseGeometry, backfilled: false, diagnostics: [] };
+  }
+
+  const geoPositions = orderedCenterlines.flatMap((centerline, index) =>
+    centerline.geoPositions.slice(index === 0 ? 0 : 1),
+  );
+  if (geoPositions.length < 2) {
+    return { geometry: baseGeometry, backfilled: false, diagnostics: [] };
+  }
+
+  const centerline: PolylineGeometry3D = {
+    geoPositions,
+    worldPositions: geoPositions.map(toCartesian),
+    geodesicLengthNm: orderedCenterlines.reduce(
+      (sum, centerlineGeometry) => sum + centerlineGeometry.geodesicLengthNm,
+      0,
+    ),
+    isArc: false,
+  };
+  const caLegIds = new Set(caLegs.map((leg) => leg.legId));
+  const estimatedDiagnostic: BuildDiagnostic = {
+    severity: "WARN",
+    segmentId: segment.segmentId,
+    legId: caLegs.length === 1 ? caLegs[0].legId : undefined,
+    code: "ESTIMATED_CA_GEOMETRY",
+    message:
+      `${segment.segmentId}: CA missed segment geometry was estimated from course, altitude, and climb model; ` +
+      "it is debug geometry and not certified source protection.",
+    sourceRefs: caLegs.flatMap((leg) => leg.sourceRefs),
+  };
+  const diagnostics = [
+    ...filterBackfilledCaDiagnostics(baseGeometry, caLegIds),
+    estimatedDiagnostic,
+  ];
+
+  return {
+    geometry: {
+      segmentId: segment.segmentId,
+      centerline,
+      stationAxis: computeStationAxis(centerline),
+      primaryEnvelope: buildStraightEnvelope(
+        `${segment.segmentId}:ca-estimated-primary`,
+        "PRIMARY",
+        centerline,
+        segment.xttNm * 2,
+      ),
+      secondaryEnvelope: segment.secondaryEnabled
+        ? buildStraightEnvelope(
+            `${segment.segmentId}:ca-estimated-secondary`,
+            "SECONDARY",
+            centerline,
+            segment.xttNm * 3,
+          )
+        : undefined,
+      turnJunctions: [],
+      diagnostics,
+    },
+    backfilled: true,
+    diagnostics: [estimatedDiagnostic],
+  };
 }
 
 export function buildMissedTurnDebugPoint(

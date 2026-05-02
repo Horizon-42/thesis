@@ -668,7 +668,14 @@ describe("procedure render bundle", () => {
     const segmentBundle = bundle.branchBundles[0].segmentBundles[0];
 
     expect(segmentBundle.segment.segmentType).toBe("MISSED_S1");
-    expect(segmentBundle.segmentGeometry.centerline.geoPositions).toEqual([]);
+    expect(segmentBundle.segmentGeometry.centerline.geoPositions.length).toBeGreaterThan(2);
+    expect(segmentBundle.segmentGeometry.primaryEnvelope).toBeDefined();
+    expect(segmentBundle.segmentGeometry.secondaryEnvelope).toBeDefined();
+    expect(segmentBundle.missedSectionSurface).toMatchObject({
+      surfaceType: "MISSED_SECTION1_ENVELOPE",
+      primary: expect.any(Object),
+      secondaryOuter: expect.any(Object),
+    });
     expect(segmentBundle.missedCourseGuides).toHaveLength(1);
     expect(segmentBundle.missedCourseGuides[0]).toMatchObject({
       legId: "leg:R:035",
@@ -695,6 +702,14 @@ describe("procedure render bundle", () => {
     });
     expect(segmentBundle.missedCaCenterlines[0].geoPositions.length).toBeGreaterThan(2);
     expect(bundle.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "ESTIMATED_CA_GEOMETRY",
+          legId: "leg:R:035",
+        }),
+      ]),
+    );
+    expect(bundle.diagnostics).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           code: "UNSUPPORTED_LEG_TYPE",
