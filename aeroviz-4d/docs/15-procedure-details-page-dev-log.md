@@ -2358,3 +2358,56 @@
 
 ### Exact Next Recommended Step
 - Add a TCH source path, preferably chart text/PDF extraction with explicit `src:chart-profile-text` provenance.
+
+## 2026-05-02 13:52 CEST
+
+### Goal Of This Session
+- Implement the reviewed Phase 1 3D procedure annotation layer for the current protected-mode visualization.
+
+### Decisions Locked
+- Added a global `Annotate` toggle in `ProcedurePanel`.
+- Annotation mode is off by default and disabled when the procedure layer is off.
+- Procedure 3D entities now carry runtime-only `ProcedureEntityAnnotation` metadata.
+- Labels are separate Cesium label entities so they can be toggled independently from the geometry.
+- Double-click selection works only when annotation mode is enabled.
+- The detail inspector is a fixed-position React overlay rather than screen-anchored to the picked object in Phase 1.
+- Selection highlight is implemented as a companion point marker at the picked/entity representative position, avoiding mutation of original geometry materials.
+
+### Files Changed
+- `src/data/procedureAnnotations.ts`
+- `src/data/__tests__/procedureAnnotations.test.ts`
+- `src/context/AppContext.tsx`
+- `src/components/ProcedurePanel.tsx`
+- `src/components/__tests__/ProcedurePanel.test.tsx`
+- `src/hooks/useProcedureSegmentLayer.ts`
+- `src/hooks/__tests__/useProcedureSegmentLayer.test.ts`
+- `src/hooks/useProcedureAnnotationPicking.ts`
+- `src/components/ProcedureAnnotationPopup.tsx`
+- `src/components/__tests__/ProcedureAnnotationPopup.test.tsx`
+- `src/components/CesiumViewer.tsx`
+- `src/App.tsx`
+- `src/index.css`
+
+### Commits
+- `435473e feat: add procedure annotation toggle`
+- `55c3c88 feat: annotate procedure 3d entities`
+- `976301f feat: inspect 3d procedure annotations`
+
+### Current Behavior
+- Turning on `Annotate` shows labels for key procedure geometry and important fixes.
+- Double-clicking a labeled/annotated 3D procedure entity opens a detail popup with:
+  - procedure/runway/branch/segment/leg context;
+  - construction status;
+  - explanation of the clicked geometry;
+  - key parameters;
+  - diagnostics and source refs when available.
+- The popup can link to Procedure Details for the active airport.
+
+### Known Boundaries
+- Hover tooltips are intentionally not implemented yet.
+- Label density is fixed to a Phase 1 key-label set.
+- Popup is fixed-position, not anchored next to the selected 3D object.
+- Highlight is a companion point marker, not a full polygon/polyline restyle.
+
+### Exact Next Recommended Step
+- Manually verify in the browser with KRDU generated procedure assets, then consider Phase 2 label density and screen-anchored popup placement.
