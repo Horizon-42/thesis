@@ -2048,3 +2048,34 @@
 
 ### Exact Next Recommended Step
 - Continue with Procedure Details 2D display for turning missed primitives before moving into P4 missed section surface refinement.
+
+## 2026-05-02 12:48 CEST
+
+### Goal Of This Session
+- Surface turning missed debug primitives in the Procedure Details 2D plan view.
+
+### Decisions Locked
+- Added 2D projected markers for `missedTurnDebugPrimitives`.
+- The plan view now includes turning missed primitive geometry in chart domain calculation, so TIA/wind/debug paths are not clipped out by the plot bounds.
+- The 2D rendering uses dashed orange diagnostic paths and labels the TIA overlay as `Turn TIA`.
+- The vertical profile remains anchor-only for turning missed debug information because the new primitives are lateral/debug geometry, not vertical surfaces.
+
+### Files Changed
+- `src/components/ProcedureDetailsPage.tsx`
+- `src/components/__tests__/ProcedureDetailsPage.test.tsx`
+- `src/index.css`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/components/__tests__/ProcedureDetailsPage.test.tsx src/utils/__tests__/procedureMissedGeometry.test.ts src/data/__tests__/procedureRenderBundle.test.ts`
+- `npm run build`
+
+### Current Status
+- Turning missed debug primitives are now visible in both protected 3D mode and Procedure Details 2D plan view.
+
+### Known Blockers
+- These are still debug-estimate primitives, not full turning missed protected surfaces.
+- Full P4/P3 compliance needs real wind/aircraft turn inputs and FAA TIA/wind-spiral construction.
+
+### Exact Next Recommended Step
+- Run full frontend validation, then start P4 missed section surface refinement.

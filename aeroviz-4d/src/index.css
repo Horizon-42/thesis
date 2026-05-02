@@ -1871,6 +1871,30 @@ body,
   stroke-width: 3px;
 }
 
+.procedure-details-turning-missed-primitive {
+  cursor: pointer;
+  transition: opacity 0.16s ease;
+}
+
+.procedure-details-turning-missed-primitive path {
+  fill: none;
+  stroke: rgba(249, 115, 22, 0.78);
+  stroke-width: 2;
+  stroke-dasharray: 7 5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.procedure-details-turning-missed-primitive text {
+  fill: #fb923c;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  paint-order: stroke;
+  stroke: rgba(15, 23, 42, 0.94);
+  stroke-width: 3px;
+}
+
 .procedure-details-arrowhead {
   fill: context-stroke;
 }

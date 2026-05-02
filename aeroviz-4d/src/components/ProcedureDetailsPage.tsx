@@ -500,6 +500,14 @@ interface MissedTurnDebugMarker {
   label: string;
 }
 
+interface MissedTurnDebugPrimitiveMarker {
+  branchId: string;
+  segmentId: string;
+  primitiveId: string;
+  points: Array<{ xM: number; yM: number }>;
+  label: string;
+}
+
 interface MissedCaEndpointMarker {
   branchId: string;
   legId: string;
@@ -715,6 +723,47 @@ function buildMissedTurnDebugMarkers(
   });
 }
 
+function buildMissedTurnDebugPrimitiveMarkers(
+  document: ProcedureDetailDocument | null,
+  renderBundle: ProcedureRenderBundle | null,
+  polylines: ProcedureBranchPolyline[],
+): MissedTurnDebugPrimitiveMarker[] {
+  if (!document || !renderBundle) return [];
+  const origin =
+    document.runway.threshold ??
+    document.fixes.find((fix) => fix.position)?.position ?? {
+      lon: 0,
+      lat: 0,
+    };
+  const branchByScopedId = new Map(
+    polylines.map((branch) => [scopedBranchIdFor(document, branch), branch]),
+  );
+
+  return renderBundle.branchBundles.flatMap((branchBundle) => {
+    const branch = branchByScopedId.get(branchBundle.branchId);
+    if (!branch) return [];
+
+    return branchBundle.segmentBundles.flatMap((segmentBundle): MissedTurnDebugPrimitiveMarker[] =>
+      segmentBundle.missedTurnDebugPrimitives.flatMap((primitive): MissedTurnDebugPrimitiveMarker[] => {
+        const points = primitive.geoPositions.map((point) => {
+          const projected = pointToEastNorth(point.lonDeg, point.latDeg, origin.lon, origin.lat);
+          return { xM: projected.east, yM: projected.north };
+        });
+        if (points.length < 2) return [];
+        return [
+          {
+            branchId: branch.branchId,
+            segmentId: segmentBundle.segment.segmentId,
+            primitiveId: primitive.primitiveId,
+            points,
+            label: primitive.debugType === "TIA_BOUNDARY" ? "Turn TIA" : "Turn debug primitive",
+          },
+        ];
+      }),
+    );
+  });
+}
+
 function buildMissedCaEndpointMarkers(
   document: ProcedureDetailDocument | null,
   renderBundle: ProcedureRenderBundle | null,
@@ -794,6 +843,7 @@ interface SvgChartProps {
   missedSectionMarkers: MissedSectionMarker[];
   missedLegMarkers: MissedLegMarker[];
   missedTurnDebugMarkers: MissedTurnDebugMarker[];
+  missedTurnDebugPrimitiveMarkers: MissedTurnDebugPrimitiveMarker[];
   missedCaEndpointMarkers: MissedCaEndpointMarker[];
   focusedFixId: string | null;
   focusedBranchId: string | null;
@@ -811,6 +861,7 @@ function ProcedurePlanView({
   missedSectionMarkers,
   missedLegMarkers,
   missedTurnDebugMarkers,
+  missedTurnDebugPrimitiveMarkers,
   missedCaEndpointMarkers,
   focusedFixId,
   focusedBranchId,
@@ -849,6 +900,7 @@ function ProcedurePlanView({
     ...missedLegMarkers.map((marker) => marker.point),
     ...missedLegMarkers.flatMap((marker) => marker.courseTarget ? [marker.courseTarget] : []),
     ...missedTurnDebugMarkers.map((marker) => marker.point),
+    ...missedTurnDebugPrimitiveMarkers.flatMap((marker) => marker.points),
     ...missedCaEndpointMarkers.map((marker) => marker.point),
   ];
   const plotWidth = SVG_WIDTH - SVG_PADDING_X * 2;
@@ -1255,6 +1307,31 @@ function ProcedurePlanView({
         );
       })}
 
+      {missedTurnDebugPrimitiveMarkers.map((marker) => {
+        const isFocused = !focusedBranchId || marker.branchId === focusedBranchId;
+        const pathData = marker.points
+          .map((point, index) => `${index === 0 ? "M" : "L"} ${scaleX(point.xM)} ${scaleY(point.yM)}`)
+          .join(" ");
+        const labelPoint = marker.points[Math.floor((marker.points.length - 1) / 2)];
+        return (
+          <g
+            key={`missed-turn-debug-primitive-${marker.primitiveId}`}
+            className={`procedure-details-turning-missed-primitive ${
+              isFocused ? "is-focused" : "is-muted"
+            }`}
+            onMouseEnter={() => onPreviewBranch(marker.branchId)}
+            onClick={() => onSelectBranch(marker.branchId)}
+          >
+            <path d={pathData} />
+            {marker.label === "Turn TIA" ? (
+              <text x={scaleX(labelPoint.xM) + 7} y={scaleY(labelPoint.yM) - 7}>
+                {marker.label}
+              </text>
+            ) : null}
+          </g>
+        );
+      })}
+
       {polylines.map((branch) => {
         const isFocused = !focusedBranchId || branch.branchId === focusedBranchId;
         return (
@@ -1321,7 +1398,7 @@ function ProcedureVerticalProfile({
   onSelectFix,
   onPreviewBranch,
   onSelectBranch,
-}: Omit<SvgChartProps, "runwayMarker" | "rfMarkers">) {
+}: Omit<SvgChartProps, "runwayMarker" | "rfMarkers" | "missedTurnDebugPrimitiveMarkers">) {
   const allPoints = polylines.flatMap((branch) => branch.points);
   if (allPoints.length === 0) {
     return (
@@ -1817,6 +1894,10 @@ export default function ProcedureDetailsPage() {
     () => buildMissedTurnDebugMarkers(procedureDocument, procedureRenderBundle, polylines),
     [polylines, procedureDocument, procedureRenderBundle],
   );
+  const missedTurnDebugPrimitiveMarkers = useMemo(
+    () => buildMissedTurnDebugPrimitiveMarkers(procedureDocument, procedureRenderBundle, polylines),
+    [polylines, procedureDocument, procedureRenderBundle],
+  );
   const missedCaEndpointMarkers = useMemo(
     () => buildMissedCaEndpointMarkers(procedureDocument, procedureRenderBundle, polylines),
     [polylines, procedureDocument, procedureRenderBundle],
@@ -2269,6 +2350,7 @@ export default function ProcedureDetailsPage() {
                       missedSectionMarkers={missedSectionMarkers}
                       missedLegMarkers={missedLegMarkers}
                       missedTurnDebugMarkers={missedTurnDebugMarkers}
+                      missedTurnDebugPrimitiveMarkers={missedTurnDebugPrimitiveMarkers}
                       missedCaEndpointMarkers={missedCaEndpointMarkers}
                       focusedFixId={focusedFixId}
                       focusedBranchId={focusedBranchId}
