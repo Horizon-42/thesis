@@ -1381,3 +1381,40 @@
 
 ### Exact Next Recommended Step
 - Start the next v3 priority by adding a typed vertical-surface diagnostic bundle for final approach modes that are currently collapsed to LNAV.
+
+## 2026-05-02 10:35 CEST
+
+### Goal Of This Session
+- Add structured final approach surface status for modes that are currently collapsed to LNAV baseline geometry.
+
+### Decisions Locked
+- Added `FinalApproachSurfaceStatus` and `FinalApproachSurfaceType`.
+- LNAV baseline final OEA is now recorded as a constructed surface type.
+- Collapsed LPV/LNAV-VNAV/LNAV procedures now expose missing mode-specific surfaces in render bundles:
+  - `LPV_W`;
+  - `LPV_X`;
+  - `LPV_Y`;
+  - `LNAV_VNAV_OCS`.
+- Added `FINAL_VERTICAL_SURFACE_UNIMPLEMENTED` diagnostics when required final vertical/surface objects are missing.
+- No LPV/GLS W/X/Y or LNAV/VNAV OCS geometry is constructed in this phase.
+
+### Files Changed
+- `src/data/procedurePackage.ts`
+- `src/utils/procedureSurfaceGeometry.ts`
+- `src/utils/__tests__/procedureSurfaceGeometry.test.ts`
+- `src/data/procedureRenderBundle.ts`
+- `src/data/__tests__/procedureRenderBundle.test.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/utils/__tests__/procedureSurfaceGeometry.test.ts src/data/__tests__/procedureRenderBundle.test.ts`
+- `npm run build`
+
+### Current Status
+- Final approach mode gaps are now typed render-bundle state, not only adapter warnings.
+
+### Known Blockers
+- Mode-specific LPV/GLS W/X/Y and LNAV/VNAV OCS geometry remains future work.
+
+### Exact Next Recommended Step
+- Surface final approach missing-surface status in Procedure Details Data Notes and the focused sequence context.

@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { ProcedureSegment } from "../../data/procedurePackage";
 import type { PolylineGeometry3D } from "../procedureSegmentGeometry";
 import { toCartesian, type GeoPoint } from "../procedureGeoMath";
-import { buildLnavFinalOea } from "../procedureSurfaceGeometry";
+import {
+  buildFinalApproachSurfaceStatus,
+  buildLnavFinalOea,
+} from "../procedureSurfaceGeometry";
 
 const finalGeoPositions: GeoPoint[] = [
   { lonDeg: -78.84, latDeg: 35.84, altM: 670.56 },
@@ -92,5 +95,30 @@ describe("procedure surface geometry", () => {
     expect(result.geometry).toBeNull();
     expect(result.diagnostics).toHaveLength(1);
     expect(result.diagnostics[0].code).toBe("SOURCE_INCOMPLETE");
+  });
+
+  it("reports missing mode-specific final surfaces when modes are collapsed to LNAV", () => {
+    const oea = buildLnavFinalOea(finalSegment, finalCenterline).geometry;
+    const result = buildFinalApproachSurfaceStatus(
+      {
+        ...finalSegment,
+        constructionFlags: { collapsedApproachModes: ["LPV", "LNAV/VNAV", "LNAV"] },
+        verticalRule: { kind: "LPV_GLS_SURFACES" },
+      },
+      oea,
+    );
+
+    expect(result.status).toMatchObject({
+      requestedModes: ["LPV", "LNAV/VNAV", "LNAV"],
+      constructedSurfaceTypes: ["LNAV_FINAL_OEA"],
+      missingSurfaceTypes: ["LPV_W", "LPV_X", "LPV_Y", "LNAV_VNAV_OCS"],
+      constructionStatus: "COLLAPSED_TO_LNAV_BASELINE",
+    });
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "FINAL_VERTICAL_SURFACE_UNIMPLEMENTED",
+        severity: "WARN",
+      }),
+    ]);
   });
 });

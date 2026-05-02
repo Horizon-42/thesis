@@ -23,7 +23,12 @@ import {
   buildAlignedLnavConnector,
   type AlignedLnavConnectorGeometry,
 } from "../utils/procedureConnectorGeometry";
-import { buildLnavFinalOea, type LnavFinalOeaGeometry } from "../utils/procedureSurfaceGeometry";
+import {
+  buildFinalApproachSurfaceStatus,
+  buildLnavFinalOea,
+  type FinalApproachSurfaceStatus,
+  type LnavFinalOeaGeometry,
+} from "../utils/procedureSurfaceGeometry";
 import {
   buildMissedCourseGuides,
   buildMissedSectionSurface,
@@ -67,6 +72,7 @@ export interface ProcedureSegmentRenderBundle {
   legs: ProcedurePackageLeg[];
   segmentGeometry: SegmentGeometryBundle;
   finalOea: LnavFinalOeaGeometry | null;
+  finalSurfaceStatus: FinalApproachSurfaceStatus | null;
   alignedConnector: AlignedLnavConnectorGeometry | null;
   missedSectionSurface: MissedSectionSurfaceGeometry | null;
   missedCourseGuides: MissedCourseGuideGeometry[];
@@ -155,6 +161,11 @@ export function buildProcedureRenderBundle(
               })
             : { geometry: null, diagnostics: [] };
         segmentDiagnostics.push(...finalOeaResult.diagnostics);
+        const finalSurfaceStatusResult = buildFinalApproachSurfaceStatus(
+          segment,
+          finalOeaResult.geometry,
+        );
+        segmentDiagnostics.push(...finalSurfaceStatusResult.diagnostics);
 
         const connectorResult =
           shouldBuildAlignedConnector(segment) && segmentGeometry.centerline.geoPositions.length >= 2
@@ -179,6 +190,7 @@ export function buildProcedureRenderBundle(
           legs: segmentLegs,
           segmentGeometry,
           finalOea: finalOeaResult.geometry,
+          finalSurfaceStatus: finalSurfaceStatusResult.status,
           alignedConnector: connectorResult.geometry,
           missedSectionSurface: missedSurfaceResult.geometry,
           missedCourseGuides: missedCourseGuideResult.geometries,

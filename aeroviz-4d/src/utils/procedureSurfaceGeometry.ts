@@ -43,6 +43,28 @@ export interface LnavFinalOeaGeometry {
   };
 }
 
+export type FinalApproachSurfaceType =
+  | "LNAV_FINAL_OEA"
+  | "LNAV_VNAV_OCS"
+  | "LPV_W"
+  | "LPV_X"
+  | "LPV_Y"
+  | "GLS_W"
+  | "GLS_X"
+  | "GLS_Y";
+
+export interface FinalApproachSurfaceStatus {
+  segmentId: string;
+  requestedModes: string[];
+  constructedSurfaceTypes: FinalApproachSurfaceType[];
+  missingSurfaceTypes: FinalApproachSurfaceType[];
+  constructionStatus:
+    | "LNAV_BASELINE_CONSTRUCTED"
+    | "COLLAPSED_TO_LNAV_BASELINE"
+    | "UNSUPPORTED_FINAL_VERTICAL_SURFACES";
+  notes: string[];
+}
+
 export interface LnavFinalOeaOptions {
   startBeforePfafNm?: number;
   endAfterThresholdNm?: number;
@@ -179,6 +201,76 @@ export function buildVariableWidthRibbon(
       stationNm,
       halfWidthNm: halfWidthAtStation(stationNm),
     })),
+  };
+}
+
+function surfaceTypesForMode(mode: string): FinalApproachSurfaceType[] {
+  const normalized = mode.toUpperCase();
+  if (normalized === "LNAV") return ["LNAV_FINAL_OEA"];
+  if (normalized === "LNAV/VNAV" || normalized === "LNAV-VNAV") return ["LNAV_VNAV_OCS"];
+  if (normalized === "LPV") return ["LPV_W", "LPV_X", "LPV_Y"];
+  if (normalized === "GLS") return ["GLS_W", "GLS_X", "GLS_Y"];
+  return [];
+}
+
+function uniqueSurfaceTypes(types: FinalApproachSurfaceType[]): FinalApproachSurfaceType[] {
+  return [...new Set(types)];
+}
+
+export function buildFinalApproachSurfaceStatus(
+  segment: ProcedureSegment,
+  finalOea: LnavFinalOeaGeometry | null,
+): { status: FinalApproachSurfaceStatus | null; diagnostics: BuildDiagnostic[] } {
+  if (!segment.segmentType.startsWith("FINAL")) {
+    return { status: null, diagnostics: [] };
+  }
+
+  const requestedModes = segment.constructionFlags.collapsedApproachModes?.length
+    ? segment.constructionFlags.collapsedApproachModes
+    : [segment.segmentType.replace(/^FINAL_/, "").replace(/_/g, "/")];
+  const requestedSurfaceTypes = uniqueSurfaceTypes(requestedModes.flatMap(surfaceTypesForMode));
+  const constructedSurfaceTypes: FinalApproachSurfaceType[] = finalOea ? ["LNAV_FINAL_OEA"] : [];
+  const missingSurfaceTypes = requestedSurfaceTypes.filter(
+    (surfaceType) => !constructedSurfaceTypes.includes(surfaceType),
+  );
+  const collapsedToLnav =
+    requestedModes.length > 1 ||
+    missingSurfaceTypes.some((surfaceType) => surfaceType !== "LNAV_FINAL_OEA");
+  const constructionStatus = missingSurfaceTypes.length === 0
+    ? "LNAV_BASELINE_CONSTRUCTED"
+    : collapsedToLnav && finalOea
+      ? "COLLAPSED_TO_LNAV_BASELINE"
+      : "UNSUPPORTED_FINAL_VERTICAL_SURFACES";
+  const diagnostics: BuildDiagnostic[] = [];
+
+  if (missingSurfaceTypes.length > 0) {
+    diagnostics.push(
+      diagnostic(
+        "FINAL_VERTICAL_SURFACE_UNIMPLEMENTED",
+        `${segment.segmentId}: final approach modes ${requestedModes.join(
+          " / ",
+        )} require ${missingSurfaceTypes.join(
+          ", ",
+        )}; current render bundle only exposes ${constructedSurfaceTypes.join(", ") || "no final surface"}.`,
+        "WARN",
+        segment.segmentId,
+        segment.sourceRefs,
+      ),
+    );
+  }
+
+  return {
+    status: {
+      segmentId: segment.segmentId,
+      requestedModes,
+      constructedSurfaceTypes,
+      missingSurfaceTypes,
+      constructionStatus,
+      notes: missingSurfaceTypes.length > 0
+        ? ["Mode-specific final vertical/surface geometry remains future work."]
+        : [],
+    },
+    diagnostics,
   };
 }
 

@@ -250,7 +250,8 @@ export interface BuildDiagnostic {
     | "MODE_COLLAPSED_TO_LNAV"
     | "UNSUPPORTED_LEG_TYPE"
     | "TURN_VISUAL_FILL_ONLY"
-    | "TURNING_MISSED_UNIMPLEMENTED";
+    | "TURNING_MISSED_UNIMPLEMENTED"
+    | "FINAL_VERTICAL_SURFACE_UNIMPLEMENTED";
   message: string;
   sourceRefs: SourceRef[];
 }

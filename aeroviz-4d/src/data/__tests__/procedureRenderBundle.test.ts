@@ -549,11 +549,52 @@ describe("procedure render bundle", () => {
     expect(segmentBundle.segment.segmentId).toBe("segment:final");
     expect(segmentBundle.segmentGeometry.centerline.geoPositions.length).toBeGreaterThan(2);
     expect(segmentBundle.finalOea?.surfaceType).toBe("LNAV_FINAL_OEA");
+    expect(segmentBundle.finalSurfaceStatus).toMatchObject({
+      constructedSurfaceTypes: ["LNAV_FINAL_OEA"],
+      missingSurfaceTypes: [],
+      constructionStatus: "LNAV_BASELINE_CONSTRUCTED",
+    });
     expect(segmentBundle.alignedConnector?.connectorType).toBe(
       "ALIGNED_LNAV_INTERMEDIATE_TO_FINAL",
     );
     expect(bundle.branchBundles[0].turnJunctions).toEqual([]);
     expect(bundle.diagnostics).toEqual([]);
+  });
+
+  it("exposes missing final vertical surfaces when approach modes collapse to LNAV", () => {
+    const collapsedPackage: ProcedurePackage = {
+      ...samplePackage,
+      segments: [
+        {
+          ...samplePackage.segments[0],
+          verticalRule: { kind: "LPV_GLS_SURFACES" },
+          constructionFlags: {
+            collapsedApproachModes: ["LPV", "LNAV/VNAV", "LNAV"],
+          },
+        },
+      ],
+    };
+    const bundle = buildProcedureRenderBundle(collapsedPackage, {
+      samplingStepNm: 0.5,
+      enableDebugPrimitives: false,
+    });
+    const segmentBundle = bundle.branchBundles[0].segmentBundles[0];
+
+    expect(segmentBundle.finalSurfaceStatus).toMatchObject({
+      requestedModes: ["LPV", "LNAV/VNAV", "LNAV"],
+      constructedSurfaceTypes: ["LNAV_FINAL_OEA"],
+      missingSurfaceTypes: ["LPV_W", "LPV_X", "LPV_Y", "LNAV_VNAV_OCS"],
+      constructionStatus: "COLLAPSED_TO_LNAV_BASELINE",
+    });
+    expect(bundle.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "FINAL_VERTICAL_SURFACE_UNIMPLEMENTED",
+          segmentId: "segment:final",
+          severity: "WARN",
+        }),
+      ]),
+    );
   });
 
   it("adds visual inter-segment turn junctions at adjacent segment joins", () => {
