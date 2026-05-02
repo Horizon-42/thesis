@@ -7,6 +7,7 @@ import type {
 import type { SegmentGeometryBundle } from "../procedureSegmentGeometry";
 import {
   buildMissedCaEndpoints,
+  buildMissedCaCenterlines,
   buildMissedCourseGuides,
   buildMissedSectionSurface,
   buildMissedTurnDebugPoint,
@@ -252,6 +253,31 @@ describe("procedure missed geometry", () => {
         message: expect.stringContaining("outbound course"),
       }),
     ]);
+  });
+
+  it("builds sampled CA centerlines from estimated endpoints", () => {
+    const endpointResult = buildMissedCaEndpoints(missedSegment, [caLeg], fixes, {
+      climbGradientFtPerNm: 200,
+    });
+    const centerlines = buildMissedCaCenterlines(endpointResult.geometries, {
+      samplingStepNm: 0.25,
+    });
+
+    expect(centerlines).toHaveLength(1);
+    expect(centerlines[0]).toMatchObject({
+      segmentId: "segment:missed-s1",
+      legId: "leg:missed:ca",
+      sourceEndpointStatus: "ESTIMATED_ENDPOINT",
+      constructionStatus: "ESTIMATED_CENTERLINE",
+      isArc: false,
+    });
+    expect(centerlines[0].geodesicLengthNm).toBeCloseTo(1, 8);
+    expect(centerlines[0].geoPositions).toHaveLength(5);
+    expect(centerlines[0].geoPositions[0].lonDeg).toBeCloseTo(-78.8, 8);
+    expect(centerlines[0].geoPositions[0].latDeg).toBeCloseTo(35.87, 8);
+    expect(centerlines[0].geoPositions[centerlines[0].geoPositions.length - 1]).toEqual(
+      endpointResult.geometries[0].geoPositions[1],
+    );
   });
 
   it("builds a debug-only turning missed anchor for flagged section two segments", () => {

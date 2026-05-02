@@ -1706,3 +1706,33 @@
 
 ### Exact Next Recommended Step
 - Build CA centerline geometry from estimated endpoints, then use it as a constructible missed segment path while keeping estimated-status diagnostics visible.
+
+## 2026-05-02 11:40 CEST
+
+### Goal Of This Session
+- Add CA centerline geometry helper from estimated CA endpoints.
+
+### Decisions Locked
+- Added `MissedCaCenterlineGeometry`.
+- Added `buildMissedCaCenterlines`.
+- Centerlines are sampled from estimated CA endpoint geometry and marked `ESTIMATED_CENTERLINE`.
+- This phase does not yet replace `SegmentGeometryBundle.centerline`; it only creates the typed centerline object needed for the next integration step.
+
+### Files Changed
+- `src/utils/procedureMissedGeometry.ts`
+- `src/utils/__tests__/procedureMissedGeometry.test.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/utils/__tests__/procedureMissedGeometry.test.ts`
+- `npm run build`
+
+### Current Status
+- CA endpoint and sampled CA centerline math are now both available as typed helper geometry.
+
+### Known Blockers
+- Render bundles do not yet expose CA centerlines.
+- The segment geometry kernel still treats CA as unsupported for centerline/envelope construction.
+
+### Exact Next Recommended Step
+- Expose CA centerlines in render bundles and render them separately before using them to backfill missed segment geometry.

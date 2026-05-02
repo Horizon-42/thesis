@@ -7,6 +7,8 @@ import type {
 import {
   FEET_TO_METERS,
   METERS_PER_NM,
+  distanceNm,
+  interpolateGreatCircle,
   offsetPoint,
   toCartesian,
   toRadians,
@@ -15,6 +17,7 @@ import {
 } from "./procedureGeoMath";
 import type {
   LateralEnvelopeGeometry,
+  PolylineGeometry3D,
   SegmentGeometryBundle,
 } from "./procedureSegmentGeometry";
 
@@ -68,6 +71,18 @@ export interface MissedCaEndpointGeometry {
 export interface MissedCaEndpointOptions {
   climbGradientFtPerNm?: number;
   useDefaultClimbGradient?: boolean;
+}
+
+export interface MissedCaCenterlineGeometry extends PolylineGeometry3D {
+  segmentId: string;
+  legId: string;
+  sourceEndpointStatus: MissedCaEndpointStatus;
+  constructionStatus: "ESTIMATED_CENTERLINE";
+  notes: string[];
+}
+
+export interface MissedCaCenterlineOptions {
+  samplingStepNm?: number;
 }
 
 export interface MissedTurnDebugPointGeometry {
@@ -377,6 +392,38 @@ export function buildMissedCaEndpoints(
   });
 
   return { geometries, diagnostics };
+}
+
+export function buildMissedCaCenterlines(
+  endpoints: MissedCaEndpointGeometry[],
+  options: MissedCaCenterlineOptions = {},
+): MissedCaCenterlineGeometry[] {
+  const samplingStepNm = Math.max(options.samplingStepNm ?? 0.25, 0.01);
+
+  return endpoints.map((endpoint) => {
+    const [start, end] = endpoint.geoPositions;
+    const lengthNm = distanceNm(start, end);
+    const sampleCount = Math.max(1, Math.ceil(lengthNm / samplingStepNm));
+    const geoPositions = Array.from({ length: sampleCount + 1 }, (_, index) =>
+      interpolateGreatCircle(start, end, index / sampleCount),
+    );
+    geoPositions[geoPositions.length - 1] = end;
+
+    return {
+      segmentId: endpoint.segmentId,
+      legId: endpoint.legId,
+      sourceEndpointStatus: endpoint.constructionStatus,
+      constructionStatus: "ESTIMATED_CENTERLINE",
+      notes: [
+        ...endpoint.notes,
+        "Centerline is sampled from estimated CA endpoint geometry; not certified source geometry.",
+      ],
+      geoPositions,
+      worldPositions: geoPositions.map(toCartesian),
+      geodesicLengthNm: lengthNm,
+      isArc: false,
+    };
+  });
 }
 
 export function buildMissedTurnDebugPoint(
