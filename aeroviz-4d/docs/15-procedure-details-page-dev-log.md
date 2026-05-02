@@ -1643,3 +1643,33 @@
 
 ### Exact Next Recommended Step
 - Add CA endpoint geometry to render bundles alongside course guides, with status/diagnostics visible but without replacing the current guide yet.
+
+## 2026-05-02 11:20 CEST
+
+### Goal Of This Session
+- Expose estimated CA endpoints through render bundles without replacing the existing CA course guide.
+
+### Decisions Locked
+- Added `missedCaEndpoints` to `ProcedureSegmentRenderBundle`.
+- `buildProcedureRenderBundle` now calls `buildMissedCaEndpoints` for missed segments.
+- CA endpoint geometry is exposed alongside `missedCourseGuides`.
+- Existing segment geometry remains unchanged: CA legs still do not become TF/DF centerlines in this phase.
+
+### Files Changed
+- `src/data/procedureRenderBundle.ts`
+- `src/data/__tests__/procedureRenderBundle.test.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/data/__tests__/procedureRenderBundle.test.ts`
+- `npm run build`
+
+### Current Status
+- Render bundles now carry both the conservative CA direction guide and the estimated CA course-to-altitude endpoint object.
+
+### Known Blockers
+- Procedure Details and 3D protected mode do not yet render the estimated CA endpoint/status.
+- CA centerline and envelope are not constructed yet.
+
+### Exact Next Recommended Step
+- Render CA estimated endpoints as diagnostic/status markers in Procedure Details and protected 3D mode.

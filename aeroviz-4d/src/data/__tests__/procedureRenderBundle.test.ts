@@ -676,6 +676,16 @@ describe("procedure render bundle", () => {
       requiredAltitudeFtMsl: 1000,
       constructionStatus: "COURSE_DIRECTION_ONLY",
     });
+    expect(segmentBundle.missedCaEndpoints).toHaveLength(1);
+    expect(segmentBundle.missedCaEndpoints[0]).toMatchObject({
+      legId: "leg:R:035",
+      courseDeg: 305,
+      startAltitudeFtMsl: 800,
+      targetAltitudeFtMsl: 1000,
+      climbGradientFtPerNm: 200,
+      distanceNm: 1,
+      constructionStatus: "ESTIMATED_ENDPOINT",
+    });
     expect(bundle.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
