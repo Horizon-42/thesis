@@ -1497,3 +1497,111 @@
 ### Remaining v3 Migration Gaps
 - Real LPV/GLS W/X/Y and LNAV/VNAV OCS geometry is still not implemented.
 - CA endpoint construction and full turning missed wind-spiral/TIA geometry remain future work.
+
+## 2026-05-02 11:00 CEST
+
+### Goal Of This Session
+- Preserve the remaining v3 migration priority list in the project docs so future work can continue after context compaction.
+
+### Remaining Major Items And Priority
+
+#### P0: CA course-to-altitude real geometry
+- Current state:
+  - CA `courseDeg` flows from CIFP parser/export into procedure package and render bundle.
+  - Procedure Details and 3D protected mode show CA course guides.
+  - Current CA primitive is `COURSE_DIRECTION_ONLY`; no endpoint, climb distance, or certified surface is claimed.
+- Required functions:
+  - Build a CA endpoint model from start fix, outbound course, required altitude, starting altitude, and explicit climb-gradient/default climb model.
+  - Emit endpoint status such as `ESTIMATED_ENDPOINT`, `SOURCE_EXACT`, or `INSUFFICIENT_CLIMB_MODEL`.
+  - Build CA centerline geometry from start fix to endpoint.
+  - Build conservative CA missed section 1 envelope/surface when endpoint is available.
+  - Keep diagnostics clear when altitude/climb inputs are missing.
+- Acceptance checks:
+  - CA with course and altitude can produce a typed endpoint and centerline.
+  - CA without enough climb/altitude information produces diagnostics and no fake endpoint.
+  - CA is not mislabeled or constructed as TF/DF.
+
+#### P1: LNAV/VNAV OCS vertical surface
+- Current state:
+  - `FinalApproachSurfaceStatus` lists `LNAV_VNAV_OCS` as missing.
+  - No LNAV/VNAV OCS geometry or vertical assessment exists.
+- Required functions:
+  - Add `LnavVnavOcsGeometry` as a final vertical surface object.
+  - Use centerline stationing plus GPA/TCH or an explicitly diagnosed fallback.
+  - Render OCS as an independent 3D translucent surface.
+  - Extend segment assessment to report vertical error/clearance against the OCS.
+- Acceptance checks:
+  - `LNAV_VNAV_OCS` moves from missing to constructed when required source data exists.
+  - Missing GPA/TCH or equivalent data produces diagnostics, not fake geometry.
+  - Vertical deviation assessment can identify aircraft below the OCS.
+
+#### P2: LPV/GLS W/X/Y surfaces
+- Current state:
+  - `FinalApproachSurfaceStatus` lists `LPV_W`, `LPV_X`, `LPV_Y` and GLS equivalents as missing.
+  - Protected mode only shows a status marker; no W/X/Y geometry exists.
+- Required functions:
+  - Add LPV/GLS surface bundle objects for W, X, and Y surfaces.
+  - Construct W/X/Y boundaries from final course, threshold/glidepath metadata, and mode-specific rules.
+  - Render W/X/Y as independently identifiable protected-mode objects.
+  - Update Procedure Details status so constructed W/X/Y surfaces replace missing-surface notes.
+- Acceptance checks:
+  - W/X/Y are separate typed geometry objects with independent entity ids.
+  - Multimode LPV procedures no longer show LPV W/X/Y as missing once geometry is available.
+  - LNAV baseline behavior remains unchanged.
+
+#### P3: Turning missed approach debug primitives
+- Current state:
+  - Turning missed section 2 is flagged with `isTurningMissedApproach`.
+  - Procedure Details and 3D protected mode show a debug-only anchor.
+  - No TIA, early/late baseline, inside/outside turn, or wind-spiral primitive exists.
+- Required functions:
+  - Classify turn-at-altitude versus turn-at-fix.
+  - Classify early/inside versus late/outside turn cases.
+  - Add debug primitives for TIA boundary, early baseline, late baseline, nominal turn path, and wind spiral.
+  - Mark estimated wind/turn primitives as `DEBUG_ESTIMATE_ONLY` or equivalent.
+- Acceptance checks:
+  - Turning missed cases produce explicit debug primitives when enough data exists.
+  - Missing wind/turn inputs produce diagnostics.
+  - Debug primitives are visually separate from certified protected surfaces.
+
+#### P4: Full missed section 1 / section 2 protected surfaces
+- Current state:
+  - `MISSED_SECTION1_ENVELOPE` and straight `MISSED_SECTION2_STRAIGHT_ENVELOPE` are first-pass envelope classifications.
+  - They are not full FAA section 1/2 protected-surface construction.
+- Required functions:
+  - Build section 1 surfaces by final type: LNAV, LNAV/VNAV, LPV/GLS.
+  - Build straight section 2 surfaces from TF/DF centerlines with section-specific primary/secondary boundaries.
+  - Build turning section 2 surfaces after P3 debug/classification primitives exist.
+  - Connect missed surfaces to climb-gradient and vertical assessment.
+- Acceptance checks:
+  - Section 1 and section 2 are independent geometry objects.
+  - Straight section 2 can be assessed for horizontal and vertical containment.
+  - Turning section 2 does not claim compliance until TIA/wind-spiral rules are implemented.
+
+#### P5: RNP AR final / RF-specific protected templates
+- Current state:
+  - RF centerline and first-pass RF envelope handling exist.
+  - Full RNP AR final templates and RF final protected areas are not implemented.
+- Required functions:
+  - Preserve and render `FINAL_RNP_AR` as a distinct final type instead of collapsing to LNAV.
+  - Add RF-to-PFAF and RF final protection templates.
+  - Tighten RF Case 1/Case 2 acceptance and diagnostics.
+  - Add FO/FB turn rule diagnostics where applicable.
+- Acceptance checks:
+  - RNP AR procedures produce distinct final-surface status/geometry.
+  - RF final surfaces are not treated as straight LNAV OEA.
+  - Unsupported FO/FB or RNP changes produce explicit diagnostics.
+
+### Recommended Execution Order
+1. P0 CA endpoint model scaffold: helper, types, diagnostics, tests; do not replace current guide until endpoint status is reliable.
+2. P0 CA centerline/envelope integration into render bundle and 2D/3D views.
+3. P1 LNAV/VNAV OCS geometry and vertical assessment.
+4. P2 LPV/GLS W/X/Y surface bundle.
+5. P3 turning missed debug primitives.
+6. P4 full missed section surfaces.
+7. P5 RNP AR / RF-specific final templates.
+
+### Boundary Rules
+- Do not claim certified FAA compliance for any estimated/debug geometry.
+- If source data or model assumptions are incomplete, emit diagnostics and avoid fake protected surfaces.
+- Keep every stage modular, covered by focused tests, logged here, and committed separately.
