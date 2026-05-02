@@ -61,11 +61,34 @@ const assessedRoute = {
       segmentId: "KRDU-R23RY-RW23R:branch:ABUTTS:segment:final:1",
       primaryHalfWidthM: 370.4,
       secondaryHalfWidthM: 740.8,
-      verticalReferenceSurfaceType: "LNAV_VNAV_OCS" as const,
       points: [
         { xM: 20500, yM: 0, zM: 950 },
         { xM: 0, yM: 0, zM: 80 },
       ],
+      finalVerticalReference: {
+        kind: "FINAL_VERTICAL_REFERENCE" as const,
+        label: "GPA 3.0 deg",
+        gpaDeg: 3,
+        tchFt: null,
+        estimatedFromThreshold: true,
+        halfWidthM: 185.2,
+        points: [
+          { xM: 20500, yM: 0, zM: 980 },
+          { xM: 0, yM: 0, zM: 15 },
+        ],
+      },
+      lnavVnavOcs: {
+        kind: "LNAV_VNAV_OCS" as const,
+        label: "LNAV/VNAV OCS",
+        gpaDeg: 3,
+        tchFt: 50,
+        primaryHalfWidthM: 370.4,
+        secondaryHalfWidthM: 740.8,
+        points: [
+          { xM: 20500, yM: 0, zM: 950 },
+          { xM: 0, yM: 0, zM: 80 },
+        ],
+      },
     },
   ],
 };
@@ -162,19 +185,22 @@ describe("RunwayTrajectoryProfilePanel", () => {
     appMock.procedureDisplayLevel = "PROTECTION";
     const { container, rerender } = render(<RunwayTrajectoryProfilePanel />);
 
-    expect(container.querySelectorAll(".runway-profile-vertical-reference-line")).toHaveLength(0);
+    expect(container.querySelectorAll(".runway-profile-final-vertical-reference-line")).toHaveLength(0);
+    expect(container.querySelectorAll(".runway-profile-lnav-vnav-ocs-line")).toHaveLength(0);
     expect(container.querySelectorAll(".runway-profile-segment-debug-label")).toHaveLength(0);
 
     appMock.procedureDisplayLevel = "ESTIMATED";
     rerender(<RunwayTrajectoryProfilePanel />);
 
-    expect(container.querySelectorAll(".runway-profile-vertical-reference-line")).toHaveLength(1);
+    expect(container.querySelectorAll(".runway-profile-final-vertical-reference-line")).toHaveLength(1);
+    expect(container.querySelectorAll(".runway-profile-lnav-vnav-ocs-line")).toHaveLength(1);
+    expect(container.textContent).toContain("GPA 3.0 deg");
     expect(container.querySelectorAll(".runway-profile-segment-debug-label")).toHaveLength(0);
 
     appMock.procedureDisplayLevel = "DEBUG";
     rerender(<RunwayTrajectoryProfilePanel />);
 
-    expect(container.querySelectorAll(".runway-profile-vertical-reference-line")).toHaveLength(1);
+    expect(container.querySelectorAll(".runway-profile-final-vertical-reference-line")).toHaveLength(1);
     expect(container.querySelectorAll(".runway-profile-segment-debug-label")).toHaveLength(1);
   });
 

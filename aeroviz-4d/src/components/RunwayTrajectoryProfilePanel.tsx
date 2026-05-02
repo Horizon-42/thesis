@@ -356,13 +356,18 @@ function ProfilePlot({
     "SOURCE_BACKED",
     displayLevel,
   );
-  const showVerticalReferenceGeometry = showProfileElement(
+  const showFinalVerticalReferenceGeometry = showProfileElement(
+    "FINAL_VERTICAL_REFERENCE",
+    "ESTIMATED",
+    displayLevel,
+  );
+  const showOcsGeometry = showProfileElement(
     "LNAV_VNAV_OCS",
     "ESTIMATED",
     displayLevel,
   );
-  const showDebugGeometry = showProfileElement(
-    "TURNING_MISSED_DEBUG",
+  const showDebugFinalSurfaceGeometry = showProfileElement(
+    "PRECISION_SURFACE",
     "DEBUG_ESTIMATE",
     displayLevel,
   );
@@ -608,12 +613,14 @@ function ProfilePlot({
                     );
                   })
                 : null}
-              {showVerticalReferenceGeometry
+              {showOcsGeometry
                 ? assessmentSegments
-                    .filter((segment) => segment.verticalReferenceSurfaceType)
+                    .filter((segment) => segment.lnavVnavOcs)
                     .map((segment, index) => {
+                      const ocs = segment.lnavVnavOcs;
+                      if (!ocs) return null;
                       const segmentPath = plotPointPath(
-                        segment.points,
+                        ocs.points,
                         domain,
                         plotWidth,
                         plotHeight,
@@ -622,16 +629,88 @@ function ProfilePlot({
                         mode,
                       );
                       return (
-                        <path
-                          key={`${route.routeId}-vertical-reference-${segment.segmentId}-${index}`}
-                          d={segmentPath}
-                          className={
-                            mode === "side"
-                              ? "runway-profile-vertical-reference-line"
-                              : "runway-profile-vertical-reference-plan-line"
-                          }
-                          data-segment-id={segment.segmentId}
-                        />
+                        <g key={`${route.routeId}-lnav-vnav-ocs-${segment.segmentId}-${index}`}>
+                          {mode === "top" ? (
+                            <>
+                              {ocs.secondaryHalfWidthM ? (
+                                <path
+                                  d={segmentPath}
+                                  className="runway-profile-lnav-vnav-ocs-secondary-band"
+                                  style={{
+                                    strokeWidth: Math.max(2, ocs.secondaryHalfWidthM * yScale * 2),
+                                  }}
+                                />
+                              ) : null}
+                              <path
+                                d={segmentPath}
+                                className="runway-profile-lnav-vnav-ocs-primary-band"
+                                style={{
+                                  strokeWidth: Math.max(2, ocs.primaryHalfWidthM * yScale * 2),
+                                }}
+                              />
+                            </>
+                          ) : (
+                            <path
+                              d={segmentPath}
+                              className="runway-profile-lnav-vnav-ocs-line"
+                              data-segment-id={segment.segmentId}
+                            />
+                          )}
+                        </g>
+                      );
+                    })
+                : null}
+              {showFinalVerticalReferenceGeometry
+                ? assessmentSegments
+                    .filter((segment) => segment.finalVerticalReference)
+                    .map((segment, index) => {
+                      const reference = segment.finalVerticalReference;
+                      if (!reference) return null;
+                      const referencePath = plotPointPath(
+                        reference.points,
+                        domain,
+                        plotWidth,
+                        plotHeight,
+                        marginLeft,
+                        marginTop,
+                        mode,
+                      );
+                      const labelPoint =
+                        reference.points[Math.max(0, Math.floor((reference.points.length - 1) / 2))];
+                      const referenceLabelX = labelPoint ? plotX(labelPoint.xM) + 7 : 0;
+                      const referenceLabelY = labelPoint
+                        ? plotY(mode === "side" ? labelPoint.zM : labelPoint.yM) - 9
+                        : 0;
+                      return (
+                        <g key={`${route.routeId}-final-vertical-reference-${segment.segmentId}-${index}`}>
+                          {mode === "top" ? (
+                            <path
+                              d={referencePath}
+                              className="runway-profile-final-vertical-reference-band"
+                              style={{
+                                strokeWidth: Math.max(2, reference.halfWidthM * yScale * 2),
+                              }}
+                              data-segment-id={segment.segmentId}
+                            />
+                          ) : null}
+                          <path
+                            d={referencePath}
+                            className={
+                              mode === "side"
+                                ? "runway-profile-final-vertical-reference-line"
+                                : "runway-profile-final-vertical-reference-plan-line"
+                            }
+                            data-segment-id={segment.segmentId}
+                          />
+                          <text
+                            x={referenceLabelX}
+                            y={referenceLabelY}
+                            className="runway-profile-final-vertical-reference-label"
+                            data-segment-id={segment.segmentId}
+                          >
+                            {reference.label}
+                          </text>
+                        </g>
                       );
                     })
                 : null}
@@ -661,13 +740,50 @@ function ProfilePlot({
                   {routeLabel(route)}
                 </text>
               ) : null}
-              {showDebugGeometry
-                ? assessmentSegments.map((segment, index) => {
+              {showDebugFinalSurfaceGeometry
+                ? assessmentSegments.flatMap((segment, index) => {
+                    const precisionSurfaceEntries = (segment.precisionSurfaces ?? []).map(
+                      (surface, surfaceIndex) => {
+                        const surfacePath = plotPointPath(
+                          surface.points,
+                          domain,
+                          plotWidth,
+                          plotHeight,
+                          marginLeft,
+                          marginTop,
+                          mode,
+                        );
+                        const surfacePoint =
+                          surface.points[Math.floor((surface.points.length - 1) / 2)];
+                        return (
+                          <g
+                            key={`${route.routeId}-precision-surface-${segment.segmentId}-${surface.surfaceType}-${surfaceIndex}`}
+                          >
+                            <path
+                              d={surfacePath}
+                              className="runway-profile-precision-surface-line"
+                              data-segment-id={segment.segmentId}
+                            />
+                            {surfacePoint ? (
+                              <text
+                                x={plotX(surfacePoint.xM) + 6}
+                                y={plotY(mode === "side" ? surfacePoint.zM : surfacePoint.yM) + 12}
+                                className="runway-profile-segment-debug-label"
+                                data-segment-id={segment.segmentId}
+                              >
+                                {surface.label}
+                              </text>
+                            ) : null}
+                          </g>
+                        );
+                      },
+                    );
                     const point = segment.points[Math.floor((segment.points.length - 1) / 2)];
-                    if (!point) return null;
+                    if (!point) return precisionSurfaceEntries;
                     const textX = plotX(point.xM) + 6;
                     const textY = plotY(mode === "side" ? point.zM : point.yM) - 10;
-                    return (
+                    return [
+                      ...precisionSurfaceEntries,
                       <text
                         key={`${route.routeId}-segment-debug-${segment.segmentId}-${index}`}
                         x={textX}
@@ -676,8 +792,8 @@ function ProfilePlot({
                         data-segment-id={segment.segmentId}
                       >
                         {segmentDebugLabel(segment, index)}
-                      </text>
-                    );
+                      </text>,
+                    ];
                   })
                 : null}
             </g>

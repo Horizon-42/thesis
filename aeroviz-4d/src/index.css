@@ -872,8 +872,13 @@ body,
 .runway-profile-route-band,
 .runway-profile-assessment-primary-band,
 .runway-profile-assessment-secondary-band,
-.runway-profile-vertical-reference-line,
-.runway-profile-vertical-reference-plan-line,
+.runway-profile-final-vertical-reference-band,
+.runway-profile-final-vertical-reference-line,
+.runway-profile-final-vertical-reference-plan-line,
+.runway-profile-lnav-vnav-ocs-primary-band,
+.runway-profile-lnav-vnav-ocs-secondary-band,
+.runway-profile-lnav-vnav-ocs-line,
+.runway-profile-precision-surface-line,
 .runway-profile-grid-line,
 .runway-profile-reference-line,
 .runway-profile-reference-tick {
@@ -921,7 +926,13 @@ body,
   stroke-linejoin: round;
 }
 
-.runway-profile-vertical-reference-line {
+.runway-profile-final-vertical-reference-band {
+  stroke: rgba(250, 204, 21, 0.18);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.runway-profile-final-vertical-reference-line {
   stroke: rgba(250, 204, 21, 0.84);
   stroke-width: 5;
   stroke-linecap: round;
@@ -929,12 +940,40 @@ body,
   opacity: 0.86;
 }
 
-.runway-profile-vertical-reference-plan-line {
+.runway-profile-final-vertical-reference-plan-line {
   stroke: rgba(250, 204, 21, 0.68);
   stroke-width: 2.4;
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-dasharray: 7 5;
+}
+
+.runway-profile-lnav-vnav-ocs-secondary-band {
+  stroke: rgba(163, 230, 53, 0.09);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.runway-profile-lnav-vnav-ocs-primary-band {
+  stroke: rgba(163, 230, 53, 0.16);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.runway-profile-lnav-vnav-ocs-line {
+  stroke: rgba(163, 230, 53, 0.7);
+  stroke-width: 3.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 8 5;
+}
+
+.runway-profile-precision-surface-line {
+  stroke: rgba(248, 113, 113, 0.72);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 3 4;
 }
 
 .runway-profile-route-line {
@@ -960,6 +999,17 @@ body,
 
 .runway-profile-route-label.is-transition {
   fill: #ffd38a;
+}
+
+.runway-profile-final-vertical-reference-label {
+  fill: #fde68a;
+  font-family: "Inter", "Segoe UI", sans-serif;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  paint-order: stroke;
+  stroke: rgba(15, 23, 42, 0.94);
+  stroke-width: 3px;
 }
 
 .runway-profile-segment-debug-label {

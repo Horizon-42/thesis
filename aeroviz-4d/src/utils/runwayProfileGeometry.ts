@@ -1,5 +1,8 @@
 import type { ProcedureRouteViewModel } from "../data/procedureRoutes";
-import type { ProcedureRenderBundle } from "../data/procedureRenderBundle";
+import type {
+  ProcedureRenderBundle,
+  ProcedureSegmentRenderBundle,
+} from "../data/procedureRenderBundle";
 import type { RunwayProperties } from "../types/geojson-aviation";
 
 const EARTH_RADIUS_M = 6_378_137;
@@ -53,7 +56,38 @@ export interface HorizontalPlateAssessmentSegment {
   primaryHalfWidthM: number;
   secondaryHalfWidthM: number | null;
   points: RunwayProfilePoint[];
-  verticalReferenceSurfaceType?: "LNAV_VNAV_OCS";
+  finalVerticalReference?: HorizontalPlateFinalVerticalReference;
+  lnavVnavOcs?: HorizontalPlateLnavVnavOcs;
+  precisionSurfaces?: HorizontalPlatePrecisionSurface[];
+}
+
+export interface HorizontalPlateFinalVerticalReference {
+  kind: "FINAL_VERTICAL_REFERENCE";
+  label: string;
+  gpaDeg: number;
+  tchFt: number | null;
+  estimatedFromThreshold: boolean;
+  halfWidthM: number;
+  points: RunwayProfilePoint[];
+}
+
+export interface HorizontalPlateLnavVnavOcs {
+  kind: "LNAV_VNAV_OCS";
+  label: string;
+  gpaDeg: number;
+  tchFt: number;
+  primaryHalfWidthM: number;
+  secondaryHalfWidthM: number | null;
+  points: RunwayProfilePoint[];
+}
+
+export interface HorizontalPlatePrecisionSurface {
+  kind: "PRECISION_SURFACE";
+  label: string;
+  surfaceType: string;
+  gpaDeg: number;
+  tchFt: number;
+  points: RunwayProfilePoint[];
 }
 
 export interface HorizontalPlateRoute {
@@ -419,6 +453,77 @@ function maxHalfWidthM(samples: Array<{ halfWidthNm: number }> | undefined): num
   return Math.max(...samples.map((sample) => sample.halfWidthNm)) * 1852;
 }
 
+const FINAL_VERTICAL_REFERENCE_DEFAULT_HALF_WIDTH_NM = 0.15;
+const FINAL_VERTICAL_REFERENCE_PROTECTION_WIDTH_RATIO = 0.5;
+
+// Mirrors the 3D procedure layer's GPA reference construction so the embedded 2D
+// profile exposes the same estimated vertical geometry instead of only OCS data.
+function isFinalProfileSegment(segmentBundle: ProcedureSegmentRenderBundle): boolean {
+  return segmentBundle.segment.segmentType?.startsWith("FINAL") === true;
+}
+
+function finalVerticalReferenceGeoPositions(segmentBundle: ProcedureSegmentRenderBundle) {
+  if (!isFinalProfileSegment(segmentBundle)) return [];
+  const gpaDeg = segmentBundle.segment.verticalRule?.gpaDeg;
+  if (typeof gpaDeg !== "number" || !Number.isFinite(gpaDeg) || gpaDeg <= 0) return [];
+
+  if (segmentBundle.lnavVnavOcs?.centerline.geoPositions.length) {
+    return segmentBundle.lnavVnavOcs.centerline.geoPositions;
+  }
+
+  const centerline = segmentBundle.segmentGeometry.centerline;
+  if (centerline.geoPositions.length < 2 || centerline.geodesicLengthNm <= 0) return [];
+  const samples =
+    segmentBundle.segmentGeometry.stationAxis.samples.length >= 2
+      ? segmentBundle.segmentGeometry.stationAxis.samples.map((sample) => ({
+          stationNm: sample.stationNm,
+          geoPosition: sample.geoPosition,
+        }))
+      : centerline.geoPositions.map((geoPosition, index) => ({
+          stationNm:
+            centerline.geodesicLengthNm *
+            (index / Math.max(centerline.geoPositions.length - 1, 1)),
+          geoPosition,
+        }));
+  if (samples.length < 2) return [];
+
+  const thresholdSample = samples[samples.length - 1];
+  const thresholdElevationFtMsl = thresholdSample.geoPosition.altM / 0.3048;
+  const thresholdReferenceAltitudeFtMsl =
+    thresholdElevationFtMsl + (segmentBundle.segment.verticalRule?.tchFt ?? 0);
+  const gpaRad = (gpaDeg * Math.PI) / 180;
+  const totalStationNm = thresholdSample.stationNm;
+
+  return samples.map((sample) => {
+    const distanceBeforeThresholdNm = Math.max(0, totalStationNm - sample.stationNm);
+    const altitudeFtMsl =
+      thresholdReferenceAltitudeFtMsl +
+      (Math.tan(gpaRad) * distanceBeforeThresholdNm * 1852) / 0.3048;
+    return {
+      lonDeg: sample.geoPosition.lonDeg,
+      latDeg: sample.geoPosition.latDeg,
+      altM: altitudeFtMsl * 0.3048,
+    };
+  });
+}
+
+function finalVerticalReferenceHalfWidthM(segmentBundle: ProcedureSegmentRenderBundle): number {
+  const protectionWidthSamples =
+    segmentBundle.finalOea?.primary.halfWidthNmSamples ??
+    segmentBundle.segmentGeometry.primaryEnvelope?.halfWidthNmSamples ??
+    [];
+  const maxProtectionHalfWidthNm =
+    protectionWidthSamples.length > 0
+      ? Math.max(...protectionWidthSamples.map((sample) => sample.halfWidthNm))
+      : FINAL_VERTICAL_REFERENCE_DEFAULT_HALF_WIDTH_NM * 2;
+  return (
+    Math.max(
+      FINAL_VERTICAL_REFERENCE_DEFAULT_HALF_WIDTH_NM,
+      maxProtectionHalfWidthNm * FINAL_VERTICAL_REFERENCE_PROTECTION_WIDTH_RATIO,
+    ) * 1852
+  );
+}
+
 export function attachRenderBundleAssessmentSegments(
   routes: HorizontalPlateRoute[],
   renderBundles: ProcedureRenderBundle[],
@@ -434,33 +539,80 @@ export function attachRenderBundleAssessmentSegments(
       .forEach((branch) => {
         const assessmentSegments = branch.segmentBundles
           .map((segmentBundle): HorizontalPlateAssessmentSegment | null => {
-            const centerline =
-              segmentBundle.lnavVnavOcs?.centerline ?? segmentBundle.segmentGeometry.centerline;
+            const centerline = segmentBundle.segmentGeometry.centerline;
             if (centerline.geoPositions.length < 2) return null;
 
             const primaryHalfWidthM =
               maxHalfWidthM(
-                segmentBundle.lnavVnavOcs?.primary.halfWidthNmSamples ??
-                  segmentBundle.segmentGeometry.primaryEnvelope?.halfWidthNmSamples,
+                segmentBundle.segmentGeometry.primaryEnvelope?.halfWidthNmSamples,
               ) ??
               segmentBundle.segment.xttNm * 2 * 1852;
             const secondaryHalfWidthM =
               maxHalfWidthM(
-                segmentBundle.lnavVnavOcs?.secondaryOuter.halfWidthNmSamples ??
-                  segmentBundle.segmentGeometry.secondaryEnvelope?.halfWidthNmSamples,
+                segmentBundle.segmentGeometry.secondaryEnvelope?.halfWidthNmSamples,
               ) ??
               (segmentBundle.segment.secondaryEnabled ? segmentBundle.segment.xttNm * 3 * 1852 : null);
+            const finalVerticalReferenceGeo = finalVerticalReferenceGeoPositions(segmentBundle);
+            const gpaDeg = segmentBundle.segment.verticalRule?.gpaDeg;
+            const tchFt = segmentBundle.segment.verticalRule?.tchFt;
+            const finalVerticalReference =
+              finalVerticalReferenceGeo.length >= 2 &&
+              typeof gpaDeg === "number" &&
+              Number.isFinite(gpaDeg)
+                ? {
+                    kind: "FINAL_VERTICAL_REFERENCE" as const,
+                    label: `GPA ${gpaDeg.toFixed(1)} deg`,
+                    gpaDeg,
+                    tchFt: typeof tchFt === "number" && Number.isFinite(tchFt) ? tchFt : null,
+                    estimatedFromThreshold:
+                      segmentBundle.lnavVnavOcs === null &&
+                      typeof segmentBundle.segment.verticalRule?.tchFt !== "number",
+                    halfWidthM: finalVerticalReferenceHalfWidthM(segmentBundle),
+                    points: finalVerticalReferenceGeo.map((point) =>
+                      projectPositionToRunwayFrame(frame, point.lonDeg, point.latDeg, point.altM),
+                    ),
+                  }
+                : undefined;
+            const lnavVnavOcs = segmentBundle.lnavVnavOcs
+              ? {
+                  kind: "LNAV_VNAV_OCS" as const,
+                  label: "LNAV/VNAV OCS",
+                  gpaDeg: segmentBundle.lnavVnavOcs.verticalProfile.gpaDeg,
+                  tchFt: segmentBundle.lnavVnavOcs.verticalProfile.tchFt,
+                  primaryHalfWidthM:
+                    maxHalfWidthM(segmentBundle.lnavVnavOcs.primary.halfWidthNmSamples) ??
+                    primaryHalfWidthM,
+                  secondaryHalfWidthM:
+                    maxHalfWidthM(segmentBundle.lnavVnavOcs.secondaryOuter.halfWidthNmSamples) ??
+                    secondaryHalfWidthM,
+                  points: segmentBundle.lnavVnavOcs.centerline.geoPositions.map((point) =>
+                    projectPositionToRunwayFrame(frame, point.lonDeg, point.latDeg, point.altM),
+                  ),
+                }
+              : undefined;
+            const precisionSurfaces = (segmentBundle.precisionFinalSurfaces ?? [])
+              .filter((surface) => surface.centerline.geoPositions.length >= 2)
+              .map((surface) => ({
+                kind: "PRECISION_SURFACE" as const,
+                label: `${surface.surfaceType.replace(/_/g, " ")} estimate`,
+                surfaceType: surface.surfaceType,
+                gpaDeg: surface.verticalProfile.gpaDeg,
+                tchFt: surface.verticalProfile.tchFt,
+                points: surface.centerline.geoPositions.map((point) =>
+                  projectPositionToRunwayFrame(frame, point.lonDeg, point.latDeg, point.altM),
+                ),
+              }));
 
             return {
               segmentId: segmentBundle.segment.segmentId,
               primaryHalfWidthM,
               secondaryHalfWidthM,
-              verticalReferenceSurfaceType: segmentBundle.lnavVnavOcs
-                ? "LNAV_VNAV_OCS"
-                : undefined,
               points: centerline.geoPositions.map((point) =>
                 projectPositionToRunwayFrame(frame, point.lonDeg, point.latDeg, point.altM),
               ),
+              finalVerticalReference,
+              lnavVnavOcs,
+              precisionSurfaces,
             };
           })
           .filter((segment): segment is HorizontalPlateAssessmentSegment => segment !== null);

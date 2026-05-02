@@ -101,11 +101,22 @@ describe("procedure segment assessment", () => {
               segmentId: "TEST-R23RY:branch:R:segment:final:1",
               primaryHalfWidthM: 500,
               secondaryHalfWidthM: 900,
-              verticalReferenceSurfaceType: "LNAV_VNAV_OCS",
               points: [
                 { xM: 5_000, yM: 0, zM: 500 },
                 { xM: 0, yM: 0, zM: 0 },
               ],
+              lnavVnavOcs: {
+                kind: "LNAV_VNAV_OCS",
+                label: "LNAV/VNAV OCS",
+                gpaDeg: 3,
+                tchFt: 50,
+                primaryHalfWidthM: 500,
+                secondaryHalfWidthM: 900,
+                points: [
+                  { xM: 5_000, yM: 0, zM: 500 },
+                  { xM: 0, yM: 0, zM: 0 },
+                ],
+              },
             },
           ],
         },

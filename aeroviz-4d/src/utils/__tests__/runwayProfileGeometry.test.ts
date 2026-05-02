@@ -263,13 +263,16 @@ describe("runwayProfileGeometry", () => {
                 {
                   segment: {
                     segmentId: "TEST-R09-RW09:branch:R:segment:final:1",
+                    segmentType: "FINAL_LNAV_VNAV",
                     xttNm: 0.3,
                     secondaryEnabled: true,
+                    verticalRule: { kind: "BARO_GLIDEPATH", gpaDeg: 3, tchFt: 50 },
                   },
                   legs: [],
                   diagnostics: [],
                   finalOea: null,
                   lnavVnavOcs: {
+                    verticalProfile: { gpaDeg: 3, tchFt: 50 },
                     centerline: {
                       geoPositions: [
                         { lonDeg: -0.005, latDeg: 0, altM: 250 },
@@ -332,9 +335,24 @@ describe("runwayProfileGeometry", () => {
     expect(finalRoute?.assessmentSegments).toHaveLength(1);
     expect(finalRoute?.assessmentSegments?.[0]).toMatchObject({
       segmentId: "TEST-R09-RW09:branch:R:segment:final:1",
-      verticalReferenceSurfaceType: "LNAV_VNAV_OCS",
+      finalVerticalReference: {
+        kind: "FINAL_VERTICAL_REFERENCE",
+        label: "GPA 3.0 deg",
+      },
+      lnavVnavOcs: {
+        kind: "LNAV_VNAV_OCS",
+        label: "LNAV/VNAV OCS",
+      },
     });
-    expect(finalRoute?.assessmentSegments?.[0].primaryHalfWidthM).toBeCloseTo(740.8, 6);
-    expect(finalRoute?.assessmentSegments?.[0].secondaryHalfWidthM).toBeCloseTo(1296.4, 6);
+    expect(finalRoute?.assessmentSegments?.[0].primaryHalfWidthM).toBeCloseTo(1111.2, 6);
+    expect(finalRoute?.assessmentSegments?.[0].secondaryHalfWidthM).toBeCloseTo(1666.8, 6);
+    expect(finalRoute?.assessmentSegments?.[0].finalVerticalReference?.halfWidthM).toBeCloseTo(
+      555.6,
+      6,
+    );
+    expect(finalRoute?.assessmentSegments?.[0].lnavVnavOcs?.primaryHalfWidthM).toBeCloseTo(
+      740.8,
+      6,
+    );
   });
 });

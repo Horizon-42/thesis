@@ -43,7 +43,7 @@ const VERTICAL_DEVIATION_EVENT_THRESHOLD_M = 30.48;
 function assessmentEvents(
   containment: HorizontalPlateContainment,
   verticalErrorM: number | null,
-  verticalReferenceSurfaceType?: HorizontalPlateAssessmentSegment["verticalReferenceSurfaceType"],
+  usesOcsVerticalReference = false,
 ): SegmentAssessmentEvent[] {
   const events: SegmentAssessmentEvent[] = [
     {
@@ -57,8 +57,8 @@ function assessmentEvents(
     Math.abs(verticalErrorM) > VERTICAL_DEVIATION_EVENT_THRESHOLD_M
   ) {
     events.push({
-      kind: verticalReferenceSurfaceType ? "VERTICAL_OCS" : "VERTICAL_DEVIATION",
-      label: verticalReferenceSurfaceType
+      kind: usesOcsVerticalReference ? "VERTICAL_OCS" : "VERTICAL_DEVIATION",
+      label: usesOcsVerticalReference
         ? verticalErrorM > 0 ? "ABOVE_OCS" : "BELOW_OCS"
         : verticalErrorM > 0 ? "ABOVE_PROFILE" : "BELOW_PROFILE",
       valueM: verticalErrorM,
@@ -77,7 +77,8 @@ function projectPointToSegment(
   secondaryHalfWidthM: number | null,
   segmentIndex: number,
   stationOffsetM: number,
-  verticalReferenceSurfaceType?: HorizontalPlateAssessmentSegment["verticalReferenceSurfaceType"],
+  verticalReferencePoints?: RunwayProfilePoint[],
+  usesOcsVerticalReference = false,
 ): CandidateAssessment | null {
   const start = segmentPoints[segmentIndex];
   const end = segmentPoints[segmentIndex + 1];
@@ -95,10 +96,15 @@ function projectPointToSegment(
       ((point.xM - start.xM) * dx + (point.yM - start.yM) * dy) / (lengthM * lengthM),
     ),
   );
+  const verticalStart = verticalReferencePoints?.[segmentIndex];
+  const verticalEnd = verticalReferencePoints?.[segmentIndex + 1];
   const closestPoint = {
     xM: start.xM + alongRatio * dx,
     yM: start.yM + alongRatio * dy,
-    zM: start.zM + alongRatio * (end.zM - start.zM),
+    zM:
+      verticalStart && verticalEnd
+        ? verticalStart.zM + alongRatio * (verticalEnd.zM - verticalStart.zM)
+        : start.zM + alongRatio * (end.zM - start.zM),
   };
   const crossTrackErrorM =
     ((point.xM - start.xM) * dy - (point.yM - start.yM) * dx) / lengthM;
@@ -125,7 +131,7 @@ function projectPointToSegment(
     verticalErrorM,
     containment,
     closestPoint,
-    events: assessmentEvents(containment, verticalErrorM, verticalReferenceSurfaceType),
+    events: assessmentEvents(containment, verticalErrorM, usesOcsVerticalReference),
     absoluteCrossTrackM,
     distanceToSegmentM,
   };
@@ -140,6 +146,9 @@ function projectPointToAssessmentSegment(
 ): HorizontalPlateSegmentAssessment | null {
   let stationOffsetM = 0;
   let best: CandidateAssessment | null = null;
+  const verticalReferencePoints =
+    assessmentSegment.lnavVnavOcs?.points ?? assessmentSegment.finalVerticalReference?.points;
+  const usesOcsVerticalReference = Boolean(assessmentSegment.lnavVnavOcs);
 
   for (
     let segmentIndex = 0;
@@ -155,7 +164,8 @@ function projectPointToAssessmentSegment(
       assessmentSegment.secondaryHalfWidthM,
       segmentIndex,
       stationOffsetM,
-      assessmentSegment.verticalReferenceSurfaceType,
+      verticalReferencePoints,
+      usesOcsVerticalReference,
     );
     if (candidate && (!best || candidate.distanceToSegmentM < best.distanceToSegmentM)) {
       best = candidate;
