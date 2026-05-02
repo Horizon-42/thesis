@@ -88,6 +88,7 @@ vi.mock("../../utils/navigation", () => ({
 }));
 
 import ProcedurePanel from "../ProcedurePanel";
+import { clearProcedureRenderBundleDataCache } from "../../data/procedureRenderBundle";
 
 const sampleIndex = {
   airport: "KRDU",
@@ -278,6 +279,7 @@ const sampleDocuments = {
 
 describe("ProcedurePanel", () => {
   beforeEach(() => {
+    clearProcedureRenderBundleDataCache();
     fetchMock.mockReset();
     resetProcedureVisibility();
     toggleLayer.mockClear();
@@ -319,6 +321,7 @@ describe("ProcedurePanel", () => {
     expect(screen.getByText("CA endpoints 0")).toBeTruthy();
     expect(screen.getByText("Missing final 3")).toBeTruthy();
     expect(screen.getByText("Source gaps 2")).toBeTruthy();
+    expect(screen.getByText("3 debug geometry/status items are hidden at this display level.")).toBeTruthy();
     expect(screen.getByText("RNAV(GPS) Y RW05L")).toBeTruthy();
     expect(screen.getByText("AOTTOS")).toBeTruthy();
     expect(setProcedureBranchesVisible).toHaveBeenCalledWith(

@@ -4,7 +4,10 @@ import {
   loadProcedureRenderBundleData,
   type ProcedureRenderBundleData,
 } from "../data/procedureRenderBundle";
-import { PROCEDURE_DISPLAY_LEVEL_OPTIONS } from "../data/procedureAnnotations";
+import {
+  PROCEDURE_DISPLAY_LEVEL_OPTIONS,
+  type ProcedureDisplayLevel,
+} from "../data/procedureAnnotations";
 import { isMissingJsonAsset } from "../utils/fetchJson";
 import { navigateWithinApp } from "../utils/navigation";
 
@@ -123,6 +126,37 @@ function protectedGeometryStatus(data: ProcedureRenderBundleData): ProtectedGeom
       0,
     ),
   };
+}
+
+function displayLevelRank(level: ProcedureDisplayLevel): number {
+  if (level === "CORE") return 1;
+  if (level === "PROTECTION") return 2;
+  if (level === "ESTIMATED") return 3;
+  if (level === "VISUAL_AID") return 4;
+  return 5;
+}
+
+function hiddenGeometryNotice(
+  status: ProtectedGeometryStatus | null,
+  displayLevel: ProcedureDisplayLevel,
+): string | null {
+  if (!status) return null;
+  const estimatedCount =
+    status.caEndpoints +
+    status.caCenterlines +
+    status.estimatedCaSurfaces +
+    status.lnavVnavOcs;
+  if (estimatedCount > 0 && displayLevelRank(displayLevel) < displayLevelRank("ESTIMATED")) {
+    return `${estimatedCount} estimated GPA/OCS/CA geometry items are hidden at this display level.`;
+  }
+  const debugCount =
+    status.precisionSurfaces +
+    status.turningMissedPrimitives +
+    status.missingFinalSurfaces;
+  if (debugCount > 0 && displayLevelRank(displayLevel) < displayLevelRank("DEBUG")) {
+    return `${debugCount} debug geometry/status items are hidden at this display level.`;
+  }
+  return null;
 }
 
 function buildGroups(branches: ProcedureBranchItem[]): RunwayGroup[] {
@@ -275,6 +309,7 @@ export default function ProcedurePanel() {
   const openAllProcedures = () => {
     setBranchesVisible(branches, true);
   };
+  const displayLevelNotice = hiddenGeometryNotice(geometryStatus, procedureDisplayLevel);
 
   return (
     <aside className="procedure-panel" aria-label="RNAV procedure controls">
@@ -340,6 +375,9 @@ export default function ProcedurePanel() {
           <span>Missing final {geometryStatus.missingFinalSurfaces}</span>
           <span>Source gaps {geometryStatus.sourceIncompleteDiagnostics}</span>
         </div>
+      ) : null}
+      {displayLevelNotice ? (
+        <p className="procedure-panel-display-notice">{displayLevelNotice}</p>
       ) : null}
 
       <div className="procedure-runway-list">

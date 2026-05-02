@@ -417,6 +417,17 @@ body,
   white-space: nowrap;
 }
 
+.procedure-panel-display-notice {
+  margin: -2px 0 10px;
+  padding: 6px 8px;
+  border: 1px solid rgba(251, 191, 36, 0.34);
+  border-radius: 6px;
+  background: rgba(120, 53, 15, 0.18);
+  color: #fde68a;
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+
 .procedure-panel-error {
   padding: 8px;
   border: 1px solid rgba(248, 113, 113, 0.7);

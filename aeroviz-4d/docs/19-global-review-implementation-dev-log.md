@@ -34,4 +34,11 @@
 - Scope: reduce repeated `FAACIFP18` scans and cifparse path point extraction during multi-procedure preprocessing.
 - Change: added bounded per-process caches for path point lines and exact source-line maps, plus `clear_cifp_parser_caches()` for tests and long-running tooling.
 - Tests: `conda run -n aviation /Users/liudongxu/opt/miniconda3/envs/aviation/bin/python3.13 -m pytest aeroviz-4d/python/tests/test_preprocess_procedures.py -q`.
-- Commit: pending.
+- Commit: this entry is included in `Cache CIFP path point metadata inputs`.
+
+## 2026-05-02 Step 6 - Display-level discoverability
+
+- Scope: make hidden Estimated/Debug procedure geometry easier to understand from the procedure panel.
+- Change: added a display-level notice that reports when built GPA/OCS/CA or debug/status geometry is hidden by the current selector.
+- Tests: `npm test -- --run src/components/__tests__/ProcedurePanel.test.tsx`; `npm run build`; full verification with `npm test -- --run`, `npm run build`, and `conda run -n aviation /Users/liudongxu/opt/miniconda3/envs/aviation/bin/python3.13 -m pytest aeroviz-4d/python/tests -q`.
+- Commit: this entry is included in `Show hidden procedure display level notice`.
