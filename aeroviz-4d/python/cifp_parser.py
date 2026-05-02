@@ -54,6 +54,7 @@ class ProcedureLeg:
     center_lat_deg: float | None = None
     center_lon_deg: float | None = None
     course_deg: float | None = None
+    vertical_angle_deg: float | None = None
 
 
 def decode_cifp_coordinate(token: str) -> float:
@@ -771,6 +772,7 @@ def parse_procedure_legs(
                 center_fix_ident=str(primary.get("center_fix") or "").strip().upper() or None,
                 center_fix_region_code=str(primary.get("center_fix_region") or "").strip().upper() or None,
                 course_deg=normalize_float(primary.get("course")),
+                vertical_angle_deg=normalize_float(primary.get("vert_angle")),
             )
         )
 

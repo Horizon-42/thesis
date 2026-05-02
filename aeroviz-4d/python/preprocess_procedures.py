@@ -656,6 +656,15 @@ def route_points_by_sequence(route_points: list[RoutePoint]) -> dict[int, RouteP
     return {point.sequence: point for point in route_points}
 
 
+def first_cifp_glidepath_angle_deg(legs: list[ProcedureLeg]) -> float | None:
+    for leg in legs:
+        angle = leg.vertical_angle_deg
+        if angle is None or not math.isfinite(angle) or angle == 0:
+            continue
+        return round(abs(angle), 3)
+    return None
+
+
 def rf_path_metadata(leg: ProcedureLeg, fix_records: dict[str, FixRecord]) -> dict[str, Any]:
     metadata: dict[str, Any] = {}
     if leg.course_deg is not None:
@@ -787,6 +796,7 @@ def build_vertical_profile_document(
     if not branch_legs or not branch_route_points:
         return []
 
+    glidepath_angle_deg = first_cifp_glidepath_angle_deg(branch_legs)
     points_by_sequence = route_points_by_sequence(branch_route_points)
     constraint_samples: list[dict[str, Any]] = []
     warnings: list[str] = []
@@ -825,7 +835,7 @@ def build_vertical_profile_document(
             "fromFixRef": constraint_samples[0]["fixRef"],
             "toFixRef": constraint_samples[-1]["fixRef"],
             "basis": "cifp_leg_constraints",
-            "glidepathAngleDeg": None,
+            "glidepathAngleDeg": glidepath_angle_deg,
             "thresholdCrossingHeightFt": None,
             "constraintSamples": constraint_samples,
             "warnings": dedupe_preserve_order(warnings),

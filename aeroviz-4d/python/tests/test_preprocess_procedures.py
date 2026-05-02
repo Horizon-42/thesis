@@ -425,6 +425,18 @@ def test_cifparse_ca_leg_metadata_exports_course() -> None:
     assert ca_leg.course_deg == pytest.approx(324.2)
 
 
+def test_cifparse_final_leg_metadata_exports_vertical_angle() -> None:
+    legs = parse_procedure_legs(
+        CIFP_ROOT / "FAACIFP18",
+        airport="KRDU",
+        procedure="R32",
+        branch="R",
+    )
+    runway_leg = next(leg for leg in legs if leg.fix_ident == "RW32")
+
+    assert runway_leg.vertical_angle_deg == pytest.approx(-3.5)
+
+
 def test_build_katl_zelan4_procedure_detail_document_exports_real_rf_metadata() -> None:
     document = build_procedure_detail_document(
         cifp_root=CIFP_ROOT,
@@ -476,7 +488,8 @@ def test_build_krdu_r05ly_procedure_detail_document() -> None:
     assert document["runway"]["threshold"]["elevationFt"] == 367
     assert len(document["branches"]) >= 3
     assert any(branch["branchRole"] == "final" for branch in document["branches"])
-    assert document["verticalProfiles"][0]["glidepathAngleDeg"] is None
+    assert document["verticalProfiles"][0]["glidepathAngleDeg"] == pytest.approx(3.0)
+    assert document["verticalProfiles"][0]["thresholdCrossingHeightFt"] is None
     assert document["validation"]["expectedFAF"] == "fix:WEPAS"
     assert document["displayHints"]["defaultVisibleBranchIds"] == ["branch:R"]
 

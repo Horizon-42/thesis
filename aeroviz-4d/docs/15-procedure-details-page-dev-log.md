@@ -2317,3 +2317,44 @@
 
 ### Exact Next Recommended Step
 - Run full Python and frontend validation, then commit this parser/export fix.
+
+## 2026-05-02 13:24 CEST
+
+### Goal Of This Session
+- Complete the first GPA/TCH source-data step: export CIFP vertical angle as procedure profile GPA.
+
+### Diagnosis
+- CIFP/cifparse procedure records do contain final-leg vertical angle data for KRDU RNAV/RNP procedures.
+- Example: KRDU `R32` final runway leg has `vert_angle = -3.5`.
+- The exporter was not carrying this field from cifparse into `ProcedureLeg`, so generated `verticalProfiles[].glidepathAngleDeg` stayed null.
+- TCH was not present in the current cifparse procedure fields used by the exporter and remains a separate chart/source extraction task.
+
+### Decisions Locked
+- Added `ProcedureLeg.vertical_angle_deg`.
+- Active cifparse-backed `parse_procedure_legs` now copies `primary["vert_angle"]` into that field.
+- `build_vertical_profile_document` exports the first non-zero final-branch vertical angle as positive `glidepathAngleDeg`.
+- `thresholdCrossingHeightFt` remains null until a real TCH source is added.
+
+### Files Changed
+- `python/cifp_parser.py`
+- `python/preprocess_procedures.py`
+- `python/tests/test_preprocess_procedures.py`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `conda run -n aviation pytest python/tests/test_preprocess_procedures.py -k "vertical_angle or build_krdu_r05ly or course"`
+- `conda run -n aviation /Users/liudongxu/opt/miniconda3/envs/aviation/bin/python3.13 python/preprocess_procedures.py --airport KRDU --include-all-rnav --include-transitions --charts-root public/data/airports/KRDU/charts --output public/data/airports/KRDU/procedures.geojson`
+
+### Regenerated KRDU Data Counts
+- Vertical profiles: 9.
+- Profiles with GPA: 9.
+- Profiles with TCH: 0.
+- `R32` exported GPA: 3.5 degrees.
+- Other KRDU RNAV/RNP profiles exported GPA: 3.0 degrees.
+
+### Current Status
+- GPA is now source-backed by CIFP vertical-angle data in generated procedure detail JSON.
+- TCH remains unavailable from the currently parsed CIFP procedure records, so final OCS/W-X-Y construction is still blocked until TCH is sourced.
+
+### Exact Next Recommended Step
+- Add a TCH source path, preferably chart text/PDF extraction with explicit `src:chart-profile-text` provenance.
