@@ -1821,6 +1821,28 @@ body,
   stroke-dasharray: 8 7;
 }
 
+.procedure-details-ca-endpoint-marker {
+  cursor: pointer;
+  transition: opacity 0.16s ease;
+}
+
+.procedure-details-ca-endpoint-marker circle {
+  fill: rgba(251, 146, 60, 0.94);
+  stroke: rgba(15, 23, 42, 0.92);
+  stroke-width: 1.8;
+  stroke-dasharray: 3 3;
+}
+
+.procedure-details-ca-endpoint-marker text {
+  fill: #fed7aa;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  paint-order: stroke;
+  stroke: rgba(15, 23, 42, 0.94);
+  stroke-width: 3px;
+}
+
 .procedure-details-turning-missed-marker {
   cursor: pointer;
   transition: opacity 0.16s ease;

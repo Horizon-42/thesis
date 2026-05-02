@@ -467,6 +467,7 @@ describe("ProcedureDetailsPage", () => {
 
     expect((await screen.findAllByText("S1/S2")).length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText("CA 305 deg").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("CA end est").length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText("DF leg").length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText("HM leg").length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText("Turn debug").length).toBeGreaterThanOrEqual(2);

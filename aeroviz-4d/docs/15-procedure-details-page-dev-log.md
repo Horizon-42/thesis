@@ -1673,3 +1673,36 @@
 
 ### Exact Next Recommended Step
 - Render CA estimated endpoints as diagnostic/status markers in Procedure Details and protected 3D mode.
+
+## 2026-05-02 11:30 CEST
+
+### Goal Of This Session
+- Render estimated CA endpoints as diagnostic/status markers.
+
+### Decisions Locked
+- Procedure Details plan view and vertical profile now render `CA end est` markers from `missedCaEndpoints`.
+- Marker hover/click focuses the CA start fix, not a synthetic endpoint fix.
+- `useProcedureSegmentLayer` now renders each estimated CA endpoint as a `-ca-endpoint-` point entity.
+- The marker is diagnostic/status only; it does not imply certified CA termination or protected surface construction.
+
+### Files Changed
+- `src/components/ProcedureDetailsPage.tsx`
+- `src/components/__tests__/ProcedureDetailsPage.test.tsx`
+- `src/hooks/useProcedureSegmentLayer.ts`
+- `src/hooks/__tests__/useProcedureSegmentLayer.test.ts`
+- `src/index.css`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/components/__tests__/ProcedureDetailsPage.test.tsx src/hooks/__tests__/useProcedureSegmentLayer.test.ts`
+- `npm run build`
+
+### Current Status
+- P0 endpoint model is visible in render bundles, Procedure Details, and protected 3D mode.
+
+### Known Blockers
+- CA estimated endpoint is not yet used to build CA centerline/envelope geometry.
+- CA surface construction remains future work.
+
+### Exact Next Recommended Step
+- Build CA centerline geometry from estimated endpoints, then use it as a constructible missed segment path while keeping estimated-status diagnostics visible.

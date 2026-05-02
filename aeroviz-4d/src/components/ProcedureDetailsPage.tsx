@@ -500,6 +500,14 @@ interface MissedTurnDebugMarker {
   label: string;
 }
 
+interface MissedCaEndpointMarker {
+  branchId: string;
+  legId: string;
+  focusFixId: string;
+  point: ProcedureChartPoint;
+  label: string;
+}
+
 const MISSED_LEG_MARKER_TYPES = new Set(["CA", "DF", "HM", "HA", "HF"]);
 
 function buildRfPlanMarkers(
@@ -707,6 +715,68 @@ function buildMissedTurnDebugMarkers(
   });
 }
 
+function buildMissedCaEndpointMarkers(
+  document: ProcedureDetailDocument | null,
+  renderBundle: ProcedureRenderBundle | null,
+  polylines: ProcedureBranchPolyline[],
+): MissedCaEndpointMarker[] {
+  if (!document || !renderBundle) return [];
+  const origin =
+    document.runway.threshold ??
+    document.fixes.find((fix) => fix.position)?.position ?? {
+      lon: 0,
+      lat: 0,
+    };
+  const branchByScopedId = new Map(
+    polylines.map((branch) => [scopedBranchIdFor(document, branch), branch]),
+  );
+  const pointByBranchAndFix = new Map(
+    polylines.flatMap((branch) =>
+      branch.points.map((point) => [`${branch.branchId}:${point.fixId}`, point] as const),
+    ),
+  );
+
+  return renderBundle.branchBundles.flatMap((branchBundle) => {
+    const branch = branchByScopedId.get(branchBundle.branchId);
+    if (!branch) return [];
+
+    return branchBundle.segmentBundles.flatMap((segmentBundle): MissedCaEndpointMarker[] =>
+      segmentBundle.missedCaEndpoints.flatMap((endpoint): MissedCaEndpointMarker[] => {
+        const anchorPoint = pointByBranchAndFix.get(`${branch.branchId}:${endpoint.startFixId}`);
+        if (!anchorPoint) return [];
+
+        const endpointGeo = endpoint.geoPositions[1];
+        const projected = pointToEastNorth(endpointGeo.lonDeg, endpointGeo.latDeg, origin.lon, origin.lat);
+        const point: ProcedureChartPoint = {
+          ...anchorPoint,
+          fixId: `${endpoint.startFixId}:ca-endpoint:${endpoint.legId}`,
+          ident: "CA END",
+          role: "CA_ENDPOINT_ESTIMATE",
+          lon: endpointGeo.lonDeg,
+          lat: endpointGeo.latDeg,
+          altitudeFt: endpoint.targetAltitudeFtMsl,
+          geometryAltitudeFt: endpoint.targetAltitudeFtMsl,
+          altM: endpointGeo.altM,
+          legType: "CA",
+          xM: projected.east,
+          yM: projected.north,
+          distanceM: anchorPoint.distanceM + endpoint.distanceNm * METERS_PER_NM,
+        };
+
+        return [
+          {
+            branchId: branch.branchId,
+            legId: endpoint.legId,
+            focusFixId: endpoint.startFixId,
+            point,
+            label: "CA end est",
+          },
+        ];
+      }),
+    );
+  });
+}
+
 function selectedBranchDefaultId(document: ProcedureDetailDocument | null): string | null {
   if (!document) return null;
   return (
@@ -724,6 +794,7 @@ interface SvgChartProps {
   missedSectionMarkers: MissedSectionMarker[];
   missedLegMarkers: MissedLegMarker[];
   missedTurnDebugMarkers: MissedTurnDebugMarker[];
+  missedCaEndpointMarkers: MissedCaEndpointMarker[];
   focusedFixId: string | null;
   focusedBranchId: string | null;
   distanceUnit: DistanceUnit;
@@ -740,6 +811,7 @@ function ProcedurePlanView({
   missedSectionMarkers,
   missedLegMarkers,
   missedTurnDebugMarkers,
+  missedCaEndpointMarkers,
   focusedFixId,
   focusedBranchId,
   distanceUnit,
@@ -777,6 +849,7 @@ function ProcedurePlanView({
     ...missedLegMarkers.map((marker) => marker.point),
     ...missedLegMarkers.flatMap((marker) => marker.courseTarget ? [marker.courseTarget] : []),
     ...missedTurnDebugMarkers.map((marker) => marker.point),
+    ...missedCaEndpointMarkers.map((marker) => marker.point),
   ];
   const plotWidth = SVG_WIDTH - SVG_PADDING_X * 2;
   const plotHeight = PLAN_SVG_HEIGHT - SVG_PADDING_Y * 2;
@@ -1096,6 +1169,25 @@ function ProcedurePlanView({
         );
       })}
 
+      {missedCaEndpointMarkers.map((marker) => {
+        const isFocused = !focusedBranchId || marker.branchId === focusedBranchId;
+        const x = scaleX(marker.point.xM);
+        const y = scaleY(marker.point.yM);
+        return (
+          <g
+            key={`missed-ca-endpoint-${marker.legId}`}
+            className={`procedure-details-ca-endpoint-marker ${
+              isFocused ? "is-focused" : "is-muted"
+            }`}
+            onMouseEnter={() => onPreviewFix(marker.focusFixId, marker.branchId)}
+            onClick={() => onSelectFix(marker.focusFixId, marker.branchId)}
+          >
+            <circle cx={x} cy={y} r={8} />
+            <text x={x + 11} y={y - 9}>{marker.label}</text>
+          </g>
+        );
+      })}
+
       {runwayMarker ? (
         <g className="procedure-details-runway">
           <line
@@ -1221,6 +1313,7 @@ function ProcedureVerticalProfile({
   missedSectionMarkers,
   missedLegMarkers,
   missedTurnDebugMarkers,
+  missedCaEndpointMarkers,
   focusedFixId,
   focusedBranchId,
   distanceUnit,
@@ -1519,6 +1612,26 @@ function ProcedureVerticalProfile({
                   </g>
                 );
               })}
+            {missedCaEndpointMarkers
+              .filter((marker) => marker.branchId === branch.branchId)
+              .map((marker) => {
+                const isFocusedMarker = !focusedBranchId || marker.branchId === focusedBranchId;
+                const x = scaleX(stationForPoint(marker.point));
+                const y = scaleY(marker.point.altitudeFt ?? 0);
+                return (
+                  <g
+                    key={`profile-missed-ca-endpoint-${marker.legId}`}
+                    className={`procedure-details-ca-endpoint-marker ${
+                      isFocusedMarker ? "is-focused" : "is-muted"
+                    }`}
+                    onMouseEnter={() => onPreviewFix(marker.focusFixId, marker.branchId)}
+                    onClick={() => onSelectFix(marker.focusFixId, marker.branchId)}
+                  >
+                    <circle cx={x} cy={y} r={7} />
+                    <text x={x + 10} y={y - 9}>{marker.label}</text>
+                  </g>
+                );
+              })}
           </g>
         );
       })}
@@ -1702,6 +1815,10 @@ export default function ProcedureDetailsPage() {
   );
   const missedTurnDebugMarkers = useMemo(
     () => buildMissedTurnDebugMarkers(procedureDocument, procedureRenderBundle, polylines),
+    [polylines, procedureDocument, procedureRenderBundle],
+  );
+  const missedCaEndpointMarkers = useMemo(
+    () => buildMissedCaEndpointMarkers(procedureDocument, procedureRenderBundle, polylines),
     [polylines, procedureDocument, procedureRenderBundle],
   );
   const selectedFixBranches = useMemo(
@@ -2152,6 +2269,7 @@ export default function ProcedureDetailsPage() {
                       missedSectionMarkers={missedSectionMarkers}
                       missedLegMarkers={missedLegMarkers}
                       missedTurnDebugMarkers={missedTurnDebugMarkers}
+                      missedCaEndpointMarkers={missedCaEndpointMarkers}
                       focusedFixId={focusedFixId}
                       focusedBranchId={focusedBranchId}
                       distanceUnit={distanceUnit}
@@ -2181,6 +2299,7 @@ export default function ProcedureDetailsPage() {
                       missedSectionMarkers={missedSectionMarkers}
                       missedLegMarkers={missedLegMarkers}
                       missedTurnDebugMarkers={missedTurnDebugMarkers}
+                      missedCaEndpointMarkers={missedCaEndpointMarkers}
                       focusedFixId={focusedFixId}
                       focusedBranchId={focusedBranchId}
                       distanceUnit={distanceUnit}

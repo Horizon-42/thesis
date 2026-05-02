@@ -23,6 +23,7 @@ const MISSED_SURFACE_COLOR = Cesium.Color.YELLOW.withAlpha(0.24);
 const CA_COURSE_GUIDE_COLOR = Cesium.Color.ORANGE.withAlpha(0.98);
 const TURNING_MISSED_DEBUG_COLOR = Cesium.Color.YELLOW.withAlpha(0.98);
 const FINAL_SURFACE_STATUS_COLOR = Cesium.Color.ORANGE.withAlpha(0.9);
+const CA_ENDPOINT_COLOR = Cesium.Color.ORANGE.withAlpha(0.98);
 const OUTLINE_COLOR = Cesium.Color.CYAN.withAlpha(0.28);
 const ENVELOPE_HEIGHT_OFFSET_M = 8;
 const OEA_HEIGHT_OFFSET_M = 18;
@@ -31,6 +32,7 @@ const MISSED_SURFACE_HEIGHT_OFFSET_M = 58;
 const CA_COURSE_GUIDE_HEIGHT_OFFSET_M = 82;
 const TURNING_MISSED_DEBUG_HEIGHT_OFFSET_M = 96;
 const FINAL_SURFACE_STATUS_HEIGHT_OFFSET_M = 110;
+const CA_ENDPOINT_HEIGHT_OFFSET_M = 92;
 
 function elevatedPoint(point: GeoPoint, altitudeOffsetM: number): GeoPoint {
   return { ...point, altM: point.altM + altitudeOffsetM };
@@ -363,6 +365,21 @@ function addSegmentEntities(
       CA_COURSE_GUIDE_COLOR,
     );
     ids.push(guideId);
+  });
+
+  segmentBundle.missedCaEndpoints.forEach((endpoint) => {
+    const endpointId = `${baseId}-ca-endpoint-${endpoint.legId}`;
+    addPoint(
+      viewer,
+      endpointId,
+      `${segmentName} CA estimated endpoint ${Math.round(endpoint.targetAltitudeFtMsl)} ft`,
+      endpoint.geoPositions[1],
+      visible,
+      10,
+      CA_ENDPOINT_COLOR,
+      CA_ENDPOINT_HEIGHT_OFFSET_M,
+    );
+    ids.push(endpointId);
   });
 
   if (segmentBundle.missedTurnDebugPoint) {

@@ -221,6 +221,22 @@ const renderBundleData = {
                   worldPositions: [],
                 },
               ],
+              missedCaEndpoints: [
+                {
+                  segmentId: "segment:final",
+                  legId: "leg:missed:ca",
+                  startFixId: "fix:RW",
+                  courseDeg: 305,
+                  startAltitudeFtMsl: 800,
+                  targetAltitudeFtMsl: 1000,
+                  climbGradientFtPerNm: 200,
+                  distanceNm: 1,
+                  constructionStatus: "ESTIMATED_ENDPOINT",
+                  geoPositions,
+                  worldPositions: [],
+                  notes: [],
+                },
+              ],
               missedTurnDebugPoint: {
                 segmentId: "segment:final",
                 debugType: "TURNING_MISSED_ANCHOR",
@@ -264,6 +280,7 @@ describe("useProcedureSegmentLayer", () => {
     expect(entities.some((entity) => String(entity.id).includes("-connector-primary-boundary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-missed-surface-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-ca-course-guide-"))).toBe(true);
+    expect(entities.some((entity) => String(entity.id).includes("-ca-endpoint-"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-turning-missed-anchor"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-turn-1-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes(":junction:"))).toBe(true);
