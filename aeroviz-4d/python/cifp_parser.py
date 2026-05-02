@@ -162,17 +162,49 @@ def parse_leg_course_deg(line: str) -> float | None:
 
 
 def parse_path_point_glidepath_angle_deg(line: str) -> float | None:
-    text = line[66:70].strip()
-    if len(text) != 4 or not text.isdigit():
-        return None
-    return int(text) / 100.0
+    from cifparse.functions.field import extract_field
+    from cifparse.records.path_point.widths import w_pri
+
+    value = extract_field(line, w_pri.gpa)
+    return normalize_float(value)
 
 
 def parse_path_point_tch_ft(line: str) -> float | None:
-    text = line[103:108].strip()
-    if len(text) != 5 or not text.isdigit():
-        return None
-    return int(text) / 10.0
+    from cifparse.functions.field import extract_field
+    from cifparse.records.path_point.widths import w_pri
+
+    tch_type = extract_field(line, w_pri.tch_ind)
+    value = extract_field(line, w_pri.path_point_tch, tch_type)
+    return normalize_float(value)
+
+
+def cifparse_path_point_lines(faacifp_path: Path) -> list[str]:
+    """Return raw airport path point lines selected by cifparse.
+
+    cifparse 2.0.9 exposes path point line classification and field decoders,
+    but PathPoint.to_dict() is unusable for this dataset because Primary.from_line()
+    mutates without returning self. Keep the adapter on cifparse's section and
+    field APIs while avoiding that object-model bug.
+    """
+    try:
+        from cifparse import CIFP
+    except ImportError as error:
+        raise RuntimeError(
+            "cifparse is required for CIFP path point metadata parsing. "
+            "Use the conda aviation environment's explicit Python interpreter."
+        ) from error
+
+    parser = CIFP(str(faacifp_path))
+    return list(parser._sections.section_p.get_path_points())
+
+
+def build_exact_source_line_map(faacifp_path: Path) -> dict[str, int]:
+    source_lines: dict[str, int] = {}
+    with faacifp_path.open(encoding="ascii", errors="replace") as f:
+        for line_number, raw_line in enumerate(f, start=1):
+            line = raw_line.rstrip("\n\r")
+            source_lines.setdefault(line, line_number)
+    return source_lines
 
 
 def parse_path_point_vertical_metadata(
@@ -185,33 +217,36 @@ def parse_path_point_vertical_metadata(
 
     Procedure legs carry the coded path and altitude constraints; GPA/TCH for
     vertically guided finals is encoded in the associated path point record.
-    Keep this parser narrow so it does not infer TCH from unrelated leg fields.
+    Keep this adapter narrow so it does not infer TCH from unrelated leg fields.
     """
-    airport_prefix = f"SUSAP {airport.upper()}"
+    from cifparse.functions.field import extract_field
+    from cifparse.records.path_point.widths import w_pri
+
+    source_lines = build_exact_source_line_map(faacifp_path)
     target_procedure = procedure.upper()
     target_runway = runway.upper() if runway else None
 
-    with faacifp_path.open(encoding="ascii", errors="replace") as f:
-        for line_number, raw_line in enumerate(f, start=1):
-            line = raw_line.rstrip("\n\r")
-            if len(line) < 108 or not line.startswith(airport_prefix):
-                continue
-            if line[12] != "P" or line[13:19].strip().upper() != target_procedure:
-                continue
-            if line[24:27].strip() != "001":
-                continue
+    for raw_line in cifparse_path_point_lines(faacifp_path):
+        line = raw_line.rstrip("\n\r")
+        if extract_field(line, w_pri.cont_rec_no) != 1:
+            continue
 
-            runway_ident = line[19:24].strip().upper()
-            if target_runway and runway_ident != target_runway:
-                continue
+        airport_ident = str(extract_field(line, w_pri.airport_id) or "").strip().upper()
+        procedure_ident = str(extract_field(line, w_pri.approach_id) or "").strip().upper()
+        if airport_ident != airport.upper() or procedure_ident != target_procedure:
+            continue
 
-            return PathPointVerticalMetadata(
-                procedure=target_procedure,
-                runway=runway_ident,
-                glidepath_angle_deg=parse_path_point_glidepath_angle_deg(line),
-                threshold_crossing_height_ft=parse_path_point_tch_ft(line),
-                source_line=line_number,
-            )
+        runway_ident = str(extract_field(line, w_pri.surface_id) or "").strip().upper()
+        if target_runway and runway_ident != target_runway:
+            continue
+
+        return PathPointVerticalMetadata(
+            procedure=target_procedure,
+            runway=runway_ident,
+            glidepath_angle_deg=parse_path_point_glidepath_angle_deg(line),
+            threshold_crossing_height_ft=parse_path_point_tch_ft(line),
+            source_line=source_lines.get(line, 0),
+        )
 
     return None
 
