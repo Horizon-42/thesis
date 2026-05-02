@@ -205,6 +205,15 @@ const renderBundleData = {
           altFtMsl: 800,
           sourceRefs: [],
         },
+        {
+          fixId: "fix:DUHAM",
+          ident: "DUHAM",
+          role: ["MAHF"],
+          lonDeg: -78.72,
+          latDeg: 35.94,
+          altFtMsl: 3000,
+          sourceRefs: [],
+        },
       ],
     },
   ],
@@ -462,6 +471,115 @@ const renderBundleData = {
                 },
               ],
             },
+            {
+              segment: {
+                segmentId: "segment:missed-s1",
+                segmentType: "MISSED_S1",
+                verticalRule: { kind: "MISSED_CLIMB_SURFACE", climbGradientFtPerNm: 200 },
+              },
+              legs: [
+                {
+                  legId: "leg:missed:ca",
+                  segmentId: "segment:missed-s1",
+                  legType: "CA",
+                  startFixId: "fix:RW",
+                  endFixId: "fix:RW",
+                  outboundCourseDeg: 305,
+                  requiredAltitude: { kind: "AT", minFtMsl: 1000, maxFtMsl: 1000, sourceText: "1000 ft" },
+                  sourceRefs: [],
+                },
+              ],
+              diagnostics: [],
+              segmentGeometry: {
+                segmentId: "segment:missed-s1",
+                centerline: {
+                  geoPositions: [
+                    { lonDeg: -78.8, latDeg: 35.87, altM: 244 },
+                    { lonDeg: -78.815, latDeg: 35.88, altM: 304.8 },
+                  ],
+                  worldPositions: [],
+                  geodesicLengthNm: 1,
+                  isArc: false,
+                },
+                stationAxis: { samples: [], totalLengthNm: 1 },
+                primaryEnvelope: ribbon,
+                secondaryEnvelope: ribbon,
+                turnJunctions: [],
+                diagnostics: [],
+              },
+              finalOea: null,
+              lnavVnavOcs: null,
+              precisionFinalSurfaces: [],
+              finalSurfaceStatus: null,
+              alignedConnector: null,
+              missedSectionSurface: null,
+              missedCourseGuides: [],
+              missedCaEndpoints: [
+                {
+                  segmentId: "segment:missed-s1",
+                  legId: "leg:missed:ca",
+                  startFixId: "fix:RW",
+                  courseDeg: 305,
+                  startAltitudeFtMsl: 800,
+                  targetAltitudeFtMsl: 1000,
+                  climbGradientFtPerNm: 200,
+                  distanceNm: 1,
+                  constructionStatus: "ESTIMATED_ENDPOINT",
+                  geoPositions: [
+                    { lonDeg: -78.8, latDeg: 35.87, altM: 244 },
+                    { lonDeg: -78.815, latDeg: 35.88, altM: 304.8 },
+                  ],
+                  worldPositions: [],
+                  notes: [],
+                },
+              ],
+              missedCaCenterlines: [],
+              missedTurnDebugPoint: null,
+              missedTurnDebugPrimitives: [],
+            },
+            {
+              segment: {
+                segmentId: "segment:missed-s2",
+                segmentType: "MISSED_S2",
+                verticalRule: { kind: "MISSED_CLIMB_SURFACE", climbGradientFtPerNm: 200 },
+              },
+              legs: [
+                {
+                  legId: "leg:missed:hm",
+                  segmentId: "segment:missed-s2",
+                  legType: "HM",
+                  startFixId: "fix:DUHAM",
+                  endFixId: "fix:DUHAM",
+                  requiredAltitude: null,
+                  sourceRefs: [],
+                  legacy: { roleAtEnd: "MAHF" },
+                },
+              ],
+              diagnostics: [],
+              segmentGeometry: {
+                segmentId: "segment:missed-s2",
+                centerline: {
+                  geoPositions: [],
+                  worldPositions: [],
+                  geodesicLengthNm: 0,
+                  isArc: false,
+                },
+                stationAxis: { samples: [], totalLengthNm: 0 },
+                turnJunctions: [],
+                diagnostics: [],
+              },
+              finalOea: null,
+              lnavVnavOcs: null,
+              precisionFinalSurfaces: [],
+              finalSurfaceStatus: null,
+              alignedConnector: null,
+              missedSectionSurface: null,
+              missedCourseGuides: [],
+              missedCaEndpoints: [],
+              missedCaCenterlines: [],
+              missedTurnDebugPoint: null,
+              missedTurnDebugPrimitives: [],
+            },
           ],
         },
       ],
@@ -518,7 +636,14 @@ describe("useProcedureSegmentLayer", () => {
     const finalVerticalProfile = entities.find((entity) =>
       String(entity.id).endsWith("-vertical-profile") && entity.polygon,
     );
-    expect(finalVerticalProfile?.polygon.hierarchy.positions).toHaveLength(6);
+    expect(finalVerticalProfile?.polygon.hierarchy.positions).toHaveLength(10);
+    expect(
+      finalVerticalProfile?.__aeroVizProcedureAnnotation?.parameters.some(
+        (parameter: { label: string; value: string }) =>
+          parameter.label === "Fixes" &&
+          parameter.value.includes("RW -> CA endpoint -> DUHAM"),
+      ),
+    ).toBe(true);
     expect(
       entities.some(
         (entity) =>

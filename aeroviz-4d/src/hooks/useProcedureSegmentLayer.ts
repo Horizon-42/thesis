@@ -354,8 +354,31 @@ function segmentVerticalProfilePointsForSegment(
 ): SegmentVerticalProfilePoint[] {
   if (!pkg) return [];
   const fixById = new Map(pkg.sharedFixes.map((fix) => [fix.fixId, fix]));
+  const missedCaEndpointByLegId = new Map(
+    segmentBundle.missedCaEndpoints.map((endpoint) => [endpoint.legId, endpoint]),
+  );
   const points: SegmentVerticalProfilePoint[] = [];
   segmentBundle.legs.forEach((leg) => {
+    if (
+      (segmentBundle.segment.segmentType === "MISSED_S1" ||
+        segmentBundle.segment.segmentType === "MISSED_S2") &&
+      leg.legType === "CA"
+    ) {
+      const endpoint = missedCaEndpointByLegId.get(leg.legId);
+      if (!endpoint) return;
+      const point = endpoint.geoPositions[1];
+      points.push({
+        lonDeg: point.lonDeg,
+        latDeg: point.latDeg,
+        altM: point.altM,
+        fixIdent: "CA endpoint",
+        altitudeFtMsl: endpoint.targetAltitudeFtMsl,
+        halfWidthNm: 0,
+        segmentId: segmentBundle.segment.segmentId,
+      });
+      return;
+    }
+
     const fix = leg.endFixId ? fixById.get(leg.endFixId) : undefined;
     if (!fix || fix.lonDeg === null || fix.latDeg === null) return;
     const altitudeFtMsl = altitudeConstraintReferenceFt(leg.requiredAltitude) ?? fix.altFtMsl;
