@@ -306,6 +306,32 @@ describe("normalizeProcedurePackage", () => {
     });
   });
 
+  it("keeps generated RNAV(RNP) RNP AR finals distinct from LNAV baseline geometry", () => {
+    const pkg = normalizeProcedurePackage({
+      ...sampleDocument,
+      procedureUid: "KRDU-H05LZ-RW05L",
+      procedure: {
+        ...sampleDocument.procedure,
+        procedureFamily: "RNAV_RNP",
+        procedureIdent: "H05LZ",
+        chartName: "RNAV(RNP) Z RWY 05L",
+        variant: "Z",
+        approachModes: ["RNP AR"],
+      },
+    });
+    const finalSegment = pkg.segments.find((segment) => segment.segmentType.startsWith("FINAL"));
+
+    expect(pkg.procedureFamily).toBe("RNAV_RNP");
+    expect(finalSegment).toMatchObject({
+      segmentType: "FINAL_RNP_AR",
+      navSpec: "RNP_AR_0_3",
+      secondaryEnabled: false,
+      verticalRule: { kind: "RNP_AR_VERTICAL" },
+      constructionFlags: {},
+    });
+    expect(finalSegment?.segmentId).toBe("KRDU-H05LZ-RW05L:branch:R:segment:final_rnp_ar:2");
+  });
+
   it("classifies route detail segments by branch role instead of collapsing them to unknown", () => {
     const transitionDocument: ProcedureDetailDocument = {
       ...sampleDocument,

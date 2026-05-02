@@ -707,6 +707,56 @@ describe("procedure render bundle", () => {
     );
   });
 
+  it("reports generated RNAV(RNP) RNP AR documents as missing RNP AR final templates", () => {
+    const pkg = normalizeProcedurePackage({
+      ...rfDocument,
+      procedureUid: "KRDU-H05LZ-RW05L",
+      procedure: {
+        ...rfDocument.procedure,
+        procedureFamily: "RNAV_RNP",
+        procedureIdent: "H05LZ",
+        chartName: "RNAV(RNP) Z RWY 05L",
+        variant: "Z",
+        approachModes: ["RNP AR"],
+      },
+      branches: [
+        {
+          ...rfDocument.branches[0],
+          legs: [
+            rfDocument.branches[0].legs[0],
+            {
+              ...rfDocument.branches[0].legs[1],
+              segmentType: "final",
+            },
+          ],
+        },
+      ],
+    });
+    const bundle = buildProcedureRenderBundle(pkg, {
+      samplingStepNm: 0.5,
+      enableDebugPrimitives: false,
+    });
+    const finalSegment = bundle.branchBundles[0].segmentBundles.find((segmentBundle) =>
+      segmentBundle.segment.segmentType.startsWith("FINAL"),
+    );
+
+    expect(finalSegment?.segment.segmentType).toBe("FINAL_RNP_AR");
+    expect(finalSegment?.finalSurfaceStatus).toMatchObject({
+      requestedModes: ["RNP/AR"],
+      constructedSurfaceTypes: [],
+      missingSurfaceTypes: ["RNP_AR_FINAL_TEMPLATE"],
+      constructionStatus: "UNSUPPORTED_FINAL_VERTICAL_SURFACES",
+    });
+    expect(bundle.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "FINAL_VERTICAL_SURFACE_UNIMPLEMENTED",
+          segmentId: "KRDU-H05LZ-RW05L:branch:R:segment:final_rnp_ar:2",
+        }),
+      ]),
+    );
+  });
+
   it("adds visual inter-segment turn junctions at adjacent segment joins", () => {
     const bundle = buildProcedureRenderBundle(twoSegmentTurnPackage, {
       samplingStepNm: 0.5,

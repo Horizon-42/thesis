@@ -110,6 +110,15 @@ function legType(pathTerminator: string): LegType {
   return SUPPORTED_LEG_TYPES.has(normalized) ? (normalized as LegType) : "UNSUPPORTED";
 }
 
+function isRnpArProcedure(document: ProcedureDetailDocument): boolean {
+  if (document.procedure.procedureFamily === "RNP_AR_APCH") return true;
+  if (document.procedure.procedureFamily !== "RNAV_RNP") return false;
+  return document.procedure.approachModes.some((mode) => {
+    const normalized = mode.toUpperCase().replace(/[\s-]+/g, "_").replace(/\//g, "_");
+    return normalized === "RNP_AR";
+  });
+}
+
 function segmentTypeFor(
   document: ProcedureDetailDocument,
   branch: ProcedureDetailBranch,
@@ -126,7 +135,7 @@ function segmentTypeFor(
   if (normalized.includes("initial")) return "INITIAL";
   if (normalized.includes("intermediate")) return "INTERMEDIATE";
   if (normalized.includes("final")) {
-    if (document.procedure.procedureFamily === "RNP_AR_APCH") return "FINAL_RNP_AR";
+    if (isRnpArProcedure(document)) return "FINAL_RNP_AR";
     if (
       document.procedure.procedureFamily === "RNAV_GPS" &&
       document.procedure.approachModes.length > 1
@@ -174,6 +183,7 @@ function verticalRuleFor(
     return { kind: "MISSED_CLIMB_SURFACE" };
   }
   if (!segmentType.startsWith("FINAL")) return { kind: "NONE" };
+  if (segmentType === "FINAL_RNP_AR") return { kind: "RNP_AR_VERTICAL" };
   const verticalProfile = document.verticalProfiles.find((profile) =>
     profile.appliesToModes.some((mode) => {
       const normalized = mode.toUpperCase();
