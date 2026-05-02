@@ -29,7 +29,7 @@ const LAYER_LABELS: Record<LayerKey, string> = {
   dsmTerrain:   "DSM Terrain",
   runways:      "Runways",
   waypoints:    "Waypoints",
-  ocsSurfaces:  "OCS Surfaces",
+  ocsSurfaces:  "Legacy FAF OCS Debug",
   trajectories: "Trajectories",
   obstacles:    "Obstacles",
   procedures:   "RNAV Procedures",

@@ -50,7 +50,7 @@ export default function CesiumViewerComponent() {
   useObstacleLayer();
   useProcedureSegmentLayer();
   useProcedureAnnotationPicking();
-  useOcsLayer();
+  useOcsLayer({ enabled: layers.ocsSurfaces });
   // Waypoint rendering is intentionally disabled for now.
   // Keep the hook implementation for future use.
   // useWaypointLayer();

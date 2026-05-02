@@ -1,11 +1,14 @@
 /**
  * useOcsLayer.ts
  * --------------
- * Renders PANS-OPS Final Approach Obstacle Clearance Surfaces (OCS)
- * derived from procedure FAF → threshold pairs.
+ * Legacy debug layer for simple FAF-to-threshold obstacle clearance surfaces.
  *
  * Data source:
  *   public/data/airports/<ICAO>/procedure-details/*.json
+ *
+ * This predates the v3 procedure segment layer. Keep it opt-in so the default
+ * scene does not mix these simplified red/orange surfaces with annotated v3
+ * procedure OEA/OCS geometry.
  *
  * For every final approach route we:
  *   1. Locate the FAF point and the runway/MAPt point in the canonical route model
@@ -113,12 +116,12 @@ function addOcsPolygon(
 
 // ── Hook ────────────────────────────────────────────────────────────────────
 
-export function useOcsLayer(): void {
+export function useOcsLayer({ enabled = false }: { enabled?: boolean } = {}): void {
   const { viewer, layers, activeAirportCode } = useApp();
 
   // Effect 1 — load canonical procedure details, build OCS entities.
   useEffect(() => {
-    if (!viewer || !activeAirportCode) return;
+    if (!enabled || !viewer || !activeAirportCode) return;
 
     let cancelled = false;
     const addedIds: string[] = [];
@@ -156,7 +159,7 @@ export function useOcsLayer(): void {
                 : DEFAULT_SECONDARY_WIDTH_M,
             });
 
-            const visible = layers.ocsSurfaces;
+            const visible = enabled;
             const baseId = `${OCS_ENTITY_PREFIX}${routeId}`;
 
             const primaryId = `${baseId}-primary`;
@@ -213,18 +216,15 @@ export function useOcsLayer(): void {
         addedIds.forEach((id) => viewer.entities.removeById(id));
       }
     };
-    // layers.ocsSurfaces is intentionally NOT in the dep list — toggling
-    // visibility is handled by Effect 2 without rebuilding geometry.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewer, activeAirportCode]);
+  }, [viewer, activeAirportCode, enabled]);
 
   // Effect 2 — sync visibility when the layer toggle changes.
   useEffect(() => {
     if (!isCesiumViewerUsable(viewer)) return;
     viewer.entities.values.forEach((entity) => {
       if (String(entity.id).startsWith(OCS_ENTITY_PREFIX)) {
-        entity.show = layers.ocsSurfaces;
+        entity.show = enabled && layers.ocsSurfaces;
       }
     });
-  }, [viewer, layers.ocsSurfaces]);
+  }, [viewer, enabled, layers.ocsSurfaces]);
 }
