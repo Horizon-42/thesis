@@ -467,6 +467,7 @@ describe("ProcedureDetailsPage", () => {
     expect(screen.getAllByText("DF leg").length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText("HM leg").length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText(/WARN UNSUPPORTED_LEG_TYPE/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/WARN TURNING_MISSED_UNIMPLEMENTED/)).toBeTruthy();
   });
 
   it("shows a friendly empty state when the richer dataset is missing", async () => {

@@ -1260,3 +1260,31 @@
 
 ### Exact Next Recommended Step
 - Expose turning missed diagnostics in Procedure Details visual notes/markers so users can identify why section 2 has no surface.
+
+## 2026-05-02 03:20 CEST
+
+### Goal Of This Session
+- Surface turning missed approach diagnostics in Procedure Details.
+
+### Decisions Locked
+- Procedure Details now filters render diagnostics using the canonical package branch id instead of `procedureUid`.
+- The existing Data Notes panel displays `TURNING_MISSED_UNIMPLEMENTED` for focused missed section 2 cases.
+- Added regression coverage to ensure a missed approach with HM section 2 shows the turning-missed diagnostic.
+
+### Files Changed
+- `src/components/ProcedureDetailsPage.tsx`
+- `src/components/__tests__/ProcedureDetailsPage.test.tsx`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/components/__tests__/ProcedureDetailsPage.test.tsx`
+- `npm run build`
+
+### Current Status
+- Users can now see why a turning missed section is diagnostic-only instead of silently missing a protected surface.
+
+### Known Blockers
+- The diagnostic is text-only; no TIA/wind-spiral debug overlay exists yet.
+
+### Exact Next Recommended Step
+- Add a lightweight 2D/3D debug marker for turning missed section 2 anchor points without constructing wind spiral geometry.

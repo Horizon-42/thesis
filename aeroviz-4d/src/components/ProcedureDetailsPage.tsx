@@ -617,11 +617,18 @@ function buildMissedLegMarkers(
   });
 }
 
-function scopedBranchIdFor(document: ProcedureDetailDocument, branch: ProcedureBranchPolyline): string {
-  const packageId = `${document.airport.icao.toUpperCase()}-${document.procedure.procedureIdent.toUpperCase()}-${
+function procedurePackageIdFor(document: ProcedureDetailDocument): string {
+  return `${document.airport.icao.toUpperCase()}-${document.procedure.procedureIdent.toUpperCase()}-${
     document.runway.ident ?? "UNKNOWN"
   }`;
-  return `${packageId}:branch:${branch.branchKey.toUpperCase()}`;
+}
+
+function scopedBranchIdForKey(document: ProcedureDetailDocument, branchKey: string): string {
+  return `${procedurePackageIdFor(document)}:branch:${branchKey.toUpperCase()}`;
+}
+
+function scopedBranchIdFor(document: ProcedureDetailDocument, branch: ProcedureBranchPolyline): string {
+  return scopedBranchIdForKey(document, branch.branchKey);
 }
 
 function buildMissedSectionMarkers(
@@ -1657,9 +1664,10 @@ export default function ProcedureDetailsPage() {
   const focusedLegs = focusedBranch?.legs ?? [];
   const focusedScopedBranchId =
     procedureDocument && focusedBranch
-      ? `${procedureDocument.procedureUid}:branch:${(
-          focusedBranch.branchKey ?? focusedBranch.branchIdent
-        ).toUpperCase()}`
+      ? scopedBranchIdForKey(
+          procedureDocument,
+          focusedBranch.branchKey ?? focusedBranch.branchIdent,
+        )
       : null;
   const focusedRenderDiagnostics = useMemo(() => {
     if (!procedureRenderBundle) return [];
