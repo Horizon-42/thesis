@@ -942,6 +942,11 @@ def build_procedure_detail_document(
         warnings.extend(f"[{branch_ident}] {warning}" for warning in branch_warnings)
 
         ordered_fix_idents.extend(leg.fix_ident for leg in branch_legs if leg.fix_ident)
+        ordered_fix_idents.extend(
+            leg.center_fix_ident
+            for leg in branch_legs
+            if leg.center_fix_ident
+        )
         for leg in branch_legs:
             role_hints_by_fix.setdefault(leg.fix_ident, []).append(leg.role)
 

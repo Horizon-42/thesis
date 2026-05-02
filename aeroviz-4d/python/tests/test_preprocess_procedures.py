@@ -468,6 +468,13 @@ def test_build_katl_zelan4_procedure_detail_document_exports_real_rf_metadata() 
     assert rf_path["centerLatDeg"] == pytest.approx(33.692475)
     assert rf_path["centerLonDeg"] == pytest.approx(-84.5128917)
 
+    fix_by_id = {fix["fixId"]: fix for fix in document["fixes"]}
+    assert "fix:CFZJF" in fix_by_id
+    assert fix_by_id["fix:CFZJF"]["position"] == {
+        "lon": pytest.approx(-84.5128917),
+        "lat": pytest.approx(33.692475),
+    }
+
 
 def test_build_krdu_r05ly_procedure_detail_document() -> None:
     document = build_procedure_detail_document(
