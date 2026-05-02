@@ -192,7 +192,7 @@ describe("normalizeProcedurePackage", () => {
         branchRole: "STRAIGHT_IN",
         segmentIds: [
           "KRDU-R05LY-RW05L:branch:R:segment:intermediate:1",
-          "KRDU-R05LY-RW05L:branch:R:segment:final_lnav:2",
+          "KRDU-R05LY-RW05L:branch:R:segment:final_rnav_gps:2",
         ],
         legacy: expect.objectContaining({
           sourceBranchId: "branch:R",
@@ -216,8 +216,8 @@ describe("normalizeProcedurePackage", () => {
         verticalRule: "NONE",
       },
       {
-        segmentId: "KRDU-R05LY-RW05L:branch:R:segment:final_lnav:2",
-        segmentType: "FINAL_LNAV",
+        segmentId: "KRDU-R05LY-RW05L:branch:R:segment:final_rnav_gps:2",
+        segmentType: "FINAL_RNAV_GPS",
         legIds: ["leg:R:020", "leg:R:030"],
         xttNm: 0.3,
         attNm: 0.3,
@@ -243,7 +243,7 @@ describe("normalizeProcedurePackage", () => {
       },
       {
         legId: "leg:R:020",
-        segmentId: "KRDU-R05LY-RW05L:branch:R:segment:final_lnav:2",
+        segmentId: "KRDU-R05LY-RW05L:branch:R:segment:final_rnav_gps:2",
         legType: "TF",
         altitude: {
           kind: "AT",
@@ -254,7 +254,7 @@ describe("normalizeProcedurePackage", () => {
       },
       {
         legId: "leg:R:030",
-        segmentId: "KRDU-R05LY-RW05L:branch:R:segment:final_lnav:2",
+        segmentId: "KRDU-R05LY-RW05L:branch:R:segment:final_rnav_gps:2",
         legType: "TF",
         altitude: null,
       },

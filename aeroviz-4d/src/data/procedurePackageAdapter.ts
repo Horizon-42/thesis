@@ -127,6 +127,12 @@ function segmentTypeFor(
   if (normalized.includes("intermediate")) return "INTERMEDIATE";
   if (normalized.includes("final")) {
     if (document.procedure.procedureFamily === "RNP_AR_APCH") return "FINAL_RNP_AR";
+    if (
+      document.procedure.procedureFamily === "RNAV_GPS" &&
+      document.procedure.approachModes.length > 1
+    ) {
+      return "FINAL_RNAV_GPS";
+    }
     return "FINAL_LNAV";
   }
   if (normalized.includes("route")) {
@@ -145,7 +151,11 @@ function navSpecFor(segmentType: ProcedureSegment["segmentType"]): NavSpecCode {
 }
 
 function xttFor(segmentType: ProcedureSegment["segmentType"]): number {
-  if (segmentType === "FINAL_LNAV" || segmentType === "FINAL_LNAV_VNAV") return 0.3;
+  if (
+    segmentType === "FINAL_RNAV_GPS" ||
+    segmentType === "FINAL_LNAV" ||
+    segmentType === "FINAL_LNAV_VNAV"
+  ) return 0.3;
   if (segmentType === "FINAL_LPV" || segmentType === "FINAL_GLS") return 0.3;
   if (segmentType === "FINAL_RNP_AR") return 0.3;
   return 1;
@@ -306,15 +316,15 @@ function groupBranchSegments(
     );
 
     const collapsedApproachModes =
-      segmentType === "FINAL_LNAV" && approachModes.length > 1 ? approachModes : undefined;
+      segmentType === "FINAL_RNAV_GPS" && approachModes.length > 1 ? approachModes : undefined;
     if (collapsedApproachModes) {
       diagnostics.push({
         severity: "INFO",
         segmentId,
         code: "MODE_COLLAPSED_TO_LNAV",
-        message: `${segmentId}: current adapter emits FINAL_LNAV as the constructible baseline for ${approachModes.join(
+        message: `${segmentId}: current adapter emits FINAL_RNAV_GPS with LNAV baseline geometry for ${approachModes.join(
           " / ",
-        )}. Mode-specific final surfaces remain future geometry work.`,
+        )}. Mode-specific final surfaces are attached when source GPA/TCH data is available.`,
         sourceRefs: sourceRefs(firstLeg.sourceRefs),
       });
     }

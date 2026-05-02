@@ -459,6 +459,7 @@ function buildVerticalProfileRibbon(
 }
 
 function compactSegmentType(segmentType: string | undefined): string {
+  if (segmentType === "FINAL_RNAV_GPS") return "FINAL RNAV(GPS)";
   return (segmentType ?? "UNKNOWN").replace(/_/g, " ");
 }
 

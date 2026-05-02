@@ -361,7 +361,11 @@ export function buildLnavFinalOea(
     return { geometry: null, diagnostics };
   }
 
-  if (segment.segmentType !== "FINAL_LNAV" && segment.segmentType !== "FINAL_LNAV_VNAV") {
+  if (
+    segment.segmentType !== "FINAL_RNAV_GPS" &&
+    segment.segmentType !== "FINAL_LNAV" &&
+    segment.segmentType !== "FINAL_LNAV_VNAV"
+  ) {
     diagnostics.push(
       diagnostic(
         "MODE_COLLAPSED_TO_LNAV",

@@ -34,10 +34,12 @@ function termsFromProcedureName(procedureName: string): string[] {
 function termsFromSegmentType(segmentType: string | undefined): string[] {
   if (!segmentType) return [];
   const terms: string[] = [];
-  if (segmentType.includes("LNAV_VNAV")) terms.push("LNAV/VNAV", "LNAV");
-  else if (segmentType.includes("LNAV")) terms.push("LNAV");
-  if (segmentType.includes("LPV")) terms.push("LPV");
-  if (segmentType.includes("RNP_AR")) terms.push("RNP AR", "RNP");
+  const upper = segmentType.toUpperCase();
+  if (upper.includes("RNAV_GPS")) terms.push("RNAV(GPS)", "RNAV", "LPV", "LNAV/VNAV", "LNAV");
+  if (upper.includes("LNAV_VNAV")) terms.push("LNAV/VNAV", "LNAV");
+  else if (upper.includes("LNAV")) terms.push("LNAV");
+  if (upper.includes("LPV")) terms.push("LPV");
+  if (upper.includes("RNP_AR")) terms.push("RNP AR", "RNP");
   return terms;
 }
 

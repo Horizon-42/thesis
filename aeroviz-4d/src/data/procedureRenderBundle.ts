@@ -100,7 +100,11 @@ export interface ProcedureSegmentRenderBundle {
 }
 
 function isLnavFinal(segment: ProcedureSegment): boolean {
-  return segment.segmentType === "FINAL_LNAV" || segment.segmentType === "FINAL_LNAV_VNAV";
+  return (
+    segment.segmentType === "FINAL_RNAV_GPS" ||
+    segment.segmentType === "FINAL_LNAV" ||
+    segment.segmentType === "FINAL_LNAV_VNAV"
+  );
 }
 
 function shouldBuildAlignedConnector(segment: ProcedureSegment): boolean {
