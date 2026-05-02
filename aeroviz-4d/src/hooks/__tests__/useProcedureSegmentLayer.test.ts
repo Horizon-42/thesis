@@ -696,7 +696,8 @@ describe("useProcedureSegmentLayer", () => {
       entities.some(
         (entity) =>
           String(entity.id).includes("-lnav-vnav-ocs-primary") &&
-          entity.polygon.material.name === "LIME",
+          entity.polygon.material.name === "MAGENTA" &&
+          entity.polygon.material.alpha === 0.34,
       ),
     ).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-precision-lpv-w"))).toBe(true);

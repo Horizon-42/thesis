@@ -42,7 +42,8 @@ const PROCEDURE_SEGMENT_ENTITY_PREFIX = "procedure-segment-";
 const CENTERLINE_COLOR = Cesium.Color.CYAN.withAlpha(0.95);
 const PRIMARY_COLOR = Cesium.Color.DEEPSKYBLUE.withAlpha(0.18);
 const SECONDARY_COLOR = Cesium.Color.YELLOW.withAlpha(0.1);
-const LNAV_VNAV_OCS_COLOR = Cesium.Color.LIME.withAlpha(0.2);
+const LNAV_VNAV_OCS_PRIMARY_COLOR = Cesium.Color.MAGENTA.withAlpha(0.34);
+const LNAV_VNAV_OCS_SECONDARY_COLOR = Cesium.Color.MAGENTA.withAlpha(0.18);
 const PRECISION_FINAL_SURFACE_COLOR = Cesium.Color.MAGENTA.withAlpha(0.18);
 const FINAL_VERTICAL_REFERENCE_COLOR = Cesium.Color.CYAN.withAlpha(0.88);
 const FINAL_VERTICAL_REFERENCE_BAND_COLOR = Cesium.Color.CYAN.withAlpha(0.16);
@@ -1044,10 +1045,10 @@ function addSegmentEntities(
       ocsPrimaryId,
       `${segmentName} LNAV/VNAV OCS primary`,
       segmentBundle.lnavVnavOcs.primary,
-      procedureEntityShow(visible, ocsAnnotation, displayLevel),
-      LNAV_VNAV_OCS_COLOR,
-      LNAV_VNAV_OCS_HEIGHT_OFFSET_M,
-      ocsAnnotation,
+        procedureEntityShow(visible, ocsAnnotation, displayLevel),
+        LNAV_VNAV_OCS_PRIMARY_COLOR,
+        LNAV_VNAV_OCS_HEIGHT_OFFSET_M,
+        ocsAnnotation,
     );
     ids.push(ocsPrimaryId);
     const ocsLabelId = addAnnotationLabel(
@@ -1070,7 +1071,7 @@ function addSegmentEntities(
       `${segmentName} LNAV/VNAV OCS secondary`,
       segmentBundle.lnavVnavOcs.secondaryOuter,
       procedureEntityShow(visible, ocsSecondaryAnnotation, displayLevel),
-      LNAV_VNAV_OCS_COLOR,
+      LNAV_VNAV_OCS_SECONDARY_COLOR,
       LNAV_VNAV_OCS_HEIGHT_OFFSET_M,
       ocsSecondaryAnnotation,
     );

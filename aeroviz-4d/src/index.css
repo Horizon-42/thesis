@@ -949,23 +949,23 @@ body,
 }
 
 .runway-profile-lnav-vnav-ocs-secondary-band {
-  stroke: rgba(163, 230, 53, 0.09);
+  stroke: rgba(244, 114, 182, 0.14);
   stroke-linecap: butt;
   stroke-linejoin: round;
 }
 
 .runway-profile-lnav-vnav-ocs-primary-band {
-  stroke: rgba(163, 230, 53, 0.16);
+  stroke: rgba(244, 114, 182, 0.28);
   stroke-linecap: butt;
   stroke-linejoin: round;
 }
 
 .runway-profile-lnav-vnav-ocs-line {
-  stroke: rgba(163, 230, 53, 0.7);
-  stroke-width: 3.2;
+  stroke: rgba(244, 114, 182, 0.92);
+  stroke-width: 4.2;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-dasharray: 8 5;
+  stroke-dasharray: 10 4;
 }
 
 .runway-profile-precision-surface-line {
