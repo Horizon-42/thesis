@@ -2219,3 +2219,27 @@
 
 ### Exact Next Recommended Step
 - Run full frontend validation, then add a focused RF/RNP AR final diagnostic that marks RF final envelopes as first-pass rather than certified RNP AR templates.
+
+## 2026-05-02 12:56 CEST
+
+### Goal Of This Session
+- Run final validation after the P0-P5 staged implementation pass.
+
+### Commands Run / Checks Passed
+- `npm test -- --run`
+  - 22 test files passed.
+  - 123 tests passed.
+- `npm run build`
+- `conda run -n aviation pytest python/tests`
+  - 76 tests passed in the `aviation` conda environment.
+
+### Current Status
+- P0 through P5 staged implementation work from this pass is validated.
+- Remaining work is mostly deeper compliance geometry rather than missing UI plumbing:
+  - certified CA endpoint/surface source model;
+  - VEB-accurate LNAV/VNAV and LPV/GLS surfaces;
+  - real turning missed TIA/wind-spiral construction;
+  - RNP AR/RF final templates beyond explicit missing-template diagnostics.
+
+### Exact Next Recommended Step
+- Continue with RF/RNP AR final diagnostics/templates in the next implementation pass.
