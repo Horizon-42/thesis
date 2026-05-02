@@ -27,7 +27,7 @@ const missedSegment: ProcedureSegment = {
   secondaryEnabled: true,
   widthChangeMode: "NONE",
   transitionRule: null,
-  verticalRule: { kind: "MISSED_CLIMB_SURFACE" },
+  verticalRule: { kind: "MISSED_CLIMB_SURFACE", climbGradientFtPerNm: 200 },
   constructionFlags: {},
   sourceRefs: [],
   legacy: {
@@ -119,10 +119,34 @@ describe("procedure missed geometry", () => {
     expect(result.geometry).toMatchObject({
       segmentId: "segment:missed-s1",
       surfaceType: "MISSED_SECTION1_ENVELOPE",
+      sectionKind: "SECTION_1",
       constructionStatus: "SOURCE_BACKED",
+      verticalProfile: {
+        constructionStatus: "SOURCE_CLIMB_GRADIENT",
+        climbGradientFtPerNm: 200,
+      },
       primary: expect.objectContaining({ geometryId: "segment:missed-s1:primary" }),
       secondaryOuter: expect.objectContaining({ geometryId: "segment:missed-s1:secondary" }),
     });
+  });
+
+  it("diagnoses missed section vertical profiles when climb gradient is missing", () => {
+    const result = buildMissedSectionSurface(
+      { ...missedSegment, verticalRule: { kind: "MISSED_CLIMB_SURFACE" } },
+      geometryBundle,
+    );
+
+    expect(result.geometry).toMatchObject({
+      verticalProfile: {
+        constructionStatus: "CENTERLINE_ALTITUDE_ONLY",
+        climbGradientFtPerNm: null,
+      },
+    });
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "SOURCE_INCOMPLETE",
+      }),
+    ]);
   });
 
   it("diagnoses missed sections that have no primary envelope", () => {

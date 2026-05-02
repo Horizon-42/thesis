@@ -155,6 +155,9 @@ function verticalRuleFor(
   document: ProcedureDetailDocument,
   segmentType: ProcedureSegment["segmentType"],
 ): VerticalRule | null {
+  if (segmentType === "MISSED_S1" || segmentType === "MISSED_S2") {
+    return { kind: "MISSED_CLIMB_SURFACE" };
+  }
   if (!segmentType.startsWith("FINAL")) return { kind: "NONE" };
   const verticalProfile = document.verticalProfiles.find((profile) =>
     profile.appliesToModes.some((mode) => {

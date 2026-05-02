@@ -35,7 +35,16 @@ export type MissedSectionSurfaceType =
 export interface MissedSectionSurfaceGeometry {
   segmentId: string;
   surfaceType: MissedSectionSurfaceType;
+  sectionKind: "SECTION_1" | "SECTION_2_STRAIGHT";
   constructionStatus: "SOURCE_BACKED" | "ESTIMATED_CA";
+  verticalProfile: {
+    constructionStatus: "SOURCE_CLIMB_GRADIENT" | "CENTERLINE_ALTITUDE_ONLY";
+    climbGradientFtPerNm: number | null;
+    samples: Array<{
+      stationNm: number;
+      altitudeFtMsl: number;
+    }>;
+  };
   primary: LateralEnvelopeGeometry;
   secondaryOuter: LateralEnvelopeGeometry | null;
 }
@@ -211,6 +220,29 @@ export function buildMissedSectionSurface(
     };
   }
 
+  const diagnostics: BuildDiagnostic[] = [];
+  const climbGradientFtPerNm = segment.verticalRule?.climbGradientFtPerNm;
+  const hasClimbGradient =
+    typeof climbGradientFtPerNm === "number" &&
+    Number.isFinite(climbGradientFtPerNm) &&
+    climbGradientFtPerNm > 0;
+  if (!hasClimbGradient) {
+    diagnostics.push(
+      diagnostic(
+        segment,
+        `${segment.segmentId}: missed section vertical profile has no explicit climb gradient; using centerline altitude samples only.`,
+      ),
+    );
+  }
+  const startAltitudeFtMsl =
+    (segmentGeometry.centerline.geoPositions[0]?.altM ?? 0) / FEET_TO_METERS;
+  const verticalSamples = segmentGeometry.stationAxis.samples.map((sample) => ({
+    stationNm: sample.stationNm,
+    altitudeFtMsl: hasClimbGradient
+      ? startAltitudeFtMsl + sample.stationNm * climbGradientFtPerNm
+      : sample.geoPosition.altM / FEET_TO_METERS,
+  }));
+
   return {
     geometry: {
       segmentId: segment.segmentId,
@@ -218,15 +250,23 @@ export function buildMissedSectionSurface(
         segment.segmentType === "MISSED_S1"
           ? "MISSED_SECTION1_ENVELOPE"
           : "MISSED_SECTION2_STRAIGHT_ENVELOPE",
+      sectionKind: segment.segmentType === "MISSED_S1" ? "SECTION_1" : "SECTION_2_STRAIGHT",
       constructionStatus: segmentGeometry.diagnostics.some(
         (diagnostic) => diagnostic.code === "ESTIMATED_CA_GEOMETRY",
       )
         ? "ESTIMATED_CA"
         : "SOURCE_BACKED",
+      verticalProfile: {
+        constructionStatus: hasClimbGradient
+          ? "SOURCE_CLIMB_GRADIENT"
+          : "CENTERLINE_ALTITUDE_ONLY",
+        climbGradientFtPerNm: hasClimbGradient ? climbGradientFtPerNm : null,
+        samples: verticalSamples,
+      },
       primary: segmentGeometry.primaryEnvelope,
       secondaryOuter: segmentGeometry.secondaryEnvelope ?? null,
     },
-    diagnostics: [],
+    diagnostics,
   };
 }
 

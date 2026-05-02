@@ -2095,3 +2095,36 @@
 
 ### Exact Next Recommended Step
 - Start P4 missed section surface refinement.
+
+## 2026-05-02 12:51 CEST
+
+### Goal Of This Session
+- Start P4 by adding explicit section typing and vertical profile status to missed section surfaces.
+
+### Decisions Locked
+- `MissedSectionSurfaceGeometry` now carries `sectionKind`.
+- Missed surfaces now carry a `verticalProfile` object with:
+  - `SOURCE_CLIMB_GRADIENT` when a positive climb gradient is available;
+  - `CENTERLINE_ALTITUDE_ONLY` when no explicit climb gradient exists.
+- Missing climb-gradient data emits a `SOURCE_INCOMPLETE` diagnostic instead of inventing a missed climb surface.
+- The package adapter now marks missed section segments with `MISSED_CLIMB_SURFACE` vertical rules, while leaving climb gradient absent until real source data is available.
+
+### Files Changed
+- `src/utils/procedureMissedGeometry.ts`
+- `src/utils/__tests__/procedureMissedGeometry.test.ts`
+- `src/data/procedurePackageAdapter.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/utils/__tests__/procedureMissedGeometry.test.ts src/data/__tests__/procedurePackageAdapter.test.ts src/data/__tests__/procedureRenderBundle.test.ts src/components/__tests__/ProcedureDetailsPage.test.tsx`
+- `npm run build`
+
+### Current Status
+- Missed section surface objects now expose section identity and vertical-profile construction status.
+
+### Known Blockers
+- Real missed climb gradients are not yet parsed/exported into procedure detail documents.
+- Turning section 2 remains debug-estimate only; no compliant TIA/wind-spiral protected surface is claimed.
+
+### Exact Next Recommended Step
+- Run full frontend validation, then continue P4 by wiring missed vertical-profile status into Procedure Details/assessment displays.
