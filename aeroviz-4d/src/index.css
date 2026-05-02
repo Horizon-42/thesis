@@ -870,6 +870,10 @@ body,
 .runway-profile-ground-line,
 .runway-profile-route-line,
 .runway-profile-route-band,
+.runway-profile-assessment-primary-band,
+.runway-profile-assessment-secondary-band,
+.runway-profile-vertical-reference-line,
+.runway-profile-vertical-reference-plan-line,
 .runway-profile-grid-line,
 .runway-profile-reference-line,
 .runway-profile-reference-tick {
@@ -905,6 +909,34 @@ body,
   stroke-linejoin: round;
 }
 
+.runway-profile-assessment-secondary-band {
+  stroke: rgba(125, 211, 252, 0.08);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.runway-profile-assessment-primary-band {
+  stroke: rgba(34, 211, 238, 0.16);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.runway-profile-vertical-reference-line {
+  stroke: rgba(250, 204, 21, 0.84);
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.86;
+}
+
+.runway-profile-vertical-reference-plan-line {
+  stroke: rgba(250, 204, 21, 0.68);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 7 5;
+}
+
 .runway-profile-route-line {
   stroke: rgba(34, 211, 238, 0.82);
   stroke-width: 1.8;
@@ -928,6 +960,17 @@ body,
 
 .runway-profile-route-label.is-transition {
   fill: #ffd38a;
+}
+
+.runway-profile-segment-debug-label {
+  fill: #fca5a5;
+  font-family: "Inter", "Segoe UI", sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  paint-order: stroke;
+  stroke: rgba(15, 23, 42, 0.92);
+  stroke-width: 3px;
 }
 
 .runway-profile-reference-line {

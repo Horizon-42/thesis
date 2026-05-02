@@ -8,10 +8,18 @@ import {
   type ProfileAircraftTrack,
 } from "../hooks/useRunwayTrajectoryProfile";
 import type {
+  HorizontalPlateAssessmentSegment,
   HorizontalPlateRoute,
   RunwayProfilePoint,
   RunwayReferenceMark,
 } from "../utils/runwayProfileGeometry";
+import {
+  isProcedureAnnotationVisibleAtDisplayLevel,
+  type ProcedureAnnotationKind,
+  type ProcedureAnnotationStatus,
+  type ProcedureDisplayLevel,
+  type ProcedureEntityAnnotation,
+} from "../data/procedureAnnotations";
 
 const METERS_PER_NM = 1852;
 const METERS_PER_FOOT = 0.3048;
@@ -29,10 +37,22 @@ interface ProfilePlotProps {
   title: string;
   subtitle: string;
   mode: "side" | "top";
+  displayLevel: ProcedureDisplayLevel;
   distanceUnit: DistanceUnit;
   tracks: ProfileAircraftTrack[];
   plateRoutes: HorizontalPlateRoute[];
   referenceMarks: RunwayReferenceMark[];
+}
+
+function showProfileElement(
+  kind: ProcedureAnnotationKind,
+  status: ProcedureAnnotationStatus,
+  displayLevel: ProcedureDisplayLevel,
+): boolean {
+  return isProcedureAnnotationVisibleAtDisplayLevel(
+    { kind, status } as ProcedureEntityAnnotation,
+    displayLevel,
+  );
 }
 
 function formatIsoTime(iso: string | null): string {
@@ -140,6 +160,11 @@ function routeLabel(route: HorizontalPlateRoute): string {
     return `${route.transitionIdent ?? route.branchIdent} transition`;
   }
   return `${route.procedureName} final`;
+}
+
+function segmentDebugLabel(segment: HorizontalPlateAssessmentSegment, index: number): string {
+  const segmentKey = segment.segmentId.split(":").slice(-1)[0] ?? `${index + 1}`;
+  return `S${index + 1} ${segmentKey}`;
 }
 
 function niceTickStep(span: number, targetTickCount: number): number {
@@ -256,6 +281,7 @@ function ProfilePlot({
   title,
   subtitle,
   mode,
+  displayLevel,
   distanceUnit,
   tracks,
   plateRoutes,
@@ -323,6 +349,22 @@ function ProfilePlot({
   );
   const plottedReferenceMarks = displayedReferenceMarks.filter(
     (mark) => mark.detail === "Threshold",
+  );
+  // Keep the embedded profile aligned with the same semantic display levels as the 3D procedure layer.
+  const showProtectionGeometry = showProfileElement(
+    "SEGMENT_ENVELOPE_PRIMARY",
+    "SOURCE_BACKED",
+    displayLevel,
+  );
+  const showVerticalReferenceGeometry = showProfileElement(
+    "LNAV_VNAV_OCS",
+    "ESTIMATED",
+    displayLevel,
+  );
+  const showDebugGeometry = showProfileElement(
+    "TURNING_MISSED_DEBUG",
+    "DEBUG_ESTIMATE",
+    displayLevel,
   );
 
   return (
@@ -516,6 +558,9 @@ function ProfilePlot({
             marginTop,
             mode,
           );
+          const assessmentSegments = (route.assessmentSegments ?? []).filter(
+            (segment) => segment.points.length >= 2,
+          );
           const bandWidth = mode === "top" ? Math.max(2, route.halfWidthM * yScale * 2) : 2;
           const labelPoint = route.points[Math.max(0, Math.floor((route.points.length - 1) / 2))];
           const labelX = labelPoint ? plotX(labelPoint.xM) : 0;
@@ -523,13 +568,73 @@ function ProfilePlot({
           const isTransition = route.branchType.toLowerCase() === "transition";
           return (
             <g key={`${mode}-${route.routeId}`}>
-              {mode === "top" ? (
+              {mode === "top" && showProtectionGeometry && assessmentSegments.length === 0 ? (
                 <path
                   d={d}
                   className="runway-profile-route-band"
                   style={{ strokeWidth: bandWidth }}
                 />
               ) : null}
+              {mode === "top" && showProtectionGeometry
+                ? assessmentSegments.map((segment, index) => {
+                    const segmentPath = plotPointPath(
+                      segment.points,
+                      domain,
+                      plotWidth,
+                      plotHeight,
+                      marginLeft,
+                      marginTop,
+                      mode,
+                    );
+                    return (
+                      <g key={`${route.routeId}-assessment-band-${segment.segmentId}-${index}`}>
+                        {segment.secondaryHalfWidthM ? (
+                          <path
+                            d={segmentPath}
+                            className="runway-profile-assessment-secondary-band"
+                            style={{
+                              strokeWidth: Math.max(2, segment.secondaryHalfWidthM * yScale * 2),
+                            }}
+                          />
+                        ) : null}
+                        <path
+                          d={segmentPath}
+                          className="runway-profile-assessment-primary-band"
+                          style={{
+                            strokeWidth: Math.max(2, segment.primaryHalfWidthM * yScale * 2),
+                          }}
+                        />
+                      </g>
+                    );
+                  })
+                : null}
+              {showVerticalReferenceGeometry
+                ? assessmentSegments
+                    .filter((segment) => segment.verticalReferenceSurfaceType)
+                    .map((segment, index) => {
+                      const segmentPath = plotPointPath(
+                        segment.points,
+                        domain,
+                        plotWidth,
+                        plotHeight,
+                        marginLeft,
+                        marginTop,
+                        mode,
+                      );
+                      return (
+                        <path
+                          key={`${route.routeId}-vertical-reference-${segment.segmentId}-${index}`}
+                          d={segmentPath}
+                          className={
+                            mode === "side"
+                              ? "runway-profile-vertical-reference-line"
+                              : "runway-profile-vertical-reference-plan-line"
+                          }
+                          data-segment-id={segment.segmentId}
+                        />
+                      );
+                    })
+                : null}
               <path
                 d={d}
                 className={`runway-profile-route-line ${
@@ -556,6 +661,25 @@ function ProfilePlot({
                   {routeLabel(route)}
                 </text>
               ) : null}
+              {showDebugGeometry
+                ? assessmentSegments.map((segment, index) => {
+                    const point = segment.points[Math.floor((segment.points.length - 1) / 2)];
+                    if (!point) return null;
+                    const textX = plotX(point.xM) + 6;
+                    const textY = plotY(mode === "side" ? point.zM : point.yM) - 10;
+                    return (
+                      <text
+                        key={`${route.routeId}-segment-debug-${segment.segmentId}-${index}`}
+                        x={textX}
+                        y={textY}
+                        className="runway-profile-segment-debug-label"
+                        data-segment-id={segment.segmentId}
+                      >
+                        {segmentDebugLabel(segment, index)}
+                      </text>
+                    );
+                  })
+                : null}
             </g>
           );
         })}
@@ -641,6 +765,7 @@ export default function RunwayTrajectoryProfilePanel() {
     setRunwayProfileOpen,
     setRunwayProfileViewMode,
     trajectoryDataSource,
+    procedureDisplayLevel,
   } = useApp();
   const profile = useRunwayTrajectoryProfile();
   const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>("nm");
@@ -753,6 +878,7 @@ export default function RunwayTrajectoryProfilePanel() {
               title="Vertical profile"
               subtitle="Runway-aligned x-z profile: follows the active procedure branch selected in the 3D procedure panel"
               mode="side"
+              displayLevel={procedureDisplayLevel}
               distanceUnit={distanceUnit}
               tracks={profile.aircraftTracks}
               plateRoutes={profile.plateRoutes}
@@ -764,6 +890,7 @@ export default function RunwayTrajectoryProfilePanel() {
               title="Plan view"
               subtitle="Runway-centered x-y plate: shows active procedure branches selected in the 3D procedure panel"
               mode="top"
+              displayLevel={procedureDisplayLevel}
               distanceUnit={distanceUnit}
               tracks={profile.aircraftTracks}
               plateRoutes={profile.plateRoutes}

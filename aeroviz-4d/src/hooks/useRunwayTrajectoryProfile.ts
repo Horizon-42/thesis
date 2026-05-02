@@ -54,7 +54,6 @@ export interface RunwayTrajectoryProfileState {
 interface LoadedProfileData {
   runwayFrame: RunwayFrame;
   plateRoutes: HorizontalPlateRoute[];
-  procedureNames: string[];
   sourceCycle: string | null;
 }
 
@@ -168,12 +167,9 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
           runwayFrame,
           selectedProfileRunwayIdent,
         );
-        const procedureNames = [...new Set(plateRoutes.map((route) => route.procedureName))];
-
         setLoadedData({
           runwayFrame,
           plateRoutes,
-          procedureNames,
           sourceCycle: procedureRenderData.index.sourceCycle ?? null,
         });
         setIsLoading(false);
@@ -279,6 +275,10 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
         : [],
     [activePlateRoutes, loadedData, selectedProfileRunwayIdent],
   );
+  const activeProcedureNames = useMemo(
+    () => [...new Set(activePlateRoutes.map((route) => route.procedureName))],
+    [activePlateRoutes],
+  );
 
   return {
     isLoading,
@@ -287,7 +287,7 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
     runwayFrame: loadedData?.runwayFrame ?? null,
     plateRoutes: activePlateRoutes,
     referenceMarks: activeReferenceMarks,
-    procedureNames: loadedData?.procedureNames ?? [],
+    procedureNames: activeProcedureNames,
     sourceCycle: loadedData?.sourceCycle ?? null,
     aircraftTracks,
   };

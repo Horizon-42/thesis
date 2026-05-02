@@ -296,6 +296,10 @@ function buildProjectedRoutePoints(
   }));
 }
 
+function renderBundleBranchKey(packageId: string, branchKey: string): string {
+  return `${packageId}:branch:${branchKey.toUpperCase()}`;
+}
+
 function pointInsidePlateRoute(
   point: Pick<RunwayProfilePoint, "xM" | "yM">,
   route: HorizontalPlateRoute,
@@ -394,7 +398,7 @@ export function buildHorizontalPlateRoutes(
     .filter((route) => isSelectedRnavRunwayFeature(route, normalizedRunway))
     .map((route) => ({
       routeId: route.routeId,
-      branchId: route.branchId,
+      branchId: renderBundleBranchKey(route.procedureUid, route.branchKey),
       procedureUid: route.procedureUid,
       branchKey: route.branchKey,
       procedureName: route.procedureName,
@@ -413,10 +417,6 @@ export function buildHorizontalPlateRoutes(
 function maxHalfWidthM(samples: Array<{ halfWidthNm: number }> | undefined): number | null {
   if (!samples || samples.length === 0) return null;
   return Math.max(...samples.map((sample) => sample.halfWidthNm)) * 1852;
-}
-
-function renderBundleBranchKey(packageId: string, branchKey: string): string {
-  return `${packageId}:branch:${branchKey.toUpperCase()}`;
 }
 
 export function attachRenderBundleAssessmentSegments(

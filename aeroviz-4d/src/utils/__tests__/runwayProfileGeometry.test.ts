@@ -213,6 +213,7 @@ describe("runwayProfileGeometry", () => {
     const outside = projectPositionToRunwayFrame(frame, -0.0045, 0.008, 220);
 
     expect(routes).toHaveLength(2);
+    expect(routes.map((route) => route.branchId)).toContain("TEST-R09-RW09:branch:R");
     expect(pointIsInsideHorizontalPlate(inside, routes)).toBe(true);
     expect(pointIsInsideHorizontalPlate(outside, routes)).toBe(false);
   });
@@ -325,7 +326,7 @@ describe("runwayProfileGeometry", () => {
       frame,
       "RW09",
     );
-    const finalRoute = enriched.find((route) => route.branchId === "branch:R");
+    const finalRoute = enriched.find((route) => route.branchId === "TEST-R09-RW09:branch:R");
 
     expect(finalRoute?.points).toHaveLength(3);
     expect(finalRoute?.assessmentSegments).toHaveLength(1);

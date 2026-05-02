@@ -5,6 +5,7 @@ import RunwayTrajectoryProfilePanel from "../RunwayTrajectoryProfilePanel";
 
 const appMock = vi.hoisted(() => ({
   runwayProfileViewMode: "side-xz" as "side-xz" | "top-xy",
+  procedureDisplayLevel: "PROTECTION" as "CORE" | "PROTECTION" | "ESTIMATED" | "DEBUG",
 }));
 
 const profileMock = vi.hoisted(() => ({
@@ -20,6 +21,7 @@ vi.mock("../../context/AppContext", () => ({
     setRunwayProfileOpen: vi.fn(),
     setRunwayProfileViewMode: vi.fn(),
     trajectoryDataSource: null,
+    procedureDisplayLevel: appMock.procedureDisplayLevel,
   }),
 }));
 
@@ -49,6 +51,22 @@ const shorterRoute = {
   points: [
     { xM: 20500, yM: 0, zM: 1200, fixIdent: "DABKE", role: "IF" },
     { xM: 0, yM: 0, zM: 0, fixIdent: "RW23R", role: "MAPt" },
+  ],
+};
+
+const assessedRoute = {
+  ...closeXRoute,
+  assessmentSegments: [
+    {
+      segmentId: "KRDU-R23RY-RW23R:branch:ABUTTS:segment:final:1",
+      primaryHalfWidthM: 370.4,
+      secondaryHalfWidthM: 740.8,
+      verticalReferenceSurfaceType: "LNAV_VNAV_OCS" as const,
+      points: [
+        { xM: 20500, yM: 0, zM: 950 },
+        { xM: 0, yM: 0, zM: 80 },
+      ],
+    },
   ],
 };
 
@@ -85,6 +103,7 @@ vi.mock("../../hooks/useRunwayTrajectoryProfile", async (importOriginal) => {
 describe("RunwayTrajectoryProfilePanel", () => {
   beforeEach(() => {
     appMock.runwayProfileViewMode = "side-xz";
+    appMock.procedureDisplayLevel = "PROTECTION";
     profileMock.state = makeProfileState([closeXRoute]);
   });
 
@@ -123,6 +142,40 @@ describe("RunwayTrajectoryProfilePanel", () => {
     expect(container.querySelectorAll('[data-fix-ident="WARMS"]')).toHaveLength(1);
     expect(container.textContent).toContain("BUTTS");
     expect(container.textContent).not.toContain("WARMS");
+  });
+
+  it("gates profile protection geometry by procedure display level", () => {
+    appMock.runwayProfileViewMode = "top-xy";
+    appMock.procedureDisplayLevel = "CORE";
+    const { container, rerender } = render(<RunwayTrajectoryProfilePanel />);
+
+    expect(container.querySelectorAll(".runway-profile-route-band")).toHaveLength(0);
+
+    appMock.procedureDisplayLevel = "PROTECTION";
+    rerender(<RunwayTrajectoryProfilePanel />);
+
+    expect(container.querySelectorAll(".runway-profile-route-band")).toHaveLength(1);
+  });
+
+  it("gates profile vertical references and segment debug labels by procedure display level", () => {
+    profileMock.state = makeProfileState([assessedRoute]);
+    appMock.procedureDisplayLevel = "PROTECTION";
+    const { container, rerender } = render(<RunwayTrajectoryProfilePanel />);
+
+    expect(container.querySelectorAll(".runway-profile-vertical-reference-line")).toHaveLength(0);
+    expect(container.querySelectorAll(".runway-profile-segment-debug-label")).toHaveLength(0);
+
+    appMock.procedureDisplayLevel = "ESTIMATED";
+    rerender(<RunwayTrajectoryProfilePanel />);
+
+    expect(container.querySelectorAll(".runway-profile-vertical-reference-line")).toHaveLength(1);
+    expect(container.querySelectorAll(".runway-profile-segment-debug-label")).toHaveLength(0);
+
+    appMock.procedureDisplayLevel = "DEBUG";
+    rerender(<RunwayTrajectoryProfilePanel />);
+
+    expect(container.querySelectorAll(".runway-profile-vertical-reference-line")).toHaveLength(1);
+    expect(container.querySelectorAll(".runway-profile-segment-debug-label")).toHaveLength(1);
   });
 
   it("switches profile distance axes from nautical miles to metres", () => {
