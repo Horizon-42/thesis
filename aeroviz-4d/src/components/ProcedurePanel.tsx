@@ -161,6 +161,10 @@ function buildGroups(branches: ProcedureBranchItem[]): RunwayGroup[] {
     });
 }
 
+function firstProcedureBranches(branches: ProcedureBranchItem[]): ProcedureBranchItem[] {
+  return buildGroups(branches)[0]?.procedures[0]?.branches ?? [];
+}
+
 export default function ProcedurePanel() {
   const {
     layers,
@@ -200,8 +204,17 @@ export default function ProcedurePanel() {
       .then((data) => {
         if (cancelled) return;
         const branchItems = branchItemsFromRenderData(data);
+        const firstProcedure = firstProcedureBranches(branchItems);
+        const firstProcedureBranchIds = new Set(firstProcedure.map((branch) => branch.branchId));
 
         setBranches(branchItems);
+        setProcedureBranchesVisible(
+          branchItems.map((branch) => branch.branchId),
+          false,
+        );
+        if (firstProcedure.length > 0) {
+          setProcedureBranchesVisible([...firstProcedureBranchIds], true);
+        }
         setGeometryStatus(protectedGeometryStatus(data));
         setSourceCycle(data.index.sourceCycle ?? null);
         setSourceAirport(data.index.airport || activeAirportCode);
@@ -226,7 +239,7 @@ export default function ProcedurePanel() {
     return () => {
       cancelled = true;
     };
-  }, [activeAirportCode]);
+  }, [activeAirportCode, setProcedureBranchesVisible]);
 
   const groups = useMemo(() => buildGroups(branches), [branches]);
   const totalWarnings = branches.reduce((sum, branch) => sum + branch.warnings.length, 0);
@@ -254,6 +267,10 @@ export default function ProcedurePanel() {
     }
     setSelectedProfileRunwayIdent(runwayIdent);
     setRunwayProfileOpen(true);
+  };
+
+  const openAllProcedures = () => {
+    setBranchesVisible(branches, true);
   };
 
   return (
@@ -288,6 +305,9 @@ export default function ProcedurePanel() {
         <span>{branches.length} branches</span>
         <span>{groups.length} runways</span>
         <span>{totalWarnings} warnings</span>
+        <button type="button" onClick={openAllProcedures} disabled={branches.length === 0}>
+          All On
+        </button>
       </div>
 
       {geometryStatus ? (

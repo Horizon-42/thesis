@@ -21,6 +21,7 @@ const {
   getSelectedProfileRunwayIdent,
   getRunwayProfileOpen,
   setProcedureAnnotationEnabled,
+  resetProcedureVisibility,
 } = vi.hoisted(() => {
   let procedureVisibility: Record<string, boolean> = {};
   let selectedProfileRunwayIdent: string | null = null;
@@ -47,6 +48,9 @@ const {
     }),
     setProcedureAnnotationEnabled: vi.fn(),
     getProcedureVisibility: () => procedureVisibility,
+    resetProcedureVisibility: () => {
+      procedureVisibility = {};
+    },
     getSelectedProfileRunwayIdent: () => selectedProfileRunwayIdent,
     getRunwayProfileOpen: () => isRunwayProfileOpen,
   };
@@ -265,6 +269,7 @@ const sampleDocuments = {
 describe("ProcedurePanel", () => {
   beforeEach(() => {
     fetchMock.mockReset();
+    resetProcedureVisibility();
     toggleLayer.mockClear();
     setProcedureBranchVisible.mockClear();
     setProcedureBranchesVisible.mockClear();
@@ -304,6 +309,18 @@ describe("ProcedurePanel", () => {
     expect(screen.getByText("Source gaps 2")).toBeTruthy();
     expect(screen.getByText("RNAV(GPS) Y RW05L")).toBeTruthy();
     expect(screen.getByText("AOTTOS")).toBeTruthy();
+    expect(setProcedureBranchesVisible).toHaveBeenCalledWith(
+      [
+        "KRDU-R05LY-RW05L:branch:R",
+        "KRDU-R05LY-RW05L:branch:AOTTOS",
+        "KRDU-R23RY-RW23R:branch:R",
+      ],
+      false,
+    );
+    expect(setProcedureBranchesVisible).toHaveBeenCalledWith(
+      ["KRDU-R05LY-RW05L:branch:R", "KRDU-R05LY-RW05L:branch:AOTTOS"],
+      true,
+    );
   });
 
   it("updates route visibility when branch checkbox changes", async () => {
@@ -321,6 +338,23 @@ describe("ProcedurePanel", () => {
 
     expect(setProcedureBranchVisible).toHaveBeenCalledWith(
       "KRDU-R05LY-RW05L:branch:AOTTOS",
+      false,
+    );
+  });
+
+  it("opens every procedure branch from the summary action", async () => {
+    render(<ProcedurePanel />);
+    await waitFor(() => expect(screen.getByText("RW05L")).toBeTruthy());
+
+    setProcedureBranchesVisible.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "All On" }));
+
+    expect(setProcedureBranchesVisible).toHaveBeenCalledWith(
+      [
+        "KRDU-R05LY-RW05L:branch:R",
+        "KRDU-R05LY-RW05L:branch:AOTTOS",
+        "KRDU-R23RY-RW23R:branch:R",
+      ],
       true,
     );
   });

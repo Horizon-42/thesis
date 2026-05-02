@@ -2449,3 +2449,26 @@
 
 ### Exact Next Recommended Step
 - Manually review label/popup density in the browser and decide whether Phase 2 should add anchored popup placement or label-density controls first.
+
+## 2026-05-02 14:09 CEST
+
+### Goal Of This Session
+- Reduce default 3D procedure clutter while keeping a fast way to restore all procedure branches.
+
+### Decisions Locked
+- On procedure data load, ProcedurePanel now explicitly hides all branches, then opens only the first procedure under the first sorted runway.
+- The first procedure is selected from the same runway/procedure grouping used by the panel UI, so default visibility follows the visible panel order.
+- Added an `All On` button in the ProcedurePanel summary to show every loaded branch.
+
+### Files Changed
+- `src/components/ProcedurePanel.tsx`
+- `src/components/__tests__/ProcedurePanel.test.tsx`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/components/__tests__/ProcedurePanel.test.tsx`
+- `npm run build`
+
+### Current Status
+- The 3D procedure layer no longer opens all default-visible straight-in procedures at startup.
+- Users can still turn on every procedure branch with one action.
