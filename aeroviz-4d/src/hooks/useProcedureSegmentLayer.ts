@@ -26,8 +26,11 @@ import {
 } from "../data/procedureAnnotations";
 import { isMissingJsonAsset } from "../utils/fetchJson";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
-import type { GeoPoint } from "../utils/procedureGeoMath";
-import type { VariableWidthRibbonGeometry } from "../utils/procedureSurfaceGeometry";
+import { distanceNm, type GeoPoint } from "../utils/procedureGeoMath";
+import {
+  buildVariableWidthRibbon,
+  type VariableWidthRibbonGeometry,
+} from "../utils/procedureSurfaceGeometry";
 
 const PROCEDURE_SEGMENT_ENTITY_PREFIX = "procedure-segment-";
 const CENTERLINE_COLOR = Cesium.Color.CYAN.withAlpha(0.95);
@@ -36,6 +39,7 @@ const SECONDARY_COLOR = Cesium.Color.YELLOW.withAlpha(0.1);
 const LNAV_VNAV_OCS_COLOR = Cesium.Color.LIME.withAlpha(0.2);
 const PRECISION_FINAL_SURFACE_COLOR = Cesium.Color.MAGENTA.withAlpha(0.18);
 const FINAL_VERTICAL_REFERENCE_COLOR = Cesium.Color.CYAN.withAlpha(0.88);
+const FINAL_VERTICAL_REFERENCE_BAND_COLOR = Cesium.Color.CYAN.withAlpha(0.16);
 const FINAL_ALTITUDE_CONSTRAINT_COLOR = Cesium.Color.LIME.withAlpha(0.98);
 const TURN_FILL_COLOR = Cesium.Color.ORANGE.withAlpha(0.22);
 const CONNECTOR_COLOR = Cesium.Color.ORANGE.withAlpha(0.32);
@@ -54,7 +58,9 @@ const OEA_HEIGHT_OFFSET_M = 18;
 const LNAV_VNAV_OCS_HEIGHT_OFFSET_M = 28;
 const PRECISION_FINAL_SURFACE_HEIGHT_OFFSET_M = 34;
 const FINAL_VERTICAL_REFERENCE_HEIGHT_OFFSET_M = 40;
+const FINAL_VERTICAL_REFERENCE_BAND_HEIGHT_OFFSET_M = 38;
 const FINAL_ALTITUDE_CONSTRAINT_HEIGHT_OFFSET_M = 46;
+const FINAL_VERTICAL_REFERENCE_HALF_WIDTH_NM = 0.06;
 const CONNECTOR_HEIGHT_OFFSET_M = 45;
 const MISSED_SURFACE_HEIGHT_OFFSET_M = 58;
 const CA_COURSE_GUIDE_HEIGHT_OFFSET_M = 82;
@@ -239,6 +245,33 @@ function finalVerticalReferencePoints(segmentBundle: ProcedureSegmentRenderBundl
       altM: altitudeFtMsl * 0.3048,
     };
   });
+}
+
+function buildFinalVerticalReferenceRibbon(
+  segmentId: string,
+  points: GeoPoint[],
+): VariableWidthRibbonGeometry | null {
+  if (points.length < 2) return null;
+  const stations: number[] = [];
+  let cumulativeNm = 0;
+  points.forEach((point, index) => {
+    if (index > 0) {
+      cumulativeNm += distanceNm(points[index - 1], point);
+    }
+    stations.push(cumulativeNm);
+  });
+
+  return buildVariableWidthRibbon(
+    `${segmentId}:final-vertical-reference-band`,
+    {
+      geoPositions: points,
+      worldPositions: [],
+      geodesicLengthNm: cumulativeNm,
+      isArc: false,
+    },
+    stations,
+    () => FINAL_VERTICAL_REFERENCE_HALF_WIDTH_NM,
+  );
 }
 
 function compactSegmentType(segmentType: string | undefined): string {
@@ -497,6 +530,7 @@ function addSegmentEntities(
   if (isFinalSegment(segmentBundle.segment)) {
     const verticalReferencePoints = finalVerticalReferencePoints(segmentBundle);
     if (verticalReferencePoints.length >= 2) {
+      const verticalReferenceBandId = `${baseId}-final-vertical-reference-band`;
       const verticalReferenceId = `${baseId}-final-vertical-reference`;
       const estimatedFromThreshold =
         segmentBundle.lnavVnavOcs === null &&
@@ -527,6 +561,21 @@ function addSegmentEntities(
           : segmentDiagnostics,
         sourceRefs: sourceRefsFromSegment(segmentBundle.segment),
       });
+      const referenceRibbon = buildFinalVerticalReferenceRibbon(
+        segmentBundle.segment.segmentId,
+        verticalReferencePoints,
+      );
+      addRibbonPolygon(
+        viewer,
+        verticalReferenceBandId,
+        `${segmentName} final vertical reference band`,
+        referenceRibbon ?? undefined,
+        procedureEntityShow(visible, verticalReferenceAnnotation, displayLevel),
+        FINAL_VERTICAL_REFERENCE_BAND_COLOR,
+        FINAL_VERTICAL_REFERENCE_BAND_HEIGHT_OFFSET_M,
+        verticalReferenceAnnotation,
+      );
+      ids.push(verticalReferenceBandId);
       addPolyline(
         viewer,
         verticalReferenceId,
