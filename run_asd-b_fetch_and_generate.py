@@ -21,10 +21,12 @@ from pathlib import Path
 
 
 def _has_flag(args: list[str], flag: str) -> bool:
+    """检查参数列表中是否已经显式提供某个 CLI 标志。"""
     return any(arg == flag or arg.startswith(f"{flag}=") for arg in args)
 
 
 def _extract_option(args: list[str], flag: str, default: str) -> str:
+    """从 CLI 参数列表中读取选项值，兼容 ``--flag value`` 和 ``--flag=value`` 两种写法。"""
     value = default
     for idx, arg in enumerate(args):
         if arg == flag and idx + 1 < len(args):
@@ -35,6 +37,7 @@ def _extract_option(args: list[str], flag: str, default: str) -> str:
 
 
 def _latest_matching_file(folder: Path, pattern: str, before: set[Path]) -> Path | None:
+    """在指定目录中按通配模式查找最新文件，优先返回本次流程新生成的文件。"""
     candidates = sorted(
         folder.glob(pattern),
         key=lambda p: p.stat().st_mtime,
@@ -48,22 +51,27 @@ def _latest_matching_file(folder: Path, pattern: str, before: set[Path]) -> Path
 
 
 def _airport_output_dir(output_root: Path, airport: str) -> Path:
+    """生成某个机场在 fetch 输出根目录下对应的子目录路径。"""
     return output_root / airport.lower()
 
 
 def _default_czml_output(aeroviz_root: Path, airport: str) -> Path:
+    """生成 AeroViz 前端默认读取的机场轨迹 CZML 输出路径。"""
     return aeroviz_root / "public" / "data" / "airports" / airport.upper() / "trajectories.czml"
 
 
 def _default_procedure_output(aeroviz_root: Path, airport: str) -> Path:
+    """生成 AeroViz 前端默认读取的机场程序 GeoJSON 输出路径。"""
     return aeroviz_root / "public" / "data" / "airports" / airport.upper() / "procedures.geojson"
 
 
 def _default_cifp_root(repo_root: Path) -> Path:
+    """返回仓库内默认使用的 CIFP 周期数据目录。"""
     return repo_root / "data" / "CIFP" / "CIFP_260319"
 
 
 def parse_args() -> tuple[argparse.Namespace, list[str]]:
+    """解析本包装脚本参数，并保留未知参数以继续转发给 OpenSky fetch 脚本。"""
     parser = argparse.ArgumentParser(
         description="Run fetch/normalization and CZML generation in one command",
         epilog=(
@@ -170,7 +178,7 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
 
 
 def _resolve_historical_window(args: argparse.Namespace) -> tuple[int, int] | None:
-    """Translate --hours-ago/--range-hours into (begin, end) unix seconds, or return None."""
+    """把 --hours-ago/--range-hours 转换为历史查询的 begin/end Unix 秒时间窗。"""
     if args.hours_ago is None and args.range_hours is None:
         return None
     if args.hours_ago is None or args.range_hours is None:
@@ -187,6 +195,7 @@ def _resolve_historical_window(args: argparse.Namespace) -> tuple[int, int] | No
 
 
 def main() -> None:
+    """编排完整流水线：获取或复用轨迹 JSON，生成 CZML，并按需生成程序资产。"""
     args, fetch_passthrough = parse_args()
 
     historical_window = _resolve_historical_window(args)

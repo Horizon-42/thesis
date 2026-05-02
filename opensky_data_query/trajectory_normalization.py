@@ -15,7 +15,7 @@ from typing import Any
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Great-circle distance in kilometers."""
+    """计算两组经纬度之间的大圆距离，单位为公里。"""
     r = 6371.0
     phi1 = math.radians(lat1)
     phi2 = math.radians(lat2)
@@ -26,7 +26,7 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def sanitize_callsign(value: str | None, fallback: str) -> str:
-    """Normalize callsign and provide a deterministic fallback."""
+    """清理航班呼号；呼号缺失时使用稳定的备用标识。"""
     text = (value or "").strip()
     return text if text else fallback.upper()
 
@@ -36,13 +36,15 @@ def track_to_raw_czml_flight(
     *,
     include_ground: bool,
 ) -> dict[str, Any] | None:
-    """Convert one OpenSky track into a raw (non-normalized) flight record."""
+    """将一条 OpenSky track 直接转换为 CZML 输入记录，不做进近过滤和高度修正。"""
     path = track.get("path") or []
     if not path:
         return None
 
     parsed: list[tuple[int, float, float, float, bool]] = []
     for wp in path:
+        # OpenSky path 点格式为 [time, lat, lon, baro_altitude, true_track, on_ground]。
+        # 这里丢弃字段不足、坐标缺失或高度无效的点，避免后续生成非法 CZML。
         if not wp or len(wp) < 6:
             continue
         t, lat, lon, alt_m, _trk, on_ground = wp
@@ -105,13 +107,15 @@ def track_to_czml_flight(
     approach_window_min: int,
     include_ground: bool,
 ) -> dict[str, Any] | None:
-    """Convert one OpenSky track payload into one normalized flight record."""
+    """将一条 OpenSky track 转换为经过机场相关性、进近窗口和高度处理后的 CZML 输入记录。"""
     path = track.get("path") or []
     if not path:
         return None
 
     parsed: list[tuple[int, float, float, float, bool, float]] = []
     for wp in path:
+        # 标准化字段顺序为 (time, lon, lat, altitude_m, on_ground, airport_distance_km)，
+        # 后续过滤逻辑都基于这个内部结构工作。
         if not wp or len(wp) < 6:
             continue
         t, lat, lon, alt_m, _trk, on_ground = wp
@@ -129,8 +133,7 @@ def track_to_czml_flight(
 
     parsed.sort(key=lambda x: x[0])
 
-    # Reject clearly non-physical trajectories (for example stale tracks with
-    # all sampled altitudes at 0 m and no meaningful vertical profile).
+    # 剔除明显不可用的轨迹，例如所有高度都为 0 m 的陈旧 track。
     if max(row[3] for row in parsed) <= 1.0:
         return None
 
@@ -138,7 +141,7 @@ def track_to_czml_flight(
         rows: list[tuple[int, float, float, float, bool, float]],
         bias: float,
     ) -> list[tuple[int, float, float, float, bool, float]]:
-        """Apply one constant altitude shift to every waypoint in the track."""
+        """对整条轨迹应用同一个高度偏置，保持垂直剖面形状不变。"""
         if abs(bias) <= 1e-12:
             return rows
 
@@ -147,7 +150,7 @@ def track_to_czml_flight(
             for t, lon, lat, alt, gnd, d in rows
         ]
 
-        # Invariant: correction must be uniform for all waypoints.
+        # 不变量：所有航点必须应用完全相同的高度修正量。
         for src, dst in zip(rows, shifted):
             delta = dst[3] - src[3]
             if abs(delta - bias) > 1e-9:
@@ -155,6 +158,7 @@ def track_to_czml_flight(
         return shifted
 
     def median(values: list[float]) -> float:
+        """返回数值列表的中位数，用于降低异常高度样本对偏置估计的影响。"""
         ordered = sorted(values)
         n = len(ordered)
         mid = n // 2
@@ -170,6 +174,7 @@ def track_to_czml_flight(
     approach_samples = 0
 
     def try_apply_bias(candidate_bias: float, source: str) -> None:
+        """在候选偏置没有超过安全阈值时记录本次高度修正方案。"""
         nonlocal bias_m, bias_applied, bias_source
         if abs(candidate_bias) <= max_altitude_bias_m:
             bias_m = candidate_bias
@@ -177,6 +182,7 @@ def track_to_czml_flight(
             bias_source = source
 
     if altitude_mode in {"touchdown-bias", "auto-bias"}:
+        # 首选真实落地点证据：机场附近 on_ground 点的中位高度应接近机场标高。
         touchdown_alts = [
             alt
             for _t, _lon, _lat, alt, gnd, d in parsed
@@ -188,6 +194,7 @@ def track_to_czml_flight(
             try_apply_bias(candidate_bias, source="touchdown")
 
     if (not bias_applied) and altitude_mode in {"approach-bias", "auto-bias"}:
+        # 如果 OpenSky 没有提供可靠的 on_ground 点，则用机场附近低高度样本保守估计偏置。
         low_alt_threshold = airport_elev_m + approach_alt_buffer_m
         near_low_alts = [
             alt
@@ -196,9 +203,7 @@ def track_to_czml_flight(
         ]
         approach_samples = len(near_low_alts)
         if approach_samples >= min_ground_samples:
-            # Fallback without touchdown evidence is intentionally conservative:
-            # use the lowest near-airport altitude as touchdown proxy and avoid
-            # downward corrections that can push paths under terrain.
+            # 没有落地点证据时只允许向上修正，避免把进近轨迹压到地形或跑道以下。
             reference_alt = min(near_low_alts)
             candidate_bias = airport_elev_m - reference_alt
             if candidate_bias >= 0.0:
@@ -208,7 +213,7 @@ def track_to_czml_flight(
         parsed = apply_uniform_altitude_bias(parsed, bias_m)
         bias_scope = "uniform-all-waypoints"
 
-    # Airport relevance: at least one point near target airport.
+    # 机场相关性：轨迹至少要有一个点进入目标机场匹配半径。
     min_dist = min(
         d
         for _t, _lon, _lat, _alt, _gnd, d in parsed
@@ -218,12 +223,14 @@ def track_to_czml_flight(
 
     closest_idx = min(range(len(parsed)), key=lambda i: parsed[i][5])
     closest_dist_km = parsed[closest_idx][5]
+    # 最终进近锚点必须足够接近机场，避免把只是路过附近的航班纳入展示。
     if closest_dist_km > max_end_distance_km:
         return None
 
     landing_reference_t: int | None = None
 
     if require_landing:
+        # 严格模式优先要求机场附近出现 on_ground，并确认此前存在空中点，避免纯地面滑行轨迹。
         touchdown_times = [
             t
             for t, _lon, _lat, _alt, gnd, d in parsed
@@ -240,6 +247,7 @@ def track_to_czml_flight(
                 landing_reference_t = first_touchdown_t
 
         if not landing_ok:
+            # 对缺失 on_ground 的数据，允许用“先高后低并接近机场”的模式识别进近结束点。
             low_alt_threshold = airport_elev_m + approach_alt_buffer_m
             near_low_points = [
                 (t, alt)
@@ -260,17 +268,17 @@ def track_to_czml_flight(
             return None
 
     if landing_reference_t is None:
-        # Fallback: use closest point to airport as approach anchor.
+        # 宽松模式没有明确落地参考时，用距离机场最近的点作为进近窗口锚点。
         landing_reference_t = parsed[closest_idx][0]
 
-    # Keep only the final approach window before landing/closest approach.
+    # 只保留落地或最近点之前的最后进近窗口，减少巡航和远端航段对可视化的干扰。
     windowed = parsed
     if approach_window_min > 0:
         window_sec = approach_window_min * 60
         window_start_t = landing_reference_t - window_sec
         windowed = [row for row in parsed if window_start_t <= row[0] <= landing_reference_t]
 
-        # If sampling is sparse, keep a bounded local segment near closest approach.
+        # 采样过稀时，从最近点附近截取一个有界局部片段，尽量保留可绘制的进近段。
         if len(windowed) < 2:
             local_start = max(0, closest_idx - 40)
             local_rows = parsed[local_start: closest_idx + 1]
@@ -282,7 +290,7 @@ def track_to_czml_flight(
         if len(windowed) < 2:
             return None
 
-    # Convert to waypoints and optionally remove ground points.
+    # 转换为生成器需要的航点结构，并按配置决定是否保留地面点。
     waypoints_abs: list[tuple[int, float, float, float]] = []
     for t, lon, lat, alt, gnd, _dist_km in windowed:
         if not include_ground and gnd:
@@ -334,7 +342,7 @@ def convert_tracks_to_czml_input(
     include_ground: bool,
     limit_flights: int,
 ) -> list[dict[str, Any]]:
-    """Convert OpenSky tracks into normalized CZML-input flight records."""
+    """批量转换 OpenSky tracks，输出去重后的标准化 CZML 输入航班列表。"""
     out: list[dict[str, Any]] = []
     used_ids: set[str] = set()
 
@@ -358,7 +366,7 @@ def convert_tracks_to_czml_input(
         if not item:
             continue
 
-        # Avoid duplicate IDs.
+        # CZML entity id 必须唯一；同一呼号出现多次时追加递增后缀。
         base = item["id"]
         if base in used_ids:
             suffix = 2
@@ -380,7 +388,7 @@ def convert_tracks_to_raw_czml_input(
     include_ground: bool,
     limit_flights: int,
 ) -> list[dict[str, Any]]:
-    """Convert OpenSky tracks into raw pass-through CZML-input flight records."""
+    """批量转换 OpenSky tracks，输出未标准化的 CZML 输入航班列表。"""
     out: list[dict[str, Any]] = []
     used_ids: set[str] = set()
 
@@ -392,7 +400,7 @@ def convert_tracks_to_raw_czml_input(
         if not item:
             continue
 
-        # Avoid duplicate IDs.
+        # CZML entity id 必须唯一；同一呼号出现多次时追加递增后缀。
         base = item["id"]
         if base in used_ids:
             suffix = 2

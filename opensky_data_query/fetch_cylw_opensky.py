@@ -71,6 +71,8 @@ AIRPORT_HINTS: dict[str, tuple[float, float, float]] = {
 
 @dataclass
 class OpenSkyClient:
+    """OpenSky API 客户端，封装匿名 GET、OAuth token 获取和认证请求。"""
+
     client_id: str | None = None
     client_secret: str | None = None
     timeout_sec: int = 30
@@ -81,9 +83,11 @@ class OpenSkyClient:
 
     @property
     def has_oauth(self) -> bool:
+        """判断当前客户端是否具备历史接口所需的 OAuth 凭据。"""
         return bool(self.client_id and self.client_secret)
 
     def _refresh_token(self) -> None:
+        """使用 client credentials flow 刷新 OpenSky OAuth access token。"""
         if not self.has_oauth:
             raise RuntimeError("OAuth credentials missing")
 
@@ -102,10 +106,11 @@ class OpenSkyClient:
 
         self._token = data["access_token"]
         expires_in = int(data.get("expires_in", 1800))
-        # Refresh slightly early.
+        # 提前刷新，避免请求发送时 token 刚好过期。
         self._token_expiry = time.time() + max(0, expires_in - 30)
 
     def _auth_headers(self) -> dict[str, str]:
+        """返回认证请求头；必要时用锁保护 token 刷新，避免并发重复刷新。"""
         if not self.has_oauth:
             return {}
         if not self._token or time.time() >= self._token_expiry:
@@ -115,6 +120,7 @@ class OpenSkyClient:
         return {"Authorization": f"Bearer {self._token}"}
 
     def get(self, endpoint: str, params: dict[str, Any] | None = None, authenticated: bool = False) -> Any:
+        """执行 OpenSky GET 请求并解析 JSON 响应。"""
         query = urlencode({k: v for k, v in (params or {}).items() if v is not None}, doseq=True)
         url = f"{API_ROOT}{endpoint}" + (f"?{query}" if query else "")
         req = Request(url, method="GET")
@@ -130,9 +136,8 @@ class OpenSkyClient:
                 return json.loads(raw) if raw else None
         except HTTPError as e:
             body = e.read().decode("utf-8", errors="replace")
-            # OpenSky convention: /flights/* and /tracks return 404 with an empty
-            # body (or "[]") to signal "no results". Treat that as None so callers
-            # can fall back to `or []` instead of raising.
+            # OpenSky 的 /flights/* 和 /tracks 在无结果时可能返回空 404；
+            # 这里把它视为 None，让调用方用 `or []` 继续处理。
             if e.code == 404 and body.strip() in ("", "[]", "{}"):
                 return None
             raise RuntimeError(f"HTTP {e.code} for {url}: {body[:300]}") from e
@@ -141,11 +146,7 @@ class OpenSkyClient:
 
 
 def load_credentials_file(path: Path) -> tuple[str | None, str | None]:
-    """Return (client_id, client_secret) parsed from a JSON credentials file.
-
-    Accepts both camelCase (clientId/clientSecret) — as exported by the OpenSky
-    web UI — and snake_case (client_id/client_secret) key styles.
-    """
+    """从 JSON 凭据文件读取 (client_id, client_secret)，兼容 camelCase 和 snake_case 键名。"""
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError as e:
@@ -162,7 +163,7 @@ def load_credentials_file(path: Path) -> tuple[str | None, str | None]:
 
 
 def parse_time_to_unix(value: str) -> int:
-    # Accept unix seconds or ISO timestamp.
+    """将 Unix 秒字符串或 ISO 时间字符串解析为 Unix 秒。"""
     if value.isdigit():
         return int(value)
     dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -172,15 +173,17 @@ def parse_time_to_unix(value: str) -> int:
 
 
 def default_outputs_root(script_path: Path) -> Path:
+    """返回脚本旁边的默认输出目录。"""
     return script_path.parent / "outputs"
 
 
 def default_aeroviz_root(script_path: Path) -> Path:
-    # sibling: thesis/opensky_data_query + thesis/aeroviz-4d
+    """返回与 opensky_data_query 同级的默认 aeroviz-4d 目录。"""
     return script_path.parent.parent / "aeroviz-4d"
 
 
 def resolve_airport_profile(airport: str, aeroviz_root: Path) -> tuple[float, float, float]:
+    """解析机场中心点和标高，优先读取 AeroViz airports.csv，缺失时使用内置提示。"""
     airport = airport.upper()
 
     csv_path = aeroviz_root / "public" / "data" / "common" / "airports.csv"
@@ -197,6 +200,7 @@ def resolve_airport_profile(airport: str, aeroviz_root: Path) -> tuple[float, fl
                     lat = row.get("latitude_deg")
                     lon = row.get("longitude_deg")
                     if lat and lon:
+                        # airports.csv 标高单位为英尺，下游归一化统一使用米。
                         elev_ft = row.get("elevation_ft")
                         elev_m = (float(elev_ft) * 0.3048) if elev_ft not in (None, "") else 0.0
                         return float(lat), float(lon), elev_m
@@ -216,6 +220,7 @@ def fetch_live_tracks(
     bbox: tuple[float, float, float, float],
     max_tracks: int,
 ) -> list[dict[str, Any]]:
+    """匿名 live 兜底路径：按机场附近 bbox 查询当前状态，再逐个拉取 track。"""
     lamin, lamax, lomin, lomax = bbox
     states_payload = client.get(
         "/states/all",
@@ -228,6 +233,7 @@ def fetch_live_tracks(
     tracks: list[dict[str, Any]] = []
 
     for row in states:
+        # /states/all 返回数组字段；这里只需要 icao24 去请求完整轨迹。
         if not row or len(row) < 2:
             continue
         icao24 = (row[0] or "").lower().strip()
@@ -244,7 +250,7 @@ def fetch_live_tracks(
             if track and track.get("path"):
                 tracks.append(track)
         except RuntimeError:
-            # Skip individual failures; keep the rest.
+            # 单架飞机失败不终止整个批次，保证匿名 live 模式尽可能返回可用样本。
             continue
 
         if len(tracks) >= max_tracks:
@@ -260,6 +266,7 @@ def fetch_recent_airport_tracks_anonymous(
     window_hours: int,
     max_tracks: int,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """匿名 live 主路径：查询近期航班列表，筛选目标机场到达航班并拉取轨迹。"""
     now = int(time.time())
     begin = now - max(1, window_hours) * 3600
 
@@ -276,13 +283,14 @@ def fetch_recent_airport_tracks_anonymous(
             arrivals.append(flight)
 
     arrivals.sort(key=lambda f: -(int(f.get("lastSeen") or 0)))
-    # Landing visualization: use arrivals only.
+    # 当前可视化关注落地进近，因此匿名航班列表只选目标机场 arrivals。
     related: list[dict[str, Any]] = arrivals
 
     tracks: list[dict[str, Any]] = []
     seen: set[tuple[str, int]] = set()
 
     for flight in related:
+        # OpenSky track 查询需要 icao24 和参考时间；使用 lastSeen 更贴近落地段。
         icao24 = (flight.get("icao24") or "").lower().strip()
         if not icao24:
             continue
@@ -303,6 +311,7 @@ def fetch_recent_airport_tracks_anonymous(
             if track and track.get("path"):
                 tracks.append(track)
         except RuntimeError:
+            # 某个候选航班 track 不可用时跳过，继续处理其他候选。
             continue
 
         if len(tracks) >= max_tracks:
@@ -320,6 +329,7 @@ def fetch_historical_tracks(
     max_tracks: int,
     track_workers: int,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """认证 historical 路径：查询指定时间窗的到达航班，并并发拉取每条轨迹。"""
     arrivals = client.get(
         "/flights/arrival",
         params={"airport": airport.upper(), "begin": begin, "end": end},
@@ -339,6 +349,7 @@ def fetch_historical_tracks(
         return arrivals, departures, []
 
     def fetch_one(index: int, flight: dict[str, Any]) -> tuple[int, dict[str, Any] | None]:
+        """拉取单个历史航班的 track，并保留原始顺序 index 供最终排序。"""
         icao24 = (flight.get("icao24") or "").lower()
         if not icao24:
             return index, None
@@ -361,6 +372,7 @@ def fetch_historical_tracks(
 
     worker_count = max(1, min(track_workers, len(candidates), max_tracks))
     if worker_count == 1:
+        # 串行路径便于调试，也可用于规避 OpenSky 限流或网络不稳定问题。
         for index, flight in enumerate(candidates, start=1):
             _idx, track = fetch_one(index, flight)
             if track:
@@ -380,6 +392,7 @@ def fetch_historical_tracks(
         f"[OpenSky] fetching historical tracks with {worker_count} workers...",
         flush=True,
     )
+    # 并发下载只用于 track 请求；最终仍按候选航班顺序排序，避免输出顺序随线程完成时间变化。
     executor = ThreadPoolExecutor(max_workers=worker_count)
     futures = {
         executor.submit(fetch_one, index, flight): index
@@ -398,6 +411,7 @@ def fetch_historical_tracks(
                 flush=True,
             )
             if len(tracks_with_index) >= max_tracks:
+                # 达到目标数量后取消尚未开始的请求，减少不必要的 API 调用。
                 for pending in futures:
                     if not pending.done():
                         pending.cancel()
@@ -411,6 +425,7 @@ def fetch_historical_tracks(
 
 
 def parse_args() -> argparse.Namespace:
+    """解析 OpenSky 下载与轨迹转换参数。"""
     parser = argparse.ArgumentParser(description="Download recent airport trajectories from OpenSky")
 
     parser.add_argument("--mode", choices=["auto", "live", "historical"], default="auto")
@@ -487,6 +502,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """执行下载或离线复用流程，写出 raw payload 和 CZML-input JSON。"""
     args = parse_args()
     script_path = Path(__file__).resolve()
 
@@ -497,6 +513,7 @@ def main() -> None:
     selected_airport = args.airport.upper()
 
     if args.input_raw_json:
+        # 离线模式复用既有 raw JSON，只重新执行 normalization/conversion。
         source_raw_path = Path(args.input_raw_json)
         if not source_raw_path.exists():
             raise RuntimeError(f"Input raw JSON not found: {source_raw_path}")
@@ -529,6 +546,7 @@ def main() -> None:
         client_id = args.client_id
         client_secret = args.client_secret
         if not (client_id and client_secret):
+            # 优先级：显式参数或环境变量 > credentials-file > 脚本旁 credentials.json。
             credentials_path = (
                 Path(args.credentials_file)
                 if args.credentials_file
@@ -549,9 +567,11 @@ def main() -> None:
         )
 
         if mode == "auto":
+            # 有 OAuth 时默认使用 historical，否则退回匿名 live。
             mode = "historical" if client.has_oauth else "live"
 
     payload: dict[str, Any] = {
+        # raw payload 保留足够上下文，便于后续离线复现同一次转换。
         "mode": mode,
         "airport": selected_airport,
         "airport_center": {"lat": airport_lat, "lon": airport_lon},
@@ -562,6 +582,7 @@ def main() -> None:
     }
 
     if source_raw_payload is not None:
+        # 保留原 raw 文件中的下载元数据，只更新本次转换相关字段。
         tracks = source_raw_payload.get("tracks") or []
         payload.update(
             {
@@ -592,7 +613,7 @@ def main() -> None:
             begin = parse_time_to_unix(args.begin)
             end = parse_time_to_unix(args.end)
         else:
-            # Default to previous UTC day [00:00, 24:00) for stable historical availability.
+            # 默认上一完整 UTC 日，避免“今天”尚未完全入库导致历史接口结果不稳定。
             now = datetime.now(timezone.utc)
             day_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc) - timedelta(days=1)
             begin = int(day_start.timestamp())
@@ -633,7 +654,7 @@ def main() -> None:
             airport_lon + args.bbox_lon_pad,
         )
 
-        # Fallback for sparse flights/all results.
+        # /flights/all 结果稀疏时，用 bbox states 查询补充仍在附近的飞机。
         if not tracks:
             tracks = fetch_live_tracks(
                 client,
@@ -651,6 +672,7 @@ def main() -> None:
                 for t in tracks
             }
             for track in extra_tracks:
+                # bbox 补充可能与航班列表路径重复，按 icao24/startTime 去重。
                 key = ((track.get("icao24") or "").lower().strip(), int(track.get("startTime") or 0))
                 if key in seen_keys:
                     continue
@@ -677,12 +699,14 @@ def main() -> None:
     match_radius_km = args.radius_km if args.radius_km is not None else args.match_radius_km
 
     if args.disable_normalization:
+        # 原始模式只转换字段结构，不做机场过滤、进近窗口截取或高度偏置。
         flights = convert_tracks_to_raw_czml_input(
             payload.get("tracks", []),
             include_ground=not args.exclude_ground,
             limit_flights=args.max_flights,
         )
     else:
+        # 标准模式输出更适合 AeroViz 展示的最终进近轨迹。
         flights = convert_tracks_to_czml_input(
             payload.get("tracks", []),
             airport_lat=airport_lat,
@@ -702,6 +726,7 @@ def main() -> None:
         )
 
         if (not args.allow_partial) and len(flights) < max(1, args.min_flights):
+            # 严格落地过滤样本过少时，用宽松进近过滤补足，保证可视化至少有数据可看。
             relaxed = convert_tracks_to_czml_input(
                 payload.get("tracks", []),
                 airport_lat=airport_lat,
