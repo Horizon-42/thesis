@@ -16,6 +16,7 @@ import { useApp } from "../context/AppContext";
 // ── Constants ────────────────────────────────────────────────────────────────
 const HDG_STEP   = 15;  // degrees per heading button click
 const PITCH_STEP = 10;  // degrees per pitch button click
+const SIDE_VIEW_PITCH_DEG = -8;
 
 // ── Compass SVG ──────────────────────────────────────────────────────────────
 // The outer ring (labels + ticks) is fixed; only the needle rotates.
@@ -162,6 +163,42 @@ export default function HUD() {
     });
   }
 
+  function cameraFocusPoint(): Cesium.Cartesian3 | null {
+    if (!viewer) return null;
+    const canvas = viewer.scene.canvas;
+    const center = new Cesium.Cartesian2(
+      canvas.clientWidth / 2,
+      canvas.clientHeight / 2,
+    );
+    const pickRay = viewer.camera.getPickRay(center);
+    if (!pickRay) return null;
+
+    const globePoint = viewer.scene.globe.pick(pickRay, viewer.scene);
+    if (globePoint) return globePoint;
+    return viewer.camera.pickEllipsoid(center, viewer.scene.globe.ellipsoid) ?? null;
+  }
+
+  function sideView() {
+    if (!viewer) return;
+    const c = viewer.camera;
+    const focus = cameraFocusPoint();
+    if (!focus) return;
+
+    const range = Cesium.Cartesian3.distance(c.positionWC, focus);
+    c.flyToBoundingSphere(
+      new Cesium.BoundingSphere(focus, 1),
+      {
+        duration: 0.45,
+        offset: new Cesium.HeadingPitchRange(
+          c.heading,
+          Cesium.Math.toRadians(SIDE_VIEW_PITCH_DEG),
+          range,
+        ),
+        easingFunction: Cesium.EasingFunction.CUBIC_OUT,
+      },
+    );
+  }
+
   // Zoom proportionally to current altitude so each click feels consistent
   // at any scale (100 m minimum to avoid floating-point weirdness).
   function zoom(dir: "in" | "out") {
@@ -261,6 +298,13 @@ export default function HUD() {
             title={`Tilt down ${PITCH_STEP}°`}
           >▼</button>
         </div>
+        <button
+          className="hud-btn hud-side-view-btn"
+          onClick={sideView}
+          title="Keep the current focus and switch to a shallow side-view pitch"
+        >
+          Side View
+        </button>
       </div>
 
       {/* ── Altitude / zoom ──────────────────────────────────────────────── */}

@@ -42,3 +42,10 @@
 - Change: added a display-level notice that reports when built GPA/OCS/CA or debug/status geometry is hidden by the current selector.
 - Tests: `npm test -- --run src/components/__tests__/ProcedurePanel.test.tsx`; `npm run build`; full verification with `npm test -- --run`, `npm run build`, and `conda run -n aviation /Users/liudongxu/opt/miniconda3/envs/aviation/bin/python3.13 -m pytest aeroviz-4d/python/tests -q`.
 - Commit: this entry is included in `Show hidden procedure display level notice`.
+
+## 2026-05-02 Step 7 - Camera side view control
+
+- Scope: add a camera-control shortcut for viewing vertical procedure elements such as OCS surfaces from the side.
+- Change: added a `Side View` HUD button that picks the current screen-center focus point, preserves heading and range, and changes only the focus-relative pitch to a shallow side-view angle.
+- Tests: `npm run build`.
+- Commit: this entry is included in `Add camera side view control`.
