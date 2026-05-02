@@ -1736,3 +1736,35 @@
 
 ### Exact Next Recommended Step
 - Expose CA centerlines in render bundles and render them separately before using them to backfill missed segment geometry.
+
+## 2026-05-02 11:50 CEST
+
+### Goal Of This Session
+- Expose estimated CA centerlines through render bundles and protected 3D mode.
+
+### Decisions Locked
+- Added `missedCaCenterlines` to `ProcedureSegmentRenderBundle`.
+- `buildProcedureRenderBundle` now builds CA centerlines from `missedCaEndpoints`.
+- `useProcedureSegmentLayer` renders estimated CA centerlines as independent `-ca-centerline-` polylines.
+- Segment kernel geometry is still unchanged; this is separate estimated CA geometry, not yet a replacement for generic segment centerline/envelope construction.
+
+### Files Changed
+- `src/data/procedureRenderBundle.ts`
+- `src/data/__tests__/procedureRenderBundle.test.ts`
+- `src/hooks/useProcedureSegmentLayer.ts`
+- `src/hooks/__tests__/useProcedureSegmentLayer.test.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/data/__tests__/procedureRenderBundle.test.ts src/hooks/__tests__/useProcedureSegmentLayer.test.ts`
+- `npm run build`
+
+### Current Status
+- CA estimated endpoint and centerline are both visible in render bundles and protected 3D mode.
+
+### Known Blockers
+- CA segment envelope/surface construction remains separate and incomplete.
+- The segment geometry kernel still reports CA as unsupported for core centerline construction.
+
+### Exact Next Recommended Step
+- Backfill CA-only missed segment geometry from estimated CA centerlines, filtering obsolete unsupported-CA diagnostics while preserving estimated-status diagnostics.

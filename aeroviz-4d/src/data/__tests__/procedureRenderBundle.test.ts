@@ -686,6 +686,14 @@ describe("procedure render bundle", () => {
       distanceNm: 1,
       constructionStatus: "ESTIMATED_ENDPOINT",
     });
+    expect(segmentBundle.missedCaCenterlines).toHaveLength(1);
+    expect(segmentBundle.missedCaCenterlines[0]).toMatchObject({
+      legId: "leg:R:035",
+      sourceEndpointStatus: "ESTIMATED_ENDPOINT",
+      constructionStatus: "ESTIMATED_CENTERLINE",
+      isArc: false,
+    });
+    expect(segmentBundle.missedCaCenterlines[0].geoPositions.length).toBeGreaterThan(2);
     expect(bundle.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

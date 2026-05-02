@@ -30,10 +30,12 @@ import {
   type LnavFinalOeaGeometry,
 } from "../utils/procedureSurfaceGeometry";
 import {
+  buildMissedCaCenterlines,
   buildMissedCaEndpoints,
   buildMissedCourseGuides,
   buildMissedSectionSurface,
   buildMissedTurnDebugPoint,
+  type MissedCaCenterlineGeometry,
   type MissedCaEndpointGeometry,
   type MissedCourseGuideGeometry,
   type MissedSectionSurfaceGeometry,
@@ -79,6 +81,7 @@ export interface ProcedureSegmentRenderBundle {
   missedSectionSurface: MissedSectionSurfaceGeometry | null;
   missedCourseGuides: MissedCourseGuideGeometry[];
   missedCaEndpoints: MissedCaEndpointGeometry[];
+  missedCaCenterlines: MissedCaCenterlineGeometry[];
   missedTurnDebugPoint: MissedTurnDebugPointGeometry | null;
   diagnostics: BuildDiagnostic[];
 }
@@ -186,6 +189,10 @@ export function buildProcedureRenderBundle(
         segmentDiagnostics.push(...missedCourseGuideResult.diagnostics);
         const missedCaEndpointResult = buildMissedCaEndpoints(segment, segmentLegs, fixes);
         segmentDiagnostics.push(...missedCaEndpointResult.diagnostics);
+        const missedCaCenterlines = buildMissedCaCenterlines(
+          missedCaEndpointResult.geometries,
+          { samplingStepNm: ctx.samplingStepNm },
+        );
         const missedTurnDebugResult = buildMissedTurnDebugPoint(segment, segmentLegs, fixes);
         segmentDiagnostics.push(...missedTurnDebugResult.diagnostics);
         diagnostics.push(...segmentDiagnostics);
@@ -200,6 +207,7 @@ export function buildProcedureRenderBundle(
           missedSectionSurface: missedSurfaceResult.geometry,
           missedCourseGuides: missedCourseGuideResult.geometries,
           missedCaEndpoints: missedCaEndpointResult.geometries,
+          missedCaCenterlines,
           missedTurnDebugPoint: missedTurnDebugResult.geometry,
           diagnostics: segmentDiagnostics,
         };

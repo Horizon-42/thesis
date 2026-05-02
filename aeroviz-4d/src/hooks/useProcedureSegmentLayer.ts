@@ -21,6 +21,7 @@ const CONNECTOR_COLOR = Cesium.Color.ORANGE.withAlpha(0.32);
 const CONNECTOR_LINE_COLOR = Cesium.Color.ORANGE.withAlpha(0.92);
 const MISSED_SURFACE_COLOR = Cesium.Color.YELLOW.withAlpha(0.24);
 const CA_COURSE_GUIDE_COLOR = Cesium.Color.ORANGE.withAlpha(0.98);
+const CA_CENTERLINE_COLOR = Cesium.Color.ORANGE.withAlpha(0.86);
 const TURNING_MISSED_DEBUG_COLOR = Cesium.Color.YELLOW.withAlpha(0.98);
 const FINAL_SURFACE_STATUS_COLOR = Cesium.Color.ORANGE.withAlpha(0.9);
 const CA_ENDPOINT_COLOR = Cesium.Color.ORANGE.withAlpha(0.98);
@@ -30,6 +31,7 @@ const OEA_HEIGHT_OFFSET_M = 18;
 const CONNECTOR_HEIGHT_OFFSET_M = 45;
 const MISSED_SURFACE_HEIGHT_OFFSET_M = 58;
 const CA_COURSE_GUIDE_HEIGHT_OFFSET_M = 82;
+const CA_CENTERLINE_HEIGHT_OFFSET_M = 88;
 const TURNING_MISSED_DEBUG_HEIGHT_OFFSET_M = 96;
 const FINAL_SURFACE_STATUS_HEIGHT_OFFSET_M = 110;
 const CA_ENDPOINT_HEIGHT_OFFSET_M = 92;
@@ -365,6 +367,20 @@ function addSegmentEntities(
       CA_COURSE_GUIDE_COLOR,
     );
     ids.push(guideId);
+  });
+
+  segmentBundle.missedCaCenterlines.forEach((centerline) => {
+    const centerlineId = `${baseId}-ca-centerline-${centerline.legId}`;
+    addPolyline(
+      viewer,
+      centerlineId,
+      `${segmentName} CA estimated centerline`,
+      centerline.geoPositions.map((point) => elevatedPoint(point, CA_CENTERLINE_HEIGHT_OFFSET_M)),
+      visible,
+      4,
+      CA_CENTERLINE_COLOR,
+    );
+    ids.push(centerlineId);
   });
 
   segmentBundle.missedCaEndpoints.forEach((endpoint) => {
