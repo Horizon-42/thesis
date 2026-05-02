@@ -1288,3 +1288,42 @@
 
 ### Exact Next Recommended Step
 - Add a lightweight 2D/3D debug marker for turning missed section 2 anchor points without constructing wind spiral geometry.
+
+## 2026-05-02 04:30 CEST
+
+### Goal Of This Session
+- Add a non-misleading turning missed approach debug anchor.
+
+### Decisions Locked
+- Added `MissedTurnDebugPointGeometry` for `MISSED_S2` segments flagged as turning missed approach.
+- The debug point records:
+  - anchor fix id;
+  - trigger leg types such as `HM`;
+  - `DEBUG_MARKER_ONLY` construction status;
+  - positioned geo/world point.
+- Render bundles now expose `missedTurnDebugPoint`.
+- 3D protected mode renders the anchor as an independent `-turning-missed-anchor` point entity.
+- No TIA, wind spiral, early/late turn baseline, or protected surface is implied.
+
+### Files Changed
+- `src/utils/procedureMissedGeometry.ts`
+- `src/utils/__tests__/procedureMissedGeometry.test.ts`
+- `src/data/procedureRenderBundle.ts`
+- `src/data/__tests__/procedureRenderBundle.test.ts`
+- `src/hooks/useProcedureSegmentLayer.ts`
+- `src/hooks/__tests__/useProcedureSegmentLayer.test.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/utils/__tests__/procedureMissedGeometry.test.ts src/data/__tests__/procedureRenderBundle.test.ts src/hooks/__tests__/useProcedureSegmentLayer.test.ts`
+- `npm run build`
+
+### Current Status
+- Turning missed approach section 2 now has schema flagging, Data Notes diagnostics, and a 3D debug anchor.
+
+### Known Blockers
+- Procedure Details 2D does not yet draw a distinct turning-missed anchor beyond the existing S1/S2 and HM markers.
+- Full turning missed protected geometry remains future work.
+
+### Exact Next Recommended Step
+- Run a final full validation pass, then summarize the completed staged work and remaining v3 gaps.

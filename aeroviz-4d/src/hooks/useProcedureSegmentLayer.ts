@@ -21,12 +21,14 @@ const CONNECTOR_COLOR = Cesium.Color.ORANGE.withAlpha(0.32);
 const CONNECTOR_LINE_COLOR = Cesium.Color.ORANGE.withAlpha(0.92);
 const MISSED_SURFACE_COLOR = Cesium.Color.YELLOW.withAlpha(0.24);
 const CA_COURSE_GUIDE_COLOR = Cesium.Color.ORANGE.withAlpha(0.98);
+const TURNING_MISSED_DEBUG_COLOR = Cesium.Color.YELLOW.withAlpha(0.98);
 const OUTLINE_COLOR = Cesium.Color.CYAN.withAlpha(0.28);
 const ENVELOPE_HEIGHT_OFFSET_M = 8;
 const OEA_HEIGHT_OFFSET_M = 18;
 const CONNECTOR_HEIGHT_OFFSET_M = 45;
 const MISSED_SURFACE_HEIGHT_OFFSET_M = 58;
 const CA_COURSE_GUIDE_HEIGHT_OFFSET_M = 82;
+const TURNING_MISSED_DEBUG_HEIGHT_OFFSET_M = 96;
 
 function elevatedPoint(point: GeoPoint, altitudeOffsetM: number): GeoPoint {
   return { ...point, altM: point.altM + altitudeOffsetM };
@@ -60,6 +62,30 @@ function addPolyline(
       ),
       width,
       material,
+    },
+  });
+}
+
+function addPoint(
+  viewer: Cesium.Viewer,
+  id: string,
+  name: string,
+  point: GeoPoint,
+  visible: boolean,
+  pixelSize: number,
+  color: Cesium.Color,
+  altitudeOffsetM = 0,
+): void {
+  viewer.entities.add({
+    id,
+    name,
+    show: visible,
+    position: geoToCartesian(point, altitudeOffsetM),
+    point: {
+      pixelSize,
+      color,
+      outlineColor: OUTLINE_COLOR,
+      outlineWidth: 2,
     },
   });
 }
@@ -310,6 +336,21 @@ function addSegmentEntities(
     );
     ids.push(guideId);
   });
+
+  if (segmentBundle.missedTurnDebugPoint) {
+    const turnDebugId = `${baseId}-turning-missed-anchor`;
+    addPoint(
+      viewer,
+      turnDebugId,
+      `${segmentName} turning missed debug anchor`,
+      segmentBundle.missedTurnDebugPoint.geoPosition,
+      visible,
+      12,
+      TURNING_MISSED_DEBUG_COLOR,
+      TURNING_MISSED_DEBUG_HEIGHT_OFFSET_M,
+    );
+    ids.push(turnDebugId);
+  }
 
   return ids;
 }

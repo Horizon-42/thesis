@@ -5,7 +5,11 @@ import type {
   ProcedureSegment,
 } from "../../data/procedurePackage";
 import type { SegmentGeometryBundle } from "../procedureSegmentGeometry";
-import { buildMissedCourseGuides, buildMissedSectionSurface } from "../procedureMissedGeometry";
+import {
+  buildMissedCourseGuides,
+  buildMissedSectionSurface,
+  buildMissedTurnDebugPoint,
+} from "../procedureMissedGeometry";
 
 const missedSegment: ProcedureSegment = {
   segmentId: "segment:missed-s1",
@@ -170,5 +174,36 @@ describe("procedure missed geometry", () => {
         severity: "WARN",
       }),
     ]);
+  });
+
+  it("builds a debug-only turning missed anchor for flagged section two segments", () => {
+    const turningSegment: ProcedureSegment = {
+      ...missedSegment,
+      segmentId: "segment:missed-s2",
+      segmentType: "MISSED_S2",
+      startFixId: "fix:RW",
+      legIds: ["leg:missed:hm"],
+      constructionFlags: { isTurningMissedApproach: true },
+    };
+    const hmLeg: ProcedurePackageLeg = {
+      ...caLeg,
+      legId: "leg:missed:hm",
+      segmentId: "segment:missed-s2",
+      legType: "HM",
+      rawPathTerminator: "HM",
+      outboundCourseDeg: undefined,
+    };
+
+    const result = buildMissedTurnDebugPoint(turningSegment, [hmLeg], fixes);
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.geometry).toMatchObject({
+      segmentId: "segment:missed-s2",
+      debugType: "TURNING_MISSED_ANCHOR",
+      anchorFixId: "fix:RW",
+      triggerLegTypes: ["HM"],
+      constructionStatus: "DEBUG_MARKER_ONLY",
+      geoPosition: expect.objectContaining({ lonDeg: -78.8, latDeg: 35.87 }),
+    });
   });
 });

@@ -213,6 +213,15 @@ const renderBundleData = {
                   worldPositions: [],
                 },
               ],
+              missedTurnDebugPoint: {
+                segmentId: "segment:final",
+                debugType: "TURNING_MISSED_ANCHOR",
+                anchorFixId: "fix:RW",
+                triggerLegTypes: ["HM"],
+                constructionStatus: "DEBUG_MARKER_ONLY",
+                geoPosition: geoPositions[1],
+                worldPosition: {},
+              },
             },
           ],
         },
@@ -246,6 +255,7 @@ describe("useProcedureSegmentLayer", () => {
     expect(entities.some((entity) => String(entity.id).includes("-connector-primary-boundary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-missed-surface-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-ca-course-guide-"))).toBe(true);
+    expect(entities.some((entity) => String(entity.id).includes("-turning-missed-anchor"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-turn-1-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes(":junction:"))).toBe(true);
   });

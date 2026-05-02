@@ -44,6 +44,16 @@ export interface MissedCourseGuideGeometry {
   worldPositions: [CartesianPoint, CartesianPoint];
 }
 
+export interface MissedTurnDebugPointGeometry {
+  segmentId: string;
+  debugType: "TURNING_MISSED_ANCHOR";
+  anchorFixId: string;
+  triggerLegTypes: string[];
+  constructionStatus: "DEBUG_MARKER_ONLY";
+  geoPosition: GeoPoint;
+  worldPosition: CartesianPoint;
+}
+
 function diagnostic(
   segment: ProcedureSegment,
   message: string,
@@ -204,4 +214,55 @@ export function buildMissedCourseGuides(
   });
 
   return { geometries, diagnostics };
+}
+
+export function buildMissedTurnDebugPoint(
+  segment: ProcedureSegment,
+  legs: ProcedurePackageLeg[],
+  fixes: Map<string, ProcedurePackageFix>,
+): { geometry: MissedTurnDebugPointGeometry | null; diagnostics: BuildDiagnostic[] } {
+  if (segment.segmentType !== "MISSED_S2" || !segment.constructionFlags.isTurningMissedApproach) {
+    return { geometry: null, diagnostics: [] };
+  }
+
+  const segmentLegs = legs.filter((leg) => leg.segmentId === segment.segmentId);
+  const triggerLegTypes = [
+    ...new Set(
+      segmentLegs
+        .map((leg) => leg.legType)
+        .filter((legType) => legType === "HM" || legType === "HA" || legType === "HF" || legType === "RF"),
+    ),
+  ];
+  const anchorFixId =
+    segment.startFixId ??
+    segmentLegs.find((leg) => leg.startFixId)?.startFixId ??
+    segmentLegs.find((leg) => leg.endFixId)?.endFixId ??
+    null;
+  const anchorFix = anchorFixId ? fixes.get(anchorFixId) : undefined;
+  const anchor = anchorFix ? pointFromFix(anchorFix) : null;
+
+  if (!anchorFixId || !anchor) {
+    return {
+      geometry: null,
+      diagnostics: [
+        diagnostic(
+          segment,
+          `${segment.segmentId}: turning missed debug anchor requires a positioned section 2 start fix.`,
+        ),
+      ],
+    };
+  }
+
+  return {
+    geometry: {
+      segmentId: segment.segmentId,
+      debugType: "TURNING_MISSED_ANCHOR",
+      anchorFixId,
+      triggerLegTypes,
+      constructionStatus: "DEBUG_MARKER_ONLY",
+      geoPosition: anchor,
+      worldPosition: toCartesian(anchor),
+    },
+    diagnostics: [],
+  };
 }

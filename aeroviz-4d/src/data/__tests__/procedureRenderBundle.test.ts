@@ -489,6 +489,49 @@ const missedCaDocument: ProcedureDetailDocument = {
   ],
 };
 
+const missedTurningDocument: ProcedureDetailDocument = {
+  ...missedDfDocument,
+  procedureUid: "KRDU-MISSEDTURN-RW05L",
+  procedure: {
+    ...missedDfDocument.procedure,
+    procedureIdent: "MISSEDTURN",
+    chartName: "RNAV MISSED TURN TEST",
+  },
+  fixes: [
+    ...missedDfDocument.fixes,
+    {
+      fixId: "fix:HOLD",
+      ident: "HOLD",
+      kind: "missed_hold_fix",
+      position: { lon: -78.7, lat: 35.95 },
+      elevationFt: 3000,
+      roleHints: ["MAHF"],
+      sourceRefs: [],
+    },
+  ],
+  branches: [
+    {
+      ...missedDfDocument.branches[0],
+      legs: [
+        missedDfDocument.branches[0].legs[0],
+        {
+          ...missedDfDocument.branches[0].legs[0],
+          legId: "leg:R:050",
+          sequence: 50,
+          path: {
+            pathTerminator: "HM",
+            constructionMethod: "hold_to_manual",
+            startFixRef: "fix:MIS1",
+            endFixRef: "fix:HOLD",
+          },
+          termination: { kind: "fix", fixRef: "fix:HOLD" },
+          roleAtEnd: "MAHF",
+        },
+      ],
+    },
+  ],
+};
+
 describe("procedure render bundle", () => {
   beforeEach(() => {
     vi.mocked(fetchJson).mockReset();
@@ -600,6 +643,25 @@ describe("procedure render bundle", () => {
         }),
       ]),
     );
+  });
+
+  it("exports turning missed debug anchors through render bundles", () => {
+    const pkg = normalizeProcedurePackage(missedTurningDocument);
+    const bundle = buildProcedureRenderBundle(pkg, {
+      samplingStepNm: 0.5,
+      enableDebugPrimitives: false,
+    });
+    const missedS2Bundle = bundle.branchBundles[0].segmentBundles.find(
+      (segmentBundle) => segmentBundle.segment.segmentType === "MISSED_S2",
+    );
+
+    expect(missedS2Bundle?.segment.constructionFlags.isTurningMissedApproach).toBe(true);
+    expect(missedS2Bundle?.missedTurnDebugPoint).toMatchObject({
+      debugType: "TURNING_MISSED_ANCHOR",
+      anchorFixId: "fix:MIS1",
+      triggerLegTypes: ["HM"],
+      constructionStatus: "DEBUG_MARKER_ONLY",
+    });
   });
 
   it("loads procedure details through the package normalizer and render bundle builder", async () => {
