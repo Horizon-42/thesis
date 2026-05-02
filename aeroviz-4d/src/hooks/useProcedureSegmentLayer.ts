@@ -41,6 +41,7 @@ const PRECISION_FINAL_SURFACE_COLOR = Cesium.Color.MAGENTA.withAlpha(0.18);
 const FINAL_VERTICAL_REFERENCE_COLOR = Cesium.Color.CYAN.withAlpha(0.88);
 const FINAL_VERTICAL_REFERENCE_BAND_COLOR = Cesium.Color.CYAN.withAlpha(0.16);
 const FINAL_ALTITUDE_CONSTRAINT_COLOR = Cesium.Color.LIME.withAlpha(0.98);
+const ALTITUDE_CONSTRAINT_LINK_COLOR = Cesium.Color.LIME.withAlpha(0.48);
 const TURN_FILL_COLOR = Cesium.Color.ORANGE.withAlpha(0.22);
 const CONNECTOR_COLOR = Cesium.Color.ORANGE.withAlpha(0.32);
 const CONNECTOR_LINE_COLOR = Cesium.Color.ORANGE.withAlpha(0.92);
@@ -60,6 +61,7 @@ const PRECISION_FINAL_SURFACE_HEIGHT_OFFSET_M = 34;
 const FINAL_VERTICAL_REFERENCE_HEIGHT_OFFSET_M = 40;
 const FINAL_VERTICAL_REFERENCE_BAND_HEIGHT_OFFSET_M = 38;
 const FINAL_ALTITUDE_CONSTRAINT_HEIGHT_OFFSET_M = 46;
+const ALTITUDE_CONSTRAINT_LINK_HEIGHT_OFFSET_M = 12;
 const FINAL_VERTICAL_REFERENCE_DEFAULT_HALF_WIDTH_NM = 0.15;
 const FINAL_VERTICAL_REFERENCE_PROTECTION_WIDTH_RATIO = 0.5;
 const CONNECTOR_HEIGHT_OFFSET_M = 45;
@@ -659,6 +661,21 @@ function addSegmentEntities(
         constraintAnnotation,
       );
       ids.push(constraintId);
+      const linkId = `${constraintId}-link`;
+      addPolyline(
+        viewer,
+        linkId,
+        `${segmentName} altitude constraint link ${endFix.ident}`,
+        [
+          elevatedPoint(point, ALTITUDE_CONSTRAINT_LINK_HEIGHT_OFFSET_M),
+          elevatedPoint(point, FINAL_ALTITUDE_CONSTRAINT_HEIGHT_OFFSET_M),
+        ],
+        procedureEntityShow(visible, constraintAnnotation, displayLevel),
+        2,
+        ALTITUDE_CONSTRAINT_LINK_COLOR,
+        constraintAnnotation,
+      );
+      ids.push(linkId);
       const constraintLabelId = addAnnotationLabel(
         viewer,
         constraintAnnotation,

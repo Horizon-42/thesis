@@ -225,6 +225,8 @@ describe("RunwayTrajectoryProfilePanel", () => {
     const { container } = render(<RunwayTrajectoryProfilePanel />);
 
     expect(container.querySelectorAll(".runway-profile-altitude-constraint-point")).toHaveLength(2);
+    expect(container.querySelectorAll(".runway-profile-altitude-constraint-station-line")).toHaveLength(2);
+    expect(container.querySelectorAll(".runway-profile-altitude-constraint-link")).toHaveLength(2);
     expect(container.textContent).toContain("BUTTS 5,200 ft");
     expect(container.textContent).toContain("DABKE 3,900 ft");
     expect(container.textContent).not.toContain("WARMS 1,500 ft");

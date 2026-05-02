@@ -495,10 +495,18 @@ describe("useProcedureSegmentLayer", () => {
     ).toBeGreaterThan(0.003);
     expect(entities.some((entity) => String(entity.id).includes("-altitude-leg:final:faf"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-altitude-leg:transition:init"))).toBe(true);
+    expect(entities.some((entity) => String(entity.id).includes("-altitude-leg:transition:init-link"))).toBe(true);
     expect(
       entities.some(
         (entity) =>
           String(entity.id).includes("-altitude-leg:transition:init") &&
+          entity.__aeroVizProcedureAnnotation?.kind === "ALTITUDE_CONSTRAINT",
+      ),
+    ).toBe(true);
+    expect(
+      entities.some(
+        (entity) =>
+          String(entity.id).includes("-altitude-leg:transition:init-link") &&
           entity.__aeroVizProcedureAnnotation?.kind === "ALTITUDE_CONSTRAINT",
       ),
     ).toBe(true);

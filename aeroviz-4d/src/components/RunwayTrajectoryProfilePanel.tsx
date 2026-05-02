@@ -803,6 +803,20 @@ function ProfilePlot({
                       const label = `${point.fixIdent} ${Math.round(constraintFt).toLocaleString()} ft`;
                       return (
                         <g key={`${route.routeId}-altitude-constraint-${point.fixIdent}-${index}`}>
+                          <line
+                            x1={cx}
+                            y1={marginTop}
+                            x2={cx}
+                            y2={marginTop + plotHeight}
+                            className="runway-profile-altitude-constraint-station-line"
+                          />
+                          <line
+                            x1={cx}
+                            y1={plotY(0)}
+                            x2={cx}
+                            y2={cy}
+                            className="runway-profile-altitude-constraint-link"
+                          />
                           <circle
                             cx={cx}
                             cy={cy}
