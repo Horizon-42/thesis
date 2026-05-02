@@ -251,7 +251,8 @@ export interface BuildDiagnostic {
     | "UNSUPPORTED_LEG_TYPE"
     | "TURN_VISUAL_FILL_ONLY"
     | "TURNING_MISSED_UNIMPLEMENTED"
-    | "FINAL_VERTICAL_SURFACE_UNIMPLEMENTED";
+    | "FINAL_VERTICAL_SURFACE_UNIMPLEMENTED"
+    | "CA_ENDPOINT_NOT_CONSTRUCTIBLE";
   message: string;
   sourceRefs: SourceRef[];
 }

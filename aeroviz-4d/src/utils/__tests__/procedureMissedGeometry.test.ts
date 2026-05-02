@@ -6,6 +6,7 @@ import type {
 } from "../../data/procedurePackage";
 import type { SegmentGeometryBundle } from "../procedureSegmentGeometry";
 import {
+  buildMissedCaEndpoints,
   buildMissedCourseGuides,
   buildMissedSectionSurface,
   buildMissedTurnDebugPoint,
@@ -172,6 +173,83 @@ describe("procedure missed geometry", () => {
         code: "SOURCE_INCOMPLETE",
         legId: "leg:missed:ca",
         severity: "WARN",
+      }),
+    ]);
+  });
+
+  it("estimates a CA endpoint from course, target altitude, start elevation, and climb gradient", () => {
+    const result = buildMissedCaEndpoints(missedSegment, [caLeg], fixes, {
+      climbGradientFtPerNm: 250,
+    });
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.geometries).toHaveLength(1);
+    expect(result.geometries[0]).toMatchObject({
+      segmentId: "segment:missed-s1",
+      legId: "leg:missed:ca",
+      startFixId: "fix:RW",
+      courseDeg: 305,
+      startAltitudeFtMsl: 800,
+      targetAltitudeFtMsl: 1000,
+      climbGradientFtPerNm: 250,
+      distanceNm: 0.8,
+      constructionStatus: "ESTIMATED_ENDPOINT",
+    });
+    expect(result.geometries[0].geoPositions[0]).toMatchObject({
+      lonDeg: -78.8,
+      latDeg: 35.87,
+      altM: 800 * 0.3048,
+    });
+    expect(result.geometries[0].geoPositions[1].altM).toBeCloseTo(1000 * 0.3048, 8);
+    expect(result.geometries[0].geoPositions[1].lonDeg).not.toBeCloseTo(-78.8, 4);
+    expect(result.geometries[0].notes[0]).toContain("explicit climb gradient");
+  });
+
+  it("estimates a CA endpoint with the documented default climb model", () => {
+    const result = buildMissedCaEndpoints(missedSegment, [caLeg], fixes);
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.geometries[0]).toMatchObject({
+      climbGradientFtPerNm: 200,
+      distanceNm: 1,
+      constructionStatus: "ESTIMATED_ENDPOINT",
+    });
+    expect(result.geometries[0].notes[0]).toContain("default 200 ft/NM climb model");
+  });
+
+  it("diagnoses CA endpoints when the climb model is disabled and no explicit gradient exists", () => {
+    const result = buildMissedCaEndpoints(missedSegment, [caLeg], fixes, {
+      useDefaultClimbGradient: false,
+    });
+
+    expect(result.geometries).toEqual([]);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "CA_ENDPOINT_NOT_CONSTRUCTIBLE",
+        legId: "leg:missed:ca",
+        severity: "WARN",
+      }),
+    ]);
+  });
+
+  it("diagnoses CA endpoints when required source semantics are missing", () => {
+    const result = buildMissedCaEndpoints(
+      missedSegment,
+      [
+        {
+          ...caLeg,
+          outboundCourseDeg: undefined,
+          requiredAltitude: null,
+        },
+      ],
+      fixes,
+    );
+
+    expect(result.geometries).toEqual([]);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "CA_ENDPOINT_NOT_CONSTRUCTIBLE",
+        message: expect.stringContaining("outbound course"),
       }),
     ]);
   });

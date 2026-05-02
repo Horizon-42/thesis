@@ -19,6 +19,7 @@ import type {
 } from "./procedureSegmentGeometry";
 
 const DEFAULT_CA_COURSE_GUIDE_LENGTH_NM = 3;
+const DEFAULT_CA_CLIMB_GRADIENT_FT_PER_NM = 200;
 
 export type MissedSectionSurfaceType =
   | "MISSED_SECTION1_ENVELOPE"
@@ -42,6 +43,31 @@ export interface MissedCourseGuideGeometry {
   constructionStatus: "COURSE_DIRECTION_ONLY";
   geoPositions: [GeoPoint, GeoPoint];
   worldPositions: [CartesianPoint, CartesianPoint];
+}
+
+export type MissedCaEndpointStatus =
+  | "ESTIMATED_ENDPOINT"
+  | "SOURCE_EXACT"
+  | "INSUFFICIENT_CLIMB_MODEL";
+
+export interface MissedCaEndpointGeometry {
+  segmentId: string;
+  legId: string;
+  startFixId: string;
+  courseDeg: number;
+  startAltitudeFtMsl: number;
+  targetAltitudeFtMsl: number;
+  climbGradientFtPerNm: number;
+  distanceNm: number;
+  constructionStatus: MissedCaEndpointStatus;
+  geoPositions: [GeoPoint, GeoPoint];
+  worldPositions: [CartesianPoint, CartesianPoint];
+  notes: string[];
+}
+
+export interface MissedCaEndpointOptions {
+  climbGradientFtPerNm?: number;
+  useDefaultClimbGradient?: boolean;
 }
 
 export interface MissedTurnDebugPointGeometry {
@@ -71,12 +97,13 @@ function legDiagnostic(
   segment: ProcedureSegment,
   leg: ProcedurePackageLeg,
   message: string,
+  code: BuildDiagnostic["code"] = "SOURCE_INCOMPLETE",
 ): BuildDiagnostic {
   return {
     severity: "WARN",
     segmentId: segment.segmentId,
     legId: leg.legId,
-    code: "SOURCE_INCOMPLETE",
+    code,
     message,
     sourceRefs: leg.sourceRefs,
   };
@@ -210,6 +237,142 @@ export function buildMissedCourseGuides(
       constructionStatus: "COURSE_DIRECTION_ONLY",
       geoPositions,
       worldPositions: [toCartesian(geoPositions[0]), toCartesian(geoPositions[1])],
+    });
+  });
+
+  return { geometries, diagnostics };
+}
+
+function climbGradientFor(options: MissedCaEndpointOptions): number | null {
+  if (
+    typeof options.climbGradientFtPerNm === "number" &&
+    Number.isFinite(options.climbGradientFtPerNm) &&
+    options.climbGradientFtPerNm > 0
+  ) {
+    return options.climbGradientFtPerNm;
+  }
+  if (options.useDefaultClimbGradient === false) return null;
+  return DEFAULT_CA_CLIMB_GRADIENT_FT_PER_NM;
+}
+
+export function buildMissedCaEndpoints(
+  segment: ProcedureSegment,
+  legs: ProcedurePackageLeg[],
+  fixes: Map<string, ProcedurePackageFix>,
+  options: MissedCaEndpointOptions = {},
+): { geometries: MissedCaEndpointGeometry[]; diagnostics: BuildDiagnostic[] } {
+  if (segment.segmentType !== "MISSED_S1" && segment.segmentType !== "MISSED_S2") {
+    return { geometries: [], diagnostics: [] };
+  }
+
+  const diagnostics: BuildDiagnostic[] = [];
+  const geometries: MissedCaEndpointGeometry[] = [];
+  const segmentLegs = legs.filter((leg) => leg.segmentId === segment.segmentId);
+
+  segmentLegs.forEach((leg) => {
+    if (leg.legType !== "CA") return;
+
+    const courseDeg = leg.outboundCourseDeg;
+    if (typeof courseDeg !== "number" || !Number.isFinite(courseDeg)) {
+      diagnostics.push(
+        legDiagnostic(
+          segment,
+          leg,
+          `${leg.legId}: CA endpoint requires outbound course metadata.`,
+          "CA_ENDPOINT_NOT_CONSTRUCTIBLE",
+        ),
+      );
+      return;
+    }
+
+    const targetAltitudeFtMsl = altitudeTargetFt(leg);
+    if (targetAltitudeFtMsl === null) {
+      diagnostics.push(
+        legDiagnostic(
+          segment,
+          leg,
+          `${leg.legId}: CA endpoint requires a target altitude constraint.`,
+          "CA_ENDPOINT_NOT_CONSTRUCTIBLE",
+        ),
+      );
+      return;
+    }
+
+    const startFixId = leg.startFixId ?? leg.endFixId;
+    const startFix = startFixId ? fixes.get(startFixId) : undefined;
+    const start = startFix ? pointFromFix(startFix) : null;
+    if (!startFixId || !start) {
+      diagnostics.push(
+        legDiagnostic(
+          segment,
+          leg,
+          `${leg.legId}: CA endpoint requires a positioned start fix.`,
+          "CA_ENDPOINT_NOT_CONSTRUCTIBLE",
+        ),
+      );
+      return;
+    }
+    if (typeof startFix?.altFtMsl !== "number" || !Number.isFinite(startFix.altFtMsl)) {
+      diagnostics.push(
+        legDiagnostic(
+          segment,
+          leg,
+          `${leg.legId}: CA endpoint requires start-fix elevation metadata.`,
+          "CA_ENDPOINT_NOT_CONSTRUCTIBLE",
+        ),
+      );
+      return;
+    }
+
+    const climbGradientFtPerNm = climbGradientFor(options);
+    if (climbGradientFtPerNm === null) {
+      diagnostics.push(
+        legDiagnostic(
+          segment,
+          leg,
+          `${leg.legId}: CA endpoint requires an explicit climb gradient when default climb model is disabled.`,
+          "CA_ENDPOINT_NOT_CONSTRUCTIBLE",
+        ),
+      );
+      return;
+    }
+
+    const altitudeDeltaFt = targetAltitudeFtMsl - startFix.altFtMsl;
+    if (altitudeDeltaFt <= 0) {
+      diagnostics.push(
+        legDiagnostic(
+          segment,
+          leg,
+          `${leg.legId}: CA endpoint requires target altitude above start-fix elevation.`,
+          "CA_ENDPOINT_NOT_CONSTRUCTIBLE",
+        ),
+      );
+      return;
+    }
+
+    const distanceNm = altitudeDeltaFt / climbGradientFtPerNm;
+    const endpoint = {
+      ...offsetPoint(start, toRadians(courseDeg), distanceNm * METERS_PER_NM),
+      altM: targetAltitudeFtMsl * FEET_TO_METERS,
+    };
+    const geoPositions: [GeoPoint, GeoPoint] = [start, endpoint];
+    const notes = options.climbGradientFtPerNm
+      ? ["Endpoint estimated from explicit climb gradient; not certified source geometry."]
+      : [`Endpoint estimated from default ${DEFAULT_CA_CLIMB_GRADIENT_FT_PER_NM} ft/NM climb model; not certified source geometry.`];
+
+    geometries.push({
+      segmentId: segment.segmentId,
+      legId: leg.legId,
+      startFixId,
+      courseDeg,
+      startAltitudeFtMsl: startFix.altFtMsl,
+      targetAltitudeFtMsl,
+      climbGradientFtPerNm,
+      distanceNm,
+      constructionStatus: "ESTIMATED_ENDPOINT",
+      geoPositions,
+      worldPositions: [toCartesian(geoPositions[0]), toCartesian(geoPositions[1])],
+      notes,
     });
   });
 

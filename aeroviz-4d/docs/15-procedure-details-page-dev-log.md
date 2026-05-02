@@ -1605,3 +1605,41 @@
 - Do not claim certified FAA compliance for any estimated/debug geometry.
 - If source data or model assumptions are incomplete, emit diagnostics and avoid fake protected surfaces.
 - Keep every stage modular, covered by focused tests, logged here, and committed separately.
+
+## 2026-05-02 11:15 CEST
+
+### Goal Of This Session
+- Start P0 by adding a CA course-to-altitude endpoint model scaffold.
+
+### Decisions Locked
+- Added `MissedCaEndpointGeometry` and `MissedCaEndpointStatus`.
+- Added `buildMissedCaEndpoints` in `procedureMissedGeometry.ts`.
+- The helper estimates endpoint distance from:
+  - positioned CA start fix;
+  - outbound CA course;
+  - target altitude constraint;
+  - start-fix elevation;
+  - explicit climb gradient, or documented default 200 ft/NM climb model.
+- Estimated endpoints are marked `ESTIMATED_ENDPOINT`.
+- Missing source semantics produce `CA_ENDPOINT_NOT_CONSTRUCTIBLE` diagnostics and no geometry.
+- This phase does not replace the existing CA course guide and does not construct CA missed section surfaces.
+
+### Files Changed
+- `src/data/procedurePackage.ts`
+- `src/utils/procedureMissedGeometry.ts`
+- `src/utils/__tests__/procedureMissedGeometry.test.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/utils/__tests__/procedureMissedGeometry.test.ts`
+- `npm run build`
+
+### Current Status
+- P0 endpoint math and safety diagnostics are now covered by focused tests.
+
+### Known Blockers
+- CA endpoint geometry is not yet wired into `ProcedureRenderBundle`.
+- CA centerline/envelope construction remains next work.
+
+### Exact Next Recommended Step
+- Add CA endpoint geometry to render bundles alongside course guides, with status/diagnostics visible but without replacing the current guide yet.
