@@ -202,6 +202,11 @@ function legStartsMissedSectionTwo(leg: ProcedureDetailLeg): boolean {
   return terminator === "HM" || terminator === "HA" || terminator === "HF" || role === "MAHF";
 }
 
+function legTriggersTurningMissed(leg: ProcedureDetailLeg): boolean {
+  const terminator = leg.path.pathTerminator.toUpperCase();
+  return terminator === "HM" || terminator === "HA" || terminator === "HF" || terminator === "RF";
+}
+
 function splitMissedGroup(group: {
   rawSegmentType: string;
   legs: ProcedureDetailLeg[];
@@ -258,6 +263,8 @@ function groupBranchSegments(
     const firstLeg = group.legs[0];
     const lastLeg = group.legs[group.legs.length - 1];
     const approachModes = document.procedure.approachModes;
+    const isTurningMissedApproach =
+      segmentType === "MISSED_S2" && group.legs.some(legTriggersTurningMissed);
 
     diagnostics.push(
       {
@@ -289,6 +296,20 @@ function groupBranchSegments(
         sourceRefs: sourceRefs(firstLeg.sourceRefs),
       });
     }
+    if (isTurningMissedApproach) {
+      const triggerTypes = [...new Set(group.legs.map((leg) => leg.path.pathTerminator.toUpperCase()))]
+        .filter((terminator) => terminator === "HM" || terminator === "HA" || terminator === "HF" || terminator === "RF")
+        .join("/");
+      diagnostics.push({
+        severity: "WARN",
+        segmentId,
+        code: "TURNING_MISSED_UNIMPLEMENTED",
+        message:
+          `${segmentId}: missed section 2 contains ${triggerTypes || "turn-trigger"} leg semantics; ` +
+          "turning missed approach TIA/wind-spiral geometry is not implemented yet.",
+        sourceRefs: group.legs.flatMap((leg) => sourceRefs(leg.sourceRefs)),
+      });
+    }
 
     return {
       segment: {
@@ -315,6 +336,7 @@ function groupBranchSegments(
         verticalRule: verticalRuleFor(document, segmentType),
         constructionFlags: {
           collapsedApproachModes,
+          isTurningMissedApproach: isTurningMissedApproach || undefined,
         },
         sourceRefs: group.legs.flatMap((leg) => sourceRefs(leg.sourceRefs)),
         legacy: {

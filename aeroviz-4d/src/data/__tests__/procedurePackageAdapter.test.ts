@@ -439,18 +439,30 @@ describe("normalizeProcedurePackage", () => {
       segmentId: segment.segmentId,
       segmentType: segment.segmentType,
       legIds: segment.legIds,
+      isTurningMissedApproach: segment.constructionFlags.isTurningMissedApproach,
     }))).toEqual([
       {
         segmentId: "KRDU-R05LY-RW05L:branch:R:segment:missed_s1:3",
         segmentType: "MISSED_S1",
         legIds: ["leg:R:040"],
+        isTurningMissedApproach: undefined,
       },
       {
         segmentId: "KRDU-R05LY-RW05L:branch:R:segment:missed_s2:4",
         segmentType: "MISSED_S2",
         legIds: ["leg:R:050"],
+        isTurningMissedApproach: true,
       },
     ]);
+    expect(pkg.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "TURNING_MISSED_UNIMPLEMENTED",
+          segmentId: "KRDU-R05LY-RW05L:branch:R:segment:missed_s2:4",
+          severity: "WARN",
+        }),
+      ]),
+    );
   });
 
   it("scopes straight-in branch ids by procedure and runway", () => {

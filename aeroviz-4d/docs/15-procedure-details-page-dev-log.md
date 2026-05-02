@@ -1231,3 +1231,32 @@
 
 ### Exact Next Recommended Step
 - Continue with a small, non-misleading missed-approach improvement: add explicit turning-missed diagnostics/flags for missed section 2 segments that contain holding or turn-trigger legs.
+
+## 2026-05-02 02:45 CEST
+
+### Goal Of This Session
+- Make turning missed approach gaps explicit at the canonical package layer.
+
+### Decisions Locked
+- `MISSED_S2` segments containing `HM`/`HA`/`HF`/`RF` now get `constructionFlags.isTurningMissedApproach`.
+- The adapter emits `TURNING_MISSED_UNIMPLEMENTED` diagnostics for these segments.
+- This is diagnostic/schema clarity only; no TIA, early/late baseline, or wind-spiral geometry is constructed in this phase.
+
+### Files Changed
+- `src/data/procedurePackage.ts`
+- `src/data/procedurePackageAdapter.ts`
+- `src/data/__tests__/procedurePackageAdapter.test.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/data/__tests__/procedurePackageAdapter.test.ts`
+- `npm run build`
+
+### Current Status
+- Turning missed approach cases are no longer only implied by unsupported hold legs; they are explicitly flagged and diagnosed.
+
+### Known Blockers
+- Turning missed protected geometry remains future work.
+
+### Exact Next Recommended Step
+- Expose turning missed diagnostics in Procedure Details visual notes/markers so users can identify why section 2 has no surface.
