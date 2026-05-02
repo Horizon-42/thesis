@@ -12,6 +12,7 @@ import type {
   ProcedurePackageFix,
   ProcedurePackageLeg,
   ProcedureSegment,
+  SourceRef,
 } from "../data/procedurePackage";
 import {
   attachProcedureAnnotation,
@@ -130,11 +131,17 @@ function isAnnotationLabelId(entityId: string): boolean {
 }
 
 function sourceRefsFromSegment(segment: ProcedureSegment): string[] {
-  return (segment.sourceRefs ?? []).map((ref) => ref.sourceId);
+  return (segment.sourceRefs ?? []).map(formatSourceRef);
 }
 
 function sourceRefsFromLegs(legs: ProcedurePackageLeg[]): string[] {
-  return [...new Set(legs.flatMap((leg) => (leg.sourceRefs ?? []).map((ref) => ref.sourceId)))];
+  return [...new Set(legs.flatMap((leg) => (leg.sourceRefs ?? []).map(formatSourceRef)))];
+}
+
+function formatSourceRef(ref: SourceRef): string {
+  return ref.rawRef ?? [ref.docId, ref.chapter, ref.section, ref.paragraph, ref.figure, ref.formula]
+    .filter(Boolean)
+    .join(" ");
 }
 
 function param(label: string, value: unknown): { label: string; value: string } | null {
@@ -188,7 +195,7 @@ function annotationBase(args: {
     sourceRefs:
       args.sourceRefs ??
       (args.leg
-        ? (args.leg.sourceRefs ?? []).map((ref) => ref.sourceId)
+        ? (args.leg.sourceRefs ?? []).map(formatSourceRef)
         : args.segment
           ? sourceRefsFromSegment(args.segment)
           : []),
@@ -264,7 +271,7 @@ function addFixLabelEntities(
         param("Role", fix.role.join(", ")),
         param("Elevation", fix.altFtMsl === null ? null : `${fix.altFtMsl} ft`),
       ],
-      sourceRefs: fix.sourceRefs.map((ref) => ref.sourceId),
+      sourceRefs: fix.sourceRefs.map(formatSourceRef),
     });
     const labelId = addAnnotationLabel(
       viewer,

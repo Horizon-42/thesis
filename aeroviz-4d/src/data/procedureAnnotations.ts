@@ -127,3 +127,14 @@ export function getProcedureAnnotation(target: unknown): ProcedureEntityAnnotati
   if (!candidate || typeof candidate !== "object") return null;
   return candidate as ProcedureEntityAnnotation;
 }
+
+export function resolvePickedProcedureAnnotation(picked: unknown): ProcedureEntityAnnotation | null {
+  if (!picked || typeof picked !== "object") return null;
+  const pickedRecord = picked as Record<string, unknown>;
+  return (
+    getProcedureAnnotation(pickedRecord.id) ??
+    getProcedureAnnotation(pickedRecord.primitive) ??
+    getProcedureAnnotation(pickedRecord.collection) ??
+    getProcedureAnnotation(picked)
+  );
+}

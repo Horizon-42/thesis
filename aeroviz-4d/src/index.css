@@ -348,6 +348,12 @@ body,
   background: #2a3f6a;
 }
 
+.procedure-panel button:disabled,
+.procedure-panel input:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .procedure-panel-summary {
   display: flex;
   flex-wrap: wrap;
@@ -391,6 +397,126 @@ body,
   border: 1px solid rgba(248, 113, 113, 0.7);
   border-radius: 6px;
   color: #fecaca;
+}
+
+.procedure-annotation-popup {
+  position: absolute;
+  right: 16px;
+  bottom: 148px;
+  z-index: 120;
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(52vh, 560px);
+  overflow: auto;
+  pointer-events: auto;
+  padding: 12px;
+  border: 1px solid rgba(103, 232, 249, 0.34);
+  border-radius: 8px;
+  background: rgba(12, 18, 32, 0.94);
+  color: #e5eef8;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.38);
+  font-family: "Inter", "Segoe UI", sans-serif;
+  font-size: 12px;
+}
+
+.procedure-annotation-popup header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.procedure-annotation-popup header p {
+  margin: 0 0 4px;
+  color: #5eead4;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.procedure-annotation-popup h3 {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.procedure-annotation-popup button {
+  flex: 0 0 auto;
+  border: 1px solid #3a4a6a;
+  border-radius: 4px;
+  background: #1e2840;
+  color: #dbeafe;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.procedure-annotation-popup button:hover {
+  background: #2a3f6a;
+}
+
+.procedure-annotation-meaning {
+  margin: 0 0 10px;
+  color: #cbd5e1;
+  line-height: 1.4;
+}
+
+.procedure-annotation-details {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+}
+
+.procedure-annotation-details div {
+  display: grid;
+  grid-template-columns: minmax(86px, 0.42fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.procedure-annotation-details dt {
+  color: #93a4b8;
+}
+
+.procedure-annotation-details dd {
+  min-width: 0;
+  margin: 0;
+  color: #f8fafc;
+  overflow-wrap: anywhere;
+}
+
+.procedure-annotation-section {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.procedure-annotation-section strong {
+  color: #fde68a;
+  font-size: 11px;
+}
+
+.procedure-annotation-section ul {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  color: #f8d8a8;
+}
+
+.procedure-annotation-section li + li {
+  margin-top: 4px;
+}
+
+.procedure-annotation-source {
+  margin-top: 10px;
+  color: #9fb3c8;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.procedure-annotation-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
 }
 
 .procedure-panel-footer {
