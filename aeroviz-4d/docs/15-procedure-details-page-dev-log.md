@@ -1835,3 +1835,21 @@
 
 ### Exact Next Recommended Step
 - Continue P0/P1 validation by adding broader full-suite checks, then move into the highest-priority remaining advanced missed/turning geometry item.
+
+## 2026-05-02 11:24 CEST
+
+### Goal Of This Session
+- Run full validation after the CA missed geometry stages.
+
+### Commands Run / Checks Passed
+- `npm test -- --run`
+  - 22 test files passed.
+  - 113 tests passed.
+- `conda run -n aviation pytest python/tests`
+  - 76 tests passed in the `aviation` conda environment.
+
+### Current Status
+- P0 CA course-to-altitude estimated endpoint, centerline, envelope/surface integration, 2D markers, 3D primitives, and estimated-surface styling are validated.
+
+### Exact Next Recommended Step
+- Start P1 LNAV/VNAV OCS geometry as a separate staged implementation.
