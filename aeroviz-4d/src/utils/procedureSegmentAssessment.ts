@@ -5,7 +5,10 @@ import type {
 } from "./runwayProfileGeometry";
 
 export type HorizontalPlateContainment = "PRIMARY" | "SECONDARY" | "OUTSIDE";
-export type SegmentAssessmentEventKind = "LATERAL_CONTAINMENT" | "VERTICAL_DEVIATION";
+export type SegmentAssessmentEventKind =
+  | "LATERAL_CONTAINMENT"
+  | "VERTICAL_DEVIATION"
+  | "VERTICAL_OCS";
 
 export interface SegmentAssessmentEvent {
   kind: SegmentAssessmentEventKind;
@@ -40,6 +43,7 @@ const VERTICAL_DEVIATION_EVENT_THRESHOLD_M = 30.48;
 function assessmentEvents(
   containment: HorizontalPlateContainment,
   verticalErrorM: number | null,
+  verticalReferenceSurfaceType?: HorizontalPlateAssessmentSegment["verticalReferenceSurfaceType"],
 ): SegmentAssessmentEvent[] {
   const events: SegmentAssessmentEvent[] = [
     {
@@ -53,8 +57,10 @@ function assessmentEvents(
     Math.abs(verticalErrorM) > VERTICAL_DEVIATION_EVENT_THRESHOLD_M
   ) {
     events.push({
-      kind: "VERTICAL_DEVIATION",
-      label: verticalErrorM > 0 ? "ABOVE_PROFILE" : "BELOW_PROFILE",
+      kind: verticalReferenceSurfaceType ? "VERTICAL_OCS" : "VERTICAL_DEVIATION",
+      label: verticalReferenceSurfaceType
+        ? verticalErrorM > 0 ? "ABOVE_OCS" : "BELOW_OCS"
+        : verticalErrorM > 0 ? "ABOVE_PROFILE" : "BELOW_PROFILE",
       valueM: verticalErrorM,
     });
   }
@@ -71,6 +77,7 @@ function projectPointToSegment(
   secondaryHalfWidthM: number | null,
   segmentIndex: number,
   stationOffsetM: number,
+  verticalReferenceSurfaceType?: HorizontalPlateAssessmentSegment["verticalReferenceSurfaceType"],
 ): CandidateAssessment | null {
   const start = segmentPoints[segmentIndex];
   const end = segmentPoints[segmentIndex + 1];
@@ -118,7 +125,7 @@ function projectPointToSegment(
     verticalErrorM,
     containment,
     closestPoint,
-    events: assessmentEvents(containment, verticalErrorM),
+    events: assessmentEvents(containment, verticalErrorM, verticalReferenceSurfaceType),
     absoluteCrossTrackM,
     distanceToSegmentM,
   };
@@ -148,6 +155,7 @@ function projectPointToAssessmentSegment(
       assessmentSegment.secondaryHalfWidthM,
       segmentIndex,
       stationOffsetM,
+      assessmentSegment.verticalReferenceSurfaceType,
     );
     if (candidate && (!best || candidate.distanceToSegmentM < best.distanceToSegmentM)) {
       best = candidate;

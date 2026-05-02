@@ -89,4 +89,35 @@ describe("procedure segment assessment", () => {
     expect(assessment?.containment).toBe("SECONDARY");
     expect(Math.abs(assessment?.crossTrackErrorM ?? 0)).toBeCloseTo(700, 6);
   });
+
+  it("labels vertical deviations against an LNAV/VNAV OCS reference", () => {
+    const assessment = classifyPointAgainstHorizontalPlateRoutes(
+      { xM: 4_000, yM: 120, zM: 250 },
+      [
+        {
+          ...route,
+          assessmentSegments: [
+            {
+              segmentId: "TEST-R23RY:branch:R:segment:final:1",
+              primaryHalfWidthM: 500,
+              secondaryHalfWidthM: 900,
+              verticalReferenceSurfaceType: "LNAV_VNAV_OCS",
+              points: [
+                { xM: 5_000, yM: 0, zM: 500 },
+                { xM: 0, yM: 0, zM: 0 },
+              ],
+            },
+          ],
+        },
+      ],
+    );
+
+    expect(assessment?.activeSegmentId).toBe("TEST-R23RY:branch:R:segment:final:1");
+    expect(assessment?.verticalErrorM).toBeCloseTo(-150, 6);
+    expect(assessment?.events).toContainEqual({
+      kind: "VERTICAL_OCS",
+      label: "BELOW_OCS",
+      valueM: -150,
+    });
+  });
 });

@@ -1891,3 +1891,35 @@
 
 ### Exact Next Recommended Step
 - Add OCS-specific vertical assessment helpers/events so aircraft below LNAV/VNAV OCS can be detected independently of the display profile.
+
+## 2026-05-02 11:33 CEST
+
+### Goal Of This Session
+- Add LNAV/VNAV OCS-specific vertical assessment events.
+
+### Decisions Locked
+- `HorizontalPlateAssessmentSegment` can now carry `verticalReferenceSurfaceType`.
+- When a render-bundle segment has `lnavVnavOcs`, runway-profile assessment uses the OCS centerline and OCS half-width samples instead of the generic segment centerline/envelope for that assessment segment.
+- Vertical deviations against OCS emit `VERTICAL_OCS` events with `BELOW_OCS` or `ABOVE_OCS` labels.
+- Existing profile-based vertical deviations still emit `VERTICAL_DEVIATION` with `BELOW_PROFILE` or `ABOVE_PROFILE`.
+
+### Files Changed
+- `src/utils/runwayProfileGeometry.ts`
+- `src/utils/__tests__/runwayProfileGeometry.test.ts`
+- `src/utils/procedureSegmentAssessment.ts`
+- `src/utils/__tests__/procedureSegmentAssessment.test.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/utils/__tests__/procedureSegmentAssessment.test.ts src/utils/__tests__/runwayProfileGeometry.test.ts src/utils/__tests__/procedureSurfaceGeometry.test.ts`
+- `npm run build`
+
+### Current Status
+- Aircraft/profile points can now be assessed against LNAV/VNAV OCS where OCS geometry is present in the render bundle.
+
+### Known Blockers
+- The visible runway-profile summary still labels the numeric value generically as vertical error.
+- Generated procedure assets still need real GPA/TCH source values before real procedures construct OCS.
+
+### Exact Next Recommended Step
+- Run full frontend validation, then start P2 LPV/GLS W/X/Y surface scaffolding if no regressions appear.

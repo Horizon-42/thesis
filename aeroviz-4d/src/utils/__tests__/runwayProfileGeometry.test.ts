@@ -268,6 +268,20 @@ describe("runwayProfileGeometry", () => {
                   legs: [],
                   diagnostics: [],
                   finalOea: null,
+                  lnavVnavOcs: {
+                    centerline: {
+                      geoPositions: [
+                        { lonDeg: -0.005, latDeg: 0, altM: 250 },
+                        { lonDeg: 0, latDeg: 0, altM: 60 },
+                      ],
+                    },
+                    primary: {
+                      halfWidthNmSamples: [{ stationNm: 0, halfWidthNm: 0.4 }],
+                    },
+                    secondaryOuter: {
+                      halfWidthNmSamples: [{ stationNm: 0, halfWidthNm: 0.7 }],
+                    },
+                  },
                   alignedConnector: null,
                   segmentGeometry: {
                     segmentId: "TEST-R09-RW09:branch:R:segment:final:1",
@@ -317,8 +331,9 @@ describe("runwayProfileGeometry", () => {
     expect(finalRoute?.assessmentSegments).toHaveLength(1);
     expect(finalRoute?.assessmentSegments?.[0]).toMatchObject({
       segmentId: "TEST-R09-RW09:branch:R:segment:final:1",
-      primaryHalfWidthM: 1111.2,
-      secondaryHalfWidthM: 1666.8,
+      verticalReferenceSurfaceType: "LNAV_VNAV_OCS",
     });
+    expect(finalRoute?.assessmentSegments?.[0].primaryHalfWidthM).toBeCloseTo(740.8, 6);
+    expect(finalRoute?.assessmentSegments?.[0].secondaryHalfWidthM).toBeCloseTo(1296.4, 6);
   });
 });

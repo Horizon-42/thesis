@@ -53,6 +53,7 @@ export interface HorizontalPlateAssessmentSegment {
   primaryHalfWidthM: number;
   secondaryHalfWidthM: number | null;
   points: RunwayProfilePoint[];
+  verticalReferenceSurfaceType?: "LNAV_VNAV_OCS";
 }
 
 export interface HorizontalPlateRoute {
@@ -433,20 +434,30 @@ export function attachRenderBundleAssessmentSegments(
       .forEach((branch) => {
         const assessmentSegments = branch.segmentBundles
           .map((segmentBundle): HorizontalPlateAssessmentSegment | null => {
-            const centerline = segmentBundle.segmentGeometry.centerline;
+            const centerline =
+              segmentBundle.lnavVnavOcs?.centerline ?? segmentBundle.segmentGeometry.centerline;
             if (centerline.geoPositions.length < 2) return null;
 
             const primaryHalfWidthM =
-              maxHalfWidthM(segmentBundle.segmentGeometry.primaryEnvelope?.halfWidthNmSamples) ??
+              maxHalfWidthM(
+                segmentBundle.lnavVnavOcs?.primary.halfWidthNmSamples ??
+                  segmentBundle.segmentGeometry.primaryEnvelope?.halfWidthNmSamples,
+              ) ??
               segmentBundle.segment.xttNm * 2 * 1852;
             const secondaryHalfWidthM =
-              maxHalfWidthM(segmentBundle.segmentGeometry.secondaryEnvelope?.halfWidthNmSamples) ??
+              maxHalfWidthM(
+                segmentBundle.lnavVnavOcs?.secondaryOuter.halfWidthNmSamples ??
+                  segmentBundle.segmentGeometry.secondaryEnvelope?.halfWidthNmSamples,
+              ) ??
               (segmentBundle.segment.secondaryEnabled ? segmentBundle.segment.xttNm * 3 * 1852 : null);
 
             return {
               segmentId: segmentBundle.segment.segmentId,
               primaryHalfWidthM,
               secondaryHalfWidthM,
+              verticalReferenceSurfaceType: segmentBundle.lnavVnavOcs
+                ? "LNAV_VNAV_OCS"
+                : undefined,
               points: centerline.geoPositions.map((point) =>
                 projectPositionToRunwayFrame(frame, point.lonDeg, point.latDeg, point.altM),
               ),
