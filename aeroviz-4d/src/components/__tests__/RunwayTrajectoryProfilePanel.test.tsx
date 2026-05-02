@@ -93,6 +93,19 @@ const assessedRoute = {
   ],
 };
 
+const assessedFinalRoute = {
+  ...assessedRoute,
+  routeId: "KRDU-R23RY-FINAL",
+  branchId: "branch:R",
+  branchIdent: "R",
+  transitionIdent: null,
+  branchType: "final",
+  points: [
+    { xM: 20500, yM: 0, zM: 1200, fixIdent: "DABKE", role: "FAF" },
+    { xM: 0, yM: 0, zM: 0, fixIdent: "RW23R", role: "MAPt" },
+  ],
+};
+
 function makeProfileState(
   plateRoutes: RunwayTrajectoryProfileState["plateRoutes"],
   aircraftTracks: RunwayTrajectoryProfileState["aircraftTracks"] = [],
@@ -206,6 +219,17 @@ describe("RunwayTrajectoryProfilePanel", () => {
 
     expect(container.querySelectorAll(".runway-profile-final-vertical-reference-line")).toHaveLength(1);
     expect(container.querySelectorAll(".runway-profile-segment-debug-label")).toHaveLength(1);
+  });
+
+  it("keeps final-route GPA visible in vertical profile when transitions are active", () => {
+    appMock.procedureDisplayLevel = "ESTIMATED";
+    profileMock.state = makeProfileState([closeXRoute, assessedFinalRoute]);
+
+    const { container } = render(<RunwayTrajectoryProfilePanel />);
+
+    expect(container.querySelectorAll('[data-route-id="KRDU-R23RY-ABUTTS"]')).toHaveLength(4);
+    expect(container.querySelectorAll(".runway-profile-final-vertical-reference-line")).toHaveLength(1);
+    expect(container.textContent).toContain("GPA 3.0 deg");
   });
 
   it("switches profile distance axes from nautical miles to metres", () => {

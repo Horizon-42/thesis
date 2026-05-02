@@ -276,6 +276,15 @@ function buildSideReferenceMarks(
   });
 }
 
+function routeHasEstimatedVerticalGeometry(route: HorizontalPlateRoute): boolean {
+  return (route.assessmentSegments ?? []).some(
+    (segment) =>
+      Boolean(segment.finalVerticalReference) ||
+      Boolean(segment.lnavVnavOcs) ||
+      (segment.precisionSurfaces ?? []).length > 0,
+  );
+}
+
 function plotPointPath(
   points: RunwayProfilePoint[],
   domain: PlotDomain,
@@ -325,9 +334,18 @@ function ProfilePlot({
       const selectedTransitions = plateRoutes.filter(
         (route) => route.branchType.toLowerCase() === "transition",
       );
-      return selectedTransitions.length > 0
-        ? selectedTransitions
-        : plateRoutes.filter((route) => route.branchType.toLowerCase() === "final");
+      const finalVerticalRoutes = plateRoutes.filter(
+        (route) =>
+          route.branchType.toLowerCase() === "final" && routeHasEstimatedVerticalGeometry(route),
+      );
+      if (selectedTransitions.length === 0) {
+        return plateRoutes.filter((route) => route.branchType.toLowerCase() === "final");
+      }
+      const displayedByRouteId = new Map<string, HorizontalPlateRoute>();
+      [...selectedTransitions, ...finalVerticalRoutes].forEach((route) => {
+        displayedByRouteId.set(route.routeId, route);
+      });
+      return [...displayedByRouteId.values()];
     },
     [mode, plateRoutes],
   );
