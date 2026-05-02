@@ -1984,6 +1984,18 @@ export default function ProcedureDetailsPage() {
   const focusedMissingFinalSurfaceStatuses = focusedFinalSurfaceStatuses.filter(
     (status) => status.missingSurfaceTypes.length > 0,
   );
+  const focusedMissedSectionSurfaces = useMemo(() => {
+    if (!procedureRenderBundle) return [];
+    return procedureRenderBundle.branchBundles
+      .filter((branchBundle) =>
+        focusedScopedBranchId ? branchBundle.branchId === focusedScopedBranchId : true,
+      )
+      .flatMap((branchBundle) =>
+        branchBundle.segmentBundles
+          .map((segmentBundle) => segmentBundle.missedSectionSurface)
+          .filter((surface): surface is NonNullable<typeof surface> => surface !== null),
+      );
+  }, [focusedScopedBranchId, procedureRenderBundle]);
   const focusedFixTerminalLeg = useMemo(
     () =>
       focusedLegs.find(
@@ -2227,6 +2239,7 @@ export default function ProcedureDetailsPage() {
               procedureDocument.provenance.warnings.length > 0 ||
               focusedBranchWarnings.length > 0 ||
               focusedMissingFinalSurfaceStatuses.length > 0 ||
+              focusedMissedSectionSurfaces.length > 0 ||
               focusedRenderDiagnostics.length > 0) ? (
               <section className="procedure-details-card procedure-details-reference-card">
                 <p className="procedure-details-overview-label">Data Notes</p>
@@ -2245,6 +2258,13 @@ export default function ProcedureDetailsPage() {
                       <strong>Final surface status</strong>
                       : constructed {formatSurfaceTypes(status.constructedSurfaceTypes)}; missing{" "}
                       {formatSurfaceTypes(status.missingSurfaceTypes)}
+                    </li>
+                  ))}
+                  {focusedMissedSectionSurfaces.map((surface) => (
+                    <li key={`missed-surface-status-${surface.segmentId}`}>
+                      <strong>Missed section status</strong>
+                      : {surface.sectionKind.replace(/_/g, " ")} {surface.constructionStatus}; vertical{" "}
+                      {surface.verticalProfile.constructionStatus.replace(/_/g, " ").toLowerCase()}
                     </li>
                   ))}
                   {focusedRenderDiagnostics.map((diagnostic, index) => (

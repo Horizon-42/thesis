@@ -474,6 +474,7 @@ describe("ProcedureDetailsPage", () => {
     expect(screen.getAllByText("HM leg").length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText("Turn debug").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("Turn TIA")).toBeTruthy();
+    expect(screen.getAllByText("Missed section status").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/WARN UNSUPPORTED_LEG_TYPE/).length).toBeGreaterThan(0);
     expect(screen.getByText(/WARN TURNING_MISSED_UNIMPLEMENTED/)).toBeTruthy();
   });

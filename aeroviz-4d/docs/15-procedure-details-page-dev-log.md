@@ -2144,3 +2144,31 @@
 
 ### Exact Next Recommended Step
 - Continue P4 by wiring missed vertical-profile status into Procedure Details/assessment displays.
+
+## 2026-05-02 12:52 CEST
+
+### Goal Of This Session
+- Expose missed section vertical-profile status in Procedure Details.
+
+### Decisions Locked
+- Data Notes now include missed section surface status for the focused branch.
+- The note includes section kind, construction source, and vertical-profile construction status.
+- This makes `CENTERLINE_ALTITUDE_ONLY` versus `SOURCE_CLIMB_GRADIENT` visible without implying a certified missed climb surface.
+
+### Files Changed
+- `src/components/ProcedureDetailsPage.tsx`
+- `src/components/__tests__/ProcedureDetailsPage.test.tsx`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/components/__tests__/ProcedureDetailsPage.test.tsx src/utils/__tests__/procedureMissedGeometry.test.ts`
+- `npm run build`
+
+### Current Status
+- P4 missed section vertical status is visible in Procedure Details.
+
+### Known Blockers
+- Assessment logic still uses generic profile/OCS paths and does not yet classify missed climb-surface containment from the new missed vertical profile.
+
+### Exact Next Recommended Step
+- Run full frontend validation, then continue P4 missed climb assessment or move to P5 RNP AR/RF-specific templates.
