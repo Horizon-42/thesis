@@ -2411,3 +2411,41 @@
 
 ### Exact Next Recommended Step
 - Manually verify in the browser with KRDU generated procedure assets, then consider Phase 2 label density and screen-anchored popup placement.
+
+## 2026-05-02 14:05 CEST
+
+### Goal Of This Session
+- Refine the 3D annotation interaction and add shared key-term explanations inside the annotation popup.
+
+### Decisions Locked
+- Annotation selection now uses single click (`LEFT_CLICK`) instead of double click.
+- The 3D annotation popup now includes a `Key Terms` section.
+- Key terms reuse the existing `src/data/procedureTerms.ts` data source used by Procedure Details.
+- Added shared glossary entries for protected-geometry abbreviations:
+  - `OCS`
+  - `OEA`
+  - `GPA`
+  - `TCH`
+  - `XTT`
+  - `ATT`
+- Popup key terms are derived from the selected annotation's procedure name, segment type, geometry kind, leg type, and parameters.
+
+### Files Changed
+- `src/hooks/useProcedureAnnotationPicking.ts`
+- `src/hooks/__tests__/useProcedureAnnotationPicking.test.ts`
+- `src/components/ProcedureAnnotationPopup.tsx`
+- `src/components/__tests__/ProcedureAnnotationPopup.test.tsx`
+- `src/data/procedureTerms.ts`
+- `src/index.css`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/hooks/__tests__/useProcedureAnnotationPicking.test.ts src/components/__tests__/ProcedureAnnotationPopup.test.tsx src/data/__tests__/procedureAnnotations.test.ts`
+- `npm run build`
+
+### Current Status
+- A single click on an annotated 3D procedure object now opens the explanation popup.
+- The popup explains relevant acronyms with definitions and references without duplicating term definitions outside the shared term module.
+
+### Exact Next Recommended Step
+- Manually review label/popup density in the browser and decide whether Phase 2 should add anchored popup placement or label-density controls first.

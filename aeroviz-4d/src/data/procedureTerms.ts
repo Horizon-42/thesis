@@ -36,6 +36,10 @@ const FAA_CIFP_REFERENCE: TermReference = {
   label: "FAA CIFP / ARINC 424",
   url: "https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/cifp/",
 };
+const FAA_PBN_ORDER_REFERENCE: TermReference = {
+  label: "FAA Order 8260.58D",
+  url: "https://www.faa.gov/regulations_policies/orders_notices/index.cfm/go/document.information/documentID/1043458",
+};
 const LOCAL_ARINC_APPROACH_ROUTE_TYPE_REFERENCE: TermReference = {
   label: "Local ARINC 424-23 Table 5-8 note",
   url: "/data/reference/arinc424-approach-route-types.md",
@@ -61,6 +65,12 @@ const PROCEDURE_MODE_TERMS = [
   "RNP AR",
   "RNAV(GPS)",
   "RNAV(RNP)",
+  "OCS",
+  "OEA",
+  "GPA",
+  "TCH",
+  "XTT",
+  "ATT",
 ];
 const APPROACH_ROUTE_TYPE_TERMS = ["A", "H", "R"];
 
@@ -78,6 +88,12 @@ const TERM_DISPLAY_NAMES: Record<string, string> = {
   "RNAV(RNP)": "Area Navigation with Required Navigation Performance (RNAV(RNP))",
   RNP: "Required Navigation Performance (RNP)",
   "RNP AR": "Required Navigation Performance Authorization Required (RNP AR)",
+  OCS: "Obstacle Clearance Surface (OCS)",
+  OEA: "Obstacle Evaluation Area (OEA)",
+  GPA: "Glidepath Angle (GPA)",
+  TCH: "Threshold Crossing Height (TCH)",
+  XTT: "Cross Track Tolerance (XTT)",
+  ATT: "Along Track Tolerance (ATT)",
   IF_TERMINATOR: "Initial Fix Path Terminator (IF)",
   TF_TERMINATOR: "Track to Fix Path Terminator (TF)",
   DF_TERMINATOR: "Direct to Fix Path Terminator (DF)",
@@ -179,6 +195,36 @@ const TERM_DETAILS: Record<string, TermDetails> = {
         url: "https://www.faa.gov/regulations_policies/advisory_circulars/index.cfm/go/document.information/documentid/903610",
       },
     ],
+  },
+  OCS: {
+    definition:
+      "Obstacle Clearance Surface is a vertical or sloping reference surface used to evaluate obstacle clearance along an instrument procedure.",
+    references: [FAA_PBN_ORDER_REFERENCE],
+  },
+  OEA: {
+    definition:
+      "Obstacle Evaluation Area is the lateral area used to evaluate obstacles for a segment or final approach surface.",
+    references: [FAA_PBN_ORDER_REFERENCE],
+  },
+  GPA: {
+    definition:
+      "Glidepath Angle is the published or coded descent angle used by vertically guided final approach visualization.",
+    references: [FAA_CIFP_REFERENCE, FAA_PBN_ORDER_REFERENCE],
+  },
+  TCH: {
+    definition:
+      "Threshold Crossing Height is the glidepath height above the runway threshold. AeroViz requires it before constructing GPA/TCH-based final vertical surfaces.",
+    references: [FAA_PBN_ORDER_REFERENCE],
+  },
+  XTT: {
+    definition:
+      "Cross Track Tolerance is the lateral tolerance used to size protected areas on either side of the nominal path.",
+    references: [FAA_PBN_ORDER_REFERENCE],
+  },
+  ATT: {
+    definition:
+      "Along Track Tolerance is the along-path tolerance used in protected-area and transition construction.",
+    references: [FAA_PBN_ORDER_REFERENCE],
   },
   IF_TERMINATOR: {
     definition:

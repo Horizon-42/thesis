@@ -54,6 +54,10 @@ describe("ProcedureAnnotationPopup", () => {
     expect(screen.getByText("Estimated")).toBeTruthy();
     expect(screen.getByText("3.5 deg")).toBeTruthy();
     expect(screen.getByText("test diagnostic")).toBeTruthy();
+    expect(screen.getByText("Key Terms")).toBeTruthy();
+    expect(screen.getByText("OCS")).toBeTruthy();
+    expect(screen.getAllByText("GPA").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("FAA Order 8260.58D").length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: "Procedure Details" }));
     expect(navigateWithinApp).toHaveBeenCalledWith("/procedure-details?airport=KRDU");

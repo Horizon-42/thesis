@@ -95,7 +95,7 @@ export function useProcedureAnnotationPicking({ enabled = true }: { enabled?: bo
       selectedEntityIdRef.current = annotation.entityId;
       setSelectedProcedureAnnotation(annotation);
       addHighlight(viewer, annotation.entityId, event.position);
-    }, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
     return () => {
       handler.destroy();
