@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import cifp_parser
 import preprocess_procedures as procedures_module
 from preprocess_procedures import (
     FixRecord,
@@ -450,6 +451,17 @@ def test_path_point_metadata_exports_tch_and_glidepath_angle() -> None:
     assert metadata.glidepath_angle_deg == pytest.approx(3.0)
     assert metadata.threshold_crossing_height_ft == pytest.approx(57.4)
     assert metadata.source_line == 300869
+
+
+def test_cifp_source_line_map_is_cached_per_process() -> None:
+    cifp_parser.clear_cifp_parser_caches()
+    faacifp_path = CIFP_ROOT / "FAACIFP18"
+
+    first = cifp_parser.build_exact_source_line_map(faacifp_path)
+    second = cifp_parser.build_exact_source_line_map(faacifp_path)
+
+    assert first is second
+    assert cifp_parser.build_exact_source_line_map.cache_info().hits == 1
 
 
 def test_build_katl_zelan4_procedure_detail_document_exports_real_rf_metadata() -> None:

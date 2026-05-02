@@ -27,4 +27,11 @@
 - Scope: reduce Cesium entity count by avoiding eager creation for hidden procedure branches.
 - Change: `useProcedureSegmentLayer` now stores loaded render bundle data, creates only visible branch entities, and lazily creates a hidden branch the first time selector state makes it visible.
 - Tests: `npm test -- --run src/hooks/__tests__/useProcedureSegmentLayer.test.ts`; `npm run build`.
+- Commit: this entry is included in `Create procedure branch entities lazily`.
+
+## 2026-05-02 Step 5 - CIFP adapter caching
+
+- Scope: reduce repeated `FAACIFP18` scans and cifparse path point extraction during multi-procedure preprocessing.
+- Change: added bounded per-process caches for path point lines and exact source-line maps, plus `clear_cifp_parser_caches()` for tests and long-running tooling.
+- Tests: `conda run -n aviation /Users/liudongxu/opt/miniconda3/envs/aviation/bin/python3.13 -m pytest aeroviz-4d/python/tests/test_preprocess_procedures.py -q`.
 - Commit: pending.

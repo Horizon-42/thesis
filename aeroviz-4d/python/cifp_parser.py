@@ -178,6 +178,7 @@ def parse_path_point_tch_ft(line: str) -> float | None:
     return normalize_float(value)
 
 
+@lru_cache(maxsize=8)
 def cifparse_path_point_lines(faacifp_path: Path) -> list[str]:
     """Return raw airport path point lines selected by cifparse.
 
@@ -198,6 +199,7 @@ def cifparse_path_point_lines(faacifp_path: Path) -> list[str]:
     return list(parser._sections.section_p.get_path_points())
 
 
+@lru_cache(maxsize=8)
 def build_exact_source_line_map(faacifp_path: Path) -> dict[str, int]:
     source_lines: dict[str, int] = {}
     with faacifp_path.open(encoding="ascii", errors="replace") as f:
@@ -205,6 +207,13 @@ def build_exact_source_line_map(faacifp_path: Path) -> dict[str, int]:
             line = raw_line.rstrip("\n\r")
             source_lines.setdefault(line, line_number)
     return source_lines
+
+
+def clear_cifp_parser_caches() -> None:
+    """Clear per-process CIFP adapter caches used by repeated procedure exports."""
+
+    cifparse_path_point_lines.cache_clear()
+    build_exact_source_line_map.cache_clear()
 
 
 def parse_path_point_vertical_metadata(
