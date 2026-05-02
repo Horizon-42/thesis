@@ -1327,3 +1327,28 @@
 
 ### Exact Next Recommended Step
 - Run a final full validation pass, then summarize the completed staged work and remaining v3 gaps.
+
+## 2026-05-02 04:45 CEST
+
+### Goal Of This Session
+- Run final full validation for the staged CA and turning-missed migration work.
+
+### Commands Run / Checks Passed
+- `npm test -- --run`
+  - 106 passed.
+- `conda run -n aviation pytest python/tests`
+  - 76 passed.
+- `npm run build`
+  - TypeScript compile and Vite production build passed.
+
+### Current Status
+- CA missed approach course metadata flows from parser/export into package/render-bundle objects.
+- CA first-leg direction is visible in Procedure Details and 3D protected mode as course-guide/debug geometry.
+- Turning missed section 2 is flagged, diagnosed, and visible in 3D as a debug-only anchor.
+- The root `run_asd-b_fetch_and_generate.py` pipeline can optionally regenerate procedure assets after CZML generation.
+
+### Remaining v3 Migration Gaps
+- CA course-to-altitude endpoint construction still requires an explicit climb/termination model.
+- Full missed approach section 1/2 protected surfaces are still first-pass envelope classifications, not certified FAA construction.
+- Turning missed TIA/early-late baseline/wind-spiral geometry is not implemented.
+- LPV/GLS W/X/Y, LNAV/VNAV, and RNP AR vertical/surface models remain future phases.
