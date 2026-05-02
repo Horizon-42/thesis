@@ -205,7 +205,7 @@ describe("buildFinalVerticalProfileOverlays", () => {
       ["WEPAS", -10327],
       ["RW05L", 0],
     ]);
-    expect(overlay.constraintPoints.at(-1)).toMatchObject({
+    expect(overlay.constraintPoints[overlay.constraintPoints.length - 1]).toMatchObject({
       fixRef: "fix:RW05L",
       altitudeFt: 367,
     });
@@ -225,7 +225,8 @@ describe("buildFinalVerticalProfileOverlays", () => {
     expect(overlay.glidepathReference?.points[0].altitudeFt).toBeGreaterThan(
       overlay.glidepathReference?.points[1].altitudeFt ?? 0,
     );
-    expect(overlay.glidepathReference?.points.at(-1)).toMatchObject({
+    const glidepathPoints = overlay.glidepathReference?.points ?? [];
+    expect(glidepathPoints[glidepathPoints.length - 1]).toMatchObject({
       stationM: 0,
       altitudeFt: 367,
     });
