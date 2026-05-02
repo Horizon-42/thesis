@@ -9,10 +9,13 @@ const {
   setProceduresVisible,
   getProcedureVisibility,
   setProcedureBranchVisible,
+  getProcedureAnnotationEnabled,
+  setProcedureAnnotationEnabled,
 } = vi.hoisted(() => {
   const entities: any[] = [];
   let proceduresVisible = true;
   let procedureVisibility: Record<string, boolean> = {};
+  let procedureAnnotationEnabled = false;
   const mockViewer = {
     entities: {
       values: entities,
@@ -40,6 +43,10 @@ const {
     setProcedureBranchVisible: (branchId: string, visible: boolean) => {
       procedureVisibility = { ...procedureVisibility, [branchId]: visible };
     },
+    getProcedureAnnotationEnabled: () => procedureAnnotationEnabled,
+    setProcedureAnnotationEnabled: (value: boolean) => {
+      procedureAnnotationEnabled = value;
+    },
   };
 });
 
@@ -63,6 +70,8 @@ vi.mock("cesium", () => {
       LIME: new Color("LIME"),
       MAGENTA: new Color("MAGENTA"),
       ORANGE: new Color("ORANGE"),
+      WHITE: new Color("WHITE"),
+      BLACK: new Color("BLACK"),
     },
     PolygonHierarchy: class PolygonHierarchy {
       constructor(public positions: unknown[]) {}
@@ -76,6 +85,7 @@ vi.mock("../../context/AppContext", () => ({
     activeAirportCode: "KRDU",
     layers: { procedures: getProceduresVisible() },
     procedureVisibility: getProcedureVisibility(),
+    procedureAnnotationEnabled: getProcedureAnnotationEnabled(),
   }),
 }));
 
@@ -341,6 +351,7 @@ describe("useProcedureSegmentLayer", () => {
     vi.mocked(loadProcedureRenderBundleData).mockReset();
     vi.mocked(loadProcedureRenderBundleData).mockResolvedValue(renderBundleData as any);
     setProceduresVisible(true);
+    setProcedureAnnotationEnabled(false);
     setProcedureBranchVisible("KRDU-R05LY-RW05L:branch:R", true);
   });
 
@@ -388,6 +399,30 @@ describe("useProcedureSegmentLayer", () => {
     expect(entities.some((entity) => String(entity.id).includes("-turning-missed-tia-boundary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-turn-1-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes(":junction:"))).toBe(true);
+    expect(
+      entities.some(
+        (entity) =>
+          String(entity.id).endsWith("-centerline") &&
+          entity.__aeroVizProcedureAnnotation?.kind === "SEGMENT_CENTERLINE",
+      ),
+    ).toBe(true);
+  });
+
+  it("adds annotation labels when annotation mode is enabled", async () => {
+    setProcedureAnnotationEnabled(true);
+
+    renderHook(() => useProcedureSegmentLayer());
+    await waitFor(() => expect(mockViewer.entities.add).toHaveBeenCalled());
+
+    expect(entities.some((entity) => String(entity.id).startsWith("procedure-annotation-label-"))).toBe(true);
+    expect(
+      entities.some(
+        (entity) =>
+          String(entity.id).startsWith("procedure-annotation-label-") &&
+          entity.show === true &&
+          entity.__aeroVizProcedureAnnotation?.title.includes("centerline"),
+      ),
+    ).toBe(true);
   });
 
   it("syncs layer visibility without reloading render bundle data", async () => {

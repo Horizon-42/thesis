@@ -51,10 +51,79 @@ export interface ProcedureEntityAnnotation {
   sourceRefs: string[];
 }
 
+export const PROCEDURE_ANNOTATION_ENTITY_FIELD = "__aeroVizProcedureAnnotation";
+
 export function annotationStatusLabel(status: ProcedureAnnotationStatus): string {
   return status
     .toLowerCase()
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+export function procedureAnnotationMeaning(
+  kind: ProcedureAnnotationKind,
+  status: ProcedureAnnotationStatus,
+): string {
+  if (kind === "FIX") {
+    return "Procedure fix used by one or more coded legs. Role labels identify chart functions such as IF, FAF, MAP, runway, or missed hold.";
+  }
+  if (kind === "SEGMENT_CENTERLINE") {
+    return status === "ESTIMATED"
+      ? "Estimated nominal path for this segment. It is used to place display geometry when source legs do not provide a normal terminating fix."
+      : "Nominal coded path for this procedure segment. It is the reference line used to place lateral protected areas.";
+  }
+  if (kind === "SEGMENT_ENVELOPE_PRIMARY") {
+    return "Primary lateral protected area around the segment centerline. It represents the central protected region for this visualization.";
+  }
+  if (kind === "SEGMENT_ENVELOPE_SECONDARY") {
+    return "Secondary lateral area outside the primary envelope. It helps show the outer buffer or taper where available.";
+  }
+  if (kind === "FINAL_OEA") {
+    return "Final-segment obstacle evaluation area used as the lateral reference for final protected-area visualization.";
+  }
+  if (kind === "LNAV_VNAV_OCS") {
+    return "Sloping LNAV/VNAV obstacle clearance surface estimate built from final centerline, GPA, and TCH source data.";
+  }
+  if (kind === "PRECISION_SURFACE") {
+    return "Debug-estimate LPV/GLS precision surface. It is useful for visual comparison but is not certified W/X/Y construction.";
+  }
+  if (kind === "ALIGNED_CONNECTOR") {
+    return "Visual connector used to show how intermediate and final protected areas join around the alignment transition.";
+  }
+  if (kind === "MISSED_SURFACE") {
+    return status === "ESTIMATED"
+      ? "Missed-approach protected area built from estimated CA centerline data."
+      : "Missed-approach protected area showing how protection continues after the MAPt.";
+  }
+  if (kind === "CA_COURSE_GUIDE") {
+    return "Course-to-altitude missed-approach guide. It shows the published course direction but does not by itself define a terminating point.";
+  }
+  if (kind === "CA_CENTERLINE") {
+    return "Estimated CA centerline built from course, altitude target, climb gradient, and start fix elevation.";
+  }
+  if (kind === "CA_ENDPOINT") {
+    return "Estimated endpoint for a course-to-altitude missed leg. It is derived from the climb model and is not an explicit source fix.";
+  }
+  if (kind === "TURNING_MISSED_DEBUG") {
+    return "Debug-only turning missed approach primitive, used to inspect turn initiation, early/late baselines, nominal path, or wind spiral placeholders.";
+  }
+  if (kind === "TURN_FILL") {
+    return "Visual fill patch between adjacent segment envelopes. It improves readability at turns but is not a compliant turn construction.";
+  }
+  return "Marker showing that an expected final protected surface was not constructed because required source data or implementation is missing.";
+}
+
+export function attachProcedureAnnotation<T extends object>(
+  target: T,
+  annotation: ProcedureEntityAnnotation,
+): T {
+  return Object.assign(target, { [PROCEDURE_ANNOTATION_ENTITY_FIELD]: annotation });
+}
+
+export function getProcedureAnnotation(target: unknown): ProcedureEntityAnnotation | null {
+  if (!target || typeof target !== "object") return null;
+  const candidate = (target as Record<string, unknown>)[PROCEDURE_ANNOTATION_ENTITY_FIELD];
+  if (!candidate || typeof candidate !== "object") return null;
+  return candidate as ProcedureEntityAnnotation;
 }
