@@ -41,8 +41,8 @@
    - Annotation mode on: show only necessary labels by default.
    - Selected entity: show rich detail in a floating inspector.
 
-4. Double-click selection should be deterministic.
-   - User double-clicks a visible procedure geometry.
+4. Click selection should be deterministic.
+   - User single-clicks a visible procedure geometry.
    - App picks nearest Cesium entity with annotation metadata.
    - Selected entity gets highlight styling and a floating details panel.
 
@@ -53,7 +53,7 @@
 
 ### 4.1 Procedure Panel Entry
 
-Add an `Annotate` toggle in `ProcedurePanel`, near the existing `On` procedure master toggle and `3D status`.
+Add an `Annotate` toggle and a display-level selector in `ProcedurePanel`, near the existing `On` procedure master toggle and `3D status`.
 
 Suggested controls:
 
@@ -65,6 +65,65 @@ Suggested controls:
 - Optional later control: annotation density.
   - `Key` / `All`
   - Phase 1 should implement only `Key` to keep scope tight.
+
+- `Display` selector:
+  - controls which classes of 3D procedure entities are visible.
+  - applies to geometry entities and their annotation labels.
+  - does not change branch/procedure visibility; it is an additional global filter.
+  - default: `Protection`.
+
+### 4.1.1 Display Levels
+
+Display levels are cumulative. Selecting a higher level includes all lower levels.
+
+| UI label | Included levels | Purpose |
+| --- | --- | --- |
+| `Core` | Level 1 | Coded procedure skeleton: fixes and nominal source-backed paths. |
+| `Protection` | Levels 1-2 | Default research view: source-backed core plus primary protected geometry. |
+| `Estimated` | Levels 1-3 | Adds model-derived operational geometry that is useful but should not be treated as direct source data. |
+| `Visual Aid` | Levels 1-4 | Adds readability helpers such as turn fill patches. |
+| `Debug` | Levels 1-5 | Adds experimental, missing-source, and debug construction artifacts. |
+
+Level definitions:
+
+1. `Source Backed Core`
+   - `FIX`
+   - `SEGMENT_CENTERLINE` when status is `SOURCE_BACKED`
+   - `CA_COURSE_GUIDE`
+   - Meaning: source-backed procedure structure and coded navigation intent.
+
+2. `Source Backed Protection`
+   - `SEGMENT_ENVELOPE_PRIMARY`
+   - `SEGMENT_ENVELOPE_SECONDARY`
+   - `FINAL_OEA`
+   - `MISSED_SURFACE` when status is `SOURCE_BACKED`
+   - Meaning: lateral protection and surface geometry built from source-backed segment paths and current rule assumptions.
+
+3. `Estimated Operational Geometry`
+   - `LNAV_VNAV_OCS`
+   - `ALIGNED_CONNECTOR`
+   - `MISSED_SURFACE` when status is `ESTIMATED`
+   - `CA_CENTERLINE`
+   - `CA_ENDPOINT`
+   - `SEGMENT_CENTERLINE` when status is `ESTIMATED`
+   - Meaning: geometry requiring repair, inference, GPA/TCH model construction, or CA climb assumptions.
+
+4. `Visual Fill / Readability`
+   - `TURN_FILL`
+   - inter-segment turn fill patches
+   - Meaning: visual continuity aids that make turns readable but are not compliant turn construction.
+
+5. `Debug / Missing / Experimental`
+   - `PRECISION_SURFACE`
+   - `TURNING_MISSED_DEBUG`
+   - `MISSING_FINAL_SURFACE`
+   - Meaning: diagnostic or incomplete construction artifacts for development and validation review.
+
+Implementation rule:
+
+- Every procedure entity with annotation metadata must resolve to one display level from its `kind` and `status`.
+- Entities without annotation metadata inside the procedure segment layer should default to Level 5 until explicitly classified, so unclassified helper geometry does not leak into the default view.
+- Annotation label visibility is gated by both `Annotate` and the source entity's display level.
 
 ### 4.2 Label Behavior
 
@@ -101,9 +160,9 @@ Default label text should be short:
 
 Use muted color and small scale so labels do not dominate the 3D scene.
 
-### 4.3 Double-Click Detail Inspector
+### 4.3 Click Detail Inspector
 
-When annotation mode is on, double-clicking a procedure entity opens a floating inspector.
+When annotation mode is on, single-clicking a procedure entity opens a floating inspector.
 
 The inspector should show:
 
@@ -161,7 +220,7 @@ Phase 1 can use a simple companion highlight entity because it is easier to clea
 
 Phase 1:
 
-- Double-click only.
+- Single-click only.
 - No hover tooltip, because hover picking every mouse move can become noisy/performance-sensitive.
 
 Phase 2:
@@ -282,7 +341,7 @@ Label entity properties:
 }
 ```
 
-Double-clicking a label should select the source annotation.
+Clicking a label should select the source annotation.
 
 ### 5.4 React State
 
@@ -293,6 +352,19 @@ procedureAnnotationEnabled: boolean;
 setProcedureAnnotationEnabled(enabled: boolean): void;
 selectedProcedureAnnotation: ProcedureEntityAnnotation | null;
 setSelectedProcedureAnnotation(annotation: ProcedureEntityAnnotation | null): void;
+procedureDisplayLevel: ProcedureDisplayLevel;
+setProcedureDisplayLevel(level: ProcedureDisplayLevel): void;
+```
+
+Where:
+
+```ts
+export type ProcedureDisplayLevel =
+  | "CORE"
+  | "PROTECTION"
+  | "ESTIMATED"
+  | "VISUAL_AID"
+  | "DEBUG";
 ```
 
 Optional later:
@@ -513,11 +585,11 @@ Suggested Cesium label style:
 
 ## 8. Picking And Popup Behavior
 
-### 8.1 Double-Click Picking
+### 8.1 Single-Click Picking
 
 Use Cesium `ScreenSpaceEventHandler`:
 
-- event: `Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK`
+- event: `Cesium.ScreenSpaceEventType.LEFT_CLICK`
 - call `viewer.scene.pick(event.position)`
 - resolve picked object:
   - picked entity
@@ -565,12 +637,15 @@ Files:
 Work:
 
 - Add annotation mode state.
+- Add procedure display-level state.
 - Add `Annotate` toggle to ProcedurePanel.
+- Add `Display` selector to ProcedurePanel.
 - Add unit test for toggle if practical.
 
 Acceptance:
 
 - Toggle appears.
+- Display selector appears and defaults to `Protection`.
 - State updates.
 - No labels/picking yet.
 
@@ -584,6 +659,7 @@ Files:
 Work:
 
 - Build `ProcedureEntityAnnotation` for every procedure entity.
+- Add pure display-level classification for every annotation kind/status pair.
 - Store annotation metadata in a ref map.
 - Attach `annotationId` property to entities.
 - Keep geometry rendering unchanged.
@@ -592,6 +668,7 @@ Acceptance:
 
 - Existing rendering unchanged.
 - Tests cover annotation metadata builder functions, not Cesium internals.
+- Tests cover display-level classification.
 
 ### Phase C: Labels
 
@@ -607,6 +684,7 @@ Work:
   - procedure layer on/off
   - branch visibility
   - annotation mode on/off
+  - procedure display-level filter
 - Labels are cleaned up with procedure entities.
 
 Acceptance:
@@ -615,7 +693,7 @@ Acceptance:
 - Annotate on: important fix/segment/protected geometry labels appear.
 - Branch toggles hide corresponding labels.
 
-### Phase D: Double-Click Selection And Popup
+### Phase D: Single-Click Selection And Popup
 
 Files:
 
@@ -625,15 +703,15 @@ Files:
 
 Work:
 
-- Register double-click picking handler.
+- Register single-click picking handler.
 - Resolve picked procedure annotation.
 - Show popup with metadata.
 - Add close button.
 
 Acceptance:
 
-- Double-clicking a procedure geometry opens popup.
-- Double-clicking non-procedure geometry does nothing.
+- Single-clicking a procedure geometry opens popup.
+- Single-clicking non-procedure geometry does nothing.
 - Popup clears correctly.
 
 ### Phase E: Highlight
