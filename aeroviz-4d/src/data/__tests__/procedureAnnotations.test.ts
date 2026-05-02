@@ -40,6 +40,12 @@ describe("procedureAnnotations", () => {
     expect(procedureAnnotationMeaning("LNAV_VNAV_OCS", "ESTIMATED")).toContain(
       "Sloping LNAV/VNAV",
     );
+    expect(procedureAnnotationMeaning("SEGMENT_ENVELOPE_PRIMARY", "SOURCE_BACKED")).toContain(
+      "not an OCS",
+    );
+    expect(procedureAnnotationMeaning("SEGMENT_ENVELOPE_SECONDARY", "SOURCE_BACKED")).toContain(
+      "not an OCS",
+    );
     expect(procedureAnnotationMeaning("SEGMENT_VERTICAL_PROFILE", "ESTIMATED")).toContain(
       "adjacent procedure fixes",
     );

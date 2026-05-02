@@ -839,7 +839,11 @@ function addSegmentEntities(
     branchBundle,
     segment: segmentBundle.segment,
     legs: segmentBundle.legs,
-    parameters: segmentParams(segmentBundle.segment, segmentBundle.legs),
+    parameters: [
+      ...segmentParams(segmentBundle.segment, segmentBundle.legs),
+      param("Surface meaning", "Lateral protection footprint"),
+      param("Vertical meaning", "Not OCS; not a vertical clearance surface"),
+    ],
     diagnostics: segmentDiagnostics,
     sourceRefs: sourceRefsFromSegment(segmentBundle.segment),
   });
@@ -866,7 +870,11 @@ function addSegmentEntities(
     branchBundle,
     segment: segmentBundle.segment,
     legs: segmentBundle.legs,
-    parameters: segmentParams(segmentBundle.segment, segmentBundle.legs),
+    parameters: [
+      ...segmentParams(segmentBundle.segment, segmentBundle.legs),
+      param("Surface meaning", "Secondary lateral protection footprint"),
+      param("Vertical meaning", "Not OCS; not a vertical clearance surface"),
+    ],
     diagnostics: segmentDiagnostics,
     sourceRefs: sourceRefsFromSegment(segmentBundle.segment),
   });

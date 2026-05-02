@@ -472,6 +472,17 @@ describe("useProcedureSegmentLayer", () => {
     expect(loadProcedureRenderBundleData).toHaveBeenCalledWith("KRDU");
     expect(entities.some((entity) => String(entity.id).endsWith("-centerline"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-envelope-primary"))).toBe(true);
+    expect(
+      entities.some(
+        (entity) =>
+          String(entity.id).includes("-envelope-primary") &&
+          entity.__aeroVizProcedureAnnotation?.parameters.some(
+            (parameter: { label: string; value: string }) =>
+              parameter.label === "Vertical meaning" &&
+              parameter.value === "Not OCS; not a vertical clearance surface",
+          ),
+      ),
+    ).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-oea-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-lnav-vnav-ocs-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-final-vertical-reference-band"))).toBe(true);

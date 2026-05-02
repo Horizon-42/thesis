@@ -151,10 +151,10 @@ export function procedureAnnotationMeaning(
       : "Nominal coded path for this procedure segment. It is the reference line used to place lateral protected areas.";
   }
   if (kind === "SEGMENT_ENVELOPE_PRIMARY") {
-    return "Primary lateral protected area around the segment centerline. It represents the central protected region for this visualization.";
+    return "Primary lateral protected-area footprint around the segment centerline. It shows horizontal containment only and is not an OCS or vertical clearance surface.";
   }
   if (kind === "SEGMENT_ENVELOPE_SECONDARY") {
-    return "Secondary lateral area outside the primary envelope. It helps show the outer buffer or taper where available.";
+    return "Secondary lateral protected-area footprint outside the primary envelope. It shows the outer horizontal buffer or taper and is not an OCS or vertical clearance surface.";
   }
   if (kind === "SEGMENT_VERTICAL_PROFILE") {
     return "Estimated vertical profile surface connecting adjacent procedure fixes. Its lateral width follows the primary protected area.";
