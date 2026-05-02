@@ -413,6 +413,18 @@ def test_cifparse_rf_leg_metadata_resolves_center_fix() -> None:
     assert rf_path["centerLonDeg"] == pytest.approx(fix_records["CFZJF"].lon)
 
 
+def test_cifparse_ca_leg_metadata_exports_course() -> None:
+    legs = parse_procedure_legs(
+        CIFP_ROOT / "FAACIFP18",
+        airport="KRDU",
+        procedure="R32",
+        branch="R",
+    )
+    ca_leg = next(leg for leg in legs if leg.leg_type == "CA")
+
+    assert ca_leg.course_deg == pytest.approx(324.2)
+
+
 def test_build_katl_zelan4_procedure_detail_document_exports_real_rf_metadata() -> None:
     document = build_procedure_detail_document(
         cifp_root=CIFP_ROOT,

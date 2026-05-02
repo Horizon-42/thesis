@@ -770,6 +770,7 @@ def parse_procedure_legs(
                 arc_radius_nm=normalize_float(primary.get("arc_radius")),
                 center_fix_ident=str(primary.get("center_fix") or "").strip().upper() or None,
                 center_fix_region_code=str(primary.get("center_fix_region") or "").strip().upper() or None,
+                course_deg=normalize_float(primary.get("course")),
             )
         )
 

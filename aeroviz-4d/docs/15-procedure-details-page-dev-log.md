@@ -2276,3 +2276,44 @@
 
 ### Exact Next Recommended Step
 - Regenerate current public procedure assets and compare the panel's `3D status` counts against expected procedures with CA, GPA/TCH, and turning-missed metadata.
+
+## 2026-05-02 13:09 CEST
+
+### Goal Of This Session
+- Fix the first source-data blocker found while explaining why recent protected-geometry changes were not clearly visible in the 3D page.
+
+### Diagnosis
+- KRDU procedure detail docs had CA, RF, HM, and turn-direction data, but no exported `courseDeg`.
+- The older fixed-width parser path could parse CA course fields, but the active cifparse adapter version of `parse_procedure_legs` did not copy the cifparse `course` value into `ProcedureLeg.course_deg`.
+- Without `courseDeg`, 3D CA course guides, estimated CA endpoints, CA centerlines, and turning-missed debug primitives were blocked by `SOURCE_INCOMPLETE` diagnostics.
+
+### Decisions Locked
+- Export cifparse `course` values as `ProcedureLeg.course_deg`.
+- Keep this in the parser adapter rather than deriving it in the frontend so generated browser data carries explicit source-backed course metadata.
+- Leave GPA/TCH unresolved for now; regenerated KRDU assets still have zero profiles with GPA/TCH, so LNAV/VNAV OCS and LPV/GLS W/X/Y surfaces remain gated by vertical-profile source data.
+
+### Files Changed
+- `python/cifp_parser.py`
+- `python/tests/test_preprocess_procedures.py`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `conda run -n aviation pytest python/tests/test_preprocess_procedures.py -k "course or cifparse_ca_leg_metadata_exports_course"`
+- `conda run -n aviation /Users/liudongxu/opt/miniconda3/envs/aviation/bin/python3.13 python/preprocess_procedures.py --airport KRDU --include-all-rnav --include-transitions --charts-root public/data/airports/KRDU/charts --output public/data/airports/KRDU/procedures.geojson`
+
+### Regenerated KRDU Data Counts
+- Detail docs: 9.
+- CA legs: 9.
+- CA legs with `courseDeg`: 9.
+- Legs with `courseDeg`: 24.
+- RF legs: 5.
+- HM legs: 9.
+- Legs with `turnDirection`: 23.
+- Vertical profiles with GPA/TCH: 0.
+
+### Current Status
+- The current local KRDU generated assets now contain the course metadata needed for CA/missed-course 3D primitives.
+- The generated `public/data/airports/*` assets are ignored local data, so the code fix is committed separately from regenerated browser data unless the data publishing policy changes.
+
+### Exact Next Recommended Step
+- Run full Python and frontend validation, then commit this parser/export fix.
