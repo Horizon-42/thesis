@@ -44,6 +44,9 @@ const PRIMARY_COLOR = Cesium.Color.DEEPSKYBLUE.withAlpha(0.18);
 const SECONDARY_COLOR = Cesium.Color.YELLOW.withAlpha(0.1);
 const LNAV_VNAV_OCS_PRIMARY_COLOR = Cesium.Color.MAGENTA.withAlpha(0.34);
 const LNAV_VNAV_OCS_SECONDARY_COLOR = Cesium.Color.MAGENTA.withAlpha(0.18);
+const LNAV_VNAV_OCS_EDGE_COLOR = Cesium.Color.MAGENTA.withAlpha(0.92);
+const LNAV_VNAV_OCS_SECONDARY_EDGE_COLOR = Cesium.Color.MAGENTA.withAlpha(0.62);
+const LNAV_VNAV_OCS_RIB_COLOR = Cesium.Color.MAGENTA.withAlpha(0.72);
 const PRECISION_FINAL_SURFACE_COLOR = Cesium.Color.MAGENTA.withAlpha(0.18);
 const FINAL_VERTICAL_REFERENCE_COLOR = Cesium.Color.CYAN.withAlpha(0.88);
 const FINAL_VERTICAL_REFERENCE_BAND_COLOR = Cesium.Color.CYAN.withAlpha(0.16);
@@ -64,6 +67,8 @@ const OUTLINE_COLOR = Cesium.Color.CYAN.withAlpha(0.28);
 const ENVELOPE_HEIGHT_OFFSET_M = 8;
 const OEA_HEIGHT_OFFSET_M = 18;
 const LNAV_VNAV_OCS_HEIGHT_OFFSET_M = 28;
+const LNAV_VNAV_OCS_EDGE_HEIGHT_OFFSET_M = LNAV_VNAV_OCS_HEIGHT_OFFSET_M + 2;
+const LNAV_VNAV_OCS_RIB_HEIGHT_OFFSET_M = LNAV_VNAV_OCS_HEIGHT_OFFSET_M + 3;
 const PRECISION_FINAL_SURFACE_HEIGHT_OFFSET_M = 34;
 const FINAL_VERTICAL_REFERENCE_HEIGHT_OFFSET_M = 40;
 const FINAL_VERTICAL_REFERENCE_BAND_HEIGHT_OFFSET_M = 38;
@@ -660,6 +665,51 @@ function addRibbonBoundaryPolylines(
   return [leftId, rightId];
 }
 
+function addRibbonCrossRibs(
+  viewer: Cesium.Viewer,
+  id: string,
+  name: string,
+  ribbon: VariableWidthRibbonGeometry | undefined,
+  visible: boolean,
+  material: Cesium.Color,
+  altitudeOffsetM: number,
+  annotation?: ProcedureEntityAnnotation,
+): string[] {
+  if (!ribbon || ribbon.leftGeoBoundary.length < 3 || ribbon.rightGeoBoundary.length < 3) return [];
+
+  const ribIds: string[] = [];
+  const lastIndex = Math.min(ribbon.leftGeoBoundary.length, ribbon.rightGeoBoundary.length) - 1;
+  const indexes = Array.from(
+    new Set([
+      0,
+      Math.round(lastIndex * 0.25),
+      Math.round(lastIndex * 0.5),
+      Math.round(lastIndex * 0.75),
+      lastIndex,
+    ]),
+  ).filter((index) => index >= 0 && index <= lastIndex);
+
+  indexes.forEach((index) => {
+    const ribId = `${id}-rib-${index}`;
+    addPolyline(
+      viewer,
+      ribId,
+      `${name} station rib ${index}`,
+      [
+        elevatedPoint(ribbon.leftGeoBoundary[index], altitudeOffsetM),
+        elevatedPoint(ribbon.rightGeoBoundary[index], altitudeOffsetM),
+      ],
+      visible,
+      2,
+      material,
+      annotation,
+    );
+    ribIds.push(ribId);
+  });
+
+  return ribIds;
+}
+
 function addSegmentEntities(
   viewer: Cesium.Viewer,
   bundle: ProcedureRenderBundle,
@@ -1052,6 +1102,28 @@ function addSegmentEntities(
         ocsAnnotation,
     );
     ids.push(ocsPrimaryId);
+    ids.push(
+      ...addRibbonBoundaryPolylines(
+        viewer,
+        `${baseId}-lnav-vnav-ocs-primary-boundary`,
+        `${segmentName} LNAV/VNAV OCS primary`,
+        segmentBundle.lnavVnavOcs.primary,
+        procedureEntityShow(visible, ocsAnnotation, displayLevel),
+        LNAV_VNAV_OCS_EDGE_COLOR,
+        LNAV_VNAV_OCS_EDGE_HEIGHT_OFFSET_M,
+        ocsAnnotation,
+      ),
+      ...addRibbonCrossRibs(
+        viewer,
+        `${baseId}-lnav-vnav-ocs-primary`,
+        `${segmentName} LNAV/VNAV OCS primary`,
+        segmentBundle.lnavVnavOcs.primary,
+        procedureEntityShow(visible, ocsAnnotation, displayLevel),
+        LNAV_VNAV_OCS_RIB_COLOR,
+        LNAV_VNAV_OCS_RIB_HEIGHT_OFFSET_M,
+        ocsAnnotation,
+      ),
+    );
     const ocsLabelId = addAnnotationLabel(
       viewer,
       ocsAnnotation,
@@ -1077,6 +1149,18 @@ function addSegmentEntities(
       ocsSecondaryAnnotation,
     );
     ids.push(ocsSecondaryId);
+    ids.push(
+      ...addRibbonBoundaryPolylines(
+        viewer,
+        `${baseId}-lnav-vnav-ocs-secondary-boundary`,
+        `${segmentName} LNAV/VNAV OCS secondary`,
+        segmentBundle.lnavVnavOcs.secondaryOuter,
+        procedureEntityShow(visible, ocsSecondaryAnnotation, displayLevel),
+        LNAV_VNAV_OCS_SECONDARY_EDGE_COLOR,
+        LNAV_VNAV_OCS_EDGE_HEIGHT_OFFSET_M,
+        ocsSecondaryAnnotation,
+      ),
+    );
   }
 
   segmentBundle.precisionFinalSurfaces.forEach((surface) => {
