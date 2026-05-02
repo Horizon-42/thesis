@@ -20,4 +20,11 @@
 - Scope: reduce duplicate procedure-detail fetch/parse/geometry-build work across `ProcedurePanel`, 3D procedure layer, and runway trajectory profile.
 - Change: added an airport/context keyed promise cache inside `procedureRenderBundle`, with a test-only clear helper and retry support after failed loads.
 - Tests: `npm test -- --run src/data/__tests__/procedureRenderBundle.test.ts`; `npm run build`.
+- Commit: this entry is included in `Cache procedure render bundle loads`.
+
+## 2026-05-02 Step 4 - Lazy procedure branch entity creation
+
+- Scope: reduce Cesium entity count by avoiding eager creation for hidden procedure branches.
+- Change: `useProcedureSegmentLayer` now stores loaded render bundle data, creates only visible branch entities, and lazily creates a hidden branch the first time selector state makes it visible.
+- Tests: `npm test -- --run src/hooks/__tests__/useProcedureSegmentLayer.test.ts`; `npm run build`.
 - Commit: pending.

@@ -1789,6 +1789,89 @@ function addBranchMissedCaMahfConnectorEntities(
   return ids;
 }
 
+function packageBranchDefaultVisible(
+  pkg: ProcedurePackage | null,
+  branchId: string,
+): boolean {
+  return pkg?.branches.find((branch) => branch.branchId === branchId)?.legacy.defaultVisible ?? true;
+}
+
+function packageBranchVisible(
+  pkg: ProcedurePackage | null,
+  branchId: string,
+  procedureVisibility: Record<string, boolean>,
+): boolean {
+  return procedureVisibility[branchId] ?? packageBranchDefaultVisible(pkg, branchId);
+}
+
+function addBranchEntities(
+  viewer: Cesium.Viewer,
+  bundle: ProcedureRenderBundle,
+  branchBundle: BranchGeometryBundle,
+  branchIndex: number,
+  pkg: ProcedurePackage | null,
+  visible: boolean,
+  annotationVisible: boolean,
+  displayLevel: ProcedureDisplayLevel,
+): string[] {
+  const ids: string[] = [];
+  if (pkg && branchIndex === 0) {
+    ids.push(
+      ...addFixLabelEntities(
+        viewer,
+        bundle,
+        branchBundle,
+        pkg,
+        visible,
+        annotationVisible,
+        displayLevel,
+      ),
+    );
+  }
+  branchBundle.segmentBundles.forEach((segmentBundle) => {
+    ids.push(
+      ...addSegmentEntities(
+        viewer,
+        bundle,
+        branchBundle,
+        segmentBundle,
+        pkg,
+        visible,
+        annotationVisible,
+        displayLevel,
+      ),
+    );
+  });
+  ids.push(
+    ...addBranchVerticalProfileEntity(
+      viewer,
+      bundle,
+      branchBundle,
+      pkg,
+      visible,
+      annotationVisible,
+      displayLevel,
+    ),
+    ...addBranchTurnJunctionEntities(
+      viewer,
+      bundle,
+      branchBundle,
+      visible,
+      annotationVisible,
+      displayLevel,
+    ),
+    ...addBranchMissedCaMahfConnectorEntities(
+      viewer,
+      bundle,
+      branchBundle,
+      visible,
+      annotationVisible,
+      displayLevel,
+    ),
+  );
+  return ids;
+}
+
 export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean } = {}): void {
   const {
     viewer,
@@ -1803,6 +1886,17 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
   const displayLevelRef = useRef(procedureDisplayLevel);
   const procedureVisibilityRef = useRef(procedureVisibility);
   const branchEntityIdsRef = useRef<Record<string, string[]>>({});
+  const allEntityIdsRef = useRef<string[]>([]);
+  const renderDataRef = useRef<{
+    renderBundles: ProcedureRenderBundle[];
+    packageById: Map<string, ProcedurePackage>;
+  } | null>(null);
+
+  const addBranchEntityIds = (branchId: string, entityIds: string[]) => {
+    allEntityIdsRef.current.push(...entityIds);
+    const existing = branchEntityIdsRef.current[branchId] ?? [];
+    branchEntityIdsRef.current[branchId] = [...existing, ...entityIds];
+  };
 
   useEffect(() => {
     visibleRef.current = layers.procedures;
@@ -1826,6 +1920,29 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
         }
       });
     });
+
+    if (layers.procedures && renderDataRef.current) {
+      renderDataRef.current.renderBundles.forEach((bundle) => {
+        const pkg = renderDataRef.current?.packageById.get(bundle.packageId) ?? null;
+        bundle.branchBundles.forEach((branchBundle, branchIndex) => {
+          const branchVisible = packageBranchVisible(pkg, branchBundle.branchId, procedureVisibility);
+          if (!branchVisible || branchEntityIdsRef.current[branchBundle.branchId]?.length) return;
+          addBranchEntityIds(
+            branchBundle.branchId,
+            addBranchEntities(
+              viewer,
+              bundle,
+              branchBundle,
+              branchIndex,
+              pkg,
+              true,
+              procedureAnnotationEnabled,
+              procedureDisplayLevel,
+            ),
+          );
+        });
+      });
+    }
   }, [
     enabled,
     viewer,
@@ -1840,82 +1957,34 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
     if (!viewer || !activeAirportCode) return;
 
     let cancelled = false;
-    const addedIds: string[] = [];
     branchEntityIdsRef.current = {};
-
-    const addBranchEntityIds = (branchId: string, entityIds: string[]) => {
-      addedIds.push(...entityIds);
-      const existing = branchEntityIdsRef.current[branchId] ?? [];
-      branchEntityIdsRef.current[branchId] = [...existing, ...entityIds];
-    };
+    allEntityIdsRef.current = [];
+    renderDataRef.current = null;
 
     loadProcedureRenderBundleData(activeAirportCode)
       .then(({ renderBundles, packages }) => {
         if (cancelled || !isCesiumViewerUsable(viewer)) return;
 
         const packageById = new Map(packages.map((pkg) => [pkg.packageId, pkg]));
+        renderDataRef.current = { renderBundles, packageById };
         renderBundles.forEach((bundle) => {
           const pkg = packageById.get(bundle.packageId);
           bundle.branchBundles.forEach((branchBundle, branchIndex) => {
-            const visible = visibleRef.current && (procedureVisibilityRef.current[branchBundle.branchId] ?? true);
-            if (pkg && branchIndex === 0) {
-              addBranchEntityIds(
-                branchBundle.branchId,
-                addFixLabelEntities(
-                  viewer,
-                  bundle,
-                  branchBundle,
-                  pkg,
-                  visible,
-                  annotationVisibleRef.current,
-                  displayLevelRef.current,
-                ),
-              );
-            }
-            branchBundle.segmentBundles.forEach((segmentBundle) => {
-              addBranchEntityIds(
-                branchBundle.branchId,
-                addSegmentEntities(
-                  viewer,
-                  bundle,
-                  branchBundle,
-                  segmentBundle,
-                  pkg ?? null,
-                  visible,
-                  annotationVisibleRef.current,
-                  displayLevelRef.current,
-                ),
-              );
-            });
+            const branchVisible = packageBranchVisible(
+              pkg ?? null,
+              branchBundle.branchId,
+              procedureVisibilityRef.current,
+            );
+            const visible = visibleRef.current && branchVisible;
+            if (!visible) return;
             addBranchEntityIds(
               branchBundle.branchId,
-              addBranchVerticalProfileEntity(
+              addBranchEntities(
                 viewer,
                 bundle,
                 branchBundle,
+                branchIndex,
                 pkg ?? null,
-                visible,
-                annotationVisibleRef.current,
-                displayLevelRef.current,
-              ),
-            );
-            addBranchEntityIds(
-              branchBundle.branchId,
-              addBranchTurnJunctionEntities(
-                viewer,
-                bundle,
-                branchBundle,
-                visible,
-                annotationVisibleRef.current,
-                displayLevelRef.current,
-              ),
-            );
-            addBranchEntityIds(
-              branchBundle.branchId,
-              addBranchMissedCaMahfConnectorEntities(
-                viewer,
-                bundle,
-                branchBundle,
                 visible,
                 annotationVisibleRef.current,
                 displayLevelRef.current,
@@ -1938,9 +2007,11 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
     return () => {
       cancelled = true;
       if (isCesiumViewerUsable(viewer)) {
-        addedIds.forEach((id) => viewer.entities.removeById(id));
+        allEntityIdsRef.current.forEach((id) => viewer.entities.removeById(id));
       }
       branchEntityIdsRef.current = {};
+      allEntityIdsRef.current = [];
+      renderDataRef.current = null;
     };
   }, [enabled, viewer, activeAirportCode]);
 }

@@ -816,6 +816,23 @@ describe("useProcedureSegmentLayer", () => {
     expect(entities.every((entity) => entity.show === false)).toBe(true);
   });
 
+  it("creates hidden branch entities lazily when the branch becomes visible", async () => {
+    setProcedureBranchVisible("KRDU-R05LY-RW05L:branch:R", false);
+
+    const { rerender } = renderHook(() => useProcedureSegmentLayer());
+    await waitFor(() => expect(loadProcedureRenderBundleData).toHaveBeenCalledTimes(1));
+
+    expect(mockViewer.entities.add).not.toHaveBeenCalled();
+    expect(entities).toHaveLength(0);
+
+    setProcedureBranchVisible("KRDU-R05LY-RW05L:branch:R", true);
+    rerender();
+
+    await waitFor(() => expect(mockViewer.entities.add).toHaveBeenCalled());
+    expect(entities.some((entity) => String(entity.id).endsWith("-centerline"))).toBe(true);
+    expect(loadProcedureRenderBundleData).toHaveBeenCalledTimes(1);
+  });
+
   it("uses the canonical branch id for Procedure Panel branch selection", async () => {
     const { rerender } = renderHook(() => useProcedureSegmentLayer());
     await waitFor(() => expect(mockViewer.entities.add).toHaveBeenCalled());
