@@ -182,6 +182,29 @@ describe("procedure surface geometry", () => {
     ]);
   });
 
+  it("keeps RNP AR final templates distinct instead of treating them as LNAV baseline", () => {
+    const result = buildFinalApproachSurfaceStatus(
+      {
+        ...finalSegment,
+        segmentType: "FINAL_RNP_AR",
+        verticalRule: { kind: "RNP_AR_VERTICAL" },
+      },
+      null,
+    );
+
+    expect(result.status).toMatchObject({
+      requestedModes: ["RNP/AR"],
+      constructedSurfaceTypes: [],
+      missingSurfaceTypes: ["RNP_AR_FINAL_TEMPLATE"],
+      constructionStatus: "UNSUPPORTED_FINAL_VERTICAL_SURFACES",
+    });
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "FINAL_VERTICAL_SURFACE_UNIMPLEMENTED",
+      }),
+    ]);
+  });
+
   it("builds independent LPV W/X/Y debug-estimate surfaces from GPA and TCH", () => {
     const lpvSegment: ProcedureSegment = {
       ...finalSegment,

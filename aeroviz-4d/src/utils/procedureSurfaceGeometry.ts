@@ -98,7 +98,8 @@ export type FinalApproachSurfaceType =
   | "LPV_Y"
   | "GLS_W"
   | "GLS_X"
-  | "GLS_Y";
+  | "GLS_Y"
+  | "RNP_AR_FINAL_TEMPLATE";
 
 export interface FinalApproachSurfaceStatus {
   segmentId: string;
@@ -266,6 +267,7 @@ function surfaceTypesForMode(mode: string): FinalApproachSurfaceType[] {
   if (normalized === "LNAV/VNAV" || normalized === "LNAV-VNAV") return ["LNAV_VNAV_OCS"];
   if (normalized === "LPV") return ["LPV_W", "LPV_X", "LPV_Y"];
   if (normalized === "GLS") return ["GLS_W", "GLS_X", "GLS_Y"];
+  if (normalized === "RNP/AR" || normalized === "RNP_AR") return ["RNP_AR_FINAL_TEMPLATE"];
   return [];
 }
 

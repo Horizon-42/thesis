@@ -2189,3 +2189,33 @@
 
 ### Exact Next Recommended Step
 - Continue with P5 RNP AR/RF-specific templates.
+
+## 2026-05-02 12:55 CEST
+
+### Goal Of This Session
+- Start P5 by preventing RNP AR finals from being reported as LNAV baseline constructed.
+
+### Decisions Locked
+- Added `RNP_AR_FINAL_TEMPLATE` to final surface status typing.
+- `FINAL_RNP_AR` now requests `RNP_AR_FINAL_TEMPLATE` and reports it as missing until a real RNP AR final template builder exists.
+- Render bundles now emit `FINAL_VERTICAL_SURFACE_UNIMPLEMENTED` for RNP AR final templates instead of silently producing an empty constructed status.
+
+### Files Changed
+- `src/utils/procedureSurfaceGeometry.ts`
+- `src/utils/__tests__/procedureSurfaceGeometry.test.ts`
+- `src/data/__tests__/procedureRenderBundle.test.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/utils/__tests__/procedureSurfaceGeometry.test.ts src/data/__tests__/procedureRenderBundle.test.ts`
+- `npm run build`
+
+### Current Status
+- P5 now preserves RNP AR final status as a distinct missing template instead of collapsing it to LNAV baseline behavior.
+
+### Known Blockers
+- No RNP AR final template geometry is constructed yet.
+- RF final protected templates remain first-pass RF parallel envelopes only.
+
+### Exact Next Recommended Step
+- Run full frontend validation, then add a focused RF/RNP AR final diagnostic that marks RF final envelopes as first-pass rather than certified RNP AR templates.

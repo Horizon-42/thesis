@@ -670,6 +670,43 @@ describe("procedure render bundle", () => {
     });
   });
 
+  it("reports RNP AR final templates as distinct missing geometry", () => {
+    const rnpArPackage: ProcedurePackage = {
+      ...samplePackage,
+      procedureFamily: "RNP_AR_APCH",
+      segments: [
+        {
+          ...samplePackage.segments[0],
+          segmentType: "FINAL_RNP_AR",
+          navSpec: "RNP_AR_0_3",
+          verticalRule: { kind: "RNP_AR_VERTICAL" },
+          secondaryEnabled: false,
+          constructionFlags: {},
+        },
+      ],
+    };
+    const bundle = buildProcedureRenderBundle(rnpArPackage, {
+      samplingStepNm: 0.5,
+      enableDebugPrimitives: false,
+    });
+    const segmentBundle = bundle.branchBundles[0].segmentBundles[0];
+
+    expect(segmentBundle.finalSurfaceStatus).toMatchObject({
+      requestedModes: ["RNP/AR"],
+      constructedSurfaceTypes: [],
+      missingSurfaceTypes: ["RNP_AR_FINAL_TEMPLATE"],
+      constructionStatus: "UNSUPPORTED_FINAL_VERTICAL_SURFACES",
+    });
+    expect(bundle.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "FINAL_VERTICAL_SURFACE_UNIMPLEMENTED",
+          segmentId: "segment:final",
+        }),
+      ]),
+    );
+  });
+
   it("adds visual inter-segment turn junctions at adjacent segment joins", () => {
     const bundle = buildProcedureRenderBundle(twoSegmentTurnPackage, {
       samplingStepNm: 0.5,
