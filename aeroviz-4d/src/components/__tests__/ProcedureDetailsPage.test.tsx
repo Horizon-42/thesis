@@ -33,6 +33,9 @@ const {
     ],
     activeAirportCode: "KRDU",
     setActiveAirportCode: vi.fn(),
+    layers: { procedures: true },
+    procedureVisibility: {},
+    procedureDisplayLevel: "PROTECTION",
   },
 }));
 
@@ -41,6 +44,9 @@ vi.mock("../../context/AppContext", () => ({
     airports: appState.airports,
     activeAirportCode: appState.activeAirportCode,
     setActiveAirportCode,
+    layers: appState.layers,
+    procedureVisibility: appState.procedureVisibility,
+    procedureDisplayLevel: appState.procedureDisplayLevel,
   }),
 }));
 
@@ -415,6 +421,9 @@ describe("ProcedureDetailsPage", () => {
     fetchMock.mockReset();
     setActiveAirportCode.mockReset();
     appState.activeAirportCode = "KRDU";
+    appState.layers = { procedures: true };
+    appState.procedureVisibility = {};
+    appState.procedureDisplayLevel = "PROTECTION";
     window.history.replaceState({}, "", "/procedure-details");
     vi.stubGlobal("fetch", fetchMock);
   });
@@ -452,10 +461,34 @@ describe("ProcedureDetailsPage", () => {
     expect(await screen.findByText("final_approach_fix")).toBeTruthy();
     expect(screen.getAllByText(/DEFAULT_TOLERANCE/).length).toBeGreaterThan(0);
     expect(screen.getAllByText("Final surfaces").length).toBeGreaterThan(0);
-    expect(screen.getByText("GPA 3.0 deg est")).toBeTruthy();
     expect(screen.getByText("WEPAS 2,200 ft")).toBeTruthy();
+    expect(screen.queryByText("GPA 3.0 deg est")).toBeNull();
     expect(screen.getByText(/Missing LPV_W, LPV_X, LPV_Y, LNAV_VNAV_OCS/)).toBeTruthy();
     expect(screen.getByText(/FINAL_VERTICAL_SURFACE_UNIMPLEMENTED/)).toBeTruthy();
+  });
+
+  it("uses procedure panel visibility and display level for 2D procedure charts", async () => {
+    appState.procedureVisibility = { "KRDU-R05LY-RW05L:branch:R": false };
+    appState.procedureDisplayLevel = "ESTIMATED";
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith("/procedure-details/index.json")) return Promise.resolve(jsonResponse(sampleIndex));
+      if (url.endsWith("/charts/index.json")) return Promise.resolve(jsonResponse(sampleCharts));
+      if (url.endsWith("/procedure-details/KRDU-R05LY-RW05L.json")) {
+        return Promise.resolve(jsonResponse(sampleDocument));
+      }
+      return Promise.resolve(notFoundResponse());
+    });
+
+    render(<ProcedureDetailsPage />);
+
+    expect(await screen.findByText("No positioned fixes available for the plan view yet.")).toBeTruthy();
+    expect(screen.getByText("No altitude-supported samples are available for the vertical profile yet.")).toBeTruthy();
+
+    appState.procedureVisibility = { "KRDU-R05LY-RW05L:branch:R": true };
+    render(<ProcedureDetailsPage />);
+
+    expect(await screen.findByText("GPA 3.0 deg est")).toBeTruthy();
+    expect(screen.getByText("WEPAS 2,200 ft")).toBeTruthy();
   });
 
   it("switches procedure-details distance axes from nautical miles to metres", async () => {
@@ -499,6 +532,7 @@ describe("ProcedureDetailsPage", () => {
   });
 
   it("marks the missed approach section split in plan and profile views", async () => {
+    appState.procedureDisplayLevel = "DEBUG";
     fetchMock.mockImplementation((url: string) => {
       if (url.endsWith("/procedure-details/index.json")) return Promise.resolve(jsonResponse(sampleIndex));
       if (url.endsWith("/charts/index.json")) return Promise.resolve(jsonResponse(sampleCharts));

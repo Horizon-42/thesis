@@ -34,6 +34,13 @@ import {
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 import { navigateWithinApp } from "../utils/navigation";
 import {
+  isProcedureAnnotationVisibleAtDisplayLevel,
+  type ProcedureAnnotationKind,
+  type ProcedureAnnotationStatus,
+  type ProcedureDisplayLevel,
+  type ProcedureEntityAnnotation,
+} from "../data/procedureAnnotations";
+import {
   buildProcedureBranchPolylines,
   buildRunwayMarker,
   findFix,
@@ -66,6 +73,17 @@ const IMPORTANT_FIX_ROLES = new Set(["IAF", "IF", "FAF", "MAPT", "MAHF"]);
 const METERS_PER_NM = 1852;
 
 type DistanceUnit = "nm" | "m";
+
+function showProcedureElement2d(
+  kind: ProcedureAnnotationKind,
+  status: ProcedureAnnotationStatus,
+  displayLevel: ProcedureDisplayLevel,
+): boolean {
+  return isProcedureAnnotationVisibleAtDisplayLevel(
+    { kind, status } as ProcedureEntityAnnotation,
+    displayLevel,
+  );
+}
 
 function readRouteParams(): {
   airport: string | null;
@@ -662,6 +680,14 @@ function scopedBranchIdFor(document: ProcedureDetailDocument, branch: ProcedureB
   return scopedBranchIdForKey(document, branch.branchKey);
 }
 
+function branchIsVisibleInProcedurePanel(
+  document: ProcedureDetailDocument,
+  branch: ProcedureBranchPolyline,
+  procedureVisibility: Record<string, boolean>,
+): boolean {
+  return procedureVisibility[scopedBranchIdFor(document, branch)] ?? branch.defaultVisible;
+}
+
 function buildMissedSectionMarkers(
   document: ProcedureDetailDocument | null,
   renderBundle: ProcedureRenderBundle | null,
@@ -851,6 +877,7 @@ interface SvgChartProps {
   missedCaEndpointMarkers: MissedCaEndpointMarker[];
   focusedFixId: string | null;
   focusedBranchId: string | null;
+  procedureDisplayLevel: ProcedureDisplayLevel;
   distanceUnit: DistanceUnit;
   onPreviewFix: (fixId: string | null, branchId: string | null) => void;
   onSelectFix: (fixId: string, branchId: string) => void;
@@ -869,6 +896,7 @@ function ProcedurePlanView({
   missedCaEndpointMarkers,
   focusedFixId,
   focusedBranchId,
+  procedureDisplayLevel,
   distanceUnit,
   onPreviewFix,
   onSelectFix,
@@ -1155,7 +1183,8 @@ function ProcedurePlanView({
         );
       })}
 
-      {missedSectionMarkers.map((marker) => {
+      {showProcedureElement2d("MISSED_SURFACE", "SOURCE_BACKED", procedureDisplayLevel)
+        ? missedSectionMarkers.map((marker) => {
         const isFocused = !focusedBranchId || marker.branchId === focusedBranchId;
         const x = scaleX(marker.point.xM);
         const y = scaleY(marker.point.yM);
@@ -1172,7 +1201,8 @@ function ProcedurePlanView({
             <text x={x + 11} y={y - 10}>{marker.label}</text>
           </g>
         );
-      })}
+        })
+        : null}
 
       {missedLegMarkers.map((marker) => {
         const isFocused = !focusedBranchId || marker.branchId === focusedBranchId;
@@ -1205,7 +1235,8 @@ function ProcedurePlanView({
         );
       })}
 
-      {missedTurnDebugMarkers.map((marker) => {
+      {showProcedureElement2d("TURNING_MISSED_DEBUG", "DEBUG_ESTIMATE", procedureDisplayLevel)
+        ? missedTurnDebugMarkers.map((marker) => {
         const isFocused = !focusedBranchId || marker.branchId === focusedBranchId;
         const x = scaleX(marker.point.xM);
         const y = scaleY(marker.point.yM);
@@ -1223,9 +1254,11 @@ function ProcedurePlanView({
             <text x={x + 13} y={y + 4}>{marker.label}</text>
           </g>
         );
-      })}
+        })
+        : null}
 
-      {missedCaEndpointMarkers.map((marker) => {
+      {showProcedureElement2d("CA_ENDPOINT", "ESTIMATED", procedureDisplayLevel)
+        ? missedCaEndpointMarkers.map((marker) => {
         const isFocused = !focusedBranchId || marker.branchId === focusedBranchId;
         const x = scaleX(marker.point.xM);
         const y = scaleY(marker.point.yM);
@@ -1242,7 +1275,8 @@ function ProcedurePlanView({
             <text x={x + 11} y={y - 9}>{marker.label}</text>
           </g>
         );
-      })}
+        })
+        : null}
 
       {runwayMarker ? (
         <g className="procedure-details-runway">
@@ -1311,7 +1345,8 @@ function ProcedurePlanView({
         );
       })}
 
-      {missedTurnDebugPrimitiveMarkers.map((marker) => {
+      {showProcedureElement2d("TURNING_MISSED_DEBUG", "DEBUG_ESTIMATE", procedureDisplayLevel)
+        ? missedTurnDebugPrimitiveMarkers.map((marker) => {
         const isFocused = !focusedBranchId || marker.branchId === focusedBranchId;
         const pathData = marker.points
           .map((point, index) => `${index === 0 ? "M" : "L"} ${scaleX(point.xM)} ${scaleY(point.yM)}`)
@@ -1334,7 +1369,8 @@ function ProcedurePlanView({
             ) : null}
           </g>
         );
-      })}
+        })
+        : null}
 
       {polylines.map((branch) => {
         const isFocused = !focusedBranchId || branch.branchId === focusedBranchId;
@@ -1402,6 +1438,7 @@ function ProcedureVerticalProfile({
   missedCaEndpointMarkers,
   focusedFixId,
   focusedBranchId,
+  procedureDisplayLevel,
   distanceUnit,
   onPreviewFix,
   onSelectFix,
@@ -1551,6 +1588,16 @@ function ProcedureVerticalProfile({
 
       {finalVerticalOverlays.map((overlay) => {
         const isFocused = !focusedBranchId || overlay.branchId === focusedBranchId;
+        const showGlidepath = showProcedureElement2d(
+          "FINAL_VERTICAL_REFERENCE",
+          "ESTIMATED",
+          procedureDisplayLevel,
+        );
+        const showConstraints = showProcedureElement2d(
+          "FINAL_ALTITUDE_CONSTRAINT",
+          "SOURCE_BACKED",
+          procedureDisplayLevel,
+        );
         const glidepathD = overlay.glidepathReference?.points
           .map((point, index) => {
             const x = scaleX(point.stationM);
@@ -1566,13 +1613,13 @@ function ProcedureVerticalProfile({
               isFocused ? "is-focused" : "is-muted"
             }`}
           >
-            {glidepathD ? (
+            {showGlidepath && glidepathD ? (
               <path
                 d={glidepathD}
                 className="procedure-details-final-glidepath-reference"
               />
             ) : null}
-            {overlay.glidepathReference ? (
+            {showGlidepath && overlay.glidepathReference ? (
               <text
                 x={scaleX(overlay.glidepathReference.points[0].stationM)}
                 y={scaleY(overlay.glidepathReference.points[0].altitudeFt) - 12}
@@ -1582,7 +1629,7 @@ function ProcedureVerticalProfile({
                 {overlay.glidepathReference.estimated ? " est" : ""}
               </text>
             ) : null}
-            {overlay.constraintPoints.map((point) => {
+            {showConstraints ? overlay.constraintPoints.map((point) => {
               const x = scaleX(point.stationM);
               const y = scaleY(point.altitudeFt);
               const selected = point.fixRef === focusedFixId;
@@ -1601,7 +1648,7 @@ function ProcedureVerticalProfile({
                   </text>
                 </g>
               );
-            })}
+            }) : null}
           </g>
         );
       })}
@@ -1706,7 +1753,8 @@ function ProcedureVerticalProfile({
                 </g>
               );
             })}
-            {missedSectionMarkers
+            {showProcedureElement2d("MISSED_SURFACE", "SOURCE_BACKED", procedureDisplayLevel)
+              ? missedSectionMarkers
               .filter((marker) => marker.branchId === branch.branchId)
               .map((marker) => {
                 const isFocusedMarker = !focusedBranchId || marker.branchId === focusedBranchId;
@@ -1725,7 +1773,8 @@ function ProcedureVerticalProfile({
                     <text x={x + 10} y={y - 10}>{marker.label}</text>
                   </g>
                 );
-              })}
+              })
+              : null}
             {missedLegMarkers
               .filter((marker) => marker.branchId === branch.branchId)
               .map((marker) => {
@@ -1746,7 +1795,8 @@ function ProcedureVerticalProfile({
                   </g>
                 );
               })}
-            {missedTurnDebugMarkers
+            {showProcedureElement2d("TURNING_MISSED_DEBUG", "DEBUG_ESTIMATE", procedureDisplayLevel)
+              ? missedTurnDebugMarkers
               .filter((marker) => marker.branchId === branch.branchId)
               .map((marker) => {
                 const isFocusedMarker = !focusedBranchId || marker.branchId === focusedBranchId;
@@ -1766,8 +1816,10 @@ function ProcedureVerticalProfile({
                     <text x={x + 11} y={y - 9}>{marker.label}</text>
                   </g>
                 );
-              })}
-            {missedCaEndpointMarkers
+              })
+              : null}
+            {showProcedureElement2d("CA_ENDPOINT", "ESTIMATED", procedureDisplayLevel)
+              ? missedCaEndpointMarkers
               .filter((marker) => marker.branchId === branch.branchId)
               .map((marker) => {
                 const isFocusedMarker = !focusedBranchId || marker.branchId === focusedBranchId;
@@ -1786,7 +1838,8 @@ function ProcedureVerticalProfile({
                     <text x={x + 10} y={y - 9}>{marker.label}</text>
                   </g>
                 );
-              })}
+              })
+              : null}
           </g>
         );
       })}
@@ -1796,7 +1849,14 @@ function ProcedureVerticalProfile({
 
 export default function ProcedureDetailsPage() {
   const initialParams = useRef(readRouteParams()).current;
-  const { airports, activeAirportCode, setActiveAirportCode } = useApp();
+  const {
+    airports,
+    activeAirportCode,
+    setActiveAirportCode,
+    layers,
+    procedureVisibility,
+    procedureDisplayLevel,
+  } = useApp();
   const [selectedAirportCode, setSelectedAirportCode] = useState(
     initialParams.airport ?? activeAirportCode,
   );
@@ -1945,20 +2005,29 @@ export default function ProcedureDetailsPage() {
     () => (procedureDocument ? buildProcedureBranchPolylines(procedureDocument) : []),
     [procedureDocument],
   );
+  const visiblePolylines = useMemo(
+    () =>
+      procedureDocument && layers.procedures
+        ? polylines.filter((branch) =>
+            branchIsVisibleInProcedurePanel(procedureDocument, branch, procedureVisibility),
+          )
+        : [],
+    [layers.procedures, polylines, procedureDocument, procedureVisibility],
+  );
   const runwayMarker = useMemo(
-    () => (procedureDocument ? buildRunwayMarker(procedureDocument, polylines) : null),
-    [procedureDocument, polylines],
+    () => (procedureDocument ? buildRunwayMarker(procedureDocument, visiblePolylines) : null),
+    [procedureDocument, visiblePolylines],
   );
   const rfMarkers = useMemo(
-    () => buildRfPlanMarkers(procedureDocument, polylines),
-    [procedureDocument, polylines],
+    () => buildRfPlanMarkers(procedureDocument, visiblePolylines),
+    [procedureDocument, visiblePolylines],
   );
   const finalVerticalOverlays = useMemo(
     () =>
       procedureDocument
-        ? buildFinalVerticalProfileOverlays(procedureDocument, polylines)
+        ? buildFinalVerticalProfileOverlays(procedureDocument, visiblePolylines)
         : [],
-    [polylines, procedureDocument],
+    [visiblePolylines, procedureDocument],
   );
   const procedureRenderBundle = useMemo(
     () =>
@@ -1968,24 +2037,24 @@ export default function ProcedureDetailsPage() {
     [procedureDocument],
   );
   const missedSectionMarkers = useMemo(
-    () => buildMissedSectionMarkers(procedureDocument, procedureRenderBundle, polylines),
-    [polylines, procedureDocument, procedureRenderBundle],
+    () => buildMissedSectionMarkers(procedureDocument, procedureRenderBundle, visiblePolylines),
+    [visiblePolylines, procedureDocument, procedureRenderBundle],
   );
   const missedLegMarkers = useMemo(
-    () => buildMissedLegMarkers(procedureDocument, procedureRenderBundle, polylines),
-    [polylines, procedureDocument, procedureRenderBundle],
+    () => buildMissedLegMarkers(procedureDocument, procedureRenderBundle, visiblePolylines),
+    [visiblePolylines, procedureDocument, procedureRenderBundle],
   );
   const missedTurnDebugMarkers = useMemo(
-    () => buildMissedTurnDebugMarkers(procedureDocument, procedureRenderBundle, polylines),
-    [polylines, procedureDocument, procedureRenderBundle],
+    () => buildMissedTurnDebugMarkers(procedureDocument, procedureRenderBundle, visiblePolylines),
+    [visiblePolylines, procedureDocument, procedureRenderBundle],
   );
   const missedTurnDebugPrimitiveMarkers = useMemo(
-    () => buildMissedTurnDebugPrimitiveMarkers(procedureDocument, procedureRenderBundle, polylines),
-    [polylines, procedureDocument, procedureRenderBundle],
+    () => buildMissedTurnDebugPrimitiveMarkers(procedureDocument, procedureRenderBundle, visiblePolylines),
+    [visiblePolylines, procedureDocument, procedureRenderBundle],
   );
   const missedCaEndpointMarkers = useMemo(
-    () => buildMissedCaEndpointMarkers(procedureDocument, procedureRenderBundle, polylines),
-    [polylines, procedureDocument, procedureRenderBundle],
+    () => buildMissedCaEndpointMarkers(procedureDocument, procedureRenderBundle, visiblePolylines),
+    [visiblePolylines, procedureDocument, procedureRenderBundle],
   );
   const selectedFixBranches = useMemo(
     () => procedureBranchForFix(procedureDocument ?? null, selectedFixId),
@@ -2449,7 +2518,7 @@ export default function ProcedureDetailsPage() {
                       </div>
                     </div>
                     <ProcedurePlanView
-                      polylines={polylines}
+                      polylines={visiblePolylines}
                       runwayMarker={runwayMarker}
                       rfMarkers={rfMarkers}
                       missedSectionMarkers={missedSectionMarkers}
@@ -2459,6 +2528,7 @@ export default function ProcedureDetailsPage() {
                       missedCaEndpointMarkers={missedCaEndpointMarkers}
                       focusedFixId={focusedFixId}
                       focusedBranchId={focusedBranchId}
+                      procedureDisplayLevel={procedureDisplayLevel}
                       distanceUnit={distanceUnit}
                       onPreviewFix={handlePreviewFix}
                       onSelectFix={handleSelectFix}
@@ -2482,7 +2552,7 @@ export default function ProcedureDetailsPage() {
                       </div>
                     </div>
                     <ProcedureVerticalProfile
-                      polylines={polylines}
+                      polylines={visiblePolylines}
                       finalVerticalOverlays={finalVerticalOverlays}
                       missedSectionMarkers={missedSectionMarkers}
                       missedLegMarkers={missedLegMarkers}
@@ -2490,6 +2560,7 @@ export default function ProcedureDetailsPage() {
                       missedCaEndpointMarkers={missedCaEndpointMarkers}
                       focusedFixId={focusedFixId}
                       focusedBranchId={focusedBranchId}
+                      procedureDisplayLevel={procedureDisplayLevel}
                       distanceUnit={distanceUnit}
                       onPreviewFix={handlePreviewFix}
                       onSelectFix={handleSelectFix}
