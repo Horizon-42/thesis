@@ -476,7 +476,7 @@ describe("useProcedureSegmentLayer", () => {
     expect(entities.some((entity) => String(entity.id).includes("-lnav-vnav-ocs-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-final-vertical-reference-band"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-final-vertical-reference"))).toBe(true);
-    expect(entities.some((entity) => String(entity.id).includes("-vertical-profile"))).toBe(true);
+    expect(entities.some((entity) => String(entity.id).includes("-vertical-profile") && entity.polygon)).toBe(true);
     expect(
       entities.some(
         (entity) =>
@@ -486,9 +486,9 @@ describe("useProcedureSegmentLayer", () => {
       ),
     ).toBe(true);
     const finalVerticalProfile = entities.find((entity) =>
-      String(entity.id).includes("segment:final-vertical-profile"),
+      String(entity.id).endsWith("-vertical-profile") && entity.polygon,
     );
-    expect(finalVerticalProfile?.polygon.hierarchy.positions).toHaveLength(4);
+    expect(finalVerticalProfile?.polygon.hierarchy.positions).toHaveLength(6);
     expect(
       entities.some(
         (entity) =>
@@ -605,7 +605,7 @@ describe("useProcedureSegmentLayer", () => {
     const ocs = entities.find((entity) => String(entity.id).includes("-lnav-vnav-ocs-primary"));
     const finalVerticalReference = entities.find((entity) => String(entity.id).endsWith("-final-vertical-reference"));
     const finalVerticalBand = entities.find((entity) => String(entity.id).endsWith("-final-vertical-reference-band"));
-    const verticalProfile = entities.find((entity) => String(entity.id).endsWith("-vertical-profile"));
+    const verticalProfile = entities.find((entity) => String(entity.id).endsWith("-vertical-profile") && entity.polygon);
     const finalAltitude = entities.find((entity) => String(entity.id).includes("-altitude-leg:final:faf"));
     const turnFill = entities.find((entity) => String(entity.id).includes("-turn-1-primary"));
     const debugSurface = entities.find((entity) => String(entity.id).includes("-precision-lpv-w"));

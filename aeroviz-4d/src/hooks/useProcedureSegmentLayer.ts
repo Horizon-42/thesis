@@ -69,7 +69,7 @@ const SEGMENT_VERTICAL_PROFILE_HEIGHT_OFFSET_M = 44;
 const FINAL_ALTITUDE_CONSTRAINT_HEIGHT_OFFSET_M = 46;
 const ALTITUDE_CONSTRAINT_LINK_HEIGHT_OFFSET_M = 12;
 const FINAL_VERTICAL_REFERENCE_DEFAULT_HALF_WIDTH_NM = 0.15;
-const FINAL_VERTICAL_REFERENCE_PROTECTION_WIDTH_RATIO = 0.5;
+const FINAL_VERTICAL_REFERENCE_PROTECTION_WIDTH_RATIO = 1;
 const CONNECTOR_HEIGHT_OFFSET_M = 45;
 const MISSED_SURFACE_HEIGHT_OFFSET_M = 58;
 const CA_COURSE_GUIDE_HEIGHT_OFFSET_M = 82;
@@ -309,40 +309,98 @@ function buildFinalVerticalReferenceRibbon(
 interface SegmentVerticalProfilePoint extends GeoPoint {
   fixIdent: string;
   altitudeFtMsl: number;
+  halfWidthNm: number;
+  segmentId?: string;
 }
 
-function segmentVerticalProfilePoints(
+function nearestHalfWidthNm(
+  samples: Array<{ stationNm: number; halfWidthNm: number }>,
+  stationNm: number,
+): number {
+  const nearest = samples.reduce<{ stationNm: number; halfWidthNm: number } | null>(
+    (best, sample) => {
+      if (!best) return sample;
+      return Math.abs(sample.stationNm - stationNm) < Math.abs(best.stationNm - stationNm)
+        ? sample
+        : best;
+    },
+    null,
+  );
+  return nearest?.halfWidthNm ?? FINAL_VERTICAL_REFERENCE_DEFAULT_HALF_WIDTH_NM * 2;
+}
+
+function segmentProtectionHalfWidthNm(
+  segmentBundle: ProcedureSegmentRenderBundle,
+  pointIndex: number,
+  pointCount: number,
+): number {
+  const protectionWidthSamples =
+    segmentBundle.finalOea?.primary.halfWidthNmSamples ??
+    segmentBundle.segmentGeometry.primaryEnvelope?.halfWidthNmSamples ??
+    [];
+  const totalStationNm =
+    protectionWidthSamples[protectionWidthSamples.length - 1]?.stationNm ??
+    segmentBundle.segmentGeometry.centerline.geodesicLengthNm;
+  const stationNm =
+    pointCount <= 1 ? totalStationNm : totalStationNm * (pointIndex / Math.max(1, pointCount - 1));
+  return nearestHalfWidthNm(protectionWidthSamples, stationNm);
+}
+
+function segmentVerticalProfilePointsForSegment(
   segmentBundle: ProcedureSegmentRenderBundle,
   pkg: ProcedurePackage | null,
 ): SegmentVerticalProfilePoint[] {
   if (!pkg) return [];
   const fixById = new Map(pkg.sharedFixes.map((fix) => [fix.fixId, fix]));
-  const points = segmentBundle.legs
-    .map((leg) => {
-      const fix = leg.endFixId ? fixById.get(leg.endFixId) : undefined;
-      if (!fix || fix.lonDeg === null || fix.latDeg === null) return null;
-      const altitudeFtMsl = altitudeConstraintReferenceFt(leg.requiredAltitude) ?? fix.altFtMsl;
-      if (altitudeFtMsl === null || !Number.isFinite(altitudeFtMsl)) return null;
-      return {
-        lonDeg: fix.lonDeg,
-        latDeg: fix.latDeg,
-        altM: altitudeFtMsl * 0.3048,
-        fixIdent: fix.ident,
-        altitudeFtMsl,
-      };
-    })
-    .filter((point): point is SegmentVerticalProfilePoint => point !== null);
+  const points: SegmentVerticalProfilePoint[] = [];
+  segmentBundle.legs.forEach((leg) => {
+    const fix = leg.endFixId ? fixById.get(leg.endFixId) : undefined;
+    if (!fix || fix.lonDeg === null || fix.latDeg === null) return;
+    const altitudeFtMsl = altitudeConstraintReferenceFt(leg.requiredAltitude) ?? fix.altFtMsl;
+    if (altitudeFtMsl === null || !Number.isFinite(altitudeFtMsl)) return;
+    points.push({
+      lonDeg: fix.lonDeg,
+      latDeg: fix.latDeg,
+      altM: altitudeFtMsl * 0.3048,
+      fixIdent: fix.ident,
+      altitudeFtMsl,
+      halfWidthNm: 0,
+      segmentId: segmentBundle.segment.segmentId,
+    });
+  });
+
+  return points
+    .map((point, index) => ({
+      ...point,
+      halfWidthNm: segmentProtectionHalfWidthNm(segmentBundle, index, points.length),
+    }))
+    .filter(
+      (point, index) =>
+        index === 0 ||
+        point.fixIdent !== points[index - 1].fixIdent ||
+        distanceNm(point, points[index - 1]) > 1e-5,
+    );
+}
+
+function branchVerticalProfilePoints(
+  branchBundle: BranchGeometryBundle,
+  pkg: ProcedurePackage | null,
+): SegmentVerticalProfilePoint[] {
+  const points = branchBundle.segmentBundles.flatMap((segmentBundle) =>
+    segmentVerticalProfilePointsForSegment(segmentBundle, pkg),
+  );
 
   return points.filter(
     (point, index) =>
       index === 0 ||
       point.fixIdent !== points[index - 1].fixIdent ||
-      distanceNm(point, points[index - 1]) > 1e-5,
+      distanceNm(point, points[index - 1]) > 1e-5 ||
+      Math.abs(point.altitudeFtMsl - points[index - 1].altitudeFtMsl) > 1e-3,
   );
 }
 
-function buildSegmentVerticalProfileRibbon(
-  segmentBundle: ProcedureSegmentRenderBundle,
+function buildVerticalProfileRibbon(
+  geometryId: string,
   points: SegmentVerticalProfilePoint[],
 ): VariableWidthRibbonGeometry | null {
   if (points.length < 2) return null;
@@ -356,24 +414,13 @@ function buildSegmentVerticalProfileRibbon(
     stations.push(cumulativeNm);
   });
 
-  const protectionWidthSamples =
-    segmentBundle.finalOea?.primary.halfWidthNmSamples ??
-    segmentBundle.segmentGeometry.primaryEnvelope?.halfWidthNmSamples ??
-    [];
-  const halfWidthAtStation = (stationNm: number) => {
-    const nearest = protectionWidthSamples.reduce<
-      { stationNm: number; halfWidthNm: number } | null
-    >((best, sample) => {
-      if (!best) return sample;
-      return Math.abs(sample.stationNm - stationNm) < Math.abs(best.stationNm - stationNm)
-        ? sample
-        : best;
-    }, null);
-    return nearest?.halfWidthNm ?? FINAL_VERTICAL_REFERENCE_DEFAULT_HALF_WIDTH_NM * 2;
-  };
+  const halfWidthSamples = stations.map((stationNm, index) => ({
+    stationNm,
+    halfWidthNm: points[index].halfWidthNm,
+  }));
 
   return buildVariableWidthRibbon(
-    `${segmentBundle.segment.segmentId}:vertical-profile`,
+    geometryId,
     {
       geoPositions: points,
       worldPositions: [],
@@ -381,7 +428,7 @@ function buildSegmentVerticalProfileRibbon(
       isArc: false,
     },
     stations,
-    halfWidthAtStation,
+    (stationNm) => nearestHalfWidthNm(halfWidthSamples, stationNm),
   );
 }
 
@@ -637,41 +684,6 @@ function addSegmentEntities(
     procedureEntityShow(visible, centerlineAnnotation, displayLevel, true, annotationVisible),
   );
   if (centerlineLabelId) ids.push(centerlineLabelId);
-
-  const verticalProfilePoints = segmentVerticalProfilePoints(segmentBundle, pkg);
-  const verticalProfileRibbon = buildSegmentVerticalProfileRibbon(segmentBundle, verticalProfilePoints);
-  if (verticalProfileRibbon) {
-    const verticalProfileId = `${baseId}-vertical-profile`;
-    const verticalProfileAnnotation = annotationBase({
-      entityId: verticalProfileId,
-      label: "Fix vertical profile",
-      title: `${segmentName} fix vertical profile`,
-      kind: "SEGMENT_VERTICAL_PROFILE",
-      status: "ESTIMATED",
-      bundle,
-      branchBundle,
-      segment: segmentBundle.segment,
-      legs: segmentBundle.legs,
-      parameters: [
-        ...segmentParams(segmentBundle.segment, segmentBundle.legs),
-        param("Fixes", verticalProfilePoints.map((point) => point.fixIdent).join(" -> ")),
-        param("Width basis", segmentBundle.finalOea ? "Final OEA primary" : "Primary envelope"),
-      ],
-      diagnostics: segmentDiagnostics,
-      sourceRefs: sourceRefsFromLegs(segmentBundle.legs),
-    });
-    addRibbonPolygon(
-      viewer,
-      verticalProfileId,
-      `${segmentName} fix vertical profile`,
-      verticalProfileRibbon,
-      procedureEntityShow(visible, verticalProfileAnnotation, displayLevel),
-      SEGMENT_VERTICAL_PROFILE_SURFACE_COLOR,
-      SEGMENT_VERTICAL_PROFILE_HEIGHT_OFFSET_M,
-      verticalProfileAnnotation,
-    );
-    ids.push(verticalProfileId);
-  }
 
   if (isFinalSegment(segmentBundle.segment)) {
     const verticalReferencePoints = finalVerticalReferencePoints(segmentBundle);
@@ -1541,6 +1553,73 @@ function addBranchTurnJunctionEntities(
   return ids;
 }
 
+function addBranchVerticalProfileEntity(
+  viewer: Cesium.Viewer,
+  bundle: ProcedureRenderBundle,
+  branchBundle: BranchGeometryBundle,
+  pkg: ProcedurePackage | null,
+  visible: boolean,
+  annotationVisible: boolean,
+  displayLevel: ProcedureDisplayLevel,
+): string[] {
+  const verticalProfilePoints = branchVerticalProfilePoints(branchBundle, pkg);
+  const verticalProfileRibbon = buildVerticalProfileRibbon(
+    `${branchBundle.branchId}:vertical-profile`,
+    verticalProfilePoints,
+  );
+  if (!verticalProfileRibbon) return [];
+
+  const ids: string[] = [];
+  const entityId = `${PROCEDURE_SEGMENT_ENTITY_PREFIX}${bundle.packageId}-${branchBundle.branchId}-vertical-profile`;
+  const allLegs = branchBundle.segmentBundles.flatMap((segmentBundle) => segmentBundle.legs);
+  const diagnostics = branchBundle.segmentBundles.flatMap((segmentBundle) =>
+    segmentBundle.diagnostics.map((diagnostic) => diagnostic.message),
+  );
+  const annotation = annotationBase({
+    entityId,
+    label: "Fix vertical profile",
+    title: `${bundle.procedureName} ${branchBundle.branchName} continuous fix vertical profile`,
+    kind: "SEGMENT_VERTICAL_PROFILE",
+    status: "ESTIMATED",
+    bundle,
+    branchBundle,
+    legs: allLegs,
+    parameters: [
+      param("Fixes", verticalProfilePoints.map((point) => point.fixIdent).join(" -> ")),
+      param(
+        "Segments",
+        branchBundle.segmentBundles
+          .map((segmentBundle) => compactSegmentType(segmentBundle.segment.segmentType))
+          .join(" -> "),
+      ),
+      param("Width basis", "Primary protected area"),
+    ],
+    diagnostics,
+    sourceRefs: sourceRefsFromLegs(allLegs),
+  });
+
+  addRibbonPolygon(
+    viewer,
+    entityId,
+    `${bundle.procedureName} ${branchBundle.branchName} continuous fix vertical profile`,
+    verticalProfileRibbon,
+    procedureEntityShow(visible, annotation, displayLevel),
+    SEGMENT_VERTICAL_PROFILE_SURFACE_COLOR,
+    SEGMENT_VERTICAL_PROFILE_HEIGHT_OFFSET_M,
+    annotation,
+  );
+  ids.push(entityId);
+
+  const labelId = addAnnotationLabel(
+    viewer,
+    annotation,
+    representativePoint(verticalProfilePoints),
+    procedureEntityShow(visible, annotation, displayLevel, true, annotationVisible),
+  );
+  if (labelId) ids.push(labelId);
+  return ids;
+}
+
 export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean } = {}): void {
   const {
     viewer,
@@ -1639,6 +1718,18 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
                 ),
               );
             });
+            addBranchEntityIds(
+              branchBundle.branchId,
+              addBranchVerticalProfileEntity(
+                viewer,
+                bundle,
+                branchBundle,
+                pkg ?? null,
+                visible,
+                annotationVisibleRef.current,
+                displayLevelRef.current,
+              ),
+            );
             addBranchEntityIds(
               branchBundle.branchId,
               addBranchTurnJunctionEntities(
