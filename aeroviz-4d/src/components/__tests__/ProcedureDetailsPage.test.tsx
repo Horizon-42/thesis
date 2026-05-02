@@ -33,9 +33,6 @@ const {
     ],
     activeAirportCode: "KRDU",
     setActiveAirportCode: vi.fn(),
-    layers: { procedures: true },
-    procedureVisibility: {},
-    procedureDisplayLevel: "PROTECTION",
   },
 }));
 
@@ -44,9 +41,6 @@ vi.mock("../../context/AppContext", () => ({
     airports: appState.airports,
     activeAirportCode: appState.activeAirportCode,
     setActiveAirportCode,
-    layers: appState.layers,
-    procedureVisibility: appState.procedureVisibility,
-    procedureDisplayLevel: appState.procedureDisplayLevel,
   }),
 }));
 
@@ -421,9 +415,6 @@ describe("ProcedureDetailsPage", () => {
     fetchMock.mockReset();
     setActiveAirportCode.mockReset();
     appState.activeAirportCode = "KRDU";
-    appState.layers = { procedures: true };
-    appState.procedureVisibility = {};
-    appState.procedureDisplayLevel = "PROTECTION";
     window.history.replaceState({}, "", "/procedure-details");
     vi.stubGlobal("fetch", fetchMock);
   });
@@ -467,9 +458,7 @@ describe("ProcedureDetailsPage", () => {
     expect(screen.getByText(/FINAL_VERTICAL_SURFACE_UNIMPLEMENTED/)).toBeTruthy();
   });
 
-  it("uses procedure panel visibility and display level for 2D procedure charts", async () => {
-    appState.procedureVisibility = { "KRDU-R05LY-RW05L:branch:R": false };
-    appState.procedureDisplayLevel = "ESTIMATED";
+  it("uses a local display level control for procedure detail charts", async () => {
     fetchMock.mockImplementation((url: string) => {
       if (url.endsWith("/procedure-details/index.json")) return Promise.resolve(jsonResponse(sampleIndex));
       if (url.endsWith("/charts/index.json")) return Promise.resolve(jsonResponse(sampleCharts));
@@ -481,13 +470,12 @@ describe("ProcedureDetailsPage", () => {
 
     render(<ProcedureDetailsPage />);
 
-    expect(await screen.findByText("No positioned fixes available for the plan view yet.")).toBeTruthy();
-    expect(screen.getByText("No altitude-supported samples are available for the vertical profile yet.")).toBeTruthy();
+    expect(await screen.findByText("WEPAS 2,200 ft")).toBeTruthy();
+    expect(screen.queryByText("GPA 3.0 deg est")).toBeNull();
 
-    appState.procedureVisibility = { "KRDU-R05LY-RW05L:branch:R": true };
-    render(<ProcedureDetailsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Estimated" }));
 
-    expect(await screen.findByText("GPA 3.0 deg est")).toBeTruthy();
+    expect(screen.getByText("GPA 3.0 deg est")).toBeTruthy();
     expect(screen.getByText("WEPAS 2,200 ft")).toBeTruthy();
   });
 
@@ -532,7 +520,6 @@ describe("ProcedureDetailsPage", () => {
   });
 
   it("marks the missed approach section split in plan and profile views", async () => {
-    appState.procedureDisplayLevel = "DEBUG";
     fetchMock.mockImplementation((url: string) => {
       if (url.endsWith("/procedure-details/index.json")) return Promise.resolve(jsonResponse(sampleIndex));
       if (url.endsWith("/charts/index.json")) return Promise.resolve(jsonResponse(sampleCharts));
@@ -546,6 +533,9 @@ describe("ProcedureDetailsPage", () => {
 
     expect((await screen.findAllByText("S1/S2")).length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText("CA 305 deg").length).toBeGreaterThanOrEqual(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Debug" }));
+
     expect(screen.getAllByText("CA end est").length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText("DF leg").length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText("HM leg").length).toBeGreaterThanOrEqual(2);

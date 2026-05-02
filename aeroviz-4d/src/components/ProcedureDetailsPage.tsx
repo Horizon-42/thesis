@@ -34,6 +34,7 @@ import {
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 import { navigateWithinApp } from "../utils/navigation";
 import {
+  PROCEDURE_DISPLAY_LEVEL_OPTIONS,
   isProcedureAnnotationVisibleAtDisplayLevel,
   type ProcedureAnnotationKind,
   type ProcedureAnnotationStatus,
@@ -678,14 +679,6 @@ function scopedBranchIdForKey(document: ProcedureDetailDocument, branchKey: stri
 
 function scopedBranchIdFor(document: ProcedureDetailDocument, branch: ProcedureBranchPolyline): string {
   return scopedBranchIdForKey(document, branch.branchKey);
-}
-
-function branchIsVisibleInProcedurePanel(
-  document: ProcedureDetailDocument,
-  branch: ProcedureBranchPolyline,
-  procedureVisibility: Record<string, boolean>,
-): boolean {
-  return procedureVisibility[scopedBranchIdFor(document, branch)] ?? branch.defaultVisible;
 }
 
 function buildMissedSectionMarkers(
@@ -1853,9 +1846,6 @@ export default function ProcedureDetailsPage() {
     airports,
     activeAirportCode,
     setActiveAirportCode,
-    layers,
-    procedureVisibility,
-    procedureDisplayLevel,
   } = useApp();
   const [selectedAirportCode, setSelectedAirportCode] = useState(
     initialParams.airport ?? activeAirportCode,
@@ -1872,6 +1862,8 @@ export default function ProcedureDetailsPage() {
   const [previewBranchId, setPreviewBranchId] = useState<string | null>(null);
   const [selectedGlossaryTerm, setSelectedGlossaryTerm] = useState<string | null>(null);
   const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>("nm");
+  const [detailsDisplayLevel, setDetailsDisplayLevel] =
+    useState<ProcedureDisplayLevel>("PROTECTION");
   const [indexManifest, setIndexManifest] = useState<ProcedureDetailsIndexManifest | null>(null);
   const [chartsManifest, setChartsManifest] = useState<ProcedureChartsManifest | null>(null);
   const [procedureDocument, setProcedureDocument] = useState<ProcedureDetailDocument | null>(null);
@@ -2005,29 +1997,17 @@ export default function ProcedureDetailsPage() {
     () => (procedureDocument ? buildProcedureBranchPolylines(procedureDocument) : []),
     [procedureDocument],
   );
-  const visiblePolylines = useMemo(
-    () =>
-      procedureDocument && layers.procedures
-        ? polylines.filter((branch) =>
-            branchIsVisibleInProcedurePanel(procedureDocument, branch, procedureVisibility),
-          )
-        : [],
-    [layers.procedures, polylines, procedureDocument, procedureVisibility],
-  );
   const runwayMarker = useMemo(
-    () => (procedureDocument ? buildRunwayMarker(procedureDocument, visiblePolylines) : null),
-    [procedureDocument, visiblePolylines],
+    () => (procedureDocument ? buildRunwayMarker(procedureDocument, polylines) : null),
+    [procedureDocument, polylines],
   );
   const rfMarkers = useMemo(
-    () => buildRfPlanMarkers(procedureDocument, visiblePolylines),
-    [procedureDocument, visiblePolylines],
+    () => buildRfPlanMarkers(procedureDocument, polylines),
+    [procedureDocument, polylines],
   );
   const finalVerticalOverlays = useMemo(
-    () =>
-      procedureDocument
-        ? buildFinalVerticalProfileOverlays(procedureDocument, visiblePolylines)
-        : [],
-    [visiblePolylines, procedureDocument],
+    () => (procedureDocument ? buildFinalVerticalProfileOverlays(procedureDocument, polylines) : []),
+    [polylines, procedureDocument],
   );
   const procedureRenderBundle = useMemo(
     () =>
@@ -2037,24 +2017,24 @@ export default function ProcedureDetailsPage() {
     [procedureDocument],
   );
   const missedSectionMarkers = useMemo(
-    () => buildMissedSectionMarkers(procedureDocument, procedureRenderBundle, visiblePolylines),
-    [visiblePolylines, procedureDocument, procedureRenderBundle],
+    () => buildMissedSectionMarkers(procedureDocument, procedureRenderBundle, polylines),
+    [polylines, procedureDocument, procedureRenderBundle],
   );
   const missedLegMarkers = useMemo(
-    () => buildMissedLegMarkers(procedureDocument, procedureRenderBundle, visiblePolylines),
-    [visiblePolylines, procedureDocument, procedureRenderBundle],
+    () => buildMissedLegMarkers(procedureDocument, procedureRenderBundle, polylines),
+    [polylines, procedureDocument, procedureRenderBundle],
   );
   const missedTurnDebugMarkers = useMemo(
-    () => buildMissedTurnDebugMarkers(procedureDocument, procedureRenderBundle, visiblePolylines),
-    [visiblePolylines, procedureDocument, procedureRenderBundle],
+    () => buildMissedTurnDebugMarkers(procedureDocument, procedureRenderBundle, polylines),
+    [polylines, procedureDocument, procedureRenderBundle],
   );
   const missedTurnDebugPrimitiveMarkers = useMemo(
-    () => buildMissedTurnDebugPrimitiveMarkers(procedureDocument, procedureRenderBundle, visiblePolylines),
-    [visiblePolylines, procedureDocument, procedureRenderBundle],
+    () => buildMissedTurnDebugPrimitiveMarkers(procedureDocument, procedureRenderBundle, polylines),
+    [polylines, procedureDocument, procedureRenderBundle],
   );
   const missedCaEndpointMarkers = useMemo(
-    () => buildMissedCaEndpointMarkers(procedureDocument, procedureRenderBundle, visiblePolylines),
-    [visiblePolylines, procedureDocument, procedureRenderBundle],
+    () => buildMissedCaEndpointMarkers(procedureDocument, procedureRenderBundle, polylines),
+    [polylines, procedureDocument, procedureRenderBundle],
   );
   const selectedFixBranches = useMemo(
     () => procedureBranchForFix(procedureDocument ?? null, selectedFixId),
@@ -2483,6 +2463,23 @@ export default function ProcedureDetailsPage() {
                       </button>
                     ))}
                   </div>
+                  <div
+                    className="procedure-details-unit-switch"
+                    role="group"
+                    aria-label="Procedure details display level"
+                  >
+                    {PROCEDURE_DISPLAY_LEVEL_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={detailsDisplayLevel === option.value ? "is-active" : ""}
+                        title={option.description}
+                        onClick={() => setDetailsDisplayLevel(option.value)}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
                 </section>
 
                 <section className="procedure-details-chart-stack">
@@ -2518,7 +2515,7 @@ export default function ProcedureDetailsPage() {
                       </div>
                     </div>
                     <ProcedurePlanView
-                      polylines={visiblePolylines}
+                      polylines={polylines}
                       runwayMarker={runwayMarker}
                       rfMarkers={rfMarkers}
                       missedSectionMarkers={missedSectionMarkers}
@@ -2528,7 +2525,7 @@ export default function ProcedureDetailsPage() {
                       missedCaEndpointMarkers={missedCaEndpointMarkers}
                       focusedFixId={focusedFixId}
                       focusedBranchId={focusedBranchId}
-                      procedureDisplayLevel={procedureDisplayLevel}
+                      procedureDisplayLevel={detailsDisplayLevel}
                       distanceUnit={distanceUnit}
                       onPreviewFix={handlePreviewFix}
                       onSelectFix={handleSelectFix}
@@ -2552,7 +2549,7 @@ export default function ProcedureDetailsPage() {
                       </div>
                     </div>
                     <ProcedureVerticalProfile
-                      polylines={visiblePolylines}
+                      polylines={polylines}
                       finalVerticalOverlays={finalVerticalOverlays}
                       missedSectionMarkers={missedSectionMarkers}
                       missedLegMarkers={missedLegMarkers}
@@ -2560,7 +2557,7 @@ export default function ProcedureDetailsPage() {
                       missedCaEndpointMarkers={missedCaEndpointMarkers}
                       focusedFixId={focusedFixId}
                       focusedBranchId={focusedBranchId}
-                      procedureDisplayLevel={procedureDisplayLevel}
+                      procedureDisplayLevel={detailsDisplayLevel}
                       distanceUnit={distanceUnit}
                       onPreviewFix={handlePreviewFix}
                       onSelectFix={handleSelectFix}
