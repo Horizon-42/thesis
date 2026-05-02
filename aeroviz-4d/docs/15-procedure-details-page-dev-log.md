@@ -1352,3 +1352,32 @@
 - Full missed approach section 1/2 protected surfaces are still first-pass envelope classifications, not certified FAA construction.
 - Turning missed TIA/early-late baseline/wind-spiral geometry is not implemented.
 - LPV/GLS W/X/Y, LNAV/VNAV, and RNP AR vertical/surface models remain future phases.
+
+## 2026-05-02 10:30 CEST
+
+### Goal Of This Session
+- Make the turning missed debug anchor visible in Procedure Details 2D charts.
+
+### Decisions Locked
+- Added `MissedTurnDebugMarker` derived from `ProcedureRenderBundle.missedTurnDebugPoint`.
+- The plan view and vertical profile now render a `Turn debug` anchor at the missed section 2 start/trigger point.
+- The marker remains explicitly diagnostic: it identifies the turn-trigger anchor only and does not draw TIA, wind spiral, early/late baseline, or protected surface geometry.
+
+### Files Changed
+- `src/components/ProcedureDetailsPage.tsx`
+- `src/components/__tests__/ProcedureDetailsPage.test.tsx`
+- `src/index.css`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/components/__tests__/ProcedureDetailsPage.test.tsx`
+- `npm run build`
+
+### Current Status
+- Turning missed section 2 is now visible in Data Notes, 3D protected mode, and both Procedure Details 2D chart contexts.
+
+### Known Blockers
+- Turning missed remains debug-marker-only until TIA/wind-spiral geometry is designed and implemented.
+
+### Exact Next Recommended Step
+- Start the next v3 priority by adding a typed vertical-surface diagnostic bundle for final approach modes that are currently collapsed to LNAV.
