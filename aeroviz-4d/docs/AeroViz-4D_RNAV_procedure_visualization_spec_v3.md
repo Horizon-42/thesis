@@ -125,6 +125,7 @@ Procedure
 每个 segment（Segment，航段）至少要带这些字段：
 
 - `segmentType`：feeder（feeder，引导航段）/initial（initial，初始航段）/intermediate（intermediate，中间航段）/final（final，最后进近航段）/missed_s1（missed_s1，复飞第一段）/missed_s2（missed_s2，复飞第二段）；
+- 若 CIFP/detail export 只能给出 `route` 语义，应按 branch role 归一为 `TRANSITION_ROUTE`（transition branch 的连接航路）或 `PROCEDURE_ROUTE`（procedure branch 内尚未细分的程序航路），不能降级为 `UNKNOWN`。
 - `navSpec`：例如 RNAV 1（Area Navigation 1）、RNP APCH（Required Navigation Performance Approach，所需导航性能进近）、A-RNP（Advanced Required Navigation Performance，高级所需导航性能）、RNP AR APCH（Required Navigation Performance Authorization Required Approach，需特殊批准的所需导航性能进近）；
 - `xtt`：XTT（Cross Track Tolerance，横向容差）；
 - `att`：ATT（Along-Track Tolerance，沿航迹容差）；
@@ -862,6 +863,8 @@ export type SegmentType =
   | 'FEEDER'
   | 'INITIAL'
   | 'INTERMEDIATE'
+  | 'TRANSITION_ROUTE'
+  | 'PROCEDURE_ROUTE'
   | 'FINAL_LNAV'
   | 'FINAL_LP'
   | 'FINAL_LNAV_VNAV'

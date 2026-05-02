@@ -306,6 +306,98 @@ describe("normalizeProcedurePackage", () => {
     });
   });
 
+  it("classifies route detail segments by branch role instead of collapsing them to unknown", () => {
+    const transitionDocument: ProcedureDetailDocument = {
+      ...sampleDocument,
+      fixes: [
+        ...sampleDocument.fixes,
+        {
+          fixId: "fix:CHWDR",
+          ident: "CHWDR",
+          kind: "named_fix",
+          position: { lon: -79.1, lat: 35.7 },
+          elevationFt: null,
+          roleHints: ["IAF"],
+          sourceRefs: ["src:cifp-detail:transition"],
+        },
+      ],
+      branches: [
+        {
+          branchId: "branch:CHWDR",
+          branchKey: "CHWDR",
+          branchIdent: "CHWDR",
+          transitionIdent: "CHWDR",
+          branchRole: "transition",
+          sequenceOrder: 0,
+          mergeFixRef: "fix:SCHOO",
+          continuesWithBranchId: "branch:R",
+          defaultVisible: false,
+          warnings: [],
+          legs: [
+            {
+              ...sampleDocument.branches[0].legs[0],
+              legId: "leg:CHWDR:010",
+              sequence: 10,
+              segmentType: "route",
+              path: {
+                pathTerminator: "TF",
+                constructionMethod: "track_to_fix",
+                startFixRef: "fix:CHWDR",
+                endFixRef: "fix:SCHOO",
+              },
+              termination: { kind: "fix", fixRef: "fix:SCHOO" },
+              sourceRefs: ["src:cifp-detail:transition"],
+            },
+          ],
+        },
+        sampleDocument.branches[0],
+      ],
+    };
+    const transitionPackage = normalizeProcedurePackage(transitionDocument);
+    const transitionSegment = transitionPackage.segments.find((segment) =>
+      segment.segmentId.includes("branch:CHWDR"),
+    );
+
+    expect(transitionSegment).toMatchObject({
+      segmentType: "TRANSITION_ROUTE",
+      navSpec: "RNAV_1",
+      xttNm: 1,
+      attNm: 1,
+      verticalRule: { kind: "NONE" },
+    });
+    expect(transitionSegment?.segmentId).toBe(
+      "KRDU-R05LY-RW05L:branch:CHWDR:segment:transition_route:1",
+    );
+
+    const procedureRoutePackage = normalizeProcedurePackage({
+      ...sampleDocument,
+      branches: [
+        {
+          ...sampleDocument.branches[0],
+          legs: [
+            {
+              ...sampleDocument.branches[0].legs[0],
+              segmentType: "route",
+            },
+            ...sampleDocument.branches[0].legs.slice(1),
+          ],
+        },
+      ],
+    });
+    const procedureRouteSegment = procedureRoutePackage.segments.find(
+      (segment) => segment.segmentType === "PROCEDURE_ROUTE",
+    );
+
+    expect(procedureRouteSegment).toMatchObject({
+      segmentId: "KRDU-R05LY-RW05L:branch:R:segment:procedure_route:1",
+      segmentType: "PROCEDURE_ROUTE",
+      navSpec: "RNP_APCH",
+      xttNm: 1,
+      attNm: 1,
+      verticalRule: { kind: "NONE" },
+    });
+  });
+
   it("passes exported RF metadata through to the canonical package leg", () => {
     const rfDocument: ProcedureDetailDocument = {
       ...sampleDocument,

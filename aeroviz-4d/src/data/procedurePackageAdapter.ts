@@ -129,11 +129,16 @@ function segmentTypeFor(
     if (document.procedure.procedureFamily === "RNP_AR_APCH") return "FINAL_RNP_AR";
     return "FINAL_LNAV";
   }
+  if (normalized.includes("route")) {
+    return branch.branchRole.toLowerCase() === "transition"
+      ? "TRANSITION_ROUTE"
+      : "PROCEDURE_ROUTE";
+  }
   return "UNKNOWN";
 }
 
 function navSpecFor(segmentType: ProcedureSegment["segmentType"]): NavSpecCode {
-  if (segmentType === "FEEDER") return "RNAV_1";
+  if (segmentType === "FEEDER" || segmentType === "TRANSITION_ROUTE") return "RNAV_1";
   if (segmentType === "FINAL_RNP_AR") return "RNP_AR_0_3";
   if (segmentType === "UNKNOWN") return "UNKNOWN";
   return "RNP_APCH";

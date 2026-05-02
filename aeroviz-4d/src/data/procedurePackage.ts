@@ -121,6 +121,8 @@ export type SegmentType =
   | "FEEDER"
   | "INITIAL"
   | "INTERMEDIATE"
+  | "TRANSITION_ROUTE"
+  | "PROCEDURE_ROUTE"
   | "FINAL_LNAV"
   | "FINAL_LP"
   | "FINAL_LNAV_VNAV"

@@ -2472,3 +2472,29 @@
 ### Current Status
 - The 3D procedure layer no longer opens all default-visible straight-in procedures at startup.
 - Users can still turn on every procedure branch with one action.
+
+## 2026-05-02 14:35 CEST
+
+### Goal Of This Session
+- Remove `UNKNOWN` labels caused by detail-export `route` segments in the 3D annotation layer.
+
+### Decisions Locked
+- Extended canonical `SegmentType` directly instead of applying display-only label aliases.
+- `route` segments on transition branches now normalize to `TRANSITION_ROUTE`.
+- `route` segments on non-transition procedure branches now normalize to `PROCEDURE_ROUTE`.
+- `TRANSITION_ROUTE` uses feeder-like `RNAV_1` default nav spec; `PROCEDURE_ROUTE` uses the existing approach default `RNP_APCH`.
+- Updated the v3 visualization spec so the schema documents both route-derived segment types.
+
+### Files Changed
+- `src/data/procedurePackage.ts`
+- `src/data/procedurePackageAdapter.ts`
+- `src/data/__tests__/procedurePackageAdapter.test.ts`
+- `docs/AeroViz-4D_RNAV_procedure_visualization_spec_v3.md`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/data/__tests__/procedurePackageAdapter.test.ts`
+- `npm run build`
+
+### Current Status
+- Annotation labels backed by canonical procedure packages should now show `TRANSITION ROUTE` or `PROCEDURE ROUTE` for exported route legs instead of `UNKNOWN`.
