@@ -4,6 +4,8 @@ export type ProcedureAnnotationKind =
   | "SEGMENT_ENVELOPE_PRIMARY"
   | "SEGMENT_ENVELOPE_SECONDARY"
   | "FINAL_OEA"
+  | "FINAL_VERTICAL_REFERENCE"
+  | "FINAL_ALTITUDE_CONSTRAINT"
   | "LNAV_VNAV_OCS"
   | "PRECISION_SURFACE"
   | "ALIGNED_CONNECTOR"
@@ -102,6 +104,7 @@ export function procedureAnnotationDisplayLevel(
   if (
     annotation.kind === "LNAV_VNAV_OCS" ||
     annotation.kind === "ALIGNED_CONNECTOR" ||
+    annotation.kind === "FINAL_VERTICAL_REFERENCE" ||
     annotation.kind === "CA_CENTERLINE" ||
     annotation.kind === "CA_ENDPOINT" ||
     (annotation.kind === "SEGMENT_CENTERLINE" && annotation.status === "ESTIMATED") ||
@@ -115,6 +118,7 @@ export function procedureAnnotationDisplayLevel(
     annotation.kind === "SEGMENT_ENVELOPE_PRIMARY" ||
     annotation.kind === "SEGMENT_ENVELOPE_SECONDARY" ||
     annotation.kind === "FINAL_OEA" ||
+    annotation.kind === "FINAL_ALTITUDE_CONSTRAINT" ||
     annotation.kind === "MISSED_SURFACE"
   ) {
     return "PROTECTION";
@@ -150,6 +154,12 @@ export function procedureAnnotationMeaning(
   }
   if (kind === "FINAL_OEA") {
     return "Final-segment obstacle evaluation area used as the lateral reference for final protected-area visualization.";
+  }
+  if (kind === "FINAL_VERTICAL_REFERENCE") {
+    return "Estimated final-approach vertical reference line built from the coded glidepath angle and runway/MAPt elevation.";
+  }
+  if (kind === "FINAL_ALTITUDE_CONSTRAINT") {
+    return "Published final-approach altitude constraint shown at its terminal fix for vertical cross-checking.";
   }
   if (kind === "LNAV_VNAV_OCS") {
     return "Sloping LNAV/VNAV obstacle clearance surface estimate built from final centerline, GPA, and TCH source data.";

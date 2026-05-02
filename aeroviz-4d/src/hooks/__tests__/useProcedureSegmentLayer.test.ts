@@ -171,7 +171,31 @@ const interSegmentTurnJunction = {
 const renderBundleData = {
   index: {},
   documents: [],
-  packages: [],
+  packages: [
+    {
+      packageId: "KRDU-R05LY-RW05L",
+      sharedFixes: [
+        {
+          fixId: "fix:FAF",
+          ident: "FAF",
+          role: ["FAF"],
+          lonDeg: -78.84,
+          latDeg: 35.84,
+          altFtMsl: null,
+          sourceRefs: [],
+        },
+        {
+          fixId: "fix:RW",
+          ident: "RW",
+          role: ["MAP", "RWY"],
+          lonDeg: -78.8,
+          latDeg: 35.87,
+          altFtMsl: 800,
+          sourceRefs: [],
+        },
+      ],
+    },
+  ],
   renderBundles: [
     {
       packageId: "KRDU-R05LY-RW05L",
@@ -188,8 +212,29 @@ const renderBundleData = {
           turnJunctions: [interSegmentTurnJunction],
           segmentBundles: [
             {
-              segment: { segmentId: "segment:final", segmentType: "FINAL_LNAV" },
-              legs: [],
+              segment: {
+                segmentId: "segment:final",
+                segmentType: "FINAL_LNAV",
+                verticalRule: { kind: "BARO_GLIDEPATH", gpaDeg: 3, tchFt: 50 },
+              },
+              legs: [
+                {
+                  legId: "leg:final:faf",
+                  segmentId: "segment:final",
+                  legType: "TF",
+                  endFixId: "fix:FAF",
+                  requiredAltitude: { kind: "AT", minFtMsl: 2200, maxFtMsl: 2200, sourceText: "2200 ft" },
+                  sourceRefs: [],
+                },
+                {
+                  legId: "leg:final:rw",
+                  segmentId: "segment:final",
+                  legType: "TF",
+                  endFixId: "fix:RW",
+                  requiredAltitude: { kind: "AT", minFtMsl: 800, maxFtMsl: 800, sourceText: "800 ft" },
+                  sourceRefs: [],
+                },
+              ],
               diagnostics: [],
               segmentGeometry: {
                 segmentId: "segment:final",
@@ -374,6 +419,8 @@ describe("useProcedureSegmentLayer", () => {
     expect(entities.some((entity) => String(entity.id).includes("-envelope-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-oea-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-lnav-vnav-ocs-primary"))).toBe(true);
+    expect(entities.some((entity) => String(entity.id).includes("-final-vertical-reference"))).toBe(true);
+    expect(entities.some((entity) => String(entity.id).includes("-final-altitude-leg:final:faf"))).toBe(true);
     expect(
       entities.some(
         (entity) =>
@@ -440,11 +487,15 @@ describe("useProcedureSegmentLayer", () => {
 
     const centerline = entities.find((entity) => String(entity.id).endsWith("-centerline"));
     const ocs = entities.find((entity) => String(entity.id).includes("-lnav-vnav-ocs-primary"));
+    const finalVerticalReference = entities.find((entity) => String(entity.id).includes("-final-vertical-reference"));
+    const finalAltitude = entities.find((entity) => String(entity.id).includes("-final-altitude-leg:final:faf"));
     const turnFill = entities.find((entity) => String(entity.id).includes("-turn-1-primary"));
     const debugSurface = entities.find((entity) => String(entity.id).includes("-precision-lpv-w"));
 
     expect(centerline.show).toBe(true);
+    expect(finalAltitude.show).toBe(true);
     expect(ocs.show).toBe(false);
+    expect(finalVerticalReference.show).toBe(false);
     expect(turnFill.show).toBe(false);
     expect(debugSurface.show).toBe(false);
 
@@ -452,6 +503,7 @@ describe("useProcedureSegmentLayer", () => {
     rerender();
 
     expect(ocs.show).toBe(true);
+    expect(finalVerticalReference.show).toBe(true);
     expect(turnFill.show).toBe(false);
     expect(debugSurface.show).toBe(false);
 

@@ -35,6 +35,8 @@ const PRIMARY_COLOR = Cesium.Color.DEEPSKYBLUE.withAlpha(0.18);
 const SECONDARY_COLOR = Cesium.Color.YELLOW.withAlpha(0.1);
 const LNAV_VNAV_OCS_COLOR = Cesium.Color.LIME.withAlpha(0.2);
 const PRECISION_FINAL_SURFACE_COLOR = Cesium.Color.MAGENTA.withAlpha(0.18);
+const FINAL_VERTICAL_REFERENCE_COLOR = Cesium.Color.CYAN.withAlpha(0.88);
+const FINAL_ALTITUDE_CONSTRAINT_COLOR = Cesium.Color.LIME.withAlpha(0.98);
 const TURN_FILL_COLOR = Cesium.Color.ORANGE.withAlpha(0.22);
 const CONNECTOR_COLOR = Cesium.Color.ORANGE.withAlpha(0.32);
 const CONNECTOR_LINE_COLOR = Cesium.Color.ORANGE.withAlpha(0.92);
@@ -51,6 +53,8 @@ const ENVELOPE_HEIGHT_OFFSET_M = 8;
 const OEA_HEIGHT_OFFSET_M = 18;
 const LNAV_VNAV_OCS_HEIGHT_OFFSET_M = 28;
 const PRECISION_FINAL_SURFACE_HEIGHT_OFFSET_M = 34;
+const FINAL_VERTICAL_REFERENCE_HEIGHT_OFFSET_M = 40;
+const FINAL_ALTITUDE_CONSTRAINT_HEIGHT_OFFSET_M = 46;
 const CONNECTOR_HEIGHT_OFFSET_M = 45;
 const MISSED_SURFACE_HEIGHT_OFFSET_M = 58;
 const CA_COURSE_GUIDE_HEIGHT_OFFSET_M = 82;
@@ -165,6 +169,76 @@ function param(label: string, value: unknown): { label: string; value: string } 
   if (value === null || value === undefined || value === "") return null;
   if (typeof value === "number") return { label, value: Number.isInteger(value) ? String(value) : value.toFixed(2) };
   return { label, value: String(value) };
+}
+
+function isFinalSegment(segment: ProcedureSegment): boolean {
+  return segment.segmentType.startsWith("FINAL");
+}
+
+function altitudeConstraintFt(leg: ProcedurePackageLeg): number | null {
+  const altitude = leg.requiredAltitude;
+  if (!altitude) return null;
+  const value = altitude.minFtMsl ?? altitude.maxFtMsl;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function fixGeoPointAtAltitude(fix: ProcedurePackageFix, altitudeFtMsl: number): GeoPoint | null {
+  if (
+    typeof fix.lonDeg !== "number" ||
+    typeof fix.latDeg !== "number" ||
+    !Number.isFinite(fix.lonDeg) ||
+    !Number.isFinite(fix.latDeg)
+  ) {
+    return null;
+  }
+  return {
+    lonDeg: fix.lonDeg,
+    latDeg: fix.latDeg,
+    altM: altitudeFtMsl * 0.3048,
+  };
+}
+
+function finalVerticalReferencePoints(segmentBundle: ProcedureSegmentRenderBundle): GeoPoint[] {
+  if (!isFinalSegment(segmentBundle.segment)) return [];
+  const gpaDeg = segmentBundle.segment.verticalRule?.gpaDeg;
+  if (typeof gpaDeg !== "number" || !Number.isFinite(gpaDeg) || gpaDeg <= 0) return [];
+
+  if (segmentBundle.lnavVnavOcs?.centerline.geoPositions.length) {
+    return segmentBundle.lnavVnavOcs.centerline.geoPositions;
+  }
+
+  const centerline = segmentBundle.segmentGeometry.centerline;
+  if (centerline.geoPositions.length < 2 || centerline.geodesicLengthNm <= 0) return [];
+
+  const samples = segmentBundle.segmentGeometry.stationAxis.samples.length >= 2
+    ? segmentBundle.segmentGeometry.stationAxis.samples.map((sample) => ({
+        stationNm: sample.stationNm,
+        geoPosition: sample.geoPosition,
+      }))
+    : centerline.geoPositions.map((geoPosition, index) => ({
+        stationNm: centerline.geodesicLengthNm * (index / Math.max(centerline.geoPositions.length - 1, 1)),
+        geoPosition,
+      }));
+  if (samples.length < 2) return [];
+
+  const thresholdSample = samples[samples.length - 1];
+  const thresholdElevationFtMsl = thresholdSample.geoPosition.altM / 0.3048;
+  const thresholdReferenceAltitudeFtMsl =
+    thresholdElevationFtMsl + (segmentBundle.segment.verticalRule?.tchFt ?? 0);
+  const gpaRad = (gpaDeg * Math.PI) / 180;
+  const totalStationNm = thresholdSample.stationNm;
+
+  return samples.map((sample) => {
+    const distanceBeforeThresholdNm = Math.max(0, totalStationNm - sample.stationNm);
+    const altitudeFtMsl =
+      thresholdReferenceAltitudeFtMsl +
+      (Math.tan(gpaRad) * distanceBeforeThresholdNm * 1852) / 0.3048;
+    return {
+      lonDeg: sample.geoPosition.lonDeg,
+      latDeg: sample.geoPosition.latDeg,
+      altM: altitudeFtMsl * 0.3048,
+    };
+  });
 }
 
 function compactSegmentType(segmentType: string | undefined): string {
@@ -373,6 +447,7 @@ function addSegmentEntities(
   bundle: ProcedureRenderBundle,
   branchBundle: BranchGeometryBundle,
   segmentBundle: ProcedureSegmentRenderBundle,
+  pkg: ProcedurePackage | null,
   visible: boolean,
   annotationVisible: boolean,
   displayLevel: ProcedureDisplayLevel,
@@ -418,6 +493,111 @@ function addSegmentEntities(
     procedureEntityShow(visible, centerlineAnnotation, displayLevel, true, annotationVisible),
   );
   if (centerlineLabelId) ids.push(centerlineLabelId);
+
+  if (isFinalSegment(segmentBundle.segment)) {
+    const verticalReferencePoints = finalVerticalReferencePoints(segmentBundle);
+    if (verticalReferencePoints.length >= 2) {
+      const verticalReferenceId = `${baseId}-final-vertical-reference`;
+      const estimatedFromThreshold =
+        segmentBundle.lnavVnavOcs === null &&
+        typeof segmentBundle.segment.verticalRule?.tchFt !== "number";
+      const verticalReferenceAnnotation = annotationBase({
+        entityId: verticalReferenceId,
+        label: `GPA ${segmentBundle.segment.verticalRule?.gpaDeg?.toFixed(1) ?? "?"} deg`,
+        title: `${segmentName} final vertical reference`,
+        kind: "FINAL_VERTICAL_REFERENCE",
+        status: "ESTIMATED",
+        bundle,
+        branchBundle,
+        segment: segmentBundle.segment,
+        legs: segmentBundle.legs,
+        parameters: [
+          ...segmentParams(segmentBundle.segment, segmentBundle.legs),
+          param("GPA", `${segmentBundle.segment.verticalRule?.gpaDeg} deg`),
+          param("TCH", segmentBundle.segment.verticalRule?.tchFt === undefined
+            ? "Not available"
+            : `${segmentBundle.segment.verticalRule.tchFt} ft`),
+          param("Basis", estimatedFromThreshold ? "Threshold/MAPt elevation estimate" : "GPA/TCH surface centerline"),
+        ],
+        diagnostics: estimatedFromThreshold
+          ? [
+              ...segmentDiagnostics,
+              "TCH is not available; final vertical reference is anchored at runway/MAPt elevation.",
+            ]
+          : segmentDiagnostics,
+        sourceRefs: sourceRefsFromSegment(segmentBundle.segment),
+      });
+      addPolyline(
+        viewer,
+        verticalReferenceId,
+        `${segmentName} final vertical reference`,
+        verticalReferencePoints.map((point) => elevatedPoint(point, FINAL_VERTICAL_REFERENCE_HEIGHT_OFFSET_M)),
+        procedureEntityShow(visible, verticalReferenceAnnotation, displayLevel),
+        5,
+        FINAL_VERTICAL_REFERENCE_COLOR,
+        verticalReferenceAnnotation,
+      );
+      ids.push(verticalReferenceId);
+      const verticalReferenceLabelId = addAnnotationLabel(
+        viewer,
+        verticalReferenceAnnotation,
+        representativePoint(verticalReferencePoints.map((point) => elevatedPoint(point, FINAL_VERTICAL_REFERENCE_HEIGHT_OFFSET_M))),
+        procedureEntityShow(visible, verticalReferenceAnnotation, displayLevel, true, annotationVisible),
+      );
+      if (verticalReferenceLabelId) ids.push(verticalReferenceLabelId);
+    }
+
+    if (pkg) {
+      const fixById = new Map(pkg.sharedFixes.map((fix) => [fix.fixId, fix]));
+      segmentBundle.legs.forEach((leg) => {
+        const altitudeFtMsl = altitudeConstraintFt(leg);
+        const endFix = leg.endFixId ? fixById.get(leg.endFixId) : undefined;
+        if (altitudeFtMsl === null || !endFix) return;
+        const point = fixGeoPointAtAltitude(endFix, altitudeFtMsl);
+        if (!point) return;
+
+        const constraintId = `${baseId}-final-altitude-${leg.legId}`;
+        const constraintAnnotation = annotationBase({
+          entityId: constraintId,
+          label: `${endFix.ident} ${Math.round(altitudeFtMsl)} ft`,
+          title: `${segmentName} final altitude constraint`,
+          kind: "FINAL_ALTITUDE_CONSTRAINT",
+          status: "SOURCE_BACKED",
+          bundle,
+          branchBundle,
+          segment: segmentBundle.segment,
+          legs: segmentBundle.legs,
+          leg,
+          parameters: [
+            param("Fix", endFix.ident),
+            param("Constraint", leg.requiredAltitude?.sourceText ?? `${altitudeFtMsl} ft`),
+            param("Leg", leg.legType),
+          ],
+          diagnostics: segmentDiagnostics,
+          sourceRefs: (leg.sourceRefs ?? []).map(formatSourceRef),
+        });
+        addPoint(
+          viewer,
+          constraintId,
+          `${segmentName} final altitude ${endFix.ident} ${Math.round(altitudeFtMsl)} ft`,
+          point,
+          procedureEntityShow(visible, constraintAnnotation, displayLevel),
+          9,
+          FINAL_ALTITUDE_CONSTRAINT_COLOR,
+          FINAL_ALTITUDE_CONSTRAINT_HEIGHT_OFFSET_M,
+          constraintAnnotation,
+        );
+        ids.push(constraintId);
+        const constraintLabelId = addAnnotationLabel(
+          viewer,
+          constraintAnnotation,
+          elevatedPoint(point, FINAL_ALTITUDE_CONSTRAINT_HEIGHT_OFFSET_M),
+          procedureEntityShow(visible, constraintAnnotation, displayLevel, true, annotationVisible),
+        );
+        if (constraintLabelId) ids.push(constraintLabelId);
+      });
+    }
+  }
 
   const primaryId = `${baseId}-envelope-primary`;
   const primaryAnnotation = annotationBase({
@@ -1235,6 +1415,7 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
                   bundle,
                   branchBundle,
                   segmentBundle,
+                  pkg ?? null,
                   visible,
                   annotationVisibleRef.current,
                   displayLevelRef.current,
