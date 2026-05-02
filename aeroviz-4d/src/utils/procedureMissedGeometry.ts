@@ -106,6 +106,29 @@ export interface MissedTurnDebugPointGeometry {
   worldPosition: CartesianPoint;
 }
 
+export type MissedTurnDebugPrimitiveType =
+  | "TIA_BOUNDARY"
+  | "EARLY_TURN_BASELINE"
+  | "LATE_TURN_BASELINE"
+  | "NOMINAL_TURN_PATH"
+  | "WIND_SPIRAL";
+
+export interface MissedTurnDebugPrimitiveGeometry {
+  primitiveId: string;
+  segmentId: string;
+  legId: string;
+  debugType: MissedTurnDebugPrimitiveType;
+  constructionStatus: "DEBUG_ESTIMATE_ONLY";
+  turnTrigger: "TURN_AT_ALTITUDE" | "TURN_AT_FIX" | "TURN_TRIGGER_UNKNOWN";
+  turnCase: "EARLY_INSIDE" | "LATE_OUTSIDE" | "NOMINAL";
+  anchorFixId: string;
+  courseDeg: number;
+  turnDirection: "LEFT" | "RIGHT";
+  geoPositions: GeoPoint[];
+  worldPositions: CartesianPoint[];
+  notes: string[];
+}
+
 function diagnostic(
   segment: ProcedureSegment,
   message: string,
@@ -591,5 +614,166 @@ export function buildMissedTurnDebugPoint(
       worldPosition: toCartesian(anchor),
     },
     diagnostics: [],
+  };
+}
+
+function triggerKindForLeg(leg: ProcedurePackageLeg): MissedTurnDebugPrimitiveGeometry["turnTrigger"] {
+  if (leg.legType === "HA") return "TURN_AT_ALTITUDE";
+  if (leg.legType === "HM" || leg.legType === "HF" || leg.legType === "RF") return "TURN_AT_FIX";
+  return "TURN_TRIGGER_UNKNOWN";
+}
+
+function debugCircle(center: GeoPoint, radiusNm: number, sampleCount = 36): GeoPoint[] {
+  return Array.from({ length: sampleCount + 1 }, (_, index) =>
+    offsetPoint(center, (index / sampleCount) * Math.PI * 2, radiusNm * METERS_PER_NM),
+  );
+}
+
+function debugBaseline(
+  anchor: GeoPoint,
+  courseDeg: number,
+  alongCourseNm: number,
+  halfLengthNm: number,
+): GeoPoint[] {
+  const courseRad = toRadians(courseDeg);
+  const midpoint = offsetPoint(anchor, courseRad, alongCourseNm * METERS_PER_NM);
+  return [
+    offsetPoint(midpoint, courseRad - Math.PI / 2, halfLengthNm * METERS_PER_NM),
+    offsetPoint(midpoint, courseRad + Math.PI / 2, halfLengthNm * METERS_PER_NM),
+  ];
+}
+
+function nominalTurnPath(
+  anchor: GeoPoint,
+  courseDeg: number,
+  turnDirection: "LEFT" | "RIGHT",
+  radiusNm: number,
+  sampleCount = 16,
+): GeoPoint[] {
+  const courseRad = toRadians(courseDeg);
+  const sign = turnDirection === "RIGHT" ? 1 : -1;
+  const center = offsetPoint(anchor, courseRad + sign * Math.PI / 2, radiusNm * METERS_PER_NM);
+  const anchorRadialBearing = courseRad - sign * Math.PI / 2;
+  return Array.from({ length: sampleCount + 1 }, (_, index) =>
+    offsetPoint(
+      center,
+      anchorRadialBearing + sign * (index / sampleCount) * (Math.PI / 2),
+      radiusNm * METERS_PER_NM,
+    ),
+  );
+}
+
+export function buildMissedTurnDebugPrimitives(
+  segment: ProcedureSegment,
+  legs: ProcedurePackageLeg[],
+  fixes: Map<string, ProcedurePackageFix>,
+): { geometries: MissedTurnDebugPrimitiveGeometry[]; diagnostics: BuildDiagnostic[] } {
+  if (segment.segmentType !== "MISSED_S2" || !segment.constructionFlags.isTurningMissedApproach) {
+    return { geometries: [], diagnostics: [] };
+  }
+
+  const segmentLegs = legs.filter((leg) => leg.segmentId === segment.segmentId);
+  const turnLeg = segmentLegs.find((leg) =>
+    leg.legType === "HA" || leg.legType === "HF" || leg.legType === "HM" || leg.legType === "RF",
+  );
+  if (!turnLeg) return { geometries: [], diagnostics: [] };
+
+  const anchorFixId =
+    segment.startFixId ??
+    turnLeg.startFixId ??
+    turnLeg.endFixId ??
+    null;
+  const anchorFix = anchorFixId ? fixes.get(anchorFixId) : undefined;
+  const anchor = anchorFix ? pointFromFix(anchorFix) : null;
+  const courseDeg = turnLeg.outboundCourseDeg;
+  const turnDirection = turnLeg.turnDirection;
+  const diagnostics: BuildDiagnostic[] = [];
+
+  if (!anchorFixId || !anchor) {
+    diagnostics.push(
+      legDiagnostic(
+        segment,
+        turnLeg,
+        `${turnLeg.legId}: turning missed debug primitives require a positioned anchor fix.`,
+      ),
+    );
+    return { geometries: [], diagnostics };
+  }
+
+  if (typeof courseDeg !== "number" || !Number.isFinite(courseDeg) || !turnDirection) {
+    diagnostics.push(
+      legDiagnostic(
+        segment,
+        turnLeg,
+        `${turnLeg.legId}: turning missed debug primitives require course and turn-direction metadata.`,
+      ),
+    );
+    return { geometries: [], diagnostics };
+  }
+
+  diagnostics.push(
+    legDiagnostic(
+      segment,
+      turnLeg,
+      `${turnLeg.legId}: turning missed wind/TIA primitives use fixed debug assumptions because wind and aircraft turn inputs are not modeled yet.`,
+    ),
+  );
+
+  const base = {
+    segmentId: segment.segmentId,
+    legId: turnLeg.legId,
+    constructionStatus: "DEBUG_ESTIMATE_ONLY" as const,
+    turnTrigger: triggerKindForLeg(turnLeg),
+    anchorFixId,
+    courseDeg,
+    turnDirection,
+    notes: [
+      "Debug-estimate turning missed primitive; not certified TIA, wind spiral, or protected surface geometry.",
+    ],
+  };
+  const primitives: Array<Omit<MissedTurnDebugPrimitiveGeometry, "worldPositions">> = [
+    {
+      ...base,
+      primitiveId: `${segment.segmentId}:turning-missed:tia-boundary`,
+      debugType: "TIA_BOUNDARY",
+      turnCase: "NOMINAL",
+      geoPositions: debugCircle(anchor, 1.5),
+    },
+    {
+      ...base,
+      primitiveId: `${segment.segmentId}:turning-missed:early-baseline`,
+      debugType: "EARLY_TURN_BASELINE",
+      turnCase: "EARLY_INSIDE",
+      geoPositions: debugBaseline(anchor, courseDeg, -0.5, 1.5),
+    },
+    {
+      ...base,
+      primitiveId: `${segment.segmentId}:turning-missed:late-baseline`,
+      debugType: "LATE_TURN_BASELINE",
+      turnCase: "LATE_OUTSIDE",
+      geoPositions: debugBaseline(anchor, courseDeg, 0.5, 1.5),
+    },
+    {
+      ...base,
+      primitiveId: `${segment.segmentId}:turning-missed:nominal-turn`,
+      debugType: "NOMINAL_TURN_PATH",
+      turnCase: "NOMINAL",
+      geoPositions: nominalTurnPath(anchor, courseDeg, turnDirection, 1),
+    },
+    {
+      ...base,
+      primitiveId: `${segment.segmentId}:turning-missed:wind-spiral`,
+      debugType: "WIND_SPIRAL",
+      turnCase: "LATE_OUTSIDE",
+      geoPositions: debugCircle(offsetPoint(anchor, toRadians(courseDeg), 0.75 * METERS_PER_NM), 1.8),
+    },
+  ];
+
+  return {
+    geometries: primitives.map((primitive) => ({
+      ...primitive,
+      worldPositions: primitive.geoPositions.map(toCartesian),
+    })),
+    diagnostics,
   };
 }

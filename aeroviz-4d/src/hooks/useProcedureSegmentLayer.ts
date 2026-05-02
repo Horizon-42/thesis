@@ -26,6 +26,7 @@ const MISSED_CA_ESTIMATED_SURFACE_COLOR = Cesium.Color.ORANGE.withAlpha(0.26);
 const CA_COURSE_GUIDE_COLOR = Cesium.Color.ORANGE.withAlpha(0.98);
 const CA_CENTERLINE_COLOR = Cesium.Color.ORANGE.withAlpha(0.86);
 const TURNING_MISSED_DEBUG_COLOR = Cesium.Color.YELLOW.withAlpha(0.98);
+const TURNING_MISSED_PRIMITIVE_COLOR = Cesium.Color.ORANGE.withAlpha(0.78);
 const FINAL_SURFACE_STATUS_COLOR = Cesium.Color.ORANGE.withAlpha(0.9);
 const CA_ENDPOINT_COLOR = Cesium.Color.ORANGE.withAlpha(0.98);
 const OUTLINE_COLOR = Cesium.Color.CYAN.withAlpha(0.28);
@@ -465,6 +466,20 @@ function addSegmentEntities(
     );
     ids.push(turnDebugId);
   }
+
+  segmentBundle.missedTurnDebugPrimitives.forEach((primitive) => {
+    const primitiveId = `${baseId}-turning-missed-${primitive.debugType.toLowerCase().replace(/_/g, "-")}`;
+    addPolyline(
+      viewer,
+      primitiveId,
+      `${segmentName} turning missed ${primitive.debugType.toLowerCase().replace(/_/g, " ")}`,
+      primitive.geoPositions.map((point) => elevatedPoint(point, TURNING_MISSED_DEBUG_HEIGHT_OFFSET_M)),
+      visible,
+      primitive.debugType === "NOMINAL_TURN_PATH" ? 4 : 3,
+      TURNING_MISSED_PRIMITIVE_COLOR,
+    );
+    ids.push(primitiveId);
+  });
 
   return ids;
 }

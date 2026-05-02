@@ -523,6 +523,8 @@ const missedTurningDocument: ProcedureDetailDocument = {
             constructionMethod: "hold_to_manual",
             startFixRef: "fix:MIS1",
             endFixRef: "fix:HOLD",
+            courseDeg: 305,
+            turnDirection: "RIGHT",
           },
           termination: { kind: "fix", fixRef: "fix:HOLD" },
           roleAtEnd: "MAHF",
@@ -809,6 +811,21 @@ describe("procedure render bundle", () => {
       triggerLegTypes: ["HM"],
       constructionStatus: "DEBUG_MARKER_ONLY",
     });
+    expect(missedS2Bundle?.missedTurnDebugPrimitives.map((primitive) => primitive.debugType)).toEqual([
+      "TIA_BOUNDARY",
+      "EARLY_TURN_BASELINE",
+      "LATE_TURN_BASELINE",
+      "NOMINAL_TURN_PATH",
+      "WIND_SPIRAL",
+    ]);
+    expect(bundle.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "SOURCE_INCOMPLETE",
+          legId: "leg:R:050",
+        }),
+      ]),
+    );
   });
 
   it("loads procedure details through the package normalizer and render bundle builder", async () => {

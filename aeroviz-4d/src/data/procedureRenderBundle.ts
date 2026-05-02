@@ -39,11 +39,13 @@ import {
   buildMissedCaEndpoints,
   buildMissedCourseGuides,
   buildMissedSectionSurface,
+  buildMissedTurnDebugPrimitives,
   buildMissedTurnDebugPoint,
   type MissedCaCenterlineGeometry,
   type MissedCaEndpointGeometry,
   type MissedCourseGuideGeometry,
   type MissedSectionSurfaceGeometry,
+  type MissedTurnDebugPrimitiveGeometry,
   type MissedTurnDebugPointGeometry,
 } from "../utils/procedureMissedGeometry";
 import {
@@ -90,6 +92,7 @@ export interface ProcedureSegmentRenderBundle {
   missedCaEndpoints: MissedCaEndpointGeometry[];
   missedCaCenterlines: MissedCaCenterlineGeometry[];
   missedTurnDebugPoint: MissedTurnDebugPointGeometry | null;
+  missedTurnDebugPrimitives: MissedTurnDebugPrimitiveGeometry[];
   diagnostics: BuildDiagnostic[];
 }
 
@@ -228,6 +231,8 @@ export function buildProcedureRenderBundle(
         segmentDiagnostics.push(...missedSurfaceResult.diagnostics);
         const missedTurnDebugResult = buildMissedTurnDebugPoint(segment, segmentLegs, fixes);
         segmentDiagnostics.push(...missedTurnDebugResult.diagnostics);
+        const missedTurnPrimitiveResult = buildMissedTurnDebugPrimitives(segment, segmentLegs, fixes);
+        segmentDiagnostics.push(...missedTurnPrimitiveResult.diagnostics);
         diagnostics.push(...segmentDiagnostics);
 
         return {
@@ -244,6 +249,7 @@ export function buildProcedureRenderBundle(
           missedCaEndpoints: missedCaEndpointResult.geometries,
           missedCaCenterlines,
           missedTurnDebugPoint: missedTurnDebugResult.geometry,
+          missedTurnDebugPrimitives: missedTurnPrimitiveResult.geometries,
           diagnostics: segmentDiagnostics,
         };
       })

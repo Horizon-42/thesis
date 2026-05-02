@@ -10,6 +10,7 @@ import {
   buildMissedCaCenterlines,
   buildMissedCourseGuides,
   buildMissedSectionSurface,
+  buildMissedTurnDebugPrimitives,
   buildMissedTurnDebugPoint,
 } from "../procedureMissedGeometry";
 
@@ -281,7 +282,7 @@ describe("procedure missed geometry", () => {
     );
   });
 
-  it("builds a debug-only turning missed anchor for flagged section two segments", () => {
+  it("builds debug-only turning missed anchor and estimated primitives for flagged section two segments", () => {
     const turningSegment: ProcedureSegment = {
       ...missedSegment,
       segmentId: "segment:missed-s2",
@@ -296,7 +297,8 @@ describe("procedure missed geometry", () => {
       segmentId: "segment:missed-s2",
       legType: "HM",
       rawPathTerminator: "HM",
-      outboundCourseDeg: undefined,
+      outboundCourseDeg: 305,
+      turnDirection: "RIGHT",
     };
 
     const result = buildMissedTurnDebugPoint(turningSegment, [hmLeg], fixes);
@@ -310,5 +312,27 @@ describe("procedure missed geometry", () => {
       constructionStatus: "DEBUG_MARKER_ONLY",
       geoPosition: expect.objectContaining({ lonDeg: -78.8, latDeg: 35.87 }),
     });
+
+    const primitiveResult = buildMissedTurnDebugPrimitives(turningSegment, [hmLeg], fixes);
+    expect(primitiveResult.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "SOURCE_INCOMPLETE",
+        legId: "leg:missed:hm",
+      }),
+    ]);
+    expect(primitiveResult.geometries.map((geometry) => geometry.debugType)).toEqual([
+      "TIA_BOUNDARY",
+      "EARLY_TURN_BASELINE",
+      "LATE_TURN_BASELINE",
+      "NOMINAL_TURN_PATH",
+      "WIND_SPIRAL",
+    ]);
+    expect(primitiveResult.geometries[0]).toMatchObject({
+      constructionStatus: "DEBUG_ESTIMATE_ONLY",
+      turnTrigger: "TURN_AT_FIX",
+      courseDeg: 305,
+      turnDirection: "RIGHT",
+    });
+    expect(primitiveResult.geometries[0].geoPositions.length).toBeGreaterThan(10);
   });
 });

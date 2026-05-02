@@ -1990,3 +1990,45 @@
 
 ### Exact Next Recommended Step
 - Continue with P3 turning missed debug primitives.
+
+## 2026-05-02 12:44 CEST
+
+### Goal Of This Session
+- Add first turning missed debug-estimate primitives beyond the existing anchor marker.
+
+### Decisions Locked
+- Added `MissedTurnDebugPrimitiveGeometry` for turning missed section 2 debug overlays.
+- Built five primitive types when section 2 has a positioned anchor plus course and turn direction:
+  - `TIA_BOUNDARY`
+  - `EARLY_TURN_BASELINE`
+  - `LATE_TURN_BASELINE`
+  - `NOMINAL_TURN_PATH`
+  - `WIND_SPIRAL`
+- The primitives classify turn trigger semantics as turn-at-fix or turn-at-altitude from the leg type.
+- All new primitives are marked `DEBUG_ESTIMATE_ONLY`.
+- Missing modeled wind/aircraft turn inputs emit a `SOURCE_INCOMPLETE` diagnostic; the wind spiral and TIA are fixed debug assumptions, not certified geometry.
+- Protected 3D mode renders each primitive as an independent `-turning-missed-...` polyline.
+
+### Files Changed
+- `src/utils/procedureMissedGeometry.ts`
+- `src/utils/__tests__/procedureMissedGeometry.test.ts`
+- `src/data/procedureRenderBundle.ts`
+- `src/data/__tests__/procedureRenderBundle.test.ts`
+- `src/hooks/useProcedureSegmentLayer.ts`
+- `src/hooks/__tests__/useProcedureSegmentLayer.test.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/utils/__tests__/procedureMissedGeometry.test.ts src/data/__tests__/procedureRenderBundle.test.ts src/hooks/__tests__/useProcedureSegmentLayer.test.ts`
+- `npm run build`
+
+### Current Status
+- P3 now has TIA, early/late baseline, nominal turn path, and wind-spiral debug overlays in render bundles and protected 3D mode.
+
+### Known Blockers
+- These primitives are not certified turning missed protected surfaces.
+- Real wind, aircraft category/speed, bank angle, reaction time, and FAA TIA parameters are not yet modeled.
+- Procedure Details 2D still shows only the turning-missed anchor marker.
+
+### Exact Next Recommended Step
+- Run full frontend validation, then continue with either 2D Procedure Details display for turning missed primitives or P4 full missed section surface refinement.

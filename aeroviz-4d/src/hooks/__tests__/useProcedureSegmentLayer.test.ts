@@ -307,6 +307,23 @@ const renderBundleData = {
                 geoPosition: geoPositions[1],
                 worldPosition: {},
               },
+              missedTurnDebugPrimitives: [
+                {
+                  primitiveId: "segment:final:turning-missed:tia-boundary",
+                  segmentId: "segment:final",
+                  legId: "leg:missed:hm",
+                  debugType: "TIA_BOUNDARY",
+                  constructionStatus: "DEBUG_ESTIMATE_ONLY",
+                  turnTrigger: "TURN_AT_FIX",
+                  turnCase: "NOMINAL",
+                  anchorFixId: "fix:RW",
+                  courseDeg: 305,
+                  turnDirection: "RIGHT",
+                  geoPositions,
+                  worldPositions: [],
+                  notes: [],
+                },
+              ],
             },
           ],
         },
@@ -368,6 +385,7 @@ describe("useProcedureSegmentLayer", () => {
     expect(entities.some((entity) => String(entity.id).includes("-ca-centerline-"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-ca-endpoint-"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-turning-missed-anchor"))).toBe(true);
+    expect(entities.some((entity) => String(entity.id).includes("-turning-missed-tia-boundary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-turn-1-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes(":junction:"))).toBe(true);
   });
