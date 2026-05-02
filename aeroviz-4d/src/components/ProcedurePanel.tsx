@@ -32,6 +32,17 @@ interface RunwayGroup {
   procedures: ProcedureGroup[];
 }
 
+interface ProtectedGeometryStatus {
+  caEndpoints: number;
+  caCenterlines: number;
+  estimatedCaSurfaces: number;
+  lnavVnavOcs: number;
+  precisionSurfaces: number;
+  turningMissedPrimitives: number;
+  missingFinalSurfaces: number;
+  sourceIncompleteDiagnostics: number;
+}
+
 function branchSortKey(branch: ProcedureBranchItem): string {
   const branchRank = branch.branchType === "STRAIGHT_IN" ? "0" : "1";
   return `${branchRank}-${branch.branchIdent}`;
@@ -79,6 +90,38 @@ function branchItemsFromRenderData(data: ProcedureRenderBundleData): ProcedureBr
       warnings: diagnosticMessages(data, branch.branchId, branch.legacy.sourceBranchId),
     })),
   );
+}
+
+function protectedGeometryStatus(data: ProcedureRenderBundleData): ProtectedGeometryStatus {
+  const segmentBundles = data.renderBundles.flatMap((bundle) =>
+    bundle.branchBundles.flatMap((branch) => branch.segmentBundles),
+  );
+
+  return {
+    caEndpoints: segmentBundles.reduce((sum, segment) => sum + segment.missedCaEndpoints.length, 0),
+    caCenterlines: segmentBundles.reduce((sum, segment) => sum + segment.missedCaCenterlines.length, 0),
+    estimatedCaSurfaces: segmentBundles.filter(
+      (segment) => segment.missedSectionSurface?.constructionStatus === "ESTIMATED_CA",
+    ).length,
+    lnavVnavOcs: segmentBundles.filter((segment) => segment.lnavVnavOcs !== null).length,
+    precisionSurfaces: segmentBundles.reduce(
+      (sum, segment) => sum + segment.precisionFinalSurfaces.length,
+      0,
+    ),
+    turningMissedPrimitives: segmentBundles.reduce(
+      (sum, segment) => sum + segment.missedTurnDebugPrimitives.length,
+      0,
+    ),
+    missingFinalSurfaces: segmentBundles.reduce(
+      (sum, segment) => sum + (segment.finalSurfaceStatus?.missingSurfaceTypes.length ?? 0),
+      0,
+    ),
+    sourceIncompleteDiagnostics: data.renderBundles.reduce(
+      (sum, bundle) =>
+        sum + bundle.diagnostics.filter((diagnostic) => diagnostic.code === "SOURCE_INCOMPLETE").length,
+      0,
+    ),
+  };
 }
 
 function buildGroups(branches: ProcedureBranchItem[]): RunwayGroup[] {
@@ -136,6 +179,7 @@ export default function ProcedurePanel() {
   const [sourceAirport, setSourceAirport] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [expandedRunways, setExpandedRunways] = useState<Set<string>>(new Set());
+  const [geometryStatus, setGeometryStatus] = useState<ProtectedGeometryStatus | null>(null);
 
   useEffect(() => {
     if (!activeAirportCode) {
@@ -144,6 +188,7 @@ export default function ProcedurePanel() {
       setSourceAirport(null);
       setLoadError(null);
       setExpandedRunways(new Set());
+      setGeometryStatus(null);
       return;
     }
 
@@ -155,6 +200,7 @@ export default function ProcedurePanel() {
         const branchItems = branchItemsFromRenderData(data);
 
         setBranches(branchItems);
+        setGeometryStatus(protectedGeometryStatus(data));
         setSourceCycle(data.index.sourceCycle ?? null);
         setSourceAirport(data.index.airport || activeAirportCode);
         const firstRunway = buildGroups(branchItems)[0]?.runwayIdent;
@@ -164,6 +210,7 @@ export default function ProcedurePanel() {
         if (cancelled) return;
 
         setBranches([]);
+        setGeometryStatus(null);
         setSourceCycle(null);
         setSourceAirport(activeAirportCode);
         setExpandedRunways(new Set());
@@ -231,6 +278,20 @@ export default function ProcedurePanel() {
         <span>{groups.length} runways</span>
         <span>{totalWarnings} warnings</span>
       </div>
+
+      {geometryStatus ? (
+        <div className="procedure-panel-geometry-status" aria-label="Protected geometry status">
+          <strong>3D status</strong>
+          <span>CA endpoints {geometryStatus.caEndpoints}</span>
+          <span>CA paths {geometryStatus.caCenterlines}</span>
+          <span>CA surfaces {geometryStatus.estimatedCaSurfaces}</span>
+          <span>LNAV/VNAV OCS {geometryStatus.lnavVnavOcs}</span>
+          <span>W/X/Y {geometryStatus.precisionSurfaces}</span>
+          <span>Turning debug {geometryStatus.turningMissedPrimitives}</span>
+          <span>Missing final {geometryStatus.missingFinalSurfaces}</span>
+          <span>Source gaps {geometryStatus.sourceIncompleteDiagnostics}</span>
+        </div>
+      ) : null}
 
       <div className="procedure-runway-list">
         {groups.map((group) => {

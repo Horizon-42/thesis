@@ -293,6 +293,10 @@ describe("ProcedurePanel", () => {
     expect(screen.getByText("3 branches")).toBeTruthy();
     expect(screen.getByText("2 runways")).toBeTruthy();
     expect(screen.getByText("8 warnings")).toBeTruthy();
+    expect(screen.getByText("3D status")).toBeTruthy();
+    expect(screen.getByText("CA endpoints 0")).toBeTruthy();
+    expect(screen.getByText("Missing final 3")).toBeTruthy();
+    expect(screen.getByText("Source gaps 2")).toBeTruthy();
     expect(screen.getByText("RNAV(GPS) Y RW05L")).toBeTruthy();
     expect(screen.getByText("AOTTOS")).toBeTruthy();
   });

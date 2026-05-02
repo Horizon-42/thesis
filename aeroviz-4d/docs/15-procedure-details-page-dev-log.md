@@ -2243,3 +2243,36 @@
 
 ### Exact Next Recommended Step
 - Continue with RF/RNP AR final diagnostics/templates in the next implementation pass.
+
+## 2026-05-02 13:03 CEST
+
+### Goal Of This Session
+- Make recent protected-geometry work visible in the main 3D page controls even when the actual 3D primitives are absent because source data is missing.
+
+### Decisions Locked
+- Added a `3D status` block to `ProcedurePanel`.
+- The status is derived from the same render bundles consumed by protected 3D mode.
+- It reports constructed/available counts for:
+  - CA endpoints;
+  - CA centerlines/paths;
+  - CA estimated missed surfaces;
+  - LNAV/VNAV OCS;
+  - LPV/GLS W/X/Y surfaces;
+  - turning missed debug primitives.
+- It also reports missing final-surface count and `SOURCE_INCOMPLETE` diagnostic count so data gaps are visible on the 3D page.
+
+### Files Changed
+- `src/components/ProcedurePanel.tsx`
+- `src/components/__tests__/ProcedurePanel.test.tsx`
+- `src/index.css`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/components/__tests__/ProcedurePanel.test.tsx`
+- `npm run build`
+
+### Current Status
+- The 3D page now shows whether the new protected geometry was actually constructed for the loaded airport/procedures or blocked by missing source data.
+
+### Exact Next Recommended Step
+- Regenerate current public procedure assets and compare the panel's `3D status` counts against expected procedures with CA, GPA/TCH, and turning-missed metadata.
