@@ -11,11 +11,14 @@ const {
   setProcedureBranchVisible,
   getProcedureAnnotationEnabled,
   setProcedureAnnotationEnabled,
+  getProcedureDisplayLevel,
+  setProcedureDisplayLevel,
 } = vi.hoisted(() => {
   const entities: any[] = [];
   let proceduresVisible = true;
   let procedureVisibility: Record<string, boolean> = {};
   let procedureAnnotationEnabled = false;
+  let procedureDisplayLevel = "PROTECTION";
   const mockViewer = {
     entities: {
       values: entities,
@@ -46,6 +49,10 @@ const {
     getProcedureAnnotationEnabled: () => procedureAnnotationEnabled,
     setProcedureAnnotationEnabled: (value: boolean) => {
       procedureAnnotationEnabled = value;
+    },
+    getProcedureDisplayLevel: () => procedureDisplayLevel,
+    setProcedureDisplayLevel: (value: string) => {
+      procedureDisplayLevel = value;
     },
   };
 });
@@ -86,6 +93,7 @@ vi.mock("../../context/AppContext", () => ({
     layers: { procedures: getProceduresVisible() },
     procedureVisibility: getProcedureVisibility(),
     procedureAnnotationEnabled: getProcedureAnnotationEnabled(),
+    procedureDisplayLevel: getProcedureDisplayLevel(),
   }),
 }));
 
@@ -352,6 +360,7 @@ describe("useProcedureSegmentLayer", () => {
     vi.mocked(loadProcedureRenderBundleData).mockResolvedValue(renderBundleData as any);
     setProceduresVisible(true);
     setProcedureAnnotationEnabled(false);
+    setProcedureDisplayLevel("PROTECTION");
     setProcedureBranchVisible("KRDU-R05LY-RW05L:branch:R", true);
   });
 
@@ -423,6 +432,35 @@ describe("useProcedureSegmentLayer", () => {
           entity.__aeroVizProcedureAnnotation?.title.includes("centerline"),
       ),
     ).toBe(true);
+  });
+
+  it("filters procedure entities by cumulative display level", async () => {
+    const { rerender } = renderHook(() => useProcedureSegmentLayer());
+    await waitFor(() => expect(mockViewer.entities.add).toHaveBeenCalled());
+
+    const centerline = entities.find((entity) => String(entity.id).endsWith("-centerline"));
+    const ocs = entities.find((entity) => String(entity.id).includes("-lnav-vnav-ocs-primary"));
+    const turnFill = entities.find((entity) => String(entity.id).includes("-turn-1-primary"));
+    const debugSurface = entities.find((entity) => String(entity.id).includes("-precision-lpv-w"));
+
+    expect(centerline.show).toBe(true);
+    expect(ocs.show).toBe(false);
+    expect(turnFill.show).toBe(false);
+    expect(debugSurface.show).toBe(false);
+
+    setProcedureDisplayLevel("ESTIMATED");
+    rerender();
+
+    expect(ocs.show).toBe(true);
+    expect(turnFill.show).toBe(false);
+    expect(debugSurface.show).toBe(false);
+
+    setProcedureDisplayLevel("DEBUG");
+    rerender();
+
+    expect(ocs.show).toBe(true);
+    expect(turnFill.show).toBe(true);
+    expect(debugSurface.show).toBe(true);
   });
 
   it("syncs layer visibility without reloading render bundle data", async () => {

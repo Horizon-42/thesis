@@ -2498,3 +2498,36 @@
 
 ### Current Status
 - Annotation labels backed by canonical procedure packages should now show `TRANSITION ROUTE` or `PROCEDURE ROUTE` for exported route legs instead of `UNKNOWN`.
+
+## 2026-05-02 14:49 CEST
+
+### Goal Of This Session
+- Add a Procedure Panel display-level switch so 3D procedure geometry can be filtered by construction confidence and purpose.
+
+### Decisions Locked
+- Display levels are cumulative:
+  - `Core`: source-backed fixes, source-backed centerlines, and CA course guides.
+  - `Protection`: Core plus source-backed envelopes, LNAV OEA, and source-backed missed surfaces.
+  - `Estimated`: Protection plus LNAV/VNAV OCS, aligned connectors, estimated CA geometry, and estimated missed surfaces.
+  - `Visual Aid`: Estimated plus visual turn fill.
+  - `Debug`: all procedure entities, including precision debug surfaces, turning missed debug primitives, missing-source markers, and unclassified helper entities.
+- Default display level is `Protection`.
+- The filter applies to both geometry entities and annotation label entities.
+- Entities without annotation metadata are treated as Debug-only until explicitly classified.
+
+### Files Changed
+- `src/data/procedureAnnotations.ts`
+- `src/context/AppContext.tsx`
+- `src/components/ProcedurePanel.tsx`
+- `src/hooks/useProcedureSegmentLayer.ts`
+- `src/index.css`
+- related tests
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/data/__tests__/procedureAnnotations.test.ts src/context/__tests__/AppContext.test.tsx src/components/__tests__/ProcedurePanel.test.tsx src/hooks/__tests__/useProcedureSegmentLayer.test.ts`
+- `npm run build`
+
+### Current Status
+- Procedure Panel now exposes a `Display` selector with `Core`, `Protection`, `Estimated`, `Visual Aid`, and `Debug`.
+- The 3D procedure layer now hides estimated/debug/readability geometry from the default view unless the selected display level includes it.

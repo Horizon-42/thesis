@@ -4,6 +4,7 @@ import {
   loadProcedureRenderBundleData,
   type ProcedureRenderBundleData,
 } from "../data/procedureRenderBundle";
+import { PROCEDURE_DISPLAY_LEVEL_OPTIONS } from "../data/procedureAnnotations";
 import { isMissingJsonAsset } from "../utils/fetchJson";
 import { navigateWithinApp } from "../utils/navigation";
 
@@ -174,6 +175,8 @@ export default function ProcedurePanel() {
     setProcedureBranchesVisible,
     procedureAnnotationEnabled,
     setProcedureAnnotationEnabled,
+    procedureDisplayLevel,
+    setProcedureDisplayLevel,
     activeAirportCode,
     selectedProfileRunwayIdent,
     setSelectedProfileRunwayIdent,
@@ -298,6 +301,21 @@ export default function ProcedurePanel() {
           Annotate
         </label>
       </header>
+
+      <label className="procedure-display-level-select">
+        <span>Display</span>
+        <select
+          value={procedureDisplayLevel}
+          disabled={!layers.procedures}
+          onChange={(event) => setProcedureDisplayLevel(event.currentTarget.value as typeof procedureDisplayLevel)}
+        >
+          {PROCEDURE_DISPLAY_LEVEL_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
 
       {loadError ? <p className="procedure-panel-error">{loadError}</p> : null}
 

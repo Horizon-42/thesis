@@ -16,7 +16,10 @@ import type {
 } from "../data/procedurePackage";
 import {
   attachProcedureAnnotation,
+  getProcedureAnnotation,
+  isProcedureAnnotationVisibleAtDisplayLevel,
   procedureAnnotationMeaning,
+  type ProcedureDisplayLevel,
   type ProcedureAnnotationKind,
   type ProcedureAnnotationStatus,
   type ProcedureEntityAnnotation,
@@ -128,6 +131,20 @@ function representativePoint(points: GeoPoint[]): GeoPoint | null {
 
 function isAnnotationLabelId(entityId: string): boolean {
   return entityId.startsWith(PROCEDURE_ANNOTATION_LABEL_PREFIX);
+}
+
+function procedureEntityShow(
+  baseVisible: boolean,
+  annotation: ProcedureEntityAnnotation | null,
+  displayLevel: ProcedureDisplayLevel,
+  isLabel = false,
+  annotationVisible = false,
+): boolean {
+  return (
+    baseVisible &&
+    isProcedureAnnotationVisibleAtDisplayLevel(annotation, displayLevel) &&
+    (!isLabel || annotationVisible)
+  );
 }
 
 function sourceRefsFromSegment(segment: ProcedureSegment): string[] {
@@ -252,6 +269,8 @@ function addFixLabelEntities(
   branchBundle: BranchGeometryBundle,
   pkg: ProcedurePackage,
   visible: boolean,
+  annotationVisible: boolean,
+  displayLevel: ProcedureDisplayLevel,
 ): string[] {
   const ids: string[] = [];
   pkg.sharedFixes.forEach((fix) => {
@@ -277,7 +296,7 @@ function addFixLabelEntities(
       viewer,
       annotation,
       { lonDeg: fix.lonDeg, latDeg: fix.latDeg, altM: (fix.altFtMsl ?? 0) * 0.3048 },
-      visible,
+      procedureEntityShow(visible, annotation, displayLevel, true, annotationVisible),
     );
     if (labelId) ids.push(labelId);
   });
@@ -321,6 +340,7 @@ function addRibbonBoundaryPolylines(
   visible: boolean,
   material: Cesium.Color,
   altitudeOffsetM: number,
+  annotation?: ProcedureEntityAnnotation,
 ): string[] {
   if (!ribbon || ribbon.leftGeoBoundary.length < 2 || ribbon.rightGeoBoundary.length < 2) return [];
   const leftId = `${id}-left`;
@@ -333,6 +353,7 @@ function addRibbonBoundaryPolylines(
     visible,
     3,
     material,
+    annotation,
   );
   addPolyline(
     viewer,
@@ -342,6 +363,7 @@ function addRibbonBoundaryPolylines(
     visible,
     3,
     material,
+    annotation,
   );
   return [leftId, rightId];
 }
@@ -353,6 +375,7 @@ function addSegmentEntities(
   segmentBundle: ProcedureSegmentRenderBundle,
   visible: boolean,
   annotationVisible: boolean,
+  displayLevel: ProcedureDisplayLevel,
 ): string[] {
   const ids: string[] = [];
   const baseId = `${PROCEDURE_SEGMENT_ENTITY_PREFIX}${bundle.packageId}-${segmentBundle.segment.segmentId}`;
@@ -382,7 +405,7 @@ function addSegmentEntities(
     centerlineId,
     `${segmentName} centerline`,
     segmentBundle.segmentGeometry.centerline.geoPositions,
-    visible,
+    procedureEntityShow(visible, centerlineAnnotation, displayLevel),
     4,
     CENTERLINE_COLOR,
     centerlineAnnotation,
@@ -392,7 +415,7 @@ function addSegmentEntities(
     viewer,
     centerlineAnnotation,
     representativePoint(segmentBundle.segmentGeometry.centerline.geoPositions),
-    visible && annotationVisible,
+    procedureEntityShow(visible, centerlineAnnotation, displayLevel, true, annotationVisible),
   );
   if (centerlineLabelId) ids.push(centerlineLabelId);
 
@@ -416,7 +439,7 @@ function addSegmentEntities(
     primaryId,
     `${segmentName} primary envelope`,
     segmentBundle.segmentGeometry.primaryEnvelope,
-    visible,
+    procedureEntityShow(visible, primaryAnnotation, displayLevel),
     PRIMARY_COLOR,
     ENVELOPE_HEIGHT_OFFSET_M,
     primaryAnnotation,
@@ -443,7 +466,7 @@ function addSegmentEntities(
     secondaryId,
     `${segmentName} secondary envelope`,
     segmentBundle.segmentGeometry.secondaryEnvelope,
-    visible,
+    procedureEntityShow(visible, secondaryAnnotation, displayLevel),
     SECONDARY_COLOR,
     ENVELOPE_HEIGHT_OFFSET_M,
     secondaryAnnotation,
@@ -473,7 +496,7 @@ function addSegmentEntities(
       turnPrimaryId,
       `${segmentName} visual turn fill primary`,
       junction.primaryPatch.ribbon,
-      visible,
+      procedureEntityShow(visible, turnPrimaryAnnotation, displayLevel),
       TURN_FILL_COLOR,
       CONNECTOR_HEIGHT_OFFSET_M,
       turnPrimaryAnnotation,
@@ -492,7 +515,7 @@ function addSegmentEntities(
         turnSecondaryId,
         `${segmentName} visual turn fill secondary`,
         junction.secondaryPatch.ribbon,
-        visible,
+        procedureEntityShow(visible, turnSecondaryAnnotation, displayLevel),
         TURN_FILL_COLOR,
         CONNECTOR_HEIGHT_OFFSET_M,
         turnSecondaryAnnotation,
@@ -521,7 +544,7 @@ function addSegmentEntities(
       oeaPrimaryId,
       `${segmentName} LNAV OEA primary`,
       segmentBundle.finalOea.primary,
-      visible,
+      procedureEntityShow(visible, oeaAnnotation, displayLevel),
       PRIMARY_COLOR,
       OEA_HEIGHT_OFFSET_M,
       oeaAnnotation,
@@ -531,7 +554,7 @@ function addSegmentEntities(
       viewer,
       oeaAnnotation,
       representativePoint(segmentBundle.finalOea.primary.leftGeoBoundary),
-      visible && annotationVisible,
+      procedureEntityShow(visible, oeaAnnotation, displayLevel, true, annotationVisible),
     );
     if (oeaLabelId) ids.push(oeaLabelId);
 
@@ -546,7 +569,7 @@ function addSegmentEntities(
       oeaSecondaryId,
       `${segmentName} LNAV OEA secondary`,
       segmentBundle.finalOea.secondaryOuter,
-      visible,
+      procedureEntityShow(visible, oeaSecondaryAnnotation, displayLevel),
       SECONDARY_COLOR,
       OEA_HEIGHT_OFFSET_M,
       oeaSecondaryAnnotation,
@@ -579,7 +602,7 @@ function addSegmentEntities(
       ocsPrimaryId,
       `${segmentName} LNAV/VNAV OCS primary`,
       segmentBundle.lnavVnavOcs.primary,
-      visible,
+      procedureEntityShow(visible, ocsAnnotation, displayLevel),
       LNAV_VNAV_OCS_COLOR,
       LNAV_VNAV_OCS_HEIGHT_OFFSET_M,
       ocsAnnotation,
@@ -589,7 +612,7 @@ function addSegmentEntities(
       viewer,
       ocsAnnotation,
       representativePoint(segmentBundle.lnavVnavOcs.centerline.geoPositions),
-      visible && annotationVisible,
+      procedureEntityShow(visible, ocsAnnotation, displayLevel, true, annotationVisible),
     );
     if (ocsLabelId) ids.push(ocsLabelId);
 
@@ -604,7 +627,7 @@ function addSegmentEntities(
       ocsSecondaryId,
       `${segmentName} LNAV/VNAV OCS secondary`,
       segmentBundle.lnavVnavOcs.secondaryOuter,
-      visible,
+      procedureEntityShow(visible, ocsSecondaryAnnotation, displayLevel),
       LNAV_VNAV_OCS_COLOR,
       LNAV_VNAV_OCS_HEIGHT_OFFSET_M,
       ocsSecondaryAnnotation,
@@ -637,7 +660,7 @@ function addSegmentEntities(
       surfaceId,
       `${segmentName} ${surface.surfaceType} debug estimate`,
       surface.ribbon,
-      visible,
+      procedureEntityShow(visible, surfaceAnnotation, displayLevel),
       PRECISION_FINAL_SURFACE_COLOR,
       PRECISION_FINAL_SURFACE_HEIGHT_OFFSET_M,
       surfaceAnnotation,
@@ -647,7 +670,7 @@ function addSegmentEntities(
       viewer,
       surfaceAnnotation,
       representativePoint(surface.centerline.geoPositions),
-      visible && annotationVisible,
+      procedureEntityShow(visible, surfaceAnnotation, displayLevel, true, annotationVisible),
     );
     if (surfaceLabelId) ids.push(surfaceLabelId);
   });
@@ -681,7 +704,7 @@ function addSegmentEntities(
         statusId,
         `${segmentName} missing final surfaces: ${segmentBundle.finalSurfaceStatus.missingSurfaceTypes.join(", ")}`,
         statusPoint,
-        visible,
+        procedureEntityShow(visible, statusAnnotation, displayLevel),
         11,
         FINAL_SURFACE_STATUS_COLOR,
         FINAL_SURFACE_STATUS_HEIGHT_OFFSET_M,
@@ -692,7 +715,7 @@ function addSegmentEntities(
         viewer,
         statusAnnotation,
         elevatedPoint(statusPoint, FINAL_SURFACE_STATUS_HEIGHT_OFFSET_M),
-        visible && annotationVisible,
+        procedureEntityShow(visible, statusAnnotation, displayLevel, true, annotationVisible),
       );
       if (statusLabelId) ids.push(statusLabelId);
     }
@@ -718,7 +741,7 @@ function addSegmentEntities(
       connectorPrimaryId,
       `${segmentName} aligned connector primary`,
       segmentBundle.alignedConnector.primary,
-      visible,
+      procedureEntityShow(visible, connectorAnnotation, displayLevel),
       CONNECTOR_COLOR,
       CONNECTOR_HEIGHT_OFFSET_M,
       connectorAnnotation,
@@ -728,7 +751,7 @@ function addSegmentEntities(
       viewer,
       connectorAnnotation,
       representativePoint(segmentBundle.alignedConnector.primary.leftGeoBoundary),
-      visible && annotationVisible,
+      procedureEntityShow(visible, connectorAnnotation, displayLevel, true, annotationVisible),
     );
     if (connectorLabelId) ids.push(connectorLabelId);
 
@@ -743,7 +766,7 @@ function addSegmentEntities(
       connectorSecondaryId,
       `${segmentName} aligned connector secondary`,
       segmentBundle.alignedConnector.secondaryOuter,
-      visible,
+      procedureEntityShow(visible, connectorSecondaryAnnotation, displayLevel),
       CONNECTOR_COLOR,
       CONNECTOR_HEIGHT_OFFSET_M,
       connectorSecondaryAnnotation,
@@ -756,18 +779,20 @@ function addSegmentEntities(
         `${baseId}-connector-primary-boundary`,
         `${segmentName} aligned connector primary`,
         segmentBundle.alignedConnector.primary,
-        visible,
+        procedureEntityShow(visible, connectorAnnotation, displayLevel),
         CONNECTOR_LINE_COLOR,
         CONNECTOR_HEIGHT_OFFSET_M,
+        connectorAnnotation,
       ),
       ...addRibbonBoundaryPolylines(
         viewer,
         `${baseId}-connector-secondary-boundary`,
         `${segmentName} aligned connector secondary`,
         segmentBundle.alignedConnector.secondaryOuter,
-        visible,
+        procedureEntityShow(visible, connectorSecondaryAnnotation, displayLevel),
         CONNECTOR_LINE_COLOR,
         CONNECTOR_HEIGHT_OFFSET_M,
+        connectorSecondaryAnnotation,
       ),
     );
   }
@@ -803,7 +828,7 @@ function addSegmentEntities(
       missedPrimaryId,
       `${missedSurfaceName} primary`,
       segmentBundle.missedSectionSurface.primary,
-      visible,
+      procedureEntityShow(visible, missedAnnotation, displayLevel),
       missedSurfaceColor,
       MISSED_SURFACE_HEIGHT_OFFSET_M,
       missedAnnotation,
@@ -813,7 +838,7 @@ function addSegmentEntities(
       viewer,
       missedAnnotation,
       representativePoint(segmentBundle.missedSectionSurface.primary.leftGeoBoundary),
-      visible && annotationVisible,
+      procedureEntityShow(visible, missedAnnotation, displayLevel, true, annotationVisible),
     );
     if (missedLabelId) ids.push(missedLabelId);
 
@@ -828,7 +853,7 @@ function addSegmentEntities(
       missedSecondaryId,
       `${missedSurfaceName} secondary`,
       segmentBundle.missedSectionSurface.secondaryOuter ?? undefined,
-      visible,
+      procedureEntityShow(visible, missedSecondaryAnnotation, displayLevel),
       missedSurfaceColor,
       MISSED_SURFACE_HEIGHT_OFFSET_M,
       missedSecondaryAnnotation,
@@ -863,7 +888,7 @@ function addSegmentEntities(
       guideId,
       `${segmentName} CA course guide ${Math.round(guide.courseDeg)} deg`,
       guide.geoPositions.map((point) => elevatedPoint(point, CA_COURSE_GUIDE_HEIGHT_OFFSET_M)),
-      visible,
+      procedureEntityShow(visible, guideAnnotation, displayLevel),
       5,
       CA_COURSE_GUIDE_COLOR,
       guideAnnotation,
@@ -873,7 +898,7 @@ function addSegmentEntities(
       viewer,
       guideAnnotation,
       representativePoint(guide.geoPositions.map((point) => elevatedPoint(point, CA_COURSE_GUIDE_HEIGHT_OFFSET_M))),
-      visible && annotationVisible,
+      procedureEntityShow(visible, guideAnnotation, displayLevel, true, annotationVisible),
     );
     if (guideLabelId) ids.push(guideLabelId);
   });
@@ -903,7 +928,7 @@ function addSegmentEntities(
       centerlineId,
       `${segmentName} CA estimated centerline`,
       centerline.geoPositions.map((point) => elevatedPoint(point, CA_CENTERLINE_HEIGHT_OFFSET_M)),
-      visible,
+      procedureEntityShow(visible, caCenterlineAnnotation, displayLevel),
       4,
       CA_CENTERLINE_COLOR,
       caCenterlineAnnotation,
@@ -913,7 +938,7 @@ function addSegmentEntities(
       viewer,
       caCenterlineAnnotation,
       representativePoint(centerline.geoPositions.map((point) => elevatedPoint(point, CA_CENTERLINE_HEIGHT_OFFSET_M))),
-      visible && annotationVisible,
+      procedureEntityShow(visible, caCenterlineAnnotation, displayLevel, true, annotationVisible),
     );
     if (centerlineLabelId) ids.push(centerlineLabelId);
   });
@@ -946,7 +971,7 @@ function addSegmentEntities(
       endpointId,
       `${segmentName} CA estimated endpoint ${Math.round(endpoint.targetAltitudeFtMsl)} ft`,
       endpoint.geoPositions[1],
-      visible,
+      procedureEntityShow(visible, endpointAnnotation, displayLevel),
       10,
       CA_ENDPOINT_COLOR,
       CA_ENDPOINT_HEIGHT_OFFSET_M,
@@ -957,7 +982,7 @@ function addSegmentEntities(
       viewer,
       endpointAnnotation,
       elevatedPoint(endpoint.geoPositions[1], CA_ENDPOINT_HEIGHT_OFFSET_M),
-      visible && annotationVisible,
+      procedureEntityShow(visible, endpointAnnotation, displayLevel, true, annotationVisible),
     );
     if (endpointLabelId) ids.push(endpointLabelId);
   });
@@ -985,7 +1010,7 @@ function addSegmentEntities(
       turnDebugId,
       `${segmentName} turning missed debug anchor`,
       segmentBundle.missedTurnDebugPoint.geoPosition,
-      visible,
+      procedureEntityShow(visible, debugAnnotation, displayLevel),
       12,
       TURNING_MISSED_DEBUG_COLOR,
       TURNING_MISSED_DEBUG_HEIGHT_OFFSET_M,
@@ -996,7 +1021,7 @@ function addSegmentEntities(
       viewer,
       debugAnnotation,
       elevatedPoint(segmentBundle.missedTurnDebugPoint.geoPosition, TURNING_MISSED_DEBUG_HEIGHT_OFFSET_M),
-      visible && annotationVisible,
+      procedureEntityShow(visible, debugAnnotation, displayLevel, true, annotationVisible),
     );
     if (debugLabelId) ids.push(debugLabelId);
   }
@@ -1029,7 +1054,7 @@ function addSegmentEntities(
       primitiveId,
       `${segmentName} turning missed ${primitive.debugType.toLowerCase().replace(/_/g, " ")}`,
       primitive.geoPositions.map((point) => elevatedPoint(point, TURNING_MISSED_DEBUG_HEIGHT_OFFSET_M)),
-      visible,
+      procedureEntityShow(visible, primitiveAnnotation, displayLevel),
       primitive.debugType === "NOMINAL_TURN_PATH" ? 4 : 3,
       TURNING_MISSED_PRIMITIVE_COLOR,
       primitiveAnnotation,
@@ -1039,7 +1064,7 @@ function addSegmentEntities(
       viewer,
       primitiveAnnotation,
       representativePoint(primitive.geoPositions.map((point) => elevatedPoint(point, TURNING_MISSED_DEBUG_HEIGHT_OFFSET_M))),
-      visible && annotationVisible,
+      procedureEntityShow(visible, primitiveAnnotation, displayLevel, true, annotationVisible),
     );
     if (primitiveLabelId) ids.push(primitiveLabelId);
   });
@@ -1053,6 +1078,7 @@ function addBranchTurnJunctionEntities(
   branchBundle: BranchGeometryBundle,
   visible: boolean,
   annotationVisible: boolean,
+  displayLevel: ProcedureDisplayLevel,
 ): string[] {
   const ids: string[] = [];
 
@@ -1080,7 +1106,7 @@ function addBranchTurnJunctionEntities(
       primaryId,
       `${junctionName} primary`,
       junction.primaryPatch.ribbon,
-      visible,
+      procedureEntityShow(visible, primaryAnnotation, displayLevel),
       TURN_FILL_COLOR,
       CONNECTOR_HEIGHT_OFFSET_M,
       primaryAnnotation,
@@ -1090,7 +1116,7 @@ function addBranchTurnJunctionEntities(
       viewer,
       primaryAnnotation,
       representativePoint(junction.primaryPatch.ribbon.leftGeoBoundary),
-      visible && annotationVisible,
+      procedureEntityShow(visible, primaryAnnotation, displayLevel, true, annotationVisible),
     );
     if (labelId) ids.push(labelId);
 
@@ -1106,7 +1132,7 @@ function addBranchTurnJunctionEntities(
         secondaryId,
         `${junctionName} secondary`,
         junction.secondaryPatch.ribbon,
-        visible,
+        procedureEntityShow(visible, secondaryAnnotation, displayLevel),
         TURN_FILL_COLOR,
         CONNECTOR_HEIGHT_OFFSET_M,
         secondaryAnnotation,
@@ -1119,15 +1145,24 @@ function addBranchTurnJunctionEntities(
 }
 
 export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean } = {}): void {
-  const { viewer, layers, procedureVisibility, activeAirportCode, procedureAnnotationEnabled } = useApp();
+  const {
+    viewer,
+    layers,
+    procedureVisibility,
+    activeAirportCode,
+    procedureAnnotationEnabled,
+    procedureDisplayLevel,
+  } = useApp();
   const visibleRef = useRef(layers.procedures);
   const annotationVisibleRef = useRef(procedureAnnotationEnabled);
+  const displayLevelRef = useRef(procedureDisplayLevel);
   const procedureVisibilityRef = useRef(procedureVisibility);
   const branchEntityIdsRef = useRef<Record<string, string[]>>({});
 
   useEffect(() => {
     visibleRef.current = layers.procedures;
     annotationVisibleRef.current = procedureAnnotationEnabled;
+    displayLevelRef.current = procedureDisplayLevel;
     procedureVisibilityRef.current = procedureVisibility;
 
     if (!enabled || !isCesiumViewerUsable(viewer)) return;
@@ -1136,14 +1171,24 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
       entityIds.forEach((entityId) => {
         const entity = viewer.entities.getById(entityId);
         if (entity) {
-          entity.show =
-            layers.procedures &&
-            branchVisible &&
-            (!isAnnotationLabelId(entityId) || procedureAnnotationEnabled);
+          entity.show = procedureEntityShow(
+            layers.procedures && branchVisible,
+            getProcedureAnnotation(entity),
+            procedureDisplayLevel,
+            isAnnotationLabelId(entityId),
+            procedureAnnotationEnabled,
+          );
         }
       });
     });
-  }, [enabled, viewer, layers.procedures, procedureVisibility, procedureAnnotationEnabled]);
+  }, [
+    enabled,
+    viewer,
+    layers.procedures,
+    procedureVisibility,
+    procedureAnnotationEnabled,
+    procedureDisplayLevel,
+  ]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -1176,7 +1221,9 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
                   bundle,
                   branchBundle,
                   pkg,
-                  visible && annotationVisibleRef.current,
+                  visible,
+                  annotationVisibleRef.current,
+                  displayLevelRef.current,
                 ),
               );
             }
@@ -1190,6 +1237,7 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
                   segmentBundle,
                   visible,
                   annotationVisibleRef.current,
+                  displayLevelRef.current,
                 ),
               );
             });
@@ -1201,6 +1249,7 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
                 branchBundle,
                 visible,
                 annotationVisibleRef.current,
+                displayLevelRef.current,
               ),
             );
           });

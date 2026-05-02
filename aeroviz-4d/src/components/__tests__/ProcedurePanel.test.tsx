@@ -21,11 +21,14 @@ const {
   getSelectedProfileRunwayIdent,
   getRunwayProfileOpen,
   setProcedureAnnotationEnabled,
+  setProcedureDisplayLevel,
+  getProcedureDisplayLevel,
   resetProcedureVisibility,
 } = vi.hoisted(() => {
   let procedureVisibility: Record<string, boolean> = {};
   let selectedProfileRunwayIdent: string | null = null;
   let isRunwayProfileOpen = false;
+  let procedureDisplayLevel = "PROTECTION";
   return {
     fetchMock: vi.fn(),
     navigateWithinApp: vi.fn(),
@@ -47,9 +50,14 @@ const {
       isRunwayProfileOpen = open;
     }),
     setProcedureAnnotationEnabled: vi.fn(),
+    setProcedureDisplayLevel: vi.fn((level: string) => {
+      procedureDisplayLevel = level;
+    }),
+    getProcedureDisplayLevel: () => procedureDisplayLevel,
     getProcedureVisibility: () => procedureVisibility,
     resetProcedureVisibility: () => {
       procedureVisibility = {};
+      procedureDisplayLevel = "PROTECTION";
     },
     getSelectedProfileRunwayIdent: () => selectedProfileRunwayIdent,
     getRunwayProfileOpen: () => isRunwayProfileOpen,
@@ -70,6 +78,8 @@ vi.mock("../../context/AppContext", () => ({
     setRunwayProfileOpen,
     procedureAnnotationEnabled: false,
     setProcedureAnnotationEnabled,
+    procedureDisplayLevel: getProcedureDisplayLevel(),
+    setProcedureDisplayLevel,
   }),
 }));
 
@@ -276,6 +286,7 @@ describe("ProcedurePanel", () => {
     setSelectedProfileRunwayIdent.mockClear();
     setRunwayProfileOpen.mockClear();
     setProcedureAnnotationEnabled.mockClear();
+    setProcedureDisplayLevel.mockClear();
     navigateWithinApp.mockClear();
     fetchMock.mockImplementation((url: string) => {
       if (url.endsWith("/procedure-details/index.json")) return Promise.resolve(jsonResponse(sampleIndex));
@@ -304,6 +315,7 @@ describe("ProcedurePanel", () => {
     expect(screen.getByText("2 runways")).toBeTruthy();
     expect(screen.getByText("8 warnings")).toBeTruthy();
     expect(screen.getByText("3D status")).toBeTruthy();
+    expect((screen.getByLabelText("Display") as HTMLSelectElement).value).toBe("PROTECTION");
     expect(screen.getByText("CA endpoints 0")).toBeTruthy();
     expect(screen.getByText("Missing final 3")).toBeTruthy();
     expect(screen.getByText("Source gaps 2")).toBeTruthy();
@@ -376,6 +388,15 @@ describe("ProcedurePanel", () => {
     fireEvent.click(screen.getByLabelText("Annotate"));
 
     expect(setProcedureAnnotationEnabled).toHaveBeenCalledWith(true);
+  });
+
+  it("updates the 3D procedure display level", async () => {
+    render(<ProcedurePanel />);
+    await waitFor(() => expect(screen.getByText("RW05L")).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText("Display"), { target: { value: "DEBUG" } });
+
+    expect(setProcedureDisplayLevel).toHaveBeenCalledWith("DEBUG");
   });
 
   it("opens procedure details from the panel footer", async () => {

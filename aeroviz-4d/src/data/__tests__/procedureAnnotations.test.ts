@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   attachProcedureAnnotation,
   annotationStatusLabel,
+  isProcedureAnnotationVisibleAtDisplayLevel,
+  procedureAnnotationDisplayLevel,
   procedureAnnotationMeaning,
   resolvePickedProcedureAnnotation,
   type ProcedureEntityAnnotation,
@@ -44,5 +46,45 @@ describe("procedureAnnotations", () => {
     const entity = attachProcedureAnnotation({ id: "entity-1" }, annotation);
 
     expect(resolvePickedProcedureAnnotation({ id: entity })).toEqual(annotation);
+  });
+
+  it("classifies annotation display levels by kind and status", () => {
+    expect(procedureAnnotationDisplayLevel({ ...annotation, kind: "FIX", status: "SOURCE_BACKED" })).toBe("CORE");
+    expect(
+      procedureAnnotationDisplayLevel({
+        ...annotation,
+        kind: "SEGMENT_ENVELOPE_PRIMARY",
+        status: "SOURCE_BACKED",
+      }),
+    ).toBe("PROTECTION");
+    expect(procedureAnnotationDisplayLevel(annotation)).toBe("ESTIMATED");
+    expect(
+      procedureAnnotationDisplayLevel({
+        ...annotation,
+        kind: "SEGMENT_ENVELOPE_PRIMARY",
+        status: "ESTIMATED",
+      }),
+    ).toBe("ESTIMATED");
+    expect(
+      procedureAnnotationDisplayLevel({
+        ...annotation,
+        kind: "TURN_FILL",
+        status: "VISUAL_FILL_ONLY",
+      }),
+    ).toBe("VISUAL_AID");
+    expect(
+      procedureAnnotationDisplayLevel({
+        ...annotation,
+        kind: "PRECISION_SURFACE",
+        status: "DEBUG_ESTIMATE",
+      }),
+    ).toBe("DEBUG");
+  });
+
+  it("applies cumulative procedure display-level visibility", () => {
+    expect(isProcedureAnnotationVisibleAtDisplayLevel(annotation, "PROTECTION")).toBe(false);
+    expect(isProcedureAnnotationVisibleAtDisplayLevel(annotation, "ESTIMATED")).toBe(true);
+    expect(isProcedureAnnotationVisibleAtDisplayLevel(null, "PROTECTION")).toBe(false);
+    expect(isProcedureAnnotationVisibleAtDisplayLevel(null, "DEBUG")).toBe(true);
   });
 });

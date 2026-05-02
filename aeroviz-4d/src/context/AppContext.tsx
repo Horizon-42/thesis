@@ -35,7 +35,10 @@ import {
   type AirportCatalogItem,
   type AirportConfig,
 } from "../data/airportData";
-import type { ProcedureEntityAnnotation } from "../data/procedureAnnotations";
+import type {
+  ProcedureDisplayLevel,
+  ProcedureEntityAnnotation,
+} from "../data/procedureAnnotations";
 import { fetchJson } from "../utils/fetchJson";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 
@@ -87,6 +90,8 @@ interface AppState {
   setProcedureBranchesVisible: (branchIds: string[], visible: boolean) => void;
   procedureAnnotationEnabled: boolean;
   setProcedureAnnotationEnabled: (enabled: boolean) => void;
+  procedureDisplayLevel: ProcedureDisplayLevel;
+  setProcedureDisplayLevel: (level: ProcedureDisplayLevel) => void;
   selectedProcedureAnnotation: ProcedureEntityAnnotation | null;
   setSelectedProcedureAnnotation: (annotation: ProcedureEntityAnnotation | null) => void;
 
@@ -120,6 +125,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(60);
   const [procedureVisibility, setProcedureVisibility] = useState<Record<string, boolean>>({});
   const [procedureAnnotationEnabled, setProcedureAnnotationEnabled] = useState(false);
+  const [procedureDisplayLevel, setProcedureDisplayLevel] =
+    useState<ProcedureDisplayLevel>("PROTECTION");
   const [selectedProcedureAnnotation, setSelectedProcedureAnnotation] =
     useState<ProcedureEntityAnnotation | null>(null);
   const [selectedProfileRunwayIdent, setSelectedProfileRunwayIdent] = useState<string | null>(
@@ -210,6 +217,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setTrajectoryDataSource(null);
       setProcedureVisibility({});
       setProcedureAnnotationEnabled(false);
+      setProcedureDisplayLevel("PROTECTION");
       setSelectedProcedureAnnotation(null);
       setSelectedProfileRunwayIdent(null);
       setRunwayProfileOpen(false);
@@ -240,6 +248,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setProcedureBranchesVisible,
         procedureAnnotationEnabled,
         setProcedureAnnotationEnabled,
+        procedureDisplayLevel,
+        setProcedureDisplayLevel,
         selectedProcedureAnnotation,
         setSelectedProcedureAnnotation,
         playbackSpeed,

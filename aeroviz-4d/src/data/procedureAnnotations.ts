@@ -22,6 +22,25 @@ export type ProcedureAnnotationStatus =
   | "VISUAL_FILL_ONLY"
   | "MISSING_SOURCE";
 
+export type ProcedureDisplayLevel =
+  | "CORE"
+  | "PROTECTION"
+  | "ESTIMATED"
+  | "VISUAL_AID"
+  | "DEBUG";
+
+export const PROCEDURE_DISPLAY_LEVEL_OPTIONS: Array<{
+  value: ProcedureDisplayLevel;
+  label: string;
+  description: string;
+}> = [
+  { value: "CORE", label: "Core", description: "Source-backed fixes and coded paths" },
+  { value: "PROTECTION", label: "Protection", description: "Core plus source-backed protection" },
+  { value: "ESTIMATED", label: "Estimated", description: "Adds inferred operational geometry" },
+  { value: "VISUAL_AID", label: "Visual Aid", description: "Adds readability fill geometry" },
+  { value: "DEBUG", label: "Debug", description: "Adds debug and missing-source markers" },
+];
+
 export interface ProcedureAnnotationParameter {
   label: string;
   value: string;
@@ -59,6 +78,56 @@ export function annotationStatusLabel(status: ProcedureAnnotationStatus): string
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function displayLevelRank(level: ProcedureDisplayLevel): number {
+  if (level === "CORE") return 1;
+  if (level === "PROTECTION") return 2;
+  if (level === "ESTIMATED") return 3;
+  if (level === "VISUAL_AID") return 4;
+  return 5;
+}
+
+export function procedureAnnotationDisplayLevel(
+  annotation: ProcedureEntityAnnotation,
+): ProcedureDisplayLevel {
+  if (
+    annotation.kind === "PRECISION_SURFACE" ||
+    annotation.kind === "TURNING_MISSED_DEBUG" ||
+    annotation.kind === "MISSING_FINAL_SURFACE"
+  ) {
+    return "DEBUG";
+  }
+  if (annotation.kind === "TURN_FILL") return "VISUAL_AID";
+  if (
+    annotation.kind === "LNAV_VNAV_OCS" ||
+    annotation.kind === "ALIGNED_CONNECTOR" ||
+    annotation.kind === "CA_CENTERLINE" ||
+    annotation.kind === "CA_ENDPOINT" ||
+    (annotation.kind === "SEGMENT_CENTERLINE" && annotation.status === "ESTIMATED") ||
+    (annotation.kind === "SEGMENT_ENVELOPE_PRIMARY" && annotation.status === "ESTIMATED") ||
+    (annotation.kind === "SEGMENT_ENVELOPE_SECONDARY" && annotation.status === "ESTIMATED") ||
+    (annotation.kind === "MISSED_SURFACE" && annotation.status === "ESTIMATED")
+  ) {
+    return "ESTIMATED";
+  }
+  if (
+    annotation.kind === "SEGMENT_ENVELOPE_PRIMARY" ||
+    annotation.kind === "SEGMENT_ENVELOPE_SECONDARY" ||
+    annotation.kind === "FINAL_OEA" ||
+    annotation.kind === "MISSED_SURFACE"
+  ) {
+    return "PROTECTION";
+  }
+  return "CORE";
+}
+
+export function isProcedureAnnotationVisibleAtDisplayLevel(
+  annotation: ProcedureEntityAnnotation | null,
+  selectedLevel: ProcedureDisplayLevel,
+): boolean {
+  if (!annotation) return selectedLevel === "DEBUG";
+  return displayLevelRank(procedureAnnotationDisplayLevel(annotation)) <= displayLevelRank(selectedLevel);
 }
 
 export function procedureAnnotationMeaning(
