@@ -20,6 +20,7 @@ const {
   setRunwayProfileOpen,
   getSelectedProfileRunwayIdent,
   getRunwayProfileOpen,
+  setProcedureAnnotationEnabled,
 } = vi.hoisted(() => {
   let procedureVisibility: Record<string, boolean> = {};
   let selectedProfileRunwayIdent: string | null = null;
@@ -44,6 +45,7 @@ const {
     setRunwayProfileOpen: vi.fn((open: boolean) => {
       isRunwayProfileOpen = open;
     }),
+    setProcedureAnnotationEnabled: vi.fn(),
     getProcedureVisibility: () => procedureVisibility,
     getSelectedProfileRunwayIdent: () => selectedProfileRunwayIdent,
     getRunwayProfileOpen: () => isRunwayProfileOpen,
@@ -62,6 +64,8 @@ vi.mock("../../context/AppContext", () => ({
     setSelectedProfileRunwayIdent,
     isRunwayProfileOpen: getRunwayProfileOpen(),
     setRunwayProfileOpen,
+    procedureAnnotationEnabled: false,
+    setProcedureAnnotationEnabled,
   }),
 }));
 
@@ -266,6 +270,7 @@ describe("ProcedurePanel", () => {
     setProcedureBranchesVisible.mockClear();
     setSelectedProfileRunwayIdent.mockClear();
     setRunwayProfileOpen.mockClear();
+    setProcedureAnnotationEnabled.mockClear();
     navigateWithinApp.mockClear();
     fetchMock.mockImplementation((url: string) => {
       if (url.endsWith("/procedure-details/index.json")) return Promise.resolve(jsonResponse(sampleIndex));
@@ -328,6 +333,15 @@ describe("ProcedurePanel", () => {
 
     expect(setSelectedProfileRunwayIdent).toHaveBeenCalledWith("RW05L");
     expect(setRunwayProfileOpen).toHaveBeenCalledWith(true);
+  });
+
+  it("toggles 3D procedure annotations", async () => {
+    render(<ProcedurePanel />);
+    await waitFor(() => expect(screen.getByText("RW05L")).toBeTruthy());
+
+    fireEvent.click(screen.getByLabelText("Annotate"));
+
+    expect(setProcedureAnnotationEnabled).toHaveBeenCalledWith(true);
   });
 
   it("opens procedure details from the panel footer", async () => {

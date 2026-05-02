@@ -35,6 +35,7 @@ import {
   type AirportCatalogItem,
   type AirportConfig,
 } from "../data/airportData";
+import type { ProcedureEntityAnnotation } from "../data/procedureAnnotations";
 import { fetchJson } from "../utils/fetchJson";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 
@@ -84,6 +85,10 @@ interface AppState {
   procedureVisibility: Record<string, boolean>;
   setProcedureBranchVisible: (branchId: string, visible: boolean) => void;
   setProcedureBranchesVisible: (branchIds: string[], visible: boolean) => void;
+  procedureAnnotationEnabled: boolean;
+  setProcedureAnnotationEnabled: (enabled: boolean) => void;
+  selectedProcedureAnnotation: ProcedureEntityAnnotation | null;
+  setSelectedProcedureAnnotation: (annotation: ProcedureEntityAnnotation | null) => void;
 
   /** Current Cesium clock multiplier (mirrors viewer.clock.multiplier) */
   playbackSpeed: number;
@@ -114,6 +119,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     useState<Cesium.CzmlDataSource | null>(null);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(60);
   const [procedureVisibility, setProcedureVisibility] = useState<Record<string, boolean>>({});
+  const [procedureAnnotationEnabled, setProcedureAnnotationEnabled] = useState(false);
+  const [selectedProcedureAnnotation, setSelectedProcedureAnnotation] =
+    useState<ProcedureEntityAnnotation | null>(null);
   const [selectedProfileRunwayIdent, setSelectedProfileRunwayIdent] = useState<string | null>(
     null,
   );
@@ -201,6 +209,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setSelectedFlightId(null);
       setTrajectoryDataSource(null);
       setProcedureVisibility({});
+      setProcedureAnnotationEnabled(false);
+      setSelectedProcedureAnnotation(null);
       setSelectedProfileRunwayIdent(null);
       setRunwayProfileOpen(false);
       setAirport(null);
@@ -228,6 +238,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         procedureVisibility,
         setProcedureBranchVisible,
         setProcedureBranchesVisible,
+        procedureAnnotationEnabled,
+        setProcedureAnnotationEnabled,
+        selectedProcedureAnnotation,
+        setSelectedProcedureAnnotation,
         playbackSpeed,
         setPlaybackSpeed,
         selectedProfileRunwayIdent,

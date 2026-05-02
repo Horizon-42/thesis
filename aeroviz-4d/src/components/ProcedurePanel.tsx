@@ -168,6 +168,8 @@ export default function ProcedurePanel() {
     procedureVisibility,
     setProcedureBranchVisible,
     setProcedureBranchesVisible,
+    procedureAnnotationEnabled,
+    setProcedureAnnotationEnabled,
     activeAirportCode,
     selectedProfileRunwayIdent,
     setSelectedProfileRunwayIdent,
@@ -268,6 +270,15 @@ export default function ProcedurePanel() {
             onChange={() => toggleLayer("procedures")}
           />
           On
+        </label>
+        <label className="procedure-master-toggle">
+          <input
+            type="checkbox"
+            checked={procedureAnnotationEnabled}
+            disabled={!layers.procedures}
+            onChange={(event) => setProcedureAnnotationEnabled(event.currentTarget.checked)}
+          />
+          Annotate
         </label>
       </header>
 
