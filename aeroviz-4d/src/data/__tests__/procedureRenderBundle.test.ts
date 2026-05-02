@@ -4,7 +4,11 @@ import { METERS_PER_NM, offsetPoint } from "../../utils/procedureGeoMath";
 import type { ProcedureDetailDocument, ProcedureDetailsIndexManifest } from "../procedureDetails";
 import type { ProcedurePackage } from "../procedurePackage";
 import { normalizeProcedurePackage } from "../procedurePackageAdapter";
-import { buildProcedureRenderBundle, loadProcedureRenderBundleData } from "../procedureRenderBundle";
+import {
+  buildProcedureRenderBundle,
+  clearProcedureRenderBundleDataCache,
+  loadProcedureRenderBundleData,
+} from "../procedureRenderBundle";
 
 vi.mock("../../utils/fetchJson", () => ({
   fetchJson: vi.fn(),
@@ -537,6 +541,7 @@ const missedTurningDocument: ProcedureDetailDocument = {
 describe("procedure render bundle", () => {
   beforeEach(() => {
     vi.mocked(fetchJson).mockReset();
+    clearProcedureRenderBundleDataCache();
   });
 
   it("aggregates segment, OEA, and aligned connector geometry from a ProcedurePackage", () => {
@@ -932,5 +937,29 @@ describe("procedure render bundle", () => {
     expect(data.documents).toEqual([sampleDocument]);
     expect(data.packages[0].packageId).toBe("KRDU-R05LY-RW05L");
     expect(data.renderBundles[0].procedureId).toBe("R05LY");
+  });
+
+  it("reuses cached render bundle loads for the same airport and geometry context", async () => {
+    vi.mocked(fetchJson)
+      .mockResolvedValueOnce(sampleIndex)
+      .mockResolvedValueOnce(sampleDocument);
+
+    const [first, second] = await Promise.all([
+      loadProcedureRenderBundleData("krdu", {
+        samplingStepNm: 0.5,
+        enableDebugPrimitives: false,
+      }),
+      loadProcedureRenderBundleData("KRDU", {
+        samplingStepNm: 0.5,
+        enableDebugPrimitives: false,
+      }),
+    ]);
+
+    expect(first).toBe(second);
+    expect(fetchJson).toHaveBeenCalledTimes(2);
+    expect(fetchJson).toHaveBeenCalledWith("/data/airports/KRDU/procedure-details/index.json");
+    expect(fetchJson).toHaveBeenCalledWith(
+      "/data/airports/KRDU/procedure-details/KRDU-R05LY-RW05L.json",
+    );
   });
 });

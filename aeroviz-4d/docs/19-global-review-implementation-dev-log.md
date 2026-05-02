@@ -13,4 +13,11 @@
 - Scope: prevent the old FAF-to-threshold OCS hook from mixing by default with v3 procedure segment OEA/OCS geometry.
 - Change: `useOcsLayer` now accepts an `enabled` flag and only loads legacy entities when the legacy toggle is on; the control label is renamed to `Legacy FAF OCS Debug`.
 - Tests: `npm test -- --run src/components/__tests__/ControlPanel.test.tsx`; `npm run build`.
+- Commit: this entry is included in `Isolate legacy OCS debug layer`.
+
+## 2026-05-02 Step 3 - Shared render bundle load cache
+
+- Scope: reduce duplicate procedure-detail fetch/parse/geometry-build work across `ProcedurePanel`, 3D procedure layer, and runway trajectory profile.
+- Change: added an airport/context keyed promise cache inside `procedureRenderBundle`, with a test-only clear helper and retry support after failed loads.
+- Tests: `npm test -- --run src/data/__tests__/procedureRenderBundle.test.ts`; `npm run build`.
 - Commit: pending.

@@ -99,6 +99,23 @@ export interface ProcedureSegmentRenderBundle {
   diagnostics: BuildDiagnostic[];
 }
 
+const procedureRenderBundleDataCache = new Map<string, Promise<ProcedureRenderBundleData>>();
+
+function renderBundleDataCacheKey(
+  airportCode: string,
+  ctx: GeometryBuildContext,
+): string {
+  return [
+    airportCode.trim().toUpperCase(),
+    `sampling=${ctx.samplingStepNm}`,
+    `debug=${ctx.enableDebugPrimitives}`,
+  ].join("|");
+}
+
+export function clearProcedureRenderBundleDataCache(): void {
+  procedureRenderBundleDataCache.clear();
+}
+
 function isLnavFinal(segment: ProcedureSegment): boolean {
   return (
     segment.segmentType === "FINAL_RNAV_GPS" ||
@@ -296,6 +313,22 @@ export function buildProcedureRenderBundle(
 export async function loadProcedureRenderBundleData(
   airportCode: string,
   ctx: GeometryBuildContext = DEFAULT_GEOMETRY_BUILD_CONTEXT,
+): Promise<ProcedureRenderBundleData> {
+  const cacheKey = renderBundleDataCacheKey(airportCode, ctx);
+  const cached = procedureRenderBundleDataCache.get(cacheKey);
+  if (cached) return cached;
+
+  const loadPromise = loadProcedureRenderBundleDataUncached(airportCode, ctx);
+  procedureRenderBundleDataCache.set(cacheKey, loadPromise);
+  loadPromise.catch(() => {
+    procedureRenderBundleDataCache.delete(cacheKey);
+  });
+  return loadPromise;
+}
+
+async function loadProcedureRenderBundleDataUncached(
+  airportCode: string,
+  ctx: GeometryBuildContext,
 ): Promise<ProcedureRenderBundleData> {
   const index = await fetchJson<ProcedureDetailsIndexManifest>(procedureDetailsIndexUrl(airportCode));
   const procedureUids = index.runways.flatMap((runway) =>
