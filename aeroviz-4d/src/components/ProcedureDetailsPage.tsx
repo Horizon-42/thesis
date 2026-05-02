@@ -122,6 +122,16 @@ function formatAltitudeFt(value: number | null | undefined): string {
   return `${Math.round(value).toLocaleString()} ft`;
 }
 
+function formatHeightFt(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "Not available";
+  return `${value.toFixed(1)} ft`;
+}
+
+function formatAngleDeg(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "Not available";
+  return `${value.toFixed(2)} deg`;
+}
+
 function formatSurfaceTypes(types: string[]): string {
   return types.length > 0 ? types.join(", ") : "None";
 }
@@ -2156,6 +2166,7 @@ export default function ProcedureDetailsPage() {
   const focusedFixHasProfileRepair =
     typeof focusedFixProfileAltitudeFt === "number" &&
     focusedFixProfileAltitudeFt !== focusedFixProcedureAltitudeFt;
+  const primaryVerticalProfile = procedureDocument?.verticalProfiles[0] ?? null;
   const glossaryTerms = useMemo(
     () => contextualTerms(procedureDocument, focusedFix, focusedBranch),
     [procedureDocument, focusedFix, focusedBranch],
@@ -2766,6 +2777,36 @@ export default function ProcedureDetailsPage() {
                 ) : (
                   <p>Hover or click a fix to inspect it here.</p>
                 )}
+              </section>
+
+              <section className="procedure-details-card">
+                <h3>Final Vertical Data</h3>
+                <dl className="procedure-details-definition-list">
+                  <div>
+                    <dt>GPA</dt>
+                    <dd>{formatAngleDeg(primaryVerticalProfile?.glidepathAngleDeg)}</dd>
+                  </div>
+                  <div>
+                    <dt>TCH</dt>
+                    <dd>{formatHeightFt(primaryVerticalProfile?.thresholdCrossingHeightFt)}</dd>
+                  </div>
+                  <div>
+                    <dt>Basis</dt>
+                    <dd>{primaryVerticalProfile?.basis.replace(/_/g, " ") ?? "Not available"}</dd>
+                  </div>
+                  <div>
+                    <dt>Path point source</dt>
+                    <dd>
+                      {typeof primaryVerticalProfile?.pathPointSourceLine === "number"
+                        ? `FAACIFP18 line ${primaryVerticalProfile.pathPointSourceLine}`
+                        : "Not available"}
+                    </dd>
+                  </div>
+                </dl>
+                <p className="procedure-details-fix-data-note">
+                  GPA/TCH values come from CIFP vertical metadata when available and control
+                  whether GPA/TCH-based final surfaces can be constructed.
+                </p>
               </section>
 
               <section className="procedure-details-card procedure-details-terms-card">

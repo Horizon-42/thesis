@@ -208,13 +208,13 @@ const TERM_DETAILS: Record<string, TermDetails> = {
   },
   GPA: {
     definition:
-      "Glidepath Angle is the published or coded descent angle used by vertically guided final approach visualization.",
+      "Glidepath Angle is the published or coded descent angle used by vertically guided final approach visualization. AeroViz reads it from CIFP path point metadata when available, otherwise it falls back to the final leg vertical angle.",
     references: [FAA_CIFP_REFERENCE, FAA_PBN_ORDER_REFERENCE],
   },
   TCH: {
     definition:
-      "Threshold Crossing Height is the glidepath height above the runway threshold. AeroViz requires it before constructing GPA/TCH-based final vertical surfaces.",
-    references: [FAA_PBN_ORDER_REFERENCE],
+      "Threshold Crossing Height is the glidepath height above the runway threshold. AeroViz reads source-backed TCH from CIFP Airport Path Point records; GPA/TCH-based OCS surfaces are only constructed when this value is available.",
+    references: [FAA_CIFP_REFERENCE, FAA_PBN_ORDER_REFERENCE],
   },
   XTT: {
     definition:
@@ -417,6 +417,10 @@ export function summaryTerms(document: ProcedureDetailDocument | null): string[]
   const familyTerm = procedureFamilyTerm(document.procedure.procedureFamily);
   if (familyTerm) terms.add(familyTerm);
   document.procedure.approachModes.forEach((mode) => terms.add(mode));
+  if (document.verticalProfiles.some((profile) => typeof profile.glidepathAngleDeg === "number")) {
+    terms.add("GPA");
+    terms.add("TCH");
+  }
   document.branches.forEach((branch) => {
     terms.add(branch.branchIdent);
     const routeTypeTerm = approachRouteTypeTerm(branch.procedureType);

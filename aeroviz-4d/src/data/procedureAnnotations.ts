@@ -165,7 +165,7 @@ export function procedureAnnotationMeaning(
     return "Final-segment obstacle evaluation area used as the lateral reference for final protected-area visualization.";
   }
   if (kind === "FINAL_VERTICAL_REFERENCE") {
-    return "Estimated final-approach vertical reference line built from the coded glidepath angle and runway/MAPt elevation.";
+    return "Estimated final-approach vertical reference built from coded GPA. When source TCH is available, the reference is GPA/TCH-aligned; otherwise it is anchored at runway/MAPt elevation for display only.";
   }
   if (kind === "ALTITUDE_CONSTRAINT") {
     return "Published altitude constraint at the leg endpoint. It anchors the segment vertical profile when source altitude data is available.";
@@ -174,7 +174,7 @@ export function procedureAnnotationMeaning(
     return "Published final-approach altitude constraint shown at its terminal fix for vertical cross-checking.";
   }
   if (kind === "LNAV_VNAV_OCS") {
-    return "Sloping LNAV/VNAV obstacle clearance surface estimate built from final centerline, GPA, and TCH source data.";
+    return "Sloping LNAV/VNAV obstacle clearance surface estimate built from final centerline plus source-backed GPA and TCH path point data.";
   }
   if (kind === "PRECISION_SURFACE") {
     return "Debug-estimate LPV/GLS precision surface. It is useful for visual comparison but is not certified W/X/Y construction.";

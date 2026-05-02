@@ -119,6 +119,7 @@ export interface ProcedureDetailVerticalProfile {
   basis: string;
   glidepathAngleDeg: number | null;
   thresholdCrossingHeightFt: number | null;
+  pathPointSourceLine?: number | null;
   constraintSamples: Array<{
     fixRef: string;
     ident: string;
