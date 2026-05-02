@@ -1204,3 +1204,30 @@
 
 ### Exact Next Recommended Step
 - Run full frontend and Python validation before continuing into the next unresolved v3 design item.
+
+## 2026-05-02 02:30 CEST
+
+### Goal Of This Session
+- Run full validation after the CA course guide and root pipeline stages.
+
+### Commands Run / Checks Passed
+- `npm test -- --run`
+  - 104 passed.
+- `conda run -n aviation pytest python/tests`
+  - 76 passed.
+- `npm run build`
+  - TypeScript compile and Vite production build passed.
+
+### Current Status
+- CA first-leg missed approach visibility is covered in 2D Procedure Details and 3D protected mode.
+- The root data pipeline can optionally regenerate procedure assets that carry CA `courseDeg`.
+- Full current regression suite is green.
+
+### Remaining v3 Migration Gaps
+- Certified CA course-to-altitude endpoint and protected surface construction are still not implemented.
+- Holding leg geometry (`HM`/`HA`/`HF`) remains semantic/diagnostic only.
+- Turning missed approach section 2 wind spiral/TIA debug geometry remains future work.
+- LPV/GLS W/X/Y and LNAV/VNAV vertical surfaces are still future work beyond the LNAV baseline.
+
+### Exact Next Recommended Step
+- Continue with a small, non-misleading missed-approach improvement: add explicit turning-missed diagnostics/flags for missed section 2 segments that contain holding or turn-trigger legs.
