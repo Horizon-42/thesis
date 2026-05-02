@@ -120,7 +120,10 @@ const ribbon = {
     { lonDeg: -78.83, latDeg: 35.84, altM: 670 },
     { lonDeg: -78.79, latDeg: 35.87, altM: 244 },
   ],
-  halfWidthNmSamples: [],
+  halfWidthNmSamples: [
+    { stationNm: 0, halfWidthNm: 0.6 },
+    { stationNm: 3, halfWidthNm: 0.6 },
+  ],
 };
 
 const turnJunction = {
@@ -428,6 +431,16 @@ describe("useProcedureSegmentLayer", () => {
           entity.polygon.material.name === "CYAN",
       ),
     ).toBe(true);
+    const finalVerticalBand = entities.find((entity) =>
+      String(entity.id).includes("-final-vertical-reference-band"),
+    );
+    expect(finalVerticalBand?.polygon.hierarchy.positions).toHaveLength(4);
+    expect(
+      Math.abs(
+        finalVerticalBand.polygon.hierarchy.positions[0].lon -
+          finalVerticalBand.polygon.hierarchy.positions[2].lon,
+      ),
+    ).toBeGreaterThan(0.003);
     expect(entities.some((entity) => String(entity.id).includes("-final-altitude-leg:final:faf"))).toBe(true);
     expect(
       entities.some(

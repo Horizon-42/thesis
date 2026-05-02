@@ -60,7 +60,8 @@ const PRECISION_FINAL_SURFACE_HEIGHT_OFFSET_M = 34;
 const FINAL_VERTICAL_REFERENCE_HEIGHT_OFFSET_M = 40;
 const FINAL_VERTICAL_REFERENCE_BAND_HEIGHT_OFFSET_M = 38;
 const FINAL_ALTITUDE_CONSTRAINT_HEIGHT_OFFSET_M = 46;
-const FINAL_VERTICAL_REFERENCE_HALF_WIDTH_NM = 0.06;
+const FINAL_VERTICAL_REFERENCE_DEFAULT_HALF_WIDTH_NM = 0.15;
+const FINAL_VERTICAL_REFERENCE_PROTECTION_WIDTH_RATIO = 0.5;
 const CONNECTOR_HEIGHT_OFFSET_M = 45;
 const MISSED_SURFACE_HEIGHT_OFFSET_M = 58;
 const CA_COURSE_GUIDE_HEIGHT_OFFSET_M = 82;
@@ -248,7 +249,7 @@ function finalVerticalReferencePoints(segmentBundle: ProcedureSegmentRenderBundl
 }
 
 function buildFinalVerticalReferenceRibbon(
-  segmentId: string,
+  segmentBundle: ProcedureSegmentRenderBundle,
   points: GeoPoint[],
 ): VariableWidthRibbonGeometry | null {
   if (points.length < 2) return null;
@@ -260,9 +261,24 @@ function buildFinalVerticalReferenceRibbon(
     }
     stations.push(cumulativeNm);
   });
+  const protectionWidthSamples =
+    segmentBundle.finalOea?.primary.halfWidthNmSamples ??
+    segmentBundle.segmentGeometry.primaryEnvelope?.halfWidthNmSamples ??
+    [];
+  const nearestProtectionHalfWidthNm = (stationNm: number) => {
+    const nearest = protectionWidthSamples.reduce<
+      { stationNm: number; halfWidthNm: number } | null
+    >((best, sample) => {
+      if (!best) return sample;
+      return Math.abs(sample.stationNm - stationNm) < Math.abs(best.stationNm - stationNm)
+        ? sample
+        : best;
+    }, null);
+    return nearest?.halfWidthNm ?? FINAL_VERTICAL_REFERENCE_DEFAULT_HALF_WIDTH_NM * 2;
+  };
 
   return buildVariableWidthRibbon(
-    `${segmentId}:final-vertical-reference-band`,
+    `${segmentBundle.segment.segmentId}:final-vertical-reference-band`,
     {
       geoPositions: points,
       worldPositions: [],
@@ -270,7 +286,11 @@ function buildFinalVerticalReferenceRibbon(
       isArc: false,
     },
     stations,
-    () => FINAL_VERTICAL_REFERENCE_HALF_WIDTH_NM,
+    (stationNm) =>
+      Math.max(
+        FINAL_VERTICAL_REFERENCE_DEFAULT_HALF_WIDTH_NM,
+        nearestProtectionHalfWidthNm(stationNm) * FINAL_VERTICAL_REFERENCE_PROTECTION_WIDTH_RATIO,
+      ),
   );
 }
 
@@ -562,7 +582,7 @@ function addSegmentEntities(
         sourceRefs: sourceRefsFromSegment(segmentBundle.segment),
       });
       const referenceRibbon = buildFinalVerticalReferenceRibbon(
-        segmentBundle.segment.segmentId,
+        segmentBundle,
         verticalReferencePoints,
       );
       addRibbonPolygon(
