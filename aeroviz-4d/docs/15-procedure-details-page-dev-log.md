@@ -1802,3 +1802,36 @@
 
 ### Exact Next Recommended Step
 - Add explicit Procedure Details/3D styling for estimated CA missed surfaces so users can distinguish CA-estimated protection from source-backed DF/TF/RF protection.
+
+## 2026-05-02 11:23 CEST
+
+### Goal Of This Session
+- Make CA-estimated missed surfaces visually and structurally distinguishable from source-backed missed surfaces.
+
+### Decisions Locked
+- `MissedSectionSurfaceGeometry` now carries `constructionStatus`.
+- Existing DF/TF/RF-backed missed section surfaces report `SOURCE_BACKED`.
+- CA backfilled missed section surfaces report `ESTIMATED_CA` when the segment geometry contains `ESTIMATED_CA_GEOMETRY`.
+- The 3D procedure layer renders estimated CA missed surfaces with CA-specific naming and orange material instead of the generic missed-surface yellow.
+
+### Files Changed
+- `src/utils/procedureMissedGeometry.ts`
+- `src/utils/__tests__/procedureMissedGeometry.test.ts`
+- `src/data/__tests__/procedureRenderBundle.test.ts`
+- `src/hooks/useProcedureSegmentLayer.ts`
+- `src/hooks/__tests__/useProcedureSegmentLayer.test.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/utils/__tests__/procedureMissedGeometry.test.ts src/data/__tests__/procedureRenderBundle.test.ts src/hooks/__tests__/useProcedureSegmentLayer.test.ts`
+- `npm run build`
+
+### Current Status
+- Estimated CA missed surfaces are now data-tagged and visually distinct in protected 3D mode.
+
+### Known Blockers
+- Procedure Details 2D views still show CA endpoints/labels but do not yet draw surface polygons.
+- Mixed turning missed geometry remains debug-marker-only unless straight constructible geometry is available.
+
+### Exact Next Recommended Step
+- Continue P0/P1 validation by adding broader full-suite checks, then move into the highest-priority remaining advanced missed/turning geometry item.

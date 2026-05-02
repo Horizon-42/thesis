@@ -118,6 +118,7 @@ describe("procedure missed geometry", () => {
     expect(result.geometry).toMatchObject({
       segmentId: "segment:missed-s1",
       surfaceType: "MISSED_SECTION1_ENVELOPE",
+      constructionStatus: "SOURCE_BACKED",
       primary: expect.objectContaining({ geometryId: "segment:missed-s1:primary" }),
       secondaryOuter: expect.objectContaining({ geometryId: "segment:missed-s1:secondary" }),
     });

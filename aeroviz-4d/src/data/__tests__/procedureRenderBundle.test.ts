@@ -651,6 +651,7 @@ describe("procedure render bundle", () => {
     expect(segmentBundle.segmentGeometry.secondaryEnvelope).toBeDefined();
     expect(segmentBundle.missedSectionSurface).toMatchObject({
       surfaceType: "MISSED_SECTION1_ENVELOPE",
+      constructionStatus: "SOURCE_BACKED",
       primary: expect.any(Object),
       secondaryOuter: expect.any(Object),
     });
@@ -673,6 +674,7 @@ describe("procedure render bundle", () => {
     expect(segmentBundle.segmentGeometry.secondaryEnvelope).toBeDefined();
     expect(segmentBundle.missedSectionSurface).toMatchObject({
       surfaceType: "MISSED_SECTION1_ENVELOPE",
+      constructionStatus: "ESTIMATED_CA",
       primary: expect.any(Object),
       secondaryOuter: expect.any(Object),
     });

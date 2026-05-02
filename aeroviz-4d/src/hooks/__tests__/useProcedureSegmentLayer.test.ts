@@ -204,6 +204,7 @@ const renderBundleData = {
               missedSectionSurface: {
                 segmentId: "segment:final",
                 surfaceType: "MISSED_SECTION1_ENVELOPE",
+                constructionStatus: "ESTIMATED_CA",
                 primary: ribbon,
                 secondaryOuter: ribbon,
               },
@@ -292,6 +293,14 @@ describe("useProcedureSegmentLayer", () => {
     expect(entities.some((entity) => String(entity.id).includes("-connector-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-connector-primary-boundary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-missed-surface-primary"))).toBe(true);
+    expect(
+      entities.some(
+        (entity) =>
+          String(entity.id).includes("-missed-surface-primary") &&
+          String(entity.name).includes("CA estimated missed section primary") &&
+          entity.polygon.material.name === "ORANGE",
+      ),
+    ).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-ca-course-guide-"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-ca-centerline-"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-ca-endpoint-"))).toBe(true);

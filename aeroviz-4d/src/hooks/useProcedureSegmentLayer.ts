@@ -20,6 +20,7 @@ const TURN_FILL_COLOR = Cesium.Color.ORANGE.withAlpha(0.22);
 const CONNECTOR_COLOR = Cesium.Color.ORANGE.withAlpha(0.32);
 const CONNECTOR_LINE_COLOR = Cesium.Color.ORANGE.withAlpha(0.92);
 const MISSED_SURFACE_COLOR = Cesium.Color.YELLOW.withAlpha(0.24);
+const MISSED_CA_ESTIMATED_SURFACE_COLOR = Cesium.Color.ORANGE.withAlpha(0.26);
 const CA_COURSE_GUIDE_COLOR = Cesium.Color.ORANGE.withAlpha(0.98);
 const CA_CENTERLINE_COLOR = Cesium.Color.ORANGE.withAlpha(0.86);
 const TURNING_MISSED_DEBUG_COLOR = Cesium.Color.YELLOW.withAlpha(0.98);
@@ -330,14 +331,22 @@ function addSegmentEntities(
   }
 
   if (segmentBundle.missedSectionSurface) {
+    const isEstimatedCaSurface =
+      segmentBundle.missedSectionSurface.constructionStatus === "ESTIMATED_CA";
+    const missedSurfaceColor = isEstimatedCaSurface
+      ? MISSED_CA_ESTIMATED_SURFACE_COLOR
+      : MISSED_SURFACE_COLOR;
+    const missedSurfaceName = isEstimatedCaSurface
+      ? `${segmentName} CA estimated missed section`
+      : `${segmentName} missed section`;
     const missedPrimaryId = `${baseId}-missed-surface-primary`;
     addRibbonPolygon(
       viewer,
       missedPrimaryId,
-      `${segmentName} missed section primary`,
+      `${missedSurfaceName} primary`,
       segmentBundle.missedSectionSurface.primary,
       visible,
-      MISSED_SURFACE_COLOR,
+      missedSurfaceColor,
       MISSED_SURFACE_HEIGHT_OFFSET_M,
     );
     ids.push(missedPrimaryId);
@@ -346,10 +355,10 @@ function addSegmentEntities(
     addRibbonPolygon(
       viewer,
       missedSecondaryId,
-      `${segmentName} missed section secondary`,
+      `${missedSurfaceName} secondary`,
       segmentBundle.missedSectionSurface.secondaryOuter ?? undefined,
       visible,
-      MISSED_SURFACE_COLOR,
+      missedSurfaceColor,
       MISSED_SURFACE_HEIGHT_OFFSET_M,
     );
     ids.push(missedSecondaryId);

@@ -35,6 +35,7 @@ export type MissedSectionSurfaceType =
 export interface MissedSectionSurfaceGeometry {
   segmentId: string;
   surfaceType: MissedSectionSurfaceType;
+  constructionStatus: "SOURCE_BACKED" | "ESTIMATED_CA";
   primary: LateralEnvelopeGeometry;
   secondaryOuter: LateralEnvelopeGeometry | null;
 }
@@ -194,6 +195,11 @@ export function buildMissedSectionSurface(
         segment.segmentType === "MISSED_S1"
           ? "MISSED_SECTION1_ENVELOPE"
           : "MISSED_SECTION2_STRAIGHT_ENVELOPE",
+      constructionStatus: segmentGeometry.diagnostics.some(
+        (diagnostic) => diagnostic.code === "ESTIMATED_CA_GEOMETRY",
+      )
+        ? "ESTIMATED_CA"
+        : "SOURCE_BACKED",
       primary: segmentGeometry.primaryEnvelope,
       secondaryOuter: segmentGeometry.secondaryEnvelope ?? null,
     },
