@@ -16,6 +16,7 @@ const PROCEDURE_SEGMENT_ENTITY_PREFIX = "procedure-segment-";
 const CENTERLINE_COLOR = Cesium.Color.CYAN.withAlpha(0.95);
 const PRIMARY_COLOR = Cesium.Color.DEEPSKYBLUE.withAlpha(0.18);
 const SECONDARY_COLOR = Cesium.Color.YELLOW.withAlpha(0.1);
+const LNAV_VNAV_OCS_COLOR = Cesium.Color.LIME.withAlpha(0.2);
 const TURN_FILL_COLOR = Cesium.Color.ORANGE.withAlpha(0.22);
 const CONNECTOR_COLOR = Cesium.Color.ORANGE.withAlpha(0.32);
 const CONNECTOR_LINE_COLOR = Cesium.Color.ORANGE.withAlpha(0.92);
@@ -29,6 +30,7 @@ const CA_ENDPOINT_COLOR = Cesium.Color.ORANGE.withAlpha(0.98);
 const OUTLINE_COLOR = Cesium.Color.CYAN.withAlpha(0.28);
 const ENVELOPE_HEIGHT_OFFSET_M = 8;
 const OEA_HEIGHT_OFFSET_M = 18;
+const LNAV_VNAV_OCS_HEIGHT_OFFSET_M = 28;
 const CONNECTOR_HEIGHT_OFFSET_M = 45;
 const MISSED_SURFACE_HEIGHT_OFFSET_M = 58;
 const CA_COURSE_GUIDE_HEIGHT_OFFSET_M = 82;
@@ -260,6 +262,32 @@ function addSegmentEntities(
       OEA_HEIGHT_OFFSET_M,
     );
     ids.push(oeaSecondaryId);
+  }
+
+  if (segmentBundle.lnavVnavOcs) {
+    const ocsPrimaryId = `${baseId}-lnav-vnav-ocs-primary`;
+    addRibbonPolygon(
+      viewer,
+      ocsPrimaryId,
+      `${segmentName} LNAV/VNAV OCS primary`,
+      segmentBundle.lnavVnavOcs.primary,
+      visible,
+      LNAV_VNAV_OCS_COLOR,
+      LNAV_VNAV_OCS_HEIGHT_OFFSET_M,
+    );
+    ids.push(ocsPrimaryId);
+
+    const ocsSecondaryId = `${baseId}-lnav-vnav-ocs-secondary`;
+    addRibbonPolygon(
+      viewer,
+      ocsSecondaryId,
+      `${segmentName} LNAV/VNAV OCS secondary`,
+      segmentBundle.lnavVnavOcs.secondaryOuter,
+      visible,
+      LNAV_VNAV_OCS_COLOR,
+      LNAV_VNAV_OCS_HEIGHT_OFFSET_M,
+    );
+    ids.push(ocsSecondaryId);
   }
 
   if (

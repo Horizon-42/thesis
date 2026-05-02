@@ -5,6 +5,7 @@ import { toCartesian, type GeoPoint } from "../procedureGeoMath";
 import {
   buildFinalApproachSurfaceStatus,
   buildLnavFinalOea,
+  buildLnavVnavOcs,
 } from "../procedureSurfaceGeometry";
 
 const finalGeoPositions: GeoPoint[] = [
@@ -117,6 +118,64 @@ describe("procedure surface geometry", () => {
     expect(result.diagnostics).toEqual([
       expect.objectContaining({
         code: "FINAL_VERTICAL_SURFACE_UNIMPLEMENTED",
+        severity: "WARN",
+      }),
+    ]);
+  });
+
+  it("builds LNAV/VNAV OCS from explicit GPA and TCH source data", () => {
+    const lnavVnavSegment: ProcedureSegment = {
+      ...finalSegment,
+      segmentType: "FINAL_LNAV_VNAV",
+      verticalRule: { kind: "BARO_GLIDEPATH", gpaDeg: 3, tchFt: 50 },
+    };
+    const oea = buildLnavFinalOea(lnavVnavSegment, finalCenterline, {
+      samplingStepNm: 0.25,
+    }).geometry;
+    const ocsResult = buildLnavVnavOcs(lnavVnavSegment, finalCenterline, oea, {
+      samplingStepNm: 0.25,
+    });
+
+    expect(ocsResult.diagnostics).toEqual([]);
+    expect(ocsResult.geometry).toMatchObject({
+      surfaceType: "LNAV_VNAV_OCS",
+      constructionStatus: "GPA_TCH_SLOPE_ESTIMATE",
+      verticalProfile: {
+        gpaDeg: 3,
+        tchFt: 50,
+      },
+    });
+    expect(ocsResult.geometry?.primary.leftGeoBoundary.length).toBeGreaterThan(2);
+    const samples = ocsResult.geometry?.verticalProfile.samples ?? [];
+    expect(samples[0].altitudeFtMsl).toBeGreaterThan(
+      samples[samples.length - 1].altitudeFtMsl,
+    );
+
+    const statusResult = buildFinalApproachSurfaceStatus(
+      lnavVnavSegment,
+      oea,
+      ocsResult.geometry,
+    );
+    expect(statusResult.status).toMatchObject({
+      constructedSurfaceTypes: ["LNAV_FINAL_OEA", "LNAV_VNAV_OCS"],
+      missingSurfaceTypes: [],
+      constructionStatus: "MODE_SPECIFIC_SURFACES_CONSTRUCTED",
+    });
+  });
+
+  it("diagnoses LNAV/VNAV OCS when GPA or TCH is missing", () => {
+    const lnavVnavSegment: ProcedureSegment = {
+      ...finalSegment,
+      segmentType: "FINAL_LNAV_VNAV",
+      verticalRule: { kind: "BARO_GLIDEPATH" },
+    };
+    const oea = buildLnavFinalOea(lnavVnavSegment, finalCenterline).geometry;
+    const result = buildLnavVnavOcs(lnavVnavSegment, finalCenterline, oea);
+
+    expect(result.geometry).toBeNull();
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "SOURCE_INCOMPLETE",
         severity: "WARN",
       }),
     ]);

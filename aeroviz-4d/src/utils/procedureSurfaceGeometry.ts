@@ -1,6 +1,7 @@
 import type { BuildDiagnostic, ProcedureSegment, SourceRef } from "../data/procedurePackage";
 import type { PolylineGeometry3D } from "./procedureSegmentGeometry";
 import {
+  FEET_TO_METERS,
   METERS_PER_NM,
   bearingRad,
   clamp,
@@ -43,6 +44,27 @@ export interface LnavFinalOeaGeometry {
   };
 }
 
+export interface LnavVnavOcsGeometry {
+  geometryId: string;
+  segmentId: string;
+  surfaceType: "LNAV_VNAV_OCS";
+  constructionStatus: "GPA_TCH_SLOPE_ESTIMATE";
+  centerline: PolylineGeometry3D;
+  primary: VariableWidthRibbonGeometry;
+  secondaryOuter: VariableWidthRibbonGeometry;
+  verticalProfile: {
+    gpaDeg: number;
+    tchFt: number;
+    thresholdElevationFtMsl: number;
+    thresholdStationNm: number;
+    samples: Array<{
+      stationNm: number;
+      altitudeFtMsl: number;
+    }>;
+  };
+  notes: string[];
+}
+
 export type FinalApproachSurfaceType =
   | "LNAV_FINAL_OEA"
   | "LNAV_VNAV_OCS"
@@ -60,6 +82,7 @@ export interface FinalApproachSurfaceStatus {
   missingSurfaceTypes: FinalApproachSurfaceType[];
   constructionStatus:
     | "LNAV_BASELINE_CONSTRUCTED"
+    | "MODE_SPECIFIC_SURFACES_CONSTRUCTED"
     | "COLLAPSED_TO_LNAV_BASELINE"
     | "UNSUPPORTED_FINAL_VERTICAL_SURFACES";
   notes: string[];
@@ -72,6 +95,10 @@ export interface LnavFinalOeaOptions {
   initialPrimaryHalfWidthNm?: number;
   stablePrimaryHalfWidthNm?: number;
   secondaryWidthNm?: number;
+  samplingStepNm?: number;
+}
+
+export interface LnavVnavOcsOptions {
   samplingStepNm?: number;
 }
 
@@ -220,6 +247,7 @@ function uniqueSurfaceTypes(types: FinalApproachSurfaceType[]): FinalApproachSur
 export function buildFinalApproachSurfaceStatus(
   segment: ProcedureSegment,
   finalOea: LnavFinalOeaGeometry | null,
+  lnavVnavOcs: LnavVnavOcsGeometry | null = null,
 ): { status: FinalApproachSurfaceStatus | null; diagnostics: BuildDiagnostic[] } {
   if (!segment.segmentType.startsWith("FINAL")) {
     return { status: null, diagnostics: [] };
@@ -229,7 +257,10 @@ export function buildFinalApproachSurfaceStatus(
     ? segment.constructionFlags.collapsedApproachModes
     : [segment.segmentType.replace(/^FINAL_/, "").replace(/_/g, "/")];
   const requestedSurfaceTypes = uniqueSurfaceTypes(requestedModes.flatMap(surfaceTypesForMode));
-  const constructedSurfaceTypes: FinalApproachSurfaceType[] = finalOea ? ["LNAV_FINAL_OEA"] : [];
+  const constructedSurfaceTypes: FinalApproachSurfaceType[] = [
+    ...(finalOea ? (["LNAV_FINAL_OEA"] as const) : []),
+    ...(lnavVnavOcs ? (["LNAV_VNAV_OCS"] as const) : []),
+  ];
   const missingSurfaceTypes = requestedSurfaceTypes.filter(
     (surfaceType) => !constructedSurfaceTypes.includes(surfaceType),
   );
@@ -237,7 +268,9 @@ export function buildFinalApproachSurfaceStatus(
     requestedModes.length > 1 ||
     missingSurfaceTypes.some((surfaceType) => surfaceType !== "LNAV_FINAL_OEA");
   const constructionStatus = missingSurfaceTypes.length === 0
-    ? "LNAV_BASELINE_CONSTRUCTED"
+    ? requestedSurfaceTypes.every((surfaceType) => surfaceType === "LNAV_FINAL_OEA")
+      ? "LNAV_BASELINE_CONSTRUCTED"
+      : "MODE_SPECIFIC_SURFACES_CONSTRUCTED"
     : collapsedToLnav && finalOea
       ? "COLLAPSED_TO_LNAV_BASELINE"
       : "UNSUPPORTED_FINAL_VERTICAL_SURFACES";
@@ -344,6 +377,146 @@ export function buildLnavFinalOea(
         stablePrimaryHalfWidthNm: opts.stablePrimaryHalfWidthNm,
         secondaryWidthNm: opts.secondaryWidthNm,
       },
+    },
+    diagnostics,
+  };
+}
+
+function nearestHalfWidth(
+  samples: WidthStationSample[],
+  stationNm: number,
+  fallbackHalfWidthNm: number,
+): number {
+  if (samples.length === 0) return fallbackHalfWidthNm;
+  return samples.reduce((nearest, candidate) =>
+    Math.abs(candidate.stationNm - stationNm) < Math.abs(nearest.stationNm - stationNm)
+      ? candidate
+      : nearest,
+  ).halfWidthNm;
+}
+
+function isLnavVnavModeRequested(segment: ProcedureSegment): boolean {
+  const modes = segment.constructionFlags.collapsedApproachModes?.length
+    ? segment.constructionFlags.collapsedApproachModes
+    : [segment.segmentType.replace(/^FINAL_/, "").replace(/_/g, "/")];
+  return modes.some((mode) => {
+    const normalized = mode.toUpperCase();
+    return normalized === "LNAV/VNAV" || normalized === "LNAV-VNAV";
+  });
+}
+
+export function buildLnavVnavOcs(
+  segment: ProcedureSegment,
+  centerline: PolylineGeometry3D,
+  finalOea: LnavFinalOeaGeometry | null,
+  options: LnavVnavOcsOptions = {},
+): { geometry: LnavVnavOcsGeometry | null; diagnostics: BuildDiagnostic[] } {
+  if (!segment.segmentType.startsWith("FINAL") || !isLnavVnavModeRequested(segment)) {
+    return { geometry: null, diagnostics: [] };
+  }
+
+  const diagnostics: BuildDiagnostic[] = [];
+  const gpaDeg = segment.verticalRule?.gpaDeg;
+  const tchFt = segment.verticalRule?.tchFt;
+  if (
+    typeof gpaDeg !== "number" ||
+    !Number.isFinite(gpaDeg) ||
+    gpaDeg <= 0 ||
+    typeof tchFt !== "number" ||
+    !Number.isFinite(tchFt)
+  ) {
+    diagnostics.push(
+      diagnostic(
+        "SOURCE_INCOMPLETE",
+        `${segment.segmentId}: LNAV/VNAV OCS requires explicit GPA and TCH source data.`,
+        "WARN",
+        segment.segmentId,
+        segment.sourceRefs,
+      ),
+    );
+    return { geometry: null, diagnostics };
+  }
+
+  if (!finalOea || centerline.geoPositions.length < 2 || centerline.geodesicLengthNm <= 0) {
+    diagnostics.push(
+      diagnostic(
+        "SOURCE_INCOMPLETE",
+        `${segment.segmentId}: LNAV/VNAV OCS requires a positioned final centerline and LNAV lateral OEA.`,
+        "WARN",
+        segment.segmentId,
+        segment.sourceRefs,
+      ),
+    );
+    return { geometry: null, diagnostics };
+  }
+
+  const samplingStepNm = Math.max(options.samplingStepNm ?? 0.25, 0.01);
+  const thresholdStationNm = centerline.geodesicLengthNm;
+  const thresholdElevationFtMsl =
+    centerline.geoPositions[centerline.geoPositions.length - 1].altM / FEET_TO_METERS;
+  const stations = sampleStationValues(0, thresholdStationNm, samplingStepNm);
+  const sampledCenterline = buildSampledCenterline(
+    centerline,
+    0,
+    thresholdStationNm,
+    samplingStepNm,
+  );
+  const gpaRad = (gpaDeg * Math.PI) / 180;
+  const samples = stations.map((stationNm) => {
+    const distanceBeforeThresholdNm = Math.max(0, thresholdStationNm - stationNm);
+    const altitudeFtMsl =
+      thresholdElevationFtMsl +
+      tchFt +
+      (Math.tan(gpaRad) * distanceBeforeThresholdNm * METERS_PER_NM) / FEET_TO_METERS;
+    return { stationNm, altitudeFtMsl };
+  });
+  const ocsGeoPositions = sampledCenterline.geoPositions.map((point, index) => ({
+    ...point,
+    altM: samples[index].altitudeFtMsl * FEET_TO_METERS,
+  }));
+  const ocsCenterline: PolylineGeometry3D = {
+    ...sampledCenterline,
+    geoPositions: ocsGeoPositions,
+    worldPositions: ocsGeoPositions.map(toCartesian),
+  };
+
+  return {
+    geometry: {
+      geometryId: `${segment.segmentId}:lnav-vnav-ocs`,
+      segmentId: segment.segmentId,
+      surfaceType: "LNAV_VNAV_OCS",
+      constructionStatus: "GPA_TCH_SLOPE_ESTIMATE",
+      centerline: ocsCenterline,
+      primary: buildVariableWidthRibbon(
+        `${segment.segmentId}:lnav-vnav-ocs-primary`,
+        ocsCenterline,
+        stations,
+        (stationNm) => nearestHalfWidth(
+          finalOea.primary.halfWidthNmSamples,
+          stationNm,
+          segment.xttNm * 2,
+        ),
+      ),
+      secondaryOuter: buildVariableWidthRibbon(
+        `${segment.segmentId}:lnav-vnav-ocs-secondary-outer`,
+        ocsCenterline,
+        stations,
+        (stationNm) => nearestHalfWidth(
+          finalOea.secondaryOuter.halfWidthNmSamples,
+          stationNm,
+          segment.xttNm * 3,
+        ),
+      ),
+      verticalProfile: {
+        gpaDeg,
+        tchFt,
+        thresholdElevationFtMsl,
+        thresholdStationNm,
+        samples,
+      },
+      notes: [
+        "Simplified LNAV/VNAV sloping OCS estimate from GPA/TCH; VEB-specific certified construction remains future work.",
+      ],
     },
     diagnostics,
   };

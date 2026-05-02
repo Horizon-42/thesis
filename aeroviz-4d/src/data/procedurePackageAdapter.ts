@@ -156,11 +156,25 @@ function verticalRuleFor(
   segmentType: ProcedureSegment["segmentType"],
 ): VerticalRule | null {
   if (!segmentType.startsWith("FINAL")) return { kind: "NONE" };
+  const verticalProfile = document.verticalProfiles.find((profile) =>
+    profile.appliesToModes.some((mode) => {
+      const normalized = mode.toUpperCase();
+      return normalized === "LNAV/VNAV" || normalized === "LNAV-VNAV" || normalized === "LPV";
+    }),
+  );
+  const pathMetadata = {
+    ...(typeof verticalProfile?.glidepathAngleDeg === "number"
+      ? { gpaDeg: verticalProfile.glidepathAngleDeg }
+      : {}),
+    ...(typeof verticalProfile?.thresholdCrossingHeightFt === "number"
+      ? { tchFt: verticalProfile.thresholdCrossingHeightFt }
+      : {}),
+  };
   if (document.procedure.approachModes.some((mode) => mode.toUpperCase() === "LPV")) {
-    return { kind: "LPV_GLS_SURFACES" };
+    return { kind: "LPV_GLS_SURFACES", ...pathMetadata };
   }
   if (document.procedure.approachModes.some((mode) => mode.toUpperCase() === "LNAV/VNAV")) {
-    return { kind: "BARO_GLIDEPATH" };
+    return { kind: "BARO_GLIDEPATH", ...pathMetadata };
   }
   return { kind: "LEVEL_ROC" };
 }

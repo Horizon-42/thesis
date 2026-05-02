@@ -60,6 +60,7 @@ vi.mock("cesium", () => {
       CYAN: new Color("CYAN"),
       DEEPSKYBLUE: new Color("DEEPSKYBLUE"),
       YELLOW: new Color("YELLOW"),
+      LIME: new Color("LIME"),
       ORANGE: new Color("ORANGE"),
     },
     PolygonHierarchy: class PolygonHierarchy {
@@ -189,11 +190,33 @@ const renderBundleData = {
                 primary: ribbon,
                 secondaryOuter: ribbon,
               },
+              lnavVnavOcs: {
+                geometryId: "segment:final:lnav-vnav-ocs",
+                segmentId: "segment:final",
+                surfaceType: "LNAV_VNAV_OCS",
+                constructionStatus: "GPA_TCH_SLOPE_ESTIMATE",
+                centerline: {
+                  geoPositions,
+                  worldPositions: [],
+                  geodesicLengthNm: 3,
+                  isArc: false,
+                },
+                primary: ribbon,
+                secondaryOuter: ribbon,
+                verticalProfile: {
+                  gpaDeg: 3,
+                  tchFt: 50,
+                  thresholdElevationFtMsl: 800,
+                  thresholdStationNm: 3,
+                  samples: [],
+                },
+                notes: [],
+              },
               finalSurfaceStatus: {
                 segmentId: "segment:final",
                 requestedModes: ["LPV", "LNAV/VNAV", "LNAV"],
-                constructedSurfaceTypes: ["LNAV_FINAL_OEA"],
-                missingSurfaceTypes: ["LPV_W", "LPV_X", "LPV_Y", "LNAV_VNAV_OCS"],
+                constructedSurfaceTypes: ["LNAV_FINAL_OEA", "LNAV_VNAV_OCS"],
+                missingSurfaceTypes: ["LPV_W", "LPV_X", "LPV_Y"],
                 constructionStatus: "COLLAPSED_TO_LNAV_BASELINE",
                 notes: [],
               },
@@ -289,6 +312,14 @@ describe("useProcedureSegmentLayer", () => {
     expect(entities.some((entity) => String(entity.id).endsWith("-centerline"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-envelope-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-oea-primary"))).toBe(true);
+    expect(entities.some((entity) => String(entity.id).includes("-lnav-vnav-ocs-primary"))).toBe(true);
+    expect(
+      entities.some(
+        (entity) =>
+          String(entity.id).includes("-lnav-vnav-ocs-primary") &&
+          entity.polygon.material.name === "LIME",
+      ),
+    ).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-final-surface-status"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-connector-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-connector-primary-boundary"))).toBe(true);

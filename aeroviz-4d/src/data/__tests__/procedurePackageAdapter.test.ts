@@ -279,6 +279,33 @@ describe("normalizeProcedurePackage", () => {
     ).toContain("LPV / LNAV/VNAV / LNAV");
   });
 
+  it("passes vertical profile GPA and TCH into final vertical rules", () => {
+    const pkg = normalizeProcedurePackage({
+      ...sampleDocument,
+      verticalProfiles: [
+        {
+          profileId: "profile:R:lnav-vnav",
+          appliesToModes: ["LNAV/VNAV"],
+          branchId: "branch:R",
+          fromFixRef: "fix:WEPAS",
+          toFixRef: "fix:RW05L",
+          basis: "chart_profile",
+          glidepathAngleDeg: 3,
+          thresholdCrossingHeightFt: 50,
+          constraintSamples: [],
+          warnings: [],
+        },
+      ],
+    });
+    const finalSegment = pkg.segments.find((segment) => segment.segmentType.startsWith("FINAL"));
+
+    expect(finalSegment?.verticalRule).toMatchObject({
+      kind: "LPV_GLS_SURFACES",
+      gpaDeg: 3,
+      tchFt: 50,
+    });
+  });
+
   it("passes exported RF metadata through to the canonical package leg", () => {
     const rfDocument: ProcedureDetailDocument = {
       ...sampleDocument,

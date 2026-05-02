@@ -1243,7 +1243,6 @@
 - This is diagnostic/schema clarity only; no TIA, early/late baseline, or wind-spiral geometry is constructed in this phase.
 
 ### Files Changed
-- `src/data/procedurePackage.ts`
 - `src/data/procedurePackageAdapter.ts`
 - `src/data/__tests__/procedurePackageAdapter.test.ts`
 - `docs/15-procedure-details-page-dev-log.md`
@@ -1853,3 +1852,42 @@
 
 ### Exact Next Recommended Step
 - Start P1 LNAV/VNAV OCS geometry as a separate staged implementation.
+
+## 2026-05-02 11:30 CEST
+
+### Goal Of This Session
+- Start P1 by adding LNAV/VNAV OCS geometry when explicit vertical source data exists.
+
+### Decisions Locked
+- Added `LnavVnavOcsGeometry` as an independent final vertical surface object.
+- OCS construction requires explicit `gpaDeg` and `tchFt` from `VerticalRule`; missing values emit `SOURCE_INCOMPLETE` and no fake geometry.
+- The first OCS implementation is marked `GPA_TCH_SLOPE_ESTIMATE`; it uses GPA/TCH and LNAV lateral OEA widths, but does not claim VEB-specific certified construction.
+- `FinalApproachSurfaceStatus` can now report `LNAV_VNAV_OCS` as constructed and distinguish `MODE_SPECIFIC_SURFACES_CONSTRUCTED`.
+- The procedure package adapter now passes `glidepathAngleDeg` and `thresholdCrossingHeightFt` from vertical profiles into final vertical rules.
+- Protected 3D mode renders LNAV/VNAV OCS as its own lime translucent surface.
+
+### Files Changed
+- `src/data/procedurePackage.ts`
+- `src/data/procedurePackageAdapter.ts`
+- `src/data/procedureRenderBundle.ts`
+- `src/data/__tests__/procedurePackageAdapter.test.ts`
+- `src/data/__tests__/procedureRenderBundle.test.ts`
+- `src/hooks/useProcedureSegmentLayer.ts`
+- `src/hooks/__tests__/useProcedureSegmentLayer.test.ts`
+- `src/utils/procedureSurfaceGeometry.ts`
+- `src/utils/__tests__/procedureSurfaceGeometry.test.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/utils/__tests__/procedureSurfaceGeometry.test.ts src/data/__tests__/procedureRenderBundle.test.ts src/hooks/__tests__/useProcedureSegmentLayer.test.ts src/data/__tests__/procedurePackageAdapter.test.ts`
+- `npm run build`
+
+### Current Status
+- LNAV/VNAV OCS is available as a typed render-bundle geometry and visible in protected 3D mode when GPA/TCH are present.
+
+### Known Blockers
+- Vertical assessment still compares aircraft altitude against route/profile samples, not against the new OCS geometry.
+- Existing generated procedure assets currently have null GPA/TCH until the exporter or source data provides those values.
+
+### Exact Next Recommended Step
+- Add OCS-specific vertical assessment helpers/events so aircraft below LNAV/VNAV OCS can be detected independently of the display profile.

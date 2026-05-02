@@ -597,6 +597,42 @@ describe("procedure render bundle", () => {
     );
   });
 
+  it("exports LNAV/VNAV OCS geometry when GPA and TCH are available", () => {
+    const lnavVnavPackage: ProcedurePackage = {
+      ...samplePackage,
+      segments: [
+        {
+          ...samplePackage.segments[0],
+          segmentType: "FINAL_LNAV_VNAV",
+          verticalRule: { kind: "BARO_GLIDEPATH", gpaDeg: 3, tchFt: 50 },
+          constructionFlags: {},
+        },
+      ],
+    };
+    const bundle = buildProcedureRenderBundle(lnavVnavPackage, {
+      samplingStepNm: 0.5,
+      enableDebugPrimitives: false,
+    });
+    const segmentBundle = bundle.branchBundles[0].segmentBundles[0];
+
+    expect(segmentBundle.lnavVnavOcs).toMatchObject({
+      surfaceType: "LNAV_VNAV_OCS",
+      constructionStatus: "GPA_TCH_SLOPE_ESTIMATE",
+      verticalProfile: {
+        gpaDeg: 3,
+        tchFt: 50,
+      },
+    });
+    expect(segmentBundle.finalSurfaceStatus).toMatchObject({
+      constructedSurfaceTypes: ["LNAV_FINAL_OEA", "LNAV_VNAV_OCS"],
+      missingSurfaceTypes: [],
+      constructionStatus: "MODE_SPECIFIC_SURFACES_CONSTRUCTED",
+    });
+    expect(bundle.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain(
+      "FINAL_VERTICAL_SURFACE_UNIMPLEMENTED",
+    );
+  });
+
   it("adds visual inter-segment turn junctions at adjacent segment joins", () => {
     const bundle = buildProcedureRenderBundle(twoSegmentTurnPackage, {
       samplingStepNm: 0.5,

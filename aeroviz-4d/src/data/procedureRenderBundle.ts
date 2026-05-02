@@ -26,8 +26,10 @@ import {
 import {
   buildFinalApproachSurfaceStatus,
   buildLnavFinalOea,
+  buildLnavVnavOcs,
   type FinalApproachSurfaceStatus,
   type LnavFinalOeaGeometry,
+  type LnavVnavOcsGeometry,
 } from "../utils/procedureSurfaceGeometry";
 import {
   buildMissedCaCenterlines,
@@ -77,6 +79,7 @@ export interface ProcedureSegmentRenderBundle {
   legs: ProcedurePackageLeg[];
   segmentGeometry: SegmentGeometryBundle;
   finalOea: LnavFinalOeaGeometry | null;
+  lnavVnavOcs: LnavVnavOcsGeometry | null;
   finalSurfaceStatus: FinalApproachSurfaceStatus | null;
   alignedConnector: AlignedLnavConnectorGeometry | null;
   missedSectionSurface: MissedSectionSurfaceGeometry | null;
@@ -186,9 +189,17 @@ export function buildProcedureRenderBundle(
               })
             : { geometry: null, diagnostics: [] };
         segmentDiagnostics.push(...finalOeaResult.diagnostics);
+        const lnavVnavOcsResult = buildLnavVnavOcs(
+          segment,
+          segmentGeometry.centerline,
+          finalOeaResult.geometry,
+          { samplingStepNm: ctx.samplingStepNm },
+        );
+        segmentDiagnostics.push(...lnavVnavOcsResult.diagnostics);
         const finalSurfaceStatusResult = buildFinalApproachSurfaceStatus(
           segment,
           finalOeaResult.geometry,
+          lnavVnavOcsResult.geometry,
         );
         segmentDiagnostics.push(...finalSurfaceStatusResult.diagnostics);
 
@@ -213,6 +224,7 @@ export function buildProcedureRenderBundle(
           legs: segmentLegs,
           segmentGeometry,
           finalOea: finalOeaResult.geometry,
+          lnavVnavOcs: lnavVnavOcsResult.geometry,
           finalSurfaceStatus: finalSurfaceStatusResult.status,
           alignedConnector: connectorResult.geometry,
           missedSectionSurface: missedSurfaceResult.geometry,
