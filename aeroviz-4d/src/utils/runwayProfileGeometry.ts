@@ -49,6 +49,8 @@ export interface RunwayProfilePoint {
 export interface HorizontalPlateRoutePoint extends RunwayProfilePoint {
   fixIdent: string;
   role: string;
+  altitudeConstraintFt: number | null;
+  altitudeConstraintSourceLine: number | null;
 }
 
 export interface HorizontalPlateAssessmentSegment {
@@ -327,6 +329,8 @@ function buildProjectedRoutePoints(
     ...projectPositionToRunwayFrame(frame, point.lon, point.lat, point.altM),
     fixIdent: point.fixIdent,
     role: point.role,
+    altitudeConstraintFt: point.altitudeFt,
+    altitudeConstraintSourceLine: point.altitudeFt === null ? null : point.sourceLine,
   }));
 }
 

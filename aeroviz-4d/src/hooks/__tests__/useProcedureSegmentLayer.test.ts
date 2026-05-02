@@ -179,6 +179,15 @@ const renderBundleData = {
       packageId: "KRDU-R05LY-RW05L",
       sharedFixes: [
         {
+          fixId: "fix:INIT",
+          ident: "INIT",
+          role: ["IF"],
+          lonDeg: -78.86,
+          latDeg: 35.82,
+          altFtMsl: null,
+          sourceRefs: [],
+        },
+        {
           fixId: "fix:FAF",
           ident: "FAF",
           role: ["FAF"],
@@ -214,6 +223,49 @@ const renderBundleData = {
           runwayId: "RW05L",
           turnJunctions: [interSegmentTurnJunction],
           segmentBundles: [
+            {
+              segment: {
+                segmentId: "segment:transition",
+                segmentType: "INITIAL",
+                verticalRule: { kind: "NONE" },
+              },
+              legs: [
+                {
+                  legId: "leg:transition:init",
+                  segmentId: "segment:transition",
+                  legType: "IF",
+                  endFixId: "fix:INIT",
+                  requiredAltitude: { kind: "AT_OR_ABOVE", minFtMsl: 3000, sourceText: "3000 ft" },
+                  sourceRefs: [],
+                },
+              ],
+              diagnostics: [],
+              segmentGeometry: {
+                segmentId: "segment:transition",
+                centerline: {
+                  geoPositions,
+                  worldPositions: [],
+                  geodesicLengthNm: 3,
+                  isArc: false,
+                },
+                stationAxis: { samples: [], totalLengthNm: 3 },
+                primaryEnvelope: ribbon,
+                secondaryEnvelope: ribbon,
+                turnJunctions: [],
+                diagnostics: [],
+              },
+              finalOea: null,
+              lnavVnavOcs: null,
+              precisionFinalSurfaces: [],
+              finalSurfaceStatus: null,
+              alignedConnector: null,
+              missedSectionSurface: null,
+              missedCourseGuides: [],
+              missedCaEndpoints: [],
+              missedCaCenterlines: [],
+              missedTurnDebugPoint: null,
+              missedTurnDebugPrimitives: [],
+            },
             {
               segment: {
                 segmentId: "segment:final",
@@ -441,7 +493,15 @@ describe("useProcedureSegmentLayer", () => {
           finalVerticalBand.polygon.hierarchy.positions[2].lon,
       ),
     ).toBeGreaterThan(0.003);
-    expect(entities.some((entity) => String(entity.id).includes("-final-altitude-leg:final:faf"))).toBe(true);
+    expect(entities.some((entity) => String(entity.id).includes("-altitude-leg:final:faf"))).toBe(true);
+    expect(entities.some((entity) => String(entity.id).includes("-altitude-leg:transition:init"))).toBe(true);
+    expect(
+      entities.some(
+        (entity) =>
+          String(entity.id).includes("-altitude-leg:transition:init") &&
+          entity.__aeroVizProcedureAnnotation?.kind === "ALTITUDE_CONSTRAINT",
+      ),
+    ).toBe(true);
     expect(
       entities.some(
         (entity) =>
@@ -510,7 +570,7 @@ describe("useProcedureSegmentLayer", () => {
     const ocs = entities.find((entity) => String(entity.id).includes("-lnav-vnav-ocs-primary"));
     const finalVerticalReference = entities.find((entity) => String(entity.id).endsWith("-final-vertical-reference"));
     const finalVerticalBand = entities.find((entity) => String(entity.id).endsWith("-final-vertical-reference-band"));
-    const finalAltitude = entities.find((entity) => String(entity.id).includes("-final-altitude-leg:final:faf"));
+    const finalAltitude = entities.find((entity) => String(entity.id).includes("-altitude-leg:final:faf"));
     const turnFill = entities.find((entity) => String(entity.id).includes("-turn-1-primary"));
     const debugSurface = entities.find((entity) => String(entity.id).includes("-precision-lpv-w"));
 

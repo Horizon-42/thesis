@@ -37,10 +37,42 @@ const closeXRoute = {
   defaultVisible: true,
   halfWidthM: 555.6,
   points: [
-    { xM: 30000, yM: 0, zM: 1600, fixIdent: "BUTTS", role: "IF" },
-    { xM: 29200, yM: 0, zM: 1500, fixIdent: "WARMS", role: "IF" },
-    { xM: 20500, yM: 0, zM: 1200, fixIdent: "DABKE", role: "IF" },
-    { xM: 0, yM: 0, zM: 0, fixIdent: "RW23R", role: "MAPt" },
+    {
+      xM: 30000,
+      yM: 0,
+      zM: 1600,
+      fixIdent: "BUTTS",
+      role: "IF",
+      altitudeConstraintFt: 5200,
+      altitudeConstraintSourceLine: 1,
+    },
+    {
+      xM: 29200,
+      yM: 0,
+      zM: 1500,
+      fixIdent: "WARMS",
+      role: "IF",
+      altitudeConstraintFt: null,
+      altitudeConstraintSourceLine: null,
+    },
+    {
+      xM: 20500,
+      yM: 0,
+      zM: 1200,
+      fixIdent: "DABKE",
+      role: "IF",
+      altitudeConstraintFt: 3900,
+      altitudeConstraintSourceLine: 3,
+    },
+    {
+      xM: 0,
+      yM: 0,
+      zM: 0,
+      fixIdent: "RW23R",
+      role: "MAPt",
+      altitudeConstraintFt: null,
+      altitudeConstraintSourceLine: null,
+    },
   ],
 };
 
@@ -49,8 +81,24 @@ const shorterRoute = {
   routeId: "KRDU-R23RY-DABKE",
   branchId: "branch:DABKE",
   points: [
-    { xM: 20500, yM: 0, zM: 1200, fixIdent: "DABKE", role: "IF" },
-    { xM: 0, yM: 0, zM: 0, fixIdent: "RW23R", role: "MAPt" },
+    {
+      xM: 20500,
+      yM: 0,
+      zM: 1200,
+      fixIdent: "DABKE",
+      role: "IF",
+      altitudeConstraintFt: 3900,
+      altitudeConstraintSourceLine: 3,
+    },
+    {
+      xM: 0,
+      yM: 0,
+      zM: 0,
+      fixIdent: "RW23R",
+      role: "MAPt",
+      altitudeConstraintFt: null,
+      altitudeConstraintSourceLine: null,
+    },
   ],
 };
 
@@ -101,8 +149,24 @@ const assessedFinalRoute = {
   transitionIdent: null,
   branchType: "final",
   points: [
-    { xM: 20500, yM: 0, zM: 1200, fixIdent: "DABKE", role: "FAF" },
-    { xM: 0, yM: 0, zM: 0, fixIdent: "RW23R", role: "MAPt" },
+    {
+      xM: 20500,
+      yM: 0,
+      zM: 1200,
+      fixIdent: "DABKE",
+      role: "FAF",
+      altitudeConstraintFt: 3900,
+      altitudeConstraintSourceLine: 3,
+    },
+    {
+      xM: 0,
+      yM: 0,
+      zM: 0,
+      fixIdent: "RW23R",
+      role: "MAPt",
+      altitudeConstraintFt: null,
+      altitudeConstraintSourceLine: null,
+    },
   ],
 };
 
@@ -155,6 +219,15 @@ describe("RunwayTrajectoryProfilePanel", () => {
     expect(referenceLabels.length).toBeLessThan(referencePoints.length);
     expect(container.textContent).toContain("BUTTS");
     expect(container.textContent).not.toContain("WARMS");
+  });
+
+  it("marks source altitude constraints in the vertical profile", () => {
+    const { container } = render(<RunwayTrajectoryProfilePanel />);
+
+    expect(container.querySelectorAll(".runway-profile-altitude-constraint-point")).toHaveLength(2);
+    expect(container.textContent).toContain("BUTTS 5,200 ft");
+    expect(container.textContent).toContain("DABKE 3,900 ft");
+    expect(container.textContent).not.toContain("WARMS 1,500 ft");
   });
 
   it("removes side-view route fix dots when the active route set changes", () => {

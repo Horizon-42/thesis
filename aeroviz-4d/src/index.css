@@ -1040,6 +1040,23 @@ body,
   stroke-width: 1.4;
 }
 
+.runway-profile-altitude-constraint-point {
+  fill: #bef264;
+  stroke: rgba(15, 23, 42, 0.94);
+  stroke-width: 1.8;
+}
+
+.runway-profile-altitude-constraint-label {
+  fill: #ecfccb;
+  font-family: "Inter", "Segoe UI", sans-serif;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  paint-order: stroke;
+  stroke: rgba(15, 23, 42, 0.94);
+  stroke-width: 3px;
+}
+
 .runway-profile-axis-label,
 .runway-profile-axis-tick,
 .runway-profile-threshold-label,

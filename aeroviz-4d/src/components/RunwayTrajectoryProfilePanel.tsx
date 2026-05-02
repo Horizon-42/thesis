@@ -409,6 +409,11 @@ function ProfilePlot({
     "ESTIMATED",
     displayLevel,
   );
+  const showAltitudeConstraintGeometry = showProfileElement(
+    "ALTITUDE_CONSTRAINT",
+    "SOURCE_BACKED",
+    displayLevel,
+  );
   const showDebugFinalSurfaceGeometry = showProfileElement(
     "PRECISION_SURFACE",
     "DEBUG_ESTIMATE",
@@ -787,6 +792,36 @@ function ProfilePlot({
                   data-fix-ident={point.fixIdent}
                 />
               ))}
+              {mode === "side" && showAltitudeConstraintGeometry
+                ? route.points
+                    .filter((point) => point.altitudeConstraintFt !== null)
+                    .map((point, index) => {
+                      const constraintFt = point.altitudeConstraintFt;
+                      if (constraintFt === null) return null;
+                      const cx = plotX(point.xM);
+                      const cy = plotY(point.zM);
+                      const label = `${point.fixIdent} ${Math.round(constraintFt).toLocaleString()} ft`;
+                      return (
+                        <g key={`${route.routeId}-altitude-constraint-${point.fixIdent}-${index}`}>
+                          <circle
+                            cx={cx}
+                            cy={cy}
+                            r={5.2}
+                            className="runway-profile-altitude-constraint-point"
+                            data-constraint-route-id={route.routeId}
+                            data-constraint-fix-ident={point.fixIdent}
+                          />
+                          <text
+                            x={cx + 7}
+                            y={cy - 7}
+                            className="runway-profile-altitude-constraint-label"
+                          >
+                            {label}
+                          </text>
+                        </g>
+                      );
+                    })
+                : null}
               {mode === "top" && isTransition ? (
                 <text
                   x={labelX + 7}

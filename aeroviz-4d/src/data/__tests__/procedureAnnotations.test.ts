@@ -68,6 +68,13 @@ describe("procedureAnnotations", () => {
     expect(
       procedureAnnotationDisplayLevel({
         ...annotation,
+        kind: "ALTITUDE_CONSTRAINT",
+        status: "SOURCE_BACKED",
+      }),
+    ).toBe("PROTECTION");
+    expect(
+      procedureAnnotationDisplayLevel({
+        ...annotation,
         kind: "TURN_FILL",
         status: "VISUAL_FILL_ONLY",
       }),

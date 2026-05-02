@@ -17,9 +17,33 @@ const route: HorizontalPlateRoute = {
   defaultVisible: true,
   halfWidthM: 500,
   points: [
-    { xM: 10_000, yM: 0, zM: 1_000, fixIdent: "IF", role: "IF" },
-    { xM: 5_000, yM: 0, zM: 500, fixIdent: "FAF", role: "FAF" },
-    { xM: 0, yM: 0, zM: 0, fixIdent: "RW23R", role: "MAPt" },
+    {
+      xM: 10_000,
+      yM: 0,
+      zM: 1_000,
+      fixIdent: "IF",
+      role: "IF",
+      altitudeConstraintFt: null,
+      altitudeConstraintSourceLine: null,
+    },
+    {
+      xM: 5_000,
+      yM: 0,
+      zM: 500,
+      fixIdent: "FAF",
+      role: "FAF",
+      altitudeConstraintFt: null,
+      altitudeConstraintSourceLine: null,
+    },
+    {
+      xM: 0,
+      yM: 0,
+      zM: 0,
+      fixIdent: "RW23R",
+      role: "MAPt",
+      altitudeConstraintFt: null,
+      altitudeConstraintSourceLine: null,
+    },
   ],
 };
 

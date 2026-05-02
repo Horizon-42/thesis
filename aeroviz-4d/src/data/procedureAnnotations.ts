@@ -5,6 +5,7 @@ export type ProcedureAnnotationKind =
   | "SEGMENT_ENVELOPE_SECONDARY"
   | "FINAL_OEA"
   | "FINAL_VERTICAL_REFERENCE"
+  | "ALTITUDE_CONSTRAINT"
   | "FINAL_ALTITUDE_CONSTRAINT"
   | "LNAV_VNAV_OCS"
   | "PRECISION_SURFACE"
@@ -118,6 +119,7 @@ export function procedureAnnotationDisplayLevel(
     annotation.kind === "SEGMENT_ENVELOPE_PRIMARY" ||
     annotation.kind === "SEGMENT_ENVELOPE_SECONDARY" ||
     annotation.kind === "FINAL_OEA" ||
+    annotation.kind === "ALTITUDE_CONSTRAINT" ||
     annotation.kind === "FINAL_ALTITUDE_CONSTRAINT" ||
     annotation.kind === "MISSED_SURFACE"
   ) {
@@ -157,6 +159,9 @@ export function procedureAnnotationMeaning(
   }
   if (kind === "FINAL_VERTICAL_REFERENCE") {
     return "Estimated final-approach vertical reference line built from the coded glidepath angle and runway/MAPt elevation.";
+  }
+  if (kind === "ALTITUDE_CONSTRAINT") {
+    return "Published altitude constraint at the leg endpoint. It anchors the segment vertical profile when source altitude data is available.";
   }
   if (kind === "FINAL_ALTITUDE_CONSTRAINT") {
     return "Published final-approach altitude constraint shown at its terminal fix for vertical cross-checking.";

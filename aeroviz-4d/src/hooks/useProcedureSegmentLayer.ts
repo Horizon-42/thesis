@@ -616,56 +616,57 @@ function addSegmentEntities(
       if (verticalReferenceLabelId) ids.push(verticalReferenceLabelId);
     }
 
-    if (pkg) {
-      const fixById = new Map(pkg.sharedFixes.map((fix) => [fix.fixId, fix]));
-      segmentBundle.legs.forEach((leg) => {
-        const altitudeFtMsl = altitudeConstraintFt(leg);
-        const endFix = leg.endFixId ? fixById.get(leg.endFixId) : undefined;
-        if (altitudeFtMsl === null || !endFix) return;
-        const point = fixGeoPointAtAltitude(endFix, altitudeFtMsl);
-        if (!point) return;
+  }
 
-        const constraintId = `${baseId}-final-altitude-${leg.legId}`;
-        const constraintAnnotation = annotationBase({
-          entityId: constraintId,
-          label: `${endFix.ident} ${Math.round(altitudeFtMsl)} ft`,
-          title: `${segmentName} final altitude constraint`,
-          kind: "FINAL_ALTITUDE_CONSTRAINT",
-          status: "SOURCE_BACKED",
-          bundle,
-          branchBundle,
-          segment: segmentBundle.segment,
-          legs: segmentBundle.legs,
-          leg,
-          parameters: [
-            param("Fix", endFix.ident),
-            param("Constraint", leg.requiredAltitude?.sourceText ?? `${altitudeFtMsl} ft`),
-            param("Leg", leg.legType),
-          ],
-          diagnostics: segmentDiagnostics,
-          sourceRefs: (leg.sourceRefs ?? []).map(formatSourceRef),
-        });
-        addPoint(
-          viewer,
-          constraintId,
-          `${segmentName} final altitude ${endFix.ident} ${Math.round(altitudeFtMsl)} ft`,
-          point,
-          procedureEntityShow(visible, constraintAnnotation, displayLevel),
-          9,
-          FINAL_ALTITUDE_CONSTRAINT_COLOR,
-          FINAL_ALTITUDE_CONSTRAINT_HEIGHT_OFFSET_M,
-          constraintAnnotation,
-        );
-        ids.push(constraintId);
-        const constraintLabelId = addAnnotationLabel(
-          viewer,
-          constraintAnnotation,
-          elevatedPoint(point, FINAL_ALTITUDE_CONSTRAINT_HEIGHT_OFFSET_M),
-          procedureEntityShow(visible, constraintAnnotation, displayLevel, true, annotationVisible),
-        );
-        if (constraintLabelId) ids.push(constraintLabelId);
+  if (pkg) {
+    const fixById = new Map(pkg.sharedFixes.map((fix) => [fix.fixId, fix]));
+    segmentBundle.legs.forEach((leg) => {
+      const altitudeFtMsl = altitudeConstraintFt(leg);
+      const endFix = leg.endFixId ? fixById.get(leg.endFixId) : undefined;
+      if (altitudeFtMsl === null || !endFix) return;
+      const point = fixGeoPointAtAltitude(endFix, altitudeFtMsl);
+      if (!point) return;
+
+      const constraintId = `${baseId}-altitude-${leg.legId}`;
+      const constraintAnnotation = annotationBase({
+        entityId: constraintId,
+        label: `${endFix.ident} ${Math.round(altitudeFtMsl)} ft`,
+        title: `${segmentName} altitude constraint`,
+        kind: "ALTITUDE_CONSTRAINT",
+        status: "SOURCE_BACKED",
+        bundle,
+        branchBundle,
+        segment: segmentBundle.segment,
+        legs: segmentBundle.legs,
+        leg,
+        parameters: [
+          param("Fix", endFix.ident),
+          param("Constraint", leg.requiredAltitude?.sourceText ?? `${altitudeFtMsl} ft`),
+          param("Leg", leg.legType),
+        ],
+        diagnostics: segmentDiagnostics,
+        sourceRefs: (leg.sourceRefs ?? []).map(formatSourceRef),
       });
-    }
+      addPoint(
+        viewer,
+        constraintId,
+        `${segmentName} altitude ${endFix.ident} ${Math.round(altitudeFtMsl)} ft`,
+        point,
+        procedureEntityShow(visible, constraintAnnotation, displayLevel),
+        9,
+        FINAL_ALTITUDE_CONSTRAINT_COLOR,
+        FINAL_ALTITUDE_CONSTRAINT_HEIGHT_OFFSET_M,
+        constraintAnnotation,
+      );
+      ids.push(constraintId);
+      const constraintLabelId = addAnnotationLabel(
+        viewer,
+        constraintAnnotation,
+        elevatedPoint(point, FINAL_ALTITUDE_CONSTRAINT_HEIGHT_OFFSET_M),
+        procedureEntityShow(visible, constraintAnnotation, displayLevel, true, annotationVisible),
+      );
+      if (constraintLabelId) ids.push(constraintLabelId);
+    });
   }
 
   const primaryId = `${baseId}-envelope-primary`;
