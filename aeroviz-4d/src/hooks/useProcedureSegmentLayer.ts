@@ -17,6 +17,7 @@ const CENTERLINE_COLOR = Cesium.Color.CYAN.withAlpha(0.95);
 const PRIMARY_COLOR = Cesium.Color.DEEPSKYBLUE.withAlpha(0.18);
 const SECONDARY_COLOR = Cesium.Color.YELLOW.withAlpha(0.1);
 const LNAV_VNAV_OCS_COLOR = Cesium.Color.LIME.withAlpha(0.2);
+const PRECISION_FINAL_SURFACE_COLOR = Cesium.Color.MAGENTA.withAlpha(0.18);
 const TURN_FILL_COLOR = Cesium.Color.ORANGE.withAlpha(0.22);
 const CONNECTOR_COLOR = Cesium.Color.ORANGE.withAlpha(0.32);
 const CONNECTOR_LINE_COLOR = Cesium.Color.ORANGE.withAlpha(0.92);
@@ -31,6 +32,7 @@ const OUTLINE_COLOR = Cesium.Color.CYAN.withAlpha(0.28);
 const ENVELOPE_HEIGHT_OFFSET_M = 8;
 const OEA_HEIGHT_OFFSET_M = 18;
 const LNAV_VNAV_OCS_HEIGHT_OFFSET_M = 28;
+const PRECISION_FINAL_SURFACE_HEIGHT_OFFSET_M = 34;
 const CONNECTOR_HEIGHT_OFFSET_M = 45;
 const MISSED_SURFACE_HEIGHT_OFFSET_M = 58;
 const CA_COURSE_GUIDE_HEIGHT_OFFSET_M = 82;
@@ -289,6 +291,20 @@ function addSegmentEntities(
     );
     ids.push(ocsSecondaryId);
   }
+
+  segmentBundle.precisionFinalSurfaces.forEach((surface) => {
+    const surfaceId = `${baseId}-precision-${surface.surfaceType.toLowerCase().replace(/_/g, "-")}`;
+    addRibbonPolygon(
+      viewer,
+      surfaceId,
+      `${segmentName} ${surface.surfaceType} debug estimate`,
+      surface.ribbon,
+      visible,
+      PRECISION_FINAL_SURFACE_COLOR,
+      PRECISION_FINAL_SURFACE_HEIGHT_OFFSET_M,
+    );
+    ids.push(surfaceId);
+  });
 
   if (
     segmentBundle.finalSurfaceStatus &&

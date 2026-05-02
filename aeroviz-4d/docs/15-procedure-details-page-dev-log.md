@@ -1939,3 +1939,38 @@
 
 ### Exact Next Recommended Step
 - Start P2 LPV/GLS W/X/Y surface scaffolding as a separate staged implementation.
+
+## 2026-05-02 11:37 CEST
+
+### Goal Of This Session
+- Start P2 by scaffolding independently typed LPV/GLS W/X/Y surface objects.
+
+### Decisions Locked
+- Added `PrecisionFinalSurfaceGeometry` for `LPV_W`, `LPV_X`, `LPV_Y`, `GLS_W`, `GLS_X`, and `GLS_Y`.
+- W/X/Y construction requires explicit GPA/TCH and a positioned final centerline with LNAV lateral OEA.
+- The scaffold is marked `GPA_TCH_DEBUG_ESTIMATE`; it uses GPA/TCH plus scaled LNAV lateral widths and does not claim certified LPV/GLS W/X/Y construction.
+- `FinalApproachSurfaceStatus` can now remove LPV/GLS W/X/Y from missing surfaces when debug-estimate geometry exists.
+- Protected 3D mode renders each precision surface with an independent `-precision-...` entity id.
+
+### Files Changed
+- `src/utils/procedureSurfaceGeometry.ts`
+- `src/utils/__tests__/procedureSurfaceGeometry.test.ts`
+- `src/data/procedureRenderBundle.ts`
+- `src/data/__tests__/procedureRenderBundle.test.ts`
+- `src/hooks/useProcedureSegmentLayer.ts`
+- `src/hooks/__tests__/useProcedureSegmentLayer.test.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/utils/__tests__/procedureSurfaceGeometry.test.ts src/data/__tests__/procedureRenderBundle.test.ts src/hooks/__tests__/useProcedureSegmentLayer.test.ts`
+- `npm run build`
+
+### Current Status
+- P2 has typed, independently rendered LPV/GLS W/X/Y debug-estimate surfaces behind explicit source-data requirements.
+
+### Known Blockers
+- Full LPV/GLS W/X/Y construction still needs VEB/mode-specific dimensions instead of scaled LNAV lateral widths.
+- Generated procedure assets still need real GPA/TCH values to construct these surfaces for real procedures.
+
+### Exact Next Recommended Step
+- Run full frontend validation, then continue with P3 turning missed debug primitives.

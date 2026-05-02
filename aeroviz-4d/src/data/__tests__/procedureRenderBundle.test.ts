@@ -633,6 +633,41 @@ describe("procedure render bundle", () => {
     );
   });
 
+  it("exports LPV W/X/Y debug-estimate surfaces with independent ids", () => {
+    const lpvPackage: ProcedurePackage = {
+      ...samplePackage,
+      segments: [
+        {
+          ...samplePackage.segments[0],
+          segmentType: "FINAL_LNAV",
+          verticalRule: { kind: "LPV_GLS_SURFACES", gpaDeg: 3, tchFt: 50 },
+          constructionFlags: { collapsedApproachModes: ["LPV", "LNAV"] },
+        },
+      ],
+    };
+    const bundle = buildProcedureRenderBundle(lpvPackage, {
+      samplingStepNm: 0.5,
+      enableDebugPrimitives: false,
+    });
+    const segmentBundle = bundle.branchBundles[0].segmentBundles[0];
+
+    expect(segmentBundle.precisionFinalSurfaces.map((surface) => surface.surfaceType)).toEqual([
+      "LPV_W",
+      "LPV_X",
+      "LPV_Y",
+    ]);
+    expect(segmentBundle.precisionFinalSurfaces.map((surface) => surface.geometryId)).toEqual([
+      "segment:final:lpv-w",
+      "segment:final:lpv-x",
+      "segment:final:lpv-y",
+    ]);
+    expect(segmentBundle.finalSurfaceStatus).toMatchObject({
+      constructedSurfaceTypes: ["LNAV_FINAL_OEA", "LPV_W", "LPV_X", "LPV_Y"],
+      missingSurfaceTypes: [],
+      constructionStatus: "MODE_SPECIFIC_SURFACES_CONSTRUCTED",
+    });
+  });
+
   it("adds visual inter-segment turn junctions at adjacent segment joins", () => {
     const bundle = buildProcedureRenderBundle(twoSegmentTurnPackage, {
       samplingStepNm: 0.5,

@@ -27,9 +27,11 @@ import {
   buildFinalApproachSurfaceStatus,
   buildLnavFinalOea,
   buildLnavVnavOcs,
+  buildPrecisionFinalSurfaces,
   type FinalApproachSurfaceStatus,
   type LnavFinalOeaGeometry,
   type LnavVnavOcsGeometry,
+  type PrecisionFinalSurfaceGeometry,
 } from "../utils/procedureSurfaceGeometry";
 import {
   buildMissedCaCenterlines,
@@ -80,6 +82,7 @@ export interface ProcedureSegmentRenderBundle {
   segmentGeometry: SegmentGeometryBundle;
   finalOea: LnavFinalOeaGeometry | null;
   lnavVnavOcs: LnavVnavOcsGeometry | null;
+  precisionFinalSurfaces: PrecisionFinalSurfaceGeometry[];
   finalSurfaceStatus: FinalApproachSurfaceStatus | null;
   alignedConnector: AlignedLnavConnectorGeometry | null;
   missedSectionSurface: MissedSectionSurfaceGeometry | null;
@@ -196,10 +199,18 @@ export function buildProcedureRenderBundle(
           { samplingStepNm: ctx.samplingStepNm },
         );
         segmentDiagnostics.push(...lnavVnavOcsResult.diagnostics);
+        const precisionFinalSurfaceResult = buildPrecisionFinalSurfaces(
+          segment,
+          segmentGeometry.centerline,
+          finalOeaResult.geometry,
+          { samplingStepNm: ctx.samplingStepNm },
+        );
+        segmentDiagnostics.push(...precisionFinalSurfaceResult.diagnostics);
         const finalSurfaceStatusResult = buildFinalApproachSurfaceStatus(
           segment,
           finalOeaResult.geometry,
           lnavVnavOcsResult.geometry,
+          precisionFinalSurfaceResult.geometries,
         );
         segmentDiagnostics.push(...finalSurfaceStatusResult.diagnostics);
 
@@ -225,6 +236,7 @@ export function buildProcedureRenderBundle(
           segmentGeometry,
           finalOea: finalOeaResult.geometry,
           lnavVnavOcs: lnavVnavOcsResult.geometry,
+          precisionFinalSurfaces: precisionFinalSurfaceResult.geometries,
           finalSurfaceStatus: finalSurfaceStatusResult.status,
           alignedConnector: connectorResult.geometry,
           missedSectionSurface: missedSurfaceResult.geometry,

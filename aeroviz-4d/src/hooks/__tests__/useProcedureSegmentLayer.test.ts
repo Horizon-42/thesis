@@ -61,6 +61,7 @@ vi.mock("cesium", () => {
       DEEPSKYBLUE: new Color("DEEPSKYBLUE"),
       YELLOW: new Color("YELLOW"),
       LIME: new Color("LIME"),
+      MAGENTA: new Color("MAGENTA"),
       ORANGE: new Color("ORANGE"),
     },
     PolygonHierarchy: class PolygonHierarchy {
@@ -212,11 +213,34 @@ const renderBundleData = {
                 },
                 notes: [],
               },
+              precisionFinalSurfaces: [
+                {
+                  geometryId: "segment:final:lpv-w",
+                  segmentId: "segment:final",
+                  surfaceType: "LPV_W",
+                  constructionStatus: "GPA_TCH_DEBUG_ESTIMATE",
+                  centerline: {
+                    geoPositions,
+                    worldPositions: [],
+                    geodesicLengthNm: 3,
+                    isArc: false,
+                  },
+                  ribbon,
+                  widthScale: 1,
+                  verticalProfile: {
+                    gpaDeg: 3,
+                    tchFt: 50,
+                    thresholdElevationFtMsl: 800,
+                    thresholdStationNm: 3,
+                  },
+                  notes: [],
+                },
+              ],
               finalSurfaceStatus: {
                 segmentId: "segment:final",
                 requestedModes: ["LPV", "LNAV/VNAV", "LNAV"],
-                constructedSurfaceTypes: ["LNAV_FINAL_OEA", "LNAV_VNAV_OCS"],
-                missingSurfaceTypes: ["LPV_W", "LPV_X", "LPV_Y"],
+                constructedSurfaceTypes: ["LNAV_FINAL_OEA", "LNAV_VNAV_OCS", "LPV_W"],
+                missingSurfaceTypes: ["LPV_X", "LPV_Y"],
                 constructionStatus: "COLLAPSED_TO_LNAV_BASELINE",
                 notes: [],
               },
@@ -318,6 +342,14 @@ describe("useProcedureSegmentLayer", () => {
         (entity) =>
           String(entity.id).includes("-lnav-vnav-ocs-primary") &&
           entity.polygon.material.name === "LIME",
+      ),
+    ).toBe(true);
+    expect(entities.some((entity) => String(entity.id).includes("-precision-lpv-w"))).toBe(true);
+    expect(
+      entities.some(
+        (entity) =>
+          String(entity.id).includes("-precision-lpv-w") &&
+          entity.polygon.material.name === "MAGENTA",
       ),
     ).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-final-surface-status"))).toBe(true);

@@ -6,6 +6,7 @@ import {
   buildFinalApproachSurfaceStatus,
   buildLnavFinalOea,
   buildLnavVnavOcs,
+  buildPrecisionFinalSurfaces,
 } from "../procedureSurfaceGeometry";
 
 const finalGeoPositions: GeoPoint[] = [
@@ -179,5 +180,42 @@ describe("procedure surface geometry", () => {
         severity: "WARN",
       }),
     ]);
+  });
+
+  it("builds independent LPV W/X/Y debug-estimate surfaces from GPA and TCH", () => {
+    const lpvSegment: ProcedureSegment = {
+      ...finalSegment,
+      segmentType: "FINAL_LPV",
+      verticalRule: { kind: "LPV_GLS_SURFACES", gpaDeg: 3, tchFt: 50 },
+      constructionFlags: { collapsedApproachModes: ["LPV", "LNAV"] },
+    };
+    const oea = buildLnavFinalOea(lpvSegment, finalCenterline).geometry;
+    const precisionResult = buildPrecisionFinalSurfaces(lpvSegment, finalCenterline, oea, {
+      samplingStepNm: 0.25,
+    });
+
+    expect(precisionResult.diagnostics).toEqual([]);
+    expect(precisionResult.geometries.map((surface) => surface.surfaceType)).toEqual([
+      "LPV_W",
+      "LPV_X",
+      "LPV_Y",
+    ]);
+    expect(precisionResult.geometries.map((surface) => surface.geometryId)).toEqual([
+      "segment:final:lpv-w",
+      "segment:final:lpv-x",
+      "segment:final:lpv-y",
+    ]);
+
+    const statusResult = buildFinalApproachSurfaceStatus(
+      lpvSegment,
+      oea,
+      null,
+      precisionResult.geometries,
+    );
+    expect(statusResult.status).toMatchObject({
+      constructedSurfaceTypes: ["LNAV_FINAL_OEA", "LPV_W", "LPV_X", "LPV_Y"],
+      missingSurfaceTypes: [],
+      constructionStatus: "MODE_SPECIFIC_SURFACES_CONSTRUCTED",
+    });
   });
 });
