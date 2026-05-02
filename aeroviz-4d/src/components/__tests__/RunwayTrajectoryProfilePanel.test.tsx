@@ -43,8 +43,7 @@ const closeXRoute = {
       zM: 1600,
       fixIdent: "BUTTS",
       role: "IF",
-      altitudeConstraintFt: 5200,
-      altitudeConstraintSourceLine: 1,
+      altitudeConstraint: { kind: "AT_OR_ABOVE" as const, minFtMsl: 5200, sourceText: "5200 ft" },
     },
     {
       xM: 29200,
@@ -52,8 +51,7 @@ const closeXRoute = {
       zM: 1500,
       fixIdent: "WARMS",
       role: "IF",
-      altitudeConstraintFt: null,
-      altitudeConstraintSourceLine: null,
+      altitudeConstraint: null,
     },
     {
       xM: 20500,
@@ -61,8 +59,7 @@ const closeXRoute = {
       zM: 1200,
       fixIdent: "DABKE",
       role: "IF",
-      altitudeConstraintFt: 3900,
-      altitudeConstraintSourceLine: 3,
+      altitudeConstraint: { kind: "AT_OR_BELOW" as const, maxFtMsl: 3900, sourceText: "3900 ft" },
     },
     {
       xM: 0,
@@ -70,8 +67,7 @@ const closeXRoute = {
       zM: 0,
       fixIdent: "RW23R",
       role: "MAPt",
-      altitudeConstraintFt: null,
-      altitudeConstraintSourceLine: null,
+      altitudeConstraint: null,
     },
   ],
 };
@@ -87,8 +83,7 @@ const shorterRoute = {
       zM: 1200,
       fixIdent: "DABKE",
       role: "IF",
-      altitudeConstraintFt: 3900,
-      altitudeConstraintSourceLine: 3,
+      altitudeConstraint: { kind: "AT_OR_BELOW" as const, maxFtMsl: 3900, sourceText: "3900 ft" },
     },
     {
       xM: 0,
@@ -96,8 +91,7 @@ const shorterRoute = {
       zM: 0,
       fixIdent: "RW23R",
       role: "MAPt",
-      altitudeConstraintFt: null,
-      altitudeConstraintSourceLine: null,
+      altitudeConstraint: null,
     },
   ],
 };
@@ -155,8 +149,7 @@ const assessedFinalRoute = {
       zM: 1200,
       fixIdent: "DABKE",
       role: "FAF",
-      altitudeConstraintFt: 3900,
-      altitudeConstraintSourceLine: 3,
+      altitudeConstraint: { kind: "AT" as const, minFtMsl: 3900, maxFtMsl: 3900, sourceText: "3900 ft" },
     },
     {
       xM: 0,
@@ -164,8 +157,7 @@ const assessedFinalRoute = {
       zM: 0,
       fixIdent: "RW23R",
       role: "MAPt",
-      altitudeConstraintFt: null,
-      altitudeConstraintSourceLine: null,
+      altitudeConstraint: null,
     },
   ],
 };
@@ -227,8 +219,10 @@ describe("RunwayTrajectoryProfilePanel", () => {
     expect(container.querySelectorAll(".runway-profile-altitude-constraint-point")).toHaveLength(2);
     expect(container.querySelectorAll(".runway-profile-altitude-constraint-station-line")).toHaveLength(2);
     expect(container.querySelectorAll(".runway-profile-altitude-constraint-link")).toHaveLength(2);
-    expect(container.textContent).toContain("BUTTS 5,200 ft");
-    expect(container.textContent).toContain("DABKE 3,900 ft");
+    expect(container.querySelectorAll(".runway-profile-altitude-constraint-point.is-at-or-above")).toHaveLength(1);
+    expect(container.querySelectorAll(".runway-profile-altitude-constraint-point.is-at-or-below")).toHaveLength(1);
+    expect(container.textContent).toContain("BUTTS >= 5,200 ft");
+    expect(container.textContent).toContain("DABKE <= 3,900 ft");
     expect(container.textContent).not.toContain("WARMS 1,500 ft");
   });
 

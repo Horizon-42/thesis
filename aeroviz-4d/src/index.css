@@ -1046,16 +1046,68 @@ body,
   stroke-width: 1.8;
 }
 
+.runway-profile-altitude-constraint-point.is-at {
+  fill: #bef264;
+}
+
+.runway-profile-altitude-constraint-point.is-at-or-above {
+  fill: #67e8f9;
+}
+
+.runway-profile-altitude-constraint-point.is-at-or-below {
+  fill: #fbbf24;
+}
+
+.runway-profile-altitude-constraint-point.is-window {
+  fill: #c4b5fd;
+}
+
+.runway-profile-altitude-constraint-point.is-unknown {
+  fill: #cbd5e1;
+}
+
 .runway-profile-altitude-constraint-station-line {
   stroke: rgba(190, 242, 100, 0.22);
   stroke-width: 1;
   stroke-dasharray: 3 5;
 }
 
+.runway-profile-altitude-constraint-station-line.is-at-or-above {
+  stroke: rgba(103, 232, 249, 0.24);
+}
+
+.runway-profile-altitude-constraint-station-line.is-at-or-below {
+  stroke: rgba(251, 191, 36, 0.26);
+}
+
+.runway-profile-altitude-constraint-station-line.is-window {
+  stroke: rgba(196, 181, 253, 0.26);
+}
+
+.runway-profile-altitude-constraint-station-line.is-unknown {
+  stroke: rgba(203, 213, 225, 0.22);
+}
+
 .runway-profile-altitude-constraint-link {
   stroke: rgba(190, 242, 100, 0.48);
   stroke-width: 1.4;
   stroke-dasharray: 5 4;
+}
+
+.runway-profile-altitude-constraint-link.is-at-or-above {
+  stroke: rgba(103, 232, 249, 0.54);
+}
+
+.runway-profile-altitude-constraint-link.is-at-or-below {
+  stroke: rgba(251, 191, 36, 0.56);
+}
+
+.runway-profile-altitude-constraint-link.is-window {
+  stroke: rgba(196, 181, 253, 0.56);
+}
+
+.runway-profile-altitude-constraint-link.is-unknown {
+  stroke: rgba(203, 213, 225, 0.48);
 }
 
 .runway-profile-altitude-constraint-label {
@@ -1067,6 +1119,22 @@ body,
   paint-order: stroke;
   stroke: rgba(15, 23, 42, 0.94);
   stroke-width: 3px;
+}
+
+.runway-profile-altitude-constraint-label.is-at-or-above {
+  fill: #cffafe;
+}
+
+.runway-profile-altitude-constraint-label.is-at-or-below {
+  fill: #fef3c7;
+}
+
+.runway-profile-altitude-constraint-label.is-window {
+  fill: #ede9fe;
+}
+
+.runway-profile-altitude-constraint-label.is-unknown {
+  fill: #e2e8f0;
 }
 
 .runway-profile-axis-label,

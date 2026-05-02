@@ -299,6 +299,12 @@ describe("buildProcedureRoutes", () => {
       1899,
       798,
     ]);
+    expect(finalRoute.points[0].altitudeConstraint).toEqual({
+      kind: "AT",
+      minFtMsl: 3000,
+      maxFtMsl: 3000,
+      sourceText: "3000 ft",
+    });
     expect(finalRoute.points.map((point) => point.altM)).toEqual([914.4, 578.82, 243.23]);
     expect(finalRoute.points[0].distanceFromStartM).toBe(0);
     expect(finalRoute.points[1].distanceFromStartM).toBeGreaterThan(0);

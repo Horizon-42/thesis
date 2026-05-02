@@ -7,6 +7,8 @@ import {
   type ProcedureDetailLeg,
   type ProcedureDetailsIndexManifest,
 } from "./procedureDetails";
+import type { AltitudeConstraint } from "./procedurePackage";
+import { altitudeConstraintReferenceFt } from "./altitudeConstraints";
 import { fetchJson } from "../utils/fetchJson";
 
 const FEET_TO_METERS = 0.3048;
@@ -22,6 +24,7 @@ export interface ProcedureRoutePoint {
   lon: number;
   lat: number;
   altitudeFt: number | null;
+  altitudeConstraint: AltitudeConstraint | null;
   geometryAltitudeFt: number;
   altM: number;
   distanceFromStartM: number;
@@ -72,6 +75,7 @@ interface RawRoutePoint {
   lon: number;
   lat: number;
   altitudeFt: number | null;
+  altitudeConstraint: AltitudeConstraint | null;
   geometryAltitudeFt: number | null;
   sourceLine: number;
 }
@@ -111,8 +115,57 @@ function legIsRenderable(leg: ProcedureDetailLeg, fix: ProcedureDetailFix | unde
   return leg.quality.renderedInPlanView === true && fix?.position !== null && fix?.position !== undefined;
 }
 
-function altitudeConstraintFt(leg: ProcedureDetailLeg): number | null {
-  return leg.constraints.altitude?.valueFt ?? null;
+function parseAltitudeWindow(rawText: string): { minFtMsl: number; maxFtMsl: number } | null {
+  const values = [...rawText.matchAll(/\d[\d,]*/g)]
+    .map((match) => Number(match[0].replace(/,/g, "")))
+    .filter((value) => Number.isFinite(value));
+  if (values.length < 2) return null;
+  const [first, second] = values;
+  return {
+    minFtMsl: Math.min(first, second),
+    maxFtMsl: Math.max(first, second),
+  };
+}
+
+function routeAltitudeConstraint(leg: ProcedureDetailLeg): AltitudeConstraint | null {
+  const altitude = leg.constraints.altitude;
+  if (!altitude) return null;
+  const qualifier = altitude.qualifier.toLowerCase();
+  const rawText = altitude.rawText;
+
+  if (qualifier.includes("window") || qualifier.includes("between") || /\bbetween\b|-/.test(rawText)) {
+    const window = parseAltitudeWindow(rawText);
+    if (window) {
+      return {
+        kind: "WINDOW",
+        ...window,
+        sourceText: rawText,
+      };
+    }
+  }
+
+  if (qualifier.includes("above")) {
+    return {
+      kind: "AT_OR_ABOVE",
+      minFtMsl: altitude.valueFt,
+      sourceText: rawText,
+    };
+  }
+
+  if (qualifier.includes("below")) {
+    return {
+      kind: "AT_OR_BELOW",
+      maxFtMsl: altitude.valueFt,
+      sourceText: rawText,
+    };
+  }
+
+  return {
+    kind: qualifier.includes("unknown") ? "UNKNOWN" : "AT",
+    minFtMsl: altitude.valueFt,
+    maxFtMsl: altitude.valueFt,
+    sourceText: rawText,
+  };
 }
 
 function geometryAltitudeFt(leg: ProcedureDetailLeg, fix: ProcedureDetailFix | undefined): number | null {
@@ -132,6 +185,7 @@ function ownBranchPoints(
     .map((leg) => {
       const fix = fixById.get(leg.path.endFixRef);
       if (!legIsRenderable(leg, fix) || !fix?.position) return null;
+      const altitudeConstraint = routeAltitudeConstraint(leg);
       return {
         fixId: fix.fixId,
         fixIdent: fix.ident,
@@ -140,7 +194,8 @@ function ownBranchPoints(
         role: leg.roleAtEnd,
         lon: Number(fix.position.lon.toFixed(8)),
         lat: Number(fix.position.lat.toFixed(8)),
-        altitudeFt: altitudeConstraintFt(leg),
+        altitudeFt: altitudeConstraintReferenceFt(altitudeConstraint),
+        altitudeConstraint,
         geometryAltitudeFt: geometryAltitudeFt(leg, fix),
         sourceLine: leg.quality.sourceLine,
       };
@@ -272,6 +327,7 @@ export function buildProcedureRoutes(
             lon: point.lon,
             lat: point.lat,
             altitudeFt: point.altitudeFt,
+            altitudeConstraint: point.altitudeConstraint,
             geometryAltitudeFt: repairedAltitudeFt,
             altM: Number((repairedAltitudeFt * FEET_TO_METERS).toFixed(2)),
             distanceFromStartM: Number(cumulativeDistanceM.toFixed(1)),

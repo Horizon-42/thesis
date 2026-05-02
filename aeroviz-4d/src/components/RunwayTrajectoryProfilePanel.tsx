@@ -20,6 +20,10 @@ import {
   type ProcedureDisplayLevel,
   type ProcedureEntityAnnotation,
 } from "../data/procedureAnnotations";
+import {
+  altitudeConstraintClassName,
+  altitudeConstraintLabel,
+} from "../data/altitudeConstraints";
 
 const METERS_PER_NM = 1852;
 const METERS_PER_FOOT = 0.3048;
@@ -794,13 +798,14 @@ function ProfilePlot({
               ))}
               {mode === "side" && showAltitudeConstraintGeometry
                 ? route.points
-                    .filter((point) => point.altitudeConstraintFt !== null)
+                    .filter((point) => point.altitudeConstraint !== null)
                     .map((point, index) => {
-                      const constraintFt = point.altitudeConstraintFt;
-                      if (constraintFt === null) return null;
+                      const constraint = point.altitudeConstraint;
+                      if (!constraint) return null;
                       const cx = plotX(point.xM);
                       const cy = plotY(point.zM);
-                      const label = `${point.fixIdent} ${Math.round(constraintFt).toLocaleString()} ft`;
+                      const constraintClassName = altitudeConstraintClassName(constraint);
+                      const label = altitudeConstraintLabel(point.fixIdent, constraint);
                       return (
                         <g key={`${route.routeId}-altitude-constraint-${point.fixIdent}-${index}`}>
                           <line
@@ -808,27 +813,27 @@ function ProfilePlot({
                             y1={marginTop}
                             x2={cx}
                             y2={marginTop + plotHeight}
-                            className="runway-profile-altitude-constraint-station-line"
+                            className={`runway-profile-altitude-constraint-station-line ${constraintClassName}`}
                           />
                           <line
                             x1={cx}
                             y1={plotY(0)}
                             x2={cx}
                             y2={cy}
-                            className="runway-profile-altitude-constraint-link"
+                            className={`runway-profile-altitude-constraint-link ${constraintClassName}`}
                           />
                           <circle
                             cx={cx}
                             cy={cy}
                             r={5.2}
-                            className="runway-profile-altitude-constraint-point"
+                            className={`runway-profile-altitude-constraint-point ${constraintClassName}`}
                             data-constraint-route-id={route.routeId}
                             data-constraint-fix-ident={point.fixIdent}
                           />
                           <text
                             x={cx + 7}
                             y={cy - 7}
-                            className="runway-profile-altitude-constraint-label"
+                            className={`runway-profile-altitude-constraint-label ${constraintClassName}`}
                           >
                             {label}
                           </text>

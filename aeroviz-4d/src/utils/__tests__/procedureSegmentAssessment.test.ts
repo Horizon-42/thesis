@@ -23,8 +23,7 @@ const route: HorizontalPlateRoute = {
       zM: 1_000,
       fixIdent: "IF",
       role: "IF",
-      altitudeConstraintFt: null,
-      altitudeConstraintSourceLine: null,
+      altitudeConstraint: null,
     },
     {
       xM: 5_000,
@@ -32,8 +31,7 @@ const route: HorizontalPlateRoute = {
       zM: 500,
       fixIdent: "FAF",
       role: "FAF",
-      altitudeConstraintFt: null,
-      altitudeConstraintSourceLine: null,
+      altitudeConstraint: null,
     },
     {
       xM: 0,
@@ -41,8 +39,7 @@ const route: HorizontalPlateRoute = {
       zM: 0,
       fixIdent: "RW23R",
       role: "MAPt",
-      altitudeConstraintFt: null,
-      altitudeConstraintSourceLine: null,
+      altitudeConstraint: null,
     },
   ],
 };

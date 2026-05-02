@@ -500,6 +500,20 @@ describe("useProcedureSegmentLayer", () => {
       entities.some(
         (entity) =>
           String(entity.id).includes("-altitude-leg:transition:init") &&
+          entity.point?.color.name === "CYAN",
+      ),
+    ).toBe(true);
+    expect(
+      entities.some(
+        (entity) =>
+          String(entity.id).includes("-altitude-leg:final:faf") &&
+          entity.point?.color.name === "LIME",
+      ),
+    ).toBe(true);
+    expect(
+      entities.some(
+        (entity) =>
+          String(entity.id).includes("-altitude-leg:transition:init") &&
           entity.__aeroVizProcedureAnnotation?.kind === "ALTITUDE_CONSTRAINT",
       ),
     ).toBe(true);

@@ -7,6 +7,12 @@ import {
   type ProcedureRenderBundle,
   type ProcedureSegmentRenderBundle,
 } from "../data/procedureRenderBundle";
+import {
+  altitudeConstraintLabel,
+  altitudeConstraintReferenceFt,
+  altitudeConstraintText,
+  type DisplayAltitudeConstraint,
+} from "../data/altitudeConstraints";
 import type {
   ProcedurePackage,
   ProcedurePackageFix,
@@ -40,8 +46,6 @@ const LNAV_VNAV_OCS_COLOR = Cesium.Color.LIME.withAlpha(0.2);
 const PRECISION_FINAL_SURFACE_COLOR = Cesium.Color.MAGENTA.withAlpha(0.18);
 const FINAL_VERTICAL_REFERENCE_COLOR = Cesium.Color.CYAN.withAlpha(0.88);
 const FINAL_VERTICAL_REFERENCE_BAND_COLOR = Cesium.Color.CYAN.withAlpha(0.16);
-const FINAL_ALTITUDE_CONSTRAINT_COLOR = Cesium.Color.LIME.withAlpha(0.98);
-const ALTITUDE_CONSTRAINT_LINK_COLOR = Cesium.Color.LIME.withAlpha(0.48);
 const TURN_FILL_COLOR = Cesium.Color.ORANGE.withAlpha(0.22);
 const CONNECTOR_COLOR = Cesium.Color.ORANGE.withAlpha(0.32);
 const CONNECTOR_LINE_COLOR = Cesium.Color.ORANGE.withAlpha(0.92);
@@ -184,11 +188,15 @@ function isFinalSegment(segment: ProcedureSegment): boolean {
   return segment.segmentType.startsWith("FINAL");
 }
 
-function altitudeConstraintFt(leg: ProcedurePackageLeg): number | null {
-  const altitude = leg.requiredAltitude;
-  if (!altitude) return null;
-  const value = altitude.minFtMsl ?? altitude.maxFtMsl;
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+function altitudeConstraintColor(
+  constraint: DisplayAltitudeConstraint | null | undefined,
+  alpha: number,
+): Cesium.Color {
+  if (constraint?.kind === "AT_OR_ABOVE") return Cesium.Color.CYAN.withAlpha(alpha);
+  if (constraint?.kind === "AT_OR_BELOW") return Cesium.Color.ORANGE.withAlpha(alpha);
+  if (constraint?.kind === "WINDOW") return Cesium.Color.MAGENTA.withAlpha(alpha);
+  if (constraint?.kind === "UNKNOWN") return Cesium.Color.WHITE.withAlpha(alpha);
+  return Cesium.Color.LIME.withAlpha(alpha);
 }
 
 function fixGeoPointAtAltitude(fix: ProcedurePackageFix, altitudeFtMsl: number): GeoPoint | null {
@@ -623,16 +631,18 @@ function addSegmentEntities(
   if (pkg) {
     const fixById = new Map(pkg.sharedFixes.map((fix) => [fix.fixId, fix]));
     segmentBundle.legs.forEach((leg) => {
-      const altitudeFtMsl = altitudeConstraintFt(leg);
+      const constraint = leg.requiredAltitude;
+      const altitudeFtMsl = altitudeConstraintReferenceFt(constraint);
       const endFix = leg.endFixId ? fixById.get(leg.endFixId) : undefined;
       if (altitudeFtMsl === null || !endFix) return;
       const point = fixGeoPointAtAltitude(endFix, altitudeFtMsl);
       if (!point) return;
 
       const constraintId = `${baseId}-altitude-${leg.legId}`;
+      const constraintLabel = altitudeConstraintLabel(endFix.ident, constraint);
       const constraintAnnotation = annotationBase({
         entityId: constraintId,
-        label: `${endFix.ident} ${Math.round(altitudeFtMsl)} ft`,
+        label: constraintLabel,
         title: `${segmentName} altitude constraint`,
         kind: "ALTITUDE_CONSTRAINT",
         status: "SOURCE_BACKED",
@@ -643,7 +653,11 @@ function addSegmentEntities(
         leg,
         parameters: [
           param("Fix", endFix.ident),
-          param("Constraint", leg.requiredAltitude?.sourceText ?? `${altitudeFtMsl} ft`),
+          param("Constraint type", constraint?.kind),
+          param("Constraint", altitudeConstraintText(constraint)),
+          param("Min altitude", constraint?.minFtMsl === undefined ? null : `${constraint.minFtMsl} ft MSL`),
+          param("Max altitude", constraint?.maxFtMsl === undefined ? null : `${constraint.maxFtMsl} ft MSL`),
+          param("Source text", constraint?.sourceText),
           param("Leg", leg.legType),
         ],
         diagnostics: segmentDiagnostics,
@@ -656,7 +670,7 @@ function addSegmentEntities(
         point,
         procedureEntityShow(visible, constraintAnnotation, displayLevel),
         9,
-        FINAL_ALTITUDE_CONSTRAINT_COLOR,
+        altitudeConstraintColor(constraint, 0.98),
         FINAL_ALTITUDE_CONSTRAINT_HEIGHT_OFFSET_M,
         constraintAnnotation,
       );
@@ -672,7 +686,7 @@ function addSegmentEntities(
         ],
         procedureEntityShow(visible, constraintAnnotation, displayLevel),
         2,
-        ALTITUDE_CONSTRAINT_LINK_COLOR,
+        altitudeConstraintColor(constraint, 0.48),
         constraintAnnotation,
       );
       ids.push(linkId);
