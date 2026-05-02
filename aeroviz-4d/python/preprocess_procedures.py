@@ -55,6 +55,7 @@ from cifp_parser import (
     parse_available_branches,
     parse_leg_altitude_ft,
     parse_leg_course_deg,
+    parse_path_point_vertical_metadata,
     parse_procedure_legs,
     parse_procedure_list,
     parse_source_cycle,
@@ -792,11 +793,15 @@ def build_vertical_profile_document(
     branch_legs: list[ProcedureLeg],
     branch_route_points: list[RoutePoint],
     fix_records: dict[str, FixRecord],
+    path_point_metadata_source_line: int | None = None,
+    path_point_glidepath_angle_deg: float | None = None,
+    path_point_tch_ft: float | None = None,
 ) -> list[dict[str, Any]]:
     if not branch_legs or not branch_route_points:
         return []
 
-    glidepath_angle_deg = first_cifp_glidepath_angle_deg(branch_legs)
+    leg_glidepath_angle_deg = first_cifp_glidepath_angle_deg(branch_legs)
+    glidepath_angle_deg = path_point_glidepath_angle_deg or leg_glidepath_angle_deg
     points_by_sequence = route_points_by_sequence(branch_route_points)
     constraint_samples: list[dict[str, Any]] = []
     warnings: list[str] = []
@@ -836,7 +841,8 @@ def build_vertical_profile_document(
             "toFixRef": constraint_samples[-1]["fixRef"],
             "basis": "cifp_leg_constraints",
             "glidepathAngleDeg": glidepath_angle_deg,
-            "thresholdCrossingHeightFt": None,
+            "thresholdCrossingHeightFt": path_point_tch_ft,
+            "pathPointSourceLine": path_point_metadata_source_line,
             "constraintSamples": constraint_samples,
             "warnings": dedupe_preserve_order(warnings),
         }
@@ -973,6 +979,12 @@ def build_procedure_detail_document(
     threshold_fix = fix_records.get(runway or "")
     chart_name = procedure_chart_name(procedure, runway)
     final_branch_legs = branch_legs_by_ident.get(final_branch_ident.upper(), [])
+    path_point_vertical_metadata = parse_path_point_vertical_metadata(
+        faacifp_path,
+        airport,
+        procedure,
+        runway,
+    )
     vertical_profiles = build_vertical_profile_document(
         procedure=procedure,
         runway=runway,
@@ -980,6 +992,15 @@ def build_procedure_detail_document(
         branch_legs=final_branch_legs,
         branch_route_points=branch_route_points_by_ident.get(final_branch_ident, []),
         fix_records=fix_records,
+        path_point_metadata_source_line=path_point_vertical_metadata.source_line
+        if path_point_vertical_metadata
+        else None,
+        path_point_glidepath_angle_deg=path_point_vertical_metadata.glidepath_angle_deg
+        if path_point_vertical_metadata
+        else None,
+        path_point_tch_ft=path_point_vertical_metadata.threshold_crossing_height_ft
+        if path_point_vertical_metadata
+        else None,
     )
 
     research_warnings = dedupe_preserve_order(warnings)

@@ -57,6 +57,15 @@ class ProcedureLeg:
     vertical_angle_deg: float | None = None
 
 
+@dataclass(frozen=True)
+class PathPointVerticalMetadata:
+    procedure: str
+    runway: str
+    glidepath_angle_deg: float | None
+    threshold_crossing_height_ft: float | None
+    source_line: int
+
+
 def decode_cifp_coordinate(token: str) -> float:
     """Decode compact CIFP DMS coordinates to decimal degrees."""
     value = token.strip().upper()
@@ -150,6 +159,61 @@ def parse_leg_course_deg(line: str) -> float | None:
     if len(text) != 4 or not text.isdigit():
         return None
     return int(text) / 10.0
+
+
+def parse_path_point_glidepath_angle_deg(line: str) -> float | None:
+    text = line[66:70].strip()
+    if len(text) != 4 or not text.isdigit():
+        return None
+    return int(text) / 100.0
+
+
+def parse_path_point_tch_ft(line: str) -> float | None:
+    text = line[103:108].strip()
+    if len(text) != 5 or not text.isdigit():
+        return None
+    return int(text) / 10.0
+
+
+def parse_path_point_vertical_metadata(
+    faacifp_path: Path,
+    airport: str,
+    procedure: str,
+    runway: str | None = None,
+) -> PathPointVerticalMetadata | None:
+    """Read final vertical metadata from Airport Path Point (P) primary records.
+
+    Procedure legs carry the coded path and altitude constraints; GPA/TCH for
+    vertically guided finals is encoded in the associated path point record.
+    Keep this parser narrow so it does not infer TCH from unrelated leg fields.
+    """
+    airport_prefix = f"SUSAP {airport.upper()}"
+    target_procedure = procedure.upper()
+    target_runway = runway.upper() if runway else None
+
+    with faacifp_path.open(encoding="ascii", errors="replace") as f:
+        for line_number, raw_line in enumerate(f, start=1):
+            line = raw_line.rstrip("\n\r")
+            if len(line) < 108 or not line.startswith(airport_prefix):
+                continue
+            if line[12] != "P" or line[13:19].strip().upper() != target_procedure:
+                continue
+            if line[24:27].strip() != "001":
+                continue
+
+            runway_ident = line[19:24].strip().upper()
+            if target_runway and runway_ident != target_runway:
+                continue
+
+            return PathPointVerticalMetadata(
+                procedure=target_procedure,
+                runway=runway_ident,
+                glidepath_angle_deg=parse_path_point_glidepath_angle_deg(line),
+                threshold_crossing_height_ft=parse_path_point_tch_ft(line),
+                source_line=line_number,
+            )
+
+    return None
 
 
 def rf_related_fix_idents(legs: list[ProcedureLeg]) -> set[str]:
