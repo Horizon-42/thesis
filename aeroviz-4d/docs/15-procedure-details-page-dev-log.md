@@ -1475,3 +1475,25 @@
 
 ### Exact Next Recommended Step
 - Run full frontend/Python validation after the final-surface status stages.
+
+## 2026-05-02 10:50 CEST
+
+### Goal Of This Session
+- Run full validation after the 2D turning missed marker and final-surface status stages.
+
+### Commands Run / Checks Passed
+- `npm test -- --run`
+  - First run exposed an expected-count regression in `ProcedurePanel.test.tsx`: final-surface missing diagnostics increased the warning summary from 5 to 8.
+  - Updated the test expectation.
+  - Rerun passed: 108 passed.
+- `conda run -n aviation pytest python/tests`
+  - 76 passed.
+- `npm run build`
+  - TypeScript compile and Vite production build passed.
+
+### Current Status
+- Procedure Details 2D, ProcedurePanel warning counts, render bundles, and protected 3D mode now account for final-surface diagnostic status.
+
+### Remaining v3 Migration Gaps
+- Real LPV/GLS W/X/Y and LNAV/VNAV OCS geometry is still not implemented.
+- CA endpoint construction and full turning missed wind-spiral/TIA geometry remain future work.

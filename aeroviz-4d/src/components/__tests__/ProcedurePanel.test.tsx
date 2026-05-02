@@ -292,7 +292,7 @@ describe("ProcedurePanel", () => {
     expect(screen.getByText("KRDU CIFP 2603")).toBeTruthy();
     expect(screen.getByText("3 branches")).toBeTruthy();
     expect(screen.getByText("2 runways")).toBeTruthy();
-    expect(screen.getByText("5 warnings")).toBeTruthy();
+    expect(screen.getByText("8 warnings")).toBeTruthy();
     expect(screen.getByText("RNAV(GPS) Y RW05L")).toBeTruthy();
     expect(screen.getByText("AOTTOS")).toBeTruthy();
   });
