@@ -22,6 +22,7 @@ const CONNECTOR_LINE_COLOR = Cesium.Color.ORANGE.withAlpha(0.92);
 const MISSED_SURFACE_COLOR = Cesium.Color.YELLOW.withAlpha(0.24);
 const CA_COURSE_GUIDE_COLOR = Cesium.Color.ORANGE.withAlpha(0.98);
 const TURNING_MISSED_DEBUG_COLOR = Cesium.Color.YELLOW.withAlpha(0.98);
+const FINAL_SURFACE_STATUS_COLOR = Cesium.Color.ORANGE.withAlpha(0.9);
 const OUTLINE_COLOR = Cesium.Color.CYAN.withAlpha(0.28);
 const ENVELOPE_HEIGHT_OFFSET_M = 8;
 const OEA_HEIGHT_OFFSET_M = 18;
@@ -29,6 +30,7 @@ const CONNECTOR_HEIGHT_OFFSET_M = 45;
 const MISSED_SURFACE_HEIGHT_OFFSET_M = 58;
 const CA_COURSE_GUIDE_HEIGHT_OFFSET_M = 82;
 const TURNING_MISSED_DEBUG_HEIGHT_OFFSET_M = 96;
+const FINAL_SURFACE_STATUS_HEIGHT_OFFSET_M = 110;
 
 function elevatedPoint(point: GeoPoint, altitudeOffsetM: number): GeoPoint {
   return { ...point, altM: point.altM + altitudeOffsetM };
@@ -88,6 +90,11 @@ function addPoint(
       outlineWidth: 2,
     },
   });
+}
+
+function representativePoint(points: GeoPoint[]): GeoPoint | null {
+  if (points.length === 0) return null;
+  return points[Math.floor((points.length - 1) / 2)];
 }
 
 function addRibbonPolygon(
@@ -248,6 +255,27 @@ function addSegmentEntities(
       OEA_HEIGHT_OFFSET_M,
     );
     ids.push(oeaSecondaryId);
+  }
+
+  if (
+    segmentBundle.finalSurfaceStatus &&
+    segmentBundle.finalSurfaceStatus.missingSurfaceTypes.length > 0
+  ) {
+    const statusPoint = representativePoint(segmentBundle.segmentGeometry.centerline.geoPositions);
+    if (statusPoint) {
+      const statusId = `${baseId}-final-surface-status`;
+      addPoint(
+        viewer,
+        statusId,
+        `${segmentName} missing final surfaces: ${segmentBundle.finalSurfaceStatus.missingSurfaceTypes.join(", ")}`,
+        statusPoint,
+        visible,
+        11,
+        FINAL_SURFACE_STATUS_COLOR,
+        FINAL_SURFACE_STATUS_HEIGHT_OFFSET_M,
+      );
+      ids.push(statusId);
+    }
   }
 
   if (segmentBundle.alignedConnector) {

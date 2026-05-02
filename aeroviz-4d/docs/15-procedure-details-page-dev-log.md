@@ -1447,3 +1447,31 @@
 
 ### Exact Next Recommended Step
 - Add a small 3D placeholder/status primitive for missing final vertical surfaces so protected mode can reveal collapsed final modes without drawing fake W/X/Y geometry.
+
+## 2026-05-02 10:45 CEST
+
+### Goal Of This Session
+- Make missing final vertical/surface status visible in 3D protected mode without inventing unsupported geometry.
+
+### Decisions Locked
+- `useProcedureSegmentLayer` now renders a `-final-surface-status` point entity for final segments whose `FinalApproachSurfaceStatus` has missing surface types.
+- The point is placed at a representative point on the final centerline and vertically offset above the other protected-mode primitives.
+- This is a status marker only; it does not draw LPV W/X/Y, GLS W/X/Y, or LNAV/VNAV OCS geometry.
+
+### Files Changed
+- `src/hooks/useProcedureSegmentLayer.ts`
+- `src/hooks/__tests__/useProcedureSegmentLayer.test.ts`
+- `docs/15-procedure-details-page-dev-log.md`
+
+### Commands Run / Checks Passed
+- `npm test -- --run src/hooks/__tests__/useProcedureSegmentLayer.test.ts`
+- `npm run build`
+
+### Current Status
+- Collapsed final modes are now visible in Procedure Details and protected 3D mode as explicit status/diagnostic objects.
+
+### Known Blockers
+- Real final vertical/surface construction remains future work.
+
+### Exact Next Recommended Step
+- Run full frontend/Python validation after the final-surface status stages.

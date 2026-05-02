@@ -189,6 +189,14 @@ const renderBundleData = {
                 primary: ribbon,
                 secondaryOuter: ribbon,
               },
+              finalSurfaceStatus: {
+                segmentId: "segment:final",
+                requestedModes: ["LPV", "LNAV/VNAV", "LNAV"],
+                constructedSurfaceTypes: ["LNAV_FINAL_OEA"],
+                missingSurfaceTypes: ["LPV_W", "LPV_X", "LPV_Y", "LNAV_VNAV_OCS"],
+                constructionStatus: "COLLAPSED_TO_LNAV_BASELINE",
+                notes: [],
+              },
               alignedConnector: {
                 primary: ribbon,
                 secondaryOuter: ribbon,
@@ -251,6 +259,7 @@ describe("useProcedureSegmentLayer", () => {
     expect(entities.some((entity) => String(entity.id).endsWith("-centerline"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-envelope-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-oea-primary"))).toBe(true);
+    expect(entities.some((entity) => String(entity.id).includes("-final-surface-status"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-connector-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-connector-primary-boundary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-missed-surface-primary"))).toBe(true);
