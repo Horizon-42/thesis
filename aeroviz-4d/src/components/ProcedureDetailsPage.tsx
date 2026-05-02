@@ -44,6 +44,10 @@ import {
   type ProcedureChartPoint,
   type ProcedureRunwayMarker,
 } from "../utils/procedureDetailsGeometry";
+import {
+  buildFinalVerticalProfileOverlays,
+  type FinalVerticalProfileOverlay,
+} from "../utils/procedureVerticalProfileOverlay";
 
 const SVG_WIDTH = 1120;
 const PLAN_SVG_HEIGHT = 680;
@@ -1385,8 +1389,13 @@ function ProcedurePlanView({
   );
 }
 
+interface VerticalProfileProps extends Omit<SvgChartProps, "runwayMarker" | "rfMarkers" | "missedTurnDebugPrimitiveMarkers"> {
+  finalVerticalOverlays: FinalVerticalProfileOverlay[];
+}
+
 function ProcedureVerticalProfile({
   polylines,
+  finalVerticalOverlays,
   missedSectionMarkers,
   missedLegMarkers,
   missedTurnDebugMarkers,
@@ -1398,7 +1407,7 @@ function ProcedureVerticalProfile({
   onSelectFix,
   onPreviewBranch,
   onSelectBranch,
-}: Omit<SvgChartProps, "runwayMarker" | "rfMarkers" | "missedTurnDebugPrimitiveMarkers">) {
+}: VerticalProfileProps) {
   const allPoints = polylines.flatMap((branch) => branch.points);
   if (allPoints.length === 0) {
     return (
@@ -1408,15 +1417,27 @@ function ProcedureVerticalProfile({
     );
   }
 
-  const rawAltitudes = allPoints.map((point) => point.altitudeFt ?? 0);
+  const overlayPathPoints = finalVerticalOverlays.flatMap((overlay) =>
+    overlay.glidepathReference?.points ?? [],
+  );
+  const overlayConstraintPoints = finalVerticalOverlays.flatMap((overlay) => overlay.constraintPoints);
+  const rawAltitudes = [
+    ...allPoints.map((point) => point.altitudeFt ?? 0),
+    ...overlayPathPoints.map((point) => point.altitudeFt),
+    ...overlayConstraintPoints.map((point) => point.altitudeFt),
+  ];
   const altitudeDomain = chartDomain(rawAltitudes, 0.14);
   const stationedBranches = polylines.map((branch) => ({
     branch,
     stationedPoints: stationedProfilePoints(branch.points),
   }));
-  const allStations = stationedBranches.flatMap((branch) =>
-    branch.stationedPoints.map((entry) => entry.stationM),
-  );
+  const allStations = [
+    ...stationedBranches.flatMap((branch) =>
+      branch.stationedPoints.map((entry) => entry.stationM),
+    ),
+    ...overlayPathPoints.map((point) => point.stationM),
+    ...overlayConstraintPoints.map((point) => point.stationM),
+  ];
   const stationDomain = chartDomain(allStations.length > 0 ? allStations : [0], 0.1);
   const stationTickStep = horizontalTickStepM(
     stationDomain.max - stationDomain.min,
@@ -1527,6 +1548,63 @@ function ProcedureVerticalProfile({
       >
         Procedure altitude (ft)
       </text>
+
+      {finalVerticalOverlays.map((overlay) => {
+        const isFocused = !focusedBranchId || overlay.branchId === focusedBranchId;
+        const glidepathD = overlay.glidepathReference?.points
+          .map((point, index) => {
+            const x = scaleX(point.stationM);
+            const y = scaleY(point.altitudeFt);
+            return `${index === 0 ? "M" : "L"} ${x} ${y}`;
+          })
+          .join(" ");
+
+        return (
+          <g
+            key={overlay.profileId}
+            className={`procedure-details-final-vertical-overlay ${
+              isFocused ? "is-focused" : "is-muted"
+            }`}
+          >
+            {glidepathD ? (
+              <path
+                d={glidepathD}
+                className="procedure-details-final-glidepath-reference"
+              />
+            ) : null}
+            {overlay.glidepathReference ? (
+              <text
+                x={scaleX(overlay.glidepathReference.points[0].stationM)}
+                y={scaleY(overlay.glidepathReference.points[0].altitudeFt) - 12}
+                className="procedure-details-final-glidepath-label"
+              >
+                GPA {overlay.glidepathReference.gpaDeg.toFixed(1)} deg
+                {overlay.glidepathReference.estimated ? " est" : ""}
+              </text>
+            ) : null}
+            {overlay.constraintPoints.map((point) => {
+              const x = scaleX(point.stationM);
+              const y = scaleY(point.altitudeFt);
+              const selected = point.fixRef === focusedFixId;
+              return (
+                <g
+                  key={`${overlay.profileId}-${point.fixRef}`}
+                  className={`procedure-details-final-constraint-marker ${
+                    selected ? "is-selected" : ""
+                  }`}
+                  onMouseEnter={() => onPreviewFix(point.fixRef, overlay.branchId)}
+                  onClick={() => onSelectFix(point.fixRef, overlay.branchId)}
+                >
+                  <path d={`M ${x} ${y - 7} L ${x + 7} ${y + 6} L ${x - 7} ${y + 6} Z`} />
+                  <text x={x + 10} y={y + 4}>
+                    {point.ident} {Math.round(point.altitudeFt).toLocaleString()} ft
+                  </text>
+                </g>
+              );
+            })}
+          </g>
+        );
+      })}
 
       {stationedBranches.map(({ branch, stationedPoints }) => {
         const isFocused = !focusedBranchId || branch.branchId === focusedBranchId;
@@ -1874,6 +1952,13 @@ export default function ProcedureDetailsPage() {
   const rfMarkers = useMemo(
     () => buildRfPlanMarkers(procedureDocument, polylines),
     [procedureDocument, polylines],
+  );
+  const finalVerticalOverlays = useMemo(
+    () =>
+      procedureDocument
+        ? buildFinalVerticalProfileOverlays(procedureDocument, polylines)
+        : [],
+    [polylines, procedureDocument],
   );
   const procedureRenderBundle = useMemo(
     () =>
@@ -2398,6 +2483,7 @@ export default function ProcedureDetailsPage() {
                     </div>
                     <ProcedureVerticalProfile
                       polylines={polylines}
+                      finalVerticalOverlays={finalVerticalOverlays}
                       missedSectionMarkers={missedSectionMarkers}
                       missedLegMarkers={missedLegMarkers}
                       missedTurnDebugMarkers={missedTurnDebugMarkers}

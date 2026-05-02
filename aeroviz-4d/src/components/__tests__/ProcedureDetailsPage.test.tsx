@@ -226,7 +226,48 @@ const sampleDocument = {
       ],
     },
   ],
-  verticalProfiles: [],
+  verticalProfiles: [
+    {
+      profileId: "profile:R05LY:RW05L",
+      appliesToModes: ["LPV", "LNAV/VNAV", "LNAV"],
+      branchId: "branch:R",
+      fromFixRef: "fix:SCHOO",
+      toFixRef: "fix:RW05L",
+      basis: "cifp_leg_constraints",
+      glidepathAngleDeg: 3,
+      thresholdCrossingHeightFt: null,
+      constraintSamples: [
+        {
+          fixRef: "fix:SCHOO",
+          ident: "SCHOO",
+          role: "IF",
+          distanceFromStartM: 0,
+          altitudeFt: 3000,
+          geometryAltitudeFt: 3000,
+          sourceLine: 1,
+        },
+        {
+          fixRef: "fix:WEPAS",
+          ident: "WEPAS",
+          role: "FAF",
+          distanceFromStartM: 5555,
+          altitudeFt: 2200,
+          geometryAltitudeFt: 2200,
+          sourceLine: 2,
+        },
+        {
+          fixRef: "fix:RW05L",
+          ident: "RW05L",
+          role: "MAPt",
+          distanceFromStartM: 15882,
+          altitudeFt: null,
+          geometryAltitudeFt: 798,
+          sourceLine: 3,
+        },
+      ],
+      warnings: [],
+    },
+  ],
   validation: {
     expectedRunwayIdent: "RW05L",
     expectedIF: "fix:SCHOO",
@@ -411,6 +452,8 @@ describe("ProcedureDetailsPage", () => {
     expect(await screen.findByText("final_approach_fix")).toBeTruthy();
     expect(screen.getAllByText(/DEFAULT_TOLERANCE/).length).toBeGreaterThan(0);
     expect(screen.getAllByText("Final surfaces").length).toBeGreaterThan(0);
+    expect(screen.getByText("GPA 3.0 deg est")).toBeTruthy();
+    expect(screen.getByText("WEPAS 2,200 ft")).toBeTruthy();
     expect(screen.getByText(/Missing LPV_W, LPV_X, LPV_Y, LNAV_VNAV_OCS/)).toBeTruthy();
     expect(screen.getByText(/FINAL_VERTICAL_SURFACE_UNIMPLEMENTED/)).toBeTruthy();
   });
