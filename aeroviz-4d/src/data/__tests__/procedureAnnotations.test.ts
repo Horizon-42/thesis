@@ -49,6 +49,9 @@ describe("procedureAnnotations", () => {
     expect(procedureAnnotationMeaning("SEGMENT_VERTICAL_PROFILE", "ESTIMATED")).toContain(
       "adjacent procedure fixes",
     );
+    expect(procedureAnnotationMeaning("CA_MAHF_CONNECTOR", "ESTIMATED")).toContain(
+      "CA endpoint",
+    );
   });
 
   it("resolves annotations from picked Cesium entities", () => {
@@ -78,6 +81,13 @@ describe("procedureAnnotations", () => {
       procedureAnnotationDisplayLevel({
         ...annotation,
         kind: "SEGMENT_VERTICAL_PROFILE",
+        status: "ESTIMATED",
+      }),
+    ).toBe("ESTIMATED");
+    expect(
+      procedureAnnotationDisplayLevel({
+        ...annotation,
+        kind: "CA_MAHF_CONNECTOR",
         status: "ESTIMATED",
       }),
     ).toBe("ESTIMATED");

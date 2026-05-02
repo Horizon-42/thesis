@@ -35,14 +35,16 @@ import {
 } from "../utils/procedureSurfaceGeometry";
 import {
   buildMissedCaCenterlines,
-  buildMissedCaSegmentGeometry,
   buildMissedCaEndpoints,
+  buildMissedCaMahfConnectors,
+  buildMissedCaSegmentGeometry,
   buildMissedCourseGuides,
   buildMissedSectionSurface,
   buildMissedTurnDebugPrimitives,
   buildMissedTurnDebugPoint,
   type MissedCaCenterlineGeometry,
   type MissedCaEndpointGeometry,
+  type MissedCaMahfConnectorGeometry,
   type MissedCourseGuideGeometry,
   type MissedSectionSurfaceGeometry,
   type MissedTurnDebugPrimitiveGeometry,
@@ -76,6 +78,7 @@ export interface BranchGeometryBundle {
   runwayId: string | null;
   segmentBundles: ProcedureSegmentRenderBundle[];
   turnJunctions: InterSegmentTurnJunctionGeometry[];
+  missedCaMahfConnectors: MissedCaMahfConnectorGeometry[];
 }
 
 export interface ProcedureSegmentRenderBundle {
@@ -257,6 +260,13 @@ export function buildProcedureRenderBundle(
 
     const branchTurnResult = buildBranchTurnJunctions(branch, segmentBundles);
     diagnostics.push(...branchTurnResult.diagnostics);
+    const branchLegs = segmentBundles.flatMap((segmentBundle) => segmentBundle.legs);
+    const missedCaMahfConnectors = buildMissedCaMahfConnectors(
+      segmentBundles.flatMap((segmentBundle) => segmentBundle.missedCaEndpoints),
+      branchLegs,
+      fixes,
+      { samplingStepNm: ctx.samplingStepNm },
+    );
 
     return {
       branchId: branch.branchId,
@@ -265,6 +275,7 @@ export function buildProcedureRenderBundle(
       runwayId: branch.runwayId,
       segmentBundles,
       turnJunctions: branchTurnResult.turnJunctions,
+      missedCaMahfConnectors,
     };
   });
 

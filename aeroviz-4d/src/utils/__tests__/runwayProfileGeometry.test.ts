@@ -266,6 +266,7 @@ describe("runwayProfileGeometry", () => {
               branchRole: "STRAIGHT_IN",
               runwayId: "RW09",
               turnJunctions: [],
+              missedCaMahfConnectors: [],
               segmentBundles: [
                 {
                   segment: {
@@ -338,6 +339,7 @@ describe("runwayProfileGeometry", () => {
               branchRole: "STRAIGHT_IN",
               runwayId: "RW09",
               turnJunctions: [],
+              missedCaMahfConnectors: [],
               segmentBundles: [
                 {
                   segment: {

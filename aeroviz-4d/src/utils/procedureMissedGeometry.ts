@@ -95,6 +95,17 @@ export interface MissedCaCenterlineGeometry extends PolylineGeometry3D {
   notes: string[];
 }
 
+export interface MissedCaMahfConnectorGeometry extends PolylineGeometry3D {
+  sourceSegmentId: string;
+  sourceLegId: string;
+  sourceEndpointStatus: MissedCaEndpointStatus;
+  targetFixId: string;
+  targetFixIdent: string;
+  targetFixRole: "MAHF" | "HOLD";
+  constructionStatus: "ESTIMATED_CONNECTOR";
+  notes: string[];
+}
+
 export interface MissedCaCenterlineOptions {
   samplingStepNm?: number;
 }
@@ -173,6 +184,18 @@ function pointFromFix(fix: ProcedurePackageFix): GeoPoint | null {
     lonDeg: fix.lonDeg,
     latDeg: fix.latDeg,
     altM: (fix.altFtMsl ?? 0) * FEET_TO_METERS,
+  };
+}
+
+function pointFromFixWithAltitudeFallback(
+  fix: ProcedurePackageFix,
+  fallbackAltitudeFtMsl: number,
+): GeoPoint | null {
+  if (fix.latDeg === null || fix.lonDeg === null) return null;
+  return {
+    lonDeg: fix.lonDeg,
+    latDeg: fix.latDeg,
+    altM: (fix.altFtMsl ?? fallbackAltitudeFtMsl) * FEET_TO_METERS,
   };
 }
 
@@ -502,6 +525,73 @@ export function buildMissedCaCenterlines(
       geodesicLengthNm: lengthNm,
       isArc: false,
     };
+  });
+}
+
+function legTargetsMahfOrHold(
+  leg: ProcedurePackageLeg,
+  fixes: Map<string, ProcedurePackageFix>,
+): { fix: ProcedurePackageFix; role: "MAHF" | "HOLD" } | null {
+  const fix = leg.endFixId ? fixes.get(leg.endFixId) : undefined;
+  if (!fix) return null;
+  if (leg.legacy.roleAtEnd.toUpperCase() === "MAHF" || fix.role.includes("MAHF")) {
+    return { fix, role: "MAHF" };
+  }
+  if (leg.legType === "HM" || leg.legType === "HA" || leg.legType === "HF") {
+    return { fix, role: "HOLD" };
+  }
+  return null;
+}
+
+export function buildMissedCaMahfConnectors(
+  endpoints: MissedCaEndpointGeometry[],
+  orderedLegs: ProcedurePackageLeg[],
+  fixes: Map<string, ProcedurePackageFix>,
+  options: MissedCaCenterlineOptions = {},
+): MissedCaMahfConnectorGeometry[] {
+  const samplingStepNm = Math.max(options.samplingStepNm ?? 0.25, 0.01);
+
+  return endpoints.flatMap((endpoint) => {
+    const sourceLegIndex = orderedLegs.findIndex((leg) => leg.legId === endpoint.legId);
+    if (sourceLegIndex < 0) return [];
+
+    const target = orderedLegs
+      .slice(sourceLegIndex + 1)
+      .map((leg) => legTargetsMahfOrHold(leg, fixes))
+      .find((entry): entry is { fix: ProcedurePackageFix; role: "MAHF" | "HOLD" } => entry !== null);
+    if (!target) return [];
+
+    const start = endpoint.geoPositions[1];
+    const end = pointFromFixWithAltitudeFallback(target.fix, endpoint.targetAltitudeFtMsl);
+    if (!end) return [];
+
+    const lengthNm = distanceNm(start, end);
+    if (lengthNm <= 1e-5) return [];
+
+    const sampleCount = Math.max(1, Math.ceil(lengthNm / samplingStepNm));
+    const geoPositions = Array.from({ length: sampleCount + 1 }, (_, index) =>
+      interpolateGreatCircle(start, end, index / sampleCount),
+    );
+    geoPositions[0] = start;
+    geoPositions[geoPositions.length - 1] = end;
+
+    return [{
+      sourceSegmentId: endpoint.segmentId,
+      sourceLegId: endpoint.legId,
+      sourceEndpointStatus: endpoint.constructionStatus,
+      targetFixId: target.fix.fixId,
+      targetFixIdent: target.fix.ident,
+      targetFixRole: target.role,
+      constructionStatus: "ESTIMATED_CONNECTOR",
+      notes: [
+        "Connector estimates procedure continuity from the CA endpoint to the later missed holding fix.",
+        "It is not source-coded leg geometry and must not be read as a certified missed approach track.",
+      ],
+      geoPositions,
+      worldPositions: geoPositions.map(toCartesian),
+      geodesicLengthNm: lengthNm,
+      isArc: false,
+    }];
   });
 }
 

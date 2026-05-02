@@ -15,6 +15,7 @@ export type ProcedureAnnotationKind =
   | "CA_COURSE_GUIDE"
   | "CA_CENTERLINE"
   | "CA_ENDPOINT"
+  | "CA_MAHF_CONNECTOR"
   | "TURNING_MISSED_DEBUG"
   | "TURN_FILL"
   | "MISSING_FINAL_SURFACE";
@@ -110,6 +111,7 @@ export function procedureAnnotationDisplayLevel(
     annotation.kind === "SEGMENT_VERTICAL_PROFILE" ||
     annotation.kind === "CA_CENTERLINE" ||
     annotation.kind === "CA_ENDPOINT" ||
+    annotation.kind === "CA_MAHF_CONNECTOR" ||
     (annotation.kind === "SEGMENT_CENTERLINE" && annotation.status === "ESTIMATED") ||
     (annotation.kind === "SEGMENT_ENVELOPE_PRIMARY" && annotation.status === "ESTIMATED") ||
     (annotation.kind === "SEGMENT_ENVELOPE_SECONDARY" && annotation.status === "ESTIMATED") ||
@@ -193,6 +195,9 @@ export function procedureAnnotationMeaning(
   }
   if (kind === "CA_ENDPOINT") {
     return "Estimated endpoint for a course-to-altitude missed leg. It is derived from the climb model and is not an explicit source fix.";
+  }
+  if (kind === "CA_MAHF_CONNECTOR") {
+    return "Estimated continuity connector from a CA endpoint to the later missed approach holding fix. It is not source-coded leg geometry.";
   }
   if (kind === "TURNING_MISSED_DEBUG") {
     return "Debug-only turning missed approach primitive, used to inspect turn initiation, early/late baselines, nominal path, or wind spiral placeholders.";

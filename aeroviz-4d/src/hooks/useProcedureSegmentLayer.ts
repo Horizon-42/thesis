@@ -54,6 +54,7 @@ const MISSED_SURFACE_COLOR = Cesium.Color.YELLOW.withAlpha(0.24);
 const MISSED_CA_ESTIMATED_SURFACE_COLOR = Cesium.Color.ORANGE.withAlpha(0.26);
 const CA_COURSE_GUIDE_COLOR = Cesium.Color.ORANGE.withAlpha(0.98);
 const CA_CENTERLINE_COLOR = Cesium.Color.ORANGE.withAlpha(0.86);
+const CA_MAHF_CONNECTOR_COLOR = Cesium.Color.ORANGE.withAlpha(0.62);
 const TURNING_MISSED_DEBUG_COLOR = Cesium.Color.YELLOW.withAlpha(0.98);
 const TURNING_MISSED_PRIMITIVE_COLOR = Cesium.Color.ORANGE.withAlpha(0.78);
 const FINAL_SURFACE_STATUS_COLOR = Cesium.Color.ORANGE.withAlpha(0.9);
@@ -74,6 +75,7 @@ const CONNECTOR_HEIGHT_OFFSET_M = 45;
 const MISSED_SURFACE_HEIGHT_OFFSET_M = 58;
 const CA_COURSE_GUIDE_HEIGHT_OFFSET_M = 82;
 const CA_CENTERLINE_HEIGHT_OFFSET_M = 88;
+const CA_MAHF_CONNECTOR_HEIGHT_OFFSET_M = 90;
 const TURNING_MISSED_DEBUG_HEIGHT_OFFSET_M = 96;
 const FINAL_SURFACE_STATUS_HEIGHT_OFFSET_M = 110;
 const CA_ENDPOINT_HEIGHT_OFFSET_M = 92;
@@ -1628,6 +1630,56 @@ function addBranchVerticalProfileEntity(
   return ids;
 }
 
+function addBranchMissedCaMahfConnectorEntities(
+  viewer: Cesium.Viewer,
+  bundle: ProcedureRenderBundle,
+  branchBundle: BranchGeometryBundle,
+  visible: boolean,
+  annotationVisible: boolean,
+  displayLevel: ProcedureDisplayLevel,
+): string[] {
+  const ids: string[] = [];
+  (branchBundle.missedCaMahfConnectors ?? []).forEach((connector, index) => {
+    const connectorId = `${PROCEDURE_SEGMENT_ENTITY_PREFIX}${bundle.packageId}-${branchBundle.branchId}-ca-mahf-connector-${index}`;
+    const annotation = annotationBase({
+      entityId: connectorId,
+      label: `CA to ${connector.targetFixIdent}`,
+      title: `${bundle.procedureName} estimated CA to MAHF connector`,
+      kind: "CA_MAHF_CONNECTOR",
+      status: "ESTIMATED",
+      bundle,
+      branchBundle,
+      parameters: [
+        param("Source CA leg", connector.sourceLegId),
+        param("Endpoint status", connector.sourceEndpointStatus),
+        param("Target fix", `${connector.targetFixIdent} ${connector.targetFixRole}`),
+        param("Distance", `${connector.geodesicLengthNm.toFixed(2)} NM`),
+        param("Geometry meaning", "Estimated continuity connector; not source-coded leg geometry"),
+      ],
+      diagnostics: connector.notes,
+    });
+    addPolyline(
+      viewer,
+      connectorId,
+      `${bundle.procedureName} estimated CA to ${connector.targetFixIdent} connector`,
+      connector.geoPositions.map((point) => elevatedPoint(point, CA_MAHF_CONNECTOR_HEIGHT_OFFSET_M)),
+      procedureEntityShow(visible, annotation, displayLevel),
+      4,
+      CA_MAHF_CONNECTOR_COLOR,
+      annotation,
+    );
+    ids.push(connectorId);
+    const labelId = addAnnotationLabel(
+      viewer,
+      annotation,
+      representativePoint(connector.geoPositions.map((point) => elevatedPoint(point, CA_MAHF_CONNECTOR_HEIGHT_OFFSET_M))),
+      procedureEntityShow(visible, annotation, displayLevel, true, annotationVisible),
+    );
+    if (labelId) ids.push(labelId);
+  });
+  return ids;
+}
+
 export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean } = {}): void {
   const {
     viewer,
@@ -1741,6 +1793,17 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
             addBranchEntityIds(
               branchBundle.branchId,
               addBranchTurnJunctionEntities(
+                viewer,
+                bundle,
+                branchBundle,
+                visible,
+                annotationVisibleRef.current,
+                displayLevelRef.current,
+              ),
+            );
+            addBranchEntityIds(
+              branchBundle.branchId,
+              addBranchMissedCaMahfConnectorEntities(
                 viewer,
                 bundle,
                 branchBundle,

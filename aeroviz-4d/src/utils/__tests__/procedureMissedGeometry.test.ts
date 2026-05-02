@@ -6,8 +6,9 @@ import type {
 } from "../../data/procedurePackage";
 import type { SegmentGeometryBundle } from "../procedureSegmentGeometry";
 import {
-  buildMissedCaEndpoints,
   buildMissedCaCenterlines,
+  buildMissedCaEndpoints,
+  buildMissedCaMahfConnectors,
   buildMissedCourseGuides,
   buildMissedSectionSurface,
   buildMissedTurnDebugPrimitives,
@@ -304,6 +305,59 @@ describe("procedure missed geometry", () => {
     expect(centerlines[0].geoPositions[centerlines[0].geoPositions.length - 1]).toEqual(
       endpointResult.geometries[0].geoPositions[1],
     );
+  });
+
+  it("estimates continuity connectors from CA endpoints to later MAHF fixes", () => {
+    const endpointResult = buildMissedCaEndpoints(missedSegment, [caLeg], fixes);
+    const connectorFixes = new Map(fixes);
+    connectorFixes.set("fix:DUHAM", {
+      fixId: "fix:DUHAM",
+      ident: "DUHAM",
+      role: ["MAHF"],
+      latDeg: 35.94,
+      lonDeg: -78.72,
+      altFtMsl: 3000,
+      annotations: [],
+      sourceRefs: [],
+    });
+    const mahfLeg: ProcedurePackageLeg = {
+      ...caLeg,
+      legId: "leg:missed:hm",
+      legType: "HM",
+      rawPathTerminator: "HM",
+      startFixId: "fix:DUHAM",
+      endFixId: "fix:DUHAM",
+      requiredAltitude: null,
+      legacy: {
+        ...caLeg.legacy,
+        sequence: 50,
+        constructionMethod: "hold_to_manual",
+        roleAtEnd: "MAHF",
+      },
+    };
+
+    const connectors = buildMissedCaMahfConnectors(
+      endpointResult.geometries,
+      [caLeg, mahfLeg],
+      connectorFixes,
+      { samplingStepNm: 1 },
+    );
+
+    expect(connectors).toHaveLength(1);
+    expect(connectors[0]).toMatchObject({
+      sourceLegId: "leg:missed:ca",
+      targetFixId: "fix:DUHAM",
+      targetFixIdent: "DUHAM",
+      targetFixRole: "MAHF",
+      constructionStatus: "ESTIMATED_CONNECTOR",
+    });
+    expect(connectors[0].geoPositions[0]).toEqual(endpointResult.geometries[0].geoPositions[1]);
+    const connectorEnd = connectors[0].geoPositions[connectors[0].geoPositions.length - 1];
+    expect(connectorEnd).toMatchObject({
+      lonDeg: -78.72,
+      latDeg: 35.94,
+    });
+    expect(connectorEnd.altM).toBeCloseTo(914.4, 8);
   });
 
   it("builds debug-only turning missed anchor and estimated primitives for flagged section two segments", () => {

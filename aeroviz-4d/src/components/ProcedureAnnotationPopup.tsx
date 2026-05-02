@@ -45,7 +45,12 @@ function termsFromKind(annotation: ProcedureEntityAnnotation): string[] {
   if (annotation.kind === "LNAV_VNAV_OCS") return ["OCS", "LNAV/VNAV", "GPA", "TCH"];
   if (annotation.kind === "FINAL_OEA") return ["OEA", "LNAV"];
   if (annotation.kind === "PRECISION_SURFACE") return ["LPV", "GPA", "TCH"];
-  if (annotation.kind === "CA_COURSE_GUIDE" || annotation.kind === "CA_CENTERLINE" || annotation.kind === "CA_ENDPOINT") {
+  if (
+    annotation.kind === "CA_COURSE_GUIDE" ||
+    annotation.kind === "CA_CENTERLINE" ||
+    annotation.kind === "CA_ENDPOINT" ||
+    annotation.kind === "CA_MAHF_CONNECTOR"
+  ) {
     return ["CA_TERMINATOR"];
   }
   if (annotation.kind === "MISSED_SURFACE") return ["MAPT", "OEA"];
