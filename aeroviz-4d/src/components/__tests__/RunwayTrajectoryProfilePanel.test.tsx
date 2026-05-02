@@ -178,6 +178,10 @@ describe("RunwayTrajectoryProfilePanel", () => {
     rerender(<RunwayTrajectoryProfilePanel />);
 
     expect(container.querySelectorAll(".runway-profile-route-band")).toHaveLength(1);
+    expect(container.querySelector("clipPath#runway-profile-plot-clip-top")).toBeTruthy();
+    expect(
+      container.querySelector(".runway-profile-route-band")?.getAttribute("clip-path"),
+    ).toBe("url(#runway-profile-plot-clip-top)");
   });
 
   it("gates profile vertical references and segment debug labels by procedure display level", () => {

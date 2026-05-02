@@ -240,6 +240,78 @@ describe("runwayProfileGeometry", () => {
     expect(transitionRoute?.points[0].zM ?? 0).toBeGreaterThan(400);
   });
 
+  it("omits degenerate assessment segments that would render as standalone protection caps", () => {
+    const frame = buildRunwayFrame(runwayCollection, "RW09");
+    const routes = buildHorizontalPlateRoutes(procedureRoutes, frame, "RW09");
+    const enriched = attachRenderBundleAssessmentSegments(
+      routes,
+      [
+        {
+          packageId: "TEST-R09-RW09",
+          procedureId: "R09",
+          procedureName: "RNAV(GPS) RW09",
+          airportId: "TEST",
+          diagnostics: [],
+          branchBundles: [
+            {
+              branchId: "TEST-R09-RW09:branch:R",
+              branchName: "R",
+              branchRole: "STRAIGHT_IN",
+              runwayId: "RW09",
+              turnJunctions: [],
+              segmentBundles: [
+                {
+                  segment: {
+                    segmentId: "TEST-R09-RW09:branch:R:segment:if:1",
+                    segmentType: "INITIAL",
+                    xttNm: 0.3,
+                    secondaryEnabled: true,
+                  },
+                  legs: [],
+                  diagnostics: [],
+                  finalOea: null,
+                  lnavVnavOcs: null,
+                  precisionFinalSurfaces: [],
+                  alignedConnector: null,
+                  segmentGeometry: {
+                    segmentId: "TEST-R09-RW09:branch:R:segment:if:1",
+                    centerline: {
+                      geoPositions: [
+                        { lonDeg: -0.01, latDeg: 0, altM: 500 },
+                        { lonDeg: -0.01, latDeg: 0, altM: 500 },
+                      ],
+                      worldPositions: [],
+                      geodesicLengthNm: 0,
+                      isArc: false,
+                    },
+                    stationAxis: { samples: [], totalLengthNm: 0 },
+                    primaryEnvelope: {
+                      geometryId: "primary",
+                      envelopeType: "PRIMARY",
+                      leftBoundary: [],
+                      rightBoundary: [],
+                      leftGeoBoundary: [],
+                      rightGeoBoundary: [],
+                      halfWidthNmSamples: [{ stationNm: 0, halfWidthNm: 0.6 }],
+                    },
+                    secondaryEnvelope: null,
+                    turnJunctions: [],
+                    diagnostics: [],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ] as any,
+      frame,
+      "RW09",
+    );
+    const finalRoute = enriched.find((route) => route.branchId === "TEST-R09-RW09:branch:R");
+
+    expect(finalRoute?.assessmentSegments).toBeUndefined();
+  });
+
   it("attaches render-bundle segment geometry for profile assessment without replacing fix display points", () => {
     const frame = buildRunwayFrame(runwayCollection, "RW09");
     const routes = buildHorizontalPlateRoutes(procedureRoutes, frame, "RW09");

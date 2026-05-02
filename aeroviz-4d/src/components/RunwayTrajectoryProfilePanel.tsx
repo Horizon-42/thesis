@@ -68,14 +68,38 @@ function collectViewDomain(
 ): PlotDomain {
   const xValues = [0];
   const yValues = [0];
+  const pushPoint = (point: RunwayProfilePoint) => {
+    xValues.push(point.xM);
+    yValues.push(mode === "side" ? point.zM : point.yM);
+  };
+  const pushTopBand = (points: RunwayProfilePoint[], halfWidthM: number | null | undefined) => {
+    if (mode !== "top" || typeof halfWidthM !== "number" || !Number.isFinite(halfWidthM)) return;
+    points.forEach((point) => {
+      yValues.push(point.yM + halfWidthM, point.yM - halfWidthM);
+    });
+  };
 
   plateRoutes.forEach((route) => {
     route.points.forEach((point) => {
-      xValues.push(point.xM);
-      yValues.push(mode === "side" ? point.zM : point.yM);
-      if (mode === "top") {
-        yValues.push(point.yM + route.halfWidthM, point.yM - route.halfWidthM);
+      pushPoint(point);
+      pushTopBand([point], route.halfWidthM);
+    });
+    (route.assessmentSegments ?? []).forEach((segment) => {
+      segment.points.forEach(pushPoint);
+      pushTopBand(segment.points, segment.primaryHalfWidthM);
+      pushTopBand(segment.points, segment.secondaryHalfWidthM);
+      if (segment.finalVerticalReference) {
+        segment.finalVerticalReference.points.forEach(pushPoint);
+        pushTopBand(segment.finalVerticalReference.points, segment.finalVerticalReference.halfWidthM);
       }
+      if (segment.lnavVnavOcs) {
+        segment.lnavVnavOcs.points.forEach(pushPoint);
+        pushTopBand(segment.lnavVnavOcs.points, segment.lnavVnavOcs.primaryHalfWidthM);
+        pushTopBand(segment.lnavVnavOcs.points, segment.lnavVnavOcs.secondaryHalfWidthM);
+      }
+      (segment.precisionSurfaces ?? []).forEach((surface) => {
+        surface.points.forEach(pushPoint);
+      });
     });
   });
 
@@ -324,6 +348,7 @@ function ProfilePlot({
 
   const xSpan = Math.max(1, domain.maxX - domain.minX);
   const ySpan = Math.max(1, domain.maxY - domain.minY);
+  const plotClipId = `runway-profile-plot-clip-${mode}`;
   const plotX = (value: number) => marginLeft + ((domain.maxX - value) / xSpan) * plotWidth;
   const plotY = (value: number) => marginTop + ((domain.maxY - value) / ySpan) * plotHeight;
   const zeroX = plotX(0);
@@ -385,6 +410,11 @@ function ProfilePlot({
         role="img"
         aria-label={title}
       >
+        <defs>
+          <clipPath id={plotClipId}>
+            <rect x={marginLeft} y={marginTop} width={plotWidth} height={plotHeight} rx={10} />
+          </clipPath>
+        </defs>
         <rect
           x={marginLeft}
           y={marginTop}
@@ -577,6 +607,7 @@ function ProfilePlot({
                 <path
                   d={d}
                   className="runway-profile-route-band"
+                  clipPath={`url(#${plotClipId})`}
                   style={{ strokeWidth: bandWidth }}
                 />
               ) : null}
@@ -597,6 +628,7 @@ function ProfilePlot({
                           <path
                             d={segmentPath}
                             className="runway-profile-assessment-secondary-band"
+                            clipPath={`url(#${plotClipId})`}
                             style={{
                               strokeWidth: Math.max(2, segment.secondaryHalfWidthM * yScale * 2),
                             }}
@@ -605,6 +637,7 @@ function ProfilePlot({
                         <path
                           d={segmentPath}
                           className="runway-profile-assessment-primary-band"
+                          clipPath={`url(#${plotClipId})`}
                           style={{
                             strokeWidth: Math.max(2, segment.primaryHalfWidthM * yScale * 2),
                           }}
@@ -636,6 +669,7 @@ function ProfilePlot({
                                 <path
                                   d={segmentPath}
                                   className="runway-profile-lnav-vnav-ocs-secondary-band"
+                                  clipPath={`url(#${plotClipId})`}
                                   style={{
                                     strokeWidth: Math.max(2, ocs.secondaryHalfWidthM * yScale * 2),
                                   }}
@@ -644,6 +678,7 @@ function ProfilePlot({
                               <path
                                 d={segmentPath}
                                 className="runway-profile-lnav-vnav-ocs-primary-band"
+                                clipPath={`url(#${plotClipId})`}
                                 style={{
                                   strokeWidth: Math.max(2, ocs.primaryHalfWidthM * yScale * 2),
                                 }}
@@ -653,6 +688,7 @@ function ProfilePlot({
                             <path
                               d={segmentPath}
                               className="runway-profile-lnav-vnav-ocs-line"
+                              clipPath={`url(#${plotClipId})`}
                               data-segment-id={segment.segmentId}
                             />
                           )}
@@ -687,6 +723,7 @@ function ProfilePlot({
                             <path
                               d={referencePath}
                               className="runway-profile-final-vertical-reference-band"
+                              clipPath={`url(#${plotClipId})`}
                               style={{
                                 strokeWidth: Math.max(2, reference.halfWidthM * yScale * 2),
                               }}
@@ -700,6 +737,7 @@ function ProfilePlot({
                                 ? "runway-profile-final-vertical-reference-line"
                                 : "runway-profile-final-vertical-reference-plan-line"
                             }
+                            clipPath={`url(#${plotClipId})`}
                             data-segment-id={segment.segmentId}
                           />
                           <text
@@ -762,6 +800,7 @@ function ProfilePlot({
                             <path
                               d={surfacePath}
                               className="runway-profile-precision-surface-line"
+                              clipPath={`url(#${plotClipId})`}
                               data-segment-id={segment.segmentId}
                             />
                             {surfacePoint ? (

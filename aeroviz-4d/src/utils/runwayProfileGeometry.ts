@@ -455,6 +455,7 @@ function maxHalfWidthM(samples: Array<{ halfWidthNm: number }> | undefined): num
 
 const FINAL_VERTICAL_REFERENCE_DEFAULT_HALF_WIDTH_NM = 0.15;
 const FINAL_VERTICAL_REFERENCE_PROTECTION_WIDTH_RATIO = 0.5;
+const MIN_PROFILE_ASSESSMENT_SEGMENT_LENGTH_M = 30;
 
 // Mirrors the 3D procedure layer's GPA reference construction so the embedded 2D
 // profile exposes the same estimated vertical geometry instead of only OCS data.
@@ -524,6 +525,16 @@ function finalVerticalReferenceHalfWidthM(segmentBundle: ProcedureSegmentRenderB
   );
 }
 
+function profilePolylineLengthM(points: RunwayProfilePoint[]): number {
+  let lengthM = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    lengthM += Math.hypot(current.xM - previous.xM, current.yM - previous.yM);
+  }
+  return lengthM;
+}
+
 export function attachRenderBundleAssessmentSegments(
   routes: HorizontalPlateRoute[],
   renderBundles: ProcedureRenderBundle[],
@@ -541,6 +552,12 @@ export function attachRenderBundleAssessmentSegments(
           .map((segmentBundle): HorizontalPlateAssessmentSegment | null => {
             const centerline = segmentBundle.segmentGeometry.centerline;
             if (centerline.geoPositions.length < 2) return null;
+            const points = centerline.geoPositions.map((point) =>
+              projectPositionToRunwayFrame(frame, point.lonDeg, point.latDeg, point.altM),
+            );
+            if (profilePolylineLengthM(points) < MIN_PROFILE_ASSESSMENT_SEGMENT_LENGTH_M) {
+              return null;
+            }
 
             const primaryHalfWidthM =
               maxHalfWidthM(
@@ -607,9 +624,7 @@ export function attachRenderBundleAssessmentSegments(
               segmentId: segmentBundle.segment.segmentId,
               primaryHalfWidthM,
               secondaryHalfWidthM,
-              points: centerline.geoPositions.map((point) =>
-                projectPositionToRunwayFrame(frame, point.lonDeg, point.latDeg, point.altM),
-              ),
+              points,
               finalVerticalReference,
               lnavVnavOcs,
               precisionSurfaces,

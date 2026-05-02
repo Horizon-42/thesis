@@ -910,25 +910,25 @@ body,
 
 .runway-profile-route-band {
   stroke: rgba(34, 211, 238, 0.12);
-  stroke-linecap: round;
+  stroke-linecap: butt;
   stroke-linejoin: round;
 }
 
 .runway-profile-assessment-secondary-band {
   stroke: rgba(125, 211, 252, 0.08);
-  stroke-linecap: round;
+  stroke-linecap: butt;
   stroke-linejoin: round;
 }
 
 .runway-profile-assessment-primary-band {
   stroke: rgba(34, 211, 238, 0.16);
-  stroke-linecap: round;
+  stroke-linecap: butt;
   stroke-linejoin: round;
 }
 
 .runway-profile-final-vertical-reference-band {
   stroke: rgba(250, 204, 21, 0.18);
-  stroke-linecap: round;
+  stroke-linecap: butt;
   stroke-linejoin: round;
 }
 
@@ -950,13 +950,13 @@ body,
 
 .runway-profile-lnav-vnav-ocs-secondary-band {
   stroke: rgba(163, 230, 53, 0.09);
-  stroke-linecap: round;
+  stroke-linecap: butt;
   stroke-linejoin: round;
 }
 
 .runway-profile-lnav-vnav-ocs-primary-band {
   stroke: rgba(163, 230, 53, 0.16);
-  stroke-linecap: round;
+  stroke-linecap: butt;
   stroke-linejoin: round;
 }
 
