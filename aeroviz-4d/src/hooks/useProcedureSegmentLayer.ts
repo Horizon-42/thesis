@@ -30,6 +30,7 @@ import {
   type ProcedureAnnotationStatus,
   type ProcedureEntityAnnotation,
 } from "../data/procedureAnnotations";
+import type { ProcedureProtectionSurface } from "../data/procedureProtectionSurfaces";
 import { isMissingJsonAsset } from "../utils/fetchJson";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import { distanceNm, type GeoPoint } from "../utils/procedureGeoMath";
@@ -581,6 +582,58 @@ function segmentParams(segment: ProcedureSegment, legs: ProcedurePackageLeg[]): 
   ];
 }
 
+function protectionSurfaceIdForMissedSection(segmentId: string, surfaceType: string): string {
+  return `${segmentId}:${surfaceType.toLowerCase()}`;
+}
+
+function findProtectionSurface(
+  branchBundle: BranchGeometryBundle,
+  surfaceId: string | null | undefined,
+): ProcedureProtectionSurface | null {
+  if (!surfaceId) return null;
+  return (branchBundle.protectionSurfaces ?? []).find((surface) => surface.surfaceId === surfaceId) ?? null;
+}
+
+function formatEnumLabel(value: string): string {
+  return value.replace(/_/g, " ");
+}
+
+function formatNmRange(values: number[]): string | null {
+  if (values.length === 0) return null;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  if (Math.abs(max - min) < 1e-6) return `${min.toFixed(2)} NM`;
+  return `${min.toFixed(2)}-${max.toFixed(2)} NM`;
+}
+
+function protectionSurfaceParams(
+  surface: ProcedureProtectionSurface | null,
+): Array<{ label: string; value: string } | null> {
+  if (!surface) return [];
+  return [
+    param("Surface kind", formatEnumLabel(surface.kind)),
+    param("Surface status", formatEnumLabel(surface.status)),
+    param("Lateral rule", surface.lateral.rule),
+    param(
+      "Primary half-width",
+      formatNmRange(surface.lateral.widthSamples.map((sample) => sample.primaryHalfWidthNm)),
+    ),
+    param(
+      "Secondary outer half-width",
+      formatNmRange(
+        surface.lateral.widthSamples
+          .map((sample) => sample.secondaryOuterHalfWidthNm)
+          .filter((value): value is number => typeof value === "number" && Number.isFinite(value)),
+      ),
+    ),
+    param("Vertical kind", formatEnumLabel(surface.vertical.kind)),
+    param("Vertical origin", formatEnumLabel(surface.vertical.origin)),
+    param("Climb gradient", surface.vertical.slopeFtPerNm === undefined
+      ? null
+      : `${surface.vertical.slopeFtPerNm} ft/NM`),
+  ];
+}
+
 function addAnnotationLabel(
   viewer: Cesium.Viewer,
   annotation: ProcedureEntityAnnotation,
@@ -1073,6 +1126,7 @@ function addSegmentEntities(
   });
 
   if (segmentBundle.finalOea) {
+    const protectionSurface = findProtectionSurface(branchBundle, segmentBundle.finalOea.geometryId);
     const oeaPrimaryId = `${baseId}-oea-primary`;
     const oeaAnnotation = annotationBase({
       entityId: oeaPrimaryId,
@@ -1084,7 +1138,10 @@ function addSegmentEntities(
       branchBundle,
       segment: segmentBundle.segment,
       legs: segmentBundle.legs,
-      parameters: segmentParams(segmentBundle.segment, segmentBundle.legs),
+      parameters: [
+        ...segmentParams(segmentBundle.segment, segmentBundle.legs),
+        ...protectionSurfaceParams(protectionSurface),
+      ],
       diagnostics: segmentDiagnostics,
     });
     addRibbonPolygon(
@@ -1126,6 +1183,7 @@ function addSegmentEntities(
   }
 
   if (segmentBundle.lnavVnavOcs) {
+    const protectionSurface = findProtectionSurface(branchBundle, segmentBundle.lnavVnavOcs.geometryId);
     const ocsPrimaryId = `${baseId}-lnav-vnav-ocs-primary`;
     const ocsAnnotation = annotationBase({
       entityId: ocsPrimaryId,
@@ -1142,6 +1200,7 @@ function addSegmentEntities(
         param("GPA", `${segmentBundle.lnavVnavOcs.verticalProfile.gpaDeg} deg`),
         param("TCH", `${segmentBundle.lnavVnavOcs.verticalProfile.tchFt} ft`),
         param("Status", segmentBundle.lnavVnavOcs.constructionStatus),
+        ...protectionSurfaceParams(protectionSurface),
       ],
       diagnostics: segmentDiagnostics,
     });
@@ -1218,6 +1277,7 @@ function addSegmentEntities(
   }
 
   segmentBundle.precisionFinalSurfaces.forEach((surface) => {
+    const protectionSurface = findProtectionSurface(branchBundle, surface.geometryId);
     const surfaceId = `${baseId}-precision-${surface.surfaceType.toLowerCase().replace(/_/g, "-")}`;
     const surfaceAnnotation = annotationBase({
       entityId: surfaceId,
@@ -1234,6 +1294,7 @@ function addSegmentEntities(
         param("GPA", `${surface.verticalProfile.gpaDeg} deg`),
         param("TCH", `${surface.verticalProfile.tchFt} ft`),
         param("Status", surface.constructionStatus),
+        ...protectionSurfaceParams(protectionSurface),
       ],
       diagnostics: [...segmentDiagnostics, ...surface.notes],
     });
@@ -1380,6 +1441,13 @@ function addSegmentEntities(
   }
 
   if (segmentBundle.missedSectionSurface) {
+    const protectionSurface = findProtectionSurface(
+      branchBundle,
+      protectionSurfaceIdForMissedSection(
+        segmentBundle.missedSectionSurface.segmentId,
+        segmentBundle.missedSectionSurface.surfaceType,
+      ),
+    );
     const isEstimatedCaSurface =
       segmentBundle.missedSectionSurface.constructionStatus === "ESTIMATED_CA";
     const missedSurfaceColor = isEstimatedCaSurface
@@ -1402,6 +1470,7 @@ function addSegmentEntities(
       parameters: [
         param("Surface", segmentBundle.missedSectionSurface.surfaceType),
         param("Status", segmentBundle.missedSectionSurface.constructionStatus),
+        ...protectionSurfaceParams(protectionSurface),
       ],
       diagnostics: segmentDiagnostics,
     });
@@ -1863,6 +1932,7 @@ function addBranchMissedConnectorSurfaceEntities(
 ): string[] {
   const ids: string[] = [];
   (branchBundle.missedConnectorSurfaces ?? []).forEach((surface, index) => {
+    const protectionSurface = findProtectionSurface(branchBundle, surface.surfaceId);
     const baseId = `${PROCEDURE_SEGMENT_ENTITY_PREFIX}${bundle.packageId}-${branchBundle.branchId}-missed-connector-surface-${index}`;
     const primaryId = `${baseId}-primary`;
     const annotation = annotationBase({
@@ -1881,6 +1951,7 @@ function addBranchMissedConnectorSurfaceEntities(
         param("Surface status", surface.constructionStatus),
         param("Vertical", surface.verticalProfile.constructionStatus),
         param("Geometry meaning", "Estimated connector surface; not certified TERPS construction"),
+        ...protectionSurfaceParams(protectionSurface),
       ],
       diagnostics: surface.notes,
     });

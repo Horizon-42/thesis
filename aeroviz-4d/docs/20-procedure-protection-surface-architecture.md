@@ -237,15 +237,17 @@ Implemented first adapter step:
   - missed connector surfaces.
 - Existing legacy fields remain in place so current rendering and assessment
   logic do not change behavior during migration.
+- Cesium annotations now read unified surface kind/status, lateral rule,
+  primary/secondary width samples, and vertical origin from the adapter when a
+  rendered surface has a matching `surfaceId`.
 
 Remaining Phase 2 work:
 
-1. Update annotations to read lateral/vertical status from the unified model.
-2. Move renderer surface iteration to `protectionSurfaces` once parity tests are
+1. Move renderer surface iteration to `protectionSurfaces` once parity tests are
    in place.
-3. Use the same list in runway-profile assessment instead of re-reading legacy
+2. Use the same list in runway-profile assessment instead of re-reading legacy
    final/missed fields independently.
-4. Remove duplicate legacy fields only after rendering and assessment are fully
+3. Remove duplicate legacy fields only after rendering and assessment are fully
    migrated.
 
 ### Phase 3 - Profile Aid Cleanup

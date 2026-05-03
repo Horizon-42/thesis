@@ -278,6 +278,56 @@ const renderBundleData = {
               notes: ["Connector surface test note."],
             },
           ],
+          protectionSurfaces: [
+            {
+              surfaceId: "segment:final:lnav-vnav-ocs",
+              kind: "FINAL_LNAV_VNAV_OCS",
+              status: "TERPS_ESTIMATE",
+              lateral: {
+                widthSamples: [
+                  { stationNm: 0, primaryHalfWidthNm: 0.6, secondaryOuterHalfWidthNm: 0.9 },
+                  { stationNm: 3, primaryHalfWidthNm: 0.6, secondaryOuterHalfWidthNm: 0.9 },
+                ],
+                rule: "LNAV/VNAV test lateral rule",
+              },
+              vertical: {
+                kind: "OCS",
+                origin: "GPA_TCH",
+              },
+            },
+            {
+              surfaceId: "segment:final:missed_section1_envelope",
+              kind: "MISSED_SECTION_1",
+              status: "DISPLAY_ESTIMATE",
+              lateral: {
+                widthSamples: [
+                  { stationNm: 0, primaryHalfWidthNm: 2, secondaryOuterHalfWidthNm: 3 },
+                  { stationNm: 1, primaryHalfWidthNm: 2, secondaryOuterHalfWidthNm: 3 },
+                ],
+                rule: "CA estimated missed lateral rule",
+              },
+              vertical: {
+                kind: "OCS",
+                origin: "CENTERLINE_ALTITUDE_ONLY",
+              },
+            },
+            {
+              surfaceId: "segment:final:ca-mahf-connector-surface:leg:missed:ca",
+              kind: "MISSED_CONNECTOR",
+              status: "DISPLAY_ESTIMATE",
+              lateral: {
+                widthSamples: [
+                  { stationNm: 0, primaryHalfWidthNm: 2, secondaryOuterHalfWidthNm: 3 },
+                  { stationNm: 5.5, primaryHalfWidthNm: 2, secondaryOuterHalfWidthNm: 3 },
+                ],
+                rule: "Estimated CA endpoint to MAHF/HOLD connector using constant terminal missed width.",
+              },
+              vertical: {
+                kind: "ALTITUDE_PROFILE",
+                origin: "ESTIMATED_CLIMB",
+              },
+            },
+          ],
           segmentBundles: [
             {
               segment: {
@@ -750,7 +800,17 @@ describe("useProcedureSegmentLayer", () => {
         (entity) =>
           String(entity.id).includes("-missed-surface-primary") &&
           String(entity.name).includes("CA estimated missed section primary") &&
-          entity.polygon.material.name === "ORANGE",
+          entity.polygon.material.name === "ORANGE" &&
+          entity.__aeroVizProcedureAnnotation?.parameters.some(
+            (parameter: { label: string; value: string }) =>
+              parameter.label === "Primary half-width" &&
+              parameter.value === "2.00 NM",
+          ) &&
+          entity.__aeroVizProcedureAnnotation?.parameters.some(
+            (parameter: { label: string; value: string }) =>
+              parameter.label === "Vertical origin" &&
+              parameter.value === "CENTERLINE ALTITUDE ONLY",
+          ),
       ),
     ).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-ca-course-guide-"))).toBe(true);
@@ -762,7 +822,12 @@ describe("useProcedureSegmentLayer", () => {
         (entity) =>
           String(entity.id).includes("-missed-connector-surface-") &&
           entity.__aeroVizProcedureAnnotation?.kind === "MISSED_CONNECTOR_SURFACE" &&
-          entity.polygon.material.name === "ORANGE",
+          entity.polygon.material.name === "ORANGE" &&
+          entity.__aeroVizProcedureAnnotation?.parameters.some(
+            (parameter: { label: string; value: string }) =>
+              parameter.label === "Lateral rule" &&
+              parameter.value.includes("constant terminal missed width"),
+          ),
       ),
     ).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-ca-mahf-connector-"))).toBe(true);
