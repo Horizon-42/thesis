@@ -52,6 +52,7 @@ export type LayerKey =
   | "ocsSurfaces"
   | "trajectories"
   | "obstacles"
+  | "obstacleLabels"
   | "procedures";
 
 export type RunwayProfileViewMode = "split" | "side-xz" | "top-xy";
@@ -145,6 +146,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     ocsSurfaces: false,
     trajectories: true,
     obstacles: true,
+    obstacleLabels: false,
     procedures: true,
   });
 

@@ -32,6 +32,7 @@ const LAYER_LABELS: Record<LayerKey, string> = {
   ocsSurfaces:  "Legacy FAF OCS Debug",
   trajectories: "Trajectories",
   obstacles:    "Obstacles",
+  obstacleLabels: "Obstacle Labels",
   procedures:   "RNAV Procedures",
 };
 
@@ -41,6 +42,7 @@ const ACTIVE_LAYER_KEYS: LayerKey[] = [
   "runways",
   "trajectories",
   "obstacles",
+  "obstacleLabels",
   "procedures",
   "ocsSurfaces",
 ];
@@ -147,7 +149,10 @@ export default function ControlPanel() {
       <section>
         <h4>Layers</h4>
         {ACTIVE_LAYER_KEYS.map((key) => (
-          <label key={key}>
+          <label
+            key={key}
+            className={key === "obstacleLabels" ? "control-panel-layer-toggle-dependent" : undefined}
+          >
             <input
               type="checkbox"
               checked={layers[key]}

@@ -263,6 +263,12 @@ body,
   cursor: pointer;
 }
 
+.control-panel-layer-toggle-dependent {
+  margin-left: 18px;
+  color: #aebbd0;
+  font-size: 12px;
+}
+
 .control-panel-airport-selector {
   display: grid;
   gap: 4px;

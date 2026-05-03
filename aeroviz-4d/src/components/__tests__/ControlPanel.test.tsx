@@ -18,6 +18,7 @@ vi.mock("../../context/AppContext", () => ({
       ocsSurfaces: true,
       trajectories: true,
       obstacles: true,
+      obstacleLabels: false,
       procedures: true,
     },
     toggleLayer,
@@ -43,5 +44,16 @@ describe("ControlPanel", () => {
     });
 
     expect(setActiveAirportCode).toHaveBeenCalledWith("CYVR");
+  });
+
+  it("toggles obstacle labels independently", () => {
+    render(<ControlPanel />);
+
+    const checkbox = screen.getByLabelText("Obstacle Labels") as HTMLInputElement;
+    expect(checkbox.checked).toBe(false);
+
+    fireEvent.click(checkbox);
+
+    expect(toggleLayer).toHaveBeenCalledWith("obstacleLabels");
   });
 });
