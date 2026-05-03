@@ -643,6 +643,24 @@ describe("procedure render bundle", () => {
     expect(segmentBundle.alignedConnector?.connectorType).toBe(
       "ALIGNED_LNAV_INTERMEDIATE_TO_FINAL",
     );
+    expect(bundle.branchBundles[0].protectionSurfaces).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          surfaceId: "segment:final:lnav-oea",
+          kind: "FINAL_LNAV_OEA",
+          status: "SOURCE_BACKED",
+          vertical: expect.objectContaining({ kind: "NONE" }),
+          lateral: expect.objectContaining({
+            widthSamples: expect.arrayContaining([
+              expect.objectContaining({
+                primaryHalfWidthNm: expect.any(Number),
+                secondaryOuterHalfWidthNm: expect.any(Number),
+              }),
+            ]),
+          }),
+        }),
+      ]),
+    );
     expect(bundle.branchBundles[0].turnJunctions).toEqual([]);
     expect(bundle.diagnostics).toEqual([]);
   });
@@ -714,6 +732,22 @@ describe("procedure render bundle", () => {
       missingSurfaceTypes: [],
       constructionStatus: "MODE_SPECIFIC_SURFACES_CONSTRUCTED",
     });
+    expect(bundle.branchBundles[0].protectionSurfaces).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          surfaceId: "segment:final:lnav-vnav-ocs",
+          kind: "FINAL_LNAV_VNAV_OCS",
+          status: "TERPS_ESTIMATE",
+          vertical: expect.objectContaining({
+            kind: "OCS",
+            origin: "GPA_TCH",
+            samples: expect.arrayContaining([
+              expect.objectContaining({ altitudeFtMsl: expect.any(Number) }),
+            ]),
+          }),
+        }),
+      ]),
+    );
     expect(bundle.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain(
       "FINAL_VERTICAL_SURFACE_UNIMPLEMENTED",
     );
@@ -747,6 +781,15 @@ describe("procedure render bundle", () => {
       "segment:final:lpv-x",
       "segment:final:lpv-y",
     ]);
+    expect(bundle.branchBundles[0].protectionSurfaces).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          surfaceId: "segment:final:lpv-w",
+          kind: "FINAL_PRECISION_DEBUG",
+          status: "DEBUG_ESTIMATE",
+        }),
+      ]),
+    );
     expect(segmentBundle.finalSurfaceStatus).toMatchObject({
       constructedSurfaceTypes: ["LNAV_FINAL_OEA", "LPV_W", "LPV_X", "LPV_Y"],
       missingSurfaceTypes: [],
@@ -996,6 +1039,28 @@ describe("procedure render bundle", () => {
       primary: expect.any(Object),
       secondaryOuter: expect.any(Object),
     });
+    expect(bundle.branchBundles[0].protectionSurfaces).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "MISSED_SECTION_1",
+          status: "DISPLAY_ESTIMATE",
+          sourceLegIds: ["leg:R:035", "leg:R:040"],
+          vertical: expect.objectContaining({
+            kind: "OCS",
+            origin: "CENTERLINE_ALTITUDE_ONLY",
+          }),
+        }),
+        expect.objectContaining({
+          kind: "MISSED_CONNECTOR",
+          status: "DISPLAY_ESTIMATE",
+          sourceLegIds: ["leg:R:035"],
+          lateral: expect.objectContaining({
+            rule: expect.stringContaining("CA endpoint to MAHF"),
+            notes: expect.arrayContaining([expect.stringContaining("Target fix HOLD")]),
+          }),
+        }),
+      ]),
+    );
     expect(bundle.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

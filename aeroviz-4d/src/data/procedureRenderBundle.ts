@@ -12,6 +12,10 @@ import {
   procedureDetailsIndexUrl,
 } from "./procedureDetails";
 import { normalizeProcedurePackage } from "./procedurePackageAdapter";
+import {
+  buildBranchProtectionSurfaces,
+  type ProcedureProtectionSurface,
+} from "./procedureProtectionSurfaces";
 import { fetchJson } from "../utils/fetchJson";
 import {
   DEFAULT_GEOMETRY_BUILD_CONTEXT,
@@ -82,6 +86,7 @@ export interface BranchGeometryBundle {
   turnJunctions: InterSegmentTurnJunctionGeometry[];
   missedCaMahfConnectors: MissedCaMahfConnectorGeometry[];
   missedConnectorSurfaces: MissedConnectorSurfaceGeometry[];
+  protectionSurfaces: ProcedureProtectionSurface[];
 }
 
 export interface ProcedureSegmentRenderBundle {
@@ -298,6 +303,10 @@ export function buildProcedureRenderBundle(
       segmentsById,
       { samplingStepNm: ctx.samplingStepNm },
     );
+    const protectionSurfaces = buildBranchProtectionSurfaces({
+      segmentBundles,
+      missedConnectorSurfaces,
+    });
 
     return {
       branchId: branch.branchId,
@@ -308,6 +317,7 @@ export function buildProcedureRenderBundle(
       turnJunctions: branchTurnResult.turnJunctions,
       missedCaMahfConnectors,
       missedConnectorSurfaces,
+      protectionSurfaces,
     };
   });
 

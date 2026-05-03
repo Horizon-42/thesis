@@ -224,11 +224,29 @@ Already implemented before this design page:
 
 ### Phase 2 - Protection Surface Adapter
 
-1. Introduce `ProcedureProtectionSurface` types.
-2. Add an adapter that maps final OEA, LNAV/VNAV OCS, missed section surfaces,
-   and missed connector surfaces into the unified list.
-3. Update annotations to read lateral/vertical status from the unified model.
-4. Keep old fields until rendering and tests are fully migrated.
+Implemented first adapter step:
+
+- `ProcedureProtectionSurface` types now exist in
+  `src/data/procedureProtectionSurfaces.ts`.
+- Each branch render bundle exposes `protectionSurfaces`.
+- The adapter maps:
+  - final LNAV OEA;
+  - LNAV/VNAV OCS;
+  - LPV/GLS W/X/Y debug-estimate surfaces;
+  - missed section surfaces;
+  - missed connector surfaces.
+- Existing legacy fields remain in place so current rendering and assessment
+  logic do not change behavior during migration.
+
+Remaining Phase 2 work:
+
+1. Update annotations to read lateral/vertical status from the unified model.
+2. Move renderer surface iteration to `protectionSurfaces` once parity tests are
+   in place.
+3. Use the same list in runway-profile assessment instead of re-reading legacy
+   final/missed fields independently.
+4. Remove duplicate legacy fields only after rendering and assessment are fully
+   migrated.
 
 ### Phase 3 - Profile Aid Cleanup
 
