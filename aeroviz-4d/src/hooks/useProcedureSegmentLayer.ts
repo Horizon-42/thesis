@@ -634,6 +634,53 @@ function protectionSurfaceParams(
   ];
 }
 
+function protectionSurfaceAnnotationStatus(
+  surface: ProcedureProtectionSurface,
+): ProcedureAnnotationStatus {
+  if (surface.status === "SOURCE_BACKED") return "SOURCE_BACKED";
+  if (surface.status === "DEBUG_ESTIMATE") return "DEBUG_ESTIMATE";
+  if (surface.status === "MISSING_SOURCE") return "MISSING_SOURCE";
+  return "ESTIMATED";
+}
+
+function segmentBundleForSurface(
+  branchBundle: BranchGeometryBundle,
+  surface: ProcedureProtectionSurface,
+): ProcedureSegmentRenderBundle | null {
+  return branchBundle.segmentBundles.find(
+    (segmentBundle) => segmentBundle.segment.segmentId === surface.segmentId,
+  ) ?? null;
+}
+
+function segmentBaseEntityId(
+  bundle: ProcedureRenderBundle,
+  segmentId: string,
+): string {
+  return `${PROCEDURE_SEGMENT_ENTITY_PREFIX}${bundle.packageId}-${segmentId}`;
+}
+
+function diagnosticsForProtectionSurface(
+  surface: ProcedureProtectionSurface,
+  segmentBundle: ProcedureSegmentRenderBundle | null,
+): string[] {
+  const surfaceDiagnostics = (surface.diagnostics ?? []).map((diagnostic) => diagnostic.message);
+  if (surfaceDiagnostics.length > 0) return surfaceDiagnostics;
+  return segmentBundle?.diagnostics.map((diagnostic) => diagnostic.message) ?? [];
+}
+
+function surfaceSegmentParams(
+  segmentBundle: ProcedureSegmentRenderBundle | null,
+): Array<{ label: string; value: string } | null> {
+  return segmentBundle
+    ? segmentParams(segmentBundle.segment, segmentBundle.legs)
+    : [];
+}
+
+function precisionSurfaceLabel(surface: ProcedureProtectionSurface): string {
+  const suffix = surface.surfaceId.slice(surface.segmentId.length + 1);
+  return suffix.replace(/-/g, " ").toUpperCase();
+}
+
 function addAnnotationLabel(
   viewer: Cesium.Viewer,
   annotation: ProcedureEntityAnnotation,
@@ -834,6 +881,7 @@ function addSegmentEntities(
   const centerlineEstimated = segmentBundle.segmentGeometry.diagnostics.some(
     (diagnostic) => diagnostic.code === "ESTIMATED_CA_GEOMETRY",
   );
+  const hasUnifiedSurfaces = (branchBundle.protectionSurfaces ?? []).length > 0;
 
   const centerlineId = `${baseId}-centerline`;
   const centerlineAnnotation = annotationBase({
@@ -1125,7 +1173,7 @@ function addSegmentEntities(
     }
   });
 
-  if (segmentBundle.finalOea) {
+  if (!hasUnifiedSurfaces && segmentBundle.finalOea) {
     const protectionSurface = findProtectionSurface(branchBundle, segmentBundle.finalOea.geometryId);
     const oeaPrimaryId = `${baseId}-oea-primary`;
     const oeaAnnotation = annotationBase({
@@ -1182,7 +1230,7 @@ function addSegmentEntities(
     ids.push(oeaSecondaryId);
   }
 
-  if (segmentBundle.lnavVnavOcs) {
+  if (!hasUnifiedSurfaces && segmentBundle.lnavVnavOcs) {
     const protectionSurface = findProtectionSurface(branchBundle, segmentBundle.lnavVnavOcs.geometryId);
     const ocsPrimaryId = `${baseId}-lnav-vnav-ocs-primary`;
     const ocsAnnotation = annotationBase({
@@ -1276,47 +1324,49 @@ function addSegmentEntities(
     );
   }
 
-  segmentBundle.precisionFinalSurfaces.forEach((surface) => {
-    const protectionSurface = findProtectionSurface(branchBundle, surface.geometryId);
-    const surfaceId = `${baseId}-precision-${surface.surfaceType.toLowerCase().replace(/_/g, "-")}`;
-    const surfaceAnnotation = annotationBase({
-      entityId: surfaceId,
-      label: `${surface.surfaceType.replace(/_/g, " ")} estimate`,
-      title: `${segmentName} ${surface.surfaceType} debug estimate`,
-      kind: "PRECISION_SURFACE",
-      status: "DEBUG_ESTIMATE",
-      bundle,
-      branchBundle,
-      segment: segmentBundle.segment,
-      legs: segmentBundle.legs,
-      parameters: [
-        param("Surface", surface.surfaceType),
-        param("GPA", `${surface.verticalProfile.gpaDeg} deg`),
-        param("TCH", `${surface.verticalProfile.tchFt} ft`),
-        param("Status", surface.constructionStatus),
-        ...protectionSurfaceParams(protectionSurface),
-      ],
-      diagnostics: [...segmentDiagnostics, ...surface.notes],
+  if (!hasUnifiedSurfaces) {
+    segmentBundle.precisionFinalSurfaces.forEach((surface) => {
+      const protectionSurface = findProtectionSurface(branchBundle, surface.geometryId);
+      const surfaceId = `${baseId}-precision-${surface.surfaceType.toLowerCase().replace(/_/g, "-")}`;
+      const surfaceAnnotation = annotationBase({
+        entityId: surfaceId,
+        label: `${surface.surfaceType.replace(/_/g, " ")} estimate`,
+        title: `${segmentName} ${surface.surfaceType} debug estimate`,
+        kind: "PRECISION_SURFACE",
+        status: "DEBUG_ESTIMATE",
+        bundle,
+        branchBundle,
+        segment: segmentBundle.segment,
+        legs: segmentBundle.legs,
+        parameters: [
+          param("Surface", surface.surfaceType),
+          param("GPA", `${surface.verticalProfile.gpaDeg} deg`),
+          param("TCH", `${surface.verticalProfile.tchFt} ft`),
+          param("Status", surface.constructionStatus),
+          ...protectionSurfaceParams(protectionSurface),
+        ],
+        diagnostics: [...segmentDiagnostics, ...surface.notes],
+      });
+      addRibbonPolygon(
+        viewer,
+        surfaceId,
+        `${segmentName} ${surface.surfaceType} debug estimate`,
+        surface.ribbon,
+        procedureEntityShow(visible, surfaceAnnotation, displayLevel),
+        PRECISION_FINAL_SURFACE_COLOR,
+        PRECISION_FINAL_SURFACE_HEIGHT_OFFSET_M,
+        surfaceAnnotation,
+      );
+      ids.push(surfaceId);
+      const surfaceLabelId = addAnnotationLabel(
+        viewer,
+        surfaceAnnotation,
+        representativePoint(surface.centerline.geoPositions),
+        procedureEntityShow(visible, surfaceAnnotation, displayLevel, true, annotationVisible),
+      );
+      if (surfaceLabelId) ids.push(surfaceLabelId);
     });
-    addRibbonPolygon(
-      viewer,
-      surfaceId,
-      `${segmentName} ${surface.surfaceType} debug estimate`,
-      surface.ribbon,
-      procedureEntityShow(visible, surfaceAnnotation, displayLevel),
-      PRECISION_FINAL_SURFACE_COLOR,
-      PRECISION_FINAL_SURFACE_HEIGHT_OFFSET_M,
-      surfaceAnnotation,
-    );
-    ids.push(surfaceId);
-    const surfaceLabelId = addAnnotationLabel(
-      viewer,
-      surfaceAnnotation,
-      representativePoint(surface.centerline.geoPositions),
-      procedureEntityShow(visible, surfaceAnnotation, displayLevel, true, annotationVisible),
-    );
-    if (surfaceLabelId) ids.push(surfaceLabelId);
-  });
+  }
 
   if (
     segmentBundle.finalSurfaceStatus &&
@@ -1440,7 +1490,7 @@ function addSegmentEntities(
     );
   }
 
-  if (segmentBundle.missedSectionSurface) {
+  if (!hasUnifiedSurfaces && segmentBundle.missedSectionSurface) {
     const protectionSurface = findProtectionSurface(
       branchBundle,
       protectionSurfaceIdForMissedSection(
@@ -1795,6 +1845,350 @@ function addBranchTurnJunctionEntities(
   return ids;
 }
 
+function addBranchProtectionSurfaceEntities(
+  viewer: Cesium.Viewer,
+  bundle: ProcedureRenderBundle,
+  branchBundle: BranchGeometryBundle,
+  visible: boolean,
+  annotationVisible: boolean,
+  displayLevel: ProcedureDisplayLevel,
+): string[] {
+  const ids: string[] = [];
+  const protectionSurfaces = branchBundle.protectionSurfaces ?? [];
+  const missedConnectorSurfaces = protectionSurfaces.filter(
+    (surface) => surface.kind === "MISSED_CONNECTOR",
+  );
+
+  protectionSurfaces.forEach((surface) => {
+    const segmentBundle = segmentBundleForSurface(branchBundle, surface);
+    const baseId = segmentBaseEntityId(bundle, surface.segmentId);
+    const segmentName = `${bundle.procedureName} ${segmentBundle?.segment.segmentType ?? surface.kind}`;
+    const diagnostics = diagnosticsForProtectionSurface(surface, segmentBundle);
+    const status = protectionSurfaceAnnotationStatus(surface);
+    const commonParameters = [
+      ...surfaceSegmentParams(segmentBundle),
+      ...protectionSurfaceParams(surface),
+    ];
+
+    if (surface.kind === "FINAL_LNAV_OEA") {
+      const primaryId = `${baseId}-oea-primary`;
+      const annotation = annotationBase({
+        entityId: primaryId,
+        label: "LNAV OEA",
+        title: `${segmentName} LNAV OEA primary`,
+        kind: "FINAL_OEA",
+        status,
+        bundle,
+        branchBundle,
+        segment: segmentBundle?.segment,
+        legs: segmentBundle?.legs,
+        parameters: commonParameters,
+        diagnostics,
+      });
+      addRibbonPolygon(
+        viewer,
+        primaryId,
+        `${segmentName} LNAV OEA primary`,
+        surface.lateral.primary,
+        procedureEntityShow(visible, annotation, displayLevel),
+        PRIMARY_COLOR,
+        OEA_HEIGHT_OFFSET_M,
+        annotation,
+      );
+      ids.push(primaryId);
+      const labelId = addAnnotationLabel(
+        viewer,
+        annotation,
+        representativePoint(surface.lateral.primary.leftGeoBoundary),
+        procedureEntityShow(visible, annotation, displayLevel, true, annotationVisible),
+      );
+      if (labelId) ids.push(labelId);
+
+      if (surface.lateral.secondaryOuter) {
+        const secondaryId = `${baseId}-oea-secondary`;
+        const secondaryAnnotation = {
+          ...annotation,
+          entityId: secondaryId,
+          title: `${segmentName} LNAV OEA secondary`,
+        };
+        addRibbonPolygon(
+          viewer,
+          secondaryId,
+          `${segmentName} LNAV OEA secondary`,
+          surface.lateral.secondaryOuter,
+          procedureEntityShow(visible, secondaryAnnotation, displayLevel),
+          SECONDARY_COLOR,
+          OEA_HEIGHT_OFFSET_M,
+          secondaryAnnotation,
+        );
+        ids.push(secondaryId);
+      }
+      return;
+    }
+
+    if (surface.kind === "FINAL_LNAV_VNAV_OCS") {
+      const primaryId = `${baseId}-lnav-vnav-ocs-primary`;
+      const annotation = annotationBase({
+        entityId: primaryId,
+        label: "LNAV/VNAV OCS",
+        title: `${segmentName} LNAV/VNAV OCS primary`,
+        kind: "LNAV_VNAV_OCS",
+        status,
+        bundle,
+        branchBundle,
+        segment: segmentBundle?.segment,
+        legs: segmentBundle?.legs,
+        parameters: commonParameters,
+        diagnostics,
+      });
+      addRibbonPolygon(
+        viewer,
+        primaryId,
+        `${segmentName} LNAV/VNAV OCS primary`,
+        surface.lateral.primary,
+        procedureEntityShow(visible, annotation, displayLevel),
+        LNAV_VNAV_OCS_PRIMARY_COLOR,
+        LNAV_VNAV_OCS_HEIGHT_OFFSET_M,
+        annotation,
+      );
+      ids.push(primaryId);
+      ids.push(
+        ...addRibbonBoundaryPolylines(
+          viewer,
+          `${baseId}-lnav-vnav-ocs-primary-boundary`,
+          `${segmentName} LNAV/VNAV OCS primary`,
+          surface.lateral.primary,
+          procedureEntityShow(visible, annotation, displayLevel),
+          LNAV_VNAV_OCS_EDGE_COLOR,
+          LNAV_VNAV_OCS_EDGE_HEIGHT_OFFSET_M,
+          annotation,
+        ),
+        ...addRibbonCrossRibs(
+          viewer,
+          `${baseId}-lnav-vnav-ocs-primary`,
+          `${segmentName} LNAV/VNAV OCS primary`,
+          surface.lateral.primary,
+          procedureEntityShow(visible, annotation, displayLevel),
+          LNAV_VNAV_OCS_RIB_COLOR,
+          LNAV_VNAV_OCS_RIB_HEIGHT_OFFSET_M,
+          annotation,
+        ),
+      );
+      const labelId = addAnnotationLabel(
+        viewer,
+        annotation,
+        representativePoint(surface.centerline.geoPositions),
+        procedureEntityShow(visible, annotation, displayLevel, true, annotationVisible),
+      );
+      if (labelId) ids.push(labelId);
+
+      if (surface.lateral.secondaryOuter) {
+        const secondaryId = `${baseId}-lnav-vnav-ocs-secondary`;
+        const secondaryAnnotation = {
+          ...annotation,
+          entityId: secondaryId,
+          title: `${segmentName} LNAV/VNAV OCS secondary`,
+        };
+        addRibbonPolygon(
+          viewer,
+          secondaryId,
+          `${segmentName} LNAV/VNAV OCS secondary`,
+          surface.lateral.secondaryOuter,
+          procedureEntityShow(visible, secondaryAnnotation, displayLevel),
+          LNAV_VNAV_OCS_SECONDARY_COLOR,
+          LNAV_VNAV_OCS_HEIGHT_OFFSET_M,
+          secondaryAnnotation,
+        );
+        ids.push(secondaryId);
+        ids.push(
+          ...addRibbonBoundaryPolylines(
+            viewer,
+            `${baseId}-lnav-vnav-ocs-secondary-boundary`,
+            `${segmentName} LNAV/VNAV OCS secondary`,
+            surface.lateral.secondaryOuter,
+            procedureEntityShow(visible, secondaryAnnotation, displayLevel),
+            LNAV_VNAV_OCS_SECONDARY_EDGE_COLOR,
+            LNAV_VNAV_OCS_EDGE_HEIGHT_OFFSET_M,
+            secondaryAnnotation,
+          ),
+        );
+      }
+      return;
+    }
+
+    if (surface.kind === "FINAL_PRECISION_DEBUG") {
+      const label = precisionSurfaceLabel(surface);
+      const surfaceId = `${baseId}-precision-${surface.surfaceId.slice(surface.segmentId.length + 1)}`;
+      const annotation = annotationBase({
+        entityId: surfaceId,
+        label: `${label} estimate`,
+        title: `${segmentName} ${label} debug estimate`,
+        kind: "PRECISION_SURFACE",
+        status,
+        bundle,
+        branchBundle,
+        segment: segmentBundle?.segment,
+        legs: segmentBundle?.legs,
+        parameters: commonParameters,
+        diagnostics,
+      });
+      addRibbonPolygon(
+        viewer,
+        surfaceId,
+        `${segmentName} ${label} debug estimate`,
+        surface.lateral.primary,
+        procedureEntityShow(visible, annotation, displayLevel),
+        PRECISION_FINAL_SURFACE_COLOR,
+        PRECISION_FINAL_SURFACE_HEIGHT_OFFSET_M,
+        annotation,
+      );
+      ids.push(surfaceId);
+      const labelId = addAnnotationLabel(
+        viewer,
+        annotation,
+        representativePoint(surface.centerline.geoPositions),
+        procedureEntityShow(visible, annotation, displayLevel, true, annotationVisible),
+      );
+      if (labelId) ids.push(labelId);
+      return;
+    }
+
+    if (surface.kind === "MISSED_SECTION_1" || surface.kind === "MISSED_SECTION_2_STRAIGHT") {
+      const estimated = surface.status !== "SOURCE_BACKED";
+      const color = estimated ? MISSED_CA_ESTIMATED_SURFACE_COLOR : MISSED_SURFACE_COLOR;
+      const name = estimated
+        ? `${segmentName} CA estimated missed section`
+        : `${segmentName} missed section`;
+      const primaryId = `${baseId}-missed-surface-primary`;
+      const annotation = annotationBase({
+        entityId: primaryId,
+        label: estimated ? "Missed CA estimate" : "Missed surface",
+        title: `${name} primary`,
+        kind: "MISSED_SURFACE",
+        status,
+        bundle,
+        branchBundle,
+        segment: segmentBundle?.segment,
+        legs: segmentBundle?.legs,
+        parameters: commonParameters,
+        diagnostics,
+      });
+      addRibbonPolygon(
+        viewer,
+        primaryId,
+        `${name} primary`,
+        surface.lateral.primary,
+        procedureEntityShow(visible, annotation, displayLevel),
+        color,
+        MISSED_SURFACE_HEIGHT_OFFSET_M,
+        annotation,
+      );
+      ids.push(primaryId);
+      const labelId = addAnnotationLabel(
+        viewer,
+        annotation,
+        representativePoint(surface.lateral.primary.leftGeoBoundary),
+        procedureEntityShow(visible, annotation, displayLevel, true, annotationVisible),
+      );
+      if (labelId) ids.push(labelId);
+
+      if (surface.lateral.secondaryOuter) {
+        const secondaryId = `${baseId}-missed-surface-secondary`;
+        const secondaryAnnotation = {
+          ...annotation,
+          entityId: secondaryId,
+          title: `${name} secondary`,
+        };
+        addRibbonPolygon(
+          viewer,
+          secondaryId,
+          `${name} secondary`,
+          surface.lateral.secondaryOuter,
+          procedureEntityShow(visible, secondaryAnnotation, displayLevel),
+          color,
+          MISSED_SURFACE_HEIGHT_OFFSET_M,
+          secondaryAnnotation,
+        );
+        ids.push(secondaryId);
+      }
+      return;
+    }
+
+    if (surface.kind === "MISSED_CONNECTOR") {
+      const connectorIndex = missedConnectorSurfaces.findIndex(
+        (candidate) => candidate.surfaceId === surface.surfaceId,
+      );
+      const index = connectorIndex < 0 ? 0 : connectorIndex;
+      const baseConnectorId = `${PROCEDURE_SEGMENT_ENTITY_PREFIX}${bundle.packageId}-${branchBundle.branchId}-missed-connector-surface-${index}`;
+      const connector = branchBundle.missedConnectorSurfaces.find(
+        (candidate) => candidate.surfaceId === surface.surfaceId,
+      );
+      const primaryId = `${baseConnectorId}-primary`;
+      const annotation = annotationBase({
+        entityId: primaryId,
+        label: connector ? `Connector to ${connector.targetFixIdent}` : "Missed connector",
+        title: `${bundle.procedureName} estimated missed connector surface`,
+        kind: "MISSED_CONNECTOR_SURFACE",
+        status,
+        bundle,
+        branchBundle,
+        segment: segmentBundle?.segment,
+        legs: segmentBundle?.legs,
+        parameters: [
+          param("Source CA leg", connector?.sourceLegId ?? surface.sourceLegIds.join(", ")),
+          param("Endpoint status", connector?.sourceEndpointStatus),
+          param("Target fix", connector ? `${connector.targetFixIdent} ${connector.targetFixRole}` : null),
+          param("Distance", `${surface.centerline.geodesicLengthNm.toFixed(2)} NM`),
+          param("Geometry meaning", "Estimated connector surface; not certified TERPS construction"),
+          ...commonParameters,
+        ],
+        diagnostics: connector?.notes ?? diagnostics,
+      });
+      addRibbonPolygon(
+        viewer,
+        primaryId,
+        `${bundle.procedureName} estimated missed connector surface primary`,
+        surface.lateral.primary,
+        procedureEntityShow(visible, annotation, displayLevel),
+        MISSED_CONNECTOR_SURFACE_COLOR,
+        MISSED_SURFACE_HEIGHT_OFFSET_M,
+        annotation,
+      );
+      ids.push(primaryId);
+
+      const labelId = addAnnotationLabel(
+        viewer,
+        annotation,
+        representativePoint(surface.lateral.primary.leftGeoBoundary),
+        procedureEntityShow(visible, annotation, displayLevel, true, annotationVisible),
+      );
+      if (labelId) ids.push(labelId);
+
+      if (surface.lateral.secondaryOuter) {
+        const secondaryId = `${baseConnectorId}-secondary`;
+        const secondaryAnnotation = {
+          ...annotation,
+          entityId: secondaryId,
+          title: `${bundle.procedureName} estimated missed connector surface secondary`,
+        };
+        addRibbonPolygon(
+          viewer,
+          secondaryId,
+          `${bundle.procedureName} estimated missed connector surface secondary`,
+          surface.lateral.secondaryOuter,
+          procedureEntityShow(visible, secondaryAnnotation, displayLevel),
+          MISSED_CONNECTOR_SURFACE_COLOR,
+          MISSED_SURFACE_HEIGHT_OFFSET_M,
+          secondaryAnnotation,
+        );
+        ids.push(secondaryId);
+      }
+    }
+  });
+
+  return ids;
+}
+
 function addBranchVerticalProfileEntity(
   viewer: Cesium.Viewer,
   bundle: ProcedureRenderBundle,
@@ -2069,7 +2463,7 @@ function addBranchEntities(
       annotationVisible,
       displayLevel,
     ),
-    ...addBranchMissedConnectorSurfaceEntities(
+    ...addBranchProtectionSurfaceEntities(
       viewer,
       bundle,
       branchBundle,
@@ -2077,6 +2471,16 @@ function addBranchEntities(
       annotationVisible,
       displayLevel,
     ),
+    ...((branchBundle.protectionSurfaces ?? []).length === 0
+      ? addBranchMissedConnectorSurfaceEntities(
+          viewer,
+          bundle,
+          branchBundle,
+          visible,
+          annotationVisible,
+          displayLevel,
+        )
+      : []),
     ...addBranchMissedCaMahfConnectorEntities(
       viewer,
       bundle,

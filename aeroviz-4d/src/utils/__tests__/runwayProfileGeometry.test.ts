@@ -340,6 +340,47 @@ describe("runwayProfileGeometry", () => {
               runwayId: "RW09",
               turnJunctions: [],
               missedCaMahfConnectors: [],
+              missedConnectorSurfaces: [],
+              protectionSurfaces: [
+                {
+                  surfaceId: "TEST-R09-RW09:branch:R:segment:final:1:lnav-oea",
+                  segmentId: "TEST-R09-RW09:branch:R:segment:final:1",
+                  kind: "FINAL_LNAV_OEA",
+                  status: "SOURCE_BACKED",
+                  centerline: {
+                    geoPositions: [
+                      { lonDeg: -0.005, latDeg: 0, altM: 300 },
+                      { lonDeg: 0, latDeg: 0, altM: 35 },
+                    ],
+                  },
+                  lateral: {
+                    widthSamples: [
+                      { stationNm: 0, primaryHalfWidthNm: 0.65, secondaryOuterHalfWidthNm: 0.95 },
+                    ],
+                  },
+                  vertical: { kind: "NONE", origin: "SOURCE", samples: [] },
+                  diagnostics: [],
+                },
+                {
+                  surfaceId: "TEST-R09-RW09:branch:R:segment:final:1:lnav-vnav-ocs",
+                  segmentId: "TEST-R09-RW09:branch:R:segment:final:1",
+                  kind: "FINAL_LNAV_VNAV_OCS",
+                  status: "TERPS_ESTIMATE",
+                  centerline: {
+                    geoPositions: [
+                      { lonDeg: -0.005, latDeg: 0, altM: 250 },
+                      { lonDeg: 0, latDeg: 0, altM: 60 },
+                    ],
+                  },
+                  lateral: {
+                    widthSamples: [
+                      { stationNm: 0, primaryHalfWidthNm: 0.5, secondaryOuterHalfWidthNm: 0.75 },
+                    ],
+                  },
+                  vertical: { kind: "OCS", origin: "GPA_TCH", samples: [] },
+                  diagnostics: [],
+                },
+              ],
               segmentBundles: [
                 {
                   segment: {
@@ -425,14 +466,14 @@ describe("runwayProfileGeometry", () => {
         label: "LNAV/VNAV OCS",
       },
     });
-    expect(finalRoute?.assessmentSegments?.[0].primaryHalfWidthM).toBeCloseTo(1111.2, 6);
-    expect(finalRoute?.assessmentSegments?.[0].secondaryHalfWidthM).toBeCloseTo(1666.8, 6);
+    expect(finalRoute?.assessmentSegments?.[0].primaryHalfWidthM).toBeCloseTo(1203.8, 6);
+    expect(finalRoute?.assessmentSegments?.[0].secondaryHalfWidthM).toBeCloseTo(1759.4, 6);
     expect(finalRoute?.assessmentSegments?.[0].finalVerticalReference?.halfWidthM).toBeCloseTo(
       555.6,
       6,
     );
     expect(finalRoute?.assessmentSegments?.[0].lnavVnavOcs?.primaryHalfWidthM).toBeCloseTo(
-      740.8,
+      926,
       6,
     );
   });

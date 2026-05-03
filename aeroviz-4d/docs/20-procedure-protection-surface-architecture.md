@@ -240,14 +240,14 @@ Implemented first adapter step:
 - Cesium annotations now read unified surface kind/status, lateral rule,
   primary/secondary width samples, and vertical origin from the adapter when a
   rendered surface has a matching `surfaceId`.
+- Cesium surface polygons are rendered from `protectionSurfaces`; legacy
+  segment fields are retained only as fallback for older bundle shapes.
+- Runway-profile assessment now reads lateral width, LNAV/VNAV OCS, and
+  precision debug surfaces from `protectionSurfaces`.
 
 Remaining Phase 2 work:
 
-1. Move renderer surface iteration to `protectionSurfaces` once parity tests are
-   in place.
-2. Use the same list in runway-profile assessment instead of re-reading legacy
-   final/missed fields independently.
-3. Remove duplicate legacy fields only after rendering and assessment are fully
+1. Remove duplicate legacy fields only after rendering and assessment are fully
    migrated.
 
 ### Phase 3 - Profile Aid Cleanup
