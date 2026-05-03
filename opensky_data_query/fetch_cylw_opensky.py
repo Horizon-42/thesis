@@ -56,7 +56,12 @@ try:
         convert_tracks_to_raw_czml_input,
     )
     from .altitude_matching import build_dual_altitude_points, parse_state_altitude_samples
-    from .dataset_store import partition_path, write_jsonl_records, write_source_response
+    from .dataset_store import (
+        find_cached_source_response,
+        partition_path,
+        write_jsonl_records,
+        write_source_response,
+    )
     from .training_dataset import (
         attach_training_points_or_quarantine,
         make_raw_track_record,
@@ -68,7 +73,12 @@ except ImportError:  # pragma: no cover - supports direct script execution.
         convert_tracks_to_raw_czml_input,
     )
     from altitude_matching import build_dual_altitude_points, parse_state_altitude_samples
-    from dataset_store import partition_path, write_jsonl_records, write_source_response
+    from dataset_store import (
+        find_cached_source_response,
+        partition_path,
+        write_jsonl_records,
+        write_source_response,
+    )
     from training_dataset import (
         attach_training_points_or_quarantine,
         make_raw_track_record,
@@ -81,6 +91,15 @@ TOKEN_URL = (
     "https://auth.opensky-network.org/auth/realms/opensky-network/"
     "protocol/openid-connect/token"
 )
+
+
+class OpenSkyRateLimitError(RuntimeError):
+    """Raised when OpenSky rejects a request with HTTP 429."""
+
+    def __init__(self, endpoint: str, params: dict[str, Any], message: str):
+        super().__init__(message)
+        self.endpoint = endpoint
+        self.params = params
 
 # Built-in airport hints: (lat, lon, elevation_m)
 AIRPORT_HINTS: dict[str, tuple[float, float, float]] = {
@@ -194,6 +213,8 @@ class OpenSkyClient:
                     )
                     time.sleep(retry_after)
                     continue
+                if e.code == 429:
+                    raise OpenSkyRateLimitError(endpoint, params or {}, f"HTTP 429 for {url}: {body[:300]}") from e
                 raise RuntimeError(f"HTTP {e.code} for {url}: {body[:300]}") from e
             except URLError as e:
                 raise RuntimeError(f"Network error for {url}: {e}") from e
@@ -517,8 +538,21 @@ def fetch_json_with_saved_source(
     endpoint: str,
     params: dict[str, Any],
     authenticated: bool,
+    use_cache: bool = True,
 ) -> tuple[Any, dict[str, Any]]:
     """Fetch a JSON endpoint, save original body text, then parse it."""
+    if use_cache:
+        cached = find_cached_source_response(
+            output_root,
+            airport=airport,
+            endpoint=endpoint,
+            params=params,
+        )
+        if cached is not None:
+            body_text = Path(cached["body_full_path"]).read_text(encoding="utf-8")
+            data = json.loads(body_text) if body_text else None
+            return data, cached | {"cache_hit": True}
+
     body_text, http_status = client.get_response_text(
         endpoint,
         params=params,
@@ -716,22 +750,44 @@ def run_training_historical_fetch(
     event_written = 0
     quarantine_written = 0
     requested = 0
+    network_track_requests = 0
     downloaded = 0
     seen_tracks: set[tuple[str, int, int]] = set()
+    stopped_reason: str | None = None
+    resume_candidate_index: int | None = None
 
-    for candidate in candidates:
+    start_index = max(0, int(args.resume_candidate_index or 0))
+    for candidate_index, candidate in enumerate(candidates[start_index:], start=start_index):
         if requested >= args.max_tracks:
             break
         requested += 1
         try:
+            params = {"icao24": candidate["icao24"], "time": candidate["t_ref"]}
+            cached = find_cached_source_response(
+                output_root,
+                airport=airport,
+                endpoint="/tracks/all",
+                params=params,
+            )
+            if cached is None and network_track_requests >= args.max_track_requests_per_run:
+                stopped_reason = "track_request_budget_exhausted"
+                resume_candidate_index = candidate_index
+                break
             track, track_source = fetch_json_with_saved_source(
                 client,
                 output_root=output_root,
                 airport=airport,
                 endpoint="/tracks/all",
-                params={"icao24": candidate["icao24"], "time": candidate["t_ref"]},
+                params=params,
                 authenticated=True,
             )
+            if cached is None:
+                network_track_requests += 1
+        except OpenSkyRateLimitError as e:
+            print(f"[OpenSky] stopping training run after rate limit: {e}", flush=True)
+            stopped_reason = "tracks_rate_limited"
+            resume_candidate_index = candidate_index
+            break
         except RuntimeError as e:
             print(f"[OpenSky] training track fetch failed for {candidate['icao24']}: {e}", flush=True)
             continue
@@ -776,18 +832,27 @@ def run_training_historical_fetch(
             continue
 
         state_samples = []
-        for state_time in _event_waypoint_times(track, events, args.max_state_samples_per_track):
-            states_payload, state_source = fetch_json_with_saved_source(
-                client,
-                output_root=output_root,
-                airport=airport,
-                endpoint="/states/all",
-                params={"time": state_time, "icao24": candidate["icao24"]},
-                authenticated=client.has_oauth,
-            )
-            state_samples.extend(
-                parse_state_altitude_samples(states_payload or {}, source_response_id=state_source["source_id"])
-            )
+        if args.enable_geo_altitude_join:
+            for state_time in _event_waypoint_times(track, events, args.max_state_samples_per_track):
+                try:
+                    states_payload, state_source = fetch_json_with_saved_source(
+                        client,
+                        output_root=output_root,
+                        airport=airport,
+                        endpoint="/states/all",
+                        params={"time": state_time, "icao24": candidate["icao24"]},
+                        authenticated=client.has_oauth,
+                    )
+                except OpenSkyRateLimitError as e:
+                    print(f"[OpenSky] stopping geo-altitude join after rate limit: {e}", flush=True)
+                    stopped_reason = "states_rate_limited"
+                    resume_candidate_index = candidate_index
+                    break
+                state_samples.extend(
+                    parse_state_altitude_samples(states_payload or {}, source_response_id=state_source["source_id"])
+                )
+            if stopped_reason:
+                break
 
         dual = build_dual_altitude_points(
             track,
@@ -821,12 +886,19 @@ def run_training_historical_fetch(
         "candidate_counts": candidate_counts,
         "track_counts": {
             "requested": requested,
+            "network_track_requests": network_track_requests,
+            "track_request_budget": args.max_track_requests_per_run,
             "downloaded": downloaded,
             "deduplicated": len(seen_tracks),
         },
         "event_counts": {
             "written": event_written,
             "quarantined": quarantine_written,
+        },
+        "resume": {
+            "stopped_reason": stopped_reason,
+            "resume_candidate_index": resume_candidate_index,
+            "complete": stopped_reason is None,
         },
     }
     manifest_time = datetime.fromtimestamp(begin, timezone.utc)
@@ -892,11 +964,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--approach-window-min", type=int, default=20, help="Keep only this many minutes before landing/closest-approach")
     parser.add_argument("--airport-event-radius-nm", type=float, default=5.0, help="Training event radius in nautical miles")
     parser.add_argument("--low-altitude-agl-m", type=float, default=600.0, help="Low-altitude evidence threshold for training labels")
-    parser.add_argument("--geo-altitude-max-age-sec", type=float, default=15.0, help="Max state-vector age for matching geo_altitude")
+    parser.add_argument("--geo-altitude-max-age-sec", type=float, default=15.0, help=argparse.SUPPRESS)
     parser.add_argument("--max-state-samples-per-track", type=int, default=40, help=argparse.SUPPRESS)
     parser.add_argument("--pass-sample-step-sec", type=int, default=900, help=argparse.SUPPRESS)
-    parser.add_argument("--require-geo-altitude", dest="require_geo_altitude", action="store_true", default=True)
-    parser.add_argument("--allow-missing-geo-altitude", dest="require_geo_altitude", action="store_false")
+    parser.add_argument("--max-track-requests-per-run", type=int, default=20, help=argparse.SUPPRESS)
+    parser.add_argument("--resume-candidate-index", type=int, default=0, help=argparse.SUPPRESS)
+    parser.add_argument("--enable-geo-altitude-join", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--require-geo-altitude", dest="require_geo_altitude", action="store_true", default=False, help=argparse.SUPPRESS)
+    parser.add_argument("--allow-missing-geo-altitude", dest="require_geo_altitude", action="store_false", help=argparse.SUPPRESS)
     parser.add_argument("--radius-km", type=float, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--allow-partial", action="store_true", help="Allow tracks that do not contain landing/touchdown near airport")
     parser.add_argument("--live-window-hours", type=int, default=12, help="Look back this many hours for /flights/all in live mode")

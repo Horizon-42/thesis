@@ -90,6 +90,46 @@ def write_jsonl_records(path: Path, records: Iterable[dict[str, Any]]) -> int:
     return count
 
 
+def load_jsonl_records(path: Path) -> list[dict[str, Any]]:
+    """Load JSONL records from a file, returning an empty list if absent."""
+    if not path.exists():
+        return []
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def find_cached_source_response(
+    output_root: Path,
+    *,
+    airport: str,
+    endpoint: str,
+    params: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Find a previously saved response for the same endpoint and params."""
+    root = output_root / "source_responses" / "v2" / f"airport={airport.upper()}"
+    if not root.exists():
+        return None
+    target_params = stable_json_dumps(params)
+    candidates: list[dict[str, Any]] = []
+    for index_path in root.rglob("source_index.jsonl"):
+        for record in load_jsonl_records(index_path):
+            if record.get("endpoint") != endpoint:
+                continue
+            if stable_json_dumps(record.get("params") or {}) != target_params:
+                continue
+            body_path = index_path.parent / str(record.get("body_path") or "")
+            if not body_path.exists():
+                continue
+            candidates.append(record | {"body_full_path": str(body_path)})
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: str(item.get("fetched_at_utc") or ""))
+    return candidates[-1]
+
+
 def write_source_response(
     output_root: Path,
     *,
@@ -139,4 +179,3 @@ def write_source_response(
     }
     _append_jsonl(partition / "source_index.jsonl", record)
     return record | {"body_full_path": str(body_path)}
-

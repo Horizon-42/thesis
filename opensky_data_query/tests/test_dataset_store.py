@@ -7,6 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from opensky_data_query.dataset_store import (
+    find_cached_source_response,
     partition_path,
     sha256_text,
     write_jsonl_records,
@@ -68,7 +69,31 @@ class DatasetStoreTests(unittest.TestCase):
                 ['{"a": 1, "b": 2}', '{"id": "x"}'],
             )
 
+    def test_find_cached_source_response_returns_matching_body(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            written = write_source_response(
+                root,
+                airport="CYLW",
+                fetched_at=datetime(2026, 4, 15, 13, 0, tzinfo=timezone.utc),
+                endpoint="/tracks/all",
+                params={"icao24": "abc123", "time": 1000},
+                body_text='{"path":[]}',
+                http_status=200,
+            )
+
+            cached = find_cached_source_response(
+                root,
+                airport="cylw",
+                endpoint="/tracks/all",
+                params={"time": 1000, "icao24": "abc123"},
+            )
+
+            self.assertIsNotNone(cached)
+            assert cached is not None
+            self.assertEqual(cached["source_id"], written["source_id"])
+            self.assertEqual(Path(cached["body_full_path"]).read_text(encoding="utf-8"), '{"path":[]}')
+
 
 if __name__ == "__main__":
     unittest.main()
-
