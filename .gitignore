@@ -32,3 +32,7 @@ aeroviz-4d/public/data/*
 
 # python 
 __pycache__
+
+
+# ENV
+.env
