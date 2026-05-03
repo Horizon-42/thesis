@@ -96,15 +96,16 @@ class OpenSkyClient:
     client_id: str | None = None
     client_secret: str | None = None
     timeout_sec: int = 30
-    request_interval_sec: float = 1.0
-    max_request_retries: int = 3
-    rate_limit_backoff_sec: float = 60.0
+    request_interval_sec: float = 5.0
+    max_request_retries: int = 8
+    rate_limit_backoff_sec: float = 15.0
 
     _token: str | None = None
     _token_expiry: float = 0.0
     _token_lock: Lock = field(default_factory=Lock)
     _request_lock: Lock = field(default_factory=Lock)
     _last_request_at: float = 0.0
+    _adaptive_request_interval_sec: float | None = None
 
     @property
     def has_oauth(self) -> bool:
@@ -183,8 +184,9 @@ class OpenSkyClient:
                 if e.code == 429 and attempt + 1 < attempts:
                     retry_after = _retry_after_seconds(
                         e.headers.get("Retry-After"),
-                        fallback=self.rate_limit_backoff_sec * (attempt + 1),
+                        fallback=min(45.0, self.rate_limit_backoff_sec + 5.0 * attempt),
                     )
+                    self._increase_adaptive_interval()
                     print(
                         f"[OpenSky] HTTP 429 rate limit; sleeping {retry_after:.1f}s before retry "
                         f"{attempt + 1}/{self.max_request_retries}",
@@ -200,7 +202,7 @@ class OpenSkyClient:
 
     def _throttle_request(self) -> None:
         """Serialize OpenSky requests and enforce a minimum interval."""
-        interval = max(0.0, self.request_interval_sec)
+        interval = max(0.0, self._adaptive_request_interval_sec or self.request_interval_sec)
         if interval <= 0.0:
             return
         with self._request_lock:
@@ -209,6 +211,12 @@ class OpenSkyClient:
             if wait_sec > 0:
                 time.sleep(wait_sec)
             self._last_request_at = time.monotonic()
+
+    def _increase_adaptive_interval(self) -> None:
+        """Slow down future requests after a rate-limit response."""
+        with self._request_lock:
+            current = self._adaptive_request_interval_sec or self.request_interval_sec
+            self._adaptive_request_interval_sec = min(30.0, max(current + 2.0, current * 1.5))
 
 
 def load_credentials_file(path: Path) -> tuple[str | None, str | None]:
@@ -847,9 +855,9 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--client-id", default=os.getenv("OPENSKY_CLIENT_ID"))
     parser.add_argument("--client-secret", default=os.getenv("OPENSKY_CLIENT_SECRET"))
-    parser.add_argument("--request-interval-sec", type=float, default=2.0, help="Minimum seconds between OpenSky requests")
-    parser.add_argument("--max-request-retries", type=int, default=4, help="Retries for retryable OpenSky request failures such as HTTP 429")
-    parser.add_argument("--rate-limit-backoff-sec", type=float, default=90.0, help="Fallback sleep seconds after HTTP 429 when Retry-After is absent")
+    parser.add_argument("--request-interval-sec", type=float, default=5.0, help=argparse.SUPPRESS)
+    parser.add_argument("--max-request-retries", type=int, default=8, help=argparse.SUPPRESS)
+    parser.add_argument("--rate-limit-backoff-sec", type=float, default=15.0, help=argparse.SUPPRESS)
     parser.add_argument(
         "--credentials-file",
         default=None,
@@ -885,8 +893,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--airport-event-radius-nm", type=float, default=5.0, help="Training event radius in nautical miles")
     parser.add_argument("--low-altitude-agl-m", type=float, default=600.0, help="Low-altitude evidence threshold for training labels")
     parser.add_argument("--geo-altitude-max-age-sec", type=float, default=15.0, help="Max state-vector age for matching geo_altitude")
-    parser.add_argument("--max-state-samples-per-track", type=int, default=120, help="Max /states/all time samples per track in training mode")
-    parser.add_argument("--pass-sample-step-sec", type=int, default=300, help="terminal_all bbox state sampling step in seconds")
+    parser.add_argument("--max-state-samples-per-track", type=int, default=40, help=argparse.SUPPRESS)
+    parser.add_argument("--pass-sample-step-sec", type=int, default=900, help=argparse.SUPPRESS)
     parser.add_argument("--require-geo-altitude", dest="require_geo_altitude", action="store_true", default=True)
     parser.add_argument("--allow-missing-geo-altitude", dest="require_geo_altitude", action="store_false")
     parser.add_argument("--radius-km", type=float, default=None, help=argparse.SUPPRESS)
