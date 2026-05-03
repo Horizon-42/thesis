@@ -1,8 +1,15 @@
 import type {
   HorizontalPlateAssessmentSegment,
   HorizontalPlateRoute,
+  RunwayFrame,
   RunwayProfilePoint,
 } from "./runwayProfileGeometry";
+import { projectPositionToRunwayFrame } from "./runwayProfileGeometry";
+import {
+  classifyPointAgainstProtectionSurfaces,
+  type ProtectionVolumeAssessment,
+} from "./procedureProtectionVolumeAssessment";
+import type { GeoPoint } from "./procedureGeoMath";
 
 export type HorizontalPlateContainment = "PRIMARY" | "SECONDARY" | "OUTSIDE";
 export type SegmentAssessmentEventKind =
@@ -27,6 +34,7 @@ export interface HorizontalPlateSegmentAssessment {
   containment: HorizontalPlateContainment;
   closestPoint: RunwayProfilePoint;
   events: SegmentAssessmentEvent[];
+  surfaceAssessment?: ProtectionVolumeAssessment;
 }
 
 interface CandidateAssessment extends HorizontalPlateSegmentAssessment {
@@ -254,6 +262,63 @@ export function classifyPointAgainstHorizontalPlateRoutes(
 ): HorizontalPlateSegmentAssessment | null {
   const assessments = routes
     .map((route) => projectPointToHorizontalPlateRoute(point, route))
+    .filter((assessment): assessment is HorizontalPlateSegmentAssessment => assessment !== null);
+
+  const primaryAssessment = assessments
+    .filter((assessment) => assessment.containment === "PRIMARY")
+    .sort((left, right) => Math.abs(left.crossTrackErrorM) - Math.abs(right.crossTrackErrorM))[0];
+  if (primaryAssessment) return primaryAssessment;
+
+  const secondaryAssessment = assessments
+    .filter((assessment) => assessment.containment === "SECONDARY")
+    .sort((left, right) => Math.abs(left.crossTrackErrorM) - Math.abs(right.crossTrackErrorM))[0];
+  if (secondaryAssessment) return secondaryAssessment;
+
+  return assessments.sort(
+    (left, right) => Math.abs(left.crossTrackErrorM) - Math.abs(right.crossTrackErrorM),
+  )[0] ?? null;
+}
+
+export function classifyGeoPointAgainstHorizontalPlateRoutes(
+  point: GeoPoint,
+  routes: HorizontalPlateRoute[],
+  frame: RunwayFrame,
+): HorizontalPlateSegmentAssessment | null {
+  const assessments = routes
+    .map((route): HorizontalPlateSegmentAssessment | null => {
+      const surfaceAssessment = classifyPointAgainstProtectionSurfaces(
+        point,
+        route.protectionSurfaces ?? [],
+      );
+      if (!surfaceAssessment) return null;
+      const closestPoint = projectPositionToRunwayFrame(
+        frame,
+        surfaceAssessment.closestPoint.lonDeg,
+        surfaceAssessment.closestPoint.latDeg,
+        surfaceAssessment.closestPoint.altM,
+      );
+      const verticalErrorM =
+        surfaceAssessment.verticalDeltaFt === null
+          ? null
+          : surfaceAssessment.verticalDeltaFt * 0.3048;
+      return {
+        routeId: route.routeId,
+        branchId: route.branchId,
+        activeSegmentId: surfaceAssessment.surfaceId,
+        segmentIndex: surfaceAssessment.segmentIndex,
+        stationM: surfaceAssessment.stationNm * 1852,
+        crossTrackErrorM: surfaceAssessment.lateralOffsetNm * 1852,
+        verticalErrorM,
+        containment: surfaceAssessment.containment,
+        closestPoint,
+        events: assessmentEvents(
+          surfaceAssessment.containment,
+          verticalErrorM,
+          surfaceAssessment.verticalKind === "OCS",
+        ),
+        surfaceAssessment,
+      };
+    })
     .filter((assessment): assessment is HorizontalPlateSegmentAssessment => assessment !== null);
 
   const primaryAssessment = assessments

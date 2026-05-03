@@ -1112,6 +1112,30 @@ describe("procedure render bundle", () => {
       "NOMINAL_TURN_PATH",
       "WIND_SPIRAL",
     ]);
+    expect(bundle.branchBundles[0].protectionSurfaces).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          surfaceId: expect.stringContaining(":turning-missed:tia-boundary"),
+          kind: "TURNING_MISSED_DEBUG",
+          status: "DEBUG_ESTIMATE",
+          lateral: expect.objectContaining({
+            rule: expect.stringContaining("debug-only turning missed placeholder"),
+            notes: expect.arrayContaining([
+              expect.stringContaining("Closed TIA/wind placeholders"),
+            ]),
+          }),
+        }),
+        expect.objectContaining({
+          surfaceId: expect.stringContaining(":turning-missed:nominal-turn"),
+          kind: "TURNING_MISSED_DEBUG",
+          status: "DEBUG_ESTIMATE",
+          vertical: expect.objectContaining({
+            kind: "ALTITUDE_PROFILE",
+            origin: "CENTERLINE_ALTITUDE_ONLY",
+          }),
+        }),
+      ]),
+    );
     expect(bundle.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

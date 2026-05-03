@@ -111,6 +111,7 @@ export interface HorizontalPlateRoute {
   halfWidthM: number;
   points: HorizontalPlateRoutePoint[];
   assessmentSegments?: HorizontalPlateAssessmentSegment[];
+  protectionSurfaces?: ProcedureProtectionSurface[];
 }
 
 export interface RunwayReferenceMark {
@@ -604,12 +605,14 @@ export function attachRenderBundleAssessmentSegments(
 ): HorizontalPlateRoute[] {
   const normalizedRunway = normalizeRunwayIdent(runwayIdent);
   const segmentsByRouteKey = new Map<string, HorizontalPlateAssessmentSegment[]>();
+  const protectionSurfacesByRouteKey = new Map<string, ProcedureProtectionSurface[]>();
 
   renderBundles.forEach((bundle) => {
     bundle.branchBundles
       .filter((branch) => normalizeRunwayIdent(branch.runwayId ?? "") === normalizedRunway)
       .forEach((branch) => {
         const branchProtectionSurfaces = branch.protectionSurfaces ?? [];
+        protectionSurfacesByRouteKey.set(branch.branchId, branchProtectionSurfaces);
         const assessmentSegments = branch.segmentBundles
           .map((segmentBundle): HorizontalPlateAssessmentSegment | null => {
             const centerline = segmentBundle.segmentGeometry.centerline;
@@ -764,7 +767,13 @@ export function attachRenderBundleAssessmentSegments(
     if (!route.procedureUid || !route.branchKey) return route;
     const routeKey = renderBundleBranchKey(route.procedureUid, route.branchKey);
     const assessmentSegments = segmentsByRouteKey.get(routeKey);
-    return assessmentSegments ? { ...route, assessmentSegments } : route;
+    const protectionSurfaces = protectionSurfacesByRouteKey.get(routeKey);
+    if (!assessmentSegments && !protectionSurfaces) return route;
+    return {
+      ...route,
+      ...(assessmentSegments ? { assessmentSegments } : {}),
+      ...(protectionSurfaces ? { protectionSurfaces } : {}),
+    };
   });
 }
 

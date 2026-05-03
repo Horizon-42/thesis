@@ -113,7 +113,10 @@ The same `ProcedureProtectionSurface` should support multiple views:
   ribbons at a small height offset.
 - `OCS/Vertical Surface`: 3D surface using the same lateral boundaries but with
   vertical samples applied per station.
-- `Volume`: optional future view using side walls and top/bottom references.
+- `Volume`: assessment volume derived from the same surface centerline,
+  lateral width samples, and vertical samples. A dedicated Cesium side-wall
+  volume mesh remains an optional future view; current rendering still uses
+  footprints/OCS polygons plus direct volume assessment.
 - `Profile Aid`: separate blue fix profile ribbon, hidden from protection
   semantics and not named as a surface.
 
@@ -274,15 +277,30 @@ Implemented first rule-structure step:
   segment XTT-derived width.
 - The connector transition status is explicit:
   `TERMINAL_WIDTH_HELD_TO_MAHF`.
+- Turning missed debug primitives are adapted into
+  `ProcedureProtectionSurface` objects with kind `TURNING_MISSED_DEBUG` and
+  status `DEBUG_ESTIMATE`.
+  - Closed TIA/wind placeholders render as debug areas.
+  - Early/late/nominal turn placeholders render as narrow debug ribbons.
+  - All annotations explicitly state that these are not certified TIA, wind
+    spiral, or TERPS protected-area construction.
+- Aircraft/profile assessment now has a direct protection-volume path:
+  - `src/utils/procedureProtectionVolumeAssessment.ts` projects a GeoPoint to
+    the same `ProcedureProtectionSurface` centerline rendered in 3D.
+  - It interpolates lateral primary/secondary widths and vertical samples at
+    the station, then returns primary/secondary/outside containment plus
+    vertical relation to the surface/profile.
+  - Runway profile routes carry the branch `protectionSurfaces`, and live
+    aircraft samples prefer this 3D surface assessment before falling back to
+    legacy route-band assessment.
 
 Remaining Phase 4 work:
 
 1. Replace the current XTT-derived estimate with chapter-specific TERPS/PBN
    missed-width tables when those source parameters are modeled.
-2. Implement turning-missed TIA/wind-spiral surfaces separately from straight
-   connector surfaces.
-3. Add assessment logic that checks aircraft points against the same
-   `ProcedureProtectionSurface` objects rendered in 3D.
+2. Add a selectable rendered side-wall/top-bottom volume mesh if the UI needs a
+   literal volume view. The current completed step is direct 3D containment
+   assessment against the unified surface object, not a separate solid mesh.
 
 ## Acceptance Criteria
 
@@ -302,3 +320,7 @@ Remaining Phase 4 work:
 - Default `Protection` view does not imply estimated geometry is source-backed.
 - `Estimated` view clearly shows estimated missed surfaces without mixing them
   with source-backed TERPS objects.
+- `Debug` view shows turning missed placeholders as `TURNING_MISSED_DEBUG`
+  surfaces, not as straight missed connector surfaces.
+- Aircraft containment/profile assessment can use the same
+  `ProcedureProtectionSurface` objects that the 3D procedure layer renders.

@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { HorizontalPlateRoute } from "../runwayProfileGeometry";
 import {
+  classifyGeoPointAgainstHorizontalPlateRoutes,
   classifyPointAgainstHorizontalPlateRoutes,
   projectPointToHorizontalPlateRoute,
 } from "../procedureSegmentAssessment";
+import { FEET_TO_METERS, METERS_PER_NM } from "../procedureGeoMath";
+
+function latOffsetDeg(nm: number): number {
+  return ((nm * METERS_PER_NM) / 6_378_137) * (180 / Math.PI);
+}
 
 const route: HorizontalPlateRoute = {
   routeId: "KRDU-R23RY-R",
@@ -150,6 +156,90 @@ describe("procedure segment assessment", () => {
       kind: "VERTICAL_OCS",
       label: "BELOW_OCS",
       valueM: -150,
+    });
+  });
+
+  it("can classify aircraft points directly against route protection surfaces", () => {
+    const assessment = classifyGeoPointAgainstHorizontalPlateRoutes(
+      {
+        lonDeg: 0.05,
+        latDeg: latOffsetDeg(0.2),
+        altM: 600 * FEET_TO_METERS,
+      },
+      [
+        {
+          ...route,
+          protectionSurfaces: [
+            {
+              surfaceId: "surface:lnav-vnav-ocs",
+              segmentId: "segment:final",
+              sourceLegIds: ["leg:final"],
+              kind: "FINAL_LNAV_VNAV_OCS",
+              status: "TERPS_ESTIMATE",
+              centerline: {
+                geoPositions: [
+                  { lonDeg: 0, latDeg: 0, altM: 1000 * FEET_TO_METERS },
+                  { lonDeg: 0.1, latDeg: 0, altM: 500 * FEET_TO_METERS },
+                ],
+                worldPositions: [],
+                geodesicLengthNm: 6,
+                isArc: false,
+              },
+              lateral: {
+                primary: {
+                  geometryId: "surface:primary",
+                  leftBoundary: [],
+                  rightBoundary: [],
+                  leftGeoBoundary: [],
+                  rightGeoBoundary: [],
+                  halfWidthNmSamples: [],
+                },
+                secondaryOuter: null,
+                widthSamples: [
+                  { stationNm: 0, primaryHalfWidthNm: 0.5, secondaryOuterHalfWidthNm: 1 },
+                  { stationNm: 6, primaryHalfWidthNm: 0.5, secondaryOuterHalfWidthNm: 1 },
+                ],
+                rule: "test rule",
+                notes: [],
+              },
+              vertical: {
+                kind: "OCS",
+                origin: "GPA_TCH",
+                samples: [
+                  { stationNm: 0, altitudeFtMsl: 1000 },
+                  { stationNm: 6, altitudeFtMsl: 500 },
+                ],
+                notes: [],
+              },
+              diagnostics: [],
+            },
+          ],
+        },
+      ],
+      {
+        runwayIdent: "RW",
+        thresholdLon: 0,
+        thresholdLat: 0,
+        thresholdAltM: 0,
+        approachUnitEast: 1,
+        approachUnitNorth: 0,
+        leftUnitEast: 0,
+        leftUnitNorth: 1,
+      },
+    );
+
+    expect(assessment).toMatchObject({
+      activeSegmentId: "surface:lnav-vnav-ocs",
+      containment: "PRIMARY",
+      surfaceAssessment: expect.objectContaining({
+        surfaceId: "surface:lnav-vnav-ocs",
+        verticalKind: "OCS",
+      }),
+    });
+    expect(assessment?.events).toContainEqual({
+      kind: "VERTICAL_OCS",
+      label: "BELOW_OCS",
+      valueM: expect.any(Number),
     });
   });
 });

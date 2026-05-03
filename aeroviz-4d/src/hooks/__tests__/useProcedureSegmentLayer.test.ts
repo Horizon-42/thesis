@@ -432,6 +432,36 @@ const renderBundleData = {
               },
               diagnostics: [],
             },
+            {
+              surfaceId: "segment:final:turning-missed:tia-boundary",
+              segmentId: "segment:final",
+              sourceLegIds: ["leg:missed:hm"],
+              kind: "TURNING_MISSED_DEBUG",
+              status: "DEBUG_ESTIMATE",
+              centerline: {
+                geoPositions,
+                worldPositions: [],
+                geodesicLengthNm: 1,
+                isArc: false,
+              },
+              lateral: {
+                primary: ribbon,
+                secondaryOuter: null,
+                widthSamples: [
+                  { stationNm: 0, primaryHalfWidthNm: 0.03 },
+                  { stationNm: 1, primaryHalfWidthNm: 0.03 },
+                ],
+                rule: "TIA_BOUNDARY: debug-only turning missed placeholder",
+                notes: ["Debug surface test note."],
+              },
+              vertical: {
+                kind: "ALTITUDE_PROFILE",
+                origin: "CENTERLINE_ALTITUDE_ONLY",
+                samples: [],
+                notes: [],
+              },
+              diagnostics: [],
+            },
           ],
           segmentBundles: [
             {
@@ -945,7 +975,14 @@ describe("useProcedureSegmentLayer", () => {
       ),
     ).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-turning-missed-anchor"))).toBe(true);
-    expect(entities.some((entity) => String(entity.id).includes("-turning-missed-tia-boundary"))).toBe(true);
+    expect(
+      entities.some(
+        (entity) =>
+          String(entity.id).includes("-turning-missed-debug-turning-missed-tia-boundary") &&
+          entity.polygon &&
+          entity.__aeroVizProcedureAnnotation?.kind === "TURNING_MISSED_DEBUG",
+      ),
+    ).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-turn-1-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes(":junction:"))).toBe(true);
     expect(
@@ -988,6 +1025,10 @@ describe("useProcedureSegmentLayer", () => {
     const finalAltitude = entities.find((entity) => String(entity.id).includes("-altitude-leg:final:faf"));
     const turnFill = entities.find((entity) => String(entity.id).includes("-turn-1-primary"));
     const debugSurface = entities.find((entity) => String(entity.id).includes("-precision-lpv-w"));
+    const turningDebugSurface = entities.find((entity) =>
+      String(entity.id).includes("-turning-missed-debug-turning-missed-tia-boundary") &&
+      entity.polygon,
+    );
 
     expect(centerline.show).toBe(true);
     expect(finalAltitude.show).toBe(true);
@@ -999,6 +1040,7 @@ describe("useProcedureSegmentLayer", () => {
     expect(caMahfConnector.show).toBe(false);
     expect(turnFill.show).toBe(false);
     expect(debugSurface.show).toBe(false);
+    expect(turningDebugSurface.show).toBe(false);
 
     setProcedureDisplayLevel("ESTIMATED");
     rerender();
@@ -1011,6 +1053,7 @@ describe("useProcedureSegmentLayer", () => {
     expect(caMahfConnector.show).toBe(true);
     expect(turnFill.show).toBe(false);
     expect(debugSurface.show).toBe(false);
+    expect(turningDebugSurface.show).toBe(false);
 
     setProcedureDisplayLevel("VISUAL_AID");
     rerender();
@@ -1018,6 +1061,7 @@ describe("useProcedureSegmentLayer", () => {
     expect(verticalProfile.show).toBe(true);
     expect(turnFill.show).toBe(true);
     expect(debugSurface.show).toBe(false);
+    expect(turningDebugSurface.show).toBe(false);
 
     setProcedureDisplayLevel("DEBUG");
     rerender();
@@ -1025,6 +1069,7 @@ describe("useProcedureSegmentLayer", () => {
     expect(ocs.show).toBe(true);
     expect(turnFill.show).toBe(true);
     expect(debugSurface.show).toBe(true);
+    expect(turningDebugSurface.show).toBe(true);
   });
 
   it("syncs layer visibility without reloading render bundle data", async () => {

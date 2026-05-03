@@ -7,11 +7,11 @@ import type {
   LnavFinalOeaGeometry,
   LnavVnavOcsGeometry,
   PrecisionFinalSurfaceGeometry,
-  VariableWidthRibbonGeometry,
 } from "../utils/procedureSurfaceGeometry";
 import type {
   MissedConnectorSurfaceGeometry,
   MissedSectionSurfaceGeometry,
+  MissedTurnDebugPrimitiveGeometry,
 } from "../utils/procedureMissedGeometry";
 import {
   computeStationAxis,
@@ -19,7 +19,16 @@ import {
   type PolylineGeometry3D,
   type SegmentGeometryBundle,
 } from "../utils/procedureSegmentGeometry";
-import { FEET_TO_METERS } from "../utils/procedureGeoMath";
+import {
+  FEET_TO_METERS,
+  distanceNm,
+  toCartesian,
+  type GeoPoint,
+} from "../utils/procedureGeoMath";
+import {
+  buildVariableWidthRibbon,
+  type VariableWidthRibbonGeometry,
+} from "../utils/procedureSurfaceGeometry";
 
 export type ProtectionSurfaceKind =
   | "FINAL_LNAV_OEA"
@@ -27,7 +36,8 @@ export type ProtectionSurfaceKind =
   | "FINAL_PRECISION_DEBUG"
   | "MISSED_SECTION_1"
   | "MISSED_SECTION_2_STRAIGHT"
-  | "MISSED_CONNECTOR";
+  | "MISSED_CONNECTOR"
+  | "TURNING_MISSED_DEBUG";
 
 export type ProtectionSurfaceStatus =
   | "SOURCE_BACKED"
@@ -95,6 +105,7 @@ export interface ProtectionSurfaceSegmentInput {
   lnavVnavOcs: LnavVnavOcsGeometry | null;
   precisionFinalSurfaces: PrecisionFinalSurfaceGeometry[];
   missedSectionSurface: MissedSectionSurfaceGeometry | null;
+  missedTurnDebugPrimitives: MissedTurnDebugPrimitiveGeometry[];
   diagnostics: BuildDiagnostic[];
 }
 
@@ -102,6 +113,8 @@ export interface ProtectionSurfaceBranchInput {
   segmentBundles: ProtectionSurfaceSegmentInput[];
   missedConnectorSurfaces: MissedConnectorSurfaceGeometry[];
 }
+
+const TURNING_MISSED_DEBUG_RIBBON_HALF_WIDTH_NM = 0.03;
 
 function nearestSecondaryHalfWidth(
   samples: ProtectionSurfaceRibbon["halfWidthNmSamples"],
@@ -143,6 +156,67 @@ function verticalSamplesFromCenterline(
     stationNm: sample.stationNm,
     altitudeFtMsl: sample.geoPosition.altM / FEET_TO_METERS,
   }));
+}
+
+function polylineFromGeoPositions(geoPositions: GeoPoint[]): PolylineGeometry3D {
+  let geodesicLengthNm = 0;
+  geoPositions.forEach((point, index) => {
+    if (index > 0) {
+      geodesicLengthNm += distanceNm(geoPositions[index - 1], point);
+    }
+  });
+  return {
+    geoPositions,
+    worldPositions: geoPositions.map(toCartesian),
+    geodesicLengthNm,
+    isArc: false,
+  };
+}
+
+function closedDebugBoundaryRibbon(
+  geometryId: string,
+  boundary: GeoPoint[],
+): VariableWidthRibbonGeometry | null {
+  if (boundary.length < 4) return null;
+  const uniqueBoundary =
+    distanceNm(boundary[0], boundary[boundary.length - 1]) < 1e-5
+      ? boundary.slice(0, -1)
+      : boundary;
+  if (uniqueBoundary.length < 4) return null;
+
+  const splitIndex = Math.floor(uniqueBoundary.length / 2);
+  const leftGeoBoundary = uniqueBoundary.slice(0, splitIndex + 1);
+  const rightGeoBoundary = uniqueBoundary.slice(splitIndex + 1).reverse();
+
+  return {
+    geometryId,
+    leftBoundary: leftGeoBoundary.map(toCartesian),
+    rightBoundary: rightGeoBoundary.map(toCartesian),
+    leftGeoBoundary,
+    rightGeoBoundary,
+    halfWidthNmSamples: [],
+  };
+}
+
+function debugRibbonForTurnPrimitive(
+  primitive: MissedTurnDebugPrimitiveGeometry,
+): VariableWidthRibbonGeometry | null {
+  if (
+    primitive.debugType === "TIA_BOUNDARY" ||
+    primitive.debugType === "WIND_SPIRAL"
+  ) {
+    return closedDebugBoundaryRibbon(`${primitive.primitiveId}:debug-area`, primitive.geoPositions);
+  }
+
+  if (primitive.geoPositions.length < 2) return null;
+  const centerline = polylineFromGeoPositions(primitive.geoPositions);
+  const stationAxis = computeStationAxis(centerline);
+  return buildVariableWidthRibbon(
+    `${primitive.primitiveId}:debug-ribbon`,
+    centerline,
+    stationAxis.samples.map((sample) => sample.stationNm),
+    () => TURNING_MISSED_DEBUG_RIBBON_HALF_WIDTH_NM,
+  );
 }
 
 function buildFinalOeaProtectionSurface(
@@ -326,6 +400,43 @@ function buildConnectorProtectionSurface(
   };
 }
 
+function buildTurningMissedDebugProtectionSurface(
+  segmentBundle: ProtectionSurfaceSegmentInput,
+  primitive: MissedTurnDebugPrimitiveGeometry,
+): ProcedureProtectionSurface | null {
+  const primary = debugRibbonForTurnPrimitive(primitive);
+  if (!primary) return null;
+  const centerline = polylineFromGeoPositions(primitive.geoPositions);
+  return {
+    surfaceId: primitive.primitiveId,
+    segmentId: primitive.segmentId,
+    sourceLegIds: [primitive.legId],
+    kind: "TURNING_MISSED_DEBUG",
+    status: "DEBUG_ESTIMATE",
+    centerline,
+    lateral: {
+      primary,
+      secondaryOuter: null,
+      widthSamples: widthSamplesFromRibbons(primary, null),
+      rule: `${primitive.debugType}: debug-only turning missed placeholder; not certified TIA, wind spiral, or protected-area construction.`,
+      notes: [
+        ...primitive.notes,
+        `Turn trigger ${primitive.turnTrigger}; turn case ${primitive.turnCase}.`,
+        "Closed TIA/wind placeholders are rendered as debug areas; baseline and nominal-turn placeholders are rendered as narrow debug ribbons.",
+      ],
+    },
+    vertical: {
+      kind: "ALTITUDE_PROFILE",
+      origin: "CENTERLINE_ALTITUDE_ONLY",
+      samples: verticalSamplesFromCenterline(centerline),
+      notes: [
+        "Altitude follows the debug primitive source points only; no TERPS vertical construction is implied.",
+      ],
+    },
+    diagnostics: segmentBundle.diagnostics,
+  };
+}
+
 export function buildSegmentProtectionSurfaces(
   segmentBundle: ProtectionSurfaceSegmentInput,
 ): ProcedureProtectionSurface[] {
@@ -344,6 +455,10 @@ export function buildSegmentProtectionSurfaces(
       buildMissedSectionProtectionSurface(segmentBundle, segmentBundle.missedSectionSurface),
     );
   }
+  segmentBundle.missedTurnDebugPrimitives.forEach((primitive) => {
+    const debugSurface = buildTurningMissedDebugProtectionSurface(segmentBundle, primitive);
+    if (debugSurface) surfaces.push(debugSurface);
+  });
   return surfaces;
 }
 

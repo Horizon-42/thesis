@@ -476,5 +476,9 @@ describe("runwayProfileGeometry", () => {
       926,
       6,
     );
+    expect(finalRoute?.protectionSurfaces?.map((surface) => surface.surfaceId)).toEqual([
+      "TEST-R09-RW09:branch:R:segment:final:1:lnav-oea",
+      "TEST-R09-RW09:branch:R:segment:final:1:lnav-vnav-ocs",
+    ]);
   });
 });

@@ -62,6 +62,7 @@ const CA_COURSE_GUIDE_COLOR = Cesium.Color.ORANGE.withAlpha(0.98);
 const CA_CENTERLINE_COLOR = Cesium.Color.ORANGE.withAlpha(0.86);
 const CA_MAHF_CONNECTOR_COLOR = Cesium.Color.ORANGE.withAlpha(0.62);
 const TURNING_MISSED_DEBUG_COLOR = Cesium.Color.YELLOW.withAlpha(0.98);
+const TURNING_MISSED_DEBUG_SURFACE_COLOR = Cesium.Color.YELLOW.withAlpha(0.14);
 const TURNING_MISSED_PRIMITIVE_COLOR = Cesium.Color.ORANGE.withAlpha(0.78);
 const FINAL_SURFACE_STATUS_COLOR = Cesium.Color.ORANGE.withAlpha(0.9);
 const CA_ENDPOINT_COLOR = Cesium.Color.ORANGE.withAlpha(0.98);
@@ -523,6 +524,13 @@ function compactSegmentType(segmentType: string | undefined): string {
   return (segmentType ?? "UNKNOWN").replace(/_/g, " ");
 }
 
+function entityIdSuffix(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 function annotationBase(args: {
   entityId: string;
   label: string;
@@ -882,6 +890,11 @@ function addSegmentEntities(
     (diagnostic) => diagnostic.code === "ESTIMATED_CA_GEOMETRY",
   );
   const hasUnifiedSurfaces = (branchBundle.protectionSurfaces ?? []).length > 0;
+  const hasUnifiedTurningMissedDebugSurfaces = (branchBundle.protectionSurfaces ?? []).some(
+    (surface) =>
+      surface.segmentId === segmentBundle.segment.segmentId &&
+      surface.kind === "TURNING_MISSED_DEBUG",
+  );
 
   const centerlineId = `${baseId}-centerline`;
   const centerlineAnnotation = annotationBase({
@@ -1727,48 +1740,50 @@ function addSegmentEntities(
     if (debugLabelId) ids.push(debugLabelId);
   }
 
-  segmentBundle.missedTurnDebugPrimitives.forEach((primitive) => {
-    const primitiveId = `${baseId}-turning-missed-${primitive.debugType.toLowerCase().replace(/_/g, "-")}`;
-    const leg = segmentBundle.legs.find((candidate) => candidate.legId === primitive.legId);
-    const primitiveAnnotation = annotationBase({
-      entityId: primitiveId,
-      label: primitive.debugType.replace(/_/g, " "),
-      title: `${segmentName} turning missed ${primitive.debugType.toLowerCase().replace(/_/g, " ")}`,
-      kind: "TURNING_MISSED_DEBUG",
-      status: "DEBUG_ESTIMATE",
-      bundle,
-      branchBundle,
-      segment: segmentBundle.segment,
-      legs: segmentBundle.legs,
-      leg,
-      parameters: [
-        param("Debug type", primitive.debugType),
-        param("Turn trigger", primitive.turnTrigger),
-        param("Turn case", primitive.turnCase),
-        param("Course", `${primitive.courseDeg} deg`),
-        param("Turn direction", primitive.turnDirection),
-      ],
-      diagnostics: [...segmentDiagnostics, ...primitive.notes],
+  if (!hasUnifiedTurningMissedDebugSurfaces) {
+    segmentBundle.missedTurnDebugPrimitives.forEach((primitive) => {
+      const primitiveId = `${baseId}-turning-missed-${primitive.debugType.toLowerCase().replace(/_/g, "-")}`;
+      const leg = segmentBundle.legs.find((candidate) => candidate.legId === primitive.legId);
+      const primitiveAnnotation = annotationBase({
+        entityId: primitiveId,
+        label: primitive.debugType.replace(/_/g, " "),
+        title: `${segmentName} turning missed ${primitive.debugType.toLowerCase().replace(/_/g, " ")}`,
+        kind: "TURNING_MISSED_DEBUG",
+        status: "DEBUG_ESTIMATE",
+        bundle,
+        branchBundle,
+        segment: segmentBundle.segment,
+        legs: segmentBundle.legs,
+        leg,
+        parameters: [
+          param("Debug type", primitive.debugType),
+          param("Turn trigger", primitive.turnTrigger),
+          param("Turn case", primitive.turnCase),
+          param("Course", `${primitive.courseDeg} deg`),
+          param("Turn direction", primitive.turnDirection),
+        ],
+        diagnostics: [...segmentDiagnostics, ...primitive.notes],
+      });
+      addPolyline(
+        viewer,
+        primitiveId,
+        `${segmentName} turning missed ${primitive.debugType.toLowerCase().replace(/_/g, " ")}`,
+        primitive.geoPositions.map((point) => elevatedPoint(point, TURNING_MISSED_DEBUG_HEIGHT_OFFSET_M)),
+        procedureEntityShow(visible, primitiveAnnotation, displayLevel),
+        primitive.debugType === "NOMINAL_TURN_PATH" ? 4 : 3,
+        TURNING_MISSED_PRIMITIVE_COLOR,
+        primitiveAnnotation,
+      );
+      ids.push(primitiveId);
+      const primitiveLabelId = addAnnotationLabel(
+        viewer,
+        primitiveAnnotation,
+        representativePoint(primitive.geoPositions.map((point) => elevatedPoint(point, TURNING_MISSED_DEBUG_HEIGHT_OFFSET_M))),
+        procedureEntityShow(visible, primitiveAnnotation, displayLevel, true, annotationVisible),
+      );
+      if (primitiveLabelId) ids.push(primitiveLabelId);
     });
-    addPolyline(
-      viewer,
-      primitiveId,
-      `${segmentName} turning missed ${primitive.debugType.toLowerCase().replace(/_/g, " ")}`,
-      primitive.geoPositions.map((point) => elevatedPoint(point, TURNING_MISSED_DEBUG_HEIGHT_OFFSET_M)),
-      procedureEntityShow(visible, primitiveAnnotation, displayLevel),
-      primitive.debugType === "NOMINAL_TURN_PATH" ? 4 : 3,
-      TURNING_MISSED_PRIMITIVE_COLOR,
-      primitiveAnnotation,
-    );
-    ids.push(primitiveId);
-    const primitiveLabelId = addAnnotationLabel(
-      viewer,
-      primitiveAnnotation,
-      representativePoint(primitive.geoPositions.map((point) => elevatedPoint(point, TURNING_MISSED_DEBUG_HEIGHT_OFFSET_M))),
-      procedureEntityShow(visible, primitiveAnnotation, displayLevel, true, annotationVisible),
-    );
-    if (primitiveLabelId) ids.push(primitiveLabelId);
-  });
+  }
 
   return ids;
 }
@@ -2043,6 +2058,60 @@ function addBranchProtectionSurfaceEntities(
         annotation,
       );
       ids.push(surfaceId);
+      const labelId = addAnnotationLabel(
+        viewer,
+        annotation,
+        representativePoint(surface.centerline.geoPositions),
+        procedureEntityShow(visible, annotation, displayLevel, true, annotationVisible),
+      );
+      if (labelId) ids.push(labelId);
+      return;
+    }
+
+    if (surface.kind === "TURNING_MISSED_DEBUG") {
+      const suffix = entityIdSuffix(
+        surface.surfaceId.slice(surface.segmentId.length + 1) || surface.surfaceId,
+      );
+      const surfaceEntityId = `${baseId}-turning-missed-debug-${suffix}`;
+      const annotation = annotationBase({
+        entityId: surfaceEntityId,
+        label: "Turning missed debug",
+        title: `${segmentName} turning missed debug surface`,
+        kind: "TURNING_MISSED_DEBUG",
+        status,
+        bundle,
+        branchBundle,
+        segment: segmentBundle?.segment,
+        legs: segmentBundle?.legs,
+        parameters: [
+          param("Geometry meaning", "Debug placeholder only; not certified TIA, wind spiral, or TERPS protection"),
+          ...commonParameters,
+        ],
+        diagnostics,
+      });
+      addRibbonPolygon(
+        viewer,
+        surfaceEntityId,
+        `${segmentName} turning missed debug surface`,
+        surface.lateral.primary,
+        procedureEntityShow(visible, annotation, displayLevel),
+        TURNING_MISSED_DEBUG_SURFACE_COLOR,
+        TURNING_MISSED_DEBUG_HEIGHT_OFFSET_M,
+        annotation,
+      );
+      ids.push(surfaceEntityId);
+      ids.push(
+        ...addRibbonBoundaryPolylines(
+          viewer,
+          `${surfaceEntityId}-boundary`,
+          `${segmentName} turning missed debug surface`,
+          surface.lateral.primary,
+          procedureEntityShow(visible, annotation, displayLevel),
+          TURNING_MISSED_PRIMITIVE_COLOR,
+          TURNING_MISSED_DEBUG_HEIGHT_OFFSET_M + 2,
+          annotation,
+        ),
+      );
       const labelId = addAnnotationLabel(
         viewer,
         annotation,

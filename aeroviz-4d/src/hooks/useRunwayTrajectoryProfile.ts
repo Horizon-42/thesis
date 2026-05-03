@@ -18,9 +18,11 @@ import {
   type RunwayProfilePoint,
 } from "../utils/runwayProfileGeometry";
 import {
+  classifyGeoPointAgainstHorizontalPlateRoutes,
   classifyPointAgainstHorizontalPlateRoutes,
   type HorizontalPlateSegmentAssessment,
 } from "../utils/procedureSegmentAssessment";
+import type { GeoPoint } from "../utils/procedureGeoMath";
 
 const TICK_THROTTLE_MS = 120;
 const TRAIL_LOOKBACK_SECONDS = 150;
@@ -37,6 +39,10 @@ export interface ProfileAircraftTrack {
   current: ProfileAircraftSample;
   trail: ProfileAircraftSample[];
   isSelected: boolean;
+}
+
+interface SampledRunwayPoint extends RunwayProfilePoint {
+  geoPosition: GeoPoint;
 }
 
 export interface RunwayTrajectoryProfileState {
@@ -73,7 +79,7 @@ function sampleRunwayPoint(
   entity: Cesium.Entity,
   time: Cesium.JulianDate,
   runwayFrame: RunwayFrame,
-): RunwayProfilePoint | null {
+): SampledRunwayPoint | null {
   if (!entity.position) return null;
 
   const cartesian = entity.position.getValue(time, new Cesium.Cartesian3());
@@ -86,12 +92,20 @@ function sampleRunwayPoint(
   );
   if (!cartographic) return null;
 
-  return projectPositionToRunwayFrame(
-    runwayFrame,
-    Cesium.Math.toDegrees(cartographic.longitude),
-    Cesium.Math.toDegrees(cartographic.latitude),
-    cartographic.height,
-  );
+  const geoPosition = {
+    lonDeg: Cesium.Math.toDegrees(cartographic.longitude),
+    latDeg: Cesium.Math.toDegrees(cartographic.latitude),
+    altM: cartographic.height,
+  };
+  return {
+    ...projectPositionToRunwayFrame(
+      runwayFrame,
+      geoPosition.lonDeg,
+      geoPosition.latDeg,
+      geoPosition.altM,
+    ),
+    geoPosition,
+  };
 }
 
 function routeIsActive(
@@ -99,6 +113,19 @@ function routeIsActive(
   procedureVisibility: Record<string, boolean>,
 ): boolean {
   return procedureVisibility[route.branchId] ?? route.defaultVisible;
+}
+
+function profileAircraftSample(
+  point: SampledRunwayPoint,
+  timeIso: string,
+  segmentAssessment: HorizontalPlateSegmentAssessment,
+): ProfileAircraftSample {
+  const { geoPosition: _geoPosition, ...profilePoint } = point;
+  return {
+    ...profilePoint,
+    timeIso,
+    segmentAssessment,
+  };
 }
 
 export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
@@ -205,13 +232,19 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
 
     return trajectoryDataSource.entities.values
       .filter((entity) => entity.id !== "document")
-      .map((entity) => {
+      .map((entity): ProfileAircraftTrack | null => {
         const currentPoint = sampleRunwayPoint(entity, currentTime, loadedData.runwayFrame);
         if (!currentPoint) return null;
-        const currentAssessment = classifyPointAgainstHorizontalPlateRoutes(
-          currentPoint,
-          activePlateRoutes,
-        );
+        const currentAssessment =
+          classifyGeoPointAgainstHorizontalPlateRoutes(
+            currentPoint.geoPosition,
+            activePlateRoutes,
+            loadedData.runwayFrame,
+          ) ??
+          classifyPointAgainstHorizontalPlateRoutes(
+            currentPoint,
+            activePlateRoutes,
+          );
         if (!currentAssessment || currentAssessment.containment !== "PRIMARY") {
           return null;
         }
@@ -229,32 +262,26 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
           );
           const samplePoint = sampleRunwayPoint(entity, sampleTime, loadedData.runwayFrame);
           if (!samplePoint) continue;
-          const sampleAssessment = classifyPointAgainstHorizontalPlateRoutes(
-            samplePoint,
-            activePlateRoutes,
-          );
+          const sampleAssessment =
+            classifyGeoPointAgainstHorizontalPlateRoutes(
+              samplePoint.geoPosition,
+              activePlateRoutes,
+              loadedData.runwayFrame,
+            ) ??
+            classifyPointAgainstHorizontalPlateRoutes(
+              samplePoint,
+              activePlateRoutes,
+            );
           if (!sampleAssessment || sampleAssessment.containment !== "PRIMARY") continue;
-          trail.push({
-            ...samplePoint,
-            timeIso: formatJulianTime(sampleTime),
-            segmentAssessment: sampleAssessment,
-          });
+          trail.push(profileAircraftSample(samplePoint, formatJulianTime(sampleTime), sampleAssessment));
         }
 
-        trail.push({
-          ...currentPoint,
-          timeIso: currentTimeIso,
-          segmentAssessment: currentAssessment,
-        });
+        trail.push(profileAircraftSample(currentPoint, currentTimeIso, currentAssessment));
 
         return {
           flightId: entity.id,
           color: colorForFlightId(entity.id),
-          current: {
-            ...currentPoint,
-            timeIso: currentTimeIso,
-            segmentAssessment: currentAssessment,
-          },
+          current: profileAircraftSample(currentPoint, currentTimeIso, currentAssessment),
           trail,
           isSelected: entity.id === selectedFlightId,
         };
