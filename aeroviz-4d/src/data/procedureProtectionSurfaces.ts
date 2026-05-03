@@ -266,8 +266,9 @@ function buildMissedSectionProtectionSurface(
       primary: surface.primary,
       secondaryOuter: surface.secondaryOuter,
       widthSamples: widthSamplesFromRibbons(surface.primary, surface.secondaryOuter),
-      rule: `${surface.sectionKind} missed approach lateral envelope from segment geometry.`,
+      rule: `${surface.lateralWidthRule.ruleId}: ${surface.lateralWidthRule.transitionStatus}`,
       notes: [
+        ...surface.lateralWidthRule.notes,
         surface.constructionStatus === "ESTIMATED_CA"
           ? "CA subsection centerline was estimated from course, altitude target, and climb model."
           : "Centerline was built from source-coded missed approach geometry.",
@@ -304,7 +305,9 @@ function buildConnectorProtectionSurface(
       primary: surface.primary,
       secondaryOuter: surface.secondaryOuter,
       widthSamples: widthSamplesFromRibbons(surface.primary, surface.secondaryOuter),
-      rule: "Estimated CA endpoint to MAHF/HOLD connector using constant terminal missed width.",
+      rule:
+        `${surface.lateralWidthRule.ruleId}: CA endpoint to MAHF/HOLD constant terminal missed width ` +
+        surface.lateralWidthRule.transitionStatus,
       notes: [
         `Target fix ${surface.targetFixIdent} (${surface.targetFixRole}).`,
         ...surface.notes,

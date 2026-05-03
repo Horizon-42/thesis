@@ -124,6 +124,13 @@ describe("procedure missed geometry", () => {
       surfaceType: "MISSED_SECTION1_ENVELOPE",
       sectionKind: "SECTION_1",
       constructionStatus: "SOURCE_BACKED",
+      lateralWidthRule: {
+        ruleId: "MISSED_SEGMENT_XTT_PRIMARY_SECONDARY",
+        ruleStatus: "SEGMENT_TOLERANCE_ESTIMATE",
+        primaryHalfWidthNm: 2,
+        secondaryOuterHalfWidthNm: 2,
+        transitionStatus: "SECTION_1_TERMINAL_WIDTH",
+      },
       verticalProfile: {
         constructionStatus: "SOURCE_CLIMB_GRADIENT",
         climbGradientFtPerNm: 200,
@@ -482,7 +489,15 @@ describe("procedure missed geometry", () => {
       [caLeg, mahfLeg],
       connectorFixes,
       new Map([[missedSegment.segmentId, missedSegment]]),
-      { samplingStepNm: 1 },
+      {
+        samplingStepNm: 1,
+        sourceMissedSurfaceBySegmentId: new Map([
+          [
+            missedSegment.segmentId,
+            buildMissedSectionSurface(missedSegment, geometryBundle).geometry!,
+          ],
+        ]),
+      },
     );
 
     expect(surfaces).toHaveLength(1);
@@ -491,6 +506,11 @@ describe("procedure missed geometry", () => {
       targetFixId: "fix:DUHAM",
       targetFixIdent: "DUHAM",
       constructionStatus: "ESTIMATED_CONNECTOR_SURFACE",
+      lateralWidthRule: {
+        ruleId: "MISSED_CONNECTOR_TERMINAL_WIDTH",
+        ruleStatus: "SOURCE_SURFACE_TERMINAL_WIDTH",
+        transitionStatus: "TERMINAL_WIDTH_HELD_TO_MAHF",
+      },
       primary: expect.objectContaining({
         geometryId: "segment:missed-s1:ca-mahf-connector-primary:leg:missed:ca",
       }),
@@ -499,7 +519,7 @@ describe("procedure missed geometry", () => {
       }),
     });
     expect(surfaces[0].primary.halfWidthNmSamples[0].halfWidthNm).toBe(2);
-    expect(surfaces[0].secondaryOuter?.halfWidthNmSamples[0].halfWidthNm).toBe(3);
+    expect(surfaces[0].secondaryOuter?.halfWidthNmSamples[0].halfWidthNm).toBe(2);
     const lastVerticalSample =
       surfaces[0].verticalProfile.samples[surfaces[0].verticalProfile.samples.length - 1];
     expect(lastVerticalSample.altitudeFtMsl).toBeCloseTo(2200, 8);

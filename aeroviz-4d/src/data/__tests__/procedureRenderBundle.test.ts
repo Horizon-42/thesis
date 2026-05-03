@@ -1036,6 +1036,11 @@ describe("procedure render bundle", () => {
       sourceLegId: "leg:R:035",
       targetFixIdent: "HOLD",
       constructionStatus: "ESTIMATED_CONNECTOR_SURFACE",
+      lateralWidthRule: {
+        ruleId: "MISSED_CONNECTOR_TERMINAL_WIDTH",
+        ruleStatus: "SOURCE_SURFACE_TERMINAL_WIDTH",
+        transitionStatus: "TERMINAL_WIDTH_HELD_TO_MAHF",
+      },
       primary: expect.any(Object),
       secondaryOuter: expect.any(Object),
     });

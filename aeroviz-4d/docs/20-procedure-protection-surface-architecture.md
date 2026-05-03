@@ -263,11 +263,25 @@ Implemented:
 
 ### Phase 4 - Rule Refinement
 
-1. Replace placeholder missed widths with rule-backed width samples.
-2. Add explicit missed section 1/section 2 transition status.
-3. Implement turning-missed TIA/wind-spiral surfaces separately from straight
+Implemented first rule-structure step:
+
+- Missed section and missed connector surfaces now carry explicit
+  `lateralWidthRule` metadata.
+- Missed section surfaces expose whether the width is a section 1 terminal
+  width or section 2 straight width.
+- CA endpoint to MAHF connector surfaces inherit the source missed surface
+  terminal width when available; only missing source surfaces fall back to
+  segment XTT-derived width.
+- The connector transition status is explicit:
+  `TERMINAL_WIDTH_HELD_TO_MAHF`.
+
+Remaining Phase 4 work:
+
+1. Replace the current XTT-derived estimate with chapter-specific TERPS/PBN
+   missed-width tables when those source parameters are modeled.
+2. Implement turning-missed TIA/wind-spiral surfaces separately from straight
    connector surfaces.
-4. Add assessment logic that checks aircraft points against the same
+3. Add assessment logic that checks aircraft points against the same
    `ProcedureProtectionSurface` objects rendered in 3D.
 
 ## Acceptance Criteria

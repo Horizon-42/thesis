@@ -32,11 +32,30 @@ export type MissedSectionSurfaceType =
   | "MISSED_SECTION1_ENVELOPE"
   | "MISSED_SECTION2_STRAIGHT_ENVELOPE";
 
+export interface MissedLateralWidthRule {
+  ruleId:
+    | "MISSED_SEGMENT_XTT_PRIMARY_SECONDARY"
+    | "MISSED_CONNECTOR_TERMINAL_WIDTH";
+  ruleStatus:
+    | "SEGMENT_TOLERANCE_ESTIMATE"
+    | "SOURCE_SURFACE_TERMINAL_WIDTH"
+    | "SEGMENT_TOLERANCE_FALLBACK";
+  primaryHalfWidthNm: number;
+  secondaryOuterHalfWidthNm: number | null;
+  transitionStatus:
+    | "CONSTANT_SEGMENT_WIDTH"
+    | "SECTION_1_TERMINAL_WIDTH"
+    | "SECTION_2_STRAIGHT_WIDTH"
+    | "TERMINAL_WIDTH_HELD_TO_MAHF";
+  notes: string[];
+}
+
 export interface MissedSectionSurfaceGeometry {
   segmentId: string;
   surfaceType: MissedSectionSurfaceType;
   sectionKind: "SECTION_1" | "SECTION_2_STRAIGHT";
   constructionStatus: "SOURCE_BACKED" | "ESTIMATED_CA";
+  lateralWidthRule: MissedLateralWidthRule;
   verticalProfile: {
     constructionStatus: "SOURCE_CLIMB_GRADIENT" | "CENTERLINE_ALTITUDE_ONLY";
     climbGradientFtPerNm: number | null;
@@ -115,6 +134,7 @@ export interface MissedConnectorSurfaceGeometry {
   targetFixIdent: string;
   targetFixRole: "MAHF" | "HOLD";
   constructionStatus: "ESTIMATED_CONNECTOR_SURFACE";
+  lateralWidthRule: MissedLateralWidthRule;
   centerline: PolylineGeometry3D;
   verticalProfile: {
     constructionStatus: "ESTIMATED_CLIMB_OR_TARGET_ALTITUDE";
@@ -130,6 +150,10 @@ export interface MissedConnectorSurfaceGeometry {
 
 export interface MissedCaCenterlineOptions {
   samplingStepNm?: number;
+}
+
+export interface MissedConnectorSurfaceOptions extends MissedCaCenterlineOptions {
+  sourceMissedSurfaceBySegmentId?: Map<string, MissedSectionSurfaceGeometry>;
 }
 
 export interface MissedCaSegmentGeometryResult {
@@ -233,6 +257,68 @@ function altitudeTargetFt(leg: ProcedurePackageLeg): number | null {
   return null;
 }
 
+function lastHalfWidthNm(envelope: LateralEnvelopeGeometry | null | undefined): number | null {
+  const lastSample = envelope?.halfWidthNmSamples[envelope.halfWidthNmSamples.length - 1];
+  return typeof lastSample?.halfWidthNm === "number" && Number.isFinite(lastSample.halfWidthNm)
+    ? lastSample.halfWidthNm
+    : null;
+}
+
+function missedSegmentWidthRule(
+  segment: ProcedureSegment,
+  primary: LateralEnvelopeGeometry,
+  secondaryOuter: LateralEnvelopeGeometry | null,
+): MissedLateralWidthRule {
+  const primaryHalfWidthNm = lastHalfWidthNm(primary) ?? segment.xttNm * 2;
+  const secondaryOuterHalfWidthNm = segment.secondaryEnabled
+    ? lastHalfWidthNm(secondaryOuter) ?? segment.xttNm * 3
+    : null;
+  return {
+    ruleId: "MISSED_SEGMENT_XTT_PRIMARY_SECONDARY",
+    ruleStatus: "SEGMENT_TOLERANCE_ESTIMATE",
+    primaryHalfWidthNm,
+    secondaryOuterHalfWidthNm,
+    transitionStatus: segment.segmentType === "MISSED_S1"
+      ? "SECTION_1_TERMINAL_WIDTH"
+      : "SECTION_2_STRAIGHT_WIDTH",
+    notes: [
+      `Primary half-width uses 2 * XTT (${segment.xttNm} NM).`,
+      segment.secondaryEnabled
+        ? `Secondary outer half-width uses 3 * XTT (${segment.xttNm} NM).`
+        : "Secondary outer area is disabled for this segment.",
+      "This is a rule-structured estimate until explicit TERPS/PBN missed-width tables are implemented.",
+    ],
+  };
+}
+
+function connectorWidthRule(
+  sourceSegment: ProcedureSegment,
+  sourceSurface: MissedSectionSurfaceGeometry | null,
+): MissedLateralWidthRule {
+  const primaryHalfWidthNm =
+    lastHalfWidthNm(sourceSurface?.primary) ??
+    sourceSegment.xttNm * 2;
+  const secondaryOuterHalfWidthNm = sourceSegment.secondaryEnabled
+    ? lastHalfWidthNm(sourceSurface?.secondaryOuter) ?? sourceSegment.xttNm * 3
+    : null;
+  const fromSourceSurface = sourceSurface !== null;
+  return {
+    ruleId: "MISSED_CONNECTOR_TERMINAL_WIDTH",
+    ruleStatus: fromSourceSurface
+      ? "SOURCE_SURFACE_TERMINAL_WIDTH"
+      : "SEGMENT_TOLERANCE_FALLBACK",
+    primaryHalfWidthNm,
+    secondaryOuterHalfWidthNm,
+    transitionStatus: "TERMINAL_WIDTH_HELD_TO_MAHF",
+    notes: [
+      fromSourceSurface
+        ? "Connector lateral width inherits the terminal width of the source missed surface."
+        : "Connector lateral width falls back to 2/3 * source segment XTT because no source missed surface was available.",
+      "Width is held constant to MAHF/HOLD until rule-backed splay/transition construction is implemented.",
+    ],
+  };
+}
+
 export function buildMissedSectionSurface(
   segment: ProcedureSegment,
   segmentGeometry: SegmentGeometryBundle,
@@ -301,6 +387,11 @@ export function buildMissedSectionSurface(
       )
         ? "ESTIMATED_CA"
         : "SOURCE_BACKED",
+      lateralWidthRule: missedSegmentWidthRule(
+        segment,
+        segmentGeometry.primaryEnvelope,
+        segmentGeometry.secondaryEnvelope ?? null,
+      ),
       verticalProfile: {
         constructionStatus: hasClimbGradient
           ? "SOURCE_CLIMB_GRADIENT"
@@ -656,7 +747,7 @@ export function buildMissedConnectorSurfaces(
   orderedLegs: ProcedurePackageLeg[],
   fixes: Map<string, ProcedurePackageFix>,
   segments: Map<string, ProcedureSegment>,
-  options: MissedCaCenterlineOptions = {},
+  options: MissedConnectorSurfaceOptions = {},
 ): MissedConnectorSurfaceGeometry[] {
   const samplingStepNm = Math.max(options.samplingStepNm ?? 0.25, 0.01);
 
@@ -675,10 +766,10 @@ export function buildMissedConnectorSurfaces(
     const centerline = buildConnectorCenterline(endpoint, target, samplingStepNm);
     if (!centerline) return [];
 
-    const primaryHalfWidthNm = sourceSegment.xttNm * 2;
-    const secondaryOuterHalfWidthNm = sourceSegment.secondaryEnabled
-      ? sourceSegment.xttNm * 3
-      : null;
+    const widthRule = connectorWidthRule(
+      sourceSegment,
+      options.sourceMissedSurfaceBySegmentId?.get(endpoint.segmentId) ?? null,
+    );
     const stationAxis = computeStationAxis(centerline);
     const targetAltitudeFtMsl = targetAltitudeForConnector(endpoint, target.leg, target.fix);
 
@@ -691,6 +782,7 @@ export function buildMissedConnectorSurfaces(
       targetFixIdent: target.fix.ident,
       targetFixRole: target.role,
       constructionStatus: "ESTIMATED_CONNECTOR_SURFACE",
+      lateralWidthRule: widthRule,
       centerline,
       verticalProfile: {
         constructionStatus: "ESTIMATED_CLIMB_OR_TARGET_ALTITUDE",
@@ -706,19 +798,19 @@ export function buildMissedConnectorSurfaces(
         `${endpoint.segmentId}:ca-mahf-connector-primary:${endpoint.legId}`,
         "PRIMARY",
         centerline,
-        primaryHalfWidthNm,
+        widthRule.primaryHalfWidthNm,
       ),
-      secondaryOuter: secondaryOuterHalfWidthNm === null
+      secondaryOuter: widthRule.secondaryOuterHalfWidthNm === null
         ? null
         : buildStraightEnvelope(
             `${endpoint.segmentId}:ca-mahf-connector-secondary:${endpoint.legId}`,
             "SECONDARY",
             centerline,
-            secondaryOuterHalfWidthNm,
+            widthRule.secondaryOuterHalfWidthNm,
           ),
       notes: [
         "Estimated connector surface from CA endpoint to later missed holding fix.",
-        "Lateral width currently holds the CA missed segment terminal width constant.",
+        ...widthRule.notes,
         "This is not a certified TERPS missed approach connector construction.",
       ],
     }];

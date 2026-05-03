@@ -290,6 +290,12 @@ export function buildProcedureRenderBundle(
     const branchTurnResult = buildBranchTurnJunctions(branch, segmentBundles);
     diagnostics.push(...branchTurnResult.diagnostics);
     const branchLegs = segmentBundles.flatMap((segmentBundle) => segmentBundle.legs);
+    const missedSectionSurfaceBySegmentId = new Map(
+      segmentBundles
+        .map((segmentBundle) => segmentBundle.missedSectionSurface)
+        .filter((surface): surface is MissedSectionSurfaceGeometry => surface !== null)
+        .map((surface) => [surface.segmentId, surface]),
+    );
     const missedCaMahfConnectors = buildMissedCaMahfConnectors(
       segmentBundles.flatMap((segmentBundle) => segmentBundle.missedCaEndpoints),
       branchLegs,
@@ -301,7 +307,10 @@ export function buildProcedureRenderBundle(
       branchLegs,
       fixes,
       segmentsById,
-      { samplingStepNm: ctx.samplingStepNm },
+      {
+        samplingStepNm: ctx.samplingStepNm,
+        sourceMissedSurfaceBySegmentId: missedSectionSurfaceBySegmentId,
+      },
     );
     const protectionSurfaces = buildBranchProtectionSurfaces({
       segmentBundles,
