@@ -581,6 +581,55 @@ def _candidate_key(icao24: str, t_ref: int) -> tuple[str, int]:
     return icao24.lower().strip(), int(t_ref)
 
 
+def _track_contains_reference_time(track: dict[str, Any], t_ref: int) -> bool:
+    """Return whether a cached track covers the OpenSky track reference time."""
+    start = int(float(track.get("startTime") or 0))
+    end = int(float(track.get("endTime") or 0))
+    if start > 0 and end > 0 and start <= int(t_ref) <= end:
+        return True
+    path = track.get("path") or []
+    times = [
+        int(point[0])
+        for point in path
+        if point and len(point) >= 1 and point[0] is not None
+    ]
+    return bool(times) and min(times) <= int(t_ref) <= max(times)
+
+
+def find_cached_track_payload(
+    output_root: Path,
+    *,
+    airport: str,
+    icao24: str,
+    t_ref: int,
+) -> tuple[dict[str, Any], list[str]] | None:
+    """Find a previously parsed track in v2 JSONL or legacy flat raw outputs."""
+    target_icao24 = icao24.lower().strip()
+
+    raw_root = output_root / "raw_tracks" / "v2" / f"airport={airport.upper()}"
+    if raw_root.exists():
+        for jsonl_path in sorted(raw_root.rglob("tracks.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True):
+            for line in jsonl_path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                record = json.loads(line)
+                track = record.get("track") or {}
+                if (track.get("icao24") or "").lower().strip() != target_icao24:
+                    continue
+                if _track_contains_reference_time(track, t_ref):
+                    return track, [record.get("raw_track_id") or f"raw_tracks_jsonl:{jsonl_path.name}"]
+
+    for raw_path in sorted(output_root.glob(f"{airport.lower()}_raw_*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        payload = json.loads(raw_path.read_text(encoding="utf-8"))
+        for track in payload.get("tracks") or []:
+            if (track.get("icao24") or "").lower().strip() != target_icao24:
+                continue
+            if _track_contains_reference_time(track, t_ref):
+                return track, [f"legacy_raw_json:{raw_path.name}"]
+
+    return None
+
+
 def collect_training_candidates(
     client: OpenSkyClient,
     *,
@@ -775,20 +824,30 @@ def run_training_historical_fetch(
                 endpoint="/tracks/all",
                 params=params,
             )
-            if cached is None and network_track_requests >= args.max_track_requests_per_run:
+            cached_track = find_cached_track_payload(
+                output_root,
+                airport=airport,
+                icao24=candidate["icao24"],
+                t_ref=candidate["t_ref"],
+            )
+            if cached is None and cached_track is None and network_track_requests >= args.max_track_requests_per_run:
                 stopped_reason = "track_request_budget_exhausted"
                 resume_candidate_index = candidate_index
                 break
-            if cached is None:
+            if cached is None and cached_track is None:
                 network_track_requests += 1
-            track, track_source = fetch_json_with_saved_source(
-                client,
-                output_root=output_root,
-                airport=airport,
-                endpoint="/tracks/all",
-                params=params,
-                authenticated=True,
-            )
+            if cached_track is not None:
+                track, track_source_ids = cached_track
+                track_source = {"source_id": track_source_ids[0], "cache_hit": True}
+            else:
+                track, track_source = fetch_json_with_saved_source(
+                    client,
+                    output_root=output_root,
+                    airport=airport,
+                    endpoint="/tracks/all",
+                    params=params,
+                    authenticated=True,
+                )
         except OpenSkyRateLimitError as e:
             print(f"[OpenSky] stopping training run after rate limit: {e}", flush=True)
             stopped_reason = "tracks_rate_limited"
