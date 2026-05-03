@@ -91,6 +91,7 @@ TOKEN_URL = (
     "https://auth.opensky-network.org/auth/realms/opensky-network/"
     "protocol/openid-connect/token"
 )
+TRACKS_ALL_MAX_AGE_SEC = 30 * 24 * 3600
 
 
 class OpenSkyRateLimitError(RuntimeError):
@@ -264,6 +265,14 @@ def _retry_after_seconds(value: str | None, *, fallback: float) -> float:
         return max(0.0, float(text))
     except ValueError:
         return max(0.0, fallback)
+
+
+def _tracks_all_too_old(t_ref: int, *, now: float | None = None, max_age_sec: int = TRACKS_ALL_MAX_AGE_SEC) -> bool:
+    """Return whether OpenSky REST /tracks/all cannot serve this timestamp."""
+    if int(t_ref) == 0:
+        return False
+    now_value = time.time() if now is None else now
+    return (now_value - int(t_ref)) > max_age_sec
 
 
 def default_outputs_root(script_path: Path) -> Path:
@@ -740,6 +749,7 @@ def run_training_historical_fetch(
     requested = 0
     network_track_requests = 0
     downloaded = 0
+    skipped_too_old_for_tracks_api = 0
     seen_tracks: set[tuple[str, int, int]] = set()
     stopped_reason: str | None = None
     resume_candidate_index: int | None = None
@@ -749,6 +759,14 @@ def run_training_historical_fetch(
         if requested >= args.max_tracks:
             break
         requested += 1
+        if _tracks_all_too_old(candidate["t_ref"]):
+            skipped_too_old_for_tracks_api += 1
+            print(
+                f"[OpenSky] skipping /tracks/all for {candidate['icao24']} at {candidate['t_ref']}: "
+                "timestamp is older than the REST track lookback window",
+                flush=True,
+            )
+            continue
         try:
             params = {"icao24": candidate["icao24"], "time": candidate["t_ref"]}
             cached = find_cached_source_response(
@@ -876,6 +894,7 @@ def run_training_historical_fetch(
             "requested": requested,
             "network_track_requests": network_track_requests,
             "track_request_budget": args.max_track_requests_per_run,
+            "skipped_too_old_for_tracks_api": skipped_too_old_for_tracks_api,
             "downloaded": downloaded,
             "deduplicated": len(seen_tracks),
         },
