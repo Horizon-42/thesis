@@ -142,7 +142,7 @@ export async function loadDsmHeightmapTerrain(
     width: metadata.tileWidth,
     height: metadata.tileHeight,
     tilingScheme,
-    credit: "BC DSM heightmap terrain",
+    credit: "Airport heightmap terrain",
     callback: (x, y, level) => {
       if (level > metadata.maxLevel) return undefined;
       if (!isTileAvailable(metadata, level, x, y)) {

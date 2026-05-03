@@ -2,17 +2,17 @@
  * useObstacleLayer.ts
  * -------------------
  * Custom hook: render FAA DOF obstacles (towers, windmills, buildings, etc.)
- * as 3D cylinder markers with text labels in the Cesium scene.
+ * as 3D cylinder markers, with optional text labels in the Cesium scene.
  *
  * Data source: public/data/airports/<ICAO>/obstacles.geojson, produced by
  *   python preprocess_obstacles.py --input <DOF .Dat file> --airport
  *
  * Follows the same dual-useEffect pattern as useWaypointLayer:
  *   Effect 1 — load GeoJSON, create entities, track IDs for cleanup
- *   Effect 2 — sync visibility with layers.obstacles toggle
+ *   Effect 2 — sync visibility with layers.obstacles / layers.obstacleLabels
  */
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { airportDataUrl } from "../data/airportData";
@@ -42,6 +42,8 @@ const OBSTACLE_COLORS: Record<string, Cesium.Color> = {
   BRIDGE:         Cesium.Color.SLATEGRAY.withAlpha(0.8),
 };
 const DEFAULT_OBSTACLE_COLOR = Cesium.Color.WHITE.withAlpha(0.7);
+const OBSTACLE_MARKER_PREFIX = "obstacle-marker-";
+const OBSTACLE_LABEL_PREFIX = "obstacle-label-";
 
 // ── GeoJSON types ───────────────────────────────────────────────────────────
 
@@ -61,11 +63,23 @@ interface ObstacleFeatureCollection {
 
 const CYLINDER_RADIUS = 20; // metres — fixed for all obstacles
 const MIN_CYLINDER_LENGTH = 10; // metres — minimum visible height
+const LABEL_VERTICAL_GAP_M = 8;
+const LABEL_MAX_DISTANCE_M = 15000;
+
+function formatObstacleLabel(props: ObstacleProperties): string {
+  const type = props.obstacle_type.trim() || "OBSTACLE";
+  return `${type} · ${Math.round(props.agl_ft)} ft AGL`;
+}
 
 // ── Hook ────────────────────────────────────────────────────────────────────
 
 export function useObstacleLayer(): void {
   const { viewer, layers, activeAirportCode } = useApp();
+  const layersRef = useRef(layers);
+
+  useEffect(() => {
+    layersRef.current = layers;
+  }, [layers]);
 
   // Effect 1: Load GeoJSON, create entities
   useEffect(() => {
@@ -94,11 +108,16 @@ export function useObstacleLayer(): void {
 
           const color =
             OBSTACLE_COLORS[props.obstacle_type] ?? DEFAULT_OBSTACLE_COLOR;
-          const id = `obstacle-${props.oas_number}-${index}`;
+          const entityKey = `${props.oas_number}-${index}`;
+          const markerId = `${OBSTACLE_MARKER_PREFIX}${entityKey}`;
+          const labelId = `${OBSTACLE_LABEL_PREFIX}${entityKey}`;
+          const labelAboveGroundM = cylinderLength + LABEL_VERTICAL_GAP_M;
+          const currentLayers = layersRef.current;
 
           viewer.entities.add({
-            id,
+            id: markerId,
             name: `${props.obstacle_type} (${props.oas_number})`,
+            show: currentLayers.obstacles,
             position: Cesium.Cartesian3.fromDegrees(
               lon,
               lat,
@@ -111,21 +130,47 @@ export function useObstacleLayer(): void {
               material: color,
               heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
             },
+          });
+          addedIds.push(markerId);
+
+          viewer.entities.add({
+            id: labelId,
+            name: `${props.obstacle_type} label (${props.oas_number})`,
+            show: currentLayers.obstacles && currentLayers.obstacleLabels,
+            position: Cesium.Cartesian3.fromDegrees(
+              lon,
+              lat,
+              labelAboveGroundM,
+            ),
             label: {
-              text: `${props.obstacle_type}\n${props.agl_ft} ft AGL`,
-              font: "12px monospace",
+              text: formatObstacleLabel(props),
+              font: "11px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
               fillColor: Cesium.Color.WHITE,
               style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-              outlineWidth: 2,
+              outlineColor: Cesium.Color.BLACK.withAlpha(0.9),
+              outlineWidth: 3,
+              showBackground: true,
+              backgroundColor: Cesium.Color.BLACK.withAlpha(0.48),
+              backgroundPadding: new Cesium.Cartesian2(5, 3),
+              heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
+              horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
               verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-              pixelOffset: new Cesium.Cartesian2(0, -20),
+              pixelOffset: new Cesium.Cartesian2(0, -4),
+              scaleByDistance: new Cesium.NearFarScalar(500, 1.0, LABEL_MAX_DISTANCE_M, 0.62),
+              translucencyByDistance: new Cesium.NearFarScalar(
+                LABEL_MAX_DISTANCE_M * 0.65,
+                1.0,
+                LABEL_MAX_DISTANCE_M,
+                0.0,
+              ),
               distanceDisplayCondition: new Cesium.DistanceDisplayCondition(
                 0,
-                50000,
+                LABEL_MAX_DISTANCE_M,
               ),
+              disableDepthTestDistance: 4000,
             },
           });
-          addedIds.push(id);
+          addedIds.push(labelId);
         });
       })
       .catch((err) => {
@@ -149,14 +194,16 @@ export function useObstacleLayer(): void {
     };
   }, [viewer, activeAirportCode]);
 
-  // Effect 2: Sync visibility with layer toggle
+  // Effect 2: Sync visibility with layer toggles
   useEffect(() => {
     if (!isCesiumViewerUsable(viewer)) return;
     viewer.entities.values.forEach((entity) => {
       const id = String(entity.id);
-      if (id.startsWith("obstacle-")) {
+      if (id.startsWith(OBSTACLE_MARKER_PREFIX)) {
         entity.show = layers.obstacles;
+      } else if (id.startsWith(OBSTACLE_LABEL_PREFIX)) {
+        entity.show = layers.obstacles && layers.obstacleLabels;
       }
     });
-  }, [viewer, layers.obstacles]);
+  }, [viewer, layers.obstacles, layers.obstacleLabels]);
 }

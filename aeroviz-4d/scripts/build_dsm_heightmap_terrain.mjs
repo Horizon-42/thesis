@@ -9,6 +9,7 @@ import * as Cesium from "cesium";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
 const AIRPORT_CODE = (cliOption("--airport") ?? "CYVR").toUpperCase();
+const rawOpenTopographyDemInputDir = path.resolve(repoRoot, `../data/opentopography/${AIRPORT_CODE}/dem`);
 const rawLidarInputDir = path.resolve(repoRoot, `../data/bc_lidar/${AIRPORT_CODE}/dsm`);
 const rawUsgsLidarInputDir = path.resolve(repoRoot, `../data/usgs_lidar/${AIRPORT_CODE}/dsm`);
 const defaultInputDir = path.resolve(repoRoot, `public/data/airports/${AIRPORT_CODE}/dsm/source`);
@@ -30,6 +31,7 @@ const MAX_LEVEL = 16;
 const FALLBACK_HEIGHT_M = 0;
 const OVERLAY_MAX_WIDTH = 1024;
 const SOURCE_TILE_INDEX_CELL_SIZE_M = 512;
+const SOURCE_TILE_INDEX_CELL_SIZE_DEGREES = 0.01;
 
 const UTM_K0 = 0.9996;
 const WGS84_A = 6378137.0;
@@ -53,6 +55,69 @@ function cliOption(name) {
   const prefix = `${name}=`;
   const value = process.argv.find((arg) => arg.startsWith(prefix));
   return value ? value.slice(prefix.length) : undefined;
+}
+
+function numericGeoKey(geoKeys, key) {
+  const value = Number(geoKeys?.[key]);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function projectedEpsgFromGeoKeys(geoKeys) {
+  return (
+    numericGeoKey(geoKeys, "ProjectedCSTypeGeoKey") ??
+    numericGeoKey(geoKeys, "ProjectedCRSGeoKey")
+  );
+}
+
+function geographicEpsgFromGeoKeys(geoKeys) {
+  return numericGeoKey(geoKeys, "GeographicTypeGeoKey");
+}
+
+function resolveSourceCrs(geoKeys, filePath) {
+  const modelType = numericGeoKey(geoKeys, "GTModelTypeGeoKey");
+  const projectedEpsg = projectedEpsgFromGeoKeys(geoKeys);
+  const geographicEpsg = geographicEpsgFromGeoKeys(geoKeys);
+
+  if (projectedEpsg || modelType === 1) {
+    const utmZone = resolveUtmZone(geoKeys, filePath);
+    UTM_ZONE = utmZone;
+    return {
+      kind: "utm",
+      units: "metres",
+      epsg: projectedEpsg,
+      utmZone,
+      horizontal: projectedEpsg
+        ? `EPSG:${projectedEpsg} / UTM zone ${utmZone} projected metres`
+        : `UTM zone ${utmZone} projected metres`,
+    };
+  }
+
+  if (geographicEpsg || modelType === 2) {
+    return {
+      kind: "geographic",
+      units: "degrees",
+      epsg: geographicEpsg,
+      utmZone: null,
+      horizontal: geographicEpsg
+        ? `EPSG:${geographicEpsg} geographic degrees`
+        : "geographic degrees",
+    };
+  }
+
+  const zoneFromPath = inferUtmZoneFromPath(filePath);
+  if (zoneFromPath || (Number.isFinite(UTM_ZONE) && UTM_ZONE >= 1 && UTM_ZONE <= 60)) {
+    const utmZone = zoneFromPath ?? UTM_ZONE;
+    UTM_ZONE = utmZone;
+    return {
+      kind: "utm",
+      units: "metres",
+      epsg: null,
+      utmZone,
+      horizontal: `UTM zone ${utmZone} projected metres`,
+    };
+  }
+
+  throw new Error(`Could not infer GeoTIFF CRS from ${filePath}`);
 }
 
 function inferUtmZoneFromGeoKeys(geoKeys) {
@@ -101,6 +166,7 @@ function resolveInputDir() {
     return path.resolve(process.cwd(), requestedInputDir);
   }
 
+  if (directoryHasGeoTiffs(rawOpenTopographyDemInputDir)) return rawOpenTopographyDemInputDir;
   if (directoryHasGeoTiffs(rawLidarInputDir)) return rawLidarInputDir;
   if (directoryHasGeoTiffs(rawUsgsLidarInputDir)) return rawUsgsLidarInputDir;
   if (directoryHasGeoTiffs(defaultInputDir)) return defaultInputDir;
@@ -271,26 +337,26 @@ function aggregateRasterStats(statsByTile) {
   };
 }
 
-function combineProjectedBounds(tiles) {
+function combineSourceBounds(tiles) {
   return [
-    Math.min(...tiles.map((tile) => tile.projectedBounds[0])),
-    Math.min(...tiles.map((tile) => tile.projectedBounds[1])),
-    Math.max(...tiles.map((tile) => tile.projectedBounds[2])),
-    Math.max(...tiles.map((tile) => tile.projectedBounds[3])),
+    Math.min(...tiles.map((tile) => tile.sourceBounds[0])),
+    Math.min(...tiles.map((tile) => tile.sourceBounds[1])),
+    Math.max(...tiles.map((tile) => tile.sourceBounds[2])),
+    Math.max(...tiles.map((tile) => tile.sourceBounds[3])),
   ];
 }
 
-function projectedBoundsToObject([west, south, east, north]) {
-  return { crs: `UTM zone ${UTM_ZONE} projected metres`, west, south, east, north };
+function sourceBoundsToObject(sourceCrs, [west, south, east, north]) {
+  return { crs: sourceCrs.horizontal, west, south, east, north };
 }
 
-function mosaicRasterDescriptor(projectedBounds, resolution) {
+function mosaicRasterDescriptor(sourceBounds, resolution) {
   const resolutionX = Math.abs(resolution[0] || 1);
   const resolutionY = Math.abs(resolution[1] || resolutionX);
 
   return {
-    width: Math.max(1, Math.round((projectedBounds[2] - projectedBounds[0]) / resolutionX)),
-    height: Math.max(1, Math.round((projectedBounds[3] - projectedBounds[1]) / resolutionY)),
+    width: Math.max(1, Math.round((sourceBounds[2] - sourceBounds[0]) / resolutionX)),
+    height: Math.max(1, Math.round((sourceBounds[3] - sourceBounds[1]) / resolutionY)),
     resolutionX,
     resolutionY,
   };
@@ -310,7 +376,7 @@ async function readDsmSourceTile(filePath, index) {
     height: image.getHeight(),
     origin: image.getOrigin(),
     resolution: image.getResolution(),
-    projectedBounds: image.getBoundingBox(),
+    sourceBounds: image.getBoundingBox(),
     geoKeys: image.getGeoKeys ? image.getGeoKeys() : {},
     noData,
     raster,
@@ -322,9 +388,12 @@ function clampIndex(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function createSourceTileIndex(tiles, projectedBounds) {
-  const [west, south, east, north] = projectedBounds;
-  const cellSize = SOURCE_TILE_INDEX_CELL_SIZE_M;
+function createSourceTileIndex(tiles, sourceBounds, sourceCrs) {
+  const [west, south, east, north] = sourceBounds;
+  const cellSize =
+    sourceCrs.kind === "geographic"
+      ? SOURCE_TILE_INDEX_CELL_SIZE_DEGREES
+      : SOURCE_TILE_INDEX_CELL_SIZE_M;
   const width = Math.max(1, Math.ceil((east - west) / cellSize));
   const height = Math.max(1, Math.ceil((north - south) / cellSize));
   const cells = new Map();
@@ -340,7 +409,7 @@ function createSourceTileIndex(tiles, projectedBounds) {
   };
 
   for (const tile of tiles) {
-    const [tileWest, tileSouth, tileEast, tileNorth] = tile.projectedBounds;
+    const [tileWest, tileSouth, tileEast, tileNorth] = tile.sourceBounds;
     const minX = clampIndex(Math.floor((tileWest - west) / cellSize), 0, width - 1);
     const maxX = clampIndex(Math.floor((tileEast - west) / cellSize), 0, width - 1);
     const minY = clampIndex(Math.floor((tileSouth - south) / cellSize), 0, height - 1);
@@ -353,27 +422,28 @@ function createSourceTileIndex(tiles, projectedBounds) {
     }
   }
 
-  return { projectedBounds, cellSize, width, height, cells };
+  return { sourceBounds, cellSize, width, height, cells };
 }
 
-function createDsmDataset(tiles, inputDir) {
+function createDsmDataset(tiles, inputDir, sourceCrs) {
   if (tiles.length === 0) {
-    throw new Error("Cannot create DSM dataset without source tiles");
+    throw new Error("Cannot create height dataset without source tiles");
   }
 
-  const projectedBounds = combineProjectedBounds(tiles);
+  const sourceBounds = combineSourceBounds(tiles);
   const resolution = tiles[0].resolution;
-  const raster = mosaicRasterDescriptor(projectedBounds, resolution);
+  const raster = mosaicRasterDescriptor(sourceBounds, resolution);
   const stats = aggregateRasterStats(tiles.map((tile) => tile.stats));
 
   return {
     inputDir,
     tiles,
-    projectedBounds,
+    sourceCrs,
+    sourceBounds,
     resolution,
     raster,
     stats,
-    tileIndex: createSourceTileIndex(tiles, projectedBounds),
+    tileIndex: createSourceTileIndex(tiles, sourceBounds, sourceCrs),
   };
 }
 
@@ -462,8 +532,7 @@ function createOverlayPng(dataset, stats, bounds) {
     for (let x = 0; x < overlayWidth; x += 1) {
       const u = overlayWidth === 1 ? 0 : x / (overlayWidth - 1);
       const lon = lerp(bounds.west, bounds.east, u);
-      const [easting, northing] = lonLatToUtm(lon, lat, UTM_ZONE);
-      const value = sampleDatasetAtProjectedOrNull(dataset, easting, northing);
+      const value = sampleDatasetAtLonLatOrNull(dataset, lon, lat);
       const offset = (y * overlayWidth + x) * 4;
 
       if (value === null) {
@@ -490,16 +559,16 @@ function createOriginalTifHeatmapPng(dataset, stats) {
   const heatmapWidth = Math.min(OVERLAY_MAX_WIDTH, dataset.raster.width);
   const heatmapHeight = Math.max(1, Math.round((dataset.raster.height / dataset.raster.width) * heatmapWidth));
   const rgba = Buffer.alloc(heatmapWidth * heatmapHeight * 4);
-  const [west, south, east, north] = dataset.projectedBounds;
+  const [west, south, east, north] = dataset.sourceBounds;
 
   for (let y = 0; y < heatmapHeight; y += 1) {
     const v = heatmapHeight === 1 ? 0 : y / (heatmapHeight - 1);
-    const northing = lerp(north, south, v);
+    const sourceY = lerp(north, south, v);
 
     for (let x = 0; x < heatmapWidth; x += 1) {
       const u = heatmapWidth === 1 ? 0 : x / (heatmapWidth - 1);
-      const easting = lerp(west, east, u);
-      const value = sampleDatasetAtProjectedOrNull(dataset, easting, northing);
+      const sourceX = lerp(west, east, u);
+      const value = sampleDatasetAtSourceOrNull(dataset, sourceX, sourceY);
       const offset = (y * heatmapWidth + x) * 4;
 
       if (value === null) {
@@ -522,13 +591,21 @@ function createOriginalTifHeatmapPng(dataset, stats) {
   };
 }
 
-function lonLatBoundsFromProjectedBounds([westEasting, southNorthing, eastEasting, northNorthing]) {
-  const corners = [
-    { name: "northWest", lonLat: utmToLonLat(westEasting, northNorthing, UTM_ZONE) },
-    { name: "northEast", lonLat: utmToLonLat(eastEasting, northNorthing, UTM_ZONE) },
-    { name: "southEast", lonLat: utmToLonLat(eastEasting, southNorthing, UTM_ZONE) },
-    { name: "southWest", lonLat: utmToLonLat(westEasting, southNorthing, UTM_ZONE) },
-  ];
+function lonLatBoundsFromSourceBounds(sourceCrs, [west, south, east, north]) {
+  const corners =
+    sourceCrs.kind === "geographic"
+      ? [
+          { name: "northWest", lonLat: [west, north] },
+          { name: "northEast", lonLat: [east, north] },
+          { name: "southEast", lonLat: [east, south] },
+          { name: "southWest", lonLat: [west, south] },
+        ]
+      : [
+          { name: "northWest", lonLat: utmToLonLat(west, north, sourceCrs.utmZone) },
+          { name: "northEast", lonLat: utmToLonLat(east, north, sourceCrs.utmZone) },
+          { name: "southEast", lonLat: utmToLonLat(east, south, sourceCrs.utmZone) },
+          { name: "southWest", lonLat: utmToLonLat(west, south, sourceCrs.utmZone) },
+        ];
 
   return {
     corners,
@@ -561,11 +638,11 @@ function tileRangeForBounds(tilingScheme, bounds, level) {
   };
 }
 
-function sampleRasterAtProjectedOrNull(dsm, easting, northing) {
+function sampleRasterAtSourceOrNull(dsm, sourceX, sourceY) {
   // image.getOrigin() describes the outer raster origin. Subtracting 0.5 is the
   // inverse of the pixel-center mapping used when writing coordinates out.
-  const x = (easting - dsm.origin[0]) / dsm.resolution[0] - 0.5;
-  const y = (northing - dsm.origin[1]) / dsm.resolution[1] - 0.5;
+  const x = (sourceX - dsm.origin[0]) / dsm.resolution[0] - 0.5;
+  const y = (sourceY - dsm.origin[1]) / dsm.resolution[1] - 0.5;
 
   if (x < 0 || y < 0 || x > dsm.width - 1 || y > dsm.height - 1) {
     return null;
@@ -603,29 +680,29 @@ function sampleRasterAtProjectedOrNull(dsm, easting, northing) {
   return weightedSamples.reduce((sum, [value, weight]) => sum + value * weight, 0) / weightSum;
 }
 
-function sourceTilesForProjected(dataset, easting, northing) {
-  const [west, south, east, north] = dataset.projectedBounds;
-  if (easting < west || easting > east || northing < south || northing > north) {
+function sourceTilesForCoordinate(dataset, sourceX, sourceY) {
+  const [west, south, east, north] = dataset.sourceBounds;
+  if (sourceX < west || sourceX > east || sourceY < south || sourceY > north) {
     return [];
   }
 
   const { cellSize, width, height, cells } = dataset.tileIndex;
-  const x = clampIndex(Math.floor((easting - west) / cellSize), 0, width - 1);
-  const y = clampIndex(Math.floor((northing - south) / cellSize), 0, height - 1);
+  const x = clampIndex(Math.floor((sourceX - west) / cellSize), 0, width - 1);
+  const y = clampIndex(Math.floor((sourceY - south) / cellSize), 0, height - 1);
 
   return cells.get(`${x},${y}`) ?? [];
 }
 
-function sampleDatasetAtProjectedOrNull(dataset, easting, northing) {
-  // The DSM folder is a projected UTM mosaic. Indexing candidates in UTM space
-  // keeps every Cesium terrain sample from scanning every source GeoTIFF.
-  const candidates = sourceTilesForProjected(dataset, easting, northing);
+function sampleDatasetAtSourceOrNull(dataset, sourceX, sourceY) {
+  // Indexing candidates in source CRS space keeps every Cesium terrain sample
+  // from scanning every source GeoTIFF.
+  const candidates = sourceTilesForCoordinate(dataset, sourceX, sourceY);
   if (candidates.length === 0) return null;
 
   let sum = 0;
   let count = 0;
   for (const tile of candidates) {
-    const value = sampleRasterAtProjectedOrNull(tile, easting, northing);
+    const value = sampleRasterAtSourceOrNull(tile, sourceX, sourceY);
     if (value === null) continue;
     sum += value;
     count += 1;
@@ -636,8 +713,21 @@ function sampleDatasetAtProjectedOrNull(dataset, easting, northing) {
   return count > 0 ? sum / count : null;
 }
 
-function sampleDatasetAtProjected(dataset, easting, northing) {
-  return sampleDatasetAtProjectedOrNull(dataset, easting, northing) ?? FALLBACK_HEIGHT_M;
+function sourceCoordinateFromLonLat(dataset, lonDeg, latDeg) {
+  if (dataset.sourceCrs.kind === "geographic") {
+    return [lonDeg, latDeg];
+  }
+
+  return lonLatToUtm(lonDeg, latDeg, dataset.sourceCrs.utmZone);
+}
+
+function sampleDatasetAtLonLatOrNull(dataset, lonDeg, latDeg) {
+  const [sourceX, sourceY] = sourceCoordinateFromLonLat(dataset, lonDeg, latDeg);
+  return sampleDatasetAtSourceOrNull(dataset, sourceX, sourceY);
+}
+
+function sampleDatasetAtLonLat(dataset, lonDeg, latDeg) {
+  return sampleDatasetAtLonLatOrNull(dataset, lonDeg, latDeg) ?? FALLBACK_HEIGHT_M;
 }
 
 function buildHeightTile(dataset, tilingScheme, x, y, level) {
@@ -653,8 +743,7 @@ function buildHeightTile(dataset, tilingScheme, x, y, level) {
       const u = TILE_SIZE === 1 ? 0 : col / (TILE_SIZE - 1);
       const lonRad = Cesium.Math.lerp(rectangle.west, rectangle.east, u);
       const lonDeg = Cesium.Math.toDegrees(lonRad);
-      const [easting, northing] = lonLatToUtm(lonDeg, latDeg, UTM_ZONE);
-      heights[row * TILE_SIZE + col] = sampleDatasetAtProjected(dataset, easting, northing);
+      heights[row * TILE_SIZE + col] = sampleDatasetAtLonLat(dataset, lonDeg, latDeg);
     }
   }
 
@@ -682,7 +771,7 @@ async function main() {
   const inputPaths = await listGeoTiffPaths(inputDir);
   const sourceTiles = [];
 
-  console.log(`Reading ${inputPaths.length} DSM GeoTIFF source tile(s) from ${path.relative(repoRoot, inputDir)}`);
+  console.log(`Reading ${inputPaths.length} height GeoTIFF source tile(s) from ${path.relative(repoRoot, inputDir)}`);
   for (let index = 0; index < inputPaths.length; index += 1) {
     sourceTiles.push(await readDsmSourceTile(inputPaths[index], index));
     if ((index + 1) % 10 === 0 || index + 1 === inputPaths.length) {
@@ -690,9 +779,9 @@ async function main() {
     }
   }
 
-  UTM_ZONE = resolveUtmZone(sourceTiles[0]?.geoKeys, sourceTiles[0]?.path ?? inputDir);
-  const dataset = createDsmDataset(sourceTiles, inputDir);
-  const { bounds, corners } = lonLatBoundsFromProjectedBounds(dataset.projectedBounds);
+  const sourceCrs = resolveSourceCrs(sourceTiles[0]?.geoKeys, sourceTiles[0]?.path ?? inputDir);
+  const dataset = createDsmDataset(sourceTiles, inputDir, sourceCrs);
+  const { bounds, corners } = lonLatBoundsFromSourceBounds(dataset.sourceCrs, dataset.sourceBounds);
   const stats = dataset.stats;
   const overlay = createOverlayPng(dataset, stats, bounds);
   const originalTifHeatmap = createOriginalTifHeatmapPng(dataset, stats);
@@ -738,7 +827,10 @@ async function main() {
             x: tile.resolution[0],
             y: tile.resolution[1],
           },
-          projectedBounds: projectedBoundsToObject(tile.projectedBounds),
+          sourceBounds: sourceBoundsToObject(dataset.sourceCrs, tile.sourceBounds),
+          ...(dataset.sourceCrs.kind === "utm"
+            ? { projectedBounds: sourceBoundsToObject(dataset.sourceCrs, tile.sourceBounds) }
+            : {}),
           stats: {
             min: tile.stats.min,
             max: tile.stats.max,
@@ -776,10 +868,16 @@ async function main() {
           noData: sourceTiles[0].noData,
         },
         sourceCrs: {
-          horizontal: `UTM zone ${UTM_ZONE} projected metres`,
-          vertical: "CGVD2013(CGG2013), used directly as metres for this demo",
+          kind: dataset.sourceCrs.kind,
+          horizontal: dataset.sourceCrs.horizontal,
+          units: dataset.sourceCrs.units,
+          epsg: dataset.sourceCrs.epsg,
+          vertical: "Source GeoTIFF elevation values, used directly as metres",
         },
-        projectedBounds: projectedBoundsToObject(dataset.projectedBounds),
+        sourceBounds: sourceBoundsToObject(dataset.sourceCrs, dataset.sourceBounds),
+        ...(dataset.sourceCrs.kind === "utm"
+          ? { projectedBounds: sourceBoundsToObject(dataset.sourceCrs, dataset.sourceBounds) }
+          : {}),
         bounds,
         corners: Object.fromEntries(
           corners.map(({ name, lonLat: [lon, lat] }) => [name, { lon, lat }])
@@ -794,7 +892,7 @@ async function main() {
 
   console.log(`Wrote ${tileCount} heightmap tiles to ${path.relative(repoRoot, outputDir)}`);
   console.log(
-    `Mosaic ${dataset.raster.width} x ${dataset.raster.height} source metres from ${sourceTiles.length} GeoTIFFs`
+    `Mosaic ${dataset.raster.width} x ${dataset.raster.height} source ${dataset.sourceCrs.units} from ${sourceTiles.length} GeoTIFFs`
   );
   console.log(`Levels ${MIN_LEVEL}-${MAX_LEVEL}, ${TILE_SIZE} x ${TILE_SIZE} samples per tile`);
 }
