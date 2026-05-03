@@ -33,7 +33,7 @@ import {
 import type { ProcedureProtectionSurface } from "../data/procedureProtectionSurfaces";
 import { isMissingJsonAsset } from "../utils/fetchJson";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
-import { distanceNm, type GeoPoint } from "../utils/procedureGeoMath";
+import { distanceNm, interpolateGreatCircle, type GeoPoint } from "../utils/procedureGeoMath";
 import {
   buildVariableWidthRibbon,
   type VariableWidthRibbonGeometry,
@@ -53,8 +53,10 @@ const FINAL_VERTICAL_REFERENCE_COLOR = Cesium.Color.CYAN.withAlpha(0.88);
 const FINAL_VERTICAL_REFERENCE_BAND_COLOR = Cesium.Color.CYAN.withAlpha(0.16);
 const SEGMENT_VERTICAL_PROFILE_AID_COLOR = Cesium.Color.DEEPSKYBLUE.withAlpha(0.13);
 const TURN_FILL_COLOR = Cesium.Color.ORANGE.withAlpha(0.22);
-const CONNECTOR_COLOR = Cesium.Color.ORANGE.withAlpha(0.32);
+const CONNECTOR_COLOR = Cesium.Color.ORANGE.withAlpha(0.06);
 const CONNECTOR_LINE_COLOR = Cesium.Color.ORANGE.withAlpha(0.92);
+const FINAL_OEA_TAPER_MARKER_COLOR = Cesium.Color.YELLOW.withAlpha(0.96);
+const FINAL_OEA_PFAF_MARKER_COLOR = Cesium.Color.LIME.withAlpha(0.98);
 const MISSED_SURFACE_COLOR = Cesium.Color.YELLOW.withAlpha(0.24);
 const MISSED_CA_ESTIMATED_SURFACE_COLOR = Cesium.Color.ORANGE.withAlpha(0.26);
 const MISSED_CONNECTOR_SURFACE_COLOR = Cesium.Color.ORANGE.withAlpha(0.18);
@@ -69,6 +71,7 @@ const CA_ENDPOINT_COLOR = Cesium.Color.ORANGE.withAlpha(0.98);
 const OUTLINE_COLOR = Cesium.Color.CYAN.withAlpha(0.28);
 const ENVELOPE_HEIGHT_OFFSET_M = 8;
 const OEA_HEIGHT_OFFSET_M = 18;
+const FINAL_OEA_STATION_MARKER_HEIGHT_OFFSET_M = OEA_HEIGHT_OFFSET_M + 12;
 const LNAV_VNAV_OCS_HEIGHT_OFFSET_M = 28;
 const LNAV_VNAV_OCS_EDGE_HEIGHT_OFFSET_M = LNAV_VNAV_OCS_HEIGHT_OFFSET_M + 2;
 const LNAV_VNAV_OCS_RIB_HEIGHT_OFFSET_M = LNAV_VNAV_OCS_HEIGHT_OFFSET_M + 3;
@@ -81,6 +84,8 @@ const ALTITUDE_CONSTRAINT_LINK_HEIGHT_OFFSET_M = 12;
 const FINAL_VERTICAL_REFERENCE_DEFAULT_HALF_WIDTH_NM = 0.15;
 const FINAL_VERTICAL_REFERENCE_PROTECTION_WIDTH_RATIO = 1;
 const CONNECTOR_HEIGHT_OFFSET_M = 45;
+const ALIGNED_CONNECTOR_FILL_HEIGHT_OFFSET_M = ENVELOPE_HEIGHT_OFFSET_M + 4;
+const ALIGNED_CONNECTOR_LINE_HEIGHT_OFFSET_M = CONNECTOR_HEIGHT_OFFSET_M;
 const MISSED_SURFACE_HEIGHT_OFFSET_M = 58;
 const CA_COURSE_GUIDE_HEIGHT_OFFSET_M = 82;
 const CA_CENTERLINE_HEIGHT_OFFSET_M = 88;
@@ -89,6 +94,32 @@ const TURNING_MISSED_DEBUG_HEIGHT_OFFSET_M = 96;
 const FINAL_SURFACE_STATUS_HEIGHT_OFFSET_M = 110;
 const CA_ENDPOINT_HEIGHT_OFFSET_M = 92;
 const PROCEDURE_ANNOTATION_LABEL_PREFIX = "procedure-annotation-label-";
+const FINAL_OEA_STATION_MARKERS = [
+  {
+    key: "pfaf-minus-03",
+    label: "PFAF -0.3",
+    stationNm: -0.3,
+    description: "LNAV final OEA start and taper start.",
+    pixelSize: 9,
+    color: FINAL_OEA_TAPER_MARKER_COLOR,
+  },
+  {
+    key: "pfaf",
+    label: "PFAF",
+    stationNm: 0,
+    description: "PFAF station on the final approach course.",
+    pixelSize: 11,
+    color: FINAL_OEA_PFAF_MARKER_COLOR,
+  },
+  {
+    key: "pfaf-plus-10",
+    label: "PFAF +1.0",
+    stationNm: 1,
+    description: "LNAV final OEA taper end; fixed-width final OEA begins here.",
+    pixelSize: 9,
+    color: FINAL_OEA_TAPER_MARKER_COLOR,
+  },
+] as const;
 
 function elevatedPoint(point: GeoPoint, altitudeOffsetM: number): GeoPoint {
   return { ...point, altM: point.altM + altitudeOffsetM };
@@ -157,6 +188,30 @@ function addPoint(
 function representativePoint(points: GeoPoint[]): GeoPoint | null {
   if (points.length === 0) return null;
   return points[Math.floor((points.length - 1) / 2)];
+}
+
+function pointAtStationFromSamples(
+  centerline: GeoPoint[],
+  samples: Array<{ stationNm: number }>,
+  stationNm: number,
+): GeoPoint | null {
+  const count = Math.min(centerline.length, samples.length);
+  if (count === 0) return null;
+  if (count === 1 || stationNm <= samples[0].stationNm) return centerline[0];
+
+  for (let index = 0; index < count - 1; index += 1) {
+    const startStationNm = samples[index].stationNm;
+    const endStationNm = samples[index + 1].stationNm;
+    if (stationNm <= endStationNm || index === count - 2) {
+      const spanNm = endStationNm - startStationNm;
+      const ratio = spanNm <= 1e-9
+        ? 0
+        : Math.min(1, Math.max(0, (stationNm - startStationNm) / spanNm));
+      return interpolateGreatCircle(centerline[index], centerline[index + 1], ratio);
+    }
+  }
+
+  return centerline[count - 1];
 }
 
 function isAnnotationLabelId(entityId: string): boolean {
@@ -689,6 +744,107 @@ function precisionSurfaceLabel(surface: ProcedureProtectionSurface): string {
   return suffix.replace(/-/g, " ").toUpperCase();
 }
 
+function nearestFinalOeaWidthSample(
+  samples: ProcedureProtectionSurface["lateral"]["widthSamples"],
+  stationNm: number,
+): ProcedureProtectionSurface["lateral"]["widthSamples"][number] | null {
+  if (samples.length === 0) return null;
+  return samples.reduce((nearest, candidate) =>
+    Math.abs(candidate.stationNm - stationNm) < Math.abs(nearest.stationNm - stationNm)
+      ? candidate
+      : nearest,
+  );
+}
+
+function finalOeaWidthSamplesFromRibbons(
+  primary: VariableWidthRibbonGeometry,
+  secondaryOuter: VariableWidthRibbonGeometry | null,
+): ProcedureProtectionSurface["lateral"]["widthSamples"] {
+  return primary.halfWidthNmSamples.map((sample) => ({
+    stationNm: sample.stationNm,
+    primaryHalfWidthNm: sample.halfWidthNm,
+    secondaryOuterHalfWidthNm: secondaryOuter
+      ? nearestHalfWidthNm(secondaryOuter.halfWidthNmSamples, sample.stationNm)
+      : undefined,
+  }));
+}
+
+function addFinalOeaStationMarkers(args: {
+  viewer: Cesium.Viewer;
+  bundle: ProcedureRenderBundle;
+  branchBundle: BranchGeometryBundle;
+  segmentBundle: ProcedureSegmentRenderBundle | null;
+  baseId: string;
+  segmentName: string;
+  centerline: GeoPoint[];
+  widthSamples: ProcedureProtectionSurface["lateral"]["widthSamples"];
+  visible: boolean;
+  annotationVisible: boolean;
+  displayLevel: ProcedureDisplayLevel;
+  diagnostics: string[];
+}): string[] {
+  const ids: string[] = [];
+  if (args.centerline.length === 0 || args.widthSamples.length === 0) return ids;
+
+  FINAL_OEA_STATION_MARKERS.forEach((marker) => {
+    const point = pointAtStationFromSamples(args.centerline, args.widthSamples, marker.stationNm);
+    if (!point) return;
+
+    const widthSample = nearestFinalOeaWidthSample(args.widthSamples, marker.stationNm);
+    const markerId = `${args.baseId}-oea-station-${marker.key}`;
+    const annotation = annotationBase({
+      entityId: markerId,
+      label: marker.label,
+      title: `${args.segmentName} ${marker.label} LNAV OEA station`,
+      kind: "FINAL_OEA",
+      status: "SOURCE_BACKED",
+      bundle: args.bundle,
+      branchBundle: args.branchBundle,
+      segment: args.segmentBundle?.segment,
+      legs: args.segmentBundle?.legs,
+      parameters: [
+        ...surfaceSegmentParams(args.segmentBundle),
+        param(
+          "Station",
+          `${marker.stationNm >= 0 ? "+" : ""}${marker.stationNm.toFixed(1)} NM from PFAF`,
+        ),
+        param("Marker", marker.description),
+        param("Primary half-width", widthSample ? `${widthSample.primaryHalfWidthNm.toFixed(2)} NM` : null),
+        param(
+          "Secondary outer half-width",
+          widthSample?.secondaryOuterHalfWidthNm === undefined
+            ? null
+            : `${widthSample.secondaryOuterHalfWidthNm.toFixed(2)} NM`,
+        ),
+        param("Taper rule", "FAA 8260.58D formula 3-2-1; fixed width after PFAF +1.0 NM"),
+      ],
+      diagnostics: args.diagnostics,
+    });
+    addPoint(
+      args.viewer,
+      markerId,
+      `${args.segmentName} ${marker.label} LNAV OEA station`,
+      point,
+      procedureEntityShow(args.visible, annotation, args.displayLevel),
+      marker.pixelSize,
+      marker.color,
+      FINAL_OEA_STATION_MARKER_HEIGHT_OFFSET_M,
+      annotation,
+    );
+    ids.push(markerId);
+
+    const labelId = addAnnotationLabel(
+      args.viewer,
+      annotation,
+      elevatedPoint(point, FINAL_OEA_STATION_MARKER_HEIGHT_OFFSET_M),
+      procedureEntityShow(args.visible, annotation, args.displayLevel, true, args.annotationVisible),
+    );
+    if (labelId) ids.push(labelId);
+  });
+
+  return ids;
+}
+
 function addAnnotationLabel(
   viewer: Cesium.Viewer,
   annotation: ProcedureEntityAnnotation,
@@ -837,7 +993,7 @@ function addRibbonCrossRibs(
   altitudeOffsetM: number,
   annotation?: ProcedureEntityAnnotation,
 ): string[] {
-  if (!ribbon || ribbon.leftGeoBoundary.length < 3 || ribbon.rightGeoBoundary.length < 3) return [];
+  if (!ribbon || ribbon.leftGeoBoundary.length < 2 || ribbon.rightGeoBoundary.length < 2) return [];
 
   const ribIds: string[] = [];
   const lastIndex = Math.min(ribbon.leftGeoBoundary.length, ribbon.rightGeoBoundary.length) - 1;
@@ -1241,6 +1397,25 @@ function addSegmentEntities(
       oeaSecondaryAnnotation,
     );
     ids.push(oeaSecondaryId);
+    ids.push(
+      ...addFinalOeaStationMarkers({
+        viewer,
+        bundle,
+        branchBundle,
+        segmentBundle,
+        baseId,
+        segmentName,
+        centerline: segmentBundle.finalOea.centerline.geoPositions,
+        widthSamples: finalOeaWidthSamplesFromRibbons(
+          segmentBundle.finalOea.primary,
+          segmentBundle.finalOea.secondaryOuter,
+        ),
+        visible,
+        annotationVisible,
+        displayLevel,
+        diagnostics: segmentDiagnostics,
+      }),
+    );
   }
 
   if (!hasUnifiedSurfaces && segmentBundle.lnavVnavOcs) {
@@ -1449,7 +1624,7 @@ function addSegmentEntities(
       segmentBundle.alignedConnector.primary,
       procedureEntityShow(visible, connectorAnnotation, displayLevel),
       CONNECTOR_COLOR,
-      CONNECTOR_HEIGHT_OFFSET_M,
+      ALIGNED_CONNECTOR_FILL_HEIGHT_OFFSET_M,
       connectorAnnotation,
     );
     ids.push(connectorPrimaryId);
@@ -1474,7 +1649,7 @@ function addSegmentEntities(
       segmentBundle.alignedConnector.secondaryOuter,
       procedureEntityShow(visible, connectorSecondaryAnnotation, displayLevel),
       CONNECTOR_COLOR,
-      CONNECTOR_HEIGHT_OFFSET_M,
+      ALIGNED_CONNECTOR_FILL_HEIGHT_OFFSET_M,
       connectorSecondaryAnnotation,
     );
     ids.push(connectorSecondaryId);
@@ -1487,7 +1662,17 @@ function addSegmentEntities(
         segmentBundle.alignedConnector.primary,
         procedureEntityShow(visible, connectorAnnotation, displayLevel),
         CONNECTOR_LINE_COLOR,
-        CONNECTOR_HEIGHT_OFFSET_M,
+        ALIGNED_CONNECTOR_LINE_HEIGHT_OFFSET_M,
+        connectorAnnotation,
+      ),
+      ...addRibbonCrossRibs(
+        viewer,
+        `${baseId}-connector-primary`,
+        `${segmentName} aligned connector primary`,
+        segmentBundle.alignedConnector.primary,
+        procedureEntityShow(visible, connectorAnnotation, displayLevel),
+        CONNECTOR_LINE_COLOR,
+        ALIGNED_CONNECTOR_LINE_HEIGHT_OFFSET_M,
         connectorAnnotation,
       ),
       ...addRibbonBoundaryPolylines(
@@ -1497,7 +1682,7 @@ function addSegmentEntities(
         segmentBundle.alignedConnector.secondaryOuter,
         procedureEntityShow(visible, connectorSecondaryAnnotation, displayLevel),
         CONNECTOR_LINE_COLOR,
-        CONNECTOR_HEIGHT_OFFSET_M,
+        ALIGNED_CONNECTOR_LINE_HEIGHT_OFFSET_M,
         connectorSecondaryAnnotation,
       ),
     );
@@ -1938,6 +2123,22 @@ function addBranchProtectionSurfaceEntities(
         );
         ids.push(secondaryId);
       }
+      ids.push(
+        ...addFinalOeaStationMarkers({
+          viewer,
+          bundle,
+          branchBundle,
+          segmentBundle,
+          baseId,
+          segmentName,
+          centerline: surface.centerline.geoPositions,
+          widthSamples: surface.lateral.widthSamples,
+          visible,
+          annotationVisible,
+          displayLevel,
+          diagnostics,
+        }),
+      );
       return;
     }
 

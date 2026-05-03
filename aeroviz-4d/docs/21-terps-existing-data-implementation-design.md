@@ -128,6 +128,11 @@ narrows toward `PFAF + 1.0 NM`; it does not continue narrowing all the way to
 the runway. After `PFAF + 1.0 NM`, it remains fixed through the threshold
 extension.
 
+Rendering rule: draw `FINAL_LNAV_OEA` as the primary/secondary filled
+footprint, and draw station markers at `PFAF -0.3`, `PFAF`, and `PFAF +1.0`.
+The intermediate connector must use a lighter fill with emphasized boundaries
+so it is not mistaken for the final OEA itself.
+
 ### Aligned LNAV Intermediate-to-Final Connector
 
 Source rule: FAA Order 8260.58D, section 3-1-4(d) and 3-1-5(b).

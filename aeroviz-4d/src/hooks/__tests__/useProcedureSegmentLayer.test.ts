@@ -927,8 +927,31 @@ describe("useProcedureSegmentLayer", () => {
       ),
     ).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-final-surface-status"))).toBe(true);
+    expect(entities.some((entity) => String(entity.id).includes("-oea-station-pfaf-minus-03"))).toBe(true);
+    expect(
+      entities.some(
+        (entity) =>
+          String(entity.id).includes("-oea-station-pfaf") &&
+          entity.point?.color.name === "LIME" &&
+          entity.__aeroVizProcedureAnnotation?.parameters.some(
+            (parameter: { label: string; value: string }) =>
+              parameter.label === "Taper rule" &&
+              parameter.value.includes("formula 3-2-1"),
+          ),
+      ),
+    ).toBe(true);
+    expect(entities.some((entity) => String(entity.id).includes("-oea-station-pfaf-plus-10"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-connector-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-connector-primary-boundary"))).toBe(true);
+    expect(entities.some((entity) => String(entity.id).includes("-connector-primary-rib-"))).toBe(true);
+    expect(
+      entities.some(
+        (entity) =>
+          String(entity.id).endsWith("-connector-primary") &&
+          entity.polygon?.material.name === "ORANGE" &&
+          entity.polygon.material.alpha === 0.06,
+      ),
+    ).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-missed-surface-primary"))).toBe(true);
     expect(
       entities.some(
