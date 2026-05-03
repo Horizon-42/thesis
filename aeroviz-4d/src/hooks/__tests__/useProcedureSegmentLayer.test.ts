@@ -658,7 +658,13 @@ describe("useProcedureSegmentLayer", () => {
         (entity) =>
           String(entity.id).includes("-vertical-profile") &&
           entity.polygon.material.name === "DEEPSKYBLUE" &&
-          entity.__aeroVizProcedureAnnotation?.kind === "SEGMENT_VERTICAL_PROFILE",
+          entity.__aeroVizProcedureAnnotation?.kind === "SEGMENT_VERTICAL_PROFILE" &&
+          entity.__aeroVizProcedureAnnotation?.status === "PROFILE_AID" &&
+          entity.__aeroVizProcedureAnnotation?.parameters.some(
+            (parameter: { label: string; value: string }) =>
+              parameter.label === "Protection meaning" &&
+              parameter.value.includes("Display aid only"),
+          ),
       ),
     ).toBe(true);
     const finalVerticalProfile = entities.find((entity) =>
@@ -830,10 +836,17 @@ describe("useProcedureSegmentLayer", () => {
     expect(ocs.show).toBe(true);
     expect(finalVerticalReference.show).toBe(true);
     expect(finalVerticalBand.show).toBe(true);
-    expect(verticalProfile.show).toBe(true);
+    expect(verticalProfile.show).toBe(false);
     expect(missedConnectorSurface.show).toBe(true);
     expect(caMahfConnector.show).toBe(true);
     expect(turnFill.show).toBe(false);
+    expect(debugSurface.show).toBe(false);
+
+    setProcedureDisplayLevel("VISUAL_AID");
+    rerender();
+
+    expect(verticalProfile.show).toBe(true);
+    expect(turnFill.show).toBe(true);
     expect(debugSurface.show).toBe(false);
 
     setProcedureDisplayLevel("DEBUG");

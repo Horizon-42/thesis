@@ -50,7 +50,7 @@ const LNAV_VNAV_OCS_RIB_COLOR = Cesium.Color.MAGENTA.withAlpha(0.72);
 const PRECISION_FINAL_SURFACE_COLOR = Cesium.Color.MAGENTA.withAlpha(0.18);
 const FINAL_VERTICAL_REFERENCE_COLOR = Cesium.Color.CYAN.withAlpha(0.88);
 const FINAL_VERTICAL_REFERENCE_BAND_COLOR = Cesium.Color.CYAN.withAlpha(0.16);
-const SEGMENT_VERTICAL_PROFILE_SURFACE_COLOR = Cesium.Color.DEEPSKYBLUE.withAlpha(0.13);
+const SEGMENT_VERTICAL_PROFILE_AID_COLOR = Cesium.Color.DEEPSKYBLUE.withAlpha(0.13);
 const TURN_FILL_COLOR = Cesium.Color.ORANGE.withAlpha(0.22);
 const CONNECTOR_COLOR = Cesium.Color.ORANGE.withAlpha(0.32);
 const CONNECTOR_LINE_COLOR = Cesium.Color.ORANGE.withAlpha(0.92);
@@ -1758,20 +1758,22 @@ function addBranchVerticalProfileEntity(
     const diagnostics = sectionSegmentBundles.flatMap((segmentBundle) =>
       segmentBundle.diagnostics.map((diagnostic) => diagnostic.message),
     );
-    const profileTitle = `${bundle.procedureName} ${branchBundle.branchName} fix vertical profile`;
+    const profileTitle = `${bundle.procedureName} ${branchBundle.branchName} fix vertical profile aid`;
     const annotation = annotationBase({
       entityId,
-      label: "Fix vertical profile",
+      label: "Profile aid",
       title: hasMultipleSections ? `${profileTitle} ${index + 1}` : profileTitle,
       kind: "SEGMENT_VERTICAL_PROFILE",
-      status: "ESTIMATED",
+      status: "PROFILE_AID",
       bundle,
       branchBundle,
       legs: sectionLegs,
       parameters: [
         param("Fixes", section.points.map((point) => point.fixIdent).join(" -> ")),
         param("Segments", section.segmentTypes.map(compactSegmentType).join(" -> ")),
-        param("Width basis", "Primary protected area"),
+        param("Aid type", "Fix altitude profile"),
+        param("Width basis", "Primary footprint width for readability"),
+        param("Protection meaning", "Display aid only; not OEA, OCS, TERPS, or a protected surface"),
       ],
       diagnostics,
       sourceRefs: sourceRefsFromLegs(sectionLegs),
@@ -1783,7 +1785,7 @@ function addBranchVerticalProfileEntity(
       annotation.title,
       verticalProfileRibbon,
       procedureEntityShow(visible, annotation, displayLevel),
-      SEGMENT_VERTICAL_PROFILE_SURFACE_COLOR,
+      SEGMENT_VERTICAL_PROFILE_AID_COLOR,
       SEGMENT_VERTICAL_PROFILE_HEIGHT_OFFSET_M,
       annotation,
     );

@@ -34,6 +34,7 @@ const annotation: ProcedureEntityAnnotation = {
 describe("procedureAnnotations", () => {
   it("formats construction status labels", () => {
     expect(annotationStatusLabel("DEBUG_ESTIMATE")).toBe("Debug Estimate");
+    expect(annotationStatusLabel("PROFILE_AID")).toBe("Profile Aid");
   });
 
   it("explains estimated LNAV/VNAV OCS geometry", () => {
@@ -46,8 +47,8 @@ describe("procedureAnnotations", () => {
     expect(procedureAnnotationMeaning("SEGMENT_ENVELOPE_SECONDARY", "SOURCE_BACKED")).toContain(
       "not an OCS",
     );
-    expect(procedureAnnotationMeaning("SEGMENT_VERTICAL_PROFILE", "ESTIMATED")).toContain(
-      "adjacent procedure fixes",
+    expect(procedureAnnotationMeaning("SEGMENT_VERTICAL_PROFILE", "PROFILE_AID")).toContain(
+      "Display-only fix vertical profile aid",
     );
     expect(procedureAnnotationMeaning("CA_MAHF_CONNECTOR", "ESTIMATED")).toContain(
       "CA endpoint",
@@ -84,9 +85,9 @@ describe("procedureAnnotations", () => {
       procedureAnnotationDisplayLevel({
         ...annotation,
         kind: "SEGMENT_VERTICAL_PROFILE",
-        status: "ESTIMATED",
+        status: "PROFILE_AID",
       }),
-    ).toBe("ESTIMATED");
+    ).toBe("VISUAL_AID");
     expect(
       procedureAnnotationDisplayLevel({
         ...annotation,

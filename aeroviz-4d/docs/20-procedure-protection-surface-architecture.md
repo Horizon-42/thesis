@@ -250,11 +250,14 @@ Remaining Phase 2 work:
 
 ### Phase 3 - Profile Aid Cleanup
 
-1. Rename `SEGMENT_VERTICAL_PROFILE` display text to make it clear it is a
-   profile aid.
-2. Default it to Debug or Visual Aid unless the user explicitly asks for
-   profile overlays.
-3. Ensure it never uses language like OEA, OCS, or protected surface.
+Implemented:
+
+- `SEGMENT_VERTICAL_PROFILE` annotations now display as profile aids.
+- The status is `PROFILE_AID`, not estimated protection.
+- The display level is `Visual Aid`, so the blue profile ribbon no longer
+  appears in `Estimated` protection views.
+- Popup wording explicitly says it is not OEA, OCS, TERPS, or a protected
+  surface.
 
 ### Phase 4 - Rule Refinement
 

@@ -25,6 +25,7 @@ export type ProcedureAnnotationStatus =
   | "SOURCE_BACKED"
   | "ESTIMATED"
   | "DEBUG_ESTIMATE"
+  | "PROFILE_AID"
   | "VISUAL_FILL_ONLY"
   | "MISSING_SOURCE";
 
@@ -43,7 +44,7 @@ export const PROCEDURE_DISPLAY_LEVEL_OPTIONS: Array<{
   { value: "CORE", label: "Core", description: "Source-backed fixes and coded paths" },
   { value: "PROTECTION", label: "Protection", description: "Core plus source-backed protection" },
   { value: "ESTIMATED", label: "Estimated", description: "Adds inferred operational geometry" },
-  { value: "VISUAL_AID", label: "Visual Aid", description: "Adds readability fill geometry" },
+  { value: "VISUAL_AID", label: "Visual Aid", description: "Adds profile aids and readability fills" },
   { value: "DEBUG", label: "Debug", description: "Adds debug and missing-source markers" },
 ];
 
@@ -104,12 +105,16 @@ export function procedureAnnotationDisplayLevel(
   ) {
     return "DEBUG";
   }
-  if (annotation.kind === "TURN_FILL") return "VISUAL_AID";
+  if (
+    annotation.kind === "SEGMENT_VERTICAL_PROFILE" ||
+    annotation.kind === "TURN_FILL"
+  ) {
+    return "VISUAL_AID";
+  }
   if (
     annotation.kind === "LNAV_VNAV_OCS" ||
     annotation.kind === "ALIGNED_CONNECTOR" ||
     annotation.kind === "FINAL_VERTICAL_REFERENCE" ||
-    annotation.kind === "SEGMENT_VERTICAL_PROFILE" ||
     annotation.kind === "CA_CENTERLINE" ||
     annotation.kind === "CA_ENDPOINT" ||
     annotation.kind === "CA_MAHF_CONNECTOR" ||
@@ -161,7 +166,7 @@ export function procedureAnnotationMeaning(
     return "Secondary lateral protected-area footprint outside the primary envelope. It shows the outer horizontal buffer or taper and is not an OCS or vertical clearance surface.";
   }
   if (kind === "SEGMENT_VERTICAL_PROFILE") {
-    return "Estimated vertical profile surface connecting adjacent procedure fixes on non-missed segments. Its lateral width follows the primary protected area; missed CA/DF/HM continuity is shown by missed-approach layers instead.";
+    return "Display-only fix vertical profile aid connecting adjacent non-missed procedure fixes. It is not TERPS, OEA, OCS, or a protected surface.";
   }
   if (kind === "FINAL_OEA") {
     return "Final-segment obstacle evaluation area used as the lateral reference for final protected-area visualization.";
