@@ -1,7 +1,23 @@
 # OpenSky Training Data Fetch and Store Redesign
 
 ## Status
-Design proposal. Not implemented yet.
+Implementation in progress.
+
+Implemented core v2 pieces:
+
+- partitioned source-response/raw-track/event/quarantine/manifest storage
+- derived 5 nm entry/exit airport event extraction with interpolated boundary metadata
+- explicit `landing`, `depart`, `pass`, `unknown`, and `ambiguous` labels
+- REST fallback with source response text preservation, cache reuse, request budgets, and rate-limit stop behavior
+- preferred OpenSky history DB ingestion through `traffic.data.opensky.history`
+- history DB raw row storage under `history_rows/v2`
+- derived training points with both `baro_altitude_m` and `geo_altitude_m`
+
+Still required before large production collection:
+
+- install and configure `traffic`/OpenSky DB access in the runtime environment
+- run a real KRDU integration fetch against the history DB
+- inspect label balance and quarantined records before expanding the date range
 
 ## Objective
 Redesign `opensky_data_query` from an airport-centered visualization downloader into a data collection pipeline suitable for training 4D trajectory prediction models.
@@ -64,12 +80,23 @@ The 5 nm event radius should be treated as a core airport-area label, not necess
 - full available OpenSky track
 
 ## Current Implementation Summary
-The current package is small and mostly implemented in:
+The package has two flows:
+
+1. Existing CZML visualization flow.
+2. New training-dataset flow.
+
+The main implemented modules are:
 
 - `fetch_cylw_opensky.py`
 - `trajectory_normalization.py`
+- `dataset_store.py`
+- `trajectory_events.py`
+- `training_dataset.py`
+- `altitude_matching.py`
+- `opensky_history_db.py`
+- `history_training.py`
 
-Current behavior:
+Current CZML behavior:
 
 - Live mode uses `/flights/all` and primarily filters flights whose estimated arrival airport matches the target airport.
 - Historical mode uses `/flights/arrival` only.
@@ -78,12 +105,24 @@ Current behavior:
 - Normalized visualization input is written as `*_czml_input_*.json`.
 - CZML normalization keeps only a final approach window before touchdown or closest approach.
 
-This is useful for visualization, but it is not suitable as the primary training dataset because it can discard route context, departures, transits, overflights, and complete airport-area crossing episodes.
+Current training behavior:
+
+- default training source is `--training-source history-db`
+- history DB mode uses `traffic.data.opensky.history`, not REST `/tracks/all`
+- `airport_ops` fetches flights associated with the airport through OpenSky DB airport filtering
+- `terminal_all` additionally fetches state-vector rows in an airport-centered bounding box to collect pass-through candidates
+- raw history DB rows are written before derived processing and are not sorted, renamed, filtered, or deduplicated in storage
+- derived processing normalizes a copy of the history rows for event extraction
+- REST `/tracks/all` remains available only with `--training-source rest` for debugging/fallback
 
 ## Problems to Fix
 
 ### Arrival Bias
-Historical mode currently only fetches arrivals. It does not collect departures or aircraft passing through the airport area.
+The old historical CZML mode only fetched arrivals. Training mode now supports departures and pass-through aircraft:
+
+- history DB `airport_ops` covers airport arrivals/departures
+- history DB `terminal_all` adds airport-area state-vector rows for pass-through discovery
+- REST fallback supports arrival, departure, and sampled area candidates, but it is not the preferred training path because of `/tracks/all` limitations
 
 ### Visualization-Oriented Filtering
 `trajectory_normalization.py` filters and trims trajectories for AeroViz display. In particular, it keeps a bounded approach window before landing or closest approach. That creates short visualization-friendly tracks, not training-ready samples.
@@ -147,10 +186,79 @@ Suggested modules:
   - keep existing CZML-oriented conversion logic
   - do not use this as the training dataset transformation
 
+- `opensky_history_db.py`
+  - adapter around `traffic.data.opensky.history`
+  - request state-vector columns with both `baroaltitude` and `geoaltitude`
+  - request joined flight-table airport metadata with `FlightsData4.estdepartureairport` and `FlightsData4.estarrivalairport`
+  - write raw returned history rows as JSONL without sorting or renaming
+
+- `history_training.py`
+  - build track-like derived records from history DB rows
+  - split aircraft history rows into track segments by time gap and metadata changes
+  - attach same-row `baro_altitude_m` and `geo_altitude_m`
+  - reuse the same airport-event extraction and labeling logic as REST-derived tracks
+
 ## Fetch Design
 
+### Preferred Training Source: OpenSky History DB
+
+For training data, the preferred source is the OpenSky history database via the `traffic` package:
+
+```python
+from traffic.data import opensky
+
+opensky.history(...)
+```
+
+Reasons:
+
+- avoids REST `/tracks/all` 429 behavior during training collection
+- avoids REST `/tracks/all` 30-day lookback limitation
+- returns state-vector rows that can include both `baroaltitude` and `geoaltitude`
+- can query by airport for airport operations and by geographic bounds for pass-through candidates
+
+Runtime prerequisite:
+
+- `traffic` must be installed
+- OpenSky DB access must be configured according to the [`traffic` OpenSky DB documentation](https://traffic-viz.github.io/data_sources/opensky_db.html)
+
+The code should fail fast with a clear error if `traffic` is unavailable.
+
 ### Historical Mode
-Historical mode should support three candidate sources:
+Historical training mode has two source implementations.
+
+#### `--training-source history-db`
+
+This is the default and recommended path.
+
+`airport_ops`:
+
+- fetch OpenSky history rows with `airport=<ICAO>`
+- request state-vector columns plus joined flight metadata:
+  - `baroaltitude`
+  - `geoaltitude`
+  - `FlightsData4.estdepartureairport`
+  - `FlightsData4.estarrivalairport`
+- derive `landing` and `depart` labels from metadata plus airport-area geometry
+
+`terminal_all`:
+
+- run the `airport_ops` query
+- additionally fetch state-vector rows in an airport-centered bounding box
+- use the bounded state-vector rows to discover pass-through aircraft
+- store the bounded result separately as raw history rows
+- label complete high-altitude entry/exit episodes as `pass` only when landing/departure evidence is absent
+
+Important limitation:
+
+- a bounded history query is a spatial raw data query, not a mutation of the stored track
+- the query bounds should be larger than the 5 nm event radius so the derived event extractor has samples before entry and after exit
+
+#### `--training-source rest`
+
+REST fallback remains available for debugging and short recent windows.
+
+It supports three candidate sources:
 
 1. Landing candidates
    - OpenSky `/flights/arrival`
@@ -198,7 +306,20 @@ Recommended behavior:
 - mark incomplete episodes clearly because live data may not yet contain the future exit from the 5 nm radius
 
 ### Track Fetching
-All candidate flights or aircraft should be converted into full track requests through `/tracks/all`.
+Do not use one track-fetching rule for every source.
+
+History DB source:
+
+- do not call REST `/tracks/all`
+- write returned DB rows under `history_rows/v2`
+- build a derived track-like record from the DB rows for compatibility with the existing event extractor
+- preserve both `baroaltitude` and `geoaltitude` from the same state-vector row
+
+REST source:
+
+- candidate flights or aircraft are converted into `/tracks/all` requests when the timestamp is within the REST endpoint lookback window
+- the original `/tracks/all` response body is saved before JSON parsing
+- `/tracks/all` is not used to obtain `geo_altitude` because the endpoint does not contain it
 
 Deduplication key:
 
@@ -216,7 +337,7 @@ The deduplication process must not delete the original source response text. If 
 
 ## Source Response Text Layer
 
-Every OpenSky HTTP response used by the pipeline should be saved before any parsing, filtering, sorting, or normalization.
+Every OpenSky HTTP response used by the REST pipeline should be saved before any parsing, filtering, sorting, or normalization.
 
 This layer is the audit source of truth.
 
@@ -257,6 +378,25 @@ Implementation rule:
 - first write the response body text and source index
 - then parse JSON from that stored text
 - never derive training records directly from an unsaved response
+
+For OpenSky history DB mode, there is no REST response body text exposed by `traffic`. The equivalent audit layer is:
+
+```text
+opensky_data_query/outputs/
+  history_rows/v2/
+    airport=KRDU/year=2026/month=04/day=19/hour=10/
+      airport_ops.jsonl
+      terminal_area.jsonl
+```
+
+History row storage rule:
+
+- write the dataframe returned by `traffic` before derived analysis
+- do not sort rows in this stored layer
+- do not rename columns in this stored layer
+- do not filter rows in this stored layer
+- do not deduplicate rows in this stored layer
+- only perform JSON-safe serialization, for example timestamp to ISO text
 
 ## Airport Event Extraction
 
@@ -308,12 +448,18 @@ OpenSky exposes altitude differently depending on endpoint:
   - state vector field index 13 is `geo_altitude`
   - `geo_altitude` is geometric altitude in meters when available
 
+- OpenSky history DB through `traffic.data.opensky.history`
+  - state-vector column `baroaltitude` is barometric altitude in meters
+  - state-vector column `geoaltitude` is geometric altitude in meters when available
+  - these two values should be preserved as separate fields in derived training points
+
 Design implication:
 
 - raw track storage must preserve OpenSky track altitude exactly as `baro_altitude_m`
 - do not label `/tracks/all` altitude as GPS altitude, WAAS altitude, geometric altitude, or height above ground
 - training trajectory/event storage must include both `baro_altitude_m` and `geo_altitude_m`
 - because `/tracks/all` does not contain `geo_altitude`, `geo_altitude_m` must be joined from an additional source such as `/states/all` state vectors
+- in history DB mode, no REST altitude join is needed because both altitude fields can come from the same history row
 - any corrected altitude, QNH-adjusted altitude, AGL estimate, or geometric-altitude join must be a derived field in a later layer
 - if future collection uses `/states/all` snapshots for pass candidates, store `baro_altitude_m` and `geo_altitude_m` separately and preserve nullability
 
@@ -338,7 +484,19 @@ geo_altitude_m
 
 This is a requirement for the derived training dataset, not a mutation of the OpenSky raw track. The pipeline should satisfy it by joining geometric altitude from state-vector data.
 
-Recommended process:
+Recommended history DB process:
+
+1. Fetch history DB state-vector rows with both `baroaltitude` and `geoaltitude`.
+2. Save the raw returned rows under `history_rows/v2`.
+3. Build a derived analysis dataframe copy.
+4. Segment rows by aircraft, time gap, and flight metadata changes.
+5. Build a track-like derived record for event extraction.
+6. Build training points with:
+   - `baro_altitude_m` from `baroaltitude`
+   - `geo_altitude_m` from `geoaltitude`
+7. Store a derived training event only when required altitude fields are available.
+
+REST fallback process:
 
 1. Fetch `/tracks/all` for the complete aircraft track.
 2. Save the original `/tracks/all` response text.
@@ -372,7 +530,29 @@ Default training behavior:
 - missing geometric altitude must not be filled with barometric altitude
 - missing geometric altitude must not be silently set to `0`, airport elevation, or a corrected barometric estimate
 
-Derived point schema:
+History DB derived point schema:
+
+```json
+{
+  "time": 1776257000,
+  "lat": 49.98,
+  "lon": -119.31,
+  "baro_altitude_m": 1500.0,
+  "geo_altitude_m": 1468.2,
+  "altitude_sources": {
+    "baro_altitude_m": "opensky_history_db_baroaltitude_m",
+    "geo_altitude_m": "opensky_history_db_geoaltitude_m"
+  },
+  "geo_altitude_match": {
+    "method": "same_history_row",
+    "source_time": 1776257000,
+    "delta_t_sec": 0,
+    "source_response_id": "opensky_history_db"
+  }
+}
+```
+
+REST fallback derived point schema:
 
 ```json
 {
@@ -662,6 +842,8 @@ Recommended layout:
 
 ```text
 opensky_data_query/outputs/
+  history_rows/v2/
+    airport=CYLW/year=2026/month=04/day=15/hour=13/*.jsonl
   source_responses/v2/
     airport=CYLW/year=2026/month=04/day=15/hour=13/
       *.body.txt
@@ -680,6 +862,7 @@ opensky_data_query/outputs/
 
 Partitioning:
 
+- history rows: partition by DB fetch time
 - source responses: partition by response fetch time
 - raw tracks: partition by track start time
 - airport events: partition by event entry time
@@ -691,15 +874,15 @@ Default partition granularity:
 hour
 ```
 
-CLI option:
-
-```text
---partition-granularity hour|day
-```
+The current implementation uses fixed hour partitions for row/event outputs and day partitions for manifests. A public `--partition-granularity` option is not implemented yet.
 
 ## Raw Track JSONL Schema
 
-One line per fetched OpenSky track. This is parsed from the stored source response text, but it must preserve OpenSky values exactly. It must not sort, filter, interpolate, or rewrite `track.path`.
+One line per fetched or derived source track.
+
+For REST source, this is parsed from the stored source response text, but it must preserve OpenSky values exactly. It must not sort, filter, interpolate, or rewrite `track.path`.
+
+For history DB source, this is a derived track-like compatibility record built from stored history rows. The immutable source layer is `history_rows/v2`; this record exists so the same airport-event extractor can run on REST and history DB data.
 
 ```json
 {
@@ -731,6 +914,19 @@ One line per fetched OpenSky track. This is parsed from the stored source respon
 ```
 
 The full OpenSky `path` should be preserved in raw storage exactly as parsed from the source response.
+
+History DB raw-track source example:
+
+```json
+{
+  "source": {
+    "api": "opensky-history-db",
+    "endpoint": "traffic.data.opensky.history",
+    "candidate_sources": ["arrival"],
+    "source_response_ids": ["history_rows:airport_ops.jsonl"]
+  }
+}
+```
 
 Do not:
 
@@ -867,18 +1063,17 @@ Each fetch run should write a manifest:
 
 ## CLI Proposal
 
-Training dataset fetch:
+Recommended training dataset fetch:
 
 ```bash
 python opensky_data_query/fetch_cylw_opensky.py \
   --mode historical \
+  --dataset-mode training \
+  --training-source history-db \
   --airport CYLW \
   --begin 2026-04-01T00:00:00Z \
   --end 2026-04-02T00:00:00Z \
-  --dataset-mode training \
-  --fetch-profile terminal_all \
-  --airport-event-radius-nm 5 \
-  --partition-granularity hour
+  --fetch-profile terminal_all
 ```
 
 Lower-cost airport operations only:
@@ -886,11 +1081,40 @@ Lower-cost airport operations only:
 ```bash
 python opensky_data_query/fetch_cylw_opensky.py \
   --mode historical \
+  --dataset-mode training \
+  --training-source history-db \
   --airport CYLW \
   --begin 2026-04-01T00:00:00Z \
   --end 2026-04-02T00:00:00Z \
-  --dataset-mode training \
   --fetch-profile airport_ops
+```
+
+Small KRDU smoke command:
+
+```bash
+python opensky_data_query/fetch_cylw_opensky.py \
+  --mode historical \
+  --dataset-mode training \
+  --training-source history-db \
+  --airport KRDU \
+  --begin 2026-04-19T10:00:00Z \
+  --end 2026-04-19T10:15:00Z \
+  --fetch-profile terminal_all \
+  --max-tracks 10
+```
+
+REST fallback command for recent data only:
+
+```bash
+python opensky_data_query/fetch_cylw_opensky.py \
+  --mode historical \
+  --dataset-mode training \
+  --training-source rest \
+  --airport KRDU \
+  --begin 2026-04-19T10:00:00Z \
+  --end 2026-04-19T10:15:00Z \
+  --fetch-profile airport_ops \
+  --max-tracks 10
 ```
 
 Existing visualization flow:
@@ -905,10 +1129,10 @@ python opensky_data_query/fetch_cylw_opensky.py \
 Suggested new arguments:
 
 ```text
---dataset-mode czml|raw|training
+--dataset-mode czml|training
+--training-source history-db|rest
 --fetch-profile airport_ops|terminal_all
 --airport-event-radius-nm 5.0
---partition-granularity hour|day
 --allow-incomplete-events
 --terminal-altitude-agl-m 3000
 --low-altitude-agl-m 600
@@ -921,6 +1145,8 @@ Suggested new arguments:
 --write-events
 --write-quarantine
 ```
+
+Current implementation intentionally hides several low-level REST tuning arguments from help output. The training default should stay usable without manually choosing sleep and retry knobs.
 
 ## Backward Compatibility
 
@@ -939,30 +1165,46 @@ The new training dataset should be additive and should not break:
 
 ## Implementation Plan
 
-1. Add `trajectory_events.py`.
+1. Add `trajectory_events.py`. Completed.
    - Parse OpenSky waypoints.
    - Compute distance to airport.
    - Detect entry and exit crossings.
    - Estimate 5 nm boundary crossings as derived metadata.
    - Emit complete airport episodes.
 
-2. Add `dataset_store.py`.
+2. Add `dataset_store.py`. Completed.
    - Write original source response body text before parsing.
    - Write JSONL records into airport/time partitions.
    - Create deterministic event IDs.
    - Write manifests.
 
-3. Refactor fetch code lightly.
+3. Refactor REST fetch code lightly. Completed.
    - Keep `OpenSkyClient` behavior initially.
    - Add departures to historical fetch.
    - Add candidate source metadata.
    - Preserve existing CZML flow.
 
-4. Add `--dataset-mode training`.
+4. Add `--dataset-mode training`. Completed.
    - Training mode writes raw tracks and airport events.
    - CZML mode keeps current behavior.
 
-5. Add tests.
+5. Add dual-altitude derived training points. Completed.
+   - REST mode can time-match `/states/all` geo altitude when explicitly enabled.
+   - history DB mode keeps same-row `baroaltitude` and `geoaltitude`.
+   - missing required `geo_altitude_m` records are quarantined.
+
+6. Add OpenSky history DB adapter. Completed.
+   - Use `traffic.data.opensky.history`.
+   - Request `baroaltitude` and `geoaltitude`.
+   - Request joined flight metadata for airport operations.
+   - Write raw returned rows before derived analysis.
+
+7. Add history DB training assembly. Completed.
+   - Build track-like derived records from history rows.
+   - Split aircraft rows into segments by time gap and metadata changes.
+   - Use the same event extraction/labeling path as REST.
+
+8. Add tests. Completed locally.
    - Source response text is saved before parsing.
    - Raw track path remains value-equivalent to parsed source response.
    - Entry boundary estimate.
@@ -978,6 +1220,14 @@ The new training dataset should be additive and should not break:
    - Multiple entry-exit pairs in one track.
    - Event ID stability.
    - Partition path generation.
+   - History DB raw row storage preserves returned order.
+   - History DB column aliases are normalized only in the derived view.
+   - History DB `raw_index` aligns with the derived track path.
+
+9. Remaining integration step.
+   - Install/configure `traffic` and OpenSky DB access.
+   - Run KRDU smoke fetch with `--training-source history-db`.
+   - Inspect generated `history_rows`, `raw_tracks`, `airport_events`, `quarantine`, and `manifest` outputs.
 
 ## Validation Plan
 
