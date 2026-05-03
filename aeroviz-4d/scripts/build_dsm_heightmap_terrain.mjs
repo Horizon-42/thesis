@@ -10,6 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
 const AIRPORT_CODE = (cliOption("--airport") ?? "CYVR").toUpperCase();
 const rawLidarInputDir = path.resolve(repoRoot, `../data/bc_lidar/${AIRPORT_CODE}/dsm`);
+const rawUsgsLidarInputDir = path.resolve(repoRoot, `../data/usgs_lidar/${AIRPORT_CODE}/dsm`);
 const defaultInputDir = path.resolve(repoRoot, `public/data/airports/${AIRPORT_CODE}/dsm/source`);
 const fallbackInputDir = path.resolve(repoRoot, `public/data/DSM/${AIRPORT_CODE}`);
 const legacySingleInput = path.resolve(
@@ -101,6 +102,7 @@ function resolveInputDir() {
   }
 
   if (directoryHasGeoTiffs(rawLidarInputDir)) return rawLidarInputDir;
+  if (directoryHasGeoTiffs(rawUsgsLidarInputDir)) return rawUsgsLidarInputDir;
   if (directoryHasGeoTiffs(defaultInputDir)) return defaultInputDir;
   if (directoryHasGeoTiffs(fallbackInputDir)) return fallbackInputDir;
   return path.dirname(legacySingleInput);
