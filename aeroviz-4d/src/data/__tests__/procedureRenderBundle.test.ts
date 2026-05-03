@@ -493,6 +493,53 @@ const missedCaDocument: ProcedureDetailDocument = {
   ],
 };
 
+const missedCaDfDocument: ProcedureDetailDocument = {
+  ...missedDfDocument,
+  procedureUid: "KRDU-MISSEDCADF-RW05L",
+  procedure: {
+    ...missedDfDocument.procedure,
+    procedureIdent: "MISSEDCADF",
+    chartName: "RNAV MISSED CA DF TEST",
+  },
+  branches: [
+    {
+      ...missedDfDocument.branches[0],
+      legs: [
+        {
+          ...missedDfDocument.branches[0].legs[0],
+          legId: "leg:R:035",
+          sequence: 35,
+          path: {
+            pathTerminator: "CA",
+            constructionMethod: "course_to_altitude",
+            startFixRef: "fix:RW05L",
+            endFixRef: "fix:",
+            courseDeg: 305,
+          },
+          termination: { kind: "fix", fixRef: "fix:" },
+          constraints: {
+            altitude: { qualifier: "at", valueFt: 1000, rawText: "1000 ft" },
+            speedKt: null,
+            geometryAltitudeFt: 1000,
+          },
+        },
+        {
+          ...missedDfDocument.branches[0].legs[0],
+          legId: "leg:R:040",
+          sequence: 40,
+          path: {
+            pathTerminator: "DF",
+            constructionMethod: "direct_to_fix",
+            startFixRef: "fix:",
+            endFixRef: "fix:MIS1",
+          },
+          termination: { kind: "fix", fixRef: "fix:MIS1" },
+        },
+      ],
+    },
+  ],
+};
+
 const missedTurningDocument: ProcedureDetailDocument = {
   ...missedDfDocument,
   procedureUid: "KRDU-MISSEDTURN-RW05L",
@@ -873,6 +920,50 @@ describe("procedure render bundle", () => {
         expect.objectContaining({
           code: "ESTIMATED_CA_GEOMETRY",
           legId: "leg:R:035",
+        }),
+      ]),
+    );
+    expect(bundle.diagnostics).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "UNSUPPORTED_LEG_TYPE",
+          legId: "leg:R:035",
+        }),
+      ]),
+    );
+  });
+
+  it("exports a CA-only estimated missed surface when a following DF leg is not constructible", () => {
+    const pkg = normalizeProcedurePackage(missedCaDfDocument);
+    const bundle = buildProcedureRenderBundle(pkg, {
+      samplingStepNm: 0.5,
+      enableDebugPrimitives: false,
+    });
+    const segmentBundle = bundle.branchBundles[0].segmentBundles[0];
+
+    expect(segmentBundle.segment.segmentType).toBe("MISSED_S1");
+    expect(segmentBundle.legs.map((leg) => leg.legType)).toEqual(["CA", "DF"]);
+    expect(segmentBundle.segmentGeometry.centerline.geoPositions.length).toBeGreaterThan(2);
+    expect(segmentBundle.missedSectionSurface).toMatchObject({
+      surfaceType: "MISSED_SECTION1_ENVELOPE",
+      constructionStatus: "ESTIMATED_CA",
+      primary: expect.objectContaining({
+        geometryId: expect.stringContaining(":ca-estimated-primary"),
+      }),
+      secondaryOuter: expect.objectContaining({
+        geometryId: expect.stringContaining(":ca-estimated-secondary"),
+      }),
+    });
+    expect(segmentBundle.missedCaEndpoints).toHaveLength(1);
+    expect(bundle.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "ESTIMATED_CA_GEOMETRY",
+          legId: "leg:R:035",
+        }),
+        expect.objectContaining({
+          code: "SOURCE_INCOMPLETE",
+          legId: "leg:R:040",
         }),
       ]),
     );

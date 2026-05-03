@@ -636,14 +636,13 @@ describe("useProcedureSegmentLayer", () => {
     const finalVerticalProfile = entities.find((entity) =>
       String(entity.id).endsWith("-vertical-profile") && entity.polygon,
     );
-    expect(finalVerticalProfile?.polygon.hierarchy.positions).toHaveLength(10);
-    expect(
-      finalVerticalProfile?.__aeroVizProcedureAnnotation?.parameters.some(
-        (parameter: { label: string; value: string }) =>
-          parameter.label === "Fixes" &&
-          parameter.value.includes("RW -> CA endpoint -> DUHAM"),
-      ),
-    ).toBe(true);
+    expect(finalVerticalProfile?.polygon.hierarchy.positions).toHaveLength(6);
+    const profileFixes = finalVerticalProfile?.__aeroVizProcedureAnnotation?.parameters.find(
+      (parameter: { label: string; value: string }) => parameter.label === "Fixes",
+    )?.value;
+    expect(profileFixes).toContain("INIT -> FAF -> RW");
+    expect(profileFixes).not.toContain("CA endpoint");
+    expect(profileFixes).not.toContain("DUHAM");
     expect(
       entities.some(
         (entity) =>

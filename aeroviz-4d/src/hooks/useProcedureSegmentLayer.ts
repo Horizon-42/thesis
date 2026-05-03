@@ -321,6 +321,13 @@ interface SegmentVerticalProfilePoint extends GeoPoint {
   segmentId?: string;
 }
 
+interface SegmentVerticalProfileSection {
+  sectionId: string;
+  points: SegmentVerticalProfilePoint[];
+  segmentIds: string[];
+  segmentTypes: string[];
+}
+
 function nearestHalfWidthNm(
   samples: Array<{ stationNm: number; halfWidthNm: number }>,
   stationNm: number,
@@ -413,21 +420,67 @@ function segmentVerticalProfilePointsForSegment(
     );
 }
 
-function branchVerticalProfilePoints(
+function isBranchVerticalProfileSegment(segmentType: string): boolean {
+  return !segmentType.startsWith("MISSED") && segmentType !== "HOLDING";
+}
+
+function isSameVerticalProfilePoint(
+  point: SegmentVerticalProfilePoint,
+  previous: SegmentVerticalProfilePoint,
+): boolean {
+  return (
+    point.fixIdent === previous.fixIdent &&
+    distanceNm(point, previous) <= 1e-5 &&
+    Math.abs(point.altitudeFtMsl - previous.altitudeFtMsl) <= 1e-3
+  );
+}
+
+function appendVerticalProfilePoint(
+  points: SegmentVerticalProfilePoint[],
+  point: SegmentVerticalProfilePoint,
+): void {
+  const previous = points[points.length - 1];
+  if (previous && isSameVerticalProfilePoint(point, previous)) return;
+  points.push(point);
+}
+
+function branchVerticalProfileSections(
   branchBundle: BranchGeometryBundle,
   pkg: ProcedurePackage | null,
-): SegmentVerticalProfilePoint[] {
-  const points = branchBundle.segmentBundles.flatMap((segmentBundle) =>
-    segmentVerticalProfilePointsForSegment(segmentBundle, pkg),
-  );
+): SegmentVerticalProfileSection[] {
+  const sections: SegmentVerticalProfileSection[] = [];
+  let currentSection: SegmentVerticalProfileSection | null = null;
 
-  return points.filter(
-    (point, index) =>
-      index === 0 ||
-      point.fixIdent !== points[index - 1].fixIdent ||
-      distanceNm(point, points[index - 1]) > 1e-5 ||
-      Math.abs(point.altitudeFtMsl - points[index - 1].altitudeFtMsl) > 1e-3,
-  );
+  branchBundle.segmentBundles.forEach((segmentBundle) => {
+    if (!isBranchVerticalProfileSegment(segmentBundle.segment.segmentType)) {
+      currentSection = null;
+      return;
+    }
+
+    const points = segmentVerticalProfilePointsForSegment(segmentBundle, pkg);
+    if (points.length === 0) return;
+
+    if (!currentSection) {
+      currentSection = {
+        sectionId: `section-${sections.length + 1}`,
+        points: [],
+        segmentIds: [],
+        segmentTypes: [],
+      };
+      sections.push(currentSection);
+    }
+
+    const section = currentSection;
+    if (!section.segmentIds.includes(segmentBundle.segment.segmentId)) {
+      section.segmentIds.push(segmentBundle.segment.segmentId);
+    }
+    if (!section.segmentTypes.includes(segmentBundle.segment.segmentType)) {
+      section.segmentTypes.push(segmentBundle.segment.segmentType);
+    }
+    points.forEach((point) => appendVerticalProfilePoint(section.points, point));
+  });
+
+  return sections.filter((section) => section.points.length >= 2);
 }
 
 function buildVerticalProfileRibbon(
@@ -1681,61 +1734,69 @@ function addBranchVerticalProfileEntity(
   annotationVisible: boolean,
   displayLevel: ProcedureDisplayLevel,
 ): string[] {
-  const verticalProfilePoints = branchVerticalProfilePoints(branchBundle, pkg);
-  const verticalProfileRibbon = buildVerticalProfileRibbon(
-    `${branchBundle.branchId}:vertical-profile`,
-    verticalProfilePoints,
-  );
-  if (!verticalProfileRibbon) return [];
+  const verticalProfileSections = branchVerticalProfileSections(branchBundle, pkg);
+  if (verticalProfileSections.length === 0) return [];
 
   const ids: string[] = [];
-  const entityId = `${PROCEDURE_SEGMENT_ENTITY_PREFIX}${bundle.packageId}-${branchBundle.branchId}-vertical-profile`;
-  const allLegs = branchBundle.segmentBundles.flatMap((segmentBundle) => segmentBundle.legs);
-  const diagnostics = branchBundle.segmentBundles.flatMap((segmentBundle) =>
-    segmentBundle.diagnostics.map((diagnostic) => diagnostic.message),
-  );
-  const annotation = annotationBase({
-    entityId,
-    label: "Fix vertical profile",
-    title: `${bundle.procedureName} ${branchBundle.branchName} continuous fix vertical profile`,
-    kind: "SEGMENT_VERTICAL_PROFILE",
-    status: "ESTIMATED",
-    bundle,
-    branchBundle,
-    legs: allLegs,
-    parameters: [
-      param("Fixes", verticalProfilePoints.map((point) => point.fixIdent).join(" -> ")),
-      param(
-        "Segments",
-        branchBundle.segmentBundles
-          .map((segmentBundle) => compactSegmentType(segmentBundle.segment.segmentType))
-          .join(" -> "),
-      ),
-      param("Width basis", "Primary protected area"),
-    ],
-    diagnostics,
-    sourceRefs: sourceRefsFromLegs(allLegs),
+  const baseEntityId = `${PROCEDURE_SEGMENT_ENTITY_PREFIX}${bundle.packageId}-${branchBundle.branchId}-vertical-profile`;
+  const hasMultipleSections = verticalProfileSections.length > 1;
+
+  verticalProfileSections.forEach((section, index) => {
+    const verticalProfileRibbon = buildVerticalProfileRibbon(
+      `${branchBundle.branchId}:vertical-profile:${section.sectionId}`,
+      section.points,
+    );
+    if (!verticalProfileRibbon) return;
+
+    const entityId = hasMultipleSections ? `${baseEntityId}-${index + 1}` : baseEntityId;
+    const sectionSegmentIdSet = new Set(section.segmentIds);
+    const sectionSegmentBundles = branchBundle.segmentBundles.filter((segmentBundle) =>
+      sectionSegmentIdSet.has(segmentBundle.segment.segmentId),
+    );
+    const sectionLegs = sectionSegmentBundles.flatMap((segmentBundle) => segmentBundle.legs);
+    const diagnostics = sectionSegmentBundles.flatMap((segmentBundle) =>
+      segmentBundle.diagnostics.map((diagnostic) => diagnostic.message),
+    );
+    const profileTitle = `${bundle.procedureName} ${branchBundle.branchName} fix vertical profile`;
+    const annotation = annotationBase({
+      entityId,
+      label: "Fix vertical profile",
+      title: hasMultipleSections ? `${profileTitle} ${index + 1}` : profileTitle,
+      kind: "SEGMENT_VERTICAL_PROFILE",
+      status: "ESTIMATED",
+      bundle,
+      branchBundle,
+      legs: sectionLegs,
+      parameters: [
+        param("Fixes", section.points.map((point) => point.fixIdent).join(" -> ")),
+        param("Segments", section.segmentTypes.map(compactSegmentType).join(" -> ")),
+        param("Width basis", "Primary protected area"),
+      ],
+      diagnostics,
+      sourceRefs: sourceRefsFromLegs(sectionLegs),
+    });
+
+    addRibbonPolygon(
+      viewer,
+      entityId,
+      annotation.title,
+      verticalProfileRibbon,
+      procedureEntityShow(visible, annotation, displayLevel),
+      SEGMENT_VERTICAL_PROFILE_SURFACE_COLOR,
+      SEGMENT_VERTICAL_PROFILE_HEIGHT_OFFSET_M,
+      annotation,
+    );
+    ids.push(entityId);
+
+    const labelId = addAnnotationLabel(
+      viewer,
+      annotation,
+      representativePoint(section.points),
+      procedureEntityShow(visible, annotation, displayLevel, true, annotationVisible),
+    );
+    if (labelId) ids.push(labelId);
   });
 
-  addRibbonPolygon(
-    viewer,
-    entityId,
-    `${bundle.procedureName} ${branchBundle.branchName} continuous fix vertical profile`,
-    verticalProfileRibbon,
-    procedureEntityShow(visible, annotation, displayLevel),
-    SEGMENT_VERTICAL_PROFILE_SURFACE_COLOR,
-    SEGMENT_VERTICAL_PROFILE_HEIGHT_OFFSET_M,
-    annotation,
-  );
-  ids.push(entityId);
-
-  const labelId = addAnnotationLabel(
-    viewer,
-    annotation,
-    representativePoint(verticalProfilePoints),
-    procedureEntityShow(visible, annotation, displayLevel, true, annotationVisible),
-  );
-  if (labelId) ids.push(labelId);
   return ids;
 }
 

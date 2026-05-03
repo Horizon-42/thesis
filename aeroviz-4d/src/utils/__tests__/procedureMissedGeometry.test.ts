@@ -9,6 +9,7 @@ import {
   buildMissedCaCenterlines,
   buildMissedCaEndpoints,
   buildMissedCaMahfConnectors,
+  buildMissedCaSegmentGeometry,
   buildMissedCourseGuides,
   buildMissedSectionSurface,
   buildMissedTurnDebugPrimitives,
@@ -305,6 +306,92 @@ describe("procedure missed geometry", () => {
     expect(centerlines[0].geoPositions[centerlines[0].geoPositions.length - 1]).toEqual(
       endpointResult.geometries[0].geoPositions[1],
     );
+  });
+
+  it("backfills a CA-only missed surface when a later DF leg has no constructible start fix", () => {
+    const dfLeg: ProcedurePackageLeg = {
+      ...caLeg,
+      legId: "leg:missed:df",
+      legType: "DF",
+      rawPathTerminator: "DF",
+      startFixId: "fix:",
+      endFixId: "fix:DUHAM",
+      outboundCourseDeg: undefined,
+      requiredAltitude: { kind: "AT", minFtMsl: 2200, maxFtMsl: 2200, sourceText: "2200 ft" },
+      legacy: {
+        ...caLeg.legacy,
+        sequence: 45,
+        constructionMethod: "direct_to_fix",
+        roleAtEnd: "Route",
+      },
+    };
+    const baseGeometry: SegmentGeometryBundle = {
+      ...geometryBundle,
+      centerline: {
+        worldPositions: [],
+        geoPositions: [],
+        geodesicLengthNm: 0,
+        isArc: false,
+      },
+      stationAxis: { samples: [], totalLengthNm: 0 },
+      primaryEnvelope: undefined,
+      secondaryEnvelope: undefined,
+      diagnostics: [
+        {
+          severity: "WARN",
+          segmentId: missedSegment.segmentId,
+          legId: caLeg.legId,
+          code: "UNSUPPORTED_LEG_TYPE",
+          message: "CA leg is not constructible by the base segment kernel.",
+          sourceRefs: [],
+        },
+        {
+          severity: "ERROR",
+          segmentId: missedSegment.segmentId,
+          legId: dfLeg.legId,
+          code: "SOURCE_INCOMPLETE",
+          message: "DF leg requires positioned start and end fixes.",
+          sourceRefs: [],
+        },
+      ],
+    };
+    const endpointResult = buildMissedCaEndpoints(missedSegment, [caLeg], fixes);
+    const centerlines = buildMissedCaCenterlines(endpointResult.geometries, {
+      samplingStepNm: 0.25,
+    });
+
+    const backfillResult = buildMissedCaSegmentGeometry(
+      missedSegment,
+      [caLeg, dfLeg],
+      baseGeometry,
+      centerlines,
+    );
+
+    expect(backfillResult.backfilled).toBe(true);
+    expect(backfillResult.geometry.centerline.geoPositions).toHaveLength(5);
+    expect(backfillResult.geometry.primaryEnvelope?.geometryId).toBe(
+      "segment:missed-s1:ca-estimated-primary",
+    );
+    expect(backfillResult.geometry.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "ESTIMATED_CA_GEOMETRY", legId: caLeg.legId }),
+        expect.objectContaining({ code: "SOURCE_INCOMPLETE", legId: dfLeg.legId }),
+      ]),
+    );
+    expect(backfillResult.geometry.diagnostics).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "UNSUPPORTED_LEG_TYPE", legId: caLeg.legId }),
+      ]),
+    );
+
+    const surfaceResult = buildMissedSectionSurface(missedSegment, backfillResult.geometry);
+    expect(surfaceResult.geometry).toMatchObject({
+      surfaceType: "MISSED_SECTION1_ENVELOPE",
+      constructionStatus: "ESTIMATED_CA",
+      primary: expect.objectContaining({
+        geometryId: "segment:missed-s1:ca-estimated-primary",
+      }),
+    });
   });
 
   it("estimates continuity connectors from CA endpoints to later MAHF fixes", () => {

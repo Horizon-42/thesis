@@ -159,7 +159,7 @@ export function procedureAnnotationMeaning(
     return "Secondary lateral protected-area footprint outside the primary envelope. It shows the outer horizontal buffer or taper and is not an OCS or vertical clearance surface.";
   }
   if (kind === "SEGMENT_VERTICAL_PROFILE") {
-    return "Estimated vertical profile surface connecting adjacent procedure fixes. Its lateral width follows the primary protected area.";
+    return "Estimated vertical profile surface connecting adjacent procedure fixes on non-missed segments. Its lateral width follows the primary protected area; missed CA/DF/HM continuity is shown by missed-approach layers instead.";
   }
   if (kind === "FINAL_OEA") {
     return "Final-segment obstacle evaluation area used as the lateral reference for final protected-area visualization.";

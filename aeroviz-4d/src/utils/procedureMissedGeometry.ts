@@ -624,16 +624,33 @@ export function buildMissedCaSegmentGeometry(
   const segmentLegs = legs.filter((leg) => leg.segmentId === segment.segmentId);
   const geometryLegs = segmentLegs.filter((leg) => leg.legType !== "IF");
   const caLegs = geometryLegs.filter((leg) => leg.legType === "CA");
-  if (geometryLegs.length === 0 || caLegs.length !== geometryLegs.length) {
+  if (geometryLegs.length === 0 || caLegs.length === 0) {
     return { geometry: baseGeometry, backfilled: false, diagnostics: [] };
   }
 
   const centerlineByLegId = new Map(centerlines.map((centerline) => [centerline.legId, centerline]));
-  const orderedCenterlines = caLegs
+  const caLegRuns: ProcedurePackageLeg[][] = [];
+  geometryLegs.forEach((leg, index) => {
+    if (leg.legType !== "CA") return;
+    const previousLeg = geometryLegs[index - 1];
+    const previousRun = caLegRuns[caLegRuns.length - 1];
+    if (previousRun && previousLeg?.legType === "CA") {
+      previousRun.push(leg);
+      return;
+    }
+    caLegRuns.push([leg]);
+  });
+  const caLegRun =
+    caLegRuns.find((run) => run.every((leg) => centerlineByLegId.has(leg.legId))) ?? [];
+  if (caLegRun.length === 0) {
+    return { geometry: baseGeometry, backfilled: false, diagnostics: [] };
+  }
+
+  const orderedCenterlines = caLegRun
     .map((leg) => centerlineByLegId.get(leg.legId))
     .filter((centerline): centerline is MissedCaCenterlineGeometry => centerline !== undefined);
 
-  if (orderedCenterlines.length !== caLegs.length) {
+  if (orderedCenterlines.length !== caLegRun.length) {
     return { geometry: baseGeometry, backfilled: false, diagnostics: [] };
   }
 
@@ -653,16 +670,16 @@ export function buildMissedCaSegmentGeometry(
     ),
     isArc: false,
   };
-  const caLegIds = new Set(caLegs.map((leg) => leg.legId));
+  const caLegIds = new Set(caLegRun.map((leg) => leg.legId));
   const estimatedDiagnostic: BuildDiagnostic = {
     severity: "WARN",
     segmentId: segment.segmentId,
-    legId: caLegs.length === 1 ? caLegs[0].legId : undefined,
+    legId: caLegRun.length === 1 ? caLegRun[0].legId : undefined,
     code: "ESTIMATED_CA_GEOMETRY",
     message:
-      `${segment.segmentId}: CA missed segment geometry was estimated from course, altitude, and climb model; ` +
+      `${segment.segmentId}: CA missed subsection geometry was estimated from course, altitude, and climb model; ` +
       "it is debug geometry and not certified source protection.",
-    sourceRefs: caLegs.flatMap((leg) => leg.sourceRefs),
+    sourceRefs: caLegRun.flatMap((leg) => leg.sourceRefs),
   };
   const diagnostics = [
     ...filterBackfilledCaDiagnostics(baseGeometry, caLegIds),
