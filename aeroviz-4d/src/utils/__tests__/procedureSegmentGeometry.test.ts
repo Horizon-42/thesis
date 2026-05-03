@@ -297,8 +297,19 @@ describe("procedure segment geometry kernel", () => {
     expect(bundle.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(["FINAL_HAS_TURN"]);
     expect(bundle.centerline.geodesicLengthNm).toBeGreaterThan(6);
     expect(bundle.stationAxis.totalLengthNm).toBeCloseTo(bundle.centerline.geodesicLengthNm, 3);
-    expect(bundle.primaryEnvelope?.halfWidthNmSamples[0].halfWidthNm).toBe(0.6);
-    expect(bundle.secondaryEnvelope?.halfWidthNmSamples[0].halfWidthNm).toBeCloseTo(0.9, 8);
+    expect(bundle.primaryEnvelope?.constructionKind).toBe("VARIABLE_WIDTH_STRAIGHT_OFFSET");
+    expect(bundle.primaryEnvelope?.halfWidthNmSamples[0].halfWidthNm).toBe(0.3);
+    expect(bundle.secondaryEnvelope?.halfWidthNmSamples[0].halfWidthNm).toBeCloseTo(0.6, 8);
+    expect(
+      bundle.primaryEnvelope?.halfWidthNmSamples[
+        bundle.primaryEnvelope.halfWidthNmSamples.length - 1
+      ].halfWidthNm,
+    ).toBeCloseTo(0.6, 8);
+    expect(
+      bundle.secondaryEnvelope?.halfWidthNmSamples[
+        bundle.secondaryEnvelope.halfWidthNmSamples.length - 1
+      ].halfWidthNm,
+    ).toBeCloseTo(0.9, 8);
     expect(bundle.turnJunctions).toHaveLength(1);
   });
 

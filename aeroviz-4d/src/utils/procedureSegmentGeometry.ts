@@ -56,7 +56,7 @@ export interface WidthSample {
 export interface LateralEnvelopeGeometry {
   geometryId: string;
   envelopeType: "PRIMARY" | "SECONDARY";
-  constructionKind?: "STRAIGHT_OFFSET" | "RF_PARALLEL_ARC";
+  constructionKind?: "STRAIGHT_OFFSET" | "VARIABLE_WIDTH_STRAIGHT_OFFSET" | "RF_PARALLEL_ARC";
   rfEnvelopeCase?: "RF_CASE_1" | "RF_CASE_2_INNER_COLLAPSED";
   radialBoundsNm?: {
     innerRadiusNm: number;
@@ -220,12 +220,88 @@ export function buildStraightEnvelope(
   };
 }
 
-function buildSegmentEnvelope(
+export function buildVariableStraightEnvelope(
   geometryId: string,
   envelopeType: "PRIMARY" | "SECONDARY",
   centerline: PolylineGeometry3D,
+  halfWidthAtStationNm: (stationNm: number) => number,
+): LateralEnvelopeGeometry {
+  const stationAxis = computeStationAxis(centerline);
+  const halfWidthSamples = stationAxis.samples.map((sample) => ({
+    stationNm: sample.stationNm,
+    halfWidthNm: halfWidthAtStationNm(sample.stationNm),
+  }));
+  const leftGeoBoundary = centerline.geoPositions.map((point, index) =>
+    offsetPoint(
+      point,
+      localBearing(centerline.geoPositions, index) - Math.PI / 2,
+      halfWidthSamples[index].halfWidthNm * METERS_PER_NM,
+    ),
+  );
+  const rightGeoBoundary = centerline.geoPositions.map((point, index) =>
+    offsetPoint(
+      point,
+      localBearing(centerline.geoPositions, index) + Math.PI / 2,
+      halfWidthSamples[index].halfWidthNm * METERS_PER_NM,
+    ),
+  );
+
+  return {
+    geometryId,
+    envelopeType,
+    constructionKind: "VARIABLE_WIDTH_STRAIGHT_OFFSET",
+    leftBoundary: leftGeoBoundary.map(toCartesian),
+    rightBoundary: rightGeoBoundary.map(toCartesian),
+    leftGeoBoundary,
+    rightGeoBoundary,
+    halfWidthNmSamples: halfWidthSamples,
+  };
+}
+
+function linearInterpolate(start: number, end: number, ratio: number): number {
+  return start + (end - start) * Math.max(0, Math.min(1, ratio));
+}
+
+function linearTaperEndStationNm(
+  segment: ProcedureSegment,
+  centerline: PolylineGeometry3D,
+): number {
+  const afterNm = segment.transitionRule?.afterNm;
+  if (typeof afterNm === "number" && Number.isFinite(afterNm) && afterNm > 0) {
+    return afterNm;
+  }
+  return Math.max(centerline.geodesicLengthNm, 0.01);
+}
+
+function taperedHalfWidthNm(
+  segment: ProcedureSegment,
+  envelopeType: "PRIMARY" | "SECONDARY",
+  centerline: PolylineGeometry3D,
+  stationNm: number,
+): number {
+  const taperEndNm = linearTaperEndStationNm(segment, centerline);
+  const ratio = taperEndNm <= 0 ? 1 : stationNm / taperEndNm;
+  const primaryHalfWidthNm = linearInterpolate(segment.xttNm, segment.xttNm * 2, ratio);
+  if (envelopeType === "PRIMARY") return primaryHalfWidthNm;
+  return primaryHalfWidthNm + segment.xttNm;
+}
+
+function buildSegmentEnvelope(
+  geometryId: string,
+  envelopeType: "PRIMARY" | "SECONDARY",
+  segment: ProcedureSegment,
+  centerline: PolylineGeometry3D,
   halfWidthNm: number,
 ): LateralEnvelopeGeometry {
+  if (segment.widthChangeMode === "LINEAR_TAPER" && !centerline.isArc) {
+    return buildVariableStraightEnvelope(
+      geometryId,
+      envelopeType,
+      centerline,
+      (stationNm) => taperedHalfWidthNm(segment, envelopeType, centerline, stationNm),
+    );
+  }
+
   return (
     buildRfParallelEnvelope(geometryId, envelopeType, centerline, halfWidthNm) ??
     buildStraightEnvelope(geometryId, envelopeType, centerline, halfWidthNm)
@@ -334,12 +410,19 @@ export function buildSegmentGeometryBundle(
     centerline,
     stationAxis,
     primaryEnvelope: geoPositions.length >= 2
-      ? buildSegmentEnvelope(`${segment.segmentId}:primary`, "PRIMARY", centerline, segment.xttNm * 2)
+      ? buildSegmentEnvelope(
+          `${segment.segmentId}:primary`,
+          "PRIMARY",
+          segment,
+          centerline,
+          segment.xttNm * 2,
+        )
       : undefined,
     secondaryEnvelope: geoPositions.length >= 2 && segment.secondaryEnabled
       ? buildSegmentEnvelope(
           `${segment.segmentId}:secondary`,
           "SECONDARY",
+          segment,
           centerline,
           segment.xttNm * 3,
         )
