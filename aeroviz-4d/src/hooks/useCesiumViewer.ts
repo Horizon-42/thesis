@@ -275,7 +275,7 @@ export function useCesiumViewer(
 
     // ── Step 3: Enable terrain lighting ───────────────────────────────────────
     // ② — Enable the globe's built-in directional lighting:
-    viewer.scene.globe.enableLighting = true;
+    viewer.scene.globe.enableLighting = false; // disable the default sun lighting
     // Ensure entities behind terrain are depth-tested to prevent view-angle
     // dependent visual drifting against runway polygons.
     viewer.scene.globe.depthTestAgainstTerrain = true;
