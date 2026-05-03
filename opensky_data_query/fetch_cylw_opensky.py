@@ -50,17 +50,30 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
-from trajectory_normalization import (
-    convert_tracks_to_czml_input,
-    convert_tracks_to_raw_czml_input,
-)
-from altitude_matching import build_dual_altitude_points, parse_state_altitude_samples
-from dataset_store import partition_path, write_jsonl_records, write_source_response
-from training_dataset import (
-    attach_training_points_or_quarantine,
-    make_raw_track_record,
-)
-from trajectory_events import extract_complete_airport_events
+try:
+    from .trajectory_normalization import (
+        convert_tracks_to_czml_input,
+        convert_tracks_to_raw_czml_input,
+    )
+    from .altitude_matching import build_dual_altitude_points, parse_state_altitude_samples
+    from .dataset_store import partition_path, write_jsonl_records, write_source_response
+    from .training_dataset import (
+        attach_training_points_or_quarantine,
+        make_raw_track_record,
+    )
+    from .trajectory_events import extract_complete_airport_events
+except ImportError:  # pragma: no cover - supports direct script execution.
+    from trajectory_normalization import (
+        convert_tracks_to_czml_input,
+        convert_tracks_to_raw_czml_input,
+    )
+    from altitude_matching import build_dual_altitude_points, parse_state_altitude_samples
+    from dataset_store import partition_path, write_jsonl_records, write_source_response
+    from training_dataset import (
+        attach_training_points_or_quarantine,
+        make_raw_track_record,
+    )
+    from trajectory_events import extract_complete_airport_events
 
 
 API_ROOT = "https://opensky-network.org/api"
@@ -83,10 +96,15 @@ class OpenSkyClient:
     client_id: str | None = None
     client_secret: str | None = None
     timeout_sec: int = 30
+    request_interval_sec: float = 1.0
+    max_request_retries: int = 3
+    rate_limit_backoff_sec: float = 60.0
 
     _token: str | None = None
     _token_expiry: float = 0.0
     _token_lock: Lock = field(default_factory=Lock)
+    _request_lock: Lock = field(default_factory=Lock)
+    _last_request_at: float = 0.0
 
     @property
     def has_oauth(self) -> bool:
@@ -149,19 +167,48 @@ class OpenSkyClient:
             for k, v in self._auth_headers().items():
                 req.add_header(k, v)
 
-        try:
-            with urlopen(req, timeout=self.timeout_sec) as resp:
-                raw = resp.read().decode("utf-8")
-                return raw, int(resp.status)
-        except HTTPError as e:
-            body = e.read().decode("utf-8", errors="replace")
-            # OpenSky 的 /flights/* 和 /tracks 在无结果时可能返回空 404；
-            # 这里把它视为 None，让调用方用 `or []` 继续处理。
-            if e.code == 404 and body.strip() in ("", "[]", "{}"):
-                return body, e.code
-            raise RuntimeError(f"HTTP {e.code} for {url}: {body[:300]}") from e
-        except URLError as e:
-            raise RuntimeError(f"Network error for {url}: {e}") from e
+        attempts = max(1, self.max_request_retries + 1)
+        for attempt in range(attempts):
+            self._throttle_request()
+            try:
+                with urlopen(req, timeout=self.timeout_sec) as resp:
+                    raw = resp.read().decode("utf-8")
+                    return raw, int(resp.status)
+            except HTTPError as e:
+                body = e.read().decode("utf-8", errors="replace")
+                # OpenSky 的 /flights/* 和 /tracks 在无结果时可能返回空 404；
+                # 这里把它视为 None，让调用方用 `or []` 继续处理。
+                if e.code == 404 and body.strip() in ("", "[]", "{}"):
+                    return body, e.code
+                if e.code == 429 and attempt + 1 < attempts:
+                    retry_after = _retry_after_seconds(
+                        e.headers.get("Retry-After"),
+                        fallback=self.rate_limit_backoff_sec * (attempt + 1),
+                    )
+                    print(
+                        f"[OpenSky] HTTP 429 rate limit; sleeping {retry_after:.1f}s before retry "
+                        f"{attempt + 1}/{self.max_request_retries}",
+                        flush=True,
+                    )
+                    time.sleep(retry_after)
+                    continue
+                raise RuntimeError(f"HTTP {e.code} for {url}: {body[:300]}") from e
+            except URLError as e:
+                raise RuntimeError(f"Network error for {url}: {e}") from e
+
+        raise RuntimeError(f"Request retry loop exhausted for {url}")
+
+    def _throttle_request(self) -> None:
+        """Serialize OpenSky requests and enforce a minimum interval."""
+        interval = max(0.0, self.request_interval_sec)
+        if interval <= 0.0:
+            return
+        with self._request_lock:
+            now = time.monotonic()
+            wait_sec = interval - (now - self._last_request_at)
+            if wait_sec > 0:
+                time.sleep(wait_sec)
+            self._last_request_at = time.monotonic()
 
 
 def load_credentials_file(path: Path) -> tuple[str | None, str | None]:
@@ -189,6 +236,17 @@ def parse_time_to_unix(value: str) -> int:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return int(dt.timestamp())
+
+
+def _retry_after_seconds(value: str | None, *, fallback: float) -> float:
+    """Parse a Retry-After value, falling back to a configured backoff."""
+    if not value:
+        return max(0.0, fallback)
+    text = value.strip()
+    try:
+        return max(0.0, float(text))
+    except ValueError:
+        return max(0.0, fallback)
 
 
 def default_outputs_root(script_path: Path) -> Path:
@@ -789,6 +847,9 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--client-id", default=os.getenv("OPENSKY_CLIENT_ID"))
     parser.add_argument("--client-secret", default=os.getenv("OPENSKY_CLIENT_SECRET"))
+    parser.add_argument("--request-interval-sec", type=float, default=2.0, help="Minimum seconds between OpenSky requests")
+    parser.add_argument("--max-request-retries", type=int, default=4, help="Retries for retryable OpenSky request failures such as HTTP 429")
+    parser.add_argument("--rate-limit-backoff-sec", type=float, default=90.0, help="Fallback sleep seconds after HTTP 429 when Retry-After is absent")
     parser.add_argument(
         "--credentials-file",
         default=None,
@@ -924,6 +985,9 @@ def main() -> None:
         client = OpenSkyClient(
             client_id=client_id,
             client_secret=client_secret,
+            request_interval_sec=args.request_interval_sec,
+            max_request_retries=args.max_request_retries,
+            rate_limit_backoff_sec=args.rate_limit_backoff_sec,
         )
 
         if mode == "auto":
