@@ -66,7 +66,7 @@ DOF_ROOT=${DOF_ROOT:-"$SCRIPT_DIR/data/DOF/DOF_260412"}
 RNAV_CHARTS_ROOT=${RNAV_CHARTS_ROOT:-"$SCRIPT_DIR/data/RNAV_CHARTS"}
 OPENTOPOGRAPHY_ROOT=${OPENTOPOGRAPHY_ROOT:-"$SCRIPT_DIR/data/opentopography"}
 USGS_LIDAR_ROOT=${USGS_LIDAR_ROOT:-"$SCRIPT_DIR/data/usgs_lidar"}
-OPENSKY_OUTPUT_ROOT=${OPENSKY_OUTPUT_ROOT:-"$SCRIPT_DIR/opensky_data_query/outputs"}
+TRAJECTORY_OUTPUT_ROOT=${TRAJECTORY_OUTPUT_ROOT:-${OPENSKY_OUTPUT_ROOT:-"$SCRIPT_DIR/trajectory_data_process/outputs"}}
 
 OBSTACLE_RADIUS_KM=${OBSTACLE_RADIUS_KM:-20}
 WAYPOINT_RADIUS_KM=${WAYPOINT_RADIUS_KM:-120}
@@ -114,7 +114,7 @@ has_geotiff_files() {
 
 latest_czml_input() {
   airport_tag=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
-  airport_output_dir="$OPENSKY_OUTPUT_ROOT/$airport_tag"
+  airport_output_dir="$TRAJECTORY_OUTPUT_ROOT/$airport_tag"
   [ -d "$airport_output_dir" ] || return 1
   latest=$(
     find "$airport_output_dir" -maxdepth 1 -type f -name "${airport_tag}_czml_input_*.json" \
@@ -348,7 +348,7 @@ if [ "$GENERATE_TRAJECTORIES" = "1" ]; then
       --input "$CZML_INPUT" \
       --output "$PUBLIC_AIRPORT_DIR/trajectories.czml"
   else
-    warn "no CZML input found under $OPENSKY_OUTPUT_ROOT/$(printf '%s' "$ICAO" | tr '[:upper:]' '[:lower:]'); skipping trajectories.czml"
+    warn "no CZML input found under $TRAJECTORY_OUTPUT_ROOT/$(printf '%s' "$ICAO" | tr '[:upper:]' '[:lower:]'); skipping trajectories.czml"
   fi
 else
   warn "GENERATE_TRAJECTORIES=0; skipping trajectories.czml"

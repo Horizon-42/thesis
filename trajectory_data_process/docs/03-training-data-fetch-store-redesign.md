@@ -20,7 +20,7 @@ Still required before large production collection:
 - inspect label balance and quarantined records before expanding the date range
 
 ## Objective
-Redesign `opensky_data_query` from an airport-centered visualization downloader into a data collection pipeline suitable for training 4D trajectory prediction models.
+Redesign `trajectory_data_process` from an airport-centered visualization downloader into a data collection pipeline suitable for training 4D trajectory prediction models.
 
 The redesigned pipeline must:
 
@@ -85,16 +85,17 @@ The package has two flows:
 1. Existing CZML visualization flow.
 2. New training-dataset flow.
 
-The main implemented modules are:
+The main implemented modules are grouped by function:
 
-- `fetch_cylw_opensky.py`
-- `trajectory_normalization.py`
-- `dataset_store.py`
-- `trajectory_events.py`
-- `training_dataset.py`
-- `altitude_matching.py`
-- `opensky_history_db.py`
-- `history_training.py`
+- `acquisition/fetch_cylw_opensky.py`
+- `acquisition/opensky_history_db.py`
+- `acquisition/download_adsblol_history.py`
+- `processing/trajectory_normalization.py`
+- `processing/altitude_matching.py`
+- `processing/trajectory_events.py`
+- `processing/history_training.py`
+- `datasets/dataset_store.py`
+- `datasets/training_dataset.py`
 
 Current CZML behavior:
 
@@ -158,41 +159,41 @@ Split the package into separate pipeline concerns:
 
 Suggested modules:
 
-- `opensky_client.py`
+- `acquisition/fetch_cylw_opensky.py`
   - OAuth token handling
   - REST API GET requests
   - return both parsed JSON and original response text
   - retries and rate-limit aware backoff in a later iteration
 
-- `airport_profile.py`
+- `acquisition/fetch_cylw_opensky.py`
   - airport coordinate and elevation resolution
   - radius and bounding-box helpers
 
-- `trajectory_events.py`
+- `processing/trajectory_events.py`
   - OpenSky waypoint parsing
   - distance-to-airport computation
   - 5 nm boundary crossing estimation on a derived copy
   - airport episode extraction
   - relation labeling
 
-- `dataset_store.py`
+- `datasets/dataset_store.py`
   - source response text writer
   - JSONL partition writer
   - manifest writer
   - deterministic event IDs
   - deduplication keys
 
-- `trajectory_normalization.py`
+- `processing/trajectory_normalization.py`
   - keep existing CZML-oriented conversion logic
   - do not use this as the training dataset transformation
 
-- `opensky_history_db.py`
+- `acquisition/opensky_history_db.py`
   - adapter around `traffic.data.opensky.history`
   - request state-vector columns with both `baroaltitude` and `geoaltitude`
   - request joined flight-table airport metadata with `FlightsData4.estdepartureairport` and `FlightsData4.estarrivalairport`
   - write raw returned history rows as JSONL without sorting or renaming
 
-- `history_training.py`
+- `processing/history_training.py`
   - build track-like derived records from history DB rows
   - split aircraft history rows into track segments by time gap and metadata changes
   - attach same-row `baro_altitude_m` and `geo_altitude_m`
@@ -344,7 +345,7 @@ This layer is the audit source of truth.
 Recommended layout:
 
 ```text
-opensky_data_query/outputs/
+trajectory_data_process/outputs/
   source_responses/v2/
     airport=CYLW/year=2026/month=04/day=15/hour=13/
       20260415T130001Z_flights_arrival_CYLW_1776211200_1776214800.body.txt
@@ -382,7 +383,7 @@ Implementation rule:
 For OpenSky history DB mode, there is no REST response body text exposed by `traffic`. The equivalent audit layer is:
 
 ```text
-opensky_data_query/outputs/
+trajectory_data_process/outputs/
   history_rows/v2/
     airport=KRDU/year=2026/month=04/day=19/hour=10/
       airport_ops.jsonl
@@ -841,7 +842,7 @@ Training data should be stored separately from CZML output.
 Recommended layout:
 
 ```text
-opensky_data_query/outputs/
+trajectory_data_process/outputs/
   history_rows/v2/
     airport=CYLW/year=2026/month=04/day=15/hour=13/*.jsonl
   source_responses/v2/
@@ -1066,7 +1067,7 @@ Each fetch run should write a manifest:
 Recommended training dataset fetch:
 
 ```bash
-python opensky_data_query/fetch_cylw_opensky.py \
+python trajectory_data_process/acquisition/fetch_cylw_opensky.py \
   --mode historical \
   --dataset-mode training \
   --training-source history-db \
@@ -1079,7 +1080,7 @@ python opensky_data_query/fetch_cylw_opensky.py \
 Lower-cost airport operations only:
 
 ```bash
-python opensky_data_query/fetch_cylw_opensky.py \
+python trajectory_data_process/acquisition/fetch_cylw_opensky.py \
   --mode historical \
   --dataset-mode training \
   --training-source history-db \
@@ -1092,7 +1093,7 @@ python opensky_data_query/fetch_cylw_opensky.py \
 Small KRDU smoke command:
 
 ```bash
-python opensky_data_query/fetch_cylw_opensky.py \
+python trajectory_data_process/acquisition/fetch_cylw_opensky.py \
   --mode historical \
   --dataset-mode training \
   --training-source history-db \
@@ -1106,7 +1107,7 @@ python opensky_data_query/fetch_cylw_opensky.py \
 REST fallback command for recent data only:
 
 ```bash
-python opensky_data_query/fetch_cylw_opensky.py \
+python trajectory_data_process/acquisition/fetch_cylw_opensky.py \
   --mode historical \
   --dataset-mode training \
   --training-source rest \
@@ -1120,7 +1121,7 @@ python opensky_data_query/fetch_cylw_opensky.py \
 Existing visualization flow:
 
 ```bash
-python opensky_data_query/fetch_cylw_opensky.py \
+python trajectory_data_process/acquisition/fetch_cylw_opensky.py \
   --mode historical \
   --airport CYLW \
   --dataset-mode czml
@@ -1165,14 +1166,14 @@ The new training dataset should be additive and should not break:
 
 ## Implementation Plan
 
-1. Add `trajectory_events.py`. Completed.
+1. Add `processing/trajectory_events.py`. Completed.
    - Parse OpenSky waypoints.
    - Compute distance to airport.
    - Detect entry and exit crossings.
    - Estimate 5 nm boundary crossings as derived metadata.
    - Emit complete airport episodes.
 
-2. Add `dataset_store.py`. Completed.
+2. Add `datasets/dataset_store.py`. Completed.
    - Write original source response body text before parsing.
    - Write JSONL records into airport/time partitions.
    - Create deterministic event IDs.

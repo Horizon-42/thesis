@@ -7,14 +7,18 @@ from typing import Any
 
 import pandas as pd
 
-try:
-    from .opensky_history_db import normalize_history_dataframe
-    from .training_dataset import attach_training_points_or_quarantine, make_raw_track_record
-    from .trajectory_events import extract_complete_airport_events
-except ImportError:  # pragma: no cover - supports direct script execution.
-    from opensky_history_db import normalize_history_dataframe
-    from training_dataset import attach_training_points_or_quarantine, make_raw_track_record
-    from trajectory_events import extract_complete_airport_events
+if __package__ is None or __package__ == "":  # pragma: no cover - direct script execution.
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from trajectory_data_process.acquisition.opensky_history_db import normalize_history_dataframe
+from trajectory_data_process.datasets.training_dataset import (
+    attach_training_points_or_quarantine,
+    make_raw_track_record,
+)
+from trajectory_data_process.processing.trajectory_events import extract_complete_airport_events
 
 
 def _timestamp_seconds(value: Any) -> int:

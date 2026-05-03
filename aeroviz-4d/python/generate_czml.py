@@ -34,7 +34,7 @@ from data_layout import airport_data_path
 
 DEFAULT_AIRPORT = "KRDU"
 REPO_ROOT = Path(__file__).resolve().parents[2]
-OPENSKY_OUTPUT_ROOT = REPO_ROOT / "opensky_data_query" / "outputs"
+TRAJECTORY_OUTPUT_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs"
 
 # Colour palette for trail polylines (RGBA 0-255)
 TRAIL_COLORS = [
@@ -48,7 +48,7 @@ TRAIL_COLORS = [
 
 def default_input_path(airport_code: str) -> Path:
     airport_tag = airport_code.strip().lower()
-    airport_output_dir = OPENSKY_OUTPUT_ROOT / airport_tag
+    airport_output_dir = TRAJECTORY_OUTPUT_ROOT / airport_tag
     if airport_output_dir.exists():
         candidates = sorted(
             airport_output_dir.glob(f"{airport_tag}_czml_input_*.json"),
@@ -452,7 +452,7 @@ def main() -> None:
     input_path = Path(args.input) if args.input else default_input_path(args.airport)
     if not input_path.exists():
         print(f"✗ Input file not found: {input_path}")
-        print("  Run opensky_data_query/fetch_cylw_opensky.py or run_fetch_and_generate.py first.")
+        print("  Run trajectory_data_process/acquisition/fetch_cylw_opensky.py or run_asd-b_fetch_and_generate.py first.")
         raise SystemExit(1)
 
     with open(input_path) as f:

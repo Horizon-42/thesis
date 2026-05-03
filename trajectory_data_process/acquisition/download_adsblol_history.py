@@ -320,7 +320,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output-root",
-        default=str(Path(__file__).resolve().parent / "outputs" / "adsblol_globe_history"),
+        default=str(Path(__file__).resolve().parents[1] / "outputs" / "adsblol_globe_history"),
         help="Directory for downloaded assets.",
     )
     parser.add_argument("--github-token", default=os.getenv("GITHUB_TOKEN"), help=argparse.SUPPRESS)

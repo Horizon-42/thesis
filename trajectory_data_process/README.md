@@ -1,21 +1,29 @@
-# OpenSky Airport Downloader
+# Trajectory Data Process
 
-This folder contains a standalone downloader module (outside `aeroviz-4d`) that fetches real OpenSky data for airport-centered traffic (for example CYYC or CYLW) and converts it into the JSON format required by:
+This folder contains standalone trajectory acquisition, processing, and dataset helpers (outside `aeroviz-4d`). It fetches real airport-centered traffic data from sources such as OpenSky and converts it into the JSON format required by:
 
 - `aeroviz-4d/python/generate_czml.py`
 
 The two stages are intentionally decoupled:
 
-1. `opensky_data_query/fetch_cylw_opensky.py` fetches + normalizes track data and writes `*_czml_input_*.json`
+1. `trajectory_data_process/acquisition/fetch_cylw_opensky.py` fetches + normalizes track data and writes `*_czml_input_*.json`
 2. `aeroviz-4d/python/generate_czml.py` converts that JSON into `trajectories.czml`
 
-## File
+## Layout
 
-- `fetch_cylw_opensky.py`
+- `acquisition/`: external data access and download entry points.
+  - `fetch_cylw_opensky.py`: OpenSky live/historical fetch, normalization orchestration, CZML-input export, and training dataset export.
+  - `opensky_history_db.py`: OpenSky history DB access through `traffic`.
+  - `download_adsblol_history.py`: ADSB.lol globe history downloader.
+- `processing/`: source-independent trajectory transforms.
+  - `trajectory_normalization.py`, `altitude_matching.py`, `trajectory_events.py`, `history_training.py`
+- `datasets/`: JSONL partitioning, source-response storage, and training record assembly.
+  - `dataset_store.py`, `training_dataset.py`
+- `tests/`: mirrors the same `acquisition/`, `processing/`, and `datasets/` grouping.
 
 ## Pipeline Script
 
-- `../run_fetch_and_generate.py` (repo root)
+- `../run_asd-b_fetch_and_generate.py` (repo root)
 
 ## Documentation
 
@@ -37,7 +45,7 @@ Prerequisites:
 KRDU smoke command:
 
 ```bash
-python opensky_data_query/fetch_cylw_opensky.py \
+python trajectory_data_process/acquisition/fetch_cylw_opensky.py \
   --mode historical \
   --dataset-mode training \
   --training-source history-db \
@@ -65,7 +73,7 @@ ADSB.lol `globe_history_2026` is published as daily global split-tar releases. T
 Dry-run release discovery:
 
 ```bash
-python opensky_data_query/download_adsblol_history.py \
+python trajectory_data_process/acquisition/download_adsblol_history.py \
   --date 2026-04-19 \
   --dry-run
 ```
@@ -73,14 +81,14 @@ python opensky_data_query/download_adsblol_history.py \
 Download one day:
 
 ```bash
-python opensky_data_query/download_adsblol_history.py \
+python trajectory_data_process/acquisition/download_adsblol_history.py \
   --date 2026-04-19
 ```
 
 Download and stream-extract the split tar:
 
 ```bash
-python opensky_data_query/download_adsblol_history.py \
+python trajectory_data_process/acquisition/download_adsblol_history.py \
   --date 2026-04-19 \
   --extract
 ```
@@ -88,28 +96,28 @@ python opensky_data_query/download_adsblol_history.py \
 Default output:
 
 ```text
-opensky_data_query/outputs/adsblol_globe_history/YYYY.MM.DD/<release-tag>/
+trajectory_data_process/outputs/adsblol_globe_history/YYYY.MM.DD/<release-tag>/
 ```
 
 ### 1) Live mode (no credentials, default airport CYYC)
 
 ```bash
 /Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
-  /Users/liudongxu/Desktop/studys/thesis/opensky_data_query/fetch_cylw_opensky.py \
+  /Users/liudongxu/Desktop/studys/thesis/trajectory_data_process/acquisition/fetch_cylw_opensky.py \
   --mode live
 ```
 
 This will:
 
 1. fetch recent CYYC-related tracks from OpenSky
-2. create CZML-input JSON under `opensky_data_query/outputs/`
+2. create CZML-input JSON under `trajectory_data_process/outputs/`
 3. print the generated input file path for the next stage
 
 To run both stages in one command, use the root-level pipeline script:
 
 ```bash
 /Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
-  /Users/liudongxu/Desktop/studys/thesis/run_fetch_and_generate.py \
+  /Users/liudongxu/Desktop/studys/thesis/run_asd-b_fetch_and_generate.py \
   --mode live \
   --airport CYYC \
   --altitude-mode auto-bias
@@ -118,8 +126,8 @@ To run both stages in one command, use the root-level pipeline script:
 # 1) existing *_raw_*.json -> run normalization/conversion + generate
 # 2) existing *_czml_input_*.json -> run generate directly
 /Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
-  /Users/liudongxu/Desktop/studys/thesis/run_fetch_and_generate.py \
-  --input-json /Users/liudongxu/Desktop/studys/thesis/opensky_data_query/outputs/cyyc_raw_20260415T152417Z.json
+  /Users/liudongxu/Desktop/studys/thesis/run_asd-b_fetch_and_generate.py \
+  --input-json /Users/liudongxu/Desktop/studys/thesis/trajectory_data_process/outputs/cyyc_raw_20260415T152417Z.json
 ```
 
 Altitude handling (research note):
@@ -142,20 +150,20 @@ To switch airport (example CYLW):
 
 ```bash
 /Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
-  /Users/liudongxu/Desktop/studys/thesis/opensky_data_query/fetch_cylw_opensky.py \
+  /Users/liudongxu/Desktop/studys/thesis/trajectory_data_process/acquisition/fetch_cylw_opensky.py \
   --airport CYLW \
   --mode live
 
 # Keep raw altitude (default)
 /Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
-  /Users/liudongxu/Desktop/studys/thesis/opensky_data_query/fetch_cylw_opensky.py \
+  /Users/liudongxu/Desktop/studys/thesis/trajectory_data_process/acquisition/fetch_cylw_opensky.py \
   --mode live \
   --airport CYYC \
   --altitude-mode raw
 
 # Apply touchdown-bias altitude correction (optional)
 /Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
-  /Users/liudongxu/Desktop/studys/thesis/opensky_data_query/fetch_cylw_opensky.py \
+  /Users/liudongxu/Desktop/studys/thesis/trajectory_data_process/acquisition/fetch_cylw_opensky.py \
   --mode live \
   --airport CYYC \
   --altitude-mode touchdown-bias \
@@ -164,7 +172,7 @@ To switch airport (example CYLW):
 
 # Recommended automatic altitude correction (touchdown first, approach fallback)
 /Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
-  /Users/liudongxu/Desktop/studys/thesis/opensky_data_query/fetch_cylw_opensky.py \
+  /Users/liudongxu/Desktop/studys/thesis/trajectory_data_process/acquisition/fetch_cylw_opensky.py \
   --mode live \
   --airport CYYC \
   --altitude-mode auto-bias \
@@ -174,14 +182,14 @@ To switch airport (example CYLW):
 
 # Disable normalization to export raw tracks for debugging
 /Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
-  /Users/liudongxu/Desktop/studys/thesis/opensky_data_query/fetch_cylw_opensky.py \
+  /Users/liudongxu/Desktop/studys/thesis/trajectory_data_process/acquisition/fetch_cylw_opensky.py \
   --mode live \
   --airport CYYC \
   --disable-normalization
 
 # Same via one-command pipeline wrapper
 /Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
-  /Users/liudongxu/Desktop/studys/thesis/run_fetch_and_generate.py \
+  /Users/liudongxu/Desktop/studys/thesis/run_asd-b_fetch_and_generate.py \
   --mode live \
   --airport CYYC \
   --disable-normalization
@@ -200,7 +208,7 @@ Run:
 
 ```bash
 /Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
-  /Users/liudongxu/Desktop/studys/thesis/opensky_data_query/fetch_cylw_opensky.py \
+  /Users/liudongxu/Desktop/studys/thesis/trajectory_data_process/acquisition/fetch_cylw_opensky.py \
   --mode historical \
   --airport CYYC \
   --begin "2026-04-05T00:00:00Z" \
@@ -211,4 +219,4 @@ Run:
 
 - REST historical arrivals/departures require authenticated OAuth access.
 - `--mode auto` will choose REST `historical` if credentials exist for CZML mode, otherwise `live`.
-- Output files are written to `opensky_data_query/outputs/` with UTC timestamp suffixes.
+- Output files are written to `trajectory_data_process/outputs/` with UTC timestamp suffixes.

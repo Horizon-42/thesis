@@ -7,12 +7,15 @@ be quarantined, but it does not fetch network data.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
-try:
-    from .dataset_store import stable_json_dumps, sha256_text
-except ImportError:  # pragma: no cover - supports direct script-style imports.
-    from dataset_store import stable_json_dumps, sha256_text
+if __package__ is None or __package__ == "":  # pragma: no cover - direct script execution.
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from trajectory_data_process.datasets.dataset_store import stable_json_dumps, sha256_text
 
 
 def stable_record_id(prefix: str, payload: dict[str, Any]) -> str:

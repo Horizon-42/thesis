@@ -1,9 +1,9 @@
 # Current Altitude Bias Correction in trajectory_normalization.py
 
 ## Scope
-This document describes the altitude correction logic implemented in opensky_cylw/trajectory_normalization.py, inside function track_to_czml_flight.
+This document describes the altitude correction logic implemented in trajectory_data_process/processing/trajectory_normalization.py, inside function track_to_czml_flight.
 
-The fetch CLI (opensky_cylw/fetch_cylw_opensky.py) imports this module for normalization.
+The fetch CLI (trajectory_data_process/acquisition/fetch_cylw_opensky.py) imports this module for normalization.
 
 ## Goal
 OpenSky track waypoints provide barometric altitude. In practice, this can be offset from airport elevation during terminal operations. The current implementation applies an optional per-flight constant altitude bias to improve visual alignment in trajectory playback.
@@ -116,7 +116,7 @@ For best vertical alignment in live CYYC data:
 Example:
 
 /Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
-  /Users/liudongxu/Desktop/studys/thesis/run_fetch_and_generate.py \
+  /Users/liudongxu/Desktop/studys/thesis/run_asd-b_fetch_and_generate.py \
   --mode live \
   --airport CYYC \
   --altitude-mode auto-bias

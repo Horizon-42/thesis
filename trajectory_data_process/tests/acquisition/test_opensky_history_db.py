@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 
 import pandas as pd
 
-from opensky_data_query.opensky_history_db import (
+from trajectory_data_process.acquisition.opensky_history_db import (
     AIRPORT_HISTORY_COLUMNS,
     HISTORY_COLUMNS,
     normalize_history_dataframe,

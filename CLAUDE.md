@@ -9,9 +9,9 @@ AeroViz-4D: Airport 4D trajectory and terrain digital-twin visualization system 
 ## Repository Layout
 
 - **aeroviz-4d/** — Main visualization app (React + CesiumJS frontend, Python CZML generator)
-- **opensky_cylw/** — OpenSky API data fetcher and trajectory normalization
+- **trajectory_data_process/** — Trajectory acquisition, processing, and dataset helpers
 - **bc_lidar_downloader/** — BC LiDAR terrain data downloader
-- **run_fetch_and_generate.py** — Orchestrator: fetch → normalize → generate CZML pipeline
+- **run_asd-b_fetch_and_generate.py** — Orchestrator: fetch -> normalize -> generate CZML pipeline
 
 ## Build & Dev Commands
 
@@ -42,13 +42,13 @@ python -m pytest aeroviz-4d/python/tests/ --cov=. --cov-report=html
 
 ```bash
 # Full pipeline: fetch live data → normalize → generate CZML
-python run_fetch_and_generate.py --airport CYYC --mode live
+python run_asd-b_fetch_and_generate.py --airport CYYC --mode live
 
 # Reuse existing raw JSON (skip fetch, run normalization + generation)
-python run_fetch_and_generate.py --input-json opensky_cylw/outputs/cyyc_raw_*.json
+python run_asd-b_fetch_and_generate.py --input-json trajectory_data_process/outputs/cyyc_raw_*.json
 
 # Skip straight to CZML generation from already-normalized data
-python run_fetch_and_generate.py --input-json opensky_cylw/outputs/cyyc_czml_input_*.json
+python run_asd-b_fetch_and_generate.py --input-json trajectory_data_process/outputs/cyyc_czml_input_*.json
 ```
 
 ## Architecture

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from opensky_data_query.dataset_store import (
+from trajectory_data_process.datasets.dataset_store import (
     find_cached_source_response,
     partition_path,
     sha256_text,

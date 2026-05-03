@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from opensky_data_query.download_adsblol_history import (
+from trajectory_data_process.acquisition.download_adsblol_history import (
     SplitFileReader,
     candidate_tags,
     parse_day,

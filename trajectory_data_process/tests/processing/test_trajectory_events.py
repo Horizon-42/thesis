@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import unittest
 
-from opensky_data_query.trajectory_events import (
+from trajectory_data_process.processing.trajectory_events import (
     extract_complete_airport_events,
     parse_track_for_analysis,
 )
@@ -101,4 +101,3 @@ class TrajectoryEventsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

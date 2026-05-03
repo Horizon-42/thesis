@@ -4,7 +4,7 @@ import unittest
 
 import pandas as pd
 
-from opensky_data_query.history_training import (
+from trajectory_data_process.processing.history_training import (
     build_training_records_from_history,
     history_group_to_dual_altitude_points,
     history_group_to_track,

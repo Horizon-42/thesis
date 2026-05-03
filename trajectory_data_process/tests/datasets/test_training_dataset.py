@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import unittest
 
-from opensky_data_query.training_dataset import (
+from trajectory_data_process.datasets.training_dataset import (
     attach_training_points_or_quarantine,
     make_raw_track_record,
 )
@@ -85,4 +85,3 @@ class TrainingDatasetTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

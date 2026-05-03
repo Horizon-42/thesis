@@ -52,44 +52,37 @@ from urllib.error import HTTPError, URLError
 
 import pandas as pd
 
-try:
-    from .trajectory_normalization import (
-        convert_tracks_to_czml_input,
-        convert_tracks_to_raw_czml_input,
-    )
-    from .altitude_matching import build_dual_altitude_points, parse_state_altitude_samples
-    from .history_training import build_training_records_from_history
-    from .opensky_history_db import AIRPORT_HISTORY_COLUMNS, STATE_VECTOR_COLUMNS, fetch_history_dataframe, write_history_rows
-    from .dataset_store import (
-        find_cached_source_response,
-        partition_path,
-        write_jsonl_records,
-        write_source_response,
-    )
-    from .training_dataset import (
-        attach_training_points_or_quarantine,
-        make_raw_track_record,
-    )
-    from .trajectory_events import extract_complete_airport_events
-except ImportError:  # pragma: no cover - supports direct script execution.
-    from trajectory_normalization import (
-        convert_tracks_to_czml_input,
-        convert_tracks_to_raw_czml_input,
-    )
-    from altitude_matching import build_dual_altitude_points, parse_state_altitude_samples
-    from history_training import build_training_records_from_history
-    from opensky_history_db import AIRPORT_HISTORY_COLUMNS, STATE_VECTOR_COLUMNS, fetch_history_dataframe, write_history_rows
-    from dataset_store import (
-        find_cached_source_response,
-        partition_path,
-        write_jsonl_records,
-        write_source_response,
-    )
-    from training_dataset import (
-        attach_training_points_or_quarantine,
-        make_raw_track_record,
-    )
-    from trajectory_events import extract_complete_airport_events
+if __package__ is None or __package__ == "":  # pragma: no cover - direct script execution.
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from trajectory_data_process.acquisition.opensky_history_db import (
+    AIRPORT_HISTORY_COLUMNS,
+    STATE_VECTOR_COLUMNS,
+    fetch_history_dataframe,
+    write_history_rows,
+)
+from trajectory_data_process.datasets.dataset_store import (
+    find_cached_source_response,
+    partition_path,
+    write_jsonl_records,
+    write_source_response,
+)
+from trajectory_data_process.datasets.training_dataset import (
+    attach_training_points_or_quarantine,
+    make_raw_track_record,
+)
+from trajectory_data_process.processing.altitude_matching import (
+    build_dual_altitude_points,
+    parse_state_altitude_samples,
+)
+from trajectory_data_process.processing.history_training import build_training_records_from_history
+from trajectory_data_process.processing.trajectory_events import extract_complete_airport_events
+from trajectory_data_process.processing.trajectory_normalization import (
+    convert_tracks_to_czml_input,
+    convert_tracks_to_raw_czml_input,
+)
 
 
 API_ROOT = "https://opensky-network.org/api"
@@ -282,13 +275,13 @@ def _tracks_all_too_old(t_ref: int, *, now: float | None = None, max_age_sec: in
 
 
 def default_outputs_root(script_path: Path) -> Path:
-    """返回脚本旁边的默认输出目录。"""
-    return script_path.parent / "outputs"
+    """返回 trajectory_data_process 包级默认输出目录。"""
+    return script_path.parents[1] / "outputs"
 
 
 def default_aeroviz_root(script_path: Path) -> Path:
-    """返回与 opensky_data_query 同级的默认 aeroviz-4d 目录。"""
-    return script_path.parent.parent / "aeroviz-4d"
+    """返回与 trajectory_data_process 同级的默认 aeroviz-4d 目录。"""
+    return script_path.parents[2] / "aeroviz-4d"
 
 
 def resolve_airport_profile(airport: str, aeroviz_root: Path) -> tuple[float, float, float]:
@@ -1174,7 +1167,7 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Path to a JSON file with OpenSky OAuth credentials. "
             "Accepts keys {clientId, clientSecret} or {client_id, client_secret}. "
-            "Defaults to credentials.json next to this script. "
+            "Defaults to trajectory_data_process/credentials.json. "
             "Used only when --client-id/--client-secret (and env vars) are absent."
         ),
     )
@@ -1237,7 +1230,11 @@ def parse_args() -> argparse.Namespace:
         help="Existing *_raw_*.json file; bypass network fetch and run conversion/normalization from its tracks",
     )
 
-    parser.add_argument("--output-root", default=None, help="Folder for outputs (default: ./outputs next to script)")
+    parser.add_argument(
+        "--output-root",
+        default=None,
+        help="Folder for outputs (default: trajectory_data_process/outputs)",
+    )
     parser.add_argument("--aeroviz-root", default=None, help="Path to aeroviz-4d folder")
 
     return parser.parse_args()
@@ -1302,11 +1299,11 @@ def main() -> None:
         client_id = args.client_id
         client_secret = args.client_secret
         if not (client_id and client_secret):
-            # 优先级：显式参数或环境变量 > credentials-file > 脚本旁 credentials.json。
+            # 优先级：显式参数或环境变量 > credentials-file > 包级 credentials.json。
             credentials_path = (
                 Path(args.credentials_file)
                 if args.credentials_file
-                else script_path.parent / "credentials.json"
+                else script_path.parents[1] / "credentials.json"
             )
             if credentials_path.exists():
                 file_id, file_secret = load_credentials_file(credentials_path)

@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from opensky_data_query.fetch_cylw_opensky import (
+from trajectory_data_process.acquisition.fetch_cylw_opensky import (
     _retry_after_seconds,
     _tracks_all_too_old,
     find_cached_track_payload,

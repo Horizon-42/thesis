@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import unittest
 
-from opensky_data_query.altitude_matching import (
+from trajectory_data_process.processing.altitude_matching import (
     build_dual_altitude_points,
     parse_state_altitude_samples,
 )
@@ -96,4 +96,3 @@ class AltitudeMatchingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

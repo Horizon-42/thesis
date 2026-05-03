@@ -13,10 +13,12 @@ from typing import Any
 
 import pandas as pd
 
-try:
-    from .dataset_store import partition_path, write_jsonl_records
-except ImportError:  # pragma: no cover - supports direct script execution.
-    from dataset_store import partition_path, write_jsonl_records
+if __package__ is None or __package__ == "":  # pragma: no cover - direct script execution.
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from trajectory_data_process.datasets.dataset_store import partition_path, write_jsonl_records
 
 
 STATE_VECTOR_COLUMNS = (

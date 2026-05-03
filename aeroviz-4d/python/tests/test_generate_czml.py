@@ -205,11 +205,11 @@ class TestDefaultPaths:
         older.write_text("[]", encoding="utf-8")
         newer.write_text("[]", encoding="utf-8")
 
-        monkeypatch.setattr("generate_czml.OPENSKY_OUTPUT_ROOT", tmp_path)
+        monkeypatch.setattr("generate_czml.TRAJECTORY_OUTPUT_ROOT", tmp_path)
 
         assert default_input_path("KRDU") == newer
 
     def test_default_input_path_falls_back_to_airport_specific_placeholder(self, monkeypatch, tmp_path):
-        monkeypatch.setattr("generate_czml.OPENSKY_OUTPUT_ROOT", tmp_path)
+        monkeypatch.setattr("generate_czml.TRAJECTORY_OUTPUT_ROOT", tmp_path)
 
         assert default_input_path("CYVR") == Path(tmp_path) / "cyvr" / "cyvr_czml_input_latest.json"
