@@ -200,20 +200,8 @@ class OpenSkyClient:
                 # 这里把它视为 None，让调用方用 `or []` 继续处理。
                 if e.code == 404 and body.strip() in ("", "[]", "{}"):
                     return body, e.code
-                if e.code == 429 and attempt + 1 < attempts:
-                    retry_after = _retry_after_seconds(
-                        e.headers.get("Retry-After"),
-                        fallback=min(45.0, self.rate_limit_backoff_sec + 5.0 * attempt),
-                    )
-                    self._increase_adaptive_interval()
-                    print(
-                        f"[OpenSky] HTTP 429 rate limit; sleeping {retry_after:.1f}s before retry "
-                        f"{attempt + 1}/{self.max_request_retries}",
-                        flush=True,
-                    )
-                    time.sleep(retry_after)
-                    continue
                 if e.code == 429:
+                    self._increase_adaptive_interval()
                     raise OpenSkyRateLimitError(endpoint, params or {}, f"HTTP 429 for {url}: {body[:300]}") from e
                 raise RuntimeError(f"HTTP {e.code} for {url}: {body[:300]}") from e
             except URLError as e:
@@ -773,6 +761,8 @@ def run_training_historical_fetch(
                 stopped_reason = "track_request_budget_exhausted"
                 resume_candidate_index = candidate_index
                 break
+            if cached is None:
+                network_track_requests += 1
             track, track_source = fetch_json_with_saved_source(
                 client,
                 output_root=output_root,
@@ -781,8 +771,6 @@ def run_training_historical_fetch(
                 params=params,
                 authenticated=True,
             )
-            if cached is None:
-                network_track_requests += 1
         except OpenSkyRateLimitError as e:
             print(f"[OpenSky] stopping training run after rate limit: {e}", flush=True)
             stopped_reason = "tracks_rate_limited"
