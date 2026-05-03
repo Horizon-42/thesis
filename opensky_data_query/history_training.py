@@ -8,9 +8,11 @@ from typing import Any
 import pandas as pd
 
 try:
+    from .opensky_history_db import normalize_history_dataframe
     from .training_dataset import attach_training_points_or_quarantine, make_raw_track_record
     from .trajectory_events import extract_complete_airport_events
 except ImportError:  # pragma: no cover - supports direct script execution.
+    from opensky_history_db import normalize_history_dataframe
     from training_dataset import attach_training_points_or_quarantine, make_raw_track_record
     from trajectory_events import extract_complete_airport_events
 
@@ -34,13 +36,35 @@ def _first_nonempty(values: pd.Series) -> str | None:
     return None
 
 
+def _bool_value(value: Any) -> bool:
+    if value is None:
+        return False
+    try:
+        if pd.isna(value):
+            return False
+    except (TypeError, ValueError):
+        pass
+    return bool(value)
+
+
+def _history_rows_for_track(group: pd.DataFrame) -> list[dict[str, Any]]:
+    """Return rows that can produce path points, in path/raw-index order."""
+    ordered = group.sort_values("time", kind="stable")
+    rows: list[dict[str, Any]] = []
+    for row in ordered.to_dict(orient="records"):
+        if pd.isna(row.get("time")) or pd.isna(row.get("lat")) or pd.isna(row.get("lon")):
+            continue
+        if pd.isna(row.get("baroaltitude")):
+            continue
+        rows.append(row)
+    return rows
+
+
 def history_group_to_track(group: pd.DataFrame) -> dict[str, Any]:
     """Convert one icao24 history group to a track-like raw payload."""
     ordered = group.sort_values("time", kind="stable")
     path: list[list[Any]] = []
-    for row in ordered.to_dict(orient="records"):
-        if pd.isna(row.get("lat")) or pd.isna(row.get("lon")) or pd.isna(row.get("baroaltitude")):
-            continue
+    for row in _history_rows_for_track(group):
         path.append(
             [
                 _timestamp_seconds(row["time"]),
@@ -48,7 +72,7 @@ def history_group_to_track(group: pd.DataFrame) -> dict[str, Any]:
                 float(row["lon"]),
                 float(row["baroaltitude"]),
                 None if pd.isna(row.get("heading")) else float(row["heading"]),
-                bool(row.get("onground")),
+                _bool_value(row.get("onground")),
             ]
         )
 
@@ -65,10 +89,7 @@ def history_group_to_track(group: pd.DataFrame) -> dict[str, Any]:
 def history_group_to_dual_altitude_points(group: pd.DataFrame) -> list[dict[str, Any]]:
     """Build derived points that retain both barometric and geometric altitude."""
     points: list[dict[str, Any]] = []
-    ordered = group.sort_values("time", kind="stable").reset_index(drop=True)
-    for raw_index, row in enumerate(ordered.to_dict(orient="records")):
-        if pd.isna(row.get("lat")) or pd.isna(row.get("lon")):
-            continue
+    for raw_index, row in enumerate(_history_rows_for_track(group)):
         points.append(
             {
                 "raw_index": raw_index,
@@ -78,7 +99,7 @@ def history_group_to_dual_altitude_points(group: pd.DataFrame) -> list[dict[str,
                 "baro_altitude_m": None if pd.isna(row.get("baroaltitude")) else float(row["baroaltitude"]),
                 "geo_altitude_m": None if pd.isna(row.get("geoaltitude")) else float(row["geoaltitude"]),
                 "true_track_deg": None if pd.isna(row.get("heading")) else float(row["heading"]),
-                "on_ground": bool(row.get("onground")),
+                "on_ground": _bool_value(row.get("onground")),
                 "altitude_sources": {
                     "baro_altitude_m": "opensky_history_db_baroaltitude_m",
                     "geo_altitude_m": "opensky_history_db_geoaltitude_m",
@@ -115,6 +136,10 @@ def build_training_records_from_history(
     radius_nm: float,
     low_altitude_agl_m: float,
     require_geo_altitude: bool = True,
+    fetch_profile: str = "history_db",
+    source_response_ids: list[str] | None = None,
+    max_tracks: int | None = None,
+    max_segment_gap_sec: int = 900,
 ) -> dict[str, list[dict[str, Any]]]:
     """Build raw tracks, airport events, and quarantine records from history rows."""
     raw_tracks: list[dict[str, Any]] = []
@@ -124,7 +149,10 @@ def build_training_records_from_history(
     if df.empty:
         return {"raw_tracks": raw_tracks, "events": events_out, "quarantine": quarantine}
 
-    for _icao24, group in df.groupby("icao24", sort=False):
+    normalized = normalize_history_dataframe(df)
+    for group in iter_history_track_segments(normalized, max_gap_sec=max_segment_gap_sec):
+        if max_tracks is not None and len(raw_tracks) >= max_tracks:
+            break
         track = history_group_to_track(group)
         if not track.get("path"):
             continue
@@ -133,11 +161,13 @@ def build_training_records_from_history(
         candidate_sources = _candidate_sources_for_airport(metadata, airport)
         raw_record = make_raw_track_record(
             airport=airport,
-            fetch_profile="history_db",
+            fetch_profile=fetch_profile,
             candidate_sources=candidate_sources,
-            source_response_ids=["opensky_history_db"],
+            source_response_ids=source_response_ids or ["opensky_history_db"],
             flight_metadata=metadata,
             track=track,
+            source_api="opensky-history-db",
+            source_endpoint="traffic.data.opensky.history",
         )
         raw_tracks.append(raw_record)
 
@@ -168,6 +198,55 @@ def build_training_records_from_history(
     return {"raw_tracks": raw_tracks, "events": events_out, "quarantine": quarantine}
 
 
+def iter_history_track_segments(df: pd.DataFrame, *, max_gap_sec: int = 900) -> list[pd.DataFrame]:
+    """Split history rows into per-aircraft track segments for event extraction."""
+    if df.empty:
+        return []
+
+    out: list[pd.DataFrame] = []
+    for _icao24, group in df.groupby("icao24", sort=False):
+        ordered = group.sort_values("time", kind="stable").reset_index(drop=True)
+        if ordered.empty:
+            continue
+        segment_start = 0
+        previous_time = pd.Timestamp(ordered.at[0, "time"])
+        previous_metadata_key = _metadata_key(ordered.iloc[0])
+        for idx in range(1, len(ordered)):
+            current_time = pd.Timestamp(ordered.at[idx, "time"])
+            current_metadata_key = _metadata_key(ordered.iloc[idx])
+            gap_sec = (current_time - previous_time).total_seconds()
+            metadata_changed = _has_complete_metadata(previous_metadata_key) and _has_complete_metadata(current_metadata_key) and current_metadata_key != previous_metadata_key
+            if gap_sec > max_gap_sec or metadata_changed:
+                out.append(ordered.iloc[segment_start:idx].copy())
+                segment_start = idx
+            previous_time = current_time
+            previous_metadata_key = current_metadata_key
+        out.append(ordered.iloc[segment_start:].copy())
+    return out
+
+
+def _metadata_key(row: pd.Series) -> tuple[str | None, str | None]:
+    dep = _clean_text(row.get("estdepartureairport"))
+    arr = _clean_text(row.get("estarrivalairport"))
+    return dep, arr
+
+
+def _clean_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip().upper()
+    return text or None
+
+
+def _has_complete_metadata(key: tuple[str | None, str | None]) -> bool:
+    return bool(key[0] or key[1])
+
+
 def _candidate_sources_for_airport(metadata: dict[str, Any], airport: str) -> list[str]:
     airport = airport.upper()
     sources: list[str] = []
@@ -178,4 +257,3 @@ def _candidate_sources_for_airport(metadata: dict[str, Any], airport: str) -> li
     if not sources:
         sources.append("area")
     return sources
-

@@ -28,6 +28,8 @@ def make_raw_track_record(
     source_response_ids: list[str],
     flight_metadata: dict[str, Any],
     track: dict[str, Any],
+    source_api: str = "opensky",
+    source_endpoint: str = "/tracks/all",
 ) -> dict[str, Any]:
     """Build a raw track JSONL record without mutating the OpenSky track."""
     raw_track_id = stable_record_id("raw_track", track)
@@ -37,8 +39,8 @@ def make_raw_track_record(
         "airport": airport.upper(),
         "fetch_profile": fetch_profile,
         "source": {
-            "api": "opensky",
-            "endpoint": "/tracks/all",
+            "api": source_api,
+            "endpoint": source_endpoint,
             "candidate_sources": list(candidate_sources),
             "source_response_ids": list(source_response_ids),
         },

@@ -9,6 +9,7 @@ from tempfile import TemporaryDirectory
 import pandas as pd
 
 from opensky_data_query.opensky_history_db import (
+    AIRPORT_HISTORY_COLUMNS,
     HISTORY_COLUMNS,
     normalize_history_dataframe,
     write_history_rows,
@@ -59,11 +60,52 @@ class OpenSkyHistoryDbTests(unittest.TestCase):
             self.assertEqual(rows[0]["icao24"], "abc123")
             self.assertEqual(rows[0]["geoaltitude"], 980.0)
 
+    def test_write_history_rows_preserves_returned_row_order(self) -> None:
+        df = pd.DataFrame(
+            [
+                {"time": pd.Timestamp("2026-04-19T10:00:10Z"), "icao24": "b"},
+                {"time": pd.Timestamp("2026-04-19T10:00:00Z"), "icao24": "a"},
+            ]
+        )
+
+        with TemporaryDirectory() as tmp:
+            path = write_history_rows(
+                Path(tmp),
+                airport="krdu",
+                df=df,
+                fetched_at=datetime(2026, 5, 3, 13, tzinfo=timezone.utc),
+                query_name="airport_ops",
+            )
+
+            self.assertEqual(path.name, "airport_ops.jsonl")
+            rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual([row["icao24"] for row in rows], ["b", "a"])
+
     def test_history_columns_include_both_altitudes(self) -> None:
         self.assertIn("baroaltitude", HISTORY_COLUMNS)
         self.assertIn("geoaltitude", HISTORY_COLUMNS)
 
+    def test_airport_history_columns_request_flights_table_airports(self) -> None:
+        self.assertIn("FlightsData4.estdepartureairport", AIRPORT_HISTORY_COLUMNS)
+        self.assertIn("FlightsData4.estarrivalairport", AIRPORT_HISTORY_COLUMNS)
+
+    def test_normalize_history_dataframe_canonicalizes_flights_columns(self) -> None:
+        df = pd.DataFrame(
+            [
+                {
+                    "time": "2026-04-19T10:00:00Z",
+                    "icao24": "ABC123",
+                    "FlightsData4.estArrivalAirport": "KRDU",
+                }
+            ]
+        )
+
+        out = normalize_history_dataframe(df)
+
+        self.assertIn("estarrivalairport", out.columns)
+        self.assertEqual(out.loc[0, "icao24"], "abc123")
+        self.assertEqual(out.loc[0, "estarrivalairport"], "KRDU")
+
 
 if __name__ == "__main__":
     unittest.main()
-

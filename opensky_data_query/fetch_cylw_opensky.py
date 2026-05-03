@@ -50,12 +50,16 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
+import pandas as pd
+
 try:
     from .trajectory_normalization import (
         convert_tracks_to_czml_input,
         convert_tracks_to_raw_czml_input,
     )
     from .altitude_matching import build_dual_altitude_points, parse_state_altitude_samples
+    from .history_training import build_training_records_from_history
+    from .opensky_history_db import AIRPORT_HISTORY_COLUMNS, STATE_VECTOR_COLUMNS, fetch_history_dataframe, write_history_rows
     from .dataset_store import (
         find_cached_source_response,
         partition_path,
@@ -73,6 +77,8 @@ except ImportError:  # pragma: no cover - supports direct script execution.
         convert_tracks_to_raw_czml_input,
     )
     from altitude_matching import build_dual_altitude_points, parse_state_altitude_samples
+    from history_training import build_training_records_from_history
+    from opensky_history_db import AIRPORT_HISTORY_COLUMNS, STATE_VECTOR_COLUMNS, fetch_history_dataframe, write_history_rows
     from dataset_store import (
         find_cached_source_response,
         partition_path,
@@ -314,6 +320,22 @@ def resolve_airport_profile(airport: str, aeroviz_root: Path) -> tuple[float, fl
     raise RuntimeError(
         f"Cannot resolve center for airport {airport}. "
         f"Provide airports.csv under {aeroviz_root / 'public' / 'data' / 'common'} or add a hint."
+    )
+
+
+def traffic_bounds_from_airport_bbox(
+    *,
+    airport_lat: float,
+    airport_lon: float,
+    lat_pad: float,
+    lon_pad: float,
+) -> tuple[float, float, float, float]:
+    """Return traffic/OpenSky DB bounds in west, south, east, north order."""
+    return (
+        airport_lon - lon_pad,
+        airport_lat - lat_pad,
+        airport_lon + lon_pad,
+        airport_lat + lat_pad,
     )
 
 
@@ -979,6 +1001,155 @@ def run_training_historical_fetch(
     print(f"[OpenSky] training manifest: {manifest_path}")
 
 
+def run_history_db_training_fetch(
+    *,
+    args: argparse.Namespace,
+    output_root: Path,
+    airport: str,
+    airport_lat: float,
+    airport_lon: float,
+    airport_elev_m: float,
+) -> None:
+    """Fetch training data from OpenSky history DB through traffic."""
+    begin, end = _historical_training_window(args)
+    start = datetime.fromtimestamp(begin, timezone.utc)
+    stop = datetime.fromtimestamp(end, timezone.utc)
+    fetched_at = datetime.now(timezone.utc)
+    history_frames: list[pd.DataFrame] = []
+    history_outputs: list[dict[str, Any]] = []
+
+    airport_df = fetch_history_dataframe(
+        start=start,
+        stop=stop,
+        airport=airport,
+        selected_columns=AIRPORT_HISTORY_COLUMNS,
+    )
+    airport_rows_path = write_history_rows(
+        output_root,
+        airport=airport,
+        df=airport_df,
+        fetched_at=fetched_at,
+        query_name="airport_ops",
+    )
+    history_frames.append(airport_df)
+    history_outputs.append(
+        {
+            "query": "airport_ops",
+            "count": int(len(airport_df)),
+            "path": str(airport_rows_path),
+            "params": {"airport": airport.upper(), "start": start.isoformat(), "stop": stop.isoformat()},
+        }
+    )
+
+    if args.fetch_profile == "terminal_all":
+        bounds = traffic_bounds_from_airport_bbox(
+            airport_lat=airport_lat,
+            airport_lon=airport_lon,
+            lat_pad=args.bbox_lat_pad,
+            lon_pad=args.bbox_lon_pad,
+        )
+        area_df = fetch_history_dataframe(
+            start=start,
+            stop=stop,
+            bounds=bounds,
+            selected_columns=STATE_VECTOR_COLUMNS,
+        )
+        area_rows_path = write_history_rows(
+            output_root,
+            airport=airport,
+            df=area_df,
+            fetched_at=fetched_at,
+            query_name="terminal_area",
+        )
+        history_frames.append(area_df)
+        history_outputs.append(
+            {
+                "query": "terminal_area",
+                "count": int(len(area_df)),
+                "path": str(area_rows_path),
+                "params": {
+                    "bounds": {
+                        "west": bounds[0],
+                        "south": bounds[1],
+                        "east": bounds[2],
+                        "north": bounds[3],
+                    },
+                    "start": start.isoformat(),
+                    "stop": stop.isoformat(),
+                },
+            }
+        )
+
+    df = pd.concat(history_frames, ignore_index=True, sort=False) if history_frames else pd.DataFrame()
+    records = build_training_records_from_history(
+        df,
+        airport=airport,
+        airport_lat=airport_lat,
+        airport_lon=airport_lon,
+        airport_elev_m=airport_elev_m,
+        radius_nm=args.airport_event_radius_nm,
+        low_altitude_agl_m=args.low_altitude_agl_m,
+        require_geo_altitude=True,
+        fetch_profile=args.fetch_profile,
+        source_response_ids=[f"history_rows:{Path(item['path']).name}" for item in history_outputs],
+        max_tracks=args.max_tracks,
+    )
+
+    raw_written = 0
+    for raw_record in records["raw_tracks"]:
+        start_time = int(raw_record["track"].get("startTime") or begin)
+        raw_path = partition_path(
+            output_root,
+            "raw_tracks",
+            airport=airport,
+            timestamp=datetime.fromtimestamp(start_time, timezone.utc),
+        ) / "tracks.jsonl"
+        raw_written += write_jsonl_records(raw_path, [raw_record])
+
+    events_written = 0
+    for event in records["events"]:
+        entry_time = datetime.fromtimestamp(event["event_time"]["entry_time"], timezone.utc)
+        event_path = partition_path(output_root, "airport_events", airport=airport, timestamp=entry_time) / "events.jsonl"
+        events_written += write_jsonl_records(event_path, [event])
+
+    quarantined = 0
+    for item in records["quarantine"]:
+        quarantine_path = partition_path(output_root, "quarantine", airport=airport, timestamp=start) / "incomplete_events.jsonl"
+        quarantined += write_jsonl_records(quarantine_path, [item])
+
+    manifest = {
+        "schema_version": "opensky-fetch-manifest-v2",
+        "airport": airport.upper(),
+        "training_source": "history-db",
+        "begin": begin,
+        "end": end,
+        "created_at_utc": fetched_at.isoformat().replace("+00:00", "Z"),
+        "radius_nm": args.airport_event_radius_nm,
+        "history_rows": {
+            "count": int(len(df)),
+            "outputs": history_outputs,
+        },
+        "track_counts": {
+            "raw_tracks_written": raw_written,
+        },
+        "event_counts": {
+            "written": events_written,
+            "quarantined": quarantined,
+        },
+    }
+    manifest_path = partition_path(output_root, "manifests", airport=airport, timestamp=start, granularity="day") / "fetch_manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    print(f"[OpenSky] history DB rows: {len(df)}")
+    for item in history_outputs:
+        print(f"[OpenSky] history rows output ({item['query']}): {item['path']}")
+    print(f"[OpenSky] training raw tracks written: {raw_written}")
+    print(f"[OpenSky] training events written: {events_written}")
+    print(f"[OpenSky] training quarantined events: {quarantined}")
+    print(f"[OpenSky] training manifest: {manifest_path}")
+
+
 def parse_args() -> argparse.Namespace:
     """解析 OpenSky 下载与轨迹转换参数。"""
     parser = argparse.ArgumentParser(description="Download recent airport trajectories from OpenSky")
@@ -986,6 +1157,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mode", choices=["auto", "live", "historical"], default="auto")
     parser.add_argument("--airport", default="CYYC")
     parser.add_argument("--dataset-mode", choices=["czml", "training"], default="czml")
+    parser.add_argument("--training-source", choices=["history-db", "rest"], default="history-db")
     parser.add_argument("--fetch-profile", choices=["airport_ops", "terminal_all"], default="airport_ops")
 
     parser.add_argument("--begin", default=None, help="Historical begin (Unix or ISO, e.g. 2026-04-05T00:00:00Z)")
@@ -1112,6 +1284,20 @@ def main() -> None:
     mode = args.mode
     if source_raw_payload is not None:
         mode = str(source_raw_payload.get("mode") or "offline")
+    elif args.dataset_mode == "training" and args.training_source == "history-db":
+        if mode == "auto":
+            mode = "historical"
+        if mode != "historical":
+            raise RuntimeError("History DB training mode requires --mode historical or --mode auto.")
+        run_history_db_training_fetch(
+            args=args,
+            output_root=output_root,
+            airport=selected_airport,
+            airport_lat=airport_lat,
+            airport_lon=airport_lon,
+            airport_elev_m=airport_elev_m,
+        )
+        return
     else:
         client_id = args.client_id
         client_secret = args.client_secret
@@ -1148,15 +1334,25 @@ def main() -> None:
             raise RuntimeError("Training dataset mode requires live OpenSky source responses, not --input-raw-json.")
         if mode != "historical":
             raise RuntimeError("Training dataset mode currently requires --mode historical or OAuth-backed --mode auto.")
-        run_training_historical_fetch(
-            client,
-            args=args,
-            output_root=output_root,
-            airport=selected_airport,
-            airport_lat=airport_lat,
-            airport_lon=airport_lon,
-            airport_elev_m=airport_elev_m,
-        )
+        if args.training_source == "history-db":
+            run_history_db_training_fetch(
+                args=args,
+                output_root=output_root,
+                airport=selected_airport,
+                airport_lat=airport_lat,
+                airport_lon=airport_lon,
+                airport_elev_m=airport_elev_m,
+            )
+        else:
+            run_training_historical_fetch(
+                client,
+                args=args,
+                output_root=output_root,
+                airport=selected_airport,
+                airport_lat=airport_lat,
+                airport_lon=airport_lon,
+                airport_elev_m=airport_elev_m,
+            )
         return
 
     payload: dict[str, Any] = {

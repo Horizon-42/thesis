@@ -8,6 +8,7 @@ from opensky_data_query.history_training import (
     build_training_records_from_history,
     history_group_to_dual_altitude_points,
     history_group_to_track,
+    iter_history_track_segments,
 )
 
 
@@ -57,6 +58,48 @@ class HistoryTrainingTests(unittest.TestCase):
         self.assertEqual(points[0]["geo_altitude_m"], 980.0)
         self.assertEqual(points[0]["geo_altitude_match"]["method"], "same_history_row")
 
+    def test_dual_altitude_raw_index_matches_filtered_track_path(self) -> None:
+        df = pd.DataFrame(
+            [
+                {
+                    "time": "2026-04-19T10:00:00Z",
+                    "icao24": "abc123",
+                    "lat": 0.10,
+                    "lon": 0.0,
+                    "baroaltitude": None,
+                    "geoaltitude": 900.0,
+                },
+                {
+                    "time": "2026-04-19T10:00:10Z",
+                    "icao24": "abc123",
+                    "lat": 0.08,
+                    "lon": 0.0,
+                    "baroaltitude": 1000.0,
+                    "geoaltitude": 980.0,
+                },
+            ]
+        )
+
+        track = history_group_to_track(df)
+        points = history_group_to_dual_altitude_points(df)
+
+        self.assertEqual(len(track["path"]), 1)
+        self.assertEqual(points[0]["raw_index"], 0)
+        self.assertEqual(points[0]["time"], track["path"][0][0])
+
+    def test_iter_history_track_segments_splits_large_time_gaps(self) -> None:
+        df = pd.DataFrame(
+            [
+                {"time": pd.Timestamp("2026-04-19T10:00:00Z"), "icao24": "abc123", "lat": 0.1, "lon": 0.0},
+                {"time": pd.Timestamp("2026-04-19T10:05:00Z"), "icao24": "abc123", "lat": 0.1, "lon": 0.0},
+                {"time": pd.Timestamp("2026-04-19T10:40:00Z"), "icao24": "abc123", "lat": 0.1, "lon": 0.0},
+            ]
+        )
+
+        segments = iter_history_track_segments(df, max_gap_sec=900)
+
+        self.assertEqual([len(segment) for segment in segments], [2, 1])
+
     def test_build_training_records_from_history_emits_pass_event(self) -> None:
         rows = []
         for t, lat, baro, geo in [
@@ -97,9 +140,9 @@ class HistoryTrainingTests(unittest.TestCase):
         self.assertEqual(len(result["events"]), 1)
         self.assertEqual(result["events"][0]["label"], "pass")
         self.assertEqual(result["events"][0]["quality"]["points_with_both_altitudes"], 3)
+        self.assertEqual(result["raw_tracks"][0]["source"]["endpoint"], "traffic.data.opensky.history")
         self.assertEqual(result["quarantine"], [])
 
 
 if __name__ == "__main__":
     unittest.main()
-
