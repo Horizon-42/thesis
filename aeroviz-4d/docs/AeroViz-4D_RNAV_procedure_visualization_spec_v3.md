@@ -285,6 +285,8 @@ Final Segment（Final Segment，最后进近航段）是验证最重要的一段
 - 从 PFAF（Precise Final Approach Fix，精确最后进近定位点）前 0.3 NM（Nautical Mile，海里）到后 1 NM（Nautical Mile，海里）存在 taper（taper，收敛）连接；
 - 从 taper（taper，收敛）结束后到 LTP（Landing Threshold Point，着陆入口点）/FTP（Fictitious Threshold Point，虚拟入口点）后 0.3 NM（Nautical Mile，海里），primary area（primary area，主区）固定为中心线两侧 ±0.6 NM（Nautical Mile，海里），secondary area（secondary area，次区）每侧 0.3 NM（Nautical Mile，海里）。见 §3-2-3。fileciteturn0file0
 
+- taper（taper，收敛）宽度必须按 Formula 3-2-1 从 taper end（PFAF 后 1 NM）向回计算：`primary half-width = 0.6 + 1.4 * Dtaper / 3`，`secondary area width = 0.3 + 0.7 * Dtaper / 3`。因此 final OEA 在 PFAF 前 0.3 NM 附近更宽，向跑道方向收敛到 PFAF 后 1 NM；之后到跑道入口后 0.3 NM 为固定宽度，并不是整段 final 一直缩窄。
+
 #### 建议画法
 
 - **中心线**：最粗、最稳定；

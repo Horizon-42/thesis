@@ -237,7 +237,7 @@ function buildFinalOeaProtectionSurface(
       rule: "LNAV final OEA taper from the coded final segment centerline.",
       notes: [
         `Primary half-width tapers from ${finalOea.taper.initialPrimaryHalfWidthNm} NM to ${finalOea.taper.stablePrimaryHalfWidthNm} NM.`,
-        `Secondary outer boundary adds ${finalOea.taper.secondaryWidthNm} NM outside primary.`,
+        `Secondary area width tapers from ${finalOea.taper.initialSecondaryWidthNm} NM to ${finalOea.taper.stableSecondaryWidthNm} NM outside primary.`,
       ],
     },
     vertical: {

@@ -80,9 +80,14 @@ describe("procedure surface geometry", () => {
       finalCenterline.geodesicLengthNm + 0.3,
       8,
     );
-    expect(primarySamples[0].halfWidthNm).toBeCloseTo(0.3, 8);
+    expect(primarySamples[0].halfWidthNm).toBeCloseTo(0.6 + (1.4 * 1.3) / 3, 8);
+    expect(sampleAtStation(primarySamples, 0)).toBeCloseTo(0.6 + 1.4 / 3, 8);
     expect(sampleAtStation(primarySamples, 1)).toBeCloseTo(0.6, 8);
     expect(primarySamples[primarySamples.length - 1].halfWidthNm).toBeCloseTo(0.6, 8);
+    expect(secondarySamples[0].halfWidthNm).toBeCloseTo(
+      0.6 + (1.4 * 1.3) / 3 + 0.3 + (0.7 * 1.3) / 3,
+      8,
+    );
     expect(sampleAtStation(secondarySamples, 1)).toBeCloseTo(0.9, 8);
   });
 

@@ -85,23 +85,60 @@ Important limits:
 Goal: make lateral protected geometry rule-driven instead of only constant
 width offsets.
 
-Implemented rule modes:
+### Segment Envelopes
 
-- `NONE`: constant width from current segment tolerance model.
+Segment `primaryEnvelope` / `secondaryEnvelope` are baseline lateral context,
+not the certified final OEA whenever a dedicated TERPS/PBN surface exists.
+
+- `NONE`: constant width from the current segment tolerance model.
 - `ABRUPT`: constant width until explicit transition rules are modeled.
-- `LINEAR_TAPER`: variable-width straight envelope.
-  - Primary starts at `1 * XTT`.
-  - Primary stabilizes at `2 * XTT`.
-  - Secondary outer starts at `2 * XTT`.
-  - Secondary outer stabilizes at `3 * XTT`.
-  - Taper end station uses `transitionRule.afterNm` when present; otherwise it
-    uses the segment length.
+- `LINEAR_TAPER`: transition metadata only. Do not apply a generic
+  `1 * XTT -> 2 * XTT` segment-wide taper. LNAV final taper must be built by
+  the dedicated final OEA / aligned connector logic below.
 
 RF/arc caution:
 
 - RF envelopes remain `RF_PARALLEL_ARC` for now.
 - Variable-width RF taper is not substituted with straight offsets because that
   would distort the arc protected area.
+
+### LNAV Final OEA
+
+Source rule: FAA Order 8260.58D, section 3-2-3 and formula 3-2-1.
+
+For LNAV and LNAV/VNAV final segment OEA:
+
+- Lateral OEA starts at `PFAF - 0.3 NM`.
+- Lateral OEA ends at `LTP/FTP + 0.3 NM` for fixed-wing procedures.
+- The taper region runs from `PFAF - 0.3 NM` to `PFAF + 1.0 NM`.
+- From `PFAF + 1.0 NM` to `LTP/FTP + 0.3 NM`, primary half-width is fixed
+  at `0.6 NM` and the secondary area is `0.3 NM` outside primary.
+- Within the taper region, widths are computed from the end of taper
+  (`PFAF + 1.0 NM`) back to the point of interest:
+
+```text
+Dtaper = PFAF+1.0 station - point station
+primaryHalfWidthNm = 0.6 + (1.4 * Dtaper) / 3
+secondaryAreaWidthNm = 0.3 + (0.7 * Dtaper) / 3
+secondaryOuterHalfWidthNm = primaryHalfWidthNm + secondaryAreaWidthNm
+```
+
+Implication: the OEA is widest near the PFAF-side start of the final OEA and
+narrows toward `PFAF + 1.0 NM`; it does not continue narrowing all the way to
+the runway. After `PFAF + 1.0 NM`, it remains fixed through the threshold
+extension.
+
+### Aligned LNAV Intermediate-to-Final Connector
+
+Source rule: FAA Order 8260.58D, section 3-1-4(d) and 3-1-5(b).
+
+For aligned LNAV/LNAV-VNAV transitions:
+
+- The connector runs from `PFAF - 2.0 NM` to `PFAF + 1.0 NM`.
+- Primary half-width connects uniformly from `2.0 NM` to `0.6 NM`.
+- Secondary outer half-width connects uniformly from `3.0 NM` to `0.9 NM`.
+- The connector must be coincident with the final OEA over the shared interval
+  from `PFAF - 0.3 NM` to `PFAF + 1.0 NM`.
 
 Future rule modes:
 
@@ -133,12 +170,13 @@ Vertical kinds:
 ## Implementation Plan
 
 1. Document this three-layer model.
-2. Make `widthChangeMode: "LINEAR_TAPER"` affect segment envelopes, not only
-   final OEA surfaces.
+2. Build LNAV final OEA taper using formula 3-2-1, and keep generic segment
+   envelopes constant when a dedicated TERPS/PBN surface is available.
 3. Add obstacle clearance assessment utilities using
    `ProcedureProtectionSurface`.
 4. Add tests covering:
-   - variable-width segment envelopes;
+   - formula 3-2-1 LNAV final OEA samples;
+   - connector/final-OEA continuity over the shared taper interval;
    - lateral-only OEA obstacle inclusion;
    - OCS clearance and penetration;
    - secondary raw OCS reporting;
@@ -147,8 +185,10 @@ Vertical kinds:
 
 ## Acceptance Criteria
 
-- A final segment with `LINEAR_TAPER` exposes increasing primary/secondary
-  width samples in `segmentGeometry`.
+- A final segment with `LINEAR_TAPER` no longer exposes a generic segment-wide
+  taper in `segmentGeometry`.
+- LNAV final OEA exposes decreasing primary/secondary widths from `PFAF - 0.3`
+  to `PFAF + 1.0`, then fixed widths through `LTP/FTP + 0.3`.
 - Final OEA/OCS surfaces continue to expose their existing protection-surface
   metadata.
 - Obstacles can be assessed against the same `ProcedureProtectionSurface`

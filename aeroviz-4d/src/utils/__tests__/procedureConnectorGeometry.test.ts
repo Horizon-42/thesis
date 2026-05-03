@@ -44,10 +44,22 @@ const finalSegment: ProcedureSegment = {
   },
 };
 
+function sampleAtStation(
+  samples: Array<{ stationNm: number; halfWidthNm: number }>,
+  stationNm: number,
+): number {
+  const sample = samples.reduce((nearest, candidate) =>
+    Math.abs(candidate.stationNm - stationNm) < Math.abs(nearest.stationNm - stationNm)
+      ? candidate
+      : nearest,
+  );
+  return sample.halfWidthNm;
+}
+
 describe("procedure connector geometry", () => {
   it("builds an aligned LNAV connector with PFAF -2 NM and +1 NM anchors for G-09", () => {
     const result = buildAlignedLnavConnector(finalSegment, finalCenterline, {
-      samplingStepNm: 0.25,
+      samplingStepNm: 0.1,
     });
 
     expect(result.diagnostics).toEqual([]);
@@ -71,6 +83,11 @@ describe("procedure connector geometry", () => {
     expect(primarySamples[primarySamples.length - 1].halfWidthNm).toBeCloseTo(0.6, 8);
     expect(secondarySamples[0].halfWidthNm).toBe(3);
     expect(secondarySamples[secondarySamples.length - 1].halfWidthNm).toBeCloseTo(0.9, 8);
+    expect(sampleAtStation(primarySamples, -0.3)).toBeCloseTo(0.6 + (1.4 * 1.3) / 3, 8);
+    expect(sampleAtStation(secondarySamples, -0.3)).toBeCloseTo(
+      0.6 + (1.4 * 1.3) / 3 + 0.3 + (0.7 * 1.3) / 3,
+      8,
+    );
   });
 
   it("returns diagnostics for connector inputs without a usable final centerline", () => {

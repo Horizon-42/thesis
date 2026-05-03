@@ -258,50 +258,12 @@ export function buildVariableStraightEnvelope(
   };
 }
 
-function linearInterpolate(start: number, end: number, ratio: number): number {
-  return start + (end - start) * Math.max(0, Math.min(1, ratio));
-}
-
-function linearTaperEndStationNm(
-  segment: ProcedureSegment,
-  centerline: PolylineGeometry3D,
-): number {
-  const afterNm = segment.transitionRule?.afterNm;
-  if (typeof afterNm === "number" && Number.isFinite(afterNm) && afterNm > 0) {
-    return afterNm;
-  }
-  return Math.max(centerline.geodesicLengthNm, 0.01);
-}
-
-function taperedHalfWidthNm(
-  segment: ProcedureSegment,
-  envelopeType: "PRIMARY" | "SECONDARY",
-  centerline: PolylineGeometry3D,
-  stationNm: number,
-): number {
-  const taperEndNm = linearTaperEndStationNm(segment, centerline);
-  const ratio = taperEndNm <= 0 ? 1 : stationNm / taperEndNm;
-  const primaryHalfWidthNm = linearInterpolate(segment.xttNm, segment.xttNm * 2, ratio);
-  if (envelopeType === "PRIMARY") return primaryHalfWidthNm;
-  return primaryHalfWidthNm + segment.xttNm;
-}
-
 function buildSegmentEnvelope(
   geometryId: string,
   envelopeType: "PRIMARY" | "SECONDARY",
-  segment: ProcedureSegment,
   centerline: PolylineGeometry3D,
   halfWidthNm: number,
 ): LateralEnvelopeGeometry {
-  if (segment.widthChangeMode === "LINEAR_TAPER" && !centerline.isArc) {
-    return buildVariableStraightEnvelope(
-      geometryId,
-      envelopeType,
-      centerline,
-      (stationNm) => taperedHalfWidthNm(segment, envelopeType, centerline, stationNm),
-    );
-  }
-
   return (
     buildRfParallelEnvelope(geometryId, envelopeType, centerline, halfWidthNm) ??
     buildStraightEnvelope(geometryId, envelopeType, centerline, halfWidthNm)
@@ -413,7 +375,6 @@ export function buildSegmentGeometryBundle(
       ? buildSegmentEnvelope(
           `${segment.segmentId}:primary`,
           "PRIMARY",
-          segment,
           centerline,
           segment.xttNm * 2,
         )
@@ -422,7 +383,6 @@ export function buildSegmentGeometryBundle(
       ? buildSegmentEnvelope(
           `${segment.segmentId}:secondary`,
           "SECONDARY",
-          segment,
           centerline,
           segment.xttNm * 3,
         )

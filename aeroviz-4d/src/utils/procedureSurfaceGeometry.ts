@@ -40,7 +40,10 @@ export interface LnavFinalOeaGeometry {
     endStationNm: number;
     initialPrimaryHalfWidthNm: number;
     stablePrimaryHalfWidthNm: number;
-    secondaryWidthNm: number;
+    initialSecondaryWidthNm: number;
+    stableSecondaryWidthNm: number;
+    primaryGrowthNmPer3Nm: number;
+    secondaryGrowthNmPer3Nm: number;
   };
 }
 
@@ -118,9 +121,10 @@ export interface LnavFinalOeaOptions {
   startBeforePfafNm?: number;
   endAfterThresholdNm?: number;
   stableAfterPfafNm?: number;
-  initialPrimaryHalfWidthNm?: number;
   stablePrimaryHalfWidthNm?: number;
-  secondaryWidthNm?: number;
+  stableSecondaryWidthNm?: number;
+  primaryGrowthNmPer3Nm?: number;
+  secondaryGrowthNmPer3Nm?: number;
   samplingStepNm?: number;
 }
 
@@ -136,9 +140,10 @@ const DEFAULT_LNAV_FINAL_OEA_OPTIONS: Required<LnavFinalOeaOptions> = {
   startBeforePfafNm: 0.3,
   endAfterThresholdNm: 0.3,
   stableAfterPfafNm: 1,
-  initialPrimaryHalfWidthNm: 0.3,
   stablePrimaryHalfWidthNm: 0.6,
-  secondaryWidthNm: 0.3,
+  stableSecondaryWidthNm: 0.3,
+  primaryGrowthNmPer3Nm: 1.4,
+  secondaryGrowthNmPer3Nm: 0.7,
   samplingStepNm: 0.25,
 };
 
@@ -220,11 +225,28 @@ function primaryHalfWidthAtStation(
   const taperStart = -opts.startBeforePfafNm;
   const taperEnd = opts.stableAfterPfafNm;
   if (stationNm >= taperEnd) return opts.stablePrimaryHalfWidthNm;
-  const ratio = clamp((stationNm - taperStart) / (taperEnd - taperStart), 0, 1);
-  return (
-    opts.initialPrimaryHalfWidthNm +
-    (opts.stablePrimaryHalfWidthNm - opts.initialPrimaryHalfWidthNm) * ratio
-  );
+  const clampedStation = clamp(stationNm, taperStart, taperEnd);
+  const dtaperNm = taperEnd - clampedStation;
+  return opts.stablePrimaryHalfWidthNm + (opts.primaryGrowthNmPer3Nm * dtaperNm) / 3;
+}
+
+function secondaryWidthAtStation(
+  stationNm: number,
+  opts: Required<LnavFinalOeaOptions>,
+): number {
+  const taperStart = -opts.startBeforePfafNm;
+  const taperEnd = opts.stableAfterPfafNm;
+  if (stationNm >= taperEnd) return opts.stableSecondaryWidthNm;
+  const clampedStation = clamp(stationNm, taperStart, taperEnd);
+  const dtaperNm = taperEnd - clampedStation;
+  return opts.stableSecondaryWidthNm + (opts.secondaryGrowthNmPer3Nm * dtaperNm) / 3;
+}
+
+function secondaryOuterHalfWidthAtStation(
+  stationNm: number,
+  opts: Required<LnavFinalOeaOptions>,
+): number {
+  return primaryHalfWidthAtStation(stationNm, opts) + secondaryWidthAtStation(stationNm, opts);
 }
 
 export function buildVariableWidthRibbon(
@@ -396,8 +418,10 @@ export function buildLnavFinalOea(
     `${segment.segmentId}:lnav-oea-secondary-outer`,
     oeaCenterline,
     stations,
-    (stationNm) => primaryHalfWidthAtStation(stationNm, opts) + opts.secondaryWidthNm,
+    (stationNm) => secondaryOuterHalfWidthAtStation(stationNm, opts),
   );
+  const initialPrimaryHalfWidthNm = primaryHalfWidthAtStation(startStationNm, opts);
+  const initialSecondaryWidthNm = secondaryWidthAtStation(startStationNm, opts);
 
   return {
     geometry: {
@@ -410,9 +434,12 @@ export function buildLnavFinalOea(
       taper: {
         startStationNm,
         endStationNm: opts.stableAfterPfafNm,
-        initialPrimaryHalfWidthNm: opts.initialPrimaryHalfWidthNm,
+        initialPrimaryHalfWidthNm,
         stablePrimaryHalfWidthNm: opts.stablePrimaryHalfWidthNm,
-        secondaryWidthNm: opts.secondaryWidthNm,
+        initialSecondaryWidthNm,
+        stableSecondaryWidthNm: opts.stableSecondaryWidthNm,
+        primaryGrowthNmPer3Nm: opts.primaryGrowthNmPer3Nm,
+        secondaryGrowthNmPer3Nm: opts.secondaryGrowthNmPer3Nm,
       },
     },
     diagnostics,
