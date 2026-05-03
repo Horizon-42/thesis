@@ -58,6 +58,39 @@ Outputs are written under:
 
 Use `--fetch-profile airport_ops` for a smaller arrival/departure-only run. Use `terminal_all` when pass-through tracks are required.
 
+### ADSB.lol global history download
+
+ADSB.lol `globe_history_2026` is published as daily global split-tar releases. The downloader below fetches one date; airport filtering should happen locally after download.
+
+Dry-run release discovery:
+
+```bash
+python opensky_data_query/download_adsblol_history.py \
+  --date 2026-04-19 \
+  --dry-run
+```
+
+Download one day:
+
+```bash
+python opensky_data_query/download_adsblol_history.py \
+  --date 2026-04-19
+```
+
+Download and stream-extract the split tar:
+
+```bash
+python opensky_data_query/download_adsblol_history.py \
+  --date 2026-04-19 \
+  --extract
+```
+
+Default output:
+
+```text
+opensky_data_query/outputs/adsblol_globe_history/YYYY.MM.DD/<release-tag>/
+```
+
 ### 1) Live mode (no credentials, default airport CYYC)
 
 ```bash
