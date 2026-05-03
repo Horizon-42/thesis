@@ -54,6 +54,13 @@ from trajectory_normalization import (
     convert_tracks_to_czml_input,
     convert_tracks_to_raw_czml_input,
 )
+from altitude_matching import build_dual_altitude_points, parse_state_altitude_samples
+from dataset_store import partition_path, write_jsonl_records, write_source_response
+from training_dataset import (
+    attach_training_points_or_quarantine,
+    make_raw_track_record,
+)
+from trajectory_events import extract_complete_airport_events
 
 
 API_ROOT = "https://opensky-network.org/api"
@@ -121,6 +128,18 @@ class OpenSkyClient:
 
     def get(self, endpoint: str, params: dict[str, Any] | None = None, authenticated: bool = False) -> Any:
         """执行 OpenSky GET 请求并解析 JSON 响应。"""
+        raw, status = self.get_response_text(endpoint, params=params, authenticated=authenticated)
+        if status == 404:
+            return None
+        return json.loads(raw) if raw else None
+
+    def get_response_text(
+        self,
+        endpoint: str,
+        params: dict[str, Any] | None = None,
+        authenticated: bool = False,
+    ) -> tuple[str, int]:
+        """执行 OpenSky GET 请求，返回原始响应文本和 HTTP 状态码。"""
         query = urlencode({k: v for k, v in (params or {}).items() if v is not None}, doseq=True)
         url = f"{API_ROOT}{endpoint}" + (f"?{query}" if query else "")
         req = Request(url, method="GET")
@@ -133,13 +152,13 @@ class OpenSkyClient:
         try:
             with urlopen(req, timeout=self.timeout_sec) as resp:
                 raw = resp.read().decode("utf-8")
-                return json.loads(raw) if raw else None
+                return raw, int(resp.status)
         except HTTPError as e:
             body = e.read().decode("utf-8", errors="replace")
             # OpenSky 的 /flights/* 和 /tracks 在无结果时可能返回空 404；
             # 这里把它视为 None，让调用方用 `or []` 继续处理。
             if e.code == 404 and body.strip() in ("", "[]", "{}"):
-                return None
+                return body, e.code
             raise RuntimeError(f"HTTP {e.code} for {url}: {body[:300]}") from e
         except URLError as e:
             raise RuntimeError(f"Network error for {url}: {e}") from e
@@ -424,12 +443,346 @@ def fetch_historical_tracks(
     return arrivals, departures, tracks
 
 
+def fetch_json_with_saved_source(
+    client: OpenSkyClient,
+    *,
+    output_root: Path,
+    airport: str,
+    endpoint: str,
+    params: dict[str, Any],
+    authenticated: bool,
+) -> tuple[Any, dict[str, Any]]:
+    """Fetch a JSON endpoint, save original body text, then parse it."""
+    body_text, http_status = client.get_response_text(
+        endpoint,
+        params=params,
+        authenticated=authenticated,
+    )
+    source_record = write_source_response(
+        output_root,
+        airport=airport,
+        fetched_at=datetime.now(timezone.utc),
+        endpoint=endpoint,
+        params=params,
+        body_text=body_text,
+        http_status=http_status,
+    )
+    data = json.loads(body_text) if body_text else None
+    return data, source_record
+
+
+def _historical_training_window(args: argparse.Namespace) -> tuple[int, int]:
+    """Resolve explicit or default historical training window."""
+    if args.begin and args.end:
+        return parse_time_to_unix(args.begin), parse_time_to_unix(args.end)
+    now = datetime.now(timezone.utc)
+    day_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc) - timedelta(days=1)
+    return int(day_start.timestamp()), int((day_start + timedelta(days=1)).timestamp())
+
+
+def _candidate_key(icao24: str, t_ref: int) -> tuple[str, int]:
+    return icao24.lower().strip(), int(t_ref)
+
+
+def collect_training_candidates(
+    client: OpenSkyClient,
+    *,
+    output_root: Path,
+    airport: str,
+    begin: int,
+    end: int,
+    fetch_profile: str,
+    bbox: tuple[float, float, float, float],
+    pass_sample_step_sec: int,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Collect historical landing/depart/pass candidates with source IDs."""
+    candidates: list[dict[str, Any]] = []
+    counts = {"landing_candidates": 0, "depart_candidates": 0, "pass_candidates": 0}
+
+    arrivals, source = fetch_json_with_saved_source(
+        client,
+        output_root=output_root,
+        airport=airport,
+        endpoint="/flights/arrival",
+        params={"airport": airport.upper(), "begin": begin, "end": end},
+        authenticated=True,
+    )
+    for flight in arrivals or []:
+        icao24 = (flight.get("icao24") or "").lower().strip()
+        t_ref = int(flight.get("lastSeen") or flight.get("firstSeen") or 0)
+        if icao24 and t_ref > 0:
+            candidates.append(
+                {
+                    "icao24": icao24,
+                    "t_ref": t_ref,
+                    "candidate_sources": ["arrival"],
+                    "flight_metadata": flight,
+                    "source_response_ids": [source["source_id"]],
+                }
+            )
+    counts["landing_candidates"] = len(arrivals or [])
+
+    departures, source = fetch_json_with_saved_source(
+        client,
+        output_root=output_root,
+        airport=airport,
+        endpoint="/flights/departure",
+        params={"airport": airport.upper(), "begin": begin, "end": end},
+        authenticated=True,
+    )
+    for flight in departures or []:
+        icao24 = (flight.get("icao24") or "").lower().strip()
+        t_ref = int(flight.get("firstSeen") or flight.get("lastSeen") or 0)
+        if icao24 and t_ref > 0:
+            candidates.append(
+                {
+                    "icao24": icao24,
+                    "t_ref": t_ref,
+                    "candidate_sources": ["departure"],
+                    "flight_metadata": flight,
+                    "source_response_ids": [source["source_id"]],
+                }
+            )
+    counts["depart_candidates"] = len(departures or [])
+
+    if fetch_profile == "terminal_all":
+        lamin, lamax, lomin, lomax = bbox
+        for sample_time in range(begin, end, max(60, pass_sample_step_sec)):
+            states_payload, state_source = fetch_json_with_saved_source(
+                client,
+                output_root=output_root,
+                airport=airport,
+                endpoint="/states/all",
+                params={
+                    "time": sample_time,
+                    "lamin": lamin,
+                    "lamax": lamax,
+                    "lomin": lomin,
+                    "lomax": lomax,
+                },
+                authenticated=client.has_oauth,
+            )
+            for row in (states_payload or {}).get("states") or []:
+                if not row or len(row) < 1:
+                    continue
+                icao24 = (row[0] or "").lower().strip()
+                if not icao24:
+                    continue
+                candidates.append(
+                    {
+                        "icao24": icao24,
+                        "t_ref": sample_time,
+                        "candidate_sources": ["area"],
+                        "flight_metadata": {"icao24": icao24, "candidateObservedTime": sample_time},
+                        "source_response_ids": [state_source["source_id"]],
+                    }
+                )
+                counts["pass_candidates"] += 1
+
+    merged: dict[tuple[str, int], dict[str, Any]] = {}
+    for candidate in candidates:
+        key = _candidate_key(candidate["icao24"], candidate["t_ref"])
+        if key not in merged:
+            merged[key] = candidate
+            continue
+        existing = merged[key]
+        existing["candidate_sources"] = sorted(set(existing["candidate_sources"]) | set(candidate["candidate_sources"]))
+        existing["source_response_ids"] = sorted(set(existing["source_response_ids"]) | set(candidate["source_response_ids"]))
+        existing["flight_metadata"] = existing["flight_metadata"] or candidate["flight_metadata"]
+    return list(merged.values()), counts
+
+
+def _event_waypoint_times(track: dict[str, Any], events: list[dict[str, Any]], max_samples: int) -> list[int]:
+    """Collect waypoint times referenced by derived events, downsampling if needed."""
+    path = track.get("path") or []
+    indexes: list[int] = []
+    for event in events:
+        raw_range = event.get("raw_waypoint_range") or {}
+        start = raw_range.get("start_raw_index")
+        end = raw_range.get("end_raw_index")
+        if start is None or end is None:
+            continue
+        indexes.extend(range(int(start), int(end) + 1))
+    times = sorted({
+        int(path[idx][0])
+        for idx in indexes
+        if 0 <= idx < len(path) and path[idx] and len(path[idx]) >= 1 and path[idx][0] is not None
+    })
+    if max_samples <= 0 or len(times) <= max_samples:
+        return times
+    step = max(1, len(times) // max_samples)
+    return times[::step][:max_samples]
+
+
+def run_training_historical_fetch(
+    client: OpenSkyClient,
+    *,
+    args: argparse.Namespace,
+    output_root: Path,
+    airport: str,
+    airport_lat: float,
+    airport_lon: float,
+    airport_elev_m: float,
+) -> None:
+    """Fetch and store partitioned training records for one historical window."""
+    if not client.has_oauth:
+        raise RuntimeError("Training historical mode requires OpenSky OAuth credentials.")
+
+    begin, end = _historical_training_window(args)
+    bbox = (
+        airport_lat - args.bbox_lat_pad,
+        airport_lat + args.bbox_lat_pad,
+        airport_lon - args.bbox_lon_pad,
+        airport_lon + args.bbox_lon_pad,
+    )
+    candidates, candidate_counts = collect_training_candidates(
+        client,
+        output_root=output_root,
+        airport=airport,
+        begin=begin,
+        end=end,
+        fetch_profile=args.fetch_profile,
+        bbox=bbox,
+        pass_sample_step_sec=args.pass_sample_step_sec,
+    )
+
+    raw_written = 0
+    event_written = 0
+    quarantine_written = 0
+    requested = 0
+    downloaded = 0
+    seen_tracks: set[tuple[str, int, int]] = set()
+
+    for candidate in candidates:
+        if requested >= args.max_tracks:
+            break
+        requested += 1
+        try:
+            track, track_source = fetch_json_with_saved_source(
+                client,
+                output_root=output_root,
+                airport=airport,
+                endpoint="/tracks/all",
+                params={"icao24": candidate["icao24"], "time": candidate["t_ref"]},
+                authenticated=True,
+            )
+        except RuntimeError as e:
+            print(f"[OpenSky] training track fetch failed for {candidate['icao24']}: {e}", flush=True)
+            continue
+        if not track or not track.get("path"):
+            continue
+        downloaded += 1
+
+        track_key = (
+            (track.get("icao24") or candidate["icao24"]).lower().strip(),
+            int(track.get("startTime") or 0),
+            int(track.get("endTime") or 0),
+        )
+        if track_key in seen_tracks:
+            continue
+        seen_tracks.add(track_key)
+
+        source_ids = sorted(set(candidate["source_response_ids"] + [track_source["source_id"]]))
+        raw_record = make_raw_track_record(
+            airport=airport,
+            fetch_profile=args.fetch_profile,
+            candidate_sources=candidate["candidate_sources"],
+            source_response_ids=source_ids,
+            flight_metadata=candidate["flight_metadata"],
+            track=track,
+        )
+        track_start = datetime.fromtimestamp(int(track.get("startTime") or candidate["t_ref"]), timezone.utc)
+        raw_path = partition_path(output_root, "raw_tracks", airport=airport, timestamp=track_start) / "tracks.jsonl"
+        raw_written += write_jsonl_records(raw_path, [raw_record])
+
+        events = extract_complete_airport_events(
+            track,
+            airport=airport,
+            airport_lat=airport_lat,
+            airport_lon=airport_lon,
+            airport_elev_m=airport_elev_m,
+            radius_nm=args.airport_event_radius_nm,
+            candidate_sources=candidate["candidate_sources"],
+            flight_metadata=candidate["flight_metadata"],
+            low_altitude_agl_m=args.low_altitude_agl_m,
+        )
+        if not events:
+            continue
+
+        state_samples = []
+        for state_time in _event_waypoint_times(track, events, args.max_state_samples_per_track):
+            states_payload, state_source = fetch_json_with_saved_source(
+                client,
+                output_root=output_root,
+                airport=airport,
+                endpoint="/states/all",
+                params={"time": state_time, "icao24": candidate["icao24"]},
+                authenticated=client.has_oauth,
+            )
+            state_samples.extend(
+                parse_state_altitude_samples(states_payload or {}, source_response_id=state_source["source_id"])
+            )
+
+        dual = build_dual_altitude_points(
+            track,
+            state_samples,
+            max_age_sec=args.geo_altitude_max_age_sec,
+            require_geo_altitude=args.require_geo_altitude,
+        )
+        for event in events:
+            ready, quarantine = attach_training_points_or_quarantine(
+                event,
+                raw_track_id=raw_record["raw_track_id"],
+                dual_altitude_points=dual["points"],
+                require_geo_altitude=args.require_geo_altitude,
+            )
+            entry_time = datetime.fromtimestamp(event["event_time"]["entry_time"], timezone.utc)
+            if ready is not None:
+                event_path = partition_path(output_root, "airport_events", airport=airport, timestamp=entry_time) / "events.jsonl"
+                event_written += write_jsonl_records(event_path, [ready])
+            if quarantine is not None:
+                quarantine_path = partition_path(output_root, "quarantine", airport=airport, timestamp=entry_time) / "incomplete_events.jsonl"
+                quarantine_written += write_jsonl_records(quarantine_path, [quarantine])
+
+    manifest = {
+        "schema_version": "opensky-fetch-manifest-v2",
+        "airport": airport.upper(),
+        "fetch_profile": args.fetch_profile,
+        "begin": begin,
+        "end": end,
+        "created_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "radius_nm": args.airport_event_radius_nm,
+        "candidate_counts": candidate_counts,
+        "track_counts": {
+            "requested": requested,
+            "downloaded": downloaded,
+            "deduplicated": len(seen_tracks),
+        },
+        "event_counts": {
+            "written": event_written,
+            "quarantined": quarantine_written,
+        },
+    }
+    manifest_time = datetime.fromtimestamp(begin, timezone.utc)
+    manifest_path = partition_path(output_root, "manifests", airport=airport, timestamp=manifest_time, granularity="day") / "fetch_manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    print(f"[OpenSky] training candidates: {len(candidates)}")
+    print(f"[OpenSky] training raw tracks written: {raw_written}")
+    print(f"[OpenSky] training events written: {event_written}")
+    print(f"[OpenSky] training quarantined events: {quarantine_written}")
+    print(f"[OpenSky] training manifest: {manifest_path}")
+
+
 def parse_args() -> argparse.Namespace:
     """解析 OpenSky 下载与轨迹转换参数。"""
     parser = argparse.ArgumentParser(description="Download recent airport trajectories from OpenSky")
 
     parser.add_argument("--mode", choices=["auto", "live", "historical"], default="auto")
     parser.add_argument("--airport", default="CYYC")
+    parser.add_argument("--dataset-mode", choices=["czml", "training"], default="czml")
+    parser.add_argument("--fetch-profile", choices=["airport_ops", "terminal_all"], default="airport_ops")
 
     parser.add_argument("--begin", default=None, help="Historical begin (Unix or ISO, e.g. 2026-04-05T00:00:00Z)")
     parser.add_argument("--end", default=None, help="Historical end (Unix or ISO)")
@@ -468,6 +821,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-altitude-bias-m", type=float, default=400.0, help="Reject touchdown-bias estimates whose absolute value exceeds this threshold")
     parser.add_argument("--approach-alt-buffer-m", type=float, default=450.0, help="If on_ground is missing, accept near-airport low-altitude segment below airport_elevation + this buffer")
     parser.add_argument("--approach-window-min", type=int, default=20, help="Keep only this many minutes before landing/closest-approach")
+    parser.add_argument("--airport-event-radius-nm", type=float, default=5.0, help="Training event radius in nautical miles")
+    parser.add_argument("--low-altitude-agl-m", type=float, default=600.0, help="Low-altitude evidence threshold for training labels")
+    parser.add_argument("--geo-altitude-max-age-sec", type=float, default=15.0, help="Max state-vector age for matching geo_altitude")
+    parser.add_argument("--max-state-samples-per-track", type=int, default=120, help="Max /states/all time samples per track in training mode")
+    parser.add_argument("--pass-sample-step-sec", type=int, default=300, help="terminal_all bbox state sampling step in seconds")
+    parser.add_argument("--require-geo-altitude", dest="require_geo_altitude", action="store_true", default=True)
+    parser.add_argument("--allow-missing-geo-altitude", dest="require_geo_altitude", action="store_false")
     parser.add_argument("--radius-km", type=float, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--allow-partial", action="store_true", help="Allow tracks that do not contain landing/touchdown near airport")
     parser.add_argument("--live-window-hours", type=int, default=12, help="Look back this many hours for /flights/all in live mode")
@@ -569,6 +929,22 @@ def main() -> None:
         if mode == "auto":
             # 有 OAuth 时默认使用 historical，否则退回匿名 live。
             mode = "historical" if client.has_oauth else "live"
+
+    if args.dataset_mode == "training":
+        if source_raw_payload is not None:
+            raise RuntimeError("Training dataset mode requires live OpenSky source responses, not --input-raw-json.")
+        if mode != "historical":
+            raise RuntimeError("Training dataset mode currently requires --mode historical or OAuth-backed --mode auto.")
+        run_training_historical_fetch(
+            client,
+            args=args,
+            output_root=output_root,
+            airport=selected_airport,
+            airport_lat=airport_lat,
+            airport_lon=airport_lon,
+            airport_elev_m=airport_elev_m,
+        )
+        return
 
     payload: dict[str, Any] = {
         # raw payload 保留足够上下文，便于后续离线复现同一次转换。
