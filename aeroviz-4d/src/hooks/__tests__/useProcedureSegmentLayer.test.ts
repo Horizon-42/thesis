@@ -250,6 +250,34 @@ const renderBundleData = {
               isArc: false,
             },
           ],
+          missedConnectorSurfaces: [
+            {
+              surfaceId: "segment:final:ca-mahf-connector-surface:leg:missed:ca",
+              sourceSegmentId: "segment:final",
+              sourceLegId: "leg:missed:ca",
+              sourceEndpointStatus: "ESTIMATED_ENDPOINT",
+              targetFixId: "fix:DUHAM",
+              targetFixIdent: "DUHAM",
+              targetFixRole: "MAHF",
+              constructionStatus: "ESTIMATED_CONNECTOR_SURFACE",
+              centerline: {
+                geoPositions: [
+                  { lonDeg: -78.8, latDeg: 35.87, altM: 304.8 },
+                  { lonDeg: -78.72, latDeg: 35.94, altM: 914.4 },
+                ],
+                worldPositions: [],
+                geodesicLengthNm: 5.5,
+                isArc: false,
+              },
+              verticalProfile: {
+                constructionStatus: "ESTIMATED_CLIMB_OR_TARGET_ALTITUDE",
+                samples: [],
+              },
+              primary: ribbon,
+              secondaryOuter: ribbon,
+              notes: ["Connector surface test note."],
+            },
+          ],
           segmentBundles: [
             {
               segment: {
@@ -722,6 +750,15 @@ describe("useProcedureSegmentLayer", () => {
     expect(entities.some((entity) => String(entity.id).includes("-ca-course-guide-"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-ca-centerline-"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-ca-endpoint-"))).toBe(true);
+    expect(entities.some((entity) => String(entity.id).includes("-missed-connector-surface-"))).toBe(true);
+    expect(
+      entities.some(
+        (entity) =>
+          String(entity.id).includes("-missed-connector-surface-") &&
+          entity.__aeroVizProcedureAnnotation?.kind === "MISSED_CONNECTOR_SURFACE" &&
+          entity.polygon.material.name === "ORANGE",
+      ),
+    ).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-ca-mahf-connector-"))).toBe(true);
     expect(
       entities.some(
@@ -770,6 +807,7 @@ describe("useProcedureSegmentLayer", () => {
     const finalVerticalReference = entities.find((entity) => String(entity.id).endsWith("-final-vertical-reference"));
     const finalVerticalBand = entities.find((entity) => String(entity.id).endsWith("-final-vertical-reference-band"));
     const verticalProfile = entities.find((entity) => String(entity.id).endsWith("-vertical-profile") && entity.polygon);
+    const missedConnectorSurface = entities.find((entity) => String(entity.id).includes("-missed-connector-surface-"));
     const caMahfConnector = entities.find((entity) => String(entity.id).includes("-ca-mahf-connector-"));
     const finalAltitude = entities.find((entity) => String(entity.id).includes("-altitude-leg:final:faf"));
     const turnFill = entities.find((entity) => String(entity.id).includes("-turn-1-primary"));
@@ -781,6 +819,7 @@ describe("useProcedureSegmentLayer", () => {
     expect(finalVerticalReference.show).toBe(false);
     expect(finalVerticalBand.show).toBe(false);
     expect(verticalProfile.show).toBe(false);
+    expect(missedConnectorSurface.show).toBe(false);
     expect(caMahfConnector.show).toBe(false);
     expect(turnFill.show).toBe(false);
     expect(debugSurface.show).toBe(false);
@@ -792,6 +831,7 @@ describe("useProcedureSegmentLayer", () => {
     expect(finalVerticalReference.show).toBe(true);
     expect(finalVerticalBand.show).toBe(true);
     expect(verticalProfile.show).toBe(true);
+    expect(missedConnectorSurface.show).toBe(true);
     expect(caMahfConnector.show).toBe(true);
     expect(turnFill.show).toBe(false);
     expect(debugSurface.show).toBe(false);

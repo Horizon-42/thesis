@@ -56,6 +56,7 @@ const CONNECTOR_COLOR = Cesium.Color.ORANGE.withAlpha(0.32);
 const CONNECTOR_LINE_COLOR = Cesium.Color.ORANGE.withAlpha(0.92);
 const MISSED_SURFACE_COLOR = Cesium.Color.YELLOW.withAlpha(0.24);
 const MISSED_CA_ESTIMATED_SURFACE_COLOR = Cesium.Color.ORANGE.withAlpha(0.26);
+const MISSED_CONNECTOR_SURFACE_COLOR = Cesium.Color.ORANGE.withAlpha(0.18);
 const CA_COURSE_GUIDE_COLOR = Cesium.Color.ORANGE.withAlpha(0.98);
 const CA_CENTERLINE_COLOR = Cesium.Color.ORANGE.withAlpha(0.86);
 const CA_MAHF_CONNECTOR_COLOR = Cesium.Color.ORANGE.withAlpha(0.62);
@@ -1850,6 +1851,80 @@ function addBranchMissedCaMahfConnectorEntities(
   return ids;
 }
 
+function addBranchMissedConnectorSurfaceEntities(
+  viewer: Cesium.Viewer,
+  bundle: ProcedureRenderBundle,
+  branchBundle: BranchGeometryBundle,
+  visible: boolean,
+  annotationVisible: boolean,
+  displayLevel: ProcedureDisplayLevel,
+): string[] {
+  const ids: string[] = [];
+  (branchBundle.missedConnectorSurfaces ?? []).forEach((surface, index) => {
+    const baseId = `${PROCEDURE_SEGMENT_ENTITY_PREFIX}${bundle.packageId}-${branchBundle.branchId}-missed-connector-surface-${index}`;
+    const primaryId = `${baseId}-primary`;
+    const annotation = annotationBase({
+      entityId: primaryId,
+      label: `Connector to ${surface.targetFixIdent}`,
+      title: `${bundle.procedureName} estimated missed connector surface`,
+      kind: "MISSED_CONNECTOR_SURFACE",
+      status: "ESTIMATED",
+      bundle,
+      branchBundle,
+      parameters: [
+        param("Source CA leg", surface.sourceLegId),
+        param("Endpoint status", surface.sourceEndpointStatus),
+        param("Target fix", `${surface.targetFixIdent} ${surface.targetFixRole}`),
+        param("Distance", `${surface.centerline.geodesicLengthNm.toFixed(2)} NM`),
+        param("Surface status", surface.constructionStatus),
+        param("Vertical", surface.verticalProfile.constructionStatus),
+        param("Geometry meaning", "Estimated connector surface; not certified TERPS construction"),
+      ],
+      diagnostics: surface.notes,
+    });
+    addRibbonPolygon(
+      viewer,
+      primaryId,
+      `${bundle.procedureName} estimated missed connector surface primary`,
+      surface.primary,
+      procedureEntityShow(visible, annotation, displayLevel),
+      MISSED_CONNECTOR_SURFACE_COLOR,
+      MISSED_SURFACE_HEIGHT_OFFSET_M,
+      annotation,
+    );
+    ids.push(primaryId);
+
+    const labelId = addAnnotationLabel(
+      viewer,
+      annotation,
+      representativePoint(surface.primary.leftGeoBoundary),
+      procedureEntityShow(visible, annotation, displayLevel, true, annotationVisible),
+    );
+    if (labelId) ids.push(labelId);
+
+    if (surface.secondaryOuter) {
+      const secondaryId = `${baseId}-secondary`;
+      const secondaryAnnotation = {
+        ...annotation,
+        entityId: secondaryId,
+        title: `${bundle.procedureName} estimated missed connector surface secondary`,
+      };
+      addRibbonPolygon(
+        viewer,
+        secondaryId,
+        `${bundle.procedureName} estimated missed connector surface secondary`,
+        surface.secondaryOuter,
+        procedureEntityShow(visible, secondaryAnnotation, displayLevel),
+        MISSED_CONNECTOR_SURFACE_COLOR,
+        MISSED_SURFACE_HEIGHT_OFFSET_M,
+        secondaryAnnotation,
+      );
+      ids.push(secondaryId);
+    }
+  });
+  return ids;
+}
+
 function packageBranchDefaultVisible(
   pkg: ProcedurePackage | null,
   branchId: string,
@@ -1914,6 +1989,14 @@ function addBranchEntities(
       displayLevel,
     ),
     ...addBranchTurnJunctionEntities(
+      viewer,
+      bundle,
+      branchBundle,
+      visible,
+      annotationVisible,
+      displayLevel,
+    ),
+    ...addBranchMissedConnectorSurfaceEntities(
       viewer,
       bundle,
       branchBundle,

@@ -10,6 +10,7 @@ import {
   buildMissedCaEndpoints,
   buildMissedCaMahfConnectors,
   buildMissedCaSegmentGeometry,
+  buildMissedConnectorSurfaces,
   buildMissedCourseGuides,
   buildMissedSectionSurface,
   buildMissedTurnDebugPrimitives,
@@ -445,6 +446,63 @@ describe("procedure missed geometry", () => {
       latDeg: 35.94,
     });
     expect(connectorEnd.altM).toBeCloseTo(914.4, 8);
+  });
+
+  it("builds an estimated connector surface from CA endpoint to a later MAHF fix", () => {
+    const endpointResult = buildMissedCaEndpoints(missedSegment, [caLeg], fixes);
+    const connectorFixes = new Map(fixes);
+    connectorFixes.set("fix:DUHAM", {
+      fixId: "fix:DUHAM",
+      ident: "DUHAM",
+      role: ["MAHF"],
+      latDeg: 35.94,
+      lonDeg: -78.72,
+      altFtMsl: null,
+      annotations: [],
+      sourceRefs: [],
+    });
+    const mahfLeg: ProcedurePackageLeg = {
+      ...caLeg,
+      legId: "leg:missed:hm",
+      legType: "HM",
+      rawPathTerminator: "HM",
+      startFixId: "fix:DUHAM",
+      endFixId: "fix:DUHAM",
+      requiredAltitude: { kind: "AT", minFtMsl: 2200, maxFtMsl: 2200, sourceText: "2200 ft" },
+      legacy: {
+        ...caLeg.legacy,
+        sequence: 50,
+        constructionMethod: "hold_to_manual",
+        roleAtEnd: "MAHF",
+      },
+    };
+
+    const surfaces = buildMissedConnectorSurfaces(
+      endpointResult.geometries,
+      [caLeg, mahfLeg],
+      connectorFixes,
+      new Map([[missedSegment.segmentId, missedSegment]]),
+      { samplingStepNm: 1 },
+    );
+
+    expect(surfaces).toHaveLength(1);
+    expect(surfaces[0]).toMatchObject({
+      sourceLegId: "leg:missed:ca",
+      targetFixId: "fix:DUHAM",
+      targetFixIdent: "DUHAM",
+      constructionStatus: "ESTIMATED_CONNECTOR_SURFACE",
+      primary: expect.objectContaining({
+        geometryId: "segment:missed-s1:ca-mahf-connector-primary:leg:missed:ca",
+      }),
+      secondaryOuter: expect.objectContaining({
+        geometryId: "segment:missed-s1:ca-mahf-connector-secondary:leg:missed:ca",
+      }),
+    });
+    expect(surfaces[0].primary.halfWidthNmSamples[0].halfWidthNm).toBe(2);
+    expect(surfaces[0].secondaryOuter?.halfWidthNmSamples[0].halfWidthNm).toBe(3);
+    const lastVerticalSample =
+      surfaces[0].verticalProfile.samples[surfaces[0].verticalProfile.samples.length - 1];
+    expect(lastVerticalSample.altitudeFtMsl).toBeCloseTo(2200, 8);
   });
 
   it("builds debug-only turning missed anchor and estimated primitives for flagged section two segments", () => {

@@ -501,6 +501,18 @@ const missedCaDfDocument: ProcedureDetailDocument = {
     procedureIdent: "MISSEDCADF",
     chartName: "RNAV MISSED CA DF TEST",
   },
+  fixes: [
+    ...missedDfDocument.fixes,
+    {
+      fixId: "fix:HOLD",
+      ident: "HOLD",
+      kind: "missed_hold_fix",
+      position: { lon: -78.7, lat: 35.95 },
+      elevationFt: null,
+      roleHints: ["MAHF"],
+      sourceRefs: [],
+    },
+  ],
   branches: [
     {
       ...missedDfDocument.branches[0],
@@ -534,6 +546,26 @@ const missedCaDfDocument: ProcedureDetailDocument = {
             endFixRef: "fix:MIS1",
           },
           termination: { kind: "fix", fixRef: "fix:MIS1" },
+        },
+        {
+          ...missedDfDocument.branches[0].legs[0],
+          legId: "leg:R:050",
+          sequence: 50,
+          path: {
+            pathTerminator: "HM",
+            constructionMethod: "hold_to_manual",
+            startFixRef: "fix:HOLD",
+            endFixRef: "fix:HOLD",
+            courseDeg: 305,
+            turnDirection: "RIGHT",
+          },
+          termination: { kind: "fix", fixRef: "fix:HOLD" },
+          constraints: {
+            altitude: { qualifier: "at", valueFt: 2200, rawText: "2200 ft" },
+            speedKt: null,
+            geometryAltitudeFt: 2200,
+          },
+          roleAtEnd: "MAHF",
         },
       ],
     },
@@ -955,6 +987,15 @@ describe("procedure render bundle", () => {
       }),
     });
     expect(segmentBundle.missedCaEndpoints).toHaveLength(1);
+    expect(bundle.branchBundles[0].missedCaMahfConnectors).toHaveLength(1);
+    expect(bundle.branchBundles[0].missedConnectorSurfaces).toHaveLength(1);
+    expect(bundle.branchBundles[0].missedConnectorSurfaces[0]).toMatchObject({
+      sourceLegId: "leg:R:035",
+      targetFixIdent: "HOLD",
+      constructionStatus: "ESTIMATED_CONNECTOR_SURFACE",
+      primary: expect.any(Object),
+      secondaryOuter: expect.any(Object),
+    });
     expect(bundle.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

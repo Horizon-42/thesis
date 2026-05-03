@@ -106,6 +106,28 @@ export interface MissedCaMahfConnectorGeometry extends PolylineGeometry3D {
   notes: string[];
 }
 
+export interface MissedConnectorSurfaceGeometry {
+  surfaceId: string;
+  sourceSegmentId: string;
+  sourceLegId: string;
+  sourceEndpointStatus: MissedCaEndpointStatus;
+  targetFixId: string;
+  targetFixIdent: string;
+  targetFixRole: "MAHF" | "HOLD";
+  constructionStatus: "ESTIMATED_CONNECTOR_SURFACE";
+  centerline: PolylineGeometry3D;
+  verticalProfile: {
+    constructionStatus: "ESTIMATED_CLIMB_OR_TARGET_ALTITUDE";
+    samples: Array<{
+      stationNm: number;
+      altitudeFtMsl: number;
+    }>;
+  };
+  primary: LateralEnvelopeGeometry;
+  secondaryOuter: LateralEnvelopeGeometry | null;
+  notes: string[];
+}
+
 export interface MissedCaCenterlineOptions {
   samplingStepNm?: number;
 }
@@ -531,16 +553,61 @@ export function buildMissedCaCenterlines(
 function legTargetsMahfOrHold(
   leg: ProcedurePackageLeg,
   fixes: Map<string, ProcedurePackageFix>,
-): { fix: ProcedurePackageFix; role: "MAHF" | "HOLD" } | null {
+): { fix: ProcedurePackageFix; role: "MAHF" | "HOLD"; leg: ProcedurePackageLeg } | null {
   const fix = leg.endFixId ? fixes.get(leg.endFixId) : undefined;
   if (!fix) return null;
-  if (leg.legacy.roleAtEnd.toUpperCase() === "MAHF" || fix.role.includes("MAHF")) {
-    return { fix, role: "MAHF" };
+  if (
+    leg.legacy.roleAtEnd.toUpperCase() === "MAHF" ||
+    fix.role.some((role) => role.toUpperCase() === "MAHF")
+  ) {
+    return { fix, role: "MAHF", leg };
   }
   if (leg.legType === "HM" || leg.legType === "HA" || leg.legType === "HF") {
-    return { fix, role: "HOLD" };
+    return { fix, role: "HOLD", leg };
   }
   return null;
+}
+
+function targetAltitudeForConnector(
+  endpoint: MissedCaEndpointGeometry,
+  targetLeg: ProcedurePackageLeg,
+  targetFix: ProcedurePackageFix,
+): number {
+  const legAltitude = altitudeTargetFt(targetLeg);
+  if (legAltitude !== null) return legAltitude;
+  if (typeof targetFix.altFtMsl === "number" && Number.isFinite(targetFix.altFtMsl)) {
+    return targetFix.altFtMsl;
+  }
+  return endpoint.targetAltitudeFtMsl;
+}
+
+function buildConnectorCenterline(
+  endpoint: MissedCaEndpointGeometry,
+  target: { fix: ProcedurePackageFix; role: "MAHF" | "HOLD"; leg: ProcedurePackageLeg },
+  samplingStepNm: number,
+): PolylineGeometry3D | null {
+  const start = endpoint.geoPositions[1];
+  const targetAltitudeFtMsl = targetAltitudeForConnector(endpoint, target.leg, target.fix);
+  const endBase = pointFromFixWithAltitudeFallback(target.fix, targetAltitudeFtMsl);
+  if (!endBase) return null;
+  const end = { ...endBase, altM: targetAltitudeFtMsl * FEET_TO_METERS };
+
+  const lengthNm = distanceNm(start, end);
+  if (lengthNm <= 1e-5) return null;
+
+  const sampleCount = Math.max(1, Math.ceil(lengthNm / samplingStepNm));
+  const geoPositions = Array.from({ length: sampleCount + 1 }, (_, index) =>
+    interpolateGreatCircle(start, end, index / sampleCount),
+  );
+  geoPositions[0] = start;
+  geoPositions[geoPositions.length - 1] = end;
+
+  return {
+    geoPositions,
+    worldPositions: geoPositions.map(toCartesian),
+    geodesicLengthNm: lengthNm,
+    isArc: false,
+  };
 }
 
 export function buildMissedCaMahfConnectors(
@@ -558,22 +625,11 @@ export function buildMissedCaMahfConnectors(
     const target = orderedLegs
       .slice(sourceLegIndex + 1)
       .map((leg) => legTargetsMahfOrHold(leg, fixes))
-      .find((entry): entry is { fix: ProcedurePackageFix; role: "MAHF" | "HOLD" } => entry !== null);
+      .find((entry): entry is { fix: ProcedurePackageFix; role: "MAHF" | "HOLD"; leg: ProcedurePackageLeg } => entry !== null);
     if (!target) return [];
 
-    const start = endpoint.geoPositions[1];
-    const end = pointFromFixWithAltitudeFallback(target.fix, endpoint.targetAltitudeFtMsl);
-    if (!end) return [];
-
-    const lengthNm = distanceNm(start, end);
-    if (lengthNm <= 1e-5) return [];
-
-    const sampleCount = Math.max(1, Math.ceil(lengthNm / samplingStepNm));
-    const geoPositions = Array.from({ length: sampleCount + 1 }, (_, index) =>
-      interpolateGreatCircle(start, end, index / sampleCount),
-    );
-    geoPositions[0] = start;
-    geoPositions[geoPositions.length - 1] = end;
+    const centerline = buildConnectorCenterline(endpoint, target, samplingStepNm);
+    if (!centerline) return [];
 
     return [{
       sourceSegmentId: endpoint.segmentId,
@@ -587,10 +643,84 @@ export function buildMissedCaMahfConnectors(
         "Connector estimates procedure continuity from the CA endpoint to the later missed holding fix.",
         "It is not source-coded leg geometry and must not be read as a certified missed approach track.",
       ],
-      geoPositions,
-      worldPositions: geoPositions.map(toCartesian),
-      geodesicLengthNm: lengthNm,
-      isArc: false,
+      geoPositions: centerline.geoPositions,
+      worldPositions: centerline.worldPositions,
+      geodesicLengthNm: centerline.geodesicLengthNm,
+      isArc: centerline.isArc,
+    }];
+  });
+}
+
+export function buildMissedConnectorSurfaces(
+  endpoints: MissedCaEndpointGeometry[],
+  orderedLegs: ProcedurePackageLeg[],
+  fixes: Map<string, ProcedurePackageFix>,
+  segments: Map<string, ProcedureSegment>,
+  options: MissedCaCenterlineOptions = {},
+): MissedConnectorSurfaceGeometry[] {
+  const samplingStepNm = Math.max(options.samplingStepNm ?? 0.25, 0.01);
+
+  return endpoints.flatMap((endpoint) => {
+    const sourceSegment = segments.get(endpoint.segmentId);
+    if (!sourceSegment) return [];
+    const sourceLegIndex = orderedLegs.findIndex((leg) => leg.legId === endpoint.legId);
+    if (sourceLegIndex < 0) return [];
+
+    const target = orderedLegs
+      .slice(sourceLegIndex + 1)
+      .map((leg) => legTargetsMahfOrHold(leg, fixes))
+      .find((entry): entry is { fix: ProcedurePackageFix; role: "MAHF" | "HOLD"; leg: ProcedurePackageLeg } => entry !== null);
+    if (!target) return [];
+
+    const centerline = buildConnectorCenterline(endpoint, target, samplingStepNm);
+    if (!centerline) return [];
+
+    const primaryHalfWidthNm = sourceSegment.xttNm * 2;
+    const secondaryOuterHalfWidthNm = sourceSegment.secondaryEnabled
+      ? sourceSegment.xttNm * 3
+      : null;
+    const stationAxis = computeStationAxis(centerline);
+    const targetAltitudeFtMsl = targetAltitudeForConnector(endpoint, target.leg, target.fix);
+
+    return [{
+      surfaceId: `${endpoint.segmentId}:ca-mahf-connector-surface:${endpoint.legId}`,
+      sourceSegmentId: endpoint.segmentId,
+      sourceLegId: endpoint.legId,
+      sourceEndpointStatus: endpoint.constructionStatus,
+      targetFixId: target.fix.fixId,
+      targetFixIdent: target.fix.ident,
+      targetFixRole: target.role,
+      constructionStatus: "ESTIMATED_CONNECTOR_SURFACE",
+      centerline,
+      verticalProfile: {
+        constructionStatus: "ESTIMATED_CLIMB_OR_TARGET_ALTITUDE",
+        samples: stationAxis.samples.map((sample) => ({
+          stationNm: sample.stationNm,
+          altitudeFtMsl:
+            endpoint.targetAltitudeFtMsl +
+            (targetAltitudeFtMsl - endpoint.targetAltitudeFtMsl) *
+              (stationAxis.totalLengthNm <= 1e-9 ? 0 : sample.stationNm / stationAxis.totalLengthNm),
+        })),
+      },
+      primary: buildStraightEnvelope(
+        `${endpoint.segmentId}:ca-mahf-connector-primary:${endpoint.legId}`,
+        "PRIMARY",
+        centerline,
+        primaryHalfWidthNm,
+      ),
+      secondaryOuter: secondaryOuterHalfWidthNm === null
+        ? null
+        : buildStraightEnvelope(
+            `${endpoint.segmentId}:ca-mahf-connector-secondary:${endpoint.legId}`,
+            "SECONDARY",
+            centerline,
+            secondaryOuterHalfWidthNm,
+          ),
+      notes: [
+        "Estimated connector surface from CA endpoint to later missed holding fix.",
+        "Lateral width currently holds the CA missed segment terminal width constant.",
+        "This is not a certified TERPS missed approach connector construction.",
+      ],
     }];
   });
 }

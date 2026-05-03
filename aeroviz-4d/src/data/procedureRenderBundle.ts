@@ -38,6 +38,7 @@ import {
   buildMissedCaEndpoints,
   buildMissedCaMahfConnectors,
   buildMissedCaSegmentGeometry,
+  buildMissedConnectorSurfaces,
   buildMissedCourseGuides,
   buildMissedSectionSurface,
   buildMissedTurnDebugPrimitives,
@@ -45,6 +46,7 @@ import {
   type MissedCaCenterlineGeometry,
   type MissedCaEndpointGeometry,
   type MissedCaMahfConnectorGeometry,
+  type MissedConnectorSurfaceGeometry,
   type MissedCourseGuideGeometry,
   type MissedSectionSurfaceGeometry,
   type MissedTurnDebugPrimitiveGeometry,
@@ -79,6 +81,7 @@ export interface BranchGeometryBundle {
   segmentBundles: ProcedureSegmentRenderBundle[];
   turnJunctions: InterSegmentTurnJunctionGeometry[];
   missedCaMahfConnectors: MissedCaMahfConnectorGeometry[];
+  missedConnectorSurfaces: MissedConnectorSurfaceGeometry[];
 }
 
 export interface ProcedureSegmentRenderBundle {
@@ -288,6 +291,13 @@ export function buildProcedureRenderBundle(
       fixes,
       { samplingStepNm: ctx.samplingStepNm },
     );
+    const missedConnectorSurfaces = buildMissedConnectorSurfaces(
+      segmentBundles.flatMap((segmentBundle) => segmentBundle.missedCaEndpoints),
+      branchLegs,
+      fixes,
+      segmentsById,
+      { samplingStepNm: ctx.samplingStepNm },
+    );
 
     return {
       branchId: branch.branchId,
@@ -297,6 +307,7 @@ export function buildProcedureRenderBundle(
       segmentBundles,
       turnJunctions: branchTurnResult.turnJunctions,
       missedCaMahfConnectors,
+      missedConnectorSurfaces,
     };
   });
 

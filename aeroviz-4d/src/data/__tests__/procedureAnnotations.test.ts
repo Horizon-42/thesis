@@ -52,6 +52,9 @@ describe("procedureAnnotations", () => {
     expect(procedureAnnotationMeaning("CA_MAHF_CONNECTOR", "ESTIMATED")).toContain(
       "CA endpoint",
     );
+    expect(procedureAnnotationMeaning("MISSED_CONNECTOR_SURFACE", "ESTIMATED")).toContain(
+      "connector surface",
+    );
   });
 
   it("resolves annotations from picked Cesium entities", () => {
@@ -88,6 +91,13 @@ describe("procedureAnnotations", () => {
       procedureAnnotationDisplayLevel({
         ...annotation,
         kind: "CA_MAHF_CONNECTOR",
+        status: "ESTIMATED",
+      }),
+    ).toBe("ESTIMATED");
+    expect(
+      procedureAnnotationDisplayLevel({
+        ...annotation,
+        kind: "MISSED_CONNECTOR_SURFACE",
         status: "ESTIMATED",
       }),
     ).toBe("ESTIMATED");

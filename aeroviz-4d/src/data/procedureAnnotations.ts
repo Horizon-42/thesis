@@ -16,6 +16,7 @@ export type ProcedureAnnotationKind =
   | "CA_CENTERLINE"
   | "CA_ENDPOINT"
   | "CA_MAHF_CONNECTOR"
+  | "MISSED_CONNECTOR_SURFACE"
   | "TURNING_MISSED_DEBUG"
   | "TURN_FILL"
   | "MISSING_FINAL_SURFACE";
@@ -112,6 +113,7 @@ export function procedureAnnotationDisplayLevel(
     annotation.kind === "CA_CENTERLINE" ||
     annotation.kind === "CA_ENDPOINT" ||
     annotation.kind === "CA_MAHF_CONNECTOR" ||
+    annotation.kind === "MISSED_CONNECTOR_SURFACE" ||
     (annotation.kind === "SEGMENT_CENTERLINE" && annotation.status === "ESTIMATED") ||
     (annotation.kind === "SEGMENT_ENVELOPE_PRIMARY" && annotation.status === "ESTIMATED") ||
     (annotation.kind === "SEGMENT_ENVELOPE_SECONDARY" && annotation.status === "ESTIMATED") ||
@@ -198,6 +200,9 @@ export function procedureAnnotationMeaning(
   }
   if (kind === "CA_MAHF_CONNECTOR") {
     return "Estimated continuity connector from a CA endpoint to the later missed approach holding fix. It is not source-coded leg geometry.";
+  }
+  if (kind === "MISSED_CONNECTOR_SURFACE") {
+    return "Estimated missed-approach connector surface from a CA endpoint to a later MAHF or hold fix. It provides lateral context for the connector but is not certified TERPS construction.";
   }
   if (kind === "TURNING_MISSED_DEBUG") {
     return "Debug-only turning missed approach primitive, used to inspect turn initiation, early/late baselines, nominal path, or wind spiral placeholders.";
