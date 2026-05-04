@@ -47,3 +47,20 @@ Minimum altitudes meet obstacle clearance requirements under ISA conditions. The
 
 
 # 4. Maybe merge 2 and 3?
+
+
+# Archetecture
+## Multi agent?
+GNN?
+
+## Signle Aircraft
+
+## Baseline
+LSTM, Transformer without ODE/PINN
+
+## Transformer
+
+## ODE
+
+## PINN
+BADA P
