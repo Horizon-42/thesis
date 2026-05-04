@@ -209,6 +209,8 @@ export default function ProcedurePanel() {
     setProcedureBranchesVisible,
     procedureAnnotationEnabled,
     setProcedureAnnotationEnabled,
+    procedureWidthMeasurementEnabled,
+    setProcedureWidthMeasurementEnabled,
     procedureDisplayLevel,
     setProcedureDisplayLevel,
     activeAirportCode,
@@ -334,6 +336,15 @@ export default function ProcedurePanel() {
             onChange={(event) => setProcedureAnnotationEnabled(event.currentTarget.checked)}
           />
           Annotate
+        </label>
+        <label className="procedure-master-toggle">
+          <input
+            type="checkbox"
+            checked={procedureWidthMeasurementEnabled}
+            disabled={!layers.procedures}
+            onChange={(event) => setProcedureWidthMeasurementEnabled(event.currentTarget.checked)}
+          />
+          Measure widths
         </label>
       </header>
 

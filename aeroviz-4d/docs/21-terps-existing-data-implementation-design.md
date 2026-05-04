@@ -130,6 +130,13 @@ extension.
 
 Rendering rule: draw `FINAL_LNAV_OEA` as the primary/secondary filled
 footprint, and draw station markers at `PFAF -0.3`, `PFAF`, and `PFAF +1.0`.
+When the width-measurement overlay is enabled, each marker label should show
+`primaryHalfWidthNm` and `secondaryOuterHalfWidthNm` in NM, and each marker
+should include cross-rib width lines so the rendered footprint can be checked
+against the rule dimensions. Non-final segment envelopes should also expose
+start/mid/end primary and secondary outer half-width labels in NM. The
+measurement overlay is controlled by its own checkbox and must not depend on
+the annotation-label toggle.
 The intermediate connector must use a lighter fill with emphasized boundaries
 so it is not mistaken for the final OEA itself.
 

@@ -11,6 +11,8 @@ const {
   setProcedureBranchVisible,
   getProcedureAnnotationEnabled,
   setProcedureAnnotationEnabled,
+  getProcedureWidthMeasurementEnabled,
+  setProcedureWidthMeasurementEnabled,
   getProcedureDisplayLevel,
   setProcedureDisplayLevel,
 } = vi.hoisted(() => {
@@ -18,6 +20,7 @@ const {
   let proceduresVisible = true;
   let procedureVisibility: Record<string, boolean> = {};
   let procedureAnnotationEnabled = false;
+  let procedureWidthMeasurementEnabled = false;
   let procedureDisplayLevel = "PROTECTION";
   const mockViewer = {
     entities: {
@@ -49,6 +52,10 @@ const {
     getProcedureAnnotationEnabled: () => procedureAnnotationEnabled,
     setProcedureAnnotationEnabled: (value: boolean) => {
       procedureAnnotationEnabled = value;
+    },
+    getProcedureWidthMeasurementEnabled: () => procedureWidthMeasurementEnabled,
+    setProcedureWidthMeasurementEnabled: (value: boolean) => {
+      procedureWidthMeasurementEnabled = value;
     },
     getProcedureDisplayLevel: () => procedureDisplayLevel,
     setProcedureDisplayLevel: (value: string) => {
@@ -93,6 +100,7 @@ vi.mock("../../context/AppContext", () => ({
     layers: { procedures: getProceduresVisible() },
     procedureVisibility: getProcedureVisibility(),
     procedureAnnotationEnabled: getProcedureAnnotationEnabled(),
+    procedureWidthMeasurementEnabled: getProcedureWidthMeasurementEnabled(),
     procedureDisplayLevel: getProcedureDisplayLevel(),
   }),
 }));
@@ -810,6 +818,7 @@ describe("useProcedureSegmentLayer", () => {
     vi.mocked(loadProcedureRenderBundleData).mockResolvedValue(renderBundleData as any);
     setProceduresVisible(true);
     setProcedureAnnotationEnabled(false);
+    setProcedureWidthMeasurementEnabled(false);
     setProcedureDisplayLevel("PROTECTION");
     setProcedureBranchVisible("KRDU-R05LY-RW05L:branch:R", true);
   });
@@ -927,20 +936,23 @@ describe("useProcedureSegmentLayer", () => {
       ),
     ).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-final-surface-status"))).toBe(true);
-    expect(entities.some((entity) => String(entity.id).includes("-oea-station-pfaf-minus-03"))).toBe(true);
     expect(
       entities.some(
         (entity) =>
-          String(entity.id).includes("-oea-station-pfaf") &&
-          entity.point?.color.name === "LIME" &&
-          entity.__aeroVizProcedureAnnotation?.parameters.some(
-            (parameter: { label: string; value: string }) =>
-              parameter.label === "Taper rule" &&
-              parameter.value.includes("formula 3-2-1"),
-          ),
+          String(entity.id).includes("procedure-measurement-label-") &&
+          entity.show === true,
       ),
-    ).toBe(true);
-    expect(entities.some((entity) => String(entity.id).includes("-oea-station-pfaf-plus-10"))).toBe(true);
+    ).toBe(false);
+    expect(
+      entities.some(
+        (entity) =>
+          (
+            String(entity.id).includes("-oea-station-") ||
+            String(entity.id).includes("-envelope-width-")
+          ) &&
+          entity.show === true,
+      ),
+    ).toBe(false);
     expect(entities.some((entity) => String(entity.id).includes("-connector-primary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-connector-primary-boundary"))).toBe(true);
     expect(entities.some((entity) => String(entity.id).includes("-connector-primary-rib-"))).toBe(true);
@@ -1013,6 +1025,63 @@ describe("useProcedureSegmentLayer", () => {
         (entity) =>
           String(entity.id).endsWith("-centerline") &&
           entity.__aeroVizProcedureAnnotation?.kind === "SEGMENT_CENTERLINE",
+      ),
+    ).toBe(true);
+  });
+
+  it("shows width measurement labels and ribs only when width measurement mode is enabled", async () => {
+    setProcedureWidthMeasurementEnabled(true);
+
+    renderHook(() => useProcedureSegmentLayer());
+    await waitFor(() => expect(mockViewer.entities.add).toHaveBeenCalled());
+
+    expect(
+      entities.some(
+        (entity) =>
+          String(entity.id).includes("-oea-station-pfaf") &&
+          entity.point?.color.name === "LIME" &&
+          entity.show === true &&
+          entity.__aeroVizProcedureAnnotation?.parameters.some(
+            (parameter: { label: string; value: string }) =>
+              parameter.label === "Taper rule" &&
+              parameter.value.includes("formula 3-2-1"),
+          ),
+      ),
+    ).toBe(true);
+    expect(
+      entities.some(
+        (entity) =>
+          String(entity.id).includes("-oea-station-pfaf-primary-width") &&
+          entity.show === true &&
+          entity.polyline?.material.name === "DEEPSKYBLUE",
+      ),
+    ).toBe(true);
+    expect(
+      entities.some(
+        (entity) =>
+          String(entity.id).includes("-oea-station-pfaf-secondary-outer-width") &&
+          entity.show === true &&
+          entity.polyline?.material.name === "YELLOW",
+      ),
+    ).toBe(true);
+    expect(
+      entities.some(
+        (entity) =>
+          String(entity.id).includes("procedure-measurement-label-") &&
+          String(entity.id).includes("-oea-station-pfaf") &&
+          entity.show === true &&
+          entity.label?.text.includes("P half 0.6 NM") &&
+          entity.label.text.includes("S outer 0.9 NM"),
+      ),
+    ).toBe(true);
+    expect(
+      entities.some(
+        (entity) =>
+          String(entity.id).includes("procedure-measurement-label-") &&
+          String(entity.id).includes("-envelope-width-mid") &&
+          entity.show === true &&
+          entity.label?.text.includes("P half 0.6 NM") &&
+          entity.label.text.includes("S outer 0.6 NM"),
       ),
     ).toBe(true);
   });

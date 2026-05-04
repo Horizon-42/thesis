@@ -57,6 +57,8 @@ const CONNECTOR_COLOR = Cesium.Color.ORANGE.withAlpha(0.06);
 const CONNECTOR_LINE_COLOR = Cesium.Color.ORANGE.withAlpha(0.92);
 const FINAL_OEA_TAPER_MARKER_COLOR = Cesium.Color.YELLOW.withAlpha(0.96);
 const FINAL_OEA_PFAF_MARKER_COLOR = Cesium.Color.LIME.withAlpha(0.98);
+const FINAL_OEA_PRIMARY_WIDTH_COLOR = Cesium.Color.DEEPSKYBLUE.withAlpha(0.92);
+const FINAL_OEA_SECONDARY_WIDTH_COLOR = Cesium.Color.YELLOW.withAlpha(0.88);
 const MISSED_SURFACE_COLOR = Cesium.Color.YELLOW.withAlpha(0.24);
 const MISSED_CA_ESTIMATED_SURFACE_COLOR = Cesium.Color.ORANGE.withAlpha(0.26);
 const MISSED_CONNECTOR_SURFACE_COLOR = Cesium.Color.ORANGE.withAlpha(0.18);
@@ -72,6 +74,7 @@ const OUTLINE_COLOR = Cesium.Color.CYAN.withAlpha(0.28);
 const ENVELOPE_HEIGHT_OFFSET_M = 8;
 const OEA_HEIGHT_OFFSET_M = 18;
 const FINAL_OEA_STATION_MARKER_HEIGHT_OFFSET_M = OEA_HEIGHT_OFFSET_M + 12;
+const FINAL_OEA_WIDTH_RIB_HEIGHT_OFFSET_M = FINAL_OEA_STATION_MARKER_HEIGHT_OFFSET_M + 3;
 const LNAV_VNAV_OCS_HEIGHT_OFFSET_M = 28;
 const LNAV_VNAV_OCS_EDGE_HEIGHT_OFFSET_M = LNAV_VNAV_OCS_HEIGHT_OFFSET_M + 2;
 const LNAV_VNAV_OCS_RIB_HEIGHT_OFFSET_M = LNAV_VNAV_OCS_HEIGHT_OFFSET_M + 3;
@@ -94,6 +97,7 @@ const TURNING_MISSED_DEBUG_HEIGHT_OFFSET_M = 96;
 const FINAL_SURFACE_STATUS_HEIGHT_OFFSET_M = 110;
 const CA_ENDPOINT_HEIGHT_OFFSET_M = 92;
 const PROCEDURE_ANNOTATION_LABEL_PREFIX = "procedure-annotation-label-";
+const PROCEDURE_MEASUREMENT_LABEL_PREFIX = "procedure-measurement-label-";
 const FINAL_OEA_STATION_MARKERS = [
   {
     key: "pfaf-minus-03",
@@ -216,6 +220,14 @@ function pointAtStationFromSamples(
 
 function isAnnotationLabelId(entityId: string): boolean {
   return entityId.startsWith(PROCEDURE_ANNOTATION_LABEL_PREFIX);
+}
+
+function isMeasurementEntityId(entityId: string): boolean {
+  return (
+    entityId.startsWith(PROCEDURE_MEASUREMENT_LABEL_PREFIX) ||
+    entityId.includes("-oea-station-") ||
+    entityId.includes("-envelope-width-")
+  );
 }
 
 function procedureEntityShow(
@@ -744,16 +756,59 @@ function precisionSurfaceLabel(surface: ProcedureProtectionSurface): string {
   return suffix.replace(/-/g, " ").toUpperCase();
 }
 
-function nearestFinalOeaWidthSample(
+function interpolatedHalfWidthNm(
+  samples: Array<{ stationNm: number; halfWidthNm: number }>,
+  stationNm: number,
+): number | null {
+  if (samples.length === 0) return null;
+  if (samples.length === 1 || stationNm <= samples[0].stationNm) return samples[0].halfWidthNm;
+
+  for (let index = 0; index < samples.length - 1; index += 1) {
+    const start = samples[index];
+    const end = samples[index + 1];
+    if (stationNm <= end.stationNm || index === samples.length - 2) {
+      const spanNm = end.stationNm - start.stationNm;
+      const ratio = spanNm <= 1e-9
+        ? 0
+        : Math.min(1, Math.max(0, (stationNm - start.stationNm) / spanNm));
+      return start.halfWidthNm + (end.halfWidthNm - start.halfWidthNm) * ratio;
+    }
+  }
+
+  return samples[samples.length - 1].halfWidthNm;
+}
+
+function interpolatedSurfaceWidthSample(
   samples: ProcedureProtectionSurface["lateral"]["widthSamples"],
   stationNm: number,
 ): ProcedureProtectionSurface["lateral"]["widthSamples"][number] | null {
   if (samples.length === 0) return null;
-  return samples.reduce((nearest, candidate) =>
-    Math.abs(candidate.stationNm - stationNm) < Math.abs(nearest.stationNm - stationNm)
-      ? candidate
-      : nearest,
-  );
+  if (samples.length === 1 || stationNm <= samples[0].stationNm) return samples[0];
+
+  for (let index = 0; index < samples.length - 1; index += 1) {
+    const start = samples[index];
+    const end = samples[index + 1];
+    if (stationNm <= end.stationNm || index === samples.length - 2) {
+      const spanNm = end.stationNm - start.stationNm;
+      const ratio = spanNm <= 1e-9
+        ? 0
+        : Math.min(1, Math.max(0, (stationNm - start.stationNm) / spanNm));
+      return {
+        stationNm,
+        primaryHalfWidthNm:
+          start.primaryHalfWidthNm +
+          (end.primaryHalfWidthNm - start.primaryHalfWidthNm) * ratio,
+        secondaryOuterHalfWidthNm:
+          start.secondaryOuterHalfWidthNm === undefined ||
+          end.secondaryOuterHalfWidthNm === undefined
+            ? undefined
+            : start.secondaryOuterHalfWidthNm +
+              (end.secondaryOuterHalfWidthNm - start.secondaryOuterHalfWidthNm) * ratio,
+      };
+    }
+  }
+
+  return samples[samples.length - 1];
 }
 
 function finalOeaWidthSamplesFromRibbons(
@@ -764,9 +819,65 @@ function finalOeaWidthSamplesFromRibbons(
     stationNm: sample.stationNm,
     primaryHalfWidthNm: sample.halfWidthNm,
     secondaryOuterHalfWidthNm: secondaryOuter
-      ? nearestHalfWidthNm(secondaryOuter.halfWidthNmSamples, sample.stationNm)
+      ? (interpolatedHalfWidthNm(secondaryOuter.halfWidthNmSamples, sample.stationNm) ?? undefined)
       : undefined,
   }));
+}
+
+function formatWidthNm(halfWidthNm: number): string {
+  const rounded = Math.round((halfWidthNm + Number.EPSILON) * 100) / 100;
+  const text = rounded.toFixed(2).replace(/\.?0+$/, "");
+  return `${text} NM`;
+}
+
+function surfaceWidthLabel(
+  sample: ProcedureProtectionSurface["lateral"]["widthSamples"][number] | null,
+): string | null {
+  if (!sample) return null;
+  const primary = `P half ${formatWidthNm(sample.primaryHalfWidthNm)}`;
+  const secondary = sample.secondaryOuterHalfWidthNm === undefined
+    ? null
+    : `S outer ${formatWidthNm(sample.secondaryOuterHalfWidthNm)}`;
+  return secondary ? `${primary}\n${secondary}` : primary;
+}
+
+function addSurfaceWidthRib(args: {
+  viewer: Cesium.Viewer;
+  id: string;
+  name: string;
+  ribbon: ProcedureProtectionSurface["lateral"]["primary"] | null;
+  stationNm: number;
+  visible: boolean;
+  material: Cesium.Color;
+  annotation?: ProcedureEntityAnnotation;
+}): string[] {
+  if (!args.ribbon) return [];
+  const left = pointAtStationFromSamples(
+    args.ribbon.leftGeoBoundary,
+    args.ribbon.halfWidthNmSamples,
+    args.stationNm,
+  );
+  const right = pointAtStationFromSamples(
+    args.ribbon.rightGeoBoundary,
+    args.ribbon.halfWidthNmSamples,
+    args.stationNm,
+  );
+  if (!left || !right) return [];
+
+  addPolyline(
+    args.viewer,
+    args.id,
+    args.name,
+    [
+      elevatedPoint(left, FINAL_OEA_WIDTH_RIB_HEIGHT_OFFSET_M),
+      elevatedPoint(right, FINAL_OEA_WIDTH_RIB_HEIGHT_OFFSET_M),
+    ],
+    args.visible,
+    3,
+    args.material,
+    args.annotation,
+  );
+  return [args.id];
 }
 
 function addFinalOeaStationMarkers(args: {
@@ -777,6 +888,8 @@ function addFinalOeaStationMarkers(args: {
   baseId: string;
   segmentName: string;
   centerline: GeoPoint[];
+  primary: ProcedureProtectionSurface["lateral"]["primary"];
+  secondaryOuter: ProcedureProtectionSurface["lateral"]["secondaryOuter"];
   widthSamples: ProcedureProtectionSurface["lateral"]["widthSamples"];
   visible: boolean;
   annotationVisible: boolean;
@@ -790,11 +903,12 @@ function addFinalOeaStationMarkers(args: {
     const point = pointAtStationFromSamples(args.centerline, args.widthSamples, marker.stationNm);
     if (!point) return;
 
-    const widthSample = nearestFinalOeaWidthSample(args.widthSamples, marker.stationNm);
+    const widthSample = interpolatedSurfaceWidthSample(args.widthSamples, marker.stationNm);
+    const widthLabel = surfaceWidthLabel(widthSample);
     const markerId = `${args.baseId}-oea-station-${marker.key}`;
     const annotation = annotationBase({
       entityId: markerId,
-      label: marker.label,
+      label: widthLabel ? `${marker.label}\n${widthLabel}` : marker.label,
       title: `${args.segmentName} ${marker.label} LNAV OEA station`,
       kind: "FINAL_OEA",
       status: "SOURCE_BACKED",
@@ -809,12 +923,12 @@ function addFinalOeaStationMarkers(args: {
           `${marker.stationNm >= 0 ? "+" : ""}${marker.stationNm.toFixed(1)} NM from PFAF`,
         ),
         param("Marker", marker.description),
-        param("Primary half-width", widthSample ? `${widthSample.primaryHalfWidthNm.toFixed(2)} NM` : null),
+        param("Primary half-width", widthSample ? formatWidthNm(widthSample.primaryHalfWidthNm) : null),
         param(
           "Secondary outer half-width",
           widthSample?.secondaryOuterHalfWidthNm === undefined
             ? null
-            : `${widthSample.secondaryOuterHalfWidthNm.toFixed(2)} NM`,
+            : formatWidthNm(widthSample.secondaryOuterHalfWidthNm),
         ),
         param("Taper rule", "FAA 8260.58D formula 3-2-1; fixed width after PFAF +1.0 NM"),
       ],
@@ -833,13 +947,180 @@ function addFinalOeaStationMarkers(args: {
     );
     ids.push(markerId);
 
-    const labelId = addAnnotationLabel(
+    const labelId = addMeasurementLabel(
       args.viewer,
-      annotation,
+      `${PROCEDURE_MEASUREMENT_LABEL_PREFIX}${markerId}`,
+      `${args.segmentName} ${marker.label} LNAV OEA width label`,
       elevatedPoint(point, FINAL_OEA_STATION_MARKER_HEIGHT_OFFSET_M),
-      procedureEntityShow(args.visible, annotation, args.displayLevel, true, args.annotationVisible),
+      widthLabel ? `${marker.label}\n${widthLabel}` : marker.label,
+      procedureEntityShow(args.visible, annotation, args.displayLevel),
+      annotation,
     );
     if (labelId) ids.push(labelId);
+
+    ids.push(
+      ...addSurfaceWidthRib({
+        viewer: args.viewer,
+        id: `${markerId}-primary-width`,
+        name: `${args.segmentName} ${marker.label} LNAV OEA primary width`,
+        ribbon: args.primary,
+        stationNm: marker.stationNm,
+        visible: procedureEntityShow(args.visible, annotation, args.displayLevel),
+        material: FINAL_OEA_PRIMARY_WIDTH_COLOR,
+        annotation,
+      }),
+    );
+    if (args.secondaryOuter) {
+      ids.push(
+        ...addSurfaceWidthRib({
+          viewer: args.viewer,
+          id: `${markerId}-secondary-outer-width`,
+          name: `${args.segmentName} ${marker.label} LNAV OEA secondary outer width`,
+          ribbon: args.secondaryOuter,
+          stationNm: marker.stationNm,
+          visible: procedureEntityShow(args.visible, annotation, args.displayLevel),
+          material: FINAL_OEA_SECONDARY_WIDTH_COLOR,
+          annotation,
+        }),
+      );
+    }
+  });
+
+  return ids;
+}
+
+function widthMarkerStations(
+  samples: Array<{ stationNm: number }>,
+): Array<{ key: string; label: string; stationNm: number }> {
+  if (samples.length === 0) return [];
+  const startStationNm = samples[0].stationNm;
+  const endStationNm = samples[samples.length - 1].stationNm;
+  const candidates = [
+    { key: "start", label: "Start", stationNm: startStationNm },
+    { key: "mid", label: "Mid", stationNm: (startStationNm + endStationNm) / 2 },
+    { key: "end", label: "End", stationNm: endStationNm },
+  ];
+  return candidates.filter(
+    (candidate, index) =>
+      candidates.findIndex(
+        (other) => Math.abs(other.stationNm - candidate.stationNm) < 1e-6,
+      ) === index,
+  );
+}
+
+function addSegmentEnvelopeWidthMarkers(args: {
+  viewer: Cesium.Viewer;
+  bundle: ProcedureRenderBundle;
+  branchBundle: BranchGeometryBundle;
+  segmentBundle: ProcedureSegmentRenderBundle;
+  baseId: string;
+  segmentName: string;
+  primary: ProcedureProtectionSurface["lateral"]["primary"] | null | undefined;
+  secondaryOuter: ProcedureProtectionSurface["lateral"]["secondaryOuter"];
+  visible: boolean;
+  displayLevel: ProcedureDisplayLevel;
+  diagnostics: string[];
+}): string[] {
+  const ids: string[] = [];
+  const primary = args.primary;
+  const secondaryOuter = args.secondaryOuter ?? null;
+  if (!primary || primary.halfWidthNmSamples.length === 0) return ids;
+
+  const widthSamples = finalOeaWidthSamplesFromRibbons(
+    primary,
+    secondaryOuter,
+  );
+  const centerline = args.segmentBundle.segmentGeometry.centerline.geoPositions;
+  widthMarkerStations(primary.halfWidthNmSamples).forEach((marker) => {
+    const point = pointAtStationFromSamples(
+      centerline,
+      primary.halfWidthNmSamples,
+      marker.stationNm,
+    );
+    if (!point) return;
+
+    const widthSample = interpolatedSurfaceWidthSample(widthSamples, marker.stationNm);
+    const widthLabel = surfaceWidthLabel(widthSample);
+    const markerId = `${args.baseId}-envelope-width-${marker.key}`;
+    const annotation = annotationBase({
+      entityId: markerId,
+      label: widthLabel ? `${marker.label}\n${widthLabel}` : marker.label,
+      title: `${args.segmentName} ${marker.label.toLowerCase()} envelope width`,
+      kind: "SEGMENT_ENVELOPE_PRIMARY",
+      status: args.segmentBundle.segmentGeometry.diagnostics.some(
+        (diagnostic) => diagnostic.code === "ESTIMATED_CA_GEOMETRY",
+      )
+        ? "ESTIMATED"
+        : "SOURCE_BACKED",
+      bundle: args.bundle,
+      branchBundle: args.branchBundle,
+      segment: args.segmentBundle.segment,
+      legs: args.segmentBundle.legs,
+      parameters: [
+        ...segmentParams(args.segmentBundle.segment, args.segmentBundle.legs),
+        param("Station", `${marker.stationNm.toFixed(2)} NM from segment start`),
+        param("Primary half-width", widthSample ? formatWidthNm(widthSample.primaryHalfWidthNm) : null),
+        param(
+          "Secondary outer half-width",
+          widthSample?.secondaryOuterHalfWidthNm === undefined
+            ? null
+            : formatWidthNm(widthSample.secondaryOuterHalfWidthNm),
+        ),
+      ],
+      diagnostics: args.diagnostics,
+      sourceRefs: sourceRefsFromSegment(args.segmentBundle.segment),
+    });
+    const visibleAtLevel = procedureEntityShow(args.visible, annotation, args.displayLevel);
+    addPoint(
+      args.viewer,
+      markerId,
+      `${args.segmentName} ${marker.label.toLowerCase()} envelope width`,
+      point,
+      visibleAtLevel,
+      7,
+      FINAL_OEA_PRIMARY_WIDTH_COLOR,
+      FINAL_OEA_STATION_MARKER_HEIGHT_OFFSET_M,
+      annotation,
+    );
+    ids.push(markerId);
+
+    const labelId = addMeasurementLabel(
+      args.viewer,
+      `${PROCEDURE_MEASUREMENT_LABEL_PREFIX}${markerId}`,
+      `${args.segmentName} ${marker.label.toLowerCase()} envelope width label`,
+      elevatedPoint(point, FINAL_OEA_STATION_MARKER_HEIGHT_OFFSET_M),
+      widthLabel ? `${marker.label}\n${widthLabel}` : marker.label,
+      visibleAtLevel,
+      annotation,
+    );
+    if (labelId) ids.push(labelId);
+
+    ids.push(
+      ...addSurfaceWidthRib({
+        viewer: args.viewer,
+        id: `${markerId}-primary-width`,
+        name: `${args.segmentName} ${marker.label.toLowerCase()} primary envelope width`,
+        ribbon: primary,
+        stationNm: marker.stationNm,
+        visible: visibleAtLevel,
+        material: FINAL_OEA_PRIMARY_WIDTH_COLOR,
+        annotation,
+      }),
+    );
+    if (secondaryOuter) {
+      ids.push(
+        ...addSurfaceWidthRib({
+          viewer: args.viewer,
+          id: `${markerId}-secondary-outer-width`,
+          name: `${args.segmentName} ${marker.label.toLowerCase()} secondary envelope width`,
+          ribbon: secondaryOuter,
+          stationNm: marker.stationNm,
+          visible: visibleAtLevel,
+          material: FINAL_OEA_SECONDARY_WIDTH_COLOR,
+          annotation,
+        }),
+      );
+    }
   });
 
   return ids;
@@ -870,6 +1151,36 @@ function addAnnotationLabel(
     },
   });
   attachProcedureAnnotation(entity, annotation);
+  return id;
+}
+
+function addMeasurementLabel(
+  viewer: Cesium.Viewer,
+  id: string,
+  name: string,
+  anchor: GeoPoint | null,
+  text: string,
+  visible: boolean,
+  annotation?: ProcedureEntityAnnotation,
+): string | null {
+  if (!anchor || !text) return null;
+  const entity = viewer.entities.add({
+    id,
+    name,
+    show: visible,
+    position: geoToCartesian(anchor, 18),
+    label: {
+      text,
+      font: "12px sans-serif",
+      fillColor: Cesium.Color.WHITE,
+      outlineColor: Cesium.Color.BLACK,
+      outlineWidth: 3,
+      showBackground: true,
+      backgroundColor: Cesium.Color.BLACK.withAlpha(0.66),
+      scale: 0.95,
+    },
+  });
+  if (annotation) attachProcedureAnnotation(entity, annotation);
   return id;
 }
 
@@ -1036,6 +1347,7 @@ function addSegmentEntities(
   pkg: ProcedurePackage | null,
   visible: boolean,
   annotationVisible: boolean,
+  widthMeasurementVisible: boolean,
   displayLevel: ProcedureDisplayLevel,
 ): string[] {
   const ids: string[] = [];
@@ -1291,6 +1603,24 @@ function addSegmentEntities(
   );
   ids.push(secondaryId);
 
+  if (!segmentBundle.finalOea) {
+    ids.push(
+      ...addSegmentEnvelopeWidthMarkers({
+        viewer,
+        bundle,
+        branchBundle,
+        segmentBundle,
+        baseId,
+        segmentName,
+        primary: segmentBundle.segmentGeometry.primaryEnvelope,
+        secondaryOuter: segmentBundle.segmentGeometry.secondaryEnvelope ?? null,
+        visible: visible && widthMeasurementVisible,
+        displayLevel,
+        diagnostics: segmentDiagnostics,
+      }),
+    );
+  }
+
   segmentBundle.segmentGeometry.turnJunctions.forEach((junction) => {
     const turnPrimaryId = `${baseId}-turn-${junction.turnPointIndex}-primary`;
     const turnPrimaryAnnotation = annotationBase({
@@ -1406,11 +1736,13 @@ function addSegmentEntities(
         baseId,
         segmentName,
         centerline: segmentBundle.finalOea.centerline.geoPositions,
+        primary: segmentBundle.finalOea.primary,
+        secondaryOuter: segmentBundle.finalOea.secondaryOuter,
         widthSamples: finalOeaWidthSamplesFromRibbons(
           segmentBundle.finalOea.primary,
           segmentBundle.finalOea.secondaryOuter,
         ),
-        visible,
+        visible: visible && widthMeasurementVisible,
         annotationVisible,
         displayLevel,
         diagnostics: segmentDiagnostics,
@@ -2051,6 +2383,7 @@ function addBranchProtectionSurfaceEntities(
   branchBundle: BranchGeometryBundle,
   visible: boolean,
   annotationVisible: boolean,
+  widthMeasurementVisible: boolean,
   displayLevel: ProcedureDisplayLevel,
 ): string[] {
   const ids: string[] = [];
@@ -2132,8 +2465,10 @@ function addBranchProtectionSurfaceEntities(
           baseId,
           segmentName,
           centerline: surface.centerline.geoPositions,
+          primary: surface.lateral.primary,
+          secondaryOuter: surface.lateral.secondaryOuter,
           widthSamples: surface.lateral.widthSamples,
-          visible,
+          visible: visible && widthMeasurementVisible,
           annotationVisible,
           displayLevel,
           diagnostics,
@@ -2685,6 +3020,7 @@ function addBranchEntities(
   pkg: ProcedurePackage | null,
   visible: boolean,
   annotationVisible: boolean,
+  widthMeasurementVisible: boolean,
   displayLevel: ProcedureDisplayLevel,
 ): string[] {
   const ids: string[] = [];
@@ -2711,6 +3047,7 @@ function addBranchEntities(
         pkg,
         visible,
         annotationVisible,
+        widthMeasurementVisible,
         displayLevel,
       ),
     );
@@ -2739,6 +3076,7 @@ function addBranchEntities(
       branchBundle,
       visible,
       annotationVisible,
+      widthMeasurementVisible,
       displayLevel,
     ),
     ...((branchBundle.protectionSurfaces ?? []).length === 0
@@ -2770,10 +3108,12 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
     procedureVisibility,
     activeAirportCode,
     procedureAnnotationEnabled,
+    procedureWidthMeasurementEnabled,
     procedureDisplayLevel,
   } = useApp();
   const visibleRef = useRef(layers.procedures);
   const annotationVisibleRef = useRef(procedureAnnotationEnabled);
+  const widthMeasurementVisibleRef = useRef(procedureWidthMeasurementEnabled);
   const displayLevelRef = useRef(procedureDisplayLevel);
   const procedureVisibilityRef = useRef(procedureVisibility);
   const branchEntityIdsRef = useRef<Record<string, string[]>>({});
@@ -2792,6 +3132,7 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
   useEffect(() => {
     visibleRef.current = layers.procedures;
     annotationVisibleRef.current = procedureAnnotationEnabled;
+    widthMeasurementVisibleRef.current = procedureWidthMeasurementEnabled;
     displayLevelRef.current = procedureDisplayLevel;
     procedureVisibilityRef.current = procedureVisibility;
 
@@ -2801,9 +3142,17 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
       entityIds.forEach((entityId) => {
         const entity = viewer.entities.getById(entityId);
         if (entity) {
+          const annotation = getProcedureAnnotation(entity);
+          const baseVisible = layers.procedures && branchVisible;
+          if (isMeasurementEntityId(entityId)) {
+            entity.show =
+              procedureWidthMeasurementEnabled &&
+              procedureEntityShow(baseVisible, annotation, procedureDisplayLevel);
+            return;
+          }
           entity.show = procedureEntityShow(
-            layers.procedures && branchVisible,
-            getProcedureAnnotation(entity),
+            baseVisible,
+            annotation,
             procedureDisplayLevel,
             isAnnotationLabelId(entityId),
             procedureAnnotationEnabled,
@@ -2828,6 +3177,7 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
               pkg,
               true,
               procedureAnnotationEnabled,
+              procedureWidthMeasurementEnabled,
               procedureDisplayLevel,
             ),
           );
@@ -2840,6 +3190,7 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
     layers.procedures,
     procedureVisibility,
     procedureAnnotationEnabled,
+    procedureWidthMeasurementEnabled,
     procedureDisplayLevel,
   ]);
 
@@ -2878,6 +3229,7 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
                 pkg ?? null,
                 visible,
                 annotationVisibleRef.current,
+                widthMeasurementVisibleRef.current,
                 displayLevelRef.current,
               ),
             );

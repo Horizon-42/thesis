@@ -21,6 +21,7 @@ const {
   getSelectedProfileRunwayIdent,
   getRunwayProfileOpen,
   setProcedureAnnotationEnabled,
+  setProcedureWidthMeasurementEnabled,
   setProcedureDisplayLevel,
   getProcedureDisplayLevel,
   resetProcedureVisibility,
@@ -50,6 +51,7 @@ const {
       isRunwayProfileOpen = open;
     }),
     setProcedureAnnotationEnabled: vi.fn(),
+    setProcedureWidthMeasurementEnabled: vi.fn(),
     setProcedureDisplayLevel: vi.fn((level: string) => {
       procedureDisplayLevel = level;
     }),
@@ -78,6 +80,8 @@ vi.mock("../../context/AppContext", () => ({
     setRunwayProfileOpen,
     procedureAnnotationEnabled: false,
     setProcedureAnnotationEnabled,
+    procedureWidthMeasurementEnabled: false,
+    setProcedureWidthMeasurementEnabled,
     procedureDisplayLevel: getProcedureDisplayLevel(),
     setProcedureDisplayLevel,
   }),
@@ -288,6 +292,7 @@ describe("ProcedurePanel", () => {
     setSelectedProfileRunwayIdent.mockClear();
     setRunwayProfileOpen.mockClear();
     setProcedureAnnotationEnabled.mockClear();
+    setProcedureWidthMeasurementEnabled.mockClear();
     setProcedureDisplayLevel.mockClear();
     navigateWithinApp.mockClear();
     fetchMock.mockImplementation((url: string) => {
@@ -391,6 +396,16 @@ describe("ProcedurePanel", () => {
     fireEvent.click(screen.getByLabelText("Annotate"));
 
     expect(setProcedureAnnotationEnabled).toHaveBeenCalledWith(true);
+  });
+
+  it("toggles procedure width measurements independently from annotations", async () => {
+    render(<ProcedurePanel />);
+    await waitFor(() => expect(screen.getByText("RW05L")).toBeTruthy());
+
+    fireEvent.click(screen.getByLabelText("Measure widths"));
+
+    expect(setProcedureWidthMeasurementEnabled).toHaveBeenCalledWith(true);
+    expect(setProcedureAnnotationEnabled).not.toHaveBeenCalled();
   });
 
   it("updates the 3D procedure display level", async () => {

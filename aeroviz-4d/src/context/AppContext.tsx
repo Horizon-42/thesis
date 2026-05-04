@@ -91,6 +91,8 @@ interface AppState {
   setProcedureBranchesVisible: (branchIds: string[], visible: boolean) => void;
   procedureAnnotationEnabled: boolean;
   setProcedureAnnotationEnabled: (enabled: boolean) => void;
+  procedureWidthMeasurementEnabled: boolean;
+  setProcedureWidthMeasurementEnabled: (enabled: boolean) => void;
   procedureDisplayLevel: ProcedureDisplayLevel;
   setProcedureDisplayLevel: (level: ProcedureDisplayLevel) => void;
   selectedProcedureAnnotation: ProcedureEntityAnnotation | null;
@@ -126,6 +128,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(60);
   const [procedureVisibility, setProcedureVisibility] = useState<Record<string, boolean>>({});
   const [procedureAnnotationEnabled, setProcedureAnnotationEnabled] = useState(false);
+  const [procedureWidthMeasurementEnabled, setProcedureWidthMeasurementEnabled] = useState(false);
   const [procedureDisplayLevel, setProcedureDisplayLevel] =
     useState<ProcedureDisplayLevel>("PROTECTION");
   const [selectedProcedureAnnotation, setSelectedProcedureAnnotation] =
@@ -219,6 +222,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setTrajectoryDataSource(null);
       setProcedureVisibility({});
       setProcedureAnnotationEnabled(false);
+      setProcedureWidthMeasurementEnabled(false);
       setProcedureDisplayLevel("PROTECTION");
       setSelectedProcedureAnnotation(null);
       setSelectedProfileRunwayIdent(null);
@@ -250,6 +254,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setProcedureBranchesVisible,
         procedureAnnotationEnabled,
         setProcedureAnnotationEnabled,
+        procedureWidthMeasurementEnabled,
+        setProcedureWidthMeasurementEnabled,
         procedureDisplayLevel,
         setProcedureDisplayLevel,
         selectedProcedureAnnotation,
