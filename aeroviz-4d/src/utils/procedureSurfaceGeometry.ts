@@ -157,13 +157,31 @@ function diagnostic(
   return { code, message, severity, segmentId, sourceRefs };
 }
 
-export function sampleStationValues(startStationNm: number, endStationNm: number, stepNm: number): number[] {
+export function sampleStationValues(
+  startStationNm: number,
+  endStationNm: number,
+  stepNm: number,
+  anchorStationsNm: number[] = [],
+): number[] {
   const safeStepNm = Math.max(stepNm, 0.01);
   const count = Math.max(1, Math.ceil((endStationNm - startStationNm) / safeStepNm));
-  return Array.from({ length: count + 1 }, (_, index) => {
+  const sampledStations = Array.from({ length: count + 1 }, (_, index) => {
     if (index === count) return endStationNm;
     return startStationNm + index * safeStepNm;
   });
+  const toleranceNm = 1e-9;
+  return [...sampledStations, ...anchorStationsNm]
+    .filter(
+      (stationNm) =>
+        stationNm >= startStationNm - toleranceNm &&
+        stationNm <= endStationNm + toleranceNm,
+    )
+    .map((stationNm) => clamp(stationNm, startStationNm, endStationNm))
+    .sort((a, b) => a - b)
+    .filter(
+      (stationNm, index, stations) =>
+        index === 0 || Math.abs(stationNm - stations[index - 1]) > toleranceNm,
+    );
 }
 
 function pointAtStation(centerline: GeoPoint[], stationNm: number): GeoPoint {
@@ -204,8 +222,14 @@ export function buildSampledCenterline(
   startStationNm: number,
   endStationNm: number,
   samplingStepNm: number,
+  anchorStationsNm: number[] = [],
 ): PolylineGeometry3D {
-  const stations = sampleStationValues(startStationNm, endStationNm, samplingStepNm);
+  const stations = sampleStationValues(
+    startStationNm,
+    endStationNm,
+    samplingStepNm,
+    anchorStationsNm,
+  );
   const thresholdStationNm = source.geodesicLengthNm;
   const geoPositions = stations.map((stationNm) =>
     pointAfterEnd(source.geoPositions, thresholdStationNm, stationNm),
@@ -401,12 +425,19 @@ export function buildLnavFinalOea(
 
   const startStationNm = -opts.startBeforePfafNm;
   const endStationNm = centerline.geodesicLengthNm + opts.endAfterThresholdNm;
-  const stations = sampleStationValues(startStationNm, endStationNm, opts.samplingStepNm);
+  const anchorStationsNm = [0, opts.stableAfterPfafNm, centerline.geodesicLengthNm];
+  const stations = sampleStationValues(
+    startStationNm,
+    endStationNm,
+    opts.samplingStepNm,
+    anchorStationsNm,
+  );
   const oeaCenterline = buildSampledCenterline(
     centerline,
     startStationNm,
     endStationNm,
     opts.samplingStepNm,
+    anchorStationsNm,
   );
   const primary = buildVariableWidthRibbon(
     `${segment.segmentId}:lnav-oea-primary`,

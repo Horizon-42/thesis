@@ -55,6 +55,13 @@ function sampleAtStation(
   return sample.halfWidthNm;
 }
 
+function exactSampleAtStation(
+  samples: Array<{ stationNm: number; halfWidthNm: number }>,
+  stationNm: number,
+): number | null {
+  return samples.find((sample) => Math.abs(sample.stationNm - stationNm) < 1e-9)?.halfWidthNm ?? null;
+}
+
 describe("procedure surface geometry", () => {
   it("builds the minimal LNAV final OEA anchors and taper for G-11", () => {
     const result = buildLnavFinalOea(finalSegment, finalCenterline, {
@@ -89,6 +96,30 @@ describe("procedure surface geometry", () => {
       8,
     );
     expect(sampleAtStation(secondarySamples, 1)).toBeCloseTo(0.9, 8);
+  });
+
+  it("samples the LNAV final OEA taper end exactly", () => {
+    const result = buildLnavFinalOea(finalSegment, finalCenterline, {
+      samplingStepNm: 0.25,
+    });
+
+    expect(result.geometry).not.toBeNull();
+    if (!result.geometry) return;
+
+    const primarySamples = result.geometry.primary.halfWidthNmSamples;
+    const secondarySamples = result.geometry.secondaryOuter.halfWidthNmSamples;
+
+    expect(exactSampleAtStation(primarySamples, -0.3)).toBeCloseTo(
+      0.6 + (1.4 * 1.3) / 3,
+      8,
+    );
+    expect(exactSampleAtStation(primarySamples, 0)).toBeCloseTo(0.6 + 1.4 / 3, 8);
+    expect(exactSampleAtStation(primarySamples, 1)).toBeCloseTo(0.6, 8);
+    expect(exactSampleAtStation(secondarySamples, 1)).toBeCloseTo(0.9, 8);
+    expect(exactSampleAtStation(primarySamples, finalCenterline.geodesicLengthNm)).toBeCloseTo(
+      0.6,
+      8,
+    );
   });
 
   it("returns diagnostics instead of fake OEA geometry for incomplete centerlines", () => {
