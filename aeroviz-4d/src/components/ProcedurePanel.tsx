@@ -320,32 +320,34 @@ export default function ProcedurePanel() {
           <h3>Procedures</h3>
           <p>{(sourceAirport ?? activeAirportCode) || "Unknown"} CIFP {sourceCycle ?? "unknown"}</p>
         </div>
-        <label className="procedure-master-toggle">
-          <input
-            type="checkbox"
-            checked={layers.procedures}
-            onChange={() => toggleLayer("procedures")}
-          />
-          On
-        </label>
-        <label className="procedure-master-toggle">
-          <input
-            type="checkbox"
-            checked={procedureAnnotationEnabled}
-            disabled={!layers.procedures}
-            onChange={(event) => setProcedureAnnotationEnabled(event.currentTarget.checked)}
-          />
-          Annotate
-        </label>
-        <label className="procedure-master-toggle">
-          <input
-            type="checkbox"
-            checked={procedureWidthMeasurementEnabled}
-            disabled={!layers.procedures}
-            onChange={(event) => setProcedureWidthMeasurementEnabled(event.currentTarget.checked)}
-          />
-          Measure widths
-        </label>
+        <div className="procedure-panel-toggle-grid">
+          <label className="procedure-master-toggle">
+            <input
+              type="checkbox"
+              checked={layers.procedures}
+              onChange={() => toggleLayer("procedures")}
+            />
+            On
+          </label>
+          <label className="procedure-master-toggle">
+            <input
+              type="checkbox"
+              checked={procedureAnnotationEnabled}
+              disabled={!layers.procedures}
+              onChange={(event) => setProcedureAnnotationEnabled(event.currentTarget.checked)}
+            />
+            Annotate
+          </label>
+          <label className="procedure-master-toggle procedure-width-toggle">
+            <input
+              type="checkbox"
+              checked={procedureWidthMeasurementEnabled}
+              disabled={!layers.procedures}
+              onChange={(event) => setProcedureWidthMeasurementEnabled(event.currentTarget.checked)}
+            />
+            Measure widths
+          </label>
+        </div>
       </header>
 
       <label className="procedure-display-level-select">
