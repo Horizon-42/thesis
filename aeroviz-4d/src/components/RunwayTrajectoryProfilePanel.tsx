@@ -66,7 +66,6 @@ function formatIsoTime(iso: string | null): string {
 
 function collectViewDomain(
   mode: "side" | "top",
-  tracks: ProfileAircraftTrack[],
   plateRoutes: HorizontalPlateRoute[],
   referenceMarks: RunwayReferenceMark[],
 ): PlotDomain {
@@ -104,13 +103,6 @@ function collectViewDomain(
       (segment.precisionSurfaces ?? []).forEach((surface) => {
         surface.points.forEach(pushPoint);
       });
-    });
-  });
-
-  tracks.forEach((track) => {
-    track.trail.forEach((point) => {
-      xValues.push(point.xM);
-      yValues.push(mode === "side" ? point.zM : point.yM);
     });
   });
 
@@ -364,8 +356,8 @@ function ProfilePlot({
     [displayedPlateRoutes, mode, referenceMarks],
   );
   const domain = useMemo(
-    () => collectViewDomain(mode, tracks, displayedPlateRoutes, displayedReferenceMarks),
-    [displayedPlateRoutes, displayedReferenceMarks, mode, tracks],
+    () => collectViewDomain(mode, displayedPlateRoutes, displayedReferenceMarks),
+    [displayedPlateRoutes, displayedReferenceMarks, mode],
   );
 
   const xSpan = Math.max(1, domain.maxX - domain.minX);
@@ -934,6 +926,7 @@ function ProfilePlot({
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 opacity={track.isSelected ? 0.96 : 0.74}
+                clipPath={`url(#${plotClipId})`}
               />
               <circle
                 cx={cx}
@@ -942,6 +935,7 @@ function ProfilePlot({
                 fill={track.color}
                 stroke="rgba(15, 23, 42, 0.95)"
                 strokeWidth={track.isSelected ? 2 : 1.4}
+                clipPath={`url(#${plotClipId})`}
               />
               {track.isSelected ? (
                 <text x={cx + 8} y={cy - 8} className="runway-profile-flight-label">
@@ -1009,6 +1003,36 @@ export default function RunwayTrajectoryProfilePanel() {
   const trackCount = profile.aircraftTracks.length;
   const assessmentTrack =
     profile.aircraftTracks.find((track) => track.isSelected) ?? profile.aircraftTracks[0];
+  const assessmentStatus = assessmentTrack
+    ? `${assessmentTrack.flightId}: ${assessmentTrack.current.segmentAssessment.activeSegmentId} · ` +
+      `station ${formatDistance(assessmentTrack.current.segmentAssessment.stationM, distanceUnit)} · ` +
+      `xtrack ${formatSignedDistance(
+        assessmentTrack.current.segmentAssessment.crossTrackErrorM,
+        distanceUnit,
+      )}` +
+      (
+        assessmentTrack.current.segmentAssessment.verticalErrorM !== null
+          ? ` · verr ${formatSignedFeet(assessmentTrack.current.segmentAssessment.verticalErrorM)}`
+          : ""
+      )
+    : null;
+  const statusText =
+    profile.error ??
+    (profile.isLoading
+      ? "Loading runway profile..."
+      : routeCount === 0
+        ? "No RNAV arrival branches were found for this runway."
+        : trackCount === 0
+          ? "No aircraft are inside the RNAV horizontal plate at the current simulation time."
+          : assessmentStatus) ??
+    "\u00a0";
+  const statusClassName = [
+    "runway-profile-status",
+    profile.error ? "runway-profile-error" : null,
+    !profile.error && !profile.isLoading && trackCount === 0 ? "runway-profile-empty" : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <aside className="runway-profile-panel" aria-label="Runway trajectory profile">
@@ -1058,43 +1082,15 @@ export default function RunwayTrajectoryProfilePanel() {
         <span>{routeCount} active RNAV branches in plate</span>
         <span>{trackCount} aircraft currently inside plate</span>
         <span>{trajectoryDataSource ? "CZML linked" : "CZML missing"}</span>
-        {assessmentTrack ? (
-          <span>
-            {assessmentTrack.flightId}: {assessmentTrack.current.segmentAssessment.activeSegmentId} ·
-            station {formatDistance(assessmentTrack.current.segmentAssessment.stationM, distanceUnit)} ·
-            xtrack{" "}
-            {formatSignedDistance(
-              assessmentTrack.current.segmentAssessment.crossTrackErrorM,
-              distanceUnit,
-            )}
-            {assessmentTrack.current.segmentAssessment.verticalErrorM !== null
-              ? ` · verr ${formatSignedFeet(
-                  assessmentTrack.current.segmentAssessment.verticalErrorM,
-                )}`
-              : ""}
-          </span>
-        ) : null}
       </div>
 
-      {profile.procedureNames.length > 0 ? (
-        <p className="runway-profile-procedure-list">
-          {profile.procedureNames.join(" · ")}
-        </p>
-      ) : null}
+      <p className="runway-profile-procedure-list">
+        {profile.procedureNames.join(" · ") || "\u00a0"}
+      </p>
 
-      {profile.error ? <p className="runway-profile-error">{profile.error}</p> : null}
-      {!profile.error && !profile.isLoading && routeCount === 0 ? (
-        <p className="runway-profile-empty">
-          No RNAV arrival branches were found for this runway.
-        </p>
-      ) : null}
-      {!profile.error && !profile.isLoading && routeCount > 0 && trackCount === 0 ? (
-        <p className="runway-profile-empty">
-          No aircraft are inside the RNAV horizontal plate at the current simulation time.
-        </p>
-      ) : null}
-
-      {profile.isLoading ? <p className="runway-profile-empty">Loading runway profile…</p> : null}
+      <p className={statusClassName} title={statusText.trim() || undefined}>
+        {statusText}
+      </p>
 
       {!profile.isLoading && !profile.error && routeCount > 0 ? (
         <div

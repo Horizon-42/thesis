@@ -184,6 +184,38 @@ function makeProfileState(
   };
 }
 
+function makeAircraftTrack(
+  overrides: Partial<RunwayTrajectoryProfileState["aircraftTracks"][number]["current"]> = {},
+): RunwayTrajectoryProfileState["aircraftTracks"][number] {
+  const current = {
+    xM: 20_000,
+    yM: 185.2,
+    zM: 900,
+    timeIso: "2026-05-01T00:00:00.000Z",
+    segmentAssessment: {
+      routeId: "KRDU-R23RY-ABUTTS",
+      branchId: "branch:ABUTTS",
+      activeSegmentId: "branch:ABUTTS:profile-segment:2",
+      segmentIndex: 1,
+      stationM: 9_260,
+      crossTrackErrorM: 185.2,
+      verticalErrorM: 30.48,
+      containment: "PRIMARY" as const,
+      closestPoint: { xM: 20_000, yM: 0, zM: 900 },
+      events: [{ kind: "LATERAL_CONTAINMENT" as const, label: "PRIMARY" }],
+    },
+    ...overrides,
+  };
+
+  return {
+    flightId: "AAL123",
+    color: "#38bdf8",
+    isSelected: true,
+    current,
+    trail: [current],
+  };
+}
+
 vi.mock("../../hooks/useRunwayTrajectoryProfile", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../hooks/useRunwayTrajectoryProfile")>();
   return {
@@ -312,52 +344,44 @@ describe("RunwayTrajectoryProfilePanel", () => {
     expect(container.textContent).toContain("m");
   });
 
+  it("keeps the plot domain stable when aircraft tracks enter or move outside the profile frame", () => {
+    const { container, rerender } = render(<RunwayTrajectoryProfilePanel />);
+
+    const thresholdX = container
+      .querySelector(".runway-profile-threshold-line")
+      ?.getAttribute("x1");
+    const yAxisLabels = Array.from(container.querySelectorAll(".runway-profile-axis-tick"))
+      .map((element) => element.textContent);
+    const yMaxLabel = yAxisLabels[yAxisLabels.length - 2];
+    expect(container.querySelectorAll(".runway-profile-summary span")).toHaveLength(3);
+    expect(container.querySelector(".runway-profile-status")?.textContent).toContain(
+      "No aircraft are inside",
+    );
+
+    profileMock.state = makeProfileState(
+      [closeXRoute],
+      [makeAircraftTrack({ xM: 80_000, yM: 0, zM: 15_000 })],
+    );
+    rerender(<RunwayTrajectoryProfilePanel />);
+
+    expect(container.querySelectorAll(".runway-profile-summary span")).toHaveLength(3);
+    expect(container.querySelector(".runway-profile-status")?.textContent).toContain("AAL123:");
+    expect(container.querySelector(".runway-profile-threshold-line")?.getAttribute("x1")).toBe(
+      thresholdX,
+    );
+    expect(
+      (() => {
+        const updatedLabels = Array.from(container.querySelectorAll(".runway-profile-axis-tick"))
+          .map((element) => element.textContent);
+        return updatedLabels[updatedLabels.length - 2];
+      })(),
+    ).toBe(yMaxLabel);
+    expect(container.querySelector('path[clip-path="url(#runway-profile-plot-clip-side)"]')).toBeTruthy();
+    expect(container.querySelector('circle[clip-path="url(#runway-profile-plot-clip-side)"]')).toBeTruthy();
+  });
+
   it("shows segment assessment for the selected aircraft", () => {
-    profileMock.state = makeProfileState([closeXRoute], [
-      {
-        flightId: "AAL123",
-        color: "#38bdf8",
-        isSelected: true,
-        current: {
-          xM: 20_000,
-          yM: 185.2,
-          zM: 900,
-          timeIso: "2026-05-01T00:00:00.000Z",
-          segmentAssessment: {
-            routeId: "KRDU-R23RY-ABUTTS",
-            branchId: "branch:ABUTTS",
-            activeSegmentId: "branch:ABUTTS:profile-segment:2",
-            segmentIndex: 1,
-            stationM: 9_260,
-            crossTrackErrorM: 185.2,
-            verticalErrorM: 30.48,
-            containment: "PRIMARY",
-            closestPoint: { xM: 20_000, yM: 0, zM: 900 },
-            events: [{ kind: "LATERAL_CONTAINMENT", label: "PRIMARY" }],
-          },
-        },
-        trail: [
-          {
-            xM: 20_000,
-            yM: 185.2,
-            zM: 900,
-            timeIso: "2026-05-01T00:00:00.000Z",
-            segmentAssessment: {
-              routeId: "KRDU-R23RY-ABUTTS",
-              branchId: "branch:ABUTTS",
-              activeSegmentId: "branch:ABUTTS:profile-segment:2",
-              segmentIndex: 1,
-              stationM: 9_260,
-              crossTrackErrorM: 185.2,
-              verticalErrorM: 30.48,
-              containment: "PRIMARY",
-              closestPoint: { xM: 20_000, yM: 0, zM: 900 },
-              events: [{ kind: "LATERAL_CONTAINMENT", label: "PRIMARY" }],
-            },
-          },
-        ],
-      },
-    ]);
+    profileMock.state = makeProfileState([closeXRoute], [makeAircraftTrack()]);
 
     render(<RunwayTrajectoryProfilePanel />);
 
