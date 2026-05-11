@@ -1,4 +1,4 @@
-# Physics-Informed and Constraint-Aware 4D Approach Trajectory Prediction
+# Physics-Informed and Constraint-Aware Generative Modeling for 4D Aircraft Approach Trajectory Prediction
 
 Approach procedures are safety-critical in aircraft operations. According to IATA statistics, at least 37.7% of aviation accidents directly involve issues with flight path control, energy management, or procedural execution during the approach and landing phases. This highlights the need for accurate and physically reliable modeling of approach trajectories, especially under operational constraints.
 
