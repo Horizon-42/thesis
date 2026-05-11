@@ -1,4 +1,9 @@
-# Physics-Informed and Constraint-Aware Generative Modeling for 4D Aircraft Approach Trajectory Prediction
+# Constrained 4D Approach Control with Generative Modeling
+Constrained Generative Modeling for 4D Aircraft Approach Trajectory Control
+4D Aircraft Approach Trajectory Control 
+
+Constrained Generative Prediction of 4D Approach Trajectories
+Operationally Constrained Prediction of 4D Approach Trajectories
 
 Approach procedures are safety-critical in aircraft operations. According to IATA statistics, at least 37.7% of aviation accidents directly involve issues with flight path control, energy management, or procedural execution during the approach and landing phases. This highlights the need for accurate and physically reliable modeling of approach trajectories, especially under operational constraints.
 
