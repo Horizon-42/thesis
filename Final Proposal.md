@@ -2,7 +2,7 @@
 Candiate Title:
 **Constrained 4D Approach Trajectory Management via Generative Modeling**
 
-Approach and landing are safety-critical phases of flight. IATA (International Air Transport Association) safety data show that flight-path management, manual control, and SOP (Standard Operating Procedures) non-compliance remain recurring contributing factors in aviation accidents. This highlights the need for approach trajectory models that are accurate, physically reliable, and explicitly aligned with operational constraints.
+Approach operations in terminal airspace are safety-critical phases of flight. IATA (International Air Transport Association) safety data show that flight-path management, manual control, and SOP (Standard Operating Procedures) non-compliance remain recurring contributing factors in aviation accidents. These factors point to the need for approach trajectory models that are accurate, physically reliable, and consistent with operational constraints.
 
 This research aims to develop a physics-informed and constraint-aware generative learning framework for 4D approach trajectory prediction. Instead of directly predicting future positions, the framework will predict aircraft control parameters and propagate them through a realistic aerodynamic model. The generated trajectories will then be evaluated under multi-level operational constraints, including spatial terrain boundaries, procedural RNAV minima, and dynamic multi-aircraft separation requirements.
 
