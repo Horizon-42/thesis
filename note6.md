@@ -40,3 +40,5 @@ Constrained 4d Approach Control
 
 
 
+Candiate Title:
+**Constrained 4D Approach Trajectory Management via Generative Modeling**
