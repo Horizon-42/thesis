@@ -1,6 +1,6 @@
 ## Constrained 4D Approach Control via Generative Modeling
 
-Approach operations in terminal airspace are safety-critical, with IATA (International Air Transport Association) safety data identifying flight-path management, manual control, and SOP (Standard Operating Procedures) non-compliance as recurring contributors to aviation accidents. This calls for trajectory models that are accurate, reliable, and operationally compliant.
+Approach operations in terminal airspace are safety-critical, with IATA (International Air Transport Association) safety data identifying flight-path management, manual control, and SOP (Standard Operating Procedures) non-compliance as recurring contributors to aviation accidents. These risks motivate the development of accurate, reliable, and operationally compliant models for approach trajectory prediction.
 
 This research aims to develop a physics-informed and constraint-aware generative learning framework for 4D approach trajectory prediction. Instead of forecasting future coordinates directly, the framework generates trajectories from aircraft control parameters and explicitly evaluates them using physical, procedural, and multi-aircraft separation constraints.
 
