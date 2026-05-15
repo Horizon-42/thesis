@@ -2,7 +2,7 @@
 
 Approach operations in terminal airspace are safety-critical. IATA (International Air Transport Association) safety data identify flight-path management, manual control, and SOP (Standard Operating Procedures) non-compliance as recurring contributors to aviation accidents. These risks motivate accurate, reliable, and operationally compliant models for approach trajectory prediction.
 
-This research develops a physics-informed, constraint-aware generative framework for 4D approach trajectory prediction. Instead of directly forecasting coordinates, it generates feasible trajectories from aircraft control parameters and evaluates them against physical, procedural, and separation constraints.
+This research develops a physics-informed, constraint-aware generative framework for 4D approach trajectory prediction. Instead of directly forecasting coordinates, it generates feasible trajectories from aircraft control parameters and evaluates them against physical, procedural, and inter-aircraft separation constraints.
 
 Aircraft trajectory prediction has evolved from physics- and optimization-based methods to AI-driven models that learn trajectory patterns from historical data. Recent approaches include deterministic, probabilistic, and generative models, often conditioned on runway configuration, weather, and traffic to capture context-dependent and multimodal behavior in terminal airspace. However, most still predict future coordinates directly, relying on implicit pattern learning rather than explicit enforcement of physical feasibility and procedural compliance.
 
