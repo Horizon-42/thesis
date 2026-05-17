@@ -63,4 +63,3 @@ class Simulator:
         sol = solve_ivp(lambda t, X: self.dynamics(t, X, control, atmosphere), t_span, state_vec, t_eval=t_eval)
 
         return sol
-   
