@@ -81,7 +81,7 @@ class FlightVisualizer:
             label="Bank deg",
             min_value=-60.0,
             max_value=60.0,
-            initial=25.0,
+            initial=0.0,
         )
         self.load_slider = self._add_slider(
             y=0.66,
@@ -162,7 +162,7 @@ class FlightVisualizer:
             self.fig.canvas.draw_idle()
             return
 
-        self._fit_axes_to_solution()
+        self._show_initial_state()
 
         # Stop a previous animation before starting a new one with new inputs.
         self._stop_animation()
@@ -208,6 +208,7 @@ class FlightVisualizer:
         self.aircraft_point.set_data([x], [y])
         self.aircraft_point.set_3d_properties([h])
 
+        self._expand_axes_if_needed(x, y, h)
         self._update_state_text(self.solution.t[frame_index], x, y, h, V, psi, gamma, m)
         return self.path_line, self.aircraft_point
 
@@ -218,33 +219,38 @@ class FlightVisualizer:
         self.path_line.set_3d_properties([s.h])
         self.aircraft_point.set_data([s.x], [s.y])
         self.aircraft_point.set_3d_properties([s.h])
-        self.ax.set_xlim(-1000.0, 1000.0)
-        self.ax.set_ylim(-1000.0, 1000.0)
-        self.ax.set_zlim(0.0, 2000.0)
+        self.ax.set_xlim(-5000.0, 5000.0)
+        self.ax.set_ylim(-5000.0, 5000.0)
+        self.ax.set_zlim(0.0, 4000.0)
         self._update_state_text(0.0, s.x, s.y, s.h, s.V, s.psi, s.gamma, s.m)
 
-    def _fit_axes_to_solution(self):
-        # Fit the plot around the whole simulated path so the red point stays in view.
-        x = self.solution.y[0]
-        y = self.solution.y[1]
-        h = self.solution.y[2]
-
-        self._set_axis_limits(self.ax.set_xlim, x, min_padding=500.0)
-        self._set_axis_limits(self.ax.set_ylim, y, min_padding=500.0)
-        self._set_axis_limits(self.ax.set_zlim, h, min_padding=200.0, floor=0.0)
+    def _expand_axes_if_needed(self, x, y, h):
+        # Grow the coordinate system while the aircraft flies. This keeps the
+        # aircraft visible without knowing the full path scale in advance.
+        self._expand_axis_if_needed(self.ax.get_xlim, self.ax.set_xlim, x)
+        self._expand_axis_if_needed(self.ax.get_ylim, self.ax.set_ylim, y)
+        self._expand_axis_if_needed(self.ax.get_zlim, self.ax.set_zlim, h, floor=0.0)
 
     @staticmethod
-    def _set_axis_limits(setter, values, min_padding, floor=None):
-        # Keep a little empty space around the path. For altitude, floor prevents
-        # the lower z limit from going below ground level.
-        low = float(np.min(values))
-        high = float(np.max(values))
-        padding = max((high - low) * 0.1, min_padding)
-        low -= padding
-        high += padding
+    def _expand_axis_if_needed(getter, setter, value, floor=None):
+        low, high = getter()
+        axis_size = high - low
+        edge_zone = axis_size * 0.15
+
+        if low + edge_zone < value < high - edge_zone:
+            return
+
+        new_low = low - axis_size * 0.5
+        new_high = high + axis_size * 0.5
+
+        if value < low + edge_zone:
+            new_low = value - axis_size * 0.5
+        if value > high - edge_zone:
+            new_high = value + axis_size * 0.5
         if floor is not None:
-            low = max(floor, low)
-        setter(low, high)
+            new_low = max(floor, new_low)
+
+        setter(new_low, new_high)
 
     def _update_state_text(self, t, x, y, h, V, psi, gamma, m):
         # Convert angles back to degrees for easier reading in the UI.
