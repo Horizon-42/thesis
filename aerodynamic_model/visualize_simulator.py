@@ -36,7 +36,7 @@ class FlightVisualizer:
         # Initial point-mass aircraft state:
         # x, y, h are position; V is speed; psi is heading; gamma is climb angle.
         self.initial_state = State(
-            x=0.0,
+            x=-2000.0,
             y=0.0,
             h=1000.0,
             V=120.0,
@@ -162,6 +162,7 @@ class FlightVisualizer:
             self.fig.canvas.draw_idle()
             return
 
+        self._trim_solution_at_ground()
         self._show_initial_state()
 
         # Stop a previous animation before starting a new one with new inputs.
@@ -175,6 +176,39 @@ class FlightVisualizer:
             repeat=False,
         )
         self.fig.canvas.draw_idle()
+
+    def _trim_solution_at_ground(self):
+        # Stop the displayed simulation when altitude first reaches the ground.
+        # The simulator returns samples at t_eval, so interpolate one final
+        # point at h = 0 instead of displaying a below-ground sample.
+        ground_hits = np.where(self.solution.y[2] <= 0.0)[0]
+        if len(ground_hits) == 0:
+            return
+
+        hit_index = int(ground_hits[0])
+        if hit_index == 0:
+            self.solution.t = self.solution.t[:1]
+            self.solution.y = self.solution.y[:, :1].copy()
+            self.solution.y[2, 0] = 0.0
+            return
+
+        previous_index = hit_index - 1
+        previous_h = self.solution.y[2, previous_index]
+        hit_h = self.solution.y[2, hit_index]
+        ground_fraction = previous_h / (previous_h - hit_h)
+
+        ground_t = self.solution.t[previous_index] + ground_fraction * (
+            self.solution.t[hit_index] - self.solution.t[previous_index]
+        )
+        ground_state = self.solution.y[:, previous_index] + ground_fraction * (
+            self.solution.y[:, hit_index] - self.solution.y[:, previous_index]
+        )
+        ground_state[2] = 0.0
+
+        self.solution.t = np.append(self.solution.t[: hit_index], ground_t)
+        self.solution.y = np.column_stack(
+            [self.solution.y[:, : hit_index], ground_state]
+        )
 
     def reset(self, _event=None):
         # Return the view to the initial state but keep slider values unchanged.
@@ -240,17 +274,22 @@ class FlightVisualizer:
         if low + edge_zone < value < high - edge_zone:
             return
 
-        new_low = low - axis_size * 0.5
-        new_high = high + axis_size * 0.5
+        new_low = low
+        new_high = high
 
         if value < low + edge_zone:
-            new_low = value - axis_size * 0.5
+            # If a floor exists and the lower bound is already at that floor,
+            # do not expand the opposite side. This avoids runaway z-axis
+            # growth when altitude is close to ground level.
+            if floor is None or low > floor:
+                new_low = min(low - axis_size * 0.5, value - axis_size * 0.2)
         if value > high - edge_zone:
-            new_high = value + axis_size * 0.5
+            new_high = max(high + axis_size * 0.5, value + axis_size * 0.2)
         if floor is not None:
             new_low = max(floor, new_low)
 
-        setter(new_low, new_high)
+        if new_low != low or new_high != high:
+            setter(new_low, new_high)
 
     def _update_state_text(self, t, x, y, h, V, psi, gamma, m):
         # Convert angles back to degrees for easier reading in the UI.
