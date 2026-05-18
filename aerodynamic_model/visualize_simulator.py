@@ -15,7 +15,7 @@ import math
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation
-from matplotlib.widgets import Button, Slider
+from matplotlib.widgets import Button, TextBox
 
 try:
     # Works when this file is executed as a package module.
@@ -66,36 +66,28 @@ class FlightVisualizer:
         self._show_initial_state()
 
     def _build_input_zone(self):
-        # Sliders are the input zone. Their values are read when Run is clicked.
+        # Text boxes are the input zone. Their values are read when Run is clicked.
         self.fig.text(0.74, 0.90, "Input zone", fontsize=13, weight="bold")
 
-        self.thrust_slider = self._add_slider(
+        self.thrust_box = self._add_input_box(
             y=0.82,
             label="Thrust N",
-            min_value=0.0,
-            max_value=40000.0,
-            initial=3000.0,
+            initial="3000",
         )
-        self.bank_slider = self._add_slider(
+        self.bank_box = self._add_input_box(
             y=0.74,
             label="Bank deg",
-            min_value=-60.0,
-            max_value=60.0,
-            initial=0.0,
+            initial="0",
         )
-        self.load_slider = self._add_slider(
+        self.load_box = self._add_input_box(
             y=0.66,
             label="Load n",
-            min_value=0.3,
-            max_value=3.0,
-            initial=1.1,
+            initial="1.1",
         )
-        self.duration_slider = self._add_slider(
+        self.duration_box = self._add_input_box(
             y=0.58,
             label="Time s",
-            min_value=10.0,
-            max_value=300.0,
-            initial=120.0,
+            initial="120",
         )
 
         run_ax = self.fig.add_axes([0.74, 0.48, 0.10, 0.05])
@@ -105,10 +97,10 @@ class FlightVisualizer:
         self.run_button.on_clicked(self.run)
         self.reset_button.on_clicked(self.reset)
 
-    def _add_slider(self, y, label, min_value, max_value, initial):
+    def _add_input_box(self, y, label, initial):
         # add_axes uses normalized figure coordinates: [left, bottom, width, height].
-        slider_ax = self.fig.add_axes([0.74, y, 0.22, 0.035])
-        return Slider(slider_ax, label, min_value, max_value, valinit=initial)
+        box_ax = self.fig.add_axes([0.82, y, 0.14, 0.045])
+        return TextBox(box_ax, label, initial=initial)
 
     def _build_state_output_zone(self):
         # The state output zone is a text box updated once per animation frame.
@@ -136,18 +128,28 @@ class FlightVisualizer:
     def _read_control(self):
         # The simulator expects bank angle in radians, while the UI shows degrees.
         return Control(
-            thrust=float(self.thrust_slider.val),
-            bank=math.radians(float(self.bank_slider.val)),
-            load_factor=float(self.load_slider.val),
+            thrust=self._read_float(self.thrust_box, "Thrust N"),
+            bank=math.radians(self._read_float(self.bank_box, "Bank deg")),
+            load_factor=self._read_float(self.load_box, "Load n"),
         )
 
     def run(self, _event=None):
-        duration = float(self.duration_slider.val)
+        try:
+            duration = self._read_float(self.duration_box, "Time s")
+            control = self._read_control()
+        except ValueError as exc:
+            self.state_text.set_text(f"Invalid input:\n{exc}")
+            self.fig.canvas.draw_idle()
+            return
+
+        if duration <= 0.0:
+            self.state_text.set_text("Invalid input:\nTime s must be greater than 0")
+            self.fig.canvas.draw_idle()
+            return
 
         # Five output samples per second gives a smooth animation while keeping
         # the ODE result small and easy to inspect.
         t_eval = np.linspace(0.0, duration, int(duration * 5) + 1)
-        control = self._read_control()
 
         self.solution = self.simulator.simulate(
             initial_state=self.initial_state,
@@ -176,6 +178,14 @@ class FlightVisualizer:
             repeat=False,
         )
         self.fig.canvas.draw_idle()
+
+    @staticmethod
+    def _read_float(text_box, label):
+        text = text_box.text.strip()
+        try:
+            return float(text)
+        except ValueError as exc:
+            raise ValueError(f"{label} must be a number") from exc
 
     def _trim_solution_at_ground(self):
         # Stop the displayed simulation when altitude first reaches the ground.
@@ -211,7 +221,7 @@ class FlightVisualizer:
         )
 
     def reset(self, _event=None):
-        # Return the view to the initial state but keep slider values unchanged.
+        # Return the view to the initial state but keep input values unchanged.
         self._stop_animation()
         self.solution = None
         self._show_initial_state()
