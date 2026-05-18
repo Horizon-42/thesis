@@ -42,7 +42,9 @@ class Simulator:
         rho = atmosphere.get_density(h)
 
         # D = 0.5 * rho * V**2 * self.get_drag_coefficient() * self.get_reference_area()
-        D = 0.02 * V**2 # Placeholder drag model, replace with actual drag calculation
+        D = 0.02 * V**2 # Placeholder drag model, replace with actual drag calculation; not problem
+        # 1.41, bank 45, should be a level turn.
+        
 
         # Compute state derivatives
         dxdt = V * math.cos(gamma) * math.cos(psi)
