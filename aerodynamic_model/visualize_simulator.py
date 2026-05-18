@@ -46,6 +46,7 @@ class FlightVisualizer:
         )
 
         self.solution = None
+        self.coefficients = None
         self.animation = None
 
         # The figure is split manually: 3D plot on the left, controls and state
@@ -151,13 +152,14 @@ class FlightVisualizer:
         # the ODE result small and easy to inspect.
         t_eval = np.linspace(0.0, duration, int(duration * 5) + 1)
 
-        self.solution = self.simulator.simulate(
+        simulation_result = self.simulator.simulate(
             initial_state=self.initial_state,
             control=control,
             atmosphere=self.atmosphere,
             t_span=(0.0, duration),
             t_eval=t_eval,
         )
+        self._store_simulation_result(simulation_result)
 
         if not self.solution.success:
             self.state_text.set_text(f"Simulation failed:\n{self.solution.message}")
@@ -178,6 +180,15 @@ class FlightVisualizer:
             repeat=False,
         )
         self.fig.canvas.draw_idle()
+
+    def _store_simulation_result(self, simulation_result):
+        # New simulator versions return (solution, [CL, CD]). Older versions
+        # returned only the solution, so keep both forms supported.
+        if isinstance(simulation_result, tuple):
+            self.solution, self.coefficients = simulation_result
+        else:
+            self.solution = simulation_result
+            self.coefficients = None
 
     @staticmethod
     def _read_float(text_box, label):
@@ -224,6 +235,7 @@ class FlightVisualizer:
         # Return the view to the initial state but keep input values unchanged.
         self._stop_animation()
         self.solution = None
+        self.coefficients = None
         self._show_initial_state()
         self.fig.canvas.draw_idle()
 
@@ -314,9 +326,16 @@ class FlightVisualizer:
                     f"psi   : {math.degrees(psi):8.2f} deg",
                     f"gamma : {math.degrees(gamma):8.2f} deg",
                     f"mass  : {m:8.1f} kg",
+                    f"CL    : {self._format_coefficient(0)}",
+                    f"CD    : {self._format_coefficient(1)}",
                 ]
             )
         )
+
+    def _format_coefficient(self, index):
+        if self.coefficients is None:
+            return "   n/a"
+        return f"{self.coefficients[index]:8.4f}"
 
 
 def main():
