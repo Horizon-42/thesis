@@ -42,3 +42,14 @@ Constrained 4d Approach Control
 
 Candiate Title:
 **Constrained 4D Approach Trajectory Management via Generative Modeling**
+
+
+coordnates system must be matched
+
+1. lat, log, aircrafg, WGS84
+2. local tagent plane around the position of the aircraft, every timestep
+3. proceed simulation step
+4. project back to WGS84 with same center; 
+5. flat map space Germany UTM32 (visulization; Terrain)
+
+time scale
