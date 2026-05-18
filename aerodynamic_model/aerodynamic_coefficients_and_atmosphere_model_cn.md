@@ -537,6 +537,8 @@ H \approx 8500\ \text{m}
 
 很多工程软件与飞行模拟器都会使用 ISA。
 
+https://en.wikipedia.org/wiki/International_Standard_Atmosphere
+
 ---
 
 # 18. 你的模拟器推荐方案
