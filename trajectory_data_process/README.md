@@ -30,6 +30,7 @@ The two stages are intentionally decoupled:
 - `docs/01-current-bias-correction.md`
 - `docs/02-metar-qnh-time-matching.md`
 - `docs/03-training-data-fetch-store-redesign.md`
+- `docs/04-production-adsb-training-data-plan.md`
 
 ## Quick start
 
