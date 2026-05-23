@@ -31,6 +31,7 @@ The two stages are intentionally decoupled:
 - `docs/02-metar-qnh-time-matching.md`
 - `docs/03-training-data-fetch-store-redesign.md`
 - `docs/04-production-adsb-training-data-plan.md`
+- `docs/05-opensky-trino-database-visual-guide.html`
 
 ## Quick start
 

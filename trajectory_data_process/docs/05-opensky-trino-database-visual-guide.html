@@ -1,0 +1,1284 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenSky Trino 数据库可视化指南 | trajectory_data_process</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --panel-strong: #f0f4f8;
+      --ink: #17202a;
+      --muted: #5f6f7e;
+      --line: #d8e0e8;
+      --accent: #006d77;
+      --accent-2: #b54708;
+      --accent-3: #2f6f4e;
+      --accent-soft: #e4f4f3;
+      --warn-soft: #fff2df;
+      --good-soft: #e9f7ee;
+      --bad-soft: #fdecec;
+      --code-bg: #111827;
+      --code-ink: #e5e7eb;
+      --shadow: 0 10px 28px rgba(17, 24, 39, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.62;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+      border-bottom: 1px solid rgba(0, 109, 119, 0.28);
+    }
+
+    a:hover {
+      border-bottom-color: currentColor;
+    }
+
+    .page {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 28px 0 56px;
+    }
+
+    header.hero {
+      padding: 36px 0 18px;
+    }
+
+    .eyebrow {
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 10px 0 12px;
+      font-size: clamp(32px, 5vw, 58px);
+      line-height: 1.05;
+      letter-spacing: 0;
+      max-width: 980px;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 28px;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 0 0 10px;
+      font-size: 20px;
+      letter-spacing: 0;
+    }
+
+    h4 {
+      margin: 18px 0 8px;
+      font-size: 16px;
+    }
+
+    p {
+      margin: 0 0 12px;
+    }
+
+    code, kbd {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+    }
+
+    .lead {
+      max-width: 900px;
+      color: var(--muted);
+      font-size: 18px;
+    }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 24px;
+    }
+
+    .meta {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      box-shadow: var(--shadow);
+    }
+
+    .meta .label {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .meta .value {
+      margin-top: 4px;
+      font-weight: 800;
+    }
+
+    nav.toc {
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      margin: 18px 0 28px;
+      padding: 10px;
+      background: rgba(246, 247, 249, 0.92);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      backdrop-filter: blur(10px);
+    }
+
+    nav.toc ul {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    nav.toc a {
+      display: inline-flex;
+      min-height: 34px;
+      align-items: center;
+      padding: 6px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    section {
+      margin-top: 22px;
+      padding: 28px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .section-kicker {
+      margin-bottom: 8px;
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .grid-4 {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      background: #fff;
+    }
+
+    .card.soft {
+      background: var(--panel-strong);
+    }
+
+    .card.good {
+      background: var(--good-soft);
+      border-color: #b7dfc5;
+    }
+
+    .card.warn {
+      background: var(--warn-soft);
+      border-color: #f2cf9f;
+    }
+
+    .card.bad {
+      background: var(--bad-soft);
+      border-color: #efb8b8;
+    }
+
+    .pill {
+      display: inline-flex;
+      min-height: 28px;
+      align-items: center;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .pill.orange {
+      background: var(--warn-soft);
+      color: var(--accent-2);
+    }
+
+    .pill.green {
+      background: var(--good-soft);
+      color: var(--accent-3);
+    }
+
+    .matrix {
+      display: grid;
+      grid-template-columns: 180px repeat(4, minmax(130px, 1fr));
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+    }
+
+    .matrix > div {
+      min-height: 64px;
+      padding: 12px;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+    }
+
+    .matrix > div:nth-child(5n) {
+      border-right: 0;
+    }
+
+    .matrix .head {
+      background: #eaf1f6;
+      font-weight: 800;
+    }
+
+    .matrix .rowhead {
+      background: #f7f9fb;
+      font-weight: 800;
+    }
+
+    .matrix .yes {
+      background: var(--good-soft);
+      color: #24543b;
+      font-weight: 800;
+    }
+
+    .matrix .maybe {
+      background: var(--warn-soft);
+      color: #704b13;
+      font-weight: 800;
+    }
+
+    .matrix .no {
+      background: var(--bad-soft);
+      color: #7b1d1d;
+      font-weight: 800;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+
+    .node {
+      position: relative;
+      min-height: 138px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: #fff;
+    }
+
+    .node:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      right: -12px;
+      width: 12px;
+      height: 2px;
+      background: var(--line);
+    }
+
+    .node strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 16px;
+    }
+
+    .node small {
+      color: var(--muted);
+    }
+
+    .altitude-visual {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .alt-card {
+      position: relative;
+      overflow: hidden;
+      min-height: 210px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      background: linear-gradient(180deg, #f8fbfd, #ffffff);
+    }
+
+    .alt-card::before {
+      content: "";
+      position: absolute;
+      left: 18px;
+      top: 24px;
+      bottom: 24px;
+      width: 4px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, #006d77, #d97706);
+    }
+
+    .alt-card .mark {
+      position: relative;
+      margin-left: 24px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .alt-card .mark + .mark {
+      margin-top: 12px;
+    }
+
+    .callout {
+      border-left: 4px solid var(--accent);
+      background: var(--accent-soft);
+      padding: 14px 16px;
+      border-radius: 8px;
+    }
+
+    .warning {
+      border-left-color: var(--accent-2);
+      background: var(--warn-soft);
+    }
+
+    .command {
+      margin: 16px 0;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid #263244;
+      background: var(--code-bg);
+    }
+
+    .command-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      padding: 9px 11px;
+      background: #1f2937;
+      color: #d1d5db;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    button.copy {
+      min-height: 30px;
+      border: 1px solid #4b5563;
+      border-radius: 8px;
+      background: #111827;
+      color: #f9fafb;
+      cursor: pointer;
+      font-weight: 800;
+      padding: 4px 9px;
+    }
+
+    pre {
+      margin: 0;
+      padding: 16px;
+      color: var(--code-ink);
+      overflow-x: auto;
+      white-space: pre;
+      line-height: 1.52;
+      font-size: 13px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #eaf1f6;
+      font-weight: 800;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    ul, ol {
+      padding-left: 22px;
+    }
+
+    li + li {
+      margin-top: 6px;
+    }
+
+    .footer {
+      margin-top: 24px;
+      padding: 18px 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 920px) {
+      .meta-grid, .grid-4, .flow {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .grid-3, .grid-2, .split, .altitude-visual {
+        grid-template-columns: 1fr;
+      }
+
+      .node:not(:last-child)::after {
+        display: none;
+      }
+
+      .matrix {
+        grid-template-columns: 150px repeat(4, minmax(120px, 1fr));
+        overflow-x: auto;
+      }
+    }
+
+    @media (max-width: 620px) {
+      .page {
+        width: min(100vw - 20px, 1180px);
+        padding-top: 12px;
+      }
+
+      section {
+        padding: 20px;
+      }
+
+      .meta-grid, .grid-4, .flow {
+        grid-template-columns: 1fr;
+      }
+
+      nav.toc {
+        position: static;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <div class="eyebrow">trajectory_data_process / OpenSky Trino</div>
+      <h1>面向 AeroViz 4D 轨迹训练的 Trino 数据库可视化指南</h1>
+      <p class="lead">
+        这份文档解释 OpenSky Trino 历史数据库里有什么、项目真正需要什么、数据结构如何从数据库变成训练样本，并特别区分
+        <code>baroaltitude</code>（气压高度）和 <code>geoaltitude</code>（几何/GNSS 高度）。每个主题都附带可以直接复制执行的
+        Trino CLI 验证命令。
+      </p>
+
+      <div class="meta-grid">
+        <div class="meta">
+          <div class="label">主数据源</div>
+          <div class="value">OpenSky Trino / history DB</div>
+        </div>
+        <div class="meta">
+          <div class="label">主表</div>
+          <div class="value"><code>state_vectors_data4</code></div>
+        </div>
+        <div class="meta">
+          <div class="label">项目目标</div>
+          <div class="value">4D 轨迹训练 + 垂直剖面验证</div>
+        </div>
+        <div class="meta">
+          <div class="label">当前示例窗口</div>
+          <div class="value">KRDU 2026-04-19 10:00-10:15 UTC</div>
+        </div>
+      </div>
+    </header>
+
+    <nav class="toc" aria-label="目录">
+      <ul>
+        <li><a href="#setup">连接方式</a></li>
+        <li><a href="#inventory">数据库有什么</a></li>
+        <li><a href="#needed">项目需要什么</a></li>
+        <li><a href="#schema">数据结构</a></li>
+        <li><a href="#altitude">高度语义</a></li>
+        <li><a href="#pipeline">项目落地层</a></li>
+        <li><a href="#validation">验证清单</a></li>
+      </ul>
+    </nav>
+
+    <section id="setup">
+      <div class="section-kicker">0 / 连接方式</div>
+      <div class="split">
+        <div>
+          <h2>先定义一个最小可重复的 Trino CLI 入口</h2>
+          <p>
+            OpenSky 官方 Trino 文档要求使用 <code>minio</code> catalog、<code>osky</code> schema 和外部认证。
+            用户名必须是 OpenSky 小写用户名。下面的命令不会查询数据，只用于确认 CLI 能登录。
+          </p>
+          <div class="callout warning">
+            <strong>性能规则：</strong>除了 <code>SHOW TABLES</code> 和 <code>DESCRIBE</code>，查询状态向量表必须带
+            <code>hour</code> 分区过滤；查询 <code>flights_data4</code> 必须带 <code>day</code> 分区过滤。
+          </div>
+        </div>
+        <div class="card soft">
+          <h3>示例变量</h3>
+          <p><code>1776592800</code> = 2026-04-19 10:00:00 UTC，一小时分区。</p>
+          <p><code>1776556800</code> = 2026-04-19 00:00:00 UTC，一天分区。</p>
+          <p>KRDU 机场中心：lat <code>35.878659</code>，lon <code>-78.7873</code>，elevation <code>435 ft</code>。</p>
+        </div>
+      </div>
+
+      <div class="command" data-label="connect">
+        <div class="command-header"><span>验证 CLI 登录和默认 schema</span><button class="copy" type="button">Copy</button></div>
+<pre><code>export OPENSKY_USER="your_lowercase_opensky_username"
+
+trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
+  --server=https://trino.opensky-network.org \
+  --external-authentication \
+  --catalog minio \
+  --schema osky \
+  --execute "SELECT current_catalog, current_schema"</code></pre>
+      </div>
+    </section>
+
+    <section id="inventory">
+      <div class="section-kicker">1 / 数据库有什么</div>
+      <h2>OpenSky Trino 是很多表，但本项目只需要两类核心信息</h2>
+      <p>
+        官方当前暴露 14 张表。多数 Mode S/ADS-B 原始消息表适合低层协议研究；AeroViz 的训练数据拉取主要使用：
+        <code>state_vectors_data4</code> 提供逐秒级位置、速度、航向、垂直速度、地面状态和双高度；
+        <code>flights_data4</code> 提供一条航班级的起降机场估计，用于 landing/depart/pass 标签证据。
+      </p>
+
+      <div class="grid-4">
+        <div class="card good">
+          <span class="pill green">必须</span>
+          <h3><code>state_vectors_data4</code></h3>
+          <p>状态向量。训练点、轨迹几何、高度语义都从这里来。</p>
+        </div>
+        <div class="card good">
+          <span class="pill green">必须</span>
+          <h3><code>flights_data4</code></h3>
+          <p>航班元数据。判断机场到达/离场候选，用 <code>day</code> 分区。</p>
+        </div>
+        <div class="card warn">
+          <span class="pill orange">可选</span>
+          <h3>其他 <code>*_data4</code></h3>
+          <p>Mode S / ADS-B 细分消息。当前训练管线不直接依赖。</p>
+        </div>
+        <div class="card warn">
+          <span class="pill orange">备查</span>
+          <h3><code>readsb_adsc_sv</code></h3>
+          <p>ADS-C 卫星状态向量。适合远洋/极区研究，不是首批机场训练目标。</p>
+        </div>
+      </div>
+
+      <div class="command" data-label="show-tables">
+        <div class="command-header"><span>查看当前 Trino schema 下的所有表</span><button class="copy" type="button">Copy</button></div>
+<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
+  --server=https://trino.opensky-network.org \
+  --external-authentication \
+  --catalog minio \
+  --schema osky \
+  --execute "SHOW TABLES"</code></pre>
+      </div>
+
+      <div class="command" data-label="describe-core">
+        <div class="command-header"><span>验证两张核心表的 schema</span><button class="copy" type="button">Copy</button></div>
+<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
+  --server=https://trino.opensky-network.org \
+  --external-authentication \
+  --catalog minio \
+  --schema osky \
+  --execute "DESCRIBE state_vectors_data4"
+
+trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
+  --server=https://trino.opensky-network.org \
+  --external-authentication \
+  --catalog minio \
+  --schema osky \
+  --execute "DESCRIBE flights_data4"</code></pre>
+      </div>
+    </section>
+
+    <section id="needed">
+      <div class="section-kicker">2 / 项目需要什么</div>
+      <h2>训练目标不是“下载航迹”，而是构造机场附近的可审计 4D episode</h2>
+      <div class="flow" aria-label="数据需求流程">
+        <div class="node">
+          <span class="pill">Trino</span>
+          <strong>状态向量行</strong>
+          <small>time, icao24, lat, lon, velocity, heading, vertrate, onground, baroaltitude, geoaltitude</small>
+        </div>
+        <div class="node">
+          <span class="pill orange">机场证据</span>
+          <strong>航班元数据</strong>
+          <small>estdepartureairport / estarrivalairport 区分 landing 和 depart 候选</small>
+        </div>
+        <div class="node">
+          <span class="pill">几何</span>
+          <strong>机场半径 episode</strong>
+          <small>默认 5 NM entry 到 exit；保留 raw index 引用</small>
+        </div>
+        <div class="node">
+          <span class="pill green">质量</span>
+          <strong>双高度点</strong>
+          <small>训练点必须保留 baro + geo；缺 geo 进入 quarantine</small>
+        </div>
+        <div class="node">
+          <span class="pill">输出</span>
+          <strong>JSONL 训练层</strong>
+          <small>history_rows / raw_tracks / airport_events / quarantine / manifests</small>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>项目问题</th>
+            <th>需要的 Trino 数据</th>
+            <th>当前代码入口</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>机场附近有哪些飞机？</td>
+            <td><code>state_vectors_data4</code> + bbox + <code>hour</code></td>
+            <td><code>fetch-profile terminal_all</code></td>
+          </tr>
+          <tr>
+            <td>哪些是落地/离场候选？</td>
+            <td><code>flights_data4.estarrivalairport</code> / <code>estdepartureairport</code></td>
+            <td><code>fetch-profile airport_ops</code></td>
+          </tr>
+          <tr>
+            <td>垂直剖面要用哪种高度？</td>
+            <td><code>baroaltitude</code> 和 <code>geoaltitude</code> 都要，且分开存</td>
+            <td><code>history_group_to_dual_altitude_points()</code></td>
+          </tr>
+          <tr>
+            <td>哪些样本可训练？</td>
+            <td>双高度非空、时间 gap 合理、5 NM episode 完整</td>
+            <td><code>attach_training_points_or_quarantine()</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="command" data-label="airport-ops-count">
+        <div class="command-header"><span>验证 4 个生产候选机场当天的 arrival/depart 候选量</span><button class="copy" type="button">Copy</button></div>
+<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
+  --server=https://trino.opensky-network.org \
+  --external-authentication \
+  --catalog minio \
+  --schema osky \
+  --execute "WITH airports(airport) AS (VALUES 'KRDU', 'KSJC', 'KSMF', 'KSTL')
+SELECT
+  a.airport,
+  count_if(f.estarrivalairport = a.airport) AS landing_candidates,
+  count_if(f.estdepartureairport = a.airport) AS departure_candidates,
+  count(DISTINCT f.icao24) AS distinct_aircraft
+FROM airports a
+LEFT JOIN flights_data4 f
+  ON f.day = 1776556800
+ AND (f.estarrivalairport = a.airport OR f.estdepartureairport = a.airport)
+GROUP BY a.airport
+ORDER BY a.airport"</code></pre>
+      </div>
+
+      <div class="command" data-label="terminal-count">
+        <div class="command-header"><span>验证 KRDU 终端区 15 分钟内的状态向量密度</span><button class="copy" type="button">Copy</button></div>
+<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
+  --server=https://trino.opensky-network.org \
+  --external-authentication \
+  --catalog minio \
+  --schema osky \
+  --execute "SELECT
+  count(*) AS rows_total,
+  count(DISTINCT icao24) AS aircraft_total,
+  count_if(baroaltitude IS NOT NULL) AS rows_with_baro,
+  count_if(geoaltitude IS NOT NULL) AS rows_with_geo,
+  count_if(baroaltitude IS NOT NULL AND geoaltitude IS NOT NULL) AS rows_with_both_altitudes
+FROM state_vectors_data4
+WHERE hour = 1776592800
+  AND time BETWEEN 1776592800 AND 1776593700
+  AND lat BETWEEN 35.578659 AND 36.178659
+  AND lon BETWEEN -79.2373 AND -78.3373
+  AND time - lastcontact <= 15"</code></pre>
+      </div>
+    </section>
+
+    <section id="schema">
+      <div class="section-kicker">3 / 数据结构</div>
+      <h2>从数据库行到训练 record：raw 不变，derived 可计算</h2>
+      <div class="matrix" role="table" aria-label="数据结构矩阵">
+        <div class="head">层级</div>
+        <div class="head">来源</div>
+        <div class="head">主键/粒度</div>
+        <div class="head">高度字段</div>
+        <div class="head">是否可变换</div>
+
+        <div class="rowhead">history_rows/v2</div>
+        <div>Trino / traffic 返回的 dataframe 行</div>
+        <div>状态向量行</div>
+        <div><code>baroaltitude</code>, <code>geoaltitude</code></div>
+        <div class="no">不可排序、不可重命名、不可过滤</div>
+
+        <div class="rowhead">raw_tracks/v2</div>
+        <div>由 history rows 派生的 track-like 兼容记录</div>
+        <div><code>raw_track_id</code></div>
+        <div><code>track.path[*][3]</code> = barometric altitude</div>
+        <div class="maybe">可派生，但必须回指 raw row</div>
+
+        <div class="rowhead">airport_events/v2</div>
+        <div>5 NM entry/exit episode</div>
+        <div><code>event_id</code></div>
+        <div><code>training_points[*].baro_altitude_m</code> + <code>geo_altitude_m</code></div>
+        <div class="yes">derived layer，可存计算字段</div>
+
+        <div class="rowhead">quarantine/v2</div>
+        <div>缺字段或质量门失败的事件</div>
+        <div><code>event_id</code> + reason</div>
+        <div>通常缺 <code>geo_altitude_m</code> 或 raw range</div>
+        <div class="yes">用于审计和返工</div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h3>状态向量最小字段集</h3>
+          <p>当前代码的 <code>STATE_VECTOR_COLUMNS</code> 请求：</p>
+          <p><code>time, icao24, lat, lon, velocity, heading, vertrate, callsign, onground, baroaltitude, geoaltitude</code></p>
+        </div>
+        <div class="card">
+          <h3>机场操作扩展字段集</h3>
+          <p><code>AIRPORT_HISTORY_COLUMNS</code> 在状态向量上额外请求：</p>
+          <p><code>FlightsData4.estdepartureairport</code> 和 <code>FlightsData4.estarrivalairport</code></p>
+        </div>
+      </div>
+
+      <div class="command" data-label="sample-state-vectors">
+        <div class="command-header"><span>抽样查看 KRDU 终端区状态向量字段</span><button class="copy" type="button">Copy</button></div>
+<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
+  --server=https://trino.opensky-network.org \
+  --external-authentication \
+  --catalog minio \
+  --schema osky \
+  --execute "SELECT
+  time,
+  icao24,
+  callsign,
+  lat,
+  lon,
+  velocity,
+  heading,
+  vertrate,
+  onground,
+  baroaltitude,
+  geoaltitude,
+  lastcontact,
+  hour
+FROM state_vectors_data4
+WHERE hour = 1776592800
+  AND time BETWEEN 1776592800 AND 1776593700
+  AND lat BETWEEN 35.578659 AND 36.178659
+  AND lon BETWEEN -79.2373 AND -78.3373
+  AND time - lastcontact <= 15
+ORDER BY time, icao24
+LIMIT 30"</code></pre>
+      </div>
+
+      <div class="command" data-label="sample-flight-metadata">
+        <div class="command-header"><span>抽样查看 KRDU 当天航班级起降机场元数据</span><button class="copy" type="button">Copy</button></div>
+<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
+  --server=https://trino.opensky-network.org \
+  --external-authentication \
+  --catalog minio \
+  --schema osky \
+  --execute "SELECT
+  icao24,
+  callsign,
+  firstseen,
+  lastseen,
+  estdepartureairport,
+  estarrivalairport,
+  day
+FROM flights_data4
+WHERE day = 1776556800
+  AND (estdepartureairport = 'KRDU' OR estarrivalairport = 'KRDU')
+ORDER BY firstseen
+LIMIT 30"</code></pre>
+      </div>
+
+      <div class="command" data-label="state-flight-join">
+        <div class="command-header"><span>验证状态向量和航班元数据可以按时间窗口关联</span><button class="copy" type="button">Copy</button></div>
+<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
+  --server=https://trino.opensky-network.org \
+  --external-authentication \
+  --catalog minio \
+  --schema osky \
+  --execute "SELECT
+  s.time,
+  s.icao24,
+  coalesce(s.callsign, f.callsign) AS callsign,
+  f.estdepartureairport,
+  f.estarrivalairport,
+  s.lat,
+  s.lon,
+  s.baroaltitude,
+  s.geoaltitude
+FROM state_vectors_data4 s
+LEFT JOIN flights_data4 f
+  ON f.day = 1776556800
+ AND f.icao24 = s.icao24
+ AND s.time BETWEEN f.firstseen AND f.lastseen
+WHERE s.hour = 1776592800
+  AND s.time BETWEEN 1776592800 AND 1776593700
+  AND s.lat BETWEEN 35.578659 AND 36.178659
+  AND s.lon BETWEEN -79.2373 AND -78.3373
+  AND s.time - s.lastcontact <= 15
+ORDER BY s.time, s.icao24
+LIMIT 30"</code></pre>
+      </div>
+    </section>
+
+    <section id="altitude">
+      <div class="section-kicker">4 / 高度语义</div>
+      <h2>本项目必须同时保留 geo altitude 和 barometric altitude</h2>
+      <p>
+        垂直剖面、跑道对齐、进近下滑剖面和模型训练会被高度来源强烈影响。OpenSky 的
+        <code>baroaltitude</code> 是气压高度，适合和航空运行中的 altimeter/FL 语义关联；
+        <code>geoaltitude</code> 是几何/GNSS 高度，更适合和 WGS84/Cesium 视觉空间对齐。
+        这两者不能互相覆盖，也不能在缺失时用另一个字段静默填充。
+      </p>
+
+      <div class="altitude-visual">
+        <div class="alt-card">
+          <h3>barometric altitude / <code>baroaltitude</code></h3>
+          <div class="mark">
+            <strong>来源</strong><br>
+            ADS-B/Mode S 状态向量气压高度，单位 metres。
+          </div>
+          <div class="mark">
+            <strong>项目用途</strong><br>
+            保留 aircraft-reported pressure altitude，用于 QNH 修正、低高度/落地证据和训练输入。
+          </div>
+          <div class="mark">
+            <strong>注意</strong><br>
+            不等于机场标高，不等于 AGL，不等于 Cesium 里可直接贴地的几何高度。
+          </div>
+        </div>
+
+        <div class="alt-card">
+          <h3>geometric altitude / <code>geoaltitude</code></h3>
+          <div class="mark">
+            <strong>来源</strong><br>
+            GNSS/geometric altitude，单位 metres，可能为空。
+          </div>
+          <div class="mark">
+            <strong>项目用途</strong><br>
+            用于 3D 空间和 WGS84 轨迹的垂直对齐，并作为训练样本的第二高度通道。
+          </div>
+          <div class="mark">
+            <strong>注意</strong><br>
+            缺失时写入 quarantine；不要用 <code>baroaltitude</code> 或机场标高填补。
+          </div>
+        </div>
+      </div>
+
+      <div class="callout">
+        <strong>当前代码约定：</strong>
+        <code>history_group_to_track()</code> 把 <code>baroaltitude</code> 放入兼容 OpenSky track 的
+        <code>path[*][3]</code>；<code>history_group_to_dual_altitude_points()</code> 再把同一 history row 的
+        <code>baroaltitude</code> 和 <code>geoaltitude</code> 分别输出成 <code>baro_altitude_m</code> 与
+        <code>geo_altitude_m</code>，并标记 <code>geo_altitude_match.method = "same_history_row"</code>。
+      </div>
+
+      <div class="command" data-label="altitude-delta-sample">
+        <div class="command-header"><span>抽样查看 geo 与 baro 的差值，不要假设二者相等</span><button class="copy" type="button">Copy</button></div>
+<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
+  --server=https://trino.opensky-network.org \
+  --external-authentication \
+  --catalog minio \
+  --schema osky \
+  --execute "SELECT
+  time,
+  icao24,
+  callsign,
+  onground,
+  baroaltitude,
+  geoaltitude,
+  geoaltitude - baroaltitude AS geo_minus_baro_m
+FROM state_vectors_data4
+WHERE hour = 1776592800
+  AND time BETWEEN 1776592800 AND 1776593700
+  AND lat BETWEEN 35.578659 AND 36.178659
+  AND lon BETWEEN -79.2373 AND -78.3373
+  AND baroaltitude IS NOT NULL
+  AND geoaltitude IS NOT NULL
+  AND time - lastcontact <= 15
+ORDER BY abs(geoaltitude - baroaltitude) DESC
+LIMIT 30"</code></pre>
+      </div>
+
+      <div class="command" data-label="altitude-quality">
+        <div class="command-header"><span>统计双高度覆盖率，决定可训练样本和 quarantine 比例</span><button class="copy" type="button">Copy</button></div>
+<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
+  --server=https://trino.opensky-network.org \
+  --external-authentication \
+  --catalog minio \
+  --schema osky \
+  --execute "SELECT
+  count(*) AS points_total,
+  count_if(baroaltitude IS NOT NULL) AS points_with_baro_altitude,
+  count_if(geoaltitude IS NOT NULL) AS points_with_geo_altitude,
+  count_if(baroaltitude IS NOT NULL AND geoaltitude IS NOT NULL) AS points_with_both_altitudes,
+  round(100.0 * count_if(baroaltitude IS NOT NULL AND geoaltitude IS NOT NULL) / count(*), 2) AS both_altitude_pct
+FROM state_vectors_data4
+WHERE hour = 1776592800
+  AND time BETWEEN 1776592800 AND 1776593700
+  AND lat BETWEEN 35.578659 AND 36.178659
+  AND lon BETWEEN -79.2373 AND -78.3373
+  AND time - lastcontact <= 15"</code></pre>
+      </div>
+
+      <div class="command" data-label="near-ground-altitude">
+        <div class="command-header"><span>检查机场附近低高度/地面样本，用于 landing/depart 证据</span><button class="copy" type="button">Copy</button></div>
+<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
+  --server=https://trino.opensky-network.org \
+  --external-authentication \
+  --catalog minio \
+  --schema osky \
+  --execute "SELECT
+  time,
+  icao24,
+  callsign,
+  onground,
+  baroaltitude,
+  geoaltitude,
+  baroaltitude - 132.588 AS baro_agl_est_m,
+  geoaltitude - 132.588 AS geo_agl_est_m
+FROM state_vectors_data4
+WHERE hour = 1776592800
+  AND time BETWEEN 1776592800 AND 1776593700
+  AND lat BETWEEN 35.828659 AND 35.928659
+  AND lon BETWEEN -78.8373 AND -78.7373
+  AND (onground OR baroaltitude <= 132.588 + 600)
+  AND time - lastcontact <= 15
+ORDER BY time
+LIMIT 30"</code></pre>
+      </div>
+    </section>
+
+    <section id="pipeline">
+      <div class="section-kicker">5 / 项目落地层</div>
+      <h2>代码中的数据拉取路线</h2>
+      <div class="split">
+        <div>
+          <h3>推荐生产路径</h3>
+          <ol>
+            <li><code>fetch_cylw_opensky.py --dataset-mode training --training-source history-db</code> 调用 <code>traffic.data.opensky.history</code>。</li>
+            <li><code>opensky_history_db.py</code> 请求状态向量列和航班机场元数据列。</li>
+            <li><code>write_history_rows()</code> 先保存 Trino 返回行，不排序、不重命名、不去重。</li>
+            <li><code>history_training.py</code> 在派生副本中规范列名、分段、构造 raw track 和双高度点。</li>
+            <li><code>trajectory_events.py</code> 提取 5 NM airport episode 并生成 label evidence。</li>
+            <li><code>training_dataset.py</code> 附加双高度训练点；缺 <code>geo_altitude_m</code> 则 quarantine。</li>
+          </ol>
+        </div>
+        <div class="card soft">
+          <h3>当前重要代码文件</h3>
+          <p><code>trajectory_data_process/acquisition/opensky_history_db.py</code></p>
+          <p><code>trajectory_data_process/acquisition/fetch_cylw_opensky.py</code></p>
+          <p><code>trajectory_data_process/processing/history_training.py</code></p>
+          <p><code>trajectory_data_process/processing/trajectory_events.py</code></p>
+          <p><code>trajectory_data_process/datasets/training_dataset.py</code></p>
+        </div>
+      </div>
+
+      <div class="command" data-label="traffic-equivalent-airport">
+        <div class="command-header"><span>用 Trino CLI 近似验证 history-db 的 airport_ops 数据含义</span><button class="copy" type="button">Copy</button></div>
+<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
+  --server=https://trino.opensky-network.org \
+  --external-authentication \
+  --catalog minio \
+  --schema osky \
+  --execute "SELECT
+  s.time,
+  s.icao24,
+  coalesce(s.callsign, f.callsign) AS callsign,
+  s.lat,
+  s.lon,
+  s.velocity,
+  s.heading,
+  s.vertrate,
+  s.onground,
+  s.baroaltitude,
+  s.geoaltitude,
+  f.estdepartureairport,
+  f.estarrivalairport
+FROM state_vectors_data4 s
+JOIN flights_data4 f
+  ON f.day = 1776556800
+ AND f.icao24 = s.icao24
+ AND s.time BETWEEN f.firstseen AND f.lastseen
+WHERE s.hour = 1776592800
+  AND s.time BETWEEN 1776592800 AND 1776593700
+  AND (f.estdepartureairport = 'KRDU' OR f.estarrivalairport = 'KRDU')
+  AND s.time - s.lastcontact <= 15
+ORDER BY s.icao24, s.time
+LIMIT 40"</code></pre>
+      </div>
+
+      <div class="command" data-label="traffic-equivalent-terminal">
+        <div class="command-header"><span>用 Trino CLI 近似验证 terminal_all bbox 数据含义</span><button class="copy" type="button">Copy</button></div>
+<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
+  --server=https://trino.opensky-network.org \
+  --external-authentication \
+  --catalog minio \
+  --schema osky \
+  --execute "SELECT
+  icao24,
+  min(time) AS first_time,
+  max(time) AS last_time,
+  count(*) AS point_count,
+  count_if(baroaltitude IS NOT NULL AND geoaltitude IS NOT NULL) AS dual_altitude_points,
+  min(baroaltitude) AS min_baroaltitude_m,
+  max(baroaltitude) AS max_baroaltitude_m
+FROM state_vectors_data4
+WHERE hour = 1776592800
+  AND time BETWEEN 1776592800 AND 1776593700
+  AND lat BETWEEN 35.578659 AND 36.178659
+  AND lon BETWEEN -79.2373 AND -78.3373
+  AND time - lastcontact <= 15
+GROUP BY icao24
+HAVING count(*) >= 3
+ORDER BY point_count DESC
+LIMIT 40"</code></pre>
+      </div>
+
+      <div class="card warn">
+        <h3>为什么不把 CZML 输入当训练数据？</h3>
+        <p>
+          <code>trajectory_normalization.py</code> 面向可视化，会截取进近窗口并可做显示用高度偏移。
+          训练数据必须从 <code>history_rows/v2</code> 和派生的 <code>airport_events/v2</code> 开始，
+          保证 raw evidence 与 derived training sample 分层。
+        </p>
+      </div>
+    </section>
+
+    <section id="validation">
+      <div class="section-kicker">6 / 验证清单</div>
+      <h2>每次拉取前后的快速验证</h2>
+
+      <div class="grid-3">
+        <div class="card good">
+          <h3>拉取前</h3>
+          <p>确认表存在、核心 schema 未变、目标机场当天有 arrival/depart 候选。</p>
+        </div>
+        <div class="card good">
+          <h3>拉取中</h3>
+          <p>保持小时间块、限制并发、避免没有 <code>hour</code>/<code>day</code> 的查询。</p>
+        </div>
+        <div class="card good">
+          <h3>拉取后</h3>
+          <p>核对双高度覆盖率、label 分布、quarantine reason 和 raw-to-derived 引用。</p>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>检查项</th>
+            <th>成功信号</th>
+            <th>失败时优先看哪里</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>状态向量密度</td>
+            <td><code>rows_total</code> 和 <code>aircraft_total</code> 非零</td>
+            <td>bbox、时间窗口、OpenSky known data gaps</td>
+          </tr>
+          <tr>
+            <td>双高度覆盖</td>
+            <td><code>points_with_both_altitudes</code> 足够高</td>
+            <td><code>geoaltitude</code> null、coverage、receiver stale 过滤</td>
+          </tr>
+          <tr>
+            <td>标签证据</td>
+            <td>landing/depart/pass 都有明确 evidence</td>
+            <td><code>flights_data4</code> join、5 NM crossing completeness</td>
+          </tr>
+          <tr>
+            <td>垂直剖面</td>
+            <td>baro/geo 差值被记录，而不是被覆盖</td>
+            <td>raw path index 3、training_points 高度字段</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="command" data-label="label-preview">
+        <div class="command-header"><span>在数据库侧预估 airport_ops 与 terminal-area 的重叠关系</span><button class="copy" type="button">Copy</button></div>
+<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
+  --server=https://trino.opensky-network.org \
+  --external-authentication \
+  --catalog minio \
+  --schema osky \
+  --execute "WITH area AS (
+  SELECT DISTINCT icao24
+  FROM state_vectors_data4
+  WHERE hour = 1776592800
+    AND time BETWEEN 1776592800 AND 1776593700
+    AND lat BETWEEN 35.578659 AND 36.178659
+    AND lon BETWEEN -79.2373 AND -78.3373
+    AND time - lastcontact <= 15
+),
+ops AS (
+  SELECT DISTINCT
+    icao24,
+    estdepartureairport,
+    estarrivalairport
+  FROM flights_data4
+  WHERE day = 1776556800
+    AND (estdepartureairport = 'KRDU' OR estarrivalairport = 'KRDU')
+)
+SELECT
+  count(*) AS area_aircraft,
+  count_if(ops.icao24 IS NOT NULL) AS area_aircraft_with_krdu_ops_metadata,
+  count_if(ops.estarrivalairport = 'KRDU') AS landing_metadata_aircraft,
+  count_if(ops.estdepartureairport = 'KRDU') AS departure_metadata_aircraft,
+  count_if(ops.icao24 IS NULL) AS possible_pass_or_unknown_aircraft
+FROM area
+LEFT JOIN ops ON ops.icao24 = area.icao24"</code></pre>
+      </div>
+
+      <div class="command" data-label="stale-filter-impact">
+        <div class="command-header"><span>验证 lastcontact stale 过滤对样本量的影响</span><button class="copy" type="button">Copy</button></div>
+<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
+  --server=https://trino.opensky-network.org \
+  --external-authentication \
+  --catalog minio \
+  --schema osky \
+  --execute "SELECT
+  count(*) AS rows_before_stale_filter,
+  count_if(time - lastcontact <= 15) AS rows_after_15s_stale_filter,
+  count_if(time - lastcontact <= 15 AND lat IS NOT NULL AND lon IS NOT NULL) AS usable_position_rows,
+  count_if(time - lastcontact <= 15 AND baroaltitude IS NOT NULL AND geoaltitude IS NOT NULL) AS usable_dual_altitude_rows
+FROM state_vectors_data4
+WHERE hour = 1776592800
+  AND time BETWEEN 1776592800 AND 1776593700
+  AND lat BETWEEN 35.578659 AND 36.178659
+  AND lon BETWEEN -79.2373 AND -78.3373"</code></pre>
+      </div>
+
+      <div class="callout">
+        <strong>建议执行顺序：</strong>
+        先跑 <code>SHOW TABLES</code> 和 <code>DESCRIBE</code>，再跑机场候选量、终端区密度、双高度覆盖率。
+        如果这些都合理，再运行项目 CLI 的 history-db training fetch。
+      </div>
+
+      <div class="command" data-label="project-cli">
+        <div class="command-header"><span>项目侧 smoke fetch：使用 history-db 生成训练层输出</span><button class="copy" type="button">Copy</button></div>
+<pre><code>/Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
+  /Users/liudongxu/Desktop/studys/thesis/trajectory_data_process/acquisition/fetch_cylw_opensky.py \
+  --mode historical \
+  --dataset-mode training \
+  --training-source history-db \
+  --airport KRDU \
+  --begin 2026-04-19T10:00:00Z \
+  --end 2026-04-19T10:15:00Z \
+  --fetch-profile terminal_all \
+  --max-tracks 10</code></pre>
+      </div>
+    </section>
+
+    <section id="sources">
+      <div class="section-kicker">Sources / 依据</div>
+      <h2>文档和代码依据</h2>
+      <ul>
+        <li>OpenSky 官方 Trino 文档：<a href="https://openskynetwork.github.io/opensky-api/trino.html">Trino - Historical Data</a></li>
+        <li>OpenSky 官方 API 数据结构说明：<a href="https://openskynetwork.github.io/opensky-api/">The OpenSky Network API documentation</a></li>
+        <li><code>traffic</code> OpenSky history DB guide：<a href="https://traffic-viz.github.io/data_sources/opensky_db.html">How to access ADS-B data from OpenSky history database?</a></li>
+        <li>本仓库：<code>trajectory_data_process/docs/03-training-data-fetch-store-redesign.md</code></li>
+        <li>本仓库：<code>trajectory_data_process/docs/04-production-adsb-training-data-plan.md</code></li>
+        <li>本仓库：<code>trajectory_data_process/acquisition/opensky_history_db.py</code></li>
+        <li>本仓库：<code>trajectory_data_process/processing/history_training.py</code></li>
+        <li>本仓库：<code>trajectory_data_process/processing/altitude_matching.py</code></li>
+      </ul>
+    </section>
+
+    <div class="footer">
+      Last updated: 2026-05-22. This is a static, self-contained HTML guide; command copy buttons run entirely in the browser.
+    </div>
+  </div>
+
+  <script>
+    document.querySelectorAll(".command").forEach((block) => {
+      const button = block.querySelector("button.copy");
+      const code = block.querySelector("code");
+      button.addEventListener("click", async () => {
+        const text = code.innerText.trim();
+        try {
+          await navigator.clipboard.writeText(text);
+          const previous = button.textContent;
+          button.textContent = "Copied";
+          setTimeout(() => {
+            button.textContent = previous;
+          }, 1200);
+        } catch (_error) {
+          button.textContent = "Select text";
+        }
+      });
+    });
+  </script>
+</body>
+</html>
