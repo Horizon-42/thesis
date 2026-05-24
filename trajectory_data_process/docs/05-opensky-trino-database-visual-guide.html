@@ -255,54 +255,46 @@
       color: var(--accent-3);
     }
 
-    .matrix {
+    .schema-table code {
+      display: inline-block;
+      margin: 2px 0;
+      white-space: normal;
+      word-break: break-word;
+    }
+
+    .schema-table .field-list {
       display: grid;
-      grid-template-columns: 180px repeat(4, minmax(130px, 1fr));
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      overflow: hidden;
-      background: #fff;
+      gap: 6px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
     }
 
-    .matrix > div {
-      min-height: 64px;
-      padding: 12px;
-      border-right: 1px solid var(--line);
-      border-bottom: 1px solid var(--line);
-      display: flex;
-      align-items: center;
+    .schema-table .field-note {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
     }
 
-    .matrix > div:nth-child(5n) {
-      border-right: 0;
+    .dictionary-table th:nth-child(1) {
+      width: 18%;
     }
 
-    .matrix .head {
-      background: #eaf1f6;
-      font-weight: 800;
+    .dictionary-table th:nth-child(2) {
+      width: 16%;
     }
 
-    .matrix .rowhead {
-      background: #f7f9fb;
-      font-weight: 800;
+    .dictionary-table th:nth-child(3) {
+      width: 22%;
     }
 
-    .matrix .yes {
-      background: var(--good-soft);
-      color: #24543b;
-      font-weight: 800;
-    }
-
-    .matrix .maybe {
-      background: var(--warn-soft);
-      color: #704b13;
-      font-weight: 800;
-    }
-
-    .matrix .no {
-      background: var(--bad-soft);
-      color: #7b1d1d;
-      font-weight: 800;
+    .dictionary-table .aviation-note {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
     }
 
     .flow {
@@ -488,8 +480,8 @@
         display: none;
       }
 
-      .matrix {
-        grid-template-columns: 150px repeat(4, minmax(120px, 1fr));
+      .schema-table {
+        display: block;
         overflow-x: auto;
       }
     }
@@ -522,7 +514,7 @@
       <p class="lead">
         这份文档解释 OpenSky Trino 历史数据库里有什么、项目真正需要什么、数据结构如何从数据库变成训练样本，并特别区分
         <code>baroaltitude</code>（气压高度）和 <code>geoaltitude</code>（几何/GNSS 高度）。每个主题都附带可以直接复制执行的
-        Trino CLI 验证命令。
+        <code>trino:osky&gt;</code> 交互式 SQL。
       </p>
 
       <div class="meta-grid">
@@ -549,6 +541,7 @@
       <ul>
         <li><a href="#setup">连接方式</a></li>
         <li><a href="#inventory">数据库有什么</a></li>
+        <li><a href="#columns">字段字典</a></li>
         <li><a href="#needed">项目需要什么</a></li>
         <li><a href="#schema">数据结构</a></li>
         <li><a href="#altitude">高度语义</a></li>
@@ -564,7 +557,8 @@
           <h2>先定义一个最小可重复的 Trino CLI 入口</h2>
           <p>
             OpenSky 官方 Trino 文档要求使用 <code>minio</code> catalog、<code>osky</code> schema 和外部认证。
-            用户名必须是 OpenSky 小写用户名。下面的命令不会查询数据，只用于确认 CLI 能登录。
+            用户名必须是 OpenSky 小写用户名。日常探索时不要反复运行 <code>--execute</code> 一次性命令；
+            更方便的方式是先进入交互式 Trino shell，然后连续粘贴多条 SQL。
           </p>
           <div class="callout warning">
             <strong>性能规则：</strong>除了 <code>SHOW TABLES</code> 和 <code>DESCRIBE</code>，查询状态向量表必须带
@@ -572,23 +566,46 @@
           </div>
         </div>
         <div class="card soft">
-          <h3>示例变量</h3>
-          <p><code>1776592800</code> = 2026-04-19 10:00:00 UTC，一小时分区。</p>
-          <p><code>1776556800</code> = 2026-04-19 00:00:00 UTC，一天分区。</p>
+          <h3>时间输入方式</h3>
+          <p>查询里优先写 <code>2026-04-19T10:00:00Z</code> 这样的 ISO UTC 时间。</p>
+          <p><code>hour_start</code> 和 <code>day_start</code> 用 <code>from_iso8601_timestamp()</code> 转成 OpenSky 分区键。</p>
           <p>KRDU 机场中心：lat <code>35.878659</code>，lon <code>-78.7873</code>，elevation <code>435 ft</code>。</p>
         </div>
       </div>
 
-      <div class="command" data-label="connect">
-        <div class="command-header"><span>验证 CLI 登录和默认 schema</span><button class="copy" type="button">Copy</button></div>
+      <div class="grid-2">
+        <div class="card good">
+          <h3>推荐：交互式会话</h3>
+          <p>
+            执行一次 <code>trino ...</code> 进入 <code>trino:osky&gt;</code> 提示符。首次提交查询时完成浏览器外部认证；
+            同一 CLI 会话内继续执行 SQL 不需要重复登录，直到认证 token 失效或会话退出。
+          </p>
+        </div>
+        <div class="card warn">
+          <h3>脚本化备选</h3>
+          <p>
+            本文后续 Trino 查询默认都是交互式 SQL。需要脚本化时，再把同一段 SQL 放进
+            <code>trino --execute "..."</code> 或 <code>trino --file query.sql</code>。
+          </p>
+        </div>
+      </div>
+
+      <div class="command" data-label="interactive-login">
+        <div class="command-header"><span>一次登录：进入交互式 Trino shell</span><button class="copy" type="button">Copy</button></div>
 <pre><code>export OPENSKY_USER="your_lowercase_opensky_username"
 
 trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
   --server=https://trino.opensky-network.org \
   --external-authentication \
   --catalog minio \
-  --schema osky \
-  --execute "SELECT current_catalog, current_schema"</code></pre>
+  --schema osky</code></pre>
+      </div>
+
+      <div class="command" data-label="interactive-first-sql">
+        <div class="command-header"><span>进入 trino:osky&gt; 后连续执行这些 SQL</span><button class="copy" type="button">Copy</button></div>
+<pre><code>SELECT current_catalog, current_schema;
+SHOW TABLES;
+DESCRIBE state_vectors_data4;</code></pre>
       </div>
     </section>
 
@@ -625,35 +642,478 @@ trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
       </div>
 
       <div class="command" data-label="show-tables">
-        <div class="command-header"><span>查看当前 Trino schema 下的所有表</span><button class="copy" type="button">Copy</button></div>
-<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
-  --server=https://trino.opensky-network.org \
-  --external-authentication \
-  --catalog minio \
-  --schema osky \
-  --execute "SHOW TABLES"</code></pre>
+        <div class="command-header"><span>在 trino:osky&gt; 中查看当前 schema 下的所有表</span><button class="copy" type="button">Copy</button></div>
+<pre><code>SHOW TABLES;</code></pre>
       </div>
 
       <div class="command" data-label="describe-core">
-        <div class="command-header"><span>验证两张核心表的 schema</span><button class="copy" type="button">Copy</button></div>
-<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
-  --server=https://trino.opensky-network.org \
-  --external-authentication \
-  --catalog minio \
-  --schema osky \
-  --execute "DESCRIBE state_vectors_data4"
+        <div class="command-header"><span>在 trino:osky&gt; 中验证两张核心表的 schema</span><button class="copy" type="button">Copy</button></div>
+<pre><code>DESCRIBE state_vectors_data4;
+DESCRIBE flights_data4;</code></pre>
+      </div>
+    </section>
 
-trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
-  --server=https://trino.opensky-network.org \
-  --external-authentication \
-  --catalog minio \
-  --schema osky \
-  --execute "DESCRIBE flights_data4"</code></pre>
+    <section id="columns">
+      <div class="section-kicker">2 / 字段字典</div>
+      <h2>逐列理解 <code>state_vectors_data4</code> 和 <code>flights_data4</code></h2>
+      <p>
+        这两张表的字段不是普通业务字段，而是航空监视数据和 OpenSky 推断结果的混合。
+        训练管线应把 <code>state_vectors_data4</code> 当作逐点观测事实，把 <code>flights_data4</code>
+        当作航班级机场标签证据。开始看列之前，先把飞机身份、航班身份和注册身份分清楚；
+        同样，也不要把 <code>baroaltitude</code> 和 <code>geoaltitude</code> 混成一个高度。
+      </p>
+
+      <h3>先分清三种“身份”：飞机、航班、注册号</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>身份类型</th>
+            <th>回答的问题</th>
+            <th>例子</th>
+            <th>在本项目里怎么用</th>
+            <th>不能怎么用</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>icao24</code></td>
+            <td>是哪一个应答机/飞机在广播这条状态？</td>
+            <td><code>a1b2c3</code> 这类 24-bit 十六进制地址</td>
+            <td>
+              用作 OpenSky 表内的飞机身份键。连接 <code>state_vectors_data4</code> 和
+              <code>flights_data4</code> 时，用 <code>icao24</code> 加 <code>firstseen/lastseen</code> 时间窗。
+            </td>
+            <td>
+              不能当航班号。因为同一架飞机一天可以飞多段航班，单看 <code>icao24</code> 不知道它这一刻是在飞哪一班。
+            </td>
+          </tr>
+          <tr>
+            <td><code>callsign</code> / 航班号</td>
+            <td>这架飞机此刻以什么运行呼号在飞？</td>
+            <td><code>AAL123</code>、<code>UAL456</code> 这类航空公司代码加数字</td>
+            <td>
+              用于人工核对、展示和辅助判断。它更接近 ATC 呼号，很多时候看起来像商业航班号。
+            </td>
+            <td>
+              不能当稳定主键。它可能为空、格式不整齐、每天重复使用，也可能和旅客票面航班号不完全一致。
+            </td>
+          </tr>
+          <tr>
+            <td>registration / 注册号</td>
+            <td>这架飞机的法定机身注册/尾号是什么？</td>
+            <td><code>N123AB</code>、<code>B-1234</code> 这类 tail number</td>
+            <td>
+              做机队、机型、单机历史分析时有用。通常需要外部 aircraft metadata 把
+              <code>icao24</code> 映射到 registration。
+            </td>
+            <td>
+              这两张核心 Trino 表默认不直接提供注册号；不要在没有外部映射时假设
+              <code>icao24</code> 就是注册号。
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout">
+        <strong>一句话：</strong>
+        <code>icao24</code> 更像“这架飞机/应答机是谁”，<code>callsign</code> 更像“这一趟任务用什么呼号飞”，
+        registration 更像“这架飞机机身上登记的尾号”。训练数据 join 优先用 <code>icao24 + 时间窗</code>；
+        人工理解航班再看 <code>callsign</code> 和机场推断字段。
+      </div>
+
+      <div class="command" data-label="describe-column-dictionary">
+        <div class="command-header"><span>在 trino:osky&gt; 中先验证字段是否和本文一致</span><button class="copy" type="button">Copy</button></div>
+<pre><code>DESCRIBE state_vectors_data4;
+DESCRIBE flights_data4;</code></pre>
+      </div>
+
+      <h3><code>state_vectors_data4</code>：逐点状态向量字段</h3>
+      <p>
+        一行通常表示某架飞机在某个 UTC 秒附近的一个状态向量。它适合构造轨迹点、速度/航向/垂直速度特征、
+        机场附近 episode，以及双高度训练样本。
+      </p>
+      <table class="dictionary-table">
+        <thead>
+          <tr>
+            <th>字段</th>
+            <th>类型/单位</th>
+            <th>直观含义</th>
+            <th>项目解释和航空注意点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>time</code></td>
+            <td>Unix 秒，UTC</td>
+            <td>该状态向量有效的时间</td>
+            <td>
+              这是训练点的主时间轴。SQL 里建议用 <code>from_iso8601_timestamp('2026-04-19T10:00:00Z')</code>
+              转换，不要手写难读的 epoch 秒。
+            </td>
+          </tr>
+          <tr>
+            <td><code>icao24</code></td>
+            <td>24-bit 十六进制地址</td>
+            <td>飞机应答机地址</td>
+            <td>
+              这是 OpenSky 里最常用的飞机身份键：它标识发出 ADS-B/Mode S 信号的应答机/飞机。
+              它不是航班号；航班号/呼号表达“这一次运行任务叫什么”。它也不是注册号；注册号是机身法定尾号，通常要查外部 aircraft metadata。
+              <span class="aviation-note">项目用法：用 <code>icao24</code> 把同一时间窗内的状态向量串成轨迹，并和 <code>flights_data4</code> 连接；但训练 label 不能只靠它决定 landing/depart。</span>
+            </td>
+          </tr>
+          <tr>
+            <td><code>lat</code></td>
+            <td>度，WGS84</td>
+            <td>纬度</td>
+            <td>机场 bbox、5 NM 半径 entry/exit、轨迹可视化都依赖它。为空或过旧时不能进入训练点。</td>
+          </tr>
+          <tr>
+            <td><code>lon</code></td>
+            <td>度，WGS84</td>
+            <td>经度</td>
+            <td>和 <code>lat</code> 一起定义水平位置。注意经度跨 180 度的区域要特殊处理；当前 KRDU/KSJC/KSMF/KSTL 不涉及。</td>
+          </tr>
+          <tr>
+            <td><code>velocity</code></td>
+            <td>m/s</td>
+            <td>地速</td>
+            <td>
+              这是 ground speed，不是 airspeed。用于轨迹动力学特征可以，但不要直接拿它判断飞机性能极限。
+              <span class="aviation-note">航空注意：风会让地速和空速差很多，进近阶段尤其明显。</span>
+            </td>
+          </tr>
+          <tr>
+            <td><code>heading</code></td>
+            <td>度，0-360</td>
+            <td>地面运动方向</td>
+            <td>
+              OpenSky 状态向量里的 heading 更接近 track/course over ground，按地理北顺时针计算；它不一定等于机头朝向。
+              <span class="aviation-note">航空注意：侧风时飞机 nose heading 和 ground track 可以明显不同。</span>
+            </td>
+          </tr>
+          <tr>
+            <td><code>vertrate</code></td>
+            <td>m/s</td>
+            <td>垂直速度</td>
+            <td>
+              正数通常表示爬升，负数表示下降。做进近/离场剖面时很有价值；若需要航空常用单位，可近似换算为
+              <code>ft/min = m/s * 196.85</code>。
+            </td>
+          </tr>
+          <tr>
+            <td><code>callsign</code></td>
+            <td>字符串</td>
+            <td>机组广播的航班呼号</td>
+            <td>
+              可用于人工识别航班，但可能为空、有尾随空格、或和商业航班号不完全一致。项目中作为辅助展示字段，不作为唯一主键。
+              <span class="aviation-note">航空注意：呼号是 ATC/飞行计划语境里的标识，和 <code>icao24</code> 的飞机硬件身份不同。</span>
+            </td>
+          </tr>
+          <tr>
+            <td><code>onground</code></td>
+            <td>boolean</td>
+            <td>是否在地面</td>
+            <td>
+              对落地/起飞识别有帮助，但可能噪声或缺失。训练 label 应结合机场半径、速度、高度、<code>flights_data4</code> 机场推断共同判断。
+            </td>
+          </tr>
+          <tr>
+            <td><code>alert</code></td>
+            <td>boolean</td>
+            <td>ATC alert 标志</td>
+            <td>
+              来自应答机/ATC 语义，表示特殊告警状态。它不是轨迹几何字段，通常不进入首版训练特征。
+              <span class="aviation-note">航空注意：可作为异常运行背景信息，但不能单独解释飞机意图。</span>
+            </td>
+          </tr>
+          <tr>
+            <td><code>spi</code></td>
+            <td>boolean</td>
+            <td>Special Position Identification</td>
+            <td>
+              飞行员按下 ident 后可能出现的特殊位置识别标志，方便 ATC 在雷达屏上识别飞机。项目里主要用于审计或异常解释。
+            </td>
+          </tr>
+          <tr>
+            <td><code>squawk</code></td>
+            <td>4 位八进制码</td>
+            <td>ATC 应答机代码</td>
+            <td>
+              由 ATC 分配或用于特殊状态。它是航空管制语义，不是飞机身份主键。
+              <span class="aviation-note">航空注意：7500、7600、7700 分别常见于非法干扰、无线电失效、紧急情况，但历史数据分析中需要谨慎解释上下文。</span>
+            </td>
+          </tr>
+          <tr>
+            <td><code>baroaltitude</code></td>
+            <td>m</td>
+            <td>气压高度</td>
+            <td>
+              由气压高度源报告，适合保留航空运行中的 pressure altitude/flight level 语义。
+              不等于 AGL，不等于机场标高，也不等于可直接放进 Cesium 的几何高度。
+              <span class="aviation-note">项目要求：必须独立保存为 <code>baro_altitude_m</code>，不能用 <code>geoaltitude</code> 覆盖。</span>
+            </td>
+          </tr>
+          <tr>
+            <td><code>geoaltitude</code></td>
+            <td>m</td>
+            <td>几何/GNSS 高度</td>
+            <td>
+              更接近空间几何高度，适合 3D 可视化和 WGS84 轨迹对齐，但可能为空。
+              <span class="aviation-note">项目要求：训练样本需要第二高度通道 <code>geo_altitude_m</code>；缺失时进入 quarantine，不要用 <code>baroaltitude</code> 静默填补。</span>
+            </td>
+          </tr>
+          <tr>
+            <td><code>lastposupdate</code></td>
+            <td>Unix 秒，UTC</td>
+            <td>最后一次位置更新的时间</td>
+            <td>用于判断 <code>lat</code>/<code>lon</code> 是否新鲜。位置可能比当前状态时间更旧，做轨迹质量控制时应关注。</td>
+          </tr>
+          <tr>
+            <td><code>lastcontact</code></td>
+            <td>Unix 秒，UTC</td>
+            <td>OpenSky 最后一次收到该飞机信号的时间</td>
+            <td>
+              本文查询常用 <code>s.time - s.lastcontact &lt;= 15</code> 过滤 stale row，避免把过期信号当作当前轨迹点。
+            </td>
+          </tr>
+          <tr>
+            <td><code>serials</code></td>
+            <td>receiver id 数组</td>
+            <td>接收到该状态向量的 OpenSky 接收机编号</td>
+            <td>适合覆盖率、接收来源和数据质量审计。它不是飞机属性，通常不要作为训练模型的行为特征。</td>
+          </tr>
+          <tr>
+            <td><code>hour</code></td>
+            <td>Unix 秒，UTC hour bucket</td>
+            <td>小时分区键</td>
+            <td>
+              这是 Trino 查询性能关键字段，不是另一个事件时间。查 <code>state_vectors_data4</code> 时必须用它裁剪分区。
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="command" data-label="state-vector-uncommon-fields">
+        <div class="command-header"><span>在 trino:osky&gt; 中抽样查看容易误解的状态向量字段</span><button class="copy" type="button">Copy</button></div>
+<pre><code>WITH params AS (
+  SELECT
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:00:00Z')) AS bigint) AS hour_start,
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:00:00Z')) AS bigint) AS begin_time,
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:15:00Z')) AS bigint) AS end_time,
+    35.578659 AS min_lat,
+    36.178659 AS max_lat,
+    -79.2373 AS min_lon,
+    -78.3373 AS max_lon
+)
+SELECT
+  s.time,
+  s.icao24,
+  s.callsign,
+  s.velocity,
+  s.heading,
+  s.vertrate,
+  s.onground,
+  s.alert,
+  s.spi,
+  s.squawk,
+  s.baroaltitude,
+  s.geoaltitude,
+  s.lastposupdate,
+  s.lastcontact,
+  s.serials
+FROM state_vectors_data4 s
+CROSS JOIN params p
+WHERE s.hour = p.hour_start
+  AND s.time BETWEEN p.begin_time AND p.end_time
+  AND s.lat BETWEEN p.min_lat AND p.max_lat
+  AND s.lon BETWEEN p.min_lon AND p.max_lon
+ORDER BY s.time, s.icao24
+LIMIT 20;</code></pre>
+      </div>
+
+      <h3><code>flights_data4</code>：航班级机场推断字段</h3>
+      <p>
+        一行通常表示 OpenSky 从一段轨迹中推断出的航班级记录。它非常适合给 airport episode 提供
+        arrival/depart 候选证据，但机场字段是估计值，不是机场运营系统的权威航班表。
+      </p>
+      <table class="dictionary-table">
+        <thead>
+          <tr>
+            <th>字段</th>
+            <th>类型/单位</th>
+            <th>直观含义</th>
+            <th>项目解释和航空注意点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>icao24</code></td>
+            <td>24-bit 十六进制地址</td>
+            <td>执行该航班记录的飞机地址</td>
+            <td>
+              表示这条航班级记录对应的是哪一个应答机/飞机。它负责回答“哪架飞机”，不是回答“哪一个航班号”。
+              可和 <code>state_vectors_data4.icao24</code> 连接，但必须再加时间条件
+              <code>s.time BETWEEN f.firstseen AND f.lastseen</code>，否则同一架飞机当天多段航班会混在一起。
+            </td>
+          </tr>
+          <tr>
+            <td><code>firstseen</code></td>
+            <td>Unix 秒，UTC</td>
+            <td>OpenSky 在该航班记录中第一次看到飞机的时间</td>
+            <td>
+              不是计划起飞时间，也不保证等于真实离地时间。它受接收覆盖影响，适合作为 join 时间窗下界和轨迹截取线索。
+            </td>
+          </tr>
+          <tr>
+            <td><code>estdepartureairport</code></td>
+            <td>ICAO 机场码</td>
+            <td>估计起飞机场</td>
+            <td>
+              用于 departure 候选标签。字段名里的 <code>est</code> 很重要：这是推断结果，项目应继续用 5 NM crossing、低高度和地面状态验证。
+              <span class="aviation-note">航空注意：ICAO 码如 KRDU、KSJC，不是 IATA 码 RDU、SJC。</span>
+            </td>
+          </tr>
+          <tr>
+            <td><code>lastseen</code></td>
+            <td>Unix 秒，UTC</td>
+            <td>OpenSky 在该航班记录中最后一次看到飞机的时间</td>
+            <td>
+              不是计划到达时间，也不保证等于接地时间。可作为 join 时间窗上界和 arrival episode 的搜索范围。
+            </td>
+          </tr>
+          <tr>
+            <td><code>estarrivalairport</code></td>
+            <td>ICAO 机场码</td>
+            <td>估计到达机场</td>
+            <td>
+              用于 landing 候选标签。和 <code>estdepartureairport</code> 一样，它是证据而不是真值；训练样本应保留 label evidence。
+            </td>
+          </tr>
+          <tr>
+            <td><code>callsign</code></td>
+            <td>字符串</td>
+            <td>航班呼号</td>
+            <td>
+              可辅助人工核对和展示。不同数据行的 callsign 可能为空或格式不稳定；连接和分组时优先使用 <code>icao24 + 时间窗</code>。
+            </td>
+          </tr>
+          <tr>
+            <td><code>track</code></td>
+            <td>数组：time, latitude, longitude, altitude, heading, onground</td>
+            <td>该航班的简化轨迹点序列</td>
+            <td>
+              适合快速预览航班路径，但不应替代 <code>state_vectors_data4</code> 作为训练 raw rows。
+              <span class="aviation-note">项目注意：track 里的 <code>altitude</code> 是单一高度槽；本项目需要双高度，所以训练点仍从 state vectors 的 <code>baroaltitude</code> + <code>geoaltitude</code> 构造。</span>
+            </td>
+          </tr>
+          <tr>
+            <td><code>estdepartureairporthorizdistance</code></td>
+            <td>m</td>
+            <td>起飞机场推断的水平距离残差</td>
+            <td>可作为起飞机场推断置信度线索；越小通常表示几何关系越贴近，但不要单独作为标签真值。</td>
+          </tr>
+          <tr>
+            <td><code>estdepartureairportvertdistance</code></td>
+            <td>m</td>
+            <td>起飞机场推断的垂直距离残差</td>
+            <td>
+              反映轨迹端点高度和机场附近高度关系。机场标高、气压高度和几何高度语义不同，因此只适合作为推断诊断字段。
+            </td>
+          </tr>
+          <tr>
+            <td><code>estarrivalairporthorizdistance</code></td>
+            <td>m</td>
+            <td>到达机场推断的水平距离残差</td>
+            <td>可用于判断 arrival airport 是否可信。若距离异常大，airport episode 应更依赖 5 NM 几何 crossing 和原始状态向量。</td>
+          </tr>
+          <tr>
+            <td><code>estarrivalairportvertdistance</code></td>
+            <td>m</td>
+            <td>到达机场推断的垂直距离残差</td>
+            <td>
+              适合发现“疑似到达机场但高度不合理”的记录。不要把它和 <code>baroaltitude</code>/<code>geoaltitude</code> 的训练通道混用。
+            </td>
+          </tr>
+          <tr>
+            <td><code>departureairportcandidatescount</code></td>
+            <td>整数</td>
+            <td>起飞机场候选数量</td>
+            <td>候选数量越多，说明推断歧义可能越大。可用于给 label evidence 标注 confidence/ambiguity。</td>
+          </tr>
+          <tr>
+            <td><code>arrivalairportcandidatescount</code></td>
+            <td>整数</td>
+            <td>到达机场候选数量</td>
+            <td>用于衡量 arrival 标签是否有多个备选机场。多机场密集区域尤其需要看它。</td>
+          </tr>
+          <tr>
+            <td><code>otherdepartureairportcandidates</code></td>
+            <td>候选机场数组</td>
+            <td>其他起飞机场候选</td>
+            <td>
+              用于审计 <code>estdepartureairport</code> 的歧义。若目标机场出现在 other candidates，而不是 estimated 字段，样本应降低置信度或进入人工复核。
+            </td>
+          </tr>
+          <tr>
+            <td><code>otherarrivalairportcandidates</code></td>
+            <td>候选机场数组</td>
+            <td>其他到达机场候选</td>
+            <td>
+              用于审计 <code>estarrivalairport</code> 的歧义。对邻近机场、多跑道终端区和接收覆盖缺口尤其有用。
+            </td>
+          </tr>
+          <tr>
+            <td><code>day</code></td>
+            <td>Unix 秒，UTC day bucket</td>
+            <td>日期分区键</td>
+            <td>
+              这是查 <code>flights_data4</code> 的性能关键字段，不是航班唯一日期语义。查询必须带
+              <code>f.day = day_start</code>，跨 UTC 日的航班要查相邻 day。
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="command" data-label="flight-data-uncommon-fields">
+        <div class="command-header"><span>在 trino:osky&gt; 中抽样查看 flights_data4 的推断距离和候选机场字段</span><button class="copy" type="button">Copy</button></div>
+<pre><code>WITH params AS (
+  SELECT
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T00:00:00Z')) AS bigint) AS day_start
+)
+SELECT
+  f.icao24,
+  f.callsign,
+  f.firstseen,
+  f.lastseen,
+  f.estdepartureairport,
+  f.estarrivalairport,
+  f.estdepartureairporthorizdistance,
+  f.estdepartureairportvertdistance,
+  f.estarrivalairporthorizdistance,
+  f.estarrivalairportvertdistance,
+  f.departureairportcandidatescount,
+  f.arrivalairportcandidatescount,
+  f.otherdepartureairportcandidates,
+  f.otherarrivalairportcandidates,
+  cardinality(f.track) AS track_points,
+  slice(f.track, 1, 3) AS first_three_track_points
+FROM flights_data4 f
+CROSS JOIN params p
+WHERE f.day = p.day_start
+  AND (f.estdepartureairport = 'KRDU' OR f.estarrivalairport = 'KRDU')
+ORDER BY f.firstseen
+LIMIT 10;</code></pre>
+      </div>
+
+      <div class="callout warning">
+        <strong>实践结论：</strong>
+        <code>state_vectors_data4</code> 给训练点的“物理观测”，<code>flights_data4</code> 给机场标签的“航班级证据”。
+        两者连接时使用 <code>icao24</code> 加 <code>firstseen/lastseen</code> 时间窗，并保留推断字段作为 evidence，
+        不要把 estimated airport 当作无条件真值。
       </div>
     </section>
 
     <section id="needed">
-      <div class="section-kicker">2 / 项目需要什么</div>
+      <div class="section-kicker">3 / 项目需要什么</div>
       <h2>训练目标不是“下载航迹”，而是构造机场附近的可审计 4D episode</h2>
       <div class="flow" aria-label="数据需求流程">
         <div class="node">
@@ -716,82 +1176,130 @@ trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
       </table>
 
       <div class="command" data-label="airport-ops-count">
-        <div class="command-header"><span>验证 4 个生产候选机场当天的 arrival/depart 候选量</span><button class="copy" type="button">Copy</button></div>
-<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
-  --server=https://trino.opensky-network.org \
-  --external-authentication \
-  --catalog minio \
-  --schema osky \
-  --execute "WITH airports(airport) AS (VALUES 'KRDU', 'KSJC', 'KSMF', 'KSTL')
+        <div class="command-header"><span>在 trino:osky&gt; 中验证 4 个生产候选机场当天的 arrival/depart 候选量</span><button class="copy" type="button">Copy</button></div>
+<pre><code>WITH
+params AS (
+  SELECT
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T00:00:00Z')) AS bigint) AS day_start
+),
+airports(airport) AS (VALUES 'KRDU', 'KSJC', 'KSMF', 'KSTL')
 SELECT
   a.airport,
   count_if(f.estarrivalairport = a.airport) AS landing_candidates,
   count_if(f.estdepartureairport = a.airport) AS departure_candidates,
   count(DISTINCT f.icao24) AS distinct_aircraft
 FROM airports a
+CROSS JOIN params p
 LEFT JOIN flights_data4 f
-  ON f.day = 1776556800
+  ON f.day = p.day_start
  AND (f.estarrivalairport = a.airport OR f.estdepartureairport = a.airport)
 GROUP BY a.airport
-ORDER BY a.airport"</code></pre>
+ORDER BY a.airport;</code></pre>
       </div>
 
       <div class="command" data-label="terminal-count">
-        <div class="command-header"><span>验证 KRDU 终端区 15 分钟内的状态向量密度</span><button class="copy" type="button">Copy</button></div>
-<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
-  --server=https://trino.opensky-network.org \
-  --external-authentication \
-  --catalog minio \
-  --schema osky \
-  --execute "SELECT
+        <div class="command-header"><span>在 trino:osky&gt; 中验证 KRDU 终端区 15 分钟内的状态向量密度</span><button class="copy" type="button">Copy</button></div>
+<pre><code>WITH params AS (
+  SELECT
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:00:00Z')) AS bigint) AS hour_start,
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:00:00Z')) AS bigint) AS begin_time,
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:15:00Z')) AS bigint) AS end_time,
+    35.578659 AS min_lat,
+    36.178659 AS max_lat,
+    -79.2373 AS min_lon,
+    -78.3373 AS max_lon
+)
+SELECT
   count(*) AS rows_total,
-  count(DISTINCT icao24) AS aircraft_total,
-  count_if(baroaltitude IS NOT NULL) AS rows_with_baro,
-  count_if(geoaltitude IS NOT NULL) AS rows_with_geo,
-  count_if(baroaltitude IS NOT NULL AND geoaltitude IS NOT NULL) AS rows_with_both_altitudes
-FROM state_vectors_data4
-WHERE hour = 1776592800
-  AND time BETWEEN 1776592800 AND 1776593700
-  AND lat BETWEEN 35.578659 AND 36.178659
-  AND lon BETWEEN -79.2373 AND -78.3373
-  AND time - lastcontact <= 15"</code></pre>
+  count(DISTINCT s.icao24) AS aircraft_total,
+  count_if(s.baroaltitude IS NOT NULL) AS rows_with_baro,
+  count_if(s.geoaltitude IS NOT NULL) AS rows_with_geo,
+  count_if(s.baroaltitude IS NOT NULL AND s.geoaltitude IS NOT NULL) AS rows_with_both_altitudes
+FROM state_vectors_data4 s
+CROSS JOIN params p
+WHERE s.hour = p.hour_start
+  AND s.time BETWEEN p.begin_time AND p.end_time
+  AND s.lat BETWEEN p.min_lat AND p.max_lat
+  AND s.lon BETWEEN p.min_lon AND p.max_lon
+  AND s.time - s.lastcontact <= 15;</code></pre>
       </div>
     </section>
 
     <section id="schema">
-      <div class="section-kicker">3 / 数据结构</div>
+      <div class="section-kicker">4 / 数据结构</div>
       <h2>从数据库行到训练 record：raw 不变，derived 可计算</h2>
-      <div class="matrix" role="table" aria-label="数据结构矩阵">
-        <div class="head">层级</div>
-        <div class="head">来源</div>
-        <div class="head">主键/粒度</div>
-        <div class="head">高度字段</div>
-        <div class="head">是否可变换</div>
-
-        <div class="rowhead">history_rows/v2</div>
-        <div>Trino / traffic 返回的 dataframe 行</div>
-        <div>状态向量行</div>
-        <div><code>baroaltitude</code>, <code>geoaltitude</code></div>
-        <div class="no">不可排序、不可重命名、不可过滤</div>
-
-        <div class="rowhead">raw_tracks/v2</div>
-        <div>由 history rows 派生的 track-like 兼容记录</div>
-        <div><code>raw_track_id</code></div>
-        <div><code>track.path[*][3]</code> = barometric altitude</div>
-        <div class="maybe">可派生，但必须回指 raw row</div>
-
-        <div class="rowhead">airport_events/v2</div>
-        <div>5 NM entry/exit episode</div>
-        <div><code>event_id</code></div>
-        <div><code>training_points[*].baro_altitude_m</code> + <code>geo_altitude_m</code></div>
-        <div class="yes">derived layer，可存计算字段</div>
-
-        <div class="rowhead">quarantine/v2</div>
-        <div>缺字段或质量门失败的事件</div>
-        <div><code>event_id</code> + reason</div>
-        <div>通常缺 <code>geo_altitude_m</code> 或 raw range</div>
-        <div class="yes">用于审计和返工</div>
+      <div class="callout">
+        <strong><code>v2</code> 是本项目输出格式版本，不是 OpenSky 数据库版本。</strong>
+        例如 <code>history_rows/v2</code> 表示“history rows 这一层，使用第 2 版存储 schema 和目录布局”。
+        这样以后如果字段命名、JSONL 结构、分区目录或训练样本协议发生不兼容变化，可以写到
+        <code>v3</code>，而旧的 <code>v2</code> 数据仍然可复现、可审计。
       </div>
+      <table class="schema-table">
+        <thead>
+          <tr>
+            <th>层级</th>
+            <th>来源</th>
+            <th>主键/粒度</th>
+            <th>高度字段</th>
+            <th>是否可变换</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>history_rows/v2</strong></td>
+            <td>Trino / traffic 返回的 dataframe 行</td>
+            <td>状态向量行</td>
+            <td>
+              <ul class="field-list">
+                <li><code>baroaltitude</code><span class="field-note">OpenSky 原始气压高度，metres</span></li>
+                <li><code>geoaltitude</code><span class="field-note">OpenSky 原始几何/GNSS 高度，metres，可为空</span></li>
+              </ul>
+            </td>
+            <td><span class="pill orange">不可排序、不可重命名、不可过滤</span></td>
+          </tr>
+          <tr>
+            <td><strong>raw_tracks/v2</strong></td>
+            <td>由 history rows 派生的 track-like 兼容记录</td>
+            <td><code>raw_track_id</code></td>
+            <td>
+              <ul class="field-list">
+                <li><code>track.path[*][3]</code><span class="field-note">兼容 OpenSky track path，值来自 <code>baroaltitude</code></span></li>
+              </ul>
+            </td>
+            <td><span class="pill orange">可派生，但必须回指 raw row</span></td>
+          </tr>
+          <tr>
+            <td><strong>airport_events/v2</strong></td>
+            <td>5 NM entry/exit episode</td>
+            <td><code>event_id</code></td>
+            <td>
+              <ul class="field-list">
+                <li><code>training_points[*].baro_altitude_m</code><span class="field-note">训练点中的气压高度通道</span></li>
+                <li><code>training_points[*].geo_altitude_m</code><span class="field-note">训练点中的几何高度通道；训练默认要求存在</span></li>
+              </ul>
+            </td>
+            <td><span class="pill green">derived layer，可存计算字段</span></td>
+          </tr>
+          <tr>
+            <td>
+              <strong>quarantine/v2</strong>
+              <span class="field-note">隔离区 / 待审输出</span>
+            </td>
+            <td>
+              不能进入训练集、但必须保留证据的事件。
+              这不是删除，也不是垃圾桶，而是质量门失败后的可审计记录。
+            </td>
+            <td><code>event_id</code> + reason</td>
+            <td>
+              <ul class="field-list">
+                <li><code>geo_altitude_m</code><span class="field-note">常见失败原因：<code>missing_geo_altitude</code></span></li>
+                <li><code>raw_waypoint_range</code><span class="field-note">常见失败原因：<code>missing_raw_waypoint_range</code></span></li>
+              </ul>
+            </td>
+            <td><span class="pill green">用于审计、返工和统计损失率</span></td>
+          </tr>
+        </tbody>
+      </table>
 
       <div class="grid-2">
         <div class="card">
@@ -807,66 +1315,78 @@ WHERE hour = 1776592800
       </div>
 
       <div class="command" data-label="sample-state-vectors">
-        <div class="command-header"><span>抽样查看 KRDU 终端区状态向量字段</span><button class="copy" type="button">Copy</button></div>
-<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
-  --server=https://trino.opensky-network.org \
-  --external-authentication \
-  --catalog minio \
-  --schema osky \
-  --execute "SELECT
-  time,
-  icao24,
-  callsign,
-  lat,
-  lon,
-  velocity,
-  heading,
-  vertrate,
-  onground,
-  baroaltitude,
-  geoaltitude,
-  lastcontact,
-  hour
-FROM state_vectors_data4
-WHERE hour = 1776592800
-  AND time BETWEEN 1776592800 AND 1776593700
-  AND lat BETWEEN 35.578659 AND 36.178659
-  AND lon BETWEEN -79.2373 AND -78.3373
-  AND time - lastcontact <= 15
-ORDER BY time, icao24
-LIMIT 30"</code></pre>
+        <div class="command-header"><span>在 trino:osky&gt; 中抽样查看 KRDU 终端区状态向量字段</span><button class="copy" type="button">Copy</button></div>
+<pre><code>WITH params AS (
+  SELECT
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:00:00Z')) AS bigint) AS hour_start,
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:00:00Z')) AS bigint) AS begin_time,
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:15:00Z')) AS bigint) AS end_time,
+    35.578659 AS min_lat,
+    36.178659 AS max_lat,
+    -79.2373 AS min_lon,
+    -78.3373 AS max_lon
+)
+SELECT
+  s.time,
+  s.icao24,
+  s.callsign,
+  s.lat,
+  s.lon,
+  s.velocity,
+  s.heading,
+  s.vertrate,
+  s.onground,
+  s.baroaltitude,
+  s.geoaltitude,
+  s.lastcontact,
+  s.hour
+FROM state_vectors_data4 s
+CROSS JOIN params p
+WHERE s.hour = p.hour_start
+  AND s.time BETWEEN p.begin_time AND p.end_time
+  AND s.lat BETWEEN p.min_lat AND p.max_lat
+  AND s.lon BETWEEN p.min_lon AND p.max_lon
+  AND s.time - s.lastcontact <= 15
+ORDER BY s.time, s.icao24
+LIMIT 30;</code></pre>
       </div>
 
       <div class="command" data-label="sample-flight-metadata">
-        <div class="command-header"><span>抽样查看 KRDU 当天航班级起降机场元数据</span><button class="copy" type="button">Copy</button></div>
-<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
-  --server=https://trino.opensky-network.org \
-  --external-authentication \
-  --catalog minio \
-  --schema osky \
-  --execute "SELECT
-  icao24,
-  callsign,
-  firstseen,
-  lastseen,
-  estdepartureairport,
-  estarrivalairport,
-  day
-FROM flights_data4
-WHERE day = 1776556800
-  AND (estdepartureairport = 'KRDU' OR estarrivalairport = 'KRDU')
-ORDER BY firstseen
-LIMIT 30"</code></pre>
+        <div class="command-header"><span>在 trino:osky&gt; 中抽样查看 KRDU 当天航班级起降机场元数据</span><button class="copy" type="button">Copy</button></div>
+<pre><code>WITH params AS (
+  SELECT
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T00:00:00Z')) AS bigint) AS day_start
+)
+SELECT
+  f.icao24,
+  f.callsign,
+  f.firstseen,
+  f.lastseen,
+  f.estdepartureairport,
+  f.estarrivalairport,
+  f.day
+FROM flights_data4 f
+CROSS JOIN params p
+WHERE f.day = p.day_start
+  AND (f.estdepartureairport = 'KRDU' OR f.estarrivalairport = 'KRDU')
+ORDER BY f.firstseen
+LIMIT 30;</code></pre>
       </div>
 
       <div class="command" data-label="state-flight-join">
-        <div class="command-header"><span>验证状态向量和航班元数据可以按时间窗口关联</span><button class="copy" type="button">Copy</button></div>
-<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
-  --server=https://trino.opensky-network.org \
-  --external-authentication \
-  --catalog minio \
-  --schema osky \
-  --execute "SELECT
+        <div class="command-header"><span>在 trino:osky&gt; 中验证状态向量和航班元数据可以按时间窗口关联</span><button class="copy" type="button">Copy</button></div>
+<pre><code>WITH params AS (
+  SELECT
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T00:00:00Z')) AS bigint) AS day_start,
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:00:00Z')) AS bigint) AS hour_start,
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:00:00Z')) AS bigint) AS begin_time,
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:15:00Z')) AS bigint) AS end_time,
+    35.578659 AS min_lat,
+    36.178659 AS max_lat,
+    -79.2373 AS min_lon,
+    -78.3373 AS max_lon
+)
+SELECT
   s.time,
   s.icao24,
   coalesce(s.callsign, f.callsign) AS callsign,
@@ -877,22 +1397,23 @@ LIMIT 30"</code></pre>
   s.baroaltitude,
   s.geoaltitude
 FROM state_vectors_data4 s
+CROSS JOIN params p
 LEFT JOIN flights_data4 f
-  ON f.day = 1776556800
+  ON f.day = p.day_start
  AND f.icao24 = s.icao24
  AND s.time BETWEEN f.firstseen AND f.lastseen
-WHERE s.hour = 1776592800
-  AND s.time BETWEEN 1776592800 AND 1776593700
-  AND s.lat BETWEEN 35.578659 AND 36.178659
-  AND s.lon BETWEEN -79.2373 AND -78.3373
+WHERE s.hour = p.hour_start
+  AND s.time BETWEEN p.begin_time AND p.end_time
+  AND s.lat BETWEEN p.min_lat AND p.max_lat
+  AND s.lon BETWEEN p.min_lon AND p.max_lon
   AND s.time - s.lastcontact <= 15
 ORDER BY s.time, s.icao24
-LIMIT 30"</code></pre>
+LIMIT 30;</code></pre>
       </div>
     </section>
 
     <section id="altitude">
-      <div class="section-kicker">4 / 高度语义</div>
+      <div class="section-kicker">5 / 高度语义</div>
       <h2>本项目必须同时保留 geo altitude 和 barometric altitude</h2>
       <p>
         垂直剖面、跑道对齐、进近下滑剖面和模型训练会被高度来源强烈影响。OpenSky 的
@@ -944,83 +1465,103 @@ LIMIT 30"</code></pre>
       </div>
 
       <div class="command" data-label="altitude-delta-sample">
-        <div class="command-header"><span>抽样查看 geo 与 baro 的差值，不要假设二者相等</span><button class="copy" type="button">Copy</button></div>
-<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
-  --server=https://trino.opensky-network.org \
-  --external-authentication \
-  --catalog minio \
-  --schema osky \
-  --execute "SELECT
-  time,
-  icao24,
-  callsign,
-  onground,
-  baroaltitude,
-  geoaltitude,
-  geoaltitude - baroaltitude AS geo_minus_baro_m
-FROM state_vectors_data4
-WHERE hour = 1776592800
-  AND time BETWEEN 1776592800 AND 1776593700
-  AND lat BETWEEN 35.578659 AND 36.178659
-  AND lon BETWEEN -79.2373 AND -78.3373
-  AND baroaltitude IS NOT NULL
-  AND geoaltitude IS NOT NULL
-  AND time - lastcontact <= 15
-ORDER BY abs(geoaltitude - baroaltitude) DESC
-LIMIT 30"</code></pre>
+        <div class="command-header"><span>在 trino:osky&gt; 中抽样查看 geo 与 baro 的差值，不要假设二者相等</span><button class="copy" type="button">Copy</button></div>
+<pre><code>WITH params AS (
+  SELECT
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:00:00Z')) AS bigint) AS hour_start,
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:00:00Z')) AS bigint) AS begin_time,
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:15:00Z')) AS bigint) AS end_time,
+    35.578659 AS min_lat,
+    36.178659 AS max_lat,
+    -79.2373 AS min_lon,
+    -78.3373 AS max_lon
+)
+SELECT
+  s.time,
+  s.icao24,
+  s.callsign,
+  s.onground,
+  s.baroaltitude,
+  s.geoaltitude,
+  s.geoaltitude - s.baroaltitude AS geo_minus_baro_m
+FROM state_vectors_data4 s
+CROSS JOIN params p
+WHERE s.hour = p.hour_start
+  AND s.time BETWEEN p.begin_time AND p.end_time
+  AND s.lat BETWEEN p.min_lat AND p.max_lat
+  AND s.lon BETWEEN p.min_lon AND p.max_lon
+  AND s.baroaltitude IS NOT NULL
+  AND s.geoaltitude IS NOT NULL
+  AND s.time - s.lastcontact <= 15
+ORDER BY abs(s.geoaltitude - s.baroaltitude) DESC
+LIMIT 30;</code></pre>
       </div>
 
       <div class="command" data-label="altitude-quality">
-        <div class="command-header"><span>统计双高度覆盖率，决定可训练样本和 quarantine 比例</span><button class="copy" type="button">Copy</button></div>
-<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
-  --server=https://trino.opensky-network.org \
-  --external-authentication \
-  --catalog minio \
-  --schema osky \
-  --execute "SELECT
+        <div class="command-header"><span>在 trino:osky&gt; 中统计双高度覆盖率，决定可训练样本和 quarantine 比例</span><button class="copy" type="button">Copy</button></div>
+<pre><code>WITH params AS (
+  SELECT
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:00:00Z')) AS bigint) AS hour_start,
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:00:00Z')) AS bigint) AS begin_time,
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:15:00Z')) AS bigint) AS end_time,
+    35.578659 AS min_lat,
+    36.178659 AS max_lat,
+    -79.2373 AS min_lon,
+    -78.3373 AS max_lon
+)
+SELECT
   count(*) AS points_total,
-  count_if(baroaltitude IS NOT NULL) AS points_with_baro_altitude,
-  count_if(geoaltitude IS NOT NULL) AS points_with_geo_altitude,
-  count_if(baroaltitude IS NOT NULL AND geoaltitude IS NOT NULL) AS points_with_both_altitudes,
-  round(100.0 * count_if(baroaltitude IS NOT NULL AND geoaltitude IS NOT NULL) / count(*), 2) AS both_altitude_pct
-FROM state_vectors_data4
-WHERE hour = 1776592800
-  AND time BETWEEN 1776592800 AND 1776593700
-  AND lat BETWEEN 35.578659 AND 36.178659
-  AND lon BETWEEN -79.2373 AND -78.3373
-  AND time - lastcontact <= 15"</code></pre>
+  count_if(s.baroaltitude IS NOT NULL) AS points_with_baro_altitude,
+  count_if(s.geoaltitude IS NOT NULL) AS points_with_geo_altitude,
+  count_if(s.baroaltitude IS NOT NULL AND s.geoaltitude IS NOT NULL) AS points_with_both_altitudes,
+  round(100.0 * count_if(s.baroaltitude IS NOT NULL AND s.geoaltitude IS NOT NULL) / count(*), 2) AS both_altitude_pct
+FROM state_vectors_data4 s
+CROSS JOIN params p
+WHERE s.hour = p.hour_start
+  AND s.time BETWEEN p.begin_time AND p.end_time
+  AND s.lat BETWEEN p.min_lat AND p.max_lat
+  AND s.lon BETWEEN p.min_lon AND p.max_lon
+  AND s.time - s.lastcontact <= 15;</code></pre>
       </div>
 
       <div class="command" data-label="near-ground-altitude">
-        <div class="command-header"><span>检查机场附近低高度/地面样本，用于 landing/depart 证据</span><button class="copy" type="button">Copy</button></div>
-<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
-  --server=https://trino.opensky-network.org \
-  --external-authentication \
-  --catalog minio \
-  --schema osky \
-  --execute "SELECT
-  time,
-  icao24,
-  callsign,
-  onground,
-  baroaltitude,
-  geoaltitude,
-  baroaltitude - 132.588 AS baro_agl_est_m,
-  geoaltitude - 132.588 AS geo_agl_est_m
-FROM state_vectors_data4
-WHERE hour = 1776592800
-  AND time BETWEEN 1776592800 AND 1776593700
-  AND lat BETWEEN 35.828659 AND 35.928659
-  AND lon BETWEEN -78.8373 AND -78.7373
-  AND (onground OR baroaltitude <= 132.588 + 600)
-  AND time - lastcontact <= 15
-ORDER BY time
-LIMIT 30"</code></pre>
+        <div class="command-header"><span>在 trino:osky&gt; 中检查机场附近低高度/地面样本，用于 landing/depart 证据</span><button class="copy" type="button">Copy</button></div>
+<pre><code>WITH params AS (
+  SELECT
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:00:00Z')) AS bigint) AS hour_start,
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:00:00Z')) AS bigint) AS begin_time,
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:15:00Z')) AS bigint) AS end_time,
+    35.828659 AS min_lat,
+    35.928659 AS max_lat,
+    -78.8373 AS min_lon,
+    -78.7373 AS max_lon,
+    132.588 AS airport_elev_m,
+    600.0 AS low_altitude_agl_m
+)
+SELECT
+  s.time,
+  s.icao24,
+  s.callsign,
+  s.onground,
+  s.baroaltitude,
+  s.geoaltitude,
+  s.baroaltitude - p.airport_elev_m AS baro_agl_est_m,
+  s.geoaltitude - p.airport_elev_m AS geo_agl_est_m
+FROM state_vectors_data4 s
+CROSS JOIN params p
+WHERE s.hour = p.hour_start
+  AND s.time BETWEEN p.begin_time AND p.end_time
+  AND s.lat BETWEEN p.min_lat AND p.max_lat
+  AND s.lon BETWEEN p.min_lon AND p.max_lon
+  AND (s.onground OR s.baroaltitude <= p.airport_elev_m + p.low_altitude_agl_m)
+  AND s.time - s.lastcontact <= 15
+ORDER BY s.time
+LIMIT 30;</code></pre>
       </div>
     </section>
 
     <section id="pipeline">
-      <div class="section-kicker">5 / 项目落地层</div>
+      <div class="section-kicker">6 / 项目落地层</div>
       <h2>代码中的数据拉取路线</h2>
       <div class="split">
         <div>
@@ -1045,13 +1586,15 @@ LIMIT 30"</code></pre>
       </div>
 
       <div class="command" data-label="traffic-equivalent-airport">
-        <div class="command-header"><span>用 Trino CLI 近似验证 history-db 的 airport_ops 数据含义</span><button class="copy" type="button">Copy</button></div>
-<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
-  --server=https://trino.opensky-network.org \
-  --external-authentication \
-  --catalog minio \
-  --schema osky \
-  --execute "SELECT
+        <div class="command-header"><span>在 trino:osky&gt; 中近似验证 history-db 的 airport_ops 数据含义</span><button class="copy" type="button">Copy</button></div>
+<pre><code>WITH params AS (
+  SELECT
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T00:00:00Z')) AS bigint) AS day_start,
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:00:00Z')) AS bigint) AS hour_start,
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:00:00Z')) AS bigint) AS begin_time,
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:15:00Z')) AS bigint) AS end_time
+)
+SELECT
   s.time,
   s.icao24,
   coalesce(s.callsign, f.callsign) AS callsign,
@@ -1066,43 +1609,50 @@ LIMIT 30"</code></pre>
   f.estdepartureairport,
   f.estarrivalairport
 FROM state_vectors_data4 s
+CROSS JOIN params p
 JOIN flights_data4 f
-  ON f.day = 1776556800
+  ON f.day = p.day_start
  AND f.icao24 = s.icao24
  AND s.time BETWEEN f.firstseen AND f.lastseen
-WHERE s.hour = 1776592800
-  AND s.time BETWEEN 1776592800 AND 1776593700
+WHERE s.hour = p.hour_start
+  AND s.time BETWEEN p.begin_time AND p.end_time
   AND (f.estdepartureairport = 'KRDU' OR f.estarrivalairport = 'KRDU')
   AND s.time - s.lastcontact <= 15
 ORDER BY s.icao24, s.time
-LIMIT 40"</code></pre>
+LIMIT 40;</code></pre>
       </div>
 
       <div class="command" data-label="traffic-equivalent-terminal">
-        <div class="command-header"><span>用 Trino CLI 近似验证 terminal_all bbox 数据含义</span><button class="copy" type="button">Copy</button></div>
-<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
-  --server=https://trino.opensky-network.org \
-  --external-authentication \
-  --catalog minio \
-  --schema osky \
-  --execute "SELECT
-  icao24,
-  min(time) AS first_time,
-  max(time) AS last_time,
+        <div class="command-header"><span>在 trino:osky&gt; 中近似验证 terminal_all bbox 数据含义</span><button class="copy" type="button">Copy</button></div>
+<pre><code>WITH params AS (
+  SELECT
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:00:00Z')) AS bigint) AS hour_start,
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:00:00Z')) AS bigint) AS begin_time,
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:15:00Z')) AS bigint) AS end_time,
+    35.578659 AS min_lat,
+    36.178659 AS max_lat,
+    -79.2373 AS min_lon,
+    -78.3373 AS max_lon
+)
+SELECT
+  s.icao24,
+  min(s.time) AS first_time,
+  max(s.time) AS last_time,
   count(*) AS point_count,
-  count_if(baroaltitude IS NOT NULL AND geoaltitude IS NOT NULL) AS dual_altitude_points,
-  min(baroaltitude) AS min_baroaltitude_m,
-  max(baroaltitude) AS max_baroaltitude_m
-FROM state_vectors_data4
-WHERE hour = 1776592800
-  AND time BETWEEN 1776592800 AND 1776593700
-  AND lat BETWEEN 35.578659 AND 36.178659
-  AND lon BETWEEN -79.2373 AND -78.3373
-  AND time - lastcontact <= 15
-GROUP BY icao24
+  count_if(s.baroaltitude IS NOT NULL AND s.geoaltitude IS NOT NULL) AS dual_altitude_points,
+  min(s.baroaltitude) AS min_baroaltitude_m,
+  max(s.baroaltitude) AS max_baroaltitude_m
+FROM state_vectors_data4 s
+CROSS JOIN params p
+WHERE s.hour = p.hour_start
+  AND s.time BETWEEN p.begin_time AND p.end_time
+  AND s.lat BETWEEN p.min_lat AND p.max_lat
+  AND s.lon BETWEEN p.min_lon AND p.max_lon
+  AND s.time - s.lastcontact <= 15
+GROUP BY s.icao24
 HAVING count(*) >= 3
 ORDER BY point_count DESC
-LIMIT 40"</code></pre>
+LIMIT 40;</code></pre>
       </div>
 
       <div class="card warn">
@@ -1116,7 +1666,7 @@ LIMIT 40"</code></pre>
     </section>
 
     <section id="validation">
-      <div class="section-kicker">6 / 验证清单</div>
+      <div class="section-kicker">7 / 验证清单</div>
       <h2>每次拉取前后的快速验证</h2>
 
       <div class="grid-3">
@@ -1167,29 +1717,38 @@ LIMIT 40"</code></pre>
       </table>
 
       <div class="command" data-label="label-preview">
-        <div class="command-header"><span>在数据库侧预估 airport_ops 与 terminal-area 的重叠关系</span><button class="copy" type="button">Copy</button></div>
-<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
-  --server=https://trino.opensky-network.org \
-  --external-authentication \
-  --catalog minio \
-  --schema osky \
-  --execute "WITH area AS (
-  SELECT DISTINCT icao24
-  FROM state_vectors_data4
-  WHERE hour = 1776592800
-    AND time BETWEEN 1776592800 AND 1776593700
-    AND lat BETWEEN 35.578659 AND 36.178659
-    AND lon BETWEEN -79.2373 AND -78.3373
-    AND time - lastcontact <= 15
+        <div class="command-header"><span>在 trino:osky&gt; 中预估 airport_ops 与 terminal-area 的重叠关系</span><button class="copy" type="button">Copy</button></div>
+<pre><code>WITH
+params AS (
+  SELECT
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T00:00:00Z')) AS bigint) AS day_start,
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:00:00Z')) AS bigint) AS hour_start,
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:00:00Z')) AS bigint) AS begin_time,
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:15:00Z')) AS bigint) AS end_time,
+    35.578659 AS min_lat,
+    36.178659 AS max_lat,
+    -79.2373 AS min_lon,
+    -78.3373 AS max_lon
+),
+area AS (
+  SELECT DISTINCT s.icao24
+  FROM state_vectors_data4 s
+  CROSS JOIN params p
+  WHERE s.hour = p.hour_start
+    AND s.time BETWEEN p.begin_time AND p.end_time
+    AND s.lat BETWEEN p.min_lat AND p.max_lat
+    AND s.lon BETWEEN p.min_lon AND p.max_lon
+    AND s.time - s.lastcontact <= 15
 ),
 ops AS (
   SELECT DISTINCT
-    icao24,
-    estdepartureairport,
-    estarrivalairport
-  FROM flights_data4
-  WHERE day = 1776556800
-    AND (estdepartureairport = 'KRDU' OR estarrivalairport = 'KRDU')
+    f.icao24,
+    f.estdepartureairport,
+    f.estarrivalairport
+  FROM flights_data4 f
+  CROSS JOIN params p
+  WHERE f.day = p.day_start
+    AND (f.estdepartureairport = 'KRDU' OR f.estarrivalairport = 'KRDU')
 )
 SELECT
   count(*) AS area_aircraft,
@@ -1198,26 +1757,32 @@ SELECT
   count_if(ops.estdepartureairport = 'KRDU') AS departure_metadata_aircraft,
   count_if(ops.icao24 IS NULL) AS possible_pass_or_unknown_aircraft
 FROM area
-LEFT JOIN ops ON ops.icao24 = area.icao24"</code></pre>
+LEFT JOIN ops ON ops.icao24 = area.icao24;</code></pre>
       </div>
 
       <div class="command" data-label="stale-filter-impact">
-        <div class="command-header"><span>验证 lastcontact stale 过滤对样本量的影响</span><button class="copy" type="button">Copy</button></div>
-<pre><code>trino --user="${OPENSKY_USER:?set OPENSKY_USER}" --password \
-  --server=https://trino.opensky-network.org \
-  --external-authentication \
-  --catalog minio \
-  --schema osky \
-  --execute "SELECT
+        <div class="command-header"><span>在 trino:osky&gt; 中验证 lastcontact stale 过滤对样本量的影响</span><button class="copy" type="button">Copy</button></div>
+<pre><code>WITH params AS (
+  SELECT
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:00:00Z')) AS bigint) AS hour_start,
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:00:00Z')) AS bigint) AS begin_time,
+    CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T10:15:00Z')) AS bigint) AS end_time,
+    35.578659 AS min_lat,
+    36.178659 AS max_lat,
+    -79.2373 AS min_lon,
+    -78.3373 AS max_lon
+)
+SELECT
   count(*) AS rows_before_stale_filter,
-  count_if(time - lastcontact <= 15) AS rows_after_15s_stale_filter,
-  count_if(time - lastcontact <= 15 AND lat IS NOT NULL AND lon IS NOT NULL) AS usable_position_rows,
-  count_if(time - lastcontact <= 15 AND baroaltitude IS NOT NULL AND geoaltitude IS NOT NULL) AS usable_dual_altitude_rows
-FROM state_vectors_data4
-WHERE hour = 1776592800
-  AND time BETWEEN 1776592800 AND 1776593700
-  AND lat BETWEEN 35.578659 AND 36.178659
-  AND lon BETWEEN -79.2373 AND -78.3373"</code></pre>
+  count_if(s.time - s.lastcontact <= 15) AS rows_after_15s_stale_filter,
+  count_if(s.time - s.lastcontact <= 15 AND s.lat IS NOT NULL AND s.lon IS NOT NULL) AS usable_position_rows,
+  count_if(s.time - s.lastcontact <= 15 AND s.baroaltitude IS NOT NULL AND s.geoaltitude IS NOT NULL) AS usable_dual_altitude_rows
+FROM state_vectors_data4 s
+CROSS JOIN params p
+WHERE s.hour = p.hour_start
+  AND s.time BETWEEN p.begin_time AND p.end_time
+  AND s.lat BETWEEN p.min_lat AND p.max_lat
+  AND s.lon BETWEEN p.min_lon AND p.max_lon;</code></pre>
       </div>
 
       <div class="callout">
@@ -1248,6 +1813,7 @@ WHERE hour = 1776592800
         <li>OpenSky 官方 Trino 文档：<a href="https://openskynetwork.github.io/opensky-api/trino.html">Trino - Historical Data</a></li>
         <li>OpenSky 官方 API 数据结构说明：<a href="https://openskynetwork.github.io/opensky-api/">The OpenSky Network API documentation</a></li>
         <li><code>traffic</code> OpenSky history DB guide：<a href="https://traffic-viz.github.io/data_sources/opensky_db.html">How to access ADS-B data from OpenSky history database?</a></li>
+        <li>本地运行时 <code>pyopensky</code> schema：<code>/Users/liudongxu/opt/miniconda3/envs/aviation/lib/python3.13/site-packages/pyopensky/schema.py</code></li>
         <li>本仓库：<code>trajectory_data_process/docs/03-training-data-fetch-store-redesign.md</code></li>
         <li>本仓库：<code>trajectory_data_process/docs/04-production-adsb-training-data-plan.md</code></li>
         <li>本仓库：<code>trajectory_data_process/acquisition/opensky_history_db.py</code></li>
@@ -1257,7 +1823,7 @@ WHERE hour = 1776592800
     </section>
 
     <div class="footer">
-      Last updated: 2026-05-22. This is a static, self-contained HTML guide; command copy buttons run entirely in the browser.
+      Last updated: 2026-05-24. This is a static, self-contained HTML guide; command copy buttons run entirely in the browser.
     </div>
   </div>
 
