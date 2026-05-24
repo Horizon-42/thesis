@@ -1585,8 +1585,23 @@ LIMIT 30;</code></pre>
         </div>
       </div>
 
+      <div class="card soft">
+        <h3><code>airport_ops</code> 是什么？</h3>
+        <p>
+          <code>airport_ops</code> 是项目里的 <code>--fetch-profile</code> 名称，意思是 airport operations：
+          只抓取和目标机场起飞/到达相关的航班状态向量。它不是 OpenSky 的一张表。
+          在 history-db 路径里，代码会调用 <code>traffic.data.opensky.history(..., airport='KRDU')</code>，
+          请求状态向量字段，并带上 <code>FlightsData4.estdepartureairport</code> /
+          <code>FlightsData4.estarrivalairport</code> 作为 landing/depart 证据。
+        </p>
+        <p>
+          和它相对的是 <code>terminal_all</code>：后者会再按机场中心 bbox 拉取终端区内所有状态向量，
+          用来发现没有 KRDU 起降元数据、但穿过机场附近的 pass-through 飞机。
+        </p>
+      </div>
+
       <div class="command" data-label="traffic-equivalent-airport">
-        <div class="command-header"><span>在 trino:osky&gt; 中近似验证 history-db 的 airport_ops 数据含义</span><button class="copy" type="button">Copy</button></div>
+        <div class="command-header"><span>在 trino:osky&gt; 中近似验证 airport_ops：KRDU 起降相关航班的状态向量</span><button class="copy" type="button">Copy</button></div>
 <pre><code>WITH params AS (
   SELECT
     CAST(to_unixtime(from_iso8601_timestamp('2026-04-19T00:00:00Z')) AS bigint) AS day_start,
@@ -1716,6 +1731,60 @@ LIMIT 40;</code></pre>
         </tbody>
       </table>
 
+      <div class="card soft">
+        <h3>这段 airport_ops / terminal-area 对比 SQL 在验证什么？</h3>
+        <p>
+          它把同一个时间窗里的两类证据放到一起比较：一类是机场附近 bbox 内实际出现过的飞机，
+          另一类是 <code>flights_data4</code> 里被推断为 KRDU 起飞或到达的航班元数据。
+          这个检查能帮助判断 <code>terminal_all</code> 里有多少飞机能被 KRDU 起降元数据解释，
+          以及有多少飞机更可能是 pass-through 或元数据未知。
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>SQL 部分</th>
+              <th>作用</th>
+              <th>为什么需要</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>params</code></td>
+              <td>把人类可读的 UTC 时间和 KRDU 附近 bbox 写成一行参数。</td>
+              <td>避免手写 epoch 秒；同时保证后面每个 CTE 用同一套时间窗和空间范围。</td>
+            </tr>
+            <tr>
+              <td><code>area</code></td>
+              <td>从 <code>state_vectors_data4</code> 找出 10:00-10:15 UTC、KRDU bbox 内出现过的唯一 <code>icao24</code>。</td>
+              <td>这是 terminal-area 视角：只要飞机实际出现在机场附近，就先纳入候选，不管它是不是在 KRDU 起降。</td>
+            </tr>
+            <tr>
+              <td><code>ops</code></td>
+              <td>从 <code>flights_data4</code> 找出当天 estimated departure/arrival airport 为 KRDU 的飞机。</td>
+              <td>这是 airport_ops 视角：只关心 OpenSky 航班级元数据认为和 KRDU 起降相关的飞机。</td>
+            </tr>
+            <tr>
+              <td><code>LEFT JOIN</code></td>
+              <td>保留所有 <code>area</code> 飞机，再尝试匹配它们是否有 KRDU 起降元数据。</td>
+              <td>没有匹配上的飞机不会丢失；它们正是 possible pass-through 或 metadata unknown 的来源。</td>
+            </tr>
+            <tr>
+              <td>最终 <code>SELECT</code></td>
+              <td>统计区域飞机总数、带 KRDU 元数据的飞机数、landing/departure 证据数和未知数。</td>
+              <td>用于判断机场标签证据是否足够，以及 <code>terminal_all</code> 是否发现了 airport_ops 之外的飞机。</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          输出里 <code>possible_pass_or_unknown_aircraft</code> 不等于“确定 pass-through”。
+          它只表示：这架飞机在 KRDU 附近出现了，但当天 <code>flights_data4</code> 没有把它标成 KRDU 起飞或到达。
+          真实标签还要结合 5 NM entry/exit、低高度、<code>onground</code>、高度剖面和时间完整性判断。
+          另外，这个查询是快速健康检查：<code>ops</code> 只按 UTC day 找 KRDU 起降元数据，
+          没有要求 <code>f.firstseen/f.lastseen</code> 和 10:00-10:15 的状态向量窗口严格重叠。
+          精确事件生成仍应使用时间窗 join 和 5 NM episode 逻辑。
+        </p>
+      </div>
+
       <div class="command" data-label="label-preview">
         <div class="command-header"><span>在 trino:osky&gt; 中预估 airport_ops 与 terminal-area 的重叠关系</span><button class="copy" type="button">Copy</button></div>
 <pre><code>WITH
@@ -1751,11 +1820,11 @@ ops AS (
     AND (f.estdepartureairport = 'KRDU' OR f.estarrivalairport = 'KRDU')
 )
 SELECT
-  count(*) AS area_aircraft,
-  count_if(ops.icao24 IS NOT NULL) AS area_aircraft_with_krdu_ops_metadata,
-  count_if(ops.estarrivalairport = 'KRDU') AS landing_metadata_aircraft,
-  count_if(ops.estdepartureairport = 'KRDU') AS departure_metadata_aircraft,
-  count_if(ops.icao24 IS NULL) AS possible_pass_or_unknown_aircraft
+  count(DISTINCT area.icao24) AS area_aircraft,
+  count(DISTINCT CASE WHEN ops.icao24 IS NOT NULL THEN area.icao24 END) AS area_aircraft_with_krdu_ops_metadata,
+  count(DISTINCT CASE WHEN ops.estarrivalairport = 'KRDU' THEN area.icao24 END) AS landing_metadata_aircraft,
+  count(DISTINCT CASE WHEN ops.estdepartureairport = 'KRDU' THEN area.icao24 END) AS departure_metadata_aircraft,
+  count(DISTINCT CASE WHEN ops.icao24 IS NULL THEN area.icao24 END) AS possible_pass_or_unknown_aircraft
 FROM area
 LEFT JOIN ops ON ops.icao24 = area.icao24;</code></pre>
       </div>

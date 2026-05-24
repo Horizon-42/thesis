@@ -17,7 +17,7 @@ if __package__ is None or __package__ == "":  # pragma: no cover - direct script
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from trajectory_data_process.acquisition.fetch_cylw_opensky import (
+from trajectory_data_process.acquisition.fetch_asdb_opensky import (
     default_aeroviz_root,
     default_outputs_root,
     parse_time_to_unix,
