@@ -27,6 +27,8 @@ except ImportError:
 
 
 class FlightVisualizer:
+    """Matplotlib UI wrapper around the 3-DOF point-mass simulator."""
+
     def __init__(self):
         # Reuse the existing simulator model. This script only handles plotting
         # and simple user input.
@@ -45,8 +47,10 @@ class FlightVisualizer:
             m=10000.0,
         )
 
+        # Runtime objects updated after each Run click. current_control is kept
+        # so CL/CD can be recomputed for every displayed animation frame.
         self.solution = None
-        self.coefficients = None
+        self.current_control = None
         self.animation = None
 
         # The figure is split manually: 3D plot on the left, controls and state
@@ -73,17 +77,17 @@ class FlightVisualizer:
         self.thrust_box = self._add_input_box(
             y=0.82,
             label="Thrust N",
-            initial="3000",
+            initial="12000",
         )
         self.bank_box = self._add_input_box(
             y=0.74,
             label="Bank deg",
-            initial="0",
+            initial="30",
         )
         self.load_box = self._add_input_box(
             y=0.66,
             label="Load n",
-            initial="1.1",
+            initial="1.1547",
         )
         self.duration_box = self._add_input_box(
             y=0.58,
@@ -159,6 +163,7 @@ class FlightVisualizer:
             t_span=(0.0, duration),
             t_eval=t_eval,
         )
+        self.current_control = control
         self._store_simulation_result(simulation_result)
 
         if not self.solution.success:
@@ -182,13 +187,13 @@ class FlightVisualizer:
         self.fig.canvas.draw_idle()
 
     def _store_simulation_result(self, simulation_result):
-        # New simulator versions return (solution, [CL, CD]). Older versions
-        # returned only the solution, so keep both forms supported.
+        # Older simulator versions returned (solution, [CL, CD]). The current
+        # simulator returns only the solution. Keep this compatibility shim so
+        # the visualizer is tolerant while the model interface is evolving.
         if isinstance(simulation_result, tuple):
-            self.solution, self.coefficients = simulation_result
+            self.solution = simulation_result[0]
         else:
             self.solution = simulation_result
-            self.coefficients = None
 
     @staticmethod
     def _read_float(text_box, label):
@@ -213,6 +218,9 @@ class FlightVisualizer:
             self.solution.y[2, 0] = 0.0
             return
 
+        # Interpolate between the last positive-altitude sample and the first
+        # below-ground sample. This makes the displayed path terminate exactly
+        # at h = 0 instead of showing an artificial underground segment.
         previous_index = hit_index - 1
         previous_h = self.solution.y[2, previous_index]
         hit_h = self.solution.y[2, hit_index]
@@ -235,7 +243,7 @@ class FlightVisualizer:
         # Return the view to the initial state but keep input values unchanged.
         self._stop_animation()
         self.solution = None
-        self.coefficients = None
+        self.current_control = None
         self._show_initial_state()
         self.fig.canvas.draw_idle()
 
@@ -314,6 +322,15 @@ class FlightVisualizer:
             setter(new_low, new_high)
 
     def _update_state_text(self, t, x, y, h, V, psi, gamma, m):
+        # CL/CD are not integrated state variables. They are derived diagnostics,
+        # so compute them from the current frame's state and active controls.
+        coefficients = self._get_current_coefficients(h, V, m)
+        if coefficients is None:
+            Cl = None
+            Cd = None
+        else:
+            Cl, Cd = coefficients
+
         # Convert angles back to degrees for easier reading in the UI.
         self.state_text.set_text(
             "\n".join(
@@ -326,16 +343,26 @@ class FlightVisualizer:
                     f"psi   : {math.degrees(psi):8.2f} deg",
                     f"gamma : {math.degrees(gamma):8.2f} deg",
                     f"mass  : {m:8.1f} kg",
-                    f"CL    : {self._format_coefficient(0)}",
-                    f"CD    : {self._format_coefficient(1)}",
+                    f"CL    : {self._format_coefficient(Cl)}",
+                    f"CD    : {self._format_coefficient(Cd)}",
                 ]
             )
         )
 
-    def _format_coefficient(self, index):
-        if self.coefficients is None:
+    def _get_current_coefficients(self, h, V, m):
+        # Before Run is clicked there is no active control, so the initial
+        # display intentionally shows CL/CD as n/a.
+        if self.current_control is None:
+            return None
+        return self.simulator.get_aerodynamic_coefficients(
+            h, V, m, self.current_control, self.atmosphere
+        )
+
+    @staticmethod
+    def _format_coefficient(value):
+        if value is None:
             return "   n/a"
-        return f"{self.coefficients[index]:8.4f}"
+        return f"{value:8.4f}"
 
 
 def main():
