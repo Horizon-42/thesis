@@ -62,12 +62,20 @@ class Simulator:
 
     def _get_drag_coefficient(self, lift_coefficient: float) -> float: return self.Cd0 + self.k * lift_coefficient**2
 
-    def dynamics(self, t, state_vec, control: Control, atmosphere: Atmosphere, Cd: float):
+    def get_aerodynamic_coefficients(self, h: float, V: float, m: float, control: Control, atmosphere: Atmosphere):
+        rho = atmosphere.get_density(h)
+        Cl = self._get_lift_coefficient(control.load_factor, V, rho, m)
+        Cd = self._get_drag_coefficient(Cl)
+        return Cl, Cd
+
+    def dynamics(self, t, state_vec, control: Control, atmosphere: Atmosphere):
         # Unpack state vector
         x, y, h, V, psi, gamma, m = state_vec
 
         # Get atmospheric density
         rho = atmosphere.get_ISA_density(h)
+
+        Cl, Cd = self.get_aerodynamic_coefficients(h, V, m, control, atmosphere)
 
         D = 0.5 * rho * V**2 * Cd * self.S 
         # 1.41, bank 45, should be a level turn.
@@ -91,9 +99,7 @@ class Simulator:
         # Convert initial state to vector form
         state_vec = [initial_state.x, initial_state.y, initial_state.h, initial_state.V, initial_state.psi, initial_state.gamma, initial_state.m]
 
-        Cl = self._get_lift_coefficient(control.load_factor, initial_state.V, atmosphere.get_density(initial_state.h), initial_state.m)
-        Cd = self._get_drag_coefficient(Cl)
         # Solve the ODEs using solve_ivp
-        sol = solve_ivp(lambda t, X: self.dynamics(t, X, control, atmosphere, Cd), t_span, state_vec, t_eval=t_eval)
+        sol = solve_ivp(lambda t, X: self.dynamics(t, X, control, atmosphere), t_span, state_vec, t_eval=t_eval)
 
-        return sol, [Cl, Cd]
+        return sol
