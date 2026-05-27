@@ -11,6 +11,7 @@ that updates while the trajectory is animated.
 """
 
 import math
+import subprocess
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -24,6 +25,144 @@ except ImportError:
     # Works when this file is executed directly:
     # python aerodynamic_model/visualize_simulator.py
     from simulator import Atmosphere, Control, Simulator, State
+
+
+class ClipboardTextBox(TextBox):
+    """TextBox with basic clipboard shortcuts and decimal-key aliases."""
+
+    COPY_KEYS = {"ctrl+c", "cmd+c", "super+c", "command+c"}
+    CUT_KEYS = {"ctrl+x", "cmd+x", "super+x", "command+x"}
+    PASTE_KEYS = {"ctrl+v", "cmd+v", "super+v", "command+v"}
+    SELECT_ALL_KEYS = {"ctrl+a", "cmd+a", "super+a", "command+a"}
+    DECIMAL_KEYS = {"period", "decimal", "kp_decimal", "numpad_decimal"}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._replace_all_on_next_insert = False
+
+    def _keypress(self, event):
+        if self.ignore(event) or not self.capturekeystrokes:
+            return
+
+        key = event.key or ""
+        normalized_key = key.lower()
+
+        if normalized_key in self.SELECT_ALL_KEYS:
+            self.cursor_index = len(self.text)
+            self._replace_all_on_next_insert = True
+            self._rendercursor()
+            return
+        if normalized_key in self.COPY_KEYS:
+            self._write_clipboard(self.text)
+            return
+        if normalized_key in self.CUT_KEYS:
+            self._write_clipboard(self.text)
+            self._replace_text("")
+            return
+        if normalized_key in self.PASTE_KEYS:
+            self._insert_text(self._read_clipboard().strip())
+            return
+        if normalized_key in self.DECIMAL_KEYS:
+            self._insert_text(".")
+            return
+
+        text = self.text
+        if len(key) == 1:
+            self._insert_text(key)
+        elif key == "right":
+            self._replace_all_on_next_insert = False
+            if self.cursor_index != len(text):
+                self.cursor_index += 1
+            self._rendercursor()
+        elif key == "left":
+            self._replace_all_on_next_insert = False
+            if self.cursor_index != 0:
+                self.cursor_index -= 1
+            self._rendercursor()
+        elif key == "home":
+            self._replace_all_on_next_insert = False
+            self.cursor_index = 0
+            self._rendercursor()
+        elif key == "end":
+            self._replace_all_on_next_insert = False
+            self.cursor_index = len(text)
+            self._rendercursor()
+        elif key == "backspace":
+            if self._replace_all_on_next_insert:
+                self._replace_text("")
+            elif self.cursor_index != 0:
+                self.cursor_index -= 1
+                self._replace_text(text[:self.cursor_index] + text[self.cursor_index + 1:])
+        elif key == "delete":
+            if self._replace_all_on_next_insert:
+                self._replace_text("")
+            elif self.cursor_index != len(text):
+                self._replace_text(text[:self.cursor_index] + text[self.cursor_index + 1:])
+        elif key in ["enter", "return"]:
+            if self.eventson:
+                self._observers.process("submit", self.text)
+
+    def _insert_text(self, value):
+        if not value:
+            return
+        if self._replace_all_on_next_insert:
+            self.cursor_index = len(value)
+            self._replace_text(value)
+            return
+
+        text = self.text
+        new_text = text[:self.cursor_index] + value + text[self.cursor_index:]
+        self.cursor_index += len(value)
+        self._replace_text(new_text)
+
+    def _replace_text(self, text):
+        self._replace_all_on_next_insert = False
+        self.cursor_index = min(self.cursor_index, len(text))
+        self.text_disp.set_text(text)
+        self._rendercursor()
+        if self.eventson:
+            self._observers.process("change", self.text)
+
+    @staticmethod
+    def _read_clipboard():
+        commands = [
+            ["pbpaste"],
+            ["xclip", "-selection", "clipboard", "-o"],
+            ["xsel", "--clipboard", "--output"],
+        ]
+        for command in commands:
+            try:
+                result = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=1.0,
+                    check=True,
+                )
+            except (FileNotFoundError, subprocess.SubprocessError):
+                continue
+            return result.stdout
+        return ""
+
+    @staticmethod
+    def _write_clipboard(text):
+        commands = [
+            ["pbcopy"],
+            ["xclip", "-selection", "clipboard"],
+            ["xsel", "--clipboard", "--input"],
+        ]
+        for command in commands:
+            try:
+                subprocess.run(
+                    command,
+                    input=text,
+                    text=True,
+                    timeout=1.0,
+                    check=True,
+                )
+            except (FileNotFoundError, subprocess.SubprocessError):
+                continue
+            return
 
 
 class FlightVisualizer:
@@ -105,7 +244,7 @@ class FlightVisualizer:
     def _add_input_box(self, y, label, initial):
         # add_axes uses normalized figure coordinates: [left, bottom, width, height].
         box_ax = self.fig.add_axes([0.82, y, 0.14, 0.045])
-        return TextBox(box_ax, label, initial=initial)
+        return ClipboardTextBox(box_ax, label, initial=initial)
 
     def _build_state_output_zone(self):
         # The state output zone is a text box updated once per animation frame.
