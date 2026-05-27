@@ -21,7 +21,7 @@ class State:
 @dataclass
 class Control:
     thrust: float
-    bank: float # roll angle, miu
+    bank_rad: float # roll angle / bank angle in radians, mu
     load_factor: float # n
 
 class Atmosphere:
@@ -89,8 +89,8 @@ class Simulator:
         dydt = V * math.cos(gamma) * math.sin(psi)
         dhdt = V * math.sin(gamma)
         dVdt = (control.thrust - D) / m - self.g * math.sin(gamma)
-        dpsidt = self.g/(V * math.cos(gamma)) * math.sin(control.bank) * control.load_factor
-        dgamadt = self.g / V * (control.load_factor * math.cos(control.bank) - math.cos(gamma))
+        dpsidt = self.g/(V * math.cos(gamma)) * math.sin(control.bank_rad) * control.load_factor
+        dgamadt = self.g / V * (control.load_factor * math.cos(control.bank_rad) - math.cos(gamma))
         dmdt = 0
 
         return [dxdt, dydt, dhdt, dVdt, dpsidt, dgamadt, dmdt]

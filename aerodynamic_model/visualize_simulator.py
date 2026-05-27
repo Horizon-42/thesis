@@ -131,10 +131,11 @@ class FlightVisualizer:
         self.ax.grid(True)
 
     def _read_control(self):
-        # The simulator expects bank angle in radians, while the UI shows degrees.
+        # Convert at the input boundary: the UI shows degrees, while the
+        # simulator stores and computes bank angle in radians.
         return Control(
             thrust=self._read_float(self.thrust_box, "Thrust N"),
-            bank=math.radians(self._read_float(self.bank_box, "Bank deg")),
+            bank_rad=math.radians(self._read_float(self.bank_box, "Bank deg")),
             load_factor=self._read_float(self.load_box, "Load n"),
         )
 
