@@ -33,9 +33,17 @@ class Atmosphere:
         self.H = H
     
     def get_density(self, h: float) -> float:
-        # ISA model for density variation with altitude
-        # return self.rho0 * (1 - h / self.H) ** 4.2561
         return self.rho0 * math.exp(-h / self.H)
+    
+    def get_ISA_temperature(self, h: float) -> float:
+        # Simplified ISA temperature model
+        T0 = 288.15 # sea level standard temperature in K
+        L = 0.0065 # temperature lapse rate in K/m
+        return T0 - L * h
+    
+    def get_ISA_density(self, h: float) -> float:
+        T = self.get_ISA_temperature(h)
+        return self.rho0 * (T / self.get_ISA_temperature(0))**4.25588
 
 class Simulator:
     g: float = 9.81 # gravitational acceleration in m/s^2
@@ -59,7 +67,7 @@ class Simulator:
         x, y, h, V, psi, gamma, m = state_vec
 
         # Get atmospheric density
-        rho = atmosphere.get_density(h)
+        rho = atmosphere.get_ISA_density(h)
 
         D = 0.5 * rho * V**2 * Cd * self.S 
         # 1.41, bank 45, should be a level turn.
