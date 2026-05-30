@@ -27,7 +27,7 @@ const SPEED_OPTIONS: Array<{ label: string; value: number }> = [
 const LAYER_LABELS: Record<LayerKey, string> = {
   satelliteImagery: "Satellite Imagery",
   terrain:      "Terrain",
-  dsmTerrain:   "Airport Local Terrain",
+  airportLocalTerrain: "Airport Local Terrain",
   runways:      "Runways",
   waypoints:    "Waypoints",
   ocsSurfaces:  "Legacy FAF OCS Debug",
@@ -40,7 +40,7 @@ const LAYER_LABELS: Record<LayerKey, string> = {
 const ACTIVE_LAYER_KEYS: LayerKey[] = [
   "satelliteImagery",
   "terrain",
-  "dsmTerrain",
+  "airportLocalTerrain",
   "runways",
   "trajectories",
   "obstacles",

@@ -27,7 +27,7 @@ export function useTerrainLayer(): void {
   const worldTerrainProviderRef = useRef<Cesium.TerrainProvider | null>(null);
   const previousStreamingSettingsRef = useRef<GlobeTerrainStreamingSettings | null>(null);
   const airportLocalTerrainOwnsProvider =
-    layers.dsmTerrain && airportLocalTerrain?.status === "active";
+    layers.airportLocalTerrain && airportLocalTerrain?.status === "active";
 
   useEffect(() => {
     if (!viewer) return;

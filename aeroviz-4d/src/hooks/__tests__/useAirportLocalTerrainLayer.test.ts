@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JsonFetchError } from "../../utils/fetchJson";
 
 const {
-  loadDsmHeightmapTerrain,
+  loadAirportLocalTerrain,
   setAirportLocalTerrain,
   mockViewer,
   getActiveAirportCode,
@@ -37,7 +37,7 @@ const {
       return Promise.resolve();
     }),
   } as Record<string, any>;
-  const loadDsmHeightmapTerrain = vi.fn((metadataUrl: string) => {
+  const loadAirportLocalTerrain = vi.fn((metadataUrl: string) => {
     const airportCode = metadataUrl.includes("KSJC") ? "KSJC" : "CYVR";
     return Promise.resolve({
       metadata: {
@@ -51,6 +51,10 @@ const {
         stats: {
           min: airportCode === "KSJC" ? 0.7 : -9,
           max: airportCode === "KSJC" ? 50.7 : 243.8,
+        },
+        precision: {
+          horizontalResolutionM: airportCode === "KSJC" ? 10 : 1,
+          source: "test",
         },
       },
       provider: providerByAirport[airportCode],
@@ -76,7 +80,7 @@ const {
   let activeAirportCode = "CYVR";
 
   return {
-    loadDsmHeightmapTerrain,
+    loadAirportLocalTerrain,
     setAirportLocalTerrain,
     mockViewer,
     getActiveAirportCode: () => activeAirportCode,
@@ -95,14 +99,14 @@ vi.mock("cesium", () => ({
   },
 }));
 
-vi.mock("../../terrain/dsmHeightmapTerrain", () => ({
-  dsmHeightmapTerrainMetadataUrl: (airportCode: string) => (
+vi.mock("../../terrain/airportLocalTerrain", () => ({
+  airportLocalTerrainMetadataUrl: (airportCode: string) => (
     `/data/airports/${airportCode}/dsm/heightmap-terrain/metadata.json`
   ),
-  dsmTerrainTileRefsNearCoordinate: (_metadata: any, lon: number) => (
+  airportLocalTerrainTileRefsNearCoordinate: (_metadata: any, lon: number) => (
     lon < -122 ? focusTilesByAirport.CYVR : focusTilesByAirport.KSJC
   ),
-  loadDsmHeightmapTerrain,
+  loadAirportLocalTerrain,
 }));
 
 vi.mock("../../context/AppContext", () => ({
@@ -113,9 +117,9 @@ vi.mock("../../context/AppContext", () => ({
   }),
 }));
 
-import { useDsmTerrainLayer } from "../useDsmTerrainLayer";
+import { useAirportLocalTerrainLayer } from "../useAirportLocalTerrainLayer";
 
-describe("useDsmTerrainLayer", () => {
+describe("useAirportLocalTerrainLayer", () => {
   beforeEach(() => {
     setActiveAirportCode("CYVR");
     mockViewer.scene.terrainProvider = { _tag: "world-terrain" } as any;
@@ -127,10 +131,10 @@ describe("useDsmTerrainLayer", () => {
     mockViewer.scene.globe.depthTestAgainstTerrain = false;
     mockViewer.scene.requestRender.mockClear();
     setAirportLocalTerrain.mockClear();
-    loadDsmHeightmapTerrain.mockClear();
+    loadAirportLocalTerrain.mockClear();
     preloadTilesByAirport.CYVR.mockClear();
     preloadTilesByAirport.KSJC.mockClear();
-    loadDsmHeightmapTerrain.mockImplementation((metadataUrl: string) => {
+    loadAirportLocalTerrain.mockImplementation((metadataUrl: string) => {
       const airportCode = metadataUrl.includes("KSJC") ? "KSJC" : "CYVR";
       return Promise.resolve({
         metadata: {
@@ -145,6 +149,10 @@ describe("useDsmTerrainLayer", () => {
             min: airportCode === "KSJC" ? 0.7 : -9,
             max: airportCode === "KSJC" ? 50.7 : 243.8,
           },
+          precision: {
+            horizontalResolutionM: airportCode === "KSJC" ? 10 : 1,
+            source: "test",
+          },
         },
         provider: providerByAirport[airportCode],
         preloadTiles: preloadTilesByAirport[airportCode],
@@ -153,11 +161,11 @@ describe("useDsmTerrainLayer", () => {
   });
 
   it("preloads focused local terrain tiles before activating the airport provider", async () => {
-    const { result } = renderHook(() => useDsmTerrainLayer());
+    const { result } = renderHook(() => useAirportLocalTerrainLayer());
 
     await waitFor(() => expect(result.current.status).toBe("active"));
 
-    expect(loadDsmHeightmapTerrain).toHaveBeenCalledWith(
+    expect(loadAirportLocalTerrain).toHaveBeenCalledWith(
       "/data/airports/CYVR/dsm/heightmap-terrain/metadata.json",
     );
     expect(preloadTilesByAirport.CYVR).toHaveBeenCalledWith(
@@ -181,7 +189,7 @@ describe("useDsmTerrainLayer", () => {
     expect(setAirportLocalTerrain).toHaveBeenLastCalledWith({
       status: "active",
       airportCode: "CYVR",
-      sourceLabel: "Airport local DSM heightmap",
+      sourceLabel: "Airport local heightmap terrain",
       minimumHeightM: -9,
       maximumHeightM: 243.8,
       loadedTiles: 12,
@@ -191,7 +199,7 @@ describe("useDsmTerrainLayer", () => {
   });
 
   it("loads a separate cached provider per active airport", async () => {
-    const { rerender, result } = renderHook(() => useDsmTerrainLayer());
+    const { rerender, result } = renderHook(() => useAirportLocalTerrainLayer());
 
     await waitFor(() => expect(result.current.status).toBe("active"));
     expect(mockViewer.scene.terrainProvider).toBe(providerByAirport.CYVR);
@@ -200,15 +208,15 @@ describe("useDsmTerrainLayer", () => {
     rerender();
     await waitFor(() => expect(mockViewer.scene.terrainProvider).toBe(providerByAirport.KSJC));
 
-    expect(loadDsmHeightmapTerrain).toHaveBeenCalledTimes(2);
-    expect(loadDsmHeightmapTerrain).toHaveBeenLastCalledWith(
+    expect(loadAirportLocalTerrain).toHaveBeenCalledTimes(2);
+    expect(loadAirportLocalTerrain).toHaveBeenLastCalledWith(
       "/data/airports/KSJC/dsm/heightmap-terrain/metadata.json",
     );
     expect(preloadTilesByAirport.KSJC).toHaveBeenCalled();
     expect(setAirportLocalTerrain).toHaveBeenLastCalledWith({
       status: "active",
       airportCode: "KSJC",
-      sourceLabel: "Airport local DSM heightmap",
+      sourceLabel: "Airport local heightmap terrain",
       minimumHeightM: 0.7,
       maximumHeightM: 50.7,
       loadedTiles: 10,
@@ -218,14 +226,14 @@ describe("useDsmTerrainLayer", () => {
   });
 
   it("reports missing terrain metadata without replacing the existing provider", async () => {
-    loadDsmHeightmapTerrain.mockRejectedValueOnce(
+    loadAirportLocalTerrain.mockRejectedValueOnce(
       new JsonFetchError("missing metadata", {
         url: "/data/airports/CYVR/dsm/heightmap-terrain/metadata.json",
         status: 404,
       }),
     );
 
-    const { result } = renderHook(() => useDsmTerrainLayer());
+    const { result } = renderHook(() => useAirportLocalTerrainLayer());
 
     await waitFor(() => expect(result.current.status).toBe("idle"));
 

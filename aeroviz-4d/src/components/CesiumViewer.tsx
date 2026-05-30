@@ -23,7 +23,7 @@ import { useCesiumViewer } from "../hooks/useCesiumViewer";
 import { useRunwayLayer } from "../hooks/useRunwayLayer";
 import { useSatelliteImageryLayer } from "../hooks/useSatelliteImageryLayer";
 import { useTerrainLayer } from "../hooks/useTerrainLayer";
-import { useDsmTerrainLayer } from "../hooks/useDsmTerrainLayer";
+import { useAirportLocalTerrainLayer } from "../hooks/useAirportLocalTerrainLayer";
 import { useObstacleLayer } from "../hooks/useObstacleLayer";
 import { useProcedureAnnotationPicking } from "../hooks/useProcedureAnnotationPicking";
 import { useProcedureSegmentLayer } from "../hooks/useProcedureSegmentLayer";
@@ -47,7 +47,7 @@ export default function CesiumViewerComponent() {
   // Each hook runs its own useEffect and manages its own cleanup.
   useSatelliteImageryLayer();
   useTerrainLayer();
-  useDsmTerrainLayer({ enabled: layers.dsmTerrain });
+  useAirportLocalTerrainLayer({ enabled: layers.airportLocalTerrain });
   useRunwayLayer();
   useObstacleLayer();
   useProcedureSegmentLayer();

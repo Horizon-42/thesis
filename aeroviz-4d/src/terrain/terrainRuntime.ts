@@ -1,20 +1,20 @@
 import * as Cesium from "cesium";
 import type { AirportLocalTerrainState } from "../context/AppContext";
 import {
-  dsmTerrainTileRefsNearCoordinate,
-  type DsmHeightmapTerrainMetadata,
-  type DsmTerrainTileRef,
-} from "./dsmHeightmapTerrain";
+  airportLocalTerrainTileRefsNearCoordinate,
+  type AirportLocalTerrainMetadata,
+  type AirportLocalTerrainTileRef,
+} from "./airportLocalTerrain";
 
 /**
  * Terrain runtime seam.
  *
  * Cesium terrain has several moving parts that must change together: provider
- * selection, tile streaming knobs, DSM warmup, no-imagery material, and lighting.
+ * selection, tile streaming knobs, local terrain warmup, no-imagery material, and lighting.
  * Keeping those rules here gives React hooks a narrow job: bind runtime policy
  * to component lifecycle without duplicating Cesium scene knowledge.
  */
-export const AIRPORT_LOCAL_TERRAIN_SOURCE_LABEL = "Airport local DSM heightmap";
+export const AIRPORT_LOCAL_TERRAIN_SOURCE_LABEL = "Airport local heightmap terrain";
 
 export const WORLD_TERRAIN_SETTINGS = {
   maximumScreenSpaceError: 1,
@@ -118,7 +118,7 @@ export interface TerrainHeightRange {
 
 export interface LocalTerrainActivationPlan {
   heightRange: TerrainHeightRange;
-  focusedTiles: DsmTerrainTileRef[];
+  focusedTiles: AirportLocalTerrainTileRef[];
   focusedPreloadConcurrency: number;
   backgroundPreloadConcurrency: number;
   activeTotalTiles: number;
@@ -150,7 +150,7 @@ export function applyWorldTerrainStreamingSettings(viewer: Cesium.Viewer): void 
 
 export function applyLocalTerrainStreamingSettings(
   viewer: Cesium.Viewer,
-  metadata: DsmHeightmapTerrainMetadata,
+  metadata: AirportLocalTerrainMetadata,
   maximumScreenSpaceError: number = LOCAL_TERRAIN_SETTINGS.maximumScreenSpaceError,
 ): void {
   const { globe } = viewer.scene;
@@ -184,7 +184,7 @@ export function restoreTerrainStreamingSettings(
 }
 
 export function terrainHeightRange(
-  metadata: DsmHeightmapTerrainMetadata,
+  metadata: AirportLocalTerrainMetadata,
 ): TerrainHeightRange {
   return {
     minimumHeightM: metadata.stats.min,
@@ -192,7 +192,7 @@ export function terrainHeightRange(
   };
 }
 
-export function terrainFocusCoordinate(metadata: DsmHeightmapTerrainMetadata): {
+export function terrainFocusCoordinate(metadata: AirportLocalTerrainMetadata): {
   lon: number;
   lat: number;
 } {
@@ -202,24 +202,24 @@ export function terrainFocusCoordinate(metadata: DsmHeightmapTerrainMetadata): {
   };
 }
 
-export function focusedDsmTerrainTiles(
-  metadata: DsmHeightmapTerrainMetadata,
-): DsmTerrainTileRef[] {
+export function focusedAirportLocalTerrainTiles(
+  metadata: AirportLocalTerrainMetadata,
+): AirportLocalTerrainTileRef[] {
   const focus = terrainFocusCoordinate(metadata);
   // Warm the max-detail tiles around the airport first so switching providers
   // does not expose the low-detail parent tile as a temporary flat patch.
-  return dsmTerrainTileRefsNearCoordinate(metadata, focus.lon, focus.lat, {
+  return airportLocalTerrainTileRefsNearCoordinate(metadata, focus.lon, focus.lat, {
     maxLevelRadius: LOCAL_TERRAIN_SETTINGS.focusMaxLevelTileRadius,
     ancestorRadius: 0,
   });
 }
 
 export function buildLocalTerrainActivationPlan(
-  metadata: DsmHeightmapTerrainMetadata,
+  metadata: AirportLocalTerrainMetadata,
 ): LocalTerrainActivationPlan {
   return {
     heightRange: terrainHeightRange(metadata),
-    focusedTiles: focusedDsmTerrainTiles(metadata),
+    focusedTiles: focusedAirportLocalTerrainTiles(metadata),
     focusedPreloadConcurrency: LOCAL_TERRAIN_SETTINGS.focusPreloadConcurrency,
     backgroundPreloadConcurrency: LOCAL_TERRAIN_SETTINGS.backgroundPreloadConcurrency,
     activeTotalTiles: metadata.tileCount,

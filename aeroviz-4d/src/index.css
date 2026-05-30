@@ -8,7 +8,7 @@ body,
   height: 100%;
 }
 
-/* ── DSM terrain demo page ────────────────────────────────────────────────── */
+/* ── Airport local terrain demo page ──────────────────────────────────────── */
 .dsm-terrain-page {
   position: fixed;
   inset: 0;
@@ -199,6 +199,70 @@ body,
 
 .czml-status-error {
   border-color: rgba(248, 113, 113, 0.7);
+}
+
+.airport-local-terrain-alert-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 180;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(8, 13, 24, 0.42);
+  pointer-events: auto;
+}
+
+.airport-local-terrain-alert {
+  width: min(520px, calc(100vw - 36px));
+  padding: 18px;
+  border: 1px solid rgba(248, 113, 113, 0.72);
+  border-radius: 8px;
+  background: rgba(17, 24, 39, 0.96);
+  box-shadow: 0 22px 54px rgba(0, 0, 0, 0.42);
+  color: #f8fafc;
+  font-family: "Inter", "Segoe UI", sans-serif;
+}
+
+.airport-local-terrain-alert h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.airport-local-terrain-alert p {
+  margin: 0;
+  color: #fecaca;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.airport-local-terrain-alert pre {
+  max-height: 140px;
+  overflow: auto;
+  margin: 12px 0 0;
+  padding: 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.28);
+  color: #e5e7eb;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.airport-local-terrain-alert button {
+  margin-top: 14px;
+  padding: 7px 12px;
+  border: 1px solid rgba(248, 250, 252, 0.32);
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #111827;
+  cursor: pointer;
+  font: inherit;
+}
+
+.airport-local-terrain-alert button:hover {
+  background: #dbeafe;
 }
 
 /* ── Control Panel overlay ────────────────────────────────────────────────── */

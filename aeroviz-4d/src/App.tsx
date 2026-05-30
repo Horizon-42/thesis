@@ -13,7 +13,8 @@
 
 import CesiumViewerComponent from "./components/CesiumViewer";
 import ControlPanel from "./components/ControlPanel";
-import DsmTerrainDemoPage from "./components/DsmTerrainDemoPage";
+import AirportLocalTerrainDemoPage from "./components/AirportLocalTerrainDemoPage";
+import AirportLocalTerrainAlert from "./components/AirportLocalTerrainAlert";
 import HUD from "./components/HUD";
 import FlightTable from "./components/FlightTable";
 import ProcedureDetailsPage from "./components/ProcedureDetailsPage";
@@ -41,6 +42,7 @@ function FlightApp() {
       {/* Layer 1: overlay grid — panels anchored to corners, clicks pass through */}
       <div className="cesium-overlay-container">
         <ControlPanel />
+        <AirportLocalTerrainAlert />
         <ProcedurePanel />
         <ProcedureAnnotationPopup />
         <RunwayTrajectoryProfilePanel />
@@ -84,12 +86,12 @@ export default function App() {
   }, []);
 
   const routeToken = locationState.hash.split("?")[0];
-  const isDsmTerrainDemo =
+  const isLocalTerrainDemo =
     locationState.pathname === "/dsm-terrain-demo" || routeToken === "#dsm-terrain-demo";
   const isProcedureDetails =
     locationState.pathname === "/procedure-details" || routeToken === "#procedure-details";
 
-  if (isDsmTerrainDemo) return <DsmTerrainDemoPage />;
+  if (isLocalTerrainDemo) return <AirportLocalTerrainDemoPage />;
   if (isProcedureDetails) return <ProcedureDetailsPage />;
 
   return <FlightApp />;

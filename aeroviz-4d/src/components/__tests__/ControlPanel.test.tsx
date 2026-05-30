@@ -13,7 +13,7 @@ vi.mock("../../context/AppContext", () => ({
     layers: {
       satelliteImagery: true,
       terrain: false,
-      dsmTerrain: true,
+      airportLocalTerrain: true,
       runways: true,
       waypoints: false,
       ocsSurfaces: true,

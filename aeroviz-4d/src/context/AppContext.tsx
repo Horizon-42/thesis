@@ -47,7 +47,7 @@ import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 export type LayerKey =
   | "satelliteImagery"
   | "terrain"
-  | "dsmTerrain"
+  | "airportLocalTerrain"
   | "runways"
   | "waypoints"
   | "ocsSurfaces"
@@ -203,7 +203,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
     satelliteImagery: true,
     terrain: false,
-    dsmTerrain: true,
+    airportLocalTerrain: true,
     runways: true,
     waypoints: true,
     ocsSurfaces: false,

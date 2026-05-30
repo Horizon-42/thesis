@@ -51,7 +51,7 @@
         <div class="module rounded-xl p-4">
           <p class="label">Generated assets</p>
           <h2 class="mt-1 font-semibold">public/data</h2>
-          <p class="mt-2 text-sm text-slate-600">CZML, runway GeoJSON, procedure details, and local DSM terrain tiles.</p>
+          <p class="mt-2 text-sm text-slate-600">CZML, runway GeoJSON, procedure details, and airport-local terrain tiles.</p>
         </div>
       </section>
 
@@ -104,15 +104,15 @@ flowchart LR
           <pre class="mermaid mt-4">
 flowchart TD
   TL[useTerrainLayer] --> RT[terrainRuntime]
-  DL[useDsmTerrainLayer] --> RT
+  DL[useAirportLocalTerrainLayer] --> RT
   SI[useSatelliteImageryLayer] --> RT
   RT --> WP[World terrain settings]
-  RT --> LP[Local DSM warm policy]
+  RT --> LP[Airport-local terrain warm policy]
   RT --> NM[No-imagery material and lighting]
   RT --> GS[Globe restore snapshots]
           </pre>
           <p class="mt-4 text-sm text-slate-600">
-            The hooks are lifecycle adapters. Provider priority, focused DSM warmup, streaming settings,
+            The hooks are lifecycle adapters. Provider priority, focused airport-local warmup, streaming settings,
             no-satellite grayscale material, and render-state restore all live behind one terrain seam.
           </p>
         </article>

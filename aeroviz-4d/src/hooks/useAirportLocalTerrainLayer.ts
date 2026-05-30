@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
-import { dsmHeightmapTerrainMetadataUrl } from "../terrain/dsmHeightmapTerrain";
+import { airportLocalTerrainMetadataUrl } from "../terrain/airportLocalTerrain";
 import {
-  loadDsmHeightmapTerrain,
-  type DsmHeightmapTerrain,
-  type DsmHeightmapTerrainMetadata,
-} from "../terrain/dsmHeightmapTerrain";
+  loadAirportLocalTerrain,
+  type AirportLocalTerrain,
+  type AirportLocalTerrainMetadata,
+} from "../terrain/airportLocalTerrain";
 import {
   applyLocalTerrainStreamingSettings,
   airportLocalTerrainProgressState,
@@ -20,11 +20,11 @@ import {
 } from "../terrain/terrainRuntime";
 import { isMissingJsonAsset } from "../utils/fetchJson";
 
-export type DsmTerrainStatus = "idle" | "loading" | "preloading" | "active" | "error";
+export type AirportLocalTerrainLayerStatus = "idle" | "loading" | "preloading" | "active" | "error";
 
-export interface DsmTerrainState {
-  status: DsmTerrainStatus;
-  metadata: DsmHeightmapTerrainMetadata | null;
+export interface AirportLocalTerrainLayerState {
+  status: AirportLocalTerrainLayerStatus;
+  metadata: AirportLocalTerrainMetadata | null;
   /** The loaded terrain provider, or null if not yet loaded / disabled. */
   provider: Cesium.CustomHeightmapTerrainProvider | null;
   loadedTiles: number;
@@ -32,16 +32,16 @@ export interface DsmTerrainState {
   error: string | null;
 }
 
-export interface UseDsmTerrainLayerOptions {
+export interface UseAirportLocalTerrainLayerOptions {
   enabled?: boolean;
   metadataUrl?: string;
   maximumScreenSpaceError?: number;
 }
 
 /**
- * Load preprocessed DSM heightmap terrain into the Cesium Viewer.
+ * Load preprocessed airport-local heightmap terrain into the Cesium Viewer.
  *
- * Uses pre-built `.f32` height tiles produced by `npm run build:dsm-heightmap-terrain`
+ * Uses pre-built `.f32` height tiles produced by `npm run build:local-terrain`
  * and served from `public/data/airports/<ICAO>/dsm/heightmap-terrain/`. The browser fetches only the tiles it needs
  * instead of decoding a full GeoTIFF.
  *
@@ -51,18 +51,18 @@ export interface UseDsmTerrainLayerOptions {
  * Returns metadata and loading status so callers can display terrain info if desired.
  * On cleanup, restores the previous terrain provider.
  */
-export function useDsmTerrainLayer(
-  options: UseDsmTerrainLayerOptions = {},
-): DsmTerrainState {
+export function useAirportLocalTerrainLayer(
+  options: UseAirportLocalTerrainLayerOptions = {},
+): AirportLocalTerrainLayerState {
   const { viewer, activeAirportCode, setAirportLocalTerrain } = useApp();
   const enabled = options.enabled ?? true;
   const maximumScreenSpaceError =
     options.maximumScreenSpaceError ?? LOCAL_TERRAIN_SETTINGS.maximumScreenSpaceError;
   const metadataUrl = options.metadataUrl ?? (
-    activeAirportCode ? dsmHeightmapTerrainMetadataUrl(activeAirportCode) : null
+    activeAirportCode ? airportLocalTerrainMetadataUrl(activeAirportCode) : null
   );
 
-  const [state, setState] = useState<DsmTerrainState>({
+  const [state, setState] = useState<AirportLocalTerrainLayerState>({
     status: "idle",
     metadata: null,
     provider: null,
@@ -72,7 +72,7 @@ export function useDsmTerrainLayer(
   });
 
   const providerRef = useRef<Cesium.CustomHeightmapTerrainProvider | null>(null);
-  const terrainCacheRef = useRef<Map<string, Promise<DsmHeightmapTerrain>>>(new Map());
+  const terrainCacheRef = useRef<Map<string, Promise<AirportLocalTerrain>>>(new Map());
   const previousProviderRef = useRef<Cesium.TerrainProvider | null>(null);
   const previousStreamingSettingsRef = useRef<GlobeTerrainStreamingSettings | null>(null);
 
@@ -114,7 +114,7 @@ export function useDsmTerrainLayer(
 
     let terrainPromise = terrainCacheRef.current.get(metadataUrl);
     if (!terrainPromise) {
-      terrainPromise = loadDsmHeightmapTerrain(metadataUrl);
+      terrainPromise = loadAirportLocalTerrain(metadataUrl);
       terrainCacheRef.current.set(metadataUrl, terrainPromise);
     }
 
@@ -207,7 +207,7 @@ export function useDsmTerrainLayer(
           },
         }).catch((error) => {
           if (cancelled) return;
-          console.error("[useDsmTerrainLayer] Failed to warm DSM terrain cache:", error);
+          console.error("[useAirportLocalTerrainLayer] Failed to warm local terrain cache:", error);
         });
       })
       .catch((error) => {
@@ -228,7 +228,7 @@ export function useDsmTerrainLayer(
 
         const message =
           error instanceof Error ? error.message : String(error);
-        console.error("[useDsmTerrainLayer] Failed to load DSM terrain:", error);
+        console.error("[useAirportLocalTerrainLayer] Failed to load local terrain:", error);
         terrainCacheRef.current.delete(metadataUrl);
         setState({
           status: "error",

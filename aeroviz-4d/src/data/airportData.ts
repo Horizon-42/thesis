@@ -39,10 +39,6 @@ export function airportDataUrl(airportCode: string, fileName: string): string {
   return `${airportDataRootUrl(airportCode)}/${fileName}`;
 }
 
-export function airportDsmRootUrl(airportCode: string): string {
-  return `${airportDataRootUrl(airportCode)}/dsm`;
-}
-
 export function airportProcedureDetailsRootUrl(airportCode: string): string {
   return `${airportDataRootUrl(airportCode)}/procedure-details`;
 }
@@ -63,13 +59,8 @@ export function airportChartsIndexUrl(airportCode: string): string {
   return `${airportChartsRootUrl(airportCode)}/index.json`;
 }
 
-export function airportDsmSourceUrl(airportCode: string, fileName?: string): string {
-  const root = `${airportDsmRootUrl(airportCode)}/source`;
-  return fileName ? `${root}/${fileName}` : root;
-}
-
-export function airportDsmHeightmapTerrainUrl(airportCode: string, fileName?: string): string {
-  const root = `${airportDsmRootUrl(airportCode)}/heightmap-terrain`;
+export function airportLocalTerrainUrl(airportCode: string, fileName?: string): string {
+  const root = `${airportDataRootUrl(airportCode)}/dsm/heightmap-terrain`;
   return fileName ? `${root}/${fileName}` : root;
 }
 

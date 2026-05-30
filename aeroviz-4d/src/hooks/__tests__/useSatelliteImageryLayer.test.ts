@@ -11,7 +11,7 @@ function localTerrainState(
   return {
     status: "active",
     airportCode: "KSJC",
-    sourceLabel: "Airport local DSM heightmap",
+    sourceLabel: "Airport local heightmap terrain",
     minimumHeightM: 0.7,
     maximumHeightM: 50.7,
     loadedTiles: 1428,

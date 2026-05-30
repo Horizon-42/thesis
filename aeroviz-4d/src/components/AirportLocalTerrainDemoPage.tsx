@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
+import AirportLocalTerrainAlert from "./AirportLocalTerrainAlert";
 import HUD from "./HUD";
-import { useDsmTerrainLayer } from "../hooks/useDsmTerrainLayer";
-import type { DsmHeightmapTerrainMetadata } from "../terrain/dsmHeightmapTerrain";
+import { useAirportLocalTerrainLayer } from "../hooks/useAirportLocalTerrainLayer";
+import type { AirportLocalTerrainMetadata } from "../terrain/airportLocalTerrain";
 
 const TERRAIN_VERTICAL_EXAGGERATION = 25;
 const SATELLITE_IMAGERY_URL =
@@ -16,7 +17,7 @@ const DEFAULT_LAYER_STATE = {
   terrainTint: false,
 };
 
-interface DsmTerrainDemoState {
+interface LocalTerrainDemoState {
   status: string;
   rasterSize: string;
   sourceTiles: string;
@@ -33,14 +34,14 @@ interface DsmTerrainDemoState {
 type LayerToggleKey = keyof typeof DEFAULT_LAYER_STATE;
 type LayerToggleState = typeof DEFAULT_LAYER_STATE;
 
-function centerOfBounds(metadata: DsmHeightmapTerrainMetadata): { lon: number; lat: number } {
+function centerOfBounds(metadata: AirportLocalTerrainMetadata): { lon: number; lat: number } {
   return {
     lon: (metadata.bounds.west + metadata.bounds.east) / 2,
     lat: (metadata.bounds.south + metadata.bounds.north) / 2,
   };
 }
 
-function rectangleFromBounds(metadata: DsmHeightmapTerrainMetadata): Cesium.Rectangle {
+function rectangleFromBounds(metadata: AirportLocalTerrainMetadata): Cesium.Rectangle {
   return Cesium.Rectangle.fromDegrees(
     metadata.bounds.west,
     metadata.bounds.south,
@@ -49,13 +50,13 @@ function rectangleFromBounds(metadata: DsmHeightmapTerrainMetadata): Cesium.Rect
   );
 }
 
-function describeMetadata(metadata: DsmHeightmapTerrainMetadata): DsmTerrainDemoState {
+function describeMetadata(metadata: AirportLocalTerrainMetadata): LocalTerrainDemoState {
   const center = centerOfBounds(metadata);
   const heightMin = `${metadata.stats.min.toFixed(2)} m`;
   const heightMax = `${metadata.stats.max.toFixed(2)} m`;
 
   return {
-    status: "DSM heightmap terrain active",
+    status: "Airport local heightmap terrain active",
     rasterSize: `${metadata.raster.width} x ${metadata.raster.height}`,
     sourceTiles: metadata.raster.sourceTileCount?.toLocaleString() ?? "1",
     tileSize: `${metadata.tileWidth} x ${metadata.tileHeight}`,
@@ -99,9 +100,9 @@ async function addSingleTileLayer(
   return layer;
 }
 
-async function addDsmHeightTint(
+async function addLocalTerrainHeightTint(
   viewer: Cesium.Viewer,
-  metadata: DsmHeightmapTerrainMetadata
+  metadata: AirportLocalTerrainMetadata
 ): Promise<Cesium.ImageryLayer | undefined> {
   if (!metadata.overlay?.url) return undefined;
 
@@ -114,7 +115,7 @@ async function addDsmHeightTint(
 
 async function addOriginalTifHeatmap(
   viewer: Cesium.Viewer,
-  metadata: DsmHeightmapTerrainMetadata
+  metadata: AirportLocalTerrainMetadata
 ): Promise<Cesium.ImageryLayer | undefined> {
   if (!metadata.originalTifHeatmap?.url) return undefined;
 
@@ -125,7 +126,7 @@ async function addOriginalTifHeatmap(
   });
 }
 
-export default function DsmTerrainDemoPage() {
+export default function AirportLocalTerrainDemoPage() {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<Cesium.Viewer | null>(null);
   const flatTerrainProviderRef = useRef<Cesium.EllipsoidTerrainProvider | null>(null);
@@ -135,10 +136,10 @@ export default function DsmTerrainDemoPage() {
   const layerStateRef = useRef<LayerToggleState>(DEFAULT_LAYER_STATE);
   const { setAirport, setViewer, activeAirportCode } = useApp();
 
-  const terrain = useDsmTerrainLayer();
+  const terrain = useAirportLocalTerrainLayer();
 
-  const [displayState, setDisplayState] = useState<DsmTerrainDemoState>({
-    status: "Loading preprocessed DSM terrain",
+  const [displayState, setDisplayState] = useState<LocalTerrainDemoState>({
+    status: "Loading preprocessed airport local terrain",
     rasterSize: "",
     sourceTiles: "",
     tileSize: "",
@@ -242,7 +243,7 @@ export default function DsmTerrainDemoPage() {
         originalTifHeatmapLayerRef.current = originalTifHeatmapLayer;
       }
 
-      const terrainTintLayer = await addDsmHeightTint(viewer, metadata);
+      const terrainTintLayer = await addLocalTerrainHeightTint(viewer, metadata);
       if (cancelled || viewer.isDestroyed()) return;
       if (terrainTintLayer) {
         terrainTintLayer.show = layerStateRef.current.terrainTint;
@@ -251,7 +252,7 @@ export default function DsmTerrainDemoPage() {
 
       const center = centerOfBounds(metadata);
       setAirport({
-        code: activeAirportCode || "DSM",
+        code: activeAirportCode || "LOCAL",
         lon: center.lon,
         lat: center.lat,
         height: 4300,
@@ -284,7 +285,7 @@ export default function DsmTerrainDemoPage() {
     if (terrain.status === "error") {
       setDisplayState((current) => ({
         ...current,
-        status: "DSM heightmap terrain failed to load",
+        status: "Airport local terrain failed to load",
         source: "Failed",
       }));
     }
@@ -294,13 +295,14 @@ export default function DsmTerrainDemoPage() {
     <main className="dsm-terrain-page">
       <div ref={containerRef} className="dsm-terrain-viewer" />
       <div className="cesium-overlay-container dsm-terrain-hud-layer">
+        <AirportLocalTerrainAlert />
         <HUD />
       </div>
       <section className="dsm-terrain-panel">
         <nav className="dsm-terrain-nav">
           <a href="/" className="dsm-terrain-link">Flight view</a>
         </nav>
-        <h1>{activeAirportCode || "Airport"} DSM Terrain</h1>
+        <h1>{activeAirportCode || "Airport"} Local Terrain</h1>
         <p>{displayState.status}</p>
         <dl>
           <div>
@@ -336,7 +338,7 @@ export default function DsmTerrainDemoPage() {
             <dd>{displayState.source}</dd>
           </div>
         </dl>
-        <div className="dsm-layer-toggles" aria-label="DSM layer toggles">
+        <div className="dsm-layer-toggles" aria-label="Local terrain layer toggles">
           <h2>Layers</h2>
           <label className="dsm-layer-toggle">
             <input
@@ -344,7 +346,7 @@ export default function DsmTerrainDemoPage() {
               checked={layers.terrain}
               onChange={(event) => setLayerEnabled("terrain", event.currentTarget.checked)}
             />
-            <span>DSM terrain surface</span>
+            <span>Local terrain surface</span>
           </label>
           <label className="dsm-layer-toggle">
             <input
@@ -375,7 +377,7 @@ export default function DsmTerrainDemoPage() {
         </div>
         <p className="dsm-terrain-note">
           Turn off the terrain surface to inspect the original TIFF heatmap on a flat globe. View
-          exaggeration is {TERRAIN_VERTICAL_EXAGGERATION}x; tile heights remain real DSM metres.
+          exaggeration is {TERRAIN_VERTICAL_EXAGGERATION}x; tile heights remain real local-terrain metres.
         </p>
       </section>
       <div className="dsm-terrain-legend">

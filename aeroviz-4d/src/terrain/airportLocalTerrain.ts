@@ -1,36 +1,54 @@
 import * as Cesium from "cesium";
-import { airportDsmHeightmapTerrainUrl } from "../data/airportData";
+import { airportLocalTerrainUrl } from "../data/airportData";
 import { fetchJson } from "../utils/fetchJson";
 
-export function dsmHeightmapTerrainMetadataUrl(airportCode: string): string {
-  return airportDsmHeightmapTerrainUrl(airportCode, "metadata.json");
+export function airportLocalTerrainMetadataUrl(airportCode: string): string {
+  return airportLocalTerrainUrl(airportCode, "metadata.json");
 }
 
-export interface DsmTerrainBounds {
+export interface AirportLocalTerrainBounds {
   west: number;
   south: number;
   east: number;
   north: number;
 }
 
-export interface DsmTerrainCorner {
+export interface AirportLocalTerrainCorner {
   lon: number;
   lat: number;
 }
 
-export interface DsmTerrainLevelRange {
+export interface AirportLocalTerrainLevelRange {
   level: number;
   xRange: [number, number];
   yRange: [number, number];
   tileCount: number;
 }
 
-export interface DsmHeightmapTerrainMetadata {
+export type AirportLocalTerrainSourceKind = "dem" | "dsm" | "unknown";
+
+export interface AirportLocalTerrainPrecisionMetadata {
+  /** Ground sample distance in metres. Smaller values are higher precision. */
+  horizontalResolutionM: number;
+  verticalAccuracyM?: number | null;
+  source: string;
+  notes?: string[];
+}
+
+export interface AirportLocalTerrainSourceMetadata {
+  kind: AirportLocalTerrainSourceKind;
+  label: string;
+  sourceDir?: string;
+}
+
+export interface AirportLocalTerrainMetadata {
   format: "float32-little-endian-heightmap";
   tileWidth: number;
   tileHeight: number;
   tilingScheme: "geographic";
   tilesBaseUrl: string;
+  source?: AirportLocalTerrainSourceMetadata;
+  precision: AirportLocalTerrainPrecisionMetadata;
   overlay?: {
     url: string;
     width: number;
@@ -54,14 +72,14 @@ export interface DsmHeightmapTerrainMetadata {
     sourceTileCount?: number;
     validSampleCount?: number;
   };
-  bounds: DsmTerrainBounds;
+  bounds: AirportLocalTerrainBounds;
   corners: {
-    northWest: DsmTerrainCorner;
-    northEast: DsmTerrainCorner;
-    southEast: DsmTerrainCorner;
-    southWest: DsmTerrainCorner;
+    northWest: AirportLocalTerrainCorner;
+    northEast: AirportLocalTerrainCorner;
+    southEast: AirportLocalTerrainCorner;
+    southWest: AirportLocalTerrainCorner;
   };
-  levels: DsmTerrainLevelRange[];
+  levels: AirportLocalTerrainLevelRange[];
   stats: {
     min: number;
     max: number;
@@ -69,26 +87,44 @@ export interface DsmHeightmapTerrainMetadata {
   };
 }
 
-export interface DsmHeightmapTerrain {
-  metadata: DsmHeightmapTerrainMetadata;
-  provider: Cesium.CustomHeightmapTerrainProvider;
-  rectangle: Cesium.Rectangle;
-  preloadTiles: (options?: PreloadDsmHeightmapTerrainTilesOptions) => Promise<void>;
+export class AirportLocalTerrainMetadataError extends Error {
+  readonly metadataUrl: string;
+  readonly code: "missing-precision-metadata" | "invalid-metadata";
+
+  constructor(
+    message: string,
+    options: {
+      metadataUrl: string;
+      code: AirportLocalTerrainMetadataError["code"];
+    },
+  ) {
+    super(message);
+    this.name = "AirportLocalTerrainMetadataError";
+    this.metadataUrl = options.metadataUrl;
+    this.code = options.code;
+  }
 }
 
-export interface DsmTerrainTileRef {
+export interface AirportLocalTerrain {
+  metadata: AirportLocalTerrainMetadata;
+  provider: Cesium.CustomHeightmapTerrainProvider;
+  rectangle: Cesium.Rectangle;
+  preloadTiles: (options?: PreloadAirportLocalTerrainTilesOptions) => Promise<void>;
+}
+
+export interface AirportLocalTerrainTileRef {
   level: number;
   x: number;
   y: number;
 }
 
-export interface PreloadDsmHeightmapTerrainTilesOptions {
+export interface PreloadAirportLocalTerrainTilesOptions {
   concurrency?: number;
-  tiles?: DsmTerrainTileRef[];
-  onProgress?: (progress: DsmHeightmapTerrainPreloadProgress) => void;
+  tiles?: AirportLocalTerrainTileRef[];
+  onProgress?: (progress: AirportLocalTerrainPreloadProgress) => void;
 }
 
-export interface DsmHeightmapTerrainPreloadProgress {
+export interface AirportLocalTerrainPreloadProgress {
   loadedTiles: number;
   totalTiles: number;
 }
@@ -97,9 +133,37 @@ function tileKey(level: number, x: number, y: number): string {
   return `${level}/${x}/${y}`;
 }
 
-function enumerateAvailableTiles(metadata: DsmHeightmapTerrainMetadata): DsmTerrainTileRef[] {
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function assertValidAirportLocalTerrainMetadata(
+  value: AirportLocalTerrainMetadata,
+  metadataUrl: string,
+): void {
+  if (!value.precision || !isFiniteNumber(value.precision.horizontalResolutionM)) {
+    throw new AirportLocalTerrainMetadataError(
+      [
+        `Local terrain package ${metadataUrl} is missing precision.horizontalResolutionM.`,
+        "Regenerate the airport local terrain package so source priority can be based on precision.",
+      ].join(" "),
+      { metadataUrl, code: "missing-precision-metadata" },
+    );
+  }
+
+  if (value.precision.horizontalResolutionM <= 0) {
+    throw new AirportLocalTerrainMetadataError(
+      `Local terrain package ${metadataUrl} has invalid precision.horizontalResolutionM.`,
+      { metadataUrl, code: "invalid-metadata" },
+    );
+  }
+}
+
+function enumerateAvailableTiles(
+  metadata: AirportLocalTerrainMetadata,
+): AirportLocalTerrainTileRef[] {
   return metadata.levels.flatMap((range) => {
-    const tiles: DsmTerrainTileRef[] = [];
+    const tiles: AirportLocalTerrainTileRef[] = [];
     for (let x = range.xRange[0]; x <= range.xRange[1]; x += 1) {
       for (let y = range.yRange[0]; y <= range.yRange[1]; y += 1) {
         tiles.push({ level: range.level, x, y });
@@ -110,7 +174,7 @@ function enumerateAvailableTiles(metadata: DsmHeightmapTerrainMetadata): DsmTerr
 }
 
 function isTileAvailable(
-  metadata: DsmHeightmapTerrainMetadata,
+  metadata: AirportLocalTerrainMetadata,
   level: number,
   x: number,
   y: number
@@ -122,11 +186,11 @@ function isTileAvailable(
 }
 
 function uniqueAvailableTiles(
-  metadata: DsmHeightmapTerrainMetadata,
-  tiles: DsmTerrainTileRef[],
-): DsmTerrainTileRef[] {
+  metadata: AirportLocalTerrainMetadata,
+  tiles: AirportLocalTerrainTileRef[],
+): AirportLocalTerrainTileRef[] {
   const seen = new Set<string>();
-  const uniqueTiles: DsmTerrainTileRef[] = [];
+  const uniqueTiles: AirportLocalTerrainTileRef[] = [];
 
   for (const tile of tiles) {
     if (!isTileAvailable(metadata, tile.level, tile.x, tile.y)) continue;
@@ -139,20 +203,20 @@ function uniqueAvailableTiles(
   return uniqueTiles;
 }
 
-export function dsmTerrainTileRefsNearCoordinate(
-  metadata: DsmHeightmapTerrainMetadata,
+export function airportLocalTerrainTileRefsNearCoordinate(
+  metadata: AirportLocalTerrainMetadata,
   lon: number,
   lat: number,
   options: {
     maxLevelRadius?: number;
     ancestorRadius?: number;
   } = {},
-): DsmTerrainTileRef[] {
+): AirportLocalTerrainTileRef[] {
   const maxLevelRadius = Math.max(0, Math.floor(options.maxLevelRadius ?? 4));
   const ancestorRadius = Math.max(0, Math.floor(options.ancestorRadius ?? 0));
   const tilingScheme = new Cesium.GeographicTilingScheme();
   const position = Cesium.Cartographic.fromDegrees(lon, lat);
-  const tiles: DsmTerrainTileRef[] = [];
+  const tiles: AirportLocalTerrainTileRef[] = [];
 
   for (const range of metadata.levels) {
     const centerTile = tilingScheme.positionToTileXY(position, range.level);
@@ -180,38 +244,39 @@ function parseFloat32LittleEndian(buffer: ArrayBuffer): Float32Array {
   return values;
 }
 
-function createFlatHeightTile(metadata: DsmHeightmapTerrainMetadata): Float32Array {
+function createFlatHeightTile(metadata: AirportLocalTerrainMetadata): Float32Array {
   const values = new Float32Array(metadata.tileWidth * metadata.tileHeight);
   values.fill(metadata.fallbackHeightM);
   return values;
 }
 
 async function fetchHeightTile(
-  metadata: DsmHeightmapTerrainMetadata,
+  metadata: AirportLocalTerrainMetadata,
   level: number,
   x: number,
   y: number
 ): Promise<Float32Array> {
   const response = await fetch(`${metadata.tilesBaseUrl}/${level}/${x}/${y}.f32`);
   if (!response.ok) {
-    throw new Error(`Failed to fetch DSM height tile ${tileKey(level, x, y)}: ${response.status}`);
+    throw new Error(`Failed to fetch local terrain height tile ${tileKey(level, x, y)}: ${response.status}`);
   }
 
   const heights = parseFloat32LittleEndian(await response.arrayBuffer());
   const expectedLength = metadata.tileWidth * metadata.tileHeight;
   if (heights.length !== expectedLength) {
     throw new Error(
-      `DSM height tile ${tileKey(level, x, y)} has ${heights.length} samples; expected ${expectedLength}`
+      `Local terrain height tile ${tileKey(level, x, y)} has ${heights.length} samples; expected ${expectedLength}`
     );
   }
 
   return heights;
 }
 
-export async function loadDsmHeightmapTerrain(
+export async function loadAirportLocalTerrain(
   metadataUrl: string
-): Promise<DsmHeightmapTerrain> {
-  const metadata = await fetchJson<DsmHeightmapTerrainMetadata>(metadataUrl);
+): Promise<AirportLocalTerrain> {
+  const metadata = await fetchJson<AirportLocalTerrainMetadata>(metadataUrl);
+  assertValidAirportLocalTerrainMetadata(metadata, metadataUrl);
   const tilingScheme = new Cesium.GeographicTilingScheme();
   const tileCache = new Map<string, Promise<Float32Array>>();
   const flatTile = createFlatHeightTile(metadata);
@@ -239,8 +304,8 @@ export async function loadDsmHeightmapTerrain(
       if (!isTileAvailable(metadata, level, x, y)) {
         // Ancestor tiles report all children as available because
         // CustomHeightmapTerrainProvider does not expose childTileMask control.
-        // Returning a flat tile for non-DSM siblings avoids holes around the
-        // patch while keeping network fetches limited to real DSM tiles.
+        // Returning a flat tile for non-local siblings avoids holes around the
+        // patch while keeping network fetches limited to real local terrain tiles.
         return flatTile.slice();
       }
 
@@ -252,7 +317,7 @@ export async function loadDsmHeightmapTerrain(
 
   const preloadTileRefs = enumerateAvailableTiles(metadata);
   const preloadTiles = (
-    options: PreloadDsmHeightmapTerrainTilesOptions = {},
+    options: PreloadAirportLocalTerrainTilesOptions = {},
   ): Promise<void> => {
     const concurrency = Math.max(1, Math.floor(options.concurrency ?? 16));
     const tilesToLoad = options.tiles
@@ -293,7 +358,7 @@ export async function loadDsmHeightmapTerrain(
   };
 }
 
-export function dsmTerrainFootprintDegrees(metadata: DsmHeightmapTerrainMetadata): number[] {
+export function airportLocalTerrainFootprintDegrees(metadata: AirportLocalTerrainMetadata): number[] {
   return [
     metadata.corners.northWest,
     metadata.corners.northEast,

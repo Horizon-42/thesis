@@ -60,7 +60,7 @@ For Cesium World Terrain:
 - `5x` to `20x`: useful for seeing low relief, but LOD pop-in is more visible
 - above `20x`: not recommended for World Terrain in the main viewer
 
-For local DSM terrain, higher exaggeration can be useful for debugging, but
+For airport-local terrain, higher exaggeration can be useful for debugging, but
 source noise and no-data edges are also magnified.
 
 ## Debug Checklist
@@ -69,7 +69,7 @@ When terrain appears unstable:
 
 1. Check the HUD terrain load status. If it says `Refining N`, wait for `Ready`.
 2. Lower terrain exaggeration to `1x` and verify whether the instability remains.
-3. Confirm only one terrain source is active: World Terrain or DSM terrain.
+3. Confirm only one terrain source is active: World Terrain or airport-local terrain.
 4. Verify the terrain provider is not being recreated by repeated layer toggles.
 5. Increase `tileCacheSize` only if memory is available and zooming repeatedly
    revisits the same area.

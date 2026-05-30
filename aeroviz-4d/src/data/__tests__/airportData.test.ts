@@ -5,7 +5,7 @@ import {
   airportDataUrl,
   airportProcedureDetailUrl,
   airportProcedureDetailsIndexUrl,
-  airportDsmHeightmapTerrainUrl,
+  airportLocalTerrainUrl,
   airportChartsIndexUrl,
   isAirportsIndexManifest,
   normalizeAirportCode,
@@ -15,7 +15,7 @@ import {
 describe("airportData helpers", () => {
   it("builds airport-scoped data URLs", () => {
     expect(airportDataUrl("krdu", "airport.json")).toBe("/data/airports/KRDU/airport.json");
-    expect(airportDsmHeightmapTerrainUrl("cyvr", "metadata.json")).toBe(
+    expect(airportLocalTerrainUrl("cyvr", "metadata.json")).toBe(
       "/data/airports/CYVR/dsm/heightmap-terrain/metadata.json",
     );
     expect(airportProcedureDetailsIndexUrl("krdu")).toBe(
