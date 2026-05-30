@@ -3,20 +3,24 @@ import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { dsmHeightmapTerrainMetadataUrl } from "../terrain/dsmHeightmapTerrain";
 import {
-  dsmTerrainTileRefsNearCoordinate,
   loadDsmHeightmapTerrain,
   type DsmHeightmapTerrain,
   type DsmHeightmapTerrainMetadata,
 } from "../terrain/dsmHeightmapTerrain";
+import {
+  applyLocalTerrainStreamingSettings,
+  airportLocalTerrainProgressState,
+  buildLocalTerrainActivationPlan,
+  captureTerrainStreamingSettings,
+  disabledAirportLocalTerrainState,
+  LOCAL_TERRAIN_SETTINGS,
+  missingAirportLocalTerrainState,
+  restoreTerrainStreamingSettings,
+  type GlobeTerrainStreamingSettings,
+} from "../terrain/terrainRuntime";
 import { isMissingJsonAsset } from "../utils/fetchJson";
 
 export type DsmTerrainStatus = "idle" | "loading" | "preloading" | "active" | "error";
-
-const DSM_MAXIMUM_SCREEN_SPACE_ERROR = 0.5;
-const DSM_MIN_TILE_CACHE_SIZE = 256;
-const DSM_FOCUS_PRELOAD_CONCURRENCY = 24;
-const DSM_BACKGROUND_PRELOAD_CONCURRENCY = 8;
-const DSM_FOCUS_MAX_LEVEL_TILE_RADIUS = 4;
 
 export interface DsmTerrainState {
   status: DsmTerrainStatus;
@@ -34,32 +38,15 @@ export interface UseDsmTerrainLayerOptions {
   maximumScreenSpaceError?: number;
 }
 
-function terrainHeightRange(metadata: DsmHeightmapTerrainMetadata): {
-  minimumHeightM: number;
-  maximumHeightM: number;
-} {
-  return {
-    minimumHeightM: metadata.stats.min,
-    maximumHeightM: metadata.stats.max,
-  };
-}
-
-function terrainFocusCoordinate(metadata: DsmHeightmapTerrainMetadata): {
-  lon: number;
-  lat: number;
-} {
-  return {
-    lon: (metadata.bounds.west + metadata.bounds.east) / 2,
-    lat: (metadata.bounds.south + metadata.bounds.north) / 2,
-  };
-}
-
 /**
  * Load preprocessed DSM heightmap terrain into the Cesium Viewer.
  *
  * Uses pre-built `.f32` height tiles produced by `npm run build:dsm-heightmap-terrain`
  * and served from `public/data/airports/<ICAO>/dsm/heightmap-terrain/`. The browser fetches only the tiles it needs
  * instead of decoding a full GeoTIFF.
+ *
+ * TerrainRuntime owns the activation policy: focused warm before provider
+ * switch, background warm after switch, and Cesium globe streaming settings.
  *
  * Returns metadata and loading status so callers can display terrain info if desired.
  * On cleanup, restores the previous terrain provider.
@@ -70,7 +57,7 @@ export function useDsmTerrainLayer(
   const { viewer, activeAirportCode, setAirportLocalTerrain } = useApp();
   const enabled = options.enabled ?? true;
   const maximumScreenSpaceError =
-    options.maximumScreenSpaceError ?? DSM_MAXIMUM_SCREEN_SPACE_ERROR;
+    options.maximumScreenSpaceError ?? LOCAL_TERRAIN_SETTINGS.maximumScreenSpaceError;
   const metadataUrl = options.metadataUrl ?? (
     activeAirportCode ? dsmHeightmapTerrainMetadataUrl(activeAirportCode) : null
   );
@@ -87,11 +74,7 @@ export function useDsmTerrainLayer(
   const providerRef = useRef<Cesium.CustomHeightmapTerrainProvider | null>(null);
   const terrainCacheRef = useRef<Map<string, Promise<DsmHeightmapTerrain>>>(new Map());
   const previousProviderRef = useRef<Cesium.TerrainProvider | null>(null);
-  const previousMaximumScreenSpaceErrorRef = useRef<number | null>(null);
-  const previousTileCacheSizeRef = useRef<number | null>(null);
-  const previousPreloadSiblingsRef = useRef<boolean | null>(null);
-  const previousPreloadAncestorsRef = useRef<boolean | null>(null);
-  const previousLoadingDescendantLimitRef = useRef<number | null>(null);
+  const previousStreamingSettingsRef = useRef<GlobeTerrainStreamingSettings | null>(null);
 
   // ── Load terrain provider ───────────────────────────────────────────────
   useEffect(() => {
@@ -104,29 +87,18 @@ export function useDsmTerrainLayer(
         totalTiles: 0,
         error: null,
       });
-      setAirportLocalTerrain({
-        status: enabled ? "missing" : "disabled",
-        airportCode: activeAirportCode || null,
-        sourceLabel: null,
-        minimumHeightM: null,
-        maximumHeightM: null,
-        loadedTiles: 0,
-        totalTiles: 0,
-        error: null,
-      });
+      setAirportLocalTerrain(
+        enabled
+          ? missingAirportLocalTerrainState(activeAirportCode || null)
+          : disabledAirportLocalTerrainState(activeAirportCode || null),
+      );
       return;
     }
 
     let cancelled = false;
 
     previousProviderRef.current = viewer.scene.terrainProvider;
-    previousMaximumScreenSpaceErrorRef.current =
-      viewer.scene.globe.maximumScreenSpaceError;
-    previousTileCacheSizeRef.current = viewer.scene.globe.tileCacheSize;
-    previousPreloadSiblingsRef.current = viewer.scene.globe.preloadSiblings;
-    previousPreloadAncestorsRef.current = viewer.scene.globe.preloadAncestors;
-    previousLoadingDescendantLimitRef.current =
-      viewer.scene.globe.loadingDescendantLimit;
+    previousStreamingSettingsRef.current = captureTerrainStreamingSettings(viewer.scene.globe);
     setState({
       status: "loading",
       metadata: null,
@@ -135,16 +107,10 @@ export function useDsmTerrainLayer(
       totalTiles: 0,
       error: null,
     });
-    setAirportLocalTerrain({
+    setAirportLocalTerrain(airportLocalTerrainProgressState({
       status: "loading",
       airportCode: activeAirportCode,
-      sourceLabel: "Airport local DSM heightmap",
-      minimumHeightM: null,
-      maximumHeightM: null,
-      loadedTiles: 0,
-      totalTiles: 0,
-      error: null,
-    });
+    }));
 
     let terrainPromise = terrainCacheRef.current.get(metadataUrl);
     if (!terrainPromise) {
@@ -156,39 +122,27 @@ export function useDsmTerrainLayer(
       .then(async (terrain) => {
         if (cancelled || viewer.isDestroyed()) return;
         const { metadata, provider } = terrain;
-        const heightRange = terrainHeightRange(metadata);
-        const focus = terrainFocusCoordinate(metadata);
-        const focusedTiles = dsmTerrainTileRefsNearCoordinate(
-          metadata,
-          focus.lon,
-          focus.lat,
-          {
-            maxLevelRadius: DSM_FOCUS_MAX_LEVEL_TILE_RADIUS,
-            ancestorRadius: 0,
-          },
-        );
+        const activationPlan = buildLocalTerrainActivationPlan(metadata);
 
         setState({
           status: "preloading",
           metadata,
           provider: null,
           loadedTiles: 0,
-          totalTiles: focusedTiles.length,
+          totalTiles: activationPlan.focusedTiles.length,
           error: null,
         });
-        setAirportLocalTerrain({
+        setAirportLocalTerrain(airportLocalTerrainProgressState({
           status: "preloading",
           airportCode: activeAirportCode,
-          sourceLabel: "Airport local DSM heightmap",
-          ...heightRange,
+          heightRange: activationPlan.heightRange,
           loadedTiles: 0,
-          totalTiles: focusedTiles.length,
-          error: null,
-        });
+          totalTiles: activationPlan.focusedTiles.length,
+        }));
 
         await terrain.preloadTiles({
-          tiles: focusedTiles,
-          concurrency: DSM_FOCUS_PRELOAD_CONCURRENCY,
+          tiles: activationPlan.focusedTiles,
+          concurrency: activationPlan.focusedPreloadConcurrency,
           onProgress: ({ loadedTiles, totalTiles }) => {
             if (cancelled) return;
             setState({
@@ -199,15 +153,13 @@ export function useDsmTerrainLayer(
               totalTiles,
               error: null,
             });
-            setAirportLocalTerrain({
+            setAirportLocalTerrain(airportLocalTerrainProgressState({
               status: "preloading",
               airportCode: activeAirportCode,
-              sourceLabel: "Airport local DSM heightmap",
-              ...heightRange,
+              heightRange: activationPlan.heightRange,
               loadedTiles,
               totalTiles,
-              error: null,
-            });
+            }));
           },
         });
 
@@ -215,38 +167,26 @@ export function useDsmTerrainLayer(
 
         providerRef.current = provider;
         viewer.scene.terrainProvider = provider;
-        viewer.scene.globe.maximumScreenSpaceError = maximumScreenSpaceError;
-        viewer.scene.globe.tileCacheSize = Math.max(
-          viewer.scene.globe.tileCacheSize,
-          metadata.tileCount + 32,
-          DSM_MIN_TILE_CACHE_SIZE,
-        );
-        viewer.scene.globe.preloadSiblings = true;
-        viewer.scene.globe.preloadAncestors = true;
-        viewer.scene.globe.loadingDescendantLimit = 1000;
-        viewer.scene.globe.depthTestAgainstTerrain = true;
-        viewer.scene.requestRender();
+        applyLocalTerrainStreamingSettings(viewer, metadata, maximumScreenSpaceError);
 
         setState({
           status: "active",
           metadata,
           provider,
-          loadedTiles: focusedTiles.length,
-          totalTiles: metadata.tileCount,
+          loadedTiles: activationPlan.focusedTiles.length,
+          totalTiles: activationPlan.activeTotalTiles,
           error: null,
         });
-        setAirportLocalTerrain({
+        setAirportLocalTerrain(airportLocalTerrainProgressState({
           status: "active",
           airportCode: activeAirportCode,
-          sourceLabel: "Airport local DSM heightmap",
-          ...heightRange,
-          loadedTiles: focusedTiles.length,
-          totalTiles: metadata.tileCount,
-          error: null,
-        });
+          heightRange: activationPlan.heightRange,
+          loadedTiles: activationPlan.focusedTiles.length,
+          totalTiles: activationPlan.activeTotalTiles,
+        }));
 
         void terrain.preloadTiles({
-          concurrency: DSM_BACKGROUND_PRELOAD_CONCURRENCY,
+          concurrency: activationPlan.backgroundPreloadConcurrency,
           onProgress: ({ loadedTiles, totalTiles }) => {
             if (cancelled) return;
             setState((current) => {
@@ -257,15 +197,13 @@ export function useDsmTerrainLayer(
                 totalTiles,
               };
             });
-            setAirportLocalTerrain({
+            setAirportLocalTerrain(airportLocalTerrainProgressState({
               status: "active",
               airportCode: activeAirportCode,
-              sourceLabel: "Airport local DSM heightmap",
-              ...heightRange,
+              heightRange: activationPlan.heightRange,
               loadedTiles,
               totalTiles,
-              error: null,
-            });
+            }));
           },
         }).catch((error) => {
           if (cancelled) return;
@@ -284,16 +222,7 @@ export function useDsmTerrainLayer(
             totalTiles: 0,
             error: null,
           });
-          setAirportLocalTerrain({
-            status: "missing",
-            airportCode: activeAirportCode,
-            sourceLabel: null,
-            minimumHeightM: null,
-            maximumHeightM: null,
-            loadedTiles: 0,
-            totalTiles: 0,
-            error: null,
-          });
+          setAirportLocalTerrain(missingAirportLocalTerrainState(activeAirportCode));
           return;
         }
 
@@ -309,16 +238,11 @@ export function useDsmTerrainLayer(
           totalTiles: 0,
           error: message,
         });
-        setAirportLocalTerrain({
+        setAirportLocalTerrain(airportLocalTerrainProgressState({
           status: "error",
           airportCode: activeAirportCode,
-          sourceLabel: "Airport local DSM heightmap",
-          minimumHeightM: null,
-          maximumHeightM: null,
-          loadedTiles: 0,
-          totalTiles: 0,
           error: message,
-        });
+        }));
       });
 
     return () => {
@@ -328,24 +252,13 @@ export function useDsmTerrainLayer(
           viewer.scene.terrainProvider =
             previousProviderRef.current ?? new Cesium.EllipsoidTerrainProvider();
         }
-        viewer.scene.globe.maximumScreenSpaceError =
-          previousMaximumScreenSpaceErrorRef.current ?? 2;
-        viewer.scene.globe.tileCacheSize =
-          previousTileCacheSizeRef.current ?? 100;
-        viewer.scene.globe.preloadSiblings =
-          previousPreloadSiblingsRef.current ?? false;
-        viewer.scene.globe.preloadAncestors =
-          previousPreloadAncestorsRef.current ?? false;
-        viewer.scene.globe.loadingDescendantLimit =
-          previousLoadingDescendantLimitRef.current ?? 10;
+        if (previousStreamingSettingsRef.current) {
+          restoreTerrainStreamingSettings(viewer, previousStreamingSettingsRef.current);
+        }
       }
       providerRef.current = null;
       previousProviderRef.current = null;
-      previousMaximumScreenSpaceErrorRef.current = null;
-      previousTileCacheSizeRef.current = null;
-      previousPreloadSiblingsRef.current = null;
-      previousPreloadAncestorsRef.current = null;
-      previousLoadingDescendantLimitRef.current = null;
+      previousStreamingSettingsRef.current = null;
     };
   }, [
     viewer,

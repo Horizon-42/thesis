@@ -4,6 +4,13 @@ import { useApp } from "../context/AppContext";
 import { airportDataUrl } from "../data/airportData";
 import { loadProcedureRenderBundleData } from "../data/procedureRenderBundle";
 import { buildProcedureRoutes } from "../data/procedureRoutes";
+import {
+  activeHorizontalPlateRoutes,
+  buildProfileAircraftTracks,
+  type ProfileAircraftInput,
+  type ProfileAircraftTrack,
+  type SampledRunwayPoint,
+} from "../data/runwayTrajectoryProfileAnalysis";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 import {
   attachRenderBundleAssessmentSegments,
@@ -15,35 +22,16 @@ import {
   type RunwayReferenceMark,
   type RunwayFeatureCollection,
   type RunwayFrame,
-  type RunwayProfilePoint,
 } from "../utils/runwayProfileGeometry";
-import {
-  classifyGeoPointAgainstHorizontalPlateRoutes,
-  classifyPointAgainstHorizontalPlateRoutes,
-  type HorizontalPlateSegmentAssessment,
-} from "../utils/procedureSegmentAssessment";
-import type { GeoPoint } from "../utils/procedureGeoMath";
+
+export type {
+  ProfileAircraftSample,
+  ProfileAircraftTrack,
+} from "../data/runwayTrajectoryProfileAnalysis";
 
 const TICK_THROTTLE_MS = 120;
 const TRAIL_LOOKBACK_SECONDS = 150;
 const TRAIL_SAMPLE_STEP_SECONDS = 5;
-
-export interface ProfileAircraftSample extends RunwayProfilePoint {
-  timeIso: string;
-  segmentAssessment: HorizontalPlateSegmentAssessment;
-}
-
-export interface ProfileAircraftTrack {
-  flightId: string;
-  color: string;
-  current: ProfileAircraftSample;
-  trail: ProfileAircraftSample[];
-  isSelected: boolean;
-}
-
-interface SampledRunwayPoint extends RunwayProfilePoint {
-  geoPosition: GeoPoint;
-}
 
 export interface RunwayTrajectoryProfileState {
   isLoading: boolean;
@@ -67,18 +55,11 @@ function formatJulianTime(time: Cesium.JulianDate): string {
   return Cesium.JulianDate.toDate(time).toISOString();
 }
 
-function colorForFlightId(flightId: string): string {
-  let hash = 0;
-  for (let index = 0; index < flightId.length; index += 1) {
-    hash = (hash * 31 + flightId.charCodeAt(index)) >>> 0;
-  }
-  return `hsl(${hash % 360} 72% 58%)`;
-}
-
 function sampleRunwayPoint(
   entity: Cesium.Entity,
   time: Cesium.JulianDate,
   runwayFrame: RunwayFrame,
+  timeIso: string,
 ): SampledRunwayPoint | null {
   if (!entity.position) return null;
 
@@ -105,26 +86,7 @@ function sampleRunwayPoint(
       geoPosition.altM,
     ),
     geoPosition,
-  };
-}
-
-function routeIsActive(
-  route: HorizontalPlateRoute,
-  procedureVisibility: Record<string, boolean>,
-): boolean {
-  return procedureVisibility[route.branchId] ?? route.defaultVisible;
-}
-
-function profileAircraftSample(
-  point: SampledRunwayPoint,
-  timeIso: string,
-  segmentAssessment: HorizontalPlateSegmentAssessment,
-): ProfileAircraftSample {
-  const { geoPosition: _geoPosition, ...profilePoint } = point;
-  return {
-    ...profilePoint,
     timeIso,
-    segmentAssessment,
   };
 }
 
@@ -219,7 +181,7 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
   }, [activeAirportCode, isRunwayProfileOpen, selectedProfileRunwayIdent]);
 
   const activePlateRoutes = useMemo(
-    () => loadedData?.plateRoutes.filter((route) => routeIsActive(route, procedureVisibility)) ?? [],
+    () => activeHorizontalPlateRoutes(loadedData?.plateRoutes ?? [], procedureVisibility),
     [loadedData, procedureVisibility],
   );
 
@@ -229,27 +191,16 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
     }
 
     const currentTimeIso = formatJulianTime(currentTime);
-
-    return trajectoryDataSource.entities.values
+    const aircraft: ProfileAircraftInput[] = trajectoryDataSource.entities.values
       .filter((entity) => entity.id !== "document")
-      .map((entity): ProfileAircraftTrack | null => {
-        const currentPoint = sampleRunwayPoint(entity, currentTime, loadedData.runwayFrame);
-        if (!currentPoint) return null;
-        const currentAssessment =
-          classifyGeoPointAgainstHorizontalPlateRoutes(
-            currentPoint.geoPosition,
-            activePlateRoutes,
-            loadedData.runwayFrame,
-          ) ??
-          classifyPointAgainstHorizontalPlateRoutes(
-            currentPoint,
-            activePlateRoutes,
-          );
-        if (!currentAssessment || currentAssessment.containment !== "PRIMARY") {
-          return null;
-        }
-
-        const trail: ProfileAircraftSample[] = [];
+      .map((entity): ProfileAircraftInput => {
+        const current = sampleRunwayPoint(
+          entity,
+          currentTime,
+          loadedData.runwayFrame,
+          currentTimeIso,
+        );
+        const trail: SampledRunwayPoint[] = [];
         for (
           let offsetSeconds = TRAIL_LOOKBACK_SECONDS;
           offsetSeconds >= TRAIL_SAMPLE_STEP_SECONDS;
@@ -260,39 +211,29 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
             -offsetSeconds,
             new Cesium.JulianDate(),
           );
-          const samplePoint = sampleRunwayPoint(entity, sampleTime, loadedData.runwayFrame);
+          const samplePoint = sampleRunwayPoint(
+            entity,
+            sampleTime,
+            loadedData.runwayFrame,
+            formatJulianTime(sampleTime),
+          );
           if (!samplePoint) continue;
-          const sampleAssessment =
-            classifyGeoPointAgainstHorizontalPlateRoutes(
-              samplePoint.geoPosition,
-              activePlateRoutes,
-              loadedData.runwayFrame,
-            ) ??
-            classifyPointAgainstHorizontalPlateRoutes(
-              samplePoint,
-              activePlateRoutes,
-            );
-          if (!sampleAssessment || sampleAssessment.containment !== "PRIMARY") continue;
-          trail.push(profileAircraftSample(samplePoint, formatJulianTime(sampleTime), sampleAssessment));
+          trail.push(samplePoint);
         }
-
-        trail.push(profileAircraftSample(currentPoint, currentTimeIso, currentAssessment));
 
         return {
           flightId: entity.id,
-          color: colorForFlightId(entity.id),
-          current: profileAircraftSample(currentPoint, currentTimeIso, currentAssessment),
+          current,
           trail,
-          isSelected: entity.id === selectedFlightId,
         };
-      })
-      .filter((track): track is ProfileAircraftTrack => track !== null)
-      .sort((left, right) => {
-        if (left.isSelected === right.isSelected) {
-          return left.flightId.localeCompare(right.flightId);
-        }
-        return left.isSelected ? -1 : 1;
       });
+
+    return buildProfileAircraftTracks({
+      aircraft,
+      activePlateRoutes,
+      runwayFrame: loadedData.runwayFrame,
+      selectedFlightId,
+    });
   }, [activePlateRoutes, currentTime, loadedData, selectedFlightId, trajectoryDataSource]);
 
   const activeReferenceMarks = useMemo(

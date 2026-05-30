@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AeroViz-4D Project Architecture</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      body { background: #f7f6f1; }
+      .module { border: 1px solid #d6d3d1; background: white; }
+      .deep { background: #111827; color: white; }
+      .adapter { background: #ecfeff; border-color: #06b6d4; }
+      .data { background: #f0fdf4; border-color: #22c55e; }
+      .scene { background: #fff7ed; border-color: #f97316; }
+      .label { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: #64748b; }
+      .code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+    </style>
+  </head>
+  <body class="text-slate-900">
+    <main class="mx-auto max-w-7xl space-y-8 px-6 py-10">
+      <header class="space-y-3">
+        <p class="label">AeroViz-4D architecture</p>
+        <h1 class="text-4xl font-semibold tracking-tight">Airport 4D trajectory and terrain digital twin</h1>
+        <p class="max-w-4xl text-sm leading-6 text-slate-600">
+          This document describes the current frontend architecture after the terrain, procedure,
+          profile, and context deepening work. The project keeps React as the UI shell, CesiumJS as
+          the 3D scene adapter, and typed data modules as the primary domain seams.
+        </p>
+      </header>
+
+      <section class="grid gap-4 md:grid-cols-4">
+        <div class="module rounded-xl p-4">
+          <p class="label">UI shell</p>
+          <h2 class="mt-1 font-semibold">React overlays</h2>
+          <p class="mt-2 text-sm text-slate-600">ControlPanel, HUD, FlightTable, ProcedurePanel, profile panel.</p>
+        </div>
+        <div class="module rounded-xl p-4">
+          <p class="label">Scene adapter</p>
+          <h2 class="mt-1 font-semibold">Cesium hooks</h2>
+          <p class="mt-2 text-sm text-slate-600">Hooks bind app state to viewer lifecycle and entity mutation.</p>
+        </div>
+        <div class="module rounded-xl p-4">
+          <p class="label">Domain modules</p>
+          <h2 class="mt-1 font-semibold">Typed geometry/data</h2>
+          <p class="mt-2 text-sm text-slate-600">Procedure, terrain, profile, and assessment modules own the rules.</p>
+        </div>
+        <div class="module rounded-xl p-4">
+          <p class="label">Generated assets</p>
+          <h2 class="mt-1 font-semibold">public/data</h2>
+          <p class="mt-2 text-sm text-slate-600">CZML, runway GeoJSON, procedure details, and local DSM terrain tiles.</p>
+        </div>
+      </section>
+
+      <section class="module rounded-2xl p-6">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p class="label">System flow</p>
+            <h2 class="text-2xl font-semibold">Runtime data and rendering path</h2>
+          </div>
+          <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">React -> domain modules -> Cesium</span>
+        </div>
+        <pre class="mermaid mt-5">
+flowchart LR
+  AS[AppProvider split contexts] --> CV[CesiumViewer]
+  AS --> UI[React overlay UI]
+  CV --> VH[Viewer hooks]
+  VH --> TR[Terrain Runtime]
+  VH --> PR[Procedure Scene Renderer]
+  VH --> CZ[CZML Loader]
+  PR --> PB[Procedure Render Bundle]
+  PB --> PS[Procedure Protection Surfaces]
+  PB --> VG[Procedure Vertical Guidance]
+  UI --> RP[Runway Profile Panel]
+  RP --> PA[Runway Profile Analysis]
+  CZ --> ENT[Cesium entities]
+  TR --> GLOBE[Cesium globe]
+  PR --> ENT
+        </pre>
+      </section>
+
+      <section class="grid gap-6 lg:grid-cols-2">
+        <article class="module rounded-2xl p-6">
+          <p class="label">State seams</p>
+          <h2 class="text-2xl font-semibold">AppProvider internal split</h2>
+          <div class="mt-4 grid gap-3 text-sm">
+            <div class="rounded-lg border border-slate-200 p-3"><span class="code font-semibold">SceneContext</span> - viewer, layer toggles, local terrain status.</div>
+            <div class="rounded-lg border border-slate-200 p-3"><span class="code font-semibold">AirportSessionContext</span> - airport catalog, active airport, airport camera target.</div>
+            <div class="rounded-lg border border-slate-200 p-3"><span class="code font-semibold">FlightSessionContext</span> - selected flight and trajectory datasource.</div>
+            <div class="rounded-lg border border-slate-200 p-3"><span class="code font-semibold">ProcedureSessionContext</span> - branch visibility, annotation, width, display level.</div>
+            <div class="rounded-lg border border-slate-200 p-3"><span class="code font-semibold">RunwayProfileSessionContext</span> - selected runway and profile view state.</div>
+          </div>
+          <p class="mt-4 text-sm text-slate-600">
+            The public <span class="code">useApp()</span> interface remains compatible. Internally, reset rules and ownership are now easier to reason about.
+          </p>
+        </article>
+
+        <article class="module rounded-2xl p-6">
+          <p class="label">Terrain</p>
+          <h2 class="text-2xl font-semibold">Terrain runtime module</h2>
+          <pre class="mermaid mt-4">
+flowchart TD
+  TL[useTerrainLayer] --> RT[terrainRuntime]
+  DL[useDsmTerrainLayer] --> RT
+  SI[useSatelliteImageryLayer] --> RT
+  RT --> WP[World terrain settings]
+  RT --> LP[Local DSM warm policy]
+  RT --> NM[No-imagery material and lighting]
+  RT --> GS[Globe restore snapshots]
+          </pre>
+          <p class="mt-4 text-sm text-slate-600">
+            The hooks are lifecycle adapters. Provider priority, focused DSM warmup, streaming settings,
+            no-satellite grayscale material, and render-state restore all live behind one terrain seam.
+          </p>
+        </article>
+      </section>
+
+      <section class="module rounded-2xl p-6">
+        <p class="label">Procedure modules</p>
+        <h2 class="text-2xl font-semibold">RNAV procedure rendering architecture</h2>
+        <div class="mt-5 grid gap-4 lg:grid-cols-[1.1fr,1fr]">
+          <pre class="mermaid">
+flowchart TD
+  DOC[procedure detail documents] --> PKG[procedurePackageAdapter]
+  PKG --> BUNDLE[procedureRenderBundle]
+  BUNDLE --> SURF[procedureProtectionSurfaces]
+  BUNDLE --> VERT[procedureVerticalGuidance]
+  BUNDLE --> SCENE[procedureSceneRenderer]
+  SURF --> SCENE
+  VERT --> SCENE
+  SCENE --> HOOK[useProcedureSegmentLayer]
+  HOOK --> CES[Cesium entities]
+          </pre>
+          <div class="space-y-3 text-sm">
+            <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+              <span class="code font-semibold">procedureProtectionSurfaces</span>
+              is the single render source for final OEA, LNAV/VNAV OCS, precision debug surfaces, missed surfaces, missed connectors, and turning missed debug surfaces.
+            </div>
+            <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+              <span class="code font-semibold">procedureVerticalGuidance</span>
+              owns GPA/TCH final references and branch vertical profile aids outside Cesium.
+            </div>
+            <div class="rounded-lg border border-orange-200 bg-orange-50 p-3">
+              <span class="code font-semibold">procedureSceneRenderer</span>
+              owns entity registry, branch lazy rendering, visibility refresh, and cleanup.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="grid gap-6 lg:grid-cols-2">
+        <article class="module rounded-2xl p-6">
+          <p class="label">Runway profile</p>
+          <h2 class="text-2xl font-semibold">Profile analysis seam</h2>
+          <pre class="mermaid mt-4">
+flowchart LR
+  ENT[Cesium trajectories] --> SAMPLE[useRunwayTrajectoryProfile samples]
+  SAMPLE --> ANALYSIS[runwayTrajectoryProfileAnalysis]
+  ROUTES[Horizontal plate routes] --> ANALYSIS
+  ANALYSIS --> PANEL[RunwayTrajectoryProfilePanel]
+          </pre>
+          <p class="mt-4 text-sm text-slate-600">
+            Cesium sampling remains in the hook. Route activation, containment classification,
+            selected-flight ordering, trail shaping, and color assignment now live in the analysis module.
+          </p>
+        </article>
+
+        <article class="module rounded-2xl p-6">
+          <p class="label">Data pipeline</p>
+          <h2 class="text-2xl font-semibold">Generated data inputs</h2>
+          <pre class="mermaid mt-4">
+flowchart TD
+  OS[OpenSky or ADS-B raw data] --> NORM[trajectory normalization]
+  NORM --> CZML[generate_czml.py]
+  CZML --> APP[useCzmlLoader]
+  CIFP[ARINC/CIFP procedure data] --> PROC[preprocess_procedures.py]
+  PROC --> PD[procedure detail JSON]
+  TIF[GeoTIFF DSM] --> DSM[build_dsm_heightmap_terrain]
+  DSM --> TILES[.f32 local terrain tiles]
+  RUN[OurAirports runway data] --> RW[runway.geojson]
+          </pre>
+        </article>
+      </section>
+
+      <section class="module rounded-2xl p-6">
+        <p class="label">Verification</p>
+        <h2 class="text-2xl font-semibold">Current validation gates</h2>
+        <div class="mt-4 grid gap-3 md:grid-cols-2">
+          <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <p class="code text-sm font-semibold">npm test -- --run</p>
+            <p class="mt-2 text-sm text-slate-600">31 files, 180 tests passing after the architecture changes.</p>
+          </div>
+          <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <p class="code text-sm font-semibold">npm run build</p>
+            <p class="mt-2 text-sm text-slate-600">TypeScript and Vite production build pass.</p>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

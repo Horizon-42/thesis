@@ -1,61 +1,22 @@
 import { useEffect, useRef } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
-
-const WORLD_TERRAIN_MAXIMUM_SCREEN_SPACE_ERROR = 1;
-const WORLD_TERRAIN_MIN_TILE_CACHE_SIZE = 512;
-const WORLD_TERRAIN_LOADING_DESCENDANT_LIMIT = 20;
-
-interface GlobeTerrainStreamingSettings {
-  maximumScreenSpaceError: number;
-  tileCacheSize: number;
-  loadingDescendantLimit: number;
-  preloadAncestors: boolean;
-  preloadSiblings: boolean;
-}
-
-function captureTerrainStreamingSettings(
-  globe: Cesium.Globe,
-): GlobeTerrainStreamingSettings {
-  return {
-    maximumScreenSpaceError: globe.maximumScreenSpaceError,
-    tileCacheSize: globe.tileCacheSize,
-    loadingDescendantLimit: globe.loadingDescendantLimit,
-    preloadAncestors: globe.preloadAncestors,
-    preloadSiblings: globe.preloadSiblings,
-  };
-}
-
-function applyWorldTerrainStreamingSettings(viewer: Cesium.Viewer): void {
-  const { globe } = viewer.scene;
-
-  globe.maximumScreenSpaceError = WORLD_TERRAIN_MAXIMUM_SCREEN_SPACE_ERROR;
-  globe.tileCacheSize = Math.max(globe.tileCacheSize, WORLD_TERRAIN_MIN_TILE_CACHE_SIZE);
-  globe.loadingDescendantLimit = WORLD_TERRAIN_LOADING_DESCENDANT_LIMIT;
-  globe.preloadAncestors = true;
-  globe.preloadSiblings = true;
-  viewer.scene.requestRender();
-}
-
-function restoreTerrainStreamingSettings(
-  viewer: Cesium.Viewer,
-  settings: GlobeTerrainStreamingSettings,
-): void {
-  const { globe } = viewer.scene;
-
-  globe.maximumScreenSpaceError = settings.maximumScreenSpaceError;
-  globe.tileCacheSize = settings.tileCacheSize;
-  globe.loadingDescendantLimit = settings.loadingDescendantLimit;
-  globe.preloadAncestors = settings.preloadAncestors;
-  globe.preloadSiblings = settings.preloadSiblings;
-  viewer.scene.requestRender();
-}
+import {
+  applyWorldTerrainStreamingSettings,
+  captureTerrainStreamingSettings,
+  restoreTerrainStreamingSettings,
+  type GlobeTerrainStreamingSettings,
+} from "../terrain/terrainRuntime";
 
 /**
  * Toggle world terrain on/off.
  *
  * ON  → CesiumTerrainProvider from Ion asset 1 (Cesium World Terrain)
  * OFF → EllipsoidTerrainProvider (flat, no elevation — imagery stays visible)
+ *
+ * The terrain runtime module owns the Cesium globe streaming policy. This hook
+ * is only the React lifecycle adapter that chooses world versus ellipsoid when
+ * airport local terrain is not already controlling the provider seam.
  *
  * On first mount we skip: useCesiumViewer already set world terrain via the
  * Viewer constructor.  Re-applying would cause a redundant network fetch.

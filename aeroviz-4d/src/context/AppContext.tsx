@@ -77,12 +77,25 @@ export interface AirportLocalTerrainState {
   error: string | null;
 }
 
-// ── Context shape ────────────────────────────────────────────────────────────
-interface AppState {
+// ── Context shapes ───────────────────────────────────────────────────────────
+// useApp still exposes one merged interface for existing callers, but the
+// provider below splits state by ownership so airport resets, scene mutations,
+// procedure controls, and profile controls no longer share one implicit seam.
+interface SceneState {
   /** The live CesiumJS Viewer, or null before it is mounted */
   viewer: Cesium.Viewer | null;
   setViewer: (v: Cesium.Viewer | null) => void;
 
+  /** Visibility flags for each data layer */
+  layers: Record<LayerKey, boolean>;
+  toggleLayer: (key: LayerKey) => void;
+
+  /** Status of the active airport-scoped local high-resolution terrain source */
+  airportLocalTerrain: AirportLocalTerrainState;
+  setAirportLocalTerrain: (state: AirportLocalTerrainState) => void;
+}
+
+interface AirportSessionState {
   /** Available airport folders exposed by public/data/airports/index.json */
   airports: AirportCatalogItem[];
   /** Active airport folder key, e.g. KRDU */
@@ -92,7 +105,9 @@ interface AppState {
   /** Airport camera target loaded from public/data/airports/<ICAO>/airport.json */
   airport: AirportConfig | null;
   setAirport: (airport: AirportConfig | null) => void;
+}
 
+interface FlightSessionState {
   /** The currently tracked/selected flight callsign */
   selectedFlightId: string | null;
   setSelectedFlightId: (id: string | null) => void;
@@ -100,15 +115,9 @@ interface AppState {
   /** The loaded CZML datasource for trajectory sampling and profile views */
   trajectoryDataSource: Cesium.CzmlDataSource | null;
   setTrajectoryDataSource: (dataSource: Cesium.CzmlDataSource | null) => void;
+}
 
-  /** Visibility flags for each data layer */
-  layers: Record<LayerKey, boolean>;
-  toggleLayer: (key: LayerKey) => void;
-
-  /** Status of the active airport-scoped local high-resolution terrain source */
-  airportLocalTerrain: AirportLocalTerrainState;
-  setAirportLocalTerrain: (state: AirportLocalTerrainState) => void;
-
+interface ProcedureSessionState {
   /** Per-branch visibility for v3 procedure features */
   procedureVisibility: Record<string, boolean>;
   setProcedureBranchVisible: (branchId: string, visible: boolean) => void;
@@ -121,11 +130,15 @@ interface AppState {
   setProcedureDisplayLevel: (level: ProcedureDisplayLevel) => void;
   selectedProcedureAnnotation: ProcedureEntityAnnotation | null;
   setSelectedProcedureAnnotation: (annotation: ProcedureEntityAnnotation | null) => void;
+}
 
+interface PlaybackState {
   /** Current Cesium clock multiplier (mirrors viewer.clock.multiplier) */
   playbackSpeed: number;
   setPlaybackSpeed: (speed: number) => void;
+}
 
+interface RunwayProfileSessionState {
   /** Selected runway for the 2D runway profile overlay */
   selectedProfileRunwayIdent: string | null;
   setSelectedProfileRunwayIdent: (runwayIdent: string | null) => void;
@@ -135,10 +148,22 @@ interface AppState {
   setRunwayProfileViewMode: (mode: RunwayProfileViewMode) => void;
 }
 
-// ── Create context ────────────────────────────────────────────────────────────
-// The default value is `null`; we assert non-null in the `useApp` hook below
-// so consumers get a helpful error if they forget to wrap with AppProvider.
-const AppContext = createContext<AppState | null>(null);
+interface AppState extends
+  SceneState,
+  AirportSessionState,
+  FlightSessionState,
+  ProcedureSessionState,
+  PlaybackState,
+  RunwayProfileSessionState {}
+
+// The defaults are `null`; useApp asserts all providers are present so consumers
+// get a helpful error if they forget to wrap with AppProvider.
+const SceneContext = createContext<SceneState | null>(null);
+const AirportSessionContext = createContext<AirportSessionState | null>(null);
+const FlightSessionContext = createContext<FlightSessionState | null>(null);
+const ProcedureSessionContext = createContext<ProcedureSessionState | null>(null);
+const PlaybackContext = createContext<PlaybackState | null>(null);
+const RunwayProfileSessionContext = createContext<RunwayProfileSessionState | null>(null);
 
 // ── Provider ──────────────────────────────────────────────────────────────────
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -278,47 +303,67 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [activeAirportCode, viewer],
   );
 
+  const sceneState: SceneState = {
+    viewer,
+    setViewer,
+    layers,
+    toggleLayer,
+    airportLocalTerrain,
+    setAirportLocalTerrain,
+  };
+  const airportSessionState: AirportSessionState = {
+    airports,
+    activeAirportCode,
+    setActiveAirportCode,
+    airport,
+    setAirport,
+  };
+  const flightSessionState: FlightSessionState = {
+    selectedFlightId,
+    setSelectedFlightId,
+    trajectoryDataSource,
+    setTrajectoryDataSource,
+  };
+  const procedureSessionState: ProcedureSessionState = {
+    procedureVisibility,
+    setProcedureBranchVisible,
+    setProcedureBranchesVisible,
+    procedureAnnotationEnabled,
+    setProcedureAnnotationEnabled,
+    procedureWidthMeasurementEnabled,
+    setProcedureWidthMeasurementEnabled,
+    procedureDisplayLevel,
+    setProcedureDisplayLevel,
+    selectedProcedureAnnotation,
+    setSelectedProcedureAnnotation,
+  };
+  const playbackState: PlaybackState = {
+    playbackSpeed,
+    setPlaybackSpeed,
+  };
+  const runwayProfileSessionState: RunwayProfileSessionState = {
+    selectedProfileRunwayIdent,
+    setSelectedProfileRunwayIdent,
+    isRunwayProfileOpen,
+    setRunwayProfileOpen,
+    runwayProfileViewMode,
+    setRunwayProfileViewMode,
+  };
+
   return (
-    <AppContext.Provider
-      value={{
-        viewer,
-        setViewer,
-        airports,
-        activeAirportCode,
-        setActiveAirportCode,
-        airport,
-        setAirport,
-        selectedFlightId,
-        setSelectedFlightId,
-        trajectoryDataSource,
-        setTrajectoryDataSource,
-        layers,
-        toggleLayer,
-        airportLocalTerrain,
-        setAirportLocalTerrain,
-        procedureVisibility,
-        setProcedureBranchVisible,
-        setProcedureBranchesVisible,
-        procedureAnnotationEnabled,
-        setProcedureAnnotationEnabled,
-        procedureWidthMeasurementEnabled,
-        setProcedureWidthMeasurementEnabled,
-        procedureDisplayLevel,
-        setProcedureDisplayLevel,
-        selectedProcedureAnnotation,
-        setSelectedProcedureAnnotation,
-        playbackSpeed,
-        setPlaybackSpeed,
-        selectedProfileRunwayIdent,
-        setSelectedProfileRunwayIdent,
-        isRunwayProfileOpen,
-        setRunwayProfileOpen,
-        runwayProfileViewMode,
-        setRunwayProfileViewMode,
-      }}
-    >
-      {children}
-    </AppContext.Provider>
+    <AirportSessionContext.Provider value={airportSessionState}>
+      <SceneContext.Provider value={sceneState}>
+        <FlightSessionContext.Provider value={flightSessionState}>
+          <ProcedureSessionContext.Provider value={procedureSessionState}>
+            <PlaybackContext.Provider value={playbackState}>
+              <RunwayProfileSessionContext.Provider value={runwayProfileSessionState}>
+                {children}
+              </RunwayProfileSessionContext.Provider>
+            </PlaybackContext.Provider>
+          </ProcedureSessionContext.Provider>
+        </FlightSessionContext.Provider>
+      </SceneContext.Provider>
+    </AirportSessionContext.Provider>
   );
 }
 
@@ -330,12 +375,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
  *   const { viewer, selectedFlightId } = useApp();
  */
 export function useApp(): AppState {
-  const ctx = useContext(AppContext);
-  if (!ctx) {
+  const sceneState = useContext(SceneContext);
+  const airportSessionState = useContext(AirportSessionContext);
+  const flightSessionState = useContext(FlightSessionContext);
+  const procedureSessionState = useContext(ProcedureSessionContext);
+  const playbackState = useContext(PlaybackContext);
+  const runwayProfileSessionState = useContext(RunwayProfileSessionContext);
+  if (
+    !sceneState ||
+    !airportSessionState ||
+    !flightSessionState ||
+    !procedureSessionState ||
+    !playbackState ||
+    !runwayProfileSessionState
+  ) {
     throw new Error(
       "useApp() was called outside of <AppProvider>. " +
         "Wrap your component tree with <AppProvider> in main.tsx."
     );
   }
-  return ctx;
+  return {
+    ...sceneState,
+    ...airportSessionState,
+    ...flightSessionState,
+    ...procedureSessionState,
+    ...playbackState,
+    ...runwayProfileSessionState,
+  };
 }

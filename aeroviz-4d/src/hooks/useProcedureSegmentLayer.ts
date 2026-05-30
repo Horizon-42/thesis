@@ -31,13 +31,23 @@ import {
   type ProcedureEntityAnnotation,
 } from "../data/procedureAnnotations";
 import type { ProcedureProtectionSurface } from "../data/procedureProtectionSurfaces";
+import {
+  branchVerticalProfileSections,
+  buildFinalVerticalReferenceRibbon,
+  buildVerticalProfileRibbon,
+  finalVerticalReferencePoints,
+} from "../data/procedureVerticalGuidance";
+import {
+  ProcedureSceneEntityRegistry,
+  renderVisibleProcedureBranches,
+  syncProcedureSceneVisibility,
+  type ProcedureSceneFlags,
+  type ProcedureSceneRenderData,
+} from "../scene/procedureSceneRenderer";
 import { isMissingJsonAsset } from "../utils/fetchJson";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
-import { distanceNm, interpolateGreatCircle, type GeoPoint } from "../utils/procedureGeoMath";
-import {
-  buildVariableWidthRibbon,
-  type VariableWidthRibbonGeometry,
-} from "../utils/procedureSurfaceGeometry";
+import { interpolateGreatCircle, type GeoPoint } from "../utils/procedureGeoMath";
+import type { VariableWidthRibbonGeometry } from "../utils/procedureSurfaceGeometry";
 
 const PROCEDURE_SEGMENT_ENTITY_PREFIX = "procedure-segment-";
 const CENTERLINE_COLOR = Cesium.Color.CYAN.withAlpha(0.95);
@@ -84,8 +94,6 @@ const FINAL_VERTICAL_REFERENCE_BAND_HEIGHT_OFFSET_M = 38;
 const SEGMENT_VERTICAL_PROFILE_HEIGHT_OFFSET_M = 44;
 const FINAL_ALTITUDE_CONSTRAINT_HEIGHT_OFFSET_M = 46;
 const ALTITUDE_CONSTRAINT_LINK_HEIGHT_OFFSET_M = 12;
-const FINAL_VERTICAL_REFERENCE_DEFAULT_HALF_WIDTH_NM = 0.15;
-const FINAL_VERTICAL_REFERENCE_PROTECTION_WIDTH_RATIO = 1;
 const CONNECTOR_HEIGHT_OFFSET_M = 45;
 const ALIGNED_CONNECTOR_FILL_HEIGHT_OFFSET_M = ENVELOPE_HEIGHT_OFFSET_M + 4;
 const ALIGNED_CONNECTOR_LINE_HEIGHT_OFFSET_M = CONNECTOR_HEIGHT_OFFSET_M;
@@ -295,297 +303,6 @@ function fixGeoPointAtAltitude(fix: ProcedurePackageFix, altitudeFtMsl: number):
   };
 }
 
-function finalVerticalReferencePoints(segmentBundle: ProcedureSegmentRenderBundle): GeoPoint[] {
-  if (!isFinalSegment(segmentBundle.segment)) return [];
-  const gpaDeg = segmentBundle.segment.verticalRule?.gpaDeg;
-  if (typeof gpaDeg !== "number" || !Number.isFinite(gpaDeg) || gpaDeg <= 0) return [];
-
-  if (segmentBundle.lnavVnavOcs?.centerline.geoPositions.length) {
-    return segmentBundle.lnavVnavOcs.centerline.geoPositions;
-  }
-
-  const centerline = segmentBundle.segmentGeometry.centerline;
-  if (centerline.geoPositions.length < 2 || centerline.geodesicLengthNm <= 0) return [];
-
-  const samples = segmentBundle.segmentGeometry.stationAxis.samples.length >= 2
-    ? segmentBundle.segmentGeometry.stationAxis.samples.map((sample) => ({
-        stationNm: sample.stationNm,
-        geoPosition: sample.geoPosition,
-      }))
-    : centerline.geoPositions.map((geoPosition, index) => ({
-        stationNm: centerline.geodesicLengthNm * (index / Math.max(centerline.geoPositions.length - 1, 1)),
-        geoPosition,
-      }));
-  if (samples.length < 2) return [];
-
-  const thresholdSample = samples[samples.length - 1];
-  const thresholdElevationFtMsl = thresholdSample.geoPosition.altM / 0.3048;
-  const thresholdReferenceAltitudeFtMsl =
-    thresholdElevationFtMsl + (segmentBundle.segment.verticalRule?.tchFt ?? 0);
-  const gpaRad = (gpaDeg * Math.PI) / 180;
-  const totalStationNm = thresholdSample.stationNm;
-
-  return samples.map((sample) => {
-    const distanceBeforeThresholdNm = Math.max(0, totalStationNm - sample.stationNm);
-    const altitudeFtMsl =
-      thresholdReferenceAltitudeFtMsl +
-      (Math.tan(gpaRad) * distanceBeforeThresholdNm * 1852) / 0.3048;
-    return {
-      lonDeg: sample.geoPosition.lonDeg,
-      latDeg: sample.geoPosition.latDeg,
-      altM: altitudeFtMsl * 0.3048,
-    };
-  });
-}
-
-function buildFinalVerticalReferenceRibbon(
-  segmentBundle: ProcedureSegmentRenderBundle,
-  points: GeoPoint[],
-): VariableWidthRibbonGeometry | null {
-  if (points.length < 2) return null;
-  const stations: number[] = [];
-  let cumulativeNm = 0;
-  points.forEach((point, index) => {
-    if (index > 0) {
-      cumulativeNm += distanceNm(points[index - 1], point);
-    }
-    stations.push(cumulativeNm);
-  });
-  const protectionWidthSamples =
-    segmentBundle.finalOea?.primary.halfWidthNmSamples ??
-    segmentBundle.segmentGeometry.primaryEnvelope?.halfWidthNmSamples ??
-    [];
-  const nearestProtectionHalfWidthNm = (stationNm: number) => {
-    const nearest = protectionWidthSamples.reduce<
-      { stationNm: number; halfWidthNm: number } | null
-    >((best, sample) => {
-      if (!best) return sample;
-      return Math.abs(sample.stationNm - stationNm) < Math.abs(best.stationNm - stationNm)
-        ? sample
-        : best;
-    }, null);
-    return nearest?.halfWidthNm ?? FINAL_VERTICAL_REFERENCE_DEFAULT_HALF_WIDTH_NM * 2;
-  };
-
-  return buildVariableWidthRibbon(
-    `${segmentBundle.segment.segmentId}:final-vertical-reference-band`,
-    {
-      geoPositions: points,
-      worldPositions: [],
-      geodesicLengthNm: cumulativeNm,
-      isArc: false,
-    },
-    stations,
-    (stationNm) =>
-      Math.max(
-        FINAL_VERTICAL_REFERENCE_DEFAULT_HALF_WIDTH_NM,
-        nearestProtectionHalfWidthNm(stationNm) * FINAL_VERTICAL_REFERENCE_PROTECTION_WIDTH_RATIO,
-      ),
-  );
-}
-
-interface SegmentVerticalProfilePoint extends GeoPoint {
-  fixIdent: string;
-  altitudeFtMsl: number;
-  halfWidthNm: number;
-  segmentId?: string;
-}
-
-interface SegmentVerticalProfileSection {
-  sectionId: string;
-  points: SegmentVerticalProfilePoint[];
-  segmentIds: string[];
-  segmentTypes: string[];
-}
-
-function nearestHalfWidthNm(
-  samples: Array<{ stationNm: number; halfWidthNm: number }>,
-  stationNm: number,
-): number {
-  const nearest = samples.reduce<{ stationNm: number; halfWidthNm: number } | null>(
-    (best, sample) => {
-      if (!best) return sample;
-      return Math.abs(sample.stationNm - stationNm) < Math.abs(best.stationNm - stationNm)
-        ? sample
-        : best;
-    },
-    null,
-  );
-  return nearest?.halfWidthNm ?? FINAL_VERTICAL_REFERENCE_DEFAULT_HALF_WIDTH_NM * 2;
-}
-
-function segmentProtectionHalfWidthNm(
-  segmentBundle: ProcedureSegmentRenderBundle,
-  pointIndex: number,
-  pointCount: number,
-): number {
-  const protectionWidthSamples =
-    segmentBundle.finalOea?.primary.halfWidthNmSamples ??
-    segmentBundle.segmentGeometry.primaryEnvelope?.halfWidthNmSamples ??
-    [];
-  const totalStationNm =
-    protectionWidthSamples[protectionWidthSamples.length - 1]?.stationNm ??
-    segmentBundle.segmentGeometry.centerline.geodesicLengthNm;
-  const stationNm =
-    pointCount <= 1 ? totalStationNm : totalStationNm * (pointIndex / Math.max(1, pointCount - 1));
-  return nearestHalfWidthNm(protectionWidthSamples, stationNm);
-}
-
-function segmentVerticalProfilePointsForSegment(
-  segmentBundle: ProcedureSegmentRenderBundle,
-  pkg: ProcedurePackage | null,
-): SegmentVerticalProfilePoint[] {
-  if (!pkg) return [];
-  const fixById = new Map(pkg.sharedFixes.map((fix) => [fix.fixId, fix]));
-  const missedCaEndpointByLegId = new Map(
-    segmentBundle.missedCaEndpoints.map((endpoint) => [endpoint.legId, endpoint]),
-  );
-  const points: SegmentVerticalProfilePoint[] = [];
-  segmentBundle.legs.forEach((leg) => {
-    if (
-      (segmentBundle.segment.segmentType === "MISSED_S1" ||
-        segmentBundle.segment.segmentType === "MISSED_S2") &&
-      leg.legType === "CA"
-    ) {
-      const endpoint = missedCaEndpointByLegId.get(leg.legId);
-      if (!endpoint) return;
-      const point = endpoint.geoPositions[1];
-      points.push({
-        lonDeg: point.lonDeg,
-        latDeg: point.latDeg,
-        altM: point.altM,
-        fixIdent: "CA endpoint",
-        altitudeFtMsl: endpoint.targetAltitudeFtMsl,
-        halfWidthNm: 0,
-        segmentId: segmentBundle.segment.segmentId,
-      });
-      return;
-    }
-
-    const fix = leg.endFixId ? fixById.get(leg.endFixId) : undefined;
-    if (!fix || fix.lonDeg === null || fix.latDeg === null) return;
-    const altitudeFtMsl = altitudeConstraintReferenceFt(leg.requiredAltitude) ?? fix.altFtMsl;
-    if (altitudeFtMsl === null || !Number.isFinite(altitudeFtMsl)) return;
-    points.push({
-      lonDeg: fix.lonDeg,
-      latDeg: fix.latDeg,
-      altM: altitudeFtMsl * 0.3048,
-      fixIdent: fix.ident,
-      altitudeFtMsl,
-      halfWidthNm: 0,
-      segmentId: segmentBundle.segment.segmentId,
-    });
-  });
-
-  return points
-    .map((point, index) => ({
-      ...point,
-      halfWidthNm: segmentProtectionHalfWidthNm(segmentBundle, index, points.length),
-    }))
-    .filter(
-      (point, index) =>
-        index === 0 ||
-        point.fixIdent !== points[index - 1].fixIdent ||
-        distanceNm(point, points[index - 1]) > 1e-5,
-    );
-}
-
-function isBranchVerticalProfileSegment(segmentType: string): boolean {
-  return !segmentType.startsWith("MISSED") && segmentType !== "HOLDING";
-}
-
-function isSameVerticalProfilePoint(
-  point: SegmentVerticalProfilePoint,
-  previous: SegmentVerticalProfilePoint,
-): boolean {
-  return (
-    point.fixIdent === previous.fixIdent &&
-    distanceNm(point, previous) <= 1e-5 &&
-    Math.abs(point.altitudeFtMsl - previous.altitudeFtMsl) <= 1e-3
-  );
-}
-
-function appendVerticalProfilePoint(
-  points: SegmentVerticalProfilePoint[],
-  point: SegmentVerticalProfilePoint,
-): void {
-  const previous = points[points.length - 1];
-  if (previous && isSameVerticalProfilePoint(point, previous)) return;
-  points.push(point);
-}
-
-function branchVerticalProfileSections(
-  branchBundle: BranchGeometryBundle,
-  pkg: ProcedurePackage | null,
-): SegmentVerticalProfileSection[] {
-  const sections: SegmentVerticalProfileSection[] = [];
-  let currentSection: SegmentVerticalProfileSection | null = null;
-
-  branchBundle.segmentBundles.forEach((segmentBundle) => {
-    if (!isBranchVerticalProfileSegment(segmentBundle.segment.segmentType)) {
-      currentSection = null;
-      return;
-    }
-
-    const points = segmentVerticalProfilePointsForSegment(segmentBundle, pkg);
-    if (points.length === 0) return;
-
-    if (!currentSection) {
-      currentSection = {
-        sectionId: `section-${sections.length + 1}`,
-        points: [],
-        segmentIds: [],
-        segmentTypes: [],
-      };
-      sections.push(currentSection);
-    }
-
-    const section = currentSection;
-    if (!section.segmentIds.includes(segmentBundle.segment.segmentId)) {
-      section.segmentIds.push(segmentBundle.segment.segmentId);
-    }
-    if (!section.segmentTypes.includes(segmentBundle.segment.segmentType)) {
-      section.segmentTypes.push(segmentBundle.segment.segmentType);
-    }
-    points.forEach((point) => appendVerticalProfilePoint(section.points, point));
-  });
-
-  return sections.filter((section) => section.points.length >= 2);
-}
-
-function buildVerticalProfileRibbon(
-  geometryId: string,
-  points: SegmentVerticalProfilePoint[],
-): VariableWidthRibbonGeometry | null {
-  if (points.length < 2) return null;
-
-  const stations: number[] = [];
-  let cumulativeNm = 0;
-  points.forEach((point, index) => {
-    if (index > 0) {
-      cumulativeNm += distanceNm(points[index - 1], point);
-    }
-    stations.push(cumulativeNm);
-  });
-
-  const halfWidthSamples = stations.map((stationNm, index) => ({
-    stationNm,
-    halfWidthNm: points[index].halfWidthNm,
-  }));
-
-  return buildVariableWidthRibbon(
-    geometryId,
-    {
-      geoPositions: points,
-      worldPositions: [],
-      geodesicLengthNm: cumulativeNm,
-      isArc: false,
-    },
-    stations,
-    (stationNm) => nearestHalfWidthNm(halfWidthSamples, stationNm),
-  );
-}
-
 function compactSegmentType(segmentType: string | undefined): string {
   if (segmentType === "FINAL_RNAV_GPS") return "FINAL RNAV(GPS)";
   return (segmentType ?? "UNKNOWN").replace(/_/g, " ");
@@ -655,18 +372,6 @@ function segmentParams(segment: ProcedureSegment, legs: ProcedurePackageLeg[]): 
     param("Width", segment.widthChangeMode),
     param("Legs", legs.map((leg) => leg.legType).join(", ")),
   ];
-}
-
-function protectionSurfaceIdForMissedSection(segmentId: string, surfaceType: string): string {
-  return `${segmentId}:${surfaceType.toLowerCase()}`;
-}
-
-function findProtectionSurface(
-  branchBundle: BranchGeometryBundle,
-  surfaceId: string | null | undefined,
-): ProcedureProtectionSurface | null {
-  if (!surfaceId) return null;
-  return (branchBundle.protectionSurfaces ?? []).find((surface) => surface.surfaceId === surfaceId) ?? null;
 }
 
 function formatEnumLabel(value: string): string {
@@ -1357,13 +1062,6 @@ function addSegmentEntities(
   const centerlineEstimated = segmentBundle.segmentGeometry.diagnostics.some(
     (diagnostic) => diagnostic.code === "ESTIMATED_CA_GEOMETRY",
   );
-  const hasUnifiedSurfaces = (branchBundle.protectionSurfaces ?? []).length > 0;
-  const hasUnifiedTurningMissedDebugSurfaces = (branchBundle.protectionSurfaces ?? []).some(
-    (surface) =>
-      surface.segmentId === segmentBundle.segment.segmentId &&
-      surface.kind === "TURNING_MISSED_DEBUG",
-  );
-
   const centerlineId = `${baseId}-centerline`;
   const centerlineAnnotation = annotationBase({
     entityId: centerlineId,
@@ -1672,222 +1370,6 @@ function addSegmentEntities(
     }
   });
 
-  if (!hasUnifiedSurfaces && segmentBundle.finalOea) {
-    const protectionSurface = findProtectionSurface(branchBundle, segmentBundle.finalOea.geometryId);
-    const oeaPrimaryId = `${baseId}-oea-primary`;
-    const oeaAnnotation = annotationBase({
-      entityId: oeaPrimaryId,
-      label: "LNAV OEA",
-      title: `${segmentName} LNAV OEA primary`,
-      kind: "FINAL_OEA",
-      status: "SOURCE_BACKED",
-      bundle,
-      branchBundle,
-      segment: segmentBundle.segment,
-      legs: segmentBundle.legs,
-      parameters: [
-        ...segmentParams(segmentBundle.segment, segmentBundle.legs),
-        ...protectionSurfaceParams(protectionSurface),
-      ],
-      diagnostics: segmentDiagnostics,
-    });
-    addRibbonPolygon(
-      viewer,
-      oeaPrimaryId,
-      `${segmentName} LNAV OEA primary`,
-      segmentBundle.finalOea.primary,
-      procedureEntityShow(visible, oeaAnnotation, displayLevel),
-      PRIMARY_COLOR,
-      OEA_HEIGHT_OFFSET_M,
-      oeaAnnotation,
-    );
-    ids.push(oeaPrimaryId);
-    const oeaLabelId = addAnnotationLabel(
-      viewer,
-      oeaAnnotation,
-      representativePoint(segmentBundle.finalOea.primary.leftGeoBoundary),
-      procedureEntityShow(visible, oeaAnnotation, displayLevel, true, annotationVisible),
-    );
-    if (oeaLabelId) ids.push(oeaLabelId);
-
-    const oeaSecondaryId = `${baseId}-oea-secondary`;
-    const oeaSecondaryAnnotation = {
-      ...oeaAnnotation,
-      entityId: oeaSecondaryId,
-      title: `${segmentName} LNAV OEA secondary`,
-    };
-    addRibbonPolygon(
-      viewer,
-      oeaSecondaryId,
-      `${segmentName} LNAV OEA secondary`,
-      segmentBundle.finalOea.secondaryOuter,
-      procedureEntityShow(visible, oeaSecondaryAnnotation, displayLevel),
-      SECONDARY_COLOR,
-      OEA_HEIGHT_OFFSET_M,
-      oeaSecondaryAnnotation,
-    );
-    ids.push(oeaSecondaryId);
-    ids.push(
-      ...addFinalOeaStationMarkers({
-        viewer,
-        bundle,
-        branchBundle,
-        segmentBundle,
-        baseId,
-        segmentName,
-        centerline: segmentBundle.finalOea.centerline.geoPositions,
-        primary: segmentBundle.finalOea.primary,
-        secondaryOuter: segmentBundle.finalOea.secondaryOuter,
-        widthSamples: finalOeaWidthSamplesFromRibbons(
-          segmentBundle.finalOea.primary,
-          segmentBundle.finalOea.secondaryOuter,
-        ),
-        visible: visible && widthMeasurementVisible,
-        annotationVisible,
-        displayLevel,
-        diagnostics: segmentDiagnostics,
-      }),
-    );
-  }
-
-  if (!hasUnifiedSurfaces && segmentBundle.lnavVnavOcs) {
-    const protectionSurface = findProtectionSurface(branchBundle, segmentBundle.lnavVnavOcs.geometryId);
-    const ocsPrimaryId = `${baseId}-lnav-vnav-ocs-primary`;
-    const ocsAnnotation = annotationBase({
-      entityId: ocsPrimaryId,
-      label: "LNAV/VNAV OCS",
-      title: `${segmentName} LNAV/VNAV OCS primary`,
-      kind: "LNAV_VNAV_OCS",
-      status: "ESTIMATED",
-      bundle,
-      branchBundle,
-      segment: segmentBundle.segment,
-      legs: segmentBundle.legs,
-      parameters: [
-        ...segmentParams(segmentBundle.segment, segmentBundle.legs),
-        param("GPA", `${segmentBundle.lnavVnavOcs.verticalProfile.gpaDeg} deg`),
-        param("TCH", `${segmentBundle.lnavVnavOcs.verticalProfile.tchFt} ft`),
-        param("Status", segmentBundle.lnavVnavOcs.constructionStatus),
-        ...protectionSurfaceParams(protectionSurface),
-      ],
-      diagnostics: segmentDiagnostics,
-    });
-    addRibbonPolygon(
-      viewer,
-      ocsPrimaryId,
-      `${segmentName} LNAV/VNAV OCS primary`,
-      segmentBundle.lnavVnavOcs.primary,
-        procedureEntityShow(visible, ocsAnnotation, displayLevel),
-        LNAV_VNAV_OCS_PRIMARY_COLOR,
-        LNAV_VNAV_OCS_HEIGHT_OFFSET_M,
-        ocsAnnotation,
-    );
-    ids.push(ocsPrimaryId);
-    ids.push(
-      ...addRibbonBoundaryPolylines(
-        viewer,
-        `${baseId}-lnav-vnav-ocs-primary-boundary`,
-        `${segmentName} LNAV/VNAV OCS primary`,
-        segmentBundle.lnavVnavOcs.primary,
-        procedureEntityShow(visible, ocsAnnotation, displayLevel),
-        LNAV_VNAV_OCS_EDGE_COLOR,
-        LNAV_VNAV_OCS_EDGE_HEIGHT_OFFSET_M,
-        ocsAnnotation,
-      ),
-      ...addRibbonCrossRibs(
-        viewer,
-        `${baseId}-lnav-vnav-ocs-primary`,
-        `${segmentName} LNAV/VNAV OCS primary`,
-        segmentBundle.lnavVnavOcs.primary,
-        procedureEntityShow(visible, ocsAnnotation, displayLevel),
-        LNAV_VNAV_OCS_RIB_COLOR,
-        LNAV_VNAV_OCS_RIB_HEIGHT_OFFSET_M,
-        ocsAnnotation,
-      ),
-    );
-    const ocsLabelId = addAnnotationLabel(
-      viewer,
-      ocsAnnotation,
-      representativePoint(segmentBundle.lnavVnavOcs.centerline.geoPositions),
-      procedureEntityShow(visible, ocsAnnotation, displayLevel, true, annotationVisible),
-    );
-    if (ocsLabelId) ids.push(ocsLabelId);
-
-    const ocsSecondaryId = `${baseId}-lnav-vnav-ocs-secondary`;
-    const ocsSecondaryAnnotation = {
-      ...ocsAnnotation,
-      entityId: ocsSecondaryId,
-      title: `${segmentName} LNAV/VNAV OCS secondary`,
-    };
-    addRibbonPolygon(
-      viewer,
-      ocsSecondaryId,
-      `${segmentName} LNAV/VNAV OCS secondary`,
-      segmentBundle.lnavVnavOcs.secondaryOuter,
-      procedureEntityShow(visible, ocsSecondaryAnnotation, displayLevel),
-      LNAV_VNAV_OCS_SECONDARY_COLOR,
-      LNAV_VNAV_OCS_HEIGHT_OFFSET_M,
-      ocsSecondaryAnnotation,
-    );
-    ids.push(ocsSecondaryId);
-    ids.push(
-      ...addRibbonBoundaryPolylines(
-        viewer,
-        `${baseId}-lnav-vnav-ocs-secondary-boundary`,
-        `${segmentName} LNAV/VNAV OCS secondary`,
-        segmentBundle.lnavVnavOcs.secondaryOuter,
-        procedureEntityShow(visible, ocsSecondaryAnnotation, displayLevel),
-        LNAV_VNAV_OCS_SECONDARY_EDGE_COLOR,
-        LNAV_VNAV_OCS_EDGE_HEIGHT_OFFSET_M,
-        ocsSecondaryAnnotation,
-      ),
-    );
-  }
-
-  if (!hasUnifiedSurfaces) {
-    segmentBundle.precisionFinalSurfaces.forEach((surface) => {
-      const protectionSurface = findProtectionSurface(branchBundle, surface.geometryId);
-      const surfaceId = `${baseId}-precision-${surface.surfaceType.toLowerCase().replace(/_/g, "-")}`;
-      const surfaceAnnotation = annotationBase({
-        entityId: surfaceId,
-        label: `${surface.surfaceType.replace(/_/g, " ")} estimate`,
-        title: `${segmentName} ${surface.surfaceType} debug estimate`,
-        kind: "PRECISION_SURFACE",
-        status: "DEBUG_ESTIMATE",
-        bundle,
-        branchBundle,
-        segment: segmentBundle.segment,
-        legs: segmentBundle.legs,
-        parameters: [
-          param("Surface", surface.surfaceType),
-          param("GPA", `${surface.verticalProfile.gpaDeg} deg`),
-          param("TCH", `${surface.verticalProfile.tchFt} ft`),
-          param("Status", surface.constructionStatus),
-          ...protectionSurfaceParams(protectionSurface),
-        ],
-        diagnostics: [...segmentDiagnostics, ...surface.notes],
-      });
-      addRibbonPolygon(
-        viewer,
-        surfaceId,
-        `${segmentName} ${surface.surfaceType} debug estimate`,
-        surface.ribbon,
-        procedureEntityShow(visible, surfaceAnnotation, displayLevel),
-        PRECISION_FINAL_SURFACE_COLOR,
-        PRECISION_FINAL_SURFACE_HEIGHT_OFFSET_M,
-        surfaceAnnotation,
-      );
-      ids.push(surfaceId);
-      const surfaceLabelId = addAnnotationLabel(
-        viewer,
-        surfaceAnnotation,
-        representativePoint(surface.centerline.geoPositions),
-        procedureEntityShow(visible, surfaceAnnotation, displayLevel, true, annotationVisible),
-      );
-      if (surfaceLabelId) ids.push(surfaceLabelId);
-    });
-  }
-
   if (
     segmentBundle.finalSurfaceStatus &&
     segmentBundle.finalSurfaceStatus.missingSurfaceTypes.length > 0
@@ -2018,78 +1500,6 @@ function addSegmentEntities(
         connectorSecondaryAnnotation,
       ),
     );
-  }
-
-  if (!hasUnifiedSurfaces && segmentBundle.missedSectionSurface) {
-    const protectionSurface = findProtectionSurface(
-      branchBundle,
-      protectionSurfaceIdForMissedSection(
-        segmentBundle.missedSectionSurface.segmentId,
-        segmentBundle.missedSectionSurface.surfaceType,
-      ),
-    );
-    const isEstimatedCaSurface =
-      segmentBundle.missedSectionSurface.constructionStatus === "ESTIMATED_CA";
-    const missedSurfaceColor = isEstimatedCaSurface
-      ? MISSED_CA_ESTIMATED_SURFACE_COLOR
-      : MISSED_SURFACE_COLOR;
-    const missedSurfaceName = isEstimatedCaSurface
-      ? `${segmentName} CA estimated missed section`
-      : `${segmentName} missed section`;
-    const missedPrimaryId = `${baseId}-missed-surface-primary`;
-    const missedAnnotation = annotationBase({
-      entityId: missedPrimaryId,
-      label: isEstimatedCaSurface ? "Missed CA estimate" : "Missed surface",
-      title: `${missedSurfaceName} primary`,
-      kind: "MISSED_SURFACE",
-      status: isEstimatedCaSurface ? "ESTIMATED" : "SOURCE_BACKED",
-      bundle,
-      branchBundle,
-      segment: segmentBundle.segment,
-      legs: segmentBundle.legs,
-      parameters: [
-        param("Surface", segmentBundle.missedSectionSurface.surfaceType),
-        param("Status", segmentBundle.missedSectionSurface.constructionStatus),
-        ...protectionSurfaceParams(protectionSurface),
-      ],
-      diagnostics: segmentDiagnostics,
-    });
-    addRibbonPolygon(
-      viewer,
-      missedPrimaryId,
-      `${missedSurfaceName} primary`,
-      segmentBundle.missedSectionSurface.primary,
-      procedureEntityShow(visible, missedAnnotation, displayLevel),
-      missedSurfaceColor,
-      MISSED_SURFACE_HEIGHT_OFFSET_M,
-      missedAnnotation,
-    );
-    ids.push(missedPrimaryId);
-    const missedLabelId = addAnnotationLabel(
-      viewer,
-      missedAnnotation,
-      representativePoint(segmentBundle.missedSectionSurface.primary.leftGeoBoundary),
-      procedureEntityShow(visible, missedAnnotation, displayLevel, true, annotationVisible),
-    );
-    if (missedLabelId) ids.push(missedLabelId);
-
-    const missedSecondaryId = `${baseId}-missed-surface-secondary`;
-    const missedSecondaryAnnotation = {
-      ...missedAnnotation,
-      entityId: missedSecondaryId,
-      title: `${missedSurfaceName} secondary`,
-    };
-    addRibbonPolygon(
-      viewer,
-      missedSecondaryId,
-      `${missedSurfaceName} secondary`,
-      segmentBundle.missedSectionSurface.secondaryOuter ?? undefined,
-      procedureEntityShow(visible, missedSecondaryAnnotation, displayLevel),
-      missedSurfaceColor,
-      MISSED_SURFACE_HEIGHT_OFFSET_M,
-      missedSecondaryAnnotation,
-    );
-    ids.push(missedSecondaryId);
   }
 
   segmentBundle.missedCourseGuides.forEach((guide) => {
@@ -2255,51 +1665,6 @@ function addSegmentEntities(
       procedureEntityShow(visible, debugAnnotation, displayLevel, true, annotationVisible),
     );
     if (debugLabelId) ids.push(debugLabelId);
-  }
-
-  if (!hasUnifiedTurningMissedDebugSurfaces) {
-    segmentBundle.missedTurnDebugPrimitives.forEach((primitive) => {
-      const primitiveId = `${baseId}-turning-missed-${primitive.debugType.toLowerCase().replace(/_/g, "-")}`;
-      const leg = segmentBundle.legs.find((candidate) => candidate.legId === primitive.legId);
-      const primitiveAnnotation = annotationBase({
-        entityId: primitiveId,
-        label: primitive.debugType.replace(/_/g, " "),
-        title: `${segmentName} turning missed ${primitive.debugType.toLowerCase().replace(/_/g, " ")}`,
-        kind: "TURNING_MISSED_DEBUG",
-        status: "DEBUG_ESTIMATE",
-        bundle,
-        branchBundle,
-        segment: segmentBundle.segment,
-        legs: segmentBundle.legs,
-        leg,
-        parameters: [
-          param("Debug type", primitive.debugType),
-          param("Turn trigger", primitive.turnTrigger),
-          param("Turn case", primitive.turnCase),
-          param("Course", `${primitive.courseDeg} deg`),
-          param("Turn direction", primitive.turnDirection),
-        ],
-        diagnostics: [...segmentDiagnostics, ...primitive.notes],
-      });
-      addPolyline(
-        viewer,
-        primitiveId,
-        `${segmentName} turning missed ${primitive.debugType.toLowerCase().replace(/_/g, " ")}`,
-        primitive.geoPositions.map((point) => elevatedPoint(point, TURNING_MISSED_DEBUG_HEIGHT_OFFSET_M)),
-        procedureEntityShow(visible, primitiveAnnotation, displayLevel),
-        primitive.debugType === "NOMINAL_TURN_PATH" ? 4 : 3,
-        TURNING_MISSED_PRIMITIVE_COLOR,
-        primitiveAnnotation,
-      );
-      ids.push(primitiveId);
-      const primitiveLabelId = addAnnotationLabel(
-        viewer,
-        primitiveAnnotation,
-        representativePoint(primitive.geoPositions.map((point) => elevatedPoint(point, TURNING_MISSED_DEBUG_HEIGHT_OFFSET_M))),
-        procedureEntityShow(visible, primitiveAnnotation, displayLevel, true, annotationVisible),
-      );
-      if (primitiveLabelId) ids.push(primitiveLabelId);
-    });
   }
 
   return ids;
@@ -2921,82 +2286,6 @@ function addBranchMissedCaMahfConnectorEntities(
   return ids;
 }
 
-function addBranchMissedConnectorSurfaceEntities(
-  viewer: Cesium.Viewer,
-  bundle: ProcedureRenderBundle,
-  branchBundle: BranchGeometryBundle,
-  visible: boolean,
-  annotationVisible: boolean,
-  displayLevel: ProcedureDisplayLevel,
-): string[] {
-  const ids: string[] = [];
-  (branchBundle.missedConnectorSurfaces ?? []).forEach((surface, index) => {
-    const protectionSurface = findProtectionSurface(branchBundle, surface.surfaceId);
-    const baseId = `${PROCEDURE_SEGMENT_ENTITY_PREFIX}${bundle.packageId}-${branchBundle.branchId}-missed-connector-surface-${index}`;
-    const primaryId = `${baseId}-primary`;
-    const annotation = annotationBase({
-      entityId: primaryId,
-      label: `Connector to ${surface.targetFixIdent}`,
-      title: `${bundle.procedureName} estimated missed connector surface`,
-      kind: "MISSED_CONNECTOR_SURFACE",
-      status: "ESTIMATED",
-      bundle,
-      branchBundle,
-      parameters: [
-        param("Source CA leg", surface.sourceLegId),
-        param("Endpoint status", surface.sourceEndpointStatus),
-        param("Target fix", `${surface.targetFixIdent} ${surface.targetFixRole}`),
-        param("Distance", `${surface.centerline.geodesicLengthNm.toFixed(2)} NM`),
-        param("Surface status", surface.constructionStatus),
-        param("Vertical", surface.verticalProfile.constructionStatus),
-        param("Geometry meaning", "Estimated connector surface; not certified TERPS construction"),
-        ...protectionSurfaceParams(protectionSurface),
-      ],
-      diagnostics: surface.notes,
-    });
-    addRibbonPolygon(
-      viewer,
-      primaryId,
-      `${bundle.procedureName} estimated missed connector surface primary`,
-      surface.primary,
-      procedureEntityShow(visible, annotation, displayLevel),
-      MISSED_CONNECTOR_SURFACE_COLOR,
-      MISSED_SURFACE_HEIGHT_OFFSET_M,
-      annotation,
-    );
-    ids.push(primaryId);
-
-    const labelId = addAnnotationLabel(
-      viewer,
-      annotation,
-      representativePoint(surface.primary.leftGeoBoundary),
-      procedureEntityShow(visible, annotation, displayLevel, true, annotationVisible),
-    );
-    if (labelId) ids.push(labelId);
-
-    if (surface.secondaryOuter) {
-      const secondaryId = `${baseId}-secondary`;
-      const secondaryAnnotation = {
-        ...annotation,
-        entityId: secondaryId,
-        title: `${bundle.procedureName} estimated missed connector surface secondary`,
-      };
-      addRibbonPolygon(
-        viewer,
-        secondaryId,
-        `${bundle.procedureName} estimated missed connector surface secondary`,
-        surface.secondaryOuter,
-        procedureEntityShow(visible, secondaryAnnotation, displayLevel),
-        MISSED_CONNECTOR_SURFACE_COLOR,
-        MISSED_SURFACE_HEIGHT_OFFSET_M,
-        secondaryAnnotation,
-      );
-      ids.push(secondaryId);
-    }
-  });
-  return ids;
-}
-
 function packageBranchDefaultVisible(
   pkg: ProcedurePackage | null,
   branchId: string,
@@ -3070,6 +2359,10 @@ function addBranchEntities(
       annotationVisible,
       displayLevel,
     ),
+    // All OEA/OCS/missed/turning protection surfaces now cross the unified
+    // ProcedureProtectionSurface seam. Segment bundles still carry legacy
+    // geometry for builders and diagnostics, but rendering does not read those
+    // fields directly.
     ...addBranchProtectionSurfaceEntities(
       viewer,
       bundle,
@@ -3079,16 +2372,6 @@ function addBranchEntities(
       widthMeasurementVisible,
       displayLevel,
     ),
-    ...((branchBundle.protectionSurfaces ?? []).length === 0
-      ? addBranchMissedConnectorSurfaceEntities(
-          viewer,
-          bundle,
-          branchBundle,
-          visible,
-          annotationVisible,
-          displayLevel,
-        )
-      : []),
     ...addBranchMissedCaMahfConnectorEntities(
       viewer,
       bundle,
@@ -3116,18 +2399,8 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
   const widthMeasurementVisibleRef = useRef(procedureWidthMeasurementEnabled);
   const displayLevelRef = useRef(procedureDisplayLevel);
   const procedureVisibilityRef = useRef(procedureVisibility);
-  const branchEntityIdsRef = useRef<Record<string, string[]>>({});
-  const allEntityIdsRef = useRef<string[]>([]);
-  const renderDataRef = useRef<{
-    renderBundles: ProcedureRenderBundle[];
-    packageById: Map<string, ProcedurePackage>;
-  } | null>(null);
-
-  const addBranchEntityIds = (branchId: string, entityIds: string[]) => {
-    allEntityIdsRef.current.push(...entityIds);
-    const existing = branchEntityIdsRef.current[branchId] ?? [];
-    branchEntityIdsRef.current[branchId] = [...existing, ...entityIds];
-  };
+  const registryRef = useRef(new ProcedureSceneEntityRegistry());
+  const renderDataRef = useRef<ProcedureSceneRenderData | null>(null);
 
   useEffect(() => {
     visibleRef.current = layers.procedures;
@@ -3137,51 +2410,53 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
     procedureVisibilityRef.current = procedureVisibility;
 
     if (!enabled || !isCesiumViewerUsable(viewer)) return;
-    Object.entries(branchEntityIdsRef.current).forEach(([branchId, entityIds]) => {
-      const branchVisible = procedureVisibility[branchId] ?? true;
-      entityIds.forEach((entityId) => {
-        const entity = viewer.entities.getById(entityId);
-        if (entity) {
-          const annotation = getProcedureAnnotation(entity);
-          const baseVisible = layers.procedures && branchVisible;
-          if (isMeasurementEntityId(entityId)) {
-            entity.show =
-              procedureWidthMeasurementEnabled &&
-              procedureEntityShow(baseVisible, annotation, procedureDisplayLevel);
-            return;
-          }
-          entity.show = procedureEntityShow(
-            baseVisible,
-            annotation,
-            procedureDisplayLevel,
-            isAnnotationLabelId(entityId),
-            procedureAnnotationEnabled,
-          );
-        }
-      });
+    const flags: ProcedureSceneFlags = {
+      proceduresVisible: layers.procedures,
+      procedureVisibility,
+      annotationVisible: procedureAnnotationEnabled,
+      widthMeasurementVisible: procedureWidthMeasurementEnabled,
+      displayLevel: procedureDisplayLevel,
+    };
+
+    syncProcedureSceneVisibility({
+      viewer,
+      registry: registryRef.current,
+      flags,
+      getAnnotation: getProcedureAnnotation,
+      entityShow: procedureEntityShow,
+      isAnnotationLabelId,
+      isMeasurementEntityId,
     });
 
-    if (layers.procedures && renderDataRef.current) {
-      renderDataRef.current.renderBundles.forEach((bundle) => {
-        const pkg = renderDataRef.current?.packageById.get(bundle.packageId) ?? null;
-        bundle.branchBundles.forEach((branchBundle, branchIndex) => {
-          const branchVisible = packageBranchVisible(pkg, branchBundle.branchId, procedureVisibility);
-          if (!branchVisible || branchEntityIdsRef.current[branchBundle.branchId]?.length) return;
-          addBranchEntityIds(
-            branchBundle.branchId,
-            addBranchEntities(
+    if (renderDataRef.current) {
+      renderVisibleProcedureBranches({
+        viewer,
+        registry: registryRef.current,
+        renderData: renderDataRef.current,
+        flags,
+        branchVisible: packageBranchVisible,
+        renderBranch: ({
+          viewer,
+          bundle,
+          branchBundle,
+          branchIndex,
+          pkg,
+          visible,
+          annotationVisible,
+          widthMeasurementVisible,
+          displayLevel,
+        }) =>
+          addBranchEntities(
               viewer,
               bundle,
               branchBundle,
               branchIndex,
               pkg,
-              true,
-              procedureAnnotationEnabled,
-              procedureWidthMeasurementEnabled,
-              procedureDisplayLevel,
-            ),
-          );
-        });
+              visible,
+              annotationVisible,
+              widthMeasurementVisible,
+              displayLevel,
+          ),
       });
     }
   }, [
@@ -3199,8 +2474,7 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
     if (!viewer || !activeAirportCode) return;
 
     let cancelled = false;
-    branchEntityIdsRef.current = {};
-    allEntityIdsRef.current = [];
+    registryRef.current.clear();
     renderDataRef.current = null;
 
     loadProcedureRenderBundleData(activeAirportCode)
@@ -3209,31 +2483,40 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
 
         const packageById = new Map(packages.map((pkg) => [pkg.packageId, pkg]));
         renderDataRef.current = { renderBundles, packageById };
-        renderBundles.forEach((bundle) => {
-          const pkg = packageById.get(bundle.packageId);
-          bundle.branchBundles.forEach((branchBundle, branchIndex) => {
-            const branchVisible = packageBranchVisible(
-              pkg ?? null,
-              branchBundle.branchId,
-              procedureVisibilityRef.current,
-            );
-            const visible = visibleRef.current && branchVisible;
-            if (!visible) return;
-            addBranchEntityIds(
-              branchBundle.branchId,
-              addBranchEntities(
+        renderVisibleProcedureBranches({
+          viewer,
+          registry: registryRef.current,
+          renderData: renderDataRef.current,
+          flags: {
+            proceduresVisible: visibleRef.current,
+            procedureVisibility: procedureVisibilityRef.current,
+            annotationVisible: annotationVisibleRef.current,
+            widthMeasurementVisible: widthMeasurementVisibleRef.current,
+            displayLevel: displayLevelRef.current,
+          },
+          branchVisible: packageBranchVisible,
+          renderBranch: ({
+            viewer,
+            bundle,
+            branchBundle,
+            branchIndex,
+            pkg,
+            visible,
+            annotationVisible,
+            widthMeasurementVisible,
+            displayLevel,
+          }) =>
+            addBranchEntities(
                 viewer,
                 bundle,
                 branchBundle,
                 branchIndex,
-                pkg ?? null,
+                pkg,
                 visible,
-                annotationVisibleRef.current,
-                widthMeasurementVisibleRef.current,
-                displayLevelRef.current,
-              ),
-            );
-          });
+                annotationVisible,
+                widthMeasurementVisible,
+                displayLevel,
+            ),
         });
       })
       .catch((error) => {
@@ -3250,10 +2533,9 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
     return () => {
       cancelled = true;
       if (isCesiumViewerUsable(viewer)) {
-        allEntityIdsRef.current.forEach((id) => viewer.entities.removeById(id));
+        registryRef.current.removeAll(viewer);
       }
-      branchEntityIdsRef.current = {};
-      allEntityIdsRef.current = [];
+      registryRef.current.clear();
       renderDataRef.current = null;
     };
   }, [enabled, viewer, activeAirportCode]);
