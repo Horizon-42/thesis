@@ -321,12 +321,17 @@
       overflow: hidden;
     }
 
-    .diagram svg {
+    .diagram svg,
+    .diagram img {
       display: block;
       width: 100%;
       height: auto;
       background:
         linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%);
+    }
+
+    .diagram img {
+      border: 0;
     }
 
     .diagram figcaption {
@@ -427,7 +432,7 @@
         本页根据原始 Markdown 文档中 “Geodetic and ECEF coordinates” 一章扩展而成。目标不是只给公式，而是让读者知道每个缩写是什么意思、每个变量从哪里来、每个坐标变换在三维空间里做了什么。
       </p>
       <p class="source-note">
-        适合读者：已经见过经纬度，但还不熟悉椭球、地心直角坐标、隐函数求导和反三角函数的人。页面中的 “3D” 指 three-dimensional，也就是三维空间示意。
+        适合读者：已经见过经纬度，但还不熟悉椭球、地心直角坐标、隐函数求导和反三角函数的人。页面中的 “3D” 指 three-dimensional，也就是三维空间示意。所有坐标图由 <code>generate_geodetic_ecef_diagrams.py</code> 按 WGS 84 参数和正交投影生成，不再手工凭感觉摆放矢量点线。
       </p>
 
       <div class="top-grid" aria-label="学习目标">
@@ -441,7 +446,7 @@
         </div>
         <div class="tile">
           <strong>理解正算</strong>
-          <span>给定 φ、λ、h，沿法线取点，再分解到 X、Y、Z 三轴。</span>
+          <span>给定 φ、λ、h，先算椭球面点 S 和单位法线 n̂，再用 P = S + h·n̂ 分解到 X、Y、Z 三轴。</span>
         </div>
         <div class="tile">
           <strong>理解反算</strong>
@@ -456,6 +461,7 @@
         <li><a href="#systems">两个坐标系</a></li>
         <li><a href="#math">数学预备</a></li>
         <li><a href="#ellipsoid">椭球推导</a></li>
+        <li><a href="#curvature">曲率半径</a></li>
         <li><a href="#forward">大地坐标到 ECEF</a></li>
         <li><a href="#inverse">ECEF 到大地坐标</a></li>
         <li><a href="#height">高度警告</a></li>
@@ -558,12 +564,12 @@
           <article class="card">
             <h3>大地坐标：φ、λ、h</h3>
             <p>
-              大地坐标写成 <strong>(φ, λ, h)</strong>。φ 是 geodetic latitude，即大地纬度；λ 是 geodetic longitude，即大地经度；h 是 ellipsoidal height，即椭球高。
+              大地坐标写成 <strong>(φ, λ, h)</strong>。φ 是 geodetic latitude，即大地纬度；λ 是 geodetic longitude，即大地经度；h 是 ellipsoidal height，即椭球高。这里的 h 必须和椭球表面、切平面、法线一起理解，不能按“从地心往外量”来理解。
             </p>
             <div class="var-list" aria-label="大地坐标变量">
               <div><strong>φ</strong>：phi，大地纬度。它由椭球法线决定，不是从地心连线决定。</div>
               <div><strong>λ</strong>：lambda，大地经度。通常以格林尼治子午面为零经度。</div>
-              <div><strong>h</strong>：椭球高。沿椭球表面法线向外量出的距离。</div>
+              <div><strong>h</strong>：椭球高。先在椭球面上找到法线脚点 S，再沿 S 处单位法线 n̂ 到目标点 P 的有符号距离。</div>
               <div><strong>datum/frame</strong>：基准或参考框架。这里默认都在 WGS 84 内部，不做基准变换。</div>
             </div>
           </article>
@@ -582,60 +588,9 @@
         </div>
 
         <figure class="diagram" aria-labelledby="fig-ecef-title">
-          <svg viewBox="0 0 760 470" role="img">
-            <defs>
-              <marker id="arrow-dark" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
-                <path d="M0,0 L8,3 L0,6 Z" fill="#2a3645"></path>
-              </marker>
-              <marker id="arrow-soft" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
-                <path d="M0,0 L8,3 L0,6 Z" fill="#7d8ea1"></path>
-              </marker>
-              <marker id="arrow-orange" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
-                <path d="M0,0 L8,3 L0,6 Z" fill="#b65b13"></path>
-              </marker>
-              <marker id="arrow-indigo" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
-                <path d="M0,0 L8,3 L0,6 Z" fill="#3d58a8"></path>
-              </marker>
-              <linearGradient id="earth-fill" x1="0" x2="1" y1="0" y2="1">
-                <stop offset="0%" stop-color="#e7f7f8"></stop>
-                <stop offset="100%" stop-color="#cde7e9"></stop>
-              </linearGradient>
-            </defs>
-
-            <text id="fig-ecef-title" class="label" x="34" y="38">3D 示意图：WGS 84 椭球、大地坐标与 ECEF 坐标</text>
-            <ellipse class="earth-shadow" cx="384" cy="252" rx="242" ry="76"></ellipse>
-            <ellipse cx="384" cy="226" rx="224" ry="146" fill="url(#earth-fill)" stroke="#207b84" stroke-width="2.2"></ellipse>
-            <ellipse class="equator" cx="384" cy="246" rx="218" ry="52"></ellipse>
-            <path class="meridian" d="M384 80 C322 118 303 205 331 281 C354 342 407 367 460 340 C535 302 544 183 497 117 C469 78 422 61 384 80"></path>
-            <path class="meridian dash" d="M247 216 C310 171 457 153 589 205"></path>
-
-            <line class="axis" x1="384" y1="246" x2="650" y2="328"></line>
-            <line class="axis" x1="384" y1="246" x2="190" y2="358"></line>
-            <line class="axis" x1="384" y1="246" x2="384" y2="54"></line>
-            <text class="label" x="657" y="336">X</text>
-            <text class="label" x="167" y="370">Y</text>
-            <text class="label" x="392" y="62">Z</text>
-            <text class="label-small" x="394" y="267">O 地心</text>
-
-            <line class="helper dash" x1="452" y1="121" x2="489" y2="251"></line>
-            <line class="helper dash" x1="489" y1="251" x2="542" y2="300"></line>
-            <line class="normal" x1="431" y1="152" x2="474" y2="91"></line>
-            <line class="radius" x1="384" y1="246" x2="431" y2="152"></line>
-            <circle class="surface-point" cx="431" cy="152" r="6"></circle>
-            <circle class="target-point" cx="474" cy="91" r="7"></circle>
-            <path class="arc" d="M518 276 C529 285 538 295 542 309"></path>
-            <path class="arc-indigo" d="M418 218 C434 225 449 236 459 251"></path>
-
-            <text class="label-teal label" x="484" y="88">P(φ, λ, h)</text>
-            <text class="label-orange label-small" x="477" y="123">h 沿法线</text>
-            <text class="label-indigo label-small" x="407" y="187">地心连线</text>
-            <text class="label-orange label-small" x="551" y="311">λ 经度</text>
-            <text class="label-indigo label-small" x="462" y="242">φ 大地纬度</text>
-            <text class="label-small" x="548" y="225">赤道面</text>
-            <text class="label-small" x="510" y="151">子午面</text>
-          </svg>
-          <figcaption>
-            这张图把两个坐标系放在一起：同一点 P 可以用大地坐标 (φ, λ, h) 表示，也可以用地心地固直角坐标 (X, Y, Z) 表示。注意 h 不是从地心向外量，而是沿椭球表面法线量。
+          <img src="assets/geodetic_ecef/01-coordinate-systems.svg" alt="WGS 84 椭球、大地坐标点、ECEF 坐标轴、法线和切平面的生成式三维示意图">
+          <figcaption id="fig-ecef-title">
+            这张图由脚本按 WGS 84 椭球参数、教学点 φ=53.809394°、λ=35° 和固定正交投影生成。P 可以用大地坐标 (φ, λ, h) 表示，也可以用 ECEF 坐标 (X, Y, Z) 表示。图中的 h 箭头沿精确单位法线 n̂ 放大显示，只用于看清方向；真实近地高度相对地球半径太小，按比例绘制会几乎不可见。
           </figcaption>
         </figure>
       </section>
@@ -750,7 +705,12 @@
                 </tr>
                 <tr>
                   <td>ν</td>
-                  <td>prime vertical radius of curvature，卯酉圈曲率半径</td>
+                  <td>prime vertical radius of curvature，卯酉圈曲率半径，也常写作 N</td>
+                  <td>随纬度 φ 改变</td>
+                </tr>
+                <tr>
+                  <td>M</td>
+                  <td>meridian radius of curvature，子午圈曲率半径</td>
                   <td>随纬度 φ 改变</td>
                 </tr>
               </tbody>
@@ -777,51 +737,51 @@
           </article>
         </div>
 
+        <div id="curvature" class="card" style="margin-top:18px">
+          <h3>子午圈与卯酉圈：古怪翻译背后的方向</h3>
+          <p>
+            在测地学里，点 S 附近有两个最重要的局部弯曲方向：沿经线走的南北方向，以及沿纬线附近走的东西方向。传统中文用十二地支表示方位：子是北，午是南，卯是东，酉是西。所以 <strong>子午圈</strong>就是南北向的 meridian；<strong>卯酉圈</strong>就是东西向的 prime vertical。
+          </p>
+          <p>
+            英文 <strong>prime vertical</strong> 直译可叫“主垂直圈”或“第一垂直圈”。在天文地平坐标语境中，它是天球上经过天顶、天底、正东和正西的大圆，圆心在观测者那里；但在本页的 <strong>prime vertical radius of curvature</strong> 里，我们说的不是那个天球大圆，而是椭球表面点 S 处<strong>东西方向法截线的局部曲率半径</strong>。这个曲率圆的圆心一般不在地心。
+          </p>
+          <div class="grid-2">
+            <article>
+              <h4>南北方向：子午圈曲率半径 M</h4>
+              <p>
+                沿经线方向，也就是向北或向南走，椭球剖面就是子午椭圆。它在点 S 附近的密切圆半径叫 meridian radius of curvature，中文是子午圈曲率半径。
+              </p>
+              <div class="formula">
+                <span class="formula-line">M = a(1 - e²) / (1 - e² sin²φ)^(3/2)</span>
+              </div>
+            </article>
+            <article>
+              <h4>东西方向：卯酉圈曲率半径 ν 或 N</h4>
+              <p>
+                沿东西方向看局部弯曲，使用的是由 S 处法线和东西切向量共同确定的法截线。它的密切圆半径叫 prime vertical radius of curvature，中文是卯酉圈曲率半径。
+              </p>
+              <div class="formula">
+                <span class="formula-line">ν = N = a / sqrt(1 - e² sin²φ)</span>
+              </div>
+            </article>
+          </div>
+          <div class="callout">
+            <strong>不要把 M 或 ν 理解成地心半径。</strong>
+            曲率半径描述的是点 S 附近某个方向“弯得有多厉害”。它来自局部密切圆，不是从地心 O 到 S 或 P 的长度。正算公式里出现 ν，是因为大地纬度按椭球法线定义，S 的水平分量正好写成 ν cosφ。
+          </div>
+        </div>
+
+        <figure class="diagram" aria-labelledby="fig-curvature-title">
+          <img src="assets/geodetic_ecef/03-curvature-radii.svg" alt="WGS 84 椭球点处子午圈曲率半径 M 和卯酉圈曲率半径 nu 的生成式三维示意图">
+          <figcaption id="fig-curvature-title">
+            这张图由脚本在同一教学点生成。南北切向对应子午圈曲率半径 M，东西切向对应卯酉圈曲率半径 ν/N；两者都是局部法截线的曲率半径。图中的虚线小圆用于提示密切圆概念，完整半径按公式计算并在图题中标出。
+          </figcaption>
+        </figure>
+
         <figure class="diagram" aria-labelledby="fig-normal-title">
-          <svg viewBox="0 0 760 500" role="img">
-            <defs>
-              <marker id="arrow-dark-2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
-                <path d="M0,0 L8,3 L0,6 Z" fill="#2a3645"></path>
-              </marker>
-              <marker id="arrow-orange-2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
-                <path d="M0,0 L8,3 L0,6 Z" fill="#b65b13"></path>
-              </marker>
-              <marker id="arrow-indigo-2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
-                <path d="M0,0 L8,3 L0,6 Z" fill="#3d58a8"></path>
-              </marker>
-            </defs>
-
-            <text id="fig-normal-title" class="label" x="34" y="38">3D 剖面示意图：大地纬度 φ 与地心纬度 ψ 不一样</text>
-            <ellipse class="earth-shadow" cx="390" cy="388" rx="236" ry="36"></ellipse>
-            <ellipse cx="390" cy="247" rx="250" ry="150" fill="#e7f7f8" stroke="#207b84" stroke-width="2.2"></ellipse>
-            <ellipse class="equator dash" cx="390" cy="247" rx="250" ry="44"></ellipse>
-            <line x1="92" y1="247" x2="675" y2="247" stroke="#2a3645" stroke-width="2.2" marker-end="url(#arrow-dark-2)"></line>
-            <line x1="390" y1="438" x2="390" y2="62" stroke="#2a3645" stroke-width="2.2" marker-end="url(#arrow-dark-2)"></line>
-            <text class="label" x="681" y="254">p</text>
-            <text class="label" x="399" y="70">z</text>
-            <text class="label-small" x="398" y="268">O</text>
-
-            <circle class="surface-point" cx="514" cy="122" r="6"></circle>
-            <line class="radius" x1="390" y1="247" x2="514" y2="122" marker-end="url(#arrow-indigo-2)"></line>
-            <line class="normal" x1="494" y1="142" x2="586" y2="49" marker-end="url(#arrow-orange-2)"></line>
-            <line x1="454" y1="183" x2="574" y2="303" stroke="#3d58a8" stroke-width="2.1"></line>
-            <line class="helper dash" x1="514" y1="122" x2="514" y2="247"></line>
-            <line class="helper dash" x1="390" y1="122" x2="514" y2="122"></line>
-
-            <path class="arc-indigo" d="M443 247 C442 220 458 192 481 170" marker-end="url(#arrow-indigo-2)"></path>
-            <path class="arc" d="M534 190 C552 174 566 154 572 130" marker-end="url(#arrow-orange-2)"></path>
-
-            <text class="label-teal label" x="524" y="119">S(p₀, z₀)</text>
-            <text class="label-small" x="517" y="188">z₀</text>
-            <text class="label-small" x="453" y="266">p₀</text>
-            <text class="label-indigo label-small" x="425" y="173">地心方向</text>
-            <text class="label-orange label-small" x="593" y="54">椭球法线</text>
-            <text class="label-indigo label-small" x="461" y="218">ψ 地心纬度</text>
-            <text class="label-orange label-small" x="568" y="167">φ 大地纬度</text>
-            <text class="label-indigo label-small" x="575" y="303">切线</text>
-          </svg>
-          <figcaption>
-            φ 是法线与赤道平面的夹角，ψ 是地心连线与赤道平面的夹角。椭球不是球体，所以法线通常不穿过地心，φ 和 ψ 一般不同。
+          <img src="assets/geodetic_ecef/02-geodetic-vs-geocentric-latitude.svg" alt="WGS 84 子午剖面中大地纬度和地心纬度的精确关系图">
+          <figcaption id="fig-normal-title">
+            这张剖面图使用 WGS 84 真实扁率计算。φ 是椭球法线与赤道平面的夹角，ψ 是地心连线与赤道平面的夹角；在教学纬度 φ=53.809394° 处，ψ=53.625811°，二者相差约 0.183584°。差异很小但会进入精密坐标转换公式。
           </figcaption>
         </figure>
 
@@ -865,78 +825,27 @@
       <section id="forward">
         <h2>5. 坐标变换一：大地坐标 (φ, λ, h) 到 ECEF (X, Y, Z)</h2>
         <p class="section-intro">
-          正算最容易建立空间直觉：先在椭球表面找到法线脚点 S，再沿法线走 h 到点 P，然后把 P 的三维位置分解到 X、Y、Z 轴。
+          正算最容易建立空间直觉：φ 和 λ 先确定椭球表面点 S 以及该点的单位法线 n̂；再沿 n̂ 走有符号距离 h 到点 P；最后把 P 的三维位置分解到 X、Y、Z 轴。
         </p>
 
         <figure class="diagram" aria-labelledby="fig-forward-title">
-          <svg viewBox="0 0 800 520" role="img">
-            <defs>
-              <marker id="arrow-dark-3" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
-                <path d="M0,0 L8,3 L0,6 Z" fill="#2a3645"></path>
-              </marker>
-              <marker id="arrow-orange-3" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
-                <path d="M0,0 L8,3 L0,6 Z" fill="#b65b13"></path>
-              </marker>
-              <marker id="arrow-indigo-3" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
-                <path d="M0,0 L8,3 L0,6 Z" fill="#3d58a8"></path>
-              </marker>
-              <marker id="arrow-teal-3" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
-                <path d="M0,0 L8,3 L0,6 Z" fill="#007c89"></path>
-              </marker>
-            </defs>
-
-            <text id="fig-forward-title" class="label" x="34" y="38">3D 坐标变换：从 φ、λ、h 分解出 X、Y、Z</text>
-            <ellipse class="earth-shadow" cx="395" cy="304" rx="245" ry="78"></ellipse>
-            <ellipse cx="395" cy="270" rx="225" ry="145" fill="#e7f7f8" stroke="#207b84" stroke-width="2.2"></ellipse>
-            <ellipse class="equator" cx="395" cy="292" rx="218" ry="52"></ellipse>
-            <path class="meridian" d="M395 126 C335 161 316 244 343 318 C365 378 419 402 470 374 C542 335 552 224 506 160 C476 120 430 107 395 126"></path>
-
-            <line x1="395" y1="292" x2="683" y2="376" stroke="#2a3645" stroke-width="2.3" marker-end="url(#arrow-dark-3)"></line>
-            <line x1="395" y1="292" x2="174" y2="409" stroke="#2a3645" stroke-width="2.3" marker-end="url(#arrow-dark-3)"></line>
-            <line x1="395" y1="292" x2="395" y2="80" stroke="#2a3645" stroke-width="2.3" marker-end="url(#arrow-dark-3)"></line>
-            <text class="label" x="690" y="384">X</text>
-            <text class="label" x="150" y="421">Y</text>
-            <text class="label" x="404" y="88">Z</text>
-
-            <circle class="surface-point" cx="456" cy="169" r="6"></circle>
-            <circle class="target-point" cx="500" cy="105" r="7"></circle>
-            <line x1="456" y1="169" x2="500" y2="105" stroke="#b65b13" stroke-width="2.5" marker-end="url(#arrow-orange-3)"></line>
-            <line x1="395" y1="292" x2="456" y2="169" stroke="#3d58a8" stroke-width="2.1" marker-end="url(#arrow-indigo-3)"></line>
-
-            <line class="helper dash" x1="500" y1="105" x2="532" y2="292"></line>
-            <line class="helper dash" x1="532" y1="292" x2="630" y2="361"></line>
-            <line class="helper dash" x1="532" y1="292" x2="259" y2="365"></line>
-            <line x1="395" y1="292" x2="532" y2="292" stroke="#007c89" stroke-width="2.4" marker-end="url(#arrow-teal-3)"></line>
-            <line x1="532" y1="292" x2="630" y2="361" stroke="#007c89" stroke-width="2.4" marker-end="url(#arrow-teal-3)"></line>
-            <line x1="532" y1="292" x2="259" y2="365" stroke="#007c89" stroke-width="2.4" marker-end="url(#arrow-teal-3)"></line>
-
-            <path class="arc" d="M558 320 C575 332 589 345 598 361" marker-end="url(#arrow-orange-3)"></path>
-            <path class="arc-indigo" d="M438 260 C456 269 474 282 488 298" marker-end="url(#arrow-indigo-3)"></path>
-
-            <text class="label-teal label" x="510" y="105">P</text>
-            <text class="label-orange label-small" x="486" y="147">h</text>
-            <text class="label-small" x="418" y="184">S</text>
-            <text class="label-indigo label-small" x="420" y="228">ν 参与确定 S</text>
-            <text class="label-teal label-small" x="505" y="283">p = sqrt(X² + Y²)</text>
-            <text class="label-orange label-small" x="608" y="355">λ</text>
-            <text class="label-indigo label-small" x="488" y="279">φ</text>
-            <text class="label-small" x="630" y="333">X 分量</text>
-            <text class="label-small" x="238" y="388">Y 分量</text>
-            <text class="label-small" x="508" y="196">Z 分量</text>
-          </svg>
-          <figcaption>
-            从大地坐标正算 ECEF 时，φ 决定法线方向和表面点 S，h 把点从 S 推到 P，λ 决定 P 绕 Z 轴转到哪个经度方向。最后用三角函数把 P 分解成 X、Y、Z。
+          <img src="assets/geodetic_ecef/04-forward-geodetic-to-ecef.svg" alt="从大地坐标 phi lambda h 正算到 ECEF X Y Z 的生成式三维坐标变换图">
+          <figcaption id="fig-forward-title">
+            正算图由脚本从公式 S(φ,λ)、n̂(φ,λ)、P=S+h·n̂、Q=(X,Y,0) 生成。φ 和 λ 先确定椭球面点 S 及其单位法线 n̂，h 是沿 n̂ 的有符号距离，最后把 P 的三维位置分解成 X、Y、Z。
           </figcaption>
         </figure>
 
         <div class="grid-2">
           <article class="card">
             <h3>正算公式</h3>
-            <p>先算卯酉圈曲率半径 ν：</p>
+            <p>先算卯酉圈曲率半径 ν，并写出椭球面点 S 和单位法线 n̂：</p>
             <div class="formula">
               <span class="formula-line">ν = a / sqrt(1 - e² sin²φ)</span>
+              <span class="formula-line">S = (ν cosφ cosλ, ν cosφ sinλ, (1-e²)ν sinφ)</span>
+              <span class="formula-line">n̂ = (cosφ cosλ, cosφ sinλ, sinφ)</span>
+              <span class="formula-line">P = S + h n̂</span>
             </div>
-            <p>再得到 ECEF 坐标：</p>
+            <p>把 P 的三个分量展开，就得到 ECEF 坐标：</p>
             <div class="formula">
               <span class="formula-line">X = (ν + h) cos φ cos λ</span>
               <span class="formula-line">Y = (ν + h) cos φ sin λ</span>
@@ -946,8 +855,10 @@
           <article class="card">
             <h3>公式里的每一项在做什么</h3>
             <ul>
-              <li><strong>(ν + h)</strong> 表示法线方向上的水平尺度，h 把点从椭球面推到椭球外或椭球内。</li>
-              <li><strong>cos φ</strong> 把位置压到赤道平面，得到水平投影。</li>
+              <li><strong>S</strong> 是 h=0 时的椭球面点。它不是地心，也不是平面地图上的点。</li>
+              <li><strong>n̂</strong> 是 S 处垂直于椭球切平面的单位方向。单位方向的长度为 1，所以 h n̂ 的长度就是 h。</li>
+              <li><strong>h</strong> 为正时 P 在椭球外侧，为负时 P 在椭球内侧；h=0 时 P 就在参考椭球面上。</li>
+              <li><strong>cos φ</strong> 把法线方向的单位向量压到赤道平面，得到水平投影比例。</li>
               <li><strong>cos λ、sin λ</strong> 把赤道平面的投影分解到 X 轴和 Y 轴。</li>
               <li><strong>((1 - e²)ν + h) sin φ</strong> 是竖直方向的 Z 分量，里面的 (1 - e²) 来自椭球被压扁。</li>
             </ul>
@@ -961,7 +872,7 @@
           </div>
           <div class="step">
             <strong>确认高度 h 是椭球高。</strong>
-            如果 h 来自地形图或机场标高，它很可能是相对平均海平面的高度，不能直接塞进这个公式。
+            h 必须是沿椭球法线的有符号距离。如果 h 来自地形图或机场标高，它很可能是相对平均海平面的高度，不能直接塞进这个公式。
           </div>
           <div class="step">
             <strong>使用同一个椭球参数。</strong>
@@ -995,59 +906,9 @@
         </p>
 
         <figure class="diagram" aria-labelledby="fig-inverse-title">
-          <svg viewBox="0 0 800 520" role="img">
-            <defs>
-              <marker id="arrow-dark-4" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
-                <path d="M0,0 L8,3 L0,6 Z" fill="#2a3645"></path>
-              </marker>
-              <marker id="arrow-orange-4" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
-                <path d="M0,0 L8,3 L0,6 Z" fill="#b65b13"></path>
-              </marker>
-              <marker id="arrow-indigo-4" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
-                <path d="M0,0 L8,3 L0,6 Z" fill="#3d58a8"></path>
-              </marker>
-              <marker id="arrow-teal-4" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
-                <path d="M0,0 L8,3 L0,6 Z" fill="#007c89"></path>
-              </marker>
-            </defs>
-
-            <text id="fig-inverse-title" class="label" x="34" y="38">3D 坐标变换：从 X、Y、Z 反求 λ、φ、h</text>
-            <ellipse class="earth-shadow" cx="392" cy="314" rx="244" ry="78"></ellipse>
-            <ellipse cx="392" cy="278" rx="225" ry="145" fill="#e7f7f8" stroke="#207b84" stroke-width="2.2"></ellipse>
-            <ellipse class="equator" cx="392" cy="300" rx="218" ry="52"></ellipse>
-            <path class="meridian" d="M392 134 C332 169 313 252 340 326 C362 386 416 410 467 382 C539 343 549 232 503 168 C473 128 427 115 392 134"></path>
-
-            <line x1="392" y1="300" x2="680" y2="383" stroke="#2a3645" stroke-width="2.3" marker-end="url(#arrow-dark-4)"></line>
-            <line x1="392" y1="300" x2="174" y2="416" stroke="#2a3645" stroke-width="2.3" marker-end="url(#arrow-dark-4)"></line>
-            <line x1="392" y1="300" x2="392" y2="82" stroke="#2a3645" stroke-width="2.3" marker-end="url(#arrow-dark-4)"></line>
-            <text class="label" x="687" y="391">X</text>
-            <text class="label" x="150" y="428">Y</text>
-            <text class="label" x="401" y="90">Z</text>
-
-            <circle class="target-point" cx="508" cy="105" r="7"></circle>
-            <circle class="surface-point" cx="462" cy="171" r="6"></circle>
-            <circle fill="#3d58a8" stroke="white" stroke-width="2" cx="543" cy="303" r="6"></circle>
-            <line x1="392" y1="300" x2="508" y2="105" stroke="#3d58a8" stroke-width="2.4" marker-end="url(#arrow-indigo-4)"></line>
-            <line x1="462" y1="171" x2="508" y2="105" stroke="#b65b13" stroke-width="2.5" marker-end="url(#arrow-orange-4)"></line>
-            <line class="helper dash" x1="508" y1="105" x2="543" y2="303"></line>
-            <line x1="392" y1="300" x2="543" y2="303" stroke="#007c89" stroke-width="2.4" marker-end="url(#arrow-teal-4)"></line>
-            <line class="helper dash" x1="543" y1="303" x2="632" y2="366"></line>
-            <line class="helper dash" x1="543" y1="303" x2="270" y2="374"></line>
-
-            <path class="arc" d="M568 325 C586 338 601 352 610 369" marker-end="url(#arrow-orange-4)"></path>
-            <path class="arc-indigo" d="M435 268 C454 278 474 292 489 309" marker-end="url(#arrow-indigo-4)"></path>
-            <path fill="none" stroke="#007c89" stroke-width="2" stroke-dasharray="6 5" d="M522 132 C547 160 566 197 572 240"></path>
-
-            <text class="label-teal label" x="520" y="105">已知 P(X,Y,Z)</text>
-            <text class="label-teal label-small" x="548" y="294">Q 投影点</text>
-            <text class="label-teal label-small" x="451" y="294">p = sqrt(X² + Y²)</text>
-            <text class="label-orange label-small" x="616" y="365">λ = atan2(Y, X)</text>
-            <text class="label-indigo label-small" x="489" y="289">φ 需求解</text>
-            <text class="label-orange label-small" x="493" y="148">h 沿法线</text>
-            <text class="label-small" x="583" y="206">迭代或闭式近似</text>
-          </svg>
-          <figcaption>
-            反算时先把 P 投影到赤道平面得到 Q。OQ 的长度是 p，OQ 相对 X 轴的方位角是 λ。真正难的是找到椭球表面的法线脚点 S，使 S 到 P 的方向是法线，于是得到 φ 和 h。
+          <img src="assets/geodetic_ecef/05-inverse-ecef-to-geodetic.svg" alt="从 ECEF X Y Z 反算大地坐标 phi lambda h 的生成式三维坐标变换图">
+          <figcaption id="fig-inverse-title">
+            反算图同样由脚本生成。已知 P(X,Y,Z) 后，先投影到赤道平面得到 Q，从 Q 求 p 和 λ；难点是找到椭球面上的 S，使向量 P-S 与该点法线 n̂ 平行。找到 S 后，φ 来自这条法线方向，h 来自 P-S 在 n̂ 上的有符号长度。
           </figcaption>
         </figure>
 
@@ -1147,54 +1008,71 @@
       <section id="height">
         <h2>7. 高度警告：h 不是“海拔”</h2>
         <p class="section-intro">
-          原文章节最后提醒的这点非常重要：公式里的 h 是 ellipsoidal height，即椭球高，不是常说的海拔。
+          原文章节最后提醒的这点非常重要：公式里的 h 是 ellipsoidal height，即椭球高，不是常说的海拔，也不是从地心到点 P 的半径差。下面从零开始定义它。
         </p>
         <div class="grid-2">
           <article class="card">
-            <h3>椭球高 h</h3>
+            <h3>第一步：先有椭球面点 S</h3>
             <p>
-              椭球高从 WGS 84 椭球表面沿法线量到点 P。GNSS 接收机内部计算常接近这种高度定义。
+              WGS 84 椭球是一个数学表面。给定 φ 和 λ 后，先找到这个表面上的点 S。S 是“高度为 0 的位置”，不是地心，也不是地面实物点。
             </p>
             <div class="formula">
-              <span class="formula-line">P = ellipsoid surface point + h × normal direction</span>
+              <span class="formula-line">S = (ν cosφ cosλ, ν cosφ sinλ, (1-e²)ν sinφ)</span>
             </div>
           </article>
           <article class="card">
-            <h3>正高或海拔 H</h3>
+            <h3>第二步：在 S 处定义法线 n̂</h3>
             <p>
-              工程、地形图和机场标高常用的高度通常接近相对平均海平面的高度，也叫 orthometric height，中文常译为正高。
+              想象一个平面刚好贴住椭球表面点 S，这个平面叫 tangent plane，即切平面。与切平面垂直、指向椭球外侧的单位方向叫 normal vector，即单位法线 n̂。
             </p>
             <div class="formula">
-              <span class="formula-line">H ≈ h - N</span>
-              <span class="formula-line">N = geoid undulation，大地水准面起伏</span>
+              <span class="formula-line">n̂ = (cosφ cosλ, cosφ sinλ, sinφ)</span>
+            </div>
+          </article>
+          <article class="card">
+            <h3>第三步：h 是沿 n̂ 的有符号距离</h3>
+            <p>
+              目标点 P 不直接由地心半径定义，而由 S 和 n̂ 定义。h 为正表示从 S 沿 n̂ 向椭球外走；h 为负表示向椭球内部走；h=0 表示点就在参考椭球面上。
+            </p>
+            <div class="formula">
+              <span class="formula-line">P = S + h n̂</span>
+              <span class="formula-line">h = (P - S) · n̂</span>
+            </div>
+          </article>
+          <article class="card">
+            <h3>它不是地心距离 r</h3>
+            <p>
+              地心距离 r 是从地心 O 到 P 的长度，通常约为 6,300 千米量级。原文 EPSG 示例中 h=73.0 m，但同一点的 r≈6,364,322.101 m。把 r-a 或 r-b 当作 h 会产生概念错误。
+            </p>
+            <div class="formula">
+              <span class="formula-line">r = ||P|| = sqrt(X² + Y² + Z²)</span>
+              <span class="formula-line">h ≠ r, h ≠ r - a, h ≠ r - b</span>
+            </div>
+          </article>
+          <article class="card">
+            <h3>它也不自动等于海拔 H</h3>
+            <p>
+              工程、地形图和机场标高常用的高度通常接近相对平均海平面的高度，也叫 orthometric height，中文常译为正高或海拔。椭球高 h 和正高 H 之间还隔着 geoid undulation，即大地水准面起伏 N。
+            </p>
+            <div class="formula">
+              <span class="formula-line">常用约定：h = H + N</span>
+              <span class="formula-line">因此：H = h - N</span>
+            </div>
+          </article>
+          <article class="card">
+            <h3>为什么法线不是地心方向</h3>
+            <p>
+              在球面上，表面法线会穿过球心；但 WGS 84 是扁椭球，除赤道和两极等特殊位置外，椭球法线通常不穿过地心。大地纬度 φ 用法线定义，地心纬度 ψ 用地心连线定义，这就是二者不相同的根本原因。
+            </p>
+            <div class="formula">
+              <span class="formula-line">tan ψ = (1 - e²) tan φ</span>
             </div>
           </article>
         </div>
         <figure class="diagram" aria-labelledby="fig-height-title">
-          <svg viewBox="0 0 760 360" role="img">
-            <defs>
-              <marker id="arrow-orange-5" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
-                <path d="M0,0 L8,3 L0,6 Z" fill="#b65b13"></path>
-              </marker>
-              <marker id="arrow-indigo-5" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
-                <path d="M0,0 L8,3 L0,6 Z" fill="#3d58a8"></path>
-              </marker>
-            </defs>
-            <text id="fig-height-title" class="label" x="34" y="38">高度示意：椭球面、大地水准面和点 P</text>
-            <path d="M70 254 C170 205 251 227 340 205 C446 179 529 214 691 166" fill="none" stroke="#207b84" stroke-width="4"></path>
-            <path d="M70 279 C170 240 250 246 342 231 C459 211 540 243 691 206" fill="none" stroke="#3d58a8" stroke-width="3" stroke-dasharray="8 6"></path>
-            <circle class="target-point" cx="478" cy="100" r="7"></circle>
-            <line x1="440" y1="198" x2="478" y2="100" stroke="#b65b13" stroke-width="2.6" marker-end="url(#arrow-orange-5)"></line>
-            <line x1="445" y1="225" x2="478" y2="100" stroke="#3d58a8" stroke-width="2.2" marker-end="url(#arrow-indigo-5)"></line>
-            <text class="label-teal label-small" x="95" y="223">WGS 84 椭球面</text>
-            <text class="label-indigo label-small" x="95" y="295">大地水准面，近似平均海平面</text>
-            <text class="label-teal label" x="488" y="103">P</text>
-            <text class="label-orange label-small" x="490" y="157">h 椭球高</text>
-            <text class="label-indigo label-small" x="378" y="152">H 正高或海拔</text>
-            <text class="label-small" x="507" y="229">两条面相差 N</text>
-          </svg>
-          <figcaption>
-            如果把机场标高、地形高程或平均海平面高度直接当作 h 使用，ECEF 的 Z 和局部垂直方向可能会出现几十米级误差，具体大小取决于当地大地水准面起伏 N。
+          <img src="assets/geodetic_ecef/06-height-normal-vs-radial.svg" alt="椭球高 h 沿法线而不是沿地心半径测量的精确剖面图">
+          <figcaption id="fig-height-title">
+            高度图使用 WGS 84 子午剖面计算。h 是从椭球面法线脚点 S 沿单位法线 n̂ 到 P 的距离；r=||P|| 是从地心 O 到 P 的地心半径长度，通常是六百多万米量级，绝不是 h。海拔或正高 H 还需要大地水准面起伏 N，常用关系是 h = H + N。
           </figcaption>
         </figure>
       </section>
@@ -1208,7 +1086,8 @@
               <li>输入纬度 φ 是大地纬度，不是地心纬度 ψ。</li>
               <li>输入经度 λ 的零点是格林尼治子午线，东西方向约定明确。</li>
               <li>角度已经转成弧度，再调用 sin、cos、tan、atan2。</li>
-              <li>高度 h 是椭球高；如果是海拔，先确认是否需要大地水准面模型。</li>
+              <li>高度 h 是沿 S 处单位法线 n̂ 的有符号距离，不是地心半径 r，也不是 r-a。</li>
+              <li>如果高度来自海拔、机场标高或地形高程，先确认是否需要大地水准面模型 N。</li>
               <li>所有参数都来自同一个参考系统，例如 WGS 84。</li>
               <li>ECEF 坐标单位是米，X、Y、Z 轴方向没有被交换。</li>
               <li>反算靠近两极时，小心 p 很小、经度不稳定的问题。</li>

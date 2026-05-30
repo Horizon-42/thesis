@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 520" role="img" aria-labelledby="title">
+<title id="title">Ellipsoidal height along the normal</title>
+<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#263548"/></marker></defs>
+<style>
+svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
+.title { fill: #16212f; font: 700 22px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.subtitle { fill: #5f6f7e; font: 500 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.axis { stroke: #263548; stroke-width: 2.2; marker-end: url(#arrow); }
+.ellipse { fill: #e7f7f8; stroke: #207b84; stroke-width: 2.2; }
+.helper { stroke: #8292a4; stroke-width: 1.5; stroke-dasharray: 6 5; fill: none; }
+.normal { stroke: #b65b13; stroke-width: 2.7; marker-end: url(#arrow); }
+.radius { stroke: #3d58a8; stroke-width: 2.4; marker-end: url(#arrow); }
+.tangent { stroke: #3d58a8; stroke-width: 2.0; }
+.point { fill: #007c89; stroke: white; stroke-width: 2.0; }
+.surface { fill: #b65b13; stroke: white; stroke-width: 2.0; }
+.label { fill: #16212f; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.small { fill: #4b5d70; font: 500 12.5px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.orange { fill: #9a4c10; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.indigo { fill: #314b99; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.formula { fill: #263548; font: 600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+</style>
+<text class="title" x="30" y="36">精确高度示意：h 沿法线，不沿地心半径</text>
+<text class="subtitle" x="30" y="58">剖面使用 WGS 84 真实扁率；h 箭头沿同一法线方向可视化放大</text>
+<ellipse class="ellipse" cx="380" cy="290" rx="250" ry="249.2"/>
+<line class="axis" x1="70" y1="290" x2="715" y2="290"/>
+<line class="axis" x1="380" y1="535" x2="380" y2="10"/>
+<line class="radius" x1="380" y1="290" x2="598.8" y2="-7.7"/>
+<line class="normal" x1="527.9" y1="89.1" x2="598.8" y2="-7.7"/>
+<circle class="surface" cx="527.9" cy="89.1" r="6"/>
+<circle class="point" cx="598.8" cy="-7.7" r="7"/>
+<text class="small" x="388" y="308">O 地心</text>
+<text class="orange" x="537.9" y="105.1">S：椭球面法线脚点</text>
+<text class="label" x="608.8" y="-13.7">P</text>
+<text class="orange" x="571.4" y="32.7">h = |P-S|，方向为 n̂</text>
+<text class="indigo" x="449.4" y="131.2">r = ||P||，不是 h</text>
+<text class="formula" x="42" y="462">P = S + h·n̂；n̂=(cosφcosλ, cosφsinλ, sinφ)。只有球面或赤道/极点等特殊情况，法线才与地心方向重合。</text>
+<text class="formula" x="42" y="488">海拔/正高 H 还需要大地水准面起伏 N：常用约定 h = H + N。</text>
+</svg>
