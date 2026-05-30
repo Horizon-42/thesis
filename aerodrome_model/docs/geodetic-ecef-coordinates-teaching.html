@@ -292,10 +292,20 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
       font-size: 15px;
       line-height: 1.65;
-      white-space: nowrap;
+      white-space: normal;
     }
 
-    .formula-line { display: block; }
+    .formula-line {
+      display: block;
+      min-width: max-content;
+      white-space: pre;
+    }
+
+    .formula-line + .formula-line {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(236, 241, 247, 0.14);
+    }
 
     .var-list {
       display: grid;
@@ -446,11 +456,11 @@
         </div>
         <div class="tile">
           <strong>理解正算</strong>
-          <span>给定 φ、λ、h，先算椭球面点 S 和单位法线 n̂，再用 P = S + h·n̂ 分解到 X、Y、Z 三轴。</span>
+          <span>给定大地纬度 φ、大地经度 λ、椭球高 h，先算椭球面点 S 和单位法线 n̂，再用目标点 P = S + h·n̂ 分解到 X、Y、Z 三轴。</span>
         </div>
         <div class="tile">
           <strong>理解反算</strong>
-          <span>给定 X、Y、Z，先求 λ 和水平距离 p，再求非线性的 φ 与高度 h。</span>
+          <span>给定目标点的地心直角坐标 X、Y、Z，先求大地经度 λ 和水平距离 p，再求非线性的大地纬度 φ 与椭球高 h。</span>
         </div>
       </div>
     </header>
@@ -607,39 +617,51 @@
               sin、cos、tan 分别描述直角三角形中的边长比例。π 读作 pi，是圆周率。计算机函数通常要求角度用 radians，即弧度，而不是 degrees，即度。
             </p>
             <div class="formula">
-              <span class="formula-line">radians = degrees × π / 180</span>
-              <span class="formula-line">degrees = radians × 180 / π</span>
+              <span class="formula-line">\[
+\mathrm{radians}=\mathrm{degrees}\times\frac{\pi}{180}
+\]</span>
+              <span class="formula-line">\[
+\mathrm{degrees}=\mathrm{radians}\times\frac{180}{\pi}
+\]</span>
             </div>
             <p>学习入口：三角函数、单位圆、弧度制。</p>
           </article>
           <article class="card">
             <h3>勾股定理和投影</h3>
             <p>
-              ECEF 中 X、Y 是赤道平面内的两个直角方向，所以点到 Z 轴的水平距离 p 来自勾股定理。sqrt 是 square root，意思是平方根。
+              本卡片里的 X、Y 是目标点 P 的 ECEF 水平分量，也就是赤道平面内的两个直角坐标；p 是 P 到 Z 轴的水平距离。这个 p 来自勾股定理。sqrt 是 square root，意思是平方根。
             </p>
             <div class="formula">
-              <span class="formula-line">p = sqrt(X² + Y²)</span>
+              <span class="formula-line">\[
+p=\sqrt{X^2+Y^2}
+\]</span>
             </div>
             <p>学习入口：向量、正交投影、三维直角坐标系。</p>
           </article>
           <article class="card">
             <h3>atan2 而不是 atan</h3>
             <p>
-              atan 是 arctangent，即反正切，只知道比例 Y/X。atan2(Y, X) 同时看 X 和 Y 的符号，能判断角落在哪个象限。
+              这里 λ 是大地经度，X、Y 仍是目标点 P 在 ECEF 中的水平分量。atan 是 arctangent，即反正切，只知道比例 Y/X。atan2(Y, X) 同时看 X 和 Y 的符号，能判断角落在哪个象限。
             </p>
             <div class="formula">
-              <span class="formula-line">λ = atan2(Y, X)</span>
+              <span class="formula-line">\[
+\lambda=\operatorname{atan2}(Y,X)
+\]</span>
             </div>
             <p>学习入口：反三角函数、象限、极坐标。</p>
           </article>
           <article class="card">
             <h3>隐函数求导</h3>
             <p>
-              椭圆方程不是 z = 某个 p 的简单形式，而是 p 和 z 同时出现在一个等式里。对等式两边求导，可以得到切线斜率。
+              这里 p 是二维剖面里“到 Z 轴的水平距离”，z 是竖直坐标，a 是赤道半径，b 是极半径。椭圆方程不是 z = 某个 p 的简单形式，而是 p 和 z 同时出现在一个等式里。对等式两边求导，可以得到切线斜率。
             </p>
             <div class="formula">
-              <span class="formula-line">p²/a² + z²/b² = 1</span>
-              <span class="formula-line">2p/a² + (2z/b²)(dz/dp) = 0</span>
+              <span class="formula-line">\[
+F(p,z)=\frac{p^2}{a^2}+\frac{z^2}{b^2}-1=0
+\]</span>
+              <span class="formula-line">\[
+\frac{dF}{dp}=\frac{2p}{a^2}+\frac{2z}{b^2}\frac{dz}{dp}=0
+\]</span>
             </div>
             <p>学习入口：导数、隐函数求导、切线斜率。</p>
           </article>
@@ -649,17 +671,21 @@
               曲线某点的切线表示“贴着表面走”的方向，法线表示“垂直表面出去”的方向。在平面中，两条互相垂直的直线斜率相乘为 -1。
             </p>
             <div class="formula">
-              <span class="formula-line">slope_normal = -1 / slope_tangent</span>
+              <span class="formula-line">\[
+m_{\mathrm{normal}}=-\frac{1}{m_{\mathrm{tangent}}}
+\]</span>
             </div>
             <p>学习入口：解析几何、斜率、垂直关系。</p>
           </article>
           <article class="card">
             <h3>非线性方程和迭代</h3>
             <p>
-              ECEF 反算大地纬度时，φ 出现在 tan、sin 和平方根里，不能像一次方程那样一移项就解出。迭代就是先猜一个 φ，再反复修正。
+              ECEF 反算大地纬度时，φ 是待求的大地纬度。它会同时出现在 tan、sin 和平方根里，不能像一次方程那样一移项就解出。迭代就是先猜一个 φ，再反复修正。
             </p>
             <div class="formula">
-              <span class="formula-line">φ₀ → φ₁ → φ₂ → ... → stable φ</span>
+              <span class="formula-line">\[
+\phi_0\rightarrow\phi_1\rightarrow\phi_2\rightarrow\cdots\rightarrow\phi
+\]</span>
             </div>
             <p>学习入口：非线性方程、固定点迭代、收敛。</p>
           </article>
@@ -722,17 +748,24 @@
           <article class="card">
             <h3>椭球方程到剖面方程</h3>
             <p>
-              三维椭球方程是：
+              下面这组公式里，x、y、z 是以地心 O 为原点的三维直角坐标；a 是赤道半径，b 是极半径。WGS 84 旋转椭球的三维方程是：
             </p>
             <div class="formula">
-              <span class="formula-line">x²/a² + y²/a² + z²/b² = 1</span>
-              <span class="formula-line">等价写法：(x² + y²)/a² + z²/b² = 1</span>
+              <span class="formula-line">\[
+\frac{x^2}{a^2}+\frac{y^2}{a^2}+\frac{z^2}{b^2}=1
+\]</span>
+              <span class="formula-line">\[
+\frac{x^2+y^2}{a^2}+\frac{z^2}{b^2}=1
+\]</span>
             </div>
             <p>
-              令 p = sqrt(X² + Y²)，也就是点到 Z 轴的水平距离。因为椭球绕 Z 轴旋转对称，三维问题可以先在 (p, z) 剖面中处理：
+              先令 p 表示“任意点到 Z 轴的水平距离”，即 p = sqrt(x² + y²)。这里的 p 是通用剖面坐标；如果讨论椭球面点 S，后面会写成 p_S；如果讨论反算中已知目标点 P，则写成 p。因为椭球绕 Z 轴旋转对称，三维问题可以先在 (p, z) 剖面中处理：
             </p>
             <div class="formula">
-              <span class="formula-line">p²/a² + z²/b² = 1</span>
+              <span class="formula-line">\[
+p=\sqrt{x^2+y^2},\qquad
+\frac{p^2}{a^2}+\frac{z^2}{b^2}=1
+\]</span>
             </div>
           </article>
         </div>
@@ -749,19 +782,23 @@
             <article>
               <h4>南北方向：子午圈曲率半径 M</h4>
               <p>
-                沿经线方向，也就是向北或向南走，椭球剖面就是子午椭圆。它在点 S 附近的密切圆半径叫 meridian radius of curvature，中文是子午圈曲率半径。
+                沿经线方向，也就是向北或向南走，椭球剖面就是子午椭圆。这里 S 是椭球表面点，φ 是 S 处的大地纬度，a 是赤道半径，e² 是第一偏心率平方。M 表示这个南北方向法截线在 S 附近的密切圆半径，英文是 meridian radius of curvature，中文是子午圈曲率半径。
               </p>
               <div class="formula">
-                <span class="formula-line">M = a(1 - e²) / (1 - e² sin²φ)^(3/2)</span>
+                <span class="formula-line">\[
+M=\frac{a(1-e^2)}{\left(1-e^2\sin^2\phi\right)^{3/2}}
+\]</span>
               </div>
             </article>
             <article>
               <h4>东西方向：卯酉圈曲率半径 ν 或 N</h4>
               <p>
-                沿东西方向看局部弯曲，使用的是由 S 处法线和东西切向量共同确定的法截线。它的密切圆半径叫 prime vertical radius of curvature，中文是卯酉圈曲率半径。
+                沿东西方向看局部弯曲，使用的是由 S 处法线和东西切向量共同确定的法截线。这里 ν 读作 nu，也常写成 N；φ、a、e² 的含义与左侧公式相同。ν/N 表示这个东西方向法截线在 S 附近的密切圆半径，英文是 prime vertical radius of curvature，中文是卯酉圈曲率半径。
               </p>
               <div class="formula">
-                <span class="formula-line">ν = N = a / sqrt(1 - e² sin²φ)</span>
+                <span class="formula-line">\[
+\nu=N=\frac{a}{\sqrt{1-e^2\sin^2\phi}}
+\]</span>
               </div>
             </article>
           </div>
@@ -781,40 +818,79 @@
         <figure class="diagram" aria-labelledby="fig-normal-title">
           <img src="assets/geodetic_ecef/02-geodetic-vs-geocentric-latitude.svg" alt="WGS 84 子午剖面中大地纬度和地心纬度的精确关系图">
           <figcaption id="fig-normal-title">
-            这张剖面图使用 WGS 84 真实扁率计算。φ 是椭球法线与赤道平面的夹角，ψ 是地心连线与赤道平面的夹角；在教学纬度 φ=53.809394° 处，ψ=53.625811°，二者相差约 0.183584°。差异很小但会进入精密坐标转换公式。
+            这张剖面图使用 WGS 84 真实扁率计算。φ 是椭球法线与赤道平面的夹角，ψ 是地心连线与赤道平面的夹角。图中的 S(p_S,z_S) 表示椭球面点 S 在子午剖面中的坐标：p_S 是 S 到 Z 轴的水平距离，z_S 是 S 的竖直坐标。这里的 p_S、z_S 与下一段推导中的 p_S、z_S 是同一对量；它们都属于表面点 S，不是反算目标点 P 的 p。在教学纬度 φ=53.809394° 处，ψ=53.625811°，二者相差约 0.183584°。差异很小但会进入精密坐标转换公式。
           </figcaption>
         </figure>
 
         <div class="card" style="margin-top:18px">
           <h3>从切线斜率推到表面点公式</h3>
           <p>
-            假设椭球表面点在剖面中是 S(p₀, z₀)。椭圆方程为 p²/a² + z²/b² = 1。对它做隐函数求导：
+            下面只讨论椭球表面点 S。把 S 在子午剖面中的坐标写成 S(p_S, z_S)，其中 p_S 是 S 到 Z 轴的水平距离，z_S 是 S 的竖直坐标。椭圆方程 p²/a² + z²/b² = 1 中的 p、z 先是通用剖面坐标；求导后再把它们代入为 p_S、z_S：
           </p>
           <div class="formula">
-            <span class="formula-line">2p/a² + (2z/b²)(dz/dp) = 0</span>
-            <span class="formula-line">dz/dp = -(b² p₀)/(a² z₀)</span>
+            <span class="formula-line">\[
+F(p,z)=\frac{p^2}{a^2}+\frac{z^2}{b^2}-1=0
+\]</span>
+            <span class="formula-line">\[
+\frac{dF}{dp}
+=\frac{2p}{a^2}+\frac{2z}{b^2}\frac{dz}{dp}=0
+\]</span>
+            <span class="formula-line">\[
+\frac{dz}{dp}=-\frac{b^2p}{a^2z},
+\qquad
+\left.\frac{dz}{dp}\right|_S=-\frac{b^2p_S}{a^2z_S}
+\]</span>
           </div>
           <p>
-            这是切线斜率。法线与切线垂直，所以法线斜率是负倒数：
+            dz/dp 表示 z 随 p 变化的速率，也就是剖面曲线在 S 处的切线斜率。法线与切线垂直，所以法线斜率是切线斜率的负倒数：
           </p>
           <div class="formula">
-            <span class="formula-line">slope_normal = (a² z₀)/(b² p₀)</span>
+            <span class="formula-line">\[
+\begin{aligned}
+m_{\mathrm{normal}}
+&amp;=-\frac{1}{m_{\mathrm{tangent}}} \\
+&amp;=-\frac{1}{-\frac{b^2p_S}{a^2z_S}} \\
+&amp;=\frac{a^2z_S}{b^2p_S}
+\end{aligned}
+\]</span>
           </div>
           <p>
-            大地纬度 φ 就是法线相对赤道平面的角度，因此 tan φ 等于法线斜率：
+            大地纬度 φ 就是 S 处椭球法线相对赤道平面的角度。tan φ 是“法线竖直变化 / 法线水平变化”，因此等于法线斜率：
           </p>
           <div class="formula">
-            <span class="formula-line">tan φ = (a² z₀)/(b² p₀)</span>
-            <span class="formula-line">因为 b²/a² = 1 - e²</span>
-            <span class="formula-line">tan φ = z₀ / ((1 - e²)p₀)</span>
+            <span class="formula-line">\[
+\tan\phi=m_{\mathrm{normal}}=\frac{a^2z_S}{b^2p_S}
+\]</span>
+            <span class="formula-line">\[
+\frac{b^2}{a^2}=1-e^2
+\]</span>
+            <span class="formula-line">\[
+\tan\phi=\frac{z_S}{(1-e^2)p_S}
+\]</span>
           </div>
           <p>
-            把这个关系和椭圆方程联立，就得到标准表面点：
+            把这个关系和椭圆方程联立，就得到标准表面点坐标。第一步先把 z_S 写成 p_S 和 φ 的形式；第二步代回椭圆方程；第三步用 b²=a²(1-e²) 化简。这里 ν 是 S 处的卯酉圈曲率半径，a 是赤道半径，e² 是第一偏心率平方：
           </p>
           <div class="formula">
-            <span class="formula-line">ν = a / sqrt(1 - e² sin²φ)</span>
-            <span class="formula-line">p₀ = ν cos φ</span>
-            <span class="formula-line">z₀ = ν(1 - e²) sin φ</span>
+            <span class="formula-line">\[
+z_S=(1-e^2)p_S\tan\phi
+\]</span>
+            <span class="formula-line">\[
+\frac{p_S^2}{a^2}
++\frac{\left((1-e^2)p_S\tan\phi\right)^2}{b^2}=1
+\]</span>
+            <span class="formula-line">\[
+p_S^2\left(\frac{1}{a^2}+\frac{(1-e^2)\tan^2\phi}{a^2}\right)=1
+\]</span>
+            <span class="formula-line">\[
+p_S=\frac{a\cos\phi}{\sqrt{1-e^2\sin^2\phi}}
+=\nu\cos\phi
+\]</span>
+            <span class="formula-line">\[
+\nu=\frac{a}{\sqrt{1-e^2\sin^2\phi}},
+\qquad
+z_S=\nu(1-e^2)\sin\phi
+\]</span>
           </div>
           <div class="callout good">
             <strong>核心直觉：</strong>ν 不是凭空冒出来的常数，它来自“沿椭球法线定义纬度”这件事。只要用大地纬度而不是地心纬度，ν 就会自然出现在公式中。
@@ -838,24 +914,39 @@
         <div class="grid-2">
           <article class="card">
             <h3>正算公式</h3>
-            <p>先算卯酉圈曲率半径 ν，并写出椭球面点 S 和单位法线 n̂：</p>
+            <p>
+              本卡片处理正算：已知大地纬度 φ、大地经度 λ、椭球高 h，以及 WGS 84 椭球参数 a 和 e²。先算卯酉圈曲率半径 ν，再写出椭球面点 S 和单位法线 n̂；P 是最终目标点。
+            </p>
             <div class="formula">
-              <span class="formula-line">ν = a / sqrt(1 - e² sin²φ)</span>
-              <span class="formula-line">S = (ν cosφ cosλ, ν cosφ sinλ, (1-e²)ν sinφ)</span>
-              <span class="formula-line">n̂ = (cosφ cosλ, cosφ sinλ, sinφ)</span>
-              <span class="formula-line">P = S + h n̂</span>
+              <span class="formula-line">\[
+\nu=\frac{a}{\sqrt{1-e^2\sin^2\phi}}
+\]</span>
+              <span class="formula-line">\[
+S=\left(\nu\cos\phi\cos\lambda,\ \nu\cos\phi\sin\lambda,\ (1-e^2)\nu\sin\phi\right)
+\]</span>
+              <span class="formula-line">\[
+\hat{\mathbf n}=\left(\cos\phi\cos\lambda,\ \cos\phi\sin\lambda,\ \sin\phi\right)
+\]</span>
+              <span class="formula-line">\[
+P=S+h\hat{\mathbf n}
+\]</span>
             </div>
-            <p>把 P 的三个分量展开，就得到 ECEF 坐标：</p>
+            <p>把 P 的三个分量展开，就得到 ECEF 坐标 X、Y、Z；它们分别是 P 在三条地心直角轴上的坐标值：</p>
             <div class="formula">
-              <span class="formula-line">X = (ν + h) cos φ cos λ</span>
-              <span class="formula-line">Y = (ν + h) cos φ sin λ</span>
-              <span class="formula-line">Z = ((1 - e²)ν + h) sin φ</span>
+              <span class="formula-line">\[
+\begin{aligned}
+X&amp;=(\nu+h)\cos\phi\cos\lambda \\
+Y&amp;=(\nu+h)\cos\phi\sin\lambda \\
+Z&amp;=\left((1-e^2)\nu+h\right)\sin\phi
+\end{aligned}
+\]</span>
             </div>
           </article>
           <article class="card">
             <h3>公式里的每一项在做什么</h3>
             <ul>
               <li><strong>S</strong> 是 h=0 时的椭球面点。它不是地心，也不是平面地图上的点。</li>
+              <li><strong>ν</strong> 是 S 处东西方向法截线的曲率半径，也常写 N；它随 φ 改变。</li>
               <li><strong>n̂</strong> 是 S 处垂直于椭球切平面的单位方向。单位方向的长度为 1，所以 h n̂ 的长度就是 h。</li>
               <li><strong>h</strong> 为正时 P 在椭球外侧，为负时 P 在椭球内侧；h=0 时 P 就在参考椭球面上。</li>
               <li><strong>cos φ</strong> 把法线方向的单位向量压到赤道平面，得到水平投影比例。</li>
@@ -883,18 +974,28 @@
         <div class="card" style="margin-top:18px">
           <h3>数值例子</h3>
           <p>
-            原文章节使用了 EPSG/IOGP 示例点。DMS 写法先转成十进制度：
+            原文章节使用了 EPSG/IOGP 示例点。这里 φ 是大地纬度，λ 是大地经度，h 是椭球高。DMS 写法先转成十进制度：
           </p>
           <div class="formula">
-            <span class="formula-line">φ = 53°48′33.820″N ≈ 53.809394444°</span>
-            <span class="formula-line">λ = 2°07′46.380″E ≈ 2.129550000°</span>
-            <span class="formula-line">h = 73.0 m</span>
+            <span class="formula-line">\[
+\begin{aligned}
+\phi&amp;=53^\circ48^\prime33.820^{\prime\prime}\mathrm{N}
+\approx 53.809394444^\circ \\
+\lambda&amp;=2^\circ07^\prime46.380^{\prime\prime}\mathrm{E}
+\approx 2.129550000^\circ \\
+h&amp;=73.0\ \mathrm{m}
+\end{aligned}
+\]</span>
           </div>
           <p>带入 WGS 84 椭球后，得到：</p>
           <div class="formula">
-            <span class="formula-line">X ≈ 3,771,793.968 m</span>
-            <span class="formula-line">Y ≈   140,253.342 m</span>
-            <span class="formula-line">Z ≈ 5,124,304.349 m</span>
+            <span class="formula-line">\[
+\begin{aligned}
+X&amp;\approx 3\,771\,793.968\ \mathrm{m} \\
+Y&amp;\approx 140\,253.342\ \mathrm{m} \\
+Z&amp;\approx 5\,124\,304.349\ \mathrm{m}
+\end{aligned}
+\]</span>
           </div>
         </div>
       </section>
@@ -908,17 +1009,22 @@
         <figure class="diagram" aria-labelledby="fig-inverse-title">
           <img src="assets/geodetic_ecef/05-inverse-ecef-to-geodetic.svg" alt="从 ECEF X Y Z 反算大地坐标 phi lambda h 的生成式三维坐标变换图">
           <figcaption id="fig-inverse-title">
-            反算图同样由脚本生成。已知 P(X,Y,Z) 后，先投影到赤道平面得到 Q，从 Q 求 p 和 λ；难点是找到椭球面上的 S，使向量 P-S 与该点法线 n̂ 平行。找到 S 后，φ 来自这条法线方向，h 来自 P-S 在 n̂ 上的有符号长度。
+            反算图同样由脚本生成。已知 P(X,Y,Z) 后，先投影到赤道平面得到 Q，从 Q 求 p 和 λ；这里 p 是目标点 P 到 Z 轴的水平距离，不是表面点 S 的 p_S。难点是找到椭球面上的 S，使向量 P-S 与该点法线 n̂ 平行。找到 S 后，φ 来自这条法线方向，h 来自 P-S 在 n̂ 上的有符号长度。
           </figcaption>
         </figure>
 
         <div class="grid-2">
           <article class="card">
             <h3>先求简单部分</h3>
-            <p>经度来自赤道平面内的方位角，水平距离来自勾股定理：</p>
+            <p>
+              本卡片中 P(X,Y,Z) 是已知目标点，X、Y、Z 是它的 ECEF 坐标。λ 是目标点所在子午面的经度；p 是 P 到 Z 轴的水平距离。注意这个 p 属于目标点 P，不是上一节椭球面点 S 的 p_S。
+            </p>
             <div class="formula">
-              <span class="formula-line">λ = atan2(Y, X)</span>
-              <span class="formula-line">p = sqrt(X² + Y²)</span>
+              <span class="formula-line">\[
+\lambda=\operatorname{atan2}(Y,X),
+\qquad
+p=\sqrt{X^2+Y^2}
+\]</span>
             </div>
             <p>
               atan2 的好处是能区分东北、西北、西南、东南四个象限。如果只用 atan(Y/X)，X 为负或接近 0 时容易出错。
@@ -926,15 +1032,32 @@
           </article>
           <article class="card">
             <h3>为什么 φ 难求</h3>
-            <p>正算公式暗含：</p>
+            <p>
+              下面的 p 仍表示目标点 P 到 Z 轴的水平距离，Z 是 P 的竖直坐标，φ 是待求的大地纬度，h 是待求的椭球高，ν 是依赖 φ 的卯酉圈曲率半径。正算公式暗含：
+            </p>
             <div class="formula">
-              <span class="formula-line">p = (ν + h) cos φ</span>
-              <span class="formula-line">Z = ((1 - e²)ν + h) sin φ</span>
+              <span class="formula-line">\[
+\begin{aligned}
+p&amp;=(\nu+h)\cos\phi \\
+Z&amp;=\left((1-e^2)\nu+h\right)\sin\phi
+\end{aligned}
+\]</span>
             </div>
             <p>由第一式得到 h = p/cos φ - ν，代入第二式：</p>
             <div class="formula">
-              <span class="formula-line">Z = p tan φ - e²ν sin φ</span>
-              <span class="formula-line">ν = a / sqrt(1 - e² sin²φ)</span>
+              <span class="formula-line">\[
+h=\frac{p}{\cos\phi}-\nu
+\]</span>
+              <span class="formula-line">\[
+\begin{aligned}
+Z
+&amp;=\left((1-e^2)\nu+\frac{p}{\cos\phi}-\nu\right)\sin\phi \\
+&amp;=p\tan\phi-e^2\nu\sin\phi
+\end{aligned}
+\]</span>
+              <span class="formula-line">\[
+\nu=\frac{a}{\sqrt{1-e^2\sin^2\phi}}
+\]</span>
             </div>
             <p>
               φ 同时出现在 tan、sin 和 ν 的平方根里，所以这是非线性方程。
@@ -945,19 +1068,27 @@
         <div class="card" style="margin-top:18px">
           <h3>方法 A：迭代反算，概念最直观</h3>
           <p>
-            先给一个初始纬度 φ₀，然后每轮用当前纬度计算 ν，再更新纬度。常用初值是：
+            这里 φ₀ 是第 0 次猜测的大地纬度，p 和 Z 来自已知点 P(X,Y,Z)，e² 是椭球的第一偏心率平方。先给一个初始纬度 φ₀，然后每轮用当前纬度计算 ν，再更新纬度。常用初值是：
           </p>
           <div class="formula">
-            <span class="formula-line">φ₀ = atan2(Z, p(1 - e²))</span>
+            <span class="formula-line">\[
+\phi_0=\operatorname{atan2}\left(Z,\ p(1-e^2)\right)
+\]</span>
           </div>
-          <p>迭代式：</p>
+          <p>迭代式中，φₙ 是第 n 次纬度估计，νₙ 是用 φₙ 算出来的卯酉圈曲率半径：</p>
           <div class="formula">
-            <span class="formula-line">νₙ = a / sqrt(1 - e² sin²φₙ)</span>
-            <span class="formula-line">φₙ₊₁ = atan2(Z + e²νₙ sin φₙ, p)</span>
+            <span class="formula-line">\[
+\nu_n=\frac{a}{\sqrt{1-e^2\sin^2\phi_n}}
+\]</span>
+            <span class="formula-line">\[
+\phi_{n+1}=\operatorname{atan2}\left(Z+e^2\nu_n\sin\phi_n,\ p\right)
+\]</span>
           </div>
           <p>当相邻两次 φ 的差很小，就停止。然后恢复高度：</p>
           <div class="formula">
-            <span class="formula-line">h = p / cos φ - ν</span>
+            <span class="formula-line">\[
+h=\frac{p}{\cos\phi}-\nu
+\]</span>
           </div>
           <div class="note">
             直觉：每轮都在问“如果当前纬度是真的，法线半径 ν 应该是多少”，然后用这个 ν 反过来修正纬度。普通地表或近地空间点通常很快收敛。
@@ -967,17 +1098,29 @@
         <div class="card" style="margin-top:18px">
           <h3>方法 B：Bowring 风格闭式近似，工程上常用</h3>
           <p>
-            EPSG/IOGP 指导文档中给出一种很准确的非迭代写法。先定义辅助角 q 和第二偏心率平方 ε：
+            EPSG/IOGP 指导文档中给出一种很准确的非迭代写法。这里 q 是 auxiliary angle，即辅助角；ε 是 second eccentricity squared，即第二偏心率平方；a 是赤道半径，b 是极半径，p 和 Z 来自已知目标点 P(X,Y,Z)。下面用中点“·”明确表示乘法，避免把 Za 或 pb 误读成新变量：
           </p>
           <div class="formula">
-            <span class="formula-line">q = atan2(Za, pb)</span>
-            <span class="formula-line">ε = e² / (1 - e²)</span>
+            <span class="formula-line">\[
+q=\operatorname{atan2}(Z\,a,\ p\,b)
+\]</span>
+            <span class="formula-line">\[
+\varepsilon=\frac{e^2}{1-e^2}
+\]</span>
           </div>
           <p>然后直接计算纬度：</p>
           <div class="formula">
-            <span class="formula-line">φ = atan2(Z + εb sin³q, p - e²a cos³q)</span>
-            <span class="formula-line">ν = a / sqrt(1 - e² sin²φ)</span>
-            <span class="formula-line">h = p / cos φ - ν</span>
+            <span class="formula-line">\[
+\phi=\operatorname{atan2}\left(
+Z+\varepsilon b\sin^3 q,\ 
+p-e^2a\cos^3 q
+\right)
+\]</span>
+            <span class="formula-line">\[
+\nu=\frac{a}{\sqrt{1-e^2\sin^2\phi}},
+\qquad
+h=\frac{p}{\cos\phi}-\nu
+\]</span>
           </div>
           <div class="callout">
             <strong>闭式不等于魔法。</strong>
@@ -987,17 +1130,25 @@
 
         <div class="card" style="margin-top:18px">
           <h3>用同一个例子反算</h3>
-          <p>输入 ECEF：</p>
+          <p>输入 ECEF：X、Y、Z 分别是目标点 P 在三条地心固定直角轴上的坐标，单位是米。</p>
           <div class="formula">
-            <span class="formula-line">X ≈ 3,771,793.968 m</span>
-            <span class="formula-line">Y ≈   140,253.342 m</span>
-            <span class="formula-line">Z ≈ 5,124,304.349 m</span>
+            <span class="formula-line">\[
+\begin{aligned}
+X&amp;\approx 3\,771\,793.968\ \mathrm{m} \\
+Y&amp;\approx 140\,253.342\ \mathrm{m} \\
+Z&amp;\approx 5\,124\,304.349\ \mathrm{m}
+\end{aligned}
+\]</span>
           </div>
           <p>反算应恢复：</p>
           <div class="formula">
-            <span class="formula-line">φ = 53°48′33.820″N</span>
-            <span class="formula-line">λ = 2°07′46.380″E</span>
-            <span class="formula-line">h = 73.0 m</span>
+            <span class="formula-line">\[
+\begin{aligned}
+\phi&amp;=53^\circ48^\prime33.820^{\prime\prime}\mathrm{N} \\
+\lambda&amp;=2^\circ07^\prime46.380^{\prime\prime}\mathrm{E} \\
+h&amp;=73.0\ \mathrm{m}
+\end{aligned}
+\]</span>
           </div>
           <p>
             正算和反算能互相回到原值，前提是使用同一个椭球、同一种高度定义和同一套轴方向约定。
@@ -1014,49 +1165,65 @@
           <article class="card">
             <h3>第一步：先有椭球面点 S</h3>
             <p>
-              WGS 84 椭球是一个数学表面。给定 φ 和 λ 后，先找到这个表面上的点 S。S 是“高度为 0 的位置”，不是地心，也不是地面实物点。
+              WGS 84 椭球是一个数学表面。给定大地纬度 φ 和大地经度 λ 后，先找到这个表面上的点 S。S 是“高度为 0 的位置”，不是地心，也不是地面实物点。公式中 ν 是 S 处的卯酉圈曲率半径，e² 是第一偏心率平方。
             </p>
             <div class="formula">
-              <span class="formula-line">S = (ν cosφ cosλ, ν cosφ sinλ, (1-e²)ν sinφ)</span>
+              <span class="formula-line">\[
+S=\left(\nu\cos\phi\cos\lambda,\ \nu\cos\phi\sin\lambda,\ (1-e^2)\nu\sin\phi\right)
+\]</span>
             </div>
           </article>
           <article class="card">
             <h3>第二步：在 S 处定义法线 n̂</h3>
             <p>
-              想象一个平面刚好贴住椭球表面点 S，这个平面叫 tangent plane，即切平面。与切平面垂直、指向椭球外侧的单位方向叫 normal vector，即单位法线 n̂。
+              想象一个平面刚好贴住椭球表面点 S，这个平面叫 tangent plane，即切平面。与切平面垂直、指向椭球外侧的单位方向叫 normal vector，即单位法线 n̂。下面公式中的 φ 和 λ 仍是确定 S 的大地纬度和大地经度。
             </p>
             <div class="formula">
-              <span class="formula-line">n̂ = (cosφ cosλ, cosφ sinλ, sinφ)</span>
+              <span class="formula-line">\[
+\hat{\mathbf n}=\left(\cos\phi\cos\lambda,\ \cos\phi\sin\lambda,\ \sin\phi\right)
+\]</span>
             </div>
           </article>
           <article class="card">
             <h3>第三步：h 是沿 n̂ 的有符号距离</h3>
             <p>
-              目标点 P 不直接由地心半径定义，而由 S 和 n̂ 定义。h 为正表示从 S 沿 n̂ 向椭球外走；h 为负表示向椭球内部走；h=0 表示点就在参考椭球面上。
+              目标点 P 不直接由地心半径定义，而由 S 和 n̂ 定义。h 是从 S 沿 n̂ 到 P 的有符号距离：h 为正表示从 S 沿 n̂ 向椭球外走；h 为负表示向椭球内部走；h=0 表示点就在参考椭球面上。
             </p>
             <div class="formula">
-              <span class="formula-line">P = S + h n̂</span>
-              <span class="formula-line">h = (P - S) · n̂</span>
+              <span class="formula-line">\[
+P=S+h\hat{\mathbf n}
+\]</span>
+              <span class="formula-line">\[
+h=(P-S)\cdot\hat{\mathbf n}
+\]</span>
             </div>
           </article>
           <article class="card">
             <h3>它不是地心距离 r</h3>
             <p>
-              地心距离 r 是从地心 O 到 P 的长度，通常约为 6,300 千米量级。原文 EPSG 示例中 h=73.0 m，但同一点的 r≈6,364,322.101 m。把 r-a 或 r-b 当作 h 会产生概念错误。
+              地心距离 r 是从地心 O 到 P 的长度，X、Y、Z 是 P 的 ECEF 三个分量。r 通常约为 6,300 千米量级。原文 EPSG 示例中 h=73.0 m，但同一点的 r≈6,364,322.101 m。把 r-a 或 r-b 当作 h 会产生概念错误。
             </p>
             <div class="formula">
-              <span class="formula-line">r = ||P|| = sqrt(X² + Y² + Z²)</span>
-              <span class="formula-line">h ≠ r, h ≠ r - a, h ≠ r - b</span>
+              <span class="formula-line">\[
+r=\lVert P\rVert=\sqrt{X^2+Y^2+Z^2}
+\]</span>
+              <span class="formula-line">\[
+h\ne r,\qquad h\ne r-a,\qquad h\ne r-b
+\]</span>
             </div>
           </article>
           <article class="card">
             <h3>它也不自动等于海拔 H</h3>
             <p>
-              工程、地形图和机场标高常用的高度通常接近相对平均海平面的高度，也叫 orthometric height，中文常译为正高或海拔。椭球高 h 和正高 H 之间还隔着 geoid undulation，即大地水准面起伏 N。
+              工程、地形图和机场标高常用的高度通常接近相对平均海平面的高度，也叫 orthometric height，中文常译为正高或海拔。这里 H 表示正高或海拔，h 表示椭球高，N 表示 geoid undulation，即大地水准面起伏。三者之间常用近似约定如下。
             </p>
             <div class="formula">
-              <span class="formula-line">常用约定：h = H + N</span>
-              <span class="formula-line">因此：H = h - N</span>
+              <span class="formula-line">\[
+h=H+N
+\]</span>
+              <span class="formula-line">\[
+H=h-N
+\]</span>
             </div>
           </article>
           <article class="card">
@@ -1065,7 +1232,9 @@
               在球面上，表面法线会穿过球心；但 WGS 84 是扁椭球，除赤道和两极等特殊位置外，椭球法线通常不穿过地心。大地纬度 φ 用法线定义，地心纬度 ψ 用地心连线定义，这就是二者不相同的根本原因。
             </p>
             <div class="formula">
-              <span class="formula-line">tan ψ = (1 - e²) tan φ</span>
+              <span class="formula-line">\[
+\tan\psi=(1-e^2)\tan\phi
+\]</span>
             </div>
           </article>
         </div>

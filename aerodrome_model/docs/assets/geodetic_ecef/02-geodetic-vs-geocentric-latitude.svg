@@ -35,10 +35,10 @@ svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
 <text class="small" x="418" y="323">O</text>
 <text class="orange" x="627.9" y="19.4">椭球法线 n̂</text>
 <text class="indigo" x="477.9" y="204.8">地心方向</text>
-<text class="label" x="570.9" y="92.1">S(p₀,z₀)</text>
-<text class="small" x="570.9" y="297.0">p₀</text>
-<text class="small" x="568.9" y="202.6">z₀</text>
-<text class="indigo" x="530" y="277">ψ = atan2(z₀,p₀)</text>
+<text class="label" x="570.9" y="92.1">S(p_S,z_S)</text>
+<text class="small" x="570.9" y="297.0">p_S</text>
+<text class="small" x="568.9" y="202.6">z_S</text>
+<text class="indigo" x="530" y="277">ψ = atan2(z_S,p_S)</text>
 <text class="orange" x="710" y="205">φ = 法线角</text>
-<text class="formula" x="42" y="512">tan ψ = z₀/p₀；tan φ = z₀ / ((1-e²)p₀)。球体 e²=0 时二者才相同。</text>
+<text class="formula" x="42" y="512">tan ψ = z_S/p_S；tan φ = z_S / ((1-e²)p_S)。球体 e²=0 时二者才相同。</text>
 </svg>

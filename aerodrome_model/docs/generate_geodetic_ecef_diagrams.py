@@ -316,12 +316,12 @@ def diagram_latitudes() -> str:
     scale = 255
     b = WGS84_B_OVER_A
     phi = TEACHING_PHI
-    p0 = nu_over_a(phi) * cos(phi)
-    z0 = (1.0 - WGS84_E2) * nu_over_a(phi) * sin(phi)
-    psi = atan2(z0, p0)
-    sx, sy = cx + p0 * scale, cy - z0 * scale
+    p_s = nu_over_a(phi) * cos(phi)
+    z_s = (1.0 - WGS84_E2) * nu_over_a(phi) * sin(phi)
+    psi = atan2(z_s, p_s)
+    sx, sy = cx + p_s * scale, cy - z_s * scale
     nx, ny = cos(phi), -sin(phi)
-    rx, ry = p0, -z0
+    rx, ry = p_s, -z_s
     tangent = (-sin(phi), -cos(phi))
     out = svg_2d_header(width, height, "Geodetic latitude and geocentric latitude")
     out.append('<text class="title" x="30" y="36">精确剖面图：大地纬度 φ 与地心纬度 ψ</text>')
@@ -340,12 +340,12 @@ def diagram_latitudes() -> str:
     out.append(f'<text class="small" x="{cx + 8}" y="{cy + 18}">O</text>')
     out.append(f'<text class="orange" x="{sx + nx * 100 + 8:.1f}" y="{sy + ny * 100:.1f}">椭球法线 n̂</text>')
     out.append(f'<text class="indigo" x="{cx + rx * scale * 0.45:.1f}" y="{cy + ry * scale * 0.45 - 8:.1f}">地心方向</text>')
-    out.append(f'<text class="label" x="{sx + 10:.1f}" y="{sy - 8:.1f}">S(p₀,z₀)</text>')
-    out.append(f'<text class="small" x="{sx + 10:.1f}" y="{cy - 8:.1f}">p₀</text>')
-    out.append(f'<text class="small" x="{sx + 8:.1f}" y="{(sy + cy) / 2:.1f}">z₀</text>')
-    out.append(f'<text class="indigo" x="{cx + 120}" y="{cy - 28}">ψ = atan2(z₀,p₀)</text>')
+    out.append(f'<text class="label" x="{sx + 10:.1f}" y="{sy - 8:.1f}">S(p_S,z_S)</text>')
+    out.append(f'<text class="small" x="{sx + 10:.1f}" y="{cy - 8:.1f}">p_S</text>')
+    out.append(f'<text class="small" x="{sx + 8:.1f}" y="{(sy + cy) / 2:.1f}">z_S</text>')
+    out.append(f'<text class="indigo" x="{cx + 120}" y="{cy - 28}">ψ = atan2(z_S,p_S)</text>')
     out.append(f'<text class="orange" x="{cx + 300}" y="{cy - 100}">φ = 法线角</text>')
-    out.append(f'<text class="formula" x="42" y="512">tan ψ = z₀/p₀；tan φ = z₀ / ((1-e²)p₀)。球体 e²=0 时二者才相同。</text>')
+    out.append(f'<text class="formula" x="42" y="512">tan ψ = z_S/p_S；tan φ = z_S / ((1-e²)p_S)。球体 e²=0 时二者才相同。</text>')
     out.append("</svg>")
     return "\n".join(out)
 
@@ -485,9 +485,9 @@ def diagram_height() -> str:
     scale = 250
     phi = TEACHING_PHI
     b = WGS84_B_OVER_A
-    p0 = nu_over_a(phi) * cos(phi)
-    z0 = (1.0 - WGS84_E2) * nu_over_a(phi) * sin(phi)
-    sx, sy = cx + p0 * scale, cy - z0 * scale
+    p_s = nu_over_a(phi) * cos(phi)
+    z_s = (1.0 - WGS84_E2) * nu_over_a(phi) * sin(phi)
+    sx, sy = cx + p_s * scale, cy - z_s * scale
     n = (cos(phi), -sin(phi))
     h_px = 120
     px, py = sx + n[0] * h_px, sy + n[1] * h_px
