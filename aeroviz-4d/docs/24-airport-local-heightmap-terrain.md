@@ -73,6 +73,13 @@ npm run build:local-terrain -- --airport KSJC
 npm run build:local-terrain -- --airport KRDU
 ```
 
+To refresh only the generated inspection overlays, including hillshade, without
+rewriting the `.f32` terrain tiles:
+
+```bash
+npm run build:local-terrain:visual-assets -- --airport KRDU
+```
+
 By convention, source discovery is handled by
 `scripts/build_local_terrain_heightmap.mjs`. When no `--input-dir` is passed it
 scores all known candidate GeoTIFF source directories by

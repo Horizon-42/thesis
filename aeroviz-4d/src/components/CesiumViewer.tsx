@@ -24,6 +24,7 @@ import { useRunwayLayer } from "../hooks/useRunwayLayer";
 import { useSatelliteImageryLayer } from "../hooks/useSatelliteImageryLayer";
 import { useTerrainLayer } from "../hooks/useTerrainLayer";
 import { useAirportLocalTerrainLayer } from "../hooks/useAirportLocalTerrainLayer";
+import { useTerrainHillshadeLayer } from "../hooks/useTerrainHillshadeLayer";
 import { useObstacleLayer } from "../hooks/useObstacleLayer";
 import { useProcedureAnnotationPicking } from "../hooks/useProcedureAnnotationPicking";
 import { useProcedureSegmentLayer } from "../hooks/useProcedureSegmentLayer";
@@ -48,6 +49,7 @@ export default function CesiumViewerComponent() {
   useSatelliteImageryLayer();
   useTerrainLayer();
   useAirportLocalTerrainLayer({ enabled: layers.airportLocalTerrain });
+  useTerrainHillshadeLayer();
   useRunwayLayer();
   useObstacleLayer();
   useProcedureSegmentLayer();

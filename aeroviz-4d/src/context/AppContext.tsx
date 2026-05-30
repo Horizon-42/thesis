@@ -48,6 +48,7 @@ export type LayerKey =
   | "satelliteImagery"
   | "terrain"
   | "airportLocalTerrain"
+  | "terrainHillshade"
   | "runways"
   | "waypoints"
   | "ocsSurfaces"
@@ -204,6 +205,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     satelliteImagery: true,
     terrain: false,
     airportLocalTerrain: true,
+    terrainHillshade: true,
     runways: true,
     waypoints: true,
     ocsSurfaces: false,

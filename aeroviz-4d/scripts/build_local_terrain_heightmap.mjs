@@ -13,6 +13,7 @@ const rawOpenTopographyDemInputDir = path.resolve(repoRoot, `../data/opentopogra
 const rawLidarInputDir = path.resolve(repoRoot, `../data/bc_lidar/${AIRPORT_CODE}/dsm`);
 const rawUsgsLidarInputDir = path.resolve(repoRoot, `../data/usgs_lidar/${AIRPORT_CODE}/dsm`);
 const defaultInputDir = path.resolve(repoRoot, `public/data/airports/${AIRPORT_CODE}/local-terrain/sources`);
+const visualAssetsOnly = cliFlag("--visual-assets-only");
 const outputDir = path.resolve(
   repoRoot,
   `public/data/airports/${AIRPORT_CODE}/local-terrain/heightmap`
@@ -26,6 +27,13 @@ const MIN_LEVEL = 0;
 const MAX_LEVEL = 16;
 const FALLBACK_HEIGHT_M = 0;
 const OVERLAY_MAX_WIDTH = 1024;
+const HILLSHADE_DEFAULT_LAYER_ALPHA = 0.34;
+const HILLSHADE_SOURCE_AZIMUTHS_DEG = [315, 45, 270];
+const HILLSHADE_SOURCE_WEIGHTS = [0.55, 0.3, 0.15];
+const HILLSHADE_SOURCE_ELEVATION_DEG = 38;
+const HILLSHADE_NEUTRAL_SHADE = 0.62;
+const HILLSHADE_MAX_SHADOW_ALPHA = 255;
+const HILLSHADE_MAX_HIGHLIGHT_ALPHA = 92;
 const SOURCE_TILE_INDEX_CELL_SIZE_M = 512;
 const SOURCE_TILE_INDEX_CELL_SIZE_DEGREES = 0.01;
 const PROGRESS_BAR_WIDTH = 28;
@@ -53,6 +61,10 @@ function cliOption(name) {
   const prefix = `${name}=`;
   const value = process.argv.find((arg) => arg.startsWith(prefix));
   return value ? value.slice(prefix.length) : undefined;
+}
+
+function cliFlag(name) {
+  return process.argv.includes(name);
 }
 
 function formatElapsed(ms) {
@@ -790,6 +802,141 @@ function createOriginalTifHeatmapPng(dataset, stats) {
   };
 }
 
+function clamp01(value) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function hillshadeFromGradient(dzDx, dzDy, sourceAzimuthDeg) {
+  const azimuth = Cesium.Math.toRadians(sourceAzimuthDeg);
+  const elevation = Cesium.Math.toRadians(HILLSHADE_SOURCE_ELEVATION_DEG);
+  const normalX = -dzDx;
+  const normalY = -dzDy;
+  const normalZ = 1;
+  const normalLength = Math.hypot(normalX, normalY, normalZ) || 1;
+  const lightX = Math.sin(azimuth) * Math.cos(elevation);
+  const lightY = Math.cos(azimuth) * Math.cos(elevation);
+  const lightZ = Math.sin(elevation);
+
+  return clamp01(
+    (normalX / normalLength) * lightX +
+    (normalY / normalLength) * lightY +
+    (normalZ / normalLength) * lightZ,
+  );
+}
+
+function multiDirectionalHillshade(dzDx, dzDy) {
+  let shade = 0;
+  let weightSum = 0;
+
+  for (let i = 0; i < HILLSHADE_SOURCE_AZIMUTHS_DEG.length; i += 1) {
+    const weight = HILLSHADE_SOURCE_WEIGHTS[i] ?? 1;
+    shade += hillshadeFromGradient(dzDx, dzDy, HILLSHADE_SOURCE_AZIMUTHS_DEG[i]) * weight;
+    weightSum += weight;
+  }
+
+  return weightSum > 0 ? shade / weightSum : 0.5;
+}
+
+function hillshadeSampleDistanceMeters(dataset, bounds, imageWidth, imageHeight) {
+  const centerLat = (bounds.south + bounds.north) / 2;
+  const { metresPerDegreeLat, metresPerDegreeLon } = metersPerDegreeAtLatitude(centerLat);
+  const pixelWidthM =
+    imageWidth > 1 ? ((bounds.east - bounds.west) * metresPerDegreeLon) / (imageWidth - 1) : 1;
+  const pixelHeightM =
+    imageHeight > 1 ? ((bounds.north - bounds.south) * metresPerDegreeLat) / (imageHeight - 1) : 1;
+  const sourceResolutionM = horizontalResolutionMeters(
+    dataset.resolution,
+    dataset.sourceCrs,
+    dataset.sourceBounds,
+  );
+
+  return Math.max(sourceResolutionM ?? 1, Math.min(Math.abs(pixelWidthM), Math.abs(pixelHeightM)));
+}
+
+function terrainGradientAtLonLat(dataset, lonDeg, latDeg, sampleDistanceM) {
+  const centerHeight = sampleDatasetAtLonLatOrNull(dataset, lonDeg, latDeg);
+  if (centerHeight === null) return null;
+
+  const { metresPerDegreeLat, metresPerDegreeLon } = metersPerDegreeAtLatitude(latDeg);
+  const lonOffset = sampleDistanceM / metresPerDegreeLon;
+  const latOffset = sampleDistanceM / metresPerDegreeLat;
+  const westHeight =
+    sampleDatasetAtLonLatOrNull(dataset, lonDeg - lonOffset, latDeg) ?? centerHeight;
+  const eastHeight =
+    sampleDatasetAtLonLatOrNull(dataset, lonDeg + lonOffset, latDeg) ?? centerHeight;
+  const southHeight =
+    sampleDatasetAtLonLatOrNull(dataset, lonDeg, latDeg - latOffset) ?? centerHeight;
+  const northHeight =
+    sampleDatasetAtLonLatOrNull(dataset, lonDeg, latDeg + latOffset) ?? centerHeight;
+
+  return {
+    dzDx: (eastHeight - westHeight) / (2 * sampleDistanceM),
+    dzDy: (northHeight - southHeight) / (2 * sampleDistanceM),
+  };
+}
+
+function writeHillshadePixel(rgba, offset, shade) {
+  if (shade < HILLSHADE_NEUTRAL_SHADE) {
+    const darkness = (HILLSHADE_NEUTRAL_SHADE - shade) / HILLSHADE_NEUTRAL_SHADE;
+    rgba[offset] = 0;
+    rgba[offset + 1] = 0;
+    rgba[offset + 2] = 0;
+    rgba[offset + 3] = Math.round(clamp01(darkness) * HILLSHADE_MAX_SHADOW_ALPHA);
+    return;
+  }
+
+  const highlight =
+    (shade - HILLSHADE_NEUTRAL_SHADE) / (1 - HILLSHADE_NEUTRAL_SHADE || 1);
+  rgba[offset] = 255;
+  rgba[offset + 1] = 255;
+  rgba[offset + 2] = 255;
+  rgba[offset + 3] = Math.round(clamp01(highlight) * HILLSHADE_MAX_HIGHLIGHT_ALPHA);
+}
+
+function createHillshadePng(dataset, bounds) {
+  const hillshadeWidth = Math.min(OVERLAY_MAX_WIDTH, dataset.raster.width);
+  const hillshadeHeight = Math.max(
+    1,
+    Math.round((dataset.raster.height / dataset.raster.width) * hillshadeWidth),
+  );
+  const sampleDistanceM = hillshadeSampleDistanceMeters(
+    dataset,
+    bounds,
+    hillshadeWidth,
+    hillshadeHeight,
+  );
+  const rgba = Buffer.alloc(hillshadeWidth * hillshadeHeight * 4);
+
+  for (let y = 0; y < hillshadeHeight; y += 1) {
+    const v = hillshadeHeight === 1 ? 0 : y / (hillshadeHeight - 1);
+    const lat = lerp(bounds.north, bounds.south, v);
+
+    for (let x = 0; x < hillshadeWidth; x += 1) {
+      const u = hillshadeWidth === 1 ? 0 : x / (hillshadeWidth - 1);
+      const lon = lerp(bounds.west, bounds.east, u);
+      const offset = (y * hillshadeWidth + x) * 4;
+      const gradient = terrainGradientAtLonLat(dataset, lon, lat, sampleDistanceM);
+
+      if (!gradient) {
+        rgba[offset + 3] = 0;
+        continue;
+      }
+
+      writeHillshadePixel(
+        rgba,
+        offset,
+        multiDirectionalHillshade(gradient.dzDx, gradient.dzDy),
+      );
+    }
+  }
+
+  return {
+    width: hillshadeWidth,
+    height: hillshadeHeight,
+    png: encodePngRgba(hillshadeWidth, hillshadeHeight, rgba),
+  };
+}
+
 function lonLatBoundsFromSourceBounds(sourceCrs, [west, south, east, north]) {
   const corners =
     sourceCrs.kind === "geographic"
@@ -969,6 +1116,60 @@ async function writeHeightTile(dataset, tilingScheme, x, y, level) {
   await writeFile(path.join(tileDir, `${y}.f32`), float32ArrayToLittleEndianBuffer(heights));
 }
 
+function localTerrainVisualAssetMetadata(overlay, originalTifHeatmap, hillshade) {
+  return {
+    overlay: {
+      url: `/data/airports/${AIRPORT_CODE}/local-terrain/heightmap/local_terrain_height_overlay.png`,
+      width: overlay.width,
+      height: overlay.height,
+      note: "Height tint for visual inspection; the terrain provider still supplies the actual heights.",
+    },
+    originalTifHeatmap: {
+      url: `/data/airports/${AIRPORT_CODE}/local-terrain/heightmap/local_terrain_source_heatmap.png`,
+      width: originalTifHeatmap.width,
+      height: originalTifHeatmap.height,
+      note:
+        "Raw GeoTIFF pixel heatmap, draped over the source lon/lat bounds for source-data inspection.",
+    },
+    hillshade: {
+      url: `/data/airports/${AIRPORT_CODE}/local-terrain/heightmap/local_terrain_hillshade.png`,
+      width: hillshade.width,
+      height: hillshade.height,
+      alpha: HILLSHADE_DEFAULT_LAYER_ALPHA,
+      note:
+        "Multi-direction transparent hillshade overlay generated from local terrain source elevations.",
+    },
+  };
+}
+
+async function writeVisualAssetFiles(overlay, originalTifHeatmap, hillshade) {
+  await writeFile(path.join(outputDir, "local_terrain_height_overlay.png"), overlay.png);
+  await writeFile(path.join(outputDir, "local_terrain_source_heatmap.png"), originalTifHeatmap.png);
+  await writeFile(path.join(outputDir, "local_terrain_hillshade.png"), hillshade.png);
+}
+
+async function updateExistingMetadataVisualAssets(visualAssets) {
+  const metadataPath = path.join(outputDir, "metadata.json");
+  if (!existsSync(metadataPath)) {
+    throw new Error(
+      `Cannot use --visual-assets-only because ${path.relative(repoRoot, metadataPath)} does not exist.`
+    );
+  }
+
+  const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
+  await writeFile(
+    metadataPath,
+    JSON.stringify(
+      {
+        ...metadata,
+        ...visualAssets,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
 async function main() {
   const inputDir = await resolveInputDir();
   const sourceMetadata = await readTerrainSourceMetadata(inputDir);
@@ -991,6 +1192,8 @@ async function main() {
   const stats = dataset.stats;
   const overlay = createOverlayPng(dataset, stats, bounds);
   const originalTifHeatmap = createOriginalTifHeatmapPng(dataset, stats);
+  const hillshade = createHillshadePng(dataset, bounds);
+  const visualAssets = localTerrainVisualAssetMetadata(overlay, originalTifHeatmap, hillshade);
   const tilingScheme = new Cesium.GeographicTilingScheme();
   const levelRanges = [];
   const levels = [];
@@ -1005,9 +1208,16 @@ async function main() {
   }
 
   await mkdir(outputDir, { recursive: true });
+  await writeVisualAssetFiles(overlay, originalTifHeatmap, hillshade);
+
+  if (visualAssetsOnly) {
+    await updateExistingMetadataVisualAssets(visualAssets);
+    console.log(`Wrote local terrain visual assets to ${path.relative(repoRoot, outputDir)}`);
+    console.log(`Updated ${path.relative(repoRoot, path.join(outputDir, "metadata.json"))}`);
+    return;
+  }
+
   await rm(tilesDir, { recursive: true, force: true });
-  await writeFile(path.join(outputDir, "local_terrain_height_overlay.png"), overlay.png);
-  await writeFile(path.join(outputDir, "local_terrain_source_heatmap.png"), originalTifHeatmap.png);
   const tileProgress = {
     written: 0,
     startedAt: Date.now(),
@@ -1074,19 +1284,7 @@ async function main() {
         tilesBaseUrl: `/data/airports/${AIRPORT_CODE}/local-terrain/heightmap/tiles`,
         source,
         precision,
-        overlay: {
-          url: `/data/airports/${AIRPORT_CODE}/local-terrain/heightmap/local_terrain_height_overlay.png`,
-          width: overlay.width,
-          height: overlay.height,
-          note: "Height tint for visual inspection; the terrain provider still supplies the actual heights.",
-        },
-        originalTifHeatmap: {
-          url: `/data/airports/${AIRPORT_CODE}/local-terrain/heightmap/local_terrain_source_heatmap.png`,
-          width: originalTifHeatmap.width,
-          height: originalTifHeatmap.height,
-          note:
-            "Raw GeoTIFF pixel heatmap, draped over the source lon/lat bounds for source-data inspection.",
-        },
+        ...visualAssets,
         minLevel: MIN_LEVEL,
         maxLevel: MAX_LEVEL,
         tileCount,

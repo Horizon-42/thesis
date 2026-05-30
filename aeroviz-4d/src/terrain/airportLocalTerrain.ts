@@ -61,6 +61,13 @@ export interface AirportLocalTerrainMetadata {
     height: number;
     note?: string;
   };
+  hillshade?: {
+    url: string;
+    width: number;
+    height: number;
+    alpha?: number;
+    note?: string;
+  };
   minLevel: number;
   maxLevel: number;
   tileCount: number;
