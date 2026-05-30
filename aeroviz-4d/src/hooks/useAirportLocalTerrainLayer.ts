@@ -42,7 +42,7 @@ export interface UseAirportLocalTerrainLayerOptions {
  * Load preprocessed airport-local heightmap terrain into the Cesium Viewer.
  *
  * Uses pre-built `.f32` height tiles produced by `npm run build:local-terrain`
- * and served from `public/data/airports/<ICAO>/dsm/heightmap-terrain/`. The browser fetches only the tiles it needs
+ * and served from `public/data/airports/<ICAO>/local-terrain/heightmap/`. The browser fetches only the tiles it needs
  * instead of decoding a full GeoTIFF.
  *
  * TerrainRuntime owns the activation policy: focused warm before provider

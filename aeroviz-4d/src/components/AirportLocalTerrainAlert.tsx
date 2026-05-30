@@ -12,7 +12,7 @@ function terrainAlertText(args: {
       title: "Local terrain data is missing",
       body:
         `No airport-local terrain package was found for ${airportCode}. ` +
-        `Generate public/data/airports/${airportCode}/dsm/heightmap-terrain/metadata.json, ` +
+        `Generate public/data/airports/${airportCode}/local-terrain/heightmap/metadata.json, ` +
         "then reload or switch airports.",
     };
   }

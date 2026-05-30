@@ -87,7 +87,7 @@ export default function App() {
 
   const routeToken = locationState.hash.split("?")[0];
   const isLocalTerrainDemo =
-    locationState.pathname === "/dsm-terrain-demo" || routeToken === "#dsm-terrain-demo";
+    locationState.pathname === "/local-terrain-demo" || routeToken === "#local-terrain-demo";
   const isProcedureDetails =
     locationState.pathname === "/procedure-details" || routeToken === "#procedure-details";
 

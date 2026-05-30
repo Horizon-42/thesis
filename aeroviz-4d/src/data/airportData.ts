@@ -60,7 +60,7 @@ export function airportChartsIndexUrl(airportCode: string): string {
 }
 
 export function airportLocalTerrainUrl(airportCode: string, fileName?: string): string {
-  const root = `${airportDataRootUrl(airportCode)}/dsm/heightmap-terrain`;
+  const root = `${airportDataRootUrl(airportCode)}/local-terrain/heightmap`;
   return fileName ? `${root}/${fileName}` : root;
 }
 

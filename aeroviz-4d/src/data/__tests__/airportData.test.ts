@@ -16,7 +16,7 @@ describe("airportData helpers", () => {
   it("builds airport-scoped data URLs", () => {
     expect(airportDataUrl("krdu", "airport.json")).toBe("/data/airports/KRDU/airport.json");
     expect(airportLocalTerrainUrl("cyvr", "metadata.json")).toBe(
-      "/data/airports/CYVR/dsm/heightmap-terrain/metadata.json",
+      "/data/airports/CYVR/local-terrain/heightmap/metadata.json",
     );
     expect(airportProcedureDetailsIndexUrl("krdu")).toBe(
       "/data/airports/KRDU/procedure-details/index.json",

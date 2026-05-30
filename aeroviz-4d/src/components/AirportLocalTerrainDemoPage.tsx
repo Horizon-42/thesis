@@ -292,15 +292,15 @@ export default function AirportLocalTerrainDemoPage() {
   }, [terrain.status]);
 
   return (
-    <main className="dsm-terrain-page">
-      <div ref={containerRef} className="dsm-terrain-viewer" />
-      <div className="cesium-overlay-container dsm-terrain-hud-layer">
+    <main className="local-terrain-page">
+      <div ref={containerRef} className="local-terrain-viewer" />
+      <div className="cesium-overlay-container local-terrain-hud-layer">
         <AirportLocalTerrainAlert />
         <HUD />
       </div>
-      <section className="dsm-terrain-panel">
-        <nav className="dsm-terrain-nav">
-          <a href="/" className="dsm-terrain-link">Flight view</a>
+      <section className="local-terrain-panel">
+        <nav className="local-terrain-nav">
+          <a href="/" className="local-terrain-link">Flight view</a>
         </nav>
         <h1>{activeAirportCode || "Airport"} Local Terrain</h1>
         <p>{displayState.status}</p>
@@ -338,9 +338,9 @@ export default function AirportLocalTerrainDemoPage() {
             <dd>{displayState.source}</dd>
           </div>
         </dl>
-        <div className="dsm-layer-toggles" aria-label="Local terrain layer toggles">
+        <div className="local-terrain-layer-toggles" aria-label="Local terrain layer toggles">
           <h2>Layers</h2>
-          <label className="dsm-layer-toggle">
+          <label className="local-terrain-layer-toggle">
             <input
               type="checkbox"
               checked={layers.terrain}
@@ -348,7 +348,7 @@ export default function AirportLocalTerrainDemoPage() {
             />
             <span>Local terrain surface</span>
           </label>
-          <label className="dsm-layer-toggle">
+          <label className="local-terrain-layer-toggle">
             <input
               type="checkbox"
               checked={layers.originalTifHeatmap}
@@ -358,7 +358,7 @@ export default function AirportLocalTerrainDemoPage() {
             />
             <span>Original TIFF heatmap</span>
           </label>
-          <label className="dsm-layer-toggle">
+          <label className="local-terrain-layer-toggle">
             <input
               type="checkbox"
               checked={layers.terrainTint}
@@ -366,7 +366,7 @@ export default function AirportLocalTerrainDemoPage() {
             />
             <span>Terrain-sampled heat tint</span>
           </label>
-          <label className="dsm-layer-toggle">
+          <label className="local-terrain-layer-toggle">
             <input
               type="checkbox"
               checked={layers.satellite}
@@ -375,12 +375,12 @@ export default function AirportLocalTerrainDemoPage() {
             <span>Satellite image</span>
           </label>
         </div>
-        <p className="dsm-terrain-note">
+        <p className="local-terrain-note">
           Turn off the terrain surface to inspect the original TIFF heatmap on a flat globe. View
           exaggeration is {TERRAIN_VERTICAL_EXAGGERATION}x; tile heights remain real local-terrain metres.
         </p>
       </section>
-      <div className="dsm-terrain-legend">
+      <div className="local-terrain-legend">
         <span>{displayState.heightMin || "Low"}</span>
         <div />
         <span>{displayState.heightMax || "High"}</span>

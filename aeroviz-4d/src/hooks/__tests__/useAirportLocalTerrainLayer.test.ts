@@ -101,7 +101,7 @@ vi.mock("cesium", () => ({
 
 vi.mock("../../terrain/airportLocalTerrain", () => ({
   airportLocalTerrainMetadataUrl: (airportCode: string) => (
-    `/data/airports/${airportCode}/dsm/heightmap-terrain/metadata.json`
+    `/data/airports/${airportCode}/local-terrain/heightmap/metadata.json`
   ),
   airportLocalTerrainTileRefsNearCoordinate: (_metadata: any, lon: number) => (
     lon < -122 ? focusTilesByAirport.CYVR : focusTilesByAirport.KSJC
@@ -166,7 +166,7 @@ describe("useAirportLocalTerrainLayer", () => {
     await waitFor(() => expect(result.current.status).toBe("active"));
 
     expect(loadAirportLocalTerrain).toHaveBeenCalledWith(
-      "/data/airports/CYVR/dsm/heightmap-terrain/metadata.json",
+      "/data/airports/CYVR/local-terrain/heightmap/metadata.json",
     );
     expect(preloadTilesByAirport.CYVR).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -210,7 +210,7 @@ describe("useAirportLocalTerrainLayer", () => {
 
     expect(loadAirportLocalTerrain).toHaveBeenCalledTimes(2);
     expect(loadAirportLocalTerrain).toHaveBeenLastCalledWith(
-      "/data/airports/KSJC/dsm/heightmap-terrain/metadata.json",
+      "/data/airports/KSJC/local-terrain/heightmap/metadata.json",
     );
     expect(preloadTilesByAirport.KSJC).toHaveBeenCalled();
     expect(setAirportLocalTerrain).toHaveBeenLastCalledWith({
@@ -228,7 +228,7 @@ describe("useAirportLocalTerrainLayer", () => {
   it("reports missing terrain metadata without replacing the existing provider", async () => {
     loadAirportLocalTerrain.mockRejectedValueOnce(
       new JsonFetchError("missing metadata", {
-        url: "/data/airports/CYVR/dsm/heightmap-terrain/metadata.json",
+        url: "/data/airports/CYVR/local-terrain/heightmap/metadata.json",
         status: 404,
       }),
     );

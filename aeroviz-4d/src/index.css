@@ -9,7 +9,7 @@ body,
 }
 
 /* ── Airport local terrain demo page ──────────────────────────────────────── */
-.dsm-terrain-page {
+.local-terrain-page {
   position: fixed;
   inset: 0;
   overflow: hidden;
@@ -18,12 +18,12 @@ body,
   font-family: "Inter", "Segoe UI", sans-serif;
 }
 
-.dsm-terrain-viewer {
+.local-terrain-viewer {
   position: absolute;
   inset: 0;
 }
 
-.dsm-terrain-panel {
+.local-terrain-panel {
   position: absolute;
   top: 18px;
   left: 18px;
@@ -38,37 +38,37 @@ body,
   width: min(360px, calc(100vw - 36px));
 }
 
-.dsm-terrain-panel h1 {
+.local-terrain-panel h1 {
   margin: 10px 0 6px;
   font-size: 22px;
   line-height: 1.1;
 }
 
-.dsm-terrain-panel p {
+.local-terrain-panel p {
   margin: 0 0 14px;
   color: #a7f3d0;
   font-size: 13px;
 }
 
-.dsm-terrain-panel dl {
+.local-terrain-panel dl {
   display: grid;
   gap: 8px;
   margin: 0;
 }
 
-.dsm-terrain-panel dl div {
+.local-terrain-panel dl div {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
 }
 
-.dsm-terrain-panel dt {
+.local-terrain-panel dt {
   color: #94a3b8;
   font-size: 12px;
 }
 
-.dsm-terrain-panel dd {
+.local-terrain-panel dd {
   margin: 0;
   color: #f8fafc;
   font-family: "Courier New", monospace;
@@ -76,30 +76,30 @@ body,
   text-align: right;
 }
 
-.dsm-terrain-link {
+.local-terrain-link {
   color: #67e8f9;
   font-size: 12px;
   text-decoration: none;
 }
 
-.dsm-terrain-link:hover {
+.local-terrain-link:hover {
   text-decoration: underline;
 }
 
-.dsm-terrain-nav {
+.local-terrain-nav {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
 }
 
-.dsm-terrain-panel .dsm-terrain-note {
+.local-terrain-panel .local-terrain-note {
   margin-top: 14px;
   margin-bottom: 0;
   color: #bae6fd;
   line-height: 1.45;
 }
 
-.dsm-layer-toggles {
+.local-terrain-layer-toggles {
   display: grid;
   gap: 8px;
   margin-top: 14px;
@@ -107,14 +107,14 @@ body,
   border-top: 1px solid rgba(148, 163, 184, 0.24);
 }
 
-.dsm-layer-toggles h2 {
+.local-terrain-layer-toggles h2 {
   margin: 0 0 2px;
   color: #e2e8f0;
   font-size: 13px;
   line-height: 1.2;
 }
 
-.dsm-layer-toggle {
+.local-terrain-layer-toggle {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -123,13 +123,13 @@ body,
   line-height: 1.25;
 }
 
-.dsm-layer-toggle input {
+.local-terrain-layer-toggle input {
   width: 14px;
   height: 14px;
   accent-color: #22d3ee;
 }
 
-.dsm-terrain-legend {
+.local-terrain-legend {
   position: absolute;
   right: 18px;
   bottom: 18px;
@@ -146,7 +146,7 @@ body,
   font-size: 12px;
 }
 
-.dsm-terrain-legend div {
+.local-terrain-legend div {
   height: 10px;
   border-radius: 4px;
   background: linear-gradient(90deg, #1e56a8 0%, #22ad7e 35%, #f5c447 66%, #c63734 100%);
