@@ -20,6 +20,20 @@ metadata.json
 tiles/<level>/<x>/<y>.f32
 ```
 
+`metadata.json` must include precision metadata:
+
+```json
+"precision": {
+  "horizontalResolutionM": 2.0,
+  "verticalAccuracyM": null,
+  "source": "terrain-source-metadata"
+}
+```
+
+`horizontalResolutionM` is the ground sample distance used to choose among
+candidate local sources. Smaller values win; DEM/DSM names are not priority
+signals.
+
 The application does not special-case CYVR, KSJC, or any other airport. The
 active airport code determines the metadata URL:
 
@@ -27,26 +41,32 @@ active airport code determines the metadata URL:
 /data/airports/<ICAO>/dsm/heightmap-terrain/metadata.json
 ```
 
-If the metadata file exists, the app can use that airport's local terrain. If it
-does not exist, the local terrain status is `Missing` and the scene falls back to
-the current terrain provider.
+If the metadata file exists and has precision metadata, the app can use that
+airport's local terrain. If it does not exist, the local terrain status is
+`Missing`, a front-end dialog is shown, and the scene falls back to the current
+terrain provider. If the package is old and lacks `precision.horizontalResolutionM`,
+the status is `Error` and the dialog asks for regeneration.
 
 ## Build Command
 
 The generator is airport-parametric:
 
 ```bash
+npm run build:local-terrain -- --airport CYVR
+npm run build:local-terrain -- --airport KSJC
 npm run build:dsm-heightmap-terrain -- --airport CYVR
-npm run build:dsm-heightmap-terrain -- --airport KSJC
 ```
 
-By convention, the input search order is handled by
-`scripts/build_dsm_heightmap_terrain.mjs`; outputs always land in the airport's
-own `public/data/airports/<ICAO>/dsm/heightmap-terrain/` folder.
+By convention, source discovery is handled by
+`scripts/build_dsm_heightmap_terrain.mjs`. When no `--input-dir` is passed it
+scores all known candidate GeoTIFF source directories by
+`precision.horizontalResolutionM` from `terrain-source.json`, falling back to the
+GeoTIFF raster transform when possible. Outputs always land in the airport's own
+`public/data/airports/<ICAO>/dsm/heightmap-terrain/` folder.
 
 ## Runtime Behavior
 
-The main viewer uses `useDsmTerrainLayer` as the airport-local terrain manager.
+The main viewer uses `useAirportLocalTerrainLayer` as the airport-local terrain manager.
 When the `Airport Local Terrain` layer is enabled:
 
 1. The hook resolves metadata from the active airport code.
@@ -119,7 +139,8 @@ The HUD exposes two separate terrain signals:
 - `Active X/Y`: local terrain provider is installed and the remaining local
   tiles are warming in the background
 - `Active`: local terrain provider is installed and the local tile cache is warm
-- `Error`: metadata or tile loading failed
+- `Error`: metadata or tile loading failed; old packages without precision
+  metadata also land here and show a regeneration dialog
 
 ## Limits
 

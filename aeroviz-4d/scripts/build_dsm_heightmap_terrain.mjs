@@ -1,4 +1,4 @@
-import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,16 +13,12 @@ const rawOpenTopographyDemInputDir = path.resolve(repoRoot, `../data/opentopogra
 const rawLidarInputDir = path.resolve(repoRoot, `../data/bc_lidar/${AIRPORT_CODE}/dsm`);
 const rawUsgsLidarInputDir = path.resolve(repoRoot, `../data/usgs_lidar/${AIRPORT_CODE}/dsm`);
 const defaultInputDir = path.resolve(repoRoot, `public/data/airports/${AIRPORT_CODE}/dsm/source`);
-const fallbackInputDir = path.resolve(repoRoot, `public/data/DSM/${AIRPORT_CODE}`);
-const legacySingleInput = path.resolve(
-  repoRoot,
-  `../data/DSM/${AIRPORT_CODE}/bc_092g015_3_3_3_xli1m_utm10_20240217_20250425.tif`
-);
 const outputDir = path.resolve(
   repoRoot,
   `public/data/airports/${AIRPORT_CODE}/dsm/heightmap-terrain`
 );
 const tilesDir = path.join(outputDir, "tiles");
+const TERRAIN_SOURCE_METADATA_FILE = "terrain-source.json";
 
 let UTM_ZONE = Number(cliOption("--utm-zone") ?? Number.NaN);
 const TILE_SIZE = 129;
@@ -200,18 +196,148 @@ function resolveUtmZone(geoKeys, filePath) {
   );
 }
 
-function resolveInputDir() {
+function knownInputDirs() {
+  const dirs = [
+    rawOpenTopographyDemInputDir,
+    rawLidarInputDir,
+    rawUsgsLidarInputDir,
+    defaultInputDir,
+  ];
+
+  if (existsSync(defaultInputDir)) {
+    for (const entry of readdirSync(defaultInputDir, { withFileTypes: true })) {
+      if (entry.isDirectory()) dirs.push(path.join(defaultInputDir, entry.name));
+    }
+  }
+
+  return [...new Set(dirs)];
+}
+
+function metersPerDegreeAtLatitude(latDeg) {
+  const latRad = Cesium.Math.toRadians(latDeg);
+  const metresPerDegreeLat =
+    111132.92 -
+    559.82 * Math.cos(2 * latRad) +
+    1.175 * Math.cos(4 * latRad) -
+    0.0023 * Math.cos(6 * latRad);
+  const metresPerDegreeLon =
+    111412.84 * Math.cos(latRad) -
+    93.5 * Math.cos(3 * latRad) +
+    0.118 * Math.cos(5 * latRad);
+  return { metresPerDegreeLat, metresPerDegreeLon };
+}
+
+function horizontalResolutionMeters(resolution, sourceCrs, sourceBounds) {
+  const resolutionX = Math.abs(Number(resolution?.[0]));
+  const resolutionY = Math.abs(Number(resolution?.[1]));
+  if (!Number.isFinite(resolutionX) || !Number.isFinite(resolutionY)) return null;
+
+  if (sourceCrs.kind === "geographic") {
+    const centerLat = (sourceBounds[1] + sourceBounds[3]) / 2;
+    const { metresPerDegreeLat, metresPerDegreeLon } = metersPerDegreeAtLatitude(centerLat);
+    return Math.max(resolutionX * metresPerDegreeLon, resolutionY * metresPerDegreeLat);
+  }
+
+  if (sourceCrs.kind === "utm") {
+    return Math.max(resolutionX, resolutionY);
+  }
+
+  return null;
+}
+
+async function readTerrainSourceMetadata(inputDir) {
+  const metadataPath = path.join(inputDir, TERRAIN_SOURCE_METADATA_FILE);
+  if (!existsSync(metadataPath)) return null;
+
+  const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
+  const horizontalResolutionM = Number(metadata?.precision?.horizontalResolutionM);
+  if (!Number.isFinite(horizontalResolutionM) || horizontalResolutionM <= 0) {
+    throw new Error(
+      `${path.relative(repoRoot, metadataPath)} must contain a positive precision.horizontalResolutionM`
+    );
+  }
+
+  return {
+    ...metadata,
+    precision: {
+      ...metadata.precision,
+      horizontalResolutionM,
+    },
+  };
+}
+
+async function readSourceTileMetadata(filePath) {
+  const tiff = await fromFile(filePath);
+  const image = await tiff.getImage();
+  return {
+    path: filePath,
+    resolution: image.getResolution(),
+    sourceBounds: image.getBoundingBox(),
+    geoKeys: image.getGeoKeys ? image.getGeoKeys() : {},
+  };
+}
+
+async function precisionForInputDir(inputDir) {
+  const sourceMetadata = await readTerrainSourceMetadata(inputDir);
+  if (sourceMetadata) {
+    return {
+      horizontalResolutionM: sourceMetadata.precision.horizontalResolutionM,
+      source: "terrain-source-metadata",
+      metadata: sourceMetadata,
+    };
+  }
+
+  const inputPaths = await listGeoTiffPaths(inputDir);
+  const tile = await readSourceTileMetadata(inputPaths[0]);
+  const sourceCrs = resolveSourceCrs(tile.geoKeys, tile.path);
+  const horizontalResolutionM = horizontalResolutionMeters(
+    tile.resolution,
+    sourceCrs,
+    tile.sourceBounds,
+  );
+  if (!horizontalResolutionM) {
+    throw new Error(
+      `Cannot infer terrain precision for ${path.relative(repoRoot, inputDir)}. ` +
+      `Add ${TERRAIN_SOURCE_METADATA_FILE} with precision.horizontalResolutionM and regenerate.`
+    );
+  }
+
+  return {
+    horizontalResolutionM,
+    source: "raster-geotransform",
+    metadata: null,
+  };
+}
+
+async function resolveInputDir() {
   const requestedInputDir = cliOption("--input-dir") ?? cliOption("--input");
   if (requestedInputDir) {
     return path.resolve(process.cwd(), requestedInputDir);
   }
 
-  if (directoryHasGeoTiffs(rawOpenTopographyDemInputDir)) return rawOpenTopographyDemInputDir;
-  if (directoryHasGeoTiffs(rawLidarInputDir)) return rawLidarInputDir;
-  if (directoryHasGeoTiffs(rawUsgsLidarInputDir)) return rawUsgsLidarInputDir;
-  if (directoryHasGeoTiffs(defaultInputDir)) return defaultInputDir;
-  if (directoryHasGeoTiffs(fallbackInputDir)) return fallbackInputDir;
-  return path.dirname(legacySingleInput);
+  const candidates = knownInputDirs().filter(directoryHasGeoTiffs);
+  if (candidates.length === 0) {
+    throw new Error(`No GeoTIFF terrain source found for ${AIRPORT_CODE}. Pass --input-dir explicitly.`);
+  }
+
+  const scoredCandidates = await Promise.all(
+    candidates.map(async (inputDir) => ({
+      inputDir,
+      precision: await precisionForInputDir(inputDir),
+    })),
+  );
+  scoredCandidates.sort((left, right) => (
+    left.precision.horizontalResolutionM - right.precision.horizontalResolutionM ||
+    left.inputDir.localeCompare(right.inputDir)
+  ));
+
+  const chosen = scoredCandidates[0];
+  console.log(
+    `Selected ${path.relative(repoRoot, chosen.inputDir)} by precision ` +
+    `${chosen.precision.horizontalResolutionM.toFixed(3)} m ` +
+    `(${chosen.precision.source})`
+  );
+  return chosen.inputDir;
 }
 
 function directoryHasGeoTiffs(inputDir) {
@@ -234,7 +360,6 @@ async function listGeoTiffPaths(inputDir) {
     .sort((left, right) => left.localeCompare(right));
 
   if (tiffPaths.length > 0) return tiffPaths;
-  if (existsSync(legacySingleInput)) return [legacySingleInput];
 
   throw new Error(`No GeoTIFF files found in ${inputDir}`);
 }
@@ -402,7 +527,7 @@ function mosaicRasterDescriptor(sourceBounds, resolution) {
   };
 }
 
-async function readDsmSourceTile(filePath, index) {
+async function readHeightSourceTile(filePath, index) {
   const tiff = await fromFile(filePath);
   const image = await tiff.getImage();
   const noData = image.getGDALNoData();
@@ -465,7 +590,7 @@ function createSourceTileIndex(tiles, sourceBounds, sourceCrs) {
   return { sourceBounds, cellSize, width, height, cells };
 }
 
-function createDsmDataset(tiles, inputDir, sourceCrs) {
+function createHeightDataset(tiles, inputDir, sourceCrs) {
   if (tiles.length === 0) {
     throw new Error("Cannot create height dataset without source tiles");
   }
@@ -484,6 +609,40 @@ function createDsmDataset(tiles, inputDir, sourceCrs) {
     raster,
     stats,
     tileIndex: createSourceTileIndex(tiles, sourceBounds, sourceCrs),
+  };
+}
+
+function localTerrainPrecisionMetadata(dataset, sourceMetadata) {
+  const inferredHorizontalResolutionM = horizontalResolutionMeters(
+    dataset.resolution,
+    dataset.sourceCrs,
+    dataset.sourceBounds,
+  );
+  const sourceHorizontalResolutionM = Number(sourceMetadata?.precision?.horizontalResolutionM);
+  const horizontalResolutionM = Number.isFinite(sourceHorizontalResolutionM) && sourceHorizontalResolutionM > 0
+    ? sourceHorizontalResolutionM
+    : inferredHorizontalResolutionM;
+
+  if (!horizontalResolutionM) {
+    throw new Error(
+      `Cannot write local terrain precision metadata for ${path.relative(repoRoot, dataset.inputDir)}. ` +
+      `Add ${TERRAIN_SOURCE_METADATA_FILE} with precision.horizontalResolutionM and regenerate.`
+    );
+  }
+
+  return {
+    horizontalResolutionM,
+    verticalAccuracyM: sourceMetadata?.precision?.verticalAccuracyM ?? null,
+    source: sourceMetadata ? "terrain-source-metadata" : "raster-geotransform",
+    notes: sourceMetadata?.precision?.notes ?? [],
+  };
+}
+
+function localTerrainSourceMetadata(inputDir, sourceMetadata) {
+  return {
+    kind: sourceMetadata?.source?.kind ?? "unknown",
+    label: sourceMetadata?.source?.label ?? path.basename(inputDir),
+    sourceDir: path.relative(repoRoot, inputDir),
   };
 }
 
@@ -682,26 +841,26 @@ function tileCountForRange(range) {
   return (range.maxX - range.minX + 1) * (range.maxY - range.minY + 1);
 }
 
-function sampleRasterAtSourceOrNull(dsm, sourceX, sourceY) {
+function sampleRasterAtSourceOrNull(sourceTile, sourceX, sourceY) {
   // image.getOrigin() describes the outer raster origin. Subtracting 0.5 is the
   // inverse of the pixel-center mapping used when writing coordinates out.
-  const x = (sourceX - dsm.origin[0]) / dsm.resolution[0] - 0.5;
-  const y = (sourceY - dsm.origin[1]) / dsm.resolution[1] - 0.5;
+  const x = (sourceX - sourceTile.origin[0]) / sourceTile.resolution[0] - 0.5;
+  const y = (sourceY - sourceTile.origin[1]) / sourceTile.resolution[1] - 0.5;
 
-  if (x < 0 || y < 0 || x > dsm.width - 1 || y > dsm.height - 1) {
+  if (x < 0 || y < 0 || x > sourceTile.width - 1 || y > sourceTile.height - 1) {
     return null;
   }
 
-  const x0 = Math.max(0, Math.min(dsm.width - 1, Math.floor(x)));
-  const y0 = Math.max(0, Math.min(dsm.height - 1, Math.floor(y)));
-  const x1 = Math.min(x0 + 1, dsm.width - 1);
-  const y1 = Math.min(y0 + 1, dsm.height - 1);
+  const x0 = Math.max(0, Math.min(sourceTile.width - 1, Math.floor(x)));
+  const y0 = Math.max(0, Math.min(sourceTile.height - 1, Math.floor(y)));
+  const x1 = Math.min(x0 + 1, sourceTile.width - 1);
+  const y1 = Math.min(y0 + 1, sourceTile.height - 1);
   const tx = x - x0;
   const ty = y - y0;
 
   const valueAt = (col, row) => {
-    const value = Number(dsm.raster[row * dsm.width + col]);
-    return isValidRasterValue(value, dsm.noData) ? value : null;
+    const value = Number(sourceTile.raster[row * sourceTile.width + col]);
+    return isValidRasterValue(value, sourceTile.noData) ? value : null;
   };
 
   const topLeft = valueAt(x0, y0);
@@ -811,20 +970,23 @@ async function writeHeightTile(dataset, tilingScheme, x, y, level) {
 }
 
 async function main() {
-  const inputDir = resolveInputDir();
+  const inputDir = await resolveInputDir();
+  const sourceMetadata = await readTerrainSourceMetadata(inputDir);
   const inputPaths = await listGeoTiffPaths(inputDir);
   const sourceTiles = [];
 
   console.log(`Reading ${inputPaths.length} height GeoTIFF source tile(s) from ${path.relative(repoRoot, inputDir)}`);
   for (let index = 0; index < inputPaths.length; index += 1) {
-    sourceTiles.push(await readDsmSourceTile(inputPaths[index], index));
+    sourceTiles.push(await readHeightSourceTile(inputPaths[index], index));
     if ((index + 1) % 10 === 0 || index + 1 === inputPaths.length) {
       console.log(`  loaded ${index + 1}/${inputPaths.length}`);
     }
   }
 
   const sourceCrs = resolveSourceCrs(sourceTiles[0]?.geoKeys, sourceTiles[0]?.path ?? inputDir);
-  const dataset = createDsmDataset(sourceTiles, inputDir, sourceCrs);
+  const dataset = createHeightDataset(sourceTiles, inputDir, sourceCrs);
+  const precision = localTerrainPrecisionMetadata(dataset, sourceMetadata);
+  const source = localTerrainSourceMetadata(inputDir, sourceMetadata);
   const { bounds, corners } = lonLatBoundsFromSourceBounds(dataset.sourceCrs, dataset.sourceBounds);
   const stats = dataset.stats;
   const overlay = createOverlayPng(dataset, stats, bounds);
@@ -910,6 +1072,8 @@ async function main() {
         tileHeight: TILE_SIZE,
         tilingScheme: "geographic",
         tilesBaseUrl: `/data/airports/${AIRPORT_CODE}/dsm/heightmap-terrain/tiles`,
+        source,
+        precision,
         overlay: {
           url: `/data/airports/${AIRPORT_CODE}/dsm/heightmap-terrain/dsm_height_overlay.png`,
           width: overlay.width,

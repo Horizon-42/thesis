@@ -3,11 +3,13 @@ import json
 from preprocess_usgs_tnm_terrain import (
     DEFAULT_LAZ_SOURCE_SRS_BY_AIRPORT,
     GeoBBox,
+    StagedTerrainSource,
     build_laz_to_dsm_pipeline,
     default_target_srs_for_bbox,
     pdal_bounds_string,
     read_manifest_bboxes,
     resolve_processing_bbox,
+    select_highest_precision_source,
     source_kinds_to_stage,
     staging_dir_for_source,
     transform_bbox_with_gdaltransform,
@@ -160,6 +162,43 @@ def test_source_kinds_to_stage_supports_both():
     assert source_kinds_to_stage("dem") == ["dem"]
     assert source_kinds_to_stage("dsm") == ["dsm"]
     assert source_kinds_to_stage("both") == ["dem", "dsm"]
+
+
+def test_source_kinds_to_stage_auto_uses_available_source_shapes(tmp_path):
+    airport_root = tmp_path / "KRDU"
+    (airport_root / "dem").mkdir(parents=True)
+    (airport_root / "dem" / "dem.tif").write_text("placeholder", encoding="utf-8")
+    (airport_root / "dsm" / "source_laz").mkdir(parents=True)
+    (airport_root / "dsm" / "source_laz" / "surface.laz").write_text(
+        "placeholder",
+        encoding="utf-8",
+    )
+
+    assert source_kinds_to_stage("auto", airport_code="KRDU", usgs_root=tmp_path) == [
+        "dem",
+        "dsm",
+    ]
+
+
+def test_select_highest_precision_source_uses_resolution_not_source_kind(tmp_path):
+    selected = select_highest_precision_source(
+        {
+            "dem": StagedTerrainSource(
+                source_kind="dem",
+                source_dir=tmp_path / "dem",
+                output_tif=tmp_path / "dem.tif",
+                horizontal_resolution_m=10.0,
+            ),
+            "dsm": StagedTerrainSource(
+                source_kind="dsm",
+                source_dir=tmp_path / "dsm",
+                output_tif=tmp_path / "dsm.tif",
+                horizontal_resolution_m=2.0,
+            ),
+        }
+    )
+
+    assert selected == "dsm"
 
 
 def test_staging_dir_defaults_under_airport_dsm_source():

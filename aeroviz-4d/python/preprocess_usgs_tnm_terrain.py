@@ -18,14 +18,14 @@ Supported source kinds:
   Z scaled from feet to metres for the inspected KRDU USGS LPC source.
 
 Usage:
-  # Bare-earth terrain, recommended default for terrain/clearance analysis.
+  # Bare-earth terrain.
   python python/preprocess_usgs_tnm_terrain.py --airport KRDU --source dem
 
-  # Surface model from LAZ point cloud, useful for seeing buildings/vegetation.
+  # Surface model from LAZ point cloud.
   python python/preprocess_usgs_tnm_terrain.py --airport KRDU --source dsm
 
-  # Stage both normalized GeoTIFFs, but publish DEM as the app's active terrain.
-  python python/preprocess_usgs_tnm_terrain.py --airport KRDU --source both --publish-source dem
+  # Stage both normalized GeoTIFFs and publish the highest precision source.
+  python python/preprocess_usgs_tnm_terrain.py --airport KRDU --source both
 """
 
 from __future__ import annotations
@@ -55,6 +55,7 @@ DEFAULT_LAZ_VERTICAL_SCALE = 0.3048
 DEFAULT_NODATA = -999999.0
 PROGRESS_BAR_WIDTH = 28
 COMMAND_HEARTBEAT_SECONDS = 10.0
+TERRAIN_SOURCE_METADATA_FILE = "terrain-source.json"
 
 # The inspected KRDU LPC files have no embedded SRS. Their XY values match
 # NAD83 / North Carolina StatePlane ftUS (EPSG:2264), while Z values are feet.
@@ -84,6 +85,7 @@ class StagedTerrainSource:
     source_kind: SourceKind
     source_dir: Path
     output_tif: Path
+    horizontal_resolution_m: float | None = None
 
 
 def parse_bbox(value: str) -> GeoBBox:
@@ -271,6 +273,104 @@ def run_command(
     print(f"[done] {label}: finished in {elapsed}", flush=True)
 
 
+def metres_per_degree_at_latitude(lat_deg: float) -> tuple[float, float]:
+    lat_rad = math.radians(lat_deg)
+    metres_per_degree_lat = (
+        111132.92
+        - 559.82 * math.cos(2 * lat_rad)
+        + 1.175 * math.cos(4 * lat_rad)
+        - 0.0023 * math.cos(6 * lat_rad)
+    )
+    metres_per_degree_lon = (
+        111412.84 * math.cos(lat_rad)
+        - 93.5 * math.cos(3 * lat_rad)
+        + 0.118 * math.cos(5 * lat_rad)
+    )
+    return metres_per_degree_lon, metres_per_degree_lat
+
+
+def horizontal_resolution_from_gdalinfo(geotiff_path: Path) -> float:
+    require_tool("gdalinfo")
+    result = subprocess.run(
+        ["gdalinfo", "-json", str(geotiff_path)],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    metadata = json.loads(result.stdout)
+    geo_transform = metadata.get("geoTransform")
+    if not isinstance(geo_transform, list) or len(geo_transform) < 6:
+        raise RuntimeError(f"Cannot read GeoTIFF transform from {geotiff_path}")
+
+    pixel_width = abs(float(geo_transform[1]))
+    pixel_height = abs(float(geo_transform[5]))
+    corners = metadata.get("cornerCoordinates") or {}
+    center = corners.get("center")
+    if pixel_width < 1 and pixel_height < 1 and isinstance(center, list) and len(center) >= 2:
+        metres_per_degree_lon, metres_per_degree_lat = metres_per_degree_at_latitude(float(center[1]))
+        return max(pixel_width * metres_per_degree_lon, pixel_height * metres_per_degree_lat)
+
+    return max(pixel_width, pixel_height)
+
+
+def write_terrain_source_metadata(
+    *,
+    source: StagedTerrainSource,
+    horizontal_resolution_m: float,
+    note: str,
+    dry_run: bool,
+) -> StagedTerrainSource:
+    metadata = {
+        "schemaVersion": 1,
+        "source": {
+            "kind": source.source_kind,
+            "label": f"USGS TNM {source.source_kind.upper()}",
+            "sourceDir": str(source.source_dir.relative_to(AEROVIZ_ROOT)),
+        },
+        "precision": {
+            "horizontalResolutionM": horizontal_resolution_m,
+            "verticalAccuracyM": None,
+            "notes": [note],
+        },
+    }
+    metadata_path = source.source_dir / TERRAIN_SOURCE_METADATA_FILE
+    if dry_run:
+        print(f"[skip] Would write {metadata_path}: {json.dumps(metadata, indent=2)}", flush=True)
+    else:
+        metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+
+    return StagedTerrainSource(
+        source_kind=source.source_kind,
+        source_dir=source.source_dir,
+        output_tif=source.output_tif,
+        horizontal_resolution_m=horizontal_resolution_m,
+    )
+
+
+def select_highest_precision_source(
+    staged: dict[SourceKind, StagedTerrainSource],
+) -> SourceKind:
+    missing_precision = [
+        source_kind
+        for source_kind, source in staged.items()
+        if source.horizontal_resolution_m is None
+    ]
+    if missing_precision:
+        missing = ", ".join(missing_precision)
+        raise RuntimeError(
+            f"Cannot choose terrain source by precision because {missing} lacks precision metadata. "
+            "Regenerate staging data so terrain-source.json is written."
+        )
+
+    return min(
+        staged,
+        key=lambda source_kind: (
+            staged[source_kind].horizontal_resolution_m or math.inf,
+            str(staged[source_kind].source_dir),
+        ),
+    )
+
+
 def stage_dem_geotiff(
     *,
     airport_code: str,
@@ -317,7 +417,14 @@ def stage_dem_geotiff(
         str(output_tif),
     ]
     run_command(command, dry_run=dry_run, label="Crop DEM GeoTIFF")
-    return StagedTerrainSource(source_kind="dem", source_dir=output_dir, output_tif=output_tif)
+    precision_input = output_tif if output_tif.exists() else source_paths[0]
+    horizontal_resolution_m = horizontal_resolution_from_gdalinfo(precision_input)
+    return write_terrain_source_metadata(
+        source=StagedTerrainSource(source_kind="dem", source_dir=output_dir, output_tif=output_tif),
+        horizontal_resolution_m=horizontal_resolution_m,
+        note="Computed from GeoTIFF pixel size after DEM normalization.",
+        dry_run=dry_run,
+    )
 
 
 def numeric_label(value: float) -> str:
@@ -509,7 +616,12 @@ def stage_laz_dsm(
         pipeline_path.write_text(pipeline_json, encoding="utf-8")
 
     run_command(["pdal", "pipeline", str(pipeline_path)], dry_run=dry_run, label="Rasterize LAZ DSM")
-    return StagedTerrainSource(source_kind="dsm", source_dir=output_dir, output_tif=output_tif)
+    return write_terrain_source_metadata(
+        source=StagedTerrainSource(source_kind="dsm", source_dir=output_dir, output_tif=output_tif),
+        horizontal_resolution_m=dsm_resolution_m,
+        note="Configured PDAL writers.gdal raster resolution.",
+        dry_run=dry_run,
+    )
 
 
 def build_heightmap_terrain(
@@ -534,7 +646,31 @@ def build_heightmap_terrain(
     )
 
 
-def source_kinds_to_stage(source: str) -> list[SourceKind]:
+def available_source_kinds(airport_code: str, usgs_root: Path) -> list[SourceKind]:
+    source_root = source_root_for_airport(usgs_root, airport_code)
+    available: list[SourceKind] = []
+    if list_source_files(source_root / "dem", (".tif", ".tiff")):
+        available.append("dem")
+    if list_source_files(source_root / "dsm" / "source_laz", (".laz", ".las")):
+        available.append("dsm")
+    return available
+
+
+def source_kinds_to_stage(
+    source: str,
+    *,
+    airport_code: str | None = None,
+    usgs_root: Path | None = None,
+) -> list[SourceKind]:
+    if source == "auto":
+        if airport_code is None or usgs_root is None:
+            raise ValueError("source='auto' requires airport_code and usgs_root")
+        available = available_source_kinds(airport_code, usgs_root)
+        if not available:
+            raise FileNotFoundError(
+                f"No DEM GeoTIFF or DSM LAZ/LAS source data found for {normalize_airport_code(airport_code)}"
+            )
+        return available
     if source == "both":
         return ["dem", "dsm"]
     if source in {"dem", "dsm"}:
@@ -558,7 +694,11 @@ def preprocess(args: argparse.Namespace) -> dict[SourceKind, StagedTerrainSource
         "Processing bbox "
         f"{bbox.west:.6f},{bbox.south:.6f},{bbox.east:.6f},{bbox.north:.6f}"
     )
-    source_kinds = source_kinds_to_stage(args.source)
+    source_kinds = source_kinds_to_stage(
+        args.source,
+        airport_code=airport_code,
+        usgs_root=usgs_root,
+    )
     total_steps = len(source_kinds) + (0 if args.stage_only else 1)
     completed_steps = 0
 
@@ -585,12 +725,21 @@ def preprocess(args: argparse.Namespace) -> dict[SourceKind, StagedTerrainSource
         completed_steps += 1
         print_stage_progress(completed_steps, total_steps, f"Finished {source_kind.upper()} staging")
 
-    publish_source = args.publish_source if args.source == "both" else args.source
+    publish_source = source_kinds[0]
+    if args.source in {"auto", "both"}:
+        publish_source = (
+            select_highest_precision_source(staged)
+            if args.publish_source == "auto"
+            else args.publish_source
+        )
     if not args.stage_only:
         print_stage_progress(
             completed_steps,
             total_steps,
-            f"Starting {publish_source.upper()} heightmap package",
+            (
+                f"Starting {publish_source.upper()} heightmap package "
+                f"({staged[publish_source].horizontal_resolution_m:.3f} m precision)"
+            ),
         )
         build_heightmap_terrain(
             airport_code=airport_code,
@@ -619,15 +768,21 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--source",
-        choices=["dem", "dsm", "both"],
-        default="dem",
-        help="Source type to stage. The published app terrain is selected by --publish-source when source=both.",
+        choices=["auto", "dem", "dsm", "both"],
+        default="auto",
+        help=(
+            "Source type to stage. The default auto stages all available source kinds "
+            "and publishes the highest precision package."
+        ),
     )
     parser.add_argument(
         "--publish-source",
-        choices=["dem", "dsm"],
-        default="dem",
-        help="When --source both is used, choose which staged source becomes the active app terrain.",
+        choices=["auto", "dem", "dsm"],
+        default="auto",
+        help=(
+            "When --source both is used, choose which staged source becomes the active app terrain. "
+            "The default auto publishes the smallest horizontalResolutionM."
+        ),
     )
     parser.add_argument(
         "--bbox",

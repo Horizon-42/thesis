@@ -2,7 +2,7 @@
 
 This note documents how to convert the USGS TNM elevation data under
 `data/usgs_tnm_elevation` into the local terrain format that AeroViz-4D already
-loads with `useDsmTerrainLayer`.
+loads with `useAirportLocalTerrainLayer`.
 
 ## Inspected KRDU Inputs
 
@@ -19,9 +19,10 @@ The KRDU folder currently contains two terrain source shapes:
   - XY coordinates match NAD83 / North Carolina StatePlane ftUS (`EPSG:2264`)
   - Z values are feet and must be scaled by `0.3048`
 
-The DEM is the better default for terrain and obstacle-clearance analysis
-because it represents bare earth. The LAZ-derived DSM is useful when the desired
-surface includes buildings, vegetation, and other above-ground returns.
+The active local terrain package is selected by source precision, not by the
+DEM/DSM label. The DEM remains useful for bare-earth clearance analysis; the
+LAZ-derived DSM is useful when the desired surface includes buildings,
+vegetation, and other above-ground returns.
 
 ## Output Contract
 
@@ -43,7 +44,13 @@ already resolves:
 
 ## Commands
 
-Bare-earth DEM, recommended default:
+Auto-stage available sources and publish the highest precision package:
+
+```bash
+PYTHONPATH=python python python/preprocess_usgs_tnm_terrain.py --airport KRDU
+```
+
+Bare-earth DEM only:
 
 ```bash
 PYTHONPATH=python python python/preprocess_usgs_tnm_terrain.py --airport KRDU --source dem
@@ -63,7 +70,8 @@ PYTHONPATH=python python python/preprocess_usgs_tnm_terrain.py --airport KRDU --
 
 When `--source both` is used without `--stage-only`, `--publish-source dem` or
 `--publish-source dsm` chooses which staged source becomes the active local
-terrain package.
+terrain package. The default `--publish-source auto` chooses the smallest
+`precision.horizontalResolutionM`.
 
 ## Processing Path
 
@@ -74,7 +82,9 @@ DEM path:
    `product_bbox` values in `download_manifest.csv`.
 3. Write a compact staged GeoTIFF under
    `public/data/airports/KRDU/dsm/source/usgs-tnm-dem/`.
-4. Run `scripts/build_dsm_heightmap_terrain.mjs` against that staged source.
+4. Write `terrain-source.json` beside the staged GeoTIFF with
+   `precision.horizontalResolutionM`.
+5. Run `scripts/build_dsm_heightmap_terrain.mjs` against that staged source.
 
 DSM path:
 
@@ -83,7 +93,9 @@ DSM path:
 3. Reproject XY to NAD83 UTM zone 17N (`EPSG:26917`).
 4. Scale Z from feet to metres.
 5. Rasterize with `writers.gdal` using `output_type=max` at 2 m resolution.
-6. Run `scripts/build_dsm_heightmap_terrain.mjs` against the staged DSM GeoTIFF.
+6. Write `terrain-source.json` beside the staged GeoTIFF with
+   `precision.horizontalResolutionM`.
+7. Run `scripts/build_dsm_heightmap_terrain.mjs` against the staged DSM GeoTIFF.
 
 The final heightmap tiles use the same
 `float32-little-endian-heightmap` contract documented in

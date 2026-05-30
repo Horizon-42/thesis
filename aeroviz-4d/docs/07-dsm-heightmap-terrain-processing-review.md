@@ -161,7 +161,7 @@ quality level over another.
 ### 7. Runtime Loading In Cesium
 
 The browser loads the output through
-[`src/terrain/dsmHeightmapTerrain.ts`](../src/terrain/dsmHeightmapTerrain.ts).
+[`src/terrain/airportLocalTerrain.ts`](../src/terrain/airportLocalTerrain.ts).
 
 It creates:
 
