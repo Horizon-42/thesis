@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>WGS 84 大地坐标与 ECEF 坐标教学文档</title>
+  <title>WGS 84 大地、ECEF 与本地切平面坐标教学文档</title>
   <style>
     :root {
       color-scheme: light;
@@ -437,9 +437,9 @@
   <div class="page">
     <header>
       <span class="eyebrow">Teaching note from the Geodetic and ECEF chapter</span>
-      <h1>WGS 84 大地坐标与 ECEF 坐标：从概念、公式到 3D 示意图</h1>
+      <h1>WGS 84 大地坐标、ECEF 与本地 tangent 空间：从概念、公式到 3D 示意图</h1>
       <p class="lead">
-        本页根据原始 Markdown 文档中 “Geodetic and ECEF coordinates” 一章扩展而成。目标不是只给公式，而是让读者知道每个缩写是什么意思、每个变量从哪里来、每个坐标变换在三维空间里做了什么。
+        本页根据原始 Markdown 文档中 “Geodetic and ECEF coordinates” 一章扩展而成，并补充 WGS 84 到本地 tangent 空间的转换。目标不是只给公式，而是让读者知道每个缩写是什么意思、每个变量从哪里来、每个坐标变换在三维空间里做了什么。
       </p>
       <p class="source-note">
         适合读者：已经见过经纬度，但还不熟悉椭球、地心直角坐标、隐函数求导和反三角函数的人。页面中的 “3D” 指 three-dimensional，也就是三维空间示意。所有坐标图由 <code>generate_geodetic_ecef_diagrams.py</code> 按 WGS 84 参数和正交投影生成，不再手工凭感觉摆放矢量点线。
@@ -460,7 +460,7 @@
         </div>
         <div class="tile">
           <strong>理解反算</strong>
-          <span>给定目标点的地心直角坐标 X、Y、Z，先求大地经度 λ 和水平距离 p，再求非线性的大地纬度 φ 与椭球高 h。</span>
+          <span>给定目标点的 X、Y、Z，可恢复 φ、λ、h；给定本地原点，还可投影成 ENU。</span>
         </div>
       </div>
     </header>
@@ -1262,8 +1262,225 @@ H=h-N
         </figure>
       </section>
 
+      <section id="local-tangent">
+        <h2>8. 坐标变换三：WGS 84 到本地 tangent 空间 ENU</h2>
+        <p class="section-intro">
+          “本地 tangent 空间”更准确地说是 local tangent space 或 local tangent plane，即在一个指定 WGS 84 原点处贴上一组本地直角轴。只说“转成本地坐标”还不够，必须同时给出本地原点和轴约定。本节默认使用 ENU：East、North、Up，也就是东、北、天。
+        </p>
+
+        <figure class="diagram" aria-labelledby="fig-local-tangent-title">
+          <img src="assets/geodetic_ecef/07-local-tangent-enu.svg" alt="WGS 84 大地坐标转换到本地切平面 ENU 坐标的生成式三维示意图">
+          <figcaption id="fig-local-tangent-title">
+            本地图由脚本生成。O_L 是本地原点，P 是目标点；二者先各自转成 ECEF，再形成差向量 Δr。east、north、up 三个单位轴由原点的 φ₀、λ₀ 精确计算，E、N、U 分量就是 Δr 在这三个方向上的投影。图中局部偏移被放大，只用于看清分解方向。
+          </figcaption>
+        </figure>
+
+        <div class="grid-2">
+          <article class="card">
+            <h3>输入、输出和必须指定的原点</h3>
+            <p>
+              本卡片里，O_L 是 local origin，即本地坐标原点；P 是要转换的目标点。φ₀、λ₀、h₀ 是原点的 WGS 84 大地纬度、大地经度、椭球高；φ、λ、h 是目标点的 WGS 84 大地坐标。输出 E、N、U 分别表示目标点相对 O_L 向东、向北、向上的局部坐标，单位是米。
+            </p>
+            <div class="formula">
+              <span class="formula-line">\[
+O_L=(\phi_0,\lambda_0,h_0),
+\qquad
+P=(\phi,\lambda,h)
+\]</span>
+              <span class="formula-line">\[
+P_{\mathrm{local}}=
+\begin{bmatrix}
+E\\N\\U
+\end{bmatrix}
+\]</span>
+            </div>
+            <div class="callout">
+              <strong>原点不是可选项。</strong>
+              同一个 WGS 84 点，换一个 O_L 就会得到完全不同的 E、N、U。没有原点、轴方向和单位，“本地 tangent 坐标”就是未定义的。
+            </div>
+          </article>
+
+          <article class="card">
+            <h3>第一步：两个 WGS 84 点都转成 ECEF</h3>
+            <p>
+              先用第 5 节的正算公式。这里 ν₀ 是原点纬度 φ₀ 对应的卯酉圈曲率半径，ν 是目标点纬度 φ 对应的卯酉圈曲率半径。r₀ 是原点的 ECEF 向量，r 是目标点的 ECEF 向量。
+            </p>
+            <div class="formula">
+              <span class="formula-line">\[
+\nu_0=\frac{a}{\sqrt{1-e^2\sin^2\phi_0}},
+\qquad
+\nu=\frac{a}{\sqrt{1-e^2\sin^2\phi}}
+\]</span>
+              <span class="formula-line">\[
+\mathbf r_0=
+\begin{bmatrix}
+(\nu_0+h_0)\cos\phi_0\cos\lambda_0\\
+(\nu_0+h_0)\cos\phi_0\sin\lambda_0\\
+\left((1-e^2)\nu_0+h_0\right)\sin\phi_0
+\end{bmatrix}
+\]</span>
+              <span class="formula-line">\[
+\mathbf r=
+\begin{bmatrix}
+(\nu+h)\cos\phi\cos\lambda\\
+(\nu+h)\cos\phi\sin\lambda\\
+\left((1-e^2)\nu+h\right)\sin\phi
+\end{bmatrix}
+\]</span>
+            </div>
+          </article>
+        </div>
+
+        <div class="grid-2">
+          <article class="card">
+            <h3>第二步：得到 ECEF 差向量</h3>
+            <p>
+              Δr 读作 delta r，意思是“位置向量的差”。它仍然在 ECEF 坐标系里，不是本地坐标。ΔX、ΔY、ΔZ 分别表示目标点 P 相对本地原点 O_L 在三条地心固定轴上的差。
+            </p>
+            <div class="formula">
+              <span class="formula-line">\[
+\Delta\mathbf r
+=\mathbf r-\mathbf r_0
+=
+\begin{bmatrix}
+\Delta X\\
+\Delta Y\\
+\Delta Z
+\end{bmatrix}
+=
+\begin{bmatrix}
+X-X_0\\Y-Y_0\\Z-Z_0
+\end{bmatrix}
+\]</span>
+            </div>
+          </article>
+
+          <article class="card">
+            <h3>第三步：在原点处构造 ENU 三个单位轴</h3>
+            <p>
+              东向单位轴 ê₀ 沿纬线切向；上向单位轴 û₀ 是原点处的椭球法线；北向单位轴 n̂_N,0 可由 û₀ × ê₀ 得到。下标 0 表示这些轴都只由本地原点 O_L 的 φ₀、λ₀ 决定。
+            </p>
+            <div class="formula">
+              <span class="formula-line">\[
+\hat{\mathbf e}_0=
+\begin{bmatrix}
+-\sin\lambda_0\\
+\cos\lambda_0\\
+0
+\end{bmatrix}
+\]</span>
+              <span class="formula-line">\[
+\hat{\mathbf u}_0=
+\begin{bmatrix}
+\cos\phi_0\cos\lambda_0\\
+\cos\phi_0\sin\lambda_0\\
+\sin\phi_0
+\end{bmatrix}
+\]</span>
+              <span class="formula-line">\[
+\hat{\mathbf n}_{N,0}
+=\hat{\mathbf u}_0\times\hat{\mathbf e}_0
+=
+\begin{bmatrix}
+-\sin\phi_0\cos\lambda_0\\
+-\sin\phi_0\sin\lambda_0\\
+\cos\phi_0
+\end{bmatrix}
+\]</span>
+            </div>
+          </article>
+        </div>
+
+        <div class="card" style="margin-top:18px">
+          <h3>第四步：投影到本地 ENU 轴</h3>
+          <p>
+            投影就是做点积。E 是 Δr 在 east 方向上的长度，N 是 Δr 在 north 方向上的长度，U 是 Δr 在 up 方向上的长度。把三个单位轴作为矩阵的三行，就得到标准的 ECEF 差向量到 ENU 的旋转矩阵。
+          </p>
+          <div class="formula">
+            <span class="formula-line">\[
+E=\hat{\mathbf e}_0\cdot\Delta\mathbf r,
+\qquad
+N=\hat{\mathbf n}_{N,0}\cdot\Delta\mathbf r,
+\qquad
+U=\hat{\mathbf u}_0\cdot\Delta\mathbf r
+\]</span>
+            <span class="formula-line">\[
+\begin{bmatrix}
+E\\N\\U
+\end{bmatrix}
+=
+\begin{bmatrix}
+-\sin\lambda_0 &amp; \cos\lambda_0 &amp; 0\\
+-\sin\phi_0\cos\lambda_0 &amp; -\sin\phi_0\sin\lambda_0 &amp; \cos\phi_0\\
+\cos\phi_0\cos\lambda_0 &amp; \cos\phi_0\sin\lambda_0 &amp; \sin\phi_0
+\end{bmatrix}
+\begin{bmatrix}
+X-X_0\\Y-Y_0\\Z-Z_0
+\end{bmatrix}
+\]</span>
+          </div>
+          <div class="note">
+            这一步本身不是近似：它是把 ECEF 中的差向量精确旋转到本地正交基。近似来自后续解释：如果你把附近弯曲的地球表面当成一张无限平面，那么离原点越远，切平面与真实椭球表面的偏离越大。
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <article class="card">
+            <h3>反向：ENU 回到 ECEF，再回到 WGS 84</h3>
+            <p>
+              如果已知本地坐标 E、N、U，要回到 ECEF，只需把三个本地分量沿三个单位轴加回去。因为 ê₀、n̂_N,0、û₀ 互相垂直且长度为 1，这个反向过程就是矩阵转置。
+            </p>
+            <div class="formula">
+              <span class="formula-line">\[
+\Delta\mathbf r
+=E\hat{\mathbf e}_0+N\hat{\mathbf n}_{N,0}+U\hat{\mathbf u}_0
+\]</span>
+              <span class="formula-line">\[
+\mathbf r=\mathbf r_0+\Delta\mathbf r
+\]</span>
+            </div>
+            <p>
+              得到 r=(X,Y,Z) 后，再用第 6 节的 ECEF 到大地坐标反算，就能回到 WGS 84 的 φ、λ、h。
+            </p>
+          </article>
+
+          <article class="card">
+            <h3>ENU 和 NED 只是轴约定不同</h3>
+            <p>
+              NED 是 North-East-Down，即北、东、地。它常见于航空和飞控系统。如果一个系统使用 NED，不要直接把 ENU 的三个数塞进去；需要交换水平轴，并把 Up 改成 Down。
+            </p>
+            <div class="formula">
+              <span class="formula-line">\[
+\begin{bmatrix}
+N_{\mathrm{NED}}\\E_{\mathrm{NED}}\\D_{\mathrm{NED}}
+\end{bmatrix}
+=
+\begin{bmatrix}
+N_{\mathrm{ENU}}\\E_{\mathrm{ENU}}\\-U_{\mathrm{ENU}}
+\end{bmatrix}
+\]</span>
+            </div>
+          </article>
+        </div>
+
+        <div class="card" style="margin-top:18px">
+          <h3>什么时候本地切平面会不够用</h3>
+          <p>
+            如果只做“坐标旋转”，ENU 变换是精确的；如果把 ENU 的 E-N 平面当成真实地表，就引入了曲率近似。令 L 表示离原点的水平距离，R 表示约 6.37×10⁶ m 的地球半径量级，球面切平面的竖向偏离可粗略估计为：
+          </p>
+          <div class="formula">
+            <span class="formula-line">\[
+\epsilon_U\approx\frac{L^2}{2R}
+\]</span>
+          </div>
+          <p>
+            这个估计告诉我们：本地 tangent 空间适合机场、工地、机器人、短基线导航这类真正局部的问题；如果范围扩大到城市或区域尺度，UTM 或其他地图投影通常更合适。
+          </p>
+        </div>
+      </section>
+
       <section id="practice">
-        <h2>8. 实操检查清单和继续学习入口</h2>
+        <h2>9. 实操检查清单和继续学习入口</h2>
         <div class="grid-2">
           <article class="card">
             <h3>写代码前逐项检查</h3>
@@ -1276,6 +1493,8 @@ H=h-N
               <li>所有参数都来自同一个参考系统，例如 WGS 84。</li>
               <li>ECEF 坐标单位是米，X、Y、Z 轴方向没有被交换。</li>
               <li>反算靠近两极时，小心 p 很小、经度不稳定的问题。</li>
+              <li>如果使用本地 tangent 空间，必须记录本地原点 O_L=(φ₀,λ₀,h₀)。</li>
+              <li>确认本地轴约定是 ENU 还是 NED，不要把 Up 和 Down 混用。</li>
             </ul>
           </article>
           <article class="card">
@@ -1288,12 +1507,14 @@ H=h-N
               <li>Prime vertical radius of curvature</li>
               <li>Bowring ECEF to geodetic conversion</li>
               <li>Ellipsoidal height, orthometric height, geoid undulation</li>
+              <li>Local tangent plane, ENU, NED, topocentric coordinates</li>
+              <li>ECEF to ENU rotation matrix</li>
             </ul>
           </article>
         </div>
         <div class="callout good">
           <strong>一句话总结：</strong>
-          大地坐标 (φ, λ, h) 是“站在椭球表面按法线、经线、纬线描述位置”；ECEF (X, Y, Z) 是“从地球中心用三条固定直角轴描述位置”。正算是把前者分解到三条轴，反算是从三条轴找回法线脚点。
+          大地坐标 (φ, λ, h) 是“站在椭球表面按法线、经线、纬线描述位置”；ECEF (X, Y, Z) 是“从地球中心用三条固定直角轴描述位置”；本地 ENU 是“选一个原点 O_L，把 ECEF 差向量投影到东、北、天三个本地轴”。
         </div>
       </section>
     </main>
