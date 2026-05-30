@@ -386,9 +386,9 @@ def stage_dem_geotiff(
     require_tool("gdalwarp")
 
     source_dir = source_root_for_airport(usgs_root, airport_code) / "dem"
-    source_paths = list_source_files(source_dir, (".tif", ".tiff"))
+    source_paths = list_source_files(source_dir, (".tif", ".tiff", ".img"))
     if not source_paths:
-        raise FileNotFoundError(f"No DEM GeoTIFF files found in {source_dir}")
+        raise FileNotFoundError(f"No DEM raster files found in {source_dir}")
 
     output_dir = staging_dir_for_source(airport_code, "dem")
     output_tif = output_dir / "usgs_tnm_dem_wgs84_elevation_m.tif"
@@ -655,7 +655,7 @@ def build_heightmap_terrain(
 def available_source_kinds(airport_code: str, usgs_root: Path) -> list[SourceKind]:
     source_root = source_root_for_airport(usgs_root, airport_code)
     available: list[SourceKind] = []
-    if list_source_files(source_root / "dem", (".tif", ".tiff")):
+    if list_source_files(source_root / "dem", (".tif", ".tiff", ".img")):
         available.append("dem")
     if list_source_files(source_root / "dsm" / "source_laz", (".laz", ".las")):
         available.append("dsm")

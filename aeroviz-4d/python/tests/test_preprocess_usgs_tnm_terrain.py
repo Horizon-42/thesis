@@ -180,6 +180,16 @@ def test_source_kinds_to_stage_auto_uses_available_source_shapes(tmp_path):
     ]
 
 
+def test_source_kinds_to_stage_auto_accepts_tnm_dem_img(tmp_path):
+    airport_root = tmp_path / "KRDU"
+    (airport_root / "dem").mkdir(parents=True)
+    (airport_root / "dem" / "dem.img").write_text("placeholder", encoding="utf-8")
+
+    assert source_kinds_to_stage("auto", airport_code="KRDU", usgs_root=tmp_path) == [
+        "dem",
+    ]
+
+
 def test_select_highest_precision_source_uses_resolution_not_source_kind(tmp_path):
     selected = select_highest_precision_source(
         {

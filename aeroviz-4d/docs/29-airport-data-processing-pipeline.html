@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AeroViz-4D Airport Data Processing Pipeline</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({
+        startOnLoad: true,
+        theme: "base",
+        securityLevel: "loose",
+        themeVariables: {
+          fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+          primaryColor: "#eff6ff",
+          primaryBorderColor: "#2563eb",
+          primaryTextColor: "#0f172a",
+          lineColor: "#475569",
+          secondaryColor: "#ecfdf5",
+          tertiaryColor: "#fff7ed",
+        },
+      });
+    </script>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #172033;
+        --muted: #64748b;
+        --line: #d7dde7;
+        --blue: #2563eb;
+        --green: #059669;
+        --amber: #d97706;
+        --rose: #e11d48;
+        --cyan: #0891b2;
+      }
+
+      body {
+        margin: 0;
+        background:
+          linear-gradient(180deg, #f8fafc 0%, #eef4f8 46%, #f7f7fb 100%);
+        color: var(--ink);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+      }
+
+      .shell {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 40px 24px 56px;
+      }
+
+      .eyebrow {
+        color: var(--cyan);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.11em;
+        text-transform: uppercase;
+      }
+
+      .panel {
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.88);
+        border-radius: 8px;
+        box-shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
+      }
+
+      .soft {
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.68);
+        border-radius: 8px;
+      }
+
+      .mono {
+        font-family:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", monospace;
+      }
+
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        padding: 4px 10px;
+        font-size: 12px;
+        font-weight: 700;
+        border: 1px solid transparent;
+      }
+
+      .tag-blue { color: #1d4ed8; background: #dbeafe; border-color: #bfdbfe; }
+      .tag-green { color: #047857; background: #d1fae5; border-color: #a7f3d0; }
+      .tag-amber { color: #b45309; background: #fef3c7; border-color: #fde68a; }
+      .tag-rose { color: #be123c; background: #ffe4e6; border-color: #fecdd3; }
+      .tag-slate { color: #475569; background: #f1f5f9; border-color: #cbd5e1; }
+
+      .matrix th {
+        color: #334155;
+        background: #f8fafc;
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .matrix th,
+      .matrix td {
+        border-bottom: 1px solid #e2e8f0;
+        padding: 14px 16px;
+        vertical-align: top;
+      }
+
+      .matrix tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .rail {
+        border-left: 3px solid #dbeafe;
+      }
+
+      .rail-green { border-left-color: #a7f3d0; }
+      .rail-amber { border-left-color: #fde68a; }
+      .rail-rose { border-left-color: #fecdd3; }
+      .rail-cyan { border-left-color: #a5f3fc; }
+    </style>
+  </head>
+  <body>
+    <main class="shell space-y-8">
+      <header class="grid gap-8 lg:grid-cols-[1.15fr,0.85fr]">
+        <section class="space-y-5">
+          <p class="eyebrow">AeroViz-4D airport preprocessing</p>
+          <div class="space-y-3">
+            <h1 class="max-w-4xl text-4xl font-semibold tracking-tight text-slate-950 md:text-5xl">
+              当前机场数据处理管线
+            </h1>
+            <p class="max-w-3xl text-base leading-7 text-slate-600">
+              这份文档描述 AeroViz-4D 现在的机场静态数据管线：机场与跑道、RNAV/RNP 程序、航图索引、障碍物、航路点，以及机场局部地形。
+              航迹 CZML 属于后续轨迹数据管线，当前总脚本默认跳过，只保留可选生成入口。
+            </p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="tag tag-blue">Browser contract: public/data/airports/&lt;ICAO&gt;</span>
+            <span class="tag tag-green">Terrain contract: local-terrain/heightmap</span>
+            <span class="tag tag-amber">Charts and CIFP are source data</span>
+            <span class="tag tag-rose">Trajectories optional</span>
+          </div>
+        </section>
+
+        <aside class="panel p-5">
+          <p class="eyebrow">One command</p>
+          <h2 class="mt-2 text-xl font-semibold text-slate-950">总入口脚本</h2>
+          <pre class="mt-4 overflow-x-auto rounded-lg bg-slate-950 p-4 text-sm leading-6 text-slate-100"><code>./preprocess_aeroviz_airport.sh KRDU</code></pre>
+          <dl class="mt-5 grid gap-3 text-sm">
+            <div class="soft p-3">
+              <dt class="font-semibold text-slate-900">默认范围</dt>
+              <dd class="mt-1 text-slate-600">机场静态资产 + 局部地形。轨迹数据默认不生成。</dd>
+            </div>
+            <div class="soft p-3">
+              <dt class="font-semibold text-slate-900">主要输出</dt>
+              <dd class="mt-1 mono text-xs text-slate-600">aeroviz-4d/public/data/airports/&lt;ICAO&gt;/</dd>
+            </div>
+          </dl>
+        </aside>
+      </header>
+
+      <section class="panel p-6">
+        <div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p class="eyebrow">Pipeline view</p>
+            <h2 class="mt-1 text-2xl font-semibold text-slate-950">数据源到前端的主路径</h2>
+          </div>
+          <p class="max-w-xl text-sm leading-6 text-slate-600">
+            左侧是外部或本地缓存数据源，中间是 Python/Node 预处理脚本，右侧是浏览器直接读取的稳定文件契约。
+          </p>
+        </div>
+        <pre class="mermaid">
+flowchart LR
+  subgraph S["Source data"]
+    OA["OurAirports CSV<br/>airports.csv, runways.csv"]
+    CIFP["FAA CIFP<br/>data/CIFP/CIFP_260319"]
+    FAACharts["FAA chart PDFs<br/>data/RNAV_CHARTS/&lt;ICAO&gt;"]
+    DOF["FAA DOF<br/>data/DOF/DOF_260412"]
+    OpenNav["OpenNav waypoint page"]
+    TNM["USGS TNM elevation<br/>data/usgs_tnm_elevation/&lt;ICAO&gt;"]
+  end
+
+  subgraph P["Preprocessing scripts"]
+    AP["preprocess_airports.py"]
+    DC["download_faa_rnav_charts.py"]
+    PP["preprocess_procedures.py"]
+    PO["preprocess_obstacles.py"]
+    PW["preprocess_waypoints.py"]
+    DT["download_tnm_elevation.py"]
+    PT["preprocess_usgs_tnm_terrain.py"]
+    BT["build_local_terrain_heightmap.mjs"]
+  end
+
+  subgraph O["Browser-facing outputs"]
+    IDX["airports/index.json"]
+    AIR["&lt;ICAO&gt;/airport.json"]
+    RWY["&lt;ICAO&gt;/runway.geojson"]
+    PROC["&lt;ICAO&gt;/procedures.geojson"]
+    PDET["&lt;ICAO&gt;/procedure-details/*.json"]
+    CHART["&lt;ICAO&gt;/charts/index.json + PDFs"]
+    OBS["&lt;ICAO&gt;/obstacles.geojson"]
+    WPT["&lt;ICAO&gt;/waypoints.geojson"]
+    TERR["&lt;ICAO&gt;/local-terrain/heightmap/**"]
+  end
+
+  OA --> AP --> IDX
+  AP --> AIR
+  AP --> RWY
+  CIFP --> PP --> PROC
+  PP --> PDET
+  FAACharts --> PP --> CHART
+  DC --> FAACharts
+  DOF --> PO --> OBS
+  OpenNav --> PW --> WPT
+  TNM --> PT --> BT --> TERR
+  DT --> TNM
+        </pre>
+      </section>
+
+      <section class="grid gap-6 lg:grid-cols-[0.95fr,1.05fr]">
+        <article class="panel p-6">
+          <p class="eyebrow">Run order</p>
+          <h2 class="mt-1 text-2xl font-semibold text-slate-950">总脚本执行顺序</h2>
+          <ol class="mt-5 space-y-3 text-sm leading-6">
+            <li class="rail pl-4"><strong>机场基础资产</strong>：用 OurAirports 生成 `airport.json`、`runway.geojson`，并更新 `airports/index.json`。</li>
+            <li class="rail pl-4"><strong>航图源缓存</strong>：若 `data/RNAV_CHARTS/&lt;ICAO&gt;` 没有 PDF，则下载 FAA RNAV/RNP 航图。</li>
+            <li class="rail pl-4"><strong>程序资产</strong>：从 CIFP 生成 `procedures.geojson`、`procedure-details/`、`charts/index.json`。</li>
+            <li class="rail rail-amber pl-4"><strong>障碍物</strong>：按机场所在国家/州选择 DOF 文件，过滤指定半径内障碍物。</li>
+            <li class="rail rail-amber pl-4"><strong>航路点</strong>：从 OpenNav 页面抓取并筛选机场周边点位。</li>
+            <li class="rail rail-rose pl-4"><strong>航迹</strong>：默认跳过；设置 `GENERATE_TRAJECTORIES=1` 才会尝试用本地 CZML 输入生成 `trajectories.czml`。</li>
+            <li class="rail rail-green pl-4"><strong>地形源</strong>：检查 `data/usgs_tnm_elevation/&lt;ICAO&gt;` 或已有 `local-terrain/sources`；两者都缺失时调用 TNM 下载器。</li>
+            <li class="rail rail-green pl-4"><strong>局部地形</strong>：TNM 源走 `preprocess_usgs_tnm_terrain.py`；已有 GeoTIFF 源直接走通用 Node heightmap 构建器。</li>
+            <li class="rail rail-cyan pl-4"><strong>契约校验</strong>：校验必需 JSON 与地形 metadata，确保前端可直接加载。</li>
+          </ol>
+        </article>
+
+        <article class="panel p-6">
+          <p class="eyebrow">Output contract</p>
+          <h2 class="mt-1 text-2xl font-semibold text-slate-950">当前浏览器文件契约</h2>
+          <div class="mt-5 overflow-hidden rounded-lg border border-slate-200 bg-white">
+            <table class="matrix w-full text-left text-sm">
+              <thead>
+                <tr>
+                  <th>Path</th>
+                  <th>Purpose</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="mono text-xs">public/data/airports/index.json</td>
+                  <td>机场目录、默认机场、机场切换列表。</td>
+                  <td><span class="tag tag-blue">required</span></td>
+                </tr>
+                <tr>
+                  <td class="mono text-xs">&lt;ICAO&gt;/airport.json</td>
+                  <td>机场中心点与初始相机高度。</td>
+                  <td><span class="tag tag-blue">required</span></td>
+                </tr>
+                <tr>
+                  <td class="mono text-xs">&lt;ICAO&gt;/runway.geojson</td>
+                  <td>跑道面与着陆区多边形。</td>
+                  <td><span class="tag tag-blue">required</span></td>
+                </tr>
+                <tr>
+                  <td class="mono text-xs">&lt;ICAO&gt;/procedures.geojson</td>
+                  <td>程序路线和 fix 的兼容 GeoJSON 投影。</td>
+                  <td><span class="tag tag-blue">required</span></td>
+                </tr>
+                <tr>
+                  <td class="mono text-xs">&lt;ICAO&gt;/procedure-details/</td>
+                  <td>程序详情页和 3D 程序层使用的 canonical JSON。</td>
+                  <td><span class="tag tag-blue">required</span></td>
+                </tr>
+                <tr>
+                  <td class="mono text-xs">&lt;ICAO&gt;/charts/</td>
+                  <td>程序详情页使用的航图索引与本地 PDF 资产。</td>
+                  <td><span class="tag tag-green">expected</span></td>
+                </tr>
+                <tr>
+                  <td class="mono text-xs">&lt;ICAO&gt;/obstacles.geojson</td>
+                  <td>FAA DOF 障碍物点，用于柱体和标签渲染。</td>
+                  <td><span class="tag tag-green">expected</span></td>
+                </tr>
+                <tr>
+                  <td class="mono text-xs">&lt;ICAO&gt;/waypoints.geojson</td>
+                  <td>机场周边航路点显示。</td>
+                  <td><span class="tag tag-green">expected</span></td>
+                </tr>
+                <tr>
+                  <td class="mono text-xs">&lt;ICAO&gt;/local-terrain/heightmap/</td>
+                  <td>机场局部高程 tiles、metadata 与可视检查图。</td>
+                  <td><span class="tag tag-green">expected</span></td>
+                </tr>
+                <tr>
+                  <td class="mono text-xs">&lt;ICAO&gt;/trajectories.czml</td>
+                  <td>4D 航迹播放数据。当前总脚本默认跳过。</td>
+                  <td><span class="tag tag-rose">optional</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section class="panel p-6">
+        <p class="eyebrow">Script and file matrix</p>
+        <h2 class="mt-1 text-2xl font-semibold text-slate-950">脚本、输入、输出对应关系</h2>
+        <div class="mt-5 overflow-hidden rounded-lg border border-slate-200 bg-white">
+          <table class="matrix w-full text-left text-sm">
+            <thead>
+              <tr>
+                <th>Step</th>
+                <th>Script</th>
+                <th>Inputs</th>
+                <th>Outputs</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Airport + runway</td>
+                <td class="mono text-xs">aeroviz-4d/python/preprocess_airports.py</td>
+                <td class="mono text-xs">public/data/common/airports.csv<br />public/data/common/runways.csv</td>
+                <td class="mono text-xs">airport.json<br />runway.geojson<br />airports/index.json</td>
+              </tr>
+              <tr>
+                <td>Chart source cache</td>
+                <td class="mono text-xs">aeroviz-4d/python/download_faa_rnav_charts.py</td>
+                <td class="mono text-xs">ICAO airport code</td>
+                <td class="mono text-xs">data/RNAV_CHARTS/&lt;ICAO&gt;/*.pdf</td>
+              </tr>
+              <tr>
+                <td>Procedures</td>
+                <td class="mono text-xs">aeroviz-4d/python/preprocess_procedures.py</td>
+                <td class="mono text-xs">data/CIFP/CIFP_260319<br />data/RNAV_CHARTS</td>
+                <td class="mono text-xs">procedures.geojson<br />procedure-details/index.json<br />procedure-details/*.json<br />charts/index.json</td>
+              </tr>
+              <tr>
+                <td>Obstacles</td>
+                <td class="mono text-xs">aeroviz-4d/python/preprocess_obstacles.py</td>
+                <td class="mono text-xs">data/DOF/DOF_260412/*.Dat<br />airport.json</td>
+                <td class="mono text-xs">obstacles.geojson</td>
+              </tr>
+              <tr>
+                <td>Waypoints</td>
+                <td class="mono text-xs">aeroviz-4d/python/preprocess_waypoints.py</td>
+                <td class="mono text-xs">OpenNav waypoint page<br />airports.csv</td>
+                <td class="mono text-xs">waypoints.geojson</td>
+              </tr>
+              <tr>
+                <td>Terrain source download</td>
+                <td class="mono text-xs">tnm_elevation_downloader/download_tnm_elevation.py</td>
+                <td class="mono text-xs">ICAO airport code<br />airports.csv</td>
+                <td class="mono text-xs">data/usgs_tnm_elevation/&lt;ICAO&gt;/dem<br />data/usgs_tnm_elevation/&lt;ICAO&gt;/dsm/source_laz<br />download_manifest.csv</td>
+              </tr>
+              <tr>
+                <td>Terrain staging + publish</td>
+                <td class="mono text-xs">aeroviz-4d/python/preprocess_usgs_tnm_terrain.py<br />aeroviz-4d/scripts/build_local_terrain_heightmap.mjs</td>
+                <td class="mono text-xs">data/usgs_tnm_elevation/&lt;ICAO&gt;<br />or local-terrain/sources/*.tif</td>
+                <td class="mono text-xs">local-terrain/sources/usgs-tnm-*<br />local-terrain/heightmap/metadata.json<br />local-terrain/heightmap/tiles/**/*.f32</td>
+              </tr>
+              <tr>
+                <td>Trajectory replay</td>
+                <td class="mono text-xs">aeroviz-4d/python/generate_czml.py</td>
+                <td class="mono text-xs">trajectory_data_process/outputs/&lt;icao&gt;/*_czml_input_*.json</td>
+                <td class="mono text-xs">trajectories.czml</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="grid gap-6 lg:grid-cols-2">
+        <article class="panel p-6">
+          <p class="eyebrow">Frontend consumers</p>
+          <h2 class="mt-1 text-2xl font-semibold text-slate-950">前端读取关系</h2>
+          <div class="mt-5 grid gap-3 text-sm">
+            <div class="soft p-4"><span class="mono font-semibold">src/data/airportData.ts</span><br /><span class="text-slate-600">统一生成机场 URL，包括 `local-terrain/heightmap`。</span></div>
+            <div class="soft p-4"><span class="mono font-semibold">useCesiumViewer</span><br /><span class="text-slate-600">读取机场目录与 `airport.json`，初始化相机。</span></div>
+            <div class="soft p-4"><span class="mono font-semibold">useRunwayLayer</span><br /><span class="text-slate-600">读取 `runway.geojson`。</span></div>
+            <div class="soft p-4"><span class="mono font-semibold">useProcedureSegmentLayer</span><br /><span class="text-slate-600">读取程序详情包并渲染 3D 程序、保护面与标注。</span></div>
+            <div class="soft p-4"><span class="mono font-semibold">useObstacleLayer / useWaypointLayer</span><br /><span class="text-slate-600">读取障碍物与航路点 GeoJSON。</span></div>
+            <div class="soft p-4"><span class="mono font-semibold">useAirportLocalTerrainLayer / useTerrainHillshadeLayer</span><br /><span class="text-slate-600">读取 `local-terrain/heightmap/metadata.json`、tiles 和 hillshade。</span></div>
+          </div>
+        </article>
+
+        <article class="panel p-6">
+          <p class="eyebrow">Current alignment notes</p>
+          <h2 class="mt-1 text-2xl font-semibold text-slate-950">和旧管线的关键差异</h2>
+          <div class="mt-5 space-y-4 text-sm leading-6 text-slate-700">
+            <div class="rail rail-green pl-4">
+              <strong>地形运行时路径已经从 `dsm/heightmap-terrain` 切换到 `local-terrain/heightmap`。</strong>
+              `dsm` 只应作为历史或源数据命名出现，不再作为前端运行时包名。
+            </div>
+            <div class="rail rail-green pl-4">
+              <strong>当前地形预处理入口是 `preprocess_usgs_tnm_terrain.py`。</strong>
+              它会把 TNM DEM/DSM 源规整到 `local-terrain/sources/`，再调用 Node heightmap 构建器发布浏览器 tiles。
+            </div>
+            <div class="rail rail-cyan pl-4">
+              <strong>已有 `local-terrain/sources` GeoTIFF 仍然是一等输入。</strong>
+              对 CYVR 这类已有本地源的机场，总脚本可以跳过 TNM 下载并直接调用通用 Node heightmap 构建器。
+            </div>
+            <div class="rail rail-rose pl-4">
+              <strong>航迹数据后续会独立更新。</strong>
+              总脚本保留 `GENERATE_TRAJECTORIES=1` 兼容入口，但默认不再把轨迹作为机场静态数据管线的一部分。
+            </div>
+            <div class="rail rail-amber pl-4">
+              <strong>OpenNav 和 TNM/FAA 下载步骤依赖网络。</strong>
+              若本地已有源数据，脚本优先复用缓存，减少重复下载。
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="panel p-6">
+        <p class="eyebrow">Operator quick reference</p>
+        <h2 class="mt-1 text-2xl font-semibold text-slate-950">常用运行方式</h2>
+        <div class="mt-5 grid gap-4 lg:grid-cols-3">
+          <div class="soft p-4">
+            <h3 class="font-semibold text-slate-950">标准机场静态管线</h3>
+            <pre class="mt-3 overflow-x-auto rounded-lg bg-slate-950 p-3 text-xs leading-6 text-slate-100"><code>./preprocess_aeroviz_airport.sh KRDU</code></pre>
+          </div>
+          <div class="soft p-4">
+            <h3 class="font-semibold text-slate-950">包含轨迹 CZML</h3>
+            <pre class="mt-3 overflow-x-auto rounded-lg bg-slate-950 p-3 text-xs leading-6 text-slate-100"><code>GENERATE_TRAJECTORIES=1 ./preprocess_aeroviz_airport.sh KRDU</code></pre>
+          </div>
+          <div class="soft p-4">
+            <h3 class="font-semibold text-slate-950">只用已有地形源</h3>
+            <pre class="mt-3 overflow-x-auto rounded-lg bg-slate-950 p-3 text-xs leading-6 text-slate-100"><code>DOWNLOAD_TERRAIN=0 ./preprocess_aeroviz_airport.sh KRDU</code></pre>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

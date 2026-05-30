@@ -7,6 +7,7 @@ set -eu
 #   ./preprocess_aeroviz_airport.sh KRDU
 #
 # Current browser-facing data contract:
+#   aeroviz-4d/public/data/airports/index.json
 #   aeroviz-4d/public/data/airports/<ICAO>/airport.json
 #   aeroviz-4d/public/data/airports/<ICAO>/runway.geojson
 #   aeroviz-4d/public/data/airports/<ICAO>/procedures.geojson
@@ -16,30 +17,29 @@ set -eu
 #   aeroviz-4d/public/data/airports/<ICAO>/charts/<files referenced by index.json>
 #   aeroviz-4d/public/data/airports/<ICAO>/obstacles.geojson
 #   aeroviz-4d/public/data/airports/<ICAO>/waypoints.geojson
+#   aeroviz-4d/public/data/airports/<ICAO>/local-terrain/heightmap/**
 #   aeroviz-4d/public/data/airports/<ICAO>/trajectories.czml
-#   aeroviz-4d/public/data/airports/<ICAO>/dsm/heightmap-terrain/**
-#     Frontend path is still named dsm for compatibility; this script builds it
-#     from OpenTopography DEM by default.
+#     Optional. Trajectory data is being reworked, so this script skips it by
+#     default unless GENERATE_TRAJECTORIES=1 is set.
 #
 # Legacy/intermediate data intentionally ignored when deciding whether the
 # current dataset is ready:
 #   aeroviz-4d/public/data/airports/<ICAO>/charts/*.PDF duplicates
 #   aeroviz-4d/public/data/airports/<ICAO>/trajectories.czml.backup
+#   aeroviz-4d/public/data/airports/<ICAO>/dsm/heightmap-terrain/**
 #   aeroviz-4d/public/data/airports/<ICAO>/dsm/3dtiles/**
 #   aeroviz-4d/public/data/airports/<ICAO>/dsm/source/**
 #   data/DSM/**
 #
-# DEM source policy:
-#   - Current DEM source lives under data/opentopography/<ICAO>/dem/*.tif.
-#   - If DEM GeoTIFFs already exist there, skip the OpenTopography downloader.
-#   - If missing, call opentopography_downloader/download_opentopography_dem.py.
-#   - Heightmap terrain is generated from TERRAIN_INPUT_DIR, which defaults to
-#     that OpenTopography DEM directory.
-#
-# DSM source policy:
-#   - DSM is not downloaded or derived by default.
-#   - Set DOWNLOAD_DSM=1 only when you explicitly need cached USGS DSM GeoTIFFs
-#     under data/usgs_lidar/<ICAO>/dsm. Existing DSM GeoTIFFs are reused.
+# Terrain source policy:
+#   - Current local-terrain source lives under data/usgs_tnm_elevation/<ICAO>/.
+#   - Existing GeoTIFF sources under public/data/airports/<ICAO>/local-terrain/sources/
+#     are also valid and are built with the generic Node heightmap builder.
+#   - If either source shape already exists, skip the TNM downloader.
+#   - If both are missing, call tnm_elevation_downloader/download_tnm_elevation.py.
+#   - preprocess_usgs_tnm_terrain.py stages sources under
+#     public/data/airports/<ICAO>/local-terrain/sources/ and publishes
+#     public/data/airports/<ICAO>/local-terrain/heightmap/.
 
 if [ "$#" -ne 1 ]; then
   echo "Usage: $0 <ICAO-or-airport-code>" >&2
@@ -52,7 +52,7 @@ REQUESTED_AIRPORT=$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')
 
 # Keep operational settings here instead of exposing a wide CLI surface.
 PYTHON_BIN=${PYTHON_BIN:-python}
-NPM_BIN=${NPM_BIN:-npm}
+NODE_BIN=${NODE_BIN:-node}
 
 AEROVIZ_ROOT=${AEROVIZ_ROOT:-"$SCRIPT_DIR/aeroviz-4d"}
 PUBLIC_DATA_ROOT=${PUBLIC_DATA_ROOT:-"$AEROVIZ_ROOT/public/data"}
@@ -64,15 +64,21 @@ RUNWAYS_CSV=${RUNWAYS_CSV:-"$COMMON_DATA_ROOT/runways.csv"}
 CIFP_ROOT=${CIFP_ROOT:-"$SCRIPT_DIR/data/CIFP/CIFP_260319"}
 DOF_ROOT=${DOF_ROOT:-"$SCRIPT_DIR/data/DOF/DOF_260412"}
 RNAV_CHARTS_ROOT=${RNAV_CHARTS_ROOT:-"$SCRIPT_DIR/data/RNAV_CHARTS"}
-OPENTOPOGRAPHY_ROOT=${OPENTOPOGRAPHY_ROOT:-"$SCRIPT_DIR/data/opentopography"}
-USGS_LIDAR_ROOT=${USGS_LIDAR_ROOT:-"$SCRIPT_DIR/data/usgs_lidar"}
+TNM_ELEVATION_ROOT=${TNM_ELEVATION_ROOT:-"$SCRIPT_DIR/data/usgs_tnm_elevation"}
 TRAJECTORY_OUTPUT_ROOT=${TRAJECTORY_OUTPUT_ROOT:-${OPENSKY_OUTPUT_ROOT:-"$SCRIPT_DIR/trajectory_data_process/outputs"}}
 
 OBSTACLE_RADIUS_KM=${OBSTACLE_RADIUS_KM:-20}
 WAYPOINT_RADIUS_KM=${WAYPOINT_RADIUS_KM:-120}
 WAYPOINT_MAX_COUNT=${WAYPOINT_MAX_COUNT:-60}
-GENERATE_TRAJECTORIES=${GENERATE_TRAJECTORIES:-1}
-DOWNLOAD_DSM=${DOWNLOAD_DSM:-0}
+GENERATE_TRAJECTORIES=${GENERATE_TRAJECTORIES:-0}
+DOWNLOAD_TERRAIN=${DOWNLOAD_TERRAIN:-1}
+TNM_PRODUCT=${TNM_PRODUCT:-dem}
+TNM_RADIUS_KM=${TNM_RADIUS_KM:-5}
+TNM_DEM_DATASET=${TNM_DEM_DATASET:-dem_1m}
+TNM_DSM_SOURCE=${TNM_DSM_SOURCE:-dsm_lpc}
+TERRAIN_SOURCE=${TERRAIN_SOURCE:-auto}
+TERRAIN_PUBLISH_SOURCE=${TERRAIN_PUBLISH_SOURCE:-auto}
+TERRAIN_STAGE_ONLY=${TERRAIN_STAGE_ONLY:-0}
 
 log() {
   printf '\n==> %s\n' "$*"
@@ -107,9 +113,24 @@ has_pdf_files() {
   find "$1" -maxdepth 1 -type f \( -iname '*.pdf' -o -iname '*.PDF' \) -print -quit | grep -q .
 }
 
-has_geotiff_files() {
+has_raster_files() {
   [ -d "$1" ] || return 1
-  find "$1" -maxdepth 1 -type f \( -iname '*.tif' -o -iname '*.tiff' \) -print -quit | grep -q .
+  find "$1" -maxdepth 1 -type f \( -iname '*.tif' -o -iname '*.tiff' -o -iname '*.img' \) -print -quit | grep -q .
+}
+
+has_lidar_point_cloud_files() {
+  [ -d "$1" ] || return 1
+  find "$1" -maxdepth 1 -type f \( -iname '*.laz' -o -iname '*.las' \) -print -quit | grep -q .
+}
+
+has_tnm_terrain_source() {
+  airport_source_dir=$1
+  has_raster_files "$airport_source_dir/dem" || has_lidar_point_cloud_files "$airport_source_dir/dsm/source_laz"
+}
+
+has_public_local_terrain_source() {
+  [ -d "$1" ] || return 1
+  find "$1" -type f \( -iname '*.tif' -o -iname '*.tiff' \) -print -quit | grep -q .
 }
 
 latest_czml_input() {
@@ -269,33 +290,27 @@ require_dir "$CIFP_ROOT"
 require_file "$CIFP_ROOT/IN_CIFP.txt"
 require_dir "$DOF_ROOT"
 require_dir "$AEROVIZ_ROOT"
-require_file "$SCRIPT_DIR/opentopography_downloader/download_opentopography_dem.py"
-if [ "$DOWNLOAD_DSM" = "1" ]; then
-  require_file "$SCRIPT_DIR/usgs_lidar_downloader/download_usgs_lidar.py"
-fi
+require_file "$SCRIPT_DIR/tnm_elevation_downloader/download_tnm_elevation.py"
+require_file "$AEROVIZ_ROOT/python/preprocess_usgs_tnm_terrain.py"
+require_file "$AEROVIZ_ROOT/scripts/build_local_terrain_heightmap.mjs"
 
 eval "$(resolve_airport_metadata)"
 
 PUBLIC_AIRPORT_DIR="$PUBLIC_AIRPORTS_ROOT/$ICAO"
-PUBLIC_DSM_HEIGHTMAP_DIR="$PUBLIC_AIRPORT_DIR/dsm/heightmap-terrain"
-OPENTOPOGRAPHY_DEM_DIR="$OPENTOPOGRAPHY_ROOT/$ICAO/dem"
-USGS_DSM_DIR="$USGS_LIDAR_ROOT/$ICAO/dsm"
-TERRAIN_INPUT_DIR=${TERRAIN_INPUT_DIR:-"$OPENTOPOGRAPHY_DEM_DIR"}
-case "$TERRAIN_INPUT_DIR" in
-  /*) ;;
-  *) TERRAIN_INPUT_DIR="$SCRIPT_DIR/$TERRAIN_INPUT_DIR" ;;
-esac
+PUBLIC_LOCAL_TERRAIN_SOURCES_DIR="$PUBLIC_AIRPORT_DIR/local-terrain/sources"
+PUBLIC_LOCAL_TERRAIN_HEIGHTMAP_DIR="$PUBLIC_AIRPORT_DIR/local-terrain/heightmap"
+TNM_AIRPORT_SOURCE_DIR="$TNM_ELEVATION_ROOT/$ICAO"
 
 log "Preprocessing $ICAO - $AIRPORT_NAME"
 mkdir -p "$PUBLIC_AIRPORT_DIR"
 
-log "1/10 Build airport.json, runway.geojson, and airports/index.json"
+log "1/9 Build airport.json, runway.geojson, and airports/index.json"
 run "$PYTHON_BIN" "$AEROVIZ_ROOT/python/preprocess_airports.py" \
   --airport "$ICAO" \
   --airports-csv "$AIRPORTS_CSV" \
   --runways-csv "$RUNWAYS_CSV"
 
-log "2/10 Ensure RNAV chart source PDFs exist"
+log "2/9 Ensure RNAV chart source PDFs exist"
 mkdir -p "$RNAV_CHARTS_ROOT"
 if has_pdf_files "$RNAV_CHARTS_ROOT/$ICAO"; then
   echo "RNAV source charts already exist: $RNAV_CHARTS_ROOT/$ICAO"
@@ -305,7 +320,7 @@ else
     --output-root "$RNAV_CHARTS_ROOT"
 fi
 
-log "3/10 Generate procedures.geojson, procedure-details, and charts/index.json"
+log "3/9 Generate procedures.geojson, procedure-details, and charts/index.json"
 run "$PYTHON_BIN" "$AEROVIZ_ROOT/python/preprocess_procedures.py" \
   --cifp-root "$CIFP_ROOT" \
   --airport "$ICAO" \
@@ -314,7 +329,7 @@ run "$PYTHON_BIN" "$AEROVIZ_ROOT/python/preprocess_procedures.py" \
   --charts-root "$RNAV_CHARTS_ROOT" \
   --output "$PUBLIC_AIRPORT_DIR/procedures.geojson"
 
-log "4/10 Generate obstacles.geojson"
+log "4/9 Generate obstacles.geojson"
 if DOF_INPUT=$(state_dof_file "$ISO_COUNTRY" "$ISO_REGION"); then
   if [ -f "$DOF_INPUT" ]; then
     run "$PYTHON_BIN" "$AEROVIZ_ROOT/python/preprocess_obstacles.py" \
@@ -330,7 +345,7 @@ else
   warn "no DOF mapping for country/region $ISO_COUNTRY/$ISO_REGION; skipping obstacles.geojson"
 fi
 
-log "5/10 Generate waypoints.geojson"
+log "5/9 Generate waypoints.geojson"
 WAYPOINT_SOURCE_URL=${WAYPOINT_SOURCE_URL:-"https://opennav.com/waypoint/$ISO_COUNTRY"}
 run "$PYTHON_BIN" "$AEROVIZ_ROOT/python/preprocess_waypoints.py" \
   --airport "$ICAO" \
@@ -340,7 +355,7 @@ run "$PYTHON_BIN" "$AEROVIZ_ROOT/python/preprocess_waypoints.py" \
   --max-waypoints "$WAYPOINT_MAX_COUNT" \
   --output "$PUBLIC_AIRPORT_DIR/waypoints.geojson"
 
-log "6/10 Generate trajectories.czml if local CZML input exists"
+log "6/9 Optional trajectories.czml generation"
 if [ "$GENERATE_TRAJECTORIES" = "1" ]; then
   if CZML_INPUT=$(latest_czml_input "$ICAO"); then
     run "$PYTHON_BIN" "$AEROVIZ_ROOT/python/generate_czml.py" \
@@ -354,43 +369,56 @@ else
   warn "GENERATE_TRAJECTORIES=0; skipping trajectories.czml"
 fi
 
-log "7/10 Ensure OpenTopography DEM GeoTIFF source exists"
-if has_geotiff_files "$OPENTOPOGRAPHY_DEM_DIR"; then
-  echo "OpenTopography DEM GeoTIFFs already exist: $OPENTOPOGRAPHY_DEM_DIR"
+log "7/9 Ensure terrain source exists"
+if has_tnm_terrain_source "$TNM_AIRPORT_SOURCE_DIR"; then
+  echo "USGS TNM terrain source already exists: $TNM_AIRPORT_SOURCE_DIR"
+elif has_public_local_terrain_source "$PUBLIC_LOCAL_TERRAIN_SOURCES_DIR"; then
+  echo "Public local-terrain source already exists: $PUBLIC_LOCAL_TERRAIN_SOURCES_DIR"
 else
-  run "$PYTHON_BIN" "$SCRIPT_DIR/opentopography_downloader/download_opentopography_dem.py" \
-    "$ICAO" \
-    --out "$OPENTOPOGRAPHY_ROOT"
-fi
-
-has_geotiff_files "$OPENTOPOGRAPHY_DEM_DIR" || die "no DEM GeoTIFFs found after OpenTopography step: $OPENTOPOGRAPHY_DEM_DIR"
-
-log "8/10 Optional USGS DSM GeoTIFF source"
-if [ "$DOWNLOAD_DSM" = "1" ]; then
-  if has_geotiff_files "$USGS_DSM_DIR"; then
-    echo "USGS derived DSM GeoTIFFs already exist: $USGS_DSM_DIR"
-  else
-    run "$PYTHON_BIN" "$SCRIPT_DIR/usgs_lidar_downloader/download_usgs_lidar.py" \
+  if [ "$DOWNLOAD_TERRAIN" = "1" ]; then
+    run "$PYTHON_BIN" "$SCRIPT_DIR/tnm_elevation_downloader/download_tnm_elevation.py" \
       "$ICAO" \
-      --out "$USGS_LIDAR_ROOT"
+      --airport-csv "$AIRPORTS_CSV" \
+      --out "$TNM_ELEVATION_ROOT" \
+      --product "$TNM_PRODUCT" \
+      --radius-km "$TNM_RADIUS_KM" \
+      --dem-dataset "$TNM_DEM_DATASET" \
+      --dsm-source "$TNM_DSM_SOURCE"
+  else
+    die "DOWNLOAD_TERRAIN=0 and no TNM source found under $TNM_AIRPORT_SOURCE_DIR"
   fi
-
-  has_geotiff_files "$USGS_DSM_DIR" || die "no DSM GeoTIFFs found after USGS step: $USGS_DSM_DIR"
-else
-  echo "DOWNLOAD_DSM=0; skipping USGS DSM download/derivation"
 fi
 
-log "9/10 Build frontend heightmap terrain from DEM"
-has_geotiff_files "$TERRAIN_INPUT_DIR" || die "no terrain input GeoTIFFs found: $TERRAIN_INPUT_DIR"
-echo "Terrain input GeoTIFFs: $TERRAIN_INPUT_DIR"
-(
-  cd "$AEROVIZ_ROOT"
-  run "$NPM_BIN" run build:dsm-heightmap-terrain -- \
-    --airport "$ICAO" \
-    --input-dir "$TERRAIN_INPUT_DIR"
-)
+has_tnm_terrain_source "$TNM_AIRPORT_SOURCE_DIR" || has_public_local_terrain_source "$PUBLIC_LOCAL_TERRAIN_SOURCES_DIR" || die "no terrain source found after download step: $TNM_AIRPORT_SOURCE_DIR or $PUBLIC_LOCAL_TERRAIN_SOURCES_DIR"
 
-log "10/10 Validate current output contract"
+log "8/9 Build airport-local terrain package"
+if has_tnm_terrain_source "$TNM_AIRPORT_SOURCE_DIR"; then
+  echo "Terrain source root: $TNM_AIRPORT_SOURCE_DIR"
+  if [ "$TERRAIN_STAGE_ONLY" = "1" ]; then
+    run "$PYTHON_BIN" "$AEROVIZ_ROOT/python/preprocess_usgs_tnm_terrain.py" \
+      --airport "$ICAO" \
+      --usgs-root "$TNM_ELEVATION_ROOT" \
+      --source "$TERRAIN_SOURCE" \
+      --publish-source "$TERRAIN_PUBLISH_SOURCE" \
+      --stage-only
+  else
+    run "$PYTHON_BIN" "$AEROVIZ_ROOT/python/preprocess_usgs_tnm_terrain.py" \
+      --airport "$ICAO" \
+      --usgs-root "$TNM_ELEVATION_ROOT" \
+      --source "$TERRAIN_SOURCE" \
+      --publish-source "$TERRAIN_PUBLISH_SOURCE"
+  fi
+else
+  echo "Terrain source root: $PUBLIC_LOCAL_TERRAIN_SOURCES_DIR"
+  if [ "$TERRAIN_STAGE_ONLY" = "1" ]; then
+    warn "TERRAIN_STAGE_ONLY=1; public local-terrain sources are already staged, so heightmap build is skipped"
+  else
+    run "$NODE_BIN" "$AEROVIZ_ROOT/scripts/build_local_terrain_heightmap.mjs" \
+      --airport "$ICAO"
+  fi
+fi
+
+log "9/9 Validate current output contract"
 require_file "$PUBLIC_AIRPORT_DIR/airport.json"
 require_file "$PUBLIC_AIRPORT_DIR/runway.geojson"
 require_file "$PUBLIC_AIRPORT_DIR/procedures.geojson"
@@ -398,8 +426,12 @@ require_file "$PUBLIC_AIRPORT_DIR/procedure-details/index.json"
 require_file "$PUBLIC_AIRPORT_DIR/charts/index.json"
 require_file "$PUBLIC_AIRPORT_DIR/obstacles.geojson"
 require_file "$PUBLIC_AIRPORT_DIR/waypoints.geojson"
-require_file "$PUBLIC_DSM_HEIGHTMAP_DIR/metadata.json"
-has_geotiff_files "$OPENTOPOGRAPHY_DEM_DIR" || die "missing OpenTopography DEM GeoTIFFs: $OPENTOPOGRAPHY_DEM_DIR"
+if [ "$TERRAIN_STAGE_ONLY" = "1" ]; then
+  warn "TERRAIN_STAGE_ONLY=1; skipping local-terrain/heightmap validation"
+else
+  require_file "$PUBLIC_LOCAL_TERRAIN_HEIGHTMAP_DIR/metadata.json"
+fi
+has_tnm_terrain_source "$TNM_AIRPORT_SOURCE_DIR" || has_public_local_terrain_source "$PUBLIC_LOCAL_TERRAIN_SOURCES_DIR" || die "missing terrain source: $TNM_AIRPORT_SOURCE_DIR or $PUBLIC_LOCAL_TERRAIN_SOURCES_DIR"
 
 validate_json_file "$PUBLIC_AIRPORT_DIR/airport.json"
 validate_json_file "$PUBLIC_AIRPORT_DIR/runway.geojson"
@@ -408,7 +440,9 @@ validate_json_file "$PUBLIC_AIRPORT_DIR/procedure-details/index.json"
 validate_json_file "$PUBLIC_AIRPORT_DIR/charts/index.json"
 validate_json_file "$PUBLIC_AIRPORT_DIR/obstacles.geojson"
 validate_json_file "$PUBLIC_AIRPORT_DIR/waypoints.geojson"
-validate_json_file "$PUBLIC_DSM_HEIGHTMAP_DIR/metadata.json"
+if [ "$TERRAIN_STAGE_ONLY" != "1" ]; then
+  validate_json_file "$PUBLIC_LOCAL_TERRAIN_HEIGHTMAP_DIR/metadata.json"
+fi
 
 if [ "$GENERATE_TRAJECTORIES" = "1" ] && [ -f "$PUBLIC_AIRPORT_DIR/trajectories.czml" ]; then
   validate_json_file "$PUBLIC_AIRPORT_DIR/trajectories.czml"
