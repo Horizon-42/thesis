@@ -48,20 +48,20 @@ def airport_chart_path(airport_code: str, file_name: str) -> Path:
     return airport_charts_dir(airport_code) / file_name
 
 
-def airport_dsm_dir(airport_code: str) -> Path:
-    return airport_data_dir(airport_code) / "dsm"
+def airport_local_terrain_dir(airport_code: str) -> Path:
+    return airport_data_dir(airport_code) / "local-terrain"
 
 
-def airport_dsm_source_dir(airport_code: str) -> Path:
-    return airport_dsm_dir(airport_code) / "source"
+def airport_local_terrain_sources_dir(airport_code: str) -> Path:
+    return airport_local_terrain_dir(airport_code) / "sources"
 
 
-def airport_dsm_3dtiles_dir(airport_code: str) -> Path:
-    return airport_dsm_dir(airport_code) / "3dtiles"
+def airport_local_terrain_3dtiles_dir(airport_code: str) -> Path:
+    return airport_local_terrain_dir(airport_code) / "3dtiles"
 
 
-def airport_dsm_heightmap_dir(airport_code: str) -> Path:
-    return airport_dsm_dir(airport_code) / "heightmap-terrain"
+def airport_local_terrain_heightmap_dir(airport_code: str) -> Path:
+    return airport_local_terrain_dir(airport_code) / "heightmap"
 
 
 def resolve_common_csv(path: Path) -> Path:

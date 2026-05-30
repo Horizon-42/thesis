@@ -6,8 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "build:local-terrain": "node scripts/build_dsm_heightmap_terrain.mjs",
-    "build:dsm-heightmap-terrain": "node scripts/build_dsm_heightmap_terrain.mjs",
+    "build:local-terrain": "node scripts/build_local_terrain_heightmap.mjs",
     "preview": "vite preview",
     "test": "vitest",
     "test:ui": "vitest --ui",

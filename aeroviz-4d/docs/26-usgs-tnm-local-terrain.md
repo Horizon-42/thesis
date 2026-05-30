@@ -24,13 +24,34 @@ DEM/DSM label. The DEM remains useful for bare-earth clearance analysis; the
 LAZ-derived DSM is useful when the desired surface includes buildings,
 vegetation, and other above-ground returns.
 
+## Public Data Naming
+
+The public package path is intentionally source-neutral:
+
+```text
+public/data/airports/<ICAO>/local-terrain/
+```
+
+Staged source directories sit below `sources/`, so a DEM source is no longer
+stored inside a directory named `dsm`:
+
+```text
+public/data/airports/<ICAO>/local-terrain/sources/usgs-tnm-dem/
+public/data/airports/<ICAO>/local-terrain/sources/usgs-tnm-dsm/
+```
+
+The DEM output file is named `usgs_tnm_dem_wgs84_elevation_m.tif`; the `_m`
+there means elevation values are in metres, not metre-level horizontal
+resolution. DSM raster outputs include the grid spacing explicitly, for example
+`usgs_tnm_lpc_dsm_grid_2m_elevation_m.tif`.
+
 ## Output Contract
 
 Both source kinds are normalized to GeoTIFF staging data, then converted to the
 existing browser terrain package:
 
 ```text
-public/data/airports/<ICAO>/dsm/heightmap-terrain/
+public/data/airports/<ICAO>/local-terrain/heightmap/
   metadata.json
   tiles/<level>/<x>/<y>.f32
 ```
@@ -39,7 +60,7 @@ The frontend does not need changes for this package. The local terrain layer
 already resolves:
 
 ```text
-/data/airports/<ICAO>/dsm/heightmap-terrain/metadata.json
+/data/airports/<ICAO>/local-terrain/heightmap/metadata.json
 ```
 
 ## Commands
@@ -81,10 +102,10 @@ DEM path:
 2. Crop it to the airport footprint. For KRDU, the module uses the union of
    `product_bbox` values in `download_manifest.csv`.
 3. Write a compact staged GeoTIFF under
-   `public/data/airports/KRDU/dsm/source/usgs-tnm-dem/`.
+   `public/data/airports/KRDU/local-terrain/sources/usgs-tnm-dem/`.
 4. Write `terrain-source.json` beside the staged GeoTIFF with
    `precision.horizontalResolutionM`.
-5. Run `scripts/build_dsm_heightmap_terrain.mjs` against that staged source.
+5. Run `scripts/build_local_terrain_heightmap.mjs` against that staged source.
 
 DSM path:
 
@@ -95,7 +116,7 @@ DSM path:
 5. Rasterize with `writers.gdal` using `output_type=max` at 2 m resolution.
 6. Write `terrain-source.json` beside the staged GeoTIFF with
    `precision.horizontalResolutionM`.
-7. Run `scripts/build_dsm_heightmap_terrain.mjs` against the staged DSM GeoTIFF.
+7. Run `scripts/build_local_terrain_heightmap.mjs` against the staged DSM GeoTIFF.
 
 The final heightmap tiles use the same
 `float32-little-endian-heightmap` contract documented in

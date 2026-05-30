@@ -5,11 +5,11 @@ Convert USGS TNM elevation downloads into AeroViz local terrain packages.
 
 The frontend already consumes airport-local terrain as:
 
-  public/data/airports/<ICAO>/dsm/heightmap-terrain/metadata.json
-  public/data/airports/<ICAO>/dsm/heightmap-terrain/tiles/<level>/<x>/<y>.f32
+  public/data/airports/<ICAO>/local-terrain/heightmap/metadata.json
+  public/data/airports/<ICAO>/local-terrain/heightmap/tiles/<level>/<x>/<y>.f32
 
 This module normalizes the two USGS source shapes into GeoTIFF staging data,
-then reuses scripts/build_dsm_heightmap_terrain.mjs to write that browser-ready
+then reuses scripts/build_local_terrain_heightmap.mjs to write that browser-ready
 heightmap package.
 
 Supported source kinds:
@@ -42,7 +42,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from data_layout import AEROVIZ_ROOT, airport_data_path, airport_dsm_dir, normalize_airport_code
+from data_layout import (
+    AEROVIZ_ROOT,
+    airport_data_path,
+    airport_local_terrain_sources_dir,
+    normalize_airport_code,
+)
 
 
 SourceKind = Literal["dem", "dsm"]
@@ -195,7 +200,7 @@ def source_root_for_airport(usgs_root: Path, airport_code: str) -> Path:
 
 
 def staging_dir_for_source(airport_code: str, source_kind: SourceKind) -> Path:
-    return airport_dsm_dir(airport_code) / "source" / f"usgs-tnm-{source_kind}"
+    return airport_local_terrain_sources_dir(airport_code) / f"usgs-tnm-{source_kind}"
 
 
 def list_source_files(input_dir: Path, suffixes: tuple[str, ...]) -> list[Path]:
@@ -386,7 +391,7 @@ def stage_dem_geotiff(
         raise FileNotFoundError(f"No DEM GeoTIFF files found in {source_dir}")
 
     output_dir = staging_dir_for_source(airport_code, "dem")
-    output_tif = output_dir / "usgs_tnm_dem_m.tif"
+    output_tif = output_dir / "usgs_tnm_dem_wgs84_elevation_m.tif"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     command = [
@@ -596,8 +601,9 @@ def stage_laz_dsm(
     target_bounds = transform_bbox_to_srs(bbox, resolved_target_srs)
 
     output_dir = staging_dir_for_source(airport_code, "dsm")
-    output_tif = output_dir / f"usgs_tnm_lpc_dsm_{numeric_label(dsm_resolution_m)}m.tif"
-    pipeline_path = output_dir / "usgs_tnm_lpc_dsm_pipeline.json"
+    grid_label = numeric_label(dsm_resolution_m)
+    output_tif = output_dir / f"usgs_tnm_lpc_dsm_grid_{grid_label}m_elevation_m.tif"
+    pipeline_path = output_dir / f"usgs_tnm_lpc_dsm_grid_{grid_label}m_pipeline.json"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     pipeline = build_laz_to_dsm_pipeline(
@@ -631,7 +637,7 @@ def build_heightmap_terrain(
     dry_run: bool,
 ) -> None:
     require_tool("node")
-    script_path = AEROVIZ_ROOT / "scripts" / "build_dsm_heightmap_terrain.mjs"
+    script_path = AEROVIZ_ROOT / "scripts" / "build_local_terrain_heightmap.mjs"
     run_command(
         [
             "node",

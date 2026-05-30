@@ -5,12 +5,28 @@ analysis. It is the implementation of the "local airport terrain" approach:
 use Cesium World Terrain as broad context, but use airport-scoped local
 heightmap terrain where the project has DSM/DEM data.
 
+## Naming Contract
+
+`local-terrain` means the airport-scoped package that the frontend can load.
+It is deliberately neutral: the active package may have been generated from a
+bare-earth DEM, a surface DSM, or another future elevation source.
+
+Source-specific names live only under `local-terrain/sources/`:
+
+```text
+public/data/airports/<ICAO>/local-terrain/sources/usgs-tnm-dem/
+public/data/airports/<ICAO>/local-terrain/sources/usgs-tnm-dsm/
+```
+
+The source folder name describes the source type. It is not the runtime package
+name and it is not used as a priority signal.
+
 ## Data Contract
 
 Each airport can provide its own terrain package under:
 
 ```text
-public/data/airports/<ICAO>/dsm/heightmap-terrain/
+public/data/airports/<ICAO>/local-terrain/heightmap/
 ```
 
 Required files:
@@ -38,7 +54,7 @@ The application does not special-case CYVR, KSJC, or any other airport. The
 active airport code determines the metadata URL:
 
 ```text
-/data/airports/<ICAO>/dsm/heightmap-terrain/metadata.json
+/data/airports/<ICAO>/local-terrain/heightmap/metadata.json
 ```
 
 If the metadata file exists and has precision metadata, the app can use that
@@ -54,15 +70,15 @@ The generator is airport-parametric:
 ```bash
 npm run build:local-terrain -- --airport CYVR
 npm run build:local-terrain -- --airport KSJC
-npm run build:dsm-heightmap-terrain -- --airport CYVR
+npm run build:local-terrain -- --airport KRDU
 ```
 
 By convention, source discovery is handled by
-`scripts/build_dsm_heightmap_terrain.mjs`. When no `--input-dir` is passed it
+`scripts/build_local_terrain_heightmap.mjs`. When no `--input-dir` is passed it
 scores all known candidate GeoTIFF source directories by
 `precision.horizontalResolutionM` from `terrain-source.json`, falling back to the
 GeoTIFF raster transform when possible. Outputs always land in the airport's own
-`public/data/airports/<ICAO>/dsm/heightmap-terrain/` folder.
+`public/data/airports/<ICAO>/local-terrain/heightmap/` folder.
 
 ## Runtime Behavior
 
@@ -103,8 +119,8 @@ Provider cache keys are metadata URLs, not hard-coded airport names. Switching
 from CYVR to KSJC loads or reuses:
 
 ```text
-/data/airports/CYVR/dsm/heightmap-terrain/metadata.json
-/data/airports/KSJC/dsm/heightmap-terrain/metadata.json
+/data/airports/CYVR/local-terrain/heightmap/metadata.json
+/data/airports/KSJC/local-terrain/heightmap/metadata.json
 ```
 
 Switching back to an airport reuses the loaded provider and its cached tile

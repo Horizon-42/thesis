@@ -1,7 +1,7 @@
 # DSM Heightmap Terrain Processing Review
 
 This document explains the current heightmap terrain pipeline in
-[`scripts/build_dsm_heightmap_terrain.mjs`](../scripts/build_dsm_heightmap_terrain.mjs)
+[`scripts/build_local_terrain_heightmap.mjs`](../scripts/build_local_terrain_heightmap.mjs)
 and lists likely reasons the generated terrain can look noisy.
 
 This is a review note only. It does not propose a final fix yet.
@@ -40,15 +40,15 @@ The source CRS is treated as:
 The script writes into:
 
 ```text
-public/data/airports/CYVR/dsm/heightmap-terrain
+public/data/airports/CYVR/local-terrain/heightmap
 ```
 
 Important outputs:
 
 - `metadata.json`: bounds, source file list, tile ranges, stats
 - `tiles/{level}/{x}/{y}.f32`: Cesium terrain height tiles
-- `dsm_height_overlay.png`: height tint sampled through the same lon/lat pipeline as the terrain
-- `dsm_original_tif_heatmap.png`: projected mosaic heatmap sampled from the source GeoTIFF values
+- `local_terrain_height_overlay.png`: height tint sampled through the same lon/lat pipeline as the terrain
+- `local_terrain_source_heatmap.png`: projected mosaic heatmap sampled from the source GeoTIFF values
 
 The metadata key is still named `originalTifHeatmap`, but after the multi-tile
 refactor it is no longer a literal view of one raw TIFF pixel grid. It is a
@@ -313,7 +313,7 @@ later need survey-grade alignment with other terrain or aviation surfaces.
 
 ## How To Review Before Changing Processing
 
-Use the demo toggles in `/dsm-terrain-demo`:
+Use the demo toggles in `/local-terrain-demo`:
 
 1. Turn off `DSM terrain surface`.
 2. Turn on `Original TIFF heatmap`.

@@ -12,10 +12,10 @@ const AIRPORT_CODE = (cliOption("--airport") ?? "CYVR").toUpperCase();
 const rawOpenTopographyDemInputDir = path.resolve(repoRoot, `../data/opentopography/${AIRPORT_CODE}/dem`);
 const rawLidarInputDir = path.resolve(repoRoot, `../data/bc_lidar/${AIRPORT_CODE}/dsm`);
 const rawUsgsLidarInputDir = path.resolve(repoRoot, `../data/usgs_lidar/${AIRPORT_CODE}/dsm`);
-const defaultInputDir = path.resolve(repoRoot, `public/data/airports/${AIRPORT_CODE}/dsm/source`);
+const defaultInputDir = path.resolve(repoRoot, `public/data/airports/${AIRPORT_CODE}/local-terrain/sources`);
 const outputDir = path.resolve(
   repoRoot,
-  `public/data/airports/${AIRPORT_CODE}/dsm/heightmap-terrain`
+  `public/data/airports/${AIRPORT_CODE}/local-terrain/heightmap`
 );
 const tilesDir = path.join(outputDir, "tiles");
 const TERRAIN_SOURCE_METADATA_FILE = "terrain-source.json";
@@ -1006,8 +1006,8 @@ async function main() {
 
   await mkdir(outputDir, { recursive: true });
   await rm(tilesDir, { recursive: true, force: true });
-  await writeFile(path.join(outputDir, "dsm_height_overlay.png"), overlay.png);
-  await writeFile(path.join(outputDir, "dsm_original_tif_heatmap.png"), originalTifHeatmap.png);
+  await writeFile(path.join(outputDir, "local_terrain_height_overlay.png"), overlay.png);
+  await writeFile(path.join(outputDir, "local_terrain_source_heatmap.png"), originalTifHeatmap.png);
   const tileProgress = {
     written: 0,
     startedAt: Date.now(),
@@ -1071,17 +1071,17 @@ async function main() {
         tileWidth: TILE_SIZE,
         tileHeight: TILE_SIZE,
         tilingScheme: "geographic",
-        tilesBaseUrl: `/data/airports/${AIRPORT_CODE}/dsm/heightmap-terrain/tiles`,
+        tilesBaseUrl: `/data/airports/${AIRPORT_CODE}/local-terrain/heightmap/tiles`,
         source,
         precision,
         overlay: {
-          url: `/data/airports/${AIRPORT_CODE}/dsm/heightmap-terrain/dsm_height_overlay.png`,
+          url: `/data/airports/${AIRPORT_CODE}/local-terrain/heightmap/local_terrain_height_overlay.png`,
           width: overlay.width,
           height: overlay.height,
           note: "Height tint for visual inspection; the terrain provider still supplies the actual heights.",
         },
         originalTifHeatmap: {
-          url: `/data/airports/${AIRPORT_CODE}/dsm/heightmap-terrain/dsm_original_tif_heatmap.png`,
+          url: `/data/airports/${AIRPORT_CODE}/local-terrain/heightmap/local_terrain_source_heatmap.png`,
           width: originalTifHeatmap.width,
           height: originalTifHeatmap.height,
           note:

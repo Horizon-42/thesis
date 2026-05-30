@@ -178,7 +178,7 @@ flowchart TD
   CZML --> APP[useCzmlLoader]
   CIFP[ARINC/CIFP procedure data] --> PROC[preprocess_procedures.py]
   PROC --> PD[procedure detail JSON]
-  TIF[GeoTIFF DSM] --> DSM[build_dsm_heightmap_terrain]
+  TIF[GeoTIFF DSM] --> DSM[build_local_terrain_heightmap]
   DSM --> TILES[.f32 local terrain tiles]
   RUN[OurAirports runway data] --> RW[runway.geojson]
           </pre>

@@ -201,7 +201,9 @@ def test_select_highest_precision_source_uses_resolution_not_source_kind(tmp_pat
     assert selected == "dsm"
 
 
-def test_staging_dir_defaults_under_airport_dsm_source():
+def test_staging_dir_defaults_under_airport_local_terrain_sources():
     path = staging_dir_for_source("krdu", "dem")
 
-    assert path.as_posix().endswith("/public/data/airports/KRDU/dsm/source/usgs-tnm-dem")
+    assert path.as_posix().endswith(
+        "/public/data/airports/KRDU/local-terrain/sources/usgs-tnm-dem"
+    )
