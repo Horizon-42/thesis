@@ -475,6 +475,7 @@
         <li><a href="#forward">大地坐标到 ECEF</a></li>
         <li><a href="#inverse">ECEF 到大地坐标</a></li>
         <li><a href="#height">高度警告</a></li>
+        <li><a href="#local-tangent">本地切平面</a></li>
         <li><a href="#practice">检查清单</a></li>
       </ul>
     </nav>
@@ -504,6 +505,21 @@
                 <td>ECEF</td>
                 <td>Earth-Centered, Earth-Fixed，地心地固</td>
                 <td>原点在地球质心，坐标轴随地球一起旋转的三维直角坐标系。</td>
+              </tr>
+              <tr>
+                <td>ENU</td>
+                <td>East, North, Up，东、北、天</td>
+                <td>常见的本地切平面坐标轴约定。E 表示向东，N 表示向北，U 表示沿椭球法线向上。</td>
+              </tr>
+              <tr>
+                <td>NED</td>
+                <td>North, East, Down，北、东、地</td>
+                <td>航空、机器人和控制领域常见的另一种本地坐标轴约定。它和 ENU 只是轴顺序和竖直方向符号不同。</td>
+              </tr>
+              <tr>
+                <td>LTP / LTS</td>
+                <td>Local Tangent Plane / Local Tangent Space，本地切平面 / 本地切空间</td>
+                <td>以某个 WGS 84 原点为锚点，把附近点表示成局部直角坐标。tangent 是“相切”的意思，本页默认用 ENU 轴。</td>
               </tr>
               <tr>
                 <td>GNSS</td>
