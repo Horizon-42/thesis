@@ -17,6 +17,8 @@ import { useApp } from "../context/AppContext";
 const HDG_STEP   = 15;  // degrees per heading button click
 const PITCH_STEP = 10;  // degrees per pitch button click
 const SIDE_VIEW_PITCH_DEG = -8;
+const TERRAIN_EXAGGERATION_MAX = 20;
+const EXAGGERATION_COMMIT_DELAY_MS = 180;
 
 // ── Compass SVG ──────────────────────────────────────────────────────────────
 // The outer ring (labels + ticks) is fixed; only the needle rotates.
@@ -75,22 +77,45 @@ interface CamState {
 }
 
 export default function HUD() {
-  const { viewer, airport, setSelectedFlightId } = useApp();
+  const { viewer, airport, airportLocalTerrain, setSelectedFlightId } = useApp();
   const [cam, setCam] = useState<CamState | null>(null);
   const [lighting, setLighting] = useState(true);
   const [exaggeration, setExaggeration] = useState(1);
+  const [terrainTilesRemaining, setTerrainTilesRemaining] = useState(0);
   const lastUpdateRef = useRef<number>(0);
+  const isEditingExaggerationRef = useRef(false);
+  const exaggerationCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestExaggerationRef = useRef(1);
 
   // ── Live readout (throttled to ~10 Hz) ───────────────────────────────────
   useEffect(() => {
     if (!viewer) return;
-    setLighting(viewer.scene.globe.enableLighting);
-    setExaggeration(viewer.scene.verticalExaggeration);
+
+    const clearExaggerationCommitTimer = () => {
+      if (!exaggerationCommitTimerRef.current) return;
+      clearTimeout(exaggerationCommitTimerRef.current);
+      exaggerationCommitTimerRef.current = null;
+    };
+
+    const syncSceneControls = () => {
+      const nextLighting = viewer.scene.globe.enableLighting;
+      const nextExaggeration = viewer.scene.verticalExaggeration;
+      setLighting((current) => (current === nextLighting ? current : nextLighting));
+      if (!isEditingExaggerationRef.current && !exaggerationCommitTimerRef.current) {
+        latestExaggerationRef.current = nextExaggeration;
+        setExaggeration((current) => (
+          current === nextExaggeration ? current : nextExaggeration
+        ));
+      }
+    };
+
+    syncSceneControls();
 
     const read = () => {
       const now = Date.now();
       if (now - lastUpdateRef.current < 100) return;
       lastUpdateRef.current = now;
+      syncSceneControls();
 
       const c = viewer.camera;
       let pos: Cesium.Cartographic;
@@ -110,8 +135,17 @@ export default function HUD() {
     };
 
     const remove = viewer.scene.postRender.addEventListener(read);
+    const removeTerrainLoadListener =
+      viewer.scene.globe.tileLoadProgressEvent.addEventListener((remainingTiles: number) => {
+        setTerrainTilesRemaining(remainingTiles);
+      });
+
     read();
-    return () => remove();
+    return () => {
+      clearExaggerationCommitTimer();
+      removeTerrainLoadListener();
+      remove();
+    };
   }, [viewer]);
 
   // ── Scene toggles ────────────────────────────────────────────────────────
@@ -120,12 +154,41 @@ export default function HUD() {
     const next = !viewer.scene.globe.enableLighting;
     viewer.scene.globe.enableLighting = next;
     setLighting(next);
+    viewer.scene.requestRender();
   }
 
-  function changeExaggeration(value: number) {
+  function commitExaggeration(value: number) {
     if (!viewer) return;
     viewer.scene.verticalExaggeration = value;
     setExaggeration(value);
+    latestExaggerationRef.current = value;
+    isEditingExaggerationRef.current = false;
+    viewer.scene.requestRender();
+  }
+
+  function scheduleExaggerationCommit(value: number) {
+    if (!viewer) return;
+    latestExaggerationRef.current = value;
+    isEditingExaggerationRef.current = true;
+    setExaggeration(value);
+
+    if (exaggerationCommitTimerRef.current) {
+      clearTimeout(exaggerationCommitTimerRef.current);
+    }
+
+    exaggerationCommitTimerRef.current = setTimeout(() => {
+      exaggerationCommitTimerRef.current = null;
+      commitExaggeration(latestExaggerationRef.current);
+    }, EXAGGERATION_COMMIT_DELAY_MS);
+  }
+
+  function commitPendingExaggeration() {
+    if (!viewer) return;
+    if (exaggerationCommitTimerRef.current) {
+      clearTimeout(exaggerationCommitTimerRef.current);
+      exaggerationCommitTimerRef.current = null;
+    }
+    commitExaggeration(latestExaggerationRef.current);
   }
 
   // ── Camera controls ──────────────────────────────────────────────────────
@@ -254,6 +317,30 @@ export default function HUD() {
   if (!cam) return null;
 
   const hdgLabel = Math.round(cam.heading).toString().padStart(3, "0") + "°";
+  const terrainLoadLabel =
+    terrainTilesRemaining > 0 ? `Refining ${terrainTilesRemaining}` : "Ready";
+  const localTerrainLabel = (() => {
+    switch (airportLocalTerrain.status) {
+      case "active":
+        return airportLocalTerrain.totalTiles > 0 &&
+          airportLocalTerrain.loadedTiles < airportLocalTerrain.totalTiles
+          ? `Active ${airportLocalTerrain.loadedTiles}/${airportLocalTerrain.totalTiles}`
+          : "Active";
+      case "preloading":
+        return airportLocalTerrain.totalTiles > 0
+          ? `Preload ${airportLocalTerrain.loadedTiles}/${airportLocalTerrain.totalTiles}`
+          : "Preloading";
+      case "loading":
+        return "Loading";
+      case "missing":
+        return "Missing";
+      case "error":
+        return "Error";
+      case "disabled":
+      default:
+        return "Off";
+    }
+  })();
 
   return (
     <div className="hud">
@@ -341,14 +428,49 @@ export default function HUD() {
           <input
             type="range"
             min="1"
-            max="60"
+            max={TERRAIN_EXAGGERATION_MAX}
             step="0.5"
             value={exaggeration}
-            onChange={(e) => changeExaggeration(Number(e.target.value))}
+            onPointerDown={() => { isEditingExaggerationRef.current = true; }}
+            onPointerUp={commitPendingExaggeration}
+            onMouseUp={commitPendingExaggeration}
+            onTouchEnd={commitPendingExaggeration}
+            onBlur={commitPendingExaggeration}
+            onChange={(e) => scheduleExaggerationCommit(Number(e.target.value))}
             className="hud-slider"
             title="Terrain height exaggeration"
           />
           <span className="hud-slider-value">{exaggeration}x</span>
+        </div>
+        <div className="hud-terrain-status" aria-live="polite">
+          <span className="hud-toggle-label">Load</span>
+          <span
+            className={
+              terrainTilesRemaining > 0
+                ? "hud-terrain-status-value is-loading"
+                : "hud-terrain-status-value"
+            }
+          >
+            {terrainLoadLabel}
+          </span>
+        </div>
+        <div className="hud-terrain-status" aria-live="polite">
+          <span className="hud-toggle-label">Local</span>
+          <span
+            className={
+              airportLocalTerrain.status === "preloading" ||
+              airportLocalTerrain.status === "loading"
+                ? "hud-terrain-status-value is-loading"
+                : airportLocalTerrain.status === "active"
+                  ? "hud-terrain-status-value is-ready"
+                  : airportLocalTerrain.status === "error"
+                    ? "hud-terrain-status-value is-error"
+                    : "hud-terrain-status-value"
+            }
+            title={airportLocalTerrain.error ?? airportLocalTerrain.sourceLabel ?? undefined}
+          >
+            {localTerrainLabel}
+          </span>
         </div>
       </div>
 

@@ -1351,6 +1351,29 @@ body,
   min-width: 28px;
   text-align: right;
 }
+.hud-terrain-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 5px;
+}
+.hud-terrain-status-value {
+  font-family: "Courier New", monospace;
+  font-size: 11px;
+  color: #9fb2c9;
+  text-align: right;
+  min-width: 72px;
+}
+.hud-terrain-status-value.is-loading {
+  color: #ffd166;
+}
+.hud-terrain-status-value.is-ready {
+  color: #8bd48b;
+}
+.hud-terrain-status-value.is-error {
+  color: #ff8a8a;
+}
 
 /* Buttons */
 .hud-btn {

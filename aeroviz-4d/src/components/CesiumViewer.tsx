@@ -21,6 +21,7 @@
 import { useRef } from "react";
 import { useCesiumViewer } from "../hooks/useCesiumViewer";
 import { useRunwayLayer } from "../hooks/useRunwayLayer";
+import { useSatelliteImageryLayer } from "../hooks/useSatelliteImageryLayer";
 import { useTerrainLayer } from "../hooks/useTerrainLayer";
 import { useDsmTerrainLayer } from "../hooks/useDsmTerrainLayer";
 import { useObstacleLayer } from "../hooks/useObstacleLayer";
@@ -44,6 +45,7 @@ export default function CesiumViewerComponent() {
 
   // ── Activate data layers ───────────────────────────────────────────────────
   // Each hook runs its own useEffect and manages its own cleanup.
+  useSatelliteImageryLayer();
   useTerrainLayer();
   useDsmTerrainLayer({ enabled: layers.dsmTerrain });
   useRunwayLayer();

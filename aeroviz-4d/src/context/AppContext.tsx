@@ -45,6 +45,7 @@ import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 // ── Layer names ──────────────────────────────────────────────────────────────
 // Extend this union if you add new data layers.
 export type LayerKey =
+  | "satelliteImagery"
   | "terrain"
   | "dsmTerrain"
   | "runways"
@@ -56,6 +57,25 @@ export type LayerKey =
   | "procedures";
 
 export type RunwayProfileViewMode = "split" | "side-xz" | "top-xy";
+
+export type AirportLocalTerrainStatus =
+  | "disabled"
+  | "missing"
+  | "loading"
+  | "preloading"
+  | "active"
+  | "error";
+
+export interface AirportLocalTerrainState {
+  status: AirportLocalTerrainStatus;
+  airportCode: string | null;
+  sourceLabel: string | null;
+  minimumHeightM: number | null;
+  maximumHeightM: number | null;
+  loadedTiles: number;
+  totalTiles: number;
+  error: string | null;
+}
 
 // ── Context shape ────────────────────────────────────────────────────────────
 interface AppState {
@@ -84,6 +104,10 @@ interface AppState {
   /** Visibility flags for each data layer */
   layers: Record<LayerKey, boolean>;
   toggleLayer: (key: LayerKey) => void;
+
+  /** Status of the active airport-scoped local high-resolution terrain source */
+  airportLocalTerrain: AirportLocalTerrainState;
+  setAirportLocalTerrain: (state: AirportLocalTerrainState) => void;
 
   /** Per-branch visibility for v3 procedure features */
   procedureVisibility: Record<string, boolean>;
@@ -139,11 +163,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [isRunwayProfileOpen, setRunwayProfileOpen] = useState(false);
   const [runwayProfileViewMode, setRunwayProfileViewMode] =
     useState<RunwayProfileViewMode>("split");
+  const [airportLocalTerrain, setAirportLocalTerrain] = useState<AirportLocalTerrainState>({
+    status: "disabled",
+    airportCode: null,
+    sourceLabel: null,
+    minimumHeightM: null,
+    maximumHeightM: null,
+    loadedTiles: 0,
+    totalTiles: 0,
+    error: null,
+  });
 
   // All layers start visible; hooks respect these flags.
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
+    satelliteImagery: true,
     terrain: false,
-    dsmTerrain: false,
+    dsmTerrain: true,
     runways: true,
     waypoints: true,
     ocsSurfaces: false,
@@ -227,6 +262,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setSelectedProcedureAnnotation(null);
       setSelectedProfileRunwayIdent(null);
       setRunwayProfileOpen(false);
+      setAirportLocalTerrain({
+        status: "loading",
+        airportCode: normalizedCode,
+        sourceLabel: null,
+        minimumHeightM: null,
+        maximumHeightM: null,
+        loadedTiles: 0,
+        totalTiles: 0,
+        error: null,
+      });
       setAirport(null);
       setActiveAirportCodeState(normalizedCode);
     },
@@ -249,6 +294,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setTrajectoryDataSource,
         layers,
         toggleLayer,
+        airportLocalTerrain,
+        setAirportLocalTerrain,
         procedureVisibility,
         setProcedureBranchVisible,
         setProcedureBranchesVisible,

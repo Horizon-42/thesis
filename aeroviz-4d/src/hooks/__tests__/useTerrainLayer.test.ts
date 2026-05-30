@@ -2,10 +2,10 @@
  * useTerrainLayer.test.ts
  * -----------------------
  * Verifies the terrain toggle hook:
- *   1. First mount with terrain ON → does NOT touch the terrain provider
+ *   1. First mount with terrain ON → keeps existing provider and tunes streaming
  *   2. Toggle OFF → sets EllipsoidTerrainProvider
- *   3. Toggle ON  → calls CesiumTerrainProvider.fromIonAssetId and applies the result
- *   4. Multiple toggles → each one applies correctly
+ *   3. Toggle ON  → calls CesiumTerrainProvider.fromIonAssetId and applies tuned settings
+ *   4. Multiple toggles → reuses the loaded world terrain provider
  *   5. Rapid toggle (ON before async completes) → cancelled, no stale write
  */
 
@@ -20,6 +20,14 @@ const { fromIonAssetId, mockWorldTerrainProvider, mockViewer, getTerrainFlag, se
     const mockViewer = {
       scene: {
         terrainProvider: { _tag: "initial-world-terrain" } as any,
+        globe: {
+          maximumScreenSpaceError: 2,
+          tileCacheSize: 100,
+          loadingDescendantLimit: 10,
+          preloadAncestors: false,
+          preloadSiblings: false,
+        },
+        requestRender: vi.fn(),
       },
       isDestroyed: () => false,
     };
@@ -61,15 +69,26 @@ describe("useTerrainLayer", () => {
   beforeEach(() => {
     setTerrainFlag(true);
     mockViewer.scene.terrainProvider = { _tag: "initial-world-terrain" } as any;
+    mockViewer.scene.globe.maximumScreenSpaceError = 2;
+    mockViewer.scene.globe.tileCacheSize = 100;
+    mockViewer.scene.globe.loadingDescendantLimit = 10;
+    mockViewer.scene.globe.preloadAncestors = false;
+    mockViewer.scene.globe.preloadSiblings = false;
+    mockViewer.scene.requestRender.mockClear();
     fromIonAssetId.mockClear();
     fromIonAssetId.mockImplementation(() => Promise.resolve(mockWorldTerrainProvider));
   });
 
-  it("does NOT change terrain provider on initial mount when terrain is ON", () => {
+  it("keeps the initial world terrain provider and tunes streaming when terrain is ON", () => {
     renderHook(() => useTerrainLayer());
 
     expect(mockViewer.scene.terrainProvider._tag).toBe("initial-world-terrain");
     expect(fromIonAssetId).not.toHaveBeenCalled();
+    expect(mockViewer.scene.globe.maximumScreenSpaceError).toBe(1);
+    expect(mockViewer.scene.globe.tileCacheSize).toBe(512);
+    expect(mockViewer.scene.globe.loadingDescendantLimit).toBe(20);
+    expect(mockViewer.scene.globe.preloadAncestors).toBe(true);
+    expect(mockViewer.scene.globe.preloadSiblings).toBe(true);
   });
 
   it("sets EllipsoidTerrainProvider when toggled OFF", () => {
@@ -79,15 +98,18 @@ describe("useTerrainLayer", () => {
     rerender();
 
     expect(mockViewer.scene.terrainProvider._tag).toBe("ellipsoid");
+    expect(mockViewer.scene.globe.maximumScreenSpaceError).toBe(2);
+    expect(mockViewer.scene.globe.tileCacheSize).toBe(100);
+    expect(mockViewer.scene.globe.loadingDescendantLimit).toBe(10);
+    expect(mockViewer.scene.globe.preloadAncestors).toBe(false);
+    expect(mockViewer.scene.globe.preloadSiblings).toBe(false);
     expect(fromIonAssetId).not.toHaveBeenCalled();
   });
 
   it("restores world terrain via fromIonAssetId when toggled back ON", async () => {
+    setTerrainFlag(false);
     const { rerender } = renderHook(() => useTerrainLayer());
 
-    // OFF
-    setTerrainFlag(false);
-    rerender();
     expect(mockViewer.scene.terrainProvider._tag).toBe("ellipsoid");
 
     // ON
@@ -100,15 +122,18 @@ describe("useTerrainLayer", () => {
       requestWaterMask: true,
     });
     expect(mockViewer.scene.terrainProvider).toBe(mockWorldTerrainProvider);
+    expect(mockViewer.scene.globe.maximumScreenSpaceError).toBe(1);
+    expect(mockViewer.scene.globe.tileCacheSize).toBe(512);
+    expect(mockViewer.scene.globe.loadingDescendantLimit).toBe(20);
+    expect(mockViewer.scene.globe.preloadAncestors).toBe(true);
+    expect(mockViewer.scene.globe.preloadSiblings).toBe(true);
   });
 
-  it("handles multiple ON→OFF→ON cycles", async () => {
+  it("reuses the loaded world terrain provider across multiple ON→OFF→ON cycles", async () => {
+    setTerrainFlag(false);
     const { rerender } = renderHook(() => useTerrainLayer());
 
     for (let i = 0; i < 3; i++) {
-      // OFF
-      setTerrainFlag(false);
-      rerender();
       expect(mockViewer.scene.terrainProvider._tag).toBe("ellipsoid");
 
       // ON
@@ -116,9 +141,13 @@ describe("useTerrainLayer", () => {
       rerender();
       await flushPromises();
       expect(mockViewer.scene.terrainProvider).toBe(mockWorldTerrainProvider);
+
+      // OFF again for the next cycle
+      setTerrainFlag(false);
+      rerender();
     }
 
-    expect(fromIonAssetId).toHaveBeenCalledTimes(3);
+    expect(fromIonAssetId).toHaveBeenCalledTimes(1);
   });
 
   it("cancels pending async restore if toggled OFF before it completes", async () => {
@@ -127,11 +156,10 @@ describe("useTerrainLayer", () => {
       () => new Promise((r) => { resolveProvider = r; }),
     );
 
+    setTerrainFlag(false);
     const { rerender } = renderHook(() => useTerrainLayer());
 
-    // OFF → ON (starts async load)
-    setTerrainFlag(false);
-    rerender();
+    // ON starts async load
     setTerrainFlag(true);
     rerender();
 

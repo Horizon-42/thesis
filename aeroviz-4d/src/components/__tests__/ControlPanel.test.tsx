@@ -11,8 +11,9 @@ vi.mock("../../context/AppContext", () => ({
   useApp: () => ({
     viewer: null,
     layers: {
+      satelliteImagery: true,
       terrain: false,
-      dsmTerrain: false,
+      dsmTerrain: true,
       runways: true,
       waypoints: false,
       ocsSurfaces: true,
@@ -55,5 +56,17 @@ describe("ControlPanel", () => {
     fireEvent.click(checkbox);
 
     expect(toggleLayer).toHaveBeenCalledWith("obstacleLabels");
+  });
+
+  it("places satellite imagery before terrain in the layer toggles", () => {
+    render(<ControlPanel />);
+
+    const layerLabels = screen.getAllByRole("checkbox").map((checkbox) => {
+      return checkbox.closest("label")?.textContent;
+    });
+
+    expect(layerLabels.indexOf("Satellite Imagery")).toBeLessThan(
+      layerLabels.indexOf("Terrain"),
+    );
   });
 });
