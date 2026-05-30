@@ -119,11 +119,17 @@ async function addOriginalTifHeatmap(
 ): Promise<Cesium.ImageryLayer | undefined> {
   if (!metadata.originalTifHeatmap?.url) return undefined;
 
-  return addSingleTileLayer(viewer, metadata.originalTifHeatmap.url, rectangleFromBounds(metadata), {
-    alpha: 0.62,
-    brightness: 1.04,
-    contrast: 1.08,
-  });
+  const bounds = metadata.originalTifHeatmap.bounds ?? metadata.bounds;
+  return addSingleTileLayer(
+    viewer,
+    metadata.originalTifHeatmap.url,
+    Cesium.Rectangle.fromDegrees(bounds.west, bounds.south, bounds.east, bounds.north),
+    {
+      alpha: 0.62,
+      brightness: 1.04,
+      contrast: 1.08,
+    },
+  );
 }
 
 export default function AirportLocalTerrainDemoPage() {

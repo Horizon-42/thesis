@@ -26,14 +26,16 @@ const TILE_SIZE = 129;
 const MIN_LEVEL = 0;
 const MAX_LEVEL = 16;
 const FALLBACK_HEIGHT_M = 0;
+const EDGE_FILL_LEVEL_OFFSET = 0;
 const OVERLAY_MAX_WIDTH = 1024;
-const HILLSHADE_DEFAULT_LAYER_ALPHA = 0.34;
+const HILLSHADE_DEFAULT_LAYER_ALPHA = 0.62;
 const HILLSHADE_SOURCE_AZIMUTHS_DEG = [315, 45, 270];
 const HILLSHADE_SOURCE_WEIGHTS = [0.55, 0.3, 0.15];
 const HILLSHADE_SOURCE_ELEVATION_DEG = 38;
 const HILLSHADE_NEUTRAL_SHADE = 0.62;
+const HILLSHADE_ALPHA_CONTRAST = 4.4;
 const HILLSHADE_MAX_SHADOW_ALPHA = 255;
-const HILLSHADE_MAX_HIGHLIGHT_ALPHA = 92;
+const HILLSHADE_MAX_HIGHLIGHT_ALPHA = 160;
 const SOURCE_TILE_INDEX_CELL_SIZE_M = 512;
 const SOURCE_TILE_INDEX_CELL_SIZE_DEGREES = 0.01;
 const PROGRESS_BAR_WIDTH = 28;
@@ -476,19 +478,29 @@ function isValidRasterValue(value, noData) {
   return Number.isFinite(value) && (noData === null || value !== noData);
 }
 
-function rasterStats(data, noData) {
+function rasterStats(data, noData, width) {
   let min = Number.POSITIVE_INFINITY;
   let max = Number.NEGATIVE_INFINITY;
   let sum = 0;
   let count = 0;
+  let minCol = Number.POSITIVE_INFINITY;
+  let maxCol = Number.NEGATIVE_INFINITY;
+  let minRow = Number.POSITIVE_INFINITY;
+  let maxRow = Number.NEGATIVE_INFINITY;
 
   for (let i = 0; i < data.length; i += 1) {
     const value = Number(data[i]);
     if (!isValidRasterValue(value, noData)) continue;
+    const row = Math.floor(i / width);
+    const col = i - row * width;
     min = Math.min(min, value);
     max = Math.max(max, value);
     sum += value;
     count += 1;
+    minCol = Math.min(minCol, col);
+    maxCol = Math.max(maxCol, col);
+    minRow = Math.min(minRow, row);
+    maxRow = Math.max(maxRow, row);
   }
 
   return {
@@ -497,6 +509,9 @@ function rasterStats(data, noData) {
     mean: count > 0 ? sum / count : FALLBACK_HEIGHT_M,
     sum,
     count,
+    validPixelBounds: count > 0
+      ? { minCol, maxCol, minRow, maxRow }
+      : null,
   };
 }
 
@@ -523,6 +538,39 @@ function combineSourceBounds(tiles) {
   ];
 }
 
+function validSourceBoundsForTile(tile) {
+  const bounds = tile.stats.validPixelBounds;
+  if (!bounds) return null;
+
+  const [originX, originY] = tile.origin;
+  const [resolutionX, resolutionY] = tile.resolution;
+  const x0 = originX + bounds.minCol * resolutionX;
+  const x1 = originX + (bounds.maxCol + 1) * resolutionX;
+  const y0 = originY + bounds.minRow * resolutionY;
+  const y1 = originY + (bounds.maxRow + 1) * resolutionY;
+
+  return [
+    Math.min(x0, x1),
+    Math.min(y0, y1),
+    Math.max(x0, x1),
+    Math.max(y0, y1),
+  ];
+}
+
+function combineValidSourceBounds(tiles) {
+  const validBounds = tiles
+    .map((tile) => tile.validSourceBounds)
+    .filter(Boolean);
+  if (validBounds.length === 0) return combineSourceBounds(tiles);
+
+  return [
+    Math.min(...validBounds.map((bounds) => bounds[0])),
+    Math.min(...validBounds.map((bounds) => bounds[1])),
+    Math.max(...validBounds.map((bounds) => bounds[2])),
+    Math.max(...validBounds.map((bounds) => bounds[3])),
+  ];
+}
+
 function sourceBoundsToObject(sourceCrs, [west, south, east, north]) {
   return { crs: sourceCrs.horizontal, west, south, east, north };
 }
@@ -545,7 +593,7 @@ async function readHeightSourceTile(filePath, index) {
   const noData = image.getGDALNoData();
   const raster = await image.readRasters({ samples: [0], interleave: true });
 
-  return {
+  const tile = {
     id: index,
     fileName: path.basename(filePath),
     path: filePath,
@@ -557,8 +605,10 @@ async function readHeightSourceTile(filePath, index) {
     geoKeys: image.getGeoKeys ? image.getGeoKeys() : {},
     noData,
     raster,
-    stats: rasterStats(raster, noData),
+    stats: rasterStats(raster, noData, image.getWidth()),
   };
+  tile.validSourceBounds = validSourceBoundsForTile(tile);
+  return tile;
 }
 
 function clampIndex(value, min, max) {
@@ -608,6 +658,7 @@ function createHeightDataset(tiles, inputDir, sourceCrs) {
   }
 
   const sourceBounds = combineSourceBounds(tiles);
+  const validSourceBounds = combineValidSourceBounds(tiles);
   const resolution = tiles[0].resolution;
   const raster = mosaicRasterDescriptor(sourceBounds, resolution);
   const stats = aggregateRasterStats(tiles.map((tile) => tile.stats));
@@ -617,6 +668,7 @@ function createHeightDataset(tiles, inputDir, sourceCrs) {
     tiles,
     sourceCrs,
     sourceBounds,
+    validSourceBounds,
     resolution,
     raster,
     stats,
@@ -881,7 +933,9 @@ function writeHillshadePixel(rgba, offset, shade) {
     rgba[offset] = 0;
     rgba[offset + 1] = 0;
     rgba[offset + 2] = 0;
-    rgba[offset + 3] = Math.round(clamp01(darkness) * HILLSHADE_MAX_SHADOW_ALPHA);
+    rgba[offset + 3] = Math.round(
+      clamp01(darkness * HILLSHADE_ALPHA_CONTRAST) * HILLSHADE_MAX_SHADOW_ALPHA,
+    );
     return;
   }
 
@@ -890,7 +944,9 @@ function writeHillshadePixel(rgba, offset, shade) {
   rgba[offset] = 255;
   rgba[offset + 1] = 255;
   rgba[offset + 2] = 255;
-  rgba[offset + 3] = Math.round(clamp01(highlight) * HILLSHADE_MAX_HIGHLIGHT_ALPHA);
+  rgba[offset + 3] = Math.round(
+    clamp01(highlight * HILLSHADE_ALPHA_CONTRAST) * HILLSHADE_MAX_HIGHLIGHT_ALPHA,
+  );
 }
 
 function createHillshadePng(dataset, bounds) {
@@ -1076,13 +1132,78 @@ function sampleDatasetAtLonLatOrNull(dataset, lonDeg, latDeg) {
   return sampleDatasetAtSourceOrNull(dataset, sourceX, sourceY);
 }
 
-function sampleDatasetAtLonLat(dataset, lonDeg, latDeg) {
-  return sampleDatasetAtLonLatOrNull(dataset, lonDeg, latDeg) ?? FALLBACK_HEIGHT_M;
+function shouldFillTerrainTileEdges(level) {
+  return level >= MAX_LEVEL - EDGE_FILL_LEVEL_OFFSET;
+}
+
+function fillMissingGridHeights(heights, valid, width, height) {
+  let validCount = 0;
+  for (const value of valid) {
+    if (value) validCount += 1;
+  }
+
+  if (validCount === 0) {
+    heights.fill(FALLBACK_HEIGHT_M);
+    return heights;
+  }
+  if (validCount === heights.length) return heights;
+
+  for (let row = 0; row < height; row += 1) {
+    let lastValidHeight = null;
+    const rowOffset = row * width;
+    for (let col = 0; col < width; col += 1) {
+      const index = rowOffset + col;
+      if (valid[index]) {
+        lastValidHeight = heights[index];
+      } else if (lastValidHeight !== null) {
+        heights[index] = lastValidHeight;
+        valid[index] = 1;
+      }
+    }
+
+    lastValidHeight = null;
+    for (let col = width - 1; col >= 0; col -= 1) {
+      const index = rowOffset + col;
+      if (valid[index]) {
+        lastValidHeight = heights[index];
+      } else if (lastValidHeight !== null) {
+        heights[index] = lastValidHeight;
+        valid[index] = 1;
+      }
+    }
+  }
+
+  for (let col = 0; col < width; col += 1) {
+    let lastValidHeight = null;
+    for (let row = 0; row < height; row += 1) {
+      const index = row * width + col;
+      if (valid[index]) {
+        lastValidHeight = heights[index];
+      } else if (lastValidHeight !== null) {
+        heights[index] = lastValidHeight;
+        valid[index] = 1;
+      }
+    }
+
+    lastValidHeight = null;
+    for (let row = height - 1; row >= 0; row -= 1) {
+      const index = row * width + col;
+      if (valid[index]) {
+        lastValidHeight = heights[index];
+      } else if (lastValidHeight !== null) {
+        heights[index] = lastValidHeight;
+        valid[index] = 1;
+      }
+    }
+  }
+
+  return heights;
 }
 
 function buildHeightTile(dataset, tilingScheme, x, y, level) {
   const rectangle = tilingScheme.tileXYToRectangle(x, y, level);
   const heights = new Float32Array(TILE_SIZE * TILE_SIZE);
+  const valid = new Uint8Array(TILE_SIZE * TILE_SIZE);
 
   for (let row = 0; row < TILE_SIZE; row += 1) {
     const v = TILE_SIZE === 1 ? 0 : row / (TILE_SIZE - 1);
@@ -1093,11 +1214,20 @@ function buildHeightTile(dataset, tilingScheme, x, y, level) {
       const u = TILE_SIZE === 1 ? 0 : col / (TILE_SIZE - 1);
       const lonRad = Cesium.Math.lerp(rectangle.west, rectangle.east, u);
       const lonDeg = Cesium.Math.toDegrees(lonRad);
-      heights[row * TILE_SIZE + col] = sampleDatasetAtLonLat(dataset, lonDeg, latDeg);
+      const index = row * TILE_SIZE + col;
+      const height = sampleDatasetAtLonLatOrNull(dataset, lonDeg, latDeg);
+      if (height === null) {
+        heights[index] = FALLBACK_HEIGHT_M;
+      } else {
+        heights[index] = height;
+        valid[index] = 1;
+      }
     }
   }
 
-  return heights;
+  return shouldFillTerrainTileEdges(level)
+    ? fillMissingGridHeights(heights, valid, TILE_SIZE, TILE_SIZE)
+    : heights;
 }
 
 function float32ArrayToLittleEndianBuffer(heights) {
@@ -1116,7 +1246,7 @@ async function writeHeightTile(dataset, tilingScheme, x, y, level) {
   await writeFile(path.join(tileDir, `${y}.f32`), float32ArrayToLittleEndianBuffer(heights));
 }
 
-function localTerrainVisualAssetMetadata(overlay, originalTifHeatmap, hillshade) {
+function localTerrainVisualAssetMetadata(overlay, originalTifHeatmap, hillshade, sourceBounds) {
   return {
     overlay: {
       url: `/data/airports/${AIRPORT_CODE}/local-terrain/heightmap/local_terrain_height_overlay.png`,
@@ -1128,6 +1258,7 @@ function localTerrainVisualAssetMetadata(overlay, originalTifHeatmap, hillshade)
       url: `/data/airports/${AIRPORT_CODE}/local-terrain/heightmap/local_terrain_source_heatmap.png`,
       width: originalTifHeatmap.width,
       height: originalTifHeatmap.height,
+      bounds: sourceBounds,
       note:
         "Raw GeoTIFF pixel heatmap, draped over the source lon/lat bounds for source-data inspection.",
     },
@@ -1139,6 +1270,7 @@ function localTerrainVisualAssetMetadata(overlay, originalTifHeatmap, hillshade)
       note:
         "Multi-direction transparent hillshade overlay generated from local terrain source elevations.",
     },
+    fallbackHeightM: FALLBACK_HEIGHT_M,
   };
 }
 
@@ -1188,12 +1320,18 @@ async function main() {
   const dataset = createHeightDataset(sourceTiles, inputDir, sourceCrs);
   const precision = localTerrainPrecisionMetadata(dataset, sourceMetadata);
   const source = localTerrainSourceMetadata(inputDir, sourceMetadata);
-  const { bounds, corners } = lonLatBoundsFromSourceBounds(dataset.sourceCrs, dataset.sourceBounds);
+  const sourceLonLat = lonLatBoundsFromSourceBounds(dataset.sourceCrs, dataset.sourceBounds);
+  const { bounds, corners } = lonLatBoundsFromSourceBounds(dataset.sourceCrs, dataset.validSourceBounds);
   const stats = dataset.stats;
   const overlay = createOverlayPng(dataset, stats, bounds);
   const originalTifHeatmap = createOriginalTifHeatmapPng(dataset, stats);
   const hillshade = createHillshadePng(dataset, bounds);
-  const visualAssets = localTerrainVisualAssetMetadata(overlay, originalTifHeatmap, hillshade);
+  const visualAssets = localTerrainVisualAssetMetadata(
+    overlay,
+    originalTifHeatmap,
+    hillshade,
+    sourceLonLat.bounds,
+  );
   const tilingScheme = new Cesium.GeographicTilingScheme();
   const levelRanges = [];
   const levels = [];
@@ -1267,8 +1405,14 @@ async function main() {
             y: tile.resolution[1],
           },
           sourceBounds: sourceBoundsToObject(dataset.sourceCrs, tile.sourceBounds),
+          ...(tile.validSourceBounds
+            ? { validSourceBounds: sourceBoundsToObject(dataset.sourceCrs, tile.validSourceBounds) }
+            : {}),
           ...(dataset.sourceCrs.kind === "utm"
             ? { projectedBounds: sourceBoundsToObject(dataset.sourceCrs, tile.sourceBounds) }
+            : {}),
+          ...(dataset.sourceCrs.kind === "utm" && tile.validSourceBounds
+            ? { validProjectedBounds: sourceBoundsToObject(dataset.sourceCrs, tile.validSourceBounds) }
             : {}),
           stats: {
             min: tile.stats.min,
@@ -1304,8 +1448,12 @@ async function main() {
           vertical: "Source GeoTIFF elevation values, used directly as metres",
         },
         sourceBounds: sourceBoundsToObject(dataset.sourceCrs, dataset.sourceBounds),
+        validSourceBounds: sourceBoundsToObject(dataset.sourceCrs, dataset.validSourceBounds),
         ...(dataset.sourceCrs.kind === "utm"
           ? { projectedBounds: sourceBoundsToObject(dataset.sourceCrs, dataset.sourceBounds) }
+          : {}),
+        ...(dataset.sourceCrs.kind === "utm"
+          ? { validProjectedBounds: sourceBoundsToObject(dataset.sourceCrs, dataset.validSourceBounds) }
           : {}),
         bounds,
         corners: Object.fromEntries(

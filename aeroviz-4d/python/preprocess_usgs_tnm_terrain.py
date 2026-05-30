@@ -41,6 +41,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from data_layout import (
     AEROVIZ_ROOT,
@@ -60,6 +62,7 @@ DEFAULT_LAZ_VERTICAL_SCALE = 0.3048
 DEFAULT_NODATA = -999999.0
 PROGRESS_BAR_WIDTH = 28
 COMMAND_HEARTBEAT_SECONDS = 10.0
+DOWNLOAD_TIMEOUT_SECONDS = 300
 TERRAIN_SOURCE_METADATA_FILE = "terrain-source.json"
 
 # The inspected KRDU LPC files have no embedded SRS. Their XY values match
@@ -151,6 +154,34 @@ def read_manifest_bboxes(
             bboxes.append(parse_bbox(raw_bbox))
 
     return bboxes
+
+
+def read_manifest_download_urls(
+    manifest_path: Path,
+    airport_code: str,
+    *,
+    product: str,
+) -> dict[Path, str]:
+    if not manifest_path.exists():
+        return {}
+
+    normalized_airport = normalize_airport_code(airport_code)
+    urls: dict[Path, str] = {}
+    with manifest_path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            if normalize_airport_code(row.get("group") or "") != normalized_airport:
+                continue
+            if (row.get("product") or "").strip().lower() != product.lower():
+                continue
+
+            target = (row.get("target") or "").strip()
+            url = (row.get("url") or "").strip()
+            if not target or not url:
+                continue
+            urls[Path(target).expanduser().resolve()] = url
+
+    return urls
 
 
 def load_airport_center(airport_code: str) -> tuple[float, float]:
@@ -278,6 +309,97 @@ def run_command(
     print(f"[done] {label}: finished in {elapsed}", flush=True)
 
 
+def geotiff_read_error(geotiff_path: Path) -> str | None:
+    require_tool("gdalinfo")
+    result = subprocess.run(
+        ["gdalinfo", str(geotiff_path)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode == 0:
+        return None
+
+    detail = (result.stderr or result.stdout).strip()
+    return detail or f"gdalinfo exited with status {result.returncode}"
+
+
+def download_file(url: str, target: Path, *, timeout: int = DOWNLOAD_TIMEOUT_SECONDS) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    part_path = target.with_name(target.name + ".part")
+    try:
+        request = Request(url, method="GET")
+        request.add_header("User-Agent", "aeroviz-usgs-tnm-preprocessor/1.0")
+        with urlopen(request, timeout=timeout) as response:
+            status = getattr(response, "status", None) or 200
+            if status >= 400:
+                raise RuntimeError(f"HTTP {status}")
+            with part_path.open("wb") as handle:
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+        part_path.replace(target)
+    except (HTTPError, URLError, OSError, RuntimeError) as exc:
+        try:
+            part_path.unlink()
+        except OSError:
+            pass
+        raise RuntimeError(f"Failed to download {url} to {target}: {exc}") from exc
+
+
+def ensure_readable_source_files(
+    *,
+    airport_code: str,
+    usgs_root: Path,
+    product: str,
+    source_paths: list[Path],
+    dry_run: bool,
+) -> list[Path]:
+    if dry_run:
+        return source_paths
+
+    manifest_urls = read_manifest_download_urls(
+        usgs_root / "download_manifest.csv",
+        airport_code,
+        product=product,
+    )
+    unreadable: list[tuple[Path, str]] = []
+
+    for source_path in source_paths:
+        error = geotiff_read_error(source_path)
+        if error is None:
+            continue
+
+        source_key = source_path.expanduser().resolve()
+        url = manifest_urls.get(source_key)
+        if not url:
+            unreadable.append((source_path, error))
+            continue
+
+        print(
+            f"[warn] {source_path.name} is not GDAL-readable; re-downloading from TNM manifest.",
+            flush=True,
+        )
+        print(f"[warn] gdalinfo: {error.splitlines()[0]}", flush=True)
+        download_file(url, source_path)
+        retry_error = geotiff_read_error(source_path)
+        if retry_error is not None:
+            unreadable.append((source_path, retry_error))
+        else:
+            print(f"[done] repaired DEM source {source_path.name}", flush=True)
+
+    if unreadable:
+        details = "\n".join(f"- {path}: {error.splitlines()[0]}" for path, error in unreadable)
+        raise RuntimeError(
+            "One or more source GeoTIFFs are not readable by GDAL and could not be repaired "
+            f"from {usgs_root / 'download_manifest.csv'}:\n{details}"
+        )
+
+    return source_paths
+
+
 def metres_per_degree_at_latitude(lat_deg: float) -> tuple[float, float]:
     lat_rad = math.radians(lat_deg)
     metres_per_degree_lat = (
@@ -389,6 +511,13 @@ def stage_dem_geotiff(
     source_paths = list_source_files(source_dir, (".tif", ".tiff", ".img"))
     if not source_paths:
         raise FileNotFoundError(f"No DEM raster files found in {source_dir}")
+    source_paths = ensure_readable_source_files(
+        airport_code=airport_code,
+        usgs_root=usgs_root,
+        product="dem",
+        source_paths=source_paths,
+        dry_run=dry_run,
+    )
 
     output_dir = staging_dir_for_source(airport_code, "dem")
     output_tif = output_dir / "usgs_tnm_dem_wgs84_elevation_m.tif"

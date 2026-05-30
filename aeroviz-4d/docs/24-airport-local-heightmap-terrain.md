@@ -50,6 +50,13 @@ tiles/<level>/<x>/<y>.f32
 candidate local sources. Smaller values win; DEM/DSM names are not priority
 signals.
 
+`metadata.bounds` is the renderable terrain footprint derived from valid
+elevation samples. The full GeoTIFF extent remains in `sourceBounds` and, for the
+raw inspection image, `originalTifHeatmap.bounds`. This distinction matters for
+DSM products with large no-data margins: using the full raster rectangle would
+make low-detail Cesium parent tiles appear to pull a flat local-terrain apron
+outward during zoom.
+
 The application does not special-case CYVR, KSJC, or any other airport. The
 active airport code determines the metadata URL:
 
@@ -114,11 +121,17 @@ The user sees `Preload X/Y` for the blocking focused set first; once it switches
 to `Active X/Y`, the provider is already installed and the rest of the airport
 package is warming in the background.
 
+Terrain `.f32` tiles use `0 m` for no-data samples. The generator and frontend
+only repair fallback edge samples at the highest terrain level. Coarser parent
+tiles keep no-data as flat fallback so Cesium's LOD refinement cannot promote
+GeoTIFF no-data margins into raised terrain while zooming; close-up tiles still
+get a small edge fill to reduce visible cliffs at the real data boundary.
+
 When satellite imagery is hidden, the local heightmap uses a gray height-based
-material with 5 m and 25 m contour bands. The shader intentionally avoids
-`materialInput.slope` and `normalEC`: Cesium's `CustomHeightmapTerrainProvider`
-reports `hasVertexNormals=false`, so a material that requires normals is skipped
-by Cesium and falls back to a flat globe color.
+material with derivative-based relief. It does not draw contour bands. The
+shader intentionally avoids `materialInput.slope` and `normalEC`: Cesium's
+`CustomHeightmapTerrainProvider` reports `hasVertexNormals=false`, so a material
+that requires normals is skipped by Cesium and falls back to a flat globe color.
 
 ## Multi-Airport Switching
 

@@ -25,6 +25,7 @@ describe("useSatelliteImageryLayer", () => {
   it("keeps the no-imagery material compatible with local heightmap terrain", () => {
     expect(NO_IMAGERY_TERRAIN_MATERIAL_SOURCE).not.toMatch(/\bslope\b/);
     expect(NO_IMAGERY_TERRAIN_MATERIAL_SOURCE).not.toContain("normalEC");
+    expect(NO_IMAGERY_TERRAIN_MATERIAL_SOURCE).not.toMatch(/contour/i);
   });
 
   it("uses active local terrain height stats for grayscale contrast", () => {

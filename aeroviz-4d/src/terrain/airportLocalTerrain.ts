@@ -59,6 +59,7 @@ export interface AirportLocalTerrainMetadata {
     url: string;
     width: number;
     height: number;
+    bounds?: AirportLocalTerrainBounds;
     note?: string;
   };
   hillshade?: {
@@ -135,6 +136,9 @@ export interface AirportLocalTerrainPreloadProgress {
   loadedTiles: number;
   totalTiles: number;
 }
+
+const HEIGHT_EPSILON_M = 0.001;
+const FALLBACK_FILL_LEVEL_OFFSET = 0;
 
 function tileKey(level: number, x: number, y: number): string {
   return `${level}/${x}/${y}`;
@@ -251,6 +255,135 @@ function parseFloat32LittleEndian(buffer: ArrayBuffer): Float32Array {
   return values;
 }
 
+export function airportLocalTerrainDisplayFallbackHeight(
+  metadata: AirportLocalTerrainMetadata,
+): number {
+  const fallbackHeight = metadata.fallbackHeightM;
+  const { min, max } = metadata.stats;
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min > max) {
+    return Number.isFinite(fallbackHeight) ? fallbackHeight : 0;
+  }
+
+  if (!Number.isFinite(fallbackHeight) || fallbackHeight < min || fallbackHeight > max) {
+    return min;
+  }
+
+  return fallbackHeight;
+}
+
+export function shouldFillAirportLocalTerrainFallbackHeights(
+  metadata: AirportLocalTerrainMetadata,
+  level: number,
+): boolean {
+  return level >= metadata.maxLevel - FALLBACK_FILL_LEVEL_OFFSET;
+}
+
+function isFallbackHeightSample(
+  metadata: AirportLocalTerrainMetadata,
+  value: number,
+): boolean {
+  if (!Number.isFinite(value)) return true;
+
+  const { min, max } = metadata.stats;
+  if (
+    Number.isFinite(min) &&
+    Number.isFinite(max) &&
+    min <= max &&
+    (value < min - HEIGHT_EPSILON_M || value > max + HEIGHT_EPSILON_M)
+  ) {
+    return true;
+  }
+
+  const fallbackHeight = metadata.fallbackHeightM;
+  return (
+    Number.isFinite(fallbackHeight) &&
+    Math.abs(value - fallbackHeight) <= HEIGHT_EPSILON_M &&
+    Number.isFinite(min) &&
+    Number.isFinite(max) &&
+    (fallbackHeight < min || fallbackHeight > max)
+  );
+}
+
+export function fillAirportLocalTerrainFallbackHeights(
+  metadata: AirportLocalTerrainMetadata,
+  heights: Float32Array,
+): Float32Array {
+  const expectedLength = metadata.tileWidth * metadata.tileHeight;
+  if (heights.length !== expectedLength) return heights;
+
+  const width = metadata.tileWidth;
+  const height = metadata.tileHeight;
+  const valid = new Uint8Array(expectedLength);
+  const fallbackHeight = airportLocalTerrainDisplayFallbackHeight(metadata);
+  let validCount = 0;
+
+  for (let i = 0; i < heights.length; i += 1) {
+    if (isFallbackHeightSample(metadata, heights[i])) {
+      heights[i] = fallbackHeight;
+    } else {
+      valid[i] = 1;
+      validCount += 1;
+    }
+  }
+
+  if (validCount === 0) {
+    heights.fill(fallbackHeight);
+    return heights;
+  }
+  if (validCount === heights.length) return heights;
+
+  for (let row = 0; row < height; row += 1) {
+    let lastValidHeight: number | null = null;
+    const rowOffset = row * width;
+    for (let col = 0; col < width; col += 1) {
+      const index = rowOffset + col;
+      if (valid[index]) {
+        lastValidHeight = heights[index];
+      } else if (lastValidHeight !== null) {
+        heights[index] = lastValidHeight;
+        valid[index] = 1;
+      }
+    }
+
+    lastValidHeight = null;
+    for (let col = width - 1; col >= 0; col -= 1) {
+      const index = rowOffset + col;
+      if (valid[index]) {
+        lastValidHeight = heights[index];
+      } else if (lastValidHeight !== null) {
+        heights[index] = lastValidHeight;
+        valid[index] = 1;
+      }
+    }
+  }
+
+  for (let col = 0; col < width; col += 1) {
+    let lastValidHeight: number | null = null;
+    for (let row = 0; row < height; row += 1) {
+      const index = row * width + col;
+      if (valid[index]) {
+        lastValidHeight = heights[index];
+      } else if (lastValidHeight !== null) {
+        heights[index] = lastValidHeight;
+        valid[index] = 1;
+      }
+    }
+
+    lastValidHeight = null;
+    for (let row = height - 1; row >= 0; row -= 1) {
+      const index = row * width + col;
+      if (valid[index]) {
+        lastValidHeight = heights[index];
+      } else if (lastValidHeight !== null) {
+        heights[index] = lastValidHeight;
+        valid[index] = 1;
+      }
+    }
+  }
+
+  return heights;
+}
+
 function createFlatHeightTile(metadata: AirportLocalTerrainMetadata): Float32Array {
   const values = new Float32Array(metadata.tileWidth * metadata.tileHeight);
   values.fill(metadata.fallbackHeightM);
@@ -276,7 +409,9 @@ async function fetchHeightTile(
     );
   }
 
-  return heights;
+  return shouldFillAirportLocalTerrainFallbackHeights(metadata, level)
+    ? fillAirportLocalTerrainFallbackHeights(metadata, heights)
+    : heights;
 }
 
 export async function loadAirportLocalTerrain(

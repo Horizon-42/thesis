@@ -6,8 +6,10 @@ from preprocess_usgs_tnm_terrain import (
     StagedTerrainSource,
     build_laz_to_dsm_pipeline,
     default_target_srs_for_bbox,
+    ensure_readable_source_files,
     pdal_bounds_string,
     read_manifest_bboxes,
+    read_manifest_download_urls,
     resolve_processing_bbox,
     select_highest_precision_source,
     source_kinds_to_stage,
@@ -35,6 +37,63 @@ def test_read_manifest_bboxes_uses_airport_group_and_product_bbox(tmp_path):
     bbox = union_bboxes(read_manifest_bboxes(manifest_path, "KRDU"))
 
     assert bbox == GeoBBox(west=-78.9, south=35.7, east=-78.7, north=35.95)
+
+
+def test_read_manifest_download_urls_uses_airport_product_and_target(tmp_path):
+    target = tmp_path / "KSJC" / "dem" / "tile.tif"
+    other_target = tmp_path / "KRDU" / "dem" / "tile.tif"
+    manifest_path = tmp_path / "download_manifest.csv"
+    manifest_path.write_text(
+        "\n".join(
+            [
+                "status,message,group,label,product,url,target",
+                f"downloaded,,KSJC,SJC,dem,https://example.test/ksjc.tif,{target}",
+                f"downloaded,,KRDU,RDU,dem,https://example.test/krdu.tif,{other_target}",
+                f"downloaded,,KSJC,SJC,dsm,https://example.test/ksjc.laz,{tmp_path / 'surface.laz'}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    urls = read_manifest_download_urls(manifest_path, "ksjc", product="dem")
+
+    assert urls == {target.resolve(): "https://example.test/ksjc.tif"}
+
+
+def test_ensure_readable_source_files_redownloads_manifest_repair(monkeypatch, tmp_path):
+    source = tmp_path / "KSJC" / "dem" / "tile.tif"
+    source.parent.mkdir(parents=True)
+    source.write_text("broken", encoding="utf-8")
+    manifest_path = tmp_path / "download_manifest.csv"
+    manifest_path.write_text(
+        "\n".join(
+            [
+                "status,message,group,label,product,url,target",
+                f"downloaded,,KSJC,SJC,dem,https://example.test/tile.tif,{source}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    states = iter(["bad tiff", None])
+    downloads = []
+
+    monkeypatch.setattr("preprocess_usgs_tnm_terrain.geotiff_read_error", lambda path: next(states))
+
+    def fake_download(url, target):
+        downloads.append((url, target))
+        target.write_text("repaired", encoding="utf-8")
+
+    monkeypatch.setattr("preprocess_usgs_tnm_terrain.download_file", fake_download)
+
+    assert ensure_readable_source_files(
+        airport_code="KSJC",
+        usgs_root=tmp_path,
+        product="dem",
+        source_paths=[source],
+        dry_run=False,
+    ) == [source]
+    assert downloads == [("https://example.test/tile.tif", source)]
+    assert source.read_text(encoding="utf-8") == "repaired"
 
 
 def test_resolve_processing_bbox_prefers_explicit_bbox(tmp_path):

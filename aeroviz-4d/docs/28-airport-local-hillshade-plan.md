@@ -19,6 +19,11 @@ to XYZ tiles.
 - Expose the generated image through `metadata.json`.
 - Load the image as a bounded Cesium imagery layer.
 - Add a UI layer toggle named `Terrain Hillshade`.
+- Use the valid-sample terrain footprint, not the full GeoTIFF bounding box, so
+  no-data raster margins do not become visible local terrain.
+- Fill local terrain no-data/fallback edge samples only at the highest detail
+  level so close-up edges avoid tall 0 m cliffs without letting coarse parent
+  tiles grow a raised apron during zoom.
 - Do not set or change `scene.verticalExaggeration`; the HUD slider remains the
   only user-facing exaggeration control.
 - Do not enable real terrain shadow maps by default.
@@ -32,7 +37,7 @@ to XYZ tiles.
   "url": "/data/airports/<ICAO>/local-terrain/heightmap/local_terrain_hillshade.png",
   "width": 1024,
   "height": 830,
-  "alpha": 0.34,
+  "alpha": 0.62,
   "note": "Multi-direction transparent hillshade overlay generated from local terrain source elevations."
 }
 ```
@@ -41,6 +46,12 @@ The image is an RGBA overlay covering `metadata.bounds`. Shadow pixels use black
 with variable alpha; highlight pixels use low-opacity white. This avoids the
 flat gray wash that a semitransparent grayscale image can create over satellite
 imagery.
+
+`fallbackHeightM` stays at `0`. The generator writes `metadata.bounds` from the
+valid elevation footprint and keeps the original GeoTIFF bounds on
+`originalTifHeatmap.bounds` for source inspection. The frontend repairs fallback
+samples only on `metadata.maxLevel`, so old low-detail parent tiles do not turn
+no-data margins into raised terrain while the camera is zooming.
 
 ## Build Command
 

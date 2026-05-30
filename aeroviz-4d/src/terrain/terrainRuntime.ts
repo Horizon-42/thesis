@@ -36,15 +36,11 @@ export const LOCAL_TERRAIN_SETTINGS = {
 } as const;
 
 const NO_IMAGERY_GLOBE_COLOR_CSS = "#8a8d84";
-const NO_IMAGERY_CONTOUR_COLOR_CSS = "#4d514c";
-const NO_IMAGERY_MAJOR_CONTOUR_COLOR_CSS = "#343832";
 const NO_IMAGERY_LAMBERT_DIFFUSE_MULTIPLIER = 1.35;
 const NO_IMAGERY_VERTEX_SHADOW_DARKNESS = 0.45;
 const NO_IMAGERY_DEFAULT_MINIMUM_HEIGHT_METERS = -50;
 const NO_IMAGERY_DEFAULT_MAXIMUM_HEIGHT_METERS = 350;
 const NO_IMAGERY_MINIMUM_HEIGHT_SPAN_METERS = 10;
-const NO_IMAGERY_CONTOUR_SPACING_METERS = 5;
-const NO_IMAGERY_MAJOR_CONTOUR_SPACING_METERS = 25;
 
 export const NO_IMAGERY_TERRAIN_MATERIAL_SOURCE = `
 czm_material czm_getMaterial(czm_materialInput materialInput)
@@ -59,26 +55,9 @@ czm_material czm_getMaterial(czm_materialInput materialInput)
 #if (__VERSION__ == 300 || defined(GL_OES_standard_derivatives))
     float relief = clamp(length(vec2(dFdx(h), dFdy(h))) * reliefStrength, 0.0, 0.24);
     shade += relief;
-
-    float fineCoordinate = h / contourSpacing;
-    float fineDistance = min(fract(fineCoordinate), 1.0 - fract(fineCoordinate));
-    float fineWidth = max(fwidth(fineCoordinate) * contourLineWidth, 0.012);
-    float contour = 1.0 - smoothstep(0.0, fineWidth, fineDistance);
-
-    float majorCoordinate = h / majorContourSpacing;
-    float majorDistance = min(fract(majorCoordinate), 1.0 - fract(majorCoordinate));
-    float majorWidth = max(fwidth(majorCoordinate) * majorContourLineWidth, 0.010);
-    float majorContour = 1.0 - smoothstep(0.0, majorWidth, majorDistance);
-#else
-    float contourPhase = abs(fract(h / contourSpacing) - 0.5) * 2.0;
-    float contour = 1.0 - smoothstep(0.0, 0.045, contourPhase);
-    float majorContourPhase = abs(fract(h / majorContourSpacing) - 0.5) * 2.0;
-    float majorContour = 1.0 - smoothstep(0.0, 0.040, majorContourPhase);
 #endif
 
     vec3 color = baseColor.rgb * shade;
-    color = mix(color, contourColor.rgb, contour * 0.32);
-    color = mix(color, majorContourColor.rgb, majorContour * 0.58);
 
     material.diffuse = color;
     material.alpha = baseColor.a;
@@ -333,14 +312,8 @@ export function createNoImageryTerrainMaterial(): Cesium.Material {
     fabric: {
       uniforms: {
         baseColor: Cesium.Color.fromCssColorString(NO_IMAGERY_GLOBE_COLOR_CSS),
-        contourColor: Cesium.Color.fromCssColorString(NO_IMAGERY_CONTOUR_COLOR_CSS),
-        majorContourColor: Cesium.Color.fromCssColorString(NO_IMAGERY_MAJOR_CONTOUR_COLOR_CSS),
         minimumHeight: NO_IMAGERY_DEFAULT_MINIMUM_HEIGHT_METERS,
         maximumHeight: NO_IMAGERY_DEFAULT_MAXIMUM_HEIGHT_METERS,
-        contourSpacing: NO_IMAGERY_CONTOUR_SPACING_METERS,
-        majorContourSpacing: NO_IMAGERY_MAJOR_CONTOUR_SPACING_METERS,
-        contourLineWidth: 1.4,
-        majorContourLineWidth: 2.0,
         elevationBandCount: 18,
         reliefStrength: 0.045,
       },
@@ -372,8 +345,8 @@ export function applyNoImageryTerrainStyle(
   globe.enableLighting = true;
   globe.lambertDiffuseMultiplier = NO_IMAGERY_LAMBERT_DIFFUSE_MULTIPLIER;
   globe.vertexShadowDarkness = NO_IMAGERY_VERTEX_SHADOW_DARKNESS;
-  viewer.shadows = true;
-  viewer.terrainShadows = Cesium.ShadowMode.ENABLED;
+  viewer.shadows = false;
+  viewer.terrainShadows = Cesium.ShadowMode.DISABLED;
   viewer.scene.requestRender();
 }
 
