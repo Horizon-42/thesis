@@ -16,11 +16,12 @@ import json
 import math
 import re
 import sys
+import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
@@ -35,6 +36,7 @@ DEFAULT_PAGE_SIZE = 100
 DEFAULT_TIMEOUT_SECONDS = 120
 DEFAULT_RETRIES = 3
 DEFAULT_WORKERS = 4
+DEFAULT_PROGRESS_INTERVAL_SECONDS = 0.5
 
 DEGREES_LAT_KM = 111.32
 
@@ -145,6 +147,9 @@ class DownloadResult:
     status: str
     message: str = ""
     size_in_bytes: int | None = None
+
+
+ProgressCallback = Callable[[Path, int], None]
 
 
 DATASET_SPECS: dict[str, DatasetSpec] = {
@@ -426,6 +431,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Concurrent downloads. Default: 4.",
     )
     parser.add_argument(
+        "--no-progress",
+        action="store_true",
+        help="Disable the aggregate download progress bar.",
+    )
+    parser.add_argument(
         "--timeout",
         type=int,
         default=DEFAULT_TIMEOUT_SECONDS,
@@ -457,6 +467,8 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--limit must be greater than zero")
     if args.page_size <= 0:
         raise ValueError("--page-size must be greater than zero")
+    if args.workers <= 0:
+        raise ValueError("--workers must be greater than zero")
     if not (has_airports or has_point or args.bbox):
         raise ValueError("provide at least one airport, --lat/--lon, or --bbox")
 
@@ -514,6 +526,121 @@ def dem_candidate_keys(selected_key: str, fallback: bool) -> list[str]:
 
 def target_path(out_dir: Path, product: TnmProduct) -> Path:
     return out_dir / product.context.group / product.spec.output_subdir / product.filename
+
+
+def format_bytes(byte_count: int | float) -> str:
+    value = float(max(0, byte_count))
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if value < 1024.0:
+            return f"{value:.1f} {unit}" if unit != "B" else f"{value:.0f} {unit}"
+        value /= 1024.0
+    return f"{value:.1f} TiB"
+
+
+def progress_bar(fraction: float, width: int = 24) -> str:
+    bounded = max(0.0, min(1.0, fraction))
+    filled = int(round(width * bounded))
+    return "[" + "#" * filled + "-" * (width - filled) + "]"
+
+
+class DownloadProgress:
+    def __init__(
+        self,
+        products: list[TnmProduct],
+        out_dir: Path,
+        *,
+        enabled: bool,
+        stream: Any = sys.stderr,
+    ) -> None:
+        self.enabled = enabled
+        self.stream = stream
+        self.is_tty = bool(getattr(stream, "isatty", lambda: False)())
+        self.interval_seconds = DEFAULT_PROGRESS_INTERVAL_SECONDS if self.is_tty else 10.0
+        self.lock = threading.Lock()
+        self.started_at = time.monotonic()
+        self.last_rendered_at = 0.0
+        self.last_line_length = 0
+        self.total_files = len(products)
+        self.completed_files = 0
+        self.expected_by_target = {
+            str(target_path(out_dir, product)): product.size_in_bytes or 0 for product in products
+        }
+        self.current_by_target = {target: 0 for target in self.expected_by_target}
+
+    @property
+    def total_known_bytes(self) -> int:
+        return sum(size for size in self.expected_by_target.values() if size > 0)
+
+    def update(self, target: Path, bytes_written: int) -> None:
+        if not self.enabled:
+            return
+        with self.lock:
+            self.current_by_target[str(target)] = max(0, bytes_written)
+
+    def complete(self, result: DownloadResult) -> None:
+        if not self.enabled:
+            return
+        target = str(result.target)
+        with self.lock:
+            self.completed_files += 1
+            if result.status in {"downloaded", "skipped"}:
+                final_size = result.size_in_bytes or self.expected_by_target.get(target, 0)
+                self.current_by_target[target] = max(self.current_by_target.get(target, 0), final_size)
+
+    def _line(self) -> str:
+        with self.lock:
+            completed_files = self.completed_files
+            known_total = self.total_known_bytes
+            known_done = sum(
+                min(self.current_by_target.get(target, 0), expected)
+                for target, expected in self.expected_by_target.items()
+                if expected > 0
+            )
+            unknown_done = sum(
+                self.current_by_target.get(target, 0)
+                for target, expected in self.expected_by_target.items()
+                if expected <= 0
+            )
+
+        elapsed = max(0.001, time.monotonic() - self.started_at)
+        total_done = known_done + unknown_done
+        speed = total_done / elapsed
+        if known_total > 0:
+            fraction = known_done / known_total
+            byte_text = f"{format_bytes(known_done)}/{format_bytes(known_total)}"
+            if unknown_done:
+                byte_text += f" + {format_bytes(unknown_done)}"
+            return (
+                f"  {progress_bar(fraction)} {fraction * 100:5.1f}% "
+                f"{completed_files}/{self.total_files} files "
+                f"{byte_text} {format_bytes(speed)}/s"
+            )
+        return (
+            f"  {completed_files}/{self.total_files} files "
+            f"{format_bytes(total_done)} {format_bytes(speed)}/s"
+        )
+
+    def render(self, *, force: bool = False) -> None:
+        if not self.enabled:
+            return
+        now = time.monotonic()
+        if not force and now - self.last_rendered_at < self.interval_seconds:
+            return
+
+        line = self._line()
+        if self.is_tty:
+            padded = line.ljust(self.last_line_length)
+            self.stream.write("\r" + padded)
+            self.last_line_length = len(padded)
+        else:
+            self.stream.write(line + "\n")
+        self.stream.flush()
+        self.last_rendered_at = now
+
+    def close(self) -> None:
+        if self.enabled and self.is_tty:
+            self.stream.write("\n")
+            self.stream.flush()
 
 
 def tnm_payload_error(data: dict[str, Any]) -> str:
@@ -755,6 +882,7 @@ def download_one(
     overwrite: bool,
     timeout: int,
     retries: int,
+    progress_callback: ProgressCallback | None = None,
 ) -> DownloadResult:
     target = target_path(out_dir, product)
     url = product.url
@@ -779,7 +907,7 @@ def download_one(
             req = Request(url, method="GET")
             req.add_header("User-Agent", "aeroviz-tnm-elevation-downloader/1.0")
             with urlopen(req, timeout=timeout) as resp:
-                status = getattr(resp, "status", 200)
+                status = getattr(resp, "status", None) or 200
                 if status >= 400:
                     return DownloadResult(
                         product=product,
@@ -787,12 +915,16 @@ def download_one(
                         status="failed",
                         message=f"HTTP {status}",
                     )
+                bytes_written = 0
                 with part_path.open("wb") as out:
                     while True:
                         chunk = resp.read(1024 * 1024)
                         if not chunk:
                             break
                         out.write(chunk)
+                        bytes_written += len(chunk)
+                        if progress_callback:
+                            progress_callback(target, bytes_written)
             part_path.replace(target)
             return DownloadResult(
                 product=product,
@@ -810,6 +942,8 @@ def download_one(
             part_path.unlink()
         except OSError:
             pass
+        if progress_callback:
+            progress_callback(target, 0)
         if attempt < max(1, retries):
             time.sleep(min(2**attempt, 10))
 
@@ -821,7 +955,9 @@ def download_all(products: list[TnmProduct], args: argparse.Namespace) -> list[D
         return []
 
     results: list[DownloadResult] = []
-    workers = max(1, args.workers)
+    workers = min(max(1, args.workers), len(products))
+    progress = DownloadProgress(products, args.out, enabled=not args.no_progress)
+    print(f"Downloading {len(products)} product(s) with {workers} worker(s).", file=sys.stderr)
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {
             executor.submit(
@@ -831,16 +967,25 @@ def download_all(products: list[TnmProduct], args: argparse.Namespace) -> list[D
                 overwrite=args.overwrite,
                 timeout=args.timeout,
                 retries=args.retries,
+                progress_callback=progress.update,
             ): product
             for product in products
         }
-        for index, future in enumerate(as_completed(futures), start=1):
-            result = future.result()
-            results.append(result)
-            print(
-                f"  {result.status} {index}/{len(futures)}: "
-                f"{result.product.context.group}/{result.target.name}"
-            )
+        pending = set(futures)
+        progress.render(force=True)
+        while pending:
+            done, pending = wait(pending, timeout=DEFAULT_PROGRESS_INTERVAL_SECONDS, return_when=FIRST_COMPLETED)
+            if not done:
+                progress.render()
+                continue
+
+            for future in done:
+                result = future.result()
+                results.append(result)
+                progress.complete(result)
+            progress.render(force=True)
+
+    progress.close()
     return results
 
 

@@ -51,6 +51,10 @@ python -m tnm_elevation_downloader.download_tnm_elevation \
   KRDU KDEN KSFO --product both --radius-km 8 --dry-run
 ```
 
+When downloads run, the script prints an aggregate progress bar with completed
+file count, known bytes, and transfer speed. Use `--no-progress` if you are
+capturing logs and only want the final summary plus manifest.
+
 ## Dataset Keys
 
 DEM choices:
@@ -75,6 +79,12 @@ The downloader also keeps only the latest returned product per dataset
 footprint by default, which avoids downloading multiple historical versions of
 the same DEM tile. Use `--include-historical` when you need every version TNM
 returns.
+
+Downloads are concurrent by default with `--workers 4`. That is intentionally
+conservative for TNM/USGS public endpoints: it improves throughput without
+opening dozens of simultaneous connections. If a run is throttled or unreliable,
+drop to `--workers 1` or `--workers 2`; for a stable connection, modest values
+such as `--workers 6` can be tried.
 
 ## Output Layout
 
