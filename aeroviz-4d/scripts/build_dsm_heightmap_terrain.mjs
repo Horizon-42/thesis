@@ -32,6 +32,8 @@ const FALLBACK_HEIGHT_M = 0;
 const OVERLAY_MAX_WIDTH = 1024;
 const SOURCE_TILE_INDEX_CELL_SIZE_M = 512;
 const SOURCE_TILE_INDEX_CELL_SIZE_DEGREES = 0.01;
+const PROGRESS_BAR_WIDTH = 28;
+const TILE_PROGRESS_LOG_INTERVAL_MS = 2000;
 
 const UTM_K0 = 0.9996;
 const WGS84_A = 6378137.0;
@@ -55,6 +57,44 @@ function cliOption(name) {
   const prefix = `${name}=`;
   const value = process.argv.find((arg) => arg.startsWith(prefix));
   return value ? value.slice(prefix.length) : undefined;
+}
+
+function formatElapsed(ms) {
+  const totalSeconds = Math.floor(ms / 1000);
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const minutes = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+
+  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
+function progressBar(completed, total, width = PROGRESS_BAR_WIDTH) {
+  if (total <= 0) return `[${"-".repeat(width)}]`;
+  const clampedCompleted = Math.max(0, Math.min(completed, total));
+  const filled = Math.round((clampedCompleted / total) * width);
+  return `[${"#".repeat(filled)}${"-".repeat(width - filled)}]`;
+}
+
+function logTileProgress(progress, totalTiles, message = "") {
+  const percent = totalTiles > 0 ? Math.round((progress.written / totalTiles) * 100) : 0;
+  const elapsed = formatElapsed(Date.now() - progress.startedAt);
+  const suffix = message ? ` ${message}` : "";
+  console.log(
+    `${progressBar(progress.written, totalTiles)} ${progress.written}/${totalTiles} ${String(percent).padStart(3)}% tiles, elapsed ${elapsed}${suffix}`
+  );
+}
+
+function shouldLogTileProgress(progress, totalTiles) {
+  const now = Date.now();
+  if (progress.written >= totalTiles) return true;
+  if (now - progress.lastLoggedAt >= TILE_PROGRESS_LOG_INTERVAL_MS) {
+    progress.lastLoggedAt = now;
+    return true;
+  }
+  return false;
 }
 
 function numericGeoKey(geoKeys, key) {
@@ -638,6 +678,10 @@ function tileRangeForBounds(tilingScheme, bounds, level) {
   };
 }
 
+function tileCountForRange(range) {
+  return (range.maxX - range.minX + 1) * (range.maxY - range.minY + 1);
+}
+
 function sampleRasterAtSourceOrNull(dsm, sourceX, sourceY) {
   // image.getOrigin() describes the outer raster origin. Subtracting 0.5 is the
   // inverse of the pixel-center mapping used when writing coordinates out.
@@ -786,25 +830,48 @@ async function main() {
   const overlay = createOverlayPng(dataset, stats, bounds);
   const originalTifHeatmap = createOriginalTifHeatmapPng(dataset, stats);
   const tilingScheme = new Cesium.GeographicTilingScheme();
+  const levelRanges = [];
   const levels = [];
+  let plannedTileCount = 0;
   let tileCount = 0;
+
+  for (let level = MIN_LEVEL; level <= MAX_LEVEL; level += 1) {
+    const range = tileRangeForBounds(tilingScheme, bounds, level);
+    const levelTileCount = tileCountForRange(range);
+    plannedTileCount += levelTileCount;
+    levelRanges.push({ range, levelTileCount });
+  }
 
   await mkdir(outputDir, { recursive: true });
   await rm(tilesDir, { recursive: true, force: true });
   await writeFile(path.join(outputDir, "dsm_height_overlay.png"), overlay.png);
   await writeFile(path.join(outputDir, "dsm_original_tif_heatmap.png"), originalTifHeatmap.png);
-  for (let level = MIN_LEVEL; level <= MAX_LEVEL; level += 1) {
-    const range = tileRangeForBounds(tilingScheme, bounds, level);
+  const tileProgress = {
+    written: 0,
+    startedAt: Date.now(),
+    lastLoggedAt: Date.now(),
+  };
+  console.log(`Generating ${plannedTileCount} heightmap tile(s)`);
+  logTileProgress(tileProgress, plannedTileCount, "start");
+
+  for (const { range, levelTileCount: plannedLevelTileCount } of levelRanges) {
+    const { level } = range;
     let levelTileCount = 0;
+    console.log(`  level ${level}: ${plannedLevelTileCount} tile(s)`);
 
     for (let x = range.minX; x <= range.maxX; x += 1) {
       for (let y = range.minY; y <= range.maxY; y += 1) {
         await writeHeightTile(dataset, tilingScheme, x, y, level);
         levelTileCount += 1;
+        tileCount += 1;
+        tileProgress.written = tileCount;
+
+        if (shouldLogTileProgress(tileProgress, plannedTileCount)) {
+          logTileProgress(tileProgress, plannedTileCount, `level ${level}`);
+        }
       }
     }
 
-    tileCount += levelTileCount;
     levels.push({
       level,
       xRange: [range.minX, range.maxX],
