@@ -585,7 +585,8 @@ class DownloadProgress:
             self.completed_files += 1
             if result.status in {"downloaded", "skipped"}:
                 final_size = result.size_in_bytes or self.expected_by_target.get(target, 0)
-                self.current_by_target[target] = max(self.current_by_target.get(target, 0), final_size)
+                self.expected_by_target[target] = final_size
+                self.current_by_target[target] = final_size
 
     def _line(self) -> str:
         with self.lock:

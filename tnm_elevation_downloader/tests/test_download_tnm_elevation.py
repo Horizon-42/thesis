@@ -7,6 +7,8 @@ from pathlib import Path
 from tnm_elevation_downloader.download_tnm_elevation import (
     DATASET_SPECS,
     DEFAULT_RADIUS_KM,
+    DownloadProgress,
+    DownloadResult,
     TnmProduct,
     bbox_from_point,
     build_query_contexts,
@@ -116,6 +118,35 @@ class TnmElevationDownloaderTests(unittest.TestCase):
         self.assertEqual(progress_bar(-1, width=4), "[----]")
         self.assertEqual(progress_bar(0.5, width=4), "[##--]")
         self.assertEqual(progress_bar(2, width=4), "[####]")
+
+    def test_progress_completes_when_actual_download_size_differs_from_tnm_metadata(self) -> None:
+        context = Namespace(group="KRDU", label="KRDU", bbox=[], latitude=0.0, longitude=0.0)
+        products = [
+            TnmProduct(
+                context=context,
+                spec=DATASET_SPECS["dsm_lpc"],
+                item={
+                    "title": f"product-{index}",
+                    "downloadURL": f"https://example.test/product-{index}.laz",
+                    "sizeInBytes": 1000,
+                },
+            )
+            for index in range(2)
+        ]
+        progress = DownloadProgress(products, Path("out"), enabled=True)
+
+        for product in products:
+            target = target_path(Path("out"), product)
+            progress.complete(
+                DownloadResult(
+                    product=product,
+                    target=target,
+                    status="downloaded",
+                    size_in_bytes=500,
+                )
+            )
+
+        self.assertIn("100.0%", progress._line())
 
     def test_target_path_uses_dataset_subdir(self) -> None:
         context = Namespace(group="KRDU", label="KRDU", bbox=[], latitude=0.0, longitude=0.0)
