@@ -53,11 +53,47 @@ const ACTIVE_LAYER_KEYS: LayerKey[] = [
   "ocsSurfaces",
 ];
 
+function formatTerrainStatus(status: string): string {
+  switch (status) {
+    case "active":
+      return "Active";
+    case "preloading":
+      return "Preloading";
+    case "loading":
+      return "Loading";
+    case "missing":
+      return "Missing";
+    case "error":
+      return "Error";
+    case "disabled":
+    default:
+      return "Off";
+  }
+}
+
+function formatTerrainResolution(resolutionM: number | null): string {
+  if (resolutionM === null || !Number.isFinite(resolutionM)) return "Pending";
+
+  const precision = resolutionM < 1 ? 3 : resolutionM < 10 ? 2 : 1;
+  return `${Number(resolutionM.toFixed(precision)).toLocaleString()} m/px`;
+}
+
+function formatTerrainSource(kind: string | null, name: string | null): string {
+  const normalizedKind = kind && kind !== "unknown" ? kind.toUpperCase() : null;
+  if (normalizedKind && name) return `${normalizedKind} (${name})`;
+  return normalizedKind ?? name ?? "Pending";
+}
+
+function formatTerrainCrs(code: string | null): string {
+  return code ?? "Pending";
+}
+
 export default function ControlPanel() {
   const {
     viewer,
     layers,
     toggleLayer,
+    airportLocalTerrain,
     playbackSpeed,
     setPlaybackSpeed,
     airports,
@@ -168,6 +204,32 @@ export default function ControlPanel() {
           </label>
         ))}
       </section>
+
+      {layers.airportLocalTerrain ? (
+        <section className="control-panel-local-terrain" aria-label="Airport local terrain details">
+          <h4>Local Terrain</h4>
+          <dl className="control-panel-terrain-details">
+            <div>
+              <dt>Status</dt>
+              <dd>{formatTerrainStatus(airportLocalTerrain.status)}</dd>
+            </div>
+            <div>
+              <dt>Tile precision</dt>
+              <dd>{formatTerrainResolution(airportLocalTerrain.horizontalResolutionM)}</dd>
+            </div>
+            <div>
+              <dt>Source</dt>
+              <dd>{formatTerrainSource(airportLocalTerrain.sourceKind, airportLocalTerrain.sourceName)}</dd>
+            </div>
+            <div>
+              <dt>CRS</dt>
+              <dd title={airportLocalTerrain.sourceCrsName ?? undefined}>
+                {formatTerrainCrs(airportLocalTerrain.sourceCrsCode)}
+              </dd>
+            </div>
+          </dl>
+        </section>
+      ) : null}
     </div>
   );
 }

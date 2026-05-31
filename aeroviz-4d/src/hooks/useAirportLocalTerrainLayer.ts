@@ -143,6 +143,7 @@ export function useAirportLocalTerrainLayer(
           status: "preloading",
           airportCode: activeAirportCode,
           heightRange: activationPlan.heightRange,
+          metadata,
           loadedTiles: 0,
           totalTiles: activationPlan.focusedTiles.length,
         }));
@@ -165,6 +166,7 @@ export function useAirportLocalTerrainLayer(
               status: "preloading",
               airportCode: activeAirportCode,
               heightRange: activationPlan.heightRange,
+              metadata,
               loadedTiles,
               totalTiles,
             }));
@@ -193,6 +195,7 @@ export function useAirportLocalTerrainLayer(
           status: "active",
           airportCode: activeAirportCode,
           heightRange: activationPlan.heightRange,
+          metadata,
           loadedTiles: activeLoadedTiles,
           totalTiles: activeTotalTiles,
         }));
@@ -215,6 +218,7 @@ export function useAirportLocalTerrainLayer(
                 status: "active",
                 airportCode: activeAirportCode,
                 heightRange: activationPlan.heightRange,
+                metadata,
                 loadedTiles,
                 totalTiles,
               }));

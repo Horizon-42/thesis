@@ -3,6 +3,7 @@ import type { AirportLocalTerrainState } from "../context/AppContext";
 import {
   airportLocalTerrainTileRefsNearCoordinate,
   type AirportLocalTerrainMetadata,
+  type AirportLocalTerrainSourceCrsMetadata,
   type AirportLocalTerrainTileRef,
 } from "./airportLocalTerrain";
 
@@ -260,12 +261,81 @@ export function buildLocalTerrainActivationPlan(
   };
 }
 
+type AirportLocalTerrainMetadataStateFields = Pick<
+  AirportLocalTerrainState,
+  | "sourceLabel"
+  | "sourceKind"
+  | "sourceName"
+  | "horizontalResolutionM"
+  | "sourceCrsCode"
+  | "sourceCrsName"
+>;
+
+function airportLocalTerrainEmptyMetadataStateFields(
+  sourceLabel: string | null = AIRPORT_LOCAL_TERRAIN_SOURCE_LABEL,
+): AirportLocalTerrainMetadataStateFields {
+  return {
+    sourceLabel,
+    sourceKind: null,
+    sourceName: null,
+    horizontalResolutionM: null,
+    sourceCrsCode: null,
+    sourceCrsName: null,
+  };
+}
+
+function numericCrsCode(value: number | null | undefined): string | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? `EPSG:${Math.trunc(value)}`
+    : null;
+}
+
+function textCrsCode(sourceCrs: AirportLocalTerrainSourceCrsMetadata | undefined): string | null {
+  const horizontal = sourceCrs?.horizontal;
+  if (!horizontal) return null;
+
+  const epsgMatch = horizontal.match(/\bEPSG:(\d+)\b/i);
+  if (epsgMatch) return `EPSG:${epsgMatch[1]}`;
+
+  const utmMatch = horizontal.match(/\bUTM\s+zone\s+(\d{1,2})\b/i);
+  if (utmMatch) return `UTM zone ${utmMatch[1]}`;
+
+  return null;
+}
+
+function airportLocalTerrainMetadataStateFields(
+  metadata: AirportLocalTerrainMetadata | null | undefined,
+): AirportLocalTerrainMetadataStateFields {
+  if (!metadata) return airportLocalTerrainEmptyMetadataStateFields();
+
+  const sourceCrs = metadata.sourceCrs;
+  const horizontalResolutionM = metadata.precision.horizontalResolutionM;
+
+  return {
+    sourceLabel: AIRPORT_LOCAL_TERRAIN_SOURCE_LABEL,
+    sourceKind: metadata.source?.kind ?? null,
+    sourceName: metadata.source?.label ?? null,
+    horizontalResolutionM: Number.isFinite(horizontalResolutionM)
+      ? horizontalResolutionM
+      : null,
+    sourceCrsCode:
+      numericCrsCode(sourceCrs?.epsg) ??
+      (
+        typeof sourceCrs?.utmZone === "number" && Number.isFinite(sourceCrs.utmZone)
+          ? `UTM zone ${Math.trunc(sourceCrs.utmZone)}`
+          : null
+      ) ??
+      textCrsCode(sourceCrs),
+    sourceCrsName: sourceCrs?.horizontal ?? null,
+  };
+}
+
 export function airportLocalTerrainState(
-  args: Omit<AirportLocalTerrainState, "sourceLabel"> & {
-    sourceLabel?: string | null;
-  },
+  args: Omit<AirportLocalTerrainState, keyof AirportLocalTerrainMetadataStateFields> &
+    Partial<AirportLocalTerrainMetadataStateFields>,
 ): AirportLocalTerrainState {
   return {
+    ...airportLocalTerrainEmptyMetadataStateFields(),
     ...args,
     sourceLabel: args.sourceLabel ?? AIRPORT_LOCAL_TERRAIN_SOURCE_LABEL,
   };
@@ -277,11 +347,13 @@ export function airportLocalTerrainProgressState(args: {
   heightRange?: TerrainHeightRange | null;
   loadedTiles?: number;
   totalTiles?: number;
+  metadata?: AirportLocalTerrainMetadata | null;
   error?: string | null;
 }): AirportLocalTerrainState {
   return airportLocalTerrainState({
     status: args.status,
     airportCode: args.airportCode,
+    ...airportLocalTerrainMetadataStateFields(args.metadata),
     minimumHeightM: args.heightRange?.minimumHeightM ?? null,
     maximumHeightM: args.heightRange?.maximumHeightM ?? null,
     loadedTiles: args.loadedTiles ?? 0,
@@ -297,6 +369,11 @@ export function missingAirportLocalTerrainState(
     status: "missing",
     airportCode,
     sourceLabel: null,
+    sourceKind: null,
+    sourceName: null,
+    horizontalResolutionM: null,
+    sourceCrsCode: null,
+    sourceCrsName: null,
     minimumHeightM: null,
     maximumHeightM: null,
     loadedTiles: 0,
@@ -312,6 +389,11 @@ export function disabledAirportLocalTerrainState(
     status: "disabled",
     airportCode,
     sourceLabel: null,
+    sourceKind: null,
+    sourceName: null,
+    horizontalResolutionM: null,
+    sourceCrsCode: null,
+    sourceCrsName: null,
     minimumHeightM: null,
     maximumHeightM: null,
     loadedTiles: 0,

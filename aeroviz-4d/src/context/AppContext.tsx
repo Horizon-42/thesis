@@ -42,6 +42,7 @@ import type {
 } from "../data/procedureAnnotations";
 import { fetchJson } from "../utils/fetchJson";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
+import type { AirportLocalTerrainSourceKind } from "../terrain/airportLocalTerrain";
 
 // ── Layer names ──────────────────────────────────────────────────────────────
 // Extend this union if you add new data layers.
@@ -73,6 +74,11 @@ export interface AirportLocalTerrainState {
   status: AirportLocalTerrainStatus;
   airportCode: string | null;
   sourceLabel: string | null;
+  sourceKind: AirportLocalTerrainSourceKind | null;
+  sourceName: string | null;
+  horizontalResolutionM: number | null;
+  sourceCrsCode: string | null;
+  sourceCrsName: string | null;
   minimumHeightM: number | null;
   maximumHeightM: number | null;
   loadedTiles: number;
@@ -88,6 +94,11 @@ function airportLocalTerrainStateForLayer(
     status: enabled ? "loading" : "disabled",
     airportCode,
     sourceLabel: null,
+    sourceKind: null,
+    sourceName: null,
+    horizontalResolutionM: null,
+    sourceCrsCode: null,
+    sourceCrsName: null,
     minimumHeightM: null,
     maximumHeightM: null,
     loadedTiles: 0,
@@ -211,6 +222,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     status: "disabled",
     airportCode: null,
     sourceLabel: null,
+    sourceKind: null,
+    sourceName: null,
+    horizontalResolutionM: null,
+    sourceCrsCode: null,
+    sourceCrsName: null,
     minimumHeightM: null,
     maximumHeightM: null,
     loadedTiles: 0,

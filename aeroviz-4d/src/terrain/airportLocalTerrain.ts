@@ -41,6 +41,15 @@ export interface AirportLocalTerrainSourceMetadata {
   sourceDir?: string;
 }
 
+export interface AirportLocalTerrainSourceCrsMetadata {
+  kind?: "utm" | "geographic" | string;
+  horizontal?: string;
+  units?: string;
+  epsg?: number | null;
+  utmZone?: number | null;
+  vertical?: string;
+}
+
 export interface AirportLocalTerrainMetadata {
   format: "float32-little-endian-heightmap";
   tileWidth: number;
@@ -49,6 +58,7 @@ export interface AirportLocalTerrainMetadata {
   tilesBaseUrl: string;
   source?: AirportLocalTerrainSourceMetadata;
   precision: AirportLocalTerrainPrecisionMetadata;
+  sourceCrs?: AirportLocalTerrainSourceCrsMetadata;
   overlay?: {
     url: string;
     width: number;
