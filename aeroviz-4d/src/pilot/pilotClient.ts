@@ -1,0 +1,126 @@
+export interface PilotControls {
+  thrustN: number;
+  bankDeg: number;
+  loadFactor: number;
+}
+
+export interface PilotResetState {
+  lon: number;
+  lat: number;
+  altM: number;
+  speedMps: number;
+  headingDeg: number;
+  flightPathDeg: number;
+  massKg: number;
+}
+
+export interface PilotSnapshot {
+  ok: true;
+  elapsedS: number;
+  state: PilotResetState;
+  control: PilotControls;
+  aero: {
+    liftCoefficient: number;
+    dragCoefficient: number;
+  };
+}
+
+interface PilotErrorResponse {
+  ok: false;
+  error: string;
+}
+
+const DEFAULT_PILOT_SERVER_URL = "http://127.0.0.1:8765";
+
+export const PILOT_SERVER_URL =
+  import.meta.env.VITE_PILOT_SERVER_URL || DEFAULT_PILOT_SERVER_URL;
+
+export async function resetPilotSimulation(
+  state: PilotResetState,
+  control: PilotControls,
+): Promise<PilotSnapshot> {
+  return postPilot("/reset", { state, control });
+}
+
+export async function stepPilotSimulation(
+  control: PilotControls,
+  dtS: number,
+): Promise<PilotSnapshot> {
+  return postPilot("/step", { control, dtS });
+}
+
+async function postPilot(path: string, payload: unknown): Promise<PilotSnapshot> {
+  const response = await fetch(`${PILOT_SERVER_URL}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json() as unknown;
+
+  if (!response.ok) {
+    const message = readPilotError(data) ?? `Pilot server returned ${response.status}`;
+    throw new Error(message);
+  }
+  return parsePilotSnapshot(data);
+}
+
+function readPilotError(value: unknown): string | null {
+  if (!isRecord(value)) return null;
+  const response = value as Partial<PilotErrorResponse>;
+  return response.ok === false && typeof response.error === "string"
+    ? response.error
+    : null;
+}
+
+function parsePilotSnapshot(value: unknown): PilotSnapshot {
+  if (!isRecord(value) || value.ok !== true) {
+    throw new Error("Pilot server returned an invalid response");
+  }
+
+  const state = readRecord(value, "state");
+  const control = readRecord(value, "control");
+  const aero = readRecord(value, "aero");
+
+  return {
+    ok: true,
+    elapsedS: readNumber(value, "elapsedS"),
+    state: {
+      lon: readNumber(state, "lon"),
+      lat: readNumber(state, "lat"),
+      altM: readNumber(state, "altM"),
+      speedMps: readNumber(state, "speedMps"),
+      headingDeg: readNumber(state, "headingDeg"),
+      flightPathDeg: readNumber(state, "flightPathDeg"),
+      massKg: readNumber(state, "massKg"),
+    },
+    control: {
+      thrustN: readNumber(control, "thrustN"),
+      bankDeg: readNumber(control, "bankDeg"),
+      loadFactor: readNumber(control, "loadFactor"),
+    },
+    aero: {
+      liftCoefficient: readNumber(aero, "liftCoefficient"),
+      dragCoefficient: readNumber(aero, "dragCoefficient"),
+    },
+  };
+}
+
+function readRecord(value: Record<string, unknown>, key: string): Record<string, unknown> {
+  const nested = value[key];
+  if (!isRecord(nested)) {
+    throw new Error(`Pilot server response is missing ${key}`);
+  }
+  return nested;
+}
+
+function readNumber(value: Record<string, unknown>, key: string): number {
+  const nested = value[key];
+  if (typeof nested !== "number" || !Number.isFinite(nested)) {
+    throw new Error(`Pilot server response has invalid ${key}`);
+  }
+  return nested;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}

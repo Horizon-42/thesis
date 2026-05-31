@@ -20,6 +20,7 @@ import FlightTable from "./components/FlightTable";
 import ProcedureDetailsPage from "./components/ProcedureDetailsPage";
 import ProcedureAnnotationPopup from "./components/ProcedureAnnotationPopup";
 import ProcedurePanel from "./components/ProcedurePanel";
+import PilotPanel from "./components/PilotPanel";
 import RunwayTrajectoryProfilePanel from "./components/RunwayTrajectoryProfilePanel";
 import { useApp } from "./context/AppContext";
 import { airportDataUrl } from "./data/airportData";
@@ -44,6 +45,7 @@ function FlightApp() {
         <ControlPanel />
         <AirportLocalTerrainAlert />
         <ProcedurePanel />
+        <PilotPanel />
         <ProcedureAnnotationPopup />
         <RunwayTrajectoryProfilePanel />
         {czmlStatus ? (

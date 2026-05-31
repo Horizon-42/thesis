@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "pilot-server": "python python/pilot_sim_server.py",
     "build": "tsc && vite build",
     "build:local-terrain": "node scripts/build_local_terrain_heightmap.mjs",
     "build:local-terrain:visual-assets": "node scripts/build_local_terrain_heightmap.mjs --visual-assets-only",

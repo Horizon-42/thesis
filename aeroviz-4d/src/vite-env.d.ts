@@ -6,6 +6,7 @@
 interface ImportMetaEnv
 {
     readonly VITE_CESIUM_ION_TOKEN:string;
+    readonly VITE_PILOT_SERVER_URL?:string;
 }
 
 interface ImportMeta {
