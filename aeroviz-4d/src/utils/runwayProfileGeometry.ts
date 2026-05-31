@@ -525,13 +525,21 @@ function isFinalProfileSegment(segmentBundle: ProcedureSegmentRenderBundle): boo
   return segmentBundle.segment.segmentType?.startsWith("FINAL") === true;
 }
 
-function finalVerticalReferenceGeoPositions(segmentBundle: ProcedureSegmentRenderBundle) {
+function finalVerticalReferenceGeoPositions(
+  segmentBundle: ProcedureSegmentRenderBundle,
+  protectionSurfaces: ProcedureProtectionSurface[],
+) {
   if (!isFinalProfileSegment(segmentBundle)) return [];
   const gpaDeg = segmentBundle.segment.verticalRule?.gpaDeg;
   if (typeof gpaDeg !== "number" || !Number.isFinite(gpaDeg) || gpaDeg <= 0) return [];
 
-  if (segmentBundle.lnavVnavOcs?.centerline.geoPositions.length) {
-    return segmentBundle.lnavVnavOcs.centerline.geoPositions;
+  const lnavVnavSurface = protectionSurfaceForSegment(
+    protectionSurfaces,
+    segmentBundle.segment.segmentId,
+    "FINAL_LNAV_VNAV_OCS",
+  );
+  if (lnavVnavSurface?.centerline.geoPositions.length) {
+    return lnavVnavSurface.centerline.geoPositions;
   }
 
   const centerline = segmentBundle.segmentGeometry.centerline;
@@ -570,9 +578,17 @@ function finalVerticalReferenceGeoPositions(segmentBundle: ProcedureSegmentRende
   });
 }
 
-function finalVerticalReferenceHalfWidthM(segmentBundle: ProcedureSegmentRenderBundle): number {
+function finalVerticalReferenceHalfWidthM(
+  segmentBundle: ProcedureSegmentRenderBundle,
+  protectionSurfaces: ProcedureProtectionSurface[],
+): number {
+  const finalOeaSurface = protectionSurfaceForSegment(
+    protectionSurfaces,
+    segmentBundle.segment.segmentId,
+    "FINAL_LNAV_OEA",
+  );
   const protectionWidthSamples =
-    segmentBundle.finalOea?.primary.halfWidthNmSamples ??
+    finalOeaSurface?.lateral?.primary?.halfWidthNmSamples ??
     segmentBundle.segmentGeometry.primaryEnvelope?.halfWidthNmSamples ??
     [];
   const maxProtectionHalfWidthNm =
@@ -640,9 +656,17 @@ export function attachRenderBundleAssessmentSegments(
                 segmentBundle.segmentGeometry.secondaryEnvelope?.halfWidthNmSamples,
               ) ??
               (segmentBundle.segment.secondaryEnabled ? segmentBundle.segment.xttNm * 3 * 1852 : null);
-            const finalVerticalReferenceGeo = finalVerticalReferenceGeoPositions(segmentBundle);
+            const finalVerticalReferenceGeo = finalVerticalReferenceGeoPositions(
+              segmentBundle,
+              branchProtectionSurfaces,
+            );
             const gpaDeg = segmentBundle.segment.verticalRule?.gpaDeg;
             const tchFt = segmentBundle.segment.verticalRule?.tchFt;
+            const lnavVnavSurface = protectionSurfaceForSegment(
+              branchProtectionSurfaces,
+              segmentBundle.segment.segmentId,
+              "FINAL_LNAV_VNAV_OCS",
+            );
             const finalVerticalReference =
               finalVerticalReferenceGeo.length >= 2 &&
               typeof gpaDeg === "number" &&
@@ -653,27 +677,25 @@ export function attachRenderBundleAssessmentSegments(
                     gpaDeg,
                     tchFt: typeof tchFt === "number" && Number.isFinite(tchFt) ? tchFt : null,
                     estimatedFromThreshold:
-                      segmentBundle.lnavVnavOcs === null &&
+                      lnavVnavSurface === null &&
                       typeof segmentBundle.segment.verticalRule?.tchFt !== "number",
-                    halfWidthM: finalVerticalReferenceHalfWidthM(segmentBundle),
+                    halfWidthM: finalVerticalReferenceHalfWidthM(
+                      segmentBundle,
+                      branchProtectionSurfaces,
+                    ),
                     points: finalVerticalReferenceGeo.map((point) =>
                       projectPositionToRunwayFrame(frame, point.lonDeg, point.latDeg, point.altM),
                     ),
                   }
                 : undefined;
-            const lnavVnavSurface = protectionSurfaceForSegment(
-              branchProtectionSurfaces,
-              segmentBundle.segment.segmentId,
-              "FINAL_LNAV_VNAV_OCS",
-            );
             const lnavVnavGpaDeg =
               typeof segmentBundle.segment.verticalRule?.gpaDeg === "number"
                 ? segmentBundle.segment.verticalRule.gpaDeg
-                : segmentBundle.lnavVnavOcs?.verticalProfile.gpaDeg;
+                : undefined;
             const lnavVnavTchFt =
               typeof segmentBundle.segment.verticalRule?.tchFt === "number"
                 ? segmentBundle.segment.verticalRule.tchFt
-                : segmentBundle.lnavVnavOcs?.verticalProfile.tchFt;
+                : undefined;
             const lnavVnavOcs =
               lnavVnavSurface &&
               lnavVnavSurface.centerline.geoPositions.length >= 2 &&
@@ -694,23 +716,7 @@ export function attachRenderBundleAssessmentSegments(
                     secondaryHalfWidthM,
                   points: surfacePoints(lnavVnavSurface, frame),
                 }
-                : segmentBundle.lnavVnavOcs
-                  ? {
-                      kind: "LNAV_VNAV_OCS" as const,
-                      label: "LNAV/VNAV OCS",
-                      gpaDeg: segmentBundle.lnavVnavOcs.verticalProfile.gpaDeg,
-                      tchFt: segmentBundle.lnavVnavOcs.verticalProfile.tchFt,
-                      primaryHalfWidthM:
-                        maxHalfWidthM(segmentBundle.lnavVnavOcs.primary.halfWidthNmSamples) ??
-                        primaryHalfWidthM,
-                      secondaryHalfWidthM:
-                        maxHalfWidthM(segmentBundle.lnavVnavOcs.secondaryOuter.halfWidthNmSamples) ??
-                        secondaryHalfWidthM,
-                      points: segmentBundle.lnavVnavOcs.centerline.geoPositions.map((point) =>
-                        projectPositionToRunwayFrame(frame, point.lonDeg, point.latDeg, point.altM),
-                      ),
-                    }
-                  : undefined;
+                : undefined;
             const precisionSurfacesFromProtection = protectionSurfacesForSegment(
               branchProtectionSurfaces,
               segmentBundle.segment.segmentId,
@@ -731,20 +737,7 @@ export function attachRenderBundleAssessmentSegments(
                     : 0,
                 points: surfacePoints(surface, frame),
               }));
-            const precisionSurfaces = precisionSurfacesFromProtection.length > 0
-              ? precisionSurfacesFromProtection
-              : (segmentBundle.precisionFinalSurfaces ?? [])
-              .filter((surface) => surface.centerline.geoPositions.length >= 2)
-              .map((surface) => ({
-                kind: "PRECISION_SURFACE" as const,
-                label: `${surface.surfaceType.replace(/_/g, " ")} estimate`,
-                surfaceType: surface.surfaceType,
-                gpaDeg: surface.verticalProfile.gpaDeg,
-                tchFt: surface.verticalProfile.tchFt,
-                points: surface.centerline.geoPositions.map((point) =>
-                  projectPositionToRunwayFrame(frame, point.lonDeg, point.latDeg, point.altM),
-                ),
-              }));
+            const precisionSurfaces = precisionSurfacesFromProtection;
 
             return {
               segmentId: segmentBundle.segment.segmentId,

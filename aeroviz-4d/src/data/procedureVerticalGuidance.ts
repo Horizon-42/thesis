@@ -4,6 +4,7 @@ import type {
   ProcedureSegmentRenderBundle,
 } from "./procedureRenderBundle";
 import type { ProcedurePackage } from "./procedurePackage";
+import type { ProcedureProtectionSurface } from "./procedureProtectionSurfaces";
 import { distanceNm, type GeoPoint } from "../utils/procedureGeoMath";
 import {
   buildVariableWidthRibbon,
@@ -47,6 +48,30 @@ function nearestHalfWidthNm(
   return nearest?.halfWidthNm ?? FINAL_VERTICAL_REFERENCE_DEFAULT_HALF_WIDTH_NM * 2;
 }
 
+function protectionSurfaceForSegment(
+  surfaces: ProcedureProtectionSurface[],
+  segmentId: string,
+  kind: ProcedureProtectionSurface["kind"],
+): ProcedureProtectionSurface | null {
+  return surfaces.find((surface) => surface.segmentId === segmentId && surface.kind === kind) ?? null;
+}
+
+function primaryProtectionWidthSamples(
+  segmentBundle: ProcedureSegmentRenderBundle,
+  protectionSurfaces: ProcedureProtectionSurface[],
+): Array<{ stationNm: number; halfWidthNm: number }> {
+  const finalOeaSurface = protectionSurfaceForSegment(
+    protectionSurfaces,
+    segmentBundle.segment.segmentId,
+    "FINAL_LNAV_OEA",
+  );
+  return (
+    finalOeaSurface?.lateral.primary.halfWidthNmSamples ??
+    segmentBundle.segmentGeometry.primaryEnvelope?.halfWidthNmSamples ??
+    []
+  );
+}
+
 /**
  * Builds the final-approach vertical reference as domain geometry.
  *
@@ -56,13 +81,19 @@ function nearestHalfWidthNm(
  */
 export function finalVerticalReferencePoints(
   segmentBundle: ProcedureSegmentRenderBundle,
+  protectionSurfaces: ProcedureProtectionSurface[] = [],
 ): GeoPoint[] {
   if (!isFinalSegment(segmentBundle.segment.segmentType)) return [];
   const gpaDeg = segmentBundle.segment.verticalRule?.gpaDeg;
   if (typeof gpaDeg !== "number" || !Number.isFinite(gpaDeg) || gpaDeg <= 0) return [];
 
-  if (segmentBundle.lnavVnavOcs?.centerline.geoPositions.length) {
-    return segmentBundle.lnavVnavOcs.centerline.geoPositions;
+  const lnavVnavSurface = protectionSurfaceForSegment(
+    protectionSurfaces,
+    segmentBundle.segment.segmentId,
+    "FINAL_LNAV_VNAV_OCS",
+  );
+  if (lnavVnavSurface?.centerline.geoPositions.length) {
+    return lnavVnavSurface.centerline.geoPositions;
   }
 
   const centerline = segmentBundle.segmentGeometry.centerline;
@@ -104,6 +135,7 @@ export function finalVerticalReferencePoints(
 export function buildFinalVerticalReferenceRibbon(
   segmentBundle: ProcedureSegmentRenderBundle,
   points: GeoPoint[],
+  protectionSurfaces: ProcedureProtectionSurface[] = [],
 ): VariableWidthRibbonGeometry | null {
   if (points.length < 2) return null;
   const stations: number[] = [];
@@ -114,10 +146,7 @@ export function buildFinalVerticalReferenceRibbon(
     }
     stations.push(cumulativeNm);
   });
-  const protectionWidthSamples =
-    segmentBundle.finalOea?.primary.halfWidthNmSamples ??
-    segmentBundle.segmentGeometry.primaryEnvelope?.halfWidthNmSamples ??
-    [];
+  const protectionWidthSamples = primaryProtectionWidthSamples(segmentBundle, protectionSurfaces);
   const nearestProtectionHalfWidthNm = (stationNm: number) =>
     nearestHalfWidthNm(protectionWidthSamples, stationNm);
 
@@ -142,11 +171,9 @@ function segmentProtectionHalfWidthNm(
   segmentBundle: ProcedureSegmentRenderBundle,
   pointIndex: number,
   pointCount: number,
+  protectionSurfaces: ProcedureProtectionSurface[],
 ): number {
-  const protectionWidthSamples =
-    segmentBundle.finalOea?.primary.halfWidthNmSamples ??
-    segmentBundle.segmentGeometry.primaryEnvelope?.halfWidthNmSamples ??
-    [];
+  const protectionWidthSamples = primaryProtectionWidthSamples(segmentBundle, protectionSurfaces);
   const totalStationNm =
     protectionWidthSamples[protectionWidthSamples.length - 1]?.stationNm ??
     segmentBundle.segmentGeometry.centerline.geodesicLengthNm;
@@ -158,6 +185,7 @@ function segmentProtectionHalfWidthNm(
 function segmentVerticalProfilePointsForSegment(
   segmentBundle: ProcedureSegmentRenderBundle,
   pkg: ProcedurePackage | null,
+  protectionSurfaces: ProcedureProtectionSurface[],
 ): SegmentVerticalProfilePoint[] {
   if (!pkg) return [];
   const fixById = new Map(pkg.sharedFixes.map((fix) => [fix.fixId, fix]));
@@ -204,7 +232,12 @@ function segmentVerticalProfilePointsForSegment(
   return points
     .map((point, index) => ({
       ...point,
-      halfWidthNm: segmentProtectionHalfWidthNm(segmentBundle, index, points.length),
+      halfWidthNm: segmentProtectionHalfWidthNm(
+        segmentBundle,
+        index,
+        points.length,
+        protectionSurfaces,
+      ),
     }))
     .filter(
       (point, index) =>
@@ -251,7 +284,11 @@ export function branchVerticalProfileSections(
       return;
     }
 
-    const points = segmentVerticalProfilePointsForSegment(segmentBundle, pkg);
+    const points = segmentVerticalProfilePointsForSegment(
+      segmentBundle,
+      pkg,
+      branchBundle.protectionSurfaces,
+    );
     if (points.length === 0) return;
 
     if (!currentSection) {

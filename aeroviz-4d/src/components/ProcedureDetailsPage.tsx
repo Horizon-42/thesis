@@ -2135,9 +2135,11 @@ export default function ProcedureDetailsPage() {
         focusedScopedBranchId ? branchBundle.branchId === focusedScopedBranchId : true,
       )
       .flatMap((branchBundle) =>
-        branchBundle.segmentBundles
-          .map((segmentBundle) => segmentBundle.missedSectionSurface)
-          .filter((surface): surface is NonNullable<typeof surface> => surface !== null),
+        branchBundle.protectionSurfaces.filter(
+          (surface) =>
+            surface.kind === "MISSED_SECTION_1" ||
+            surface.kind === "MISSED_SECTION_2_STRAIGHT",
+        ),
       );
   }, [focusedScopedBranchId, procedureRenderBundle]);
   const focusedFixTerminalLeg = useMemo(
@@ -2408,8 +2410,8 @@ export default function ProcedureDetailsPage() {
                   {focusedMissedSectionSurfaces.map((surface) => (
                     <li key={`missed-surface-status-${surface.segmentId}`}>
                       <strong>Missed section status</strong>
-                      : {surface.sectionKind.replace(/_/g, " ")} {surface.constructionStatus}; vertical{" "}
-                      {surface.verticalProfile.constructionStatus.replace(/_/g, " ").toLowerCase()}
+                      : {surface.kind.replace(/_/g, " ")} {surface.status}; vertical{" "}
+                      {surface.vertical.origin.replace(/_/g, " ").toLowerCase()}
                     </li>
                   ))}
                   {focusedRenderDiagnostics.map((diagnostic, index) => (

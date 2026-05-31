@@ -632,9 +632,13 @@ describe("procedure render bundle", () => {
     expect(bundle.packageId).toBe("KRDU-R05LY-RW05L");
     expect(bundle.branchBundles).toHaveLength(1);
     const segmentBundle = bundle.branchBundles[0].segmentBundles[0];
+    const protectionSurfaces = bundle.branchBundles[0].protectionSurfaces;
     expect(segmentBundle.segment.segmentId).toBe("segment:final");
     expect(segmentBundle.segmentGeometry.centerline.geoPositions.length).toBeGreaterThan(2);
-    expect(segmentBundle.finalOea?.surfaceType).toBe("LNAV_FINAL_OEA");
+    expect(protectionSurfaces.find((surface) => surface.kind === "FINAL_LNAV_OEA")).toMatchObject({
+      surfaceId: "segment:final:lnav-oea",
+      status: "SOURCE_BACKED",
+    });
     expect(segmentBundle.finalSurfaceStatus).toMatchObject({
       constructedSurfaceTypes: ["LNAV_FINAL_OEA"],
       missingSurfaceTypes: [],
@@ -643,7 +647,7 @@ describe("procedure render bundle", () => {
     expect(segmentBundle.alignedConnector?.connectorType).toBe(
       "ALIGNED_LNAV_INTERMEDIATE_TO_FINAL",
     );
-    expect(bundle.branchBundles[0].protectionSurfaces).toEqual(
+    expect(protectionSurfaces).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           surfaceId: "segment:final:lnav-oea",
@@ -718,13 +722,19 @@ describe("procedure render bundle", () => {
       enableDebugPrimitives: false,
     });
     const segmentBundle = bundle.branchBundles[0].segmentBundles[0];
+    const lnavVnavSurface = bundle.branchBundles[0].protectionSurfaces.find(
+      (surface) => surface.kind === "FINAL_LNAV_VNAV_OCS",
+    );
 
-    expect(segmentBundle.lnavVnavOcs).toMatchObject({
-      surfaceType: "LNAV_VNAV_OCS",
-      constructionStatus: "GPA_TCH_SLOPE_ESTIMATE",
-      verticalProfile: {
-        gpaDeg: 3,
-        tchFt: 50,
+    expect(lnavVnavSurface).toMatchObject({
+      surfaceId: "segment:final:lnav-vnav-ocs",
+      status: "TERPS_ESTIMATE",
+      vertical: {
+        kind: "OCS",
+        origin: "GPA_TCH",
+        notes: expect.arrayContaining([
+          "GPA 3 deg with TCH 50 ft.",
+        ]),
       },
     });
     expect(segmentBundle.finalSurfaceStatus).toMatchObject({
@@ -770,13 +780,19 @@ describe("procedure render bundle", () => {
       enableDebugPrimitives: false,
     });
     const segmentBundle = bundle.branchBundles[0].segmentBundles[0];
+    const precisionSurfaces = bundle.branchBundles[0].protectionSurfaces.filter(
+      (surface) => surface.kind === "FINAL_PRECISION_DEBUG",
+    );
 
-    expect(segmentBundle.precisionFinalSurfaces.map((surface) => surface.surfaceType)).toEqual([
+    expect(precisionSurfaces.map((surface) => {
+      const suffix = surface.surfaceId.split(":").pop() ?? "";
+      return suffix.replace(/-/g, "_").toUpperCase();
+    })).toEqual([
       "LPV_W",
       "LPV_X",
       "LPV_Y",
     ]);
-    expect(segmentBundle.precisionFinalSurfaces.map((surface) => surface.geometryId)).toEqual([
+    expect(precisionSurfaces.map((surface) => surface.surfaceId)).toEqual([
       "segment:final:lpv-w",
       "segment:final:lpv-x",
       "segment:final:lpv-y",
@@ -931,16 +947,21 @@ describe("procedure render bundle", () => {
       enableDebugPrimitives: false,
     });
     const segmentBundle = bundle.branchBundles[0].segmentBundles[0];
+    const missedSurface = bundle.branchBundles[0].protectionSurfaces.find(
+      (surface) => surface.kind === "MISSED_SECTION_1",
+    );
 
     expect(segmentBundle.segment.segmentType).toBe("MISSED_S1");
     expect(segmentBundle.segmentGeometry.centerline.geoPositions.length).toBeGreaterThan(2);
     expect(segmentBundle.segmentGeometry.primaryEnvelope).toBeDefined();
     expect(segmentBundle.segmentGeometry.secondaryEnvelope).toBeDefined();
-    expect(segmentBundle.missedSectionSurface).toMatchObject({
-      surfaceType: "MISSED_SECTION1_ENVELOPE",
-      constructionStatus: "SOURCE_BACKED",
-      primary: expect.any(Object),
-      secondaryOuter: expect.any(Object),
+    expect(missedSurface).toMatchObject({
+      kind: "MISSED_SECTION_1",
+      status: "SOURCE_BACKED",
+      lateral: expect.objectContaining({
+        primary: expect.any(Object),
+        secondaryOuter: expect.any(Object),
+      }),
     });
     expect(bundle.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain(
       "UNSUPPORTED_LEG_TYPE",
@@ -954,16 +975,21 @@ describe("procedure render bundle", () => {
       enableDebugPrimitives: false,
     });
     const segmentBundle = bundle.branchBundles[0].segmentBundles[0];
+    const missedSurface = bundle.branchBundles[0].protectionSurfaces.find(
+      (surface) => surface.kind === "MISSED_SECTION_1",
+    );
 
     expect(segmentBundle.segment.segmentType).toBe("MISSED_S1");
     expect(segmentBundle.segmentGeometry.centerline.geoPositions.length).toBeGreaterThan(2);
     expect(segmentBundle.segmentGeometry.primaryEnvelope).toBeDefined();
     expect(segmentBundle.segmentGeometry.secondaryEnvelope).toBeDefined();
-    expect(segmentBundle.missedSectionSurface).toMatchObject({
-      surfaceType: "MISSED_SECTION1_ENVELOPE",
-      constructionStatus: "ESTIMATED_CA",
-      primary: expect.any(Object),
-      secondaryOuter: expect.any(Object),
+    expect(missedSurface).toMatchObject({
+      kind: "MISSED_SECTION_1",
+      status: "DISPLAY_ESTIMATE",
+      lateral: expect.objectContaining({
+        primary: expect.any(Object),
+        secondaryOuter: expect.any(Object),
+      }),
     });
     expect(segmentBundle.missedCourseGuides).toHaveLength(1);
     expect(segmentBundle.missedCourseGuides[0]).toMatchObject({
@@ -1015,34 +1041,40 @@ describe("procedure render bundle", () => {
       enableDebugPrimitives: false,
     });
     const segmentBundle = bundle.branchBundles[0].segmentBundles[0];
+    const missedSurface = bundle.branchBundles[0].protectionSurfaces.find(
+      (surface) => surface.kind === "MISSED_SECTION_1",
+    );
+    const missedConnectorSurface = bundle.branchBundles[0].protectionSurfaces.find(
+      (surface) => surface.kind === "MISSED_CONNECTOR",
+    );
 
     expect(segmentBundle.segment.segmentType).toBe("MISSED_S1");
     expect(segmentBundle.legs.map((leg) => leg.legType)).toEqual(["CA", "DF"]);
     expect(segmentBundle.segmentGeometry.centerline.geoPositions.length).toBeGreaterThan(2);
-    expect(segmentBundle.missedSectionSurface).toMatchObject({
-      surfaceType: "MISSED_SECTION1_ENVELOPE",
-      constructionStatus: "ESTIMATED_CA",
-      primary: expect.objectContaining({
-        geometryId: expect.stringContaining(":ca-estimated-primary"),
-      }),
-      secondaryOuter: expect.objectContaining({
-        geometryId: expect.stringContaining(":ca-estimated-secondary"),
+    expect(missedSurface).toMatchObject({
+      kind: "MISSED_SECTION_1",
+      status: "DISPLAY_ESTIMATE",
+      lateral: expect.objectContaining({
+        primary: expect.objectContaining({
+          geometryId: expect.stringContaining(":ca-estimated-primary"),
+        }),
+        secondaryOuter: expect.objectContaining({
+          geometryId: expect.stringContaining(":ca-estimated-secondary"),
+        }),
       }),
     });
     expect(segmentBundle.missedCaEndpoints).toHaveLength(1);
     expect(bundle.branchBundles[0].missedCaMahfConnectors).toHaveLength(1);
-    expect(bundle.branchBundles[0].missedConnectorSurfaces).toHaveLength(1);
-    expect(bundle.branchBundles[0].missedConnectorSurfaces[0]).toMatchObject({
-      sourceLegId: "leg:R:035",
-      targetFixIdent: "HOLD",
-      constructionStatus: "ESTIMATED_CONNECTOR_SURFACE",
-      lateralWidthRule: {
-        ruleId: "MISSED_CONNECTOR_TERMINAL_WIDTH",
-        ruleStatus: "SOURCE_SURFACE_TERMINAL_WIDTH",
-        transitionStatus: "TERMINAL_WIDTH_HELD_TO_MAHF",
-      },
-      primary: expect.any(Object),
-      secondaryOuter: expect.any(Object),
+    expect(missedConnectorSurface).toMatchObject({
+      sourceLegIds: ["leg:R:035"],
+      kind: "MISSED_CONNECTOR",
+      status: "DISPLAY_ESTIMATE",
+      lateral: expect.objectContaining({
+        primary: expect.any(Object),
+        secondaryOuter: expect.any(Object),
+        rule: expect.stringContaining("MISSED_CONNECTOR_TERMINAL_WIDTH"),
+        notes: expect.arrayContaining([expect.stringContaining("Target fix HOLD")]),
+      }),
     });
     expect(bundle.branchBundles[0].protectionSurfaces).toEqual(
       expect.arrayContaining([

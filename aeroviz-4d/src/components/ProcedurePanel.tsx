@@ -97,21 +97,26 @@ function branchItemsFromRenderData(data: ProcedureRenderBundleData): ProcedureBr
 }
 
 function protectedGeometryStatus(data: ProcedureRenderBundleData): ProtectedGeometryStatus {
-  const segmentBundles = data.renderBundles.flatMap((bundle) =>
-    bundle.branchBundles.flatMap((branch) => branch.segmentBundles),
+  const branchBundles = data.renderBundles.flatMap((bundle) => bundle.branchBundles);
+  const segmentBundles = branchBundles.flatMap((branch) => branch.segmentBundles);
+  const protectionSurfaces = branchBundles.flatMap(
+    (branch) => branch.protectionSurfaces,
   );
 
   return {
     caEndpoints: segmentBundles.reduce((sum, segment) => sum + segment.missedCaEndpoints.length, 0),
     caCenterlines: segmentBundles.reduce((sum, segment) => sum + segment.missedCaCenterlines.length, 0),
-    estimatedCaSurfaces: segmentBundles.filter(
-      (segment) => segment.missedSectionSurface?.constructionStatus === "ESTIMATED_CA",
+    estimatedCaSurfaces: protectionSurfaces.filter(
+      (surface) =>
+        (surface.kind === "MISSED_SECTION_1" || surface.kind === "MISSED_SECTION_2_STRAIGHT") &&
+        surface.status !== "SOURCE_BACKED",
     ).length,
-    lnavVnavOcs: segmentBundles.filter((segment) => segment.lnavVnavOcs !== null).length,
-    precisionSurfaces: segmentBundles.reduce(
-      (sum, segment) => sum + segment.precisionFinalSurfaces.length,
-      0,
-    ),
+    lnavVnavOcs: protectionSurfaces.filter(
+      (surface) => surface.kind === "FINAL_LNAV_VNAV_OCS",
+    ).length,
+    precisionSurfaces: protectionSurfaces.filter(
+      (surface) => surface.kind === "FINAL_PRECISION_DEBUG",
+    ).length,
     turningMissedPrimitives: segmentBundles.reduce(
       (sum, segment) => sum + segment.missedTurnDebugPrimitives.length,
       0,

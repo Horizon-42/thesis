@@ -14,6 +14,7 @@ import {
 import { normalizeProcedurePackage } from "./procedurePackageAdapter";
 import {
   buildBranchProtectionSurfaces,
+  type ProtectionSurfaceSegmentInput,
   type ProcedureProtectionSurface,
 } from "./procedureProtectionSurfaces";
 import { fetchJson } from "../utils/fetchJson";
@@ -33,9 +34,6 @@ import {
   buildLnavVnavOcs,
   buildPrecisionFinalSurfaces,
   type FinalApproachSurfaceStatus,
-  type LnavFinalOeaGeometry,
-  type LnavVnavOcsGeometry,
-  type PrecisionFinalSurfaceGeometry,
 } from "../utils/procedureSurfaceGeometry";
 import {
   buildMissedCaCenterlines,
@@ -50,7 +48,6 @@ import {
   type MissedCaCenterlineGeometry,
   type MissedCaEndpointGeometry,
   type MissedCaMahfConnectorGeometry,
-  type MissedConnectorSurfaceGeometry,
   type MissedCourseGuideGeometry,
   type MissedSectionSurfaceGeometry,
   type MissedTurnDebugPrimitiveGeometry,
@@ -85,7 +82,6 @@ export interface BranchGeometryBundle {
   segmentBundles: ProcedureSegmentRenderBundle[];
   turnJunctions: InterSegmentTurnJunctionGeometry[];
   missedCaMahfConnectors: MissedCaMahfConnectorGeometry[];
-  missedConnectorSurfaces: MissedConnectorSurfaceGeometry[];
   protectionSurfaces: ProcedureProtectionSurface[];
 }
 
@@ -93,18 +89,36 @@ export interface ProcedureSegmentRenderBundle {
   segment: ProcedureSegment;
   legs: ProcedurePackageLeg[];
   segmentGeometry: SegmentGeometryBundle;
-  finalOea: LnavFinalOeaGeometry | null;
-  lnavVnavOcs: LnavVnavOcsGeometry | null;
-  precisionFinalSurfaces: PrecisionFinalSurfaceGeometry[];
   finalSurfaceStatus: FinalApproachSurfaceStatus | null;
   alignedConnector: AlignedLnavConnectorGeometry | null;
-  missedSectionSurface: MissedSectionSurfaceGeometry | null;
   missedCourseGuides: MissedCourseGuideGeometry[];
   missedCaEndpoints: MissedCaEndpointGeometry[];
   missedCaCenterlines: MissedCaCenterlineGeometry[];
   missedTurnDebugPoint: MissedTurnDebugPointGeometry | null;
   missedTurnDebugPrimitives: MissedTurnDebugPrimitiveGeometry[];
   diagnostics: BuildDiagnostic[];
+}
+
+interface ProcedureSegmentBuildBundle
+  extends ProcedureSegmentRenderBundle,
+    ProtectionSurfaceSegmentInput {}
+
+function toPublicSegmentBundle(
+  bundle: ProcedureSegmentBuildBundle,
+): ProcedureSegmentRenderBundle {
+  return {
+    segment: bundle.segment,
+    legs: bundle.legs,
+    segmentGeometry: bundle.segmentGeometry,
+    finalSurfaceStatus: bundle.finalSurfaceStatus,
+    alignedConnector: bundle.alignedConnector,
+    missedCourseGuides: bundle.missedCourseGuides,
+    missedCaEndpoints: bundle.missedCaEndpoints,
+    missedCaCenterlines: bundle.missedCaCenterlines,
+    missedTurnDebugPoint: bundle.missedTurnDebugPoint,
+    missedTurnDebugPrimitives: bundle.missedTurnDebugPrimitives,
+    diagnostics: bundle.diagnostics,
+  };
 }
 
 const procedureRenderBundleDataCache = new Map<string, Promise<ProcedureRenderBundleData>>();
@@ -192,7 +206,7 @@ export function buildProcedureRenderBundle(
 
   const branchBundles = pkg.branches.map((branch): BranchGeometryBundle => {
     const segmentBundles = branch.segmentIds
-      .map((segmentId): ProcedureSegmentRenderBundle | null => {
+      .map((segmentId): ProcedureSegmentBuildBundle | null => {
         const segment = segmentsById.get(segmentId);
         if (!segment) return null;
 
@@ -285,7 +299,7 @@ export function buildProcedureRenderBundle(
           diagnostics: segmentDiagnostics,
         };
       })
-      .filter((bundle): bundle is ProcedureSegmentRenderBundle => bundle !== null);
+      .filter((bundle): bundle is ProcedureSegmentBuildBundle => bundle !== null);
 
     const branchTurnResult = buildBranchTurnJunctions(branch, segmentBundles);
     diagnostics.push(...branchTurnResult.diagnostics);
@@ -316,16 +330,16 @@ export function buildProcedureRenderBundle(
       segmentBundles,
       missedConnectorSurfaces,
     });
+    const publicSegmentBundles = segmentBundles.map(toPublicSegmentBundle);
 
     return {
       branchId: branch.branchId,
       branchName: branch.branchName,
       branchRole: branch.branchRole,
       runwayId: branch.runwayId,
-      segmentBundles,
+      segmentBundles: publicSegmentBundles,
       turnJunctions: branchTurnResult.turnJunctions,
       missedCaMahfConnectors,
-      missedConnectorSurfaces,
       protectionSurfaces,
     };
   });

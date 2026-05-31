@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { airportDataUrl } from "../data/airportData";
+import { buildProcedureProfileProjection } from "../data/procedureProfileProjection";
 import { loadProcedureRenderBundleData } from "../data/procedureRenderBundle";
-import { buildProcedureRoutes } from "../data/procedureRoutes";
 import {
   activeHorizontalPlateRoutes,
   buildProfileAircraftTracks,
@@ -13,8 +13,6 @@ import {
 } from "../data/runwayTrajectoryProfileAnalysis";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 import {
-  attachRenderBundleAssessmentSegments,
-  buildHorizontalPlateRoutes,
   buildRunwayReferenceMarksFromPlateRoutes,
   buildRunwayFrame,
   projectPositionToRunwayFrame,
@@ -145,21 +143,15 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
         if (cancelled) return;
 
         const runwayFrame = buildRunwayFrame(runwayCollection, selectedProfileRunwayIdent);
-        const procedureRoutes = buildProcedureRoutes(procedureRenderData.documents);
-        const plateRoutes = attachRenderBundleAssessmentSegments(
-          buildHorizontalPlateRoutes(
-            procedureRoutes,
-            runwayFrame,
-            selectedProfileRunwayIdent,
-          ),
-          procedureRenderData.renderBundles,
+        const procedureProfileProjection = buildProcedureProfileProjection(
+          procedureRenderData,
           runwayFrame,
           selectedProfileRunwayIdent,
         );
         setLoadedData({
           runwayFrame,
-          plateRoutes,
-          sourceCycle: procedureRenderData.index.sourceCycle ?? null,
+          plateRoutes: procedureProfileProjection.plateRoutes,
+          sourceCycle: procedureProfileProjection.sourceCycle,
         });
         setIsLoading(false);
       })
