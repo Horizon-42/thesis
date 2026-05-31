@@ -18,7 +18,7 @@ from functools import lru_cache
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 COORD_PAIR_RE = re.compile(r"([NS]\d{8,10})([EW]\d{9,11})")
 LEG_TYPE_RE = re.compile(r"(?<![A-Z])(IF|TF|DF|CA|CF|HM|HF|RF|VI|VA|FA)(?![A-Z])")
@@ -934,6 +934,7 @@ def build_airport_fix_index(faacifp_path: Path, airport: str) -> dict[str, FixRe
     return fixes
 
 
+
 def build_fix_index(
     faacifp_path: Path,
     airport: str,
@@ -971,3 +972,278 @@ def build_fix_index(
         )
 
     return fixes
+
+
+class CifpParserAdapter(Protocol):
+    """Named seam for CIFP source parsing.
+
+    AeroViz keeps two concrete adapters: the original fixed-width parser for
+    validation/fallback and the cifparse-backed adapter for production branch,
+    leg, and fix extraction. Public functions delegate through this seam so the
+    active parser choice is visible instead of relying on later function
+    redefinitions in this module.
+    """
+
+    def procedure_exists(
+        self,
+        index_path: Path,
+        airport: str,
+        procedure_type: str,
+        procedure: str,
+    ) -> bool: ...
+
+    def discover_rnav_procedures(
+        self,
+        index_path: Path,
+        airport: str,
+        procedure_type: str,
+    ) -> list[str]: ...
+
+    def parse_available_branches(
+        self,
+        faacifp_path: Path,
+        airport: str,
+        procedure: str,
+    ) -> list[str]: ...
+
+    def parse_procedure_legs(
+        self,
+        faacifp_path: Path,
+        airport: str,
+        procedure: str,
+        branch: str,
+    ) -> list[ProcedureLeg]: ...
+
+    def build_airport_fix_index(
+        self,
+        faacifp_path: Path,
+        airport: str,
+    ) -> dict[str, FixRecord]: ...
+
+    def build_fix_index(
+        self,
+        faacifp_path: Path,
+        airport: str,
+        procedure_legs: list[ProcedureLeg] | None = None,
+    ) -> dict[str, FixRecord]: ...
+
+
+_cifparse_parse_available_branches = parse_available_branches
+_cifparse_parse_procedure_legs = parse_procedure_legs
+_cifparse_build_airport_fix_index = build_airport_fix_index
+
+
+class FixedWidthCifpAdapter:
+    """Adapter for the retained local fixed-width parser."""
+
+    def procedure_exists(
+        self,
+        index_path: Path,
+        airport: str,
+        procedure_type: str,
+        procedure: str,
+    ) -> bool:
+        return local_procedure_exists(index_path, airport, procedure_type, procedure)
+
+    def discover_rnav_procedures(
+        self,
+        index_path: Path,
+        airport: str,
+        procedure_type: str,
+    ) -> list[str]:
+        return local_discover_rnav_procedures(index_path, airport, procedure_type)
+
+    def parse_available_branches(
+        self,
+        faacifp_path: Path,
+        airport: str,
+        procedure: str,
+    ) -> list[str]:
+        return local_parse_available_branches(faacifp_path, airport, procedure)
+
+    def parse_procedure_legs(
+        self,
+        faacifp_path: Path,
+        airport: str,
+        procedure: str,
+        branch: str,
+    ) -> list[ProcedureLeg]:
+        return local_parse_procedure_legs(faacifp_path, airport, procedure, branch)
+
+    def build_airport_fix_index(
+        self,
+        faacifp_path: Path,
+        airport: str,
+    ) -> dict[str, FixRecord]:
+        return local_build_airport_fix_index(faacifp_path, airport)
+
+    def build_fix_index(
+        self,
+        faacifp_path: Path,
+        airport: str,
+        procedure_legs: list[ProcedureLeg] | None = None,
+    ) -> dict[str, FixRecord]:
+        fixes = local_build_airport_fix_index(faacifp_path, airport)
+        if procedure_legs is None:
+            return fixes
+
+        required_idents = {leg.fix_ident for leg in procedure_legs if leg.fix_ident}
+        required_idents.update(rf_related_fix_idents(procedure_legs))
+        fixes.update(
+            build_global_fix_fallback_index(
+                faacifp_path=faacifp_path,
+                airport=airport,
+                missing_idents=required_idents - set(fixes),
+                preferred_regions=preferred_region_codes_by_fix(procedure_legs),
+            )
+        )
+        return fixes
+
+
+class CifparseCifpAdapter:
+    """Adapter for cifparse-backed production parsing."""
+
+    def procedure_exists(
+        self,
+        index_path: Path,
+        airport: str,
+        procedure_type: str,
+        procedure: str,
+    ) -> bool:
+        return local_procedure_exists(index_path, airport, procedure_type, procedure)
+
+    def discover_rnav_procedures(
+        self,
+        index_path: Path,
+        airport: str,
+        procedure_type: str,
+    ) -> list[str]:
+        return local_discover_rnav_procedures(index_path, airport, procedure_type)
+
+    def parse_available_branches(
+        self,
+        faacifp_path: Path,
+        airport: str,
+        procedure: str,
+    ) -> list[str]:
+        return _cifparse_parse_available_branches(faacifp_path, airport, procedure)
+
+    def parse_procedure_legs(
+        self,
+        faacifp_path: Path,
+        airport: str,
+        procedure: str,
+        branch: str,
+    ) -> list[ProcedureLeg]:
+        return _cifparse_parse_procedure_legs(faacifp_path, airport, procedure, branch)
+
+    def build_airport_fix_index(
+        self,
+        faacifp_path: Path,
+        airport: str,
+    ) -> dict[str, FixRecord]:
+        return _cifparse_build_airport_fix_index(faacifp_path, airport)
+
+    def build_fix_index(
+        self,
+        faacifp_path: Path,
+        airport: str,
+        procedure_legs: list[ProcedureLeg] | None = None,
+    ) -> dict[str, FixRecord]:
+        data = cifparse_data(faacifp_path)
+        fixes = _cifparse_build_airport_fix_index(faacifp_path, airport)
+        if procedure_legs is None:
+            return fixes
+
+        required_idents = {leg.fix_ident for leg in procedure_legs if leg.fix_ident}
+        required_idents.update(rf_related_fix_idents(procedure_legs))
+        missing_idents = required_idents - set(fixes)
+        preferred_regions = preferred_region_codes_by_fix(procedure_legs)
+        for primary in data.enroute_waypoints:
+            ident = str(primary.get("waypoint_id") or "").strip().upper()
+            if ident not in missing_idents or ident in fixes:
+                continue
+            region_code = str(primary.get("waypoint_region") or "").strip().upper() or None
+            expected_regions = preferred_regions.get(ident, set())
+            if expected_regions and region_code not in expected_regions:
+                continue
+            fixes[ident] = FixRecord(
+                ident=ident,
+                lon=float(primary["lon"]),
+                lat=float(primary["lat"]),
+                altitude_ft=None,
+                source_line=data.enroute_fix_source_lines.get(
+                    ident,
+                    cifparse_source_line(primary.get("record_number"), data.header_line_count),
+                ),
+                region_code=region_code,
+                source_kind="global-cifp-fallback",
+            )
+
+        return fixes
+
+
+FIXED_WIDTH_CIFP_ADAPTER = FixedWidthCifpAdapter()
+CIFPARSE_CIFP_ADAPTER = CifparseCifpAdapter()
+DEFAULT_CIFP_PARSER_ADAPTER: CifpParserAdapter = CIFPARSE_CIFP_ADAPTER
+
+
+def active_cifp_parser_adapter() -> CifpParserAdapter:
+    return DEFAULT_CIFP_PARSER_ADAPTER
+
+
+def procedure_exists(index_path: Path, airport: str, procedure_type: str, procedure: str) -> bool:
+    """Return true when the active CIFP parser adapter finds the requested procedure."""
+    return active_cifp_parser_adapter().procedure_exists(
+        index_path,
+        airport,
+        procedure_type,
+        procedure,
+    )
+
+
+def discover_rnav_procedures(index_path: Path, airport: str, procedure_type: str) -> list[str]:
+    """Return RNAV/RNP approach idents through the active CIFP parser adapter."""
+    return active_cifp_parser_adapter().discover_rnav_procedures(
+        index_path,
+        airport,
+        procedure_type,
+    )
+
+
+def parse_available_branches(
+    faacifp_path: Path,
+    airport: str,
+    procedure: str,
+) -> list[str]:
+    """Return available branch idents through the active CIFP parser adapter."""
+    return active_cifp_parser_adapter().parse_available_branches(faacifp_path, airport, procedure)
+
+
+def parse_procedure_legs(
+    faacifp_path: Path,
+    airport: str,
+    procedure: str,
+    branch: str,
+) -> list[ProcedureLeg]:
+    """Return procedure legs through the active CIFP parser adapter."""
+    return active_cifp_parser_adapter().parse_procedure_legs(
+        faacifp_path,
+        airport,
+        procedure,
+        branch,
+    )
+
+
+def build_airport_fix_index(faacifp_path: Path, airport: str) -> dict[str, FixRecord]:
+    """Return airport-local fixes through the active CIFP parser adapter."""
+    return active_cifp_parser_adapter().build_airport_fix_index(faacifp_path, airport)
+
+
+def build_fix_index(
+    faacifp_path: Path,
+    airport: str,
+    procedure_legs: list[ProcedureLeg] | None = None,
+) -> dict[str, FixRecord]:
+    """Return airport-local and fallback fixes through the active CIFP parser adapter."""
+    return active_cifp_parser_adapter().build_fix_index(faacifp_path, airport, procedure_legs)

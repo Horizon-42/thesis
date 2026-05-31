@@ -1555,6 +1555,24 @@ def publish_procedure_details_assets(
         tunnel_half_height_ft=tunnel_half_height_ft,
         sample_spacing_m=sample_spacing_m,
     )
+    return publish_procedure_detail_documents(
+        airport=airport,
+        airport_name=airport_details["name"],
+        source_cycle=source_cycle,
+        documents=documents,
+        chart_root=chart_root,
+    )
+
+
+def publish_procedure_detail_documents(
+    *,
+    airport: str,
+    airport_name: str,
+    source_cycle: str | None,
+    documents: list[dict[str, Any]],
+    chart_root: Path,
+) -> dict[str, Any]:
+    """Publish canonical procedure-detail documents and their browser indexes."""
     procedure_dir = airport_procedure_details_dir(airport)
     procedure_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1564,7 +1582,7 @@ def publish_procedure_details_assets(
 
     index_manifest = build_procedure_details_index(
         airport=airport,
-        airport_name=airport_details["name"],
+        airport_name=airport_name,
         source_cycle=source_cycle,
         documents=documents,
     )
@@ -1666,34 +1684,13 @@ def main() -> None:
     detail_publish_result = None
     if not args.skip_procedure_details:
         airport_details = load_airport_details(args.airport)
-        procedure_dir = airport_procedure_details_dir(args.airport)
-        procedure_dir.mkdir(parents=True, exist_ok=True)
-        for document in canonical_documents:
-            detail_path = airport_procedure_details_path(args.airport, f"{document['procedureUid']}.json")
-            detail_path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
-
-        index_manifest = build_procedure_details_index(
+        detail_publish_result = publish_procedure_detail_documents(
             airport=args.airport,
             airport_name=airport_details["name"],
             source_cycle=parse_source_cycle(Path(args.cifp_root) / "FAACIFP18"),
             documents=canonical_documents,
-        )
-        index_path = airport_procedure_details_path(args.airport, "index.json")
-        index_path.write_text(json.dumps(index_manifest, indent=2) + "\n", encoding="utf-8")
-
-        chart_manifest = publish_local_chart_manifest(
-            airport=args.airport,
             chart_root=Path(args.charts_root),
-            documents=canonical_documents,
         )
-        chart_index_path = airport_chart_path(args.airport, "index.json")
-        chart_index_path.write_text(json.dumps(chart_manifest, indent=2) + "\n", encoding="utf-8")
-        detail_publish_result = {
-            "procedureIndexPath": index_path,
-            "chartIndexPath": chart_index_path,
-            "procedureCount": len(canonical_documents),
-            "chartCount": len(chart_manifest["charts"]),
-        }
 
     route_features = [
         feature
