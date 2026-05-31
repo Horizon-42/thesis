@@ -286,10 +286,10 @@
       margin: 14px 0;
       padding: 14px 16px;
       overflow-x: auto;
-      background: var(--code-bg);
-      color: var(--code-ink);
+      background: #fbfdff;
+      color: var(--ink);
+      border: 1px solid var(--line);
       border-radius: 8px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
       font-size: 15px;
       line-height: 1.65;
       white-space: normal;
@@ -297,14 +297,23 @@
 
     .formula-line {
       display: block;
-      min-width: max-content;
-      white-space: pre;
+      min-width: 0;
+      white-space: normal;
     }
 
     .formula-line + .formula-line {
       margin-top: 8px;
       padding-top: 8px;
-      border-top: 1px solid rgba(236, 241, 247, 0.14);
+      border-top: 1px solid var(--line);
+    }
+
+    .formula mjx-container[display="true"] {
+      margin: 0.2em 0 !important;
+      min-width: max-content;
+    }
+
+    .formula mjx-container {
+      font-size: 108%;
     }
 
     .var-list {
@@ -432,6 +441,32 @@
       section { break-inside: avoid; }
     }
   </style>
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['\\(', '\\)']],
+        displayMath: [['\\[', '\\]']],
+        processEscapes: true,
+        tags: 'none'
+      },
+      svg: {
+        fontCache: 'global',
+        scale: 1
+      },
+      startup: {
+        pageReady: function () {
+          return MathJax.startup.defaultPageReady()
+            .then(function () {
+              document.documentElement.classList.add('mathjax-ready');
+            })
+            .catch(function (error) {
+              console.error('MathJax failed to render formulas:', error);
+            });
+        }
+      }
+    };
+  </script>
+  <script id="MathJax-script" async src="assets/vendor/mathjax/tex-svg.js"></script>
 </head>
 <body>
   <div class="page">
@@ -843,12 +878,50 @@ M=\frac{a(1-e^2)}{\left(1-e^2\sin^2\phi\right)^{3/2}}
           <p>
             下面只讨论椭球表面点 S。把 S 在子午剖面中的坐标写成 S(p_S, z_S)，其中 p_S 是 S 到 Z 轴的水平距离，z_S 是 S 的竖直坐标。椭圆方程 p²/a² + z²/b² = 1 中的 p、z 先是通用剖面坐标；求导后再把它们代入为 p_S、z_S：
           </p>
+          <figure class="diagram" aria-labelledby="fig-tangent-slope-title">
+            <img src="assets/geodetic_ecef/03-tangent-slope-dp.svg" alt="说明 dz/dp 中 p 的含义、delta p、delta z、割线和切线斜率的 WGS 84 子午剖面图">
+            <figcaption id="fig-tangent-slope-title">
+              这张图只画子午剖面右上象限。横轴 p 不是某个新坐标系的 X 轴，而是任意三维点到 Z 轴的水平距离 p=sqrt(x²+y²)。对固定点 S 来说，p 的取值是 p_S；对附近点 S′ 来说，p 的取值是 p_S+Δp。割线斜率 Δz/Δp 在 Δp 趋近 0 时，极限就是 S 处的导数 dz/dp，也就是切线斜率。
+            </figcaption>
+          </figure>
+          <div class="callout">
+            <strong>先纠正一个容易混淆的说法：</strong>
+            dz/dp 是 slope，即切线斜率，不是曲率（curvature）。斜率描述“曲线上这一点朝哪个方向倾斜”；曲率描述“斜率沿曲线变化得有多快”，需要二阶导数或曲率半径来表达。前面讲 M 和 ν 时说的是曲率半径；这里用 dz/dp 只是为了找到切线，再由切线垂直关系得到法线方向。
+          </div>
+          <p>
+            更严格地说，在 S 附近可以把椭圆上半支看成一个函数 z=z(p)。这里 z(p) 的意思是：给定一个水平距离 p，椭圆方程会给出对应的竖直坐标 z。选一个很靠近 S 的点 S′，它的水平变化量是 Δp，竖直变化量是 Δz，则割线斜率是：
+          </p>
+          <div class="formula">
+            <span class="formula-line">\[
+\frac{\Delta z}{\Delta p}
+=
+\frac{z(p_S+\Delta p)-z(p_S)}{\Delta p}
+\]</span>
+            <span class="formula-line">\[
+\left.\frac{dz}{dp}\right|_S
+=
+\lim_{\Delta p\to 0}
+\frac{z(p_S+\Delta p)-z(p_S)}{\Delta p}
+\]</span>
+          </div>
+          <p>
+            所以 dz/dp 的分母 p，就是图中的水平剖面坐标 p，而不是目标点 P，也不是一个固定常数。只有写成 p_S 时，才表示“把这个水平坐标取在表面点 S 上”。
+          </p>
           <div class="formula">
             <span class="formula-line">\[
 F(p,z)=\frac{p^2}{a^2}+\frac{z^2}{b^2}-1=0
 \]</span>
             <span class="formula-line">\[
+\frac{\partial F}{\partial p}=\frac{2p}{a^2},
+\qquad
+\frac{\partial F}{\partial z}=\frac{2z}{b^2}
+\]</span>
+            <span class="formula-line">\[
 \frac{dF}{dp}
+=
+\frac{\partial F}{\partial p}\frac{dp}{dp}
++
+\frac{\partial F}{\partial z}\frac{dz}{dp}
 =\frac{2p}{a^2}+\frac{2z}{b^2}\frac{dz}{dp}=0
 \]</span>
             <span class="formula-line">\[
@@ -858,7 +931,20 @@ F(p,z)=\frac{p^2}{a^2}+\frac{z^2}{b^2}-1=0
 \]</span>
           </div>
           <p>
-            dz/dp 表示 z 随 p 变化的速率，也就是剖面曲线在 S 处的切线斜率。法线与切线垂直，所以法线斜率是切线斜率的负倒数：
+            上面的 ∂F/∂p 和 ∂F/∂z 是 partial derivative，即偏导数。∂F/∂z 的意思不是“把 dF 除以 dz”，而是“先暂时固定 p，只改变 z，F 会按多快的速度变化”。但沿椭圆曲线移动时，z 又会随着 p 改变，所以链式法则会额外乘上 dz/dp。因为椭圆上的每个点都满足 F(p,z)=0，沿曲线移动时 F 的值一直是 0，所以总导数 dF/dp 也等于 0。
+          </p>
+          <p>
+            记号 \(\left.dz/dp\right|_S\) 读作“dz/dp evaluated at S”，也就是“把 dz/dp 这个通用表达式拿到点 S 上求值”。竖线 | 后面的 S 是求值位置，不是乘以 S：
+          </p>
+          <div class="formula">
+            <span class="formula-line">\[
+\left.\frac{dz}{dp}\right|_S
+=
+\left(\frac{dz}{dp}\right)_{p=p_S,\;z=z_S}
+\]</span>
+          </div>
+          <p>
+            得到 S 处切线斜率后，再用“法线与切线垂直”。在二维直角坐标里，如果两条非竖直直线互相垂直，它们的斜率乘积为 -1，因此法线斜率是切线斜率的负倒数：
           </p>
           <div class="formula">
             <span class="formula-line">\[
