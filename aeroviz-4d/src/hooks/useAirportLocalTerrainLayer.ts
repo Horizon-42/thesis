@@ -11,12 +11,13 @@ import {
   applyLocalTerrainStreamingSettings,
   airportLocalTerrainProgressState,
   buildLocalTerrainActivationPlan,
-  captureTerrainStreamingSettings,
+  captureTerrainProviderRestorePoint,
   disabledAirportLocalTerrainState,
+  installTerrainProvider,
   LOCAL_TERRAIN_SETTINGS,
   missingAirportLocalTerrainState,
-  restoreTerrainStreamingSettings,
-  type GlobeTerrainStreamingSettings,
+  restoreTerrainProvider,
+  type TerrainProviderRestorePoint,
 } from "../terrain/terrainRuntime";
 import { isMissingJsonAsset } from "../utils/fetchJson";
 
@@ -80,8 +81,7 @@ export function useAirportLocalTerrainLayer(
 
   const providerRef = useRef<Cesium.CustomHeightmapTerrainProvider | null>(null);
   const terrainCacheRef = useRef<Map<string, Promise<AirportLocalTerrain>>>(new Map());
-  const previousProviderRef = useRef<Cesium.TerrainProvider | null>(null);
-  const previousStreamingSettingsRef = useRef<GlobeTerrainStreamingSettings | null>(null);
+  const restorePointRef = useRef<TerrainProviderRestorePoint | null>(null);
 
   // ── Load terrain provider ───────────────────────────────────────────────
   useEffect(() => {
@@ -105,8 +105,7 @@ export function useAirportLocalTerrainLayer(
     let cancelled = false;
     const preloadAbortController = new AbortController();
 
-    previousProviderRef.current = viewer.scene.terrainProvider;
-    previousStreamingSettingsRef.current = captureTerrainStreamingSettings(viewer.scene.globe);
+    restorePointRef.current = captureTerrainProviderRestorePoint(viewer);
     setState({
       status: "loading",
       metadata: null,
@@ -175,7 +174,7 @@ export function useAirportLocalTerrainLayer(
         if (cancelled || viewer.isDestroyed()) return;
 
         providerRef.current = provider;
-        viewer.scene.terrainProvider = provider;
+        installTerrainProvider(viewer, provider);
         applyLocalTerrainStreamingSettings(viewer, metadata, maximumScreenSpaceError);
         const activeLoadedTiles = activationPlan.focusedTiles.length;
         const activeTotalTiles = backgroundPreload
@@ -266,16 +265,11 @@ export function useAirportLocalTerrainLayer(
       preloadAbortController.abort();
       if (!viewer.isDestroyed() && providerRef.current) {
         if (viewer.scene.terrainProvider === providerRef.current) {
-          viewer.scene.terrainProvider =
-            previousProviderRef.current ?? new Cesium.EllipsoidTerrainProvider();
-        }
-        if (previousStreamingSettingsRef.current) {
-          restoreTerrainStreamingSettings(viewer, previousStreamingSettingsRef.current);
+          restoreTerrainProvider(viewer, restorePointRef.current);
         }
       }
       providerRef.current = null;
-      previousProviderRef.current = null;
-      previousStreamingSettingsRef.current = null;
+      restorePointRef.current = null;
     };
   }, [
     viewer,

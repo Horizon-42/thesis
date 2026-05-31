@@ -2,30 +2,11 @@ import { useEffect, useRef } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import {
+  airportLocalTerrainImageryPlan,
   airportLocalTerrainMetadataUrl,
   type AirportLocalTerrainMetadata,
 } from "../terrain/airportLocalTerrain";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
-
-const DEFAULT_HILLSHADE_ALPHA = 0.5;
-const DEFAULT_HILLSHADE_BRIGHTNESS = 1.04;
-const DEFAULT_HILLSHADE_CONTRAST = 1.22;
-const DEFAULT_HILLSHADE_GAMMA = 0.9;
-
-function boundedAlpha(value: unknown): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_HILLSHADE_ALPHA;
-  return Math.max(0, Math.min(1, value));
-}
-
-function boundedLayerTone(
-  value: unknown,
-  fallback: number,
-  min: number,
-  max: number,
-): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
-  return Math.max(min, Math.min(max, value));
-}
 
 function removeLayer(viewer: Cesium.Viewer, layer: Cesium.ImageryLayer | null): void {
   if (!layer || viewer.isDestroyed()) return;
@@ -64,43 +45,24 @@ export function useTerrainHillshadeLayer(): void {
     void fetchJson<AirportLocalTerrainMetadata>(metadataUrl)
       .then((metadata) => {
         if (cancelled || viewer.isDestroyed()) return;
-        if (!metadata.hillshade?.url) return;
+        const plan = airportLocalTerrainImageryPlan(metadata, "hillshade");
+        if (!plan) return;
 
         const layer = viewer.imageryLayers.addImageryProvider(
           new Cesium.SingleTileImageryProvider({
-            url: metadata.hillshade.url,
-            tileWidth: metadata.hillshade.width,
-            tileHeight: metadata.hillshade.height,
-            rectangle: Cesium.Rectangle.fromDegrees(
-              metadata.bounds.west,
-              metadata.bounds.south,
-              metadata.bounds.east,
-              metadata.bounds.north,
-            ),
-            credit: "Airport terrain hillshade",
+            url: plan.url,
+            tileWidth: plan.tileWidth,
+            tileHeight: plan.tileHeight,
+            rectangle: plan.rectangle,
+            credit: plan.credit,
           }),
         );
-        layer.alpha = boundedAlpha(metadata.hillshade.alpha);
+        layer.alpha = plan.alpha;
         // Hillshade is a perceptual relief cue: tone controls make low-relief
         // airport terrain read as 3D without changing the terrain heights.
-        layer.brightness = boundedLayerTone(
-          metadata.hillshade.brightness,
-          DEFAULT_HILLSHADE_BRIGHTNESS,
-          0.5,
-          1.5,
-        );
-        layer.contrast = boundedLayerTone(
-          metadata.hillshade.contrast,
-          DEFAULT_HILLSHADE_CONTRAST,
-          0.5,
-          2,
-        );
-        layer.gamma = boundedLayerTone(
-          metadata.hillshade.gamma,
-          DEFAULT_HILLSHADE_GAMMA,
-          0.5,
-          2,
-        );
+        layer.brightness = plan.brightness ?? layer.brightness;
+        layer.contrast = plan.contrast ?? layer.contrast;
+        layer.gamma = plan.gamma ?? layer.gamma;
         layerRef.current = layer;
         viewer.scene.requestRender();
       })

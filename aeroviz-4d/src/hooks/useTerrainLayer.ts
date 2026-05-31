@@ -2,10 +2,12 @@ import { useEffect, useRef } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import {
+  airportLocalTerrainControlsProvider,
   applyWorldTerrainStreamingSettings,
-  captureTerrainStreamingSettings,
-  restoreTerrainStreamingSettings,
-  type GlobeTerrainStreamingSettings,
+  captureTerrainProviderRestorePoint,
+  installTerrainProvider,
+  restoreEllipsoidTerrainProvider,
+  type TerrainProviderRestorePoint,
 } from "../terrain/terrainRuntime";
 
 /**
@@ -25,9 +27,11 @@ import {
 export function useTerrainLayer(): void {
   const { viewer, layers, airportLocalTerrain } = useApp();
   const worldTerrainProviderRef = useRef<Cesium.TerrainProvider | null>(null);
-  const previousStreamingSettingsRef = useRef<GlobeTerrainStreamingSettings | null>(null);
-  const airportLocalTerrainOwnsProvider =
-    layers.airportLocalTerrain && airportLocalTerrain?.status === "active";
+  const restorePointRef = useRef<TerrainProviderRestorePoint | null>(null);
+  const airportLocalTerrainOwnsProvider = airportLocalTerrainControlsProvider({
+    airportLocalTerrainLayerEnabled: layers.airportLocalTerrain,
+    airportLocalTerrain,
+  });
 
   useEffect(() => {
     if (!viewer) return;
@@ -37,14 +41,12 @@ export function useTerrainLayer(): void {
     let cancelled = false;
 
     if (layers.terrain) {
-      if (!previousStreamingSettingsRef.current) {
-        previousStreamingSettingsRef.current = captureTerrainStreamingSettings(
-          viewer.scene.globe,
-        );
+      if (!restorePointRef.current) {
+        restorePointRef.current = captureTerrainProviderRestorePoint(viewer);
       }
 
       if (worldTerrainProviderRef.current) {
-        viewer.scene.terrainProvider = worldTerrainProviderRef.current;
+        installTerrainProvider(viewer, worldTerrainProviderRef.current);
         applyWorldTerrainStreamingSettings(viewer);
         return;
       }
@@ -59,16 +61,13 @@ export function useTerrainLayer(): void {
         if (viewer.isDestroyed()) return;
         worldTerrainProviderRef.current = provider;
         if (!cancelled) {
-          viewer.scene.terrainProvider = provider;
+          installTerrainProvider(viewer, provider);
           applyWorldTerrainStreamingSettings(viewer);
         }
       });
     } else {
-      viewer.scene.terrainProvider = new Cesium.EllipsoidTerrainProvider();
-      if (previousStreamingSettingsRef.current) {
-        restoreTerrainStreamingSettings(viewer, previousStreamingSettingsRef.current);
-        previousStreamingSettingsRef.current = null;
-      }
+      restoreEllipsoidTerrainProvider(viewer, restorePointRef.current);
+      restorePointRef.current = null;
     }
 
     return () => { cancelled = true; };

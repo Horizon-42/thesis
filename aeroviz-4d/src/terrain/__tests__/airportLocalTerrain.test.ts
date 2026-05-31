@@ -10,10 +10,14 @@ vi.mock("../../utils/fetchJson", () => ({
 
 vi.mock("cesium", () => ({
   GeographicTilingScheme: class GeographicTilingScheme {},
+  Rectangle: {
+    fromDegrees: vi.fn((west, south, east, north) => ({ west, south, east, north })),
+  },
 }));
 
 import {
   AirportLocalTerrainMetadataError,
+  airportLocalTerrainImageryPlan,
   airportLocalTerrainDisplayFallbackHeight,
   fillAirportLocalTerrainFallbackHeights,
   shouldFillAirportLocalTerrainFallbackHeights,
@@ -129,5 +133,62 @@ describe("fillAirportLocalTerrainFallbackHeights", () => {
   it("only fills fallback samples near the highest-detail local terrain levels", () => {
     expect(shouldFillAirportLocalTerrainFallbackHeights(metadata({ maxLevel: 16 }), 15)).toBe(false);
     expect(shouldFillAirportLocalTerrainFallbackHeights(metadata({ maxLevel: 16 }), 16)).toBe(true);
+  });
+});
+
+describe("airportLocalTerrainImageryPlan", () => {
+  it("builds a bounded hillshade plan from terrain metadata", () => {
+    const plan = airportLocalTerrainImageryPlan(
+      metadata({
+        hillshade: {
+          url: "/hillshade.png",
+          width: 1024,
+          height: 768,
+          alpha: 1.4,
+          brightness: 2,
+          contrast: 0.1,
+          gamma: 0.2,
+        },
+      }),
+      "hillshade",
+    );
+
+    expect(plan).toEqual({
+      url: "/hillshade.png",
+      tileWidth: 1024,
+      tileHeight: 768,
+      rectangle: { west: 0, south: 0, east: 1, north: 1 },
+      credit: "Airport terrain hillshade",
+      alpha: 1,
+      brightness: 1.5,
+      contrast: 0.5,
+      gamma: 0.5,
+    });
+  });
+
+  it("builds a height-tint plan with terrain package defaults", () => {
+    const plan = airportLocalTerrainImageryPlan(
+      metadata({
+        overlay: {
+          url: "/height-tint.png",
+          width: 900,
+          height: 700,
+          alpha: -0.2,
+        },
+      }),
+      "heightTint",
+    );
+
+    expect(plan).toEqual({
+      url: "/height-tint.png",
+      tileWidth: 900,
+      tileHeight: 700,
+      rectangle: { west: 0, south: 0, east: 1, north: 1 },
+      credit: "Airport terrain height tint",
+      alpha: 0,
+      brightness: 1.05,
+      contrast: 1.12,
+      saturation: 0.9,
+    });
   });
 });

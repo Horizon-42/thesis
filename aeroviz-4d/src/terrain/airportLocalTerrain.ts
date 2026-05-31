@@ -142,11 +142,34 @@ export interface AirportLocalTerrainPreloadProgress {
   totalTiles: number;
 }
 
+export type AirportLocalTerrainVisualAssetKind = "hillshade" | "heightTint";
+
+export interface AirportLocalTerrainImageryPlan {
+  url: string;
+  tileWidth: number;
+  tileHeight: number;
+  rectangle: Cesium.Rectangle;
+  credit: string;
+  alpha: number;
+  brightness?: number;
+  contrast?: number;
+  gamma?: number;
+  saturation?: number;
+}
+
 const HEIGHT_EPSILON_M = 0.001;
 const FALLBACK_FILL_LEVEL_OFFSET = 0;
 const DEFAULT_MAX_CACHED_HEIGHT_TILES = 512;
 const HOST_USES_LITTLE_ENDIAN_FLOAT32 =
   new Uint8Array(new Float32Array([1]).buffer)[0] === 0;
+const DEFAULT_HILLSHADE_ALPHA = 0.5;
+const DEFAULT_HILLSHADE_BRIGHTNESS = 1.04;
+const DEFAULT_HILLSHADE_CONTRAST = 1.22;
+const DEFAULT_HILLSHADE_GAMMA = 0.9;
+const DEFAULT_HEIGHT_TINT_ALPHA = 0.38;
+const DEFAULT_HEIGHT_TINT_BRIGHTNESS = 1.05;
+const DEFAULT_HEIGHT_TINT_CONTRAST = 1.12;
+const DEFAULT_HEIGHT_TINT_SATURATION = 0.9;
 
 function tileKey(level: number, x: number, y: number): string {
   return `${level}/${x}/${y}`;
@@ -154,6 +177,78 @@ function tileKey(level: number, x: number, y: number): string {
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
+}
+
+function boundedAlpha(value: unknown, fallback: number): number {
+  if (!isFiniteNumber(value)) return fallback;
+  return Math.max(0, Math.min(1, value));
+}
+
+function boundedLayerTone(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  if (!isFiniteNumber(value)) return fallback;
+  return Math.max(min, Math.min(max, value));
+}
+
+function metadataRectangle(metadata: AirportLocalTerrainMetadata): Cesium.Rectangle {
+  return Cesium.Rectangle.fromDegrees(
+    metadata.bounds.west,
+    metadata.bounds.south,
+    metadata.bounds.east,
+    metadata.bounds.north,
+  );
+}
+
+export function airportLocalTerrainImageryPlan(
+  metadata: AirportLocalTerrainMetadata,
+  kind: AirportLocalTerrainVisualAssetKind,
+): AirportLocalTerrainImageryPlan | null {
+  if (kind === "hillshade") {
+    if (!metadata.hillshade?.url) return null;
+    return {
+      url: metadata.hillshade.url,
+      tileWidth: metadata.hillshade.width,
+      tileHeight: metadata.hillshade.height,
+      rectangle: metadataRectangle(metadata),
+      credit: "Airport terrain hillshade",
+      alpha: boundedAlpha(metadata.hillshade.alpha, DEFAULT_HILLSHADE_ALPHA),
+      brightness: boundedLayerTone(
+        metadata.hillshade.brightness,
+        DEFAULT_HILLSHADE_BRIGHTNESS,
+        0.5,
+        1.5,
+      ),
+      contrast: boundedLayerTone(
+        metadata.hillshade.contrast,
+        DEFAULT_HILLSHADE_CONTRAST,
+        0.5,
+        2,
+      ),
+      gamma: boundedLayerTone(
+        metadata.hillshade.gamma,
+        DEFAULT_HILLSHADE_GAMMA,
+        0.5,
+        2,
+      ),
+    };
+  }
+
+  if (!metadata.overlay?.url) return null;
+  return {
+    url: metadata.overlay.url,
+    tileWidth: metadata.overlay.width,
+    tileHeight: metadata.overlay.height,
+    rectangle: metadataRectangle(metadata),
+    credit: "Airport terrain height tint",
+    alpha: boundedAlpha(metadata.overlay.alpha, DEFAULT_HEIGHT_TINT_ALPHA),
+    brightness: DEFAULT_HEIGHT_TINT_BRIGHTNESS,
+    contrast: DEFAULT_HEIGHT_TINT_CONTRAST,
+    saturation: DEFAULT_HEIGHT_TINT_SATURATION,
+  };
 }
 
 function preloadAbortError(): Error {

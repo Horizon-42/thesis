@@ -2,20 +2,11 @@ import { useEffect, useRef } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import {
+  airportLocalTerrainImageryPlan,
   airportLocalTerrainMetadataUrl,
   type AirportLocalTerrainMetadata,
 } from "../terrain/airportLocalTerrain";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
-
-const DEFAULT_HEIGHT_TINT_ALPHA = 0.38;
-const DEFAULT_HEIGHT_TINT_BRIGHTNESS = 1.05;
-const DEFAULT_HEIGHT_TINT_CONTRAST = 1.12;
-const DEFAULT_HEIGHT_TINT_SATURATION = 0.9;
-
-function boundedAlpha(value: unknown): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_HEIGHT_TINT_ALPHA;
-  return Math.max(0, Math.min(1, value));
-}
 
 function removeLayer(viewer: Cesium.Viewer, layer: Cesium.ImageryLayer | null): void {
   if (!layer || viewer.isDestroyed()) return;
@@ -54,26 +45,22 @@ export function useTerrainHeightTintLayer(): void {
     void fetchJson<AirportLocalTerrainMetadata>(metadataUrl)
       .then((metadata) => {
         if (cancelled || viewer.isDestroyed()) return;
-        if (!metadata.overlay?.url) return;
+        const plan = airportLocalTerrainImageryPlan(metadata, "heightTint");
+        if (!plan) return;
 
         const layer = viewer.imageryLayers.addImageryProvider(
           new Cesium.SingleTileImageryProvider({
-            url: metadata.overlay.url,
-            tileWidth: metadata.overlay.width,
-            tileHeight: metadata.overlay.height,
-            rectangle: Cesium.Rectangle.fromDegrees(
-              metadata.bounds.west,
-              metadata.bounds.south,
-              metadata.bounds.east,
-              metadata.bounds.north,
-            ),
-            credit: "Airport terrain height tint",
+            url: plan.url,
+            tileWidth: plan.tileWidth,
+            tileHeight: plan.tileHeight,
+            rectangle: plan.rectangle,
+            credit: plan.credit,
           }),
         );
-        layer.alpha = boundedAlpha(metadata.overlay.alpha);
-        layer.brightness = DEFAULT_HEIGHT_TINT_BRIGHTNESS;
-        layer.contrast = DEFAULT_HEIGHT_TINT_CONTRAST;
-        layer.saturation = DEFAULT_HEIGHT_TINT_SATURATION;
+        layer.alpha = plan.alpha;
+        layer.brightness = plan.brightness ?? layer.brightness;
+        layer.contrast = plan.contrast ?? layer.contrast;
+        layer.saturation = plan.saturation ?? layer.saturation;
         layerRef.current = layer;
         viewer.scene.requestRender();
       })

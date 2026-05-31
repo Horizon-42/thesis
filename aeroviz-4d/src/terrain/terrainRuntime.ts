@@ -75,6 +75,11 @@ export interface GlobeTerrainStreamingSettings {
   depthTestAgainstTerrain: boolean;
 }
 
+export interface TerrainProviderRestorePoint {
+  provider: Cesium.TerrainProvider;
+  streamingSettings: GlobeTerrainStreamingSettings;
+}
+
 export interface GlobeRenderState {
   baseColor: Cesium.Color;
   enableLighting: boolean;
@@ -115,6 +120,56 @@ export function captureTerrainStreamingSettings(
     preloadSiblings: globe.preloadSiblings,
     depthTestAgainstTerrain: globe.depthTestAgainstTerrain,
   };
+}
+
+export function captureTerrainProviderRestorePoint(
+  viewer: Cesium.Viewer,
+): TerrainProviderRestorePoint {
+  return {
+    provider: viewer.scene.terrainProvider,
+    streamingSettings: captureTerrainStreamingSettings(viewer.scene.globe),
+  };
+}
+
+export function installTerrainProvider(
+  viewer: Cesium.Viewer,
+  provider: Cesium.TerrainProvider,
+): void {
+  viewer.scene.terrainProvider = provider;
+  viewer.scene.requestRender();
+}
+
+export function restoreTerrainProvider(
+  viewer: Cesium.Viewer,
+  restorePoint: TerrainProviderRestorePoint | null,
+): void {
+  installTerrainProvider(
+    viewer,
+    restorePoint?.provider ?? new Cesium.EllipsoidTerrainProvider(),
+  );
+  if (restorePoint) {
+    restoreTerrainStreamingSettings(viewer, restorePoint.streamingSettings);
+  }
+}
+
+export function restoreEllipsoidTerrainProvider(
+  viewer: Cesium.Viewer,
+  restorePoint: TerrainProviderRestorePoint | null,
+): void {
+  installTerrainProvider(viewer, new Cesium.EllipsoidTerrainProvider());
+  if (restorePoint) {
+    restoreTerrainStreamingSettings(viewer, restorePoint.streamingSettings);
+  }
+}
+
+export function airportLocalTerrainControlsProvider(args: {
+  airportLocalTerrainLayerEnabled: boolean;
+  airportLocalTerrain: AirportLocalTerrainState | null | undefined;
+}): boolean {
+  return (
+    args.airportLocalTerrainLayerEnabled &&
+    args.airportLocalTerrain?.status === "active"
+  );
 }
 
 export function applyWorldTerrainStreamingSettings(viewer: Cesium.Viewer): void {
