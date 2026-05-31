@@ -192,8 +192,19 @@ export default function PilotPanel() {
     setError(null);
   }
 
-  function updateControl(key: keyof PilotControls, value: number) {
-    setControls((current) => ({ ...current, [key]: value }));
+  function updateControl(
+    key: keyof PilotControls,
+    value: number,
+    min: number,
+    max: number,
+  ) {
+    if (!Number.isFinite(value)) return;
+    setControls((current) => ({ ...current, [key]: clamp(value, min, max) }));
+  }
+
+  function updateFrameDt(value: number) {
+    if (!Number.isFinite(value)) return;
+    setFrameDtS(clamp(value, 0.02, 0.5));
   }
 
   function nudgeControl(
@@ -258,14 +269,14 @@ export default function PilotPanel() {
           <label>
             <span>Bank</span>
             <input
-              type="range"
+              className="pilot-number-input"
+              type="number"
               min="-45"
               max="45"
               step="1"
               value={controls.bankDeg}
-              onChange={(event) => updateControl("bankDeg", Number(event.target.value))}
+              onChange={(event) => updateControl("bankDeg", Number(event.target.value), -45, 45)}
             />
-            <output>{controls.bankDeg.toFixed(0)} deg</output>
           </label>
           <button
             onClick={() => nudgeControl("bankDeg", 5, -45, 45)}
@@ -285,14 +296,14 @@ export default function PilotPanel() {
           <label>
             <span>Load</span>
             <input
-              type="range"
+              className="pilot-number-input"
+              type="number"
               min="0.4"
               max="2.2"
               step="0.01"
               value={controls.loadFactor}
-              onChange={(event) => updateControl("loadFactor", Number(event.target.value))}
+              onChange={(event) => updateControl("loadFactor", Number(event.target.value), 0.4, 2.2)}
             />
-            <output>{controls.loadFactor.toFixed(2)}</output>
           </label>
           <button
             onClick={() => nudgeControl("loadFactor", 0.05, 0.4, 2.2)}
@@ -312,14 +323,14 @@ export default function PilotPanel() {
           <label>
             <span>Thrust</span>
             <input
-              type="range"
+              className="pilot-number-input"
+              type="number"
               min="0"
               max="60000"
               step="500"
               value={controls.thrustN}
-              onChange={(event) => updateControl("thrustN", Number(event.target.value))}
+              onChange={(event) => updateControl("thrustN", Number(event.target.value), 0, 60000)}
             />
-            <output>{Math.round(controls.thrustN).toLocaleString()} N</output>
           </label>
           <button
             onClick={() => nudgeControl("thrustN", 1000, 0, 60000)}
@@ -336,19 +347,19 @@ export default function PilotPanel() {
               checked={isFollowing}
               onChange={(event) => setIsFollowing(event.target.checked)}
             />
-            Follow
+            Follow camera
           </label>
           <label>
             <span>dt</span>
             <input
-              type="range"
+              className="pilot-number-input"
+              type="number"
               min="0.02"
               max="0.5"
               step="0.02"
               value={frameDtS}
-              onChange={(event) => setFrameDtS(Number(event.target.value))}
+              onChange={(event) => updateFrameDt(Number(event.target.value))}
             />
-            <output>{frameDtS.toFixed(2)} s</output>
           </label>
         </div>
       </section>

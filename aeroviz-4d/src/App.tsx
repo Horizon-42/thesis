@@ -2,12 +2,12 @@
  * App.tsx
  * -------
  * Root layout component.  Stacks the 3D globe (full-screen) with floating
- * UI panels (ControlPanel, FlightTable, HUD) layered on top.
+ * UI panels (ControlPanel, FlightOperationsPanel, HUD) layered on top.
  *
  * Layout principle:
  *   - CesiumViewer            → position: absolute, fills 100vw × 100vh
  *   - .cesium-overlay-container → position: absolute, inset: 0, CSS Grid
- *       Panels sit in named grid areas (ctrl / proc / hud / tbl); clicks fall
+ *       Panels sit in named grid areas (ctrl / proc / hud / ops); clicks fall
  *       through via pointer-events: none on the container.
  */
 
@@ -16,11 +16,10 @@ import ControlPanel from "./components/ControlPanel";
 import AirportLocalTerrainDemoPage from "./components/AirportLocalTerrainDemoPage";
 import AirportLocalTerrainAlert from "./components/AirportLocalTerrainAlert";
 import HUD from "./components/HUD";
-import FlightTable from "./components/FlightTable";
+import FlightOperationsPanel from "./components/FlightOperationsPanel";
 import ProcedureDetailsPage from "./components/ProcedureDetailsPage";
 import ProcedureAnnotationPopup from "./components/ProcedureAnnotationPopup";
 import ProcedurePanel from "./components/ProcedurePanel";
-import PilotPanel from "./components/PilotPanel";
 import RunwayTrajectoryProfilePanel from "./components/RunwayTrajectoryProfilePanel";
 import { useApp } from "./context/AppContext";
 import { airportDataUrl } from "./data/airportData";
@@ -45,7 +44,6 @@ function FlightApp() {
         <ControlPanel />
         <AirportLocalTerrainAlert />
         <ProcedurePanel />
-        <PilotPanel />
         <ProcedureAnnotationPopup />
         <RunwayTrajectoryProfilePanel />
         {czmlStatus ? (
@@ -59,7 +57,7 @@ function FlightApp() {
           </div>
         ) : null}
         <HUD />
-        <FlightTable flightIds={flightIds} />
+        <FlightOperationsPanel flightIds={flightIds} />
       </div>
     </>
   );
