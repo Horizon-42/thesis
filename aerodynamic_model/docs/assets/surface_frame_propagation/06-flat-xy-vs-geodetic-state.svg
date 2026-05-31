@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 620" role="img" aria-labelledby="title">
+<title id="title">Flat xy state versus geodetic state</title>
+<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#263548"/></marker></defs>
+<style>
+svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
+.title { fill: #16212f; font: 700 22px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.subtitle { fill: #5f6f7e; font: 500 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.box { fill: white; stroke: #c8d4df; stroke-width: 1.4; }
+.accent { fill: #e7f7f8; stroke: #207b84; stroke-width: 1.4; }
+.warn { fill: #fff5e8; stroke: #c2712a; stroke-width: 1.4; }
+.axis { stroke: #263548; stroke-width: 2.2; marker-end: url(#arrow); fill: none; }
+.north { stroke: #2f62b7; stroke-width: 2.7; marker-end: url(#arrow); fill: none; }
+.east { stroke: #007c89; stroke-width: 2.7; marker-end: url(#arrow); fill: none; }
+.up { stroke: #9a4c10; stroke-width: 2.7; marker-end: url(#arrow); fill: none; }
+.down { stroke: #8f3f71; stroke-width: 2.7; marker-end: url(#arrow); fill: none; stroke-dasharray: 7 5; }
+.arrow { stroke: #263548; stroke-width: 2.0; marker-end: url(#arrow); fill: none; }
+.helper { stroke: #8292a4; stroke-width: 1.4; stroke-dasharray: 6 5; fill: none; }
+.surface { fill: #b65b13; stroke: white; stroke-width: 2.0; }
+.point { fill: #007c89; stroke: white; stroke-width: 2.0; }
+.label { fill: #16212f; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.small { fill: #4b5d70; font: 500 12.5px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.teal { fill: #006f79; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.orange { fill: #9a4c10; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.indigo { fill: #314b99; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.magenta { fill: #8f3f71; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.formula { fill: #263548; font: 600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+</style>
+<rect width="980" height="620" fill="#fbfdff"/>
+<text class="title" x="34" y="42">x/y 与 φ/λ 的区别：固定平面位移 vs 椭球上的位置状态</text>
+<text class="subtitle" x="34" y="66">x/y 是相对某个 origin 的米制局部坐标；φ/λ 是 WGS84 曲面上的全局角坐标</text>
+<rect class="accent" x="48" y="112" width="402" height="350" rx="10"/>
+<rect class="warn" x="530" y="112" width="402" height="350" rx="10"/>
+<text class="label" x="76" y="148">固定 flat x/y 状态</text>
+<text class="label" x="558" y="148">WGS84 φ/λ/h 状态</text>
+<line class="east" x1="244.0" y1="318.0" x2="394.0" y2="318.0"/>
+<line class="north" x1="244.0" y1="318.0" x2="244.0" y2="168.0"/>
+<circle class="surface" cx="244.0" cy="318.0" r="6"/>
+<circle class="point" cx="336.0" cy="236.0" r="6"/>
+<line class="helper" x1="336.0" y1="236.0" x2="336.0" y2="318.0"/>
+<line class="helper" x1="244.0" y1="236.0" x2="336.0" y2="236.0"/>
+<text class="teal" x="402.0" y="323.0">x / E meters</text>
+<text class="indigo" x="216.0" y="156.0">y / N meters</text>
+<text class="orange" x="216.0" y="346.0">O₀</text>
+<text class="label" x="348.0" y="230.0">P_flat(x,y)</text>
+<text class="formula" x="78" y="414">近似：Δφ≈y/(M₀+h₀)</text>
+<text class="formula" x="78" y="438">近似：Δλ≈x/((ν₀+h₀)cosφ₀)</text>
+<ellipse class="helper" cx="730.0" cy="338.0" rx="155.0" ry="118.0"/>
+<path class="helper" d="M 593.0,266.0 C 690.0,248.0 770.0,284.0 867.0,266.0"/>
+<path class="helper" d="M 593.0,302.0 C 690.0,284.0 770.0,320.0 867.0,302.0"/>
+<path class="helper" d="M 593.0,338.0 C 690.0,320.0 770.0,356.0 867.0,338.0"/>
+<path class="helper" d="M 593.0,374.0 C 690.0,356.0 770.0,392.0 867.0,374.0"/>
+<path class="helper" d="M 593.0,410.0 C 690.0,392.0 770.0,428.0 867.0,410.0"/>
+<path class="helper" d="M 652.0,230.0 C 624.0,318.0 680.0,358.0 652.0,446.0"/>
+<path class="helper" d="M 694.0,230.0 C 666.0,318.0 722.0,358.0 694.0,446.0"/>
+<path class="helper" d="M 766.0,230.0 C 738.0,318.0 794.0,358.0 766.0,446.0"/>
+<path class="helper" d="M 808.0,230.0 C 780.0,318.0 836.0,358.0 808.0,446.0"/>
+<circle class="surface" cx="652.0" cy="376.0" r="6"/>
+<circle class="point" cx="786.0" cy="294.0" r="6"/>
+<path class="arrow" d="M 660.0,372.0 C 712.0,312.0 746.0,284.0 778.0,292.0"/>
+<text class="orange" x="614.0" y="404.0">P₀(φ₀,λ₀,h₀)</text>
+<text class="label" x="796.0" y="288.0">P(φ,λ,h)</text>
+<text class="formula" x="558" y="184">状态直接积分：φ_dot, λ_dot, h_dot</text>
+<text class="formula" x="558" y="208">每一步重新用当前 φ,λ 计算 M,ν,ê,n̂,û</text>
+<text class="formula" x="80" y="526">ENU→WGS84：r = r₀ + x ê₀ + y n̂₀ + z û₀，再做 ECEF→WGS84。</text>
+<text class="formula" x="80" y="554">WGS84→ENU：x=(r-r₀)·ê₀，y=(r-r₀)·n̂₀，z=(r-r₀)·û₀。</text>
+<text class="formula" x="80" y="582">转换只有数值误差；长期误差来自固定平面模型，不来自坐标公式本身。</text>
+</svg>

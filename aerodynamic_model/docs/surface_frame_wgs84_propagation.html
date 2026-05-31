@@ -368,6 +368,65 @@
 \]</span>
         </div>
         <p>
+          这里的帽子符号 \(\hat{\ }\) 表示 unit vector，即单位向量，长度为 1。 \(\hat{\mathbf e}\) 是 East 方向，\(\hat{\mathbf n}\) 是 North 方向，\(\hat{\mathbf u}\) 是 Up 方向。它们不是位置坐标，而是“当前位置的三根方向尺”。
+        </p>
+        <figure class="diagram" aria-labelledby="fig-east-unit">
+          <img src="assets/surface_frame_propagation/05-east-unit-derivation.svg" alt="从 ECEF X-Y 平面中固定纬度圈的经度切向推导 east unit vector e hat 的图示">
+          <figcaption id="fig-east-unit">
+            \(\hat{\mathbf e}\) 来自“经度 \(\lambda\) 增大时，水平投影点沿纬度圈走的切向方向”。固定 \(\phi\) 和 \(h\) 时，点的水平投影是半径 \(\rho=(\nu+h)\cos\phi\) 的圆，\(\lambda\) 只决定这个圆上的角位置。
+          </figcaption>
+        </figure>
+        <p>
+          具体推导如下。把 ECEF 位置向量只看水平投影，也就是只看 \(X,Y\) 分量：
+        </p>
+        <div class="formula">
+          <span>\[
+\mathbf q(\lambda)=
+\rho
+\begin{bmatrix}
+\cos\lambda\\
+\sin\lambda\\
+0
+\end{bmatrix},
+\qquad
+\rho=(\nu+h)\cos\phi
+\]</span>
+        </div>
+        <p>
+          当 \(\lambda\) 增加一个很小的量 \(d\lambda\) 时，点沿这个水平圆移动。对 \(\lambda\) 求导，得到切向量：
+        </p>
+        <div class="formula">
+          <span>\[
+\frac{d\mathbf q}{d\lambda}
+=
+\rho
+\begin{bmatrix}
+-\sin\lambda\\
+\cos\lambda\\
+0
+\end{bmatrix}
+\]</span>
+        </div>
+        <p>
+          这个向量长度是 \(\rho\)。把它除以长度 \(\rho\)，就得到 East 单位向量。换句话说，e-hat（East unit vector，东向单位向量）的取值不是凭约定随便指定的，而是由“固定纬度圈的经度增大切线”归一化得到的：
+        </p>
+        <div class="formula">
+          <span>\[
+\hat{\mathbf e}
+=
+\frac{1}{\rho}\frac{d\mathbf q}{d\lambda}
+=
+\begin{bmatrix}
+-\sin\lambda\\
+\cos\lambda\\
+0
+\end{bmatrix}
+\]</span>
+        </div>
+        <div class="note">
+          这解释了一个容易误会的点：\(\hat{\mathbf e}\) 的方向只依赖经度 \(\lambda\)，不依赖纬度 \(\phi\) 和高度 \(h\)。纬度和高度会改变纬度圈半径 \(\rho\)，也就是“同样的经度变化对应多少米”，但不会改变 East 切线的单位方向。靠近两极时 \(\rho\approx0\)，经度方向本身变得病态，East 方向也会数值不稳定。
+        </div>
+        <p>
           FAA 的 NED 只是换一个排列和竖直方向：\(\hat{\mathbf x}_s=\hat{\mathbf n}\)，\(\hat{\mathbf y}_s=\hat{\mathbf e}\)，\(\hat{\mathbf z}_s=-\hat{\mathbf u}\)。
         </p>
       </article>
@@ -480,6 +539,126 @@ x&y&h&V&\psi&\gamma&m
           </p>
         </article>
       </div>
+
+      <article class="card" style="margin-top:16px">
+        <h3>为什么有必要更换 state，而不是继续长期积分 x/y</h3>
+        <p>
+          当前 \(x,y\) 是一个局部平面里的米制坐标。只要飞行范围很小，它非常直观：\(x\) 可以当 East 位移，\(y\) 可以当 North 位移。但它隐含了一个固定切平面：所有后续位置都被放在同一张平面上。飞机飞远后，真实地球表面已经弯走了，局部 North/East/Up 方向也随 \(\phi,\lambda\) 慢慢旋转，固定的 \(x,y\) 轴不会自动跟着转。
+        </p>
+        <p>
+          如果把长期位置状态换成 \(\phi,\lambda,h\)，每一步都会在当前位置重新计算 \(M,\nu,\hat{\mathbf e},\hat{\mathbf n},\hat{\mathbf u}\)。这样动力学仍然在局部平直空间里解释，但位置状态始终贴着 WGS84 椭球传播。
+        </p>
+        <figure class="diagram" aria-labelledby="fig-xy-vs-geodetic">
+          <img src="assets/surface_frame_propagation/06-flat-xy-vs-geodetic-state.svg" alt="固定平面 x y 状态与 WGS84 phi lambda h 状态的区别和转换关系图">
+          <figcaption id="fig-xy-vs-geodetic">
+            左边的 \(x,y\) 是相对于某个固定原点 \(O_0\) 的平面位移；右边的 \(\phi,\lambda,h\) 是 WGS84 椭球上的位置状态。两者可以互相转换，但长期积分时物理含义不同。
+          </figcaption>
+        </figure>
+      </article>
+
+      <article class="card" style="margin-top:16px">
+        <h3>x/y 和 \(\phi,\lambda\) 的转换关系</h3>
+        <p>
+          先看 ENU→WGS84 方向。如果你有一个固定局部原点 \(O_0=(\phi_0,\lambda_0,h_0)\)，并在这个原点构造固定 ENU 轴 \(\hat{\mathbf e}_0,\hat{\mathbf n}_0,\hat{\mathbf u}_0\)，那么局部平面坐标到 ECEF 的精确写法是：
+        </p>
+        <div class="formula">
+          <span>\[
+\mathbf r
+=
+\mathbf r_0
++x\hat{\mathbf e}_0
++y\hat{\mathbf n}_0
++z\hat{\mathbf u}_0
+\]</span>
+        </div>
+        <p>
+          这里 \(\mathbf r_0\) 是 \(O_0\) 的 ECEF 位置向量。注意 \(z\) 不是天然等于椭球高 \(h\)。\(z\) 是沿原点 Up 方向 \(\hat{\mathbf u}_0\) 的局部竖直坐标；而椭球高 \(h\) 是从目标点自己的椭球法线方向量出来的高度。距离很短时常用 \(z\approx h-h_0\)，但这是一种局部近似，不应该被理解成全局精确定义。
+        </p>
+        <p>
+          得到 \(\mathbf r=(X,Y,Z)\) 后，再做 ECEF 到 WGS84 的反算，就得到目标点真正的 \(\phi,\lambda,h\)。这是“固定 ENU 坐标转 WGS84”的精确转换路径。它本身只会引入浮点数舍入误差和反算容差，不会引入“地球曲率模型误差”。
+        </p>
+        <p>
+          反过来看 WGS84→ENU 方向。如果已经有一个 WGS84 点 \(P=(\phi,\lambda,h)\)，先把它转成 ECEF 位置向量 \(\mathbf r\)，再相对原点做投影：
+        </p>
+        <div class="formula">
+          <span>\[
+\Delta\mathbf r=\mathbf r-\mathbf r_0
+\]</span>
+          <span>\[
+x=\Delta\mathbf r\cdot\hat{\mathbf e}_0,\qquad
+y=\Delta\mathbf r\cdot\hat{\mathbf n}_0,\qquad
+z=\Delta\mathbf r\cdot\hat{\mathbf u}_0
+\]</span>
+        </div>
+        <p>
+          这个反向投影也是精确的固定 ENU 表达。但要记住，投影得到的 \(x,y\) 是切平面坐标，不是沿椭球表面量出来的弧长；距离越远，它越不像“在地面上朝东/朝北走了多少米”。
+        </p>
+        <p>
+          如果只是很小范围内做近似，可以不用 ECEF 反算，直接用当前原点处的曲率半径：
+        </p>
+        <div class="formula">
+          <span>\[
+y
+\approx
+(M_0+h_0)\Delta\phi,
+\qquad
+x
+\approx
+(\nu_0+h_0)\cos\phi_0\,\Delta\lambda
+\]</span>
+          <span>\[
+\Delta\phi
+\approx
+\frac{y}{M_0+h_0}
+\]</span>
+          <span>\[
+\Delta\lambda
+\approx
+\frac{x}{(\nu_0+h_0)\cos\phi_0}
+\]</span>
+          <span>\[
+\phi\approx\phi_0+\Delta\phi,
+\qquad
+\lambda\approx\lambda_0+\Delta\lambda
+\]</span>
+        </div>
+        <p>
+          这个近似的含义是：把 \(M,\nu,\cos\phi\) 都冻结在原点 \(O_0\)。距离很短时很好用；飞远后误差来自“冻结曲率和方向”这个近似。
+        </p>
+      </article>
+
+      <article class="card" style="margin-top:16px">
+        <h3>转换会不会引入误差？分三层看</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>操作</th>
+              <th>是否引入误差</th>
+              <th>原因</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>ENU \(x,y,z\) → ECEF → WGS84</td>
+              <td>几乎只有数值误差</td>
+              <td>这是坐标表达之间的数学转换；只要 WGS84 参数一致，主要误差是浮点舍入和 ECEF 反算迭代容差。</td>
+            </tr>
+            <tr>
+              <td>用 \(\Delta\phi,\Delta\lambda\) 的小范围近似</td>
+              <td>会有近似误差</td>
+              <td>它把 \(M,\nu,\cos\phi\) 固定在原点，没有随着飞机位置更新。</td>
+            </tr>
+            <tr>
+              <td>长期在固定 \(x,y\) 平面中积分</td>
+              <td>会有模型误差</td>
+              <td>真实地球表面弯曲，局部 Up/North/East 随位置旋转；固定平面不能持续贴合曲面。</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="note">
+          所以“换成 \(\phi,\lambda,h\) state”的必要性不在于普通坐标转换会严重失真，而在于长期把轨迹积分在固定 \(x,y\) 平面中，会把曲面运动误建模成平面运动。使用 \(\phi,\lambda,h\) 后，传播公式每一步都重新使用当前位置的曲率和局部轴，误差来源就主要回到动力学模型本身和数值积分步长。
+        </div>
+      </article>
 
       <figure class="diagram" aria-labelledby="fig-conventions">
         <img src="assets/surface_frame_propagation/04-simulator-convention-map.svg" alt="当前 simulator.py 的 ENU 角度约定和 FAA NED surface frame 的对照图">

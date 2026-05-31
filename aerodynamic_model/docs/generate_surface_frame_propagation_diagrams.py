@@ -387,6 +387,87 @@ def diagram_rate_patch() -> str:
     return svg.render()
 
 
+def diagram_east_unit_derivation() -> str:
+    width, height = 980, 560
+    cx, cy = 300.0, 310.0
+    radius = 170.0
+    lam = TEACHING_LAMBDA
+    qx = cx + radius * cos(lam)
+    qy = cy - radius * sin(lam)
+    tx = -sin(lam)
+    ty = -cos(lam)
+    tangent_len = 128.0
+    tangent_end = (qx + tx * tangent_len, qy + ty * tangent_len)
+    radial_unit_end = (cx + cos(lam) * 80.0, cy - sin(lam) * 80.0)
+    out = svg_2d_header(width, height, "East unit vector derivation")
+    out.append('<text class="title" x="34" y="42">e-hat 的来源：固定纬度圈上，经度 λ 增大的切向方向</text>')
+    out.append('<text class="subtitle" x="34" y="66">俯视 ECEF 的 X-Y 平面；圆半径 ρ=(ν+h)cosφ，改变 λ 只会沿这个圆切向移动</text>')
+    out.append(f'<circle class="helper" cx="{cx:.1f}" cy="{cy:.1f}" r="{radius:.1f}"/>')
+    out.append(f'<line class="axis" x1="{cx - 210:.1f}" y1="{cy:.1f}" x2="{cx + 255:.1f}" y2="{cy:.1f}"/>')
+    out.append(f'<line class="axis" x1="{cx:.1f}" y1="{cy + 210:.1f}" x2="{cx:.1f}" y2="{cy - 230:.1f}"/>')
+    out.append(f'<line class="helper" x1="{cx:.1f}" y1="{cy:.1f}" x2="{qx:.1f}" y2="{qy:.1f}"/>')
+    out.append(f'<line class="east" x1="{qx:.1f}" y1="{qy:.1f}" x2="{tangent_end[0]:.1f}" y2="{tangent_end[1]:.1f}"/>')
+    out.append(f'<path class="helper" d="M {cx + 80:.1f},{cy:.1f} A 80,80 0 0 1 {radial_unit_end[0]:.1f},{radial_unit_end[1]:.1f}"/>')
+    out.append(f'<circle class="point" cx="{qx:.1f}" cy="{qy:.1f}" r="6.5"/>')
+    out.append(f'<text class="label" x="{cx + 264:.1f}" y="{cy + 5:.1f}">X_ECEF</text>')
+    out.append(f'<text class="label" x="{cx + 8:.1f}" y="{cy - 206:.1f}">Y_ECEF</text>')
+    out.append(f'<text class="small" x="{cx + 40:.1f}" y="{cy - 32:.1f}">λ</text>')
+    out.append(f'<text class="teal" x="{tangent_end[0] + 8:.1f}" y="{tangent_end[1] + 5:.1f}">ê：East</text>')
+    out.append(f'<text class="label" x="{qx + 14:.1f}" y="{qy - 8:.1f}">Q(λ)</text>')
+    out.append(f'<text class="small" x="{(cx + qx) / 2 - 18:.1f}" y="{(cy + qy) / 2 - 10:.1f}">ρ</text>')
+    out.append('<text class="formula" x="540" y="166">水平投影：q(λ)=ρ[cosλ, sinλ, 0]^T</text>')
+    out.append('<text class="formula" x="540" y="206">沿经度求导：dq/dλ=ρ[-sinλ, cosλ, 0]^T</text>')
+    out.append('<text class="formula" x="540" y="246">归一化后：ê=[-sinλ, cosλ, 0]^T</text>')
+    out.append('<text class="formula" x="540" y="286">所以 ê 不依赖 φ 和 h；它只由当前经度 λ 决定。</text>')
+    out.append('<text class="small" x="540" y="344">注意：在极点附近 ρ≈0，经度方向本身变得不稳定，East 方向也随之病态。</text>')
+    out.append("</svg>")
+    return "\n".join(out)
+
+
+def diagram_xy_vs_geodetic_state() -> str:
+    width, height = 980, 620
+    out = svg_2d_header(width, height, "Flat xy state versus geodetic state")
+    out.append('<text class="title" x="34" y="42">x/y 与 φ/λ 的区别：固定平面位移 vs 椭球上的位置状态</text>')
+    out.append('<text class="subtitle" x="34" y="66">x/y 是相对某个 origin 的米制局部坐标；φ/λ 是 WGS84 曲面上的全局角坐标</text>')
+    out.append('<rect class="accent" x="48" y="112" width="402" height="350" rx="10"/>')
+    out.append('<rect class="warn" x="530" y="112" width="402" height="350" rx="10"/>')
+    out.append('<text class="label" x="76" y="148">固定 flat x/y 状态</text>')
+    out.append('<text class="label" x="558" y="148">WGS84 φ/λ/h 状态</text>')
+    left_cx, left_cy = 244.0, 318.0
+    out.append(f'<line class="east" x1="{left_cx}" y1="{left_cy}" x2="{left_cx + 150}" y2="{left_cy}"/>')
+    out.append(f'<line class="north" x1="{left_cx}" y1="{left_cy}" x2="{left_cx}" y2="{left_cy - 150}"/>')
+    out.append(f'<circle class="surface" cx="{left_cx:.1f}" cy="{left_cy:.1f}" r="6"/>')
+    out.append(f'<circle class="point" cx="{left_cx + 92:.1f}" cy="{left_cy - 82:.1f}" r="6"/>')
+    out.append(f'<line class="helper" x1="{left_cx + 92:.1f}" y1="{left_cy - 82:.1f}" x2="{left_cx + 92:.1f}" y2="{left_cy:.1f}"/>')
+    out.append(f'<line class="helper" x1="{left_cx:.1f}" y1="{left_cy - 82:.1f}" x2="{left_cx + 92:.1f}" y2="{left_cy - 82:.1f}"/>')
+    out.append(f'<text class="teal" x="{left_cx + 158:.1f}" y="{left_cy + 5:.1f}">x / E meters</text>')
+    out.append(f'<text class="indigo" x="{left_cx - 28:.1f}" y="{left_cy - 162:.1f}">y / N meters</text>')
+    out.append(f'<text class="orange" x="{left_cx - 28:.1f}" y="{left_cy + 28:.1f}">O₀</text>')
+    out.append(f'<text class="label" x="{left_cx + 104:.1f}" y="{left_cy - 88:.1f}">P_flat(x,y)</text>')
+    out.append('<text class="formula" x="78" y="414">近似：Δφ≈y/(M₀+h₀)</text>')
+    out.append('<text class="formula" x="78" y="438">近似：Δλ≈x/((ν₀+h₀)cosφ₀)</text>')
+
+    right_cx, right_cy = 730.0, 338.0
+    rx, ry = 155.0, 118.0
+    out.append(f'<ellipse class="helper" cx="{right_cx:.1f}" cy="{right_cy:.1f}" rx="{rx:.1f}" ry="{ry:.1f}"/>')
+    for offset in (-72, -36, 0, 36, 72):
+        out.append(f'<path class="helper" d="M {right_cx - rx + 18:.1f},{right_cy + offset:.1f} C {right_cx - 40:.1f},{right_cy + offset - 18:.1f} {right_cx + 40:.1f},{right_cy + offset + 18:.1f} {right_cx + rx - 18:.1f},{right_cy + offset:.1f}"/>')
+    for offset in (-78, -36, 36, 78):
+        out.append(f'<path class="helper" d="M {right_cx + offset:.1f},{right_cy - ry + 10:.1f} C {right_cx + offset - 28:.1f},{right_cy - 20:.1f} {right_cx + offset + 28:.1f},{right_cy + 20:.1f} {right_cx + offset:.1f},{right_cy + ry - 10:.1f}"/>')
+    out.append(f'<circle class="surface" cx="{right_cx - 78:.1f}" cy="{right_cy + 38:.1f}" r="6"/>')
+    out.append(f'<circle class="point" cx="{right_cx + 56:.1f}" cy="{right_cy - 44:.1f}" r="6"/>')
+    out.append(f'<path class="arrow" d="M {right_cx - 70:.1f},{right_cy + 34:.1f} C {right_cx - 18:.1f},{right_cy - 26:.1f} {right_cx + 16:.1f},{right_cy - 54:.1f} {right_cx + 48:.1f},{right_cy - 46:.1f}"/>')
+    out.append(f'<text class="orange" x="{right_cx - 116:.1f}" y="{right_cy + 66:.1f}">P₀(φ₀,λ₀,h₀)</text>')
+    out.append(f'<text class="label" x="{right_cx + 66:.1f}" y="{right_cy - 50:.1f}">P(φ,λ,h)</text>')
+    out.append('<text class="formula" x="558" y="184">状态直接积分：φ_dot, λ_dot, h_dot</text>')
+    out.append('<text class="formula" x="558" y="208">每一步重新用当前 φ,λ 计算 M,ν,ê,n̂,û</text>')
+    out.append('<text class="formula" x="80" y="526">ENU→WGS84：r = r₀ + x ê₀ + y n̂₀ + z û₀，再做 ECEF→WGS84。</text>')
+    out.append('<text class="formula" x="80" y="554">WGS84→ENU：x=(r-r₀)·ê₀，y=(r-r₀)·n̂₀，z=(r-r₀)·û₀。</text>')
+    out.append('<text class="formula" x="80" y="582">转换只有数值误差；长期误差来自固定平面模型，不来自坐标公式本身。</text>')
+    out.append("</svg>")
+    return "\n".join(out)
+
+
 def diagram_conventions() -> str:
     width, height = 980, 560
     out = svg_2d_header(width, height, "Simulator and FAA frame conventions")
@@ -438,6 +519,8 @@ These SVG files are generated by `../generate_surface_frame_propagation_diagrams
 - Meridian radius M at teaching latitude: {meridian_radius_over_a(phi) * WGS84_A_M:.3f} m
 - Prime vertical radius nu at teaching latitude: {nu_over_a(phi) * WGS84_A_M:.3f} m
 - Visual aircraft height arrow: {VISUAL_H_OVER_A:.3f} a, used only to make the local frame visible.
+- East-unit diagram: e-hat is the normalized derivative of the horizontal longitude circle.
+- State comparison diagram: fixed flat x/y state versus WGS84 geodetic propagation state.
 """
 
 
@@ -451,6 +534,8 @@ def main() -> None:
     write(ASSET_DIR / "02-ecef-surface-frame.svg", diagram_surface_frame())
     write(ASSET_DIR / "03-geodetic-rate-patch.svg", diagram_rate_patch())
     write(ASSET_DIR / "04-simulator-convention-map.svg", diagram_conventions())
+    write(ASSET_DIR / "05-east-unit-derivation.svg", diagram_east_unit_derivation())
+    write(ASSET_DIR / "06-flat-xy-vs-geodetic-state.svg", diagram_xy_vs_geodetic_state())
     write(ASSET_DIR / "README.md", values_readme())
 
 
