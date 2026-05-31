@@ -132,8 +132,8 @@ describe("ControlPanel", () => {
 
     render(<ControlPanel />);
 
-    expect(screen.getByText("Tile precision")).toBeTruthy();
-    expect(screen.getByText("2 m/px")).toBeTruthy();
+    expect(screen.getByText("Source spacing")).toBeTruthy();
+    expect(screen.getByText("2 m spacing")).toBeTruthy();
     expect(screen.getByText("DSM (USGS TNM DSM)")).toBeTruthy();
     expect(screen.getByText("EPSG:26917")).toBeTruthy();
   });

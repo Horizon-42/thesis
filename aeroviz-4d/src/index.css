@@ -359,12 +359,13 @@ body,
 
 .control-panel-terrain-details div {
   display: grid;
-  grid-template-columns: 88px minmax(0, 1fr);
+  grid-template-columns: 104px minmax(0, 1fr);
   gap: 8px;
 }
 
 .control-panel-terrain-details dt {
   color: #8898aa;
+  white-space: nowrap;
 }
 
 .control-panel-terrain-details dd {

@@ -75,7 +75,7 @@ function formatTerrainResolution(resolutionM: number | null): string {
   if (resolutionM === null || !Number.isFinite(resolutionM)) return "Pending";
 
   const precision = resolutionM < 1 ? 3 : resolutionM < 10 ? 2 : 1;
-  return `${Number(resolutionM.toFixed(precision)).toLocaleString()} m/px`;
+  return `${Number(resolutionM.toFixed(precision)).toLocaleString()} m spacing`;
 }
 
 function formatTerrainSource(kind: string | null, name: string | null): string {
@@ -214,7 +214,7 @@ export default function ControlPanel() {
               <dd>{formatTerrainStatus(airportLocalTerrain.status)}</dd>
             </div>
             <div>
-              <dt>Tile precision</dt>
+              <dt>Source spacing</dt>
               <dd>{formatTerrainResolution(airportLocalTerrain.horizontalResolutionM)}</dd>
             </div>
             <div>
