@@ -1138,15 +1138,35 @@ b^2=a^2(1-e^2)
             <span class="formula-line">\[
 p_S^2\left(\frac{1}{a^2}+\frac{(1-e^2)\tan^2\phi}{a^2}\right)=1
 \]</span>
+          </div>
+          <p>
+            下面这一步只是普通代数化简。先把 \(\tan^2\phi\) 改写成 \(\sin^2\phi/\cos^2\phi\)，再把 1 写成同分母的 \(\cos^2\phi/\cos^2\phi\)，最后用 \(\cos^2\phi+\sin^2\phi=1\) 合并：
+            <span class="en" lang="en">The next step is only algebraic simplification. First rewrite \(\tan^2\phi\) as \(\sin^2\phi/\cos^2\phi\), then rewrite 1 with the same denominator as \(\cos^2\phi/\cos^2\phi\), and finally combine terms using \(\cos^2\phi+\sin^2\phi=1\):</span>
+          </p>
+          <div class="formula">
             <span class="formula-line">\[
 \begin{aligned}
 1+(1-e^2)\tan^2\phi
 &amp;=
+1+(1-e^2)\frac{\sin^2\phi}{\cos^2\phi} \\
+&amp;=
+\frac{\cos^2\phi}{\cos^2\phi}
++
+\frac{(1-e^2)\sin^2\phi}{\cos^2\phi} \\
+&amp;=
 \frac{\cos^2\phi+(1-e^2)\sin^2\phi}{\cos^2\phi} \\
+&amp;=
+\frac{\cos^2\phi+\sin^2\phi-e^2\sin^2\phi}{\cos^2\phi} \\
 &amp;=
 \frac{1-e^2\sin^2\phi}{\cos^2\phi}
 \end{aligned}
 \]</span>
+          </div>
+          <p>
+            把这个结果代回上一式，就可以把 \(p_S^2\) 单独解出来：
+            <span class="en" lang="en">Substituting this result back into the previous equation isolates \(p_S^2\):</span>
+          </p>
+          <div class="formula">
             <span class="formula-line">\[
 \begin{aligned}
 p_S^2
@@ -1174,6 +1194,38 @@ p_S=\nu\cos\phi
           <p>
             这个 \(\nu\) 是希腊字母 nu，外形容易看成拉丁字母 v。几何上，它正好等于前面讲过的 S 处卯酉圈曲率半径；但在这条代数推导里，你可以先把它理解为“为了让公式短一些而定义的中间量”。也就是说：先由斜率关系和椭圆方程解出根式，再把这个根式命名为 \(\nu\)，不是先假设 \(\nu\) 再倒推出 \(p_S\)。
             <span class="en" lang="en">This \(\nu\) is the Greek letter nu, which can look like the Latin letter v. Geometrically, it is exactly the prime vertical radius of curvature at S discussed earlier; but in this algebraic derivation, you may first read it simply as an intermediate quantity defined to shorten the formulas. In other words: the radical expression is solved from the slope relation and the ellipse equation first, then named \(\nu\); \(\nu\) is not assumed first in order to force \(p_S\).</span>
+          </p>
+          <div class="callout">
+            <strong>为什么这个因子正好也是卯酉圈曲率半径？</strong>
+            直观说，固定 \(\phi\) 只改变 \(\lambda\) 时，S 会沿一条纬线圆运动。由 \(p_S=\nu\cos\phi\) 可知，这条纬线圆在水平面内的半径是 \(\rho=\nu\cos\phi\)。圆本身的空间曲率大小是 \(1/\rho=1/(\nu\cos\phi)\)。但 <strong>prime vertical radius of curvature</strong> 取的不是纬线圆本身的半径，而是东西方向法截线的曲率半径；等价地看，是把这条纬线圆的曲率向量投影到椭球法线方向后再取倒数。
+            <span class="en" lang="en"><strong>Why is this factor exactly the prime vertical radius of curvature?</strong> Intuitively, if \(\phi\) is fixed and only \(\lambda\) changes, S moves along a parallel circle. Since \(p_S=\nu\cos\phi\), the radius of that horizontal circle is \(\rho=\nu\cos\phi\). The spatial curvature of the circle itself has magnitude \(1/\rho=1/(\nu\cos\phi)\). But the <strong>prime vertical radius of curvature</strong> is not the radius of the parallel circle itself; it is the radius of curvature of the east-west normal section. Equivalently, take the curvature vector of that parallel circle, project it onto the ellipsoid-normal direction, and then take the reciprocal.</span>
+          </div>
+          <div class="formula">
+            <span class="formula-line">\[
+\rho=\nu\cos\phi,\qquad
+\kappa_{\mathrm{circle}}=\frac{1}{\rho}
+\]</span>
+            <span class="formula-line">\[
+\text{normal projection factor}=\cos\phi
+\]</span>
+            <span class="formula-line">\[
+\kappa_{\mathrm{prime\ vertical}}
+=
+\frac{1}{\nu\cos\phi}\cos\phi
+=
+\frac{1}{\nu}
+\]</span>
+            <span class="formula-line">\[
+R_{\mathrm{prime\ vertical}}
+=
+\frac{1}{\kappa_{\mathrm{prime\ vertical}}}
+=
+\nu
+\]</span>
+          </div>
+          <p>
+            所以这里有两层含义：代数上，\(\nu\) 是把 \(a/\sqrt{1-e^2\sin^2\phi}\) 命名出来；几何上，同一个量又等于东西方向法截线的曲率半径。完整严谨证明会进入曲面微分几何，学习路径可以查：normal curvature（法曲率）、Meusnier theorem（默尼耶定理）、first and second fundamental forms（第一/第二基本形式）、principal curvatures of an ellipsoid（椭球主曲率）。
+            <span class="en" lang="en">So there are two layers of meaning here: algebraically, \(\nu\) names the factor \(a/\sqrt{1-e^2\sin^2\phi}\); geometrically, the same quantity equals the radius of curvature of the east-west normal section. A fully rigorous proof belongs to surface differential geometry. Useful learning paths are: normal curvature, Meusnier theorem, first and second fundamental forms, and principal curvatures of an ellipsoid.</span>
           </p>
           <p>
             最后把 \(p_S=\nu\cos\phi\) 代回 \(z_S=(1-e^2)p_S\tan\phi\)，就得到表面点的竖直坐标：
