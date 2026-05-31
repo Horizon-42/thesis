@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 560" role="img" aria-labelledby="title">
+<title id="title">Meaning of p in dz/dp on the WGS 84 meridian section</title>
+<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#263548"/></marker></defs>
+<style>
+svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
+.title { fill: #16212f; font: 700 22px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.subtitle { fill: #5f6f7e; font: 500 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.axis { stroke: #263548; stroke-width: 2.2; marker-end: url(#arrow); }
+.ellipse { fill: #e7f7f8; stroke: #207b84; stroke-width: 2.2; }
+.helper { stroke: #8292a4; stroke-width: 1.5; stroke-dasharray: 6 5; fill: none; }
+.normal { stroke: #b65b13; stroke-width: 2.7; marker-end: url(#arrow); }
+.radius { stroke: #3d58a8; stroke-width: 2.4; marker-end: url(#arrow); }
+.tangent { stroke: #3d58a8; stroke-width: 2.0; }
+.point { fill: #007c89; stroke: white; stroke-width: 2.0; }
+.surface { fill: #b65b13; stroke: white; stroke-width: 2.0; }
+.label { fill: #16212f; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.small { fill: #4b5d70; font: 500 12.5px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.orange { fill: #9a4c10; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.indigo { fill: #314b99; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.formula { fill: #263548; font: 600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+</style>
+<style>
+.secant { stroke: #007c89; stroke-width: 2.0; stroke-dasharray: 8 5; }
+.delta { stroke: #007c89; stroke-width: 2.4; marker-end: url(#arrow); }
+.delta-z { stroke: #b65b13; stroke-width: 2.4; marker-end: url(#arrow); }
+</style>
+<text class="title" x="30" y="36">推导图：dz/dp 中的 p 是剖面水平坐标</text>
+<text class="subtitle" x="30" y="58">在子午剖面里，p = sqrt(x²+y²)，表示点到 Z 轴的水平距离；S 附近令 Δp 逐渐趋近 0，割线斜率趋近切线斜率。</text>
+<polyline class="ellipse" fill="none" points="485.0,365.0 485.0,361.9 484.9,358.8 484.8,355.7 484.7,352.6 484.5,349.5 484.3,346.4 484.1,343.4 483.8,340.3 483.5,337.2 483.1,334.1 482.7,331.1 482.3,328.0 481.8,324.9 481.3,321.9 480.8,318.8 480.2,315.8 479.6,312.8 478.9,309.7 478.2,306.7 477.5,303.7 476.7,300.7 475.9,297.7 475.1,294.7 474.2,291.8 473.3,288.8 472.3,285.9 471.3,282.9 470.3,280.0 469.3,277.1 468.2,274.2 467.0,271.3 465.9,268.5 464.7,265.6 463.5,262.8 462.2,259.9 460.9,257.1 459.6,254.3 458.2,251.6 456.8,248.8 455.3,246.1 453.9,243.3 452.4,240.6 450.8,237.9 449.3,235.3 447.7,232.6 446.0,230.0 444.4,227.4 442.7,224.8 440.9,222.2 439.2,219.7 437.4,217.1 435.6,214.6 433.7,212.1 431.8,209.7 429.9,207.2 428.0,204.8 426.0,202.4 424.0,200.1 422.0,197.7 419.9,195.4 417.8,193.1 415.7,190.8 413.6,188.6 411.4,186.4 409.2,184.2 407.0,182.0 404.7,179.9 402.5,177.8 400.2,175.7 397.8,173.7 395.5,171.6 393.1,169.7 390.7,167.7 388.3,165.8 385.8,163.8 383.4,162.0 380.9,160.1 378.4,158.3 375.8,156.5 373.3,154.8 370.7,153.0 368.1,151.4 365.5,149.7 362.8,148.1 360.2,146.5 357.5,144.9 354.8,143.4 352.1,141.9 349.3,140.4 346.6,139.0 343.8,137.6 341.0,136.2 338.2,134.9 335.4,133.6 332.6,132.3 329.7,131.1 326.9,129.9 324.0,128.7 321.1,127.6 318.2,126.5 315.3,125.5 312.3,124.5 309.4,123.5 306.4,122.5 303.5,121.6 300.5,120.8 297.5,119.9 294.5,119.1 291.5,118.4 288.5,117.6 285.4,116.9 282.4,116.3 279.4,115.7 276.3,115.1 273.3,114.5 270.2,114.0 267.1,113.6 264.1,113.1 261.0,112.7 257.9,112.4 254.8,112.1 251.7,111.8 248.6,111.5 245.5,111.3 242.4,111.2 239.3,111.0 236.2,110.9 233.1,110.9 230.0,110.9"/>
+<line class="axis" x1="230" y1="515" x2="230" y2="75"/>
+<line class="axis" x1="210" y1="365" x2="795" y2="365"/>
+<line class="helper" x1="380.9" y1="160.1" x2="380.9" y2="365.0"/>
+<line class="helper" x1="394.9" y1="171.2" x2="394.9" y2="365.0"/>
+<line class="helper" x1="230.0" y1="160.1" x2="380.9" y2="160.1"/>
+<line class="helper" x1="230.0" y1="171.2" x2="394.9" y2="171.2"/>
+<line class="tangent" x1="329.9" y1="122.8" x2="429.4" y2="195.6"/>
+<line class="secant" x1="380.9" y1="160.1" x2="394.9" y2="171.2"/>
+<line class="delta" x1="380.9" y1="182.1" x2="394.9" y2="182.1"/>
+<line class="delta-z" x1="408.9" y1="160.1" x2="408.9" y2="171.2"/>
+<circle class="surface" cx="380.9" cy="160.1" r="6"/>
+<circle class="point" cx="394.9" cy="171.2" r="5"/>
+<text class="label" x="805" y="370">p</text>
+<text class="label" x="240" y="73">z</text>
+<text class="small" x="236" y="383">O / Z 轴穿出剖面的位置</text>
+<text class="orange" x="390.9" y="148.1">S(p_S,z_S)</text>
+<text class="teal" x="404.9" y="176.2">S′(p_S+Δp,z_S+Δz)</text>
+<text class="small" x="375.9" y="387.0">p_S</text>
+<text class="small" x="382.9" y="403.0">p_S+Δp</text>
+<text class="teal" x="381.9" y="202.1">Δp</text>
+<text class="orange" x="419.9" y="170.6">Δz</text>
+<text class="indigo" x="437.4" y="199.6">切线 slope = (dz/dp)|S</text>
+<text class="formula" x="42" y="512">割线斜率 = Δz/Δp；令 Δp → 0 后得到导数 (dz/dp)|S。它是切线斜率，不是曲率。</text>
+</svg>
