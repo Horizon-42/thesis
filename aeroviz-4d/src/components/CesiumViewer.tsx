@@ -13,6 +13,7 @@
  *         (useCesiumViewer)      initialises Viewer, stores in context
  *         (useRunwayLayer)       loads runway.geojson
  *         (useWaypointLayer)     loads waypoints.geojson
+ *         (useTerrainHillshadeLayer/useTerrainHeightTintLayer) adds local terrain visual aids
  *         (useProcedureSegmentLayer) loads v3 procedure render bundles
  *         (useOcsLayer)          builds OCS geometry
  *         (useCzmlLoader)        loads trajectories.czml
@@ -25,6 +26,7 @@ import { useSatelliteImageryLayer } from "../hooks/useSatelliteImageryLayer";
 import { useTerrainLayer } from "../hooks/useTerrainLayer";
 import { useAirportLocalTerrainLayer } from "../hooks/useAirportLocalTerrainLayer";
 import { useTerrainHillshadeLayer } from "../hooks/useTerrainHillshadeLayer";
+import { useTerrainHeightTintLayer } from "../hooks/useTerrainHeightTintLayer";
 import { useObstacleLayer } from "../hooks/useObstacleLayer";
 import { useProcedureAnnotationPicking } from "../hooks/useProcedureAnnotationPicking";
 import { useProcedureSegmentLayer } from "../hooks/useProcedureSegmentLayer";
@@ -50,6 +52,7 @@ export default function CesiumViewerComponent() {
   useTerrainLayer();
   useAirportLocalTerrainLayer({ enabled: layers.airportLocalTerrain });
   useTerrainHillshadeLayer();
+  useTerrainHeightTintLayer();
   useRunwayLayer();
   useObstacleLayer();
   useProcedureSegmentLayer();

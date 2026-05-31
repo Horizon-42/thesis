@@ -7,18 +7,18 @@ const {
   mockViewer,
   getActiveAirportCode,
   setActiveAirportCode,
-  getTerrainHillshadeEnabled,
-  setTerrainHillshadeEnabled,
+  getTerrainHeightTintEnabled,
+  setTerrainHeightTintEnabled,
   addImageryProvider,
   removeImageryLayer,
   requestRender,
 } = vi.hoisted(() => {
   const addImageryProvider = vi.fn((provider: any) => ({
-    _tag: "hillshade-layer",
+    _tag: "height-tint-layer",
     alpha: 1,
     brightness: 1,
     contrast: 1,
-    gamma: 1,
+    saturation: 1,
     provider,
   }));
   const removeImageryLayer = vi.fn();
@@ -35,7 +35,7 @@ const {
   };
   const fetchJson = vi.fn();
   let activeAirportCode = "KRDU";
-  let terrainHillshadeEnabled = true;
+  let terrainHeightTintEnabled = true;
 
   return {
     fetchJson,
@@ -44,9 +44,9 @@ const {
     setActiveAirportCode: (airportCode: string) => {
       activeAirportCode = airportCode;
     },
-    getTerrainHillshadeEnabled: () => terrainHillshadeEnabled,
-    setTerrainHillshadeEnabled: (enabled: boolean) => {
-      terrainHillshadeEnabled = enabled;
+    getTerrainHeightTintEnabled: () => terrainHeightTintEnabled,
+    setTerrainHeightTintEnabled: (enabled: boolean) => {
+      terrainHeightTintEnabled = enabled;
     },
     addImageryProvider,
     removeImageryLayer,
@@ -80,14 +80,14 @@ vi.mock("../../context/AppContext", () => ({
     viewer: mockViewer,
     activeAirportCode: getActiveAirportCode(),
     layers: {
-      terrainHillshade: getTerrainHillshadeEnabled(),
+      terrainHeightTint: getTerrainHeightTintEnabled(),
     },
   }),
 }));
 
-import { useTerrainHillshadeLayer } from "../useTerrainHillshadeLayer";
+import { useTerrainHeightTintLayer } from "../useTerrainHeightTintLayer";
 
-function metadata(alpha = 0.42) {
+function metadata(alpha = 0.31) {
   return {
     bounds: {
       west: -79.02,
@@ -95,8 +95,8 @@ function metadata(alpha = 0.42) {
       east: -78.55,
       north: 36.07,
     },
-    hillshade: {
-      url: "/data/airports/KRDU/local-terrain/heightmap/local_terrain_hillshade.png",
+    overlay: {
+      url: "/data/airports/KRDU/local-terrain/heightmap/local_terrain_height_overlay.png",
       width: 1024,
       height: 830,
       alpha,
@@ -104,10 +104,10 @@ function metadata(alpha = 0.42) {
   };
 }
 
-describe("useTerrainHillshadeLayer", () => {
+describe("useTerrainHeightTintLayer", () => {
   beforeEach(() => {
     setActiveAirportCode("KRDU");
-    setTerrainHillshadeEnabled(true);
+    setTerrainHeightTintEnabled(true);
     fetchJson.mockReset();
     fetchJson.mockResolvedValue(metadata());
     addImageryProvider.mockClear();
@@ -115,8 +115,8 @@ describe("useTerrainHillshadeLayer", () => {
     requestRender.mockClear();
   });
 
-  it("loads the active airport hillshade as a bounded single-tile imagery layer", async () => {
-    renderHook(() => useTerrainHillshadeLayer());
+  it("loads the active airport height tint as a bounded single-tile imagery layer", async () => {
+    renderHook(() => useTerrainHeightTintLayer());
 
     await waitFor(() => expect(addImageryProvider).toHaveBeenCalledTimes(1));
 
@@ -125,7 +125,7 @@ describe("useTerrainHillshadeLayer", () => {
     );
     const provider = addImageryProvider.mock.calls[0][0];
     expect(provider.options).toEqual({
-      url: "/data/airports/KRDU/local-terrain/heightmap/local_terrain_hillshade.png",
+      url: "/data/airports/KRDU/local-terrain/heightmap/local_terrain_height_overlay.png",
       tileWidth: 1024,
       tileHeight: 830,
       rectangle: {
@@ -134,21 +134,21 @@ describe("useTerrainHillshadeLayer", () => {
         east: -78.55,
         north: 36.07,
       },
-      credit: "Airport terrain hillshade",
+      credit: "Airport terrain height tint",
     });
-    expect(addImageryProvider.mock.results[0].value.alpha).toBe(0.42);
-    expect(addImageryProvider.mock.results[0].value.brightness).toBe(1.04);
-    expect(addImageryProvider.mock.results[0].value.contrast).toBe(1.22);
-    expect(addImageryProvider.mock.results[0].value.gamma).toBe(0.9);
+    expect(addImageryProvider.mock.results[0].value.alpha).toBe(0.31);
+    expect(addImageryProvider.mock.results[0].value.brightness).toBe(1.05);
+    expect(addImageryProvider.mock.results[0].value.contrast).toBe(1.12);
+    expect(addImageryProvider.mock.results[0].value.saturation).toBe(0.9);
     expect(requestRender).toHaveBeenCalled();
   });
 
-  it("removes the hillshade layer when the toggle is disabled", async () => {
-    const { rerender } = renderHook(() => useTerrainHillshadeLayer());
+  it("removes the height tint layer when the toggle is disabled", async () => {
+    const { rerender } = renderHook(() => useTerrainHeightTintLayer());
 
     await waitFor(() => expect(addImageryProvider).toHaveBeenCalledTimes(1));
 
-    setTerrainHillshadeEnabled(false);
+    setTerrainHeightTintEnabled(false);
     rerender();
 
     expect(removeImageryLayer).toHaveBeenCalledWith(
@@ -165,7 +165,7 @@ describe("useTerrainHillshadeLayer", () => {
       }),
     );
 
-    renderHook(() => useTerrainHillshadeLayer());
+    renderHook(() => useTerrainHeightTintLayer());
 
     await waitFor(() => expect(fetchJson).toHaveBeenCalled());
 

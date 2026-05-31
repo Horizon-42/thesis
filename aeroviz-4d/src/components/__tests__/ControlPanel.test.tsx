@@ -15,6 +15,7 @@ vi.mock("../../context/AppContext", () => ({
       terrain: false,
       airportLocalTerrain: false,
       terrainHillshade: false,
+      terrainHeightTint: false,
       runways: true,
       waypoints: false,
       ocsSurfaces: true,

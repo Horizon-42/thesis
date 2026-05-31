@@ -17,8 +17,9 @@ to XYZ tiles.
 - Generate a multi-direction hillshade image beside each local heightmap
   terrain package.
 - Expose the generated image through `metadata.json`.
-- Load the image as a bounded Cesium imagery layer.
+- Load the hillshade and height-tint images as bounded Cesium imagery layers.
 - Add a UI layer toggle named `Terrain Hillshade`.
+- Add a UI layer toggle named `Terrain Height Tint` for analysis coloring.
 - Use the valid-sample terrain footprint, not the full GeoTIFF bounding box, so
   no-data raster margins do not become visible local terrain.
 - Fill local terrain no-data/fallback edge samples only at the highest detail
@@ -39,13 +40,22 @@ to XYZ tiles.
   "height": 830,
   "alpha": 0.62,
   "note": "Multi-direction transparent hillshade overlay generated from local terrain source elevations."
+},
+"overlay": {
+  "url": "/data/airports/<ICAO>/local-terrain/heightmap/local_terrain_height_overlay.png",
+  "width": 1024,
+  "height": 830,
+  "alpha": 0.38,
+  "note": "Height tint for visual inspection; the terrain provider still supplies the actual heights."
 }
 ```
 
-The image is an RGBA overlay covering `metadata.bounds`. Shadow pixels use black
+The hillshade image is an RGBA overlay covering `metadata.bounds`. Shadow pixels use black
 with variable alpha; highlight pixels use low-opacity white. This avoids the
 flat gray wash that a semitransparent grayscale image can create over satellite
-imagery.
+imagery. The height-tint image uses the same bounds and is intended as an
+analysis overlay for low-relief airports where absolute terrain differences are
+hard to read from lighting alone.
 
 `fallbackHeightM` stays at `0`. The generator writes `metadata.bounds` from the
 valid elevation footprint and keeps the original GeoTIFF bounds on
@@ -71,11 +81,18 @@ npm run build:local-terrain:visual-assets -- --airport KRDU
 
 `useTerrainHillshadeLayer` reads the active airport-local terrain metadata. If a
 `hillshade` entry exists and the layer is enabled, it adds a
-`SingleTileImageryProvider` constrained to `metadata.bounds`.
+`SingleTileImageryProvider` constrained to `metadata.bounds` and applies mild
+brightness/contrast/gamma tuning so subtle relief is visible without changing
+height values.
 
-The layer is independent of the local terrain provider. It can show over Cesium
-World Terrain or airport-local heightmap terrain, but it disappears when the
-active airport has no generated local terrain metadata or no hillshade asset.
+`useTerrainHeightTintLayer` reads the same metadata. If an `overlay` entry exists
+and the `Terrain Height Tint` layer is enabled, it adds the generated
+height-color image as a bounded `SingleTileImageryProvider`.
+
+Both layers are independent of the local terrain provider. They can show over
+Cesium World Terrain or airport-local heightmap terrain, but each disappears when
+the active airport has no generated local terrain metadata or matching visual
+asset.
 
 ## Performance Notes
 

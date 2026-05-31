@@ -53,6 +53,7 @@ describe("AppContext", () => {
     await waitFor(() => expect(result.current.activeAirportCode).toBe("KRDU"));
     expect(result.current.layers.airportLocalTerrain).toBe(false);
     expect(result.current.layers.terrainHillshade).toBe(false);
+    expect(result.current.layers.terrainHeightTint).toBe(false);
     expect(result.current.layers.obstacles).toBe(false);
     expect(result.current.layers.procedures).toBe(false);
 

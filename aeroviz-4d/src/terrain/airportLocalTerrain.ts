@@ -53,6 +53,7 @@ export interface AirportLocalTerrainMetadata {
     url: string;
     width: number;
     height: number;
+    alpha?: number;
     note?: string;
   };
   originalTifHeatmap?: {
@@ -67,6 +68,9 @@ export interface AirportLocalTerrainMetadata {
     width: number;
     height: number;
     alpha?: number;
+    brightness?: number;
+    contrast?: number;
+    gamma?: number;
     note?: string;
   };
   minLevel: number;

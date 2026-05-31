@@ -50,6 +50,7 @@ export type LayerKey =
   | "terrain"
   | "airportLocalTerrain"
   | "terrainHillshade"
+  | "terrainHeightTint"
   | "runways"
   | "waypoints"
   | "ocsSurfaces"
@@ -225,6 +226,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     terrain: false,
     airportLocalTerrain: false,
     terrainHillshade: false,
+    terrainHeightTint: false,
     runways: true,
     waypoints: false,
     ocsSurfaces: false,

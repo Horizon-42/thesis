@@ -29,6 +29,7 @@ const FALLBACK_HEIGHT_M = 0;
 const EDGE_FILL_LEVEL_OFFSET = 0;
 const OVERLAY_MAX_WIDTH = 1024;
 const HILLSHADE_DEFAULT_LAYER_ALPHA = 0.62;
+const HEIGHT_TINT_DEFAULT_LAYER_ALPHA = 0.38;
 const HILLSHADE_SOURCE_AZIMUTHS_DEG = [315, 45, 270];
 const HILLSHADE_SOURCE_WEIGHTS = [0.55, 0.3, 0.15];
 const HILLSHADE_SOURCE_ELEVATION_DEG = 38;
@@ -1252,6 +1253,7 @@ function localTerrainVisualAssetMetadata(overlay, originalTifHeatmap, hillshade,
       url: `/data/airports/${AIRPORT_CODE}/local-terrain/heightmap/local_terrain_height_overlay.png`,
       width: overlay.width,
       height: overlay.height,
+      alpha: HEIGHT_TINT_DEFAULT_LAYER_ALPHA,
       note: "Height tint for visual inspection; the terrain provider still supplies the actual heights.",
     },
     originalTifHeatmap: {

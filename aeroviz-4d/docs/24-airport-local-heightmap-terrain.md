@@ -80,8 +80,8 @@ npm run build:local-terrain -- --airport KSJC
 npm run build:local-terrain -- --airport KRDU
 ```
 
-To refresh only the generated inspection overlays, including hillshade, without
-rewriting the `.f32` terrain tiles:
+To refresh only the generated inspection overlays, including hillshade and
+height tint, without rewriting the `.f32` terrain tiles:
 
 ```bash
 npm run build:local-terrain:visual-assets -- --airport KRDU
@@ -122,6 +122,14 @@ This keeps airport-center switching responsive without forcing a full cache warm
 The user sees `Preload X/Y` for the blocking focused set first; once it switches
 to `Active`, the provider is already installed and non-focused tiles stream only
 when camera movement asks for them.
+
+Two optional imagery-only visual aids can be layered above the terrain without
+changing heights:
+
+- `Terrain Hillshade`: a multi-direction relief cue with tuned
+  brightness/contrast/gamma for low-relief airports
+- `Terrain Height Tint`: the generated local height-color overlay for analysis
+  coloring
 
 Terrain `.f32` tiles use `0 m` for no-data samples. The generator and frontend
 only repair fallback edge samples at the highest terrain level. Coarser parent

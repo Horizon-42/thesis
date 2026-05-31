@@ -7,11 +7,24 @@ import {
 } from "../terrain/airportLocalTerrain";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 
-const DEFAULT_HILLSHADE_ALPHA = 0.34;
+const DEFAULT_HILLSHADE_ALPHA = 0.5;
+const DEFAULT_HILLSHADE_BRIGHTNESS = 1.04;
+const DEFAULT_HILLSHADE_CONTRAST = 1.22;
+const DEFAULT_HILLSHADE_GAMMA = 0.9;
 
 function boundedAlpha(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_HILLSHADE_ALPHA;
   return Math.max(0, Math.min(1, value));
+}
+
+function boundedLayerTone(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.max(min, Math.min(max, value));
 }
 
 function removeLayer(viewer: Cesium.Viewer, layer: Cesium.ImageryLayer | null): void {
@@ -68,6 +81,26 @@ export function useTerrainHillshadeLayer(): void {
           }),
         );
         layer.alpha = boundedAlpha(metadata.hillshade.alpha);
+        // Hillshade is a perceptual relief cue: tone controls make low-relief
+        // airport terrain read as 3D without changing the terrain heights.
+        layer.brightness = boundedLayerTone(
+          metadata.hillshade.brightness,
+          DEFAULT_HILLSHADE_BRIGHTNESS,
+          0.5,
+          1.5,
+        );
+        layer.contrast = boundedLayerTone(
+          metadata.hillshade.contrast,
+          DEFAULT_HILLSHADE_CONTRAST,
+          0.5,
+          2,
+        );
+        layer.gamma = boundedLayerTone(
+          metadata.hillshade.gamma,
+          DEFAULT_HILLSHADE_GAMMA,
+          0.5,
+          2,
+        );
         layerRef.current = layer;
         viewer.scene.requestRender();
       })
