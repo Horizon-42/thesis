@@ -550,6 +550,87 @@ def diagram_curvature_radii() -> str:
     return svg.render()
 
 
+def diagram_prime_vertical_projection() -> str:
+    width, height = 940, 620
+    phi = TEACHING_PHI
+    lam = TEACHING_LAMBDA
+    cos_phi = cos(phi)
+    sin_phi = sin(phi)
+
+    out = svg_2d_header(width, height, "Projection from parallel-circle curvature to prime-vertical normal curvature")
+    out.append("""<style>
+.panel-title { fill: #16212f; font: 700 16px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.parallel-circle { fill: #eef8f9; stroke: #007c89; stroke-width: 2.2; }
+.kcircle { stroke: #007c89; stroke-width: 3.0; marker-end: url(#arrow); fill: none; }
+.projection { stroke: #b65b13; stroke-width: 3.0; marker-end: url(#arrow); fill: none; }
+.normal-line { stroke: #b65b13; stroke-width: 2.4; marker-end: url(#arrow); fill: none; }
+.arc { fill: none; stroke: #3d58a8; stroke-width: 1.8; }
+.panel-box { fill: none; stroke: #d8e1e8; stroke-width: 1.2; }
+</style>""")
+    out.append('<text class="title" x="30" y="36">图解：为什么 κ_circle 和 κ_prime vertical 不一样</text>')
+    out.append(
+        f'<text class="subtitle" x="30" y="58">同一教学点 φ={TEACHING_PHI_DEG:.6f}°；投影因子 cosφ={cos_phi:.4f}。纬线圆曲率先是水平向内，再投影到椭球法线方向。</text>'
+    )
+    out.append('<rect class="panel-box" x="30" y="86" width="410" height="410" rx="8"/>')
+    out.append('<rect class="panel-box" x="500" y="86" width="410" height="410" rx="8"/>')
+    out.append('<text class="panel-title" x="50" y="116">A. 纬线圆的空间曲率</text>')
+    out.append('<text class="panel-title" x="520" y="116">B. 把曲率投影到椭球法线</text>')
+
+    # Left panel: top-down view of the parallel circle at z=z_S.
+    cx, cy, radius = 235.0, 300.0, 150.0
+    sx = cx + radius * cos(lam)
+    sy = cy - radius * sin(lam)
+    tangent_len = 96.0
+    tx = -sin(lam)
+    ty = -cos(lam)
+    k_len = 92.0
+    kx = -cos(lam)
+    ky = sin(lam)
+    out.append(f'<circle class="parallel-circle" cx="{cx:.1f}" cy="{cy:.1f}" r="{radius:.1f}"/>')
+    out.append(f'<line class="radius" x1="{cx:.1f}" y1="{cy:.1f}" x2="{sx:.1f}" y2="{sy:.1f}"/>')
+    out.append(
+        f'<line class="tangent" x1="{sx - tx * tangent_len / 2:.1f}" y1="{sy - ty * tangent_len / 2:.1f}" x2="{sx + tx * tangent_len / 2:.1f}" y2="{sy + ty * tangent_len / 2:.1f}"/>'
+    )
+    out.append(f'<line class="kcircle" x1="{sx:.1f}" y1="{sy:.1f}" x2="{sx + kx * k_len:.1f}" y2="{sy + ky * k_len:.1f}"/>')
+    out.append(f'<circle class="surface" cx="{sx:.1f}" cy="{sy:.1f}" r="6.2"/>')
+    out.append(f'<circle class="point" cx="{cx:.1f}" cy="{cy:.1f}" r="4.8"/>')
+    out.append(f'<text class="small" x="{cx - 20:.1f}" y="{cy + 24:.1f}">Z 轴</text>')
+    out.append(f'<text class="orange" x="{sx + 10:.1f}" y="{sy - 6:.1f}">S</text>')
+    out.append(f'<text class="indigo" x="{(cx + sx) / 2 + 6:.1f}" y="{(cy + sy) / 2 - 8:.1f}">ρ = ν cosφ</text>')
+    out.append(f'<text class="teal" x="{sx + kx * k_len - 92:.1f}" y="{sy + ky * k_len - 10:.1f}">κ_circle = 1/ρ</text>')
+    out.append(f'<text class="small" x="{sx + tx * 34:.1f}" y="{sy + ty * 34 + 22:.1f}">east tangent</text>')
+
+    # Right panel: local vector projection in the plane spanned by the inward radial direction and Z.
+    ox, oy = 735.0, 310.0
+    vec_len = 172.0
+    q_end = (ox - vec_len, oy)
+    normal_end = (ox - vec_len * cos_phi, oy + vec_len * sin_phi)
+    proj_len = vec_len * cos_phi
+    proj_end = (ox - proj_len * cos_phi, oy + proj_len * sin_phi)
+    out.append(f'<line class="helper" x1="{ox - 205:.1f}" y1="{oy:.1f}" x2="{ox + 22:.1f}" y2="{oy:.1f}"/>')
+    out.append(f'<line class="kcircle" x1="{ox:.1f}" y1="{oy:.1f}" x2="{q_end[0]:.1f}" y2="{q_end[1]:.1f}"/>')
+    out.append(f'<line class="normal-line" x1="{ox:.1f}" y1="{oy:.1f}" x2="{normal_end[0]:.1f}" y2="{normal_end[1]:.1f}"/>')
+    out.append(f'<line class="projection" x1="{ox:.1f}" y1="{oy:.1f}" x2="{proj_end[0]:.1f}" y2="{proj_end[1]:.1f}"/>')
+    out.append(f'<line class="helper" x1="{q_end[0]:.1f}" y1="{q_end[1]:.1f}" x2="{proj_end[0]:.1f}" y2="{proj_end[1]:.1f}"/>')
+    out.append(f'<circle class="surface" cx="{ox:.1f}" cy="{oy:.1f}" r="6.2"/>')
+    out.append(f'<circle class="point" cx="{proj_end[0]:.1f}" cy="{proj_end[1]:.1f}" r="4.8"/>')
+    arc_r = 44.0
+    start = (ox - arc_r, oy)
+    end = (ox - arc_r * cos_phi, oy + arc_r * sin_phi)
+    out.append(f'<path class="arc" d="M {start[0]:.1f},{start[1]:.1f} A {arc_r:.1f},{arc_r:.1f} 0 0 0 {end[0]:.1f},{end[1]:.1f}"/>')
+    out.append(f'<text class="indigo" x="{ox - 62:.1f}" y="{oy + 36:.1f}">φ</text>')
+    out.append(f'<text class="teal" x="{q_end[0] - 4:.1f}" y="{q_end[1] - 14:.1f}">水平向内 q̂</text>')
+    out.append(f'<text class="orange" x="{normal_end[0] - 32:.1f}" y="{normal_end[1] + 22:.1f}">向内法线 -n̂</text>')
+    out.append(f'<text class="orange" x="{proj_end[0] - 52:.1f}" y="{proj_end[1] - 12:.1f}">投影长度 = |κ_circle| cosφ</text>')
+    out.append(f'<text class="small" x="{ox + 10:.1f}" y="{oy + 22:.1f}">S</text>')
+
+    out.append(f'<text class="formula" x="48" y="532">左图：纬线圆作为空间曲线，曲率 κ_circle 水平指向 Z 轴，|κ_circle|=1/ρ=1/(νcosφ)。</text>')
+    out.append(f'<text class="formula" x="48" y="556">右图：东西方向法曲率只取 κ_circle 在椭球法线方向的分量；q̂·(-n̂)=cosφ。</text>')
+    out.append(f'<text class="formula" x="48" y="580">所以 κ_prime vertical = κ_circle cosφ = 1/ν，曲率半径 R_prime vertical = ν。</text>')
+    out.append("</svg>")
+    return "\n".join(out)
+
+
 def diagram_forward() -> str:
     s = geodetic_surface_unit(TEACHING_PHI, TEACHING_LAMBDA)
     n = normal_unit(TEACHING_PHI, TEACHING_LAMBDA)
@@ -743,6 +824,7 @@ These SVG files are generated by `../generate_geodetic_ecef_diagrams.py`.
 - Meridian radius M at teaching latitude: {meridian_radius_over_a(phi) * WGS84_A_M:.3f} m
 - Prime vertical radius nu at teaching latitude: {nu_over_a(phi) * WGS84_A_M:.3f} m
 - p-z section diagram: fixed lambda meridian half-section, z=z_S parallel circle, and p=p_S cylinder surface.
+- Prime vertical projection diagram: parallel-circle radius rho=nu*cos(phi), circle curvature, and normal-curvature projection factor cos(phi).
 - Visual height arrow: {VISUAL_H_OVER_A:.3f} a, used only to make the normal direction visible.
 - Tangent slope diagram delta p: 0.055 a, used only to show the limiting secant visually.
 - Local tangent ENU diagram visual offsets: E=0.34 a, N=0.22 a, U=0.15 a, used only to show the decomposition.
@@ -760,6 +842,7 @@ def main() -> None:
     write(ASSET_DIR / "02-pz-section-geometry.svg", diagram_pz_section_geometry())
     write(ASSET_DIR / "02-geodetic-vs-geocentric-latitude.svg", diagram_latitudes())
     write(ASSET_DIR / "03-curvature-radii.svg", diagram_curvature_radii())
+    write(ASSET_DIR / "03-prime-vertical-projection.svg", diagram_prime_vertical_projection())
     write(ASSET_DIR / "03-tangent-slope-dp.svg", diagram_tangent_slope_dp())
     write(ASSET_DIR / "04-forward-geodetic-to-ecef.svg", diagram_forward())
     write(ASSET_DIR / "05-inverse-ecef-to-geodetic.svg", diagram_inverse())

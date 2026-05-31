@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 620" role="img" aria-labelledby="title">
+<title id="title">Projection from parallel-circle curvature to prime-vertical normal curvature</title>
+<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#263548"/></marker></defs>
+<style>
+svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
+.title { fill: #16212f; font: 700 22px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.subtitle { fill: #5f6f7e; font: 500 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.axis { stroke: #263548; stroke-width: 2.2; marker-end: url(#arrow); }
+.ellipse { fill: #e7f7f8; stroke: #207b84; stroke-width: 2.2; }
+.helper { stroke: #8292a4; stroke-width: 1.5; stroke-dasharray: 6 5; fill: none; }
+.normal { stroke: #b65b13; stroke-width: 2.7; marker-end: url(#arrow); }
+.radius { stroke: #3d58a8; stroke-width: 2.4; marker-end: url(#arrow); }
+.tangent { stroke: #3d58a8; stroke-width: 2.0; }
+.point { fill: #007c89; stroke: white; stroke-width: 2.0; }
+.surface { fill: #b65b13; stroke: white; stroke-width: 2.0; }
+.label { fill: #16212f; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.small { fill: #4b5d70; font: 500 12.5px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.orange { fill: #9a4c10; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.indigo { fill: #314b99; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.formula { fill: #263548; font: 600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+</style>
+<style>
+.panel-title { fill: #16212f; font: 700 16px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.parallel-circle { fill: #eef8f9; stroke: #007c89; stroke-width: 2.2; }
+.kcircle { stroke: #007c89; stroke-width: 3.0; marker-end: url(#arrow); fill: none; }
+.projection { stroke: #b65b13; stroke-width: 3.0; marker-end: url(#arrow); fill: none; }
+.normal-line { stroke: #b65b13; stroke-width: 2.4; marker-end: url(#arrow); fill: none; }
+.arc { fill: none; stroke: #3d58a8; stroke-width: 1.8; }
+.panel-box { fill: none; stroke: #d8e1e8; stroke-width: 1.2; }
+</style>
+<text class="title" x="30" y="36">图解：为什么 κ_circle 和 κ_prime vertical 不一样</text>
+<text class="subtitle" x="30" y="58">同一教学点 φ=53.809394°；投影因子 cosφ=0.5905。纬线圆曲率先是水平向内，再投影到椭球法线方向。</text>
+<rect class="panel-box" x="30" y="86" width="410" height="410" rx="8"/>
+<rect class="panel-box" x="500" y="86" width="410" height="410" rx="8"/>
+<text class="panel-title" x="50" y="116">A. 纬线圆的空间曲率</text>
+<text class="panel-title" x="520" y="116">B. 把曲率投影到椭球法线</text>
+<circle class="parallel-circle" cx="235.0" cy="300.0" r="150.0"/>
+<line class="radius" x1="235.0" y1="300.0" x2="357.9" y2="214.0"/>
+<line class="tangent" x1="385.4" y1="253.3" x2="330.3" y2="174.6"/>
+<line class="kcircle" x1="357.9" y1="214.0" x2="282.5" y2="266.7"/>
+<circle class="surface" cx="357.9" cy="214.0" r="6.2"/>
+<circle class="point" cx="235.0" cy="300.0" r="4.8"/>
+<text class="small" x="215.0" y="324.0">Z 轴</text>
+<text class="orange" x="367.9" y="208.0">S</text>
+<text class="indigo" x="302.4" y="249.0">ρ = ν cosφ</text>
+<text class="teal" x="190.5" y="256.7">κ_circle = 1/ρ</text>
+<text class="small" x="338.4" y="208.1">east tangent</text>
+<line class="helper" x1="530.0" y1="310.0" x2="757.0" y2="310.0"/>
+<line class="kcircle" x1="735.0" y1="310.0" x2="563.0" y2="310.0"/>
+<line class="normal-line" x1="735.0" y1="310.0" x2="633.4" y2="448.8"/>
+<line class="projection" x1="735.0" y1="310.0" x2="675.0" y2="392.0"/>
+<line class="helper" x1="563.0" y1="310.0" x2="675.0" y2="392.0"/>
+<circle class="surface" cx="735.0" cy="310.0" r="6.2"/>
+<circle class="point" cx="675.0" cy="392.0" r="4.8"/>
+<path class="arc" d="M 691.0,310.0 A 44.0,44.0 0 0 0 709.0,345.5"/>
+<text class="indigo" x="673.0" y="346.0">φ</text>
+<text class="teal" x="559.0" y="296.0">水平向内 q̂</text>
+<text class="orange" x="601.4" y="470.8">向内法线 -n̂</text>
+<text class="orange" x="623.0" y="380.0">投影长度 = |κ_circle| cosφ</text>
+<text class="small" x="745.0" y="332.0">S</text>
+<text class="formula" x="48" y="532">左图：纬线圆作为空间曲线，曲率 κ_circle 水平指向 Z 轴，|κ_circle|=1/ρ=1/(νcosφ)。</text>
+<text class="formula" x="48" y="556">右图：东西方向法曲率只取 κ_circle 在椭球法线方向的分量；q̂·(-n̂)=cosφ。</text>
+<text class="formula" x="48" y="580">所以 κ_prime vertical = κ_circle cosφ = 1/ν，曲率半径 R_prime vertical = ν。</text>
+</svg>

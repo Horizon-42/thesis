@@ -1197,28 +1197,52 @@ p_S=\nu\cos\phi
           </p>
           <div class="callout">
             <strong>为什么这个因子正好也是卯酉圈曲率半径？</strong>
-            直观说，固定 \(\phi\) 只改变 \(\lambda\) 时，S 会沿一条纬线圆运动。由 \(p_S=\nu\cos\phi\) 可知，这条纬线圆在水平面内的半径是 \(\rho=\nu\cos\phi\)。圆本身的空间曲率大小是 \(1/\rho=1/(\nu\cos\phi)\)。但 <strong>prime vertical radius of curvature</strong> 取的不是纬线圆本身的半径，而是东西方向法截线的曲率半径；等价地看，是把这条纬线圆的曲率向量投影到椭球法线方向后再取倒数。
-            <span class="en" lang="en"><strong>Why is this factor exactly the prime vertical radius of curvature?</strong> Intuitively, if \(\phi\) is fixed and only \(\lambda\) changes, S moves along a parallel circle. Since \(p_S=\nu\cos\phi\), the radius of that horizontal circle is \(\rho=\nu\cos\phi\). The spatial curvature of the circle itself has magnitude \(1/\rho=1/(\nu\cos\phi)\). But the <strong>prime vertical radius of curvature</strong> is not the radius of the parallel circle itself; it is the radius of curvature of the east-west normal section. Equivalently, take the curvature vector of that parallel circle, project it onto the ellipsoid-normal direction, and then take the reciprocal.</span>
+            直观说，固定 \(\phi\) 只改变 \(\lambda\) 时，S 会沿一条纬线圆运动。由 \(p_S=\nu\cos\phi\) 可知，这条纬线圆在水平面内的半径是 \(\rho=\nu\cos\phi\)。圆本身作为三维空间曲线的曲率大小是 \(1/\rho=1/(\nu\cos\phi)\)，曲率向量水平指向 Z 轴。但 <strong>prime vertical radius of curvature</strong> 取的不是纬线圆本身的半径，而是东西方向法截线的曲率半径；等价地看，它只取纬线圆曲率向量在椭球法线方向上的分量。
+            <span class="en" lang="en"><strong>Why is this factor exactly the prime vertical radius of curvature?</strong> Intuitively, if \(\phi\) is fixed and only \(\lambda\) changes, S moves along a parallel circle. Since \(p_S=\nu\cos\phi\), the radius of that horizontal circle is \(\rho=\nu\cos\phi\). The curvature magnitude of that circle as a three-dimensional space curve is \(1/\rho=1/(\nu\cos\phi)\), and its curvature vector points horizontally toward the Z axis. But the <strong>prime vertical radius of curvature</strong> is not the radius of the parallel circle itself; it is the radius of curvature of the east-west normal section. Equivalently, it takes only the component of the parallel-circle curvature vector in the ellipsoid-normal direction.</span>
           </div>
+
+          <figure class="diagram" aria-labelledby="fig-prime-vertical-projection-title">
+            <img src="assets/geodetic_ecef/03-prime-vertical-projection.svg" alt="解释纬线圆曲率向量投影到椭球法线方向后得到卯酉圈法曲率的生成式图解 / Generated diagram explaining how the parallel-circle curvature vector projects onto the ellipsoid normal to produce prime-vertical normal curvature">
+            <figcaption id="fig-prime-vertical-projection-title">
+              左图从 Z 轴方向俯看纬线圆：\(\kappa_{\mathrm{circle}}\) 是这条圆作为空间曲线的曲率，方向水平向内。右图把同一方向放到 S 点附近看：水平向内单位向量 \(\hat q\) 与向内法线 \(-\hat{\mathbf n}\) 的夹角正是 \(\phi\)，所以把 \(\kappa_{\mathrm{circle}}\) 投影到法线方向时要乘 \(\cos\phi\)。
+              <span class="en" lang="en">The left panel looks down along the Z axis at the parallel circle: \(\kappa_{\mathrm{circle}}\) is the curvature of that circle as a space curve, pointing horizontally inward. The right panel views the same direction locally at S: the inward horizontal unit vector \(\hat q\) makes angle \(\phi\) with the inward normal \(-\hat{\mathbf n}\), so projecting \(\kappa_{\mathrm{circle}}\) onto the normal direction multiplies it by \(\cos\phi\).</span>
+            </figcaption>
+          </figure>
+
+          <p>
+            这里的投影因子不是凭感觉选出来的。设 \(\hat q\) 是从 S 水平指向 Z 轴的单位向量，也就是 \(\kappa_{\mathrm{circle}}\) 的方向；\(-\hat{\mathbf n}\) 是向内椭球法线方向。两个单位向量的点积等于它们夹角的余弦，也等于把 \(\hat q\) 投影到 \(-\hat{\mathbf n}\) 方向后的长度比例。由于这两个方向的夹角是 \(\phi\)，所以投影因子就是 \(\cos\phi\)：
+            <span class="en" lang="en">The projection factor here is not chosen by intuition. Let \(\hat q\) be the unit vector from S horizontally toward the Z axis, which is the direction of \(\kappa_{\mathrm{circle}}\); let \(-\hat{\mathbf n}\) be the inward ellipsoid-normal direction. The dot product of two unit vectors equals the cosine of the angle between them, and also equals the length ratio after projecting one vector onto the other direction. Because the angle between these two directions is \(\phi\), the projection factor is \(\cos\phi\):</span>
+          </p>
+
           <div class="formula">
             <span class="formula-line">\[
 \rho=\nu\cos\phi,\qquad
 \kappa_{\mathrm{circle}}=\frac{1}{\rho}
 \]</span>
             <span class="formula-line">\[
-\text{normal projection factor}=\cos\phi
+\hat q=(-\cos\lambda,\ -\sin\lambda,\ 0)
 \]</span>
             <span class="formula-line">\[
-\kappa_{\mathrm{prime\ vertical}}
+\hat{\mathbf n}=(\cos\phi\cos\lambda,\ \cos\phi\sin\lambda,\ \sin\phi)
+\]</span>
+            <span class="formula-line">\[
+\hat q\cdot(-\hat{\mathbf n})
+=
+\cos\phi\cos^2\lambda+\cos\phi\sin^2\lambda
+=
+\cos\phi
+\]</span>
+            <span class="formula-line">\[
+\kappa_{\mathrm{PV}}
 =
 \frac{1}{\nu\cos\phi}\cos\phi
 =
 \frac{1}{\nu}
 \]</span>
             <span class="formula-line">\[
-R_{\mathrm{prime\ vertical}}
+R_{\mathrm{PV}}
 =
-\frac{1}{\kappa_{\mathrm{prime\ vertical}}}
+\frac{1}{\kappa_{\mathrm{PV}}}
 =
 \nu
 \]</span>
