@@ -1,0 +1,688 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>局部 Surface Frame 动力学与 WGS84/ECEF 轨迹传播</title>
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['\\(', '\\)']],
+        displayMath: [['\\[', '\\]']],
+        processEscapes: true,
+        tags: 'ams'
+      },
+      svg: { fontCache: 'global' }
+    };
+  </script>
+  <script defer src="../../aerodrome_model/docs/assets/vendor/mathjax/tex-svg.js"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f7fa;
+      --panel: #ffffff;
+      --ink: #172231;
+      --muted: #5d6c7b;
+      --line: #ccd7e2;
+      --teal: #007c89;
+      --blue: #2f62b7;
+      --orange: #a55212;
+      --violet: #8f3f71;
+      --soft-teal: #e7f7f8;
+      --soft-orange: #fff4e6;
+      --code: #263548;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 16px/1.68 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
+    }
+
+    main {
+      width: min(1120px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 32px 0 64px;
+    }
+
+    header {
+      margin-bottom: 24px;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: clamp(30px, 5vw, 52px);
+      line-height: 1.08;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 40px 0 14px;
+      font-size: clamp(24px, 3vw, 34px);
+      line-height: 1.18;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 0 0 12px;
+      font-size: 19px;
+      line-height: 1.28;
+      letter-spacing: 0;
+    }
+
+    p { margin: 0 0 14px; }
+
+    a { color: var(--teal); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+
+    code {
+      background: #eef3f7;
+      color: var(--code);
+      border-radius: 5px;
+      padding: 0.08em 0.32em;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: .92em;
+    }
+
+    pre {
+      margin: 12px 0 0;
+      padding: 16px;
+      overflow-x: auto;
+      background: #172231;
+      color: #eef6f8;
+      border-radius: 8px;
+      font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .lead {
+      max-width: 900px;
+      color: var(--muted);
+      font-size: 18px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 10px 24px rgba(32, 48, 68, .06);
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin: 16px 0;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      margin: 16px 0;
+    }
+
+    .note {
+      margin: 16px 0;
+      padding: 14px 16px;
+      border-left: 4px solid var(--teal);
+      background: var(--soft-teal);
+      border-radius: 0 8px 8px 0;
+    }
+
+    .warn {
+      margin: 16px 0;
+      padding: 14px 16px;
+      border-left: 4px solid var(--orange);
+      background: var(--soft-orange);
+      border-radius: 0 8px 8px 0;
+    }
+
+    .formula {
+      margin: 14px 0;
+      padding: 12px 14px;
+      overflow-x: auto;
+      background: #f8fbfd;
+      border: 1px solid #dce6ee;
+      border-radius: 8px;
+    }
+
+    .diagram {
+      margin: 20px 0;
+      padding: 12px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .diagram img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-radius: 6px;
+    }
+
+    figcaption {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    th, td {
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th { background: #edf4f8; }
+    tr:last-child td { border-bottom: 0; }
+
+    .tag-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 18px 0;
+    }
+
+    .tag {
+      border: 1px solid var(--line);
+      background: white;
+      border-radius: 999px;
+      padding: 6px 10px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .toc {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin: 22px 0 28px;
+    }
+
+    .toc a {
+      display: block;
+      min-height: 58px;
+      padding: 12px;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--ink);
+      text-decoration: none;
+    }
+
+    @media (max-width: 820px) {
+      main { width: min(100vw - 20px, 1120px); padding-top: 22px; }
+      .grid-2, .grid-3, .toc { grid-template-columns: 1fr; }
+      .card { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>局部 Surface Frame 动力学与 WGS84/ECEF 轨迹传播</h1>
+      <p class="lead">
+        本文把 FAA Aircraft Dynamics Model 第 2.8 节的思路，翻译成适合当前
+        <code>aerodynamic_model/simulator.py</code> 的实现路径：飞机动力学仍在局部平直坐标里计算，轨迹位置用 WGS84 大地坐标和 ECEF 地心地固坐标传播。
+      </p>
+      <div class="tag-row">
+        <span class="tag">ADM = Aircraft Dynamics Model，飞机动力学模型</span>
+        <span class="tag">ECEF = Earth-Centered, Earth-Fixed，地心地固</span>
+        <span class="tag">WGS84 = World Geodetic System 1984</span>
+        <span class="tag">NED = North-East-Down，北东地</span>
+        <span class="tag">ENU = East-North-Up，东北天</span>
+      </div>
+    </header>
+
+    <nav class="toc" aria-label="目录">
+      <a href="#why">1. 为什么这么做</a>
+      <a href="#frames">2. 三套坐标框架</a>
+      <a href="#derivation">3. 公式推导</a>
+      <a href="#simulator">4. 对接 simulator.py</a>
+      <a href="#algorithm">5. 一步积分流程</a>
+      <a href="#limits">6. 适用边界</a>
+      <a href="#implementation">7. 代码骨架</a>
+      <a href="#sources">8. 来源与核对点</a>
+    </nav>
+
+    <section id="why">
+      <h2>1. 为什么不是固定 ENU，也不是完整 ECEF 动力学</h2>
+      <div class="card">
+        <p>
+          固定 ENU 的优点是简单，但飞机离原点越远，切平面越不贴合 WGS84 椭球。完整 ECEF 向量动力学可以处理全球运动、地球自转和非惯性项，但会迫使你重写力、姿态和重力模型。
+        </p>
+        <p>
+          FAA ADM 第 2.8 节采用的是中间路线：飞机方程仍然在局部 surface frame 中解释，位置传播时再把局部速度换成纬度、经度和高度变化率。这样保留了点质量模型的直观性，也避免了固定局部平面飞远后的曲率误差。
+        </p>
+      </div>
+
+      <figure class="diagram" aria-labelledby="fig-architecture">
+        <img src="assets/surface_frame_propagation/01-surface-frame-architecture.svg" alt="局部 surface frame 动力学与 WGS84 ECEF 轨迹传播流程图">
+        <figcaption id="fig-architecture">
+          总体架构：全局位置状态是 \(\phi,\lambda,h\)，每一步在当前位置构造局部轴，把动力学给出的局部速度换成 \(\dot\phi,\dot\lambda,\dot h\)，再积分回 WGS84/ECEF 轨迹。
+        </figcaption>
+      </figure>
+    </section>
+
+    <section id="frames">
+      <h2>2. FAA 2.8 节中的三套坐标框架</h2>
+      <div class="grid-3">
+        <article class="card">
+          <h3>DIS / ECEF</h3>
+          <p>
+            PDF 中的 DIS 是 Distributed Interactive Simulation 标准里的地心地固直角坐标。它的几何含义与常见 ECEF 一致：原点在地心，Z 轴指向北极，X 轴穿过赤道和本初子午线，Y 轴在赤道面内构成右手系。
+          </p>
+        </article>
+        <article class="card">
+          <h3>Geodetic</h3>
+          <p>
+            大地坐标使用 \(\phi,\lambda,h\)：\(\phi\) 是 geodetic latitude，即大地纬度；\(\lambda\) 是 longitude，即经度；\(h\) 是 ellipsoidal height，即相对 WGS84 参考椭球的椭球高。
+          </p>
+        </article>
+        <article class="card">
+          <h3>Surface Frame</h3>
+          <p>
+            PDF 用 NED：\(x_s\) 指北，\(y_s\) 指东，\(z_s\) 指下。它随飞机当前位置移动，局部水平面与 WGS84 椭球在当前点的切平面平行。
+          </p>
+        </article>
+      </div>
+
+      <figure class="diagram" aria-labelledby="fig-surface-frame">
+        <img src="assets/surface_frame_propagation/02-ecef-surface-frame.svg" alt="ECEF 坐标系、WGS84 椭球和随飞机移动的 surface frame 示意图">
+        <figcaption id="fig-surface-frame">
+          ECEF/DIS 负责全局位置；surface frame 只是在当前位置提供一组局部 North、East、Up/Down 方向。FAA 用 NED，本文为了对接当前代码也给出 ENU 写法。
+        </figcaption>
+      </figure>
+
+      <div class="warn">
+        <strong>关键区分：</strong>“每一步构造局部 frame”不等于“把飞机位置每一步重置为局部原点”。位置状态仍然保存在 WGS84/ECEF 中；局部 frame 只是用来解释这一瞬间的速度、航向角、爬升角和力的方向。
+      </div>
+    </section>
+
+    <section id="derivation">
+      <h2>3. 从 WGS84 位置向量推导传播公式</h2>
+      <article class="card">
+        <h3>3.1 先写 WGS84 到 ECEF 的位置向量</h3>
+        <p>
+          令 \(a\) 表示 WGS84 semi-major axis，即赤道半径；\(e^2\) 表示第一偏心率平方；\(\nu\) 表示 prime vertical radius of curvature，即卯酉圈曲率半径。对于当前飞机位置 \(P(\phi,\lambda,h)\)：
+        </p>
+        <div class="formula">
+          <span>\[
+\nu(\phi)=\frac{a}{\sqrt{1-e^2\sin^2\phi}}
+\]</span>
+          <span>\[
+\mathbf r(\phi,\lambda,h)=
+\begin{bmatrix}
+(\nu+h)\cos\phi\cos\lambda\\
+(\nu+h)\cos\phi\sin\lambda\\
+\left((1-e^2)\nu+h\right)\sin\phi
+\end{bmatrix}
+\]</span>
+        </div>
+        <p>
+          FAA PDF 中的 \(D_\mu\) 与这里的 \(\nu\) 是同一类量：它不是地心半径，而是从椭球几何推出来、用于东西向传播的曲率相关因子。
+        </p>
+      </article>
+
+      <article class="card" style="margin-top:16px">
+        <h3>3.2 在当前位置构造局部 ENU / NED 轴</h3>
+        <p>
+          用 \(\phi,\lambda\) 可以直接得到三根单位向量。下面采用 ENU 排列，方便和当前 `simulator.py` 对齐：
+        </p>
+        <div class="formula">
+          <span>\[
+\hat{\mathbf e}=
+\begin{bmatrix}
+-\sin\lambda\\
+\cos\lambda\\
+0
+\end{bmatrix},
+\qquad
+\hat{\mathbf n}=
+\begin{bmatrix}
+-\sin\phi\cos\lambda\\
+-\sin\phi\sin\lambda\\
+\cos\phi
+\end{bmatrix},
+\qquad
+\hat{\mathbf u}=
+\begin{bmatrix}
+\cos\phi\cos\lambda\\
+\cos\phi\sin\lambda\\
+\sin\phi
+\end{bmatrix}
+\]</span>
+        </div>
+        <p>
+          FAA 的 NED 只是换一个排列和竖直方向：\(\hat{\mathbf x}_s=\hat{\mathbf n}\)，\(\hat{\mathbf y}_s=\hat{\mathbf e}\)，\(\hat{\mathbf z}_s=-\hat{\mathbf u}\)。
+        </p>
+      </article>
+
+      <article class="card" style="margin-top:16px">
+        <h3>3.3 小位移如何变成纬度、经度、高度变化</h3>
+        <p>
+          在当前位置附近，沿 North 走一小段，对应大地纬度变化；沿 East 走一小段，对应经度变化；沿 Up 走一小段，对应高度变化。曲率半径决定“多少米对应多少弧度”。
+        </p>
+        <figure class="diagram" aria-labelledby="fig-rate-patch">
+          <img src="assets/surface_frame_propagation/03-geodetic-rate-patch.svg" alt="局部 North East Up 速度分量和 WGS84 纬度经度高度变化率的关系图">
+          <figcaption id="fig-rate-patch">
+            图中 \(M\) 是 meridian radius of curvature，即子午圈曲率半径；\(\nu\) 是 prime vertical radius of curvature，即卯酉圈曲率半径。南北传播用 \(M+h\)，东西传播用 \((\nu+h)\cos\phi\)。
+          </figcaption>
+        </figure>
+        <div class="formula">
+          <span>\[
+M(\phi)=\frac{a(1-e^2)}{(1-e^2\sin^2\phi)^{3/2}}
+\]</span>
+          <span>\[
+d\mathbf r
+\approx
+(M+h)\hat{\mathbf n}\,d\phi
++(\nu+h)\cos\phi\,\hat{\mathbf e}\,d\lambda
++\hat{\mathbf u}\,dh
+\]</span>
+        </div>
+        <p>
+          把小位移除以时间，就得到速度关系：
+        </p>
+        <div class="formula">
+          <span>\[
+\mathbf v
+=v_E\hat{\mathbf e}+v_N\hat{\mathbf n}+v_U\hat{\mathbf u}
+=(M+h)\dot\phi\,\hat{\mathbf n}
++(\nu+h)\cos\phi\,\dot\lambda\,\hat{\mathbf e}
++\dot h\,\hat{\mathbf u}
+\]</span>
+        </div>
+        <p>
+          比较三根正交轴上的系数，得到最重要的传播公式：
+        </p>
+        <div class="formula">
+          <span>\[
+\boxed{
+\dot\phi=\frac{v_N}{M+h}
+}
+\]</span>
+          <span>\[
+\boxed{
+\dot\lambda=\frac{v_E}{(\nu+h)\cos\phi}
+}
+\]</span>
+          <span>\[
+\boxed{
+\dot h=v_U
+}
+\]</span>
+        </div>
+        <p>
+          这就是 FAA 2.8 节公式 (2.114) 的 ENU 版本。PDF 中写成 NED 形式时，\(V_x\) 是 North 速度，\(V_y\) 是 East 速度，因此 \(\dot\mu=V_x/(R_\mu+h)\)，\(\dot\lambda=V_y/((D_\mu+h)\cos\mu)\)。对应到本文：\(\mu\to\phi\)，\(R_\mu\to M\)，\(D_\mu\to\nu\)。
+        </p>
+      </article>
+    </section>
+
+    <section id="simulator">
+      <h2>4. 对接当前 simulator.py</h2>
+      <div class="grid-2">
+        <article class="card">
+          <h3>当前代码的运动学</h3>
+          <p>
+            现在的 `simulator.py` 状态是：
+          </p>
+          <div class="formula">
+            <span>\[
+\mathbf x=
+\begin{bmatrix}
+x&y&h&V&\psi&\gamma&m
+\end{bmatrix}^T
+\]</span>
+          </div>
+          <p>
+            其中位置导数是：
+          </p>
+          <div class="formula">
+            <span>\[
+\begin{aligned}
+\dot x&amp;=V\cos\gamma\cos\psi \\
+\dot y&amp;=V\cos\gamma\sin\psi \\
+\dot h&amp;=V\sin\gamma
+\end{aligned}
+\]</span>
+          </div>
+        </article>
+        <article class="card">
+          <h3>建议的新位置状态</h3>
+          <p>
+            保留速度、航向、爬升角、质量和控制输入，但把长期位置从 \(x,y\) 换成 \(\phi,\lambda\)：
+          </p>
+          <div class="formula">
+            <span>\[
+\mathbf x_g=
+\begin{bmatrix}
+\phi&\lambda&h&V&\psi&\gamma&m
+\end{bmatrix}^T
+\]</span>
+          </div>
+          <p>
+            这里 \(h\) 继续表示绝对椭球高或近似海拔高度，不能因为局部 frame 每步重建就清零；大气密度模型仍然需要这个高度。
+          </p>
+        </article>
+      </div>
+
+      <figure class="diagram" aria-labelledby="fig-conventions">
+        <img src="assets/surface_frame_propagation/04-simulator-convention-map.svg" alt="当前 simulator.py 的 ENU 角度约定和 FAA NED surface frame 的对照图">
+        <figcaption id="fig-conventions">
+          当前代码若解释为 ENU，则 \(\psi=0\) 朝 East，\(\psi=\pi/2\) 朝 North。航空常见 heading \(\chi\) 通常从 North 朝 East 增大，二者满足 \(\chi=\pi/2-\psi\)。
+        </figcaption>
+      </figure>
+
+      <article class="card">
+        <h3>4.1 沿用当前 \(\psi\) 约定的传播方程</h3>
+        <p>
+          如果不改 `psi` 的含义，直接把当前 \(x,y\) 解释成 ENU 中的 \(E,N\)，则局部速度分量为：
+        </p>
+        <div class="formula">
+          <span>\[
+v_E=V\cos\gamma\cos\psi,\qquad
+v_N=V\cos\gamma\sin\psi,\qquad
+v_U=V\sin\gamma
+\]</span>
+        </div>
+        <p>
+          代入上一节传播公式：
+        </p>
+        <div class="formula">
+          <span>\[
+\boxed{
+\dot\phi=
+\frac{V\cos\gamma\sin\psi}{M+h}
+}
+\]</span>
+          <span>\[
+\boxed{
+\dot\lambda=
+\frac{V\cos\gamma\cos\psi}{(\nu+h)\cos\phi}
+}
+\]</span>
+          <span>\[
+\boxed{
+\dot h=V\sin\gamma
+}
+\]</span>
+        </div>
+        <p>
+          速度大小和角度动力学可以先保留当前模型：
+        </p>
+        <div class="formula">
+          <span>\[
+\dot V=\frac{T-D}{m}-g\sin\gamma
+\]</span>
+          <span>\[
+\dot\psi=\frac{g}{V\cos\gamma}\sin(\mu_b)n
+\]</span>
+          <span>\[
+\dot\gamma=\frac{g}{V}\left(n\cos(\mu_b)-\cos\gamma\right)
+\]</span>
+        </div>
+        <p>
+          这里 \(T\) 是 thrust，即推力；\(D\) 是 drag，即阻力；\(n\) 是 load factor，即载荷因子；\(\mu_b\) 是 bank angle，即倾侧角。为了避免和 PDF 中 geodetic latitude \(\mu\) 混淆，本文用 \(\mu_b\) 表示 bank angle。
+        </p>
+      </article>
+
+      <div class="warn">
+        当前 `dpsidt` 为正时，\(\psi\) 从 East 转向 North，几何上是 ENU 平面里的逆时针转。如果你希望 `bank_rad > 0` 表示航空习惯的右坡度，并且使用 heading \(\chi\) 从 North 朝 East 增大，那么建议把状态角改成 \(\chi\)，并重新核对转弯率符号。
+      </div>
+    </section>
+
+    <section id="algorithm">
+      <h2>5. 一步积分时到底发生了什么</h2>
+      <ol class="card">
+        <li>当前状态是 \(P_k=(\phi_k,\lambda_k,h_k)\)，速度状态是 \(V_k,\psi_k,\gamma_k\)。</li>
+        <li>用 \(\phi_k\) 计算 \(M_k\) 和 \(\nu_k\)。</li>
+        <li>用 \(V_k,\psi_k,\gamma_k\) 得到局部速度 \(v_E,v_N,v_U\)。</li>
+        <li>用曲率公式得到 \(\dot\phi,\dot\lambda,\dot h\)。</li>
+        <li>用推力、阻力、载荷因子、bank angle 得到 \(\dot V,\dot\psi,\dot\gamma\)。</li>
+        <li>数值积分得到下一状态 \(\phi_{k+1},\lambda_{k+1},h_{k+1},V_{k+1},\psi_{k+1},\gamma_{k+1}\)。</li>
+        <li>需要 Cesium 或 ECEF 输出时，再把 \(\phi,\lambda,h\) 正算成 ECEF \((X,Y,Z)\)。</li>
+      </ol>
+
+      <div class="note">
+        这套方法看起来像“每一步都换 origin”，但实际上没有维护一个会被清零的局部位置状态。局部 frame 每一步只是当前点的方向标尺；真正被积分的位置是 \(\phi,\lambda,h\)。
+      </div>
+    </section>
+
+    <section id="implementation">
+      <h2>6. 与当前代码最接近的实现骨架</h2>
+      <div class="card">
+        <p>
+          下面不是直接改代码，只是把 `simulator.py` 的位置导数替换成 WGS84 propagation 的最小形态。角度都用弧度，长度都用米。
+        </p>
+        <pre><code>def radii_of_curvature(phi):
+    s = math.sin(phi)
+    denom = 1.0 - WGS84_E2 * s * s
+    nu = WGS84_A / math.sqrt(denom)
+    M = WGS84_A * (1.0 - WGS84_E2) / (denom ** 1.5)
+    return M, nu
+
+def dynamics_geodetic(t, state_vec, control, atmosphere):
+    phi, lam, h, V, psi, gamma, m = state_vec
+
+    rho = atmosphere.get_ISA_density(h)
+    Cl, Cd = get_aerodynamic_coefficients(h, V, m, control, atmosphere)
+    D = 0.5 * rho * V**2 * Cd * S
+
+    M, nu = radii_of_curvature(phi)
+
+    v_E = V * math.cos(gamma) * math.cos(psi)
+    v_N = V * math.cos(gamma) * math.sin(psi)
+    v_U = V * math.sin(gamma)
+
+    dphidt = v_N / (M + h)
+    dlamdt = v_E / ((nu + h) * math.cos(phi))
+    dhdt = v_U
+
+    dVdt = (control.thrust - D) / m - g * math.sin(gamma)
+    dpsidt = g / (V * math.cos(gamma)) * math.sin(control.bank_rad) * control.load_factor
+    dgamadt = g / V * (control.load_factor * math.cos(control.bank_rad) - math.cos(gamma))
+    dmdt = 0.0
+
+    return [dphidt, dlamdt, dhdt, dVdt, dpsidt, dgamadt, dmdt]</code></pre>
+      </div>
+
+      <div class="grid-2">
+        <article class="card">
+          <h3>输出到 ECEF</h3>
+          <p>
+            每个积分采样点都可以用正算公式得到 ECEF：
+          </p>
+          <div class="formula">
+            <span>\[
+\mathbf r_k=
+\mathbf r(\phi_k,\lambda_k,h_k)
+\]</span>
+          </div>
+          <p>
+            这样轨迹文件可以同时保存 WGS84 经纬高和 ECEF 米制直角坐标。
+          </p>
+        </article>
+        <article class="card">
+          <h3>接真实航向角</h3>
+          <p>
+            若外部数据给的是航空 heading \(\chi\)，即 \(0^\circ\) North、\(90^\circ\) East，则当前 \(\psi\) 约定下：
+          </p>
+          <div class="formula">
+            <span>\[
+\psi=\frac{\pi}{2}-\chi
+\]</span>
+          </div>
+          <p>
+            反过来输出 heading 时，\(\chi=\pi/2-\psi\)，然后归一化到 \([0,2\pi)\)。
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section id="limits">
+      <h2>7. 适用边界和风险点</h2>
+      <div class="grid-2">
+        <article class="card">
+          <h3>适合</h3>
+          <p>
+            终端区、进近、离场、区域航迹生成，以及类似 FAA TGF 的目标生成。PDF 也明确指出，这类模型忽略地球自转和重力方向随位置变化，适合飞机，不适合弹道飞行器或航天器。
+          </p>
+        </article>
+        <article class="card">
+          <h3>小心</h3>
+          <p>
+            靠近两极时 \(\cos\phi\) 很小，\(\dot\lambda\) 会变得数值敏感。长航程、高超声速或需要惯性导航级别精度时，应考虑 ECEF/ECI 向量动力学和地球自转项。
+          </p>
+        </article>
+      </div>
+      <div class="warn">
+        这套传播公式解决的是“位置沿椭球传播”的问题，不自动解决风场、气压高度与椭球高的差异、地形高度、地球自转、机体系姿态等问题。它是把当前点质量模型放到 WGS84 地球上的合理下一步，而不是完整飞行动力学仿真器。
+      </div>
+    </section>
+
+    <section id="sources">
+      <h2>8. 来源与核对点</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>来源</th>
+            <th>本文采用的内容</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><a href="AircraftDynamicsModel.pdf#page=61">AircraftDynamicsModel.pdf §2.8</a></td>
+            <td>DIS/ECEF、Geodetic、Surface/NED 三框架；surface frame 随飞机移动；由局部速度推导纬度率和经度率。</td>
+          </tr>
+          <tr>
+            <td><code>aerodynamic_model/simulator.py</code></td>
+            <td>保留 \(V,\psi,\gamma,m\) 和 thrust/bank/load factor 控制输入；替换 \(x,y\) 平面位置传播方式。</td>
+          </tr>
+          <tr>
+            <td>WGS84 椭球公式</td>
+            <td>使用 \(M\)、\(\nu\)、ECEF 正算和局部 ENU/NED 基底，确保地球曲率进入位置传播。</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        图由 <code>generate_surface_frame_propagation_diagrams.py</code> 生成，SVG 资源位于 <code>assets/surface_frame_propagation/</code>。
+      </p>
+    </section>
+  </main>
+</body>
+</html>

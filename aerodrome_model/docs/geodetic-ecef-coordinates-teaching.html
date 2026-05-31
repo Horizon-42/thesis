@@ -1460,21 +1460,87 @@ Z
         <div class="card" style="margin-top:18px">
           <h3>方法 A：迭代反算，概念最直观<span class="en" lang="en">Method A: Iterative Inverse Conversion, the Most Intuitive Conceptually</span></h3>
           <p>
-            这里 φ₀ 是第 0 次猜测的大地纬度，p 和 Z 来自已知点 P(X,Y,Z)，e² 是椭球的第一偏心率平方。先给一个初始纬度 φ₀，然后每轮用当前纬度计算 ν，再更新纬度。常用初值是：
-            <span class="en" lang="en">Here φ₀ is the zeroth guess for geodetic latitude, p and Z come from the known point P(X,Y,Z), and e² is the ellipsoid’s first eccentricity squared. Start with an initial latitude φ₀; in each round, compute ν from the current latitude and then update the latitude. A common initial value is:</span>
+            迭代反算的想法不是“猜到对为止”这么粗糙，而是把纬度方程改写成一个反复取角度的过程。已知 ECEF 点 P(X,Y,Z) 后，先用 \(p=\sqrt{X^2+Y^2}\) 把三维问题降到固定经度 \(\lambda\) 的 \((p,z)\) 子午半剖面。这个剖面里的水平轴是 p，竖直轴是 z；P 在剖面中的坐标就是 \((p,Z)\)。
+            <span class="en" lang="en">The iterative inverse is not merely “guess until correct.” It rewrites the latitude equation as a repeated angle-taking process. Given the ECEF point P(X,Y,Z), first use \(p=\sqrt{X^2+Y^2}\) to reduce the three-dimensional problem to the fixed-longitude \(\lambda\) meridian half-section \((p,z)\). In that section, the horizontal axis is p and the vertical axis is z; P has section coordinates \((p,Z)\).</span>
+          </p>
+          <figure class="diagram" aria-labelledby="fig-iterative-inverse-atan2-title">
+            <img src="assets/geodetic_ecef/05-iterative-inverse-atan2.svg" alt="ECEF 到大地纬度迭代反算中 atan2 角度更新的生成式剖面图 / Generated section diagram showing the atan2 angle update in iterative ECEF-to-geodetic latitude inversion">
+            <figcaption id="fig-iterative-inverse-atan2-title">
+              这张图把反算放到固定经度的 \((p,z)\) 剖面中。原始点是 \(P(p,Z)\)，但大地纬度 \(\phi\) 不是地心连线 \(OP\) 的角度。由椭球正算式整理后，需要把竖直边修正成 \(z_{c,n}=Z+e^2\nu_n\sin\phi_n\)。于是下一轮纬度就是从水平轴 p 指向修正点 \(C_n=(p,z_{c,n})\) 的角度。
+              <span class="en" lang="en">This diagram places the inverse conversion in the fixed-longitude \((p,z)\) section. The raw point is \(P(p,Z)\), but geodetic latitude \(\phi\) is not the angle of the geocentric line \(OP\). After rearranging the forward ellipsoid equations, the vertical leg is corrected to \(z_{c,n}=Z+e^2\nu_n\sin\phi_n\). The next latitude estimate is therefore the angle from the horizontal p-axis to the corrected point \(C_n=(p,z_{c,n})\).</span>
+            </figcaption>
+          </figure>
+          <p>
+            为什么可以用 \(\operatorname{atan2}\)？在普通平面直角坐标中，如果一个向量的水平分量是 \(x\)，竖直分量是 \(y\)，它相对水平轴的有符号角 \(\theta\) 满足 \(\tan\theta=y/x\)。\(\operatorname{atan2}(y,x)\) 就是“给我竖直边 y 和水平边 x，我返回正确象限里的角度”。这里要特别注意参数顺序：多数编程语言写作 \(\operatorname{atan2}(y,x)\)，竖直量在前，水平量在后。
+            <span class="en" lang="en">Why can atan2 be used? In an ordinary Cartesian plane, if a vector has horizontal component \(x\) and vertical component \(y\), its signed angle \(\theta\) from the horizontal axis satisfies \(\tan\theta=y/x\). \(\operatorname{atan2}(y,x)\) means “given the vertical leg y and horizontal leg x, return the angle in the correct quadrant.” Pay attention to the argument order: most programming languages use \(\operatorname{atan2}(y,x)\), with the vertical component first and the horizontal component second.</span>
+          </p>
+          <p>
+            对本问题来说，不能直接用 \(\operatorname{atan2}(Z,p)\) 当作大地纬度，因为 \(OP\) 是地心方向，给出的是类似地心纬度的角度；大地纬度 \(\phi\) 由椭球法线方向定义。上一张卡片已经从正算式得到：
+            <span class="en" lang="en">For this problem, \(\operatorname{atan2}(Z,p)\) cannot be used directly as the geodetic latitude, because \(OP\) is the geocentric direction and gives a geocentric-like angle. Geodetic latitude \(\phi\) is defined by the ellipsoid normal direction. The previous card derived from the forward equations:</span>
+          </p>
+          <div class="formula">
+            <span class="formula-line">\[
+Z=p\tan\phi-e^2\nu\sin\phi
+\]</span>
+          </div>
+          <p>
+            把含 \(e^2\) 的项移到左边以外，就得到一个“像三角形一样”的式子：
+            <span class="en" lang="en">Move the term containing \(e^2\) to the other side, and the equation becomes triangle-like:</span>
+          </p>
+          <div class="formula">
+            <span class="formula-line">\[
+\begin{aligned}
+p\tan\phi&amp;=Z+e^2\nu\sin\phi \\
+\tan\phi&amp;=\frac{Z+e^2\nu\sin\phi}{p}
+\end{aligned}
+\]</span>
+          </div>
+          <p>
+            如果右边的 \(\nu\) 和 \(\sin\phi\) 都已经知道，那么分子就是修正后的竖直边，分母就是水平边 p，于是纬度角可以写成：
+            <span class="en" lang="en">If \(\nu\) and \(\sin\phi\) on the right-hand side were already known, the numerator would be the corrected vertical leg and the denominator would be the horizontal leg p. The latitude angle could then be written as:</span>
+          </p>
+          <div class="formula">
+            <span class="formula-line">\[
+\phi=\operatorname{atan2}\left(Z+e^2\nu\sin\phi,\ p\right)
+\]</span>
+          </div>
+          <p>
+            难点只剩一个：右边仍然含有未知的 \(\phi\)。迭代法的处理方式是：第 n 轮先拿当前估计 \(\phi_n\) 去计算 \(\nu_n\) 和修正竖直边 \(z_{c,n}\)，再用 \(\operatorname{atan2}\) 得到下一轮角度。
+            <span class="en" lang="en">Only one difficulty remains: the right-hand side still contains the unknown \(\phi\). The iterative method handles this by using the current estimate \(\phi_n\) in round n to compute \(\nu_n\) and the corrected vertical leg \(z_{c,n}\), then using \(\operatorname{atan2}\) to obtain the next angle.</span>
+          </p>
+          <div class="formula">
+            <span class="formula-line">\[
+\begin{aligned}
+\nu_n&amp;=\frac{a}{\sqrt{1-e^2\sin^2\phi_n}} \\
+z_{c,n}&amp;=Z+e^2\nu_n\sin\phi_n \\
+\phi_{n+1}&amp;=\operatorname{atan2}\left(z_{c,n},\ p\right)
+\end{aligned}
+\]</span>
+          </div>
+          <p>
+            常用初值也来自同一个剖面直觉。如果先假设点就在椭球面附近，并忽略高度项，那么表面点满足：
+            <span class="en" lang="en">The common initial value comes from the same section intuition. If the point is assumed to be near the ellipsoid surface and the height term is ignored, a surface point satisfies:</span>
+          </p>
+          <div class="formula">
+            <span class="formula-line">\[
+\begin{aligned}
+p_S&amp;=\nu\cos\phi \\
+z_S&amp;=(1-e^2)\nu\sin\phi
+\end{aligned}
+\]</span>
+            <span class="formula-line">\[
+\frac{z_S}{p_S}=(1-e^2)\tan\phi
+\quad\Longrightarrow\quad
+\tan\phi=\frac{z_S}{p_S(1-e^2)}
+\]</span>
+          </div>
+          <p>
+            对近地目标点 P，用 \(Z\) 近似 \(z_S\)，用 p 近似 \(p_S\)，就得到第 0 次猜测：
+            <span class="en" lang="en">For a near-Earth target point P, approximate \(z_S\) by \(Z\) and \(p_S\) by p. This gives the zeroth guess:</span>
           </p>
           <div class="formula">
             <span class="formula-line">\[
 \phi_0=\operatorname{atan2}\left(Z,\ p(1-e^2)\right)
-\]</span>
-          </div>
-          <p>迭代式中，φₙ 是第 n 次纬度估计，νₙ 是用 φₙ 算出来的卯酉圈曲率半径：<span class="en" lang="en">In the iteration, φₙ is the nth latitude estimate, and νₙ is the prime vertical radius of curvature computed from φₙ:</span></p>
-          <div class="formula">
-            <span class="formula-line">\[
-\nu_n=\frac{a}{\sqrt{1-e^2\sin^2\phi_n}}
-\]</span>
-            <span class="formula-line">\[
-\phi_{n+1}=\operatorname{atan2}\left(Z+e^2\nu_n\sin\phi_n,\ p\right)
 \]</span>
           </div>
           <p>当相邻两次 φ 的差很小，就停止。然后恢复高度：<span class="en" lang="en">Stop when the difference between two successive φ values is very small. Then recover the height:</span></p>
@@ -1484,8 +1550,8 @@ h=\frac{p}{\cos\phi}-\nu
 \]</span>
           </div>
           <div class="note">
-            直觉：每轮都在问“如果当前纬度是真的，法线半径 ν 应该是多少”，然后用这个 ν 反过来修正纬度。普通地表或近地空间点通常很快收敛。
-            <span class="en" lang="en">Intuition: each round asks, “If the current latitude were true, what should the normal radius ν be?” Then that ν is used to correct the latitude. Ordinary surface or near-Earth points usually converge quickly.</span>
+            直觉：每轮都在问“如果当前纬度 \(\phi_n\) 是真的，卯酉圈曲率半径 \(\nu_n\) 应该是多少？把椭球扁率造成的竖直差额补回去后，新的法线角是多少？”普通地表或近地空间点通常很快收敛。靠近两极时 p 很小，经度会变得不稳定；这不是 atan2 的错误，而是极点附近“经度方向”本身接近未定义。
+            <span class="en" lang="en">Intuition: each round asks, “If the current latitude \(\phi_n\) were true, what should the prime vertical radius \(\nu_n\) be? After adding back the vertical offset caused by ellipsoid flattening, what is the new normal angle?” Ordinary surface or near-Earth points usually converge quickly. Near the poles p is very small and longitude becomes unstable; that is not an atan2 failure, but a consequence of longitude itself becoming nearly undefined near a pole.</span>
           </div>
         </div>
 
@@ -1658,6 +1724,68 @@ H=h-N
           <span class="en" lang="en">A “local tangent space” is more precisely a local tangent space or local tangent plane: a local Cartesian axis set attached at a specified WGS 84 origin. Saying “convert to local coordinates” is not enough; the local origin and axis convention must also be specified. This section uses ENU by default: East, North, Up.</span>
         </p>
 
+        <div class="card" style="margin-top:18px">
+          <h3>先定义三个帽子向量：\(\hat{\mathbf e}_0,\hat{\mathbf n}_{N,0},\hat{\mathbf u}_0\)<span class="en" lang="en">First Define the Three Unit Vectors: \(\hat{\mathbf e}_0,\hat{\mathbf n}_{N,0},\hat{\mathbf u}_0\)</span></h3>
+          <p>
+            帽子符号 \(\hat{\ }\) 表示 unit vector，即长度为 1 的单位向量。下标 0 表示这些向量只由本地原点 \(O_L=(\phi_0,\lambda_0,h_0)\) 的纬度和经度决定。这里 \(\hat{\mathbf e}_0\) 指向 East，\(\hat{\mathbf n}_{N,0}\) 指向 North，\(\hat{\mathbf u}_0\) 指向 Up。为了避免和前文“椭球法线 \(\hat{\mathbf n}\)”混淆，北向量写成 \(\hat{\mathbf n}_{N,0}\)，其中 N 表示 North。
+            <span class="en" lang="en">The hat symbol \(\hat{\ }\) means a unit vector, a vector of length 1. The subscript 0 means these vectors are determined only by the latitude and longitude of the local origin \(O_L=(\phi_0,\lambda_0,h_0)\). Here \(\hat{\mathbf e}_0\) points East, \(\hat{\mathbf n}_{N,0}\) points North, and \(\hat{\mathbf u}_0\) points Up. To avoid confusion with the earlier ellipsoid normal \(\hat{\mathbf n}\), the north vector is written as \(\hat{\mathbf n}_{N,0}\), where N means North.</span>
+          </p>
+          <p>
+            \(\hat{\mathbf u}_0\) 直接来自原点处的椭球外法线；\(\hat{\mathbf e}_0\) 来自“固定纬度、增大经度”的方向，也就是沿纬线向东的切向；\(\hat{\mathbf n}_{N,0}\) 用叉乘 \(\hat{\mathbf u}_0\times\hat{\mathbf e}_0\) 得到，这样它会落在切平面内并指向北。
+            <span class="en" lang="en">\(\hat{\mathbf u}_0\) comes directly from the outward ellipsoid normal at the origin; \(\hat{\mathbf e}_0\) comes from the direction of increasing longitude at fixed latitude, namely the eastward tangent to the parallel; \(\hat{\mathbf n}_{N,0}\) is obtained by the cross product \(\hat{\mathbf u}_0\times\hat{\mathbf e}_0\), so it lies in the tangent plane and points north.</span>
+          </p>
+          <div class="formula">
+            <span class="formula-line">\[
+\hat{\mathbf e}_0=
+\begin{bmatrix}
+-\sin\lambda_0\\
+\cos\lambda_0\\
+0
+\end{bmatrix},
+\qquad
+\hat{\mathbf u}_0=
+\begin{bmatrix}
+\cos\phi_0\cos\lambda_0\\
+\cos\phi_0\sin\lambda_0\\
+\sin\phi_0
+\end{bmatrix}
+\]</span>
+            <span class="formula-line">\[
+\hat{\mathbf n}_{N,0}
+=\hat{\mathbf u}_0\times\hat{\mathbf e}_0
+=
+\begin{bmatrix}
+-\sin\phi_0\cos\lambda_0\\
+-\sin\phi_0\sin\lambda_0\\
+\cos\phi_0
+\end{bmatrix}
+\]</span>
+            <span class="formula-line">\[
+\hat{\mathbf e}_0\times\hat{\mathbf n}_{N,0}
+=\hat{\mathbf u}_0
+\]</span>
+          </div>
+          <div class="callout good">
+            <strong>ENU 是右手坐标系。</strong>
+            按 \(E,N,U\) 的顺序看，\(\hat{\mathbf e}_0\times\hat{\mathbf n}_{N,0}=\hat{\mathbf u}_0\)，所以 ENU 与普通数学/物理里的右手三维直角坐标系一致。如果你的动力学模型把 \(x,y,z\) 分别解释为 East、North、Up，那么可以直接把 \((x,y,z)\) 对应到 \((E,N,U)\)。
+            <span class="en" lang="en"><strong>ENU is right-handed.</strong> In the \(E,N,U\) order, \(\hat{\mathbf e}_0\times\hat{\mathbf n}_{N,0}=\hat{\mathbf u}_0\), so ENU is consistent with an ordinary right-handed Cartesian coordinate system used in mathematics and physics. If your dynamics model interprets \(x,y,z\) as East, North, and Up respectively, then \((x,y,z)\) can map directly to \((E,N,U)\).</span>
+          </div>
+        </div>
+
+        <figure class="diagram" aria-labelledby="fig-enu-basis-title">
+          <img src="assets/geodetic_ecef/07-enu-basis-derivation.svg" alt="从 WGS 84 本地原点推导 ENU 三个单位轴的生成式三维图 / Generated 3D diagram deriving the ENU unit basis vectors from a WGS 84 local origin">
+          <figcaption id="fig-enu-basis-title">
+            这张图由脚本按同一教学原点生成。East 来自纬线切向，Up 来自椭球外法线，North 由 \( \hat{\mathbf u}_0\times\hat{\mathbf e}_0 \) 得到。图底部同时标出右手关系 \( \hat{\mathbf e}_0\times\hat{\mathbf n}_{N,0}=\hat{\mathbf u}_0 \)。
+            <span class="en" lang="en">This diagram is generated at the same teaching origin. East comes from the tangent to the parallel, Up comes from the outward ellipsoid normal, and North is obtained from \( \hat{\mathbf u}_0\times\hat{\mathbf e}_0 \). The bottom of the diagram also marks the right-handed relation \( \hat{\mathbf e}_0\times\hat{\mathbf n}_{N,0}=\hat{\mathbf u}_0 \).</span>
+          </figcaption>
+        </figure>
+
+        <div class="callout">
+          <strong>本节要解决的实际流程：</strong>
+          给定一个 WGS 84 原点 \(O_L\)，先用它建立 ENU 切线空间；把飞机当前 WGS 84 位置转成 ENU；在 ENU 这个普通三维直角空间里应用动力学方程，得到下一时刻的 \((E,N,U)\)；最后把新的 ENU 点转回 ECEF，再反算回 WGS 84。
+          <span class="en" lang="en"><strong>The practical workflow in this section:</strong> given a WGS 84 origin \(O_L\), first build the ENU tangent space from it; convert the aircraft’s current WGS 84 position into ENU; apply the dynamics equations in this ordinary three-dimensional Cartesian ENU space to obtain the next \((E,N,U)\); finally convert that new ENU point back to ECEF and then back to WGS 84.</span>
+        </div>
+
         <figure class="diagram" aria-labelledby="fig-local-tangent-title">
           <img src="assets/geodetic_ecef/07-local-tangent-enu.svg" alt="WGS 84 大地坐标转换到本地切平面 ENU 坐标的生成式三维示意图 / Generated 3D diagram of converting WGS 84 geodetic coordinates to local tangent plane ENU coordinates">
           <figcaption id="fig-local-tangent-title">
@@ -1753,8 +1881,8 @@ X-X_0\\Y-Y_0\\Z-Z_0
           <article class="card">
             <h3>第三步：在原点处构造 ENU 三个单位轴<span class="en" lang="en">Step 3: Build the Three ENU Unit Axes at the Origin</span></h3>
             <p>
-              东向单位轴 ê₀ 沿纬线切向；上向单位轴 û₀ 是原点处的椭球法线；北向单位轴 n̂_N,0 可由 û₀ × ê₀ 得到。下标 0 表示这些轴都只由本地原点 O_L 的 φ₀、λ₀ 决定。
-              <span class="en" lang="en">The east unit axis ê₀ follows the tangent to the parallel. The up unit axis û₀ is the ellipsoid normal at the origin. The north unit axis n̂_N,0 can be obtained from û₀ × ê₀. The subscript 0 means these axes are determined only by the local origin O_L through φ₀ and λ₀.</span>
+              这一步使用本节开头定义过的三个单位轴。它们不是由目标点 P 决定的，而是由原点 \(O_L\) 的 \(\phi_0,\lambda_0\) 决定的固定本地基底。只要本地原点不变，后续所有附近点都投影到同一组 \(\hat{\mathbf e}_0,\hat{\mathbf n}_{N,0},\hat{\mathbf u}_0\) 上。
+              <span class="en" lang="en">This step uses the three unit axes defined at the beginning of this section. They are not determined by target point P; they are the fixed local basis determined by the origin \(O_L\) through \(\phi_0,\lambda_0\). As long as the local origin is fixed, all nearby points are projected onto the same \(\hat{\mathbf e}_0,\hat{\mathbf n}_{N,0},\hat{\mathbf u}_0\) basis.</span>
             </p>
             <div class="formula">
               <span class="formula-line">\[
@@ -1850,6 +1978,10 @@ X-X_0\\Y-Y_0\\Z-Z_0
               NED 是 North-East-Down，即北、东、地。它常见于航空和飞控系统。如果一个系统使用 NED，不要直接把 ENU 的三个数塞进去；需要交换水平轴，并把 Up 改成 Down。
               <span class="en" lang="en">NED means North-East-Down. It is common in aviation and flight-control systems. If a system uses NED, do not directly insert the three ENU numbers; the horizontal axes must be swapped, and Up must be changed to Down.</span>
             </p>
+            <p>
+              ENU 按 \((E,N,U)\) 排列是右手系，因为 \(E\times N=U\)。NED 按 \((N,E,D)\) 排列也常被当作右手系，因为 \(N\times E=D\)，但它的竖直正方向是向下。很多航空 body frame 也用 \(x\) 前、\(y\) 右、\(z\) 下；那是机体系，不是本地 ENU 世界系。
+              <span class="en" lang="en">ENU ordered as \((E,N,U)\) is right-handed because \(E\times N=U\). NED ordered as \((N,E,D)\) is also commonly treated as right-handed because \(N\times E=D\), but its positive vertical direction is downward. Many aerospace body frames use x forward, y right, z down; that is a body frame, not the local ENU world frame.</span>
+            </p>
             <div class="formula">
               <span class="formula-line">\[
 \begin{bmatrix}
@@ -1862,6 +1994,77 @@ N_{\mathrm{ENU}}\\E_{\mathrm{ENU}}\\-U_{\mathrm{ENU}}
 \]</span>
             </div>
           </article>
+        </div>
+
+        <div class="card" style="margin-top:18px">
+          <h3>航空动力学示例：在 ENU 中推进一步，再转回 WGS 84<span class="en" lang="en">Aircraft Dynamics Example: Step Once in ENU, Then Convert Back to WGS 84</span></h3>
+          <p>
+            你的需求可以按下面的闭环实现。先选定一个固定 WGS 84 原点 \(O_L=(\phi_0,\lambda_0,h_0)\)，例如机场参考点、跑道入口或仿真场景中心。由 \(O_L\) 计算 \(\mathbf r_0\) 和 ENU 基底。然后把飞机当前 WGS 84 点 \(P_k=(\phi_k,\lambda_k,h_k)\) 转成 ECEF 的 \(\mathbf r_k\)，再投影成当前本地坐标 \(\mathbf p_k^{ENU}\)。
+            <span class="en" lang="en">Your workflow can be implemented as the following loop. First choose a fixed WGS 84 origin \(O_L=(\phi_0,\lambda_0,h_0)\), such as an airport reference point, runway threshold, or simulation-scene center. Compute \(\mathbf r_0\) and the ENU basis from \(O_L\). Then convert the aircraft’s current WGS 84 point \(P_k=(\phi_k,\lambda_k,h_k)\) to its ECEF vector \(\mathbf r_k\), and project it into the current local coordinate \(\mathbf p_k^{ENU}\).</span>
+          </p>
+          <div class="formula">
+            <span class="formula-line">\[
+\mathbf p_k^{ENU}
+=
+\begin{bmatrix}E_k\\N_k\\U_k\end{bmatrix}
+=
+\begin{bmatrix}
+\hat{\mathbf e}_0^T\\
+\hat{\mathbf n}_{N,0}^T\\
+\hat{\mathbf u}_0^T
+\end{bmatrix}
+\left(\mathbf r_k-\mathbf r_0\right)
+\]</span>
+          </div>
+          <p>
+            如果你的动力学模型使用普通右手三维世界坐标，并且约定 \(x\) 向东、\(y\) 向北、\(z\) 向上，那么可以直接令 \(\mathbf x_k=\mathbf p_k^{ENU}\)。例如一个最简单的常加速度离散步可以写成：
+            <span class="en" lang="en">If your dynamics model uses an ordinary right-handed 3D world coordinate system and defines x as east, y as north, and z as up, then you can directly set \(\mathbf x_k=\mathbf p_k^{ENU}\). For example, a simple constant-acceleration discrete step can be written as:</span>
+          </p>
+          <div class="formula">
+            <span class="formula-line">\[
+\mathbf x_k=
+\begin{bmatrix}E_k\\N_k\\U_k\end{bmatrix},
+\qquad
+\mathbf v_k=
+\begin{bmatrix}v_E\\v_N\\v_U\end{bmatrix},
+\qquad
+\mathbf a_k=
+\begin{bmatrix}a_E\\a_N\\a_U\end{bmatrix}
+\]</span>
+            <span class="formula-line">\[
+\mathbf x_{k+1}
+=
+\mathbf x_k+\mathbf v_k\Delta t+\frac{1}{2}\mathbf a_k\Delta t^2,
+\qquad
+\mathbf v_{k+1}
+=
+\mathbf v_k+\mathbf a_k\Delta t
+\]</span>
+          </div>
+          <p>
+            得到下一时刻的 \(\mathbf x_{k+1}=[E_{k+1},N_{k+1},U_{k+1}]^T\) 后，把 ENU 分量沿三根本地轴加回 ECEF，再用第 6 节反算回 WGS 84：
+            <span class="en" lang="en">After obtaining \(\mathbf x_{k+1}=[E_{k+1},N_{k+1},U_{k+1}]^T\), add the ENU components back along the three local axes to recover ECEF, then use the inverse conversion from Section 6 to return to WGS 84:</span>
+          </p>
+          <div class="formula">
+            <span class="formula-line">\[
+\mathbf r_{k+1}
+=
+\mathbf r_0
++E_{k+1}\hat{\mathbf e}_0
++N_{k+1}\hat{\mathbf n}_{N,0}
++U_{k+1}\hat{\mathbf u}_0
+\]</span>
+            <span class="formula-line">\[
+\mathbf r_{k+1}=(X_{k+1},Y_{k+1},Z_{k+1})
+\quad\Longrightarrow\quad
+(\phi_{k+1},\lambda_{k+1},h_{k+1})
+\]</span>
+          </div>
+          <div class="callout">
+            <strong>能不能直接对应到你的航空动力学模型？</strong>
+            如果模型的“普通 3D 坐标系”是右手、z 轴向上，并且你愿意把 \(x=E,\ y=N,\ z=U\)，那就可以直接对应。如果模型使用 NED 或航空机体系 \(x\) forward、\(y\) right、\(z\) down，就不能直接把 ENU 数值塞进去；需要先做 ENU↔NED 或 ENU↔body 的轴变换和姿态旋转。
+            <span class="en" lang="en"><strong>Can this map directly to your aircraft dynamics model?</strong> If the model’s “ordinary 3D coordinate system” is right-handed, has z upward, and you choose \(x=E,\ y=N,\ z=U\), then it maps directly. If the model uses NED or an aircraft body frame with x forward, y right, z down, do not insert ENU numbers directly; first apply the ENU↔NED or ENU↔body axis conversion and attitude rotation.</span>
+          </div>
         </div>
 
         <div class="card" style="margin-top:18px">

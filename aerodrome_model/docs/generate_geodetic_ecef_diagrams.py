@@ -697,6 +697,69 @@ def diagram_inverse() -> str:
     return svg.render()
 
 
+def diagram_iterative_inverse_atan2() -> str:
+    width, height = 940, 620
+    cx, cy = 250, 400
+    scale = 270
+    phi = TEACHING_PHI
+    b = WGS84_B_OVER_A
+    nu = nu_over_a(phi)
+    p_s = nu * cos(phi)
+    z_s = (1.0 - WGS84_E2) * nu * sin(phi)
+    h = VISUAL_H_OVER_A
+    p = p_s + h * cos(phi)
+    z = z_s + h * sin(phi)
+    z_corrected = z + WGS84_E2 * nu * sin(phi)
+    phi_initial = atan2(z, p * (1.0 - WGS84_E2))
+
+    def xy(p_value: float, z_value: float) -> Vec2:
+        return (cx + p_value * scale, cy - z_value * scale)
+
+    sx, sy = xy(p_s, z_s)
+    px, py = xy(p, z)
+    pcx, pcy = xy(p, z_corrected)
+    init_x, init_y = xy(p * (1.0 - WGS84_E2), z)
+    angle_r = 58
+    angle_end = (cx + angle_r * cos(phi), cy - angle_r * sin(phi))
+    init_angle_end = (cx + 42 * cos(phi_initial), cy - 42 * sin(phi_initial))
+
+    out = svg_2d_header(width, height, "Iterative inverse latitude and atan2")
+    out.append('<text class="title" x="30" y="36">方法 A 图解：为什么纬度 φ 可以写成 atan2</text>')
+    out.append('<text class="subtitle" x="30" y="58">在固定经度 λ 的 (p,z) 子午半剖面里，把非线性项先当作“竖直边修正量”</text>')
+    out.append(f'<ellipse class="ellipse" cx="{cx}" cy="{cy}" rx="{scale}" ry="{scale * b:.1f}"/>')
+    out.append(f'<line class="axis" x1="{cx - 145}" y1="{cy}" x2="{cx + 585}" y2="{cy}"/>')
+    out.append(f'<line class="axis" x1="{cx}" y1="{cy + 170}" x2="{cx}" y2="{cy - 330}"/>')
+    out.append(f'<line class="helper" x1="{px:.1f}" y1="{py:.1f}" x2="{px:.1f}" y2="{cy:.1f}"/>')
+    out.append(f'<line class="helper" x1="{cx:.1f}" y1="{py:.1f}" x2="{px:.1f}" y2="{py:.1f}"/>')
+    out.append(f'<line class="helper" x1="{cx:.1f}" y1="{pcy:.1f}" x2="{pcx:.1f}" y2="{pcy:.1f}"/>')
+    out.append(f'<line class="helper" x1="{pcx:.1f}" y1="{pcy:.1f}" x2="{pcx:.1f}" y2="{cy:.1f}"/>')
+    out.append(f'<line class="normal" x1="{sx:.1f}" y1="{sy:.1f}" x2="{px:.1f}" y2="{py:.1f}"/>')
+    out.append(f'<line class="radius" x1="{cx}" y1="{cy}" x2="{pcx:.1f}" y2="{pcy:.1f}"/>')
+    out.append(f'<line class="helper" x1="{cx}" y1="{cy}" x2="{px:.1f}" y2="{py:.1f}"/>')
+    out.append(f'<line class="normal" x1="{px:.1f}" y1="{py:.1f}" x2="{pcx:.1f}" y2="{pcy:.1f}"/>')
+    out.append(f'<line class="helper" x1="{cx}" y1="{cy}" x2="{init_x:.1f}" y2="{init_y:.1f}"/>')
+    out.append(f'<circle class="surface" cx="{sx:.1f}" cy="{sy:.1f}" r="6"/>')
+    out.append(f'<circle class="point" cx="{px:.1f}" cy="{py:.1f}" r="7"/>')
+    out.append(f'<circle class="point" cx="{pcx:.1f}" cy="{pcy:.1f}" r="5"/>')
+    out.append(f'<circle class="surface" cx="{init_x:.1f}" cy="{init_y:.1f}" r="4.5"/>')
+    out.append(f'<path class="helper" d="M {cx + angle_r:.1f},{cy:.1f} A {angle_r:.1f},{angle_r:.1f} 0 0 0 {angle_end[0]:.1f},{angle_end[1]:.1f}"/>')
+    out.append(f'<path class="helper" d="M {cx + 42:.1f},{cy:.1f} A 42,42 0 0 0 {init_angle_end[0]:.1f},{init_angle_end[1]:.1f}"/>')
+    out.append(f'<text class="label" x="{cx + 592}" y="{cy + 6}">p</text>')
+    out.append(f'<text class="label" x="{cx + 10}" y="{cy - 333}">z</text>')
+    out.append(f'<text class="small" x="{cx + 8}" y="{cy + 18}">O</text>')
+    out.append(f'<text class="orange" x="{sx - 20:.1f}" y="{sy + 30:.1f}">S</text>')
+    out.append(f'<text class="label" x="{px + 18:.1f}" y="{py + 38:.1f}">P(p,Z)</text>')
+    out.append(f'<text class="indigo" x="{pcx + 22:.1f}" y="{pcy - 34:.1f}">Cₙ=(p, Z+e²νₙ sinφₙ)</text>')
+    out.append(f'<text class="orange" x="{px + 42:.1f}" y="{(py + pcy) / 2 - 10:.1f}">竖直修正 e²νₙ sinφₙ</text>')
+    out.append(f'<text class="small" x="{cx + (p * scale) * 0.45:.1f}" y="{cy + 22:.1f}">水平边 p</text>')
+    out.append(f'<text class="indigo" x="{cx + 72}" y="{cy - 70}">φₙ₊₁ = atan2(z_c,n, p)</text>')
+    out.append(f'<text class="small" x="{init_x + 34:.1f}" y="{init_y + 58:.1f}">初值角：atan2(Z, p(1-e²))</text>')
+    out.append('<text class="formula" x="42" y="555">由 Z = p tanφ - e²ν sinφ 得到：p tanφ = Z + e²ν sinφ。</text>')
+    out.append('<text class="formula" x="42" y="579">令 z_c,n = Z + e²ν_n sinφ_n，则 tanφ_{n+1}=z_c,n/p，所以 φ_{n+1}=atan2(z_c,n,p)。</text>')
+    out.append("</svg>")
+    return "\n".join(out)
+
+
 def diagram_height() -> str:
     width, height = 900, 520
     cx, cy = 380, 290
@@ -799,6 +862,55 @@ def diagram_local_tangent_enu() -> str:
     return svg.render()
 
 
+def diagram_enu_basis_derivation() -> str:
+    phi0 = TEACHING_PHI
+    lam0 = TEACHING_LAMBDA
+    origin = geodetic_surface_unit(phi0, lam0)
+    east = east_unit(lam0)
+    north = north_unit(phi0, lam0)
+    up = normal_unit(phi0, lam0)
+    e_end = add(origin, mul(0.42, east))
+    n_end = add(origin, mul(0.42, north))
+    u_end = add(origin, mul(0.42, up))
+    plane = tangent_plane_polygon(origin, phi0, lam0, size=0.38)
+    pts = (
+        wire_points()
+        + plane
+        + [
+            (0, 0, 0),
+            (1.45, 0, 0),
+            (0, 1.45, 0),
+            (0, 0, 1.35),
+            origin,
+            e_end,
+            n_end,
+            u_end,
+        ]
+    )
+    svg = Svg(940, 640, "ENU basis vectors derived at a WGS 84 local origin", pts, pad=44)
+    svg.text_xy("生成式 3D 图：ENU 三个单位轴从本地原点 O_L 导出", 30, 36, "title")
+    svg.text_xy("ê₀ 沿纬线向东；û₀ 是椭球外法线；n̂ₙ,₀ = û₀ × ê₀；ê₀ × n̂ₙ,₀ = û₀，所以 ENU 是右手系", 30, 58, "subtitle")
+    draw_wire(svg)
+    for end, label in [((1.45, 0, 0), "X"), ((0, 1.45, 0), "Y"), ((0, 0, 1.35), "Z")]:
+        svg.line((0, 0, 0), end, "axis", True)
+        svg.text(label, end, 8, 4)
+    polygon_points(svg, plane, "plane")
+    svg.line((0, 0, 0), origin, "helper")
+    svg.line(origin, e_end, "east", True)
+    svg.line(origin, n_end, "north", True)
+    svg.line(origin, u_end, "normal", True)
+    svg.circle(origin, 6.6, "surface")
+    svg.text("O_L(φ₀,λ₀,h₀)", origin, 10, 16, "orange")
+    svg.text("ê₀ East", e_end, 18, 22, "teal")
+    svg.text("n̂_N,0 North", n_end, -118, -12, "indigo")
+    svg.text("û₀ Up / normal", u_end, 18, -22, "orange")
+    svg.text("local tangent plane", add(origin, add(mul(-0.22, east), mul(0.18, north))), -54, -10, "small")
+    svg.text_xy("ê₀=(-sinλ₀, cosλ₀, 0)", 44, 552, "formula")
+    svg.text_xy("û₀=(cosφ₀cosλ₀, cosφ₀sinλ₀, sinφ₀)", 44, 576, "formula")
+    svg.text_xy("n̂_N,0=û₀×ê₀=(-sinφ₀cosλ₀, -sinφ₀sinλ₀, cosφ₀)；ê₀×n̂_N,0=û₀", 44, 600, "formula")
+    return svg.render()
+
+
 def diagram_values_readme() -> str:
     phi = TEACHING_PHI
     lam = TEACHING_LAMBDA
@@ -825,6 +937,8 @@ These SVG files are generated by `../generate_geodetic_ecef_diagrams.py`.
 - Prime vertical radius nu at teaching latitude: {nu_over_a(phi) * WGS84_A_M:.3f} m
 - p-z section diagram: fixed lambda meridian half-section, z=z_S parallel circle, and p=p_S cylinder surface.
 - Prime vertical projection diagram: parallel-circle radius rho=nu*cos(phi), circle curvature, and normal-curvature projection factor cos(phi).
+- Iterative inverse atan2 diagram: fixed-longitude p-z section, corrected vertical leg Z+e^2*nu_n*sin(phi_n), and fixed-point latitude update.
+- ENU basis derivation diagram: east from parallel tangent, up from ellipsoid normal, north from u-hat cross e-hat.
 - Visual height arrow: {VISUAL_H_OVER_A:.3f} a, used only to make the normal direction visible.
 - Tangent slope diagram delta p: 0.055 a, used only to show the limiting secant visually.
 - Local tangent ENU diagram visual offsets: E=0.34 a, N=0.22 a, U=0.15 a, used only to show the decomposition.
@@ -846,7 +960,9 @@ def main() -> None:
     write(ASSET_DIR / "03-tangent-slope-dp.svg", diagram_tangent_slope_dp())
     write(ASSET_DIR / "04-forward-geodetic-to-ecef.svg", diagram_forward())
     write(ASSET_DIR / "05-inverse-ecef-to-geodetic.svg", diagram_inverse())
+    write(ASSET_DIR / "05-iterative-inverse-atan2.svg", diagram_iterative_inverse_atan2())
     write(ASSET_DIR / "06-height-normal-vs-radial.svg", diagram_height())
+    write(ASSET_DIR / "07-enu-basis-derivation.svg", diagram_enu_basis_derivation())
     write(ASSET_DIR / "07-local-tangent-enu.svg", diagram_local_tangent_enu())
     write(ASSET_DIR / "README.md", diagram_values_readme())
 

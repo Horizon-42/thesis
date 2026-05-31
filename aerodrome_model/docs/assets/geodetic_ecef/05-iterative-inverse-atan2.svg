@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 620" role="img" aria-labelledby="title">
+<title id="title">Iterative inverse latitude and atan2</title>
+<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#263548"/></marker></defs>
+<style>
+svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
+.title { fill: #16212f; font: 700 22px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.subtitle { fill: #5f6f7e; font: 500 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.axis { stroke: #263548; stroke-width: 2.2; marker-end: url(#arrow); }
+.ellipse { fill: #e7f7f8; stroke: #207b84; stroke-width: 2.2; }
+.helper { stroke: #8292a4; stroke-width: 1.5; stroke-dasharray: 6 5; fill: none; }
+.normal { stroke: #b65b13; stroke-width: 2.7; marker-end: url(#arrow); }
+.radius { stroke: #3d58a8; stroke-width: 2.4; marker-end: url(#arrow); }
+.tangent { stroke: #3d58a8; stroke-width: 2.0; }
+.point { fill: #007c89; stroke: white; stroke-width: 2.0; }
+.surface { fill: #b65b13; stroke: white; stroke-width: 2.0; }
+.label { fill: #16212f; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.small { fill: #4b5d70; font: 500 12.5px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.orange { fill: #9a4c10; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.indigo { fill: #314b99; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.formula { fill: #263548; font: 600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+</style>
+<text class="title" x="30" y="36">方法 A 图解：为什么纬度 φ 可以写成 atan2</text>
+<text class="subtitle" x="30" y="58">在固定经度 λ 的 (p,z) 子午半剖面里，把非线性项先当作“竖直边修正量”</text>
+<ellipse class="ellipse" cx="250" cy="400" rx="270" ry="269.1"/>
+<line class="axis" x1="105" y1="400" x2="835" y2="400"/>
+<line class="axis" x1="250" y1="570" x2="250" y2="70"/>
+<line class="helper" x1="435.3" y1="148.2" x2="435.3" y2="400.0"/>
+<line class="helper" x1="250.0" y1="148.2" x2="435.3" y2="148.2"/>
+<line class="helper" x1="250.0" y1="146.8" x2="435.3" y2="146.8"/>
+<line class="helper" x1="435.3" y1="146.8" x2="435.3" y2="400.0"/>
+<line class="normal" x1="409.8" y1="183.1" x2="435.3" y2="148.2"/>
+<line class="radius" x1="250" y1="400" x2="435.3" y2="146.8"/>
+<line class="helper" x1="250" y1="400" x2="435.3" y2="148.2"/>
+<line class="normal" x1="435.3" y1="148.2" x2="435.3" y2="146.8"/>
+<line class="helper" x1="250" y1="400" x2="434.0" y2="148.2"/>
+<circle class="surface" cx="409.8" cy="183.1" r="6"/>
+<circle class="point" cx="435.3" cy="148.2" r="7"/>
+<circle class="point" cx="435.3" cy="146.8" r="5"/>
+<circle class="surface" cx="434.0" cy="148.2" r="4.5"/>
+<path class="helper" d="M 308.0,400.0 A 58.0,58.0 0 0 0 284.2,353.2"/>
+<path class="helper" d="M 292.0,400.0 A 42,42 0 0 0 274.8,366.1"/>
+<text class="label" x="842" y="406">p</text>
+<text class="label" x="260" y="67">z</text>
+<text class="small" x="258" y="418">O</text>
+<text class="orange" x="389.8" y="213.1">S</text>
+<text class="label" x="453.3" y="186.2">P(p,Z)</text>
+<text class="indigo" x="457.3" y="112.8">Cₙ=(p, Z+e²νₙ sinφₙ)</text>
+<text class="orange" x="477.3" y="137.5">竖直修正 e²νₙ sinφₙ</text>
+<text class="small" x="333.4" y="422.0">水平边 p</text>
+<text class="indigo" x="322" y="330">φₙ₊₁ = atan2(z_c,n, p)</text>
+<text class="small" x="468.0" y="206.2">初值角：atan2(Z, p(1-e²))</text>
+<text class="formula" x="42" y="555">由 Z = p tanφ - e²ν sinφ 得到：p tanφ = Z + e²ν sinφ。</text>
+<text class="formula" x="42" y="579">令 z_c,n = Z + e²ν_n sinφ_n，则 tanφ_{n+1}=z_c,n/p，所以 φ_{n+1}=atan2(z_c,n,p)。</text>
+</svg>

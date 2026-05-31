@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 560" role="img" aria-labelledby="title">
+<title id="title">Surface-frame propagation architecture</title>
+<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#263548"/></marker></defs>
+<style>
+svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
+.title { fill: #16212f; font: 700 22px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.subtitle { fill: #5f6f7e; font: 500 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.box { fill: white; stroke: #c8d4df; stroke-width: 1.4; }
+.accent { fill: #e7f7f8; stroke: #207b84; stroke-width: 1.4; }
+.warn { fill: #fff5e8; stroke: #c2712a; stroke-width: 1.4; }
+.axis { stroke: #263548; stroke-width: 2.2; marker-end: url(#arrow); fill: none; }
+.north { stroke: #2f62b7; stroke-width: 2.7; marker-end: url(#arrow); fill: none; }
+.east { stroke: #007c89; stroke-width: 2.7; marker-end: url(#arrow); fill: none; }
+.up { stroke: #9a4c10; stroke-width: 2.7; marker-end: url(#arrow); fill: none; }
+.down { stroke: #8f3f71; stroke-width: 2.7; marker-end: url(#arrow); fill: none; stroke-dasharray: 7 5; }
+.arrow { stroke: #263548; stroke-width: 2.0; marker-end: url(#arrow); fill: none; }
+.helper { stroke: #8292a4; stroke-width: 1.4; stroke-dasharray: 6 5; fill: none; }
+.surface { fill: #b65b13; stroke: white; stroke-width: 2.0; }
+.point { fill: #007c89; stroke: white; stroke-width: 2.0; }
+.label { fill: #16212f; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.small { fill: #4b5d70; font: 500 12.5px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.teal { fill: #006f79; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.orange { fill: #9a4c10; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.indigo { fill: #314b99; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.magenta { fill: #8f3f71; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.formula { fill: #263548; font: 600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+</style>
+<rect width="980" height="560" fill="#fbfdff"/>
+<text class="title" x="34" y="42">总体思路：局部 surface frame 算动力学，WGS84/ECEF 保存轨迹位置</text>
+<text class="subtitle" x="34" y="66">FAA ADM 2.8 的核心：平地球飞机方程仍在局部切平面里解释，地球曲率只进入位置传播</text>
+<rect class="accent" x="42" y="122" width="212" height="92" rx="8"/>
+<text class="label" x="60" y="152">当前全球位置</text>
+<text class="teal" x="60" y="178">φ, λ, h</text>
+<text class="small" x="60" y="200">WGS84 geodetic</text>
+<rect class="box" x="298" y="122" width="212" height="92" rx="8"/>
+<text class="label" x="316" y="152">当前位置构造局部轴</text>
+<text class="teal" x="316" y="178">E,N,U 或 N,E,D</text>
+<text class="small" x="316" y="200">surface frame</text>
+<rect class="box" x="554" y="122" width="212" height="92" rx="8"/>
+<text class="label" x="572" y="152">飞机动力学</text>
+<text class="teal" x="572" y="178">V, ψ, γ, bank, n, T</text>
+<text class="small" x="572" y="200">local equations</text>
+<rect class="box" x="298" y="298" width="212" height="92" rx="8"/>
+<text class="label" x="316" y="328">局部速度分量</text>
+<text class="teal" x="316" y="354">v_E, v_N, v_U</text>
+<text class="small" x="316" y="376">or Vx,Vy,-h_dot</text>
+<rect class="box" x="554" y="298" width="212" height="92" rx="8"/>
+<text class="label" x="572" y="328">曲率半径传播</text>
+<text class="teal" x="572" y="354">φ_dot, λ_dot, h_dot</text>
+<text class="small" x="572" y="376">M, ν</text>
+<rect class="accent" x="810" y="298" width="128" height="92" rx="8"/>
+<text class="label" x="828" y="328">输出轨迹</text>
+<text class="teal" x="828" y="354">WGS84/ECEF</text>
+<text class="small" x="828" y="376">for Cesium</text>
+<path class="arrow" d="M254,168 L296,168"/>
+<path class="arrow" d="M510,168 L552,168"/>
+<path class="arrow" d="M660,214 L410,296"/>
+<path class="arrow" d="M510,344 L552,344"/>
+<path class="arrow" d="M766,344 L808,344"/>
+<text class="formula" x="74" y="468">不把 x,y 长期积在固定平面里；位置状态改成 φ,λ,h，或每步由 φ,λ,h 计算 ECEF r。</text>
+<text class="formula" x="74" y="494">动力学仍然输出局部水平/竖直速度；传播层把这些速度转换成经纬度变化率。</text>
+<text class="small" x="812" y="420">下一步：输出的 φ,λ,h 成为新的当前位置</text>
+</svg>
