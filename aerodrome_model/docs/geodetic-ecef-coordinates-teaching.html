@@ -402,8 +402,8 @@
       overflow: hidden;
     }
 
-    .diagram svg,
-    .diagram img {
+    .diagram > svg,
+    .diagram > img {
       display: block;
       width: 100%;
       height: auto;
@@ -411,7 +411,7 @@
         linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%);
     }
 
-    .diagram img {
+    .diagram > img {
       border: 0;
     }
 
@@ -889,8 +889,8 @@ m_{\mathrm{normal}}=-\frac{1}{m_{\mathrm{tangent}}}
 \]</span>
             </div>
             <p>
-              先令 p 表示“任意点到 Z 轴的水平距离”，即 p = sqrt(x² + y²)。这里的 p 是通用剖面坐标；如果讨论椭球面点 S，后面会写成 p_S；如果讨论反算中已知目标点 P，则写成 p。因为椭球绕 Z 轴旋转对称，三维问题可以先在 (p, z) 剖面中处理：
-              <span class="en" lang="en">First let p mean the horizontal distance from any point to the Z axis, namely p = sqrt(x² + y²). This p is a general section coordinate. When discussing the ellipsoid surface point S, it will be written as p_S; when discussing the known target point P in inverse conversion, it is written as p. Because the ellipsoid is rotationally symmetric around the Z axis, the three-dimensional problem can first be handled in the (p, z) section:</span>
+              先令 p 表示“任意点到 Z 轴的水平距离”，即 \(p=\sqrt{x^2+y^2}\)。这里的 p 是通用水平距离坐标；如果讨论椭球面点 S，后面会写成 \(p_S\)；如果讨论反算中已知目标点 P，则写成 p。因为椭球绕 Z 轴旋转对称，三维问题可以先投到固定经度 \(\lambda\) 的 \((p,z)\) 子午半剖面中处理：
+              <span class="en" lang="en">First let p mean the horizontal distance from any point to the Z axis, namely \(p=\sqrt{x^2+y^2}\). This p is a general horizontal-distance coordinate. When discussing the ellipsoid surface point S, it will be written as \(p_S\); when discussing the known target point P in inverse conversion, it is written as p. Because the ellipsoid is rotationally symmetric around the Z axis, the three-dimensional problem can first be projected into the fixed-longitude \(\lambda\) meridian half-section in \((p,z)\):</span>
             </p>
             <div class="formula">
               <span class="formula-line">\[
@@ -899,6 +899,35 @@ p=\sqrt{x^2+y^2},\qquad
 \]</span>
             </div>
           </article>
+        </div>
+
+        <figure class="diagram" aria-labelledby="fig-pz-section-title">
+          <img src="assets/geodetic_ecef/02-pz-section-geometry.svg" alt="p-z 剖面、纬度剖面和固定 p 圆柱面的生成式三维示意图 / Generated 3D diagram of the p-z section, latitude section, and constant-p cylinder">
+          <figcaption id="fig-pz-section-title">
+            这张图由脚本按 WGS 84 椭球生成。图中的 S 是选取的椭球表面点，\(p_S\) 是 S 到 Z 轴的水平距离，\(z_S\) 是 S 的竖直坐标。蓝色半平面是固定经度 \(\lambda\) 后得到的子午半剖面，也就是推导中真正使用的 \((p,z)\) 剖面；橙色圆是固定 \(z=z_S\) 的水平切片，属于纬度方向的圆；紫色线框表示固定 \(p=p_S\) 后在三维空间形成的圆柱面。
+            <span class="en" lang="en">This diagram is generated from the WGS 84 ellipsoid. S is the selected ellipsoid surface point, \(p_S\) is the horizontal distance from S to the Z axis, and \(z_S\) is the vertical coordinate of S. The blue half-plane is the fixed-longitude \(\lambda\) meridian half-section, which is the actual \((p,z)\) section used in the derivation; the orange circle is the horizontal slice at \(z=z_S\), a latitude-direction circle; the purple wireframe shows the circular cylinder formed by holding \(p=p_S\) in three-dimensional space.</span>
+          </figcaption>
+        </figure>
+
+        <div class="card" style="margin-top:18px">
+          <h3>p-z 剖面到底是什么<span class="en" lang="en">What Exactly Is the p-z Section?</span></h3>
+          <p>
+            推导里的 \((p,z)\) 剖面<strong>不是纬度剖面</strong>，而是固定某一个经度 \(\lambda\) 后的<strong>子午半剖面</strong>。把经度固定后，三维点可以写成 \((x,y,z)=(p\cos\lambda,p\sin\lambda,z)\)，所以 \(x^2+y^2=p^2\)，三维椭球方程就变成二维椭圆方程 \(p^2/a^2+z^2/b^2=1\)。
+            <span class="en" lang="en">The \((p,z)\) section in the derivation is <strong>not a latitude section</strong>. It is a <strong>meridian half-section</strong> obtained by holding one longitude \(\lambda\) fixed. After \(\lambda\) is fixed, a three-dimensional point can be written as \((x,y,z)=(p\cos\lambda,p\sin\lambda,z)\), so \(x^2+y^2=p^2\), and the three-dimensional ellipsoid equation becomes the two-dimensional ellipse equation \(p^2/a^2+z^2/b^2=1\).</span>
+          </p>
+          <p>
+            纬度剖面是另一件事：如果固定竖直坐标 \(z=z_S\)，用一个水平平面切椭球，得到的是绕 Z 轴的一条圆，也就是图中的橙色纬线圈。这个圆上的每个点有不同的经度 \(\lambda\)，但有相同的 z 和相同的 \(p_S\)。
+            <span class="en" lang="en">A latitude section is a different object: if the vertical coordinate \(z=z_S\) is fixed and the ellipsoid is cut by a horizontal plane, the result is a circle around the Z axis, shown as the orange parallel circle. Points on that circle have different longitudes \(\lambda\), but share the same z and the same \(p_S\).</span>
+          </p>
+          <p>
+            p 本身没有“形状”。它是一个数，表示点到 Z 轴的水平距离，也就是柱坐标里的 radial coordinate（径向坐标）。在固定经度的子午半剖面里，p 表现为横轴；在完整三维空间里，固定 \(p=p_S\) 的所有点形成一个绕 Z 轴的圆柱面。这个圆柱面再与椭球相交，才得到对应的纬线圈。
+            <span class="en" lang="en">p itself has no “shape.” It is a number: the horizontal distance from the point to the Z axis, also called the radial coordinate in cylindrical coordinates. In a fixed-longitude meridian half-section, p appears as the horizontal axis; in full three-dimensional space, all points with \(p=p_S\) form a circular cylinder around the Z axis. Intersecting that cylinder with the ellipsoid gives the corresponding parallel circle.</span>
+          </p>
+          <div class="callout good">
+            <strong>一句话区分：</strong>
+            固定 \(\lambda\) 看 \((p,z)\)，得到经度方向的子午半剖面；固定 z 看 \((x,y)\)，得到纬度方向的水平圆；固定 p 看三维轨迹，得到绕 Z 轴的圆柱面。
+            <span class="en" lang="en"><strong>One-sentence distinction:</strong> hold \(\lambda\) fixed and look at \((p,z)\) to get the longitude-direction meridian half-section; hold z fixed and look at \((x,y)\) to get the latitude-direction horizontal circle; hold p fixed in 3D to get a circular cylinder around the Z axis.</span>
+          </div>
         </div>
 
         <div id="curvature" class="card" style="margin-top:18px">
@@ -963,8 +992,30 @@ M=\frac{a(1-e^2)}{\left(1-e^2\sin^2\phi\right)^{3/2}}
         <div class="card" style="margin-top:18px">
           <h3>从切线斜率推到表面点公式<span class="en" lang="en">From Tangent Slope to the Surface-Point Formula</span></h3>
           <p>
-            下面只讨论椭球表面点 S。把 S 在子午剖面中的坐标写成 S(p_S, z_S)，其中 p_S 是 S 到 Z 轴的水平距离，z_S 是 S 的竖直坐标。椭圆方程 p²/a² + z²/b² = 1 中的 p、z 先是通用剖面坐标；求导后再把它们代入为 p_S、z_S：
-            <span class="en" lang="en">The following discussion only concerns ellipsoid surface point S. Write the coordinates of S in the meridian section as S(p_S, z_S), where p_S is the horizontal distance from S to the Z axis and z_S is its vertical coordinate. In the ellipse equation p²/a² + z²/b² = 1, p and z first act as general section coordinates; after differentiation, they are evaluated as p_S and z_S:</span>
+            这一小节要推的目标不是 \(\tan\phi\) 本身，而是<strong>给定大地纬度 \(\phi\) 和经度 \(\lambda\) 时，椭球表面点 S 的坐标公式</strong>。先在子午剖面里解出 \(S(p_S,z_S)\)，再把这个二维结果绕 Z 轴转到经度 \(\lambda\) 上：
+            <span class="en" lang="en">The goal of this subsection is not \(\tan\phi\) itself. The goal is <strong>the coordinate formula for ellipsoid surface point S when geodetic latitude \(\phi\) and longitude \(\lambda\) are given</strong>. First solve for \(S(p_S,z_S)\) in the meridian section, then rotate that two-dimensional result around the Z axis to longitude \(\lambda\):</span>
+          </p>
+          <div class="formula">
+            <span class="formula-line">\[
+p_S=\nu\cos\phi,\qquad
+z_S=(1-e^2)\nu\sin\phi
+\]</span>
+            <span class="formula-line">\[
+S(\phi,\lambda,h=0)
+=
+\left(p_S\cos\lambda,\ p_S\sin\lambda,\ z_S\right)
+=
+\left(\nu\cos\phi\cos\lambda,\ \nu\cos\phi\sin\lambda,\ (1-e^2)\nu\sin\phi\right)
+\]</span>
+          </div>
+          <div class="callout good">
+            <strong>这里的“标准表面点坐标”是什么意思？</strong>
+            它不是新的坐标系统，而是大地坐标正算里最常用的 \(h=0\) 椭球面点公式：S 是给定 \(\phi,\lambda\) 后落在 WGS 84 参考椭球表面上的点。后面的第 5 节会从这个 S 出发，再沿法线加上高度 h 得到目标点 P。
+            <span class="en" lang="en"><strong>What does “standard surface-point coordinates” mean here?</strong> It is not a new coordinate system. It is the commonly used \(h=0\) ellipsoid-surface-point formula in geodetic-to-ECEF forward conversion: S is the point on the WGS 84 reference ellipsoid determined by \(\phi,\lambda\). Section 5 starts from this S and then adds height h along the normal to reach target point P.</span>
+          </div>
+          <p>
+            下面只讨论这个椭球表面点 S。把 S 在子午剖面中的坐标写成 \(S(p_S,z_S)\)，其中 \(p_S\) 是 S 到 Z 轴的水平距离，\(z_S\) 是 S 的竖直坐标。椭圆方程 \(p^2/a^2+z^2/b^2=1\) 中的 p、z 先是通用剖面坐标；求导后再把它们代入为 \(p_S,z_S\)：
+            <span class="en" lang="en">The following discussion only concerns this ellipsoid surface point S. Write the coordinates of S in the meridian section as \(S(p_S,z_S)\), where \(p_S\) is the horizontal distance from S to the Z axis and \(z_S\) is its vertical coordinate. In the ellipse equation \(p^2/a^2+z^2/b^2=1\), p and z first act as general section coordinates; after differentiation, they are evaluated as \(p_S,z_S\):</span>
           </p>
           <figure class="diagram" aria-labelledby="fig-tangent-slope-title">
             <img src="assets/geodetic_ecef/03-tangent-slope-dp.svg" alt="说明 dz/dp 中 p 的含义、delta p、delta z、割线和切线斜率的 WGS 84 子午剖面图 / WGS 84 meridian-section diagram explaining the p in dz/dp, delta p, delta z, the secant, and the tangent slope">
@@ -1067,12 +1118,18 @@ m_{\mathrm{normal}}
 \]</span>
           </div>
           <p>
-            把这个关系和椭圆方程联立，就得到标准表面点坐标。第一步先把 z_S 写成 p_S 和 φ 的形式；第二步代回椭圆方程；第三步用 b²=a²(1-e²) 化简。这里 ν 是 S 处的卯酉圈曲率半径，a 是赤道半径，e² 是第一偏心率平方：
-            <span class="en" lang="en">Combining this relationship with the ellipse equation gives the standard surface-point coordinates. First write z_S in terms of p_S and φ; second substitute it back into the ellipse equation; third simplify using b²=a²(1-e²). Here ν is the prime vertical radius of curvature at S, a is the equatorial radius, and e² is the first eccentricity squared:</span>
+            到这里，我们只得到了一条<strong>约束关系</strong>：如果 S 的大地纬度是 \(\phi\)，那么 \(p_S\) 和 \(z_S\) 必须满足 \(z_S=(1-e^2)p_S\tan\phi\)。这还不是表面点坐标公式，因为 \(p_S,z_S\) 仍然没有被单独解出来。下一步才是把这条约束代回椭圆方程，解出 \(p_S\)：
+            <span class="en" lang="en">At this point we have only obtained a <strong>constraint</strong>: if the geodetic latitude of S is \(\phi\), then \(p_S\) and \(z_S\) must satisfy \(z_S=(1-e^2)p_S\tan\phi\). This is not yet the surface-point coordinate formula, because \(p_S,z_S\) have not been solved separately. The next step is to substitute this constraint back into the ellipse equation and solve for \(p_S\):</span>
           </p>
           <div class="formula">
             <span class="formula-line">\[
 z_S=(1-e^2)p_S\tan\phi
+\]</span>
+            <span class="formula-line">\[
+\frac{p_S^2}{a^2}
++\frac{z_S^2}{b^2}=1,
+\qquad
+b^2=a^2(1-e^2)
 \]</span>
             <span class="formula-line">\[
 \frac{p_S^2}{a^2}
@@ -1082,18 +1139,64 @@ z_S=(1-e^2)p_S\tan\phi
 p_S^2\left(\frac{1}{a^2}+\frac{(1-e^2)\tan^2\phi}{a^2}\right)=1
 \]</span>
             <span class="formula-line">\[
-p_S=\frac{a\cos\phi}{\sqrt{1-e^2\sin^2\phi}}
-=\nu\cos\phi
+\begin{aligned}
+1+(1-e^2)\tan^2\phi
+&amp;=
+\frac{\cos^2\phi+(1-e^2)\sin^2\phi}{\cos^2\phi} \\
+&amp;=
+\frac{1-e^2\sin^2\phi}{\cos^2\phi}
+\end{aligned}
 \]</span>
             <span class="formula-line">\[
-\nu=\frac{a}{\sqrt{1-e^2\sin^2\phi}},
-\qquad
-z_S=\nu(1-e^2)\sin\phi
+\begin{aligned}
+p_S^2
+&amp;=
+\frac{a^2\cos^2\phi}{1-e^2\sin^2\phi} \\
+p_S
+&amp;=
+\frac{a\cos\phi}{\sqrt{1-e^2\sin^2\phi}}
+\end{aligned}
+\]</span>
+          </div>
+          <p>
+            现在才引入 \(\nu\)。它不是在前面“直接代入”的假设，而是把刚刚解出的 \(p_S\) 公式中反复出现的因子命名出来：
+            <span class="en" lang="en">Now introduce \(\nu\). It is not an assumption that was “directly substituted” earlier; it is a name given to the repeated factor that has just appeared while solving for \(p_S\):</span>
+          </p>
+          <div class="formula">
+            <span class="formula-line">\[
+\nu \stackrel{\mathrm{def}}{=}
+\frac{a}{\sqrt{1-e^2\sin^2\phi}}
+\]</span>
+            <span class="formula-line">\[
+p_S=\nu\cos\phi
+\]</span>
+          </div>
+          <p>
+            这个 \(\nu\) 是希腊字母 nu，外形容易看成拉丁字母 v。几何上，它正好等于前面讲过的 S 处卯酉圈曲率半径；但在这条代数推导里，你可以先把它理解为“为了让公式短一些而定义的中间量”。也就是说：先由斜率关系和椭圆方程解出根式，再把这个根式命名为 \(\nu\)，不是先假设 \(\nu\) 再倒推出 \(p_S\)。
+            <span class="en" lang="en">This \(\nu\) is the Greek letter nu, which can look like the Latin letter v. Geometrically, it is exactly the prime vertical radius of curvature at S discussed earlier; but in this algebraic derivation, you may first read it simply as an intermediate quantity defined to shorten the formulas. In other words: the radical expression is solved from the slope relation and the ellipse equation first, then named \(\nu\); \(\nu\) is not assumed first in order to force \(p_S\).</span>
+          </p>
+          <p>
+            最后把 \(p_S=\nu\cos\phi\) 代回 \(z_S=(1-e^2)p_S\tan\phi\)，就得到表面点的竖直坐标：
+            <span class="en" lang="en">Finally substitute \(p_S=\nu\cos\phi\) back into \(z_S=(1-e^2)p_S\tan\phi\) to obtain the vertical coordinate of the surface point:</span>
+          </p>
+          <div class="formula">
+            <span class="formula-line">\[
+\begin{aligned}
+z_S
+&amp;=(1-e^2)\nu\cos\phi\tan\phi \\
+&amp;=(1-e^2)\nu\sin\phi
+\end{aligned}
+\]</span>
+            <span class="formula-line">\[
+S(p_S,z_S)
+=
+\left(\nu\cos\phi,\ (1-e^2)\nu\sin\phi\right)
 \]</span>
           </div>
           <div class="callout good">
-            <strong>核心直觉：</strong>ν 不是凭空冒出来的常数，它来自“沿椭球法线定义纬度”这件事。只要用大地纬度而不是地心纬度，ν 就会自然出现在公式中。
-            <span class="en" lang="en"><strong>Core intuition:</strong> ν is not an arbitrary constant. It appears because latitude is defined along the ellipsoid normal. As long as geodetic latitude, rather than geocentric latitude, is used, ν naturally enters the formula.</span>
+            <strong>这一段真正完成了什么？</strong>
+            它完成的是从“\(\phi\) 是法线角度”到“表面点 S 的坐标可以写成 \(p_S=\nu\cos\phi,\ z_S=(1-e^2)\nu\sin\phi\)”的桥。下一节正算公式只是把这个子午剖面结果按经度 \(\lambda\) 展开成 \(X_S=p_S\cos\lambda,\ Y_S=p_S\sin\lambda,\ Z_S=z_S\)，再沿法线加高度 h。
+            <span class="en" lang="en"><strong>What has this subsection actually accomplished?</strong> It builds the bridge from “\(\phi\) is the normal angle” to “surface point S can be written as \(p_S=\nu\cos\phi,\ z_S=(1-e^2)\nu\sin\phi\).” The forward formula in the next section merely expands this meridian-section result by longitude \(\lambda\) as \(X_S=p_S\cos\lambda,\ Y_S=p_S\sin\lambda,\ Z_S=z_S\), then adds height h along the normal.</span>
           </div>
         </div>
       </section>
