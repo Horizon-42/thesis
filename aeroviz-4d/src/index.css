@@ -1339,9 +1339,9 @@ body,
   pointer-events: auto;
   display: grid;
   gap: 8px;
-  width: clamp(190px, 15vw, 230px);
+  width: clamp(260px, 22vw, 330px);
   max-width: min(100%, calc(100vw - 36px));
-  height: min(38vh, 450px);
+  height: min(58vh, 680px);
   min-height: 0;
   padding: 8px;
   border: 1px solid rgba(103, 232, 249, 0.24);
@@ -1412,9 +1412,177 @@ body,
   color: #bbf7d0;
 }
 
+.pilot-status-placing {
+  border-color: rgba(250, 204, 21, 0.52);
+  color: #fde68a;
+}
+
 .pilot-status-error {
   border-color: rgba(248, 113, 113, 0.6);
   color: #fecaca;
+}
+
+.pilot-placement-button.active {
+  border-color: rgba(250, 204, 21, 0.72);
+  background: rgba(113, 63, 18, 0.78);
+  color: #fef3c7;
+}
+
+.pilot-initial-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+  padding: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.46);
+}
+
+.pilot-initial-summary h4 {
+  margin: 0 0 3px;
+  color: #c7d2fe;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pilot-initial-summary span {
+  display: inline-block;
+  max-width: 78px;
+  margin-right: 6px;
+  overflow: hidden;
+  color: #bae6fd;
+  font-family: "Courier New", monospace;
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pilot-initial-summary dl {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  margin: 0;
+}
+
+.pilot-initial-summary dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 5px;
+  min-width: 0;
+}
+
+.pilot-initial-summary dt {
+  color: #93a4b8;
+  font-size: 10.5px;
+}
+
+.pilot-initial-summary dd {
+  min-width: 0;
+  overflow: hidden;
+  margin: 0;
+  color: #f8fafc;
+  font-family: "Courier New", monospace;
+  font-size: 10.5px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pilot-initial-overlay {
+  position: fixed;
+  left: 50%;
+  bottom: 96px;
+  z-index: 170;
+  width: min(700px, calc(100vw - 32px));
+  padding: 10px;
+  border: 1px solid rgba(103, 232, 249, 0.32);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.93);
+  box-shadow: 0 20px 54px rgba(2, 8, 23, 0.46);
+  box-sizing: border-box;
+  color: #dbeafe;
+  transform: translateX(-50%);
+  pointer-events: auto;
+}
+
+.pilot-initial-overlay-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.pilot-initial-overlay-header h3 {
+  margin: 0 0 3px;
+  color: #7dd3fc;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pilot-initial-overlay-header span {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.pilot-initial-overlay-body {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.9fr) minmax(0, 1.6fr);
+  gap: 10px;
+  padding-top: 10px;
+}
+
+.pilot-initial-place-card {
+  display: grid;
+  gap: 7px;
+  align-content: start;
+}
+
+.pilot-initial-place-card .pilot-placement-button {
+  width: 100%;
+  min-height: 30px;
+}
+
+.pilot-initial-coordinates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.pilot-initial-coordinates output {
+  min-width: 0;
+  overflow: hidden;
+  padding: 5px 6px;
+  border-radius: 4px;
+  background: rgba(2, 6, 23, 0.42);
+  color: #bae6fd;
+  font-family: "Courier New", monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pilot-initial-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.pilot-initial-fields label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pilot-initial-fields span {
+  color: #93a4b8;
+  font-size: 10.5px;
 }
 
 .pilot-actions {
@@ -1564,7 +1732,7 @@ body,
 
 @media (max-width: 980px) {
   .flight-ops-panel {
-    width: clamp(190px, 15vw, 230px);
+    width: clamp(260px, 28vw, 330px);
   }
 }
 
@@ -1576,6 +1744,15 @@ body,
   .pilot-stepper-row label,
   .pilot-options-row label {
     grid-template-columns: 44px minmax(0, 1fr);
+  }
+
+  .pilot-initial-overlay {
+    bottom: 84px;
+  }
+
+  .pilot-initial-overlay-body,
+  .pilot-initial-fields {
+    grid-template-columns: 1fr;
   }
 }
 

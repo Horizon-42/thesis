@@ -1,6 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
 import { usePilotAircraft, type PilotAircraftPose } from "../hooks/usePilotAircraft";
+import PilotInitialStateOverlay, {
+  EnglishNumberInput,
+  formatCoord,
+  formatNumberInputValue,
+  type PilotInitialEditableKey,
+} from "./PilotInitialStateOverlay";
+import {
+  usePilotInitialPlacement,
+  type PilotInitialPlacementPosition,
+} from "../hooks/usePilotInitialPlacement";
 import {
   PILOT_SERVER_URL,
   resetPilotSimulation,
@@ -19,10 +29,22 @@ const DEFAULT_FRAME_DT_S = 0.2;
 const STEP_INTERVAL_MS = 120;
 const MAX_TRAIL_POINTS = 360;
 
+interface PlacementBackup {
+  initialState: PilotResetState;
+  isInitialPreviewVisible: boolean;
+  isEnabled: boolean;
+  isFlying: boolean;
+  snapshot: PilotSnapshot | null;
+  trail: PilotAircraftPose[];
+}
+
 export default function PilotPanel() {
   const { airport } = useApp();
   const [isEnabled, setIsEnabled] = useState(false);
   const [isFlying, setIsFlying] = useState(false);
+  const [isInitialEditorOpen, setIsInitialEditorOpen] = useState(false);
+  const [isPlacingInitialPosition, setIsPlacingInitialPosition] = useState(false);
+  const [isInitialPreviewVisible, setIsInitialPreviewVisible] = useState(false);
   const [isFollowing, setIsFollowing] = useState(true);
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,18 +56,120 @@ export default function PilotPanel() {
   const controlsRef = useRef(controls);
   const frameDtRef = useRef(frameDtS);
   const stepInFlightRef = useRef(false);
+  const placementBackupRef = useRef<PlacementBackup | null>(null);
 
-  const initialState = useMemo<PilotResetState>(() => ({
-    lon: airport?.lon ?? -78.7873,
-    lat: airport?.lat ?? 35.878659,
-    altM: 1000,
-    speedMps: 120,
-    headingDeg: 0,
-    flightPathDeg: 0,
-    massKg: 10000,
-  }), [airport]);
+  const [initialState, setInitialState] = useState<PilotResetState>(() =>
+    makeDefaultInitialState(null),
+  );
 
   const pose = snapshotToPose(snapshot);
+
+  const clearSnapshotForInitialEdit = useCallback(() => {
+    if (!snapshot && !isEnabled && !isFlying) return;
+
+    setIsFlying(false);
+    setIsEnabled(false);
+    setSnapshot(null);
+    setTrail([]);
+  }, [isEnabled, isFlying, snapshot]);
+
+  const updateInitialPosition = useCallback(
+    (position: PilotInitialPlacementPosition) => {
+      setInitialState((current) => ({
+        ...current,
+        lon: clamp(position.lon, -180, 180),
+        lat: clamp(position.lat, -90, 90),
+      }));
+      clearSnapshotForInitialEdit();
+    },
+    [clearSnapshotForInitialEdit],
+  );
+
+  const finishInitialPlacement = useCallback(() => {
+    placementBackupRef.current = null;
+    setIsInitialPreviewVisible(true);
+    setIsPlacingInitialPosition(false);
+    setIsInitialEditorOpen(false);
+  }, []);
+
+  const cancelInitialPlacement = useCallback(() => {
+    const backup = placementBackupRef.current;
+    if (backup) {
+      setInitialState(backup.initialState);
+      setIsInitialPreviewVisible(backup.isInitialPreviewVisible);
+      setIsEnabled(backup.isEnabled);
+      setIsFlying(backup.isFlying);
+      setSnapshot(backup.snapshot);
+      setTrail(backup.trail);
+    }
+
+    placementBackupRef.current = null;
+    setIsPlacingInitialPosition(false);
+    setIsInitialEditorOpen(false);
+  }, []);
+
+  const openInitialEditor = useCallback(() => {
+    if (isFlying || isBusy) return;
+
+    setError(null);
+    setIsInitialEditorOpen(true);
+    setIsInitialPreviewVisible(true);
+    clearSnapshotForInitialEdit();
+  }, [clearSnapshotForInitialEdit, isBusy, isFlying]);
+
+  const closeInitialEditor = useCallback(() => {
+    if (isPlacingInitialPosition) {
+      cancelInitialPlacement();
+      return;
+    }
+
+    setIsInitialEditorOpen(false);
+  }, [cancelInitialPlacement, isPlacingInitialPosition]);
+
+  const toggleInitialPlacement = useCallback(() => {
+    if (isPlacingInitialPosition) {
+      cancelInitialPlacement();
+      return;
+    }
+
+    if (isFlying || isBusy) return;
+
+    placementBackupRef.current = {
+      initialState,
+      isInitialPreviewVisible,
+      isEnabled,
+      isFlying,
+      snapshot,
+      trail,
+    };
+    setIsFlying(false);
+    setIsEnabled(false);
+    setError(null);
+    setIsInitialEditorOpen(true);
+    setIsInitialPreviewVisible(true);
+    setIsPlacingInitialPosition(true);
+  }, [
+    cancelInitialPlacement,
+    initialState,
+    isInitialPreviewVisible,
+    isBusy,
+    isEnabled,
+    isFlying,
+    isPlacingInitialPosition,
+    snapshot,
+    trail,
+  ]);
+
+  usePilotInitialPlacement({
+    enabled: isPlacingInitialPosition,
+    previewVisible: (isInitialEditorOpen || isPlacingInitialPosition || isInitialPreviewVisible) &&
+      !isEnabled &&
+      !snapshot,
+    initialState,
+    onPositionChange: updateInitialPosition,
+    onFinish: finishInitialPlacement,
+    onCancel: cancelInitialPlacement,
+  });
 
   usePilotAircraft({
     enabled: isEnabled,
@@ -53,6 +177,18 @@ export default function PilotPanel() {
     trail,
     follow: isFollowing,
   });
+
+  useEffect(() => {
+    placementBackupRef.current = null;
+    setInitialState(makeDefaultInitialState(airport));
+    setIsInitialEditorOpen(false);
+    setIsPlacingInitialPosition(false);
+    setIsInitialPreviewVisible(false);
+    setIsFlying(false);
+    setIsEnabled(false);
+    setSnapshot(null);
+    setTrail([]);
+  }, [airport]);
 
   useEffect(() => {
     controlsRef.current = controls;
@@ -148,6 +284,9 @@ export default function PilotPanel() {
   }, [isEnabled]);
 
   async function startPilot() {
+    placementBackupRef.current = null;
+    setIsInitialEditorOpen(false);
+    setIsPlacingInitialPosition(false);
     setIsBusy(true);
     setError(null);
     try {
@@ -168,6 +307,9 @@ export default function PilotPanel() {
   }
 
   async function resetPilot() {
+    placementBackupRef.current = null;
+    setIsInitialEditorOpen(false);
+    setIsPlacingInitialPosition(false);
     setIsBusy(true);
     setError(null);
     try {
@@ -185,6 +327,9 @@ export default function PilotPanel() {
   }
 
   function stopPilot() {
+    placementBackupRef.current = null;
+    setIsInitialEditorOpen(false);
+    setIsPlacingInitialPosition(false);
     setIsFlying(false);
     setIsEnabled(false);
     setSnapshot(null);
@@ -200,6 +345,19 @@ export default function PilotPanel() {
   ) {
     if (!Number.isFinite(value)) return;
     setControls((current) => ({ ...current, [key]: clamp(value, min, max) }));
+  }
+
+  function updateInitialField(
+    key: PilotInitialEditableKey,
+    value: number,
+    min: number,
+    max: number,
+  ) {
+    if (!Number.isFinite(value) || isFlying) return;
+
+    setInitialState((current) => ({ ...current, [key]: clamp(value, min, max) }));
+    setIsInitialPreviewVisible(true);
+    clearSnapshotForInitialEdit();
   }
 
   function updateFrameDt(value: number) {
@@ -221,11 +379,14 @@ export default function PilotPanel() {
 
   const statusLabel = error
     ? "Error"
-    : isFlying
-      ? "Flying"
-      : snapshot
-        ? "Paused"
-        : "Standby";
+    : isPlacingInitialPosition
+      ? "Placing"
+      : isFlying
+        ? "Flying"
+        : snapshot
+          ? "Paused"
+          : "Standby";
+  const initialControlsDisabled = isFlying || isBusy;
 
   return (
     <div className="pilot-panel">
@@ -239,21 +400,66 @@ export default function PilotPanel() {
         </span>
       </header>
 
+      <section className="pilot-initial-summary" aria-label="Initial aircraft state summary">
+        <div>
+          <h4>Initial Aircraft</h4>
+          <span>{formatCoord(initialState.lat, "N", "S")}</span>
+          <span>{formatCoord(initialState.lon, "E", "W")}</span>
+        </div>
+        <button
+          type="button"
+          onClick={openInitialEditor}
+          disabled={initialControlsDisabled}
+        >
+          Initial State
+        </button>
+        <dl>
+          <div>
+            <dt>Psi</dt>
+            <dd>{formatNumberInputValue(initialState.headingDeg)}</dd>
+          </div>
+          <div>
+            <dt>Gamma</dt>
+            <dd>{formatNumberInputValue(initialState.flightPathDeg)}</dd>
+          </div>
+          <div>
+            <dt>V0</dt>
+            <dd>{formatNumberInputValue(initialState.speedMps)}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <PilotInitialStateOverlay
+        open={isInitialEditorOpen}
+        isPlacing={isPlacingInitialPosition}
+        state={initialState}
+        disabled={initialControlsDisabled}
+        onClose={closeInitialEditor}
+        onPlaceToggle={toggleInitialPlacement}
+        onFieldChange={updateInitialField}
+      />
+
       <div className="pilot-actions">
         <button
           className="pilot-primary-button"
           onClick={startPilot}
-          disabled={isBusy || isFlying}
+          disabled={isBusy || isFlying || isPlacingInitialPosition}
         >
           {snapshot ? "Resume" : "Start"}
         </button>
-        <button onClick={() => setIsFlying(false)} disabled={!isFlying || isBusy}>
+        <button
+          onClick={() => setIsFlying(false)}
+          disabled={!isFlying || isBusy || isPlacingInitialPosition}
+        >
           Pause
         </button>
-        <button onClick={resetPilot} disabled={isBusy}>
+        <button onClick={resetPilot} disabled={isBusy || isPlacingInitialPosition}>
           Reset
         </button>
-        <button onClick={stopPilot} disabled={!isEnabled && !snapshot}>
+        <button
+          onClick={stopPilot}
+          disabled={(!isEnabled && !snapshot) || isPlacingInitialPosition}
+        >
           End
         </button>
       </div>
@@ -268,14 +474,13 @@ export default function PilotPanel() {
           </button>
           <label>
             <span>Bank</span>
-            <input
-              className="pilot-number-input"
-              type="number"
-              min="-45"
-              max="45"
-              step="1"
+            <EnglishNumberInput
               value={controls.bankDeg}
-              onChange={(event) => updateControl("bankDeg", Number(event.target.value), -45, 45)}
+              min={-45}
+              max={45}
+              step="1"
+              disabled={false}
+              onCommit={(value) => updateControl("bankDeg", value, -45, 45)}
             />
           </label>
           <button
@@ -295,14 +500,13 @@ export default function PilotPanel() {
           </button>
           <label>
             <span>Load</span>
-            <input
-              className="pilot-number-input"
-              type="number"
-              min="0.4"
-              max="2.2"
-              step="0.01"
+            <EnglishNumberInput
               value={controls.loadFactor}
-              onChange={(event) => updateControl("loadFactor", Number(event.target.value), 0.4, 2.2)}
+              min={0.4}
+              max={2.2}
+              step="0.01"
+              disabled={false}
+              onCommit={(value) => updateControl("loadFactor", value, 0.4, 2.2)}
             />
           </label>
           <button
@@ -322,14 +526,13 @@ export default function PilotPanel() {
           </button>
           <label>
             <span>Thrust</span>
-            <input
-              className="pilot-number-input"
-              type="number"
-              min="0"
-              max="60000"
-              step="500"
+            <EnglishNumberInput
               value={controls.thrustN}
-              onChange={(event) => updateControl("thrustN", Number(event.target.value), 0, 60000)}
+              min={0}
+              max={60000}
+              step="500"
+              disabled={false}
+              onCommit={(value) => updateControl("thrustN", value, 0, 60000)}
             />
           </label>
           <button
@@ -351,14 +554,13 @@ export default function PilotPanel() {
           </label>
           <label>
             <span>dt</span>
-            <input
-              className="pilot-number-input"
-              type="number"
-              min="0.02"
-              max="0.5"
-              step="0.02"
+            <EnglishNumberInput
               value={frameDtS}
-              onChange={(event) => updateFrameDt(Number(event.target.value))}
+              min={0.02}
+              max={0.5}
+              step="0.02"
+              disabled={false}
+              onCommit={updateFrameDt}
             />
           </label>
         </div>
@@ -389,6 +591,20 @@ function Readout({ label, value }: { label: string; value: string }) {
   );
 }
 
+function makeDefaultInitialState(
+  airport: { lon: number; lat: number } | null,
+): PilotResetState {
+  return {
+    lon: airport?.lon ?? -78.7873,
+    lat: airport?.lat ?? 35.878659,
+    altM: 1000,
+    speedMps: 120,
+    headingDeg: 0,
+    flightPathDeg: 0,
+    massKg: 10000,
+  };
+}
+
 function snapshotToPose(snapshot: PilotSnapshot | null): PilotAircraftPose | null {
   if (!snapshot) return null;
   return {
@@ -399,10 +615,6 @@ function snapshotToPose(snapshot: PilotSnapshot | null): PilotAircraftPose | nul
     flightPathDeg: snapshot.state.flightPathDeg,
     bankDeg: snapshot.control.bankDeg,
   };
-}
-
-function formatCoord(deg: number, pos: string, neg: string): string {
-  return `${Math.abs(deg).toFixed(5)} ${deg >= 0 ? pos : neg}`;
 }
 
 function toErrorMessage(error: unknown): string {
