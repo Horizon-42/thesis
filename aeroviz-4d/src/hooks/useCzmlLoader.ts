@@ -71,10 +71,11 @@ export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
     setState({ isLoaded: false, flightIds: [], warning: null, error: null });
     setTrajectoryDataSource(null);
 
-    // ── Step 1: Preflight the CZML URL so missing files don't parse index.html.
+    // ── Step 1: Fetch once, then hand the parsed packet array to Cesium.
+    // This preserves the missing-asset guard without downloading the CZML twice.
     const ds = new Cesium.CzmlDataSource(LAYER_NAME);
     fetchJson<unknown>(czmlUrl)
-      .then(() => ds.load(czmlUrl))
+      .then((czml) => ds.load(czml))
       .then((loadedDs) => {
         if (cancelled) return;
 

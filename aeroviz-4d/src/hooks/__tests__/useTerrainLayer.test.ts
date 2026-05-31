@@ -2,7 +2,7 @@
  * useTerrainLayer.test.ts
  * -----------------------
  * Verifies the terrain toggle hook:
- *   1. First mount with terrain ON → keeps existing provider and tunes streaming
+ *   1. First mount with terrain ON → loads world terrain and tunes streaming
  *   2. Toggle OFF → sets EllipsoidTerrainProvider
  *   3. Toggle ON  → calls CesiumTerrainProvider.fromIonAssetId and applies tuned settings
  *   4. Multiple toggles → reuses the loaded world terrain provider
@@ -79,11 +79,15 @@ describe("useTerrainLayer", () => {
     fromIonAssetId.mockImplementation(() => Promise.resolve(mockWorldTerrainProvider));
   });
 
-  it("keeps the initial world terrain provider and tunes streaming when terrain is ON", () => {
+  it("loads and tunes world terrain when terrain is ON", async () => {
     renderHook(() => useTerrainLayer());
+    await flushPromises();
 
-    expect(mockViewer.scene.terrainProvider._tag).toBe("initial-world-terrain");
-    expect(fromIonAssetId).not.toHaveBeenCalled();
+    expect(fromIonAssetId).toHaveBeenCalledWith(1, {
+      requestVertexNormals: true,
+      requestWaterMask: true,
+    });
+    expect(mockViewer.scene.terrainProvider).toBe(mockWorldTerrainProvider);
     expect(mockViewer.scene.globe.maximumScreenSpaceError).toBe(1);
     expect(mockViewer.scene.globe.tileCacheSize).toBe(512);
     expect(mockViewer.scene.globe.loadingDescendantLimit).toBe(20);
@@ -103,7 +107,7 @@ describe("useTerrainLayer", () => {
     expect(mockViewer.scene.globe.loadingDescendantLimit).toBe(10);
     expect(mockViewer.scene.globe.preloadAncestors).toBe(false);
     expect(mockViewer.scene.globe.preloadSiblings).toBe(false);
-    expect(fromIonAssetId).not.toHaveBeenCalled();
+    expect(fromIonAssetId).toHaveBeenCalledTimes(1);
   });
 
   it("restores world terrain via fromIonAssetId when toggled back ON", async () => {

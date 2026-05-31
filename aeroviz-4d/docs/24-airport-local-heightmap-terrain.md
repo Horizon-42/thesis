@@ -106,20 +106,22 @@ When the `Airport Local Terrain` layer is enabled:
    local terrain footprint center.
 4. After focused preload completes, the provider is installed as
    `viewer.scene.terrainProvider`.
-5. The remaining tiles listed in `metadata.levels` are warmed in the background
-   with bounded concurrency.
+5. By default the remaining tiles are streamed by Cesium on demand. Callers can
+   opt into full-package background warming with `backgroundPreload: true`, but
+   the main viewer leaves it off to avoid loading thousands of height tiles during
+   normal airport switching.
 6. Globe cache/refinement settings are tuned so the loaded local tile set stays
    resident:
-   - `maximumScreenSpaceError = 0.5`
-   - `tileCacheSize >= metadata.tileCount + 32`
+   - `maximumScreenSpaceError = 1.5`
+   - `tileCacheSize` bounded between the local minimum and maximum cache limits
    - `preloadAncestors = true`
-   - `preloadSiblings = true`
-   - `loadingDescendantLimit = 1000`
+   - `preloadSiblings = false`
+   - `loadingDescendantLimit = 64`
 
-This keeps airport-center switching responsive without abandoning cache warming.
+This keeps airport-center switching responsive without forcing a full cache warm.
 The user sees `Preload X/Y` for the blocking focused set first; once it switches
-to `Active X/Y`, the provider is already installed and the rest of the airport
-package is warming in the background.
+to `Active`, the provider is already installed and non-focused tiles stream only
+when camera movement asks for them.
 
 Terrain `.f32` tiles use `0 m` for no-data samples. The generator and frontend
 only repair fallback edge samples at the highest terrain level. Coarser parent
@@ -143,8 +145,9 @@ from CYVR to KSJC loads or reuses:
 /data/airports/KSJC/local-terrain/heightmap/metadata.json
 ```
 
-Switching back to an airport reuses the loaded provider and its cached tile
-promises for the lifetime of the viewer.
+Switching back to an airport reuses the loaded provider. Height tile promises are
+kept in a bounded LRU cache so repeated inspection of the same area stays fast
+without retaining every generated tile for every visited airport.
 
 ## Provider Priority
 
@@ -172,8 +175,8 @@ The HUD exposes two separate terrain signals:
 - `Missing`: no local package exists for the active airport
 - `Loading`: metadata/provider is being created
 - `Preload X/Y`: local tiles are being loaded into cache
-- `Active X/Y`: local terrain provider is installed and the remaining local
-  tiles are warming in the background
+- `Active X/Y`: local terrain provider is installed and optional background
+  warming is still running
 - `Active`: local terrain provider is installed and the local tile cache is warm
 - `Error`: metadata or tile loading failed; old packages without precision
   metadata also land here and show a regeneration dialog

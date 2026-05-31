@@ -58,7 +58,7 @@ export function useRunwayLayer(): void {
     //
     // Reference: docs/02-runway-layer.md § "GeoJsonDataSource options"
     fetchJson<unknown>(runwayUrl)
-      .then(() => dataSource.load(runwayUrl, {
+      .then((geojson) => dataSource.load(geojson, {
       clampToGround: true,
       fill: RUNWAY_SURFACE_FILL,
       stroke: RUNWAY_SURFACE_STROKE,

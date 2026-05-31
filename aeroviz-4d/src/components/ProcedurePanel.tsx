@@ -227,7 +227,7 @@ export default function ProcedurePanel() {
   const [geometryStatus, setGeometryStatus] = useState<ProtectedGeometryStatus | null>(null);
 
   useEffect(() => {
-    if (!activeAirportCode) {
+    if (!activeAirportCode || !layers.procedures) {
       setBranches([]);
       setSourceCycle(null);
       setSourceAirport(null);
@@ -278,7 +278,7 @@ export default function ProcedurePanel() {
     return () => {
       cancelled = true;
     };
-  }, [activeAirportCode, setProcedureBranchesVisible]);
+  }, [activeAirportCode, layers.procedures, setProcedureBranchesVisible]);
 
   const groups = useMemo(() => buildGroups(branches), [branches]);
   const totalWarnings = branches.reduce((sum, branch) => sum + branch.warnings.length, 0);

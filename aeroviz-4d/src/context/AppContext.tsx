@@ -24,6 +24,7 @@ import {
   useState,
   useCallback,
   useEffect,
+  useMemo,
   type ReactNode,
 } from "react";
 import type * as Cesium from "cesium";
@@ -76,6 +77,22 @@ export interface AirportLocalTerrainState {
   loadedTiles: number;
   totalTiles: number;
   error: string | null;
+}
+
+function airportLocalTerrainStateForLayer(
+  airportCode: string | null,
+  enabled: boolean,
+): AirportLocalTerrainState {
+  return {
+    status: enabled ? "loading" : "disabled",
+    airportCode,
+    sourceLabel: null,
+    minimumHeightM: null,
+    maximumHeightM: null,
+    loadedTiles: 0,
+    totalTiles: 0,
+    error: null,
+  };
 }
 
 // ── Context shapes ───────────────────────────────────────────────────────────
@@ -200,19 +217,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     error: null,
   });
 
-  // All layers start visible; hooks respect these flags.
+  // Keep heavyweight analysis layers opt-in. Local terrain and RNAV procedure
+  // geometry can allocate hundreds of MB once loaded, so startup should show the
+  // core flight scene first and let the user ask for analysis detail.
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
     satelliteImagery: true,
     terrain: false,
-    airportLocalTerrain: true,
-    terrainHillshade: true,
+    airportLocalTerrain: false,
+    terrainHillshade: false,
     runways: true,
-    waypoints: true,
+    waypoints: false,
     ocsSurfaces: false,
     trajectories: true,
-    obstacles: true,
+    obstacles: false,
     obstacleLabels: false,
-    procedures: true,
+    procedures: false,
   });
 
   // Store the Viewer reference.
@@ -289,44 +308,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setSelectedProcedureAnnotation(null);
       setSelectedProfileRunwayIdent(null);
       setRunwayProfileOpen(false);
-      setAirportLocalTerrain({
-        status: "loading",
-        airportCode: normalizedCode,
-        sourceLabel: null,
-        minimumHeightM: null,
-        maximumHeightM: null,
-        loadedTiles: 0,
-        totalTiles: 0,
-        error: null,
-      });
+      setAirportLocalTerrain(
+        airportLocalTerrainStateForLayer(normalizedCode, layers.airportLocalTerrain),
+      );
       setAirport(null);
       setActiveAirportCodeState(normalizedCode);
     },
-    [activeAirportCode, viewer],
+    [activeAirportCode, layers.airportLocalTerrain, viewer],
   );
 
-  const sceneState: SceneState = {
+  const sceneState: SceneState = useMemo(() => ({
     viewer,
     setViewer,
     layers,
     toggleLayer,
     airportLocalTerrain,
     setAirportLocalTerrain,
-  };
-  const airportSessionState: AirportSessionState = {
+  }), [airportLocalTerrain, layers, setViewer, toggleLayer, viewer]);
+  const airportSessionState: AirportSessionState = useMemo(() => ({
     airports,
     activeAirportCode,
     setActiveAirportCode,
     airport,
     setAirport,
-  };
-  const flightSessionState: FlightSessionState = {
+  }), [activeAirportCode, airport, airports, setActiveAirportCode]);
+  const flightSessionState: FlightSessionState = useMemo(() => ({
     selectedFlightId,
     setSelectedFlightId,
     trajectoryDataSource,
     setTrajectoryDataSource,
-  };
-  const procedureSessionState: ProcedureSessionState = {
+  }), [selectedFlightId, trajectoryDataSource]);
+  const procedureSessionState: ProcedureSessionState = useMemo(() => ({
     procedureVisibility,
     setProcedureBranchVisible,
     setProcedureBranchesVisible,
@@ -338,19 +350,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setProcedureDisplayLevel,
     selectedProcedureAnnotation,
     setSelectedProcedureAnnotation,
-  };
-  const playbackState: PlaybackState = {
+  }), [
+    procedureAnnotationEnabled,
+    procedureDisplayLevel,
+    procedureVisibility,
+    procedureWidthMeasurementEnabled,
+    selectedProcedureAnnotation,
+    setProcedureBranchVisible,
+    setProcedureBranchesVisible,
+  ]);
+  const playbackState: PlaybackState = useMemo(() => ({
     playbackSpeed,
     setPlaybackSpeed,
-  };
-  const runwayProfileSessionState: RunwayProfileSessionState = {
+  }), [playbackSpeed]);
+  const runwayProfileSessionState: RunwayProfileSessionState = useMemo(() => ({
     selectedProfileRunwayIdent,
     setSelectedProfileRunwayIdent,
     isRunwayProfileOpen,
     setRunwayProfileOpen,
     runwayProfileViewMode,
     setRunwayProfileViewMode,
-  };
+  }), [isRunwayProfileOpen, runwayProfileViewMode, selectedProfileRunwayIdent]);
 
   return (
     <AirportSessionContext.Provider value={airportSessionState}>

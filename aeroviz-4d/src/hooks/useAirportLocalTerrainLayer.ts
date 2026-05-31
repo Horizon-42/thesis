@@ -34,6 +34,12 @@ export interface AirportLocalTerrainLayerState {
 
 export interface UseAirportLocalTerrainLayerOptions {
   enabled?: boolean;
+  /**
+   * Warm every generated tile after the provider becomes active.
+   * Disabled by default because large airports contain thousands of 65 KB
+   * height tiles; Cesium can stream non-focused tiles on demand instead.
+   */
+  backgroundPreload?: boolean;
   metadataUrl?: string;
   maximumScreenSpaceError?: number;
 }
@@ -56,6 +62,7 @@ export function useAirportLocalTerrainLayer(
 ): AirportLocalTerrainLayerState {
   const { viewer, activeAirportCode, setAirportLocalTerrain } = useApp();
   const enabled = options.enabled ?? true;
+  const backgroundPreload = options.backgroundPreload ?? false;
   const maximumScreenSpaceError =
     options.maximumScreenSpaceError ?? LOCAL_TERRAIN_SETTINGS.maximumScreenSpaceError;
   const metadataUrl = options.metadataUrl ?? (
@@ -96,6 +103,7 @@ export function useAirportLocalTerrainLayer(
     }
 
     let cancelled = false;
+    const preloadAbortController = new AbortController();
 
     previousProviderRef.current = viewer.scene.terrainProvider;
     previousStreamingSettingsRef.current = captureTerrainStreamingSettings(viewer.scene.globe);
@@ -143,6 +151,7 @@ export function useAirportLocalTerrainLayer(
         await terrain.preloadTiles({
           tiles: activationPlan.focusedTiles,
           concurrency: activationPlan.focusedPreloadConcurrency,
+          signal: preloadAbortController.signal,
           onProgress: ({ loadedTiles, totalTiles }) => {
             if (cancelled) return;
             setState({
@@ -168,47 +177,54 @@ export function useAirportLocalTerrainLayer(
         providerRef.current = provider;
         viewer.scene.terrainProvider = provider;
         applyLocalTerrainStreamingSettings(viewer, metadata, maximumScreenSpaceError);
+        const activeLoadedTiles = activationPlan.focusedTiles.length;
+        const activeTotalTiles = backgroundPreload
+          ? activationPlan.activeTotalTiles
+          : activeLoadedTiles;
 
         setState({
           status: "active",
           metadata,
           provider,
-          loadedTiles: activationPlan.focusedTiles.length,
-          totalTiles: activationPlan.activeTotalTiles,
+          loadedTiles: activeLoadedTiles,
+          totalTiles: activeTotalTiles,
           error: null,
         });
         setAirportLocalTerrain(airportLocalTerrainProgressState({
           status: "active",
           airportCode: activeAirportCode,
           heightRange: activationPlan.heightRange,
-          loadedTiles: activationPlan.focusedTiles.length,
-          totalTiles: activationPlan.activeTotalTiles,
+          loadedTiles: activeLoadedTiles,
+          totalTiles: activeTotalTiles,
         }));
 
-        void terrain.preloadTiles({
-          concurrency: activationPlan.backgroundPreloadConcurrency,
-          onProgress: ({ loadedTiles, totalTiles }) => {
-            if (cancelled) return;
-            setState((current) => {
-              if (current.status !== "active") return current;
-              return {
-                ...current,
+        if (backgroundPreload) {
+          void terrain.preloadTiles({
+            concurrency: activationPlan.backgroundPreloadConcurrency,
+            signal: preloadAbortController.signal,
+            onProgress: ({ loadedTiles, totalTiles }) => {
+              if (cancelled) return;
+              setState((current) => {
+                if (current.status !== "active") return current;
+                return {
+                  ...current,
+                  loadedTiles,
+                  totalTiles,
+                };
+              });
+              setAirportLocalTerrain(airportLocalTerrainProgressState({
+                status: "active",
+                airportCode: activeAirportCode,
+                heightRange: activationPlan.heightRange,
                 loadedTiles,
                 totalTiles,
-              };
-            });
-            setAirportLocalTerrain(airportLocalTerrainProgressState({
-              status: "active",
-              airportCode: activeAirportCode,
-              heightRange: activationPlan.heightRange,
-              loadedTiles,
-              totalTiles,
-            }));
-          },
-        }).catch((error) => {
-          if (cancelled) return;
-          console.error("[useAirportLocalTerrainLayer] Failed to warm local terrain cache:", error);
-        });
+              }));
+            },
+          }).catch((error) => {
+            if (cancelled) return;
+            console.error("[useAirportLocalTerrainLayer] Failed to warm local terrain cache:", error);
+          });
+        }
       })
       .catch((error) => {
         if (cancelled) return;
@@ -247,6 +263,7 @@ export function useAirportLocalTerrainLayer(
 
     return () => {
       cancelled = true;
+      preloadAbortController.abort();
       if (!viewer.isDestroyed() && providerRef.current) {
         if (viewer.scene.terrainProvider === providerRef.current) {
           viewer.scene.terrainProvider =
@@ -263,6 +280,7 @@ export function useAirportLocalTerrainLayer(
   }, [
     viewer,
     enabled,
+    backgroundPreload,
     metadataUrl,
     maximumScreenSpaceError,
     activeAirportCode,

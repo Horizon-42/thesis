@@ -18,12 +18,12 @@ import {
  * is only the React lifecycle adapter that chooses world versus ellipsoid when
  * airport local terrain is not already controlling the provider seam.
  *
- * On first mount we skip: useCesiumViewer already set world terrain via the
- * Viewer constructor.  Re-applying would cause a redundant network fetch.
+ * The Viewer now starts on ellipsoid terrain.  Loading World Terrain is
+ * deliberately opt-in because it creates network and GPU work before the user
+ * asks for elevation context.
  */
 export function useTerrainLayer(): void {
   const { viewer, layers, airportLocalTerrain } = useApp();
-  const initializedRef = useRef(false);
   const worldTerrainProviderRef = useRef<Cesium.TerrainProvider | null>(null);
   const previousStreamingSettingsRef = useRef<GlobeTerrainStreamingSettings | null>(null);
   const airportLocalTerrainOwnsProvider =
@@ -32,19 +32,6 @@ export function useTerrainLayer(): void {
   useEffect(() => {
     if (!viewer) return;
     if (airportLocalTerrainOwnsProvider) return;
-
-    // Skip the very first run — terrain is already correct from the constructor.
-    if (!initializedRef.current) {
-      initializedRef.current = true;
-      if (layers.terrain) {
-        worldTerrainProviderRef.current = viewer.scene.terrainProvider;
-        previousStreamingSettingsRef.current = captureTerrainStreamingSettings(
-          viewer.scene.globe,
-        );
-        applyWorldTerrainStreamingSettings(viewer);
-        return;
-      }
-    }
 
     // Cancelled by cleanup if the user toggles again before the async load finishes.
     let cancelled = false;

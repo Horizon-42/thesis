@@ -140,7 +140,8 @@ describe("useCzmlLoader", () => {
 
     await waitFor(() => expect(result.current.isLoaded).toBe(true));
 
-    expect(loadCzml).toHaveBeenCalledWith(CZML_URL);
+    expect(fetchMock).toHaveBeenCalledWith(CZML_URL);
+    expect(loadCzml).toHaveBeenCalledWith([{ id: "document" }]);
     expect(result.current.flightIds).toEqual([]);
     expect(result.current.warning).toContain("No trajectory entities");
     expect(mockViewer.dataSources.add).not.toHaveBeenCalled();
@@ -159,7 +160,8 @@ describe("useCzmlLoader", () => {
 
     await waitFor(() => expect(result.current.isLoaded).toBe(true));
 
-    expect(loadCzml).toHaveBeenCalledWith(CZML_URL);
+    expect(fetchMock).toHaveBeenCalledWith(CZML_URL);
+    expect(loadCzml).toHaveBeenCalledWith([{ id: "document" }]);
     expect(result.current.flightIds).toEqual(["flight-1"]);
     expect(result.current.warning).toContain("has no duration");
     expect(mockViewer.dataSources.add).toHaveBeenCalledTimes(1);
@@ -179,7 +181,8 @@ describe("useCzmlLoader", () => {
 
     await waitFor(() => expect(result.current.isLoaded).toBe(true));
 
-    expect(loadCzml).toHaveBeenCalledWith(CZML_URL);
+    expect(fetchMock).toHaveBeenCalledWith(CZML_URL);
+    expect(loadCzml).toHaveBeenCalledWith([{ id: "document" }]);
     expect(result.current.flightIds).toEqual(["flight-1", "flight-2"]);
     expect(result.current.warning).toBeNull();
     expect(mockViewer.clock.startTime.seconds).toBe(10);

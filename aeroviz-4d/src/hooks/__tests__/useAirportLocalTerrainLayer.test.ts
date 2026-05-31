@@ -170,32 +170,42 @@ describe("useAirportLocalTerrainLayer", () => {
     );
     expect(preloadTilesByAirport.CYVR).toHaveBeenCalledWith(
       expect.objectContaining({
-        concurrency: 24,
+        concurrency: 12,
         tiles: focusTilesByAirport.CYVR,
       }),
     );
-    expect(preloadTilesByAirport.CYVR).toHaveBeenCalledWith(
-      expect.objectContaining({ concurrency: 8 }),
-    );
+    expect(preloadTilesByAirport.CYVR).toHaveBeenCalledTimes(1);
     expect(mockViewer.scene.terrainProvider).toBe(providerByAirport.CYVR);
-    expect(mockViewer.scene.globe.maximumScreenSpaceError).toBe(0.5);
+    expect(mockViewer.scene.globe.maximumScreenSpaceError).toBe(1.5);
     expect(mockViewer.scene.globe.tileCacheSize).toBe(256);
-    expect(mockViewer.scene.globe.loadingDescendantLimit).toBe(1000);
-    expect(mockViewer.scene.globe.preloadSiblings).toBe(true);
+    expect(mockViewer.scene.globe.loadingDescendantLimit).toBe(64);
+    expect(mockViewer.scene.globe.preloadSiblings).toBe(false);
     expect(mockViewer.scene.globe.preloadAncestors).toBe(true);
     expect(mockViewer.scene.globe.depthTestAgainstTerrain).toBe(true);
-    await waitFor(() => expect(result.current.loadedTiles).toBe(12));
-    expect(result.current.totalTiles).toBe(12);
+    await waitFor(() => expect(result.current.loadedTiles).toBe(1));
+    expect(result.current.totalTiles).toBe(1);
     expect(setAirportLocalTerrain).toHaveBeenLastCalledWith({
       status: "active",
       airportCode: "CYVR",
       sourceLabel: "Airport local heightmap terrain",
       minimumHeightM: -9,
       maximumHeightM: 243.8,
-      loadedTiles: 12,
-      totalTiles: 12,
+      loadedTiles: 1,
+      totalTiles: 1,
       error: null,
     });
+  });
+
+  it("can opt into warming the remaining local terrain tiles after activation", async () => {
+    const { result } = renderHook(() => useAirportLocalTerrainLayer({ backgroundPreload: true }));
+
+    await waitFor(() => expect(result.current.status).toBe("active"));
+    await waitFor(() => expect(result.current.loadedTiles).toBe(12));
+
+    expect(preloadTilesByAirport.CYVR).toHaveBeenCalledWith(
+      expect.objectContaining({ concurrency: 4 }),
+    );
+    expect(result.current.totalTiles).toBe(12);
   });
 
   it("loads a separate cached provider per active airport", async () => {
@@ -219,8 +229,8 @@ describe("useAirportLocalTerrainLayer", () => {
       sourceLabel: "Airport local heightmap terrain",
       minimumHeightM: 0.7,
       maximumHeightM: 50.7,
-      loadedTiles: 10,
-      totalTiles: 10,
+      loadedTiles: 1,
+      totalTiles: 1,
       error: null,
     });
   });

@@ -36,8 +36,9 @@ unmounts — otherwise the GPU resources are leaked.
 
 ## Concept 2 — Terrain
 
-CesiumJS supports swappable terrain providers.  For this project we use
-**Cesium World Terrain** (streamed from Cesium Ion):
+CesiumJS supports swappable terrain providers.  The main viewer starts with the
+cheap ellipsoid provider so startup does not immediately stream terrain.  When
+the Terrain layer is enabled, the app loads **Cesium World Terrain** from Ion:
 
 ```typescript
 Cesium.Terrain.fromWorldTerrain({
@@ -122,9 +123,9 @@ Use `viewer.camera.setView(...)` with the `DEFAULT_AIRPORT` constants.
 | Symptom | Likely cause | Fix |
 |---------|-------------|-----|
 | White screen, no globe | Token not set or invalid | Check `CESIUM_ION_TOKEN` constant |
-| Globe loads but terrain is flat | `requestVertexNormals` is false or terrain not set | Pass `fromWorldTerrain({requestVertexNormals: true})` |
+| Globe loads but terrain is flat | Terrain layer is off, or `requestVertexNormals` is false | Enable Terrain; World Terrain is loaded with vertex normals |
 | Camera starts at Africa (0°N 0°E) | `setView` not called or using wrong coordinates | Check `DEFAULT_AIRPORT.lon/lat` values |
-| React StrictMode: globe renders twice | Normal in dev — React mounts twice to detect side-effects | Ignore in development; disappears in production build |
+| React StrictMode: globe renders twice | Cesium subtree is inside StrictMode | Keep the Cesium app shell outside StrictMode for realistic local profiling |
 
 ---
 

@@ -1164,7 +1164,7 @@ describe("useProcedureSegmentLayer", () => {
     expect(turningDebugSurface.show).toBe(true);
   });
 
-  it("syncs layer visibility without reloading render bundle data", async () => {
+  it("releases procedure entities when the master layer is disabled", async () => {
     const { rerender } = renderHook(() => useProcedureSegmentLayer());
     await waitFor(() => expect(mockViewer.entities.add).toHaveBeenCalled());
 
@@ -1172,7 +1172,8 @@ describe("useProcedureSegmentLayer", () => {
     rerender();
 
     expect(loadProcedureRenderBundleData).toHaveBeenCalledTimes(1);
-    expect(entities.every((entity) => entity.show === false)).toBe(true);
+    await waitFor(() => expect(entities).toHaveLength(0));
+    expect(mockViewer.entities.removeById).toHaveBeenCalled();
   });
 
   it("creates hidden branch entities lazily when the branch becomes visible", async () => {

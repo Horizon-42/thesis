@@ -2401,6 +2401,7 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
   const procedureVisibilityRef = useRef(procedureVisibility);
   const registryRef = useRef(new ProcedureSceneEntityRegistry());
   const renderDataRef = useRef<ProcedureSceneRenderData | null>(null);
+  const proceduresRequested = enabled && layers.procedures;
 
   useEffect(() => {
     visibleRef.current = layers.procedures;
@@ -2470,7 +2471,13 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
   ]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!proceduresRequested) {
+      if (isCesiumViewerUsable(viewer)) {
+        registryRef.current.removeAll(viewer);
+      }
+      renderDataRef.current = null;
+      return;
+    }
     if (!viewer || !activeAirportCode) return;
 
     let cancelled = false;
@@ -2538,5 +2545,5 @@ export function useProcedureSegmentLayer({ enabled = true }: { enabled?: boolean
       registryRef.current.clear();
       renderDataRef.current = null;
     };
-  }, [enabled, viewer, activeAirportCode]);
+  }, [proceduresRequested, viewer, activeAirportCode]);
 }

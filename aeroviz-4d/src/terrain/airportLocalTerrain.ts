@@ -129,6 +129,7 @@ export interface AirportLocalTerrainTileRef {
 export interface PreloadAirportLocalTerrainTilesOptions {
   concurrency?: number;
   tiles?: AirportLocalTerrainTileRef[];
+  signal?: AbortSignal;
   onProgress?: (progress: AirportLocalTerrainPreloadProgress) => void;
 }
 
@@ -139,6 +140,9 @@ export interface AirportLocalTerrainPreloadProgress {
 
 const HEIGHT_EPSILON_M = 0.001;
 const FALLBACK_FILL_LEVEL_OFFSET = 0;
+const DEFAULT_MAX_CACHED_HEIGHT_TILES = 512;
+const HOST_USES_LITTLE_ENDIAN_FLOAT32 =
+  new Uint8Array(new Float32Array([1]).buffer)[0] === 0;
 
 function tileKey(level: number, x: number, y: number): string {
   return `${level}/${x}/${y}`;
@@ -146,6 +150,16 @@ function tileKey(level: number, x: number, y: number): string {
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
+}
+
+function preloadAbortError(): Error {
+  const error = new Error("Airport local terrain preload was aborted");
+  error.name = "AbortError";
+  return error;
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw preloadAbortError();
 }
 
 function assertValidAirportLocalTerrainMetadata(
@@ -245,6 +259,11 @@ export function airportLocalTerrainTileRefsNearCoordinate(
 }
 
 function parseFloat32LittleEndian(buffer: ArrayBuffer): Float32Array {
+  // Generated tiles are little-endian Float32. Every supported browser/Node
+  // target is little-endian today, so avoid a per-sample DataView loop on the
+  // hot terrain tile path and keep the portable path for unusual runtimes.
+  if (HOST_USES_LITTLE_ENDIAN_FLOAT32) return new Float32Array(buffer);
+
   const view = new DataView(buffer);
   const values = new Float32Array(buffer.byteLength / Float32Array.BYTES_PER_ELEMENT);
 
@@ -394,9 +413,13 @@ async function fetchHeightTile(
   metadata: AirportLocalTerrainMetadata,
   level: number,
   x: number,
-  y: number
+  y: number,
+  signal?: AbortSignal,
 ): Promise<Float32Array> {
-  const response = await fetch(`${metadata.tilesBaseUrl}/${level}/${x}/${y}.f32`);
+  throwIfAborted(signal);
+  const response = await fetch(`${metadata.tilesBaseUrl}/${level}/${x}/${y}.f32`, {
+    signal,
+  });
   if (!response.ok) {
     throw new Error(`Failed to fetch local terrain height tile ${tileKey(level, x, y)}: ${response.status}`);
   }
@@ -421,19 +444,53 @@ export async function loadAirportLocalTerrain(
   assertValidAirportLocalTerrainMetadata(metadata, metadataUrl);
   const tilingScheme = new Cesium.GeographicTilingScheme();
   const tileCache = new Map<string, Promise<Float32Array>>();
+  const maxCachedHeightTiles = Math.max(
+    1,
+    Math.min(metadata.tileCount, DEFAULT_MAX_CACHED_HEIGHT_TILES),
+  );
   const flatTile = createFlatHeightTile(metadata);
 
-  const getCachedHeightTile = (level: number, x: number, y: number): Promise<Float32Array> => {
+  const touchCachedTile = (key: string, tilePromise: Promise<Float32Array>): void => {
+    tileCache.delete(key);
+    tileCache.set(key, tilePromise);
+  };
+
+  const evictStaleHeightTiles = (): void => {
+    while (tileCache.size > maxCachedHeightTiles) {
+      const oldestKey = tileCache.keys().next().value as string | undefined;
+      if (!oldestKey) return;
+      tileCache.delete(oldestKey);
+    }
+  };
+
+  const getCachedHeightTile = (
+    level: number,
+    x: number,
+    y: number,
+    signal?: AbortSignal,
+  ): Promise<Float32Array> => {
+    throwIfAborted(signal);
     const key = tileKey(level, x, y);
     let tilePromise = tileCache.get(key);
-    if (!tilePromise) {
-      tilePromise = fetchHeightTile(metadata, level, x, y).catch((error) => {
+    if (tilePromise) {
+      touchCachedTile(key, tilePromise);
+      return tilePromise;
+    }
+
+    const newTilePromise = fetchHeightTile(metadata, level, x, y, signal)
+      .then((heights) => {
+        if (tileCache.get(key) === newTilePromise) {
+          touchCachedTile(key, newTilePromise);
+          evictStaleHeightTiles();
+        }
+        return heights;
+      })
+      .catch((error) => {
         tileCache.delete(key);
         throw error;
       });
-      tileCache.set(key, tilePromise);
-    }
-    return tilePromise;
+    tileCache.set(key, newTilePromise);
+    return newTilePromise;
   };
 
   const provider = new Cesium.CustomHeightmapTerrainProvider({
@@ -462,6 +519,7 @@ export async function loadAirportLocalTerrain(
     options: PreloadAirportLocalTerrainTilesOptions = {},
   ): Promise<void> => {
     const concurrency = Math.max(1, Math.floor(options.concurrency ?? 16));
+    const signal = options.signal;
     const tilesToLoad = options.tiles
       ? uniqueAvailableTiles(metadata, options.tiles)
       : preloadTileRefs;
@@ -469,13 +527,16 @@ export async function loadAirportLocalTerrain(
 
     let loadedTiles = 0;
     let nextTileIndex = 0;
+    throwIfAborted(signal);
     options.onProgress?.({ loadedTiles, totalTiles });
 
     const preloadWorker = async () => {
       while (nextTileIndex < totalTiles) {
+        throwIfAborted(signal);
         const tile = tilesToLoad[nextTileIndex];
         nextTileIndex += 1;
-        await getCachedHeightTile(tile.level, tile.x, tile.y);
+        await getCachedHeightTile(tile.level, tile.x, tile.y, signal);
+        throwIfAborted(signal);
         loadedTiles += 1;
         options.onProgress?.({ loadedTiles, totalTiles });
       }

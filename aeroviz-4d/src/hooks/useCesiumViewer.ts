@@ -119,7 +119,8 @@ export function useCesiumViewer(
 
     // ── Step 2: Create the Viewer ─────────────────────────────────────────
     // ① — Create `new Cesium.Viewer(...)` with the following settings:
-    //   • terrain:             Cesium.Terrain.fromWorldTerrain({ requestVertexNormals: true, requestWaterMask: true })
+    //   • terrainProvider:     EllipsoidTerrainProvider at startup. World/local
+    //                          terrain is loaded only after the user enables it.
     //   • baseLayerPicker:     false   (hide the base layer picker button)
     //   • geocoder:            false   (hide the search bar)
     //   • homeButton:          false
@@ -129,16 +130,9 @@ export function useCesiumViewer(
     //   • timeline:            true    (keep the timeline bar)
     //   • skyAtmosphere:       new Cesium.SkyAtmosphere()
     //
-    // Hint: `requestVertexNormals: true` tells Cesium to download slope data
-    // alongside elevation so the terrain shader can compute light/shadow.
-    // Without it, mountains look flat and grey.
-    //
     // Reference: docs/01-cesium-viewer.md § "Viewer options"
     const viewer = new Cesium.Viewer(containerRef.current, {
-      terrain: Cesium.Terrain.fromWorldTerrain({
-        requestVertexNormals: true,
-        requestWaterMask: true,
-      }),
+      terrainProvider: new Cesium.EllipsoidTerrainProvider(),
       baseLayerPicker: false,
       geocoder: false,
       homeButton: false,

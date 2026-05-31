@@ -25,14 +25,15 @@ export const WORLD_TERRAIN_SETTINGS = {
 } as const;
 
 export const LOCAL_TERRAIN_SETTINGS = {
-  maximumScreenSpaceError: 0.5,
+  maximumScreenSpaceError: 1.5,
   minTileCacheSize: 256,
-  focusPreloadConcurrency: 24,
-  backgroundPreloadConcurrency: 8,
-  focusMaxLevelTileRadius: 4,
-  loadingDescendantLimit: 1000,
+  maxTileCacheSize: 384,
+  focusPreloadConcurrency: 12,
+  backgroundPreloadConcurrency: 4,
+  focusMaxLevelTileRadius: 2,
+  loadingDescendantLimit: 64,
   preloadAncestors: true,
-  preloadSiblings: true,
+  preloadSiblings: false,
 } as const;
 
 const NO_IMAGERY_GLOBE_COLOR_CSS = "#8a8d84";
@@ -136,9 +137,8 @@ export function applyLocalTerrainStreamingSettings(
 
   globe.maximumScreenSpaceError = maximumScreenSpaceError;
   globe.tileCacheSize = Math.max(
-    globe.tileCacheSize,
-    metadata.tileCount + 32,
     LOCAL_TERRAIN_SETTINGS.minTileCacheSize,
+    Math.min(metadata.tileCount + 32, LOCAL_TERRAIN_SETTINGS.maxTileCacheSize),
   );
   globe.preloadSiblings = LOCAL_TERRAIN_SETTINGS.preloadSiblings;
   globe.preloadAncestors = LOCAL_TERRAIN_SETTINGS.preloadAncestors;

@@ -51,6 +51,10 @@ describe("AppContext", () => {
     const { result } = renderHook(() => useApp(), { wrapper });
 
     await waitFor(() => expect(result.current.activeAirportCode).toBe("KRDU"));
+    expect(result.current.layers.airportLocalTerrain).toBe(false);
+    expect(result.current.layers.terrainHillshade).toBe(false);
+    expect(result.current.layers.obstacles).toBe(false);
+    expect(result.current.layers.procedures).toBe(false);
 
     const viewer = {
       trackedEntity: { id: "flight-1" },

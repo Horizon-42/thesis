@@ -1,4 +1,3 @@
-import React from "react";
 import ReactDOM from "react-dom/client";
 import { AppProvider } from "./context/AppContext";
 import App from "./App";
@@ -7,12 +6,10 @@ import "cesium/Build/Cesium/Widgets/widgets.css";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
-  // StrictMode renders components twice in development to catch side-effects.
-  // NOTE: This causes the CesiumJS viewer to be created TWICE in dev.
-  // If you see a duplicate globe, this is why — it's intentional.
-  <React.StrictMode>
-    <AppProvider>
-      <App />
-    </AppProvider>
-  </React.StrictMode>
+  // Cesium allocates WebGL resources and workers during mount. React StrictMode's
+  // development-only remount doubles that cost, so the Cesium app shell is kept
+  // outside StrictMode for realistic local performance profiling.
+  <AppProvider>
+    <App />
+  </AppProvider>
 );
