@@ -76,7 +76,7 @@ class SimulationServer():
         lat_rad = math.radians(geo_S.latitude)
         lon_rad = math.radians(geo_S.longitude)
 
-        # Compute the rotation matrix from ECEF to ENU
+        # project from old enu to new enu by new ENU unit vectors expressed in ECEF. This is the inverse of step 2.
         e_hat = (-math.sin(lon_rad), math.cos(lon_rad), 0)
         n_hat = (-math.sin(lat_rad) * math.cos(lon_rad), -math.sin(lat_rad) * math.sin(lon_rad), math.cos(lat_rad))
         u_hat = (math.cos(lat_rad) * math.cos(lon_rad), math.cos(lat_rad) * math.sin(lon_rad), math.sin(lat_rad))
