@@ -42,7 +42,7 @@ export function usePilotAircraft({
     const orientation = Cesium.Transforms.headingPitchRollQuaternion(
       position,
       new Cesium.HeadingPitchRoll(
-        Cesium.Math.toRadians(pose.headingDeg),
+        Cesium.Math.toRadians(-pose.headingDeg),
         Cesium.Math.toRadians(pose.flightPathDeg),
         Cesium.Math.toRadians(pose.bankDeg),
       ),
