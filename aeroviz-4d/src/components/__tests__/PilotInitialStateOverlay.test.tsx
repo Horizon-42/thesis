@@ -26,6 +26,9 @@ describe("PilotInitialStateOverlay", () => {
     expect(
       (screen.getByRole("textbox", { name: "Gamma deg" }) as HTMLInputElement).value,
     ).toBe("-3.2");
+    expect(
+      (screen.getByRole("textbox", { name: "Mass kg" }) as HTMLInputElement).value,
+    ).toBe("10000");
   });
 
   it("normalizes decimal input to English period notation", () => {
@@ -52,14 +55,17 @@ describe("PilotInitialStateOverlay", () => {
     const altInput = screen.getByRole("textbox", { name: "Alt m" });
     const psiInput = screen.getByRole("textbox", { name: "Psi deg" });
     const gammaInput = screen.getByRole("textbox", { name: "Gamma deg" });
+    const massInput = screen.getByRole("textbox", { name: "Mass kg" });
 
     expect(altInput.getAttribute("step")).toBe("1");
     expect(psiInput.getAttribute("step")).toBe("1");
     expect(gammaInput.getAttribute("step")).toBe("1");
+    expect(massInput.getAttribute("step")).toBe("1");
 
     fireEvent.keyDown(altInput, { key: "ArrowUp" });
     fireEvent.keyDown(psiInput, { key: "ArrowDown" });
     fireEvent.keyDown(gammaInput, { key: "ArrowUp" });
+    fireEvent.keyDown(massInput, { key: "ArrowUp" });
 
     expect(onFieldChange).toHaveBeenCalledWith("altM", 1001, -500, 14000);
     expect(onFieldChange).toHaveBeenCalledWith(
@@ -72,6 +78,12 @@ describe("PilotInitialStateOverlay", () => {
       "flightPathDeg",
       -2.2,
       Number.NEGATIVE_INFINITY,
+      Number.POSITIVE_INFINITY,
+    );
+    expect(onFieldChange).toHaveBeenCalledWith(
+      "massKg",
+      10001,
+      1,
       Number.POSITIVE_INFINITY,
     );
   });

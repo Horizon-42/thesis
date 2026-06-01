@@ -9,7 +9,8 @@ export type PilotInitialEditableKey =
   | "altM"
   | "headingDeg"
   | "flightPathDeg"
-  | "speedMps";
+  | "speedMps"
+  | "massKg";
 
 interface PilotInitialStateOverlayProps {
   open: boolean;
@@ -121,6 +122,17 @@ export default function PilotInitialStateOverlay({
               step="1"
               disabled={disabled}
               onCommit={(value) => onFieldChange("speedMps", value, 1, 350)}
+            />
+          </label>
+          <label>
+            <span>Mass kg</span>
+            <EnglishNumberInput
+              value={state.massKg}
+              min={1}
+              max={UNBOUNDED_MAX}
+              step="1"
+              disabled={disabled}
+              onCommit={(value) => onFieldChange("massKg", value, 1, UNBOUNDED_MAX)}
             />
           </label>
         </section>
