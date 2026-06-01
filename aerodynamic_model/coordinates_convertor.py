@@ -59,6 +59,12 @@ class CoordinateConverter:
     def ecef_to_geodetic(ecef: ECEFCoordinate) -> GeodeticCoordinate:
         p = math.sqrt(ecef.x**2 + ecef.y**2)
         lamda = math.atan2(ecef.y, ecef.x)
+        # Handle the special case where p is zero (at the poles) to avoid division by zero in the latitude calculation
+        if math.isclose(p, 0.0, abs_tol=1e-12):
+            lat = 90.0 if ecef.z >= 0 else -90.0
+            alt = abs(ecef.z) - CoordinateConverter.b
+            return GeodeticCoordinate(lat, math.degrees(lamda), alt)
+
         # Closed-form approximation for latitude
         q = math.atan2(ecef.z * CoordinateConverter.a, p * CoordinateConverter.b)
         sin_q = math.sin(q)
@@ -80,7 +86,7 @@ class CoordinateConverter:
 
         e_hat = (-math.sin(lamda), math.cos(lamda), 0)
         n_hat = (-math.sin(phi) * math.cos(lamda), -math.sin(phi) * math.sin(lamda), math.cos(phi))
-        u_hat = (math.cos(phi) * math.cos(lamda), math.cos(phi) * math.sin(lamda), math.sin(phi))å
+        u_hat = (math.cos(phi) * math.cos(lamda), math.cos(phi) * math.sin(lamda), math.sin(phi))
         dx = r.x - r0.x
         dy = r.y - r0.y
         dz = r.z - r0.z
