@@ -1339,9 +1339,9 @@ body,
   pointer-events: auto;
   display: grid;
   gap: 8px;
-  width: clamp(260px, 22vw, 330px);
+  width: clamp(190px, 15vw, 230px);
   max-width: min(100%, calc(100vw - 36px));
-  height: min(58vh, 680px);
+  max-height: min(38vh, 450px);
   min-height: 0;
   padding: 8px;
   border: 1px solid rgba(103, 232, 249, 0.24);
@@ -1505,8 +1505,31 @@ body,
   box-shadow: 0 20px 54px rgba(2, 8, 23, 0.46);
   box-sizing: border-box;
   color: #dbeafe;
+  font-family: "Inter", "Segoe UI", sans-serif;
+  font-size: 12px;
   transform: translateX(-50%);
   pointer-events: auto;
+}
+
+.pilot-initial-overlay button {
+  border: 1px solid #3a4a6a;
+  border-radius: 4px;
+  background: #1e2840;
+  color: #c8d8ec;
+  padding: 4px 8px;
+  cursor: pointer;
+  font: inherit;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.pilot-initial-overlay button:hover {
+  background: #2a3f6a;
+  border-color: #5a7ab8;
+}
+
+.pilot-initial-overlay button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .pilot-initial-overlay-header {
@@ -1732,7 +1755,7 @@ body,
 
 @media (max-width: 980px) {
   .flight-ops-panel {
-    width: clamp(260px, 28vw, 330px);
+    width: clamp(190px, 15vw, 230px);
   }
 }
 

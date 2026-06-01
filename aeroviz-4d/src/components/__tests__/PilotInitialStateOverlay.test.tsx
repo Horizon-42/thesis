@@ -14,13 +14,12 @@ const defaultState = {
 
 describe("PilotInitialStateOverlay", () => {
   it("renders initial aircraft controls outside the flight ops panel flow", () => {
-    renderOverlay();
+    const { container } = renderOverlay();
+    const overlay = screen.getByRole("complementary", { name: "Initial aircraft setup" });
 
-    expect(
-      screen
-        .getByRole("complementary", { name: "Initial aircraft setup" })
-        .classList.contains("pilot-initial-overlay"),
-    ).toBe(true);
+    expect(overlay.classList.contains("pilot-initial-overlay")).toBe(true);
+    expect(container.contains(overlay)).toBe(false);
+    expect(document.body.contains(overlay)).toBe(true);
     expect(
       (screen.getByRole("button", { name: "Place Aircraft" }) as HTMLButtonElement).disabled,
     ).toBe(false);

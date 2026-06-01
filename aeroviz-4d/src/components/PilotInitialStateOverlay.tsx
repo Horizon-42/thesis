@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { createPortal } from "react-dom";
 import type { PilotResetState } from "../pilot/pilotClient";
 
 export type PilotInitialEditableKey =
@@ -42,7 +43,7 @@ export default function PilotInitialStateOverlay({
 }: PilotInitialStateOverlayProps) {
   if (!open) return null;
 
-  return (
+  return createPortal(
     <aside className="pilot-initial-overlay" aria-label="Initial aircraft setup">
       <header className="pilot-initial-overlay-header">
         <div>
@@ -117,7 +118,8 @@ export default function PilotInitialStateOverlay({
           </label>
         </section>
       </div>
-    </aside>
+    </aside>,
+    document.body,
   );
 }
 
