@@ -2,6 +2,9 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import type { PilotResetState } from "../pilot/pilotClient";
 
+const UNBOUNDED_MIN = Number.NEGATIVE_INFINITY;
+const UNBOUNDED_MAX = Number.POSITIVE_INFINITY;
+
 export type PilotInitialEditableKey =
   | "altM"
   | "headingDeg"
@@ -78,7 +81,7 @@ export default function PilotInitialStateOverlay({
               value={state.altM}
               min={-500}
               max={14000}
-              step="50"
+              step="1"
               disabled={disabled}
               onCommit={(value) => onFieldChange("altM", value, -500, 14000)}
             />
@@ -87,22 +90,26 @@ export default function PilotInitialStateOverlay({
             <span>Psi deg</span>
             <EnglishNumberInput
               value={state.headingDeg}
-              min={0}
-              max={359}
+              min={UNBOUNDED_MIN}
+              max={UNBOUNDED_MAX}
               step="1"
               disabled={disabled}
-              onCommit={(value) => onFieldChange("headingDeg", value, 0, 359)}
+              onCommit={(value) =>
+                onFieldChange("headingDeg", value, UNBOUNDED_MIN, UNBOUNDED_MAX)
+              }
             />
           </label>
           <label>
             <span>Gamma deg</span>
             <EnglishNumberInput
               value={state.flightPathDeg}
-              min={-15}
-              max={15}
-              step="0.1"
+              min={UNBOUNDED_MIN}
+              max={UNBOUNDED_MAX}
+              step="1"
               disabled={disabled}
-              onCommit={(value) => onFieldChange("flightPathDeg", value, -15, 15)}
+              onCommit={(value) =>
+                onFieldChange("flightPathDeg", value, UNBOUNDED_MIN, UNBOUNDED_MAX)
+              }
             />
           </label>
           <label>
@@ -158,6 +165,16 @@ export function EnglishNumberInput({
     } else if (event.key === "Escape") {
       setText(formatNumberInputValue(value));
       event.currentTarget.blur();
+    } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      const parsed = parseEnglishNumber(text);
+      const baseValue = parsed ?? value;
+      const stepValue = parseEnglishNumber(step) ?? 1;
+      const direction = event.key === "ArrowUp" ? 1 : -1;
+      const nextValue = clamp(baseValue + direction * stepValue, min, max);
+
+      event.preventDefault();
+      onCommit(nextValue);
+      setText(formatNumberInputValue(nextValue));
     }
   };
 
