@@ -1,5 +1,5 @@
 import { renderHook } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   setSelectedFlightId,
@@ -76,6 +76,10 @@ vi.mock("../../context/AppContext", () => ({
 import { usePilotAircraft } from "../usePilotAircraft";
 
 describe("usePilotAircraft", () => {
+  beforeEach(() => {
+    capturedHeadingPitchRolls.length = 0;
+  });
+
   it("converts simulator psi degrees to Cesium heading sign", () => {
     // Simulator psi increases from east toward north, while Cesium HPR heading increases from east toward south.
     renderHook(() =>
@@ -95,5 +99,26 @@ describe("usePilotAircraft", () => {
     );
 
     expect(capturedHeadingPitchRolls[0].heading).toBeCloseTo(-10 * Math.PI / 180);
+  });
+
+  it("converts simulator bank degrees to Cesium roll sign", () => {
+    // Positive simulator bank turns left in ENU; Cesium positive roll visually banks right for the same heading frame.
+    renderHook(() =>
+      usePilotAircraft({
+        enabled: true,
+        pose: {
+          lon: 0,
+          lat: 0,
+          altM: 1000,
+          headingDeg: 0,
+          flightPathDeg: 0,
+          bankDeg: 12,
+        },
+        trail: [],
+        follow: false,
+      }),
+    );
+
+    expect(capturedHeadingPitchRolls[0].roll).toBeCloseTo(-12 * Math.PI / 180);
   });
 });

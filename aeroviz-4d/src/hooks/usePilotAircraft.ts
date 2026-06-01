@@ -44,7 +44,7 @@ export function usePilotAircraft({
       new Cesium.HeadingPitchRoll(
         Cesium.Math.toRadians(-pose.headingDeg),
         Cesium.Math.toRadians(pose.flightPathDeg),
-        Cesium.Math.toRadians(pose.bankDeg),
+        Cesium.Math.toRadians(-pose.bankDeg),
       ),
     );
 

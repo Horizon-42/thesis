@@ -182,7 +182,7 @@ function updatePlacementPreview(
   const orientation = Cesium.Transforms.headingPitchRollQuaternion(
     aircraftPosition,
     new Cesium.HeadingPitchRoll(
-      Cesium.Math.toRadians(state.headingDeg),
+      Cesium.Math.toRadians(-state.headingDeg),
       Cesium.Math.toRadians(state.flightPathDeg),
       0,
     ),

@@ -247,11 +247,11 @@ export default function PilotPanel() {
       switch (event.key.toLowerCase()) {
         case "arrowleft":
         case "a":
-          nudgeControl("bankDeg", -3, -45, 45);
+          nudgeControl("bankDeg", 3, -45, 45);
           break;
         case "arrowright":
         case "d":
-          nudgeControl("bankDeg", 3, -45, 45);
+          nudgeControl("bankDeg", -3, -45, 45);
           break;
         case "arrowup":
         case "w":
@@ -467,7 +467,7 @@ export default function PilotPanel() {
       <section className="pilot-control-zone" aria-label="Pilot controls">
         <div className="pilot-stepper-row">
           <button
-            onClick={() => nudgeControl("bankDeg", -5, -45, 45)}
+            onClick={() => nudgeControl("bankDeg", 5, -45, 45)}
             title="Bank left"
           >
             &lt;
@@ -484,7 +484,7 @@ export default function PilotPanel() {
             />
           </label>
           <button
-            onClick={() => nudgeControl("bankDeg", 5, -45, 45)}
+            onClick={() => nudgeControl("bankDeg", -5, -45, 45)}
             title="Bank right"
           >
             &gt;
