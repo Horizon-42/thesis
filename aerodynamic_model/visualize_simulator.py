@@ -210,6 +210,7 @@ class FlightVisualizer:
         self._show_initial_state()
 
     def _build_input_zone(self):
+        # inital input control values are chosen to give a moderate turn with a visible trajectory
         # Text boxes are the input zone. Their values are read when Run is clicked.
         self.fig.text(0.74, 0.90, "Input zone", fontsize=13, weight="bold")
 
@@ -221,12 +222,12 @@ class FlightVisualizer:
         self.bank_box = self._add_input_box(
             y=0.74,
             label="Bank deg",
-            initial="30",
+            initial="45",
         )
         self.load_box = self._add_input_box(
             y=0.66,
             label="Load n",
-            initial="1.1547",
+            initial="1.41421356",
         )
         self.duration_box = self._add_input_box(
             y=0.58,
@@ -495,7 +496,7 @@ class FlightVisualizer:
         if self.current_control is None:
             return None
         return self.simulator.get_aerodynamic_coefficients(
-            h, V, m, self.current_control, self.atmosphere
+            h, V, m, self.current_control.load_factor, self.atmosphere.get_ISA_density(h)
         )
 
     @staticmethod

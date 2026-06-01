@@ -41,8 +41,9 @@ class Atmosphere:
         L = 0.0065 # temperature lapse rate in K/m
         return T0 - L * h
     
-    def get_ISA_density(self, h: float) -> float:
-        T = self.get_ISA_temperature(h)
+    def get_ISA_density(self, h_atm: float) -> float:
+        # must use h for atmospheric properties, not altitude above ground level
+        T = self.get_ISA_temperature(h_atm)
         return self.rho0 * (T / self.get_ISA_temperature(0))**4.25588
 
 class Simulator:
@@ -62,9 +63,8 @@ class Simulator:
 
     def _get_drag_coefficient(self, lift_coefficient: float) -> float: return self.Cd0 + self.k * lift_coefficient**2
 
-    def get_aerodynamic_coefficients(self, h: float, V: float, m: float, control: Control, atmosphere: Atmosphere):
-        rho = atmosphere.get_density(h)
-        Cl = self._get_lift_coefficient(control.load_factor, V, rho, m)
+    def get_aerodynamic_coefficients(self, h: float, V: float, m: float, load_factor: float, rho: float) -> tuple:
+        Cl = self._get_lift_coefficient(load_factor, V, rho, m)
         Cd = self._get_drag_coefficient(Cl)
         return Cl, Cd
 
@@ -75,7 +75,7 @@ class Simulator:
         # Get atmospheric density
         rho = atmosphere.get_ISA_density(h)
 
-        Cl, Cd = self.get_aerodynamic_coefficients(h, V, m, control, atmosphere)
+        Cl, Cd = self.get_aerodynamic_coefficients(h, V, m, control.load_factor, rho)
 
         D = 0.5 * rho * V**2 * Cd * self.S 
         # 1.41, bank 45, should be a level turn.
