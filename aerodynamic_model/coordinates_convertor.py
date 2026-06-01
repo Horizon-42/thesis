@@ -17,11 +17,20 @@ class ECEFCoordinate:
     z: float
 
 @dataclass
+class ENUUnitVectors:
+    # Unit vectors for the ENU coordinate system at the reference point
+    e_hat: tuple[float, float, float]  # East unit vector
+    n_hat: tuple[float, float, float]  # North unit vector
+    u_hat: tuple[float, float, float]  # Up unit vector
+
+@dataclass
 class ENUCoordinate:
     # East-North-Up (ENU) coordinates relative to a reference point, units in meters
     east: float
     north: float
     up: float
+
+
 
 class CoordinateConverter:
     a = 6378137.0  # Semi-major axis of the Earth (WGS84)
@@ -60,11 +69,39 @@ class CoordinateConverter:
         alt = p / math.cos(lat_rad) - N
         
         return GeodeticCoordinate(math.degrees(lat_rad), math.degrees(lamda), alt)
-
-    @staticmethod
-    def ecef_to_enu(ecef: ECEFCoordinate, ref_geo: GeodeticCoordinate) -> ENUCoordinate:
-        pass
     
     @staticmethod
-    def enu_to_ecef(enu: ENUCoordinate, ref_geo: GeodeticCoordinate) -> ECEFCoordinate:
-        pass
+    def geodetic_to_enu(geo: GeodeticCoordinate, ref_geo: GeodeticCoordinate) -> ENUCoordinate:
+        r0 = CoordinateConverter.geodetic_to_ecef(ref_geo)
+        r = CoordinateConverter.geodetic_to_ecef(geo)
+
+        phi = math.radians(ref_geo.latitude)
+        lamda = math.radians(ref_geo.longitude)
+
+        e_hat = (-math.sin(lamda), math.cos(lamda), 0)
+        n_hat = (-math.sin(phi) * math.cos(lamda), -math.sin(phi) * math.sin(lamda), math.cos(phi))
+        u_hat = (math.cos(phi) * math.cos(lamda), math.cos(phi) * math.sin(lamda), math.sin(phi))å
+        dx = r.x - r0.x
+        dy = r.y - r0.y
+        dz = r.z - r0.z
+        east = e_hat[0] * dx + e_hat[1] * dy + e_hat[2] * dz
+        north = n_hat[0] * dx + n_hat[1] * dy + n_hat[2] * dz
+        up = u_hat[0] * dx + u_hat[1] * dy + u_hat[2] * dz
+
+        return ENUCoordinate(east, north, up)
+
+    @staticmethod
+    def enu_to_geodetic(enu: ENUCoordinate, ref_geo: GeodeticCoordinate) -> GeodeticCoordinate:
+        r0 = CoordinateConverter.geodetic_to_ecef(ref_geo)
+        phi = math.radians(ref_geo.latitude)
+        lamda = math.radians(ref_geo.longitude)
+        e_hat = (-math.sin(lamda), math.cos(lamda), 0)
+        n_hat = (-math.sin(phi) * math.cos(lamda), -math.sin(phi) * math.sin(lamda), math.cos(phi))
+        u_hat = (math.cos(phi) * math.cos(lamda), math.cos(phi) * math.sin(lamda), math.sin(phi))
+
+        dx = e_hat[0] * enu.east + n_hat[0] * enu.north + u_hat[0] * enu.up
+        dy = e_hat[1] * enu.east + n_hat[1] * enu.north + u_hat[1] * enu.up
+        dz = e_hat[2] * enu.east + n_hat[2] * enu.north + u_hat[2] * enu.up
+
+        r = ECEFCoordinate(r0.x + dx, r0.y + dy, r0.z + dz)
+        return CoordinateConverter.ecef_to_geodetic(r)
