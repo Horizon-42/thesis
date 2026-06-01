@@ -7,6 +7,7 @@ import PilotInitialStateOverlay, {
   formatNumberInputValue,
   type PilotInitialEditableKey,
 } from "./PilotInitialStateOverlay";
+import PilotRealtimeStatePanel from "./PilotRealtimeStatePanel";
 import {
   usePilotInitialPlacement,
   type PilotInitialPlacementPosition,
@@ -390,6 +391,8 @@ export default function PilotPanel() {
 
   return (
     <div className="pilot-panel">
+      <PilotRealtimeStatePanel snapshot={snapshot} visible={isFlying} />
+
       <header className="pilot-panel-header">
         <div>
           <h3>Pilot Mode</h3>
@@ -401,30 +404,48 @@ export default function PilotPanel() {
       </header>
 
       <section className="pilot-initial-summary" aria-label="Initial aircraft state summary">
-        <div>
+        <div className="pilot-initial-summary-header">
           <h4>Initial Aircraft</h4>
-          <span>{formatCoord(initialState.lat, "N", "S")}</span>
-          <span>{formatCoord(initialState.lon, "E", "W")}</span>
+          <button
+            type="button"
+            onClick={openInitialEditor}
+            disabled={initialControlsDisabled}
+          >
+            Edit
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={openInitialEditor}
-          disabled={initialControlsDisabled}
-        >
-          Initial State
-        </button>
-        <dl>
+
+        <dl className="pilot-initial-position">
+          <div>
+            <dt>Lat</dt>
+            <dd>{formatCoord(initialState.lat, "N", "S")}</dd>
+          </div>
+          <div>
+            <dt>Lon</dt>
+            <dd>{formatCoord(initialState.lon, "E", "W")}</dd>
+          </div>
+        </dl>
+
+        <dl className="pilot-initial-readouts">
+          <div>
+            <dt>Alt</dt>
+            <dd>{formatNumberInputValue(initialState.altM)} m</dd>
+          </div>
           <div>
             <dt>Psi</dt>
-            <dd>{formatNumberInputValue(initialState.headingDeg)}</dd>
+            <dd>{formatNumberInputValue(initialState.headingDeg)} deg</dd>
           </div>
           <div>
             <dt>Gamma</dt>
-            <dd>{formatNumberInputValue(initialState.flightPathDeg)}</dd>
+            <dd>{formatNumberInputValue(initialState.flightPathDeg)} deg</dd>
           </div>
           <div>
             <dt>V0</dt>
-            <dd>{formatNumberInputValue(initialState.speedMps)}</dd>
+            <dd>{formatNumberInputValue(initialState.speedMps)} m/s</dd>
+          </div>
+          <div>
+            <dt>Mass</dt>
+            <dd>{formatNumberInputValue(initialState.massKg)} kg</dd>
           </div>
         </dl>
       </section>
@@ -566,27 +587,7 @@ export default function PilotPanel() {
         </div>
       </section>
 
-      <section className="pilot-state-zone" aria-live="polite">
-        <Readout label="LAT" value={snapshot ? formatCoord(snapshot.state.lat, "N", "S") : "--"} />
-        <Readout label="LON" value={snapshot ? formatCoord(snapshot.state.lon, "E", "W") : "--"} />
-        <Readout label="ALT" value={snapshot ? `${snapshot.state.altM.toFixed(0)} m` : "--"} />
-        <Readout label="SPD" value={snapshot ? `${snapshot.state.speedMps.toFixed(1)} m/s` : "--"} />
-        <Readout label="HDG" value={snapshot ? `${snapshot.state.headingDeg.toFixed(1)} deg` : "--"} />
-        <Readout label="GAM" value={snapshot ? `${snapshot.state.flightPathDeg.toFixed(2)} deg` : "--"} />
-        <Readout label="CL" value={snapshot ? snapshot.aero.liftCoefficient.toFixed(3) : "--"} />
-        <Readout label="CD" value={snapshot ? snapshot.aero.dragCoefficient.toFixed(3) : "--"} />
-      </section>
-
       {error ? <div className="pilot-error" role="alert">{error}</div> : null}
-    </div>
-  );
-}
-
-function Readout({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="pilot-readout">
-      <span>{label}</span>
-      <strong>{value}</strong>
     </div>
   );
 }

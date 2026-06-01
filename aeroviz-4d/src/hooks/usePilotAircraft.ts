@@ -30,11 +30,23 @@ export function usePilotAircraft({
 }: UsePilotAircraftOptions): void {
   const { viewer, setSelectedFlightId } = useApp();
   const aircraftRef = useRef<Cesium.Entity | null>(null);
+  const aircraftPositionPropertyRef =
+    useRef<Cesium.ConstantPositionProperty | null>(null);
+  const aircraftOrientationPropertyRef =
+    useRef<Cesium.ConstantProperty | null>(null);
   const trailRef = useRef<Cesium.Entity | null>(null);
+  const trailPositionsRef = useRef<Cesium.Cartesian3[]>([]);
+  const trailPositionsPropertyRef = useRef<Cesium.CallbackProperty | null>(null);
 
   useEffect(() => {
     if (!viewer || !enabled || !pose) {
       removePilotEntities(viewer, aircraftRef, trailRef);
+      resetPilotProperties(
+        aircraftPositionPropertyRef,
+        aircraftOrientationPropertyRef,
+        trailPositionsRef,
+        trailPositionsPropertyRef,
+      );
       return;
     }
 
@@ -49,11 +61,13 @@ export function usePilotAircraft({
     );
 
     if (!aircraftRef.current) {
+      aircraftPositionPropertyRef.current = new Cesium.ConstantPositionProperty(position);
+      aircraftOrientationPropertyRef.current = new Cesium.ConstantProperty(orientation);
       aircraftRef.current = viewer.entities.add({
         id: PILOT_AIRCRAFT_ID,
         name: "Pilot Mode Aircraft",
-        position: new Cesium.ConstantPositionProperty(position),
-        orientation: new Cesium.ConstantProperty(orientation),
+        position: aircraftPositionPropertyRef.current,
+        orientation: aircraftOrientationPropertyRef.current,
         model: {
           uri: "/models/aircraft.glb",
           scale: 3.0,
@@ -74,32 +88,38 @@ export function usePilotAircraft({
         },
       });
     } else {
-      aircraftRef.current.position = new Cesium.ConstantPositionProperty(position);
-      aircraftRef.current.orientation = new Cesium.ConstantProperty(orientation);
+      aircraftPositionPropertyRef.current?.setValue(position);
+      aircraftOrientationPropertyRef.current?.setValue(orientation);
       aircraftRef.current.show = true;
     }
 
-    const trailPositions = trail.map((point) =>
+    trailPositionsRef.current = trail.map((point) =>
       Cesium.Cartesian3.fromDegrees(point.lon, point.lat, point.altM),
     );
     if (!trailRef.current) {
+      trailPositionsPropertyRef.current = new Cesium.CallbackProperty(
+        () => trailPositionsRef.current,
+        false,
+      );
       trailRef.current = viewer.entities.add({
         id: PILOT_TRAIL_ID,
         name: "Pilot Mode Trail",
+        show: trailPositionsRef.current.length > 1,
         polyline: {
-          positions: new Cesium.ConstantProperty(trailPositions),
+          positions: trailPositionsPropertyRef.current,
           width: 3,
           material: Cesium.Color.fromCssColorString("#67e8f9").withAlpha(0.78),
           clampToGround: false,
         },
       });
     } else if (trailRef.current.polyline) {
-      trailRef.current.polyline.positions = new Cesium.ConstantProperty(trailPositions);
-      trailRef.current.show = trailPositions.length > 1;
+      trailRef.current.show = trailPositionsRef.current.length > 1;
     }
 
     if (follow) {
-      viewer.trackedEntity = aircraftRef.current;
+      if (viewer.trackedEntity !== aircraftRef.current) {
+        viewer.trackedEntity = aircraftRef.current;
+      }
       setSelectedFlightId(null);
     } else if (viewer.trackedEntity?.id === PILOT_AIRCRAFT_ID) {
       viewer.trackedEntity = undefined;
@@ -111,8 +131,30 @@ export function usePilotAircraft({
   useEffect(() => {
     return () => {
       removePilotEntities(viewer, aircraftRef, trailRef);
+      resetPilotProperties(
+        aircraftPositionPropertyRef,
+        aircraftOrientationPropertyRef,
+        trailPositionsRef,
+        trailPositionsPropertyRef,
+      );
     };
   }, [viewer]);
+}
+
+function resetPilotProperties(
+  aircraftPositionPropertyRef: MutableRefObject<
+    Cesium.ConstantPositionProperty | null
+  >,
+  aircraftOrientationPropertyRef: MutableRefObject<
+    Cesium.ConstantProperty | null
+  >,
+  trailPositionsRef: MutableRefObject<Cesium.Cartesian3[]>,
+  trailPositionsPropertyRef: MutableRefObject<Cesium.CallbackProperty | null>,
+): void {
+  aircraftPositionPropertyRef.current = null;
+  aircraftOrientationPropertyRef.current = null;
+  trailPositionsRef.current = [];
+  trailPositionsPropertyRef.current = null;
 }
 
 function removePilotEntities(

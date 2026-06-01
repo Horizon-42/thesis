@@ -12,6 +12,8 @@ export default function FlightOperationsPanel({ flightIds }: FlightOperationsPan
 
   return (
     <div className="flight-ops-panel">
+      <PilotPanel />
+
       <header className="flight-ops-header">
         <div>
           <h3>Flight Ops</h3>
@@ -25,8 +27,6 @@ export default function FlightOperationsPanel({ flightIds }: FlightOperationsPan
           {isFlightListOpen ? "Hide List" : "Show List"}
         </button>
       </header>
-
-      <PilotPanel />
 
       {isFlightListOpen && hasFlights ? (
         <section className="flight-list-section">

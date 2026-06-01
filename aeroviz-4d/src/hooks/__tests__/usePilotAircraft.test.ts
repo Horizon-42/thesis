@@ -53,9 +53,27 @@ vi.mock("cesium", () => ({
   },
   ConstantPositionProperty: class ConstantPositionProperty {
     constructor(public value: unknown) {}
+
+    setValue(value: unknown) {
+      this.value = value;
+    }
   },
   ConstantProperty: class ConstantProperty {
     constructor(public value: unknown) {}
+
+    setValue(value: unknown) {
+      this.value = value;
+    }
+  },
+  CallbackProperty: class CallbackProperty {
+    constructor(
+      public callback: () => unknown,
+      public isConstant: boolean,
+    ) {}
+
+    getValue() {
+      return this.callback();
+    }
   },
   Color: {
     WHITE: "white",
@@ -78,6 +96,11 @@ import { usePilotAircraft } from "../usePilotAircraft";
 describe("usePilotAircraft", () => {
   beforeEach(() => {
     capturedHeadingPitchRolls.length = 0;
+    mockViewer.trackedEntity = undefined;
+    mockViewer.entities.add.mockClear();
+    mockViewer.entities.remove.mockClear();
+    mockViewer.scene.requestRender.mockClear();
+    setSelectedFlightId.mockClear();
   });
 
   it("converts simulator psi degrees to Cesium heading sign", () => {
@@ -120,5 +143,66 @@ describe("usePilotAircraft", () => {
     );
 
     expect(capturedHeadingPitchRolls[0].roll).toBeCloseTo(-12 * Math.PI / 180);
+  });
+
+  it("keeps Cesium properties stable while updating aircraft pose and trail points", () => {
+    const firstPose = {
+      lon: -114,
+      lat: 51,
+      altM: 1100,
+      headingDeg: 4,
+      flightPathDeg: 1,
+      bankDeg: 0,
+    };
+    const secondPose = {
+      lon: -113.99,
+      lat: 51.01,
+      altM: 1120,
+      headingDeg: 8,
+      flightPathDeg: 2,
+      bankDeg: 1,
+    };
+    const firstTrail = [firstPose];
+    const secondTrail = [firstPose, secondPose];
+
+    const { rerender } = renderHook(
+      ({ pose, trail }) =>
+        usePilotAircraft({
+          enabled: true,
+          pose,
+          trail,
+          follow: false,
+        }),
+      {
+        initialProps: {
+          pose: firstPose,
+          trail: firstTrail,
+        },
+      },
+    );
+
+    const aircraft = mockViewer.entities.add.mock.calls[0][0] as any;
+    const trail = mockViewer.entities.add.mock.calls[1][0] as any;
+    const positionProperty = aircraft.position;
+    const orientationProperty = aircraft.orientation;
+    const trailPositionsProperty = trail.polyline.positions;
+
+    rerender({
+      pose: secondPose,
+      trail: secondTrail,
+    });
+
+    expect(aircraft.position).toBe(positionProperty);
+    expect(aircraft.orientation).toBe(orientationProperty);
+    expect(trail.polyline.positions).toBe(trailPositionsProperty);
+    expect(positionProperty.value).toEqual({
+      lon: secondPose.lon,
+      lat: secondPose.lat,
+      alt: secondPose.altM,
+    });
+    expect(trailPositionsProperty.getValue()).toEqual([
+      { lon: firstPose.lon, lat: firstPose.lat, alt: firstPose.altM },
+      { lon: secondPose.lon, lat: secondPose.lat, alt: secondPose.altM },
+    ]);
   });
 });
