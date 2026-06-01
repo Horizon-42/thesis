@@ -8,6 +8,8 @@ class ReferenceArea:
     WideBody_S: float = 300.0 # m^2, reference area for wide-body aircraft
     GeneralAviation_S: float = 16.2 # m^2, reference area for general aviation aircraft
 
+# Mass for different aricraft types, for reference only, not used in the simulator
+
 @dataclass
 class State:
     x: float
@@ -59,7 +61,9 @@ class Simulator:
 
     def _get_lift_coefficient(self, n:float, V:float, rho: float, m: float) -> float:
         # Placeholder lift coefficient model, replace with actual lift calculation
+        # should depend on alpha
         return 2 * m * self.g * n / (rho * V**2 * self.S)
+    
 
     def _get_drag_coefficient(self, lift_coefficient: float) -> float: return self.Cd0 + self.k * lift_coefficient**2
 
