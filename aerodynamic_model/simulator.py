@@ -28,7 +28,7 @@ class Atmosphere:
     rho0: float = 1.225 # sea level density in kg/m^3
     H: float = 8500.0 # scale height in meters
 
-    def __init__(self, rho0: float, H: float):
+    def __init__(self, rho0: float=1.225, H: float=8500.0):
         self.rho0 = rho0
         self.H = H
     
