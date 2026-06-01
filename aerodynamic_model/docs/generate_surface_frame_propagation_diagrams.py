@@ -273,15 +273,15 @@ def draw_wire(svg: Svg) -> None:
 def diagram_architecture() -> str:
     width, height = 980, 560
     out = svg_2d_header(width, height, "Surface-frame propagation architecture")
-    out.append('<text class="title" x="34" y="42">总体思路：局部 surface frame 算动力学，WGS84/ECEF 保存轨迹位置</text>')
-    out.append('<text class="subtitle" x="34" y="66">FAA ADM 2.8 的核心：平地球飞机方程仍在局部切平面里解释，地球曲率只进入位置传播</text>')
+    out.append('<text class="title" x="34" y="42">总体思路：每步局部 x/y/z 增量，转回 WGS84/ECEF 保存轨迹</text>')
+    out.append('<text class="subtitle" x="34" y="66">飞机方程仍在局部切平面里积分；局部 origin 每步更新，长期位置不累计在固定平面</text>')
     boxes = [
         (42, 122, 212, 92, "当前全球位置", "φ, λ, h", "WGS84 geodetic"),
-        (298, 122, 212, 92, "当前位置构造局部轴", "E,N,U 或 N,E,D", "surface frame"),
-        (554, 122, 212, 92, "飞机动力学", "V, ψ, γ, bank, n, T", "local equations"),
-        (298, 298, 212, 92, "局部速度分量", "v_E, v_N, v_U", "or Vx,Vy,-h_dot"),
-        (554, 298, 212, 92, "曲率半径传播", "φ_dot, λ_dot, h_dot", "M, ν"),
-        (810, 298, 128, 92, "输出轨迹", "WGS84/ECEF", "for Cesium"),
+        (298, 122, 212, 92, "本步 origin 和局部轴", "ê,n̂,û", "from current φ,λ"),
+        (554, 122, 212, 92, "局部 solver", "x,y,z,V,ψ,γ,m", "same local equations"),
+        (298, 298, 212, 92, "本步局部增量", "Δr=x ê+y n̂+z û", "ECEF vector"),
+        (554, 298, 212, 92, "ECEF 更新", "r₁=r₀+Δr", "then inverse WGS84"),
+        (810, 298, 128, 92, "下一步", "new φ,λ,h", "new origin"),
     ]
     for x, y, w, h, title, main, sub in boxes:
         cls = "accent" if "全球" in title or "输出" in title else "box"
@@ -298,9 +298,9 @@ def diagram_architecture() -> str:
     ]
     for x1, y1, x2, y2 in arrows:
         out.append(f'<path class="arrow" d="M{x1},{y1} L{x2},{y2}"/>')
-    out.append('<text class="formula" x="74" y="468">不把 x,y 长期积在固定平面里；位置状态改成 φ,λ,h，或每步由 φ,λ,h 计算 ECEF r。</text>')
-    out.append('<text class="formula" x="74" y="494">动力学仍然输出局部水平/竖直速度；传播层把这些速度转换成经纬度变化率。</text>')
-    out.append('<text class="small" x="812" y="420">下一步：输出的 φ,λ,h 成为新的当前位置</text>')
+    out.append('<text class="formula" x="74" y="468">主方案：x,y,z 每步从 0 开始，只表示这一小步；WGS84/ECEF 才是长期轨迹状态。</text>')
+    out.append('<text class="formula" x="74" y="494">速度也要随新 frame 投影：v_ECEF → 新 ê,n̂,û → 新 V,ψ,γ。</text>')
+    out.append('<text class="small" x="718" y="420">下一步：新 φ,λ,h 成为新的 origin</text>')
     out.append("</svg>")
     return "\n".join(out)
 
@@ -426,13 +426,13 @@ def diagram_east_unit_derivation() -> str:
 
 def diagram_xy_vs_geodetic_state() -> str:
     width, height = 980, 620
-    out = svg_2d_header(width, height, "Flat xy state versus geodetic state")
-    out.append('<text class="title" x="34" y="42">x/y 与 φ/λ 的区别：固定平面位移 vs 椭球上的位置状态</text>')
-    out.append('<text class="subtitle" x="34" y="66">x/y 是相对某个 origin 的米制局部坐标；φ/λ 是 WGS84 曲面上的全局角坐标</text>')
+    out = svg_2d_header(width, height, "Per-step local xy increment versus geodetic state")
+    out.append('<text class="title" x="34" y="42">主方案：每步临时 x/y/z 增量，再转回 WGS84 位置</text>')
+    out.append('<text class="subtitle" x="34" y="66">x/y/z 是相对当前 origin 的单步局部坐标；φ/λ/h 是跨步骤保存的全局位置状态</text>')
     out.append('<rect class="accent" x="48" y="112" width="402" height="350" rx="10"/>')
     out.append('<rect class="warn" x="530" y="112" width="402" height="350" rx="10"/>')
-    out.append('<text class="label" x="76" y="148">固定 flat x/y 状态</text>')
-    out.append('<text class="label" x="558" y="148">WGS84 φ/λ/h 状态</text>')
+    out.append('<text class="label" x="76" y="148">本步临时 local x/y/z</text>')
+    out.append('<text class="label" x="558" y="148">跨步骤 WGS84 φ/λ/h</text>')
     left_cx, left_cy = 244.0, 318.0
     out.append(f'<line class="east" x1="{left_cx}" y1="{left_cy}" x2="{left_cx + 150}" y2="{left_cy}"/>')
     out.append(f'<line class="north" x1="{left_cx}" y1="{left_cy}" x2="{left_cx}" y2="{left_cy - 150}"/>')
@@ -443,9 +443,9 @@ def diagram_xy_vs_geodetic_state() -> str:
     out.append(f'<text class="teal" x="{left_cx + 158:.1f}" y="{left_cy + 5:.1f}">x / E meters</text>')
     out.append(f'<text class="indigo" x="{left_cx - 28:.1f}" y="{left_cy - 162:.1f}">y / N meters</text>')
     out.append(f'<text class="orange" x="{left_cx - 28:.1f}" y="{left_cy + 28:.1f}">O₀</text>')
-    out.append(f'<text class="label" x="{left_cx + 104:.1f}" y="{left_cy - 88:.1f}">P_flat(x,y)</text>')
-    out.append('<text class="formula" x="78" y="414">近似：Δφ≈y/(M₀+h₀)</text>')
-    out.append('<text class="formula" x="78" y="438">近似：Δλ≈x/((ν₀+h₀)cosφ₀)</text>')
+    out.append(f'<text class="label" x="{left_cx + 104:.1f}" y="{left_cy - 88:.1f}">Δp_local(x,y,z)</text>')
+    out.append('<text class="formula" x="78" y="414">每步开始：x=y=z=0</text>')
+    out.append('<text class="formula" x="78" y="438">每步结束：只取本步 x,y,z 增量</text>')
 
     right_cx, right_cy = 730.0, 338.0
     rx, ry = 155.0, 118.0
@@ -457,15 +457,72 @@ def diagram_xy_vs_geodetic_state() -> str:
     out.append(f'<circle class="surface" cx="{right_cx - 78:.1f}" cy="{right_cy + 38:.1f}" r="6"/>')
     out.append(f'<circle class="point" cx="{right_cx + 56:.1f}" cy="{right_cy - 44:.1f}" r="6"/>')
     out.append(f'<path class="arrow" d="M {right_cx - 70:.1f},{right_cy + 34:.1f} C {right_cx - 18:.1f},{right_cy - 26:.1f} {right_cx + 16:.1f},{right_cy - 54:.1f} {right_cx + 48:.1f},{right_cy - 46:.1f}"/>')
-    out.append(f'<text class="orange" x="{right_cx - 116:.1f}" y="{right_cy + 66:.1f}">P₀(φ₀,λ₀,h₀)</text>')
-    out.append(f'<text class="label" x="{right_cx + 66:.1f}" y="{right_cy - 50:.1f}">P(φ,λ,h)</text>')
-    out.append('<text class="formula" x="558" y="184">状态直接积分：φ_dot, λ_dot, h_dot</text>')
-    out.append('<text class="formula" x="558" y="208">每一步重新用当前 φ,λ 计算 M,ν,ê,n̂,û</text>')
-    out.append('<text class="formula" x="80" y="526">ENU→WGS84：r = r₀ + x ê₀ + y n̂₀ + z û₀，再做 ECEF→WGS84。</text>')
-    out.append('<text class="formula" x="80" y="554">WGS84→ENU：x=(r-r₀)·ê₀，y=(r-r₀)·n̂₀，z=(r-r₀)·û₀。</text>')
-    out.append('<text class="formula" x="80" y="582">转换只有数值误差；长期误差来自固定平面模型，不来自坐标公式本身。</text>')
+    out.append(f'<text class="orange" x="{right_cx - 116:.1f}" y="{right_cy + 66:.1f}">P_k(φ_k,λ_k,h_k)</text>')
+    out.append(f'<text class="label" x="{right_cx + 66:.1f}" y="{right_cy - 50:.1f}">P_next(φ,λ,h)</text>')
+    out.append('<text class="formula" x="558" y="184">权威位置：φ, λ, h 或 ECEF r</text>')
+    out.append('<text class="formula" x="558" y="208">下一步用新 φ,λ,h 重建 ê,n̂,û</text>')
+    out.append('<text class="formula" x="80" y="526">本步转换：r₁ = r₀ + x ê₀ + y n̂₀ + z û₀，再做 ECEF→WGS84。</text>')
+    out.append('<text class="formula" x="80" y="554">速度转换：v_ECEF → 投影到新 ê,n̂,û → 新 V,ψ,γ。</text>')
+    out.append('<text class="formula" x="80" y="582">Δφ/Δλ 公式是一阶近似；主方案保留 x/y 增量并走 ECEF 反算。</text>')
     out.append("</svg>")
     return "\n".join(out)
+
+
+def diagram_velocity_ecef_projection() -> str:
+    phi0, lam0 = TEACHING_PHI, TEACHING_LAMBDA
+    h = 0.070
+    phi1 = phi0 + 0.115
+    lam1 = lam0 + 0.145
+    p0 = geodetic_unit(phi0, lam0, h)
+    p1 = geodetic_unit(phi1, lam1, h + 0.012)
+    e0, n0, u0 = east_unit(lam0), north_unit(phi0, lam0), up_unit(phi0, lam0)
+    e1, n1, u1 = east_unit(lam1), north_unit(phi1, lam1), up_unit(phi1, lam1)
+    psi = 38.0 * pi / 180.0
+    gamma = 13.0 * pi / 180.0
+    v_e = cos(gamma) * cos(psi)
+    v_n = cos(gamma) * sin(psi)
+    v_u = sin(gamma)
+    v_world = add(add(mul(v_e, e0), mul(v_n, n0)), mul(v_u, u0))
+    v_tip = add(p0, mul(0.42, v_world))
+    h_tip = add(p0, mul(0.42 * cos(gamma), add(mul(cos(psi), e0), mul(sin(psi), n0))))
+    pts = wire_points() + [p0, p1, v_tip, h_tip]
+    pts += [
+        add(p0, mul(0.28, e0)),
+        add(p0, mul(0.28, n0)),
+        add(p0, mul(0.24, u0)),
+        add(p1, mul(0.25, e1)),
+        add(p1, mul(0.25, n1)),
+        add(p1, mul(0.22, u1)),
+    ]
+    svg = Svg(980, 680, "Local velocity vector to ECEF and new frame projection", pts, pad=58)
+    svg.text_xy("生成式 3D 图：局部速度分量 → ECEF 速度向量 → 新 frame 分量", 30, 38, "title")
+    svg.text_xy("旧 ENU 轴给出速度分量；ECEF 向量保存真实方向；新 ENU 轴用点积重新读取分量", 30, 62, "subtitle")
+    draw_wire(svg)
+    svg.line(p0, p1, "helper")
+    svg.line(p0, add(p0, mul(0.28, e0)), "east", True)
+    svg.line(p0, add(p0, mul(0.28, n0)), "north", True)
+    svg.line(p0, add(p0, mul(0.24, u0)), "up", True)
+    svg.line(p1, add(p1, mul(0.25, e1)), "east", True)
+    svg.line(p1, add(p1, mul(0.25, n1)), "north", True)
+    svg.line(p1, add(p1, mul(0.22, u1)), "up", True)
+    svg.line(p0, h_tip, "helper")
+    svg.line(h_tip, v_tip, "up", True)
+    svg.line(p0, v_tip, "axis", True)
+    svg.circle(p0, 6.5, "surface")
+    svg.circle(p1, 6.5, "point")
+    svg.text("P_k", p0, -42, 40, "orange")
+    svg.text("P_{k+1}", p1, 24, -18, "teal")
+    svg.text("v_ECEF", v_tip, 56, -14, "label")
+    svg.text("horizontal V cosγ", h_tip, 24, 24, "small")
+    svg.text("v_U", add(h_tip, mul(0.5, sub(v_tip, h_tip))), 18, -4, "orange")
+    svg.text_xy("P_k: 旧 origin，使用旧 ê_k,n̂_k,û_k", 60, 104, "orange")
+    svg.text_xy("P_{k+1}: 新 origin，重新构造新 ê,n̂,û", 610, 104, "teal")
+    svg.text_xy("v_ECEF 是同一个物理速度向量，不随坐标轴一起旋转", 522, 140, "small")
+    svg.text_xy("旧 frame 分量：v_E=V cosγ cosψ,  v_N=V cosγ sinψ,  v_U=V sinγ", 44, 572, "formula")
+    svg.text_xy("换到 ECEF：v_ECEF = v_E ê_k + v_N n̂_k + v_U û_k", 44, 600, "formula")
+    svg.text_xy("投影到新 frame：v_E' = v_ECEF·ê_{k+1},  v_N' = v_ECEF·n̂_{k+1},  v_U' = v_ECEF·û_{k+1}", 44, 628, "formula")
+    svg.text_xy("再由 v_E',v_N',v_U' 反算 V、ψ、γ；这一步处理的是坐标轴旋转，不是空气动力学。", 44, 656, "formula")
+    return svg.render()
 
 
 def diagram_conventions() -> str:
@@ -520,7 +577,8 @@ These SVG files are generated by `../generate_surface_frame_propagation_diagrams
 - Prime vertical radius nu at teaching latitude: {nu_over_a(phi) * WGS84_A_M:.3f} m
 - Visual aircraft height arrow: {VISUAL_H_OVER_A:.3f} a, used only to make the local frame visible.
 - East-unit diagram: e-hat is the normalized derivative of the horizontal longitude circle.
-- State comparison diagram: fixed flat x/y state versus WGS84 geodetic propagation state.
+- State comparison diagram: per-step local x/y/z increment versus WGS84 geodetic state.
+- Velocity projection diagram: local ENU velocity components are expanded into ECEF and projected into the next local frame.
 """
 
 
@@ -536,6 +594,7 @@ def main() -> None:
     write(ASSET_DIR / "04-simulator-convention-map.svg", diagram_conventions())
     write(ASSET_DIR / "05-east-unit-derivation.svg", diagram_east_unit_derivation())
     write(ASSET_DIR / "06-flat-xy-vs-geodetic-state.svg", diagram_xy_vs_geodetic_state())
+    write(ASSET_DIR / "07-velocity-ecef-projection.svg", diagram_velocity_ecef_projection())
     write(ASSET_DIR / "README.md", values_readme())
 
 

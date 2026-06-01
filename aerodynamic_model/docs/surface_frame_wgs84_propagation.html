@@ -237,7 +237,7 @@
       <h1>局部 Surface Frame 动力学与 WGS84/ECEF 轨迹传播</h1>
       <p class="lead">
         本文把 FAA Aircraft Dynamics Model 第 2.8 节的思路，翻译成适合当前
-        <code>aerodynamic_model/simulator.py</code> 的实现路径：飞机动力学仍在局部平直坐标里计算，轨迹位置用 WGS84 大地坐标和 ECEF 地心地固坐标传播。
+        <code>aerodynamic_model/simulator.py</code> 的实现路径：飞机动力学仍在局部平直 \(x/y/z\) 坐标里计算，每一步把局部增量转换回 WGS84 大地坐标和 ECEF 地心地固坐标，再用新的 WGS84 位置进入下一步。
       </p>
       <div class="tag-row">
         <span class="tag">ADM = Aircraft Dynamics Model，飞机动力学模型</span>
@@ -254,9 +254,11 @@
       <a href="#derivation">3. 公式推导</a>
       <a href="#simulator">4. 对接 simulator.py</a>
       <a href="#algorithm">5. 一步积分流程</a>
-      <a href="#limits">6. 适用边界</a>
+      <a href="#velocity-state">6. 速度与角度转换</a>
       <a href="#implementation">7. 代码骨架</a>
-      <a href="#sources">8. 来源与核对点</a>
+      <a href="#limits">8. 适用边界</a>
+      <a href="#sources">9. 来源与核对点</a>
+      <a href="#backup">10. 备用方案</a>
     </nav>
 
     <section id="why">
@@ -266,14 +268,14 @@
           固定 ENU 的优点是简单，但飞机离原点越远，切平面越不贴合 WGS84 椭球。完整 ECEF 向量动力学可以处理全球运动、地球自转和非惯性项，但会迫使你重写力、姿态和重力模型。
         </p>
         <p>
-          FAA ADM 第 2.8 节采用的是中间路线：飞机方程仍然在局部 surface frame 中解释，位置传播时再把局部速度换成纬度、经度和高度变化率。这样保留了点质量模型的直观性，也避免了固定局部平面飞远后的曲率误差。
+          FAA ADM 第 2.8 节采用的是中间路线：飞机方程仍然在局部 surface frame 中解释，位置传播时再把局部运动转换回 WGS84/ECEF。实现上有两条等价到一阶的路：一条是把局部速度换成 \(\dot\phi,\dot\lambda,\dot h\)，另一条是本文主体采用的“局部 \(x/y/z\) 增量 → ECEF → WGS84”。后者更贴近你现在的 simulator。
         </p>
       </div>
 
       <figure class="diagram" aria-labelledby="fig-architecture">
         <img src="assets/surface_frame_propagation/01-surface-frame-architecture.svg" alt="局部 surface frame 动力学与 WGS84 ECEF 轨迹传播流程图">
         <figcaption id="fig-architecture">
-          总体架构：全局位置状态是 \(\phi,\lambda,h\)，每一步在当前位置构造局部轴，把动力学给出的局部速度换成 \(\dot\phi,\dot\lambda,\dot h\)，再积分回 WGS84/ECEF 轨迹。
+          总体架构：权威位置保存在 \(\phi,\lambda,h\) 或 ECEF 中；每一步在当前位置构造局部轴，让 simulator 在局部 \(x/y/z\) 中积分一个小增量，再把这个增量转换回 WGS84/ECEF。
         </figcaption>
       </figure>
     </section>
@@ -309,12 +311,12 @@
       </figure>
 
       <div class="warn">
-        <strong>关键区分：</strong>“每一步构造局部 frame”不等于“把飞机位置每一步重置为局部原点”。位置状态仍然保存在 WGS84/ECEF 中；局部 frame 只是用来解释这一瞬间的速度、航向角、爬升角和力的方向。
+        <strong>关键区分：</strong>“每一步构造局部 frame”可以让局部 \(x,y,z\) 每步从 0 开始，但这不是把全局位置丢掉。全局位置仍然保存在 WGS84/ECEF 中；局部 frame 只是这一小步的计算坐标，负责解释速度、航向角、爬升角和力的方向。
       </div>
     </section>
 
     <section id="derivation">
-      <h2>3. 从 WGS84 位置向量推导传播公式</h2>
+      <h2>3. 从 WGS84 位置向量推导局部转换关系</h2>
       <article class="card">
         <h3>3.1 先写 WGS84 到 ECEF 的位置向量</h3>
         <p>
@@ -467,7 +469,7 @@ d\mathbf r
 \]</span>
         </div>
         <p>
-          比较三根正交轴上的系数，得到最重要的传播公式：
+          比较三根正交轴上的系数，可以得到直接积分经纬高时使用的变化率公式：
         </p>
         <div class="formula">
           <span>\[
@@ -487,222 +489,160 @@ d\mathbf r
 \]</span>
         </div>
         <p>
-          这就是 FAA 2.8 节公式 (2.114) 的 ENU 版本。PDF 中写成 NED 形式时，\(V_x\) 是 North 速度，\(V_y\) 是 East 速度，因此 \(\dot\mu=V_x/(R_\mu+h)\)，\(\dot\lambda=V_y/((D_\mu+h)\cos\mu)\)。对应到本文：\(\mu\to\phi\)，\(R_\mu\to M\)，\(D_\mu\to\nu\)。
+          这就是 FAA 2.8 节公式 (2.114) 的 ENU 版本，也是本文最后备用方案的核心。PDF 中写成 NED 形式时，\(V_x\) 是 North 速度，\(V_y\) 是 East 速度，因此 \(\dot\mu=V_x/(R_\mu+h)\)，\(\dot\lambda=V_y/((D_\mu+h)\cos\mu)\)。对应到本文：\(\mu\to\phi\)，\(R_\mu\to M\)，\(D_\mu\to\nu\)。
         </p>
       </article>
     </section>
 
     <section id="simulator">
-      <h2>4. 对接当前 simulator.py</h2>
+      <h2>4. 对接当前 simulator.py：主体仍然用 x/y</h2>
       <div class="grid-2">
         <article class="card">
-          <h3>当前代码的运动学</h3>
+          <h3>当前代码的局部状态</h3>
           <p>
-            现在的 `simulator.py` 状态是：
+            `simulator.py` 里的 \(x,y,h\) 最适合解释成“某个局部 ENU 坐标系里的坐标”。如果每一步都用当前 WGS84 点作为这个局部坐标系的原点，那么局部状态可以写成：
           </p>
           <div class="formula">
             <span>\[
-\mathbf x=
+\mathbf q=
 \begin{bmatrix}
-x&y&h&V&\psi&\gamma&m
+x&y&z&V&\psi&\gamma&m
 \end{bmatrix}^T
 \]</span>
           </div>
           <p>
-            其中位置导数是：
+            这里 \(x\) 是 East 方向的局部米制位移，\(y\) 是 North 方向的局部米制位移，\(z\) 是 Up 方向的局部米制位移。为了避免和椭球高混淆，本文在局部积分里用 \(z\)，不用 \(h\) 表示这个竖直增量。
           </p>
-          <div class="formula">
-            <span>\[
-\begin{aligned}
-\dot x&amp;=V\cos\gamma\cos\psi \\
-\dot y&amp;=V\cos\gamma\sin\psi \\
-\dot h&amp;=V\sin\gamma
-\end{aligned}
-\]</span>
-          </div>
         </article>
         <article class="card">
-          <h3>建议的新位置状态</h3>
+          <h3>全局权威状态</h3>
           <p>
-            保留速度、航向、爬升角、质量和控制输入，但把长期位置从 \(x,y\) 换成 \(\phi,\lambda\)：
+            长期保存的位置不要是从最初原点累计出来的 \(x,y\)，而应该是当前 WGS84 点：
           </p>
           <div class="formula">
             <span>\[
-\mathbf x_g=
+\mathbf s=
 \begin{bmatrix}
 \phi&\lambda&h&V&\psi&\gamma&m
 \end{bmatrix}^T
 \]</span>
           </div>
           <p>
-            这里 \(h\) 继续表示绝对椭球高或近似海拔高度，不能因为局部 frame 每步重建就清零；大气密度模型仍然需要这个高度。
+            这并不等于放弃 \(x,y\)。真正的做法是：每一步把 \((\phi,\lambda,h)\) 作为局部 origin，令 \(x=y=z=0\)，用当前动力学积分出这一小步的 \(x,y,z\)，然后立刻转回新的 \(\phi,\lambda,h\)。
           </p>
         </article>
       </div>
 
       <article class="card" style="margin-top:16px">
-        <h3>为什么有必要更换 state，而不是继续长期积分 x/y</h3>
+        <h3>主方案：局部 x/y/z 增量转回 WGS84</h3>
         <p>
-          当前 \(x,y\) 是一个局部平面里的米制坐标。只要飞行范围很小，它非常直观：\(x\) 可以当 East 位移，\(y\) 可以当 North 位移。但它隐含了一个固定切平面：所有后续位置都被放在同一张平面上。飞机飞远后，真实地球表面已经弯走了，局部 North/East/Up 方向也随 \(\phi,\lambda\) 慢慢旋转，固定的 \(x,y\) 轴不会自动跟着转。
+          在第 \(k\) 步，当前 WGS84 位置是 \(P_k=(\phi_k,\lambda_k,h_k)\)。先把它正算成 ECEF 位置向量 \(\mathbf r_k\)，并由 \(\phi_k,\lambda_k\) 计算当前局部轴 \(\hat{\mathbf e}_k,\hat{\mathbf n}_k,\hat{\mathbf u}_k\)。局部积分器只负责从 \(x=y=z=0\) 积分出这一小步的局部位移：
         </p>
+        <div class="formula">
+          <span>\[
+\Delta\mathbf r_k
+=
+x_k\hat{\mathbf e}_k
++y_k\hat{\mathbf n}_k
++z_k\hat{\mathbf u}_k
+\]</span>
+          <span>\[
+\mathbf r_{k+1}
+=
+\mathbf r_k+\Delta\mathbf r_k
+\]</span>
+        </div>
         <p>
-          如果把长期位置状态换成 \(\phi,\lambda,h\)，每一步都会在当前位置重新计算 \(M,\nu,\hat{\mathbf e},\hat{\mathbf n},\hat{\mathbf u}\)。这样动力学仍然在局部平直空间里解释，但位置状态始终贴着 WGS84 椭球传播。
+          然后对 \(\mathbf r_{k+1}\) 做 ECEF→WGS84 反算，得到 \(P_{k+1}=(\phi_{k+1},\lambda_{k+1},h_{k+1})\)。下一步再用 \(P_{k+1}\) 作为新的 origin，局部 \(x,y,z\) 再次从 0 开始。
         </p>
         <figure class="diagram" aria-labelledby="fig-xy-vs-geodetic">
-          <img src="assets/surface_frame_propagation/06-flat-xy-vs-geodetic-state.svg" alt="固定平面 x y 状态与 WGS84 phi lambda h 状态的区别和转换关系图">
+          <img src="assets/surface_frame_propagation/06-flat-xy-vs-geodetic-state.svg" alt="每步临时 x y z 增量转回 WGS84 位置状态的图示">
           <figcaption id="fig-xy-vs-geodetic">
-            左边的 \(x,y\) 是相对于某个固定原点 \(O_0\) 的平面位移；右边的 \(\phi,\lambda,h\) 是 WGS84 椭球上的位置状态。两者可以互相转换，但长期积分时物理含义不同。
+            \(x,y,z\) 是单步局部增量，不是长期累计的全局位置；WGS84/ECEF 保存真实轨迹。每一步换 origin 的意义，是让局部平面始终贴近当前位置。
           </figcaption>
         </figure>
       </article>
 
       <article class="card" style="margin-top:16px">
-        <h3>x/y 和 \(\phi,\lambda\) 的转换关系</h3>
+        <h3>这和 \(\Delta\phi,\Delta\lambda\) 公式有什么区别</h3>
         <p>
-          先看 ENU→WGS84 方向。如果你有一个固定局部原点 \(O_0=(\phi_0,\lambda_0,h_0)\)，并在这个原点构造固定 ENU 轴 \(\hat{\mathbf e}_0,\hat{\mathbf n}_0,\hat{\mathbf u}_0\)，那么局部平面坐标到 ECEF 的精确写法是：
+          \(\Delta\phi,\Delta\lambda\) 公式是上面精确路径在当前点的一阶近似。把局部位移直接换成经纬度增量时，会写成：
         </p>
         <div class="formula">
-          <span>\[
-\mathbf r
-=
-\mathbf r_0
-+x\hat{\mathbf e}_0
-+y\hat{\mathbf n}_0
-+z\hat{\mathbf u}_0
-\]</span>
-        </div>
-        <p>
-          这里 \(\mathbf r_0\) 是 \(O_0\) 的 ECEF 位置向量。注意 \(z\) 不是天然等于椭球高 \(h\)。\(z\) 是沿原点 Up 方向 \(\hat{\mathbf u}_0\) 的局部竖直坐标；而椭球高 \(h\) 是从目标点自己的椭球法线方向量出来的高度。距离很短时常用 \(z\approx h-h_0\)，但这是一种局部近似，不应该被理解成全局精确定义。
-        </p>
-        <p>
-          得到 \(\mathbf r=(X,Y,Z)\) 后，再做 ECEF 到 WGS84 的反算，就得到目标点真正的 \(\phi,\lambda,h\)。这是“固定 ENU 坐标转 WGS84”的精确转换路径。它本身只会引入浮点数舍入误差和反算容差，不会引入“地球曲率模型误差”。
-        </p>
-        <p>
-          反过来看 WGS84→ENU 方向。如果已经有一个 WGS84 点 \(P=(\phi,\lambda,h)\)，先把它转成 ECEF 位置向量 \(\mathbf r\)，再相对原点做投影：
-        </p>
-        <div class="formula">
-          <span>\[
-\Delta\mathbf r=\mathbf r-\mathbf r_0
-\]</span>
-          <span>\[
-x=\Delta\mathbf r\cdot\hat{\mathbf e}_0,\qquad
-y=\Delta\mathbf r\cdot\hat{\mathbf n}_0,\qquad
-z=\Delta\mathbf r\cdot\hat{\mathbf u}_0
-\]</span>
-        </div>
-        <p>
-          这个反向投影也是精确的固定 ENU 表达。但要记住，投影得到的 \(x,y\) 是切平面坐标，不是沿椭球表面量出来的弧长；距离越远，它越不像“在地面上朝东/朝北走了多少米”。
-        </p>
-        <p>
-          如果只是很小范围内做近似，可以不用 ECEF 反算，直接用当前原点处的曲率半径：
-        </p>
-        <div class="formula">
-          <span>\[
-y
-\approx
-(M_0+h_0)\Delta\phi,
-\qquad
-x
-\approx
-(\nu_0+h_0)\cos\phi_0\,\Delta\lambda
-\]</span>
           <span>\[
 \Delta\phi
 \approx
-\frac{y}{M_0+h_0}
+\frac{y_k}{M_k+h_k}
 \]</span>
           <span>\[
 \Delta\lambda
 \approx
-\frac{x}{(\nu_0+h_0)\cos\phi_0}
+\frac{x_k}{(\nu_k+h_k)\cos\phi_k}
 \]</span>
           <span>\[
-\phi\approx\phi_0+\Delta\phi,
+\phi_{k+1}\approx\phi_k+\Delta\phi,
 \qquad
-\lambda\approx\lambda_0+\Delta\lambda
+\lambda_{k+1}\approx\lambda_k+\Delta\lambda
 \]</span>
         </div>
         <p>
-          这个近似的含义是：把 \(M,\nu,\cos\phi\) 都冻结在原点 \(O_0\)。距离很短时很好用；飞远后误差来自“冻结曲率和方向”这个近似。
+          主方案不需要显式计算这两个近似增量，而是走 \(x/y/z\rightarrow\) ECEF \(\rightarrow\) WGS84。两者在步长足够小时几乎一致；差别是主方案把“这一小步的直角位移”放进 ECEF 后再反算，少了一层经纬度线性化。它仍然有时间步长误差和局部平面单步近似误差，但不会把 \(M,\nu,\cos\phi\) 固定在很久以前的原点。
         </p>
       </article>
 
       <article class="card" style="margin-top:16px">
-        <h3>转换会不会引入误差？分三层看</h3>
+        <h3>转换会不会引入误差？按来源拆开看</h3>
         <table>
           <thead>
             <tr>
-              <th>操作</th>
-              <th>是否引入误差</th>
-              <th>原因</th>
+              <th>步骤</th>
+              <th>误差性质</th>
+              <th>说明</th>
             </tr>
           </thead>
           <tbody>
             <tr>
-              <td>ENU \(x,y,z\) → ECEF → WGS84</td>
-              <td>几乎只有数值误差</td>
-              <td>这是坐标表达之间的数学转换；只要 WGS84 参数一致，主要误差是浮点舍入和 ECEF 反算迭代容差。</td>
+              <td>\(x/y/z\rightarrow\) ECEF \(\rightarrow\) WGS84</td>
+              <td>坐标转换本身几乎只有数值误差</td>
+              <td>只要 WGS84 参数一致，主要是浮点舍入和 ECEF 反算容差。</td>
             </tr>
             <tr>
-              <td>用 \(\Delta\phi,\Delta\lambda\) 的小范围近似</td>
-              <td>会有近似误差</td>
-              <td>它把 \(M,\nu,\cos\phi\) 固定在原点，没有随着飞机位置更新。</td>
+              <td>单步局部平面积分</td>
+              <td>有时间步长和局部线性化误差</td>
+              <td>这一小步把局部 frame 视为不旋转；步长越小，误差越小。下一步重建 origin 可以避免长期固定平面误差。</td>
             </tr>
             <tr>
-              <td>长期在固定 \(x,y\) 平面中积分</td>
-              <td>会有模型误差</td>
+              <td>\(\Delta\phi,\Delta\lambda\) 近似</td>
+              <td>额外增加一阶曲率近似误差</td>
+              <td>它直接用当前 \(M,\nu,\cos\phi\) 把米换成弧度，适合短步长或作为公式核对。</td>
+            </tr>
+            <tr>
+              <td>从最初 origin 长期累计 \(x,y\)</td>
+              <td>会有明显模型误差</td>
               <td>真实地球表面弯曲，局部 Up/North/East 随位置旋转；固定平面不能持续贴合曲面。</td>
             </tr>
           </tbody>
         </table>
-        <div class="note">
-          所以“换成 \(\phi,\lambda,h\) state”的必要性不在于普通坐标转换会严重失真，而在于长期把轨迹积分在固定 \(x,y\) 平面中，会把曲面运动误建模成平面运动。使用 \(\phi,\lambda,h\) 后，传播公式每一步都重新使用当前位置的曲率和局部轴，误差来源就主要回到动力学模型本身和数值积分步长。
-        </div>
       </article>
 
-      <figure class="diagram" aria-labelledby="fig-conventions">
-        <img src="assets/surface_frame_propagation/04-simulator-convention-map.svg" alt="当前 simulator.py 的 ENU 角度约定和 FAA NED surface frame 的对照图">
-        <figcaption id="fig-conventions">
-          当前代码若解释为 ENU，则 \(\psi=0\) 朝 East，\(\psi=\pi/2\) 朝 North。航空常见 heading \(\chi\) 通常从 North 朝 East 增大，二者满足 \(\chi=\pi/2-\psi\)。
-        </figcaption>
-      </figure>
-
-      <article class="card">
-        <h3>4.1 沿用当前 \(\psi\) 约定的传播方程</h3>
+      <article class="card" style="margin-top:16px">
+        <h3>局部 x/y/z 的动力学保持原样</h3>
         <p>
-          如果不改 `psi` 的含义，直接把当前 \(x,y\) 解释成 ENU 中的 \(E,N\)，则局部速度分量为：
+          若沿用当前 \(\psi\) 约定，即 \(\psi=0\) 朝 East，\(\psi=\pi/2\) 朝 North，则局部速度分量仍然是：
         </p>
         <div class="formula">
           <span>\[
-v_E=V\cos\gamma\cos\psi,\qquad
-v_N=V\cos\gamma\sin\psi,\qquad
-v_U=V\sin\gamma
+\dot x=v_E=V\cos\gamma\cos\psi
+\]</span>
+          <span>\[
+\dot y=v_N=V\cos\gamma\sin\psi
+\]</span>
+          <span>\[
+\dot z=v_U=V\sin\gamma
 \]</span>
         </div>
         <p>
-          代入上一节传播公式：
-        </p>
-        <div class="formula">
-          <span>\[
-\boxed{
-\dot\phi=
-\frac{V\cos\gamma\sin\psi}{M+h}
-}
-\]</span>
-          <span>\[
-\boxed{
-\dot\lambda=
-\frac{V\cos\gamma\cos\psi}{(\nu+h)\cos\phi}
-}
-\]</span>
-          <span>\[
-\boxed{
-\dot h=V\sin\gamma
-}
-\]</span>
-        </div>
-        <p>
-          速度大小和角度动力学可以先保留当前模型：
+          速度大小、爬升角、航向角、质量和控制输入也可以继续使用当前模型：
         </p>
         <div class="formula">
           <span>\[
@@ -720,101 +660,219 @@ v_U=V\sin\gamma
         </p>
       </article>
 
+      <figure class="diagram" aria-labelledby="fig-conventions">
+        <img src="assets/surface_frame_propagation/04-simulator-convention-map.svg" alt="当前 simulator.py 的 ENU 角度约定和 FAA NED surface frame 的对照图">
+        <figcaption id="fig-conventions">
+          当前代码若解释为 ENU，则 \(\psi=0\) 朝 East，\(\psi=\pi/2\) 朝 North。航空常见 heading \(\chi\) 通常从 North 朝 East 增大，二者满足 \(\chi=\pi/2-\psi\)。
+        </figcaption>
+      </figure>
+    </section>
+
+    <section id="algorithm">
+      <h2>5. 一步积分流程：x/y 是临时坐标</h2>
+      <ol class="card">
+        <li>输入当前全局位置 \(P_k=(\phi_k,\lambda_k,h_k)\)，以及局部速度状态 \(V_k,\psi_k,\gamma_k,m_k\)。</li>
+        <li>把 \(P_k\) 正算成 ECEF：\(\mathbf r_k=\mathbf r(\phi_k,\lambda_k,h_k)\)。</li>
+        <li>用 \(\phi_k,\lambda_k\) 构造 \(\hat{\mathbf e}_k,\hat{\mathbf n}_k,\hat{\mathbf u}_k\)。</li>
+        <li>创建单步局部状态 \(\mathbf q_k=[0,0,0,V_k,\psi_k,\gamma_k,m_k]^T\)。</li>
+        <li>在局部 ENU 中积分 \(\Delta t\)，得到 \(x_k,y_k,z_k,V^\ast,\psi^\ast,\gamma^\ast,m_{k+1}\)。</li>
+        <li>用 \(\mathbf r_{k+1}=\mathbf r_k+x_k\hat{\mathbf e}_k+y_k\hat{\mathbf n}_k+z_k\hat{\mathbf u}_k\) 更新 ECEF。</li>
+        <li>把 \(\mathbf r_{k+1}\) 反算成新的 WGS84 位置 \(P_{k+1}\)。</li>
+        <li>把积分末端的速度方向从旧局部 frame 投影到新局部 frame，得到下一步使用的 \(V_{k+1},\psi_{k+1},\gamma_{k+1}\)。</li>
+      </ol>
+
+      <div class="note">
+        这套方案里的 \(x,y,z\) 每一步都会清零，但轨迹不会清零，因为真正保存和输出的是 \(P_k\) 或 \(\mathbf r_k\)。它和“长期累计固定平面 \(x,y\)”不是同一种模型。
+      </div>
+    </section>
+
+    <section id="velocity-state">
+      <h2>6. 速度、航向角和其他状态怎么转换</h2>
+      <article class="card">
+        <h3>为什么速度也要处理</h3>
+        <p>
+          每一步换 origin 后，新的 \(\hat{\mathbf e},\hat{\mathbf n},\hat{\mathbf u}\) 会轻微旋转。如果只更新位置，却把旧 frame 里的 \(\psi,\gamma\) 原样带到新 frame，短距离通常问题不大，但严格说会把速度方向留在旧坐标尺里。更稳妥的做法是先把速度写成 ECEF 向量，再投影到新 frame。
+        </p>
+        <figure class="diagram" aria-labelledby="fig-velocity-ecef">
+          <img src="assets/surface_frame_propagation/07-velocity-ecef-projection.svg" alt="局部 ENU 速度分量合成为 ECEF 速度向量，再投影到新 ENU frame 的示意图">
+          <figcaption id="fig-velocity-ecef">
+            旧 frame 中的 \(V,\psi,\gamma\) 先变成局部速度分量 \(v_E,v_N,v_U\)，再按旧 ENU 三根单位向量合成同一个 ECEF 速度向量。到达新位置后，用新 ENU 轴对这个向量做点积投影，得到下一步的速度分量。
+          </figcaption>
+        </figure>
+        <p>
+          公式的来源分两步。第一步是把 speed、heading-like angle 和 climb angle 变成局部分量。\(V\) 是总速度大小；\(\gamma\) 是 climb angle，即速度向量相对局部水平面的爬升角。所以速度在水平面内的投影长度是：
+        </p>
+        <div class="formula">
+          <span>\[
+V_h=V\cos\gamma
+\]</span>
+        </div>
+        <p>
+          当前文档沿用 `simulator.py` 的 \(\psi\) 约定：\(\psi=0\) 指 East，\(\psi=\pi/2\) 指 North。于是水平速度 \(V_h\) 在 East 和 North 两轴上的分量就是普通二维直角坐标投影：
+        </p>
+        <div class="formula">
+          <span>\[
+v_E=V_h\cos\psi
+=V\cos\gamma\cos\psi
+\]</span>
+          <span>\[
+v_N=V_h\sin\psi
+=V\cos\gamma\sin\psi
+\]</span>
+          <span>\[
+v_U=V\sin\gamma
+\]</span>
+        </div>
+        <p>
+          第二步是换基。ENU 的三根轴 \(\hat{\mathbf e}_k,\hat{\mathbf n}_k,\hat{\mathbf u}_k\) 本身已经是写在 ECEF 坐标里的单位向量，并且互相垂直。在线性代数里，如果一组互相垂直的单位向量作为基底，那么“某个向量等于各轴分量乘以各轴方向再相加”：
+        </p>
+        <div class="formula">
+          <span>\[
+\mathbf v_{\text{ECEF}}
+=
+v_E\hat{\mathbf e}_k
++v_N\hat{\mathbf n}_k
++v_U\hat{\mathbf u}_k
+\]</span>
+        </div>
+        <p>
+          把上一步的 \(v_E,v_N,v_U\) 代入，就得到文档中使用的速度向量公式：
+        </p>
+        <div class="formula">
+          <span>\[
+\mathbf v^\ast_{\text{ECEF}}
+=
+V^\ast\cos\gamma^\ast\cos\psi^\ast\,\hat{\mathbf e}_k
++V^\ast\cos\gamma^\ast\sin\psi^\ast\,\hat{\mathbf n}_k
++V^\ast\sin\gamma^\ast\,\hat{\mathbf u}_k
+\]</span>
+        </div>
+        <p>
+          这里的星号 \(^\ast\) 表示“局部积分刚结束、还没有投影到新 frame 的值”。它不是新的坐标系统，只是提醒读者这些量还属于旧的第 \(k\) 步局部 frame。
+        </p>
+        <p>
+          到了新位置 \(P_{k+1}\)，\(\hat{\mathbf e},\hat{\mathbf n},\hat{\mathbf u}\) 已经轻微改变。要在新 frame 中读取同一个物理速度向量，只需要对新基底做点积投影。点积的意义是“一个向量在某个单位方向上的长度”：
+        </p>
+        <div class="formula">
+          <span>\[
+v_E^{k+1}=\mathbf v^\ast_{\text{ECEF}}\cdot\hat{\mathbf e}_{k+1},
+\qquad
+v_N^{k+1}=\mathbf v^\ast_{\text{ECEF}}\cdot\hat{\mathbf n}_{k+1},
+\qquad
+v_U^{k+1}=\mathbf v^\ast_{\text{ECEF}}\cdot\hat{\mathbf u}_{k+1}
+\]</span>
+        </div>
+        <p>
+          得到新 frame 下的三个速度分量后，再把它们还原成 `simulator.py` 使用的 \(V,\psi,\gamma\)。速度大小来自三维勾股定理：
+        </p>
+        <div class="formula">
+          <span>\[
+V_{k+1}
+=
+\sqrt{(v_E^{k+1})^2+(v_N^{k+1})^2+(v_U^{k+1})^2}
+\]</span>
+        </div>
+        <p>
+          \(\psi\) 是水平投影从 East 朝 North 转过的角，因此使用 \(\operatorname{atan2}(v_N,v_E)\)。\(\operatorname{atan2}(y,x)\) 比普通 \(\arctan(y/x)\) 更稳，因为它能判断象限，也能处理 \(x=0\) 的情况：
+        </p>
+        <div class="formula">
+          <span>\[
+\psi_{k+1}
+=
+\operatorname{atan2}(v_N^{k+1},v_E^{k+1})
+\]</span>
+        </div>
+        <p>
+          \(\gamma\) 是速度向量相对水平面的爬升角。水平速度大小是 \(\sqrt{v_E^2+v_N^2}\)，竖直速度是 \(v_U\)，所以：
+        </p>
+        <div class="formula">
+          <span>\[
+\gamma_{k+1}
+=
+\operatorname{atan2}\left(v_U^{k+1},\sqrt{(v_E^{k+1})^2+(v_N^{k+1})^2}\right)
+\]</span>
+        </div>
+        <div class="note">
+          这一步不是在重新计算空气动力学，也不是在额外改变飞机速度；它只是把同一个速度向量从旧局部坐标尺读成新局部坐标尺下的 \(V,\psi,\gamma\)。如果步长很小，差异会很小；但长期仿真时，这个投影能避免速度方向悄悄留在旧 frame 里。
+        </div>
+      </article>
+
+      <div class="grid-2">
+        <article class="card">
+          <h3>高度、密度和气动参数</h3>
+          <p>
+            局部积分内部的 \(z\) 是本步 Up 增量，不是绝对高度。气动模型需要绝对高度时，最简单近似是使用 \(h_k+z\)。如果步长较大或爬升率很高，可以在积分子步里临时做一次 \(x/y/z\rightarrow\) WGS84 转换，用子步得到的 \(h\) 查询大气密度。
+          </p>
+        </article>
+        <article class="card">
+          <h3>质量和控制输入</h3>
+          <p>
+            \(m\) 是质量，和坐标系无关，直接积分即可。thrust、load factor、bank angle 是动力学输入，不需要做 WGS84 坐标转换；但 bank 的正负号要和 \(\psi\) 或航空 heading \(\chi\) 的定义一致。
+          </p>
+        </article>
+      </div>
+
       <div class="warn">
         当前 `dpsidt` 为正时，\(\psi\) 从 East 转向 North，几何上是 ENU 平面里的逆时针转。如果你希望 `bank_rad > 0` 表示航空习惯的右坡度，并且使用 heading \(\chi\) 从 North 朝 East 增大，那么建议把状态角改成 \(\chi\)，并重新核对转弯率符号。
       </div>
     </section>
 
-    <section id="algorithm">
-      <h2>5. 一步积分时到底发生了什么</h2>
-      <ol class="card">
-        <li>当前状态是 \(P_k=(\phi_k,\lambda_k,h_k)\)，速度状态是 \(V_k,\psi_k,\gamma_k\)。</li>
-        <li>用 \(\phi_k\) 计算 \(M_k\) 和 \(\nu_k\)。</li>
-        <li>用 \(V_k,\psi_k,\gamma_k\) 得到局部速度 \(v_E,v_N,v_U\)。</li>
-        <li>用曲率公式得到 \(\dot\phi,\dot\lambda,\dot h\)。</li>
-        <li>用推力、阻力、载荷因子、bank angle 得到 \(\dot V,\dot\psi,\dot\gamma\)。</li>
-        <li>数值积分得到下一状态 \(\phi_{k+1},\lambda_{k+1},h_{k+1},V_{k+1},\psi_{k+1},\gamma_{k+1}\)。</li>
-        <li>需要 Cesium 或 ECEF 输出时，再把 \(\phi,\lambda,h\) 正算成 ECEF \((X,Y,Z)\)。</li>
-      </ol>
-
-      <div class="note">
-        这套方法看起来像“每一步都换 origin”，但实际上没有维护一个会被清零的局部位置状态。局部 frame 每一步只是当前点的方向标尺；真正被积分的位置是 \(\phi,\lambda,h\)。
-      </div>
-    </section>
-
     <section id="implementation">
-      <h2>6. 与当前代码最接近的实现骨架</h2>
+      <h2>7. 与当前代码最接近的实现骨架</h2>
       <div class="card">
         <p>
-          下面不是直接改代码，只是把 `simulator.py` 的位置导数替换成 WGS84 propagation 的最小形态。角度都用弧度，长度都用米。
+          下面不是直接改代码，而是展示主方案的数据流。角度都用弧度，长度都用米，并假设 ECEF 向量和 ENU 轴使用 NumPy 风格数组。核心思想是：局部 solver 仍然返回 \(x,y,z,V,\psi,\gamma,m\)，包装层负责 WGS84/ECEF 转换。
         </p>
-        <pre><code>def radii_of_curvature(phi):
-    s = math.sin(phi)
-    denom = 1.0 - WGS84_E2 * s * s
-    nu = WGS84_A / math.sqrt(denom)
-    M = WGS84_A * (1.0 - WGS84_E2) / (denom ** 1.5)
-    return M, nu
+        <pre><code>def local_dynamics(t, q, control, atmosphere, h_origin):
+    x, y, z, V, psi, gamma, m = q
 
-def dynamics_geodetic(t, state_vec, control, atmosphere):
-    phi, lam, h, V, psi, gamma, m = state_vec
-
-    rho = atmosphere.get_ISA_density(h)
-    Cl, Cd = get_aerodynamic_coefficients(h, V, m, control, atmosphere)
+    h_for_atmosphere = h_origin + z
+    rho = atmosphere.get_ISA_density(h_for_atmosphere)
+    Cl, Cd = get_aerodynamic_coefficients(h_for_atmosphere, V, m, control, atmosphere)
     D = 0.5 * rho * V**2 * Cd * S
 
-    M, nu = radii_of_curvature(phi)
-
-    v_E = V * math.cos(gamma) * math.cos(psi)
-    v_N = V * math.cos(gamma) * math.sin(psi)
-    v_U = V * math.sin(gamma)
-
-    dphidt = v_N / (M + h)
-    dlamdt = v_E / ((nu + h) * math.cos(phi))
-    dhdt = v_U
+    dxdt = V * math.cos(gamma) * math.cos(psi)
+    dydt = V * math.cos(gamma) * math.sin(psi)
+    dzdt = V * math.sin(gamma)
 
     dVdt = (control.thrust - D) / m - g * math.sin(gamma)
     dpsidt = g / (V * math.cos(gamma)) * math.sin(control.bank_rad) * control.load_factor
     dgamadt = g / V * (control.load_factor * math.cos(control.bank_rad) - math.cos(gamma))
     dmdt = 0.0
 
-    return [dphidt, dlamdt, dhdt, dVdt, dpsidt, dgamadt, dmdt]</code></pre>
-      </div>
+    return [dxdt, dydt, dzdt, dVdt, dpsidt, dgamadt, dmdt]
 
-      <div class="grid-2">
-        <article class="card">
-          <h3>输出到 ECEF</h3>
-          <p>
-            每个积分采样点都可以用正算公式得到 ECEF：
-          </p>
-          <div class="formula">
-            <span>\[
-\mathbf r_k=
-\mathbf r(\phi_k,\lambda_k,h_k)
-\]</span>
-          </div>
-          <p>
-            这样轨迹文件可以同时保存 WGS84 经纬高和 ECEF 米制直角坐标。
-          </p>
-        </article>
-        <article class="card">
-          <h3>接真实航向角</h3>
-          <p>
-            若外部数据给的是航空 heading \(\chi\)，即 \(0^\circ\) North、\(90^\circ\) East，则当前 \(\psi\) 约定下：
-          </p>
-          <div class="formula">
-            <span>\[
-\psi=\frac{\pi}{2}-\chi
-\]</span>
-          </div>
-          <p>
-            反过来输出 heading 时，\(\chi=\pi/2-\psi\)，然后归一化到 \([0,2\pi)\)。
-          </p>
-        </article>
+def propagate_one_step(world_state, control, dt, atmosphere):
+    phi, lam, h, V, psi, gamma, m = world_state
+    r0 = geodetic_to_ecef(phi, lam, h)
+    e0, n0, u0 = enu_axes(phi, lam)
+
+    q0 = [0.0, 0.0, 0.0, V, psi, gamma, m]
+    x, y, z, V_star, psi_star, gamma_star, m_next = integrate_local(q0, dt, control, atmosphere, h)
+
+    r1 = r0 + x * e0 + y * n0 + z * u0
+    phi1, lam1, h1 = ecef_to_geodetic(r1)
+
+    e1, n1, u1 = enu_axes(phi1, lam1)
+    v_ecef = (
+        V_star * math.cos(gamma_star) * math.cos(psi_star) * e0
+        + V_star * math.cos(gamma_star) * math.sin(psi_star) * n0
+        + V_star * math.sin(gamma_star) * u0
+    )
+    vE = dot(v_ecef, e1)
+    vN = dot(v_ecef, n1)
+    vU = dot(v_ecef, u1)
+
+    V1 = math.sqrt(vE * vE + vN * vN + vU * vU)
+    psi1 = math.atan2(vN, vE)
+    gamma1 = math.atan2(vU, math.sqrt(vE * vE + vN * vN))
+
+    return [phi1, lam1, h1, V1, psi1, gamma1, m_next]</code></pre>
       </div>
     </section>
 
     <section id="limits">
-      <h2>7. 适用边界和风险点</h2>
+      <h2>8. 适用边界和风险点</h2>
       <div class="grid-2">
         <article class="card">
           <h3>适合</h3>
@@ -825,17 +883,17 @@ def dynamics_geodetic(t, state_vec, control, atmosphere):
         <article class="card">
           <h3>小心</h3>
           <p>
-            靠近两极时 \(\cos\phi\) 很小，\(\dot\lambda\) 会变得数值敏感。长航程、高超声速或需要惯性导航级别精度时，应考虑 ECEF/ECI 向量动力学和地球自转项。
+            靠近两极时 \(\cos\phi\) 很小，longitude 和 East 方向都会变得数值敏感；直接 \(\Delta\lambda\) 或 \(\dot\lambda\) 公式尤其明显。长航程、高超声速或需要惯性导航级别精度时，应考虑 ECEF/ECI 向量动力学和地球自转项。
           </p>
         </article>
       </div>
       <div class="warn">
-        这套传播公式解决的是“位置沿椭球传播”的问题，不自动解决风场、气压高度与椭球高的差异、地形高度、地球自转、机体系姿态等问题。它是把当前点质量模型放到 WGS84 地球上的合理下一步，而不是完整飞行动力学仿真器。
+        这套局部增量转换方案解决的是“位置沿 WGS84 更新”的问题，不自动解决风场、气压高度与椭球高的差异、地形高度、地球自转、机体系姿态等问题。它是把当前点质量模型放到 WGS84 地球上的合理下一步，而不是完整飞行动力学仿真器。
       </div>
     </section>
 
     <section id="sources">
-      <h2>8. 来源与核对点</h2>
+      <h2>9. 来源与核对点</h2>
       <table>
         <thead>
           <tr>
@@ -850,7 +908,7 @@ def dynamics_geodetic(t, state_vec, control, atmosphere):
           </tr>
           <tr>
             <td><code>aerodynamic_model/simulator.py</code></td>
-            <td>保留 \(V,\psi,\gamma,m\) 和 thrust/bank/load factor 控制输入；替换 \(x,y\) 平面位置传播方式。</td>
+            <td>保留 \(x,y,z\) 局部增量、\(V,\psi,\gamma,m\) 和 thrust/bank/load factor 控制输入；在每步结束时把局部增量转换回 WGS84/ECEF。</td>
           </tr>
           <tr>
             <td>WGS84 椭球公式</td>
@@ -861,6 +919,47 @@ def dynamics_geodetic(t, state_vec, control, atmosphere):
       <p>
         图由 <code>generate_surface_frame_propagation_diagrams.py</code> 生成，SVG 资源位于 <code>assets/surface_frame_propagation/</code>。
       </p>
+    </section>
+
+    <section id="backup">
+      <h2>10. 备用方案：直接积分 \(\dot\phi,\dot\lambda,\dot h\)</h2>
+      <article class="card">
+        <p>
+          如果以后希望完全不维护局部 \(x,y,z\) 增量，也可以直接把局部速度换成 WGS84 变化率。这就是第 3.3 节推导的公式。它和主体方案在小步长下是一阶等价的，但实现形态不同：主体方案先得到局部位移再做 ECEF→WGS84 反算；备用方案直接把速度除以曲率半径，积分经纬高。
+        </p>
+        <div class="formula">
+          <span>\[
+v_E=V\cos\gamma\cos\psi,\qquad
+v_N=V\cos\gamma\sin\psi,\qquad
+v_U=V\sin\gamma
+\]</span>
+          <span>\[
+\dot\phi=\frac{v_N}{M+h},
+\qquad
+\dot\lambda=\frac{v_E}{(\nu+h)\cos\phi},
+\qquad
+\dot h=v_U
+\]</span>
+        </div>
+        <p>
+          这种写法的优点是状态方程很短，适合和 FAA ADM 2.8 公式逐项核对；缺点是它不再直接复用当前 simulator 的 \(x,y\) 位移输出。对你现在的代码而言，它更适合作为验证用的备用路径，而不是主实现。
+        </p>
+        <pre><code>def dynamics_geodetic_backup(t, state_vec, control, atmosphere):
+    phi, lam, h, V, psi, gamma, m = state_vec
+    M, nu = radii_of_curvature(phi)
+
+    vE = V * math.cos(gamma) * math.cos(psi)
+    vN = V * math.cos(gamma) * math.sin(psi)
+    vU = V * math.sin(gamma)
+
+    dphidt = vN / (M + h)
+    dlamdt = vE / ((nu + h) * math.cos(phi))
+    dhdt = vU
+
+    # V, psi, gamma, m keep the same dynamics as the local model.
+    ...
+    return [dphidt, dlamdt, dhdt, dVdt, dpsidt, dgamadt, dmdt]</code></pre>
+      </article>
     </section>
   </main>
 </body>

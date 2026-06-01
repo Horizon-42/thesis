@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 620" role="img" aria-labelledby="title">
-<title id="title">Flat xy state versus geodetic state</title>
+<title id="title">Per-step local xy increment versus geodetic state</title>
 <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#263548"/></marker></defs>
 <style>
 svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
@@ -26,12 +26,12 @@ svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
 .formula { fill: #263548; font: 600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 </style>
 <rect width="980" height="620" fill="#fbfdff"/>
-<text class="title" x="34" y="42">x/y 与 φ/λ 的区别：固定平面位移 vs 椭球上的位置状态</text>
-<text class="subtitle" x="34" y="66">x/y 是相对某个 origin 的米制局部坐标；φ/λ 是 WGS84 曲面上的全局角坐标</text>
+<text class="title" x="34" y="42">主方案：每步临时 x/y/z 增量，再转回 WGS84 位置</text>
+<text class="subtitle" x="34" y="66">x/y/z 是相对当前 origin 的单步局部坐标；φ/λ/h 是跨步骤保存的全局位置状态</text>
 <rect class="accent" x="48" y="112" width="402" height="350" rx="10"/>
 <rect class="warn" x="530" y="112" width="402" height="350" rx="10"/>
-<text class="label" x="76" y="148">固定 flat x/y 状态</text>
-<text class="label" x="558" y="148">WGS84 φ/λ/h 状态</text>
+<text class="label" x="76" y="148">本步临时 local x/y/z</text>
+<text class="label" x="558" y="148">跨步骤 WGS84 φ/λ/h</text>
 <line class="east" x1="244.0" y1="318.0" x2="394.0" y2="318.0"/>
 <line class="north" x1="244.0" y1="318.0" x2="244.0" y2="168.0"/>
 <circle class="surface" cx="244.0" cy="318.0" r="6"/>
@@ -41,9 +41,9 @@ svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
 <text class="teal" x="402.0" y="323.0">x / E meters</text>
 <text class="indigo" x="216.0" y="156.0">y / N meters</text>
 <text class="orange" x="216.0" y="346.0">O₀</text>
-<text class="label" x="348.0" y="230.0">P_flat(x,y)</text>
-<text class="formula" x="78" y="414">近似：Δφ≈y/(M₀+h₀)</text>
-<text class="formula" x="78" y="438">近似：Δλ≈x/((ν₀+h₀)cosφ₀)</text>
+<text class="label" x="348.0" y="230.0">Δp_local(x,y,z)</text>
+<text class="formula" x="78" y="414">每步开始：x=y=z=0</text>
+<text class="formula" x="78" y="438">每步结束：只取本步 x,y,z 增量</text>
 <ellipse class="helper" cx="730.0" cy="338.0" rx="155.0" ry="118.0"/>
 <path class="helper" d="M 593.0,266.0 C 690.0,248.0 770.0,284.0 867.0,266.0"/>
 <path class="helper" d="M 593.0,302.0 C 690.0,284.0 770.0,320.0 867.0,302.0"/>
@@ -57,11 +57,11 @@ svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
 <circle class="surface" cx="652.0" cy="376.0" r="6"/>
 <circle class="point" cx="786.0" cy="294.0" r="6"/>
 <path class="arrow" d="M 660.0,372.0 C 712.0,312.0 746.0,284.0 778.0,292.0"/>
-<text class="orange" x="614.0" y="404.0">P₀(φ₀,λ₀,h₀)</text>
-<text class="label" x="796.0" y="288.0">P(φ,λ,h)</text>
-<text class="formula" x="558" y="184">状态直接积分：φ_dot, λ_dot, h_dot</text>
-<text class="formula" x="558" y="208">每一步重新用当前 φ,λ 计算 M,ν,ê,n̂,û</text>
-<text class="formula" x="80" y="526">ENU→WGS84：r = r₀ + x ê₀ + y n̂₀ + z û₀，再做 ECEF→WGS84。</text>
-<text class="formula" x="80" y="554">WGS84→ENU：x=(r-r₀)·ê₀，y=(r-r₀)·n̂₀，z=(r-r₀)·û₀。</text>
-<text class="formula" x="80" y="582">转换只有数值误差；长期误差来自固定平面模型，不来自坐标公式本身。</text>
+<text class="orange" x="614.0" y="404.0">P_k(φ_k,λ_k,h_k)</text>
+<text class="label" x="796.0" y="288.0">P_next(φ,λ,h)</text>
+<text class="formula" x="558" y="184">权威位置：φ, λ, h 或 ECEF r</text>
+<text class="formula" x="558" y="208">下一步用新 φ,λ,h 重建 ê,n̂,û</text>
+<text class="formula" x="80" y="526">本步转换：r₁ = r₀ + x ê₀ + y n̂₀ + z û₀，再做 ECEF→WGS84。</text>
+<text class="formula" x="80" y="554">速度转换：v_ECEF → 投影到新 ê,n̂,û → 新 V,ψ,γ。</text>
+<text class="formula" x="80" y="582">Δφ/Δλ 公式是一阶近似；主方案保留 x/y 增量并走 ECEF 反算。</text>
 </svg>

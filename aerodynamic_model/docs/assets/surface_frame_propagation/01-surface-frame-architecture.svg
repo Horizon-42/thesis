@@ -26,38 +26,38 @@ svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
 .formula { fill: #263548; font: 600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 </style>
 <rect width="980" height="560" fill="#fbfdff"/>
-<text class="title" x="34" y="42">总体思路：局部 surface frame 算动力学，WGS84/ECEF 保存轨迹位置</text>
-<text class="subtitle" x="34" y="66">FAA ADM 2.8 的核心：平地球飞机方程仍在局部切平面里解释，地球曲率只进入位置传播</text>
+<text class="title" x="34" y="42">总体思路：每步局部 x/y/z 增量，转回 WGS84/ECEF 保存轨迹</text>
+<text class="subtitle" x="34" y="66">飞机方程仍在局部切平面里积分；局部 origin 每步更新，长期位置不累计在固定平面</text>
 <rect class="accent" x="42" y="122" width="212" height="92" rx="8"/>
 <text class="label" x="60" y="152">当前全球位置</text>
 <text class="teal" x="60" y="178">φ, λ, h</text>
 <text class="small" x="60" y="200">WGS84 geodetic</text>
 <rect class="box" x="298" y="122" width="212" height="92" rx="8"/>
-<text class="label" x="316" y="152">当前位置构造局部轴</text>
-<text class="teal" x="316" y="178">E,N,U 或 N,E,D</text>
-<text class="small" x="316" y="200">surface frame</text>
+<text class="label" x="316" y="152">本步 origin 和局部轴</text>
+<text class="teal" x="316" y="178">ê,n̂,û</text>
+<text class="small" x="316" y="200">from current φ,λ</text>
 <rect class="box" x="554" y="122" width="212" height="92" rx="8"/>
-<text class="label" x="572" y="152">飞机动力学</text>
-<text class="teal" x="572" y="178">V, ψ, γ, bank, n, T</text>
-<text class="small" x="572" y="200">local equations</text>
+<text class="label" x="572" y="152">局部 solver</text>
+<text class="teal" x="572" y="178">x,y,z,V,ψ,γ,m</text>
+<text class="small" x="572" y="200">same local equations</text>
 <rect class="box" x="298" y="298" width="212" height="92" rx="8"/>
-<text class="label" x="316" y="328">局部速度分量</text>
-<text class="teal" x="316" y="354">v_E, v_N, v_U</text>
-<text class="small" x="316" y="376">or Vx,Vy,-h_dot</text>
+<text class="label" x="316" y="328">本步局部增量</text>
+<text class="teal" x="316" y="354">Δr=x ê+y n̂+z û</text>
+<text class="small" x="316" y="376">ECEF vector</text>
 <rect class="box" x="554" y="298" width="212" height="92" rx="8"/>
-<text class="label" x="572" y="328">曲率半径传播</text>
-<text class="teal" x="572" y="354">φ_dot, λ_dot, h_dot</text>
-<text class="small" x="572" y="376">M, ν</text>
-<rect class="accent" x="810" y="298" width="128" height="92" rx="8"/>
-<text class="label" x="828" y="328">输出轨迹</text>
-<text class="teal" x="828" y="354">WGS84/ECEF</text>
-<text class="small" x="828" y="376">for Cesium</text>
+<text class="label" x="572" y="328">ECEF 更新</text>
+<text class="teal" x="572" y="354">r₁=r₀+Δr</text>
+<text class="small" x="572" y="376">then inverse WGS84</text>
+<rect class="box" x="810" y="298" width="128" height="92" rx="8"/>
+<text class="label" x="828" y="328">下一步</text>
+<text class="teal" x="828" y="354">new φ,λ,h</text>
+<text class="small" x="828" y="376">new origin</text>
 <path class="arrow" d="M254,168 L296,168"/>
 <path class="arrow" d="M510,168 L552,168"/>
 <path class="arrow" d="M660,214 L410,296"/>
 <path class="arrow" d="M510,344 L552,344"/>
 <path class="arrow" d="M766,344 L808,344"/>
-<text class="formula" x="74" y="468">不把 x,y 长期积在固定平面里；位置状态改成 φ,λ,h，或每步由 φ,λ,h 计算 ECEF r。</text>
-<text class="formula" x="74" y="494">动力学仍然输出局部水平/竖直速度；传播层把这些速度转换成经纬度变化率。</text>
-<text class="small" x="812" y="420">下一步：输出的 φ,λ,h 成为新的当前位置</text>
+<text class="formula" x="74" y="468">主方案：x,y,z 每步从 0 开始，只表示这一小步；WGS84/ECEF 才是长期轨迹状态。</text>
+<text class="formula" x="74" y="494">速度也要随新 frame 投影：v_ECEF → 新 ê,n̂,û → 新 V,ψ,γ。</text>
+<text class="small" x="718" y="420">下一步：新 φ,λ,h 成为新的 origin</text>
 </svg>
