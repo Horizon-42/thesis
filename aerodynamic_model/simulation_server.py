@@ -234,9 +234,17 @@ def _clamp(value: float, low: float, high: float) -> float:
 def _normalize_degrees(value: float) -> float:
     return value % 360.0
 
+def _safe_float(value: Any) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return float("nan")
+    return number if math.isfinite(number) else float("nan")
+
 class SimulationRequestHandler(BaseHTTPRequestHandler):
     session = SimulationSession()
     server_version = "AeroVizSimulationHTTP/0.1"
+    _live_log_active = False
 
     def do_OPTIONS(self) -> None:
         self._send_empty(204)
@@ -251,19 +259,76 @@ class SimulationRequestHandler(BaseHTTPRequestHandler):
         try:
             payload = self._read_json()
             if self.path == "/reset":
-                self._send_json(self.session.reset(payload))
+                snapshot = self.session.reset(payload)
+                self._send_json(snapshot)
+                self._log_snapshot("reset", snapshot)
                 return
             if self.path == "/step":
-                self._send_json(self.session.step(payload))
+                snapshot = self.session.step(payload)
+                self._send_json(snapshot)
+                self._log_snapshot("frame", snapshot)
                 return
             self._send_json({"ok": False, "error": "not found"}, status=404)
+            self._log_error(404, "not found")
         except ValueError as exc:
             self._send_json({"ok": False, "error": str(exc)}, status=400)
+            self._log_error(400, str(exc))
         except Exception as exc:
             self._send_json({"ok": False, "error": str(exc)}, status=500)
+            self._log_error(500, str(exc))
 
     def log_message(self, format: str, *args: Any) -> None:
-        sys.stderr.write("[simulation-server] " + format % args + "\n")
+        # Suppress BaseHTTPRequestHandler access logs such as:
+        # "POST /step HTTP/1.1" 200. The simulation logs below carry the
+        # per-frame state and error context that are useful while debugging.
+        return
+
+    def _log_snapshot(self, event: str, snapshot: dict[str, Any]) -> None:
+        state = _as_mapping(snapshot.get("state"))
+        control = _as_mapping(snapshot.get("control"))
+        aero = _as_mapping(snapshot.get("aero"))
+        elapsed = _safe_float(snapshot.get("elapsedS"))
+        line = (
+            "[simulation-server] "
+            f"{event} "
+            f"t={elapsed:.3f}s "
+            f"lat={_safe_float(state.get('lat')):.7f} "
+            f"lon={_safe_float(state.get('lon')):.7f} "
+            f"alt={_safe_float(state.get('altM')):.2f}m "
+            f"speed={_safe_float(state.get('speedMps')):.2f}m/s "
+            f"heading={_safe_float(state.get('headingDeg')):.2f}deg "
+            f"fpa={_safe_float(state.get('flightPathDeg')):.2f}deg "
+            f"mass={_safe_float(state.get('massKg')):.1f}kg "
+            f"thrust={_safe_float(control.get('thrustN')):.1f}N "
+            f"bank={_safe_float(control.get('bankDeg')):.2f}deg "
+            f"n={_safe_float(control.get('loadFactor')):.2f} "
+            f"Cl={_safe_float(aero.get('liftCoefficient')):.4f} "
+            f"Cd={_safe_float(aero.get('dragCoefficient')):.4f}"
+        )
+
+        if event == "frame":
+            sys.stderr.write("\r" + line + "\033[K")
+            sys.stderr.flush()
+            type(self)._live_log_active = True
+            return
+
+        self._finish_live_log_line()
+        sys.stderr.write(line + "\n")
+        sys.stderr.flush()
+
+    def _log_error(self, status: int, message: str) -> None:
+        self._finish_live_log_line()
+        sys.stderr.write(
+            "[simulation-server] "
+            f"error status={status} method={self.command} path={self.path} "
+            f"message={message}\n"
+        )
+        sys.stderr.flush()
+
+    def _finish_live_log_line(self) -> None:
+        if type(self)._live_log_active:
+            sys.stderr.write("\n")
+            type(self)._live_log_active = False
 
     def _read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
