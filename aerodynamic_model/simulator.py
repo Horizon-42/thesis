@@ -24,7 +24,7 @@ class State:
 class Control:
     thrust: float
     bank_rad: float # roll angle / bank angle in radians, mu
-    load_factor: float # n
+    attack_rad: float # angle of attack in radians, alpha
 
 class Atmosphere:
     rho0: float = 1.225 # sea level density in kg/m^3
@@ -53,48 +53,51 @@ class Simulator:
 
     S:float = ReferenceArea.NarrowBody_S # reference area for drag calculation, default to narrow-body
 
+    # Lift coefficients, these can be tuned or replaced with more complex models
+    CL0: float = 0.2 # zero angle of attack lift coefficient
+    CL_alpha: float = 5.7 # lift curve slope in per radian, typical for subsonic airfoils, can be tuned based on aircraft type
+
+    # Drag coefficients, these can be tuned or replaced with more complex models
     Cd0: float = 0.02 # zero-lift drag coefficient
     k: float = 0.04 # induced drag factor
 
     def __init__(self, S: float = ReferenceArea.NarrowBody_S):
         self.S = S
 
-    def _get_lift_coefficient(self, n:float, V:float, rho: float, m: float) -> float:
-        # Placeholder lift coefficient model, replace with actual lift calculation
-        # should depend on alpha
-        return 2 * m * self.g * n / (rho * V**2 * self.S)
-    
+    def _get_lift_coefficient(self, attack_angle: float) -> float: return self.CL0 + self.CL_alpha * attack_angle
 
     def _get_drag_coefficient(self, lift_coefficient: float) -> float: return self.Cd0 + self.k * lift_coefficient**2
 
-    def get_aerodynamic_coefficients(self, h: float, V: float, m: float, load_factor: float, rho: float) -> tuple:
-        Cl = self._get_lift_coefficient(load_factor, V, rho, m)
+    def get_aerodynamic_coefficients(self, attack_angle: float) -> tuple:
+        Cl = self._get_lift_coefficient(attack_angle)
         Cd = self._get_drag_coefficient(Cl)
         return Cl, Cd
+    
+    def get_aerodynamic_forces(self, V: float, attack_angle: float, atmosphere: Atmosphere, h: float) -> tuple:
+        rho = atmosphere.get_ISA_density(h)
+        Cl, Cd = self.get_aerodynamic_coefficients(attack_angle)
+        L = 0.5 * rho * V**2 * Cl * self.S
+        D = 0.5 * rho * V**2 * Cd * self.S
+        return L, D
+    
+    def get_load_factor(self, L: float, m: float) -> float:
+        return L / (m * self.g)
 
     def dynamics(self, t, state_vec, control: Control, atmosphere: Atmosphere):
         # Unpack state vector
         x, y, h, V, psi, gamma, m = state_vec
 
-        # Get atmospheric density
-        rho = atmosphere.get_ISA_density(h)
+        T, phi, alpha = control.thrust, control.bank_rad, control.attack_rad
 
-        Cl, Cd = self.get_aerodynamic_coefficients(h, V, m, control.load_factor, rho)
-
-        D = 0.5 * rho * V**2 * Cd * self.S 
-        # 1.41, bank 45, should be a level turn.
-
-        # Stall, max load factor
-
-        # maxmium lift coefficient,  1.5
+        L, D = self.get_aerodynamic_forces(V, control.attack_rad, atmosphere, h)
 
         # Compute state derivatives
         dxdt = V * math.cos(gamma) * math.cos(psi)
         dydt = V * math.cos(gamma) * math.sin(psi)
         dhdt = V * math.sin(gamma)
-        dVdt = (control.thrust - D) / m - self.g * math.sin(gamma)
-        dpsidt = self.g/(V * math.cos(gamma)) * math.sin(control.bank_rad) * control.load_factor
-        dgamadt = self.g / V * (control.load_factor * math.cos(control.bank_rad) - math.cos(gamma))
+        dVdt = (T * math.cos(alpha) - D) / m - self.g * math.sin(gamma)
+        dpsidt = (L + T * math.sin(alpha) * math.sin(phi)) / (m * V * math.cos(gamma))
+        dgamadt = ((L+ T * math.sin(alpha))*math.cos(phi) - m * self.g * math.cos(gamma)) / (m * V)
         dmdt = 0
 
         return [dxdt, dydt, dhdt, dVdt, dpsidt, dgamadt, dmdt]
