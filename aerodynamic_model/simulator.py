@@ -45,6 +45,9 @@ class Simulator:
     aircraft: AircraftSpec
     S: float # wing area in m^2, set by aircraft config
 
+    # Alpha max
+    alpha_max_rad: float = math.radians(18.0) # maximum angle of attack in radians, can be tuned based on aircraft type
+
     g: float = 9.81 # gravitational acceleration in m/s^2
 
     # Lift coefficients, these can be tuned or replaced with more complex models
@@ -59,9 +62,12 @@ class Simulator:
         self.aircraft = aircraft
         self.S = aircraft.wing_area_m2
 
-    def _get_lift_coefficient(self, attack_angle: float) -> float: return self.CL0 + self.CL_alpha * attack_angle
+    def _get_lift_coefficient(self, attack_angle: float) -> float: 
+        # need to consider stall behavior
+        return self.CL0 + self.CL_alpha * attack_angle
 
-    def _get_drag_coefficient(self, lift_coefficient: float) -> float: return self.Cd0 + self.k * lift_coefficient**2
+    def _get_drag_coefficient(self, lift_coefficient: float) -> float: 
+        return self.Cd0 + self.k * lift_coefficient**2
 
     def get_aerodynamic_coefficients(self, attack_angle: float) -> tuple:
         Cl = self._get_lift_coefficient(attack_angle)
