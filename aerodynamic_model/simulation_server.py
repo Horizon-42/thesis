@@ -1,4 +1,5 @@
 from coordinates_convertor import CoordinateConverter, GeodeticCoordinate, ECEFCoordinate, ENUCoordinate, ENUUnitVectors
+from aircraft_sets import AIRCRAFT_PRESETS, AircraftSpec, A320
 from simulator import Simulator, Control, Atmosphere, State
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -25,7 +26,7 @@ DEFAULT_STATE = GeodeticState(
     V=120.0,
     psi=0.0,
     gamma=0.0,
-    m=10000.0,
+    m=A320.mass_kg,
 )
 
 DEFAULT_CONTROL = Control(
@@ -33,13 +34,14 @@ DEFAULT_CONTROL = Control(
     bank_rad=0.0,
     attack_rad=0.0,
 )
+DEFAULT_AIRCRAFT_TYPE = A320.code
 
 DEFAULT_DT = 0.2
 MAX_DT = 2.0
 
 class SimulationServer():
-    def __init__(self):
-        self.simulator = Simulator()
+    def __init__(self, aircraft: AircraftSpec = A320):
+        self.simulator = Simulator(aircraft=aircraft)
         self.atmosphere = Atmosphere()
     
     @staticmethod
@@ -106,7 +108,12 @@ class SimulationServer():
         if not solution.success:
             raise ValueError(solution.message)
 
-        new_state_vec = [float(value) for value in solution.y[:, -1]]
+        if solution.y.shape[1] > 0:
+            new_state_vec = [float(value) for value in solution.y[:, -1]]
+        else:
+            raise ValueError("simulation stopped: altitude below 0")
+        if new_state_vec[2] < 0.0:
+            raise ValueError("simulation stopped: altitude below 0")
 
         # Convert back to geodetic coordinates
         new_enu_P = ENUCoordinate(new_state_vec[0], new_state_vec[1], new_state_vec[2])
@@ -146,17 +153,22 @@ class SimulationSession:
         payload = payload or {}
         state_payload = _as_mapping(payload.get("state"))
         control_payload = _as_mapping(payload.get("control"))
+        aircraft = _read_aircraft(state_payload, DEFAULT_AIRCRAFT_TYPE)
 
-        self.state = GeodeticState(
+        next_state = GeodeticState(
             latitude=_read_float(state_payload, "lat", DEFAULT_STATE.latitude),
             longitude=_read_float(state_payload, "lon", DEFAULT_STATE.longitude),
             altitude=max(0.0, _read_float(state_payload, "altM", DEFAULT_STATE.altitude)),
             V=max(1.0, _read_float(state_payload, "speedMps", DEFAULT_STATE.V)),
             psi=math.radians(_read_float(state_payload, "headingDeg", math.degrees(DEFAULT_STATE.psi))),
             gamma=math.radians(_read_float(state_payload, "flightPathDeg", math.degrees(DEFAULT_STATE.gamma))),
-            m=max(1.0, _read_float(state_payload, "massKg", DEFAULT_STATE.m)),
+            m=aircraft.mass_kg,
         )
-        self.control = _read_control(control_payload, DEFAULT_CONTROL)
+        next_control = _read_control(control_payload, DEFAULT_CONTROL)
+
+        self.server = SimulationServer(aircraft)
+        self.state = next_state
+        self.control = next_control
         self.elapsed = 0.0
         return self.snapshot()
 
@@ -183,6 +195,7 @@ class SimulationSession:
                 "headingDeg": _normalize_degrees(math.degrees(self.state.psi)),
                 "flightPathDeg": math.degrees(self.state.gamma),
                 "massKg": self.state.m,
+                "aircraftType": self.server.simulator.aircraft.code,
             },
             "control": {
                 "thrustN": self.control.thrust,
@@ -223,6 +236,33 @@ def _read_control(payload: dict[str, Any], fallback: Control) -> Control:
         )),
     )
 
+def _read_aircraft(payload: dict[str, Any], default_code: str) -> AircraftSpec:
+    value = payload.get("aircraftType", default_code)
+    if not isinstance(value, str):
+        raise ValueError("aircraftType must be a string")
+
+    code = value.strip().upper()
+    aircraft = AIRCRAFT_PRESETS.get(code)
+    if aircraft is None:
+        valid_codes = ", ".join(sorted(AIRCRAFT_PRESETS))
+        raise ValueError(f"aircraftType must be one of {valid_codes}")
+    return aircraft
+
+def _aircraft_catalog() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "aircraft": [
+            {
+                "code": aircraft.code,
+                "name": aircraft.name,
+                "category": aircraft.category,
+                "massKg": aircraft.mass_kg,
+                "wingAreaM2": aircraft.wing_area_m2,
+            }
+            for aircraft in AIRCRAFT_PRESETS.values()
+        ],
+    }
+
 def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
@@ -247,6 +287,9 @@ class SimulationRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path == "/health":
             self._send_json({"ok": True, "service": "aeroviz-simulation"})
+            return
+        if self.path == "/aircraft":
+            self._send_json(_aircraft_catalog())
             return
         self._send_json({"ok": False, "error": "not found"}, status=404)
 
@@ -294,6 +337,7 @@ class SimulationRequestHandler(BaseHTTPRequestHandler):
             f"heading={_safe_float(state.get('headingDeg')):.2f}deg "
             f"fpa={_safe_float(state.get('flightPathDeg')):.2f}deg "
             f"mass={_safe_float(state.get('massKg')):.1f}kg "
+            f"type={state.get('aircraftType', 'n/a')} "
             f"thrust={_safe_float(control.get('thrustN')):.1f}N "
             f"bank={_safe_float(control.get('bankDeg')):.2f}deg "
             f"alpha={_safe_float(control.get('attackDeg')):.2f}deg "

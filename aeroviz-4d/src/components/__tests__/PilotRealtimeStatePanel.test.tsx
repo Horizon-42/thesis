@@ -13,7 +13,8 @@ const snapshot: PilotSnapshot = {
     speedMps: 121.5,
     headingDeg: -14.2,
     flightPathDeg: 2.25,
-    massKg: 10000,
+    massKg: 78000,
+    aircraftType: "A320",
   },
   control: {
     thrustN: 12000,

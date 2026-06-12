@@ -4,6 +4,16 @@ export interface PilotControls {
   attackDeg: number;
 }
 
+export type PilotAircraftType = string;
+
+export interface PilotAircraftConfig {
+  code: PilotAircraftType;
+  name: string;
+  category: string;
+  massKg: number;
+  wingAreaM2: number;
+}
+
 export interface PilotResetState {
   lon: number;
   lat: number;
@@ -12,6 +22,7 @@ export interface PilotResetState {
   headingDeg: number;
   flightPathDeg: number;
   massKg: number;
+  aircraftType: PilotAircraftType;
 }
 
 export interface PilotSnapshot {
@@ -47,6 +58,17 @@ export async function stepPilotSimulation(
   dtS: number,
 ): Promise<PilotSnapshot> {
   return postPilot("/step", { control, dtS });
+}
+
+export async function fetchPilotAircraftConfigs(): Promise<PilotAircraftConfig[]> {
+  const response = await fetch(`${PILOT_SERVER_URL}/aircraft`);
+  const data = await response.json() as unknown;
+
+  if (!response.ok) {
+    const message = readPilotError(data) ?? `Pilot server returned ${response.status}`;
+    throw new Error(message);
+  }
+  return parsePilotAircraftConfigs(data);
 }
 
 async function postPilot(path: string, payload: unknown): Promise<PilotSnapshot> {
@@ -92,6 +114,7 @@ function parsePilotSnapshot(value: unknown): PilotSnapshot {
       headingDeg: readNumber(state, "headingDeg"),
       flightPathDeg: readNumber(state, "flightPathDeg"),
       massKg: readNumber(state, "massKg"),
+      aircraftType: readString(state, "aircraftType"),
     },
     control: {
       thrustN: readNumber(control, "thrustN"),
@@ -105,6 +128,25 @@ function parsePilotSnapshot(value: unknown): PilotSnapshot {
   };
 }
 
+function parsePilotAircraftConfigs(value: unknown): PilotAircraftConfig[] {
+  if (!isRecord(value) || value.ok !== true || !Array.isArray(value.aircraft)) {
+    throw new Error("Pilot server returned invalid aircraft config");
+  }
+
+  return value.aircraft.map((item) => {
+    if (!isRecord(item)) {
+      throw new Error("Pilot server returned invalid aircraft config");
+    }
+    return {
+      code: readString(item, "code"),
+      name: readString(item, "name"),
+      category: readString(item, "category"),
+      massKg: readNumber(item, "massKg"),
+      wingAreaM2: readNumber(item, "wingAreaM2"),
+    };
+  });
+}
+
 function readRecord(value: Record<string, unknown>, key: string): Record<string, unknown> {
   const nested = value[key];
   if (!isRecord(nested)) {
@@ -116,6 +158,14 @@ function readRecord(value: Record<string, unknown>, key: string): Record<string,
 function readNumber(value: Record<string, unknown>, key: string): number {
   const nested = value[key];
   if (typeof nested !== "number" || !Number.isFinite(nested)) {
+    throw new Error(`Pilot server response has invalid ${key}`);
+  }
+  return nested;
+}
+
+function readString(value: Record<string, unknown>, key: string): string {
+  const nested = value[key];
+  if (typeof nested !== "string" || nested.length === 0) {
     throw new Error(`Pilot server response has invalid ${key}`);
   }
   return nested;

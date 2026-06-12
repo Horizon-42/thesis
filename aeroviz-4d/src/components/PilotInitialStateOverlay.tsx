@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
-import type { PilotResetState } from "../pilot/pilotClient";
+import {
+  type PilotAircraftConfig,
+  type PilotAircraftType,
+  type PilotResetState,
+} from "../pilot/pilotClient";
 
 const UNBOUNDED_MIN = Number.NEGATIVE_INFINITY;
 const UNBOUNDED_MAX = Number.POSITIVE_INFINITY;
@@ -9,13 +13,13 @@ export type PilotInitialEditableKey =
   | "altM"
   | "headingDeg"
   | "flightPathDeg"
-  | "speedMps"
-  | "massKg";
+  | "speedMps";
 
 interface PilotInitialStateOverlayProps {
   open: boolean;
   isPlacing: boolean;
   state: PilotResetState;
+  aircraftConfigs: PilotAircraftConfig[];
   disabled: boolean;
   onClose: () => void;
   onPlaceToggle: () => void;
@@ -25,6 +29,7 @@ interface PilotInitialStateOverlayProps {
     min: number,
     max: number,
   ) => void;
+  onAircraftTypeChange: (aircraftType: PilotAircraftType) => void;
 }
 
 interface EnglishNumberInputProps {
@@ -40,10 +45,12 @@ export default function PilotInitialStateOverlay({
   open,
   isPlacing,
   state,
+  aircraftConfigs,
   disabled,
   onClose,
   onPlaceToggle,
   onFieldChange,
+  onAircraftTypeChange,
 }: PilotInitialStateOverlayProps) {
   if (!open) return null;
 
@@ -76,6 +83,26 @@ export default function PilotInitialStateOverlay({
         </section>
 
         <section className="pilot-initial-fields" aria-label="Initial state values">
+          <label>
+            <span>Type</span>
+            <select
+              className="pilot-select-input"
+              value={state.aircraftType}
+              disabled={disabled || aircraftConfigs.length === 0}
+              onChange={(event) =>
+                onAircraftTypeChange(event.target.value as PilotAircraftType)
+              }
+            >
+              {aircraftConfigs.length === 0 ? (
+                <option value="">Unavailable</option>
+              ) : null}
+              {aircraftConfigs.map((aircraft) => (
+                <option key={aircraft.code} value={aircraft.code}>
+                  {aircraft.code}
+                </option>
+              ))}
+            </select>
+          </label>
           <label>
             <span>Alt m</span>
             <EnglishNumberInput
@@ -126,14 +153,9 @@ export default function PilotInitialStateOverlay({
           </label>
           <label>
             <span>Mass kg</span>
-            <EnglishNumberInput
-              value={state.massKg}
-              min={1}
-              max={UNBOUNDED_MAX}
-              step="1"
-              disabled={disabled}
-              onCommit={(value) => onFieldChange("massKg", value, 1, UNBOUNDED_MAX)}
-            />
+            <output className="pilot-number-input">
+              {formatNumberInputValue(state.massKg)}
+            </output>
           </label>
         </section>
       </div>

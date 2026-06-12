@@ -19,6 +19,7 @@ from simulation_server import (  # noqa: E402
     make_request_handler,
 )
 from coordinates_convertor import GeodeticCoordinate  # noqa: E402
+from aircraft_sets import B77W  # noqa: E402
 from simulator import Control  # noqa: E402
 
 
@@ -85,6 +86,21 @@ class TestSimulationServerCore(unittest.TestCase):
         self.assertAlmostEqual(next_state.latitude, state.latitude, places=6)
         self.assertGreater(next_state.V, 0.0)
 
+    def test_step_stops_when_altitude_reaches_ground(self):
+        server = SimulationServer()
+        state = GeodeticState(
+            latitude=0.0,
+            longitude=0.0,
+            altitude=5.0,
+            V=120.0,
+            psi=0.0,
+            gamma=math.radians(-20.0),
+            m=10000.0,
+        )
+
+        with self.assertRaisesRegex(ValueError, "altitude below 0"):
+            server.step(state, Control(0.0, 0.0, math.radians(-10.0)), 1.0)
+
     def test_session_reset_reads_frontend_payload_names(self):
         # This protects the browser/server JSON boundary without bypassing field mapping.
         session = SimulationSession()
@@ -98,6 +114,7 @@ class TestSimulationServerCore(unittest.TestCase):
                 "headingDeg": 12.0,
                 "flightPathDeg": -3.0,
                 "massKg": 12000.0,
+                "aircraftType": "B77W",
             },
             "control": {
                 "thrustN": 15000.0,
@@ -111,6 +128,9 @@ class TestSimulationServerCore(unittest.TestCase):
         self.assertAlmostEqual(snapshot["state"]["lon"], -114.0203)
         self.assertAlmostEqual(snapshot["state"]["lat"], 51.1139)
         self.assertAlmostEqual(snapshot["state"]["headingDeg"], 12.0)
+        self.assertEqual(snapshot["state"]["aircraftType"], "B77W")
+        self.assertAlmostEqual(snapshot["state"]["massKg"], B77W.mass_kg)
+        self.assertEqual(session.server.simulator.aircraft, B77W)
         self.assertAlmostEqual(snapshot["control"]["bankDeg"], 5.0)
         self.assertAlmostEqual(snapshot["control"]["attackDeg"], 4.0)
         self.assertAlmostEqual(
@@ -130,7 +150,8 @@ class TestSimulationServerCore(unittest.TestCase):
                 "speedMps": 120.0,
                 "headingDeg": 0.0,
                 "flightPathDeg": 0.0,
-                "massKg": 10000.0,
+                "massKg": 78000.0,
+                "aircraftType": "A320",
             }
         })
 
@@ -163,6 +184,19 @@ class TestSimulationHttpApi(unittest.TestCase):
         self.assertEqual(response.status, 200)
         self.assertEqual(payload, {"ok": True, "service": "aeroviz-simulation"})
 
+    def test_aircraft_endpoint_returns_backend_aircraft_config(self):
+        with request.urlopen(f"{self.base_url}/aircraft", timeout=2) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        by_code = {
+            aircraft["code"]: aircraft
+            for aircraft in payload["aircraft"]
+        }
+        self.assertEqual(response.status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertAlmostEqual(by_code["B77W"]["massKg"], B77W.mass_kg)
+        self.assertAlmostEqual(by_code["B77W"]["wingAreaM2"], B77W.wing_area_m2)
+
     def test_reset_endpoint_returns_frontend_snapshot_shape(self):
         # This protects the real HTTP input/output shape consumed by pilotClient.ts.
         payload = {
@@ -173,7 +207,8 @@ class TestSimulationHttpApi(unittest.TestCase):
                 "speedMps": 120.0,
                 "headingDeg": 0.0,
                 "flightPathDeg": 0.0,
-                "massKg": 10000.0,
+                "massKg": 78000.0,
+                "aircraftType": "A320",
             }
         }
 
@@ -184,6 +219,7 @@ class TestSimulationHttpApi(unittest.TestCase):
         self.assertIn("control", response_payload)
         self.assertIn("aero", response_payload)
         self.assertEqual(response_payload["state"]["lon"], 0.0)
+        self.assertEqual(response_payload["state"]["aircraftType"], "A320")
 
     def _post_json(self, path: str, payload: dict) -> dict:
         body = json.dumps(payload).encode("utf-8")

@@ -14,17 +14,20 @@ import {
 } from "../hooks/usePilotInitialPlacement";
 import {
   PILOT_SERVER_URL,
+  fetchPilotAircraftConfigs,
   resetPilotSimulation,
   stepPilotSimulation,
+  type PilotAircraftConfig,
+  type PilotAircraftType,
   type PilotControls,
   type PilotResetState,
   type PilotSnapshot,
 } from "../pilot/pilotClient";
 
 const DEFAULT_CONTROLS: PilotControls = {
-  thrustN: 12000,
+  thrustN: 43441,
   bankDeg: 0,
-  attackDeg: 0,
+  attackDeg: 5.783,
 };
 const DEFAULT_FRAME_DT_S = 0.2;
 const STEP_INTERVAL_MS = 120;
@@ -49,6 +52,7 @@ export default function PilotPanel() {
   const [isFollowing, setIsFollowing] = useState(true);
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [aircraftConfigs, setAircraftConfigs] = useState<PilotAircraftConfig[]>([]);
   const [controls, setControls] = useState<PilotControls>(DEFAULT_CONTROLS);
   const [frameDtS, setFrameDtS] = useState(DEFAULT_FRAME_DT_S);
   const [snapshot, setSnapshot] = useState<PilotSnapshot | null>(null);
@@ -60,7 +64,7 @@ export default function PilotPanel() {
   const placementBackupRef = useRef<PlacementBackup | null>(null);
 
   const [initialState, setInitialState] = useState<PilotResetState>(() =>
-    makeDefaultInitialState(null),
+    makeDefaultInitialState(null, null),
   );
 
   const pose = snapshotToPose(snapshot);
@@ -110,13 +114,13 @@ export default function PilotPanel() {
   }, []);
 
   const openInitialEditor = useCallback(() => {
-    if (isFlying || isBusy) return;
+    if (isFlying || isBusy || aircraftConfigs.length === 0) return;
 
     setError(null);
     setIsInitialEditorOpen(true);
     setIsInitialPreviewVisible(true);
     clearSnapshotForInitialEdit();
-  }, [clearSnapshotForInitialEdit, isBusy, isFlying]);
+  }, [aircraftConfigs.length, clearSnapshotForInitialEdit, isBusy, isFlying]);
 
   const closeInitialEditor = useCallback(() => {
     if (isPlacingInitialPosition) {
@@ -133,7 +137,7 @@ export default function PilotPanel() {
       return;
     }
 
-    if (isFlying || isBusy) return;
+    if (isFlying || isBusy || aircraftConfigs.length === 0) return;
 
     placementBackupRef.current = {
       initialState,
@@ -159,6 +163,7 @@ export default function PilotPanel() {
     isPlacingInitialPosition,
     snapshot,
     trail,
+    aircraftConfigs.length,
   ]);
 
   usePilotInitialPlacement({
@@ -181,7 +186,7 @@ export default function PilotPanel() {
 
   useEffect(() => {
     placementBackupRef.current = null;
-    setInitialState(makeDefaultInitialState(airport));
+    setInitialState(makeDefaultInitialState(airport, aircraftConfigs[0] ?? null));
     setIsInitialEditorOpen(false);
     setIsPlacingInitialPosition(false);
     setIsInitialPreviewVisible(false);
@@ -189,7 +194,27 @@ export default function PilotPanel() {
     setIsEnabled(false);
     setSnapshot(null);
     setTrail([]);
-  }, [airport]);
+  }, [airport, aircraftConfigs]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void fetchPilotAircraftConfigs()
+      .then((configs) => {
+        if (cancelled) return;
+        setAircraftConfigs(configs);
+        setError(null);
+      })
+      .catch((configError: unknown) => {
+        if (cancelled) return;
+        setAircraftConfigs([]);
+        setError(toErrorMessage(configError));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     controlsRef.current = controls;
@@ -361,6 +386,21 @@ export default function PilotPanel() {
     clearSnapshotForInitialEdit();
   }
 
+  function updateAircraftType(aircraftType: PilotAircraftType) {
+    if (isFlying) return;
+
+    const aircraft = aircraftConfigs.find((config) => config.code === aircraftType);
+    if (!aircraft) return;
+
+    setInitialState((current) => ({
+      ...current,
+      aircraftType: aircraft.code,
+      massKg: aircraft.massKg,
+    }));
+    setIsInitialPreviewVisible(true);
+    clearSnapshotForInitialEdit();
+  }
+
   function updateFrameDt(value: number) {
     if (!Number.isFinite(value)) return;
     setFrameDtS(clamp(value, 0.02, 0.5));
@@ -387,7 +427,8 @@ export default function PilotPanel() {
         : snapshot
           ? "Paused"
           : "Standby";
-  const initialControlsDisabled = isFlying || isBusy;
+  const hasAircraftConfigs = aircraftConfigs.length > 0;
+  const initialControlsDisabled = isFlying || isBusy || !hasAircraftConfigs;
 
   return (
     <div className="pilot-panel">
@@ -432,6 +473,10 @@ export default function PilotPanel() {
             <dd>{formatNumberInputValue(initialState.altM)} m</dd>
           </div>
           <div>
+            <dt>Type</dt>
+            <dd>{initialState.aircraftType}</dd>
+          </div>
+          <div>
             <dt>Psi</dt>
             <dd>{formatNumberInputValue(initialState.headingDeg)} deg</dd>
           </div>
@@ -454,17 +499,19 @@ export default function PilotPanel() {
         open={isInitialEditorOpen}
         isPlacing={isPlacingInitialPosition}
         state={initialState}
+        aircraftConfigs={aircraftConfigs}
         disabled={initialControlsDisabled}
         onClose={closeInitialEditor}
         onPlaceToggle={toggleInitialPlacement}
         onFieldChange={updateInitialField}
+        onAircraftTypeChange={updateAircraftType}
       />
 
       <div className="pilot-actions">
         <button
           className="pilot-primary-button"
           onClick={startPilot}
-          disabled={isBusy || isFlying || isPlacingInitialPosition}
+          disabled={isBusy || isFlying || isPlacingInitialPosition || !hasAircraftConfigs}
         >
           {snapshot ? "Resume" : "Start"}
         </button>
@@ -474,7 +521,10 @@ export default function PilotPanel() {
         >
           Pause
         </button>
-        <button onClick={resetPilot} disabled={isBusy || isPlacingInitialPosition}>
+        <button
+          onClick={resetPilot}
+          disabled={isBusy || isPlacingInitialPosition || !hasAircraftConfigs}
+        >
           Reset
         </button>
         <button
@@ -594,6 +644,7 @@ export default function PilotPanel() {
 
 function makeDefaultInitialState(
   airport: { lon: number; lat: number } | null,
+  aircraft: PilotAircraftConfig | null,
 ): PilotResetState {
   return {
     lon: airport?.lon ?? -78.7873,
@@ -602,7 +653,8 @@ function makeDefaultInitialState(
     speedMps: 120,
     headingDeg: 0,
     flightPathDeg: 0,
-    massKg: 10000,
+    massKg: aircraft?.massKg ?? 0,
+    aircraftType: aircraft?.code ?? "",
   };
 }
 

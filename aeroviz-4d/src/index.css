@@ -1611,7 +1611,7 @@ body,
 
 .pilot-initial-fields {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 7px;
 }
 
@@ -1704,7 +1704,9 @@ body,
   color: #cbd5e1;
 }
 
-.pilot-number-input {
+.pilot-number-input,
+.pilot-select-input {
+  display: block;
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
@@ -1714,6 +1716,10 @@ body,
   color: #e0f2fe;
   padding: 4px 5px;
   font: 11px "Courier New", monospace;
+}
+
+.pilot-select-input:disabled {
+  opacity: 0.5;
 }
 
 .pilot-panel input[type="checkbox"] {

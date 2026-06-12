@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  fetchPilotAircraftConfigs,
   resetPilotSimulation,
   stepPilotSimulation,
   type PilotControls,
+  type PilotAircraftConfig,
   type PilotResetState,
 } from "../pilotClient";
 
@@ -13,7 +15,8 @@ const state: PilotResetState = {
   speedMps: 135,
   headingDeg: 12,
   flightPathDeg: -3,
-  massKg: 12000,
+  massKg: 351530,
+  aircraftType: "B77W",
 };
 
 const control: PilotControls = {
@@ -21,6 +24,23 @@ const control: PilotControls = {
   bankDeg: 5,
   attackDeg: 4,
 };
+
+const aircraftConfigs: PilotAircraftConfig[] = [
+  {
+    code: "A320",
+    name: "Airbus A320-200",
+    category: "narrow_body",
+    massKg: 78000,
+    wingAreaM2: 122.6,
+  },
+  {
+    code: "B77W",
+    name: "Boeing 777-300ER",
+    category: "wide_body",
+    massKg: 351530,
+    wingAreaM2: 436.8,
+  },
+];
 
 const snapshot = {
   ok: true,
@@ -68,6 +88,16 @@ describe("pilotClient", () => {
         body: JSON.stringify({ control, dtS: 0.2 }),
       }),
     );
+  });
+
+  it("loads aircraft configs from the pilot server", async () => {
+    const payload = { ok: true, aircraft: aircraftConfigs };
+    const fetchMock = mockFetch(payload);
+
+    const result = await fetchPilotAircraftConfigs();
+
+    expect(result).toEqual(aircraftConfigs);
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8765/aircraft");
   });
 
   it("throws the server error message when the response is not ok", async () => {
