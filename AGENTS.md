@@ -93,6 +93,16 @@ Static data follows a similar pattern: OurAirports CSV → `preprocess_airports.
 - Vite config uses `vite-plugin-cesium` which handles Cesium asset copying and `CESIUM_BASE_URL` setup
 - TypeScript strict mode is enabled (strict null checks, noUnusedLocals, noUnusedParameters)
 - Test environment: jsdom with vitest globals enabled
+- Run all Python scripts and Python tests in the conda `aviation` environment.
+- Use `conda run -n aviation ...` for non-interactive Python test commands.
+- In this workspace, `conda run -n aviation python` may resolve to Homebrew Python instead of the conda environment interpreter. Prefer `/Users/liudongxu/opt/miniconda3/envs/aviation/bin/python3.13` for scripts and `conda run -n aviation pytest ...` for tests.
+- Do not run project Python commands with the system Python, Homebrew Python, or an unqualified `python` command.
+
+## Change Scope
+
+- Each turn must only make the changes explicitly requested by the user.
+- Do not modify additional files, modules, APIs, tests, or docs merely to make broader test suites pass or to synchronize adjacent code.
+- If a requested change exposes unrelated failures or stale interfaces, report them clearly instead of fixing them without explicit permission.
 
 ## Domain Context
 
