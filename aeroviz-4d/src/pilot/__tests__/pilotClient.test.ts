@@ -19,7 +19,7 @@ const state: PilotResetState = {
 const control: PilotControls = {
   thrustN: 15000,
   bankDeg: 5,
-  loadFactor: 1.1,
+  attackDeg: 4,
 };
 
 const snapshot = {

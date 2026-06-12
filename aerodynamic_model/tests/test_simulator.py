@@ -9,7 +9,8 @@ MODEL_DIR = Path(__file__).resolve().parents[1]
 if str(MODEL_DIR) not in sys.path:
     sys.path.insert(0, str(MODEL_DIR))
 
-from simulator import Atmosphere, Control, ReferenceArea, Simulator, State  # noqa: E402
+from aircraft_sets import A320  # noqa: E402
+from simulator import Atmosphere, Control, Simulator, State  # noqa: E402
 
 
 class TestAlphaInputSimulator(unittest.TestCase):
@@ -47,7 +48,7 @@ class TestAlphaInputSimulator(unittest.TestCase):
 
         rho = self.atmosphere.get_ISA_density(h)
         Cl, Cd = self.simulator.get_aerodynamic_coefficients(alpha)
-        dynamic_pressure_area = 0.5 * rho * V**2 * ReferenceArea.NarrowBody_S
+        dynamic_pressure_area = 0.5 * rho * V**2 * A320.wing_area_m2
         self.assertAlmostEqual(lift, dynamic_pressure_area * Cl)
         self.assertAlmostEqual(drag, dynamic_pressure_area * Cd)
         self.assertAlmostEqual(load_factor, lift / (m * self.simulator.g))

@@ -1,5 +1,5 @@
 from coordinates_convertor import CoordinateConverter, GeodeticCoordinate, ECEFCoordinate, ENUCoordinate, ENUUnitVectors
-from simulator import Simulator, Control, Atmosphere, ReferenceArea, State
+from simulator import Simulator, Control, Atmosphere, State
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import argparse
@@ -31,15 +31,15 @@ DEFAULT_STATE = GeodeticState(
 DEFAULT_CONTROL = Control(
     thrust=12000.0,
     bank_rad=0.0,
-    load_factor=1.0,
+    attack_rad=0.0,
 )
 
 DEFAULT_DT = 0.2
 MAX_DT = 2.0
 
 class SimulationServer():
-    def __init__(self, S: float = ReferenceArea.NarrowBody_S):
-        self.simulator = Simulator(S)
+    def __init__(self):
+        self.simulator = Simulator()
         self.atmosphere = Atmosphere()
     
     @staticmethod
@@ -169,13 +169,8 @@ class SimulationSession:
         return self.snapshot()
 
     def snapshot(self) -> dict[str, Any]:
-        rho = self.server.atmosphere.get_ISA_density(self.state.altitude)
         Cl, Cd = self.server.simulator.get_aerodynamic_coefficients(
-            self.state.altitude,
-            self.state.V,
-            self.state.m,
-            self.control.load_factor,
-            rho,
+            self.control.attack_rad,
         )
         return {
             "ok": True,
@@ -192,7 +187,7 @@ class SimulationSession:
             "control": {
                 "thrustN": self.control.thrust,
                 "bankDeg": math.degrees(self.control.bank_rad),
-                "loadFactor": self.control.load_factor,
+                "attackDeg": math.degrees(self.control.attack_rad),
             },
             "aero": {
                 "liftCoefficient": Cl,
@@ -221,11 +216,11 @@ def _read_control(payload: dict[str, Any], fallback: Control) -> Control:
             -60.0,
             60.0,
         )),
-        load_factor=_clamp(
-            _read_float(payload, "loadFactor", fallback.load_factor),
-            0.2,
-            3.0,
-        ),
+        attack_rad=math.radians(_clamp(
+            _read_float(payload, "attackDeg", math.degrees(fallback.attack_rad)),
+            -10.0,
+            18.0,
+        )),
     )
 
 def _clamp(value: float, low: float, high: float) -> float:
@@ -301,7 +296,7 @@ class SimulationRequestHandler(BaseHTTPRequestHandler):
             f"mass={_safe_float(state.get('massKg')):.1f}kg "
             f"thrust={_safe_float(control.get('thrustN')):.1f}N "
             f"bank={_safe_float(control.get('bankDeg')):.2f}deg "
-            f"n={_safe_float(control.get('loadFactor')):.2f} "
+            f"alpha={_safe_float(control.get('attackDeg')):.2f}deg "
             f"Cl={_safe_float(aero.get('liftCoefficient')):.4f} "
             f"Cd={_safe_float(aero.get('dragCoefficient')):.4f}"
         )

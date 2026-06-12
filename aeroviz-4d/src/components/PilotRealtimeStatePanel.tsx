@@ -40,6 +40,10 @@ export default function PilotRealtimeStatePanel({
           value={`${snapshot.state.flightPathDeg.toFixed(2)} deg`}
         />
         <RealtimeReadout
+          label="Attack Angle (alpha)"
+          value={`${snapshot.control.attackDeg.toFixed(2)} deg`}
+        />
+        <RealtimeReadout
           label="Lift Coefficient"
           value={snapshot.aero.liftCoefficient.toFixed(3)}
         />

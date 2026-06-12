@@ -10,6 +10,7 @@ export interface PilotAircraftPose {
   headingDeg: number;
   flightPathDeg: number;
   bankDeg: number;
+  attackDeg: number;
 }
 
 interface UsePilotAircraftOptions {
@@ -55,7 +56,7 @@ export function usePilotAircraft({
       position,
       new Cesium.HeadingPitchRoll(
         Cesium.Math.toRadians(-pose.headingDeg),
-        Cesium.Math.toRadians(pose.flightPathDeg),
+        Cesium.Math.toRadians(pose.flightPathDeg + pose.attackDeg),
         Cesium.Math.toRadians(-pose.bankDeg),
       ),
     );

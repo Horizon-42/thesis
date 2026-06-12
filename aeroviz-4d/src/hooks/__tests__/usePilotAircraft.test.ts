@@ -115,6 +115,7 @@ describe("usePilotAircraft", () => {
           headingDeg: 10,
           flightPathDeg: 0,
           bankDeg: 0,
+          attackDeg: 0,
         },
         trail: [],
         follow: false,
@@ -136,6 +137,7 @@ describe("usePilotAircraft", () => {
           headingDeg: 0,
           flightPathDeg: 0,
           bankDeg: 12,
+          attackDeg: 0,
         },
         trail: [],
         follow: false,
@@ -143,6 +145,27 @@ describe("usePilotAircraft", () => {
     );
 
     expect(capturedHeadingPitchRolls[0].roll).toBeCloseTo(-12 * Math.PI / 180);
+  });
+
+  it("adds attack angle to flight path pitch for aircraft attitude", () => {
+    renderHook(() =>
+      usePilotAircraft({
+        enabled: true,
+        pose: {
+          lon: 0,
+          lat: 0,
+          altM: 1000,
+          headingDeg: 0,
+          flightPathDeg: 2,
+          bankDeg: 0,
+          attackDeg: 4,
+        },
+        trail: [],
+        follow: false,
+      }),
+    );
+
+    expect(capturedHeadingPitchRolls[0].pitch).toBeCloseTo(6 * Math.PI / 180);
   });
 
   it("keeps Cesium properties stable while updating aircraft pose and trail points", () => {
@@ -153,6 +176,7 @@ describe("usePilotAircraft", () => {
       headingDeg: 4,
       flightPathDeg: 1,
       bankDeg: 0,
+      attackDeg: 0,
     };
     const secondPose = {
       lon: -113.99,
@@ -161,6 +185,7 @@ describe("usePilotAircraft", () => {
       headingDeg: 8,
       flightPathDeg: 2,
       bankDeg: 1,
+      attackDeg: 3,
     };
     const firstTrail = [firstPose];
     const secondTrail = [firstPose, secondPose];

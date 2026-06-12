@@ -79,7 +79,7 @@ class TestSimulationServerCore(unittest.TestCase):
             m=10000.0,
         )
 
-        next_state = server.step(state, Control(12000.0, 0.0, 1.0), 0.2)
+        next_state = server.step(state, Control(12000.0, 0.0, 0.0), 0.2)
 
         self.assertGreater(next_state.longitude, state.longitude)
         self.assertAlmostEqual(next_state.latitude, state.latitude, places=6)
@@ -102,7 +102,7 @@ class TestSimulationServerCore(unittest.TestCase):
             "control": {
                 "thrustN": 15000.0,
                 "bankDeg": 5.0,
-                "loadFactor": 1.1,
+                "attackDeg": 4.0,
             },
         })
 
@@ -112,7 +112,12 @@ class TestSimulationServerCore(unittest.TestCase):
         self.assertAlmostEqual(snapshot["state"]["lat"], 51.1139)
         self.assertAlmostEqual(snapshot["state"]["headingDeg"], 12.0)
         self.assertAlmostEqual(snapshot["control"]["bankDeg"], 5.0)
-        self.assertAlmostEqual(snapshot["control"]["loadFactor"], 1.1)
+        self.assertAlmostEqual(snapshot["control"]["attackDeg"], 4.0)
+        self.assertAlmostEqual(
+            snapshot["aero"]["liftCoefficient"],
+            session.server.simulator.CL0 +
+            session.server.simulator.CL_alpha * math.radians(4.0),
+        )
 
     def test_session_step_advances_elapsed_time_and_position(self):
         # This protects the stateful server loop used by repeated frontend /step calls.

@@ -1,7 +1,7 @@
 export interface PilotControls {
   thrustN: number;
   bankDeg: number;
-  loadFactor: number;
+  attackDeg: number;
 }
 
 export interface PilotResetState {
@@ -96,7 +96,7 @@ function parsePilotSnapshot(value: unknown): PilotSnapshot {
     control: {
       thrustN: readNumber(control, "thrustN"),
       bankDeg: readNumber(control, "bankDeg"),
-      loadFactor: readNumber(control, "loadFactor"),
+      attackDeg: readNumber(control, "attackDeg"),
     },
     aero: {
       liftCoefficient: readNumber(aero, "liftCoefficient"),

@@ -24,7 +24,7 @@ import {
 const DEFAULT_CONTROLS: PilotControls = {
   thrustN: 12000,
   bankDeg: 0,
-  loadFactor: 1,
+  attackDeg: 0,
 };
 const DEFAULT_FRAME_DT_S = 0.2;
 const STEP_INTERVAL_MS = 120;
@@ -256,11 +256,11 @@ export default function PilotPanel() {
           break;
         case "arrowup":
         case "w":
-          nudgeControl("loadFactor", 0.04, 0.4, 2.2);
+          nudgeControl("attackDeg", 0.5, -10, 18);
           break;
         case "arrowdown":
         case "s":
-          nudgeControl("loadFactor", -0.04, 0.4, 2.2);
+          nudgeControl("attackDeg", -0.5, -10, 18);
           break;
         case "q":
           nudgeControl("thrustN", -500, 0, 60000);
@@ -269,7 +269,7 @@ export default function PilotPanel() {
           nudgeControl("thrustN", 500, 0, 60000);
           break;
         case " ":
-          setControls((current) => ({ ...current, bankDeg: 0, loadFactor: 1 }));
+          setControls((current) => ({ ...current, bankDeg: 0, attackDeg: 0 }));
           break;
         default:
           handled = false;
@@ -514,25 +514,25 @@ export default function PilotPanel() {
 
         <div className="pilot-stepper-row">
           <button
-            onClick={() => nudgeControl("loadFactor", -0.05, 0.4, 2.2)}
-            title="Reduce load factor"
+            onClick={() => nudgeControl("attackDeg", -0.5, -10, 18)}
+            title="Reduce alpha"
           >
             -
           </button>
           <label>
-            <span>Load</span>
+            <span>Alpha</span>
             <EnglishNumberInput
-              value={controls.loadFactor}
-              min={0.4}
-              max={2.2}
-              step="0.01"
+              value={controls.attackDeg}
+              min={-10}
+              max={18}
+              step="0.5"
               disabled={false}
-              onCommit={(value) => updateControl("loadFactor", value, 0.4, 2.2)}
+              onCommit={(value) => updateControl("attackDeg", value, -10, 18)}
             />
           </label>
           <button
-            onClick={() => nudgeControl("loadFactor", 0.05, 0.4, 2.2)}
-            title="Increase load factor"
+            onClick={() => nudgeControl("attackDeg", 0.5, -10, 18)}
+            title="Increase alpha"
           >
             +
           </button>
@@ -615,6 +615,7 @@ function snapshotToPose(snapshot: PilotSnapshot | null): PilotAircraftPose | nul
     headingDeg: snapshot.state.headingDeg,
     flightPathDeg: snapshot.state.flightPathDeg,
     bankDeg: snapshot.control.bankDeg,
+    attackDeg: snapshot.control.attackDeg,
   };
 }
 
