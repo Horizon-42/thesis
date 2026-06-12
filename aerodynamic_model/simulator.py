@@ -96,7 +96,7 @@ class Simulator:
         dydt = V * math.cos(gamma) * math.sin(psi)
         dhdt = V * math.sin(gamma)
         dVdt = (T * math.cos(alpha) - D) / m - self.g * math.sin(gamma)
-        dpsidt = (L + T * math.sin(alpha) * math.sin(phi)) / (m * V * math.cos(gamma))
+        dpsidt = (L + T * math.sin(alpha)) * math.sin(phi) / (m * V * math.cos(gamma))
         dgamadt = ((L+ T * math.sin(alpha))*math.cos(phi) - m * self.g * math.cos(gamma)) / (m * V)
         dmdt = 0
 
