@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>3-DOF 飞行动力学模型：alpha 完整模型与 n 简化模型</title>
+  <link rel="stylesheet" href="style.css">
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['\\(', '\\)']],
+        displayMath: [['\\[', '\\]']],
+        processEscapes: true,
+        tags: 'ams'
+      },
+      svg: { fontCache: 'global' }
+    };
+  </script>
+  <script defer src="../../../aerodrome_model/docs/assets/vendor/mathjax/tex-svg.js"></script>
+</head>
+<body>
+<main>
+  <nav>
+    <a href="index.html">总览</a>
+    <a href="alpha_model.html">完整 alpha 模型</a>
+    <a href="simplified_model.html">简化 n 模型</a>
+    <a href="../three_dof_flight_dynamics_models_explained_cn.md">源 Markdown</a>
+  </nav>
+
+  <header>
+    <h1>3-DOF 点质量飞行动力学模型</h1>
+    <p class="lead">
+      本文档基于 <code>three_dof_flight_dynamics_models_explained_cn.md</code>，
+      将三自由度模型拆成两个子页面：一个保留攻角 \(\alpha\) 和空气动力计算，
+      一个保留当前轨迹仿真常用的 \(T,\mu,n\) 简化控制形式。
+    </p>
+  </header>
+
+  <section class="grid-2">
+    <article class="panel">
+      <h3>完整模型：输入 \(T,\phi,\alpha\)</h3>
+      <p>
+        完整模型把攻角作为控制输入，通过
+        \(C_L(\alpha)\)、\(C_D(\alpha)\) 计算升力 \(L\) 和阻力 \(D\)。
+        这使 stall 可以直接由 \(\alpha \ge \alpha_{\mathrm{crit}}\) 定义。
+      </p>
+      <p><a class="pill" href="alpha_model.html">进入完整 alpha 模型</a></p>
+    </article>
+
+    <article class="panel">
+      <h3>简化模型：输入 \(T,\mu,n\)</h3>
+      <p>
+        简化模型直接命令载荷因子 \(n\)，等价于要求 \(L=nmg\)。
+        stall 不是由输入 \(\alpha\) 触发，而是由所需
+        \(C_{L,\mathrm{req}}\) 或反推 \(\alpha_{\mathrm{req}}\) 超限触发。
+      </p>
+      <p><a class="pill" href="simplified_model.html">进入简化 n 模型</a></p>
+    </article>
+  </section>
+
+  <figure>
+    <img src="../assets/three_dof_models/model-bridge-stall.svg" alt="完整 alpha 模型与简化 n 模型的升力关系和 stall 条件桥接图">
+    <figcaption>
+      图由 <code>../generate_three_dof_model_diagrams.py</code> 生成。
+      两个模型并不是互相独立：它们通过 \(L=\frac12\rho V^2SC_L\) 和 \(n=L/(mg)\) 连接。
+    </figcaption>
+  </figure>
+
+  <section class="panel">
+    <h2>统一状态变量</h2>
+    <p>两个模型都使用三自由度点质量状态：</p>
+    <div class="eq">
+      \[
+      \mathbf{x}
+      =
+      \begin{bmatrix}
+      X & Y & h & V & \psi & \gamma & m
+      \end{bmatrix}^{T}
+      \]
+    </div>
+    <table>
+      <thead>
+        <tr><th>变量</th><th>含义</th><th>在方程中的作用</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>\(X,Y,h\)</td><td>位置和高度</td><td>由速度 \(V\)、航向 \(\psi\)、飞行路径角 \(\gamma\) 积分得到</td></tr>
+        <tr><td>\(V\)</td><td>速度大小</td><td>由沿速度方向的力决定</td></tr>
+        <tr><td>\(\psi\)</td><td>航向角</td><td>由水平转弯方向的法向力决定</td></tr>
+        <tr><td>\(\gamma\)</td><td>飞行路径角</td><td>由竖直平面内的法向力和重力分量决定</td></tr>
+        <tr><td>\(m\)</td><td>质量</td><td>完整模型可加入燃油消耗；短时仿真常令 \(\dot m=0\)</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="bridge">
+    <h2>读法建议</h2>
+    <p>
+      如果目标是解释空气动力学来源，先读
+      <a href="alpha_model.html#lift-drag">完整模型的 \(L,D\) 计算</a>。
+      如果目标是理解当前 trajectory simulator 为什么用 \(n\)，直接读
+      <a href="simplified_model.html#connection-to-alpha">简化模型如何反推 \(\alpha_{\mathrm{req}}\)</a>。
+      两处都放了互相跳转链接。
+    </p>
+  </section>
+</main>
+</body>
+</html>

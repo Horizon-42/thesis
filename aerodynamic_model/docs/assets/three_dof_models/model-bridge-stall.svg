@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 720" role="img" aria-labelledby="title">
+  <title id="title">Bridge between alpha and load-factor models with stall conditions</title>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3.5 L0,7 Z" fill="#233143"/>
+    </marker>
+    <linearGradient id="panel" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#eef5f7"/>
+    </linearGradient>
+  </defs>
+  <style>
+    svg { background: #f6f8fb; }
+    .panel { fill: url(#panel); stroke: #c9d5df; stroke-width: 1.2; rx: 14; }
+    .soft { fill: #eef6f8; stroke: #bdd6dc; stroke-width: 1.2; rx: 10; }
+    .warnbox { fill: #fff4e5; stroke: #e1a154; stroke-width: 1.2; rx: 10; }
+    .aircraft { fill: #233143; stroke: #ffffff; stroke-width: 2.2; }
+    .wing { fill: #67809a; opacity: .95; }
+    .horizon { stroke: #9fb0bf; stroke-width: 2; stroke-dasharray: 7 7; }
+    .path { stroke: #007c89; stroke-width: 4; fill: none; }
+    .axis { stroke: #233143; stroke-width: 2.4; fill: none; }
+    .force { stroke: #b65b13; stroke-width: 4; fill: none; }
+    .lift { stroke: #2f62b7; stroke-width: 4; fill: none; }
+    .drag { stroke: #8f3f71; stroke-width: 4; fill: none; }
+    .weight { stroke: #58687a; stroke-width: 4; fill: none; }
+    .component { stroke: #7b8b9b; stroke-width: 2.4; stroke-dasharray: 6 5; fill: none; }
+    .alpha { stroke: #bf4b34; stroke-width: 3; fill: none; }
+    .bank { stroke: #6f48a8; stroke-width: 3; fill: none; }
+    .flow { stroke: #007c89; stroke-width: 2.8; fill: none; }
+    .danger { stroke: #b7352d; stroke-width: 3.2; fill: none; }
+    .dot { fill: #007c89; stroke: #ffffff; stroke-width: 2; }
+    .title { fill: #14202f; font: 700 24px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .subtitle { fill: #52677a; font: 500 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .label { fill: #182538; font: 650 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .small { fill: #52677a; font: 500 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .formula { fill: #182538; font: 600 17px "Times New Roman", serif; }
+    .mono { fill: #233143; font: 600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .orange { fill: #9a4c10; font: 700 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .blue { fill: #2f62b7; font: 700 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .violet { fill: #7b3f93; font: 700 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .red { fill: #b7352d; font: 700 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  </style>
+  <rect class="panel" x="34.0" y="34.0" width="1052.0" height="652.0"/><text class="title" x="64.0" y="78.0">两种模型的连接：α 决定气动能力，n 是简化模型的升力需求</text><text class="subtitle" x="66.0" y="104.0">同一个升力方程把完整模型和简化模型连接起来；stall 是能力边界，不只是告警。</text><rect class="soft" x="88.0" y="166.0" width="286.0" height="128.0"/><text class="label" x="112.0" y="202.0">完整模型输入</text><text class="formula" x="112.0" y="236.0">u = [T, φ, α]</text><text class="formula" x="112.0" y="268.0">α → CL(α) → L</text><rect class="soft" x="418.0" y="166.0" width="286.0" height="128.0"/><text class="label" x="442.0" y="202.0">共同升力方程</text><text class="formula" x="442.0" y="236.0">L = 1/2 ρ V² S CL</text><text class="formula" x="442.0" y="268.0">n = L/(mg)</text><rect class="soft" x="748.0" y="166.0" width="286.0" height="128.0"/><text class="label" x="772.0" y="202.0">简化模型输入</text><text class="formula" x="772.0" y="236.0">u = [T, μ, n_cmd]</text><text class="formula" x="772.0" y="268.0">n_cmd → CL_req → α_req</text><line class="flow" x1="374.0" y1="230.0" x2="418.0" y2="230.0" marker-end="url(#arrow)"/><line class="flow" x1="704.0" y1="230.0" x2="748.0" y2="230.0" marker-end="url(#arrow)"/><path class="flow" d="M748,274 C650,362 508,362 374,274" marker-end="url(#arrow)"/><text class="label" x="528.0" y="352.0">反推关系</text><rect class="warnbox" x="116.0" y="404.0" width="412.0" height="166.0"/><text class="red" x="142.0" y="438.0">完整模型 stall</text><text class="formula"><tspan x="142.0" dy="0">α ≥ αcrit</tspan><tspan x="142.0" dy="28">或 CL(α) ≥ CLmax</tspan><tspan x="142.0" dy="28">动力学中使用 post-stall 的 CL_actual 与 CD_actual</tspan></text><rect class="warnbox" x="592.0" y="404.0" width="412.0" height="166.0"/><text class="red" x="618.0" y="438.0">简化模型 stall</text><text class="formula"><tspan x="618.0" dy="0">CL_req = 2mgn_cmd/(ρV²S)</tspan><tspan x="618.0" dy="28">α_req = (CL_req - CL0)/CLα</tspan><tspan x="618.0" dy="28">n_actual = min(n_cmd, nmax) 并增加 stall drag</tspan></text><line class="danger" x1="360.0" y1="570.0" x2="360.0" y2="618.0" marker-end="url(#arrow)"/><line class="danger" x1="826.0" y1="570.0" x2="826.0" y2="618.0" marker-end="url(#arrow)"/><text class="red" x="304.0" y="650.0">轨迹影响：V 下降、γ 下降、转弯能力低于命令值</text>
+</svg>

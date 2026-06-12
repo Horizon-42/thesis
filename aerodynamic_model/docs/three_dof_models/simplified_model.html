@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>简化 n 输入 3-DOF 飞行动力学模型</title>
+  <link rel="stylesheet" href="style.css">
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['\\(', '\\)']],
+        displayMath: [['\\[', '\\]']],
+        processEscapes: true,
+        tags: 'ams'
+      },
+      svg: { fontCache: 'global' }
+    };
+  </script>
+  <script defer src="../../../aerodrome_model/docs/assets/vendor/mathjax/tex-svg.js"></script>
+</head>
+<body>
+<main>
+  <nav>
+    <a href="index.html">总览</a>
+    <a href="alpha_model.html">完整 alpha 模型</a>
+    <a href="simplified_model.html">简化 n 模型</a>
+  </nav>
+
+  <header>
+    <h1>简化模型：控制输入为 \(T,\mu,n\)</h1>
+    <p class="lead">
+      这个子页面阐述当前轨迹仿真常用的简化模型。它不直接输入攻角，
+      而是假设推力沿速度方向，并用载荷因子 \(n\) 直接指定所需升力。
+      stall 时，\(n_{\mathrm{cmd}}\) 不一定能被实现。
+    </p>
+  </header>
+
+  <section class="panel">
+    <h2>状态与控制</h2>
+    <div class="grid-2">
+      <div>
+        <h3>状态</h3>
+        <div class="eq">
+          \[
+          \mathbf{x} =
+          \begin{bmatrix}
+          X & Y & h & V & \psi & \gamma & m
+          \end{bmatrix}^{T}
+          \]
+        </div>
+      </div>
+      <div>
+        <h3>控制输入</h3>
+        <div class="eq">
+          \[
+          \mathbf{u}_{n} =
+          \begin{bmatrix}
+          T & \mu & n_{\mathrm{cmd}}
+          \end{bmatrix}^{T}
+          \]
+        </div>
+        <p class="muted">这里 \(n_{\mathrm{cmd}}\) 是命令值；stall 后应使用 \(n_{\mathrm{actual}}\)。</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="model-equations" class="panel">
+    <h2>核心假设与方程</h2>
+    <p>简化模型使用两个关键近似：</p>
+    <div class="eq">
+      \[
+      \alpha\approx0,\quad
+      T\sin\alpha\approx0,\quad
+      L=nmg
+      \]
+    </div>
+    <p>于是：</p>
+    <div class="eq">
+      \[
+      \dot X=V\cos\gamma\cos\psi,\quad
+      \dot Y=V\cos\gamma\sin\psi,\quad
+      \dot h=V\sin\gamma
+      \]
+      \[
+      \boxed{
+      \dot V=
+      \frac{T-D}{m}-g\sin\gamma
+      }
+      \]
+      \[
+      \boxed{
+      \dot\psi=
+      \frac{g}{V\cos\gamma}n\sin\mu
+      }
+      \]
+      \[
+      \boxed{
+      \dot\gamma=
+      \frac{g}{V}(n\cos\mu-\cos\gamma)
+      }
+      \]
+      \[
+      \dot m=0
+      \]
+    </div>
+  </section>
+
+  <figure>
+    <img src="../assets/three_dof_models/simplified-model-force-decomposition.svg" alt="简化 n 模型的力分解 SVG 图">
+    <figcaption>
+      力分解图由 Python 脚本生成。简化模型把法向力写成 \(L=nmg\)，再通过 bank angle
+      \(\mu\) 分解为转弯方向和飞行路径角方向的分量。
+    </figcaption>
+  </figure>
+
+  <section class="panel">
+    <h2>简化模型中 \(D\) 怎么算</h2>
+    <p>
+      即使简化模型直接输入 \(n\)，阻力仍然需要空气动力系数。因为 \(L=nmg\)，可以得到所需升力系数：
+    </p>
+    <div class="eq">
+      \[
+      C_{L,\mathrm{req}}
+      =
+      \frac{L}{qS}
+      =
+      \frac{2mgn_{\mathrm{cmd}}}{\rho V^2S}
+      \]
+      \[
+      C_D = C_{D0}+kC_{L,\mathrm{req}}^2,\quad
+      D=\frac12\rho V^2SC_D
+      \]
+    </div>
+    <p>
+      如果发生 stall，\(C_{L,\mathrm{req}}\) 不能继续被无条件实现，阻力也应加入 stall penalty。
+    </p>
+  </section>
+
+  <section id="connection-to-alpha" class="bridge">
+    <h2>与完整 alpha 模型的连接</h2>
+    <p>
+      简化模型虽然不输入 \(\alpha\)，但可以从 \(n_{\mathrm{cmd}}\) 反推“为了实现该载荷因子所需的攻角”：
+    </p>
+    <div class="eq">
+      \[
+      C_{L,\mathrm{req}}
+      =
+      \frac{2mgn_{\mathrm{cmd}}}{\rho V^2S}
+      \]
+      \[
+      \boxed{
+      \alpha_{\mathrm{req}}
+      =
+      \frac{C_{L,\mathrm{req}}-C_{L0}}{C_{L\alpha}}
+      }
+      \]
+    </div>
+    <p>
+      因此简化模型可以把 \(\alpha_{\mathrm{req}}\) 当作诊断量和约束量。
+      反过来，完整模型可由
+      <a href="alpha_model.html#connection-to-simplified">\(n_{\mathrm{eq}}=L/(mg)\)</a>
+      映射到简化模型。
+    </p>
+  </section>
+
+  <section id="stall" class="panel">
+    <h2>简化模型的 stall 条件</h2>
+    <p>
+      因为简化模型的输入是 \(n_{\mathrm{cmd}}\) 而不是 \(\alpha\)，stall 判据应写成
+      “所需气动能力超过上限”：
+    </p>
+    <div class="eq">
+      \[
+      \boxed{
+      C_{L,\mathrm{req}} \ge C_{L,\max}
+      }
+      \]
+      \[
+      \boxed{
+      \alpha_{\mathrm{req}}\ge\alpha_{\mathrm{crit}}
+      }
+      \]
+    </div>
+    <p>等价地，可以定义当前状态下最大可实现载荷因子：</p>
+    <div class="eq">
+      \[
+      n_{\max}
+      =
+      \frac{\frac12\rho V^2SC_{L,\max}}{mg}
+      \]
+      \[
+      \boxed{
+      n_{\mathrm{cmd}}>n_{\max}\Rightarrow\mathrm{stall}
+      }
+      \]
+    </div>
+    <p>为了让 stall 真实改变轨迹，动力学中应使用：</p>
+    <div class="eq">
+      \[
+      n_{\mathrm{actual}}=\min(n_{\mathrm{cmd}},n_{\max})
+      \]
+    </div>
+    <p>
+      然后把方程中的 \(n\) 替换为 \(n_{\mathrm{actual}}\)，并增加阻力惩罚：
+    </p>
+    <div class="eq">
+      \[
+      C_{D,\mathrm{actual}}
+      =
+      C_{D0}+kC_{L,\mathrm{actual}}^2+
+      C_{D,\mathrm{stall}}\max(0,\alpha_{\mathrm{req}}-\alpha_{\mathrm{crit}})^2
+      \]
+    </div>
+    <div class="warning">
+      <p>
+        只把 \(n\) 限幅会让飞机“拉不动”；再增加 stall drag 才会出现更明显的减速和下沉。
+        这比单纯输出 stall warning 更适合验证轨迹响应。
+      </p>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>简化模型验证用控制参数</h2>
+    <table>
+      <thead>
+        <tr><th>验证目标</th><th>控制设置</th><th>预期动力学响应</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>平飞保持</td>
+          <td>\(\mu=0\)，\(n=1\)，\(T\approx D\)</td>
+          <td>\(\dot\gamma\approx0\)、\(\dot V\approx0\)。这是最基础的 sanity check。</td>
+        </tr>
+        <tr>
+          <td>协调水平转弯</td>
+          <td>\(\mu=30^\circ\)，\(n=1/\cos\mu\)，\(T\approx D\)</td>
+          <td>\(\dot\psi>0\)，且 \(n\cos\mu\approx1\)，所以 \(\dot\gamma\approx0\)。</td>
+        </tr>
+        <tr>
+          <td>坡度不足载荷</td>
+          <td>\(\mu=30^\circ\)，\(n=1\)，\(T\approx D\)</td>
+          <td>\(n\cos\mu<1\)，所以 \(\dot\gamma<0\)，飞机应开始下沉。</td>
+        </tr>
+        <tr>
+          <td>低速高载荷 stall</td>
+          <td>降低 \(V\) 或升高 \(n_{\mathrm{cmd}}\)，使 \(n_{\mathrm{cmd}}>n_{\max}\)</td>
+          <td>使用 \(n_{\mathrm{actual}}\) 后，\(\dot\psi\) 和 \(\dot\gamma\) 小于命令值；若加入 stall drag，\(\dot V\) 也应明显变负。</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+</body>
+</html>

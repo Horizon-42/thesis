@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>完整 alpha 输入 3-DOF 飞行动力学模型</title>
+  <link rel="stylesheet" href="style.css">
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['\\(', '\\)']],
+        displayMath: [['\\[', '\\]']],
+        processEscapes: true,
+        tags: 'ams'
+      },
+      svg: { fontCache: 'global' }
+    };
+  </script>
+  <script defer src="../../../aerodrome_model/docs/assets/vendor/mathjax/tex-svg.js"></script>
+</head>
+<body>
+<main>
+  <nav>
+    <a href="index.html">总览</a>
+    <a href="alpha_model.html">完整 alpha 模型</a>
+    <a href="simplified_model.html">简化 n 模型</a>
+  </nav>
+
+  <header>
+    <h1>完整模型：控制输入为 \(T,\phi,\alpha\)</h1>
+    <p class="lead">
+      这个子页面阐述较完整的 3-DOF 点质量模型。它不把 \(n\) 作为输入，
+      而是把攻角 \(\alpha\) 作为控制量，通过空气动力模型计算 \(L\) 和 \(D\)，
+      再把力投影到速度方向、航向方向和飞行路径角方向。
+    </p>
+  </header>
+
+  <section class="panel">
+    <h2>状态与控制</h2>
+    <div class="grid-2">
+      <div>
+        <h3>状态</h3>
+        <div class="eq">
+          \[
+          \mathbf{x} =
+          \begin{bmatrix}
+          X & Y & h & V & \psi & \gamma & m
+          \end{bmatrix}^{T}
+          \]
+        </div>
+      </div>
+      <div>
+        <h3>控制输入</h3>
+        <div class="eq">
+          \[
+          \mathbf{u}_{\alpha} =
+          \begin{bmatrix}
+          T & \phi & \alpha
+          \end{bmatrix}^{T}
+          \]
+        </div>
+        <p class="muted">这里 \(\alpha\) 是输入，不是由 \(n\) 反推的诊断量。</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="lift-drag" class="panel">
+    <h2>补全 \(L\) 与 \(D\) 的计算</h2>
+    <p>
+      源 Markdown 中完整模型直接使用 \(L\) 和 \(D\)。为了让模型可计算，需要先定义动压：
+    </p>
+    <div class="eq">
+      \[
+      q = \frac12 \rho(h)V^2
+      \]
+    </div>
+    <p>然后由攻角得到升力系数和阻力系数。最小可用的线性段模型是：</p>
+    <div class="eq">
+      \[
+      C_L(\alpha)=C_{L0}+C_{L\alpha}\alpha
+      \]
+      \[
+      C_D(\alpha)=C_{D0}+kC_L(\alpha)^2
+      \]
+    </div>
+    <p>于是升力和阻力为：</p>
+    <div class="eq">
+      \[
+      \boxed{L=qSC_L(\alpha)=\frac12\rho(h)V^2SC_L(\alpha)}
+      \]
+      \[
+      \boxed{D=qSC_D(\alpha)=\frac12\rho(h)V^2SC_D(\alpha)}
+      \]
+    </div>
+    <div class="note">
+      <p>
+        这一步是完整模型和简化模型的连接点。若想看简化模型如何从 \(n\) 反推出
+        \(C_{L,\mathrm{req}}\) 和 \(\alpha_{\mathrm{req}}\)，跳到
+        <a href="simplified_model.html#connection-to-alpha">简化模型的连接段</a>。
+      </p>
+    </div>
+  </section>
+
+  <figure>
+    <img src="../assets/three_dof_models/alpha-model-force-decomposition.svg" alt="完整 alpha 模型的力分解 SVG 图">
+    <figcaption>
+      力分解图由 Python 脚本生成。切向力决定 \(\dot V\)，法向合力
+      \(L+T\sin\alpha\) 经 bank angle \(\phi\) 分解后决定 \(\dot\psi\) 和 \(\dot\gamma\)。
+    </figcaption>
+  </figure>
+
+  <section class="panel">
+    <h2>微分方程</h2>
+    <p>保留源文档中的风项时，位置方程为：</p>
+    <div class="eq">
+      \[
+      \dot X = V\cos\psi\cos\gamma+\omega_x,\quad
+      \dot Y = V\sin\psi\cos\gamma+\omega_y,\quad
+      \dot h = V\sin\gamma+\omega_z
+      \]
+    </div>
+    <p>若与当前无风 simulator 对齐，可令 \(\omega_x=\omega_y=\omega_z=0\)。动力学核心为：</p>
+    <div class="eq">
+      \[
+      \boxed{
+      \dot V =
+      \frac{T\cos\alpha-D}{m}-g\sin\gamma
+      }
+      \]
+      \[
+      \boxed{
+      \dot\psi =
+      \frac{(L+T\sin\alpha)\sin\phi}{mV\cos\gamma}
+      }
+      \]
+      \[
+      \boxed{
+      \dot\gamma =
+      \frac{(L+T\sin\alpha)\cos\phi-mg\cos\gamma}{mV}
+      }
+      \]
+      \[
+      \dot m = -\frac{c_T}{g}T
+      \quad \text{或短时仿真中令}\quad
+      \dot m=0
+      \]
+    </div>
+  </section>
+
+  <section id="stall" class="panel">
+    <h2>完整模型的 stall 条件</h2>
+    <p>
+      因为 \(\alpha\) 是输入，所以 stall 可以直接由临界迎角定义：
+    </p>
+    <div class="eq">
+      \[
+      \boxed{\alpha \ge \alpha_{\mathrm{crit}}\Rightarrow \mathrm{stall}}
+      \]
+    </div>
+    <p>等价地，也可以写成最大升力系数约束：</p>
+    <div class="eq">
+      \[
+      C_L(\alpha)\ge C_{L,\max}
+      \]
+    </div>
+    <p>
+      如果希望 stall 真实改变轨迹，不能只输出 warning。动力学中应使用
+      post-stall 的 \(C_{L,\mathrm{actual}}\) 和 \(C_{D,\mathrm{actual}}\)：
+    </p>
+    <div class="eq">
+      \[
+      C_{L,\mathrm{actual}}(\alpha)=
+      \begin{cases}
+      C_{L0}+C_{L\alpha}\alpha, & \alpha < \alpha_{\mathrm{crit}}\\
+      C_{L,\max}-k_{\mathrm{stall}}(\alpha-\alpha_{\mathrm{crit}}), & \alpha \ge \alpha_{\mathrm{crit}}
+      \end{cases}
+      \]
+      \[
+      C_{D,\mathrm{actual}}(\alpha)=
+      C_{D0}+kC_{L,\mathrm{actual}}^2+
+      C_{D,\mathrm{stall}}\max(0,\alpha-\alpha_{\mathrm{crit}})^2
+      \]
+    </div>
+    <div class="warning">
+      <p>
+        这个 3-DOF 模型没有 pitch rate、elevator 和俯仰力矩，所以它不能自然模拟
+        “机头下沉恢复”的姿态动态；但通过降低 \(C_L\)、增大 \(C_D\)，可以让轨迹表现出
+        失速后的下沉、减速和转弯能力下降。
+      </p>
+    </div>
+  </section>
+
+  <section id="connection-to-simplified" class="bridge">
+    <h2>与简化模型的连接</h2>
+    <p>
+      在 \(\alpha\) 较小、\(T\sin\alpha\) 可忽略时，完整模型可映射成一个等效载荷因子：
+    </p>
+    <div class="eq">
+      \[
+      n_{\mathrm{eq}}
+      =
+      \frac{L}{mg}
+      =
+      \frac{\frac12\rho V^2SC_L(\alpha)}{mg}
+      \]
+    </div>
+    <p>
+      这就是 <a href="simplified_model.html#model-equations">简化模型</a>
+      中 \(L=nmg\) 的来源。差别是：完整模型命令 \(\alpha\)，简化模型命令 \(n\)。
+    </p>
+  </section>
+
+  <section class="panel">
+    <h2>完整模型验证用控制参数</h2>
+    <table>
+      <thead>
+        <tr><th>验证目标</th><th>控制设置</th><th>预期动力学响应</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>近似平飞 trim</td>
+          <td>\(\phi=0\)，\(\alpha=\alpha_{\mathrm{trim}}\)，\(T\approx D\)</td>
+          <td>\(\dot\gamma\approx0\)、\(\dot V\approx0\)、高度基本稳定。这里 \(\alpha_{\mathrm{trim}}\) 由 \(L+T\sin\alpha\approx mg\) 解出。</td>
+        </tr>
+        <tr>
+          <td>推力加速</td>
+          <td>\(\phi=0\)，\(\alpha\) 保持 trim 附近，\(T>D\)</td>
+          <td>\(\dot V>0\)，若升力没有同步调整，\(\gamma\) 会随速度变化出现缓慢偏移。</td>
+        </tr>
+        <tr>
+          <td>协调转弯</td>
+          <td>\(\phi=25^\circ\)，提高 \(\alpha\) 使 \((L+T\sin\alpha)\cos\phi\approx mg\cos\gamma\)</td>
+          <td>\(\dot\psi>0\)，且 \(\dot\gamma\approx0\)。若 \(\alpha\) 不提高，飞机会下沉。</td>
+        </tr>
+        <tr>
+          <td>stall 轨迹响应</td>
+          <td>\(\alpha>\alpha_{\mathrm{crit}}\)，\(T\) 不足以抵消新增阻力</td>
+          <td>\(C_L\) 不再线性增加，\(C_D\) 增大，表现为 \(\dot V<0\)、\(\dot\gamma<0\)、转弯率低于正常段。</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+</body>
+</html>
