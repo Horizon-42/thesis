@@ -1,14 +1,7 @@
 from dataclasses import dataclass
 import math
 from scipy.integrate import solve_ivp
-
-@dataclass(frozen=True)
-class ReferenceArea:
-    NarrowBody_S: float = 122.6 # m^2, reference area for narrow-body aircraft
-    WideBody_S: float = 300.0 # m^2, reference area for wide-body aircraft
-    GeneralAviation_S: float = 16.2 # m^2, reference area for general aviation aircraft
-
-# Mass for different aricraft types, for reference only, not used in the simulator
+from aircraft_sets import AIRCRAFT_PRESETS, AircraftSpec, A320
 
 @dataclass
 class State:
@@ -49,9 +42,10 @@ class Atmosphere:
         return self.rho0 * (T / self.get_ISA_temperature(0))**4.25588
 
 class Simulator:
-    g: float = 9.81 # gravitational acceleration in m/s^2
+    aircraft: AircraftSpec
+    S: float # wing area in m^2, set by aircraft config
 
-    S:float = ReferenceArea.NarrowBody_S # reference area for drag calculation, default to narrow-body
+    g: float = 9.81 # gravitational acceleration in m/s^2
 
     # Lift coefficients, these can be tuned or replaced with more complex models
     CL0: float = 0.2 # zero angle of attack lift coefficient
@@ -61,8 +55,9 @@ class Simulator:
     Cd0: float = 0.02 # zero-lift drag coefficient
     k: float = 0.04 # induced drag factor
 
-    def __init__(self, S: float = ReferenceArea.NarrowBody_S):
-        self.S = S
+    def __init__(self, aircraft: AircraftSpec = A320):
+        self.aircraft = aircraft
+        self.S = aircraft.wing_area_m2
 
     def _get_lift_coefficient(self, attack_angle: float) -> float: return self.CL0 + self.CL_alpha * attack_angle
 

@@ -21,10 +21,12 @@ from matplotlib.widgets import Button, TextBox
 try:
     # Works when this file is executed as a package module.
     from .simulator import Atmosphere, Control, Simulator, State
+    from .aircraft_sets import AIRCRAFT_PRESETS, AircraftSpec, A320, B77W, C172
 except ImportError:
     # Works when this file is executed directly:
     # python aerodynamic_model/visualize_simulator.py
     from simulator import Atmosphere, Control, Simulator, State
+    from aircraft_sets import AIRCRAFT_PRESETS, AircraftSpec, A320, B77W, C172
 
 
 class ClipboardTextBox(TextBox):
@@ -171,7 +173,7 @@ class FlightVisualizer:
     def __init__(self):
         # Reuse the existing simulator model. This script only handles plotting
         # and simple user input.
-        self.simulator = Simulator()
+        self.simulator = Simulator(aircraft=A320)
         self.atmosphere = Atmosphere(rho0=1.225, H=8500.0)
 
         # Initial point-mass aircraft state:
@@ -183,7 +185,7 @@ class FlightVisualizer:
             V=120.0,
             psi=0.0,
             gamma=0.0,
-            m=10000.0,
+            m=A320.mass_kg,
         )
 
         # Runtime objects updated after each Run click. current_control is kept
