@@ -187,7 +187,7 @@ class FlightVisualizer:
         )
 
         # Runtime objects updated after each Run click. current_control is kept
-        # so CL/CD can be recomputed for every displayed animation frame.
+        # so CL/CD/n can be recomputed for every displayed animation frame.
         self.solution = None
         self.current_control = None
         self.animation = None
@@ -224,10 +224,10 @@ class FlightVisualizer:
             label="Bank deg",
             initial="45",
         )
-        self.load_box = self._add_input_box(
+        self.attack_box = self._add_input_box(
             y=0.66,
-            label="Load n",
-            initial="1.41421356",
+            label="Alpha deg",
+            initial="0",
         )
         self.duration_box = self._add_input_box(
             y=0.58,
@@ -271,12 +271,12 @@ class FlightVisualizer:
         self.ax.grid(True)
 
     def _read_control(self):
-        # Convert at the input boundary: the UI shows degrees, while the
-        # simulator stores and computes bank angle in radians.
+        # Convert at the input boundary: the UI shows angles in degrees, while
+        # the simulator stores and computes them in radians.
         return Control(
             thrust=self._read_float(self.thrust_box, "Thrust N"),
             bank_rad=math.radians(self._read_float(self.bank_box, "Bank deg")),
-            load_factor=self._read_float(self.load_box, "Load n"),
+            attack_rad=math.radians(self._read_float(self.attack_box, "Alpha deg")),
         )
 
     def run(self, _event=None):
@@ -463,14 +463,16 @@ class FlightVisualizer:
             setter(new_low, new_high)
 
     def _update_state_text(self, t, x, y, h, V, psi, gamma, m):
-        # CL/CD are not integrated state variables. They are derived diagnostics,
-        # so compute them from the current frame's state and active controls.
-        coefficients = self._get_current_coefficients(h, V, m)
-        if coefficients is None:
+        # CL/CD/n are not integrated state variables. They are derived
+        # diagnostics, so compute them from the current frame's state and active
+        # controls.
+        aero_outputs = self._get_current_aero_outputs(h, V, m)
+        if aero_outputs is None:
             Cl = None
             Cd = None
+            load_factor = None
         else:
-            Cl, Cd = coefficients
+            Cl, Cd, load_factor = aero_outputs
 
         # Convert angles back to degrees for easier reading in the UI.
         self.state_text.set_text(
@@ -484,20 +486,26 @@ class FlightVisualizer:
                     f"psi   : {math.degrees(psi):8.2f} deg",
                     f"gamma : {math.degrees(gamma):8.2f} deg",
                     f"mass  : {m:8.1f} kg",
+                    f"n     : {self._format_coefficient(load_factor)}",
                     f"CL    : {self._format_coefficient(Cl)}",
                     f"CD    : {self._format_coefficient(Cd)}",
                 ]
             )
         )
 
-    def _get_current_coefficients(self, h, V, m):
+    def _get_current_aero_outputs(self, h, V, m):
         # Before Run is clicked there is no active control, so the initial
-        # display intentionally shows CL/CD as n/a.
+        # display intentionally shows derived aerodynamic outputs as n/a.
         if self.current_control is None:
             return None
-        return self.simulator.get_aerodynamic_coefficients(
-            h, V, m, self.current_control.load_factor, self.atmosphere.get_ISA_density(h)
+        Cl, Cd = self.simulator.get_aerodynamic_coefficients(
+            self.current_control.attack_rad
         )
+        lift, _ = self.simulator.get_aerodynamic_forces(
+            V, self.current_control.attack_rad, self.atmosphere, h
+        )
+        load_factor = self.simulator.get_load_factor(lift, m)
+        return Cl, Cd, load_factor
 
     @staticmethod
     def _format_coefficient(value):
