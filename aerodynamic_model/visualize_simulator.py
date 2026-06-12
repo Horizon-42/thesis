@@ -22,11 +22,13 @@ try:
     # Works when this file is executed as a package module.
     from .simulator import Atmosphere, Control, Simulator, State
     from .aircraft_sets import AIRCRAFT_PRESETS, AircraftSpec, A320, B77W, C172
+    from .auto_pilot import NaiveAutoPilot
 except ImportError:
     # Works when this file is executed directly:
     # python aerodynamic_model/visualize_simulator.py
     from simulator import Atmosphere, Control, Simulator, State
     from aircraft_sets import AIRCRAFT_PRESETS, AircraftSpec, A320, B77W, C172
+    from auto_pilot import NaiveAutoPilot
 
 
 class ClipboardTextBox(TextBox):
@@ -175,6 +177,7 @@ class FlightVisualizer:
         # and simple user input.
         self.simulator = Simulator(aircraft=A320)
         self.atmosphere = Atmosphere(rho0=1.225, H=8500.0)
+        self.autopilot = NaiveAutoPilot(aircraft=A320, atmosphere=self.atmosphere)
 
         # Initial point-mass aircraft state:
         # x, y, h are position; V is speed; psi is heading; gamma is climb angle.
@@ -206,12 +209,24 @@ class FlightVisualizer:
             [], [], [], marker="o", markersize=9, color="tab:red", linestyle="None"
         )
 
-        self._build_input_zone()
+        # set init control values
+        # init_control:Control = self.autopilot.maintain_level_turn(
+        #     thrust=12000.0,
+        #     bank_angle=math.radians(45.0),
+        #     state=self.initial_state,
+        # )
+        init_control:Control = Control(
+            thrust=67261,
+            bank_rad=math.radians(45.0),
+            attack_rad=math.radians(8.97),
+        )
+
+        self._build_input_zone(init_control, duration_s=120.0)
         self._build_state_output_zone()
         self._setup_plot()
         self._show_initial_state()
 
-    def _build_input_zone(self):
+    def _build_input_zone(self, init_control: Control, duration_s: float = 120.0):
         # inital input control values are chosen to give a moderate turn with a visible trajectory
         # Text boxes are the input zone. Their values are read when Run is clicked.
         self.fig.text(0.74, 0.90, "Input zone", fontsize=13, weight="bold")
@@ -219,22 +234,22 @@ class FlightVisualizer:
         self.thrust_box = self._add_input_box(
             y=0.82,
             label="Thrust N",
-            initial="12000",
+            initial=str(init_control.thrust),
         )
         self.bank_box = self._add_input_box(
             y=0.74,
             label="Bank deg",
-            initial="45",
+            initial=str(math.degrees(init_control.bank_rad)),
         )
         self.attack_box = self._add_input_box(
             y=0.66,
             label="Alpha deg",
-            initial="0",
+            initial=str(math.degrees(init_control.attack_rad)),
         )
         self.duration_box = self._add_input_box(
             y=0.58,
             label="Time s",
-            initial="120",
+            initial=str(duration_s),
         )
 
         run_ax = self.fig.add_axes([0.74, 0.48, 0.10, 0.05])
