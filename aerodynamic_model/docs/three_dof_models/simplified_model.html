@@ -112,10 +112,15 @@
       速度大小为 \(V\)，飞行路径角为 \(\gamma\)，所以水平速度大小为：
     </p>
     <figure class="derivation-figure">
-      <img src="../assets/three_dof_models/position-velocity-decomposition.svg" alt="位置方程中的速度分解图">
+      <img src="../assets/three_dof_models/position-gamma-decomposition.svg" alt="位置方程中由 gamma 得到水平和竖直速度的分解图">
       <figcaption>
-        位置方程只需要速度几何投影：\(\gamma\) 决定水平/竖直分量，
-        \(\psi\) 决定水平速度在 \(X,Y\) 两个方向上的分量。
+        第一步：\(\gamma\) 只决定速度矢量在水平面和竖直方向上的投影。
+      </figcaption>
+    </figure>
+    <figure class="derivation-figure">
+      <img src="../assets/three_dof_models/position-psi-decomposition.svg" alt="位置方程中由 psi 把水平速度分解到 X 和 Y 方向的图">
+      <figcaption>
+        第二步：\(\psi\) 只作用在水平速度 \(V\cos\gamma\) 上，把它分到 \(X,Y\) 方向。
       </figcaption>
     </figure>
     <div class="eq">
@@ -181,8 +186,8 @@
     <figure class="derivation-figure">
       <img src="../assets/three_dof_models/simplified-psidot-force-decomposition.svg" alt="简化模型 psidot 推导中的水平转弯力分解图">
       <figcaption>
-        简化模型直接令 \(L=nmg\)。bank angle \(\mu\) 把 \(nmg\) 倾斜，
-        其中 \(nmg\sin\mu\) 产生水平转弯。
+        左侧说明航向变化对应 \(a_\psi=V\cos\gamma\dot\psi\)，右侧说明 bank 后只有
+        \(nmg\sin\mu\) 进入水平转弯方向。
       </figcaption>
     </figure>
     <div class="eq">
@@ -234,8 +239,8 @@
     <figure class="derivation-figure">
       <img src="../assets/three_dof_models/simplified-gammadot-force-decomposition.svg" alt="简化模型 gammadot 推导中的竖直法向力分解图">
       <figcaption>
-        \(\dot\gamma\) 由 \(nmg\cos\mu\) 和 \(mg\cos\gamma\) 的差决定。
-        这张图也解释了为什么 \(n\cos\mu<\cos\gamma\) 时轨迹会下沉。
+        \(\gamma\) 是速度矢量在竖直平面内的转动，因此加速度尺度是 \(V\dot\gamma\)，
+        受 \(nmg\cos\mu\) 与 \(mg\cos\gamma\) 的差控制。
       </figcaption>
     </figure>
     <div class="eq">

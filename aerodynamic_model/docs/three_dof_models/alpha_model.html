@@ -156,10 +156,15 @@
       因此速度的水平投影大小是：
     </p>
     <figure class="derivation-figure">
-      <img src="../assets/three_dof_models/position-velocity-decomposition.svg" alt="位置方程中的速度分解图">
+      <img src="../assets/three_dof_models/position-gamma-decomposition.svg" alt="位置方程中由 gamma 得到水平和竖直速度的分解图">
       <figcaption>
-        位置方程不来自外力，而来自速度矢量的几何分解：先由 \(\gamma\) 得到水平和竖直速度，
-        再由 \(\psi\) 把水平速度分到 \(X,Y\) 方向。
+        第一步：\(\gamma\) 只决定速度矢量在水平面和竖直方向上的投影。
+      </figcaption>
+    </figure>
+    <figure class="derivation-figure">
+      <img src="../assets/three_dof_models/position-psi-decomposition.svg" alt="位置方程中由 psi 把水平速度分解到 X 和 Y 方向的图">
+      <figcaption>
+        第二步：\(\psi\) 只作用在水平速度 \(V\cos\gamma\) 上，把它分到 \(X,Y\) 方向。
       </figcaption>
     </figure>
     <div class="eq">
@@ -249,8 +254,8 @@
     <figure class="derivation-figure">
       <img src="../assets/three_dof_models/alpha-psidot-force-decomposition.svg" alt="完整模型 psidot 推导中的水平转弯力分解图">
       <figcaption>
-        法向合力 \(N=L+T\sin\alpha\) 经 bank angle \(\phi\) 倾斜后，
-        其中 \(N\sin\phi\) 是改变航向角的水平转弯分量。
+        左侧说明航向变化对应 \(a_\psi=V\cos\gamma\dot\psi\)，右侧说明 bank 后只有
+        \(N\sin\phi\) 进入水平转弯方向。
       </figcaption>
     </figure>
     <div class="eq">
@@ -298,8 +303,8 @@
     <figure class="derivation-figure">
       <img src="../assets/three_dof_models/alpha-gammadot-force-decomposition.svg" alt="完整模型 gammadot 推导中的竖直法向力分解图">
       <figcaption>
-        \(\dot\gamma\) 来自竖直法向力差：
-        \((L+T\sin\alpha)\cos\phi\) 向上改变轨迹，\(mg\cos\gamma\) 向下压低轨迹。
+        \(\gamma\) 是速度矢量在竖直平面内的转动，因此加速度尺度是 \(V\dot\gamma\)，
+        受 \(N\cos\phi\) 与 \(mg\cos\gamma\) 的差控制。
       </figcaption>
     </figure>
     <div class="eq">

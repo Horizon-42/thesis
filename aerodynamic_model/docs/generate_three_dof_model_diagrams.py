@@ -135,60 +135,56 @@ def draw_aircraft(svg: Svg, cx: float, cy: float, angle_deg: float) -> None:
     svg.polygon(fuselage, "aircraft")
 
 
-def derivation_canvas(title: str, subtitle: str) -> Svg:
+def derivation_canvas(title: str) -> Svg:
     svg = Svg(980, 420, title)
     svg.rect(26, 26, 928, 368, "panel")
     svg.text(title, 54, 66, "title")
-    svg.text(subtitle, 56, 92, "subtitle")
     return svg
 
 
-def velocity_components_diagram() -> str:
-    svg = derivation_canvas(
-        "位置方程：速度矢量先按 γ 分解，再按 ψ 分解",
-        "这不是力分解；它说明 X、Y、h 三个位置微分方程来自速度投影。",
-    )
-    ox, oy = 252, 282
+def position_gamma_decomposition_diagram() -> str:
+    svg = derivation_canvas("位置方程 Step 1：γ 分解速度")
+    ox, oy = 300, 270
     gamma = 22
-    vx, vy = arrow_vec(ox, oy, 230, gamma)
-    hx, hy = arrow_vec(ox, oy, 214, 0)
-    ux, uy = arrow_vec(hx, hy, 88, 90)
-    svg.line(70, oy, 480, oy, "horizon")
+    vx, vy = arrow_vec(ox, oy, 320, gamma)
+    hx, hy = arrow_vec(ox, oy, 298, 0)
+    ux, uy = arrow_vec(hx, hy, 120, 90)
+    svg.line(92, oy, 770, oy, "horizon")
     svg.line(ox, oy, vx, vy, "axis", True)
     svg.text("V", vx + 10, vy + 4, "label")
     svg.line(ox, oy, hx, hy, "component", True)
-    svg.text("V cos γ", ox + 112, oy - 10, "blue")
+    svg.text("V cos γ", ox + 158, oy - 10, "blue")
     svg.line(hx, hy, ux, uy, "component", True)
     svg.text("V sin γ", ux + 8, uy + 8, "blue")
     svg.path(f"M{ox + 62},{oy} A62,62 0 0,0 {ox + 58},{oy - 23}", "alpha")
     svg.text("γ", ox + 74, oy - 8, "red")
+    svg.text("水平速度", hx - 32, hy + 34, "small")
+    svg.text("竖直速度", ux + 8, uy + 34, "small")
+    return svg.render()
 
-    cx, cy = 708, 262
-    svg.ellipse(cx, cy, 150, 92, "soft")
-    svg.line(cx - 122, cy + 58, cx + 128, cy + 58, "horizon")
-    svg.line(cx - 112, cy + 58, cx - 112, cy - 78, "component")
-    svg.text("X", cx + 126, cy + 70, "small")
-    svg.text("Y", cx - 132, cy - 82, "small")
-    px, py = arrow_vec(cx - 112, cy + 58, 160, 32)
-    svg.line(cx - 112, cy + 58, px, py, "axis", True)
-    svg.text("V cos γ", px + 10, py + 4, "label")
-    svg.line(cx - 112, cy + 58, px, cy + 58, "component", True)
-    svg.text("V cosγ cosψ", cx - 28, cy + 46, "blue")
-    svg.line(px, cy + 58, px, py, "component", True)
-    svg.text("V cosγ sinψ", px + 10, cy - 12, "blue")
-    svg.path(f"M{cx - 66},{cy + 58} A48,48 0 0,0 {cx - 72},{cy + 33}", "bank")
-    svg.text("ψ", cx - 50, cy + 44, "violet")
 
-    svg.rect(564, 316, 330, 58, "soft")
-    svg.text("Xdot = V cosγ cosψ,  Ydot = V cosγ sinψ,  hdot = V sinγ", 584, 352, "formula")
+def position_psi_decomposition_diagram() -> str:
+    svg = derivation_canvas("位置方程 Step 2：ψ 分解水平速度")
+    cx, cy = 334, 300
+    px, py = arrow_vec(cx, cy, 272, 32)
+    svg.ellipse(cx + 174, cy - 50, 238, 124, "soft")
+    svg.line(cx, cy, cx + 420, cy, "horizon")
+    svg.line(cx, cy, cx, cy - 220, "component")
+    svg.text("X", cx + 418, cy + 20, "small")
+    svg.text("Y", cx - 22, cy - 224, "small")
+    svg.line(cx, cy, px, py, "axis", True)
+    svg.text("Vh = V cosγ", px + 12, py + 4, "label")
+    svg.line(cx, cy, px, cy, "component", True)
+    svg.text("Vh cosψ", cx + 126, cy - 10, "blue")
+    svg.line(px, cy, px, py, "component", True)
+    svg.text("Vh sinψ", px + 10, cy - 38, "blue")
+    svg.path(f"M{cx + 76},{cy} A76,76 0 0,0 {cx + 64},{cy - 38}", "bank")
+    svg.text("ψ", cx + 84, cy - 24, "violet")
     return svg.render()
 
 
 def alpha_vdot_derivation_diagram() -> str:
-    svg = derivation_canvas(
-        "Vdot 推导：把力投影到速度方向 eV",
-        "切向方向只保留 T cosα、-D 和 -mg sinγ。",
-    )
+    svg = derivation_canvas("Vdot 推导：把力投影到速度方向 eV")
     ox, oy = 318, 258
     gamma = 15
     alpha = 14
@@ -226,33 +222,84 @@ def alpha_vdot_derivation_diagram() -> str:
 
 
 def alpha_psidot_derivation_diagram() -> str:
-    svg = derivation_canvas(
-        "ψdot 推导：法向合力的水平转弯分量",
-        "水平转弯加速度是 V cosγ ψdot，对应力是 (L + T sinα) sinφ。",
-    )
-    cx, cy = 348, 242
-    svg.ellipse(cx, cy, 190, 108, "soft")
-    svg.line(cx, cy, cx + 182, cy, "horizon")
-    svg.text("水平转弯方向 eψ", cx + 112, cy - 14, "label")
-    svg.line(cx, cy, cx, cy - 146, "component")
-    svg.text("竖直法向", cx - 28, cy - 156, "small")
-    svg.line(cx, cy, cx + 135, cy - 104, "axis", True)
-    svg.text("N = L + T sinα", cx + 108, cy - 112, "label")
-    svg.line(cx, cy, cx + 154, cy, "lift", True)
-    svg.text("N sinφ", cx + 120, cy + 28, "blue")
-    svg.line(cx + 154, cy, cx + 154, cy - 118, "component")
-    svg.line(cx, cy, cx, cy - 118, "lift", True)
-    svg.text("N cosφ", cx + 12, cy - 106, "small")
-    svg.path(f"M{cx + 12},{cy - 62} A70,70 0 0,1 {cx + 64},{cy - 49}", "bank")
-    svg.text("φ", cx + 58, cy - 68, "violet")
+    svg = derivation_canvas("ψdot 难点：水平转弯只看 V cosγ")
 
-    svg.rect(628, 152, 298, 160, "soft")
+    # Kinematics: heading changes in the horizontal plane, so the speed is Vh.
+    kx, ky = 230, 250
+    svg.ellipse(kx, ky, 138, 92, "soft")
+    svg.path(f"M{kx - 74},{ky + 58} C{kx - 18},{ky + 96} {kx + 86},{ky + 58} {kx + 98},{ky - 20}", "path", True)
+    svg.text("水平面内转弯", kx - 70, ky + 112, "small")
+    svg.line(kx - 18, ky - 74, kx + 112, ky - 74, "axis", True)
+    svg.text("Vh = V cosγ", kx + 20, ky - 90, "label")
+    svg.line(kx + 106, ky - 74, kx + 42, ky - 22, "danger", True)
+    svg.text("aψ = Vh ψdot", kx + 20, ky - 32, "red")
+
+    # Forces: banked normal force provides the horizontal turning force.
+    cx, cy = 506, 292
+    nx, ny = cx + 96, cy - 132
+    hx, hy = cx + 96, cy
+    vx, vy = cx, cy - 132
+    svg.line(cx - 26, cy, cx + 144, cy, "horizon")
+    svg.text("eψ", cx + 112, cy - 12, "label")
+    svg.line(cx, cy + 14, cx, cy - 158, "component")
+    svg.text("竖直", cx - 36, cy - 156, "small")
+    svg.line(cx, cy, nx, ny, "axis", True)
+    svg.text("N = L + T sinα", nx + 8, ny - 8, "label")
+    svg.line(cx, cy, hx, hy, "lift", True)
+    svg.text("N sinφ", hx - 18, hy + 28, "blue")
+    svg.line(cx, cy, vx, vy, "lift", True)
+    svg.text("N cosφ", vx + 10, vy + 18, "small")
+    svg.line(nx, ny, vx, vy, "component")
+    svg.line(nx, ny, hx, hy, "component")
+    svg.path(f"M{cx},{cy - 70} A70,70 0 0,1 {cx + 40},{cy - 56}", "bank")
+    svg.text("φ", cx + 44, cy - 66, "violet")
+
+    svg.rect(654, 152, 292, 160, "soft")
     svg.tspan_text(
         [
             "N = L + T sinα",
             "F_ψ = N sinφ",
-            "m V cosγ ψdot = (L + T sinα) sinφ",
-            "ψdot = ((L + T sinα) sinφ)/(mV cosγ)",
+            "m (V cosγ) ψdot = N sinφ",
+            "ψdot = N sinφ/(mV cosγ)",
+        ],
+        678,
+        190,
+        "formula",
+        30,
+    )
+    return svg.render()
+
+
+def alpha_gammadot_derivation_diagram() -> str:
+    svg = derivation_canvas("γdot 难点：竖直平面转动看整速度 V")
+    ox, oy = 318, 264
+    gamma = 17
+    svg.line(72, oy + 18, 594, oy + 18, "horizon")
+    svg.line(ox - 130, oy + 58, ox + 248, oy - 56, "path")
+    svg.text("竖直平面内改变飞行路径角", ox - 136, oy + 92, "small")
+    svg.line(ox, oy, *arrow_vec(ox, oy, 132, gamma), "axis", True)
+    svg.text("V", ox + 122, oy - 32, "label")
+    ax, ay = ox - 72, oy + 10
+    svg.line(ax, ay, *arrow_vec(ax, ay, 88, gamma + 90), "danger", True)
+    svg.text("aγ = V γdot", ax - 34, ay - 86, "red")
+    svg.line(ox, oy, *arrow_vec(ox, oy, 150, gamma + 90), "lift", True)
+    svg.text("N cosφ", ox + 8, oy - 142, "blue")
+    svg.line(ox, oy, ox, oy + 136, "weight", True)
+    svg.text("mg", ox + 16, oy + 140, "small")
+    svg.line(ox, oy, *arrow_vec(ox, oy, 104, gamma - 90), "component", True)
+    svg.text("mg cosγ", ox + 70, oy + 100, "small")
+    svg.line(ox, oy, *arrow_vec(ox, oy, 118, gamma + 90), "component", True)
+    svg.text("eγ", ox - 40, oy - 110, "label")
+    svg.path(f"M{ox + 62},{oy + 18} A68,68 0 0,0 {ox + 58},{oy - 2}", "alpha")
+    svg.text("γ", ox + 76, oy + 12, "red")
+
+    svg.rect(628, 152, 308, 160, "soft")
+    svg.tspan_text(
+        [
+            "N = L + T sinα",
+            "F_γ = N cosφ - mg cosγ",
+            "m V γdot = F_γ",
+            "γdot = (N cosφ - mg cosγ)/(mV)",
         ],
         652,
         190,
@@ -262,48 +309,8 @@ def alpha_psidot_derivation_diagram() -> str:
     return svg.render()
 
 
-def alpha_gammadot_derivation_diagram() -> str:
-    svg = derivation_canvas(
-        "γdot 推导：竖直法向力与重力分量",
-        "飞行路径角变化对应 V γdot；法向上是 (L + T sinα) cosφ - mg cosγ。",
-    )
-    ox, oy = 318, 254
-    gamma = 17
-    svg.line(72, oy + 18, 594, oy + 18, "horizon")
-    svg.line(ox - 130, oy + 58, ox + 248, oy - 56, "path")
-    svg.line(ox, oy, *arrow_vec(ox, oy, 150, gamma + 90), "lift", True)
-    svg.text("(L + T sinα) cosφ", ox - 28, oy - 140, "blue")
-    svg.line(ox, oy, ox, oy + 136, "weight", True)
-    svg.text("mg", ox + 16, oy + 140, "small")
-    svg.line(ox, oy, *arrow_vec(ox, oy, 104, gamma - 90), "component", True)
-    svg.text("mg cosγ", ox + 70, oy + 100, "small")
-    svg.line(ox, oy, *arrow_vec(ox, oy, 132, gamma), "axis", True)
-    svg.text("eV", ox + 122, oy - 32, "label")
-    svg.line(ox, oy, *arrow_vec(ox, oy, 118, gamma + 90), "component", True)
-    svg.text("eγ", ox - 40, oy - 110, "label")
-    svg.path(f"M{ox + 62},{oy + 18} A68,68 0 0,0 {ox + 58},{oy - 2}", "alpha")
-    svg.text("γ", ox + 76, oy + 12, "red")
-
-    svg.rect(628, 152, 308, 160, "soft")
-    svg.tspan_text(
-        [
-            "F_γ = (L + T sinα) cosφ - mg cosγ",
-            "m V γdot = F_γ",
-            "γdot = ((L + T sinα) cosφ - mg cosγ)/(mV)",
-        ],
-        652,
-        196,
-        "formula",
-        32,
-    )
-    return svg.render()
-
-
 def mass_flow_derivation_diagram() -> str:
-    svg = derivation_canvas(
-        "mdot 推导：推力对应燃油消耗",
-        "这不是空间力分解；它把重量消耗率换算成质量变化率。",
-    )
+    svg = derivation_canvas("mdot 推导：推力对应燃油消耗")
     svg.rect(92, 170, 220, 86, "soft")
     svg.text("推力 T", 168, 206, "label")
     svg.text("发动机工作量", 142, 236, "small")
@@ -321,10 +328,7 @@ def mass_flow_derivation_diagram() -> str:
 
 
 def simplified_vdot_derivation_diagram() -> str:
-    svg = derivation_canvas(
-        "Vdot 推导：α≈0 后推力沿速度方向",
-        "切向力从完整模型退化为 T、-D 和 -mg sinγ。",
-    )
+    svg = derivation_canvas("Vdot 推导：α≈0 后推力沿速度方向")
     ox, oy = 318, 258
     gamma = 14
     svg.line(70, oy + 18, 590, oy + 18, "horizon")
@@ -357,34 +361,45 @@ def simplified_vdot_derivation_diagram() -> str:
 
 
 def simplified_psidot_derivation_diagram() -> str:
-    svg = derivation_canvas(
-        "ψdot 推导：nmg 的水平转弯分量",
-        "载荷因子输入先给出 L=nmg，再由 bank angle μ 产生水平转弯力。",
-    )
-    cx, cy = 348, 242
-    svg.ellipse(cx, cy, 190, 108, "soft")
-    svg.line(cx, cy, cx + 182, cy, "horizon")
-    svg.text("水平转弯方向 eψ", cx + 112, cy - 14, "label")
-    svg.line(cx, cy, cx, cy - 146, "component")
-    svg.text("竖直法向", cx - 28, cy - 156, "small")
-    svg.line(cx, cy, cx + 135, cy - 104, "axis", True)
-    svg.text("L = nmg", cx + 116, cy - 112, "label")
-    svg.line(cx, cy, cx + 154, cy, "lift", True)
-    svg.text("nmg sinμ", cx + 120, cy + 28, "blue")
-    svg.line(cx, cy, cx, cy - 118, "lift", True)
-    svg.text("nmg cosμ", cx + 12, cy - 106, "small")
-    svg.path(f"M{cx + 12},{cy - 62} A70,70 0 0,1 {cx + 64},{cy - 49}", "bank")
-    svg.text("μ", cx + 58, cy - 68, "violet")
+    svg = derivation_canvas("ψdot 难点：nmg sinμ 驱动水平速度转弯")
 
-    svg.rect(628, 152, 298, 160, "soft")
+    kx, ky = 230, 250
+    svg.ellipse(kx, ky, 138, 92, "soft")
+    svg.path(f"M{kx - 74},{ky + 58} C{kx - 18},{ky + 96} {kx + 86},{ky + 58} {kx + 98},{ky - 20}", "path", True)
+    svg.text("水平面内转弯", kx - 70, ky + 112, "small")
+    svg.line(kx - 18, ky - 74, kx + 112, ky - 74, "axis", True)
+    svg.text("Vh = V cosγ", kx + 20, ky - 90, "label")
+    svg.line(kx + 106, ky - 74, kx + 42, ky - 22, "danger", True)
+    svg.text("aψ = Vh ψdot", kx + 20, ky - 32, "red")
+
+    cx, cy = 506, 292
+    nx, ny = cx + 96, cy - 132
+    hx, hy = cx + 96, cy
+    vx, vy = cx, cy - 132
+    svg.line(cx - 26, cy, cx + 144, cy, "horizon")
+    svg.text("eψ", cx + 112, cy - 12, "label")
+    svg.line(cx, cy + 14, cx, cy - 158, "component")
+    svg.text("竖直", cx - 36, cy - 156, "small")
+    svg.line(cx, cy, nx, ny, "axis", True)
+    svg.text("L = nmg", nx + 8, ny - 8, "label")
+    svg.line(cx, cy, hx, hy, "lift", True)
+    svg.text("nmg sinμ", hx - 22, hy + 28, "blue")
+    svg.line(cx, cy, vx, vy, "lift", True)
+    svg.text("nmg cosμ", vx + 10, vy + 18, "small")
+    svg.line(nx, ny, vx, vy, "component")
+    svg.line(nx, ny, hx, hy, "component")
+    svg.path(f"M{cx},{cy - 70} A70,70 0 0,1 {cx + 40},{cy - 56}", "bank")
+    svg.text("μ", cx + 44, cy - 66, "violet")
+
+    svg.rect(654, 152, 292, 160, "soft")
     svg.tspan_text(
         [
             "L = nmg",
             "F_ψ = nmg sinμ",
-            "m V cosγ ψdot = nmg sinμ",
+            "m (V cosγ) ψdot = nmg sinμ",
             "ψdot = g n sinμ/(V cosγ)",
         ],
-        652,
+        678,
         190,
         "formula",
         30,
@@ -393,22 +408,23 @@ def simplified_psidot_derivation_diagram() -> str:
 
 
 def simplified_gammadot_derivation_diagram() -> str:
-    svg = derivation_canvas(
-        "γdot 推导：nmg cosμ 与 mg cosγ 的差",
-        "竖直法向合力决定飞行路径角是抬升、保持还是下沉。",
-    )
-    ox, oy = 318, 254
+    svg = derivation_canvas("γdot 难点：nmg cosμ 改变飞行路径角")
+    ox, oy = 318, 264
     gamma = 16
     svg.line(72, oy + 18, 594, oy + 18, "horizon")
     svg.line(ox - 130, oy + 58, ox + 248, oy - 56, "path")
+    svg.text("竖直平面内改变飞行路径角", ox - 136, oy + 92, "small")
+    svg.line(ox, oy, *arrow_vec(ox, oy, 132, gamma), "axis", True)
+    svg.text("V", ox + 122, oy - 32, "label")
+    ax, ay = ox - 72, oy + 10
+    svg.line(ax, ay, *arrow_vec(ax, ay, 88, gamma + 90), "danger", True)
+    svg.text("aγ = V γdot", ax - 34, ay - 86, "red")
     svg.line(ox, oy, *arrow_vec(ox, oy, 150, gamma + 90), "lift", True)
     svg.text("nmg cosμ", ox - 28, oy - 140, "blue")
     svg.line(ox, oy, ox, oy + 136, "weight", True)
     svg.text("mg", ox + 16, oy + 140, "small")
     svg.line(ox, oy, *arrow_vec(ox, oy, 104, gamma - 90), "component", True)
     svg.text("mg cosγ", ox + 70, oy + 100, "small")
-    svg.line(ox, oy, *arrow_vec(ox, oy, 132, gamma), "axis", True)
-    svg.text("eV", ox + 122, oy - 32, "label")
     svg.line(ox, oy, *arrow_vec(ox, oy, 118, gamma + 90), "component", True)
     svg.text("eγ", ox - 40, oy - 110, "label")
 
@@ -431,7 +447,6 @@ def alpha_model_diagram() -> str:
     svg = Svg(1120, 760, "Alpha-input 3-DOF model force decomposition")
     svg.rect(34, 34, 1052, 692, "panel")
     svg.text("完整模型：以攻角 α 为输入，先计算 L 与 D，再投影到轨迹方向", 64, 78, "title")
-    svg.text("风轴：切向 eV 决定 Vdot；法向合力分解为航向转弯方向与飞行路径角方向", 66, 104, "subtitle")
 
     ox, oy = 365, 402
     gamma = 16
@@ -505,7 +520,6 @@ def simplified_model_diagram() -> str:
     svg = Svg(1120, 760, "Simplified load-factor 3-DOF model force decomposition")
     svg.rect(34, 34, 1052, 692, "panel")
     svg.text("简化模型：以载荷因子 n 为输入，直接令 L = nmg", 64, 78, "title")
-    svg.text("假设 α≈0、推力沿速度方向；n 是控制命令，但 stall 时只能实现 n_actual", 66, 104, "subtitle")
 
     ox, oy = 365, 402
     gamma = 12
@@ -564,7 +578,6 @@ def bridge_stall_diagram() -> str:
     svg = Svg(1120, 720, "Bridge between alpha and load-factor models with stall conditions")
     svg.rect(34, 34, 1052, 652, "panel")
     svg.text("两种模型的连接：α 决定气动能力，n 是简化模型的升力需求", 64, 78, "title")
-    svg.text("同一个升力方程把完整模型和简化模型连接起来；stall 是能力边界，不只是告警。", 66, 104, "subtitle")
 
     svg.rect(88, 166, 286, 128, "soft")
     svg.text("完整模型输入", 112, 202, "label")
@@ -626,7 +639,8 @@ def main() -> None:
         "alpha-model-force-decomposition.svg": alpha_model_diagram(),
         "simplified-model-force-decomposition.svg": simplified_model_diagram(),
         "model-bridge-stall.svg": bridge_stall_diagram(),
-        "position-velocity-decomposition.svg": velocity_components_diagram(),
+        "position-gamma-decomposition.svg": position_gamma_decomposition_diagram(),
+        "position-psi-decomposition.svg": position_psi_decomposition_diagram(),
         "alpha-vdot-force-decomposition.svg": alpha_vdot_derivation_diagram(),
         "alpha-psidot-force-decomposition.svg": alpha_psidot_derivation_diagram(),
         "alpha-gammadot-force-decomposition.svg": alpha_gammadot_derivation_diagram(),
