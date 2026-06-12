@@ -38,7 +38,7 @@
 
   <section class="grid-2">
     <article class="panel">
-      <h3>完整模型：输入 \(T,\phi,\alpha\)</h3>
+      <h3>完整模型：输入 T, φ, α</h3>
       <p>
         完整模型把攻角作为控制输入，通过
         \(C_L(\alpha)\)、\(C_D(\alpha)\) 计算升力 \(L\) 和阻力 \(D\)。
@@ -48,7 +48,7 @@
     </article>
 
     <article class="panel">
-      <h3>简化模型：输入 \(T,\mu,n\)</h3>
+      <h3>简化模型：输入 T, μ, n</h3>
       <p>
         简化模型直接命令载荷因子 \(n\)，等价于要求 \(L=nmg\)。
         stall 不是由输入 \(\alpha\) 触发，而是由所需
@@ -101,6 +101,42 @@
       <a href="simplified_model.html#connection-to-alpha">简化模型如何反推 \(\alpha_{\mathrm{req}}\)</a>。
       两处都放了互相跳转链接。
     </p>
+  </section>
+
+  <section class="panel">
+    <h2>推导地图</h2>
+    <p>
+      两个子页面现在都按同一条路线推导微分方程：先从速度矢量得到
+      \(\dot X,\dot Y,\dot h\)，再把外力分解到切向、水平转弯方向和竖直法向方向，
+      最后用牛顿第二定律得到 \(\dot V,\dot\psi,\dot\gamma\)。
+    </p>
+    <table>
+      <thead>
+        <tr><th>推导对象</th><th>完整 alpha 模型</th><th>简化 n 模型</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>位置方程</td>
+          <td><a href="alpha_model.html#position-derivation">速度按 \(\gamma,\psi\) 分解</a></td>
+          <td><a href="simplified_model.html#position-derivation">同一几何分解</a></td>
+        </tr>
+        <tr>
+          <td>速度大小</td>
+          <td><a href="alpha_model.html#vdot-derivation">\(T\cos\alpha-D-mg\sin\gamma\)</a></td>
+          <td><a href="simplified_model.html#vdot-derivation">\(T-D-mg\sin\gamma\)</a></td>
+        </tr>
+        <tr>
+          <td>航向角</td>
+          <td><a href="alpha_model.html#psidot-derivation">\((L+T\sin\alpha)\sin\phi\)</a></td>
+          <td><a href="simplified_model.html#psidot-derivation">\(nmg\sin\mu\)</a></td>
+        </tr>
+        <tr>
+          <td>飞行路径角</td>
+          <td><a href="alpha_model.html#gammadot-derivation">\((L+T\sin\alpha)\cos\phi-mg\cos\gamma\)</a></td>
+          <td><a href="simplified_model.html#gammadot-derivation">\(nmg\cos\mu-mg\cos\gamma\)</a></td>
+        </tr>
+      </tbody>
+    </table>
   </section>
 </main>
 </body>

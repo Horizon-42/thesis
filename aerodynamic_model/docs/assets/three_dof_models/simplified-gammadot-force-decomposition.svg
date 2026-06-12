@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="420" viewBox="0 0 980 420" role="img" aria-labelledby="title">
+  <title id="title">γdot 推导：nmg cosμ 与 mg cosγ 的差</title>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3.5 L0,7 Z" fill="#233143"/>
+    </marker>
+    <linearGradient id="panel" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#eef5f7"/>
+    </linearGradient>
+  </defs>
+  <style>
+    svg { background: #f6f8fb; }
+    .panel { fill: url(#panel); stroke: #c9d5df; stroke-width: 1.2; rx: 14; }
+    .soft { fill: #eef6f8; stroke: #bdd6dc; stroke-width: 1.2; rx: 10; }
+    .warnbox { fill: #fff4e5; stroke: #e1a154; stroke-width: 1.2; rx: 10; }
+    .aircraft { fill: #233143; stroke: #ffffff; stroke-width: 2.2; }
+    .wing { fill: #67809a; opacity: .95; }
+    .horizon { stroke: #9fb0bf; stroke-width: 2; stroke-dasharray: 7 7; }
+    .path { stroke: #007c89; stroke-width: 4; fill: none; }
+    .axis { stroke: #233143; stroke-width: 2.4; fill: none; }
+    .force { stroke: #b65b13; stroke-width: 4; fill: none; }
+    .lift { stroke: #2f62b7; stroke-width: 4; fill: none; }
+    .drag { stroke: #8f3f71; stroke-width: 4; fill: none; }
+    .weight { stroke: #58687a; stroke-width: 4; fill: none; }
+    .component { stroke: #7b8b9b; stroke-width: 2.4; stroke-dasharray: 6 5; fill: none; }
+    .alpha { stroke: #bf4b34; stroke-width: 3; fill: none; }
+    .bank { stroke: #6f48a8; stroke-width: 3; fill: none; }
+    .flow { stroke: #007c89; stroke-width: 2.8; fill: none; }
+    .danger { stroke: #b7352d; stroke-width: 3.2; fill: none; }
+    .dot { fill: #007c89; stroke: #ffffff; stroke-width: 2; }
+    .title { fill: #14202f; font: 700 24px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .subtitle { fill: #52677a; font: 500 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .label { fill: #182538; font: 650 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .small { fill: #52677a; font: 500 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .formula { fill: #182538; font: 600 17px "Times New Roman", serif; }
+    .mono { fill: #233143; font: 600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .orange { fill: #9a4c10; font: 700 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .blue { fill: #2f62b7; font: 700 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .violet { fill: #7b3f93; font: 700 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .red { fill: #b7352d; font: 700 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  </style>
+  <rect class="panel" x="26.0" y="26.0" width="928.0" height="368.0"/><text class="title" x="54.0" y="66.0">γdot 推导：nmg cosμ 与 mg cosγ 的差</text><text class="subtitle" x="56.0" y="92.0">竖直法向合力决定飞行路径角是抬升、保持还是下沉。</text><line class="horizon" x1="72.0" y1="272.0" x2="594.0" y2="272.0"/><line class="path" x1="188.0" y1="312.0" x2="566.0" y2="198.0"/><line class="lift" x1="318.0" y1="254.0" x2="276.7" y2="109.8" marker-end="url(#arrow)"/><text class="blue" x="290.0" y="114.0">nmg cosμ</text><line class="weight" x1="318.0" y1="254.0" x2="318.0" y2="390.0" marker-end="url(#arrow)"/><text class="small" x="334.0" y="394.0">mg</text><line class="component" x1="318.0" y1="254.0" x2="346.7" y2="354.0" marker-end="url(#arrow)"/><text class="small" x="388.0" y="354.0">mg cosγ</text><line class="axis" x1="318.0" y1="254.0" x2="444.9" y2="217.6" marker-end="url(#arrow)"/><text class="label" x="440.0" y="222.0">eV</text><line class="component" x1="318.0" y1="254.0" x2="285.5" y2="140.6" marker-end="url(#arrow)"/><text class="label" x="278.0" y="144.0">eγ</text><rect class="soft" x="628.0" y="152.0" width="308.0" height="160.0"/><text class="formula" x="652.0" y="196.0"><tspan x="652.0" dy="0">F_γ = nmg cosμ - mg cosγ</tspan><tspan x="652.0" dy="32">m V γdot = F_γ</tspan><tspan x="652.0" dy="32">γdot = g(n cosμ - cosγ)/V</tspan></text>
+</svg>

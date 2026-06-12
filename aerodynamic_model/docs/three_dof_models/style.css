@@ -159,6 +159,13 @@ figure img {
   height: auto;
 }
 
+figure.derivation-figure {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
 figcaption {
   margin-top: 10px;
   color: var(--muted);

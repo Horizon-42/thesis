@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="420" viewBox="0 0 980 420" role="img" aria-labelledby="title">
+  <title id="title">Vdot 推导：把力投影到速度方向 eV</title>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3.5 L0,7 Z" fill="#233143"/>
+    </marker>
+    <linearGradient id="panel" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#eef5f7"/>
+    </linearGradient>
+  </defs>
+  <style>
+    svg { background: #f6f8fb; }
+    .panel { fill: url(#panel); stroke: #c9d5df; stroke-width: 1.2; rx: 14; }
+    .soft { fill: #eef6f8; stroke: #bdd6dc; stroke-width: 1.2; rx: 10; }
+    .warnbox { fill: #fff4e5; stroke: #e1a154; stroke-width: 1.2; rx: 10; }
+    .aircraft { fill: #233143; stroke: #ffffff; stroke-width: 2.2; }
+    .wing { fill: #67809a; opacity: .95; }
+    .horizon { stroke: #9fb0bf; stroke-width: 2; stroke-dasharray: 7 7; }
+    .path { stroke: #007c89; stroke-width: 4; fill: none; }
+    .axis { stroke: #233143; stroke-width: 2.4; fill: none; }
+    .force { stroke: #b65b13; stroke-width: 4; fill: none; }
+    .lift { stroke: #2f62b7; stroke-width: 4; fill: none; }
+    .drag { stroke: #8f3f71; stroke-width: 4; fill: none; }
+    .weight { stroke: #58687a; stroke-width: 4; fill: none; }
+    .component { stroke: #7b8b9b; stroke-width: 2.4; stroke-dasharray: 6 5; fill: none; }
+    .alpha { stroke: #bf4b34; stroke-width: 3; fill: none; }
+    .bank { stroke: #6f48a8; stroke-width: 3; fill: none; }
+    .flow { stroke: #007c89; stroke-width: 2.8; fill: none; }
+    .danger { stroke: #b7352d; stroke-width: 3.2; fill: none; }
+    .dot { fill: #007c89; stroke: #ffffff; stroke-width: 2; }
+    .title { fill: #14202f; font: 700 24px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .subtitle { fill: #52677a; font: 500 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .label { fill: #182538; font: 650 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .small { fill: #52677a; font: 500 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .formula { fill: #182538; font: 600 17px "Times New Roman", serif; }
+    .mono { fill: #233143; font: 600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .orange { fill: #9a4c10; font: 700 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .blue { fill: #2f62b7; font: 700 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .violet { fill: #7b3f93; font: 700 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .red { fill: #b7352d; font: 700 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  </style>
+  <rect class="panel" x="26.0" y="26.0" width="928.0" height="368.0"/><text class="title" x="54.0" y="66.0">Vdot 推导：把力投影到速度方向 eV</text><text class="subtitle" x="56.0" y="92.0">切向方向只保留 T cosα、-D 和 -mg sinγ。</text><line class="horizon" x1="70.0" y1="276.0" x2="590.0" y2="276.0"/><line class="path" x1="188.0" y1="310.0" x2="568.0" y2="210.0"/><polygon class="wing" points="326.7,253.2 290.1,232.3 281.4,239.4 311.0,261.9 314.4,298.9 325.0,295.3"/><polygon class="wing" points="288.3,274.5 263.6,263.0 260.3,269.4 277.8,280.3 277.7,300.9 284.9,301.5"/><polygon class="aircraft" points="360.0,234.7 323.2,242.6 276.9,270.5 270.8,284.2 285.6,286.2 333.8,261.8"/><line class="axis" x1="318.0" y1="258.0" x2="501.5" y2="208.8" marker-end="url(#arrow)"/><text class="label" x="502.0" y="208.0">eV</text><line class="force" x1="318.0" y1="258.0" x2="442.2" y2="189.2" marker-end="url(#arrow)"/><text class="orange" x="444.0" y="184.0">T</text><line class="component" x1="318.0" y1="258.0" x2="441.6" y2="224.9" marker-end="url(#arrow)"/><text class="blue" x="426.0" y="234.0">T cos α</text><line class="drag" x1="318.0" y1="258.0" x2="204.0" y2="288.5" marker-end="url(#arrow)"/><text class="violet" x="180.0" y="298.0">-D</text><line class="component" x1="318.0" y1="258.0" x2="229.1" y2="281.8" marker-end="url(#arrow)"/><text class="small" x="202.0" y="336.0">-mg sin γ</text><line class="weight" x1="318.0" y1="258.0" x2="318.0" y2="378.0" marker-end="url(#arrow)"/><text class="small" x="332.0" y="382.0">mg</text><path class="alpha" d="M384,240 A70,70 0 0,0 376,224"/><text class="red" x="396.0" y="238.0">α</text><rect class="soft" x="650.0" y="160.0" width="270.0" height="128.0"/><text class="formula" x="674.0" y="198.0"><tspan x="674.0" dy="0">ΣF_eV = T cosα - D - mg sinγ</tspan><tspan x="674.0" dy="31">m Vdot = ΣF_eV</tspan><tspan x="674.0" dy="31">Vdot = (T cosα - D)/m - g sinγ</tspan></text>
+</svg>

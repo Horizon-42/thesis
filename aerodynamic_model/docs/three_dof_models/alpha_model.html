@@ -27,7 +27,7 @@
   </nav>
 
   <header>
-    <h1>完整模型：控制输入为 \(T,\phi,\alpha\)</h1>
+    <h1>完整模型：控制输入为 T, φ, α</h1>
     <p class="lead">
       这个子页面阐述较完整的 3-DOF 点质量模型。它不把 \(n\) 作为输入，
       而是把攻角 \(\alpha\) 作为控制量，通过空气动力模型计算 \(L\) 和 \(D\)，
@@ -110,8 +110,10 @@
   </figure>
 
   <section class="panel">
-    <h2>微分方程</h2>
-    <p>保留源文档中的风项时，位置方程为：</p>
+    <h2>微分方程总览</h2>
+    <p>
+      下面先列出完整方程，随后逐项推导。保留源文档中的风项时，位置方程为：
+    </p>
     <div class="eq">
       \[
       \dot X = V\cos\psi\cos\gamma+\omega_x,\quad
@@ -145,6 +147,220 @@
       \dot m=0
       \]
     </div>
+  </section>
+
+  <section id="position-derivation" class="panel">
+    <h2>位置方程推导</h2>
+    <p>
+      飞机速度大小为 \(V\)，飞行路径角 \(\gamma\) 表示速度矢量相对水平面的夹角。
+      因此速度的水平投影大小是：
+    </p>
+    <figure class="derivation-figure">
+      <img src="../assets/three_dof_models/position-velocity-decomposition.svg" alt="位置方程中的速度分解图">
+      <figcaption>
+        位置方程不来自外力，而来自速度矢量的几何分解：先由 \(\gamma\) 得到水平和竖直速度，
+        再由 \(\psi\) 把水平速度分到 \(X,Y\) 方向。
+      </figcaption>
+    </figure>
+    <div class="eq">
+      \[
+      V_{\mathrm{horizontal}}=V\cos\gamma
+      \]
+    </div>
+    <p>
+      航向角 \(\psi\) 再把这个水平速度分解到 \(X\) 与 \(Y\) 两个水平轴：
+    </p>
+    <div class="eq">
+      \[
+      \dot X_{\mathrm{air}}=V\cos\gamma\cos\psi
+      \]
+      \[
+      \dot Y_{\mathrm{air}}=V\cos\gamma\sin\psi
+      \]
+    </div>
+    <p>
+      竖直速度直接来自速度矢量在竖直方向的投影：
+    </p>
+    <div class="eq">
+      \[
+      \dot h_{\mathrm{air}}=V\sin\gamma
+      \]
+    </div>
+    <p>
+      如果保留风速分量 \((\omega_x,\omega_y,\omega_z)\)，地面坐标中的位置变化率就是空速贡献加风速贡献：
+    </p>
+    <div class="eq">
+      \[
+      \boxed{\dot X=V\cos\gamma\cos\psi+\omega_x}
+      \]
+      \[
+      \boxed{\dot Y=V\cos\gamma\sin\psi+\omega_y}
+      \]
+      \[
+      \boxed{\dot h=V\sin\gamma+\omega_z}
+      \]
+    </div>
+  </section>
+
+  <section id="vdot-derivation" class="panel">
+    <h2>\(\dot V\) 推导：沿速度方向的力</h2>
+    <p>
+      \(\dot V\) 描述速度大小如何变化，只看沿速度方向 \(e_V\) 的力。
+      推力轴与速度方向夹角为 \(\alpha\)，所以推力的切向分量是：
+    </p>
+    <figure class="derivation-figure">
+      <img src="../assets/three_dof_models/alpha-vdot-force-decomposition.svg" alt="完整模型 Vdot 推导中的切向力分解图">
+      <figcaption>
+        \(\dot V\) 只看切向：\(T\cos\alpha\) 加速，\(D\) 和 \(mg\sin\gamma\) 减速。
+      </figcaption>
+    </figure>
+    <div class="eq">
+      \[
+      T_{\parallel}=T\cos\alpha
+      \]
+    </div>
+    <p>
+      阻力总是沿速度反方向，切向贡献为 \(-D\)。重力竖直向下，它在速度方向上的投影为：
+    </p>
+    <div class="eq">
+      \[
+      W_{\parallel}=-mg\sin\gamma
+      \]
+    </div>
+    <p>将这些切向力代入牛顿第二定律：</p>
+    <div class="eq">
+      \[
+      m\dot V=T\cos\alpha-D-mg\sin\gamma
+      \]
+      \[
+      \boxed{
+      \dot V=\frac{T\cos\alpha-D}{m}-g\sin\gamma
+      }
+      \]
+    </div>
+  </section>
+
+  <section id="psidot-derivation" class="panel">
+    <h2>\(\dot\psi\) 推导：水平转弯方向的力</h2>
+    <p>
+      航向角 \(\psi\) 是水平面内的速度方向。真正参与水平转弯的是水平速度
+      \(V\cos\gamma\)。如果航向角以 \(\dot\psi\) 变化，水平转弯加速度大小为：
+    </p>
+    <figure class="derivation-figure">
+      <img src="../assets/three_dof_models/alpha-psidot-force-decomposition.svg" alt="完整模型 psidot 推导中的水平转弯力分解图">
+      <figcaption>
+        法向合力 \(N=L+T\sin\alpha\) 经 bank angle \(\phi\) 倾斜后，
+        其中 \(N\sin\phi\) 是改变航向角的水平转弯分量。
+      </figcaption>
+    </figure>
+    <div class="eq">
+      \[
+      a_{\psi}=V\cos\gamma\dot\psi
+      \]
+    </div>
+    <p>
+      升力 \(L\) 垂直于速度方向；推力的法向分量是 \(T\sin\alpha\)。
+      二者合成法向力：
+    </p>
+    <div class="eq">
+      \[
+      N=L+T\sin\alpha
+      \]
+    </div>
+    <p>
+      bank angle \(\phi\) 把法向力倾斜，其中水平转弯方向分量为：
+    </p>
+    <div class="eq">
+      \[
+      N_{\psi}=N\sin\phi=(L+T\sin\alpha)\sin\phi
+      \]
+    </div>
+    <p>对水平转弯方向写牛顿第二定律：</p>
+    <div class="eq">
+      \[
+      mV\cos\gamma\dot\psi=(L+T\sin\alpha)\sin\phi
+      \]
+      \[
+      \boxed{
+      \dot\psi=
+      \frac{(L+T\sin\alpha)\sin\phi}{mV\cos\gamma}
+      }
+      \]
+    </div>
+  </section>
+
+  <section id="gammadot-derivation" class="panel">
+    <h2>\(\dot\gamma\) 推导：竖直法向方向的力</h2>
+    <p>
+      飞行路径角 \(\gamma\) 是速度矢量在竖直平面内的仰角。
+      当 \(\gamma\) 以 \(\dot\gamma\) 变化时，垂直于速度的竖直平面加速度大小为：
+    </p>
+    <figure class="derivation-figure">
+      <img src="../assets/three_dof_models/alpha-gammadot-force-decomposition.svg" alt="完整模型 gammadot 推导中的竖直法向力分解图">
+      <figcaption>
+        \(\dot\gamma\) 来自竖直法向力差：
+        \((L+T\sin\alpha)\cos\phi\) 向上改变轨迹，\(mg\cos\gamma\) 向下压低轨迹。
+      </figcaption>
+    </figure>
+    <div class="eq">
+      \[
+      a_{\gamma}=V\dot\gamma
+      \]
+    </div>
+    <p>
+      法向合力 \(N=L+T\sin\alpha\) 的竖直平面分量是 \(N\cos\phi\)。
+      重力在这个法向方向上的反向分量是 \(mg\cos\gamma\)。因此：
+    </p>
+    <div class="eq">
+      \[
+      N_{\gamma}=(L+T\sin\alpha)\cos\phi
+      \]
+      \[
+      W_{\gamma}=-mg\cos\gamma
+      \]
+    </div>
+    <p>对竖直法向方向写牛顿第二定律：</p>
+    <div class="eq">
+      \[
+      mV\dot\gamma=(L+T\sin\alpha)\cos\phi-mg\cos\gamma
+      \]
+      \[
+      \boxed{
+      \dot\gamma=
+      \frac{(L+T\sin\alpha)\cos\phi-mg\cos\gamma}{mV}
+      }
+      \]
+    </div>
+  </section>
+
+  <section id="mass-derivation" class="panel">
+    <h2>\(\dot m\) 推导：燃油消耗项</h2>
+    <p>
+      如果需要质量变化，可从重量 \(W=mg\) 开始。教材中常把重量消耗率写成：
+    </p>
+    <figure class="derivation-figure">
+      <img src="../assets/three_dof_models/alpha-mdot-fuel-flow.svg" alt="完整模型 mdot 推导中的推力到燃油消耗关系图">
+      <figcaption>
+        质量方程不是空间方向上的力分解，而是由推力对应的燃油消耗率换算得到。
+      </figcaption>
+    </figure>
+    <div class="eq">
+      \[
+      \dot W=-c_TT
+      \]
+    </div>
+    <p>
+      因为 \(g\) 近似常数，\(\dot W=g\dot m\)，所以：
+    </p>
+    <div class="eq">
+      \[
+      g\dot m=-c_TT
+      \]
+      \[
+      \boxed{\dot m=-\frac{c_T}{g}T}
+      \]
+    </div>
+    <p>短时轨迹仿真可以忽略燃油消耗，取 \(\dot m=0\)。</p>
   </section>
 
   <section id="stall" class="panel">

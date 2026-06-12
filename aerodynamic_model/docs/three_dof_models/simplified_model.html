@@ -27,7 +27,7 @@
   </nav>
 
   <header>
-    <h1>简化模型：控制输入为 \(T,\mu,n\)</h1>
+    <h1>简化模型：控制输入为 T, μ, n</h1>
     <p class="lead">
       这个子页面阐述当前轨迹仿真常用的简化模型。它不直接输入攻角，
       而是假设推力沿速度方向，并用载荷因子 \(n\) 直接指定所需升力。
@@ -65,7 +65,7 @@
   </section>
 
   <section id="model-equations" class="panel">
-    <h2>核心假设与方程</h2>
+    <h2>核心假设与方程总览</h2>
     <p>简化模型使用两个关键近似：</p>
     <div class="eq">
       \[
@@ -102,6 +102,176 @@
       \[
       \dot m=0
       \]
+    </div>
+  </section>
+
+  <section id="position-derivation" class="panel">
+    <h2>位置方程推导</h2>
+    <p>
+      简化模型和完整模型使用同一套轨迹状态，因此位置方程完全来自速度矢量的几何分解。
+      速度大小为 \(V\)，飞行路径角为 \(\gamma\)，所以水平速度大小为：
+    </p>
+    <figure class="derivation-figure">
+      <img src="../assets/three_dof_models/position-velocity-decomposition.svg" alt="位置方程中的速度分解图">
+      <figcaption>
+        位置方程只需要速度几何投影：\(\gamma\) 决定水平/竖直分量，
+        \(\psi\) 决定水平速度在 \(X,Y\) 两个方向上的分量。
+      </figcaption>
+    </figure>
+    <div class="eq">
+      \[
+      V_{\mathrm{horizontal}}=V\cos\gamma
+      \]
+    </div>
+    <p>航向角 \(\psi\) 再把水平速度分到两个水平轴：</p>
+    <div class="eq">
+      \[
+      \dot X=V\cos\gamma\cos\psi
+      \]
+      \[
+      \dot Y=V\cos\gamma\sin\psi
+      \]
+    </div>
+    <p>竖直方向由 \(V\) 在竖直轴上的投影得到：</p>
+    <div class="eq">
+      \[
+      \boxed{\dot h=V\sin\gamma}
+      \]
+    </div>
+  </section>
+
+  <section id="vdot-derivation" class="panel">
+    <h2>\(\dot V\) 推导：切向力平衡</h2>
+    <p>
+      简化模型令 \(\alpha\approx0\)，所以推力基本沿速度方向：
+    </p>
+    <figure class="derivation-figure">
+      <img src="../assets/three_dof_models/simplified-vdot-force-decomposition.svg" alt="简化模型 Vdot 推导中的切向力分解图">
+      <figcaption>
+        当 \(\alpha\approx0\) 时，切向推力近似为 \(T\)，所以切向合力是
+        \(T-D-mg\sin\gamma\)。
+      </figcaption>
+    </figure>
+    <div class="eq">
+      \[
+      T\cos\alpha\approx T,\quad T\sin\alpha\approx0
+      \]
+    </div>
+    <p>
+      沿速度方向的力包括正向推力 \(T\)、反向阻力 \(-D\)，以及重力在速度方向上的分量
+      \(-mg\sin\gamma\)。因此：
+    </p>
+    <div class="eq">
+      \[
+      m\dot V=T-D-mg\sin\gamma
+      \]
+      \[
+      \boxed{
+      \dot V=\frac{T-D}{m}-g\sin\gamma
+      }
+      \]
+    </div>
+  </section>
+
+  <section id="psidot-derivation" class="panel">
+    <h2>\(\dot\psi\) 推导：由 \(n\) 指定水平转弯力</h2>
+    <p>
+      载荷因子定义为：
+    </p>
+    <figure class="derivation-figure">
+      <img src="../assets/three_dof_models/simplified-psidot-force-decomposition.svg" alt="简化模型 psidot 推导中的水平转弯力分解图">
+      <figcaption>
+        简化模型直接令 \(L=nmg\)。bank angle \(\mu\) 把 \(nmg\) 倾斜，
+        其中 \(nmg\sin\mu\) 产生水平转弯。
+      </figcaption>
+    </figure>
+    <div class="eq">
+      \[
+      n=\frac{L}{mg}
+      \]
+    </div>
+    <p>因此简化模型直接令：</p>
+    <div class="eq">
+      \[
+      L=nmg
+      \]
+    </div>
+    <p>
+      航向角变化对应水平转弯加速度：
+    </p>
+    <div class="eq">
+      \[
+      a_{\psi}=V\cos\gamma\dot\psi
+      \]
+    </div>
+    <p>
+      bank angle \(\mu\) 把升力倾斜，其中水平转弯方向的分量为：
+    </p>
+    <div class="eq">
+      \[
+      L_{\psi}=L\sin\mu=nmg\sin\mu
+      \]
+    </div>
+    <p>对水平转弯方向写牛顿第二定律：</p>
+    <div class="eq">
+      \[
+      mV\cos\gamma\dot\psi=nmg\sin\mu
+      \]
+      \[
+      \boxed{
+      \dot\psi=
+      \frac{g}{V\cos\gamma}n\sin\mu
+      }
+      \]
+    </div>
+  </section>
+
+  <section id="gammadot-derivation" class="panel">
+    <h2>\(\dot\gamma\) 推导：由 \(n\) 指定竖直法向力</h2>
+    <p>
+      飞行路径角 \(\gamma\) 的变化对应竖直平面内、垂直于速度方向的加速度：
+    </p>
+    <figure class="derivation-figure">
+      <img src="../assets/three_dof_models/simplified-gammadot-force-decomposition.svg" alt="简化模型 gammadot 推导中的竖直法向力分解图">
+      <figcaption>
+        \(\dot\gamma\) 由 \(nmg\cos\mu\) 和 \(mg\cos\gamma\) 的差决定。
+        这张图也解释了为什么 \(n\cos\mu<\cos\gamma\) 时轨迹会下沉。
+      </figcaption>
+    </figure>
+    <div class="eq">
+      \[
+      a_{\gamma}=V\dot\gamma
+      \]
+    </div>
+    <p>
+      升力在竖直法向方向上的分量是 \(L\cos\mu=nmg\cos\mu\)。
+      重力在该方向上的反向分量是 \(mg\cos\gamma\)。因此：
+    </p>
+    <div class="eq">
+      \[
+      L_{\gamma}=nmg\cos\mu
+      \]
+      \[
+      W_{\gamma}=-mg\cos\gamma
+      \]
+    </div>
+    <p>对竖直法向方向写牛顿第二定律：</p>
+    <div class="eq">
+      \[
+      mV\dot\gamma=nmg\cos\mu-mg\cos\gamma
+      \]
+      \[
+      \boxed{
+      \dot\gamma=
+      \frac{g}{V}(n\cos\mu-\cos\gamma)
+      }
+      \]
+    </div>
+    <div class="note">
+      <p>
+        这也解释了为什么协调水平转弯需要 \(n\cos\mu\approx1\)：
+        这样 \(\dot\gamma\approx0\)，飞机不会因为 bank 后竖直升力不足而下沉。
+      </p>
     </div>
   </section>
 

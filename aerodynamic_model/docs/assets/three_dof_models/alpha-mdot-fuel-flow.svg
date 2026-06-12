@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="420" viewBox="0 0 980 420" role="img" aria-labelledby="title">
+  <title id="title">mdot 推导：推力对应燃油消耗</title>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3.5 L0,7 Z" fill="#233143"/>
+    </marker>
+    <linearGradient id="panel" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#eef5f7"/>
+    </linearGradient>
+  </defs>
+  <style>
+    svg { background: #f6f8fb; }
+    .panel { fill: url(#panel); stroke: #c9d5df; stroke-width: 1.2; rx: 14; }
+    .soft { fill: #eef6f8; stroke: #bdd6dc; stroke-width: 1.2; rx: 10; }
+    .warnbox { fill: #fff4e5; stroke: #e1a154; stroke-width: 1.2; rx: 10; }
+    .aircraft { fill: #233143; stroke: #ffffff; stroke-width: 2.2; }
+    .wing { fill: #67809a; opacity: .95; }
+    .horizon { stroke: #9fb0bf; stroke-width: 2; stroke-dasharray: 7 7; }
+    .path { stroke: #007c89; stroke-width: 4; fill: none; }
+    .axis { stroke: #233143; stroke-width: 2.4; fill: none; }
+    .force { stroke: #b65b13; stroke-width: 4; fill: none; }
+    .lift { stroke: #2f62b7; stroke-width: 4; fill: none; }
+    .drag { stroke: #8f3f71; stroke-width: 4; fill: none; }
+    .weight { stroke: #58687a; stroke-width: 4; fill: none; }
+    .component { stroke: #7b8b9b; stroke-width: 2.4; stroke-dasharray: 6 5; fill: none; }
+    .alpha { stroke: #bf4b34; stroke-width: 3; fill: none; }
+    .bank { stroke: #6f48a8; stroke-width: 3; fill: none; }
+    .flow { stroke: #007c89; stroke-width: 2.8; fill: none; }
+    .danger { stroke: #b7352d; stroke-width: 3.2; fill: none; }
+    .dot { fill: #007c89; stroke: #ffffff; stroke-width: 2; }
+    .title { fill: #14202f; font: 700 24px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .subtitle { fill: #52677a; font: 500 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .label { fill: #182538; font: 650 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .small { fill: #52677a; font: 500 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .formula { fill: #182538; font: 600 17px "Times New Roman", serif; }
+    .mono { fill: #233143; font: 600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .orange { fill: #9a4c10; font: 700 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .blue { fill: #2f62b7; font: 700 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .violet { fill: #7b3f93; font: 700 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .red { fill: #b7352d; font: 700 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  </style>
+  <rect class="panel" x="26.0" y="26.0" width="928.0" height="368.0"/><text class="title" x="54.0" y="66.0">mdot 推导：推力对应燃油消耗</text><text class="subtitle" x="56.0" y="92.0">这不是空间力分解；它把重量消耗率换算成质量变化率。</text><rect class="soft" x="92.0" y="170.0" width="220.0" height="86.0"/><text class="label" x="168.0" y="206.0">推力 T</text><text class="small" x="142.0" y="236.0">发动机工作量</text><line class="flow" x1="312.0" y1="212.0" x2="420.0" y2="212.0" marker-end="url(#arrow)"/><rect class="warnbox" x="420.0" y="170.0" width="220.0" height="86.0"/><text class="label" x="494.0" y="206.0">重量消耗</text><text class="formula" x="480.0" y="236.0">Wdot = -cT T</text><line class="flow" x1="640.0" y1="212.0" x2="748.0" y2="212.0" marker-end="url(#arrow)"/><rect class="soft" x="748.0" y="170.0" width="160.0" height="86.0"/><text class="label" x="794.0" y="206.0">质量变化</text><text class="formula" x="800.0" y="236.0">W = mg</text><rect class="soft" x="282.0" y="304.0" width="430.0" height="56.0"/><text class="formula" x="322.0" y="340.0">g mdot = -cT T  →  mdot = -(cT/g) T</text>
+</svg>
