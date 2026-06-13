@@ -1,13 +1,16 @@
 import math
+from pathlib import Path
+import sys
+
 from scipy.optimize import minimize
 import numpy as np
 
-try:
-    from ...aerodynamic_model.simulator import Simulator, Atmosphere, Control
-    from ...aerodynamic_model.simulation_server import GeodeticState, SimulationServer
-except ImportError:
-    from aerodynamic_model.simulator import Simulator, Atmosphere, Control
-    from aerodynamic_model.simulation_server import GeodeticState, SimulationServer
+_AERODYNAMIC_MODEL_DIR = Path(__file__).resolve().parents[2] / "aerodynamic_model"
+if str(_AERODYNAMIC_MODEL_DIR) not in sys.path:
+    sys.path.insert(0, str(_AERODYNAMIC_MODEL_DIR))
+
+from simulator import Simulator, Atmosphere, Control
+from simulation_server import GeodeticState, SimulationServer
 
 class TranscriptionOptimizor:
     # multiple shooting args
