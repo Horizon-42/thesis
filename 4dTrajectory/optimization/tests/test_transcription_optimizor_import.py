@@ -50,7 +50,7 @@ def test_unpack_z_uses_final_time_controls_and_states_layout():
     )
 
 
-def test_geodetic_state_to_array_uses_simulation_server_field_names():
+def test_geodetic_state_to_array_uses_geodetic_state_field_names():
     module = load_transcription_module()
     state = module.GeodeticState(
         latitude=51.1139,
@@ -72,8 +72,11 @@ def test_geodetic_state_to_array_uses_simulation_server_field_names():
 
 def test_optimize_trajectory_builds_compatible_minimize_problem(monkeypatch):
     module = load_transcription_module()
-    sim_server = FakeSimulationServer(module)
-    optimizer = module.TranscriptionOptimizor(sim_server=sim_server, n_segments=2)
+    geodetic_simulator = FakeGeodeticSimulator(module)
+    optimizer = module.TranscriptionOptimizor(
+        sim_server=geodetic_simulator,
+        n_segments=2,
+    )
     initial_state = module.GeodeticState(1.0, 2.0, 1000.0, 120.0, 0.1, -0.01, 70000.0)
     target_state = module.GeodeticState(3.0, 4.0, 900.0, 115.0, 0.2, -0.02, 70000.0)
 
@@ -91,13 +94,16 @@ def test_optimize_trajectory_builds_compatible_minimize_problem(monkeypatch):
 
         assert defect_values.shape == (optimizer.n_segments * optimizer.state_dim,)
         assert final_state_values.shape == (optimizer.state_dim,)
-        assert len(sim_server.calls) == optimizer.n_segments
+        assert len(geodetic_simulator.calls) == optimizer.n_segments
         assert all(
             isinstance(call["state"], module.GeodeticState)
-            for call in sim_server.calls
+            for call in geodetic_simulator.calls
         )
-        assert all(isinstance(call["control"], module.Control) for call in sim_server.calls)
-        assert all(call["dt"] == 50.0 for call in sim_server.calls)
+        assert all(
+            isinstance(call["control"], module.Control)
+            for call in geodetic_simulator.calls
+        )
+        assert all(call["dt"] == 50.0 for call in geodetic_simulator.calls)
         return SimpleNamespace(success=True, x=x0, message="")
 
     monkeypatch.setattr(module, "minimize", fake_minimize)
@@ -115,7 +121,7 @@ def test_optimize_trajectory_builds_compatible_minimize_problem(monkeypatch):
 def test_optimize_trajectory_raises_when_minimize_fails(monkeypatch):
     module = load_transcription_module()
     optimizer = module.TranscriptionOptimizor(
-        sim_server=FakeSimulationServer(module),
+        sim_server=FakeGeodeticSimulator(module),
         n_segments=1,
     )
     state = module.GeodeticState(1.0, 2.0, 1000.0, 120.0, 0.1, -0.01, 70000.0)
@@ -129,7 +135,7 @@ def test_optimize_trajectory_raises_when_minimize_fails(monkeypatch):
         optimizer.optimize_trajectory(state, state)
 
 
-class FakeSimulationServer:
+class FakeGeodeticSimulator:
     def __init__(self, module):
         self.module = module
         self.calls = []

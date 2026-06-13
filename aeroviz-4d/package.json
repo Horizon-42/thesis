@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "pilot-server": "/Users/liudongxu/opt/miniconda3/envs/aviation/bin/python ../aerodynamic_model/simulation_server.py",
+    "backend": "/Users/liudongxu/opt/miniconda3/envs/aviation/bin/python ../aeroviz_backend/http_server.py",
     "build": "tsc && vite build",
     "build:local-terrain": "node scripts/build_local_terrain_heightmap.mjs",
     "build:local-terrain:visual-assets": "node scripts/build_local_terrain_heightmap.mjs --visual-assets-only",

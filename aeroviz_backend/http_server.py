@@ -1,0 +1,194 @@
+from __future__ import annotations
+
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import argparse
+import json
+from pathlib import Path
+import sys
+from typing import Any
+
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from aeroviz_backend.optimization_backend import OptimizationBackend
+from aeroviz_backend.simulation_backend import SimulationBackend, aircraft_catalog
+
+
+class AeroVizBackendApp:
+    def __init__(
+        self,
+        simulation_backend: SimulationBackend | None = None,
+        optimization_backend: OptimizationBackend | None = None,
+    ) -> None:
+        self.simulation_backend = simulation_backend or SimulationBackend()
+        self.optimization_backend = optimization_backend or OptimizationBackend()
+
+    def handle_get(self, path: str) -> tuple[int, dict[str, Any]]:
+        if path == "/health":
+            return 200, {"ok": True, "service": "aeroviz-backend"}
+        if path == "/simulation/aircraft":
+            return 200, aircraft_catalog()
+        return 404, {"ok": False, "error": "not found"}
+
+    def handle_post(
+        self,
+        path: str,
+        payload: dict[str, Any],
+    ) -> tuple[int, dict[str, Any], str | None]:
+        if path == "/simulation/reset":
+            return 200, self.simulation_backend.reset(payload), "reset"
+        if path == "/simulation/step":
+            return 200, self.simulation_backend.step(payload), "frame"
+        if path == "/optimization/run":
+            return 200, self.optimization_backend.optimize(payload), None
+        return 404, {"ok": False, "error": "not found"}, None
+
+
+class AeroVizRequestHandler(BaseHTTPRequestHandler):
+    app = AeroVizBackendApp()
+    server_version = "AeroVizBackendHTTP/0.1"
+    _live_log_active = False
+
+    def do_OPTIONS(self) -> None:
+        self._send_empty(204)
+
+    def do_GET(self) -> None:
+        status, payload = self.app.handle_get(self.path)
+        self._send_json(payload, status=status)
+        if status >= 400:
+            self._log_error(status, payload.get("error", "not found"))
+
+    def do_POST(self) -> None:
+        try:
+            payload = self._read_json()
+            status, response_payload, log_event = self.app.handle_post(
+                self.path,
+                payload,
+            )
+            self._send_json(response_payload, status=status)
+            if log_event and status < 400:
+                self._log_snapshot(log_event, response_payload)
+            elif status >= 400:
+                self._log_error(status, response_payload.get("error", "not found"))
+        except ValueError as exc:
+            self._send_json({"ok": False, "error": str(exc)}, status=400)
+            self._log_error(400, str(exc))
+        except Exception as exc:
+            self._send_json({"ok": False, "error": str(exc)}, status=500)
+            self._log_error(500, str(exc))
+
+    def log_message(self, format: str, *args: Any) -> None:
+        return
+
+    def _log_snapshot(self, event: str, snapshot: dict[str, Any]) -> None:
+        state = snapshot["state"]
+        control = snapshot["control"]
+        aero = snapshot["aero"]
+        line = (
+            "[aeroviz-backend] "
+            f"{event} "
+            f"t={snapshot['elapsedS']:.3f}s "
+            f"lat={state['lat']:.7f} "
+            f"lon={state['lon']:.7f} "
+            f"alt={state['altM']:.2f}m "
+            f"speed={state['speedMps']:.2f}m/s "
+            f"heading={state['headingDeg']:.2f}deg "
+            f"fpa={state['flightPathDeg']:.2f}deg "
+            f"mass={state['massKg']:.1f}kg "
+            f"type={state['aircraftType']} "
+            f"thrust={control['thrustN']:.1f}N "
+            f"bank={control['bankDeg']:.2f}deg "
+            f"alpha={control['attackDeg']:.2f}deg "
+            f"Cl={aero['liftCoefficient']:.4f} "
+            f"Cd={aero['dragCoefficient']:.4f}"
+        )
+
+        if event == "frame":
+            sys.stderr.write("\r" + line + "\033[K")
+            sys.stderr.flush()
+            type(self)._live_log_active = True
+            return
+
+        self._finish_live_log_line()
+        sys.stderr.write(line + "\n")
+        sys.stderr.flush()
+
+    def _log_error(self, status: int, message: str) -> None:
+        self._finish_live_log_line()
+        sys.stderr.write(
+            "[aeroviz-backend] "
+            f"error status={status} method={self.command} path={self.path} "
+            f"message={message}\n"
+        )
+        sys.stderr.flush()
+
+    def _finish_live_log_line(self) -> None:
+        if type(self)._live_log_active:
+            sys.stderr.write("\n")
+            type(self)._live_log_active = False
+
+    def _read_json(self) -> dict[str, Any]:
+        length = int(self.headers.get("Content-Length", "0"))
+        if length <= 0:
+            return {}
+        raw = self.rfile.read(length).decode("utf-8")
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError("request body must be JSON") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("request body must be a JSON object")
+        return parsed
+
+    def _send_json(self, payload: dict[str, Any], status: int = 200) -> None:
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self._send_cors_headers()
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_empty(self, status: int) -> None:
+        self.send_response(status)
+        self._send_cors_headers()
+        self.end_headers()
+
+    def _send_cors_headers(self) -> None:
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
+
+def make_request_handler(
+    app: AeroVizBackendApp | None = None,
+) -> type[AeroVizRequestHandler]:
+    class BoundAeroVizRequestHandler(AeroVizRequestHandler):
+        pass
+
+    BoundAeroVizRequestHandler.app = app or AeroVizBackendApp()
+    return BoundAeroVizRequestHandler
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Run the AeroViz backend server.")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8765)
+    args = parser.parse_args()
+
+    http_server = ThreadingHTTPServer(
+        (args.host, args.port),
+        make_request_handler(),
+    )
+    print(f"AeroViz backend listening on http://{args.host}:{args.port}", flush=True)
+    try:
+        http_server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        http_server.server_close()
+
+
+if __name__ == "__main__":
+    main()

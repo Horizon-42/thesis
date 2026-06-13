@@ -5,15 +5,15 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AEROVIZ_APP_DIR="${AEROVIZ_APP_DIR:-$ROOT_DIR/aeroviz-4d}"
 AEROVIZ_PUBLIC_DATA_DIR="$AEROVIZ_APP_DIR/public/data"
 AEROVIZ_DIST_DATA_PATH="$AEROVIZ_APP_DIR/dist/data"
-SIM_SERVER_HOST="${SIM_SERVER_HOST:-127.0.0.1}"
-SIM_SERVER_PORT="${SIM_SERVER_PORT:-8765}"
+AEROVIZ_BACKEND_HOST="${AEROVIZ_BACKEND_HOST:-127.0.0.1}"
+AEROVIZ_BACKEND_PORT="${AEROVIZ_BACKEND_PORT:-8765}"
 VITE_HOST="${VITE_HOST:-127.0.0.1}"
 VITE_PORT="${VITE_PORT:-5173}"
 PYTHON_BIN="${PYTHON_BIN:-/Users/liudongxu/opt/miniconda3/envs/aviation/bin/python}"
 
 cleanup() {
-  if [[ -n "${SIM_SERVER_PID:-}" ]]; then
-    kill "$SIM_SERVER_PID" 2>/dev/null || true
+  if [[ -n "${AEROVIZ_BACKEND_PID:-}" ]]; then
+    kill "$AEROVIZ_BACKEND_PID" 2>/dev/null || true
   fi
   if [[ -n "${VITE_PID:-}" ]]; then
     kill "$VITE_PID" 2>/dev/null || true
@@ -31,20 +31,20 @@ if [[ -d "$AEROVIZ_DIST_DATA_PATH" && ! -L "$AEROVIZ_DIST_DATA_PATH" ]]; then
   echo "Run npm run build in $AEROVIZ_APP_DIR, or remove dist/data, to reclaim the duplicate storage." >&2
 fi
 
-"$PYTHON_BIN" "$ROOT_DIR/aerodynamic_model/simulation_server.py" \
-  --host "$SIM_SERVER_HOST" \
-  --port "$SIM_SERVER_PORT" &
-SIM_SERVER_PID=$!
+"$PYTHON_BIN" "$ROOT_DIR/aeroviz_backend/http_server.py" \
+  --host "$AEROVIZ_BACKEND_HOST" \
+  --port "$AEROVIZ_BACKEND_PORT" &
+AEROVIZ_BACKEND_PID=$!
 
 cd "$AEROVIZ_APP_DIR"
-VITE_PILOT_SERVER_URL="${VITE_PILOT_SERVER_URL:-http://${SIM_SERVER_HOST}:${SIM_SERVER_PORT}}" \
+VITE_AEROVIZ_BACKEND_URL="${VITE_AEROVIZ_BACKEND_URL:-http://${AEROVIZ_BACKEND_HOST}:${AEROVIZ_BACKEND_PORT}}" \
   npm run dev -- --host "$VITE_HOST" --port "$VITE_PORT" &
 VITE_PID=$!
 
-echo "Simulation server: http://${SIM_SERVER_HOST}:${SIM_SERVER_PORT}"
+echo "AeroViz backend: http://${AEROVIZ_BACKEND_HOST}:${AEROVIZ_BACKEND_PORT}"
 echo "Frontend: http://${VITE_HOST}:${VITE_PORT}"
 echo "AeroViz data: $AEROVIZ_PUBLIC_DATA_DIR"
 
-while kill -0 "$SIM_SERVER_PID" 2>/dev/null && kill -0 "$VITE_PID" 2>/dev/null; do
+while kill -0 "$AEROVIZ_BACKEND_PID" 2>/dev/null && kill -0 "$VITE_PID" 2>/dev/null; do
   sleep 1
 done

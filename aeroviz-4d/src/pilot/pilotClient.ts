@@ -41,38 +41,38 @@ interface PilotErrorResponse {
   error: string;
 }
 
-const DEFAULT_PILOT_SERVER_URL = "http://127.0.0.1:8765";
+const DEFAULT_AEROVIZ_BACKEND_URL = "http://127.0.0.1:8765";
 
-export const PILOT_SERVER_URL =
-  import.meta.env.VITE_PILOT_SERVER_URL || DEFAULT_PILOT_SERVER_URL;
+export const AEROVIZ_BACKEND_URL =
+  import.meta.env.VITE_AEROVIZ_BACKEND_URL || DEFAULT_AEROVIZ_BACKEND_URL;
 
 export async function resetPilotSimulation(
   state: PilotResetState,
   control: PilotControls,
 ): Promise<PilotSnapshot> {
-  return postPilot("/reset", { state, control });
+  return postPilot("/simulation/reset", { state, control });
 }
 
 export async function stepPilotSimulation(
   control: PilotControls,
   dtS: number,
 ): Promise<PilotSnapshot> {
-  return postPilot("/step", { control, dtS });
+  return postPilot("/simulation/step", { control, dtS });
 }
 
 export async function fetchPilotAircraftConfigs(): Promise<PilotAircraftConfig[]> {
-  const response = await fetch(`${PILOT_SERVER_URL}/aircraft`);
+  const response = await fetch(`${AEROVIZ_BACKEND_URL}/simulation/aircraft`);
   const data = await response.json() as unknown;
 
   if (!response.ok) {
-    const message = readPilotError(data) ?? `Pilot server returned ${response.status}`;
+    const message = readPilotError(data) ?? `AeroViz backend returned ${response.status}`;
     throw new Error(message);
   }
   return parsePilotAircraftConfigs(data);
 }
 
 async function postPilot(path: string, payload: unknown): Promise<PilotSnapshot> {
-  const response = await fetch(`${PILOT_SERVER_URL}${path}`, {
+  const response = await fetch(`${AEROVIZ_BACKEND_URL}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -80,7 +80,7 @@ async function postPilot(path: string, payload: unknown): Promise<PilotSnapshot>
   const data = await response.json() as unknown;
 
   if (!response.ok) {
-    const message = readPilotError(data) ?? `Pilot server returned ${response.status}`;
+    const message = readPilotError(data) ?? `AeroViz backend returned ${response.status}`;
     throw new Error(message);
   }
   return parsePilotSnapshot(data);
@@ -96,7 +96,7 @@ function readPilotError(value: unknown): string | null {
 
 function parsePilotSnapshot(value: unknown): PilotSnapshot {
   if (!isRecord(value) || value.ok !== true) {
-    throw new Error("Pilot server returned an invalid response");
+    throw new Error("AeroViz backend returned an invalid response");
   }
 
   const state = readRecord(value, "state");
@@ -130,12 +130,12 @@ function parsePilotSnapshot(value: unknown): PilotSnapshot {
 
 function parsePilotAircraftConfigs(value: unknown): PilotAircraftConfig[] {
   if (!isRecord(value) || value.ok !== true || !Array.isArray(value.aircraft)) {
-    throw new Error("Pilot server returned invalid aircraft config");
+    throw new Error("AeroViz backend returned invalid aircraft config");
   }
 
   return value.aircraft.map((item) => {
     if (!isRecord(item)) {
-      throw new Error("Pilot server returned invalid aircraft config");
+      throw new Error("AeroViz backend returned invalid aircraft config");
     }
     return {
       code: readString(item, "code"),
@@ -150,7 +150,7 @@ function parsePilotAircraftConfigs(value: unknown): PilotAircraftConfig[] {
 function readRecord(value: Record<string, unknown>, key: string): Record<string, unknown> {
   const nested = value[key];
   if (!isRecord(nested)) {
-    throw new Error(`Pilot server response is missing ${key}`);
+    throw new Error(`AeroViz backend response is missing ${key}`);
   }
   return nested;
 }
@@ -158,7 +158,7 @@ function readRecord(value: Record<string, unknown>, key: string): Record<string,
 function readNumber(value: Record<string, unknown>, key: string): number {
   const nested = value[key];
   if (typeof nested !== "number" || !Number.isFinite(nested)) {
-    throw new Error(`Pilot server response has invalid ${key}`);
+    throw new Error(`AeroViz backend response has invalid ${key}`);
   }
   return nested;
 }
@@ -166,7 +166,7 @@ function readNumber(value: Record<string, unknown>, key: string): number {
 function readString(value: Record<string, unknown>, key: string): string {
   const nested = value[key];
   if (typeof nested !== "string" || nested.length === 0) {
-    throw new Error(`Pilot server response has invalid ${key}`);
+    throw new Error(`AeroViz backend response has invalid ${key}`);
   }
   return nested;
 }

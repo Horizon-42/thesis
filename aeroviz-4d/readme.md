@@ -79,15 +79,15 @@ Run the development server:
 npm run dev
 ```
 
-Run pilot mode in a second terminal:
+Run the AeroViz backend in a second terminal:
 
 ```bash
 pip install -r python/requirements.txt
-npm run pilot-server
+npm run backend
 ```
 
 The browser talks to `http://127.0.0.1:8765` by default. Set
-`VITE_PILOT_SERVER_URL` if the Python bridge is running elsewhere.
+`VITE_AEROVIZ_BACKEND_URL` if the Python backend is running elsewhere.
 
 Build the frontend:
 

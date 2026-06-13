@@ -13,7 +13,7 @@ import {
   type PilotInitialPlacementPosition,
 } from "../hooks/usePilotInitialPlacement";
 import {
-  PILOT_SERVER_URL,
+  AEROVIZ_BACKEND_URL,
   fetchPilotAircraftConfigs,
   resetPilotSimulation,
   stepPilotSimulation,
@@ -437,7 +437,7 @@ export default function PilotPanel() {
       <header className="pilot-panel-header">
         <div>
           <h3>Pilot Mode</h3>
-          <span className="pilot-panel-server">{PILOT_SERVER_URL}</span>
+          <span className="pilot-panel-server">{AEROVIZ_BACKEND_URL}</span>
         </div>
         <span className={`pilot-status pilot-status-${statusLabel.toLowerCase()}`}>
           {statusLabel}

@@ -59,14 +59,14 @@ describe("pilotClient", () => {
   });
 
   it("posts reset payload using the simulation server contract", async () => {
-    // This locks the frontend reset request shape to the Python /reset endpoint.
+    // This locks the frontend reset request shape to the Python /simulation/reset endpoint.
     const fetchMock = mockFetch(snapshot);
 
     const result = await resetPilotSimulation(state, control);
 
     expect(result).toEqual(snapshot);
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://127.0.0.1:8765/reset",
+      "http://127.0.0.1:8765/simulation/reset",
       expect.objectContaining({
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -76,13 +76,13 @@ describe("pilotClient", () => {
   });
 
   it("posts step payload using control and dt only", async () => {
-    // This locks the frontend step request shape to the Python /step endpoint.
+    // This locks the frontend step request shape to the Python /simulation/step endpoint.
     const fetchMock = mockFetch(snapshot);
 
     await stepPilotSimulation(control, 0.2);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://127.0.0.1:8765/step",
+      "http://127.0.0.1:8765/simulation/step",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ control, dtS: 0.2 }),
@@ -90,14 +90,16 @@ describe("pilotClient", () => {
     );
   });
 
-  it("loads aircraft configs from the pilot server", async () => {
+  it("loads aircraft configs from the backend simulation namespace", async () => {
     const payload = { ok: true, aircraft: aircraftConfigs };
     const fetchMock = mockFetch(payload);
 
     const result = await fetchPilotAircraftConfigs();
 
     expect(result).toEqual(aircraftConfigs);
-    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8765/aircraft");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8765/simulation/aircraft",
+    );
   });
 
   it("throws the server error message when the response is not ok", async () => {
