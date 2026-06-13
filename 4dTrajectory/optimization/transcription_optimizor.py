@@ -101,5 +101,11 @@ class TranscriptionOptimizor:
                           constraints=constraints, 
                           method='SLSQP', 
                           options={'maxiter': 1000, 'ftol': 1e-6})
+        
+        # return sates and controls at each node
+        if result.success:
+            final_time, node_control, node_state = self.unpack_z(result.x)
+            return final_time, node_control, node_state
 
-        return []
+        else:
+            raise ValueError("Optimization failed: " + result.message)
