@@ -89,6 +89,32 @@ def test_optimize_trajectory_builds_compatible_minimize_problem(monkeypatch):
         assert options == {"maxiter": 1000, "ftol": 1e-6}
         assert fun(x0) == 100.0
 
+        _, node_control, node_state = optimizer.unpack_z(x0)
+        np.testing.assert_allclose(
+            node_control,
+            np.array([[12000.0, 0.0, 0.0], [12000.0, 0.0, 0.0]]),
+        )
+        np.testing.assert_allclose(
+            node_state,
+            np.array([
+                [2.0, 3.0, 950.0, 117.5, 0.15, -0.015, 70000.0],
+                [3.0, 4.0, 900.0, 115.0, 0.2, -0.02, 70000.0],
+            ]),
+        )
+
+        state_bounds = bounds[
+            1 + optimizer.n_segments * optimizer.control_dim:
+        ]
+        assert state_bounds[:optimizer.state_dim] == [
+            (-90.0, 90.0),
+            (-180.0, 180.0),
+            (0.0, None),
+            (1.0, None),
+            (None, None),
+            (-(np.pi / 2.0 - 1e-3), np.pi / 2.0 - 1e-3),
+            (1.0, None),
+        ]
+
         defect_values = constraints[0]["fun"](x0)
         final_state_values = constraints[1]["fun"](x0)
 
@@ -116,6 +142,52 @@ def test_optimize_trajectory_builds_compatible_minimize_problem(monkeypatch):
     assert final_time == 100.0
     assert node_control.shape == (2, 3)
     assert node_state.shape == (2, 7)
+
+
+def test_defect_constraints_turn_simulator_failures_into_infeasible_residual(monkeypatch):
+    module = load_transcription_module()
+    optimizer = module.TranscriptionOptimizor(
+        sim_server=FailingGeodeticSimulator(),
+        n_segments=2,
+    )
+    state = module.GeodeticState(1.0, 2.0, 1000.0, 120.0, 0.1, -0.01, 70000.0)
+
+    def fake_minimize(fun, x0, bounds, constraints, method, options):
+        del fun, bounds, method, options
+        defect_values = constraints[0]["fun"](x0)
+
+        assert defect_values.shape == (optimizer.n_segments * optimizer.state_dim,)
+        np.testing.assert_allclose(defect_values, np.full(defect_values.shape, 1e9))
+        return SimpleNamespace(success=True, x=x0, message="")
+
+    monkeypatch.setattr(module, "minimize", fake_minimize)
+
+    final_time, node_control, node_state = optimizer.optimize_trajectory(state, state)
+
+    assert final_time == 100.0
+    assert node_control.shape == (2, 3)
+    assert node_state.shape == (2, 7)
+
+
+def test_optimize_trajectory_rejects_unsimulatable_endpoint_state():
+    module = load_transcription_module()
+    optimizer = module.TranscriptionOptimizor(
+        sim_server=FakeGeodeticSimulator(module),
+        n_segments=1,
+    )
+    initial_state = module.GeodeticState(
+        latitude=1.0,
+        longitude=2.0,
+        altitude=1000.0,
+        V=0.0,
+        psi=0.1,
+        gamma=-0.01,
+        m=70000.0,
+    )
+    target_state = module.GeodeticState(1.0, 2.0, 900.0, 115.0, 0.2, -0.02, 70000.0)
+
+    with pytest.raises(ValueError, match="initial_state.V must be >= 1.0"):
+        optimizer.optimize_trajectory(initial_state, target_state)
 
 
 def test_optimize_trajectory_raises_when_minimize_fails(monkeypatch):
@@ -151,3 +223,9 @@ class FakeGeodeticSimulator:
             gamma=state.gamma + 0.001,
             m=state.m,
         )
+
+
+class FailingGeodeticSimulator:
+    def step(self, state, control, dt):
+        del state, control, dt
+        raise ValueError("Required step size is less than spacing between numbers.")
