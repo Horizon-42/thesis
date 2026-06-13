@@ -10,7 +10,7 @@ if str(_AERODYNAMIC_MODEL_DIR) not in sys.path:
     sys.path.insert(0, str(_AERODYNAMIC_MODEL_DIR))
 
 from simulator import Simulator, Atmosphere, Control
-from simulation_server import GeodeticState, SimulationServer
+from geodetic_simulator import GeodeticSimulator, GeodeticState
 
 class TranscriptionOptimizor:
     # multiple shooting args
@@ -22,7 +22,7 @@ class TranscriptionOptimizor:
     # state dim
     state_dim : int = 7 # Match to GeodeticState, lat, lon, alt, V, psi, gamma, mass
 
-    def __init__(self, sim_server: SimulationServer, n_segments: int = 10):
+    def __init__(self, sim_server: GeodeticSimulator, n_segments: int = 10):
         self.sim_server = sim_server
         self.n_segments = n_segments
 
