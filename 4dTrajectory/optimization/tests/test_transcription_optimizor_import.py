@@ -119,7 +119,7 @@ def test_optimize_trajectory_builds_compatible_minimize_problem(monkeypatch):
         final_state_values = constraints[1]["fun"](x0)
 
         assert defect_values.shape == (optimizer.n_segments * optimizer.state_dim,)
-        assert final_state_values.shape == (optimizer.state_dim,)
+        assert final_state_values.shape == (optimizer.state_dim - 1,)
         assert len(geodetic_simulator.calls) == optimizer.n_segments
         assert all(
             isinstance(call["state"], module.GeodeticState)
@@ -167,6 +167,44 @@ def test_defect_constraints_turn_simulator_failures_into_infeasible_residual(mon
     assert final_time == 100.0
     assert node_control.shape == (2, 3)
     assert node_state.shape == (2, 7)
+
+
+def test_default_runway_guess_stays_inside_simulator_domain(monkeypatch):
+    module = load_transcription_module()
+    optimizer = module.TranscriptionOptimizor(
+        sim_server=module.GeodeticSimulator(),
+        n_segments=10,
+    )
+    initial_state = module.GeodeticState(
+        latitude=35.878659,
+        longitude=-78.7873,
+        altitude=1000.0,
+        V=120.0,
+        psi=0.0,
+        gamma=0.0,
+        m=78000.0,
+    )
+    target_state = module.GeodeticState(
+        latitude=35.874,
+        longitude=-78.802,
+        altitude=111.86,
+        V=70.0,
+        psi=np.radians(45.0),
+        gamma=np.radians(-4.0),
+        m=78000.0,
+    )
+
+    def fake_minimize(fun, x0, bounds, constraints, method, options):
+        del fun, bounds, method, options
+        defect_values = constraints[0]["fun"](x0)
+
+        assert np.all(np.isfinite(defect_values))
+        assert not np.all(defect_values == 1e9)
+        return SimpleNamespace(success=True, x=x0, message="")
+
+    monkeypatch.setattr(module, "minimize", fake_minimize)
+
+    optimizer.optimize_trajectory(initial_state, target_state)
 
 
 def test_optimize_trajectory_rejects_unsimulatable_endpoint_state():
