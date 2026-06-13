@@ -33,8 +33,8 @@ class TranscriptionOptimizor:
     
     @staticmethod
     def geodetic_state_to_array(state: GeodeticState) -> np.ndarray:
-        return np.array([state.lat, state.lon, state.alt, state.V, state.psi, state.gamma, state.mass])
-        
+        return np.array([state.latitude, state.longitude, state.altitude, state.V, state.psi, state.gamma, state.m])
+
     def optimize_trajectory(self, initial_state: GeodeticState, target_state: GeodeticState) -> list:
         # initialize guess and bounds
         # final time guess
@@ -45,7 +45,6 @@ class TranscriptionOptimizor:
         node_control_guess = np.zeros((self.n_segments, self.control_dim))
         # control bounds, for example, thrust between 0 and max thrust 1000KN, bank angle between -90 and 90 degrees, attack angle between -10 and 10 degrees
         control_bounds = [(0.0, 1000000.0), (-math.pi/2, math.pi/2), (-math.radians(18), math.radians(18))] * self.n_segments
-        control_bounds = control_bounds * self.n_segments
 
         # state guess
         node_state_guess = np.zeros((self.n_segments, self.state_dim))
@@ -76,7 +75,7 @@ class TranscriptionOptimizor:
                 # simulate dynamics for one segment
                 # this is a placeholder, you would need to implement the actual dynamics simulation based on your model
                 # next_state = simulate_dynamics(state_i, control_i, dt)
-                geo_predicted_state = self.sim_server.step(start_state, Control(*control_i), dt)
+                geo_predicted_state = self.sim_server.step(GeodeticState(*start_state), Control(*control_i), dt)
                 predicted_state = self.geodetic_state_to_array(geo_predicted_state)
 
                 defects.append(predicted_state - state_i)
