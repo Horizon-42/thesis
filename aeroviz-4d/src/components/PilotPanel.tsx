@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
 import {
   fetchRunwayThresholdTargets,
   type RunwayThresholdTarget,
 } from "../data/runwayThresholdTargets";
 import { usePilotAircraft, type PilotAircraftPose } from "../hooks/usePilotAircraft";
+import { usePilotTargetGate } from "../hooks/usePilotTargetGate";
 import PilotInitialStateOverlay, {
   EnglishNumberInput,
   formatCoord,
@@ -12,6 +13,10 @@ import PilotInitialStateOverlay, {
   type PilotInitialEditableKey,
 } from "./PilotInitialStateOverlay";
 import PilotRealtimeStatePanel from "./PilotRealtimeStatePanel";
+import PilotTargetStateOverlay, {
+  type PilotTargetEditableKey,
+  type PilotTargetState,
+} from "./PilotTargetStateOverlay";
 import {
   usePilotInitialPlacement,
   type PilotInitialPlacementPosition,
@@ -46,17 +51,6 @@ const DEFAULT_TARGET_ALPHA_DEG = 4;
 
 type PilotPanelMode = "pilot" | "trajectory";
 
-interface TrajectoryTargetState {
-  runwayThresholdId: string;
-  lon: number;
-  lat: number;
-  altM: number;
-  speedMps: number;
-  headingDeg: number;
-  flightPathDeg: number;
-  attackDeg: number;
-}
-
 interface PlacementBackup {
   initialState: PilotResetState;
   isInitialPreviewVisible: boolean;
@@ -73,6 +67,7 @@ export default function PilotPanel() {
   const [isFlying, setIsFlying] = useState(false);
   const [isTrajectoryPlaying, setIsTrajectoryPlaying] = useState(false);
   const [isInitialEditorOpen, setIsInitialEditorOpen] = useState(false);
+  const [isTargetEditorOpen, setIsTargetEditorOpen] = useState(false);
   const [isPlacingInitialPosition, setIsPlacingInitialPosition] = useState(false);
   const [isInitialPreviewVisible, setIsInitialPreviewVisible] = useState(false);
   const [isFollowing, setIsFollowing] = useState(true);
@@ -84,7 +79,7 @@ export default function PilotPanel() {
   const [snapshot, setSnapshot] = useState<PilotSnapshot | null>(null);
   const [trail, setTrail] = useState<PilotAircraftPose[]>([]);
   const [runwayTargets, setRunwayTargets] = useState<RunwayThresholdTarget[]>([]);
-  const [targetState, setTargetState] = useState<TrajectoryTargetState>(() =>
+  const [targetState, setTargetState] = useState<PilotTargetState>(() =>
     makeDefaultTrajectoryTarget(null),
   );
   const [nSegments, setNSegments] = useState(10);
@@ -104,6 +99,30 @@ export default function PilotPanel() {
   );
 
   const pose = snapshotToPose(snapshot);
+  const selectedTargetRunway = runwayTargets.find(
+    (target) => target.id === targetState.runwayThresholdId,
+  );
+  const targetGateState = useMemo(
+    () =>
+      selectedTargetRunway
+        ? {
+            runwayThresholdId: targetState.runwayThresholdId,
+            runwayIdent: selectedTargetRunway.runwayIdent,
+            lon: targetState.lon,
+            lat: targetState.lat,
+            altM: targetState.altM,
+            headingDeg: targetState.headingDeg,
+          }
+        : null,
+    [
+      selectedTargetRunway,
+      targetState.altM,
+      targetState.headingDeg,
+      targetState.lat,
+      targetState.lon,
+      targetState.runwayThresholdId,
+    ],
+  );
 
   const clearSnapshotForInitialEdit = useCallback(() => {
     setOptimizedTrajectory(null);
@@ -229,12 +248,18 @@ export default function PilotPanel() {
     follow: isFollowing,
   });
 
+  usePilotTargetGate({
+    enabled: activeMode === "trajectory",
+    target: targetGateState,
+  });
+
   useEffect(() => {
     placementBackupRef.current = null;
     trajectoryReplayIndexRef.current = 0;
     setInitialState(makeDefaultInitialState(airport, aircraftConfigs[0] ?? null));
     setActiveMode("pilot");
     setIsInitialEditorOpen(false);
+    setIsTargetEditorOpen(false);
     setIsPlacingInitialPosition(false);
     setIsInitialPreviewVisible(false);
     setIsFlying(false);
@@ -541,6 +566,7 @@ export default function PilotPanel() {
   function openTrajectoryMode() {
     if (isPlacingInitialPosition) return;
     setIsFlying(false);
+    setIsInitialEditorOpen(false);
     setActiveMode("trajectory");
     setError(null);
   }
@@ -548,8 +574,21 @@ export default function PilotPanel() {
   function openPilotMode() {
     if (isPlacingInitialPosition) return;
     setIsTrajectoryPlaying(false);
+    setIsTargetEditorOpen(false);
     setActiveMode("pilot");
     setError(null);
+  }
+
+  function openTargetEditor() {
+    if (isBusy || isTrajectoryPlaying || runwayTargets.length === 0) return;
+
+    setError(null);
+    setIsInitialEditorOpen(false);
+    setIsTargetEditorOpen(true);
+  }
+
+  function closeTargetEditor() {
+    setIsTargetEditorOpen(false);
   }
 
   function updateTargetRunway(runwayThresholdId: string) {
@@ -562,10 +601,7 @@ export default function PilotPanel() {
   }
 
   function updateTargetField(
-    key: keyof Pick<
-      TrajectoryTargetState,
-      "speedMps" | "headingDeg" | "flightPathDeg" | "attackDeg"
-    >,
+    key: PilotTargetEditableKey,
     value: number,
     min: number,
     max: number,
@@ -657,47 +693,53 @@ export default function PilotPanel() {
     }));
   }
 
-  const statusLabel = error
-    ? "Error"
-    : isPlacingInitialPosition
-      ? "Placing"
-      : isBusy && activeMode === "trajectory"
-        ? "Computing"
-        : isTrajectoryPlaying
-          ? "Playing"
-          : isFlying
-            ? "Flying"
-            : optimizedTrajectory && activeMode === "trajectory"
-              ? "Ready"
-              : snapshot
-                ? "Paused"
-                : "Standby";
+  const statusLabel = isPlacingInitialPosition
+    ? "Placing"
+    : isBusy && activeMode === "trajectory"
+      ? "Computing"
+      : isTrajectoryPlaying
+        ? "Playing"
+        : isFlying
+          ? "Flying"
+          : optimizedTrajectory && activeMode === "trajectory"
+            ? "Ready"
+            : snapshot
+              ? "Paused"
+              : "Standby";
   const hasAircraftConfigs = aircraftConfigs.length > 0;
   const initialControlsDisabled = isFlying || isTrajectoryPlaying || isBusy || !hasAircraftConfigs;
+  const targetControlsDisabled = isBusy || isTrajectoryPlaying || runwayTargets.length === 0;
   const trajectoryDtS = optimizedTrajectory
     ? optimizedTrajectory.finalTimeS / Math.max(1, optimizedTrajectory.controls.length)
     : null;
 
   return (
     <div className="pilot-panel">
-      <PilotRealtimeStatePanel snapshot={snapshot} visible={isFlying || isTrajectoryPlaying} />
+      <PilotRealtimeStatePanel
+        snapshot={snapshot}
+        visible={isFlying || isTrajectoryPlaying}
+        showControlReadout={activeMode === "trajectory"}
+      />
 
       <header className="pilot-panel-header">
-        <div>
-          <h3>{activeMode === "trajectory" ? "Trajectory Play" : "Pilot Mode"}</h3>
-          <span className="pilot-panel-server">{AEROVIZ_BACKEND_URL}</span>
+        <div className="pilot-panel-header-main">
+          <div className="pilot-panel-title-block">
+            <h3>{activeMode === "trajectory" ? "Trajectory Play" : "Pilot Mode"}</h3>
+            <span className="pilot-panel-server">{AEROVIZ_BACKEND_URL}</span>
+          </div>
+          <span className={`pilot-status pilot-status-${statusLabel.toLowerCase()}`}>
+            {statusLabel}
+          </span>
         </div>
-        <div className="pilot-panel-header-actions">
+        <div className="pilot-panel-mode-row">
           <button
             type="button"
+            className="pilot-mode-toggle"
             onClick={activeMode === "trajectory" ? openPilotMode : openTrajectoryMode}
             disabled={isPlacingInitialPosition}
           >
             {activeMode === "trajectory" ? "Pilot" : "Trajectory"}
           </button>
-          <span className={`pilot-status pilot-status-${statusLabel.toLowerCase()}`}>
-            {statusLabel}
-          </span>
         </div>
       </header>
 
@@ -768,22 +810,14 @@ export default function PilotPanel() {
         <>
           <section className="pilot-initial-summary" aria-label="Target aircraft state summary">
             <div className="pilot-initial-summary-header">
-              <h4>Target Threshold</h4>
-              <select
-                className="pilot-select-input"
-                value={targetState.runwayThresholdId}
-                onChange={(event) => updateTargetRunway(event.target.value)}
-                disabled={isBusy || isTrajectoryPlaying || runwayTargets.length === 0}
+              <h4>Target State</h4>
+              <button
+                type="button"
+                onClick={openTargetEditor}
+                disabled={targetControlsDisabled}
               >
-                {runwayTargets.length === 0 ? (
-                  <option value="">No runway</option>
-                ) : null}
-                {runwayTargets.map((target) => (
-                  <option key={target.id} value={target.id}>
-                    {target.runwayIdent}
-                  </option>
-                ))}
-              </select>
+                Edit
+              </button>
             </div>
 
             <dl className="pilot-initial-position">
@@ -803,6 +837,10 @@ export default function PilotPanel() {
                 <dd>{formatNumberInputValue(targetState.altM)} m</dd>
               </div>
               <div>
+                <dt>Rwy</dt>
+                <dd>{selectedTargetRunway?.runwayIdent ?? "-"}</dd>
+              </div>
+              <div>
                 <dt>Psi</dt>
                 <dd>{formatNumberInputValue(targetState.headingDeg)} deg</dd>
               </div>
@@ -818,11 +856,31 @@ export default function PilotPanel() {
                 <dt>Alpha</dt>
                 <dd>{formatNumberInputValue(targetState.attackDeg)} deg</dd>
               </div>
-              <div>
-                <dt>Pair</dt>
-                <dd>{selectedRunwayPair(runwayTargets, targetState.runwayThresholdId)}</dd>
-              </div>
             </dl>
+          </section>
+
+          <PilotTargetStateOverlay
+            open={isTargetEditorOpen}
+            state={targetState}
+            runwayTargets={runwayTargets}
+            disabled={targetControlsDisabled}
+            onClose={closeTargetEditor}
+            onRunwayChange={updateTargetRunway}
+            onFieldChange={updateTargetField}
+          />
+
+          <section className="pilot-optimization-row" aria-label="Trajectory optimization settings">
+            <label>
+              <span>Segments</span>
+              <EnglishNumberInput
+                value={nSegments}
+                min={1}
+                max={80}
+                step="1"
+                disabled={targetControlsDisabled}
+                onCommit={updateNSegments}
+              />
+            </label>
           </section>
 
           <div className="pilot-actions">
@@ -869,64 +927,6 @@ export default function PilotPanel() {
           </div>
 
           <section className="pilot-control-zone" aria-label="Trajectory play controls">
-            <div className="pilot-target-fields">
-              <label>
-                <span>Vt</span>
-                <EnglishNumberInput
-                  value={targetState.speedMps}
-                  min={1}
-                  max={260}
-                  step="1"
-                  disabled={isBusy || isTrajectoryPlaying}
-                  onCommit={(value) => updateTargetField("speedMps", value, 1, 260)}
-                />
-              </label>
-              <label>
-                <span>Psi</span>
-                <EnglishNumberInput
-                  value={targetState.headingDeg}
-                  min={0}
-                  max={360}
-                  step="1"
-                  disabled={isBusy || isTrajectoryPlaying}
-                  onCommit={(value) => updateTargetField("headingDeg", value, 0, 360)}
-                />
-              </label>
-              <label>
-                <span>Gamma</span>
-                <EnglishNumberInput
-                  value={targetState.flightPathDeg}
-                  min={-15}
-                  max={10}
-                  step="0.1"
-                  disabled={isBusy || isTrajectoryPlaying}
-                  onCommit={(value) => updateTargetField("flightPathDeg", value, -15, 10)}
-                />
-              </label>
-              <label>
-                <span>Alpha</span>
-                <EnglishNumberInput
-                  value={targetState.attackDeg}
-                  min={-10}
-                  max={18}
-                  step="0.5"
-                  disabled={isBusy || isTrajectoryPlaying}
-                  onCommit={(value) => updateTargetField("attackDeg", value, -10, 18)}
-                />
-              </label>
-              <label>
-                <span>Segments</span>
-                <EnglishNumberInput
-                  value={nSegments}
-                  min={1}
-                  max={80}
-                  step="1"
-                  disabled={isBusy || isTrajectoryPlaying}
-                  onCommit={updateNSegments}
-                />
-              </label>
-            </div>
-
             <div className="pilot-options-row">
               <label>
                 <input
@@ -1113,8 +1113,8 @@ function makeDefaultInitialState(
 
 function makeDefaultTrajectoryTarget(
   runwayTarget: RunwayThresholdTarget | null,
-  fallback?: TrajectoryTargetState,
-): TrajectoryTargetState {
+  fallback?: PilotTargetState,
+): PilotTargetState {
   return {
     runwayThresholdId: runwayTarget?.id ?? fallback?.runwayThresholdId ?? "",
     lon: runwayTarget?.lon ?? fallback?.lon ?? 0,
@@ -1128,7 +1128,7 @@ function makeDefaultTrajectoryTarget(
 }
 
 function trajectoryTargetToPilotState(
-  target: TrajectoryTargetState,
+  target: PilotTargetState,
   aircraftType: PilotAircraftType,
   massKg: number,
 ): PilotResetState {
@@ -1142,13 +1142,6 @@ function trajectoryTargetToPilotState(
     massKg,
     aircraftType,
   };
-}
-
-function selectedRunwayPair(
-  targets: RunwayThresholdTarget[],
-  runwayThresholdId: string,
-): string {
-  return targets.find((target) => target.id === runwayThresholdId)?.runwayPairIdent || "-";
 }
 
 function snapshotToPose(snapshot: PilotSnapshot | null): PilotAircraftPose | null {

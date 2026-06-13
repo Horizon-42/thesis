@@ -6,11 +6,13 @@ import { formatCoord } from "./PilotInitialStateOverlay";
 interface PilotRealtimeStatePanelProps {
   snapshot: PilotSnapshot | null;
   visible: boolean;
+  showControlReadout?: boolean;
 }
 
 export default function PilotRealtimeStatePanel({
   snapshot,
   visible,
+  showControlReadout = false,
 }: PilotRealtimeStatePanelProps) {
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
 
@@ -39,6 +41,13 @@ export default function PilotRealtimeStatePanel({
           label="Flight Path Angle (gamma)"
           value={`${snapshot.state.flightPathDeg.toFixed(2)} deg`}
         />
+        {showControlReadout ? (
+          <RealtimeReadout
+            label="Control"
+            value={`bank ${snapshot.control.bankDeg.toFixed(1)} deg | alpha ${snapshot.control.attackDeg.toFixed(2)} deg | thrust ${snapshot.control.thrustN.toFixed(0)} N`}
+            wide
+          />
+        ) : null}
         <RealtimeReadout
           label="Attack Angle (alpha)"
           value={`${snapshot.control.attackDeg.toFixed(2)} deg`}
@@ -57,9 +66,17 @@ export default function PilotRealtimeStatePanel({
   );
 }
 
-function RealtimeReadout({ label, value }: { label: string; value: string }) {
+function RealtimeReadout({
+  label,
+  value,
+  wide = false,
+}: {
+  label: string;
+  value: string;
+  wide?: boolean;
+}) {
   return (
-    <div className="pilot-realtime-readout">
+    <div className={wide ? "pilot-realtime-readout pilot-realtime-readout-wide" : "pilot-realtime-readout"}>
       <dt>{label}</dt>
       <dd>{value}</dd>
     </div>

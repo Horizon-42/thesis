@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import PilotPanel from "../PilotPanel";
 
@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   runTrajectoryOptimization: vi.fn(),
   usePilotAircraft: vi.fn(),
   usePilotInitialPlacement: vi.fn(),
+  usePilotTargetGate: vi.fn(),
 }));
 
 vi.mock("../../context/AppContext", () => ({
@@ -26,6 +27,10 @@ vi.mock("../../hooks/usePilotAircraft", () => ({
 
 vi.mock("../../hooks/usePilotInitialPlacement", () => ({
   usePilotInitialPlacement: mocks.usePilotInitialPlacement,
+}));
+
+vi.mock("../../hooks/usePilotTargetGate", () => ({
+  usePilotTargetGate: mocks.usePilotTargetGate,
 }));
 
 vi.mock("../../pilot/pilotClient", () => ({
@@ -70,8 +75,43 @@ describe("PilotPanel trajectory play mode", () => {
       ok: true,
       finalTimeS: 100,
       nSegments: 10,
-      controls: [{ thrustN: 12000, bankDeg: 0, attackDeg: 4 }],
+      controls: [
+        { thrustN: 12000, bankDeg: 0, attackDeg: 4 },
+        { thrustN: 12000, bankDeg: 3, attackDeg: 4 },
+      ],
       states: [],
+    });
+    mocks.resetPilotSimulation.mockResolvedValue({
+      ok: true,
+      elapsedS: 0,
+      state: {
+        lon: -78.7873,
+        lat: 35.878659,
+        altM: 1000,
+        speedMps: 120,
+        headingDeg: 0,
+        flightPathDeg: 0,
+        massKg: 78000,
+        aircraftType: "A320",
+      },
+      control: { thrustN: 12000, bankDeg: 3, attackDeg: 4 },
+      aero: { liftCoefficient: 0.4, dragCoefficient: 0.04 },
+    });
+    mocks.stepPilotSimulation.mockResolvedValue({
+      ok: true,
+      elapsedS: 10,
+      state: {
+        lon: -78.79,
+        lat: 35.87,
+        altM: 900,
+        speedMps: 115,
+        headingDeg: 5,
+        flightPathDeg: -1,
+        massKg: 78000,
+        aircraftType: "A320",
+      },
+      control: { thrustN: 12000, bankDeg: 3, attackDeg: 4 },
+      aero: { liftCoefficient: 0.42, dragCoefficient: 0.041 },
     });
   });
 
@@ -82,8 +122,38 @@ describe("PilotPanel trajectory play mode", () => {
     fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
 
     expect(screen.getByText("Trajectory Play")).toBeTruthy();
-    expect(await screen.findByText("Target Threshold")).toBeTruthy();
-    expect(screen.getByRole("combobox").textContent).toContain("RW05L");
+    expect(await screen.findByText("Target State")).toBeTruthy();
+    expect(screen.getByText("RW05L")).toBeTruthy();
+
+    await waitFor(() => {
+      expect(mocks.usePilotTargetGate).toHaveBeenLastCalledWith({
+        enabled: true,
+        target: expect.objectContaining({
+          runwayThresholdId: "RW05L",
+          runwayIdent: "RW05L",
+          lon: -78.802,
+          lat: 35.874,
+          altM: 111.86,
+          headingDeg: 45,
+        }),
+      });
+    });
+
+    const targetSummary = screen.getByLabelText("Target aircraft state summary");
+    fireEvent.click(within(targetSummary).getByRole("button", { name: "Edit" }));
+
+    const targetEditor = await screen.findByLabelText("Target state setup");
+    expect(within(targetEditor).getByText("Threshold Gate")).toBeTruthy();
+    expect(within(targetEditor).getByRole("combobox").textContent).toContain("RW05L");
+
+    const gammaInput = within(targetEditor).getByLabelText("Gamma deg");
+    fireEvent.change(gammaInput, { target: { value: "-4" } });
+    fireEvent.blur(gammaInput);
+
+    const segmentInput = screen.getByLabelText("Segments");
+    fireEvent.change(segmentInput, { target: { value: "12" } });
+    fireEvent.blur(segmentInput);
+    fireEvent.click(within(targetEditor).getByRole("button", { name: "Close" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Optimize" }));
 
@@ -101,12 +171,42 @@ describe("PilotPanel trajectory play mode", () => {
           altM: 111.86,
           speedMps: 70,
           headingDeg: 45,
-          flightPathDeg: -3,
+          flightPathDeg: -4,
           aircraftType: "A320",
         }),
         targetControl: { attackDeg: 4 },
-        nSegments: 10,
+        nSegments: 12,
       });
     });
+  });
+
+  it("shows the trajectory replay control row in the live state panel", async () => {
+    document.body.innerHTML = '<div class="cesium-overlay-container"></div>';
+    render(<PilotPanel />);
+
+    expect(await screen.findByText("A320")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Optimize" }));
+
+    await waitFor(() => {
+      expect(mocks.runTrajectoryOptimization).toHaveBeenCalled();
+    });
+    await waitFor(() => {
+      expect((screen.getByRole("button", { name: "Play" }) as HTMLButtonElement).disabled)
+        .toBe(false);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Play" }));
+
+    await waitFor(() => {
+      expect(mocks.resetPilotSimulation).toHaveBeenCalled();
+    });
+    const liveStatePanel = await screen.findByRole("complementary", {
+      name: "Realtime aircraft state",
+    });
+    expect(within(liveStatePanel).getByText("Control")).toBeTruthy();
+    expect(
+      within(liveStatePanel).getByText("bank 3.0 deg | alpha 4.00 deg | thrust 12000 N"),
+    ).toBeTruthy();
   });
 });

@@ -165,13 +165,14 @@ body,
   z-index: 100;
   pointer-events: none;
   display: grid;
-  overflow-x: hidden;
-  gap: 12px 16px;
-  padding: 16px 16px 120px;    /* Bottom padding clears Cesium's timeline bar */
+  box-sizing: border-box;
+  overflow: hidden;
+  gap: 8px 16px;
+  padding: 8px 16px 44px;    /* Bottom padding clears Cesium's timeline bar */
   grid-template-areas:
     "ctrl  pilotState  hud"
-    "proc  .           ops"
-    ".     .           .  ";
+    "ctrl  .           ops"
+    "proc  .           ops";
   grid-template-columns: var(--overlay-left-width) minmax(0, 1fr) auto;
   grid-template-rows: auto minmax(0, 1fr) auto;
 }
@@ -1334,16 +1335,17 @@ body,
 /* ── Right-bottom flight operations panel ────────────────────────────────── */
 .flight-ops-panel {
   grid-area: ops;
-  align-self: start;
+  align-self: stretch;
   justify-self: end;
   pointer-events: auto;
   display: grid;
-  gap: 8px;
+  gap: 6px;
   width: clamp(190px, 15vw, 230px);
   max-width: min(100%, calc(100vw - 36px));
-  max-height: min(38vh, 450px);
+  height: 100%;
+  max-height: 100%;
   min-height: 0;
-  padding: 8px;
+  padding: 6px;
   border: 1px solid rgba(103, 232, 249, 0.24);
   border-radius: 8px;
   background: rgba(16, 22, 33, 0.9);
@@ -1363,26 +1365,31 @@ body,
 }
 
 .pilot-panel-header {
-  display: flex;
-  align-items: start;
-  justify-content: space-between;
+  display: grid;
   gap: 6px;
   margin-bottom: 8px;
 }
 
-.pilot-panel-header > div {
+.pilot-panel-header-main {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pilot-panel-title-block {
   flex: 1 1 auto;
   min-width: 0;
 }
 
-.pilot-panel-header-actions {
+.pilot-panel-mode-row {
   display: flex;
-  align-items: start;
-  gap: 5px;
-  flex: 0 0 auto;
+  min-width: 0;
 }
 
-.pilot-panel-header-actions button {
+.pilot-mode-toggle {
+  width: 100%;
   padding: 4px 6px;
   white-space: nowrap;
 }
@@ -1390,9 +1397,11 @@ body,
 .pilot-panel h3 {
   margin: 0 0 3px;
   color: #7dd3fc;
-  font-size: 13px;
-  letter-spacing: 0.06em;
+  font-size: 12px;
+  letter-spacing: 0;
+  line-height: 1.1;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .pilot-panel-server {
@@ -1408,7 +1417,7 @@ body,
 
 .pilot-status {
   flex: 0 0 auto;
-  min-width: 48px;
+  min-width: 64px;
   padding: 4px 5px;
   border: 1px solid rgba(148, 163, 184, 0.26);
   border-radius: 4px;
@@ -1444,11 +1453,6 @@ body,
   color: #fde68a;
 }
 
-.pilot-status-error {
-  border-color: rgba(248, 113, 113, 0.6);
-  color: #fecaca;
-}
-
 .pilot-placement-button.active {
   border-color: rgba(250, 204, 21, 0.72);
   background: rgba(113, 63, 18, 0.78);
@@ -1457,9 +1461,9 @@ body,
 
 .pilot-initial-summary {
   display: grid;
-  gap: 4px;
-  margin-bottom: 6px;
-  padding: 6px;
+  gap: 3px;
+  margin-bottom: 5px;
+  padding: 5px;
   border: 1px solid rgba(148, 163, 184, 0.22);
   border-radius: 6px;
   background: rgba(15, 23, 42, 0.46);
@@ -1469,7 +1473,7 @@ body,
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
 }
 
@@ -1478,9 +1482,9 @@ body,
   margin: 0;
   overflow: hidden;
   color: #c7d2fe;
-  font-size: 10.5px;
+  font-size: 10px;
   line-height: 1.2;
-  letter-spacing: 0.06em;
+  letter-spacing: 0;
   text-overflow: ellipsis;
   text-transform: uppercase;
   white-space: nowrap;
@@ -1488,7 +1492,7 @@ body,
 
 .pilot-initial-summary-header button {
   flex: 0 0 auto;
-  padding: 2px 7px;
+  padding: 2px 6px;
 }
 
 .pilot-initial-summary-header .pilot-select-input {
@@ -1501,7 +1505,7 @@ body,
 .pilot-initial-readouts {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 2px 5px;
+  gap: 2px 4px;
   margin: 0;
 }
 
@@ -1510,9 +1514,9 @@ body,
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
-  padding: 1px 3px;
+  padding: 1px 2px;
   border-radius: 4px;
   background: rgba(2, 6, 23, 0.2);
 }
@@ -1623,13 +1627,25 @@ body,
   min-height: 30px;
 }
 
+.pilot-target-gate-card label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pilot-target-gate-card span {
+  color: #93a4b8;
+  font-size: 10.5px;
+}
+
 .pilot-initial-coordinates {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 5px;
 }
 
-.pilot-initial-coordinates output {
+.pilot-initial-coordinates output,
+.pilot-target-gate-readouts output {
   min-width: 0;
   overflow: hidden;
   padding: 5px 6px;
@@ -1640,6 +1656,12 @@ body,
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.pilot-target-gate-readouts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
 }
 
 .pilot-initial-fields {
@@ -1662,8 +1684,8 @@ body,
 .pilot-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
-  margin-bottom: 8px;
+  gap: 4px;
+  margin-bottom: 6px;
 }
 
 .pilot-panel button {
@@ -1671,7 +1693,7 @@ body,
   border-radius: 4px;
   background: #1e2840;
   color: #c8d8ec;
-  padding: 4px 6px;
+  padding: 3px 5px;
   cursor: pointer;
   font: inherit;
   transition: background 0.15s, border-color 0.15s;
@@ -1696,21 +1718,20 @@ body,
 
 .pilot-control-zone {
   display: grid;
-  gap: 6px;
-  margin-bottom: 8px;
+  gap: 5px;
+  margin-bottom: 6px;
 }
 
-.pilot-target-fields {
+.pilot-optimization-row {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
+  margin-bottom: 5px;
 }
 
-.pilot-target-fields label {
+.pilot-optimization-row label {
   display: grid;
-  grid-template-columns: 54px minmax(0, 1fr);
+  grid-template-columns: 58px minmax(0, 1fr);
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
 }
 
@@ -1718,7 +1739,7 @@ body,
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr) 22px;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
 }
 
 .pilot-stepper-row button {
@@ -1734,20 +1755,20 @@ body,
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr);
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
 }
 
 .pilot-options-row {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 6px;
+  gap: 4px;
 }
 
 .pilot-options-row label:first-child {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   color: #cbd5e1;
 }
 
@@ -1761,7 +1782,7 @@ body,
   border-radius: 4px;
   background: #0f172a;
   color: #e0f2fe;
-  padding: 4px 5px;
+  padding: 3px 4px;
   font: 11px "Courier New", monospace;
 }
 
@@ -1864,6 +1885,10 @@ body,
   min-width: 0;
 }
 
+.pilot-realtime-readout-wide {
+  grid-column: 1 / -1;
+}
+
 .pilot-realtime-readout dt {
   min-width: 0;
   overflow: hidden;
@@ -1911,7 +1936,7 @@ body,
 
   .pilot-stepper-row label,
   .pilot-options-row label,
-  .pilot-target-fields label {
+  .pilot-optimization-row label {
     grid-template-columns: 44px minmax(0, 1fr);
   }
 
@@ -1989,7 +2014,7 @@ body,
   backdrop-filter: blur(6px);
   color: #c8d8ec;
   border-radius: 8px;
-  padding: 12px 14px;
+  padding: 7px 10px;
   width: clamp(190px, 15vw, 230px);
   font-family: "Inter", "Segoe UI", sans-serif;
   font-size: 12px;
@@ -1998,22 +2023,22 @@ body,
 
 /* Title */
 .hud-title {
-  margin: 0 0 10px;
-  font-size: 13px;
+  margin: 0 0 4px;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.06em;
+  letter-spacing: 0;
   text-transform: uppercase;
   color: #7eb8f7;
 }
 
 /* Section wrapper + label */
-.hud-section       { margin-bottom: 8px; }
+.hud-section       { margin-bottom: 4px; }
 .hud-section-label {
-  margin: 0 0 5px;
+  margin: 0 0 2px;
   font-size: 10px;
   font-weight: 400;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0;
   color: #8898aa;
 }
 
@@ -2022,22 +2047,26 @@ body,
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: 5px;
 }
 .hud-compass-wrap {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   flex: 1;
 }
-.hud-compass-svg { display: block; }
+.hud-compass-svg {
+  display: block;
+  width: 52px;
+  height: 52px;
+}
 .hud-hdg-value {
   font-family: "Courier New", monospace;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   color: #7eb8f7;
-  letter-spacing: 0.1em;
+  letter-spacing: 0;
   line-height: 1;
 }
 
@@ -2045,7 +2074,7 @@ body,
 .hud-ctrl-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
 }
 .hud-ctrl-value {
   flex: 1;
@@ -2060,9 +2089,9 @@ body,
 .hud-toggle-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   cursor: pointer;
-  margin: 0 0 4px;
+  margin: 0 0 2px;
 }
 .hud-toggle-label {
   font-size: 11px;
@@ -2073,7 +2102,7 @@ body,
 .hud-slider-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
 }
 .hud-slider {
   flex: 1;
@@ -2092,8 +2121,8 @@ body,
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
-  margin-top: 5px;
+  gap: 5px;
+  margin-top: 3px;
 }
 .hud-terrain-status-value {
   font-family: "Courier New", monospace;
@@ -2128,8 +2157,8 @@ body,
 
 /* Arrow buttons (tall to align with compass SVG) */
 .hud-arrow-btn {
-  width: 26px;
-  height: 72px;
+  width: 24px;
+  height: 52px;
   font-size: 15px;
   display: flex;
   align-items: center;
@@ -2140,8 +2169,8 @@ body,
 
 /* Small square buttons for pitch / zoom */
 .hud-sm-btn {
-  width: 26px;
-  height: 26px;
+  width: 23px;
+  height: 23px;
   font-size: 14px;
   font-weight: 700;
   display: flex;
@@ -2154,17 +2183,17 @@ body,
 /* Full-width reset button */
 .hud-side-view-btn {
   width: 100%;
-  margin-top: 6px;
-  padding: 5px 0;
+  margin-top: 3px;
+  padding: 3px 0;
   font-size: 11px;
   color: #d8f3ff;
 }
 
 .hud-reset-btn {
   width: 100%;
-  padding: 6px 0;
+  padding: 4px 0;
   font-size: 11px;
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
   text-align: center;
   justify-content: center;
 }
@@ -2173,16 +2202,16 @@ body,
 .hud-divider {
   border: none;
   border-top: 1px solid #2a3550;
-  margin: 8px 0;
+  margin: 4px 0;
 }
 
 /* Lat / lon readout */
-.hud-readout       { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }
-.hud-readout-row   { display: flex; align-items: center; gap: 6px; }
+.hud-readout       { display: flex; flex-direction: column; gap: 2px; margin-bottom: 5px; }
+.hud-readout-row   { display: flex; align-items: center; gap: 5px; }
 .hud-readout-label {
   font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0;
   color: #8898aa;
   width: 26px;
   flex-shrink: 0;

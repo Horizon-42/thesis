@@ -62,4 +62,17 @@ describe("PilotRealtimeStatePanel", () => {
       screen.queryByRole("complementary", { name: "Realtime aircraft state" }),
     ).toBeNull();
   });
+
+  it("can add a separate trajectory control readout row", async () => {
+    render(
+      <PilotRealtimeStatePanel
+        snapshot={snapshot}
+        visible={true}
+        showControlReadout={true}
+      />,
+    );
+
+    expect(await screen.findByText("Control")).toBeTruthy();
+    expect(screen.getByText("bank 0.0 deg | alpha 3.50 deg | thrust 12000 N")).toBeTruthy();
+  });
 });
