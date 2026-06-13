@@ -1375,6 +1375,18 @@ body,
   min-width: 0;
 }
 
+.pilot-panel-header-actions {
+  display: flex;
+  align-items: start;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+
+.pilot-panel-header-actions button {
+  padding: 4px 6px;
+  white-space: nowrap;
+}
+
 .pilot-panel h3 {
   margin: 0 0 3px;
   color: #7dd3fc;
@@ -1410,6 +1422,21 @@ body,
 .pilot-status-flying {
   border-color: rgba(52, 211, 153, 0.42);
   color: #bbf7d0;
+}
+
+.pilot-status-playing {
+  border-color: rgba(52, 211, 153, 0.42);
+  color: #bbf7d0;
+}
+
+.pilot-status-ready {
+  border-color: rgba(96, 165, 250, 0.5);
+  color: #bfdbfe;
+}
+
+.pilot-status-computing {
+  border-color: rgba(250, 204, 21, 0.52);
+  color: #fde68a;
 }
 
 .pilot-status-placing {
@@ -1462,6 +1489,12 @@ body,
 .pilot-initial-summary-header button {
   flex: 0 0 auto;
   padding: 2px 7px;
+}
+
+.pilot-initial-summary-header .pilot-select-input {
+  flex: 0 1 96px;
+  padding-top: 2px;
+  padding-bottom: 2px;
 }
 
 .pilot-initial-position,
@@ -1667,6 +1700,20 @@ body,
   margin-bottom: 8px;
 }
 
+.pilot-target-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.pilot-target-fields label {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
 .pilot-stepper-row {
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr) 22px;
@@ -1732,6 +1779,41 @@ body,
   font-family: "Courier New", monospace;
   font-size: 11px;
   text-align: right;
+  white-space: nowrap;
+}
+
+.pilot-plan-readouts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  margin: 0;
+}
+
+.pilot-plan-readouts div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 5px 6px;
+  border-radius: 5px;
+  background: rgba(2, 6, 23, 0.28);
+}
+
+.pilot-plan-readouts dt {
+  color: #93a4b8;
+  font-size: 9px;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.pilot-plan-readouts dd {
+  min-width: 0;
+  overflow: hidden;
+  margin: 0;
+  color: #f8fafc;
+  font-family: "Courier New", monospace;
+  font-size: 10.5px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -1828,7 +1910,8 @@ body,
   }
 
   .pilot-stepper-row label,
-  .pilot-options-row label {
+  .pilot-options-row label,
+  .pilot-target-fields label {
     grid-template-columns: 44px minmax(0, 1fr);
   }
 

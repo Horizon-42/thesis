@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
+import {
+  fetchRunwayThresholdTargets,
+  type RunwayThresholdTarget,
+} from "../data/runwayThresholdTargets";
 import { usePilotAircraft, type PilotAircraftPose } from "../hooks/usePilotAircraft";
 import PilotInitialStateOverlay, {
   EnglishNumberInput,
@@ -23,6 +27,10 @@ import {
   type PilotResetState,
   type PilotSnapshot,
 } from "../pilot/pilotClient";
+import {
+  runTrajectoryOptimization,
+  type TrajectoryOptimizationResult,
+} from "../pilot/trajectoryOptimizationClient";
 
 const DEFAULT_CONTROLS: PilotControls = {
   thrustN: 43441,
@@ -32,6 +40,22 @@ const DEFAULT_CONTROLS: PilotControls = {
 const DEFAULT_FRAME_DT_S = 0.2;
 const STEP_INTERVAL_MS = 120;
 const MAX_TRAIL_POINTS = 360;
+const DEFAULT_TARGET_SPEED_MPS = 70;
+const DEFAULT_TARGET_GAMMA_DEG = -3;
+const DEFAULT_TARGET_ALPHA_DEG = 4;
+
+type PilotPanelMode = "pilot" | "trajectory";
+
+interface TrajectoryTargetState {
+  runwayThresholdId: string;
+  lon: number;
+  lat: number;
+  altM: number;
+  speedMps: number;
+  headingDeg: number;
+  flightPathDeg: number;
+  attackDeg: number;
+}
 
 interface PlacementBackup {
   initialState: PilotResetState;
@@ -43,9 +67,11 @@ interface PlacementBackup {
 }
 
 export default function PilotPanel() {
-  const { airport } = useApp();
+  const { activeAirportCode, airport } = useApp();
+  const [activeMode, setActiveMode] = useState<PilotPanelMode>("pilot");
   const [isEnabled, setIsEnabled] = useState(false);
   const [isFlying, setIsFlying] = useState(false);
+  const [isTrajectoryPlaying, setIsTrajectoryPlaying] = useState(false);
   const [isInitialEditorOpen, setIsInitialEditorOpen] = useState(false);
   const [isPlacingInitialPosition, setIsPlacingInitialPosition] = useState(false);
   const [isInitialPreviewVisible, setIsInitialPreviewVisible] = useState(false);
@@ -57,10 +83,20 @@ export default function PilotPanel() {
   const [frameDtS, setFrameDtS] = useState(DEFAULT_FRAME_DT_S);
   const [snapshot, setSnapshot] = useState<PilotSnapshot | null>(null);
   const [trail, setTrail] = useState<PilotAircraftPose[]>([]);
+  const [runwayTargets, setRunwayTargets] = useState<RunwayThresholdTarget[]>([]);
+  const [targetState, setTargetState] = useState<TrajectoryTargetState>(() =>
+    makeDefaultTrajectoryTarget(null),
+  );
+  const [nSegments, setNSegments] = useState(10);
+  const [optimizedTrajectory, setOptimizedTrajectory] =
+    useState<TrajectoryOptimizationResult | null>(null);
 
   const controlsRef = useRef(controls);
   const frameDtRef = useRef(frameDtS);
   const stepInFlightRef = useRef(false);
+  const trajectoryPlanRef = useRef<TrajectoryOptimizationResult | null>(null);
+  const trajectoryReplayIndexRef = useRef(0);
+  const trajectoryStepInFlightRef = useRef(false);
   const placementBackupRef = useRef<PlacementBackup | null>(null);
 
   const [initialState, setInitialState] = useState<PilotResetState>(() =>
@@ -70,13 +106,15 @@ export default function PilotPanel() {
   const pose = snapshotToPose(snapshot);
 
   const clearSnapshotForInitialEdit = useCallback(() => {
-    if (!snapshot && !isEnabled && !isFlying) return;
+    setOptimizedTrajectory(null);
+    if (!snapshot && !isEnabled && !isFlying && !isTrajectoryPlaying) return;
 
     setIsFlying(false);
+    setIsTrajectoryPlaying(false);
     setIsEnabled(false);
     setSnapshot(null);
     setTrail([]);
-  }, [isEnabled, isFlying, snapshot]);
+  }, [isEnabled, isFlying, isTrajectoryPlaying, snapshot]);
 
   const updateInitialPosition = useCallback(
     (position: PilotInitialPlacementPosition) => {
@@ -114,13 +152,19 @@ export default function PilotPanel() {
   }, []);
 
   const openInitialEditor = useCallback(() => {
-    if (isFlying || isBusy || aircraftConfigs.length === 0) return;
+    if (isFlying || isTrajectoryPlaying || isBusy || aircraftConfigs.length === 0) return;
 
     setError(null);
     setIsInitialEditorOpen(true);
     setIsInitialPreviewVisible(true);
     clearSnapshotForInitialEdit();
-  }, [aircraftConfigs.length, clearSnapshotForInitialEdit, isBusy, isFlying]);
+  }, [
+    aircraftConfigs.length,
+    clearSnapshotForInitialEdit,
+    isBusy,
+    isFlying,
+    isTrajectoryPlaying,
+  ]);
 
   const closeInitialEditor = useCallback(() => {
     if (isPlacingInitialPosition) {
@@ -137,7 +181,7 @@ export default function PilotPanel() {
       return;
     }
 
-    if (isFlying || isBusy || aircraftConfigs.length === 0) return;
+    if (isFlying || isTrajectoryPlaying || isBusy || aircraftConfigs.length === 0) return;
 
     placementBackupRef.current = {
       initialState,
@@ -160,6 +204,7 @@ export default function PilotPanel() {
     isBusy,
     isEnabled,
     isFlying,
+    isTrajectoryPlaying,
     isPlacingInitialPosition,
     snapshot,
     trail,
@@ -186,14 +231,18 @@ export default function PilotPanel() {
 
   useEffect(() => {
     placementBackupRef.current = null;
+    trajectoryReplayIndexRef.current = 0;
     setInitialState(makeDefaultInitialState(airport, aircraftConfigs[0] ?? null));
+    setActiveMode("pilot");
     setIsInitialEditorOpen(false);
     setIsPlacingInitialPosition(false);
     setIsInitialPreviewVisible(false);
     setIsFlying(false);
+    setIsTrajectoryPlaying(false);
     setIsEnabled(false);
     setSnapshot(null);
     setTrail([]);
+    setOptimizedTrajectory(null);
   }, [airport, aircraftConfigs]);
 
   useEffect(() => {
@@ -217,12 +266,47 @@ export default function PilotPanel() {
   }, []);
 
   useEffect(() => {
+    if (!activeAirportCode) {
+      setRunwayTargets([]);
+      setTargetState(makeDefaultTrajectoryTarget(null));
+      return;
+    }
+
+    let cancelled = false;
+    void fetchRunwayThresholdTargets(activeAirportCode)
+      .then((targets) => {
+        if (cancelled) return;
+        setRunwayTargets(targets);
+        setTargetState((current) => {
+          const selected = targets.find((target) => target.id === current.runwayThresholdId) ??
+            targets[0] ??
+            null;
+          return makeDefaultTrajectoryTarget(selected, current);
+        });
+      })
+      .catch((runwayError: unknown) => {
+        if (cancelled) return;
+        setRunwayTargets([]);
+        setTargetState(makeDefaultTrajectoryTarget(null));
+        setError(toErrorMessage(runwayError));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeAirportCode]);
+
+  useEffect(() => {
     controlsRef.current = controls;
   }, [controls]);
 
   useEffect(() => {
     frameDtRef.current = frameDtS;
   }, [frameDtS]);
+
+  useEffect(() => {
+    trajectoryPlanRef.current = optimizedTrajectory;
+  }, [optimizedTrajectory]);
 
   const appendTrailPoint = useCallback((nextSnapshot: PilotSnapshot) => {
     const nextPose = snapshotToPose(nextSnapshot);
@@ -264,7 +348,52 @@ export default function PilotPanel() {
   }, [appendTrailPoint, isEnabled, isFlying]);
 
   useEffect(() => {
-    if (!isEnabled) return;
+    if (!isEnabled || !isTrajectoryPlaying) return;
+
+    let cancelled = false;
+    const tick = () => {
+      const plan = trajectoryPlanRef.current;
+      if (!plan || trajectoryStepInFlightRef.current) return;
+
+      const control = plan.controls[trajectoryReplayIndexRef.current];
+      if (!control) {
+        setIsTrajectoryPlaying(false);
+        return;
+      }
+
+      const replayDtS = plan.finalTimeS / Math.max(1, plan.controls.length);
+      trajectoryStepInFlightRef.current = true;
+      void stepPilotSimulation(control, replayDtS)
+        .then((nextSnapshot) => {
+          if (cancelled) return;
+          setSnapshot(nextSnapshot);
+          appendTrailPoint(nextSnapshot);
+          setError(null);
+          trajectoryReplayIndexRef.current += 1;
+          if (trajectoryReplayIndexRef.current >= plan.controls.length) {
+            setIsTrajectoryPlaying(false);
+          }
+        })
+        .catch((stepError: unknown) => {
+          if (cancelled) return;
+          setIsTrajectoryPlaying(false);
+          setError(toErrorMessage(stepError));
+        })
+        .finally(() => {
+          trajectoryStepInFlightRef.current = false;
+        });
+    };
+
+    tick();
+    const interval = window.setInterval(tick, STEP_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [appendTrailPoint, isEnabled, isTrajectoryPlaying]);
+
+  useEffect(() => {
+    if (!isEnabled || activeMode !== "pilot") return;
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (isEditableTarget(event.target)) return;
@@ -307,12 +436,13 @@ export default function PilotPanel() {
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [isEnabled]);
+  }, [activeMode, isEnabled]);
 
   async function startPilot() {
     placementBackupRef.current = null;
     setIsInitialEditorOpen(false);
     setIsPlacingInitialPosition(false);
+    setIsTrajectoryPlaying(false);
     setIsBusy(true);
     setError(null);
     try {
@@ -336,6 +466,7 @@ export default function PilotPanel() {
     placementBackupRef.current = null;
     setIsInitialEditorOpen(false);
     setIsPlacingInitialPosition(false);
+    setIsTrajectoryPlaying(false);
     setIsBusy(true);
     setError(null);
     try {
@@ -357,6 +488,7 @@ export default function PilotPanel() {
     setIsInitialEditorOpen(false);
     setIsPlacingInitialPosition(false);
     setIsFlying(false);
+    setIsTrajectoryPlaying(false);
     setIsEnabled(false);
     setSnapshot(null);
     setTrail([]);
@@ -379,7 +511,7 @@ export default function PilotPanel() {
     min: number,
     max: number,
   ) {
-    if (!Number.isFinite(value) || isFlying) return;
+    if (!Number.isFinite(value) || isFlying || isTrajectoryPlaying) return;
 
     setInitialState((current) => ({ ...current, [key]: clamp(value, min, max) }));
     setIsInitialPreviewVisible(true);
@@ -387,7 +519,7 @@ export default function PilotPanel() {
   }
 
   function updateAircraftType(aircraftType: PilotAircraftType) {
-    if (isFlying) return;
+    if (isFlying || isTrajectoryPlaying) return;
 
     const aircraft = aircraftConfigs.find((config) => config.code === aircraftType);
     if (!aircraft) return;
@@ -406,6 +538,113 @@ export default function PilotPanel() {
     setFrameDtS(clamp(value, 0.02, 0.5));
   }
 
+  function openTrajectoryMode() {
+    if (isPlacingInitialPosition) return;
+    setIsFlying(false);
+    setActiveMode("trajectory");
+    setError(null);
+  }
+
+  function openPilotMode() {
+    if (isPlacingInitialPosition) return;
+    setIsTrajectoryPlaying(false);
+    setActiveMode("pilot");
+    setError(null);
+  }
+
+  function updateTargetRunway(runwayThresholdId: string) {
+    const target = runwayTargets.find((candidate) => candidate.id === runwayThresholdId);
+    if (!target) return;
+
+    setTargetState((current) => makeDefaultTrajectoryTarget(target, current));
+    setOptimizedTrajectory(null);
+    setIsTrajectoryPlaying(false);
+  }
+
+  function updateTargetField(
+    key: keyof Pick<
+      TrajectoryTargetState,
+      "speedMps" | "headingDeg" | "flightPathDeg" | "attackDeg"
+    >,
+    value: number,
+    min: number,
+    max: number,
+  ) {
+    if (!Number.isFinite(value)) return;
+
+    setTargetState((current) => ({ ...current, [key]: clamp(value, min, max) }));
+    setOptimizedTrajectory(null);
+    setIsTrajectoryPlaying(false);
+  }
+
+  function updateNSegments(value: number) {
+    if (!Number.isFinite(value)) return;
+    setNSegments(Math.round(clamp(value, 1, 80)));
+    setOptimizedTrajectory(null);
+    setIsTrajectoryPlaying(false);
+  }
+
+  async function computeTrajectory() {
+    if (!hasAircraftConfigs || runwayTargets.length === 0) return;
+
+    setIsBusy(true);
+    setIsFlying(false);
+    setIsTrajectoryPlaying(false);
+    setError(null);
+    try {
+      const result = await runTrajectoryOptimization({
+        initialState,
+        targetState: trajectoryTargetToPilotState(
+          targetState,
+          initialState.aircraftType,
+          initialState.massKg,
+        ),
+        targetControl: { attackDeg: targetState.attackDeg },
+        nSegments,
+      });
+      setOptimizedTrajectory(result);
+      trajectoryReplayIndexRef.current = 0;
+    } catch (computeError: unknown) {
+      setOptimizedTrajectory(null);
+      setError(toErrorMessage(computeError));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function playOptimizedTrajectory() {
+    if (!optimizedTrajectory || optimizedTrajectory.controls.length === 0) return;
+
+    setIsBusy(true);
+    setIsFlying(false);
+    setIsTrajectoryPlaying(false);
+    setError(null);
+    try {
+      const firstControl = optimizedTrajectory.controls[0] ?? controls;
+      const nextSnapshot = await resetPilotSimulation(initialState, firstControl);
+      setSnapshot(nextSnapshot);
+      const nextPose = snapshotToPose(nextSnapshot);
+      setTrail(nextPose ? [nextPose] : []);
+      trajectoryReplayIndexRef.current = 0;
+      setIsEnabled(true);
+      setIsTrajectoryPlaying(true);
+    } catch (playError: unknown) {
+      setError(toErrorMessage(playError));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  function resetTrajectoryReplay() {
+    trajectoryReplayIndexRef.current = 0;
+    setIsTrajectoryPlaying(false);
+    setIsFlying(false);
+    setIsEnabled(false);
+    setSnapshot(null);
+    setTrail([]);
+    setError(null);
+  }
+
   function nudgeControl(
     key: keyof PilotControls,
     delta: number,
@@ -422,26 +661,44 @@ export default function PilotPanel() {
     ? "Error"
     : isPlacingInitialPosition
       ? "Placing"
-      : isFlying
-        ? "Flying"
-        : snapshot
-          ? "Paused"
-          : "Standby";
+      : isBusy && activeMode === "trajectory"
+        ? "Computing"
+        : isTrajectoryPlaying
+          ? "Playing"
+          : isFlying
+            ? "Flying"
+            : optimizedTrajectory && activeMode === "trajectory"
+              ? "Ready"
+              : snapshot
+                ? "Paused"
+                : "Standby";
   const hasAircraftConfigs = aircraftConfigs.length > 0;
-  const initialControlsDisabled = isFlying || isBusy || !hasAircraftConfigs;
+  const initialControlsDisabled = isFlying || isTrajectoryPlaying || isBusy || !hasAircraftConfigs;
+  const trajectoryDtS = optimizedTrajectory
+    ? optimizedTrajectory.finalTimeS / Math.max(1, optimizedTrajectory.controls.length)
+    : null;
 
   return (
     <div className="pilot-panel">
-      <PilotRealtimeStatePanel snapshot={snapshot} visible={isFlying} />
+      <PilotRealtimeStatePanel snapshot={snapshot} visible={isFlying || isTrajectoryPlaying} />
 
       <header className="pilot-panel-header">
         <div>
-          <h3>Pilot Mode</h3>
+          <h3>{activeMode === "trajectory" ? "Trajectory Play" : "Pilot Mode"}</h3>
           <span className="pilot-panel-server">{AEROVIZ_BACKEND_URL}</span>
         </div>
-        <span className={`pilot-status pilot-status-${statusLabel.toLowerCase()}`}>
-          {statusLabel}
-        </span>
+        <div className="pilot-panel-header-actions">
+          <button
+            type="button"
+            onClick={activeMode === "trajectory" ? openPilotMode : openTrajectoryMode}
+            disabled={isPlacingInitialPosition}
+          >
+            {activeMode === "trajectory" ? "Pilot" : "Trajectory"}
+          </button>
+          <span className={`pilot-status pilot-status-${statusLabel.toLowerCase()}`}>
+            {statusLabel}
+          </span>
+        </div>
       </header>
 
       <section className="pilot-initial-summary" aria-label="Initial aircraft state summary">
@@ -507,135 +764,331 @@ export default function PilotPanel() {
         onAircraftTypeChange={updateAircraftType}
       />
 
-      <div className="pilot-actions">
-        <button
-          className="pilot-primary-button"
-          onClick={startPilot}
-          disabled={isBusy || isFlying || isPlacingInitialPosition || !hasAircraftConfigs}
-        >
-          {snapshot ? "Resume" : "Start"}
-        </button>
-        <button
-          onClick={() => setIsFlying(false)}
-          disabled={!isFlying || isBusy || isPlacingInitialPosition}
-        >
-          Pause
-        </button>
-        <button
-          onClick={resetPilot}
-          disabled={isBusy || isPlacingInitialPosition || !hasAircraftConfigs}
-        >
-          Reset
-        </button>
-        <button
-          onClick={stopPilot}
-          disabled={(!isEnabled && !snapshot) || isPlacingInitialPosition}
-        >
-          End
-        </button>
-      </div>
+      {activeMode === "trajectory" ? (
+        <>
+          <section className="pilot-initial-summary" aria-label="Target aircraft state summary">
+            <div className="pilot-initial-summary-header">
+              <h4>Target Threshold</h4>
+              <select
+                className="pilot-select-input"
+                value={targetState.runwayThresholdId}
+                onChange={(event) => updateTargetRunway(event.target.value)}
+                disabled={isBusy || isTrajectoryPlaying || runwayTargets.length === 0}
+              >
+                {runwayTargets.length === 0 ? (
+                  <option value="">No runway</option>
+                ) : null}
+                {runwayTargets.map((target) => (
+                  <option key={target.id} value={target.id}>
+                    {target.runwayIdent}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-      <section className="pilot-control-zone" aria-label="Pilot controls">
-        <div className="pilot-stepper-row">
-          <button
-            onClick={() => nudgeControl("bankDeg", 5, -45, 45)}
-            title="Bank left"
-          >
-            &lt;
-          </button>
-          <label>
-            <span>Bank</span>
-            <EnglishNumberInput
-              value={controls.bankDeg}
-              min={-45}
-              max={45}
-              step="1"
-              disabled={false}
-              onCommit={(value) => updateControl("bankDeg", value, -45, 45)}
-            />
-          </label>
-          <button
-            onClick={() => nudgeControl("bankDeg", -5, -45, 45)}
-            title="Bank right"
-          >
-            &gt;
-          </button>
-        </div>
+            <dl className="pilot-initial-position">
+              <div>
+                <dt>Lat</dt>
+                <dd>{formatCoord(targetState.lat, "N", "S")}</dd>
+              </div>
+              <div>
+                <dt>Lon</dt>
+                <dd>{formatCoord(targetState.lon, "E", "W")}</dd>
+              </div>
+            </dl>
 
-        <div className="pilot-stepper-row">
-          <button
-            onClick={() => nudgeControl("attackDeg", -0.5, -10, 18)}
-            title="Reduce alpha"
-          >
-            -
-          </button>
-          <label>
-            <span>Alpha</span>
-            <EnglishNumberInput
-              value={controls.attackDeg}
-              min={-10}
-              max={18}
-              step="0.5"
-              disabled={false}
-              onCommit={(value) => updateControl("attackDeg", value, -10, 18)}
-            />
-          </label>
-          <button
-            onClick={() => nudgeControl("attackDeg", 0.5, -10, 18)}
-            title="Increase alpha"
-          >
-            +
-          </button>
-        </div>
+            <dl className="pilot-initial-readouts">
+              <div>
+                <dt>Alt</dt>
+                <dd>{formatNumberInputValue(targetState.altM)} m</dd>
+              </div>
+              <div>
+                <dt>Psi</dt>
+                <dd>{formatNumberInputValue(targetState.headingDeg)} deg</dd>
+              </div>
+              <div>
+                <dt>Vt</dt>
+                <dd>{formatNumberInputValue(targetState.speedMps)} m/s</dd>
+              </div>
+              <div>
+                <dt>Gamma</dt>
+                <dd>{formatNumberInputValue(targetState.flightPathDeg)} deg</dd>
+              </div>
+              <div>
+                <dt>Alpha</dt>
+                <dd>{formatNumberInputValue(targetState.attackDeg)} deg</dd>
+              </div>
+              <div>
+                <dt>Pair</dt>
+                <dd>{selectedRunwayPair(runwayTargets, targetState.runwayThresholdId)}</dd>
+              </div>
+            </dl>
+          </section>
 
-        <div className="pilot-stepper-row">
-          <button
-            onClick={() => nudgeControl("thrustN", -1000, 0, 60000)}
-            title="Reduce thrust"
-          >
-            -
-          </button>
-          <label>
-            <span>Thrust</span>
-            <EnglishNumberInput
-              value={controls.thrustN}
-              min={0}
-              max={60000}
-              step="500"
-              disabled={false}
-              onCommit={(value) => updateControl("thrustN", value, 0, 60000)}
-            />
-          </label>
-          <button
-            onClick={() => nudgeControl("thrustN", 1000, 0, 60000)}
-            title="Increase thrust"
-          >
-            +
-          </button>
-        </div>
+          <div className="pilot-actions">
+            <button
+              className="pilot-primary-button"
+              onClick={computeTrajectory}
+              disabled={
+                isBusy ||
+                isTrajectoryPlaying ||
+                isPlacingInitialPosition ||
+                !hasAircraftConfigs ||
+                runwayTargets.length === 0
+              }
+            >
+              Optimize
+            </button>
+            <button
+              onClick={playOptimizedTrajectory}
+              disabled={
+                isBusy ||
+                isTrajectoryPlaying ||
+                isPlacingInitialPosition ||
+                !optimizedTrajectory
+              }
+            >
+              Play
+            </button>
+            <button
+              onClick={() => setIsTrajectoryPlaying(false)}
+              disabled={!isTrajectoryPlaying || isBusy || isPlacingInitialPosition}
+            >
+              Pause
+            </button>
+            <button
+              onClick={resetTrajectoryReplay}
+              disabled={
+                isBusy ||
+                isPlacingInitialPosition ||
+                (!snapshot && !optimizedTrajectory)
+              }
+            >
+              Reset
+            </button>
+          </div>
 
-        <div className="pilot-options-row">
-          <label>
-            <input
-              type="checkbox"
-              checked={isFollowing}
-              onChange={(event) => setIsFollowing(event.target.checked)}
-            />
-            Follow camera
-          </label>
-          <label>
-            <span>dt</span>
-            <EnglishNumberInput
-              value={frameDtS}
-              min={0.02}
-              max={0.5}
-              step="0.02"
-              disabled={false}
-              onCommit={updateFrameDt}
-            />
-          </label>
-        </div>
-      </section>
+          <section className="pilot-control-zone" aria-label="Trajectory play controls">
+            <div className="pilot-target-fields">
+              <label>
+                <span>Vt</span>
+                <EnglishNumberInput
+                  value={targetState.speedMps}
+                  min={1}
+                  max={260}
+                  step="1"
+                  disabled={isBusy || isTrajectoryPlaying}
+                  onCommit={(value) => updateTargetField("speedMps", value, 1, 260)}
+                />
+              </label>
+              <label>
+                <span>Psi</span>
+                <EnglishNumberInput
+                  value={targetState.headingDeg}
+                  min={0}
+                  max={360}
+                  step="1"
+                  disabled={isBusy || isTrajectoryPlaying}
+                  onCommit={(value) => updateTargetField("headingDeg", value, 0, 360)}
+                />
+              </label>
+              <label>
+                <span>Gamma</span>
+                <EnglishNumberInput
+                  value={targetState.flightPathDeg}
+                  min={-15}
+                  max={10}
+                  step="0.1"
+                  disabled={isBusy || isTrajectoryPlaying}
+                  onCommit={(value) => updateTargetField("flightPathDeg", value, -15, 10)}
+                />
+              </label>
+              <label>
+                <span>Alpha</span>
+                <EnglishNumberInput
+                  value={targetState.attackDeg}
+                  min={-10}
+                  max={18}
+                  step="0.5"
+                  disabled={isBusy || isTrajectoryPlaying}
+                  onCommit={(value) => updateTargetField("attackDeg", value, -10, 18)}
+                />
+              </label>
+              <label>
+                <span>Segments</span>
+                <EnglishNumberInput
+                  value={nSegments}
+                  min={1}
+                  max={80}
+                  step="1"
+                  disabled={isBusy || isTrajectoryPlaying}
+                  onCommit={updateNSegments}
+                />
+              </label>
+            </div>
+
+            <div className="pilot-options-row">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={isFollowing}
+                  onChange={(event) => setIsFollowing(event.target.checked)}
+                />
+                Follow camera
+              </label>
+            </div>
+
+            {optimizedTrajectory ? (
+              <dl className="pilot-plan-readouts">
+                <div>
+                  <dt>Final</dt>
+                  <dd>{formatNumberInputValue(optimizedTrajectory.finalTimeS)} s</dd>
+                </div>
+                <div>
+                  <dt>dt</dt>
+                  <dd>{formatNumberInputValue(trajectoryDtS ?? 0)} s</dd>
+                </div>
+                <div>
+                  <dt>Controls</dt>
+                  <dd>{optimizedTrajectory.controls.length}</dd>
+                </div>
+              </dl>
+            ) : null}
+          </section>
+        </>
+      ) : (
+        <>
+          <div className="pilot-actions">
+            <button
+              className="pilot-primary-button"
+              onClick={startPilot}
+              disabled={isBusy || isFlying || isPlacingInitialPosition || !hasAircraftConfigs}
+            >
+              {snapshot ? "Resume" : "Start"}
+            </button>
+            <button
+              onClick={() => setIsFlying(false)}
+              disabled={!isFlying || isBusy || isPlacingInitialPosition}
+            >
+              Pause
+            </button>
+            <button
+              onClick={resetPilot}
+              disabled={isBusy || isPlacingInitialPosition || !hasAircraftConfigs}
+            >
+              Reset
+            </button>
+            <button
+              onClick={stopPilot}
+              disabled={(!isEnabled && !snapshot) || isPlacingInitialPosition}
+            >
+              End
+            </button>
+          </div>
+
+          <section className="pilot-control-zone" aria-label="Pilot controls">
+            <div className="pilot-stepper-row">
+              <button
+                onClick={() => nudgeControl("bankDeg", 5, -45, 45)}
+                title="Bank left"
+              >
+                &lt;
+              </button>
+              <label>
+                <span>Bank</span>
+                <EnglishNumberInput
+                  value={controls.bankDeg}
+                  min={-45}
+                  max={45}
+                  step="1"
+                  disabled={false}
+                  onCommit={(value) => updateControl("bankDeg", value, -45, 45)}
+                />
+              </label>
+              <button
+                onClick={() => nudgeControl("bankDeg", -5, -45, 45)}
+                title="Bank right"
+              >
+                &gt;
+              </button>
+            </div>
+
+            <div className="pilot-stepper-row">
+              <button
+                onClick={() => nudgeControl("attackDeg", -0.5, -10, 18)}
+                title="Reduce alpha"
+              >
+                -
+              </button>
+              <label>
+                <span>Alpha</span>
+                <EnglishNumberInput
+                  value={controls.attackDeg}
+                  min={-10}
+                  max={18}
+                  step="0.5"
+                  disabled={false}
+                  onCommit={(value) => updateControl("attackDeg", value, -10, 18)}
+                />
+              </label>
+              <button
+                onClick={() => nudgeControl("attackDeg", 0.5, -10, 18)}
+                title="Increase alpha"
+              >
+                +
+              </button>
+            </div>
+
+            <div className="pilot-stepper-row">
+              <button
+                onClick={() => nudgeControl("thrustN", -1000, 0, 60000)}
+                title="Reduce thrust"
+              >
+                -
+              </button>
+              <label>
+                <span>Thrust</span>
+                <EnglishNumberInput
+                  value={controls.thrustN}
+                  min={0}
+                  max={60000}
+                  step="500"
+                  disabled={false}
+                  onCommit={(value) => updateControl("thrustN", value, 0, 60000)}
+                />
+              </label>
+              <button
+                onClick={() => nudgeControl("thrustN", 1000, 0, 60000)}
+                title="Increase thrust"
+              >
+                +
+              </button>
+            </div>
+
+            <div className="pilot-options-row">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={isFollowing}
+                  onChange={(event) => setIsFollowing(event.target.checked)}
+                />
+                Follow camera
+              </label>
+              <label>
+                <span>dt</span>
+                <EnglishNumberInput
+                  value={frameDtS}
+                  min={0.02}
+                  max={0.5}
+                  step="0.02"
+                  disabled={false}
+                  onCommit={updateFrameDt}
+                />
+              </label>
+            </div>
+          </section>
+        </>
+      )}
 
       {error ? <div className="pilot-error" role="alert">{error}</div> : null}
     </div>
@@ -656,6 +1109,46 @@ function makeDefaultInitialState(
     massKg: aircraft?.massKg ?? 0,
     aircraftType: aircraft?.code ?? "",
   };
+}
+
+function makeDefaultTrajectoryTarget(
+  runwayTarget: RunwayThresholdTarget | null,
+  fallback?: TrajectoryTargetState,
+): TrajectoryTargetState {
+  return {
+    runwayThresholdId: runwayTarget?.id ?? fallback?.runwayThresholdId ?? "",
+    lon: runwayTarget?.lon ?? fallback?.lon ?? 0,
+    lat: runwayTarget?.lat ?? fallback?.lat ?? 0,
+    altM: runwayTarget?.altM ?? fallback?.altM ?? 0,
+    speedMps: fallback?.speedMps ?? DEFAULT_TARGET_SPEED_MPS,
+    headingDeg: runwayTarget?.psiDeg ?? fallback?.headingDeg ?? 0,
+    flightPathDeg: fallback?.flightPathDeg ?? DEFAULT_TARGET_GAMMA_DEG,
+    attackDeg: fallback?.attackDeg ?? DEFAULT_TARGET_ALPHA_DEG,
+  };
+}
+
+function trajectoryTargetToPilotState(
+  target: TrajectoryTargetState,
+  aircraftType: PilotAircraftType,
+  massKg: number,
+): PilotResetState {
+  return {
+    lon: target.lon,
+    lat: target.lat,
+    altM: target.altM,
+    speedMps: target.speedMps,
+    headingDeg: target.headingDeg,
+    flightPathDeg: target.flightPathDeg,
+    massKg,
+    aircraftType,
+  };
+}
+
+function selectedRunwayPair(
+  targets: RunwayThresholdTarget[],
+  runwayThresholdId: string,
+): string {
+  return targets.find((target) => target.id === runwayThresholdId)?.runwayPairIdent || "-";
 }
 
 function snapshotToPose(snapshot: PilotSnapshot | null): PilotAircraftPose | null {
