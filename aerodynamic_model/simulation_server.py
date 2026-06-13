@@ -1,4 +1,4 @@
-from coordinates_convertor import CoordinateConverter, GeodeticCoordinate, ECEFCoordinate, ENUCoordinate, ENUUnitVectors
+from coordinates_convertor import CoordinateConverter, GeodeticCoordinate, ENUCoordinate
 from aircraft_sets import AIRCRAFT_PRESETS, AircraftSpec, A320
 from simulator import Simulator, Control, Atmosphere, State
 from dataclasses import dataclass
@@ -39,14 +39,14 @@ DEFAULT_AIRCRAFT_TYPE = A320.code
 DEFAULT_DT = 0.2
 MAX_DT = 2.0
 
-class SimulationServer():
+class SimulationServer:
     def __init__(self, aircraft: AircraftSpec = A320):
         self.simulator = Simulator(aircraft=aircraft)
         self.atmosphere = Atmosphere()
     
     @staticmethod
     def get_enu_velocity_components(V: float, gamma: float, psi: float) -> tuple[float, float, float]:
-        # Step 1: read the simulator velocity state in the old local ENU frame.
+        # Step 1: read the simulator velocity state in the current local ENU frame.
         # psi/gamma are radians; psi=0 points East and psi=pi/2 points North.
         V_east = V * math.cos(gamma) * math.cos(psi)
         V_north = V * math.cos(gamma) * math.sin(psi)
@@ -55,7 +55,7 @@ class SimulationServer():
 
     @staticmethod
     def enu_velocity_to_ecef_velocity(enu_velocity: tuple[float, float, float], geo_S: GeodeticCoordinate) -> tuple[float, float, float]:
-        # Step 2: expand old-ENU components into the global ECEF basis.
+        # Step 2: expand local ENU components into the global ECEF basis.
         # e_hat/n_hat/u_hat are local ENU axes, but each axis is expressed as
         # an ECEF unit vector. Multiplying and summing gives one ECEF vector.
         V_east, V_north, V_up = enu_velocity
@@ -78,7 +78,7 @@ class SimulationServer():
         lat_rad = math.radians(geo_S.latitude)
         lon_rad = math.radians(geo_S.longitude)
 
-        # project from old enu to new enu by new ENU unit vectors expressed in ECEF. This is the inverse of step 2.
+        # Project from ECEF onto the destination ENU unit vectors.
         e_hat = (-math.sin(lon_rad), math.cos(lon_rad), 0)
         n_hat = (-math.sin(lat_rad) * math.cos(lon_rad), -math.sin(lat_rad) * math.sin(lon_rad), math.cos(lat_rad))
         u_hat = (math.cos(lat_rad) * math.cos(lon_rad), math.cos(lat_rad) * math.sin(lon_rad), math.sin(lat_rad))
@@ -89,13 +89,10 @@ class SimulationServer():
         return (V_east, V_north, V_up)
 
     def step(self, state: GeodeticState, control: Control, dt: float) -> GeodeticState:
-        # Convert geodetic state to ECEF for simulation
-        geo_P = GeodeticCoordinate(state.latitude, state.longitude, state.altitude)
         geo_S = GeodeticCoordinate(state.latitude, state.longitude, 0.0)  # Reference point for ENU is at the same lat/lon but sea level
-        enu_P = CoordinateConverter.geodetic_to_enu(geo_P, geo_S)  # Using the same point as reference
 
-        # Create state vector for simulator (x, y, h, V, psi, gamma, m)
-        state_vec = State(enu_P.east, enu_P.north, state.altitude, state.V, state.psi, state.gamma, state.m)
+        # Re-anchor x/y at the current WGS84 point for this local tangent-plane step.
+        state_vec = State(0.0, 0.0, state.altitude, state.V, state.psi, state.gamma, state.m)
 
         # Simulate one time step
         solution = self.simulator.simulate(
@@ -108,23 +105,22 @@ class SimulationServer():
         if not solution.success:
             raise ValueError(solution.message)
 
-        if solution.y.shape[1] > 0:
-            new_state_vec = [float(value) for value in solution.y[:, -1]]
-        else:
-            raise ValueError("simulation stopped: altitude below 0")
-        if new_state_vec[2] < 0.0:
+        new_x, new_y, new_h, speed, heading, flight_path, mass = [
+            float(value) for value in solution.y[:, -1]
+        ]
+        if new_h < 0.0:
             raise ValueError("simulation stopped: altitude below 0")
 
         # Convert back to geodetic coordinates
-        new_enu_P = ENUCoordinate(new_state_vec[0], new_state_vec[1], new_state_vec[2])
+        new_enu_P = ENUCoordinate(new_x, new_y, new_h)
         new_geo = CoordinateConverter.enu_to_geodetic(new_enu_P, geo_S)  # Convert back to geodetic using the same reference point
 
         # Keep velocity as the same physical vector while the local ENU frame
-        # moves: old ENU components -> ECEF vector -> new ENU components.
+        # moves: source ENU components -> ECEF vector -> destination ENU components.
         old_enu_velocity = self.get_enu_velocity_components(
-            V=new_state_vec[3],
-            gamma=new_state_vec[5],
-            psi=new_state_vec[4]
+            V=speed,
+            gamma=flight_path,
+            psi=heading
         )
         new_ecef_velocity = self.enu_velocity_to_ecef_velocity(old_enu_velocity, geo_S)
         new_enu_velocity = self.ecef_velocity_to_enu_velocity(new_ecef_velocity, new_geo)
@@ -139,7 +135,7 @@ class SimulationServer():
             V=V,
             psi=math.atan2(V_north, V_east),
             gamma=math.atan2(V_up, horizontal_V),
-            m=new_state_vec[6]
+            m=mass
         )
 
 class SimulationSession:
@@ -151,8 +147,8 @@ class SimulationSession:
 
     def reset(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = payload or {}
-        state_payload = _as_mapping(payload.get("state"))
-        control_payload = _as_mapping(payload.get("control"))
+        state_payload = _read_optional_mapping(payload, "state")
+        control_payload = _read_optional_mapping(payload, "control")
         aircraft = _read_aircraft(state_payload, DEFAULT_AIRCRAFT_TYPE)
 
         next_state = GeodeticState(
@@ -174,7 +170,7 @@ class SimulationSession:
 
     def step(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = payload or {}
-        self.control = _read_control(_as_mapping(payload.get("control")), self.control)
+        self.control = _read_control(_read_optional_mapping(payload, "control"), self.control)
         dt = _clamp(_read_float(payload, "dtS", DEFAULT_DT), 0.001, MAX_DT)
         self.state = self.server.step(self.state, self.control, dt)
         self.elapsed += dt
@@ -208,8 +204,11 @@ class SimulationSession:
             },
         }
 
-def _as_mapping(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
+def _read_optional_mapping(payload: dict[str, Any], key: str) -> dict[str, Any]:
+    value = payload.get(key, {})
+    if isinstance(value, dict):
+        return value
+    raise ValueError(f"{key} must be an object")
 
 def _read_float(payload: dict[str, Any], key: str, default: float) -> float:
     value = payload.get(key, default)
@@ -269,13 +268,6 @@ def _clamp(value: float, low: float, high: float) -> float:
 def _normalize_degrees(value: float) -> float:
     return value % 360.0
 
-def _safe_float(value: Any) -> float:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return float("nan")
-    return number if math.isfinite(number) else float("nan")
-
 class SimulationRequestHandler(BaseHTTPRequestHandler):
     session = SimulationSession()
     server_version = "AeroVizSimulationHTTP/0.1"
@@ -322,27 +314,26 @@ class SimulationRequestHandler(BaseHTTPRequestHandler):
         return
 
     def _log_snapshot(self, event: str, snapshot: dict[str, Any]) -> None:
-        state = _as_mapping(snapshot.get("state"))
-        control = _as_mapping(snapshot.get("control"))
-        aero = _as_mapping(snapshot.get("aero"))
-        elapsed = _safe_float(snapshot.get("elapsedS"))
+        state = snapshot["state"]
+        control = snapshot["control"]
+        aero = snapshot["aero"]
         line = (
             "[simulation-server] "
             f"{event} "
-            f"t={elapsed:.3f}s "
-            f"lat={_safe_float(state.get('lat')):.7f} "
-            f"lon={_safe_float(state.get('lon')):.7f} "
-            f"alt={_safe_float(state.get('altM')):.2f}m "
-            f"speed={_safe_float(state.get('speedMps')):.2f}m/s "
-            f"heading={_safe_float(state.get('headingDeg')):.2f}deg "
-            f"fpa={_safe_float(state.get('flightPathDeg')):.2f}deg "
-            f"mass={_safe_float(state.get('massKg')):.1f}kg "
-            f"type={state.get('aircraftType', 'n/a')} "
-            f"thrust={_safe_float(control.get('thrustN')):.1f}N "
-            f"bank={_safe_float(control.get('bankDeg')):.2f}deg "
-            f"alpha={_safe_float(control.get('attackDeg')):.2f}deg "
-            f"Cl={_safe_float(aero.get('liftCoefficient')):.4f} "
-            f"Cd={_safe_float(aero.get('dragCoefficient')):.4f}"
+            f"t={snapshot['elapsedS']:.3f}s "
+            f"lat={state['lat']:.7f} "
+            f"lon={state['lon']:.7f} "
+            f"alt={state['altM']:.2f}m "
+            f"speed={state['speedMps']:.2f}m/s "
+            f"heading={state['headingDeg']:.2f}deg "
+            f"fpa={state['flightPathDeg']:.2f}deg "
+            f"mass={state['massKg']:.1f}kg "
+            f"type={state['aircraftType']} "
+            f"thrust={control['thrustN']:.1f}N "
+            f"bank={control['bankDeg']:.2f}deg "
+            f"alpha={control['attackDeg']:.2f}deg "
+            f"Cl={aero['liftCoefficient']:.4f} "
+            f"Cd={aero['dragCoefficient']:.4f}"
         )
 
         if event == "frame":
