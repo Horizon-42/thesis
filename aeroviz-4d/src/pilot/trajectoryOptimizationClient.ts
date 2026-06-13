@@ -5,6 +5,7 @@ export interface TrajectoryOptimizationRequest {
   targetState: PilotResetState;
   targetControl: Pick<PilotControls, "attackDeg">;
   nSegments: number;
+  maxIterations: number;
 }
 
 export interface TrajectoryOptimizationResult {

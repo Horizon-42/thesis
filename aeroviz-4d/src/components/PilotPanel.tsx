@@ -48,6 +48,7 @@ const MAX_TRAIL_POINTS = 360;
 const DEFAULT_TARGET_SPEED_MPS = 70;
 const DEFAULT_TARGET_GAMMA_DEG = -3;
 const DEFAULT_TARGET_ALPHA_DEG = 4;
+const DEFAULT_MAX_ITERATIONS = 1000;
 
 type PilotPanelMode = "pilot" | "trajectory";
 
@@ -83,6 +84,7 @@ export default function PilotPanel() {
     makeDefaultTrajectoryTarget(null),
   );
   const [nSegments, setNSegments] = useState(10);
+  const [maxIterations, setMaxIterations] = useState(DEFAULT_MAX_ITERATIONS);
   const [optimizedTrajectory, setOptimizedTrajectory] =
     useState<TrajectoryOptimizationResult | null>(null);
 
@@ -620,6 +622,13 @@ export default function PilotPanel() {
     setIsTrajectoryPlaying(false);
   }
 
+  function updateMaxIterations(value: number) {
+    if (!Number.isFinite(value)) return;
+    setMaxIterations(Math.round(clamp(value, 1, 10000)));
+    setOptimizedTrajectory(null);
+    setIsTrajectoryPlaying(false);
+  }
+
   async function computeTrajectory() {
     if (!hasAircraftConfigs || runwayTargets.length === 0) return;
 
@@ -637,6 +646,7 @@ export default function PilotPanel() {
         ),
         targetControl: { attackDeg: targetState.attackDeg },
         nSegments,
+        maxIterations,
       });
       setOptimizedTrajectory(result);
       trajectoryReplayIndexRef.current = 0;
@@ -879,6 +889,17 @@ export default function PilotPanel() {
                 step="1"
                 disabled={targetControlsDisabled}
                 onCommit={updateNSegments}
+              />
+            </label>
+            <label>
+              <span>Max iter</span>
+              <EnglishNumberInput
+                value={maxIterations}
+                min={1}
+                max={10000}
+                step="50"
+                disabled={targetControlsDisabled}
+                onCommit={updateMaxIterations}
               />
             </label>
           </section>

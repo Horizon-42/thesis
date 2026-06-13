@@ -20,6 +20,7 @@ from transcription_optimizor import TranscriptionOptimizor
 
 
 DEFAULT_N_SEGMENTS = 10
+DEFAULT_MAX_ITERATIONS = 1000
 
 
 class OptimizationBackend:
@@ -28,6 +29,11 @@ class OptimizationBackend:
         initial_payload = read_required_mapping(payload, "initialState")
         target_payload = read_required_mapping(payload, "targetState")
         n_segments = read_positive_int(payload, "nSegments", DEFAULT_N_SEGMENTS)
+        max_iterations = read_positive_int(
+            payload,
+            "maxIterations",
+            DEFAULT_MAX_ITERATIONS,
+        )
         aircraft = read_aircraft(initial_payload, DEFAULT_AIRCRAFT_TYPE)
 
         initial_state = read_geodetic_state(initial_payload, DEFAULT_STATE, aircraft)
@@ -35,6 +41,7 @@ class OptimizationBackend:
         optimizer = TranscriptionOptimizor(
             GeodeticSimulator(aircraft),
             n_segments=n_segments,
+            max_iterations=max_iterations,
         )
         final_time, node_control, node_state = optimizer.optimize_trajectory(
             initial_state,

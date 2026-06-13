@@ -153,6 +153,9 @@ describe("PilotPanel trajectory play mode", () => {
     const segmentInput = screen.getByLabelText("Segments");
     fireEvent.change(segmentInput, { target: { value: "12" } });
     fireEvent.blur(segmentInput);
+    const maxIterationsInput = screen.getByLabelText("Max iter");
+    fireEvent.change(maxIterationsInput, { target: { value: "25" } });
+    fireEvent.blur(maxIterationsInput);
     fireEvent.click(within(targetEditor).getByRole("button", { name: "Close" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Optimize" }));
@@ -176,6 +179,7 @@ describe("PilotPanel trajectory play mode", () => {
         }),
         targetControl: { attackDeg: 4 },
         nSegments: 12,
+        maxIterations: 25,
       });
     });
   });

@@ -6,6 +6,7 @@ import {
 
 const request: TrajectoryOptimizationRequest = {
   nSegments: 4,
+  maxIterations: 25,
   initialState: {
     lon: -114.02,
     lat: 51.11,

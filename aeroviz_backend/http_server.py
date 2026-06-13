@@ -5,6 +5,7 @@ import argparse
 import json
 from pathlib import Path
 import sys
+import time
 from typing import Any
 
 
@@ -60,22 +61,44 @@ class AeroVizRequestHandler(BaseHTTPRequestHandler):
             self._log_error(status, payload.get("error", "not found"))
 
     def do_POST(self) -> None:
+        optimization_started_at: float | None = None
         try:
             payload = self._read_json()
+            if self.path == "/optimization/run":
+                optimization_started_at = time.monotonic()
+                self._log_optimization_start(payload)
             status, response_payload, log_event = self.app.handle_post(
                 self.path,
                 payload,
             )
             self._send_json(response_payload, status=status)
+            if optimization_started_at is not None:
+                self._log_optimization_done(
+                    status,
+                    response_payload,
+                    time.monotonic() - optimization_started_at,
+                )
             if log_event and status < 400:
                 self._log_snapshot(log_event, response_payload)
             elif status >= 400:
                 self._log_error(status, response_payload.get("error", "not found"))
         except ValueError as exc:
             self._send_json({"ok": False, "error": str(exc)}, status=400)
+            if optimization_started_at is not None:
+                self._log_optimization_failed(
+                    400,
+                    str(exc),
+                    time.monotonic() - optimization_started_at,
+                )
             self._log_error(400, str(exc))
         except Exception as exc:
             self._send_json({"ok": False, "error": str(exc)}, status=500)
+            if optimization_started_at is not None:
+                self._log_optimization_failed(
+                    500,
+                    str(exc),
+                    time.monotonic() - optimization_started_at,
+                )
             self._log_error(500, str(exc))
 
     def log_message(self, format: str, *args: Any) -> None:
@@ -120,6 +143,45 @@ class AeroVizRequestHandler(BaseHTTPRequestHandler):
             "[aeroviz-backend] "
             f"error status={status} method={self.command} path={self.path} "
             f"message={message}\n"
+        )
+        sys.stderr.flush()
+
+    def _log_optimization_start(self, payload: dict[str, Any]) -> None:
+        self._finish_live_log_line()
+        sys.stderr.write(
+            "[aeroviz-backend] optimization start "
+            f"segments={payload.get('nSegments', 'default')} "
+            f"maxIterations={payload.get('maxIterations', 'default')}\n"
+        )
+        sys.stderr.flush()
+
+    def _log_optimization_done(
+        self,
+        status: int,
+        payload: dict[str, Any],
+        elapsed_s: float,
+    ) -> None:
+        self._finish_live_log_line()
+        sys.stderr.write(
+            "[aeroviz-backend] optimization done "
+            f"status={status} "
+            f"elapsed={elapsed_s:.3f}s "
+            f"finalTime={payload.get('finalTimeS', 'n/a')} "
+            f"states={len(payload.get('states', []))} "
+            f"controls={len(payload.get('controls', []))}\n"
+        )
+        sys.stderr.flush()
+
+    def _log_optimization_failed(
+        self,
+        status: int,
+        message: str,
+        elapsed_s: float,
+    ) -> None:
+        self._finish_live_log_line()
+        sys.stderr.write(
+            "[aeroviz-backend] optimization failed "
+            f"status={status} elapsed={elapsed_s:.3f}s message={message}\n"
         )
         sys.stderr.flush()
 
