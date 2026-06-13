@@ -31,9 +31,11 @@ class TranscriptionOptimizor:
     # state dim
     state_dim : int = 7 # Match to GeodeticState, lat, lon, alt, V, psi, gamma, mass
 
-    def __init__(self, sim_server: GeodeticSimulator, n_segments: int = 10):
+    def __init__(self, sim_server: GeodeticSimulator, n_segments: int = 10, max_iterations: int = 1000, ftol: float = 1e-6):
         self.sim_server = sim_server
         self.n_segments = n_segments
+        self.max_iterations = max_iterations
+        self.ftol = ftol
 
     def unpack_z(self, z):
         z = np.asarray(z, dtype=float)
@@ -304,7 +306,7 @@ class TranscriptionOptimizor:
                           bounds=bounds, 
                           constraints=constraints, 
                           method='SLSQP', 
-                          options={'maxiter': 1000, 'ftol': 1e-6})
+                          options={'maxiter': self.max_iterations, 'ftol': self.ftol})
         
         # return sates and controls at each node
         if result.success:
