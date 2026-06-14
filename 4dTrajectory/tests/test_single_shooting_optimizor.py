@@ -8,7 +8,11 @@ import pytest
 
 
 def load_single_shooting_module():
-    module_path = Path(__file__).resolve().parents[1] / "single_shooting_optimizor.py"
+    module_path = (
+        Path(__file__).resolve().parents[1]
+        / "optimization"
+        / "single_shooting_optimizor.py"
+    )
     spec = importlib.util.spec_from_file_location(
         "single_shooting_optimizor",
         module_path,
@@ -20,7 +24,7 @@ def load_single_shooting_module():
     return module
 
 
-def test_single_shooting_optimizor_imports_from_repo_root():
+def test_single_shooting_optimizor_imports_from_optimization_dir():
     module = load_single_shooting_module()
 
     assert module.SingleShootingOptimizor.__name__ == "SingleShootingOptimizor"

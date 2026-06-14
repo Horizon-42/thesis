@@ -5,7 +5,7 @@ import math
 import numpy as np
 from scipy.optimize import minimize
 
-_AERODYNAMIC_MODEL_DIR = Path(__file__).resolve().parents[1] / "aerodynamic_model"
+_AERODYNAMIC_MODEL_DIR = Path(__file__).resolve().parents[2] / "aerodynamic_model"
 if str(_AERODYNAMIC_MODEL_DIR) not in sys.path:
     sys.path.insert(0, str(_AERODYNAMIC_MODEL_DIR))
 
