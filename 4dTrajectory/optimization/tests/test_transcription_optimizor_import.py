@@ -95,6 +95,7 @@ def test_optimize_trajectory_builds_compatible_minimize_problem(monkeypatch):
     optimizer = module.TranscriptionOptimizor(
         sim_server=geodetic_simulator,
         n_segments=2,
+        dt=25.0,
     )
     initial_state = module.GeodeticState(1.0, 2.0, 1000.0, 120.0, 0.1, -0.01, 70000.0)
     target_state = module.GeodeticState(3.0, 4.0, 900.0, 115.0, 0.2, -0.02, 70000.0)
@@ -138,7 +139,7 @@ def test_optimize_trajectory_builds_compatible_minimize_problem(monkeypatch):
 
         assert defect_values.shape == (optimizer.n_segments * optimizer.state_dim,)
         assert final_state_values.shape == (optimizer.state_dim,)
-        assert len(geodetic_simulator.calls) == optimizer.n_segments
+        assert len(geodetic_simulator.calls) == optimizer.n_segments * 2
         assert all(
             isinstance(call["state"], module.GeodeticState)
             for call in geodetic_simulator.calls
@@ -148,7 +149,7 @@ def test_optimize_trajectory_builds_compatible_minimize_problem(monkeypatch):
             for call in geodetic_simulator.calls
         )
         assert all(call["state"].m == initial_state.m for call in geodetic_simulator.calls)
-        assert all(call["dt"] == 50.0 for call in geodetic_simulator.calls)
+        assert all(call["dt"] == 25.0 for call in geodetic_simulator.calls)
         return SimpleNamespace(success=True, x=x0, message="")
 
     monkeypatch.setattr(module, "minimize", fake_minimize)
@@ -161,6 +162,36 @@ def test_optimize_trajectory_builds_compatible_minimize_problem(monkeypatch):
     assert final_time == 100.0
     assert node_control.shape == (2, 3)
     assert node_state.shape == (2, 6)
+
+
+def test_step_simulator_splits_segment_into_bounded_substeps():
+    module = load_transcription_module()
+    geodetic_simulator = FakeGeodeticSimulator(module)
+    optimizer = module.TranscriptionOptimizor(
+        sim_server=geodetic_simulator,
+        n_segments=1,
+        dt=0.4,
+    )
+    state = module.GeodeticState(1.0, 2.0, 1000.0, 120.0, 0.1, -0.01, 70000.0)
+    control = module.Control(12000.0, 0.0, 0.0)
+
+    optimizer.step_simulator(state, control, duration=1.0)
+
+    assert len(geodetic_simulator.calls) == 3
+    np.testing.assert_allclose(
+        [call["dt"] for call in geodetic_simulator.calls],
+        [1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0],
+    )
+
+
+def test_transcription_optimizor_rejects_invalid_dt():
+    module = load_transcription_module()
+
+    with pytest.raises(ValueError, match="dt must be positive and finite"):
+        module.TranscriptionOptimizor(
+            sim_server=FakeGeodeticSimulator(module),
+            dt=0.0,
+        )
 
 
 def test_defect_constraints_turn_simulator_failures_into_infeasible_residual(monkeypatch):

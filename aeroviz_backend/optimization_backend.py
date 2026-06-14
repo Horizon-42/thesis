@@ -5,10 +5,14 @@ from typing import Any
 from aeroviz_backend import paths  # noqa: F401
 from aeroviz_backend.simulation_backend import (
     DEFAULT_AIRCRAFT_TYPE,
+    DEFAULT_DT,
     DEFAULT_STATE,
+    MAX_DT,
+    clamp,
     format_control,
     format_geodetic_state,
     read_aircraft,
+    read_float,
     read_geodetic_state,
     read_positive_int,
     read_required_mapping,
@@ -21,6 +25,7 @@ from transcription_optimizor import TranscriptionOptimizor
 
 DEFAULT_N_SEGMENTS = 10
 DEFAULT_MAX_ITERATIONS = 1000
+MIN_OPTIMIZATION_DT = 0.001
 
 
 class OptimizationBackend:
@@ -34,6 +39,7 @@ class OptimizationBackend:
             "maxIterations",
             DEFAULT_MAX_ITERATIONS,
         )
+        dt = clamp(read_float(payload, "dtS", DEFAULT_DT), MIN_OPTIMIZATION_DT, MAX_DT)
         aircraft = read_aircraft(initial_payload, DEFAULT_AIRCRAFT_TYPE)
 
         initial_state = read_geodetic_state(initial_payload, DEFAULT_STATE, aircraft)
@@ -41,6 +47,7 @@ class OptimizationBackend:
         optimizer = TranscriptionOptimizor(
             GeodeticSimulator(aircraft),
             n_segments=n_segments,
+            dt=dt,
             max_iterations=max_iterations,
         )
         final_time, node_control, node_state = optimizer.optimize_trajectory(
@@ -52,6 +59,7 @@ class OptimizationBackend:
             "ok": True,
             "finalTimeS": float(final_time),
             "nSegments": n_segments,
+            "dtS": dt,
             "controls": [
                 format_control(Control(*control_values))
                 for control_values in node_control

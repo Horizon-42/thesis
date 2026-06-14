@@ -6,6 +6,7 @@ import {
 
 const request: TrajectoryOptimizationRequest = {
   nSegments: 4,
+  dtS: 0.2,
   maxIterations: 25,
   initialState: {
     lon: -114.02,
@@ -42,6 +43,7 @@ describe("trajectoryOptimizationClient", () => {
       ok: true,
       finalTimeS: 80,
       nSegments: 4,
+      dtS: 0.2,
       controls: [
         { thrustN: 12000, bankDeg: 1, attackDeg: 4 },
       ],

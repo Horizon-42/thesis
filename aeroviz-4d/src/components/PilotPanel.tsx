@@ -84,6 +84,7 @@ export default function PilotPanel() {
     makeDefaultTrajectoryTarget(null),
   );
   const [nSegments, setNSegments] = useState(10);
+  const [trajectoryDtS, setTrajectoryDtS] = useState(DEFAULT_FRAME_DT_S);
   const [maxIterations, setMaxIterations] = useState(DEFAULT_MAX_ITERATIONS);
   const [optimizedTrajectory, setOptimizedTrajectory] =
     useState<TrajectoryOptimizationResult | null>(null);
@@ -93,6 +94,7 @@ export default function PilotPanel() {
   const stepInFlightRef = useRef(false);
   const trajectoryPlanRef = useRef<TrajectoryOptimizationResult | null>(null);
   const trajectoryReplayIndexRef = useRef(0);
+  const trajectorySegmentElapsedSRef = useRef(0);
   const trajectoryStepInFlightRef = useRef(false);
   const placementBackupRef = useRef<PlacementBackup | null>(null);
 
@@ -258,6 +260,7 @@ export default function PilotPanel() {
   useEffect(() => {
     placementBackupRef.current = null;
     trajectoryReplayIndexRef.current = 0;
+    trajectorySegmentElapsedSRef.current = 0;
     setInitialState(makeDefaultInitialState(airport, aircraftConfigs[0] ?? null));
     setActiveMode("pilot");
     setIsInitialEditorOpen(false);
@@ -388,7 +391,18 @@ export default function PilotPanel() {
         return;
       }
 
-      const replayDtS = plan.finalTimeS / Math.max(1, plan.controls.length);
+      const segmentDurationS = plan.finalTimeS / Math.max(1, plan.controls.length);
+      const remainingSegmentS = segmentDurationS - trajectorySegmentElapsedSRef.current;
+      if (remainingSegmentS <= 1e-9) {
+        trajectoryReplayIndexRef.current += 1;
+        trajectorySegmentElapsedSRef.current = 0;
+        if (trajectoryReplayIndexRef.current >= plan.controls.length) {
+          setIsTrajectoryPlaying(false);
+        }
+        return;
+      }
+
+      const replayDtS = Math.min(plan.dtS, remainingSegmentS);
       trajectoryStepInFlightRef.current = true;
       void stepPilotSimulation(control, replayDtS)
         .then((nextSnapshot) => {
@@ -396,7 +410,11 @@ export default function PilotPanel() {
           setSnapshot(nextSnapshot);
           appendTrailPoint(nextSnapshot);
           setError(null);
-          trajectoryReplayIndexRef.current += 1;
+          trajectorySegmentElapsedSRef.current += replayDtS;
+          if (trajectorySegmentElapsedSRef.current >= segmentDurationS - 1e-9) {
+            trajectoryReplayIndexRef.current += 1;
+            trajectorySegmentElapsedSRef.current = 0;
+          }
           if (trajectoryReplayIndexRef.current >= plan.controls.length) {
             setIsTrajectoryPlaying(false);
           }
@@ -622,6 +640,13 @@ export default function PilotPanel() {
     setIsTrajectoryPlaying(false);
   }
 
+  function updateTrajectoryDt(value: number) {
+    if (!Number.isFinite(value)) return;
+    setTrajectoryDtS(clamp(value, 0.02, 0.5));
+    setOptimizedTrajectory(null);
+    setIsTrajectoryPlaying(false);
+  }
+
   function updateMaxIterations(value: number) {
     if (!Number.isFinite(value)) return;
     setMaxIterations(Math.round(clamp(value, 1, 10000)));
@@ -646,10 +671,12 @@ export default function PilotPanel() {
         ),
         targetControl: { attackDeg: targetState.attackDeg },
         nSegments,
+        dtS: trajectoryDtS,
         maxIterations,
       });
       setOptimizedTrajectory(result);
       trajectoryReplayIndexRef.current = 0;
+      trajectorySegmentElapsedSRef.current = 0;
     } catch (computeError: unknown) {
       setOptimizedTrajectory(null);
       setError(toErrorMessage(computeError));
@@ -672,6 +699,7 @@ export default function PilotPanel() {
       const nextPose = snapshotToPose(nextSnapshot);
       setTrail(nextPose ? [nextPose] : []);
       trajectoryReplayIndexRef.current = 0;
+      trajectorySegmentElapsedSRef.current = 0;
       setIsEnabled(true);
       setIsTrajectoryPlaying(true);
     } catch (playError: unknown) {
@@ -683,6 +711,7 @@ export default function PilotPanel() {
 
   function resetTrajectoryReplay() {
     trajectoryReplayIndexRef.current = 0;
+    trajectorySegmentElapsedSRef.current = 0;
     setIsTrajectoryPlaying(false);
     setIsFlying(false);
     setIsEnabled(false);
@@ -719,7 +748,7 @@ export default function PilotPanel() {
   const hasAircraftConfigs = aircraftConfigs.length > 0;
   const initialControlsDisabled = isFlying || isTrajectoryPlaying || isBusy || !hasAircraftConfigs;
   const targetControlsDisabled = isBusy || isTrajectoryPlaying || runwayTargets.length === 0;
-  const trajectoryDtS = optimizedTrajectory
+  const trajectorySegmentDurationS = optimizedTrajectory
     ? optimizedTrajectory.finalTimeS / Math.max(1, optimizedTrajectory.controls.length)
     : null;
 
@@ -892,6 +921,17 @@ export default function PilotPanel() {
               />
             </label>
             <label>
+              <span>dt</span>
+              <EnglishNumberInput
+                value={trajectoryDtS}
+                min={0.02}
+                max={0.5}
+                step="0.02"
+                disabled={targetControlsDisabled}
+                onCommit={updateTrajectoryDt}
+              />
+            </label>
+            <label>
               <span>Max iter</span>
               <EnglishNumberInput
                 value={maxIterations}
@@ -967,11 +1007,11 @@ export default function PilotPanel() {
                 </div>
                 <div>
                   <dt>dt</dt>
-                  <dd>{formatNumberInputValue(trajectoryDtS ?? 0)} s</dd>
+                  <dd>{formatNumberInputValue(optimizedTrajectory.dtS)} s</dd>
                 </div>
                 <div>
-                  <dt>Controls</dt>
-                  <dd>{optimizedTrajectory.controls.length}</dd>
+                  <dt>Segment</dt>
+                  <dd>{formatNumberInputValue(trajectorySegmentDurationS ?? 0)} s</dd>
                 </div>
               </dl>
             ) : null}

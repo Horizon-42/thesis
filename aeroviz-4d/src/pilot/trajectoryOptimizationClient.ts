@@ -5,6 +5,7 @@ export interface TrajectoryOptimizationRequest {
   targetState: PilotResetState;
   targetControl: Pick<PilotControls, "attackDeg">;
   nSegments: number;
+  dtS: number;
   maxIterations: number;
 }
 
@@ -12,6 +13,7 @@ export interface TrajectoryOptimizationResult {
   ok: true;
   finalTimeS: number;
   nSegments: number;
+  dtS: number;
   controls: PilotControls[];
   states: PilotResetState[];
 }
@@ -61,6 +63,7 @@ function parseTrajectoryOptimizationResult(
     ok: true,
     finalTimeS: readNumber(value, "finalTimeS"),
     nSegments: readNumber(value, "nSegments"),
+    dtS: readPositiveNumber(value, "dtS"),
     controls: value.controls.map(parseControl),
     states: value.states.map(parseState),
   };
@@ -99,6 +102,14 @@ function readNumber(value: Record<string, unknown>, key: string): number {
     throw new Error(`AeroViz backend optimization response has invalid ${key}`);
   }
   return nested;
+}
+
+function readPositiveNumber(value: Record<string, unknown>, key: string): number {
+  const number = readNumber(value, key);
+  if (number <= 0) {
+    throw new Error(`AeroViz backend optimization response has invalid ${key}`);
+  }
+  return number;
 }
 
 function readString(value: Record<string, unknown>, key: string): string {

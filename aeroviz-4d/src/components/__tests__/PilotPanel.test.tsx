@@ -75,6 +75,7 @@ describe("PilotPanel trajectory play mode", () => {
       ok: true,
       finalTimeS: 100,
       nSegments: 10,
+      dtS: 0.2,
       controls: [
         { thrustN: 12000, bankDeg: 0, attackDeg: 4 },
         { thrustN: 12000, bankDeg: 3, attackDeg: 4 },
@@ -153,6 +154,9 @@ describe("PilotPanel trajectory play mode", () => {
     const segmentInput = screen.getByLabelText("Segments");
     fireEvent.change(segmentInput, { target: { value: "12" } });
     fireEvent.blur(segmentInput);
+    const trajectoryDtInput = screen.getByLabelText("dt");
+    fireEvent.change(trajectoryDtInput, { target: { value: "0.1" } });
+    fireEvent.blur(trajectoryDtInput);
     const maxIterationsInput = screen.getByLabelText("Max iter");
     fireEvent.change(maxIterationsInput, { target: { value: "25" } });
     fireEvent.blur(maxIterationsInput);
@@ -179,6 +183,7 @@ describe("PilotPanel trajectory play mode", () => {
         }),
         targetControl: { attackDeg: 4 },
         nSegments: 12,
+        dtS: 0.1,
         maxIterations: 25,
       });
     });
@@ -204,6 +209,12 @@ describe("PilotPanel trajectory play mode", () => {
 
     await waitFor(() => {
       expect(mocks.resetPilotSimulation).toHaveBeenCalled();
+    });
+    await waitFor(() => {
+      expect(mocks.stepPilotSimulation).toHaveBeenCalledWith(
+        { thrustN: 12000, bankDeg: 0, attackDeg: 4 },
+        0.2,
+      );
     });
     const liveStatePanel = await screen.findByRole("complementary", {
       name: "Realtime aircraft state",

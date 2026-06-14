@@ -10,10 +10,11 @@ class TestOptimizationBackend(unittest.TestCase):
         calls = []
 
         class FakeTranscriptionOptimizor:
-            def __init__(self, geodetic_simulator, n_segments, max_iterations):
+            def __init__(self, geodetic_simulator, n_segments, dt, max_iterations):
                 calls.append({
                     "aircraft": geodetic_simulator.simulator.aircraft.code,
                     "n_segments": n_segments,
+                    "dt": dt,
                     "max_iterations": max_iterations,
                 })
 
@@ -33,6 +34,7 @@ class TestOptimizationBackend(unittest.TestCase):
         try:
             result = optimization_backend.OptimizationBackend().optimize({
                 "nSegments": 1,
+                "dtS": 0.25,
                 "maxIterations": 25,
                 "initialState": {
                     "lon": -114.0203,
@@ -57,13 +59,14 @@ class TestOptimizationBackend(unittest.TestCase):
 
         self.assertEqual(
             calls[0],
-            {"aircraft": "A320", "n_segments": 1, "max_iterations": 25},
+            {"aircraft": "A320", "n_segments": 1, "dt": 0.25, "max_iterations": 25},
         )
         self.assertAlmostEqual(calls[1]["initial"].longitude, -114.0203)
         self.assertAlmostEqual(calls[1]["target"].latitude, 51.2)
         self.assertEqual(result["ok"], True)
         self.assertEqual(result["finalTimeS"], 42.0)
         self.assertEqual(result["nSegments"], 1)
+        self.assertEqual(result["dtS"], 0.25)
         self.assertEqual(result["controls"][0]["thrustN"], 15000.0)
         self.assertAlmostEqual(result["controls"][0]["bankDeg"], np.degrees(0.1))
         self.assertAlmostEqual(result["states"][0]["lat"], 51.0)

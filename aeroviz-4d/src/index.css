@@ -1724,17 +1724,23 @@ body,
 
 .pilot-optimization-row {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 5px;
   margin-bottom: 5px;
 }
 
 .pilot-optimization-row label {
   display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
+  grid-template-columns: 1fr;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
+}
+
+.pilot-optimization-row label span {
+  color: #cbd5e1;
+  font-size: 9px;
+  line-height: 1.1;
 }
 
 .pilot-stepper-row {
@@ -1937,8 +1943,7 @@ body,
   }
 
   .pilot-stepper-row label,
-  .pilot-options-row label,
-  .pilot-optimization-row label {
+  .pilot-options-row label {
     grid-template-columns: 44px minmax(0, 1fr);
   }
 

@@ -19,6 +19,7 @@ _DEFAULT_THRUST_GUESS_N = 12000.0
 _MIN_ATTACK_RAD = -math.radians(18.0)
 _MAX_ATTACK_RAD = math.radians(18.0)
 _INVALID_DEFECT_MAGNITUDE = 1e9
+_DEFAULT_DT_S = 0.2
 
 
 class TranscriptionOptimizor:
@@ -31,9 +32,19 @@ class TranscriptionOptimizor:
     # state dim
     state_dim : int = 6 # Match to GeodeticState, lat, lon, alt, V, psi, gamma
 
-    def __init__(self, sim_server: GeodeticSimulator, n_segments: int = 10, max_iterations: int = 1000, ftol: float = 1e-6):
+    def __init__(
+        self,
+        sim_server: GeodeticSimulator,
+        n_segments: int = 10,
+        dt: float = _DEFAULT_DT_S,
+        max_iterations: int = 1000,
+        ftol: float = 1e-6,
+    ):
+        if not math.isfinite(dt) or dt <= 0.0:
+            raise ValueError("dt must be positive and finite")
         self.sim_server = sim_server
         self.n_segments = n_segments
+        self.dt = float(dt)
         self.max_iterations = max_iterations
         self.ftol = ftol
 
@@ -231,6 +242,25 @@ class TranscriptionOptimizor:
             _INVALID_DEFECT_MAGNITUDE,
         )
 
+    def step_simulator(
+        self,
+        start_state: GeodeticState,
+        control: Control,
+        duration: float,
+    ) -> GeodeticState:
+        if not math.isfinite(duration) or duration <= 0.0:
+            raise ValueError("duration must be positive and finite")
+
+        # Keep the multiple-shooting mesh coarse while integrating each segment
+        # with bounded substeps. This improves dynamics fidelity without adding
+        # state/control variables to the SLSQP problem.
+        n_substeps = max(1, math.ceil(duration / self.dt))
+        substep_duration = duration / n_substeps
+        state = start_state
+        for _ in range(n_substeps):
+            state = self.sim_server.step(state, control, substep_duration)
+        return state
+
     def optimize_trajectory(self, initial_state: GeodeticState, target_state: GeodeticState) -> list:
         self.validate_endpoint_state(initial_state, "initial_state")
         self.validate_endpoint_state(target_state, "target_state")
@@ -267,7 +297,7 @@ class TranscriptionOptimizor:
         # defect constraints to ensure dynamics are satisfied at each segment
         def defect_constraints(z):
             final_time, node_control, node_state = self.unpack_z(z)
-            dt = final_time / self.n_segments
+            duration = final_time / self.n_segments
 
             defects = []
 
@@ -288,7 +318,11 @@ class TranscriptionOptimizor:
                 # failures into a large equality residual so one bad probe does
                 # not abort the whole HTTP optimization request.
                 try:
-                    geo_predicted_state = self.sim_server.step(self.array_to_geodetic_state(start_state, mass), Control(*control_i), dt)
+                    geo_predicted_state = self.step_simulator(
+                        self.array_to_geodetic_state(start_state, mass),
+                        Control(*control_i),
+                        duration,
+                    )
                 except (ValueError, ZeroDivisionError, OverflowError):
                     return self.invalid_defects()
                 predicted_state = self.geodetic_state_to_array(geo_predicted_state)
