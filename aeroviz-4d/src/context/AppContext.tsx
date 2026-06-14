@@ -246,7 +246,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     runways: true,
     waypoints: false,
     ocsSurfaces: false,
-    trajectories: true,
+    trajectories: false,
     obstacles: false,
     obstacleLabels: false,
     procedures: false,
