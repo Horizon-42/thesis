@@ -756,8 +756,13 @@ export default function PilotPanel() {
     <div className="pilot-panel">
       <PilotRealtimeStatePanel
         snapshot={snapshot}
-        visible={isFlying || isTrajectoryPlaying}
+        visible={
+          isFlying ||
+          isTrajectoryPlaying ||
+          (activeMode === "trajectory" && snapshot !== null)
+        }
         showControlReadout={activeMode === "trajectory"}
+        targetState={activeMode === "trajectory" ? targetState : null}
       />
 
       <header className="pilot-panel-header">

@@ -7,12 +7,14 @@ interface PilotRealtimeStatePanelProps {
   snapshot: PilotSnapshot | null;
   visible: boolean;
   showControlReadout?: boolean;
+  targetState?: Pick<PilotSnapshot["state"], "lat" | "lon" | "altM"> | null;
 }
 
 export default function PilotRealtimeStatePanel({
   snapshot,
   visible,
   showControlReadout = false,
+  targetState = null,
 }: PilotRealtimeStatePanelProps) {
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
 
@@ -32,6 +34,22 @@ export default function PilotRealtimeStatePanel({
         <RealtimeReadout label="Latitude" value={formatCoord(snapshot.state.lat, "N", "S")} />
         <RealtimeReadout label="Longitude" value={formatCoord(snapshot.state.lon, "E", "W")} />
         <RealtimeReadout label="Altitude" value={`${snapshot.state.altM.toFixed(0)} m`} />
+        {targetState ? (
+          <>
+            <RealtimeReadout
+              label="Lat Error"
+              value={formatSignedDelta(snapshot.state.lat - targetState.lat, 6, "deg")}
+            />
+            <RealtimeReadout
+              label="Lon Error"
+              value={formatSignedDelta(snapshot.state.lon - targetState.lon, 6, "deg")}
+            />
+            <RealtimeReadout
+              label="Alt Error"
+              value={formatSignedDelta(snapshot.state.altM - targetState.altM, 1, "m")}
+            />
+          </>
+        ) : null}
         <RealtimeReadout label="Speed" value={`${snapshot.state.speedMps.toFixed(1)} m/s`} />
         <RealtimeReadout
           label="Heading Angle (psi)"
@@ -64,6 +82,13 @@ export default function PilotRealtimeStatePanel({
     </aside>,
     portalTarget,
   );
+}
+
+function formatSignedDelta(value: number, fractionDigits: number, unit: string): string {
+  const zeroThreshold = 0.5 * 10 ** -fractionDigits;
+  const normalizedValue = Math.abs(value) < zeroThreshold ? 0 : value;
+  const prefix = normalizedValue > 0 ? "+" : "";
+  return `${prefix}${normalizedValue.toFixed(fractionDigits)} ${unit}`;
 }
 
 function RealtimeReadout({

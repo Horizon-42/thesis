@@ -75,4 +75,19 @@ describe("PilotRealtimeStatePanel", () => {
     expect(await screen.findByText("Control")).toBeTruthy();
     expect(screen.getByText("bank 0.0 deg | alpha 3.50 deg | thrust 12000 N")).toBeTruthy();
   });
+
+  it("shows actual minus target position errors when a target state is provided", async () => {
+    render(
+      <PilotRealtimeStatePanel
+        snapshot={snapshot}
+        visible={true}
+        targetState={{ lat: 51, lon: -114.1, altM: 1200 }}
+      />,
+    );
+
+    expect(await screen.findByText("Lat Error")).toBeTruthy();
+    expect(screen.getByText("+0.020000 deg")).toBeTruthy();
+    expect(screen.getByText("+0.050000 deg")).toBeTruthy();
+    expect(screen.getByText("+34.0 m")).toBeTruthy();
+  });
 });

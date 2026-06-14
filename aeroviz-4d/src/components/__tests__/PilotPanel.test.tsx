@@ -224,4 +224,51 @@ describe("PilotPanel trajectory play mode", () => {
       within(liveStatePanel).getByText("bank 3.0 deg | alpha 4.00 deg | thrust 12000 N"),
     ).toBeTruthy();
   });
+
+  it("keeps the final trajectory state panel visible after replay finishes", async () => {
+    document.body.innerHTML = '<div class="cesium-overlay-container"></div>';
+    mocks.runTrajectoryOptimization.mockResolvedValueOnce({
+      ok: true,
+      finalTimeS: 0.2,
+      nSegments: 1,
+      dtS: 0.2,
+      controls: [{ thrustN: 12000, bankDeg: 0, attackDeg: 4 }],
+      states: [],
+    });
+
+    render(<PilotPanel />);
+
+    expect(await screen.findByText("A320")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Optimize" }));
+
+    await waitFor(() => {
+      expect(mocks.runTrajectoryOptimization).toHaveBeenCalled();
+    });
+    await waitFor(() => {
+      expect((screen.getByRole("button", { name: "Play" }) as HTMLButtonElement).disabled)
+        .toBe(false);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Play" }));
+
+    await waitFor(() => {
+      expect(mocks.stepPilotSimulation).toHaveBeenCalledWith(
+        { thrustN: 12000, bankDeg: 0, attackDeg: 4 },
+        0.2,
+      );
+    });
+    await waitFor(() => {
+      expect((screen.getByRole("button", { name: "Pause" }) as HTMLButtonElement).disabled)
+        .toBe(true);
+    });
+
+    const finalStatePanel = screen.getByRole("complementary", {
+      name: "Realtime aircraft state",
+    });
+    expect(within(finalStatePanel).getByText("Lat Error")).toBeTruthy();
+    expect(within(finalStatePanel).getByText("-0.004000 deg")).toBeTruthy();
+    expect(within(finalStatePanel).getByText("+0.012000 deg")).toBeTruthy();
+    expect(within(finalStatePanel).getByText("+788.1 m")).toBeTruthy();
+  });
 });
