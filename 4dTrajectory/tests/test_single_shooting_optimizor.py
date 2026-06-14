@@ -58,11 +58,11 @@ def test_angular_difference_uses_shortest_wrapped_distance():
     assert math.isclose(difference, math.radians(-2.0))
 
 
-def test_endpoint_error_vector_normalizes_mixed_units():
+def test_position_constraint_error_uses_only_position():
     module = load_single_shooting_module()
     state = module.GeodeticState(
-        latitude=51.0 + 1.0 / 111.32,
-        longitude=-114.0,
+        latitude=1.0 / 111.32,
+        longitude=1.0 / 111.32,
         altitude=1100.0,
         V=130.0,
         psi=math.radians(179.0),
@@ -70,8 +70,8 @@ def test_endpoint_error_vector_normalizes_mixed_units():
         m=70000.0,
     )
     target_state = module.GeodeticState(
-        latitude=51.0,
-        longitude=-114.0,
+        latitude=0.0,
+        longitude=0.0,
         altitude=1000.0,
         V=120.0,
         psi=math.radians(-179.0),
@@ -79,13 +79,41 @@ def test_endpoint_error_vector_normalizes_mixed_units():
         m=70000.0,
     )
 
-    error = module.SingleShootingOptimizor.endpoint_error_vector(state, target_state)
-
-    np.testing.assert_allclose(
-        error,
-        np.array([1.0, 0.0, 1.0, 1.0, -0.2, 1.0]),
-        atol=1e-12,
+    error = module.SingleShootingOptimizor.position_constraint_error(
+        state,
+        target_state,
     )
+
+    np.testing.assert_allclose(error, np.array([1.0, 1.0, 1.0]), atol=1e-6)
+
+
+def test_terminal_soft_cost_uses_speed_and_angles():
+    module = load_single_shooting_module()
+    state = module.GeodeticState(
+        latitude=1.0,
+        longitude=2.0,
+        altitude=1100.0,
+        V=130.0,
+        psi=math.radians(179.0),
+        gamma=math.radians(-1.0),
+        m=70000.0,
+    )
+    target_state = module.GeodeticState(
+        latitude=0.0,
+        longitude=0.0,
+        altitude=1000.0,
+        V=120.0,
+        psi=math.radians(-179.0),
+        gamma=math.radians(-3.0),
+        m=70000.0,
+    )
+
+    cost = module.SingleShootingOptimizor.terminal_soft_cost(
+        state,
+        target_state,
+    )
+
+    assert math.isclose(cost, math.sqrt(1.0**2 + (-0.2)**2 + 1.0**2))
 
 
 def test_segment_simulate_splits_duration_into_bounded_substeps():
@@ -115,18 +143,19 @@ def test_optimize_trajectory_builds_single_shooting_minimize_problem(monkeypatch
     optimizer = module.SingleShootingOptimizor(
         sim=simulator,
         n_control_segments=2,
-        dt=100.0,
+        dt=10000.0,
     )
     initial_state = module.GeodeticState(1.0, 2.0, 1000.0, 120.0, 0.1, -0.01, 70000.0)
 
-    def fake_minimize(fun, x0, method, bounds, options):
+    def fake_minimize(fun, x0, method, bounds, constraints, options):
         assert len(x0) == 1 + optimizer.n_control_segments * optimizer.control_dim
         assert method == "SLSQP"
         assert len(bounds) == len(x0)
+        assert constraints["type"] == "eq"
         assert options == {"maxiter": 1000, "ftol": 1e-6}
 
         final_time, controls = optimizer.unpack_z(x0)
-        assert final_time == 100.0
+        assert final_time > 0.0
         np.testing.assert_allclose(
             controls,
             np.array([
@@ -134,11 +163,12 @@ def test_optimize_trajectory_builds_single_shooting_minimize_problem(monkeypatch
                 [12000.0, 0.0, math.radians(4.0)],
             ]),
         )
-        assert math.isclose(fun(x0), 0.01)
-        assert len(simulator.calls) == optimizer.n_control_segments
+        assert math.isclose(fun(x0), final_time * 1e-4)
+        np.testing.assert_allclose(constraints["fun"](x0), np.zeros(3))
+        assert len(simulator.calls) == optimizer.n_control_segments * 2
         np.testing.assert_allclose(
             [call["dt"] for call in simulator.calls],
-            [50.0, 50.0],
+            [final_time / 2.0] * 4,
         )
         return SimpleNamespace(success=True, x=x0, message="")
 
@@ -149,12 +179,12 @@ def test_optimize_trajectory_builds_single_shooting_minimize_problem(monkeypatch
         target_state,
     )
 
-    assert final_time == 100.0
+    assert final_time > 0.0
     assert controls.shape == (2, 3)
     assert node_state is None
 
 
-def test_objective_penalizes_unsimulatable_candidates(monkeypatch):
+def test_objective_and_constraint_penalize_unsimulatable_candidates(monkeypatch):
     module = load_single_shooting_module()
     optimizer = module.SingleShootingOptimizor(
         sim=FailingGeodeticSimulator(),
@@ -162,16 +192,20 @@ def test_objective_penalizes_unsimulatable_candidates(monkeypatch):
     )
     state = module.GeodeticState(1.0, 2.0, 1000.0, 120.0, 0.1, -0.01, 70000.0)
 
-    def fake_minimize(fun, x0, method, bounds, options):
+    def fake_minimize(fun, x0, method, bounds, constraints, options):
         del method, bounds, options
         assert fun(x0) == module._INFEASIBLE_OBJECTIVE_VALUE
+        np.testing.assert_array_equal(
+            constraints["fun"](x0),
+            np.full(3, module._INFEASIBLE_OBJECTIVE_VALUE),
+        )
         return SimpleNamespace(success=True, x=x0, message="")
 
     monkeypatch.setattr(module, "minimize", fake_minimize)
 
     final_time, controls, node_state = optimizer.optimize_trajectory(state, state)
 
-    assert final_time == 100.0
+    assert final_time == 1.0
     assert controls.shape == (1, 3)
     assert node_state is None
 

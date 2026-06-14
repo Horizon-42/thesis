@@ -102,45 +102,43 @@ class SingleShootingOptimizor:
         return (left - right + math.pi) % (2.0 * math.pi) - math.pi
 
     @staticmethod
-    def endpoint_error_vector(
+    def position_constraint_error(
         state: GeodeticState,
         target_state: GeodeticState,
     ) -> np.ndarray:
-        # The optimizer's scalar objective is the norm of this vector, so each
-        # entry must be in a comparable unit/scale. Without this normalization,
-        # latitude/longitude degrees, altitude metres, speed m/s, and angles in
-        # radians would be mixed directly, making the objective numerically
-        # arbitrary.
-        #
-        # Latitude and longitude are converted to approximate kilometres. The
-        # longitude conversion depends on latitude because one degree of longitude
-        # gets shorter away from the equator. The cosine is clamped to avoid a
-        # near-zero scale at the poles; terminal-area trajectories should never be
-        # near that edge case, but the clamp keeps the helper well-defined.
+        # Equality constraints only pin terminal position: lateral position in
+        # kilometres, altitude in hundreds of metres. Scaling changes numerical
+        # conditioning but not the required zero-error endpoint.
         mean_latitude = math.radians((state.latitude + target_state.latitude) * 0.5)
         metres_per_degree_lon = _METRES_PER_DEGREE_LAT * max(
             0.1,
             abs(math.cos(mean_latitude)),
         )
-
         return np.array([
-            # Position: kilometres. This makes a 1 km lateral miss contribute
-            # roughly one unit to the objective norm.
             (state.latitude - target_state.latitude) * _METRES_PER_DEGREE_LAT / 1000.0,
             (state.longitude - target_state.longitude) * metres_per_degree_lon / 1000.0,
-            # Altitude: hundreds of metres. This keeps vertical error important
-            # without letting metre-scale values dominate lateral kilometres.
             (state.altitude - target_state.altitude) / 100.0,
-            # Speed: tens of m/s. A 10 m/s terminal-speed miss contributes about
-            # one unit.
-            (state.V - target_state.V) / 10.0,
-            # Heading: units of 10 degrees, using wrapped angular difference.
-            SingleShootingOptimizor.angular_difference_rad(state.psi, target_state.psi)
-                / math.radians(10.0),
-            # Flight-path angle: units of 2 degrees, because gamma errors are
-            # operationally meaningful even when numerically small in radians.
-            (state.gamma - target_state.gamma) / math.radians(2.0),
         ])
+
+    @staticmethod
+    def terminal_soft_cost(
+        state: GeodeticState,
+        target_state: GeodeticState,
+    ) -> float:
+        speed_error = (state.V - target_state.V) / 10.0
+        heading_error = (
+            SingleShootingOptimizor.angular_difference_rad(
+                state.psi,
+                target_state.psi,
+            )
+            / math.radians(10.0)
+        )
+        flight_path_error = (state.gamma - target_state.gamma) / math.radians(2.0)
+        return math.sqrt(
+            speed_error**2 +
+            heading_error**2 +
+            flight_path_error**2
+        )
     
     def segment_simulate(self, start_state: GeodeticState, control: Control, duration: float) -> GeodeticState:
         if not math.isfinite(duration) or duration <= 0.0:
@@ -153,13 +151,85 @@ class SingleShootingOptimizor:
             state = self.sim.step(state, control, substep_duration)
         return state
 
+    def simulate_controls(
+        self,
+        initial_state: GeodeticState,
+        controls: np.ndarray,
+        final_time: float,
+    ) -> GeodeticState:
+        duration_per_segment = final_time / self.n_control_segments
+        state = initial_state
+        for control_values in controls:
+            state = self.segment_simulate(
+                state,
+                Control(*control_values),
+                duration_per_segment,
+            )
+        return state
+
+    def terminal_objective(
+        self,
+        z: np.ndarray,
+        initial_state: GeodeticState,
+        target_state: GeodeticState,
+    ) -> float:
+        final_time, controls = self.unpack_z(z)
+        try:
+            final_state = self.simulate_controls(initial_state, controls, final_time)
+        except (ValueError, ZeroDivisionError, OverflowError):
+            return _INFEASIBLE_OBJECTIVE_VALUE
+
+        return self.terminal_soft_cost(final_state, target_state) + 1e-4 * final_time
+
+    def terminal_position_constraint(
+        self,
+        z: np.ndarray,
+        initial_state: GeodeticState,
+        target_state: GeodeticState,
+    ) -> np.ndarray:
+        final_time, controls = self.unpack_z(z)
+        try:
+            final_state = self.simulate_controls(initial_state, controls, final_time)
+        except (ValueError, ZeroDivisionError, OverflowError):
+            return np.full(3, _INFEASIBLE_OBJECTIVE_VALUE)
+
+        return self.position_constraint_error(final_state, target_state)
+
     def optimize_trajectory(self, initial_state: GeodeticState, target_state: GeodeticState) -> tuple[float, np.ndarray, None]:
         self.validate_endpoint_state(initial_state, "Initial")
         self.validate_endpoint_state(target_state, "Target")
 
         # initial guess and bounds
-        final_time_guess = 5
-        final_time_bound = (1.0, 200) 
+        final_time_bound = (1.0, 1000.0)
+        mean_latitude_rad = math.radians(
+            (initial_state.latitude + target_state.latitude) * 0.5,
+        )
+        metres_per_degree_lon = _METRES_PER_DEGREE_LAT * max(
+            0.1,
+            abs(math.cos(mean_latitude_rad)),
+        )
+        latitude_delta_m = (
+            (initial_state.latitude - target_state.latitude)
+            * _METRES_PER_DEGREE_LAT
+        )
+        longitude_delta_m = (
+            (initial_state.longitude - target_state.longitude)
+            * metres_per_degree_lon
+        )
+        altitude_delta_m = initial_state.altitude - target_state.altitude
+        distance_m = math.sqrt(
+            latitude_delta_m**2 +
+            longitude_delta_m**2 +
+            altitude_delta_m**2
+        )
+        average_speed_mps = max(initial_state.V, target_state.V, 50.0)
+        final_time_guess = min(
+            final_time_bound[1],
+            max(
+                final_time_bound[0],
+                distance_m / average_speed_mps * 1.5,
+            ),
+        )
 
         # control guesses and bounds
         control_guesses = np.tile(
@@ -171,28 +241,21 @@ class SingleShootingOptimizor:
         initial_guess = np.hstack(([final_time_guess], control_guesses.flatten()))
         bounds = [final_time_bound] + control_bounds
 
-        # optimization
-        def objective(z):
-            final_time, controls = self.unpack_z(z)
-            duration_per_segment = final_time / self.n_control_segments
-
-            state = initial_state
-
-            try:
-                for i in range(self.n_control_segments):
-                    control = Control(*controls[i])
-                    state = self.segment_simulate(state, control, duration_per_segment)
-            except (ValueError, ZeroDivisionError, OverflowError):
-                return _INFEASIBLE_OBJECTIVE_VALUE
-            
-            endpoint_error = self.endpoint_error_vector(state, target_state)
-            return np.linalg.norm(endpoint_error) + 1e-4 * final_time
+        constraints = {
+            'type': 'eq',
+            'fun': lambda z: self.terminal_position_constraint(
+                z,
+                initial_state,
+                target_state,
+            ),
+        }
         
         result = minimize(
-            objective,
+            lambda z: self.terminal_objective(z, initial_state, target_state),
             initial_guess,
             method='SLSQP',
             bounds=bounds,
+            constraints=constraints,
             options={'maxiter': self.max_iterations, 'ftol': self.ftol},
         )
 
