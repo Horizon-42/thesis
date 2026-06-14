@@ -20,6 +20,17 @@ _MIN_ATTACK_RAD = -math.radians(18.0)
 _MAX_ATTACK_RAD = math.radians(18.0)
 _INVALID_DEFECT_MAGNITUDE = 1e9
 _DEFAULT_DT_S = 0.2
+# Residual scaling keeps SLSQP constraint rows in comparable numeric ranges.
+# Optimizer variables and simulator inputs still stay in real physical units.
+_METRES_PER_DEGREE_LAT = 111_320.0
+# A 100 m altitude miss contributes about one residual unit.
+_ALTITUDE_RESIDUAL_SCALE_M = 100.0
+# A 10 m/s speed miss contributes about one residual unit.
+_SPEED_RESIDUAL_SCALE_MPS = 10.0
+# Heading residuals are measured in 10 degree units after angle wrapping.
+_HEADING_RESIDUAL_SCALE_RAD = math.radians(10.0)
+# Flight path angle is tighter because small gamma errors are operationally visible.
+_FLIGHT_PATH_RESIDUAL_SCALE_RAD = math.radians(2.0)
 
 # For state value normalization, the optimizer only needs to compare relative magnitudes of defects
 # Max thrust, 1000KN for wide-body aircraft
@@ -87,6 +98,33 @@ class TranscriptionOptimizor:
             gamma=array[5],
             m=mass,
         )
+
+    @staticmethod
+    def angular_difference_rad(left: float, right: float) -> float:
+        # Use the shortest signed difference so headings across +/-pi stay close.
+        return (left - right + math.pi) % (2.0 * math.pi) - math.pi
+
+    @staticmethod
+    def state_constraint_error(
+        left_state: np.ndarray,
+        right_state: np.ndarray,
+    ) -> np.ndarray:
+        # Convert mixed-unit state errors into residuals of similar magnitude.
+        # This only scales equality constraints; it does not change state units.
+        mean_latitude = math.radians((left_state[0] + right_state[0]) * 0.5)
+        metres_per_degree_lon = _METRES_PER_DEGREE_LAT * max(
+            0.1,
+            abs(math.cos(mean_latitude)),
+        )
+        return np.array([
+            (left_state[0] - right_state[0]) * _METRES_PER_DEGREE_LAT / 1000.0,
+            (left_state[1] - right_state[1]) * metres_per_degree_lon / 1000.0,
+            (left_state[2] - right_state[2]) / _ALTITUDE_RESIDUAL_SCALE_M,
+            (left_state[3] - right_state[3]) / _SPEED_RESIDUAL_SCALE_MPS,
+            TranscriptionOptimizor.angular_difference_rad(left_state[4], right_state[4])
+                / _HEADING_RESIDUAL_SCALE_RAD,
+            (left_state[5] - right_state[5]) / _FLIGHT_PATH_RESIDUAL_SCALE_RAD,
+        ])
 
     @staticmethod
     def validate_endpoint_state(state: GeodeticState, label: str) -> None:
@@ -345,7 +383,7 @@ class TranscriptionOptimizor:
                 if not self.is_simulatable_state_array(predicted_state):
                     return self.invalid_defects()
 
-                defects.append(predicted_state - state_i)
+                defects.append(self.state_constraint_error(predicted_state, state_i))
 
                 start_state = state_i # for next segment
 
@@ -355,7 +393,7 @@ class TranscriptionOptimizor:
             _, _, node_state = self.unpack_z(z)
             final_state = node_state[-1]
             target_state_array = self.geodetic_state_to_array(target_state)
-            return final_state - target_state_array
+            return self.state_constraint_error(final_state, target_state_array)
 
         constraints = [{'type': 'eq', 'fun': defect_constraints},
                        {'type': 'eq', 'fun': final_state_constraint}]

@@ -89,6 +89,37 @@ def test_array_to_geodetic_state_restores_fixed_mass():
     )
 
 
+def test_state_constraint_error_scales_units_and_wraps_heading():
+    module = load_transcription_module()
+    left_state = np.array([
+        1.0 / 111.32,
+        1.0 / 111.32,
+        1100.0,
+        130.0,
+        np.radians(179.0),
+        np.radians(-1.0),
+    ])
+    right_state = np.array([
+        0.0,
+        0.0,
+        1000.0,
+        120.0,
+        np.radians(-179.0),
+        np.radians(-3.0),
+    ])
+
+    error = module.TranscriptionOptimizor.state_constraint_error(
+        left_state,
+        right_state,
+    )
+
+    np.testing.assert_allclose(
+        error,
+        np.array([1.0, 1.0, 1.0, 1.0, -0.2, 1.0]),
+        atol=1e-6,
+    )
+
+
 def test_optimize_trajectory_builds_compatible_minimize_problem(monkeypatch):
     module = load_transcription_module()
     geodetic_simulator = FakeGeodeticSimulator(module)
@@ -126,12 +157,15 @@ def test_optimize_trajectory_builds_compatible_minimize_problem(monkeypatch):
             1 + optimizer.n_segments * optimizer.control_dim:
         ]
         assert state_bounds[:optimizer.state_dim] == [
-            (-90.0, 90.0),
-            (-180.0, 180.0),
-            (0.0, None),
-            (1.0, None),
-            (None, None),
-            (-(np.pi / 2.0 - 1e-3), np.pi / 2.0 - 1e-3),
+            (-module._MAX_LATITUDE_DEG, module._MAX_LATITUDE_DEG),
+            (-module._MAX_LONGITUDE_DEG, module._MAX_LONGITUDE_DEG),
+            (0.0, module._MAX_ALTITUDE_M),
+            (module._MIN_SPEED_MPS, module._MAX_SPEED_MPS),
+            (-module._MAX_HEADING_DEG, module._MAX_HEADING_DEG),
+            (
+                -module._MAX_FLIGHT_PATH_ANGLE_DEG,
+                module._MAX_FLIGHT_PATH_ANGLE_DEG,
+            ),
         ]
 
         defect_values = constraints[0]["fun"](x0)
