@@ -61,9 +61,10 @@ def test_optimize_trajectory_builds_least_squares_problem(monkeypatch):
         assert residuals.shape == (
             optimizer.n_segments * optimizer.state_dim
             + optimizer.state_dim
+            + optimizer.state_dim
             + optimizer.n_segments * optimizer.control_dim,
         )
-        assert len(geodetic_simulator.calls) == optimizer.n_segments
+        assert len(geodetic_simulator.calls) == 4
         assert all(call["dt"] == 50.0 for call in geodetic_simulator.calls)
         return SimpleNamespace(success=True, x=x0, message="")
 
@@ -106,6 +107,49 @@ def test_terminal_residual_is_weighted_above_defects():
     )
     np.testing.assert_allclose(terminal_residual, expected_terminal)
     assert terminal_residual[2] == module._TERMINAL_RESIDUAL_WEIGHT
+
+
+def test_replay_final_state_residual_uses_controls_not_node_state():
+    module = load_least_squares_module()
+    geodetic_simulator = FakeGeodeticSimulator(module)
+    optimizer = module.LeastSquaresTranscriptionOptimizor(
+        sim_server=geodetic_simulator,
+        n_segments=1,
+        arrival_time_s=10.0,
+        dt=10.0,
+    )
+    initial_state = module.GeodeticState(1.0, 2.0, 1000.0, 120.0, 0.1, -0.01, 70000.0)
+    target_state = module.GeodeticState(1.0, 2.0, 900.0, 120.0, 0.1, -0.01, 70000.0)
+    node_control_guess = np.array([[0.0, 0.0, 0.0]])
+    node_state_guess = optimizer.geodetic_state_to_array(target_state).reshape(1, 6)
+    z = np.hstack((node_control_guess.flatten(), node_state_guess.flatten()))
+
+    residuals = optimizer.trajectory_residuals(z, initial_state, target_state)
+    replay_start = (
+        optimizer.n_segments * optimizer.state_dim
+        + optimizer.state_dim
+    )
+    replay_residual = residuals[replay_start:replay_start + optimizer.state_dim]
+    replay_state = optimizer.geodetic_state_to_array(
+        module.GeodeticState(
+            latitude=initial_state.latitude + 0.1,
+            longitude=initial_state.longitude + 0.2,
+            altitude=initial_state.altitude + 1.0,
+            V=initial_state.V + 2.0,
+            psi=initial_state.psi + 0.01,
+            gamma=initial_state.gamma + 0.001,
+            m=initial_state.m,
+        )
+    )
+
+    expected_replay_residual = (
+        module._REPLAY_FINAL_STATE_RESIDUAL_WEIGHT
+        * optimizer.state_constraint_error(
+            replay_state,
+            optimizer.geodetic_state_to_array(target_state),
+        )
+    )
+    np.testing.assert_allclose(replay_residual, expected_replay_residual)
 
 
 def test_least_squares_failure_raises(monkeypatch):

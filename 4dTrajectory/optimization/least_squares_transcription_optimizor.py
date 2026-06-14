@@ -15,6 +15,7 @@ from transcription_optimizor import (
 
 _DEFECT_RESIDUAL_WEIGHT = 5.0
 _TERMINAL_RESIDUAL_WEIGHT = 50.0
+_REPLAY_FINAL_STATE_RESIDUAL_WEIGHT = 5.0
 _CONTROL_RESIDUAL_WEIGHT = 1e-3
 _CONTROL_VARIABLE_SCALE = np.array([100000.0, 1.0, 0.1])
 _STATE_VARIABLE_SCALE = np.array([0.01, 0.01, 1000.0, 100.0, 1.0, 0.1])
@@ -37,6 +38,7 @@ class LeastSquaresTranscriptionOptimizor(TranscriptionOptimizor):
         # probe as bad without letting simulator exceptions abort the solve.
         return np.full(
             self.n_segments * self.state_dim
+            + self.state_dim
             + self.state_dim
             + self.n_segments * self.control_dim,
             _INVALID_DEFECT_MAGNITUDE,
@@ -67,6 +69,7 @@ class LeastSquaresTranscriptionOptimizor(TranscriptionOptimizor):
 
         defects = []
         start_state = self.geodetic_state_to_array(initial_state)
+        replay_state = initial_state
         for i in range(self.n_segments):
             state_i = node_state[i]
             control_i = node_control[i]
@@ -85,9 +88,19 @@ class LeastSquaresTranscriptionOptimizor(TranscriptionOptimizor):
                 # Multiple shooting defect: propagate from the previous node
                 # with this segment's constant control, then compare the
                 # propagated state with the optimized next node.
+                control = Control(*control_i)
                 predicted_geo_state = self.step_simulator(
                     self.array_to_geodetic_state(start_state, mass),
-                    Control(*control_i),
+                    control,
+                    duration,
+                )
+
+                # Replay follows only the optimized controls from the real
+                # initial state. It is intentionally separate from the defect
+                # propagation above, which follows the optimized node chain.
+                replay_state = self.step_simulator(
+                    replay_state,
+                    control,
                     duration,
                 )
             except (ValueError, ZeroDivisionError, OverflowError):
@@ -110,6 +123,19 @@ class LeastSquaresTranscriptionOptimizor(TranscriptionOptimizor):
             * self.state_constraint_error(node_state[-1], target_state_array)
         )
 
+        # The optimized node state can hit the runway target while soft defects
+        # still allow the actual control replay to drift. Tie the controls to
+        # the replayed final state too; using the full state avoids the bad
+        # tradeoff where altitude improves by sacrificing lat/lon or gamma.
+        replay_final_state = self.geodetic_state_to_array(replay_state)
+        replay_final_residual = (
+            _REPLAY_FINAL_STATE_RESIDUAL_WEIGHT
+            * self.state_constraint_error(
+                replay_final_state,
+                target_state_array,
+            )
+        )
+
         # Tiny regularization discourages needlessly extreme controls but stays
         # small enough that dynamics defects and terminal accuracy dominate.
         control_scales = np.array([_MAX_THRUST_N, math.pi / 2.0, _MAX_ATTACK_RAD])
@@ -120,6 +146,7 @@ class LeastSquaresTranscriptionOptimizor(TranscriptionOptimizor):
         return np.concatenate((
             _DEFECT_RESIDUAL_WEIGHT * np.concatenate(defects),
             terminal_residual,
+            replay_final_residual,
             control_residual,
         ))
 

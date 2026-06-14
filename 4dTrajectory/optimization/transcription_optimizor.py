@@ -278,8 +278,11 @@ class TranscriptionOptimizor:
             (-_MAX_LONGITUDE_DEG, _MAX_LONGITUDE_DEG),
             (0.0, _MAX_ALTITUDE_M),
             (_MIN_SPEED_MPS, _MAX_SPEED_MPS),
-            (-_MAX_HEADING_DEG, _MAX_HEADING_DEG),
-            (-_MAX_FLIGHT_PATH_ANGLE_DEG, _MAX_FLIGHT_PATH_ANGLE_DEG),
+            (-math.radians(_MAX_HEADING_DEG), math.radians(_MAX_HEADING_DEG)),
+            (
+                -math.radians(_MAX_FLIGHT_PATH_ANGLE_DEG),
+                math.radians(_MAX_FLIGHT_PATH_ANGLE_DEG),
+            ),
         ]
         return state_bounds * self.n_segments
 

@@ -166,10 +166,13 @@ def test_optimize_trajectory_builds_compatible_minimize_problem(monkeypatch):
             (-module._MAX_LONGITUDE_DEG, module._MAX_LONGITUDE_DEG),
             (0.0, module._MAX_ALTITUDE_M),
             (module._MIN_SPEED_MPS, module._MAX_SPEED_MPS),
-            (-module._MAX_HEADING_DEG, module._MAX_HEADING_DEG),
             (
-                -module._MAX_FLIGHT_PATH_ANGLE_DEG,
-                module._MAX_FLIGHT_PATH_ANGLE_DEG,
+                -np.radians(module._MAX_HEADING_DEG),
+                np.radians(module._MAX_HEADING_DEG),
+            ),
+            (
+                -np.radians(module._MAX_FLIGHT_PATH_ANGLE_DEG),
+                np.radians(module._MAX_FLIGHT_PATH_ANGLE_DEG),
             ),
         ]
 
