@@ -46,7 +46,7 @@ def test_optimize_trajectory_builds_least_squares_problem(monkeypatch):
     initial_state = module.GeodeticState(1.0, 2.0, 1000.0, 120.0, 0.1, -0.01, 70000.0)
     target_state = module.GeodeticState(3.0, 4.0, 900.0, 115.0, 0.2, -0.02, 70000.0)
 
-    def fake_least_squares(fun, x0, bounds, max_nfev, ftol, xtol, gtol):
+    def fake_least_squares(fun, x0, bounds, max_nfev, ftol, xtol, gtol, x_scale):
         assert len(x0) == optimizer.n_segments * (
             optimizer.control_dim + optimizer.state_dim
         )
@@ -55,6 +55,7 @@ def test_optimize_trajectory_builds_least_squares_problem(monkeypatch):
         assert len(bounds[1]) == len(x0)
         assert max_nfev == 1000
         assert ftol == xtol == gtol == 1e-6
+        np.testing.assert_allclose(x_scale, optimizer.build_variable_scale())
 
         residuals = fun(x0)
         assert residuals.shape == (
@@ -76,6 +77,35 @@ def test_optimize_trajectory_builds_least_squares_problem(monkeypatch):
     assert final_time == 100.0
     assert node_control.shape == (2, 3)
     assert node_state.shape == (2, 6)
+
+
+def test_terminal_residual_is_weighted_above_defects():
+    module = load_least_squares_module()
+    geodetic_simulator = FakeGeodeticSimulator(module)
+    optimizer = module.LeastSquaresTranscriptionOptimizor(
+        sim_server=geodetic_simulator,
+        n_segments=1,
+        arrival_time_s=10.0,
+        dt=10.0,
+    )
+    initial_state = module.GeodeticState(1.0, 2.0, 1000.0, 120.0, 0.1, -0.01, 70000.0)
+    target_state = module.GeodeticState(1.0, 2.0, 900.0, 120.0, 0.1, -0.01, 70000.0)
+    node_control_guess = np.array([[0.0, 0.0, 0.0]])
+    node_state_guess = optimizer.geodetic_state_to_array(initial_state).reshape(1, 6)
+    z = np.hstack((node_control_guess.flatten(), node_state_guess.flatten()))
+
+    residuals = optimizer.trajectory_residuals(z, initial_state, target_state)
+    terminal_start = optimizer.n_segments * optimizer.state_dim
+    terminal_residual = residuals[
+        terminal_start:terminal_start + optimizer.state_dim
+    ]
+
+    expected_terminal = (
+        module._TERMINAL_RESIDUAL_WEIGHT
+        * optimizer.state_constraint_error(node_state_guess[0], optimizer.geodetic_state_to_array(target_state))
+    )
+    np.testing.assert_allclose(terminal_residual, expected_terminal)
+    assert terminal_residual[2] == module._TERMINAL_RESIDUAL_WEIGHT
 
 
 def test_least_squares_failure_raises(monkeypatch):

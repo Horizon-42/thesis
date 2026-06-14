@@ -13,6 +13,12 @@ from transcription_optimizor import (
     _MIN_ATTACK_RAD,
 )
 
+_DEFECT_RESIDUAL_WEIGHT = 5.0
+_TERMINAL_RESIDUAL_WEIGHT = 50.0
+_CONTROL_RESIDUAL_WEIGHT = 1e-3
+_CONTROL_VARIABLE_SCALE = np.array([100000.0, 1.0, 0.1])
+_STATE_VARIABLE_SCALE = np.array([0.01, 0.01, 1000.0, 100.0, 1.0, 0.1])
+
 
 class LeastSquaresTranscriptionOptimizor(TranscriptionOptimizor):
     """Multiple-shooting transcription solved as nonlinear least squares.
@@ -35,6 +41,16 @@ class LeastSquaresTranscriptionOptimizor(TranscriptionOptimizor):
             + self.n_segments * self.control_dim,
             _INVALID_DEFECT_MAGNITUDE,
         )
+
+    def build_variable_scale(self) -> np.ndarray:
+        # least_squares uses this scale for trust-region steps and numerical
+        # differentiation. Without it, thrust, altitude, lat/lon, and angles live
+        # on wildly different magnitudes, and the solver can stop after moving
+        # node states while barely changing the controls that replay uses.
+        return np.hstack((
+            np.tile(_CONTROL_VARIABLE_SCALE, self.n_segments),
+            np.tile(_STATE_VARIABLE_SCALE, self.n_segments),
+        ))
 
     def trajectory_residuals(
         self,
@@ -85,22 +101,24 @@ class LeastSquaresTranscriptionOptimizor(TranscriptionOptimizor):
             start_state = state_i
 
         # Terminal residual keeps the last optimized node close to the target.
-        # Unlike SLSQP equality constraints, this is a weighted least-squares
-        # objective term, so exact target hit is encouraged rather than enforced
-        # by a separate constraint object.
+        # Unlike SLSQP equality constraints, this is still a soft objective term.
+        # Weight it above per-segment defects so least_squares does not prefer a
+        # dynamically smooth trajectory that misses the runway altitude badly.
         target_state_array = self.geodetic_state_to_array(target_state)
-        terminal_residual = self.state_constraint_error(
-            node_state[-1],
-            target_state_array,
+        terminal_residual = (
+            _TERMINAL_RESIDUAL_WEIGHT
+            * self.state_constraint_error(node_state[-1], target_state_array)
         )
 
         # Tiny regularization discourages needlessly extreme controls but stays
         # small enough that dynamics defects and terminal accuracy dominate.
         control_scales = np.array([_MAX_THRUST_N, math.pi / 2.0, _MAX_ATTACK_RAD])
-        control_residual = 1e-3 * (node_control / control_scales).reshape(-1)
+        control_residual = _CONTROL_RESIDUAL_WEIGHT * (
+            node_control / control_scales
+        ).reshape(-1)
 
         return np.concatenate((
-            np.concatenate(defects),
+            _DEFECT_RESIDUAL_WEIGHT * np.concatenate(defects),
             terminal_residual,
             control_residual,
         ))
@@ -142,6 +160,7 @@ class LeastSquaresTranscriptionOptimizor(TranscriptionOptimizor):
             ftol=self.ftol,
             xtol=self.ftol,
             gtol=self.ftol,
+            x_scale=self.build_variable_scale(),
         )
 
         if result.success:
