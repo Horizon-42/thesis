@@ -16,8 +16,7 @@ const UNBOUNDED_MAX = Number.POSITIVE_INFINITY;
 export type PilotTargetEditableKey =
   | "speedMps"
   | "headingDeg"
-  | "flightPathDeg"
-  | "attackDeg";
+  | "flightPathDeg";
 
 export interface PilotTargetState {
   runwayThresholdId: string;
@@ -27,7 +26,6 @@ export interface PilotTargetState {
   speedMps: number;
   headingDeg: number;
   flightPathDeg: number;
-  attackDeg: number;
 }
 
 interface PilotTargetStateOverlayProps {
@@ -143,17 +141,6 @@ export default function PilotTargetStateOverlay({
               step="0.1"
               disabled={disabled}
               onCommit={(value) => onFieldChange("flightPathDeg", value, -15, 10)}
-            />
-          </label>
-          <label>
-            <span>Alpha deg</span>
-            <EnglishNumberInput
-              value={state.attackDeg}
-              min={-10}
-              max={18}
-              step="0.5"
-              disabled={disabled}
-              onCommit={(value) => onFieldChange("attackDeg", value, -10, 18)}
             />
           </label>
         </section>

@@ -197,7 +197,6 @@ describe("PilotPanel trajectory play mode", () => {
           flightPathDeg: -4,
           aircraftType: "A320",
         }),
-        targetControl: { attackDeg: 4 },
         nSegments: 12,
         arrivalTimeS: 96,
         dtS: 0.1,

@@ -30,9 +30,6 @@ const request: TrajectoryOptimizationRequest = {
     massKg: 78000,
     aircraftType: "A320",
   },
-  targetControl: {
-    attackDeg: 4,
-  },
 };
 
 describe("trajectoryOptimizationClient", () => {

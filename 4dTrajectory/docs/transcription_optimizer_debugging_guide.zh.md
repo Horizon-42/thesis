@@ -83,7 +83,6 @@ payload = {
         "massKg": 78000,
         "aircraftType": "A320",
     },
-    "targetControl": {"attackDeg": 4},
     "nSegments": 10,
 }
 
@@ -180,7 +179,6 @@ payload = {
         "massKg": 78000,
         "aircraftType": "A320",
     },
-    "targetControl": {"attackDeg": 4},
     "nSegments": 10,
 }
 
@@ -426,7 +424,6 @@ payload = {
         "massKg": 78000,
         "aircraftType": "A320",
     },
-    "targetControl": {"attackDeg": 4},
     "nSegments": 10,
 }
 
@@ -453,4 +450,3 @@ PY
 3. **数学症状要回到物理模型。** rank 退化、常量残差、ODE 步长失败，背后通常对应冗余约束、不可模拟状态或动力学奇异点。
 4. **惩罚残差要谨慎。** 它能避免异常冒泡，但如果初始点就在惩罚平面上，优化器会失去导数信息。
 5. **修复必须变成测试。** 调试脚本负责发现问题，单元测试负责防止问题回来。
-

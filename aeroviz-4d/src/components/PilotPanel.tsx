@@ -55,7 +55,6 @@ const STEP_INTERVAL_MS = 120;
 const MAX_TRAIL_POINTS = 360;
 const DEFAULT_TARGET_SPEED_MPS = TARGET_APPROACH_SPEED_MPS;
 const DEFAULT_TARGET_GAMMA_DEG = -3;
-const DEFAULT_TARGET_ALPHA_DEG = 4;
 const DEFAULT_MAX_ITERATIONS = 300;
 const DEFAULT_ARRIVAL_TIME_S = 100;
 const DEFAULT_TRAJECTORY_OPTIMIZER: TrajectoryOptimizer = "transcription";
@@ -707,7 +706,6 @@ export default function PilotPanel() {
           initialState.aircraftType,
           initialState.massKg,
         ),
-        targetControl: { attackDeg: targetState.attackDeg },
         nSegments,
         arrivalTimeS,
         dtS: trajectoryDtS,
@@ -934,10 +932,6 @@ export default function PilotPanel() {
               <div>
                 <dt>Gamma</dt>
                 <dd>{formatNumberInputValue(targetState.flightPathDeg)} deg</dd>
-              </div>
-              <div>
-                <dt>Alpha</dt>
-                <dd>{formatNumberInputValue(targetState.attackDeg)} deg</dd>
               </div>
             </dl>
           </section>
@@ -1258,7 +1252,6 @@ function makeDefaultTrajectoryTarget(
       ? runwayAlignedHeadingDeg(runwayTarget.psiDeg)
       : runwayAlignedHeadingDeg(fallback?.headingDeg ?? 0),
     flightPathDeg: fallback?.flightPathDeg ?? DEFAULT_TARGET_GAMMA_DEG,
-    attackDeg: fallback?.attackDeg ?? DEFAULT_TARGET_ALPHA_DEG,
   };
 }
 

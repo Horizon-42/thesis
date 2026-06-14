@@ -9,7 +9,6 @@ export interface TrajectoryOptimizationRequest {
   optimizer: TrajectoryOptimizer;
   initialState: PilotResetState;
   targetState: PilotResetState;
-  targetControl: Pick<PilotControls, "attackDeg">;
   nSegments: number;
   arrivalTimeS: number;
   dtS: number;
