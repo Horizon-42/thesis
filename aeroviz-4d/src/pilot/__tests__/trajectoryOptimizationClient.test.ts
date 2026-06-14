@@ -5,6 +5,7 @@ import {
 } from "../trajectoryOptimizationClient";
 
 const request: TrajectoryOptimizationRequest = {
+  optimizer: "singleShooting",
   nSegments: 4,
   dtS: 0.2,
   maxIterations: 25,
@@ -41,6 +42,7 @@ describe("trajectoryOptimizationClient", () => {
   it("posts the optimization request to the backend", async () => {
     const responsePayload = {
       ok: true,
+      optimizer: "singleShooting",
       finalTimeS: 80,
       nSegments: 4,
       dtS: 0.2,

@@ -21,6 +21,10 @@ _MIN_ATTACK_RAD = -math.radians(18.0)
 _MAX_ATTACK_RAD = math.radians(18.0)
 _DEFAULT_DT_S = 0.2
 _METRES_PER_DEGREE_LAT = 111_320.0
+# SLSQP will probe controls that are physically impossible. Returning a large
+# finite objective lets it reject those candidates without turning one bad probe
+# into an HTTP 400 response.
+_INFEASIBLE_OBJECTIVE_VALUE = 1e9
 
 class SingleShootingOptimizor:
     
@@ -174,9 +178,12 @@ class SingleShootingOptimizor:
 
             state = initial_state
 
-            for i in range(self.n_control_segments):
-                control = Control(*controls[i])
-                state = self.segment_simulate(state, control, duration_per_segment)
+            try:
+                for i in range(self.n_control_segments):
+                    control = Control(*controls[i])
+                    state = self.segment_simulate(state, control, duration_per_segment)
+            except (ValueError, ZeroDivisionError, OverflowError):
+                return _INFEASIBLE_OBJECTIVE_VALUE
             
             endpoint_error = self.endpoint_error_vector(state, target_state)
             return np.linalg.norm(endpoint_error) + 1e-4 * final_time

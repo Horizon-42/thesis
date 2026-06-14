@@ -73,6 +73,7 @@ describe("PilotPanel trajectory play mode", () => {
     ]);
     mocks.runTrajectoryOptimization.mockResolvedValue({
       ok: true,
+      optimizer: "singleShooting",
       finalTimeS: 100,
       nSegments: 10,
       dtS: 0.2,
@@ -126,6 +127,10 @@ describe("PilotPanel trajectory play mode", () => {
     expect(await screen.findByText("Target State")).toBeTruthy();
     expect(screen.getByText("RW05L")).toBeTruthy();
 
+    fireEvent.change(screen.getByRole("combobox", { name: "Optimizer" }), {
+      target: { value: "singleShooting" },
+    });
+
     await waitFor(() => {
       expect(mocks.usePilotTargetGate).toHaveBeenLastCalledWith({
         enabled: true,
@@ -166,6 +171,7 @@ describe("PilotPanel trajectory play mode", () => {
 
     await waitFor(() => {
       expect(mocks.runTrajectoryOptimization).toHaveBeenCalledWith({
+        optimizer: "singleShooting",
         initialState: expect.objectContaining({
           lon: -78.7873,
           lat: 35.878659,
@@ -229,6 +235,7 @@ describe("PilotPanel trajectory play mode", () => {
     document.body.innerHTML = '<div class="cesium-overlay-container"></div>';
     mocks.runTrajectoryOptimization.mockResolvedValueOnce({
       ok: true,
+      optimizer: "transcription",
       finalTimeS: 0.2,
       nSegments: 1,
       dtS: 0.2,

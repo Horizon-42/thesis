@@ -34,6 +34,7 @@ import {
 } from "../pilot/pilotClient";
 import {
   runTrajectoryOptimization,
+  type TrajectoryOptimizer,
   type TrajectoryOptimizationResult,
 } from "../pilot/trajectoryOptimizationClient";
 
@@ -49,6 +50,7 @@ const DEFAULT_TARGET_SPEED_MPS = 70;
 const DEFAULT_TARGET_GAMMA_DEG = -3;
 const DEFAULT_TARGET_ALPHA_DEG = 4;
 const DEFAULT_MAX_ITERATIONS = 1000;
+const DEFAULT_TRAJECTORY_OPTIMIZER: TrajectoryOptimizer = "transcription";
 
 type PilotPanelMode = "pilot" | "trajectory";
 
@@ -83,6 +85,8 @@ export default function PilotPanel() {
   const [targetState, setTargetState] = useState<PilotTargetState>(() =>
     makeDefaultTrajectoryTarget(null),
   );
+  const [trajectoryOptimizer, setTrajectoryOptimizer] =
+    useState<TrajectoryOptimizer>(DEFAULT_TRAJECTORY_OPTIMIZER);
   const [nSegments, setNSegments] = useState(10);
   const [trajectoryDtS, setTrajectoryDtS] = useState(DEFAULT_FRAME_DT_S);
   const [maxIterations, setMaxIterations] = useState(DEFAULT_MAX_ITERATIONS);
@@ -654,6 +658,12 @@ export default function PilotPanel() {
     setIsTrajectoryPlaying(false);
   }
 
+  function updateTrajectoryOptimizer(value: TrajectoryOptimizer) {
+    setTrajectoryOptimizer(value);
+    setOptimizedTrajectory(null);
+    setIsTrajectoryPlaying(false);
+  }
+
   async function computeTrajectory() {
     if (!hasAircraftConfigs || runwayTargets.length === 0) return;
 
@@ -663,6 +673,7 @@ export default function PilotPanel() {
     setError(null);
     try {
       const result = await runTrajectoryOptimization({
+        optimizer: trajectoryOptimizer,
         initialState,
         targetState: trajectoryTargetToPilotState(
           targetState,
@@ -914,6 +925,20 @@ export default function PilotPanel() {
           />
 
           <section className="pilot-optimization-row" aria-label="Trajectory optimization settings">
+            <label>
+              <span>Optimizer</span>
+              <select
+                className="pilot-select-input"
+                value={trajectoryOptimizer}
+                disabled={targetControlsDisabled}
+                onChange={(event) =>
+                  updateTrajectoryOptimizer(event.target.value as TrajectoryOptimizer)
+                }
+              >
+                <option value="transcription">Transcription</option>
+                <option value="singleShooting">Single shooting</option>
+              </select>
+            </label>
             <label>
               <span>Segments</span>
               <EnglishNumberInput

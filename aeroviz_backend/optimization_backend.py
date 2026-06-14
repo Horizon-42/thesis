@@ -19,6 +19,7 @@ from aeroviz_backend.simulation_backend import (
 )
 
 from geodetic_simulator import GeodeticSimulator, GeodeticState
+from single_shooting_optimizor import SingleShootingOptimizor
 from simulator import Control
 from transcription_optimizor import TranscriptionOptimizor
 
@@ -26,6 +27,8 @@ from transcription_optimizor import TranscriptionOptimizor
 DEFAULT_N_SEGMENTS = 10
 DEFAULT_MAX_ITERATIONS = 1000
 MIN_OPTIMIZATION_DT = 0.001
+DEFAULT_OPTIMIZER = "transcription"
+SUPPORTED_OPTIMIZERS = ("transcription", "singleShooting")
 
 
 class OptimizationBackend:
@@ -39,16 +42,18 @@ class OptimizationBackend:
             "maxIterations",
             DEFAULT_MAX_ITERATIONS,
         )
+        optimizer_name = read_optimizer(payload)
         dt = clamp(read_float(payload, "dtS", DEFAULT_DT), MIN_OPTIMIZATION_DT, MAX_DT)
         aircraft = read_aircraft(initial_payload, DEFAULT_AIRCRAFT_TYPE)
 
         initial_state = read_geodetic_state(initial_payload, DEFAULT_STATE, aircraft)
         target_state = read_geodetic_state(target_payload, initial_state, aircraft)
-        optimizer = TranscriptionOptimizor(
+        optimizer = make_optimizer(
+            optimizer_name,
             GeodeticSimulator(aircraft),
-            n_segments=n_segments,
-            dt=dt,
-            max_iterations=max_iterations,
+            n_segments,
+            dt,
+            max_iterations,
         )
         final_time, node_control, node_state = optimizer.optimize_trajectory(
             initial_state,
@@ -60,18 +65,64 @@ class OptimizationBackend:
             "finalTimeS": float(final_time),
             "nSegments": n_segments,
             "dtS": dt,
+            "optimizer": optimizer_name,
             "controls": [
                 format_control(Control(*control_values))
                 for control_values in node_control
             ],
-            "states": [
-                format_geodetic_state(
-                    _array_to_geodetic_state(state_values, initial_state.m),
-                    aircraft.code,
-                )
-                for state_values in node_state
-            ],
+            "states": format_node_states(node_state, initial_state.m, aircraft.code),
         }
+
+
+def read_optimizer(payload: dict[str, Any]) -> str:
+    value = payload.get("optimizer", DEFAULT_OPTIMIZER)
+    if not isinstance(value, str):
+        raise ValueError("optimizer must be a string")
+
+    optimizer = value.strip()
+    if optimizer not in SUPPORTED_OPTIMIZERS:
+        valid_values = ", ".join(SUPPORTED_OPTIMIZERS)
+        raise ValueError(f"optimizer must be one of {valid_values}")
+    return optimizer
+
+
+def make_optimizer(
+    optimizer_name: str,
+    geodetic_simulator: GeodeticSimulator,
+    n_segments: int,
+    dt: float,
+    max_iterations: int,
+) -> Any:
+    if optimizer_name == "singleShooting":
+        return SingleShootingOptimizor(
+            geodetic_simulator,
+            n_control_segments=n_segments,
+            dt=dt,
+            max_iterations=max_iterations,
+        )
+
+    return TranscriptionOptimizor(
+        geodetic_simulator,
+        n_segments=n_segments,
+        dt=dt,
+        max_iterations=max_iterations,
+    )
+
+
+def format_node_states(
+    node_state: Any,
+    mass: float,
+    aircraft_code: str,
+) -> list[dict[str, Any]]:
+    if node_state is None:
+        return []
+    return [
+        format_geodetic_state(
+            _array_to_geodetic_state(state_values, mass),
+            aircraft_code,
+        )
+        for state_values in node_state
+    ]
 
 
 def _array_to_geodetic_state(values: Any, mass: float) -> GeodeticState:
