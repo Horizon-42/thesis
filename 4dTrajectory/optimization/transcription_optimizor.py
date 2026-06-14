@@ -21,6 +21,9 @@ _MAX_ATTACK_RAD = math.radians(18.0)
 _INVALID_DEFECT_MAGNITUDE = 1e9
 _DEFAULT_DT_S = 0.2
 
+# For state value normalization, the optimizer only needs to compare relative magnitudes of defects
+# Max thrust, 1000KN for wide-body aircraft
+_MAX_THRUST_N = 1000000.0
 
 class TranscriptionOptimizor:
     # multiple shooting args
@@ -284,7 +287,7 @@ class TranscriptionOptimizor:
         # control guess
         node_control_guess = self.build_control_guess(initial_state, node_state_guess)
         # control bounds, for example, thrust between 0 and max thrust 1000KN, bank angle between -90 and 90 degrees, attack angle between -18 and 18 degrees
-        control_bounds = [(0.0, 1000000.0), (-math.pi/2, math.pi/2), (_MIN_ATTACK_RAD, _MAX_ATTACK_RAD)] * self.n_segments
+        control_bounds = [(0.0, _MAX_THRUST_N), (-math.pi/2, math.pi/2), (_MIN_ATTACK_RAD, _MAX_ATTACK_RAD)] * self.n_segments
 
         initial_guess = np.hstack((final_time_guess, node_control_guess.flatten(), node_state_guess.flatten()))
         bounds = [final_time_bounds] + control_bounds + state_bounds
