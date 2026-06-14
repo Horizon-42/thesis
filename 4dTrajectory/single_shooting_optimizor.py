@@ -87,7 +87,7 @@ class SingleShootingOptimizor:
         return state
 
 
-    def optimize_trajectory(self, initial_state: GeodeticState, target_state: GeodeticState) -> tuple[float, np.ndarray]:
+    def optimize_trajectory(self, initial_state: GeodeticState, target_state: GeodeticState) -> tuple[float, np.ndarray, np.ndarray]:
         self.validate_endpoint_state(initial_state, "Initial")
         self.validate_endpoint_state(target_state, "Target")
 
@@ -128,7 +128,7 @@ class SingleShootingOptimizor:
 
         if result.success:
             final_time, controls = self.unpack_z(result.x)
-            return final_time, controls, []
+            return final_time, controls, None
         else:
             raise RuntimeError(
                 f"Optimization failed: {result.message}. Final time guess was {final_time_guess:.2f} s. This may be due to an infeasible problem setup or insufficient iterations. Consider adjusting the initial guess, increasing max_iterations, or relaxing ftol. If the problem is expected to be feasible, this may indicate a bug in the simulator or optimization code.",
