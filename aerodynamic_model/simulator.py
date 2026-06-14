@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import math
+import numpy as np
 from aircraft_sets import AIRCRAFT_PRESETS, AircraftSpec, A320
 
 @dataclass
@@ -84,6 +85,8 @@ class Simulator:
         return L / (m * self.g)
 
     def dynamics(self, t, state_vec, control: Control, atmosphere: Atmosphere):
+        state_vec = np.asarray(state_vec, dtype=float)
+
         # Unpack state vector
         x, y, h, V, psi, gamma, m = state_vec
 
@@ -100,30 +103,18 @@ class Simulator:
         dgamadt = ((L+ T * math.sin(alpha))*math.cos(phi) - m * self.g * math.cos(gamma)) / (m * V)
         dmdt = 0
 
-        return [dxdt, dydt, dhdt, dVdt, dpsidt, dgamadt, dmdt]
+        return np.array([dxdt, dydt, dhdt, dVdt, dpsidt, dgamadt, dmdt], dtype=float)
 
     @staticmethod
     def _rk4_step(func, t, state_vec, control, atmosphere, dt):
-        k1 = func(t, state_vec, control, atmosphere)
-        k2_state = [
-            s + dt * k1_i / 2
-            for s, k1_i in zip(state_vec, k1)
-        ]
-        k2 = func(t + dt / 2, k2_state, control, atmosphere)
-        k3_state = [
-            s + dt * k2_i / 2
-            for s, k2_i in zip(state_vec, k2)
-        ]
-        k3 = func(t + dt / 2, k3_state, control, atmosphere)
-        k4_state = [
-            s + dt * k3_i
-            for s, k3_i in zip(state_vec, k3)
-        ]
-        k4 = func(t + dt, k4_state, control, atmosphere)
-        return [
-            s + (dt / 6) * (k1_i + 2 * k2_i + 2 * k3_i + k4_i)
-            for s, k1_i, k2_i, k3_i, k4_i in zip(state_vec, k1, k2, k3, k4)
-        ]
+        y = np.asarray(state_vec, dtype=float)
+
+        k1 = func(t, y, control, atmosphere)
+        k2 = func(t + 0.5 * dt, y + 0.5 * dt * k1, control, atmosphere)
+        k3 = func(t + 0.5 * dt, y + 0.5 * dt * k2, control, atmosphere)
+        k4 = func(t + dt, y + dt * k3, control, atmosphere)
+
+        return y + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
 
     def simulate(
         self,
@@ -141,7 +132,7 @@ class Simulator:
         integrator usable if time-varying winds or controls are added later.
         dt is the fixed integration step in seconds.
         """
-        state_vec = [
+        state_vec = np.array([
             initial_state.x,
             initial_state.y,
             initial_state.h,
@@ -149,7 +140,7 @@ class Simulator:
             initial_state.psi,
             initial_state.gamma,
             initial_state.m,
-        ]
+        ], dtype=float)
 
         next_state = self._rk4_step(
             self.dynamics,
@@ -160,4 +151,4 @@ class Simulator:
             dt,
         )
 
-        return State(*next_state)
+        return State(*next_state.tolist())

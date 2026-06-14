@@ -4,6 +4,8 @@ from pathlib import Path
 import sys
 import unittest
 
+import numpy as np
+
 
 MODEL_DIR = Path(__file__).resolve().parents[1]
 if str(MODEL_DIR) not in sys.path:
@@ -68,12 +70,16 @@ class TestAlphaInputSimulator(unittest.TestCase):
             bank_rad=math.radians(25.0),
             attack_rad=math.radians(4.0),
         )
-        state_vec = [state.x, state.y, state.h, state.V, state.psi, state.gamma, state.m]
+        state_vec = np.array(
+            [state.x, state.y, state.h, state.V, state.psi, state.gamma, state.m],
+            dtype=float,
+        )
 
         derivatives = self.simulator.dynamics(
             0.0, state_vec, control, self.atmosphere
         )
 
+        self.assertIsInstance(derivatives, np.ndarray)
         lift, drag = self.simulator.get_aerodynamic_forces(
             state.V, control.attack_rad, self.atmosphere, state.h
         )
@@ -107,7 +113,7 @@ class TestAlphaInputSimulator(unittest.TestCase):
         self.assertEqual(derivatives[6], 0)
 
     def test_zero_bank_has_no_heading_rate(self):
-        state_vec = [0.0, 0.0, 1000.0, 120.0, 0.0, 0.0, 10000.0]
+        state_vec = np.array([0.0, 0.0, 1000.0, 120.0, 0.0, 0.0, 10000.0])
         control = Control(
             thrust=12000.0,
             bank_rad=0.0,
