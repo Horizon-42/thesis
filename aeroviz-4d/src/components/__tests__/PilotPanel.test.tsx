@@ -258,6 +258,15 @@ describe("PilotPanel trajectory play mode", () => {
         0.2,
       );
     });
+    await waitFor(() => {
+      expect(mocks.usePilotAircraft).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          trail: expect.arrayContaining([
+            expect.objectContaining({ segmentIndex: 0 }),
+          ]),
+        }),
+      );
+    });
     const liveStatePanel = await screen.findByRole("complementary", {
       name: "Realtime aircraft state",
     });

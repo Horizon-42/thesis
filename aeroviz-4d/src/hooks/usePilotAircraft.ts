@@ -11,6 +11,7 @@ export interface PilotAircraftPose {
   flightPathDeg: number;
   bankDeg: number;
   attackDeg: number;
+  segmentIndex?: number;
 }
 
 interface UsePilotAircraftOptions {
@@ -21,7 +22,20 @@ interface UsePilotAircraftOptions {
 }
 
 const PILOT_AIRCRAFT_ID = "pilot-mode-aircraft";
-const PILOT_TRAIL_ID = "pilot-mode-trail";
+const PILOT_TRAIL_ID_PREFIX = "pilot-mode-trail-";
+const PILOT_TRAIL_COLORS = [
+  "#67e8f9",
+  "#f97316",
+  "#a3e635",
+  "#f472b6",
+  "#facc15",
+  "#60a5fa",
+];
+
+interface PilotTrailSegment {
+  segmentIndex: number;
+  points: PilotAircraftPose[];
+}
 
 export function usePilotAircraft({
   enabled,
@@ -35,13 +49,13 @@ export function usePilotAircraft({
     useRef<Cesium.ConstantPositionProperty | null>(null);
   const aircraftOrientationPropertyRef =
     useRef<Cesium.ConstantProperty | null>(null);
-  const trailRef = useRef<Cesium.Entity | null>(null);
-  const trailPositionsRef = useRef<Cesium.Cartesian3[]>([]);
-  const trailPositionsPropertyRef = useRef<Cesium.CallbackProperty | null>(null);
+  const trailRefs = useRef<Cesium.Entity[]>([]);
+  const trailPositionsRef = useRef<Cesium.Cartesian3[][]>([]);
+  const trailPositionsPropertyRef = useRef<Cesium.CallbackProperty[]>([]);
 
   useEffect(() => {
     if (!viewer || !enabled || !pose) {
-      removePilotEntities(viewer, aircraftRef, trailRef);
+      removePilotEntities(viewer, aircraftRef, trailRefs);
       resetPilotProperties(
         aircraftPositionPropertyRef,
         aircraftOrientationPropertyRef,
@@ -94,28 +108,19 @@ export function usePilotAircraft({
       aircraftRef.current.show = true;
     }
 
-    trailPositionsRef.current = trail.map((point) =>
-      Cesium.Cartesian3.fromDegrees(point.lon, point.lat, point.altM),
+    const trailSegments = buildTrailSegments(trail);
+    trailPositionsRef.current = trailSegments.map((segment) =>
+      segment.points.map((point) =>
+        Cesium.Cartesian3.fromDegrees(point.lon, point.lat, point.altM),
+      ),
     );
-    if (!trailRef.current) {
-      trailPositionsPropertyRef.current = new Cesium.CallbackProperty(
-        () => trailPositionsRef.current,
-        false,
-      );
-      trailRef.current = viewer.entities.add({
-        id: PILOT_TRAIL_ID,
-        name: "Pilot Mode Trail",
-        show: trailPositionsRef.current.length > 1,
-        polyline: {
-          positions: trailPositionsPropertyRef.current,
-          width: 3,
-          material: Cesium.Color.fromCssColorString("#67e8f9").withAlpha(0.78),
-          clampToGround: false,
-        },
-      });
-    } else if (trailRef.current.polyline) {
-      trailRef.current.show = trailPositionsRef.current.length > 1;
-    }
+    syncTrailSegmentEntities(
+      viewer,
+      trailSegments,
+      trailRefs,
+      trailPositionsRef,
+      trailPositionsPropertyRef,
+    );
 
     if (follow) {
       if (viewer.trackedEntity !== aircraftRef.current) {
@@ -131,7 +136,7 @@ export function usePilotAircraft({
 
   useEffect(() => {
     return () => {
-      removePilotEntities(viewer, aircraftRef, trailRef);
+      removePilotEntities(viewer, aircraftRef, trailRefs);
       resetPilotProperties(
         aircraftPositionPropertyRef,
         aircraftOrientationPropertyRef,
@@ -149,23 +154,23 @@ function resetPilotProperties(
   aircraftOrientationPropertyRef: MutableRefObject<
     Cesium.ConstantProperty | null
   >,
-  trailPositionsRef: MutableRefObject<Cesium.Cartesian3[]>,
-  trailPositionsPropertyRef: MutableRefObject<Cesium.CallbackProperty | null>,
+  trailPositionsRef: MutableRefObject<Cesium.Cartesian3[][]>,
+  trailPositionsPropertyRef: MutableRefObject<Cesium.CallbackProperty[]>,
 ): void {
   aircraftPositionPropertyRef.current = null;
   aircraftOrientationPropertyRef.current = null;
   trailPositionsRef.current = [];
-  trailPositionsPropertyRef.current = null;
+  trailPositionsPropertyRef.current = [];
 }
 
 function removePilotEntities(
   viewer: Cesium.Viewer | null,
   aircraftRef: MutableRefObject<Cesium.Entity | null>,
-  trailRef: MutableRefObject<Cesium.Entity | null>,
+  trailRefs: MutableRefObject<Cesium.Entity[]>,
 ): void {
   if (!isCesiumViewerUsable(viewer)) {
     aircraftRef.current = null;
-    trailRef.current = null;
+    trailRefs.current = [];
     return;
   }
 
@@ -176,9 +181,80 @@ function removePilotEntities(
     viewer.entities.remove(aircraftRef.current);
     aircraftRef.current = null;
   }
-  if (trailRef.current) {
-    viewer.entities.remove(trailRef.current);
-    trailRef.current = null;
-  }
+  trailRefs.current.forEach((trailEntity) => viewer.entities.remove(trailEntity));
+  trailRefs.current = [];
   viewer.scene.requestRender();
+}
+
+function buildTrailSegments(trail: PilotAircraftPose[]): PilotTrailSegment[] {
+  const segments: PilotTrailSegment[] = [];
+  for (let index = 1; index < trail.length; index += 1) {
+    const previousPoint = trail[index - 1];
+    const currentPoint = trail[index];
+    const segmentIndex = currentPoint.segmentIndex ?? 0;
+    const activeSegment = segments[segments.length - 1];
+
+    if (!activeSegment || activeSegment.segmentIndex !== segmentIndex) {
+      segments.push({
+        segmentIndex,
+        points: [previousPoint, currentPoint],
+      });
+    } else {
+      activeSegment.points.push(currentPoint);
+    }
+  }
+  return segments;
+}
+
+function syncTrailSegmentEntities(
+  viewer: Cesium.Viewer,
+  trailSegments: PilotTrailSegment[],
+  trailRefs: MutableRefObject<Cesium.Entity[]>,
+  trailPositionsRef: MutableRefObject<Cesium.Cartesian3[][]>,
+  trailPositionsPropertyRef: MutableRefObject<Cesium.CallbackProperty[]>,
+): void {
+  while (trailRefs.current.length > trailSegments.length) {
+    const entity = trailRefs.current.pop();
+    trailPositionsPropertyRef.current.pop();
+    if (entity) {
+      viewer.entities.remove(entity);
+    }
+  }
+
+  trailSegments.forEach((segment, index) => {
+    const material = trailMaterialForSegment(segment.segmentIndex);
+    let entity = trailRefs.current[index];
+    if (!entity) {
+      const positionsProperty = new Cesium.CallbackProperty(
+        () => trailPositionsRef.current[index] ?? [],
+        false,
+      );
+      trailPositionsPropertyRef.current[index] = positionsProperty;
+      entity = viewer.entities.add({
+        id: `${PILOT_TRAIL_ID_PREFIX}${index}`,
+        name: `Pilot Mode Trail ${segment.segmentIndex + 1}`,
+        show: trailPositionsRef.current[index]?.length > 1,
+        polyline: {
+          positions: positionsProperty,
+          width: 3,
+          material,
+          clampToGround: false,
+        },
+      });
+      trailRefs.current[index] = entity;
+    } else {
+      entity.show = trailPositionsRef.current[index]?.length > 1;
+      entity.name = `Pilot Mode Trail ${segment.segmentIndex + 1}`;
+      if (entity.polyline) {
+        entity.polyline.material = material;
+      }
+    }
+  });
+}
+
+function trailMaterialForSegment(segmentIndex: number): Cesium.ColorMaterialProperty {
+  const color = PILOT_TRAIL_COLORS[segmentIndex % PILOT_TRAIL_COLORS.length];
+  return new Cesium.ColorMaterialProperty(
+    Cesium.Color.fromCssColorString(color).withAlpha(0.78),
+  );
 }

@@ -65,6 +65,9 @@ vi.mock("cesium", () => ({
       this.value = value;
     }
   },
+  ColorMaterialProperty: class ColorMaterialProperty {
+    constructor(public color: unknown) {}
+  },
   CallbackProperty: class CallbackProperty {
     constructor(
       public callback: () => unknown,
@@ -78,7 +81,9 @@ vi.mock("cesium", () => ({
   Color: {
     WHITE: "white",
     BLACK: "black",
-    fromCssColorString: () => ({ withAlpha: () => "color" }),
+    fromCssColorString: (color: string) => ({
+      withAlpha: (alpha: number) => `${color}:${alpha}`,
+    }),
   },
   LabelStyle: { FILL_AND_OUTLINE: "FILL_AND_OUTLINE" },
   VerticalOrigin: { BOTTOM: "BOTTOM" },
@@ -187,8 +192,17 @@ describe("usePilotAircraft", () => {
       bankDeg: 1,
       attackDeg: 3,
     };
-    const firstTrail = [firstPose];
-    const secondTrail = [firstPose, secondPose];
+    const thirdPose = {
+      lon: -113.98,
+      lat: 51.02,
+      altM: 1130,
+      headingDeg: 9,
+      flightPathDeg: 2,
+      bankDeg: 1,
+      attackDeg: 3,
+    };
+    const firstTrail = [firstPose, secondPose];
+    const secondTrail = [firstPose, secondPose, thirdPose];
 
     const { rerender } = renderHook(
       ({ pose, trail }) =>
@@ -228,6 +242,62 @@ describe("usePilotAircraft", () => {
     expect(trailPositionsProperty.getValue()).toEqual([
       { lon: firstPose.lon, lat: firstPose.lat, alt: firstPose.altM },
       { lon: secondPose.lon, lat: secondPose.lat, alt: secondPose.altM },
+      { lon: thirdPose.lon, lat: thirdPose.lat, alt: thirdPose.altM },
+    ]);
+  });
+
+  it("draws replay trail segments with separate colors", () => {
+    const point0 = {
+      lon: -114,
+      lat: 51,
+      altM: 1100,
+      headingDeg: 4,
+      flightPathDeg: 1,
+      bankDeg: 0,
+      attackDeg: 0,
+      segmentIndex: 0,
+    };
+    const point1 = {
+      ...point0,
+      lon: -113.99,
+      lat: 51.01,
+      segmentIndex: 0,
+    };
+    const point2 = {
+      ...point0,
+      lon: -113.98,
+      lat: 51.02,
+      segmentIndex: 1,
+    };
+    const point3 = {
+      ...point0,
+      lon: -113.97,
+      lat: 51.03,
+      segmentIndex: 1,
+    };
+
+    renderHook(() =>
+      usePilotAircraft({
+        enabled: true,
+        pose: point3,
+        trail: [point0, point1, point2, point3],
+        follow: false,
+      }),
+    );
+
+    const firstTrailSegment = mockViewer.entities.add.mock.calls[1][0] as any;
+    const secondTrailSegment = mockViewer.entities.add.mock.calls[2][0] as any;
+
+    expect(firstTrailSegment.polyline.material.color).toBe("#67e8f9:0.78");
+    expect(secondTrailSegment.polyline.material.color).toBe("#f97316:0.78");
+    expect(firstTrailSegment.polyline.positions.getValue()).toEqual([
+      { lon: point0.lon, lat: point0.lat, alt: point0.altM },
+      { lon: point1.lon, lat: point1.lat, alt: point1.altM },
+    ]);
+    expect(secondTrailSegment.polyline.positions.getValue()).toEqual([
+      { lon: point1.lon, lat: point1.lat, alt: point1.altM },
+      { lon: point2.lon, lat: point2.lat, alt: point2.altM },
+      { lon: point3.lon, lat: point3.lat, alt: point3.altM },
     ]);
   });
 });

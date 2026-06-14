@@ -341,10 +341,12 @@ export default function PilotPanel() {
     trajectoryPlanRef.current = optimizedTrajectory;
   }, [optimizedTrajectory]);
 
-  const appendTrailPoint = useCallback((nextSnapshot: PilotSnapshot) => {
+  const appendTrailPoint = useCallback((nextSnapshot: PilotSnapshot, segmentIndex?: number) => {
     const nextPose = snapshotToPose(nextSnapshot);
     if (!nextPose) return;
-    setTrail((current) => [...current.slice(-(MAX_TRAIL_POINTS - 1)), nextPose]);
+    const nextTrailPose =
+      segmentIndex === undefined ? nextPose : { ...nextPose, segmentIndex };
+    setTrail((current) => [...current.slice(-(MAX_TRAIL_POINTS - 1)), nextTrailPose]);
   }, []);
 
   useEffect(() => {
@@ -388,7 +390,8 @@ export default function PilotPanel() {
       const plan = trajectoryPlanRef.current;
       if (!plan || trajectoryStepInFlightRef.current) return;
 
-      const control = plan.controls[trajectoryReplayIndexRef.current];
+      const segmentIndex = trajectoryReplayIndexRef.current;
+      const control = plan.controls[segmentIndex];
       if (!control) {
         setIsTrajectoryPlaying(false);
         return;
@@ -411,7 +414,7 @@ export default function PilotPanel() {
         .then((nextSnapshot) => {
           if (cancelled) return;
           setSnapshot(nextSnapshot);
-          appendTrailPoint(nextSnapshot);
+          appendTrailPoint(nextSnapshot, segmentIndex);
           setError(null);
           trajectorySegmentElapsedSRef.current += replayDtS;
           if (trajectorySegmentElapsedSRef.current >= segmentDurationS - 1e-9) {
@@ -707,7 +710,7 @@ export default function PilotPanel() {
       const nextSnapshot = await resetPilotSimulation(initialState, firstControl);
       setSnapshot(nextSnapshot);
       const nextPose = snapshotToPose(nextSnapshot);
-      setTrail(nextPose ? [nextPose] : []);
+      setTrail(nextPose ? [{ ...nextPose, segmentIndex: 0 }] : []);
       trajectoryReplayIndexRef.current = 0;
       trajectorySegmentElapsedSRef.current = 0;
       setIsEnabled(true);
