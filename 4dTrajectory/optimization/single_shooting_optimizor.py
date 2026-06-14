@@ -158,8 +158,8 @@ class SingleShootingOptimizor:
         self.validate_endpoint_state(target_state, "Target")
 
         # initial guess and bounds
-        final_time_guess = 100.0
-        final_time_bound = (1.0, 1000.0) 
+        final_time_guess = 5
+        final_time_bound = (1.0, 200) 
 
         # control guesses and bounds
         control_guesses = np.tile(
