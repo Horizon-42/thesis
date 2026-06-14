@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import PilotPanel from "../PilotPanel";
 
@@ -127,9 +127,9 @@ describe("PilotPanel trajectory play mode", () => {
     expect(await screen.findByText("Target State")).toBeTruthy();
     expect(screen.getByText("RW05L")).toBeTruthy();
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Optimizer" }), {
-      target: { value: "singleShooting" },
-    });
+    expect((screen.getByRole("combobox", { name: "Optimizer" }) as HTMLSelectElement).value)
+      .toBe("singleShooting");
+    expect((screen.getByLabelText("Max iter") as HTMLInputElement).value).toBe("300");
 
     await waitFor(() => {
       expect(mocks.usePilotTargetGate).toHaveBeenLastCalledWith({
@@ -162,9 +162,6 @@ describe("PilotPanel trajectory play mode", () => {
     const trajectoryDtInput = screen.getByLabelText("dt");
     fireEvent.change(trajectoryDtInput, { target: { value: "0.1" } });
     fireEvent.blur(trajectoryDtInput);
-    const maxIterationsInput = screen.getByLabelText("Max iter");
-    fireEvent.change(maxIterationsInput, { target: { value: "25" } });
-    fireEvent.blur(maxIterationsInput);
     fireEvent.click(within(targetEditor).getByRole("button", { name: "Close" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Optimize" }));
@@ -190,9 +187,48 @@ describe("PilotPanel trajectory play mode", () => {
         targetControl: { attackDeg: 4 },
         nSegments: 12,
         dtS: 0.1,
-        maxIterations: 25,
+        maxIterations: 300,
       });
     });
+  });
+
+  it("keeps the initial aircraft editor open after placing the aircraft", async () => {
+    render(<PilotPanel />);
+
+    expect(await screen.findByText("A320")).toBeTruthy();
+    const initialSummary = screen.getByLabelText("Initial aircraft state summary");
+    fireEvent.click(within(initialSummary).getByRole("button", { name: "Edit" }));
+
+    const initialEditor = await screen.findByLabelText("Initial aircraft setup");
+    fireEvent.click(within(initialEditor).getByRole("button", { name: "Place Aircraft" }));
+
+    await waitFor(() => {
+      expect(mocks.usePilotInitialPlacement).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          enabled: true,
+          onFinish: expect.any(Function),
+        }),
+      );
+    });
+
+    const calls = mocks.usePilotInitialPlacement.mock.calls;
+    const placementOptions = calls[calls.length - 1]?.[0];
+    if (!placementOptions) {
+      throw new Error("usePilotInitialPlacement was not called");
+    }
+
+    act(() => {
+      placementOptions.onFinish();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Initial aircraft setup")).toBeTruthy();
+    });
+    expect(
+      within(screen.getByLabelText("Initial aircraft setup")).getByRole("button", {
+        name: "Place Aircraft",
+      }),
+    ).toBeTruthy();
   });
 
   it("shows the trajectory replay control row in the live state panel", async () => {

@@ -49,8 +49,8 @@ const MAX_TRAIL_POINTS = 360;
 const DEFAULT_TARGET_SPEED_MPS = 70;
 const DEFAULT_TARGET_GAMMA_DEG = -3;
 const DEFAULT_TARGET_ALPHA_DEG = 4;
-const DEFAULT_MAX_ITERATIONS = 1000;
-const DEFAULT_TRAJECTORY_OPTIMIZER: TrajectoryOptimizer = "transcription";
+const DEFAULT_MAX_ITERATIONS = 300;
+const DEFAULT_TRAJECTORY_OPTIMIZER: TrajectoryOptimizer = "singleShooting";
 
 type PilotPanelMode = "pilot" | "trajectory";
 
@@ -159,7 +159,6 @@ export default function PilotPanel() {
     placementBackupRef.current = null;
     setIsInitialPreviewVisible(true);
     setIsPlacingInitialPosition(false);
-    setIsInitialEditorOpen(false);
   }, []);
 
   const cancelInitialPlacement = useCallback(() => {
