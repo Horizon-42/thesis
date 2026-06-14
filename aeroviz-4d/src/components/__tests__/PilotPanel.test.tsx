@@ -1,5 +1,10 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  TARGET_APPROACH_SPEED_MAX_MPS,
+  TARGET_APPROACH_SPEED_MPS,
+  targetAltitudeMForThreshold,
+} from "../../pilot/trajectoryTargetConstraints";
 import PilotPanel from "../PilotPanel";
 
 const mocks = vi.hoisted(() => ({
@@ -144,7 +149,7 @@ describe("PilotPanel trajectory play mode", () => {
           runwayIdent: "RW05L",
           lon: -78.802,
           lat: 35.874,
-          altM: 111.86,
+          altM: targetAltitudeMForThreshold(111.86),
           headingDeg: 45,
         }),
       });
@@ -186,8 +191,8 @@ describe("PilotPanel trajectory play mode", () => {
         targetState: expect.objectContaining({
           lon: -78.802,
           lat: 35.874,
-          altM: 111.86,
-          speedMps: 70,
+          altM: targetAltitudeMForThreshold(111.86),
+          speedMps: TARGET_APPROACH_SPEED_MPS,
           headingDeg: 45,
           flightPathDeg: -4,
           aircraftType: "A320",
@@ -199,6 +204,35 @@ describe("PilotPanel trajectory play mode", () => {
         maxIterations: 300,
       });
     });
+  });
+
+  it("clamps trajectory target speed and heading to threshold constraints", async () => {
+    render(<PilotPanel />);
+
+    expect(await screen.findByText("A320")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
+
+    const targetSummary = await screen.findByLabelText("Target aircraft state summary");
+    fireEvent.click(within(targetSummary).getByRole("button", { name: "Edit" }));
+
+    const targetEditor = await screen.findByLabelText("Target state setup");
+    const speedInput = within(targetEditor).getByLabelText("Vt m/s");
+    fireEvent.change(speedInput, { target: { value: "100" } });
+    fireEvent.blur(speedInput);
+    const headingInput = within(targetEditor).getByLabelText("Psi deg");
+    fireEvent.change(headingInput, { target: { value: "50" } });
+    fireEvent.blur(headingInput);
+    fireEvent.click(within(targetEditor).getByRole("button", { name: "Close" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Optimize" }));
+
+    await waitFor(() => {
+      expect(mocks.runTrajectoryOptimization).toHaveBeenCalled();
+    });
+    const calls = mocks.runTrajectoryOptimization.mock.calls;
+    const request = calls[calls.length - 1]?.[0];
+    expect(request.targetState.speedMps).toBeCloseTo(TARGET_APPROACH_SPEED_MAX_MPS);
+    expect(request.targetState.headingDeg).toBe(46);
   });
 
   it("keeps the initial aircraft editor open after placing the aircraft", async () => {
@@ -330,6 +364,6 @@ describe("PilotPanel trajectory play mode", () => {
     expect(within(finalStatePanel).getByText("Lat Error")).toBeTruthy();
     expect(within(finalStatePanel).getByText("-0.004000 deg")).toBeTruthy();
     expect(within(finalStatePanel).getByText("+0.012000 deg")).toBeTruthy();
-    expect(within(finalStatePanel).getByText("+788.1 m")).toBeTruthy();
+    expect(within(finalStatePanel).getByText("+786.3 m")).toBeTruthy();
   });
 });

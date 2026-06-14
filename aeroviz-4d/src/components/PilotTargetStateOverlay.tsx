@@ -1,10 +1,17 @@
 import { createPortal } from "react-dom";
 import type { RunwayThresholdTarget } from "../data/runwayThresholdTargets";
 import {
+  TARGET_APPROACH_SPEED_MAX_MPS,
+  TARGET_APPROACH_SPEED_MIN_MPS,
+} from "../pilot/trajectoryTargetConstraints";
+import {
   EnglishNumberInput,
   formatCoord,
   formatNumberInputValue,
 } from "./PilotInitialStateOverlay";
+
+const UNBOUNDED_MIN = Number.NEGATIVE_INFINITY;
+const UNBOUNDED_MAX = Number.POSITIVE_INFINITY;
 
 export type PilotTargetEditableKey =
   | "speedMps"
@@ -100,22 +107,31 @@ export default function PilotTargetStateOverlay({
             <span>Vt m/s</span>
             <EnglishNumberInput
               value={state.speedMps}
-              min={1}
-              max={260}
-              step="1"
+              min={TARGET_APPROACH_SPEED_MIN_MPS}
+              max={TARGET_APPROACH_SPEED_MAX_MPS}
+              step="0.1"
               disabled={disabled}
-              onCommit={(value) => onFieldChange("speedMps", value, 1, 260)}
+              onCommit={(value) =>
+                onFieldChange(
+                  "speedMps",
+                  value,
+                  TARGET_APPROACH_SPEED_MIN_MPS,
+                  TARGET_APPROACH_SPEED_MAX_MPS,
+                )
+              }
             />
           </label>
           <label>
             <span>Psi deg</span>
             <EnglishNumberInput
               value={state.headingDeg}
-              min={0}
-              max={360}
+              min={UNBOUNDED_MIN}
+              max={UNBOUNDED_MAX}
               step="1"
               disabled={disabled}
-              onCommit={(value) => onFieldChange("headingDeg", value, 0, 360)}
+              onCommit={(value) =>
+                onFieldChange("headingDeg", value, UNBOUNDED_MIN, UNBOUNDED_MAX)
+              }
             />
           </label>
           <label>

@@ -33,6 +33,13 @@ import {
   type PilotSnapshot,
 } from "../pilot/pilotClient";
 import {
+  TARGET_APPROACH_SPEED_MPS,
+  clampHeadingToRunwayTolerance,
+  clampTargetSpeedMps,
+  runwayAlignedHeadingDeg,
+  targetAltitudeMForThreshold,
+} from "../pilot/trajectoryTargetConstraints";
+import {
   runTrajectoryOptimization,
   type TrajectoryOptimizer,
   type TrajectoryOptimizationResult,
@@ -46,7 +53,7 @@ const DEFAULT_CONTROLS: PilotControls = {
 const DEFAULT_FRAME_DT_S = 0.2;
 const STEP_INTERVAL_MS = 120;
 const MAX_TRAIL_POINTS = 360;
-const DEFAULT_TARGET_SPEED_MPS = 70;
+const DEFAULT_TARGET_SPEED_MPS = TARGET_APPROACH_SPEED_MPS;
 const DEFAULT_TARGET_GAMMA_DEG = -3;
 const DEFAULT_TARGET_ALPHA_DEG = 4;
 const DEFAULT_MAX_ITERATIONS = 300;
@@ -636,7 +643,16 @@ export default function PilotPanel() {
   ) {
     if (!Number.isFinite(value)) return;
 
-    setTargetState((current) => ({ ...current, [key]: clamp(value, min, max) }));
+    let nextValue = clamp(value, min, max);
+    if (key === "speedMps") {
+      nextValue = clampTargetSpeedMps(nextValue);
+    } else if (key === "headingDeg") {
+      nextValue = selectedTargetRunway
+        ? clampHeadingToRunwayTolerance(value, selectedTargetRunway.psiDeg)
+        : runwayAlignedHeadingDeg(nextValue);
+    }
+
+    setTargetState((current) => ({ ...current, [key]: nextValue }));
     setOptimizedTrajectory(null);
     setIsTrajectoryPlaying(false);
   }
@@ -1234,9 +1250,13 @@ function makeDefaultTrajectoryTarget(
     runwayThresholdId: runwayTarget?.id ?? fallback?.runwayThresholdId ?? "",
     lon: runwayTarget?.lon ?? fallback?.lon ?? 0,
     lat: runwayTarget?.lat ?? fallback?.lat ?? 0,
-    altM: runwayTarget?.altM ?? fallback?.altM ?? 0,
-    speedMps: fallback?.speedMps ?? DEFAULT_TARGET_SPEED_MPS,
-    headingDeg: runwayTarget?.psiDeg ?? fallback?.headingDeg ?? 0,
+    altM: runwayTarget
+      ? targetAltitudeMForThreshold(runwayTarget.altM)
+      : fallback?.altM ?? 0,
+    speedMps: clampTargetSpeedMps(fallback?.speedMps ?? DEFAULT_TARGET_SPEED_MPS),
+    headingDeg: runwayTarget
+      ? runwayAlignedHeadingDeg(runwayTarget.psiDeg)
+      : runwayAlignedHeadingDeg(fallback?.headingDeg ?? 0),
     flightPathDeg: fallback?.flightPathDeg ?? DEFAULT_TARGET_GAMMA_DEG,
     attackDeg: fallback?.attackDeg ?? DEFAULT_TARGET_ALPHA_DEG,
   };
