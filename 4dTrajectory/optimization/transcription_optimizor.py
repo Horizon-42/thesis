@@ -27,9 +27,9 @@ class TranscriptionOptimizor:
 
     # control dim
     control_dim: int = 3 # Match to control input, thrust, bank angle, attack angle
-    
+
     # state dim
-    state_dim : int = 7 # Match to GeodeticState, lat, lon, alt, V, psi, gamma, mass
+    state_dim : int = 6 # Match to GeodeticState, lat, lon, alt, V, psi, gamma
 
     def __init__(self, sim_server: GeodeticSimulator, n_segments: int = 10, max_iterations: int = 1000, ftol: float = 1e-6):
         self.sim_server = sim_server
@@ -44,10 +44,22 @@ class TranscriptionOptimizor:
         node_control = z[1:1+self.n_segments*self.control_dim].reshape((self.n_segments, self.control_dim))
         node_state = z[1+self.n_segments*self.control_dim:].reshape((self.n_segments, self.state_dim))
         return final_time, node_control, node_state
-    
+
     @staticmethod
     def geodetic_state_to_array(state: GeodeticState) -> np.ndarray:
-        return np.array([state.latitude, state.longitude, state.altitude, state.V, state.psi, state.gamma, state.m])
+        return np.array([state.latitude, state.longitude, state.altitude, state.V, state.psi, state.gamma])
+
+    @staticmethod
+    def array_to_geodetic_state(array: np.ndarray, mass: float) -> GeodeticState:
+        return GeodeticState(
+            latitude=array[0],
+            longitude=array[1],
+            altitude=array[2],
+            V=array[3],
+            psi=array[4],
+            gamma=array[5],
+            m=mass,
+        )
 
     @staticmethod
     def validate_endpoint_state(state: GeodeticState, label: str) -> None:
@@ -64,8 +76,6 @@ class TranscriptionOptimizor:
             raise ValueError(f"{label}.V must be >= {_MIN_SPEED_MPS}")
         if abs(state.gamma) >= _MAX_ABS_GAMMA_RAD:
             raise ValueError(f"{label}.gamma must stay away from +/- pi/2")
-        if state.m < _MIN_MASS_KG:
-            raise ValueError(f"{label}.m must be >= {_MIN_MASS_KG}")
 
     def build_control_guess(
         self,
@@ -95,12 +105,12 @@ class TranscriptionOptimizor:
                 # adjust them after it gets a valid first Jacobian.
                 _DEFAULT_THRUST_GUESS_N,
                 0.0,
-                self.estimate_trim_attack_rad(start_state),
+                self.estimate_trim_attack_rad(start_state, initial_state.m),
             ]
             for start_state in start_states
         ])
 
-    def estimate_trim_attack_rad(self, state: np.ndarray) -> float:
+    def estimate_trim_attack_rad(self, state: np.ndarray, mass: float) -> float:
         # This is not an autopilot law and it is not meant to satisfy the target
         # trajectory. It is only an initialization heuristic: choose an attack
         # angle that approximately balances the vertical-plane force equation at
@@ -117,7 +127,6 @@ class TranscriptionOptimizor:
         altitude = float(state[2])
         speed = float(state[3])
         gamma = float(state[5])
-        mass = float(state[6])
         if speed < _MIN_SPEED_MPS or mass < _MIN_MASS_KG:
             # Endpoint validation should normally reject these states before this
             # method runs. Keep this guard because the optimizer may reuse helpers
@@ -202,7 +211,6 @@ class TranscriptionOptimizor:
             (_MIN_SPEED_MPS, None),
             (None, None),
             (-_MAX_ABS_GAMMA_RAD, _MAX_ABS_GAMMA_RAD),
-            (_MIN_MASS_KG, None),
         ]
         return state_bounds * self.n_segments
 
@@ -215,7 +223,6 @@ class TranscriptionOptimizor:
             and state[2] >= 0.0
             and state[3] >= _MIN_SPEED_MPS
             and abs(state[5]) < _MAX_ABS_GAMMA_RAD
-            and state[6] >= _MIN_MASS_KG
         )
 
     def invalid_defects(self) -> np.ndarray:
@@ -227,6 +234,13 @@ class TranscriptionOptimizor:
     def optimize_trajectory(self, initial_state: GeodeticState, target_state: GeodeticState) -> list:
         self.validate_endpoint_state(initial_state, "initial_state")
         self.validate_endpoint_state(target_state, "target_state")
+
+        mass = initial_state.m
+        if mass < _MIN_MASS_KG:
+            raise ValueError(
+                f"initial_state.m must be >= {_MIN_MASS_KG} kg "
+                "to avoid singularities in the dynamics"
+            )
 
         # initialize guess and bounds
         # final time guess
@@ -274,7 +288,7 @@ class TranscriptionOptimizor:
                 # failures into a large equality residual so one bad probe does
                 # not abort the whole HTTP optimization request.
                 try:
-                    geo_predicted_state = self.sim_server.step(GeodeticState(*start_state), Control(*control_i), dt)
+                    geo_predicted_state = self.sim_server.step(self.array_to_geodetic_state(start_state, mass), Control(*control_i), dt)
                 except (ValueError, ZeroDivisionError, OverflowError):
                     return self.invalid_defects()
                 predicted_state = self.geodetic_state_to_array(geo_predicted_state)
@@ -291,11 +305,7 @@ class TranscriptionOptimizor:
             _, _, node_state = self.unpack_z(z)
             final_state = node_state[-1]
             target_state_array = self.geodetic_state_to_array(target_state)
-            # Mass has no dynamics in the current point-mass model (dmdt = 0).
-            # The defect constraints already force every node mass to match the
-            # initial mass, so constraining terminal mass again makes SLSQP's
-            # equality Jacobian rank-deficient.
-            return final_state[:-1] - target_state_array[:-1]
+            return final_state - target_state_array
 
         constraints = [{'type': 'eq', 'fun': defect_constraints},
                        {'type': 'eq', 'fun': final_state_constraint}]

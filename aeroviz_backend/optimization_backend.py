@@ -58,7 +58,7 @@ class OptimizationBackend:
             ],
             "states": [
                 format_geodetic_state(
-                    _array_to_geodetic_state(state_values),
+                    _array_to_geodetic_state(state_values, initial_state.m),
                     aircraft.code,
                 )
                 for state_values in node_state
@@ -66,8 +66,8 @@ class OptimizationBackend:
         }
 
 
-def _array_to_geodetic_state(values: Any) -> GeodeticState:
-    latitude, longitude, altitude, V, psi, gamma, m = [float(value) for value in values]
+def _array_to_geodetic_state(values: Any, mass: float) -> GeodeticState:
+    latitude, longitude, altitude, V, psi, gamma = [float(value) for value in values]
     return GeodeticState(
         latitude=latitude,
         longitude=longitude,
@@ -75,5 +75,5 @@ def _array_to_geodetic_state(values: Any) -> GeodeticState:
         V=V,
         psi=psi,
         gamma=gamma,
-        m=m,
+        m=mass,
     )

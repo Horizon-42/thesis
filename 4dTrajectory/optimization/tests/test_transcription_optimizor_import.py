@@ -44,8 +44,8 @@ def test_unpack_z_uses_final_time_controls_and_states_layout():
     np.testing.assert_array_equal(
         node_state,
         np.array([
-            [7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0],
-            [14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0],
+            [7.0, 8.0, 9.0, 10.0, 11.0, 12.0],
+            [13.0, 14.0, 15.0, 16.0, 17.0, 18.0],
         ]),
     )
 
@@ -66,7 +66,26 @@ def test_geodetic_state_to_array_uses_geodetic_state_field_names():
 
     np.testing.assert_allclose(
         array,
-        np.array([51.1139, -114.0203, 1084.0, 135.0, 0.3, -0.05, 64000.0]),
+        np.array([51.1139, -114.0203, 1084.0, 135.0, 0.3, -0.05]),
+    )
+
+
+def test_array_to_geodetic_state_restores_fixed_mass():
+    module = load_transcription_module()
+
+    state = module.TranscriptionOptimizor.array_to_geodetic_state(
+        np.array([51.1139, -114.0203, 1084.0, 135.0, 0.3, -0.05]),
+        mass=64000.0,
+    )
+
+    assert state == module.GeodeticState(
+        latitude=51.1139,
+        longitude=-114.0203,
+        altitude=1084.0,
+        V=135.0,
+        psi=0.3,
+        gamma=-0.05,
+        m=64000.0,
     )
 
 
@@ -97,8 +116,8 @@ def test_optimize_trajectory_builds_compatible_minimize_problem(monkeypatch):
         np.testing.assert_allclose(
             node_state,
             np.array([
-                [2.0, 3.0, 950.0, 117.5, 0.15, -0.015, 70000.0],
-                [3.0, 4.0, 900.0, 115.0, 0.2, -0.02, 70000.0],
+                [2.0, 3.0, 950.0, 117.5, 0.15, -0.015],
+                [3.0, 4.0, 900.0, 115.0, 0.2, -0.02],
             ]),
         )
 
@@ -112,14 +131,13 @@ def test_optimize_trajectory_builds_compatible_minimize_problem(monkeypatch):
             (1.0, None),
             (None, None),
             (-(np.pi / 2.0 - 1e-3), np.pi / 2.0 - 1e-3),
-            (1.0, None),
         ]
 
         defect_values = constraints[0]["fun"](x0)
         final_state_values = constraints[1]["fun"](x0)
 
         assert defect_values.shape == (optimizer.n_segments * optimizer.state_dim,)
-        assert final_state_values.shape == (optimizer.state_dim - 1,)
+        assert final_state_values.shape == (optimizer.state_dim,)
         assert len(geodetic_simulator.calls) == optimizer.n_segments
         assert all(
             isinstance(call["state"], module.GeodeticState)
@@ -129,6 +147,7 @@ def test_optimize_trajectory_builds_compatible_minimize_problem(monkeypatch):
             isinstance(call["control"], module.Control)
             for call in geodetic_simulator.calls
         )
+        assert all(call["state"].m == initial_state.m for call in geodetic_simulator.calls)
         assert all(call["dt"] == 50.0 for call in geodetic_simulator.calls)
         return SimpleNamespace(success=True, x=x0, message="")
 
@@ -141,7 +160,7 @@ def test_optimize_trajectory_builds_compatible_minimize_problem(monkeypatch):
 
     assert final_time == 100.0
     assert node_control.shape == (2, 3)
-    assert node_state.shape == (2, 7)
+    assert node_state.shape == (2, 6)
 
 
 def test_defect_constraints_turn_simulator_failures_into_infeasible_residual(monkeypatch):
@@ -166,7 +185,7 @@ def test_defect_constraints_turn_simulator_failures_into_infeasible_residual(mon
 
     assert final_time == 100.0
     assert node_control.shape == (2, 3)
-    assert node_state.shape == (2, 7)
+    assert node_state.shape == (2, 6)
 
 
 def test_default_runway_guess_stays_inside_simulator_domain(monkeypatch):

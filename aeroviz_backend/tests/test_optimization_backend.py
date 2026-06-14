@@ -25,7 +25,7 @@ class TestOptimizationBackend(unittest.TestCase):
                 return (
                     42.0,
                     np.array([[15000.0, 0.1, 0.2]]),
-                    np.array([[51.0, -114.0, 1000.0, 130.0, 0.3, -0.05, 78000.0]]),
+                    np.array([[51.0, -114.0, 1000.0, 130.0, 0.3, -0.05]]),
                 )
 
         original_optimizer = optimization_backend.TranscriptionOptimizor
@@ -68,6 +68,7 @@ class TestOptimizationBackend(unittest.TestCase):
         self.assertAlmostEqual(result["controls"][0]["bankDeg"], np.degrees(0.1))
         self.assertAlmostEqual(result["states"][0]["lat"], 51.0)
         self.assertAlmostEqual(result["states"][0]["headingDeg"], np.degrees(0.3))
+        self.assertEqual(result["states"][0]["massKg"], 78000.0)
         self.assertEqual(result["states"][0]["aircraftType"], "A320")
 
 
