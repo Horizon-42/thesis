@@ -24,6 +24,19 @@ _DEFAULT_DT_S = 0.2
 # For state value normalization, the optimizer only needs to compare relative magnitudes of defects
 # Max thrust, 1000KN for wide-body aircraft
 _MAX_THRUST_N = 1000000.0
+# Max Latitude difference, half the globe
+_MAX_LATITUDE_DEG = 90.0
+# Max Longitude difference, half the globe
+_MAX_LONGITUDE_DEG = 180.0
+# Max Altitude, For approach 
+_MAX_ALTITUDE_M = 10000.0
+# Max Speed, 1000 m/s is about Mach 3 at sea level
+_MAX_SPEED_MPS = 1000.0
+# Max heading difference, 180 degrees
+_MAX_HEADING_DEG = 180.0
+# Max flight path angle, 90 degrees, gamma
+_MAX_FLIGHT_PATH_ANGLE_DEG = 80.0
+
 
 class TranscriptionOptimizor:
     # multiple shooting args
@@ -219,12 +232,12 @@ class TranscriptionOptimizor:
         # keep SLSQP inside the simulatable flight envelope while still allowing
         # broad terminal-area trajectories.
         state_bounds = [
-            (-90.0, 90.0),
-            (-180.0, 180.0),
-            (0.0, None),
-            (_MIN_SPEED_MPS, None),
-            (None, None),
-            (-_MAX_ABS_GAMMA_RAD, _MAX_ABS_GAMMA_RAD),
+            (-_MAX_LATITUDE_DEG, _MAX_LATITUDE_DEG),
+            (-_MAX_LONGITUDE_DEG, _MAX_LONGITUDE_DEG),
+            (0.0, _MAX_ALTITUDE_M),
+            (_MIN_SPEED_MPS, _MAX_SPEED_MPS),
+            (-_MAX_HEADING_DEG, _MAX_HEADING_DEG),
+            (-_MAX_FLIGHT_PATH_ANGLE_DEG, _MAX_FLIGHT_PATH_ANGLE_DEG),
         ]
         return state_bounds * self.n_segments
 
@@ -232,8 +245,8 @@ class TranscriptionOptimizor:
     def is_simulatable_state_array(state: np.ndarray) -> bool:
         return (
             np.all(np.isfinite(state))
-            and -90.0 <= state[0] <= 90.0
-            and -180.0 <= state[1] <= 180.0
+            and -_MAX_LATITUDE_DEG <= state[0] <= _MAX_LATITUDE_DEG
+            and -_MAX_LONGITUDE_DEG <= state[1] <= _MAX_LONGITUDE_DEG
             and state[2] >= 0.0
             and state[3] >= _MIN_SPEED_MPS
             and abs(state[5]) < _MAX_ABS_GAMMA_RAD
