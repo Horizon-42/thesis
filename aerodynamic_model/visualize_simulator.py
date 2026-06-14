@@ -12,6 +12,7 @@ that updates while the trajectory is animated.
 
 import math
 import subprocess
+from types import SimpleNamespace
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -310,24 +311,8 @@ class FlightVisualizer:
             self.fig.canvas.draw_idle()
             return
 
-        # Five output samples per second gives a smooth animation while keeping
-        # the ODE result small and easy to inspect.
-        t_eval = np.linspace(0.0, duration, int(duration * 5) + 1)
-
-        simulation_result = self.simulator.simulate(
-            initial_state=self.initial_state,
-            control=control,
-            atmosphere=self.atmosphere,
-            t_span=(0.0, duration),
-            t_eval=t_eval,
-        )
         self.current_control = control
-        self._store_simulation_result(simulation_result)
-
-        if not self.solution.success:
-            self.state_text.set_text(f"Simulation failed:\n{self.solution.message}")
-            self.fig.canvas.draw_idle()
-            return
+        self.solution = self._simulate_samples(duration, control)
 
         self._trim_solution_at_ground()
         self._show_initial_state()
@@ -344,14 +329,36 @@ class FlightVisualizer:
         )
         self.fig.canvas.draw_idle()
 
-    def _store_simulation_result(self, simulation_result):
-        # Older simulator versions returned (solution, [CL, CD]). The current
-        # simulator returns only the solution. Keep this compatibility shim so
-        # the visualizer is tolerant while the model interface is evolving.
-        if isinstance(simulation_result, tuple):
-            self.solution = simulation_result[0]
-        else:
-            self.solution = simulation_result
+    def _simulate_samples(self, duration, control):
+        # The simulator now exposes a single fixed-step RK4 advance. The
+        # visualizer owns its display sampling rate instead of asking the
+        # simulator to return multiple samples from one call.
+        sample_dt = 0.2
+        times = [0.0]
+        states = [self.initial_state]
+        current_time = 0.0
+        current_state = self.initial_state
+
+        while current_time < duration:
+            dt = min(sample_dt, duration - current_time)
+            current_state = self.simulator.simulate(
+                initial_state=current_state,
+                control=control,
+                atmosphere=self.atmosphere,
+                t=current_time,
+                dt=dt,
+            )
+            current_time += dt
+            times.append(current_time)
+            states.append(current_state)
+
+        return SimpleNamespace(
+            t=np.array(times),
+            y=np.array([
+                [state.x, state.y, state.h, state.V, state.psi, state.gamma, state.m]
+                for state in states
+            ]).T,
+        )
 
     @staticmethod
     def _read_float(text_box, label):
@@ -363,8 +370,8 @@ class FlightVisualizer:
 
     def _trim_solution_at_ground(self):
         # Stop the displayed simulation when altitude first reaches the ground.
-        # The simulator returns samples at t_eval, so interpolate one final
-        # point at h = 0 instead of displaying a below-ground sample.
+        # Interpolate one final point at h = 0 instead of displaying a
+        # below-ground sample.
         ground_hits = np.where(self.solution.y[2] <= 0.0)[0]
         if len(ground_hits) == 0:
             return

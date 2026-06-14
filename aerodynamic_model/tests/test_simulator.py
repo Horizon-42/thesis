@@ -120,7 +120,7 @@ class TestAlphaInputSimulator(unittest.TestCase):
 
         self.assertAlmostEqual(derivatives[4], 0.0)
 
-    def test_simulate_returns_requested_samples_for_alpha_control(self):
+    def test_simulate_advances_one_rk4_step_for_alpha_control(self):
         initial_state = State(
             x=0.0,
             y=0.0,
@@ -135,19 +135,18 @@ class TestAlphaInputSimulator(unittest.TestCase):
             bank_rad=math.radians(10.0),
             attack_rad=math.radians(2.0),
         )
-        t_eval = [0.0, 0.5, 1.0]
 
-        solution = self.simulator.simulate(
+        next_state = self.simulator.simulate(
             initial_state,
             control,
             self.atmosphere,
-            t_span=(0.0, 1.0),
-            t_eval=t_eval,
+            t=0.0,
+            dt=0.2,
         )
 
-        self.assertTrue(solution.success)
-        self.assertEqual(list(solution.t), t_eval)
-        self.assertEqual(solution.y.shape, (7, len(t_eval)))
+        self.assertIsInstance(next_state, State)
+        self.assertGreater(next_state.x, initial_state.x)
+        self.assertEqual(next_state.m, initial_state.m)
 
 
 if __name__ == "__main__":

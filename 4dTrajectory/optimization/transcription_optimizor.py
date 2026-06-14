@@ -104,7 +104,7 @@ class TranscriptionOptimizor:
         ))
 
         # The first SLSQP probe must be simulatable. A zero-alpha guess can make
-        # low-speed/heavy-aircraft segments descend so fast that solve_ivp fails,
+        # low-speed/heavy-aircraft segments can descend so fast that simulation fails,
         # which turns the whole defect vector into the constant invalid residual.
         # A constant residual has almost no useful Jacobian information, and SLSQP
         # can report "Singular matrix C in LSQ subproblem" before it ever gets a

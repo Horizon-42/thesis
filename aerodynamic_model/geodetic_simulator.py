@@ -131,19 +131,20 @@ class GeodeticSimulator:
         )
 
         # Simulate one time step.
-        solution = self.simulator.simulate(
+        next_state = self.simulator.simulate(
             initial_state=state_vec,
             control=control,
             atmosphere=self.atmosphere,
-            t_span=(0.0, dt),
-            t_eval=[dt],
+            t=0.0,
+            dt=dt,
         )
-        if not solution.success:
-            raise ValueError(solution.message)
-
-        new_x, new_y, new_h, speed, heading, flight_path, mass = [
-            float(value) for value in solution.y[:, -1]
-        ]
+        new_x = float(next_state.x)
+        new_y = float(next_state.y)
+        new_h = float(next_state.h)
+        speed = float(next_state.V)
+        heading = float(next_state.psi)
+        flight_path = float(next_state.gamma)
+        mass = float(next_state.m)
         if new_h < 0.0:
             raise ValueError("simulation stopped: altitude below 0")
 

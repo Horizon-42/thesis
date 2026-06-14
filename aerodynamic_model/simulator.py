@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 import math
-from scipy.integrate import solve_ivp
 from aircraft_sets import AIRCRAFT_PRESETS, AircraftSpec, A320
 
 @dataclass
@@ -102,25 +101,63 @@ class Simulator:
         dmdt = 0
 
         return [dxdt, dydt, dhdt, dVdt, dpsidt, dgamadt, dmdt]
-    
+
     @staticmethod
     def _rk4_step(func, t, state_vec, control, atmosphere, dt):
         k1 = func(t, state_vec, control, atmosphere)
-        k2 = func(t + dt / 2, [s + dt * k1_i / 2 for s, k1_i in zip(state_vec, k1)], control, atmosphere)
-        k3 = func(t + dt / 2, [s + dt * k2_i / 2 for s, k2_i in zip(state_vec, k2)], control, atmosphere)
-        k4 = func(t + dt, [s + dt * k3_i for s, k3_i in zip(state_vec, k3)], control, atmosphere)
-        return [s + (dt / 6) * (k1_i + 2 * k2_i + 2 * k3_i + k4_i) for s, k1_i, k2_i, k3_i, k4_i in zip(state_vec, k1, k2, k3, k4)]
-        
-    def simulate(self, initial_state: State, control: Control, atmosphere: Atmosphere, t:float, dt:float) -> State:
-        """
-        Simulate the aircraft dynamics over a time span given an initial state and control inputs.
-        t: the initial time
-        dt: the time step
-        """
-        # Convert initial state to vector form
-        state_vec = [initial_state.x, initial_state.y, initial_state.h, initial_state.V, initial_state.psi, initial_state.gamma, initial_state.m]
-        
-        # For better performance, we can implement our own RK4 integrator instead of using solve_ivp, since we only need the state at specific time points and the dynamics are not stiff.
-        next_state = self._rk4_step(self.dynamics, t, state_vec, control, atmosphere, dt)
+        k2_state = [
+            s + dt * k1_i / 2
+            for s, k1_i in zip(state_vec, k1)
+        ]
+        k2 = func(t + dt / 2, k2_state, control, atmosphere)
+        k3_state = [
+            s + dt * k2_i / 2
+            for s, k2_i in zip(state_vec, k2)
+        ]
+        k3 = func(t + dt / 2, k3_state, control, atmosphere)
+        k4_state = [
+            s + dt * k3_i
+            for s, k3_i in zip(state_vec, k3)
+        ]
+        k4 = func(t + dt, k4_state, control, atmosphere)
+        return [
+            s + (dt / 6) * (k1_i + 2 * k2_i + 2 * k3_i + k4_i)
+            for s, k1_i, k2_i, k3_i, k4_i in zip(state_vec, k1, k2, k3, k4)
+        ]
 
-        return next_state
+    def simulate(
+        self,
+        initial_state: State,
+        control: Control,
+        atmosphere: Atmosphere,
+        t: float,
+        dt: float,
+    ) -> State:
+        """
+        Advance aircraft dynamics by one fixed RK4 step.
+
+        t is the current simulation time passed to the dynamics model. The
+        current dynamics are time-invariant, but keeping t in the API makes the
+        integrator usable if time-varying winds or controls are added later.
+        dt is the fixed integration step in seconds.
+        """
+        state_vec = [
+            initial_state.x,
+            initial_state.y,
+            initial_state.h,
+            initial_state.V,
+            initial_state.psi,
+            initial_state.gamma,
+            initial_state.m,
+        ]
+
+        next_state = self._rk4_step(
+            self.dynamics,
+            t,
+            state_vec,
+            control,
+            atmosphere,
+            dt,
+        )
+
+        return State(*next_state)
