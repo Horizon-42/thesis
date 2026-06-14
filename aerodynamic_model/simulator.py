@@ -102,12 +102,25 @@ class Simulator:
         dmdt = 0
 
         return [dxdt, dydt, dhdt, dVdt, dpsidt, dgamadt, dmdt]
-
-    def simulate(self, initial_state: State, control: Control, atmosphere: Atmosphere, t_span: tuple, t_eval: list):
+    
+    @staticmethod
+    def _rk4_step(func, t, state_vec, control, atmosphere, dt):
+        k1 = func(t, state_vec, control, atmosphere)
+        k2 = func(t + dt / 2, [s + dt * k1_i / 2 for s, k1_i in zip(state_vec, k1)], control, atmosphere)
+        k3 = func(t + dt / 2, [s + dt * k2_i / 2 for s, k2_i in zip(state_vec, k2)], control, atmosphere)
+        k4 = func(t + dt, [s + dt * k3_i for s, k3_i in zip(state_vec, k3)], control, atmosphere)
+        return [s + (dt / 6) * (k1_i + 2 * k2_i + 2 * k3_i + k4_i) for s, k1_i, k2_i, k3_i, k4_i in zip(state_vec, k1, k2, k3, k4)]
+        
+    def simulate(self, initial_state: State, control: Control, atmosphere: Atmosphere, t:float, dt:float) -> State:
+        """
+        Simulate the aircraft dynamics over a time span given an initial state and control inputs.
+        t: the initial time
+        dt: the time step
+        """
         # Convert initial state to vector form
         state_vec = [initial_state.x, initial_state.y, initial_state.h, initial_state.V, initial_state.psi, initial_state.gamma, initial_state.m]
+        
+        # For better performance, we can implement our own RK4 integrator instead of using solve_ivp, since we only need the state at specific time points and the dynamics are not stiff.
+        next_state = self._rk4_step(self.dynamics, t, state_vec, control, atmosphere, dt)
 
-        # Solve the ODEs using solve_ivp
-        sol = solve_ivp(lambda t, X: self.dynamics(t, X, control, atmosphere), t_span, state_vec, t_eval=t_eval)
-
-        return sol
+        return next_state
