@@ -1,6 +1,9 @@
 import { AEROVIZ_BACKEND_URL, type PilotControls, type PilotResetState } from "./pilotClient";
 
-export type TrajectoryOptimizer = "transcription" | "singleShooting";
+export type TrajectoryOptimizer =
+  | "transcription"
+  | "leastSquaresTranscription"
+  | "singleShooting";
 
 export interface TrajectoryOptimizationRequest {
   optimizer: TrajectoryOptimizer;
@@ -8,6 +11,7 @@ export interface TrajectoryOptimizationRequest {
   targetState: PilotResetState;
   targetControl: Pick<PilotControls, "attackDeg">;
   nSegments: number;
+  arrivalTimeS: number;
   dtS: number;
   maxIterations: number;
 }
@@ -76,7 +80,11 @@ function parseTrajectoryOptimizationResult(
 
 function readOptimizer(value: Record<string, unknown>): TrajectoryOptimizer {
   const nested = value.optimizer;
-  if (nested === "transcription" || nested === "singleShooting") {
+  if (
+    nested === "transcription" ||
+    nested === "leastSquaresTranscription" ||
+    nested === "singleShooting"
+  ) {
     return nested;
   }
   throw new Error("AeroViz backend optimization response has invalid optimizer");

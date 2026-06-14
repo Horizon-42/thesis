@@ -50,7 +50,8 @@ const DEFAULT_TARGET_SPEED_MPS = 70;
 const DEFAULT_TARGET_GAMMA_DEG = -3;
 const DEFAULT_TARGET_ALPHA_DEG = 4;
 const DEFAULT_MAX_ITERATIONS = 300;
-const DEFAULT_TRAJECTORY_OPTIMIZER: TrajectoryOptimizer = "singleShooting";
+const DEFAULT_ARRIVAL_TIME_S = 100;
+const DEFAULT_TRAJECTORY_OPTIMIZER: TrajectoryOptimizer = "transcription";
 
 type PilotPanelMode = "pilot" | "trajectory";
 
@@ -88,6 +89,7 @@ export default function PilotPanel() {
   const [trajectoryOptimizer, setTrajectoryOptimizer] =
     useState<TrajectoryOptimizer>(DEFAULT_TRAJECTORY_OPTIMIZER);
   const [nSegments, setNSegments] = useState(10);
+  const [arrivalTimeS, setArrivalTimeS] = useState(DEFAULT_ARRIVAL_TIME_S);
   const [trajectoryDtS, setTrajectoryDtS] = useState(DEFAULT_FRAME_DT_S);
   const [maxIterations, setMaxIterations] = useState(DEFAULT_MAX_ITERATIONS);
   const [optimizedTrajectory, setOptimizedTrajectory] =
@@ -646,6 +648,13 @@ export default function PilotPanel() {
     setIsTrajectoryPlaying(false);
   }
 
+  function updateArrivalTime(value: number) {
+    if (!Number.isFinite(value)) return;
+    setArrivalTimeS(clamp(value, 1, 1000));
+    setOptimizedTrajectory(null);
+    setIsTrajectoryPlaying(false);
+  }
+
   function updateTrajectoryDt(value: number) {
     if (!Number.isFinite(value)) return;
     setTrajectoryDtS(clamp(value, 0.02, 0.5));
@@ -684,6 +693,7 @@ export default function PilotPanel() {
         ),
         targetControl: { attackDeg: targetState.attackDeg },
         nSegments,
+        arrivalTimeS,
         dtS: trajectoryDtS,
         maxIterations,
       });
@@ -938,6 +948,7 @@ export default function PilotPanel() {
                 }
               >
                 <option value="transcription">Transcription</option>
+                <option value="leastSquaresTranscription">Least squares</option>
                 <option value="singleShooting">Single shooting</option>
               </select>
             </label>
@@ -950,6 +961,17 @@ export default function PilotPanel() {
                 step="1"
                 disabled={targetControlsDisabled}
                 onCommit={updateNSegments}
+              />
+            </label>
+            <label>
+              <span>Arrival time</span>
+              <EnglishNumberInput
+                value={arrivalTimeS}
+                min={1}
+                max={1000}
+                step="5"
+                disabled={targetControlsDisabled}
+                onCommit={updateArrivalTime}
               />
             </label>
             <label>

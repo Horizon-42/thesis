@@ -25,27 +25,31 @@ def test_transcription_optimizor_imports_from_repo_root():
     assert module.TranscriptionOptimizor.__name__ == "TranscriptionOptimizor"
 
 
-def test_unpack_z_uses_final_time_controls_and_states_layout():
+def test_unpack_z_uses_fixed_arrival_time_controls_and_states_layout():
     module = load_transcription_module()
-    optimizer = module.TranscriptionOptimizor(sim_server=object(), n_segments=2)
+    optimizer = module.TranscriptionOptimizor(
+        sim_server=object(),
+        n_segments=2,
+        arrival_time_s=75.0,
+    )
     z = np.arange(
-        1 + optimizer.n_segments * optimizer.control_dim +
+        optimizer.n_segments * optimizer.control_dim +
         optimizer.n_segments * optimizer.state_dim,
         dtype=float,
     )
 
     final_time, node_control, node_state = optimizer.unpack_z(z)
 
-    assert final_time == 0.0
+    assert final_time == 75.0
     np.testing.assert_array_equal(
         node_control,
-        np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]),
+        np.array([[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]]),
     )
     np.testing.assert_array_equal(
         node_state,
         np.array([
-            [7.0, 8.0, 9.0, 10.0, 11.0, 12.0],
-            [13.0, 14.0, 15.0, 16.0, 17.0, 18.0],
+            [6.0, 7.0, 8.0, 9.0, 10.0, 11.0],
+            [12.0, 13.0, 14.0, 15.0, 16.0, 17.0],
         ]),
     )
 
@@ -127,18 +131,19 @@ def test_optimize_trajectory_builds_compatible_minimize_problem(monkeypatch):
         sim_server=geodetic_simulator,
         n_segments=2,
         dt=25.0,
+        arrival_time_s=100.0,
     )
     initial_state = module.GeodeticState(1.0, 2.0, 1000.0, 120.0, 0.1, -0.01, 70000.0)
     target_state = module.GeodeticState(3.0, 4.0, 900.0, 115.0, 0.2, -0.02, 70000.0)
 
     def fake_minimize(fun, x0, bounds, constraints, method, options):
-        assert len(x0) == 1 + optimizer.n_segments * (
+        assert len(x0) == optimizer.n_segments * (
             optimizer.control_dim + optimizer.state_dim
         )
         assert len(bounds) == len(x0)
         assert method == "SLSQP"
         assert options == {"maxiter": 1000, "ftol": 1e-6}
-        assert fun(x0) == 100.0
+        assert fun(x0) >= 0.0
 
         _, node_control, node_state = optimizer.unpack_z(x0)
         np.testing.assert_allclose(
@@ -154,7 +159,7 @@ def test_optimize_trajectory_builds_compatible_minimize_problem(monkeypatch):
         )
 
         state_bounds = bounds[
-            1 + optimizer.n_segments * optimizer.control_dim:
+            optimizer.n_segments * optimizer.control_dim:
         ]
         assert state_bounds[:optimizer.state_dim] == [
             (-module._MAX_LATITUDE_DEG, module._MAX_LATITUDE_DEG),
@@ -204,6 +209,7 @@ def test_step_simulator_splits_segment_into_bounded_substeps():
     optimizer = module.TranscriptionOptimizor(
         sim_server=geodetic_simulator,
         n_segments=1,
+        arrival_time_s=100.0,
         dt=0.4,
     )
     state = module.GeodeticState(1.0, 2.0, 1000.0, 120.0, 0.1, -0.01, 70000.0)
@@ -224,7 +230,20 @@ def test_transcription_optimizor_rejects_invalid_dt():
     with pytest.raises(ValueError, match="dt must be positive and finite"):
         module.TranscriptionOptimizor(
             sim_server=FakeGeodeticSimulator(module),
+            n_segments=1,
+            arrival_time_s=100.0,
             dt=0.0,
+        )
+
+
+def test_transcription_optimizor_rejects_invalid_arrival_time():
+    module = load_transcription_module()
+
+    with pytest.raises(ValueError, match="arrival_time_s must be positive and finite"):
+        module.TranscriptionOptimizor(
+            sim_server=FakeGeodeticSimulator(module),
+            n_segments=1,
+            arrival_time_s=0.0,
         )
 
 
@@ -233,6 +252,7 @@ def test_defect_constraints_turn_simulator_failures_into_infeasible_residual(mon
     optimizer = module.TranscriptionOptimizor(
         sim_server=FailingGeodeticSimulator(),
         n_segments=2,
+        arrival_time_s=100.0,
     )
     state = module.GeodeticState(1.0, 2.0, 1000.0, 120.0, 0.1, -0.01, 70000.0)
 
@@ -258,6 +278,7 @@ def test_default_runway_guess_stays_inside_simulator_domain(monkeypatch):
     optimizer = module.TranscriptionOptimizor(
         sim_server=module.GeodeticSimulator(),
         n_segments=10,
+        arrival_time_s=100.0,
     )
     initial_state = module.GeodeticState(
         latitude=35.878659,
@@ -296,6 +317,7 @@ def test_optimize_trajectory_rejects_unsimulatable_endpoint_state():
     optimizer = module.TranscriptionOptimizor(
         sim_server=FakeGeodeticSimulator(module),
         n_segments=1,
+        arrival_time_s=100.0,
     )
     initial_state = module.GeodeticState(
         latitude=1.0,
@@ -317,6 +339,7 @@ def test_optimize_trajectory_raises_when_minimize_fails(monkeypatch):
     optimizer = module.TranscriptionOptimizor(
         sim_server=FakeGeodeticSimulator(module),
         n_segments=1,
+        arrival_time_s=100.0,
     )
     state = module.GeodeticState(1.0, 2.0, 1000.0, 120.0, 0.1, -0.01, 70000.0)
 

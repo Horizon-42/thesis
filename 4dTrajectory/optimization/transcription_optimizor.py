@@ -62,26 +62,30 @@ class TranscriptionOptimizor:
     def __init__(
         self,
         sim_server: GeodeticSimulator,
-        n_segments: int = 10,
+        n_segments: int,
+        arrival_time_s: float,
         dt: float = _DEFAULT_DT_S,
         max_iterations: int = 1000,
         ftol: float = 1e-6,
     ):
         if not math.isfinite(dt) or dt <= 0.0:
             raise ValueError("dt must be positive and finite")
+        if not math.isfinite(arrival_time_s) or arrival_time_s <= 0.0:
+            raise ValueError("arrival_time_s must be positive and finite")
         self.sim_server = sim_server
         self.n_segments = n_segments
         self.dt = float(dt)
+        self.arrival_time_s = float(arrival_time_s)
         self.max_iterations = max_iterations
         self.ftol = ftol
 
     def unpack_z(self, z):
         z = np.asarray(z, dtype=float)
 
-        final_time = z[0]
-        node_control = z[1:1+self.n_segments*self.control_dim].reshape((self.n_segments, self.control_dim))
-        node_state = z[1+self.n_segments*self.control_dim:].reshape((self.n_segments, self.state_dim))
-        return final_time, node_control, node_state
+        control_end = self.n_segments * self.control_dim
+        node_control = z[:control_end].reshape((self.n_segments, self.control_dim))
+        node_state = z[control_end:].reshape((self.n_segments, self.state_dim))
+        return self.arrival_time_s, node_control, node_state
 
     @staticmethod
     def geodetic_state_to_array(state: GeodeticState) -> np.ndarray:
@@ -327,9 +331,7 @@ class TranscriptionOptimizor:
             )
 
         # initialize guess and bounds
-        # final time guess
-        final_time_guess = 100.0 # seconds, this is a placeholder and should be set based on the problem
-        final_time_bounds = (1.0, 1000.0) # seconds
+        final_time = self.arrival_time_s
 
         # state guess
         node_state_guess = self.build_state_guess(initial_state, target_state)
@@ -340,18 +342,20 @@ class TranscriptionOptimizor:
         # control bounds, for example, thrust between 0 and max thrust 1000KN, bank angle between -90 and 90 degrees, attack angle between -18 and 18 degrees
         control_bounds = [(0.0, _MAX_THRUST_N), (-math.pi/2, math.pi/2), (_MIN_ATTACK_RAD, _MAX_ATTACK_RAD)] * self.n_segments
 
-        initial_guess = np.hstack((final_time_guess, node_control_guess.flatten(), node_state_guess.flatten()))
-        bounds = [final_time_bounds] + control_bounds + state_bounds
+        initial_guess = np.hstack((node_control_guess.flatten(), node_state_guess.flatten()))
+        bounds = control_bounds + state_bounds
 
-        # objective function to minimize final time
+        # With arrival time fixed, keep the NLP well-defined by minimizing mild
+        # control effort instead of optimizing time.
         def trajectory_objective(z):
-            final_time, _, _ = self.unpack_z(z)
-            return final_time
+            _, node_control, _ = self.unpack_z(z)
+            control_scales = np.array([_MAX_THRUST_N, math.pi / 2.0, _MAX_ATTACK_RAD])
+            return float(np.mean((node_control / control_scales) ** 2))
         
         # defect constraints to ensure dynamics are satisfied at each segment
         def defect_constraints(z):
-            final_time, node_control, node_state = self.unpack_z(z)
             duration = final_time / self.n_segments
+            _, node_control, node_state = self.unpack_z(z)
 
             defects = []
 

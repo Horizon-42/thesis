@@ -19,6 +19,7 @@ from aeroviz_backend.simulation_backend import (
 )
 
 from geodetic_simulator import GeodeticSimulator, GeodeticState
+from least_squares_transcription_optimizor import LeastSquaresTranscriptionOptimizor
 from single_shooting_optimizor import SingleShootingOptimizor
 from simulator import Control
 from transcription_optimizor import TranscriptionOptimizor
@@ -26,9 +27,15 @@ from transcription_optimizor import TranscriptionOptimizor
 
 DEFAULT_N_SEGMENTS = 10
 DEFAULT_MAX_ITERATIONS = 1000
+MIN_ARRIVAL_TIME_S = 1.0
+MAX_ARRIVAL_TIME_S = 1000.0
 MIN_OPTIMIZATION_DT = 0.001
 DEFAULT_OPTIMIZER = "transcription"
-SUPPORTED_OPTIMIZERS = ("transcription", "singleShooting")
+SUPPORTED_OPTIMIZERS = (
+    "transcription",
+    "leastSquaresTranscription",
+    "singleShooting",
+)
 
 
 class OptimizationBackend:
@@ -43,6 +50,7 @@ class OptimizationBackend:
             DEFAULT_MAX_ITERATIONS,
         )
         optimizer_name = read_optimizer(payload)
+        arrival_time_s = read_arrival_time_s(payload)
         dt = clamp(read_float(payload, "dtS", DEFAULT_DT), MIN_OPTIMIZATION_DT, MAX_DT)
         aircraft = read_aircraft(initial_payload, DEFAULT_AIRCRAFT_TYPE)
 
@@ -54,6 +62,7 @@ class OptimizationBackend:
             n_segments,
             dt,
             max_iterations,
+            arrival_time_s=arrival_time_s,
         )
         final_time, node_control, node_state = optimizer.optimize_trajectory(
             initial_state,
@@ -92,6 +101,7 @@ def make_optimizer(
     n_segments: int,
     dt: float,
     max_iterations: int,
+    arrival_time_s: float,
 ) -> Any:
     if optimizer_name == "singleShooting":
         return SingleShootingOptimizor(
@@ -101,12 +111,34 @@ def make_optimizer(
             max_iterations=max_iterations,
         )
 
+    if optimizer_name == "leastSquaresTranscription":
+        return LeastSquaresTranscriptionOptimizor(
+            geodetic_simulator,
+            n_segments=n_segments,
+            dt=dt,
+            arrival_time_s=arrival_time_s,
+            max_iterations=max_iterations,
+        )
+
     return TranscriptionOptimizor(
         geodetic_simulator,
         n_segments=n_segments,
         dt=dt,
+        arrival_time_s=arrival_time_s,
         max_iterations=max_iterations,
     )
+
+
+def read_arrival_time_s(payload: dict[str, Any]) -> float:
+    if "arrivalTimeS" not in payload:
+        raise ValueError("arrivalTimeS must be a number")
+    arrival_time_s = read_float(payload, "arrivalTimeS", 0.0)
+    if not MIN_ARRIVAL_TIME_S <= arrival_time_s <= MAX_ARRIVAL_TIME_S:
+        raise ValueError(
+            f"arrivalTimeS must be between {MIN_ARRIVAL_TIME_S} and "
+            f"{MAX_ARRIVAL_TIME_S}"
+        )
+    return arrival_time_s
 
 
 def format_node_states(

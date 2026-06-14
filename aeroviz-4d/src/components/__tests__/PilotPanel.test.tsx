@@ -73,9 +73,10 @@ describe("PilotPanel trajectory play mode", () => {
     ]);
     mocks.runTrajectoryOptimization.mockResolvedValue({
       ok: true,
-      optimizer: "singleShooting",
+      optimizer: "transcription",
       finalTimeS: 100,
       nSegments: 10,
+      arrivalTimeS: 100,
       dtS: 0.2,
       controls: [
         { thrustN: 12000, bankDeg: 0, attackDeg: 4 },
@@ -128,8 +129,12 @@ describe("PilotPanel trajectory play mode", () => {
     expect(screen.getByText("RW05L")).toBeTruthy();
 
     expect((screen.getByRole("combobox", { name: "Optimizer" }) as HTMLSelectElement).value)
-      .toBe("singleShooting");
+      .toBe("transcription");
     expect((screen.getByLabelText("Max iter") as HTMLInputElement).value).toBe("300");
+    const optimizerSelect = screen.getByRole("combobox", { name: "Optimizer" });
+    fireEvent.change(optimizerSelect, {
+      target: { value: "leastSquaresTranscription" },
+    });
 
     await waitFor(() => {
       expect(mocks.usePilotTargetGate).toHaveBeenLastCalledWith({
@@ -159,6 +164,9 @@ describe("PilotPanel trajectory play mode", () => {
     const segmentInput = screen.getByLabelText("Segments");
     fireEvent.change(segmentInput, { target: { value: "12" } });
     fireEvent.blur(segmentInput);
+    const arrivalInput = screen.getByLabelText("Arrival time");
+    fireEvent.change(arrivalInput, { target: { value: "96" } });
+    fireEvent.blur(arrivalInput);
     const trajectoryDtInput = screen.getByLabelText("dt");
     fireEvent.change(trajectoryDtInput, { target: { value: "0.1" } });
     fireEvent.blur(trajectoryDtInput);
@@ -168,7 +176,7 @@ describe("PilotPanel trajectory play mode", () => {
 
     await waitFor(() => {
       expect(mocks.runTrajectoryOptimization).toHaveBeenCalledWith({
-        optimizer: "singleShooting",
+        optimizer: "leastSquaresTranscription",
         initialState: expect.objectContaining({
           lon: -78.7873,
           lat: 35.878659,
@@ -186,6 +194,7 @@ describe("PilotPanel trajectory play mode", () => {
         }),
         targetControl: { attackDeg: 4 },
         nSegments: 12,
+        arrivalTimeS: 96,
         dtS: 0.1,
         maxIterations: 300,
       });
