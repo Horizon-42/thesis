@@ -144,6 +144,61 @@ class SingleShootingOptimizor:
             heading_error**2 +
             flight_path_error**2
         )
+
+    def estimate_trim_attack_rad(self, state: GeodeticState) -> float:
+        simulator = getattr(self.sim, "simulator", None)
+        atmosphere = getattr(self.sim, "atmosphere", None)
+        if simulator is None or atmosphere is None:
+            return _DEFAULT_ATTACK_GUESS_RAD
+
+        if state.V < _MIN_SPEED_MPS or state.m < _MIN_MASS_KG:
+            return _DEFAULT_ATTACK_GUESS_RAD
+
+        dynamic_pressure_area = (
+            0.5
+            * atmosphere.get_ISA_density(state.altitude)
+            * state.V**2
+            * simulator.S
+        )
+        required_normal_force = state.m * simulator.g * math.cos(state.gamma)
+
+        def vertical_balance_error(attack_rad: float) -> float:
+            lift_coefficient = simulator.CL0 + simulator.CL_alpha * attack_rad
+            lift = dynamic_pressure_area * lift_coefficient
+            thrust_normal = self.default_thrust_guess_n * math.sin(attack_rad)
+            return lift + thrust_normal - required_normal_force
+
+        low_error = vertical_balance_error(_MIN_ATTACK_RAD)
+        high_error = vertical_balance_error(_MAX_ATTACK_RAD)
+        if low_error * high_error > 0.0:
+            return (
+                _MIN_ATTACK_RAD
+                if abs(low_error) < abs(high_error)
+                else _MAX_ATTACK_RAD
+            )
+
+        low = _MIN_ATTACK_RAD
+        high = _MAX_ATTACK_RAD
+        for _ in range(60):
+            attack_rad = 0.5 * (low + high)
+            error = vertical_balance_error(attack_rad)
+            if error == 0.0:
+                return attack_rad
+            if low_error * error < 0.0:
+                high = attack_rad
+                high_error = error
+            else:
+                low = attack_rad
+                low_error = error
+        return 0.5 * (low + high)
+
+    @staticmethod
+    def is_infeasible_objective(value: float) -> bool:
+        return value >= _INFEASIBLE_OBJECTIVE_VALUE
+
+    @staticmethod
+    def is_infeasible_constraint(values: np.ndarray) -> bool:
+        return np.all(values == _INFEASIBLE_OBJECTIVE_VALUE)
     
     def segment_simulate(self, start_state: GeodeticState, control: Control, duration: float) -> GeodeticState:
         if not math.isfinite(duration) or duration <= 0.0:
@@ -237,8 +292,9 @@ class SingleShootingOptimizor:
         )
 
         # control guesses and bounds
+        attack_guess_rad = self.estimate_trim_attack_rad(initial_state)
         control_guesses = np.tile(
-            np.array([self.default_thrust_guess_n, 0.0, _DEFAULT_ATTACK_GUESS_RAD]),
+            np.array([self.default_thrust_guess_n, 0.0, attack_guess_rad]),
             (self.n_control_segments, 1),
         )
         control_bounds = [
@@ -249,6 +305,25 @@ class SingleShootingOptimizor:
 
         initial_guess = np.hstack(([final_time_guess], control_guesses.flatten()))
         bounds = [final_time_bound] + control_bounds
+
+        initial_objective = self.terminal_objective(
+            initial_guess,
+            initial_state,
+            target_state,
+        )
+        initial_constraint = self.terminal_position_constraint(
+            initial_guess,
+            initial_state,
+            target_state,
+        )
+        if (
+            self.is_infeasible_objective(initial_objective)
+            or self.is_infeasible_constraint(initial_constraint)
+        ):
+            raise ValueError(
+                "Single-shooting initial control guess is not simulatable; "
+                "check initial altitude, speed, target state, and aircraft performance"
+            )
 
         constraints = {
             'type': 'eq',

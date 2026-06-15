@@ -1,0 +1,842 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>estimate_trim_attack_rad 可视化说明</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #18212f;
+      --muted: #667085;
+      --line: #d8dee9;
+      --panel: #ffffff;
+      --paper: #f6f8fb;
+      --accent: #2563eb;
+      --accent-2: #0f9f6e;
+      --warn: #d97706;
+      --bad: #dc2626;
+      --code: #102033;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--paper);
+      line-height: 1.58;
+    }
+
+    header {
+      padding: 42px 28px 30px;
+      background: #0f172a;
+      color: white;
+    }
+
+    header .inner,
+    main {
+      width: min(1180px, calc(100vw - 40px));
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: clamp(30px, 4vw, 48px);
+      line-height: 1.08;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0 0 16px;
+      font-size: 24px;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 0 0 10px;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 12px;
+    }
+
+    .subtitle {
+      max-width: 900px;
+      margin: 0;
+      color: #d0d7e2;
+      font-size: 17px;
+    }
+
+    main {
+      padding: 28px 0 56px;
+    }
+
+    section {
+      margin: 0 0 22px;
+      padding: 24px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      align-items: start;
+    }
+
+    .grid-wide {
+      display: grid;
+      grid-template-columns: minmax(320px, 420px) 1fr;
+      gap: 20px;
+      align-items: stretch;
+    }
+
+    .note {
+      padding: 12px 14px;
+      border-left: 4px solid var(--accent);
+      background: #eef5ff;
+      color: #21324b;
+      border-radius: 4px;
+    }
+
+    .warning {
+      border-left-color: var(--warn);
+      background: #fff7ed;
+    }
+
+    .formula {
+      display: grid;
+      gap: 10px;
+      margin: 16px 0;
+    }
+
+    .formula code,
+    pre {
+      display: block;
+      overflow-x: auto;
+      padding: 14px;
+      border-radius: 8px;
+      background: #0f172a;
+      color: #e5eefb;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 13px;
+      line-height: 1.55;
+      white-space: pre;
+    }
+
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .step {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+      min-height: 130px;
+    }
+
+    .step strong {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      margin-bottom: 10px;
+      border-radius: 50%;
+      color: white;
+      background: var(--accent);
+      font-size: 14px;
+    }
+
+    .panel-title {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .panel-title small {
+      color: var(--muted);
+    }
+
+    .controls {
+      display: grid;
+      gap: 13px;
+      padding: 16px;
+      background: #fbfcfe;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    label {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      color: #344054;
+      font-size: 14px;
+    }
+
+    label span {
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    input[type="range"] {
+      grid-column: 1 / -1;
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    .preset-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    button {
+      min-height: 36px;
+      border: 1px solid #c7d2fe;
+      border-radius: 6px;
+      background: #eef2ff;
+      color: #273b8a;
+      font-weight: 650;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #e0e7ff;
+    }
+
+    canvas {
+      width: 100%;
+      height: 430px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: white;
+    }
+
+    .readouts {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .readout {
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+    }
+
+    .readout dt {
+      margin: 0 0 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .readout dd {
+      margin: 0;
+      font-size: 17px;
+      font-weight: 750;
+      font-variant-numeric: tabular-nums;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      min-height: 360px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: white;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .swatch {
+      width: 14px;
+      height: 4px;
+      border-radius: 99px;
+      background: var(--accent);
+    }
+
+    .swatch.green {
+      background: var(--accent-2);
+    }
+
+    .swatch.orange {
+      background: var(--warn);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: #344054;
+      background: #f8fafc;
+    }
+
+    .status-ok {
+      color: var(--accent-2);
+    }
+
+    .status-bound {
+      color: var(--warn);
+    }
+
+    @media (max-width: 900px) {
+      .grid,
+      .grid-wide,
+      .steps,
+      .readouts {
+        grid-template-columns: 1fr;
+      }
+
+      header .inner,
+      main {
+        width: min(100vw - 24px, 1180px);
+      }
+
+      section {
+        padding: 18px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="inner">
+      <h1>estimate_trim_attack_rad 可视化说明</h1>
+      <p class="subtitle">
+        这个函数不是飞控律，也不是最终优化结果。它只是在 single shooting 进入 SLSQP 之前，给每个控制段一个“至少能飞起来”的迎角初始猜测，避免初始仿真直接撞地并导致约束雅可比退化。
+      </p>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>1. 这个函数解决什么问题</h2>
+      <div class="grid">
+        <div>
+          <p>
+            single shooting 只有控制量和最终时间，没有中间状态节点。SLSQP 第一次评估时，会把整条轨迹从真实初始状态一路 replay 到终点。
+          </p>
+          <p>
+            如果初始控制猜测太弱，例如 A320 用 <strong>4 deg alpha</strong>、170 kt、重 78 吨，那么升力不够，轨迹会在第一次仿真中快速下沉到地面以下。
+          </p>
+          <div class="note warning">
+            一旦仿真失败，当前代码会把 objective 或 constraint 返回成大常数 <code>1e9</code>。如果附近的有限差分点也都是同一个常数，SLSQP 看到的约束梯度就是零，于是报 <strong>Singular matrix C in LSQ subproblem</strong>。
+          </div>
+        </div>
+        <div>
+          <svg viewBox="0 0 640 360" role="img" aria-label="单次 shooting 失败路径示意">
+            <defs>
+              <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+                <path d="M0,0 L10,5 L0,10 Z" fill="#2563eb"></path>
+              </marker>
+              <marker id="arrow-green" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+                <path d="M0,0 L10,5 L0,10 Z" fill="#0f9f6e"></path>
+              </marker>
+              <marker id="arrow-red" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+                <path d="M0,0 L10,5 L0,10 Z" fill="#dc2626"></path>
+              </marker>
+            </defs>
+            <rect x="34" y="258" width="572" height="4" fill="#cbd5e1"></rect>
+            <path d="M68 214 C166 225, 230 249, 292 286" fill="none" stroke="#dc2626" stroke-width="4" stroke-dasharray="8 7"></path>
+            <path d="M68 214 C182 190, 283 168, 410 147 C485 135, 548 126, 596 118" fill="none" stroke="#0f9f6e" stroke-width="4"></path>
+            <g transform="translate(76 207) rotate(-10)">
+              <path d="M-30 0 L18 -10 L48 0 L18 10 Z" fill="#334155"></path>
+              <path d="M-6 -4 L14 -34 L24 -31 L11 0 Z" fill="#64748b"></path>
+              <path d="M-6 4 L14 34 L24 31 L11 0 Z" fill="#64748b"></path>
+            </g>
+            <line x1="150" y1="207" x2="150" y2="134" stroke="#2563eb" stroke-width="4" marker-end="url(#arrow-blue)"></line>
+            <text x="162" y="140" fill="#2563eb" font-size="16" font-weight="700">L(alpha)</text>
+            <line x1="150" y1="207" x2="150" y2="282" stroke="#dc2626" stroke-width="4" marker-end="url(#arrow-red)"></line>
+            <text x="162" y="276" fill="#dc2626" font-size="16" font-weight="700">m g cos(gamma)</text>
+            <line x1="150" y1="207" x2="214" y2="181" stroke="#0f9f6e" stroke-width="4" marker-end="url(#arrow-green)"></line>
+            <text x="221" y="178" fill="#0f9f6e" font-size="16" font-weight="700">T sin(alpha)</text>
+            <text x="56" y="314" fill="#64748b" font-size="15">红色虚线：alpha 太小，轨迹撞地，SLSQP 只能看到 1e9 常数残差</text>
+            <text x="56" y="338" fill="#64748b" font-size="15">绿色曲线：alpha 初值足够，仿真可微，优化器才有搜索方向</text>
+          </svg>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>2. 函数背后的力平衡</h2>
+      <p>
+        函数只看垂直平面里的“法向力够不够”。它并不试图让飞机正好到达跑道，也不优化路径。它只是找一个 alpha，使升力加上 thrust 在法向上的分量，尽量抵消重力在法向上的分量。
+      </p>
+
+      <div class="formula">
+        <code>qS = 0.5 * rho(h) * V^2 * S</code>
+        <code>CL(alpha) = CL0 + CL_alpha * alpha</code>
+        <code>lift = qS * CL(alpha)</code>
+        <code>required_normal_force = m * g * cos(gamma)</code>
+        <code>vertical_balance_error(alpha) = lift + thrust * sin(alpha) - required_normal_force</code>
+      </div>
+
+      <div class="note">
+        当 <code>vertical_balance_error(alpha) = 0</code> 时，说明这个 alpha 在当前速度、高度和重量下大致能配平垂直法向力。函数就在 <code>-18 deg</code> 到 <code>18 deg</code> 之间找这个零点。
+      </div>
+    </section>
+
+    <section>
+      <h2>3. 交互图：为什么 A320 不能从 4 deg alpha 开始</h2>
+      <div class="grid-wide">
+        <div class="controls">
+          <div class="panel-title">
+            <h3>输入状态</h3>
+            <small>和函数参数一一对应</small>
+          </div>
+
+          <label>
+            Speed V
+            <span id="speedLabel"></span>
+            <input id="speed" type="range" min="45" max="110" step="0.5" value="87.45">
+          </label>
+
+          <label>
+            Altitude h
+            <span id="altitudeLabel"></span>
+            <input id="altitude" type="range" min="0" max="2500" step="10" value="700">
+          </label>
+
+          <label>
+            Mass m
+            <span id="massLabel"></span>
+            <input id="mass" type="range" min="1000" max="360000" step="500" value="78000">
+          </label>
+
+          <label>
+            Wing area S
+            <span id="wingLabel"></span>
+            <input id="wing" type="range" min="15" max="450" step="0.1" value="122.6">
+          </label>
+
+          <label>
+            Thrust guess
+            <span id="thrustLabel"></span>
+            <input id="thrust" type="range" min="500" max="260000" step="500" value="40000">
+          </label>
+
+          <label>
+            Gamma
+            <span id="gammaLabel"></span>
+            <input id="gamma" type="range" min="-8" max="4" step="0.1" value="-3">
+          </label>
+
+          <div class="preset-row">
+            <button type="button" data-preset="a320Final">A320 final</button>
+            <button type="button" data-preset="a320Slow">A320 145 kt</button>
+            <button type="button" data-preset="c172Final">C172 final</button>
+          </div>
+        </div>
+
+        <div>
+          <canvas id="balanceChart" width="900" height="520" aria-label="vertical balance error curve"></canvas>
+          <div class="legend">
+            <span><i class="swatch"></i>vertical_balance_error(alpha)</span>
+            <span><i class="swatch green"></i>函数返回的 alpha</span>
+            <span><i class="swatch orange"></i>旧固定初值 4 deg</span>
+          </div>
+          <dl class="readouts">
+            <div class="readout">
+              <dt>返回 alpha</dt>
+              <dd id="rootReadout"></dd>
+            </div>
+            <div class="readout">
+              <dt>4 deg 时误差</dt>
+              <dd id="fourDegReadout"></dd>
+            </div>
+            <div class="readout">
+              <dt>状态</dt>
+              <dd id="statusReadout"></dd>
+            </div>
+          </dl>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>4. 函数流程：从输入状态到 alpha 初值</h2>
+      <div class="steps">
+        <div class="step">
+          <strong>1</strong>
+          <h3>读取模型</h3>
+          <p>如果 fake simulator 没有 <code>simulator</code> 或 <code>atmosphere</code>，函数退回旧默认 <code>4 deg</code>，方便单元测试和简单替身对象。</p>
+        </div>
+        <div class="step">
+          <strong>2</strong>
+          <h3>建立误差函数</h3>
+          <p>用当前 <code>V, h, m, gamma, thrust</code> 计算 <code>vertical_balance_error(alpha)</code>。</p>
+        </div>
+        <div class="step">
+          <strong>3</strong>
+          <h3>检查边界</h3>
+          <p>先看 <code>-18 deg</code> 和 <code>18 deg</code> 是否夹住零点。如果夹不住，就选误差较小的边界。</p>
+        </div>
+        <div class="step">
+          <strong>4</strong>
+          <h3>二分查找</h3>
+          <p>如果零点被夹住，就二分 60 次。这个区间很小，60 次足够让数值误差远小于模型误差。</p>
+        </div>
+      </div>
+
+      <pre><code>low_error = vertical_balance_error(-18 deg)
+high_error = vertical_balance_error(18 deg)
+
+if low_error and high_error have the same sign:
+    return the bound with smaller absolute error
+
+for 60 iterations:
+    mid = (low + high) / 2
+    if error(low) and error(mid) have opposite signs:
+        high = mid
+    else:
+        low = mid
+
+return midpoint(low, high)</code></pre>
+    </section>
+
+    <section>
+      <h2>5. 典型数值对比</h2>
+      <p>
+        下表使用当前简化气动模型的默认系数：<code>CL0 = 0.2</code>，<code>CL_alpha = 5.7/rad</code>。这些数值不是飞行手册数据，只用于解释为什么旧的 <code>4 deg</code> 初值经常不够。
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>场景</th>
+            <th>速度</th>
+            <th>近似所需 alpha</th>
+            <th>含义</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>A320, final approach 外侧</td>
+            <td>170 kt</td>
+            <td>约 12 deg</td>
+            <td>4 deg 初值升力不足，容易下沉。</td>
+          </tr>
+          <tr>
+            <td>A320, terminal speed</td>
+            <td>145 kt</td>
+            <td>约 18 deg</td>
+            <td>已经接近当前 alpha 上限，说明模型缺少襟翼/高升力构型。</td>
+          </tr>
+          <tr>
+            <td>C172, final approach</td>
+            <td>65 kt</td>
+            <td>约 9 deg</td>
+            <td>小飞机也不能无脑固定 4 deg，但需求远低于大型喷气机。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>6. 这不是最终答案，只是一个更好的起点</h2>
+      <div class="grid">
+        <div>
+          <h3>函数保证什么</h3>
+          <p>它让初始控制猜测更可能处于可仿真的区域，让 SLSQP 能看到非零约束梯度和搜索方向。</p>
+          <p>对于你遇到的报错，它消除了“第一步就撞地，约束恒定 1e9”的直接原因。</p>
+        </div>
+        <div>
+          <h3>函数不保证什么</h3>
+          <p>它不保证 single shooting 一定收敛，不保证最终轨迹真实，也不解决模型缺少襟翼、起落架阻力、速度调度等问题。</p>
+          <p>如果后续仍然难收敛，问题会从“初始点不可微”转为“single shooting 参数化太弱或目标不可达”。</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const constants = {
+      rho0: 1.225,
+      temp0: 288.15,
+      lapse: 0.0065,
+      g: 9.81,
+      cl0: 0.2,
+      clAlpha: 5.7,
+      minAlphaDeg: -18,
+      maxAlphaDeg: 18,
+      metresPerKnot: 1852 / 3600
+    };
+
+    const presets = {
+      a320Final: { speed: 87.45, altitude: 700, mass: 78000, wing: 122.6, thrust: 40000, gamma: -3 },
+      a320Slow: { speed: 74.59, altitude: 300, mass: 78000, wing: 122.6, thrust: 40000, gamma: -3 },
+      c172Final: { speed: 33.44, altitude: 300, mass: 1157, wing: 16.2, thrust: 800, gamma: -3 }
+    };
+
+    const inputs = {
+      speed: document.getElementById("speed"),
+      altitude: document.getElementById("altitude"),
+      mass: document.getElementById("mass"),
+      wing: document.getElementById("wing"),
+      thrust: document.getElementById("thrust"),
+      gamma: document.getElementById("gamma")
+    };
+
+    const labels = {
+      speed: document.getElementById("speedLabel"),
+      altitude: document.getElementById("altitudeLabel"),
+      mass: document.getElementById("massLabel"),
+      wing: document.getElementById("wingLabel"),
+      thrust: document.getElementById("thrustLabel"),
+      gamma: document.getElementById("gammaLabel")
+    };
+
+    const readouts = {
+      root: document.getElementById("rootReadout"),
+      fourDeg: document.getElementById("fourDegReadout"),
+      status: document.getElementById("statusReadout")
+    };
+
+    const canvas = document.getElementById("balanceChart");
+    const ctx = canvas.getContext("2d");
+
+    function isaDensity(altitudeM) {
+      const t = constants.temp0 - constants.lapse * altitudeM;
+      return constants.rho0 * Math.pow(t / constants.temp0, 4.25588);
+    }
+
+    function stateFromInputs() {
+      return {
+        speed: Number(inputs.speed.value),
+        altitude: Number(inputs.altitude.value),
+        mass: Number(inputs.mass.value),
+        wing: Number(inputs.wing.value),
+        thrust: Number(inputs.thrust.value),
+        gammaDeg: Number(inputs.gamma.value)
+      };
+    }
+
+    function balanceError(alphaDeg, state) {
+      const alphaRad = alphaDeg * Math.PI / 180;
+      const gammaRad = state.gammaDeg * Math.PI / 180;
+      const rho = isaDensity(state.altitude);
+      const dynamicPressureArea = 0.5 * rho * state.speed * state.speed * state.wing;
+      const liftCoefficient = constants.cl0 + constants.clAlpha * alphaRad;
+      const lift = dynamicPressureArea * liftCoefficient;
+      const thrustNormal = state.thrust * Math.sin(alphaRad);
+      const requiredNormalForce = state.mass * constants.g * Math.cos(gammaRad);
+      return lift + thrustNormal - requiredNormalForce;
+    }
+
+    function estimateTrimAlpha(state) {
+      let low = constants.minAlphaDeg;
+      let high = constants.maxAlphaDeg;
+      let lowError = balanceError(low, state);
+      let highError = balanceError(high, state);
+
+      if (lowError * highError > 0) {
+        return {
+          alphaDeg: Math.abs(lowError) < Math.abs(highError) ? low : high,
+          bounded: true
+        };
+      }
+
+      for (let index = 0; index < 60; index += 1) {
+        const mid = 0.5 * (low + high);
+        const error = balanceError(mid, state);
+        if (error === 0) {
+          return { alphaDeg: mid, bounded: false };
+        }
+        if (lowError * error < 0) {
+          high = mid;
+          highError = error;
+        } else {
+          low = mid;
+          lowError = error;
+        }
+      }
+      return { alphaDeg: 0.5 * (low + high), bounded: false };
+    }
+
+    function formatKnots(mps) {
+      return `${(mps / constants.metresPerKnot).toFixed(0)} kt`;
+    }
+
+    function updateLabels(state) {
+      labels.speed.textContent = `${state.speed.toFixed(1)} m/s, ${formatKnots(state.speed)}`;
+      labels.altitude.textContent = `${state.altitude.toFixed(0)} m`;
+      labels.mass.textContent = `${state.mass.toFixed(0)} kg`;
+      labels.wing.textContent = `${state.wing.toFixed(1)} m2`;
+      labels.thrust.textContent = `${state.thrust.toFixed(0)} N`;
+      labels.gamma.textContent = `${state.gammaDeg.toFixed(1)} deg`;
+    }
+
+    function drawChart(state) {
+      const width = canvas.width;
+      const height = canvas.height;
+      const margin = { left: 78, right: 26, top: 28, bottom: 58 };
+      const plotW = width - margin.left - margin.right;
+      const plotH = height - margin.top - margin.bottom;
+
+      const samples = [];
+      for (let alpha = constants.minAlphaDeg; alpha <= constants.maxAlphaDeg + 0.001; alpha += 0.25) {
+        samples.push({ alpha, error: balanceError(alpha, state) / 1000 });
+      }
+
+      const yValues = samples.map((sample) => sample.error);
+      yValues.push(0, balanceError(4, state) / 1000);
+      const maxAbsY = Math.max(10, ...yValues.map((value) => Math.abs(value))) * 1.12;
+
+      const xToPx = (alpha) => margin.left +
+        ((alpha - constants.minAlphaDeg) / (constants.maxAlphaDeg - constants.minAlphaDeg)) * plotW;
+      const yToPx = (value) => margin.top + (maxAbsY - value) / (2 * maxAbsY) * plotH;
+
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, width, height);
+
+      ctx.strokeStyle = "#e2e8f0";
+      ctx.lineWidth = 1;
+      ctx.font = "13px system-ui, sans-serif";
+      ctx.fillStyle = "#64748b";
+      for (let tick = -18; tick <= 18; tick += 6) {
+        const x = xToPx(tick);
+        ctx.beginPath();
+        ctx.moveTo(x, margin.top);
+        ctx.lineTo(x, margin.top + plotH);
+        ctx.stroke();
+        ctx.fillText(`${tick}`, x - 8, height - 28);
+      }
+      for (let tick = -Math.floor(maxAbsY / 50) * 50; tick <= maxAbsY; tick += 50) {
+        if (Math.abs(tick) > maxAbsY) continue;
+        const y = yToPx(tick);
+        ctx.beginPath();
+        ctx.moveTo(margin.left, y);
+        ctx.lineTo(margin.left + plotW, y);
+        ctx.stroke();
+        ctx.fillText(`${tick}`, 24, y + 4);
+      }
+
+      const zeroY = yToPx(0);
+      ctx.strokeStyle = "#334155";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(margin.left, zeroY);
+      ctx.lineTo(margin.left + plotW, zeroY);
+      ctx.stroke();
+
+      ctx.strokeStyle = "#2563eb";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      samples.forEach((sample, index) => {
+        const x = xToPx(sample.alpha);
+        const y = yToPx(sample.error);
+        if (index === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+
+      const root = estimateTrimAlpha(state);
+      const rootX = xToPx(root.alphaDeg);
+      ctx.strokeStyle = "#0f9f6e";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(rootX, margin.top);
+      ctx.lineTo(rootX, margin.top + plotH);
+      ctx.stroke();
+      ctx.fillStyle = "#0f9f6e";
+      ctx.beginPath();
+      ctx.arc(rootX, yToPx(balanceError(root.alphaDeg, state) / 1000), 6, 0, Math.PI * 2);
+      ctx.fill();
+
+      const oldX = xToPx(4);
+      ctx.strokeStyle = "#d97706";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([8, 6]);
+      ctx.beginPath();
+      ctx.moveTo(oldX, margin.top);
+      ctx.lineTo(oldX, margin.top + plotH);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.fillStyle = "#18212f";
+      ctx.font = "700 15px system-ui, sans-serif";
+      ctx.fillText("alpha (deg)", margin.left + plotW / 2 - 36, height - 10);
+      ctx.save();
+      ctx.translate(18, margin.top + plotH / 2 + 80);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillText("vertical_balance_error (kN)", 0, 0);
+      ctx.restore();
+
+      return root;
+    }
+
+    function update() {
+      const state = stateFromInputs();
+      updateLabels(state);
+      const root = drawChart(state);
+      const fourDegError = balanceError(4, state) / 1000;
+
+      readouts.root.textContent = `${root.alphaDeg.toFixed(2)} deg`;
+      readouts.fourDeg.textContent = `${fourDegError.toFixed(1)} kN`;
+      readouts.status.textContent = root.bounded ? "选边界" : "找到零点";
+      readouts.status.className = root.bounded ? "status-bound" : "status-ok";
+    }
+
+    Object.values(inputs).forEach((input) => {
+      input.addEventListener("input", update);
+    });
+
+    document.querySelectorAll("[data-preset]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const preset = presets[button.dataset.preset];
+        Object.entries(preset).forEach(([key, value]) => {
+          inputs[key].value = value;
+        });
+        update();
+      });
+    });
+
+    update();
+  </script>
+</body>
+</html>
