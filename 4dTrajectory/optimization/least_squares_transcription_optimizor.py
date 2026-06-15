@@ -15,7 +15,7 @@ from transcription_optimizor import (
 
 _DEFECT_RESIDUAL_WEIGHT = 5.0
 _TERMINAL_RESIDUAL_WEIGHT = 50.0
-_REPLAY_FINAL_STATE_RESIDUAL_WEIGHT = 5.0
+_REPLAY_STATE_RESIDUAL_WEIGHT = 5.0
 _CONTROL_RESIDUAL_WEIGHT = 1e-3
 _CONTROL_VARIABLE_SCALE = np.array([100000.0, 1.0, 0.1])
 _STATE_VARIABLE_SCALE = np.array([0.01, 0.01, 1000.0, 100.0, 1.0, 0.1])
@@ -39,7 +39,7 @@ class LeastSquaresTranscriptionOptimizor(TranscriptionOptimizor):
         return np.full(
             self.n_segments * self.state_dim
             + self.state_dim
-            + self.state_dim
+            + self.n_segments * self.state_dim
             + self.n_segments * self.control_dim,
             _INVALID_DEFECT_MAGNITUDE,
         )
@@ -68,6 +68,7 @@ class LeastSquaresTranscriptionOptimizor(TranscriptionOptimizor):
         mass = initial_state.m
 
         defects = []
+        replay_residuals = []
         start_state = self.geodetic_state_to_array(initial_state)
         replay_state = initial_state
         for i in range(self.n_segments):
@@ -111,6 +112,12 @@ class LeastSquaresTranscriptionOptimizor(TranscriptionOptimizor):
                 return self.invalid_residuals()
 
             defects.append(self.state_constraint_error(predicted_state, state_i))
+            replay_residuals.append(
+                self.state_constraint_error(
+                    self.geodetic_state_to_array(replay_state),
+                    state_i,
+                )
+            )
             start_state = state_i
 
         # Terminal residual keeps the last optimized node close to the target.
@@ -123,17 +130,13 @@ class LeastSquaresTranscriptionOptimizor(TranscriptionOptimizor):
             * self.state_constraint_error(node_state[-1], target_state_array)
         )
 
-        # The optimized node state can hit the runway target while soft defects
-        # still allow the actual control replay to drift. Tie the controls to
-        # the replayed final state too; using the full state avoids the bad
-        # tradeoff where altitude improves by sacrificing lat/lon or gamma.
-        replay_final_state = self.geodetic_state_to_array(replay_state)
-        replay_final_residual = (
-            _REPLAY_FINAL_STATE_RESIDUAL_WEIGHT
-            * self.state_constraint_error(
-                replay_final_state,
-                target_state_array,
-            )
+        # Soft multiple-shooting defects alone let optimized nodes drift away
+        # from the trajectory produced by replaying controls from the real
+        # initial state. Penalize that drift at every node, not only at the
+        # final point, so thrust and bank have to explain the whole path.
+        replay_residual = (
+            _REPLAY_STATE_RESIDUAL_WEIGHT
+            * np.concatenate(replay_residuals)
         )
 
         # Tiny regularization discourages needlessly extreme controls but stays
@@ -146,7 +149,7 @@ class LeastSquaresTranscriptionOptimizor(TranscriptionOptimizor):
         return np.concatenate((
             _DEFECT_RESIDUAL_WEIGHT * np.concatenate(defects),
             terminal_residual,
-            replay_final_residual,
+            replay_residual,
             control_residual,
         ))
 

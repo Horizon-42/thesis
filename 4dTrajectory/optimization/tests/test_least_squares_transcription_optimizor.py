@@ -61,7 +61,7 @@ def test_optimize_trajectory_builds_least_squares_problem(monkeypatch):
         assert residuals.shape == (
             optimizer.n_segments * optimizer.state_dim
             + optimizer.state_dim
-            + optimizer.state_dim
+            + optimizer.n_segments * optimizer.state_dim
             + optimizer.n_segments * optimizer.control_dim,
         )
         assert len(geodetic_simulator.calls) == 4
@@ -109,19 +109,25 @@ def test_terminal_residual_is_weighted_above_defects():
     assert terminal_residual[2] == module._TERMINAL_RESIDUAL_WEIGHT
 
 
-def test_replay_final_state_residual_uses_controls_not_node_state():
+def test_replay_state_residual_uses_controls_not_node_state():
     module = load_least_squares_module()
     geodetic_simulator = FakeGeodeticSimulator(module)
     optimizer = module.LeastSquaresTranscriptionOptimizor(
         sim_server=geodetic_simulator,
-        n_segments=1,
+        n_segments=2,
         arrival_time_s=10.0,
         dt=10.0,
     )
     initial_state = module.GeodeticState(1.0, 2.0, 1000.0, 120.0, 0.1, -0.01, 70000.0)
     target_state = module.GeodeticState(1.0, 2.0, 900.0, 120.0, 0.1, -0.01, 70000.0)
-    node_control_guess = np.array([[0.0, 0.0, 0.0]])
-    node_state_guess = optimizer.geodetic_state_to_array(target_state).reshape(1, 6)
+    node_control_guess = np.array([
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0],
+    ])
+    node_state_guess = np.vstack((
+        optimizer.geodetic_state_to_array(target_state),
+        optimizer.geodetic_state_to_array(target_state),
+    ))
     z = np.hstack((node_control_guess.flatten(), node_state_guess.flatten()))
 
     residuals = optimizer.trajectory_residuals(z, initial_state, target_state)
@@ -129,8 +135,10 @@ def test_replay_final_state_residual_uses_controls_not_node_state():
         optimizer.n_segments * optimizer.state_dim
         + optimizer.state_dim
     )
-    replay_residual = residuals[replay_start:replay_start + optimizer.state_dim]
-    replay_state = optimizer.geodetic_state_to_array(
+    replay_residual = residuals[
+        replay_start:replay_start + optimizer.n_segments * optimizer.state_dim
+    ]
+    first_replay_state = optimizer.geodetic_state_to_array(
         module.GeodeticState(
             latitude=initial_state.latitude + 0.1,
             longitude=initial_state.longitude + 0.2,
@@ -141,15 +149,58 @@ def test_replay_final_state_residual_uses_controls_not_node_state():
             m=initial_state.m,
         )
     )
-
-    expected_replay_residual = (
-        module._REPLAY_FINAL_STATE_RESIDUAL_WEIGHT
-        * optimizer.state_constraint_error(
-            replay_state,
-            optimizer.geodetic_state_to_array(target_state),
+    second_replay_state = optimizer.geodetic_state_to_array(
+        module.GeodeticState(
+            latitude=initial_state.latitude + 0.2,
+            longitude=initial_state.longitude + 0.4,
+            altitude=initial_state.altitude + 2.0,
+            V=initial_state.V + 4.0,
+            psi=initial_state.psi + 0.02,
+            gamma=initial_state.gamma + 0.002,
+            m=initial_state.m,
         )
     )
+
+    expected_replay_residual = (
+        module._REPLAY_STATE_RESIDUAL_WEIGHT
+        * np.concatenate((
+            optimizer.state_constraint_error(
+                first_replay_state,
+                node_state_guess[0],
+            ),
+            optimizer.state_constraint_error(
+                second_replay_state,
+                node_state_guess[1],
+            ),
+        ))
+    )
     np.testing.assert_allclose(replay_residual, expected_replay_residual)
+
+
+def test_replay_residual_adds_one_state_block_per_segment():
+    module = load_least_squares_module()
+    optimizer = module.LeastSquaresTranscriptionOptimizor(
+        sim_server=FakeGeodeticSimulator(module),
+        n_segments=3,
+        arrival_time_s=12.0,
+        dt=12.0,
+    )
+    state = module.GeodeticState(1.0, 2.0, 1000.0, 120.0, 0.1, -0.01, 70000.0)
+    node_control_guess = np.zeros((optimizer.n_segments, optimizer.control_dim))
+    node_state_guess = np.tile(
+        optimizer.geodetic_state_to_array(state),
+        (optimizer.n_segments, 1),
+    )
+    z = np.hstack((node_control_guess.flatten(), node_state_guess.flatten()))
+
+    residuals = optimizer.trajectory_residuals(z, state, state)
+
+    assert residuals.shape == (
+        optimizer.n_segments * optimizer.state_dim
+        + optimizer.state_dim
+        + optimizer.n_segments * optimizer.state_dim
+        + optimizer.n_segments * optimizer.control_dim,
+    )
 
 
 def test_least_squares_failure_raises(monkeypatch):
