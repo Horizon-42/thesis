@@ -64,7 +64,7 @@ def test_optimize_trajectory_builds_least_squares_problem(monkeypatch):
             + optimizer.n_segments * optimizer.state_dim
             + optimizer.n_segments * optimizer.control_dim,
         )
-        assert len(geodetic_simulator.calls) == 4
+        assert len(geodetic_simulator.calls) == 8
         assert all(call["dt"] == 50.0 for call in geodetic_simulator.calls)
         return SimpleNamespace(success=True, x=x0, message="")
 
@@ -203,6 +203,24 @@ def test_replay_residual_adds_one_state_block_per_segment():
     )
 
 
+def test_initial_invalid_residual_raises_before_solver(monkeypatch):
+    module = load_least_squares_module()
+    optimizer = module.LeastSquaresTranscriptionOptimizor(
+        sim_server=FailingGeodeticSimulator(),
+        n_segments=1,
+        arrival_time_s=20.0,
+    )
+    state = module.GeodeticState(1.0, 2.0, 1000.0, 120.0, 0.1, -0.01, 70000.0)
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("least_squares should not run for an invalid initial guess")
+
+    monkeypatch.setattr(module, "least_squares", fail_if_called)
+
+    with pytest.raises(ValueError, match="initial trajectory guess is not simulatable"):
+        optimizer.optimize_trajectory(state, state)
+
+
 def test_least_squares_failure_raises(monkeypatch):
     module = load_least_squares_module()
     optimizer = module.LeastSquaresTranscriptionOptimizor(
@@ -237,3 +255,9 @@ class FakeGeodeticSimulator:
             gamma=state.gamma + 0.001,
             m=state.m,
         )
+
+
+class FailingGeodeticSimulator:
+    def step(self, state, control, dt):
+        del state, control, dt
+        raise ValueError("simulation stopped: altitude below 0")

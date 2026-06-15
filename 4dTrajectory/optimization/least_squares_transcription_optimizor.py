@@ -44,6 +44,10 @@ class LeastSquaresTranscriptionOptimizor(TranscriptionOptimizor):
             _INVALID_DEFECT_MAGNITUDE,
         )
 
+    @staticmethod
+    def is_invalid_residuals(residuals: np.ndarray) -> bool:
+        return np.all(residuals == _INVALID_DEFECT_MAGNITUDE)
+
     def build_variable_scale(self) -> np.ndarray:
         # least_squares uses this scale for trust-region steps and numerical
         # differentiation. Without it, thrust, altitude, lat/lon, and angles live
@@ -178,6 +182,16 @@ class LeastSquaresTranscriptionOptimizor(TranscriptionOptimizor):
             node_control_guess.flatten(),
             node_state_guess.flatten(),
         ))
+        initial_residuals = self.trajectory_residuals(
+            initial_guess,
+            initial_state,
+            target_state,
+        )
+        if self.is_invalid_residuals(initial_residuals):
+            raise ValueError(
+                "Least-squares initial trajectory guess is not simulatable; "
+                "check target speed, target altitude, arrival time, and initial state"
+            )
 
         # The residual function already contains defects, terminal error, and
         # control regularization. There is no separate objective function or hard
