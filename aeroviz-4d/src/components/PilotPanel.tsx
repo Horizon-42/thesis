@@ -98,6 +98,8 @@ export default function PilotPanel() {
   const [maxIterations, setMaxIterations] = useState(DEFAULT_MAX_ITERATIONS);
   const [optimizedTrajectory, setOptimizedTrajectory] =
     useState<TrajectoryOptimizationResult | null>(null);
+  const isVariableTimeTrajectoryOptimizer =
+    trajectoryOptimizer === "variableTimeWarmStartTranscription";
 
   const controlsRef = useRef(controls);
   const frameDtRef = useRef(frameDtS);
@@ -1001,6 +1003,8 @@ export default function PilotPanel() {
               >
                 <option value="transcription">Transcription</option>
                 <option value="leastSquaresTranscription">Least squares</option>
+                <option value="warmStartTranscription">Warm start fixed time</option>
+                <option value="variableTimeWarmStartTranscription">Warm start variable time</option>
                 <option value="singleShooting">Single shooting</option>
               </select>
             </label>
@@ -1022,7 +1026,7 @@ export default function PilotPanel() {
                 min={1}
                 max={1000}
                 step="5"
-                disabled={targetControlsDisabled}
+                disabled={targetControlsDisabled || isVariableTimeTrajectoryOptimizer}
                 onCommit={updateArrivalTime}
               />
             </label>

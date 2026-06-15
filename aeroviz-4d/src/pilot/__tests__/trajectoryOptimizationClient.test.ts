@@ -40,7 +40,7 @@ describe("trajectoryOptimizationClient", () => {
   it("posts the optimization request to the backend", async () => {
     const responsePayload = {
       ok: true,
-      optimizer: "leastSquaresTranscription",
+      optimizer: "variableTimeWarmStartTranscription",
       finalTimeS: 80,
       nSegments: 4,
       dtS: 0.2,

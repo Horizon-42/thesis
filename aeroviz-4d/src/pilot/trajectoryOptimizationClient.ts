@@ -3,6 +3,8 @@ import { AEROVIZ_BACKEND_URL, type PilotControls, type PilotResetState } from ".
 export type TrajectoryOptimizer =
   | "transcription"
   | "leastSquaresTranscription"
+  | "warmStartTranscription"
+  | "variableTimeWarmStartTranscription"
   | "singleShooting";
 
 export interface TrajectoryOptimizationRequest {
@@ -82,6 +84,8 @@ function readOptimizer(value: Record<string, unknown>): TrajectoryOptimizer {
   if (
     nested === "transcription" ||
     nested === "leastSquaresTranscription" ||
+    nested === "warmStartTranscription" ||
+    nested === "variableTimeWarmStartTranscription" ||
     nested === "singleShooting"
   ) {
     return nested;

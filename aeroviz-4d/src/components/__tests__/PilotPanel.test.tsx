@@ -149,7 +149,7 @@ describe("PilotPanel trajectory play mode", () => {
     expect((screen.getByLabelText("Max iter") as HTMLInputElement).value).toBe("300");
     const optimizerSelect = screen.getByRole("combobox", { name: "Optimizer" });
     fireEvent.change(optimizerSelect, {
-      target: { value: "leastSquaresTranscription" },
+      target: { value: "warmStartTranscription" },
     });
 
     await waitFor(() => {
@@ -192,7 +192,7 @@ describe("PilotPanel trajectory play mode", () => {
 
     await waitFor(() => {
       expect(mocks.runTrajectoryOptimization).toHaveBeenCalledWith({
-        optimizer: "leastSquaresTranscription",
+        optimizer: "warmStartTranscription",
         initialState: expect.objectContaining({
           lon: -78.7873,
           lat: 35.878659,
@@ -214,6 +214,27 @@ describe("PilotPanel trajectory play mode", () => {
         maxIterations: 300,
       });
     });
+  });
+
+  it("disables arrival time input for variable-time warm start optimizer", async () => {
+    render(<PilotPanel />);
+
+    expect(await screen.findByText("A320")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
+
+    const optimizerSelect = screen.getByRole("combobox", { name: "Optimizer" });
+    const arrivalInput = screen.getByLabelText("Arrival time") as HTMLInputElement;
+
+    expect(arrivalInput.disabled).toBe(false);
+    fireEvent.change(optimizerSelect, {
+      target: { value: "variableTimeWarmStartTranscription" },
+    });
+    expect(arrivalInput.disabled).toBe(true);
+
+    fireEvent.change(optimizerSelect, {
+      target: { value: "warmStartTranscription" },
+    });
+    expect(arrivalInput.disabled).toBe(false);
   });
 
   it("clamps trajectory target speed and heading to threshold constraints", async () => {

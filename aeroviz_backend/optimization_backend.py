@@ -23,6 +23,10 @@ from least_squares_transcription_optimizor import LeastSquaresTranscriptionOptim
 from single_shooting_optimizor import SingleShootingOptimizor
 from simulator import Control
 from transcription_optimizor import TranscriptionOptimizor
+from variable_time_warm_start_transcription_optimizor import (
+    VariableTimeWarmStartTranscriptionOptimizor,
+)
+from warm_start_transcription_optimizor import WarmStartTranscriptionOptimizor
 
 
 DEFAULT_N_SEGMENTS = 10
@@ -34,6 +38,8 @@ DEFAULT_OPTIMIZER = "transcription"
 SUPPORTED_OPTIMIZERS = (
     "transcription",
     "leastSquaresTranscription",
+    "warmStartTranscription",
+    "variableTimeWarmStartTranscription",
     "singleShooting",
 )
 
@@ -113,6 +119,24 @@ def make_optimizer(
 
     if optimizer_name == "leastSquaresTranscription":
         return LeastSquaresTranscriptionOptimizor(
+            geodetic_simulator,
+            n_segments=n_segments,
+            dt=dt,
+            arrival_time_s=arrival_time_s,
+            max_iterations=max_iterations,
+        )
+
+    if optimizer_name == "warmStartTranscription":
+        return WarmStartTranscriptionOptimizor(
+            geodetic_simulator,
+            n_segments=n_segments,
+            dt=dt,
+            arrival_time_s=arrival_time_s,
+            max_iterations=max_iterations,
+        )
+
+    if optimizer_name == "variableTimeWarmStartTranscription":
+        return VariableTimeWarmStartTranscriptionOptimizor(
             geodetic_simulator,
             n_segments=n_segments,
             dt=dt,
