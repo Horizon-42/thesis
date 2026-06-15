@@ -9,7 +9,6 @@ from transcription_optimizor import (
     TranscriptionOptimizor,
     _INVALID_DEFECT_MAGNITUDE,
     _MAX_ATTACK_RAD,
-    _MAX_THRUST_N,
     _MIN_ATTACK_RAD,
 )
 
@@ -17,7 +16,6 @@ _DEFECT_RESIDUAL_WEIGHT = 5.0
 _TERMINAL_RESIDUAL_WEIGHT = 50.0
 _REPLAY_STATE_RESIDUAL_WEIGHT = 5.0
 _CONTROL_RESIDUAL_WEIGHT = 1e-3
-_CONTROL_VARIABLE_SCALE = np.array([100000.0, 1.0, 0.1])
 _STATE_VARIABLE_SCALE = np.array([0.01, 0.01, 1000.0, 100.0, 1.0, 0.1])
 
 
@@ -53,8 +51,9 @@ class LeastSquaresTranscriptionOptimizor(TranscriptionOptimizor):
         # differentiation. Without it, thrust, altitude, lat/lon, and angles live
         # on wildly different magnitudes, and the solver can stop after moving
         # node states while barely changing the controls that replay uses.
+        control_variable_scale = np.array([self.max_thrust_n, 1.0, 0.1])
         return np.hstack((
-            np.tile(_CONTROL_VARIABLE_SCALE, self.n_segments),
+            np.tile(control_variable_scale, self.n_segments),
             np.tile(_STATE_VARIABLE_SCALE, self.n_segments),
         ))
 
@@ -145,7 +144,7 @@ class LeastSquaresTranscriptionOptimizor(TranscriptionOptimizor):
 
         # Tiny regularization discourages needlessly extreme controls but stays
         # small enough that dynamics defects and terminal accuracy dominate.
-        control_scales = np.array([_MAX_THRUST_N, math.pi / 2.0, _MAX_ATTACK_RAD])
+        control_scales = np.array([self.max_thrust_n, math.pi / 2.0, _MAX_ATTACK_RAD])
         control_residual = _CONTROL_RESIDUAL_WEIGHT * (
             node_control / control_scales
         ).reshape(-1)
@@ -171,7 +170,7 @@ class LeastSquaresTranscriptionOptimizor(TranscriptionOptimizor):
         # dictionaries. The variable order is [all controls, all node states],
         # matching TranscriptionOptimizor.unpack_z().
         control_bounds = [
-            (0.0, _MAX_THRUST_N),
+            (0.0, self.max_thrust_n),
             (-math.pi / 2.0, math.pi / 2.0),
             (_MIN_ATTACK_RAD, _MAX_ATTACK_RAD),
         ] * self.n_segments

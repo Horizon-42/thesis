@@ -1,18 +1,28 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
-import type { PilotResetState } from "../pilot/pilotClient";
+import type { RunwayThresholdTarget } from "../data/runwayThresholdTargets";
+import type { PilotAircraftConfig, PilotResetState } from "../pilot/pilotClient";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 
 export interface PilotInitialPlacementPosition {
   lon: number;
   lat: number;
+  altM?: number;
+  headingDeg?: number;
+  flightPathDeg?: number;
+}
+
+interface PilotInitialPlacementGuidance {
+  runway: RunwayThresholdTarget;
+  aircraft: PilotAircraftConfig;
 }
 
 interface UsePilotInitialPlacementOptions {
   enabled: boolean;
   previewVisible: boolean;
   initialState: PilotResetState;
+  placementGuidance: PilotInitialPlacementGuidance | null;
   onPositionChange: (position: PilotInitialPlacementPosition) => void;
   onFinish: () => void;
   onCancel: () => void;
@@ -20,11 +30,15 @@ interface UsePilotInitialPlacementOptions {
 
 const PLACEMENT_AIRCRAFT_ID = "pilot-initial-placement-aircraft";
 const PLACEMENT_GROUND_POINT_ID = "pilot-initial-placement-ground-point";
+const PLACEMENT_GUIDANCE_ID = "pilot-initial-placement-guidance";
+const METRES_PER_NAUTICAL_MILE = 1852;
+const EARTH_RADIUS_M = 6_378_137;
 
 export function usePilotInitialPlacement({
   enabled,
   previewVisible,
   initialState,
+  placementGuidance,
   onPositionChange,
   onFinish,
   onCancel,
@@ -32,6 +46,7 @@ export function usePilotInitialPlacement({
   const { viewer, setSelectedFlightId } = useApp();
   const aircraftRef = useRef<Cesium.Entity | null>(null);
   const groundPointRef = useRef<Cesium.Entity | null>(null);
+  const guidanceRef = useRef<Cesium.Entity | null>(null);
   const isDraggingRef = useRef(false);
   const callbacksRef = useRef({ onPositionChange, onFinish, onCancel });
 
@@ -48,6 +63,16 @@ export function usePilotInitialPlacement({
     updatePlacementPreview(viewer, initialState, aircraftRef, groundPointRef);
     viewer.scene.requestRender();
   }, [initialState, previewVisible, viewer]);
+
+  useEffect(() => {
+    if (!enabled || !placementGuidance || !isCesiumViewerUsable(viewer)) {
+      removePlacementGuidance(viewer, guidanceRef);
+      return;
+    }
+
+    updatePlacementGuidance(viewer, placementGuidance, guidanceRef);
+    viewer.scene.requestRender();
+  }, [enabled, placementGuidance, viewer]);
 
   useEffect(() => {
     if (!enabled || !isCesiumViewerUsable(viewer)) return;
@@ -82,7 +107,11 @@ export function usePilotInitialPlacement({
       const nextPosition = pickPilotPlacementPosition(viewer, position);
       if (!nextPosition) return false;
 
-      callbacksRef.current.onPositionChange(nextPosition);
+      callbacksRef.current.onPositionChange(
+        placementGuidance
+          ? withSuggestedFinalApproachState(nextPosition, placementGuidance)
+          : nextPosition,
+      );
       return true;
     };
 
@@ -128,11 +157,12 @@ export function usePilotInitialPlacement({
         canvas.style.cursor = previousCursor;
       }
     };
-  }, [enabled, setSelectedFlightId, viewer]);
+  }, [enabled, placementGuidance, setSelectedFlightId, viewer]);
 
   useEffect(() => {
     return () => {
       removePlacementPreview(viewer, aircraftRef, groundPointRef);
+      removePlacementGuidance(viewer, guidanceRef);
     };
   }, [viewer]);
 }
@@ -263,4 +293,134 @@ function removePlacementPreview(
     groundPointRef.current = null;
   }
   viewer.scene.requestRender();
+}
+
+function updatePlacementGuidance(
+  viewer: Cesium.Viewer,
+  guidance: PilotInitialPlacementGuidance,
+  guidanceRef: MutableRefObject<Cesium.Entity | null>,
+): void {
+  const positions = buildFinalApproachBandPositions(guidance);
+
+  if (!guidanceRef.current) {
+    guidanceRef.current = viewer.entities.add({
+      id: PLACEMENT_GUIDANCE_ID,
+      name: "Pilot Initial Placement Guidance",
+      polygon: makeGuidancePolygon(positions),
+    });
+    return;
+  }
+
+  guidanceRef.current.polygon = makeGuidancePolygon(positions);
+  guidanceRef.current.show = true;
+}
+
+function makeGuidancePolygon(positions: Cesium.Cartesian3[]): Cesium.PolygonGraphics {
+  return new Cesium.PolygonGraphics({
+    hierarchy: new Cesium.PolygonHierarchy(positions),
+    material: Cesium.Color.fromCssColorString("#22c55e").withAlpha(0.2),
+    outline: true,
+    outlineColor: Cesium.Color.fromCssColorString("#bbf7d0").withAlpha(0.92),
+    heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+  });
+}
+
+function removePlacementGuidance(
+  viewer: Cesium.Viewer | null,
+  guidanceRef: MutableRefObject<Cesium.Entity | null>,
+): void {
+  if (!isCesiumViewerUsable(viewer)) {
+    guidanceRef.current = null;
+    return;
+  }
+
+  if (guidanceRef.current) {
+    viewer.entities.remove(guidanceRef.current);
+    guidanceRef.current = null;
+    viewer.scene.requestRender();
+  }
+}
+
+function buildFinalApproachBandPositions(
+  guidance: PilotInitialPlacementGuidance,
+): Cesium.Cartesian3[] {
+  const runway = guidance.runway;
+  const aircraft = guidance.aircraft;
+  const innerM = aircraft.finalApproachMinNm * METRES_PER_NAUTICAL_MILE;
+  const outerM = aircraft.finalApproachMaxNm * METRES_PER_NAUTICAL_MILE;
+  const halfWidthM = aircraft.finalApproachLateralHalfWidthNm *
+    METRES_PER_NAUTICAL_MILE;
+  const direction = unitVectorFromSimulatorPsi(runway.psiDeg + 180);
+  const lateral = { east: -direction.north, north: direction.east };
+
+  const points = [
+    offsetLonLat(runway.lon, runway.lat, direction, lateral, innerM, halfWidthM),
+    offsetLonLat(runway.lon, runway.lat, direction, lateral, outerM, halfWidthM),
+    offsetLonLat(runway.lon, runway.lat, direction, lateral, outerM, -halfWidthM),
+    offsetLonLat(runway.lon, runway.lat, direction, lateral, innerM, -halfWidthM),
+  ];
+
+  return points.map((point) => Cesium.Cartesian3.fromDegrees(point.lon, point.lat, 0));
+}
+
+function withSuggestedFinalApproachState(
+  position: PilotInitialPlacementPosition,
+  guidance: PilotInitialPlacementGuidance,
+): PilotInitialPlacementPosition {
+  const distanceM = horizontalDistanceM(
+    position.lon,
+    position.lat,
+    guidance.runway.lon,
+    guidance.runway.lat,
+  );
+  const glideAngleRad = Cesium.Math.toRadians(
+    guidance.aircraft.finalApproachGlideAngleDeg,
+  );
+  return {
+    ...position,
+    altM: guidance.runway.altM +
+      guidance.aircraft.thresholdCrossingHeightM +
+      Math.tan(glideAngleRad) * distanceM,
+    headingDeg: guidance.runway.psiDeg,
+    flightPathDeg: -guidance.aircraft.finalApproachGlideAngleDeg,
+  };
+}
+
+function offsetLonLat(
+  lon: number,
+  lat: number,
+  direction: { east: number; north: number },
+  lateral: { east: number; north: number },
+  alongM: number,
+  lateralM: number,
+): { lon: number; lat: number } {
+  const eastM = direction.east * alongM + lateral.east * lateralM;
+  const northM = direction.north * alongM + lateral.north * lateralM;
+  const latRad = Cesium.Math.toRadians(lat);
+  return {
+    lon: lon + Cesium.Math.toDegrees(eastM / (EARTH_RADIUS_M * Math.cos(latRad))),
+    lat: lat + Cesium.Math.toDegrees(northM / EARTH_RADIUS_M),
+  };
+}
+
+function unitVectorFromSimulatorPsi(psiDeg: number): { east: number; north: number } {
+  const psiRad = Cesium.Math.toRadians(psiDeg);
+  return {
+    east: Math.cos(psiRad),
+    north: Math.sin(psiRad),
+  };
+}
+
+function horizontalDistanceM(
+  lonA: number,
+  latA: number,
+  lonB: number,
+  latB: number,
+): number {
+  const meanLat = Cesium.Math.toRadians((latA + latB) * 0.5);
+  const eastM = Cesium.Math.toRadians(lonA - lonB) *
+    EARTH_RADIUS_M *
+    Math.cos(meanLat);
+  const northM = Cesium.Math.toRadians(latA - latB) * EARTH_RADIUS_M;
+  return Math.hypot(eastM, northM);
 }

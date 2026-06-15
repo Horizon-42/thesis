@@ -1,6 +1,6 @@
 import type * as Cesium from "cesium";
 import { renderHook } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   addEntity,
@@ -87,6 +87,12 @@ vi.mock("cesium", () => ({
   },
   ConstantProperty: class ConstantProperty {
     constructor(public value: unknown) {}
+  },
+  PolygonHierarchy: class PolygonHierarchy {
+    constructor(public positions: unknown[]) {}
+  },
+  PolygonGraphics: class PolygonGraphics {
+    constructor(public options: unknown) {}
   },
   Color: {
     WHITE: "white",
@@ -175,6 +181,10 @@ describe("pickPilotPlacementPosition", () => {
 });
 
 describe("usePilotInitialPlacement", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("keeps the initial aircraft preview after placement mode ends", () => {
     const props = {
       enabled: true,
@@ -189,6 +199,7 @@ describe("usePilotInitialPlacement", () => {
         massKg: 78000,
         aircraftType: "A320" as const,
       },
+      placementGuidance: null,
       onPositionChange: vi.fn(),
       onFinish: vi.fn(),
       onCancel: vi.fn(),
@@ -207,6 +218,63 @@ describe("usePilotInitialPlacement", () => {
     rerender({ ...props, enabled: false, previewVisible: false });
     expect(removeEntity).toHaveBeenCalledTimes(2);
     expect(requestRender).toHaveBeenCalled();
+  });
+
+  it("draws the selected runway final approach placement band", () => {
+    renderHook(() =>
+      usePilotInitialPlacement({
+        enabled: true,
+        previewVisible: false,
+        initialState: {
+          lon: -78.7873,
+          lat: 35.878659,
+          altM: 1000,
+          speedMps: 120,
+          headingDeg: 0,
+          flightPathDeg: 0,
+          massKg: 78000,
+          aircraftType: "A320",
+        },
+        placementGuidance: {
+          runway: {
+            id: "RW05L",
+            runwayIdent: "RW05L",
+            runwayPairIdent: "05L/23R",
+            lon: -78.802,
+            lat: 35.874,
+            altM: 111.86,
+            psiDeg: 45,
+          },
+          aircraft: {
+            code: "A320",
+            name: "Airbus A320-200",
+            category: "narrow_body",
+            massKg: 78000,
+            wingAreaM2: 122.6,
+            maxThrustN: 240000,
+            approachThrustGuessN: 40000,
+            terminalSpeedKt: 145,
+            terminalSpeedMinKt: 135,
+            terminalSpeedMaxKt: 155,
+            finalApproachMinNm: 5,
+            finalApproachMaxNm: 10,
+            finalApproachLateralHalfWidthNm: 0.8,
+            finalApproachGlideAngleDeg: 3,
+            thresholdCrossingHeightM: 15,
+          },
+        },
+        onPositionChange: vi.fn(),
+        onFinish: vi.fn(),
+        onCancel: vi.fn(),
+      }),
+    );
+
+    expect(addEntity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "pilot-initial-placement-guidance",
+        polygon: expect.any(Object),
+      }),
+    );
   });
 });
 

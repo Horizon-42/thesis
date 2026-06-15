@@ -33,11 +33,13 @@ import {
   type PilotSnapshot,
 } from "../pilot/pilotClient";
 import {
-  TARGET_APPROACH_SPEED_MPS,
   clampHeadingToRunwayTolerance,
   clampTargetSpeedMps,
+  defaultTargetSpeedMps,
+  knotsToMetresPerSecond,
   runwayAlignedHeadingDeg,
   targetAltitudeMForThreshold,
+  targetSpeedBoundsMps,
 } from "../pilot/trajectoryTargetConstraints";
 import {
   runTrajectoryOptimization,
@@ -45,19 +47,15 @@ import {
   type TrajectoryOptimizationResult,
 } from "../pilot/trajectoryOptimizationClient";
 
-const DEFAULT_CONTROLS: PilotControls = {
-  thrustN: 43441,
-  bankDeg: 0,
-  attackDeg: 5.783,
-};
+const DEFAULT_CONTROLS: PilotControls = makeDefaultControls(null);
 const DEFAULT_FRAME_DT_S = 0.2;
 const STEP_INTERVAL_MS = 120;
 const MAX_TRAIL_POINTS = 360;
-const DEFAULT_TARGET_SPEED_MPS = TARGET_APPROACH_SPEED_MPS;
 const DEFAULT_TARGET_GAMMA_DEG = -3;
 const DEFAULT_MAX_ITERATIONS = 300;
 const DEFAULT_ARRIVAL_TIME_S = 100;
 const DEFAULT_TRAJECTORY_OPTIMIZER: TrajectoryOptimizer = "transcription";
+const FALLBACK_MAX_THRUST_N = 240000;
 
 type PilotPanelMode = "pilot" | "trajectory";
 
@@ -90,7 +88,7 @@ export default function PilotPanel() {
   const [trail, setTrail] = useState<PilotAircraftPose[]>([]);
   const [runwayTargets, setRunwayTargets] = useState<RunwayThresholdTarget[]>([]);
   const [targetState, setTargetState] = useState<PilotTargetState>(() =>
-    makeDefaultTrajectoryTarget(null),
+    makeDefaultTrajectoryTarget(null, null),
   );
   const [trajectoryOptimizer, setTrajectoryOptimizer] =
     useState<TrajectoryOptimizer>(DEFAULT_TRAJECTORY_OPTIMIZER);
@@ -115,8 +113,23 @@ export default function PilotPanel() {
   );
 
   const pose = snapshotToPose(snapshot);
+  const selectedAircraft = aircraftConfigs.find(
+    (config) => config.code === initialState.aircraftType,
+  ) ?? aircraftConfigs[0] ?? null;
+  const selectedMaxThrustN = selectedAircraft?.maxThrustN ?? FALLBACK_MAX_THRUST_N;
+  const targetSpeedBounds = targetSpeedBoundsMps(selectedAircraft);
   const selectedTargetRunway = runwayTargets.find(
     (target) => target.id === targetState.runwayThresholdId,
+  );
+  const placementGuidance = useMemo(
+    () =>
+      selectedAircraft && selectedTargetRunway
+        ? {
+            aircraft: selectedAircraft,
+            runway: selectedTargetRunway,
+          }
+        : null,
+    [selectedAircraft, selectedTargetRunway],
   );
   const targetGateState = useMemo(
     () =>
@@ -157,10 +170,16 @@ export default function PilotPanel() {
         ...current,
         lon: clamp(position.lon, -180, 180),
         lat: clamp(position.lat, -90, 90),
+        altM: position.altM ?? current.altM,
+        headingDeg: position.headingDeg ?? current.headingDeg,
+        flightPathDeg: position.flightPathDeg ?? current.flightPathDeg,
+        speedMps: selectedAircraft
+          ? defaultInitialSpeedMps(selectedAircraft)
+          : current.speedMps,
       }));
       clearSnapshotForInitialEdit();
     },
-    [clearSnapshotForInitialEdit],
+    [clearSnapshotForInitialEdit, selectedAircraft],
   );
 
   const finishInitialPlacement = useCallback(() => {
@@ -251,6 +270,7 @@ export default function PilotPanel() {
       !isEnabled &&
       !snapshot,
     initialState,
+    placementGuidance,
     onPositionChange: updateInitialPosition,
     onFinish: finishInitialPlacement,
     onCancel: cancelInitialPlacement,
@@ -269,10 +289,12 @@ export default function PilotPanel() {
   });
 
   useEffect(() => {
+    const aircraft = aircraftConfigs[0] ?? null;
     placementBackupRef.current = null;
     trajectoryReplayIndexRef.current = 0;
     trajectorySegmentElapsedSRef.current = 0;
-    setInitialState(makeDefaultInitialState(airport, aircraftConfigs[0] ?? null));
+    setInitialState(makeDefaultInitialState(airport, aircraft));
+    setControls(makeDefaultControls(aircraft));
     setActiveMode("pilot");
     setIsInitialEditorOpen(false);
     setIsTargetEditorOpen(false);
@@ -285,6 +307,17 @@ export default function PilotPanel() {
     setTrail([]);
     setOptimizedTrajectory(null);
   }, [airport, aircraftConfigs]);
+
+  useEffect(() => {
+    if (!selectedAircraft) return;
+
+    setTargetState((current) => {
+      const runwayTarget = runwayTargets.find(
+        (target) => target.id === current.runwayThresholdId,
+      ) ?? runwayTargets[0] ?? null;
+      return makeDefaultTrajectoryTarget(runwayTarget, selectedAircraft, current);
+    });
+  }, [runwayTargets, selectedAircraft]);
 
   useEffect(() => {
     let cancelled = false;
@@ -309,7 +342,7 @@ export default function PilotPanel() {
   useEffect(() => {
     if (!activeAirportCode) {
       setRunwayTargets([]);
-      setTargetState(makeDefaultTrajectoryTarget(null));
+      setTargetState(makeDefaultTrajectoryTarget(null, null));
       return;
     }
 
@@ -322,13 +355,13 @@ export default function PilotPanel() {
           const selected = targets.find((target) => target.id === current.runwayThresholdId) ??
             targets[0] ??
             null;
-          return makeDefaultTrajectoryTarget(selected, current);
+          return makeDefaultTrajectoryTarget(selected, null, current);
         });
       })
       .catch((runwayError: unknown) => {
         if (cancelled) return;
         setRunwayTargets([]);
-        setTargetState(makeDefaultTrajectoryTarget(null));
+        setTargetState(makeDefaultTrajectoryTarget(null, null));
         setError(toErrorMessage(runwayError));
       });
 
@@ -476,10 +509,10 @@ export default function PilotPanel() {
           nudgeControl("attackDeg", -0.5, -10, 18);
           break;
         case "q":
-          nudgeControl("thrustN", -500, 0, 60000);
+          nudgeControl("thrustN", -500, 0, selectedMaxThrustN);
           break;
         case "e":
-          nudgeControl("thrustN", 500, 0, 60000);
+          nudgeControl("thrustN", 500, 0, selectedMaxThrustN);
           break;
         case " ":
           setControls((current) => ({ ...current, bankDeg: 0, attackDeg: 0 }));
@@ -495,7 +528,7 @@ export default function PilotPanel() {
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [activeMode, isEnabled]);
+  }, [activeMode, isEnabled, selectedMaxThrustN]);
 
   async function startPilot() {
     placementBackupRef.current = null;
@@ -587,7 +620,12 @@ export default function PilotPanel() {
       ...current,
       aircraftType: aircraft.code,
       massKg: aircraft.massKg,
+      speedMps: defaultInitialSpeedMps(aircraft),
     }));
+    setControls(makeDefaultControls(aircraft));
+    setTargetState((current) =>
+      makeDefaultTrajectoryTarget(selectedTargetRunway ?? null, aircraft, current, true)
+    );
     setIsInitialPreviewVisible(true);
     clearSnapshotForInitialEdit();
   }
@@ -629,7 +667,9 @@ export default function PilotPanel() {
     const target = runwayTargets.find((candidate) => candidate.id === runwayThresholdId);
     if (!target) return;
 
-    setTargetState((current) => makeDefaultTrajectoryTarget(target, current));
+    setTargetState((current) =>
+      makeDefaultTrajectoryTarget(target, selectedAircraft, current)
+    );
     setOptimizedTrajectory(null);
     setIsTrajectoryPlaying(false);
   }
@@ -644,7 +684,7 @@ export default function PilotPanel() {
 
     let nextValue = clamp(value, min, max);
     if (key === "speedMps") {
-      nextValue = clampTargetSpeedMps(nextValue);
+      nextValue = clampTargetSpeedMps(nextValue, selectedAircraft);
     } else if (key === "headingDeg") {
       nextValue = selectedTargetRunway
         ? clampHeadingToRunwayTolerance(value, selectedTargetRunway.psiDeg)
@@ -940,6 +980,8 @@ export default function PilotPanel() {
             open={isTargetEditorOpen}
             state={targetState}
             runwayTargets={runwayTargets}
+            speedMinMps={targetSpeedBounds.min}
+            speedMaxMps={targetSpeedBounds.max}
             disabled={targetControlsDisabled}
             onClose={closeTargetEditor}
             onRunwayChange={updateTargetRunway}
@@ -1166,7 +1208,7 @@ export default function PilotPanel() {
 
             <div className="pilot-stepper-row">
               <button
-                onClick={() => nudgeControl("thrustN", -1000, 0, 60000)}
+                onClick={() => nudgeControl("thrustN", -1000, 0, selectedMaxThrustN)}
                 title="Reduce thrust"
               >
                 -
@@ -1176,14 +1218,16 @@ export default function PilotPanel() {
                 <EnglishNumberInput
                   value={controls.thrustN}
                   min={0}
-                  max={60000}
+                  max={selectedMaxThrustN}
                   step="500"
                   disabled={false}
-                  onCommit={(value) => updateControl("thrustN", value, 0, 60000)}
+                  onCommit={(value) =>
+                    updateControl("thrustN", value, 0, selectedMaxThrustN)
+                  }
                 />
               </label>
               <button
-                onClick={() => nudgeControl("thrustN", 1000, 0, 60000)}
+                onClick={() => nudgeControl("thrustN", 1000, 0, selectedMaxThrustN)}
                 title="Increase thrust"
               >
                 +
@@ -1228,7 +1272,7 @@ function makeDefaultInitialState(
     lon: airport?.lon ?? -78.7873,
     lat: airport?.lat ?? 35.878659,
     altM: 1000,
-    speedMps: 120,
+    speedMps: defaultInitialSpeedMps(aircraft),
     headingDeg: 0,
     flightPathDeg: 0,
     massKg: aircraft?.massKg ?? 0,
@@ -1236,23 +1280,41 @@ function makeDefaultInitialState(
   };
 }
 
+function makeDefaultControls(aircraft: PilotAircraftConfig | null): PilotControls {
+  return {
+    thrustN: aircraft?.approachThrustGuessN ?? 40000,
+    bankDeg: 0,
+    attackDeg: 5.783,
+  };
+}
+
 function makeDefaultTrajectoryTarget(
   runwayTarget: RunwayThresholdTarget | null,
+  aircraft: PilotAircraftConfig | null,
   fallback?: PilotTargetState,
+  resetSpeed = false,
 ): PilotTargetState {
+  const fallbackSpeed = resetSpeed ? undefined : fallback?.speedMps;
   return {
     runwayThresholdId: runwayTarget?.id ?? fallback?.runwayThresholdId ?? "",
     lon: runwayTarget?.lon ?? fallback?.lon ?? 0,
     lat: runwayTarget?.lat ?? fallback?.lat ?? 0,
     altM: runwayTarget
-      ? targetAltitudeMForThreshold(runwayTarget.altM)
+      ? targetAltitudeMForThreshold(runwayTarget.altM, aircraft)
       : fallback?.altM ?? 0,
-    speedMps: clampTargetSpeedMps(fallback?.speedMps ?? DEFAULT_TARGET_SPEED_MPS),
+    speedMps: clampTargetSpeedMps(
+      fallbackSpeed ?? defaultTargetSpeedMps(aircraft),
+      aircraft,
+    ),
     headingDeg: runwayTarget
       ? runwayAlignedHeadingDeg(runwayTarget.psiDeg)
       : runwayAlignedHeadingDeg(fallback?.headingDeg ?? 0),
     flightPathDeg: fallback?.flightPathDeg ?? DEFAULT_TARGET_GAMMA_DEG,
   };
+}
+
+function defaultInitialSpeedMps(aircraft: PilotAircraftConfig | null): number {
+  return knotsToMetresPerSecond((aircraft?.terminalSpeedKt ?? 145) + 25);
 }
 
 function trajectoryTargetToPilotState(

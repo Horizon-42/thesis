@@ -32,9 +32,8 @@ _HEADING_RESIDUAL_SCALE_RAD = math.radians(10.0)
 # Flight path angle is tighter because small gamma errors are operationally visible.
 _FLIGHT_PATH_RESIDUAL_SCALE_RAD = math.radians(2.0)
 
-# For state value normalization, the optimizer only needs to compare relative magnitudes of defects
-# Max thrust, 1000KN for wide-body aircraft
-_MAX_THRUST_N = 1000000.0
+# For state value normalization, the optimizer only needs to compare relative
+# magnitudes of defects. Thrust bounds now come from AircraftSpec.
 # Max Latitude difference, half the globe
 _MAX_LATITUDE_DEG = 90.0
 # Max Longitude difference, half the globe
@@ -78,6 +77,13 @@ class TranscriptionOptimizor:
         self.arrival_time_s = float(arrival_time_s)
         self.max_iterations = max_iterations
         self.ftol = ftol
+        aircraft = getattr(getattr(sim_server, "simulator", None), "aircraft", None)
+        self.max_thrust_n = float(
+            getattr(aircraft, "max_thrust_n", _DEFAULT_THRUST_GUESS_N)
+        )
+        self.default_thrust_guess_n = float(
+            getattr(aircraft, "approach_thrust_guess_n", _DEFAULT_THRUST_GUESS_N)
+        )
 
     def unpack_z(self, z):
         z = np.asarray(z, dtype=float)
@@ -172,7 +178,7 @@ class TranscriptionOptimizor:
             [
                 # Thrust and bank are still simple neutral guesses; SLSQP can
                 # adjust them after it gets a valid first Jacobian.
-                _DEFAULT_THRUST_GUESS_N,
+                self.default_thrust_guess_n,
                 0.0,
                 self.estimate_trim_attack_rad(start_state, initial_state.m),
             ]
@@ -219,7 +225,7 @@ class TranscriptionOptimizor:
             # locally trimmed segment needs; negative means it needs more alpha.
             lift_coefficient = simulator.CL0 + simulator.CL_alpha * attack_rad
             lift = dynamic_pressure_area * lift_coefficient
-            thrust_normal = _DEFAULT_THRUST_GUESS_N * math.sin(attack_rad)
+            thrust_normal = self.default_thrust_guess_n * math.sin(attack_rad)
             return lift + thrust_normal - required_normal_force
 
         low_error = vertical_balance_error(_MIN_ATTACK_RAD)
@@ -342,8 +348,9 @@ class TranscriptionOptimizor:
 
         # control guess
         node_control_guess = self.build_control_guess(initial_state, node_state_guess)
-        # control bounds, for example, thrust between 0 and max thrust 1000KN, bank angle between -90 and 90 degrees, attack angle between -18 and 18 degrees
-        control_bounds = [(0.0, _MAX_THRUST_N), (-math.pi/2, math.pi/2), (_MIN_ATTACK_RAD, _MAX_ATTACK_RAD)] * self.n_segments
+        # control bounds: thrust is aircraft-specific, bank and attack angle use
+        # the current point-mass model limits.
+        control_bounds = [(0.0, self.max_thrust_n), (-math.pi/2, math.pi/2), (_MIN_ATTACK_RAD, _MAX_ATTACK_RAD)] * self.n_segments
 
         initial_guess = np.hstack((node_control_guess.flatten(), node_state_guess.flatten()))
         bounds = control_bounds + state_bounds
@@ -352,7 +359,7 @@ class TranscriptionOptimizor:
         # control effort instead of optimizing time.
         def trajectory_objective(z):
             _, node_control, _ = self.unpack_z(z)
-            control_scales = np.array([_MAX_THRUST_N, math.pi / 2.0, _MAX_ATTACK_RAD])
+            control_scales = np.array([self.max_thrust_n, math.pi / 2.0, _MAX_ATTACK_RAD])
             return float(np.mean((node_control / control_scales) ** 2))
         
         # defect constraints to ensure dynamics are satisfied at each segment

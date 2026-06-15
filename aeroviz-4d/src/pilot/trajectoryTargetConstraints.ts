@@ -2,33 +2,51 @@ const METRES_PER_FOOT = 0.3048;
 const METRES_PER_NAUTICAL_MILE = 1852;
 const SECONDS_PER_HOUR = 3600;
 
-export const TARGET_THRESHOLD_CROSSING_HEIGHT_FT = 6;
+export const TARGET_THRESHOLD_CROSSING_HEIGHT_FT = 50;
 export const TARGET_THRESHOLD_CROSSING_HEIGHT_M =
   TARGET_THRESHOLD_CROSSING_HEIGHT_FT * METRES_PER_FOOT;
 
-export const TARGET_APPROACH_SPEED_KT = 62;
-export const TARGET_APPROACH_SPEED_TOLERANCE_KT = 5;
-export const TARGET_APPROACH_SPEED_MPS = knotsToMetresPerSecond(
-  TARGET_APPROACH_SPEED_KT,
-);
-export const TARGET_APPROACH_SPEED_MIN_MPS = knotsToMetresPerSecond(
-  TARGET_APPROACH_SPEED_KT - TARGET_APPROACH_SPEED_TOLERANCE_KT,
-);
-export const TARGET_APPROACH_SPEED_MAX_MPS = knotsToMetresPerSecond(
-  TARGET_APPROACH_SPEED_KT + TARGET_APPROACH_SPEED_TOLERANCE_KT,
-);
-
 export const TARGET_RUNWAY_HEADING_TOLERANCE_DEG = 1;
 
-export function targetAltitudeMForThreshold(thresholdElevationM: number): number {
-  return thresholdElevationM + TARGET_THRESHOLD_CROSSING_HEIGHT_M;
+interface TargetSpeedAircraftConfig {
+  terminalSpeedKt: number;
+  terminalSpeedMinKt: number;
+  terminalSpeedMaxKt: number;
+  thresholdCrossingHeightM: number;
 }
 
-export function clampTargetSpeedMps(speedMps: number): number {
+export function targetAltitudeMForThreshold(
+  thresholdElevationM: number,
+  aircraft: TargetSpeedAircraftConfig | null = null,
+): number {
+  return thresholdElevationM +
+    (aircraft?.thresholdCrossingHeightM ?? TARGET_THRESHOLD_CROSSING_HEIGHT_M);
+}
+
+export function defaultTargetSpeedMps(
+  aircraft: TargetSpeedAircraftConfig | null,
+): number {
+  return knotsToMetresPerSecond(aircraft?.terminalSpeedKt ?? 145);
+}
+
+export function targetSpeedBoundsMps(
+  aircraft: TargetSpeedAircraftConfig | null,
+): { min: number; max: number } {
+  return {
+    min: knotsToMetresPerSecond(aircraft?.terminalSpeedMinKt ?? 135),
+    max: knotsToMetresPerSecond(aircraft?.terminalSpeedMaxKt ?? 155),
+  };
+}
+
+export function clampTargetSpeedMps(
+  speedMps: number,
+  aircraft: TargetSpeedAircraftConfig | null,
+): number {
+  const bounds = targetSpeedBoundsMps(aircraft);
   return clamp(
     speedMps,
-    TARGET_APPROACH_SPEED_MIN_MPS,
-    TARGET_APPROACH_SPEED_MAX_MPS,
+    bounds.min,
+    bounds.max,
   );
 }
 
@@ -51,7 +69,7 @@ export function clampHeadingToRunwayTolerance(
   );
 }
 
-function knotsToMetresPerSecond(knots: number): number {
+export function knotsToMetresPerSecond(knots: number): number {
   return (knots * METRES_PER_NAUTICAL_MILE) / SECONDS_PER_HOUR;
 }
 

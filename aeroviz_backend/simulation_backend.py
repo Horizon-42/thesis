@@ -21,7 +21,7 @@ DEFAULT_STATE = GeodeticState(
 )
 
 DEFAULT_CONTROL = Control(
-    thrust=12000.0,
+    thrust=A320.approach_thrust_guess_n,
     bank_rad=0.0,
     attack_rad=0.0,
 )
@@ -46,15 +46,21 @@ class SimulationBackend:
 
         self.geodetic_simulator = GeodeticSimulator(aircraft)
         self.state = read_geodetic_state(state_payload, DEFAULT_STATE, aircraft)
-        self.control = read_control(control_payload, DEFAULT_CONTROL)
+        self.control = read_control(
+            control_payload,
+            default_control_for_aircraft(aircraft),
+            aircraft,
+        )
         self.elapsed = 0.0
         return self.snapshot()
 
     def step(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = payload or {}
+        aircraft = self.geodetic_simulator.simulator.aircraft
         self.control = read_control(
             read_optional_mapping(payload, "control"),
             self.control,
+            aircraft,
         )
         dt = clamp(read_float(payload, "dtS", DEFAULT_DT), 0.001, MAX_DT)
         self.state = self.geodetic_simulator.step(self.state, self.control, dt)
@@ -112,9 +118,17 @@ def read_positive_int(payload: dict[str, Any], key: str, default: int) -> int:
     return int(number)
 
 
-def read_control(payload: dict[str, Any], fallback: Control) -> Control:
+def read_control(
+    payload: dict[str, Any],
+    fallback: Control,
+    aircraft: AircraftSpec,
+) -> Control:
     return Control(
-        thrust=clamp(read_float(payload, "thrustN", fallback.thrust), 0.0, 80000.0),
+        thrust=clamp(
+            read_float(payload, "thrustN", fallback.thrust),
+            0.0,
+            aircraft.max_thrust_n,
+        ),
         bank_rad=math.radians(
             clamp(
                 read_float(payload, "bankDeg", math.degrees(fallback.bank_rad)),
@@ -129,6 +143,14 @@ def read_control(payload: dict[str, Any], fallback: Control) -> Control:
                 18.0,
             )
         ),
+    )
+
+
+def default_control_for_aircraft(aircraft: AircraftSpec) -> Control:
+    return Control(
+        thrust=aircraft.approach_thrust_guess_n,
+        bank_rad=DEFAULT_CONTROL.bank_rad,
+        attack_rad=DEFAULT_CONTROL.attack_rad,
     )
 
 
@@ -194,6 +216,20 @@ def aircraft_catalog() -> dict[str, Any]:
                 "category": aircraft.category,
                 "massKg": aircraft.mass_kg,
                 "wingAreaM2": aircraft.wing_area_m2,
+                "maxThrustN": aircraft.max_thrust_n,
+                "approachThrustGuessN": aircraft.approach_thrust_guess_n,
+                "terminalSpeedKt": aircraft.terminal_speed_kt,
+                "terminalSpeedMinKt": aircraft.terminal_speed_min_kt,
+                "terminalSpeedMaxKt": aircraft.terminal_speed_max_kt,
+                "finalApproachMinNm": aircraft.final_approach_min_nm,
+                "finalApproachMaxNm": aircraft.final_approach_max_nm,
+                "finalApproachLateralHalfWidthNm": (
+                    aircraft.final_approach_lateral_half_width_nm
+                ),
+                "finalApproachGlideAngleDeg": (
+                    aircraft.final_approach_glide_angle_deg
+                ),
+                "thresholdCrossingHeightM": aircraft.threshold_crossing_height_m,
             }
             for aircraft in AIRCRAFT_PRESETS.values()
         ],

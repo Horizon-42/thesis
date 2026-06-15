@@ -63,6 +63,11 @@ class SingleShootingOptimizor:
         self.dt = dt
         self.max_iterations = max_iterations
         self.ftol = ftol
+        aircraft = getattr(getattr(sim, "simulator", None), "aircraft", None)
+        self.max_thrust_n = float(getattr(aircraft, "max_thrust_n", 1000000.0))
+        self.default_thrust_guess_n = float(
+            getattr(aircraft, "approach_thrust_guess_n", _DEFAULT_THRUST_GUESS_N)
+        )
     
     def unpack_z(self, z: np.ndarray) -> tuple[float, np.ndarray]:
         final_time = z[0]
@@ -233,10 +238,14 @@ class SingleShootingOptimizor:
 
         # control guesses and bounds
         control_guesses = np.tile(
-            np.array([_DEFAULT_THRUST_GUESS_N, 0.0, _DEFAULT_ATTACK_GUESS_RAD]),
+            np.array([self.default_thrust_guess_n, 0.0, _DEFAULT_ATTACK_GUESS_RAD]),
             (self.n_control_segments, 1),
         )
-        control_bounds = [(0.0, 1000000.0), (-math.pi/2, math.pi/2), (_MIN_ATTACK_RAD, _MAX_ATTACK_RAD)] * self.n_control_segments
+        control_bounds = [
+            (0.0, self.max_thrust_n),
+            (-math.pi / 2, math.pi / 2),
+            (_MIN_ATTACK_RAD, _MAX_ATTACK_RAD),
+        ] * self.n_control_segments
 
         initial_guess = np.hstack(([final_time_guess], control_guesses.flatten()))
         bounds = [final_time_bound] + control_bounds

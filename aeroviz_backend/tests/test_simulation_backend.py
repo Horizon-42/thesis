@@ -1,7 +1,7 @@
 import math
 import unittest
 
-from aeroviz_backend.simulation_backend import SimulationBackend
+from aeroviz_backend.simulation_backend import SimulationBackend, aircraft_catalog
 from aircraft_sets import B77W
 
 
@@ -43,6 +43,23 @@ class TestSimulationBackend(unittest.TestCase):
             + backend.geodetic_simulator.simulator.CL_alpha * math.radians(4.0),
         )
 
+    def test_reset_clamps_thrust_with_selected_aircraft_spec(self):
+        backend = SimulationBackend()
+
+        snapshot = backend.reset({
+            "state": {"aircraftType": "C172"},
+            "control": {"thrustN": 1000000.0},
+        })
+
+        self.assertAlmostEqual(snapshot["control"]["thrustN"], 3200.0)
+
+    def test_reset_uses_selected_aircraft_default_control(self):
+        backend = SimulationBackend()
+
+        snapshot = backend.reset({"state": {"aircraftType": "C172"}})
+
+        self.assertAlmostEqual(snapshot["control"]["thrustN"], 800.0)
+
     def test_step_advances_elapsed_time_and_position(self):
         backend = SimulationBackend()
         backend.reset({
@@ -63,6 +80,16 @@ class TestSimulationBackend(unittest.TestCase):
         self.assertAlmostEqual(snapshot["elapsedS"], 0.2)
         self.assertGreater(snapshot["state"]["lon"], 0.0)
         self.assertTrue(math.isfinite(snapshot["aero"]["liftCoefficient"]))
+
+    def test_aircraft_catalog_exposes_performance_defaults(self):
+        payload = aircraft_catalog()
+        a320 = next(item for item in payload["aircraft"] if item["code"] == "A320")
+        b77w = next(item for item in payload["aircraft"] if item["code"] == "B77W")
+
+        self.assertEqual(a320["terminalSpeedKt"], 145.0)
+        self.assertEqual(a320["maxThrustN"], 240000.0)
+        self.assertEqual(a320["finalApproachMinNm"], 5.0)
+        self.assertEqual(b77w["maxThrustN"], 1026000.0)
 
 
 if __name__ == "__main__":

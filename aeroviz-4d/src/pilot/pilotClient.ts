@@ -12,6 +12,16 @@ export interface PilotAircraftConfig {
   category: string;
   massKg: number;
   wingAreaM2: number;
+  maxThrustN: number;
+  approachThrustGuessN: number;
+  terminalSpeedKt: number;
+  terminalSpeedMinKt: number;
+  terminalSpeedMaxKt: number;
+  finalApproachMinNm: number;
+  finalApproachMaxNm: number;
+  finalApproachLateralHalfWidthNm: number;
+  finalApproachGlideAngleDeg: number;
+  thresholdCrossingHeightM: number;
 }
 
 export interface PilotResetState {
@@ -143,6 +153,22 @@ function parsePilotAircraftConfigs(value: unknown): PilotAircraftConfig[] {
       category: readString(item, "category"),
       massKg: readNumber(item, "massKg"),
       wingAreaM2: readNumber(item, "wingAreaM2"),
+      maxThrustN: readNumber(item, "maxThrustN"),
+      approachThrustGuessN: readNumber(item, "approachThrustGuessN"),
+      terminalSpeedKt: readNumber(item, "terminalSpeedKt"),
+      terminalSpeedMinKt: readNumber(item, "terminalSpeedMinKt"),
+      terminalSpeedMaxKt: readNumber(item, "terminalSpeedMaxKt"),
+      finalApproachMinNm: readNumber(item, "finalApproachMinNm"),
+      finalApproachMaxNm: readNumber(item, "finalApproachMaxNm"),
+      finalApproachLateralHalfWidthNm: readNumber(
+        item,
+        "finalApproachLateralHalfWidthNm",
+      ),
+      finalApproachGlideAngleDeg: readNumber(
+        item,
+        "finalApproachGlideAngleDeg",
+      ),
+      thresholdCrossingHeightM: readNumber(item, "thresholdCrossingHeightM"),
     };
   });
 }

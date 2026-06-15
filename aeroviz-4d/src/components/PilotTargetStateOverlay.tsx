@@ -1,10 +1,6 @@
 import { createPortal } from "react-dom";
 import type { RunwayThresholdTarget } from "../data/runwayThresholdTargets";
 import {
-  TARGET_APPROACH_SPEED_MAX_MPS,
-  TARGET_APPROACH_SPEED_MIN_MPS,
-} from "../pilot/trajectoryTargetConstraints";
-import {
   EnglishNumberInput,
   formatCoord,
   formatNumberInputValue,
@@ -32,6 +28,8 @@ interface PilotTargetStateOverlayProps {
   open: boolean;
   state: PilotTargetState;
   runwayTargets: RunwayThresholdTarget[];
+  speedMinMps: number;
+  speedMaxMps: number;
   disabled: boolean;
   onClose: () => void;
   onRunwayChange: (runwayThresholdId: string) => void;
@@ -47,6 +45,8 @@ export default function PilotTargetStateOverlay({
   open,
   state,
   runwayTargets,
+  speedMinMps,
+  speedMaxMps,
   disabled,
   onClose,
   onRunwayChange,
@@ -105,16 +105,16 @@ export default function PilotTargetStateOverlay({
             <span>Vt m/s</span>
             <EnglishNumberInput
               value={state.speedMps}
-              min={TARGET_APPROACH_SPEED_MIN_MPS}
-              max={TARGET_APPROACH_SPEED_MAX_MPS}
+              min={speedMinMps}
+              max={speedMaxMps}
               step="0.1"
               disabled={disabled}
               onCommit={(value) =>
                 onFieldChange(
                   "speedMps",
                   value,
-                  TARGET_APPROACH_SPEED_MIN_MPS,
-                  TARGET_APPROACH_SPEED_MAX_MPS,
+                  speedMinMps,
+                  speedMaxMps,
                 )
               }
             />

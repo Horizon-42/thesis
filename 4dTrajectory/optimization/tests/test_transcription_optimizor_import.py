@@ -74,6 +74,26 @@ def test_geodetic_state_to_array_uses_geodetic_state_field_names():
     )
 
 
+def test_transcription_uses_aircraft_thrust_defaults_for_control_guess():
+    module = load_transcription_module()
+    aircraft = SimpleNamespace(
+        max_thrust_n=3200.0,
+        approach_thrust_guess_n=800.0,
+    )
+    optimizer = module.TranscriptionOptimizor(
+        sim_server=SimpleNamespace(simulator=SimpleNamespace(aircraft=aircraft)),
+        n_segments=1,
+        arrival_time_s=75.0,
+    )
+    state = module.GeodeticState(1.0, 2.0, 1000.0, 70.0, 0.1, -0.01, 1157.0)
+    node_state_guess = optimizer.geodetic_state_to_array(state).reshape(1, 6)
+
+    control_guess = optimizer.build_control_guess(state, node_state_guess)
+
+    np.testing.assert_allclose(control_guess[:, 0], [800.0])
+    assert optimizer.max_thrust_n == 3200.0
+
+
 def test_array_to_geodetic_state_restores_fixed_mass():
     module = load_transcription_module()
 
