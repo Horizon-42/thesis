@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import type { PilotSnapshot } from "../pilot/pilotClient";
+import type { PilotSimulationMode, PilotSnapshot } from "../pilot/pilotClient";
 import { formatCoord } from "./PilotInitialStateOverlay";
 
 interface PilotRealtimeStatePanelProps {
   snapshot: PilotSnapshot | null;
   visible: boolean;
   showControlReadout?: boolean;
+  simulationMode?: PilotSimulationMode;
   targetState?: Pick<PilotSnapshot["state"], "lat" | "lon" | "altM"> | null;
 }
 
@@ -14,6 +15,7 @@ export default function PilotRealtimeStatePanel({
   snapshot,
   visible,
   showControlReadout = false,
+  simulationMode,
   targetState = null,
 }: PilotRealtimeStatePanelProps) {
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
@@ -25,6 +27,10 @@ export default function PilotRealtimeStatePanel({
   }, []);
 
   if (!visible || !snapshot || !portalTarget) return null;
+  const effectiveSimulationMode = simulationMode ?? snapshot.simulationMode ?? "alpha";
+  const showLoadFactor = effectiveSimulationMode === "loadFactor" &&
+    snapshot.control.loadFactor !== undefined;
+  const loadFactor = snapshot.control.loadFactor ?? 0;
 
   return createPortal(
     <aside className="pilot-realtime-panel" aria-label="Realtime aircraft state">
@@ -62,14 +68,23 @@ export default function PilotRealtimeStatePanel({
         {showControlReadout ? (
           <RealtimeReadout
             label="Control"
-            value={`bank ${snapshot.control.bankDeg.toFixed(1)} deg | alpha ${snapshot.control.attackDeg.toFixed(2)} deg | thrust ${snapshot.control.thrustN.toFixed(0)} N`}
+            value={showLoadFactor
+              ? `bank ${snapshot.control.bankDeg.toFixed(1)} deg | n ${loadFactor.toFixed(2)} | thrust ${snapshot.control.thrustN.toFixed(0)} N`
+              : `bank ${snapshot.control.bankDeg.toFixed(1)} deg | alpha ${snapshot.control.attackDeg.toFixed(2)} deg | thrust ${snapshot.control.thrustN.toFixed(0)} N`}
             wide
           />
         ) : null}
-        <RealtimeReadout
-          label="Attack Angle (alpha)"
-          value={`${snapshot.control.attackDeg.toFixed(2)} deg`}
-        />
+        {showLoadFactor ? (
+          <RealtimeReadout
+            label="Load Factor"
+            value={`${loadFactor.toFixed(2)} g`}
+          />
+        ) : (
+          <RealtimeReadout
+            label="Attack Angle (alpha)"
+            value={`${snapshot.control.attackDeg.toFixed(2)} deg`}
+          />
+        )}
         <RealtimeReadout
           label="Lift Coefficient"
           value={snapshot.aero.liftCoefficient.toFixed(3)}

@@ -916,6 +916,7 @@ export default function PilotPanel() {
           (activeMode === "trajectory" && snapshot !== null)
         }
         showControlReadout={activeMode === "trajectory"}
+        simulationMode={snapshot?.simulationMode ?? simulationMode}
         targetState={activeMode === "trajectory" ? targetState : null}
       />
 

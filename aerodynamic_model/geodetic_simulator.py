@@ -2,6 +2,7 @@ from dataclasses import dataclass
 import math
 from pathlib import Path
 import sys
+from typing import Any
 
 
 MODEL_DIR = Path(__file__).resolve().parent
@@ -25,8 +26,8 @@ class GeodeticState:
 
 
 class GeodeticSimulator:
-    def __init__(self, aircraft: AircraftSpec = A320):
-        self.simulator = Simulator(aircraft=aircraft)
+    def __init__(self, aircraft: AircraftSpec = A320, simulator: Any | None = None):
+        self.simulator = simulator or Simulator(aircraft=aircraft)
         self.atmosphere = Atmosphere()
 
     @staticmethod
@@ -114,7 +115,7 @@ class GeodeticSimulator:
     def step(
         self,
         state: GeodeticState,
-        control: Control,
+        control: Any,
         dt: float,
     ) -> GeodeticState:
         geo_S = GeodeticCoordinate(state.latitude, state.longitude, 0.0)

@@ -76,6 +76,30 @@ describe("PilotRealtimeStatePanel", () => {
     expect(screen.getByText("bank 0.0 deg | alpha 3.50 deg | thrust 12000 N")).toBeTruthy();
   });
 
+  it("renders load-factor control readouts when requested", async () => {
+    render(
+      <PilotRealtimeStatePanel
+        snapshot={{
+          ...snapshot,
+          control: {
+            thrustN: 12000,
+            bankDeg: 0,
+            attackDeg: 0,
+            loadFactor: 1.2,
+          },
+        }}
+        visible={true}
+        showControlReadout={true}
+        simulationMode="loadFactor"
+      />,
+    );
+
+    expect(await screen.findByText("Load Factor")).toBeTruthy();
+    expect(screen.getByText("1.20 g")).toBeTruthy();
+    expect(screen.getByText("bank 0.0 deg | n 1.20 | thrust 12000 N")).toBeTruthy();
+    expect(screen.queryByText("Attack Angle (alpha)")).toBeNull();
+  });
+
   it("shows actual minus target position errors when a target state is provided", async () => {
     render(
       <PilotRealtimeStatePanel

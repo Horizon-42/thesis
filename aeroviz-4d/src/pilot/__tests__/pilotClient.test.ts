@@ -149,6 +149,24 @@ describe("pilotClient", () => {
     );
   });
 
+  it("parses load-factor snapshots without attack angle", async () => {
+    const fetchMock = mockFetch({
+      ...snapshot,
+      simulationMode: "loadFactor",
+      control: {
+        thrustN: 15000,
+        bankDeg: 5,
+        loadFactor: 1.2,
+      },
+    });
+
+    const result = await stepPilotSimulation(control, 0.2, "loadFactor");
+
+    expect(fetchMock).toHaveBeenCalled();
+    expect(result.control.attackDeg).toBe(0);
+    expect(result.control.loadFactor).toBe(1.2);
+  });
+
   it("loads aircraft configs from the backend simulation namespace", async () => {
     const payload = { ok: true, aircraft: aircraftConfigs };
     const fetchMock = mockFetch(payload);

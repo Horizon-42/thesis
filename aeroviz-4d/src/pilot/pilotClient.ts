@@ -53,6 +53,7 @@ export interface PilotResetState {
 export interface PilotSnapshot {
   ok: true;
   elapsedS: number;
+  simulationMode?: PilotSimulationMode;
   state: PilotResetState;
   control: PilotControls;
   aero: {
@@ -137,18 +138,23 @@ function parsePilotSnapshot(value: unknown): PilotSnapshot {
   const state = readRecord(value, "state");
   const control = readRecord(value, "control");
   const aero = readRecord(value, "aero");
+  const attackDeg = readOptionalNumber(control, "attackDeg");
+  const loadFactor = readOptionalNumber(control, "loadFactor");
+  if (attackDeg === null && loadFactor === null) {
+    throw new Error("AeroViz backend response has invalid control");
+  }
 
   const parsedControl: PilotControls = {
     thrustN: readNumber(control, "thrustN"),
     bankDeg: readNumber(control, "bankDeg"),
-    attackDeg: readNumber(control, "attackDeg"),
+    attackDeg: attackDeg ?? 0,
   };
-  const loadFactor = readOptionalNumber(control, "loadFactor");
   if (loadFactor !== null) {
     parsedControl.loadFactor = loadFactor;
   }
+  const simulationMode = readOptionalSimulationMode(value);
 
-  return {
+  const snapshot: PilotSnapshot = {
     ok: true,
     elapsedS: readNumber(value, "elapsedS"),
     state: {
@@ -167,6 +173,10 @@ function parsePilotSnapshot(value: unknown): PilotSnapshot {
       dragCoefficient: readNumber(aero, "dragCoefficient"),
     },
   };
+  if (simulationMode !== null) {
+    snapshot.simulationMode = simulationMode;
+  }
+  return snapshot;
 }
 
 function serializePilotControl(
@@ -246,6 +256,15 @@ function readOptionalNumber(value: Record<string, unknown>, key: string): number
     throw new Error(`AeroViz backend response has invalid ${key}`);
   }
   return nested;
+}
+
+function readOptionalSimulationMode(
+  value: Record<string, unknown>,
+): PilotSimulationMode | null {
+  const nested = value.simulationMode;
+  if (nested === undefined) return null;
+  if (nested === "alpha" || nested === "loadFactor") return nested;
+  throw new Error("AeroViz backend response has invalid simulationMode");
 }
 
 function readString(value: Record<string, unknown>, key: string): string {

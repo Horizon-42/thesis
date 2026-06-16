@@ -3,6 +3,7 @@ import unittest
 
 from aeroviz_backend.simulation_backend import SimulationBackend, aircraft_catalog
 from aircraft_sets import B77W
+from simulator_simple import LoadFactorSimulator
 
 
 class TestSimulationBackend(unittest.TestCase):
@@ -80,6 +81,49 @@ class TestSimulationBackend(unittest.TestCase):
         self.assertAlmostEqual(snapshot["elapsedS"], 0.2)
         self.assertGreater(snapshot["state"]["lon"], 0.0)
         self.assertTrue(math.isfinite(snapshot["aero"]["liftCoefficient"]))
+
+    def test_reset_can_select_load_factor_simulation(self):
+        backend = SimulationBackend()
+
+        snapshot = backend.reset({
+            "simulationMode": "loadFactor",
+            "state": {
+                "altM": 1000.0,
+                "speedMps": 140.0,
+                "aircraftType": "A320",
+            },
+            "control": {
+                "thrustN": 15000.0,
+                "bankDeg": 5.0,
+                "loadFactor": 1.2,
+            },
+        })
+
+        self.assertEqual(snapshot["simulationMode"], "loadFactor")
+        self.assertIsInstance(backend.geodetic_simulator.simulator, LoadFactorSimulator)
+        self.assertAlmostEqual(snapshot["control"]["loadFactor"], 1.2)
+        self.assertNotIn("attackDeg", snapshot["control"])
+        self.assertTrue(math.isfinite(snapshot["aero"]["liftCoefficient"]))
+
+    def test_step_can_switch_to_load_factor_simulation(self):
+        backend = SimulationBackend()
+        backend.reset({"state": {"aircraftType": "A320"}})
+
+        snapshot = backend.step({
+            "simulationMode": "loadFactor",
+            "control": {"loadFactor": 1.0},
+            "dtS": 0.2,
+        })
+
+        self.assertEqual(snapshot["simulationMode"], "loadFactor")
+        self.assertIsInstance(backend.geodetic_simulator.simulator, LoadFactorSimulator)
+        self.assertIn("loadFactor", snapshot["control"])
+
+    def test_rejects_unknown_simulation_mode(self):
+        backend = SimulationBackend()
+
+        with self.assertRaisesRegex(ValueError, "simulationMode must be one of"):
+            backend.reset({"simulationMode": "unknown"})
 
     def test_aircraft_catalog_exposes_performance_defaults(self):
         payload = aircraft_catalog()

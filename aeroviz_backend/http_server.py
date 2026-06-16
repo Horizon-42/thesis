@@ -108,6 +108,10 @@ class AeroVizRequestHandler(BaseHTTPRequestHandler):
         state = snapshot["state"]
         control = snapshot["control"]
         aero = snapshot["aero"]
+        if "loadFactor" in control:
+            control_text = f"loadFactor={control['loadFactor']:.3f} "
+        else:
+            control_text = f"alpha={control['attackDeg']:.2f}deg "
         line = (
             "[aeroviz-backend] "
             f"{event} "
@@ -122,7 +126,7 @@ class AeroVizRequestHandler(BaseHTTPRequestHandler):
             f"type={state['aircraftType']} "
             f"thrust={control['thrustN']:.1f}N "
             f"bank={control['bankDeg']:.2f}deg "
-            f"alpha={control['attackDeg']:.2f}deg "
+            f"{control_text}"
             f"Cl={aero['liftCoefficient']:.4f} "
             f"Cd={aero['dragCoefficient']:.4f}"
         )

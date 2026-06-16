@@ -8,6 +8,7 @@ from aeroviz_backend import paths  # noqa: F401
 from aircraft_sets import AIRCRAFT_PRESETS, AircraftSpec, A320
 from geodetic_simulator import GeodeticSimulator, GeodeticState
 from simulator import Control
+from simulator_simple import LoadFactorControl, LoadFactorSimulator
 
 
 DEFAULT_STATE = GeodeticState(
@@ -26,14 +27,19 @@ DEFAULT_CONTROL = Control(
     attack_rad=0.0,
 )
 DEFAULT_AIRCRAFT_TYPE = A320.code
+DEFAULT_SIMULATION_MODE = "alpha"
+SUPPORTED_SIMULATION_MODES = ("alpha", "loadFactor")
 
 DEFAULT_DT = 0.2
 MAX_DT = 2.0
+MIN_LOAD_FACTOR = 0.0
+MAX_LOAD_FACTOR = 3.0
 
 
 class SimulationBackend:
     def __init__(self) -> None:
         self.geodetic_simulator = GeodeticSimulator()
+        self.simulation_mode = DEFAULT_SIMULATION_MODE
         self.state = DEFAULT_STATE
         self.control = DEFAULT_CONTROL
         self.elapsed = 0.0
@@ -42,14 +48,17 @@ class SimulationBackend:
         payload = payload or {}
         state_payload = read_optional_mapping(payload, "state")
         control_payload = read_optional_mapping(payload, "control")
+        simulation_mode = read_simulation_mode(payload, DEFAULT_SIMULATION_MODE)
         aircraft = read_aircraft(state_payload, DEFAULT_AIRCRAFT_TYPE)
 
-        self.geodetic_simulator = GeodeticSimulator(aircraft)
+        self.simulation_mode = simulation_mode
+        self.geodetic_simulator = make_geodetic_simulator(aircraft, simulation_mode)
         self.state = read_geodetic_state(state_payload, DEFAULT_STATE, aircraft)
-        self.control = read_control(
+        self.control = read_simulation_control(
             control_payload,
-            default_control_for_aircraft(aircraft),
             aircraft,
+            simulation_mode,
+            default_control_for_mode(aircraft, simulation_mode),
         )
         self.elapsed = 0.0
         return self.snapshot()
@@ -57,10 +66,16 @@ class SimulationBackend:
     def step(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = payload or {}
         aircraft = self.geodetic_simulator.simulator.aircraft
-        self.control = read_control(
+        simulation_mode = read_simulation_mode(payload, self.simulation_mode)
+        if simulation_mode != self.simulation_mode:
+            self.simulation_mode = simulation_mode
+            self.geodetic_simulator = make_geodetic_simulator(aircraft, simulation_mode)
+
+        self.control = read_simulation_control(
             read_optional_mapping(payload, "control"),
-            self.control,
             aircraft,
+            simulation_mode,
+            fallback_control_for_mode(self.control, aircraft, simulation_mode),
         )
         dt = clamp(read_float(payload, "dtS", DEFAULT_DT), 0.001, MAX_DT)
         self.state = self.geodetic_simulator.step(self.state, self.control, dt)
@@ -68,12 +83,16 @@ class SimulationBackend:
         return self.snapshot()
 
     def snapshot(self) -> dict[str, Any]:
-        Cl, Cd = self.geodetic_simulator.simulator.get_aerodynamic_coefficients(
-            self.control.attack_rad,
+        Cl, Cd = read_snapshot_aero(
+            self.geodetic_simulator,
+            self.state,
+            self.control,
+            self.simulation_mode,
         )
         return {
             "ok": True,
             "elapsedS": self.elapsed,
+            "simulationMode": self.simulation_mode,
             "state": format_geodetic_state(
                 self.state,
                 self.geodetic_simulator.simulator.aircraft.code,
@@ -118,6 +137,43 @@ def read_positive_int(payload: dict[str, Any], key: str, default: int) -> int:
     return int(number)
 
 
+def read_simulation_mode(payload: dict[str, Any], default: str) -> str:
+    value = payload.get("simulationMode", default)
+    if not isinstance(value, str):
+        raise ValueError("simulationMode must be a string")
+
+    mode = value.strip()
+    if mode not in SUPPORTED_SIMULATION_MODES:
+        valid_values = ", ".join(SUPPORTED_SIMULATION_MODES)
+        raise ValueError(f"simulationMode must be one of {valid_values}")
+    return mode
+
+
+def read_simulation_control(
+    payload: dict[str, Any],
+    aircraft: AircraftSpec,
+    simulation_mode: str,
+    fallback: Control | LoadFactorControl,
+) -> Control | LoadFactorControl:
+    if simulation_mode == "loadFactor":
+        return read_load_factor_control(
+            payload,
+            (
+                fallback
+                if isinstance(fallback, LoadFactorControl)
+                else default_load_factor_control_for_aircraft(aircraft)
+            ),
+            aircraft,
+        )
+    return read_control(
+        payload,
+        fallback
+        if isinstance(fallback, Control)
+        else default_control_for_aircraft(aircraft),
+        aircraft,
+    )
+
+
 def read_control(
     payload: dict[str, Any],
     fallback: Control,
@@ -146,12 +202,85 @@ def read_control(
     )
 
 
+def read_load_factor_control(
+    payload: dict[str, Any],
+    fallback: LoadFactorControl,
+    aircraft: AircraftSpec,
+) -> LoadFactorControl:
+    return LoadFactorControl(
+        thrust=clamp(
+            read_float(payload, "thrustN", fallback.thrust),
+            0.0,
+            aircraft.max_thrust_n,
+        ),
+        bank_rad=math.radians(
+            clamp(
+                read_float(payload, "bankDeg", math.degrees(fallback.bank_rad)),
+                -60.0,
+                60.0,
+            )
+        ),
+        load_factor=clamp(
+            read_float(payload, "loadFactor", fallback.load_factor),
+            MIN_LOAD_FACTOR,
+            MAX_LOAD_FACTOR,
+        ),
+    )
+
+
 def default_control_for_aircraft(aircraft: AircraftSpec) -> Control:
     return Control(
         thrust=aircraft.approach_thrust_guess_n,
         bank_rad=DEFAULT_CONTROL.bank_rad,
         attack_rad=DEFAULT_CONTROL.attack_rad,
     )
+
+
+def default_load_factor_control_for_aircraft(aircraft: AircraftSpec) -> LoadFactorControl:
+    return LoadFactorControl(
+        thrust=aircraft.approach_thrust_guess_n,
+        bank_rad=DEFAULT_CONTROL.bank_rad,
+        load_factor=1.0,
+    )
+
+
+def default_control_for_mode(
+    aircraft: AircraftSpec,
+    simulation_mode: str,
+) -> Control | LoadFactorControl:
+    if simulation_mode == "loadFactor":
+        return default_load_factor_control_for_aircraft(aircraft)
+    return default_control_for_aircraft(aircraft)
+
+
+def fallback_control_for_mode(
+    control: Control | LoadFactorControl,
+    aircraft: AircraftSpec,
+    simulation_mode: str,
+) -> Control | LoadFactorControl:
+    if simulation_mode == "loadFactor":
+        return (
+            control
+            if isinstance(control, LoadFactorControl)
+            else default_load_factor_control_for_aircraft(aircraft)
+        )
+    return (
+        control
+        if isinstance(control, Control)
+        else default_control_for_aircraft(aircraft)
+    )
+
+
+def make_geodetic_simulator(
+    aircraft: AircraftSpec,
+    simulation_mode: str,
+) -> GeodeticSimulator:
+    if simulation_mode == "loadFactor":
+        return GeodeticSimulator(
+            aircraft,
+            simulator=LoadFactorSimulator(aircraft),
+        )
+    return GeodeticSimulator(aircraft)
 
 
 def read_aircraft(payload: dict[str, Any], default_code: str) -> AircraftSpec:
@@ -198,12 +327,35 @@ def format_geodetic_state(state: GeodeticState, aircraft_type: str) -> dict[str,
     }
 
 
-def format_control(control: Control) -> dict[str, float]:
-    return {
+def format_control(control: Control | LoadFactorControl) -> dict[str, float]:
+    formatted = {
         "thrustN": control.thrust,
         "bankDeg": math.degrees(control.bank_rad),
-        "attackDeg": math.degrees(control.attack_rad),
     }
+    if isinstance(control, LoadFactorControl):
+        formatted["loadFactor"] = control.load_factor
+    else:
+        formatted["attackDeg"] = math.degrees(control.attack_rad)
+    return formatted
+
+
+def read_snapshot_aero(
+    geodetic_simulator: GeodeticSimulator,
+    state: GeodeticState,
+    control: Control | LoadFactorControl,
+    simulation_mode: str,
+) -> tuple[float, float]:
+    simulator = geodetic_simulator.simulator
+    if simulation_mode == "loadFactor" and isinstance(control, LoadFactorControl):
+        Cl, Cd, _ = simulator.get_aerodynamic_coefficients(
+            control.load_factor,
+            state.V,
+            geodetic_simulator.atmosphere,
+            state.altitude,
+            state.m,
+        )
+        return Cl, Cd
+    return simulator.get_aerodynamic_coefficients(control.attack_rad)
 
 
 def aircraft_catalog() -> dict[str, Any]:
