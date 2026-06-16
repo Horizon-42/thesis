@@ -17,6 +17,8 @@
     };
   </script>
   <script defer src="../../../aerodrome_model/docs/assets/vendor/mathjax/tex-svg.js"></script>
+  <script defer src="bank_angle_3d.js"></script>
+  <script defer src="force_diagrams_3d.js"></script>
 </head>
 <body>
 <main>
@@ -106,6 +108,12 @@
     <figcaption>
       力分解图由 Python 脚本生成。切向力决定 \(\dot V\)，法向合力
       \(L+T\sin\alpha\) 经 bank angle \(\phi\) 分解后决定 \(\dot\psi\) 和 \(\dot\gamma\)。
+    </figcaption>
+  </figure>
+  <figure class="interactive-figure">
+    <div class="force-demo" data-force-demo data-scene="alpha-overview"></div>
+    <figcaption>
+      3D 总览只保留 \(T\)、\(D\)、法向合力 \(N=L+T\sin\alpha\) 和 \(mg\)，用于说明完整模型的三类动力学方向。
     </figcaption>
   </figure>
 
@@ -219,6 +227,12 @@
         \(\dot V\) 只看切向：\(T\cos\alpha\) 加速，\(D\) 和 \(mg\sin\gamma\) 减速。
       </figcaption>
     </figure>
+    <figure class="interactive-figure">
+      <div class="force-demo" data-force-demo data-scene="alpha-vdot"></div>
+      <figcaption>
+        对 \(\dot V\) 推导，3D 图只显示沿速度轴 \(e_V\) 的投影：\(T\cos\alpha\)、\(-D\)、\(-mg\sin\gamma\)。
+      </figcaption>
+    </figure>
     <div class="eq">
       \[
       T_{\parallel}=T\cos\alpha
@@ -256,6 +270,19 @@
       <figcaption>
         左侧说明航向变化对应 \(a_\psi=V\cos\gamma\dot\psi\)，右侧说明 bank 后只有
         \(N\sin\phi\) 进入水平转弯方向。
+      </figcaption>
+    </figure>
+    <figure class="interactive-figure">
+      <div
+        class="bank-demo"
+        data-bank-demo
+        data-symbol="phi"
+        data-force="N = L + T sin alpha">
+      </div>
+      <figcaption>
+        完整模型中 bank angle \(\phi\) 作用在法向合力
+        \(N=L+T\sin\alpha\) 上。零度时 \(N\) 沿 \(e_\gamma\)，正 \(\phi\)
+        把 \(N\) 绕速度轴 \(e_V\) 转向 \(e_\psi\)。
       </figcaption>
     </figure>
     <div class="eq">
@@ -307,6 +334,12 @@
         受 \(N\cos\phi\) 与 \(mg\cos\gamma\) 的差控制。
       </figcaption>
     </figure>
+    <figure class="interactive-figure">
+      <div class="force-demo" data-force-demo data-scene="alpha-gammadot"></div>
+      <figcaption>
+        对 \(\dot\gamma\) 推导，3D 图只保留竖直法向轴 \(e_\gamma\)、\(N\cos\phi\) 和反向的 \(mg\cos\gamma\)。
+      </figcaption>
+    </figure>
     <div class="eq">
       \[
       a_{\gamma}=V\dot\gamma
@@ -347,6 +380,12 @@
       <img src="../assets/three_dof_models/alpha-mdot-fuel-flow.svg" alt="完整模型 mdot 推导中的推力到燃油消耗关系图">
       <figcaption>
         质量方程不是空间方向上的力分解，而是由推力对应的燃油消耗率换算得到。
+      </figcaption>
+    </figure>
+    <figure class="interactive-figure">
+      <div class="force-demo" data-force-demo data-scene="alpha-mdot"></div>
+      <figcaption>
+        对 \(\dot m\) 推导，3D 图只保留推力大小 \(T\)：这里不再做方向投影，只说明燃油消耗率与推力幅值相关。
       </figcaption>
     </figure>
     <div class="eq">

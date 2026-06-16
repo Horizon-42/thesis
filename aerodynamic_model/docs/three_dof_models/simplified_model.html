@@ -17,6 +17,8 @@
     };
   </script>
   <script defer src="../../../aerodrome_model/docs/assets/vendor/mathjax/tex-svg.js"></script>
+  <script defer src="bank_angle_3d.js"></script>
+  <script defer src="force_diagrams_3d.js"></script>
 </head>
 <body>
 <main>
@@ -157,6 +159,12 @@
         \(T-D-mg\sin\gamma\)。
       </figcaption>
     </figure>
+    <figure class="interactive-figure">
+      <div class="force-demo" data-force-demo data-scene="simplified-vdot"></div>
+      <figcaption>
+        对简化模型的 \(\dot V\) 推导，3D 图只显示速度轴 \(e_V\) 上的 \(T\)、\(-D\)、\(-mg\sin\gamma\)。
+      </figcaption>
+    </figure>
     <div class="eq">
       \[
       T\cos\alpha\approx T,\quad T\sin\alpha\approx0
@@ -188,6 +196,19 @@
       <figcaption>
         左侧说明航向变化对应 \(a_\psi=V\cos\gamma\dot\psi\)，右侧说明 bank 后只有
         \(nmg\sin\mu\) 进入水平转弯方向。
+      </figcaption>
+    </figure>
+    <figure class="interactive-figure">
+      <div
+        class="bank-demo"
+        data-bank-demo
+        data-symbol="mu"
+        data-force="L = nmg">
+      </div>
+      <figcaption>
+        3D 视角下，\(\mu=0\) 时 \(L=nmg\) 沿 \(e_\gamma\)；
+        正 \(\mu\) 把升力绕速度轴 \(e_V\) 转向 \(e_\psi\)，产生
+        \(nmg\sin\mu\) 的水平转弯分量。
       </figcaption>
     </figure>
     <div class="eq">
@@ -243,6 +264,12 @@
         受 \(nmg\cos\mu\) 与 \(mg\cos\gamma\) 的差控制。
       </figcaption>
     </figure>
+    <figure class="interactive-figure">
+      <div class="force-demo" data-force-demo data-scene="simplified-gammadot"></div>
+      <figcaption>
+        对简化模型的 \(\dot\gamma\) 推导，3D 图只保留竖直法向轴 \(e_\gamma\)、\(nmg\cos\mu\) 和反向的 \(mg\cos\gamma\)。
+      </figcaption>
+    </figure>
     <div class="eq">
       \[
       a_{\gamma}=V\dot\gamma
@@ -285,6 +312,12 @@
     <figcaption>
       力分解图由 Python 脚本生成。简化模型把法向力写成 \(L=nmg\)，再通过 bank angle
       \(\mu\) 分解为转弯方向和飞行路径角方向的分量。
+    </figcaption>
+  </figure>
+  <figure class="interactive-figure">
+    <div class="force-demo" data-force-demo data-scene="simplified-overview"></div>
+    <figcaption>
+      3D 总览只保留 \(T\)、\(D\)、\(L=nmg\) 和 \(mg\)。水平转弯与竖直法向分量分别留给上面的 \(\dot\psi\)、\(\dot\gamma\) 推导图。
     </figcaption>
   </figure>
 

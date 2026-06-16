@@ -166,6 +166,210 @@ figure.derivation-figure {
   border-radius: 0;
 }
 
+.interactive-figure {
+  padding: 0;
+  overflow: hidden;
+}
+
+.interactive-figure figcaption {
+  padding: 0 14px 14px;
+}
+
+.bank-demo {
+  background: #fbfdff;
+}
+
+.bank-demo__stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  min-height: 360px;
+  background:
+    linear-gradient(180deg, #f9fcff 0%, #eef5f7 58%, #f8fbf6 100%);
+  border-bottom: 1px solid var(--line);
+}
+
+.bank-demo__stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: grab;
+}
+
+.bank-demo__stage canvas:active {
+  cursor: grabbing;
+}
+
+.bank-demo__controls {
+  display: grid;
+  grid-template-columns: minmax(230px, 1fr) minmax(230px, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+  background: #ffffff;
+}
+
+.bank-demo__controls label {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.bank-demo__controls input[type="range"] {
+  width: 100%;
+  min-width: 0;
+  accent-color: var(--teal);
+}
+
+.bank-demo__controls output {
+  min-width: 58px;
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  text-align: right;
+}
+
+.bank-demo__controls button {
+  min-height: 34px;
+  padding: 6px 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.bank-demo__controls button:hover {
+  border-color: var(--teal);
+  color: var(--teal);
+}
+
+.bank-demo__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 12px 14px 2px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.bank-demo__legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.bank-demo__swatch {
+  width: 18px;
+  height: 3px;
+  border-radius: 99px;
+  display: inline-block;
+}
+
+.bank-demo__swatch--speed { background: #24344a; }
+.bank-demo__swatch--normal { background: var(--blue); }
+.bank-demo__swatch--turn { background: var(--teal); }
+.bank-demo__swatch--lift { background: var(--red); }
+
+.force-demo {
+  background: #fbfdff;
+}
+
+.force-demo__stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  min-height: 340px;
+  background:
+    linear-gradient(180deg, #f9fcff 0%, #eef5f7 58%, #f8fbf6 100%);
+  border-bottom: 1px solid var(--line);
+}
+
+.force-demo__stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: grab;
+}
+
+.force-demo__stage canvas:active {
+  cursor: grabbing;
+}
+
+.force-demo__controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+  background: #ffffff;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.force-demo__controls button {
+  min-height: 34px;
+  padding: 6px 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.force-demo__controls button:hover {
+  border-color: var(--teal);
+  color: var(--teal);
+}
+
+.force-demo__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 12px 14px 2px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.force-demo__legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.force-demo__swatch {
+  width: 18px;
+  height: 3px;
+  border-radius: 99px;
+  display: inline-block;
+}
+
+.force-demo__swatch--speed { background: #24344a; }
+.force-demo__swatch--thrust { background: #a55212; }
+.force-demo__swatch--drag { background: #6f48a8; }
+.force-demo__swatch--normal { background: #b7352d; }
+.force-demo__swatch--component { background: #2f62b7; }
+.force-demo__swatch--turn { background: var(--teal); }
+.force-demo__swatch--weight { background: #344254; }
+
 figcaption {
   margin-top: 10px;
   color: var(--muted);
@@ -213,6 +417,40 @@ tr:last-child td { border-bottom: 0; }
 
   .grid-2 {
     grid-template-columns: 1fr;
+  }
+
+  .bank-demo__stage {
+    aspect-ratio: 1 / 1;
+    min-height: 300px;
+  }
+
+  .force-demo__stage {
+    aspect-ratio: 1 / 1;
+    min-height: 300px;
+  }
+
+  .bank-demo__controls {
+    grid-template-columns: 1fr;
+  }
+
+  .force-demo__controls {
+    grid-template-columns: 1fr;
+  }
+
+  .bank-demo__controls label {
+    grid-template-columns: 76px 1fr 58px;
+  }
+
+  .force-demo__controls button {
+    width: fit-content;
+  }
+
+  .force-demo__legend span {
+    white-space: normal;
+  }
+
+  .bank-demo__legend span {
+    white-space: normal;
   }
 
   th,

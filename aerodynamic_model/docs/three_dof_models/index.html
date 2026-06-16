@@ -17,6 +17,7 @@
     };
   </script>
   <script defer src="../../../aerodrome_model/docs/assets/vendor/mathjax/tex-svg.js"></script>
+  <script defer src="bank_angle_3d.js"></script>
 </head>
 <body>
 <main>
@@ -90,6 +91,40 @@
         <tr><td>\(m\)</td><td>质量</td><td>完整模型可加入燃油消耗；短时仿真常令 \(\dot m=0\)</td></tr>
       </tbody>
     </table>
+  </section>
+
+  <section id="bank-angle-3d" class="panel">
+    <h2>bank angle 的 3D 定义</h2>
+    <p>
+      在 3-DOF 点质量模型中，bank angle 不是相对地面 \(X/Y/h\) 轴直接量出来的角，
+      而是绕速度轴 \(e_V\) 旋转法向力方向的角。零度方向是 \(e_\gamma\)：它垂直于速度，
+      并位于速度轴和当地竖直轴构成的竖直平面内。
+    </p>
+    <figure class="interactive-figure">
+      <div
+        class="bank-demo"
+        data-bank-demo
+        data-symbol="mu"
+        data-force="normal force">
+      </div>
+      <figcaption>
+        拖动画布可旋转视角。正 bank 在本文的 \(\psi\) 约定下把法向力从
+        \(e_\gamma\) 转向 \(e_\psi\)，因此产生 \(+\dot\psi\)。
+      </figcaption>
+    </figure>
+    <div class="eq">
+      \[
+      \mathbf{N}
+      =
+      N\cos\mu\,e_\gamma
+      +
+      N\sin\mu\,e_\psi
+      \]
+    </div>
+    <p>
+      所以 \(\cos\mu\) 项进入 \(\dot\gamma\)，\(\sin\mu\) 项进入 \(\dot\psi\)。
+      若把航向角改成航空常用的从 North 顺时针增大的 heading \(\chi\)，正负号需要随角度定义重新核对。
+    </p>
   </section>
 
   <section class="bridge">
