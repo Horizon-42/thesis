@@ -23,6 +23,7 @@ const control: PilotControls = {
   thrustN: 15000,
   bankDeg: 5,
   attackDeg: 4,
+  loadFactor: 1.2,
 };
 
 const aircraftConfigs: PilotAircraftConfig[] = [
@@ -90,12 +91,20 @@ describe("pilotClient", () => {
       expect.objectContaining({
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ state, control }),
+        body: JSON.stringify({
+          state,
+          control: {
+            thrustN: 15000,
+            bankDeg: 5,
+            attackDeg: 4,
+          },
+          simulationMode: "alpha",
+        }),
       }),
     );
   });
 
-  it("posts step payload using control and dt only", async () => {
+  it("posts step payload using alpha control and dt by default", async () => {
     // This locks the frontend step request shape to the Python /simulation/step endpoint.
     const fetchMock = mockFetch(snapshot);
 
@@ -105,7 +114,37 @@ describe("pilotClient", () => {
       "http://127.0.0.1:8765/simulation/step",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ control, dtS: 0.2 }),
+        body: JSON.stringify({
+          control: {
+            thrustN: 15000,
+            bankDeg: 5,
+            attackDeg: 4,
+          },
+          dtS: 0.2,
+          simulationMode: "alpha",
+        }),
+      }),
+    );
+  });
+
+  it("posts load-factor simulation mode with loadFactor control", async () => {
+    const fetchMock = mockFetch(snapshot);
+
+    await stepPilotSimulation(control, 0.2, "loadFactor");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8765/simulation/step",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          control: {
+            thrustN: 15000,
+            bankDeg: 5,
+            loadFactor: 1.2,
+          },
+          dtS: 0.2,
+          simulationMode: "loadFactor",
+        }),
       }),
     );
   });

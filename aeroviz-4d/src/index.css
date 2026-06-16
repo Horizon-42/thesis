@@ -1424,17 +1424,6 @@ body,
   white-space: nowrap;
 }
 
-.pilot-panel-server {
-  display: block;
-  max-width: 112px;
-  overflow: hidden;
-  color: #94a3b8;
-  font-family: "Courier New", monospace;
-  font-size: 10.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .pilot-status {
   flex: 0 0 auto;
   min-width: 64px;
@@ -1781,7 +1770,7 @@ body,
 .pilot-stepper-row label,
 .pilot-options-row label {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
+  grid-template-columns: 68px minmax(0, 1fr);
   align-items: center;
   gap: 3px;
   min-width: 0;
@@ -1793,7 +1782,7 @@ body,
   gap: 4px;
 }
 
-.pilot-options-row label:first-child {
+.pilot-checkbox-label {
   display: flex;
   align-items: center;
   gap: 5px;

@@ -134,6 +134,54 @@ describe("PilotPanel trajectory play mode", () => {
     });
   });
 
+  it("hides backend URL and switches pilot controls between alpha and load factor", async () => {
+    render(<PilotPanel />);
+
+    expect(await screen.findByText("A320")).toBeTruthy();
+    expect(screen.queryByText("http://127.0.0.1:8765")).toBeNull();
+
+    const simulationSelect = screen.getByRole("combobox", {
+      name: "Simulation",
+    }) as HTMLSelectElement;
+    expect(simulationSelect.value).toBe("alpha");
+    const alphaInput = screen.getByLabelText("Alpha") as HTMLInputElement;
+    expect(alphaInput).toBeTruthy();
+    expect(screen.queryByLabelText("Load factor")).toBeNull();
+
+    fireEvent.keyDown(simulationSelect, { key: "ArrowUp" });
+    expect(simulationSelect.value).toBe("alpha");
+    expect(alphaInput.value).toBe("6.283");
+
+    fireEvent.change(simulationSelect, {
+      target: { value: "loadFactor" },
+    });
+
+    expect(screen.queryByLabelText("Alpha")).toBeNull();
+    const loadFactorInput = screen.getByLabelText("Load factor") as HTMLInputElement;
+    expect(loadFactorInput.value).toBe("1");
+
+    fireEvent.keyDown(simulationSelect, { key: "ArrowUp" });
+    expect(simulationSelect.value).toBe("loadFactor");
+    expect(loadFactorInput.value).toBe("1.05");
+
+    fireEvent.change(loadFactorInput, { target: { value: "1.25" } });
+    fireEvent.blur(loadFactorInput);
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+
+    await waitFor(() => {
+      expect(mocks.resetPilotSimulation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          aircraftType: "A320",
+          massKg: 78000,
+        }),
+        expect.objectContaining({
+          loadFactor: 1.25,
+        }),
+        "loadFactor",
+      );
+    });
+  });
+
   it("opens trajectory play from pilot mode and submits runway-target optimization", async () => {
     render(<PilotPanel />);
 

@@ -2,7 +2,22 @@ export interface PilotControls {
   thrustN: number;
   bankDeg: number;
   attackDeg: number;
+  loadFactor?: number;
 }
+
+export type PilotSimulationMode = "alpha" | "loadFactor";
+
+type PilotControlPayload =
+  | {
+      thrustN: number;
+      bankDeg: number;
+      attackDeg: number;
+    }
+  | {
+      thrustN: number;
+      bankDeg: number;
+      loadFactor: number;
+    };
 
 export type PilotAircraftType = string;
 
@@ -59,15 +74,25 @@ export const AEROVIZ_BACKEND_URL =
 export async function resetPilotSimulation(
   state: PilotResetState,
   control: PilotControls,
+  simulationMode: PilotSimulationMode = "alpha",
 ): Promise<PilotSnapshot> {
-  return postPilot("/simulation/reset", { state, control });
+  return postPilot("/simulation/reset", {
+    state,
+    control: serializePilotControl(control, simulationMode),
+    simulationMode,
+  });
 }
 
 export async function stepPilotSimulation(
   control: PilotControls,
   dtS: number,
+  simulationMode: PilotSimulationMode = "alpha",
 ): Promise<PilotSnapshot> {
-  return postPilot("/simulation/step", { control, dtS });
+  return postPilot("/simulation/step", {
+    control: serializePilotControl(control, simulationMode),
+    dtS,
+    simulationMode,
+  });
 }
 
 export async function fetchPilotAircraftConfigs(): Promise<PilotAircraftConfig[]> {
@@ -113,6 +138,16 @@ function parsePilotSnapshot(value: unknown): PilotSnapshot {
   const control = readRecord(value, "control");
   const aero = readRecord(value, "aero");
 
+  const parsedControl: PilotControls = {
+    thrustN: readNumber(control, "thrustN"),
+    bankDeg: readNumber(control, "bankDeg"),
+    attackDeg: readNumber(control, "attackDeg"),
+  };
+  const loadFactor = readOptionalNumber(control, "loadFactor");
+  if (loadFactor !== null) {
+    parsedControl.loadFactor = loadFactor;
+  }
+
   return {
     ok: true,
     elapsedS: readNumber(value, "elapsedS"),
@@ -126,15 +161,30 @@ function parsePilotSnapshot(value: unknown): PilotSnapshot {
       massKg: readNumber(state, "massKg"),
       aircraftType: readString(state, "aircraftType"),
     },
-    control: {
-      thrustN: readNumber(control, "thrustN"),
-      bankDeg: readNumber(control, "bankDeg"),
-      attackDeg: readNumber(control, "attackDeg"),
-    },
+    control: parsedControl,
     aero: {
       liftCoefficient: readNumber(aero, "liftCoefficient"),
       dragCoefficient: readNumber(aero, "dragCoefficient"),
     },
+  };
+}
+
+function serializePilotControl(
+  control: PilotControls,
+  simulationMode: PilotSimulationMode,
+): PilotControlPayload {
+  if (simulationMode === "loadFactor") {
+    return {
+      thrustN: control.thrustN,
+      bankDeg: control.bankDeg,
+      loadFactor: control.loadFactor ?? 1,
+    };
+  }
+
+  return {
+    thrustN: control.thrustN,
+    bankDeg: control.bankDeg,
+    attackDeg: control.attackDeg,
   };
 }
 
@@ -183,6 +233,15 @@ function readRecord(value: Record<string, unknown>, key: string): Record<string,
 
 function readNumber(value: Record<string, unknown>, key: string): number {
   const nested = value[key];
+  if (typeof nested !== "number" || !Number.isFinite(nested)) {
+    throw new Error(`AeroViz backend response has invalid ${key}`);
+  }
+  return nested;
+}
+
+function readOptionalNumber(value: Record<string, unknown>, key: string): number | null {
+  const nested = value[key];
+  if (nested === undefined) return null;
   if (typeof nested !== "number" || !Number.isFinite(nested)) {
     throw new Error(`AeroViz backend response has invalid ${key}`);
   }

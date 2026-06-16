@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { useApp } from "../context/AppContext";
 import {
   fetchRunwayThresholdTargets,
@@ -22,7 +29,6 @@ import {
   type PilotInitialPlacementPosition,
 } from "../hooks/usePilotInitialPlacement";
 import {
-  AEROVIZ_BACKEND_URL,
   fetchPilotAircraftConfigs,
   resetPilotSimulation,
   stepPilotSimulation,
@@ -30,6 +36,7 @@ import {
   type PilotAircraftType,
   type PilotControls,
   type PilotResetState,
+  type PilotSimulationMode,
   type PilotSnapshot,
 } from "../pilot/pilotClient";
 import {
@@ -47,6 +54,10 @@ import {
   type TrajectoryOptimizationResult,
 } from "../pilot/trajectoryOptimizationClient";
 
+const DEFAULT_SIMULATION_MODE: PilotSimulationMode = "alpha";
+const DEFAULT_LOAD_FACTOR = 1;
+const MIN_LOAD_FACTOR = 0;
+const MAX_LOAD_FACTOR = 3;
 const DEFAULT_CONTROLS: PilotControls = makeDefaultControls(null);
 const DEFAULT_FRAME_DT_S = 0.2;
 const STEP_INTERVAL_MS = 120;
@@ -82,6 +93,8 @@ export default function PilotPanel() {
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [aircraftConfigs, setAircraftConfigs] = useState<PilotAircraftConfig[]>([]);
+  const [simulationMode, setSimulationMode] =
+    useState<PilotSimulationMode>(DEFAULT_SIMULATION_MODE);
   const [controls, setControls] = useState<PilotControls>(DEFAULT_CONTROLS);
   const [frameDtS, setFrameDtS] = useState(DEFAULT_FRAME_DT_S);
   const [snapshot, setSnapshot] = useState<PilotSnapshot | null>(null);
@@ -102,6 +115,7 @@ export default function PilotPanel() {
     trajectoryOptimizer === "variableTimeWarmStartTranscription";
 
   const controlsRef = useRef(controls);
+  const simulationModeRef = useRef(simulationMode);
   const frameDtRef = useRef(frameDtS);
   const stepInFlightRef = useRef(false);
   const trajectoryPlanRef = useRef<TrajectoryOptimizationResult | null>(null);
@@ -296,6 +310,7 @@ export default function PilotPanel() {
     trajectoryReplayIndexRef.current = 0;
     trajectorySegmentElapsedSRef.current = 0;
     setInitialState(makeDefaultInitialState(airport, aircraft));
+    setSimulationMode(DEFAULT_SIMULATION_MODE);
     setControls(makeDefaultControls(aircraft));
     setActiveMode("pilot");
     setIsInitialEditorOpen(false);
@@ -377,6 +392,10 @@ export default function PilotPanel() {
   }, [controls]);
 
   useEffect(() => {
+    simulationModeRef.current = simulationMode;
+  }, [simulationMode]);
+
+  useEffect(() => {
     frameDtRef.current = frameDtS;
   }, [frameDtS]);
 
@@ -400,7 +419,11 @@ export default function PilotPanel() {
       if (stepInFlightRef.current) return;
       stepInFlightRef.current = true;
 
-      void stepPilotSimulation(controlsRef.current, frameDtRef.current)
+      void stepPilotSimulation(
+        controlsRef.current,
+        frameDtRef.current,
+        simulationModeRef.current,
+      )
         .then((nextSnapshot) => {
           if (cancelled) return;
           setSnapshot(nextSnapshot);
@@ -504,11 +527,11 @@ export default function PilotPanel() {
           break;
         case "arrowup":
         case "w":
-          nudgeControl("attackDeg", 0.5, -10, 18);
+          nudgeModeControl(1);
           break;
         case "arrowdown":
         case "s":
-          nudgeControl("attackDeg", -0.5, -10, 18);
+          nudgeModeControl(-1);
           break;
         case "q":
           nudgeControl("thrustN", -500, 0, selectedMaxThrustN);
@@ -517,7 +540,11 @@ export default function PilotPanel() {
           nudgeControl("thrustN", 500, 0, selectedMaxThrustN);
           break;
         case " ":
-          setControls((current) => ({ ...current, bankDeg: 0, attackDeg: 0 }));
+          setControls((current) =>
+            simulationModeRef.current === "loadFactor"
+              ? { ...current, bankDeg: 0, loadFactor: DEFAULT_LOAD_FACTOR }
+              : { ...current, bankDeg: 0, attackDeg: 0 }
+          );
           break;
         default:
           handled = false;
@@ -541,7 +568,11 @@ export default function PilotPanel() {
     setError(null);
     try {
       if (!snapshot) {
-        const nextSnapshot = await resetPilotSimulation(initialState, controls);
+        const nextSnapshot = await resetPilotSimulation(
+          initialState,
+          controls,
+          simulationMode,
+        );
         setSnapshot(nextSnapshot);
         const nextPose = snapshotToPose(nextSnapshot);
         setTrail(nextPose ? [nextPose] : []);
@@ -564,7 +595,11 @@ export default function PilotPanel() {
     setIsBusy(true);
     setError(null);
     try {
-      const nextSnapshot = await resetPilotSimulation(initialState, controls);
+      const nextSnapshot = await resetPilotSimulation(
+        initialState,
+        controls,
+        simulationMode,
+      );
       setSnapshot(nextSnapshot);
       const nextPose = snapshotToPose(nextSnapshot);
       setTrail(nextPose ? [nextPose] : []);
@@ -597,6 +632,29 @@ export default function PilotPanel() {
   ) {
     if (!Number.isFinite(value)) return;
     setControls((current) => ({ ...current, [key]: clamp(value, min, max) }));
+  }
+
+  function updateSimulationMode(value: PilotSimulationMode) {
+    setSimulationMode(value);
+    if (value !== "loadFactor") return;
+
+    setControls((current) =>
+      current.loadFactor === undefined
+        ? { ...current, loadFactor: DEFAULT_LOAD_FACTOR }
+        : current
+    );
+  }
+
+  function handleSimulationSelectKeyDown(
+    event: ReactKeyboardEvent<HTMLSelectElement>,
+  ) {
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      nudgeModeControl(1, simulationMode);
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      nudgeModeControl(-1, simulationMode);
+    }
   }
 
   function updateInitialField(
@@ -807,8 +865,25 @@ export default function PilotPanel() {
   ) {
     setControls((current) => ({
       ...current,
-      [key]: clamp(current[key] + delta, min, max),
+      [key]: clamp((current[key] ?? defaultControlValue(key)) + delta, min, max),
     }));
+  }
+
+  function nudgeModeControl(
+    direction: 1 | -1,
+    mode: PilotSimulationMode = simulationModeRef.current,
+  ) {
+    if (mode === "loadFactor") {
+      nudgeControl(
+        "loadFactor",
+        direction * 0.05,
+        MIN_LOAD_FACTOR,
+        MAX_LOAD_FACTOR,
+      );
+      return;
+    }
+
+    nudgeControl("attackDeg", direction * 0.5, -10, 18);
   }
 
   const statusLabel = isPlacingInitialPosition
@@ -848,7 +923,6 @@ export default function PilotPanel() {
         <div className="pilot-panel-header-main">
           <div className="pilot-panel-title-block">
             <h3>{activeMode === "trajectory" ? "Trajectory Play" : "Pilot Mode"}</h3>
-            <span className="pilot-panel-server">{AEROVIZ_BACKEND_URL}</span>
           </div>
           <span className={`pilot-status pilot-status-${statusLabel.toLowerCase()}`}>
             {statusLabel}
@@ -1099,7 +1173,7 @@ export default function PilotPanel() {
 
           <section className="pilot-control-zone" aria-label="Trajectory play controls">
             <div className="pilot-options-row">
-              <label>
+              <label className="pilot-checkbox-label">
                 <input
                   type="checkbox"
                   checked={isFollowing}
@@ -1184,31 +1258,80 @@ export default function PilotPanel() {
               </button>
             </div>
 
-            <div className="pilot-stepper-row">
-              <button
-                onClick={() => nudgeControl("attackDeg", -0.5, -10, 18)}
-                title="Reduce alpha"
-              >
-                -
-              </button>
-              <label>
-                <span>Alpha</span>
-                <EnglishNumberInput
-                  value={controls.attackDeg}
-                  min={-10}
-                  max={18}
-                  step="0.5"
-                  disabled={false}
-                  onCommit={(value) => updateControl("attackDeg", value, -10, 18)}
-                />
-              </label>
-              <button
-                onClick={() => nudgeControl("attackDeg", 0.5, -10, 18)}
-                title="Increase alpha"
-              >
-                +
-              </button>
-            </div>
+            {simulationMode === "loadFactor" ? (
+              <div className="pilot-stepper-row">
+                <button
+                  onClick={() =>
+                    nudgeControl(
+                      "loadFactor",
+                      -0.05,
+                      MIN_LOAD_FACTOR,
+                      MAX_LOAD_FACTOR,
+                    )
+                  }
+                  title="Reduce load factor"
+                >
+                  -
+                </button>
+                <label>
+                  <span>Load factor</span>
+                  <EnglishNumberInput
+                    value={controls.loadFactor ?? DEFAULT_LOAD_FACTOR}
+                    min={MIN_LOAD_FACTOR}
+                    max={MAX_LOAD_FACTOR}
+                    step="0.05"
+                    disabled={false}
+                    onCommit={(value) =>
+                      updateControl(
+                        "loadFactor",
+                        value,
+                        MIN_LOAD_FACTOR,
+                        MAX_LOAD_FACTOR,
+                      )
+                    }
+                  />
+                </label>
+                <button
+                  onClick={() =>
+                    nudgeControl(
+                      "loadFactor",
+                      0.05,
+                      MIN_LOAD_FACTOR,
+                      MAX_LOAD_FACTOR,
+                    )
+                  }
+                  title="Increase load factor"
+                >
+                  +
+                </button>
+              </div>
+            ) : (
+              <div className="pilot-stepper-row">
+                <button
+                  onClick={() => nudgeControl("attackDeg", -0.5, -10, 18)}
+                  title="Reduce alpha"
+                >
+                  -
+                </button>
+                <label>
+                  <span>Alpha</span>
+                  <EnglishNumberInput
+                    value={controls.attackDeg}
+                    min={-10}
+                    max={18}
+                    step="0.5"
+                    disabled={false}
+                    onCommit={(value) => updateControl("attackDeg", value, -10, 18)}
+                  />
+                </label>
+                <button
+                  onClick={() => nudgeControl("attackDeg", 0.5, -10, 18)}
+                  title="Increase alpha"
+                >
+                  +
+                </button>
+              </div>
+            )}
 
             <div className="pilot-stepper-row">
               <button
@@ -1240,6 +1363,21 @@ export default function PilotPanel() {
 
             <div className="pilot-options-row">
               <label>
+                <span>Simulation</span>
+                <select
+                  className="pilot-select-input"
+                  value={simulationMode}
+                  disabled={isPlacingInitialPosition}
+                  onKeyDown={handleSimulationSelectKeyDown}
+                  onChange={(event) =>
+                    updateSimulationMode(event.target.value as PilotSimulationMode)
+                  }
+                >
+                  <option value="alpha">Alpha</option>
+                  <option value="loadFactor">Load factor</option>
+                </select>
+              </label>
+              <label className="pilot-checkbox-label">
                 <input
                   type="checkbox"
                   checked={isFollowing}
@@ -1289,6 +1427,7 @@ function makeDefaultControls(aircraft: PilotAircraftConfig | null): PilotControl
     thrustN: aircraft?.approachThrustGuessN ?? 40000,
     bankDeg: 0,
     attackDeg: 5.783,
+    loadFactor: DEFAULT_LOAD_FACTOR,
   };
 }
 
@@ -1357,6 +1496,10 @@ function toErrorMessage(error: unknown): string {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function defaultControlValue(key: keyof PilotControls): number {
+  return key === "loadFactor" ? DEFAULT_LOAD_FACTOR : 0;
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
