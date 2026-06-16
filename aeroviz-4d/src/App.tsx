@@ -7,7 +7,7 @@
  * Layout principle:
  *   - CesiumViewer            → position: absolute, fills 100vw × 100vh
  *   - .cesium-overlay-container → position: absolute, inset: 0, CSS Grid
- *       Panels sit in named grid areas (ctrl / proc / hud / ops); clicks fall
+ *       Panels sit in named grid areas (leftStack / hud / ops); clicks fall
  *       through via pointer-events: none on the container.
  */
 
@@ -41,9 +41,11 @@ function FlightApp() {
 
       {/* Layer 1: overlay grid — panels anchored to corners, clicks pass through */}
       <div className="cesium-overlay-container">
-        <ControlPanel />
+        <div className="left-overlay-panel-stack">
+          <ControlPanel />
+          <ProcedurePanel />
+        </div>
         <AirportLocalTerrainAlert />
-        <ProcedurePanel />
         <ProcedureAnnotationPopup />
         <RunwayTrajectoryProfilePanel />
         {czmlStatus ? (
