@@ -1,6 +1,6 @@
 import casadi as ca
 import numpy as np
-from .casadi_exprs import *
+from .casadi_exprs import isa_density_expr, aerodynamic_coefficients_expr
 
 
 # Dynamic model for load factor control, using CasADi for symbolic computation
@@ -31,23 +31,15 @@ def make_dynamics_model():
     Cd0 = ca.SX.sym('Cd0')  # zero-lift drag coefficient
     k = ca.SX.sym('k')  # induced drag factor
 
-    # Define and compute symbols for Cl and Cd
-    g = 9.81  # gravity (m/s^2)
-    Cl_req = n_cmd*m*g/(0.5*rho*S*V**2)  
-    # Cl
-    r = Cl_req / Cl_max
-    stalled = r > 1.0
-    Cl = ca.if_else(stalled, Cl_max, Cl_req)  # cap Cl at Cl_max to model stall
     # Cd
     stall_threshold = ca.SX.sym('stall_threshold')  # stall threshold as a fraction of Cl_max
     k_stall = ca.SX.sym('k_stall')  # stall drag coefficient factor
-    # smooth factor
-    stall_fraction = ca.fmin(r, 1.0)
-    x_stall = clamp_expr((stall_fraction - stall_threshold) / (1.0 - stall_threshold), 0.0, 1.0)
-    smooth = x_stall * x_stall * (3 - 2 * x_stall)  # smooth transition for stall drag
-    Cd_stall = ca.if_else(r > stall_threshold, smooth * k_stall, 0.0)  # simple stall drag model
-    Cd = Cd0 + k * Cl**2 + Cd_stall
 
+    # Define and compute symbols for Cl and Cd
+    aero_coeffs = aerodynamic_coefficients_expr(n_cmd, V, h, m, [S, Cl_max, Cd0, k, stall_threshold, k_stall])
+    Cd, stalled =   aero_coeffs['Cd'], aero_coeffs['stalled']
+
+    g = 9.81  # gravity (m/s^2)
     # Compute actually load factor
     n = ca.if_else(stalled, 0.5*rho*V**2*Cl_max*S/(m*g), n_cmd)
 
@@ -85,6 +77,14 @@ def make_dynamics_model():
         'xdot': xdot,
         'dae': dae,
         'rhs_func': rhs_func,
+        "aux":{
+            'rho': rho,
+            'Cl': aero_coeffs['Cl'],
+            'Cd': aero_coeffs['Cd'],
+            'stalled': aero_coeffs['stalled'],
+            'n': n,
+            'D': D,
+        }
     }
 
 def make_integrator(model, dt):

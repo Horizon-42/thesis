@@ -6,14 +6,54 @@ import numpy as np
 
 
 from aerodynamic_model.aircraft_sets import A320  # noqa: E402
+from aerodynamic_model.casadi_exprs import (  # noqa: E402
+    aerodynamic_coefficients_expr,
+    isa_density_expr,
+)
 from aerodynamic_model.casadi_simulator import make_dynamics_model, make_integrator  # noqa: E402
-from aerodynamic_model.common import Atmosphere  # noqa: E402
 
 
 class TestCasadiSimulator(unittest.TestCase):
     def setUp(self):
         self.model = make_dynamics_model()
-        self.atmosphere = Atmosphere()
+        altitude = ca.SX.sym("altitude")
+        self.density_func = ca.Function(
+            "density_from_expr",
+            [altitude],
+            [isa_density_expr(altitude)],
+        )
+        n_cmd = ca.SX.sym("n_cmd")
+        speed = ca.SX.sym("speed")
+        mass = ca.SX.sym("mass")
+        aero_params = ca.SX.sym("aero_params", 6)
+        coeffs = aerodynamic_coefficients_expr(
+            n_cmd,
+            speed,
+            altitude,
+            mass,
+            aero_params,
+        )
+        self.coefficients_func = ca.Function(
+            "aero_coefficients_from_expr",
+            [n_cmd, speed, altitude, mass, aero_params],
+            [
+                coeffs["Cl_req"],
+                coeffs["Cl"],
+                coeffs["Cd"],
+                coeffs["r"],
+                coeffs["stalled"],
+            ],
+            ["n_cmd", "speed", "altitude", "mass", "aero_params"],
+            ["cl_req", "cl", "cd", "r", "stalled"],
+        )
+        aux = self.model["aux"]
+        self.aux_func = ca.Function(
+            "dynamics_aux_from_expr",
+            [self.model["x"], self.model["u"], self.model["aero_params"]],
+            [aux["rho"], aux["Cl"], aux["Cd"], aux["stalled"], aux["n"], aux["D"]],
+            ["x", "u", "aero_params"],
+            ["rho", "cl", "cd", "stalled", "n", "drag"],
+        )
         # Keep this order aligned with casadi_simulator.make_dynamics_model().
         self.aero_params = np.array(
             [
@@ -58,11 +98,39 @@ class TestCasadiSimulator(unittest.TestCase):
         )
         return np.array(result["xdot"], dtype=float).reshape(-1)
 
+    def _density(self, altitude: float) -> float:
+        return float(self.density_func(altitude))
+
+    def _coefficients(
+        self,
+        *,
+        load_factor: float,
+        speed: float,
+        altitude: float,
+        mass: float = A320.mass_kg,
+    ) -> dict[str, float]:
+        result = self.coefficients_func(
+            n_cmd=load_factor,
+            speed=speed,
+            altitude=altitude,
+            mass=mass,
+            aero_params=self.aero_params,
+        )
+        return {name: float(value) for name, value in result.items()}
+
+    def _aux(self, state_vec: np.ndarray, control_vec: np.ndarray) -> dict[str, float]:
+        result = self.aux_func(
+            x=state_vec,
+            u=control_vec,
+            aero_params=self.aero_params,
+        )
+        return {name: float(value) for name, value in result.items()}
+
     def test_model_exposes_symbolic_contract(self):
         # The outer model dict is our local interface for tests and callers.
         self.assertEqual(
             set(self.model.keys()),
-            {"x", "u", "aero_params", "xdot", "dae", "rhs_func"},
+            {"x", "u", "aero_params", "xdot", "dae", "rhs_func", "aux"},
         )
         self.assertEqual(self.model["x"].shape, (7, 1))
         self.assertEqual(self.model["u"].shape, (3, 1))
@@ -75,6 +143,76 @@ class TestCasadiSimulator(unittest.TestCase):
         self.assertEqual(dae["x"].shape, (7, 1))
         self.assertEqual(dae["p"].shape, (9, 1))
         self.assertEqual(dae["ode"].shape, (7, 1))
+
+        aux = self.model["aux"]
+        self.assertEqual(set(aux.keys()), {"rho", "Cl", "Cd", "stalled", "n", "D"})
+        for expression in aux.values():
+            self.assertEqual(expression.shape, (1, 1))
+
+    def test_aerodynamic_coefficients_expr_matches_unstalled_drag_polar(self):
+        speed = 150.0
+        altitude = 1000.0
+        load_factor = 1.0
+
+        coeffs = self._coefficients(
+            load_factor=load_factor,
+            speed=speed,
+            altitude=altitude,
+        )
+
+        rho = self._density(altitude)
+        wing_area_m2, cl_max, cd0, induced_drag_factor = self.aero_params[:4]
+        expected_cl_req = load_factor * A320.mass_kg * 9.81 / (
+            0.5 * rho * wing_area_m2 * speed**2
+        )
+        expected_cd = cd0 + induced_drag_factor * expected_cl_req**2
+
+        self.assertLess(expected_cl_req, cl_max)
+        self.assertAlmostEqual(coeffs["cl_req"], expected_cl_req)
+        self.assertAlmostEqual(coeffs["cl"], expected_cl_req)
+        self.assertAlmostEqual(coeffs["r"], expected_cl_req / cl_max)
+        self.assertAlmostEqual(coeffs["cd"], expected_cd)
+        self.assertEqual(coeffs["stalled"], 0.0)
+
+    def test_aerodynamic_coefficients_expr_caps_lift_when_stalled(self):
+        speed = 80.0
+        altitude = 1000.0
+        load_factor = 5.0
+
+        coeffs = self._coefficients(
+            load_factor=load_factor,
+            speed=speed,
+            altitude=altitude,
+        )
+
+        _, cl_max, cd0, induced_drag_factor, _, stall_drag_factor = self.aero_params
+        expected_cd = cd0 + induced_drag_factor * cl_max**2 + stall_drag_factor
+
+        self.assertGreater(coeffs["cl_req"], cl_max)
+        self.assertAlmostEqual(coeffs["cl"], cl_max)
+        self.assertAlmostEqual(coeffs["cd"], expected_cd)
+        self.assertEqual(coeffs["stalled"], 1.0)
+
+    def test_aux_outputs_are_evaluable_from_dynamics_symbols(self):
+        state_vec = self._state_vector(speed=150.0, altitude=1000.0)
+        control_vec = self._control_vector(load_factor=1.0)
+
+        aux = self._aux(state_vec, control_vec)
+        coeffs = self._coefficients(
+            load_factor=control_vec[2],
+            speed=state_vec[3],
+            altitude=state_vec[2],
+            mass=state_vec[6],
+        )
+
+        for value in aux.values():
+            self.assertTrue(np.isfinite(value))
+        self.assertAlmostEqual(aux["rho"], self._density(state_vec[2]))
+        self.assertAlmostEqual(aux["cl"], coeffs["cl"])
+        self.assertAlmostEqual(aux["cd"], coeffs["cd"])
+        self.assertAlmostEqual(aux["stalled"], coeffs["stalled"])
+        self.assertAlmostEqual(aux["n"], control_vec[2])
+        self.assertGreater(aux["drag"], 0.0)
 
     def test_dae_can_be_wrapped_as_casadi_function_without_free_variables(self):
         dae = self.model["dae"]
@@ -114,7 +252,7 @@ class TestCasadiSimulator(unittest.TestCase):
         derivatives = self._rhs(state_vec, control_vec)
 
         # Once Cl is capped at Cl_max, the actual load factor is physics-limited.
-        rho = self.atmosphere.get_ISA_density(altitude)
+        rho = self._density(altitude)
         wing_area_m2, cl_max = self.aero_params[:2]
         actual_load_factor = 0.5 * rho * speed**2 * cl_max * wing_area_m2 / (
             A320.mass_kg * 9.81
