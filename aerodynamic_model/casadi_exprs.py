@@ -12,10 +12,9 @@ def isa_density_expr(h):
     rho_h = RHO0 * (T_h / T0)**4.25588
     return rho_h
 
-def aerodynamic_coefficients_expr(n_cmd, V, h, m, aero_params):
+def aerodynamic_coefficients_expr(n_cmd, V, m, rho, aero_params):
     S, Cl_max, Cd0, k, stall_threshold, k_stall = aero_params[0], aero_params[1], aero_params[2], aero_params[3], aero_params[4], aero_params[5]
     g = 9.81  # gravity (m/s^2)
-    rho = isa_density_expr(h)
 
     Cl_req = n_cmd*m*g/(0.5*rho*S*V**2)
     r = Cl_req / Cl_max
