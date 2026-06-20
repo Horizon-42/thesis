@@ -37,4 +37,8 @@ def aerodynamic_coefficients_expr(n_cmd, V, h, m, aero_params):
     }
 
 # GEO coordinates convert to enu coordinates
-def 
+def enu_velocity_components_expr(V, gamma, psi):
+    Vx = V * ca.cos(gamma) * ca.cos(psi)
+    Vy = V * ca.cos(gamma) * ca.sin(psi)
+    Vz = V * ca.sin(gamma)
+    return Vx, Vy, Vz
