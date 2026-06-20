@@ -39,7 +39,13 @@ def make_dynamics_model():
     k_stall = ca.SX.sym('k_stall')  # stall drag coefficient factor
 
     # Define and compute symbols for Cl and Cd
-    aero_coeffs = aerodynamic_coefficients_expr(n_cmd, V, h, m, [S, Cl_max, Cd0, k, stall_threshold, k_stall])
+    aero_coeffs = aerodynamic_coefficients_expr(
+        n_cmd,
+        V,
+        m,
+        rho,
+        [S, Cl_max, Cd0, k, stall_threshold, k_stall],
+    )
     Cd, stalled =   aero_coeffs['Cd'], aero_coeffs['stalled']
 
     g = 9.81  # gravity (m/s^2)
@@ -241,11 +247,10 @@ class CasadiSimulator:
         u = ca.vertcat(control.thrust, control.bank_rad, control.load_factor)
         aero_params_vec = ca.vertcat(self.aero_params.S, self.aero_params.Cl_max, self.aero_params.Cd0, self.aero_params.k, self.aero_params.stall_threshold, self.aero_params.k_stall)
 
-        x_geo_next = self.geo_step(x_geo=x_geo, u=u, aero_params=aero_params_vec, dt=dt)
-        return GeoState(*x_geo_next.full().flatten())
-    
+        result = self.geo_step(x_geo=x_geo, u=u, aero_params=aero_params_vec, dt=dt)
+        x_geo_next = np.array(result["x_geo_next"], dtype=float).reshape(-1)
+        return GeoState(*x_geo_next.tolist())
+
     def optimize_trajectory(self, initial_state: GeoState, target_state: GeoState, N: int, dt: float):
         # This function can be implemented to optimize a trajectory using CasADi's NLP solvers, given an initial state and a sequence of controls.
         pass
-
-    

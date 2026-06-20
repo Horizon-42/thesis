@@ -10,7 +10,13 @@ from aerodynamic_model.casadi_exprs import (  # noqa: E402
     aerodynamic_coefficients_expr,
     isa_density_expr,
 )
-from aerodynamic_model.casadi_simulator import make_dynamics_model, make_integrator  # noqa: E402
+from aerodynamic_model.casadi_simulator import (  # noqa: E402
+    CasadiSimulator,
+    GeoControl,
+    GeoState,
+    make_dynamics_model,
+    make_integrator,
+)
 
 
 class TestCasadiSimulator(unittest.TestCase):
@@ -26,11 +32,12 @@ class TestCasadiSimulator(unittest.TestCase):
         speed = ca.SX.sym("speed")
         mass = ca.SX.sym("mass")
         aero_params = ca.SX.sym("aero_params", 6)
+        rho = isa_density_expr(altitude)
         coeffs = aerodynamic_coefficients_expr(
             n_cmd,
             speed,
-            altitude,
             mass,
+            rho,
             aero_params,
         )
         self.coefficients_func = ca.Function(
@@ -261,6 +268,45 @@ class TestCasadiSimulator(unittest.TestCase):
 
         self.assertLess(actual_load_factor, control_vec[2])
         self.assertAlmostEqual(derivatives[5], expected_gamma_rate)
+
+    def test_casadi_simulator_step_returns_geo_state_from_named_output(self):
+        simulator = CasadiSimulator(A320, dt=0.2)
+        state = GeoState(
+            latitude=51.1139,
+            longitude=-114.0203,
+            altitude=1000.0,
+            V=150.0,
+            psi=0.0,
+            gamma=0.0,
+            m=A320.mass_kg,
+        )
+        control = GeoControl(
+            thrust=A320.approach_thrust_guess_n,
+            bank_rad=0.0,
+            load_factor=1.0,
+        )
+
+        next_state = simulator.step(state, control, dt=0.2)
+
+        self.assertIsInstance(next_state, GeoState)
+        self.assertTrue(
+            np.all(
+                np.isfinite(
+                    [
+                        next_state.latitude,
+                        next_state.longitude,
+                        next_state.altitude,
+                        next_state.V,
+                        next_state.psi,
+                        next_state.gamma,
+                        next_state.m,
+                    ]
+                )
+            )
+        )
+        self.assertAlmostEqual(next_state.latitude, state.latitude, places=5)
+        self.assertGreater(next_state.longitude, state.longitude)
+        self.assertAlmostEqual(next_state.m, state.m)
 
     def test_symbolic_jacobians_can_be_built_and_evaluated(self):
         # Continuous-time linearization: A=dxdot/dx, B=dxdot/du, P=dxdot/dparams.
