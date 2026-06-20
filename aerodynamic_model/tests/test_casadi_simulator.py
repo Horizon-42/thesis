@@ -1,19 +1,13 @@
 import math
-from pathlib import Path
-import sys
 import unittest
 
 import casadi as ca
 import numpy as np
 
 
-MODEL_DIR = Path(__file__).resolve().parents[1]
-if str(MODEL_DIR) not in sys.path:
-    sys.path.insert(0, str(MODEL_DIR))
-
-from aircraft_sets import A320  # noqa: E402
-from casadi_simulator import make_dynamics_model, make_integrator  # noqa: E402
-from common import Atmosphere  # noqa: E402
+from aerodynamic_model.aircraft_sets import A320  # noqa: E402
+from aerodynamic_model.casadi_simulator import make_dynamics_model, make_integrator  # noqa: E402
+from aerodynamic_model.common import Atmosphere  # noqa: E402
 
 
 class TestCasadiSimulator(unittest.TestCase):

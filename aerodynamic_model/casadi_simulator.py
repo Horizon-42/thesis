@@ -1,6 +1,6 @@
 import casadi as ca
 import numpy as np
-from casadi_atmosphere import make_atmosphere_model
+from .casadi_exprs import *
 
 
 # Dynamic model for load factor control, using CasADi for symbolic computation
@@ -21,8 +21,7 @@ def make_dynamics_model():
     state_vec = ca.vertcat(x, y, h, V, psi, gamma, m)
     control_vec = ca.vertcat(T, mu, n_cmd)
 
-    atmosphere_model = make_atmosphere_model()
-    rho = atmosphere_model(h)
+    rho = isa_density_expr(h)
 
     # Define aircraft metadata and aerodynamic parameters (these could be made symbolic if needed)
     S = ca.SX.sym('S')  # reference area (m^2)
@@ -44,7 +43,7 @@ def make_dynamics_model():
     k_stall = ca.SX.sym('k_stall')  # stall drag coefficient factor
     # smooth factor
     stall_fraction = ca.fmin(r, 1.0)
-    x_stall = ca.fmin(ca.fmax((stall_fraction - stall_threshold) / (1.0 - stall_threshold), 0.0), 1.0)
+    x_stall = clamp_expr((stall_fraction - stall_threshold) / (1.0 - stall_threshold), 0.0, 1.0)
     smooth = x_stall * x_stall * (3 - 2 * x_stall)  # smooth transition for stall drag
     Cd_stall = ca.if_else(r > stall_threshold, smooth * k_stall, 0.0)  # simple stall drag model
     Cd = Cd0 + k * Cl**2 + Cd_stall
