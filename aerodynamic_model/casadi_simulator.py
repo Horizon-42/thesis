@@ -1,7 +1,11 @@
 import casadi as ca
 import numpy as np
 from .casadi_exprs import isa_density_expr, aerodynamic_coefficients_expr
-from .casadi_coordinates_converter import geodetic_deg_to_ecef_expr, ecef_to_geodetic_expr, ecef_to_enu_rotation_matrix_expr, geodetic_to_enu_expr, enu_to_geodetic_expr
+from .casadi_coordinates_converter import ecef_to_enu_rotation_matrix_expr, enu_to_geodetic_expr
+
+from .aircraft_sets import AircraftSpec, A320
+from dataclasses import dataclass
+
 # Dynamic model for load factor control, using CasADi for symbolic computation
 def make_dynamics_model():
     # Define symbolic variables for state and control
@@ -138,8 +142,16 @@ def enu_state_to_geodetic_expr(x_enu, ref_geo):
     gamma_new = ca.atan2(V_up_new, horizontal_V)
     return lat, lon, alt, V_new, psi_new, gamma_new
 
+def rk4_step_expr(rhs_expr, x, u, aero_params, dt):
+    k1 = rhs_expr(x, u, aero_params)
+    k2 = rhs_expr(x + 0.5 * dt * k1, u, aero_params)
+    k3 = rhs_expr(x + 0.5 * dt * k2, u, aero_params)
+    k4 = rhs_expr(x + dt * k3, u, aero_params)
+
+    return x + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+
 # create geodetic dynamics model
-def make_geo_step_from_enu_integrator(dt):
+def make_geo_step_from_enu_integrator():
     # Define symbolic variables for state and control
     lat = ca.SX.sym('lat')  # latitude (degrees)
     lon = ca.SX.sym('lon')  # longitude (degrees)
@@ -149,6 +161,8 @@ def make_geo_step_from_enu_integrator(dt):
     gamma = ca.SX.sym('gamma')  # flight path angle (rad)
     m = ca.SX.sym('m')  # mass (kg)
     x_geo = ca.vertcat(lat, lon, alt, V, psi, gamma, m)
+
+    dt = ca.SX.sym('dt')  # time step for integration
 
     T = ca.SX.sym('T')  # thrust (N)
     mu = ca.SX.sym('mu')  # bank angle (rad)
@@ -166,20 +180,20 @@ def make_geo_step_from_enu_integrator(dt):
 
 
     enu_model = make_dynamics_model()
-    enu_integrator = make_integrator(enu_model, dt=dt) # create an integrator for the ENU dynamics
+    rhs_expr = enu_model['rhs_func']
 
     x_enu0 = ca.vertcat(0.0, 0.0, alt, V, psi, gamma, m) 
     p = ca.vertcat(u, aero_params)
-    x_enu_next = enu_integrator(x0=x_enu0, p=p)['xf']  # integrate ENU dynamics for one step, xf is the final state after integration
+    x_enu_next = rk4_step_expr(rhs_expr, x_enu0, u, aero_params, dt)
 
     # Convert the next ENU state back to geodetic coordinates
     ref_geo = ca.vertcat(lat, lon, 0.0)  # surface reference point for ENU frame, using current lat/lon and 0 altitude
     x_geo_next = ca.vertcat(*enu_state_to_geodetic_expr(x_enu_next, ref_geo), m)
 
     step_func = ca.Function('geo_step_func',
-                            [x_geo, u, aero_params],
+                            [x_geo, u, aero_params, dt],
                             [x_geo_next],                            
-                            ['x_geo', 'u', 'aero_params'],
+                            ['x_geo', 'u', 'aero_params', 'dt'],
                             ['x_geo_next'])
     return {
         "x": x_geo,
@@ -187,10 +201,51 @@ def make_geo_step_from_enu_integrator(dt):
         "aero_params": aero_params,
         "step_func": step_func,
         "enu_model": enu_model,
-        "enu_integrator": enu_integrator,
     }
 
+@dataclass
+class GeoState:
+    latitude: float
+    longitude: float
+    altitude: float
+    V: float
+    psi: float
+    gamma: float
+    m: float
 
+@dataclass
+class AeroParams:
+    S: float 
+    Cl_max: float = 1.5
+    Cd0: float = 0.02
+    k: float = 0.04
+    stall_threshold: float = 0.9
+    k_stall: float = 0.1
 
+@dataclass
+class GeoControl:
+    thrust: float
+    bank_rad: float
+    load_factor: float
+
+class CasadiSimulator:
+    g = 9.81  # gravity (m/s^2)
+
+    def __init__(self, aircraft: AircraftSpec, dt: float):
+        self.aircraft = aircraft
+        self.aero_params = AeroParams(S=aircraft.wing_area_m2)
+        self.geo_step = make_geo_step_from_enu_integrator()["step_func"]
+
+    def step(self, state: GeoState, control: GeoControl, dt: float) -> GeoState:
+        x_geo = ca.vertcat(state.latitude, state.longitude, state.altitude, state.V, state.psi, state.gamma, state.m)
+        u = ca.vertcat(control.thrust, control.bank_rad, control.load_factor)
+        aero_params_vec = ca.vertcat(self.aero_params.S, self.aero_params.Cl_max, self.aero_params.Cd0, self.aero_params.k, self.aero_params.stall_threshold, self.aero_params.k_stall)
+
+        x_geo_next = self.geo_step(x_geo=x_geo, u=u, aero_params=aero_params_vec, dt=dt)
+        return GeoState(*x_geo_next.full().flatten())
+    
+    def optimize_trajectory(self, initial_state: GeoState, target_state: GeoState, N: int, dt: float):
+        # This function can be implemented to optimize a trajectory using CasADi's NLP solvers, given an initial state and a sequence of controls.
+        pass
 
     
