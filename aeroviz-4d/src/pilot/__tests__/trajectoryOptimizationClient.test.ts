@@ -72,6 +72,40 @@ describe("trajectoryOptimizationClient", () => {
     );
   });
 
+  it("parses CasADi optimizer load-factor controls", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        optimizer: "casadiIpopt",
+        finalTimeS: 72,
+        nSegments: 4,
+        dtS: 0.2,
+        controls: [
+          { thrustN: 12000, bankDeg: 1, loadFactor: 1.2 },
+        ],
+        states: [
+          request.targetState,
+        ],
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ));
+
+    const result = await runTrajectoryOptimization({
+      ...request,
+      optimizer: "casadiIpopt",
+    });
+
+    expect(result.optimizer).toBe("casadiIpopt");
+    expect(result.controls[0]).toEqual({
+      thrustN: 12000,
+      bankDeg: 1,
+      attackDeg: 0,
+      loadFactor: 1.2,
+    });
+  });
+
   it("throws the backend optimization error message", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ ok: false, error: "bad target" }), {

@@ -4,6 +4,11 @@ import {
   knotsToMetresPerSecond,
   targetAltitudeMForThreshold,
 } from "../../pilot/trajectoryTargetConstraints";
+import type {
+  PilotControls,
+  PilotResetState,
+  PilotSimulationMode,
+} from "../../pilot/pilotClient";
 import PilotPanel from "../PilotPanel";
 
 const a320Config = {
@@ -89,20 +94,25 @@ describe("PilotPanel trajectory play mode", () => {
     ]);
     mocks.runTrajectoryOptimization.mockResolvedValue({
       ok: true,
-      optimizer: "transcription",
+      optimizer: "casadiIpopt",
       finalTimeS: 100,
       nSegments: 10,
       arrivalTimeS: 100,
       dtS: 0.2,
       controls: [
-        { thrustN: 12000, bankDeg: 0, attackDeg: 4 },
-        { thrustN: 12000, bankDeg: 3, attackDeg: 4 },
+        { thrustN: 12000, bankDeg: 0, attackDeg: 0, loadFactor: 1.2 },
+        { thrustN: 12000, bankDeg: 3, attackDeg: 0, loadFactor: 1.1 },
       ],
       states: [],
     });
-    mocks.resetPilotSimulation.mockResolvedValue({
+    mocks.resetPilotSimulation.mockImplementation((
+      _state: PilotResetState,
+      control: PilotControls,
+      simulationMode: PilotSimulationMode = "alpha",
+    ) => Promise.resolve({
       ok: true,
       elapsedS: 0,
+      simulationMode,
       state: {
         lon: -78.7873,
         lat: 35.878659,
@@ -113,16 +123,21 @@ describe("PilotPanel trajectory play mode", () => {
         massKg: 78000,
         aircraftType: "A320",
       },
-      control: { thrustN: 12000, bankDeg: 3, attackDeg: 4 },
+      control,
       aero: {
         liftCoefficient: 0.4,
         dragCoefficient: 0.04,
-        actualLoadFactor: 1.1,
+        actualLoadFactor: control.loadFactor ?? 1.1,
       },
-    });
-    mocks.stepPilotSimulation.mockResolvedValue({
+    }));
+    mocks.stepPilotSimulation.mockImplementation((
+      control: PilotControls,
+      dtS: number,
+      simulationMode: PilotSimulationMode = "alpha",
+    ) => Promise.resolve({
       ok: true,
-      elapsedS: 10,
+      elapsedS: dtS,
+      simulationMode,
       state: {
         lon: -78.79,
         lat: 35.87,
@@ -133,13 +148,13 @@ describe("PilotPanel trajectory play mode", () => {
         massKg: 78000,
         aircraftType: "A320",
       },
-      control: { thrustN: 12000, bankDeg: 3, attackDeg: 4 },
+      control,
       aero: {
         liftCoefficient: 0.42,
         dragCoefficient: 0.041,
-        actualLoadFactor: 1.12,
+        actualLoadFactor: control.loadFactor ?? 1.12,
       },
-    });
+    }));
   });
 
   it("hides backend URL and switches pilot controls between alpha and load factor", async () => {
@@ -236,7 +251,7 @@ describe("PilotPanel trajectory play mode", () => {
     expect(screen.getByText("RW05L")).toBeTruthy();
 
     expect((screen.getByRole("combobox", { name: "Optimizer" }) as HTMLSelectElement).value)
-      .toBe("transcription");
+      .toBe("casadiIpopt");
     expect((screen.getByLabelText("Max iter") as HTMLInputElement).value).toBe("300");
     const optimizerSelect = screen.getByRole("combobox", { name: "Optimizer" });
     fireEvent.change(optimizerSelect, {
@@ -420,10 +435,17 @@ describe("PilotPanel trajectory play mode", () => {
       expect(mocks.resetPilotSimulation).toHaveBeenCalled();
     });
     await waitFor(() => {
+      expect(mocks.resetPilotSimulation).toHaveBeenCalledWith(
+        expect.objectContaining({ aircraftType: "A320" }),
+        { thrustN: 12000, bankDeg: 0, attackDeg: 0, loadFactor: 1.2 },
+        "casadi",
+      );
+    });
+    await waitFor(() => {
       expect(mocks.stepPilotSimulation).toHaveBeenCalledWith(
-        { thrustN: 12000, bankDeg: 0, attackDeg: 4 },
+        { thrustN: 12000, bankDeg: 0, attackDeg: 0, loadFactor: 1.2 },
         0.2,
-        "alpha",
+        "casadi",
         0.2,
       );
     });
@@ -441,7 +463,7 @@ describe("PilotPanel trajectory play mode", () => {
     });
     expect(within(liveStatePanel).getByText("Control")).toBeTruthy();
     expect(
-      within(liveStatePanel).getByText("bank 3.0 deg | alpha 4.00 deg | thrust 12000 N"),
+      within(liveStatePanel).getByText("bank 0.0 deg | n 1.20 | thrust 12000 N"),
     ).toBeTruthy();
   });
 

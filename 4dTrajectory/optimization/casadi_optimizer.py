@@ -22,12 +22,12 @@ def make_control_bounds(max_thrust: float, min_load_factor: float, max_load_fact
     n_cmd_max = max_load_factor  # maximum load factor (can be adjusted based on aircraft capabilities)
     return [T_min, mu_min, n_cmd_min], [T_max, mu_max, n_cmd_max]
 
-def make_state_bounds():
+def make_state_bounds(min_altitude:float, min_velocity:float):
     # Define state bounds (these can be adjusted based on the expected operating envelope of the aircraft)
     lat_min, lat_max = -90.0, 90.0
     lon_min, lon_max = -180.0, 180.0
-    alt_min, alt_max = 0.0, 10000.0  # altitude in meters
-    V_min, V_max = 0.0, 1000.0  # velocity in m/s
+    alt_min, alt_max = min_altitude, 10000.0  # altitude in meters
+    V_min, V_max = min_velocity, 1000.0  # velocity in m/s
     psi_min, psi_max = -ca.pi, ca.pi  # heading angle in radians
     gamma_min, gamma_max = -ca.pi/2, ca.pi/2  # flight path angle in radians
     return [lat_min, lon_min, alt_min, V_min, psi_min, gamma_min], [lat_max, lon_max, alt_max, V_max, psi_max, gamma_max]
@@ -53,7 +53,7 @@ def make_multiple_shooting_solver(segment_num: int, dt: float, max_duration: flo
 
     # start with an empty NLP
     w = [duration] # decision variable list, starting with duration
-    lbw = [0.0] # lower bounds on decision variables
+    lbw = [max_duration/3.0] # lower bounds on decision variables
     ubw = [max_duration] # upper bounds on decision variables
 
     segment_duration = duration / segment_num
@@ -81,7 +81,7 @@ def make_multiple_shooting_solver(segment_num: int, dt: float, max_duration: flo
         seg_states.append(xk)
     
     # create states bounds
-    state_lb, state_ub = make_state_bounds()
+    state_lb, state_ub = make_state_bounds(min_altitude=aircraft_meta['min_altitude'], min_velocity=aircraft_meta['min_terminal_speed'])
     state_lb = state_lb * segment_num # apply the same bounds to all states in all segments
     state_ub = state_ub * segment_num
 
@@ -106,6 +106,11 @@ def make_multiple_shooting_solver(segment_num: int, dt: float, max_duration: flo
     ubg = [0.0] * g.shape[0]
 
     nlp = {'f': duration, 'x': ca.vertcat(*w), 'g': g, 'p': ca.vertcat(start_state, target_state)}
+    # opts = {
+    #     "ipopt.max_cpu_time": 10,
+    #     "ipopt.max_iter": 200,
+    #     "ipopt.print_level": 5,
+    # }
     solver = ca.nlpsol('solver', 'ipopt', nlp)
 
     return solver, lbw, ubw, lbg, ubg
@@ -129,6 +134,8 @@ class CasadiOptimizer:
                 "max_thrust": aircraft.max_thrust_n,
                 "min_load_factor": 0.5,
                 "max_load_factor": 2, # need to check the actual limits for the aircraft, these are just example values
+                "min_terminal_speed": aircraft.terminal_speed_kt * 0.51444, # convert from knots to m/s
+                "min_altitude": aircraft.threshold_crossing_height_m + 10.0, # set minimum altitude slightly above threshold crossing height to avoid infeasible solutions, can be tuned
             },)
     
     @staticmethod
@@ -165,7 +172,7 @@ class CasadiOptimizer:
         target = self.geo_state_to_decision_vector(target_state)
         
         x0 = self.build_initial_guess(initial, target)
-        
+
         p = ca.vertcat(initial, target) # parameters for the NLP: initial and target states
         sol = self.solver(x0=x0, lbx=self.lbw, ubx=self.ubw, lbg=self.lbg, ubg=self.ubg, p=p)
         stats = self.solver.stats()

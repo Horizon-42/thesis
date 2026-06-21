@@ -68,11 +68,17 @@ const MAX_TRAIL_POINTS = 360;
 const DEFAULT_TARGET_GAMMA_DEG = -3;
 const DEFAULT_MAX_ITERATIONS = 300;
 const DEFAULT_ARRIVAL_TIME_S = 100;
-const DEFAULT_TRAJECTORY_OPTIMIZER: TrajectoryOptimizer = "transcription";
+const DEFAULT_TRAJECTORY_OPTIMIZER: TrajectoryOptimizer = "casadiIpopt";
 const FALLBACK_MAX_THRUST_N = 240000;
 
 function usesLoadFactorControl(mode: PilotSimulationMode) {
   return mode === "loadFactor" || mode === "casadi";
+}
+
+function trajectoryOptimizerSimulationMode(
+  optimizer: TrajectoryOptimizer,
+): PilotSimulationMode {
+  return optimizer === "casadiIpopt" ? "casadi" : "alpha";
 }
 
 type PilotPanelMode = "pilot" | "trajectory";
@@ -484,7 +490,12 @@ export default function PilotPanel() {
 
       const replayDtS = Math.min(PLAYBACK_FRAME_DT_S, remainingSegmentS);
       trajectoryStepInFlightRef.current = true;
-      void stepPilotSimulation(control, replayDtS, "alpha", plan.dtS)
+      void stepPilotSimulation(
+        control,
+        replayDtS,
+        trajectoryOptimizerSimulationMode(plan.optimizer),
+        plan.dtS,
+      )
         .then((nextSnapshot) => {
           if (cancelled) return;
           setSnapshot(nextSnapshot);
@@ -839,7 +850,11 @@ export default function PilotPanel() {
     setError(null);
     try {
       const firstControl = optimizedTrajectory.controls[0] ?? controls;
-      const nextSnapshot = await resetPilotSimulation(initialState, firstControl);
+      const nextSnapshot = await resetPilotSimulation(
+        initialState,
+        firstControl,
+        trajectoryOptimizerSimulationMode(optimizedTrajectory.optimizer),
+      );
       setSnapshot(nextSnapshot);
       const nextPose = snapshotToPose(nextSnapshot);
       setTrail(nextPose ? [{ ...nextPose, segmentIndex: 0 }] : []);
@@ -1084,6 +1099,7 @@ export default function PilotPanel() {
                   updateTrajectoryOptimizer(event.target.value as TrajectoryOptimizer)
                 }
               >
+                <option value="casadiIpopt">CasADi IPOPT</option>
                 <option value="transcription">Transcription</option>
                 <option value="leastSquaresTranscription">Least squares</option>
                 <option value="warmStartTranscription">Warm start fixed time</option>

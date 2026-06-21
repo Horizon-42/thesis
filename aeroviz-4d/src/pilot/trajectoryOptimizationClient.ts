@@ -1,6 +1,7 @@
 import { AEROVIZ_BACKEND_URL, type PilotControls, type PilotResetState } from "./pilotClient";
 
 export type TrajectoryOptimizer =
+  | "casadiIpopt"
   | "transcription"
   | "leastSquaresTranscription"
   | "warmStartTranscription"
@@ -82,6 +83,7 @@ function parseTrajectoryOptimizationResult(
 function readOptimizer(value: Record<string, unknown>): TrajectoryOptimizer {
   const nested = value.optimizer;
   if (
+    nested === "casadiIpopt" ||
     nested === "transcription" ||
     nested === "leastSquaresTranscription" ||
     nested === "warmStartTranscription" ||
@@ -97,10 +99,16 @@ function parseControl(value: unknown): PilotControls {
   if (!isRecord(value)) {
     throw new Error("AeroViz backend optimization response has invalid control");
   }
+  const attackDeg = readOptionalNumber(value, "attackDeg");
+  const loadFactor = readOptionalNumber(value, "loadFactor");
+  if (attackDeg === null && loadFactor === null) {
+    throw new Error("AeroViz backend optimization response has invalid control");
+  }
   return {
     thrustN: readNumber(value, "thrustN"),
     bankDeg: readNumber(value, "bankDeg"),
-    attackDeg: readNumber(value, "attackDeg"),
+    attackDeg: attackDeg ?? 0,
+    ...(loadFactor === null ? {} : { loadFactor }),
   };
 }
 
@@ -126,6 +134,11 @@ function readNumber(value: Record<string, unknown>, key: string): number {
     throw new Error(`AeroViz backend optimization response has invalid ${key}`);
   }
   return nested;
+}
+
+function readOptionalNumber(value: Record<string, unknown>, key: string): number | null {
+  if (!(key in value)) return null;
+  return readNumber(value, key);
 }
 
 function readPositiveNumber(value: Record<string, unknown>, key: string): number {

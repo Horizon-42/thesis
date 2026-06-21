@@ -19,6 +19,8 @@ from aeroviz_backend.simulation_backend import (
 )
 
 from geodetic_simulator import GeodeticSimulator, GeodeticState
+from casadi_optimizer import CasadiOptimizer
+from common import LoadFactorControl
 from least_squares_transcription_optimizor import LeastSquaresTranscriptionOptimizor
 from single_shooting_optimizor import SingleShootingOptimizor
 from simulator import Control
@@ -34,8 +36,9 @@ DEFAULT_MAX_ITERATIONS = 1000
 MIN_ARRIVAL_TIME_S = 1.0
 MAX_ARRIVAL_TIME_S = 1000.0
 MIN_OPTIMIZATION_DT = 0.001
-DEFAULT_OPTIMIZER = "transcription"
+DEFAULT_OPTIMIZER = "casadiIpopt"
 SUPPORTED_OPTIMIZERS = (
+    "casadiIpopt",
     "transcription",
     "leastSquaresTranscription",
     "warmStartTranscription",
@@ -82,7 +85,7 @@ class OptimizationBackend:
             "dtS": dt,
             "optimizer": optimizer_name,
             "controls": [
-                format_control(Control(*control_values))
+                format_optimizer_control(optimizer_name, control_values)
                 for control_values in node_control
             ],
             "states": format_node_states(node_state, initial_state.m, aircraft.code),
@@ -109,6 +112,14 @@ def make_optimizer(
     max_iterations: int,
     arrival_time_s: float,
 ) -> Any:
+    if optimizer_name == "casadiIpopt":
+        return CasadiOptimizer(
+            n_segments=n_segments,
+            dt=dt,
+            max_duration=arrival_time_s,
+            aircraft=geodetic_simulator.simulator.aircraft,
+        )
+
     if optimizer_name == "singleShooting":
         return SingleShootingOptimizor(
             geodetic_simulator,
@@ -151,6 +162,15 @@ def make_optimizer(
         arrival_time_s=arrival_time_s,
         max_iterations=max_iterations,
     )
+
+
+def format_optimizer_control(
+    optimizer_name: str,
+    control_values: Any,
+) -> dict[str, float]:
+    if optimizer_name == "casadiIpopt":
+        return format_control(LoadFactorControl(*control_values))
+    return format_control(Control(*control_values))
 
 
 def read_arrival_time_s(payload: dict[str, Any]) -> float:
