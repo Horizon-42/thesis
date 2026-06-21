@@ -4,6 +4,7 @@ import unittest
 from aeroviz_backend.simulation_backend import SimulationBackend, aircraft_catalog
 from aerodynamic_model.casadi_simulator import CasadiSimulator
 from aircraft_sets import B77W
+from geodetic_simulator import GeodeticSimulator
 from simulator_simple import LoadFactorSimulator
 
 
@@ -83,6 +84,22 @@ class TestSimulationBackend(unittest.TestCase):
         self.assertAlmostEqual(snapshot["elapsedS"], 0.2)
         self.assertGreater(snapshot["state"]["lon"], 0.0)
         self.assertTrue(math.isfinite(snapshot["aero"]["liftCoefficient"]))
+
+    def test_step_subdivides_playback_dt_with_integrator_dt(self):
+        backend = SimulationBackend()
+        simulator = RecordingGeodeticSimulator()
+        backend.geodetic_simulator = simulator
+
+        snapshot = backend.step({
+            "dtS": 0.2,
+            "integratorDtS": 0.07,
+        })
+
+        self.assertAlmostEqual(snapshot["elapsedS"], 0.2)
+        self.assertEqual(len(simulator.step_dts), 3)
+        self.assertAlmostEqual(simulator.step_dts[0], 0.07)
+        self.assertAlmostEqual(simulator.step_dts[1], 0.07)
+        self.assertAlmostEqual(simulator.step_dts[2], 0.06)
 
     def test_reset_can_select_load_factor_simulation(self):
         backend = SimulationBackend()
@@ -188,6 +205,16 @@ class TestSimulationBackend(unittest.TestCase):
         self.assertEqual(a320["maxThrustN"], 240000.0)
         self.assertEqual(a320["finalApproachMinNm"], 5.0)
         self.assertEqual(b77w["maxThrustN"], 1026000.0)
+
+
+class RecordingGeodeticSimulator(GeodeticSimulator):
+    def __init__(self):
+        super().__init__()
+        self.step_dts = []
+
+    def step(self, state, control, dt):
+        self.step_dts.append(dt)
+        return state
 
 
 if __name__ == "__main__":

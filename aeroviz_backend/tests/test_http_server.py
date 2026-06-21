@@ -48,7 +48,7 @@ class TestAeroVizBackendApp(unittest.TestCase):
         self.assertEqual(reset_log, "reset")
         self.assertEqual(step_status, 200)
         self.assertEqual(step_payload["route"], "step")
-        self.assertEqual(step_log, "frame")
+        self.assertIsNone(step_log)
         self.assertEqual(
             simulation_backend.calls,
             [

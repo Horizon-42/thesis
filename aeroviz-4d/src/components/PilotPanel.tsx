@@ -61,7 +61,8 @@ const DEFAULT_THRUST_N = 67000;
 const MIN_LOAD_FACTOR = 0;
 const MAX_LOAD_FACTOR = 3;
 const DEFAULT_CONTROLS: PilotControls = makeDefaultControls(null);
-const DEFAULT_FRAME_DT_S = 0.2;
+const DEFAULT_INTEGRATOR_DT_S = 0.2;
+const PLAYBACK_FRAME_DT_S = 0.2;
 const STEP_INTERVAL_MS = 120;
 const MAX_TRAIL_POINTS = 360;
 const DEFAULT_TARGET_GAMMA_DEG = -3;
@@ -102,7 +103,7 @@ export default function PilotPanel() {
   const [simulationMode, setSimulationMode] =
     useState<PilotSimulationMode>(DEFAULT_SIMULATION_MODE);
   const [controls, setControls] = useState<PilotControls>(DEFAULT_CONTROLS);
-  const [frameDtS, setFrameDtS] = useState(DEFAULT_FRAME_DT_S);
+  const [integratorDtS, setIntegratorDtS] = useState(DEFAULT_INTEGRATOR_DT_S);
   const [snapshot, setSnapshot] = useState<PilotSnapshot | null>(null);
   const [trail, setTrail] = useState<PilotAircraftPose[]>([]);
   const [runwayTargets, setRunwayTargets] = useState<RunwayThresholdTarget[]>([]);
@@ -113,7 +114,7 @@ export default function PilotPanel() {
     useState<TrajectoryOptimizer>(DEFAULT_TRAJECTORY_OPTIMIZER);
   const [nSegments, setNSegments] = useState(10);
   const [arrivalTimeS, setArrivalTimeS] = useState(DEFAULT_ARRIVAL_TIME_S);
-  const [trajectoryDtS, setTrajectoryDtS] = useState(DEFAULT_FRAME_DT_S);
+  const [trajectoryDtS, setTrajectoryDtS] = useState(DEFAULT_INTEGRATOR_DT_S);
   const [maxIterations, setMaxIterations] = useState(DEFAULT_MAX_ITERATIONS);
   const [optimizedTrajectory, setOptimizedTrajectory] =
     useState<TrajectoryOptimizationResult | null>(null);
@@ -122,7 +123,7 @@ export default function PilotPanel() {
 
   const controlsRef = useRef(controls);
   const simulationModeRef = useRef(simulationMode);
-  const frameDtRef = useRef(frameDtS);
+  const integratorDtRef = useRef(integratorDtS);
   const stepInFlightRef = useRef(false);
   const trajectoryPlanRef = useRef<TrajectoryOptimizationResult | null>(null);
   const trajectoryReplayIndexRef = useRef(0);
@@ -402,8 +403,8 @@ export default function PilotPanel() {
   }, [simulationMode]);
 
   useEffect(() => {
-    frameDtRef.current = frameDtS;
-  }, [frameDtS]);
+    integratorDtRef.current = integratorDtS;
+  }, [integratorDtS]);
 
   useEffect(() => {
     trajectoryPlanRef.current = optimizedTrajectory;
@@ -427,8 +428,9 @@ export default function PilotPanel() {
 
       void stepPilotSimulation(
         controlsRef.current,
-        frameDtRef.current,
+        PLAYBACK_FRAME_DT_S,
         simulationModeRef.current,
+        integratorDtRef.current,
       )
         .then((nextSnapshot) => {
           if (cancelled) return;
@@ -480,9 +482,9 @@ export default function PilotPanel() {
         return;
       }
 
-      const replayDtS = Math.min(plan.dtS, remainingSegmentS);
+      const replayDtS = Math.min(PLAYBACK_FRAME_DT_S, remainingSegmentS);
       trajectoryStepInFlightRef.current = true;
-      void stepPilotSimulation(control, replayDtS)
+      void stepPilotSimulation(control, replayDtS, "alpha", plan.dtS)
         .then((nextSnapshot) => {
           if (cancelled) return;
           setSnapshot(nextSnapshot);
@@ -696,9 +698,9 @@ export default function PilotPanel() {
     clearSnapshotForInitialEdit();
   }
 
-  function updateFrameDt(value: number) {
+  function updateIntegratorDt(value: number) {
     if (!Number.isFinite(value)) return;
-    setFrameDtS(clamp(value, 0.02, 0.5));
+    setIntegratorDtS(clamp(value, 0.02, 0.5));
   }
 
   function openTrajectoryMode() {
@@ -1396,12 +1398,12 @@ export default function PilotPanel() {
               <label>
                 <span>dt</span>
                 <EnglishNumberInput
-                  value={frameDtS}
+                  value={integratorDtS}
                   min={0.02}
                   max={0.5}
                   step="0.02"
                   disabled={false}
-                  onCommit={updateFrameDt}
+                  onCommit={updateIntegratorDt}
                 />
               </label>
             </div>

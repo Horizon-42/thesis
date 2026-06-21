@@ -40,7 +40,7 @@ class AeroVizBackendApp:
         if path == "/simulation/reset":
             return 200, self.simulation_backend.reset(payload), "reset"
         if path == "/simulation/step":
-            return 200, self.simulation_backend.step(payload), "frame"
+            return 200, self.simulation_backend.step(payload), None
         if path == "/optimization/run":
             return 200, self.optimization_backend.optimize(payload), None
         return 404, {"ok": False, "error": "not found"}, None

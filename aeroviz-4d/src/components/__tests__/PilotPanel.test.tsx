@@ -423,6 +423,8 @@ describe("PilotPanel trajectory play mode", () => {
       expect(mocks.stepPilotSimulation).toHaveBeenCalledWith(
         { thrustN: 12000, bankDeg: 0, attackDeg: 4 },
         0.2,
+        "alpha",
+        0.2,
       );
     });
     await waitFor(() => {
@@ -450,7 +452,7 @@ describe("PilotPanel trajectory play mode", () => {
       optimizer: "transcription",
       finalTimeS: 0.2,
       nSegments: 1,
-      dtS: 0.2,
+      dtS: 0.02,
       controls: [{ thrustN: 12000, bankDeg: 0, attackDeg: 4 }],
       states: [],
     });
@@ -475,6 +477,8 @@ describe("PilotPanel trajectory play mode", () => {
       expect(mocks.stepPilotSimulation).toHaveBeenCalledWith(
         { thrustN: 12000, bankDeg: 0, attackDeg: 4 },
         0.2,
+        "alpha",
+        0.02,
       );
     });
     await waitFor(() => {

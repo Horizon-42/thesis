@@ -128,6 +128,29 @@ describe("pilotClient", () => {
     );
   });
 
+  it("posts an optional integrator dt separately from the playback dt", async () => {
+    const fetchMock = mockFetch(snapshot);
+
+    await stepPilotSimulation(control, 0.2, "alpha", 0.02);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8765/simulation/step",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          control: {
+            thrustN: 15000,
+            bankDeg: 5,
+            attackDeg: 4,
+          },
+          dtS: 0.2,
+          integratorDtS: 0.02,
+          simulationMode: "alpha",
+        }),
+      }),
+    );
+  });
+
   it("posts load-factor simulation mode with loadFactor control", async () => {
     const fetchMock = mockFetch(snapshot);
 

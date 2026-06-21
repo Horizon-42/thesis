@@ -103,7 +103,21 @@ class SimulationBackend:
             fallback_control_for_mode(self.control, aircraft, simulation_mode),
         )
         dt = clamp(read_float(payload, "dtS", DEFAULT_DT), 0.001, MAX_DT)
-        self.state = self.geodetic_simulator.step(self.state, self.control, dt)
+        integrator_dt = clamp(
+            read_float(payload, "integratorDtS", dt),
+            0.001,
+            MAX_DT,
+        )
+
+        remaining_dt = dt
+        while remaining_dt > 1e-12:
+            step_dt = min(integrator_dt, remaining_dt)
+            self.state = self.geodetic_simulator.step(
+                self.state,
+                self.control,
+                step_dt,
+            )
+            remaining_dt -= step_dt
         self.elapsed += dt
         return self.snapshot()
 

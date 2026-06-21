@@ -89,10 +89,12 @@ export async function stepPilotSimulation(
   control: PilotControls,
   dtS: number,
   simulationMode: PilotSimulationMode = "alpha",
+  integratorDtS?: number,
 ): Promise<PilotSnapshot> {
   return postPilot("/simulation/step", {
     control: serializePilotControl(control, simulationMode),
     dtS,
+    ...(integratorDtS === undefined ? {} : { integratorDtS }),
     simulationMode,
   });
 }
