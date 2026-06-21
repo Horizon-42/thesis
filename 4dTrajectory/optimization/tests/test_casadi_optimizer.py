@@ -5,7 +5,9 @@ from types import SimpleNamespace
 import casadi as ca
 import numpy as np
 
+from aerodynamic_model.aircraft_sets import C172
 from aerodynamic_model.casadi_simulator import AeroParams
+from aerodynamic_model.common import GeodeticState
 
 
 def load_casadi_optimizer_module():
@@ -109,3 +111,41 @@ def test_make_multiple_shooting_solver_uses_pure_symbolic_parameters(monkeypatch
     )
 
     assert captured["nlp"]["p"].is_symbolic()
+
+
+def test_optimize_trajectory_runs_real_ipopt_for_stationary_target():
+    module = load_casadi_optimizer_module()
+    state = GeodeticState(
+        latitude=51.1139,
+        longitude=-114.0203,
+        altitude=1000.0,
+        V=35.0,
+        psi=0.0,
+        gamma=0.0,
+        m=C172.mass_kg,
+    )
+    optimizer = module.CasadiOptimizer(
+        n_segments=2,
+        dt=0.5,
+        max_duration=1.0,
+        aircraft=C172,
+    )
+
+    duration, controls, states = optimizer.optimize_trajectory(state, state)
+
+    assert optimizer.solver.stats()["success"]
+    assert 0.0 <= duration <= 1.0
+    assert controls.shape == (2, 3)
+    assert states.shape == (2, 6)
+    np.testing.assert_allclose(
+        states[-1],
+        np.array([
+            state.latitude,
+            state.longitude,
+            state.altitude,
+            state.V,
+            state.psi,
+            state.gamma,
+        ]),
+        atol=1e-5,
+    )

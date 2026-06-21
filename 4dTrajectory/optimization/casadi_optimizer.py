@@ -139,10 +139,7 @@ class CasadiOptimizer:
     def decision_vector_to_geo_state(vec):
         return GeodeticState(*vec.tolist())
     
-    def optimize_trajectory(self, initial_state: GeodeticState, target_state: GeodeticState):
-        # This function can be implemented to optimize a trajectory using CasADi's NLP solvers, given an initial state and a sequence of controls.
-        initial = self.geo_state_to_decision_vector(initial_state)
-        target = self.geo_state_to_decision_vector(target_state)
+    def build_initial_guess(self, initial, target):
         duration_guess = (
             0.0
             if initial[:6] == target[:6]
@@ -160,7 +157,15 @@ class CasadiOptimizer:
                 initial[i] + (target[i] - initial[i]) * ratio
                 for i in range(6)
             ])
-        x0 = [duration_guess] + control_guess + state_guess
+        return [duration_guess] + control_guess + state_guess
+    
+    def optimize_trajectory(self, initial_state: GeodeticState, target_state: GeodeticState):
+        # This function can be implemented to optimize a trajectory using CasADi's NLP solvers, given an initial state and a sequence of controls.
+        initial = self.geo_state_to_decision_vector(initial_state)
+        target = self.geo_state_to_decision_vector(target_state)
+        
+        x0 = self.build_initial_guess(initial, target)
+        
         p = ca.vertcat(initial, target) # parameters for the NLP: initial and target states
         sol = self.solver(x0=x0, lbx=self.lbw, ubx=self.ubw, lbg=self.lbg, ubg=self.ubg, p=p)
         stats = self.solver.stats()
