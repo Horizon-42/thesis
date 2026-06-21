@@ -113,14 +113,19 @@ parse_procedure_legs → leg.altitude_ft = 18000 (transition altitude)
 
 Result: CONCA/SINNO → `altitude_ft = None`; NOSIC → `3400` (atOrAbove).
 
-### B. Frontend skips IFs without a real published altitude (`rnavInitialFixCandidates.ts`)
+### B. Frontend derives an unpublished IF's altitude (`rnavInitialFixCandidates.ts`)
 
-`altitudeFtForInitialFix` now requires a **finite, positive** published
-crossing altitude (`geometryAltitudeFt` or `altitude.valueFt`) and no
-longer falls back to `fix.elevationFt`. An IF with no real altitude
-(CONCA/SINNO) yields `null` and is dropped from the candidate list, so it
-is never offered as an initial state at the transition altitude, terrain
-elevation, or zero. NOSIC (3400 ft) remains.
+`altitudeFtForInitialFix` returns a leg's **own** altitude only when it is a
+finite, positive published `geometryAltitudeFt`/`altitude.valueFt` — never
+the transition altitude or the fix's terrain elevation. A feeder/transition
+IF with no own altitude (CONCA/SINNO) is **not discarded**: a new
+`derivedInitialFixAltitudeFt` interpolates an altitude from the nearest
+published fix(es) on the branch (by along-track distance when bracketed,
+else the single available neighbour). So CONCA derives ~3400 ft from the
+downstream NOSIC leg and stays usable as an initial state. An IF is dropped
+only when *no* neighbour has a published altitude. (The earlier
+"skip the IF" behaviour was changed to this on request — feeder IFs should
+remain selectable with a sensible derived altitude.)
 
 ### C. Regression tests
 
@@ -130,8 +135,10 @@ elevation, or zero. NOSIC (3400 ft) remains.
 * `tests/test_cifp_fix_record_consistency.py` — production-path test:
   KRDU R32 CONCA/SINNO IF → `altitude_ft is None`, NOSIC → 3400 /
   atOrAbove.
-* `src/data/__tests__/rnavInitialFixCandidates.test.ts` — a feeder IF with
-  no real altitude (or a zero placeholder / terrain elevation) is skipped.
+* `src/data/__tests__/rnavInitialFixCandidates.test.ts` — an unpublished IF
+  derives its altitude from the nearest published neighbour (downstream, or
+  interpolated when bracketed); never uses a zero placeholder / terrain
+  elevation; dropped only when no neighbour has an altitude.
 
 ## Regenerate the Data (procedures only — NOT a full airport rebuild)
 
@@ -164,10 +171,11 @@ done
 
 * Transition altitude can no longer leak into any leg's crossing altitude,
   in either parser path; covered by tests.
-* IFs genuinely lacking a published altitude are *skipped* rather than
-  guessed. We do not invent an altitude for a feeder fix — the source data
-  simply does not specify one, and NOSIC-style IFs with real constraints
-  remain available.
+* IFs lacking their own published altitude get one **derived** from the
+  nearest published neighbour(s) on the branch (so feeder IFs stay usable),
+  and are dropped only if no neighbour has an altitude. Note the derived
+  altitude is a *synthesised* starting value, not a published crossing
+  altitude.
 * Out of scope here: a feasibility pre-check that reports "required
   glideslope X° exceeds the −γ limit" before handing the problem to IPOPT
   (tracked separately).

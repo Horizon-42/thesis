@@ -46,7 +46,10 @@ describe("rnavInitialFixCandidates", () => {
     expect(candidate?.altM).toBeCloseTo(914.4);
   });
 
-  it("skips IF fixes that cannot produce a full initial state", () => {
+  it("derives an unpublished IF altitude from the nearest downstream fix", () => {
+    // A leading feeder/transition IF with no published crossing altitude
+    // (e.g. KRDU R32 CONCA/SINNO) is kept, with an altitude derived from the
+    // nearest published neighbour rather than discarded.
     const candidates = buildRnavInitialFixCandidates([
       makeDocument({
         fixes: [
@@ -60,13 +63,14 @@ describe("rnavInitialFixCandidates", () => {
       }),
     ], "RW09");
 
-    expect(candidates).toEqual([]);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.altM).toBeCloseTo(2200 * 0.3048);
   });
 
-  it("does not place an IF at a zero-placeholder altitude or terrain elevation", () => {
-    // Regression for the transition-altitude misparse postmortem: a
-    // feeder/transition IF with no real published crossing altitude must
-    // be skipped, never placed at 0 ft or at the fix's terrain elevation.
+  it("does not use a zero-placeholder altitude or terrain elevation; derives instead", () => {
+    // The IF's own altitude is a zero placeholder and its fix carries a
+    // terrain elevation; neither may be used.  The altitude is derived from
+    // the nearest published neighbour (2200 ft), not 0 and not 450.
     const ifFix = makeFix("fix:FEEDER", "FEEDER", 0, 0, ["IF"]);
     const candidates = buildRnavInitialFixCandidates([
       makeDocument({
@@ -77,6 +81,46 @@ describe("rnavInitialFixCandidates", () => {
         legs: [
           makeLeg("leg:R:010", 10, null, "fix:FEEDER", "IF", "IF", 0),
           makeLeg("leg:R:020", 20, "fix:FEEDER", "fix:NEXT", "TF", "FAF", 2200),
+        ],
+      }),
+    ], "RW09");
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.altM).toBeCloseTo(2200 * 0.3048);
+  });
+
+  it("interpolates an unpublished IF altitude between bracketing fixes", () => {
+    // IF sits between an upstream fix (5000 ft) and a downstream fix
+    // (3000 ft); with the IF midway, the derived altitude is the mean.
+    const candidates = buildRnavInitialFixCandidates([
+      makeDocument({
+        fixes: [
+          makeFix("fix:UP", "UP", 0, 0.00, ["IAF"]),
+          makeFix("fix:MID", "MID", 0, 0.01, ["IF"]),
+          makeFix("fix:DOWN", "DOWN", 0, 0.02, ["FAF"]),
+        ],
+        legs: [
+          makeLeg("leg:R:010", 10, null, "fix:UP", "TF", "IAF", 5000),
+          makeLeg("leg:R:020", 20, "fix:UP", "fix:MID", "TF", "IF", null),
+          makeLeg("leg:R:030", 30, "fix:MID", "fix:DOWN", "TF", "FAF", 3000),
+        ],
+      }),
+    ], "RW09");
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.altM).toBeCloseTo(4000 * 0.3048, 1);
+  });
+
+  it("skips an IF only when no neighbour has a published altitude", () => {
+    const candidates = buildRnavInitialFixCandidates([
+      makeDocument({
+        fixes: [
+          makeFix("fix:NOALT", "NOALT", 0, 0, ["IF"]),
+          makeFix("fix:NEXT", "NEXT", 0, 0.01, ["FAF"]),
+        ],
+        legs: [
+          makeLeg("leg:R:010", 10, null, "fix:NOALT", "IF", "IF", null),
+          makeLeg("leg:R:020", 20, "fix:NOALT", "fix:NEXT", "TF", "FAF", null),
         ],
       }),
     ], "RW09");

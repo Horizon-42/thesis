@@ -94,7 +94,13 @@ function buildDocumentInitialFixCandidates(
       const nextFix = fixLookup.get(nextLeg.path.endFixRef);
       if (!nextFix?.position) return [];
 
-      const altitudeFt = altitudeFtForInitialFix(leg);
+      // An IF without its own published crossing altitude (feeder/transition
+      // IF such as KRDU R32 CONCA/SINNO) is given an altitude DERIVED from the
+      // nearest fix(es) on the branch that do have one -- interpolated by
+      // along-track distance when bracketed, else the single available
+      // neighbour.  Only skip if no neighbour has a published altitude.
+      // See docs/33-cifp-transition-altitude-misparse-postmortem.md.
+      const altitudeFt = derivedInitialFixAltitudeFt(legs, index, fixLookup, fix.position);
       if (altitudeFt === null) return [];
 
       const candidateWithoutKey = {
@@ -166,12 +172,9 @@ function findNextLegFromFix(
 }
 
 function altitudeFtForInitialFix(leg: ProcedureDetailLeg): number | null {
-  // Only a real published crossing altitude makes an IF usable as an
-  // initial state.  A feeder/transition IF with no Altitude 1/2 constraint
-  // (e.g. KRDU R32 CONCA/SINNO) must be skipped, NOT placed at the
-  // transition altitude, the fix's terrain elevation, or zero.  We
-  // therefore require a finite, positive published altitude and do not
-  // fall back to ``fix.elevationFt``.
+  // A leg's *own* published crossing altitude: a finite, positive value
+  // from the Altitude 1/2 constraint.  We never use the transition altitude
+  // (a procedure-wide constant) or the fix's terrain elevation here.
   // See docs/33-cifp-transition-altitude-misparse-postmortem.md.
   const geometryAltitudeFt = leg.constraints.geometryAltitudeFt;
   if (isFiniteNumber(geometryAltitudeFt) && geometryAltitudeFt > 0) {
@@ -184,6 +187,64 @@ function altitudeFtForInitialFix(leg: ProcedureDetailLeg): number | null {
   }
 
   return null;
+}
+
+interface AltitudeAnchor {
+  altitudeFt: number;
+  position: { lon: number; lat: number };
+}
+
+function nearestAnchor(
+  legs: ProcedureDetailLeg[],
+  fixLookup: Map<string, ProcedureDetailFix>,
+  start: number,
+  step: 1 | -1,
+): AltitudeAnchor | null {
+  for (let i = start; i >= 0 && i < legs.length; i += step) {
+    const altitudeFt = altitudeFtForInitialFix(legs[i]);
+    const fix = fixLookup.get(legs[i].path.endFixRef);
+    if (altitudeFt !== null && fix?.position) {
+      return { altitudeFt, position: fix.position };
+    }
+  }
+  return null;
+}
+
+function derivedInitialFixAltitudeFt(
+  legs: ProcedureDetailLeg[],
+  index: number,
+  fixLookup: Map<string, ProcedureDetailFix>,
+  ifPosition: { lon: number; lat: number },
+): number | null {
+  // Prefer the IF's own published altitude.
+  const own = altitudeFtForInitialFix(legs[index]);
+  if (own !== null) return own;
+
+  // Otherwise derive from the nearest published neighbours on the branch.
+  const upstream = nearestAnchor(legs, fixLookup, index - 1, -1);
+  const downstream = nearestAnchor(legs, fixLookup, index + 1, 1);
+
+  if (upstream && downstream) {
+    // Linear interpolation by along-track distance between the two anchors.
+    const dUp = distanceM(ifPosition, upstream.position);
+    const dDown = distanceM(ifPosition, downstream.position);
+    const total = dUp + dDown;
+    if (total <= 0) return upstream.altitudeFt;
+    return upstream.altitudeFt +
+      (downstream.altitudeFt - upstream.altitudeFt) * (dUp / total);
+  }
+  // A leading IF (the common case) only has a downstream anchor.
+  return downstream?.altitudeFt ?? upstream?.altitudeFt ?? null;
+}
+
+function distanceM(
+  a: { lon: number; lat: number },
+  b: { lon: number; lat: number },
+): number {
+  const meanLat = toRadians((a.lat + b.lat) / 2);
+  const east = toRadians(b.lon - a.lon) * EARTH_RADIUS_M * Math.cos(meanLat);
+  const north = toRadians(b.lat - a.lat) * EARTH_RADIUS_M;
+  return Math.hypot(east, north);
 }
 
 function dedupeCandidates(
