@@ -66,6 +66,7 @@ const MIN_LOAD_FACTOR = 0;
 const MAX_LOAD_FACTOR = 3;
 const DEFAULT_CONTROLS: PilotControls = makeDefaultControls(null);
 const DEFAULT_INTEGRATOR_DT_S = 0.2;
+const DEFAULT_TRAJECTORY_DT_S = 0.5;
 const PLAYBACK_FRAME_DT_S = 0.2;
 const STEP_INTERVAL_MS = 120;
 const MAX_TRAIL_POINTS = 360;
@@ -124,7 +125,7 @@ export default function PilotPanel() {
     useState<TrajectoryOptimizer>(DEFAULT_TRAJECTORY_OPTIMIZER);
   const [nSegments, setNSegments] = useState(10);
   const [arrivalTimeS, setArrivalTimeS] = useState(DEFAULT_ARRIVAL_TIME_S);
-  const [trajectoryDtS, setTrajectoryDtS] = useState(DEFAULT_INTEGRATOR_DT_S);
+  const [trajectoryDtS, setTrajectoryDtS] = useState(DEFAULT_TRAJECTORY_DT_S);
   const [maxIterations, setMaxIterations] = useState(DEFAULT_MAX_ITERATIONS);
   const [optimizedTrajectory, setOptimizedTrajectory] =
     useState<TrajectoryOptimizationResult | null>(null);
@@ -870,7 +871,7 @@ export default function PilotPanel() {
 
   function updateTrajectoryDt(value: number) {
     if (!Number.isFinite(value)) return;
-    setTrajectoryDtS(clamp(value, 0.02, 0.5));
+    setTrajectoryDtS(clamp(value, 0.02, 2));
     setOptimizedTrajectory(null);
     setIsTrajectoryPlaying(false);
   }
@@ -1218,7 +1219,7 @@ export default function PilotPanel() {
               <EnglishNumberInput
                 value={trajectoryDtS}
                 min={0.02}
-                max={0.5}
+                max={2}
                 step="0.02"
                 disabled={targetControlsDisabled}
                 onCommit={updateTrajectoryDt}

@@ -334,7 +334,8 @@ describe("PilotPanel trajectory play mode", () => {
     fireEvent.change(arrivalInput, { target: { value: "96" } });
     fireEvent.blur(arrivalInput);
     const trajectoryDtInput = screen.getByLabelText("dt");
-    fireEvent.change(trajectoryDtInput, { target: { value: "0.1" } });
+    expect((trajectoryDtInput as HTMLInputElement).value).toBe("0.5");
+    fireEvent.change(trajectoryDtInput, { target: { value: "5" } });
     fireEvent.blur(trajectoryDtInput);
     fireEvent.click(within(targetEditor).getByRole("button", { name: "Close" }));
 
@@ -367,7 +368,7 @@ describe("PilotPanel trajectory play mode", () => {
       }),
       nSegments: 12,
       arrivalTimeS: 96,
-      dtS: 0.1,
+      dtS: 2,
       maxIterations: 300,
     });
     expect(request.initialState.headingDeg).toBeCloseTo(39.1);
