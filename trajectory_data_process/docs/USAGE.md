@@ -8,9 +8,24 @@ visualization.
 ## 1. Prerequisites
 
 - `pip install traffic pandas`
-- Configure OpenSky DB access for `traffic`
-  ([guide](https://traffic-viz.github.io/data_sources/opensky_db.html)). Without it,
-  the fetch fails loudly with an instruction to configure access.
+- **Historical-data access must be granted to your OpenSky account.** Authenticating
+  is not enough: the Trino historical database is a separate entitlement. If the
+  account lacks it, queries fail with `PERMISSION_DENIED: Access Denied: Cannot
+  execute query` (the downloader turns this into a one-line message). Request access
+  via the OpenSky Network ([DB guide](https://traffic-viz.github.io/data_sources/opensky_db.html)).
+- **Configure credentials** in `~/.config/pyopensky/settings.conf`:
+
+  ```ini
+  [opensky]
+  username = your_opensky_username
+  password = your_opensky_password
+  ```
+
+  or via environment variables `OPENSKY_USERNAME` / `OPENSKY_PASSWORD`. Note the
+  variable is `OPENSKY_USERNAME`, **not** `OPENSKY_USER`; with no recognized
+  credentials, `traffic` falls back to interactive browser auth on every query.
+- **Do not query "today".** The historical DB lags real time, so the most recent
+  hours return nothing. Pass `--start` (or `--begin`) at least a day or two back.
 - Reference data lives under `aeroviz-4d/public/data/common/`:
   - `airports.csv` — airport centers and elevations.
   - `runways.csv` — runway-threshold coordinates (for `--runway`).

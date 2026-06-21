@@ -72,7 +72,18 @@ def fetch_history_dataframe(
         kwargs["airport"] = airport.upper()
     if bounds:
         kwargs["bounds"] = bounds
-    return _as_dataframe(opensky.history(**kwargs))
+    try:
+        return _as_dataframe(opensky.history(**kwargs))
+    except Exception as e:  # noqa: BLE001 - turn DB driver errors into actionable guidance.
+        if "PERMISSION_DENIED" in str(e) or "Access Denied" in str(e):
+            raise RuntimeError(
+                "OpenSky history query was denied (PERMISSION_DENIED). The account is "
+                "authenticated but not authorized for the historical Trino database. "
+                "Request historical-data access from OpenSky, then configure credentials "
+                "in ~/.config/pyopensky/settings.conf or via the OPENSKY_USERNAME / "
+                "OPENSKY_PASSWORD environment variables (note: OPENSKY_USER is not read)."
+            ) from e
+        raise
 
 
 def _as_dataframe(result: Any) -> pd.DataFrame:
