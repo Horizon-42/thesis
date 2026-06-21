@@ -5,6 +5,9 @@ from aerodynamic_model.casadi_simulator import make_geo_step_from_enu_integrator
 from aerodynamic_model.aircraft_sets import AircraftSpec
 from aerodynamic_model.common import GeodeticState
 
+def radians_expr(degrees):
+    return degrees * ca.pi / 180.0
+
 def segement_integrate_expr(step_func, x_start, u, aero_params, dt:float, duration, n_steps: int):
     dt_step = duration / n_steps
     xk = x_start
@@ -29,7 +32,7 @@ def make_state_bounds(min_altitude:float, min_velocity:float):
     alt_min, alt_max = min_altitude, 10000.0  # altitude in meters
     V_min, V_max = min_velocity, 1000.0  # velocity in m/s
     psi_min, psi_max = -ca.pi, ca.pi  # heading angle in radians
-    gamma_min, gamma_max = -ca.pi/2, ca.pi/2  # flight path angle in radians
+    gamma_min, gamma_max = -radians_expr(10), radians_expr(30)  # flight path angle in radians
     return [lat_min, lon_min, alt_min, V_min, psi_min, gamma_min], [lat_max, lon_max, alt_max, V_max, psi_max, gamma_max]
 
 def state_vector_to_decision_vector(state):
