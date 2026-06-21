@@ -60,10 +60,9 @@ whether the trajectory looks plausible in the runway/approach context.
 Dynamic trajectory path:
 
 ```text
-OpenSky / ADSB history
-  -> trajectory_data_process/acquisition/fetch_cylw_opensky.py
-  -> raw track JSON and/or training records
-  -> trajectory_data_process/processing/trajectory_normalization.py
+OpenSky history DB (traffic)
+  -> trajectory_data_process/download_trajectories.py
+  -> Trajectory model (geometric altitude) -> czml export and/or training records
   -> *_czml_input_*.json
   -> aeroviz-4d/python/generate_czml.py
   -> aeroviz-4d/public/data/airports/<ICAO>/trajectories.czml
@@ -255,15 +254,13 @@ OpenSky training data smoke command:
 
 ```bash
 /Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
-  trajectory_data_process/acquisition/fetch_cylw_opensky.py \
-  --mode historical \
+  trajectory_data_process/download_trajectories.py \
   --dataset-mode training \
-  --training-source history-db \
   --airport KRDU \
   --begin 2026-04-19T10:00:00Z \
   --end 2026-04-19T10:15:00Z \
   --fetch-profile terminal_all \
-  --max-tracks 10
+  --max-trajectories 10
 ```
 
 ## Important Environment and Data Notes
@@ -276,9 +273,9 @@ OpenSky training data smoke command:
   `__pycache__`, `.env`, and most generated browser data.
 - `aeroviz-4d/public/data/common/airports.csv` and `runways.csv` are tracked
   common source data.
-- `trajectory_data_process/acquisition/fetch_cylw_opensky.py` supports live
-  OpenSky mode without credentials and historical modes requiring OAuth or
-  OpenSky history DB access through `traffic`.
+- `trajectory_data_process/download_trajectories.py` downloads airport trajectories
+  from the OpenSky history DB through `traffic` (geometric altitude required); it has
+  no live/REST/OAuth path.
 
 ## Domain Glossary
 

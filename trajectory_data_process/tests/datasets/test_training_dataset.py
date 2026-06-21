@@ -1,86 +1,56 @@
 from __future__ import annotations
 
-import copy
 import unittest
 
-from trajectory_data_process.datasets.training_dataset import (
-    attach_training_points_or_quarantine,
-    make_raw_track_record,
-)
+from trajectory_data_process.datasets.training_dataset import build_training_event, make_raw_track_record
+from trajectory_data_process.trajectory import Trajectory, TrajectoryPoint
+
+
+def _trajectory(geo_values: list[float | None]) -> Trajectory:
+    points = [
+        TrajectoryPoint(i * 10, 0.0, 0.0, geo, None if geo is None else geo + 20, None, False)
+        for i, geo in enumerate(geo_values)
+    ]
+    return Trajectory(icao24="abc123", callsign="TST", dep_airport=None, arr_airport="KRDU", points=points)
+
+
+def _event(start: int, end: int) -> dict:
+    return {
+        "event_id": "evt-1",
+        "airport": "KRDU",
+        "label": "landing",
+        "event_time": {"entry_time": 0},
+        "point_range": {"start_index": start, "end_index": end},
+        "quality": {"num_points": end - start + 1},
+    }
 
 
 class TrainingDatasetTests(unittest.TestCase):
-    def test_make_raw_track_record_keeps_track_payload_unchanged(self) -> None:
-        track = {
-            "icao24": "abc123",
-            "path": [[1000, 49.98, -119.31, 1500.0, 210.0, False]],
-        }
-        original = copy.deepcopy(track)
-
+    def test_make_raw_track_record_embeds_trajectory(self) -> None:
         record = make_raw_track_record(
-            airport="cylw",
-            fetch_profile="terminal_all",
-            candidate_sources=["arrival", "area"],
-            source_response_ids=["sha256:source"],
-            flight_metadata={"estArrivalAirport": "CYLW"},
-            track=track,
+            airport="KRDU", fetch_profile="airport_ops", source_response_ids=["x"], traj=_trajectory([900.0, 950.0])
         )
-
-        self.assertEqual(track, original)
-        self.assertEqual(record["airport"], "CYLW")
-        self.assertEqual(record["track"], original)
-        self.assertEqual(record["source"]["candidate_sources"], ["arrival", "area"])
         self.assertTrue(record["raw_track_id"].startswith("raw_track:sha256:"))
+        self.assertEqual(record["source"]["endpoint"], "traffic.data.opensky.history")
+        self.assertEqual(len(record["trajectory"]["points"]), 2)
 
-    def test_attach_training_points_requires_geo_altitude(self) -> None:
-        event = {
-            "event_id": "evt1",
-            "airport": "CYLW",
-            "label": "pass",
-            "raw_waypoint_range": {"start_raw_index": 1, "end_raw_index": 2},
-        }
-        points = [
-            {"raw_index": 1, "baro_altitude_m": 1500.0, "geo_altitude_m": 1490.0},
-            {"raw_index": 2, "baro_altitude_m": 1510.0, "geo_altitude_m": None},
-        ]
-
-        ready, quarantine = attach_training_points_or_quarantine(
-            event,
-            raw_track_id="raw_track:sha256:abc",
-            dual_altitude_points=points,
-            require_geo_altitude=True,
-        )
-
-        self.assertIsNone(ready)
-        self.assertIsNotNone(quarantine)
-        self.assertEqual(quarantine["reason"], "missing_geo_altitude")
-        self.assertEqual(quarantine["detail"]["missing_raw_indexes"], [2])
-
-    def test_attach_training_points_adds_quality_counts(self) -> None:
-        event = {
-            "event_id": "evt1",
-            "airport": "CYLW",
-            "label": "pass",
-            "quality": {"complete": True},
-            "raw_waypoint_range": {"start_raw_index": 1, "end_raw_index": 2},
-        }
-        points = [
-            {"raw_index": 1, "baro_altitude_m": 1500.0, "geo_altitude_m": 1490.0},
-            {"raw_index": 2, "baro_altitude_m": 1510.0, "geo_altitude_m": 1500.0},
-        ]
-
-        ready, quarantine = attach_training_points_or_quarantine(
-            event,
-            raw_track_id="raw_track:sha256:abc",
-            dual_altitude_points=points,
-        )
+    def test_build_training_event_attaches_points(self) -> None:
+        traj = _trajectory([900.0, 950.0, 1000.0])
+        ready, quarantine = build_training_event(_event(0, 2), raw_track_id="rt", traj=traj)
 
         self.assertIsNone(quarantine)
-        self.assertIsNotNone(ready)
         assert ready is not None
-        self.assertEqual(len(ready["training_points"]), 2)
-        self.assertEqual(ready["source"]["raw_track_id"], "raw_track:sha256:abc")
-        self.assertEqual(ready["quality"]["points_with_both_altitudes"], 2)
+        self.assertEqual(len(ready["training_points"]), 3)
+        self.assertEqual(ready["quality"]["points_with_geo_altitude"], 3)
+        self.assertEqual(ready["source"]["raw_track_id"], "rt")
+
+    def test_missing_geo_altitude_is_quarantined(self) -> None:
+        traj = _trajectory([900.0, None, 1000.0])
+        ready, quarantine = build_training_event(_event(0, 2), raw_track_id="rt", traj=traj, require_geo_altitude=True)
+
+        self.assertIsNone(ready)
+        assert quarantine is not None
+        self.assertEqual(quarantine["reason"], "missing_geo_altitude")
 
 
 if __name__ == "__main__":

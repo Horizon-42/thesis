@@ -68,8 +68,7 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 ### Data Flow
 
 ```
-OpenSky API → fetch_cylw_opensky.py → *_raw_*.json
-    → trajectory_normalization.py (altitude bias correction, filtering) → *_czml_input_*.json
+OpenSky history DB → download_trajectories.py (Trajectory model, geometric altitude) → *_czml_input_*.json
     → generate_czml.py (bearing, velocity, orientation) → trajectories.czml
     → useCzmlLoader hook → CesiumJS rendering
 ```

@@ -452,7 +452,7 @@ def main() -> None:
     input_path = Path(args.input) if args.input else default_input_path(args.airport)
     if not input_path.exists():
         print(f"✗ Input file not found: {input_path}")
-        print("  Run trajectory_data_process/acquisition/fetch_cylw_opensky.py or run_asd-b_fetch_and_generate.py first.")
+        print("  Run trajectory_data_process/download_trajectories.py or run_asd-b_fetch_and_generate.py first.")
         raise SystemExit(1)
 
     with open(input_path) as f:

@@ -1,224 +1,83 @@
-# Trajectory Data Process
+# trajectory_data_process
 
-This folder contains standalone trajectory acquisition, processing, and dataset helpers (outside `aeroviz-4d`). It fetches real airport-centered traffic data from sources such as OpenSky and converts it into the JSON format required by:
+Downloads real airport trajectories from the **OpenSky history database** and turns
+them into the JSON that `aeroviz-4d/python/generate_czml.py` renders. It can also
+emit a partitioned training dataset.
 
-- `aeroviz-4d/python/generate_czml.py`
+Single data source, single trajectory model, geometric altitude everywhere.
 
-The two stages are intentionally decoupled:
+## Why this design
 
-1. `trajectory_data_process/acquisition/fetch_cylw_opensky.py` fetches + normalizes track data and writes `*_czml_input_*.json`
-2. `aeroviz-4d/python/generate_czml.py` converts that JSON into `trajectories.czml`
+- **One source — the OpenSky history DB** (`traffic.data.opensky.history`). No live
+  REST polling, no anonymous fallback, no OAuth track scraping.
+- **Geometric altitude is required.** History rows carry `baroaltitude` and
+  `geoaltitude` in the same record; the exported altitude is geometric, referenced
+  to the ellipsoid, so no barometric bias correction is needed.
+- **One trajectory model** (`trajectory.Trajectory`) is parsed once and reused by
+  both the CZML export and the training-dataset builder.
 
 ## Layout
 
-- `acquisition/`: external data access and download entry points.
-  - `fetch_cylw_opensky.py`: OpenSky live/historical fetch, normalization orchestration, CZML-input export, and training dataset export.
-  - `opensky_history_db.py`: OpenSky history DB access through `traffic`.
-  - `download_adsblol_history.py`: ADSB.lol globe history downloader.
-- `processing/`: source-independent trajectory transforms.
-  - `trajectory_normalization.py`, `altitude_matching.py`, `trajectory_events.py`, `history_training.py`
-- `datasets/`: JSONL partitioning, source-response storage, and training record assembly.
-  - `dataset_store.py`, `training_dataset.py`
-- `tests/`: mirrors the same `acquisition/`, `processing/`, and `datasets/` grouping.
+```
+trajectory.py                  Trajectory / TrajectoryPoint model + builder from history rows
+geo.py                         great-circle distance helpers
+acquisition/
+  opensky_history.py           history-DB fetch (requires geoaltitude)
+  airports.py                  airport center + elevation from common/airports.csv
+  runways.py                   runway-threshold coordinates from common/runways.csv
+processing/
+  czml_export.py               Trajectory -> CZML-input flight (geometric altitude)
+  trajectory_events.py         airport entry/exit episode extraction + classification
+datasets/
+  dataset_store.py             partition layout + JSONL helpers
+  training_dataset.py          raw-track / training-event / quarantine assembly
+download_trajectories.py       CLI entry point (czml | training)
+docs/USAGE.md                  full usage guide
+```
 
-## Pipeline Script
+## Prerequisites
 
-- `../run_asd-b_fetch_and_generate.py` (repo root)
-
-## Documentation
-
-- `docs/01-current-bias-correction.md`
-- `docs/02-metar-qnh-time-matching.md`
-- `docs/03-training-data-fetch-store-redesign.md`
-- `docs/04-production-adsb-training-data-plan.md`
-- `docs/05-opensky-trino-database-visual-guide.html`
+- `pip install traffic pandas`
+- Configure OpenSky database access for `traffic`:
+  https://traffic-viz.github.io/data_sources/opensky_db.html
 
 ## Quick start
 
-### Training data mode (recommended source: OpenSky history DB)
-
-Training ingestion defaults to OpenSky history DB mode through `traffic.data.opensky.history`, not REST `/tracks/all`.
-
-Prerequisites:
-
-- install `traffic`
-- configure OpenSky DB access for `traffic` using the [traffic OpenSky DB guide](https://traffic-viz.github.io/data_sources/opensky_db.html)
-
-KRDU smoke command:
+CZML input for KRDU, landings at runway threshold 23R:
 
 ```bash
-python trajectory_data_process/acquisition/fetch_cylw_opensky.py \
-  --mode historical \
-  --dataset-mode training \
-  --training-source history-db \
+python trajectory_data_process/download_trajectories.py \
   --airport KRDU \
-  --begin 2026-04-19T10:00:00Z \
-  --end 2026-04-19T10:15:00Z \
-  --fetch-profile terminal_all \
-  --max-tracks 10
+  --begin 2026-04-19T10:00:00Z --end 2026-04-19T10:30:00Z \
+  --runway 23R \
+  --max-trajectories 20
+# -> trajectory_data_process/outputs/krdu/krdu_czml_input_<UTC>.json
 ```
 
-Outputs are written under:
-
-- `outputs/history_rows/v2/`
-- `outputs/raw_tracks/v2/`
-- `outputs/airport_events/v2/`
-- `outputs/quarantine/v2/`
-- `outputs/manifests/v2/`
-
-Use `--fetch-profile airport_ops` for a smaller arrival/departure-only run. Use `terminal_all` when pass-through tracks are required.
-
-### ADSB.lol global history download
-
-ADSB.lol `globe_history_2026` is published as daily global split-tar releases. The downloader below fetches one date; airport filtering should happen locally after download.
-
-Dry-run release discovery:
+One command, fetch + render to the AeroViz frontend asset:
 
 ```bash
-python trajectory_data_process/acquisition/download_adsblol_history.py \
-  --date 2026-04-19 \
-  --dry-run
+python run_asd-b_fetch_and_generate.py \
+  --airport KRDU --begin 2026-04-19T10:00:00Z --end 2026-04-19T10:30:00Z --runway 23R
+# -> aeroviz-4d/public/data/airports/KRDU/trajectories.czml
 ```
 
-Download one day:
+Training dataset:
 
 ```bash
-python trajectory_data_process/acquisition/download_adsblol_history.py \
-  --date 2026-04-19
+python trajectory_data_process/download_trajectories.py \
+  --airport KRDU --begin 2026-04-19T00:00:00Z --end 2026-04-19T06:00:00Z \
+  --dataset-mode training --fetch-profile terminal_all
 ```
 
-Download and stream-extract the split tar:
+See **[docs/USAGE.md](docs/USAGE.md)** for every flag and the output schemas.
+
+## Tests
 
 ```bash
-python trajectory_data_process/acquisition/download_adsblol_history.py \
-  --date 2026-04-19 \
-  --extract
+python -m pytest trajectory_data_process/tests -q
 ```
 
-Default output:
-
-```text
-trajectory_data_process/outputs/adsblol_globe_history/YYYY.MM.DD/<release-tag>/
-```
-
-### 1) Live mode (no credentials, default airport CYYC)
-
-```bash
-/Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
-  /Users/liudongxu/Desktop/studys/thesis/trajectory_data_process/acquisition/fetch_cylw_opensky.py \
-  --mode live
-```
-
-This will:
-
-1. fetch recent CYYC-related tracks from OpenSky
-2. create CZML-input JSON under `trajectory_data_process/outputs/`
-3. print the generated input file path for the next stage
-
-To run both stages in one command, use the root-level pipeline script:
-
-```bash
-/Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
-  /Users/liudongxu/Desktop/studys/thesis/run_asd-b_fetch_and_generate.py \
-  --mode live \
-  --airport CYYC \
-  --altitude-mode auto-bias
-
-# Reuse existing JSON and bypass live fetch:
-# 1) existing *_raw_*.json -> run normalization/conversion + generate
-# 2) existing *_czml_input_*.json -> run generate directly
-/Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
-  /Users/liudongxu/Desktop/studys/thesis/run_asd-b_fetch_and_generate.py \
-  --input-json /Users/liudongxu/Desktop/studys/thesis/trajectory_data_process/outputs/cyyc_raw_20260415T152417Z.json
-```
-
-Altitude handling (research note):
-
-- Default is `--altitude-mode raw`, which preserves OpenSky track altitude as-is.
-- `--altitude-mode touchdown-bias` applies a per-flight constant offset estimated from near-runway on-ground samples.
-- `--altitude-mode approach-bias` applies a per-flight constant offset estimated from near-runway low-altitude samples (works even when on_ground is sparse).
-- `--altitude-mode auto-bias` tries touchdown-bias first, then approach-bias.
-- All bias modes preserve trajectory shape and only shift altitude.
-
-Normalization switch (debug note):
-
-- `--disable-normalization` bypasses airport/landing filtering and bias correction, and exports raw OpenSky `tracks/all` waypoints directly into CZML-input schema.
-- Use this mode when you want to verify whether empty or distorted output comes from normalization logic vs source track data quality.
-
-By default, only trajectories that include touchdown near the airport are kept,
-so landing process is preserved.
-
-To switch airport (example CYLW):
-
-```bash
-/Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
-  /Users/liudongxu/Desktop/studys/thesis/trajectory_data_process/acquisition/fetch_cylw_opensky.py \
-  --airport CYLW \
-  --mode live
-
-# Keep raw altitude (default)
-/Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
-  /Users/liudongxu/Desktop/studys/thesis/trajectory_data_process/acquisition/fetch_cylw_opensky.py \
-  --mode live \
-  --airport CYYC \
-  --altitude-mode raw
-
-# Apply touchdown-bias altitude correction (optional)
-/Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
-  /Users/liudongxu/Desktop/studys/thesis/trajectory_data_process/acquisition/fetch_cylw_opensky.py \
-  --mode live \
-  --airport CYYC \
-  --altitude-mode touchdown-bias \
-  --min-ground-samples 2 \
-  --max-altitude-bias-m 400
-
-# Recommended automatic altitude correction (touchdown first, approach fallback)
-/Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
-  /Users/liudongxu/Desktop/studys/thesis/trajectory_data_process/acquisition/fetch_cylw_opensky.py \
-  --mode live \
-  --airport CYYC \
-  --altitude-mode auto-bias \
-  --min-ground-samples 2 \
-  --max-altitude-bias-m 400 \
-  --approach-alt-buffer-m 450
-
-# Disable normalization to export raw tracks for debugging
-/Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
-  /Users/liudongxu/Desktop/studys/thesis/trajectory_data_process/acquisition/fetch_cylw_opensky.py \
-  --mode live \
-  --airport CYYC \
-  --disable-normalization
-
-# Same via one-command pipeline wrapper
-/Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
-  /Users/liudongxu/Desktop/studys/thesis/run_asd-b_fetch_and_generate.py \
-  --mode live \
-  --airport CYYC \
-  --disable-normalization
-```
-
-### 2) CZML historical mode (REST, requires OpenSky OAuth credentials)
-
-Set credentials:
-
-```bash
-export OPENSKY_CLIENT_ID="..."
-export OPENSKY_CLIENT_SECRET="..."
-```
-
-Run:
-
-```bash
-/Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
-  /Users/liudongxu/Desktop/studys/thesis/trajectory_data_process/acquisition/fetch_cylw_opensky.py \
-  --mode historical \
-  --airport CYYC \
-  --begin "2026-04-05T00:00:00Z" \
-  --end "2026-04-06T00:00:00Z"
-```
-
-## Notes
-
-- REST historical arrivals/departures require authenticated OAuth access.
-- `--mode auto` will choose REST `historical` if credentials exist for CZML mode, otherwise `live`.
-- Output files are written to `trajectory_data_process/outputs/` with UTC timestamp suffixes.
+> The design notes under `docs/01`–`docs/05` predate this refactor and describe the
+> former REST/live training pipeline; they are kept only as history. `docs/USAGE.md`
+> and this README are authoritative.

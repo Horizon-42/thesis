@@ -1,0 +1,123 @@
+# Usage guide
+
+This package downloads airport trajectories from the OpenSky **history database** and
+exports them either as CZML input (for visualization) or as a partitioned training
+dataset. Every point carries **geometric altitude**, which is the value used for
+visualization.
+
+## 1. Prerequisites
+
+- `pip install traffic pandas`
+- Configure OpenSky DB access for `traffic`
+  ([guide](https://traffic-viz.github.io/data_sources/opensky_db.html)). Without it,
+  the fetch fails loudly with an instruction to configure access.
+- Reference data lives under `aeroviz-4d/public/data/common/`:
+  - `airports.csv` — airport centers and elevations.
+  - `runways.csv` — runway-threshold coordinates (for `--runway`).
+
+## 2. Pipeline overview
+
+```
+OpenSky history DB ──► download_trajectories.py ──► outputs/<airport>/*_czml_input_*.json
+ (traffic, geo alt)         │                              │
+                            │                              └─► generate_czml.py ─► trajectories.czml
+                            └─► (training mode) partitioned JSONL dataset + manifest
+```
+
+The flow is built on one model: `trajectory.Trajectory`, a time-sorted list of
+`TrajectoryPoint`s, each with `geo_altitude_m`, `baro_altitude_m`, `heading_deg`,
+`on_ground`. History rows are grouped per aircraft and split into separate
+trajectories on a time gap (`--segment-gap-sec`) or a change of departure/arrival
+airport.
+
+## 3. CZML mode (default)
+
+```bash
+python trajectory_data_process/download_trajectories.py \
+  --airport KRDU \
+  --begin 2026-04-19T10:00:00Z --end 2026-04-19T10:30:00Z \
+  --runway 23R --max-trajectories 20
+```
+
+Writes `outputs/krdu/krdu_czml_input_<UTC>.json`: a list of flights, each
+
+```json
+{ "id": "EDV5269", "callsign": "EDV5269", "type": "UNK",
+  "icao24": "a1b2c3", "dep_airport": "KJFK", "arr_airport": "KRDU", "runway": "23R",
+  "altitude_source": "opensky_history_geoaltitude_m",
+  "waypoints": [[0, -78.75, 36.83, 1500.0], [12, -78.76, 36.81, 1100.0]] }
+```
+
+Each waypoint is `[offset_seconds, longitude, latitude, geometric_altitude_metres]`,
+exactly what `aeroviz-4d/python/generate_czml.py` consumes.
+
+### Selecting by runway threshold (`--runway`)
+
+Without `--runway`, a trajectory is kept when its closest point to the airport is
+within `--max-end-distance-km` (default 2.5 km). With `--runway 23R`, the threshold
+coordinates are read from `runways.csv` and a trajectory is kept only when its final
+approach point lands within `--runway-threshold-radius-m` (default 600 m) of **that
+threshold** — i.e. you select the exact runway end the aircraft arrives at, not just
+the airport.
+
+### Key CZML flags
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--runway` | none | keep only arrivals at this runway threshold, e.g. `23R` |
+| `--runway-threshold-radius-m` | 600 | proximity to the threshold to count as an arrival |
+| `--match-radius-km` | 35 | trajectory must approach within this distance of the airport |
+| `--max-end-distance-km` | 2.5 | arrival-anchor distance limit (ignored when `--runway` is set) |
+| `--approach-window-min` | 20 | keep this many minutes before the arrival anchor |
+| `--exclude-ground` | off | drop on-ground points from the export |
+| `--max-trajectories` | 80 | cap exported flights |
+
+## 4. Training mode
+
+```bash
+python trajectory_data_process/download_trajectories.py \
+  --airport KRDU --begin 2026-04-19T00:00:00Z --end 2026-04-19T06:00:00Z \
+  --dataset-mode training --fetch-profile terminal_all
+```
+
+Writes a partitioned `outputs/<dataset>/v3/airport=KRDU/year=…/month=…/day=…/[hour=…]/`
+tree:
+
+- `raw_tracks/` — one JSONL record per trajectory (full point list, both altitudes).
+- `airport_events/` — entry/exit episodes labelled `landing` / `depart` / `pass` /
+  `ambiguous`, each with attached `training_points`.
+- `quarantine/` — events dropped because a required geometric altitude was missing.
+- `manifests/` — one JSON manifest per run.
+
+Training flags: `--airport-event-radius-nm` (default 5), `--low-altitude-agl-m`
+(default 600), `--segment-gap-sec` (default 900).
+
+## 5. Fetch profiles & time window
+
+- `--fetch-profile airport_ops` (default): query rows whose estimated departure or
+  arrival airport is the target — smallest result, arrivals/departures only.
+- `--fetch-profile terminal_all`: also query a bounding box around the airport
+  (`--bbox-lat-pad`, `--bbox-lon-pad`) to include pass-through traffic.
+- `--begin` / `--end` accept ISO (`2026-04-19T10:00:00Z`) or Unix seconds.
+- Long windows are split into `--chunk-hours` queries (default 1 h).
+
+## 6. One-command pipeline
+
+```bash
+python run_asd-b_fetch_and_generate.py \
+  --airport KRDU --begin 2026-04-19T10:00:00Z --end 2026-04-19T10:30:00Z --runway 23R
+```
+
+Runs the download stage, then `generate_czml.py`, writing
+`aeroviz-4d/public/data/airports/KRDU/trajectories.czml`. Unknown flags
+(`--begin`, `--end`, `--runway`, `--fetch-profile`, …) are forwarded to the download
+stage. Add `--generate-procedures` to also rebuild RNAV/RNP procedure assets, or
+`--input-json <czml_input.json>` to render an existing file without re-downloading.
+
+## 7. Notes
+
+- Geometric altitude is mandatory: points without `geoaltitude` are dropped, and a
+  history result lacking the `geoaltitude` column raises an error rather than
+  silently producing baro-only data.
+- There is no live/REST/OAuth path and no barometric bias correction — both were
+  removed with the move to the history DB.

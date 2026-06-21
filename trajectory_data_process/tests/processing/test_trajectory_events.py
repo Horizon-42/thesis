@@ -1,102 +1,63 @@
 from __future__ import annotations
 
-import copy
 import unittest
 
-from trajectory_data_process.processing.trajectory_events import (
-    extract_complete_airport_events,
-    parse_track_for_analysis,
-)
+from trajectory_data_process.processing.trajectory_events import extract_airport_events
+from trajectory_data_process.trajectory import Trajectory, TrajectoryPoint
 
 
-AIRPORT_LAT = 0.0
-AIRPORT_LON = 0.0
-
-
-def sample_track(*path: list[object]) -> dict[str, object]:
-    return {
-        "icao24": "abc123",
-        "callsign": "TST123",
-        "startTime": 1000,
-        "endTime": 1100,
-        "path": list(path),
-    }
+def _trajectory(arr=None, dep=None, geo_floor=1850.0) -> Trajectory:
+    coords = [
+        (0, 0.10, 2000.0),
+        (10, 0.06, 1900.0),
+        (20, 0.02, geo_floor),
+        (30, 0.06, 1900.0),
+        (40, 0.10, 2000.0),
+    ]
+    points = [
+        TrajectoryPoint(t, lat, 0.0, geo, geo + 20, 180.0, on_ground=False) for t, lat, geo in coords
+    ]
+    return Trajectory(icao24="abc123", callsign="TST123", dep_airport=dep, arr_airport=arr, points=points)
 
 
 class TrajectoryEventsTests(unittest.TestCase):
-    def test_parse_track_for_analysis_keeps_raw_index_and_sorts_derived_view(self) -> None:
-        track = sample_track(
-            [30, 0.1000, 0.0, 1600.0, 180.0, False],
-            [10, 0.1200, 0.0, 1700.0, 180.0, False],
-            [20, None, 0.0, 1700.0, 180.0, False],
-        )
-
-        points = parse_track_for_analysis(track, airport_lat=AIRPORT_LAT, airport_lon=AIRPORT_LON)
-
-        self.assertEqual([point.time for point in points], [10.0, 30.0])
-        self.assertEqual([point.raw_index for point in points], [1, 0])
-
-    def test_extract_complete_pass_event_without_mutating_raw_path(self) -> None:
-        track = sample_track(
-            [1000, 0.1000, 0.0, 2000.0, 180.0, False],
-            [1010, 0.0600, 0.0, 1900.0, 180.0, False],
-            [1020, 0.0200, 0.0, 1850.0, 180.0, False],
-            [1030, 0.0600, 0.0, 1900.0, 0.0, False],
-            [1040, 0.1000, 0.0, 2000.0, 0.0, False],
-        )
-        original_path = copy.deepcopy(track["path"])
-
-        events = extract_complete_airport_events(
-            track,
-            airport="CYLW",
-            airport_lat=AIRPORT_LAT,
-            airport_lon=AIRPORT_LON,
-            airport_elev_m=0.0,
-            radius_nm=5.0,
-            candidate_sources=["area"],
-            flight_metadata={"estDepartureAirport": "KSEA", "estArrivalAirport": "CYVR"},
-        )
-
-        self.assertEqual(track["path"], original_path)
-        self.assertEqual(len(events), 1)
-        event = events[0]
-        self.assertEqual(event["label"], "pass")
-        self.assertTrue(event["complete_radius_crossing"])
-        self.assertEqual(event["raw_waypoint_range"], {"start_raw_index": 1, "end_raw_index": 3})
-        self.assertEqual(
-            event["boundary_crossings"]["entry"]["source_segment"],
-            {"before_raw_index": 0, "after_raw_index": 1},
-        )
-        self.assertEqual(
-            event["boundary_crossings"]["exit"]["source_segment"],
-            {"before_raw_index": 3, "after_raw_index": 4},
-        )
-        self.assertAlmostEqual(event["boundary_crossings"]["entry"]["radius_nm"], 5.0)
-
-    def test_arrival_candidate_with_conflicting_geometry_is_ambiguous(self) -> None:
-        track = sample_track(
-            [1000, 0.1000, 0.0, 3000.0, 180.0, False],
-            [1010, 0.0600, 0.0, 2900.0, 180.0, False],
-            [1020, 0.0200, 0.0, 2800.0, 180.0, False],
-            [1030, 0.0600, 0.0, 2900.0, 0.0, False],
-            [1040, 0.1000, 0.0, 3000.0, 0.0, False],
-        )
-
-        events = extract_complete_airport_events(
-            track,
-            airport="CYLW",
-            airport_lat=AIRPORT_LAT,
-            airport_lon=AIRPORT_LON,
-            airport_elev_m=0.0,
-            radius_nm=5.0,
-            candidate_sources=["arrival"],
-            flight_metadata={"estArrivalAirport": "CYLW"},
-            low_altitude_agl_m=600.0,
+    def test_pass_event_high_over_airport(self) -> None:
+        events = extract_airport_events(
+            _trajectory(), airport="TST", airport_lat=0.0, airport_lon=0.0, airport_elev_m=0.0
         )
 
         self.assertEqual(len(events), 1)
-        self.assertEqual(events[0]["label"], "ambiguous")
-        self.assertTrue(events[0]["label_evidence"]["estArrivalAirport_matches"])
+        self.assertEqual(events[0]["label"], "pass")
+        self.assertEqual(events[0]["point_range"], {"start_index": 1, "end_index": 3})
+
+    def test_arrival_low_over_airport_is_landing(self) -> None:
+        events = extract_airport_events(
+            _trajectory(arr="TST", geo_floor=300.0),
+            airport="TST",
+            airport_lat=0.0,
+            airport_lon=0.0,
+            airport_elev_m=0.0,
+        )
+
+        self.assertEqual(events[0]["label"], "landing")
+        self.assertTrue(events[0]["label_evidence"]["arr_airport_matches"])
+
+    def test_no_event_when_never_inside_radius(self) -> None:
+        far = Trajectory(
+            icao24="zzz",
+            callsign=None,
+            dep_airport=None,
+            arr_airport=None,
+            points=[
+                TrajectoryPoint(0, 1.0, 0.0, 2000.0, 2000.0, None, False),
+                TrajectoryPoint(10, 1.1, 0.0, 2000.0, 2000.0, None, False),
+            ],
+        )
+
+        self.assertEqual(
+            extract_airport_events(far, airport="TST", airport_lat=0.0, airport_lon=0.0, airport_elev_m=0.0),
+            [],
+        )
 
 
 if __name__ == "__main__":

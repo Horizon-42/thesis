@@ -1,15 +1,13 @@
-"""Dataset storage helpers for OpenSky training data.
+"""Filesystem layout and JSONL helpers for the partitioned dataset store.
 
-This module only handles filesystem layout and JSONL writing. It deliberately
-does not parse or normalize OpenSky payloads, so callers can save source
-response bodies before any data transformation happens.
+This module only handles where records go and how they are written; it does not
+interpret trajectory content.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Literal
@@ -20,9 +18,7 @@ PartitionGranularity = Literal["hour", "day"]
 
 def ensure_utc(dt: datetime) -> datetime:
     """Return a timezone-aware UTC datetime."""
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
 
 
 def partition_path(
@@ -32,12 +28,9 @@ def partition_path(
     airport: str,
     timestamp: datetime,
     granularity: PartitionGranularity = "hour",
-    version: str = "v2",
+    version: str = "v3",
 ) -> Path:
     """Build a stable airport/time partition path."""
-    if granularity not in {"hour", "day"}:
-        raise ValueError(f"Unsupported partition granularity: {granularity}")
-
     ts = ensure_utc(timestamp)
     parts = [
         output_root,
@@ -53,31 +46,6 @@ def partition_path(
     return Path(*parts)
 
 
-def stable_json_dumps(value: Any) -> str:
-    """Serialize metadata deterministically for index and manifest records."""
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-
-
-def sha256_text(value: str) -> str:
-    """Hash text exactly as it will be written with UTF-8 encoding."""
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
-def _safe_name(value: str) -> str:
-    """Convert an endpoint or tag into a filesystem-safe compact name."""
-    text = value.strip().strip("/") or "root"
-    text = text.replace("/", "_")
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", text).strip("_") or "item"
-
-
-def _append_jsonl(path: Path, record: dict[str, Any]) -> None:
-    """Append one JSON object to a JSONL file."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False, sort_keys=True))
-        f.write("\n")
-
-
 def write_jsonl_records(path: Path, records: Iterable[dict[str, Any]]) -> int:
     """Append records to a JSONL file and return the count written."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -91,91 +59,17 @@ def write_jsonl_records(path: Path, records: Iterable[dict[str, Any]]) -> int:
 
 
 def load_jsonl_records(path: Path) -> list[dict[str, Any]]:
-    """Load JSONL records from a file, returning an empty list if absent."""
+    """Load JSONL records from a file, or an empty list if it does not exist."""
     if not path.exists():
         return []
-    return [
-        json.loads(line)
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def find_cached_source_response(
-    output_root: Path,
-    *,
-    airport: str,
-    endpoint: str,
-    params: dict[str, Any],
-) -> dict[str, Any] | None:
-    """Find a previously saved response for the same endpoint and params."""
-    root = output_root / "source_responses" / "v2" / f"airport={airport.upper()}"
-    if not root.exists():
-        return None
-    target_params = stable_json_dumps(params)
-    candidates: list[dict[str, Any]] = []
-    for index_path in root.rglob("source_index.jsonl"):
-        for record in load_jsonl_records(index_path):
-            if record.get("endpoint") != endpoint:
-                continue
-            if stable_json_dumps(record.get("params") or {}) != target_params:
-                continue
-            body_path = index_path.parent / str(record.get("body_path") or "")
-            if not body_path.exists():
-                continue
-            candidates.append(record | {"body_full_path": str(body_path)})
-    if not candidates:
-        return None
-    candidates.sort(key=lambda item: str(item.get("fetched_at_utc") or ""))
-    return candidates[-1]
+def stable_json_dumps(value: Any) -> str:
+    """Serialize deterministically for content-addressed identifiers."""
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def write_source_response(
-    output_root: Path,
-    *,
-    airport: str,
-    fetched_at: datetime,
-    endpoint: str,
-    params: dict[str, Any],
-    body_text: str,
-    http_status: int,
-    granularity: PartitionGranularity = "hour",
-) -> dict[str, Any]:
-    """Persist an original OpenSky response body and append its index record.
-
-    The body is written before the index record. Callers should parse JSON only
-    from the returned body path or from the same text after this function
-    succeeds.
-    """
-    fetched_at_utc = ensure_utc(fetched_at)
-    body_sha256 = sha256_text(body_text)
-    source_id = f"sha256:{body_sha256}"
-    partition = partition_path(
-        output_root,
-        "source_responses",
-        airport=airport,
-        timestamp=fetched_at_utc,
-        granularity=granularity,
-    )
-    partition.mkdir(parents=True, exist_ok=True)
-
-    timestamp_tag = fetched_at_utc.strftime("%Y%m%dT%H%M%SZ")
-    endpoint_tag = _safe_name(endpoint)
-    params_tag = hashlib.sha1(stable_json_dumps(params).encode("utf-8")).hexdigest()[:10]
-    body_name = f"{timestamp_tag}_{endpoint_tag}_{params_tag}_{body_sha256[:12]}.body.txt"
-    body_path = partition / body_name
-    body_path.write_text(body_text, encoding="utf-8")
-
-    record = {
-        "schema_version": "opensky-source-response-v2",
-        "source_id": source_id,
-        "fetched_at_utc": fetched_at_utc.isoformat().replace("+00:00", "Z"),
-        "endpoint": endpoint,
-        "params": params,
-        "http_status": int(http_status),
-        "body_path": body_name,
-        "body_sha256": body_sha256,
-        "body_bytes": len(body_text.encode("utf-8")),
-    }
-    _append_jsonl(partition / "source_index.jsonl", record)
-    return record | {"body_full_path": str(body_path)}
+def sha256_text(value: str) -> str:
+    """Hash text as it will be written with UTF-8 encoding."""
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
