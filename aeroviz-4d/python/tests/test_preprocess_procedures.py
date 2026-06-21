@@ -20,6 +20,7 @@ from preprocess_procedures import (
     generate_procedures_geojson,
     infer_chart_targets,
     parse_leg_altitude_ft,
+    parse_leg_altitude_qualifier,
     parse_leg_course_deg,
     parse_path_point_vertical_metadata,
     parse_procedure_legs,
@@ -41,22 +42,29 @@ def test_decode_cifp_coordinate() -> None:
     assert decode_cifp_coordinate("W07848070690") == pytest.approx(-78.8019630)
 
 
-def test_parse_leg_altitude_reads_second_cifp_altitude_field() -> None:
+def test_parse_leg_altitude_ignores_transition_altitude_for_unconstrained_if() -> None:
+    # KRDU R32 CONCA is an initial fix with NO altitude constraint; the
+    # "18000" sits in the Transition Altitude field (cols 95-99), a
+    # procedure-wide constant.  It must NOT be read as a crossing altitude.
+    # Regression for docs/33-cifp-transition-altitude-misparse-postmortem.md.
     line = (
         "SUSAP KRDUK7FR32   ACONCA 010CONCAK7PC0E  A    IF"
         "                                             18000                 A JS   008442407"
     )
 
-    assert parse_leg_altitude_ft(line) == 18000
+    assert parse_leg_altitude_ft(line) is None
+    assert parse_leg_altitude_qualifier(line) is None
 
 
-def test_parse_leg_altitude_reads_second_altitude_before_speed_field() -> None:
+def test_parse_leg_altitude_ignores_transition_altitude_with_speed_field() -> None:
+    # Same misparse, with a speed limit packed after the transition
+    # altitude ("18000210" = transition altitude 18000 + speed 210).
     line = (
         "SUSAP KRDUK7FR23LY ADUWON 010DUWONK7PC0E  A    IF"
         "                                             18000210              A-JS   008112102"
     )
 
-    assert parse_leg_altitude_ft(line) == 18000
+    assert parse_leg_altitude_ft(line) is None
 
 
 def test_parse_leg_altitude_prefers_signed_constraint_over_hold_course() -> None:
@@ -66,6 +74,20 @@ def test_parse_leg_altitude_prefers_signed_constraint_over_hold_course() -> None
     )
 
     assert parse_leg_altitude_ft(line) == 2200
+    assert parse_leg_altitude_qualifier(line) == "atOrAbove"
+
+
+def test_parse_leg_altitude_reads_at_or_above_crossing_constraint() -> None:
+    # KRDU R32 NOSIC has a real "at or above 3400" constraint (Alt1) plus
+    # the 18000 transition altitude; the real constraint must win and the
+    # qualifier must reflect the "+" descriptor.
+    line = (
+        "SUSAP KRDUK7FR32   ANOSIC 010NOSICK7PC0EE AR   HF"
+        "                     32420040    + 03400     18000                 A JS   008462407"
+    )
+
+    assert parse_leg_altitude_ft(line) == 3400
+    assert parse_leg_altitude_qualifier(line) == "atOrAbove"
 
 
 def test_parse_leg_course_reads_ca_course_field() -> None:

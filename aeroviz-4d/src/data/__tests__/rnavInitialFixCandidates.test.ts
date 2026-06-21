@@ -62,6 +62,27 @@ describe("rnavInitialFixCandidates", () => {
 
     expect(candidates).toEqual([]);
   });
+
+  it("does not place an IF at a zero-placeholder altitude or terrain elevation", () => {
+    // Regression for the transition-altitude misparse postmortem: a
+    // feeder/transition IF with no real published crossing altitude must
+    // be skipped, never placed at 0 ft or at the fix's terrain elevation.
+    const ifFix = makeFix("fix:FEEDER", "FEEDER", 0, 0, ["IF"]);
+    const candidates = buildRnavInitialFixCandidates([
+      makeDocument({
+        fixes: [
+          { ...ifFix, elevationFt: 450 },
+          makeFix("fix:NEXT", "NEXT", 0, 0.01, ["FAF"]),
+        ],
+        legs: [
+          makeLeg("leg:R:010", 10, null, "fix:FEEDER", "IF", "IF", 0),
+          makeLeg("leg:R:020", 20, "fix:FEEDER", "fix:NEXT", "TF", "FAF", 2200),
+        ],
+      }),
+    ], "RW09");
+
+    expect(candidates).toEqual([]);
+  });
 });
 
 function makeDocument({

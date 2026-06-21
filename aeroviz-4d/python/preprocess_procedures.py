@@ -54,6 +54,7 @@ from cifp_parser import (
     final_branch_for_procedure,
     parse_available_branches,
     parse_leg_altitude_ft,
+    parse_leg_altitude_qualifier,
     parse_leg_course_deg,
     parse_path_point_vertical_metadata,
     parse_procedure_legs,
@@ -732,7 +733,7 @@ def build_branch_document(
                 "constraints": {
                     "altitude": (
                         {
-                            "qualifier": "at",
+                            "qualifier": leg.altitude_qualifier or "at",
                             "valueFt": leg.altitude_ft,
                             "rawText": f"{leg.altitude_ft} ft",
                         }

@@ -94,7 +94,7 @@ function buildDocumentInitialFixCandidates(
       const nextFix = fixLookup.get(nextLeg.path.endFixRef);
       if (!nextFix?.position) return [];
 
-      const altitudeFt = altitudeFtForInitialFix(leg, fix);
+      const altitudeFt = altitudeFtForInitialFix(leg);
       if (altitudeFt === null) return [];
 
       const candidateWithoutKey = {
@@ -165,17 +165,24 @@ function findNextLegFromFix(
     null;
 }
 
-function altitudeFtForInitialFix(
-  leg: ProcedureDetailLeg,
-  fix: ProcedureDetailFix,
-): number | null {
+function altitudeFtForInitialFix(leg: ProcedureDetailLeg): number | null {
+  // Only a real published crossing altitude makes an IF usable as an
+  // initial state.  A feeder/transition IF with no Altitude 1/2 constraint
+  // (e.g. KRDU R32 CONCA/SINNO) must be skipped, NOT placed at the
+  // transition altitude, the fix's terrain elevation, or zero.  We
+  // therefore require a finite, positive published altitude and do not
+  // fall back to ``fix.elevationFt``.
+  // See docs/33-cifp-transition-altitude-misparse-postmortem.md.
   const geometryAltitudeFt = leg.constraints.geometryAltitudeFt;
-  if (isFiniteNumber(geometryAltitudeFt)) return geometryAltitudeFt;
+  if (isFiniteNumber(geometryAltitudeFt) && geometryAltitudeFt > 0) {
+    return geometryAltitudeFt;
+  }
 
   const altitudeFt = leg.constraints.altitude?.valueFt;
-  if (isFiniteNumber(altitudeFt)) return altitudeFt;
+  if (isFiniteNumber(altitudeFt) && altitudeFt > 0) {
+    return altitudeFt;
+  }
 
-  if (isFiniteNumber(fix.elevationFt)) return fix.elevationFt;
   return null;
 }
 

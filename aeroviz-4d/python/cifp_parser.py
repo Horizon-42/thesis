@@ -44,6 +44,7 @@ class ProcedureLeg:
     role: str
     altitude_ft: int | None
     source_line: int
+    altitude_qualifier: str | None = None
     fix_region_code: str | None = None
     procedure_type: str | None = None
     transition_ident: str | None = None
@@ -114,18 +115,54 @@ def parse_signed_altitude_ft(text: str) -> int | None:
 
 
 def parse_leg_altitude_ft(line: str) -> int | None:
-    """Parse altitude constraints from the CIFP procedure leg altitude fields."""
-    primary_altitude = parse_signed_altitude_ft(line[70:90])
-    if primary_altitude is not None:
-        return primary_altitude
+    """Parse the crossing-altitude constraint from a CIFP procedure leg.
 
-    # Some CIFP legs encode altitude 2 immediately before the speed limit field,
-    # e.g. "18000210" for 18,000 ft and 210 kt. Parse it by column, not regex.
-    secondary_altitude = line[94:99].strip()
-    if len(secondary_altitude) == 5 and secondary_altitude.isdigit():
-        return int(secondary_altitude)
+    ARINC 424 SIAP leg altitude fields (1-indexed columns):
 
-    return None
+        * Altitude Description : col 83        (``+``/``-``/``B``/...)
+        * Altitude 1           : cols 85-89    (the binding crossing altitude)
+        * Altitude 2           : cols 90-94    (window second bound, rare)
+        * Transition Altitude  : cols 95-99    (procedure-wide constant)
+
+    Only Altitude 1/2 are per-leg crossing constraints.  The **Transition
+    Altitude** is a procedure-wide field (18000 ft across the whole US
+    dataset) and must NOT be read as a fix altitude -- doing so gave
+    altitude-less initial fixes (e.g. KRDU R32 CONCA/SINNO) a spurious
+    "18000 ft" crossing.  We therefore scan only ``line[70:94]`` (through
+    Altitude 2) and stop strictly before the Transition Altitude field.
+    """
+    # ``line[70:94]`` spans the altitude-description + Altitude 1 + Altitude 2
+    # columns but ends at col 94, one column short of the Transition Altitude
+    # field (col 95).  The regex returns Altitude 1 when present, else
+    # Altitude 2; it never sees the transition altitude.
+    return parse_signed_altitude_ft(line[70:94])
+
+
+# ARINC 424 altitude-description code -> human qualifier.  Anything not
+# listed (including blank) means a plain "at" crossing, so callers fall back
+# to "at" on ``None``.
+_ALTITUDE_DESCRIPTOR_QUALIFIERS = {
+    "+": "atOrAbove",
+    "V": "atOrAbove",  # step-down "at or above"
+    "-": "atOrBelow",
+    "B": "block",      # at or below Altitude 1, at or above Altitude 2
+}
+
+
+def qualifier_from_alt_desc(alt_desc: Any) -> str | None:
+    """Map an ARINC 424 altitude-description code to a qualifier, or None."""
+    descriptor = str(alt_desc or "").strip().upper()
+    return _ALTITUDE_DESCRIPTOR_QUALIFIERS.get(descriptor)
+
+
+def parse_leg_altitude_qualifier(line: str) -> str | None:
+    """Map the ARINC 424 altitude-description code (col 83) to a qualifier.
+
+    Returns ``None`` when there is no description code so callers can fall
+    back to the default ("at").
+    """
+    descriptor = line[82:83] if len(line) > 82 else ""
+    return qualifier_from_alt_desc(descriptor)
 
 
 def normalize_turn_direction(value: Any) -> str | None:
@@ -604,6 +641,9 @@ def parse_procedure_legs(
             sequence = int(sequence_text)
             role = parse_leg_role(line, leg_type, fix_ident, sequence)
             altitude_ft = parse_leg_altitude_ft(line)
+            altitude_qualifier = (
+                parse_leg_altitude_qualifier(line) if altitude_ft is not None else None
+            )
             is_rf = leg_type == "RF"
             has_course = leg_type in {"CA", "CF", "FA"}
             legs.append(
@@ -614,6 +654,7 @@ def parse_procedure_legs(
                     leg_type=leg_type,
                     role=role,
                     altitude_ft=altitude_ft,
+                    altitude_qualifier=altitude_qualifier,
                     source_line=line_number,
                     fix_region_code=line[34:36].strip().upper() or None,
                     procedure_type=target_branch[0] if len(target_branch) > 5 else target_branch,
@@ -857,11 +898,20 @@ def parse_procedure_legs(
         if sequence is None or not leg_type:
             continue
 
+        # Altitude 1/2 are the per-leg crossing constraints.  ``trans_alt``
+        # (the procedure-wide Transition Altitude, 18000 ft across the US
+        # dataset) is NOT a crossing altitude and must never be used as a
+        # fallback -- doing so gave altitude-less initial fixes (e.g. KRDU
+        # R32 CONCA/SINNO) a spurious "18000 ft" crossing.  See
+        # docs/33-cifp-transition-altitude-misparse-postmortem.md.
         altitude_ft = normalize_int(primary.get("alt_1"))
         if altitude_ft is None:
             altitude_ft = normalize_int(primary.get("alt_2"))
-        if altitude_ft is None:
-            altitude_ft = normalize_int(primary.get("trans_alt"))
+        altitude_qualifier = (
+            qualifier_from_alt_desc(primary.get("alt_desc"))
+            if altitude_ft is not None
+            else None
+        )
 
         legs.append(
             ProcedureLeg(
@@ -871,6 +921,7 @@ def parse_procedure_legs(
                 leg_type=leg_type,
                 role=role_from_cifparse(primary, leg_type, fix_ident, sequence),
                 altitude_ft=altitude_ft,
+                altitude_qualifier=altitude_qualifier,
                 source_line=cifparse_source_line(primary.get("record_number"), data.header_line_count),
                 fix_region_code=str(primary.get("fix_region") or "").strip().upper() or None,
                 procedure_type=str(primary.get("procedure_type") or "").strip().upper() or None,
