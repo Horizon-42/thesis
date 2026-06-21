@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 import math
 from pathlib import Path
 import sys
@@ -9,20 +8,18 @@ MODEL_DIR = Path(__file__).resolve().parent
 if str(MODEL_DIR) not in sys.path:
     sys.path.insert(0, str(MODEL_DIR))
 
-from aircraft_sets import AircraftSpec, A320
-from coordinates_convertor import CoordinateConverter, GeodeticCoordinate, ENUCoordinate
-from simulator import Atmosphere, Control, Simulator, State
+try:
+    from .aircraft_sets import AircraftSpec, A320
+    from .coordinates_convertor import CoordinateConverter, GeodeticCoordinate, ENUCoordinate
+    from .simulator import Atmosphere, Simulator, State
+    from .common import GeodeticState
+except ImportError:  # pragma: no cover - compatibility for flat script imports.
+    from aircraft_sets import AircraftSpec, A320
+    from coordinates_convertor import CoordinateConverter, GeodeticCoordinate, ENUCoordinate
+    from simulator import Atmosphere, Simulator, State
+    from common import GeodeticState
 
 
-@dataclass
-class GeodeticState:
-    latitude: float
-    longitude: float
-    altitude: float
-    V: float
-    psi: float
-    gamma: float
-    m: float
 
 
 class GeodeticSimulator:

@@ -12,11 +12,10 @@ from aerodynamic_model.casadi_exprs import (  # noqa: E402
 )
 from aerodynamic_model.casadi_simulator import (  # noqa: E402
     CasadiSimulator,
-    GeoControl,
-    GeoState,
     make_dynamics_model,
     make_integrator,
 )
+from aerodynamic_model.common import GeodeticState, LoadFactorControl  # noqa: E402
 
 
 class TestCasadiSimulator(unittest.TestCase):
@@ -271,7 +270,7 @@ class TestCasadiSimulator(unittest.TestCase):
 
     def test_casadi_simulator_step_returns_geo_state_from_named_output(self):
         simulator = CasadiSimulator(A320, dt=0.2)
-        state = GeoState(
+        state = GeodeticState(
             latitude=51.1139,
             longitude=-114.0203,
             altitude=1000.0,
@@ -280,7 +279,7 @@ class TestCasadiSimulator(unittest.TestCase):
             gamma=0.0,
             m=A320.mass_kg,
         )
-        control = GeoControl(
+        control = LoadFactorControl(
             thrust=A320.approach_thrust_guess_n,
             bank_rad=0.0,
             load_factor=1.0,
@@ -288,7 +287,7 @@ class TestCasadiSimulator(unittest.TestCase):
 
         next_state = simulator.step(state, control, dt=0.2)
 
-        self.assertIsInstance(next_state, GeoState)
+        self.assertIsInstance(next_state, GeodeticState)
         self.assertTrue(
             np.all(
                 np.isfinite(

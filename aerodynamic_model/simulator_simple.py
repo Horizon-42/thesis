@@ -1,15 +1,12 @@
 # Simple Aerodynamic Simulator, with load factor, assume alpha = 0
-from dataclasses import dataclass
 import numpy as np
 import math
-from aircraft_sets import AircraftSpec, A320
-from common import State, Atmosphere, rk4_step
-
-@dataclass
-class LoadFactorControl:
-    thrust: float
-    bank_rad: float # roll angle / bank angle in radians, mu
-    load_factor: float # load factor, n
+try:
+    from .aircraft_sets import AircraftSpec, A320
+    from .common import State, Atmosphere, rk4_step, LoadFactorControl
+except ImportError:  # pragma: no cover - compatibility for flat script imports.
+    from aircraft_sets import AircraftSpec, A320
+    from common import State, Atmosphere, rk4_step, LoadFactorControl
 
 class LoadFactorSimulator:
     aircraft: AircraftSpec

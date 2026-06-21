@@ -6,6 +6,8 @@ from .casadi_coordinates_converter import ecef_to_enu_rotation_matrix_expr, enu_
 from .aircraft_sets import AircraftSpec, A320
 from dataclasses import dataclass
 
+from .common import GeodeticState, LoadFactorControl
+
 # Dynamic model for load factor control, using CasADi for symbolic computation
 def make_dynamics_model():
     # Define symbolic variables for state and control
@@ -210,16 +212,6 @@ def make_geo_step_from_enu_integrator():
     }
 
 @dataclass
-class GeoState:
-    latitude: float
-    longitude: float
-    altitude: float
-    V: float
-    psi: float
-    gamma: float
-    m: float
-
-@dataclass
 class AeroParams:
     S: float 
     Cl_max: float = 1.5
@@ -228,11 +220,6 @@ class AeroParams:
     stall_threshold: float = 0.9
     k_stall: float = 0.1
 
-@dataclass
-class GeoControl:
-    thrust: float
-    bank_rad: float
-    load_factor: float
 
 class CasadiSimulator:
     g = 9.81  # gravity (m/s^2)
@@ -242,15 +229,15 @@ class CasadiSimulator:
         self.aero_params = AeroParams(S=aircraft.wing_area_m2)
         self.geo_step = make_geo_step_from_enu_integrator()["step_func"]
 
-    def step(self, state: GeoState, control: GeoControl, dt: float) -> GeoState:
+    def step(self, state: GeodeticState, control: LoadFactorControl, dt: float) -> GeodeticState:
         x_geo = ca.vertcat(state.latitude, state.longitude, state.altitude, state.V, state.psi, state.gamma, state.m)
         u = ca.vertcat(control.thrust, control.bank_rad, control.load_factor)
         aero_params_vec = ca.vertcat(self.aero_params.S, self.aero_params.Cl_max, self.aero_params.Cd0, self.aero_params.k, self.aero_params.stall_threshold, self.aero_params.k_stall)
 
         result = self.geo_step(x_geo=x_geo, u=u, aero_params=aero_params_vec, dt=dt)
         x_geo_next = np.array(result["x_geo_next"], dtype=float).reshape(-1)
-        return GeoState(*x_geo_next.tolist())
+        return GeodeticState(*x_geo_next.tolist())
 
-    def optimize_trajectory(self, initial_state: GeoState, target_state: GeoState, N: int, dt: float):
+    def optimize_trajectory(self, initial_state: GeodeticState, target_state: GeodeticState, N: int, dt: float):
         # This function can be implemented to optimize a trajectory using CasADi's NLP solvers, given an initial state and a sequence of controls.
         pass

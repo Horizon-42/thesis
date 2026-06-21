@@ -1,14 +1,12 @@
-from dataclasses import dataclass
 import math
 import numpy as np
-from aircraft_sets import AIRCRAFT_PRESETS, AircraftSpec, A320
-from common import State, Atmosphere, rk4_step
+try:
+    from .aircraft_sets import AIRCRAFT_PRESETS, AircraftSpec, A320
+    from .common import State, Atmosphere, rk4_step, Control
+except ImportError:  # pragma: no cover - compatibility for flat script imports.
+    from aircraft_sets import AIRCRAFT_PRESETS, AircraftSpec, A320
+    from common import State, Atmosphere, rk4_step, Control
 
-@dataclass
-class Control:
-    thrust: float
-    bank_rad: float # roll angle / bank angle in radians, mu
-    attack_rad: float # angle of attack in radians, alpha
 
 class Simulator:
     aircraft: AircraftSpec

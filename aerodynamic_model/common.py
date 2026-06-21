@@ -13,6 +13,28 @@ class State:
     gamma: float
     m: float
 
+@dataclass
+class GeodeticState:
+    latitude: float
+    longitude: float
+    altitude: float
+    V: float
+    psi: float
+    gamma: float
+    m: float
+
+@dataclass
+class Control:
+    thrust: float
+    bank_rad: float # roll angle / bank angle in radians, mu
+    attack_rad: float # angle of attack in radians, alpha
+
+@dataclass
+class LoadFactorControl:
+    thrust: float
+    bank_rad: float # roll angle / bank angle in radians, mu
+    load_factor: float # load factor, n
+
 class Atmosphere:
     rho0: float = 1.225 # sea level density in kg/m^3
     H: float = 8500.0 # scale height in meters
