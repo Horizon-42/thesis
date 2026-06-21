@@ -18,7 +18,7 @@
 
 $$
 \begin{aligned}
-\min_{x(\cdot),\,u(\cdot),\,T} \quad & J = T + \lambda \int_0^T \|u(t)\|^2_W \, dt \\
+\min_{x(\cdot),\,u(\cdot),\,T} \quad & J = T + \lambda \int_0^T \|u(t)\|^2_W \, dt + \mu \int_0^T \|\dot u(t)\|^2_S \, dt \\
 \text{s.t.} \quad & \dot{x}(t) = f(x(t), u(t)) && t \in [0, T] \\
 & x(0) = x_0,\quad x(T) = x_T \\
 & x(t) \in \mathcal{X},\quad u(t) \in \mathcal{U}
@@ -199,15 +199,21 @@ defect = x_kp1 - x_k - (h / 6.0) * (f_k + 4.0 * f_mid + f_kp1)
 $$
 \begin{aligned}
 \min_{x_{0:N},\,u_{0:N-1},\,T} \quad &
-\frac{T}{T_\text{max}} + \lambda\,\frac{1}{N}\sum_{k=0}^{N-1}\|u_k\|^2_W \\
+\frac{T}{T_\text{max}} + \lambda\,\frac{1}{N}\sum_{k=0}^{N-1}\|u_k\|^2_W
++ \frac{1}{N-1}\sum_{k=0}^{N-2}\|u_{k+1}-u_k\|^2_S \\
 \text{s.t.}\quad & x_{k+1} - x_k - \tfrac{h}{6}(f_k + 4f_\text{mid} + f_{k+1}) = 0,\; h = T/N,\;\forall k \\
 & x_0 = x_\text{start},\; x_N = x_\text{target} \\
 & \underline{x} \le x_k \le \overline{x},\; \underline{u} \le u_k \le \overline{u} \\
+& \big|V_N\cos\gamma_N\,\dot\psi_N\big| \le g\tan(\mu_\text{max}) \quad\text{(终端坡度，纯 state)} \\
 & T_\text{min} \le T \le T_\text{max}
 \end{aligned}
 $$
 
-为什么这在 direct collocation 里"几乎免费"？
+目标里多出的两项：
+- $\dfrac{1}{N-1}\sum\|u_{k+1}-u_k\|^2_S$ 是**控制平滑项**，权重矩阵 $S$ 主要罚坡度 $\mu$ 和载荷 $n$（真实飞行里这两个是姿态驱动、本就平滑的量），thrust 给小权重；它在 free-time 里不被 $\lambda$ 那个小正则系数压低，确保它真的塑形控制曲线。
+- 终端不等式把**实际坡度**（由末端相邻 state 节点反推的 $\dot\psi$ 算出，$g\tan\mu=V\cos\gamma\,\dot\psi$）限在 $\mu_\text{max}$（默认 5°）以内——是纯 state 约束，不碰控制 $\mu$。
+
+为什么 free-time 这在 direct collocation 里"几乎免费"？
 
 - defect 公式里 $h$ 只是个符号，IPOPT 对它自动求导没有任何额外代价；
 - 雅可比新增了一列（对 $T$ 的偏导），稀疏结构不变；
@@ -364,6 +370,8 @@ dense-state 直接把优化器的**离散算子**对齐到 playback，从源头�
 | 固定时间 NLP | `make_direct_collocation_solver(..., sub_steps=M)` |
 | 自由时间 NLP（含 $T$） | `make_direct_collocation_solver_free_time(..., sub_steps=M)` |
 | 几何/状态边界 | `make_state_bounds`, `make_control_bounds` |
+| 控制平滑项（主罚 μ、n） | `_control_smoothness_cost`（权重 `smoothness_weights`，默认 `(0.1,1,1)`） |
+| 终端坡度约束（纯 state） | `terminal_bank_constraint_expr`（`max_terminal_bank_deg`，默认 5°） |
 | free-time 初值（复用 fixed-time 原始解 + $T$） | `CasadiDirectCollocationOptimizer._build_free_time_initial_guess` |
 | 段端状态抽取（$N\cdot M$ 节点里每 $M$ 取一个） | `_extract_node_states_geo` |
 | 度↔弧度边界转换 | `_geodetic_state_to_decision` / `_decision_to_geodetic_state` |

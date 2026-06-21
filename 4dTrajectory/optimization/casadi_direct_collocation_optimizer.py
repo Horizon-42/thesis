@@ -271,19 +271,51 @@ def terminal_bank_constraint_expr(state_nodes, start_state, state_h, max_bank_ra
     return expr, -bound, bound
 
 
+# Per-control smoothness weights on the scaled segment-to-segment change
+# (thrust, bank μ, load n).  Bank and load factor are attitude-driven and
+# physically smooth in real flight, so they are penalised most; thrust gets a
+# small weight (engine spool already limits its rate).
+_DEFAULT_SMOOTHNESS_WEIGHTS = (0.1, 1.0, 1.0)
+
+
+def _control_scales(aircraft_meta):
+    return (
+        aircraft_meta['max_thrust'],
+        ca.pi / 2.0,
+        max(abs(aircraft_meta['min_load_factor']), abs(aircraft_meta['max_load_factor'])),
+    )
+
+
 def _scaled_control_cost(seg_controls, aircraft_meta):
     """Mean squared scaled control effort over the N control segments."""
-    scale_thrust = aircraft_meta['max_thrust']
-    scale_mu = ca.pi / 2.0
-    scale_n = max(
-        abs(aircraft_meta['min_load_factor']),
-        abs(aircraft_meta['max_load_factor']),
-    )
+    scale_thrust, scale_mu, scale_n = _control_scales(aircraft_meta)
     cost = ca.SX(0)
     for uk in seg_controls:
         scaled = ca.vertcat(uk[0] / scale_thrust, uk[1] / scale_mu, uk[2] / scale_n)
         cost += ca.dot(scaled, scaled)
     return cost / len(seg_controls)
+
+
+def _control_smoothness_cost(seg_controls, aircraft_meta, weights):
+    """Mean squared weighted, scaled control change between adjacent segments.
+
+    ``weights = (w_thrust, w_bank, w_load)`` emphasise bank (μ) and load
+    factor (n) — the smooth, attitude-driven quantities in real flight — over
+    thrust.  Penalising ``u_{k+1} - u_k`` discourages segment-to-segment jumps.
+    """
+    if len(seg_controls) < 2:
+        return ca.SX(0)
+    scale_thrust, scale_mu, scale_n = _control_scales(aircraft_meta)
+    w_thrust, w_bank, w_load = weights
+    cost = ca.SX(0)
+    for prev, cur in zip(seg_controls[:-1], seg_controls[1:]):
+        d = ca.vertcat(
+            w_thrust * (cur[0] - prev[0]) / scale_thrust,
+            w_bank * (cur[1] - prev[1]) / scale_mu,
+            w_load * (cur[2] - prev[2]) / scale_n,
+        )
+        cost += ca.dot(d, d)
+    return cost / (len(seg_controls) - 1)
 
 
 # --------------------------------------------------------------------------
@@ -296,6 +328,7 @@ def make_direct_collocation_solver(
     aircraft_meta: dict,
     sub_steps: int = 1,
     max_terminal_bank_deg: float = _DEFAULT_MAX_TERMINAL_BANK_DEG,
+    smoothness_weights: tuple = _DEFAULT_SMOOTHNESS_WEIGHTS,
 ):
     """Build the Hermite-Simpson NLP symbolically.
 
@@ -364,9 +397,13 @@ def make_direct_collocation_solver(
     lbg = [0.0] * n_defect_rows + [bank_lb]
     ubg = [0.0] * n_defect_rows + [bank_ub]
 
-    # 6. Objective: minimise mean squared scaled control effort so the NLP
-    # stays well-posed when arrival time is fixed.
-    cost = _scaled_control_cost(seg_controls, aircraft_meta)
+    # 6. Objective: control effort + segment-to-segment smoothness (mostly
+    # on bank μ and load n).  Keeps the NLP well-posed when arrival time is
+    # fixed and discourages control jumps.
+    cost = (
+        _scaled_control_cost(seg_controls, aircraft_meta)
+        + _control_smoothness_cost(seg_controls, aircraft_meta, smoothness_weights)
+    )
 
     nlp = {
         'f': cost,
@@ -402,6 +439,7 @@ def make_direct_collocation_solver_free_time(
     time_regularization: float = _DEFAULT_TIME_REGULARIZATION,
     sub_steps: int = 1,
     max_terminal_bank_deg: float = _DEFAULT_MAX_TERMINAL_BANK_DEG,
+    smoothness_weights: tuple = _DEFAULT_SMOOTHNESS_WEIGHTS,
 ):
     """Build the Hermite-Simpson NLP with ``T`` as a decision variable.
 
@@ -477,11 +515,15 @@ def make_direct_collocation_solver_free_time(
     lbg = [0.0] * n_defect_rows + [bank_lb]
     ubg = [0.0] * n_defect_rows + [bank_ub]
 
-    # 6. Objective.  Time dominates; control effort is a small regulariser.
-    # Both terms are non-dimensional so IPOPT sees a well-scaled gradient.
+    # 6. Objective.  Time dominates; control effort is a tiny tie-breaker.
+    # Smoothness (mostly bank μ and load n) is added directly (NOT scaled by
+    # time_regularization) so it actually shapes the control profile on the
+    # default free-time path -- trading a little arrival time for smoother
+    # attitude commands.  All terms are non-dimensional.
     cost = (
         duration_var / max_duration
         + time_regularization * _scaled_control_cost(seg_controls, aircraft_meta)
+        + _control_smoothness_cost(seg_controls, aircraft_meta, smoothness_weights)
     )
 
     nlp = {
@@ -512,6 +554,7 @@ class CasadiDirectCollocationOptimizer:
         max_duration: float,
         aircraft: AircraftSpec,
         max_terminal_bank_deg: float = _DEFAULT_MAX_TERMINAL_BANK_DEG,
+        smoothness_weights: tuple = _DEFAULT_SMOOTHNESS_WEIGHTS,
     ):
         if n_segments < 2:
             raise ValueError("n_segments must be at least 2 for direct collocation")
@@ -519,6 +562,9 @@ class CasadiDirectCollocationOptimizer:
         # Keep the realised bank at the terminal node below this angle (a
         # pure state constraint).
         self.max_terminal_bank_deg = max_terminal_bank_deg
+        # Per-control smoothness weights (thrust, bank μ, load n) on the
+        # segment-to-segment control change.
+        self.smoothness_weights = smoothness_weights
         # ``dt`` is accepted for API parity with the multiple-shooting
         # optimiser.  Control stays piecewise-constant over ``n_segments``;
         # dynamics fidelity comes from collocating the state on a finer
@@ -550,6 +596,7 @@ class CasadiDirectCollocationOptimizer:
                 aircraft_meta=aircraft_meta,
                 sub_steps=self.state_substeps,
                 max_terminal_bank_deg=max_terminal_bank_deg,
+                smoothness_weights=smoothness_weights,
             )
         )
 
@@ -569,6 +616,7 @@ class CasadiDirectCollocationOptimizer:
             aircraft_meta=aircraft_meta,
             sub_steps=self.state_substeps,
             max_terminal_bank_deg=max_terminal_bank_deg,
+            smoothness_weights=smoothness_weights,
         )
 
     # ------------------------------------------------------------------

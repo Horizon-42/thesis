@@ -79,6 +79,20 @@ def test_terminal_bank_constraint_expr_matches_coordinated_bank():
     assert lb == pytest.approx(-ub)
 
 
+def test_control_smoothness_cost_weights_segment_changes():
+    module = load_module()
+    meta = {"max_thrust": 240000.0, "min_load_factor": 0.5, "max_load_factor": 2.0}
+    # Two control segments; bank changes by pi/2 (scaled diff = 1.0), thrust
+    # and load unchanged.  With w_bank = 3, the single pair contributes
+    # (3 * 1)^2 = 9, averaged over 1 pair => 9.
+    u0 = ca.DM([0.0, 0.0, 1.0])
+    u1 = ca.DM([0.0, math.pi / 2.0, 1.0])
+    cost = module._control_smoothness_cost([u0, u1], meta, (0.1, 3.0, 1.0))
+    assert float(cost) == pytest.approx(9.0)
+    # No change between segments => zero smoothness cost.
+    assert float(module._control_smoothness_cost([u0, u0], meta, (0.1, 3.0, 1.0))) == pytest.approx(0.0)
+
+
 def test_make_direct_collocation_solver_builds_symbolic_nlp(monkeypatch):
     module = load_module()
     captured = {}
