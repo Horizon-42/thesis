@@ -180,8 +180,29 @@ outputs/landings/summary_<UTC>.json                          # collected count p
 ```
 
 Each flight additionally carries `landing_time_utc` (the absolute time it reached the
-threshold). The files are standard CZML input and render directly through
-`generate_czml.py`.
+threshold). The files are CZML **input**, not CZML — the frontend loads one
+`trajectories.czml` per airport, so convert before using them in the app.
+
+### Render to the frontend
+
+`landings_to_czml.py` merges an airport's per-threshold landing files (all, or a
+subset) into a single CZML the frontend can load directly:
+
+```bash
+# all runways of KRDU -> aeroviz-4d/public/data/airports/KRDU/trajectories.czml
+python trajectory_data_process/landings_to_czml.py --airport KRDU
+
+# only specific runway ends, or a custom output path
+python trajectory_data_process/landings_to_czml.py --airport KRDU --runway 23R 23L
+python trajectory_data_process/landings_to_czml.py --airport KRDU --output /tmp/krdu.czml
+```
+
+It de-duplicates landings by `(icao24, landing_time_utc)`, re-uniques ids, writes a
+combined `<ICAO>_combined_czml_input.json` for inspection, then runs `generate_czml.py`.
+Omit `--output` to write straight to the airport's frontend asset.
+
+A single landing file can also be rendered directly:
+`python aeroviz-4d/python/generate_czml.py --airport KRDU --input <file> --output <…>/trajectories.czml`.
 
 ### Resume & caching (re-running)
 
