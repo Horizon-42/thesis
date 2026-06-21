@@ -3,7 +3,7 @@ from aerodynamic_model.casadi_simulator import make_geo_step_from_enu_integrator
 
 def segement_integrate_expr(step_func, x_start, u, aero_params, dt:float, duration: float):
     
-    n_steps = ca.fmax(1, ca.ceil(duration / dt))
+    n_steps = int(ca.fmax(1, ca.ceil(duration / dt)))
     dt_step = duration / n_steps
     xk = x_start
     for k in range(n_steps):
@@ -29,7 +29,13 @@ def make_state_bounds():
     psi_min, psi_max = -ca.pi, ca.pi  # heading angle in radians
     gamma_min, gamma_max = -ca.pi/2, ca.pi/2  # flight path angle in radians
     return [lat_min, lon_min, alt_min, V_min, psi_min, gamma_min], [lat_max, lon_max, alt_max, V_max, psi_max, gamma_max]
-   
+
+def geo_state_to_decision_vector(state):
+    return state[:6] # exclude mass from optimization state, it is constant in this model
+
+def decision_vector_to_geo_state(vec, mass):
+    return vec[0], vec[1], vec[2], vec[3], vec[4], vec[5], mass
+
 def make_multiple_shooting_solver(segment_num: int, dt: float, max_duration: float, aero_params_obj: AeroParams, aircraft_meta:dict):
     lat = ca.SX.sym('lat')
     lon = ca.SX.sym('lon')
@@ -48,8 +54,8 @@ def make_multiple_shooting_solver(segment_num: int, dt: float, max_duration: flo
 
     aero_params = ca.vertcat(aero_params_obj.S, aero_params_obj.Cl_max, aero_params_obj.Cd0, aero_params_obj.k, aero_params_obj.stall_threshold, aero_params_obj.k_stall)
 
-    start_state = ca.SX.sym('start_state', 6) # excluding mass
-    target_state = ca.SX.sym('target_state', 6)
+    start_state = ca.SX.sym('start_state', 7) # excluding mass
+    target_state = ca.SX.sym('target_state', 7)
 
     duration = ca.SX.sym('duration') # total duration of the trajectory, the optimization object
 
@@ -61,7 +67,7 @@ def make_multiple_shooting_solver(segment_num: int, dt: float, max_duration: flo
     ubw = [max_duration] # upper bounds on decision variables
 
     segment_duration = duration / segment_num
-    xk = start_state # exclude mass from optimization state, it is constant in this model
+    xk = geo_state_to_decision_vector(start_state) # exclude mass from optimization state, it is constant in this model
     seg_states = []
     
     seg_controls = []
@@ -72,8 +78,9 @@ def make_multiple_shooting_solver(segment_num: int, dt: float, max_duration: flo
         uk = ca.SX.sym(f'u_{k}', 3)
         seg_controls.append(uk)
 
-
-        xk_next = segement_integrate_expr(step_func, xk, uk, aero_params, dt, segment_duration)
+        cur_geo_state = decision_vector_to_geo_state(xk, start_state[6]) # reconstruct the full geodetic state with mass for integration
+        cur_geo_state = segement_integrate_expr(step_func, cur_geo_state, uk, aero_params, dt, segment_duration)
+        xk_next = geo_state_to_decision_vector(cur_geo_state) # convert back to optimization state format for the next segment
         xk_next_sym = ca.SX.sym(f'x_{k+1}', 6)
 
         # Add defect constraint
@@ -101,13 +108,13 @@ def make_multiple_shooting_solver(segment_num: int, dt: float, max_duration: flo
     ubw.extend(state_ub)
     
     # final state constraint
-    defects.append(seg_states[-1] - target_state)
+    defects.append(seg_states[-1] - target_state[:6])
 
     g = ca.vertcat(*defects)
     lbg = [0.0] * g.shape[0] # equality constraints
     ubg = [0.0] * g.shape[0]
 
-    nlp = {'f': duration, 'x': ca.vertcat(*w), 'g': g, 'p': ca.vertcat(start_state, target_state, aero_params)}
+    nlp = {'f': duration, 'x': ca.vertcat(*w), 'g': g, 'p': ca.vertcat(start_state, target_state)}
     solver = ca.nlpsol('solver', 'ipopt', nlp)
 
     return solver, lbw, ubw, lbg, ubg
