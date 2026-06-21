@@ -62,6 +62,23 @@ def test_hermite_simpson_defect_is_zero_for_constant_state_with_zero_rhs():
     )
 
 
+def test_terminal_bank_constraint_expr_matches_coordinated_bank():
+    module = load_module()
+    # Heading turns 0 -> 0.05 rad over state_h = 2 s at V = 100, gamma = 0:
+    # expr = V cos(gamma) * (dpsi / state_h) = 100 * 1 * 0.05 / 2 = 2.5 (= g*tan(mu)).
+    n_prev = ca.DM([0.0, 0.0, 1000.0, 100.0, 0.0, 0.0])
+    n_term = ca.DM([0.0, 0.0, 1000.0, 100.0, 0.05, 0.0])
+    start = ca.DM([0.0, 0.0, 1000.0, 100.0, 0.0, 0.0, 70000.0])
+
+    expr, lb, ub = module.terminal_bank_constraint_expr(
+        [n_prev, n_term], start, 2.0, math.radians(5.0),
+    )
+
+    assert float(expr) == pytest.approx(2.5)
+    assert ub == pytest.approx(9.81 * math.tan(math.radians(5.0)))
+    assert lb == pytest.approx(-ub)
+
+
 def test_make_direct_collocation_solver_builds_symbolic_nlp(monkeypatch):
     module = load_module()
     captured = {}
@@ -89,12 +106,13 @@ def test_make_direct_collocation_solver_builds_symbolic_nlp(monkeypatch):
     assert captured["plugin"] == "ipopt"
     # 2 controls × 3 + 2 states × 6 = 18 decision variables.
     assert captured["nlp"]["x"].shape == (2 * 3 + 2 * 6, 1)
-    # 2 segment defects × 6 + 1 terminal × 6 = 18 equality constraints.
-    assert captured["nlp"]["g"].shape == (2 * 6 + 6, 1)
+    # 2 segment defects × 6 + 1 terminal × 6 = 18 equality constraints,
+    # plus 1 terminal bank inequality.
+    assert captured["nlp"]["g"].shape == (2 * 6 + 6 + 1, 1)
     # 7 (initial) + 7 (target) + 1 (duration) = 15 parameter slots.
     assert captured["nlp"]["p"].shape == (7 + 7 + 1, 1)
     assert len(lbw) == len(ubw) == 2 * 3 + 2 * 6
-    assert len(lbg) == len(ubg) == 2 * 6 + 6
+    assert len(lbg) == len(ubg) == 2 * 6 + 6 + 1
 
 
 def test_optimize_trajectory_solves_real_ipopt_problem():
@@ -221,8 +239,9 @@ def test_make_direct_collocation_solver_free_time_builds_symbolic_nlp(monkeypatc
     assert captured["plugin"] == "ipopt"
     # 2 controls × 3 + 2 states × 6 + 1 duration = 19 decision variables.
     assert captured["nlp"]["x"].shape == (2 * 3 + 2 * 6 + 1, 1)
-    # Constraints unchanged: 2 segment defects × 6 + 1 terminal × 6 = 18.
-    assert captured["nlp"]["g"].shape == (2 * 6 + 6, 1)
+    # 2 segment defects × 6 + 1 terminal × 6 = 18 equality constraints,
+    # plus 1 terminal bank inequality.
+    assert captured["nlp"]["g"].shape == (2 * 6 + 6 + 1, 1)
     # 7 (initial) + 7 (target) + 1 (max_duration scale) = 15 parameter slots.
     assert captured["nlp"]["p"].shape == (7 + 7 + 1, 1)
     assert len(lbw) == len(ubw) == 2 * 3 + 2 * 6 + 1

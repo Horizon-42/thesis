@@ -103,6 +103,14 @@ This is a thesis research project. Key aviation concepts in the code:
 
 The project serves dual purposes: thesis visualization/validation, and reusable research component library.
 
+## Coding Conventions
+
+**Minimise defensive / patch-like code.** Prefer clear contracts over scattered guards.
+
+- Don't sprinkle `if x is not None` / `try/except` / fallback branches to handle inputs that shouldn't occur. Instead: give the parameter a sensible **default**, or make it **required** — pick one. Validate once at the boundary if validation is truly needed; otherwise let it fail loudly (consistent with "fail loudly if data is missing").
+- No band-aids that paper over a root cause. If something is wrong upstream, fix it upstream rather than adding a downstream workaround (e.g. fix the parser, not the consumer).
+- Keep the happy path linear and readable; a single explicit assumption beats many repeated `None`/empty checks for the same condition.
+
 ## Changelog
 
 ### 2026-06-22 — Dense-state direct collocation (control N, state N·M); remove polish

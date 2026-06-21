@@ -192,6 +192,10 @@ def _decision_to_geodetic_state(row: np.ndarray, mass: float) -> GeodeticState:
 _TARGET_STATE_STEP_S = 3.0
 _MAX_STATE_SUBSTEPS = 16
 
+# Terminal realised-bank cap (degrees), always applied. Set generously high
+# (e.g. 89) at construction to effectively disable it.
+_DEFAULT_MAX_TERMINAL_BANK_DEG = 5.0
+
 
 def select_state_substeps(max_duration: float, segment_num: int) -> int:
     """Pick M so the state step ``T/(N*M)`` is about ``_TARGET_STATE_STEP_S``.
@@ -242,6 +246,31 @@ def _build_collocation_decision(
     return seg_controls, state_nodes, defects
 
 
+_G = 9.81  # gravity (m/s^2), matches the dynamics model
+
+
+def terminal_bank_constraint_expr(state_nodes, start_state, state_h, max_bank_rad):
+    """Bound the realised coordinated bank at the terminal, from STATE only.
+
+    Bank angle is the control ``mu`` in this model, but the *realised* bank in
+    a coordinated turn is fixed by how fast the heading turns:
+    ``tan(mu) = V cos(gamma) * psi_dot / g``.  We reconstruct ``psi_dot`` at
+    the terminal from the last two STATE sub-nodes (``Δpsi / state_h``) — so
+    this is a pure state constraint, never touching the control ``mu``.
+
+    Returns ``(expr, lb, ub)`` for the scalar inequality ``lb <= expr <= ub``
+    with ``expr = V·cos(gamma)·psi_dot = g·tan(mu_eff)`` and
+    ``|expr| <= g·tan(max_bank)`` — i.e. ``|mu_eff| <= max_bank``.  Keeping
+    ``expr`` in the ``g·tan`` form avoids an ``atan`` in the NLP.
+    """
+    terminal = state_nodes[-1]
+    prev = state_nodes[-2] if len(state_nodes) >= 2 else start_state[:STATE_DIM]
+    psi_dot = (terminal[_PSI] - prev[_PSI]) / state_h
+    expr = terminal[_V] * ca.cos(terminal[_GAMMA]) * psi_dot
+    bound = _G * math.tan(max_bank_rad)
+    return expr, -bound, bound
+
+
 def _scaled_control_cost(seg_controls, aircraft_meta):
     """Mean squared scaled control effort over the N control segments."""
     scale_thrust = aircraft_meta['max_thrust']
@@ -266,6 +295,7 @@ def make_direct_collocation_solver(
     aero_params_obj: AeroParams,
     aircraft_meta: dict,
     sub_steps: int = 1,
+    max_terminal_bank_deg: float = _DEFAULT_MAX_TERMINAL_BANK_DEG,
 ):
     """Build the Hermite-Simpson NLP symbolically.
 
@@ -273,6 +303,10 @@ def make_direct_collocation_solver(
     parameters so the same compiled solver can serve every optimisation
     request without rebuilding.  This matches the strategy used in
     ``casadi_optimizer.make_multiple_shooting_solver``.
+
+    A terminal inequality keeps the *realised* bank at the final node below
+    ``max_terminal_bank_deg`` — a pure state constraint (see
+    ``terminal_bank_constraint_expr``).
     """
     # 1. Continuous geodetic RHS reused from the simulator.  There is
     # no second dynamics model to keep in sync, and no tangent plane.
@@ -319,9 +353,16 @@ def make_direct_collocation_solver(
     lbw = control_lb * segment_num + state_lb * len(state_nodes)
     ubw = control_ub * segment_num + state_ub * len(state_nodes)
 
-    g = ca.vertcat(*defects)
-    lbg = [0.0] * g.shape[0]
-    ubg = [0.0] * g.shape[0]
+    # Equality defects (lbg = ubg = 0) plus the terminal bank inequality
+    # (finite two-sided bounds), appended last.
+    bank_expr, bank_lb, bank_ub = terminal_bank_constraint_expr(
+        state_nodes, start_state, segment_h / sub_steps,
+        math.radians(max_terminal_bank_deg),
+    )
+    g = ca.vertcat(*defects, bank_expr)
+    n_defect_rows = STATE_DIM * len(defects)
+    lbg = [0.0] * n_defect_rows + [bank_lb]
+    ubg = [0.0] * n_defect_rows + [bank_ub]
 
     # 6. Objective: minimise mean squared scaled control effort so the NLP
     # stays well-posed when arrival time is fixed.
@@ -360,6 +401,7 @@ def make_direct_collocation_solver_free_time(
     aircraft_meta: dict,
     time_regularization: float = _DEFAULT_TIME_REGULARIZATION,
     sub_steps: int = 1,
+    max_terminal_bank_deg: float = _DEFAULT_MAX_TERMINAL_BANK_DEG,
 ):
     """Build the Hermite-Simpson NLP with ``T`` as a decision variable.
 
@@ -367,6 +409,10 @@ def make_direct_collocation_solver_free_time(
     dominates (the regularisation is a tie-breaker that keeps the
     control profile from drifting along an arbitrary null-space when
     several controls reach the same arrival time).
+
+    The terminal realised-bank inequality is the same as the fixed-time
+    builder; here ``state_h`` depends on the decision variable ``T``, which
+    IPOPT differentiates through.
     """
     # 1. Same continuous geodetic RHS as the fixed-time NLP.
     model = make_geodetic_dynamics_model()
@@ -420,9 +466,16 @@ def make_direct_collocation_solver_free_time(
     lbw = control_lb * segment_num + state_lb * len(state_nodes) + [duration_lb]
     ubw = control_ub * segment_num + state_ub * len(state_nodes) + [duration_ub]
 
-    g = ca.vertcat(*defects)
-    lbg = [0.0] * g.shape[0]
-    ubg = [0.0] * g.shape[0]
+    # Equality defects (lbg = ubg = 0) plus the terminal bank inequality.
+    # state_h = segment_h / sub_steps depends on the decision variable T here.
+    bank_expr, bank_lb, bank_ub = terminal_bank_constraint_expr(
+        state_nodes, start_state, segment_h / sub_steps,
+        math.radians(max_terminal_bank_deg),
+    )
+    g = ca.vertcat(*defects, bank_expr)
+    n_defect_rows = STATE_DIM * len(defects)
+    lbg = [0.0] * n_defect_rows + [bank_lb]
+    ubg = [0.0] * n_defect_rows + [bank_ub]
 
     # 6. Objective.  Time dominates; control effort is a small regulariser.
     # Both terms are non-dimensional so IPOPT sees a well-scaled gradient.
@@ -452,10 +505,20 @@ class CasadiDirectCollocationOptimizer:
     can substitute either optimiser behind the same call shape.
     """
 
-    def __init__(self, n_segments: int, dt: float, max_duration: float, aircraft: AircraftSpec):
+    def __init__(
+        self,
+        n_segments: int,
+        dt: float,
+        max_duration: float,
+        aircraft: AircraftSpec,
+        max_terminal_bank_deg: float = _DEFAULT_MAX_TERMINAL_BANK_DEG,
+    ):
         if n_segments < 2:
             raise ValueError("n_segments must be at least 2 for direct collocation")
         self.n_segments = n_segments
+        # Keep the realised bank at the terminal node below this angle (a
+        # pure state constraint).
+        self.max_terminal_bank_deg = max_terminal_bank_deg
         # ``dt`` is accepted for API parity with the multiple-shooting
         # optimiser.  Control stays piecewise-constant over ``n_segments``;
         # dynamics fidelity comes from collocating the state on a finer
@@ -486,6 +549,7 @@ class CasadiDirectCollocationOptimizer:
                 aero_params_obj=self.aero_params,
                 aircraft_meta=aircraft_meta,
                 sub_steps=self.state_substeps,
+                max_terminal_bank_deg=max_terminal_bank_deg,
             )
         )
 
@@ -504,6 +568,7 @@ class CasadiDirectCollocationOptimizer:
             aero_params_obj=self.aero_params,
             aircraft_meta=aircraft_meta,
             sub_steps=self.state_substeps,
+            max_terminal_bank_deg=max_terminal_bank_deg,
         )
 
     # ------------------------------------------------------------------
