@@ -21,3 +21,10 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 def distance_nm(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Great-circle distance in nautical miles."""
     return haversine_km(lat1, lon1, lat2, lon2) / KM_PER_NM
+
+
+def bounds_from_radius_km(lat: float, lon: float, radius_km: float) -> tuple[float, float, float, float]:
+    """Bounding box of +/- ``radius_km`` around a point, as west, south, east, north."""
+    dlat = radius_km / 110.574
+    dlon = radius_km / (111.320 * math.cos(math.radians(lat)))
+    return (lon - dlon, lat - dlat, lon + dlon, lat + dlat)

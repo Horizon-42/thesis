@@ -38,6 +38,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--start", default=None, help="Scan backward from this UTC time (ISO, default: now)")
     p.add_argument("--max-lookback-days", type=float, default=30.0)
     p.add_argument("--chunk-hours", type=float, default=6.0)
+    p.add_argument("--bbox-radius-km", type=float, default=30.0, help="Terminal-area query box radius around the airport")
     p.add_argument("--runway-threshold-radius-m", type=float, default=1000.0)
     p.add_argument("--output-root", default=str(here / "outputs" / "landings"))
     p.add_argument("--overwrite", action="store_true", help="Refetch from scratch instead of resuming existing files")
@@ -85,7 +86,7 @@ def main() -> None:
 
     first = next(profile for profile, _t, _p, needs in plans if needs)
     print("[landings] preflight: checking OpenSky history access...", flush=True)
-    check_history_access(airport=first.code, reference=start)
+    check_history_access(profile=first, reference=start, bbox_radius_km=args.bbox_radius_km)
 
     summary: dict[str, dict[str, int]] = {}
     for profile, thresholds, preloaded, needs_work in plans:
@@ -104,6 +105,7 @@ def main() -> None:
             start=start,
             max_lookback_days=args.max_lookback_days,
             chunk_hours=args.chunk_hours,
+            bbox_radius_km=args.bbox_radius_km,
             runway_threshold_radius_m=args.runway_threshold_radius_m,
             preloaded=None if args.overwrite else preloaded,
         )

@@ -4,6 +4,11 @@ This is the reusable engine behind ``download_landings.py``. For one airport it
 issues a single history query per time chunk and reuses the resulting trajectories
 for every threshold, scanning backward in time until each threshold has the
 requested number of landings (or a maximum lookback is reached).
+
+Queries use a bounding box around the airport (``bbox_radius_km``) rather than the
+full-track airport join, so only terminal-area state vectors are downloaded. Landing
+detection keys off runway-heading alignment and descent geometry, not the flight's
+arrival-airport metadata, so the bbox query (which omits that metadata) is sufficient.
 """
 
 from __future__ import annotations
@@ -21,10 +26,13 @@ if __package__ is None or __package__ == "":  # pragma: no cover - direct execut
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from trajectory_data_process.acquisition.airports import AirportProfile
-from trajectory_data_process.acquisition.opensky_history import AIRPORT_HISTORY_COLUMNS, fetch_history_dataframe
+from trajectory_data_process.acquisition.opensky_history import STATE_VECTOR_COLUMNS, fetch_history_dataframe
 from trajectory_data_process.acquisition.runways import RunwayThreshold
+from trajectory_data_process.geo import bounds_from_radius_km
 from trajectory_data_process.processing.czml_export import trajectories_to_czml_input
 from trajectory_data_process.trajectory import build_trajectories_from_history
+
+DEFAULT_BBOX_RADIUS_KM = 30.0
 
 FetchHistory = Callable[..., pd.DataFrame]
 
@@ -59,23 +67,24 @@ def iter_airport_entries(config: dict[str, Any]) -> list[tuple[AirportProfile, l
 
 def check_history_access(
     *,
-    airport: str,
+    profile: AirportProfile,
     reference: datetime,
+    bbox_radius_km: float = DEFAULT_BBOX_RADIUS_KM,
     fetch_history_fn: FetchHistory = fetch_history_dataframe,
 ) -> None:
     """Run one tiny probe query so a whole run fails fast on missing access.
 
-    Uses the same airport-join query shape as the real download over a 1-minute
-    window two days before ``reference``. Raises the wrapped, actionable error if
-    credentials or historical-data access are missing; returns on success.
+    Uses the same bbox query shape as the real download over a 1-minute window two
+    days before ``reference``. Raises the wrapped, actionable error if credentials or
+    historical-data access are missing; returns on success.
     """
     stop = reference - timedelta(days=2)
     start = stop - timedelta(minutes=1)
     fetch_history_fn(
         start=start,
         stop=stop,
-        airport=airport,
-        selected_columns=AIRPORT_HISTORY_COLUMNS,
+        bounds=bounds_from_radius_km(profile.lat, profile.lon, bbox_radius_km),
+        selected_columns=STATE_VECTOR_COLUMNS,
         cached=True,
     )
 
@@ -88,6 +97,7 @@ def download_airport_landings(
     start: datetime,
     max_lookback_days: float,
     chunk_hours: float = 6.0,
+    bbox_radius_km: float = DEFAULT_BBOX_RADIUS_KM,
     runway_threshold_radius_m: float = 1000.0,
     approach_window_min: int = 25,
     segment_gap_sec: int = 900,
@@ -97,12 +107,14 @@ def download_airport_landings(
 ) -> dict[str, list[dict[str, Any]]]:
     """Collect up to ``count`` landings for each threshold, scanning backward.
 
+    Each chunk is fetched as a ``bbox_radius_km`` box around the airport.
     ``preloaded`` seeds already-collected flights per threshold (for resume): a
     threshold already at ``count`` triggers no queries, and new landings are
     de-duplicated against the preloaded ones. Returns a mapping of runway-threshold
     ident to a list of CZML-input flights.
     """
     preloaded = preloaded or {}
+    bounds = bounds_from_radius_km(profile.lat, profile.lon, bbox_radius_km)
     collected: dict[str, list[dict[str, Any]]] = {
         t.ident: list(preloaded.get(t.ident, []))[:count] for t in thresholds
     }
@@ -123,8 +135,8 @@ def download_airport_landings(
         df = fetch_history_fn(
             start=chunk_start,
             stop=cursor,
-            airport=profile.code,
-            selected_columns=AIRPORT_HISTORY_COLUMNS,
+            bounds=bounds,
+            selected_columns=STATE_VECTOR_COLUMNS,
             cached=cached,
         )
         trajectories = build_trajectories_from_history(df, max_gap_sec=segment_gap_sec)

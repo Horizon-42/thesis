@@ -43,9 +43,11 @@ class _StubFetch:
         self.df = df
         self.always = always
         self.calls = 0
+        self.last_kwargs: dict = {}
 
-    def __call__(self, **_kwargs) -> pd.DataFrame:
+    def __call__(self, **kwargs) -> pd.DataFrame:
         self.calls += 1
+        self.last_kwargs = kwargs
         if self.always or self.calls == 1:
             return self.df.copy()
         return pd.DataFrame(columns=list(self.df.columns))
@@ -102,20 +104,37 @@ class ResumeTests(unittest.TestCase):
         self.assertEqual(collected["23R"][0]["icao24"], "old1")
 
 
+class BboxQueryTests(unittest.TestCase):
+    def test_download_uses_bbox_not_airport_join(self) -> None:
+        fetch = _StubFetch(_landing_df())
+
+        download_airport_landings(
+            profile=PROFILE, thresholds=[THRESHOLD], count=1, start=START,
+            max_lookback_days=1.0, bbox_radius_km=30.0, fetch_history_fn=fetch,
+        )
+
+        self.assertIn("bounds", fetch.last_kwargs)
+        self.assertNotIn("airport", fetch.last_kwargs)
+        west, south, east, north = fetch.last_kwargs["bounds"]
+        self.assertLess(west, PROFILE.lon)  # box brackets the airport centre
+        self.assertGreater(north, PROFILE.lat)
+
+
 class PreflightTests(unittest.TestCase):
     def test_probes_once_and_returns_on_success(self) -> None:
         fetch = _StubFetch(_landing_df(), always=True)
 
-        check_history_access(airport="KRDU", reference=START, fetch_history_fn=fetch)
+        check_history_access(profile=PROFILE, reference=START, fetch_history_fn=fetch)
 
         self.assertEqual(fetch.calls, 1)
+        self.assertIn("bounds", fetch.last_kwargs)
 
     def test_propagates_access_error(self) -> None:
         def denied(**_kwargs):
             raise RuntimeError("OpenSky history query was denied (PERMISSION_DENIED).")
 
         with self.assertRaises(RuntimeError):
-            check_history_access(airport="KRDU", reference=START, fetch_history_fn=denied)
+            check_history_access(profile=PROFILE, reference=START, fetch_history_fn=denied)
 
 
 class ConfigLoaderTests(unittest.TestCase):

@@ -158,10 +158,14 @@ python trajectory_data_process/download_landings.py --count 30 --airports KRDU K
   --max-lookback-days 60
 ```
 
-For each airport it issues **one history query per time chunk** and reuses the
-trajectories for all of that airport's thresholds, scanning backward from `--start`
-(default: now) in `--chunk-hours` steps until each threshold has `--count` landings or
-`--max-lookback-days` is reached. A trajectory counts as a landing at a threshold when
+For each airport it issues **one history query per time chunk** — a bounding box of
+`--bbox-radius-km` (default 30 km) around the airport — and reuses the trajectories for
+all of that airport's thresholds, scanning backward from `--start` (default: now) in
+`--chunk-hours` steps until each threshold has `--count` landings or
+`--max-lookback-days` is reached. The bbox query downloads only terminal-area state
+vectors (≈80% fewer rows than the full-track airport join) and, because it is purely
+geometric, also catches arrivals whose `estarrival` metadata is missing or wrong.
+Landing flight records therefore have `arr_airport`/`dep_airport` set to `null`. A trajectory counts as a landing at a threshold when
 its closest point passes within `--runway-threshold-radius-m` of the threshold while
 **tracking the runway heading** and having **descended** from earlier in the track.
 The heading test picks the correct runway end and the descent test excludes climbing
