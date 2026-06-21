@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
+import type { RnavInitialFixCandidate } from "../../data/rnavInitialFixCandidates";
 import type { PilotAircraftConfig, PilotResetState } from "../../pilot/pilotClient";
 import PilotInitialStateOverlay from "../PilotInitialStateOverlay";
 
@@ -52,6 +53,26 @@ const aircraftConfigs: PilotAircraftConfig[] = [
   },
 ];
 
+const rnavInitialFixCandidates: RnavInitialFixCandidate[] = [
+  {
+    key: "KRDU-R05LY-RW05L|branch:R|fix:SCHOO|fix:WEPAS|914.4",
+    runwayIdent: "RW05L",
+    procedureUid: "KRDU-R05LY-RW05L",
+    procedureIdent: "R05LY",
+    chartName: "RNAV(GPS) Y RWY 05L",
+    branchId: "branch:R",
+    branchIdent: "R",
+    fixId: "fix:SCHOO",
+    fixIdent: "SCHOO",
+    nextFixId: "fix:WEPAS",
+    nextFixIdent: "WEPAS",
+    lon: -78.92647222,
+    lat: 35.77341389,
+    altM: 914.4,
+    headingDeg: 39.1,
+  },
+];
+
 describe("PilotInitialStateOverlay", () => {
   it("renders initial aircraft controls outside the flight ops panel flow", () => {
     const { container } = renderOverlay();
@@ -83,6 +104,31 @@ describe("PilotInitialStateOverlay", () => {
     expect(onAircraftTypeChange).toHaveBeenCalledWith("B77W");
   });
 
+  it("can list RNAV IF candidates for trajectory initial placement", () => {
+    const onRnavInitialFixChange = vi.fn();
+    renderOverlay({
+      rnavInitialFixCandidates,
+      onRnavInitialFixChange,
+    });
+
+    const select = screen.getByRole("combobox", { name: "RNAV IF" });
+    expect(select.textContent).toContain("SCHOO to WEPAS | R05LY | R | 914.4 m");
+
+    fireEvent.change(select, {
+      target: { value: rnavInitialFixCandidates[0].key },
+    });
+
+    expect(onRnavInitialFixChange).toHaveBeenCalledWith(
+      rnavInitialFixCandidates[0].key,
+    );
+  });
+
+  it("hides RNAV IF controls when no candidates are provided", () => {
+    renderOverlay();
+
+    expect(screen.queryByRole("combobox", { name: "RNAV IF" })).toBeNull();
+  });
+
   it("can display the backend-configured mass for the selected aircraft type", () => {
     function Wrapper() {
       const [state, setState] = useState(defaultState);
@@ -93,10 +139,13 @@ describe("PilotInitialStateOverlay", () => {
           isPlacing={false}
           state={state}
           aircraftConfigs={aircraftConfigs}
+          rnavInitialFixCandidates={[]}
+          selectedRnavInitialFixKey=""
           disabled={false}
           onClose={vi.fn()}
           onPlaceToggle={vi.fn()}
           onFieldChange={vi.fn()}
+          onRnavInitialFixChange={vi.fn()}
           onAircraftTypeChange={(aircraftType) => {
             const aircraft = aircraftConfigs.find((config) => config.code === aircraftType);
             if (!aircraft) return;
@@ -198,9 +247,15 @@ describe("PilotInitialStateOverlay", () => {
 function renderOverlay({
   onFieldChange = vi.fn(),
   onAircraftTypeChange = vi.fn(),
+  onRnavInitialFixChange = vi.fn(),
+  rnavInitialFixCandidates = [],
+  selectedRnavInitialFixKey = "",
 }: {
   onFieldChange?: ReturnType<typeof vi.fn>;
   onAircraftTypeChange?: ReturnType<typeof vi.fn>;
+  onRnavInitialFixChange?: ReturnType<typeof vi.fn>;
+  rnavInitialFixCandidates?: RnavInitialFixCandidate[];
+  selectedRnavInitialFixKey?: string;
 } = {}) {
   return render(
     <PilotInitialStateOverlay
@@ -208,11 +263,14 @@ function renderOverlay({
       isPlacing={false}
       state={defaultState}
       aircraftConfigs={aircraftConfigs}
+      rnavInitialFixCandidates={rnavInitialFixCandidates}
+      selectedRnavInitialFixKey={selectedRnavInitialFixKey}
       disabled={false}
       onClose={vi.fn()}
       onPlaceToggle={vi.fn()}
       onFieldChange={onFieldChange}
       onAircraftTypeChange={onAircraftTypeChange}
+      onRnavInitialFixChange={onRnavInitialFixChange}
     />,
   );
 }

@@ -5,6 +5,7 @@ import {
   type PilotAircraftType,
   type PilotResetState,
 } from "../pilot/pilotClient";
+import type { RnavInitialFixCandidate } from "../data/rnavInitialFixCandidates";
 
 const UNBOUNDED_MIN = Number.NEGATIVE_INFINITY;
 const UNBOUNDED_MAX = Number.POSITIVE_INFINITY;
@@ -20,6 +21,8 @@ interface PilotInitialStateOverlayProps {
   isPlacing: boolean;
   state: PilotResetState;
   aircraftConfigs: PilotAircraftConfig[];
+  rnavInitialFixCandidates: RnavInitialFixCandidate[];
+  selectedRnavInitialFixKey: string;
   disabled: boolean;
   onClose: () => void;
   onPlaceToggle: () => void;
@@ -30,6 +33,7 @@ interface PilotInitialStateOverlayProps {
     max: number,
   ) => void;
   onAircraftTypeChange: (aircraftType: PilotAircraftType) => void;
+  onRnavInitialFixChange: (candidateKey: string) => void;
 }
 
 interface EnglishNumberInputProps {
@@ -46,11 +50,14 @@ export default function PilotInitialStateOverlay({
   isPlacing,
   state,
   aircraftConfigs,
+  rnavInitialFixCandidates,
+  selectedRnavInitialFixKey,
   disabled,
   onClose,
   onPlaceToggle,
   onFieldChange,
   onAircraftTypeChange,
+  onRnavInitialFixChange,
 }: PilotInitialStateOverlayProps) {
   if (!open) return null;
 
@@ -83,6 +90,24 @@ export default function PilotInitialStateOverlay({
         </section>
 
         <section className="pilot-initial-fields" aria-label="Initial state values">
+          {rnavInitialFixCandidates.length > 0 ? (
+            <label>
+              <span>RNAV IF</span>
+              <select
+                className="pilot-select-input"
+                value={selectedRnavInitialFixKey}
+                disabled={disabled}
+                onChange={(event) => onRnavInitialFixChange(event.target.value)}
+              >
+                <option value="">Manual</option>
+                {rnavInitialFixCandidates.map((candidate) => (
+                  <option key={candidate.key} value={candidate.key}>
+                    {formatRnavInitialFixLabel(candidate)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <label>
             <span>Type</span>
             <select
@@ -236,6 +261,15 @@ export function EnglishNumberInput({
 
 export function formatNumberInputValue(value: number): string {
   return Number(value.toFixed(6)).toString();
+}
+
+function formatRnavInitialFixLabel(candidate: RnavInitialFixCandidate): string {
+  return [
+    `${candidate.fixIdent} to ${candidate.nextFixIdent}`,
+    candidate.procedureIdent,
+    candidate.branchIdent,
+    `${formatNumberInputValue(candidate.altM)} m`,
+  ].join(" | ");
 }
 
 function parseEnglishNumber(value: string): number | null {

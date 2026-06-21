@@ -94,6 +94,12 @@ vi.mock("cesium", () => ({
   PolygonGraphics: class PolygonGraphics {
     constructor(public options: unknown) {}
   },
+  PolylineDashMaterialProperty: class PolylineDashMaterialProperty {
+    constructor(public options: unknown) {}
+  },
+  PolylineGraphics: class PolylineGraphics {
+    constructor(public options: unknown) {}
+  },
   Color: {
     WHITE: "white",
     BLACK: "black",
@@ -210,13 +216,48 @@ describe("usePilotInitialPlacement", () => {
       { initialProps: props },
     );
 
-    expect(addEntity).toHaveBeenCalledTimes(2);
+    expect(addEntity).toHaveBeenCalledTimes(3);
+    expect(addEntity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "pilot-initial-placement-aircraft",
+        model: expect.objectContaining({
+          minimumPixelSize: 54,
+          color: "color",
+          colorBlendAmount: 0.5,
+          silhouetteColor: "color",
+          silhouetteSize: 2.5,
+        }),
+      }),
+    );
+    expect(addEntity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "pilot-initial-placement-ground-point",
+        point: expect.objectContaining({
+          pixelSize: 17,
+          outlineWidth: 4,
+          heightReference: "CLAMP_TO_GROUND",
+        }),
+      }),
+    );
+    expect(addEntity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "pilot-initial-placement-drop-line",
+        polyline: expect.objectContaining({
+          positions: [
+            { lon: -78.7873, lat: 35.878659, alt: 0 },
+            { lon: -78.7873, lat: 35.878659, alt: 1000 },
+          ],
+          width: 2.5,
+          material: expect.any(Object),
+        }),
+      }),
+    );
 
     rerender({ ...props, enabled: false, previewVisible: true });
     expect(removeEntity).not.toHaveBeenCalled();
 
     rerender({ ...props, enabled: false, previewVisible: false });
-    expect(removeEntity).toHaveBeenCalledTimes(2);
+    expect(removeEntity).toHaveBeenCalledTimes(3);
     expect(requestRender).toHaveBeenCalled();
   });
 

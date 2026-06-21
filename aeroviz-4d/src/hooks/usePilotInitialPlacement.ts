@@ -30,6 +30,7 @@ interface UsePilotInitialPlacementOptions {
 
 const PLACEMENT_AIRCRAFT_ID = "pilot-initial-placement-aircraft";
 const PLACEMENT_GROUND_POINT_ID = "pilot-initial-placement-ground-point";
+const PLACEMENT_DROP_LINE_ID = "pilot-initial-placement-drop-line";
 const PLACEMENT_GUIDANCE_ID = "pilot-initial-placement-guidance";
 const METRES_PER_NAUTICAL_MILE = 1852;
 const EARTH_RADIUS_M = 6_378_137;
@@ -46,6 +47,7 @@ export function usePilotInitialPlacement({
   const { viewer, setSelectedFlightId } = useApp();
   const aircraftRef = useRef<Cesium.Entity | null>(null);
   const groundPointRef = useRef<Cesium.Entity | null>(null);
+  const dropLineRef = useRef<Cesium.Entity | null>(null);
   const guidanceRef = useRef<Cesium.Entity | null>(null);
   const isDraggingRef = useRef(false);
   const callbacksRef = useRef({ onPositionChange, onFinish, onCancel });
@@ -56,11 +58,17 @@ export function usePilotInitialPlacement({
 
   useEffect(() => {
     if (!previewVisible || !isCesiumViewerUsable(viewer)) {
-      removePlacementPreview(viewer, aircraftRef, groundPointRef);
+      removePlacementPreview(viewer, aircraftRef, groundPointRef, dropLineRef);
       return;
     }
 
-    updatePlacementPreview(viewer, initialState, aircraftRef, groundPointRef);
+    updatePlacementPreview(
+      viewer,
+      initialState,
+      aircraftRef,
+      groundPointRef,
+      dropLineRef,
+    );
     viewer.scene.requestRender();
   }, [initialState, previewVisible, viewer]);
 
@@ -161,7 +169,7 @@ export function usePilotInitialPlacement({
 
   useEffect(() => {
     return () => {
-      removePlacementPreview(viewer, aircraftRef, groundPointRef);
+      removePlacementPreview(viewer, aircraftRef, groundPointRef, dropLineRef);
       removePlacementGuidance(viewer, guidanceRef);
     };
   }, [viewer]);
@@ -207,8 +215,10 @@ function updatePlacementPreview(
   state: PilotResetState,
   aircraftRef: MutableRefObject<Cesium.Entity | null>,
   groundPointRef: MutableRefObject<Cesium.Entity | null>,
+  dropLineRef: MutableRefObject<Cesium.Entity | null>,
 ): void {
   const aircraftPosition = Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.altM);
+  const groundPosition = Cesium.Cartesian3.fromDegrees(state.lon, state.lat, 0);
   const orientation = Cesium.Transforms.headingPitchRollQuaternion(
     aircraftPosition,
     new Cesium.HeadingPitchRoll(
@@ -227,11 +237,13 @@ function updatePlacementPreview(
       model: {
         uri: "/models/aircraft.glb",
         scale: 3.0,
-        minimumPixelSize: 42,
+        minimumPixelSize: 54,
         maximumScale: 20_000,
-        color: Cesium.Color.fromCssColorString("#facc15").withAlpha(0.86),
+        color: Cesium.Color.fromCssColorString("#38bdf8").withAlpha(0.92),
         colorBlendMode: Cesium.ColorBlendMode.MIX,
-        colorBlendAmount: 0.34,
+        colorBlendAmount: 0.5,
+        silhouetteColor: Cesium.Color.fromCssColorString("#e0f2fe").withAlpha(0.96),
+        silhouetteSize: 2.5,
         runAnimations: true,
       },
       label: {
@@ -252,17 +264,16 @@ function updatePlacementPreview(
     aircraftRef.current.show = true;
   }
 
-  const groundPosition = Cesium.Cartesian3.fromDegrees(state.lon, state.lat, 0);
   if (!groundPointRef.current) {
     groundPointRef.current = viewer.entities.add({
       id: PLACEMENT_GROUND_POINT_ID,
       name: "Pilot Initial Ground Point",
       position: groundPosition,
       point: {
-        pixelSize: 11,
-        color: Cesium.Color.fromCssColorString("#22d3ee"),
+        pixelSize: 17,
+        color: Cesium.Color.fromCssColorString("#0ea5e9").withAlpha(0.96),
         outlineColor: Cesium.Color.WHITE,
-        outlineWidth: 2,
+        outlineWidth: 4,
         heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
@@ -271,16 +282,51 @@ function updatePlacementPreview(
     groundPointRef.current.position = new Cesium.ConstantPositionProperty(groundPosition);
     groundPointRef.current.show = true;
   }
+
+  if (!dropLineRef.current) {
+    dropLineRef.current = viewer.entities.add({
+      id: PLACEMENT_DROP_LINE_ID,
+      name: "Pilot Initial Aircraft Ground Link",
+      polyline: {
+        positions: [groundPosition, aircraftPosition],
+        width: 2.5,
+        material: new Cesium.PolylineDashMaterialProperty({
+          color: Cesium.Color.fromCssColorString("#7dd3fc").withAlpha(0.92),
+          dashLength: 12,
+        }),
+        depthFailMaterial: new Cesium.PolylineDashMaterialProperty({
+          color: Cesium.Color.fromCssColorString("#bae6fd").withAlpha(0.82),
+          dashLength: 12,
+        }),
+      },
+    });
+  } else {
+    dropLineRef.current.polyline = new Cesium.PolylineGraphics({
+      positions: [groundPosition, aircraftPosition],
+      width: 2.5,
+      material: new Cesium.PolylineDashMaterialProperty({
+        color: Cesium.Color.fromCssColorString("#7dd3fc").withAlpha(0.92),
+        dashLength: 12,
+      }),
+      depthFailMaterial: new Cesium.PolylineDashMaterialProperty({
+        color: Cesium.Color.fromCssColorString("#bae6fd").withAlpha(0.82),
+        dashLength: 12,
+      }),
+    });
+    dropLineRef.current.show = true;
+  }
 }
 
 function removePlacementPreview(
   viewer: Cesium.Viewer | null,
   aircraftRef: MutableRefObject<Cesium.Entity | null>,
   groundPointRef: MutableRefObject<Cesium.Entity | null>,
+  dropLineRef: MutableRefObject<Cesium.Entity | null>,
 ): void {
   if (!isCesiumViewerUsable(viewer)) {
     aircraftRef.current = null;
     groundPointRef.current = null;
+    dropLineRef.current = null;
     return;
   }
 
@@ -291,6 +337,10 @@ function removePlacementPreview(
   if (groundPointRef.current) {
     viewer.entities.remove(groundPointRef.current);
     groundPointRef.current = null;
+  }
+  if (dropLineRef.current) {
+    viewer.entities.remove(dropLineRef.current);
+    dropLineRef.current = null;
   }
   viewer.scene.requestRender();
 }

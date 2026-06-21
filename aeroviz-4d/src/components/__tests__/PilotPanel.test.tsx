@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => ({
   resetPilotSimulation: vi.fn(),
   stepPilotSimulation: vi.fn(),
   fetchRunwayThresholdTargets: vi.fn(),
+  fetchRnavInitialFixCandidates: vi.fn(),
   runTrajectoryOptimization: vi.fn(),
   usePilotAircraft: vi.fn(),
   usePilotInitialPlacement: vi.fn(),
@@ -71,6 +72,10 @@ vi.mock("../../data/runwayThresholdTargets", () => ({
   fetchRunwayThresholdTargets: mocks.fetchRunwayThresholdTargets,
 }));
 
+vi.mock("../../data/rnavInitialFixCandidates", () => ({
+  fetchRnavInitialFixCandidates: mocks.fetchRnavInitialFixCandidates,
+}));
+
 vi.mock("../../pilot/trajectoryOptimizationClient", () => ({
   runTrajectoryOptimization: mocks.runTrajectoryOptimization,
 }));
@@ -90,6 +95,25 @@ describe("PilotPanel trajectory play mode", () => {
         lat: 35.874,
         altM: 111.86,
         psiDeg: 45,
+      },
+    ]);
+    mocks.fetchRnavInitialFixCandidates.mockResolvedValue([
+      {
+        key: "KRDU-R05LY-RW05L|branch:R|fix:SCHOO|fix:WEPAS|914.4",
+        runwayIdent: "RW05L",
+        procedureUid: "KRDU-R05LY-RW05L",
+        procedureIdent: "R05LY",
+        chartName: "RNAV(GPS) Y RWY 05L",
+        branchId: "branch:R",
+        branchIdent: "R",
+        fixId: "fix:SCHOO",
+        fixIdent: "SCHOO",
+        nextFixId: "fix:WEPAS",
+        nextFixIdent: "WEPAS",
+        lon: -78.92647222,
+        lat: 35.77341389,
+        altM: 914.4,
+        headingDeg: 39.1,
       },
     ]);
     mocks.runTrajectoryOptimization.mockResolvedValue({
@@ -271,6 +295,26 @@ describe("PilotPanel trajectory play mode", () => {
         }),
       });
     });
+    await waitFor(() => {
+      expect(mocks.fetchRnavInitialFixCandidates).toHaveBeenCalledWith(
+        "KRDU",
+        "RW05L",
+      );
+    });
+
+    const initialSummary = screen.getByLabelText("Initial aircraft state summary");
+    fireEvent.click(within(initialSummary).getByRole("button", { name: "Edit" }));
+    const initialEditor = await screen.findByLabelText("Initial aircraft setup");
+    const rnavIfSelect = within(initialEditor).getByRole("combobox", {
+      name: "RNAV IF",
+    });
+    expect(rnavIfSelect.textContent).toContain(
+      "SCHOO to WEPAS | R05LY | R | 914.4 m",
+    );
+    fireEvent.change(rnavIfSelect, {
+      target: { value: "KRDU-R05LY-RW05L|branch:R|fix:SCHOO|fix:WEPAS|914.4" },
+    });
+    fireEvent.click(within(initialEditor).getByRole("button", { name: "Close" }));
 
     const targetSummary = screen.getByLabelText("Target aircraft state summary");
     fireEvent.click(within(targetSummary).getByRole("button", { name: "Edit" }));
@@ -297,29 +341,36 @@ describe("PilotPanel trajectory play mode", () => {
     fireEvent.click(screen.getByRole("button", { name: "Optimize" }));
 
     await waitFor(() => {
-      expect(mocks.runTrajectoryOptimization).toHaveBeenCalledWith({
-        optimizer: "warmStartTranscription",
-        initialState: expect.objectContaining({
-          lon: -78.7873,
-          lat: 35.878659,
-          massKg: 78000,
-          aircraftType: "A320",
-        }),
-        targetState: expect.objectContaining({
-          lon: -78.802,
-          lat: 35.874,
-          altM: targetAltitudeMForThreshold(111.86, a320Config),
-          speedMps: knotsToMetresPerSecond(a320Config.terminalSpeedKt),
-          headingDeg: 45,
-          flightPathDeg: -4,
-          aircraftType: "A320",
-        }),
-        nSegments: 12,
-        arrivalTimeS: 96,
-        dtS: 0.1,
-        maxIterations: 300,
-      });
+      expect(mocks.runTrajectoryOptimization).toHaveBeenCalled();
     });
+    const calls = mocks.runTrajectoryOptimization.mock.calls;
+    const request = calls[calls.length - 1]?.[0];
+    expect(request).toMatchObject({
+      optimizer: "warmStartTranscription",
+      initialState: expect.objectContaining({
+        lon: -78.92647222,
+        lat: 35.77341389,
+        altM: 914.4,
+        speedMps: knotsToMetresPerSecond(a320Config.terminalSpeedKt + 25),
+        flightPathDeg: 0,
+        massKg: 78000,
+        aircraftType: "A320",
+      }),
+      targetState: expect.objectContaining({
+        lon: -78.802,
+        lat: 35.874,
+        altM: targetAltitudeMForThreshold(111.86, a320Config),
+        speedMps: knotsToMetresPerSecond(a320Config.terminalSpeedKt),
+        headingDeg: 45,
+        flightPathDeg: -4,
+        aircraftType: "A320",
+      }),
+      nSegments: 12,
+      arrivalTimeS: 96,
+      dtS: 0.1,
+      maxIterations: 300,
+    });
+    expect(request.initialState.headingDeg).toBeCloseTo(39.1);
   });
 
   it("disables arrival time input for variable-time warm start optimizer", async () => {
@@ -327,6 +378,12 @@ describe("PilotPanel trajectory play mode", () => {
 
     expect(await screen.findByText("A320")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
+    await waitFor(() => {
+      expect(mocks.fetchRnavInitialFixCandidates).toHaveBeenCalledWith(
+        "KRDU",
+        "RW05L",
+      );
+    });
 
     const optimizerSelect = screen.getByRole("combobox", { name: "Optimizer" });
     const arrivalInput = screen.getByLabelText("Arrival time") as HTMLInputElement;
@@ -388,6 +445,7 @@ describe("PilotPanel trajectory play mode", () => {
       expect(mocks.usePilotInitialPlacement).toHaveBeenLastCalledWith(
         expect.objectContaining({
           enabled: true,
+          previewVisible: true,
           onFinish: expect.any(Function),
         }),
       );
@@ -411,6 +469,31 @@ describe("PilotPanel trajectory play mode", () => {
         name: "Place Aircraft",
       }),
     ).toBeTruthy();
+  });
+
+  it("keeps the initial placement preview visible while replacing an existing snapshot", async () => {
+    render(<PilotPanel />);
+
+    expect(await screen.findByText("A320")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+
+    await waitFor(() => {
+      expect(mocks.resetPilotSimulation).toHaveBeenCalled();
+    });
+
+    const initialSummary = screen.getByLabelText("Initial aircraft state summary");
+    fireEvent.click(within(initialSummary).getByRole("button", { name: "Edit" }));
+    const initialEditor = await screen.findByLabelText("Initial aircraft setup");
+    fireEvent.click(within(initialEditor).getByRole("button", { name: "Place Aircraft" }));
+
+    await waitFor(() => {
+      expect(mocks.usePilotInitialPlacement).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          enabled: true,
+          previewVisible: true,
+        }),
+      );
+    });
   });
 
   it("shows the trajectory replay control row in the live state panel", async () => {

@@ -11,6 +11,10 @@ import {
   fetchRunwayThresholdTargets,
   type RunwayThresholdTarget,
 } from "../data/runwayThresholdTargets";
+import {
+  fetchRnavInitialFixCandidates,
+  type RnavInitialFixCandidate,
+} from "../data/rnavInitialFixCandidates";
 import { usePilotAircraft, type PilotAircraftPose } from "../hooks/usePilotAircraft";
 import { usePilotTargetGate } from "../hooks/usePilotTargetGate";
 import PilotInitialStateOverlay, {
@@ -140,6 +144,10 @@ export default function PilotPanel() {
   const [initialState, setInitialState] = useState<PilotResetState>(() =>
     makeDefaultInitialState(null, null),
   );
+  const [rnavInitialFixCandidates, setRnavInitialFixCandidates] = useState<
+    RnavInitialFixCandidate[]
+  >([]);
+  const [selectedRnavInitialFixKey, setSelectedRnavInitialFixKey] = useState("");
 
   const pose = snapshotToPose(snapshot);
   const selectedAircraft = aircraftConfigs.find(
@@ -195,6 +203,7 @@ export default function PilotPanel() {
 
   const updateInitialPosition = useCallback(
     (position: PilotInitialPlacementPosition) => {
+      setSelectedRnavInitialFixKey("");
       setInitialState((current) => ({
         ...current,
         lon: clamp(position.lon, -180, 180),
@@ -295,9 +304,8 @@ export default function PilotPanel() {
 
   usePilotInitialPlacement({
     enabled: isPlacingInitialPosition,
-    previewVisible: (isInitialEditorOpen || isPlacingInitialPosition || isInitialPreviewVisible) &&
-      !isEnabled &&
-      !snapshot,
+    previewVisible: isPlacingInitialPosition ||
+      ((isInitialEditorOpen || isInitialPreviewVisible) && !isEnabled && !snapshot),
     initialState,
     placementGuidance,
     onPositionChange: updateInitialPosition,
@@ -323,6 +331,8 @@ export default function PilotPanel() {
     trajectoryReplayIndexRef.current = 0;
     trajectorySegmentElapsedSRef.current = 0;
     setInitialState(makeDefaultInitialState(airport, aircraft));
+    setRnavInitialFixCandidates([]);
+    setSelectedRnavInitialFixKey("");
     setSimulationMode(DEFAULT_SIMULATION_MODE);
     setControls(makeDefaultControls(aircraft));
     setActiveMode("pilot");
@@ -399,6 +409,51 @@ export default function PilotPanel() {
       cancelled = true;
     };
   }, [activeAirportCode]);
+
+  useEffect(() => {
+    if (
+      activeMode !== "trajectory" ||
+      !activeAirportCode ||
+      !selectedTargetRunway
+    ) {
+      setRnavInitialFixCandidates([]);
+      setSelectedRnavInitialFixKey("");
+      return;
+    }
+
+    let cancelled = false;
+    setRnavInitialFixCandidates([]);
+    setSelectedRnavInitialFixKey("");
+
+    void fetchRnavInitialFixCandidates(
+      activeAirportCode,
+      selectedTargetRunway.runwayIdent,
+    )
+      .then((candidates) => {
+        if (cancelled) return;
+        setRnavInitialFixCandidates(candidates);
+        if (candidates.length === 0) {
+          setError(
+            `No RNAV IF points are available for ${activeAirportCode} ${selectedTargetRunway.runwayIdent}.`,
+          );
+          return;
+        }
+        setError(null);
+      })
+      .catch((initialError: unknown) => {
+        if (cancelled) return;
+        setRnavInitialFixCandidates([]);
+        setError(toErrorMessage(initialError));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeAirportCode,
+    activeMode,
+    selectedTargetRunway,
+  ]);
 
   useEffect(() => {
     controlsRef.current = controls;
@@ -685,6 +740,7 @@ export default function PilotPanel() {
     if (!Number.isFinite(value) || isFlying || isTrajectoryPlaying) return;
 
     setInitialState((current) => ({ ...current, [key]: clamp(value, min, max) }));
+    setSelectedRnavInitialFixKey("");
     setIsInitialPreviewVisible(true);
     clearSnapshotForInitialEdit();
   }
@@ -749,8 +805,31 @@ export default function PilotPanel() {
     setTargetState((current) =>
       makeDefaultTrajectoryTarget(target, selectedAircraft, current)
     );
+    setSelectedRnavInitialFixKey("");
     setOptimizedTrajectory(null);
     setIsTrajectoryPlaying(false);
+  }
+
+  function updateRnavInitialFix(candidateKey: string) {
+    if (isFlying || isTrajectoryPlaying) return;
+
+    setSelectedRnavInitialFixKey(candidateKey);
+    const candidate = rnavInitialFixCandidates.find(
+      (current) => current.key === candidateKey,
+    );
+    if (!candidate || !selectedAircraft) return;
+
+    try {
+      const speedMps = initialSpeedMpsForAircraft(selectedAircraft);
+      setInitialState((current) =>
+        makeInitialStateFromRnavFix(candidate, selectedAircraft, current, speedMps)
+      );
+      setIsInitialPreviewVisible(true);
+      clearSnapshotForInitialEdit();
+      setError(null);
+    } catch (initialError: unknown) {
+      setError(toErrorMessage(initialError));
+    }
   }
 
   function updateTargetField(
@@ -1020,11 +1099,16 @@ export default function PilotPanel() {
         isPlacing={isPlacingInitialPosition}
         state={initialState}
         aircraftConfigs={aircraftConfigs}
+        rnavInitialFixCandidates={
+          activeMode === "trajectory" ? rnavInitialFixCandidates : []
+        }
+        selectedRnavInitialFixKey={selectedRnavInitialFixKey}
         disabled={initialControlsDisabled}
         onClose={closeInitialEditor}
         onPlaceToggle={toggleInitialPlacement}
         onFieldChange={updateInitialField}
         onAircraftTypeChange={updateAircraftType}
+        onRnavInitialFixChange={updateRnavInitialFix}
       />
 
       {activeMode === "trajectory" ? (
@@ -1483,7 +1567,37 @@ function makeDefaultTrajectoryTarget(
 }
 
 function defaultInitialSpeedMps(aircraft: PilotAircraftConfig | null): number {
-  return knotsToMetresPerSecond((aircraft?.terminalSpeedKt ?? 145) + 25);
+  return aircraft
+    ? initialSpeedMpsForAircraft(aircraft)
+    : knotsToMetresPerSecond(170);
+}
+
+function initialSpeedMpsForAircraft(aircraft: PilotAircraftConfig): number {
+  if (!Number.isFinite(aircraft.terminalSpeedKt)) {
+    throw new Error(
+      `Aircraft spec ${aircraft.code} is missing terminalSpeedKt; cannot set RNAV IF initial speed.`,
+    );
+  }
+  return knotsToMetresPerSecond(aircraft.terminalSpeedKt + 25);
+}
+
+function makeInitialStateFromRnavFix(
+  candidate: RnavInitialFixCandidate,
+  aircraft: PilotAircraftConfig,
+  fallback: PilotResetState,
+  speedMps: number,
+): PilotResetState {
+  return {
+    ...fallback,
+    lon: candidate.lon,
+    lat: candidate.lat,
+    altM: candidate.altM,
+    headingDeg: runwayAlignedHeadingDeg(candidate.headingDeg),
+    flightPathDeg: 0,
+    speedMps,
+    massKg: aircraft.massKg,
+    aircraftType: aircraft.code,
+  };
 }
 
 function trajectoryTargetToPilotState(
