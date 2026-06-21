@@ -22,6 +22,7 @@ if __package__ is None or __package__ == "":  # pragma: no cover - direct execut
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from trajectory_data_process.landings import (
+    check_history_access,
     download_airport_landings,
     iter_airport_entries,
     load_runway_config,
@@ -49,10 +50,15 @@ def main() -> None:
     output_root = Path(args.output_root)
     wanted = {a.upper() for a in args.airports} if args.airports else None
 
+    entries = [(p, t) for p, t in iter_airport_entries(config) if not wanted or p.code in wanted]
+    if not entries:
+        raise SystemExit("No matching airports in config for the requested --airports.")
+
+    print("[landings] preflight: checking OpenSky history access...", flush=True)
+    check_history_access(airport=entries[0][0].code, reference=start)
+
     summary: dict[str, dict[str, int]] = {}
-    for profile, thresholds in iter_airport_entries(config):
-        if wanted and profile.code not in wanted:
-            continue
+    for profile, thresholds in entries:
         collected = download_airport_landings(
             profile=profile,
             thresholds=thresholds,

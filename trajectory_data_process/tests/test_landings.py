@@ -7,7 +7,11 @@ import pandas as pd
 
 from trajectory_data_process.acquisition.airports import AirportProfile
 from trajectory_data_process.acquisition.runways import RunwayThreshold
-from trajectory_data_process.landings import download_airport_landings, iter_airport_entries
+from trajectory_data_process.landings import (
+    check_history_access,
+    download_airport_landings,
+    iter_airport_entries,
+)
 
 PROFILE = AirportProfile("KRDU", 35.8776, -78.7875, 132.0)
 THRESHOLD = RunwayThreshold("KRDU", "23R", 35.8938, -78.778, 124.7, 225.0)
@@ -70,6 +74,22 @@ class LandingDownloadTests(unittest.TestCase):
 
         self.assertEqual(len(collected["23R"]), 1)  # same landing not double-counted
         self.assertGreaterEqual(fetch.calls, 2)
+
+
+class PreflightTests(unittest.TestCase):
+    def test_probes_once_and_returns_on_success(self) -> None:
+        fetch = _StubFetch(_landing_df(), always=True)
+
+        check_history_access(airport="KRDU", reference=START, fetch_history_fn=fetch)
+
+        self.assertEqual(fetch.calls, 1)
+
+    def test_propagates_access_error(self) -> None:
+        def denied(**_kwargs):
+            raise RuntimeError("OpenSky history query was denied (PERMISSION_DENIED).")
+
+        with self.assertRaises(RuntimeError):
+            check_history_access(airport="KRDU", reference=START, fetch_history_fn=denied)
 
 
 class ConfigLoaderTests(unittest.TestCase):

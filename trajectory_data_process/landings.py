@@ -57,6 +57,29 @@ def iter_airport_entries(config: dict[str, Any]) -> list[tuple[AirportProfile, l
     return entries
 
 
+def check_history_access(
+    *,
+    airport: str,
+    reference: datetime,
+    fetch_history_fn: FetchHistory = fetch_history_dataframe,
+) -> None:
+    """Run one tiny probe query so a whole run fails fast on missing access.
+
+    Uses the same airport-join query shape as the real download over a 1-minute
+    window two days before ``reference``. Raises the wrapped, actionable error if
+    credentials or historical-data access are missing; returns on success.
+    """
+    stop = reference - timedelta(days=2)
+    start = stop - timedelta(minutes=1)
+    fetch_history_fn(
+        start=start,
+        stop=stop,
+        airport=airport,
+        selected_columns=AIRPORT_HISTORY_COLUMNS,
+        cached=True,
+    )
+
+
 def download_airport_landings(
     *,
     profile: AirportProfile,
