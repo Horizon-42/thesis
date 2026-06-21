@@ -8,6 +8,7 @@ geometric altitude is already referenced to the ellipsoid.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -32,9 +33,18 @@ def trajectory_to_czml_flight(
     exclude_ground: bool = False,
     runway_threshold: RunwayThreshold | None = None,
     runway_threshold_radius_m: float = 600.0,
+    landing_only: bool = False,
+    landing_agl_m: float = 150.0,
+    descent_margin_m: float = 300.0,
 ) -> dict[str, Any] | None:
     """Convert one trajectory to a CZML-input flight, or ``None`` if it is not a
-    relevant arrival at the airport (or the requested runway threshold)."""
+    relevant arrival at the airport (or the requested runway threshold).
+
+    With ``landing_only`` (which requires ``runway_threshold``) the trajectory is
+    kept only when it actually lands at that threshold: its closest point reaches
+    low altitude over the threshold (within ``landing_agl_m``) after descending
+    from at least ``descent_margin_m`` higher earlier — which excludes departures.
+    """
     points = traj.points
     if len(points) < 2:
         return None
@@ -53,6 +63,12 @@ def trajectory_to_czml_flight(
         runway_threshold_radius_m=runway_threshold_radius_m,
     ):
         return None
+
+    if landing_only:
+        if runway_threshold is None:
+            raise ValueError("landing_only requires a runway_threshold")
+        if not _is_landing(points, anchor_index, runway_threshold, landing_agl_m, descent_margin_m):
+            return None
 
     window = _approach_window(points, anchor_index, approach_window_min)
     waypoints = [
@@ -73,6 +89,7 @@ def trajectory_to_czml_flight(
         "dep_airport": traj.dep_airport,
         "arr_airport": traj.arr_airport,
         "runway": runway_threshold.ident if runway_threshold else None,
+        "landing_time_utc": _iso_utc(points[anchor_index].time) if runway_threshold else None,
         "altitude_source": "opensky_history_geoaltitude_m",
         "waypoints": waypoints,
     }
@@ -89,6 +106,7 @@ def trajectories_to_czml_input(
     exclude_ground: bool = False,
     runway_threshold: RunwayThreshold | None = None,
     runway_threshold_radius_m: float = 600.0,
+    landing_only: bool = False,
     max_flights: int = 80,
 ) -> list[dict[str, Any]]:
     """Convert trajectories to CZML-input flights with unique ids."""
@@ -97,6 +115,7 @@ def trajectories_to_czml_input(
     for traj in trajectories:
         flight = trajectory_to_czml_flight(
             traj,
+            landing_only=landing_only,
             airport_lat=airport_lat,
             airport_lon=airport_lon,
             match_radius_km=match_radius_km,
@@ -159,6 +178,34 @@ def _approach_window(
     window_start = anchor_time - approach_window_min * 60
     window = [p for p in points[: anchor_index + 1] if window_start <= p.time <= anchor_time]
     return window if len(window) >= 2 else points[: anchor_index + 1]
+
+
+def _is_landing(
+    points: list[TrajectoryPoint],
+    anchor_index: int,
+    threshold: RunwayThreshold,
+    landing_agl_m: float,
+    descent_margin_m: float,
+) -> bool:
+    """True if the anchor reaches the runway after descending from higher up.
+
+    Geometric altitude carries a geoid offset versus the threshold's MSL elevation,
+    so the thresholds are deliberately generous: ``landing_agl_m`` only needs to be
+    near the runway, and the descent check (a clearly higher earlier point) is what
+    separates a landing from a departure.
+    """
+    anchor_geo = points[anchor_index].geo_altitude_m
+    if anchor_geo is None or anchor_geo - threshold.elevation_m > landing_agl_m:
+        return False
+    return any(
+        points[i].geo_altitude_m is not None
+        and points[i].geo_altitude_m - threshold.elevation_m >= descent_margin_m
+        for i in range(anchor_index)
+    )
+
+
+def _iso_utc(unix_seconds: int) -> str:
+    return datetime.fromtimestamp(unix_seconds, timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _unique_id(base: str, used_ids: set[str]) -> str:

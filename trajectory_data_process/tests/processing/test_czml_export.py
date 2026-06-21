@@ -26,6 +26,21 @@ def _approach_trajectory() -> Trajectory:
     return Trajectory(icao24="abc123", callsign="TST123", dep_airport="KJFK", arr_airport="KRDU", points=points)
 
 
+THRESHOLD = RunwayThreshold("KRDU", "23R", AIRPORT_LAT, AIRPORT_LON, 124.0, 225.0)
+
+
+def _landing_trajectory() -> Trajectory:
+    coords = [(0, 35.95, 900.0), (30, 35.92, 500.0), (60, AIRPORT_LAT, 150.0)]
+    points = [TrajectoryPoint(t, lat, AIRPORT_LON, geo, geo + 20, 225.0, False) for t, lat, geo in coords]
+    return Trajectory(icao24="abc123", callsign="LND1", dep_airport="KJFK", arr_airport="KRDU", points=points)
+
+
+def _departure_trajectory() -> Trajectory:
+    coords = [(0, AIRPORT_LAT, 150.0), (30, 35.92, 500.0), (60, 35.95, 900.0)]
+    points = [TrajectoryPoint(t, lat, AIRPORT_LON, geo, geo + 20, 45.0, False) for t, lat, geo in coords]
+    return Trajectory(icao24="dep999", callsign="DEP1", dep_airport="KRDU", arr_airport="KJFK", points=points)
+
+
 class CzmlExportTests(unittest.TestCase):
     def test_uses_geometric_altitude_for_waypoints(self) -> None:
         flight = trajectory_to_czml_flight(_approach_trajectory(), airport_lat=AIRPORT_LAT, airport_lon=AIRPORT_LON)
@@ -53,6 +68,25 @@ class CzmlExportTests(unittest.TestCase):
 
         flight = trajectory_to_czml_flight(
             _approach_trajectory(), airport_lat=AIRPORT_LAT, airport_lon=AIRPORT_LON, runway_threshold=far_threshold
+        )
+
+        self.assertIsNone(flight)
+
+    def test_landing_only_keeps_descent_to_threshold(self) -> None:
+        flight = trajectory_to_czml_flight(
+            _landing_trajectory(), airport_lat=AIRPORT_LAT, airport_lon=AIRPORT_LON,
+            runway_threshold=THRESHOLD, landing_only=True,
+        )
+
+        self.assertIsNotNone(flight)
+        assert flight is not None
+        self.assertEqual(flight["runway"], "23R")
+        self.assertTrue(flight["landing_time_utc"].endswith("Z"))
+
+    def test_landing_only_rejects_departure(self) -> None:
+        flight = trajectory_to_czml_flight(
+            _departure_trajectory(), airport_lat=AIRPORT_LAT, airport_lon=AIRPORT_LON,
+            runway_threshold=THRESHOLD, landing_only=True,
         )
 
         self.assertIsNone(flight)

@@ -1,0 +1,318 @@
+{
+  "schema_version": "runway-thresholds-v1",
+  "airports": {
+    "KRDU": {
+      "name": "Raleigh-Durham International Airport",
+      "lat": 35.878659,
+      "lon": -78.7873,
+      "elevation_m": 132.59,
+      "runways": [
+        {
+          "name": "05L/23R",
+          "length_ft": 10000,
+          "surface": "CON",
+          "thresholds": [
+            {
+              "ident": "05L",
+              "lat": 35.8745002746582,
+              "lon": -78.802001953125,
+              "elevation_m": 111.86,
+              "heading_deg": 45.0
+            },
+            {
+              "ident": "23R",
+              "lat": 35.893798828125,
+              "lon": -78.77799987792969,
+              "elevation_m": 124.66,
+              "heading_deg": 225.0
+            }
+          ]
+        },
+        {
+          "name": "05R/23L",
+          "length_ft": 7500,
+          "surface": "ASP",
+          "thresholds": [
+            {
+              "ident": "05R",
+              "lat": 35.864601135253906,
+              "lon": -78.79730224609375,
+              "elevation_m": 121.01,
+              "heading_deg": 45.0
+            },
+            {
+              "ident": "23L",
+              "lat": 35.87919998168945,
+              "lon": -78.77940368652344,
+              "elevation_m": 131.37,
+              "heading_deg": 225.0
+            }
+          ]
+        },
+        {
+          "name": "14/32",
+          "length_ft": 3570,
+          "surface": "ASP",
+          "thresholds": [
+            {
+              "ident": "14",
+              "lat": 35.875,
+              "lon": -78.78269958496094,
+              "elevation_m": 131.67,
+              "heading_deg": 135.0
+            },
+            {
+              "ident": "32",
+              "lat": 35.868099212646484,
+              "lon": -78.77420043945312,
+              "elevation_m": 129.54,
+              "heading_deg": 315.0
+            }
+          ]
+        }
+      ]
+    },
+    "KMSY": {
+      "name": "Louis Armstrong New Orleans International Airport",
+      "lat": 29.993401,
+      "lon": -90.264673,
+      "elevation_m": 1.22,
+      "runways": [
+        {
+          "name": "02/20",
+          "length_ft": 7002,
+          "surface": "ASP",
+          "thresholds": [
+            {
+              "ident": "02",
+              "lat": 29.98450089,
+              "lon": -90.25140381,
+              "elevation_m": 0.91,
+              "heading_deg": 15.0
+            },
+            {
+              "ident": "20",
+              "lat": 30.00309944,
+              "lon": -90.24549866,
+              "elevation_m": null,
+              "heading_deg": 195.0
+            }
+          ]
+        },
+        {
+          "name": "11/29",
+          "length_ft": 10104,
+          "surface": "PEM",
+          "thresholds": [
+            {
+              "ident": "11",
+              "lat": 29.996599197387695,
+              "lon": -90.28170013427734,
+              "elevation_m": 1.22,
+              "heading_deg": 106.0
+            },
+            {
+              "ident": "29",
+              "lat": 29.989200592041016,
+              "lon": -90.2509994506836,
+              "elevation_m": 0.61,
+              "heading_deg": 286.0
+            }
+          ]
+        }
+      ]
+    },
+    "KSJC": {
+      "name": "Norman Y. Mineta San Jose International Airport",
+      "lat": 37.362452,
+      "lon": -121.929188,
+      "elevation_m": 18.9,
+      "runways": [
+        {
+          "name": "12L/30R",
+          "length_ft": 11000,
+          "surface": "CON",
+          "thresholds": [
+            {
+              "ident": "12L",
+              "lat": 37.375,
+              "lon": -121.94000244140625,
+              "elevation_m": 11.58,
+              "heading_deg": 139.0
+            },
+            {
+              "ident": "30R",
+              "lat": 37.352298736572266,
+              "lon": -121.91500091552734,
+              "elevation_m": 16.76,
+              "heading_deg": 319.0
+            }
+          ]
+        },
+        {
+          "name": "12R/30L",
+          "length_ft": 11000,
+          "surface": "CON",
+          "thresholds": [
+            {
+              "ident": "12R",
+              "lat": 37.37369918823242,
+              "lon": -121.94200134277344,
+              "elevation_m": 11.58,
+              "heading_deg": 138.8
+            },
+            {
+              "ident": "30L",
+              "lat": 37.35100173950195,
+              "lon": -121.91699981689453,
+              "elevation_m": 17.37,
+              "heading_deg": 318.8
+            }
+          ]
+        }
+      ]
+    },
+    "KSMF": {
+      "name": "Sacramento International Airport",
+      "lat": 38.6954,
+      "lon": -121.591003,
+      "elevation_m": 8.23,
+      "runways": [
+        {
+          "name": "17L/35R",
+          "length_ft": 8605,
+          "surface": "CON",
+          "thresholds": [
+            {
+              "ident": "17L",
+              "lat": 38.7071,
+              "lon": -121.580002,
+              "elevation_m": 8.23,
+              "heading_deg": 181.0
+            },
+            {
+              "ident": "35R",
+              "lat": 38.683498,
+              "lon": -121.580002,
+              "elevation_m": 6.71,
+              "heading_deg": 1.0
+            }
+          ]
+        },
+        {
+          "name": "17R/35L",
+          "length_ft": 8598,
+          "surface": "CON",
+          "thresholds": [
+            {
+              "ident": "17R",
+              "lat": 38.707298278808594,
+              "lon": -121.60099792480469,
+              "elevation_m": 7.62,
+              "heading_deg": 181.0
+            },
+            {
+              "ident": "35L",
+              "lat": 38.68370056152344,
+              "lon": -121.60099792480469,
+              "elevation_m": 6.71,
+              "heading_deg": 1.0
+            }
+          ]
+        }
+      ]
+    },
+    "KSTL": {
+      "name": "St. Louis Lambert International Airport",
+      "lat": 38.748697,
+      "lon": -90.370003,
+      "elevation_m": 188.37,
+      "runways": [
+        {
+          "name": "06/24",
+          "length_ft": 7603,
+          "surface": "CON",
+          "thresholds": [
+            {
+              "ident": "06",
+              "lat": 38.746684,
+              "lon": -90.381218,
+              "elevation_m": 167.94,
+              "heading_deg": 63.0
+            },
+            {
+              "ident": "24",
+              "lat": 38.756217,
+              "lon": -90.357504,
+              "elevation_m": 162.46,
+              "heading_deg": 243.0
+            }
+          ]
+        },
+        {
+          "name": "11/29",
+          "length_ft": 9000,
+          "surface": "CON",
+          "thresholds": [
+            {
+              "ident": "11",
+              "lat": 38.759952,
+              "lon": -90.409872,
+              "elevation_m": 188.06,
+              "heading_deg": 122.0
+            },
+            {
+              "ident": "29",
+              "lat": 38.746792,
+              "lon": -90.383163,
+              "elevation_m": 169.16,
+              "heading_deg": 302.0
+            }
+          ]
+        },
+        {
+          "name": "12L/30R",
+          "length_ft": 9013,
+          "surface": "CON",
+          "thresholds": [
+            {
+              "ident": "12L",
+              "lat": 38.751793,
+              "lon": -90.366322,
+              "elevation_m": 160.93,
+              "heading_deg": 122.0
+            },
+            {
+              "ident": "30R",
+              "lat": 38.738607,
+              "lon": -90.339585,
+              "elevation_m": 184.4,
+              "heading_deg": 302.0
+            }
+          ]
+        },
+        {
+          "name": "12R/30L",
+          "length_ft": 11020,
+          "surface": "CON",
+          "thresholds": [
+            {
+              "ident": "12R",
+              "lat": 38.753904,
+              "lon": -90.379159,
+              "elevation_m": 164.59,
+              "heading_deg": 122.0
+            },
+            {
+              "ident": "30L",
+              "lat": 38.737782,
+              "lon": -90.346464,
+              "elevation_m": 178.31,
+              "heading_deg": 302.0
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

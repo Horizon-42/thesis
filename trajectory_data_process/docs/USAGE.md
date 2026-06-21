@@ -114,7 +114,54 @@ Runs the download stage, then `generate_czml.py`, writing
 stage. Add `--generate-procedures` to also rebuild RNAV/RNP procedure assets, or
 `--input-json <czml_input.json>` to render an existing file without re-downloading.
 
-## 7. Notes
+## 7. Landings per runway threshold (bulk download)
+
+To collect a fixed number of historical **landings at every runway threshold** of the
+project's main airports, use the dedicated entry point. It is driven by a maintained
+mapping file and keeps the caller trivial — all logic lives in `landings.py`.
+
+### Runway-threshold mapping
+
+`config/runway_thresholds.json` lists each airport's open runways and their two
+thresholds (ident, lat/lon, elevation, heading). It is reusable by any other code
+that needs threshold geometry. Regenerate it from the OurAirports CSVs whenever the
+airport set or source data changes:
+
+```bash
+python trajectory_data_process/build_runway_config.py            # default 5 airports
+python trajectory_data_process/build_runway_config.py --airports KRDU KSJC
+```
+
+### Download
+
+```bash
+# 20 landings for every threshold of every airport in the config:
+python trajectory_data_process/download_landings.py --count 20
+
+# Narrow to specific airports and scan further back:
+python trajectory_data_process/download_landings.py --count 30 --airports KRDU KSJC \
+  --max-lookback-days 60
+```
+
+For each airport it issues **one history query per time chunk** and reuses the
+trajectories for all of that airport's thresholds, scanning backward from `--start`
+(default: now) in `--chunk-hours` steps until each threshold has `--count` landings or
+`--max-lookback-days` is reached. A trajectory counts as a landing at a threshold when
+its closest point reaches low altitude over the threshold after descending from higher
+up — which excludes departures.
+
+Output (one CZML-input file per threshold, plus a summary):
+
+```text
+outputs/landings/<AIRPORT>/<AIRPORT>_<RUNWAY>_landings.json   # e.g. KRDU_23R_landings.json
+outputs/landings/summary_<UTC>.json                          # collected count per threshold
+```
+
+Each flight additionally carries `landing_time_utc` (the absolute time it reached the
+threshold). The files are standard CZML input and render directly through
+`generate_czml.py`.
+
+## 8. Notes
 
 - Geometric altitude is mandatory: points without `geoaltitude` are dropped, and a
   history result lacking the `geoaltitude` column raises an error rather than

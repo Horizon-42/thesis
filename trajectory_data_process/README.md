@@ -31,7 +31,11 @@ processing/
 datasets/
   dataset_store.py             partition layout + JSONL helpers
   training_dataset.py          raw-track / training-event / quarantine assembly
+landings.py                    scan-back engine: N landings per runway threshold
+config/runway_thresholds.json  maintained airport/runway/threshold mapping
+build_runway_config.py         regenerate runway_thresholds.json from OurAirports CSVs
 download_trajectories.py       CLI entry point (czml | training)
+download_landings.py           CLI entry point (bulk landings per threshold)
 docs/USAGE.md                  full usage guide
 ```
 
@@ -60,6 +64,14 @@ One command, fetch + render to the AeroViz frontend asset:
 python run_asd-b_fetch_and_generate.py \
   --airport KRDU --begin 2026-04-19T10:00:00Z --end 2026-04-19T10:30:00Z --runway 23R
 # -> aeroviz-4d/public/data/airports/KRDU/trajectories.czml
+```
+
+Bulk landings — N per runway threshold for the main airports, driven by the
+maintained `config/runway_thresholds.json` mapping:
+
+```bash
+python trajectory_data_process/download_landings.py --count 20
+# -> trajectory_data_process/outputs/landings/<AIRPORT>/<AIRPORT>_<RUNWAY>_landings.json
 ```
 
 Training dataset:
