@@ -2,6 +2,7 @@ import math
 import unittest
 
 from aeroviz_backend.simulation_backend import SimulationBackend, aircraft_catalog
+from aerodynamic_model.casadi_simulator import CasadiSimulator
 from aircraft_sets import B77W
 from simulator_simple import LoadFactorSimulator
 
@@ -118,6 +119,54 @@ class TestSimulationBackend(unittest.TestCase):
         self.assertEqual(snapshot["simulationMode"], "loadFactor")
         self.assertIsInstance(backend.geodetic_simulator.simulator, LoadFactorSimulator)
         self.assertIn("loadFactor", snapshot["control"])
+
+    def test_reset_can_select_casadi_simulation(self):
+        backend = SimulationBackend()
+
+        snapshot = backend.reset({
+            "simulationMode": "casadi",
+            "state": {
+                "altM": 1000.0,
+                "speedMps": 140.0,
+                "aircraftType": "A320",
+            },
+            "control": {
+                "thrustN": 15000.0,
+                "bankDeg": 5.0,
+                "loadFactor": 1.2,
+            },
+        })
+
+        self.assertEqual(snapshot["simulationMode"], "casadi")
+        self.assertIsInstance(backend.geodetic_simulator.simulator, CasadiSimulator)
+        self.assertAlmostEqual(snapshot["control"]["loadFactor"], 1.2)
+        self.assertNotIn("attackDeg", snapshot["control"])
+        self.assertTrue(math.isfinite(snapshot["aero"]["liftCoefficient"]))
+
+    def test_step_can_switch_to_casadi_simulation(self):
+        backend = SimulationBackend()
+        backend.reset({
+            "state": {
+                "lon": 0.0,
+                "lat": 0.0,
+                "altM": 1000.0,
+                "speedMps": 140.0,
+                "headingDeg": 0.0,
+                "flightPathDeg": 0.0,
+                "aircraftType": "A320",
+            }
+        })
+
+        snapshot = backend.step({
+            "simulationMode": "casadi",
+            "control": {"loadFactor": 1.0},
+            "dtS": 0.2,
+        })
+
+        self.assertEqual(snapshot["simulationMode"], "casadi")
+        self.assertIsInstance(backend.geodetic_simulator.simulator, CasadiSimulator)
+        self.assertIn("loadFactor", snapshot["control"])
+        self.assertGreater(snapshot["state"]["lon"], 0.0)
 
     def test_rejects_unknown_simulation_mode(self):
         backend = SimulationBackend()

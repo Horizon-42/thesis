@@ -5,10 +5,11 @@ from typing import Any
 
 from aeroviz_backend import paths  # noqa: F401
 
+from aerodynamic_model.casadi_simulator import CasadiSimulator
 from aircraft_sets import AIRCRAFT_PRESETS, AircraftSpec, A320
-from geodetic_simulator import GeodeticSimulator, GeodeticState
-from simulator import Control
-from simulator_simple import LoadFactorControl, LoadFactorSimulator
+from common import Atmosphere, Control, GeodeticState, LoadFactorControl
+from geodetic_simulator import GeodeticSimulator
+from simulator_simple import LoadFactorSimulator
 
 
 DEFAULT_STATE = GeodeticState(
@@ -28,12 +29,36 @@ DEFAULT_CONTROL = Control(
 )
 DEFAULT_AIRCRAFT_TYPE = A320.code
 DEFAULT_SIMULATION_MODE = "alpha"
-SUPPORTED_SIMULATION_MODES = ("alpha", "loadFactor")
+SUPPORTED_SIMULATION_MODES = ("alpha", "loadFactor", "casadi")
 
 DEFAULT_DT = 0.2
 MAX_DT = 2.0
 MIN_LOAD_FACTOR = 0.0
 MAX_LOAD_FACTOR = 3.0
+
+
+class CasadiGeodeticSimulator:
+    def __init__(self, aircraft: AircraftSpec) -> None:
+        self.simulator = CasadiSimulator(aircraft, DEFAULT_DT)
+
+    def step(
+        self,
+        state: GeodeticState,
+        control: LoadFactorControl,
+        dt: float,
+    ) -> GeodeticState:
+        next_state = self.simulator.step(state, control, dt)
+        if next_state.altitude < 0.0:
+            raise ValueError("simulation stopped: altitude below 0")
+        return GeodeticState(
+            latitude=next_state.latitude,
+            longitude=next_state.longitude,
+            altitude=next_state.altitude,
+            V=next_state.V,
+            psi=next_state.psi,
+            gamma=next_state.gamma,
+            m=next_state.m,
+        )
 
 
 class SimulationBackend:
@@ -155,7 +180,7 @@ def read_simulation_control(
     simulation_mode: str,
     fallback: Control | LoadFactorControl,
 ) -> Control | LoadFactorControl:
-    if simulation_mode == "loadFactor":
+    if simulation_mode in ("loadFactor", "casadi"):
         return read_load_factor_control(
             payload,
             (
@@ -248,7 +273,7 @@ def default_control_for_mode(
     aircraft: AircraftSpec,
     simulation_mode: str,
 ) -> Control | LoadFactorControl:
-    if simulation_mode == "loadFactor":
+    if simulation_mode in ("loadFactor", "casadi"):
         return default_load_factor_control_for_aircraft(aircraft)
     return default_control_for_aircraft(aircraft)
 
@@ -258,7 +283,7 @@ def fallback_control_for_mode(
     aircraft: AircraftSpec,
     simulation_mode: str,
 ) -> Control | LoadFactorControl:
-    if simulation_mode == "loadFactor":
+    if simulation_mode in ("loadFactor", "casadi"):
         return (
             control
             if isinstance(control, LoadFactorControl)
@@ -274,7 +299,9 @@ def fallback_control_for_mode(
 def make_geodetic_simulator(
     aircraft: AircraftSpec,
     simulation_mode: str,
-) -> GeodeticSimulator:
+) -> GeodeticSimulator | CasadiGeodeticSimulator:
+    if simulation_mode == "casadi":
+        return CasadiGeodeticSimulator(aircraft)
     if simulation_mode == "loadFactor":
         return GeodeticSimulator(
             aircraft,
@@ -340,12 +367,14 @@ def format_control(control: Control | LoadFactorControl) -> dict[str, float]:
 
 
 def read_snapshot_aero(
-    geodetic_simulator: GeodeticSimulator,
+    geodetic_simulator: GeodeticSimulator | CasadiGeodeticSimulator,
     state: GeodeticState,
     control: Control | LoadFactorControl,
     simulation_mode: str,
 ) -> tuple[float, float]:
     simulator = geodetic_simulator.simulator
+    if simulation_mode == "casadi" and isinstance(control, LoadFactorControl):
+        return casadi_snapshot_aero(simulator, state, control)
     if simulation_mode == "loadFactor" and isinstance(control, LoadFactorControl):
         Cl, Cd, _ = simulator.get_aerodynamic_coefficients(
             control.load_factor,
@@ -356,6 +385,32 @@ def read_snapshot_aero(
         )
         return Cl, Cd
     return simulator.get_aerodynamic_coefficients(control.attack_rad)
+
+
+def casadi_snapshot_aero(
+    simulator: CasadiSimulator,
+    state: GeodeticState,
+    control: LoadFactorControl,
+) -> tuple[float, float]:
+    rho = Atmosphere().get_ISA_density(state.altitude)
+    params = simulator.aero_params
+    cl_req = control.load_factor * state.m * simulator.g / (
+        0.5 * rho * params.S * state.V**2
+    )
+    cl = min(cl_req, params.Cl_max)
+    r = cl_req / params.Cl_max
+    cd_stall = 0.0
+    if r > params.stall_threshold:
+        stall_fraction = min(r, 1.0)
+        x = clamp(
+            (stall_fraction - params.stall_threshold)
+            / (1.0 - params.stall_threshold),
+            0.0,
+            1.0,
+        )
+        cd_stall = params.k_stall * x * x * (3.0 - 2.0 * x)
+    cd = params.Cd0 + params.k * cl**2 + cd_stall
+    return cl, cd
 
 
 def aircraft_catalog() -> dict[str, Any]:
