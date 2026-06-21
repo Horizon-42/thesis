@@ -149,6 +149,39 @@ describe("pilotClient", () => {
     );
   });
 
+  it("posts casadi simulation mode with loadFactor control", async () => {
+    const fetchMock = mockFetch({
+      ...snapshot,
+      simulationMode: "casadi",
+      control: {
+        thrustN: 15000,
+        bankDeg: 5,
+        loadFactor: 1.2,
+      },
+    });
+
+    const result = await stepPilotSimulation(control, 0.2, "casadi");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8765/simulation/step",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          control: {
+            thrustN: 15000,
+            bankDeg: 5,
+            loadFactor: 1.2,
+          },
+          dtS: 0.2,
+          simulationMode: "casadi",
+        }),
+      }),
+    );
+    expect(result.simulationMode).toBe("casadi");
+    expect(result.control.attackDeg).toBe(0);
+    expect(result.control.loadFactor).toBe(1.2);
+  });
+
   it("parses load-factor snapshots without attack angle", async () => {
     const fetchMock = mockFetch({
       ...snapshot,

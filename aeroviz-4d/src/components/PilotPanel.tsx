@@ -68,6 +68,10 @@ const DEFAULT_ARRIVAL_TIME_S = 100;
 const DEFAULT_TRAJECTORY_OPTIMIZER: TrajectoryOptimizer = "transcription";
 const FALLBACK_MAX_THRUST_N = 240000;
 
+function usesLoadFactorControl(mode: PilotSimulationMode) {
+  return mode === "loadFactor" || mode === "casadi";
+}
+
 type PilotPanelMode = "pilot" | "trajectory";
 
 interface PlacementBackup {
@@ -541,7 +545,7 @@ export default function PilotPanel() {
           break;
         case " ":
           setControls((current) =>
-            simulationModeRef.current === "loadFactor"
+            usesLoadFactorControl(simulationModeRef.current)
               ? { ...current, bankDeg: 0, loadFactor: DEFAULT_LOAD_FACTOR }
               : { ...current, bankDeg: 0, attackDeg: 0 }
           );
@@ -636,7 +640,7 @@ export default function PilotPanel() {
 
   function updateSimulationMode(value: PilotSimulationMode) {
     setSimulationMode(value);
-    if (value !== "loadFactor") return;
+    if (!usesLoadFactorControl(value)) return;
 
     setControls((current) =>
       current.loadFactor === undefined
@@ -873,7 +877,7 @@ export default function PilotPanel() {
     direction: 1 | -1,
     mode: PilotSimulationMode = simulationModeRef.current,
   ) {
-    if (mode === "loadFactor") {
+    if (usesLoadFactorControl(mode)) {
       nudgeControl(
         "loadFactor",
         direction * 0.05,
@@ -1259,7 +1263,7 @@ export default function PilotPanel() {
               </button>
             </div>
 
-            {simulationMode === "loadFactor" ? (
+            {usesLoadFactorControl(simulationMode) ? (
               <div className="pilot-stepper-row">
                 <button
                   onClick={() =>
@@ -1376,6 +1380,7 @@ export default function PilotPanel() {
                 >
                   <option value="alpha">Alpha</option>
                   <option value="loadFactor">Load factor</option>
+                  <option value="casadi">CasADi</option>
                 </select>
               </label>
               <label className="pilot-checkbox-label">

@@ -5,7 +5,7 @@ export interface PilotControls {
   loadFactor?: number;
 }
 
-export type PilotSimulationMode = "alpha" | "loadFactor";
+export type PilotSimulationMode = "alpha" | "loadFactor" | "casadi";
 
 type PilotControlPayload =
   | {
@@ -183,7 +183,7 @@ function serializePilotControl(
   control: PilotControls,
   simulationMode: PilotSimulationMode,
 ): PilotControlPayload {
-  if (simulationMode === "loadFactor") {
+  if (simulationMode === "loadFactor" || simulationMode === "casadi") {
     return {
       thrustN: control.thrustN,
       bankDeg: control.bankDeg,
@@ -263,7 +263,9 @@ function readOptionalSimulationMode(
 ): PilotSimulationMode | null {
   const nested = value.simulationMode;
   if (nested === undefined) return null;
-  if (nested === "alpha" || nested === "loadFactor") return nested;
+  if (nested === "alpha" || nested === "loadFactor" || nested === "casadi") {
+    return nested;
+  }
   throw new Error("AeroViz backend response has invalid simulationMode");
 }
 

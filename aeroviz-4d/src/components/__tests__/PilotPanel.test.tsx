@@ -182,6 +182,41 @@ describe("PilotPanel trajectory play mode", () => {
     });
   });
 
+  it("switches pilot controls to load factor for casadi simulation", async () => {
+    render(<PilotPanel />);
+
+    expect(await screen.findByText("A320")).toBeTruthy();
+    const simulationSelect = screen.getByRole("combobox", {
+      name: "Simulation",
+    }) as HTMLSelectElement;
+
+    fireEvent.change(simulationSelect, {
+      target: { value: "casadi" },
+    });
+
+    expect(simulationSelect.value).toBe("casadi");
+    expect(screen.queryByLabelText("Alpha")).toBeNull();
+    const loadFactorInput = screen.getByLabelText("Load factor") as HTMLInputElement;
+    expect(loadFactorInput.value).toBe("1");
+
+    fireEvent.change(loadFactorInput, { target: { value: "1.15" } });
+    fireEvent.blur(loadFactorInput);
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+
+    await waitFor(() => {
+      expect(mocks.resetPilotSimulation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          aircraftType: "A320",
+          massKg: 78000,
+        }),
+        expect.objectContaining({
+          loadFactor: 1.15,
+        }),
+        "casadi",
+      );
+    });
+  });
+
   it("opens trajectory play from pilot mode and submits runway-target optimization", async () => {
     render(<PilotPanel />);
 

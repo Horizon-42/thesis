@@ -28,7 +28,8 @@ export default function PilotRealtimeStatePanel({
 
   if (!visible || !snapshot || !portalTarget) return null;
   const effectiveSimulationMode = simulationMode ?? snapshot.simulationMode ?? "alpha";
-  const showLoadFactor = effectiveSimulationMode === "loadFactor" &&
+  const showLoadFactor =
+    (effectiveSimulationMode === "loadFactor" || effectiveSimulationMode === "casadi") &&
     snapshot.control.loadFactor !== undefined;
   const loadFactor = snapshot.control.loadFactor ?? 0;
 
