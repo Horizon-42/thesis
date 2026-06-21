@@ -87,6 +87,10 @@ export default function PilotRealtimeStatePanel({
           />
         )}
         <RealtimeReadout
+          label="Actual n"
+          value={`${snapshot.aero.actualLoadFactor.toFixed(3)} g`}
+        />
+        <RealtimeReadout
           label="Lift Coefficient"
           value={snapshot.aero.liftCoefficient.toFixed(3)}
         />

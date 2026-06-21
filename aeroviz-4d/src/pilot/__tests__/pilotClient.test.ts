@@ -71,6 +71,7 @@ const snapshot = {
   aero: {
     liftCoefficient: 0.41,
     dragCoefficient: 0.03,
+    actualLoadFactor: 1.2,
   },
 };
 

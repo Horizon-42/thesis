@@ -114,7 +114,11 @@ describe("PilotPanel trajectory play mode", () => {
         aircraftType: "A320",
       },
       control: { thrustN: 12000, bankDeg: 3, attackDeg: 4 },
-      aero: { liftCoefficient: 0.4, dragCoefficient: 0.04 },
+      aero: {
+        liftCoefficient: 0.4,
+        dragCoefficient: 0.04,
+        actualLoadFactor: 1.1,
+      },
     });
     mocks.stepPilotSimulation.mockResolvedValue({
       ok: true,
@@ -130,7 +134,11 @@ describe("PilotPanel trajectory play mode", () => {
         aircraftType: "A320",
       },
       control: { thrustN: 12000, bankDeg: 3, attackDeg: 4 },
-      aero: { liftCoefficient: 0.42, dragCoefficient: 0.041 },
+      aero: {
+        liftCoefficient: 0.42,
+        dragCoefficient: 0.041,
+        actualLoadFactor: 1.12,
+      },
     });
   });
 
@@ -158,11 +166,11 @@ describe("PilotPanel trajectory play mode", () => {
 
     expect(screen.queryByLabelText("Alpha")).toBeNull();
     const loadFactorInput = screen.getByLabelText("Load factor") as HTMLInputElement;
-    expect(loadFactorInput.value).toBe("1");
+    expect(loadFactorInput.value).toBe("1.414214");
 
     fireEvent.keyDown(simulationSelect, { key: "ArrowUp" });
     expect(simulationSelect.value).toBe("loadFactor");
-    expect(loadFactorInput.value).toBe("1.05");
+    expect(loadFactorInput.value).toBe("1.464214");
 
     fireEvent.change(loadFactorInput, { target: { value: "1.25" } });
     fireEvent.blur(loadFactorInput);
@@ -197,7 +205,7 @@ describe("PilotPanel trajectory play mode", () => {
     expect(simulationSelect.value).toBe("casadi");
     expect(screen.queryByLabelText("Alpha")).toBeNull();
     const loadFactorInput = screen.getByLabelText("Load factor") as HTMLInputElement;
-    expect(loadFactorInput.value).toBe("1");
+    expect(loadFactorInput.value).toBe("1.414214");
 
     fireEvent.change(loadFactorInput, { target: { value: "1.15" } });
     fireEvent.blur(loadFactorInput);

@@ -59,6 +59,7 @@ export interface PilotSnapshot {
   aero: {
     liftCoefficient: number;
     dragCoefficient: number;
+    actualLoadFactor: number;
   };
 }
 
@@ -171,6 +172,7 @@ function parsePilotSnapshot(value: unknown): PilotSnapshot {
     aero: {
       liftCoefficient: readNumber(aero, "liftCoefficient"),
       dragCoefficient: readNumber(aero, "dragCoefficient"),
+      actualLoadFactor: readNumber(aero, "actualLoadFactor"),
     },
   };
   if (simulationMode !== null) {

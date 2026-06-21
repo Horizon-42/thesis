@@ -24,6 +24,7 @@ const snapshot: PilotSnapshot = {
   aero: {
     liftCoefficient: 0.412,
     dragCoefficient: 0.038,
+    actualLoadFactor: 1.234,
   },
 };
 
@@ -49,10 +50,12 @@ describe("PilotRealtimeStatePanel", () => {
     expect(screen.getByText("Heading Angle (psi)")).toBeTruthy();
     expect(screen.getByText("Flight Path Angle (gamma)")).toBeTruthy();
     expect(screen.getByText("Attack Angle (alpha)")).toBeTruthy();
+    expect(screen.getByText("Actual n")).toBeTruthy();
     expect(screen.getByText("Drag Coefficient")).toBeTruthy();
     expect(screen.getByText("1234 m")).toBeTruthy();
     expect(screen.getByText("-14.2 deg")).toBeTruthy();
     expect(screen.getByText("3.50 deg")).toBeTruthy();
+    expect(screen.getByText("1.234 g")).toBeTruthy();
   });
 
   it("stays hidden when simulation is not flying", () => {

@@ -55,7 +55,9 @@ import {
 } from "../pilot/trajectoryOptimizationClient";
 
 const DEFAULT_SIMULATION_MODE: PilotSimulationMode = "alpha";
-const DEFAULT_LOAD_FACTOR = 1;
+const DEFAULT_BANK_DEG = 45;
+const DEFAULT_LOAD_FACTOR = 1.414214;
+const DEFAULT_THRUST_N = 67000;
 const MIN_LOAD_FACTOR = 0;
 const MAX_LOAD_FACTOR = 3;
 const DEFAULT_CONTROLS: PilotControls = makeDefaultControls(null);
@@ -1430,8 +1432,8 @@ function makeDefaultInitialState(
 
 function makeDefaultControls(aircraft: PilotAircraftConfig | null): PilotControls {
   return {
-    thrustN: aircraft?.approachThrustGuessN ?? 40000,
-    bankDeg: 0,
+    thrustN: Math.min(DEFAULT_THRUST_N, aircraft?.maxThrustN ?? DEFAULT_THRUST_N),
+    bankDeg: DEFAULT_BANK_DEG,
     attackDeg: 5.783,
     loadFactor: DEFAULT_LOAD_FACTOR,
   };

@@ -108,7 +108,7 @@ class SimulationBackend:
         return self.snapshot()
 
     def snapshot(self) -> dict[str, Any]:
-        Cl, Cd = read_snapshot_aero(
+        Cl, Cd, actual_load_factor = read_snapshot_aero(
             self.geodetic_simulator,
             self.state,
             self.control,
@@ -126,6 +126,7 @@ class SimulationBackend:
             "aero": {
                 "liftCoefficient": Cl,
                 "dragCoefficient": Cd,
+                "actualLoadFactor": actual_load_factor,
             },
         }
 
@@ -371,27 +372,42 @@ def read_snapshot_aero(
     state: GeodeticState,
     control: Control | LoadFactorControl,
     simulation_mode: str,
-) -> tuple[float, float]:
+) -> tuple[float, float, float]:
     simulator = geodetic_simulator.simulator
     if simulation_mode == "casadi" and isinstance(control, LoadFactorControl):
         return casadi_snapshot_aero(simulator, state, control)
     if simulation_mode == "loadFactor" and isinstance(control, LoadFactorControl):
-        Cl, Cd, _ = simulator.get_aerodynamic_coefficients(
+        Cl, Cd, stalled = simulator.get_aerodynamic_coefficients(
             control.load_factor,
             state.V,
             geodetic_simulator.atmosphere,
             state.altitude,
             state.m,
         )
-        return Cl, Cd
-    return simulator.get_aerodynamic_coefficients(control.attack_rad)
+        if stalled:
+            rho = geodetic_simulator.atmosphere.get_ISA_density(state.altitude)
+            actual_load_factor = (
+                0.5 * rho * state.V**2 * simulator.Cl_max * simulator.S
+                / (state.m * simulator.g)
+            )
+        else:
+            actual_load_factor = control.load_factor
+        return Cl, Cd, actual_load_factor
+
+    Cl, Cd = simulator.get_aerodynamic_coefficients(control.attack_rad)
+    rho = geodetic_simulator.atmosphere.get_ISA_density(state.altitude)
+    normal_force = (
+        0.5 * rho * state.V**2 * Cl * simulator.S
+        + control.thrust * math.sin(control.attack_rad)
+    )
+    return Cl, Cd, normal_force / (state.m * simulator.g)
 
 
 def casadi_snapshot_aero(
     simulator: CasadiSimulator,
     state: GeodeticState,
     control: LoadFactorControl,
-) -> tuple[float, float]:
+) -> tuple[float, float, float]:
     rho = Atmosphere().get_ISA_density(state.altitude)
     params = simulator.aero_params
     cl_req = control.load_factor * state.m * simulator.g / (
@@ -410,7 +426,11 @@ def casadi_snapshot_aero(
         )
         cd_stall = params.k_stall * x * x * (3.0 - 2.0 * x)
     cd = params.Cd0 + params.k * cl**2 + cd_stall
-    return cl, cd
+    actual_load_factor = (
+        0.5 * rho * state.V**2 * cl * params.S
+        / (state.m * simulator.g)
+    )
+    return cl, cd, actual_load_factor
 
 
 def aircraft_catalog() -> dict[str, Any]:

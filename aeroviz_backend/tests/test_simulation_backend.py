@@ -44,6 +44,7 @@ class TestSimulationBackend(unittest.TestCase):
             backend.geodetic_simulator.simulator.CL0
             + backend.geodetic_simulator.simulator.CL_alpha * math.radians(4.0),
         )
+        self.assertGreater(snapshot["aero"]["actualLoadFactor"], 0.0)
 
     def test_reset_clamps_thrust_with_selected_aircraft_spec(self):
         backend = SimulationBackend()
@@ -105,6 +106,7 @@ class TestSimulationBackend(unittest.TestCase):
         self.assertAlmostEqual(snapshot["control"]["loadFactor"], 1.2)
         self.assertNotIn("attackDeg", snapshot["control"])
         self.assertTrue(math.isfinite(snapshot["aero"]["liftCoefficient"]))
+        self.assertAlmostEqual(snapshot["aero"]["actualLoadFactor"], 1.2)
 
     def test_step_can_switch_to_load_factor_simulation(self):
         backend = SimulationBackend()
@@ -119,6 +121,7 @@ class TestSimulationBackend(unittest.TestCase):
         self.assertEqual(snapshot["simulationMode"], "loadFactor")
         self.assertIsInstance(backend.geodetic_simulator.simulator, LoadFactorSimulator)
         self.assertIn("loadFactor", snapshot["control"])
+        self.assertAlmostEqual(snapshot["aero"]["actualLoadFactor"], 1.0)
 
     def test_reset_can_select_casadi_simulation(self):
         backend = SimulationBackend()
@@ -142,6 +145,7 @@ class TestSimulationBackend(unittest.TestCase):
         self.assertAlmostEqual(snapshot["control"]["loadFactor"], 1.2)
         self.assertNotIn("attackDeg", snapshot["control"])
         self.assertTrue(math.isfinite(snapshot["aero"]["liftCoefficient"]))
+        self.assertAlmostEqual(snapshot["aero"]["actualLoadFactor"], 1.2)
 
     def test_step_can_switch_to_casadi_simulation(self):
         backend = SimulationBackend()
@@ -167,6 +171,7 @@ class TestSimulationBackend(unittest.TestCase):
         self.assertIsInstance(backend.geodetic_simulator.simulator, CasadiSimulator)
         self.assertIn("loadFactor", snapshot["control"])
         self.assertGreater(snapshot["state"]["lon"], 0.0)
+        self.assertAlmostEqual(snapshot["aero"]["actualLoadFactor"], 1.0)
 
     def test_rejects_unknown_simulation_mode(self):
         backend = SimulationBackend()
