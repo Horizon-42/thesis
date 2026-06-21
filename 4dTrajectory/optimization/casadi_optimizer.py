@@ -160,16 +160,33 @@ class CasadiOptimizer:
             ])
         return control_guess + state_guess
     
-    def optimize_trajectory(self, initial_state: GeodeticState, target_state: GeodeticState, duration: float | None = None):
+    @staticmethod
+    def solution_to_initial_guess(controls, states):
+        return list(controls.flatten()) + list(states.flatten())
+    
+    def optimize_trajectory(
+        self,
+        initial_state: GeodeticState,
+        target_state: GeodeticState,
+        duration: float | None = None,
+        initial_guess=None,
+    ):
         # This function can be implemented to optimize a trajectory using CasADi's NLP solvers, given an initial state and a sequence of controls.
         initial = self.geo_state_to_decision_vector(initial_state)
         target = self.geo_state_to_decision_vector(target_state)
         solve_duration = self.max_duration if duration is None else duration
         
-        x0 = self.build_initial_guess(initial, target)
+        x0 = self.build_initial_guess(initial, target) if initial_guess is None else initial_guess
 
         p = ca.vertcat(initial, target, solve_duration) # parameters for the NLP: initial state, target state, and fixed duration
-        sol = self.solver(x0=x0, lbx=self.lbw, ubx=self.ubw, lbg=self.lbg, ubg=self.ubg, p=p)
+        sol = self.solver(
+            x0=x0,
+            lbx=self.lbw,
+            ubx=self.ubw,
+            lbg=self.lbg,
+            ubg=self.ubg,
+            p=p,
+        )
         stats = self.solver.stats()
         if not stats.get("success", False):
             raise ValueError("CasADi optimization failed: " + stats.get("return_status", "unknown"))
@@ -178,14 +195,28 @@ class CasadiOptimizer:
         state_opt = w_opt[self.n_segments*3:].reshape((self.n_segments, 6))
         return solve_duration, control_opt, state_opt
     
-    def optimize_time_to_target(self, initial_state: GeodeticState, target_state: GeodeticState, max_duration: float, max_attempts: int = 10):
+    def optimize_time_to_target(
+        self,
+        initial_state: GeodeticState,
+        target_state: GeodeticState,
+        max_duration: float,
+        max_attempts: int = 10,
+    ):
         low = 0.0
         high = max_duration
+        initial_guess = None
         best_result = self.optimize_trajectory(initial_state, target_state, high)
+        initial_guess = self.solution_to_initial_guess(best_result[1], best_result[2])
         for _ in range(max_attempts):
             mid = 0.5 * (low + high)
             try:
-                best_result = self.optimize_trajectory(initial_state, target_state, mid)
+                best_result = self.optimize_trajectory(
+                    initial_state,
+                    target_state,
+                    mid,
+                    initial_guess=initial_guess,
+                )
+                initial_guess = self.solution_to_initial_guess(best_result[1], best_result[2])
                 high = mid
             except ValueError:
                 low = mid

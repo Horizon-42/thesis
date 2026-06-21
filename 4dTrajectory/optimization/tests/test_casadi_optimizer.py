@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import casadi as ca
 import numpy as np
+import pytest
 
 from aerodynamic_model.aircraft_sets import C172
 from aerodynamic_model.casadi_simulator import AeroParams
@@ -164,18 +165,56 @@ def test_optimize_trajectory_runs_real_ipopt_for_fixed_time_target():
     )
 
 
+def test_optimize_trajectory_uses_supplied_initial_guess():
+    module = load_casadi_optimizer_module()
+    optimizer = object.__new__(module.CasadiOptimizer)
+    optimizer.n_segments = 1
+    optimizer.max_duration = 10.0
+    optimizer.lbw = [0.0] * 9
+    optimizer.ubw = [100.0] * 9
+    optimizer.lbg = [0.0] * 12
+    optimizer.ubg = [0.0] * 12
+    optimizer.build_initial_guess = lambda initial, target: [99.0] * 9
+    supplied_guess = [float(i) for i in range(9)]
+
+    class FakeSolver:
+        def __call__(self, **kwargs):
+            self.kwargs = kwargs
+            return {"x": ca.DM([1.0, 2.0, 3.0, 51.0, -114.0, 1000.0, 40.0, 0.1, 0.0])}
+
+        def stats(self):
+            return {"success": True}
+
+    optimizer.solver = FakeSolver()
+    state = GeodeticState(51.0, -114.0, 1000.0, 40.0, 0.1, 0.0, C172.mass_kg)
+
+    optimizer.optimize_trajectory(
+        state,
+        state,
+        duration=5.0,
+        initial_guess=supplied_guess,
+    )
+
+    assert optimizer.solver.kwargs["x0"] == supplied_guess
+
+
 def test_optimize_time_to_target_reuses_solver_with_duration_parameter():
     module = load_casadi_optimizer_module()
     calls = []
 
     class FakeOptimizer:
         dt = 1.0
+        solution_to_initial_guess = staticmethod(module.CasadiOptimizer.solution_to_initial_guess)
 
-        def optimize_trajectory(self, initial_state, target_state, duration=None):
-            calls.append(duration)
+        def optimize_trajectory(self, initial_state, target_state, duration=None, initial_guess=None):
+            calls.append((duration, initial_guess))
             if duration < 6.0:
                 raise ValueError("too short")
-            return duration, "controls", "states"
+            return (
+                duration,
+                np.full((1, 3), duration),
+                np.full((1, 6), duration),
+            )
 
     result = module.CasadiOptimizer.optimize_time_to_target(
         FakeOptimizer(),
@@ -185,8 +224,41 @@ def test_optimize_time_to_target_reuses_solver_with_duration_parameter():
         max_attempts=3,
     )
 
-    assert result == (6.25, "controls", "states")
-    assert calls == [10.0, 5.0, 7.5, 6.25]
+    assert result[0] == 6.25
+    assert [call[0] for call in calls] == [10.0, 5.0, 7.5, 6.25]
+    assert calls[0][1] is None
+    np.testing.assert_allclose(calls[1][1], [10.0] * 9)
+    np.testing.assert_allclose(calls[2][1], [10.0] * 9)
+    np.testing.assert_allclose(calls[3][1], [7.5] * 9)
+
+
+def test_optimize_time_to_target_raises_when_first_solve_fails():
+    module = load_casadi_optimizer_module()
+    calls = []
+
+    class FakeOptimizer:
+        solution_to_initial_guess = staticmethod(module.CasadiOptimizer.solution_to_initial_guess)
+
+        def optimize_trajectory(self, initial_state, target_state, duration=None, initial_guess=None):
+            calls.append((duration, initial_guess))
+            if duration < 7.0 or duration == 10.0:
+                raise ValueError("failed")
+            return (
+                duration,
+                np.full((1, 3), duration),
+                np.full((1, 6), duration),
+            )
+
+    with pytest.raises(ValueError, match="failed"):
+        module.CasadiOptimizer.optimize_time_to_target(
+            FakeOptimizer(),
+            object(),
+            object(),
+            max_duration=10.0,
+            max_attempts=2,
+        )
+
+    assert calls == [(10.0, None)]
 
 
 def propagate_with_nominal_control(module, optimizer, state, duration):
