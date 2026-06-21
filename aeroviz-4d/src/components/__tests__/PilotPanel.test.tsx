@@ -275,7 +275,7 @@ describe("PilotPanel trajectory play mode", () => {
     expect(screen.getByText("RW05L")).toBeTruthy();
 
     expect((screen.getByRole("combobox", { name: "Optimizer" }) as HTMLSelectElement).value)
-      .toBe("casadiIpopt");
+      .toBe("casadiDirectCollocation");
     expect((screen.getByLabelText("Max iter") as HTMLInputElement).value).toBe("300");
     const optimizerSelect = screen.getByRole("combobox", { name: "Optimizer" });
     fireEvent.change(optimizerSelect, {

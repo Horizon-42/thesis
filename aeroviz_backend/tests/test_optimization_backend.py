@@ -91,10 +91,14 @@ class TestOptimizationBackend(unittest.TestCase):
         self.assertEqual(result["states"][0]["massKg"], 78000.0)
         self.assertEqual(result["states"][0]["aircraftType"], "A320")
 
-    def test_optimize_defaults_to_casadi_optimizer_with_load_factor_controls(self):
+    def test_optimize_defaults_to_direct_collocation_optimizer_with_load_factor_controls(self):
+        # The default optimiser is the fixed-ENU direct-collocation
+        # solver.  It shares the LoadFactorControl I/O shape with the
+        # casadiIpopt multiple-shooting optimiser, so the format of
+        # ``result["controls"][k]`` is unchanged.
         calls = []
 
-        class FakeCasadiOptimizer:
+        class FakeCasadiDirectCollocationOptimizer:
             def __init__(self, n_segments, dt, max_duration, aircraft):
                 calls.append({
                     "aircraft": aircraft.code,
@@ -103,7 +107,7 @@ class TestOptimizationBackend(unittest.TestCase):
                     "max_duration": max_duration,
                 })
 
-            def optimize_time_to_target(self, initial_state, target_state, max_duration):
+            def optimize_free_time(self, initial_state, target_state, max_duration):
                 calls.append({
                     "initial": initial_state,
                     "target": target_state,
@@ -118,8 +122,10 @@ class TestOptimizationBackend(unittest.TestCase):
                     ]),
                 )
 
-        original_optimizer = optimization_backend.CasadiOptimizer
-        optimization_backend.CasadiOptimizer = FakeCasadiOptimizer
+        original_optimizer = optimization_backend.CasadiDirectCollocationOptimizer
+        optimization_backend.CasadiDirectCollocationOptimizer = (
+            FakeCasadiDirectCollocationOptimizer
+        )
         try:
             result = optimization_backend.OptimizationBackend().optimize({
                 "nSegments": 2,
@@ -145,7 +151,7 @@ class TestOptimizationBackend(unittest.TestCase):
                 },
             })
         finally:
-            optimization_backend.CasadiOptimizer = original_optimizer
+            optimization_backend.CasadiDirectCollocationOptimizer = original_optimizer
 
         self.assertEqual(
             calls[0],
@@ -160,7 +166,7 @@ class TestOptimizationBackend(unittest.TestCase):
         self.assertAlmostEqual(calls[1]["target"].latitude, 51.2)
         self.assertEqual(calls[1]["max_duration"], 84.0)
         self.assertEqual(result["ok"], True)
-        self.assertEqual(result["optimizer"], "casadiIpopt")
+        self.assertEqual(result["optimizer"], "casadiDirectCollocation")
         self.assertEqual(result["finalTimeS"], 51.0)
         self.assertEqual(result["nSegments"], 2)
         self.assertEqual(result["controls"][0]["thrustN"], 15000.0)
@@ -202,6 +208,11 @@ class TestOptimizationBackend(unittest.TestCase):
 
         def make_payload(initial_lon, target_lon, dt=0.25):
             return {
+                # The default optimiser changed to direct collocation,
+                # but the multiple-shooting casadiIpopt optimiser is
+                # still cache-able; this test pins the optimiser to
+                # exercise that path.
+                "optimizer": "casadiIpopt",
                 "nSegments": 2,
                 "arrivalTimeS": 84.0,
                 "dtS": dt,
@@ -256,6 +267,73 @@ class TestOptimizationBackend(unittest.TestCase):
         self.assertAlmostEqual(solves[1]["initial_lon"], -114.0300)
         self.assertAlmostEqual(solves[1]["target_lon"], -114.2)
         self.assertEqual([solve["max_duration"] for solve in solves], [84.0, 84.0, 84.0])
+
+    def test_optimize_reuses_direct_collocation_optimizer_for_same_solver_key(self):
+        # The two CasADi optimisers share the cache slot but are keyed
+        # separately by optimiser name, so switching between them must
+        # rebuild the solver.  This test only exercises the
+        # direct-collocation cache; the casadiIpopt cache is covered
+        # above.
+        constructions = []
+        solves = []
+
+        class FakeCasadiDirectCollocationOptimizer:
+            def __init__(self, n_segments, dt, max_duration, aircraft):
+                self.instance_id = len(constructions) + 1
+                constructions.append({
+                    "aircraft": aircraft.code,
+                    "n_segments": n_segments,
+                    "dt": dt,
+                    "max_duration": max_duration,
+                })
+
+            def optimize_free_time(self, initial_state, target_state, max_duration):
+                solves.append({"instance_id": self.instance_id})
+                return (
+                    51.0,
+                    np.array([[15000.0, 0.0, 1.0]]),
+                    np.array([[51.0, -114.0, 1000.0, 130.0, 0.3, -0.05]]),
+                )
+
+        def make_payload(dt=0.25):
+            return {
+                "nSegments": 2,
+                "arrivalTimeS": 84.0,
+                "dtS": dt,
+                "maxIterations": 25,
+                "initialState": {
+                    "lon": -114.0203,
+                    "lat": 51.1139,
+                    "altM": 1084.0,
+                    "speedMps": 135.0,
+                    "headingDeg": 12.0,
+                    "flightPathDeg": -3.0,
+                    "aircraftType": "A320",
+                },
+                "targetState": {
+                    "lon": -114.1,
+                    "lat": 51.2,
+                    "altM": 900.0,
+                    "speedMps": 125.0,
+                    "headingDeg": 18.0,
+                    "flightPathDeg": -2.0,
+                },
+            }
+
+        original_optimizer = optimization_backend.CasadiDirectCollocationOptimizer
+        optimization_backend.CasadiDirectCollocationOptimizer = (
+            FakeCasadiDirectCollocationOptimizer
+        )
+        try:
+            backend = optimization_backend.OptimizationBackend()
+            backend.optimize(make_payload())
+            backend.optimize(make_payload())  # same key -> reuse
+            backend.optimize(make_payload(dt=0.2))  # new key -> rebuild
+        finally:
+            optimization_backend.CasadiDirectCollocationOptimizer = original_optimizer
+
+        self.assertEqual([c["dt"] for c in constructions], [0.25, 0.2])
+        self.assertEqual([s["instance_id"] for s in solves], [1, 1, 2])
 
     def test_optimize_can_select_single_shooting_optimizer(self):
         calls = []

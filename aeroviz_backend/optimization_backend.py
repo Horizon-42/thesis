@@ -20,6 +20,7 @@ from aeroviz_backend.simulation_backend import (
 
 from geodetic_simulator import GeodeticSimulator, GeodeticState
 from casadi_optimizer import CasadiOptimizer
+from casadi_direct_collocation_optimizer import CasadiDirectCollocationOptimizer
 from common import LoadFactorControl
 from least_squares_transcription_optimizor import LeastSquaresTranscriptionOptimizor
 from single_shooting_optimizor import SingleShootingOptimizor
@@ -36,8 +37,9 @@ DEFAULT_MAX_ITERATIONS = 1000
 MIN_ARRIVAL_TIME_S = 1.0
 MAX_ARRIVAL_TIME_S = 1000.0
 MIN_OPTIMIZATION_DT = 0.001
-DEFAULT_OPTIMIZER = "casadiIpopt"
+DEFAULT_OPTIMIZER = "casadiDirectCollocation"
 SUPPORTED_OPTIMIZERS = (
+    "casadiDirectCollocation",
     "casadiIpopt",
     "transcription",
     "leastSquaresTranscription",
@@ -45,6 +47,7 @@ SUPPORTED_OPTIMIZERS = (
     "variableTimeWarmStartTranscription",
     "singleShooting",
 )
+CASADI_OPTIMIZERS = ("casadiIpopt", "casadiDirectCollocation")
 
 
 class OptimizationBackend:
@@ -77,7 +80,18 @@ class OptimizationBackend:
             max_iterations,
             arrival_time_s=arrival_time_s,
         )
-        if optimizer_name == "casadiIpopt":
+        if optimizer_name == "casadiDirectCollocation":
+            # Direct collocation includes T as a decision variable, so
+            # one solve returns both the optimal trajectory and the
+            # optimal arrival time -- no outer bisection needed.
+            final_time, node_control, node_state = optimizer.optimize_free_time(
+                initial_state,
+                target_state,
+                arrival_time_s,
+            )
+        elif optimizer_name == "casadiIpopt":
+            # Multiple shooting uses a fixed-time NLP; finding the
+            # shortest feasible duration still requires bisecting on T.
             final_time, node_control, node_state = optimizer.optimize_time_to_target(
                 initial_state,
                 target_state,
@@ -111,16 +125,24 @@ class OptimizationBackend:
         max_iterations: int,
         arrival_time_s: float,
     ) -> Any:
-        if optimizer_name == "casadiIpopt":
+        if optimizer_name in CASADI_OPTIMIZERS:
+            # CasADi optimisers recompile a (potentially large) NLP at
+            # construction.  Caching one instance per (aircraft, mesh,
+            # dt, arrival_time, optimizer_name) avoids the cost on every
+            # request.  ``optimizer_name`` is included in the key
+            # because the multiple-shooting and direct-collocation
+            # solvers have different NLP layouts.
             aircraft = geodetic_simulator.simulator.aircraft
-            key = (aircraft.code, n_segments, dt, arrival_time_s)
+            key = (optimizer_name, aircraft.code, n_segments, dt, arrival_time_s)
             if self._casadi_optimizer_key != key:
                 self._casadi_optimizer_key = key
-                self._casadi_optimizer = CasadiOptimizer(
-                    n_segments=n_segments,
-                    dt=dt,
-                    max_duration=arrival_time_s,
-                    aircraft=aircraft,
+                self._casadi_optimizer = make_optimizer(
+                    optimizer_name,
+                    geodetic_simulator,
+                    n_segments,
+                    dt,
+                    max_iterations,
+                    arrival_time_s,
                 )
             return self._casadi_optimizer
 
@@ -156,6 +178,14 @@ def make_optimizer(
 ) -> Any:
     if optimizer_name == "casadiIpopt":
         return CasadiOptimizer(
+            n_segments=n_segments,
+            dt=dt,
+            max_duration=arrival_time_s,
+            aircraft=geodetic_simulator.simulator.aircraft,
+        )
+
+    if optimizer_name == "casadiDirectCollocation":
+        return CasadiDirectCollocationOptimizer(
             n_segments=n_segments,
             dt=dt,
             max_duration=arrival_time_s,
@@ -210,7 +240,9 @@ def format_optimizer_control(
     optimizer_name: str,
     control_values: Any,
 ) -> dict[str, float]:
-    if optimizer_name == "casadiIpopt":
+    # Both CasADi optimisers use the load-factor parameterisation
+    # (T, mu, n_cmd); the alpha-based optimisers use (T, mu, alpha).
+    if optimizer_name in CASADI_OPTIMIZERS:
         return format_control(LoadFactorControl(*control_values))
     return format_control(Control(*control_values))
 

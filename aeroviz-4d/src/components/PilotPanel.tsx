@@ -73,7 +73,7 @@ const MAX_TRAIL_POINTS = 360;
 const DEFAULT_TARGET_GAMMA_DEG = -3;
 const DEFAULT_MAX_ITERATIONS = 300;
 const DEFAULT_ARRIVAL_TIME_S = 100;
-const DEFAULT_TRAJECTORY_OPTIMIZER: TrajectoryOptimizer = "casadiIpopt";
+const DEFAULT_TRAJECTORY_OPTIMIZER: TrajectoryOptimizer = "casadiDirectCollocation";
 const FALLBACK_MAX_THRUST_N = 240000;
 
 function usesLoadFactorControl(mode: PilotSimulationMode) {
@@ -83,7 +83,13 @@ function usesLoadFactorControl(mode: PilotSimulationMode) {
 function trajectoryOptimizerSimulationMode(
   optimizer: TrajectoryOptimizer,
 ): PilotSimulationMode {
-  return optimizer === "casadiIpopt" ? "casadi" : "alpha";
+  // Both CasADi optimisers emit LoadFactorControl-shaped controls
+  // (T, mu, n_cmd), so playback must run the "casadi" simulation mode
+  // to interpret them.  All other optimisers emit alpha-based controls
+  // and play back through the alpha simulator.
+  return optimizer === "casadiIpopt" || optimizer === "casadiDirectCollocation"
+    ? "casadi"
+    : "alpha";
 }
 
 type PilotPanelMode = "pilot" | "trajectory";
@@ -1184,6 +1190,7 @@ export default function PilotPanel() {
                   updateTrajectoryOptimizer(event.target.value as TrajectoryOptimizer)
                 }
               >
+                <option value="casadiDirectCollocation">CasADi direct collocation (fixed ENU)</option>
                 <option value="casadiIpopt">CasADi IPOPT</option>
                 <option value="transcription">Transcription</option>
                 <option value="leastSquaresTranscription">Least squares</option>

@@ -1,6 +1,7 @@
 import { AEROVIZ_BACKEND_URL, type PilotControls, type PilotResetState } from "./pilotClient";
 
 export type TrajectoryOptimizer =
+  | "casadiDirectCollocation"
   | "casadiIpopt"
   | "transcription"
   | "leastSquaresTranscription"
@@ -83,6 +84,7 @@ function parseTrajectoryOptimizationResult(
 function readOptimizer(value: Record<string, unknown>): TrajectoryOptimizer {
   const nested = value.optimizer;
   if (
+    nested === "casadiDirectCollocation" ||
     nested === "casadiIpopt" ||
     nested === "transcription" ||
     nested === "leastSquaresTranscription" ||
