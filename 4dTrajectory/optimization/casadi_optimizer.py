@@ -2,6 +2,8 @@ import math
 
 import casadi as ca
 from aerodynamic_model.casadi_simulator import make_geo_step_from_enu_integrator, AeroParams
+from aerodynamic_model.aircraft_sets import AircraftSpec
+from aerodynamic_model.common import GeodeticState
 
 def segement_integrate_expr(step_func, x_start, u, aero_params, dt:float, duration: float, n_steps: int):
     dt_step = duration / n_steps
@@ -30,10 +32,10 @@ def make_state_bounds():
     gamma_min, gamma_max = -ca.pi/2, ca.pi/2  # flight path angle in radians
     return [lat_min, lon_min, alt_min, V_min, psi_min, gamma_min], [lat_max, lon_max, alt_max, V_max, psi_max, gamma_max]
 
-def geo_state_to_decision_vector(state):
+def state_vector_to_decision_vector(state):
     return state[:6] # exclude mass from optimization state, it is constant in this model
 
-def decision_vector_to_geo_state(vec, mass):
+def decision_vector_to_state_vector(vec, mass):
     return ca.vertcat(vec[0], vec[1], vec[2], vec[3], vec[4], vec[5], mass)
 
 def make_multiple_shooting_solver(segment_num: int, dt: float, max_duration: float, aero_params_obj: AeroParams, aircraft_meta:dict):
@@ -56,7 +58,7 @@ def make_multiple_shooting_solver(segment_num: int, dt: float, max_duration: flo
 
     segment_duration = duration / segment_num
     segment_substeps = max(1, math.ceil((max_duration / segment_num) / dt))
-    xk = geo_state_to_decision_vector(start_state) # exclude mass from optimization state, it is constant in this model
+    xk = state_vector_to_decision_vector(start_state) # exclude mass from optimization state, it is constant in this model
     seg_states = []
     
     seg_controls = []
@@ -67,9 +69,9 @@ def make_multiple_shooting_solver(segment_num: int, dt: float, max_duration: flo
         uk = ca.SX.sym(f'u_{k}', 3)
         seg_controls.append(uk)
 
-        cur_geo_state = decision_vector_to_geo_state(xk, start_state[6]) # reconstruct the full geodetic state with mass for integration
+        cur_geo_state = decision_vector_to_state_vector(xk, start_state[6]) # reconstruct the full geodetic state with mass for integration
         cur_geo_state = segement_integrate_expr(step_func, cur_geo_state, uk, aero_params, dt, segment_duration, segment_substeps)
-        xk_next = geo_state_to_decision_vector(cur_geo_state) # convert back to optimization state format for the next segment
+        xk_next = state_vector_to_decision_vector(cur_geo_state) # convert back to optimization state format for the next segment
         xk_next_sym = ca.SX.sym(f'x_{k+1}', 6)
 
         # Add defect constraint
@@ -107,3 +109,65 @@ def make_multiple_shooting_solver(segment_num: int, dt: float, max_duration: flo
     solver = ca.nlpsol('solver', 'ipopt', nlp)
 
     return solver, lbw, ubw, lbg, ubg
+
+class CasadiOptimizer:
+    def __init__(self, n_segments: int, dt: float, max_duration: float, aircraft: AircraftSpec):
+        if n_segments < 2:
+            raise ValueError("n_segments must be at least 2 for this multiple-shooting NLP")
+        self.n_segments = n_segments
+        self.dt = dt
+        self.max_duration = max_duration
+        self.aircraft = aircraft
+        # build AeroParams from aircraft spec
+        self.aero_params = AeroParams(S=aircraft.wing_area_m2)
+        self.solver, self.lbw, self.ubw, self.lbg, self.ubg = make_multiple_shooting_solver(
+            segment_num=n_segments,
+            dt=dt,
+            max_duration=max_duration,
+            aero_params_obj=self.aero_params,
+            aircraft_meta={
+                "max_thrust": aircraft.max_thrust_n,
+                "min_load_factor": 0.5,
+                "max_load_factor": 2, # need to check the actual limits for the aircraft, these are just example values
+            },)
+    
+    @staticmethod
+    def geo_state_to_decision_vector(state: GeodeticState):
+        return [state.latitude, state.longitude, state.altitude, state.V, state.psi, state.gamma, state.m]
+    
+    @staticmethod    
+    def decision_vector_to_geo_state(vec):
+        return GeodeticState(*vec.tolist())
+    
+    def optimize_trajectory(self, initial_state: GeodeticState, target_state: GeodeticState):
+        # This function can be implemented to optimize a trajectory using CasADi's NLP solvers, given an initial state and a sequence of controls.
+        initial = self.geo_state_to_decision_vector(initial_state)
+        target = self.geo_state_to_decision_vector(target_state)
+        duration_guess = (
+            0.0
+            if initial[:6] == target[:6]
+            else self.max_duration / 2
+        )
+        control_guess = [
+            self.aircraft.approach_thrust_guess_n,
+            0.0,
+            1.0,
+        ] * self.n_segments
+        state_guess = []
+        for k in range(self.n_segments):
+            ratio = (k + 1) / self.n_segments
+            state_guess.extend([
+                initial[i] + (target[i] - initial[i]) * ratio
+                for i in range(6)
+            ])
+        x0 = [duration_guess] + control_guess + state_guess
+        p = ca.vertcat(initial, target) # parameters for the NLP: initial and target states
+        sol = self.solver(x0=x0, lbx=self.lbw, ubx=self.ubw, lbg=self.lbg, ubg=self.ubg, p=p)
+        stats = self.solver.stats()
+        if not stats.get("success", False):
+            raise ValueError("CasADi optimization failed: " + stats.get("return_status", "unknown"))
+        w_opt = sol['x'].full().flatten()
+        duration_opt = min(max(w_opt[0], self.lbw[0]), self.ubw[0])
+        control_opt = w_opt[1:1+self.n_segments*3].reshape((self.n_segments, 3))
+        state_opt = w_opt[1+self.n_segments*3:].reshape((self.n_segments, 6))
+        return duration_opt, control_opt, state_opt
