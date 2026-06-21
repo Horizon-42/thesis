@@ -179,6 +179,25 @@ Each flight additionally carries `landing_time_utc` (the absolute time it reache
 threshold). The files are standard CZML input and render directly through
 `generate_czml.py`.
 
+### Resume & caching (re-running)
+
+There are two layers, and they behave differently:
+
+- **Output resume (default).** On each run the existing `*_landings.json` files are
+  loaded; thresholds already at `--count` are **not** re-collected, and an airport
+  whose thresholds are all satisfied is skipped entirely (no query). New landings are
+  merged and de-duplicated by `(icao24, landing_time_utc)`. Pass `--overwrite` to
+  ignore existing files and refetch from scratch.
+- **Trino query cache (`traffic`).** Each history query result is cached to
+  `~/Library/Caches/opensky` keyed by the exact `(airport, time window, columns)`.
+  Re-querying the **same window** never re-hits Trino. **Caveat:** `--start` defaults
+  to *now*, so each run uses different windows and misses the cache — pass a **fixed
+  `--start`** (and the same `--chunk-hours`) to reuse it.
+
+Note: a runway end that is idle in the requested period legitimately yields few or no
+landings, so its airport keeps scanning back to `--max-lookback-days` on every run.
+Bound the search with `--max-lookback-days` rather than chasing those ends.
+
 ## 8. Notes
 
 - Geometric altitude is mandatory: points without `geoaltitude` are dropped, and a

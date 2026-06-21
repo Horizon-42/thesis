@@ -92,14 +92,24 @@ def download_airport_landings(
     approach_window_min: int = 25,
     segment_gap_sec: int = 900,
     cached: bool = True,
+    preloaded: dict[str, list[dict[str, Any]]] | None = None,
     fetch_history_fn: FetchHistory = fetch_history_dataframe,
 ) -> dict[str, list[dict[str, Any]]]:
     """Collect up to ``count`` landings for each threshold, scanning backward.
 
-    Returns a mapping of runway-threshold ident to a list of CZML-input flights.
+    ``preloaded`` seeds already-collected flights per threshold (for resume): a
+    threshold already at ``count`` triggers no queries, and new landings are
+    de-duplicated against the preloaded ones. Returns a mapping of runway-threshold
+    ident to a list of CZML-input flights.
     """
-    collected: dict[str, list[dict[str, Any]]] = {t.ident: [] for t in thresholds}
-    seen: dict[str, set[tuple[str, str | None]]] = {t.ident: set() for t in thresholds}
+    preloaded = preloaded or {}
+    collected: dict[str, list[dict[str, Any]]] = {
+        t.ident: list(preloaded.get(t.ident, []))[:count] for t in thresholds
+    }
+    seen: dict[str, set[tuple[str, str | None]]] = {
+        t.ident: {(f["icao24"], f.get("landing_time_utc")) for f in collected[t.ident]}
+        for t in thresholds
+    }
 
     earliest = start - timedelta(days=max_lookback_days)
     cursor = start

@@ -76,6 +76,32 @@ class LandingDownloadTests(unittest.TestCase):
         self.assertGreaterEqual(fetch.calls, 2)
 
 
+class ResumeTests(unittest.TestCase):
+    def test_preloaded_at_count_makes_no_queries(self) -> None:
+        fetch = _StubFetch(_landing_df(), always=True)
+        preloaded = {"23R": [{"icao24": "old1", "landing_time_utc": "2026-04-01T00:00:00Z", "runway": "23R"}]}
+
+        collected = download_airport_landings(
+            profile=PROFILE, thresholds=[THRESHOLD], count=1, start=START,
+            max_lookback_days=1.0, preloaded=preloaded, fetch_history_fn=fetch,
+        )
+
+        self.assertEqual(fetch.calls, 0)            # already satisfied: no download
+        self.assertEqual(collected["23R"], preloaded["23R"])
+
+    def test_preloaded_partial_merges_and_dedupes(self) -> None:
+        fetch = _StubFetch(_landing_df(), always=True)
+        preloaded = {"23R": [{"icao24": "old1", "landing_time_utc": "2026-04-01T00:00:00Z", "runway": "23R"}]}
+
+        collected = download_airport_landings(
+            profile=PROFILE, thresholds=[THRESHOLD], count=2, start=START,
+            max_lookback_days=0.75, preloaded=preloaded, fetch_history_fn=fetch,
+        )
+
+        self.assertEqual(len(collected["23R"]), 2)  # kept the old one, added one new landing
+        self.assertEqual(collected["23R"][0]["icao24"], "old1")
+
+
 class PreflightTests(unittest.TestCase):
     def test_probes_once_and_returns_on_success(self) -> None:
         fetch = _StubFetch(_landing_df(), always=True)
