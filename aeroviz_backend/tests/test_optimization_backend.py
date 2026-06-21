@@ -168,6 +168,91 @@ class TestOptimizationBackend(unittest.TestCase):
         self.assertAlmostEqual(result["states"][1]["lat"], 51.2)
         self.assertAlmostEqual(result["states"][1]["headingDeg"], np.degrees(0.31))
 
+    def test_optimize_reuses_casadi_optimizer_for_same_solver_key(self):
+        constructions = []
+        solves = []
+
+        class FakeCasadiOptimizer:
+            def __init__(self, n_segments, dt, max_duration, aircraft):
+                self.instance_id = len(constructions) + 1
+                constructions.append({
+                    "aircraft": aircraft.code,
+                    "n_segments": n_segments,
+                    "dt": dt,
+                    "max_duration": max_duration,
+                })
+
+            def optimize_trajectory(self, initial_state, target_state):
+                solves.append({
+                    "instance_id": self.instance_id,
+                    "initial_lon": initial_state.longitude,
+                    "target_lon": target_state.longitude,
+                })
+                return (
+                    51.0,
+                    np.array([[15000.0, 0.1, 1.2], [14000.0, 0.0, 1.0]]),
+                    np.array([
+                        [51.0, -114.0, 1000.0, 130.0, 0.3, -0.05],
+                        [51.2, -114.1, 900.0, 125.0, 0.31, -0.04],
+                    ]),
+                )
+
+        def make_payload(initial_lon, target_lon, dt=0.25):
+            return {
+                "nSegments": 2,
+                "arrivalTimeS": 84.0,
+                "dtS": dt,
+                "maxIterations": 25,
+                "initialState": {
+                    "lon": initial_lon,
+                    "lat": 51.1139,
+                    "altM": 1084.0,
+                    "speedMps": 135.0,
+                    "headingDeg": 12.0,
+                    "flightPathDeg": -3.0,
+                    "aircraftType": "A320",
+                },
+                "targetState": {
+                    "lon": target_lon,
+                    "lat": 51.2,
+                    "altM": 900.0,
+                    "speedMps": 125.0,
+                    "headingDeg": 18.0,
+                    "flightPathDeg": -2.0,
+                },
+            }
+
+        original_optimizer = optimization_backend.CasadiOptimizer
+        optimization_backend.CasadiOptimizer = FakeCasadiOptimizer
+        try:
+            backend = optimization_backend.OptimizationBackend()
+            backend.optimize(make_payload(-114.0203, -114.1))
+            backend.optimize(make_payload(-114.0300, -114.2))
+            backend.optimize(make_payload(-114.0300, -114.2, dt=0.2))
+        finally:
+            optimization_backend.CasadiOptimizer = original_optimizer
+
+        self.assertEqual(
+            constructions,
+            [
+                {
+                    "aircraft": "A320",
+                    "n_segments": 2,
+                    "dt": 0.25,
+                    "max_duration": 84.0,
+                },
+                {
+                    "aircraft": "A320",
+                    "n_segments": 2,
+                    "dt": 0.2,
+                    "max_duration": 84.0,
+                },
+            ],
+        )
+        self.assertEqual([solve["instance_id"] for solve in solves], [1, 1, 2])
+        self.assertAlmostEqual(solves[1]["initial_lon"], -114.0300)
+        self.assertAlmostEqual(solves[1]["target_lon"], -114.2)
+
     def test_optimize_can_select_single_shooting_optimizer(self):
         calls = []
 

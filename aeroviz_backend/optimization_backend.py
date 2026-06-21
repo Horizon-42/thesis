@@ -48,6 +48,10 @@ SUPPORTED_OPTIMIZERS = (
 
 
 class OptimizationBackend:
+    def __init__(self) -> None:
+        self._casadi_optimizer_key = None
+        self._casadi_optimizer = None
+
     def optimize(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = payload or {}
         initial_payload = read_required_mapping(payload, "initialState")
@@ -65,7 +69,7 @@ class OptimizationBackend:
 
         initial_state = read_geodetic_state(initial_payload, DEFAULT_STATE, aircraft)
         target_state = read_geodetic_state(target_payload, initial_state, aircraft)
-        optimizer = make_optimizer(
+        optimizer = self.make_optimizer(
             optimizer_name,
             GeodeticSimulator(aircraft),
             n_segments,
@@ -90,6 +94,37 @@ class OptimizationBackend:
             ],
             "states": format_node_states(node_state, initial_state.m, aircraft.code),
         }
+
+    def make_optimizer(
+        self,
+        optimizer_name: str,
+        geodetic_simulator: GeodeticSimulator,
+        n_segments: int,
+        dt: float,
+        max_iterations: int,
+        arrival_time_s: float,
+    ) -> Any:
+        if optimizer_name == "casadiIpopt":
+            aircraft = geodetic_simulator.simulator.aircraft
+            key = (aircraft.code, n_segments, dt, arrival_time_s)
+            if self._casadi_optimizer_key != key:
+                self._casadi_optimizer_key = key
+                self._casadi_optimizer = CasadiOptimizer(
+                    n_segments=n_segments,
+                    dt=dt,
+                    max_duration=arrival_time_s,
+                    aircraft=aircraft,
+                )
+            return self._casadi_optimizer
+
+        return make_optimizer(
+            optimizer_name,
+            geodetic_simulator,
+            n_segments,
+            dt,
+            max_iterations,
+            arrival_time_s,
+        )
 
 
 def read_optimizer(payload: dict[str, Any]) -> str:
