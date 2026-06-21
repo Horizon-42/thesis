@@ -88,7 +88,7 @@ def download_airport_landings(
     start: datetime,
     max_lookback_days: float,
     chunk_hours: float = 6.0,
-    runway_threshold_radius_m: float = 600.0,
+    runway_threshold_radius_m: float = 1000.0,
     approach_window_min: int = 25,
     segment_gap_sec: int = 900,
     cached: bool = True,

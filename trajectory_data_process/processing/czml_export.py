@@ -32,18 +32,22 @@ def trajectory_to_czml_flight(
     approach_window_min: int = 20,
     exclude_ground: bool = False,
     runway_threshold: RunwayThreshold | None = None,
-    runway_threshold_radius_m: float = 600.0,
+    runway_threshold_radius_m: float = 1000.0,
     landing_only: bool = False,
-    landing_agl_m: float = 150.0,
     descent_margin_m: float = 300.0,
+    heading_tolerance_deg: float = 35.0,
 ) -> dict[str, Any] | None:
     """Convert one trajectory to a CZML-input flight, or ``None`` if it is not a
     relevant arrival at the airport (or the requested runway threshold).
 
     With ``landing_only`` (which requires ``runway_threshold``) the trajectory is
-    kept only when it actually lands at that threshold: its closest point reaches
-    low altitude over the threshold (within ``landing_agl_m``) after descending
-    from at least ``descent_margin_m`` higher earlier — which excludes departures.
+    kept only when it lands at that threshold: its closest point passes within
+    ``runway_threshold_radius_m`` of the threshold while tracking the runway heading
+    (within ``heading_tolerance_deg``) and having descended at least
+    ``descent_margin_m`` from earlier in the track. Real ADS-B coverage rarely
+    reaches the ground near a runway, so this keys off the aligned descent rather
+    than a touchdown altitude; the heading test separates the two runway ends and
+    excludes climbing departures.
     """
     points = traj.points
     if len(points) < 2:
@@ -67,7 +71,7 @@ def trajectory_to_czml_flight(
     if landing_only:
         if runway_threshold is None:
             raise ValueError("landing_only requires a runway_threshold")
-        if not _is_landing(points, anchor_index, runway_threshold, landing_agl_m, descent_margin_m):
+        if not _is_landing(points, anchor_index, runway_threshold, descent_margin_m, heading_tolerance_deg):
             return None
 
     window = _approach_window(points, anchor_index, approach_window_min)
@@ -105,7 +109,7 @@ def trajectories_to_czml_input(
     approach_window_min: int = 20,
     exclude_ground: bool = False,
     runway_threshold: RunwayThreshold | None = None,
-    runway_threshold_radius_m: float = 600.0,
+    runway_threshold_radius_m: float = 1000.0,
     landing_only: bool = False,
     max_flights: int = 80,
 ) -> list[dict[str, Any]]:
@@ -184,24 +188,34 @@ def _is_landing(
     points: list[TrajectoryPoint],
     anchor_index: int,
     threshold: RunwayThreshold,
-    landing_agl_m: float,
     descent_margin_m: float,
+    heading_tolerance_deg: float,
 ) -> bool:
-    """True if the anchor reaches the runway after descending from higher up.
+    """True if the trajectory descends toward the threshold along the runway heading.
 
-    Geometric altitude carries a geoid offset versus the threshold's MSL elevation,
-    so the thresholds are deliberately generous: ``landing_agl_m`` only needs to be
-    near the runway, and the descent check (a clearly higher earlier point) is what
-    separates a landing from a departure.
+    The anchor is the closest point to the threshold (already within range). A
+    landing tracks the runway heading there and has descended at least
+    ``descent_margin_m`` from earlier in the track — which rejects the opposite
+    runway end (heading ~180 deg off) and climbing departures (no prior descent).
     """
-    anchor_geo = points[anchor_index].geo_altitude_m
-    if anchor_geo is None or anchor_geo - threshold.elevation_m > landing_agl_m:
+    anchor = points[anchor_index]
+    if (
+        threshold.heading_deg is not None
+        and anchor.heading_deg is not None
+        and _heading_diff(anchor.heading_deg, threshold.heading_deg) > heading_tolerance_deg
+    ):
         return False
-    return any(
-        points[i].geo_altitude_m is not None
-        and points[i].geo_altitude_m - threshold.elevation_m >= descent_margin_m
-        for i in range(anchor_index)
-    )
+
+    anchor_geo = anchor.geo_altitude_m
+    if anchor_geo is None:
+        return False
+    earlier = [points[i].geo_altitude_m for i in range(anchor_index) if points[i].geo_altitude_m is not None]
+    return bool(earlier) and max(earlier) - anchor_geo >= descent_margin_m
+
+
+def _heading_diff(a: float, b: float) -> float:
+    """Smallest absolute difference between two headings in degrees (0–180)."""
+    return min((a - b) % 360.0, (b - a) % 360.0)
 
 
 def _iso_utc(unix_seconds: int) -> str:

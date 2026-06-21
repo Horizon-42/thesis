@@ -37,6 +37,11 @@ AIRPORT_HISTORY_COLUMNS = (
     "FlightsData4.estarrivalairport",
 )
 
+# ``traffic`` returns altitudes in feet (its aviation-unit convention), whereas the
+# rest of this package works in metres. Convert these columns on the way out.
+FEET_TO_M = 0.3048
+ALTITUDE_COLUMNS = ("altitude", "geoaltitude", "baroaltitude")
+
 
 def require_traffic_opensky() -> Any:
     """Import and return ``traffic.data.opensky`` with a focused error message."""
@@ -73,7 +78,7 @@ def fetch_history_dataframe(
     if bounds:
         kwargs["bounds"] = bounds
     try:
-        return _as_dataframe(opensky.history(**kwargs))
+        return _altitudes_to_metres(_as_dataframe(opensky.history(**kwargs)))
     except Exception as e:  # noqa: BLE001 - turn DB driver errors into actionable guidance.
         if "PERMISSION_DENIED" in str(e) or "Access Denied" in str(e):
             raise RuntimeError(
@@ -84,6 +89,14 @@ def fetch_history_dataframe(
                 "OPENSKY_PASSWORD environment variables (note: OPENSKY_USER is not read)."
             ) from e
         raise
+
+
+def _altitudes_to_metres(df: pd.DataFrame) -> pd.DataFrame:
+    """Convert traffic's feet-based altitude columns to metres in place."""
+    for column in ALTITUDE_COLUMNS:
+        if column in df.columns:
+            df[column] = pd.to_numeric(df[column], errors="coerce") * FEET_TO_M
+    return df
 
 
 def _as_dataframe(result: Any) -> pd.DataFrame:

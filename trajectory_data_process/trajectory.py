@@ -25,6 +25,18 @@ import pandas as pd
 # bare name below.
 CORE_COLUMNS = ("time", "icao24", "lat", "lon")
 
+# ``traffic`` renames the raw OpenSky columns to its own vocabulary before handing
+# back a dataframe. Map both the raw names and traffic's names to one internal set.
+COLUMN_ALIASES = {
+    "timestamp": "time",
+    "latitude": "lat",
+    "longitude": "lon",
+    "altitude": "baroaltitude",
+    "track": "heading",
+    "groundspeed": "velocity",
+    "vertical_rate": "vertrate",
+}
+
 
 @dataclass(frozen=True)
 class TrajectoryPoint:
@@ -67,9 +79,11 @@ class Trajectory:
 
 
 def canonical_column(column: object) -> str:
-    """Map a traffic/pyopensky column label to its bare lowercase name."""
+    """Map a traffic/pyopensky column label to its internal canonical name."""
     text = str(column).strip().strip('"').lower()
-    return text.rsplit(".", 1)[-1] if "." in text else text
+    if "." in text:
+        text = text.rsplit(".", 1)[-1]
+    return COLUMN_ALIASES.get(text, text)
 
 
 def normalize_history_dataframe(df: pd.DataFrame) -> pd.DataFrame:

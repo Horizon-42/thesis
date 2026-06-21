@@ -162,8 +162,11 @@ For each airport it issues **one history query per time chunk** and reuses the
 trajectories for all of that airport's thresholds, scanning backward from `--start`
 (default: now) in `--chunk-hours` steps until each threshold has `--count` landings or
 `--max-lookback-days` is reached. A trajectory counts as a landing at a threshold when
-its closest point reaches low altitude over the threshold after descending from higher
-up — which excludes departures.
+its closest point passes within `--runway-threshold-radius-m` of the threshold while
+**tracking the runway heading** and having **descended** from earlier in the track.
+The heading test picks the correct runway end and the descent test excludes climbing
+departures — this works even though real ADS-B coverage rarely reaches the ground near
+a runway (tracks typically end a few hundred feet up on short final).
 
 Output (one CZML-input file per threshold, plus a summary):
 

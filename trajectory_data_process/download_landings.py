@@ -38,7 +38,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--start", default=None, help="Scan backward from this UTC time (ISO, default: now)")
     p.add_argument("--max-lookback-days", type=float, default=30.0)
     p.add_argument("--chunk-hours", type=float, default=6.0)
-    p.add_argument("--runway-threshold-radius-m", type=float, default=600.0)
+    p.add_argument("--runway-threshold-radius-m", type=float, default=1000.0)
     p.add_argument("--output-root", default=str(here / "outputs" / "landings"))
     return p.parse_args()
 
