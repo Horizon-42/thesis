@@ -112,7 +112,7 @@ class OptimizationBackend:
                 self._casadi_optimizer = CasadiOptimizer(
                     n_segments=n_segments,
                     dt=dt,
-                    max_duration=arrival_time_s,
+                    duration=arrival_time_s,
                     aircraft=aircraft,
                 )
             return self._casadi_optimizer
@@ -151,7 +151,7 @@ def make_optimizer(
         return CasadiOptimizer(
             n_segments=n_segments,
             dt=dt,
-            max_duration=arrival_time_s,
+            duration=arrival_time_s,
             aircraft=geodetic_simulator.simulator.aircraft,
         )
 

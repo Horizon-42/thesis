@@ -67,20 +67,22 @@ def test_make_multiple_shooting_solver_builds_symbolic_nlp(monkeypatch):
     solver, lbw, ubw, lbg, ubg = module.make_multiple_shooting_solver(
         segment_num=2,
         dt=0.5,
-        max_duration=10.0,
+        duration=10.0,
         aero_params_obj=AeroParams(S=122.6),
         aircraft_meta={
             "max_thrust": 240000.0,
             "min_load_factor": 0.0,
             "max_load_factor": 3.0,
+            "min_terminal_speed": 0.0,
+            "min_altitude": 0.0,
         },
     )
 
     assert solver.name == "solver"
     assert captured["plugin"] == "ipopt"
-    assert captured["nlp"]["x"].shape == (1 + 2 * 3 + 2 * 6, 1)
+    assert captured["nlp"]["x"].shape == (2 * 3 + 2 * 6, 1)
     assert captured["nlp"]["g"].shape == (2 * 6 + 6, 1)
-    assert len(lbw) == len(ubw) == 1 + 2 * 3 + 2 * 6
+    assert len(lbw) == len(ubw) == 2 * 3 + 2 * 6
     assert len(lbg) == len(ubg) == 2 * 6 + 6
 
 
@@ -101,51 +103,78 @@ def test_make_multiple_shooting_solver_uses_pure_symbolic_parameters(monkeypatch
     module.make_multiple_shooting_solver(
         segment_num=1,
         dt=0.5,
-        max_duration=10.0,
+        duration=10.0,
         aero_params_obj=AeroParams(S=122.6),
         aircraft_meta={
             "max_thrust": 240000.0,
             "min_load_factor": 0.0,
             "max_load_factor": 3.0,
+            "min_terminal_speed": 0.0,
+            "min_altitude": 0.0,
         },
     )
 
     assert captured["nlp"]["p"].is_symbolic()
 
 
-def test_optimize_trajectory_runs_real_ipopt_for_stationary_target():
+def test_optimize_trajectory_runs_real_ipopt_for_fixed_time_target():
     module = load_casadi_optimizer_module()
+    duration = 0.2
+    speed = C172.terminal_speed_kt * 0.51444 + 5.0
     state = GeodeticState(
         latitude=51.1139,
         longitude=-114.0203,
         altitude=1000.0,
-        V=35.0,
+        V=speed,
         psi=0.0,
         gamma=0.0,
         m=C172.mass_kg,
     )
     optimizer = module.CasadiOptimizer(
         n_segments=2,
-        dt=0.5,
-        max_duration=1.0,
+        dt=0.1,
+        duration=duration,
         aircraft=C172,
     )
+    target = propagate_with_nominal_control(module, optimizer, state)
 
-    duration, controls, states = optimizer.optimize_trajectory(state, state)
+    duration_opt, controls, states = optimizer.optimize_trajectory(state, target)
 
     assert optimizer.solver.stats()["success"]
-    assert 0.0 <= duration <= 1.0
+    assert duration_opt == duration
     assert controls.shape == (2, 3)
     assert states.shape == (2, 6)
     np.testing.assert_allclose(
         states[-1],
         np.array([
-            state.latitude,
-            state.longitude,
-            state.altitude,
-            state.V,
-            state.psi,
-            state.gamma,
+            target.latitude,
+            target.longitude,
+            target.altitude,
+            target.V,
+            target.psi,
+            target.gamma,
         ]),
         atol=1e-5,
     )
+
+
+def propagate_with_nominal_control(module, optimizer, state):
+    step_func = module.make_geo_step_from_enu_integrator()["step_func"]
+    x = ca.DM(optimizer.geo_state_to_decision_vector(state))
+    u = ca.DM([C172.approach_thrust_guess_n, 0.0, 1.0])
+    aero_params = ca.DM([
+        optimizer.aero_params.S,
+        optimizer.aero_params.Cl_max,
+        optimizer.aero_params.Cd0,
+        optimizer.aero_params.k,
+        optimizer.aero_params.stall_threshold,
+        optimizer.aero_params.k_stall,
+    ])
+    for _ in range(optimizer.n_segments):
+        x = step_func(
+            x_geo=x,
+            u=u,
+            aero_params=aero_params,
+            dt=optimizer.duration / optimizer.n_segments,
+        )["x_geo_next"]
+    return GeodeticState(*np.array(x, dtype=float).reshape(-1).tolist())

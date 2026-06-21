@@ -95,12 +95,12 @@ class TestOptimizationBackend(unittest.TestCase):
         calls = []
 
         class FakeCasadiOptimizer:
-            def __init__(self, n_segments, dt, max_duration, aircraft):
+            def __init__(self, n_segments, dt, duration, aircraft):
                 calls.append({
                     "aircraft": aircraft.code,
                     "n_segments": n_segments,
                     "dt": dt,
-                    "max_duration": max_duration,
+                    "duration": duration,
                 })
 
             def optimize_trajectory(self, initial_state, target_state):
@@ -152,7 +152,7 @@ class TestOptimizationBackend(unittest.TestCase):
                 "aircraft": "A320",
                 "n_segments": 2,
                 "dt": 0.25,
-                "max_duration": 84.0,
+                "duration": 84.0,
             },
         )
         self.assertAlmostEqual(calls[1]["initial"].longitude, -114.0203)
@@ -173,13 +173,13 @@ class TestOptimizationBackend(unittest.TestCase):
         solves = []
 
         class FakeCasadiOptimizer:
-            def __init__(self, n_segments, dt, max_duration, aircraft):
+            def __init__(self, n_segments, dt, duration, aircraft):
                 self.instance_id = len(constructions) + 1
                 constructions.append({
                     "aircraft": aircraft.code,
                     "n_segments": n_segments,
                     "dt": dt,
-                    "max_duration": max_duration,
+                    "duration": duration,
                 })
 
             def optimize_trajectory(self, initial_state, target_state):
@@ -239,13 +239,13 @@ class TestOptimizationBackend(unittest.TestCase):
                     "aircraft": "A320",
                     "n_segments": 2,
                     "dt": 0.25,
-                    "max_duration": 84.0,
+                    "duration": 84.0,
                 },
                 {
                     "aircraft": "A320",
                     "n_segments": 2,
                     "dt": 0.2,
-                    "max_duration": 84.0,
+                    "duration": 84.0,
                 },
             ],
         )

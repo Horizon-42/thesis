@@ -38,7 +38,7 @@ def state_vector_to_decision_vector(state):
 def decision_vector_to_state_vector(vec, mass):
     return ca.vertcat(vec[0], vec[1], vec[2], vec[3], vec[4], vec[5], mass)
 
-def make_multiple_shooting_solver(segment_num: int, dt: float, max_duration: float, aero_params_obj: AeroParams, aircraft_meta:dict):
+def make_multiple_shooting_solver(segment_num: int, dt: float, duration: float, aero_params_obj: AeroParams, aircraft_meta:dict):
     # State lat, lon, alt, V, psi, gamma
     # Control T, mu, n_cmd
 
@@ -47,17 +47,15 @@ def make_multiple_shooting_solver(segment_num: int, dt: float, max_duration: flo
     start_state = ca.SX.sym('start_state', 7) # excluding mass
     target_state = ca.SX.sym('target_state', 7)
 
-    duration = ca.SX.sym('duration') # total duration of the trajectory, the optimization object
-
     step_func = make_geo_step_from_enu_integrator()['step_func']
 
     # start with an empty NLP
-    w = [duration] # decision variable list, starting with duration
-    lbw = [max_duration/3.0] # lower bounds on decision variables
-    ubw = [max_duration] # upper bounds on decision variables
+    w = []
+    lbw = []
+    ubw = []
 
     segment_duration = duration / segment_num
-    segment_substeps = max(1, math.ceil((max_duration / segment_num) / dt))
+    segment_substeps = max(1, math.ceil(segment_duration / dt))
     xk = state_vector_to_decision_vector(start_state) # exclude mass from optimization state, it is constant in this model
     seg_states = []
     
@@ -105,7 +103,7 @@ def make_multiple_shooting_solver(segment_num: int, dt: float, max_duration: flo
     lbg = [0.0] * g.shape[0] # equality constraints
     ubg = [0.0] * g.shape[0]
 
-    nlp = {'f': duration, 'x': ca.vertcat(*w), 'g': g, 'p': ca.vertcat(start_state, target_state)}
+    nlp = {'f': ca.SX(0), 'x': ca.vertcat(*w), 'g': g, 'p': ca.vertcat(start_state, target_state)}
     # opts = {
     #     "ipopt.max_cpu_time": 10,
     #     "ipopt.max_iter": 200,
@@ -116,19 +114,19 @@ def make_multiple_shooting_solver(segment_num: int, dt: float, max_duration: flo
     return solver, lbw, ubw, lbg, ubg
 
 class CasadiOptimizer:
-    def __init__(self, n_segments: int, dt: float, max_duration: float, aircraft: AircraftSpec):
+    def __init__(self, n_segments: int, dt: float, duration: float, aircraft: AircraftSpec):
         if n_segments < 2:
             raise ValueError("n_segments must be at least 2 for this multiple-shooting NLP")
         self.n_segments = n_segments
         self.dt = dt
-        self.max_duration = max_duration
+        self.duration = duration
         self.aircraft = aircraft
         # build AeroParams from aircraft spec
         self.aero_params = AeroParams(S=aircraft.wing_area_m2)
         self.solver, self.lbw, self.ubw, self.lbg, self.ubg = make_multiple_shooting_solver(
             segment_num=n_segments,
             dt=dt,
-            max_duration=max_duration,
+            duration=duration,
             aero_params_obj=self.aero_params,
             aircraft_meta={
                 "max_thrust": aircraft.max_thrust_n,
@@ -147,11 +145,6 @@ class CasadiOptimizer:
         return GeodeticState(*vec.tolist())
     
     def build_initial_guess(self, initial, target):
-        duration_guess = (
-            0.0
-            if initial[:6] == target[:6]
-            else self.max_duration / 2
-        )
         control_guess = [
             self.aircraft.approach_thrust_guess_n,
             0.0,
@@ -164,7 +157,7 @@ class CasadiOptimizer:
                 initial[i] + (target[i] - initial[i]) * ratio
                 for i in range(6)
             ])
-        return [duration_guess] + control_guess + state_guess
+        return control_guess + state_guess
     
     def optimize_trajectory(self, initial_state: GeodeticState, target_state: GeodeticState):
         # This function can be implemented to optimize a trajectory using CasADi's NLP solvers, given an initial state and a sequence of controls.
@@ -179,7 +172,6 @@ class CasadiOptimizer:
         if not stats.get("success", False):
             raise ValueError("CasADi optimization failed: " + stats.get("return_status", "unknown"))
         w_opt = sol['x'].full().flatten()
-        duration_opt = min(max(w_opt[0], self.lbw[0]), self.ubw[0])
-        control_opt = w_opt[1:1+self.n_segments*3].reshape((self.n_segments, 3))
-        state_opt = w_opt[1+self.n_segments*3:].reshape((self.n_segments, 6))
-        return duration_opt, control_opt, state_opt
+        control_opt = w_opt[:self.n_segments*3].reshape((self.n_segments, 3))
+        state_opt = w_opt[self.n_segments*3:].reshape((self.n_segments, 6))
+        return self.duration, control_opt, state_opt
