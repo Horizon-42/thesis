@@ -77,10 +77,17 @@ class OptimizationBackend:
             max_iterations,
             arrival_time_s=arrival_time_s,
         )
-        final_time, node_control, node_state = optimizer.optimize_trajectory(
-            initial_state,
-            target_state,
-        )
+        if optimizer_name == "casadiIpopt":
+            final_time, node_control, node_state = optimizer.optimize_time_to_target(
+                initial_state,
+                target_state,
+                arrival_time_s,
+            )
+        else:
+            final_time, node_control, node_state = optimizer.optimize_trajectory(
+                initial_state,
+                target_state,
+            )
 
         return {
             "ok": True,
@@ -112,7 +119,7 @@ class OptimizationBackend:
                 self._casadi_optimizer = CasadiOptimizer(
                     n_segments=n_segments,
                     dt=dt,
-                    duration=arrival_time_s,
+                    max_duration=arrival_time_s,
                     aircraft=aircraft,
                 )
             return self._casadi_optimizer
@@ -151,7 +158,7 @@ def make_optimizer(
         return CasadiOptimizer(
             n_segments=n_segments,
             dt=dt,
-            duration=arrival_time_s,
+            max_duration=arrival_time_s,
             aircraft=geodetic_simulator.simulator.aircraft,
         )
 

@@ -5,7 +5,7 @@ from aerodynamic_model.casadi_simulator import make_geo_step_from_enu_integrator
 from aerodynamic_model.aircraft_sets import AircraftSpec
 from aerodynamic_model.common import GeodeticState
 
-def segement_integrate_expr(step_func, x_start, u, aero_params, dt:float, duration: float, n_steps: int):
+def segement_integrate_expr(step_func, x_start, u, aero_params, dt:float, duration, n_steps: int):
     dt_step = duration / n_steps
     xk = x_start
     for k in range(n_steps):
@@ -38,7 +38,7 @@ def state_vector_to_decision_vector(state):
 def decision_vector_to_state_vector(vec, mass):
     return ca.vertcat(vec[0], vec[1], vec[2], vec[3], vec[4], vec[5], mass)
 
-def make_multiple_shooting_solver(segment_num: int, dt: float, duration: float, aero_params_obj: AeroParams, aircraft_meta:dict):
+def make_multiple_shooting_solver(segment_num: int, dt: float, max_duration: float, aero_params_obj: AeroParams, aircraft_meta:dict):
     # State lat, lon, alt, V, psi, gamma
     # Control T, mu, n_cmd
 
@@ -46,6 +46,7 @@ def make_multiple_shooting_solver(segment_num: int, dt: float, duration: float, 
 
     start_state = ca.SX.sym('start_state', 7) # excluding mass
     target_state = ca.SX.sym('target_state', 7)
+    duration = ca.SX.sym('duration')
 
     step_func = make_geo_step_from_enu_integrator()['step_func']
 
@@ -55,7 +56,7 @@ def make_multiple_shooting_solver(segment_num: int, dt: float, duration: float, 
     ubw = []
 
     segment_duration = duration / segment_num
-    segment_substeps = max(1, math.ceil(segment_duration / dt))
+    segment_substeps = max(1, math.ceil((max_duration / segment_num) / dt))
     xk = state_vector_to_decision_vector(start_state) # exclude mass from optimization state, it is constant in this model
     seg_states = []
     
@@ -103,7 +104,7 @@ def make_multiple_shooting_solver(segment_num: int, dt: float, duration: float, 
     lbg = [0.0] * g.shape[0] # equality constraints
     ubg = [0.0] * g.shape[0]
 
-    nlp = {'f': ca.SX(0), 'x': ca.vertcat(*w), 'g': g, 'p': ca.vertcat(start_state, target_state)}
+    nlp = {'f': ca.SX(0), 'x': ca.vertcat(*w), 'g': g, 'p': ca.vertcat(start_state, target_state, duration)}
     # opts = {
     #     "ipopt.max_cpu_time": 10,
     #     "ipopt.max_iter": 200,
@@ -114,19 +115,19 @@ def make_multiple_shooting_solver(segment_num: int, dt: float, duration: float, 
     return solver, lbw, ubw, lbg, ubg
 
 class CasadiOptimizer:
-    def __init__(self, n_segments: int, dt: float, duration: float, aircraft: AircraftSpec):
+    def __init__(self, n_segments: int, dt: float, max_duration: float, aircraft: AircraftSpec):
         if n_segments < 2:
             raise ValueError("n_segments must be at least 2 for this multiple-shooting NLP")
         self.n_segments = n_segments
         self.dt = dt
-        self.duration = duration
+        self.max_duration = max_duration
         self.aircraft = aircraft
         # build AeroParams from aircraft spec
         self.aero_params = AeroParams(S=aircraft.wing_area_m2)
         self.solver, self.lbw, self.ubw, self.lbg, self.ubg = make_multiple_shooting_solver(
             segment_num=n_segments,
             dt=dt,
-            duration=duration,
+            max_duration=max_duration,
             aero_params_obj=self.aero_params,
             aircraft_meta={
                 "max_thrust": aircraft.max_thrust_n,
@@ -159,14 +160,15 @@ class CasadiOptimizer:
             ])
         return control_guess + state_guess
     
-    def optimize_trajectory(self, initial_state: GeodeticState, target_state: GeodeticState):
+    def optimize_trajectory(self, initial_state: GeodeticState, target_state: GeodeticState, duration: float | None = None):
         # This function can be implemented to optimize a trajectory using CasADi's NLP solvers, given an initial state and a sequence of controls.
         initial = self.geo_state_to_decision_vector(initial_state)
         target = self.geo_state_to_decision_vector(target_state)
+        solve_duration = self.max_duration if duration is None else duration
         
         x0 = self.build_initial_guess(initial, target)
 
-        p = ca.vertcat(initial, target) # parameters for the NLP: initial and target states
+        p = ca.vertcat(initial, target, solve_duration) # parameters for the NLP: initial state, target state, and fixed duration
         sol = self.solver(x0=x0, lbx=self.lbw, ubx=self.ubw, lbg=self.lbg, ubg=self.ubg, p=p)
         stats = self.solver.stats()
         if not stats.get("success", False):
@@ -174,4 +176,17 @@ class CasadiOptimizer:
         w_opt = sol['x'].full().flatten()
         control_opt = w_opt[:self.n_segments*3].reshape((self.n_segments, 3))
         state_opt = w_opt[self.n_segments*3:].reshape((self.n_segments, 6))
-        return self.duration, control_opt, state_opt
+        return solve_duration, control_opt, state_opt
+    
+    def optimize_time_to_target(self, initial_state: GeodeticState, target_state: GeodeticState, max_duration: float, max_attempts: int = 10):
+        low = 0.0
+        high = max_duration
+        best_result = self.optimize_trajectory(initial_state, target_state, high)
+        for _ in range(max_attempts):
+            mid = 0.5 * (low + high)
+            try:
+                best_result = self.optimize_trajectory(initial_state, target_state, mid)
+                high = mid
+            except ValueError:
+                low = mid
+        return best_result

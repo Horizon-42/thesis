@@ -1,4 +1,5 @@
 import importlib.util
+import math
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -67,7 +68,7 @@ def test_make_multiple_shooting_solver_builds_symbolic_nlp(monkeypatch):
     solver, lbw, ubw, lbg, ubg = module.make_multiple_shooting_solver(
         segment_num=2,
         dt=0.5,
-        duration=10.0,
+        max_duration=10.0,
         aero_params_obj=AeroParams(S=122.6),
         aircraft_meta={
             "max_thrust": 240000.0,
@@ -82,6 +83,7 @@ def test_make_multiple_shooting_solver_builds_symbolic_nlp(monkeypatch):
     assert captured["plugin"] == "ipopt"
     assert captured["nlp"]["x"].shape == (2 * 3 + 2 * 6, 1)
     assert captured["nlp"]["g"].shape == (2 * 6 + 6, 1)
+    assert captured["nlp"]["p"].shape == (7 + 7 + 1, 1)
     assert len(lbw) == len(ubw) == 2 * 3 + 2 * 6
     assert len(lbg) == len(ubg) == 2 * 6 + 6
 
@@ -103,7 +105,7 @@ def test_make_multiple_shooting_solver_uses_pure_symbolic_parameters(monkeypatch
     module.make_multiple_shooting_solver(
         segment_num=1,
         dt=0.5,
-        duration=10.0,
+        max_duration=10.0,
         aero_params_obj=AeroParams(S=122.6),
         aircraft_meta={
             "max_thrust": 240000.0,
@@ -133,12 +135,16 @@ def test_optimize_trajectory_runs_real_ipopt_for_fixed_time_target():
     optimizer = module.CasadiOptimizer(
         n_segments=2,
         dt=0.1,
-        duration=duration,
+        max_duration=0.4,
         aircraft=C172,
     )
-    target = propagate_with_nominal_control(module, optimizer, state)
+    target = propagate_with_nominal_control(module, optimizer, state, duration)
 
-    duration_opt, controls, states = optimizer.optimize_trajectory(state, target)
+    duration_opt, controls, states = optimizer.optimize_trajectory(
+        state,
+        target,
+        duration=duration,
+    )
 
     assert optimizer.solver.stats()["success"]
     assert duration_opt == duration
@@ -158,7 +164,32 @@ def test_optimize_trajectory_runs_real_ipopt_for_fixed_time_target():
     )
 
 
-def propagate_with_nominal_control(module, optimizer, state):
+def test_optimize_time_to_target_reuses_solver_with_duration_parameter():
+    module = load_casadi_optimizer_module()
+    calls = []
+
+    class FakeOptimizer:
+        dt = 1.0
+
+        def optimize_trajectory(self, initial_state, target_state, duration=None):
+            calls.append(duration)
+            if duration < 6.0:
+                raise ValueError("too short")
+            return duration, "controls", "states"
+
+    result = module.CasadiOptimizer.optimize_time_to_target(
+        FakeOptimizer(),
+        object(),
+        object(),
+        max_duration=10.0,
+        max_attempts=3,
+    )
+
+    assert result == (6.25, "controls", "states")
+    assert calls == [10.0, 5.0, 7.5, 6.25]
+
+
+def propagate_with_nominal_control(module, optimizer, state, duration):
     step_func = module.make_geo_step_from_enu_integrator()["step_func"]
     x = ca.DM(optimizer.geo_state_to_decision_vector(state))
     u = ca.DM([C172.approach_thrust_guess_n, 0.0, 1.0])
@@ -170,11 +201,14 @@ def propagate_with_nominal_control(module, optimizer, state):
         optimizer.aero_params.stall_threshold,
         optimizer.aero_params.k_stall,
     ])
+    segment_substeps = max(1, math.ceil((optimizer.max_duration / optimizer.n_segments) / optimizer.dt))
+    step_dt = duration / optimizer.n_segments / segment_substeps
     for _ in range(optimizer.n_segments):
-        x = step_func(
-            x_geo=x,
-            u=u,
-            aero_params=aero_params,
-            dt=optimizer.duration / optimizer.n_segments,
-        )["x_geo_next"]
+        for _ in range(segment_substeps):
+            x = step_func(
+                x_geo=x,
+                u=u,
+                aero_params=aero_params,
+                dt=step_dt,
+            )["x_geo_next"]
     return GeodeticState(*np.array(x, dtype=float).reshape(-1).tolist())

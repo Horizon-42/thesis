@@ -95,18 +95,19 @@ class TestOptimizationBackend(unittest.TestCase):
         calls = []
 
         class FakeCasadiOptimizer:
-            def __init__(self, n_segments, dt, duration, aircraft):
+            def __init__(self, n_segments, dt, max_duration, aircraft):
                 calls.append({
                     "aircraft": aircraft.code,
                     "n_segments": n_segments,
                     "dt": dt,
-                    "duration": duration,
+                    "max_duration": max_duration,
                 })
 
-            def optimize_trajectory(self, initial_state, target_state):
+            def optimize_time_to_target(self, initial_state, target_state, max_duration):
                 calls.append({
                     "initial": initial_state,
                     "target": target_state,
+                    "max_duration": max_duration,
                 })
                 return (
                     51.0,
@@ -152,11 +153,12 @@ class TestOptimizationBackend(unittest.TestCase):
                 "aircraft": "A320",
                 "n_segments": 2,
                 "dt": 0.25,
-                "duration": 84.0,
+                "max_duration": 84.0,
             },
         )
         self.assertAlmostEqual(calls[1]["initial"].longitude, -114.0203)
         self.assertAlmostEqual(calls[1]["target"].latitude, 51.2)
+        self.assertEqual(calls[1]["max_duration"], 84.0)
         self.assertEqual(result["ok"], True)
         self.assertEqual(result["optimizer"], "casadiIpopt")
         self.assertEqual(result["finalTimeS"], 51.0)
@@ -173,20 +175,21 @@ class TestOptimizationBackend(unittest.TestCase):
         solves = []
 
         class FakeCasadiOptimizer:
-            def __init__(self, n_segments, dt, duration, aircraft):
+            def __init__(self, n_segments, dt, max_duration, aircraft):
                 self.instance_id = len(constructions) + 1
                 constructions.append({
                     "aircraft": aircraft.code,
                     "n_segments": n_segments,
                     "dt": dt,
-                    "duration": duration,
+                    "max_duration": max_duration,
                 })
 
-            def optimize_trajectory(self, initial_state, target_state):
+            def optimize_time_to_target(self, initial_state, target_state, max_duration):
                 solves.append({
                     "instance_id": self.instance_id,
                     "initial_lon": initial_state.longitude,
                     "target_lon": target_state.longitude,
+                    "max_duration": max_duration,
                 })
                 return (
                     51.0,
@@ -239,19 +242,20 @@ class TestOptimizationBackend(unittest.TestCase):
                     "aircraft": "A320",
                     "n_segments": 2,
                     "dt": 0.25,
-                    "duration": 84.0,
+                    "max_duration": 84.0,
                 },
                 {
                     "aircraft": "A320",
                     "n_segments": 2,
                     "dt": 0.2,
-                    "duration": 84.0,
+                    "max_duration": 84.0,
                 },
             ],
         )
         self.assertEqual([solve["instance_id"] for solve in solves], [1, 1, 2])
         self.assertAlmostEqual(solves[1]["initial_lon"], -114.0300)
         self.assertAlmostEqual(solves[1]["target_lon"], -114.2)
+        self.assertEqual([solve["max_duration"] for solve in solves], [84.0, 84.0, 84.0])
 
     def test_optimize_can_select_single_shooting_optimizer(self):
         calls = []
