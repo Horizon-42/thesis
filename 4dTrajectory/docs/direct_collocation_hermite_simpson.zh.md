@@ -7,7 +7,8 @@
 1. 直接配点 (direct collocation) 是怎么把一个连续时间 OCP 离散成一个 NLP 的；
 2. Hermite-Simpson 公式是怎么"凭空"冒出来的，3 阶精度是哪来的；
 3. 为什么把 `T`（到达时间）作为决策变量在 direct collocation 里几乎是免费的，而在 multiple shooting 里需要外层 bisection；
-4. 这两种方法相对于经典数值积分（RK4）的工程取舍。
+4. 这两种方法相对于经典数值积分（RK4）的工程取舍；
+5. 为什么 NLP 的硬约束严格满足、播放飞机却没落到 target 上——以及为什么"把 **state** 网格加密、**control** 保持粗"能干净地修好它，而**不需要任何 polish**。
 
 ---
 
@@ -27,22 +28,25 @@ $$
 状态、控制和动力学函数在我们的项目里是：
 
 $$
-x = (e,\, n,\, h,\, V,\, \psi,\, \gamma)^\top, \qquad
+x = (\varphi,\, \lambda,\, h,\, V,\, \psi,\, \gamma)^\top, \qquad
 u = (T_\text{thrust},\, \mu,\, n_\text{cmd})^\top
 $$
 
-$f$ 就是 `aerodynamic_model.casadi_simulator.make_dynamics_model()` 返回的那个连续 ENU 三自由度点质量模型：
+即**直接用大地坐标**：纬度 $\varphi$、经度 $\lambda$（弧度）、大地高 $h$。$f$ 是
+`aerodynamic_model.casadi_simulator.make_geodetic_dynamics_model()` 返回的连续大地坐标三自由度点质量模型：位置运动学用 WGS84 曲率半径 $R_M, R_N$，并带 transport（输运）项，力的方程与经典点质量一致：
 
 $$
 \dot{x} = \begin{bmatrix}
-V \cos\gamma \cos\psi \\[2pt]
-V \cos\gamma \sin\psi \\[2pt]
+V \cos\gamma\sin\psi / (R_M + h) \\[2pt]
+V \cos\gamma\cos\psi / \big((R_N + h)\cos\varphi\big) \\[2pt]
 V \sin\gamma \\[2pt]
 (T_\text{thrust} - D)/m - g\sin\gamma \\[2pt]
-g\,n_\text{cmd}\sin\mu / (V\cos\gamma) \\[2pt]
-g\,(n_\text{cmd}\cos\mu - \cos\gamma)/V
+g\,n_\text{cmd}\sin\mu / (V\cos\gamma) \;+\; \text{(transport)} \\[2pt]
+g\,(n_\text{cmd}\cos\mu - \cos\gamma)/V \;+\; \text{(transport)}
 \end{bmatrix}
 $$
+
+完整 RHS（含 transport 项的推导）见 `geodetic_dynamics_transport.zh.html`。关键点：这是**一个全局光滑的连续向量场**（没有切平面、没有每步重锚定），所以 direct collocation 的 defect 才能直接写在它上面。
 
 OCP 是连续的、无限维的；NLP 求解器（如 IPOPT）只会做有限维优化。把 OCP 变成 NLP 的过程叫做 **离散化 (transcription)**。
 
@@ -184,6 +188,8 @@ defect = x_kp1 - x_k - (h / 6.0) * (f_k + 4.0 * f_mid + f_kp1)
 
 代价是控制的最高精度被压到了 2 阶（一阶导数在节点处不连续）。如果要把整体精度推到 4 阶，可以改用段线性 + Hermite-Simpson 分离形式，或者高阶 Radau 配点（Lobatto IIIA 系）。
 
+> **重要（control 网格 ≠ state 网格）。** 本项目用 $N$ 段**控制**（分段常数），但把**状态**配点在更细的 $N\cdot M$ 个 HS 子区间上（同一段控制 $u_k$ 在它的 $M$ 个子区间里共享）。$M$ 按航程自动选（让状态步长约 3s，见 §5）。这样控制自由度保持 $3N$（操作上有意义、且避免控制曲线"皱"），但段内动力学被精确解析到几秒级——这是让原始解**无需 polish 即 playback 一致**的关键，§5 详述。
+
 ---
 
 ## 4. Free-Final-Time：在 direct collocation 里几乎免费
@@ -219,7 +225,92 @@ $k_1 = f(x_k), k_2 = f(x_k + \tfrac{h}{2}k_1), \ldots$ 里面，对 $T$ 的链�
 
 ---
 
-## 5. 两种方法对照表
+## 5. Playback 一致性：连续 $f$ 一样 ≠ 离散算子一样
+
+### 5.1 一个看似矛盾的现象
+
+终端等式 $x_N = x_\text{target}$ 是 NLP 的**硬等式约束**。IPOPT 收敛后会把它满足到 $10^{-9}$ 量级——比任何工程容差都小好几个数量级。然而在前端"播放"里（点 Play），把同一组控制 $u_{0:N-1}$ 喂给模拟器跑一遍，飞机却**没落在 target 上**——粗网格长航程下能差到**几千米**。
+
+> 注意：优化器返回的**节点状态**是严格落 target 的（那是 NLP 约束）。漂移出现在 playback **重放控制**这条路上（`PilotPanel` 把 `controls` 喂给 `/simulation/step`）。
+
+### 5.2 关键区分：连续向量场 vs 离散算子
+
+很容易误以为"漂移=两套动力学不一样"。其实**两边用的连续 $f$ 是同一个**：
+
+- 优化器：collocate 在大地坐标连续 $f$ 上；
+- playback：`CasadiSimulator`（重锚定 RK4）积分的连续 $f$，与上面那个在连续极限下重合到 ~0.3 mm/5 km（见 `geodetic_vs_reanchored_error.py`）。
+
+漂移来自**离散算子不同**——同一个 $f$ 的两种离散化：
+
+| | HS direct collocation（优化器） | 细步 RK4（playback） |
+|---|---|---|
+| 段内做法 | 假设一条三次多项式 + Simpson 求积（**不积分**） | 每 $\Delta t=0.2$s 真积一步 |
+| 把段 $[t_k,t_{k+1}]$ 推到段尾的 $x_{k+1}$ | 解 $x_{k+1}-x_k-\tfrac{h}{6}(f_k+4f_\text{mid}+f_{k+1})=0$ | 累积 $h/\Delta t$ 步 RK4 |
+
+这两个离散算子对同一 $(x_k,u_k,h)$ 给出**不同**的 $x_{k+1}$，差距是 HS 的截断误差。**这跟连续 $f$ 是否等价无关**——是离散网格 $h$ 的函数。
+
+### 5.3 为什么 $h$ 一大就崩
+
+HS 只在配点上钉住动力学，段内**假设**是三次多项式。真解与三次多项式的偏差是 $O(h^4)$ 局部、$O(h^3)$ 全程。
+
+- $h\sim 1$–$4$s：三次多项式是段内动力学的好近似，defect=0 ≈ 真轨迹过这些点 → playback 吻合；
+- $h\sim 30$s（默认 $N=10$、5 分钟航程）：拿一条三次曲线拟合 30 秒非线性飞行 = **垃圾近似**。defect 严格满足（$10^{-9}$），但它满足的是个错模型——真积分（playback）跑出去就差千米。
+
+所以"连续系统"这件事没变，是**我们对它的有限维替身随 $h$ 变好/变坏**。
+
+### 5.4 为什么不能简单"加大 $N$"修
+
+直觉是加大 $N$ 让 $h$ 变小。实测这条路有两个坑：
+
+1. **收敛性变差**。决策变量越多、可行集越窄，IPOPT 越容易在 restoration phase 里打转；不同 $N$ 收敛与否还不单调。
+2. **控制曲线"皱"**。$N$ 增大同时加密了**控制**，段间 $n_\text{cmd}$ 跳变更剧烈，RK4 对剧变控制更敏感，反而放大 HS–RK4 的差距。
+
+根因是：加大 $N$ **同时**加密了 control 和 state。真正需要加密的只是 **state**。
+
+### 5.5 解法：加密 state 网格，control 保持粗（无需 polish）
+
+把两个网格解耦：**控制** 仍 $N$ 段（分段常数），**状态** 配点在 $N\cdot M$ 个 HS 子区间上，同一段控制 $u_k$ 在它的 $M$ 个子区间里共享：
+
+```
+控制段 k:        |————————————— u_k （不变）—————————————|
+状态子区间:       |—HS—|—HS—|—HS—| ... （M 个，每个 h_state = h/M）
+defect:          每个子区间一条 HS defect（共用 u_k）
+```
+
+为什么这就根治了？
+
+- 状态步长 $h_\text{state}=T/(N M)$ 被压到几秒，HS 在子区间上是**好近似**——优化器的离散算子**收敛到** playback 的离散算子（分段常数控制的细积分）。两者都逼近"该控制下的真 ODE 解" → 自然吻合。
+- 控制自由度仍是 $3N$：**没有** §5.4 的"皱"问题，操作语义不变（每段一条指令）。
+- 前端协议不变：仍返回 $N$ 段控制 + $N$ 个**段端**状态（从 $N\cdot M$ 个节点里每 $M$ 个取一个）。
+
+$M$ **按航程自动选**（`select_state_substeps`）：目标状态步长约 3s，即 $M\approx \lceil (T_\text{max}/N)/3\text{s}\rceil$，上限 16。例如到达时间上限 260s、$N=10$ → $M=9$。
+
+> 这本质上等价于"控制跨多个积分子步保持不变"的多重打靶，但保留了 collocation 的**带状稀疏**结构，IPOPT 吃得消。
+
+### 5.6 实测对比
+
+**(a) 固定 control（$N=10$）、扫 state 子步 $M$**（A320、$T=150$s）：
+
+| $M$ | 状态步长 | playback 水平偏差 |
+|---|---|---|
+| 1 | 15.0 s | 11.1 m |
+| 3 | 5.0 s | 2.1 m |
+| 6 | 2.5 s | 0.3 m |
+| 12 | 1.2 s | 0.1 m |
+
+控制完全不变，只加密 state，漂移随 $h_\text{state}$ 单调降到分米级。
+
+**(b) 长航程、粗 control**（A320、$N=10$、自动 $M=9$）：单段一步（$M=1$，$h\sim 30$s）playback 偏 **~5 km**；dense-state（$M=9$）后 playback 偏 **<1 m**——**全程无 polish**。
+
+### 5.7 历史：曾经的 polish（已删除）
+
+在引入 geodetic + dense-state 之前，本项目用过一个**两阶段 HS planner + RK4 polisher** 管线（HS 出粗解 → 用 `CasadiOptimizer` 多重打靶把控制投影到 playback 的 RK4 流形）。它能把漂移压到毫米级，但：① 慢（多解一个 NLP）；② 在长/难 case 上 polisher 自身冷启动会失败、静默回退成原始 HS（等于没修）。
+
+dense-state 直接把优化器的**离散算子**对齐到 playback，从源头消除漂移，所以 **polish 已整体删除**（`optimize_free_time` 不再有 `polish` 参数）。
+
+---
+
+## 6. 两种方法对照表
 
 | 维度 | Multiple Shooting | Direct Collocation (HS) |
 |---|---|---|
@@ -238,11 +329,12 @@ $k_1 = f(x_k), k_2 = f(x_k + \tfrac{h}{2}k_1), \ldots$ 里面，对 $T$ 的链�
 - 飞行轨迹这类连续动力学、需要灵活 $T$、终端约束硬的问题，**Hermite-Simpson direct collocation 通常更好用**；
 - 控制空间很离散、动力学带断点（比如档位切换）的问题，multiple shooting + 事件检测可能更自然；
 - 大规模 (>100 段) 时 direct collocation 的稀疏雅可比会显著领先；
-- 对初值敏感时考虑 warm-start：先 fixed-time，再 free-time（就是本项目的策略）。
+- 对初值敏感时考虑 warm-start：先 fixed-time，再 free-time（就是本项目的策略）；
+- 如果下游有一个**固定的真实积分器**（例如本项目的播放模拟器），要保证输出在那个积分器下也落到 target，就把 **state 网格加密到积分器步长量级、control 网格保持粗**（§5.5）——让优化器的离散算子收敛到积分器的离散算子，无需任何后处理 polish。
 
 ---
 
-## 6. 与 RK4 / 单次打靶的关系
+## 7. 与 RK4 / 单次打靶的关系
 
 | 方法 | 动力学 | 决策变量 | 终端约束 |
 |---|---|---|---|
@@ -261,25 +353,31 @@ $k_1 = f(x_k), k_2 = f(x_k + \tfrac{h}{2}k_1), \ldots$ 里面，对 $T$ 的链�
 
 ---
 
-## 7. 与本项目代码的对应关系
+## 8. 与本项目代码的对应关系
 
 | 公式 / 概念 | 代码位置 |
 |---|---|
-| 连续 RHS $f(x,u)$ | `aerodynamic_model.casadi_simulator.make_dynamics_model()` |
+| 连续大地坐标 RHS $f(x,u)$（含 transport） | `aerodynamic_model.casadi_simulator.make_geodetic_dynamics_model()` |
 | HS defect 公式 | `casadi_direct_collocation_optimizer.hermite_simpson_defect_expr` |
-| 固定时间 NLP | `make_direct_collocation_solver` |
-| 自由时间 NLP（含 $T$） | `make_direct_collocation_solver_free_time` |
-| 段常数控制 + 段端状态决策 | NLP 构造里的 `seg_controls`, `seg_states` |
+| dense-state 装配核心（control $N$、state $N\cdot M$） | `_build_collocation_decision` |
+| 自动选 $M$ | `select_state_substeps`（→ `self.state_substeps`） |
+| 固定时间 NLP | `make_direct_collocation_solver(..., sub_steps=M)` |
+| 自由时间 NLP（含 $T$） | `make_direct_collocation_solver_free_time(..., sub_steps=M)` |
 | 几何/状态边界 | `make_state_bounds`, `make_control_bounds` |
-| 两阶段 warm-start | `CasadiDirectCollocationOptimizer._build_free_time_initial_guess` |
-| Fixed-ENU 坐标系 | `_geodetic_state_to_enu_decision` / `_enu_decision_to_geodetic_state` |
-| 曲率误差量化（论证 fixed-ENU 可用） | `fixed_enu_frame_error.py` |
+| free-time 初值（复用 fixed-time 原始解 + $T$） | `CasadiDirectCollocationOptimizer._build_free_time_initial_guess` |
+| 段端状态抽取（$N\cdot M$ 节点里每 $M$ 取一个） | `_extract_node_states_geo` |
+| 度↔弧度边界转换 | `_geodetic_state_to_decision` / `_decision_to_geodetic_state` |
+| 播放模拟器（重锚定 RK4，连续 $f$ 同源） | `make_geo_step_from_enu_integrator` |
+| 两个离散系统的连续极限对比（5 km） | `geodetic_vs_reanchored_error.py` |
+| dense-state playback 一致性测试 | `tests/...::test_dense_state_keeps_playback_consistent_on_long_coarse_control_horizon` |
 
-固定 ENU 这一选择是 direct collocation 的硬性要求：每个 defect 公式假设 $f(x,u)$ 是连续可微的状态函数。原来 `make_geo_step_from_enu_integrator` 每一步重新锚定 ENU 框架，那个"换锚"是离散跳变，没法塞进 defect 里——所以 collocation 必须用单个固定 ENU 框架，由此引入的曲率误差由 `fixed_enu_frame_error.py` 量化，在 5 km 范围内不超过 ~2 m / 0.06°，足够工程使用。
+为什么 collocation 能直接用大地坐标 RHS：每个 defect 公式假设 $f(x,u)$ 是连续可微的状态函数。原来 `make_geo_step_from_enu_integrator` 每步重新锚定 ENU 框架，那个"换锚"是离散跳变，没法塞进 defect；`make_geodetic_dynamics_model` 把坐标变换折进连续 RHS（$R_M/R_N$ 曲率因子 + transport 项），整条航程是一个光滑向量场，collocation 直接适用。
+
+playback 的重锚定 RK4 与优化器共享**同一个连续 $f$**（连续极限差 ~0.3 mm/5 km）；让两者的**离散算子**也一致，靠的是 dense-state（state 配点到几秒级），而不是再跑一个 polish。
 
 ---
 
-## 8. 进一步阅读
+## 9. 进一步阅读
 
 - Betts, J. T. *Practical Methods for Optimal Control and Estimation Using Nonlinear Programming.* SIAM, 2010. （direct collocation 的经典教材；HS 推导在第 4 章）
 - Hargraves, C. R. and Paris, S. W. *Direct Trajectory Optimization Using Nonlinear Programming and Collocation.* J. Guidance, Control, and Dynamics, 1987. （HS 方法在飞行力学里的第一次系统应用）

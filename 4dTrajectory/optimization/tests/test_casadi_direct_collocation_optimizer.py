@@ -1,5 +1,6 @@
 import importlib.util
 import math
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,6 +11,11 @@ import pytest
 from aerodynamic_model.aircraft_sets import C172
 from aerodynamic_model.casadi_simulator import AeroParams
 from aerodynamic_model.common import GeodeticState
+
+# Keep the optimisation dir importable for modules loaded via importlib.
+_OPTIMIZATION_DIR = Path(__file__).resolve().parents[1]
+if str(_OPTIMIZATION_DIR) not in sys.path:
+    sys.path.insert(0, str(_OPTIMIZATION_DIR))
 
 
 def load_module():
@@ -119,7 +125,7 @@ def test_optimize_trajectory_solves_real_ipopt_problem():
         aircraft=C172,
     )
 
-    target = _propagate_with_fixed_enu_rhs(state, optimizer, duration)
+    target = _propagate_with_geodetic_rhs(state, optimizer, duration)
 
     duration_opt, controls, states = optimizer.optimize_trajectory(
         state,
@@ -154,6 +160,7 @@ def test_optimize_trajectory_uses_supplied_initial_guess():
     module = load_module()
     optimizer = object.__new__(module.CasadiDirectCollocationOptimizer)
     optimizer.n_segments = 1
+    optimizer.state_substeps = 1
     optimizer.max_duration = 5.0
     optimizer.lbw = [0.0] * 9
     optimizer.ubw = [100.0] * 9
@@ -246,7 +253,7 @@ def test_optimize_free_time_solves_real_ipopt_problem():
         max_duration=max_duration,
         aircraft=C172,
     )
-    target = _propagate_with_fixed_enu_rhs(state, optimizer, feasible_duration)
+    target = _propagate_with_geodetic_rhs(state, optimizer, feasible_duration)
 
     final_time, controls, states = optimizer.optimize_free_time(
         state, target, max_duration,
@@ -279,6 +286,153 @@ def test_optimize_free_time_solves_real_ipopt_problem():
     )
 
 
+def test_optimize_free_time_raw_is_playback_consistent():
+    """The geodetic transcription shares ONE continuous RHS with the
+    playback integrator, so the raw (un-polished) controls already land
+    at the target when replayed -- no multiple-shooting polish needed.
+
+    Replaying the piecewise-constant controls through the geodetic
+    stepper (a fine RK4 of the same continuous dynamics the collocation
+    defects approximate) should reach the target up to the Hermite-Simpson
+    discretisation error, which is small on this short horizon.
+    """
+    module = load_module()
+    n_segments = 4
+    feasible_duration = 2.0
+    max_duration = 6.0
+
+    speed = C172.terminal_speed_kt * 0.51444 + 10.0
+    state = GeodeticState(
+        latitude=51.1139,
+        longitude=-114.0203,
+        altitude=1000.0,
+        V=speed,
+        psi=0.0,
+        gamma=0.0,
+        m=C172.mass_kg,
+    )
+
+    optimizer = module.CasadiDirectCollocationOptimizer(
+        n_segments=n_segments,
+        dt=0.2,
+        max_duration=max_duration,
+        aircraft=C172,
+    )
+    target = _propagate_with_geodetic_rhs(state, optimizer, feasible_duration)
+
+    final_time, controls, _ = optimizer.optimize_free_time(
+        state, target, max_duration,
+    )
+
+    # Replay the raw controls through the continuous geodetic stepper --
+    # this is the playback path the frontend's dynamics now share.
+    from aerodynamic_model.casadi_simulator import make_geodetic_step_integrator
+
+    step = make_geodetic_step_integrator(include_transport=True)["step_func"]
+    aero_params = ca.DM([
+        optimizer.aero_params.S,
+        optimizer.aero_params.Cl_max,
+        optimizer.aero_params.Cd0,
+        optimizer.aero_params.k,
+        optimizer.aero_params.stall_threshold,
+        optimizer.aero_params.k_stall,
+    ])
+    x = ca.DM([
+        state.latitude, state.longitude, state.altitude,
+        state.V, state.psi, state.gamma, state.m,
+    ])
+    segment_h = final_time / n_segments
+    for k in range(n_segments):
+        u = ca.DM([float(controls[k, 0]), float(controls[k, 1]), float(controls[k, 2])])
+        remaining = segment_h
+        while remaining > 1e-9:
+            dt = min(0.05, remaining)
+            x = step(x_geo=x, u=u, aero_params=aero_params, dt=dt)["x_geo_next"]
+            remaining -= dt
+
+    playback = np.array(x).reshape(-1)
+    # Raw HS controls land on target up to the collocation discretisation
+    # error: metre-level horizontally on this short horizon, with NO
+    # polish step.  (The old fixed-ENU path needed polish to get here.)
+    assert abs(playback[0] - target.latitude) < 1e-3
+    assert abs(playback[1] - target.longitude) < 1e-3
+    assert abs(playback[2] - target.altitude) < 5.0
+    assert abs(playback[3] - target.V) < 1.0
+
+
+def test_dense_state_keeps_playback_consistent_on_long_coarse_control_horizon():
+    """The whole point of the dense-state transcription: even with a COARSE
+    control mesh over a LONG horizon (where a single HS step per control
+    segment would drift kilometres), replaying the raw controls through the
+    re-anchored RK4 playback simulator still lands within a few metres --
+    because the state is collocated on N*M sub-intervals (auto-selected M).
+    """
+    from aerodynamic_model.aircraft_sets import A320
+    from aerodynamic_model.casadi_simulator import (
+        AeroParams, CasadiSimulator, make_geodetic_step_integrator,
+    )
+    from aerodynamic_model.common import LoadFactorControl
+
+    module = load_module()
+    n_segments = 10
+    horizon = 150.0
+    max_duration = 260.0
+    state = GeodeticState(35.60, -78.50, 1600.0, 90.0,
+                          math.radians(-40), math.radians(-3), A320.mass_kg)
+
+    optimizer = module.CasadiDirectCollocationOptimizer(
+        n_segments=n_segments, dt=0.2, max_duration=max_duration, aircraft=A320,
+    )
+    # M is auto-selected to keep the state step a few seconds even though
+    # the control segments are tens of seconds long.
+    assert optimizer.state_substeps >= 4
+
+    # Feasible target: propagate the A320 nominal approach control for the
+    # horizon through the geodetic dynamics (on its own dynamics manifold).
+    ap = AeroParams(S=A320.wing_area_m2)
+    aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
+    gstep = make_geodetic_step_integrator(include_transport=True)["step_func"]
+    u_nom = ca.DM([A320.approach_thrust_guess_n, 0.0, 1.0])
+    xp = ca.DM([state.latitude, state.longitude, state.altitude,
+                state.V, state.psi, state.gamma, state.m])
+    for _ in range(int(horizon / 0.05)):
+        xp = gstep(x_geo=xp, u=u_nom, aero_params=aero, dt=0.05)["x_geo_next"]
+    tp = np.array(xp).reshape(-1)
+    target = GeodeticState(tp[0], tp[1], tp[2], tp[3], tp[4], tp[5], A320.mass_kg)
+
+    # Fixed-time path (robust convergence); the dense-state behaviour under
+    # test is identical for the free-time path.
+    final_time, controls, _ = optimizer.optimize_trajectory(
+        state, target, duration=horizon,
+    )
+
+    # Replay through the same re-anchored RK4 stepper the frontend playback
+    # uses (NOT the geodetic stepper) -- they share the continuous RHS.
+    sim = CasadiSimulator(aircraft=A320, dt=0.2)
+    s = state
+    segment_h = final_time / n_segments
+    for k in range(n_segments):
+        u = LoadFactorControl(
+            thrust=float(controls[k, 0]),
+            bank_rad=float(controls[k, 1]),
+            load_factor=float(controls[k, 2]),
+        )
+        remaining = segment_h
+        while remaining > 1e-9:
+            dt = min(0.2, remaining)
+            s = sim.step(s, u, dt)
+            remaining -= dt
+
+    R = 6_371_000.0
+    horiz = R * math.hypot(
+        math.radians(s.latitude - target.latitude),
+        math.radians(s.longitude - target.longitude) * math.cos(math.radians(target.latitude)),
+    )
+    assert horiz < 5.0
+    assert abs(s.altitude - target.altitude) < 5.0
+    assert abs(s.V - target.V) < 1.0
+
+
 def test_optimizer_does_not_expose_optimize_time_to_target():
     # Direct collocation only ships ``optimize_free_time`` -- the
     # CasadiOptimizer-style bisection wrapper has been removed since it
@@ -292,6 +446,7 @@ def test_optimize_trajectory_raises_on_solver_failure():
     module = load_module()
     optimizer = object.__new__(module.CasadiDirectCollocationOptimizer)
     optimizer.n_segments = 1
+    optimizer.state_substeps = 1
     optimizer.max_duration = 5.0
     optimizer.lbw = [0.0] * 9
     optimizer.ubw = [100.0] * 9
@@ -313,17 +468,18 @@ def test_optimize_trajectory_raises_on_solver_failure():
         optimizer.optimize_trajectory(state, state, duration=2.0)
 
 
-def _propagate_with_fixed_enu_rhs(
+def _propagate_with_geodetic_rhs(
     state: GeodeticState,
     optimizer,
     duration: float,
 ) -> GeodeticState:
-    """Forward RK4 of the same continuous fixed-ENU RHS the optimiser
-    uses.  Anchoring at the initial geodetic point keeps the propagator
-    and the optimiser in the same frame."""
-    from aerodynamic_model.casadi_simulator import make_dynamics_model
+    """Forward RK4 of the same continuous geodetic RHS the optimiser
+    uses, via the geodetic stepper.  Generating the target this way means
+    the optimiser is asked to recover a point that is exactly on its own
+    dynamics manifold (no cross-frame discrepancy to absorb)."""
+    from aerodynamic_model.casadi_simulator import make_geodetic_step_integrator
 
-    rhs_func = make_dynamics_model()["rhs_func"]
+    step = make_geodetic_step_integrator(include_transport=True)["step_func"]
     aero_params = ca.DM([
         optimizer.aero_params.S,
         optimizer.aero_params.Cl_max,
@@ -334,29 +490,9 @@ def _propagate_with_fixed_enu_rhs(
     ])
     u = ca.DM([C172.approach_thrust_guess_n, 0.0, 1.0])
 
-    anchor_lat = state.latitude
-    anchor_lon = state.longitude
-    # Build a small CasADi function in the test (not the module) so the
-    # test does not lean on private helpers.
-    lat_s, lon_s, alt_s = ca.SX.sym("lat"), ca.SX.sym("lon"), ca.SX.sym("alt")
-    rlat_s, rlon_s = ca.SX.sym("rlat"), ca.SX.sym("rlon")
-    from aerodynamic_model.casadi_coordinates_converter import (
-        enu_to_geodetic_expr,
-        geodetic_to_enu_expr,
-    )
-    e_s, n_s, u_s = geodetic_to_enu_expr(lat_s, lon_s, alt_s, rlat_s, rlon_s, 0.0)
-    to_enu = ca.Function("to_enu", [lat_s, lon_s, alt_s, rlat_s, rlon_s], [ca.vertcat(e_s, n_s, u_s)])
-
-    e_in = ca.SX.sym("e")
-    n_in = ca.SX.sym("n")
-    u_in = ca.SX.sym("u")
-    lat_o, lon_o, alt_o = enu_to_geodetic_expr(e_in, n_in, u_in, rlat_s, rlon_s, 0.0)
-    to_geo = ca.Function("to_geo", [e_in, n_in, u_in, rlat_s, rlon_s], [ca.vertcat(lat_o, lon_o, alt_o)])
-
-    enu = to_enu(state.latitude, state.longitude, state.altitude, anchor_lat, anchor_lon)
     x = ca.DM([
-        float(enu[0]),
-        float(enu[1]),
+        state.latitude,
+        state.longitude,
         state.altitude,
         state.V,
         state.psi,
@@ -366,17 +502,12 @@ def _propagate_with_fixed_enu_rhs(
     n_steps = max(1, int(round(duration / 0.05)))
     dt = duration / n_steps
     for _ in range(n_steps):
-        k1 = rhs_func(x, u, aero_params)
-        k2 = rhs_func(x + 0.5 * dt * k1, u, aero_params)
-        k3 = rhs_func(x + 0.5 * dt * k2, u, aero_params)
-        k4 = rhs_func(x + dt * k3, u, aero_params)
-        x = x + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+        x = step(x_geo=x, u=u, aero_params=aero_params, dt=dt)["x_geo_next"]
 
-    geo = to_geo(float(x[0]), float(x[1]), float(x[2]), anchor_lat, anchor_lon)
     return GeodeticState(
-        latitude=float(geo[0]),
-        longitude=float(geo[1]),
-        altitude=float(geo[2]),
+        latitude=float(x[0]),
+        longitude=float(x[1]),
+        altitude=float(x[2]),
         V=float(x[3]),
         psi=float(x[4]),
         gamma=float(x[5]),

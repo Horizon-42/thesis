@@ -105,6 +105,33 @@ The project serves dual purposes: thesis visualization/validation, and reusable 
 
 ## Changelog
 
+### 2026-06-22 — Dense-state direct collocation (control N, state N·M); remove polish
+
+Fixed the optimizer→playback target mismatch (km-scale on long, coarse-mesh approaches). Root cause: matching the *continuous* dynamics (geodetic ≈ re-anchored RK4) is necessary but not sufficient — the optimiser's *discrete* operator (Hermite-Simpson on a coarse mesh, h~30 s) differs from the playback's (fine RK4), so replaying the raw controls drifted. Fix: collocate the **state** on a finer grid while keeping **control** coarse.
+
+- `4dTrajectory/optimization/casadi_direct_collocation_optimizer.py` — both NLP builders now take `sub_steps` (M): control is piecewise-constant over N segments, state collocated on N·M Hermite-Simpson sub-intervals (`_build_collocation_decision`). M auto-selected from the horizon (`select_state_substeps`, ~3 s state step, capped at 16). External contract unchanged: returns N controls + N segment-endpoint states. **The multiple-shooting polish (`_polish_with_multiple_shooting`, `_get_polisher`, `solution_to_initial_guess`, the `polish` arg, the lazy `casadi_optimizer` import) is removed** — the dense-state raw solution is playback-consistent.
+- Verified: playback drift drops from km-scale (M=1, h~30 s) to <1 m; backend `optimize()` lands exactly on target; 124 tests pass; added a long-horizon coarse-control playback regression test.
+- Why not just raise nSegments: that refines control too, causing the convergence/"wrinkle" pathology (old doc §5.4). Refining only the state mesh avoids it (control DOF stays 3N).
+- Note: `4dTrajectory/docs/direct_collocation_hermite_simpson.zh.md` §5 and `geodetic_dynamics_transport.zh.html` still describe the old HS-planner + RK4-polish pipeline and are now historically inaccurate.
+
+### 2026-06-22 — Fix CIFP transition-altitude misparse (bogus 18000 ft initial fixes)
+
+RNAV initial fixes with no published crossing altitude (e.g. KRDU R32 CONCA/SINNO) were being placed at **18000 ft** because the CIFP parser read the ARINC 424 **Transition Altitude** field (a procedure-wide constant) as the leg's crossing altitude. Selecting such an IF as the optimizer start made the problem infeasible (~10° required descent) → `Maximum_Iterations`/`Infeasible`. Full root cause + evidence + regenerate command in `aeroviz-4d/docs/33-cifp-transition-altitude-misparse-postmortem.md`.
+
+- `aeroviz-4d/python/cifp_parser.py` — production `parse_procedure_legs` (cifparse adapter) no longer falls back to `trans_alt`; sets the altitude qualifier from `alt_desc` (`+`→atOrAbove, etc.). Legacy `parse_leg_altitude_ft` scans only through Altitude 2 (drops the `line[94:99]` transition-altitude read); added `parse_leg_altitude_qualifier`.
+- `aeroviz-4d/src/data/rnavInitialFixCandidates.ts` — `altitudeFtForInitialFix` requires a finite **positive** published altitude and no longer falls back to `fix.elevationFt`, so altitude-less feeder IFs are skipped instead of placed at the transition altitude / terrain / zero.
+- Tests updated to assert the corrected behavior (two prior tests had locked in `== 18000`); added production-path + frontend regression tests. KRDU procedure data regenerated. Note: the ready-made `cifparse`/`arinc424` packages are only used in `validate_cifp_parser_packages.py` (cross-check), and their altitude extraction had the same `trans_alt` fallback — switching libraries would not have fixed this.
+
+### 2026-06-21 — Geodetic continuous dynamics for direct collocation (replaces fixed-ENU + polish)
+
+Replaced the fixed-ENU transcription in the direct-collocation optimiser with a single **continuous geodetic RHS**, so the optimiser and the playback simulator now share one continuous vector field. The coordinate transformation that the re-anchored ENU stepper did discretely (per-step frame swap) is folded into the continuous RHS as WGS84 curvature factors plus transport-rate terms — no tangent plane, no fixed-frame curvature error, and the multiple-shooting polish is no longer needed.
+
+- `aerodynamic_model/casadi_simulator.py` — added `make_geodetic_dynamics_model(include_transport=True)` (continuous point-mass RHS in `(lat, lon, h, V, psi, gamma)`, lat/lon in radians; position kinematics via `R_M`/`R_N`; transport terms on `psi_dot`/`gamma_dot`) and `make_geodetic_step_integrator` (RK4 stepper, degrees externally). **Existing `make_dynamics_model` / `make_geo_step_from_enu_integrator` left untouched.**
+- `4dTrajectory/optimization/casadi_direct_collocation_optimizer.py` — collocates directly on geodetic state (radians), boundary is now just deg↔rad; ENU anchor machinery removed. **Polish is disabled by default (`optimize_free_time(polish=False)`)** but the polisher code is kept temporarily for verification — *remove it once the geodetic path is fully validated*.
+- `4dTrajectory/optimization/geodetic_vs_reanchored_error.py` (new) — 5 km comparison of the two discrete systems. Result: geodetic+transport tracks the re-anchored RK4 playback to ~0.3 mm; dropping transport drifts ~2.9 m / 1.3 m alt / 0.04° over 5 km (= the transport rate).
+- `4dTrajectory/docs/geodetic_dynamics_transport.zh.html` (new) — interactive HTML (MathJax + Plotly 3D) explaining the geodetic RHS and the transport terms (meridian convergence + curvature pitch), with the 5 km validation.
+- Tests updated; backend `optimize()` path verified end-to-end (terminal state matches target). Convergence robustness on aggressive cold-start targets is unchanged from the old optimiser (parity confirmed).
+
 ### 2026-04-20 — Finish OCS geometry and add final-approach OCS layer
 
 Completed the PANS-OPS final-approach Obstacle Clearance Surface (OCS) pipeline: filled in the TODO in `src/utils/ocsGeometry.ts`, wrote full unit-test assertions, and added a new `useOcsLayer` hook that derives FAF→threshold pairs from `procedures.geojson` and renders three semi-transparent Cesium polygons per route (red primary + two orange 7:1-slope secondary panels, `perPositionHeight: true` for the slope to show).

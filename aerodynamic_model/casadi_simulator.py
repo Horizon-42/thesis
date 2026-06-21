@@ -1,7 +1,12 @@
 import casadi as ca
 import numpy as np
 from .casadi_exprs import isa_density_expr, aerodynamic_coefficients_expr
-from .casadi_coordinates_converter import ecef_to_enu_rotation_matrix_expr, enu_to_geodetic_expr
+from .casadi_coordinates_converter import (
+    ecef_to_enu_rotation_matrix_expr,
+    enu_to_geodetic_expr,
+    WGS84_A,
+    WGS84_E2,
+)
 
 from .aircraft_sets import AircraftSpec, A320
 from dataclasses import dataclass
@@ -210,6 +215,223 @@ def make_geo_step_from_enu_integrator():
         "step_func": step_func,
         "enu_model": enu_model,
     }
+
+
+# ---------------------------------------------------------------------------
+# Geodetic-frame continuous dynamics (single continuous ODE, no re-anchoring)
+# ---------------------------------------------------------------------------
+#
+# Why this exists
+# ---------------
+# ``make_dynamics_model`` integrates in a flat ENU tangent plane, and
+# ``make_geo_step_from_enu_integrator`` re-anchors that plane every RK4 step
+# so the integration always sees a fresh local-tangent frame.  That
+# re-anchoring is a *discrete jump* of the coordinate frame; it cannot be
+# embedded in a direct-collocation defect, which assumes ONE continuous,
+# differentiable RHS ``xdot = f(x, u)`` over the whole horizon.
+#
+# This model removes the need for any tangent plane at all: it writes the
+# point-mass kinematics *directly* in geodetic coordinates ``(lat, lon, h)``.
+# The "coordinate transformation" that the re-anchored stepper performed
+# discretely is now folded into the continuous RHS as the WGS84 radius-of-
+# curvature factors ``1/(R_M+h)`` and ``1/((R_N+h)cos lat)``.  Because the
+# RHS is one smooth function over the whole horizon, direct collocation
+# applies natively AND a plain RK4 of this same RHS reproduces the
+# re-anchored stepper's continuous limit (the two discrete systems share the
+# same continuous vector field).
+#
+# Frame rotation / transport rate
+# -------------------------------
+# ``psi`` and ``gamma`` are defined relative to the *local* geographic
+# (ENU) frame.  As the aircraft moves, that frame rotates over the curved
+# earth, so ``psi`` and ``gamma`` change even with zero aerodynamic moment.
+# That apparent rate is the **transport rate**.  The re-anchored ENU stepper
+# captures it implicitly (it re-projects the velocity into the new local
+# frame every step); to match it, the continuous geodetic RHS must carry the
+# transport terms explicitly.  They are derived from the ENU transport
+# angular velocity of the local frame relative to earth,
+#
+#   omega_en (ENU) = ( -V_north/(R_M+h),  V_east/(R_N+h),  V_east*tan(lat)/(R_N+h) )
+#
+# projected onto the heading/flight-path rotation axes:
+#
+#   gamma_dot += V cos(gamma) * ( sin^2(psi)/(R_M+h) + cos^2(psi)/(R_N+h) )   (earth curves away -> pitch up)
+#   psi_dot   += -V cos(gamma) cos(psi) tan(lat) / (R_N+h)                    (meridian convergence)
+#
+# ``include_transport=False`` drops them, which is useful for quantifying how
+# much they matter (see the 5 km comparison script).
+
+def make_geodetic_dynamics_model(include_transport: bool = True):
+    """Continuous point-mass dynamics expressed DIRECTLY in geodetic
+    coordinates.
+
+    State ``x = (lat, lon, h, V, psi, gamma, m)`` with **lat/lon in
+    radians**, ``h`` geodetic altitude in metres.  Control and aero
+    parameters match ``make_dynamics_model`` so the same callers and
+    ``AeroParams`` work unchanged.
+    """
+    lat = ca.SX.sym('lat')   # latitude (rad)
+    lon = ca.SX.sym('lon')   # longitude (rad)
+    h = ca.SX.sym('h')       # geodetic altitude (m)
+    V = ca.SX.sym('V')       # velocity (m/s)
+    psi = ca.SX.sym('psi')   # heading (rad), 0 = East, +ve toward North
+    gamma = ca.SX.sym('gamma')  # flight path angle (rad)
+    m = ca.SX.sym('m')       # mass (kg)
+    state_vec = ca.vertcat(lat, lon, h, V, psi, gamma, m)
+
+    T = ca.SX.sym('T')       # thrust (N)
+    mu = ca.SX.sym('mu')     # bank angle (rad)
+    n_cmd = ca.SX.sym('n_cmd')  # commanded load factor
+    control_vec = ca.vertcat(T, mu, n_cmd)
+
+    S = ca.SX.sym('S')
+    Cl_max = ca.SX.sym('Cl_max')
+    Cd0 = ca.SX.sym('Cd0')
+    k = ca.SX.sym('k')
+    stall_threshold = ca.SX.sym('stall_threshold')
+    k_stall = ca.SX.sym('k_stall')
+    aero_params = ca.vertcat(S, Cl_max, Cd0, k, stall_threshold, k_stall)
+
+    # Atmosphere + aero use the same simplified models as the ENU RHS.  The
+    # ISA density reads ``h`` as geodetic altitude (exact here, unlike the
+    # fixed-ENU model which approximated it by the tangent-plane u-coord).
+    rho = isa_density_expr(h)
+    aero_coeffs = aerodynamic_coefficients_expr(
+        n_cmd, V, m, rho,
+        [S, Cl_max, Cd0, k, stall_threshold, k_stall],
+    )
+    Cd, stalled = aero_coeffs['Cd'], aero_coeffs['stalled']
+
+    g = 9.81
+    n = ca.if_else(stalled, 0.5 * rho * V**2 * Cl_max * S / (m * g), n_cmd)
+    D = 0.5 * rho * V**2 * Cd * S
+
+    # WGS84 radii of curvature at this latitude.
+    sin_lat = ca.sin(lat)
+    denom = 1.0 - WGS84_E2 * sin_lat**2
+    R_N = WGS84_A / ca.sqrt(denom)                    # prime-vertical radius
+    R_M = WGS84_A * (1.0 - WGS84_E2) / denom**1.5     # meridional radius
+
+    cos_g = ca.cos(gamma)
+    V_east = V * cos_g * ca.cos(psi)
+    V_north = V * cos_g * ca.sin(psi)
+    V_up = V * ca.sin(gamma)
+
+    # Position kinematics: the continuous coordinate transformation.
+    lat_dot = V_north / (R_M + h)
+    lon_dot = V_east / ((R_N + h) * ca.cos(lat))
+    h_dot = V_up
+
+    # Force / orientation dynamics (identical to the ENU RHS).
+    V_dot = (T - D) / m - g * ca.sin(gamma)
+    psi_dot = g * n * ca.sin(mu) / (V * cos_g)
+    gamma_dot = g * (n * ca.cos(mu) - cos_g) / V
+
+    if include_transport:
+        gamma_dot = gamma_dot + V * cos_g * (
+            ca.sin(psi)**2 / (R_M + h) + ca.cos(psi)**2 / (R_N + h)
+        )
+        psi_dot = psi_dot - V * cos_g * ca.cos(psi) * ca.tan(lat) / (R_N + h)
+
+    dmdt = 0.0
+    xdot = ca.vertcat(lat_dot, lon_dot, h_dot, V_dot, psi_dot, gamma_dot, dmdt)
+
+    p = ca.vertcat(control_vec, aero_params)
+    dae = {'x': state_vec, 'p': p, 'ode': xdot}
+
+    rhs_func = ca.Function(
+        'geo_rhs_func',
+        [state_vec, control_vec, aero_params],
+        [xdot],
+        ['x', 'u', 'aero_params'],
+        ['xdot'],
+    )
+
+    return {
+        'x': state_vec,
+        'u': control_vec,
+        'aero_params': aero_params,
+        'xdot': xdot,
+        'dae': dae,
+        'rhs_func': rhs_func,
+        'include_transport': include_transport,
+        'aux': {
+            'rho': rho,
+            'Cl': aero_coeffs['Cl'],
+            'Cd': aero_coeffs['Cd'],
+            'stalled': stalled,
+            'n': n,
+            'D': D,
+            'R_M': R_M,
+            'R_N': R_N,
+        },
+    }
+
+
+def make_geodetic_step_integrator(include_transport: bool = True):
+    """RK4 stepper for ``make_geodetic_dynamics_model``.
+
+    The external state uses lat/lon in **degrees** (so it is a drop-in
+    counterpart to ``make_geo_step_from_enu_integrator`` and matches
+    ``GeodeticState``), while the RK4 advance happens in radians on the
+    continuous geodetic RHS.  Unlike the re-anchored stepper, there is no
+    per-step frame swap: it integrates one continuous ODE.
+    """
+    model = make_geodetic_dynamics_model(include_transport=include_transport)
+    rhs_expr = model['rhs_func']
+
+    lat = ca.SX.sym('lat')   # degrees
+    lon = ca.SX.sym('lon')   # degrees
+    alt = ca.SX.sym('alt')
+    V = ca.SX.sym('V')
+    psi = ca.SX.sym('psi')
+    gamma = ca.SX.sym('gamma')
+    m = ca.SX.sym('m')
+    x_geo = ca.vertcat(lat, lon, alt, V, psi, gamma, m)
+
+    dt = ca.SX.sym('dt')
+
+    T = ca.SX.sym('T')
+    mu = ca.SX.sym('mu')
+    n_cmd = ca.SX.sym('n_cmd')
+    u = ca.vertcat(T, mu, n_cmd)
+
+    S = ca.SX.sym('S')
+    Cl_max = ca.SX.sym('Cl_max')
+    Cd0 = ca.SX.sym('Cd0')
+    k = ca.SX.sym('k')
+    stall_threshold = ca.SX.sym('stall_threshold')
+    k_stall = ca.SX.sym('k_stall')
+    aero_params = ca.vertcat(S, Cl_max, Cd0, k, stall_threshold, k_stall)
+
+    deg2rad = ca.pi / 180.0
+    x_rad = ca.vertcat(lat * deg2rad, lon * deg2rad, alt, V, psi, gamma, m)
+    x_rad_next = rk4_step_expr(rhs_expr, x_rad, u, aero_params, dt)
+    x_geo_next = ca.vertcat(
+        x_rad_next[0] / deg2rad,
+        x_rad_next[1] / deg2rad,
+        x_rad_next[2],
+        x_rad_next[3],
+        x_rad_next[4],
+        x_rad_next[5],
+        x_rad_next[6],
+    )
+
+    step_func = ca.Function(
+        'geodetic_step_func',
+        [x_geo, u, aero_params, dt],
+        [x_geo_next],
+        ['x_geo', 'u', 'aero_params', 'dt'],
+        ['x_geo_next'],
+    )
+    return {
+        "x": x_geo,
+        "u": u,
+        "aero_params": aero_params,
+        "step_func": step_func,
+        "model": model,
+    }
+
 
 @dataclass
 class AeroParams:
