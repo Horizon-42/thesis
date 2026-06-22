@@ -4,10 +4,38 @@ import unittest
 
 import pandas as pd
 
+from trajectory_data_process.acquisition import opensky_history
 from trajectory_data_process.acquisition.opensky_history import (
     AIRPORT_HISTORY_COLUMNS,
+    cancel_active_queries,
     history_rows_as_records,
 )
+
+
+class _FakeCursor:
+    def __init__(self) -> None:
+        self.cancelled = False
+
+    def cancel(self) -> None:
+        self.cancelled = True
+
+
+class QueryCancelTests(unittest.TestCase):
+    def tearDown(self) -> None:
+        opensky_history._active_cursors.clear()
+
+    def test_cancel_active_queries_cancels_and_clears(self) -> None:
+        a, b = _FakeCursor(), _FakeCursor()
+        opensky_history._active_cursors.update({a, b})
+
+        cancelled = cancel_active_queries()
+
+        self.assertEqual(cancelled, 2)
+        self.assertTrue(a.cancelled and b.cancelled)
+        self.assertEqual(len(opensky_history._active_cursors), 0)
+
+    def test_cancel_is_safe_when_nothing_running(self) -> None:
+        self.assertEqual(cancel_active_queries(), 0)
 
 
 class OpenSkyHistoryTests(unittest.TestCase):

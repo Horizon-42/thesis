@@ -21,6 +21,7 @@ if __package__ is None or __package__ == "":  # pragma: no cover - direct execut
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from trajectory_data_process.acquisition.opensky_history import install_query_cancel_on_interrupt
 from trajectory_data_process.landings import (
     check_history_access,
     download_airport_landings,
@@ -62,6 +63,10 @@ def main() -> None:
     start = datetime.fromisoformat(args.start.replace("Z", "+00:00")) if args.start else datetime.now(timezone.utc)
     output_root = Path(args.output_root)
     wanted = {a.upper() for a in args.airports} if args.airports else None
+
+    # Cancel the in-flight Trino query on Ctrl-C so it does not linger and eat the
+    # account's query quota.
+    install_query_cancel_on_interrupt()
 
     entries = [(p, t) for p, t in iter_airport_entries(config) if not wanted or p.code in wanted]
     if not entries:

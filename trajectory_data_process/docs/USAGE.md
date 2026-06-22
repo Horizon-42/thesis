@@ -268,3 +268,8 @@ only controls query size / responsiveness, not how far back a dry runway is trie
   silently producing baro-only data.
 - There is no live/REST/OAuth path and no barometric bias correction — both were
   removed with the move to the history DB.
+- The OpenSky Trino account has a small query quota (typically 2 running + 2 queued).
+  The download CLIs install a Ctrl-C / SIGTERM handler that **cancels the in-flight
+  query** before exiting, so an interrupted run does not leave queries occupying the
+  quota. If you ever do exhaust it (e.g. a hard kill), clear stuck queries at
+  <https://trino.opensky-network.org/ui/> (filter by your user, then Kill).

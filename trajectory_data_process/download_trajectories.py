@@ -38,6 +38,7 @@ from trajectory_data_process.acquisition.opensky_history import (
     AIRPORT_HISTORY_COLUMNS,
     STATE_VECTOR_COLUMNS,
     fetch_history_dataframe,
+    install_query_cancel_on_interrupt,
 )
 from trajectory_data_process.acquisition.runways import (
     RunwayThreshold,
@@ -256,6 +257,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    install_query_cancel_on_interrupt()
     script_path = Path(__file__).resolve()
     aeroviz_root = Path(args.aeroviz_root) if args.aeroviz_root else default_aeroviz_root(script_path)
     output_root = Path(args.output_root) if args.output_root else default_outputs_root(script_path)
