@@ -86,8 +86,9 @@ def main() -> None:
         return
 
     first = next(profile for profile, _t, _p, needs in plans if needs)
-    print("[landings] preflight: checking OpenSky history access...", flush=True)
+    print("[landings] preflight: checking OpenSky history access (one small probe query)...", flush=True)
     check_history_access(profile=first, reference=start, bbox_radius_km=args.bbox_radius_km)
+    print("[landings] preflight: access OK, starting download", flush=True)
 
     summary: dict[str, dict[str, int]] = {}
     for profile, thresholds, preloaded, needs_work in plans:
