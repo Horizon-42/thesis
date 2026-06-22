@@ -3,490 +3,475 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>大地坐标连续动力系统与 transport 项</title>
+<title>在圆地球上描述飞机运动：一篇从零开始的教程</title>
 <script>
   window.MathJax = {
-    tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+    tex: { inlineMath: [['$', '$']], displayMath: [['$$', '$$']] },
     svg: { fontCache: 'global' }
   };
 </script>
-<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js" id="MathJax-script" async></script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js" async></script>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
 <style>
-  :root {
-    --bg: #0f1419; --panel: #161b22; --ink: #e6edf3; --muted: #9aa7b4;
-    --accent: #4aa3ff; --good: #3fb950; --warn: #e3873c; --bad: #f85149;
-    --line: #2a323c; --code-bg: #0b0f14;
+  :root{
+    --bg:#0f1419; --panel:#161b22; --ink:#e6edf3; --muted:#9aa7b4;
+    --pos:#4aa3ff;   /* 位置 / 东 */
+    --conv:#3fb950;  /* 子午线收敛 / 北 */
+    --pitch:#e3873c; /* 曲率俯仰 / 天 */
+    --bad:#f85149; --line:#2a323c; --codebg:#0b0f14; --accent:#7ee0ff;
   }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--ink);
-    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", Segoe UI, Roboto, sans-serif;
-    line-height: 1.75; font-size: 16px;
-  }
-  .wrap { max-width: 980px; margin: 0 auto; padding: 32px 24px 96px; }
-  h1 { font-size: 30px; line-height: 1.3; margin: 8px 0 4px; }
-  h2 { font-size: 23px; margin: 48px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
-  h3 { font-size: 18px; margin: 28px 0 8px; color: var(--accent); }
-  .sub { color: var(--muted); margin: 0 0 24px; }
-  p { margin: 12px 0; }
-  a { color: var(--accent); }
-  code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; font-size: 14px;
-         font-family: "SF Mono", Menlo, Consolas, monospace; color: #c9d6e3; }
-  pre { background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
-        padding: 14px 16px; overflow-x: auto; font-size: 13.5px; }
-  pre code { background: none; padding: 0; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-          padding: 18px 20px; margin: 18px 0; }
-  .callout { border-left: 4px solid var(--accent); background: #11203044; padding: 10px 16px;
-             border-radius: 0 8px 8px 0; margin: 16px 0; }
-  .callout.good { border-color: var(--good); }
-  .callout.warn { border-color: var(--warn); }
-  .fig { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-         padding: 12px; margin: 20px 0; }
-  .fig .plot { width: 100%; }
-  .cap { color: var(--muted); font-size: 14px; margin: 8px 6px 2px; }
-  .controls { margin: 8px 6px 4px; color: var(--muted); font-size: 14px; }
-  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; }
-  th, td { border: 1px solid var(--line); padding: 7px 10px; text-align: right; }
-  th { background: #1c2430; color: var(--ink); }
-  td:first-child, th:first-child { text-align: left; }
-  .good-num { color: var(--good); font-weight: 600; }
-  .bad-num { color: var(--warn); font-weight: 600; }
-  .tag { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px;
-         border: 1px solid var(--line); color: var(--muted); margin-left: 6px; vertical-align: middle; }
-  .toc { font-size: 14.5px; columns: 2; column-gap: 32px; }
-  .toc a { display: block; padding: 3px 0; color: var(--muted); text-decoration: none; }
-  .toc a:hover { color: var(--accent); }
-  .eqwrap { overflow-x: auto; }
-  .legend span { display:inline-block; margin-right:16px; font-size:13px; }
-  .swatch { display:inline-block; width:11px; height:11px; border-radius:2px; vertical-align:middle; margin-right:5px; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16.5px;
+       font-family:-apple-system,"PingFang SC","Microsoft YaHei",Segoe UI,Roboto,sans-serif;}
+  .wrap{max-width:920px;margin:0 auto;padding:34px 22px 120px}
+  h1{font-size:31px;line-height:1.3;margin:6px 0 6px}
+  .lede{color:var(--muted);font-size:17px;margin:0 0 28px}
+  h2{font-size:24px;margin:54px 0 14px}
+  h2 .badge{display:inline-block;width:30px;height:30px;line-height:30px;text-align:center;
+    border-radius:50%;background:#1d2733;color:var(--accent);font-size:16px;margin-right:10px;vertical-align:2px}
+  h3{font-size:18.5px;margin:30px 0 8px}
+  p{margin:13px 0}
+  a{color:var(--accent)}
+  code{background:var(--codebg);padding:1px 6px;border-radius:5px;font-size:14px;
+    font-family:"SF Mono",Menlo,Consolas,monospace;color:#cfe0f0}
+  pre{background:var(--codebg);border:1px solid var(--line);border-radius:9px;padding:14px 16px;overflow-x:auto;font-size:13.5px}
+  pre code{background:none;padding:0}
+  .pos{color:var(--pos);font-weight:600}
+  .conv{color:var(--conv);font-weight:600}
+  .pitch{color:var(--pitch);font-weight:600}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:18px 20px;margin:18px 0}
+  .box{border-left:4px solid var(--accent);background:#10212e66;border-radius:0 9px 9px 0;padding:11px 16px;margin:16px 0}
+  .box.intuition{border-color:#f0c75e;background:#2a230f55}
+  .box.think{border-color:#b985ff;background:#1e1530aa}
+  .box .tag{display:block;font-size:13px;letter-spacing:.04em;color:var(--muted);margin-bottom:3px}
+  .box.intuition .tag{color:#f0c75e}
+  .box.think .tag{color:#c6a0ff}
+  .fig{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:14px;margin:22px 0}
+  .fig .plot{width:100%}
+  .cap{color:var(--muted);font-size:14px;margin:9px 4px 2px}
+  .ctrl{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:6px 4px 12px;font-size:14px;color:var(--muted)}
+  .ctrl label{min-width:96px}
+  .ctrl input[type=range]{flex:1;min-width:160px;accent-color:var(--accent)}
+  .ctrl .val{min-width:74px;color:var(--ink);font-variant-numeric:tabular-nums;font-weight:600}
+  .readout{font-size:14.5px;color:var(--ink);margin:6px 4px 0;font-variant-numeric:tabular-nums}
+  .readout b{color:var(--accent)}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13.5px}
+  th,td{border:1px solid var(--line);padding:6px 9px;text-align:right;font-variant-numeric:tabular-nums}
+  th{background:#1c2430}
+  td:first-child,th:first-child{text-align:left}
+  .good{color:var(--conv);font-weight:600}.bn{color:var(--pitch);font-weight:600}
+  .toc{font-size:14.5px;columns:2;column-gap:34px}
+  .toc a{display:block;padding:3px 0;color:var(--muted);text-decoration:none}
+  .toc a:hover{color:var(--accent)}
+  .eq{overflow-x:auto}
+  .legend span{display:inline-block;margin-right:16px;font-size:13px}
+  .sw{display:inline-block;width:11px;height:11px;border-radius:2px;vertical-align:middle;margin-right:5px}
+  hr{border:none;border-top:1px solid var(--line);margin:40px 0}
 </style>
 </head>
 <body>
 <div class="wrap">
 
-  <h1>大地坐标连续动力系统与 transport 项</h1>
-  <p class="sub">把坐标变换做成连续 RHS，让 direct collocation 优化器与 playback 仿真器共享同一个动力系统 · 配合
-    <code>aerodynamic_model/casadi_simulator.py</code> 与
-    <code>4dTrajectory/optimization/casadi_direct_collocation_optimizer.py</code> 阅读</p>
+  <h1>在圆地球上，飞机“在哪、朝哪飞”该怎么算？</h1>
+  <p class="lede">一篇从零开始的教程：为什么我们直接用经纬度写飞行方程，以及那个听起来玄乎的“transport 项”到底是什么。
+  你不需要任何先修知识，跟着拖动几个滑块就能看懂。</p>
 
   <div class="card">
-    <strong>本文回答：</strong>
+    <strong style="color:var(--accent)">你会一步步搞清楚：</strong>
     <div class="toc" style="margin-top:8px">
-      <a href="#s1">1 · 为什么需要新动力系统：两个离散系统的矛盾</a>
-      <a href="#s2">2 · 连续大地坐标 RHS：把坐标变换折进曲率因子</a>
-      <a href="#s3">3 · transport 项：局部坐标系在转</a>
-      <a href="#s4">4 · 三维示意：子午线收敛与曲率俯仰</a>
-      <a href="#s5">5 · 5 km 数值验证：两个离散系统统一</a>
-      <a href="#s6">6 · 与代码的对应关系</a>
+      <a href="#s1">① 一架进近的飞机，和“翻地图”的老办法</a>
+      <a href="#s2">② 位置：把“米”翻译成“经纬度”</a>
+      <a href="#s3">③ transport：脚下的“东南西北”在转</a>
+      <a href="#s4">④ 把它们拼成一个方程</a>
+      <a href="#s5">⑤ 这点差别，要紧吗？5 km 实测</a>
+      <a href="#s6">⑥ 给优化器用：为什么必须“连续”</a>
     </div>
   </div>
 
-  <!-- ============================================================= -->
-  <h2 id="s1">1 · 为什么需要新动力系统</h2>
+  <!-- ============================================================ -->
+  <h2 id="s1"><span class="badge">①</span>一架飞机，和“翻地图”的老办法</h2>
 
-  <p>系统里有两个相互独立的部件，它们各自定义了一个“离散动力学”
-    $x_{k+1}=F(x_k,u_k,h)$：</p>
+  <p>设想你在指挥一架飞机进近着陆。任何时刻，要把它描述清楚，你得知道两件事：</p>
+  <ul>
+    <li><b>它在哪</b>——纬度 $\varphi$、经度 $\lambda$、高度 $h$；</li>
+    <li><b>它朝哪飞</b>——速度多大 $V$、机头朝哪个方位（航向 $\psi$）、是在爬升还是下降（航迹角 $\gamma$）。</li>
+  </ul>
+  <p>这六个数 $(\varphi,\lambda,h,V,\psi,\gamma)$ 合起来就是飞机的<b>状态</b>。我们要的，是一条“规则”：给定此刻的状态和飞行员的操作，
+  下一瞬间这六个数怎么变。有了这条规则，就能把整条航迹推演出来。</p>
+
+  <p>麻烦在于：地球是<b>圆</b>的，而我们的直觉、我们的几何公式，都是<b>平</b>的。怎么调和？</p>
+
+  <div class="box intuition">
+    <span class="tag">老办法：每一步都“翻一页平地图”</span>
+    在飞机脚下放一张<b>相切的平面地图</b>，在这张平面上用初中几何把飞机往前推一小步；推完，飞机已经挪到新位置了，
+    于是把旧地图扔掉、在新位置<b>重新贴一张</b>新的平面地图，再推下一步……如此反复。每张地图都很准，但整个过程是<b>一页一页跳着翻的</b>。
+  </div>
+
+  <p>下面这个地球上：<span class="conv">黄色曲线</span>是飞机真正走的光滑航迹；
+  <span style="color:#8fb7ff">蓝色小方块</span>就是老办法沿途“贴”的一张张平面地图。可以拖动旋转看看——
+  老办法把一条光滑的路，拆成了一摞不断更换的小平面。</p>
+
+  <div class="fig">
+    <div id="globe1" class="plot" style="height:430px"></div>
+    <div class="cap">图 1 · 同一条航迹的两种看法：一条光滑曲线（新办法）vs 一摞不断翻新的相切平面（老办法）。可拖动、滚轮缩放。</div>
+  </div>
+
+  <div class="box">
+    <span class="tag">为什么这页要换掉它</span>
+    “翻页”这个动作本身是<b>跳跃</b>的——它不是时间的连续函数。后面（第 ⑥ 节）你会看到，我们用的轨迹优化器要求运动规则是
+    <b>一条光滑、连续</b>的方程。所以本教程要做的，是把“换地图”这件事，<b>化进一个连续的方程里</b>，
+    让飞机始终在<b>同一套经纬度</b>上飞，不再翻页。
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="s2"><span class="badge">②</span>位置：把“米”翻译成“经纬度”</h2>
+
+  <p>先看最简单的“它在哪怎么变”。飞机在动，速度可以拆成三个方向：
+  向<span class="conv">北</span>多少、向<span class="pos">东</span>多少、向上多少（单位都是 米/秒）。
+  问题来了：<b>向北飞了 700 米，纬度增加多少度？</b></p>
+
+  <div class="box intuition">
+    <span class="tag">关键直觉：纬度是“角度”，角度 = 弧长 ÷ 半径</span>
+    沿地球表面向北走，本质是绕着地心转了一个小角。转过的角 = 走过的弧长 ÷ 到地心的半径。
+    所以 <b>纬度变化 = 向北的米数 ÷ 地球半径</b>。地球越大，同样走 700 米，转过的角越小。
+    经度同理，但还要多除一个 $\cos\varphi$——因为越靠近两极，同一纬度圈越小，走同样的东向距离，经度反而转得更多。
+  </div>
+
+  <p>写成公式就是下面这两行（$V_N$=向北的速度，$V_E$=向东的速度，$R$ 是地球半径，$h$ 是高度，量纲都对得上）：</p>
+  <div class="eq">
+  $$\dot\varphi=\frac{V_N}{\;R+h\;},\qquad \dot\lambda=\frac{V_E}{(R+h)\,\cos\varphi}$$
+  </div>
+  <p>这两个分母 <span class="pos">$\dfrac{1}{R+h}$</span> 和 <span class="pos">$\dfrac{1}{(R+h)\cos\varphi}$</span>，
+  就是“把米翻译成度”的<b>汇率</b>。老办法靠“翻页 + 投影”一步步偷偷做的换算，新办法直接把这个汇率写进方程里——这就是连续化的第一步。</p>
+
+  <p>自己拨一拨下面的滑块，体会这个汇率：</p>
 
   <div class="card">
-    <table style="font-size:14.5px">
-      <tr><th>部件</th><th style="text-align:left">离散动力学 $F$</th><th style="text-align:left">代码</th></tr>
-      <tr>
-        <td>优化器<br><span class="tag">direct collocation</span></td>
-        <td style="text-align:left">Hermite–Simpson defect 约束</td>
-        <td style="text-align:left"><code>casadi_direct_collocation_optimizer.py</code></td>
-      </tr>
-      <tr>
-        <td>playback 仿真<br><span class="tag">前端重放</span></td>
-        <td style="text-align:left">每步重锚定 ENU 平面 + RK4，再投影回大地坐标</td>
-        <td style="text-align:left"><code>make_geo_step_from_enu_integrator</code></td>
-      </tr>
-    </table>
+    <div class="ctrl"><label>速度 V</label><input id="p_v" type="range" min="40" max="250" value="90"><span class="val" id="p_v_v">90 m/s</span></div>
+    <div class="ctrl"><label>航向（从正东起）</label><input id="p_psi" type="range" min="0" max="359" value="20"><span class="val" id="p_psi_v">20°</span></div>
+    <div class="ctrl"><label>所在纬度</label><input id="p_lat" type="range" min="0" max="80" value="51"><span class="val" id="p_lat_v">51°</span></div>
+    <div class="readout" id="p_out"></div>
   </div>
 
-  <p>老的 playback 之所以要<strong>每一步重新锚定一个 ENU 切平面</strong>，正是为了换坐标系：
-    在当前点冻结一个局部平面，在平面里用平直动力学积一步，再把结果投影回经纬度。
-    这个“换锚”是一个<strong>离散跳变</strong>——它不是时间的连续函数。</p>
-
-  <div class="callout warn">
-    direct collocation 的每一条 defect 都假设动力学是<strong>一个连续可微的</strong> RHS
-    $\dot x = f(x,u)$。段内换坐标系会让 $f$ 不连续，defect 无从写起。所以老优化器只能退而求其次：
-    在<em>单一固定</em> ENU 平面里做 collocation，再引入一个 multiple-shooting 的 polish 把解投影回
-    重锚定 RK4 的可行流形——绕了一大圈，就因为优化器和 playback 用的是两个不同的 $F$。
+  <div class="box think">
+    <span class="tag">想一想</span>
+    把纬度滑到 75°，再看“经度变化率”。同样的东向速度，为什么经度转得快多了？
+    （提示：那个 $\cos\varphi$ 越来越小，做了分母。靠近极点时，经线挤在一起，跨一格经度其实没走多远。）
   </div>
 
-  <p>本文的解法不是去掉坐标变换，而是把它<strong>做成连续的</strong>：直接在大地坐标
-    $(\lambda,\varphi,h)$ 里写运动方程，坐标变换变成 RHS 内部的几个连续代数因子。这样：</p>
+  <!-- ============================================================ -->
+  <h2 id="s3"><span class="badge">③</span>transport：脚下的“东南西北”在转</h2>
 
-  <ul>
-    <li>$f$ 在整个 horizon 上是<strong>一个光滑函数</strong> → direct collocation 原生适用；</li>
-    <li>playback 直接 RK4 同一个 $f$ → 优化器与 playback 共享同一个连续系统；</li>
-    <li>固定 ENU 的曲率近似误差消失（曲率被精确算进 RHS）。</li>
+  <p>到这里，“它在哪怎么变”讲完了。接下来是本教程最有意思、也最容易被忽略的部分——“<b>它朝哪飞</b>”为什么会自己变。</p>
+
+  <div class="box intuition">
+    <span class="tag">核心直觉：你的“方向感”是相对脚下的</span>
+    你说飞机“朝东、机头略微下俯”，这个“东”和“下”，都是相对<b>你此刻脚下当地</b>的东南西北上来说的。
+    可飞机一移动，<b>脚下那套“东南西北上”本身就在地球上慢慢转</b>。于是，哪怕飞行员的手一动不动，
+    航向 $\psi$ 和航迹角 $\gamma$ 也会悄悄地变。这个“凭空多出来的转动”，就叫 <b>transport（输运）</b>。
+  </div>
+
+  <p>它由两个独立的小效应组成。我们各用一个可拖的图把它讲透。</p>
+
+  <h3>3.1 <span class="conv">子午线收敛</span>：往东飞，“北”在偏</h3>
+
+  <p>下面是从<b>北极正上方往下看</b>的俯视图。从极点散出去的<span class="conv">绿色细线</span>是经线（子午线）；
+  飞机沿一条纬度圈往东飞，在两个位置各画出它的“<span class="conv">当地正北</span>”（指向圆心）和“<span class="pos">机头/正东</span>”方向。</p>
+  <p>注意看那两个绿色“北”箭头：<b>它们并不平行</b>。因为经线像橘子瓣一样朝极点收拢，你每往东挪一点，“正北”就转一点。
+  拖动纬度滑块——<b>越靠近极点，收敛越凶</b>。</p>
+
+  <div class="fig">
+    <div id="conv" class="plot" style="height:430px"></div>
+    <div class="ctrl"><label>飞行纬度</label><input id="c_lat" type="range" min="10" max="80" value="51"><span class="val" id="c_lat_v">51°</span></div>
+    <div class="readout" id="c_out"></div>
+    <div class="cap">图 2 · 北极俯视：经线收拢使“当地正北”随东飞而偏转。这就是航向会自己漂移的原因。</div>
+  </div>
+
+  <h3>3.2 <span class="pitch">曲率俯仰</span>：地面在前方“沉”下去</h3>
+
+  <p>另一个效应在垂直方向。地球是圆的，所以你正前方的地面，是<b>不断往下弯</b>的。
+  假如飞机的速度方向在“真实空间里”保持笔直，那么相对<b>前方那块已经沉下去的当地地平线</b>，机头就显得越来越<b>抬头</b>了。</p>
+
+  <p>下图是侧视的剖面（曲率<b>夸张</b>了，方便看）。<span class="pitch">橙色虚线</span>是飞机当前位置的当地地平线，
+  <span class="pos">蓝色箭头</span>是保持笔直的速度方向。拖动“已飞距离”滑块，看那块地平线怎么沉下去、机头相对它怎么一点点抬起来。</p>
+
+  <div class="fig">
+    <div id="pitch" class="plot" style="height:400px"></div>
+    <div class="ctrl"><label>已飞距离（示意）</label><input id="pp" type="range" min="0" max="100" value="55"><span class="val" id="pp_v">55%</span></div>
+    <div class="readout" id="pp_out"></div>
+    <div class="cap">图 3 · 侧视剖面（曲率已夸张）：当地地平线随地球弯曲而下沉，使航迹角相对它增大——这就是“曲率俯仰”。</div>
+  </div>
+
+  <div class="box think">
+    <span class="tag">想一想：这跟“升力刚好等于重力”有什么关系？</span>
+    如果飞机的升力<b>恰好</b>等于重力（载荷因子 $n=1$），按理“不该爬也不该降”。但在圆地球上，$n=1$ 并没有提供
+    跟着地面弯下去所需的那一点点“向心”量，于是飞机会相对地面<b>缓慢爬升</b>——正是上面这个曲率俯仰。
+    要真正保持水平，载荷因子得比 1 稍微小一点点。这不是 bug，是圆地球的真实物理。
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="s4"><span class="badge">④</span>把它们拼成一个方程</h2>
+
+  <p>现在每一块你都见过了，可以放心地把完整规则摆出来。状态 $(\varphi,\lambda,h,V,\psi,\gamma)$ 的变化率分三组，
+  我把每一行都按前面讲过的颜色标了出来——没有任何一项是“凭空扔给你”的：</p>
+
+  <div class="card eq">
+  $$\begin{aligned}
+  \color{#4aa3ff}{\dot\varphi}&\color{#4aa3ff}{=\frac{V\cos\gamma\sin\psi}{R_M+h}}\\[4pt]
+  \color{#4aa3ff}{\dot\lambda}&\color{#4aa3ff}{=\frac{V\cos\gamma\cos\psi}{(R_N+h)\cos\varphi}}\\[4pt]
+  \dot h&=V\sin\gamma\\[8pt]
+  \dot V&=\frac{T-D}{m}-g\sin\gamma\\[4pt]
+  \dot\psi&=\frac{g\,n\sin\mu}{V\cos\gamma}\;\color{#3fb950}{-\,\frac{V\cos\gamma\cos\psi\,\tan\varphi}{R_N+h}}\\[4pt]
+  \dot\gamma&=\frac{g(n\cos\mu-\cos\gamma)}{V}\;\color{#e3873c}{+\,\frac{V\cos\gamma}{R_M+h}}
+  \end{aligned}$$
+  </div>
+
+  <p>逐行对照（颜色和前面的图、滑块一致）：</p>
+  <ul style="font-size:15px">
+    <li><span class="pos">$\dot\varphi,\dot\lambda$</span> —— 第②节的“汇率”：向北/向东的速度，除以半径（经度再除 $\cos\varphi$）。</li>
+    <li>$\dot h=V\sin\gamma$ —— 向上的速度，就是爬升率。</li>
+    <li>$\dot V$ —— 牛顿第二定律：推力 $T$、阻力 $D$、重力沿航迹的分量。</li>
+    <li>$\dot\psi$ —— 第一项是飞行员压坡度 $\mu$ 转弯；<span class="conv">绿色尾巴是子午线收敛（3.1）</span>。</li>
+    <li>$\dot\gamma$ —— 第一项是拉杆（载荷因子 $n$）改变俯仰；<span class="pitch">橙色尾巴是曲率俯仰（3.2）</span>。</li>
   </ul>
 
-  <div class="callout warn">
-    <strong>注意：连续 $f$ 一致是必要不充分。</strong> geodetic 让优化器和 playback 用同一个<em>连续向量场</em>，
-    但优化器的<em>离散算子</em>（Hermite-Simpson 配点，粗网格）和 playback 的（细步 RK4）仍不同：粗网格下
-    raw 解 replay 会漂移千米级。最终去掉 polish 靠的是<strong>把 state 网格加密、control 保持粗</strong>
-    （控制 $N$ 段、状态 $N\cdot M$ 子区间，$M$ 自动选），让两边的离散算子也一致。详见
-    <code>direct_collocation_hermite_simpson.zh.md</code> §5。
+  <p>前三行是<span class="pos">位置</span>（第②节的“汇率”）；中间三行是“力怎么改变速度和姿态”，和平地上的点质量飞机模型<b>一字不差</b>；
+  真正的新东西，是 $\dot\psi$、$\dot\gamma$ 末尾那两个 <span class="conv">绿</span>、<span class="pitch">橙</span> 小尾巴——它们就是第③节的两个 transport 效应。
+  （$R_M,R_N$ 是 WGS84 椭球在该纬度的两个曲率半径，比单一的 $R$ 更精确；直觉完全一样。）</p>
+
+  <div class="box">
+    <span class="tag">一句话总结</span>
+    老办法靠“翻页 + 投影”离散地做的所有事——换算米与度、旋转当地坐标系——现在全被写成了
+    <b>一个处处光滑的连续方程</b>。没有切平面，没有翻页。
   </div>
 
-  <!-- ============================================================= -->
-  <h2 id="s2">2 · 连续大地坐标 RHS</h2>
+  <!-- ============================================================ -->
+  <h2 id="s5"><span class="badge">⑤</span>这点差别，要紧吗？5 km 实测</h2>
 
-  <p>状态 $x=(\varphi,\lambda,h,V,\psi,\gamma)$：纬度 $\varphi$、经度 $\lambda$（弧度）、大地高 $h$、
-    速度 $V$、航向 $\psi$（从<strong>正东</strong>起算，向北为正）、航迹角 $\gamma$。
-    位置那三行是“连续化的坐标变换”，<strong>力的方程（$V,\psi,\gamma$）与原 ENU 模型逐字相同</strong>。</p>
-
-  <h3>2.1 位置运动学：曲率半径因子</h3>
-  <div class="eqwrap">
-  $$
-  \dot\varphi = \frac{V\cos\gamma\sin\psi}{R_M + h}, \qquad
-  \dot\lambda = \frac{V\cos\gamma\cos\psi}{(R_N + h)\cos\varphi}, \qquad
-  \dot h = V\sin\gamma
-  $$
-  </div>
-  <p>其中 WGS84 子午圈、卯酉圈曲率半径</p>
-  <div class="eqwrap">
-  $$
-  R_N = \frac{a}{\sqrt{1-e^2\sin^2\varphi}}, \qquad
-  R_M = \frac{a\,(1-e^2)}{\left(1-e^2\sin^2\varphi\right)^{3/2}}
-  $$
-  </div>
-  <p>这两个 $\dfrac{1}{R_M+h}$、$\dfrac{1}{(R_N+h)\cos\varphi}$ 就是把“局部速度 (m/s)”连续地换算成
-    “经纬度变化率”的因子——它们<strong>替代了原来每步重锚定要做的离散坐标投影</strong>，而且把地球曲率
-    精确算进去，没有切平面近似。</p>
-
-  <h3>2.2 力 / 姿态方程（与 ENU 模型一致）</h3>
-  <div class="eqwrap">
-  $$
-  \dot V = \frac{T-D}{m} - g\sin\gamma, \qquad
-  \dot\psi = \frac{g\,n\sin\mu}{V\cos\gamma}, \qquad
-  \dot\gamma = \frac{g\,(n\cos\mu - \cos\gamma)}{V}
-  $$
-  </div>
-
-  <div class="callout">
-    注意单位：RHS 内部 $\varphi,\lambda$ 用<strong>弧度</strong>（否则 $\cos\varphi$ 与速率量纲不符），
-    而 <code>GeodeticState</code> 用度。唯一的边界处理就是度↔弧度转换——没有任何切平面投影。
-  </div>
-
-  <!-- ============================================================= -->
-  <h2 id="s3">3 · transport 项：局部坐标系在转</h2>
-
-  <p>$\psi$ 和 $\gamma$ 是相对<strong>局部</strong>地理（ENU）坐标系定义的。飞机一移动，这个局部坐标系
-    就在弯曲的地球上转动，于是即使没有任何气动力矩，$\psi$、$\gamma$ 也会变。这个“凭空”出现的角速率
-    就是 <strong>transport rate（输运角速率）</strong>。</p>
-
-  <p>老的重锚定 ENU stepper <em>隐式</em>地包含了它——每步它把速度矢量重新投影到新的局部坐标系，
-    $\psi,\gamma$ 自然就变了。要让连续大地坐标 RHS 与之一致，必须把 transport 项<strong>显式</strong>写出来。
-    它来自局部 ENU 坐标系相对地球的输运角速度</p>
-  <div class="eqwrap">
-  $$
-  \boldsymbol{\omega}_{en}^{\text{ENU}} =
-  \left( -\frac{V_N}{R_M+h},\ \ \frac{V_E}{R_N+h},\ \ \frac{V_E\tan\varphi}{R_N+h} \right)
-  $$
-  </div>
-  <p>把它投影到“改变航迹角”和“改变航向”的旋转轴上，得到两条修正项：</p>
-
-  <div class="card">
-    <h3 style="margin-top:4px">曲率俯仰（curvature pitch）—— 加到 $\dot\gamma$</h3>
-    <div class="eqwrap">
-    $$
-    \Delta\dot\gamma = V\cos\gamma\left(\frac{\sin^2\psi}{R_M+h} + \frac{\cos^2\psi}{R_N+h}\right)
-    \;\xrightarrow{\text{球近似}}\; \frac{V\cos\gamma}{R+h}
-    $$
-    </div>
-    <p style="color:var(--muted);font-size:14.5px;margin-bottom:0">
-      地面在飞机前方不断“弯下去”，一条相对惯性空间笔直的速度矢量会越来越高于<em>当地</em>地平线，
-      所以 $\gamma$ 增大。物理含义：升力恰好等于重力（$n=1$）时，飞机其实会缓慢爬升——少了跟随
-      地球曲率所需的向心量。</p>
-  </div>
-
-  <div class="card">
-    <h3 style="margin-top:4px">子午线收敛（meridian convergence）—— 加到 $\dot\psi$</h3>
-    <div class="eqwrap">
-    $$
-    \Delta\dot\psi = -\,V\cos\gamma\cos\psi\,\frac{\tan\varphi}{R_N+h}
-    $$
-    </div>
-    <p style="color:var(--muted);font-size:14.5px;margin-bottom:0">
-      经线向极点收敛，沿东西方向飞行时，相对当地“北”的航向会缓慢漂移。纬度越高
-      （$\tan\varphi$ 越大）漂移越快。</p>
-  </div>
-
-  <p>代码里用 <code>include_transport</code> 开关控制这两项，<code>True</code> 为默认（与 playback 一致），
-    <code>False</code> 用来量化它们的影响（见 §5）。</p>
-
-  <!-- ============================================================= -->
-  <h2 id="s4">4 · 三维示意</h2>
-
-  <h3>4.1 子午线收敛：局部坐标系沿航迹旋转</h3>
-  <p>下图是一个地球球面。一架飞机沿高纬度（<strong>60°N</strong>）向东飞行，沿途几个点上画出<strong>当地
-    ENU 三轴</strong>（<span style="color:#4aa3ff">东 E</span>、
-    <span style="color:#3fb950">北 N</span>、<span style="color:#e3873c">天 U</span>）。
-    注意 E/N 轴随着东飞而<strong>逐渐转动</strong>——这就是 transport rate 的几何来源。
-    （为了看得清，经度跨度做了夸张；真实终端区 5 km 内的转动只有约 0.04°。）</p>
-
-  <div class="fig">
-    <div id="globe" class="plot" style="height:520px"></div>
-    <div class="controls">可拖动旋转、滚轮缩放。</div>
-    <div class="cap">图 1 · 沿航迹的局部 ENU 三轴旋转 = 输运角速率 $\boldsymbol{\omega}_{en}$ 的可视化。</div>
-  </div>
-
-  <h3>4.2 曲率俯仰：为什么“笔直”飞会相对地平线抬头</h3>
-  <p>垂直剖面图。<span style="color:#9aa7b4">灰色弧</span>是地球表面，飞机沿
-    <span style="color:#4aa3ff">蓝色切线方向</span>（相对惯性空间笔直）飞行。随着地面弯下去，
-    在后面的点上，同一条速度方向相对<span style="color:#e3873c">当地地平线</span>的夹角 $\gamma$ 张开了——
-    这就是 $\Delta\dot\gamma=+V\cos\gamma/(R{+}h)$。</p>
-
-  <div class="fig">
-    <div id="pitch" class="plot" style="height:430px"></div>
-    <div class="cap">图 2 · 曲率俯仰：当地地平线随曲率下沉，使航迹角相对当地坐标系增大（已夸张）。</div>
-  </div>
-
-  <!-- ============================================================= -->
-  <h2 id="s5">5 · 5 km 数值验证：两个离散系统统一</h2>
-
-  <p>用同一初始状态、同一控制，把两个<strong>离散</strong>系统各积一遍，比较 5 km 内的终点偏差
-    （脚本：<code>4dTrajectory/optimization/geodetic_vs_reanchored_error.py</code>，机型 A320）：</p>
-
+  <p>那两个 transport 小尾巴，看着不起眼，去掉会怎样？我们做个对照：同一架飞机、同一组操作，分别用</p>
   <ul>
-    <li><strong>大地坐标 RK4（含 transport）</strong> vs 重锚定 ENU RK4（playback）；</li>
-    <li><strong>大地坐标 RK4（无 transport）</strong> vs 重锚定 ENU RK4。</li>
+    <li><b>带 transport</b> 的连续方程，和</li>
+    <li><b>不带 transport</b> 的连续方程，</li>
   </ul>
+  <p>各自积分，再和老办法（逐步翻页的 playback 积分器）比终点差多少。</p>
 
   <div class="fig">
-    <div id="drift" class="plot" style="height:430px"></div>
+    <div id="drift" class="plot" style="height:420px"></div>
     <div class="legend" style="margin:4px 6px">
-      <span><span class="swatch" style="background:#3fb950"></span>含 transport（水平偏差）</span>
-      <span><span class="swatch" style="background:#56c271"></span>含 transport（高度偏差）</span>
-      <span><span class="swatch" style="background:#e3873c"></span>无 transport（水平偏差）</span>
-      <span><span class="swatch" style="background:#f85149"></span>无 transport（高度偏差）</span>
+      <span><span class="sw" style="background:#3fb950"></span>带 transport · 水平</span>
+      <span><span class="sw" style="background:#56c271"></span>带 transport · 高度</span>
+      <span><span class="sw" style="background:#e3873c"></span>不带 transport · 水平</span>
+      <span><span class="sw" style="background:#f85149"></span>不带 transport · 高度</span>
     </div>
-    <div class="cap">图 3 · 终点水平/高度偏差随距离的变化（相对 playback 积分器）。含 transport 的水平与高度偏差都贴在 ~0（亚毫米）。</div>
+    <div class="cap">图 4 · 相对老办法 playback 的终点偏差。带 transport 的水平与高度偏差都贴在 ~0（亚毫米），几乎看不见。</div>
   </div>
 
+  <p>表里把四项偏差都列全（水平、高度、航向、航迹角）：</p>
   <table>
-    <tr>
-      <th rowspan="2">距离<br>[km]</th>
-      <th colspan="4">含 transport vs playback</th>
-      <th colspan="4">无 transport vs playback</th>
-    </tr>
-    <tr>
-      <th>水平 [m]</th><th>高度 [m]</th><th>航向 Δψ [°]</th><th>航迹 Δγ [°]</th>
-      <th>水平 [m]</th><th>高度 [m]</th><th>航向 Δψ [°]</th><th>航迹 Δγ [°]</th>
-    </tr>
-    <tr><td>1.0</td><td class="good-num">0.0002</td><td class="good-num">0.0002</td><td class="good-num">0.0000</td><td class="good-num">0.0000</td><td class="bad-num">0.101</td><td>0.058</td><td>0.0112</td><td>0.0041</td></tr>
-    <tr><td>2.0</td><td class="good-num">0.0003</td><td class="good-num">0.0007</td><td class="good-num">0.0000</td><td class="good-num">0.0000</td><td class="bad-num">0.418</td><td>0.146</td><td>0.0224</td><td>0.0069</td></tr>
-    <tr><td>3.0</td><td class="good-num">0.0002</td><td class="good-num">0.0012</td><td class="good-num">0.0000</td><td class="good-num">0.0000</td><td class="bad-num">0.989</td><td>0.379</td><td>0.0335</td><td>0.0146</td></tr>
-    <tr><td>4.0</td><td class="good-num">0.0002</td><td class="good-num">0.0017</td><td class="good-num">0.0000</td><td class="good-num">0.0000</td><td class="bad-num">1.828</td><td>0.768</td><td>0.0447</td><td>0.0219</td></tr>
-    <tr><td>5.0</td><td class="good-num">0.0003</td><td class="good-num">0.0022</td><td class="good-num">0.0000</td><td class="good-num">0.0000</td><td class="bad-num">2.947</td><td>1.304</td><td>0.0558</td><td>0.0290</td></tr>
+    <tr><th rowspan="2">距离<br>[km]</th><th colspan="4">带 transport vs 老办法</th><th colspan="4">不带 transport vs 老办法</th></tr>
+    <tr><th>水平[m]</th><th>高度[m]</th><th>Δψ[°]</th><th>Δγ[°]</th><th>水平[m]</th><th>高度[m]</th><th>Δψ[°]</th><th>Δγ[°]</th></tr>
+    <tr><td>1</td><td class="good">0.0002</td><td class="good">0.0002</td><td class="good">0.0000</td><td class="good">0.0000</td><td class="bn">0.101</td><td>0.058</td><td>0.0112</td><td>0.0041</td></tr>
+    <tr><td>3</td><td class="good">0.0002</td><td class="good">0.0012</td><td class="good">0.0000</td><td class="good">0.0000</td><td class="bn">0.989</td><td>0.379</td><td>0.0335</td><td>0.0146</td></tr>
+    <tr><td>5</td><td class="good">0.0003</td><td class="good">0.0022</td><td class="good">0.0000</td><td class="good">0.0000</td><td class="bn">2.947</td><td>1.304</td><td>0.0558</td><td>0.0290</td></tr>
   </table>
 
-  <div class="callout good">
-    <strong>结论。</strong> 含 transport 的大地坐标系统在 5 km 内把 playback 积分器追踪到
-    <strong>亚毫米级——所有分量都是</strong>（水平 ≤0.0003 m、<strong>高度 ≤0.0022 m</strong>、航向/航迹 ≤0.0001°）：
-    两者是<em>同一个连续向量场</em>，这消除了固定 ENU 的曲率/框架误差。去掉 transport 后偏差升到
-    <strong>~2.9 m 水平 / 1.3 m 高度 / 0.056° 航向 / 0.029° 航迹</strong>——这个差<em>就是</em>
-    transport rate（子午线收敛 + 曲率俯仰），与重锚定 stepper 隐式捕捉的量完全吻合。
+  <div class="box">
+    <span class="tag">怎么读这张表</span>
+    <b>带 transport</b> 那半边，四项全是亚毫米 / 千分之几度——意思是它和老办法<b>几乎一模一样</b>，
+    说明这套连续方程是对的。<b>不带 transport</b> 那半边，5 km 就漂出 <b>~2.9 米水平、1.3 米高度</b>——
+    而这个漂移量，<b>恰好等于</b>第③节那两个效应（子午线收敛 + 曲率俯仰）的大小。
+    换句话说：老办法其实<b>一直在偷偷算 transport</b>（它每步重贴地图时把方向重新投影了一遍），
+    我们只是把这件事<b>摊到明面上、写成了连续方程</b>。
   </div>
 
-  <div class="callout">
-    这里对比的是<strong>连续向量场</strong>（两边用同一积分器、同一控制）。要让<strong>优化器与 playback 在
-    离散层面</strong>也落到同一 target，还需把 <strong>state 网格加密、control 保持粗</strong>（dense-state
-    transcription，$M$ 自动选）——这才是最终去掉 polish 的原因。见
-    <code>direct_collocation_hermite_simpson.zh.md</code> §5。
-  </div>
+  <p>在终端区这点差别只有几米，但它是<b>系统性</b>的、会随距离累积；更重要的是，写成连续方程后，整套动力学
+  才能干净地交给优化器——这正是下一节。</p>
 
-  <!-- ============================================================= -->
-  <h2 id="s6">6 · 与代码的对应关系</h2>
+  <!-- ============================================================ -->
+  <h2 id="s6"><span class="badge">⑥</span>给优化器用：为什么必须“连续”</h2>
 
-  <table style="font-size:14.5px">
-    <tr><th style="text-align:left">概念 / 公式</th><th style="text-align:left">代码位置</th></tr>
-    <tr><td style="text-align:left">连续大地坐标 RHS + transport 项</td><td style="text-align:left"><code>make_geodetic_dynamics_model(include_transport=True)</code></td></tr>
-    <tr><td style="text-align:left">大地坐标 RK4 stepper（playback/对比）</td><td style="text-align:left"><code>make_geodetic_step_integrator</code></td></tr>
-    <tr><td style="text-align:left">老的重锚定 ENU stepper（对照基线）</td><td style="text-align:left"><code>make_geo_step_from_enu_integrator</code></td></tr>
-    <tr><td style="text-align:left">接入 direct collocation（弧度决策变量）</td><td style="text-align:left"><code>make_direct_collocation_solver</code> / <code>..._free_time</code>（<code>sub_steps=M</code>）</td></tr>
-    <tr><td style="text-align:left">dense-state：control $N$、state $N\cdot M$ + 自动选 $M$</td><td style="text-align:left"><code>_build_collocation_decision</code> / <code>select_state_substeps</code></td></tr>
-    <tr><td style="text-align:left">边界度↔弧度转换</td><td style="text-align:left"><code>_geodetic_state_to_decision</code> / <code>_decision_to_geodetic_state</code></td></tr>
-    <tr><td style="text-align:left">multiple-shooting polish</td><td style="text-align:left">已删除（dense-state 后不再需要）</td></tr>
-    <tr><td style="text-align:left">5 km 连续向量场对比脚本</td><td style="text-align:left"><code>geodetic_vs_reanchored_error.py</code></td></tr>
+  <p>我们用直接配点法（direct collocation）做轨迹优化。它把动力学拆成一串<b>代数等式</b>，每条等式都要在“同一条连续规则
+  $\dot x=f(x,u)$”上取两次值来比对。而老办法的“翻页”是<b>离散跳变</b>——段中间换一次地图，这条等式就<b>没法写</b>了。</p>
+
+  <p>本教程这套大地坐标连续方程，正好满足这个要求：它处处光滑，整条航迹用<b>同一套坐标</b>。于是优化器和飞行回放共享
+  <b>同一个连续向量场</b>（第⑤节验证到亚毫米），既不需要切平面、也不需要事后再做一遍“打磨（polish）”。</p>
+
+  <table style="font-size:14px">
+    <tr><th style="text-align:left">概念</th><th style="text-align:left">代码</th></tr>
+    <tr><td style="text-align:left">连续大地坐标方程（含 transport）</td><td style="text-align:left"><code>make_geodetic_dynamics_model(include_transport=True)</code></td></tr>
+    <tr><td style="text-align:left">老办法（重锚定 RK4，对照基线）</td><td style="text-align:left"><code>make_geo_step_from_enu_integrator</code></td></tr>
+    <tr><td style="text-align:left">第⑤节的 5 km 对照脚本</td><td style="text-align:left"><code>geodetic_vs_reanchored_error.py</code></td></tr>
+    <tr><td style="text-align:left">配点优化器（用它）</td><td style="text-align:left"><code>casadi_direct_collocation_optimizer.py</code></td></tr>
   </table>
 
-  <pre><code># 含 transport 与 playback 一致；无 transport 用于量化其影响
-gamma_dot += V*cos(gamma) * (sin(psi)**2/(R_M+h) + cos(psi)**2/(R_N+h))   # 曲率俯仰
-psi_dot   += -V*cos(gamma)*cos(psi)*tan(lat)/(R_N+h)                       # 子午线收敛</code></pre>
+  <pre><code># 那两个 transport 小尾巴，就是这两行：
+gamma_dot += V*cos(gamma) / (R_M + h)                      # 曲率俯仰（3.2）
+psi_dot   += -V*cos(gamma)*cos(psi)*tan(lat) / (R_N + h)   # 子午线收敛（3.1）</code></pre>
 
-  <p class="sub" style="margin-top:36px">相关文档：
-    <code>direct_collocation_hermite_simpson.zh.md</code>（HS 配点推导、dense-state 与 playback 一致性 §5）。</p>
+  <hr>
+  <p class="lede">延伸阅读：<code>direct_collocation_hermite_simpson.zh.md</code>——配点法本身、以及为什么“state 网格加密、control 保持粗”能让回放严格落到目标。</p>
 
 </div>
 
 <script>
-// ----------------------------------------------------------------------
-// 共享几何：单位球面上某点 (lat,lon, 弧度) 的 ENU 三轴 (ECEF 表示)
-// ----------------------------------------------------------------------
-function enuTriad(latRad, lonRad) {
-  const cphi = Math.cos(latRad), sphi = Math.sin(latRad);
-  const clam = Math.cos(lonRad), slam = Math.sin(lonRad);
-  const U = [cphi * clam, cphi * slam, sphi];          // 天 (= 单位球面位置)
-  const E = [-slam, clam, 0];                            // 东
-  const N = [-sphi * clam, -sphi * slam, cphi];          // 北
-  return { U, E, N };
+// ---------- 公用 ----------
+const D2R = Math.PI/180, R2D = 180/Math.PI, R_EARTH = 6371000;
+const BG='#161b22', GRID='#2a323c', INK='#e6edf3';
+const C_POS='#4aa3ff', C_CONV='#3fb950', C_PITCH='#e3873c';
+
+function enuTriad(latRad, lonRad){
+  const cp=Math.cos(latRad), sp=Math.sin(latRad), cl=Math.cos(lonRad), sl=Math.sin(lonRad);
+  return {
+    U:[cp*cl, cp*sl, sp],
+    E:[-sl, cl, 0],
+    N:[-sp*cl, -sp*sl, cp]
+  };
 }
-const PLOT_BG = '#161b22', GRID = '#2a323c', INK = '#e6edf3';
-const baseLayout3d = {
-  paper_bgcolor: PLOT_BG, font: { color: INK },
-  margin: { l: 0, r: 0, t: 0, b: 0 }, showlegend: false,
-  scene: {
-    xaxis: { visible: false }, yaxis: { visible: false }, zaxis: { visible: false },
-    aspectmode: 'data',
-    camera: { eye: { x: 1.25, y: -1.35, z: 0.9 } }
-  }
-};
 
-// ----------------------------------------------------------------------
-// 图 1：地球 + 航迹 + 沿途 ENU 三轴（子午线收敛）
-// ----------------------------------------------------------------------
-(function drawGlobe() {
-  // 半透明球面
-  const nu = 40, nv = 40;
-  const xs = [], ys = [], zs = [];
-  for (let i = 0; i <= nu; i++) {
-    const rowx = [], rowy = [], rowz = [];
-    const phi = -Math.PI / 2 + Math.PI * i / nu;
-    for (let j = 0; j <= nv; j++) {
-      const lam = -Math.PI + 2 * Math.PI * j / nv;
-      rowx.push(Math.cos(phi) * Math.cos(lam));
-      rowy.push(Math.cos(phi) * Math.sin(lam));
-      rowz.push(Math.sin(phi));
-    }
-    xs.push(rowx); ys.push(rowy); zs.push(rowz);
-  }
-  const sphere = {
-    type: 'surface', x: xs, y: ys, z: zs, showscale: false, opacity: 0.55,
-    colorscale: [[0, '#11202e'], [1, '#1b3a52']], hoverinfo: 'skip',
-    contours: { x: { highlight: false }, y: { highlight: false }, z: { highlight: false } }
-  };
-
-  // 航迹：纬度 60°N，经度 -120° → -10°（夸张以显示收敛）
-  const latDeg = 60, lonStart = -120, lonEnd = -10;
-  const path = { x: [], y: [], z: [], type: 'scatter3d', mode: 'lines',
-                 line: { color: '#f0c75e', width: 6 }, hoverinfo: 'skip' };
-  const R = 1.003;
-  for (let k = 0; k <= 60; k++) {
-    const lon = (lonStart + (lonEnd - lonStart) * k / 60) * Math.PI / 180;
-    const t = enuTriad(latDeg * Math.PI / 180, lon);
-    path.x.push(R * t.U[0]); path.y.push(R * t.U[1]); path.z.push(R * t.U[2]);
-  }
-
-  // 沿途几个点画三轴
-  const traces = [sphere, path];
-  const L = 0.16;
-  const samples = [-120, -92, -64, -36, -10];
-  const axisColors = { E: '#4aa3ff', N: '#3fb950', U: '#e3873c' };
-  samples.forEach(lonDeg => {
-    const t = enuTriad(latDeg * Math.PI / 180, lonDeg * Math.PI / 180);
-    const p = [R * t.U[0], R * t.U[1], R * t.U[2]];
-    ['E', 'N', 'U'].forEach(ax => {
-      const v = t[ax];
-      traces.push({
-        type: 'scatter3d', mode: 'lines',
-        x: [p[0], p[0] + L * v[0]], y: [p[1], p[1] + L * v[1]], z: [p[2], p[2] + L * v[2]],
-        line: { color: axisColors[ax], width: 5 }, hoverinfo: 'skip'
-      });
-      // 箭头尖（小 cone）
-      traces.push({
-        type: 'cone', x: [p[0] + L * v[0]], y: [p[1] + L * v[1]], z: [p[2] + L * v[2]],
-        u: [v[0]], v: [v[1]], w: [v[2]], sizemode: 'absolute', sizeref: 0.05,
-        showscale: false, colorscale: [[0, axisColors[ax]], [1, axisColors[ax]]],
-        anchor: 'tip', hoverinfo: 'skip'
-      });
-    });
+// ---------- 图1：地球 + 光滑航迹 + 翻页平面 ----------
+(function(){
+  const nu=36,nv=36, xs=[],ys=[],zs=[];
+  for(let i=0;i<=nu;i++){const rx=[],ry=[],rz=[];const phi=-Math.PI/2+Math.PI*i/nu;
+    for(let j=0;j<=nv;j++){const lam=-Math.PI+2*Math.PI*j/nv;
+      rx.push(Math.cos(phi)*Math.cos(lam));ry.push(Math.cos(phi)*Math.sin(lam));rz.push(Math.sin(phi));}
+    xs.push(rx);ys.push(ry);zs.push(rz);}
+  const sphere={type:'surface',x:xs,y:ys,z:zs,showscale:false,opacity:0.5,
+    colorscale:[[0,'#11202e'],[1,'#1b3a52']],hoverinfo:'skip',
+    contours:{x:{highlight:false},y:{highlight:false},z:{highlight:false}}};
+  const latDeg=42, lon0=-58, lon1=58, Rp=1.004;
+  const path={x:[],y:[],z:[],type:'scatter3d',mode:'lines',line:{color:'#f0c75e',width:7},name:'光滑航迹',hoverinfo:'skip'};
+  for(let k=0;k<=60;k++){const lon=(lon0+(lon1-lon0)*k/60)*D2R;const t=enuTriad(latDeg*D2R,lon);
+    path.x.push(Rp*t.U[0]);path.y.push(Rp*t.U[1]);path.z.push(Rp*t.U[2]);}
+  const traces=[sphere,path];
+  // 翻页平面：沿途几处画一个小相切方块
+  const s=0.13;
+  [-58,-29,0,29,58].forEach(lonDeg=>{
+    const t=enuTriad(latDeg*D2R,lonDeg*D2R);const p=[Rp*t.U[0],Rp*t.U[1],Rp*t.U[2]];
+    const c=[];for(const a of [[-1,-1],[1,-1],[1,1],[-1,1]])
+      c.push([p[0]+s*(a[0]*t.E[0]+a[1]*t.N[0]), p[1]+s*(a[0]*t.E[1]+a[1]*t.N[1]), p[2]+s*(a[0]*t.E[2]+a[1]*t.N[2])]);
+    traces.push({type:'mesh3d',x:c.map(v=>v[0]),y:c.map(v=>v[1]),z:c.map(v=>v[2]),
+      i:[0,0],j:[1,2],k:[2,3],color:'#8fb7ff',opacity:0.45,flatshading:true,hoverinfo:'skip'});
   });
-
-  const layout = JSON.parse(JSON.stringify(baseLayout3d));
-  // 把镜头对准航迹区域
-  layout.scene.camera.eye = { x: 0.2, y: -1.0, z: 1.25 };
-  Plotly.newPlot('globe', traces, layout, { displayModeBar: false, responsive: true });
+  Plotly.newPlot('globe1',traces,{paper_bgcolor:BG,font:{color:INK},showlegend:false,
+    margin:{l:0,r:0,t:0,b:0},
+    scene:{xaxis:{visible:false},yaxis:{visible:false},zaxis:{visible:false},aspectmode:'data',
+      camera:{eye:{x:0.35,y:-1.15,z:1.15}}}},{displayModeBar:false,responsive:true});
 })();
 
-// ----------------------------------------------------------------------
-// 图 2：曲率俯仰（垂直剖面，2D，夸张曲率）
-// ----------------------------------------------------------------------
-(function drawPitch() {
-  const Rd = 1.0;                       // 画图用半径
-  const arc = { x: [], y: [], type: 'scatter', mode: 'lines',
-                line: { color: '#9aa7b4', width: 3 }, hoverinfo: 'skip', name: '地球表面' };
-  const a0 = Math.PI / 2 + 0.9, a1 = Math.PI / 2 - 0.9;
-  for (let k = 0; k <= 100; k++) {
-    const a = a0 + (a1 - a0) * k / 100;
-    arc.x.push(Rd * Math.cos(a)); arc.y.push(Rd * Math.sin(a));
-  }
-  // 起点（顶点）与切线（速度方向，相对惯性笔直）
-  const p0 = [0, Rd];
-  const tangent = { x: [p0[0], p0[0] + 0.95], y: [p0[1], p0[1]], type: 'scatter', mode: 'lines',
-                    line: { color: '#4aa3ff', width: 4 }, hoverinfo: 'skip', name: '速度方向' };
-  const data = [arc, tangent];
+// ---------- 图2：位置汇率 playground ----------
+function posUpdate(){
+  const V=+document.getElementById('p_v').value;
+  const psi=+document.getElementById('p_psi').value;
+  const lat=+document.getElementById('p_lat').value;
+  document.getElementById('p_v_v').textContent=V+' m/s';
+  document.getElementById('p_psi_v').textContent=psi+'°';
+  document.getElementById('p_lat_v').textContent=lat+'°';
+  const vN=V*Math.sin(psi*D2R), vE=V*Math.cos(psi*D2R);
+  const dphi=vN/R_EARTH*R2D;                       // deg/s
+  const dlam=vE/(R_EARTH*Math.cos(lat*D2R))*R2D;    // deg/s
+  document.getElementById('p_out').innerHTML=
+    `向北 <b>${vN.toFixed(1)}</b> m/s，向东 <b>${vE.toFixed(1)}</b> m/s　→　`+
+    `纬度变化 <b>${dphi.toFixed(5)}</b> °/s，经度变化 <b>${dlam.toFixed(5)}</b> °/s`+
+    `<br>东向“汇率”里那个 1/cos(纬度) = <b>${(1/Math.cos(lat*D2R)).toFixed(3)}</b>`+
+    `（纬度越高它越大，所以同样东速、经度转得越快）`;
+}
+['p_v','p_psi','p_lat'].forEach(id=>document.getElementById(id).addEventListener('input',posUpdate));
+posUpdate();
 
-  // 几个下游点：当地地平线（切线）+ 速度方向(水平) 之间的夹角 = gamma
-  const annotations = [];
-  [0.45, 0.8].forEach((ang, idx) => {
-    const a = Math.PI / 2 - ang;
-    const px = Rd * Math.cos(a), py = Rd * Math.sin(a);
-    // 当地地平线方向（垂直于半径）
-    const hx = Math.cos(a - Math.PI / 2), hy = Math.sin(a - Math.PI / 2);
-    const Lh = 0.34;
-    data.push({ x: [px - Lh * hx, px + Lh * hx], y: [py - Lh * hy, py + Lh * hy],
-                type: 'scatter', mode: 'lines', line: { color: '#e3873c', width: 3, dash: 'dot' },
-                hoverinfo: 'skip' });
-    // 速度方向在该点（仍水平，相对惯性笔直）
-    data.push({ x: [px, px + 0.34], y: [py, py], type: 'scatter', mode: 'lines',
-                line: { color: '#4aa3ff', width: 3 }, hoverinfo: 'skip' });
-    annotations.push({ x: px + 0.20, y: py + 0.07, text: 'γ ↑', showarrow: false,
-                       font: { color: '#f0c75e', size: 15 } });
+// ---------- 图2(3.1)：子午线收敛 俯视 ----------
+function drawConv(){
+  const lat=+document.getElementById('c_lat').value;
+  document.getElementById('c_lat_v').textContent=lat+'°';
+  const colat=(90-lat)/90;            // 极点=0，赤道=1
+  const data=[];
+  // 经线（radial）
+  for(let a=0;a<360;a+=30){const r=1.05;
+    data.push({x:[0,r*Math.cos(a*D2R)],y:[0,r*Math.sin(a*D2R)],type:'scatter',mode:'lines',
+      line:{color:C_CONV,width:1},opacity:0.35,hoverinfo:'skip'});}
+  // 纬度圈
+  const cx=[],cy=[];for(let a=0;a<=360;a+=4){cx.push(colat*Math.cos(a*D2R));cy.push(colat*Math.sin(a*D2R));}
+  data.push({x:cx,y:cy,type:'scatter',mode:'lines',line:{color:'#f0c75e',width:3},hoverinfo:'skip'});
+  // 极点
+  data.push({x:[0],y:[0],type:'scatter',mode:'markers+text',marker:{color:'#fff',size:7},
+    text:['北极'],textposition:'top center',textfont:{color:INK,size:12},hoverinfo:'skip'});
+  // 两架飞机：当地北（指向圆心）+ 东（切向）
+  const arrowN=colat*0.34, arrowE=colat*0.34;
+  [25,70].forEach(angDeg=>{
+    const a=angDeg*D2R, px=colat*Math.cos(a), py=colat*Math.sin(a);
+    const nx=-Math.cos(a), ny=-Math.sin(a);          // 指向圆心 = 当地北
+    const ex=-Math.sin(a), ey=Math.cos(a);           // 切向 = 当地东(机头)
+    data.push({x:[px,px+arrowN*nx],y:[py,py+arrowN*ny],type:'scatter',mode:'lines',
+      line:{color:C_CONV,width:4},hoverinfo:'skip'});
+    data.push({x:[px,px+arrowE*ex],y:[py,py+arrowE*ey],type:'scatter',mode:'lines',
+      line:{color:C_POS,width:4},hoverinfo:'skip'});
+    data.push({x:[px],y:[py],type:'scatter',mode:'markers',marker:{color:'#fff',size:8},hoverinfo:'skip'});
   });
-  annotations.push({ x: 0.0, y: Rd + 0.08, text: '飞机', showarrow: false, font: { color: INK, size: 13 } });
+  Plotly.react('conv',data,{paper_bgcolor:BG,plot_bgcolor:BG,font:{color:INK},showlegend:false,
+    margin:{l:8,r:8,t:8,b:8},
+    xaxis:{visible:false,range:[-1.15,1.15],scaleanchor:'y',scaleratio:1},
+    yaxis:{visible:false,range:[-1.15,1.15]}},{displayModeBar:false,responsive:true});
+  // 5km 漂移读数：往东飞 ψ̇ = -V tanφ / R，对 5km：tanφ * 5000/R
+  const drift5=Math.tan(lat*D2R)*5000/R_EARTH*R2D;
+  document.getElementById('c_out').innerHTML=
+    `两个<span class="conv">绿色“北”箭头</span>明显不平行——这就是收敛。`+
+    `沿东飞 <b>5 km</b>，航向相对当地北约漂移 <b>${drift5.toFixed(3)}°</b>`+
+    `（= tan(纬度) × 0.045°；纬度越高漂得越快）。`;
+}
+document.getElementById('c_lat').addEventListener('input',drawConv);
+drawConv();
 
-  const layout = {
-    paper_bgcolor: PLOT_BG, plot_bgcolor: PLOT_BG, font: { color: INK },
-    margin: { l: 10, r: 10, t: 10, b: 10 }, showlegend: false,
-    xaxis: { visible: false, range: [-0.2, 1.15], scaleanchor: 'y', scaleratio: 1 },
-    yaxis: { visible: false, range: [0.1, 1.18] },
-    annotations
-  };
-  Plotly.newPlot('pitch', data, layout, { displayModeBar: false, responsive: true });
-})();
+// ---------- 图3(3.2)：曲率俯仰 侧视 ----------
+function drawPitch(){
+  const frac=+document.getElementById('pp').value/100;
+  document.getElementById('pp_v').textContent=Math.round(frac*100)+'%';
+  const Rd=1.0, span=1.0;                 // 夸张曲率：顶点在 (0,Rd)
+  const arc={x:[],y:[],type:'scatter',mode:'lines',line:{color:'#9aa7b4',width:3},hoverinfo:'skip'};
+  for(let k=0;k<=100;k++){const a=Math.PI/2+span-2*span*k/100;arc.x.push(Rd*Math.cos(a));arc.y.push(Rd*Math.sin(a));}
+  const data=[arc];
+  // 起点（顶点）速度方向（水平）
+  data.push({x:[0,0.9],y:[Rd,Rd],type:'scatter',mode:'lines',line:{color:C_POS,width:4},hoverinfo:'skip'});
+  data.push({x:[0],y:[Rd],type:'scatter',mode:'markers+text',marker:{color:'#fff',size:8},
+    text:['飞机'],textposition:'top center',textfont:{color:INK,size:12},hoverinfo:'skip'});
+  // 当前点
+  const a=Math.PI/2 - span*frac, px=Rd*Math.cos(a), py=Rd*Math.sin(a);
+  const hx=Math.cos(a-Math.PI/2), hy=Math.sin(a-Math.PI/2);  // 当地地平线方向（垂直半径）
+  const L=0.42;
+  data.push({x:[px-L*hx,px+L*hx],y:[py-L*hy,py+L*hy],type:'scatter',mode:'lines',
+    line:{color:C_PITCH,width:3,dash:'dot'},hoverinfo:'skip'});             // 当地地平线
+  data.push({x:[px,px+0.42],y:[py,py],type:'scatter',mode:'lines',line:{color:C_POS,width:4},hoverinfo:'skip'}); // 速度方向(仍水平)
+  data.push({x:[px],y:[py],type:'scatter',mode:'markers',marker:{color:'#fff',size:8},hoverinfo:'skip'});
+  const gammaDeg=(span*frac)*R2D;        // 示意角 = 经过的弧角
+  const ann=[{x:px+0.30,y:py+0.05,text:'γ ↑',showarrow:false,font:{color:'#f0c75e',size:15}}];
+  Plotly.react('pitch',data,{paper_bgcolor:BG,plot_bgcolor:BG,font:{color:INK},showlegend:false,
+    margin:{l:8,r:8,t:8,b:8},annotations:ann,
+    xaxis:{visible:false,range:[-0.15,1.05],scaleanchor:'y',scaleratio:1},
+    yaxis:{visible:false,range:[0.05,1.16]}},{displayModeBar:false,responsive:true});
+  document.getElementById('pp_out').innerHTML=
+    `机头相对<span class="pitch">当地地平线</span>已抬头 <b>${gammaDeg.toFixed(0)}°</b>（示意，曲率夸张）。`+
+    `真实地球上，每飞 <b>1 km</b> 这个角约增加 <b>0.009°</b>——很小，但一直在累积。`;
+}
+document.getElementById('pp').addEventListener('input',drawPitch);
+drawPitch();
 
-// ----------------------------------------------------------------------
-// 图 3：5 km 漂移（嵌入 A320 实测数据）
-// ----------------------------------------------------------------------
-(function drawDrift() {
-  const dist = [1, 2, 3, 4, 5];
-  const horizT = [0.0002, 0.0003, 0.0002, 0.0002, 0.0003];
-  const altT   = [0.0002, 0.0007, 0.0012, 0.0017, 0.0022];
-  const horizN = [0.101, 0.418, 0.989, 1.828, 2.947];
-  const altN   = [0.058, 0.146, 0.379, 0.768, 1.304];
-  const mk = (y, color, name, dash) => ({
-    x: dist, y, type: 'scatter', mode: 'lines+markers', name,
-    line: { color, width: 3, dash: dash || 'solid' }, marker: { size: 7, color }
-  });
-  const data = [
-    mk(horizN, '#e3873c', '无 transport · 水平'),
-    mk(altN, '#f85149', '无 transport · 高度', 'dot'),
-    mk(horizT, '#3fb950', '含 transport · 水平'),
-    mk(altT, '#56c271', '含 transport · 高度', 'dot')
-  ];
-  const layout = {
-    paper_bgcolor: PLOT_BG, plot_bgcolor: PLOT_BG, font: { color: INK },
-    margin: { l: 56, r: 16, t: 12, b: 44 }, showlegend: false,
-    xaxis: { title: '飞行距离 [km]', gridcolor: GRID, zerolinecolor: GRID },
-    yaxis: { title: '相对 playback 的偏差 [m]', gridcolor: GRID, zerolinecolor: GRID, rangemode: 'tozero' }
-  };
-  Plotly.newPlot('drift', data, layout, { displayModeBar: false, responsive: true });
+// ---------- 图4：5km 漂移 ----------
+(function(){
+  const dist=[1,2,3,4,5];
+  const horizT=[0.0002,0.0003,0.0002,0.0002,0.0003];
+  const altT  =[0.0002,0.0007,0.0012,0.0017,0.0022];
+  const horizN=[0.101,0.418,0.989,1.828,2.947];
+  const altN  =[0.058,0.146,0.379,0.768,1.304];
+  const mk=(y,c,n,dash)=>({x:dist,y,type:'scatter',mode:'lines+markers',name:n,
+    line:{color:c,width:3,dash:dash||'solid'},marker:{size:7,color:c}});
+  Plotly.newPlot('drift',[
+    mk(horizN,C_PITCH,'不带 transport·水平'),
+    mk(altN,'#f85149','不带 transport·高度','dot'),
+    mk(horizT,C_CONV,'带 transport·水平'),
+    mk(altT,'#56c271','带 transport·高度','dot')
+  ],{paper_bgcolor:BG,plot_bgcolor:BG,font:{color:INK},showlegend:false,
+    margin:{l:58,r:16,t:12,b:46},
+    xaxis:{title:'飞行距离 [km]',gridcolor:GRID,zerolinecolor:GRID},
+    yaxis:{title:'相对老办法的终点偏差 [m]',gridcolor:GRID,zerolinecolor:GRID,rangemode:'tozero'}},
+    {displayModeBar:false,responsive:true});
 })();
 </script>
 </body>
