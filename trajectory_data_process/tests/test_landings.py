@@ -66,6 +66,18 @@ class LandingDownloadTests(unittest.TestCase):
         self.assertEqual(collected["23R"][0]["runway"], "23R")
         self.assertEqual(fetch.calls, 1)  # stops as soon as the count is met
 
+    def test_gives_up_on_dry_runway_instead_of_full_lookback(self) -> None:
+        empty = _StubFetch(pd.DataFrame(columns=list(_landing_df().columns)), always=True)
+
+        collected = download_airport_landings(
+            profile=PROFILE, thresholds=[THRESHOLD], count=5, start=START,
+            max_lookback_days=10.0, chunk_hours=12.0, dry_give_up_chunks=3,
+            fetch_history_fn=empty,
+        )
+
+        self.assertEqual(len(collected["23R"]), 0)
+        self.assertEqual(empty.calls, 3)  # gave up after 3 dry chunks, not the full 20
+
     def test_dedupes_same_landing_across_chunks(self) -> None:
         fetch = _StubFetch(_landing_df(), always=True)
 

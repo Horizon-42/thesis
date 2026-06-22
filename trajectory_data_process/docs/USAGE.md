@@ -161,8 +161,11 @@ python trajectory_data_process/download_landings.py --count 30 --airports KRDU K
 For each airport it issues **one history query per time chunk** — a bounding box of
 `--bbox-radius-km` (default 30 km) around the airport — and reuses the trajectories for
 all of that airport's thresholds, scanning backward from `--start` (default: now) in
-`--chunk-hours` steps until each threshold has `--count` landings or
-`--max-lookback-days` is reached. The bbox query downloads only terminal-area state
+`--chunk-hours` steps (default 12 h) until each threshold has `--count` landings or
+`--max-lookback-days` is reached. A threshold that finds nothing new for
+`--dry-give-up-chunks` consecutive chunks (default 8) is abandoned, so an idle runway
+end no longer drags the whole airport back to the full lookback. The bbox query
+downloads only terminal-area state
 vectors (≈80% fewer rows than the full-track airport join) and, because it is purely
 geometric, also catches arrivals whose `estarrival` metadata is missing or wrong.
 Landing flight records therefore have `arr_airport`/`dep_airport` set to `null`. A trajectory counts as a landing at a threshold when
@@ -254,8 +257,9 @@ There are two layers, and they behave differently:
   `--start`** (and the same `--chunk-hours`) to reuse it.
 
 Note: a runway end that is idle in the requested period legitimately yields few or no
-landings, so its airport keeps scanning back to `--max-lookback-days` on every run.
-Bound the search with `--max-lookback-days` rather than chasing those ends.
+landings. It is abandoned after `--dry-give-up-chunks` dry chunks rather than scanning
+all the way to `--max-lookback-days`, which is the main lever on run time. Raise it (or
+`--max-lookback-days`) if you want to dig deeper for sparse runway ends.
 
 ## 8. Notes
 

@@ -96,22 +96,24 @@ def download_airport_landings(
     count: int,
     start: datetime,
     max_lookback_days: float,
-    chunk_hours: float = 6.0,
+    chunk_hours: float = 12.0,
     bbox_radius_km: float = DEFAULT_BBOX_RADIUS_KM,
     runway_threshold_radius_m: float = 1000.0,
     approach_window_min: int = 25,
     segment_gap_sec: int = 900,
+    dry_give_up_chunks: int = 8,
     cached: bool = True,
     preloaded: dict[str, list[dict[str, Any]]] | None = None,
     fetch_history_fn: FetchHistory = fetch_history_dataframe,
 ) -> dict[str, list[dict[str, Any]]]:
     """Collect up to ``count`` landings for each threshold, scanning backward.
 
-    Each chunk is fetched as a ``bbox_radius_km`` box around the airport.
-    ``preloaded`` seeds already-collected flights per threshold (for resume): a
-    threshold already at ``count`` triggers no queries, and new landings are
-    de-duplicated against the preloaded ones. Returns a mapping of runway-threshold
-    ident to a list of CZML-input flights.
+    Each chunk is fetched as a ``bbox_radius_km`` box around the airport. A threshold
+    that yields no new landing for ``dry_give_up_chunks`` consecutive chunks is given
+    up (idle runway ends would otherwise drag the whole airport back to
+    ``max_lookback_days``); the scan stops once every threshold is at ``count`` or
+    given up. ``preloaded`` seeds already-collected flights per threshold (for resume),
+    de-duplicated by ``(icao24, landing_time_utc)``.
     """
     preloaded = preloaded or {}
     bounds = bounds_from_radius_km(profile.lat, profile.lon, bbox_radius_km)
@@ -122,10 +124,15 @@ def download_airport_landings(
         t.ident: {(f["icao24"], f.get("landing_time_utc")) for f in collected[t.ident]}
         for t in thresholds
     }
+    dry_chunks: dict[str, int] = {t.ident: 0 for t in thresholds}
+    given_up: set[str] = set()
+
+    def active(ident: str) -> bool:
+        return len(collected[ident]) < count and ident not in given_up
 
     earliest = start - timedelta(days=max_lookback_days)
     cursor = start
-    while cursor > earliest and any(len(collected[t.ident]) < count for t in thresholds):
+    while cursor > earliest and any(active(t.ident) for t in thresholds):
         chunk_start = max(cursor - timedelta(hours=chunk_hours), earliest)
         print(
             f"[landings] {profile.code} {chunk_start.isoformat()} -> {cursor.isoformat()} "
@@ -142,9 +149,9 @@ def download_airport_landings(
         trajectories = build_trajectories_from_history(df, max_gap_sec=segment_gap_sec)
 
         for threshold in thresholds:
-            remaining = count - len(collected[threshold.ident])
-            if remaining <= 0:
+            if not active(threshold.ident):
                 continue
+            before = len(collected[threshold.ident])
             flights = trajectories_to_czml_input(
                 trajectories,
                 airport_lat=profile.lat,
@@ -153,7 +160,7 @@ def download_airport_landings(
                 runway_threshold_radius_m=runway_threshold_radius_m,
                 landing_only=True,
                 approach_window_min=approach_window_min,
-                max_flights=remaining + 10,
+                max_flights=count - before + 10,
             )
             for flight in flights:
                 key = (flight["icao24"], flight.get("landing_time_utc"))
@@ -163,6 +170,16 @@ def download_airport_landings(
                 collected[threshold.ident].append(flight)
                 if len(collected[threshold.ident]) >= count:
                     break
+
+            if len(collected[threshold.ident]) > before:
+                dry_chunks[threshold.ident] = 0
+            else:
+                dry_chunks[threshold.ident] += 1
+                if dry_chunks[threshold.ident] >= dry_give_up_chunks:
+                    given_up.add(threshold.ident)
+                    print(f"[landings] {profile.code} {threshold.ident}: dry for "
+                          f"{dry_give_up_chunks} chunks, giving up at "
+                          f"{len(collected[threshold.ident])}/{count}", flush=True)
 
         cursor = chunk_start
 
