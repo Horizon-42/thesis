@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>30 km 尺度上四种动力系统的误差对比</title>
+<script src="https://cdn.plot.ly/plotly-2.30.0.min.js" charset="utf-8"></script>
+<style>
+  :root{--ink:#1b2733;--muted:#5b6b7a;--line:#e1e7ee;--bg:#f7f9fc;--card:#fff;--accent:#2f6fed;
+    --A:#d1495b;--B:#111;--C:#2f6fed;--D:#e8890c;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);line-height:1.75;font-size:16px;
+    font-family:-apple-system,"Segoe UI","Noto Sans CJK SC","PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:32px 22px 96px}
+  header.hero{background:linear-gradient(135deg,#0f3d2e,#2f6fed 80%);color:#fff;border-radius:16px;padding:34px 30px;margin-bottom:26px}
+  header.hero h1{margin:0 0 8px;font-size:26px;line-height:1.35}
+  header.hero p{margin:0;color:#e3ecff;font-size:15.5px}
+  h2{margin:42px 0 6px;font-size:22px;border-left:4px solid var(--accent);padding-left:12px}
+  h2 .eyebrow{display:block;font-size:12.5px;color:var(--muted);font-weight:600;letter-spacing:.08em}
+  h3{margin:24px 0 6px;font-size:17.5px}
+  p{margin:12px 0}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:16px 0}
+  .callout{border-radius:10px;padding:14px 16px;margin:16px 0;font-size:15px}
+  .intuition{background:#eef4ff;border:1px solid #cdddff}
+  .warn{background:#fff7ed;border:1px solid #fdba74}
+  .good{background:#f0fdf4;border:1px solid #86efac}
+  code,.mono{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:13.5px;background:#eef2f7;padding:1px 6px;border-radius:5px}
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:8px 11px;text-align:left}
+  th{background:#f1f5fb}
+  td.num{text-align:right;font-variant-numeric:tabular-nums}
+  .chip{display:inline-block;padding:1px 9px;border-radius:999px;font-size:12.5px;font-weight:700;color:#fff}
+  .cA{background:var(--A)} .cB{background:var(--B)} .cC{background:var(--C)} .cD{background:var(--D)}
+  .plot{width:100%;height:380px}
+  .muted{color:var(--muted)}
+  .footer{margin-top:40px;font-size:13.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:16px}
+  dl{margin:8px 0}
+  dt{font-weight:600;margin-top:8px}
+  dd{margin:2px 0 2px 0;color:#243240}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>30&nbsp;km 尺度上四种动力系统的误差对比</h1>
+  <p>同一条轨迹(同一个初始状态 + 同一组恒定控制)飞约 30&nbsp;km,用四种不同的动力学公式各积分一遍,逐点测量它们相对"物理最忠实"参考的偏差。结论:固定切平面(局部 ENU)和"丢掉 transport 的 RHS"在终端区尺度上都会漂出<strong>上百米</strong>;而完整的测地 RHS 与逐点重锚几乎完全一致。</p>
+</header>
+
+<!-- 1 -->
+<h2 id="systems"><span class="eyebrow">第 1 节</span>四个被比较的动力系统</h2>
+<div class="card">
+  <table>
+    <tr><th>系统</th><th>是什么</th><th>代码</th></tr>
+    <tr><td><span class="chip cA">A</span> 固定局部 ENU(锚在<strong>目标</strong>)</td>
+        <td>整段 30&nbsp;km 只用<strong>一个</strong>切平面(ref = 目标点):起点 geo→ENU <strong>转一次</strong>,在 ENU 里全程积分平面点质量方程,只在记录时 ENU→geo(<strong>不</strong>每步来回转)。</td>
+        <td><code>geodetic_state_to_enu_expr</code> + <code>make_dynamics_model</code>(RK4)+ <code>enu_state_to_geodetic_expr</code></td></tr>
+    <tr><td><span class="chip cB">B</span> 逐点重锚 ENU <em>(参考)</em></td>
+        <td>每一步都在当前点<strong>重建</strong>切平面 —— 框架始终跟着飞机走。最忠实的离散积分器,作为<strong>参考真值</strong>。</td>
+        <td><code>make_geo_step_from_enu_integrator</code></td></tr>
+    <tr><td><span class="chip cC">C</span> 完整测地 RHS(<strong>含 transport</strong>)</td>
+        <td>直接在 (lat, lon, h) 上写的连续 RHS,把曲率和框架旋转(transport)都折进去。应当与 B 几乎一致 —— 用来<strong>验证</strong>这套 RHS。</td>
+        <td><code>make_geodetic_step_integrator(True)</code></td></tr>
+    <tr><td><span class="chip cD">D</span> 测地 RHS(<strong>无 transport</strong>)</td>
+        <td>同 C,但<strong>去掉 transport 项</strong>,用来量化"框架旋转"到底有多重要。</td>
+        <td><code>make_geodetic_step_integrator(False)</code></td></tr>
+  </table>
+</div>
+<div class="callout intuition">
+  💡 <b>为什么拿 B 当参考?</b> B 每步都重锚切平面,等于"永远站在飞机脚下看世界"——它正确处理了地球曲率和框架旋转,是这几种里最贴近真实的离散积分。所以我们测 A、C、D <strong>相对 B</strong> 的偏差。
+</div>
+
+<!-- 2 -->
+<h2 id="method"><span class="eyebrow">第 2 节</span>比较方法(初始值、控制、参考、误差度量)</h2>
+<p>四个系统都从<strong>同一个初始状态</strong>出发、用<strong>同一组恒定控制</strong>、以<strong>同一个 RK4 步长</strong>积分。这样它们之间的差别只能来自<strong>模型/坐标框架</strong>,而不是离散化噪声(步长取得足够小,见下)。</p>
+<div class="card">
+  <dl id="method-dl"></dl>
+</div>
+<div class="callout good">
+  ✅ <b>离散化噪声已排除:</b> 步长取 <code id="dt-note"></code> s,RK4 截断误差可忽略。证据见结果——参考系 C 与 B 的偏差只有 <strong>厘米/毫米级</strong>(若是离散化噪声占主导,加密步长它会变,但它没变)。所以 A、D 的几百米偏差是<strong>实打实的模型误差</strong>。
+</div>
+<p><b>误差度量(相对参考 B,沿飞行距离):</b></p>
+<ul>
+  <li><b>水平位置误差(m)</b>:同一时刻两点的水平大圆近似距离。</li>
+  <li><b>高度误差(m)</b>:几何高度之差。</li>
+  <li><b>航向误差(deg)</b>:航向角之差(取最短)。</li>
+</ul>
+
+<!-- 3 -->
+<h2 id="results"><span class="eyebrow">第 3 节</span>结果</h2>
+
+<h3>水平位置误差 vs 飞行距离</h3>
+<div id="plot-horiz" class="plot"></div>
+<p class="muted">A(固定切平面)随距离<strong>越漂越远</strong>——单个切平面跟不上地球曲率;D(无 transport)也漂出上百米;C 几乎贴着 0。</p>
+
+<h3>高度误差 vs 飞行距离</h3>
+<div id="plot-alt" class="plot"></div>
+<p class="muted">D(无 transport)高度误差最大——丢掉了"地球往下弯、需要持续抬头保持等高"的 transport 俯仰项;A 的高度反而较小(平面↔椭球的非线性转换在竖直方向部分补偿了),但它的<strong>水平</strong>误差最大。</p>
+
+<h3>30 km 处的最终偏差</h3>
+<div class="card">
+  <table id="final-table"><tr><th>系统</th><th class="num">水平误差</th><th class="num">高度误差</th><th class="num">航向误差</th></tr></table>
+</div>
+
+<!-- 4 -->
+<h2 id="conclusion"><span class="eyebrow">第 4 节</span>结论</h2>
+<div class="callout warn">
+  ⚠️ <b>A — 固定局部 ENU(锚在目标):</b> 30&nbsp;km 处水平漂 <strong id="cf-A"></strong>。一个固定切平面无法跟随 30&nbsp;km 的地球曲率,这正是当初<strong>放弃固定 ENU 转写</strong>的原因。第 2 个任务里新增的 <code>localEnu</code> 优化器就是把这套系统用进优化——它的解回放时会带上同样的偏移。
+</div>
+<div class="callout warn">
+  ⚠️ <b>D — 无 transport 的 RHS:</b> 水平漂 <strong id="cf-D"></strong>、高度差 <strong id="cf-Dalt"></strong>。transport 项(经线收敛 + 曲率俯仰)在终端区尺度上<strong>不可忽略</strong>。
+</div>
+<div class="callout good">
+  ✅ <b>C — 完整测地 RHS(含 transport):</b> 与逐点重锚参考 B 只差 <strong id="cf-C"></strong>。这验证了:**优化器现在用的这套连续测地 RHS,和回放用的逐点重锚积分器,描述的是同一段运动**——所以优化器的解能被回放忠实复现。
+</div>
+<p class="muted">数学细节(transport 项的推导)见 <code>4dTrajectory/docs/geodetic_dynamics_transport.zh.html</code>;本页数据由 <code>4dTrajectory/optimization/dynamics_comparison_30km.py</code> 生成(可改初值/控制重跑)。</p>
+
+<div class="footer" id="footer"></div>
+
+</div>
+
+<script>
+const DATA = {"meta":{"aircraft":"A320","range_km":30.0,"dt_s":0.02,"duration_s":250.0,"V0_mps":130.0,"bearing_deg":45.0,"gamma0_deg":-2.0,"control":{"thrust_n":70000.0,"bank_deg":0.0,"load_factor":1.0},"start":{"lat":35.40922507819619,"lon":-78.73462642140213,"alt":2300.0},"target":{"lat":35.6,"lon":-78.5,"alt":200.0},"reference":"B = per-step re-anchored ENU (most faithful)"},"series":{"distance_km":[0.0,0.5011,1.0013,1.5001,2.0023,2.5019,3.0013,3.5028,4.0002,4.5019,5.0016,5.502,6.0028,6.5004,7.001,7.5009,8.0,8.5013,9.0012,9.503,10.0028,10.5006,11.003,11.5029,12.0001,12.5014,13.0033,13.5019,14.0006,14.5031,15.0017,15.5001,16.0019,16.5032,17.0001,17.5001,18.0031,18.5013,19.0023,19.5022,20.0008,20.502,21.0017,21.5039,22.0005,22.5034,23.0005,23.5038,24.0011,24.5005,25.0019,25.5011,26.0022,26.501,27.0016,27.504,28.0038,28.5011,29.0,29.5005,30.0025],"A":{"horiz":[0.0,0.3329,1.2944,2.8294,4.9103,7.4707,10.4786,13.9143,17.6985,21.8642,26.3319,31.0968,36.1311,41.3741,46.8669,52.5528,58.4083,64.4518,70.6241,76.9482,83.3636,89.8519,96.4886,103.1677,109.8733,116.6885,123.5536,130.4067,137.2857,144.2315,151.132,158.0284,164.9639,171.8782,178.7103,185.5575,192.4127,199.1633,205.9083,212.5885,219.198,225.7836,232.2873,238.756,245.0815,251.4133,257.5937,263.7703,269.7885,275.7445,281.6339,287.4045,293.1011,298.6732,304.1647,309.5717,314.8464,319.9874,325.0365,329.9904,334.846],"alt":[0.0,0.0007,0.0022,0.0042,0.0061,0.0074,0.0077,0.0065,0.0036,-0.0015,-0.0091,-0.0193,-0.0326,-0.049,-0.069,-0.0925,-0.1198,-0.1512,-0.1865,-0.2262,-0.27,-0.318,-0.3709,-0.428,-0.4894,-0.5559,-0.6271,-0.7025,-0.7826,-0.868,-0.9574,-1.0515,-1.1508,-1.2548,-1.3624,-1.4753,-1.5935,-1.715,-1.8418,-1.9727,-2.1077,-2.2477,-2.3917,-2.5406,-2.6921,-2.8496,-3.0093,-3.1751,-3.3428,-3.515,-3.6917,-3.8714,-4.0555,-4.2422,-4.4331,-4.6282,-4.8256,-5.0252,-5.2286,-5.4357,-5.6465],"head":[0.0,0.0,1e-05,1e-05,2e-05,3e-05,5e-05,6e-05,8e-05,0.0001,0.00012,0.00014,0.00016,0.00019,0.00021,0.00024,0.00026,0.00029,0.00032,0.00035,0.00038,0.00041,0.00044,0.00047,0.0005,0.00053,0.00056,0.00059,0.00062,0.00065,0.00069,0.00072,0.00075,0.00078,0.00081,0.00084,0.00087,0.0009,0.00093,0.00096,0.00099,0.00103,0.00105,0.00108,0.00111,0.00114,0.00117,0.0012,0.00123,0.00125,0.00128,0.00131,0.00133,0.00136,0.00138,0.00141,0.00143,0.00146,0.00148,0.0015,0.00152]},"C":{"horiz":[0.0,0.0,0.0001,0.0001,0.0002,0.0004,0.0005,0.0007,0.0009,0.0011,0.0013,0.0016,0.0019,0.0021,0.0024,0.0028,0.0031,0.0034,0.0038,0.0042,0.0046,0.005,0.0054,0.0058,0.0062,0.0067,0.0071,0.0076,0.0081,0.0086,0.009,0.0095,0.0101,0.0106,0.0111,0.0116,0.0122,0.0127,0.0133,0.0138,0.0144,0.015,0.0156,0.0161,0.0167,0.0173,0.0179,0.0185,0.0191,0.0198,0.0204,0.021,0.0216,0.0223,0.0229,0.0236,0.0242,0.0249,0.0255,0.0262,0.0268],"alt":[0.0,-0.0,-0.0,-0.0,-0.0,-0.0,-0.0,-0.0,-0.0,-0.0,-0.0,-0.0001,-0.0001,-0.0001,-0.0001,-0.0001,-0.0001,-0.0001,-0.0001,-0.0001,-0.0001,-0.0001,-0.0001,-0.0001,-0.0001,-0.0001,-0.0002,-0.0002,-0.0002,-0.0002,-0.0002,-0.0002,-0.0002,-0.0002,-0.0002,-0.0002,-0.0002,-0.0003,-0.0003,-0.0003,-0.0003,-0.0003,-0.0003,-0.0003,-0.0003,-0.0004,-0.0004,-0.0004,-0.0004,-0.0004,-0.0004,-0.0004,-0.0005,-0.0005,-0.0005,-0.0005,-0.0005,-0.0006,-0.0006,-0.0006,-0.0006],"head":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,1e-05,2e-05,2e-05,2e-05,2e-05,2e-05,2e-05,2e-05,2e-05,2e-05,2e-05,2e-05]},"D":{"horiz":[0.0,0.01,0.0412,0.0978,0.1866,0.313,0.4838,0.7062,0.9827,1.3232,1.7284,2.2045,2.7553,3.3797,4.0884,4.8797,5.7556,6.7241,7.7805,8.9336,10.1767,11.5097,12.9528,14.4874,16.1123,17.8517,19.6951,21.6287,23.6656,25.8222,28.0667,30.4145,32.884,35.4578,38.1141,40.8931,43.7966,46.7789,49.8855,53.0921,56.3974,59.8276,63.3552,67.0084,70.7267,74.6005,78.5356,82.6283,86.7779,91.0511,95.4484,99.9327,104.5406,109.2326,114.0473,118.9851,124.0034,129.0995,134.3158,139.6526,145.1102],"alt":[0.0,-0.0197,-0.0787,-0.1767,-0.3147,-0.4913,-0.7069,-0.9627,-1.2553,-1.5896,-1.9616,-2.3732,-2.8241,-3.3108,-3.8392,-4.4058,-5.0101,-5.6558,-6.3384,-7.0623,-7.822,-8.6167,-9.4575,-10.3324,-11.2406,-12.1946,-13.1881,-14.213,-15.2762,-16.3855,-17.5242,-18.7,-19.9218,-21.1804,-22.4652,-23.7955,-25.1717,-26.5722,-28.0181,-29.4981,-31.0115,-32.5701,-34.1615,-35.7981,-37.453,-39.1663,-40.8965,-42.6856,-44.4899,-46.3383,-48.231,-50.1521,-52.1173,-54.1098,-56.1461,-58.2263,-60.3325,-62.4638,-64.638,-66.8553,-69.1157],"head":[0.0,0.00226,0.00452,0.00677,0.00903,0.01129,0.01354,0.01581,0.01805,0.02032,0.02258,0.02484,0.0271,0.02935,0.03161,0.03387,0.03613,0.03839,0.04065,0.04292,0.04518,0.04744,0.04971,0.05197,0.05422,0.05649,0.05877,0.06102,0.06328,0.06556,0.06782,0.07008,0.07235,0.07462,0.07688,0.07914,0.08143,0.08368,0.08596,0.08823,0.09049,0.09276,0.09503,0.09731,0.09957,0.10185,0.10411,0.1064,0.10866,0.11093,0.1132,0.11547,0.11775,0.12002,0.1223,0.12458,0.12686,0.12912,0.13139,0.13367,0.13595]}}};
+
+const COL = {A:"#d1495b", C:"#2f6fed", D:"#e8890c"};
+const m = DATA.meta, s = DATA.series, x = s.distance_km;
+
+// Method definition list
+const dl = document.getElementById("method-dl");
+const c = m.control;
+const rows = [
+  ["机型", m.aircraft],
+  ["初始位置", `${m.start.lat.toFixed(5)}°, ${m.start.lon.toFixed(5)}°, ${m.start.alt.toFixed(0)} m`],
+  ["目标(= 固定切平面锚点)", `${m.target.lat}°, ${m.target.lon}°, ${m.target.alt} m`],
+  ["初始速度 V₀", `${m.V0_mps} m/s`],
+  ["初始航向 ψ(自东起)", `${m.bearing_deg}° (朝东北飞向目标)`],
+  ["初始航迹角 γ", `${m.gamma0_deg}° (缓降)`],
+  ["恒定控制", `推力 ${c.thrust_n.toFixed(0)} N · 坡度 ${c.bank_deg}° · 过载 ${c.load_factor}`],
+  ["积分步长 dt", `${m.dt_s} s (RK4)`],
+  ["飞行距离", `${m.range_km} km`],
+  ["参考真值", "B = 逐点重锚 ENU(最忠实)"],
+];
+dl.innerHTML = rows.map(([k,v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+document.getElementById("dt-note").textContent = m.dt_s;
+
+function plot(id, field, title, ylab){
+  const mk = (k,name)=>({x, y:s[k][field], mode:"lines", name, line:{color:COL[k], width:2.5}});
+  Plotly.newPlot(id, [
+    mk("A","A 固定局部 ENU @ 目标"), mk("D","D 无 transport"), mk("C","C 完整 RHS(参考≈0)"),
+  ], {
+    margin:{t:10,r:10,b:46,l:60},
+    xaxis:{title:"沿参考路径的飞行距离 (km)"},
+    yaxis:{title:ylab},
+    legend:{orientation:"h", y:1.13},
+  }, {displayModeBar:false, responsive:true});
+}
+plot("plot-horiz","horiz","水平误差","水平位置误差 (m)");
+plot("plot-alt","alt","高度误差","高度误差 (m)");
+
+// final table + conclusion numbers
+const last = a => a[a.length-1];
+const names = {A:["A","cA","固定局部 ENU @ 目标"], C:["C","cC","完整测地 RHS(+transport)"], D:["D","cD","测地 RHS(无 transport)"]};
+const ft = document.getElementById("final-table");
+for(const k of ["A","C","D"]){
+  const tr=document.createElement("tr");
+  tr.innerHTML = `<td><span class="chip ${names[k][1]}">${names[k][0]}</span> ${names[k][2]}</td>`+
+    `<td class="num">${last(s[k].horiz).toFixed(2)} m</td>`+
+    `<td class="num">${last(s[k].alt).toFixed(2)} m</td>`+
+    `<td class="num">${last(s[k].head).toFixed(3)}°</td>`;
+  ft.appendChild(tr);
+}
+document.getElementById("cf-A").textContent = last(s.A.horiz).toFixed(0)+" m";
+document.getElementById("cf-D").textContent = last(s.D.horiz).toFixed(0)+" m";
+document.getElementById("cf-Dalt").textContent = last(s.D.alt).toFixed(0)+" m";
+document.getElementById("cf-C").textContent = last(s.C.horiz).toFixed(2)+" m / "+last(s.C.alt).toFixed(2)+" m";
+document.getElementById("footer").innerHTML =
+  `数据:A320,${m.range_km} km,dt=${m.dt_s}s,共 ${x.length} 个采样点。`+
+  `所有曲线由 <code>dynamics_comparison_30km.py</code> 离线计算,数据内嵌于本页。`;
+</script>
+</body>
+</html>
