@@ -600,3 +600,130 @@ def _propagate_with_geodetic_rhs(
         gamma=float(x[5]),
         m=float(x[6]),
     )
+
+
+# --------------------------------------------------------------------------
+# Selectable defect "fitting equation" (collocation scheme) comparison
+# --------------------------------------------------------------------------
+
+def test_defect_scheme_registry_lists_three_schemes():
+    module = load_module()
+    assert set(module._DEFECT_SCHEMES) == {"trapezoidal", "hermiteSimpson", "rk4"}
+    # The bare optimiser keeps Hermite-Simpson for backward compatibility.
+    assert module._DEFAULT_SCHEME == "hermiteSimpson"
+
+
+def test_trapezoidal_and_rk4_defects_zero_for_constant_state_zero_rhs():
+    module = load_module()
+    rhs_func = ca.Function(
+        "rhs_zero",
+        [ca.SX.sym("x", 7), ca.SX.sym("u", 3), ca.SX.sym("p", 6)],
+        [ca.SX.zeros(7)],
+    )
+    x = ca.DM([10.0, -5.0, 1000.0, 60.0, 0.1, -0.01, 70000.0])
+    u = ca.DM([1000.0, 0.0, 1.0])
+    p = ca.DM([122.6, 1.5, 0.02, 0.04, 0.9, 0.1])
+
+    for defect_expr in (module.trapezoidal_defect_expr, module.rk4_defect_expr):
+        defect = defect_expr(rhs_func, x, x, u, p, 0.5)
+        np.testing.assert_allclose(
+            np.array(defect, dtype=float).reshape(-1), np.zeros(7), atol=1e-12,
+        )
+
+
+def test_unknown_collocation_scheme_raises():
+    module = load_module()
+    with pytest.raises(ValueError, match="unknown collocation_scheme"):
+        module.CasadiDirectCollocationOptimizer(
+            n_segments=10, dt=0.2, max_duration=120.0, aircraft=C172,
+            collocation_scheme="quartic",
+        )
+
+
+def _replay_geodetic_horiz_miss(aircraft, init, controls, horizon):
+    """Replay piecewise-constant controls through the fine geodetic
+    integrator and return the horizontal miss to ``controls``' endpoint
+    target (set by the caller)."""
+    from aerodynamic_model.casadi_simulator import (
+        AeroParams, make_geodetic_step_integrator,
+    )
+
+    step = make_geodetic_step_integrator(include_transport=True)["step_func"]
+    ap = AeroParams(S=aircraft.wing_area_m2)
+    aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
+    x = ca.DM([init.latitude, init.longitude, init.altitude,
+               init.V, init.psi, init.gamma, init.m])
+    seg = horizon / len(controls)
+    for row in controls:
+        u = ca.DM([float(row[0]), float(row[1]), float(row[2])])
+        rem = seg
+        while rem > 1e-9:
+            h = min(0.05, rem)
+            x = step(x_geo=x, u=u, aero_params=aero, dt=h)["x_geo_next"]
+            rem -= h
+    return np.array(x).reshape(-1)
+
+
+def test_collocation_schemes_form_an_accuracy_ladder():
+    """All three defect schemes solve the same feasible problem and pin
+    their NODES on the target; replaying the controls reveals the order
+    ladder -- the crude trapezoidal (2nd order) drifts more than the
+    higher-order Hermite-Simpson and rk4 (both 4th order)."""
+    from aerodynamic_model.aircraft_sets import A320
+
+    module = load_module()
+    n_segments = 10
+    horizon = 90.0
+    init = GeodeticState(35.60, -78.50, 1500.0, 90.0,
+                         math.radians(40.0), math.radians(-3.0), A320.mass_kg)
+
+    # Feasible on-manifold target: propagate the A320 nominal approach
+    # control through the optimiser's own geodetic RHS.
+    from aerodynamic_model.casadi_simulator import (
+        AeroParams, make_geodetic_step_integrator,
+    )
+    ap = AeroParams(S=A320.wing_area_m2)
+    aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
+    step = make_geodetic_step_integrator(include_transport=True)["step_func"]
+    u = ca.DM([A320.approach_thrust_guess_n, 0.0, 1.0])
+    xp = ca.DM([init.latitude, init.longitude, init.altitude,
+                init.V, init.psi, init.gamma, init.m])
+    for _ in range(int(horizon / 0.05)):
+        xp = step(x_geo=xp, u=u, aero_params=aero, dt=0.05)["x_geo_next"]
+    tp = np.array(xp).reshape(-1)
+    target = GeodeticState(tp[0], tp[1], tp[2], tp[3], tp[4], tp[5], A320.mass_kg)
+
+    R = 6_371_000.0
+
+    def node_and_playback_miss(scheme):
+        opt = module.CasadiDirectCollocationOptimizer(
+            n_segments=n_segments, dt=0.2, max_duration=horizon * 1.6,
+            aircraft=A320, collocation_scheme=scheme,
+        )
+        _, controls, states = opt.optimize_trajectory(init, target, duration=horizon)
+        node_miss = R * math.hypot(
+            math.radians(states[-1][0] - target.latitude),
+            math.radians(states[-1][1] - target.longitude) * math.cos(math.radians(target.latitude)),
+        )
+        end = _replay_geodetic_horiz_miss(A320, init, controls, horizon)
+        pb_miss = R * math.hypot(
+            math.radians(end[0] - target.latitude),
+            math.radians(end[1] - target.longitude) * math.cos(math.radians(target.latitude)),
+        )
+        assert controls.shape == (n_segments, 3)
+        assert states.shape == (n_segments, 6)
+        return node_miss, pb_miss
+
+    trap_node, trap_pb = node_and_playback_miss("trapezoidal")
+    hs_node, hs_pb = node_and_playback_miss("hermiteSimpson")
+    rk4_node, rk4_pb = node_and_playback_miss("rk4")
+
+    # Every scheme pins its own nodes on the target (terminal equality).
+    for node_miss in (trap_node, hs_node, rk4_node):
+        assert node_miss < 1.0
+
+    # The higher-order schemes reproduce the trajectory to sub-metre; the
+    # crude trapezoidal drifts noticeably more.
+    assert hs_pb < 2.0
+    assert rk4_pb < 2.0
+    assert trap_pb > hs_pb

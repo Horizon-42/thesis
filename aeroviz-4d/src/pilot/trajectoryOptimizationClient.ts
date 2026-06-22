@@ -1,7 +1,14 @@
 import { AEROVIZ_BACKEND_URL, type PilotControls, type PilotResetState } from "./pilotClient";
 
 export type TrajectoryOptimizer =
+  // Direct-collocation variants, one per defect "fitting equation".
+  // The bare name keeps the default (Hermite-Simpson).
   | "casadiDirectCollocation"
+  | "casadiDirectCollocationTrapezoidal"
+  | "casadiDirectCollocationHermiteSimpson"
+  | "casadiDirectCollocationRk4"
+  // Legacy optimizers: still served by the backend, no longer offered in
+  // the UI (kept here so a response naming one still parses).
   | "casadiIpopt"
   | "transcription"
   | "leastSquaresTranscription"
@@ -165,6 +172,9 @@ function readOptimizer(value: Record<string, unknown>): TrajectoryOptimizer {
   const nested = value.optimizer;
   if (
     nested === "casadiDirectCollocation" ||
+    nested === "casadiDirectCollocationTrapezoidal" ||
+    nested === "casadiDirectCollocationHermiteSimpson" ||
+    nested === "casadiDirectCollocationRk4" ||
     nested === "casadiIpopt" ||
     nested === "transcription" ||
     nested === "leastSquaresTranscription" ||

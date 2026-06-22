@@ -324,7 +324,7 @@ describe("PilotPanel trajectory play mode", () => {
     expect((screen.getByLabelText("Max iter") as HTMLInputElement).value).toBe("300");
     const optimizerSelect = screen.getByRole("combobox", { name: "Optimizer" });
     fireEvent.change(optimizerSelect, {
-      target: { value: "warmStartTranscription" },
+      target: { value: "casadiDirectCollocationRk4" },
     });
 
     await waitFor(() => {
@@ -392,7 +392,7 @@ describe("PilotPanel trajectory play mode", () => {
     const calls = mocks.runTrajectoryOptimization.mock.calls;
     const request = calls[calls.length - 1]?.[0];
     expect(request).toMatchObject({
-      optimizer: "warmStartTranscription",
+      optimizer: "casadiDirectCollocationRk4",
       initialState: expect.objectContaining({
         lon: -78.92647222,
         lat: 35.77341389,
@@ -419,7 +419,7 @@ describe("PilotPanel trajectory play mode", () => {
     expect(request.initialState.headingDeg).toBeCloseTo(39.1);
   });
 
-  it("disables arrival time input for variable-time warm start optimizer", async () => {
+  it("offers the direct-collocation defect-scheme variants and keeps arrival time enabled", async () => {
     render(<PilotPanel />);
 
     expect(await screen.findByText("A320")).toBeTruthy();
@@ -431,19 +431,25 @@ describe("PilotPanel trajectory play mode", () => {
       );
     });
 
-    const optimizerSelect = screen.getByRole("combobox", { name: "Optimizer" });
+    const optimizerSelect = screen.getByRole("combobox", {
+      name: "Optimizer",
+    }) as HTMLSelectElement;
     const arrivalInput = screen.getByLabelText("Arrival time") as HTMLInputElement;
 
+    // Default is the Hermite-Simpson variant; arrival time (= max duration)
+    // stays editable for every direct-collocation scheme.
+    expect(optimizerSelect.value).toBe("casadiDirectCollocation");
     expect(arrivalInput.disabled).toBe(false);
-    fireEvent.change(optimizerSelect, {
-      target: { value: "variableTimeWarmStartTranscription" },
-    });
-    expect(arrivalInput.disabled).toBe(true);
 
-    fireEvent.change(optimizerSelect, {
-      target: { value: "warmStartTranscription" },
-    });
-    expect(arrivalInput.disabled).toBe(false);
+    for (const scheme of [
+      "casadiDirectCollocationTrapezoidal",
+      "casadiDirectCollocationRk4",
+      "casadiDirectCollocation",
+    ]) {
+      fireEvent.change(optimizerSelect, { target: { value: scheme } });
+      expect(optimizerSelect.value).toBe(scheme);
+      expect(arrivalInput.disabled).toBe(false);
+    }
   });
 
   it("clamps trajectory target speed and heading to threshold constraints", async () => {

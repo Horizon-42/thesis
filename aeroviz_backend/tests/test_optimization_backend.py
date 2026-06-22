@@ -3,6 +3,8 @@ import unittest
 import numpy as np
 
 from aeroviz_backend import optimization_backend
+from aeroviz_backend.simulation_backend import GeodeticSimulator
+from aerodynamic_model.aircraft_sets import A320
 
 
 class TestOptimizationBackend(unittest.TestCase):
@@ -99,12 +101,14 @@ class TestOptimizationBackend(unittest.TestCase):
         calls = []
 
         class FakeCasadiDirectCollocationOptimizer:
-            def __init__(self, n_segments, dt, max_duration, aircraft):
+            def __init__(self, n_segments, dt, max_duration, aircraft,
+                         collocation_scheme="hermiteSimpson"):
                 calls.append({
                     "aircraft": aircraft.code,
                     "n_segments": n_segments,
                     "dt": dt,
                     "max_duration": max_duration,
+                    "collocation_scheme": collocation_scheme,
                 })
 
             def optimize_free_time(self, initial_state, target_state, max_duration):
@@ -160,6 +164,7 @@ class TestOptimizationBackend(unittest.TestCase):
                 "n_segments": 2,
                 "dt": 0.25,
                 "max_duration": 84.0,
+                "collocation_scheme": "hermiteSimpson",
             },
         )
         self.assertAlmostEqual(calls[1]["initial"].longitude, -114.0203)
@@ -175,6 +180,31 @@ class TestOptimizationBackend(unittest.TestCase):
         self.assertNotIn("attackDeg", result["controls"][0])
         self.assertAlmostEqual(result["states"][1]["lat"], 51.2)
         self.assertAlmostEqual(result["states"][1]["headingDeg"], np.degrees(0.31))
+
+    def test_direct_collocation_variant_names_select_their_defect_scheme(self):
+        # Each scheme-suffixed optimizer name must reach
+        # CasadiDirectCollocationOptimizer with the matching collocation_scheme.
+        seen = {}
+
+        class RecordingOptimizer:
+            def __init__(self, n_segments, dt, max_duration, aircraft,
+                         collocation_scheme="hermiteSimpson"):
+                self.collocation_scheme = collocation_scheme
+
+        original = optimization_backend.CasadiDirectCollocationOptimizer
+        optimization_backend.CasadiDirectCollocationOptimizer = RecordingOptimizer
+        try:
+            for name, scheme in optimization_backend.DIRECT_COLLOCATION_SCHEMES.items():
+                opt = optimization_backend.make_optimizer(
+                    name, GeodeticSimulator(A320), 10, 0.2, 300, arrival_time_s=120.0,
+                )
+                seen[name] = opt.collocation_scheme
+        finally:
+            optimization_backend.CasadiDirectCollocationOptimizer = original
+
+        self.assertEqual(seen, dict(optimization_backend.DIRECT_COLLOCATION_SCHEMES))
+        self.assertEqual(seen["casadiDirectCollocation"], "hermiteSimpson")
+        self.assertEqual(seen["casadiDirectCollocationRk4"], "rk4")
 
     def test_optimize_reuses_casadi_optimizer_for_same_solver_key(self):
         constructions = []
@@ -278,13 +308,15 @@ class TestOptimizationBackend(unittest.TestCase):
         solves = []
 
         class FakeCasadiDirectCollocationOptimizer:
-            def __init__(self, n_segments, dt, max_duration, aircraft):
+            def __init__(self, n_segments, dt, max_duration, aircraft,
+                         collocation_scheme="hermiteSimpson"):
                 self.instance_id = len(constructions) + 1
                 constructions.append({
                     "aircraft": aircraft.code,
                     "n_segments": n_segments,
                     "dt": dt,
                     "max_duration": max_duration,
+                    "collocation_scheme": collocation_scheme,
                 })
 
             def optimize_free_time(self, initial_state, target_state, max_duration):

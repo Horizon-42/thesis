@@ -33,7 +33,8 @@ piecewise-constant controls:
 ``x_mid`` is **not** a decision variable — it is read off the Hermite
 interpolating polynomial between (x_k, f_k) and (x_{k+1}, f_{k+1}).
 That keeps the NLP roughly the same size as the multiple-shooting form
-while still capturing 3rd-order dynamics fidelity per segment.
+while still capturing 4th-order dynamics fidelity per segment (Simpson
+quadrature — same order as RK4, differing only in construction).
 
 Frame
 -----
@@ -58,7 +59,11 @@ import math
 import casadi as ca
 import numpy as np
 
-from aerodynamic_model.casadi_simulator import make_geodetic_dynamics_model, AeroParams
+from aerodynamic_model.casadi_simulator import (
+    make_geodetic_dynamics_model,
+    rk4_step_expr,
+    AeroParams,
+)
 from aerodynamic_model.aircraft_sets import AircraftSpec
 from aerodynamic_model.common import GeodeticState
 
@@ -104,6 +109,47 @@ def hermite_simpson_defect_expr(rhs_func, x_k, x_kp1, u_k, aero_params, h):
     # Simpson quadrature of the interpolant, rearranged so the defect is
     # zero when the dynamics are satisfied to third order in h.
     return x_kp1 - x_k - (h / 6.0) * (f_k + 4.0 * f_mid + f_kp1)
+
+
+def trapezoidal_defect_expr(rhs_func, x_k, x_kp1, u_k, aero_params, h):
+    """Trapezoidal collocation defect (state piecewise-LINEAR, 2nd order).
+
+    The crudest of the three: the state between knots is a straight line, and
+    the integral of ``f`` is approximated by the trapezoid rule using only the
+    two endpoint derivatives — no interior evaluation.  Cheapest per defect,
+    but needs a finer mesh for the same accuracy.
+    """
+    f_k = rhs_func(x_k, u_k, aero_params)
+    f_kp1 = rhs_func(x_kp1, u_k, aero_params)
+    return x_kp1 - x_k - (h / 2.0) * (f_k + f_kp1)
+
+
+def rk4_defect_expr(rhs_func, x_k, x_kp1, u_k, aero_params, h):
+    """RK4 'shooting' defect (4th order): the next knot must equal the RK4
+    integral of the segment.
+
+    This is the *integrator-as-defect* form rather than a polynomial fit:
+    its discrete operator F **is** the same RK4 *scheme* the playback runs,
+    so a converged solution has no scheme mismatch with playback.  A small
+    step-size gap remains, though: the defect takes ONE RK4 step per
+    sub-interval, while playback integrates the same scheme with a much
+    finer step — so it is playback-*consistent*, not byte-for-byte exact.
+    The price is a denser constraint Jacobian (the RK4 chain rule) and a
+    slower solve.
+    """
+    return x_kp1 - rk4_step_expr(rhs_func, x_k, u_k, aero_params, h)
+
+
+# Selectable defect "fitting equations", in increasing order of accuracy:
+#   trapezoidal    – linear state,  2nd order, cheapest
+#   hermiteSimpson – cubic state,   3rd order, default
+#   rk4            – RK4 integral,  4th order, playback-consistent, densest
+_DEFECT_SCHEMES = {
+    "trapezoidal": trapezoidal_defect_expr,
+    "hermiteSimpson": hermite_simpson_defect_expr,
+    "rk4": rk4_defect_expr,
+}
+_DEFAULT_SCHEME = "hermiteSimpson"
 
 
 # --------------------------------------------------------------------------
@@ -228,15 +274,15 @@ def select_state_substeps(max_duration: float, segment_num: int) -> int:
 
 def _build_collocation_decision(
     rhs_func, aero_params, start_state, target_state,
-    segment_h, segment_num, sub_steps,
+    segment_h, segment_num, sub_steps, defect_fn,
 ):
-    """Build controls, state nodes and defects for the dense-state HS NLP.
+    """Build controls, state nodes and defects for the dense-state NLP.
 
     Returns ``(seg_controls, state_nodes, defects)``: ``seg_controls`` has
     ``segment_num`` 3-vectors, ``state_nodes`` has ``segment_num*sub_steps``
-    6-vectors (x_1 .. x_{N*M}).  Each sub-interval gets its own
-    Hermite-Simpson defect using the shared control of its segment; the
-    terminal-equality defect (last node == target) is appended last.
+    6-vectors (x_1 .. x_{N*M}).  Each sub-interval gets its own defect via
+    ``defect_fn`` (the chosen scheme) using the shared control of its
+    segment; the terminal-equality defect (last node == target) is last.
     """
     mass_param = start_state[6]
     state_h = segment_h / sub_steps
@@ -255,7 +301,7 @@ def _build_collocation_decision(
             # Mass derivative is identically zero, so drop the 7th defect
             # component to keep the constraint Jacobian rectangular.
             defects.append(
-                hermite_simpson_defect_expr(
+                defect_fn(
                     rhs_func, x_prev_full, x_next_full, uk, aero_params, state_h,
                 )[:STATE_DIM]
             )
@@ -347,8 +393,9 @@ def make_direct_collocation_solver(
     sub_steps: int = 1,
     max_terminal_bank_deg: float = _DEFAULT_MAX_TERMINAL_BANK_DEG,
     smoothness_weights: tuple = _DEFAULT_SMOOTHNESS_WEIGHTS,
+    collocation_scheme: str = _DEFAULT_SCHEME,
 ):
-    """Build the Hermite-Simpson NLP symbolically.
+    """Build the fixed-time NLP symbolically with the chosen defect scheme.
 
     Initial state, target state, and segment duration are passed as
     parameters so the same compiled solver can serve every optimisation
@@ -385,7 +432,7 @@ def make_direct_collocation_solver(
     # 4. Decision variables + defects: N controls, N*sub_steps state nodes.
     seg_controls, state_nodes, defects = _build_collocation_decision(
         rhs_func, aero_params, start_state, target_state,
-        segment_h, segment_num, sub_steps,
+        segment_h, segment_num, sub_steps, _DEFECT_SCHEMES[collocation_scheme],
     )
 
     # 5. Bounds.  Identical envelope to ``casadi_optimizer.py`` so the
@@ -458,8 +505,9 @@ def make_direct_collocation_solver_free_time(
     sub_steps: int = 1,
     max_terminal_bank_deg: float = _DEFAULT_MAX_TERMINAL_BANK_DEG,
     smoothness_weights: tuple = _DEFAULT_SMOOTHNESS_WEIGHTS,
+    collocation_scheme: str = _DEFAULT_SCHEME,
 ):
-    """Build the Hermite-Simpson NLP with ``T`` as a decision variable.
+    """Build the free-final-time NLP with ``T`` as a decision variable.
 
     Objective is ``T/T_max + λ · mean(||u_scaled||²)`` so the time term
     dominates (the regularisation is a tie-breaker that keeps the
@@ -499,7 +547,7 @@ def make_direct_collocation_solver_free_time(
     # then T appended last so we can slice it out of ``sol['x']`` cleanly.
     seg_controls, state_nodes, defects = _build_collocation_decision(
         rhs_func, aero_params, start_state, target_state,
-        segment_h, segment_num, sub_steps,
+        segment_h, segment_num, sub_steps, _DEFECT_SCHEMES[collocation_scheme],
     )
 
     # 5. Bounds.
@@ -573,10 +621,18 @@ class CasadiDirectCollocationOptimizer:
         aircraft: AircraftSpec,
         max_terminal_bank_deg: float = _DEFAULT_MAX_TERMINAL_BANK_DEG,
         smoothness_weights: tuple = _DEFAULT_SMOOTHNESS_WEIGHTS,
+        collocation_scheme: str = _DEFAULT_SCHEME,
     ):
         if n_segments < 2:
             raise ValueError("n_segments must be at least 2 for direct collocation")
+        if collocation_scheme not in _DEFECT_SCHEMES:
+            raise ValueError(
+                f"unknown collocation_scheme {collocation_scheme!r}; "
+                f"choose from {sorted(_DEFECT_SCHEMES)}"
+            )
         self.n_segments = n_segments
+        # Defect "fitting equation": trapezoidal / hermiteSimpson / rk4.
+        self.collocation_scheme = collocation_scheme
         # Keep the realised bank at the terminal node below this angle (a
         # pure state constraint).
         self.max_terminal_bank_deg = max_terminal_bank_deg
@@ -615,6 +671,7 @@ class CasadiDirectCollocationOptimizer:
                 sub_steps=self.state_substeps,
                 max_terminal_bank_deg=max_terminal_bank_deg,
                 smoothness_weights=smoothness_weights,
+                collocation_scheme=collocation_scheme,
             )
         )
 
@@ -635,6 +692,7 @@ class CasadiDirectCollocationOptimizer:
             sub_steps=self.state_substeps,
             max_terminal_bank_deg=max_terminal_bank_deg,
             smoothness_weights=smoothness_weights,
+            collocation_scheme=collocation_scheme,
         )
 
     # ------------------------------------------------------------------

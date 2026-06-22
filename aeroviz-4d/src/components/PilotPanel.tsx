@@ -88,11 +88,12 @@ function usesLoadFactorControl(mode: PilotSimulationMode) {
 function trajectoryOptimizerSimulationMode(
   optimizer: TrajectoryOptimizer,
 ): PilotSimulationMode {
-  // Both CasADi optimisers emit LoadFactorControl-shaped controls
-  // (T, mu, n_cmd), so playback must run the "casadi" simulation mode
-  // to interpret them.  All other optimisers emit alpha-based controls
-  // and play back through the alpha simulator.
-  return optimizer === "casadiIpopt" || optimizer === "casadiDirectCollocation"
+  // The CasADi optimisers (IPOPT and every direct-collocation defect-scheme
+  // variant) emit LoadFactorControl-shaped controls (T, mu, n_cmd), so
+  // playback must run the "casadi" simulation mode to interpret them.  All
+  // other optimisers emit alpha-based controls and play back via alpha.
+  return optimizer === "casadiIpopt" ||
+    optimizer.startsWith("casadiDirectCollocation")
     ? "casadi"
     : "alpha";
 }
@@ -144,8 +145,6 @@ export default function PilotPanel() {
   const [maxIterations, setMaxIterations] = useState(DEFAULT_MAX_ITERATIONS);
   const [optimizedTrajectory, setOptimizedTrajectory] =
     useState<TrajectoryOptimizationResult | null>(null);
-  const isVariableTimeTrajectoryOptimizer =
-    trajectoryOptimizer === "variableTimeWarmStartTranscription";
 
   const controlsRef = useRef(controls);
   const simulationModeRef = useRef(simulationMode);
@@ -1147,13 +1146,9 @@ export default function PilotPanel() {
                   updateTrajectoryOptimizer(event.target.value as TrajectoryOptimizer)
                 }
               >
-                <option value="casadiDirectCollocation">CasADi direct collocation (fixed ENU)</option>
-                <option value="casadiIpopt">CasADi IPOPT</option>
-                <option value="transcription">Transcription</option>
-                <option value="leastSquaresTranscription">Least squares</option>
-                <option value="warmStartTranscription">Warm start fixed time</option>
-                <option value="variableTimeWarmStartTranscription">Warm start variable time</option>
-                <option value="singleShooting">Single shooting</option>
+                <option value="casadiDirectCollocation">Direct collocation · Hermite-Simpson (default, 4th order)</option>
+                <option value="casadiDirectCollocationTrapezoidal">Direct collocation · Trapezoidal (linear, 2nd order)</option>
+                <option value="casadiDirectCollocationRk4">Direct collocation · RK4 (4th order)</option>
               </select>
             </label>
             <label>
@@ -1174,7 +1169,7 @@ export default function PilotPanel() {
                 min={1}
                 max={1000}
                 step="5"
-                disabled={targetControlsDisabled || isVariableTimeTrajectoryOptimizer}
+                disabled={targetControlsDisabled}
                 onCommit={updateArrivalTime}
               />
             </label>

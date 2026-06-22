@@ -49,7 +49,6 @@ from common import Control, GeodeticState, LoadFactorControl
 # Optimizers that emit LoadFactorControl-shaped controls (T, mu, n); everything
 # else emits alpha-based Control (T, mu, alpha).  Mirrors the frontend's
 # ``trajectoryOptimizerSimulationMode``.
-_CASADI_OPTIMIZERS = ("casadiIpopt", "casadiDirectCollocation")
 
 # Arbitrary fixed epoch.  The optimized trajectory is a standalone playback, so
 # the absolute date is irrelevant — only the relative offsets matter.
@@ -87,7 +86,12 @@ class TrajectorySample:
 
 
 def simulation_mode_for_optimizer(optimizer_name: str) -> str:
-    return "casadi" if optimizer_name in _CASADI_OPTIMIZERS else "alpha"
+    # Covers casadiIpopt and every casadiDirectCollocation* defect-scheme
+    # variant (load-factor controls); everything else is alpha-based.
+    is_casadi = optimizer_name == "casadiIpopt" or optimizer_name.startswith(
+        "casadiDirectCollocation"
+    )
+    return "casadi" if is_casadi else "alpha"
 
 
 def build_optimized_trajectory_playback(

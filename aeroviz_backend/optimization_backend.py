@@ -39,8 +39,18 @@ MIN_ARRIVAL_TIME_S = 1.0
 MAX_ARRIVAL_TIME_S = 1000.0
 MIN_OPTIMIZATION_DT = 0.001
 DEFAULT_OPTIMIZER = "casadiDirectCollocation"
+
+# Direct-collocation variants exposed as distinct optimizer names, each
+# selecting a defect "fitting equation" (see casadi_direct_collocation_optimizer).
+# The bare name keeps the default (Hermite-Simpson) for backward compatibility.
+DIRECT_COLLOCATION_SCHEMES = {
+    "casadiDirectCollocation": "hermiteSimpson",
+    "casadiDirectCollocationTrapezoidal": "trapezoidal",
+    "casadiDirectCollocationHermiteSimpson": "hermiteSimpson",
+    "casadiDirectCollocationRk4": "rk4",
+}
 SUPPORTED_OPTIMIZERS = (
-    "casadiDirectCollocation",
+    *DIRECT_COLLOCATION_SCHEMES,
     "casadiIpopt",
     "transcription",
     "leastSquaresTranscription",
@@ -48,7 +58,9 @@ SUPPORTED_OPTIMIZERS = (
     "variableTimeWarmStartTranscription",
     "singleShooting",
 )
-CASADI_OPTIMIZERS = ("casadiIpopt", "casadiDirectCollocation")
+# CasADi optimisers are cached (their NLP is compiled once); the direct-
+# collocation variants additionally use the single-solve free-time path.
+CASADI_OPTIMIZERS = ("casadiIpopt", *DIRECT_COLLOCATION_SCHEMES)
 
 
 class OptimizationBackend:
@@ -81,7 +93,7 @@ class OptimizationBackend:
             max_iterations,
             arrival_time_s=arrival_time_s,
         )
-        if optimizer_name == "casadiDirectCollocation":
+        if optimizer_name in DIRECT_COLLOCATION_SCHEMES:
             # Direct collocation includes T as a decision variable, so
             # one solve returns both the optimal trajectory and the
             # optimal arrival time -- no outer bisection needed.
@@ -201,12 +213,13 @@ def make_optimizer(
             aircraft=geodetic_simulator.simulator.aircraft,
         )
 
-    if optimizer_name == "casadiDirectCollocation":
+    if optimizer_name in DIRECT_COLLOCATION_SCHEMES:
         return CasadiDirectCollocationOptimizer(
             n_segments=n_segments,
             dt=dt,
             max_duration=arrival_time_s,
             aircraft=geodetic_simulator.simulator.aircraft,
+            collocation_scheme=DIRECT_COLLOCATION_SCHEMES[optimizer_name],
         )
 
     if optimizer_name == "singleShooting":

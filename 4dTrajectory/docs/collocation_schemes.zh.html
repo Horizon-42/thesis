@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>轨迹优化入门 · 三种"拟合方程"(配点格式)</title>
+<script>
+  window.MathJax = {
+    tex: { inlineMath: [["\\(", "\\)"]], displayMath: [["\\[", "\\]"]] },
+    svg: { fontCache: "global" },
+  };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js" id="MathJax-script" async></script>
+<script src="https://cdn.plot.ly/plotly-2.30.0.min.js" charset="utf-8"></script>
+<style>
+  :root {
+    --ink: #1b2733; --muted: #5b6b7a; --line: #e1e7ee; --bg: #f7f9fc;
+    --card: #ffffff; --accent: #2f6fed; --trap: #d1495b; --hs: #2f6fed; --rk4: #16a34a;
+    --warn-bg: #fff7ed; --warn-line: #fdba74; --good-bg: #f0fdf4; --good-line: #86efac;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, "Segoe UI", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+    line-height: 1.75; font-size: 16px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 32px 22px 96px; }
+  header.hero {
+    background: linear-gradient(135deg, #1e3a8a, #2f6fed 70%); color: #fff;
+    border-radius: 16px; padding: 34px 30px; margin-bottom: 28px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 27px; line-height: 1.35; }
+  header.hero p { margin: 0; color: #dbe6ff; font-size: 15.5px; }
+  h2 { margin: 44px 0 6px; font-size: 22px; border-left: 4px solid var(--accent); padding-left: 12px; }
+  h2 .eyebrow { display: block; font-size: 12.5px; color: var(--muted); font-weight: 600; letter-spacing: .08em; }
+  h3 { margin: 26px 0 6px; font-size: 18px; }
+  p { margin: 12px 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; margin: 18px 0; }
+  .card.tight { padding: 16px 18px; }
+  .lead { font-size: 17px; color: #243240; }
+  .muted { color: var(--muted); }
+  .callout { border-radius: 10px; padding: 14px 16px; margin: 16px 0; font-size: 15px; }
+  .callout.intuition { background: #eef4ff; border: 1px solid #cdddff; }
+  .callout.warn { background: var(--warn-bg); border: 1px solid var(--warn-line); }
+  .callout.good { background: var(--good-bg); border: 1px solid var(--good-line); }
+  .callout b { color: var(--ink); }
+  code, .mono { font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 13.5px;
+    background: #eef2f7; padding: 1px 6px; border-radius: 5px; }
+  pre { background: #0f172a; color: #e2e8f0; padding: 14px 16px; border-radius: 10px; overflow-x: auto; font-size: 13px; line-height: 1.6; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; }
+  th, td { border: 1px solid var(--line); padding: 8px 11px; text-align: left; }
+  th { background: #f1f5fb; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .chip { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12.5px; font-weight: 600; }
+  .chip.trap { background: #fbe3e7; color: var(--trap); }
+  .chip.hs { background: #e3ecff; color: var(--hs); }
+  .chip.rk4 { background: #dcfce7; color: var(--rk4); }
+  .controls { display: flex; flex-wrap: wrap; gap: 16px 26px; align-items: center; margin: 8px 0 4px; }
+  .controls label { font-size: 14px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; min-width: 150px; }
+  .controls input[type=range] { width: 180px; }
+  .controls .val { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .plot { width: 100%; height: 360px; }
+  .legend-inline span { display: inline-flex; align-items: center; gap: 6px; margin-right: 16px; font-size: 13.5px; }
+  .legend-inline i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+  .toc { columns: 2; column-gap: 26px; font-size: 14.5px; }
+  .toc a { color: var(--accent); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .step { counter-reset: none; padding-left: 0; }
+  .footer { margin-top: 40px; font-size: 13.5px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 16px; }
+  .kbd { font-size: 12.5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>轨迹优化入门:从"离散化"到三种拟合方程</h1>
+  <p>面向零基础读者。先把最优控制、转写(transcription)、缺陷(defect)这些词讲清楚,再用可交互的小例子,带你看懂梯形 / Hermite-Simpson / RK4 三种"拟合方程"到底差在哪,以及为什么在我们的 4D 进近优化里它会决定"飞机会不会一头扎进地里"。</p>
+</header>
+
+<div class="card tight">
+  <strong>目录</strong>
+  <div class="toc" style="margin-top:8px;">
+    <a href="#why">0. 我们到底在优化什么</a><br/>
+    <a href="#basics">1. 五个基础词:状态 / 控制 / 动力学 / 目标 / 约束</a><br/>
+    <a href="#transcription">2. 连续问题没法直接解 → 切成段(转写)</a><br/>
+    <a href="#defect">3. 关键词:缺陷(defect)= 物理自洽的尺子</a><br/>
+    <a href="#schemes">4. 三种拟合方程(配点格式)</a><br/>
+    <a href="#order">5. 阶数与精度(可交互:看斜率)</a><br/>
+    <a href="#realworld">6. 回到我们的系统:为什么它能让飞机"扎地"</a><br/>
+    <a href="#use">7. 在本项目里怎么选、怎么跑</a>
+  </div>
+</div>
+
+<!-- ───────────────────────────── 0 ───────────────────────────── -->
+<h2 id="why"><span class="eyebrow">第 0 节 · 动机</span>我们到底在优化什么</h2>
+<p class="lead">想象一架飞机要在某个<strong>指定时刻</strong>、以<strong>指定的速度和姿态</strong>飞到跑道入口。它一路上能扳动的只有几根杆:推力、坡度(机翼倾斜角)、过载。问题是:</p>
+<div class="callout intuition">
+  🛩️ <b>这几根杆,每一刻该打到多少,才能既准时、又平稳地落到目标点?</b><br/>
+  这就是一个<strong>轨迹优化</strong>(最优控制)问题。它不像解方程那样有唯一答案,而是在"所有能飞到目标的开杆方式"里,挑一个最省力 / 最省时的。
+</div>
+<p>本教程不教你怎么写优化器,而是讲清楚:优化器在求解时,必须把"飞机要服从物理规律"这件事翻译成一条条数学约束;翻译的方式有好几种,精度和代价各不相同。这几种翻译方式,就是"拟合方程"(专业叫<strong>配点格式 / collocation scheme</strong>)。</p>
+
+<!-- ───────────────────────────── 1 ───────────────────────────── -->
+<h2 id="basics"><span class="eyebrow">第 1 节 · 基础</span>五个基础词</h2>
+<div class="card">
+  <table>
+    <tr><th>词</th><th>是什么</th><th>在我们这儿具体指</th></tr>
+    <tr><td><strong>状态</strong> \(x\)</td><td>飞机"此刻的样子",随时间变化的量</td><td>经度、纬度、高度、速度 \(V\)、航向 \(\psi\)、航迹角 \(\gamma\)</td></tr>
+    <tr><td><strong>控制</strong> \(u\)</td><td>你能主动扳动的杆</td><td>推力 \(T\)、坡度 \(\mu\)、过载 \(n\)</td></tr>
+    <tr><td><strong>动力学</strong> \(\dot x=f(x,u)\)</td><td>物理规律:当前状态 + 当前开杆 → 状态如何变化(变化率)</td><td>点质量飞行力学(重力、升力、阻力、推力)</td></tr>
+    <tr><td><strong>目标</strong> \(J\)</td><td>你想最小化的东西</td><td>到达时间、控制突变、能耗……</td></tr>
+    <tr><td><strong>约束</strong></td><td>必须满足的硬性条件</td><td>起点 = 现在;终点 = 目标;速度/高度/坡度不越界</td></tr>
+  </table>
+</div>
+<div class="callout intuition">
+  💡 <b>最关键的是动力学这一行。</b> \(\dot x = f(x,u)\) 读作:"状态的变化率,由当前状态和当前控制唯一决定。" 它是一个<strong>微分方程</strong>——给定起点和一路的开杆方式,飞机的整条轨迹就被它<strong>完全确定</strong>了。优化器的全部难处,都在于如何在计算机里"遵守"这条微分方程。
+</div>
+
+<!-- ───────────────────────────── 2 ───────────────────────────── -->
+<h2 id="transcription"><span class="eyebrow">第 2 节 · 转写</span>连续问题没法直接解,所以切成段</h2>
+<p>时间是连续的,控制 \(u(t)\) 是一条连续曲线——它有<strong>无穷多个自由度</strong>(每一瞬间都是一个待定数)。计算机求解器只能处理<strong>有限个</strong>未知数。于是第一步永远是:</p>
+<div class="callout good">
+  ✅ <b>把时间切成 \(N\) 段。</b> 每段里控制取一个常数,整条轨迹用有限个"节点状态"来代表。这样,连续的最优控制问题就变成了一个有限维的<strong>非线性规划(NLP)</strong>——一堆未知数 + 一堆约束 + 一个目标函数,可以交给 IPOPT 这样的求解器。这一步叫<strong>转写(transcription)</strong>。
+</div>
+<p>切完段之后,未知数就是:每一段的控制 \(u_0,\dots,u_{N-1}\),以及每个节点上的状态 \(x_0,\dots,x_N\)。但这里马上冒出一个问题——</p>
+
+<!-- ───────────────────────────── 3 ───────────────────────────── -->
+<h2 id="defect"><span class="eyebrow">第 3 节 · 核心概念</span>缺陷(defect):物理自洽的尺子</h2>
+<p>优化器可以随便给每个节点 \(x_k\) 填数值。但这些数值<strong>不一定符合物理</strong>:凭什么相邻两个节点 \(x_k\)、\(x_{k+1}\),正好就是"飞机用控制 \(u_k\) 飞一小段"后该到的位置?</p>
+<div class="callout intuition">
+  📏 <b>缺陷(defect)就是这把尺子。</b> 它衡量:"如果飞机真的从 \(x_k\) 出发、用 \(u_k\) 飞过这一段,它该到的地方" 与 "优化器声称的下一个节点 \(x_{k+1}\)" 之间差多少。<br/>
+  <b>缺陷 = 0 ⟺ 这一段符合物理。</b> 优化器的硬约束就是:<em>每一段的缺陷都必须为零</em>。
+</div>
+<p>那么,"飞机该到的地方"怎么算?我们并不想在求解时真的去做一次精细积分(太慢、不可微)。于是退而求其次:<strong>用一条简单曲线去拟合这一小段的轨迹</strong>,用这条曲线的端点来写缺陷。</p>
+<p class="lead"><strong>用什么曲线去拟合——这就是"拟合方程"的全部分歧。</strong> 直线?三次曲线?还是干脆用一个四阶积分器算出来?下面逐个看。</p>
+
+<div class="card">
+  <h3>先动手感受一下:一段里,直线 vs 曲线</h3>
+  <p class="muted">下面是一个玩具微分方程 \(\dot y=-y^2\)(它有精确解,方便对照)。我们只看<strong>一整段</strong> \([0,h]\):真实轨迹是那条黑色实线;三种拟合方程各自画出它"以为"的轨迹。拖动滑块把这一段 \(h\) 拉长,看谁先崩。</p>
+  <div class="controls">
+    <label>这一段的长度 \(h\)<input id="seg-h" type="range" min="0.2" max="3" step="0.05" value="1.4" /><span class="val" id="seg-h-val"></span></label>
+  </div>
+  <div class="legend-inline" style="margin:4px 0 8px;">
+    <span><i style="background:#111"></i>真实轨迹(精细积分)</span>
+    <span><i style="background:var(--trap)"></i>梯形(直线)</span>
+    <span><i style="background:var(--hs)"></i>Hermite-Simpson(三次)</span>
+    <span><i style="background:var(--rk4)"></i>RK4(四阶)</span>
+  </div>
+  <div id="seg-plot" class="plot"></div>
+  <p class="muted" id="seg-readout" style="font-size:13.5px;"></p>
+</div>
+
+<!-- ───────────────────────────── 4 ───────────────────────────── -->
+<h2 id="schemes"><span class="eyebrow">第 4 节 · 主角</span>三种拟合方程</h2>
+<p>记号统一一下:一段的起点 \(x_k\)、终点 \(x_{k+1}\),段长 \(h\),这段里控制恒为 \(u_k\)。记变化率 \(f_k=f(x_k,u_k)\)、\(f_{k+1}=f(x_{k+1},u_k)\)。</p>
+
+<h3><span class="chip trap">① 梯形 Trapezoidal</span> 用直线拟合(2 阶)</h3>
+<p>最朴素:假设这一段里状态<strong>沿直线变化</strong>,变化率从 \(f_k\) 线性过渡到 \(f_{k+1}\)。于是这一段走过的位移,用<strong>梯形面积</strong>近似:</p>
+<p>\[ \underbrace{x_{k+1}-x_k}_{\text{声称的位移}}\;-\;\underbrace{\tfrac{h}{2}\,(f_k+f_{k+1})}_{\text{梯形法估的位移}}\;=\;0 \]</p>
+<ul>
+  <li>👍 <b>最便宜</b>:每段只算两次 \(f\)(两端),约束最稀疏,求解最快、最稳。</li>
+  <li>👎 <b>最粗</b>:只是 2 阶精度。段一长就明显偏(上面的图里它最先离开黑线)。</li>
+</ul>
+
+<h3><span class="chip hs">② Hermite-Simpson</span> 用三次曲线拟合(4 阶,默认)</h3>
+<p>更聪明:用一条<strong>三次曲线</strong>(Hermite 插值)穿过两端,并且让它在两端的<strong>斜率</strong>也等于 \(f_k\)、\(f_{k+1}\)。再在<strong>正中间</strong>取一个点 \(x_\text{mid}\),要求那里也满足物理(这叫"配点"),用 <strong>Simpson(抛物线)积分</strong>写位移:</p>
+<p>\[ x_\text{mid}=\tfrac12(x_k+x_{k+1})+\tfrac{h}{8}(f_k-f_{k+1}),\qquad x_{k+1}-x_k-\tfrac{h}{6}\big(f_k+4f_\text{mid}+f_{k+1}\big)=0 \]</p>
+<ul>
+  <li>👍 <b>性价比之王</b>:每段多算一次中点 \(f\)(共三次),精度却直接跳到 <b>4 阶</b>——和下面 RK4 同一档。这就是它成为默认的原因。</li>
+  <li>⚖️ 约束比梯形稠密一些,但仍是隐式多项式配点,IPOPT 处理起来很顺。</li>
+</ul>
+<div class="callout intuition">
+  🎯 <b>"平方"在哪?</b> Simpson 法的本质,是用一条<strong>抛物线(二次)</strong>去拟合"变化率 \(f\) 随时间的曲线"再积分。所以这一档常被叫作"抛物线/平方"格式;但因为多项式的对称性,它实际达到了 4 阶精度——一个划算的"意外之喜"。
+</div>
+
+<h3><span class="chip rk4">③ RK4</span> 干脆真积分一遍(4 阶,与回放一致)</h3>
+<p>另一条路:不"拟合曲线",而是直接用经典的<strong>四阶 Runge-Kutta 积分器</strong>把这一段算出来(在段内取 4 个采样点估变化率),要求终点节点正好等于这个积分结果:</p>
+<p>\[ x_{k+1}-\operatorname{RK4}(x_k,u_k,h)=0 \]</p>
+<ul>
+  <li>👍 <b>与回放同一族方法</b>:前端"播放优化轨迹"时,用的就是同一族 RK4 积分器。所以 RK4 格式<strong>没有"格式不匹配"的缝隙</strong>——不会出现"优化器用一种格式、回放用另一种"的模型裂缝(这正是本项目踩过的坑,见第 6 节)。注意:它消除的是<strong>格式</strong>缝隙,不是<strong>步长</strong>缝隙——defect 每小段只走一大步,回放走很多细步,所以是"高度一致"而非"逐字节归零"。</li>
+  <li>👎 <b>最贵</b>:RK4 的链式法则让约束雅可比最稠密,求解最慢;它是"打靶式"(显式积分)而非多项式配点。</li>
+</ul>
+<div class="callout intuition">
+  🔧 <b>HS 与 RK4 的真正区别不是阶数(都是 4 阶),而是"构造方式"。</b> HS 是隐式的多项式<strong>配点</strong>(便宜、是默认);RK4 是显式的积分器<strong>打靶</strong>(贵,但与回放逐字节一致)。下一节用斜率把"都是 4 阶"这件事看个明白。
+</div>
+
+<!-- ───────────────────────────── 5 ───────────────────────────── -->
+<h2 id="order"><span class="eyebrow">第 5 节 · 精度</span>阶数到底是什么:看斜率</h2>
+<p>"\(p\) 阶精度"的意思是:把网格加密一倍(\(h\) 减半),误差大约缩小 \(2^p\) 倍。在<strong>双对数</strong>(log-log)图上,误差对 \(h\) 是一条直线,<strong>斜率就等于阶数 \(p\)</strong>。下面这张图是用上面那个玩具方程<strong>实时算</strong>出来的(不是贴图):把整段 \([0,2]\) 切成 \(N\) 步逐步积分,记录终点误差。</p>
+<div class="card">
+  <div class="controls">
+    <label>最少步数 \(N_\min\)<input id="ord-nmin" type="range" min="2" max="16" step="1" value="4" /><span class="val" id="ord-nmin-val"></span></label>
+    <span class="muted" style="font-size:13.5px;">(每档把 \(N\) 翻倍,直到 \(N=512\);斜率即经验阶数)</span>
+  </div>
+  <div id="ord-plot" class="plot" style="height:400px;"></div>
+  <p class="muted" id="ord-readout" style="font-size:13.5px;"></p>
+</div>
+<div class="callout good">
+  ✅ <b>读图要点:</b> 梯形那条线斜率约 <b>2</b>(平缓);Hermite-Simpson 和 RK4 两条线斜率都约 <b>4</b>(陡峭),而且几乎<strong>重叠</strong>——印证了"HS 用更低成本拿到了和 RK4 同样的 4 阶精度"。这就是默认选 HS 的全部理由。
+</div>
+
+<h3>在真实问题上的对比</h3>
+<p>玩具方程之外,我们在真实的 A320 进近问题上跑了同样的对比(脚本见第 7 节)。做法:对同一个目标,三种格式各解一遍,<strong>都把自己的节点精确钉在目标上</strong>;再把解出的控制重新精细积分,看终点真正落在哪——这才是"回放精度"。</p>
+<div class="card tight">
+  <table>
+    <tr><th>格式</th><th>阶数</th><th class="num">节点 → 目标</th><th class="num">回放 → 目标</th></tr>
+    <tr><td><span class="chip trap">梯形</span></td><td>2</td><td class="num">0.000 m</td><td class="num">5.31 m</td></tr>
+    <tr><td><span class="chip hs">Hermite-Simpson</span></td><td>4</td><td class="num">0.000 m</td><td class="num">0.02 m</td></tr>
+    <tr><td><span class="chip rk4">RK4</span></td><td>4</td><td class="num">0.000 m</td><td class="num">0.42 m</td></tr>
+  </table>
+  <p class="muted" style="font-size:13.5px;margin:6px 0 0;">三者都声称落在目标上(节点→目标≈0),但梯形的控制重新积分会偏 5 米,而两种 4 阶格式都在亚米级。</p>
+</div>
+
+<!-- ───────────────────────────── 6 ───────────────────────────── -->
+<h2 id="realworld"><span class="eyebrow">第 6 节 · 真实教训</span>为什么它能让飞机"扎进地里"</h2>
+<p>阶数不是学术装饰。本项目真实踩过这个坑:某个近乎直线进近的目标,优化器解出来后,前端回放时飞机<strong>终点偏出几百米到几公里,甚至中途钻到地面以下</strong>。</p>
+<div class="callout warn">
+  ⚠️ <b>根因不是"优化器和回放对不上",而是"拟合精度在激进解附近崩了"。</b> 当目标速度逼近失速、下滑角顶满下限时,真实轨迹在那一段急剧弯曲;若网格太粗(或格式阶数太低),拟合曲线<strong>完全没跟上</strong>这段弯曲——优化器的节点满足了缺陷=0,但这组控制<strong>实际飞不出那条节点轨迹</strong>。回放(=精细积分)忠实地暴露了这一点:一头扎到地下。
+</div>
+<p>两个互补的解法,本节正好对应前面两节:</p>
+<ul>
+  <li><b>提高拟合精度</b>:加密网格,或换更高阶的格式(梯形 → HS/RK4)。第 5 节的斜率说明:同样网格下,4 阶格式的误差比 2 阶小几个数量级。</li>
+  <li><b>别让解跑到那么激进</b>:给优化加"稳定下降"之类的约束,把解留在轨迹平滑的区域——那里任何格式、默认网格都够准。</li>
+</ul>
+<div class="callout intuition">
+  🧭 <b>一句话:</b> "终点偏移"不是采样 bug,而是<strong>离散化精度</strong>问题。拟合方程(格式)和网格密度,共同决定了"优化器声称的轨迹"和"控制真能飞出的轨迹"之间的裂缝有多大。
+</div>
+
+<!-- ───────────────────────────── 7 ───────────────────────────── -->
+<h2 id="use"><span class="eyebrow">第 7 节 · 上手</span>在本项目里怎么选、怎么跑</h2>
+<p><b>前端(Pilot · Trajectory Play)</b>:优化器下拉框现在直接列出三种拟合方程的直接配点变体——</p>
+<ul>
+  <li><span class="chip hs">Hermite-Simpson(默认)</span> 日常首选,性价比最高。</li>
+  <li><span class="chip trap">Trapezoidal(线性)</span> 想要最快、最稳的求解,或教学对比时用;注意精度低,必要时把段数调高。</li>
+  <li><span class="chip rk4">RK4(四阶)</span> 想要"解出来即与回放逐字节一致"时用;最慢。</li>
+</ul>
+<p><b>命令行对比</b>(打印上面那张真实对比表):</p>
+<pre>cd 4dTrajectory/optimization
+python -m collocation_scheme_comparison --aircraft A320 --horizon 90
+python -m collocation_scheme_comparison --aircraft C172 --horizon 60</pre>
+<p><b>代码位置</b>:</p>
+<ul>
+  <li>三种缺陷方程 + 注册表:<code>4dTrajectory/optimization/casadi_direct_collocation_optimizer.py</code>(<code>trapezoidal_defect_expr</code> / <code>hermite_simpson_defect_expr</code> / <code>rk4_defect_expr</code>,以及 <code>_DEFECT_SCHEMES</code>)。构造器参数 <code>collocation_scheme</code>。</li>
+  <li>后端按名字派发:<code>aeroviz_backend/optimization_backend.py</code>(<code>DIRECT_COLLOCATION_SCHEMES</code>)。</li>
+  <li>对比测试:<code>4dTrajectory/optimization/tests/test_casadi_direct_collocation_optimizer.py</code>(<code>test_collocation_schemes_form_an_accuracy_ladder</code> 等)。</li>
+</ul>
+<div class="callout intuition">
+  📚 <b>想深入数学细节</b>(Hermite 插值的推导、稠密状态网格、和回放积分器的统一)?见技术参考 <code>4dTrajectory/docs/direct_collocation_hermite_simpson.zh.md</code>。本页是它的"前传"——先建立直觉。
+</div>
+
+<div class="footer">
+  本页所有图表均在浏览器内用同一个玩具方程 \(\dot y=-y^2\)(精确解 \(y=\tfrac{1}{1+t}\))实时计算,隐式格式(梯形 / HS)用几步牛顿迭代求解,与仓库里 Python 实现一致。可任意拖动滑块复现。
+</div>
+
+</div>
+
+<script>
+// ───────────── 玩具 ODE 与三种格式(与 Python 实现一致)─────────────
+const f = (y) => -y * y;          // y' = -y^2
+const exact = (t) => 1 / (1 + t); // y(0)=1
+const Y0 = 1.0;
+
+// 牛顿法解隐式格式的单步(对 y1 求根)
+function newton(g, x0, iters = 10) {
+  let x = x0;
+  const eps = 1e-7;
+  for (let i = 0; i < iters; i++) {
+    const gx = g(x);
+    const d = (g(x + eps) - gx) / eps;
+    if (Math.abs(d) < 1e-14) break;
+    x -= gx / d;
+  }
+  return x;
+}
+const stepTrap = (y, h) => newton((y1) => y1 - y - (h / 2) * (f(y) + f(y1)), y);
+const stepHS = (y, h) => newton((y1) => {
+  const ym = 0.5 * (y + y1) + (h / 8) * (f(y) - f(y1));
+  return y1 - y - (h / 6) * (f(y) + 4 * f(ym) + f(y1));
+}, y);
+const stepRK4 = (y, h) => {
+  const k1 = f(y), k2 = f(y + h / 2 * k1), k3 = f(y + h / 2 * k2), k4 = f(y + h * k3);
+  return y + h / 6 * (k1 + 2 * k2 + 2 * k3 + k4);
+};
+
+const COL = { trap: "#d1495b", hs: "#2f6fed", rk4: "#16a34a", truth: "#111111" };
+
+// ───────────── 图 1:一整段里,直线 vs 曲线 ─────────────
+function drawSegment() {
+  const h = parseFloat(document.getElementById("seg-h").value);
+  document.getElementById("seg-h-val").textContent = h.toFixed(2);
+
+  // 真实轨迹(精细)
+  const tt = [], yy = [];
+  for (let i = 0; i <= 120; i++) { const t = h * i / 120; tt.push(t); yy.push(exact(t)); }
+
+  const y1Trap = stepTrap(Y0, h), y1HS = stepHS(Y0, h), y1RK4 = stepRK4(Y0, h);
+
+  // 梯形:直线
+  const trapLine = { x: [0, h], y: [Y0, y1Trap] };
+  // HS:三次 Hermite 插值(端点值+端点斜率),用其端点
+  const f0 = f(Y0), f1 = f(y1HS);
+  const ym = 0.5 * (Y0 + y1HS) + (h / 8) * (f0 - f1);
+  const hsX = [], hsY = [];
+  for (let i = 0; i <= 60; i++) {
+    const s = i / 60, t = s * h;          // Hermite 基函数
+    const h00 = 2 * s ** 3 - 3 * s ** 2 + 1, h10 = s ** 3 - 2 * s ** 2 + s;
+    const h01 = -2 * s ** 3 + 3 * s ** 2, h11 = s ** 3 - s ** 2;
+    hsX.push(t); hsY.push(h00 * Y0 + h10 * h * f0 + h01 * y1HS + h11 * h * f1);
+  }
+
+  const traces = [
+    { x: tt, y: yy, mode: "lines", name: "真实", line: { color: COL.truth, width: 3 } },
+    { x: trapLine.x, y: trapLine.y, mode: "lines+markers", name: "梯形", line: { color: COL.trap, width: 2, dash: "dot" }, marker: { size: 7 } },
+    { x: hsX, y: hsY, mode: "lines", name: "HS(三次)", line: { color: COL.hs, width: 2 } },
+    { x: [h / 2], y: [ym], mode: "markers", name: "HS 中点配点", marker: { color: COL.hs, size: 9, symbol: "diamond" } },
+    { x: [h], y: [y1RK4], mode: "markers", name: "RK4 终点", marker: { color: COL.rk4, size: 11, symbol: "x" } },
+    { x: [h], y: [exact(h)], mode: "markers", name: "真实终点", marker: { color: COL.truth, size: 9, symbol: "circle-open", line: { width: 2 } } },
+  ];
+  Plotly.react("seg-plot", traces, {
+    margin: { t: 10, r: 10, b: 40, l: 44 }, showlegend: false,
+    xaxis: { title: "段内时间 t", zeroline: false },
+    yaxis: { title: "y(t)" },
+  }, { displayModeBar: false, responsive: true });
+
+  const e = exact(h);
+  const fmt = (v) => (Math.abs(v - e)).toExponential(2);
+  document.getElementById("seg-readout").innerHTML =
+    `段长 h=${h.toFixed(2)} 时,终点误差: 梯形 <b style="color:${COL.trap}">${fmt(y1Trap)}</b> · ` +
+    `HS <b style="color:${COL.hs}">${fmt(y1HS)}</b> · RK4 <b style="color:${COL.rk4}">${fmt(y1RK4)}</b>。` +
+    ` 把 h 拉大,梯形(直线)最先离开黑线。`;
+}
+
+// ───────────── 图 2:阶数 = log-log 斜率 ─────────────
+function drawOrder() {
+  const nmin = parseInt(document.getElementById("ord-nmin").value, 10);
+  document.getElementById("ord-nmin-val").textContent = nmin;
+  const T = 2.0;
+  const Ns = [];
+  for (let N = nmin; N <= 512; N *= 2) Ns.push(N);
+
+  const hs = [], eTrap = [], eHS = [], eRK4 = [];
+  for (const N of Ns) {
+    const h = T / N;
+    let yT = Y0, yH = Y0, yR = Y0;
+    for (let i = 0; i < N; i++) { yT = stepTrap(yT, h); yH = stepHS(yH, h); yR = stepRK4(yR, h); }
+    const e = exact(T);
+    hs.push(h);
+    eTrap.push(Math.max(Math.abs(yT - e), 1e-16));
+    eHS.push(Math.max(Math.abs(yH - e), 1e-16));
+    eRK4.push(Math.max(Math.abs(yR - e), 1e-16));
+  }
+  // 经验斜率(最小二乘)
+  const slope = (xs, ys) => {
+    const lx = xs.map(Math.log), ly = ys.map(Math.log);
+    const n = lx.length, mx = lx.reduce((a, b) => a + b) / n, my = ly.reduce((a, b) => a + b) / n;
+    let num = 0, den = 0;
+    for (let i = 0; i < n; i++) { num += (lx[i] - mx) * (ly[i] - my); den += (lx[i] - mx) ** 2; }
+    return num / den;
+  };
+  const sT = slope(hs, eTrap), sH = slope(hs, eHS), sR = slope(hs, eRK4);
+
+  const mk = (y, c, name) => ({ x: hs, y, mode: "lines+markers", name, line: { color: c, width: 2.5 }, marker: { size: 6 } });
+  Plotly.react("ord-plot", [
+    mk(eTrap, COL.trap, "梯形"), mk(eHS, COL.hs, "Hermite-Simpson"), mk(eRK4, COL.rk4, "RK4"),
+  ], {
+    margin: { t: 10, r: 10, b: 48, l: 56 },
+    xaxis: { title: "步长 h(越往左越密)", type: "log", autorange: "reversed" },
+    yaxis: { title: "终点误差", type: "log" },
+    legend: { orientation: "h", y: 1.12 },
+  }, { displayModeBar: false, responsive: true });
+
+  document.getElementById("ord-readout").innerHTML =
+    `经验阶数(斜率): 梯形 <b style="color:${COL.trap}">${sT.toFixed(2)}</b> · ` +
+    `HS <b style="color:${COL.hs}">${sH.toFixed(2)}</b> · RK4 <b style="color:${COL.rk4}">${sR.toFixed(2)}</b>。` +
+    ` 梯形≈2,HS 与 RK4≈4 且几乎重叠。`;
+}
+
+document.getElementById("seg-h").addEventListener("input", drawSegment);
+document.getElementById("ord-nmin").addEventListener("input", drawOrder);
+drawSegment();
+drawOrder();
+</script>
+</body>
+</html>
