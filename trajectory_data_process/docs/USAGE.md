@@ -161,11 +161,11 @@ python trajectory_data_process/download_landings.py --count 30 --airports KRDU K
 For each airport it issues **one history query per time chunk** — a bounding box of
 `--bbox-radius-km` (default 30 km) around the airport — and reuses the trajectories for
 all of that airport's thresholds, scanning backward from `--start` (default: now) in
-`--chunk-hours` steps (default 12 h) until each threshold has `--count` landings or
-`--max-lookback-days` is reached. A threshold that finds nothing new for
-`--dry-give-up-chunks` consecutive chunks (default 8) is abandoned, so an idle runway
-end no longer drags the whole airport back to the full lookback. The bbox query
-downloads only terminal-area state
+`--chunk-hours` steps (default 6 h) until each threshold has `--count` landings or
+`--max-lookback-days` is reached. A threshold is abandoned once the scan has gone
+`--dry-give-up-days` (default 4) past its last new landing — a **fixed duration,
+independent of `--chunk-hours`** — so an idle runway end no longer drags the whole
+airport back to the full lookback. The bbox query downloads only terminal-area state
 vectors (≈80% fewer rows than the full-track airport join) and, because it is purely
 geometric, also catches arrivals whose `estarrival` metadata is missing or wrong.
 Landing flight records therefore have `arr_airport`/`dep_airport` set to `null`. A trajectory counts as a landing at a threshold when
@@ -257,9 +257,9 @@ There are two layers, and they behave differently:
   `--start`** (and the same `--chunk-hours`) to reuse it.
 
 Note: a runway end that is idle in the requested period legitimately yields few or no
-landings. It is abandoned after `--dry-give-up-chunks` dry chunks rather than scanning
-all the way to `--max-lookback-days`, which is the main lever on run time. Raise it (or
-`--max-lookback-days`) if you want to dig deeper for sparse runway ends.
+landings. It is abandoned after `--dry-give-up-days` of dry scanning rather than going
+all the way to `--max-lookback-days`, which is the main lever on run time. `--chunk-hours`
+only controls query size / responsiveness, not how far back a dry runway is tried.
 
 ## 8. Notes
 

@@ -66,17 +66,31 @@ class LandingDownloadTests(unittest.TestCase):
         self.assertEqual(collected["23R"][0]["runway"], "23R")
         self.assertEqual(fetch.calls, 1)  # stops as soon as the count is met
 
-    def test_gives_up_on_dry_runway_instead_of_full_lookback(self) -> None:
+    def test_gives_up_after_fixed_days_independent_of_chunk_hours(self) -> None:
         empty = _StubFetch(pd.DataFrame(columns=list(_landing_df().columns)), always=True)
 
+        # 1 day of give-up at 12 h chunks -> gives up after 2 chunks (24 h scanned),
+        # regardless of the 10-day max lookback.
         collected = download_airport_landings(
             profile=PROFILE, thresholds=[THRESHOLD], count=5, start=START,
-            max_lookback_days=10.0, chunk_hours=12.0, dry_give_up_chunks=3,
+            max_lookback_days=10.0, chunk_hours=12.0, dry_give_up_days=1.0,
             fetch_history_fn=empty,
         )
 
         self.assertEqual(len(collected["23R"]), 0)
-        self.assertEqual(empty.calls, 3)  # gave up after 3 dry chunks, not the full 20
+        self.assertEqual(empty.calls, 2)
+
+    def test_give_up_depth_is_independent_of_chunk_size(self) -> None:
+        # Same 1-day give-up but 6 h chunks -> 4 chunks to cover the same 24 h.
+        empty = _StubFetch(pd.DataFrame(columns=list(_landing_df().columns)), always=True)
+
+        download_airport_landings(
+            profile=PROFILE, thresholds=[THRESHOLD], count=5, start=START,
+            max_lookback_days=10.0, chunk_hours=6.0, dry_give_up_days=1.0,
+            fetch_history_fn=empty,
+        )
+
+        self.assertEqual(empty.calls, 4)
 
     def test_dedupes_same_landing_across_chunks(self) -> None:
         fetch = _StubFetch(_landing_df(), always=True)

@@ -37,8 +37,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--airports", nargs="+", default=None, help="Subset of airport codes (default: all in config)")
     p.add_argument("--start", default=None, help="Scan backward from this UTC time (ISO, default: now)")
     p.add_argument("--max-lookback-days", type=float, default=30.0)
-    p.add_argument("--chunk-hours", type=float, default=12.0, help="Hours per history query (fewer, larger queries)")
-    p.add_argument("--dry-give-up-chunks", type=int, default=8, help="Stop scanning a runway after this many chunks with no new landing")
+    p.add_argument("--chunk-hours", type=float, default=6.0, help="Hours per history query")
+    p.add_argument("--dry-give-up-days", type=float, default=4.0, help="Give up a runway after this many days scanned with no new landing")
     p.add_argument("--bbox-radius-km", type=float, default=30.0, help="Terminal-area query box radius around the airport")
     p.add_argument("--runway-threshold-radius-m", type=float, default=1000.0)
     p.add_argument("--output-root", default=str(here / "outputs" / "landings"))
@@ -108,7 +108,7 @@ def main() -> None:
             chunk_hours=args.chunk_hours,
             bbox_radius_km=args.bbox_radius_km,
             runway_threshold_radius_m=args.runway_threshold_radius_m,
-            dry_give_up_chunks=args.dry_give_up_chunks,
+            dry_give_up_days=args.dry_give_up_days,
             preloaded=None if args.overwrite else preloaded,
         )
         airport_dir.mkdir(parents=True, exist_ok=True)

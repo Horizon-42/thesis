@@ -96,12 +96,12 @@ def download_airport_landings(
     count: int,
     start: datetime,
     max_lookback_days: float,
-    chunk_hours: float = 12.0,
+    chunk_hours: float = 6.0,
     bbox_radius_km: float = DEFAULT_BBOX_RADIUS_KM,
     runway_threshold_radius_m: float = 1000.0,
     approach_window_min: int = 25,
     segment_gap_sec: int = 900,
-    dry_give_up_chunks: int = 8,
+    dry_give_up_days: float = 4.0,
     cached: bool = True,
     preloaded: dict[str, list[dict[str, Any]]] | None = None,
     fetch_history_fn: FetchHistory = fetch_history_dataframe,
@@ -109,10 +109,11 @@ def download_airport_landings(
     """Collect up to ``count`` landings for each threshold, scanning backward.
 
     Each chunk is fetched as a ``bbox_radius_km`` box around the airport. A threshold
-    that yields no new landing for ``dry_give_up_chunks`` consecutive chunks is given
-    up (idle runway ends would otherwise drag the whole airport back to
-    ``max_lookback_days``); the scan stops once every threshold is at ``count`` or
-    given up. ``preloaded`` seeds already-collected flights per threshold (for resume),
+    is given up once the scan has gone ``dry_give_up_days`` past its last new landing
+    (idle runway ends would otherwise drag the whole airport back to
+    ``max_lookback_days``); this depth is a fixed duration, independent of
+    ``chunk_hours``. The scan stops once every threshold is at ``count`` or given up.
+    ``preloaded`` seeds already-collected flights per threshold (for resume),
     de-duplicated by ``(icao24, landing_time_utc)``.
     """
     preloaded = preloaded or {}
@@ -124,7 +125,10 @@ def download_airport_landings(
         t.ident: {(f["icao24"], f.get("landing_time_utc")) for f in collected[t.ident]}
         for t in thresholds
     }
-    dry_chunks: dict[str, int] = {t.ident: 0 for t in thresholds}
+    # The deepest time each threshold last found a landing (init: top of the scan).
+    # When the scan goes more than dry_give_up_days past it, the threshold is given up.
+    dry_floor: dict[str, datetime] = {t.ident: start for t in thresholds}
+    give_up_span = timedelta(days=dry_give_up_days)
     given_up: set[str] = set()
 
     def active(ident: str) -> bool:
@@ -172,14 +176,12 @@ def download_airport_landings(
                     break
 
             if len(collected[threshold.ident]) > before:
-                dry_chunks[threshold.ident] = 0
-            else:
-                dry_chunks[threshold.ident] += 1
-                if dry_chunks[threshold.ident] >= dry_give_up_chunks:
-                    given_up.add(threshold.ident)
-                    print(f"[landings] {profile.code} {threshold.ident}: dry for "
-                          f"{dry_give_up_chunks} chunks, giving up at "
-                          f"{len(collected[threshold.ident])}/{count}", flush=True)
+                dry_floor[threshold.ident] = chunk_start
+            elif dry_floor[threshold.ident] - chunk_start >= give_up_span:
+                given_up.add(threshold.ident)
+                print(f"[landings] {profile.code} {threshold.ident}: no landings in the last "
+                      f"{dry_give_up_days:g} days scanned, giving up at "
+                      f"{len(collected[threshold.ident])}/{count}", flush=True)
 
         cursor = chunk_start
 
