@@ -83,7 +83,10 @@ vi.mock("../../data/rnavInitialFixCandidates", () => ({
   fetchRnavInitialFixCandidates: mocks.fetchRnavInitialFixCandidates,
 }));
 
-vi.mock("../../pilot/trajectoryOptimizationClient", () => ({
+vi.mock("../../pilot/trajectoryOptimizationClient", async (importOriginal) => ({
+  // Keep the real pure helpers (optimizerToParts / partsToOptimizer /
+  // validFittingsForDynamics); only stub the network call.
+  ...(await importOriginal<typeof import("../../pilot/trajectoryOptimizationClient")>()),
   runTrajectoryOptimization: mocks.runTrajectoryOptimization,
 }));
 
@@ -319,12 +322,16 @@ describe("PilotPanel trajectory play mode", () => {
     expect(await screen.findByText("Target State")).toBeTruthy();
     expect(screen.getByText("RW05L")).toBeTruthy();
 
-    expect((screen.getByRole("combobox", { name: "Optimizer" }) as HTMLSelectElement).value)
-      .toBe("casadiDirectCollocation");
+    // Optimizer is chosen as two dropdowns: dynamics × fitting.  Defaults =
+    // geodetic + Hermite-Simpson (= casadiDirectCollocation).
+    expect((screen.getByRole("combobox", { name: "Dynamics" }) as HTMLSelectElement).value)
+      .toBe("geodetic");
+    expect((screen.getByRole("combobox", { name: "Fitting" }) as HTMLSelectElement).value)
+      .toBe("hermiteSimpson");
     expect((screen.getByLabelText("Max iter") as HTMLInputElement).value).toBe("300");
-    const optimizerSelect = screen.getByRole("combobox", { name: "Optimizer" });
-    fireEvent.change(optimizerSelect, {
-      target: { value: "casadiDirectCollocationRk4" },
+    // geodetic + shooting => casadiDirectCollocationRk4.
+    fireEvent.change(screen.getByRole("combobox", { name: "Fitting" }), {
+      target: { value: "shooting" },
     });
 
     await waitFor(() => {
@@ -419,7 +426,7 @@ describe("PilotPanel trajectory play mode", () => {
     expect(request.initialState.headingDeg).toBeCloseTo(39.1);
   });
 
-  it("offers the direct-collocation defect-scheme variants and keeps arrival time enabled", async () => {
+  it("chooses the optimizer as dynamics × fitting; ENU dynamics force shooting", async () => {
     render(<PilotPanel />);
 
     expect(await screen.findByText("A320")).toBeTruthy();
@@ -431,26 +438,37 @@ describe("PilotPanel trajectory play mode", () => {
       );
     });
 
-    const optimizerSelect = screen.getByRole("combobox", {
-      name: "Optimizer",
-    }) as HTMLSelectElement;
+    const dynamicsSelect = screen.getByRole("combobox", { name: "Dynamics" }) as HTMLSelectElement;
+    const fittingSelect = screen.getByRole("combobox", { name: "Fitting" }) as HTMLSelectElement;
     const arrivalInput = screen.getByLabelText("Arrival time") as HTMLInputElement;
 
-    // Default is the Hermite-Simpson variant; arrival time (= max duration)
-    // stays editable for every direct-collocation scheme.
-    expect(optimizerSelect.value).toBe("casadiDirectCollocation");
+    // Defaults: geodetic + Hermite-Simpson; all three fittings available.
+    expect(dynamicsSelect.value).toBe("geodetic");
+    expect(fittingSelect.value).toBe("hermiteSimpson");
+    expect(fittingSelect.querySelectorAll("option").length).toBe(3);
+    expect(fittingSelect.disabled).toBe(false);
     expect(arrivalInput.disabled).toBe(false);
 
-    for (const scheme of [
-      "casadiDirectCollocationTrapezoidal",
-      "casadiDirectCollocationRk4",
-      "casadiDirectCollocationReanchoredEnu",
-      "casadiDirectCollocation",
-    ]) {
-      fireEvent.change(optimizerSelect, { target: { value: scheme } });
-      expect(optimizerSelect.value).toBe(scheme);
+    // geodetic supports all three fittings; arrival time stays editable.
+    for (const fitting of ["trapezoidal", "shooting", "hermiteSimpson"]) {
+      fireEvent.change(fittingSelect, { target: { value: fitting } });
+      expect(fittingSelect.value).toBe(fitting);
       expect(arrivalInput.disabled).toBe(false);
     }
+
+    // Re-anchored ENU is discrete (re-anchors each step) -> shooting-only.
+    fireEvent.change(dynamicsSelect, { target: { value: "reanchoredEnu" } });
+    expect(fittingSelect.value).toBe("shooting");
+    expect(fittingSelect.querySelectorAll("option").length).toBe(1);
+    expect(fittingSelect.disabled).toBe(true);
+
+    // Local ENU @ target is a continuous RHS too -> all three fittings, like
+    // geodetic.  (Its dynamics differ; the transcription is free to vary.)
+    fireEvent.change(dynamicsSelect, { target: { value: "localEnu" } });
+    expect(fittingSelect.querySelectorAll("option").length).toBe(3);
+    expect(fittingSelect.disabled).toBe(false);
+    fireEvent.change(fittingSelect, { target: { value: "hermiteSimpson" } });
+    expect(fittingSelect.value).toBe("hermiteSimpson");
   });
 
   it("clamps trajectory target speed and heading to threshold constraints", async () => {

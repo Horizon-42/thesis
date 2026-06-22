@@ -1,8 +1,51 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   runTrajectoryOptimization,
+  optimizerToParts,
+  partsToOptimizer,
+  validFittingsForDynamics,
   type TrajectoryOptimizationRequest,
 } from "../trajectoryOptimizationClient";
+
+describe("optimizer dynamics × fitting decomposition", () => {
+  it("round-trips every direct-collocation optimizer through parts", () => {
+    const optimizers = [
+      "casadiDirectCollocation",
+      "casadiDirectCollocationTrapezoidal",
+      "casadiDirectCollocationRk4",
+      "casadiDirectCollocationReanchoredEnu",
+      "casadiDirectCollocationLocalEnu",
+      "casadiDirectCollocationLocalEnuTrapezoidal",
+      "casadiDirectCollocationLocalEnuHermiteSimpson",
+    ] as const;
+    for (const opt of optimizers) {
+      const { dynamics, fitting } = optimizerToParts(opt);
+      expect(partsToOptimizer(dynamics, fitting)).toBe(opt);
+    }
+  });
+
+  it("maps geodetic + fitting to the right scheme", () => {
+    expect(partsToOptimizer("geodetic", "hermiteSimpson")).toBe("casadiDirectCollocation");
+    expect(partsToOptimizer("geodetic", "trapezoidal")).toBe("casadiDirectCollocationTrapezoidal");
+    expect(partsToOptimizer("geodetic", "shooting")).toBe("casadiDirectCollocationRk4");
+  });
+
+  it("local ENU is continuous too: takes every fitting; only re-anchored ENU is shooting-only", () => {
+    expect(validFittingsForDynamics("geodetic")).toEqual([
+      "hermiteSimpson", "trapezoidal", "shooting",
+    ]);
+    expect(validFittingsForDynamics("localEnu")).toEqual([
+      "hermiteSimpson", "trapezoidal", "shooting",
+    ]);
+    expect(validFittingsForDynamics("reanchoredEnu")).toEqual(["shooting"]);
+    // localEnu composes with each fitting.
+    expect(partsToOptimizer("localEnu", "hermiteSimpson")).toBe("casadiDirectCollocationLocalEnuHermiteSimpson");
+    expect(partsToOptimizer("localEnu", "trapezoidal")).toBe("casadiDirectCollocationLocalEnuTrapezoidal");
+    expect(partsToOptimizer("localEnu", "shooting")).toBe("casadiDirectCollocationLocalEnu");
+    // The re-anchored stepper snaps any polynomial request to shooting.
+    expect(partsToOptimizer("reanchoredEnu", "hermiteSimpson")).toBe("casadiDirectCollocationReanchoredEnu");
+  });
+});
 
 const request: TrajectoryOptimizationRequest = {
   optimizer: "singleShooting",

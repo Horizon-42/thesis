@@ -8,6 +8,9 @@ export type TrajectoryOptimizer =
   | "casadiDirectCollocationHermiteSimpson"
   | "casadiDirectCollocationRk4"
   | "casadiDirectCollocationReanchoredEnu"
+  | "casadiDirectCollocationLocalEnu"
+  | "casadiDirectCollocationLocalEnuTrapezoidal"
+  | "casadiDirectCollocationLocalEnuHermiteSimpson"
   // Legacy optimizers: still served by the backend, no longer offered in
   // the UI (kept here so a response naming one still parses).
   | "casadiIpopt"
@@ -16,6 +19,65 @@ export type TrajectoryOptimizer =
   | "warmStartTranscription"
   | "variableTimeWarmStartTranscription"
   | "singleShooting";
+
+// ── Two-axis view of the direct-collocation family ─────────────────────────
+// The backend still takes a single ``optimizer`` string, but the UI exposes it
+// as two orthogonal choices that compose into that string:
+//   dynamics  — what vector field / stepper drives the defect
+//   fitting   — how the defect is formed (transcription)
+// The polynomial fittings (trapezoidal / Hermite-Simpson) need a CONTINUOUS
+// RHS, so they apply to the geodetic dynamics AND the fixed local-ENU dynamics
+// (the flat point-mass RHS in a fixed tangent frame).  Only the *re-anchored*
+// ENU dynamics is discrete (it re-anchors every step), so it is shooting-only.
+// ``shooting`` is the RK4 integral defect of the chosen dynamics.
+export type OptimizerDynamics = "geodetic" | "reanchoredEnu" | "localEnu";
+export type OptimizerFitting = "hermiteSimpson" | "trapezoidal" | "shooting";
+
+const COMBO_TO_OPTIMIZER: Record<string, TrajectoryOptimizer> = {
+  "geodetic|hermiteSimpson": "casadiDirectCollocation",
+  "geodetic|trapezoidal": "casadiDirectCollocationTrapezoidal",
+  "geodetic|shooting": "casadiDirectCollocationRk4",
+  "reanchoredEnu|shooting": "casadiDirectCollocationReanchoredEnu",
+  "localEnu|hermiteSimpson": "casadiDirectCollocationLocalEnuHermiteSimpson",
+  "localEnu|trapezoidal": "casadiDirectCollocationLocalEnuTrapezoidal",
+  "localEnu|shooting": "casadiDirectCollocationLocalEnu",
+};
+
+const OPTIMIZER_TO_COMBO: Record<string, { dynamics: OptimizerDynamics; fitting: OptimizerFitting }> = {
+  casadiDirectCollocation: { dynamics: "geodetic", fitting: "hermiteSimpson" },
+  casadiDirectCollocationHermiteSimpson: { dynamics: "geodetic", fitting: "hermiteSimpson" },
+  casadiDirectCollocationTrapezoidal: { dynamics: "geodetic", fitting: "trapezoidal" },
+  casadiDirectCollocationRk4: { dynamics: "geodetic", fitting: "shooting" },
+  casadiDirectCollocationReanchoredEnu: { dynamics: "reanchoredEnu", fitting: "shooting" },
+  casadiDirectCollocationLocalEnu: { dynamics: "localEnu", fitting: "shooting" },
+  casadiDirectCollocationLocalEnuHermiteSimpson: { dynamics: "localEnu", fitting: "hermiteSimpson" },
+  casadiDirectCollocationLocalEnuTrapezoidal: { dynamics: "localEnu", fitting: "trapezoidal" },
+};
+
+/** Fittings valid for a given dynamics: only the re-anchored ENU stepper is
+ * discrete (shooting-only); geodetic and fixed local-ENU are continuous RHS. */
+export function validFittingsForDynamics(dynamics: OptimizerDynamics): OptimizerFitting[] {
+  return dynamics === "reanchoredEnu"
+    ? ["shooting"]
+    : ["hermiteSimpson", "trapezoidal", "shooting"];
+}
+
+export function optimizerToParts(
+  optimizer: TrajectoryOptimizer,
+): { dynamics: OptimizerDynamics; fitting: OptimizerFitting } {
+  return OPTIMIZER_TO_COMBO[optimizer] ?? { dynamics: "geodetic", fitting: "hermiteSimpson" };
+}
+
+/** Compose a (dynamics, fitting) pair back into the optimizer name, snapping
+ * the fitting to a valid one for the dynamics if needed. */
+export function partsToOptimizer(
+  dynamics: OptimizerDynamics,
+  fitting: OptimizerFitting,
+): TrajectoryOptimizer {
+  const valid = validFittingsForDynamics(dynamics);
+  const chosen = valid.includes(fitting) ? fitting : valid[0];
+  return COMBO_TO_OPTIMIZER[`${dynamics}|${chosen}`];
+}
 
 export interface TrajectoryOptimizationRequest {
   optimizer: TrajectoryOptimizer;
@@ -177,6 +239,9 @@ function readOptimizer(value: Record<string, unknown>): TrajectoryOptimizer {
     nested === "casadiDirectCollocationHermiteSimpson" ||
     nested === "casadiDirectCollocationRk4" ||
     nested === "casadiDirectCollocationReanchoredEnu" ||
+    nested === "casadiDirectCollocationLocalEnu" ||
+    nested === "casadiDirectCollocationLocalEnuTrapezoidal" ||
+    nested === "casadiDirectCollocationLocalEnuHermiteSimpson" ||
     nested === "casadiIpopt" ||
     nested === "transcription" ||
     nested === "leastSquaresTranscription" ||

@@ -56,9 +56,14 @@ import {
 } from "../pilot/trajectoryTargetConstraints";
 import {
   runTrajectoryOptimization,
+  optimizerToParts,
+  partsToOptimizer,
+  validFittingsForDynamics,
   type TrajectoryOptimizer,
   type TrajectoryOptimizationResult,
   type TrajectorySample,
+  type OptimizerDynamics,
+  type OptimizerFitting,
 } from "../pilot/trajectoryOptimizationClient";
 
 const DEFAULT_SIMULATION_MODE: PilotSimulationMode = "alpha";
@@ -77,6 +82,16 @@ const DEFAULT_TARGET_GAMMA_DEG = -3;
 const DEFAULT_MAX_ITERATIONS = 300;
 const DEFAULT_ARRIVAL_TIME_S = 100;
 const DEFAULT_TRAJECTORY_OPTIMIZER: TrajectoryOptimizer = "casadiDirectCollocation";
+const OPTIMIZER_DYNAMICS_OPTIONS: { value: OptimizerDynamics; label: string }[] = [
+  { value: "geodetic", label: "Geodetic RHS (+transport)" },
+  { value: "reanchoredEnu", label: "Re-anchored ENU (playback model)" },
+  { value: "localEnu", label: "Local ENU @ target (fixed tangent, drifts far out)" },
+];
+const OPTIMIZER_FITTING_OPTIONS: { value: OptimizerFitting; label: string }[] = [
+  { value: "hermiteSimpson", label: "Hermite-Simpson (cubic, 4th order)" },
+  { value: "trapezoidal", label: "Trapezoidal (linear, 2nd order)" },
+  { value: "shooting", label: "RK4 / shooting (4th order)" },
+];
 const FALLBACK_MAX_THRUST_N = 240000;
 /** Stable empty-samples reference so the playback hook deps don't churn. */
 const EMPTY_SAMPLES: TrajectorySample[] = [];
@@ -967,6 +982,10 @@ export default function PilotPanel() {
   const hasAircraftConfigs = aircraftConfigs.length > 0;
   const initialControlsDisabled = isFlying || isTrajectoryPlaying || isBusy || !hasAircraftConfigs;
   const targetControlsDisabled = isBusy || isTrajectoryPlaying || runwayTargets.length === 0;
+  // The single optimizer name is shown as two dropdowns: dynamics × fitting.
+  const { dynamics: optimizerDynamics, fitting: optimizerFitting } =
+    optimizerToParts(trajectoryOptimizer);
+  const allowedFittings = validFittingsForDynamics(optimizerDynamics);
   const trajectorySegmentDurationS = optimizedTrajectory
     ? optimizedTrajectory.finalTimeS / Math.max(1, optimizedTrajectory.controls.length)
     : null;
@@ -1137,19 +1156,37 @@ export default function PilotPanel() {
 
           <section className="pilot-optimization-row" aria-label="Trajectory optimization settings">
             <label>
-              <span>Optimizer</span>
+              <span>Dynamics</span>
               <select
                 className="pilot-select-input"
-                value={trajectoryOptimizer}
+                value={optimizerDynamics}
                 disabled={targetControlsDisabled}
                 onChange={(event) =>
-                  updateTrajectoryOptimizer(event.target.value as TrajectoryOptimizer)
+                  updateTrajectoryOptimizer(
+                    partsToOptimizer(event.target.value as OptimizerDynamics, optimizerFitting),
+                  )
                 }
               >
-                <option value="casadiDirectCollocation">Direct collocation · Hermite-Simpson (default, 4th order)</option>
-                <option value="casadiDirectCollocationTrapezoidal">Direct collocation · Trapezoidal (linear, 2nd order)</option>
-                <option value="casadiDirectCollocationRk4">Direct collocation · RK4 (4th order)</option>
-                <option value="casadiDirectCollocationReanchoredEnu">Direct collocation · Re-anchored ENU (shooting, playback model)</option>
+                {OPTIMIZER_DYNAMICS_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Fitting</span>
+              <select
+                className="pilot-select-input"
+                value={optimizerFitting}
+                disabled={targetControlsDisabled || allowedFittings.length === 1}
+                onChange={(event) =>
+                  updateTrajectoryOptimizer(
+                    partsToOptimizer(optimizerDynamics, event.target.value as OptimizerFitting),
+                  )
+                }
+              >
+                {OPTIMIZER_FITTING_OPTIONS.filter((o) => allowedFittings.includes(o.value)).map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
               </select>
             </label>
             <label>
