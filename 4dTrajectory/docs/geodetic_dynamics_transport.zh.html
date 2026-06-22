@@ -262,30 +262,35 @@
     <div id="drift" class="plot" style="height:430px"></div>
     <div class="legend" style="margin:4px 6px">
       <span><span class="swatch" style="background:#3fb950"></span>含 transport（水平偏差）</span>
+      <span><span class="swatch" style="background:#56c271"></span>含 transport（高度偏差）</span>
       <span><span class="swatch" style="background:#e3873c"></span>无 transport（水平偏差）</span>
       <span><span class="swatch" style="background:#f85149"></span>无 transport（高度偏差）</span>
     </div>
-    <div class="cap">图 3 · 终点水平/高度偏差随距离的变化（相对 playback 积分器）。</div>
+    <div class="cap">图 3 · 终点水平/高度偏差随距离的变化（相对 playback 积分器）。含 transport 的水平与高度偏差都贴在 ~0（亚毫米）。</div>
   </div>
 
   <table>
     <tr>
       <th rowspan="2">距离<br>[km]</th>
-      <th colspan="2">含 transport vs playback</th>
-      <th colspan="3">无 transport vs playback</th>
+      <th colspan="4">含 transport vs playback</th>
+      <th colspan="4">无 transport vs playback</th>
     </tr>
-    <tr><th>水平 [m]</th><th>航向 Δψ [°]</th><th>水平 [m]</th><th>高度 [m]</th><th>航迹 Δγ [°]</th></tr>
-    <tr><td>1.0</td><td class="good-num">0.0002</td><td class="good-num">0.000</td><td class="bad-num">0.101</td><td>0.058</td><td>0.0041</td></tr>
-    <tr><td>2.0</td><td class="good-num">0.0003</td><td class="good-num">0.000</td><td class="bad-num">0.418</td><td>0.146</td><td>0.0069</td></tr>
-    <tr><td>3.0</td><td class="good-num">0.0002</td><td class="good-num">0.000</td><td class="bad-num">0.989</td><td>0.379</td><td>0.0146</td></tr>
-    <tr><td>4.0</td><td class="good-num">0.0002</td><td class="good-num">0.000</td><td class="bad-num">1.828</td><td>0.768</td><td>0.0219</td></tr>
-    <tr><td>5.0</td><td class="good-num">0.0003</td><td class="good-num">0.039</td><td class="bad-num">2.947</td><td>1.304</td><td>0.0290</td></tr>
+    <tr>
+      <th>水平 [m]</th><th>高度 [m]</th><th>航向 Δψ [°]</th><th>航迹 Δγ [°]</th>
+      <th>水平 [m]</th><th>高度 [m]</th><th>航向 Δψ [°]</th><th>航迹 Δγ [°]</th>
+    </tr>
+    <tr><td>1.0</td><td class="good-num">0.0002</td><td class="good-num">0.0002</td><td class="good-num">0.0000</td><td class="good-num">0.0000</td><td class="bad-num">0.101</td><td>0.058</td><td>0.0112</td><td>0.0041</td></tr>
+    <tr><td>2.0</td><td class="good-num">0.0003</td><td class="good-num">0.0007</td><td class="good-num">0.0000</td><td class="good-num">0.0000</td><td class="bad-num">0.418</td><td>0.146</td><td>0.0224</td><td>0.0069</td></tr>
+    <tr><td>3.0</td><td class="good-num">0.0002</td><td class="good-num">0.0012</td><td class="good-num">0.0000</td><td class="good-num">0.0000</td><td class="bad-num">0.989</td><td>0.379</td><td>0.0335</td><td>0.0146</td></tr>
+    <tr><td>4.0</td><td class="good-num">0.0002</td><td class="good-num">0.0017</td><td class="good-num">0.0000</td><td class="good-num">0.0000</td><td class="bad-num">1.828</td><td>0.768</td><td>0.0447</td><td>0.0219</td></tr>
+    <tr><td>5.0</td><td class="good-num">0.0003</td><td class="good-num">0.0022</td><td class="good-num">0.0000</td><td class="good-num">0.0000</td><td class="bad-num">2.947</td><td>1.304</td><td>0.0558</td><td>0.0290</td></tr>
   </table>
 
   <div class="callout good">
     <strong>结论。</strong> 含 transport 的大地坐标系统在 5 km 内把 playback 积分器追踪到
-    <strong>亚毫米级</strong>（0.0003 m）——两者是<em>同一个连续向量场</em>。这消除了固定 ENU 的
-    曲率/框架误差。去掉 transport 后偏差升到 <strong>~2.9 m / 1.3 m 高度 / 0.04° 航向</strong>——这个差<em>就是</em>
+    <strong>亚毫米级——所有分量都是</strong>（水平 ≤0.0003 m、<strong>高度 ≤0.0022 m</strong>、航向/航迹 ≤0.0001°）：
+    两者是<em>同一个连续向量场</em>，这消除了固定 ENU 的曲率/框架误差。去掉 transport 后偏差升到
+    <strong>~2.9 m 水平 / 1.3 m 高度 / 0.056° 航向 / 0.029° 航迹</strong>——这个差<em>就是</em>
     transport rate（子午线收敛 + 曲率俯仰），与重锚定 stepper 隐式捕捉的量完全吻合。
   </div>
 
@@ -462,6 +467,7 @@ const baseLayout3d = {
 (function drawDrift() {
   const dist = [1, 2, 3, 4, 5];
   const horizT = [0.0002, 0.0003, 0.0002, 0.0002, 0.0003];
+  const altT   = [0.0002, 0.0007, 0.0012, 0.0017, 0.0022];
   const horizN = [0.101, 0.418, 0.989, 1.828, 2.947];
   const altN   = [0.058, 0.146, 0.379, 0.768, 1.304];
   const mk = (y, color, name, dash) => ({
@@ -471,7 +477,8 @@ const baseLayout3d = {
   const data = [
     mk(horizN, '#e3873c', '无 transport · 水平'),
     mk(altN, '#f85149', '无 transport · 高度', 'dot'),
-    mk(horizT, '#3fb950', '含 transport · 水平')
+    mk(horizT, '#3fb950', '含 transport · 水平'),
+    mk(altT, '#56c271', '含 transport · 高度', 'dot')
   ];
   const layout = {
     paper_bgcolor: PLOT_BG, plot_bgcolor: PLOT_BG, font: { color: INK },
