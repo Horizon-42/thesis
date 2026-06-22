@@ -172,6 +172,25 @@ The heading test picks the correct runway end and the descent test excludes clim
 departures — this works even though real ADS-B coverage rarely reaches the ground near
 a runway (tracks typically end a few hundred feet up on short final).
 
+#### What is selected and where each track starts/ends
+
+- **Selection (a landing at runway R):** the trajectory's closest point to R's threshold
+  is within `--runway-threshold-radius-m` (default 1000 m), the heading there is aligned
+  with R's runway heading (±35°), and the aircraft has descended ≥300 m from earlier in
+  the track. This excludes the opposite runway end and climbing departures.
+- **End (anchor):** each saved track ends at the **anchor** = the point closest to the
+  threshold. Points *after* it (rollout/taxi) are dropped. In practice the anchor sits a
+  few hundred feet up because low-altitude ADS-B coverage is sparse near runways.
+- **Start (truncation):** only the **last 25 minutes before the anchor** are kept
+  (the approach window, fixed at 25 min in this flow). At approach speed that is far more
+  than the 30 km box spans, so in practice the track starts wherever the data starts.
+- **Why starts are not all at the same distance:** `--bbox-radius-km` is a **square**
+  (±30 km in lat/lon), so entry distance ranges from ~30 km (edge) to ~42 km (corner).
+  A track that starts much closer (e.g. 13 km) simply was **not received earlier** — a
+  coverage gap, or a >`--segment-gap-sec` (900 s) gap that split the track into a
+  separate segment. The pipeline keeps the real samples; it never back-fills the missing
+  earlier portion.
+
 Output (one CZML-input file per threshold, plus a summary):
 
 ```text
