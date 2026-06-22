@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Merge downloaded landing files into one CZML the frontend can load.
+"""Render downloaded landings into per-runway + combined CZML for the frontend.
 
-``download_landings.py`` writes one CZML-input file per runway threshold, but the
-frontend loads a single ``trajectories.czml`` per airport. This merges an airport's
-threshold files (all of them, or a chosen subset) and runs ``generate_czml.py``.
+``download_landings.py`` writes one CZML-input file per runway threshold. The
+frontend can load a single runway or all of them, so this writes, into the
+airport's frontend folder:
 
-    # all runways of KRDU -> public/data/airports/KRDU/trajectories.czml
+  public/data/airports/<ICAO>/landings/<ICAO>_<RWY>.czml   one CZML per runway
+  public/data/airports/<ICAO>/landings/index.json          manifest of runways
+  public/data/airports/<ICAO>/trajectories.czml            all runways combined
+
     python trajectory_data_process/landings_to_czml.py --airport KRDU
-
-    # only specific runway ends, to a custom path
-    python trajectory_data_process/landings_to_czml.py --airport KRDU --runway 23R 23L \\
-      --output /tmp/krdu_23.czml
+    python trajectory_data_process/landings_to_czml.py --airport KRDU --runway 23R 23L
 """
 
 from __future__ import annotations
@@ -32,6 +32,11 @@ def landing_files(airport_dir: Path, code: str, runways: list[str] | None) -> li
             raise SystemExit(f"No landing files for: {', '.join(missing)} (run download_landings.py first)")
         return paths
     return sorted(airport_dir.glob(f"{code}_*_landings.json"))
+
+
+def runway_ident_from_path(path: Path, code: str) -> str:
+    """KRDU_23R_landings.json -> 23R."""
+    return path.stem[len(f"{code}_"):-len("_landings")]
 
 
 def merge_landing_flights(paths: list[Path]) -> list[dict[str, Any]]:
@@ -61,41 +66,65 @@ def _unique_id(base: str, used_ids: set[str]) -> str:
     return f"{base}_{suffix}"
 
 
+def _generate_czml(generator: Path, code: str, input_path: Path, output_path: Path, multiplier: int | None) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [sys.executable, str(generator), "--airport", code, "--input", str(input_path), "--output", str(output_path)]
+    if multiplier is not None:
+        cmd += ["--multiplier", str(multiplier)]
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
+
+
 def main() -> None:
     here = Path(__file__).resolve().parent
-    p = argparse.ArgumentParser(description="Merge landing files into one CZML for the frontend")
+    p = argparse.ArgumentParser(description="Render landings into per-runway + combined CZML for the frontend")
     p.add_argument("--airport", required=True, help="Airport ICAO code, e.g. KRDU")
     p.add_argument("--runway", nargs="+", default=None, help="Runway ends to include (default: all)")
-    p.add_argument("--output", default=None, help="Output CZML (default: <aeroviz>/public/data/airports/<ICAO>/trajectories.czml)")
     p.add_argument("--multiplier", type=int, default=None, help="Optional CZML clock multiplier")
-    p.add_argument("--output-root", default=str(here / "outputs" / "landings"))
-    p.add_argument("--aeroviz-root", default=str(here.parents[0] / "aeroviz-4d"))
+    p.add_argument("--output-root", default=str(here / "outputs" / "landings"), help="Where the *_landings.json live")
+    p.add_argument("--aeroviz-root", default=str(here.parents[0] / "aeroviz-4d"), help="Frontend root to write CZML into")
     args = p.parse_args()
 
     code = args.airport.upper()
-    airport_dir = Path(args.output_root) / code
+    source_dir = Path(args.output_root) / code
     aeroviz_root = Path(args.aeroviz_root)
-
-    paths = landing_files(airport_dir, code, args.runway)
-    flights = merge_landing_flights(paths)
-    if not flights:
-        raise SystemExit(f"No landings found under {airport_dir}")
-
-    combined = airport_dir / f"{code}_combined_czml_input.json"
-    combined.write_text(json.dumps(flights, indent=2), encoding="utf-8")
-
-    output = Path(args.output) if args.output else aeroviz_root / "public" / "data" / "airports" / code / "trajectories.czml"
-    output.parent.mkdir(parents=True, exist_ok=True)
+    airport_dir = aeroviz_root / "public" / "data" / "airports" / code
+    landings_dir = airport_dir / "landings"
 
     generator = aeroviz_root / "python" / "generate_czml.py"
     if not generator.exists():
         raise SystemExit(f"generate_czml.py not found: {generator}")
 
-    cmd = [sys.executable, str(generator), "--airport", code, "--input", str(combined), "--output", str(output)]
-    if args.multiplier is not None:
-        cmd += ["--multiplier", str(args.multiplier)]
-    print(f"[landings->czml] {len(flights)} landings from {len(paths)} file(s) -> {output}", flush=True)
-    subprocess.run(cmd, check=True)
+    paths = [p for p in landing_files(source_dir, code, args.runway)]
+    runway_manifest: list[dict[str, Any]] = []
+    for path in paths:
+        flights = json.loads(path.read_text(encoding="utf-8"))
+        if not flights:
+            continue  # an idle runway end with no landings: skip it
+        ident = runway_ident_from_path(path, code)
+        czml_path = landings_dir / f"{code}_{ident}.czml"
+        _generate_czml(generator, code, path, czml_path, args.multiplier)
+        runway_manifest.append({"runway": ident, "file": f"landings/{czml_path.name}", "count": len(flights)})
+        print(f"[landings->czml] {code} {ident}: {len(flights)} -> {czml_path}")
+
+    if not runway_manifest:
+        raise SystemExit(f"No landings found under {source_dir}")
+
+    # Combined (all runways) -> the airport's default trajectories.czml.
+    combined_flights = merge_landing_flights(paths)
+    combined_input = source_dir / f"{code}_combined_czml_input.json"
+    combined_input.write_text(json.dumps(combined_flights, indent=2), encoding="utf-8")
+    combined_czml = airport_dir / "trajectories.czml"
+    _generate_czml(generator, code, combined_input, combined_czml, args.multiplier)
+    print(f"[landings->czml] {code} combined: {len(combined_flights)} -> {combined_czml}")
+
+    manifest = {
+        "airport": code,
+        "combined": "trajectories.czml",
+        "runways": sorted(runway_manifest, key=lambda r: r["runway"]),
+    }
+    index_path = landings_dir / "index.json"
+    index_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    print(f"[landings->czml] manifest: {index_path}")
 
 
 if __name__ == "__main__":

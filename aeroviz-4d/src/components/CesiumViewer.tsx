@@ -31,6 +31,7 @@ import { useObstacleLayer } from "../hooks/useObstacleLayer";
 import { useProcedureAnnotationPicking } from "../hooks/useProcedureAnnotationPicking";
 import { useProcedureSegmentLayer } from "../hooks/useProcedureSegmentLayer";
 import { useOcsLayer } from "../hooks/useOcsLayer";
+import { useRangeRingLayer } from "../hooks/useRangeRingLayer";
 import { useApp } from "../context/AppContext";
 
 export default function CesiumViewerComponent() {
@@ -58,6 +59,7 @@ export default function CesiumViewerComponent() {
   useProcedureSegmentLayer();
   useProcedureAnnotationPicking();
   useOcsLayer({ enabled: layers.ocsSurfaces });
+  useRangeRingLayer();
   // Waypoint rendering is intentionally disabled for now.
   // Keep the hook implementation for future use.
   // useWaypointLayer();

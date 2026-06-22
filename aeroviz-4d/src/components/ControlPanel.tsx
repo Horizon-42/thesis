@@ -12,7 +12,8 @@
  */
 
 import { useApp, type LayerKey } from "../context/AppContext";
-import { useEffect, useState } from "react";
+import { useLandingsManifest } from "../hooks/useLandingsManifest";
+import { useEffect, useRef, useState } from "react";
 
 /** Predefined speed options shown as buttons */
 const SPEED_OPTIONS: Array<{ label: string; value: number }> = [
@@ -37,6 +38,7 @@ const LAYER_LABELS: Record<LayerKey, string> = {
   obstacles:    "Obstacles",
   obstacleLabels: "Obstacle Labels",
   procedures:   "RNAV Procedures",
+  rangeRing:    "Range Ring",
 };
 
 const ACTIVE_LAYER_KEYS: LayerKey[] = [
@@ -51,7 +53,22 @@ const ACTIVE_LAYER_KEYS: LayerKey[] = [
   "obstacleLabels",
   "procedures",
   "ocsSurfaces",
+  "rangeRing",
 ];
+
+const RANGE_RING_MIN_KM = 1;
+const RANGE_RING_MAX_KM = 50;
+const RANGE_RING_STEP_KM = 0.5;
+
+function clampRangeRingRadiusKm(value: number): number {
+  if (!Number.isFinite(value)) return RANGE_RING_MIN_KM;
+  return Math.min(RANGE_RING_MAX_KM, Math.max(RANGE_RING_MIN_KM, value));
+}
+
+/** Canonical string shown in the number field (no forced decimals). */
+function formatRangeRingRadiusDraft(km: number): string {
+  return String(km);
+}
 
 function formatTerrainStatus(status: string): string {
   switch (status) {
@@ -99,8 +116,29 @@ export default function ControlPanel() {
     airports,
     activeAirportCode,
     setActiveAirportCode,
+    selectedRunway,
+    setSelectedRunway,
+    rangeRingRadiusKm,
+    setRangeRingRadiusKm,
   } = useApp();
+  const { manifest: landingsManifest } = useLandingsManifest(activeAirportCode);
+  const landingRunways = landingsManifest?.runways ?? [];
   const [isAnimating, setIsAnimating] = useState<boolean>(false);
+
+  // The range-ring radius field keeps its own draft string so the user can fully
+  // clear it (e.g. to retype 10 → 30) without each keystroke being clamped back to
+  // the minimum. We only sync the draft from the committed value when the field
+  // isn't being edited, and normalize on blur.
+  const [rangeRingRadiusDraft, setRangeRingRadiusDraft] = useState<string>(() =>
+    formatRangeRingRadiusDraft(rangeRingRadiusKm),
+  );
+  const rangeRingRadiusFocusedRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    if (!rangeRingRadiusFocusedRef.current) {
+      setRangeRingRadiusDraft(formatRangeRingRadiusDraft(rangeRingRadiusKm));
+    }
+  }, [rangeRingRadiusKm]);
 
   useEffect(() => {
     if (!viewer) {
@@ -165,6 +203,24 @@ export default function ControlPanel() {
             ))}
           </select>
         </label>
+
+        {landingRunways.length > 0 ? (
+          <label className="control-panel-airport-selector">
+            <span>Landing Runway</span>
+            <select
+              className="control-panel-airport-selector-input"
+              value={selectedRunway ?? ""}
+              onChange={(event) => setSelectedRunway(event.target.value || null)}
+            >
+              <option value="">All runways</option>
+              {landingRunways.map((entry) => (
+                <option key={entry.runway} value={entry.runway}>
+                  {entry.runway} ({entry.count})
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
       </section>
 
       {/* ── Playback controls ────────────────────────────────────────────── */}
@@ -204,6 +260,52 @@ export default function ControlPanel() {
           </label>
         ))}
       </section>
+
+      {layers.rangeRing ? (
+        <section className="control-panel-range-ring" aria-label="Range ring radius">
+          <h4>Range Ring Radius</h4>
+          <div className="control-panel-range-ring-value">{rangeRingRadiusKm.toFixed(1)} km</div>
+          <div className="control-panel-range-ring-inputs">
+            <input
+              type="range"
+              min={RANGE_RING_MIN_KM}
+              max={RANGE_RING_MAX_KM}
+              step={RANGE_RING_STEP_KM}
+              value={rangeRingRadiusKm}
+              onChange={(event) =>
+                setRangeRingRadiusKm(clampRangeRingRadiusKm(Number(event.target.value)))
+              }
+            />
+            <input
+              type="number"
+              min={RANGE_RING_MIN_KM}
+              max={RANGE_RING_MAX_KM}
+              step={RANGE_RING_STEP_KM}
+              value={rangeRingRadiusDraft}
+              onFocus={() => {
+                rangeRingRadiusFocusedRef.current = true;
+              }}
+              onChange={(event) => {
+                const raw = event.target.value;
+                setRangeRingRadiusDraft(raw);
+                // Let the field sit empty/partial mid-edit; only commit a clamped
+                // value once it parses to a finite number.
+                if (raw.trim() === "") return;
+                const parsed = Number(raw);
+                if (Number.isFinite(parsed)) {
+                  setRangeRingRadiusKm(clampRangeRingRadiusKm(parsed));
+                }
+              }}
+              onBlur={() => {
+                rangeRingRadiusFocusedRef.current = false;
+                const next = clampRangeRingRadiusKm(Number(rangeRingRadiusDraft));
+                setRangeRingRadiusKm(next);
+                setRangeRingRadiusDraft(formatRangeRingRadiusDraft(next));
+              }}
+            />
+          </div>
+        </section>
+      ) : null}
 
       {layers.airportLocalTerrain ? (
         <section className="control-panel-local-terrain" aria-label="Airport local terrain details">

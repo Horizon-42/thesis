@@ -22,14 +22,16 @@ import ProcedureAnnotationPopup from "./components/ProcedureAnnotationPopup";
 import ProcedurePanel from "./components/ProcedurePanel";
 import RunwayTrajectoryProfilePanel from "./components/RunwayTrajectoryProfilePanel";
 import { useApp } from "./context/AppContext";
-import { airportDataUrl } from "./data/airportData";
+import { airportDataUrl, airportLandingsRunwayUrl } from "./data/airportData";
 import { useCzmlLoader } from "./hooks/useCzmlLoader";
 import { useEffect, useState } from "react";
 
 function FlightApp() {
-  const { activeAirportCode } = useApp();
+  const { activeAirportCode, selectedRunway } = useApp();
   const czmlUrl = activeAirportCode
-    ? airportDataUrl(activeAirportCode, "trajectories.czml")
+    ? selectedRunway
+      ? airportLandingsRunwayUrl(activeAirportCode, selectedRunway)
+      : airportDataUrl(activeAirportCode, "trajectories.czml")
     : "";
   const { flightIds, warning, error } = useCzmlLoader(czmlUrl);
   const czmlStatus = error ?? warning;

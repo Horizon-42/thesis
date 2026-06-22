@@ -64,6 +64,30 @@ export function airportLocalTerrainUrl(airportCode: string, fileName?: string): 
   return fileName ? `${root}/${fileName}` : root;
 }
 
+export function airportLandingsIndexUrl(airportCode: string): string {
+  return `${airportDataRootUrl(airportCode)}/landings/index.json`;
+}
+
+export function airportLandingsRunwayUrl(airportCode: string, runway: string): string {
+  const code = normalizeAirportCode(airportCode);
+  return airportDataUrl(code, `landings/${code}_${runway.toUpperCase()}.czml`);
+}
+
+/** One runway's landing CZML, as listed in landings/index.json. */
+export interface LandingRunwayEntry {
+  runway: string;
+  /** Path relative to the airport folder, e.g. "landings/KRDU_23R.czml" */
+  file: string;
+  count: number;
+}
+
+export interface LandingsManifest {
+  airport: string;
+  /** Combined (all-runway) CZML file name, e.g. "trajectories.czml" */
+  combined: string;
+  runways: LandingRunwayEntry[];
+}
+
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
@@ -102,4 +126,25 @@ export function isAirportsIndexManifest(value: unknown): value is AirportsIndexM
 
 export function sortAirportCatalog(airports: AirportCatalogItem[]): AirportCatalogItem[] {
   return [...airports].sort((left, right) => left.code.localeCompare(right.code));
+}
+
+function isLandingRunwayEntry(value: unknown): value is LandingRunwayEntry {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.runway === "string" &&
+    typeof candidate.file === "string" &&
+    isFiniteNumber(candidate.count)
+  );
+}
+
+export function isLandingsManifest(value: unknown): value is LandingsManifest {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.airport === "string" &&
+    typeof candidate.combined === "string" &&
+    Array.isArray(candidate.runways) &&
+    candidate.runways.every(isLandingRunwayEntry)
+  );
 }

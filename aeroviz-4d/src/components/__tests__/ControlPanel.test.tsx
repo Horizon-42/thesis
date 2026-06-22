@@ -7,6 +7,8 @@ const {
   toggleLayer,
   setPlaybackSpeed,
   setActiveAirportCode,
+  setSelectedRunway,
+  landingsRef,
 } = vi.hoisted(() => {
   const defaultLayers = {
     satelliteImagery: true,
@@ -59,16 +61,24 @@ const {
     toggleLayer: vi.fn(),
     setPlaybackSpeed: vi.fn(),
     setActiveAirportCode: vi.fn(),
+    setSelectedRunway: vi.fn(),
+    landingsRef: { current: { manifest: null as unknown, status: "empty" } },
   };
 });
 
 vi.mock("../../context/AppContext", () => ({
   useApp: () => ({
     ...appState,
+    selectedRunway: appState.selectedRunway ?? null,
     toggleLayer,
     setPlaybackSpeed,
     setActiveAirportCode,
+    setSelectedRunway,
   }),
+}));
+
+vi.mock("../../hooks/useLandingsManifest", () => ({
+  useLandingsManifest: () => landingsRef.current,
 }));
 
 import ControlPanel from "../ControlPanel";
@@ -76,7 +86,42 @@ import ControlPanel from "../ControlPanel";
 describe("ControlPanel", () => {
   beforeEach(() => {
     resetAppState();
+    landingsRef.current = { manifest: null, status: "empty" };
     vi.clearAllMocks();
+  });
+
+  it("shows a landing-runway selector from the manifest and selects a runway", () => {
+    landingsRef.current = {
+      manifest: {
+        airport: "KRDU",
+        combined: "trajectories.czml",
+        runways: [
+          { runway: "23R", file: "landings/KRDU_23R.czml", count: 40 },
+          { runway: "05L", file: "landings/KRDU_05L.czml", count: 12 },
+        ],
+      },
+      status: "ready",
+    };
+
+    render(<ControlPanel />);
+
+    const select = screen.getByLabelText("Landing Runway") as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.textContent)).toEqual([
+      "All runways",
+      "23R (40)",
+      "05L (12)",
+    ]);
+
+    fireEvent.change(select, { target: { value: "23R" } });
+    expect(setSelectedRunway).toHaveBeenCalledWith("23R");
+
+    fireEvent.change(select, { target: { value: "" } });
+    expect(setSelectedRunway).toHaveBeenCalledWith(null);
+  });
+
+  it("hides the runway selector when there are no landings", () => {
+    render(<ControlPanel />);
+    expect(screen.queryByLabelText("Landing Runway")).toBeNull();
   });
 
   it("switches the active airport from the selector", () => {

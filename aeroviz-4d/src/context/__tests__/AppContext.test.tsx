@@ -66,10 +66,13 @@ describe("AppContext", () => {
       result.current.setViewer(viewer);
       result.current.setAirport({ code: "KRDU", lon: -78.7873, lat: 35.878659, height: 15000 });
       result.current.setSelectedFlightId("flight-1");
+      result.current.setSelectedRunway("23R");
       result.current.setProcedureBranchVisible("branch:R", true);
       result.current.setProcedureDisplayLevel("DEBUG");
       result.current.setPlaybackSpeed(120);
     });
+
+    expect(result.current.selectedRunway).toBe("23R");
 
     act(() => {
       result.current.setActiveAirportCode("CYVR");
@@ -77,6 +80,7 @@ describe("AppContext", () => {
 
     expect(result.current.activeAirportCode).toBe("CYVR");
     expect(result.current.selectedFlightId).toBeNull();
+    expect(result.current.selectedRunway).toBeNull();
     expect(result.current.procedureVisibility).toEqual({});
     expect(result.current.procedureDisplayLevel).toBe("PROTECTION");
     expect(result.current.airport).toBeNull();

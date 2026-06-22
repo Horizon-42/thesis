@@ -58,7 +58,8 @@ export type LayerKey =
   | "trajectories"
   | "obstacles"
   | "obstacleLabels"
-  | "procedures";
+  | "procedures"
+  | "rangeRing";
 
 export type RunwayProfileViewMode = "split" | "side-xz" | "top-xy";
 
@@ -123,6 +124,10 @@ interface SceneState {
   /** Status of the active airport-scoped local high-resolution terrain source */
   airportLocalTerrain: AirportLocalTerrainState;
   setAirportLocalTerrain: (state: AirportLocalTerrainState) => void;
+
+  /** Radius (km) of the airport-centred range ring drawn by the `rangeRing` layer */
+  rangeRingRadiusKm: number;
+  setRangeRingRadiusKm: (km: number) => void;
 }
 
 interface AirportSessionState {
@@ -141,6 +146,10 @@ interface FlightSessionState {
   /** The currently tracked/selected flight callsign */
   selectedFlightId: string | null;
   setSelectedFlightId: (id: string | null) => void;
+
+  /** Selected landing runway end (e.g. "23R"); null loads the combined CZML */
+  selectedRunway: string | null;
+  setSelectedRunway: (runway: string | null) => void;
 
   /** The loaded CZML datasource for trajectory sampling and profile views */
   trajectoryDataSource: Cesium.CzmlDataSource | null;
@@ -202,6 +211,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [activeAirportCode, setActiveAirportCodeState] = useState<string>("");
   const [airport, setAirport] = useState<AirportConfig | null>(null);
   const [selectedFlightId, setSelectedFlightId] = useState<string | null>(null);
+  const [selectedRunway, setSelectedRunway] = useState<string | null>(null);
   const [trajectoryDataSource, setTrajectoryDataSource] =
     useState<Cesium.CzmlDataSource | null>(null);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(60);
@@ -218,6 +228,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [isRunwayProfileOpen, setRunwayProfileOpen] = useState(false);
   const [runwayProfileViewMode, setRunwayProfileViewMode] =
     useState<RunwayProfileViewMode>("split");
+  const [rangeRingRadiusKm, setRangeRingRadiusKm] = useState<number>(5);
   const [airportLocalTerrain, setAirportLocalTerrain] = useState<AirportLocalTerrainState>({
     status: "disabled",
     airportCode: null,
@@ -250,6 +261,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     obstacles: false,
     obstacleLabels: false,
     procedures: false,
+    rangeRing: false,
   });
 
   // Store the Viewer reference.
@@ -318,6 +330,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         viewer.trackedEntity = undefined;
       }
       setSelectedFlightId(null);
+      setSelectedRunway(null);
       setTrajectoryDataSource(null);
       setProcedureVisibility({});
       setProcedureAnnotationEnabled(false);
@@ -342,7 +355,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     toggleLayer,
     airportLocalTerrain,
     setAirportLocalTerrain,
-  }), [airportLocalTerrain, layers, setViewer, toggleLayer, viewer]);
+    rangeRingRadiusKm,
+    setRangeRingRadiusKm,
+  }), [airportLocalTerrain, layers, rangeRingRadiusKm, setViewer, toggleLayer, viewer]);
   const airportSessionState: AirportSessionState = useMemo(() => ({
     airports,
     activeAirportCode,
@@ -353,9 +368,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const flightSessionState: FlightSessionState = useMemo(() => ({
     selectedFlightId,
     setSelectedFlightId,
+    selectedRunway,
+    setSelectedRunway,
     trajectoryDataSource,
     setTrajectoryDataSource,
-  }), [selectedFlightId, trajectoryDataSource]);
+  }), [selectedFlightId, selectedRunway, trajectoryDataSource]);
   const procedureSessionState: ProcedureSessionState = useMemo(() => ({
     procedureVisibility,
     setProcedureBranchVisible,

@@ -183,26 +183,37 @@ Each flight additionally carries `landing_time_utc` (the absolute time it reache
 threshold). The files are CZML **input**, not CZML — the frontend loads one
 `trajectories.czml` per airport, so convert before using them in the app.
 
-### Render to the frontend
+### Render to the frontend (per-runway + combined)
 
-`landings_to_czml.py` merges an airport's per-threshold landing files (all, or a
-subset) into a single CZML the frontend can load directly:
+`landings_to_czml.py` renders an airport's landing files into the frontend folder,
+**one CZML per runway plus a combined CZML**, with a manifest:
 
 ```bash
-# all runways of KRDU -> aeroviz-4d/public/data/airports/KRDU/trajectories.czml
+# all runways of KRDU
 python trajectory_data_process/landings_to_czml.py --airport KRDU
 
-# only specific runway ends, or a custom output path
+# only specific runway ends
 python trajectory_data_process/landings_to_czml.py --airport KRDU --runway 23R 23L
-python trajectory_data_process/landings_to_czml.py --airport KRDU --output /tmp/krdu.czml
 ```
 
-It de-duplicates landings by `(icao24, landing_time_utc)`, re-uniques ids, writes a
-combined `<ICAO>_combined_czml_input.json` for inspection, then runs `generate_czml.py`.
-Omit `--output` to write straight to the airport's frontend asset.
+Output under `aeroviz-4d/public/data/airports/<ICAO>/`:
 
-A single landing file can also be rendered directly:
-`python aeroviz-4d/python/generate_czml.py --airport KRDU --input <file> --output <…>/trajectories.czml`.
+```text
+landings/<ICAO>_<RWY>.czml   one CZML per runway (e.g. landings/KRDU_23R.czml)
+landings/index.json          manifest: { airport, combined, runways:[{runway,file,count}] }
+trajectories.czml            all runways combined (the default the frontend loads)
+```
+
+It de-duplicates landings by `(icao24, landing_time_utc)`, re-uniques ids, and runs
+`generate_czml.py` per runway and once for the combined file.
+
+### Loading in the frontend
+
+The app loads **per airport** by default (`trajectories.czml` = all runways). When a
+`landings/index.json` manifest is present, the ControlPanel shows a **Landing Runway**
+selector (`All runways` + one entry per runway with its count); picking a runway loads
+just that runway's `landings/<ICAO>_<RWY>.czml`. The selection resets to `All` when the
+airport is switched.
 
 ### Resume & caching (re-running)
 

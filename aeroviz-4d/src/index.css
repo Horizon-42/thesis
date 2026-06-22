@@ -397,6 +397,35 @@ body,
   overflow-wrap: anywhere;
 }
 
+.control-panel-range-ring-value {
+  color: #7eecff;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 6px;
+}
+
+.control-panel-range-ring-inputs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px;
+  gap: 8px;
+  align-items: center;
+}
+
+.control-panel-range-ring-inputs input[type="range"] {
+  width: 100%;
+  min-width: 0;
+}
+
+.control-panel-range-ring-inputs input[type="number"] {
+  width: 100%;
+  box-sizing: border-box;
+  background: #2a3550;
+  border: 1px solid #3a4a6a;
+  color: #c8d8ec;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+
 /* ── Procedure Panel overlay ─────────────────────────────────────────────── */
 .procedure-panel {
   align-self: start;
