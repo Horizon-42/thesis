@@ -128,7 +128,12 @@ def make_state_bounds(min_altitude: float, min_velocity: float):
     lon_min, lon_max = -ca.pi, ca.pi
     alt_min, alt_max = min_altitude, 10_000.0
     V_min, V_max = min_velocity, 1_000.0
-    psi_min, psi_max = -ca.pi, ca.pi
+    # Heading is cyclic: bounding it to a single [-pi, pi] branch makes any
+    # turn that crosses the +-180 deg cut infeasible (e.g. -135 deg -> +135 deg,
+    # a short ~90 deg turn).  We bound it loosely over several turns so the
+    # target heading can be unwrapped to the shortest turn (see
+    # ``_unwrap_target_heading``).  psi has no singularity in the RHS.
+    psi_min, psi_max = -3.0 * ca.pi, 3.0 * ca.pi
     gamma_min, gamma_max = -radians_expr(6.0), radians_expr(15.0)
     return (
         [lat_min, lon_min, alt_min, V_min, psi_min, gamma_min],
@@ -160,6 +165,19 @@ def _geodetic_state_to_decision(state: GeodeticState) -> list[float]:
         state.gamma,
         state.m,
     ]
+
+
+def _unwrap_target_heading(initial_param: list[float], target_param: list[float]) -> list[float]:
+    """Shift the target heading by multiples of 2π so it lies within π of the
+    initial heading — i.e. the aircraft turns the SHORT way to the target
+    course, without the path having to cross the ±180° branch cut that the
+    (widened) heading box would otherwise trap it on.  Returns a copy of
+    ``target_param`` with only the psi entry adjusted.
+    """
+    unwrapped = list(target_param)
+    dpsi = initial_param[_PSI] - target_param[_PSI]
+    unwrapped[_PSI] = target_param[_PSI] + 2.0 * math.pi * round(dpsi / (2.0 * math.pi))
+    return unwrapped
 
 
 def _decision_to_geodetic_state(row: np.ndarray, mass: float) -> GeodeticState:
@@ -636,9 +654,12 @@ class CasadiDirectCollocationOptimizer:
         solve_duration = self.max_duration if duration is None else duration
 
         # 1. Convert the geodetic endpoints to the radian decision units.
-        # No tangent plane, no anchor -- the RHS is global.
+        # No tangent plane, no anchor -- the RHS is global.  Unwrap the target
+        # heading so the optimiser turns the short way to it.
         initial_param = _geodetic_state_to_decision(initial_state)
-        target_param = _geodetic_state_to_decision(target_state)
+        target_param = _unwrap_target_heading(
+            initial_param, _geodetic_state_to_decision(target_state),
+        )
 
         # 2. Build (or accept) the initial guess.  The default linear
         # interpolation is the same shape as casadi_optimizer; replace
@@ -695,7 +716,9 @@ class CasadiDirectCollocationOptimizer:
         through the playback integrator -- no post-solve polish is needed.
         """
         initial_param = _geodetic_state_to_decision(initial_state)
-        target_param = _geodetic_state_to_decision(target_state)
+        target_param = _unwrap_target_heading(
+            initial_param, _geodetic_state_to_decision(target_state),
+        )
 
         if initial_guess is None:
             x0 = self._build_free_time_initial_guess(
@@ -808,7 +831,9 @@ class CasadiDirectCollocationOptimizer:
         fails (rare), fall back to the cold linear-interpolation guess.
         """
         initial_param = _geodetic_state_to_decision(initial_state)
-        target_param = _geodetic_state_to_decision(target_state)
+        target_param = _unwrap_target_heading(
+            initial_param, _geodetic_state_to_decision(target_state),
+        )
         cold = self._build_initial_guess(initial_param, target_param)
         try:
             w_opt = self._solve_fixed_time_raw(

@@ -93,6 +93,60 @@ def test_control_smoothness_cost_weights_segment_changes():
     assert float(module._control_smoothness_cost([u0, u0], meta, (0.1, 3.0, 1.0))) == pytest.approx(0.0)
 
 
+def test_unwrap_target_heading_picks_short_turn():
+    module = load_module()
+    # init +170 deg, target given as -170 deg: the short turn is +20 deg, so
+    # the target heading must unwrap to +190 deg (same heading, other branch).
+    init = [0.0, 0.0, 0.0, 0.0, math.radians(170.0), 0.0, 0.0]
+    tgt = [0.0, 0.0, 0.0, 0.0, math.radians(-170.0), 0.0, 0.0]
+    assert math.degrees(module._unwrap_target_heading(init, tgt)[4]) == pytest.approx(190.0)
+    # already within +-180 deg: unchanged.
+    init2 = [0.0, 0.0, 0.0, 0.0, math.radians(10.0), 0.0, 0.0]
+    tgt2 = [0.0, 0.0, 0.0, 0.0, math.radians(40.0), 0.0, 0.0]
+    assert math.degrees(module._unwrap_target_heading(init2, tgt2)[4]) == pytest.approx(40.0)
+
+
+def test_optimize_handles_heading_wrap_across_180_deg():
+    """A turn whose target heading sits on the other side of the +-180 branch
+    cut (e.g. KRDU R32 SINNO: -135 deg -> +135 deg) must still solve -- the
+    target heading is unwrapped to the shortest turn."""
+    import casadi as ca
+    from aerodynamic_model.casadi_simulator import (
+        AeroParams, make_geodetic_step_integrator,
+    )
+
+    module = load_module()
+    ap = AeroParams(S=C172.wing_area_m2)
+    aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
+    step = make_geodetic_step_integrator(include_transport=True)["step_func"]
+
+    duration = 2.0
+    speed = C172.terminal_speed_kt * 0.51444 + 10.0
+    init = GeodeticState(51.1139, -114.0203, 1000.0, speed,
+                         math.radians(179.0), 0.0, C172.mass_kg)
+    # Propagate a left turn so the heading just crosses +180 deg.
+    u = ca.DM([C172.approach_thrust_guess_n, math.radians(10.0), 1.05])
+    x = ca.DM([init.latitude, init.longitude, init.altitude,
+               init.V, init.psi, init.gamma, init.m])
+    for _ in range(int(duration / 0.05)):
+        x = step(x_geo=x, u=u, aero_params=aero, dt=0.05)["x_geo_next"]
+    a = np.array(x).reshape(-1)
+    # Supply the target heading WRAPPED into [-180, 180] deg, as the frontend would.
+    wrapped_psi = (a[4] + math.pi) % (2 * math.pi) - math.pi
+    assert wrapped_psi < 0  # crossed +180 -> now negative branch
+    target = GeodeticState(a[0], a[1], a[2], a[3], wrapped_psi, a[5], C172.mass_kg)
+
+    optimizer = module.CasadiDirectCollocationOptimizer(
+        n_segments=4, dt=0.2, max_duration=6.0, aircraft=C172,
+        max_terminal_bank_deg=89.0,
+    )
+    _, _, states = optimizer.optimize_trajectory(init, target, duration=duration)
+    assert optimizer.solver.stats()["success"]
+    # Terminal heading equals the propagated heading modulo 360 deg.
+    diff = (math.degrees(states[-1][4]) - math.degrees(a[4])) % 360.0
+    assert min(diff, 360.0 - diff) < 1.0
+
+
 def test_make_direct_collocation_solver_builds_symbolic_nlp(monkeypatch):
     module = load_module()
     captured = {}

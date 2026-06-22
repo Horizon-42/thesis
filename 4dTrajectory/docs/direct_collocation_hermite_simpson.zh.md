@@ -372,6 +372,7 @@ dense-state 直接把优化器的**离散算子**对齐到 playback，从源头�
 | 几何/状态边界 | `make_state_bounds`, `make_control_bounds` |
 | 控制平滑项（主罚 μ、n） | `_control_smoothness_cost`（权重 `smoothness_weights`，默认 `(0.1,1,1)`） |
 | 终端坡度约束（纯 state） | `terminal_bank_constraint_expr`（`max_terminal_bank_deg`，默认 5°） |
+| 航向解卷（取最短转向，避免 ±180° 切割） | `_unwrap_target_heading` + ψ 边界放宽到 ±3π |
 | free-time 初值（复用 fixed-time 原始解 + $T$） | `CasadiDirectCollocationOptimizer._build_free_time_initial_guess` |
 | 段端状态抽取（$N\cdot M$ 节点里每 $M$ 取一个） | `_extract_node_states_geo` |
 | 度↔弧度边界转换 | `_geodetic_state_to_decision` / `_decision_to_geodetic_state` |
