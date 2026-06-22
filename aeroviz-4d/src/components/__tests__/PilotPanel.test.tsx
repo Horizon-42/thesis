@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useEffect } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   knotsToMetresPerSecond,
@@ -40,12 +41,14 @@ const mocks = vi.hoisted(() => ({
   usePilotAircraft: vi.fn(),
   usePilotInitialPlacement: vi.fn(),
   usePilotTargetGate: vi.fn(),
+  useOptimizedTrajectoryPlayback: vi.fn(),
 }));
 
 vi.mock("../../context/AppContext", () => ({
   useApp: () => ({
     activeAirportCode: "KRDU",
     airport: mocks.airport,
+    viewer: null,
   }),
 }));
 
@@ -59,6 +62,10 @@ vi.mock("../../hooks/usePilotInitialPlacement", () => ({
 
 vi.mock("../../hooks/usePilotTargetGate", () => ({
   usePilotTargetGate: mocks.usePilotTargetGate,
+}));
+
+vi.mock("../../hooks/useOptimizedTrajectoryPlayback", () => ({
+  useOptimizedTrajectoryPlayback: mocks.useOptimizedTrajectoryPlayback,
 }));
 
 vi.mock("../../pilot/pilotClient", () => ({
@@ -128,6 +135,44 @@ describe("PilotPanel trajectory play mode", () => {
         { thrustN: 12000, bankDeg: 3, attackDeg: 0, loadFactor: 1.1 },
       ],
       states: [],
+      playback: {
+        epochIso: "2026-01-01T00:00:00Z",
+        multiplier: 1,
+        czml: [{ id: "document" }, { id: "optimized-trajectory-aircraft" }],
+        samples: [
+          {
+            t: 0,
+            lon: -78.79,
+            lat: 35.87,
+            altM: 900,
+            speedMps: 115,
+            headingDeg: 5,
+            flightPathDeg: -1,
+            bankDeg: 0,
+            thrustN: 12000,
+            segmentIndex: 0,
+            liftCoefficient: 0.42,
+            dragCoefficient: 0.041,
+            actualLoadFactor: 1.2,
+            loadFactor: 1.2,
+          },
+        ],
+      },
+    });
+    // The real playback hook drives the live readout by sampling the rollout on
+    // each Cesium clock tick. Here we stand in for that: when enabled, emit the
+    // first sample once so the readout renders without a real Cesium clock.
+    mocks.useOptimizedTrajectoryPlayback.mockImplementation((params: {
+      enabled: boolean;
+      samples: unknown[];
+      onSample: (sample: unknown) => void;
+    }) => {
+      useEffect(() => {
+        params.onSample(
+          params.enabled && params.samples.length > 0 ? params.samples[0] : null,
+        );
+      }, [params.enabled, params.samples]);
+      return { status: params.enabled ? "loaded" : "idle", error: null };
     });
     mocks.resetPilotSimulation.mockImplementation((
       _state: PilotResetState,
@@ -497,7 +542,7 @@ describe("PilotPanel trajectory play mode", () => {
     });
   });
 
-  it("shows the trajectory replay control row in the live state panel", async () => {
+  it("plays the optimized trajectory on the Cesium clock and shows the sampled control", async () => {
     document.body.innerHTML = '<div class="cesium-overlay-container"></div>';
     render(<PilotPanel />);
 
@@ -515,33 +560,23 @@ describe("PilotPanel trajectory play mode", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Play" }));
 
+    // Playback is handed to Cesium's clock via the CZML — the frontend no longer
+    // steps the dynamics segment-by-segment.
+    expect(mocks.stepPilotSimulation).not.toHaveBeenCalled();
     await waitFor(() => {
-      expect(mocks.resetPilotSimulation).toHaveBeenCalled();
-    });
-    await waitFor(() => {
-      expect(mocks.resetPilotSimulation).toHaveBeenCalledWith(
-        expect.objectContaining({ aircraftType: "A320" }),
-        { thrustN: 12000, bankDeg: 0, attackDeg: 0, loadFactor: 1.2 },
-        "casadi",
-      );
-    });
-    await waitFor(() => {
-      expect(mocks.stepPilotSimulation).toHaveBeenCalledWith(
-        { thrustN: 12000, bankDeg: 0, attackDeg: 0, loadFactor: 1.2 },
-        0.2,
-        "casadi",
-        0.2,
-      );
-    });
-    await waitFor(() => {
-      expect(mocks.usePilotAircraft).toHaveBeenLastCalledWith(
+      expect(mocks.useOptimizedTrajectoryPlayback).toHaveBeenLastCalledWith(
         expect.objectContaining({
-          trail: expect.arrayContaining([
+          enabled: true,
+          czml: expect.any(Array),
+          samples: expect.arrayContaining([
             expect.objectContaining({ segmentIndex: 0 }),
           ]),
+          follow: expect.any(Boolean),
+          onSample: expect.any(Function),
         }),
       );
     });
+
     const liveStatePanel = await screen.findByRole("complementary", {
       name: "Realtime aircraft state",
     });
@@ -551,7 +586,7 @@ describe("PilotPanel trajectory play mode", () => {
     ).toBeTruthy();
   });
 
-  it("keeps the final trajectory state panel visible after replay finishes", async () => {
+  it("shows the live state panel with target errors during optimized playback", async () => {
     document.body.innerHTML = '<div class="cesium-overlay-container"></div>';
     mocks.runTrajectoryOptimization.mockResolvedValueOnce({
       ok: true,
@@ -561,6 +596,29 @@ describe("PilotPanel trajectory play mode", () => {
       dtS: 0.02,
       controls: [{ thrustN: 12000, bankDeg: 0, attackDeg: 4 }],
       states: [],
+      playback: {
+        epochIso: "2026-01-01T00:00:00Z",
+        multiplier: 1,
+        czml: [{ id: "document" }],
+        samples: [
+          {
+            t: 0,
+            lon: -78.79,
+            lat: 35.87,
+            altM: 900,
+            speedMps: 115,
+            headingDeg: 5,
+            flightPathDeg: -1,
+            bankDeg: 0,
+            thrustN: 12000,
+            segmentIndex: 0,
+            liftCoefficient: 0.42,
+            dragCoefficient: 0.041,
+            actualLoadFactor: 1.12,
+            attackDeg: 4,
+          },
+        ],
+      },
     });
 
     render(<PilotPanel />);
@@ -579,20 +637,7 @@ describe("PilotPanel trajectory play mode", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Play" }));
 
-    await waitFor(() => {
-      expect(mocks.stepPilotSimulation).toHaveBeenCalledWith(
-        { thrustN: 12000, bankDeg: 0, attackDeg: 4 },
-        0.2,
-        "alpha",
-        0.02,
-      );
-    });
-    await waitFor(() => {
-      expect((screen.getByRole("button", { name: "Pause" }) as HTMLButtonElement).disabled)
-        .toBe(true);
-    });
-
-    const finalStatePanel = screen.getByRole("complementary", {
+    const finalStatePanel = await screen.findByRole("complementary", {
       name: "Realtime aircraft state",
     });
     expect(within(finalStatePanel).getByText("Lat Error")).toBeTruthy();

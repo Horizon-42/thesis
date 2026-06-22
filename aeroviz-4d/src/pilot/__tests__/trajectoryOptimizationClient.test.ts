@@ -61,7 +61,8 @@ describe("trajectoryOptimizationClient", () => {
 
     const result = await runTrajectoryOptimization(request);
 
-    expect(result).toEqual(responsePayload);
+    // No `playback` in the response → parsed result carries `playback: null`.
+    expect(result).toEqual({ ...responsePayload, playback: null });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://127.0.0.1:8765/optimization/run",
       expect.objectContaining({

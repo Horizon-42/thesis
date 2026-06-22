@@ -19,6 +19,42 @@ export interface TrajectoryOptimizationRequest {
   maxIterations: number;
 }
 
+/**
+ * One dense rollout sample of the optimized trajectory. The backend rolls the
+ * optimizer's controls forward once and returns these so the frontend can drive
+ * the live readout by sampling at the current Cesium clock time.
+ */
+export interface TrajectorySample {
+  t: number;
+  lon: number;
+  lat: number;
+  altM: number;
+  speedMps: number;
+  headingDeg: number;
+  flightPathDeg: number;
+  bankDeg: number;
+  thrustN: number;
+  segmentIndex: number;
+  liftCoefficient: number;
+  dragCoefficient: number;
+  actualLoadFactor: number;
+  loadFactor?: number;
+  attackDeg?: number;
+}
+
+/**
+ * Playback bundle: a CZML document the frontend loads into a CzmlDataSource and
+ * plays on Cesium's own clock (like a downloaded trajectory), plus the dense
+ * sample series backing the live readout. `czml` is opaque to TypeScript — it
+ * is handed straight to Cesium's CzmlDataSource.load().
+ */
+export interface TrajectoryPlayback {
+  epochIso: string;
+  multiplier: number;
+  czml: unknown[];
+  samples: TrajectorySample[];
+}
+
 export interface TrajectoryOptimizationResult {
   ok: true;
   optimizer: TrajectoryOptimizer;
@@ -27,6 +63,7 @@ export interface TrajectoryOptimizationResult {
   dtS: number;
   controls: PilotControls[];
   states: PilotResetState[];
+  playback: TrajectoryPlayback | null;
 }
 
 interface TrajectoryOptimizationErrorResponse {
@@ -78,7 +115,50 @@ function parseTrajectoryOptimizationResult(
     dtS: readPositiveNumber(value, "dtS"),
     controls: value.controls.map(parseControl),
     states: value.states.map(parseState),
+    playback: parsePlayback(value.playback),
   };
+}
+
+function parsePlayback(value: unknown): TrajectoryPlayback | null {
+  if (value === undefined || value === null) return null;
+  if (!isRecord(value)) {
+    throw new Error("AeroViz backend optimization response has invalid playback");
+  }
+  if (!Array.isArray(value.czml) || !Array.isArray(value.samples)) {
+    throw new Error("AeroViz backend optimization playback is missing czml/samples");
+  }
+  return {
+    epochIso: readString(value, "epochIso"),
+    multiplier: readNumber(value, "multiplier"),
+    czml: value.czml,
+    samples: value.samples.map(parseSample),
+  };
+}
+
+function parseSample(value: unknown): TrajectorySample {
+  if (!isRecord(value)) {
+    throw new Error("AeroViz backend optimization playback has invalid sample");
+  }
+  const sample: TrajectorySample = {
+    t: readNumber(value, "t"),
+    lon: readNumber(value, "lon"),
+    lat: readNumber(value, "lat"),
+    altM: readNumber(value, "altM"),
+    speedMps: readNumber(value, "speedMps"),
+    headingDeg: readNumber(value, "headingDeg"),
+    flightPathDeg: readNumber(value, "flightPathDeg"),
+    bankDeg: readNumber(value, "bankDeg"),
+    thrustN: readNumber(value, "thrustN"),
+    segmentIndex: readNumber(value, "segmentIndex"),
+    liftCoefficient: readNumber(value, "liftCoefficient"),
+    dragCoefficient: readNumber(value, "dragCoefficient"),
+    actualLoadFactor: readNumber(value, "actualLoadFactor"),
+  };
+  const loadFactor = readOptionalNumber(value, "loadFactor");
+  if (loadFactor !== null) sample.loadFactor = loadFactor;
+  const attackDeg = readOptionalNumber(value, "attackDeg");
+  if (attackDeg !== null) sample.attackDeg = attackDeg;
+  return sample;
 }
 
 function readOptimizer(value: Record<string, unknown>): TrajectoryOptimizer {

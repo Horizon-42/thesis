@@ -17,6 +17,8 @@ import {
 } from "../data/rnavInitialFixCandidates";
 import { usePilotAircraft, type PilotAircraftPose } from "../hooks/usePilotAircraft";
 import { usePilotTargetGate } from "../hooks/usePilotTargetGate";
+import { useOptimizedTrajectoryPlayback } from "../hooks/useOptimizedTrajectoryPlayback";
+import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import PilotInitialStateOverlay, {
   EnglishNumberInput,
   formatCoord,
@@ -56,6 +58,7 @@ import {
   runTrajectoryOptimization,
   type TrajectoryOptimizer,
   type TrajectoryOptimizationResult,
+  type TrajectorySample,
 } from "../pilot/trajectoryOptimizationClient";
 
 const DEFAULT_SIMULATION_MODE: PilotSimulationMode = "alpha";
@@ -75,6 +78,8 @@ const DEFAULT_MAX_ITERATIONS = 300;
 const DEFAULT_ARRIVAL_TIME_S = 100;
 const DEFAULT_TRAJECTORY_OPTIMIZER: TrajectoryOptimizer = "casadiDirectCollocation";
 const FALLBACK_MAX_THRUST_N = 240000;
+/** Stable empty-samples reference so the playback hook deps don't churn. */
+const EMPTY_SAMPLES: TrajectorySample[] = [];
 
 function usesLoadFactorControl(mode: PilotSimulationMode) {
   return mode === "loadFactor" || mode === "casadi";
@@ -104,10 +109,14 @@ interface PlacementBackup {
 }
 
 export default function PilotPanel() {
-  const { activeAirportCode, airport } = useApp();
+  const { activeAirportCode, airport, viewer } = useApp();
   const [activeMode, setActiveMode] = useState<PilotPanelMode>("pilot");
   const [isEnabled, setIsEnabled] = useState(false);
   const [isFlying, setIsFlying] = useState(false);
+  // Optimized-trajectory playback now runs on Cesium's own clock from a backend
+  // CZML.  `isTrajectoryPlaybackActive` means the CZML is loaded into the scene;
+  // `isTrajectoryPlaying` mirrors the intended clock animation (play vs pause).
+  const [isTrajectoryPlaybackActive, setIsTrajectoryPlaybackActive] = useState(false);
   const [isTrajectoryPlaying, setIsTrajectoryPlaying] = useState(false);
   const [isInitialEditorOpen, setIsInitialEditorOpen] = useState(false);
   const [isTargetEditorOpen, setIsTargetEditorOpen] = useState(false);
@@ -142,10 +151,6 @@ export default function PilotPanel() {
   const simulationModeRef = useRef(simulationMode);
   const integratorDtRef = useRef(integratorDtS);
   const stepInFlightRef = useRef(false);
-  const trajectoryPlanRef = useRef<TrajectoryOptimizationResult | null>(null);
-  const trajectoryReplayIndexRef = useRef(0);
-  const trajectorySegmentElapsedSRef = useRef(0);
-  const trajectoryStepInFlightRef = useRef(false);
   const placementBackupRef = useRef<PlacementBackup | null>(null);
 
   const [initialState, setInitialState] = useState<PilotResetState>(() =>
@@ -197,16 +202,23 @@ export default function PilotPanel() {
     ],
   );
 
-  const clearSnapshotForInitialEdit = useCallback(() => {
+  // Invalidate any computed/loaded optimized trajectory. Used whenever an input
+  // that feeds the optimizer changes, so a stale CZML never stays on the clock.
+  const clearOptimizedPlayback = useCallback(() => {
     setOptimizedTrajectory(null);
+    setIsTrajectoryPlaying(false);
+    setIsTrajectoryPlaybackActive(false);
+  }, []);
+
+  const clearSnapshotForInitialEdit = useCallback(() => {
+    clearOptimizedPlayback();
     if (!snapshot && !isEnabled && !isFlying && !isTrajectoryPlaying) return;
 
     setIsFlying(false);
-    setIsTrajectoryPlaying(false);
     setIsEnabled(false);
     setSnapshot(null);
     setTrail([]);
-  }, [isEnabled, isFlying, isTrajectoryPlaying, snapshot]);
+  }, [clearOptimizedPlayback, isEnabled, isFlying, isTrajectoryPlaying, snapshot]);
 
   const updateInitialPosition = useCallback(
     (position: PilotInitialPlacementPosition) => {
@@ -320,8 +332,10 @@ export default function PilotPanel() {
     onCancel: cancelInitialPlacement,
   });
 
+  // The hand-built aircraft + trail are only for live Pilot mode. In Trajectory
+  // Play the aircraft and the colored trajectory come from the CZML instead.
   usePilotAircraft({
-    enabled: isEnabled,
+    enabled: isEnabled && activeMode === "pilot",
     pose,
     trail,
     follow: isFollowing,
@@ -332,11 +346,37 @@ export default function PilotPanel() {
     target: targetGateState,
   });
 
+  // Drive the live readout from the optimized rollout sampled at the clock time.
+  const playbackOptimizer = optimizedTrajectory?.optimizer ?? DEFAULT_TRAJECTORY_OPTIMIZER;
+  const handlePlaybackSample = useCallback(
+    (sample: TrajectorySample | null) => {
+      if (!sample) {
+        setSnapshot(null);
+        return;
+      }
+      setSnapshot(
+        trajectorySampleToSnapshot(
+          sample,
+          trajectoryOptimizerSimulationMode(playbackOptimizer),
+          initialState.aircraftType,
+          initialState.massKg,
+        ),
+      );
+    },
+    [playbackOptimizer, initialState.aircraftType, initialState.massKg],
+  );
+
+  useOptimizedTrajectoryPlayback({
+    enabled: isTrajectoryPlaybackActive,
+    czml: optimizedTrajectory?.playback?.czml ?? null,
+    samples: optimizedTrajectory?.playback?.samples ?? EMPTY_SAMPLES,
+    follow: isFollowing,
+    onSample: handlePlaybackSample,
+  });
+
   useEffect(() => {
     const aircraft = aircraftConfigs[0] ?? null;
     placementBackupRef.current = null;
-    trajectoryReplayIndexRef.current = 0;
-    trajectorySegmentElapsedSRef.current = 0;
     setInitialState(makeDefaultInitialState(airport, aircraft));
     setRnavInitialFixCandidates([]);
     setSelectedRnavInitialFixKey("");
@@ -349,6 +389,7 @@ export default function PilotPanel() {
     setIsInitialPreviewVisible(false);
     setIsFlying(false);
     setIsTrajectoryPlaying(false);
+    setIsTrajectoryPlaybackActive(false);
     setIsEnabled(false);
     setSnapshot(null);
     setTrail([]);
@@ -474,10 +515,6 @@ export default function PilotPanel() {
     integratorDtRef.current = integratorDtS;
   }, [integratorDtS]);
 
-  useEffect(() => {
-    trajectoryPlanRef.current = optimizedTrajectory;
-  }, [optimizedTrajectory]);
-
   const appendTrailPoint = useCallback((nextSnapshot: PilotSnapshot, segmentIndex?: number) => {
     const nextPose = snapshotToPose(nextSnapshot);
     if (!nextPose) return;
@@ -523,72 +560,6 @@ export default function PilotPanel() {
       window.clearInterval(interval);
     };
   }, [appendTrailPoint, isEnabled, isFlying]);
-
-  useEffect(() => {
-    if (!isEnabled || !isTrajectoryPlaying) return;
-
-    let cancelled = false;
-    const tick = () => {
-      const plan = trajectoryPlanRef.current;
-      if (!plan || trajectoryStepInFlightRef.current) return;
-
-      const segmentIndex = trajectoryReplayIndexRef.current;
-      const control = plan.controls[segmentIndex];
-      if (!control) {
-        setIsTrajectoryPlaying(false);
-        return;
-      }
-
-      const segmentDurationS = plan.finalTimeS / Math.max(1, plan.controls.length);
-      const remainingSegmentS = segmentDurationS - trajectorySegmentElapsedSRef.current;
-      if (remainingSegmentS <= 1e-9) {
-        trajectoryReplayIndexRef.current += 1;
-        trajectorySegmentElapsedSRef.current = 0;
-        if (trajectoryReplayIndexRef.current >= plan.controls.length) {
-          setIsTrajectoryPlaying(false);
-        }
-        return;
-      }
-
-      const replayDtS = Math.min(PLAYBACK_FRAME_DT_S, remainingSegmentS);
-      trajectoryStepInFlightRef.current = true;
-      void stepPilotSimulation(
-        control,
-        replayDtS,
-        trajectoryOptimizerSimulationMode(plan.optimizer),
-        plan.dtS,
-      )
-        .then((nextSnapshot) => {
-          if (cancelled) return;
-          setSnapshot(nextSnapshot);
-          appendTrailPoint(nextSnapshot, segmentIndex);
-          setError(null);
-          trajectorySegmentElapsedSRef.current += replayDtS;
-          if (trajectorySegmentElapsedSRef.current >= segmentDurationS - 1e-9) {
-            trajectoryReplayIndexRef.current += 1;
-            trajectorySegmentElapsedSRef.current = 0;
-          }
-          if (trajectoryReplayIndexRef.current >= plan.controls.length) {
-            setIsTrajectoryPlaying(false);
-          }
-        })
-        .catch((stepError: unknown) => {
-          if (cancelled) return;
-          setIsTrajectoryPlaying(false);
-          setError(toErrorMessage(stepError));
-        })
-        .finally(() => {
-          trajectoryStepInFlightRef.current = false;
-        });
-    };
-
-    tick();
-    const interval = window.setInterval(tick, STEP_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [appendTrailPoint, isEnabled, isTrajectoryPlaying]);
 
   useEffect(() => {
     if (!isEnabled || activeMode !== "pilot") return;
@@ -787,7 +758,10 @@ export default function PilotPanel() {
 
   function openPilotMode() {
     if (isPlacingInitialPosition) return;
+    // Unload the optimized CZML when leaving Trajectory Play, but keep the
+    // computed result so returning lets the user replay without re-optimizing.
     setIsTrajectoryPlaying(false);
+    setIsTrajectoryPlaybackActive(false);
     setIsTargetEditorOpen(false);
     setActiveMode("pilot");
     setError(null);
@@ -813,8 +787,7 @@ export default function PilotPanel() {
       makeDefaultTrajectoryTarget(target, selectedAircraft, current)
     );
     setSelectedRnavInitialFixKey("");
-    setOptimizedTrajectory(null);
-    setIsTrajectoryPlaying(false);
+    clearOptimizedPlayback();
   }
 
   function updateRnavInitialFix(candidateKey: string) {
@@ -857,42 +830,36 @@ export default function PilotPanel() {
     }
 
     setTargetState((current) => ({ ...current, [key]: nextValue }));
-    setOptimizedTrajectory(null);
-    setIsTrajectoryPlaying(false);
+    clearOptimizedPlayback();
   }
 
   function updateNSegments(value: number) {
     if (!Number.isFinite(value)) return;
     setNSegments(Math.round(clamp(value, 1, 80)));
-    setOptimizedTrajectory(null);
-    setIsTrajectoryPlaying(false);
+    clearOptimizedPlayback();
   }
 
   function updateArrivalTime(value: number) {
     if (!Number.isFinite(value)) return;
     setArrivalTimeS(clamp(value, 1, 1000));
-    setOptimizedTrajectory(null);
-    setIsTrajectoryPlaying(false);
+    clearOptimizedPlayback();
   }
 
   function updateTrajectoryDt(value: number) {
     if (!Number.isFinite(value)) return;
     setTrajectoryDtS(clamp(value, 0.02, 2));
-    setOptimizedTrajectory(null);
-    setIsTrajectoryPlaying(false);
+    clearOptimizedPlayback();
   }
 
   function updateMaxIterations(value: number) {
     if (!Number.isFinite(value)) return;
     setMaxIterations(Math.round(clamp(value, 1, 10000)));
-    setOptimizedTrajectory(null);
-    setIsTrajectoryPlaying(false);
+    clearOptimizedPlayback();
   }
 
   function updateTrajectoryOptimizer(value: TrajectoryOptimizer) {
     setTrajectoryOptimizer(value);
-    setOptimizedTrajectory(null);
-    setIsTrajectoryPlaying(false);
+    clearOptimizedPlayback();
   }
 
   async function computeTrajectory() {
@@ -900,7 +867,7 @@ export default function PilotPanel() {
 
     setIsBusy(true);
     setIsFlying(false);
-    setIsTrajectoryPlaying(false);
+    clearOptimizedPlayback();
     setError(null);
     try {
       const result = await runTrajectoryOptimization({
@@ -917,8 +884,6 @@ export default function PilotPanel() {
         maxIterations,
       });
       setOptimizedTrajectory(result);
-      trajectoryReplayIndexRef.current = 0;
-      trajectorySegmentElapsedSRef.current = 0;
     } catch (computeError: unknown) {
       setOptimizedTrajectory(null);
       setError(toErrorMessage(computeError));
@@ -927,43 +892,33 @@ export default function PilotPanel() {
     }
   }
 
-  async function playOptimizedTrajectory() {
-    if (!optimizedTrajectory || optimizedTrajectory.controls.length === 0) return;
+  function playOptimizedTrajectory() {
+    if (!optimizedTrajectory?.playback) return;
 
-    setIsBusy(true);
-    setIsFlying(false);
-    setIsTrajectoryPlaying(false);
     setError(null);
-    try {
-      const firstControl = optimizedTrajectory.controls[0] ?? controls;
-      const nextSnapshot = await resetPilotSimulation(
-        initialState,
-        firstControl,
-        trajectoryOptimizerSimulationMode(optimizedTrajectory.optimizer),
-      );
-      setSnapshot(nextSnapshot);
-      const nextPose = snapshotToPose(nextSnapshot);
-      setTrail(nextPose ? [{ ...nextPose, segmentIndex: 0 }] : []);
-      trajectoryReplayIndexRef.current = 0;
-      trajectorySegmentElapsedSRef.current = 0;
-      setIsEnabled(true);
-      setIsTrajectoryPlaying(true);
-    } catch (playError: unknown) {
-      setError(toErrorMessage(playError));
-    } finally {
-      setIsBusy(false);
+    setIsFlying(false);
+    setIsEnabled(false);
+    setIsTrajectoryPlaybackActive(true);
+    setIsTrajectoryPlaying(true);
+    if (isCesiumViewerUsable(viewer)) {
+      viewer.clock.shouldAnimate = true;
+    }
+  }
+
+  function pauseOptimizedTrajectory() {
+    setIsTrajectoryPlaying(false);
+    if (isCesiumViewerUsable(viewer)) {
+      viewer.clock.shouldAnimate = false;
     }
   }
 
   function resetTrajectoryReplay() {
-    trajectoryReplayIndexRef.current = 0;
-    trajectorySegmentElapsedSRef.current = 0;
     setIsTrajectoryPlaying(false);
-    setIsFlying(false);
-    setIsEnabled(false);
-    setSnapshot(null);
-    setTrail([]);
     setError(null);
+    if (isCesiumViewerUsable(viewer)) {
+      viewer.clock.shouldAnimate = false;
+      viewer.clock.currentTime = viewer.clock.startTime.clone();
+    }
   }
 
   function nudgeControl(
@@ -1003,11 +958,13 @@ export default function PilotPanel() {
         ? "Playing"
         : isFlying
           ? "Flying"
-          : optimizedTrajectory && activeMode === "trajectory"
-            ? "Ready"
-            : snapshot
-              ? "Paused"
-              : "Standby";
+          : isTrajectoryPlaybackActive
+            ? "Paused"
+            : optimizedTrajectory && activeMode === "trajectory"
+              ? "Ready"
+              : snapshot
+                ? "Paused"
+                : "Standby";
   const hasAircraftConfigs = aircraftConfigs.length > 0;
   const initialControlsDisabled = isFlying || isTrajectoryPlaying || isBusy || !hasAircraftConfigs;
   const targetControlsDisabled = isBusy || isTrajectoryPlaying || runwayTargets.length === 0;
@@ -1265,13 +1222,13 @@ export default function PilotPanel() {
                 isBusy ||
                 isTrajectoryPlaying ||
                 isPlacingInitialPosition ||
-                !optimizedTrajectory
+                !optimizedTrajectory?.playback
               }
             >
               Play
             </button>
             <button
-              onClick={() => setIsTrajectoryPlaying(false)}
+              onClick={pauseOptimizedTrajectory}
               disabled={!isTrajectoryPlaying || isBusy || isPlacingInitialPosition}
             >
               Pause
@@ -1281,7 +1238,7 @@ export default function PilotPanel() {
               disabled={
                 isBusy ||
                 isPlacingInitialPosition ||
-                (!snapshot && !optimizedTrajectory)
+                (!isTrajectoryPlaybackActive && !optimizedTrajectory)
               }
             >
               Reset
@@ -1622,6 +1579,43 @@ function trajectoryTargetToPilotState(
     flightPathDeg: target.flightPathDeg,
     massKg,
     aircraftType,
+  };
+}
+
+function trajectorySampleToSnapshot(
+  sample: TrajectorySample,
+  simulationMode: PilotSimulationMode,
+  aircraftType: PilotAircraftType,
+  massKg: number,
+): PilotSnapshot {
+  const control: PilotControls = {
+    thrustN: sample.thrustN,
+    bankDeg: sample.bankDeg,
+    attackDeg: sample.attackDeg ?? 0,
+  };
+  if (sample.loadFactor !== undefined) {
+    control.loadFactor = sample.loadFactor;
+  }
+  return {
+    ok: true,
+    elapsedS: sample.t,
+    simulationMode,
+    state: {
+      lon: sample.lon,
+      lat: sample.lat,
+      altM: sample.altM,
+      speedMps: sample.speedMps,
+      headingDeg: sample.headingDeg,
+      flightPathDeg: sample.flightPathDeg,
+      massKg,
+      aircraftType,
+    },
+    control,
+    aero: {
+      liftCoefficient: sample.liftCoefficient,
+      dragCoefficient: sample.dragCoefficient,
+      actualLoadFactor: sample.actualLoadFactor,
+    },
   };
 }
 

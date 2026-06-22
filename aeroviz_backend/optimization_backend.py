@@ -25,6 +25,7 @@ from common import LoadFactorControl
 from least_squares_transcription_optimizor import LeastSquaresTranscriptionOptimizor
 from single_shooting_optimizor import SingleShootingOptimizor
 from simulator import Control
+from aeroviz_backend.trajectory_playback import build_optimized_trajectory_playback
 from transcription_optimizor import TranscriptionOptimizor
 from variable_time_warm_start_transcription_optimizor import (
     VariableTimeWarmStartTranscriptionOptimizor,
@@ -103,7 +104,7 @@ class OptimizationBackend:
                 target_state,
             )
 
-        return {
+        result = {
             "ok": True,
             "finalTimeS": float(final_time),
             "nSegments": n_segments,
@@ -115,6 +116,22 @@ class OptimizationBackend:
             ],
             "states": format_node_states(node_state, initial_state.m, aircraft.code),
         }
+
+        # Roll the controls forward once to produce a CZML the frontend plays on
+        # Cesium's own clock (like a downloaded trajectory) plus a dense sample
+        # series for the live readout.  Kept separate from the solve so it can be
+        # stubbed in tests via ``build_optimized_trajectory_playback``.
+        playback = build_optimized_trajectory_playback(
+            optimizer_name,
+            initial_state,
+            node_control,
+            float(final_time),
+            aircraft,
+        )
+        if playback is not None:
+            result["playback"] = playback
+
+        return result
 
     def make_optimizer(
         self,
