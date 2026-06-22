@@ -141,6 +141,13 @@ export function useCesiumViewer(
       infoBox: false,
       animation: true,
       timeline: true,
+      // The CZML loaders fully configure viewer.clock themselves (start/stop/
+      // range/multiplier). Leaving Cesium's automatic tracking on lets it copy
+      // the data source's clock — including its hardcoded range — back into
+      // viewer.clock when a data source is added and on its first changedEvent,
+      // which silently overrides our auto-replay (clockRange) setting on every
+      // fresh trajectory load. We own the clock, so turn auto-tracking off.
+      automaticallyTrackDataSourceClocks: false,
       skyAtmosphere: new Cesium.SkyAtmosphere(),
     });
     // const viewer = null as unknown as Cesium.Viewer; // ← replace this line
