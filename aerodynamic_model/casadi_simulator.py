@@ -225,10 +225,15 @@ def make_geo_step_from_enu_integrator():
 # ---------------
 # ``make_dynamics_model`` integrates in a flat ENU tangent plane, and
 # ``make_geo_step_from_enu_integrator`` re-anchors that plane every RK4 step
-# so the integration always sees a fresh local-tangent frame.  That
-# re-anchoring is a *discrete jump* of the coordinate frame; it cannot be
-# embedded in a direct-collocation defect, which assumes ONE continuous,
-# differentiable RHS ``xdot = f(x, u)`` over the whole horizon.
+# so the integration always sees a fresh local-tangent frame.  Because that
+# stepper is a *discrete* one-step map ``Phi(x, u, h)`` rather than a
+# continuous RHS, it cannot be embedded in a *polynomial collocation* defect
+# (trapezoidal / Hermite-Simpson evaluate ``f`` and fit a polynomial — they
+# need the RHS, not a stepper).  It CAN be used as a *shooting* defect
+# (``x_{k+1} - Phi(x_k, u_k, h) = 0``); the optimiser exposes exactly that as
+# the ``reanchoredEnu`` scheme.  The continuous model below is what unlocks
+# the polynomial schemes AND lets a plain RK4 of one smooth RHS reproduce the
+# re-anchored stepper's continuous limit.
 #
 # This model removes the need for any tangent plane at all: it writes the
 # point-mass kinematics *directly* in geodetic coordinates ``(lat, lon, h)``.

@@ -182,7 +182,16 @@
   <li>👎 <b>最贵</b>:RK4 的链式法则让约束雅可比最稠密,求解最慢;它是"打靶式"(显式积分)而非多项式配点。</li>
 </ul>
 <div class="callout intuition">
-  🔧 <b>HS 与 RK4 的真正区别不是阶数(都是 4 阶),而是"构造方式"。</b> HS 是隐式的多项式<strong>配点</strong>(便宜、是默认);RK4 是显式的积分器<strong>打靶</strong>(贵,但与回放逐字节一致)。下一节用斜率把"都是 4 阶"这件事看个明白。
+  🔧 <b>HS 与 RK4 的真正区别不是阶数(都是 4 阶),而是"构造方式"。</b> HS 是隐式的多项式<strong>配点</strong>(便宜、是默认);RK4 是显式的积分器<strong>打靶</strong>(贵,但跑的是和回放同一个连续场)。下一节用斜率把"都是 4 阶"这件事看个明白。
+</div>
+
+<h3><span class="chip rk4" style="background:#ede9fe;color:#7c3aed;">④ 进阶 · Re-anchored ENU</span> 干脆用回放那台积分器(打靶,4 阶)</h3>
+<p>前三种都建立在<strong>连续测地动力学 \(f\)</strong> 上。但前端"播放轨迹"用的其实是另一台积分器:<strong>重锚 ENU 步进器</strong>(每步在当前点重建一个本地切平面、在里面 RK4、再转回经纬度)。RK4-on-\(f\) 和它只差亚毫米(测地 vs ENU 模型差),但毕竟不是同一台。</p>
+<p>于是有第四种格式 <code>reanchoredEnu</code>:直接把<strong>那台 ENU 步进器</strong>当 defect(\(x_{k+1}-\Phi_\text{ENU}(x_k,u_k,h)=0\))。它和回放用的<strong>是同一个矢量场</strong>,没有"测地 vs ENU"的模型缝隙。</p>
+<div class="callout warn">
+  ⚠️ <b>注意两点,别误解。</b><br/>
+  ① 它<strong>不是多项式配点</strong>——步进器是离散映射,不是连续 \(f\),所以梯形/HS 那种"拟合多项式"对它无效。它是<strong>打靶式 defect</strong>(和 RK4 同属一类),只是仍待在同一个稠密状态的直接转写框架里(状态节点是决策变量、每小段一条 defect)。<br/>
+  ② "同一个模型"≠"逐字节一致":defect 在每小段只走<strong>一大步</strong>(\(h=\) 状态步长),而回放走的是<strong>很多小步</strong>。这个步长差仍在,所以实测它和回放的吻合度与 RK4 一个量级(米级),并非魔法归零。它消除的是<strong>模型</strong>缝隙,不是<strong>离散</strong>缝隙。
 </div>
 
 <!-- ───────────────────────────── 5 ───────────────────────────── -->
@@ -229,11 +238,12 @@
 
 <!-- ───────────────────────────── 7 ───────────────────────────── -->
 <h2 id="use"><span class="eyebrow">第 7 节 · 上手</span>在本项目里怎么选、怎么跑</h2>
-<p><b>前端(Pilot · Trajectory Play)</b>:优化器下拉框现在直接列出三种拟合方程的直接配点变体——</p>
+<p><b>前端(Pilot · Trajectory Play)</b>:优化器下拉框现在直接列出这些直接转写变体——</p>
 <ul>
   <li><span class="chip hs">Hermite-Simpson(默认)</span> 日常首选,性价比最高。</li>
   <li><span class="chip trap">Trapezoidal(线性)</span> 想要最快、最稳的求解,或教学对比时用;注意精度低,必要时把段数调高。</li>
-  <li><span class="chip rk4">RK4(四阶)</span> 想要"解出来即与回放逐字节一致"时用;最慢。</li>
+  <li><span class="chip rk4">RK4(四阶)</span> 想要打靶式、和回放同一连续场时用;较慢。</li>
+  <li><span class="chip rk4" style="background:#ede9fe;color:#7c3aed;">Re-anchored ENU</span> 想完全贴合回放的 ENU 模型(无模型缝隙)时用;打靶式,最贵。</li>
 </ul>
 <p><b>命令行对比</b>(打印上面那张真实对比表):</p>
 <pre>cd 4dTrajectory/optimization
@@ -241,7 +251,7 @@ python -m collocation_scheme_comparison --aircraft A320 --horizon 90
 python -m collocation_scheme_comparison --aircraft C172 --horizon 60</pre>
 <p><b>代码位置</b>:</p>
 <ul>
-  <li>三种缺陷方程 + 注册表:<code>4dTrajectory/optimization/casadi_direct_collocation_optimizer.py</code>(<code>trapezoidal_defect_expr</code> / <code>hermite_simpson_defect_expr</code> / <code>rk4_defect_expr</code>,以及 <code>_DEFECT_SCHEMES</code>)。构造器参数 <code>collocation_scheme</code>。</li>
+  <li>四种缺陷方程 + 注册表:<code>4dTrajectory/optimization/casadi_direct_collocation_optimizer.py</code>(<code>trapezoidal_defect_expr</code> / <code>hermite_simpson_defect_expr</code> / <code>rk4_defect_expr</code> / <code>reanchored_enu_defect_expr</code>,以及 <code>_DEFECT_SCHEMES</code> 里的 <code>(defect_fn, dynamics_kind)</code>)。构造器参数 <code>collocation_scheme</code>。</li>
   <li>后端按名字派发:<code>aeroviz_backend/optimization_backend.py</code>(<code>DIRECT_COLLOCATION_SCHEMES</code>)。</li>
   <li>对比测试:<code>4dTrajectory/optimization/tests/test_casadi_direct_collocation_optimizer.py</code>(<code>test_collocation_schemes_form_an_accuracy_ladder</code> 等)。</li>
 </ul>
@@ -256,7 +266,7 @@ python -m collocation_scheme_comparison --aircraft C172 --horizon 60</pre>
 </div>
 
 <script>
-// ───────────── 玩具 ODE 与三种格式(与 Python 实现一致)─────────────
+// ───────────── 玩具 ODE 与各格式(与 Python 实现一致)─────────────
 const f = (y) => -y * y;          // y' = -y^2
 const exact = (t) => 1 / (1 + t); // y(0)=1
 const Y0 = 1.0;

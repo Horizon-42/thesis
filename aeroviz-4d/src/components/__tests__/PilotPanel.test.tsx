@@ -444,6 +444,7 @@ describe("PilotPanel trajectory play mode", () => {
     for (const scheme of [
       "casadiDirectCollocationTrapezoidal",
       "casadiDirectCollocationRk4",
+      "casadiDirectCollocationReanchoredEnu",
       "casadiDirectCollocation",
     ]) {
       fireEvent.change(optimizerSelect, { target: { value: scheme } });

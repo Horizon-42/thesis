@@ -6,11 +6,16 @@ The optimiser (``casadi_direct_collocation_optimizer``) supports three defect
     trapezoidal     – state piecewise-linear, 2nd order, cheapest
     hermiteSimpson  – state cubic (Simpson rule), 4th order, the default
     rk4             – RK4 integral defect, 4th order, playback-consistent
+    reanchoredEnu   – re-anchored ENU RK4 step (the exact playback model), 4th
 
-hermiteSimpson and rk4 share the same convergence ORDER (4); they differ in
-construction — HS is an implicit polynomial collocation, rk4 is an explicit
-shooting/integrator defect (so an rk4 solution matches the playback RK4 by
-construction). Trapezoidal is the only lower-order (2nd) scheme.
+trapezoidal/hermiteSimpson/rk4 collocate the continuous geodetic RHS; the last
+two are shooting/integrator defects.  reanchoredEnu instead uses the discrete
+re-anchored-ENU one-step map the frontend playback runs, so it matches the
+playback's vector field exactly (no geodetic-vs-ENU model gap).  Here we replay
+every scheme through a common fine GEODETIC integrator, so reanchoredEnu shows a
+slightly larger residual than HS/rk4 (it is tuned to the ENU model, not this
+geodetic reference) — its consistency with the ENU playback is checked in the
+test suite instead.
 
 This script solves the SAME feasible problem with each scheme and reports how
 well the returned controls, when replayed through a fine integrator, land on
@@ -53,7 +58,7 @@ from casadi_direct_collocation_optimizer import (  # noqa: E402
 )
 
 _AIRCRAFT = {"A320": A320, "C172": C172}
-_SCHEMES = ["trapezoidal", "hermiteSimpson", "rk4"]
+_SCHEMES = list(_DEFECT_SCHEMES)  # trapezoidal, hermiteSimpson, rk4, reanchoredEnu
 _R = 6_371_000.0
 
 
@@ -123,7 +128,7 @@ def main(argv=None) -> int:
           f"{'PLAYBACK→tgt[m]':>17}{'replay min-alt[m]':>19}")
     print("  " + "-" * 82)
 
-    orders = {"trapezoidal": 2, "hermiteSimpson": 4, "rk4": 4}
+    orders = {"trapezoidal": 2, "hermiteSimpson": 4, "rk4": 4, "reanchoredEnu": 4}
     for scheme in _SCHEMES:
         opt = CasadiDirectCollocationOptimizer(
             n_segments=args.n_segments, dt=0.2, max_duration=args.horizon * 1.6,

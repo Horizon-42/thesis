@@ -1149,6 +1149,7 @@ export default function PilotPanel() {
                 <option value="casadiDirectCollocation">Direct collocation · Hermite-Simpson (default, 4th order)</option>
                 <option value="casadiDirectCollocationTrapezoidal">Direct collocation · Trapezoidal (linear, 2nd order)</option>
                 <option value="casadiDirectCollocationRk4">Direct collocation · RK4 (4th order)</option>
+                <option value="casadiDirectCollocationReanchoredEnu">Direct collocation · Re-anchored ENU (shooting, playback model)</option>
               </select>
             </label>
             <label>

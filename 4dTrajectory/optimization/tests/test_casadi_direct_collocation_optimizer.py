@@ -608,7 +608,9 @@ def _propagate_with_geodetic_rhs(
 
 def test_defect_scheme_registry_lists_three_schemes():
     module = load_module()
-    assert set(module._DEFECT_SCHEMES) == {"trapezoidal", "hermiteSimpson", "rk4"}
+    assert set(module._DEFECT_SCHEMES) == {
+        "trapezoidal", "hermiteSimpson", "rk4", "reanchoredEnu",
+    }
     # The bare optimiser keeps Hermite-Simpson for backward compatibility.
     assert module._DEFAULT_SCHEME == "hermiteSimpson"
 
@@ -638,6 +640,22 @@ def test_unknown_collocation_scheme_raises():
             n_segments=10, dt=0.2, max_duration=120.0, aircraft=C172,
             collocation_scheme="quartic",
         )
+
+
+def test_solver_backend_validation_and_default():
+    module = load_module()
+    assert module._DEFAULT_SOLVER_BACKEND == "ipopt"
+    assert set(module._SOLVER_BACKENDS) == {"ipopt", "sqpmethod"}
+    with pytest.raises(ValueError, match="unknown solver_backend"):
+        module.CasadiDirectCollocationOptimizer(
+            n_segments=10, dt=0.2, max_duration=120.0, aircraft=C172,
+            solver_backend="lbfgs",
+        )
+    # The default optimiser records ipopt as its backend.
+    opt = module.CasadiDirectCollocationOptimizer(
+        n_segments=4, dt=0.2, max_duration=30.0, aircraft=C172,
+    )
+    assert opt.solver_backend == "ipopt"
 
 
 def _replay_geodetic_horiz_miss(aircraft, init, controls, horizon):
@@ -727,3 +745,63 @@ def test_collocation_schemes_form_an_accuracy_ladder():
     assert hs_pb < 2.0
     assert rk4_pb < 2.0
     assert trap_pb > hs_pb
+
+
+def test_reanchored_enu_scheme_is_consistent_with_the_enu_playback():
+    """The ``reanchoredEnu`` defect IS the re-anchored ENU one-step map the
+    frontend playback (``CasadiSimulator``) runs, so a solution replayed
+    through that exact simulator lands on the target with a small miss
+    (no geodetic-vs-ENU model gap; only the step-size discretisation remains)."""
+    from aerodynamic_model.aircraft_sets import A320
+    from aerodynamic_model.casadi_simulator import (
+        AeroParams, CasadiSimulator, make_geodetic_step_integrator,
+    )
+    from aerodynamic_model.common import LoadFactorControl
+
+    module = load_module()
+    n_segments = 10
+    horizon = 90.0
+    init = GeodeticState(35.60, -78.50, 1500.0, 90.0,
+                         math.radians(40.0), math.radians(-3.0), A320.mass_kg)
+
+    ap = AeroParams(S=A320.wing_area_m2)
+    aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
+    gstep = make_geodetic_step_integrator(include_transport=True)["step_func"]
+    u = ca.DM([A320.approach_thrust_guess_n, 0.0, 1.0])
+    xp = ca.DM([init.latitude, init.longitude, init.altitude,
+                init.V, init.psi, init.gamma, init.m])
+    for _ in range(int(horizon / 0.05)):
+        xp = gstep(x_geo=xp, u=u, aero_params=aero, dt=0.05)["x_geo_next"]
+    tp = np.array(xp).reshape(-1)
+    target = GeodeticState(tp[0], tp[1], tp[2], tp[3], tp[4], tp[5], A320.mass_kg)
+
+    opt = module.CasadiDirectCollocationOptimizer(
+        n_segments=n_segments, dt=0.2, max_duration=horizon * 1.6,
+        aircraft=A320, collocation_scheme="reanchoredEnu",
+    )
+    assert opt.collocation_scheme == "reanchoredEnu"
+    final_time, controls, states = opt.optimize_trajectory(init, target, duration=horizon)
+    assert controls.shape == (n_segments, 3)
+    assert states.shape == (n_segments, 6)
+
+    # Replay through the exact ENU stepper the playback uses.
+    sim = CasadiSimulator(aircraft=A320, dt=0.2)
+    s = init
+    seg = final_time / n_segments
+    for k in range(n_segments):
+        cu = LoadFactorControl(thrust=float(controls[k, 0]),
+                               bank_rad=float(controls[k, 1]),
+                               load_factor=float(controls[k, 2]))
+        remaining = seg
+        while remaining > 1e-9:
+            dt = min(0.2, remaining)
+            s = sim.step(s, cu, dt)
+            remaining -= dt
+
+    R = 6_371_000.0
+    horiz = R * math.hypot(
+        math.radians(s.latitude - target.latitude),
+        math.radians(s.longitude - target.longitude) * math.cos(math.radians(target.latitude)),
+    )
+    assert horiz < 5.0
+    assert abs(s.altitude - target.altitude) < 5.0

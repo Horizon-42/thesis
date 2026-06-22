@@ -7,6 +7,7 @@ export type TrajectoryOptimizer =
   | "casadiDirectCollocationTrapezoidal"
   | "casadiDirectCollocationHermiteSimpson"
   | "casadiDirectCollocationRk4"
+  | "casadiDirectCollocationReanchoredEnu"
   // Legacy optimizers: still served by the backend, no longer offered in
   // the UI (kept here so a response naming one still parses).
   | "casadiIpopt"
@@ -175,6 +176,7 @@ function readOptimizer(value: Record<string, unknown>): TrajectoryOptimizer {
     nested === "casadiDirectCollocationTrapezoidal" ||
     nested === "casadiDirectCollocationHermiteSimpson" ||
     nested === "casadiDirectCollocationRk4" ||
+    nested === "casadiDirectCollocationReanchoredEnu" ||
     nested === "casadiIpopt" ||
     nested === "transcription" ||
     nested === "leastSquaresTranscription" ||

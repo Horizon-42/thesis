@@ -48,6 +48,7 @@ DIRECT_COLLOCATION_SCHEMES = {
     "casadiDirectCollocationTrapezoidal": "trapezoidal",
     "casadiDirectCollocationHermiteSimpson": "hermiteSimpson",
     "casadiDirectCollocationRk4": "rk4",
+    "casadiDirectCollocationReanchoredEnu": "reanchoredEnu",
 }
 SUPPORTED_OPTIMIZERS = (
     *DIRECT_COLLOCATION_SCHEMES,

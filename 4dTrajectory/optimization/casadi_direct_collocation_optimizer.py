@@ -61,6 +61,7 @@ import numpy as np
 
 from aerodynamic_model.casadi_simulator import (
     make_geodetic_dynamics_model,
+    make_geo_step_from_enu_integrator,
     rk4_step_expr,
     AeroParams,
 )
@@ -82,6 +83,10 @@ _LAT, _LON, _ALT, _V, _PSI, _GAMMA = range(6)
 
 def radians_expr(degrees):
     return degrees * ca.pi / 180.0
+
+
+def degrees_expr(radians):
+    return radians * 180.0 / ca.pi
 
 
 # --------------------------------------------------------------------------
@@ -140,16 +145,80 @@ def rk4_defect_expr(rhs_func, x_k, x_kp1, u_k, aero_params, h):
     return x_kp1 - rk4_step_expr(rhs_func, x_k, u_k, aero_params, h)
 
 
-# Selectable defect "fitting equations", in increasing order of accuracy:
-#   trapezoidal    – linear state,  2nd order, cheapest
-#   hermiteSimpson – cubic state,   3rd order, default
-#   rk4            – RK4 integral,  4th order, playback-consistent, densest
+def reanchored_enu_defect_expr(step_func, x_k, x_kp1, u_k, aero_params, h):
+    """Shooting defect built on the re-anchored ENU one-step integrator
+    (``make_geo_step_from_enu_integrator``) — the SAME discrete operator the
+    frontend playback runs.
+
+    Unlike the other three, the "dynamics" here is not a continuous RHS but a
+    discrete step map ``Φ(x,u,h)`` (one RK4 step in a freshly anchored ENU
+    tangent frame, converted back to geodetic).  So this is a *multiple-
+    shooting* defect, not a polynomial collocation — the trapezoidal/Hermite
+    fits cannot be built from a stepper.  It still lives in the same dense-
+    state direct transcription (state nodes are decision variables, one defect
+    per sub-interval), and it matches the playback's vector field exactly
+    (no geodetic-vs-ENU model gap), at the cost of a denser, slower NLP.
+
+    The optimiser carries lat/lon in radians; the ENU stepper expects degrees,
+    so convert on the way in and back out.
+    """
+    x_k_deg = ca.vertcat(degrees_expr(x_k[0]), degrees_expr(x_k[1]), x_k[2:])
+    x_next_deg = step_func(x_k_deg, u_k, aero_params, h)
+    x_next = ca.vertcat(radians_expr(x_next_deg[0]), radians_expr(x_next_deg[1]), x_next_deg[2:])
+    return x_kp1 - x_next
+
+
+# Selectable defect "fitting equations" as ``(defect_fn, dynamics_kind)``.
+# ``dynamics_kind`` decides what callable the defect_fn's first argument is:
+#   "continuous" -> the geodetic RHS f(x,u,p)        (trapezoidal / HS / rk4)
+#   "enuStep"    -> the re-anchored ENU step Φ(x,u,h) (reanchoredEnu)
+# Accuracy/ cost ladder:
+#   trapezoidal    – linear state,   2nd order, cheapest
+#   hermiteSimpson – cubic state,    4th order, default (Simpson rule)
+#   rk4            – RK4 integral,    4th order, playback-consistent, dense
+#   reanchoredEnu  – ENU RK4 step,   4th order, exact playback vector field
 _DEFECT_SCHEMES = {
-    "trapezoidal": trapezoidal_defect_expr,
-    "hermiteSimpson": hermite_simpson_defect_expr,
-    "rk4": rk4_defect_expr,
+    "trapezoidal":    (trapezoidal_defect_expr,    "continuous"),
+    "hermiteSimpson": (hermite_simpson_defect_expr, "continuous"),
+    "rk4":            (rk4_defect_expr,             "continuous"),
+    "reanchoredEnu":  (reanchored_enu_defect_expr,  "enuStep"),
 }
 _DEFAULT_SCHEME = "hermiteSimpson"
+
+
+def _make_scheme_dynamics(dynamics_kind):
+    """Build the dynamics callable a scheme's defect_fn expects (see
+    ``_DEFECT_SCHEMES``)."""
+    if dynamics_kind == "enuStep":
+        return make_geo_step_from_enu_integrator()["step_func"]
+    return make_geodetic_dynamics_model()["rhs_func"]
+
+
+# Selectable NLP solver backend.  ``ipopt`` (interior point) is the robust
+# default; ``sqpmethod`` (SQP + active-set QP) can be faster on benign /
+# warm-started solves but is less robust on hard cold starts.
+_SOLVER_BACKENDS = ("ipopt", "sqpmethod")
+_DEFAULT_SOLVER_BACKEND = "ipopt"
+
+
+def _make_nlp_solver(nlp, solver_backend):
+    """Build the NLP solver for the chosen backend (see ``_SOLVER_BACKENDS``).
+
+    The exact Hessian of the point-mass dynamics is nonconvex, so the SQP
+    backend regularises it (``convexify_strategy``) to keep its QP subproblem
+    solvable, and tells the QP not to throw on a failed subproblem.
+    """
+    if solver_backend == "sqpmethod":
+        return ca.nlpsol('solver', 'sqpmethod', nlp, {
+            'qpsol': 'qpoases',
+            'qpsol_options': {'printLevel': 'none', 'error_on_fail': False},
+            'convexify_strategy': 'regularize',
+            'max_iter': 100,
+            'print_iteration': False,
+            'print_header': False,
+            'print_time': False,
+        })
+    return ca.nlpsol('solver', 'ipopt', nlp)
 
 
 # --------------------------------------------------------------------------
@@ -273,10 +342,14 @@ def select_state_substeps(max_duration: float, segment_num: int) -> int:
 
 
 def _build_collocation_decision(
-    rhs_func, aero_params, start_state, target_state,
+    dynamics, aero_params, start_state, target_state,
     segment_h, segment_num, sub_steps, defect_fn,
 ):
     """Build controls, state nodes and defects for the dense-state NLP.
+
+    ``dynamics`` is the scheme's dynamics callable (a continuous RHS for the
+    polynomial schemes, or a one-step integrator for the shooting schemes);
+    it is handed verbatim to ``defect_fn``.
 
     Returns ``(seg_controls, state_nodes, defects)``: ``seg_controls`` has
     ``segment_num`` 3-vectors, ``state_nodes`` has ``segment_num*sub_steps``
@@ -302,7 +375,7 @@ def _build_collocation_decision(
             # component to keep the constraint Jacobian rectangular.
             defects.append(
                 defect_fn(
-                    rhs_func, x_prev_full, x_next_full, uk, aero_params, state_h,
+                    dynamics, x_prev_full, x_next_full, uk, aero_params, state_h,
                 )[:STATE_DIM]
             )
             x_prev = xnode
@@ -394,6 +467,7 @@ def make_direct_collocation_solver(
     max_terminal_bank_deg: float = _DEFAULT_MAX_TERMINAL_BANK_DEG,
     smoothness_weights: tuple = _DEFAULT_SMOOTHNESS_WEIGHTS,
     collocation_scheme: str = _DEFAULT_SCHEME,
+    solver_backend: str = _DEFAULT_SOLVER_BACKEND,
 ):
     """Build the fixed-time NLP symbolically with the chosen defect scheme.
 
@@ -406,10 +480,12 @@ def make_direct_collocation_solver(
     ``max_terminal_bank_deg`` — a pure state constraint (see
     ``terminal_bank_constraint_expr``).
     """
-    # 1. Continuous geodetic RHS reused from the simulator.  There is
-    # no second dynamics model to keep in sync, and no tangent plane.
-    model = make_geodetic_dynamics_model()
-    rhs_func = model['rhs_func']
+    # 1. Dynamics for the chosen scheme: a continuous geodetic RHS for the
+    # polynomial schemes, or the re-anchored ENU one-step integrator for the
+    # shooting scheme.  Either way there is one source, no tangent plane to
+    # carry around the NLP.
+    defect_fn, dynamics_kind = _DEFECT_SCHEMES[collocation_scheme]
+    dynamics = _make_scheme_dynamics(dynamics_kind)
 
     # 2. Symbolic parameters (lat/lon in radians).
     start_state = ca.SX.sym('start_state', 7)   # lat, lon, h, V, psi, gamma, m
@@ -431,8 +507,8 @@ def make_direct_collocation_solver(
 
     # 4. Decision variables + defects: N controls, N*sub_steps state nodes.
     seg_controls, state_nodes, defects = _build_collocation_decision(
-        rhs_func, aero_params, start_state, target_state,
-        segment_h, segment_num, sub_steps, _DEFECT_SCHEMES[collocation_scheme],
+        dynamics, aero_params, start_state, target_state,
+        segment_h, segment_num, sub_steps, defect_fn,
     )
 
     # 5. Bounds.  Identical envelope to ``casadi_optimizer.py`` so the
@@ -476,7 +552,7 @@ def make_direct_collocation_solver(
         'g': g,
         'p': ca.vertcat(start_state, target_state, duration),
     }
-    solver = ca.nlpsol('solver', 'ipopt', nlp)
+    solver = _make_nlp_solver(nlp, solver_backend)
     return solver, lbw, ubw, lbg, ubg
 
 
@@ -506,6 +582,7 @@ def make_direct_collocation_solver_free_time(
     max_terminal_bank_deg: float = _DEFAULT_MAX_TERMINAL_BANK_DEG,
     smoothness_weights: tuple = _DEFAULT_SMOOTHNESS_WEIGHTS,
     collocation_scheme: str = _DEFAULT_SCHEME,
+    solver_backend: str = _DEFAULT_SOLVER_BACKEND,
 ):
     """Build the free-final-time NLP with ``T`` as a decision variable.
 
@@ -518,9 +595,9 @@ def make_direct_collocation_solver_free_time(
     builder; here ``state_h`` depends on the decision variable ``T``, which
     IPOPT differentiates through.
     """
-    # 1. Same continuous geodetic RHS as the fixed-time NLP.
-    model = make_geodetic_dynamics_model()
-    rhs_func = model['rhs_func']
+    # 1. Same per-scheme dynamics resolution as the fixed-time NLP.
+    defect_fn, dynamics_kind = _DEFECT_SCHEMES[collocation_scheme]
+    dynamics = _make_scheme_dynamics(dynamics_kind)
 
     # 2. Symbolic parameters.  ``max_duration`` is the upper bound for
     # the decision-variable duration and is also the scale factor used
@@ -546,8 +623,8 @@ def make_direct_collocation_solver_free_time(
     # 4. Decision variables + defects: N controls, N*sub_steps state nodes,
     # then T appended last so we can slice it out of ``sol['x']`` cleanly.
     seg_controls, state_nodes, defects = _build_collocation_decision(
-        rhs_func, aero_params, start_state, target_state,
-        segment_h, segment_num, sub_steps, _DEFECT_SCHEMES[collocation_scheme],
+        dynamics, aero_params, start_state, target_state,
+        segment_h, segment_num, sub_steps, defect_fn,
     )
 
     # 5. Bounds.
@@ -598,7 +675,7 @@ def make_direct_collocation_solver_free_time(
         'g': g,
         'p': ca.vertcat(start_state, target_state, max_duration),
     }
-    solver = ca.nlpsol('solver', 'ipopt', nlp)
+    solver = _make_nlp_solver(nlp, solver_backend)
     return solver, lbw, ubw, lbg, ubg
 
 
@@ -622,6 +699,7 @@ class CasadiDirectCollocationOptimizer:
         max_terminal_bank_deg: float = _DEFAULT_MAX_TERMINAL_BANK_DEG,
         smoothness_weights: tuple = _DEFAULT_SMOOTHNESS_WEIGHTS,
         collocation_scheme: str = _DEFAULT_SCHEME,
+        solver_backend: str = _DEFAULT_SOLVER_BACKEND,
     ):
         if n_segments < 2:
             raise ValueError("n_segments must be at least 2 for direct collocation")
@@ -630,9 +708,16 @@ class CasadiDirectCollocationOptimizer:
                 f"unknown collocation_scheme {collocation_scheme!r}; "
                 f"choose from {sorted(_DEFECT_SCHEMES)}"
             )
+        if solver_backend not in _SOLVER_BACKENDS:
+            raise ValueError(
+                f"unknown solver_backend {solver_backend!r}; "
+                f"choose from {list(_SOLVER_BACKENDS)}"
+            )
         self.n_segments = n_segments
-        # Defect "fitting equation": trapezoidal / hermiteSimpson / rk4.
+        # Defect "fitting equation": trapezoidal / hermiteSimpson / rk4 / reanchoredEnu.
         self.collocation_scheme = collocation_scheme
+        # NLP solver backend: ipopt (default) or sqpmethod.
+        self.solver_backend = solver_backend
         # Keep the realised bank at the terminal node below this angle (a
         # pure state constraint).
         self.max_terminal_bank_deg = max_terminal_bank_deg
@@ -672,6 +757,7 @@ class CasadiDirectCollocationOptimizer:
                 max_terminal_bank_deg=max_terminal_bank_deg,
                 smoothness_weights=smoothness_weights,
                 collocation_scheme=collocation_scheme,
+                solver_backend=solver_backend,
             )
         )
 
@@ -693,6 +779,7 @@ class CasadiDirectCollocationOptimizer:
             max_terminal_bank_deg=max_terminal_bank_deg,
             smoothness_weights=smoothness_weights,
             collocation_scheme=collocation_scheme,
+            solver_backend=solver_backend,
         )
 
     # ------------------------------------------------------------------
