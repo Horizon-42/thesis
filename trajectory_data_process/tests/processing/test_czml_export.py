@@ -83,6 +83,22 @@ class CzmlExportTests(unittest.TestCase):
         self.assertEqual(flight["runway"], "23R")
         self.assertTrue(flight["landing_time_utc"].endswith("Z"))
 
+    def test_landing_only_rejects_high_overflight(self) -> None:
+        # A jet descending at altitude that merely clips the threshold laterally
+        # (aligned heading, prior descent) must not count as a landing.
+        coords = [(0, 35.95, 9000.0), (30, 35.92, 8500.0), (60, AIRPORT_LAT, 8000.0)]
+        points = [TrajectoryPoint(t, lat, AIRPORT_LON, geo, geo + 20, 225.0, False) for t, lat, geo in coords]
+        overflight = Trajectory(
+            icao24="ovf1", callsign="OVF1", dep_airport=None, arr_airport=None, points=points
+        )
+
+        flight = trajectory_to_czml_flight(
+            overflight, airport_lat=AIRPORT_LAT, airport_lon=AIRPORT_LON,
+            runway_threshold=THRESHOLD, landing_only=True,
+        )
+
+        self.assertIsNone(flight)
+
     def test_landing_only_rejects_departure(self) -> None:
         flight = trajectory_to_czml_flight(
             _departure_trajectory(), airport_lat=AIRPORT_LAT, airport_lon=AIRPORT_LON,

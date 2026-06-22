@@ -36,6 +36,7 @@ def trajectory_to_czml_flight(
     landing_only: bool = False,
     descent_margin_m: float = 300.0,
     heading_tolerance_deg: float = 35.0,
+    landing_max_agl_m: float = 1500.0,
 ) -> dict[str, Any] | None:
     """Convert one trajectory to a CZML-input flight, or ``None`` if it is not a
     relevant arrival at the airport (or the requested runway threshold).
@@ -71,7 +72,9 @@ def trajectory_to_czml_flight(
     if landing_only:
         if runway_threshold is None:
             raise ValueError("landing_only requires a runway_threshold")
-        if not _is_landing(points, anchor_index, runway_threshold, descent_margin_m, heading_tolerance_deg):
+        if not _is_landing(
+            points, anchor_index, runway_threshold, descent_margin_m, heading_tolerance_deg, landing_max_agl_m
+        ):
             return None
 
     window = _approach_window(points, anchor_index, approach_window_min)
@@ -111,6 +114,7 @@ def trajectories_to_czml_input(
     runway_threshold: RunwayThreshold | None = None,
     runway_threshold_radius_m: float = 1000.0,
     landing_only: bool = False,
+    landing_max_agl_m: float = 1500.0,
     max_flights: int = 80,
 ) -> list[dict[str, Any]]:
     """Convert trajectories to CZML-input flights with unique ids."""
@@ -120,6 +124,7 @@ def trajectories_to_czml_input(
         flight = trajectory_to_czml_flight(
             traj,
             landing_only=landing_only,
+            landing_max_agl_m=landing_max_agl_m,
             airport_lat=airport_lat,
             airport_lon=airport_lon,
             match_radius_km=match_radius_km,
@@ -190,15 +195,25 @@ def _is_landing(
     threshold: RunwayThreshold,
     descent_margin_m: float,
     heading_tolerance_deg: float,
+    max_agl_m: float,
 ) -> bool:
-    """True if the trajectory descends toward the threshold along the runway heading.
+    """True if the trajectory descends to near the threshold along the runway heading.
 
-    The anchor is the closest point to the threshold (already within range). A
-    landing tracks the runway heading there and has descended at least
-    ``descent_margin_m`` from earlier in the track — which rejects the opposite
-    runway end (heading ~180 deg off) and climbing departures (no prior descent).
+    The anchor is the closest point to the threshold (already within lateral range). A
+    landing (a) reaches it below ``max_agl_m`` above the threshold — so high overflights
+    that merely clip the threshold laterally are rejected — (b) tracks the runway
+    heading there (rejecting the opposite end), and (c) has descended at least
+    ``descent_margin_m`` from earlier in the track (rejecting climbing departures).
+
+    ``max_agl_m`` is deliberately generous (not a touchdown altitude): low-altitude
+    ADS-B coverage near runways is sparse, so a real approach's closest tracked point
+    may still be a few hundred to a couple thousand feet up.
     """
     anchor = points[anchor_index]
+    anchor_geo = anchor.geo_altitude_m
+    if anchor_geo is None or anchor_geo - threshold.elevation_m > max_agl_m:
+        return False
+
     if (
         threshold.heading_deg is not None
         and anchor.heading_deg is not None
@@ -206,9 +221,6 @@ def _is_landing(
     ):
         return False
 
-    anchor_geo = anchor.geo_altitude_m
-    if anchor_geo is None:
-        return False
     earlier = [points[i].geo_altitude_m for i in range(anchor_index) if points[i].geo_altitude_m is not None]
     return bool(earlier) and max(earlier) - anchor_geo >= descent_margin_m
 

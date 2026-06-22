@@ -175,9 +175,11 @@ a runway (tracks typically end a few hundred feet up on short final).
 #### What is selected and where each track starts/ends
 
 - **Selection (a landing at runway R):** the trajectory's closest point to R's threshold
-  is within `--runway-threshold-radius-m` (default 1000 m), the heading there is aligned
-  with R's runway heading (±35°), and the aircraft has descended ≥300 m from earlier in
-  the track. This excludes the opposite runway end and climbing departures.
+  is (a) within `--runway-threshold-radius-m` (default 1000 m) laterally, (b) **below a
+  generous AGL ceiling** (1500 m above the threshold) so high overflights that merely
+  clip the threshold are rejected, (c) tracking R's runway heading (±35°), and (d) the
+  aircraft has descended ≥300 m from earlier in the track. Together these exclude the
+  opposite runway end, climbing departures, and cruise/descent overflights.
 - **End (anchor):** each saved track ends at the **anchor** = the point closest to the
   threshold. Points *after* it (rollout/taxi) are dropped. In practice the anchor sits a
   few hundred feet up because low-altitude ADS-B coverage is sparse near runways.
