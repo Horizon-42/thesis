@@ -4,6 +4,7 @@ from .casadi_exprs import isa_density_expr, aerodynamic_coefficients_expr
 from .casadi_coordinates_converter import (
     ecef_to_enu_rotation_matrix_expr,
     enu_to_geodetic_expr,
+    geodetic_to_enu_expr,
     WGS84_A,
     WGS84_E2,
 )
@@ -155,6 +156,22 @@ def enu_state_to_geodetic_expr(x_enu, ref_geo):
     gamma_new = ca.atan2(V_up_new, horizontal_V)
     return lat, lon, alt, V_new, psi_new, gamma_new
 
+
+def geodetic_state_to_enu_expr(x_geo, ref_geo):
+    """Forward of ``enu_state_to_geodetic_expr``: a geodetic state
+    ``(lat, lon [deg], alt, V, psi, gamma)`` -> the ENU state
+    ``(east, north, up, V, psi_enu, gamma_enu)`` in the fixed frame anchored at
+    ``ref_geo = (lat, lon [deg], alt)``.  Position by the WGS84 conversion;
+    velocity reprojected (local frame -> ECEF -> ref frame)."""
+    lat, lon, alt = x_geo[0], x_geo[1], x_geo[2]
+    east, north, up = geodetic_to_enu_expr(lat, lon, alt, ref_geo[0], ref_geo[1], ref_geo[2])
+    V_east, V_north, V_up = get_enu_velocity_components_expr(x_geo[3], x_geo[4], x_geo[5])
+    vx, vy, vz = enu_to_ecef_velocity_expr(V_east, V_north, V_up, ca.vertcat(lat, lon, 0.0))
+    Ve_r, Vn_r, Vu_r = ecef_to_enu_velocity_expr(vx, vy, vz, ref_geo)
+    V_r = ca.sqrt(Ve_r**2 + Vn_r**2 + Vu_r**2)
+    horiz = ca.sqrt(Ve_r**2 + Vn_r**2)
+    return east, north, up, V_r, ca.atan2(Vn_r, Ve_r), ca.atan2(Vu_r, horiz)
+
 def rk4_step_expr(rhs_expr, x, u, aero_params, dt):
     k1 = rhs_expr(x, u, aero_params)
     k2 = rhs_expr(x + 0.5 * dt * k1, u, aero_params)
@@ -215,6 +232,15 @@ def make_geo_step_from_enu_integrator():
         "step_func": step_func,
         "enu_model": enu_model,
     }
+
+
+# Note: a FIXED local-ENU tangent frame integrates entirely in ENU and converts
+# geodetic <-> ENU only at the boundary (``geodetic_state_to_enu_expr`` in, then
+# step the flat ``make_dynamics_model`` RHS in ENU, then
+# ``enu_state_to_geodetic_expr`` out).  A per-STEP geo->ENU->geo stepper for it
+# would just round-trip redundantly, so it does not need its own integrator --
+# see ``dynamics_comparison_30km`` (system A) for the boundary-only version, and
+# the ``localEnu`` optimiser scheme, which converts each node for its defect.
 
 
 # ---------------------------------------------------------------------------
@@ -440,7 +466,7 @@ def make_geodetic_step_integrator(include_transport: bool = True):
 
 @dataclass
 class AeroParams:
-    S: float 
+    S: float
     Cl_max: float = 1.5
     Cd0: float = 0.02
     k: float = 0.04
@@ -448,12 +474,29 @@ class AeroParams:
     k_stall: float = 0.1
 
 
+def aero_params_for_aircraft(aircraft: AircraftSpec) -> AeroParams:
+    """AeroParams for an aircraft with a mass-based maximum lift coefficient.
+
+    The single source of truth for the stall model: the optimiser AND the
+    playback (``CasadiSimulator``) must use the SAME ``Cl_max`` or an optimized
+    trajectory will not replay consistently.  Heavier types reach a lower
+    terminal Cl_max; A320/737-class fly ~2.7 with landing flaps deployed.
+    """
+    if aircraft.mass_kg > 100_000.0:
+        cl_max = 2.4
+    elif aircraft.mass_kg >= 30_000.0:   # e.g. A320, 737
+        cl_max = 2.7
+    else:
+        cl_max = 2.2
+    return AeroParams(S=aircraft.wing_area_m2, Cl_max=cl_max)
+
+
 class CasadiSimulator:
     g = 9.81  # gravity (m/s^2)
 
     def __init__(self, aircraft: AircraftSpec, dt: float):
         self.aircraft = aircraft
-        self.aero_params = AeroParams(S=aircraft.wing_area_m2)
+        self.aero_params = aero_params_for_aircraft(aircraft)
         self.geo_step = make_geo_step_from_enu_integrator()["step_func"]
 
     def step(self, state: GeodeticState, control: LoadFactorControl, dt: float) -> GeodeticState:

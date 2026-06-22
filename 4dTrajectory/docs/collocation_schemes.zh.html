@@ -244,6 +244,7 @@
   <li><span class="chip trap">Trapezoidal(线性)</span> 想要最快、最稳的求解,或教学对比时用;注意精度低,必要时把段数调高。</li>
   <li><span class="chip rk4">RK4(四阶)</span> 想要打靶式、和回放同一连续场时用;较慢。</li>
   <li><span class="chip rk4" style="background:#ede9fe;color:#7c3aed;">Re-anchored ENU</span> 想完全贴合回放的 ENU 模型(无模型缝隙)时用;打靶式,最贵。</li>
+  <li><span class="chip rk4" style="background:#f1f5f9;color:#64748b;">Local ENU @ target</span> <strong>固定</strong>切平面(锚在目标)的连续动力学——它和测地一样是连续 RHS,所以<strong>同样可选任意拟合</strong>(梯形/HS/RK4);只是<strong>刻意降级</strong>用于对比,远离目标会漂出上百米,见下面那篇 30&nbsp;km 对比文档,不建议实战用。</li>
 </ul>
 <p><b>命令行对比</b>(打印上面那张真实对比表):</p>
 <pre>cd 4dTrajectory/optimization
@@ -251,7 +252,9 @@ python -m collocation_scheme_comparison --aircraft A320 --horizon 90
 python -m collocation_scheme_comparison --aircraft C172 --horizon 60</pre>
 <p><b>代码位置</b>:</p>
 <ul>
-  <li>四种缺陷方程 + 注册表:<code>4dTrajectory/optimization/casadi_direct_collocation_optimizer.py</code>(<code>trapezoidal_defect_expr</code> / <code>hermite_simpson_defect_expr</code> / <code>rk4_defect_expr</code> / <code>reanchored_enu_defect_expr</code>,以及 <code>_DEFECT_SCHEMES</code> 里的 <code>(defect_fn, dynamics_kind)</code>)。构造器参数 <code>collocation_scheme</code>。</li>
+  <li><strong>动力学 × 拟合</strong>的方案注册表:<code>4dTrajectory/optimization/casadi_direct_collocation_optimizer.py</code> 里 <code>_DEFECT_SCHEMES</code>(每项是 <code>(make_dynamics, make_defect)</code>)。动力学 = 测地 RHS / 固定 local-ENU(连续,任意拟合)/ 重锚 ENU(离散,仅打靶);拟合 = <code>trapezoidal_defect_expr</code> / <code>hermite_simpson_defect_expr</code> / <code>rk4_defect_expr</code>(打靶)。构造器参数 <code>collocation_scheme</code>。</li>
+  <li>失速模型(Cl_max)由 <code>aero_params_for_aircraft</code> 统一提供,优化器与回放(<code>CasadiSimulator</code>)共用,保证优化解能被回放一致复现。</li>
+  <li>30&nbsp;km 四种动力系统误差对比(固定局部 ENU vs 逐点重锚 vs 完整 RHS vs 无 transport):<code>4dTrajectory/docs/dynamics_comparison_30km.zh.html</code>,数据由 <code>dynamics_comparison_30km.py</code> 生成。</li>
   <li>后端按名字派发:<code>aeroviz_backend/optimization_backend.py</code>(<code>DIRECT_COLLOCATION_SCHEMES</code>)。</li>
   <li>对比测试:<code>4dTrajectory/optimization/tests/test_casadi_direct_collocation_optimizer.py</code>(<code>test_collocation_schemes_form_an_accuracy_ladder</code> 等)。</li>
 </ul>

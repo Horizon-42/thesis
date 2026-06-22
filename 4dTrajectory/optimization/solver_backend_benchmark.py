@@ -44,7 +44,7 @@ if str(_OPT_DIR) not in sys.path:
 from aerodynamic_model.aircraft_sets import A320, C172  # noqa: E402
 from aerodynamic_model.common import GeodeticState  # noqa: E402
 from aerodynamic_model.casadi_simulator import (  # noqa: E402
-    AeroParams, make_geodetic_step_integrator,
+    aero_params_for_aircraft, make_geodetic_step_integrator,
 )
 from casadi_direct_collocation_optimizer import (  # noqa: E402
     CasadiDirectCollocationOptimizer, _SOLVER_BACKENDS,
@@ -63,7 +63,7 @@ def _horiz_m(lat, lon, ref):
 
 def _feasible_target(aircraft, init, horizon):
     step = make_geodetic_step_integrator(include_transport=True)["step_func"]
-    ap = AeroParams(S=aircraft.wing_area_m2)
+    ap = aero_params_for_aircraft(aircraft)
     aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
     u = ca.DM([aircraft.approach_thrust_guess_n, 0.0, 1.0])
     x = ca.DM([init.latitude, init.longitude, init.altitude,

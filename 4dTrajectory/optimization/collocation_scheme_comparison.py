@@ -1,21 +1,23 @@
 """Compare the selectable collocation defect schemes on one problem.
 
-The optimiser (``casadi_direct_collocation_optimizer``) supports three defect
-"fitting equations", in increasing order of accuracy:
+The optimiser (``casadi_direct_collocation_optimizer``) supports five defect
+"fitting equations":
 
     trapezoidal     – state piecewise-linear, 2nd order, cheapest
     hermiteSimpson  – state cubic (Simpson rule), 4th order, the default
     rk4             – RK4 integral defect, 4th order, playback-consistent
     reanchoredEnu   – re-anchored ENU RK4 step (the exact playback model), 4th
+    localEnu        – fixed ENU step anchored at the target; a LOCAL approx
+                      that drifts far from the anchor (see dynamics_comparison_30km)
 
-trapezoidal/hermiteSimpson/rk4 collocate the continuous geodetic RHS; the last
-two are shooting/integrator defects.  reanchoredEnu instead uses the discrete
+trapezoidal/hermiteSimpson/rk4 collocate the continuous geodetic RHS; the ENU
+schemes are shooting/integrator defects.  reanchoredEnu uses the discrete
 re-anchored-ENU one-step map the frontend playback runs, so it matches the
 playback's vector field exactly (no geodetic-vs-ENU model gap).  Here we replay
-every scheme through a common fine GEODETIC integrator, so reanchoredEnu shows a
-slightly larger residual than HS/rk4 (it is tuned to the ENU model, not this
-geodetic reference) — its consistency with the ENU playback is checked in the
-test suite instead.
+every scheme through a common fine GEODETIC integrator, so the ENU schemes show
+a slightly larger residual than HS/rk4 (they are tuned to the ENU model, not
+this geodetic reference) — their accuracy is checked in the test suite and in
+the 30 km comparison instead.
 
 This script solves the SAME feasible problem with each scheme and reports how
 well the returned controls, when replayed through a fine integrator, land on
@@ -51,14 +53,14 @@ if str(_OPT_DIR) not in sys.path:
 from aerodynamic_model.aircraft_sets import A320, C172  # noqa: E402
 from aerodynamic_model.common import GeodeticState  # noqa: E402
 from aerodynamic_model.casadi_simulator import (  # noqa: E402
-    AeroParams, make_geodetic_step_integrator,
+    aero_params_for_aircraft, make_geodetic_step_integrator,
 )
 from casadi_direct_collocation_optimizer import (  # noqa: E402
     CasadiDirectCollocationOptimizer, _DEFECT_SCHEMES,
 )
 
 _AIRCRAFT = {"A320": A320, "C172": C172}
-_SCHEMES = list(_DEFECT_SCHEMES)  # trapezoidal, hermiteSimpson, rk4, reanchoredEnu
+_SCHEMES = list(_DEFECT_SCHEMES)  # all registered schemes (keep `orders` in sync)
 _R = 6_371_000.0
 
 
@@ -70,7 +72,7 @@ def _horiz_m(lat, lon, ref):
 
 
 def _aero_dm(aircraft):
-    ap = AeroParams(S=aircraft.wing_area_m2)
+    ap = aero_params_for_aircraft(aircraft)
     return ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
 
 
@@ -128,7 +130,9 @@ def main(argv=None) -> int:
           f"{'PLAYBACK→tgt[m]':>17}{'replay min-alt[m]':>19}")
     print("  " + "-" * 82)
 
-    orders = {"trapezoidal": 2, "hermiteSimpson": 4, "rk4": 4, "reanchoredEnu": 4}
+    orders = {"trapezoidal": 2, "hermiteSimpson": 4, "rk4": 4,
+              "reanchoredEnu": 4, "localEnu": 4,
+              "localEnuTrapezoidal": 2, "localEnuHermiteSimpson": 4}
     for scheme in _SCHEMES:
         opt = CasadiDirectCollocationOptimizer(
             n_segments=args.n_segments, dt=0.2, max_duration=args.horizon * 1.6,
@@ -140,10 +144,10 @@ def main(argv=None) -> int:
             ok = bool(opt.solver.stats().get("success", False))
             node_miss = _horiz_m(states[-1][0], states[-1][1], target)
             pb, min_alt = _replay_terminal(aircraft, init, controls, args.horizon)
-            print(f"  {scheme:<16}{orders[scheme]:>6}{('yes' if ok else 'no'):>11}"
+            print(f"  {scheme:<16}{orders.get(scheme, '?'):>6}{('yes' if ok else 'no'):>11}"
                   f"{node_miss:>13.3f}{_horiz_m(pb.latitude, pb.longitude, target):>17.2f}{min_alt:>19.1f}")
         except ValueError as exc:
-            print(f"  {scheme:<16}{orders[scheme]:>6}{'FAIL':>11}   {str(exc).split(': ')[-1][:40]}")
+            print(f"  {scheme:<16}{orders.get(scheme, '?'):>6}{'FAIL':>11}   {str(exc).split(': ')[-1][:40]}")
 
     print("\nInterpretation: every scheme pins its own NODES on the target (node→tgt≈0),")
     print("but replaying the controls reveals the scheme's true accuracy. The crude")

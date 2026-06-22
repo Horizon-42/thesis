@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from aerodynamic_model.aircraft_sets import C172
-from aerodynamic_model.casadi_simulator import AeroParams
+from aerodynamic_model.casadi_simulator import AeroParams, aero_params_for_aircraft
 from aerodynamic_model.common import GeodeticState
 
 # Keep the optimisation dir importable for modules loaded via importlib.
@@ -116,7 +116,7 @@ def test_optimize_handles_heading_wrap_across_180_deg():
     )
 
     module = load_module()
-    ap = AeroParams(S=C172.wing_area_m2)
+    ap = aero_params_for_aircraft(C172)
     aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
     step = make_geodetic_step_integrator(include_transport=True)["step_func"]
 
@@ -476,7 +476,7 @@ def test_dense_state_keeps_playback_consistent_on_long_coarse_control_horizon():
 
     # Feasible target: propagate the A320 nominal approach control for the
     # horizon through the geodetic dynamics (on its own dynamics manifold).
-    ap = AeroParams(S=A320.wing_area_m2)
+    ap = aero_params_for_aircraft(A320)
     aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
     gstep = make_geodetic_step_integrator(include_transport=True)["step_func"]
     u_nom = ca.DM([A320.approach_thrust_guess_n, 0.0, 1.0])
@@ -606,10 +606,14 @@ def _propagate_with_geodetic_rhs(
 # Selectable defect "fitting equation" (collocation scheme) comparison
 # --------------------------------------------------------------------------
 
-def test_defect_scheme_registry_lists_three_schemes():
+def test_defect_scheme_registry_lists_all_schemes():
     module = load_module()
+    # Geodetic and local-ENU dynamics each take all three fittings; the
+    # re-anchored ENU is discrete so it is shooting-only.
     assert set(module._DEFECT_SCHEMES) == {
-        "trapezoidal", "hermiteSimpson", "rk4", "reanchoredEnu",
+        "trapezoidal", "hermiteSimpson", "rk4",
+        "localEnuTrapezoidal", "localEnuHermiteSimpson", "localEnu",
+        "reanchoredEnu",
     }
     # The bare optimiser keeps Hermite-Simpson for backward compatibility.
     assert module._DEFAULT_SCHEME == "hermiteSimpson"
@@ -667,7 +671,7 @@ def _replay_geodetic_horiz_miss(aircraft, init, controls, horizon):
     )
 
     step = make_geodetic_step_integrator(include_transport=True)["step_func"]
-    ap = AeroParams(S=aircraft.wing_area_m2)
+    ap = aero_params_for_aircraft(aircraft)
     aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
     x = ca.DM([init.latitude, init.longitude, init.altitude,
                init.V, init.psi, init.gamma, init.m])
@@ -700,7 +704,7 @@ def test_collocation_schemes_form_an_accuracy_ladder():
     from aerodynamic_model.casadi_simulator import (
         AeroParams, make_geodetic_step_integrator,
     )
-    ap = AeroParams(S=A320.wing_area_m2)
+    ap = aero_params_for_aircraft(A320)
     aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
     step = make_geodetic_step_integrator(include_transport=True)["step_func"]
     u = ca.DM([A320.approach_thrust_guess_n, 0.0, 1.0])
@@ -764,7 +768,7 @@ def test_reanchored_enu_scheme_is_consistent_with_the_enu_playback():
     init = GeodeticState(35.60, -78.50, 1500.0, 90.0,
                          math.radians(40.0), math.radians(-3.0), A320.mass_kg)
 
-    ap = AeroParams(S=A320.wing_area_m2)
+    ap = aero_params_for_aircraft(A320)
     aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
     gstep = make_geodetic_step_integrator(include_transport=True)["step_func"]
     u = ca.DM([A320.approach_thrust_guess_n, 0.0, 1.0])
@@ -805,3 +809,76 @@ def test_reanchored_enu_scheme_is_consistent_with_the_enu_playback():
     )
     assert horiz < 5.0
     assert abs(s.altitude - target.altitude) < 5.0
+
+
+def test_geodetic_enu_conversion_round_trips_and_anchors_at_ref():
+    """Regression for the localEnu dynamics: the forward
+    ``geodetic_state_to_enu_expr`` must invert ``enu_state_to_geodetic_expr``
+    (so the fixed-frame collocation is self-consistent), and a point converted
+    against its OWN ref must sit at the ENU origin with V/psi/gamma unchanged."""
+    from aerodynamic_model.casadi_simulator import (
+        geodetic_state_to_enu_expr, enu_state_to_geodetic_expr,
+    )
+
+    x_geo = [35.60, -78.50, 1500.0, 120.0, math.radians(40.0), math.radians(-2.0)]
+    ref = ca.DM([35.87, -78.80, 0.0])         # a fixed anchor ~30 km away
+
+    enu = np.array(ca.DM(geodetic_state_to_enu_expr(ca.DM(x_geo), ref)), dtype=float).ravel()
+    back = np.array(ca.DM(enu_state_to_geodetic_expr(ca.DM(list(enu)), ref)), dtype=float).ravel()
+    # forward then inverse recovers the geodetic state.
+    np.testing.assert_allclose(back[:3], x_geo[:3], atol=1e-6)          # lat,lon,alt
+    np.testing.assert_allclose(back[3], x_geo[3], atol=1e-6)            # V
+    np.testing.assert_allclose([back[4], back[5]], x_geo[4:6], atol=1e-9)
+
+    # Anchored at its own point -> ENU origin, speed/heading/pitch unchanged.
+    ref_self = ca.DM([x_geo[0], x_geo[1], 0.0])
+    enu0 = np.array(ca.DM(geodetic_state_to_enu_expr(ca.DM(x_geo), ref_self)), dtype=float).ravel()
+    np.testing.assert_allclose(enu0[0:2], [0.0, 0.0], atol=1e-6)        # east, north
+    np.testing.assert_allclose(enu0[2], x_geo[2], atol=1e-6)           # up == alt
+    np.testing.assert_allclose([enu0[3], enu0[4], enu0[5]],
+                               [x_geo[3], x_geo[4], x_geo[5]], atol=1e-9)
+
+
+def test_local_enu_scheme_solves_with_every_fitting():
+    """localEnu is a CONTINUOUS dynamics (flat RHS in a fixed ENU tangent frame
+    at the target), so -- like the geodetic dynamics -- it takes every fitting.
+    All three variants solve and return the standard tuple shape; the terminal
+    node is pinned on the target.  (Its accuracy far from the anchor is studied
+    in dynamics_comparison_30km, not here.)"""
+    from aerodynamic_model.aircraft_sets import A320
+    from aerodynamic_model.casadi_simulator import (
+        AeroParams, make_geodetic_step_integrator,
+    )
+
+    module = load_module()
+    n_segments = 10
+    horizon = 90.0
+    init = GeodeticState(35.60, -78.50, 1500.0, 90.0,
+                         math.radians(40.0), math.radians(-3.0), A320.mass_kg)
+
+    ap = aero_params_for_aircraft(A320)
+    aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
+    gstep = make_geodetic_step_integrator(include_transport=True)["step_func"]
+    u = ca.DM([A320.approach_thrust_guess_n, 0.0, 1.0])
+    xp = ca.DM([init.latitude, init.longitude, init.altitude,
+                init.V, init.psi, init.gamma, init.m])
+    for _ in range(int(horizon / 0.05)):
+        xp = gstep(x_geo=xp, u=u, aero_params=aero, dt=0.05)["x_geo_next"]
+    tp = np.array(xp).reshape(-1)
+    target = GeodeticState(tp[0], tp[1], tp[2], tp[3], tp[4], tp[5], A320.mass_kg)
+    R = 6_371_000.0
+
+    for scheme in ("localEnuTrapezoidal", "localEnuHermiteSimpson", "localEnu"):
+        opt = module.CasadiDirectCollocationOptimizer(
+            n_segments=n_segments, dt=0.2, max_duration=horizon * 1.6,
+            aircraft=A320, collocation_scheme=scheme,
+        )
+        assert opt.collocation_scheme == scheme
+        _, controls, states = opt.optimize_trajectory(init, target, duration=horizon)
+        assert controls.shape == (n_segments, 3)
+        assert states.shape == (n_segments, 6)
+        node_miss = R * math.hypot(
+            math.radians(states[-1][0] - target.latitude),
+            math.radians(states[-1][1] - target.longitude) * math.cos(math.radians(target.latitude)),
+        )
+        assert node_miss < 1.0

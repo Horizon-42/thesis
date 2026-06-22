@@ -61,9 +61,12 @@ import numpy as np
 
 from aerodynamic_model.casadi_simulator import (
     make_geodetic_dynamics_model,
+    make_dynamics_model,
     make_geo_step_from_enu_integrator,
+    geodetic_state_to_enu_expr,
     rk4_step_expr,
     AeroParams,
+    aero_params_for_aircraft,
 )
 from aerodynamic_model.aircraft_sets import AircraftSpec
 from aerodynamic_model.common import GeodeticState
@@ -145,19 +148,19 @@ def rk4_defect_expr(rhs_func, x_k, x_kp1, u_k, aero_params, h):
     return x_kp1 - rk4_step_expr(rhs_func, x_k, u_k, aero_params, h)
 
 
-def reanchored_enu_defect_expr(step_func, x_k, x_kp1, u_k, aero_params, h):
-    """Shooting defect built on the re-anchored ENU one-step integrator
-    (``make_geo_step_from_enu_integrator``) — the SAME discrete operator the
-    frontend playback runs.
+def enu_step_defect_expr(step_func, x_k, x_kp1, u_k, aero_params, h):
+    """Shooting defect built on an ENU one-step integrator ``Φ(x,u,h)``.
 
-    Unlike the other three, the "dynamics" here is not a continuous RHS but a
-    discrete step map ``Φ(x,u,h)`` (one RK4 step in a freshly anchored ENU
-    tangent frame, converted back to geodetic).  So this is a *multiple-
-    shooting* defect, not a polynomial collocation — the trapezoidal/Hermite
-    fits cannot be built from a stepper.  It still lives in the same dense-
-    state direct transcription (state nodes are decision variables, one defect
-    per sub-interval), and it matches the playback's vector field exactly
-    (no geodetic-vs-ENU model gap), at the cost of a denser, slower NLP.
+    Shared by both ENU schemes — ``step_func`` is either the *re-anchored*
+    stepper (``reanchoredEnu``: ref = current point, the exact operator the
+    playback runs) or the *fixed-frame* stepper anchored at the target
+    (``localEnu``: ref = target, baked in by the builder).
+
+    The "dynamics" here is a discrete step map, not a continuous RHS, so this
+    is a *multiple-shooting* defect rather than a polynomial collocation (the
+    trapezoidal/Hermite fits cannot be built from a stepper).  It still lives
+    in the same dense-state direct transcription (state nodes are decision
+    variables, one defect per sub-interval), at the cost of a denser NLP.
 
     The optimiser carries lat/lon in radians; the ENU stepper expects degrees,
     so convert on the way in and back out.
@@ -168,30 +171,82 @@ def reanchored_enu_defect_expr(step_func, x_k, x_kp1, u_k, aero_params, h):
     return x_kp1 - x_next
 
 
-# Selectable defect "fitting equations" as ``(defect_fn, dynamics_kind)``.
-# ``dynamics_kind`` decides what callable the defect_fn's first argument is:
-#   "continuous" -> the geodetic RHS f(x,u,p)        (trapezoidal / HS / rk4)
-#   "enuStep"    -> the re-anchored ENU step Φ(x,u,h) (reanchoredEnu)
-# Accuracy/ cost ladder:
-#   trapezoidal    – linear state,   2nd order, cheapest
-#   hermiteSimpson – cubic state,    4th order, default (Simpson rule)
-#   rk4            – RK4 integral,    4th order, playback-consistent, dense
-#   reanchoredEnu  – ENU RK4 step,   4th order, exact playback vector field
+# A collocation scheme = a DYNAMICS × a FITTING.  The fitting (trapezoidal /
+# Hermite-Simpson / rk4) is the transcription; the dynamics decides what RHS the
+# fitting is applied to and in which coordinates:
+#
+#   geodetic       – the continuous geodetic RHS, collocated in (lat, lon, h).
+#   localEnu       – the flat point-mass RHS in a FIXED ENU tangent frame
+#                    anchored at the target: the geodetic nodes are converted
+#                    into that frame and the fitting is applied THERE.  It is a
+#                    continuous RHS too, so it takes any fitting (just like
+#                    geodetic) -- but it is a LOCAL approximation that drifts far
+#                    from the anchor (see dynamics_comparison_30km).
+#   reanchoredEnu  – the re-anchored ENU one-step map (ref = current point).  It
+#                    re-anchors every step, so it is *discrete* (no continuous
+#                    RHS) -> only a shooting defect exists; no polynomial fit.
+#
+# Each scheme is a pair ``(make_dynamics, make_defect)``:
+#   make_dynamics()                -> the RHS / stepper.  Built in the builder
+#                                     BEFORE the NLP decision symbols so the
+#                                     symbolic graph (and hence the solve) is
+#                                     stable -- IPOPT is sensitive to the order
+#                                     symbols are created in.
+#   make_defect(dynamics, target)  -> the per-interval defect callable
+#                                     ``defect(x_k, x_kp1, u, aero, h)``.
+# (the target is the fixed ENU anchor; geodetic / re-anchored schemes ignore it)
+
+def _geodetic_scheme(fitting_fn):
+    def make_dynamics():
+        return make_geodetic_dynamics_model()["rhs_func"]
+
+    def make_defect(rhs, target_state):
+        return lambda x_k, x_kp1, u, aero, h: fitting_fn(rhs, x_k, x_kp1, u, aero, h)
+
+    return make_dynamics, make_defect
+
+
+def _geodetic_node_to_enu(x_geo, ref_geo):
+    """Optimiser geodetic node (lat/lon in RADIANS, 7-vec) -> ENU 7-state in the
+    fixed frame anchored at ``ref_geo`` (degrees)."""
+    x_deg = ca.vertcat(degrees_expr(x_geo[_LAT]), degrees_expr(x_geo[_LON]), x_geo[2:6])
+    return ca.vertcat(*geodetic_state_to_enu_expr(x_deg, ref_geo), x_geo[6])
+
+
+def _local_enu_scheme(fitting_fn):
+    def make_dynamics():
+        return make_dynamics_model()["rhs_func"]
+
+    def make_defect(flat_rhs, target_state):
+        ref_geo = ca.vertcat(degrees_expr(target_state[_LAT]), degrees_expr(target_state[_LON]), 0.0)
+        def defect(x_k, x_kp1, u, aero, h):
+            return fitting_fn(flat_rhs, _geodetic_node_to_enu(x_k, ref_geo),
+                              _geodetic_node_to_enu(x_kp1, ref_geo), u, aero, h)
+        return defect
+
+    return make_dynamics, make_defect
+
+
+def _reanchored_enu_scheme():
+    def make_dynamics():
+        return make_geo_step_from_enu_integrator()["step_func"]
+
+    def make_defect(stepper, target_state):
+        return lambda x_k, x_kp1, u, aero, h: enu_step_defect_expr(stepper, x_k, x_kp1, u, aero, h)
+
+    return make_dynamics, make_defect
+
+
 _DEFECT_SCHEMES = {
-    "trapezoidal":    (trapezoidal_defect_expr,    "continuous"),
-    "hermiteSimpson": (hermite_simpson_defect_expr, "continuous"),
-    "rk4":            (rk4_defect_expr,             "continuous"),
-    "reanchoredEnu":  (reanchored_enu_defect_expr,  "enuStep"),
+    "trapezoidal":            _geodetic_scheme(trapezoidal_defect_expr),
+    "hermiteSimpson":         _geodetic_scheme(hermite_simpson_defect_expr),
+    "rk4":                    _geodetic_scheme(rk4_defect_expr),
+    "localEnuTrapezoidal":    _local_enu_scheme(trapezoidal_defect_expr),
+    "localEnuHermiteSimpson": _local_enu_scheme(hermite_simpson_defect_expr),
+    "localEnu":               _local_enu_scheme(rk4_defect_expr),
+    "reanchoredEnu":          _reanchored_enu_scheme(),
 }
 _DEFAULT_SCHEME = "hermiteSimpson"
-
-
-def _make_scheme_dynamics(dynamics_kind):
-    """Build the dynamics callable a scheme's defect_fn expects (see
-    ``_DEFECT_SCHEMES``)."""
-    if dynamics_kind == "enuStep":
-        return make_geo_step_from_enu_integrator()["step_func"]
-    return make_geodetic_dynamics_model()["rhs_func"]
 
 
 # Selectable NLP solver backend.  ``ipopt`` (interior point) is the robust
@@ -342,20 +397,20 @@ def select_state_substeps(max_duration: float, segment_num: int) -> int:
 
 
 def _build_collocation_decision(
-    dynamics, aero_params, start_state, target_state,
-    segment_h, segment_num, sub_steps, defect_fn,
+    defect, aero_params, start_state, target_state,
+    segment_h, segment_num, sub_steps,
 ):
     """Build controls, state nodes and defects for the dense-state NLP.
 
-    ``dynamics`` is the scheme's dynamics callable (a continuous RHS for the
-    polynomial schemes, or a one-step integrator for the shooting schemes);
-    it is handed verbatim to ``defect_fn``.
+    ``defect`` is the scheme's resolved per-interval callable
+    ``defect(x_k, x_kp1, u, aero, h)`` (already bound to its dynamics and, for
+    localEnu, the target anchor; see ``_DEFECT_SCHEMES``).
 
     Returns ``(seg_controls, state_nodes, defects)``: ``seg_controls`` has
     ``segment_num`` 3-vectors, ``state_nodes`` has ``segment_num*sub_steps``
-    6-vectors (x_1 .. x_{N*M}).  Each sub-interval gets its own defect via
-    ``defect_fn`` (the chosen scheme) using the shared control of its
-    segment; the terminal-equality defect (last node == target) is last.
+    6-vectors (x_1 .. x_{N*M}).  Each sub-interval gets its own defect using
+    the shared control of its segment; the terminal-equality defect (last node
+    == target) is last.
     """
     mass_param = start_state[6]
     state_h = segment_h / sub_steps
@@ -374,8 +429,8 @@ def _build_collocation_decision(
             # Mass derivative is identically zero, so drop the 7th defect
             # component to keep the constraint Jacobian rectangular.
             defects.append(
-                defect_fn(
-                    dynamics, x_prev_full, x_next_full, uk, aero_params, state_h,
+                defect(
+                    x_prev_full, x_next_full, uk, aero_params, state_h,
                 )[:STATE_DIM]
             )
             x_prev = xnode
@@ -480,17 +535,17 @@ def make_direct_collocation_solver(
     ``max_terminal_bank_deg`` — a pure state constraint (see
     ``terminal_bank_constraint_expr``).
     """
-    # 1. Dynamics for the chosen scheme: a continuous geodetic RHS for the
-    # polynomial schemes, or the re-anchored ENU one-step integrator for the
-    # shooting scheme.  Either way there is one source, no tangent plane to
-    # carry around the NLP.
-    defect_fn, dynamics_kind = _DEFECT_SCHEMES[collocation_scheme]
-    dynamics = _make_scheme_dynamics(dynamics_kind)
+    # 1. Build the scheme's dynamics BEFORE the NLP symbols (solve stability).
+    make_dynamics, make_defect = _DEFECT_SCHEMES[collocation_scheme]
+    dynamics = make_dynamics()
 
     # 2. Symbolic parameters (lat/lon in radians).
     start_state = ca.SX.sym('start_state', 7)   # lat, lon, h, V, psi, gamma, m
     target_state = ca.SX.sym('target_state', 7)
     duration = ca.SX.sym('duration')
+
+    # 3. Bind the per-interval defect (for localEnu, anchored at the target).
+    defect = make_defect(dynamics, target_state)
 
     aero_params = ca.vertcat(
         aero_params_obj.S,
@@ -507,8 +562,8 @@ def make_direct_collocation_solver(
 
     # 4. Decision variables + defects: N controls, N*sub_steps state nodes.
     seg_controls, state_nodes, defects = _build_collocation_decision(
-        dynamics, aero_params, start_state, target_state,
-        segment_h, segment_num, sub_steps, defect_fn,
+        defect, aero_params, start_state, target_state,
+        segment_h, segment_num, sub_steps,
     )
 
     # 5. Bounds.  Identical envelope to ``casadi_optimizer.py`` so the
@@ -595,9 +650,9 @@ def make_direct_collocation_solver_free_time(
     builder; here ``state_h`` depends on the decision variable ``T``, which
     IPOPT differentiates through.
     """
-    # 1. Same per-scheme dynamics resolution as the fixed-time NLP.
-    defect_fn, dynamics_kind = _DEFECT_SCHEMES[collocation_scheme]
-    dynamics = _make_scheme_dynamics(dynamics_kind)
+    # 1. Build the scheme's dynamics BEFORE the NLP symbols (solve stability).
+    make_dynamics, make_defect = _DEFECT_SCHEMES[collocation_scheme]
+    dynamics = make_dynamics()
 
     # 2. Symbolic parameters.  ``max_duration`` is the upper bound for
     # the decision-variable duration and is also the scale factor used
@@ -605,6 +660,9 @@ def make_direct_collocation_solver_free_time(
     start_state = ca.SX.sym('start_state', 7)
     target_state = ca.SX.sym('target_state', 7)
     max_duration = ca.SX.sym('max_duration')
+
+    # 3. Bind the per-interval defect (same as the fixed-time NLP).
+    defect = make_defect(dynamics, target_state)
 
     aero_params = ca.vertcat(
         aero_params_obj.S,
@@ -623,8 +681,8 @@ def make_direct_collocation_solver_free_time(
     # 4. Decision variables + defects: N controls, N*sub_steps state nodes,
     # then T appended last so we can slice it out of ``sol['x']`` cleanly.
     seg_controls, state_nodes, defects = _build_collocation_decision(
-        dynamics, aero_params, start_state, target_state,
-        segment_h, segment_num, sub_steps, defect_fn,
+        defect, aero_params, start_state, target_state,
+        segment_h, segment_num, sub_steps,
     )
 
     # 5. Bounds.
@@ -735,7 +793,12 @@ class CasadiDirectCollocationOptimizer:
         self.max_duration = max_duration
         self.aircraft = aircraft
         self.state_substeps = select_state_substeps(max_duration, n_segments)
-        self.aero_params = AeroParams(S=aircraft.wing_area_m2)
+
+        # Mass-based stall model, SHARED with the playback (CasadiSimulator) via
+        # ``aero_params_for_aircraft`` so an optimized trajectory replays
+        # consistently -- the optimiser and the playback must agree on Cl_max.
+        self.aero_params = aero_params_for_aircraft(aircraft)
+        
         aircraft_meta = {
             "max_thrust": aircraft.max_thrust_n,
             "min_load_factor": 0.5,
