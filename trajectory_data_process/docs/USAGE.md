@@ -185,14 +185,16 @@ threshold). The files are CZML **input**, not CZML — the frontend loads one
 
 ### Render to the frontend (per-runway + combined)
 
-`landings_to_czml.py` renders an airport's landing files into the frontend folder,
-**one CZML per runway plus a combined CZML**, with a manifest:
+`landings_to_czml.py` renders landing files into the frontend folder, **one CZML per
+runway plus a combined CZML**, with a manifest. With no `--airport` it processes
+**every downloaded airport** under `outputs/landings/`:
 
 ```bash
-# all runways of KRDU
-python trajectory_data_process/landings_to_czml.py --airport KRDU
+# all downloaded airports (default)
+python trajectory_data_process/landings_to_czml.py
 
-# only specific runway ends
+# one airport, or a subset of its runways
+python trajectory_data_process/landings_to_czml.py --airport KRDU
 python trajectory_data_process/landings_to_czml.py --airport KRDU --runway 23R 23L
 ```
 

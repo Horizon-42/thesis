@@ -5,7 +5,11 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from trajectory_data_process.landings_to_czml import landing_files, merge_landing_flights
+from trajectory_data_process.landings_to_czml import (
+    discover_airports,
+    landing_files,
+    merge_landing_flights,
+)
 
 
 def _flight(fid: str, icao: str, t: str) -> dict:
@@ -47,6 +51,20 @@ class MergeTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             with self.assertRaises(SystemExit):
                 landing_files(Path(tmp), "KRDU", ["99X"])
+
+    def test_discover_airports_finds_dirs_with_landing_files(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "KRDU").mkdir()
+            self._write(root / "KRDU", "KRDU", "23R", [_flight("A", "a", "t")])
+            (root / "KSJC").mkdir()
+            self._write(root / "KSJC", "KSJC", "30L", [_flight("B", "b", "t")])
+            (root / "empty").mkdir()  # no *_landings.json -> not discovered
+
+            self.assertEqual(discover_airports(root), ["KRDU", "KSJC"])
+
+    def test_discover_airports_missing_root(self) -> None:
+        self.assertEqual(discover_airports(Path("/tmp/does-not-exist-xyz")), [])
 
 
 if __name__ == "__main__":
