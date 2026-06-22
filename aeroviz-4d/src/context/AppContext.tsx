@@ -175,6 +175,13 @@ interface PlaybackState {
   /** Current Cesium clock multiplier (mirrors viewer.clock.multiplier) */
   playbackSpeed: number;
   setPlaybackSpeed: (speed: number) => void;
+
+  /**
+   * Whether trajectory playback loops (LOOP_STOP) or stops at the final state
+   * (CLAMPED). Applies to both downloaded and optimized trajectories.
+   */
+  autoReplay: boolean;
+  setAutoReplay: (value: boolean) => void;
 }
 
 interface RunwayProfileSessionState {
@@ -215,6 +222,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [trajectoryDataSource, setTrajectoryDataSource] =
     useState<Cesium.CzmlDataSource | null>(null);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(60);
+  const [autoReplay, setAutoReplay] = useState<boolean>(true);
   const [procedureVisibility, setProcedureVisibility] = useState<Record<string, boolean>>({});
   const [procedureAnnotationEnabled, setProcedureAnnotationEnabled] = useState(false);
   const [procedureWidthMeasurementEnabled, setProcedureWidthMeasurementEnabled] = useState(false);
@@ -397,7 +405,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const playbackState: PlaybackState = useMemo(() => ({
     playbackSpeed,
     setPlaybackSpeed,
-  }), [playbackSpeed]);
+    autoReplay,
+    setAutoReplay,
+  }), [playbackSpeed, autoReplay]);
   const runwayProfileSessionState: RunwayProfileSessionState = useMemo(() => ({
     selectedProfileRunwayIdent,
     setSelectedProfileRunwayIdent,

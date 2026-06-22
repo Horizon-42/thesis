@@ -11,6 +11,7 @@
  * the rendering engine.
  */
 
+import * as Cesium from "cesium";
 import { useApp, type LayerKey } from "../context/AppContext";
 import { useLandingsManifest } from "../hooks/useLandingsManifest";
 import { useEffect, useRef, useState } from "react";
@@ -113,6 +114,8 @@ export default function ControlPanel() {
     airportLocalTerrain,
     playbackSpeed,
     setPlaybackSpeed,
+    autoReplay,
+    setAutoReplay,
     airports,
     activeAirportCode,
     setActiveAirportCode,
@@ -172,6 +175,15 @@ export default function ControlPanel() {
     const next = !viewer.clock.shouldAnimate;
     viewer.clock.shouldAnimate = next;
     setIsAnimating(next);
+  }
+
+  /** Toggle auto-replay: loop at the end vs stop and hold the final state */
+  function handleAutoReplayChange(next: boolean) {
+    setAutoReplay(next);
+    if (!viewer) return;
+    viewer.clock.clockRange = next
+      ? Cesium.ClockRange.LOOP_STOP
+      : Cesium.ClockRange.CLAMPED;
   }
 
   /** Reset the clock to the start of the simulation */
@@ -241,6 +253,15 @@ export default function ControlPanel() {
             </button>
           ))}
         </div>
+
+        <label className="control-panel-auto-replay">
+          <input
+            type="checkbox"
+            checked={autoReplay}
+            onChange={(event) => handleAutoReplayChange(event.target.checked)}
+          />
+          Auto-replay (loop)
+        </label>
       </section>
 
       {/* ── Layer toggles ────────────────────────────────────────────────── */}

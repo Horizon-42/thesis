@@ -342,6 +342,12 @@ body,
   margin-top: 6px;
 }
 
+.control-panel-auto-replay {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #aebbd0;
+}
+
 .control-panel label {
   display: flex;
   align-items: center;

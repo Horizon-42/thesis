@@ -57,7 +57,7 @@ export function useOptimizedTrajectoryPlayback({
   follow,
   onSample,
 }: UseOptimizedTrajectoryPlaybackParams): UseOptimizedTrajectoryPlaybackResult {
-  const { viewer, setPlaybackSpeed } = useApp();
+  const { viewer, setPlaybackSpeed, autoReplay } = useApp();
   const dsRef = useRef<Cesium.CzmlDataSource | null>(null);
   const aircraftRef = useRef<Cesium.Entity | null>(null);
   const startTimeRef = useRef<Cesium.JulianDate | null>(null);
@@ -103,7 +103,9 @@ export function useOptimizedTrajectoryPlayback({
             viewer.clock.startTime = start;
             viewer.clock.stopTime = stop;
             viewer.clock.currentTime = start.clone();
-            viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP;
+            viewer.clock.clockRange = autoReplay
+              ? Cesium.ClockRange.LOOP_STOP
+              : Cesium.ClockRange.CLAMPED;
             viewer.clock.multiplier = multiplier;
             viewer.clock.shouldAnimate = true;
             viewer.timeline?.zoomTo(start, stop);

@@ -46,7 +46,7 @@ export interface CzmlLoaderState {
  * @param czmlUrl - path to the CZML file, e.g. "/data/airports/KRDU/trajectories.czml"
  */
 export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
-  const { viewer, layers, setSelectedFlightId, setTrajectoryDataSource } = useApp();
+  const { viewer, layers, autoReplay, setSelectedFlightId, setTrajectoryDataSource } = useApp();
   // Hold a direct reference — the CZML document packet can overwrite the
   // datasource name, making getByName() unreliable for visibility sync.
   const dsRef = useRef<Cesium.CzmlDataSource | null>(null);
@@ -113,7 +113,9 @@ export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
             viewer.clock.startTime = startTime;
             viewer.clock.stopTime = stopTime;
             viewer.clock.currentTime = startTime.clone();
-            viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP;
+            viewer.clock.clockRange = autoReplay
+              ? Cesium.ClockRange.LOOP_STOP
+              : Cesium.ClockRange.CLAMPED;
             viewer.clock.multiplier = 60;
             viewer.clock.shouldAnimate = true;
             viewer.timeline?.zoomTo(viewer.clock.startTime, viewer.clock.stopTime);
