@@ -8,7 +8,7 @@ import casadi as ca
 import numpy as np
 import pytest
 
-from aerodynamic_model.aircraft_sets import C172
+from aerodynamic_model.aircraft_sets import A320, C172
 from aerodynamic_model.casadi_simulator import AeroParams, aero_params_for_aircraft
 from aerodynamic_model.common import GeodeticState
 
@@ -247,6 +247,7 @@ def test_optimize_trajectory_uses_supplied_initial_guess():
     optimizer = object.__new__(module.CasadiDirectCollocationOptimizer)
     optimizer.n_segments = 1
     optimizer.state_substeps = 1
+    optimizer.collocation_scheme = "hermiteSimpson"
     optimizer.max_duration = 5.0
     optimizer.lbw = [0.0] * 9
     optimizer.ubw = [100.0] * 9
@@ -534,6 +535,7 @@ def test_optimize_trajectory_raises_on_solver_failure():
     optimizer = object.__new__(module.CasadiDirectCollocationOptimizer)
     optimizer.n_segments = 1
     optimizer.state_substeps = 1
+    optimizer.collocation_scheme = "hermiteSimpson"
     optimizer.max_duration = 5.0
     optimizer.lbw = [0.0] * 9
     optimizer.ubw = [100.0] * 9
@@ -608,13 +610,18 @@ def _propagate_with_geodetic_rhs(
 
 def test_defect_scheme_registry_lists_all_schemes():
     module = load_module()
-    # Geodetic and local-ENU dynamics each take all three fittings; the
-    # re-anchored ENU is discrete so it is shooting-only.
+    # Geodetic, normalized-geodetic and local-ENU dynamics each take all three
+    # fittings; the re-anchored ENU is discrete so it is shooting-only.
     assert set(module._DEFECT_SCHEMES) == {
         "trapezoidal", "hermiteSimpson", "rk4",
+        "trapezoidalNormalized", "hermiteSimpsonNormalized", "rk4Normalized",
         "localEnuTrapezoidal", "localEnuHermiteSimpson", "localEnu",
         "reanchoredEnu",
     }
+    # Only the *Normalized schemes carry the metric-position decision transform.
+    assert module._NORMALIZED_SCHEMES == frozenset({
+        "trapezoidalNormalized", "hermiteSimpsonNormalized", "rk4Normalized",
+    })
     # The bare optimiser keeps Hermite-Simpson for backward compatibility.
     assert module._DEFAULT_SCHEME == "hermiteSimpson"
 
@@ -884,82 +891,91 @@ def test_local_enu_scheme_solves_with_every_fitting():
         assert node_miss < 1.0
 
 
-def test_cold_start_scheme_validation_rejects_unknown():
-    module = load_module()
-    with pytest.raises(ValueError, match="unknown cold_start_scheme"):
-        module.CasadiDirectCollocationOptimizer(
-            n_segments=4, dt=0.2, max_duration=6.0,
-            aircraft=C172, cold_start_scheme="quartic",
-        )
+def test_normalized_scheme_solves_loose_window_where_geodetic_fails():
+    """Regression (KRDU HEAVE -> RW05L): the metric-position *Normalized*
+    geodetic scheme stays well-conditioned and converges on the default mesh
+    with a loose arrival window, where the plain (radian-state) geodetic scheme
+    exhausts IPOPT's iteration budget.
 
-
-def test_cold_start_local_enu_seeds_geodetic_free_time_solve():
-    """Hybrid mode: the free-time refinement runs on the geodetic RHS while the
-    cold-start (fixed-time warm-start) solve runs the fixed local-ENU dynamics.
-
-    The two schemes share the same decision-vector layout, so the local-ENU
-    cold-start solution seeds the geodetic free-time solve directly; the result
-    still reaches the target, and ``last_solve_timings`` records the cold-start
-    vs free-time wall-clock split for the backend's whole-flow log.
+    HEAVE -> RW05L is a ~180 deg turn + ~1700 m descent over a ~9.6 km
+    straight-line span; at n_segments=10 with max_duration=1000 s (far longer
+    than the ~250 s the trajectory needs) the radian-state geodetic NLP is badly
+    scaled.  Expressing position as METRES from the target conditions the NLP so
+    the same solve converges and lands on the target.
     """
     module = load_module()
-    n_segments = 4
-    feasible_duration = 2.0
-    max_duration = 6.0
+    n_segments = 10
+    max_duration = 1000.0
 
-    speed = C172.terminal_speed_kt * 0.51444 + 10.0
     state = GeodeticState(
-        latitude=51.1139,
-        longitude=-114.0203,
-        altitude=1000.0,
-        V=speed,
-        psi=0.0,
-        gamma=0.0,
-        m=C172.mass_kg,
+        latitude=35.91816944, longitude=-78.89327222, altitude=1828.8,
+        V=(A320.terminal_speed_kt + 25) * 0.51444,
+        psi=math.radians(225.0), gamma=0.0, m=A320.mass_kg,
+    )
+    target = GeodeticState(
+        latitude=35.87446907, longitude=-78.80194912,
+        altitude=367.0 * 0.3048 + A320.threshold_crossing_height_m,
+        V=A320.terminal_speed_kt * 0.51444,
+        psi=math.radians(45.0), gamma=math.radians(-3.0), m=A320.mass_kg,
     )
 
     optimizer = module.CasadiDirectCollocationOptimizer(
-        n_segments=n_segments,
-        dt=0.2,
-        max_duration=max_duration,
-        aircraft=C172,
-        collocation_scheme="hermiteSimpson",
-        cold_start_scheme="localEnu",
+        n_segments=n_segments, dt=0.2, max_duration=max_duration, aircraft=A320,
+        collocation_scheme="hermiteSimpsonNormalized",
     )
-    # The free-time solve keeps the requested geodetic RHS; only the cold start
-    # swaps to the fixed local-ENU dynamics.
-    assert optimizer.collocation_scheme == "hermiteSimpson"
-    assert optimizer.cold_start_scheme == "localEnu"
-    assert optimizer.last_solve_timings is None
-
-    target = _propagate_with_geodetic_rhs(state, optimizer, feasible_duration)
     final_time, controls, states = optimizer.optimize_free_time(
         state, target, max_duration,
     )
 
     assert optimizer.free_time_solver.stats()["success"]
     assert controls.shape == (n_segments, 3)
-    assert states.shape == (n_segments, 6)
-    assert final_time < max_duration - 0.1
+    # The solver shrank T to the natural duration, far below the loose window.
+    assert final_time < 0.5 * max_duration
 
     np.testing.assert_allclose(
         states[-1],
         np.array([
-            target.latitude,
-            target.longitude,
-            target.altitude,
-            target.V,
-            target.psi,
-            target.gamma,
+            target.latitude, target.longitude, target.altitude,
+            target.V, target.psi, target.gamma,
         ]),
         atol=1e-3,
     )
 
-    # The cold-start / free-time split is recorded for the backend timing log.
+    # The cold-start / free-time wall-clock split is still recorded for the log.
     timings = optimizer.last_solve_timings
     assert set(timings) == {"coldStartS", "freeTimeSolveS", "solveTotalS"}
-    assert timings["coldStartS"] > 0.0
-    assert timings["freeTimeSolveS"] > 0.0
     assert timings["solveTotalS"] == pytest.approx(
         timings["coldStartS"] + timings["freeTimeSolveS"],
     )
+
+
+def test_normalized_scheme_matches_plain_geodetic_on_a_benign_problem():
+    """Normalization is a pure change of DECISION variables (the geodetic RHS is
+    evaluated at the exact reconstructed lat/lon), so on a problem the plain
+    geodetic scheme also solves, the normalized scheme returns the SAME
+    trajectory -- same arrival time and same terminal state."""
+    module = load_module()
+    n_segments = 4
+    feasible_duration = 2.0
+    max_duration = 6.0
+
+    speed = C172.terminal_speed_kt * 0.51444 + 10.0
+    state = GeodeticState(51.1139, -114.0203, 1000.0, speed, 0.0, 0.0, C172.mass_kg)
+
+    base = module.CasadiDirectCollocationOptimizer(
+        n_segments=n_segments, dt=0.2, max_duration=max_duration, aircraft=C172,
+        collocation_scheme="hermiteSimpson",
+    )
+    target = _propagate_with_geodetic_rhs(state, base, feasible_duration)
+    norm = module.CasadiDirectCollocationOptimizer(
+        n_segments=n_segments, dt=0.2, max_duration=max_duration, aircraft=C172,
+        collocation_scheme="hermiteSimpsonNormalized",
+    )
+
+    t_base, _, s_base = base.optimize_free_time(state, target, max_duration)
+    t_norm, _, s_norm = norm.optimize_free_time(state, target, max_duration)
+
+    assert base.free_time_solver.stats()["success"]
+    assert norm.free_time_solver.stats()["success"]
+    assert t_norm == pytest.approx(t_base, abs=0.05)
+    np.testing.assert_allclose(s_norm[-1], s_base[-1], atol=1e-3)

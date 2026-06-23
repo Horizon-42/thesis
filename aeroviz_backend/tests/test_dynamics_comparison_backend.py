@@ -45,20 +45,21 @@ class TestDynamicsComparisonBackend(_TempHistory):
         super().setUp()
         self.result = DynamicsComparisonBackend().run(_payload())
 
-    def test_run_reports_four_systems_with_b_as_reference(self):
+    def test_run_reports_five_systems_with_b_as_reference(self):
         systems = self.result["systems"]
-        self.assertEqual([s["key"] for s in systems], ["A", "B", "C", "D"])
+        # A/B/C/D plus N (geodetic RHS in the optimizer's normalized coords).
+        self.assertEqual([s["key"] for s in systems], ["A", "B", "C", "D", "N"])
         reference = [s["key"] for s in systems if s["isReference"]]
         self.assertEqual(reference, ["B"])
         # every system carries a distinct rgba colour for the legend / path
         colours = {tuple(s["colorRgba"]) for s in systems}
-        self.assertEqual(len(colours), 4)
+        self.assertEqual(len(colours), 5)
 
     def test_czml_has_one_hideable_entity_per_system(self):
         czml = self.result["playback"]["czml"]
         self.assertEqual(czml[0]["id"], "document")
         ids = [packet["id"] for packet in czml[1:]]
-        self.assertEqual(ids, ["dyncmp-A", "dyncmp-B", "dyncmp-C", "dyncmp-D"])
+        self.assertEqual(ids, ["dyncmp-A", "dyncmp-B", "dyncmp-C", "dyncmp-D", "dyncmp-N"])
         # each entity has a time-sampled position, a colored path, and a colored
         # aircraft model (its colour matches the path)
         for packet in czml[1:]:
@@ -80,16 +81,25 @@ class TestDynamicsComparisonBackend(_TempHistory):
 
     def test_chart_series_excludes_reference_and_aligns_with_distance(self):
         chart = self.result["chart"]
-        self.assertEqual(set(chart["series"]), {"A", "C", "D"})
+        self.assertEqual(set(chart["series"]), {"A", "C", "D", "N"})
         n = len(chart["distanceKm"])
         self.assertEqual(len(chart["timeS"]), n)
-        for key in ("A", "C", "D"):
+        for key in ("A", "C", "D", "N"):
             for field in ("horiz", "alt", "head", "speed", "fpa"):
                 self.assertEqual(len(chart["series"][key][field]), n)
         # distance grows monotonically along the reference
         self.assertTrue(
             all(chart["distanceKm"][i] <= chart["distanceKm"][i + 1] for i in range(n - 1))
         )
+
+    def test_normalized_system_overlays_geodetic(self):
+        # System N (geodetic RHS in the optimizer's NORMALIZED metric coords)
+        # is a pure change of variables, so its error vs B matches system C's to
+        # machine precision -- the proof that normalization changes nothing.
+        chart = self.result["chart"]
+        for field in ("horiz", "alt", "head", "speed", "fpa"):
+            for n_val, c_val in zip(chart["series"]["N"][field], chart["series"]["C"][field]):
+                self.assertAlmostEqual(n_val, c_val, places=4)
 
     def test_geodetic_rhs_matches_reanchored_reference(self):
         # System C (geodetic RHS + transport) should track B to sub-metre, while
@@ -134,7 +144,7 @@ class TestDynamicsComparisonHistory(_TempHistory):
         self.assertEqual(averaged["runCount"], 2)
         chart = averaged["chart"]
         # averaged onto one common grid; series excludes the reference B
-        self.assertEqual(set(chart["series"]), {"A", "C", "D"})
+        self.assertEqual(set(chart["series"]), {"A", "C", "D", "N"})
         n = len(chart["distanceKm"])
         self.assertGreater(n, 1)
         for key in ("A", "C", "D"):

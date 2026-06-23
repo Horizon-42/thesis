@@ -3,7 +3,8 @@
  * --------------------------------
  * Plays the backend-generated dynamics-comparison CZML on Cesium's own clock.
  * Unlike the single-aircraft optimized playback, this CZML holds one entity per
- * dynamics system (A/B/C/D), each a colored growing path. The hook:
+ * dynamics system (A/B/C/D, plus N = the geodetic RHS in the optimizer's
+ * normalized coords, which overlays C), each a colored growing path. The hook:
  *   1. loads the CZML into a CzmlDataSource and drives viewer.clock from its
  *      document clock (start/stop/multiplier), and
  *   2. shows/hides each system's entity from `hiddenKeys`, so the user can hide

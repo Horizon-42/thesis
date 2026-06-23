@@ -107,7 +107,7 @@ const OPTIMIZER_DYNAMICS_OPTIONS: { value: OptimizerDynamics; label: string }[] 
   { value: "geodetic", label: "Geodetic RHS (+transport)" },
   { value: "reanchoredEnu", label: "Re-anchored ENU (playback model)" },
   { value: "localEnu", label: "Local ENU @ target (fixed tangent, drifts far out)" },
-  { value: "geodeticColdStart", label: "Geodetic RHS (local-ENU cold start)" },
+  { value: "geodeticNormalized", label: "Geodetic RHS (normalized, robust)" },
 ];
 const OPTIMIZER_FITTING_OPTIONS: { value: OptimizerFitting; label: string }[] = [
   { value: "hermiteSimpson", label: "Hermite-Simpson (cubic, 4th order)" },

@@ -40,6 +40,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from aerodynamic_model.casadi_simulator import (  # noqa: E402
     make_dynamics_model,
+    make_geodetic_dynamics_model,
     rk4_step_expr,
     geodetic_state_to_enu_expr,
     enu_state_to_geodetic_expr,
@@ -50,11 +51,21 @@ from aerodynamic_model.casadi_simulator import (  # noqa: E402
 # Mean-earth radius for the small-angle ground-distance metric (matches the
 # 30 km study so the two callers report comparable numbers).
 _R = 6_371_000.0
+# WGS84 equatorial radius for the optimizer's metric-position normalization
+# (system N).  Must match ``casadi_direct_collocation_optimizer._EARTH_RADIUS_M``
+# so N reproduces the optimizer's exact change of variables.
+_NORM_R = 6_378_137.0
 
 SYSTEM_KEYS = ("A", "B", "C", "D")
 #: The systems whose error is measured against the reference B.
 COMPARED_KEYS = ("A", "C", "D")
 REFERENCE_KEY = "B"
+#: Optional 5th system: the geodetic RHS integrated in the optimizer's NORMALIZED
+#: metric-position coordinates (see ``compare_dynamics(include_normalized=True)``).
+#: It overlays system C to machine precision, demonstrating that the
+#: ``*Normalized`` optimizer schemes are a pure change of variables — they do not
+#: change the dynamics or the goal.  Opt-in so the 30 km study stays unchanged.
+NORMALIZED_KEY = "N"
 
 
 def horizontal_error_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -80,6 +91,56 @@ _INTEGRATORS: dict | None = None
 _INTEGRATORS_LOCK = threading.Lock()
 
 
+def _make_normalized_geodetic_stepper():
+    """One RK4 step of the continuous geodetic RHS, performed in the optimizer's
+    NORMALIZED metric-position coordinates and mapped back to geodetic degrees.
+
+    This is the exact change of variables the ``*Normalized`` optimizer schemes
+    use: position is metres from a reference anchor ``n=(lat-lat_ref)·R``,
+    ``e=(lon-lon_ref)·R·cos(lat_ref)``; the SAME geodetic RHS is evaluated at the
+    reconstructed (exact) lat/lon and its position derivative scaled back.  Since
+    the map is a pure affine recentre+rescale and RK4 is invariant under it, the
+    result equals a plain geodetic step (system C) to machine precision — which
+    is the point: it lets the Compare mode SHOW that normalization does not
+    change the dynamics.  Built as a CasADi Function (cached) for speed.
+    """
+    rhs = make_geodetic_dynamics_model()["rhs_func"]  # radians, f(x_geo_rad7, u, aero) -> 7
+    deg = ca.pi / 180.0
+    x_deg = ca.SX.sym("x_geo_deg", 7)            # [lat°, lon°, h, V, psi, gamma, m]
+    u = ca.SX.sym("u", 3)
+    aero = ca.SX.sym("aero", 6)
+    dt = ca.SX.sym("dt")
+    ref_lat = ca.SX.sym("ref_lat")               # anchor, degrees
+    ref_lon = ca.SX.sym("ref_lon")
+
+    lat_ref = ref_lat * deg
+    lon_ref = ref_lon * deg
+    c_lat = 1.0 / _NORM_R
+    c_lon = 1.0 / (_NORM_R * ca.cos(lat_ref))    # x = b + c (.*) z  ->  z = (x - b)/c
+
+    # geodetic (deg) -> normalized z (metric position; h/V/psi/gamma unchanged)
+    z0 = ca.vertcat(
+        (x_deg[0] * deg - lat_ref) / c_lat,
+        (x_deg[1] * deg - lon_ref) / c_lon,
+        x_deg[2], x_deg[3], x_deg[4], x_deg[5], x_deg[6],
+    )
+
+    def norm_rhs(z, uu, pp):
+        lat_rad = lat_ref + z[0] * c_lat         # exact reconstruction
+        lon_rad = lon_ref + z[1] * c_lon
+        xr = ca.vertcat(lat_rad, lon_rad, z[2], z[3], z[4], z[5], z[6])
+        fr = rhs(xr, uu, pp)
+        return ca.vertcat(fr[0] / c_lat, fr[1] / c_lon, fr[2], fr[3], fr[4], fr[5], fr[6])
+
+    z1 = rk4_step_expr(norm_rhs, z0, u, aero, dt)
+    x1 = ca.vertcat(
+        (lat_ref + z1[0] * c_lat) / deg,
+        (lon_ref + z1[1] * c_lon) / deg,
+        z1[2], z1[3], z1[4], z1[5], z1[6],
+    )
+    return ca.Function("norm_geo_step", [x_deg, u, aero, dt, ref_lat, ref_lon], [x1])
+
+
 def _integrators() -> dict:
     global _INTEGRATORS
     if _INTEGRATORS is None:
@@ -90,6 +151,7 @@ def _integrators() -> dict:
                     "reanchored": make_geo_step_from_enu_integrator()["step_func"],
                     "geodetic_transport": make_geodetic_step_integrator(include_transport=True)["step_func"],
                     "geodetic_no_transport": make_geodetic_step_integrator(include_transport=False)["step_func"],
+                    "normalized_geodetic": _make_normalized_geodetic_stepper(),
                 }
     return _INTEGRATORS
 
@@ -123,6 +185,7 @@ def compare_dynamics(
     anchor_geo: tuple[float, float, float] | None = None,
     max_range_m: float | None = None,
     stop_below_ground: bool = True,
+    include_normalized: bool = False,
 ) -> DynamicsComparison:
     """Integrate the four systems from ``start`` under a constant ``control``.
 
@@ -145,6 +208,12 @@ def compare_dynamics(
         Optional early stop once the reference has flown this ground distance.
     stop_below_ground
         Stop if the reference descends below 0 m (a free-flight safety net).
+    include_normalized
+        Also integrate system ``N`` — the geodetic RHS in the optimizer's
+        NORMALIZED metric-position coordinates (anchored at the start).  It
+        overlays system C to machine precision, so it is a live proof that the
+        ``*Normalized`` optimizer schemes are a pure change of variables.  Off by
+        default so the 30 km study (which does not pass it) is unchanged.
     """
     integ = _integrators()
     flat_rhs = integ["flat_rhs"]
@@ -154,6 +223,7 @@ def compare_dynamics(
         "C": integ["geodetic_transport"],
         "D": integ["geodetic_no_transport"],
     }
+    norm_step = integ["normalized_geodetic"] if include_normalized else None
 
     u = ca.DM([control[0], control[1], control[2]])
     aero = ca.DM(list(aero_params))
@@ -186,8 +256,14 @@ def compare_dynamics(
         arr = np.array(f(x_geo=ca.DM(x), u=u, aero_params=aero, dt=dt)["x_geo_next"]).ravel()
         return [float(v) for v in arr]
 
-    paths: dict[str, list[list[float]]] = {k: [list(x0)] for k in SYSTEM_KEYS}
-    state = {k: list(x0) for k in "BCD"}
+    def normalized_step(x):  # one geodetic step done in the optimizer's metric coords
+        arr = np.array(norm_step(ca.DM(x), u, aero, dt, x0[0], x0[1])).ravel()  # anchored at start
+        return [float(v) for v in arr]
+
+    geo_keys = "BCDN" if norm_step is not None else "BCD"
+    keys = (*SYSTEM_KEYS, NORMALIZED_KEY) if norm_step is not None else SYSTEM_KEYS
+    paths: dict[str, list[list[float]]] = {k: [list(x0)] for k in keys}
+    state = {k: list(x0) for k in geo_keys}
     enu_A = geo_to_enu(x0)  # system A lives in the fixed ENU frame
     dist = [0.0]
     times = [0.0]
@@ -200,8 +276,10 @@ def compare_dynamics(
         # recorded sample is always on the surface and JSON-clean.
         enu_A_next = rk4_step_expr(flat_rhs, enu_A, u, aero, dt)  # integrate in ENU
         next_states = {"A": enu_to_geo(enu_A_next)}  # convert only to record
-        for k in "BCD":
-            next_states[k] = geo_step(k, state[k])
+        for k in geo_keys:
+            next_states[k] = (
+                normalized_step(state[k]) if k == NORMALIZED_KEY else geo_step(k, state[k])
+            )
 
         if not all(math.isfinite(v) for s in next_states.values() for v in s):
             break  # divergent rollout produced NaN/inf — truncate (viz aid)
@@ -210,7 +288,7 @@ def compare_dynamics(
 
         enu_A = enu_A_next
         paths["A"].append(next_states["A"])
-        for k in "BCD":
+        for k in geo_keys:
             state[k] = next_states[k]
             paths[k].append(next_states[k])
         b, bprev = paths["B"][-1], paths["B"][-2]
@@ -238,19 +316,21 @@ def even_sample_indices(n: int, max_samples: int) -> list[int]:
 def error_series(
     comparison: DynamicsComparison,
     indices: list[int],
+    keys: tuple[str, ...] = COMPARED_KEYS,
 ) -> dict[str, dict[str, list[float]]]:
-    """Per-sample error of A/C/D vs the reference B at the given indices.
+    """Per-sample error of ``keys`` vs the reference B at the given indices.
 
-    Returns ``{key: {"horiz", "alt", "head", "speed", "fpa"}}`` for keys in
-    ``COMPARED_KEYS`` (B is the zero reference and is omitted).  ``head`` and
+    Returns ``{key: {"horiz", "alt", "head", "speed", "fpa"}}`` for the requested
+    keys (default ``COMPARED_KEYS`` = A/C/D; the interactive Compare mode also
+    passes ``N``).  B is the zero reference and is never included.  ``head`` and
     ``horiz`` are magnitudes; ``alt``, ``speed`` and ``fpa`` (flight-path-angle,
     state index 5) are signed.
     """
     B = comparison.paths[REFERENCE_KEY]
-    out = {k: {"horiz": [], "alt": [], "head": [], "speed": [], "fpa": []} for k in COMPARED_KEYS}
+    out = {k: {"horiz": [], "alt": [], "head": [], "speed": [], "fpa": []} for k in keys}
     for i in indices:
         ref = B[i]
-        for k in COMPARED_KEYS:
+        for k in keys:
             p = comparison.paths[k][i]
             out[k]["horiz"].append(horizontal_error_m(p[0], p[1], ref[0], ref[1]))
             out[k]["alt"].append(p[2] - ref[2])

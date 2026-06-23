@@ -84,6 +84,13 @@ CONTROL_DIM = 3
 # Indices into the 6-state decision vector.
 _LAT, _LON, _ALT, _V, _PSI, _GAMMA = range(6)
 
+# Earth radius for the metric position normalization (see _normalization_cb).
+_EARTH_RADIUS_M = 6_378_137.0
+# Loose metric box for the normalized schemes' position state (metres from the
+# anchor), replacing the radian lat/lon bounds, which are meaningless once
+# position is expressed in metres.
+_NORMALIZED_POS_BOUND_M = 1.0e7
+
 
 def radians_expr(degrees):
     return degrees * ca.pi / 180.0
@@ -238,15 +245,100 @@ def _reanchored_enu_scheme():
     return make_dynamics, make_defect
 
 
+# --------------------------------------------------------------------------
+# Metric position normalization (the geodetic-*Normalized* schemes)
+# --------------------------------------------------------------------------
+#
+# The plain geodetic schemes carry lat/lon as RADIANS in the decision vector,
+# next to metre-scale altitude and m/s-scale speed.  The position derivative is
+# ``lat_dot = V cos(gamma) cos(psi) / (R_M + h)`` -- the ``1/(R+h)`` factor makes
+# the position defect rows ~7 orders of magnitude smaller than the altitude
+# rows, so the constraint Jacobian is badly conditioned and IPOPT can fail to
+# converge on harder problems (e.g. KRDU HEAVE -> RW05L at the default mesh with
+# a loose arrival window).
+#
+# The *Normalized* schemes express position as METRES from the target anchor:
+#
+#     x = b + c (.*) z        (elementwise)
+#     n = (lat - lat_t) R                     <- north metres   (c_lat = 1/R)
+#     e = (lon - lon_t) R cos(lat_t)          <- east  metres   (c_lon = 1/(R cos lat_t))
+#
+# with h/V/psi/gamma unchanged (c = 1, b = 0).  The dynamics is the SAME exact
+# geodetic RHS -- the defect just evaluates it on the reconstructed physical
+# state and scales the derivative back -- so there is zero modelling change (the
+# (n,e) <-> (lat,lon) map is a pure affine change of variables, unlike localEnu
+# which approximates the dynamics in a flat tangent frame).  Now every decision
+# component AND every defect residual is metric, which conditions the NLP well.
+
+
+def _normalization_cb(target_state):
+    """Per-state scale ``c`` and offset ``b`` for the metric position
+    normalization, anchored at ``target_state`` (a 6/7-vector, SX or DM), such
+    that the physical geodetic state is ``x = b + c (.*) z``.
+
+    Only position (lat/lon) is rescaled; h/V/psi/gamma keep ``c=1, b=0``."""
+    lat_t = target_state[_LAT]
+    lon_t = target_state[_LON]
+    c = ca.vertcat(
+        1.0 / _EARTH_RADIUS_M,
+        1.0 / (_EARTH_RADIUS_M * ca.cos(lat_t)),
+        1.0, 1.0, 1.0, 1.0,
+    )
+    b = ca.vertcat(lat_t, lon_t, 0.0, 0.0, 0.0, 0.0)
+    return c, b
+
+
+def _identity_cb():
+    """Identity transform (``x = z``) used by every non-normalized scheme so
+    their decision/boundary path stays byte-identical to the original."""
+    return ca.DM.ones(STATE_DIM), ca.DM.zeros(STATE_DIM)
+
+
+def _geodetic_normalized_scheme(fitting_fn):
+    """A geodetic scheme whose decision STATE is metric position offsets from
+    the target (see above).  Same continuous geodetic RHS; the defect evaluates
+    it on the reconstructed physical state and scales the derivative back into
+    metric coords, so the residual is metric.  Anchored at the target, like
+    ``localEnu`` (reuses the ``target_state`` the builder already passes)."""
+    def make_dynamics():
+        return make_geodetic_dynamics_model()["rhs_func"]
+
+    def make_defect(rhs, target_state):
+        c, b = _normalization_cb(target_state)
+
+        def normalized_rhs(z7, u, aero):
+            # z7 = [z6 ; mass]; reconstruct physical state, evaluate the geodetic
+            # RHS, scale the position derivatives back into metric coordinates.
+            phys6 = b + c * z7[:6]
+            phys7 = ca.vertcat(phys6, z7[6])
+            xdot = rhs(phys7, u, aero)
+            return ca.vertcat(xdot[:6] / c, xdot[6])
+
+        return lambda x_k, x_kp1, u, aero, h: fitting_fn(
+            normalized_rhs, x_k, x_kp1, u, aero, h,
+        )
+
+    return make_dynamics, make_defect
+
+
 _DEFECT_SCHEMES = {
     "trapezoidal":            _geodetic_scheme(trapezoidal_defect_expr),
     "hermiteSimpson":         _geodetic_scheme(hermite_simpson_defect_expr),
     "rk4":                    _geodetic_scheme(rk4_defect_expr),
+    "trapezoidalNormalized":  _geodetic_normalized_scheme(trapezoidal_defect_expr),
+    "hermiteSimpsonNormalized": _geodetic_normalized_scheme(hermite_simpson_defect_expr),
+    "rk4Normalized":          _geodetic_normalized_scheme(rk4_defect_expr),
     "localEnuTrapezoidal":    _local_enu_scheme(trapezoidal_defect_expr),
     "localEnuHermiteSimpson": _local_enu_scheme(hermite_simpson_defect_expr),
     "localEnu":               _local_enu_scheme(rk4_defect_expr),
     "reanchoredEnu":          _reanchored_enu_scheme(),
 }
+# Schemes whose decision STATE is the metric position normalization -- the
+# boundary/bounds/guess/output code below applies the (c, b) transform for these
+# and the identity for all others.
+_NORMALIZED_SCHEMES = frozenset({
+    "trapezoidalNormalized", "hermiteSimpsonNormalized", "rk4Normalized",
+})
 _DEFAULT_SCHEME = "hermiteSimpson"
 
 
@@ -399,26 +491,33 @@ def select_state_substeps(max_duration: float, segment_num: int) -> int:
 
 def _build_collocation_decision(
     defect, aero_params, start_state, target_state,
-    segment_h, segment_num, sub_steps,
+    segment_h, segment_num, sub_steps, normalize_cb,
 ):
     """Build controls, state nodes and defects for the dense-state NLP.
 
     ``defect`` is the scheme's resolved per-interval callable
     ``defect(x_k, x_kp1, u, aero, h)`` (already bound to its dynamics and, for
-    localEnu, the target anchor; see ``_DEFECT_SCHEMES``).
+    localEnu / the normalized schemes, the target anchor; see ``_DEFECT_SCHEMES``).
+
+    ``normalize_cb = (c, b)`` is the decision-state transform ``x = b + c (.*) z``
+    (identity for non-normalized schemes).  The state *nodes* are the optimisation
+    variables ``z``; the physical start/target are mapped into ``z`` here so the
+    first interval and the terminal-equality defect are written in the same
+    coordinates as the nodes.
 
     Returns ``(seg_controls, state_nodes, defects)``: ``seg_controls`` has
     ``segment_num`` 3-vectors, ``state_nodes`` has ``segment_num*sub_steps``
-    6-vectors (x_1 .. x_{N*M}).  Each sub-interval gets its own defect using
+    6-vectors (z_1 .. z_{N*M}).  Each sub-interval gets its own defect using
     the shared control of its segment; the terminal-equality defect (last node
     == target) is last.
     """
+    c, b = normalize_cb
     mass_param = start_state[6]
     state_h = segment_h / sub_steps
     seg_controls = []
     state_nodes = []
     defects = []
-    x_prev = start_state[:6]
+    x_prev = (start_state[:6] - b) / c          # start in z-coordinates
     for k in range(segment_num):
         uk = ca.SX.sym(f'u_{k}', CONTROL_DIM)
         seg_controls.append(uk)
@@ -435,7 +534,7 @@ def _build_collocation_decision(
                 )[:STATE_DIM]
             )
             x_prev = xnode
-    defects.append(state_nodes[-1] - target_state[:STATE_DIM])
+    defects.append(state_nodes[-1] - (target_state[:STATE_DIM] - b) / c)
     return seg_controls, state_nodes, defects
 
 
@@ -515,6 +614,25 @@ def _control_smoothness_cost(seg_controls, aircraft_meta, weights):
 # NLP builder
 # --------------------------------------------------------------------------
 
+def _scheme_normalization(collocation_scheme, target_state):
+    """The decision-state transform ``(c, b)`` for a scheme: the metric position
+    normalization for the ``*Normalized`` schemes, identity for all others."""
+    if collocation_scheme in _NORMALIZED_SCHEMES:
+        return _normalization_cb(target_state)
+    return _identity_cb()
+
+
+def _normalized_position_bounds(state_lb, state_ub, collocation_scheme):
+    """Replace the radian lat/lon state bounds with a loose metric box for the
+    normalized schemes (position is metres there); h/V/psi/gamma are unchanged."""
+    if collocation_scheme not in _NORMALIZED_SCHEMES:
+        return state_lb, state_ub
+    lb, ub = list(state_lb), list(state_ub)
+    lb[_LAT] = lb[_LON] = -_NORMALIZED_POS_BOUND_M
+    ub[_LAT] = ub[_LON] = _NORMALIZED_POS_BOUND_M
+    return lb, ub
+
+
 def make_direct_collocation_solver(
     segment_num: int,
     aero_params_obj: AeroParams,
@@ -545,8 +663,10 @@ def make_direct_collocation_solver(
     target_state = ca.SX.sym('target_state', 7)
     duration = ca.SX.sym('duration')
 
-    # 3. Bind the per-interval defect (for localEnu, anchored at the target).
+    # 3. Bind the per-interval defect (for localEnu / *Normalized*, anchored at
+    # the target) and resolve the decision-state transform for the boundary.
     defect = make_defect(dynamics, target_state)
+    normalize_cb = _scheme_normalization(collocation_scheme, target_state)
 
     aero_params = ca.vertcat(
         aero_params_obj.S,
@@ -564,7 +684,7 @@ def make_direct_collocation_solver(
     # 4. Decision variables + defects: N controls, N*sub_steps state nodes.
     seg_controls, state_nodes, defects = _build_collocation_decision(
         defect, aero_params, start_state, target_state,
-        segment_h, segment_num, sub_steps,
+        segment_h, segment_num, sub_steps, normalize_cb,
     )
 
     # 5. Bounds.  Identical envelope to ``casadi_optimizer.py`` so the
@@ -573,6 +693,7 @@ def make_direct_collocation_solver(
         min_altitude=aircraft_meta['min_altitude'],
         min_velocity=aircraft_meta['min_terminal_speed'],
     )
+    state_lb, state_ub = _normalized_position_bounds(state_lb, state_ub, collocation_scheme)
     control_lb, control_ub = make_control_bounds(
         aircraft_meta['max_thrust'],
         aircraft_meta['min_load_factor'],
@@ -662,8 +783,10 @@ def make_direct_collocation_solver_free_time(
     target_state = ca.SX.sym('target_state', 7)
     max_duration = ca.SX.sym('max_duration')
 
-    # 3. Bind the per-interval defect (same as the fixed-time NLP).
+    # 3. Bind the per-interval defect (same as the fixed-time NLP) and resolve
+    # the decision-state transform for the boundary.
     defect = make_defect(dynamics, target_state)
+    normalize_cb = _scheme_normalization(collocation_scheme, target_state)
 
     aero_params = ca.vertcat(
         aero_params_obj.S,
@@ -683,7 +806,7 @@ def make_direct_collocation_solver_free_time(
     # then T appended last so we can slice it out of ``sol['x']`` cleanly.
     seg_controls, state_nodes, defects = _build_collocation_decision(
         defect, aero_params, start_state, target_state,
-        segment_h, segment_num, sub_steps,
+        segment_h, segment_num, sub_steps, normalize_cb,
     )
 
     # 5. Bounds.
@@ -691,6 +814,7 @@ def make_direct_collocation_solver_free_time(
         min_altitude=aircraft_meta['min_altitude'],
         min_velocity=aircraft_meta['min_terminal_speed'],
     )
+    state_lb, state_ub = _normalized_position_bounds(state_lb, state_ub, collocation_scheme)
     control_lb, control_ub = make_control_bounds(
         aircraft_meta['max_thrust'],
         aircraft_meta['min_load_factor'],
@@ -758,7 +882,6 @@ class CasadiDirectCollocationOptimizer:
         max_terminal_bank_deg: float = _DEFAULT_MAX_TERMINAL_BANK_DEG,
         smoothness_weights: tuple = _DEFAULT_SMOOTHNESS_WEIGHTS,
         collocation_scheme: str = _DEFAULT_SCHEME,
-        cold_start_scheme: str | None = None,
         solver_backend: str = _DEFAULT_SOLVER_BACKEND,
     ):
         if n_segments < 2:
@@ -768,31 +891,16 @@ class CasadiDirectCollocationOptimizer:
                 f"unknown collocation_scheme {collocation_scheme!r}; "
                 f"choose from {sorted(_DEFECT_SCHEMES)}"
             )
-        if cold_start_scheme is not None and cold_start_scheme not in _DEFECT_SCHEMES:
-            raise ValueError(
-                f"unknown cold_start_scheme {cold_start_scheme!r}; "
-                f"choose from {sorted(_DEFECT_SCHEMES)}"
-            )
         if solver_backend not in _SOLVER_BACKENDS:
             raise ValueError(
                 f"unknown solver_backend {solver_backend!r}; "
                 f"choose from {list(_SOLVER_BACKENDS)}"
             )
         self.n_segments = n_segments
-        # Defect "fitting equation": trapezoidal / hermiteSimpson / rk4 / reanchoredEnu.
-        # This is the scheme of the FREE-TIME solve (the "rhs dynamics" the
-        # caller asked for).
+        # Defect scheme = dynamics x fitting (e.g. hermiteSimpson, localEnu,
+        # reanchoredEnu, or a *Normalized* metric-position variant).  Both the
+        # fixed-time and free-time solvers use it.
         self.collocation_scheme = collocation_scheme
-        # Optional hybrid mode: when set, the fixed-time solve that seeds the
-        # free-time solve (the cold start, ``_build_free_time_initial_guess`` ->
-        # ``_solve_fixed_time_raw``) uses a DIFFERENT, cheaper/more-robust
-        # dynamics than the free-time refinement -- e.g. the fixed local-ENU
-        # tangent dynamics (``localEnu``) to seed a geodetic-RHS free-time solve.
-        # The decision-vector layout is identical across schemes (same N and M),
-        # so the cold-start raw solution drops straight in as the free-time seed.
-        # ``None`` -> both solves share ``collocation_scheme`` (original behaviour).
-        self.cold_start_scheme = cold_start_scheme
-        fixed_time_scheme = cold_start_scheme or collocation_scheme
         # Wall-clock breakdown of the most recent ``optimize_free_time`` call
         # (cold-start solve vs free-time solve); read by the backend for the
         # whole-flow timing log.  ``None`` until the first solve.
@@ -834,9 +942,8 @@ class CasadiDirectCollocationOptimizer:
         # Fixed-time NLP -- duration is a parameter.  Used by
         # ``optimize_trajectory`` when the caller supplies an explicit
         # duration (e.g. a Controlled Time of Arrival), and as the cold-start
-        # seed for the free-time solve.  In hybrid mode it runs
-        # ``fixed_time_scheme`` (= cold_start_scheme) rather than the free-time
-        # ``collocation_scheme``.
+        # seed for the free-time solve.  Same scheme as the free-time solve, so
+        # the seed's decision vector drops straight in.
         self.solver, self.lbw, self.ubw, self.lbg, self.ubg = (
             make_direct_collocation_solver(
                 segment_num=n_segments,
@@ -845,7 +952,7 @@ class CasadiDirectCollocationOptimizer:
                 sub_steps=self.state_substeps,
                 max_terminal_bank_deg=max_terminal_bank_deg,
                 smoothness_weights=smoothness_weights,
-                collocation_scheme=fixed_time_scheme,
+                collocation_scheme=collocation_scheme,
                 solver_backend=solver_backend,
             )
         )
@@ -914,7 +1021,7 @@ class CasadiDirectCollocationOptimizer:
         # 4. Return one geodetic state per control segment (segment
         # endpoints), so the response stays aligned with the N controls.
         state_geo = self._extract_node_states_geo(
-            w_opt[self.n_segments * CONTROL_DIM:], initial_state.m,
+            w_opt[self.n_segments * CONTROL_DIM:], initial_state.m, target_param,
         )
         return solve_duration, control_opt, state_geo
 
@@ -954,9 +1061,9 @@ class CasadiDirectCollocationOptimizer:
             initial_param, _geodetic_state_to_decision(target_state),
         )
 
-        # Cold start: build the warm-start seed (solves the fixed-time NLP --
-        # under cold_start_scheme in hybrid mode).  Timed separately from the
-        # free-time solve so the backend can log the whole-flow breakdown.
+        # Cold start: build the warm-start seed (solves the fixed-time NLP).
+        # Timed separately from the free-time solve so the backend can log the
+        # whole-flow breakdown.
         cold_start_started = time.perf_counter()
         if initial_guess is None:
             x0 = self._build_free_time_initial_guess(
@@ -1009,7 +1116,7 @@ class CasadiDirectCollocationOptimizer:
             self.n_segments * CONTROL_DIM : self.n_segments * CONTROL_DIM + n_state_block
         ]
         final_time = float(w_opt[-1])
-        state_geo = self._extract_node_states_geo(state_block, initial_state.m)
+        state_geo = self._extract_node_states_geo(state_block, initial_state.m, target_param)
         return final_time, control_opt, state_geo
 
     # ------------------------------------------------------------------
@@ -1031,21 +1138,34 @@ class CasadiDirectCollocationOptimizer:
             )
         return sol['x'].full().flatten()
 
-    def _extract_node_states_geo(self, state_block, mass: float) -> np.ndarray:
+    def _normalize_cb_numeric(self, target_param):
+        """Numeric decision-state transform ``(c, b)`` (``x = b + c (.*) z``)
+        anchored at the numeric target -- metric position for the ``*Normalized``
+        schemes, identity (c=1, b=0) otherwise."""
+        c, b = _scheme_normalization(self.collocation_scheme, ca.DM(target_param))
+        return np.array(c).flatten(), np.array(b).flatten()
+
+    def _extract_node_states_geo(self, state_block, mass: float, target_param) -> np.ndarray:
         """Pick the segment-endpoint state of each of the N control
         segments from the dense ``N*M`` state block and convert to
-        geodetic degrees -- returns an ``(N, 6)`` array."""
+        geodetic degrees -- returns an ``(N, 6)`` array.  The block is in the
+        scheme's decision coordinates ``z``; map back to physical via
+        ``x = b + c (.*) z`` before converting to geodetic."""
+        c, b = self._normalize_cb_numeric(target_param)
         nodes = np.asarray(state_block).reshape(
             (self.n_segments * self.state_substeps, STATE_DIM),
         )
         endpoints = nodes[self.state_substeps - 1 :: self.state_substeps]
+        phys_endpoints = endpoints * c + b
         return np.array([
-            self._decision_row_to_geo_array(row, mass) for row in endpoints
+            self._decision_row_to_geo_array(row, mass) for row in phys_endpoints
         ])
 
     def _build_initial_guess(self, initial_param, target_param):
-        """Straight-line interpolation across the N*M state nodes
-        (radians), plus a neutral approach control profile (N controls)."""
+        """Straight-line interpolation across the N*M state nodes (in the
+        scheme's decision coordinates -- metric position for the ``*Normalized``
+        schemes, radians otherwise), plus a neutral approach control profile."""
+        c, b = self._normalize_cb_numeric(target_param)
         control_guess = [
             self.aircraft.approach_thrust_guess_n,
             0.0,
@@ -1055,10 +1175,9 @@ class CasadiDirectCollocationOptimizer:
         state_guess: list[float] = []
         for i in range(n_nodes):
             ratio = (i + 1) / n_nodes
-            state_guess.extend([
-                initial_param[d] + (target_param[d] - initial_param[d]) * ratio
-                for d in range(STATE_DIM)
-            ])
+            for d in range(STATE_DIM):
+                phys = initial_param[d] + (target_param[d] - initial_param[d]) * ratio
+                state_guess.append((phys - b[d]) / c[d])
         return control_guess + state_guess
 
     def _build_free_time_initial_guess(

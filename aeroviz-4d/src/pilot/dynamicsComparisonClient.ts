@@ -13,12 +13,15 @@ import {
  * dynamicsComparisonClient.ts
  * ---------------------------
  * Client for the backend /dynamics-comparison/run endpoint. The backend flies
- * one trajectory under one *constant* control four different ways (A fixed
- * tangent ENU, B re-anchored ENU = reference, C geodetic RHS +transport, D
- * geodetic RHS no-transport) and returns:
+ * one trajectory under one *constant* control several ways (A fixed tangent ENU,
+ * B re-anchored ENU = reference, C geodetic RHS +transport, D geodetic RHS
+ * no-transport, and N = the geodetic RHS integrated in the optimizer's NORMALIZED
+ * metric coordinates, which overlays C to machine precision) and returns:
  *   - a multi-system CZML (one colored, hideable path per system), and
  *   - a chart series of each system's error vs the reference B (horizontal,
  *     altitude, heading, speed) over distance flown.
+ * Parsing is system-agnostic (iterates whatever systems/series the backend
+ * sends), so the system count is not hard-coded here.
  */
 
 /** Constant control held for the whole comparison flight. */

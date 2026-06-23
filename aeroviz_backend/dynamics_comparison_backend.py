@@ -48,10 +48,17 @@ from common import GeodeticState, LoadFactorControl
 from aerodynamic_model.casadi_simulator import aero_params_for_aircraft
 from dynamics_comparison import (
     COMPARED_KEYS,
+    NORMALIZED_KEY,
     compare_dynamics,
     error_series,
     even_sample_indices,
 )
+
+# The interactive Compare mode also flies system N (the geodetic RHS in the
+# optimizer's NORMALIZED metric coordinates), so its error vs B is charted
+# alongside A/C/D.  N overlays C to machine precision, demonstrating the
+# *Normalized optimizer schemes do not change the dynamics or the goal.
+_CHART_KEYS = (*COMPARED_KEYS, NORMALIZED_KEY)
 
 
 _ENTITY_PREFIX = "dyncmp-"
@@ -97,6 +104,17 @@ _SYSTEMS = (
         "key": "D",
         "label": "D · geodetic RHS, no transport",
         "color": (250, 204, 21, 240),
+        "reference": False,
+    },
+    {
+        # The geodetic RHS integrated in the optimizer's NORMALIZED metric
+        # coordinates — a pure change of variables, so it overlays C (and its
+        # error vs B matches C's).  Lets you VERIFY the *Normalized optimizer
+        # schemes do not change the dynamics / goal.  Violet so it reads as a
+        # distinct line sitting on top of cyan C.
+        "key": "N",
+        "label": "N · normalized coords (≡ C, proves no change)",
+        "color": (167, 139, 250, 240),
         "reference": False,
     },
 )
@@ -150,6 +168,9 @@ class DynamicsComparisonBackend:
             # diverge as they fly away from it (clearest "different dynamics ->
             # different drift" picture for an interactive run).
             anchor_geo=None,
+            # Also fly system N (geodetic RHS in normalized coords) so the user
+            # can verify it overlays C (i.e. normalization changes nothing).
+            include_normalized=True,
         )
 
         indices = even_sample_indices(comparison.n_samples, MAX_SAMPLES)
@@ -333,14 +354,14 @@ def _reference_samples(
 # ── Chart payload ─────────────────────────────────────────────────────────────
 
 def _build_chart(comparison, indices) -> dict[str, Any]:
-    errs = error_series(comparison, indices)
+    errs = error_series(comparison, indices, keys=_CHART_KEYS)
     series = {
         key: {field: [round(v, 6) for v in errs[key][field]] for field in _ERROR_FIELDS}
-        for key in COMPARED_KEYS
+        for key in _CHART_KEYS
     }
     final = {
         key: {field: round(errs[key][field][-1], 6) for field in _ERROR_FIELDS}
-        for key in COMPARED_KEYS
+        for key in _CHART_KEYS
     }
     return {
         "distanceKm": [round(comparison.dist_m[i] / 1000.0, 5) for i in indices],

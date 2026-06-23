@@ -54,23 +54,13 @@ DIRECT_COLLOCATION_SCHEMES = {
     "casadiDirectCollocationLocalEnu": "localEnu",
     "casadiDirectCollocationLocalEnuTrapezoidal": "localEnuTrapezoidal",
     "casadiDirectCollocationLocalEnuHermiteSimpson": "localEnuHermiteSimpson",
-    # Hybrid: the free-time refinement runs on the geodetic RHS, seeded by a
-    # fixed local-ENU cold-start solve (see DIRECT_COLLOCATION_COLD_START_SCHEMES).
-    # The free-time fitting is selectable (the geodetic RHS is continuous, so it
-    # takes any fitting); the bare name keeps the Hermite-Simpson default.
-    "casadiDirectCollocationLocalEnuColdStart": "hermiteSimpson",
-    "casadiDirectCollocationLocalEnuColdStartTrapezoidal": "trapezoidal",
-    "casadiDirectCollocationLocalEnuColdStartRk4": "rk4",
-}
-
-# Hybrid optimizers: the cold-start (fixed-time warm-start) solve uses a
-# different, cheaper/more-robust dynamics than the free-time scheme above.
-# A name absent here cold-starts under its own free-time scheme (the original
-# behaviour).
-DIRECT_COLLOCATION_COLD_START_SCHEMES = {
-    "casadiDirectCollocationLocalEnuColdStart": "localEnu",
-    "casadiDirectCollocationLocalEnuColdStartTrapezoidal": "localEnu",
-    "casadiDirectCollocationLocalEnuColdStartRk4": "localEnu",
+    # Normalized geodetic schemes: same geodetic RHS, but the decision STATE is
+    # metric position offsets from the target, which conditions the NLP well so
+    # the solve is robust on loose arrival windows / finer meshes (the bare name
+    # keeps the Hermite-Simpson default).
+    "casadiDirectCollocationNormalized": "hermiteSimpsonNormalized",
+    "casadiDirectCollocationNormalizedTrapezoidal": "trapezoidalNormalized",
+    "casadiDirectCollocationNormalizedRk4": "rk4Normalized",
 }
 SUPPORTED_OPTIMIZERS = (
     *DIRECT_COLLOCATION_SCHEMES,
@@ -297,7 +287,6 @@ def make_optimizer(
             max_duration=arrival_time_s,
             aircraft=geodetic_simulator.simulator.aircraft,
             collocation_scheme=DIRECT_COLLOCATION_SCHEMES[optimizer_name],
-            cold_start_scheme=DIRECT_COLLOCATION_COLD_START_SCHEMES.get(optimizer_name),
         )
 
     if optimizer_name == "singleShooting":

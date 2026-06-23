@@ -104,14 +104,13 @@ class TestOptimizationBackend(unittest.TestCase):
 
         class FakeCasadiDirectCollocationOptimizer:
             def __init__(self, n_segments, dt, max_duration, aircraft,
-                         collocation_scheme="hermiteSimpson", cold_start_scheme=None):
+                         collocation_scheme="hermiteSimpson"):
                 calls.append({
                     "aircraft": aircraft.code,
                     "n_segments": n_segments,
                     "dt": dt,
                     "max_duration": max_duration,
                     "collocation_scheme": collocation_scheme,
-                    "cold_start_scheme": cold_start_scheme,
                 })
 
             def optimize_free_time(self, initial_state, target_state, max_duration):
@@ -168,7 +167,6 @@ class TestOptimizationBackend(unittest.TestCase):
                 "dt": 0.25,
                 "max_duration": 84.0,
                 "collocation_scheme": "hermiteSimpson",
-                "cold_start_scheme": None,
             },
         )
         self.assertAlmostEqual(calls[1]["initial"].longitude, -114.0203)
@@ -190,13 +188,10 @@ class TestOptimizationBackend(unittest.TestCase):
         # CasadiDirectCollocationOptimizer with the matching collocation_scheme.
         seen = {}
 
-        cold_starts = {}
-
         class RecordingOptimizer:
             def __init__(self, n_segments, dt, max_duration, aircraft,
-                         collocation_scheme="hermiteSimpson", cold_start_scheme=None):
+                         collocation_scheme="hermiteSimpson"):
                 self.collocation_scheme = collocation_scheme
-                self.cold_start_scheme = cold_start_scheme
 
         original = optimization_backend.CasadiDirectCollocationOptimizer
         optimization_backend.CasadiDirectCollocationOptimizer = RecordingOptimizer
@@ -206,28 +201,17 @@ class TestOptimizationBackend(unittest.TestCase):
                     name, GeodeticSimulator(A320), 10, 0.2, 300, arrival_time_s=120.0,
                 )
                 seen[name] = opt.collocation_scheme
-                cold_starts[name] = opt.cold_start_scheme
         finally:
             optimization_backend.CasadiDirectCollocationOptimizer = original
 
         self.assertEqual(seen, dict(optimization_backend.DIRECT_COLLOCATION_SCHEMES))
         self.assertEqual(seen["casadiDirectCollocation"], "hermiteSimpson")
         self.assertEqual(seen["casadiDirectCollocationRk4"], "rk4")
-        # The hybrid name refines on the geodetic RHS but cold-starts under
-        # the fixed local-ENU dynamics; every other name has no cold-start
-        # override (cold-starts under its own scheme).
-        self.assertEqual(seen["casadiDirectCollocationLocalEnuColdStart"], "hermiteSimpson")
-        # The cold-start hybrid exposes every free-time fitting (the geodetic RHS
-        # is continuous); all three cold-start under the fixed local-ENU dynamics.
-        self.assertEqual(seen["casadiDirectCollocationLocalEnuColdStartTrapezoidal"], "trapezoidal")
-        self.assertEqual(seen["casadiDirectCollocationLocalEnuColdStartRk4"], "rk4")
-        for name in (
-            "casadiDirectCollocationLocalEnuColdStart",
-            "casadiDirectCollocationLocalEnuColdStartTrapezoidal",
-            "casadiDirectCollocationLocalEnuColdStartRk4",
-        ):
-            self.assertEqual(cold_starts[name], "localEnu")
-        self.assertIsNone(cold_starts["casadiDirectCollocation"])
+        # The normalized geodetic names select the metric-position *Normalized
+        # schemes (same geodetic RHS, well-conditioned decision state).
+        self.assertEqual(seen["casadiDirectCollocationNormalized"], "hermiteSimpsonNormalized")
+        self.assertEqual(seen["casadiDirectCollocationNormalizedTrapezoidal"], "trapezoidalNormalized")
+        self.assertEqual(seen["casadiDirectCollocationNormalizedRk4"], "rk4Normalized")
 
     def test_optimize_reuses_casadi_optimizer_for_same_solver_key(self):
         constructions = []
@@ -332,7 +316,7 @@ class TestOptimizationBackend(unittest.TestCase):
 
         class FakeCasadiDirectCollocationOptimizer:
             def __init__(self, n_segments, dt, max_duration, aircraft,
-                         collocation_scheme="hermiteSimpson", cold_start_scheme=None):
+                         collocation_scheme="hermiteSimpson"):
                 self.instance_id = len(constructions) + 1
                 constructions.append({
                     "aircraft": aircraft.code,
@@ -708,7 +692,7 @@ class TestOptimizationBackend(unittest.TestCase):
         # exposes a cold-start / free-time split, both appear in the line.
         class FakeCasadiDirectCollocationOptimizer:
             def __init__(self, n_segments, dt, max_duration, aircraft,
-                         collocation_scheme="hermiteSimpson", cold_start_scheme=None):
+                         collocation_scheme="hermiteSimpson"):
                 self.last_solve_timings = {
                     "coldStartS": 0.4,
                     "freeTimeSolveS": 0.6,
@@ -730,7 +714,7 @@ class TestOptimizationBackend(unittest.TestCase):
         try:
             with redirect_stderr(buffer):
                 optimization_backend.OptimizationBackend().optimize({
-                    "optimizer": "casadiDirectCollocationLocalEnuColdStart",
+                    "optimizer": "casadiDirectCollocationNormalized",
                     "nSegments": 2,
                     "arrivalTimeS": 84.0,
                     "initialState": {
@@ -756,7 +740,7 @@ class TestOptimizationBackend(unittest.TestCase):
 
         log = buffer.getvalue()
         self.assertIn("optimization timing", log)
-        self.assertIn("optimizer=casadiDirectCollocationLocalEnuColdStart", log)
+        self.assertIn("optimizer=casadiDirectCollocationNormalized", log)
         self.assertIn("build=", log)
         self.assertIn("coldStart=0.400s", log)
         self.assertIn("freeTime=0.600s", log)

@@ -17,9 +17,9 @@ describe("optimizer dynamics × fitting decomposition", () => {
       "casadiDirectCollocationLocalEnu",
       "casadiDirectCollocationLocalEnuTrapezoidal",
       "casadiDirectCollocationLocalEnuHermiteSimpson",
-      "casadiDirectCollocationLocalEnuColdStart",
-      "casadiDirectCollocationLocalEnuColdStartTrapezoidal",
-      "casadiDirectCollocationLocalEnuColdStartRk4",
+      "casadiDirectCollocationNormalized",
+      "casadiDirectCollocationNormalizedTrapezoidal",
+      "casadiDirectCollocationNormalizedRk4",
     ] as const;
     for (const opt of optimizers) {
       const { dynamics, fitting } = optimizerToParts(opt);
@@ -49,23 +49,23 @@ describe("optimizer dynamics × fitting decomposition", () => {
     expect(partsToOptimizer("reanchoredEnu", "hermiteSimpson")).toBe("casadiDirectCollocationReanchoredEnu");
   });
 
-  it("local-ENU cold-start hybrid refines a continuous RHS: takes every fitting", () => {
-    // The free-time refinement is the geodetic RHS, so the hybrid composes with
-    // each fitting; only the cold-start seed (fixed local-ENU) is shared.
-    expect(validFittingsForDynamics("geodeticColdStart")).toEqual([
+  it("normalized geodetic is a continuous RHS: takes every fitting", () => {
+    // Same geodetic RHS, just a metric-position change of decision variables, so
+    // the normalized dynamics composes with each fitting.
+    expect(validFittingsForDynamics("geodeticNormalized")).toEqual([
       "hermiteSimpson", "trapezoidal", "shooting",
     ]);
-    expect(partsToOptimizer("geodeticColdStart", "hermiteSimpson")).toBe(
-      "casadiDirectCollocationLocalEnuColdStart",
+    expect(partsToOptimizer("geodeticNormalized", "hermiteSimpson")).toBe(
+      "casadiDirectCollocationNormalized",
     );
-    expect(partsToOptimizer("geodeticColdStart", "trapezoidal")).toBe(
-      "casadiDirectCollocationLocalEnuColdStartTrapezoidal",
+    expect(partsToOptimizer("geodeticNormalized", "trapezoidal")).toBe(
+      "casadiDirectCollocationNormalizedTrapezoidal",
     );
-    expect(partsToOptimizer("geodeticColdStart", "shooting")).toBe(
-      "casadiDirectCollocationLocalEnuColdStartRk4",
+    expect(partsToOptimizer("geodeticNormalized", "shooting")).toBe(
+      "casadiDirectCollocationNormalizedRk4",
     );
-    expect(optimizerToParts("casadiDirectCollocationLocalEnuColdStartRk4")).toEqual({
-      dynamics: "geodeticColdStart",
+    expect(optimizerToParts("casadiDirectCollocationNormalizedRk4")).toEqual({
+      dynamics: "geodeticNormalized",
       fitting: "shooting",
     });
   });
