@@ -35,6 +35,28 @@ function systemKeyOf(entity: Cesium.Entity): string | null {
   return entity.id.startsWith(ENTITY_PREFIX) ? entity.id.slice(ENTITY_PREFIX.length) : null;
 }
 
+/**
+ * A VelocityOrientationProperty that holds its last valid value. The position
+ * series uses HOLD extrapolation, so once playback reaches the final sample the
+ * velocity drops to zero and the underlying property returns `undefined` — which
+ * would snap the model to a default attitude. Returning the last in-flight
+ * orientation keeps the parked aircraft pointing along its final state instead.
+ */
+function makeStableVelocityOrientation(
+  position: Cesium.PositionProperty,
+): Cesium.CallbackProperty {
+  const velocity = new Cesium.VelocityOrientationProperty(position);
+  let last: Cesium.Quaternion | undefined;
+  return new Cesium.CallbackProperty((time, result) => {
+    const value = time ? velocity.getValue(time, result) : undefined;
+    if (value) {
+      last = Cesium.Quaternion.clone(value, last);
+      return value;
+    }
+    return last;
+  }, false);
+}
+
 export type DynamicsComparisonPlaybackStatus = "idle" | "loading" | "loaded" | "error";
 
 interface UseDynamicsComparisonPlaybackParams {
@@ -115,9 +137,13 @@ export function useDynamicsComparisonPlayback({
 
         // Orient each system's aircraft model along its own path (the CZML only
         // carries position; velocity orientation points the nose down-track).
+        // Wrap it so the final attitude holds the last in-flight orientation: at
+        // the end the position extrapolation is HOLD, so the velocity → 0 and a
+        // plain VelocityOrientationProperty returns undefined and snaps the model
+        // to a default heading — not the final state's heading/pitch.
         loadedDs.entities.values.forEach((entity) => {
           if (systemKeyOf(entity) !== null && entity.position) {
-            entity.orientation = new Cesium.VelocityOrientationProperty(entity.position);
+            entity.orientation = makeStableVelocityOrientation(entity.position);
           }
         });
 

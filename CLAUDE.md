@@ -113,6 +113,21 @@ The project serves dual purposes: thesis visualization/validation, and reusable 
 
 ## Changelog
 
+### 2026-06-23 — Bug fixes: Compare final attitude + Trajectory-Play error as live chips
+
+Two fixes to the same-day Live-State work.
+
+1. **Compare mode — the parked aircraft no longer snaps to a default attitude at the end.** Each system's CZML position uses HOLD extrapolation, so once playback reaches the last sample the velocity drops to zero and `VelocityOrientationProperty` returns `undefined` — Cesium then snapped the model to a default heading instead of the final state's heading/pitch. `useDynamicsComparisonPlayback` now wraps it in `makeStableVelocityOrientation`, a `CallbackProperty` that returns the **last valid** orientation when the velocity-derived one is `undefined`, so the parked plane keeps pointing along its final state.
+2. **Trajectory Play — the target deviation is now shown as compare-style chips throughout, replacing the separate `Lat/Lon/Alt Error` rows** (which were unintuitive). `PilotPanel` computes a single amber `"Δ"` delta from the **live** sampled state vs `targetState` (horizontal via `haversineDistanceM`, signed `alt`/`speed`/`fpa`, magnitude `head`/`headingMagnitudeDeg`) and feeds it through the existing `comparisonDeltas`/`comparisonSystems` props with `deltaReferenceLabel="target"`; it tracks the aircraft and converges to the final-vs-target error at the end. The old `targetState`-driven error rows (and the `targetState` panel prop + `formatSignedDelta`) are removed. Chip numbers drop decimals for large magnitudes (≥ 100) so a km-scale early-flight horizontal error stays readable.
+- Tests updated: `PilotRealtimeStatePanel` (target-labelled chip strip; no chips without deltas) and `PilotPanel` (live target chips replace the separate error rows). **279 frontend tests + tsc + vite build pass** (no backend change).
+
+### 2026-06-23 — Trajectory Play: final-vs-target deviation chips (superseded above — now live)
+
+Trajectory Play renders the optimizer's state vs the requested target as colored delta chips, reusing the Compare-mode delta strip. (Originally shown only at end of playback; the bug-fix entry above made it a live readout and removed the old separate error rows.)
+
+- **Reuses the Compare delta strip.** `PilotRealtimeStatePanel` gained a `deltaReferenceLabel` prop (Horiz Err row reads "vs target" instead of "vs B"). Trajectory passes a single-system delta keyed `"Δ"` (amber) through the existing `comparisonDeltas`/`comparisonSystems` props.
+- **`PilotPanel` computes the delta** vs `targetState`: `horiz` via `haversineDistanceM` (reused from `procedureGeoMath`), signed `alt`/`speed`/`fpa`, magnitude `head` (`headingMagnitudeDeg`).
+
 ### 2026-06-23 — Dynamics Comparison: Live State shows B + colored A/C/D deviations
 
 The Compare-mode Live-State readout still shows the **reference B** state as the main value of each row, and now appends each other system's **live error vs B** in that system's colour (A warm / C cyan / D yellow), so the readout reads the same comparison the 2×2 charts plot — just at the current instant.

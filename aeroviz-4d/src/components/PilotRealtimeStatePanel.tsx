@@ -14,15 +14,17 @@ interface PilotRealtimeStatePanelProps {
   visible: boolean;
   showControlReadout?: boolean;
   simulationMode?: PilotSimulationMode;
-  targetState?: Pick<PilotSnapshot["state"], "lat" | "lon" | "altM"> | null;
   /**
-   * Compare mode: A/C/D deviations vs the reference B at the current clock time.
-   * When set (with ``comparisonSystems``), the main rows still show B's state and
-   * each other system's error is appended in its own colour.
+   * Per-row deviations appended as coloured chips. Compare mode passes the A/C/D
+   * errors vs the reference B; Trajectory Play passes the single live error vs the
+   * target. The main rows keep showing the subject's state and each chip is its
+   * keyed deviation.
    */
   comparisonDeltas?: DynamicsComparisonDeltas | null;
-  /** Compare mode: the systems (for the per-system delta colours/labels). */
+  /** The systems backing ``comparisonDeltas`` (for the per-chip colours/labels). */
   comparisonSystems?: DynamicsComparisonSystem[] | null;
+  /** What the deltas are measured against — used in the Horiz Err row label. */
+  deltaReferenceLabel?: string;
 }
 
 export default function PilotRealtimeStatePanel({
@@ -30,9 +32,9 @@ export default function PilotRealtimeStatePanel({
   visible,
   showControlReadout = false,
   simulationMode,
-  targetState = null,
   comparisonDeltas = null,
   comparisonSystems = null,
+  deltaReferenceLabel = "B",
 }: PilotRealtimeStatePanelProps) {
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
 
@@ -81,26 +83,10 @@ export default function PilotRealtimeStatePanel({
         />
         {showDeltas ? (
           <RealtimeReadout
-            label="Horiz Err (vs B)"
+            label={`Horiz Err (vs ${deltaReferenceLabel})`}
             value="0 m"
             extra={compareExtra("horiz", 1, false)}
           />
-        ) : null}
-        {targetState ? (
-          <>
-            <RealtimeReadout
-              label="Lat Error"
-              value={formatSignedDelta(snapshot.state.lat - targetState.lat, 6, "deg")}
-            />
-            <RealtimeReadout
-              label="Lon Error"
-              value={formatSignedDelta(snapshot.state.lon - targetState.lon, 6, "deg")}
-            />
-            <RealtimeReadout
-              label="Alt Error"
-              value={formatSignedDelta(snapshot.state.altM - targetState.altM, 1, "m")}
-            />
-          </>
         ) : null}
         <RealtimeReadout
           label="Speed"
@@ -155,10 +141,6 @@ export default function PilotRealtimeStatePanel({
   );
 }
 
-function formatSignedDelta(value: number, fractionDigits: number, unit: string): string {
-  return `${formatSignedCompact(value, fractionDigits)} ${unit}`;
-}
-
 /** Signed value with a "+" on positives and small magnitudes collapsed to 0
  * (no trailing unit), e.g. "+5.2", "-2.1", "0.0". */
 function formatSignedCompact(value: number, fractionDigits: number): string {
@@ -210,6 +192,9 @@ function ComparisonDeltaStrip({
         if (delta === undefined) return null; // B (the reference) has no delta
         const [r, g, b] = system.colorRgba;
         const value = delta[field];
+        // Decimals only help small deviations; for large ones (e.g. a km-scale
+        // horizontal error early in a trajectory) they are noise — drop them.
+        const digits = Math.abs(value) >= 100 ? 0 : fractionDigits;
         return (
           <span
             key={system.key}
@@ -218,9 +203,7 @@ function ComparisonDeltaStrip({
             title={system.label}
           >
             {system.key}{" "}
-            {signed
-              ? formatSignedCompact(value, fractionDigits)
-              : Math.abs(value).toFixed(fractionDigits)}
+            {signed ? formatSignedCompact(value, digits) : Math.abs(value).toFixed(digits)}
           </span>
         );
       })}

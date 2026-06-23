@@ -76,7 +76,9 @@ import {
   type DynamicsComparisonControl,
   type DynamicsComparisonDeltas,
   type DynamicsComparisonResult,
+  type DynamicsComparisonSystem,
 } from "../pilot/dynamicsComparisonClient";
+import { haversineDistanceM } from "../utils/procedureGeoMath";
 
 const DEFAULT_SIMULATION_MODE: PilotSimulationMode = "alpha";
 const DEFAULT_BANK_DEG = 45;
@@ -115,6 +117,12 @@ const OPTIMIZER_FITTING_OPTIONS: { value: OptimizerFitting; label: string }[] = 
 const FALLBACK_MAX_THRUST_N = 240000;
 /** Stable empty-samples reference so the playback hook deps don't churn. */
 const EMPTY_SAMPLES: TrajectorySample[] = [];
+/** The single pseudo-"system" backing the Trajectory-Play target-deviation delta
+ * chips — reuses the Compare-mode delta strip with one amber chip per row. */
+const TARGET_DELTA_KEY = "Δ";
+const TARGET_DELTA_SYSTEMS: DynamicsComparisonSystem[] = [
+  { key: TARGET_DELTA_KEY, label: "final − target", colorRgba: [251, 191, 36, 255], isReference: false },
+];
 
 function usesLoadFactorControl(mode: PilotSimulationMode) {
   return mode === "loadFactor" || mode === "casadi";
@@ -489,6 +497,36 @@ export default function PilotPanel() {
     chart: comparisonResult?.chart ?? null,
     onDeltas: setComparisonDeltas,
   });
+
+  // Trajectory Play: the aircraft's live deviation from the requested target,
+  // shown as one amber delta chip per state row (the same style as the Compare
+  // deviations) instead of separate "X Error" rows. It tracks the sampled state,
+  // so it converges to the final-vs-target error as playback reaches the end.
+  const trajectoryTargetDeltas = useMemo<DynamicsComparisonDeltas | null>(() => {
+    if (activeMode !== "trajectory" || !snapshot) return null;
+    const s = snapshot.state;
+    return {
+      [TARGET_DELTA_KEY]: {
+        horiz: haversineDistanceM(
+          { latDeg: s.lat, lonDeg: s.lon, altM: 0 },
+          { latDeg: targetState.lat, lonDeg: targetState.lon, altM: 0 },
+        ),
+        alt: s.altM - targetState.altM,
+        head: headingMagnitudeDeg(s.headingDeg, targetState.headingDeg),
+        speed: s.speedMps - targetState.speedMps,
+        fpa: s.flightPathDeg - targetState.flightPathDeg,
+      },
+    };
+  }, [
+    activeMode,
+    snapshot,
+    targetState.lat,
+    targetState.lon,
+    targetState.altM,
+    targetState.headingDeg,
+    targetState.speedMps,
+    targetState.flightPathDeg,
+  ]);
 
   useEffect(() => {
     const aircraft = aircraftConfigs[0] ?? null;
@@ -1281,9 +1319,21 @@ export default function PilotPanel() {
         }
         showControlReadout={activeMode === "trajectory" || activeMode === "comparison"}
         simulationMode={snapshot?.simulationMode ?? simulationMode}
-        targetState={activeMode === "trajectory" ? targetState : null}
-        comparisonDeltas={activeMode === "comparison" ? comparisonDeltas : null}
-        comparisonSystems={activeMode === "comparison" ? comparisonResult?.systems ?? null : null}
+        comparisonDeltas={
+          activeMode === "comparison"
+            ? comparisonDeltas
+            : activeMode === "trajectory"
+              ? trajectoryTargetDeltas
+              : null
+        }
+        comparisonSystems={
+          activeMode === "comparison"
+            ? comparisonResult?.systems ?? null
+            : activeMode === "trajectory" && trajectoryTargetDeltas
+              ? TARGET_DELTA_SYSTEMS
+              : null
+        }
+        deltaReferenceLabel={activeMode === "trajectory" ? "target" : "B"}
       />
 
       <header className="pilot-panel-header">
@@ -2131,6 +2181,11 @@ function makeInitialStateFromRnavFix(
     massKg: aircraft.massKg,
     aircraftType: aircraft.code,
   };
+}
+
+/** Shortest-arc magnitude between two headings in degrees (0..180). */
+function headingMagnitudeDeg(a: number, b: number): number {
+  return Math.abs(((a - b + 540) % 360) - 180);
 }
 
 function trajectoryTargetToPilotState(

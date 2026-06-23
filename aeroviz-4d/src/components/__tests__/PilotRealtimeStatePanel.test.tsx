@@ -138,9 +138,10 @@ describe("PilotRealtimeStatePanel", () => {
     expect(altA?.textContent).toContain("A");
     expect(altA?.style.color).toBe("rgb(244, 114, 22)");
 
-    // Horizontal deltas are magnitudes (no sign): A 335.2, D 145.6.
-    expect(chips.find((c) => c.textContent?.includes("335.2"))?.textContent).toContain("A");
-    expect(chips.find((c) => c.textContent?.includes("145.6"))?.textContent).toContain("D");
+    // Horizontal deltas are magnitudes (no sign); large values drop decimals
+    // (335.2 → "335", 145.6 → "146").
+    expect(chips.find((c) => c.textContent?.includes("335"))?.textContent).toContain("A");
+    expect(chips.find((c) => c.textContent?.includes("146"))?.textContent).toContain("D");
 
     // Flight-path-angle deltas are signed: A +0.27, D -0.12.
     expect(chips.find((c) => c.textContent?.includes("+0.27"))?.textContent).toContain("A");
@@ -150,24 +151,39 @@ describe("PilotRealtimeStatePanel", () => {
     expect(chips.some((c) => c.title === "B · reference")).toBe(false);
   });
 
-  it("does not render delta chips or the horiz-error row outside compare mode", () => {
-    render(<PilotRealtimeStatePanel snapshot={snapshot} visible={true} />);
-    expect(screen.queryByText("Horiz Err (vs B)")).toBeNull();
-    expect(document.querySelector(".pilot-realtime-delta")).toBeNull();
-  });
-
-  it("shows actual minus target position errors when a target state is provided", async () => {
+  it("renders a single target-deviation delta with a target-labelled Horiz Err row", async () => {
     render(
       <PilotRealtimeStatePanel
         snapshot={snapshot}
         visible={true}
-        targetState={{ lat: 51, lon: -114.1, altM: 1200 }}
+        showControlReadout={true}
+        simulationMode="casadi"
+        comparisonDeltas={{ "Δ": { horiz: 42.5, alt: 34, head: 3.2, speed: 1.5, fpa: -0.4 } }}
+        comparisonSystems={[
+          { key: "Δ", label: "final − target", colorRgba: [251, 191, 36, 255], isReference: false },
+        ]}
+        deltaReferenceLabel="target"
       />,
     );
 
-    expect(await screen.findByText("Lat Error")).toBeTruthy();
-    expect(screen.getByText("+0.020000 deg")).toBeTruthy();
-    expect(screen.getByText("+0.050000 deg")).toBeTruthy();
-    expect(screen.getByText("+34.0 m")).toBeTruthy();
+    // The Horiz Err row is labelled against the target, not B.
+    expect(await screen.findByText("Horiz Err (vs target)")).toBeTruthy();
+
+    const chips = Array.from(
+      document.querySelectorAll<HTMLElement>(".pilot-realtime-delta"),
+    );
+    // One amber chip carries the horizontal error magnitude.
+    const horiz = chips.find((c) => c.textContent?.includes("42.5"));
+    expect(horiz?.textContent).toContain("Δ");
+    expect(horiz?.style.color).toBe("rgb(251, 191, 36)");
+    // Altitude delta is signed.
+    expect(chips.find((c) => c.textContent?.includes("+34"))).toBeTruthy();
+  });
+
+  it("does not render delta chips or the horiz-error row when no deltas are given", () => {
+    render(<PilotRealtimeStatePanel snapshot={snapshot} visible={true} />);
+    expect(screen.queryByText("Horiz Err (vs B)")).toBeNull();
+    expect(screen.queryByText("Horiz Err (vs target)")).toBeNull();
+    expect(document.querySelector(".pilot-realtime-delta")).toBeNull();
   });
 });

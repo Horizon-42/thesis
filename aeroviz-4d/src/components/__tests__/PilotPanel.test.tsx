@@ -621,7 +621,7 @@ describe("PilotPanel trajectory play mode", () => {
     ).toBeTruthy();
   });
 
-  it("shows the live state panel with target errors during optimized playback", async () => {
+  it("renders the live target-deviation as compare-style chips (not separate error rows)", async () => {
     document.body.innerHTML = '<div class="cesium-overlay-container"></div>';
     mocks.runTrajectoryOptimization.mockResolvedValueOnce({
       ok: true,
@@ -672,12 +672,13 @@ describe("PilotPanel trajectory play mode", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Play" }));
 
-    const finalStatePanel = await screen.findByRole("complementary", {
+    const panel = await screen.findByRole("complementary", {
       name: "Realtime aircraft state",
     });
-    expect(within(finalStatePanel).getByText("Lat Error")).toBeTruthy();
-    expect(within(finalStatePanel).getByText("-0.004000 deg")).toBeTruthy();
-    expect(within(finalStatePanel).getByText("+0.012000 deg")).toBeTruthy();
-    expect(within(finalStatePanel).getByText("+773.1 m")).toBeTruthy();
+    // The deviation is shown as the compare-style chip strip + Horiz Err row,
+    // not the old separate "Lat/Lon/Alt Error" rows.
+    expect(within(panel).getByText("Horiz Err (vs target)")).toBeTruthy();
+    expect(within(panel).queryByText("Lat Error")).toBeNull();
+    expect(panel.querySelectorAll(".pilot-realtime-delta").length).toBeGreaterThan(0);
   });
 });
