@@ -727,6 +727,85 @@ h_dot   = V_up</code></pre>
           </article>
         </div>
 
+        <div class="card" style="margin-top:18px">
+          <h3>为什么步进器要绕 ENU→ECEF→大地 一大圈，而连续方案“除以半径”就够了？<span class="en" lang="en">Why the Stepper Round-Trips ENU→ECEF→Geodetic, While the Continuous Scheme Just “Divides by Radius”</span></h3>
+          <p>
+            因为步进器<strong>复用平直 RHS</strong>（<code>make_dynamics_model</code>），而那套方程只认<strong>平直 ENU 的米</strong>。它没法直接吃一个大地坐标状态，于是每一步都被迫绕一圈：
+            <span class="en" lang="en">Because the stepper <strong>reuses the flat RHS</strong> (<code>make_dynamics_model</code>), and those equations only understand <strong>flat ENU metres</strong>. They cannot be evaluated on a geodetic state directly, so every step is forced through a round-trip:</span>
+          </p>
+          <div class="formula"><span class="formula-line">\[
+\underbrace{(\phi,\lambda,h)}_{\text{geodetic, deg}}
+\;\xrightarrow{\;\text{geo}\to\text{ECEF}\to\text{ENU}\;}\;
+\underbrace{(0,0,h,V,\psi,\gamma)}_{\text{flat ENU, m}}
+\;\xrightarrow{\;\text{flat RHS, one RK4 step}\;}\;
+(\delta E,\delta N,\delta U,\dots)
+\;\xrightarrow{\;\text{ENU}\to\text{ECEF}\to\text{geo}\;}\;
+(\phi',\lambda',h')
+\]</span></div>
+          <p>
+            这趟来回是<strong>精确</strong>的，但它是“复用平直模型”要付的代价：每一步都数值地做一次坐标换算。连续大地 RHS 不复用平直方程，而是<strong>直接</strong>把动力学写在大地坐标里——它把这趟换算替换成换算的<strong>导数（雅可比）</strong>。对位置而言，这个雅可比恰好是一个对角的“除以半径”：
+            <span class="en" lang="en">That round-trip is <strong>exact</strong>, but it is the price of reusing the flat model: a numerical coordinate conversion every step. The continuous geodetic RHS does not reuse the flat equations; it writes the dynamics <strong>directly</strong> in geodetic coordinates — replacing the conversion by its <strong>derivative (Jacobian)</strong>. For position, that Jacobian is exactly a diagonal “divide by radius”:</span>
+          </p>
+          <div class="formula"><span class="formula-line">\[
+\delta N=(R_M+h)\,\delta\phi,\qquad
+\delta E=(R_N+h)\cos\phi\,\delta\lambda,\qquad
+\delta U=\delta h
+\]</span></div>
+          <p>
+            “沿子午线走 \(\delta N\) 米，纬度增加 \(\delta N/(R_M+h)\)；沿纬线（半径 \((R_N+h)\cos\phi\)）走 \(\delta E\) 米，经度增加 \(\delta E/((R_N+h)\cos\phi)\)。” 这里的 \(R_M,R_N\) 正是图 2 的两个曲率半径。把它写成雅可比：
+            <span class="en" lang="en">“Walk \(\delta N\) metres along the meridian → latitude rises by \(\delta N/(R_M+h)\); walk \(\delta E\) metres along the parallel (radius \((R_N+h)\cos\phi\)) → longitude rises by \(\delta E/((R_N+h)\cos\phi)\).” The \(R_M,R_N\) here are exactly Figure 2’s two radii of curvature. As a Jacobian:</span>
+          </p>
+          <div class="formula"><span class="formula-line">\[
+J=\left.\frac{\partial(\phi,\lambda,h)}{\partial(E,N,U)}\right|_{0}
+=\begin{pmatrix}
+0 & \dfrac{1}{R_M+h} & 0\\[8pt]
+\dfrac{1}{(R_N+h)\cos\phi} & 0 & 0\\[8pt]
+0 & 0 & 1
+\end{pmatrix}
+\]</span></div>
+          <div class="note">
+            关键区别：“除以半径”只是换算的<strong>微分（瞬时率）</strong>。你<strong>不能</strong>用它替换一次<strong>有限</strong>的 ENU→大地换算——那只是某一点的线性化，走远了就偏。所以有限步长的步进器仍得做完整的非线性来回；而连续 RHS 是瞬时的，用线性雅可比正好。两者是<strong>不同的离散算子</strong>，但下面证明它们有<strong>相同的连续极限</strong>。
+            <span class="en" lang="en">The key distinction: “divide by radius” is only the <strong>differential (instantaneous rate)</strong> of the conversion. You <strong>cannot</strong> use it to replace one <strong>finite</strong> ENU→geodetic conversion — that is just the linearization at a point and drifts over distance. So the finite-step stepper still does the full nonlinear round-trip, while the continuous RHS, being instantaneous, uses the linear Jacobian. They are <strong>different discrete operators</strong> — but, as proven next, with the <strong>same continuous limit</strong>.</span>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:18px">
+          <h3>数学证明：步进器的 \(\Delta t\to0\) 极限 = 连续大地 RHS<span class="en" lang="en">Proof: the \(\Delta t\to0\) Limit of the Stepper = the Continuous Geodetic RHS</span></h3>
+          <p>
+            记步进器为一步映射 \(\Phi_{\Delta t}\)。它锚定在当前点，平直 RHS 给出的 ENU 位移是 \((\delta E,\delta N,\delta U)=(V_E,V_N,V_U)\Delta t+O(\Delta t^2)\)。再用<strong>精确</strong>的 ENU→大地映射 \(G\) 换回来。在锚点（ENU 原点 \(\leftrightarrow\) 当前大地点）把 \(G\) 做一阶泰勒展开：
+            <span class="en" lang="en">Write the stepper as a one-step map \(\Phi_{\Delta t}\). Anchored at the current point, the flat RHS gives the ENU displacement \((\delta E,\delta N,\delta U)=(V_E,V_N,V_U)\Delta t+O(\Delta t^2)\). Convert back with the <strong>exact</strong> ENU→geodetic map \(G\). Taylor-expand \(G\) at the anchor (ENU origin \(\leftrightarrow\) current geodetic point) to first order:</span>
+          </p>
+          <div class="formula">
+            <span class="formula-line">\[
+\Phi_{\Delta t}(\mathbf x)\big|_{\text{pos}}
+=G(\delta E,\delta N,\delta U)
+=\underbrace{G(0)}_{(\phi,\lambda,h)}+\,J\begin{pmatrix}\delta E\\\delta N\\\delta U\end{pmatrix}+O(\Delta t^2)
+\]</span>
+            <span class="formula-line">\[
+\Rightarrow\quad
+\lim_{\Delta t\to0}\frac{\Phi_{\Delta t}(\mathbf x)-\mathbf x}{\Delta t}\bigg|_{\text{pos}}
+=J\begin{pmatrix}V_E\\V_N\\V_U\end{pmatrix}
+=\begin{pmatrix}\dfrac{V_N}{R_M+h}\\[6pt]\dfrac{V_E}{(R_N+h)\cos\phi}\\[6pt]V_U\end{pmatrix}
+\]</span>
+          </div>
+          <p>
+            右边正是第 6 节（和第 9 节）的位置 RHS。<strong>姿态部分</strong>同理：步进器每步重锚时把速度重新投影到<strong>新</strong>的当地框架（<code>enu_state_to_geodetic_expr</code> 里的速度再投影），这把 \((\psi,\gamma)\) 转过的角度，在 \(\Delta t\to0\) 时正好是第 8 节的输运率两项。位置 + 姿态合起来：
+            <span class="en" lang="en">The right side is exactly the position RHS of Section 6 (and Section 9). The <strong>attitude part</strong> follows the same way: re-anchoring each step re-projects the velocity into the <strong>new</strong> local frame (the velocity reprojection inside <code>enu_state_to_geodetic_expr</code>); the angle by which this rotates \((\psi,\gamma)\) is, as \(\Delta t\to0\), exactly Section 8’s two transport terms. Position plus attitude together:</span>
+          </p>
+          <div class="formula"><span class="formula-line">\[
+\boxed{\;\lim_{\Delta t\to0}\frac{\Phi_{\Delta t}(\mathbf x,\mathbf u)-\mathbf x}{\Delta t}=f_{\text{geo}}(\mathbf x,\mathbf u)\;}
+\]</span></div>
+          <p>
+            即：步进器和连续大地 RHS 共享<strong>同一个连续向量场</strong>。步进器在每步把坐标换算<strong>数值地</strong>算一遍；连续 RHS 把换算的<strong>导数</strong>（曲率半径 + 输运率）一次性折进 \(f\)。有限 \(\Delta t\) 下两者只差 \(O(\Delta t^2)\) 的逐步截断误差。
+            <span class="en" lang="en">That is: the stepper and the continuous geodetic RHS share <strong>one continuous vector field</strong>. The stepper computes the conversion <strong>numerically</strong> every step; the continuous RHS folds the conversion’s <strong>derivative</strong> (curvature radii + transport) into \(f\) once. At finite \(\Delta t\) they differ only by \(O(\Delta t^2)\) per-step truncation.</span>
+          </p>
+          <div class="callout good">
+            <strong>数值佐证。</strong>
+            \(J\) 与逐点数值换算吻合到约 10 位有效数字；脚本 <code>geodetic_vs_reanchored_error.py</code> 在 5 km 上测得：连续大地 RHS（带输运）与逐步重锚 RK4 仅差约 <strong>0.3 毫米</strong>——正是“同一连续向量场、不同离散算子”的实证。
+            <span class="en" lang="en"><strong>Numerical evidence.</strong> \(J\) matches the pointwise numerical conversion to ~10 significant figures; the script <code>geodetic_vs_reanchored_error.py</code> measures, over 5 km, that the continuous geodetic RHS (with transport) and the per-step re-anchored RK4 differ by only about <strong>0.3 mm</strong> — the same continuous vector field, realised by two different discrete operators.</span>
+          </div>
+        </div>
+
         <figure class="viz">
           <div id="viz-triad" class="plot" style="height:480px"></div>
           <div class="controls">
@@ -753,35 +832,157 @@ h_dot   = V_up</code></pre>
           <span class="en" lang="en">\(\psi\) and \(\gamma\) are defined not against inertial space but against the <strong>local ENU frame</strong>. Yet that frame itself rotates as the aircraft moves over the curved surface (clearly visible in Figure 3). So even with zero aerodynamic moment, \(\psi,\gamma\) change. This “purely geometric angular velocity” is the transport rate. The continuous geodetic RHS must add it explicitly to equal the re-anchored stepper.</span>
         </p>
 
+        <div class="note">
+          <strong>本节路线（五步，不跳步）：</strong>
+          ① 把 \(\psi,\gamma\) 写成"速度方向在当地 ENU 里的两个角"；② 求当地框架的转动角速度 \(\boldsymbol\omega_{en}\)；③ 用输运定理把"力造成的转动"和"我们读到的角速率"分开；④ 把方向变化率投影回 \(\dot\psi,\dot\gamma\)；⑤ 代入、取主项，得到代码里的两行。
+          <span class="en" lang="en"><strong>Roadmap (five steps, none skipped):</strong> ① write \(\psi,\gamma\) as two angles of the velocity direction in the local ENU frame; ② find the frame’s angular velocity \(\boldsymbol\omega_{en}\); ③ use the transport theorem to separate "rotation from forces" from "the rate we read off"; ④ project the direction-rate back onto \(\dot\psi,\dot\gamma\); ⑤ substitute and keep the leading terms to land on the two code lines.</span>
+        </div>
+
         <div class="card">
-          <h3>本地框架相对地球的转动角速度<span class="en" lang="en">Angular Velocity of the Local Frame Relative to Earth</span></h3>
+          <h3>第 1 步：\(\psi,\gamma\) 是"速度方向"在当地 ENU 里的两个角<span class="en" lang="en">Step 1: \(\psi,\gamma\) Are Two Angles of the Velocity Direction in the Local ENU Frame</span></h3>
           <p>
-            当飞机以 ENU 速度 \((V_E,V_N,V_U)\) 移动时，当地 ENU 框架相对地球的转动角速度（写在 ENU 轴上）是经典的“运输率”向量：
-            <span class="en" lang="en">As the aircraft moves with ENU velocity \((V_E,V_N,V_U)\), the local ENU frame’s angular velocity relative to Earth (expressed on the ENU axes) is the classic transport-rate vector:</span>
+            把单位速度向量 \(\hat{\mathbf v}\)（速度除以速率 \(V\)）写在 East-North-Up 三轴上。航向 \(\psi\) 是它在水平面内相对东轴的角，航迹角 \(\gamma\) 是它相对水平面的仰角：
+            <span class="en" lang="en">Write the unit velocity vector \(\hat{\mathbf v}\) (velocity over speed \(V\)) on the East-North-Up axes. Heading \(\psi\) is its angle from East in the horizontal plane; flight-path angle \(\gamma\) is its elevation above the horizontal:</span>
           </p>
+          <div class="formula"><span class="formula-line">\[
+\hat{\mathbf v}=\frac{1}{V}\begin{pmatrix}V_E\\V_N\\V_U\end{pmatrix}
+=\begin{pmatrix}\cos\gamma\cos\psi\\[2pt]\cos\gamma\sin\psi\\[2pt]\sin\gamma\end{pmatrix}_{ENU}
+\]</span></div>
+          <p>
+            <strong>关键：</strong>这两个角是相对 ENU 这组轴量的。而 ENU 轴本身钉在地表，随飞机移动会转。所以哪怕 \(\hat{\mathbf v}\) 在惯性空间里完全不动，只要框架转了，读出来的 \(\psi,\gamma\) 也会变。这部分变化就是输运率，下面四步把它精确算出来。
+            <span class="en" lang="en"><strong>The key point:</strong> these two angles are measured against the ENU axes, and those axes are pinned to the surface and rotate as the aircraft moves. So even if \(\hat{\mathbf v}\) were frozen in inertial space, the read-off \(\psi,\gamma\) would still change once the frame turns. That change is the transport rate, computed exactly in the next four steps.</span>
+          </p>
+        </div>
+
+        <div class="card" style="margin-top:18px">
+          <h3>第 2 步：求当地框架的转动角速度 \(\boldsymbol\omega_{en}\)<span class="en" lang="en">Step 2: Find the Local Frame’s Angular Velocity \(\boldsymbol\omega_{en}\)</span></h3>
+          <p>
+            ENU 轴的朝向只由 \((\phi,\lambda)\) 决定。飞机一动，\(\phi,\lambda\) 变，轴就转。转动只来自两个独立部分：
+            <span class="en" lang="en">The ENU axes’ orientation depends only on \((\phi,\lambda)\). When the aircraft moves, \(\phi,\lambda\) change and the axes rotate. The rotation comes from just two independent pieces:</span>
+          </p>
+          <ul>
+            <li><strong>经度变化 \(\dot\lambda\)</strong>：是绕地球<strong>自转轴</strong> \(\hat{\mathbf z}_e\) 的转动。把自转轴写到 ENU 三轴上（它在 East 上投影为 0、North 上为 \(\cos\phi\)、Up 上为 \(\sin\phi\)）：\(\hat{\mathbf z}_e=\cos\phi\,\hat{\mathbf n}+\sin\phi\,\hat{\mathbf u}\)。<span class="en" lang="en"><strong>Longitude change \(\dot\lambda\)</strong> is a rotation about the Earth’s <strong>spin axis</strong> \(\hat{\mathbf z}_e\). On the ENU axes (its East component is 0, North \(\cos\phi\), Up \(\sin\phi\)): \(\hat{\mathbf z}_e=\cos\phi\,\hat{\mathbf n}+\sin\phi\,\hat{\mathbf u}\).</span></li>
+            <li><strong>纬度变化 \(\dot\phi\)</strong>：向北走时整个框架绕<strong>东轴</strong>倒下，转轴是 \(-\hat{\mathbf e}\)。（验证：\(\partial\hat{\mathbf u}/\partial\phi=\hat{\mathbf n}\)、\(\partial\hat{\mathbf n}/\partial\phi=-\hat{\mathbf u}\)，正是绕 \(-\hat{\mathbf e}\) 的旋转。）<span class="en" lang="en"><strong>Latitude change \(\dot\phi\)</strong>: moving north tips the whole frame about the <strong>East axis</strong>, with rotation axis \(-\hat{\mathbf e}\). (Check: \(\partial\hat{\mathbf u}/\partial\phi=\hat{\mathbf n}\), \(\partial\hat{\mathbf n}/\partial\phi=-\hat{\mathbf u}\) — exactly a rotation about \(-\hat{\mathbf e}\).)</span></li>
+          </ul>
+          <p>把两部分相加，再换到 ENU 分量：<span class="en" lang="en">Add the two pieces, then read the ENU components:</span></p>
+          <div class="formula">
+            <span class="formula-line">\[
+\boldsymbol\omega_{en}=\dot\lambda\,\hat{\mathbf z}_e-\dot\phi\,\hat{\mathbf e}
+=-\dot\phi\,\hat{\mathbf e}+\dot\lambda\cos\phi\,\hat{\mathbf n}+\dot\lambda\sin\phi\,\hat{\mathbf u}
+\]</span>
+            <span class="formula-line">\[
+\boldsymbol\omega_{en}^{ENU}=(\omega_E,\ \omega_N,\ \omega_U)
+=\bigl(-\dot\phi,\ \dot\lambda\cos\phi,\ \dot\lambda\sin\phi\bigr)
+\]</span>
+          </div>
+          <p>代入第 6 节的位置率 \(\dot\phi=\dfrac{V_N}{R_M+h}\)、\(\dot\lambda=\dfrac{V_E}{(R_N+h)\cos\phi}\)（注意第三分量里 \(\dot\lambda\sin\phi\) 的 \(\cos\phi\) 被约掉变成 \(\tan\phi\)）：<span class="en" lang="en">Substitute the position rates from Section 6, \(\dot\phi=\dfrac{V_N}{R_M+h}\), \(\dot\lambda=\dfrac{V_E}{(R_N+h)\cos\phi}\) (in the third component the \(\cos\phi\) cancels, leaving \(\tan\phi\)):</span></p>
           <div class="formula"><span class="formula-line">\[
 \boldsymbol\omega_{en}^{ENU}=
 \left(\;
--\frac{V_N}{R_M+h},\quad
-\frac{V_E}{R_N+h},\quad
-\frac{V_E\tan\phi}{R_N+h}
+\underbrace{-\frac{V_N}{R_M+h}}_{\omega_E},\quad
+\underbrace{\frac{V_E}{R_N+h}}_{\omega_N},\quad
+\underbrace{\frac{V_E\tan\phi}{R_N+h}}_{\omega_U}
 \;\right)
 \]</span></div>
+        </div>
+
+        <div class="card" style="margin-top:18px">
+          <h3>第 3 步：输运定理——分开"力造成的转动"和"读到的角速率"<span class="en" lang="en">Step 3: The Transport Theorem — Separate "Rotation from Forces" from "the Rate We Read"</span></h3>
           <p>
-            把它投影到“改变航迹角 \(\gamma\)”和“改变航向 \(\psi\)”的转轴上，就得到两个附加项。代码里只显式加了它们（其余的运输分量已隐含在速度分解里）：
-            <span class="en" lang="en">Projecting it onto the axes that change flight-path angle \(\gamma\) and heading \(\psi\) gives two extra terms. The code adds exactly these (the remaining transport components are already implicit in the velocity decomposition):</span>
+            对任意向量，惯性系里的变化率 = 转动系里的变化率 + 框架自转贡献（输运定理）。本模型忽略地球自转，所以"惯性系"≈地球系 \(e\)；"转动系"是当地 ENU 系 \(n\)：
+            <span class="en" lang="en">For any vector, the rate in the inertial frame equals the rate in the rotating frame plus the frame’s own spin (the transport theorem). This model ignores Earth’s rotation, so "inertial" ≈ Earth frame \(e\); the "rotating frame" is the local ENU frame \(n\):</span>
+          </p>
+          <div class="formula"><span class="formula-line">\[
+\left.\frac{d\hat{\mathbf v}}{dt}\right|_{e}
+=\left.\frac{d\hat{\mathbf v}}{dt}\right|_{n}
++\boldsymbol\omega_{en}\times\hat{\mathbf v}
+\]</span></div>
+          <p>
+            牛顿定律在 \(e\) 系成立，所以<strong>气动力 + 重力</strong>给出的是左边 \(\big(d\hat{\mathbf v}/dt\big)|_{e}\)。而平直模型的那两条姿态方程（第 3 节的 \(\dot\psi,\dot\gamma\)）是<strong>假设框架不转</strong>推出来的，等于把力造成的转动直接当成了 \(n\) 系里的角速率。真正在 \(n\) 系里读到的是右边第一项，于是要补的修正就是 \(-\boldsymbol\omega_{en}\times\hat{\mathbf v}\)：
+            <span class="en" lang="en">Newton’s law holds in \(e\), so <strong>aerodynamic force + gravity</strong> give the left side \(\big(d\hat{\mathbf v}/dt\big)|_{e}\). The flat model’s two attitude equations (the \(\dot\psi,\dot\gamma\) of Section 3) were derived <strong>assuming the frame does not rotate</strong> — they equate the force-induced turn directly with the \(n\)-frame angular rates. What we actually read in \(n\) is the first right-hand term, so the correction to add is \(-\boldsymbol\omega_{en}\times\hat{\mathbf v}\):</span>
+          </p>
+          <div class="formula"><span class="formula-line">\[
+\underbrace{\left.\frac{d\hat{\mathbf v}}{dt}\right|_{n}}_{\text{measured }\dot\psi,\dot\gamma}
+=\underbrace{\left.\frac{d\hat{\mathbf v}}{dt}\right|_{e}}_{\text{aero, Step 3}}
+\;\underbrace{-\;\boldsymbol\omega_{en}\times\hat{\mathbf v}}_{\text{transport correction}}
+\]</span></div>
+        </div>
+
+        <div class="card" style="margin-top:18px">
+          <h3>第 4 步：把"方向变化率"投影回 \(\dot\psi,\dot\gamma\)<span class="en" lang="en">Step 4: Project the "Direction Rate" Back onto \(\dot\psi,\dot\gamma\)</span></h3>
+          <p>
+            \(\hat{\mathbf v}\) 只有两个自由度 \((\psi,\gamma)\)。对它们求偏导，得到两条互相垂直的单位方向——\(\hat{\boldsymbol\gamma}\)（仰角增大的方向）和 \(\hat{\boldsymbol\psi}\)（航向增大的方向）：
+            <span class="en" lang="en">\(\hat{\mathbf v}\) has only two degrees of freedom \((\psi,\gamma)\). Differentiating with respect to them gives two mutually perpendicular unit directions — \(\hat{\boldsymbol\gamma}\) (increasing elevation) and \(\hat{\boldsymbol\psi}\) (increasing heading):</span>
+          </p>
+          <div class="formula">
+            <span class="formula-line">\[
+\hat{\boldsymbol\gamma}=\frac{\partial\hat{\mathbf v}}{\partial\gamma}
+=\begin{pmatrix}-\sin\gamma\cos\psi\\-\sin\gamma\sin\psi\\\cos\gamma\end{pmatrix},
+\qquad
+\frac{\partial\hat{\mathbf v}}{\partial\psi}=\cos\gamma\,\hat{\boldsymbol\psi},\quad
+\hat{\boldsymbol\psi}=\begin{pmatrix}-\sin\psi\\\cos\psi\\0\end{pmatrix}
+\]</span>
+          </div>
+          <p>
+            于是任意方向变化率 \(\dfrac{d\hat{\mathbf v}}{dt}=\dot\gamma\,\hat{\boldsymbol\gamma}+\dot\psi\cos\gamma\,\hat{\boldsymbol\psi}\)，反解出"读数规则"——把变化率点到两条单位方向上：
+            <span class="en" lang="en">So any direction rate is \(\dfrac{d\hat{\mathbf v}}{dt}=\dot\gamma\,\hat{\boldsymbol\gamma}+\dot\psi\cos\gamma\,\hat{\boldsymbol\psi}\); inverting gives the "read-off rule" — dot the rate onto the two unit directions:</span>
+          </p>
+          <div class="formula"><span class="formula-line">\[
+\dot\gamma=\frac{d\hat{\mathbf v}}{dt}\cdot\hat{\boldsymbol\gamma},
+\qquad
+\dot\psi=\frac{1}{\cos\gamma}\,\frac{d\hat{\mathbf v}}{dt}\cdot\hat{\boldsymbol\psi}
+\]</span></div>
+        </div>
+
+        <div class="card" style="margin-top:18px">
+          <h3>第 5 步：代入修正项，取主项 → 对上代码<span class="en" lang="en">Step 5: Substitute the Correction, Keep the Leading Terms → Match the Code</span></h3>
+          <p>
+            把第 4 步的读数规则作用在第 3 步的修正 \(-\boldsymbol\omega_{en}\times\hat{\mathbf v}\) 上。用标量三重积 \((\mathbf A\times\mathbf B)\cdot\mathbf C=\mathbf A\cdot(\mathbf B\times\mathbf C)\) 与两条恒等式 \(\hat{\mathbf v}\times\hat{\boldsymbol\gamma}=-\hat{\boldsymbol\psi}\)、\(\hat{\mathbf v}\times\hat{\boldsymbol\psi}=\hat{\boldsymbol\gamma}\)，叉积一下就消掉：
+            <span class="en" lang="en">Apply Step 4’s rule to Step 3’s correction \(-\boldsymbol\omega_{en}\times\hat{\mathbf v}\). Using the scalar triple product \((\mathbf A\times\mathbf B)\cdot\mathbf C=\mathbf A\cdot(\mathbf B\times\mathbf C)\) and the two identities \(\hat{\mathbf v}\times\hat{\boldsymbol\gamma}=-\hat{\boldsymbol\psi}\), \(\hat{\mathbf v}\times\hat{\boldsymbol\psi}=\hat{\boldsymbol\gamma}\), the cross products collapse:</span>
+          </p>
+          <div class="formula">
+            <span class="formula-line">\[
+\Delta\dot\gamma=(-\boldsymbol\omega_{en}\times\hat{\mathbf v})\cdot\hat{\boldsymbol\gamma}
+=\boldsymbol\omega_{en}\cdot\hat{\boldsymbol\psi},
+\qquad
+\Delta\dot\psi=\frac{(-\boldsymbol\omega_{en}\times\hat{\mathbf v})\cdot\hat{\boldsymbol\psi}}{\cos\gamma}
+=-\frac{\boldsymbol\omega_{en}\cdot\hat{\boldsymbol\gamma}}{\cos\gamma}
+\]</span>
+          </div>
+          <p><strong>航迹角 \(\gamma\)（结果是严格的）：</strong>点积 \(\boldsymbol\omega_{en}\cdot\hat{\boldsymbol\psi}=-\omega_E\sin\psi+\omega_N\cos\psi\)，再用 \(V_N=V\cos\gamma\sin\psi\)、\(V_E=V\cos\gamma\cos\psi\)：<span class="en" lang="en"><strong>Flight-path angle \(\gamma\) (this result is exact):</strong> the dot product \(\boldsymbol\omega_{en}\cdot\hat{\boldsymbol\psi}=-\omega_E\sin\psi+\omega_N\cos\psi\), then with \(V_N=V\cos\gamma\sin\psi\), \(V_E=V\cos\gamma\cos\psi\):</span></p>
+          <div class="formula">
+            <span class="formula-line">\[
+\Delta\dot\gamma=\frac{V_N\sin\psi}{R_M+h}+\frac{V_E\cos\psi}{R_N+h}
+=V\cos\gamma\left(\frac{\sin^2\psi}{R_M+h}+\frac{\cos^2\psi}{R_N+h}\right)
+\]</span>
+          </div>
+          <p><strong>航向 \(\psi\)（保留主项）：</strong>展开 \(-\dfrac{\boldsymbol\omega_{en}\cdot\hat{\boldsymbol\gamma}}{\cos\gamma}\) 得到两项——主项是子午线收敛 \(-\omega_U/\!\cos\gamma\cdot\cos\gamma\)，外加一个小交叉项：<span class="en" lang="en"><strong>Heading \(\psi\) (keep the leading term):</strong> expanding \(-\dfrac{\boldsymbol\omega_{en}\cdot\hat{\boldsymbol\gamma}}{\cos\gamma}\) gives two pieces — the dominant meridian-convergence term plus a small cross term:</span></p>
+          <div class="formula">
+            <span class="formula-line">\[
+\Delta\dot\psi=
+\underbrace{-\frac{V\cos\gamma\cos\psi\tan\phi}{R_N+h}}_{\text{kept: meridian convergence}}
++\underbrace{V\sin\gamma\sin\psi\cos\psi\!\left(\frac{1}{R_N+h}-\frac{1}{R_M+h}\right)}_{\text{dropped}}
+\]</span>
+          </div>
+          <p>
+            丢弃项同时含 \(\sin\gamma\)（近水平飞行很小）和 \(\bigl(\tfrac{1}{R_N+h}-\tfrac{1}{R_M+h}\bigr)\)（因 \(R_N\approx R_M\)，差仅约 \(e^2\) 量级），实测比保留项小约 \(10^{4}\) 倍，故略去。得到代码里的两行：
+            <span class="en" lang="en">The dropped term carries both \(\sin\gamma\) (tiny in near-level flight) and \(\bigl(\tfrac{1}{R_N+h}-\tfrac{1}{R_M+h}\bigr)\) (since \(R_N\approx R_M\), a difference of order \(e^2\)); numerically it is about \(10^{4}\) times smaller than the kept term, so it is dropped. This yields the two code lines:</span>
           </p>
           <div class="formula">
             <span class="formula-line">\[
 \dot\gamma \mathrel{+}= V\cos\gamma\left(
 \frac{\sin^2\psi}{R_M+h}+\frac{\cos^2\psi}{R_N+h}
 \right)
-\qquad\text{(曲率俯仰 / curvature pitch-up)}
+\qquad\text{(curvature pitch-up)}
 \]</span>
             <span class="formula-line">\[
 \dot\psi \mathrel{+}= -\,\frac{V\cos\gamma\,\cos\psi\,\tan\phi}{R_N+h}
-\qquad\text{(子午线收敛 / meridian convergence)}
+\qquad\text{(meridian convergence)}
 \]</span>
+          </div>
+          <div class="note">
+            数值自检（某状态 \(V=130,\ \psi=34^\circ,\ \gamma=-2.9^\circ,\ \phi=42^\circ,\ h=3\,\mathrm{km}\)）：严格投影与上面两行代码逐项吻合，\(\dot\gamma\) 完全相等，\(\dot\psi\) 仅差被丢弃的交叉项 \(\sim1.8\times10^{-9}\,\mathrm{rad/s}\)（占保留项的 \(0.01\%\)）。
+            <span class="en" lang="en">Numerical self-check (state \(V=130,\ \psi=34^\circ,\ \gamma=-2.9^\circ,\ \phi=42^\circ,\ h=3\,\mathrm{km}\)): the exact projection matches the two code lines term by term — \(\dot\gamma\) is identical, and \(\dot\psi\) differs only by the dropped cross term \(\sim1.8\times10^{-9}\,\mathrm{rad/s}\) (0.01% of the kept term).</span>
           </div>
         </div>
 
@@ -884,17 +1085,23 @@ gamma_dot = g * (n * <span class="tok-fn">cos</span>(mu) - cos_g) / V
         <figure class="viz">
           <div id="viz-traj" class="plot" style="height:480px"></div>
           <div class="controls">
-            <span><label for="traj-d">航程 / range flown</label></span>
-            <input id="traj-d" type="range" min="200" max="3000" value="1600" step="50">
-            <span class="chip"><span class="dot" style="background:#2e7d59"></span>大地 RHS（贴地） geodetic</span>
-            <span class="chip"><span class="dot" style="background:#b65b13"></span>平直 ENU（飘起） flat ENU</span>
+            <span><label for="traj-d">航程 L / range flown</label></span>
+            <input id="traj-d" type="range" min="100" max="2000" value="600" step="50">
+            <span class="chip"><span class="dot" style="background:#007c89"></span>切平面 = 平直 ENU 的“地面” tangent plane</span>
+            <span class="chip"><span class="dot" style="background:#2e7d59"></span>大地（贴地） geodetic on Earth</span>
+            <span class="chip"><span class="dot" style="background:#b65b13"></span>平直 ENU（留在切平面） flat ENU</span>
           </div>
           <div class="readout" id="traj-out"></div>
           <figcaption>
-            图 4 · 三维（曲率与高度差已夸张）：两机同点出发、向东平飞、飞过同样的地面距离。绿线用大地坐标平飞，跟着纬线圈<strong>贴住</strong>椭球面；橙线是固定切平面里的平直 ENU，沿初始切线笔直前进，逐渐<strong>抬离</strong>地球。脱离量随航程二次增长，正是图 1 的 \(\epsilon\approx L^2/2R\)。
-            <span class="en" lang="en">Figure 4 · 3D (curvature and height gap exaggerated): two aircraft leave the same point, fly level eastward, and cover the same ground distance. The green line flies in geodetic coordinates and follows the parallel, <strong>hugging</strong> the ellipsoid; the orange line is the flat ENU in a fixed tangent plane, going straight along the initial tangent and gradually <strong>lifting off</strong> the Earth. The departure grows quadratically with range — exactly Figure 1’s \(\epsilon\approx L^2/2R\).</span>
+            图 4 · 侧视三维（只夸张竖直方向）：青色薄片是<strong>切平面——平直 ENU 默认的“地面”</strong>；真实地球（连同贴着它的绿色大地航迹）从切平面下方<strong>弯走</strong>。橙线是平直 ENU，它一直留在自己的平面上，于是相对地球“抬起”。橙色竖线就是竖直脱离 \(\epsilon\approx L^2/2R\)。注意：<strong>这是纯几何（没有外力）</strong>，脱离几乎全在竖直方向；横向（沿航迹）几何差 \(\sim L^3/3R^2\) 极小。
+            <span class="en" lang="en">Figure 4 · Side-on 3D (only the vertical is exaggerated): the teal sheet is the <strong>tangent plane — the flat ENU’s assumed “ground.”</strong> The real Earth (and the green geodetic path hugging it) <strong>curves away</strong> below the plane. The orange line is the flat ENU, which stays on its own plane and so “rises” relative to the Earth. The orange vertical bar is the departure \(\epsilon\approx L^2/2R\). Note: <strong>this is pure geometry (no forces)</strong>, so the departure is almost entirely vertical; the cross/along-track geometric difference \(\sim L^3/3R^2\) is tiny.</span>
           </figcaption>
         </figure>
+        <div class="callout">
+          <strong>但加进动力学后，主误差会从“高度”翻转到“水平”。</strong>
+          上图是纯几何：脱离几乎全在竖直方向，难怪直觉觉得“曲率 = 高度问题”。可一旦让飞机真的飞（带重力、升力），<strong>误差通道翻转</strong>：实测系统 A（平直 ENU）的真实误差是<strong>水平（沿航迹）约 335 m、高度仅约 5.6 m</strong>。原因见第 11 节——倾斜把重力的切向分量算错、直接带偏速度，而升力管不到速度方程。所以：几何让你以为是高度问题，动力学告诉你其实是<strong>里程</strong>问题。
+          <span class="en" lang="en"><strong>But once dynamics are added, the dominant error flips from “altitude” to “horizontal.”</strong> The figure above is pure geometry: the departure is almost all vertical, which is why intuition says “curvature = an altitude problem.” Yet once the aircraft actually flies (with gravity and lift), the <strong>error channel flips</strong>: the measured error of system A (flat ENU) is <strong>~335 m horizontal (along-track) and only ~5.6 m in altitude</strong>. Why — see Section 11: the tilt mis-computes the tangential component of gravity and biases the speed directly, and lift cannot touch the speed equation. So geometry suggests an altitude problem; dynamics reveal it is a <strong>range</strong> problem.</span>
+        </div>
 
         <div class="card">
           <table>
@@ -950,15 +1157,19 @@ gamma_dot = g * (n * <span class="tok-fn">cos</span>(mu) - cos_g) / V
       <section id="tilt">
         <h2>11. 为什么水平误差反而比高度误差大<span class="en" lang="en">Why the Horizontal Error Is Larger Than the Altitude Error</span></h2>
         <p class="section-intro">
-          直觉的陷阱：既然曲率表现为“切平面在竖直方向脱离椭球 \(\epsilon\approx L^2/2R\)”，那误差不该出现在<strong>高度</strong>上吗？但实测里平直 ENU（系统 A）水平差 ≈ 335 m、高度只差 ≈ 5.6 m。原因是：曲率的本质不是“竖直缺口”，而是一个<strong>倾角</strong>，而倾角先伤水平。
-          <span class="en" lang="en">The intuitive trap: since curvature shows up as “the tangent plane departs vertically by \(\epsilon\approx L^2/2R\),” shouldn’t the error land in <strong>altitude</strong>? Yet in practice flat ENU (system A) is off by ≈ 335 m horizontally and only ≈ 5.6 m in altitude. The reason: curvature is fundamentally not a “vertical gap” but a <strong>tilt</strong>, and a tilt hurts the horizontal first.</span>
+          直觉的陷阱：既然曲率表现为“切平面在竖直方向脱离椭球 \(\epsilon\approx L^2/2R\)”，那误差不该出现在<strong>高度</strong>上吗？但实测里平直 ENU（系统 A）水平差 ≈ 335 m、高度只差 ≈ 5.6 m。把这 335 m 拆开看更清楚：它<strong>几乎全是“沿航迹/里程”方向</strong>（系统 A 到得偏短约 335 m），横向只有 \(\sim\!0.3\) m。下面用真实代码把"为什么误差落在里程上、并且偏短"一步步讲清楚——结论是：不是重力变大，而是<strong>速度被算错了</strong>。
+          <span class="en" lang="en">The intuitive trap: since curvature shows up as “the tangent plane departs vertically by \(\epsilon\approx L^2/2R\),” shouldn’t the error land in <strong>altitude</strong>? Yet flat ENU (system A) is off by ≈ 335 m horizontally and only ≈ 5.6 m in altitude. Decomposing the 335 m makes it clearer: it is <strong>almost entirely along-track (range)</strong> — system A arrives about 335 m short — with only \(\sim\!0.3\) m cross-track. Below we trace, with the actual code, why the error lands in range and why it is short. The conclusion: gravity does not grow; the <strong>speed is computed wrong</strong>.</span>
         </p>
+        <div class="note">
+          实测分解（30 km，对照参考 B；脚本 <code>dynamics_comparison_30km.py</code>）：系统 A 的水平误差 = <strong>沿航迹 −335 m</strong>、横向 \(\approx-0.3\) m；同时它一路<strong>比 B 慢</strong>，速度差累计到约 <strong>−2.6 m/s</strong>。高度差 −5.6 m、航向差 −0.04°。误差几乎是纯里程误差，且来自速度。
+          <span class="en" lang="en">Measured decomposition (30 km, versus reference B; script <code>dynamics_comparison_30km.py</code>): system A’s horizontal error = <strong>−335 m along-track</strong>, \(\approx-0.3\) m cross-track; and it flies <strong>slower than B</strong> throughout, the speed gap reaching about <strong>−2.6 m/s</strong>. Altitude error −5.6 m, heading −0.04°. The error is almost pure range, and it comes from the speed.</span>
+        </div>
 
         <div class="card">
-          <h3>曲率 = 倾角 \(\theta=L/R\)；正弦是一阶，余弦缺口是二阶<span class="en" lang="en">Curvature = a Tilt \(\theta=L/R\); the Sine Is First Order, the Cosine Defect Is Second Order</span></h3>
+          <h3>第 1 步：误差不是重力变大，而是重力被参照到一组倾斜的坐标轴<span class="en" lang="en">Step 1: The Error Is Not Gravity Growing — It Is Gravity Resolved Against Tilted Axes</span></h3>
           <p>
-            在基线 \(L\) 上，两端“当地竖直方向”之间差一个倾角 \(\theta=L/R\)（30 km → \(\theta\approx0.27^\circ\)）。把固定切平面里建模错的重力方向，分解到“真实当地”的水平与竖直两个通道：
-            <span class="en" lang="en">Over a baseline \(L\), the local verticals at the two ends differ by a tilt \(\theta=L/R\) (30 km → \(\theta\approx0.27^\circ\)). Decompose the mis-pointed modelled gravity of the fixed plane onto the true local horizontal and vertical channels:</span>
+            <strong>重力没有变</strong>：始终大小 \(g\)、指向地心。问题在系统 A 把动力学积分在一块<strong>锚定在目标</strong>的切平面里——它的"水平/竖直"永远用目标处那一套轴。飞机飞出 \(L\) 之后，它<strong>真实的当地竖直</strong>已经和这块固定竖直差了一个倾角 \(\theta=L/R\)（30 km → \(\theta\approx0.27^\circ\)）。也就是说：同一个 \(g\)，被分解到了倾斜了 \(\theta\) 的坐标轴上。把这个"分解错位"投到真实的水平/竖直两个方向：
+            <span class="en" lang="en"><strong>Gravity does not change</strong>: always magnitude \(g\), pointing to Earth’s centre. The issue is that system A integrates the dynamics in a tangent plane <strong>anchored at the target</strong> — its "horizontal/vertical" always uses the axes at the target. After flying a distance \(L\), the aircraft’s <strong>true local vertical</strong> already differs from that fixed vertical by a tilt \(\theta=L/R\) (30 km → \(\theta\approx0.27^\circ\)). So the same \(g\) is being resolved against axes rotated by \(\theta\). Project that mis-resolution onto the true horizontal and vertical:</span>
           </p>
           <div class="formula">
             <span class="formula-line">\[
@@ -978,24 +1189,40 @@ a_{\text{vert}}\approx g\,(1-\cos\theta)\approx \tfrac12 g\,\theta^2
 \]</span>
           </div>
           <p>
-            那个著名的竖直缺口 \(\epsilon_U\approx L^2/2R=\tfrac12 R\theta^2\) 本身就是这个<strong>二阶</strong>余弦项。一阶的正弦项把整 \(g\) 泄漏进水平，比它大 \(\sim 2/\theta\) 倍。
-            <span class="en" lang="en">The famous vertical gap \(\epsilon_U\approx L^2/2R=\tfrac12 R\theta^2\) <strong>is</strong> this second-order cosine term. The first-order sine term leaks the full \(g\) into the horizontal, larger by \(\sim 2/\theta\).</span>
+            那个著名的竖直缺口 \(\epsilon_U\approx L^2/2R=\tfrac12 R\theta^2\) 本身就是这个<strong>二阶</strong>余弦项。一阶的正弦项在<strong>沿速度方向</strong>留下 \(g\sin\theta\approx g\theta\approx 0.046\,\mathrm{m/s^2}\)（30 km）的分量，比竖直项大 \(\sim 2/\theta\approx 425\) 倍。但"差一个力"还不够——真正的关键是：这个力进了<strong>哪条方程</strong>、有没有东西能<strong>抵消</strong>它。第 2 步见分晓。
+            <span class="en" lang="en">The famous vertical gap \(\epsilon_U\approx L^2/2R=\tfrac12 R\theta^2\) <strong>is</strong> this second-order cosine term. The first-order sine term leaves a component \(g\sin\theta\approx g\theta\approx 0.046\,\mathrm{m/s^2}\) (30 km) <strong>along the velocity</strong>, larger by \(\sim 2/\theta\approx 425\). But "a leftover force" is not the whole story — what really matters is <strong>which equation</strong> that force enters and whether anything <strong>cancels</strong> it. Step 2 settles that.</span>
+          </p>
+        </div>
+
+        <div class="card" style="margin-top:18px">
+          <h3>第 2 步：那个力进了"速度方程"，而升力<strong>不在</strong>这条方程里<span class="en" lang="en">Step 2: That Force Enters the "Speed Equation," and Lift Is <strong>Not</strong> in It</span></h3>
+          <p>
+            速度大小 \(V\) 怎么变？看仿真器的速度方程（第 3 节）——它只受推力、阻力和<strong>重力沿速度的分量</strong>影响：
+            <span class="en" lang="en">How does the speed \(V\) change? Look at the simulator’s speed equation (Section 3) — it depends only on thrust, drag, and the <strong>component of gravity along the velocity</strong>:</span>
+          </p>
+          <div class="formula"><span class="formula-line">\[
+\dot V=\frac{T-D}{m}-\underbrace{g\sin\gamma}_{\text{gravity along }\hat{\mathbf v}}
+\qquad\bigl(\text{load factor }n\ \text{ is absent}\bigr)
+\]</span></div>
+          <p>
+            航迹角 \(\gamma\) 在系统 A 里是相对那块<strong>固定（倾斜了 \(\theta\)）的水平面</strong>量的，于是 \(g\sin\gamma\) 被算错了约 \(g\theta\)。这正是第 1 步那个一阶分量——它就落在<strong>沿速度方向</strong>，直接进入 \(\dot V\)。<strong>致命之处：升力（载荷因子 \(n\)）垂直于速度，根本不出现在 \(\dot V\) 里，所以没有任何东西能抵消这个误差。</strong>
+            <span class="en" lang="en">In system A the flight-path angle \(\gamma\) is measured against that <strong>fixed (tilted by \(\theta\)) horizontal</strong>, so \(g\sin\gamma\) is off by about \(g\theta\). This is exactly Step 1’s first-order component — it lies <strong>along the velocity</strong> and enters \(\dot V\) directly. <strong>The fatal part: lift (load factor \(n\)) is perpendicular to the velocity and never appears in \(\dot V\), so nothing cancels this error.</strong></span>
           </p>
         </div>
 
         <div class="grid-2">
           <article class="card">
-            <h3>水平：一阶力 + 没有恢复 → 双重积分跑飞<span class="en" lang="en">Horizontal: First-Order Force + No Restoring → Double-Integrates and Runs Away</span></h3>
+            <h3>水平/沿航迹：速度被持续带偏 → 里程误差累积<span class="en" lang="en">Horizontal / Along-Track: A Persistent Speed Bias → Accumulating Range Error</span></h3>
             <p>
-              倾角让重力在水平方向多出 \(\approx g\theta\approx0.046\,\mathrm{m/s^2}\) 的力。关键是<strong>水平位置没有任何参照或恢复力</strong>，这点小力被时间<strong>双重积分</strong>，越积越大——随航程超二次增长（约 \(\sim L^3\)）。这正是惯性导航里的经典现象：一个微小姿态倾斜 → 水平位置误差不断增长。
-              <span class="en" lang="en">The tilt adds a horizontal force \(\approx g\theta\approx0.046\,\mathrm{m/s^2}\). Crucially, <strong>horizontal position has no reference and no restoring force</strong>, so this small force is <strong>double-integrated</strong> over time and keeps growing — super-quadratically with range (\(\sim L^3\)). This is exactly the classic inertial-navigation effect: a tiny attitude tilt → an ever-growing horizontal position error.</span>
+              这点没人抵消的切向误差 \(\approx g\theta\) 一直在改 \(\dot V\)。实测系统 A 因此<strong>一路比 B 慢</strong>，速度差累计到约 \(-2.6\,\mathrm{m/s}\)。而沿航迹位置 \(=\int V\,dt\)：速度偏差被积分成不断增大的<strong>里程误差</strong>——30 km 处偏短约 335 m，横向几乎为 0。这正是惯性导航的经典链条：微小倾斜 → 切向比力算错 → 速度误差 → 位置误差。
+              <span class="en" lang="en">This uncancelled tangential error \(\approx g\theta\) keeps biasing \(\dot V\). Measured, system A is <strong>slower than B</strong> throughout, the speed gap reaching about \(-2.6\,\mathrm{m/s}\). And along-track position \(=\int V\,dt\): the speed bias integrates into a growing <strong>range error</strong> — about 335 m short at 30 km, with ~0 cross-track. This is the classic inertial-navigation chain: a tiny tilt → wrong tangential specific force → velocity error → position error.</span>
             </p>
           </article>
           <article class="card">
-            <h3>高度：二阶 + 被“钉住”→ 很小<span class="en" lang="en">Altitude: Second Order + “Pinned” → Stays Small</span></h3>
+            <h3>竖直/高度：有升力随时抵消 + 只到二阶 → 很小<span class="en" lang="en">Vertical / Altitude: Lift Cancels It + Only Second Order → Small</span></h3>
             <p>
-              竖直方向只吃二阶项 \(\tfrac12 g\theta^2\)，而且高度被<strong>钉住</strong>：升力≈重力维持竖直平衡，边界处的 geodetic↔ENU 又是<strong>精确旋转</strong>。所以高度误差只到二阶残差（系统 A 仅 5.6 m）。竖直通道“硬”（重力定标），水平通道“软”（无参照）——倾斜永远先伤水平。
-              <span class="en" lang="en">The vertical channel only takes the second-order term \(\tfrac12 g\theta^2\), and altitude is <strong>pinned</strong>: lift≈weight holds the vertical balance, and the boundary geodetic↔ENU conversion is an <strong>exact rotation</strong>. So the altitude error is only a second-order residual (just 5.6 m for system A). The vertical channel is “stiff” (gravity-referenced), the horizontal “soft” (no reference) — a tilt always hurts the horizontal first.</span>
+              竖直方向不一样：这里<strong>有一个随时再平衡的力——升力</strong>。它持续顶住当地重力的竖直分量，把倾斜误差大部分抵消；而倾斜泄漏进竖直本来就只有二阶的 \(\tfrac12 g\theta^2\)。再加上边界处 geodetic↔ENU 是精确旋转、高度又是直接携带的状态，于是高度误差只剩二阶残差（系统 A 仅 5.6 m）。<strong>一句话：竖直有升力回正，沿航迹的速度没有——所以倾斜永远先把误差倒进里程。</strong>
+              <span class="en" lang="en">The vertical is different: here there <strong>is a continuously re-balancing force — lift</strong>. It keeps opposing the vertical component of local gravity, cancelling most of the tilt error; and the tilt leaks into the vertical only at second order \(\tfrac12 g\theta^2\). Add that the boundary geodetic↔ENU conversion is an exact rotation and altitude is a directly-carried state, and the altitude error is only a second-order residual (just 5.6 m for system A). <strong>In one line: the vertical has lift to restore it, the along-track speed does not — so a tilt always dumps the error into range first.</strong></span>
             </p>
           </article>
         </div>
@@ -1011,8 +1238,8 @@ a_{\text{vert}}\approx g\,(1-\cos\theta)\approx \tfrac12 g\,\theta^2
           </div>
           <div class="readout" id="tilt-out"></div>
           <figcaption>
-            图 5 · 三维（弧长与夹角已夸张以便看清）：相距 \(L\) 的两点 S₁、S₂，各自的“当地竖直”（指向天）方向之间张开一个角 \(\theta=L/R\)。正是这个倾角把竖直的重力 \(g\) 按 \(\sin\theta\)（一阶）泄漏进水平、按 \(1-\cos\theta\)（二阶）扰动竖直。读数用真实 \(\theta\) 给出两者大小与比值。
-            <span class="en" lang="en">Figure 5 · 3D (arc and angle exaggerated for visibility): two points S₁, S₂ a distance \(L\) apart; their “local verticals” (zenith directions) fan apart by an angle \(\theta=L/R\). This tilt is exactly what leaks vertical gravity \(g\) into the horizontal at \(\sin\theta\) (first order) and perturbs the vertical at \(1-\cos\theta\) (second order). Readouts use the real \(\theta\) to give both magnitudes and their ratio.</span>
+            图 5 · 三维（弧长与夹角已夸张以便看清）：相距 \(L\) 的两点 S₁、S₂，各自的“当地竖直”（指向天）方向之间张开一个角 \(\theta=L/R\)。系统 A 把整条轨迹都用 S₂（目标）那套轴来算，于是在 S₁ 处把同一个重力 \(g\) 分解错位：沿速度方向多出 \(g\sin\theta\)（一阶，进入速度方程、无升力抵消），竖直只差 \(g(1-\cos\theta)\)（二阶，被升力顶住）。读数用真实 \(\theta\) 给出两者大小与比值。
+            <span class="en" lang="en">Figure 5 · 3D (arc and angle exaggerated for visibility): two points S₁, S₂ a distance \(L\) apart; their “local verticals” fan apart by \(\theta=L/R\). System A computes the whole trajectory with S₂’s (the target’s) axes, so at S₁ it mis-resolves the same gravity \(g\): a component \(g\sin\theta\) along the velocity (first order — enters the speed equation, uncancelled by lift) and only \(g(1-\cos\theta)\) in the vertical (second order — opposed by lift). Readouts use the real \(\theta\) for both magnitudes and their ratio.</span>
           </figcaption>
         </figure>
 
@@ -1373,79 +1600,73 @@ a_{\text{vert}}\approx g\,(1-\cos\theta)\approx \tfrac12 g\,\theta^2
   });
 
   // ============================================================
-  //  FIGURE 4 — flat-ENU vs geodetic trajectory on the globe
+  //  FIGURE 4 — flat tangent "ground" vs curved Earth (side-on 3D)
+  //  Shows the tangent plane (flat-ENU's assumed ground) as a reference
+  //  sheet; the Earth (and the geodetic path on it) droops away below it.
+  //  Only the vertical is exaggerated, and modestly.
   // ============================================================
   onReady(function(){
     const div = document.getElementById('viz-traj');
     const slider = document.getElementById('traj-d');
     const out = document.getElementById('traj-out');
-    const lat0 = 45 * D2R;
-
-    // Level eastbound flight, same ground distance, two coordinate handlings:
-    //  - geodetic: follow the parallel (constant lat, h=0) -> stays on the ellipsoid
-    //  - flat ENU: straight tangent line in the fixed start plane -> lifts off
-    // A parallel sits at constant ECEF Z AND constant |r|, so geodetic points map
-    // exactly onto the display sphere; the flat tangent rises above it.
-    function integrate(totalKm){
-      const steps = 200;
-      const E_max = totalKm * 1000;                 // ground distance flown east
-      const r0 = geo2ecef(lat0, 0, 0);              // start = (p0, 0, Z0)
-      const rGeo = norm(r0);                        // constant radius along the parallel
-      const p0 = Math.hypot(r0[0], r0[1]);          // parallel radius = R_N(lat0) cos lat0
-      const eHat = [0, 1, 0];                       // East at lon = 0
-      const geo = [], flat = [];
-      for (let i = 0; i <= steps; i++){
-        const E = E_max * i / steps;
-        geo.push(geo2ecef(lat0, E / p0, 0));        // advance longitude by arc length E
-        flat.push(add(r0, scl(eHat, E)));           // straight tangent in the fixed plane
-      }
-      const flatAlt = norm(flat[steps]) - rGeo;     // height the flat path gained above the surface
-      return { geo, flat, rGeo, flatAlt };
-    }
-
-    function toDisplay(pts, rGeo, exag){
-      // map onto the unit display sphere; surface points (|r|=rGeo) land exactly on it,
-      // radial excess amplified by exag so the lift-off is visible
-      const x = [], y = [], z = [];
-      pts.forEach(p => {
-        const r = norm(p);
-        const disp = 1 + (r / rGeo - 1) * exag;
-        x.push(p[0]/r * disp); y.push(p[1]/r * disp); z.push(p[2]/r * disp);
-      });
-      return { x, y, z };
-    }
+    const W = 0.16;                       // cross-track half-width of the sheets
 
     function build(totalKm){
-      const res = integrate(totalKm);
-      const excessFrac = res.flatAlt / res.rGeo;
-      const exag = excessFrac > 1e-9 ? Math.min(50, 0.45 / excessFrac) : 20;
+      const L = totalKm * 1000;
+      const eps = L * L / (2 * R_MEAN);                       // true vertical departure (m)
+      const along = L * L * L / (3 * R_MEAN * R_MEAN);        // true geometric along-track diff (m)
+      // modest, capped vertical exaggeration for the display droop
+      const depth = Math.max(0.05, Math.min(0.26, 0.26 * totalKm / 2000));
+      const n = 44;
 
-      const globe = sphereSurface(1, '#e6f3f4', 0.6);
-      const gd = toDisplay(res.geo, res.rGeo, exag);
-      const fd = toDisplay(res.flat, res.rGeo, exag);
-      const geoTrace = { type:'scatter3d', mode:'lines', x:gd.x, y:gd.y, z:gd.z,
-        line:{color:GREEN, width:7}, hoverinfo:'skip' };
-      const flatTrace = { type:'scatter3d', mode:'lines', x:fd.x, y:fd.y, z:fd.z,
-        line:{color:ORANGE, width:7}, hoverinfo:'skip' };
-      const startPt = { type:'scatter3d', mode:'markers', x:[gd.x[0]], y:[gd.y[0]], z:[gd.z[0]],
-        marker:{size:5, color:INK}, hoverinfo:'skip' };
-      const endFlat = { type:'scatter3d', mode:'markers+text', x:[fd.x[fd.x.length-1]],
-        y:[fd.y[fd.y.length-1]], z:[fd.z[fd.z.length-1]], marker:{size:5, color:ORANGE},
-        text:['  飞离地表 lifts off'], textposition:'top center',
-        textfont:{size:11, color:ORANGE}, hoverinfo:'skip' };
+      // curved Earth surface (droops as -depth*u^2) and the flat tangent plane (z=0)
+      const ex=[],ey=[],ez=[], px=[],py=[],pz=[];
+      for (let i=0;i<=n;i++){
+        const u=i/n, rx=[],ry=[],rz=[], qx=[],qy=[],qz=[];
+        for (let j=0;j<=1;j++){
+          const v=-W+2*W*j;
+          rx.push(u); ry.push(v); rz.push(-depth*u*u);
+          qx.push(u); qy.push(v); qz.push(0);
+        }
+        ex.push(rx);ey.push(ry);ez.push(rz); px.push(qx);py.push(qy);pz.push(qz);
+      }
+      const earth={type:'surface',x:ex,y:ey,z:ez,showscale:false,opacity:0.55,
+        colorscale:[[0,'#cfe8ea'],[1,'#cfe8ea']],hoverinfo:'skip',lighting:{ambient:0.92}};
+      const plane={type:'surface',x:px,y:py,z:pz,showscale:false,opacity:0.20,
+        colorscale:[[0,TEAL],[1,TEAL]],hoverinfo:'skip',lighting:{ambient:1.0}};
 
-      // frame the start region of the path
-      const cx = gd.x[Math.floor(gd.x.length/2)], cy = gd.y[Math.floor(gd.y.length/2)], cz = gd.z[Math.floor(gd.z.length/2)];
-      Plotly.react(div, [globe, geoTrace, flatTrace, startPt, endFlat], Object.assign(LAYOUT(480), {
-        scene: scene3d({ camera:{ eye:{x:cx*1.7, y:cy*1.7+0.9, z:cz*1.7+0.6}, center:{x:cx*0.6,y:cy*0.6,z:cz*0.6} } })
-      }), {displayModeBar:false, responsive:true});
+      // paths: flat-ENU stays on the plane (z=0); geodetic follows the Earth
+      const gx=[],gz=[]; for(let i=0;i<=n;i++){const u=i/n; gx.push(u); gz.push(-depth*u*u);}
+      const geoTrace={type:'scatter3d',mode:'lines',x:gx,y:gx.map(()=>0),z:gz,
+        line:{color:GREEN,width:7},hoverinfo:'skip'};
+      const flatTrace={type:'scatter3d',mode:'lines',x:[0,1],y:[0,0],z:[0,0],
+        line:{color:ORANGE,width:7},hoverinfo:'skip'};
+      // vertical departure connector at the far end (the altitude error)
+      const gap={type:'scatter3d',mode:'lines',x:[1,1],y:[0,0],z:[0,-depth],
+        line:{color:ORANGE,width:6,dash:'dot'},hoverinfo:'skip'};
+      const gapLbl={type:'scatter3d',mode:'text',x:[1.02],y:[0],z:[-depth/2],
+        text:['竖直脱离 ε≈L²/2R'],textfont:{size:11,color:ORANGE},textposition:'middle right',hoverinfo:'skip'};
+      const startPt={type:'scatter3d',mode:'markers',x:[0],y:[0],z:[0],marker:{size:5,color:INK},hoverinfo:'skip'};
+      const flatEnd={type:'scatter3d',mode:'markers',x:[1],y:[0],z:[0],marker:{size:5,color:ORANGE},hoverinfo:'skip'};
+      const geoEnd={type:'scatter3d',mode:'markers',x:[1],y:[0],z:[-depth],marker:{size:5,color:GREEN},hoverinfo:'skip'};
+      const planeLbl={type:'scatter3d',mode:'text',x:[0.30],y:[W*0.7],z:[0.012],
+        text:['切平面 = 平直 ENU 的“地面” tangent plane'],textfont:{size:11,color:'#1c6f78'},hoverinfo:'skip'};
+      const earthLbl={type:'scatter3d',mode:'text',x:[0.62],y:[0],z:[-depth*0.40-0.03],
+        text:['真实弯曲地球 curved Earth'],textfont:{size:11,color:GREEN},hoverinfo:'skip'};
 
-      const eps = (totalKm*1000)*(totalKm*1000)/(2*R_MEAN);
+      Plotly.react(div, [earth, plane, geoTrace, flatTrace, gap, gapLbl, startPt, flatEnd, geoEnd, planeLbl, earthLbl],
+        Object.assign(LAYOUT(480), { scene: {
+          xaxis:{visible:false}, yaxis:{visible:false}, zaxis:{visible:false},
+          aspectmode:'manual', aspectratio:{x:2.4, y:0.6, z:0.7},
+          camera:{ eye:{x:0.35, y:-2.0, z:0.55}, center:{x:0.5, y:0, z:-depth*0.45} }
+        }}), {displayModeBar:false, responsive:true});
+
+      const fmt = m => m>=1000 ? (m/1000).toFixed(2)+' km' : m.toFixed(1)+' m';
       out.innerHTML =
-        '航程 / range: <b>' + totalKm + ' km</b> &nbsp;·&nbsp; ' +
-        '平直 ENU 终点离椭球高度 / flat-ENU end altitude: <b>' +
-        (res.flatAlt >= 1000 ? (res.flatAlt/1000).toFixed(1)+' km' : res.flatAlt.toFixed(0)+' m') + '</b>' +
-        ' &nbsp;<span style="color:'+MUTED+'">（≈ L²/2R = ' + (eps/1000).toFixed(1) + ' km；显示放大 ' + exag.toFixed(0) + '×）</span>';
+        '航程 L = <b>' + totalKm + ' km</b> &nbsp;·&nbsp; ' +
+        '竖直脱离 ε = L²/2R = <b>' + fmt(eps) + '</b>（图中橙色竖线）&nbsp;·&nbsp; ' +
+        '纯几何沿航迹差 ≈ L³/3R² = <b>' + fmt(along) + '</b>（极小）' +
+        ' &nbsp;<span style="color:'+MUTED+'">（竖直方向已夸张以便看清 / vertical exaggerated）</span>';
     }
     build(+slider.value);
     slider.addEventListener('input', () => build(+slider.value));
@@ -1503,7 +1724,7 @@ a_{\text{vert}}\approx g\,(1-\cos\theta)\approx \tfrac12 g\,\theta^2
       const eps = (Lkm*1000)*(Lkm*1000) / (2*R_MEAN);
       out.innerHTML =
         '基线 L = <b>' + Lkm + ' km</b> &nbsp;·&nbsp; 真实倾角 θ=L/R = <b>' + (th*R2D).toFixed(3) + '°</b> &nbsp;·&nbsp; ' +
-        '水平 g·sinθ = <b>' + aH.toFixed(4) + ' m/s²</b> &nbsp;vs&nbsp; 竖直 g(1−cosθ) = <b>' + aV.toExponential(2) + ' m/s²</b> &nbsp;·&nbsp; ' +
+        '沿速度 g·sinθ（进速度方程，无升力抵消）= <b>' + aH.toFixed(4) + ' m/s²</b> &nbsp;vs&nbsp; 竖直 g(1−cosθ)（被升力抵消）= <b>' + aV.toExponential(2) + ' m/s²</b> &nbsp;·&nbsp; ' +
         '比值 ≈ <b>' + (aH/aV).toFixed(0) + '×</b> &nbsp;·&nbsp; 竖直缺口 L²/2R = <b>' + eps.toFixed(1) + ' m</b>' +
         ' &nbsp;<span style="color:'+MUTED+'">（弧与夹角为示意已夸张 / arc &amp; angle exaggerated）</span>';
     }
