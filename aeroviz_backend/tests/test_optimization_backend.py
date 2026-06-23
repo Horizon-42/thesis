@@ -217,9 +217,16 @@ class TestOptimizationBackend(unittest.TestCase):
         # the fixed local-ENU dynamics; every other name has no cold-start
         # override (cold-starts under its own scheme).
         self.assertEqual(seen["casadiDirectCollocationLocalEnuColdStart"], "hermiteSimpson")
-        self.assertEqual(
-            cold_starts["casadiDirectCollocationLocalEnuColdStart"], "localEnu",
-        )
+        # The cold-start hybrid exposes every free-time fitting (the geodetic RHS
+        # is continuous); all three cold-start under the fixed local-ENU dynamics.
+        self.assertEqual(seen["casadiDirectCollocationLocalEnuColdStartTrapezoidal"], "trapezoidal")
+        self.assertEqual(seen["casadiDirectCollocationLocalEnuColdStartRk4"], "rk4")
+        for name in (
+            "casadiDirectCollocationLocalEnuColdStart",
+            "casadiDirectCollocationLocalEnuColdStartTrapezoidal",
+            "casadiDirectCollocationLocalEnuColdStartRk4",
+        ):
+            self.assertEqual(cold_starts[name], "localEnu")
         self.assertIsNone(cold_starts["casadiDirectCollocation"])
 
     def test_optimize_reuses_casadi_optimizer_for_same_solver_key(self):

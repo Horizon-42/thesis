@@ -54,9 +54,13 @@ DIRECT_COLLOCATION_SCHEMES = {
     "casadiDirectCollocationLocalEnu": "localEnu",
     "casadiDirectCollocationLocalEnuTrapezoidal": "localEnuTrapezoidal",
     "casadiDirectCollocationLocalEnuHermiteSimpson": "localEnuHermiteSimpson",
-    # Hybrid: the free-time refinement runs on the geodetic RHS (hermiteSimpson),
-    # seeded by a fixed local-ENU cold-start solve (see DIRECT_COLLOCATION_COLD_START_SCHEMES).
+    # Hybrid: the free-time refinement runs on the geodetic RHS, seeded by a
+    # fixed local-ENU cold-start solve (see DIRECT_COLLOCATION_COLD_START_SCHEMES).
+    # The free-time fitting is selectable (the geodetic RHS is continuous, so it
+    # takes any fitting); the bare name keeps the Hermite-Simpson default.
     "casadiDirectCollocationLocalEnuColdStart": "hermiteSimpson",
+    "casadiDirectCollocationLocalEnuColdStartTrapezoidal": "trapezoidal",
+    "casadiDirectCollocationLocalEnuColdStartRk4": "rk4",
 }
 
 # Hybrid optimizers: the cold-start (fixed-time warm-start) solve uses a
@@ -65,6 +69,8 @@ DIRECT_COLLOCATION_SCHEMES = {
 # behaviour).
 DIRECT_COLLOCATION_COLD_START_SCHEMES = {
     "casadiDirectCollocationLocalEnuColdStart": "localEnu",
+    "casadiDirectCollocationLocalEnuColdStartTrapezoidal": "localEnu",
+    "casadiDirectCollocationLocalEnuColdStartRk4": "localEnu",
 }
 SUPPORTED_OPTIMIZERS = (
     *DIRECT_COLLOCATION_SCHEMES,

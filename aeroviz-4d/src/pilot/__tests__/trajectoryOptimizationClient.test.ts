@@ -18,6 +18,8 @@ describe("optimizer dynamics × fitting decomposition", () => {
       "casadiDirectCollocationLocalEnuTrapezoidal",
       "casadiDirectCollocationLocalEnuHermiteSimpson",
       "casadiDirectCollocationLocalEnuColdStart",
+      "casadiDirectCollocationLocalEnuColdStartTrapezoidal",
+      "casadiDirectCollocationLocalEnuColdStartRk4",
     ] as const;
     for (const opt of optimizers) {
       const { dynamics, fitting } = optimizerToParts(opt);
@@ -47,19 +49,24 @@ describe("optimizer dynamics × fitting decomposition", () => {
     expect(partsToOptimizer("reanchoredEnu", "hermiteSimpson")).toBe("casadiDirectCollocationReanchoredEnu");
   });
 
-  it("local-ENU cold-start hybrid is geodetic free-time with a locked fitting", () => {
-    // The hybrid composes a single optimizer (Hermite-Simpson free-time), so
-    // its fitting axis is locked and any fitting request snaps to it.
-    expect(validFittingsForDynamics("geodeticColdStart")).toEqual(["hermiteSimpson"]);
+  it("local-ENU cold-start hybrid refines a continuous RHS: takes every fitting", () => {
+    // The free-time refinement is the geodetic RHS, so the hybrid composes with
+    // each fitting; only the cold-start seed (fixed local-ENU) is shared.
+    expect(validFittingsForDynamics("geodeticColdStart")).toEqual([
+      "hermiteSimpson", "trapezoidal", "shooting",
+    ]);
     expect(partsToOptimizer("geodeticColdStart", "hermiteSimpson")).toBe(
       "casadiDirectCollocationLocalEnuColdStart",
     );
     expect(partsToOptimizer("geodeticColdStart", "trapezoidal")).toBe(
-      "casadiDirectCollocationLocalEnuColdStart",
+      "casadiDirectCollocationLocalEnuColdStartTrapezoidal",
     );
-    expect(optimizerToParts("casadiDirectCollocationLocalEnuColdStart")).toEqual({
+    expect(partsToOptimizer("geodeticColdStart", "shooting")).toBe(
+      "casadiDirectCollocationLocalEnuColdStartRk4",
+    );
+    expect(optimizerToParts("casadiDirectCollocationLocalEnuColdStartRk4")).toEqual({
       dynamics: "geodeticColdStart",
-      fitting: "hermiteSimpson",
+      fitting: "shooting",
     });
   });
 });

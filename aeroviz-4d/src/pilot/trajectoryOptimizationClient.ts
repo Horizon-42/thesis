@@ -20,7 +20,10 @@ export type TrajectoryOptimizer =
   | "casadiDirectCollocationLocalEnuHermiteSimpson"
   // Hybrid: geodetic-RHS free-time solve, cold-started by a fixed local-ENU
   // solve (the cold start is cheaper/more robust; the refinement is accurate).
+  // The free-time fitting is selectable; the bare name is Hermite-Simpson.
   | "casadiDirectCollocationLocalEnuColdStart"
+  | "casadiDirectCollocationLocalEnuColdStartTrapezoidal"
+  | "casadiDirectCollocationLocalEnuColdStartRk4"
   // Legacy optimizers: still served by the backend, no longer offered in
   // the UI (kept here so a response naming one still parses).
   | "casadiIpopt"
@@ -42,8 +45,9 @@ export type TrajectoryOptimizer =
 // ``shooting`` is the RK4 integral defect of the chosen dynamics.
 // ``geodeticColdStart`` is the geodetic RHS again, but the warm-start (cold)
 // solve that seeds the free-time solve runs the fixed local-ENU dynamics
-// instead -- a hybrid that has only one composed optimizer (Hermite-Simpson
-// free-time), so its fitting axis is locked.
+// instead.  The free-time refinement is the continuous geodetic RHS, so it
+// takes every fitting (Hermite-Simpson / trapezoidal / shooting) just like the
+// plain geodetic dynamics; only the cold-start seed differs.
 export type OptimizerDynamics = "geodetic" | "reanchoredEnu" | "localEnu" | "geodeticColdStart";
 export type OptimizerFitting = "hermiteSimpson" | "trapezoidal" | "shooting";
 
@@ -56,6 +60,8 @@ const COMBO_TO_OPTIMIZER: Record<string, TrajectoryOptimizer> = {
   "localEnu|trapezoidal": "casadiDirectCollocationLocalEnuTrapezoidal",
   "localEnu|shooting": "casadiDirectCollocationLocalEnu",
   "geodeticColdStart|hermiteSimpson": "casadiDirectCollocationLocalEnuColdStart",
+  "geodeticColdStart|trapezoidal": "casadiDirectCollocationLocalEnuColdStartTrapezoidal",
+  "geodeticColdStart|shooting": "casadiDirectCollocationLocalEnuColdStartRk4",
 };
 
 const OPTIMIZER_TO_COMBO: Record<string, { dynamics: OptimizerDynamics; fitting: OptimizerFitting }> = {
@@ -68,15 +74,15 @@ const OPTIMIZER_TO_COMBO: Record<string, { dynamics: OptimizerDynamics; fitting:
   casadiDirectCollocationLocalEnuHermiteSimpson: { dynamics: "localEnu", fitting: "hermiteSimpson" },
   casadiDirectCollocationLocalEnuTrapezoidal: { dynamics: "localEnu", fitting: "trapezoidal" },
   casadiDirectCollocationLocalEnuColdStart: { dynamics: "geodeticColdStart", fitting: "hermiteSimpson" },
+  casadiDirectCollocationLocalEnuColdStartTrapezoidal: { dynamics: "geodeticColdStart", fitting: "trapezoidal" },
+  casadiDirectCollocationLocalEnuColdStartRk4: { dynamics: "geodeticColdStart", fitting: "shooting" },
 };
 
 /** Fittings valid for a given dynamics: only the re-anchored ENU stepper is
- * discrete (shooting-only); geodetic and fixed local-ENU are continuous RHS.
- * The local-ENU cold-start hybrid composes a single optimizer, so its fitting
- * is locked to Hermite-Simpson. */
+ * discrete (shooting-only).  Geodetic, fixed local-ENU, and the local-ENU
+ * cold-start hybrid all refine a continuous RHS, so they take every fitting. */
 export function validFittingsForDynamics(dynamics: OptimizerDynamics): OptimizerFitting[] {
   if (dynamics === "reanchoredEnu") return ["shooting"];
-  if (dynamics === "geodeticColdStart") return ["hermiteSimpson"];
   return ["hermiteSimpson", "trapezoidal", "shooting"];
 }
 
@@ -261,6 +267,8 @@ function readOptimizer(value: Record<string, unknown>): TrajectoryOptimizer {
     nested === "casadiDirectCollocationLocalEnuTrapezoidal" ||
     nested === "casadiDirectCollocationLocalEnuHermiteSimpson" ||
     nested === "casadiDirectCollocationLocalEnuColdStart" ||
+    nested === "casadiDirectCollocationLocalEnuColdStartTrapezoidal" ||
+    nested === "casadiDirectCollocationLocalEnuColdStartRk4" ||
     nested === "casadiIpopt" ||
     nested === "transcription" ||
     nested === "leastSquaresTranscription" ||
