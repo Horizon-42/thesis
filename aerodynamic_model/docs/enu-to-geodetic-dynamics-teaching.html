@@ -1,0 +1,1333 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>从平面 ENU 动力学到 make_geodetic_dynamics_model：坐标变换教学 / From Flat ENU Dynamics to make_geodetic_dynamics_model: A Coordinate-Transformation Teaching Document</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fb;
+      --ink: #16212f;
+      --muted: #607084;
+      --panel: #ffffff;
+      --panel-strong: #edf4f7;
+      --line: #d8e1e8;
+      --line-strong: #a9bac7;
+      --teal: #007c89;
+      --teal-soft: #e2f3f4;
+      --orange: #b65b13;
+      --orange-soft: #fff0df;
+      --indigo: #3d58a8;
+      --indigo-soft: #eef2ff;
+      --green: #2e7d59;
+      --green-soft: #e9f6ef;
+      --code-bg: #101827;
+      --code-ink: #ecf1f7;
+      --shadow: 0 16px 40px rgba(20, 33, 48, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.7;
+    }
+
+    a {
+      color: var(--teal);
+      text-decoration: none;
+      border-bottom: 1px solid rgba(0, 124, 137, 0.28);
+    }
+    a:hover { border-bottom-color: currentColor; }
+
+    .page {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 28px 0 64px;
+    }
+
+    header { padding: 34px 0 24px; }
+
+    .eyebrow {
+      display: inline-block;
+      color: var(--teal);
+      font-size: 13px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+    .eyebrow .en { color: inherit; font-size: 1em; line-height: 1.3; }
+
+    h1 {
+      margin: 12px 0 14px;
+      max-width: 980px;
+      font-size: clamp(30px, 4.8vw, 56px);
+      line-height: 1.08;
+    }
+    h2 { margin: 0 0 14px; font-size: clamp(24px, 3vw, 34px); line-height: 1.2; }
+    h3 { margin: 0 0 10px; font-size: 21px; line-height: 1.28; }
+    h4 { margin: 18px 0 8px; font-size: 16px; line-height: 1.3; }
+    p { margin: 0 0 12px; }
+
+    .en {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 0.92em;
+      line-height: 1.55;
+    }
+    h1 .en, h2 .en, h3 .en, h4 .en, strong .en { font-weight: 600; }
+    h1 .en { max-width: 900px; font-size: clamp(18px, 2.1vw, 25px); line-height: 1.3; }
+    h2 .en { font-size: 0.62em; line-height: 1.35; }
+    h3 .en { font-size: 0.74em; line-height: 1.35; }
+    h4 .en { font-size: 0.82em; line-height: 1.35; }
+    li .en { margin-top: 2px; }
+    td .en, th .en, figcaption .en, footer .en { margin-top: 5px; }
+
+    ul, ol { margin: 8px 0 0; padding-left: 22px; }
+    li { margin: 6px 0; }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+      background: rgba(16, 24, 39, 0.06);
+      border: 1px solid rgba(16, 24, 39, 0.08);
+      border-radius: 6px;
+      padding: 0.05em 0.3em;
+    }
+
+    .lead { max-width: 900px; color: var(--muted); font-size: 18px; }
+    .source-note { margin-top: 18px; max-width: 900px; color: var(--muted); font-size: 14px; }
+
+    .top-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 24px;
+    }
+    .tile {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 15px;
+      box-shadow: var(--shadow);
+      min-width: 0;
+    }
+    .tile strong { display: block; margin-bottom: 6px; color: var(--ink); font-size: 14px; }
+    .tile span { display: block; color: var(--muted); font-size: 14px; }
+
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      margin: 10px 0 22px;
+      padding: 10px;
+      background: rgba(247, 248, 251, 0.92);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      backdrop-filter: blur(14px);
+    }
+    nav ul { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+    nav a {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: flex-start;
+      min-height: 34px;
+      padding: 6px 10px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--ink);
+      font-size: 14px;
+    }
+    nav a .en { margin-top: 1px; color: var(--muted); font-size: 11px; line-height: 1.15; }
+    nav a:hover { border-color: var(--teal); color: var(--teal); }
+
+    section { padding: 34px 0; border-top: 1px solid var(--line); }
+    .section-intro { max-width: 900px; color: var(--muted); font-size: 17px; }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 18px;
+      align-items: start;
+      margin-top: 18px;
+    }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+    .grid-2 > *, .grid-3 > *, .top-grid > * { min-width: 0; }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      box-shadow: var(--shadow);
+      min-width: 0;
+    }
+
+    .callout {
+      margin-top: 16px;
+      padding: 16px 18px;
+      background: var(--orange-soft);
+      border: 1px solid rgba(182, 91, 19, 0.24);
+      border-radius: 8px;
+    }
+    .callout strong { color: var(--orange); }
+    .good { background: var(--green-soft); border-color: rgba(46, 125, 89, 0.24); }
+    .good strong { color: var(--green); }
+    .note {
+      margin-top: 14px;
+      padding: 14px 16px;
+      background: var(--indigo-soft);
+      border: 1px solid rgba(61, 88, 168, 0.22);
+      border-radius: 8px;
+      color: #34416d;
+    }
+
+    table { width: 100%; border-collapse: collapse; margin-top: 14px; overflow-wrap: anywhere; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; text-align: left; }
+    th { background: var(--panel-strong); color: var(--ink); font-size: 14px; }
+    td { color: #263548; }
+
+    .formula {
+      margin: 14px 0;
+      padding: 14px 16px;
+      overflow-x: auto;
+      background: #fbfdff;
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font-size: 15px;
+      line-height: 1.65;
+      white-space: normal;
+    }
+    .formula-line { display: block; min-width: 0; white-space: normal; }
+    .formula-line + .formula-line { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+    .formula mjx-container[display="true"] { margin: 0.2em 0 !important; min-width: max-content; }
+    .formula mjx-container { font-size: 108%; }
+
+    .var-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; margin-top: 12px; }
+    .var-list div {
+      padding: 9px 10px;
+      background: #f9fbfc;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font-size: 14px;
+    }
+
+    pre {
+      margin: 14px 0;
+      padding: 14px 16px;
+      background: var(--code-bg);
+      color: var(--code-ink);
+      border-radius: 8px;
+      overflow-x: auto;
+      font-size: 13.5px;
+      line-height: 1.55;
+    }
+    pre code {
+      background: none;
+      border: 0;
+      padding: 0;
+      color: inherit;
+      font-size: inherit;
+    }
+    .tok-key { color: #7fd1de; }
+    .tok-com { color: #8a98ab; font-style: italic; }
+    .tok-fn  { color: #ffd479; }
+
+    /* interactive figure shell */
+    figure.viz {
+      margin: 18px 0 0;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .viz .plot { width: 100%; height: 460px; background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
+    .viz .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px 22px;
+      align-items: center;
+      padding: 12px 16px;
+      border-top: 1px solid var(--line);
+      background: #fbfdff;
+    }
+    .viz .controls label { font-size: 13px; color: var(--muted); font-weight: 600; }
+    .viz .controls input[type="range"] { width: 200px; vertical-align: middle; accent-color: var(--teal); }
+    .viz .readout {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      padding: 10px 16px;
+      border-top: 1px solid var(--line);
+      font-size: 13.5px;
+      color: #263548;
+      background: var(--panel-strong);
+    }
+    .viz .readout b { color: var(--teal); font-variant-numeric: tabular-nums; }
+    .viz figcaption { padding: 12px 16px 15px; color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); }
+    .chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 2px 8px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
+      border: 1px solid var(--line);
+    }
+    .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+    .steps { counter-reset: step; display: grid; gap: 12px; margin-top: 16px; }
+    .step {
+      position: relative;
+      padding: 14px 16px 14px 52px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .step::before {
+      counter-increment: step;
+      content: counter(step);
+      position: absolute;
+      left: 15px; top: 14px;
+      display: grid; place-items: center;
+      width: 26px; height: 26px;
+      border-radius: 50%;
+      background: var(--teal); color: white; font-weight: 800; line-height: 1;
+    }
+    .checklist li::marker { color: var(--teal); }
+
+    footer { padding: 24px 0 0; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+
+    @media (max-width: 860px) {
+      .top-grid, .grid-2, .grid-3 { grid-template-columns: 1fr; }
+      nav { position: static; }
+      .var-list { grid-template-columns: 1fr; }
+      .formula { font-size: 13px; }
+      .viz .controls input[type="range"] { width: 150px; }
+    }
+    @media print {
+      body { background: #fff; }
+      nav { display: none; }
+      .card, .tile, figure.viz { box-shadow: none; }
+      section { break-inside: avoid; }
+    }
+  </style>
+  <script>
+    window.MathJax = {
+      tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']], processEscapes: true, tags: 'none' },
+      svg: { fontCache: 'global', scale: 1 },
+      startup: {
+        pageReady: function () {
+          return MathJax.startup.defaultPageReady().then(function () {
+            document.documentElement.classList.add('mathjax-ready');
+          });
+        }
+      }
+    };
+  </script>
+  <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <span class="eyebrow">Teaching note · ENU dynamics to geodetic dynamics<span class="en" lang="en">From the aerodynamic_model / casadi_simulator.py source</span></span>
+      <h1>从平面 ENU 动力学到 <code>make_geodetic_dynamics_model</code>：中间到底做了哪些坐标变换<span class="en" lang="en">From Flat ENU Dynamics to <code>make_geodetic_dynamics_model</code>: Exactly Which Coordinate Transformations Happen in Between</span></h1>
+      <p class="lead">
+        本页讲清楚一件事：仿真器里那套写在“平直 ENU 切平面”里的点质量动力学（<code>make_dynamics_model</code>），是怎么一步步变成直接写在大地坐标 \((\text{lat},\text{lon},h)\) 里的连续动力学（<code>make_geodetic_dynamics_model</code>）的。中间的桥是“逐步重锚 ENU 步进器”（<code>make_geo_step_from_enu_integrator</code>）。重点不是抄公式，而是看清每一个坐标变换在三维空间里到底做了什么。
+        <span class="en" lang="en">This page explains one thing clearly: how the point-mass dynamics written in a flat ENU tangent plane (<code>make_dynamics_model</code>) become, step by step, the continuous dynamics written directly in geodetic coordinates \((\text{lat},\text{lon},h)\) (<code>make_geodetic_dynamics_model</code>). The bridge between them is the per-step re-anchored ENU stepper (<code>make_geo_step_from_enu_integrator</code>). The goal is not to copy formulas, but to see what each coordinate transformation actually does in three-dimensional space.</span>
+      </p>
+      <p class="source-note">
+        前置阅读：同项目的 <a href="../../aerodrome_model/docs/geodetic-ecef-coordinates-teaching.html">《WGS 84 大地、ECEF 与本地切平面坐标教学文档》</a>（讲清楚 ENU 这个“坐标系”本身）。本页接着讲“在这个坐标系里放动力学方程，并把它升级到整颗椭球”。下面三幅三维图都是用真实 WGS 84 参数在浏览器里实时计算的，可以拖动滑块互动；为了肉眼可见，球体曲率和高度差做了夸张，但读数全部按真实公式给出。
+        <span class="en" lang="en">Prerequisite: the sibling document <a href="../../aerodrome_model/docs/geodetic-ecef-coordinates-teaching.html">“WGS 84 Geodetic, ECEF, and Local Tangent Plane.”</a> That page defines the ENU coordinate system itself; this page puts dynamics equations inside that system and then upgrades them to the whole ellipsoid. The three 3D figures below are computed live in the browser from real WGS 84 parameters and respond to the sliders. Curvature and height gaps are exaggerated so they are visible by eye, but every numeric readout uses the exact formula.</span>
+      </p>
+
+      <div class="top-grid" aria-label="学习目标 / Learning goals">
+        <div class="tile">
+          <strong>起点：平面 ENU<span class="en" lang="en">Start: flat ENU</span></strong>
+          <span><code>make_dynamics_model</code> 把飞机放在一块平直的东-北-天切平面里，\(x,y\) 是米。<span class="en" lang="en"><code>make_dynamics_model</code> places the aircraft in a flat East-North-Up tangent plane; \(x,y\) are metres.</span></span>
+        </div>
+        <div class="tile">
+          <strong>问题：平面会飘<span class="en" lang="en">Problem: the plane drifts</span></strong>
+          <span>切平面只在原点附近准；飞远了，平面和真实椭球面差 \(\epsilon\approx L^2/2R\)。<span class="en" lang="en">A tangent plane is only accurate near its origin; far away it departs from the ellipsoid by \(\epsilon\approx L^2/2R\).</span></span>
+        </div>
+        <div class="tile">
+          <strong>变换：两件事<span class="en" lang="en">Transform: two things</span></strong>
+          <span>(1) 位置：米/秒速度→经纬度角速率，用曲率半径 \(R_M,R_N\)；(2) 姿态：补输运率。<span class="en" lang="en">(1) Position: metre-per-second velocity to angular lat/lon rates via curvature radii \(R_M,R_N\); (2) attitude: add the transport rate.</span></span>
+        </div>
+        <div class="tile">
+          <strong>终点：连续大地 RHS<span class="en" lang="en">End: continuous geodetic RHS</span></strong>
+          <span><code>make_geodetic_dynamics_model</code> 把变换折进一条光滑 ODE，不再需要任何切平面。<span class="en" lang="en"><code>make_geodetic_dynamics_model</code> folds the transform into one smooth ODE — no tangent plane at all.</span></span>
+        </div>
+      </div>
+    </header>
+
+    <nav aria-label="页面导航 / Page navigation">
+      <ul>
+        <li><a href="#abbr">缩写与符号<span class="en" lang="en">Symbols</span></a></li>
+        <li><a href="#three">三个模型<span class="en" lang="en">Three Models</span></a></li>
+        <li><a href="#enu">起点：平面 ENU<span class="en" lang="en">Flat ENU</span></a></li>
+        <li><a href="#why">平面为何不够<span class="en" lang="en">Why It Drifts</span></a></li>
+        <li><a href="#radii">曲率半径 R_M, R_N<span class="en" lang="en">Curvature Radii</span></a></li>
+        <li><a href="#position">变换 A：位置<span class="en" lang="en">Position Kinematics</span></a></li>
+        <li><a href="#reanchor">桥：重锚步进器<span class="en" lang="en">Re-anchored Stepper</span></a></li>
+        <li><a href="#transport">变换 B：输运率<span class="en" lang="en">Transport Rate</span></a></li>
+        <li><a href="#geodetic">终点：大地 RHS<span class="en" lang="en">Geodetic RHS</span></a></li>
+        <li><a href="#errors">三者等价与误差<span class="en" lang="en">Equivalence</span></a></li>
+        <li><a href="#checklist">检查清单<span class="en" lang="en">Checklist</span></a></li>
+      </ul>
+    </nav>
+
+    <main>
+      <!-- 1. SYMBOLS -->
+      <section id="abbr">
+        <h2>1. 先把符号和缩写铺开<span class="en" lang="en">Lay Out the Symbols and Abbreviations First</span></h2>
+        <p class="section-intro">
+          这页混用了“坐标系缩写”和“飞行力学符号”。先一次性展开，后面读公式就不卡。
+          <span class="en" lang="en">This page mixes coordinate-system abbreviations with flight-mechanics symbols. Expanding them once here keeps the formulas readable later.</span>
+        </p>
+        <div class="card">
+          <table>
+            <thead>
+              <tr>
+                <th>符号 / 缩写<span class="en" lang="en">Symbol / abbreviation</span></th>
+                <th>含义<span class="en" lang="en">Meaning</span></th>
+                <th>在本页中的角色<span class="en" lang="en">Role on this page</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>ENU</td><td>East-North-Up，东-北-天本地切平面<span class="en" lang="en">East-North-Up local tangent plane.</span></td><td>平直动力学所在的坐标系；\(x\!\to\!E,\ y\!\to\!N,\ h\!\to\!U\)。<span class="en" lang="en">The frame the flat dynamics live in; \(x\!\to\!E,\ y\!\to\!N,\ h\!\to\!U\).</span></td></tr>
+              <tr><td>ECEF</td><td>Earth-Centered Earth-Fixed，地心地固直角系<span class="en" lang="en">Earth-Centered, Earth-Fixed Cartesian frame.</span></td><td>ENU 和大地坐标互换时的中转站。<span class="en" lang="en">The intermediate frame used when converting between ENU and geodetic.</span></td></tr>
+              <tr><td>RHS</td><td>Right-Hand Side，常微分方程右端项 \(\dot{\mathbf x}=f(\mathbf x,\mathbf u)\)<span class="en" lang="en">The right-hand side \(f\) of an ODE \(\dot{\mathbf x}=f(\mathbf x,\mathbf u)\).</span></td><td>“连续动力学”就是指这个 \(f\)；它是连续的，可被多项式配点直接使用。<span class="en" lang="en">“Continuous dynamics” means this \(f\); being continuous, it can feed polynomial collocation directly.</span></td></tr>
+              <tr><td>\(\phi,\lambda,h\)</td><td>大地纬度、大地经度、椭球高<span class="en" lang="en">Geodetic latitude, longitude, ellipsoidal height.</span></td><td>大地动力学的位置状态。代码里 <code>lat,lon</code> 内部用弧度。<span class="en" lang="en">The position state of the geodetic dynamics; internally <code>lat,lon</code> are in radians.</span></td></tr>
+              <tr><td>\(V,\psi,\gamma\)</td><td>空速、航向角、航迹角<span class="en" lang="en">Airspeed, heading angle, flight-path angle.</span></td><td>速度大小与方向。\(\psi=0\) 指向东，\(\gamma\) 是相对当地水平面的爬升角。<span class="en" lang="en">Speed and direction. \(\psi=0\) points East; \(\gamma\) is the climb angle relative to the local horizon.</span></td></tr>
+              <tr><td>\(T,\mu,n\)</td><td>推力、滚转（坡度）角、载荷因子<span class="en" lang="en">Thrust, bank angle, load factor.</span></td><td>三个控制量；本页只关心它们如何驱动 \(\dot V,\dot\psi,\dot\gamma\)。<span class="en" lang="en">The three controls; here we only care how they drive \(\dot V,\dot\psi,\dot\gamma\).</span></td></tr>
+              <tr><td>\(V_E,V_N,V_U\)</td><td>速度在东、北、天三方向的分量<span class="en" lang="en">Velocity components along East, North, Up.</span></td><td>桥梁量：\(V_E=V\cos\gamma\cos\psi\) 等，把 \((V,\psi,\gamma)\) 和坐标率连起来。<span class="en" lang="en">The bridge quantities \(V_E=V\cos\gamma\cos\psi\), etc., linking \((V,\psi,\gamma)\) to coordinate rates.</span></td></tr>
+              <tr><td>\(R_M\)</td><td>子午圈曲率半径（meridional radius）<span class="en" lang="en">Meridional radius of curvature.</span></td><td>南北方向上“走一米等于几弧度纬度”的换算半径。<span class="en" lang="en">The radius converting north–south metres into latitude radians.</span></td></tr>
+              <tr><td>\(R_N\)</td><td>卯酉圈曲率半径（prime-vertical radius）<span class="en" lang="en">Prime-vertical radius of curvature.</span></td><td>东西方向换算半径，配合 \(\cos\phi\) 处理纬线圈收缩。<span class="en" lang="en">The east–west conversion radius, paired with \(\cos\phi\) for the shrinking parallel.</span></td></tr>
+              <tr><td>\(a,\ e^2\)</td><td>WGS 84 赤道半径与第一偏心率平方<span class="en" lang="en">WGS 84 equatorial radius and first eccentricity squared.</span></td><td>代码常数：\(a=6378137\,\mathrm m\)，\(e^2=f(2-f)\)，\(f=1/298.257223563\)。<span class="en" lang="en">Code constants: \(a=6378137\,\mathrm m\), \(e^2=f(2-f)\), \(f=1/298.257223563\).</span></td></tr>
+              <tr><td>输运率 transport rate<span class="en" lang="en">transport rate</span></td><td>本地 ENU 框架随飞机在曲面上移动而自身转动的角速度<span class="en" lang="en">The angular velocity at which the local ENU frame itself rotates as the aircraft moves over the curved surface.</span></td><td>本页的核心“隐藏变换”，必须显式补进大地 RHS。<span class="en" lang="en">The page’s key hidden transformation; it must be added explicitly to the geodetic RHS.</span></td></tr>
+              <tr><td>配点 collocation<span class="en" lang="en">collocation</span></td><td>直接配点法：用多项式拟合状态、令缺陷项为零来转写最优控制问题<span class="en" lang="en">Direct collocation: fitting the state by a polynomial and driving the defect to zero to transcribe an optimal-control problem.</span></td><td>解释“为什么要连续 RHS”：多项式配点需要 \(f\)，离散步进器不行。<span class="en" lang="en">Explains “why a continuous RHS”: polynomial collocation needs \(f\); a discrete stepper will not do.</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 2. THREE MODELS -->
+      <section id="three">
+        <h2>2. 三个模型一张表：起点、桥、终点<span class="en" lang="en">Three Models at a Glance: Start, Bridge, End</span></h2>
+        <p class="section-intro">
+          仿真器里有三个相关函数，它们描述的是<strong>同一套点质量飞行力学</strong>，只是“坐标怎么记”和“连续还是离散”不同。把它们摆在一起，整页的逻辑就清楚了。
+          <span class="en" lang="en">The simulator has three related functions describing the <strong>same point-mass flight mechanics</strong>; they differ only in how coordinates are recorded and whether they are continuous or discrete. Seeing them side by side makes the whole page’s logic clear.</span>
+        </p>
+        <div class="card">
+          <table>
+            <thead>
+              <tr>
+                <th>函数<span class="en" lang="en">Function</span></th>
+                <th>位置坐标<span class="en" lang="en">Position coordinates</span></th>
+                <th>连续 / 离散<span class="en" lang="en">Continuous / discrete</span></th>
+                <th>它做的“坐标处理”<span class="en" lang="en">How it handles coordinates</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>起点</strong> <code>make_dynamics_model</code><span class="en" lang="en"><strong>Start</strong></span></td>
+                <td>平直 ENU \((x,y,h)\)，单位米<span class="en" lang="en">Flat ENU \((x,y,h)\), metres</span></td>
+                <td>连续 RHS<span class="en" lang="en">Continuous RHS</span></td>
+                <td>不处理曲率：把附近地球当成一张无限平面。<span class="en" lang="en">Ignores curvature: treats the nearby Earth as an infinite plane.</span></td>
+              </tr>
+              <tr>
+                <td><strong>桥</strong> <code>make_geo_step_from_enu_integrator</code><span class="en" lang="en"><strong>Bridge</strong></span></td>
+                <td>大地 \((\phi,\lambda,h)\)，单位度<span class="en" lang="en">Geodetic \((\phi,\lambda,h)\), degrees</span></td>
+                <td>离散一步映射 \(\Phi(\mathbf x,\mathbf u,\Delta t)\)<span class="en" lang="en">Discrete one-step map \(\Phi\)</span></td>
+                <td>每个 RK4 步都<strong>重新</strong>在当前点贴一块新切平面，步进、再转回大地坐标。<span class="en" lang="en">Each RK4 step <strong>re-attaches</strong> a fresh tangent plane at the current point, steps, then converts back to geodetic.</span></td>
+              </tr>
+              <tr>
+                <td><strong>终点</strong> <code>make_geodetic_dynamics_model</code><span class="en" lang="en"><strong>End</strong></span></td>
+                <td>大地 \((\phi,\lambda,h)\)，内部弧度<span class="en" lang="en">Geodetic \((\phi,\lambda,h)\), radians inside</span></td>
+                <td>连续 RHS<span class="en" lang="en">Continuous RHS</span></td>
+                <td>把曲率与“重锚”折进连续方程：曲率半径因子 + 输运率项。<span class="en" lang="en">Folds curvature and re-anchoring into the continuous equations: curvature-radius factors plus transport terms.</span></td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="note">
+            一句话路线图：<strong>起点</strong>简单但只在局部准；<strong>桥</strong>靠“每步换一块新切平面”修正了曲率，但它是离散映射，不能喂给多项式配点；<strong>终点</strong>把桥的离散修正写成连续 RHS，于是既准、又能直接做最优化配点。
+            <span class="en" lang="en">One-line roadmap: the <strong>start</strong> is simple but only locally accurate; the <strong>bridge</strong> fixes curvature by swapping in a fresh tangent plane each step, but as a discrete map it cannot feed polynomial collocation; the <strong>end</strong> rewrites the bridge’s discrete fix as a continuous RHS, so it is both accurate and directly usable in optimization.</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. FLAT ENU -->
+      <section id="enu">
+        <h2>3. 起点：平直 ENU 切平面里的点质量动力学<span class="en" lang="en">Start: Point-Mass Dynamics in a Flat ENU Tangent Plane</span></h2>
+        <p class="section-intro">
+          前置文档已经把 ENU 这个坐标系定义清楚了：选一个原点 \(O_L\)，三根本地正交轴 \(\hat{\mathbf e}_0\)（东）、\(\hat{\mathbf n}_{N,0}\)（北）、\(\hat{\mathbf u}_0\)（天）。<code>make_dynamics_model</code> 就是<strong>在这块平面里写牛顿运动</strong>，状态 \((x,y,h,V,\psi,\gamma,m)\)。
+          <span class="en" lang="en">The prerequisite document already defined the ENU frame: pick an origin \(O_L\) and three local orthonormal axes \(\hat{\mathbf e}_0\) (East), \(\hat{\mathbf n}_{N,0}\) (North), \(\hat{\mathbf u}_0\) (Up). <code>make_dynamics_model</code> simply <strong>writes Newtonian motion inside that plane</strong>, with state \((x,y,h,V,\psi,\gamma,m)\).</span>
+        </p>
+
+        <div class="grid-2">
+          <article class="card">
+            <h3>状态、控制与速度分解<span class="en" lang="en">State, Control, and Velocity Decomposition</span></h3>
+            <p>
+              位置 \((x,y,h)\) 是相对原点向东、向北、向上的<strong>米</strong>。速度大小是 \(V\)，方向由航向 \(\psi\)（在水平面内，\(\psi=0\) 朝东）和航迹角 \(\gamma\)（抬头爬升为正）决定。把 \(V\) 投到三轴：
+              <span class="en" lang="en">Position \((x,y,h)\) is in <strong>metres</strong> east, north, and up of the origin. Speed is \(V\); its direction is set by heading \(\psi\) (in the horizontal plane, \(\psi=0\) is east) and flight-path angle \(\gamma\) (positive climbing). Project \(V\) onto the three axes:</span>
+            </p>
+            <div class="formula">
+              <span class="formula-line">\[
+V_E=V\cos\gamma\cos\psi,\quad
+V_N=V\cos\gamma\sin\psi,\quad
+V_U=V\sin\gamma
+\]</span>
+            </div>
+            <div class="var-list">
+              <div><strong>\(x,y,h\)</strong>：东、北、天位置（米）。<span class="en" lang="en">East, north, up position (m).</span></div>
+              <div><strong>\(V\)</strong>：空速（m/s）。<span class="en" lang="en">Airspeed (m/s).</span></div>
+              <div><strong>\(\psi\)</strong>：航向角（rad），\(0=\) 东。<span class="en" lang="en">Heading (rad), \(0=\) east.</span></div>
+              <div><strong>\(\gamma\)</strong>：航迹角（rad）。<span class="en" lang="en">Flight-path angle (rad).</span></div>
+            </div>
+          </article>
+          <article class="card">
+            <h3>七个状态的连续 RHS<span class="en" lang="en">The Continuous RHS for the Seven States</span></h3>
+            <p>
+              位置率直接就是速度分量（平面里“走一米就是一米”）；速度与姿态率来自推力 \(T\)、阻力 \(D\)、重力 \(g\) 和载荷因子 \(n\)、坡度 \(\mu\)。
+              <span class="en" lang="en">Position rates are simply the velocity components (in a plane, “one metre travelled is one metre”); speed and attitude rates come from thrust \(T\), drag \(D\), gravity \(g\), load factor \(n\), and bank \(\mu\).</span>
+            </p>
+            <div class="formula">
+              <span class="formula-line">\[
+\dot x=V\cos\gamma\cos\psi,\qquad
+\dot y=V\cos\gamma\sin\psi,\qquad
+\dot h=V\sin\gamma
+\]</span>
+              <span class="formula-line">\[
+\dot V=\frac{T-D}{m}-g\sin\gamma
+\]</span>
+              <span class="formula-line">\[
+\dot\psi=\frac{g\,n\sin\mu}{V\cos\gamma},\qquad
+\dot\gamma=\frac{g\,(n\cos\mu-\cos\gamma)}{V}
+\]</span>
+            </div>
+            <p class="en" lang="en" style="margin-top:8px">
+              Note: \(\dot x,\dot y\) are exactly \(V_E,V_N\). This is the part that must change when we leave the flat plane.
+            </p>
+          </article>
+        </div>
+
+        <pre aria-label="make_dynamics_model 节选 / excerpt"><code><span class="tok-com"># aerodynamic_model/casadi_simulator.py — make_dynamics_model()</span>
+dxdt   = V * <span class="tok-fn">cos</span>(gamma) * <span class="tok-fn">cos</span>(psi)        <span class="tok-com"># East  velocity  (metres/s)</span>
+dydt   = V * <span class="tok-fn">cos</span>(gamma) * <span class="tok-fn">sin</span>(psi)        <span class="tok-com"># North velocity  (metres/s)</span>
+dhdt   = V * <span class="tok-fn">sin</span>(gamma)                   <span class="tok-com"># Up    velocity  (metres/s)</span>
+dVdt   = (T - D) / m - g * <span class="tok-fn">sin</span>(gamma)
+dpsidt = g*n * <span class="tok-fn">sin</span>(mu) / (V * <span class="tok-fn">cos</span>(gamma))
+dgamadt= g * (n * <span class="tok-fn">cos</span>(mu) - <span class="tok-fn">cos</span>(gamma)) / V</code></pre>
+
+        <div class="callout">
+          <strong>记住这两行：<code>dxdt</code>、<code>dydt</code> 是“米/秒”。</strong>
+          整页接下来的全部坐标变换，几乎都集中在“怎么把这两行的<strong>线速度</strong>，换成大地坐标里的<strong>角速度</strong>”，以及“平面假设带来的姿态误差要怎么补”。其余四行（\(\dot h,\dot V,\dot\psi,\dot\gamma\) 的力学部分）几乎原样保留。
+          <span class="en" lang="en"><strong>Keep these two lines in mind: <code>dxdt</code> and <code>dydt</code> are “metres/second.”</strong> Almost every transformation on the rest of this page is about turning those <strong>linear velocities</strong> into <strong>angular rates</strong> in geodetic coordinates, plus correcting the attitude error introduced by the flat-plane assumption. The other four lines (the force parts of \(\dot h,\dot V,\dot\psi,\dot\gamma\)) carry over almost unchanged.</span>
+        </div>
+      </section>
+
+      <!-- 4. WHY FLAT BREAKS -->
+      <section id="why">
+        <h2>4. 为什么“平面”不够：切平面会脱离椭球<span class="en" lang="en">Why “Flat” Is Not Enough: The Tangent Plane Peels Off the Ellipsoid</span></h2>
+        <p class="section-intro">
+          ENU 平面只在原点处和椭球相切。沿平面飞远了，平面会越来越“高出”真实地表。把水平距离记作 \(L\)、地球半径量级记作 \(R\approx6.37\times10^6\,\mathrm m\)，竖向偏离可估计为 \(\epsilon_U\approx L^2/2R\)。拖动下面滑块看它怎么长大。
+          <span class="en" lang="en">The ENU plane is tangent to the ellipsoid only at the origin. Fly far along it and the plane rises increasingly above the true surface. Let \(L\) be the horizontal distance and \(R\approx6.37\times10^6\,\mathrm m\) the Earth-radius scale; the vertical departure is \(\epsilon_U\approx L^2/2R\). Drag the slider to watch it grow.</span>
+        </p>
+
+        <figure class="viz">
+          <div id="viz-departure" class="plot"></div>
+          <div class="controls">
+            <span><label for="dep-L">水平距离 L / horizontal distance</label></span>
+            <input id="dep-L" type="range" min="5" max="300" value="120" step="1">
+            <span class="chip"><span class="dot" style="background:#007c89"></span>切平面 tangent plane</span>
+            <span class="chip"><span class="dot" style="background:#b65b13"></span>真实椭球面 true surface</span>
+          </div>
+          <div class="readout" id="dep-out"></div>
+          <figcaption>
+            图 1 · 三维示意：飞机“以为”自己在水平切平面上平飞，但真实椭球面在它脚下弯走，竖向缺口 \(\epsilon_U\) 随 \(L\) 二次增长。球体曲率为看清做了夸张，读数 \(\epsilon_U=L^2/2R\) 用真实 \(R\) 计算。
+            <span class="en" lang="en">Figure 1 · 3D sketch: the aircraft “thinks” it flies level on the horizontal tangent plane, but the true ellipsoid curves away beneath it; the vertical gap \(\epsilon_U\) grows quadratically with \(L\). Curvature is exaggerated for clarity; the readout \(\epsilon_U=L^2/2R\) uses the real \(R\).</span>
+          </figcaption>
+        </figure>
+
+        <div class="callout">
+          <strong>这就是 30 km 实验里 335 m 误差的来源。</strong>
+          项目脚本 <code>dynamics_comparison_30km.py</code> 让同一条轨迹飞 30 km：固定在目标处的<strong>平直 ENU</strong> 系统（系统 A）相对“逐步重锚”的真实参考，水平误差累积到约 <strong>335 m</strong>。这不是 bug，正是把弯曲地球当平面的代价。
+          <span class="en" lang="en"><strong>This is the source of the 335 m error in the 30 km experiment.</strong> The project script <code>dynamics_comparison_30km.py</code> flies one trajectory for 30 km: the <strong>flat ENU</strong> system anchored at the target (system A) accumulates about <strong>335 m</strong> of horizontal error versus the per-step re-anchored reference. That is not a bug; it is the price of treating a curved Earth as flat.</span>
+        </div>
+      </section>
+
+      <!-- 5. RADII OF CURVATURE -->
+      <section id="radii">
+        <h2>5. 数学预备：WGS 84 的两个曲率半径 \(R_M,R_N\)<span class="en" lang="en">Math Primer: The Two WGS 84 Radii of Curvature \(R_M,R_N\)</span></h2>
+        <p class="section-intro">
+          要把“米/秒”换成“纬度/经度的弧度每秒”，需要知道在某一点上“走一米，方向上转过几弧度”。椭球在不同方向曲率不同，于是有两个半径：南北向的子午圈半径 \(R_M\)，东西向的卯酉圈半径 \(R_N\)。
+          <span class="en" lang="en">To convert “metres/second” into “radians of latitude/longitude per second,” we need to know how many radians one metre of travel sweeps at a given point. An ellipsoid curves differently in different directions, so there are two radii: the meridional radius \(R_M\) (north–south) and the prime-vertical radius \(R_N\) (east–west).</span>
+        </p>
+
+        <div class="grid-2">
+          <article class="card">
+            <h3>两个半径的公式<span class="en" lang="en">The Two Radius Formulas</span></h3>
+            <p>
+              它们只依赖纬度 \(\phi\) 和椭球常数 \(a,e^2\)。记 \(W=\sqrt{1-e^2\sin^2\phi}\)：
+              <span class="en" lang="en">They depend only on latitude \(\phi\) and the ellipsoid constants \(a,e^2\). Writing \(W=\sqrt{1-e^2\sin^2\phi}\):</span>
+            </p>
+            <div class="formula">
+              <span class="formula-line">\[
+R_N=\frac{a}{W}=\frac{a}{\sqrt{1-e^2\sin^2\phi}}
+\]</span>
+              <span class="formula-line">\[
+R_M=\frac{a(1-e^2)}{W^3}=\frac{a(1-e^2)}{\left(1-e^2\sin^2\phi\right)^{3/2}}
+\]</span>
+            </div>
+            <p>
+              这正是代码里的两行（注意 <code>denom</code> \(=W^2\)）：
+              <span class="en" lang="en">These are exactly the two code lines (note <code>denom</code> \(=W^2\)):</span>
+            </p>
+            <pre aria-label="curvature radii 节选"><code><span class="tok-com"># make_geodetic_dynamics_model()</span>
+denom = 1.0 - WGS84_E2 * <span class="tok-fn">sin</span>(lat)**2     <span class="tok-com"># = W^2</span>
+R_N = WGS84_A / <span class="tok-fn">sqrt</span>(denom)            <span class="tok-com"># prime-vertical</span>
+R_M = WGS84_A * (1.0 - WGS84_E2) / denom**1.5  <span class="tok-com"># meridional</span></code></pre>
+          </article>
+          <article class="card">
+            <h3>几何含义：两个密切圆<span class="en" lang="en">Geometric Meaning: Two Osculating Circles</span></h3>
+            <p>
+              在子午剖面里，过某点 P 沿法线方向有两条“最贴合”的圆弧。<strong>\(R_M\)</strong> 是沿子午线（南北）走时贴合的密切圆半径；<strong>\(R_N\)</strong> 是法线一直延伸到自转轴的长度，决定东西方向的弯曲。在 WGS 84 上总有 \(R_N\ge R_M\)，且二者都随纬度变化——拖动滑块感受一下。
+              <span class="en" lang="en">In the meridian section, two “best-fitting” circular arcs pass through a point P along the normal. <strong>\(R_M\)</strong> is the osculating-circle radius when moving along the meridian (north–south); <strong>\(R_N\)</strong> is the length of the normal extended to the spin axis, controlling east–west bending. On WGS 84 always \(R_N\ge R_M\), and both vary with latitude — drag the slider to feel it.</span>
+            </p>
+            <div class="note">
+              赤道处 \(R_M\) 最小、两极处最大；\(R_N\) 反之在两极最大。差别不大（千分之几），但在大地动力学里它必须被正确区分，否则南北/东西换算就会系统性偏一点点。
+              <span class="en" lang="en">\(R_M\) is smallest at the equator and largest at the poles; \(R_N\) is largest at the poles too. The difference is small (a few parts per thousand) but must be kept distinct in geodetic dynamics, or the north–south versus east–west conversions pick up a small systematic bias.</span>
+            </div>
+          </article>
+        </div>
+
+        <figure class="viz">
+          <div id="viz-radii" class="plot" style="height:480px"></div>
+          <div class="controls">
+            <span><label for="rad-lat">纬度 φ / latitude</label></span>
+            <input id="rad-lat" type="range" min="0" max="89" value="45" step="1">
+            <span class="chip"><span class="dot" style="background:#3d58a8"></span>R<sub>N</sub> 卯酉圈 prime-vertical</span>
+            <span class="chip"><span class="dot" style="background:#b65b13"></span>R<sub>M</sub> 子午圈 meridional</span>
+          </div>
+          <div class="readout" id="rad-out"></div>
+          <figcaption>
+            图 2 · 子午剖面（扁率已夸张以便看清两圆）：点 P 在纬度 \(\phi\)。蓝线是法线，延伸到自转轴的长度即 \(R_N\)；橙色密切圆半径为 \(R_M\)。右侧读数为真实 WGS 84 数值（千米）。
+            <span class="en" lang="en">Figure 2 · Meridian section (flattening exaggerated so both circles are visible): point P at latitude \(\phi\). The blue line is the normal; its length to the spin axis is \(R_N\); the orange osculating circle has radius \(R_M\). The readouts give the real WGS 84 values in kilometres.</span>
+          </figcaption>
+        </figure>
+      </section>
+
+      <!-- 6. POSITION KINEMATICS -->
+      <section id="position">
+        <h2>6. 坐标变换 A：位置运动学，米/秒 → 经纬度弧度/秒<span class="en" lang="en">Transformation A: Position Kinematics, Metres/Second → Radians/Second</span></h2>
+        <p class="section-intro">
+          这是第一处真正的变换。平面模型写 \(\dot x=V_E,\ \dot y=V_N\)（米/秒）。大地模型必须把同样的线速度换成纬度、经度的<strong>角速度</strong>。换算因子就是上一节的曲率半径。
+          <span class="en" lang="en">This is the first real transformation. The flat model writes \(\dot x=V_E,\ \dot y=V_N\) (metres/second). The geodetic model must turn the same linear velocities into <strong>angular rates</strong> of latitude and longitude. The conversion factors are the curvature radii from the previous section.</span>
+        </p>
+
+        <div class="steps">
+          <div class="step">
+            <strong>北向：纬度率。</strong>沿子午线走一米，纬度增加 \(1/(R_M+h)\) 弧度（半径 \(R_M\) 的圆弧，加上高度 \(h\)）。所以
+            <span class="en" lang="en"><strong>Northward: latitude rate.</strong> Moving one metre along the meridian increases latitude by \(1/(R_M+h)\) radians (an arc of radius \(R_M\), plus height \(h\)). Hence</span>
+            <div class="formula"><span class="formula-line">\[\dot\phi=\frac{V_N}{R_M+h}\]</span></div>
+          </div>
+          <div class="step">
+            <strong>东向：经度率。</strong>沿纬线走一米，经度增加 \(1/\big((R_N+h)\cos\phi\big)\) 弧度。多出来的 \(\cos\phi\) 是因为纬线圈半径是 \((R_N+h)\cos\phi\)：越往高纬，纬线圈越小，走一米对应更多经度。
+            <span class="en" lang="en"><strong>Eastward: longitude rate.</strong> Moving one metre along the parallel increases longitude by \(1/\big((R_N+h)\cos\phi\big)\) radians. The extra \(\cos\phi\) appears because the parallel’s radius is \((R_N+h)\cos\phi\): at higher latitude the parallel shrinks, so one metre maps to more longitude.</span>
+            <div class="formula"><span class="formula-line">\[\dot\lambda=\frac{V_E}{(R_N+h)\cos\phi}\]</span></div>
+          </div>
+          <div class="step">
+            <strong>天向：高度率。</strong>这一维没有曲率换算，沿法线向上的速度就是高度率，和平面模型一致。
+            <span class="en" lang="en"><strong>Up: height rate.</strong> This dimension needs no curvature conversion; the upward velocity along the normal is the height rate, identical to the flat model.</span>
+            <div class="formula"><span class="formula-line">\[\dot h=V_U\]</span></div>
+          </div>
+        </div>
+
+        <div class="grid-2" style="margin-top:18px">
+          <article class="card">
+            <h3>对照：平面 vs 大地的位置率<span class="en" lang="en">Side by Side: Flat vs Geodetic Position Rates</span></h3>
+            <div class="formula">
+              <span class="formula-line">\[
+\underbrace{\dot x=V_E,\quad \dot y=V_N}_{\text{flat ENU, metres}}
+\]</span>
+              <span class="formula-line">\[
+\underbrace{\dot\phi=\frac{V_N}{R_M+h},\quad
+\dot\lambda=\frac{V_E}{(R_N+h)\cos\phi}}_{\text{geodetic, radians}}
+\]</span>
+            </div>
+            <p>
+              注意东、北和 \(\phi,\lambda\) 的对应：\(V_N\)（北）驱动 \(\dot\phi\)（纬度），\(V_E\)（东）驱动 \(\dot\lambda\)（经度）。这正是代码里那三行“连续坐标变换”。
+              <span class="en" lang="en">Note the East/North to \(\phi,\lambda\) pairing: \(V_N\) (north) drives \(\dot\phi\) (latitude), \(V_E\) (east) drives \(\dot\lambda\) (longitude). These are exactly the three “continuous coordinate transformation” lines in the code.</span>
+            </p>
+          </article>
+          <article class="card">
+            <h3>代码原样<span class="en" lang="en">The Code, Verbatim</span></h3>
+            <pre aria-label="position kinematics 节选"><code><span class="tok-com"># make_geodetic_dynamics_model() — position kinematics</span>
+V_east  = V * cos_g * <span class="tok-fn">cos</span>(psi)
+V_north = V * cos_g * <span class="tok-fn">sin</span>(psi)
+V_up    = V * <span class="tok-fn">sin</span>(gamma)
+
+lat_dot = V_north / (R_M + h)
+lon_dot = V_east  / ((R_N + h) * <span class="tok-fn">cos</span>(lat))
+h_dot   = V_up</code></pre>
+            <div class="note">
+              这里 <code>lat,lon</code> 是弧度。外层步进器 <code>make_geodetic_step_integrator</code> 对外用度、内部转弧度，方便和 <code>GeodeticState</code> 对接。
+              <span class="en" lang="en">Here <code>lat,lon</code> are radians. The outer stepper <code>make_geodetic_step_integrator</code> exposes degrees and converts to radians inside, to match <code>GeodeticState</code>.</span>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <!-- 7. RE-ANCHORED BRIDGE -->
+      <section id="reanchor">
+        <h2>7. 中间桥：逐步重锚 ENU 步进器<span class="en" lang="en">The Bridge: The Per-Step Re-anchored ENU Stepper</span></h2>
+        <p class="section-intro">
+          在写出连续大地 RHS 之前，项目先有一个“离散但精确”的中间方案：<code>make_geo_step_from_enu_integrator</code>。它的想法极简单——既然平面只在原点附近准，那就<strong>每一步都把原点搬到飞机当前位置</strong>，用全新的切平面走一步，再转回大地坐标。
+          <span class="en" lang="en">Before writing the continuous geodetic RHS, the project first had a “discrete but accurate” middle option: <code>make_geo_step_from_enu_integrator</code>. The idea is simple — since the plane is only accurate near its origin, <strong>move the origin to the aircraft’s current position every step</strong>, take one step in a brand-new tangent plane, then convert back to geodetic.</span>
+        </p>
+
+        <div class="grid-2">
+          <article class="card">
+            <h3>一步映射 \(\Phi\) 的内部<span class="en" lang="en">Inside the One-Step Map \(\Phi\)</span></h3>
+            <p>每个 RK4 步做四件事：<span class="en" lang="en">Each RK4 step does four things:</span></p>
+            <ol>
+              <li>在当前 \((\phi,\lambda)\) 处、以 \(h\) 为竖直起点，建一块<strong>新</strong>切平面，把当前状态写成 ENU 原点处的 \((0,0,h,V,\psi,\gamma)\)。<span class="en" lang="en">Build a <strong>fresh</strong> tangent plane at the current \((\phi,\lambda)\), and write the current state at the ENU origin as \((0,0,h,V,\psi,\gamma)\).</span></li>
+              <li>用平面 RHS（<code>make_dynamics_model</code>）走一个 RK4 步，得到 ENU 里的下一个状态。<span class="en" lang="en">Take one RK4 step with the flat RHS (<code>make_dynamics_model</code>) to get the next ENU state.</span></li>
+              <li>把新的 ENU 位置 + 速度转回大地坐标（<code>enu_state_to_geodetic_expr</code>）。<span class="en" lang="en">Convert the new ENU position and velocity back to geodetic (<code>enu_state_to_geodetic_expr</code>).</span></li>
+              <li>丢弃这块切平面；下一步重新来过。<span class="en" lang="en">Discard the tangent plane; start over next step.</span></li>
+            </ol>
+            <div class="formula"><span class="formula-line">\[
+\mathbf x_{k+1}=\Phi(\mathbf x_k,\mathbf u_k,\Delta t)
+\]</span></div>
+          </article>
+          <article class="card">
+            <h3>为什么它“离散”很关键<span class="en" lang="en">Why “Discrete” Matters</span></h3>
+            <p>
+              \(\Phi\) 是一个<strong>一步映射</strong>，不是连续右端 \(f\)。这带来一个实际限制：直接配点里的多项式方案（梯形、Hermite-Simpson、RK4 缺陷）需要对连续 \(f\) 求值并拟合多项式，<strong>喂不进一个步进器</strong>。步进器只能当“打靶”缺陷用：\(\mathbf x_{k+1}-\Phi(\mathbf x_k,\mathbf u_k,\Delta t)=0\)。
+              <span class="en" lang="en">\(\Phi\) is a <strong>one-step map</strong>, not a continuous right-hand side \(f\). That brings a practical limit: polynomial collocation schemes (trapezoidal, Hermite-Simpson, RK4 defect) evaluate and fit a polynomial to a continuous \(f\), so <strong>a stepper cannot feed them</strong>. A stepper can only serve as a shooting defect: \(\mathbf x_{k+1}-\Phi(\mathbf x_k,\mathbf u_k,\Delta t)=0\).</span>
+            </p>
+            <div class="callout">
+              <strong>这正是要走到“终点”的动机。</strong>
+              重锚步进器精确，但离散。要在最优化里用多项式配点，需要一条<strong>连续</strong>的大地 RHS——它在每个点上的瞬时行为，等于“无穷小重锚”的极限。下一节就把这个极限写出来。
+              <span class="en" lang="en"><strong>This is precisely the motivation for the “end.”</strong> The re-anchored stepper is accurate but discrete. To use polynomial collocation in optimization, we need a <strong>continuous</strong> geodetic RHS whose instantaneous behaviour at each point equals the limit of “infinitesimal re-anchoring.” The next section writes that limit down.</span>
+            </div>
+          </article>
+        </div>
+
+        <figure class="viz">
+          <div id="viz-triad" class="plot" style="height:480px"></div>
+          <div class="controls">
+            <span><label for="tri-pos">沿航迹推进 / advance along path</label></span>
+            <input id="tri-pos" type="range" min="0" max="100" value="35" step="1">
+            <span class="chip"><span class="dot" style="background:#b65b13"></span>East</span>
+            <span class="chip"><span class="dot" style="background:#2e7d59"></span>North</span>
+            <span class="chip"><span class="dot" style="background:#3d58a8"></span>Up</span>
+            <span class="chip"><span class="dot" style="background:#9aa7b6"></span>初始北向（冻结） initial north (frozen)</span>
+          </div>
+          <div class="readout" id="tri-out"></div>
+          <figcaption>
+            图 3 · 三维：飞机沿一条纬线向东飞，每个位置重建一块本地 ENU 切平面（彩色三轴）。注意 East/North 轴随经度<strong>转动</strong>——这就是“重锚”每步在做的事，也直接引出下一节的输运率。灰色虚线是被“冻结”的初始北向，和当前真实北向的夹角即子午线收敛角。
+            <span class="en" lang="en">Figure 3 · 3D: the aircraft flies east along a parallel, rebuilding a local ENU plane (coloured triad) at each position. Notice how the East/North axes <strong>rotate</strong> with longitude — exactly what “re-anchoring” does each step, and what leads to the next section’s transport rate. The grey dashed line is the “frozen” initial north; its angle to the true current north is the meridian-convergence angle.</span>
+          </figcaption>
+        </figure>
+      </section>
+
+      <!-- 8. TRANSPORT RATE -->
+      <section id="transport">
+        <h2>8. 坐标变换 B：输运率（这页最微妙的一处）<span class="en" lang="en">Transformation B: The Transport Rate (the subtlest part of this page)</span></h2>
+        <p class="section-intro">
+          \(\psi\) 和 \(\gamma\) 不是相对惯性空间定义的，而是相对<strong>当地 ENU 框架</strong>。可这个框架本身随飞机在曲面上移动而转动（图 3 看得很清楚）。于是即使气动力矩为零，\(\psi,\gamma\) 也会变。这个“纯几何造成的角速度”叫输运率。连续大地 RHS 必须把它显式补上，才能等于重锚步进器。
+          <span class="en" lang="en">\(\psi\) and \(\gamma\) are defined not against inertial space but against the <strong>local ENU frame</strong>. Yet that frame itself rotates as the aircraft moves over the curved surface (clearly visible in Figure 3). So even with zero aerodynamic moment, \(\psi,\gamma\) change. This “purely geometric angular velocity” is the transport rate. The continuous geodetic RHS must add it explicitly to equal the re-anchored stepper.</span>
+        </p>
+
+        <div class="card">
+          <h3>本地框架相对地球的转动角速度<span class="en" lang="en">Angular Velocity of the Local Frame Relative to Earth</span></h3>
+          <p>
+            当飞机以 ENU 速度 \((V_E,V_N,V_U)\) 移动时，当地 ENU 框架相对地球的转动角速度（写在 ENU 轴上）是经典的“运输率”向量：
+            <span class="en" lang="en">As the aircraft moves with ENU velocity \((V_E,V_N,V_U)\), the local ENU frame’s angular velocity relative to Earth (expressed on the ENU axes) is the classic transport-rate vector:</span>
+          </p>
+          <div class="formula"><span class="formula-line">\[
+\boldsymbol\omega_{en}^{ENU}=
+\left(\;
+-\frac{V_N}{R_M+h},\quad
+\frac{V_E}{R_N+h},\quad
+\frac{V_E\tan\phi}{R_N+h}
+\;\right)
+\]</span></div>
+          <p>
+            把它投影到“改变航迹角 \(\gamma\)”和“改变航向 \(\psi\)”的转轴上，就得到两个附加项。代码里只显式加了它们（其余的运输分量已隐含在速度分解里）：
+            <span class="en" lang="en">Projecting it onto the axes that change flight-path angle \(\gamma\) and heading \(\psi\) gives two extra terms. The code adds exactly these (the remaining transport components are already implicit in the velocity decomposition):</span>
+          </p>
+          <div class="formula">
+            <span class="formula-line">\[
+\dot\gamma \mathrel{+}= V\cos\gamma\left(
+\frac{\sin^2\psi}{R_M+h}+\frac{\cos^2\psi}{R_N+h}
+\right)
+\qquad\text{(曲率俯仰 / curvature pitch-up)}
+\]</span>
+            <span class="formula-line">\[
+\dot\psi \mathrel{+}= -\,\frac{V\cos\gamma\,\cos\psi\,\tan\phi}{R_N+h}
+\qquad\text{(子午线收敛 / meridian convergence)}
+\]</span>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <article class="card">
+            <h3>项一：曲率俯仰，地面在脚下弯走<span class="en" lang="en">Term 1: Curvature Pitch-up, the Ground Curves Away</span></h3>
+            <p>
+              飞机往前飞，当地“水平面”随地球弯下去。要保持相对地面同样的航迹角，\(\gamma\) 必须随之“抬头”——即使升力恰好等于重力。这一项总是正的（抬头），大小由前进速度和当地曲率决定。
+              <span class="en" lang="en">As the aircraft moves forward, the local “horizon” bends downward with the Earth. To keep the same flight-path angle relative to the ground, \(\gamma\) must “pitch up” — even when lift exactly balances weight. This term is always positive (pitch-up); its size is set by forward speed and local curvature.</span>
+            </p>
+          </article>
+          <article class="card">
+            <h3>项二：子午线收敛，北向自己转<span class="en" lang="en">Term 2: Meridian Convergence, North Rotates by Itself</span></h3>
+            <p>
+              不同经度上的“正北”在三维空间里并不平行（图 3 的灰虚线）。向东飞时，当地北向相对惯性空间缓慢转动，于是以北为基准的航向 \(\psi\) 也跟着变。这一项含 \(\tan\phi\)：越靠近极地，子午线越快收敛，效应越强；赤道上为零。
+              <span class="en" lang="en">“True north” at different longitudes is not parallel in 3D space (the grey dashed line in Figure 3). Flying east, the local north slowly rotates relative to inertial space, so the heading \(\psi\) measured against north changes too. This term carries \(\tan\phi\): nearer the poles, meridians converge faster and the effect grows; it vanishes at the equator.</span>
+            </p>
+          </article>
+        </div>
+
+        <div class="callout">
+          <strong>开关 <code>include_transport</code> 量化它有多重要。</strong>
+          脚本 <code>geodetic_vs_reanchored_error.py</code> 在 5 km 上比较：带输运项时，连续大地系统与逐步重锚 RK4 吻合到约 <strong>0.3 毫米</strong>；<strong>去掉</strong>输运项（<code>include_transport=False</code>）则漂移约 <strong>2.9 m</strong> 水平、<strong>1.3 m</strong> 高度、<strong>0.04°</strong> 航向——这正好等于输运率的累计。30 km 实验里，去输运（系统 D）约 145 m，带全项（系统 C）约 0.03 m。
+          <span class="en" lang="en"><strong>The <code>include_transport</code> flag quantifies how much it matters.</strong> The script <code>geodetic_vs_reanchored_error.py</code> compares over 5 km: with the transport terms, the continuous geodetic system matches the per-step re-anchored RK4 to about <strong>0.3 mm</strong>; <strong>dropping</strong> them (<code>include_transport=False</code>) drifts about <strong>2.9 m</strong> horizontally, <strong>1.3 m</strong> in altitude, and <strong>0.04°</strong> in heading — exactly the accumulated transport rate. In the 30 km test, no-transport (system D) is ~145 m and the full RHS (system C) is ~0.03 m.</span>
+        </div>
+      </section>
+
+      <!-- 9. GEODETIC RHS -->
+      <section id="geodetic">
+        <h2>9. 终点：<code>make_geodetic_dynamics_model</code> 完整连续 RHS<span class="en" lang="en">End: The Complete Continuous RHS of <code>make_geodetic_dynamics_model</code></span></h2>
+        <p class="section-intro">
+          把变换 A（位置）和变换 B（输运）装进去，其余力学项原样保留，就得到直接写在大地坐标里的连续动力学。没有切平面，没有逐步重锚，只有一条光滑 \(f\)。
+          <span class="en" lang="en">Plug in Transformation A (position) and Transformation B (transport), keep the other force terms unchanged, and you get continuous dynamics written directly in geodetic coordinates. No tangent plane, no per-step re-anchoring — just one smooth \(f\).</span>
+        </p>
+
+        <div class="card">
+          <h3>七维状态 \((\phi,\lambda,h,V,\psi,\gamma,m)\) 的右端<span class="en" lang="en">The Right-Hand Side of the 7-State \((\phi,\lambda,h,V,\psi,\gamma,m)\)</span></h3>
+          <div class="formula">
+            <span class="formula-line">\[
+\begin{aligned}
+\dot\phi    &amp;=\frac{V_N}{R_M+h} &amp;\quad
+\dot\lambda &amp;=\frac{V_E}{(R_N+h)\cos\phi} &amp;\quad
+\dot h      &amp;=V_U
+\end{aligned}
+\]</span>
+            <span class="formula-line">\[
+\dot V=\frac{T-D}{m}-g\sin\gamma
+\]</span>
+            <span class="formula-line">\[
+\dot\psi=\underbrace{\frac{g\,n\sin\mu}{V\cos\gamma}}_{\text{aero (unchanged)}}
+\;\underbrace{-\;\frac{V\cos\gamma\cos\psi\tan\phi}{R_N+h}}_{\text{transport}}
+\]</span>
+            <span class="formula-line">\[
+\dot\gamma=\underbrace{\frac{g\,(n\cos\mu-\cos\gamma)}{V}}_{\text{aero (unchanged)}}
+\;\underbrace{+\;V\cos\gamma\!\left(\frac{\sin^2\psi}{R_M+h}+\frac{\cos^2\psi}{R_N+h}\right)}_{\text{transport}}
+\]</span>
+          </div>
+          <p style="margin-top:8px">
+            把它和第 3 节的平面 RHS 并排看：变的只有<strong>位置三行</strong>（米/秒 → 弧度/秒，引入 \(R_M,R_N,\cos\phi\)）和 \(\dot\psi,\dot\gamma\) 上各<strong>多出一项输运</strong>。\(\dot V\)、气动部分、阻力、密度全都没动。
+            <span class="en" lang="en">Set this beside the flat RHS in Section 3: the only changes are the <strong>three position lines</strong> (metres/s → radians/s, introducing \(R_M,R_N,\cos\phi\)) and <strong>one extra transport term</strong> each on \(\dot\psi,\dot\gamma\). \(\dot V\), the aerodynamics, drag, and density are untouched.</span>
+          </p>
+        </div>
+
+        <pre aria-label="make_geodetic_dynamics_model 节选"><code><span class="tok-com"># aerodynamic_model/casadi_simulator.py — make_geodetic_dynamics_model(include_transport=True)</span>
+sin_lat = <span class="tok-fn">sin</span>(lat)
+denom   = 1.0 - WGS84_E2 * sin_lat**2
+R_N = WGS84_A / <span class="tok-fn">sqrt</span>(denom)                  <span class="tok-com"># prime-vertical radius</span>
+R_M = WGS84_A * (1.0 - WGS84_E2) / denom**1.5    <span class="tok-com"># meridional radius</span>
+
+V_east  = V * cos_g * <span class="tok-fn">cos</span>(psi)
+V_north = V * cos_g * <span class="tok-fn">sin</span>(psi)
+V_up    = V * <span class="tok-fn">sin</span>(gamma)
+
+lat_dot = V_north / (R_M + h)                    <span class="tok-com"># transformation A: position</span>
+lon_dot = V_east  / ((R_N + h) * <span class="tok-fn">cos</span>(lat))
+h_dot   = V_up
+
+V_dot     = (T - D) / m - g * <span class="tok-fn">sin</span>(gamma)       <span class="tok-com"># force terms: unchanged</span>
+psi_dot   = g * n * <span class="tok-fn">sin</span>(mu) / (V * cos_g)
+gamma_dot = g * (n * <span class="tok-fn">cos</span>(mu) - cos_g) / V
+
+<span class="tok-key">if</span> include_transport:                            <span class="tok-com"># transformation B: transport rate</span>
+    gamma_dot += V * cos_g * (<span class="tok-fn">sin</span>(psi)**2/(R_M+h) + <span class="tok-fn">cos</span>(psi)**2/(R_N+h))
+    psi_dot   -= V * cos_g * <span class="tok-fn">cos</span>(psi) * <span class="tok-fn">tan</span>(lat) / (R_N + h)</code></pre>
+
+        <div class="note">
+          实现备注：<code>make_geodetic_dynamics_model</code> 内部全用弧度；密度 <code>isa_density_expr(h)</code> 直接读真实大地高度 \(h\)（平面模型里它只能用切平面的 \(u\) 近似）。这也是大地模型更准的一个小细节。
+          <span class="en" lang="en">Implementation note: <code>make_geodetic_dynamics_model</code> works in radians throughout; density <code>isa_density_expr(h)</code> reads the true geodetic height \(h\) directly (the flat model could only approximate it by the tangent-plane \(u\)). That is one more small reason the geodetic model is more accurate.</span>
+        </div>
+      </section>
+
+      <!-- 10. EQUIVALENCE / ERRORS -->
+      <section id="errors">
+        <h2>10. 三者等价性与误差预算<span class="en" lang="en">Equivalence and the Error Budget</span></h2>
+        <p class="section-intro">
+          最后把三条路线放在同一条轨迹上比较：平直 ENU、带输运的连续大地、不带输运的大地。下图把“平直 ENU 脱离椭球”的几何效应直接画出来，并给出三者的误差量级表。
+          <span class="en" lang="en">Finally, compare the routes on one trajectory: flat ENU, continuous geodetic with transport, and geodetic without transport. The figure below draws the “flat ENU peels off the ellipsoid” effect directly, and the table lists the error magnitudes.</span>
+        </p>
+
+        <figure class="viz">
+          <div id="viz-traj" class="plot" style="height:480px"></div>
+          <div class="controls">
+            <span><label for="traj-d">航程 / range flown</label></span>
+            <input id="traj-d" type="range" min="200" max="3000" value="1600" step="50">
+            <span class="chip"><span class="dot" style="background:#2e7d59"></span>大地 RHS（贴地） geodetic</span>
+            <span class="chip"><span class="dot" style="background:#b65b13"></span>平直 ENU（飘起） flat ENU</span>
+          </div>
+          <div class="readout" id="traj-out"></div>
+          <figcaption>
+            图 4 · 三维（曲率与高度差已夸张）：两机同点出发、向东平飞、飞过同样的地面距离。绿线用大地坐标平飞，跟着纬线圈<strong>贴住</strong>椭球面；橙线是固定切平面里的平直 ENU，沿初始切线笔直前进，逐渐<strong>抬离</strong>地球。脱离量随航程二次增长，正是图 1 的 \(\epsilon\approx L^2/2R\)。
+            <span class="en" lang="en">Figure 4 · 3D (curvature and height gap exaggerated): two aircraft leave the same point, fly level eastward, and cover the same ground distance. The green line flies in geodetic coordinates and follows the parallel, <strong>hugging</strong> the ellipsoid; the orange line is the flat ENU in a fixed tangent plane, going straight along the initial tangent and gradually <strong>lifting off</strong> the Earth. The departure grows quadratically with range — exactly Figure 1’s \(\epsilon\approx L^2/2R\).</span>
+          </figcaption>
+        </figure>
+
+        <div class="card">
+          <table>
+            <thead>
+              <tr>
+                <th>系统<span class="en" lang="en">System</span></th>
+                <th>坐标处理<span class="en" lang="en">Coordinate handling</span></th>
+                <th>30 km 水平误差*<span class="en" lang="en">30 km horiz. error*</span></th>
+                <th>能否做多项式配点<span class="en" lang="en">Polynomial collocation?</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>平直 ENU（系统 A）<span class="en" lang="en">Flat ENU (A)</span></td>
+                <td>单一固定切平面，无曲率<span class="en" lang="en">Single fixed tangent plane, no curvature</span></td>
+                <td>≈ 335 m</td>
+                <td>可（连续），但不准<span class="en" lang="en">Yes (continuous), but inaccurate</span></td>
+              </tr>
+              <tr>
+                <td>大地无输运（系统 D）<span class="en" lang="en">Geodetic, no transport (D)</span></td>
+                <td>有曲率换算，缺输运项<span class="en" lang="en">Curvature conversion, missing transport</span></td>
+                <td>≈ 145 m</td>
+                <td>可<span class="en" lang="en">Yes</span></td>
+              </tr>
+              <tr>
+                <td>逐步重锚 ENU（参考 B）<span class="en" lang="en">Re-anchored ENU (reference B)</span></td>
+                <td>每步换新切平面（最忠实）<span class="en" lang="en">Fresh plane each step (most faithful)</span></td>
+                <td>0（参考）<span class="en" lang="en">0 (reference)</span></td>
+                <td>否——离散，仅可打靶<span class="en" lang="en">No — discrete, shooting only</span></td>
+              </tr>
+              <tr>
+                <td><strong>大地 + 输运（系统 C）</strong><span class="en" lang="en"><strong>Geodetic + transport (C)</strong></span></td>
+                <td><strong>曲率 + 输运，折进连续 RHS</strong><span class="en" lang="en"><strong>Curvature + transport, in a continuous RHS</strong></span></td>
+                <td><strong>≈ 0.03 m</strong></td>
+                <td><strong>可，且准</strong><span class="en" lang="en"><strong>Yes, and accurate</strong></span></td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="source-note" style="margin-top:10px">
+            * 相对逐步重锚参考 B，数据来自 <code>4dTrajectory/optimization/dynamics_comparison_30km.py</code>（A320，30 km，定常控制）。
+            <span class="en" lang="en">* Relative to the re-anchored reference B; figures from <code>4dTrajectory/optimization/dynamics_comparison_30km.py</code> (A320, 30 km, constant control).</span>
+          </p>
+        </div>
+
+        <div class="callout good">
+          <strong>为什么终点是赢家。</strong>
+          系统 C（<code>make_geodetic_dynamics_model</code>，带输运）几乎和最忠实的重锚参考一样准（亚毫米），<strong>同时</strong>是连续 RHS，可以直接喂给 Hermite-Simpson / 梯形 / RK4 多项式配点去做轨迹最优化。这就是整个重构的目的：把“桥”的离散精度，变成“终点”的连续可用性。
+          <span class="en" lang="en"><strong>Why the end wins.</strong> System C (<code>make_geodetic_dynamics_model</code> with transport) is essentially as accurate as the most faithful re-anchored reference (sub-millimetre), <strong>and</strong> is a continuous RHS that can feed Hermite-Simpson / trapezoidal / RK4 polynomial collocation for trajectory optimization. That is the whole point of the refactor: turn the bridge’s discrete accuracy into the end’s continuous usability.</span>
+        </div>
+      </section>
+
+      <!-- 11. CHECKLIST -->
+      <section id="checklist">
+        <h2>11. 实操检查清单与继续学习<span class="en" lang="en">Practical Checklist and Further Reading</span></h2>
+        <div class="grid-2">
+          <article class="card">
+            <h3>动手前逐项检查<span class="en" lang="en">Check Each Item Before Coding</span></h3>
+            <ul class="checklist">
+              <li>分清三个模型：平面连续 / 重锚离散 / 大地连续，别混用。<span class="en" lang="en">Keep the three models distinct: flat-continuous / re-anchored-discrete / geodetic-continuous.</span></li>
+              <li>位置率：北向用 \(R_M+h\)，东向用 \((R_N+h)\cos\phi\)，别把 \(R_M,R_N\) 弄反。<span class="en" lang="en">Position rates: north uses \(R_M+h\), east uses \((R_N+h)\cos\phi\); don’t swap \(R_M,R_N\).</span></li>
+              <li>大地 RHS 内部用弧度；只有外层步进器对外用度。<span class="en" lang="en">The geodetic RHS is radians inside; only the outer stepper exposes degrees.</span></li>
+              <li>要复现重锚步进器，必须开 <code>include_transport=True</code>。<span class="en" lang="en">To reproduce the re-anchored stepper, <code>include_transport=True</code> is required.</span></li>
+              <li>输运项是几何效应，不是气动力矩；\(\tan\phi\) 在高纬变大、赤道为零。<span class="en" lang="en">Transport terms are geometric, not aerodynamic; \(\tan\phi\) grows at high latitude and is zero at the equator.</span></li>
+              <li>想做多项式配点就用连续大地 RHS；步进器只能当打靶缺陷。<span class="en" lang="en">For polynomial collocation use the continuous geodetic RHS; a stepper can only be a shooting defect.</span></li>
+              <li>\(\psi=0\) 是东向（不是罗盘北），与 \(V_E=V\cos\gamma\cos\psi\) 一致。<span class="en" lang="en">\(\psi=0\) is east (not compass north), consistent with \(V_E=V\cos\gamma\cos\psi\).</span></li>
+              <li>近极区 \(\cos\phi\to0\)，\(\dot\lambda\) 不稳定——和反算经度奇异同源。<span class="en" lang="en">Near the poles \(\cos\phi\to0\) makes \(\dot\lambda\) unstable — same singularity as inverse-longitude.</span></li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>继续学习与相关源文件<span class="en" lang="en">Further Reading and Related Sources</span></h3>
+            <ul>
+              <li>前置：<a href="../../aerodrome_model/docs/geodetic-ecef-coordinates-teaching.html">WGS 84 / ECEF / 本地切平面教学</a><span class="en" lang="en">Prerequisite: WGS 84 / ECEF / local tangent plane teaching doc.</span></li>
+              <li>相关：<a href="surface_frame_wgs84_propagation.html">surface_frame_wgs84_propagation.html</a>（表面框架传播）<span class="en" lang="en">Related: surface-frame WGS 84 propagation.</span></li>
+              <li>源码：<code>aerodynamic_model/casadi_simulator.py</code>（三个模型都在这里）<span class="en" lang="en">Source: all three models live in casadi_simulator.py.</span></li>
+              <li>验证脚本：<code>4dTrajectory/optimization/geodetic_vs_reanchored_error.py</code>、<code>dynamics_comparison_30km.py</code><span class="en" lang="en">Validation scripts.</span></li>
+              <li>关键词：transport rate / Coriolis of a moving frame、radii of curvature of an ellipsoid、point-mass aircraft kinematics on WGS 84、direct collocation。<span class="en" lang="en">Keywords: transport rate of a moving frame, ellipsoid radii of curvature, point-mass kinematics on WGS 84, direct collocation.</span></li>
+            </ul>
+          </article>
+        </div>
+        <div class="callout good">
+          <strong>一句话总结：</strong>
+          从平面 ENU 到 <code>make_geodetic_dynamics_model</code>，本质只做了两件坐标的事——把<strong>位置</strong>的“米/秒”用曲率半径 \(R_M,R_N,\cos\phi\) 换成“经纬度弧度/秒”，并给<strong>姿态</strong> \(\psi,\gamma\) 补上当地框架自身转动的<strong>输运率</strong>。其余飞行力学一字未改。
+          <span class="en" lang="en"><strong>One-sentence summary:</strong> Going from flat ENU to <code>make_geodetic_dynamics_model</code> does only two coordinate things — convert <strong>position</strong> rates from “metres/s” to “lat/lon radians/s” via the curvature radii \(R_M,R_N,\cos\phi\), and add to the <strong>attitude</strong> rates \(\psi,\gamma\) the <strong>transport rate</strong> of the rotating local frame. The rest of the flight mechanics is unchanged.</span>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      生成文件：aerodynamic_model/docs/enu-to-geodetic-dynamics-teaching.html。内容基于 <code>aerodynamic_model/casadi_simulator.py</code> 中 <code>make_dynamics_model</code> / <code>make_geo_step_from_enu_integrator</code> / <code>make_geodetic_dynamics_model</code> 三个函数与项目验证脚本，遵循同项目《WGS 84 大地、ECEF 与本地切平面坐标教学文档》的双语教学排版标准。三维图用真实 WGS 84 参数在浏览器内实时计算。
+      <span class="en" lang="en">Generated file: aerodynamic_model/docs/enu-to-geodetic-dynamics-teaching.html. Content based on the three functions <code>make_dynamics_model</code> / <code>make_geo_step_from_enu_integrator</code> / <code>make_geodetic_dynamics_model</code> in casadi_simulator.py plus the project validation scripts, following the bilingual teaching layout of the sibling “WGS 84 Geodetic, ECEF, and Local Tangent Plane” document. The 3D figures are computed live in the browser from real WGS 84 parameters.</span>
+    </footer>
+  </div>
+
+  <script>
+  // ============================================================
+  //  Shared WGS 84 geometry (real constants, used for all readouts)
+  // ============================================================
+  const A = 6378137.0;
+  const F = 1.0 / 298.257223563;
+  const E2 = F * (2.0 - F);
+  const R_MEAN = 6371000.0;
+  const D2R = Math.PI / 180, R2D = 180 / Math.PI;
+
+  const INK = '#16212f', MUTED = '#607084';
+  const TEAL = '#007c89', ORANGE = '#b65b13', INDIGO = '#3d58a8', GREEN = '#2e7d59', GREY = '#9aa7b6';
+
+  function R_N(latr){ return A / Math.sqrt(1 - E2 * Math.sin(latr) ** 2); }                  // prime-vertical
+  function R_M(latr){ const w2 = 1 - E2 * Math.sin(latr) ** 2; return A * (1 - E2) / Math.pow(w2, 1.5); } // meridional
+
+  function geo2ecef(latr, lonr, h){
+    const n = R_N(latr);
+    return [
+      (n + h) * Math.cos(latr) * Math.cos(lonr),
+      (n + h) * Math.cos(latr) * Math.sin(lonr),
+      ((1 - E2) * n + h) * Math.sin(latr)
+    ];
+  }
+  function enuBasis(latr, lonr){
+    return {
+      e: [-Math.sin(lonr), Math.cos(lonr), 0],
+      n: [-Math.sin(latr) * Math.cos(lonr), -Math.sin(latr) * Math.sin(lonr), Math.cos(latr)],
+      u: [ Math.cos(latr) * Math.cos(lonr),  Math.cos(latr) * Math.sin(lonr), Math.sin(latr)]
+    };
+  }
+  const add = (a, b) => [a[0]+b[0], a[1]+b[1], a[2]+b[2]];
+  const scl = (a, s) => [a[0]*s, a[1]*s, a[2]*s];
+  const norm = a => Math.hypot(a[0], a[1], a[2]);
+
+  // A 3D arrow = a thick line + a cone head.
+  function arrow(o, v, color, sizeref){
+    const tip = add(o, v);
+    return [
+      { type:'scatter3d', mode:'lines', x:[o[0],tip[0]], y:[o[1],tip[1]], z:[o[2],tip[2]],
+        line:{color:color, width:7}, hoverinfo:'skip', showlegend:false },
+      { type:'cone', x:[tip[0]], y:[tip[1]], z:[tip[2]], u:[v[0]], v:[v[1]], w:[v[2]],
+        sizemode:'absolute', sizeref:sizeref || 0.10, anchor:'tip', showscale:false,
+        colorscale:[[0,color],[1,color]], hoverinfo:'skip' }
+    ];
+  }
+  // Low-res display sphere as a Plotly surface.
+  function sphereSurface(R, color, op){
+    const nu = 30, nv = 30, x = [], y = [], z = [];
+    for (let i = 0; i <= nu; i++){
+      const th = Math.PI * i / nu;
+      const rx = [], ry = [], rz = [];
+      for (let j = 0; j <= nv; j++){
+        const ph = 2 * Math.PI * j / nv;
+        rx.push(R * Math.sin(th) * Math.cos(ph));
+        ry.push(R * Math.sin(th) * Math.sin(ph));
+        rz.push(R * Math.cos(th));
+      }
+      x.push(rx); y.push(ry); z.push(rz);
+    }
+    return { type:'surface', x:x, y:y, z:z, showscale:false, opacity:(op==null?0.55:op),
+      colorscale:[[0,color],[1,color]], hoverinfo:'skip', lighting:{ambient:0.85} };
+  }
+  const scene3d = (extra) => Object.assign({
+    xaxis:{visible:false}, yaxis:{visible:false}, zaxis:{visible:false},
+    aspectmode:'data',
+    camera:{ eye:{x:1.5, y:1.4, z:1.1} }
+  }, extra || {});
+  const LAYOUT = (h) => ({ paper_bgcolor:'rgba(0,0,0,0)', margin:{l:0,r:0,t:0,b:0},
+    height:h, font:{color:INK}, showlegend:false });
+
+  function onReady(fn){ if (window.Plotly) fn(); else window.addEventListener('load', fn); }
+
+  // ============================================================
+  //  FIGURE 1 — tangent-plane departure
+  // ============================================================
+  onReady(function(){
+    const R = 1;                       // display sphere radius (exaggerated curvature)
+    const div = document.getElementById('viz-departure');
+    const slider = document.getElementById('dep-L');
+    const out = document.getElementById('dep-out');
+    const Lmax = 300;                  // km at slider max
+    const thetaMax = 62 * D2R;         // display angular reach at Lmax
+
+    // static traces: globe + tangent plane (z = R) + path on plane
+    const globe = sphereSurface(R, '#cfeaec', 0.6);
+    const planeHalf = R * Math.tan(thetaMax) * 1.02;
+    const plane = { type:'mesh3d',
+      x:[-planeHalf, planeHalf, planeHalf, -planeHalf],
+      y:[-planeHalf, -planeHalf, planeHalf, planeHalf],
+      z:[R, R, R, R], i:[0,0], j:[1,2], k:[2,3],
+      color:TEAL, opacity:0.18, hoverinfo:'skip', flatshading:true };
+
+    function build(Lkm){
+      const theta = (Lkm / Lmax) * thetaMax;
+      const xm = R * Math.sin(theta);                // horizontal position on plane
+      const zs = Math.sqrt(Math.max(0, R*R - xm*xm)); // surface height directly beneath
+      const epsReal = (Lkm*1000)*(Lkm*1000) / (2*R_MEAN); // real departure (m)
+
+      const planePt = { type:'scatter3d', mode:'markers+text', x:[xm], y:[0], z:[R],
+        marker:{size:5, color:TEAL}, text:['  飞机以为的位置'], textposition:'top right',
+        textfont:{size:11, color:TEAL}, hoverinfo:'skip' };
+      const surfPt = { type:'scatter3d', mode:'markers', x:[xm], y:[0], z:[zs],
+        marker:{size:5, color:ORANGE}, hoverinfo:'skip' };
+      const gap = { type:'scatter3d', mode:'lines', x:[xm,xm], y:[0,0], z:[R,zs],
+        line:{color:ORANGE, width:8}, hoverinfo:'skip' };
+      const pathLine = { type:'scatter3d', mode:'lines', x:[0,xm], y:[0,0], z:[R,R],
+        line:{color:TEAL, width:4, dash:'dot'}, hoverinfo:'skip' };
+      const origin = { type:'scatter3d', mode:'markers', x:[0], y:[0], z:[R],
+        marker:{size:4, color:INK}, hoverinfo:'skip' };
+
+      Plotly.react(div, [globe, plane, pathLine, gap, planePt, surfPt, origin],
+        Object.assign(LAYOUT(460), { scene: scene3d({ camera:{eye:{x:0.2,y:2.0,z:0.9}} }) }),
+        {displayModeBar:false, responsive:true});
+
+      out.innerHTML =
+        '水平距离 L / horizontal distance: <b>' + Lkm + ' km</b> &nbsp;·&nbsp; ' +
+        '竖向缺口 ε_U = L²/2R: <b>' + (epsReal >= 1000 ? (epsReal/1000).toFixed(2)+' km' : epsReal.toFixed(1)+' m') + '</b>' +
+        ' &nbsp;<span style="color:'+MUTED+'">（用真实 R≈6371 km；曲率为示意已夸张 / real R; curvature exaggerated）</span>';
+    }
+    build(+slider.value);
+    slider.addEventListener('input', () => build(+slider.value));
+  });
+
+  // ============================================================
+  //  FIGURE 2 — radii of curvature (meridian section, 2D)
+  // ============================================================
+  onReady(function(){
+    const div = document.getElementById('viz-radii');
+    const slider = document.getElementById('rad-lat');
+    const out = document.getElementById('rad-out');
+
+    // self-consistent DISPLAY ellipse (flattening exaggerated for visibility)
+    const aD = 1.0, fD = 0.16, e2D = fD * (2 - fD);
+    function Nd(latr){ return aD / Math.sqrt(1 - e2D * Math.sin(latr) ** 2); }
+    function Md(latr){ const w2 = 1 - e2D * Math.sin(latr) ** 2; return aD * (1 - e2D) / Math.pow(w2, 1.5); }
+
+    // ellipse outline (p,z) in the meridian half-plane
+    const pe = [], ze = [];
+    for (let i = 0; i <= 180; i++){
+      const t = (i / 180) * Math.PI - Math.PI/2;  // parametric, -90..90 (right half)
+      const nd = Nd(t);
+      pe.push(nd * Math.cos(t));
+      ze.push((1 - e2D) * nd * Math.sin(t));
+    }
+    const ellipseTrace = { type:'scatter', mode:'lines', x:pe, y:ze,
+      line:{color:'#9bb0c2', width:2}, hoverinfo:'skip', name:'ellipsoid' };
+    const axisZ = { type:'scatter', mode:'lines', x:[0,0], y:[-1.25,1.25],
+      line:{color:'#cdd7e0', width:1.5, dash:'dot'}, hoverinfo:'skip' };
+    const axisP = { type:'scatter', mode:'lines', x:[-0.1,1.3], y:[0,0],
+      line:{color:'#cdd7e0', width:1.5, dash:'dot'}, hoverinfo:'skip' };
+
+    function build(latDeg){
+      const t = latDeg * D2R;
+      const nd = Nd(t), md = Md(t);
+      const P = [nd * Math.cos(t), (1 - e2D) * nd * Math.sin(t)];
+      const nrm = [Math.cos(t), Math.sin(t)];              // outward geodetic normal in (p,z)
+
+      // R_N: normal foot on the spin axis  (P - Nd * normal) -> lies on p=0
+      const footN = [P[0] - nd*nrm[0], P[1] - nd*nrm[1]];
+      // R_M: osculating-circle centre along inward normal at distance Md
+      const cM = [P[0] - md*nrm[0], P[1] - md*nrm[1]];
+      const circP = [], circZ = [];
+      for (let i = 0; i <= 90; i++){
+        const a = (i/90) * 2*Math.PI;
+        circP.push(cM[0] + md*Math.cos(a));
+        circZ.push(cM[1] + md*Math.sin(a));
+      }
+
+      const Ptrace = { type:'scatter', mode:'markers+text', x:[P[0]], y:[P[1]],
+        marker:{size:9, color:INK}, text:['P (φ='+latDeg+'°)'], textposition:'top right',
+        textfont:{size:12, color:INK}, hoverinfo:'skip' };
+      const rnLine = { type:'scatter', mode:'lines', x:[P[0],footN[0]], y:[P[1],footN[1]],
+        line:{color:INDIGO, width:3}, hoverinfo:'skip' };
+      const rnTxt = { type:'scatter', mode:'text', x:[(P[0]+footN[0])/2], y:[(P[1]+footN[1])/2],
+        text:['R_N'], textfont:{size:13, color:INDIGO}, textposition:'middle left', hoverinfo:'skip' };
+      const mCircle = { type:'scatter', mode:'lines', x:circP, y:circZ,
+        line:{color:ORANGE, width:2, dash:'dot'}, hoverinfo:'skip' };
+      const mLine = { type:'scatter', mode:'lines', x:[P[0],cM[0]], y:[P[1],cM[1]],
+        line:{color:ORANGE, width:2}, hoverinfo:'skip' };
+      const mTxt = { type:'scatter', mode:'text', x:[cM[0]], y:[cM[1]],
+        text:['R_M'], textfont:{size:13, color:ORANGE}, textposition:'bottom center', hoverinfo:'skip' };
+
+      Plotly.react(div, [axisZ, axisP, mCircle, ellipseTrace, rnLine, mLine, Ptrace, rnTxt, mTxt], {
+        paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', height:480,
+        margin:{l:10,r:10,t:10,b:10}, showlegend:false,
+        xaxis:{visible:false, scaleanchor:'y', range:[-1.35,1.55]},
+        yaxis:{visible:false, range:[-1.45,1.45]}
+      }, {displayModeBar:false, responsive:true});
+
+      // REAL WGS84 numbers for the readout
+      const rnReal = R_N(t)/1000, rmReal = R_M(t)/1000, parReal = R_N(t)*Math.cos(t)/1000;
+      out.innerHTML =
+        '真实 WGS 84 @ φ=' + latDeg + '°: &nbsp;' +
+        'R_N（卯酉圈 prime-vertical）= <b>' + rnReal.toFixed(2) + ' km</b> &nbsp;·&nbsp; ' +
+        'R_M（子午圈 meridional）= <b>' + rmReal.toFixed(2) + ' km</b> &nbsp;·&nbsp; ' +
+        '纬线圈半径 (R_N·cosφ) = <b>' + parReal.toFixed(2) + ' km</b>';
+    }
+    build(+slider.value);
+    slider.addEventListener('input', () => build(+slider.value));
+  });
+
+  // ============================================================
+  //  FIGURE 3 — moving ENU triad along a parallel (transport)
+  // ============================================================
+  onReady(function(){
+    const R = 1;
+    const div = document.getElementById('viz-triad');
+    const slider = document.getElementById('tri-pos');
+    const out = document.getElementById('tri-out');
+
+    const lat0 = 55 * D2R;             // flight latitude
+    const lon0 = -5 * D2R, lon1 = 75 * D2R;
+    const aLen = 0.42;                 // arrow length on the unit sphere
+
+    const globe = sphereSurface(R, '#dff0f1', 0.55);
+    // the parallel (constant-lat path)
+    const px = [], py = [], pz = [];
+    for (let i = 0; i <= 80; i++){
+      const lon = lon0 + (lon1 - lon0) * i / 80;
+      const p = scl(geo2ecef(lat0, lon, 0), R / A);
+      px.push(p[0]); py.push(p[1]); pz.push(p[2]);
+    }
+    const pathTrace = { type:'scatter3d', mode:'lines', x:px, y:py, z:pz,
+      line:{color:TEAL, width:5}, hoverinfo:'skip' };
+
+    // faint sample triads to make the rotation obvious
+    function triadTraces(lon, scale, opacity){
+      const o = scl(geo2ecef(lat0, lon, 0), R / A);     // on display sphere
+      const b = enuBasis(lat0, lon);
+      let t = [];
+      t = t.concat(arrow(o, scl(b.e, aLen*scale), ORANGE, 0.05));
+      t = t.concat(arrow(o, scl(b.n, aLen*scale), GREEN, 0.05));
+      t = t.concat(arrow(o, scl(b.u, aLen*scale), INDIGO, 0.05));
+      if (opacity < 1) t.forEach(tr => { tr.opacity = opacity; });
+      return t;
+    }
+
+    function build(pct){
+      const lon = lon0 + (lon1 - lon0) * pct / 100;
+      const o = scl(geo2ecef(lat0, lon, 0), R / A);
+      const b = enuBasis(lat0, lon);
+      const b0 = enuBasis(lat0, lon0);                  // frozen initial frame
+
+      let traces = [globe, pathTrace];
+      // three faint guide triads
+      [lon0, (lon0+lon1)/2, lon1].forEach(L => { traces = traces.concat(triadTraces(L, 0.7, 0.28)); });
+      // the live triad at current position
+      traces = traces.concat(triadTraces(lon, 1.0, 1.0));
+      // frozen initial north carried to current origin (grey dashed)
+      const carried = { type:'scatter3d', mode:'lines',
+        x:[o[0], o[0]+b0.n[0]*aLen], y:[o[1], o[1]+b0.n[1]*aLen], z:[o[2], o[2]+b0.n[2]*aLen],
+        line:{color:GREY, width:6, dash:'dash'}, hoverinfo:'skip' };
+      traces.push(carried);
+
+      Plotly.react(div, traces, Object.assign(LAYOUT(480), {
+        scene: scene3d({ camera:{eye:{x:1.1, y:1.0, z:1.5}} })
+      }), {displayModeBar:false, responsive:true});
+
+      const conv = (lon - lon0) * Math.sin(lat0) * R2D;  // meridian convergence angle (deg)
+      out.innerHTML =
+        '飞行纬度 φ = <b>55°</b> &nbsp;·&nbsp; 已向东 Δλ = <b>' + ((lon - lon0)*R2D).toFixed(0) + '°</b> &nbsp;·&nbsp; ' +
+        '子午线收敛角 Δλ·sinφ = <b>' + conv.toFixed(1) + '°</b>' +
+        ' &nbsp;<span style="color:'+MUTED+'">（当前北向相对冻结初始北向转过的角度 / current vs frozen north）</span>';
+    }
+    build(+slider.value);
+    slider.addEventListener('input', () => build(+slider.value));
+  });
+
+  // ============================================================
+  //  FIGURE 4 — flat-ENU vs geodetic trajectory on the globe
+  // ============================================================
+  onReady(function(){
+    const div = document.getElementById('viz-traj');
+    const slider = document.getElementById('traj-d');
+    const out = document.getElementById('traj-out');
+    const lat0 = 45 * D2R;
+
+    // Level eastbound flight, same ground distance, two coordinate handlings:
+    //  - geodetic: follow the parallel (constant lat, h=0) -> stays on the ellipsoid
+    //  - flat ENU: straight tangent line in the fixed start plane -> lifts off
+    // A parallel sits at constant ECEF Z AND constant |r|, so geodetic points map
+    // exactly onto the display sphere; the flat tangent rises above it.
+    function integrate(totalKm){
+      const steps = 200;
+      const E_max = totalKm * 1000;                 // ground distance flown east
+      const r0 = geo2ecef(lat0, 0, 0);              // start = (p0, 0, Z0)
+      const rGeo = norm(r0);                        // constant radius along the parallel
+      const p0 = Math.hypot(r0[0], r0[1]);          // parallel radius = R_N(lat0) cos lat0
+      const eHat = [0, 1, 0];                       // East at lon = 0
+      const geo = [], flat = [];
+      for (let i = 0; i <= steps; i++){
+        const E = E_max * i / steps;
+        geo.push(geo2ecef(lat0, E / p0, 0));        // advance longitude by arc length E
+        flat.push(add(r0, scl(eHat, E)));           // straight tangent in the fixed plane
+      }
+      const flatAlt = norm(flat[steps]) - rGeo;     // height the flat path gained above the surface
+      return { geo, flat, rGeo, flatAlt };
+    }
+
+    function toDisplay(pts, rGeo, exag){
+      // map onto the unit display sphere; surface points (|r|=rGeo) land exactly on it,
+      // radial excess amplified by exag so the lift-off is visible
+      const x = [], y = [], z = [];
+      pts.forEach(p => {
+        const r = norm(p);
+        const disp = 1 + (r / rGeo - 1) * exag;
+        x.push(p[0]/r * disp); y.push(p[1]/r * disp); z.push(p[2]/r * disp);
+      });
+      return { x, y, z };
+    }
+
+    function build(totalKm){
+      const res = integrate(totalKm);
+      const excessFrac = res.flatAlt / res.rGeo;
+      const exag = excessFrac > 1e-9 ? Math.min(50, 0.45 / excessFrac) : 20;
+
+      const globe = sphereSurface(1, '#e6f3f4', 0.6);
+      const gd = toDisplay(res.geo, res.rGeo, exag);
+      const fd = toDisplay(res.flat, res.rGeo, exag);
+      const geoTrace = { type:'scatter3d', mode:'lines', x:gd.x, y:gd.y, z:gd.z,
+        line:{color:GREEN, width:7}, hoverinfo:'skip' };
+      const flatTrace = { type:'scatter3d', mode:'lines', x:fd.x, y:fd.y, z:fd.z,
+        line:{color:ORANGE, width:7}, hoverinfo:'skip' };
+      const startPt = { type:'scatter3d', mode:'markers', x:[gd.x[0]], y:[gd.y[0]], z:[gd.z[0]],
+        marker:{size:5, color:INK}, hoverinfo:'skip' };
+      const endFlat = { type:'scatter3d', mode:'markers+text', x:[fd.x[fd.x.length-1]],
+        y:[fd.y[fd.y.length-1]], z:[fd.z[fd.z.length-1]], marker:{size:5, color:ORANGE},
+        text:['  飞离地表 lifts off'], textposition:'top center',
+        textfont:{size:11, color:ORANGE}, hoverinfo:'skip' };
+
+      // frame the start region of the path
+      const cx = gd.x[Math.floor(gd.x.length/2)], cy = gd.y[Math.floor(gd.y.length/2)], cz = gd.z[Math.floor(gd.z.length/2)];
+      Plotly.react(div, [globe, geoTrace, flatTrace, startPt, endFlat], Object.assign(LAYOUT(480), {
+        scene: scene3d({ camera:{ eye:{x:cx*1.7, y:cy*1.7+0.9, z:cz*1.7+0.6}, center:{x:cx*0.6,y:cy*0.6,z:cz*0.6} } })
+      }), {displayModeBar:false, responsive:true});
+
+      const eps = (totalKm*1000)*(totalKm*1000)/(2*R_MEAN);
+      out.innerHTML =
+        '航程 / range: <b>' + totalKm + ' km</b> &nbsp;·&nbsp; ' +
+        '平直 ENU 终点离椭球高度 / flat-ENU end altitude: <b>' +
+        (res.flatAlt >= 1000 ? (res.flatAlt/1000).toFixed(1)+' km' : res.flatAlt.toFixed(0)+' m') + '</b>' +
+        ' &nbsp;<span style="color:'+MUTED+'">（≈ L²/2R = ' + (eps/1000).toFixed(1) + ' km；显示放大 ' + exag.toFixed(0) + '×）</span>';
+    }
+    build(+slider.value);
+    slider.addEventListener('input', () => build(+slider.value));
+  });
+  </script>
+</body>
+</html>
