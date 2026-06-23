@@ -36,11 +36,14 @@ from aeroviz_backend.simulation_backend import (
     DEFAULT_STATE,
     clamp,
     format_geodetic_state,
+    make_geodetic_simulator,
     read_aircraft,
     read_float,
     read_geodetic_state,
     read_required_mapping,
+    read_snapshot_aero,
 )
+from common import GeodeticState, LoadFactorControl
 
 from aerodynamic_model.casadi_simulator import aero_params_for_aircraft
 from dynamics_comparison import (
@@ -192,6 +195,11 @@ class DynamicsComparisonBackend:
                 "epochIso": iso(EPOCH),
                 "multiplier": multiplier,
                 "czml": _build_czml(comparison, indices, realized_duration, multiplier),
+                # Dense state of the reference B, so the frontend can drive the
+                # shared Live-State readout (reuses the trajectory-play sample shape).
+                "samples": _reference_samples(
+                    comparison, indices, aircraft, thrust, bank_rad, load_factor
+                ),
             },
             "chart": chart,
         }
@@ -279,6 +287,47 @@ def _system_packet(system, comparison, indices, duration_s) -> dict[str, Any]:
             "pixelOffset": {"cartesian2": [0, -14]},
         },
     }
+
+
+# ── Reference-B sample series (for the Live-State readout) ─────────────────────
+
+def _reference_samples(
+    comparison, indices, aircraft, thrust, bank_rad, load_factor
+) -> list[dict[str, Any]]:
+    """Dense state of the reference (B) trajectory in the trajectory-play sample
+    shape, so the frontend reuses ``sampleTrajectoryAt`` + the Live-State panel.
+
+    The comparison flies a constant load-factor control, so each sample carries
+    that control plus the aero coefficients (computed with the same casadi-mode
+    snapshot the live simulator/playback use)."""
+    simulator = make_geodetic_simulator(aircraft, "casadi")
+    control = LoadFactorControl(thrust=thrust, bank_rad=bank_rad, load_factor=load_factor)
+    bank_deg = math.degrees(bank_rad)
+    reference = comparison.paths["B"]
+    samples: list[dict[str, Any]] = []
+    for i in indices:
+        lat, lon, alt, V, psi, gamma, m = reference[i]
+        state = GeodeticState(
+            latitude=lat, longitude=lon, altitude=alt, V=V, psi=psi, gamma=gamma, m=m
+        )
+        cl, cd, actual_n = read_snapshot_aero(simulator, state, control, "casadi")
+        samples.append({
+            "t": round(comparison.times_s[i], 4),
+            "lon": lon,
+            "lat": lat,
+            "altM": alt,
+            "speedMps": V,
+            "headingDeg": math.degrees(psi) % 360.0,
+            "flightPathDeg": math.degrees(gamma),
+            "bankDeg": bank_deg,
+            "thrustN": thrust,
+            "segmentIndex": 0,
+            "loadFactor": load_factor,
+            "liftCoefficient": float(cl),
+            "dragCoefficient": float(cd),
+            "actualLoadFactor": float(actual_n),
+        })
+    return samples
 
 
 # ── Chart payload ─────────────────────────────────────────────────────────────

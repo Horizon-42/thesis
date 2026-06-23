@@ -454,11 +454,33 @@ export default function PilotPanel() {
     onSample: handlePlaybackSample,
   });
 
+  // Drive the live readout from the reference-B rollout (the comparison always
+  // uses the casadi/load-factor parameterisation).
+  const handleComparisonSample = useCallback(
+    (sample: TrajectorySample | null) => {
+      if (!sample) {
+        setSnapshot(null);
+        return;
+      }
+      setSnapshot(
+        trajectorySampleToSnapshot(
+          sample,
+          "casadi",
+          initialState.aircraftType,
+          initialState.massKg,
+        ),
+      );
+    },
+    [initialState.aircraftType, initialState.massKg],
+  );
+
   useDynamicsComparisonPlayback({
     enabled: isComparisonPlaybackActive,
     czml: comparisonResult?.playback.czml ?? null,
     hiddenKeys: hiddenComparisonKeys,
     follow: isFollowing && activeMode === "comparison",
+    samples: comparisonResult?.playback.samples ?? EMPTY_SAMPLES,
+    onSample: handleComparisonSample,
   });
 
   useEffect(() => {
@@ -1247,9 +1269,10 @@ export default function PilotPanel() {
         visible={
           isFlying ||
           isTrajectoryPlaying ||
-          (activeMode === "trajectory" && snapshot !== null)
+          (activeMode === "trajectory" && snapshot !== null) ||
+          (activeMode === "comparison" && isComparisonPlaybackActive && snapshot !== null)
         }
-        showControlReadout={activeMode === "trajectory"}
+        showControlReadout={activeMode === "trajectory" || activeMode === "comparison"}
         simulationMode={snapshot?.simulationMode ?? simulationMode}
         targetState={activeMode === "trajectory" ? targetState : null}
       />

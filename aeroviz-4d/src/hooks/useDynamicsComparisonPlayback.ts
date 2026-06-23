@@ -17,9 +17,13 @@ import { useEffect, useRef, useState } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
+import { sampleTrajectoryAt } from "./useOptimizedTrajectoryPlayback";
+import type { TrajectorySample } from "../pilot/trajectoryOptimizationClient";
 
 const DATASOURCE_NAME = "dynamics-comparison";
 const ENTITY_PREFIX = "dyncmp-";
+/** Min wall-clock gap between readout updates, to cap re-renders at ~12 Hz. */
+const READOUT_THROTTLE_MS = 80;
 
 /** The system key (e.g. "B") for a dyncmp entity, or null for any other entity. */
 function systemKeyOf(entity: Cesium.Entity): string | null {
@@ -37,6 +41,10 @@ interface UseDynamicsComparisonPlaybackParams {
   hiddenKeys: readonly string[];
   /** Camera-follow the reference (B) trajectory. */
   follow: boolean;
+  /** Dense reference-B samples used to drive the Live-State readout. */
+  samples: TrajectorySample[];
+  /** Receives the reference-B state at the current clock time (null when idle). */
+  onSample: (sample: TrajectorySample | null) => void;
 }
 
 interface UseDynamicsComparisonPlaybackResult {
@@ -49,11 +57,21 @@ export function useDynamicsComparisonPlayback({
   czml,
   hiddenKeys,
   follow,
+  samples,
+  onSample,
 }: UseDynamicsComparisonPlaybackParams): UseDynamicsComparisonPlaybackResult {
   const { viewer, setPlaybackSpeed, autoReplay } = useApp();
   const dsRef = useRef<Cesium.CzmlDataSource | null>(null);
+  const startTimeRef = useRef<Cesium.JulianDate | null>(null);
   const [status, setStatus] = useState<DynamicsComparisonPlaybackStatus>("idle");
   const [error, setError] = useState<string | null>(null);
+
+  // Keep the latest samples / callback reachable from the clock tick without
+  // re-subscribing the listener every render.
+  const samplesRef = useRef(samples);
+  samplesRef.current = samples;
+  const onSampleRef = useRef(onSample);
+  onSampleRef.current = onSample;
 
   // Join so the visibility effect re-runs only when the hidden set changes.
   const hiddenKey = [...hiddenKeys].sort().join(",");
@@ -93,6 +111,7 @@ export function useDynamicsComparisonPlayback({
           const stop = loadedDs.clock.stopTime.clone();
           if (Cesium.JulianDate.lessThan(start, stop)) {
             const multiplier = loadedDs.clock.multiplier || 1;
+            startTimeRef.current = start.clone();
             viewer.clock.startTime = start;
             viewer.clock.stopTime = stop;
             viewer.clock.currentTime = start.clone();
@@ -117,6 +136,8 @@ export function useDynamicsComparisonPlayback({
     return () => {
       cancelled = true;
       dsRef.current = null;
+      startTimeRef.current = null;
+      onSampleRef.current(null);
       if (dataSource && isCesiumViewerUsable(viewer)) {
         if (viewer.trackedEntity && dataSource.entities.contains(viewer.trackedEntity)) {
           viewer.trackedEntity = undefined;
@@ -168,6 +189,28 @@ export function useDynamicsComparisonPlayback({
       visible.find((entity) => systemKeyOf(entity) === "B") ?? visible[0];
     viewer.trackedEntity = referenceFirst ?? undefined;
   }, [viewer, status, follow, hiddenKey]);
+
+  // ── Effect 5: sample the reference B on each clock tick for the readout ───────
+  useEffect(() => {
+    if (!isCesiumViewerUsable(viewer) || status !== "loaded") return;
+
+    let lastEmitMs = 0;
+    const emit = () => {
+      const start = startTimeRef.current;
+      if (!start) return;
+      const now = performance.now();
+      if (now - lastEmitMs < READOUT_THROTTLE_MS) return;
+      lastEmitMs = now;
+      const elapsedS = Cesium.JulianDate.secondsDifference(viewer.clock.currentTime, start);
+      onSampleRef.current(sampleTrajectoryAt(samplesRef.current, elapsedS));
+    };
+
+    emit();
+    const remove = viewer.clock.onTick.addEventListener(emit);
+    return () => {
+      remove();
+    };
+  }, [viewer, status]);
 
   return { status, error };
 }

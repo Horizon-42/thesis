@@ -113,6 +113,14 @@ The project serves dual purposes: thesis visualization/validation, and reusable 
 
 ## Changelog
 
+### 2026-06-23 — Dynamics Comparison: reuse the live state readout (reference B)
+
+The trajectory-play `PilotRealtimeStatePanel` (Live State) now appears during a Compare playback, showing the **reference B** trajectory's state.
+
+- **Backend** — the comparison `playback` now includes a dense `samples` series for B in the trajectory-play sample shape (`_reference_samples`): position/speed/heading/fpa + the constant load-factor control + aero (`Cl`/`Cd`/actual `n`) computed with the same casadi-mode `read_snapshot_aero` the optimized playback uses.
+- **Frontend** — `useDynamicsComparisonPlayback` gains `samples` + `onSample`; on each clock tick it samples B (reusing the optimized hook's `sampleTrajectoryAt`, throttled ~12 Hz) and reports it. `PilotPanel` feeds that into the shared `snapshot` (casadi mode) and shows `PilotRealtimeStatePanel` while a comparison is playing (`showControlReadout`, no target errors). The comparison client parses the new `samples` (reusing the `TrajectorySample` type + `readOptionalNumber`).
+- 48 backend + 273 frontend tests + tsc + vite build pass.
+
 ### 2026-06-23 — Dynamics Comparison: per-system aircraft models + fix stranded START preview
 
 - **Colored aircraft model per trajectory** — each system's CZML entity now carries an aircraft `model` (`/models/aircraft.glb`) tinted with the system colour (`colorBlendMode: MIX` + matching silhouette), replacing the plain point marker; the reference B is slightly larger. The frontend hook sets each model's orientation with `VelocityOrientationProperty(entity.position)` so the nose points down its own path (the CZML carries position only). Paths/labels unchanged.

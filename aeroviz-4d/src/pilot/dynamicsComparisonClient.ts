@@ -1,9 +1,11 @@
 import { AEROVIZ_BACKEND_URL, type PilotResetState } from "./pilotClient";
+import type { TrajectorySample } from "./trajectoryOptimizationClient";
 import {
   asFiniteNumber,
   isRecord,
   readNumber,
   readNumberArray,
+  readOptionalNumber,
   readString,
 } from "./responseValidators";
 
@@ -62,6 +64,8 @@ export interface DynamicsComparisonPlayback {
   multiplier: number;
   /** Opaque CZML packet array handed straight to Cesium's CzmlDataSource. */
   czml: unknown[];
+  /** Dense state of the reference B, sampled at the clock time for the readout. */
+  samples: TrajectorySample[];
 }
 
 export interface DynamicsComparisonResult {
@@ -201,14 +205,41 @@ function parseSystem(value: unknown): DynamicsComparisonSystem {
 }
 
 function parsePlayback(value: unknown): DynamicsComparisonPlayback {
-  if (!isRecord(value) || !Array.isArray(value.czml)) {
+  if (!isRecord(value) || !Array.isArray(value.czml) || !Array.isArray(value.samples)) {
     throw new Error("AeroViz backend dynamics-comparison response has invalid playback");
   }
   return {
     epochIso: readString(value, "epochIso"),
     multiplier: readNumber(value, "multiplier"),
     czml: value.czml,
+    samples: value.samples.map(parseSample),
   };
+}
+
+function parseSample(value: unknown): TrajectorySample {
+  if (!isRecord(value)) {
+    throw new Error("AeroViz backend dynamics-comparison playback has an invalid sample");
+  }
+  const sample: TrajectorySample = {
+    t: readNumber(value, "t"),
+    lon: readNumber(value, "lon"),
+    lat: readNumber(value, "lat"),
+    altM: readNumber(value, "altM"),
+    speedMps: readNumber(value, "speedMps"),
+    headingDeg: readNumber(value, "headingDeg"),
+    flightPathDeg: readNumber(value, "flightPathDeg"),
+    bankDeg: readNumber(value, "bankDeg"),
+    thrustN: readNumber(value, "thrustN"),
+    segmentIndex: readNumber(value, "segmentIndex"),
+    liftCoefficient: readNumber(value, "liftCoefficient"),
+    dragCoefficient: readNumber(value, "dragCoefficient"),
+    actualLoadFactor: readNumber(value, "actualLoadFactor"),
+  };
+  const loadFactor = readOptionalNumber(value, "loadFactor");
+  if (loadFactor !== null) sample.loadFactor = loadFactor;
+  const attackDeg = readOptionalNumber(value, "attackDeg");
+  if (attackDeg !== null) sample.attackDeg = attackDeg;
+  return sample;
 }
 
 function parseChart(value: unknown): DynamicsComparisonChart {
