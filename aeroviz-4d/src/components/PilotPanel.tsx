@@ -69,6 +69,10 @@ import {
 } from "../pilot/trajectoryOptimizationClient";
 import {
   runDynamicsComparison,
+  averageDynamicsComparisonHistory,
+  clearDynamicsComparisonHistory,
+  fetchDynamicsComparisonHistoryCount,
+  type DynamicsComparisonAverage,
   type DynamicsComparisonControl,
   type DynamicsComparisonResult,
 } from "../pilot/dynamicsComparisonClient";
@@ -190,6 +194,12 @@ export default function PilotPanel() {
   const [isComparisonPlaying, setIsComparisonPlaying] = useState(false);
   const [hiddenComparisonKeys, setHiddenComparisonKeys] = useState<string[]>([]);
   const [isChartsOpen, setIsChartsOpen] = useState(false);
+  // Run history (#2/#3): count of stored runs + the backend-averaged result.
+  // `chartMode` selects which chart the overlay shows: this run vs the average.
+  const [comparisonHistoryCount, setComparisonHistoryCount] = useState(0);
+  const [averagedComparison, setAveragedComparison] =
+    useState<DynamicsComparisonAverage | null>(null);
+  const [chartMode, setChartMode] = useState<"run" | "average">("run");
 
   const controlsRef = useRef(controls);
   const simulationModeRef = useRef(simulationMode);
@@ -262,6 +272,7 @@ export default function PilotPanel() {
     setIsComparisonPlaybackActive(false);
     setIsChartsOpen(false);
     setHiddenComparisonKeys([]);
+    setChartMode("run");
   }, []);
 
   const clearSnapshotForInitialEdit = useCallback(() => {
@@ -466,6 +477,8 @@ export default function PilotPanel() {
     setComparisonControl(DEFAULT_COMPARISON_CONTROL);
     setComparisonDurationS(DEFAULT_COMPARISON_DURATION_S);
     setComparisonDtS(DEFAULT_COMPARISON_DT_S);
+    setAveragedComparison(null);
+    setComparisonHistoryCount(0);
     clearComparisonPlayback();
   }, [airport, aircraftConfigs, clearComparisonPlayback]);
 
@@ -533,7 +546,7 @@ export default function PilotPanel() {
 
   useEffect(() => {
     if (
-      activeMode !== "trajectory" ||
+      (activeMode !== "trajectory" && activeMode !== "comparison") ||
       !activeAirportCode ||
       !selectedTargetRunway
     ) {
@@ -553,7 +566,9 @@ export default function PilotPanel() {
       .then((candidates) => {
         if (cancelled) return;
         setRnavInitialFixCandidates(candidates);
-        if (candidates.length === 0) {
+        // In Compare mode an RNAV fix is an optional convenience (the start can
+        // also be edited / placed), so an empty list is not an error there.
+        if (candidates.length === 0 && activeMode === "trajectory") {
           setError(
             `No RNAV IF points are available for ${activeAirportCode} ${selectedTargetRunway.runwayIdent}.`,
           );
@@ -575,6 +590,23 @@ export default function PilotPanel() {
     activeMode,
     selectedTargetRunway,
   ]);
+
+  // Refresh the stored-run count when entering Compare mode, so the Average
+  // button reflects history from earlier sessions too (count is server-side).
+  useEffect(() => {
+    if (activeMode !== "comparison") return;
+    let cancelled = false;
+    void fetchDynamicsComparisonHistoryCount()
+      .then((count) => {
+        if (!cancelled) setComparisonHistoryCount(count);
+      })
+      .catch(() => {
+        // Non-critical: leave the count as-is if the backend is unreachable.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeMode]);
 
   useEffect(() => {
     controlsRef.current = controls;
@@ -1052,6 +1084,8 @@ export default function PilotPanel() {
         dtS: comparisonDtS,
       });
       setComparisonResult(result);
+      setComparisonHistoryCount(result.historyCount);
+      setChartMode("run");
       setIsChartsOpen(true);
     } catch (comparisonError: unknown) {
       setComparisonResult(null);
@@ -1059,6 +1093,46 @@ export default function PilotPanel() {
     } finally {
       setIsBusy(false);
     }
+  }
+
+  async function showAveragedHistory() {
+    setIsBusy(true);
+    setError(null);
+    try {
+      const averaged = await averageDynamicsComparisonHistory();
+      setAveragedComparison(averaged);
+      setComparisonHistoryCount(averaged.runCount);
+      setChartMode("average");
+      setIsChartsOpen(true);
+    } catch (averageError: unknown) {
+      setError(toErrorMessage(averageError));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function clearComparisonHistory() {
+    setIsBusy(true);
+    setError(null);
+    try {
+      const count = await clearDynamicsComparisonHistory();
+      setComparisonHistoryCount(count);
+      setAveragedComparison(null);
+      if (chartMode === "average") setIsChartsOpen(false);
+    } catch (clearError: unknown) {
+      setError(toErrorMessage(clearError));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  function toggleRunCharts() {
+    if (isChartsOpen && chartMode === "run") {
+      setIsChartsOpen(false);
+      return;
+    }
+    setChartMode("run");
+    setIsChartsOpen(true);
   }
 
   function playComparison() {
@@ -1265,7 +1339,9 @@ export default function PilotPanel() {
         state={initialState}
         aircraftConfigs={aircraftConfigs}
         rnavInitialFixCandidates={
-          activeMode === "trajectory" ? rnavInitialFixCandidates : []
+          activeMode === "trajectory" || activeMode === "comparison"
+            ? rnavInitialFixCandidates
+            : []
         }
         selectedRnavInitialFixKey={selectedRnavInitialFixKey}
         disabled={initialControlsDisabled}
@@ -1493,10 +1569,30 @@ export default function PilotPanel() {
         </>
       ) : activeMode === "comparison" ? (
         <>
+          <p className="dyncmp-hint">
+            Set the start state via <strong>Edit</strong> above (fields / place on
+            map) or pick a published RNAV fix from a runway below.
+          </p>
           <section
             className="pilot-optimization-row"
             aria-label="Dynamics comparison settings"
           >
+            <label>
+              <span>RNAV runway</span>
+              <select
+                className="pilot-select-input"
+                value={targetState.runwayThresholdId}
+                disabled={comparisonControlsDisabled || runwayTargets.length === 0}
+                onChange={(event) => updateTargetRunway(event.target.value)}
+              >
+                {runwayTargets.length === 0 ? <option value="">—</option> : null}
+                {runwayTargets.map((target) => (
+                  <option key={target.id} value={target.id}>
+                    {target.runwayIdent}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label>
               <span>Thrust</span>
               <EnglishNumberInput
@@ -1608,10 +1704,28 @@ export default function PilotPanel() {
               </label>
               <button
                 type="button"
-                onClick={() => setIsChartsOpen((open) => !open)}
+                onClick={toggleRunCharts}
                 disabled={!comparisonResult}
               >
-                {isChartsOpen ? "Hide charts" : "Show charts"}
+                {isChartsOpen && chartMode === "run" ? "Hide charts" : "Show charts"}
+              </button>
+            </div>
+
+            <div className="pilot-actions dyncmp-history-actions">
+              <button
+                type="button"
+                onClick={showAveragedHistory}
+                disabled={isBusy || comparisonHistoryCount === 0}
+                title="Average the deviation of all stored runs (computed on the backend)"
+              >
+                Average history ({comparisonHistoryCount})
+              </button>
+              <button
+                type="button"
+                onClick={clearComparisonHistory}
+                disabled={isBusy || comparisonHistoryCount === 0}
+              >
+                Clear history
               </button>
             </div>
 
@@ -1872,7 +1986,18 @@ export default function PilotPanel() {
 
       {error ? <div className="pilot-error" role="alert">{error}</div> : null}
 
-      {activeMode === "comparison" && isChartsOpen && comparisonResult ? (
+      {activeMode === "comparison" && isChartsOpen && chartMode === "average" && averagedComparison ? (
+        <DynamicsComparisonCharts
+          chart={averagedComparison.chart}
+          systems={averagedComparison.systems}
+          hiddenKeys={hiddenComparisonKeys}
+          onToggleSystem={toggleComparisonSystem}
+          onClose={() => setIsChartsOpen(false)}
+          subtitle={`Mean deviation across ${averagedComparison.runCount} stored run${
+            averagedComparison.runCount === 1 ? "" : "s"
+          }, resampled onto a common distance grid (backend-averaged).`}
+        />
+      ) : activeMode === "comparison" && isChartsOpen && chartMode === "run" && comparisonResult ? (
         <DynamicsComparisonCharts
           chart={comparisonResult.chart}
           systems={comparisonResult.systems}

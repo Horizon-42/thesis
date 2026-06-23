@@ -21,6 +21,8 @@ interface Props {
   hiddenKeys: readonly string[];
   onToggleSystem: (key: string) => void;
   onClose: () => void;
+  /** Header subtitle override (e.g. "Averaged over N runs"). */
+  subtitle?: string;
 }
 
 type MetricField = "horiz" | "alt" | "head" | "speed";
@@ -216,6 +218,7 @@ export default function DynamicsComparisonCharts({
   hiddenKeys,
   onToggleSystem,
   onClose,
+  subtitle,
 }: Props) {
   const hiddenSet = useMemo(() => new Set(hiddenKeys), [hiddenKeys]);
   const colorByKey = useMemo(() => {
@@ -310,7 +313,7 @@ export default function DynamicsComparisonCharts({
       >
         <div className="dyncmp-charts-titles">
           <h3>Dynamics deviation vs reference B</h3>
-          <p>Each system's error against the per-step re-anchored ENU reference, over distance flown.</p>
+          <p>{subtitle ?? "Each system's error against the per-step re-anchored ENU reference, over distance flown."}</p>
         </div>
         <button type="button" className="dyncmp-charts-close" onClick={onClose}>
           Close

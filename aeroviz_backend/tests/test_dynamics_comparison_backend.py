@@ -1,6 +1,10 @@
 import json
+import shutil
+import tempfile
 import unittest
+from pathlib import Path
 
+from aeroviz_backend import dynamics_comparison_history as history
 from aeroviz_backend.dynamics_comparison_backend import DynamicsComparisonBackend
 
 
@@ -23,8 +27,22 @@ def _payload(**overrides):
     return payload
 
 
-class TestDynamicsComparisonBackend(unittest.TestCase):
+class _TempHistory(unittest.TestCase):
+    """Point the run-history dir at a temp dir so tests never touch the repo."""
+
     def setUp(self):
+        self._orig_history_dir = history.HISTORY_DIR
+        self._tmp = Path(tempfile.mkdtemp())
+        history.HISTORY_DIR = self._tmp
+
+    def tearDown(self):
+        history.HISTORY_DIR = self._orig_history_dir
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+
+class TestDynamicsComparisonBackend(_TempHistory):
+    def setUp(self):
+        super().setUp()
         self.result = DynamicsComparisonBackend().run(_payload())
 
     def test_run_reports_four_systems_with_b_as_reference(self):
@@ -92,6 +110,48 @@ class TestDynamicsComparisonBackend(unittest.TestCase):
         # clamped horizon still yields a usable playback
         self.assertGreaterEqual(result["durationS"], 5.0)
         self.assertGreater(len(result["chart"]["distanceKm"]), 1)
+
+    def test_run_persists_a_record(self):
+        # setUp already ran one comparison.
+        self.assertEqual(self.result["historyCount"], 1)
+
+
+class TestDynamicsComparisonHistory(_TempHistory):
+    def test_count_increments_and_average_spans_shortest_run(self):
+        backend = DynamicsComparisonBackend()
+        self.assertEqual(backend.history_count()["historyCount"], 0)
+
+        r1 = backend.run(_payload(durationS=120.0, dtS=0.2))
+        r2 = backend.run(_payload(durationS=200.0, dtS=0.2))
+        self.assertEqual(r2["historyCount"], 2)
+
+        averaged = backend.average()
+        self.assertTrue(averaged["ok"])
+        self.assertEqual(averaged["runCount"], 2)
+        chart = averaged["chart"]
+        # averaged onto one common grid; series excludes the reference B
+        self.assertEqual(set(chart["series"]), {"A", "C", "D"})
+        n = len(chart["distanceKm"])
+        self.assertGreater(n, 1)
+        for key in ("A", "C", "D"):
+            for field in ("horiz", "alt", "head", "speed"):
+                self.assertEqual(len(chart["series"][key][field]), n)
+        # the common grid spans only as far as the shorter-range run (every run
+        # covers it), and starts at 0
+        self.assertEqual(chart["distanceKm"][0], 0.0)
+        shortest = min(r1["chart"]["distanceKm"][-1], r2["chart"]["distanceKm"][-1])
+        self.assertAlmostEqual(chart["distanceKm"][-1], shortest, places=3)
+        json.dumps(averaged)  # serialisable (no numpy scalars)
+
+    def test_average_without_history_reports_not_ok(self):
+        result = DynamicsComparisonBackend().average()
+        self.assertFalse(result["ok"])
+
+    def test_clear_empties_history(self):
+        backend = DynamicsComparisonBackend()
+        backend.run(_payload())
+        self.assertEqual(backend.clear()["historyCount"], 0)
+        self.assertEqual(backend.history_count()["historyCount"], 0)
 
 
 if __name__ == "__main__":

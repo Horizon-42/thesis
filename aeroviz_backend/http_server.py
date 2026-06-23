@@ -35,6 +35,8 @@ class AeroVizBackendApp:
             return 200, {"ok": True, "service": "aeroviz-backend"}
         if path == "/simulation/aircraft":
             return 200, aircraft_catalog()
+        if path == "/dynamics-comparison/history":
+            return 200, self.dynamics_comparison_backend.history_count()
         return 404, {"ok": False, "error": "not found"}
 
     def handle_post(
@@ -50,6 +52,10 @@ class AeroVizBackendApp:
             return 200, self.optimization_backend.optimize(payload), None
         if path == "/dynamics-comparison/run":
             return 200, self.dynamics_comparison_backend.run(payload), None
+        if path == "/dynamics-comparison/history/average":
+            return 200, self.dynamics_comparison_backend.average(payload), None
+        if path == "/dynamics-comparison/history/clear":
+            return 200, self.dynamics_comparison_backend.clear(payload), None
         return 404, {"ok": False, "error": "not found"}, None
 
 

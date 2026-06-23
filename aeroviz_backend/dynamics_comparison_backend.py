@@ -19,16 +19,23 @@ the run visualises *how the choice of dynamics formulation changes the drift*.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 import math
 from typing import Any
 
 from aeroviz_backend import paths  # noqa: F401
 from aeroviz_backend.czml_common import EPOCH, document_packet, iso
+from aeroviz_backend.dynamics_comparison_history import (
+    average_history,
+    clear_history,
+    history_count,
+    save_record,
+)
 from aeroviz_backend.simulation_backend import (
     DEFAULT_AIRCRAFT_TYPE,
     DEFAULT_STATE,
     clamp,
+    format_geodetic_state,
     read_aircraft,
     read_float,
     read_geodetic_state,
@@ -91,6 +98,18 @@ _SYSTEMS = (
 )
 
 
+def _systems_payload() -> list[dict[str, Any]]:
+    return [
+        {
+            "key": system["key"],
+            "label": system["label"],
+            "colorRgba": list(system["color"]),
+            "isReference": system["reference"],
+        }
+        for system in _SYSTEMS
+    ]
+
+
 class DynamicsComparisonBackend:
     def run(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = payload or {}
@@ -133,6 +152,30 @@ class DynamicsComparisonBackend:
         realized_duration = comparison.times_s[indices[-1]]
         multiplier = max(1, round(realized_duration / _TARGET_PLAYBACK_S))
 
+        systems = _systems_payload()
+        chart = _build_chart(comparison, indices)
+
+        # Persist this run so it can be averaged with later runs (#2/#3).
+        count = save_record(
+            {
+                "meta": {
+                    "aircraftType": aircraft.code,
+                    "control": {
+                        "thrustN": thrust,
+                        "bankDeg": math.degrees(bank_rad),
+                        "loadFactor": load_factor,
+                    },
+                    "durationS": realized_duration,
+                    "requestedDurationS": duration_s,
+                    "dtS": dt_s,
+                    "initialState": format_geodetic_state(initial_state, aircraft.code),
+                },
+                "systems": systems,
+                "chart": chart,
+            },
+            now_iso=iso(datetime.now(timezone.utc)),
+        )
+
         return {
             "ok": True,
             "durationS": realized_duration,
@@ -142,22 +185,32 @@ class DynamicsComparisonBackend:
             "requestedDurationS": duration_s,
             "dtS": dt_s,
             "aircraftType": aircraft.code,
-            "systems": [
-                {
-                    "key": system["key"],
-                    "label": system["label"],
-                    "colorRgba": list(system["color"]),
-                    "isReference": system["reference"],
-                }
-                for system in _SYSTEMS
-            ],
+            "historyCount": count,
+            "systems": systems,
             "playback": {
                 "epochIso": iso(EPOCH),
                 "multiplier": multiplier,
                 "czml": _build_czml(comparison, indices, realized_duration, multiplier),
             },
-            "chart": _build_chart(comparison, indices),
+            "chart": chart,
         }
+
+    def history_count(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        return {"ok": True, "historyCount": history_count()}
+
+    def average(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        averaged = average_history()
+        if averaged is None:
+            return {"ok": False, "error": "No comparison history to average yet."}
+        return {
+            "ok": True,
+            "runCount": averaged["runCount"],
+            "systems": _systems_payload(),
+            "chart": averaged["chart"],
+        }
+
+    def clear(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        return {"ok": True, "historyCount": clear_history()}
 
 
 # ── CZML assembly ─────────────────────────────────────────────────────────────

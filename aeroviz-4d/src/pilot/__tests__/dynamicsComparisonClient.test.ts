@@ -1,8 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  averageDynamicsComparisonHistory,
+  clearDynamicsComparisonHistory,
+  fetchDynamicsComparisonHistoryCount,
   runDynamicsComparison,
   type DynamicsComparisonRequest,
 } from "../dynamicsComparisonClient";
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
 
 const request: DynamicsComparisonRequest = {
   initialState: {
@@ -27,6 +37,7 @@ function responsePayload() {
     requestedDurationS: 240,
     dtS: 0.1,
     aircraftType: "A320",
+    historyCount: 1,
     systems: [
       { key: "A", label: "A · fixed tangent ENU", colorRgba: [244, 114, 22, 240], isReference: false },
       { key: "B", label: "B · re-anchored ENU", colorRgba: [226, 232, 240, 245], isReference: true },
@@ -123,5 +134,50 @@ describe("dynamicsComparisonClient", () => {
     ));
 
     await expect(runDynamicsComparison(request)).rejects.toThrow(/colorRgba/);
+  });
+
+  it("parses the run's historyCount", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(responsePayload())));
+    const result = await runDynamicsComparison(request);
+    expect(result.historyCount).toBe(1);
+  });
+});
+
+describe("dynamics comparison history endpoints", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("fetches the stored-run count", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true, historyCount: 4 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchDynamicsComparisonHistoryCount()).resolves.toBe(4);
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8765/dynamics-comparison/history");
+  });
+
+  it("parses a backend-averaged result", async () => {
+    const payload = {
+      ok: true,
+      runCount: 3,
+      systems: responsePayload().systems,
+      chart: responsePayload().chart,
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(payload)));
+    const averaged = await averageDynamicsComparisonHistory();
+    expect(averaged.runCount).toBe(3);
+    expect(Object.keys(averaged.chart.series)).toEqual(["A", "C", "D"]);
+    expect(averaged.systems.map((s) => s.key)).toEqual(["A", "B", "C", "D"]);
+  });
+
+  it("throws the backend message when there is no history to average", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      jsonResponse({ ok: false, error: "No comparison history to average yet." }),
+    ));
+    await expect(averageDynamicsComparisonHistory()).rejects.toThrow(/No comparison history/);
+  });
+
+  it("clears history and returns the new count", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ ok: true, historyCount: 0 })));
+    await expect(clearDynamicsComparisonHistory()).resolves.toBe(0);
   });
 });

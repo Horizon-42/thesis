@@ -71,8 +71,17 @@ export interface DynamicsComparisonResult {
   requestedDurationS: number;
   dtS: number;
   aircraftType: string;
+  /** Total stored runs after this one was persisted. */
+  historyCount: number;
   systems: DynamicsComparisonSystem[];
   playback: DynamicsComparisonPlayback;
+  chart: DynamicsComparisonChart;
+}
+
+/** Backend-averaged history: all averaging is done server-side. */
+export interface DynamicsComparisonAverage {
+  runCount: number;
+  systems: DynamicsComparisonSystem[];
   chart: DynamicsComparisonChart;
 }
 
@@ -120,10 +129,59 @@ function parseResult(value: unknown): DynamicsComparisonResult {
     requestedDurationS: readNumber(value, "requestedDurationS"),
     dtS: readNumber(value, "dtS"),
     aircraftType: readString(value, "aircraftType"),
+    historyCount: readNumber(value, "historyCount"),
     systems: value.systems.map(parseSystem),
     playback,
     chart: parseChart(value.chart),
   };
+}
+
+/** Total stored comparison runs (GET; safe to call before any run this session). */
+export async function fetchDynamicsComparisonHistoryCount(): Promise<number> {
+  const response = await fetch(`${AEROVIZ_BACKEND_URL}/dynamics-comparison/history`);
+  const data = (await response.json()) as unknown;
+  if (!response.ok || !isRecord(data)) {
+    throw new Error(`AeroViz backend returned ${response.status}`);
+  }
+  return readNumber(data, "historyCount");
+}
+
+/** Average all stored runs on the backend; throws if there is no history. */
+export async function averageDynamicsComparisonHistory(): Promise<DynamicsComparisonAverage> {
+  const response = await fetch(`${AEROVIZ_BACKEND_URL}/dynamics-comparison/history/average`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const data = (await response.json()) as unknown;
+  if (!response.ok) {
+    throw new Error(readError(data) ?? `AeroViz backend returned ${response.status}`);
+  }
+  if (!isRecord(data) || data.ok !== true) {
+    throw new Error(readError(data) ?? "No comparison history to average yet.");
+  }
+  if (!Array.isArray(data.systems)) {
+    throw new Error("AeroViz backend dynamics-comparison average is missing systems");
+  }
+  return {
+    runCount: readNumber(data, "runCount"),
+    systems: data.systems.map(parseSystem),
+    chart: parseChart(data.chart),
+  };
+}
+
+/** Delete all stored runs; returns the new (zero) count. */
+export async function clearDynamicsComparisonHistory(): Promise<number> {
+  const response = await fetch(`${AEROVIZ_BACKEND_URL}/dynamics-comparison/history/clear`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const data = (await response.json()) as unknown;
+  if (!response.ok || !isRecord(data)) {
+    throw new Error(`AeroViz backend returned ${response.status}`);
+  }
+  return readNumber(data, "historyCount");
 }
 
 function parseSystem(value: unknown): DynamicsComparisonSystem {

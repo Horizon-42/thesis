@@ -36,3 +36,5 @@ __pycache__
 
 # ENV
 .env
+# Dynamics Comparison run history (generated at runtime)
+dynamics_comparison_history/

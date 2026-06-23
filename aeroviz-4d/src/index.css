@@ -3868,3 +3868,8 @@ body,
     grid-template-columns: 1fr;
   }
 }
+
+/* Dynamics comparison: history (average/clear) action row */
+.dyncmp-history-actions {
+  margin-top: 6px;
+}

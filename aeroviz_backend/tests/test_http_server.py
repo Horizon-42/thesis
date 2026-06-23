@@ -98,7 +98,30 @@ class TestAeroVizBackendApp(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload, {"ok": True, "route": "comparison"})
         self.assertIsNone(log_event)
-        self.assertEqual(dynamics_comparison_backend.calls, [request_payload])
+        self.assertEqual(dynamics_comparison_backend.calls, [("run", request_payload)])
+
+    def test_dynamics_comparison_history_routes_delegate(self):
+        dynamics_comparison_backend = FakeDynamicsComparisonBackend()
+        app = AeroVizBackendApp(
+            simulation_backend=FakeSimulationBackend(),
+            optimization_backend=FakeOptimizationBackend(),
+            dynamics_comparison_backend=dynamics_comparison_backend,
+        )
+
+        get_status, get_payload = app.handle_get("/dynamics-comparison/history")
+        avg_status, avg_payload, _ = app.handle_post("/dynamics-comparison/history/average", {})
+        clear_status, clear_payload, _ = app.handle_post("/dynamics-comparison/history/clear", {})
+
+        self.assertEqual(get_status, 200)
+        self.assertEqual(get_payload, {"ok": True, "historyCount": 3})
+        self.assertEqual(avg_status, 200)
+        self.assertEqual(avg_payload, {"ok": True, "route": "average"})
+        self.assertEqual(clear_status, 200)
+        self.assertEqual(clear_payload, {"ok": True, "historyCount": 0})
+        self.assertEqual(
+            [name for name, _ in dynamics_comparison_backend.calls],
+            ["history_count", "average", "clear"],
+        )
 
     def test_legacy_root_simulation_routes_are_not_exposed(self):
         app = AeroVizBackendApp(
@@ -140,8 +163,20 @@ class FakeDynamicsComparisonBackend:
         self.calls = []
 
     def run(self, payload):
-        self.calls.append(payload)
+        self.calls.append(("run", payload))
         return {"ok": True, "route": "comparison"}
+
+    def history_count(self, payload=None):
+        self.calls.append(("history_count", payload))
+        return {"ok": True, "historyCount": 3}
+
+    def average(self, payload=None):
+        self.calls.append(("average", payload))
+        return {"ok": True, "route": "average"}
+
+    def clear(self, payload=None):
+        self.calls.append(("clear", payload))
+        return {"ok": True, "historyCount": 0}
 
 
 if __name__ == "__main__":

@@ -113,6 +113,15 @@ The project serves dual purposes: thesis visualization/validation, and reusable 
 
 ## Changelog
 
+### 2026-06-23 — Dynamics Comparison: custom start state, run history, backend-averaged history
+
+Three additions to the Compare mode (all averaging/persistence math on the backend).
+
+- **Custom start state like trajectory mode** — Compare now sources RNAV initial fixes too: the rnav-candidate fetch effect runs in `comparison` mode (not just `trajectory`), a runway `<select>` in the Compare settings row picks the source runway, and the initial-state overlay shows the RNAV-fix dropdown in Compare. (The field editor + place-on-map already worked, being shared.) An empty RNAV list is only an error in trajectory mode (optional in Compare).
+- **Run history (`aeroviz_backend/dynamics_comparison_history.py`, new)** — each `/dynamics-comparison/run` persists one JSON record (`meta` + `chart`) under `dynamics_comparison_history/` (git-ignored); `run()` returns `historyCount`. Unique filenames per run (threading server); a lock guards clear-all.
+- **Backend-averaged history + button** — `POST /dynamics-comparison/history/average` resamples every stored run onto one common distance grid (0 .. the shortest run's range, linear `np.interp`) and averages per system/field (and each run's final value) — **all server-side**; returns a chart in the same shape the run uses. `GET /dynamics-comparison/history` (count) and `POST /dynamics-comparison/history/clear` round it out. Frontend: *Average history (N)* / *Clear history* buttons; the averaged chart reuses `DynamicsComparisonCharts` (new `subtitle` prop, `chartMode: "run" | "average"`). Client gains `fetchDynamicsComparisonHistoryCount` / `averageDynamicsComparisonHistory` / `clearDynamicsComparisonHistory` + `historyCount` on the run result.
+- Tests: backend `TestDynamicsComparisonHistory` (count/average-spans-shortest/clear/no-history) + the existing run test now uses a temp history dir (no repo writes) + 3 new HTTP route tests; frontend 6 new client tests. **273 frontend + 48 backend + 67 optimizer python pass; tsc + vite build clean; no repo pollution.**
+
 ### 2026-06-23 — Hybrid local-ENU cold-start + geodetic free-time; whole-flow timing log
 
 The direct-collocation free-time solve already cold-starts itself by first solving the **fixed-time** NLP (at `max_duration`) to get a dynamically-feasible seed, then shrinking `T` along the feasible manifold. Until now that cold-start solve used the **same** dynamics the caller asked for. This adds a **hybrid** where the cold start runs a cheaper/more-robust dynamics than the free-time refinement, plus timing of the whole optimisation pipeline (not just one solve).
