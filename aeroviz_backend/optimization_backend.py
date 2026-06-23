@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+import time
 from typing import Any
 
 from aeroviz_backend import paths  # noqa: F401
@@ -52,6 +54,17 @@ DIRECT_COLLOCATION_SCHEMES = {
     "casadiDirectCollocationLocalEnu": "localEnu",
     "casadiDirectCollocationLocalEnuTrapezoidal": "localEnuTrapezoidal",
     "casadiDirectCollocationLocalEnuHermiteSimpson": "localEnuHermiteSimpson",
+    # Hybrid: the free-time refinement runs on the geodetic RHS (hermiteSimpson),
+    # seeded by a fixed local-ENU cold-start solve (see DIRECT_COLLOCATION_COLD_START_SCHEMES).
+    "casadiDirectCollocationLocalEnuColdStart": "hermiteSimpson",
+}
+
+# Hybrid optimizers: the cold-start (fixed-time warm-start) solve uses a
+# different, cheaper/more-robust dynamics than the free-time scheme above.
+# A name absent here cold-starts under its own free-time scheme (the original
+# behaviour).
+DIRECT_COLLOCATION_COLD_START_SCHEMES = {
+    "casadiDirectCollocationLocalEnuColdStart": "localEnu",
 }
 SUPPORTED_OPTIMIZERS = (
     *DIRECT_COLLOCATION_SCHEMES,
@@ -89,6 +102,13 @@ class OptimizationBackend:
 
         initial_state = read_geodetic_state(initial_payload, DEFAULT_STATE, aircraft)
         target_state = read_geodetic_state(target_payload, initial_state, aircraft)
+
+        # Time the WHOLE optimization flow, not just the solver call: building
+        # (compiling) the NLP, the solve (which for direct collocation is itself
+        # a cold-start solve + a free-time solve), and rolling the controls
+        # forward into the playback CZML.  The breakdown is logged to the server
+        # log (stderr) below.
+        flow_started = time.perf_counter()
         optimizer = self.make_optimizer(
             optimizer_name,
             GeodeticSimulator(aircraft),
@@ -97,6 +117,9 @@ class OptimizationBackend:
             max_iterations,
             arrival_time_s=arrival_time_s,
         )
+        build_s = time.perf_counter() - flow_started
+
+        solve_started = time.perf_counter()
         if optimizer_name in DIRECT_COLLOCATION_SCHEMES:
             # Direct collocation includes T as a decision variable, so
             # one solve returns both the optimal trajectory and the
@@ -119,6 +142,7 @@ class OptimizationBackend:
                 initial_state,
                 target_state,
             )
+        solve_s = time.perf_counter() - solve_started
 
         result = {
             "ok": True,
@@ -137,6 +161,7 @@ class OptimizationBackend:
         # Cesium's own clock (like a downloaded trajectory) plus a dense sample
         # series for the live readout.  Kept separate from the solve so it can be
         # stubbed in tests via ``build_optimized_trajectory_playback``.
+        playback_started = time.perf_counter()
         playback = build_optimized_trajectory_playback(
             optimizer_name,
             initial_state,
@@ -144,9 +169,18 @@ class OptimizationBackend:
             float(final_time),
             aircraft,
         )
+        playback_s = time.perf_counter() - playback_started
         if playback is not None:
             result["playback"] = playback
 
+        log_optimization_timing(
+            optimizer_name,
+            build_s=build_s,
+            solve_s=solve_s,
+            playback_s=playback_s,
+            total_s=time.perf_counter() - flow_started,
+            solve_breakdown=getattr(optimizer, "last_solve_timings", None),
+        )
         return result
 
     def make_optimizer(
@@ -189,6 +223,39 @@ class OptimizationBackend:
         )
 
 
+def log_optimization_timing(
+    optimizer_name: str,
+    build_s: float,
+    solve_s: float,
+    playback_s: float,
+    total_s: float,
+    solve_breakdown: dict[str, float] | None = None,
+) -> None:
+    """Write the whole-flow optimization timing to the server log (stderr).
+
+    ``build`` is the NLP compile (≈0 on a cache hit), ``solve`` the optimiser
+    call, ``playback`` the control-rollout CZML build, ``total`` the sum.  When
+    the optimiser exposes a per-phase ``solve_breakdown`` (direct collocation:
+    the cold-start solve vs the free-time solve), those are interleaved so the
+    log shows the full pipeline rather than one lumped solve time.
+    """
+    parts = [
+        "[aeroviz-backend] optimization timing",
+        f"optimizer={optimizer_name}",
+        f"build={build_s:.3f}s",
+    ]
+    if solve_breakdown:
+        parts.append(f"coldStart={solve_breakdown.get('coldStartS', 0.0):.3f}s")
+        parts.append(f"freeTime={solve_breakdown.get('freeTimeSolveS', 0.0):.3f}s")
+    parts.extend([
+        f"solve={solve_s:.3f}s",
+        f"playback={playback_s:.3f}s",
+        f"total={total_s:.3f}s",
+    ])
+    sys.stderr.write(" ".join(parts) + "\n")
+    sys.stderr.flush()
+
+
 def read_optimizer(payload: dict[str, Any]) -> str:
     value = payload.get("optimizer", DEFAULT_OPTIMIZER)
     if not isinstance(value, str):
@@ -224,6 +291,7 @@ def make_optimizer(
             max_duration=arrival_time_s,
             aircraft=geodetic_simulator.simulator.aircraft,
             collocation_scheme=DIRECT_COLLOCATION_SCHEMES[optimizer_name],
+            cold_start_scheme=DIRECT_COLLOCATION_COLD_START_SCHEMES.get(optimizer_name),
         )
 
     if optimizer_name == "singleShooting":

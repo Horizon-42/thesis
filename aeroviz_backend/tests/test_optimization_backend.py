@@ -1,4 +1,6 @@
+import io
 import unittest
+from contextlib import redirect_stderr
 
 import numpy as np
 
@@ -102,13 +104,14 @@ class TestOptimizationBackend(unittest.TestCase):
 
         class FakeCasadiDirectCollocationOptimizer:
             def __init__(self, n_segments, dt, max_duration, aircraft,
-                         collocation_scheme="hermiteSimpson"):
+                         collocation_scheme="hermiteSimpson", cold_start_scheme=None):
                 calls.append({
                     "aircraft": aircraft.code,
                     "n_segments": n_segments,
                     "dt": dt,
                     "max_duration": max_duration,
                     "collocation_scheme": collocation_scheme,
+                    "cold_start_scheme": cold_start_scheme,
                 })
 
             def optimize_free_time(self, initial_state, target_state, max_duration):
@@ -165,6 +168,7 @@ class TestOptimizationBackend(unittest.TestCase):
                 "dt": 0.25,
                 "max_duration": 84.0,
                 "collocation_scheme": "hermiteSimpson",
+                "cold_start_scheme": None,
             },
         )
         self.assertAlmostEqual(calls[1]["initial"].longitude, -114.0203)
@@ -186,10 +190,13 @@ class TestOptimizationBackend(unittest.TestCase):
         # CasadiDirectCollocationOptimizer with the matching collocation_scheme.
         seen = {}
 
+        cold_starts = {}
+
         class RecordingOptimizer:
             def __init__(self, n_segments, dt, max_duration, aircraft,
-                         collocation_scheme="hermiteSimpson"):
+                         collocation_scheme="hermiteSimpson", cold_start_scheme=None):
                 self.collocation_scheme = collocation_scheme
+                self.cold_start_scheme = cold_start_scheme
 
         original = optimization_backend.CasadiDirectCollocationOptimizer
         optimization_backend.CasadiDirectCollocationOptimizer = RecordingOptimizer
@@ -199,12 +206,21 @@ class TestOptimizationBackend(unittest.TestCase):
                     name, GeodeticSimulator(A320), 10, 0.2, 300, arrival_time_s=120.0,
                 )
                 seen[name] = opt.collocation_scheme
+                cold_starts[name] = opt.cold_start_scheme
         finally:
             optimization_backend.CasadiDirectCollocationOptimizer = original
 
         self.assertEqual(seen, dict(optimization_backend.DIRECT_COLLOCATION_SCHEMES))
         self.assertEqual(seen["casadiDirectCollocation"], "hermiteSimpson")
         self.assertEqual(seen["casadiDirectCollocationRk4"], "rk4")
+        # The hybrid name refines on the geodetic RHS but cold-starts under
+        # the fixed local-ENU dynamics; every other name has no cold-start
+        # override (cold-starts under its own scheme).
+        self.assertEqual(seen["casadiDirectCollocationLocalEnuColdStart"], "hermiteSimpson")
+        self.assertEqual(
+            cold_starts["casadiDirectCollocationLocalEnuColdStart"], "localEnu",
+        )
+        self.assertIsNone(cold_starts["casadiDirectCollocation"])
 
     def test_optimize_reuses_casadi_optimizer_for_same_solver_key(self):
         constructions = []
@@ -309,7 +325,7 @@ class TestOptimizationBackend(unittest.TestCase):
 
         class FakeCasadiDirectCollocationOptimizer:
             def __init__(self, n_segments, dt, max_duration, aircraft,
-                         collocation_scheme="hermiteSimpson"):
+                         collocation_scheme="hermiteSimpson", cold_start_scheme=None):
                 self.instance_id = len(constructions) + 1
                 constructions.append({
                     "aircraft": aircraft.code,
@@ -678,6 +694,67 @@ class TestOptimizationBackend(unittest.TestCase):
         self.assertEqual(result["optimizer"], "variableTimeWarmStartTranscription")
         self.assertEqual(result["finalTimeS"], 91.0)
         self.assertEqual(result["nSegments"], 1)
+
+    def test_optimize_logs_whole_flow_timing_to_server_log(self):
+        # The backend times the ENTIRE flow (build + solve + playback) and
+        # writes a breakdown to the server log (stderr).  When the optimiser
+        # exposes a cold-start / free-time split, both appear in the line.
+        class FakeCasadiDirectCollocationOptimizer:
+            def __init__(self, n_segments, dt, max_duration, aircraft,
+                         collocation_scheme="hermiteSimpson", cold_start_scheme=None):
+                self.last_solve_timings = {
+                    "coldStartS": 0.4,
+                    "freeTimeSolveS": 0.6,
+                    "solveTotalS": 1.0,
+                }
+
+            def optimize_free_time(self, initial_state, target_state, max_duration):
+                return (
+                    51.0,
+                    np.array([[15000.0, 0.0, 1.0]]),
+                    np.array([[51.0, -114.0, 1000.0, 130.0, 0.3, -0.05]]),
+                )
+
+        original = optimization_backend.CasadiDirectCollocationOptimizer
+        optimization_backend.CasadiDirectCollocationOptimizer = (
+            FakeCasadiDirectCollocationOptimizer
+        )
+        buffer = io.StringIO()
+        try:
+            with redirect_stderr(buffer):
+                optimization_backend.OptimizationBackend().optimize({
+                    "optimizer": "casadiDirectCollocationLocalEnuColdStart",
+                    "nSegments": 2,
+                    "arrivalTimeS": 84.0,
+                    "initialState": {
+                        "lon": -114.0203,
+                        "lat": 51.1139,
+                        "altM": 1084.0,
+                        "speedMps": 135.0,
+                        "headingDeg": 12.0,
+                        "flightPathDeg": -3.0,
+                        "aircraftType": "A320",
+                    },
+                    "targetState": {
+                        "lon": -114.1,
+                        "lat": 51.2,
+                        "altM": 900.0,
+                        "speedMps": 125.0,
+                        "headingDeg": 18.0,
+                        "flightPathDeg": -2.0,
+                    },
+                })
+        finally:
+            optimization_backend.CasadiDirectCollocationOptimizer = original
+
+        log = buffer.getvalue()
+        self.assertIn("optimization timing", log)
+        self.assertIn("optimizer=casadiDirectCollocationLocalEnuColdStart", log)
+        self.assertIn("build=", log)
+        self.assertIn("coldStart=0.400s", log)
+        self.assertIn("freeTime=0.600s", log)
+        self.assertIn("playback=", log)
+        self.assertIn("total=", log)
 
     def test_optimize_rejects_unknown_optimizer(self):
         with self.assertRaisesRegex(ValueError, "optimizer must be one of"):

@@ -55,6 +55,7 @@ variables use **radians**.
 """
 
 import math
+import time
 
 import casadi as ca
 import numpy as np
@@ -757,6 +758,7 @@ class CasadiDirectCollocationOptimizer:
         max_terminal_bank_deg: float = _DEFAULT_MAX_TERMINAL_BANK_DEG,
         smoothness_weights: tuple = _DEFAULT_SMOOTHNESS_WEIGHTS,
         collocation_scheme: str = _DEFAULT_SCHEME,
+        cold_start_scheme: str | None = None,
         solver_backend: str = _DEFAULT_SOLVER_BACKEND,
     ):
         if n_segments < 2:
@@ -766,6 +768,11 @@ class CasadiDirectCollocationOptimizer:
                 f"unknown collocation_scheme {collocation_scheme!r}; "
                 f"choose from {sorted(_DEFECT_SCHEMES)}"
             )
+        if cold_start_scheme is not None and cold_start_scheme not in _DEFECT_SCHEMES:
+            raise ValueError(
+                f"unknown cold_start_scheme {cold_start_scheme!r}; "
+                f"choose from {sorted(_DEFECT_SCHEMES)}"
+            )
         if solver_backend not in _SOLVER_BACKENDS:
             raise ValueError(
                 f"unknown solver_backend {solver_backend!r}; "
@@ -773,7 +780,23 @@ class CasadiDirectCollocationOptimizer:
             )
         self.n_segments = n_segments
         # Defect "fitting equation": trapezoidal / hermiteSimpson / rk4 / reanchoredEnu.
+        # This is the scheme of the FREE-TIME solve (the "rhs dynamics" the
+        # caller asked for).
         self.collocation_scheme = collocation_scheme
+        # Optional hybrid mode: when set, the fixed-time solve that seeds the
+        # free-time solve (the cold start, ``_build_free_time_initial_guess`` ->
+        # ``_solve_fixed_time_raw``) uses a DIFFERENT, cheaper/more-robust
+        # dynamics than the free-time refinement -- e.g. the fixed local-ENU
+        # tangent dynamics (``localEnu``) to seed a geodetic-RHS free-time solve.
+        # The decision-vector layout is identical across schemes (same N and M),
+        # so the cold-start raw solution drops straight in as the free-time seed.
+        # ``None`` -> both solves share ``collocation_scheme`` (original behaviour).
+        self.cold_start_scheme = cold_start_scheme
+        fixed_time_scheme = cold_start_scheme or collocation_scheme
+        # Wall-clock breakdown of the most recent ``optimize_free_time`` call
+        # (cold-start solve vs free-time solve); read by the backend for the
+        # whole-flow timing log.  ``None`` until the first solve.
+        self.last_solve_timings: dict[str, float] | None = None
         # NLP solver backend: ipopt (default) or sqpmethod.
         self.solver_backend = solver_backend
         # Keep the realised bank at the terminal node below this angle (a
@@ -810,7 +833,10 @@ class CasadiDirectCollocationOptimizer:
 
         # Fixed-time NLP -- duration is a parameter.  Used by
         # ``optimize_trajectory`` when the caller supplies an explicit
-        # duration (e.g. a Controlled Time of Arrival).
+        # duration (e.g. a Controlled Time of Arrival), and as the cold-start
+        # seed for the free-time solve.  In hybrid mode it runs
+        # ``fixed_time_scheme`` (= cold_start_scheme) rather than the free-time
+        # ``collocation_scheme``.
         self.solver, self.lbw, self.ubw, self.lbg, self.ubg = (
             make_direct_collocation_solver(
                 segment_num=n_segments,
@@ -819,7 +845,7 @@ class CasadiDirectCollocationOptimizer:
                 sub_steps=self.state_substeps,
                 max_terminal_bank_deg=max_terminal_bank_deg,
                 smoothness_weights=smoothness_weights,
-                collocation_scheme=collocation_scheme,
+                collocation_scheme=fixed_time_scheme,
                 solver_backend=solver_backend,
             )
         )
@@ -928,12 +954,17 @@ class CasadiDirectCollocationOptimizer:
             initial_param, _geodetic_state_to_decision(target_state),
         )
 
+        # Cold start: build the warm-start seed (solves the fixed-time NLP --
+        # under cold_start_scheme in hybrid mode).  Timed separately from the
+        # free-time solve so the backend can log the whole-flow breakdown.
+        cold_start_started = time.perf_counter()
         if initial_guess is None:
             x0 = self._build_free_time_initial_guess(
                 initial_state, target_state, max_duration,
             )
         else:
             x0 = list(initial_guess)
+        cold_start_s = time.perf_counter() - cold_start_started
 
         # Rebind the upper bound on T at solve time.  The NLP was built
         # with a placeholder upper bound (1e6); we tighten it here to
@@ -947,6 +978,7 @@ class CasadiDirectCollocationOptimizer:
         lbw[-1] = min(lbw[-1], max_duration * 0.5)
 
         p = ca.vertcat(initial_param, target_param, max_duration)
+        free_time_started = time.perf_counter()
         sol = self.free_time_solver(
             x0=x0,
             lbx=lbw,
@@ -955,6 +987,12 @@ class CasadiDirectCollocationOptimizer:
             ubg=self.free_time_ubg,
             p=p,
         )
+        free_time_s = time.perf_counter() - free_time_started
+        self.last_solve_timings = {
+            "coldStartS": cold_start_s,
+            "freeTimeSolveS": free_time_s,
+            "solveTotalS": cold_start_s + free_time_s,
+        }
         stats = self.free_time_solver.stats()
         if not stats.get("success", False):
             raise ValueError(

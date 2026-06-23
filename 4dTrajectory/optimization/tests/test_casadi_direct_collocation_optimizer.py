@@ -882,3 +882,84 @@ def test_local_enu_scheme_solves_with_every_fitting():
             math.radians(states[-1][1] - target.longitude) * math.cos(math.radians(target.latitude)),
         )
         assert node_miss < 1.0
+
+
+def test_cold_start_scheme_validation_rejects_unknown():
+    module = load_module()
+    with pytest.raises(ValueError, match="unknown cold_start_scheme"):
+        module.CasadiDirectCollocationOptimizer(
+            n_segments=4, dt=0.2, max_duration=6.0,
+            aircraft=C172, cold_start_scheme="quartic",
+        )
+
+
+def test_cold_start_local_enu_seeds_geodetic_free_time_solve():
+    """Hybrid mode: the free-time refinement runs on the geodetic RHS while the
+    cold-start (fixed-time warm-start) solve runs the fixed local-ENU dynamics.
+
+    The two schemes share the same decision-vector layout, so the local-ENU
+    cold-start solution seeds the geodetic free-time solve directly; the result
+    still reaches the target, and ``last_solve_timings`` records the cold-start
+    vs free-time wall-clock split for the backend's whole-flow log.
+    """
+    module = load_module()
+    n_segments = 4
+    feasible_duration = 2.0
+    max_duration = 6.0
+
+    speed = C172.terminal_speed_kt * 0.51444 + 10.0
+    state = GeodeticState(
+        latitude=51.1139,
+        longitude=-114.0203,
+        altitude=1000.0,
+        V=speed,
+        psi=0.0,
+        gamma=0.0,
+        m=C172.mass_kg,
+    )
+
+    optimizer = module.CasadiDirectCollocationOptimizer(
+        n_segments=n_segments,
+        dt=0.2,
+        max_duration=max_duration,
+        aircraft=C172,
+        collocation_scheme="hermiteSimpson",
+        cold_start_scheme="localEnu",
+    )
+    # The free-time solve keeps the requested geodetic RHS; only the cold start
+    # swaps to the fixed local-ENU dynamics.
+    assert optimizer.collocation_scheme == "hermiteSimpson"
+    assert optimizer.cold_start_scheme == "localEnu"
+    assert optimizer.last_solve_timings is None
+
+    target = _propagate_with_geodetic_rhs(state, optimizer, feasible_duration)
+    final_time, controls, states = optimizer.optimize_free_time(
+        state, target, max_duration,
+    )
+
+    assert optimizer.free_time_solver.stats()["success"]
+    assert controls.shape == (n_segments, 3)
+    assert states.shape == (n_segments, 6)
+    assert final_time < max_duration - 0.1
+
+    np.testing.assert_allclose(
+        states[-1],
+        np.array([
+            target.latitude,
+            target.longitude,
+            target.altitude,
+            target.V,
+            target.psi,
+            target.gamma,
+        ]),
+        atol=1e-3,
+    )
+
+    # The cold-start / free-time split is recorded for the backend timing log.
+    timings = optimizer.last_solve_timings
+    assert set(timings) == {"coldStartS", "freeTimeSolveS", "solveTotalS"}
+    assert timings["coldStartS"] > 0.0
+    assert timings["freeTimeSolveS"] > 0.0
+    assert timings["solveTotalS"] == pytest.approx(
+        timings["coldStartS"] + timings["freeTimeSolveS"],
+    )
