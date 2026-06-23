@@ -17,6 +17,7 @@ describe("optimizer dynamics × fitting decomposition", () => {
       "casadiDirectCollocationLocalEnu",
       "casadiDirectCollocationLocalEnuTrapezoidal",
       "casadiDirectCollocationLocalEnuHermiteSimpson",
+      "casadiDirectCollocationLocalEnuColdStart",
     ] as const;
     for (const opt of optimizers) {
       const { dynamics, fitting } = optimizerToParts(opt);
@@ -44,6 +45,22 @@ describe("optimizer dynamics × fitting decomposition", () => {
     expect(partsToOptimizer("localEnu", "shooting")).toBe("casadiDirectCollocationLocalEnu");
     // The re-anchored stepper snaps any polynomial request to shooting.
     expect(partsToOptimizer("reanchoredEnu", "hermiteSimpson")).toBe("casadiDirectCollocationReanchoredEnu");
+  });
+
+  it("local-ENU cold-start hybrid is geodetic free-time with a locked fitting", () => {
+    // The hybrid composes a single optimizer (Hermite-Simpson free-time), so
+    // its fitting axis is locked and any fitting request snaps to it.
+    expect(validFittingsForDynamics("geodeticColdStart")).toEqual(["hermiteSimpson"]);
+    expect(partsToOptimizer("geodeticColdStart", "hermiteSimpson")).toBe(
+      "casadiDirectCollocationLocalEnuColdStart",
+    );
+    expect(partsToOptimizer("geodeticColdStart", "trapezoidal")).toBe(
+      "casadiDirectCollocationLocalEnuColdStart",
+    );
+    expect(optimizerToParts("casadiDirectCollocationLocalEnuColdStart")).toEqual({
+      dynamics: "geodeticColdStart",
+      fitting: "hermiteSimpson",
+    });
   });
 });
 
