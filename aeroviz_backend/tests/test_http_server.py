@@ -78,6 +78,28 @@ class TestAeroVizBackendApp(unittest.TestCase):
         self.assertIsNone(log_event)
         self.assertEqual(optimization_backend.calls, [request_payload])
 
+    def test_dynamics_comparison_route_delegates_to_its_backend(self):
+        dynamics_comparison_backend = FakeDynamicsComparisonBackend()
+        app = AeroVizBackendApp(
+            simulation_backend=FakeSimulationBackend(),
+            optimization_backend=FakeOptimizationBackend(),
+            dynamics_comparison_backend=dynamics_comparison_backend,
+        )
+        request_payload = {
+            "initialState": {"aircraftType": "A320"},
+            "control": {"thrustN": 70000.0},
+        }
+
+        status, payload, log_event = app.handle_post(
+            "/dynamics-comparison/run",
+            request_payload,
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload, {"ok": True, "route": "comparison"})
+        self.assertIsNone(log_event)
+        self.assertEqual(dynamics_comparison_backend.calls, [request_payload])
+
     def test_legacy_root_simulation_routes_are_not_exposed(self):
         app = AeroVizBackendApp(
             simulation_backend=FakeSimulationBackend(),
@@ -111,6 +133,15 @@ class FakeOptimizationBackend:
     def optimize(self, payload):
         self.calls.append(payload)
         return {"ok": True, "finalTimeS": 12.0}
+
+
+class FakeDynamicsComparisonBackend:
+    def __init__(self):
+        self.calls = []
+
+    def run(self, payload):
+        self.calls.append(payload)
+        return {"ok": True, "route": "comparison"}
 
 
 if __name__ == "__main__":

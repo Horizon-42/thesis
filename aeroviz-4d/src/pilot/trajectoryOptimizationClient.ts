@@ -1,4 +1,11 @@
 import { AEROVIZ_BACKEND_URL, type PilotControls, type PilotResetState } from "./pilotClient";
+import {
+  isRecord,
+  readNumber,
+  readOptionalNumber,
+  readPositiveNumber,
+  readString,
+} from "./responseValidators";
 
 export type TrajectoryOptimizer =
   // Direct-collocation variants, one per defect "fitting equation".
@@ -287,35 +294,3 @@ function parseState(value: unknown): PilotResetState {
   };
 }
 
-function readNumber(value: Record<string, unknown>, key: string): number {
-  const nested = value[key];
-  if (typeof nested !== "number" || !Number.isFinite(nested)) {
-    throw new Error(`AeroViz backend optimization response has invalid ${key}`);
-  }
-  return nested;
-}
-
-function readOptionalNumber(value: Record<string, unknown>, key: string): number | null {
-  if (!(key in value)) return null;
-  return readNumber(value, key);
-}
-
-function readPositiveNumber(value: Record<string, unknown>, key: string): number {
-  const number = readNumber(value, key);
-  if (number <= 0) {
-    throw new Error(`AeroViz backend optimization response has invalid ${key}`);
-  }
-  return number;
-}
-
-function readString(value: Record<string, unknown>, key: string): string {
-  const nested = value[key];
-  if (typeof nested !== "string" || nested.length === 0) {
-    throw new Error(`AeroViz backend optimization response has invalid ${key}`);
-  }
-  return nested;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}

@@ -12,6 +12,7 @@ from typing import Any
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from aeroviz_backend.dynamics_comparison_backend import DynamicsComparisonBackend
 from aeroviz_backend.optimization_backend import OptimizationBackend
 from aeroviz_backend.simulation_backend import SimulationBackend, aircraft_catalog
 
@@ -21,9 +22,13 @@ class AeroVizBackendApp:
         self,
         simulation_backend: SimulationBackend | None = None,
         optimization_backend: OptimizationBackend | None = None,
+        dynamics_comparison_backend: DynamicsComparisonBackend | None = None,
     ) -> None:
         self.simulation_backend = simulation_backend or SimulationBackend()
         self.optimization_backend = optimization_backend or OptimizationBackend()
+        self.dynamics_comparison_backend = (
+            dynamics_comparison_backend or DynamicsComparisonBackend()
+        )
 
     def handle_get(self, path: str) -> tuple[int, dict[str, Any]]:
         if path == "/health":
@@ -43,6 +48,8 @@ class AeroVizBackendApp:
             return 200, self.simulation_backend.step(payload), None
         if path == "/optimization/run":
             return 200, self.optimization_backend.optimize(payload), None
+        if path == "/dynamics-comparison/run":
+            return 200, self.dynamics_comparison_backend.run(payload), None
         return 404, {"ok": False, "error": "not found"}, None
 
 

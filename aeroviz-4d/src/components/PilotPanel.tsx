@@ -18,6 +18,8 @@ import {
 import { usePilotAircraft, type PilotAircraftPose } from "../hooks/usePilotAircraft";
 import { usePilotTargetGate } from "../hooks/usePilotTargetGate";
 import { useOptimizedTrajectoryPlayback } from "../hooks/useOptimizedTrajectoryPlayback";
+import { useDynamicsComparisonPlayback } from "../hooks/useDynamicsComparisonPlayback";
+import DynamicsComparisonCharts from "./DynamicsComparisonCharts";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import PilotInitialStateOverlay, {
   EnglishNumberInput,
@@ -65,6 +67,11 @@ import {
   type OptimizerDynamics,
   type OptimizerFitting,
 } from "../pilot/trajectoryOptimizationClient";
+import {
+  runDynamicsComparison,
+  type DynamicsComparisonControl,
+  type DynamicsComparisonResult,
+} from "../pilot/dynamicsComparisonClient";
 
 const DEFAULT_SIMULATION_MODE: PilotSimulationMode = "alpha";
 const DEFAULT_BANK_DEG = 45;
@@ -81,6 +88,13 @@ const MAX_TRAIL_POINTS = 360;
 const DEFAULT_TARGET_GAMMA_DEG = -3;
 const DEFAULT_MAX_ITERATIONS = 300;
 const DEFAULT_ARRIVAL_TIME_S = 100;
+const DEFAULT_COMPARISON_DURATION_S = 240;
+const DEFAULT_COMPARISON_DT_S = 0.1;
+const DEFAULT_COMPARISON_CONTROL: DynamicsComparisonControl = {
+  thrustN: 70000,
+  bankDeg: 0,
+  loadFactor: 1,
+};
 const DEFAULT_TRAJECTORY_OPTIMIZER: TrajectoryOptimizer = "casadiDirectCollocation";
 const OPTIMIZER_DYNAMICS_OPTIONS: { value: OptimizerDynamics; label: string }[] = [
   { value: "geodetic", label: "Geodetic RHS (+transport)" },
@@ -113,7 +127,7 @@ function trajectoryOptimizerSimulationMode(
     : "alpha";
 }
 
-type PilotPanelMode = "pilot" | "trajectory";
+type PilotPanelMode = "pilot" | "trajectory" | "comparison";
 
 interface PlacementBackup {
   initialState: PilotResetState;
@@ -138,7 +152,7 @@ export default function PilotPanel() {
   const [isTargetEditorOpen, setIsTargetEditorOpen] = useState(false);
   const [isPlacingInitialPosition, setIsPlacingInitialPosition] = useState(false);
   const [isInitialPreviewVisible, setIsInitialPreviewVisible] = useState(false);
-  const [isFollowing, setIsFollowing] = useState(true);
+  const [isFollowing, setIsFollowing] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [aircraftConfigs, setAircraftConfigs] = useState<PilotAircraftConfig[]>([]);
@@ -160,6 +174,21 @@ export default function PilotPanel() {
   const [maxIterations, setMaxIterations] = useState(DEFAULT_MAX_ITERATIONS);
   const [optimizedTrajectory, setOptimizedTrajectory] =
     useState<TrajectoryOptimizationResult | null>(null);
+
+  // Dynamics Comparison mode: one trajectory flown four ways under one constant
+  // control, replayed as a multi-system CZML with a pop-up deviation chart.
+  const [comparisonControl, setComparisonControl] =
+    useState<DynamicsComparisonControl>(DEFAULT_COMPARISON_CONTROL);
+  const [comparisonDurationS, setComparisonDurationS] = useState(
+    DEFAULT_COMPARISON_DURATION_S,
+  );
+  const [comparisonDtS, setComparisonDtS] = useState(DEFAULT_COMPARISON_DT_S);
+  const [comparisonResult, setComparisonResult] =
+    useState<DynamicsComparisonResult | null>(null);
+  const [isComparisonPlaybackActive, setIsComparisonPlaybackActive] = useState(false);
+  const [isComparisonPlaying, setIsComparisonPlaying] = useState(false);
+  const [hiddenComparisonKeys, setHiddenComparisonKeys] = useState<string[]>([]);
+  const [isChartsOpen, setIsChartsOpen] = useState(false);
 
   const controlsRef = useRef(controls);
   const simulationModeRef = useRef(simulationMode);
@@ -224,15 +253,33 @@ export default function PilotPanel() {
     setIsTrajectoryPlaybackActive(false);
   }, []);
 
+  // Invalidate any computed/loaded dynamics comparison. Used whenever an input
+  // feeding the comparison changes, so a stale CZML/chart never stays on screen.
+  const clearComparisonPlayback = useCallback(() => {
+    setComparisonResult(null);
+    setIsComparisonPlaying(false);
+    setIsComparisonPlaybackActive(false);
+    setIsChartsOpen(false);
+    setHiddenComparisonKeys([]);
+  }, []);
+
   const clearSnapshotForInitialEdit = useCallback(() => {
     clearOptimizedPlayback();
+    clearComparisonPlayback();
     if (!snapshot && !isEnabled && !isFlying && !isTrajectoryPlaying) return;
 
     setIsFlying(false);
     setIsEnabled(false);
     setSnapshot(null);
     setTrail([]);
-  }, [clearOptimizedPlayback, isEnabled, isFlying, isTrajectoryPlaying, snapshot]);
+  }, [
+    clearOptimizedPlayback,
+    clearComparisonPlayback,
+    isEnabled,
+    isFlying,
+    isTrajectoryPlaying,
+    snapshot,
+  ]);
 
   const updateInitialPosition = useCallback(
     (position: PilotInitialPlacementPosition) => {
@@ -388,6 +435,13 @@ export default function PilotPanel() {
     onSample: handlePlaybackSample,
   });
 
+  useDynamicsComparisonPlayback({
+    enabled: isComparisonPlaybackActive,
+    czml: comparisonResult?.playback.czml ?? null,
+    hiddenKeys: hiddenComparisonKeys,
+    follow: isFollowing && activeMode === "comparison",
+  });
+
   useEffect(() => {
     const aircraft = aircraftConfigs[0] ?? null;
     placementBackupRef.current = null;
@@ -408,7 +462,11 @@ export default function PilotPanel() {
     setSnapshot(null);
     setTrail([]);
     setOptimizedTrajectory(null);
-  }, [airport, aircraftConfigs]);
+    setComparisonControl(DEFAULT_COMPARISON_CONTROL);
+    setComparisonDurationS(DEFAULT_COMPARISON_DURATION_S);
+    setComparisonDtS(DEFAULT_COMPARISON_DT_S);
+    clearComparisonPlayback();
+  }, [airport, aircraftConfigs, clearComparisonPlayback]);
 
   useEffect(() => {
     if (!selectedAircraft) return;
@@ -762,9 +820,21 @@ export default function PilotPanel() {
     setIntegratorDtS(clamp(value, 0.02, 0.5));
   }
 
+  // Unload any active playback when leaving a mode, but KEEP the computed
+  // results (optimized trajectory / comparison) so returning lets the user
+  // replay without recomputing.
+  function suspendPlaybacks() {
+    setIsTrajectoryPlaying(false);
+    setIsTrajectoryPlaybackActive(false);
+    setIsComparisonPlaying(false);
+    setIsComparisonPlaybackActive(false);
+    setIsChartsOpen(false);
+  }
+
   function openTrajectoryMode() {
     if (isPlacingInitialPosition) return;
     setIsFlying(false);
+    suspendPlaybacks();
     setIsInitialEditorOpen(false);
     setActiveMode("trajectory");
     setError(null);
@@ -772,12 +842,19 @@ export default function PilotPanel() {
 
   function openPilotMode() {
     if (isPlacingInitialPosition) return;
-    // Unload the optimized CZML when leaving Trajectory Play, but keep the
-    // computed result so returning lets the user replay without re-optimizing.
-    setIsTrajectoryPlaying(false);
-    setIsTrajectoryPlaybackActive(false);
+    suspendPlaybacks();
     setIsTargetEditorOpen(false);
     setActiveMode("pilot");
+    setError(null);
+  }
+
+  function openComparisonMode() {
+    if (isPlacingInitialPosition) return;
+    setIsFlying(false);
+    suspendPlaybacks();
+    setIsTargetEditorOpen(false);
+    setIsInitialEditorOpen(false);
+    setActiveMode("comparison");
     setError(null);
   }
 
@@ -935,6 +1012,94 @@ export default function PilotPanel() {
     }
   }
 
+  // ── Dynamics comparison handlers ──────────────────────────────────────────
+  function updateComparisonControl(
+    key: keyof DynamicsComparisonControl,
+    value: number,
+    min: number,
+    max: number,
+  ) {
+    if (!Number.isFinite(value)) return;
+    setComparisonControl((current) => ({ ...current, [key]: clamp(value, min, max) }));
+    clearComparisonPlayback();
+  }
+
+  function updateComparisonDuration(value: number) {
+    if (!Number.isFinite(value)) return;
+    setComparisonDurationS(clamp(value, 5, 600));
+    clearComparisonPlayback();
+  }
+
+  function updateComparisonDt(value: number) {
+    if (!Number.isFinite(value)) return;
+    setComparisonDtS(clamp(value, 0.05, 1));
+    clearComparisonPlayback();
+  }
+
+  async function computeComparison() {
+    if (!hasAircraftConfigs) return;
+
+    setIsBusy(true);
+    setIsFlying(false);
+    clearComparisonPlayback();
+    setError(null);
+    try {
+      const result = await runDynamicsComparison({
+        initialState,
+        control: comparisonControl,
+        durationS: comparisonDurationS,
+        dtS: comparisonDtS,
+      });
+      setComparisonResult(result);
+      setIsChartsOpen(true);
+    } catch (comparisonError: unknown) {
+      setComparisonResult(null);
+      setError(toErrorMessage(comparisonError));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  function playComparison() {
+    if (!comparisonResult) return;
+
+    setError(null);
+    setIsFlying(false);
+    setIsEnabled(false);
+    setIsComparisonPlaybackActive(true);
+    setIsComparisonPlaying(true);
+    if (isCesiumViewerUsable(viewer)) {
+      viewer.clock.shouldAnimate = true;
+    }
+  }
+
+  function pauseComparison() {
+    setIsComparisonPlaying(false);
+    if (isCesiumViewerUsable(viewer)) {
+      viewer.clock.shouldAnimate = false;
+    }
+  }
+
+  function resetComparisonReplay() {
+    // Only meaningful once the comparison CZML is loaded (Effect 1 sets the
+    // clock). Before first Play the clock belongs to another mode, so do nothing.
+    if (!isComparisonPlaybackActive) return;
+    setIsComparisonPlaying(false);
+    setError(null);
+    if (isCesiumViewerUsable(viewer)) {
+      viewer.clock.shouldAnimate = false;
+      viewer.clock.currentTime = viewer.clock.startTime.clone();
+    }
+  }
+
+  function toggleComparisonSystem(key: string) {
+    setHiddenComparisonKeys((current) =>
+      current.includes(key)
+        ? current.filter((existing) => existing !== key)
+        : [...current, key],
+    );
+  }
+
   function nudgeControl(
     key: keyof PilotControls,
     delta: number,
@@ -966,22 +1131,25 @@ export default function PilotPanel() {
 
   const statusLabel = isPlacingInitialPosition
     ? "Placing"
-    : isBusy && activeMode === "trajectory"
+    : isBusy && (activeMode === "trajectory" || activeMode === "comparison")
       ? "Computing"
-      : isTrajectoryPlaying
+      : isTrajectoryPlaying || isComparisonPlaying
         ? "Playing"
         : isFlying
           ? "Flying"
-          : isTrajectoryPlaybackActive
+          : isTrajectoryPlaybackActive || isComparisonPlaybackActive
             ? "Paused"
-            : optimizedTrajectory && activeMode === "trajectory"
+            : (optimizedTrajectory && activeMode === "trajectory") ||
+                (comparisonResult && activeMode === "comparison")
               ? "Ready"
               : snapshot
                 ? "Paused"
                 : "Standby";
   const hasAircraftConfigs = aircraftConfigs.length > 0;
-  const initialControlsDisabled = isFlying || isTrajectoryPlaying || isBusy || !hasAircraftConfigs;
+  const isAnyPlaying = isTrajectoryPlaying || isComparisonPlaying;
+  const initialControlsDisabled = isFlying || isAnyPlaying || isBusy || !hasAircraftConfigs;
   const targetControlsDisabled = isBusy || isTrajectoryPlaying || runwayTargets.length === 0;
+  const comparisonControlsDisabled = isBusy || isComparisonPlaying || !hasAircraftConfigs;
   // The single optimizer name is shown as two dropdowns: dynamics × fitting.
   const { dynamics: optimizerDynamics, fitting: optimizerFitting } =
     optimizerToParts(trajectoryOptimizer);
@@ -1007,21 +1175,35 @@ export default function PilotPanel() {
       <header className="pilot-panel-header">
         <div className="pilot-panel-header-main">
           <div className="pilot-panel-title-block">
-            <h3>{activeMode === "trajectory" ? "Trajectory Play" : "Pilot Mode"}</h3>
+            <h3>
+              {activeMode === "comparison"
+                ? "Dynamics Compare"
+                : activeMode === "trajectory"
+                  ? "Trajectory Play"
+                  : "Pilot Mode"}
+            </h3>
           </div>
           <span className={`pilot-status pilot-status-${statusLabel.toLowerCase()}`}>
             {statusLabel}
           </span>
         </div>
-        <div className="pilot-panel-mode-row">
-          <button
-            type="button"
-            className="pilot-mode-toggle"
-            onClick={activeMode === "trajectory" ? openPilotMode : openTrajectoryMode}
-            disabled={isPlacingInitialPosition}
-          >
-            {activeMode === "trajectory" ? "Pilot" : "Trajectory"}
-          </button>
+        <div className="pilot-panel-mode-row pilot-panel-mode-switch" role="group" aria-label="Panel mode">
+          {([
+            { mode: "pilot", label: "Pilot", onClick: openPilotMode },
+            { mode: "trajectory", label: "Trajectory", onClick: openTrajectoryMode },
+            { mode: "comparison", label: "Compare", onClick: openComparisonMode },
+          ] as const).map((entry) => (
+            <button
+              key={entry.mode}
+              type="button"
+              className={`pilot-mode-toggle${activeMode === entry.mode ? " active" : ""}`}
+              onClick={entry.onClick}
+              disabled={isPlacingInitialPosition}
+              aria-pressed={activeMode === entry.mode}
+            >
+              {entry.label}
+            </button>
+          ))}
         </div>
       </header>
 
@@ -1308,6 +1490,184 @@ export default function PilotPanel() {
             ) : null}
           </section>
         </>
+      ) : activeMode === "comparison" ? (
+        <>
+          <section
+            className="pilot-optimization-row"
+            aria-label="Dynamics comparison settings"
+          >
+            <label>
+              <span>Thrust</span>
+              <EnglishNumberInput
+                value={comparisonControl.thrustN}
+                min={0}
+                max={selectedMaxThrustN}
+                step="500"
+                disabled={comparisonControlsDisabled}
+                onCommit={(value) =>
+                  updateComparisonControl("thrustN", value, 0, selectedMaxThrustN)
+                }
+              />
+            </label>
+            <label>
+              <span>Bank</span>
+              <EnglishNumberInput
+                value={comparisonControl.bankDeg}
+                min={-60}
+                max={60}
+                step="1"
+                disabled={comparisonControlsDisabled}
+                onCommit={(value) => updateComparisonControl("bankDeg", value, -60, 60)}
+              />
+            </label>
+            <label>
+              <span>Load factor</span>
+              <EnglishNumberInput
+                value={comparisonControl.loadFactor}
+                min={MIN_LOAD_FACTOR}
+                max={MAX_LOAD_FACTOR}
+                step="0.05"
+                disabled={comparisonControlsDisabled}
+                onCommit={(value) =>
+                  updateComparisonControl("loadFactor", value, MIN_LOAD_FACTOR, MAX_LOAD_FACTOR)
+                }
+              />
+            </label>
+            <label>
+              <span>Duration</span>
+              <EnglishNumberInput
+                value={comparisonDurationS}
+                min={5}
+                max={600}
+                step="10"
+                disabled={comparisonControlsDisabled}
+                onCommit={updateComparisonDuration}
+              />
+            </label>
+            <label>
+              <span>dt</span>
+              <EnglishNumberInput
+                value={comparisonDtS}
+                min={0.05}
+                max={1}
+                step="0.05"
+                disabled={comparisonControlsDisabled}
+                onCommit={updateComparisonDt}
+              />
+            </label>
+          </section>
+
+          <div className="pilot-actions">
+            <button
+              className="pilot-primary-button"
+              onClick={computeComparison}
+              disabled={
+                isBusy ||
+                isComparisonPlaying ||
+                isPlacingInitialPosition ||
+                !hasAircraftConfigs
+              }
+            >
+              Compute
+            </button>
+            <button
+              onClick={playComparison}
+              disabled={
+                isBusy ||
+                isComparisonPlaying ||
+                isPlacingInitialPosition ||
+                !comparisonResult
+              }
+            >
+              Play
+            </button>
+            <button
+              onClick={pauseComparison}
+              disabled={!isComparisonPlaying || isBusy || isPlacingInitialPosition}
+            >
+              Pause
+            </button>
+            <button
+              onClick={resetComparisonReplay}
+              disabled={isBusy || isPlacingInitialPosition || !isComparisonPlaybackActive}
+            >
+              Reset
+            </button>
+          </div>
+
+          <section className="pilot-control-zone" aria-label="Dynamics comparison playback">
+            <div className="pilot-options-row">
+              <label className="pilot-checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={isFollowing}
+                  onChange={(event) => setIsFollowing(event.target.checked)}
+                />
+                Follow B
+              </label>
+              <button
+                type="button"
+                onClick={() => setIsChartsOpen((open) => !open)}
+                disabled={!comparisonResult}
+              >
+                {isChartsOpen ? "Hide charts" : "Show charts"}
+              </button>
+            </div>
+
+            {comparisonResult ? (
+              <>
+                <ul className="dyncmp-panel-legend" aria-label="Trajectory visibility">
+                  {comparisonResult.systems.map((system) => {
+                    const isHidden = hiddenComparisonKeys.includes(system.key);
+                    const [r, g, b, a] = system.colorRgba;
+                    return (
+                      <li key={system.key}>
+                        <label className={`dyncmp-legend-item${isHidden ? " is-hidden" : ""}`}>
+                          <input
+                            type="checkbox"
+                            checked={!isHidden}
+                            onChange={() => toggleComparisonSystem(system.key)}
+                          />
+                          <span
+                            className="dyncmp-legend-swatch"
+                            style={{ background: `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})` }}
+                          />
+                          <span className="dyncmp-legend-label">{system.label}</span>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <dl className="pilot-plan-readouts">
+                  <div>
+                    <dt>Duration</dt>
+                    <dd>{formatNumberInputValue(comparisonResult.durationS)} s</dd>
+                  </div>
+                  <div>
+                    <dt>dt</dt>
+                    <dd>{formatNumberInputValue(comparisonResult.dtS)} s</dd>
+                  </div>
+                  <div>
+                    <dt>Speed</dt>
+                    <dd>{comparisonResult.playback.multiplier}x</dd>
+                  </div>
+                </dl>
+                {comparisonResult.durationS < comparisonResult.requestedDurationS - 0.5 ? (
+                  <p className="dyncmp-hint dyncmp-hint-warn" role="status">
+                    Flight reached the ground after {formatNumberInputValue(comparisonResult.durationS)} s
+                    (requested {formatNumberInputValue(comparisonResult.requestedDurationS)} s) — horizon truncated.
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <p className="dyncmp-hint">
+                Set a constant control + horizon, then Compute to fly the start state
+                four ways (fixed tangent, re-anchored, geodetic ±transport) and compare
+                the drift.
+              </p>
+            )}
+          </section>
+        </>
       ) : (
         <>
           <div className="pilot-actions">
@@ -1510,6 +1870,16 @@ export default function PilotPanel() {
       )}
 
       {error ? <div className="pilot-error" role="alert">{error}</div> : null}
+
+      {activeMode === "comparison" && isChartsOpen && comparisonResult ? (
+        <DynamicsComparisonCharts
+          chart={comparisonResult.chart}
+          systems={comparisonResult.systems}
+          hiddenKeys={hiddenComparisonKeys}
+          onToggleSystem={toggleComparisonSystem}
+          onClose={() => setIsChartsOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

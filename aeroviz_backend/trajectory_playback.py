@@ -33,12 +33,18 @@ from the sample series, matching the live Pilot-mode aircraft exactly.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import math
 import sys
 from typing import Any
 
 from aeroviz_backend import paths  # noqa: F401
+from aeroviz_backend.czml_common import (
+    EPOCH as _EPOCH,
+    document_packet,
+    iso as _iso,
+    iso_ms as _iso_ms,
+)
 from aeroviz_backend.simulation_backend import (
     make_geodetic_simulator,
     read_snapshot_aero,
@@ -49,10 +55,6 @@ from common import Control, GeodeticState, LoadFactorControl
 # Optimizers that emit LoadFactorControl-shaped controls (T, mu, n); everything
 # else emits alpha-based Control (T, mu, alpha).  Mirrors the frontend's
 # ``trajectoryOptimizerSimulationMode``.
-
-# Arbitrary fixed epoch.  The optimized trajectory is a standalone playback, so
-# the absolute date is irrelevant — only the relative offsets matter.
-_EPOCH = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
 
 _AIRCRAFT_MODEL_URI = "/models/aircraft.glb"
 _AIRCRAFT_ENTITY_ID = "optimized-trajectory-aircraft"
@@ -265,18 +267,7 @@ def _build_czml(
 
 
 def _build_document_packet(end_dt: datetime) -> dict[str, Any]:
-    return {
-        "id": "document",
-        "name": "AeroViz-4D Optimized Trajectory",
-        "version": "1.0",
-        "clock": {
-            "interval": f"{_iso(_EPOCH)}/{_iso(end_dt)}",
-            "currentTime": _iso(_EPOCH),
-            "multiplier": 1,
-            "range": "LOOP_STOP",
-            "step": "SYSTEM_CLOCK_MULTIPLIER",
-        },
-    }
+    return document_packet(end_dt, 1, "AeroViz-4D Optimized Trajectory")
 
 
 def _build_aircraft_packet(
@@ -394,13 +385,3 @@ def _segment_color_rgba(segment_index: int, segment_count: int) -> tuple[int, in
             )
     _, r, g, b = _SEGMENT_COLOR_STOPS[-1]
     return (r, g, b, _SEGMENT_COLOR_ALPHA)
-
-
-def _iso(dt: datetime) -> str:
-    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def _iso_ms(dt: datetime) -> str:
-    """ISO 8601 with millisecond precision (for sub-second availability steps)."""
-    base = dt.astimezone(timezone.utc)
-    return base.strftime("%Y-%m-%dT%H:%M:%S.") + f"{base.microsecond // 1000:03d}Z"

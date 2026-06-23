@@ -34,43 +34,23 @@ import math
 import sys
 from pathlib import Path
 
-import casadi as ca
-import numpy as np
-
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from aerodynamic_model.aircraft_sets import A320  # noqa: E402
-from aerodynamic_model.casadi_simulator import (  # noqa: E402
-    aero_params_for_aircraft,
-    make_dynamics_model,
-    rk4_step_expr,
-    geodetic_state_to_enu_expr,
-    enu_state_to_geodetic_expr,
-    make_geo_step_from_enu_integrator,
-    make_geodetic_step_integrator,
+from aerodynamic_model.casadi_simulator import aero_params_for_aircraft  # noqa: E402
+from dynamics_comparison import (  # noqa: E402
+    _R,
+    compare_dynamics,
+    horizontal_error_m as _horiz_m,
+    heading_error_deg as _heading_err_deg,
 )
-
-_R = 6_371_000.0
-
-
-def _horiz_m(lat1, lon1, lat2, lon2):
-    return _R * math.hypot(
-        math.radians(lat1 - lat2),
-        math.radians(lon1 - lon2) * math.cos(math.radians(lat2)),
-    )
-
-
-def _heading_err_deg(psi1, psi2):
-    d = math.degrees(psi1 - psi2) % 360.0
-    return min(d, 360.0 - d)
 
 
 def main() -> int:
     aircraft = A320
     ap = aero_params_for_aircraft(aircraft)
-    aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
 
     # ── Scenario (documented in the HTML) ────────────────────────────────
     # Target on the ground; start ~30 km to the south-west, heading NE toward
@@ -91,48 +71,24 @@ def main() -> int:
     psi0 = math.radians(bearing_deg)        # heading from East, +ve toward North
     gamma0 = math.radians(-2.0)
     control = dict(thrust_n=70_000.0, bank_deg=0.0, load_factor=1.0)
-    u = ca.DM([control["thrust_n"], math.radians(control["bank_deg"]), control["load_factor"]])
     dt = 0.02
     duration = 250.0
-    n_steps = int(duration / dt)
 
-    x0 = [start["lat"], start["lon"], start["alt"], V0, psi0, gamma0, aircraft.mass_kg]
-
-    # ── Integrators (all take lat/lon in DEGREES externally) ─────────────
-    # (A) fixed local-tangent ENU: a fixed frame integrates ENTIRELY in ENU,
-    # converting geodetic <-> ENU only at the boundary.  So we convert the start
-    # into the target-anchored frame ONCE, step the flat point-mass RHS in ENU,
-    # and convert back only to record each sample (NOT every step).
-    flat_rhs = make_dynamics_model()["rhs_func"]
-    reanchored = make_geo_step_from_enu_integrator()["step_func"]
-    rhs_tr = make_geodetic_step_integrator(include_transport=True)["step_func"]
-    rhs_no = make_geodetic_step_integrator(include_transport=False)["step_func"]
-    ref_geo = ca.DM([target["lat"], target["lon"], 0.0])  # fixed anchor = target
-
-    def geo_to_enu(xg):   # 7-vec geodetic (deg) -> 7-vec ENU in the fixed frame
-        return ca.vertcat(*geodetic_state_to_enu_expr(ca.DM(xg), ref_geo), xg[6])
-
-    def enu_to_geo(xe):   # 7-vec ENU -> 7-vec geodetic (deg)
-        return list(np.array(ca.vertcat(*enu_state_to_geodetic_expr(xe, ref_geo), xe[6])).ravel())
-
-    def geo_step(which, x):   # one geodetic step for B / C / D
-        f = {"B": reanchored, "C": rhs_tr, "D": rhs_no}[which]
-        return list(np.array(f(x_geo=ca.DM(x), u=u, aero_params=aero, dt=dt)["x_geo_next"]).ravel())
-
-    paths = {k: [list(x0)] for k in "ABCD"}
-    state = {k: list(x0) for k in "BCD"}
-    enu_A = geo_to_enu(x0)             # system A's state lives in the fixed ENU frame
-    dist = [0.0]                       # cumulative ground distance along reference B
-    for _ in range(n_steps):
-        enu_A = rk4_step_expr(flat_rhs, enu_A, u, aero, dt)   # integrate in ENU
-        paths["A"].append(enu_to_geo(enu_A))                 # convert only to record
-        for k in "BCD":
-            state[k] = geo_step(k, state[k])
-            paths[k].append(list(state[k]))
-        b, bprev = paths["B"][-1], paths["B"][-2]
-        dist.append(dist[-1] + _horiz_m(b[0], b[1], bprev[0], bprev[1]))
-        if dist[-1] >= range_km * 1000.0:   # stop once we have flown 30 km
-            break
+    # System A is the fixed local-tangent ENU anchored at the TARGET (this study's
+    # documented setup; see dynamics_comparison.py for the shared engine).
+    comparison = compare_dynamics(
+        start=dict(lat=start["lat"], lon=start["lon"], alt=start["alt"],
+                   V=V0, psi=psi0, gamma=gamma0, mass=aircraft.mass_kg),
+        control=(control["thrust_n"], math.radians(control["bank_deg"]), control["load_factor"]),
+        aero_params=[ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall],
+        duration_s=duration,
+        dt_s=dt,
+        anchor_geo=(target["lat"], target["lon"], 0.0),
+        max_range_m=range_km * 1000.0,
+        stop_below_ground=False,
+    )
+    paths = comparison.paths
+    dist = comparison.dist_m
     B = paths["B"]
 
     # Sample ~every 0.5 km for a compact series.

@@ -42,6 +42,8 @@ const mocks = vi.hoisted(() => ({
   usePilotInitialPlacement: vi.fn(),
   usePilotTargetGate: vi.fn(),
   useOptimizedTrajectoryPlayback: vi.fn(),
+  useDynamicsComparisonPlayback: vi.fn(),
+  runDynamicsComparison: vi.fn(),
 }));
 
 vi.mock("../../context/AppContext", () => ({
@@ -66,6 +68,14 @@ vi.mock("../../hooks/usePilotTargetGate", () => ({
 
 vi.mock("../../hooks/useOptimizedTrajectoryPlayback", () => ({
   useOptimizedTrajectoryPlayback: mocks.useOptimizedTrajectoryPlayback,
+}));
+
+vi.mock("../../hooks/useDynamicsComparisonPlayback", () => ({
+  useDynamicsComparisonPlayback: mocks.useDynamicsComparisonPlayback,
+}));
+
+vi.mock("../../pilot/dynamicsComparisonClient", () => ({
+  runDynamicsComparison: mocks.runDynamicsComparison,
 }));
 
 vi.mock("../../pilot/pilotClient", () => ({
