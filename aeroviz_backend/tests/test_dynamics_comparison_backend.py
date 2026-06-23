@@ -59,13 +59,17 @@ class TestDynamicsComparisonBackend(_TempHistory):
         self.assertEqual(czml[0]["id"], "document")
         ids = [packet["id"] for packet in czml[1:]]
         self.assertEqual(ids, ["dyncmp-A", "dyncmp-B", "dyncmp-C", "dyncmp-D"])
-        # each entity has a time-sampled position and a colored path
+        # each entity has a time-sampled position, a colored path, and a colored
+        # aircraft model (its colour matches the path)
         for packet in czml[1:]:
             position = packet["position"]["cartographicDegrees"]
             self.assertGreater(len(position), 4)
             self.assertEqual(len(position) % 4, 0)
             self.assertIn("path", packet)
-            self.assertIn("rgba", packet["path"]["material"]["solidColor"]["color"])
+            path_color = packet["path"]["material"]["solidColor"]["color"]["rgba"]
+            self.assertIn("model", packet)
+            self.assertTrue(packet["model"]["gltf"].endswith(".glb"))
+            self.assertEqual(packet["model"]["color"]["rgba"], path_color)
 
     def test_clock_multiplier_keeps_playback_short(self):
         # 120 s at the doc multiplier should land near the ~40 s wall-time target.

@@ -396,8 +396,15 @@ export default function PilotPanel() {
 
   usePilotInitialPlacement({
     enabled: isPlacingInitialPosition,
+    // The static "START" preview marks the chosen start state while setting up.
+    // Hide it once a comparison is loaded/playing (Compare never sets `snapshot`,
+    // so without this guard the START aircraft would sit at the origin while the
+    // per-system models fly away).
     previewVisible: isPlacingInitialPosition ||
-      ((isInitialEditorOpen || isInitialPreviewVisible) && !isEnabled && !snapshot),
+      ((isInitialEditorOpen || isInitialPreviewVisible) &&
+        !isEnabled &&
+        !snapshot &&
+        !isComparisonPlaybackActive),
     initialState,
     placementGuidance,
     onPositionChange: updateInitialPosition,

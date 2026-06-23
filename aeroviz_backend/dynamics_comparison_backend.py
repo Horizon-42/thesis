@@ -52,6 +52,7 @@ from dynamics_comparison import (
 
 
 _ENTITY_PREFIX = "dyncmp-"
+_AIRCRAFT_MODEL_URI = "/models/aircraft.glb"
 
 DEFAULT_DURATION_S = 240.0
 MIN_DURATION_S = 5.0
@@ -244,11 +245,21 @@ def _system_packet(system, comparison, indices, duration_s) -> dict[str, Any]:
             "interpolationAlgorithm": "LINEAR",
             "forwardExtrapolationType": "HOLD",
         },
-        "point": {
-            "pixelSize": 12 if is_ref else 9,
+        # A colored aircraft model per system (the frontend sets its orientation
+        # along the path). Tinted with the system colour + a matching silhouette
+        # so the four planes are distinguishable; the reference B is a touch
+        # larger. Replaces the old plain point marker.
+        "model": {
+            "gltf": _AIRCRAFT_MODEL_URI,
+            "scale": 1.0,
+            "minimumPixelSize": 34 if is_ref else 28,
+            "maximumScale": 20000,
             "color": {"rgba": color},
-            "outlineColor": {"rgba": [15, 23, 42, 255]},
-            "outlineWidth": 1.6,
+            "colorBlendMode": "MIX",
+            "colorBlendAmount": 0.7,
+            "silhouetteColor": {"rgba": color},
+            "silhouetteSize": 2.0,
+            "runAnimations": False,
         },
         "path": {
             "material": {"solidColor": {"color": {"rgba": color}}},

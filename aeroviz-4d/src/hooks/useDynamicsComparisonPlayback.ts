@@ -80,6 +80,14 @@ export function useDynamicsComparisonPlayback({
         dsRef.current = loadedDs;
         viewer.dataSources.add(loadedDs);
 
+        // Orient each system's aircraft model along its own path (the CZML only
+        // carries position; velocity orientation points the nose down-track).
+        loadedDs.entities.values.forEach((entity) => {
+          if (systemKeyOf(entity) !== null && entity.position) {
+            entity.orientation = new Cesium.VelocityOrientationProperty(entity.position);
+          }
+        });
+
         if (loadedDs.clock) {
           const start = loadedDs.clock.startTime.clone();
           const stop = loadedDs.clock.stopTime.clone();

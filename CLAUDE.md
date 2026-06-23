@@ -113,6 +113,12 @@ The project serves dual purposes: thesis visualization/validation, and reusable 
 
 ## Changelog
 
+### 2026-06-23 — Dynamics Comparison: per-system aircraft models + fix stranded START preview
+
+- **Colored aircraft model per trajectory** — each system's CZML entity now carries an aircraft `model` (`/models/aircraft.glb`) tinted with the system colour (`colorBlendMode: MIX` + matching silhouette), replacing the plain point marker; the reference B is slightly larger. The frontend hook sets each model's orientation with `VelocityOrientationProperty(entity.position)` so the nose points down its own path (the CZML carries position only). Paths/labels unchanged.
+- **Fix: the START preview no longer stays stranded at the origin during a Compare run** — Compare never sets `snapshot`, so the `previewVisible` guard (`… && !snapshot`) never hid the static placement aircraft; added `&& !isComparisonPlaybackActive` so the START marker shows only while setting up and disappears once the comparison loads/plays.
+- 48 backend + 273 frontend tests, tsc + vite build pass (the CZML entity test now asserts a colored model whose colour matches the path).
+
 ### 2026-06-23 — Dynamics Comparison: custom start state, run history, backend-averaged history
 
 Three additions to the Compare mode (all averaging/persistence math on the backend).
