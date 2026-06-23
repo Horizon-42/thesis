@@ -1965,6 +1965,23 @@ body,
   white-space: nowrap;
 }
 
+/* Compare mode: colored A/C/D deviation chips appended under the B value. */
+.pilot-realtime-deltas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px 7px;
+  min-width: 0;
+  margin-top: 1px;
+}
+
+.pilot-realtime-delta {
+  font-family: "Courier New", monospace;
+  font-size: 9.3px;
+  font-weight: 700;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
 .pilot-error {
   margin-top: 9px;
   padding: 7px 8px;

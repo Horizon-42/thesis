@@ -74,6 +74,7 @@ import {
   fetchDynamicsComparisonHistoryCount,
   type DynamicsComparisonAverage,
   type DynamicsComparisonControl,
+  type DynamicsComparisonDeltas,
   type DynamicsComparisonResult,
 } from "../pilot/dynamicsComparisonClient";
 
@@ -193,6 +194,10 @@ export default function PilotPanel() {
   const [isComparisonPlaybackActive, setIsComparisonPlaybackActive] = useState(false);
   const [isComparisonPlaying, setIsComparisonPlaying] = useState(false);
   const [hiddenComparisonKeys, setHiddenComparisonKeys] = useState<string[]>([]);
+  // A/C/D deviations vs the reference B at the current clock time, overlaid on
+  // the Live-State readout during a Compare playback.
+  const [comparisonDeltas, setComparisonDeltas] =
+    useState<DynamicsComparisonDeltas | null>(null);
   const [isChartsOpen, setIsChartsOpen] = useState(false);
   // Run history (#2/#3): count of stored runs + the backend-averaged result.
   // `chartMode` selects which chart the overlay shows: this run vs the average.
@@ -481,6 +486,8 @@ export default function PilotPanel() {
     follow: isFollowing && activeMode === "comparison",
     samples: comparisonResult?.playback.samples ?? EMPTY_SAMPLES,
     onSample: handleComparisonSample,
+    chart: comparisonResult?.chart ?? null,
+    onDeltas: setComparisonDeltas,
   });
 
   useEffect(() => {
@@ -1275,6 +1282,8 @@ export default function PilotPanel() {
         showControlReadout={activeMode === "trajectory" || activeMode === "comparison"}
         simulationMode={snapshot?.simulationMode ?? simulationMode}
         targetState={activeMode === "trajectory" ? targetState : null}
+        comparisonDeltas={activeMode === "comparison" ? comparisonDeltas : null}
+        comparisonSystems={activeMode === "comparison" ? comparisonResult?.systems ?? null : null}
       />
 
       <header className="pilot-panel-header">

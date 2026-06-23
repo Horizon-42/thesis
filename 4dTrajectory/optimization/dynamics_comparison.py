@@ -241,11 +241,13 @@ def error_series(
 ) -> dict[str, dict[str, list[float]]]:
     """Per-sample error of A/C/D vs the reference B at the given indices.
 
-    Returns ``{key: {"horiz", "alt", "head", "speed"}}`` for keys in
-    ``COMPARED_KEYS`` (B is the zero reference and is omitted).
+    Returns ``{key: {"horiz", "alt", "head", "speed", "fpa"}}`` for keys in
+    ``COMPARED_KEYS`` (B is the zero reference and is omitted).  ``head`` and
+    ``horiz`` are magnitudes; ``alt``, ``speed`` and ``fpa`` (flight-path-angle,
+    state index 5) are signed.
     """
     B = comparison.paths[REFERENCE_KEY]
-    out = {k: {"horiz": [], "alt": [], "head": [], "speed": []} for k in COMPARED_KEYS}
+    out = {k: {"horiz": [], "alt": [], "head": [], "speed": [], "fpa": []} for k in COMPARED_KEYS}
     for i in indices:
         ref = B[i]
         for k in COMPARED_KEYS:
@@ -254,4 +256,5 @@ def error_series(
             out[k]["alt"].append(p[2] - ref[2])
             out[k]["head"].append(heading_error_deg(p[4], ref[4]))
             out[k]["speed"].append(p[3] - ref[3])
+            out[k]["fpa"].append(math.degrees(p[5] - ref[5]))
     return out

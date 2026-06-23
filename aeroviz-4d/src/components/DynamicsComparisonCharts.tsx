@@ -10,9 +10,9 @@ import type {
  * ----------------------------
  * Pop-up stats overlay for the Dynamics Comparison mode. Plots each compared
  * system's deviation from the reference B over distance flown — horizontal,
- * altitude, heading and speed error — plus a final-value summary (incl. the
- * final speed deviation). Lines are colored to match the 3D paths and respect
- * the per-system hide toggles.
+ * altitude, heading, speed and flight-path-angle error — plus a final-value
+ * summary. Lines are colored to match the 3D paths and respect the per-system
+ * hide toggles.
  */
 
 interface Props {
@@ -25,13 +25,14 @@ interface Props {
   subtitle?: string;
 }
 
-type MetricField = "horiz" | "alt" | "head" | "speed";
+type MetricField = "horiz" | "alt" | "head" | "speed" | "fpa";
 
 const METRICS: { field: MetricField; title: string; unit: string }[] = [
   { field: "horiz", title: "Horizontal error", unit: "m" },
   { field: "alt", title: "Altitude error", unit: "m" },
   { field: "head", title: "Heading error", unit: "°" },
   { field: "speed", title: "Speed error", unit: "m/s" },
+  { field: "fpa", title: "Flight path angle error", unit: "°" },
 ];
 
 function rgba([r, g, b, a]: [number, number, number, number]): string {
@@ -365,6 +366,7 @@ export default function DynamicsComparisonCharts({
             <th scope="col">Alt (m)</th>
             <th scope="col">Heading (°)</th>
             <th scope="col">Speed (m/s)</th>
+            <th scope="col">FPA (°)</th>
           </tr>
         </thead>
         <tbody>
@@ -380,6 +382,7 @@ export default function DynamicsComparisonCharts({
                 <td>{formatSigned(final.alt, 1)}</td>
                 <td>{formatMagnitude(final.head, 3)}</td>
                 <td>{formatSigned(final.speed, 2)}</td>
+                <td>{formatSigned(final.fpa, 3)}</td>
               </tr>
             );
           })}

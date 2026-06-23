@@ -18,14 +18,14 @@ const chart: DynamicsComparisonChart = {
   distanceKm: [0, 0.5, 1.0],
   timeS: [0, 3.8, 7.6],
   series: {
-    A: { horiz: [0, 5, 12], alt: [0, -1, -3], head: [0, 0.01, 0.02], speed: [0, 0.1, 0.2] },
-    C: { horiz: [0, 0.001, 0.002], alt: [0, 0, 0], head: [0, 0, 0], speed: [0, 0, 0] },
-    D: { horiz: [0, 4, 9], alt: [0, -2, -5], head: [0, 0.05, 0.1], speed: [0, 0.1, 0.2] },
+    A: { horiz: [0, 5, 12], alt: [0, -1, -3], head: [0, 0.01, 0.02], speed: [0, 0.1, 0.2], fpa: [0, 0.02, 0.05] },
+    C: { horiz: [0, 0.001, 0.002], alt: [0, 0, 0], head: [0, 0, 0], speed: [0, 0, 0], fpa: [0, 0, 0] },
+    D: { horiz: [0, 4, 9], alt: [0, -2, -5], head: [0, 0.05, 0.1], speed: [0, 0.1, 0.2], fpa: [0, -0.01, -0.03] },
   },
   final: {
-    A: { horiz: 12, alt: -3, head: 0.02, speed: 0.2 },
-    C: { horiz: 0.002, alt: 0, head: 0, speed: 0 },
-    D: { horiz: 9, alt: -5, head: 0.1, speed: 0.2 },
+    A: { horiz: 12, alt: -3, head: 0.02, speed: 0.2, fpa: 0.05 },
+    C: { horiz: 0.002, alt: 0, head: 0, speed: 0, fpa: 0 },
+    D: { horiz: 9, alt: -5, head: 0.1, speed: 0.2, fpa: -0.03 },
   },
 };
 
@@ -53,12 +53,13 @@ describe("DynamicsComparisonCharts", () => {
     delete (window as { innerHeight?: number }).innerHeight;
   });
 
-  it("renders the four deviation charts and a final-value table", () => {
+  it("renders the five deviation charts and a final-value table", () => {
     renderCharts();
     expect(screen.getByText("Horizontal error")).toBeTruthy();
     expect(screen.getByText("Altitude error")).toBeTruthy();
     expect(screen.getByText("Heading error")).toBeTruthy();
     expect(screen.getByText("Speed error")).toBeTruthy();
+    expect(screen.getByText("Flight path angle error")).toBeTruthy();
 
     // final table has a row per compared system (A/C/D), not the reference B
     const table = screen.getByRole("table");
@@ -101,8 +102,8 @@ describe("DynamicsComparisonCharts", () => {
     );
     const hiddenPaths = baseElement.querySelectorAll(".dyncmp-chart svg path").length;
 
-    // 4 charts × 1 line removed = 4 fewer paths
-    expect(fullPaths - hiddenPaths).toBe(4);
+    // 5 charts × 1 line removed = 5 fewer paths
+    expect(fullPaths - hiddenPaths).toBe(5);
   });
 
   it("calls onClose from the Close button", async () => {

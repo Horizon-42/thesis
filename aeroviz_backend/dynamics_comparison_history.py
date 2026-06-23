@@ -30,7 +30,7 @@ from aeroviz_backend import paths
 HISTORY_DIR = paths.REPO_ROOT / "dynamics_comparison_history"
 
 COMPARED_KEYS = ("A", "C", "D")
-_ERROR_FIELDS = ("horiz", "alt", "head", "speed")
+_ERROR_FIELDS = ("horiz", "alt", "head", "speed", "fpa")
 _AVERAGE_GRID_POINTS = 120
 
 # Writes use unique filenames so the threading HTTP server never collides; the
@@ -88,9 +88,12 @@ def average_history() -> dict[str, Any] | None:
             for record in usable:
                 chart = record["chart"]
                 x = chart["distanceKm"]
-                y = chart["series"][key][field]
+                # Records written before a field existed (e.g. "fpa") simply
+                # contribute zeros for it — the only sensible value for a metric
+                # that run never recorded.
+                y = chart["series"][key].get(field, [0.0] * len(x))
                 stacked += np.interp(grid, x, y)
-                final_sum += chart["final"][key][field]
+                final_sum += chart["final"][key].get(field, 0.0)
             series[key][field] = [round(float(v), 6) for v in (stacked / count)]
             final[key][field] = round(final_sum / count, 6)
 

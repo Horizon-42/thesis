@@ -49,14 +49,29 @@ export interface DynamicsComparisonErrorSeries {
   alt: number[];
   head: number[];
   speed: number[];
+  /** Flight-path-angle (gamma) error, degrees (signed). */
+  fpa: number[];
 }
+
+/** A single system's scalar error vs the reference B at one instant. */
+export interface DynamicsComparisonDelta {
+  horiz: number;
+  alt: number;
+  head: number;
+  speed: number;
+  /** Flight-path-angle (gamma) error, degrees (signed). */
+  fpa: number;
+}
+
+/** Per-compared-system deltas (A/C/D) at one instant; B is the zero reference. */
+export type DynamicsComparisonDeltas = Record<string, DynamicsComparisonDelta>;
 
 export interface DynamicsComparisonChart {
   distanceKm: number[];
   timeS: number[];
   /** Keyed by compared system (A/C/D); B is the zero reference and is omitted. */
   series: Record<string, DynamicsComparisonErrorSeries>;
-  final: Record<string, { horiz: number; alt: number; head: number; speed: number }>;
+  final: Record<string, DynamicsComparisonDelta>;
 }
 
 export interface DynamicsComparisonPlayback {
@@ -253,7 +268,7 @@ function parseChart(value: unknown): DynamicsComparisonChart {
   for (const [key, raw] of Object.entries(value.series)) {
     series[key] = parseErrorSeries(raw);
   }
-  const final: Record<string, { horiz: number; alt: number; head: number; speed: number }> = {};
+  const final: DynamicsComparisonDeltas = {};
   for (const [key, raw] of Object.entries(value.final)) {
     if (!isRecord(raw)) {
       throw new Error("AeroViz backend dynamics-comparison final has an invalid entry");
@@ -263,6 +278,7 @@ function parseChart(value: unknown): DynamicsComparisonChart {
       alt: readNumber(raw, "alt"),
       head: readNumber(raw, "head"),
       speed: readNumber(raw, "speed"),
+      fpa: readNumber(raw, "fpa"),
     };
   }
   return {
@@ -282,5 +298,56 @@ function parseErrorSeries(value: unknown): DynamicsComparisonErrorSeries {
     alt: readNumberArray(value, "alt"),
     head: readNumberArray(value, "head"),
     speed: readNumberArray(value, "speed"),
+    fpa: readNumberArray(value, "fpa"),
   };
+}
+
+/**
+ * Sample every compared system's error (vs the reference B) at ``elapsedS`` by
+ * linearly interpolating the chart's per-sample series over its ascending time
+ * grid. Used to drive the Live-State readout during a Compare playback, so each
+ * state row can show B's value plus A/C/D's live deviation. Clamps at both ends;
+ * returns null only when the chart has no samples.
+ */
+export function interpolateComparisonDeltas(
+  chart: DynamicsComparisonChart,
+  elapsedS: number,
+): DynamicsComparisonDeltas | null {
+  const times = chart.timeS;
+  if (times.length === 0) return null;
+
+  // Locate the bracketing interval [low, high] and the blend fraction f.
+  let low: number;
+  let high: number;
+  let f: number;
+  if (elapsedS <= times[0]) {
+    low = high = 0;
+    f = 0;
+  } else if (elapsedS >= times[times.length - 1]) {
+    low = high = times.length - 1;
+    f = 0;
+  } else {
+    low = 0;
+    high = times.length - 1;
+    while (high - low > 1) {
+      const mid = (low + high) >> 1;
+      if (times[mid] <= elapsedS) low = mid;
+      else high = mid;
+    }
+    const span = times[high] - times[low];
+    f = span > 1e-9 ? (elapsedS - times[low]) / span : 0;
+  }
+
+  const lerp = (values: number[]) => values[low] + (values[high] - values[low]) * f;
+  const deltas: DynamicsComparisonDeltas = {};
+  for (const [key, series] of Object.entries(chart.series)) {
+    deltas[key] = {
+      horiz: lerp(series.horiz),
+      alt: lerp(series.alt),
+      head: lerp(series.head),
+      speed: lerp(series.speed),
+      fpa: lerp(series.fpa),
+    };
+  }
+  return deltas;
 }

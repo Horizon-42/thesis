@@ -113,6 +113,16 @@ The project serves dual purposes: thesis visualization/validation, and reusable 
 
 ## Changelog
 
+### 2026-06-23 — Dynamics Comparison: Live State shows B + colored A/C/D deviations
+
+The Compare-mode Live-State readout still shows the **reference B** state as the main value of each row, and now appends each other system's **live error vs B** in that system's colour (A warm / C cyan / D yellow), so the readout reads the same comparison the 2×2 charts plot — just at the current instant.
+
+- **Frontend only — reuses the existing `chart` payload (no backend change).** `interpolateComparisonDeltas(chart, elapsedS)` (`dynamicsComparisonClient.ts`) linearly interpolates each compared system's per-sample error series (`horiz`/`alt`/`head`/`speed`) onto the current clock time (binary-search + clamp, mirroring `sampleTrajectoryAt`). New `DynamicsComparisonDelta`/`DynamicsComparisonDeltas` types (the `chart.final` map now reuses `DynamicsComparisonDelta`).
+- `useDynamicsComparisonPlayback` gains `chart` + `onDeltas`; the same throttled tick that samples B now also reports the interpolated A/C/D deltas (null on cleanup). `PilotPanel` holds `comparisonDeltas` state and passes it (+ `comparisonResult.systems` for colours) to `PilotRealtimeStatePanel` in Compare mode.
+- `PilotRealtimeStatePanel` decorates **Altitude** (signed), **Speed** (signed), **Heading** (magnitude) and **Flight Path Angle / gamma** (signed) with a colored per-system chip strip (`ComparisonDeltaStrip`), and adds a compare-only **Horiz Err (vs B)** row (B = `0 m`, A/C/D magnitudes) — the study's headline metric. B never gets a chip (it is the zero reference). New `.pilot-realtime-deltas`/`.pilot-realtime-delta` CSS; `formatSignedDelta` refactored onto a `formatSignedCompact` helper.
+- **`fpa` (flight-path-angle / gamma) is now a tracked error metric end-to-end.** `error_series` (`dynamics_comparison.py`) emits a signed `fpa = degrees(gamma_k − gamma_B)` (state index 5); the backend + history `_ERROR_FIELDS` include it (history averaging is robust to legacy records lacking `fpa` → contributes zeros). Client `DynamicsComparisonErrorSeries`/`DynamicsComparisonDelta` + parsing + interpolation carry `fpa`; `DynamicsComparisonCharts` gains a 5th **Flight path angle error** plot and an **FPA (°)** final-table column. (The 30 km study computes its own local series, so it is unaffected.)
+- Tests: `interpolateComparisonDeltas` (interpolate/clamp/keys/empty) + `PilotRealtimeStatePanel` compare-mode rendering (B main value kept, colored alt/speed/heading/fpa deltas, horiz row, B has no chip) + charts now assert 5 plots; backend field-set tests include `fpa`. **279 frontend + 48 backend tests + tsc + vite build pass.**
+
 ### 2026-06-23 — Dynamics Comparison: reuse the live state readout (reference B)
 
 The trajectory-play `PilotRealtimeStatePanel` (Live State) now appears during a Compare playback, showing the **reference B** trajectory's state.

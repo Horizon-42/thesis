@@ -84,7 +84,7 @@ class TestDynamicsComparisonBackend(_TempHistory):
         n = len(chart["distanceKm"])
         self.assertEqual(len(chart["timeS"]), n)
         for key in ("A", "C", "D"):
-            for field in ("horiz", "alt", "head", "speed"):
+            for field in ("horiz", "alt", "head", "speed", "fpa"):
                 self.assertEqual(len(chart["series"][key][field]), n)
         # distance grows monotonically along the reference
         self.assertTrue(
@@ -138,7 +138,7 @@ class TestDynamicsComparisonHistory(_TempHistory):
         n = len(chart["distanceKm"])
         self.assertGreater(n, 1)
         for key in ("A", "C", "D"):
-            for field in ("horiz", "alt", "head", "speed"):
+            for field in ("horiz", "alt", "head", "speed", "fpa"):
                 self.assertEqual(len(chart["series"][key][field]), n)
         # the common grid spans only as far as the shorter-range run (every run
         # covers it), and starts at 0

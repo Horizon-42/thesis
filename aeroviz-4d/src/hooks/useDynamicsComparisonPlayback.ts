@@ -19,6 +19,11 @@ import { useApp } from "../context/AppContext";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import { sampleTrajectoryAt } from "./useOptimizedTrajectoryPlayback";
 import type { TrajectorySample } from "../pilot/trajectoryOptimizationClient";
+import {
+  interpolateComparisonDeltas,
+  type DynamicsComparisonChart,
+  type DynamicsComparisonDeltas,
+} from "../pilot/dynamicsComparisonClient";
 
 const DATASOURCE_NAME = "dynamics-comparison";
 const ENTITY_PREFIX = "dyncmp-";
@@ -45,6 +50,10 @@ interface UseDynamicsComparisonPlaybackParams {
   samples: TrajectorySample[];
   /** Receives the reference-B state at the current clock time (null when idle). */
   onSample: (sample: TrajectorySample | null) => void;
+  /** Error series (A/C/D vs B) used to overlay live deviations on the readout. */
+  chart: DynamicsComparisonChart | null;
+  /** Receives the A/C/D deviations at the current clock time (null when idle). */
+  onDeltas: (deltas: DynamicsComparisonDeltas | null) => void;
 }
 
 interface UseDynamicsComparisonPlaybackResult {
@@ -59,6 +68,8 @@ export function useDynamicsComparisonPlayback({
   follow,
   samples,
   onSample,
+  chart,
+  onDeltas,
 }: UseDynamicsComparisonPlaybackParams): UseDynamicsComparisonPlaybackResult {
   const { viewer, setPlaybackSpeed, autoReplay } = useApp();
   const dsRef = useRef<Cesium.CzmlDataSource | null>(null);
@@ -72,6 +83,10 @@ export function useDynamicsComparisonPlayback({
   samplesRef.current = samples;
   const onSampleRef = useRef(onSample);
   onSampleRef.current = onSample;
+  const chartRef = useRef(chart);
+  chartRef.current = chart;
+  const onDeltasRef = useRef(onDeltas);
+  onDeltasRef.current = onDeltas;
 
   // Join so the visibility effect re-runs only when the hidden set changes.
   const hiddenKey = [...hiddenKeys].sort().join(",");
@@ -138,6 +153,7 @@ export function useDynamicsComparisonPlayback({
       dsRef.current = null;
       startTimeRef.current = null;
       onSampleRef.current(null);
+      onDeltasRef.current(null);
       if (dataSource && isCesiumViewerUsable(viewer)) {
         if (viewer.trackedEntity && dataSource.entities.contains(viewer.trackedEntity)) {
           viewer.trackedEntity = undefined;
@@ -190,7 +206,10 @@ export function useDynamicsComparisonPlayback({
     viewer.trackedEntity = referenceFirst ?? undefined;
   }, [viewer, status, follow, hiddenKey]);
 
-  // ── Effect 5: sample the reference B on each clock tick for the readout ───────
+  // ── Effect 5: sample B + the A/C/D deviations on each clock tick ──────────────
+  // The readout shows B's state (from the dense samples) and overlays each other
+  // system's live error (interpolated from the chart's error series at the same
+  // clock time), so both come from one throttled tick.
   useEffect(() => {
     if (!isCesiumViewerUsable(viewer) || status !== "loaded") return;
 
@@ -203,6 +222,8 @@ export function useDynamicsComparisonPlayback({
       lastEmitMs = now;
       const elapsedS = Cesium.JulianDate.secondsDifference(viewer.clock.currentTime, start);
       onSampleRef.current(sampleTrajectoryAt(samplesRef.current, elapsedS));
+      const chartNow = chartRef.current;
+      onDeltasRef.current(chartNow ? interpolateComparisonDeltas(chartNow, elapsedS) : null);
     };
 
     emit();

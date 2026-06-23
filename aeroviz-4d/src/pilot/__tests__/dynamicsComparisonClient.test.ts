@@ -3,7 +3,9 @@ import {
   averageDynamicsComparisonHistory,
   clearDynamicsComparisonHistory,
   fetchDynamicsComparisonHistoryCount,
+  interpolateComparisonDeltas,
   runDynamicsComparison,
+  type DynamicsComparisonChart,
   type DynamicsComparisonRequest,
 } from "../dynamicsComparisonClient";
 
@@ -71,14 +73,14 @@ function responsePayload() {
       distanceKm: [0, 0.5, 1.0],
       timeS: [0, 3.8, 7.6],
       series: {
-        A: { horiz: [0, 5, 12], alt: [0, -1, -3], head: [0, 0.01, 0.02], speed: [0, 0.1, 0.2] },
-        C: { horiz: [0, 0.001, 0.002], alt: [0, 0, 0], head: [0, 0, 0], speed: [0, 0, 0] },
-        D: { horiz: [0, 4, 9], alt: [0, -2, -5], head: [0, 0.05, 0.1], speed: [0, 0.1, 0.2] },
+        A: { horiz: [0, 5, 12], alt: [0, -1, -3], head: [0, 0.01, 0.02], speed: [0, 0.1, 0.2], fpa: [0, 0.02, 0.05] },
+        C: { horiz: [0, 0.001, 0.002], alt: [0, 0, 0], head: [0, 0, 0], speed: [0, 0, 0], fpa: [0, 0, 0] },
+        D: { horiz: [0, 4, 9], alt: [0, -2, -5], head: [0, 0.05, 0.1], speed: [0, 0.1, 0.2], fpa: [0, -0.01, -0.03] },
       },
       final: {
-        A: { horiz: 12, alt: -3, head: 0.02, speed: 0.2 },
-        C: { horiz: 0.002, alt: 0, head: 0, speed: 0 },
-        D: { horiz: 9, alt: -5, head: 0.1, speed: 0.2 },
+        A: { horiz: 12, alt: -3, head: 0.02, speed: 0.2, fpa: 0.05 },
+        C: { horiz: 0.002, alt: 0, head: 0, speed: 0, fpa: 0 },
+        D: { horiz: 9, alt: -5, head: 0.1, speed: 0.2, fpa: -0.03 },
       },
     },
   };
@@ -197,5 +199,47 @@ describe("dynamics comparison history endpoints", () => {
   it("clears history and returns the new count", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ ok: true, historyCount: 0 })));
     await expect(clearDynamicsComparisonHistory()).resolves.toBe(0);
+  });
+});
+
+describe("interpolateComparisonDeltas", () => {
+  const chart: DynamicsComparisonChart = {
+    distanceKm: [0, 0.5, 1.0],
+    timeS: [0, 4, 8],
+    series: {
+      A: { horiz: [0, 5, 12], alt: [0, -1, -3], head: [0, 0.01, 0.02], speed: [0, 0.1, 0.2], fpa: [0, 0.04, 0.08] },
+      C: { horiz: [0, 0.001, 0.002], alt: [0, 0, 0], head: [0, 0, 0], speed: [0, 0, 0], fpa: [0, 0, 0] },
+      D: { horiz: [0, 4, 9], alt: [0, -2, -5], head: [0, 0.05, 0.1], speed: [0, 0.1, 0.2], fpa: [0, -0.02, -0.04] },
+    },
+    final: {
+      A: { horiz: 12, alt: -3, head: 0.02, speed: 0.2, fpa: 0.08 },
+      C: { horiz: 0.002, alt: 0, head: 0, speed: 0, fpa: 0 },
+      D: { horiz: 9, alt: -5, head: 0.1, speed: 0.2, fpa: -0.04 },
+    },
+  };
+
+  it("returns the compared keys (A/C/D) and skips the reference B", () => {
+    const deltas = interpolateComparisonDeltas(chart, 4);
+    expect(Object.keys(deltas ?? {})).toEqual(["A", "C", "D"]);
+  });
+
+  it("linearly interpolates each field between samples", () => {
+    // Halfway between t=0 and t=4 → midpoint of the first segment.
+    const deltas = interpolateComparisonDeltas(chart, 2);
+    expect(deltas?.A.horiz).toBeCloseTo(2.5, 6);
+    expect(deltas?.A.alt).toBeCloseTo(-0.5, 6);
+    expect(deltas?.A.fpa).toBeCloseTo(0.02, 6);
+    expect(deltas?.D.head).toBeCloseTo(0.025, 6);
+  });
+
+  it("clamps below the first and beyond the last sample", () => {
+    expect(interpolateComparisonDeltas(chart, -10)?.A.horiz).toBe(0);
+    expect(interpolateComparisonDeltas(chart, 999)?.A.horiz).toBe(12);
+  });
+
+  it("returns null when the chart has no samples", () => {
+    expect(
+      interpolateComparisonDeltas({ ...chart, timeS: [], series: {}, final: {} }, 1),
+    ).toBeNull();
   });
 });

@@ -68,7 +68,7 @@ MAX_SAMPLES = 220
 # minutes to watch.
 _TARGET_PLAYBACK_S = 40.0
 
-_ERROR_FIELDS = ("horiz", "alt", "head", "speed")
+_ERROR_FIELDS = ("horiz", "alt", "head", "speed", "fpa")
 
 # Per-system presentation: colour (rgba), label and whether it is the reference.
 # Colours are distinct and read intuitively — A (worst drift) warm, B (truth)

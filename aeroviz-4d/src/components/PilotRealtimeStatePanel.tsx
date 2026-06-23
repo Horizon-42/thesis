@@ -1,6 +1,12 @@
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { PilotSimulationMode, PilotSnapshot } from "../pilot/pilotClient";
+import type {
+  DynamicsComparisonDelta,
+  DynamicsComparisonDeltas,
+  DynamicsComparisonSystem,
+} from "../pilot/dynamicsComparisonClient";
 import { formatCoord } from "./PilotInitialStateOverlay";
 
 interface PilotRealtimeStatePanelProps {
@@ -9,6 +15,14 @@ interface PilotRealtimeStatePanelProps {
   showControlReadout?: boolean;
   simulationMode?: PilotSimulationMode;
   targetState?: Pick<PilotSnapshot["state"], "lat" | "lon" | "altM"> | null;
+  /**
+   * Compare mode: A/C/D deviations vs the reference B at the current clock time.
+   * When set (with ``comparisonSystems``), the main rows still show B's state and
+   * each other system's error is appended in its own colour.
+   */
+  comparisonDeltas?: DynamicsComparisonDeltas | null;
+  /** Compare mode: the systems (for the per-system delta colours/labels). */
+  comparisonSystems?: DynamicsComparisonSystem[] | null;
 }
 
 export default function PilotRealtimeStatePanel({
@@ -17,6 +31,8 @@ export default function PilotRealtimeStatePanel({
   showControlReadout = false,
   simulationMode,
   targetState = null,
+  comparisonDeltas = null,
+  comparisonSystems = null,
 }: PilotRealtimeStatePanelProps) {
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
 
@@ -33,6 +49,24 @@ export default function PilotRealtimeStatePanel({
     snapshot.control.loadFactor !== undefined;
   const loadFactor = snapshot.control.loadFactor ?? 0;
 
+  // In Compare mode, build the colored A/C/D deviation strip for a given error
+  // field; returns null outside Compare so the rows render exactly as before.
+  const showDeltas = comparisonDeltas !== null && comparisonSystems !== null;
+  const compareExtra = (
+    field: keyof DynamicsComparisonDelta,
+    fractionDigits: number,
+    signed: boolean,
+  ): ReactNode =>
+    comparisonDeltas !== null && comparisonSystems !== null ? (
+      <ComparisonDeltaStrip
+        systems={comparisonSystems}
+        deltas={comparisonDeltas}
+        field={field}
+        fractionDigits={fractionDigits}
+        signed={signed}
+      />
+    ) : null;
+
   return createPortal(
     <aside className="pilot-realtime-panel" aria-label="Realtime aircraft state">
       <span className="pilot-realtime-title">Live State</span>
@@ -40,7 +74,18 @@ export default function PilotRealtimeStatePanel({
         <RealtimeReadout label="Time" value={`${snapshot.elapsedS.toFixed(1)} s`} />
         <RealtimeReadout label="Latitude" value={formatCoord(snapshot.state.lat, "N", "S")} />
         <RealtimeReadout label="Longitude" value={formatCoord(snapshot.state.lon, "E", "W")} />
-        <RealtimeReadout label="Altitude" value={`${snapshot.state.altM.toFixed(0)} m`} />
+        <RealtimeReadout
+          label="Altitude"
+          value={`${snapshot.state.altM.toFixed(0)} m`}
+          extra={compareExtra("alt", 1, true)}
+        />
+        {showDeltas ? (
+          <RealtimeReadout
+            label="Horiz Err (vs B)"
+            value="0 m"
+            extra={compareExtra("horiz", 1, false)}
+          />
+        ) : null}
         {targetState ? (
           <>
             <RealtimeReadout
@@ -57,14 +102,20 @@ export default function PilotRealtimeStatePanel({
             />
           </>
         ) : null}
-        <RealtimeReadout label="Speed" value={`${snapshot.state.speedMps.toFixed(1)} m/s`} />
+        <RealtimeReadout
+          label="Speed"
+          value={`${snapshot.state.speedMps.toFixed(1)} m/s`}
+          extra={compareExtra("speed", 1, true)}
+        />
         <RealtimeReadout
           label="Heading Angle (psi)"
           value={`${snapshot.state.headingDeg.toFixed(1)} deg`}
+          extra={compareExtra("head", 2, false)}
         />
         <RealtimeReadout
           label="Flight Path Angle (gamma)"
           value={`${snapshot.state.flightPathDeg.toFixed(2)} deg`}
+          extra={compareExtra("fpa", 2, true)}
         />
         {showControlReadout ? (
           <RealtimeReadout
@@ -105,25 +156,74 @@ export default function PilotRealtimeStatePanel({
 }
 
 function formatSignedDelta(value: number, fractionDigits: number, unit: string): string {
+  return `${formatSignedCompact(value, fractionDigits)} ${unit}`;
+}
+
+/** Signed value with a "+" on positives and small magnitudes collapsed to 0
+ * (no trailing unit), e.g. "+5.2", "-2.1", "0.0". */
+function formatSignedCompact(value: number, fractionDigits: number): string {
   const zeroThreshold = 0.5 * 10 ** -fractionDigits;
   const normalizedValue = Math.abs(value) < zeroThreshold ? 0 : value;
   const prefix = normalizedValue > 0 ? "+" : "";
-  return `${prefix}${normalizedValue.toFixed(fractionDigits)} ${unit}`;
+  return `${prefix}${normalizedValue.toFixed(fractionDigits)}`;
 }
 
 function RealtimeReadout({
   label,
   value,
   wide = false,
+  extra = null,
 }: {
   label: string;
   value: string;
   wide?: boolean;
+  extra?: ReactNode;
 }) {
   return (
     <div className={wide ? "pilot-realtime-readout pilot-realtime-readout-wide" : "pilot-realtime-readout"}>
       <dt>{label}</dt>
       <dd>{value}</dd>
+      {extra}
+    </div>
+  );
+}
+
+/** Compare mode: one colored chip per compared system (A/C/D) showing its error
+ * vs the reference B for a single field, appended under the B value. */
+function ComparisonDeltaStrip({
+  systems,
+  deltas,
+  field,
+  fractionDigits,
+  signed,
+}: {
+  systems: DynamicsComparisonSystem[];
+  deltas: DynamicsComparisonDeltas;
+  field: keyof DynamicsComparisonDelta;
+  fractionDigits: number;
+  signed: boolean;
+}) {
+  return (
+    <div className="pilot-realtime-deltas">
+      {systems.map((system) => {
+        const delta = deltas[system.key];
+        if (delta === undefined) return null; // B (the reference) has no delta
+        const [r, g, b] = system.colorRgba;
+        const value = delta[field];
+        return (
+          <span
+            key={system.key}
+            className="pilot-realtime-delta"
+            style={{ color: `rgb(${r}, ${g}, ${b})` }}
+            title={system.label}
+          >
+            {system.key}{" "}
+            {signed
+              ? formatSignedCompact(value, fractionDigits)
+              : Math.abs(value).toFixed(fractionDigits)}
+          </span>
+        );
+      })}
     </div>
   );
 }
