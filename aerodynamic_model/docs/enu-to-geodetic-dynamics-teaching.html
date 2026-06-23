@@ -378,6 +378,7 @@
         <li><a href="#transport">变换 B：输运率<span class="en" lang="en">Transport Rate</span></a></li>
         <li><a href="#geodetic">终点：大地 RHS<span class="en" lang="en">Geodetic RHS</span></a></li>
         <li><a href="#errors">三者等价与误差<span class="en" lang="en">Equivalence</span></a></li>
+        <li><a href="#tilt">水平 vs 高度<span class="en" lang="en">Horiz vs Alt</span></a></li>
         <li><a href="#checklist">检查清单<span class="en" lang="en">Checklist</span></a></li>
       </ul>
     </nav>
@@ -608,17 +609,23 @@ R_M = WGS84_A * (1.0 - WGS84_E2) / denom**1.5  <span class="tok-com"># meridiona
         </div>
 
         <figure class="viz">
-          <div id="viz-radii" class="plot" style="height:480px"></div>
+          <div id="viz-radii" class="plot" style="height:520px"></div>
           <div class="controls">
             <span><label for="rad-lat">纬度 φ / latitude</label></span>
             <input id="rad-lat" type="range" min="0" max="89" value="45" step="1">
-            <span class="chip"><span class="dot" style="background:#3d58a8"></span>R<sub>N</sub> 卯酉圈 prime-vertical</span>
-            <span class="chip"><span class="dot" style="background:#b65b13"></span>R<sub>M</sub> 子午圈 meridional</span>
+            <span><label for="rad-show">显示 / show</label></span>
+            <select id="rad-show" style="font-size:13px;padding:3px 6px;border-radius:6px;border:1px solid var(--line)">
+              <option value="both">两者 both</option>
+              <option value="M">只看 R_M (子午圈)</option>
+              <option value="N">只看 R_N (卯酉圈)</option>
+            </select>
+            <span class="chip"><span class="dot" style="background:#3d58a8"></span>R<sub>N</sub> 卯酉圈 prime-vertical (东西 E-W)</span>
+            <span class="chip"><span class="dot" style="background:#b65b13"></span>R<sub>M</sub> 子午圈 meridional (南北 N-S)</span>
           </div>
           <div class="readout" id="rad-out"></div>
           <figcaption>
-            图 2 · 子午剖面（扁率已夸张以便看清两圆）：点 P 在纬度 \(\phi\)。蓝线是法线，延伸到自转轴的长度即 \(R_N\)；橙色密切圆半径为 \(R_M\)。右侧读数为真实 WGS 84 数值（千米）。
-            <span class="en" lang="en">Figure 2 · Meridian section (flattening exaggerated so both circles are visible): point P at latitude \(\phi\). The blue line is the normal; its length to the spin axis is \(R_N\); the orange osculating circle has radius \(R_M\). The readouts give the real WGS 84 values in kilometres.</span>
+            图 3-D · 同一点 P 上的两个曲率半径，画成两条互相垂直的<strong>法截面密切圆</strong>（扁率已强烈夸张以便区分）：橙圆在<strong>子午（南北）平面</strong>里，半径 \(R_M\)，描述往南北走时地表多弯；蓝圆在<strong>卯酉（东西）平面</strong>里，半径 \(R_N\)，它的圆心正好落在自转轴上——所以 \(R_N\) 也等于“法线从 P 延伸到自转轴的长度”。两圆都在 P 处与地表相切，但弯曲程度不同：总有 \(R_N\ge R_M\)。可用右上下拉框单独看其中一个。读数为真实 WGS 84 值。
+            <span class="en" lang="en">Figure 3-D · The two radii of curvature at one point P, drawn as two mutually perpendicular <strong>normal-section osculating circles</strong> (flattening strongly exaggerated to tell them apart): the orange circle lies in the <strong>meridian (north–south) plane</strong> with radius \(R_M\) — how sharply the surface bends going north–south; the blue circle lies in the <strong>prime-vertical (east–west) plane</strong> with radius \(R_N\), and its centre sits exactly on the spin axis — so \(R_N\) also equals the “length of the normal from P to the spin axis.” Both circles are tangent to the surface at P but bend differently: always \(R_N\ge R_M\). Use the dropdown to isolate one. Readouts are real WGS 84 values.</span>
           </figcaption>
         </figure>
       </section>
@@ -939,9 +946,86 @@ gamma_dot = g * (n * <span class="tok-fn">cos</span>(mu) - cos_g) / V
         </div>
       </section>
 
-      <!-- 11. CHECKLIST -->
+      <!-- 11. WHY HORIZONTAL > ALTITUDE -->
+      <section id="tilt">
+        <h2>11. 为什么水平误差反而比高度误差大<span class="en" lang="en">Why the Horizontal Error Is Larger Than the Altitude Error</span></h2>
+        <p class="section-intro">
+          直觉的陷阱：既然曲率表现为“切平面在竖直方向脱离椭球 \(\epsilon\approx L^2/2R\)”，那误差不该出现在<strong>高度</strong>上吗？但实测里平直 ENU（系统 A）水平差 ≈ 335 m、高度只差 ≈ 5.6 m。原因是：曲率的本质不是“竖直缺口”，而是一个<strong>倾角</strong>，而倾角先伤水平。
+          <span class="en" lang="en">The intuitive trap: since curvature shows up as “the tangent plane departs vertically by \(\epsilon\approx L^2/2R\),” shouldn’t the error land in <strong>altitude</strong>? Yet in practice flat ENU (system A) is off by ≈ 335 m horizontally and only ≈ 5.6 m in altitude. The reason: curvature is fundamentally not a “vertical gap” but a <strong>tilt</strong>, and a tilt hurts the horizontal first.</span>
+        </p>
+
+        <div class="card">
+          <h3>曲率 = 倾角 \(\theta=L/R\)；正弦是一阶，余弦缺口是二阶<span class="en" lang="en">Curvature = a Tilt \(\theta=L/R\); the Sine Is First Order, the Cosine Defect Is Second Order</span></h3>
+          <p>
+            在基线 \(L\) 上，两端“当地竖直方向”之间差一个倾角 \(\theta=L/R\)（30 km → \(\theta\approx0.27^\circ\)）。把固定切平面里建模错的重力方向，分解到“真实当地”的水平与竖直两个通道：
+            <span class="en" lang="en">Over a baseline \(L\), the local verticals at the two ends differ by a tilt \(\theta=L/R\) (30 km → \(\theta\approx0.27^\circ\)). Decompose the mis-pointed modelled gravity of the fixed plane onto the true local horizontal and vertical channels:</span>
+          </p>
+          <div class="formula">
+            <span class="formula-line">\[
+\theta=\frac{L}{R}
+\]</span>
+            <span class="formula-line">\[
+a_{\text{horiz}}\approx g\sin\theta\approx g\,\theta
+\qquad(\textbf{一阶 / first order})
+\]</span>
+            <span class="formula-line">\[
+a_{\text{vert}}\approx g\,(1-\cos\theta)\approx \tfrac12 g\,\theta^2
+\qquad(\textbf{二阶 / second order})
+\]</span>
+            <span class="formula-line">\[
+\frac{a_{\text{horiz}}}{a_{\text{vert}}}=\frac{\sin\theta}{1-\cos\theta}\approx\frac{2}{\theta}
+\;\approx\;425\;(\,L=30\,\text{km}\,)
+\]</span>
+          </div>
+          <p>
+            那个著名的竖直缺口 \(\epsilon_U\approx L^2/2R=\tfrac12 R\theta^2\) 本身就是这个<strong>二阶</strong>余弦项。一阶的正弦项把整 \(g\) 泄漏进水平，比它大 \(\sim 2/\theta\) 倍。
+            <span class="en" lang="en">The famous vertical gap \(\epsilon_U\approx L^2/2R=\tfrac12 R\theta^2\) <strong>is</strong> this second-order cosine term. The first-order sine term leaks the full \(g\) into the horizontal, larger by \(\sim 2/\theta\).</span>
+          </p>
+        </div>
+
+        <div class="grid-2">
+          <article class="card">
+            <h3>水平：一阶力 + 没有恢复 → 双重积分跑飞<span class="en" lang="en">Horizontal: First-Order Force + No Restoring → Double-Integrates and Runs Away</span></h3>
+            <p>
+              倾角让重力在水平方向多出 \(\approx g\theta\approx0.046\,\mathrm{m/s^2}\) 的力。关键是<strong>水平位置没有任何参照或恢复力</strong>，这点小力被时间<strong>双重积分</strong>，越积越大——随航程超二次增长（约 \(\sim L^3\)）。这正是惯性导航里的经典现象：一个微小姿态倾斜 → 水平位置误差不断增长。
+              <span class="en" lang="en">The tilt adds a horizontal force \(\approx g\theta\approx0.046\,\mathrm{m/s^2}\). Crucially, <strong>horizontal position has no reference and no restoring force</strong>, so this small force is <strong>double-integrated</strong> over time and keeps growing — super-quadratically with range (\(\sim L^3\)). This is exactly the classic inertial-navigation effect: a tiny attitude tilt → an ever-growing horizontal position error.</span>
+            </p>
+          </article>
+          <article class="card">
+            <h3>高度：二阶 + 被“钉住”→ 很小<span class="en" lang="en">Altitude: Second Order + “Pinned” → Stays Small</span></h3>
+            <p>
+              竖直方向只吃二阶项 \(\tfrac12 g\theta^2\)，而且高度被<strong>钉住</strong>：升力≈重力维持竖直平衡，边界处的 geodetic↔ENU 又是<strong>精确旋转</strong>。所以高度误差只到二阶残差（系统 A 仅 5.6 m）。竖直通道“硬”（重力定标），水平通道“软”（无参照）——倾斜永远先伤水平。
+              <span class="en" lang="en">The vertical channel only takes the second-order term \(\tfrac12 g\theta^2\), and altitude is <strong>pinned</strong>: lift≈weight holds the vertical balance, and the boundary geodetic↔ENU conversion is an <strong>exact rotation</strong>. So the altitude error is only a second-order residual (just 5.6 m for system A). The vertical channel is “stiff” (gravity-referenced), the horizontal “soft” (no reference) — a tilt always hurts the horizontal first.</span>
+            </p>
+          </article>
+        </div>
+
+        <figure class="viz">
+          <div id="viz-tilt" class="plot" style="height:460px"></div>
+          <div class="controls">
+            <span><label for="tilt-L">基线 L / baseline</label></span>
+            <input id="tilt-L" type="range" min="5" max="100" value="30" step="1">
+            <span class="chip"><span class="dot" style="background:#3d58a8"></span>S₁ 当地竖直 local vertical</span>
+            <span class="chip"><span class="dot" style="background:#b65b13"></span>S₂ 当地竖直 local vertical</span>
+            <span class="chip">夹角 θ angle</span>
+          </div>
+          <div class="readout" id="tilt-out"></div>
+          <figcaption>
+            图 5 · 三维（弧长与夹角已夸张以便看清）：相距 \(L\) 的两点 S₁、S₂，各自的“当地竖直”（指向天）方向之间张开一个角 \(\theta=L/R\)。正是这个倾角把竖直的重力 \(g\) 按 \(\sin\theta\)（一阶）泄漏进水平、按 \(1-\cos\theta\)（二阶）扰动竖直。读数用真实 \(\theta\) 给出两者大小与比值。
+            <span class="en" lang="en">Figure 5 · 3D (arc and angle exaggerated for visibility): two points S₁, S₂ a distance \(L\) apart; their “local verticals” (zenith directions) fan apart by an angle \(\theta=L/R\). This tilt is exactly what leaks vertical gravity \(g\) into the horizontal at \(\sin\theta\) (first order) and perturbs the vertical at \(1-\cos\theta\) (second order). Readouts use the real \(\theta\) to give both magnitudes and their ratio.</span>
+          </figcaption>
+        </figure>
+
+        <div class="callout">
+          <strong>曲率误差落在哪个通道，取决于你做了哪种近似。</strong>
+          纯平直 ENU（系统 A）几乎把曲率误差全甩进水平（335 m 水平 / 5.6 m 高度）。而只缺输运项的大地模型（系统 D）位置运动学是对的，缺的恰好是竖直的“曲率俯仰”修正——于是那 \(L^2/2R\approx70\) m <strong>反而</strong>显形在高度上（−69 m 高度 / 145 m 水平）。带全项的系统 C 两者都 ≈ 0。
+          <span class="en" lang="en"><strong>Which channel the curvature error lands in depends on which approximation you make.</strong> Pure flat ENU (system A) dumps almost all of it into the horizontal (335 m horiz / 5.6 m alt). The geodetic model missing only the transport terms (system D) has correct position kinematics; what it lacks is exactly the vertical “curvature pitch-up,” so the \(L^2/2R\approx70\) m <strong>does</strong> surface in altitude (−69 m alt / 145 m horiz). The full system C is ≈ 0 in both.</span>
+        </div>
+      </section>
+
+      <!-- 12. CHECKLIST -->
       <section id="checklist">
-        <h2>11. 实操检查清单与继续学习<span class="en" lang="en">Practical Checklist and Further Reading</span></h2>
+        <h2>12. 实操检查清单与继续学习<span class="en" lang="en">Practical Checklist and Further Reading</span></h2>
         <div class="grid-2">
           <article class="card">
             <h3>动手前逐项检查<span class="en" lang="en">Check Each Item Before Coding</span></h3>
@@ -1106,81 +1190,119 @@ gamma_dot = g * (n * <span class="tok-fn">cos</span>(mu) - cos_g) / V
   });
 
   // ============================================================
-  //  FIGURE 2 — radii of curvature (meridian section, 2D)
+  //  FIGURE 2 — radii of curvature as two perpendicular
+  //  normal-section osculating circles on a 3D ellipsoid
   // ============================================================
   onReady(function(){
     const div = document.getElementById('viz-radii');
     const slider = document.getElementById('rad-lat');
+    const sel = document.getElementById('rad-show');
     const out = document.getElementById('rad-out');
 
-    // self-consistent DISPLAY ellipse (flattening exaggerated for visibility)
-    const aD = 1.0, fD = 0.16, e2D = fD * (2 - fD);
+    // DISPLAY ellipsoid (flattening strongly exaggerated so R_M != R_N is visible)
+    const aD = 1.0, fD = 0.34, bD = aD * (1 - fD), e2D = fD * (2 - fD);
     function Nd(latr){ return aD / Math.sqrt(1 - e2D * Math.sin(latr) ** 2); }
     function Md(latr){ const w2 = 1 - e2D * Math.sin(latr) ** 2; return aD * (1 - e2D) / Math.pow(w2, 1.5); }
 
-    // ellipse outline (p,z) in the meridian half-plane
-    const pe = [], ze = [];
-    for (let i = 0; i <= 180; i++){
-      const t = (i / 180) * Math.PI - Math.PI/2;  // parametric, -90..90 (right half)
-      const nd = Nd(t);
-      pe.push(nd * Math.cos(t));
-      ze.push((1 - e2D) * nd * Math.sin(t));
+    // oblate spheroid surface: (aD sinθ cosφ, aD sinθ sinφ, bD cosθ)
+    function ellipsoidSurface(){
+      const nu = 26, nv = 38, x = [], y = [], z = [];
+      for (let i = 0; i <= nu; i++){
+        const th = Math.PI * i / nu, rx = [], ry = [], rz = [];
+        for (let j = 0; j <= nv; j++){
+          const ph = 2 * Math.PI * j / nv;
+          rx.push(aD * Math.sin(th) * Math.cos(ph));
+          ry.push(aD * Math.sin(th) * Math.sin(ph));
+          rz.push(bD * Math.cos(th));
+        }
+        x.push(rx); y.push(ry); z.push(rz);
+      }
+      return { type:'surface', x:x, y:y, z:z, showscale:false, opacity:0.30,
+        colorscale:[[0,'#d4eef0'],[1,'#d4eef0']], hoverinfo:'skip', lighting:{ambient:0.9} };
     }
-    const ellipseTrace = { type:'scatter', mode:'lines', x:pe, y:ze,
-      line:{color:'#9bb0c2', width:2}, hoverinfo:'skip', name:'ellipsoid' };
-    const axisZ = { type:'scatter', mode:'lines', x:[0,0], y:[-1.25,1.25],
-      line:{color:'#cdd7e0', width:1.5, dash:'dot'}, hoverinfo:'skip' };
-    const axisP = { type:'scatter', mode:'lines', x:[-0.1,1.3], y:[0,0],
-      line:{color:'#cdd7e0', width:1.5, dash:'dot'}, hoverinfo:'skip' };
+    const surf = ellipsoidSurface();
+    const spinAxis = { type:'scatter3d', mode:'lines', x:[0,0], y:[0,0], z:[-bD*1.35,bD*1.35],
+      line:{color:'#b9c6d4', width:3, dash:'dot'}, hoverinfo:'skip' };
+    // meridian outline at lon=0 (X-Z plane) for context
+    const mx = [], mz = [];
+    for (let i = 0; i <= 120; i++){
+      const t = (i/120)*2*Math.PI;
+      mx.push(aD*Math.cos(t)); mz.push(bD*Math.sin(t));
+    }
+    const meridian = { type:'scatter3d', mode:'lines', x:mx, y:mx.map(()=>0), z:mz,
+      line:{color:'#9fb2c4', width:2}, hoverinfo:'skip' };
 
-    function build(latDeg){
+    function arc(center, radius, uHat, vHat, halfDeg){
+      // arc swept ±halfDeg around the uHat direction, in the (uHat,vHat) plane
+      const x = [], y = [], z = [];
+      const n = 60;
+      for (let i = 0; i <= n; i++){
+        const a = (-halfDeg + 2*halfDeg*i/n) * D2R;
+        const c = Math.cos(a), s = Math.sin(a);
+        x.push(center[0] + radius*(c*uHat[0] + s*vHat[0]));
+        y.push(center[1] + radius*(c*uHat[1] + s*vHat[1]));
+        z.push(center[2] + radius*(c*uHat[2] + s*vHat[2]));
+      }
+      return { x, y, z };
+    }
+
+    function build(){
+      const latDeg = +slider.value, show = sel.value;
       const t = latDeg * D2R;
       const nd = Nd(t), md = Md(t);
-      const P = [nd * Math.cos(t), (1 - e2D) * nd * Math.sin(t)];
-      const nrm = [Math.cos(t), Math.sin(t)];              // outward geodetic normal in (p,z)
+      const p = nd * Math.cos(t), z = (1 - e2D) * nd * Math.sin(t);
+      const P = [p, 0, z];
+      const nHat = [Math.cos(t), 0, Math.sin(t)];          // outward normal (X-Z plane)
+      const eHat = [0, 1, 0];                               // east (out of meridian plane)
+      const tHat = [-Math.sin(t), 0, Math.cos(t)];          // north tangent (X-Z plane)
 
-      // R_N: normal foot on the spin axis  (P - Nd * normal) -> lies on p=0
-      const footN = [P[0] - nd*nrm[0], P[1] - nd*nrm[1]];
-      // R_M: osculating-circle centre along inward normal at distance Md
-      const cM = [P[0] - md*nrm[0], P[1] - md*nrm[1]];
-      const circP = [], circZ = [];
-      for (let i = 0; i <= 90; i++){
-        const a = (i/90) * 2*Math.PI;
-        circP.push(cM[0] + md*Math.cos(a));
-        circZ.push(cM[1] + md*Math.sin(a));
+      const cM = add(P, scl(nHat, -md));                    // R_M centre (off axis)
+      const cN = add(P, scl(nHat, -nd));                    // R_N centre (on spin axis)
+
+      let traces = [surf, spinAxis, meridian];
+
+      if (show === 'both' || show === 'M'){
+        const aM = arc(cM, md, nHat, tHat, 62);             // meridian-plane osculating circle
+        traces.push({ type:'scatter3d', mode:'lines', x:aM.x, y:aM.y, z:aM.z,
+          line:{color:ORANGE, width:6}, hoverinfo:'skip' });
+        traces.push({ type:'scatter3d', mode:'lines', x:[P[0],cM[0]], y:[P[1],cM[1]], z:[P[2],cM[2]],
+          line:{color:ORANGE, width:4}, hoverinfo:'skip' });
+        traces.push({ type:'scatter3d', mode:'text', x:[(P[0]+cM[0])/2], y:[0], z:[(P[2]+cM[2])/2],
+          text:['R_M'], textfont:{size:14, color:ORANGE}, hoverinfo:'skip' });
       }
+      if (show === 'both' || show === 'N'){
+        const aN = arc(cN, nd, nHat, eHat, 58);             // prime-vertical osculating circle
+        traces.push({ type:'scatter3d', mode:'lines', x:aN.x, y:aN.y, z:aN.z,
+          line:{color:INDIGO, width:6}, hoverinfo:'skip' });
+        traces.push({ type:'scatter3d', mode:'lines', x:[P[0],cN[0]], y:[P[1],cN[1]], z:[P[2],cN[2]],
+          line:{color:INDIGO, width:4}, hoverinfo:'skip' });
+        traces.push({ type:'scatter3d', mode:'text', x:[(P[0]+cN[0])/2], y:[(P[1]+cN[1])/2 + 0.04], z:[(P[2]+cN[2])/2],
+          text:['R_N'], textfont:{size:14, color:INDIGO}, hoverinfo:'skip' });
+        // mark the centre sitting on the spin axis
+        traces.push({ type:'scatter3d', mode:'markers', x:[cN[0]], y:[cN[1]], z:[cN[2]],
+          marker:{size:4, color:INDIGO}, hoverinfo:'skip' });
+      }
+      // outward normal stub + point P
+      traces = traces.concat(arrow(P, scl(nHat, 0.22), INK, 0.04));
+      traces.push({ type:'scatter3d', mode:'markers+text', x:[P[0]], y:[P[1]], z:[P[2]],
+        marker:{size:6, color:INK}, text:['  P (φ='+latDeg+'°)'], textposition:'top center',
+        textfont:{size:12, color:INK}, hoverinfo:'skip' });
 
-      const Ptrace = { type:'scatter', mode:'markers+text', x:[P[0]], y:[P[1]],
-        marker:{size:9, color:INK}, text:['P (φ='+latDeg+'°)'], textposition:'top right',
-        textfont:{size:12, color:INK}, hoverinfo:'skip' };
-      const rnLine = { type:'scatter', mode:'lines', x:[P[0],footN[0]], y:[P[1],footN[1]],
-        line:{color:INDIGO, width:3}, hoverinfo:'skip' };
-      const rnTxt = { type:'scatter', mode:'text', x:[(P[0]+footN[0])/2], y:[(P[1]+footN[1])/2],
-        text:['R_N'], textfont:{size:13, color:INDIGO}, textposition:'middle left', hoverinfo:'skip' };
-      const mCircle = { type:'scatter', mode:'lines', x:circP, y:circZ,
-        line:{color:ORANGE, width:2, dash:'dot'}, hoverinfo:'skip' };
-      const mLine = { type:'scatter', mode:'lines', x:[P[0],cM[0]], y:[P[1],cM[1]],
-        line:{color:ORANGE, width:2}, hoverinfo:'skip' };
-      const mTxt = { type:'scatter', mode:'text', x:[cM[0]], y:[cM[1]],
-        text:['R_M'], textfont:{size:13, color:ORANGE}, textposition:'bottom center', hoverinfo:'skip' };
+      Plotly.react(div, traces, Object.assign(LAYOUT(520), {
+        scene: scene3d({ camera:{ eye:{x:1.55, y:1.45, z:0.85} } })
+      }), {displayModeBar:false, responsive:true});
 
-      Plotly.react(div, [axisZ, axisP, mCircle, ellipseTrace, rnLine, mLine, Ptrace, rnTxt, mTxt], {
-        paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', height:480,
-        margin:{l:10,r:10,t:10,b:10}, showlegend:false,
-        xaxis:{visible:false, scaleanchor:'y', range:[-1.35,1.55]},
-        yaxis:{visible:false, range:[-1.45,1.45]}
-      }, {displayModeBar:false, responsive:true});
-
-      // REAL WGS84 numbers for the readout
       const rnReal = R_N(t)/1000, rmReal = R_M(t)/1000, parReal = R_N(t)*Math.cos(t)/1000;
       out.innerHTML =
         '真实 WGS 84 @ φ=' + latDeg + '°: &nbsp;' +
-        'R_N（卯酉圈 prime-vertical）= <b>' + rnReal.toFixed(2) + ' km</b> &nbsp;·&nbsp; ' +
-        'R_M（子午圈 meridional）= <b>' + rmReal.toFixed(2) + ' km</b> &nbsp;·&nbsp; ' +
-        '纬线圈半径 (R_N·cosφ) = <b>' + parReal.toFixed(2) + ' km</b>';
+        'R_N（卯酉圈/东西 prime-vertical）= <b>' + rnReal.toFixed(2) + ' km</b> &nbsp;·&nbsp; ' +
+        'R_M（子午圈/南北 meridional）= <b>' + rmReal.toFixed(2) + ' km</b> &nbsp;·&nbsp; ' +
+        'R_N − R_M = <b>' + (rnReal - rmReal).toFixed(2) + ' km</b> &nbsp;·&nbsp; ' +
+        '纬线圈半径 R_N·cosφ = <b>' + parReal.toFixed(2) + ' km</b>';
     }
-    build(+slider.value);
-    slider.addEventListener('input', () => build(+slider.value));
+    build();
+    slider.addEventListener('input', build);
+    sel.addEventListener('change', build);
   });
 
   // ============================================================
@@ -1324,6 +1446,66 @@ gamma_dot = g * (n * <span class="tok-fn">cos</span>(mu) - cos_g) / V
         '平直 ENU 终点离椭球高度 / flat-ENU end altitude: <b>' +
         (res.flatAlt >= 1000 ? (res.flatAlt/1000).toFixed(1)+' km' : res.flatAlt.toFixed(0)+' m') + '</b>' +
         ' &nbsp;<span style="color:'+MUTED+'">（≈ L²/2R = ' + (eps/1000).toFixed(1) + ' km；显示放大 ' + exag.toFixed(0) + '×）</span>';
+    }
+    build(+slider.value);
+    slider.addEventListener('input', () => build(+slider.value));
+  });
+
+  // ============================================================
+  //  FIGURE 5 — the tilt theta = L/R between two local verticals
+  // ============================================================
+  onReady(function(){
+    const div = document.getElementById('viz-tilt');
+    const slider = document.getElementById('tilt-L');
+    const out = document.getElementById('tilt-out');
+    const Lmax = 100, betaMax = 38 * D2R;   // displayed half-fan at Lmax (exaggerated)
+
+    const globe = sphereSurface(1, '#dff0f1', 0.55);
+
+    function build(Lkm){
+      const beta = (Lkm / Lmax) * betaMax;            // DISPLAYED separation angle
+      const d1 = [0, 0, 1];                           // S1 zenith (top)
+      const d2 = [Math.sin(beta), 0, Math.cos(beta)]; // S2 zenith
+      const aLen = 0.55;
+
+      // surface arc S1 -> S2 (the baseline L along the surface)
+      const ax = [], ay = [], az = [];
+      for (let i = 0; i <= 40; i++){
+        const b = beta * i / 40;
+        ax.push(Math.sin(b)); ay.push(0); az.push(Math.cos(b));
+      }
+      const baseArc = { type:'scatter3d', mode:'lines', x:ax, y:ay, z:az,
+        line:{color:TEAL, width:6}, hoverinfo:'skip' };
+      const baseLbl = { type:'scatter3d', mode:'text', x:[Math.sin(beta/2)*1.04], y:[0], z:[Math.cos(beta/2)*1.04],
+        text:['L'], textfont:{size:14, color:TEAL}, hoverinfo:'skip' };
+      const s1 = { type:'scatter3d', mode:'markers+text', x:[d1[0]], y:[d1[1]], z:[d1[2]],
+        marker:{size:5, color:INK}, text:['S₁ '], textposition:'middle left', textfont:{size:12,color:INK}, hoverinfo:'skip' };
+      const s2 = { type:'scatter3d', mode:'markers+text', x:[d2[0]], y:[d2[1]], z:[d2[2]],
+        marker:{size:5, color:INK}, text:[' S₂'], textposition:'middle right', textfont:{size:12,color:INK}, hoverinfo:'skip' };
+
+      let traces = [globe, baseArc, baseLbl];
+      traces = traces.concat(arrow(d1, scl(d1, aLen), INDIGO, 0.06));   // S1 local vertical
+      traces = traces.concat(arrow(d2, scl(d2, aLen), ORANGE, 0.06));   // S2 local vertical
+      // a faint copy of S1's vertical placed at S2, to show the gap angle theta
+      const carried = { type:'scatter3d', mode:'lines',
+        x:[d2[0], d2[0]+d1[0]*aLen], y:[d2[1], d2[1]+d1[1]*aLen], z:[d2[2], d2[2]+d1[2]*aLen],
+        line:{color:GREY, width:5, dash:'dash'}, hoverinfo:'skip' };
+      traces.push(carried, s1, s2);
+
+      Plotly.react(div, traces, Object.assign(LAYOUT(460), {
+        scene: scene3d({ camera:{ eye:{x:0.2, y:2.1, z:0.7} } })
+      }), {displayModeBar:false, responsive:true});
+
+      // REAL numbers
+      const th = (Lkm * 1000) / R_MEAN;               // real tilt (rad)
+      const aH = 9.81 * Math.sin(th);                 // first-order horizontal coupling
+      const aV = 9.81 * (1 - Math.cos(th));           // second-order vertical defect
+      const eps = (Lkm*1000)*(Lkm*1000) / (2*R_MEAN);
+      out.innerHTML =
+        '基线 L = <b>' + Lkm + ' km</b> &nbsp;·&nbsp; 真实倾角 θ=L/R = <b>' + (th*R2D).toFixed(3) + '°</b> &nbsp;·&nbsp; ' +
+        '水平 g·sinθ = <b>' + aH.toFixed(4) + ' m/s²</b> &nbsp;vs&nbsp; 竖直 g(1−cosθ) = <b>' + aV.toExponential(2) + ' m/s²</b> &nbsp;·&nbsp; ' +
+        '比值 ≈ <b>' + (aH/aV).toFixed(0) + '×</b> &nbsp;·&nbsp; 竖直缺口 L²/2R = <b>' + eps.toFixed(1) + ' m</b>' +
+        ' &nbsp;<span style="color:'+MUTED+'">（弧与夹角为示意已夸张 / arc &amp; angle exaggerated）</span>';
     }
     build(+slider.value);
     slider.addEventListener('input', () => build(+slider.value));
