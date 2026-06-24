@@ -8,7 +8,10 @@ import {
   type ProcedureDetailsIndexManifest,
 } from "./procedureDetails";
 import type { AltitudeConstraint } from "./procedurePackage";
-import { altitudeConstraintReferenceFt } from "./altitudeConstraints";
+import {
+  altitudeConstraintFromCifp,
+  altitudeConstraintReferenceFt,
+} from "./altitudeConstraints";
 import { fetchJson } from "../utils/fetchJson";
 
 const FEET_TO_METERS = 0.3048;
@@ -115,59 +118,6 @@ function legIsRenderable(leg: ProcedureDetailLeg, fix: ProcedureDetailFix | unde
   return leg.quality.renderedInPlanView === true && fix?.position !== null && fix?.position !== undefined;
 }
 
-function parseAltitudeWindow(rawText: string): { minFtMsl: number; maxFtMsl: number } | null {
-  const values = [...rawText.matchAll(/\d[\d,]*/g)]
-    .map((match) => Number(match[0].replace(/,/g, "")))
-    .filter((value) => Number.isFinite(value));
-  if (values.length < 2) return null;
-  const [first, second] = values;
-  return {
-    minFtMsl: Math.min(first, second),
-    maxFtMsl: Math.max(first, second),
-  };
-}
-
-function routeAltitudeConstraint(leg: ProcedureDetailLeg): AltitudeConstraint | null {
-  const altitude = leg.constraints.altitude;
-  if (!altitude) return null;
-  const qualifier = altitude.qualifier.toLowerCase();
-  const rawText = altitude.rawText;
-
-  if (qualifier.includes("window") || qualifier.includes("between") || /\bbetween\b|-/.test(rawText)) {
-    const window = parseAltitudeWindow(rawText);
-    if (window) {
-      return {
-        kind: "WINDOW",
-        ...window,
-        sourceText: rawText,
-      };
-    }
-  }
-
-  if (qualifier.includes("above")) {
-    return {
-      kind: "AT_OR_ABOVE",
-      minFtMsl: altitude.valueFt,
-      sourceText: rawText,
-    };
-  }
-
-  if (qualifier.includes("below")) {
-    return {
-      kind: "AT_OR_BELOW",
-      maxFtMsl: altitude.valueFt,
-      sourceText: rawText,
-    };
-  }
-
-  return {
-    kind: qualifier.includes("unknown") ? "UNKNOWN" : "AT",
-    minFtMsl: altitude.valueFt,
-    maxFtMsl: altitude.valueFt,
-    sourceText: rawText,
-  };
-}
-
 function geometryAltitudeFt(leg: ProcedureDetailLeg, fix: ProcedureDetailFix | undefined): number | null {
   return (
     leg.constraints.geometryAltitudeFt ??
@@ -185,7 +135,7 @@ function ownBranchPoints(
     .map((leg) => {
       const fix = fixById.get(leg.path.endFixRef);
       if (!legIsRenderable(leg, fix) || !fix?.position) return null;
-      const altitudeConstraint = routeAltitudeConstraint(leg);
+      const altitudeConstraint = altitudeConstraintFromCifp(leg.constraints.altitude);
       return {
         fixId: fix.fixId,
         fixIdent: fix.ident,

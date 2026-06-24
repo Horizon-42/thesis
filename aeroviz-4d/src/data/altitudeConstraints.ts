@@ -5,6 +5,69 @@ export type DisplayAltitudeConstraint = Pick<
   "kind" | "minFtMsl" | "maxFtMsl" | "sourceText"
 >;
 
+/**
+ * A leg altitude exactly as the Python preprocessor codes it on disk
+ * (`ProcedureDetailLeg.constraints.altitude`): the CIFP altitude descriptor
+ * mapped to a `qualifier` plus the binding `valueFt` and its original text.
+ */
+export interface CifpLegAltitude {
+  qualifier: string;
+  valueFt: number;
+  rawText: string;
+}
+
+function parseAltitudeWindowBounds(
+  rawText: string,
+): { minFtMsl: number; maxFtMsl: number } | null {
+  const values = [...rawText.matchAll(/\d[\d,]*/g)]
+    .map((match) => Number(match[0].replace(/,/g, "")))
+    .filter((value) => Number.isFinite(value));
+  if (values.length < 2) return null;
+  const [first, second] = values;
+  return { minFtMsl: Math.min(first, second), maxFtMsl: Math.max(first, second) };
+}
+
+/**
+ * The single canonical conversion from a coded CIFP leg altitude to the
+ * in-memory {@link AltitudeConstraint}. Both the route view-model
+ * (`procedureRoutes`) and the normalized procedure package
+ * (`procedurePackageAdapter`) go through this, so a block / window / unknown
+ * altitude is interpreted identically everywhere. (Previously the two
+ * pipelines had divergent copies: the route builder produced WINDOW/UNKNOWN
+ * while the package adapter silently collapsed every non-above/below altitude
+ * to AT, dropping the upper bound of a block altitude.)
+ */
+export function altitudeConstraintFromCifp(
+  altitude: CifpLegAltitude | null | undefined,
+): AltitudeConstraint | null {
+  if (!altitude) return null;
+  const qualifier = altitude.qualifier.toLowerCase();
+  const rawText = altitude.rawText;
+
+  const looksLikeWindow =
+    qualifier.includes("block") ||
+    qualifier.includes("window") ||
+    qualifier.includes("between") ||
+    /\bbetween\b|-/.test(rawText);
+  if (looksLikeWindow) {
+    const window = parseAltitudeWindowBounds(rawText);
+    if (window) return { kind: "WINDOW", ...window, sourceText: rawText };
+  }
+
+  if (qualifier.includes("above")) {
+    return { kind: "AT_OR_ABOVE", minFtMsl: altitude.valueFt, sourceText: rawText };
+  }
+  if (qualifier.includes("below")) {
+    return { kind: "AT_OR_BELOW", maxFtMsl: altitude.valueFt, sourceText: rawText };
+  }
+  return {
+    kind: qualifier.includes("unknown") ? "UNKNOWN" : "AT",
+    minFtMsl: altitude.valueFt,
+    maxFtMsl: altitude.valueFt,
+    sourceText: rawText,
+  };
+}
+
 function formatFt(value: number): string {
   return `${Math.round(value).toLocaleString()} ft`;
 }

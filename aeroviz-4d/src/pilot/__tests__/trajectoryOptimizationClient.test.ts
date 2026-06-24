@@ -128,8 +128,12 @@ describe("trajectoryOptimizationClient", () => {
 
     const result = await runTrajectoryOptimization(request);
 
-    // No `playback` in the response → parsed result carries `playback: null`.
-    expect(result).toEqual({ ...responsePayload, playback: null });
+    // No `playback`/`procedureConstraintSummary` in the response → both null.
+    expect(result).toEqual({
+      ...responsePayload,
+      playback: null,
+      procedureConstraintSummary: null,
+    });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://127.0.0.1:8765/optimization/run",
       expect.objectContaining({
@@ -171,6 +175,38 @@ describe("trajectoryOptimizationClient", () => {
       bankDeg: 1,
       attackDeg: 0,
       loadFactor: 1.2,
+    });
+  });
+
+  it("parses the procedure-constraint summary the backend echoes back", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        optimizer: "casadiDirectCollocation",
+        finalTimeS: 72,
+        nSegments: 4,
+        dtS: 0.2,
+        controls: [{ thrustN: 12000, bankDeg: 1, loadFactor: 1.2 }],
+        states: [request.targetState],
+        procedureConstraintSummary: {
+          waypointCount: 3,
+          monotonicDescent: true,
+          firstFixIdent: "SCHOO",
+          lastFixIdent: "RW05L",
+        },
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ));
+
+    const result = await runTrajectoryOptimization(request);
+
+    expect(result.procedureConstraintSummary).toEqual({
+      waypointCount: 3,
+      monotonicDescent: true,
+      firstFixIdent: "SCHOO",
+      lastFixIdent: "RW05L",
     });
   });
 

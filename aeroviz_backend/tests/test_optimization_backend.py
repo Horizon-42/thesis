@@ -95,6 +95,104 @@ class TestOptimizationBackend(unittest.TestCase):
         self.assertEqual(result["states"][0]["massKg"], 78000.0)
         self.assertEqual(result["states"][0]["aircraftType"], "A320")
 
+    def test_optimize_echoes_procedure_constraint_summary(self):
+        # Plumbing check: the canonical procedure constraint the frontend ships
+        # is parsed by the backend and a validation summary is echoed back. The
+        # NLP does not yet enforce the waypoint windows.
+        class FakeTranscriptionOptimizor:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def optimize_trajectory(self, initial_state, target_state):
+                return (
+                    42.0,
+                    np.array([[15000.0, 0.1, 0.2]]),
+                    np.array([[51.0, -114.0, 1000.0, 130.0, 0.3, -0.05]]),
+                )
+
+        original_optimizer = optimization_backend.TranscriptionOptimizor
+        optimization_backend.TranscriptionOptimizor = FakeTranscriptionOptimizor
+        try:
+            result = optimization_backend.OptimizationBackend().optimize({
+                "optimizer": "transcription",
+                "nSegments": 1,
+                "arrivalTimeS": 84.0,
+                "dtS": 0.25,
+                "maxIterations": 25,
+                "initialState": {
+                    "lon": -114.0203, "lat": 51.1139, "altM": 1084.0,
+                    "speedMps": 135.0, "headingDeg": 12.0, "flightPathDeg": -3.0,
+                    "aircraftType": "A320",
+                },
+                "targetState": {
+                    "lon": -114.1, "lat": 51.2, "altM": 900.0,
+                    "speedMps": 125.0, "headingDeg": 18.0, "flightPathDeg": -2.0,
+                },
+                "procedureConstraint": {
+                    "procedureUid": "KRDU-R05LY-RW05L",
+                    "branchId": "branch:R",
+                    "waypoints": [
+                        {"fixId": "fix:SCHOO", "ident": "SCHOO", "role": "IF",
+                         "legType": "IF", "lonDeg": -78.9, "latDeg": 35.77,
+                         "altitudeRefFt": 3000, "distanceFromStartM": 0},
+                        {"fixId": "fix:WEPAS", "ident": "WEPAS", "role": "FAF",
+                         "legType": "TF", "lonDeg": -78.88, "latDeg": 35.80,
+                         "altitudeRefFt": 2200, "distanceFromStartM": 5500},
+                        {"fixId": "fix:RW05L", "ident": "RW05L", "role": "MAPt",
+                         "legType": "TF", "lonDeg": -78.80, "latDeg": 35.87,
+                         "altitudeRefFt": 424, "distanceFromStartM": 15900},
+                    ],
+                },
+            })
+        finally:
+            optimization_backend.TranscriptionOptimizor = original_optimizer
+
+        self.assertEqual(
+            result["procedureConstraintSummary"],
+            {
+                "waypointCount": 3,
+                "monotonicDescent": True,
+                "firstFixIdent": "SCHOO",
+                "lastFixIdent": "RW05L",
+            },
+        )
+
+    def test_optimize_omits_summary_without_procedure_constraint(self):
+        class FakeTranscriptionOptimizor:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def optimize_trajectory(self, initial_state, target_state):
+                return (
+                    42.0,
+                    np.array([[15000.0, 0.1, 0.2]]),
+                    np.array([[51.0, -114.0, 1000.0, 130.0, 0.3, -0.05]]),
+                )
+
+        original_optimizer = optimization_backend.TranscriptionOptimizor
+        optimization_backend.TranscriptionOptimizor = FakeTranscriptionOptimizor
+        try:
+            result = optimization_backend.OptimizationBackend().optimize({
+                "optimizer": "transcription",
+                "nSegments": 1,
+                "arrivalTimeS": 84.0,
+                "dtS": 0.25,
+                "maxIterations": 25,
+                "initialState": {
+                    "lon": -114.0203, "lat": 51.1139, "altM": 1084.0,
+                    "speedMps": 135.0, "headingDeg": 12.0, "flightPathDeg": -3.0,
+                    "aircraftType": "A320",
+                },
+                "targetState": {
+                    "lon": -114.1, "lat": 51.2, "altM": 900.0,
+                    "speedMps": 125.0, "headingDeg": 18.0, "flightPathDeg": -2.0,
+                },
+            })
+        finally:
+            optimization_backend.TranscriptionOptimizor = original_optimizer
+
+        self.assertNotIn("procedureConstraintSummary", result)
+
     def test_optimize_defaults_to_direct_collocation_optimizer_with_load_factor_controls(self):
         # The default optimiser is the fixed-ENU direct-collocation
         # solver.  It shares the LoadFactorControl I/O shape with the

@@ -51,6 +51,14 @@ export function readString(value: Record<string, unknown>, key: string): string 
   return nested;
 }
 
+export function readBoolean(value: Record<string, unknown>, key: string): boolean {
+  const nested = value[key];
+  if (typeof nested !== "boolean") {
+    throw new Error(`AeroViz backend response has invalid ${key}`);
+  }
+  return nested;
+}
+
 export function readNumberArray(value: Record<string, unknown>, key: string): number[] {
   const nested = value[key];
   if (!Array.isArray(nested)) {

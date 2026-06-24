@@ -1,6 +1,8 @@
 import { AEROVIZ_BACKEND_URL, type PilotControls, type PilotResetState } from "./pilotClient";
+import type { ProcedureConstraint } from "../data/procedureConstraint";
 import {
   isRecord,
+  readBoolean,
   readNumber,
   readOptionalNumber,
   readPositiveNumber,
@@ -113,6 +115,14 @@ export interface TrajectoryOptimizationRequest {
   arrivalTimeS: number;
   dtS: number;
   maxIterations: number;
+  /**
+   * Optional canonical procedure constraint (see `data/procedureConstraint`).
+   * Shipped verbatim to the backend, which parses the same shape. The NLP does
+   * not yet enforce the intermediate waypoint altitude/speed windows — the
+   * backend currently validates + summarizes it — but the contract is in place
+   * so enforcement is a self-contained follow-up.
+   */
+  procedureConstraint?: ProcedureConstraint;
 }
 
 /**
@@ -151,6 +161,19 @@ export interface TrajectoryPlayback {
   samples: TrajectorySample[];
 }
 
+/**
+ * Backend echo of the parsed {@link ProcedureConstraint}. Present only when the
+ * request carried a `procedureConstraint`; proves the backend read the same
+ * canonical shape the frontend built and reports a cheap sanity check.
+ */
+export interface ProcedureConstraintSummary {
+  waypointCount: number;
+  /** Reference altitudes are non-increasing from the entry toward the runway. */
+  monotonicDescent: boolean;
+  firstFixIdent: string | null;
+  lastFixIdent: string | null;
+}
+
 export interface TrajectoryOptimizationResult {
   ok: true;
   optimizer: TrajectoryOptimizer;
@@ -160,6 +183,7 @@ export interface TrajectoryOptimizationResult {
   controls: PilotControls[];
   states: PilotResetState[];
   playback: TrajectoryPlayback | null;
+  procedureConstraintSummary: ProcedureConstraintSummary | null;
 }
 
 interface TrajectoryOptimizationErrorResponse {
@@ -212,6 +236,24 @@ function parseTrajectoryOptimizationResult(
     controls: value.controls.map(parseControl),
     states: value.states.map(parseState),
     playback: parsePlayback(value.playback),
+    procedureConstraintSummary: parseProcedureConstraintSummary(
+      value.procedureConstraintSummary,
+    ),
+  };
+}
+
+function parseProcedureConstraintSummary(
+  value: unknown,
+): ProcedureConstraintSummary | null {
+  if (value === undefined || value === null) return null;
+  if (!isRecord(value)) {
+    throw new Error("AeroViz backend optimization response has invalid procedureConstraintSummary");
+  }
+  return {
+    waypointCount: readNumber(value, "waypointCount"),
+    monotonicDescent: readBoolean(value, "monotonicDescent"),
+    firstFixIdent: typeof value.firstFixIdent === "string" ? value.firstFixIdent : null,
+    lastFixIdent: typeof value.lastFixIdent === "string" ? value.lastFixIdent : null,
   };
 }
 

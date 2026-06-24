@@ -27,6 +27,7 @@ from common import LoadFactorControl
 from least_squares_transcription_optimizor import LeastSquaresTranscriptionOptimizor
 from single_shooting_optimizor import SingleShootingOptimizor
 from simulator import Control
+from aeroviz_backend.procedure_constraint import ProcedureConstraint
 from aeroviz_backend.trajectory_playback import build_optimized_trajectory_playback
 from transcription_optimizor import TranscriptionOptimizor
 from variable_time_warm_start_transcription_optimizor import (
@@ -168,6 +169,18 @@ class OptimizationBackend:
         playback_s = time.perf_counter() - playback_started
         if playback is not None:
             result["playback"] = playback
+
+        # Plumbing for the canonical procedure constraint (the front↔back shared
+        # path/altitude/speed structure). The NLP does not yet enforce the
+        # intermediate waypoint windows as path constraints -- that is a
+        # self-contained follow-up -- so here we parse the same shape the
+        # frontend ships and echo a cheap validation summary, which both proves
+        # the contract round-trips and is testable.
+        procedure_constraint = ProcedureConstraint.from_payload(
+            payload.get("procedureConstraint")
+        )
+        if procedure_constraint is not None:
+            result["procedureConstraintSummary"] = procedure_constraint.summary()
 
         log_optimization_timing(
             optimizer_name,

@@ -19,6 +19,7 @@ import type {
   SourceRef,
   VerticalRule,
 } from "./procedurePackage";
+import { altitudeConstraintFromCifp } from "./altitudeConstraints";
 
 const SUPPORTED_LEG_TYPES = new Set(["IF", "TF", "RF", "DF", "CA", "HM", "HA", "HF"]);
 
@@ -208,21 +209,7 @@ function verticalRuleFor(
 }
 
 function altitudeConstraint(leg: ProcedureDetailLeg): AltitudeConstraint | null {
-  const altitude = leg.constraints.altitude;
-  if (!altitude) return null;
-  const qualifier = altitude.qualifier.toLowerCase();
-  if (qualifier.includes("above")) {
-    return { kind: "AT_OR_ABOVE", minFtMsl: altitude.valueFt, sourceText: altitude.rawText };
-  }
-  if (qualifier.includes("below")) {
-    return { kind: "AT_OR_BELOW", maxFtMsl: altitude.valueFt, sourceText: altitude.rawText };
-  }
-  return {
-    kind: "AT",
-    minFtMsl: altitude.valueFt,
-    maxFtMsl: altitude.valueFt,
-    sourceText: altitude.rawText,
-  };
+  return altitudeConstraintFromCifp(leg.constraints.altitude);
 }
 
 function segmentIdFor(
