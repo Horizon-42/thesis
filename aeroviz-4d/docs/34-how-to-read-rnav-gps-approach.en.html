@@ -1,0 +1,1967 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>How to Read an RNAV (GPS) Approach Chart — Using KRDU RNAV Y RWY 5L as a Worked Example</title>
+<style>
+/* ===== RESET & BASE ===== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #f8f9fa;
+  --surface: #ffffff;
+  --border: #dee2e6;
+  --border-light: #e9ecef;
+  --text: #212529;
+  --text-secondary: #6c757d;
+  --text-muted: #868e96;
+  --accent: #1a6eb5;
+  --accent-light: #e8f0fb;
+  --accent-dark: #0d4e8a;
+  --green: #2d7a3a;
+  --green-light: #e8f5ea;
+  --amber: #a05c00;
+  --amber-light: #fff3cd;
+  --red: #9c2b2b;
+  --red-light: #fce8e8;
+  --purple: #5b2a8a;
+  --purple-light: #f2ebfc;
+  --teal: #0f6b6b;
+  --teal-light: #e0f4f4;
+  --nav-bg: #1e2d40;
+  --nav-text: #c8d6e5;
+  --nav-active: #4fa3e0;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace;
+  --radius: 8px;
+  --radius-sm: 4px;
+  --shadow: 0 2px 8px rgba(0,0,0,.10);
+  --shadow-lg: 0 4px 20px rgba(0,0,0,.14);
+}
+
+html { scroll-behavior: smooth; font-size: 16px; }
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.75;
+  display: flex;
+  min-height: 100vh;
+}
+
+/* ===== SIDEBAR NAV ===== */
+#sidebar {
+  position: fixed;
+  top: 0; left: 0;
+  width: 240px;
+  height: 100vh;
+  background: var(--nav-bg);
+  color: var(--nav-text);
+  overflow-y: auto;
+  overflow-x: hidden;
+  z-index: 100;
+  padding: 24px 0 40px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+#sidebar h2 {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: #7a9bb5;
+  padding: 0 20px 12px;
+}
+
+#sidebar ol {
+  list-style: none;
+  counter-reset: nav-counter;
+}
+
+#sidebar ol li {
+  counter-increment: nav-counter;
+}
+
+#sidebar ol li a {
+  display: block;
+  padding: 6px 20px 6px 16px;
+  color: var(--nav-text);
+  text-decoration: none;
+  transition: background .15s, color .15s;
+  border-left: 3px solid transparent;
+}
+
+#sidebar ol li a::before {
+  content: counter(nav-counter) ". ";
+  color: #4a6a85;
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+#sidebar ol li a:hover {
+  background: rgba(255,255,255,.07);
+  color: #fff;
+  border-left-color: var(--nav-active);
+}
+
+#sidebar ol li a.active {
+  color: var(--nav-active);
+  background: rgba(79,163,224,.10);
+  border-left-color: var(--nav-active);
+}
+
+/* ===== MAIN CONTENT ===== */
+#main {
+  margin-left: 240px;
+  flex: 1;
+  padding: 0 0 80px;
+}
+
+.hero {
+  background: linear-gradient(135deg, #1a3a5c 0%, #0d4e8a 60%, #1a6eb5 100%);
+  color: #fff;
+  padding: 48px 48px 44px;
+  border-bottom: 1px solid #0a2d50;
+}
+
+.hero .badge {
+  display: inline-block;
+  background: rgba(255,255,255,.15);
+  border: 1px solid rgba(255,255,255,.25);
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .05em;
+  padding: 3px 12px;
+  margin-bottom: 16px;
+  color: #cde4f8;
+}
+
+.hero h1 {
+  font-size: 2.0rem;
+  font-weight: 700;
+  line-height: 1.25;
+  margin-bottom: 12px;
+  letter-spacing: -.01em;
+}
+
+.hero p {
+  font-size: 1.05rem;
+  color: #b5d0e8;
+  max-width: 680px;
+  line-height: 1.7;
+}
+
+.hero .meta {
+  margin-top: 20px;
+  font-size: 12.5px;
+  color: #7aadd0;
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.hero .meta span::before { content: "◆ "; }
+
+.content {
+  max-width: 860px;
+  padding: 0 48px;
+  margin: 0 auto;
+}
+
+/* ===== SECTIONS ===== */
+section {
+  padding-top: 56px;
+}
+
+section h2 {
+  font-size: 1.55rem;
+  font-weight: 700;
+  color: var(--accent-dark);
+  margin-bottom: 20px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid var(--accent-light);
+  letter-spacing: -.01em;
+}
+
+section h3 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text);
+  margin: 28px 0 12px;
+}
+
+section h4 {
+  font-size: 1.0rem;
+  font-weight: 700;
+  color: var(--accent);
+  margin: 20px 0 8px;
+}
+
+p { margin-bottom: 14px; }
+
+ul, ol {
+  margin: 10px 0 14px 20px;
+}
+
+li { margin-bottom: 6px; }
+
+strong { color: #1a2a3a; }
+
+code {
+  font-family: var(--font-mono);
+  font-size: .875em;
+  background: #eef2f7;
+  border: 1px solid #d0dae8;
+  border-radius: 3px;
+  padding: 1px 5px;
+  color: #2a4a6a;
+}
+
+/* ===== CALLOUT BOXES ===== */
+.callout {
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  margin: 20px 0;
+  border-left: 4px solid;
+}
+
+.callout-title {
+  font-weight: 700;
+  font-size: .95rem;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.callout-title .icon { font-size: 1.1em; }
+
+.callout p:last-child { margin-bottom: 0; }
+
+.callout-key {
+  background: var(--accent-light);
+  border-color: var(--accent);
+  color: #0d3a6b;
+}
+.callout-key .callout-title { color: var(--accent-dark); }
+
+.callout-warn {
+  background: var(--amber-light);
+  border-color: #d4880a;
+  color: #5a3200;
+}
+.callout-warn .callout-title { color: var(--amber); }
+
+.callout-tip {
+  background: var(--green-light);
+  border-color: var(--green);
+  color: #1a4520;
+}
+.callout-tip .callout-title { color: var(--green); }
+
+.callout-danger {
+  background: var(--red-light);
+  border-color: #c0392b;
+  color: #5a1010;
+}
+.callout-danger .callout-title { color: var(--red); }
+
+.callout-info {
+  background: var(--teal-light);
+  border-color: var(--teal);
+  color: #063a3a;
+}
+.callout-info .callout-title { color: var(--teal); }
+
+/* ===== TABLES ===== */
+.table-wrap {
+  overflow-x: auto;
+  margin: 20px 0;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface);
+  font-size: .92rem;
+}
+
+thead th {
+  background: #1e2d40;
+  color: #c8d6e5;
+  font-weight: 600;
+  padding: 10px 14px;
+  text-align: left;
+  font-size: .85rem;
+  letter-spacing: .03em;
+  white-space: nowrap;
+}
+
+tbody tr:nth-child(even) { background: #f5f7fa; }
+tbody tr:hover { background: var(--accent-light); }
+
+td {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border-light);
+  vertical-align: top;
+}
+
+tbody tr:last-child td { border-bottom: none; }
+
+/* ===== SVG DIAGRAMS ===== */
+.diagram {
+  margin: 24px 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.diagram-caption {
+  background: #1e2d40;
+  color: #c8d6e5;
+  font-size: .8rem;
+  font-weight: 600;
+  padding: 8px 16px;
+  letter-spacing: .04em;
+}
+
+.diagram svg {
+  display: block;
+  width: 100%;
+}
+
+/* ===== MINIMA CARDS ===== */
+.minima-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px;
+  margin: 20px 0;
+}
+
+.minima-card {
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  text-align: center;
+}
+
+.minima-card .label {
+  font-size: .75rem;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.minima-card .da {
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.minima-card .vis { font-size: .85rem; color: var(--text-secondary); }
+.minima-card .hat { font-size: .75rem; color: var(--text-muted); margin-top: 6px; }
+
+.card-lpv { background: var(--green-light); border-color: var(--green); }
+.card-lpv .label { color: var(--green); }
+.card-lpv .da { color: var(--green); }
+
+.card-lv { background: var(--accent-light); border-color: var(--accent); }
+.card-lv .label { color: var(--accent-dark); }
+.card-lv .da { color: var(--accent-dark); }
+
+.card-lnav { background: var(--amber-light); border-color: #d4880a; }
+.card-lnav .label { color: var(--amber); }
+.card-lnav .da { color: var(--amber); }
+
+.card-circ { background: #f5f0fa; border-color: #8b52c0; }
+.card-circ .label { color: #6a3099; }
+.card-circ .da { color: #6a3099; }
+
+/* ===== FIX ROLE BADGES ===== */
+.fix-badge {
+  display: inline-block;
+  border-radius: 3px;
+  font-size: .72rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  letter-spacing: .04em;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+.badge-iaf { background: #1a6eb5; color: #fff; }
+.badge-if  { background: #2d7a3a; color: #fff; }
+.badge-faf { background: #c05000; color: #fff; }
+.badge-mapt{ background: #9c2b2b; color: #fff; }
+
+/* ===== ALTITUDE QUALIFIER DEMO ===== */
+.alt-qual-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+
+.alt-qual-box {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  text-align: center;
+  flex: 1;
+  min-width: 130px;
+  background: var(--surface);
+}
+
+.alt-val {
+  font-size: 1.4rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: #1a2a3a;
+  position: relative;
+  display: inline-block;
+  margin-bottom: 6px;
+}
+
+.alt-val.at-above::after {
+  content: "";
+  display: block;
+  height: 2.5px;
+  background: #1a2a3a;
+  position: absolute;
+  bottom: -3px; left: 0; right: 0;
+}
+
+.alt-val.at-below::before {
+  content: "";
+  display: block;
+  height: 2.5px;
+  background: #1a2a3a;
+  position: absolute;
+  top: -3px; left: 0; right: 0;
+}
+
+.alt-val.mandatory {
+  border: 2px solid #1a2a3a;
+  padding: 2px 8px;
+  border-radius: 2px;
+}
+
+.alt-qual-label {
+  font-size: .78rem;
+  color: var(--text-secondary);
+  font-weight: 600;
+  margin-top: 10px;
+}
+
+/* ===== LEG TYPE TABLE ===== */
+.leg-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1px;
+  background: var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin: 16px 0;
+  box-shadow: var(--shadow);
+}
+
+.leg-cell {
+  background: var(--surface);
+  padding: 9px 14px;
+}
+
+.leg-cell.header {
+  background: #1e2d40;
+  color: #c8d6e5;
+  font-weight: 700;
+  font-size: .82rem;
+}
+
+.leg-code {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: .95rem;
+  color: var(--accent-dark);
+}
+
+/* ===== SECTION NUMBER ===== */
+.sec-num {
+  display: inline-block;
+  background: var(--accent);
+  color: #fff;
+  font-size: .75rem;
+  font-weight: 700;
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  text-align: center;
+  line-height: 26px;
+  margin-right: 10px;
+  vertical-align: middle;
+}
+
+/* ===== GLOSSARY TABLE ===== */
+#glossary table td:first-child {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--accent-dark);
+  white-space: nowrap;
+}
+
+/* ===== RESPONSIVE ===== */
+@media (max-width: 900px) {
+  #sidebar { display: none; }
+  #main { margin-left: 0; }
+  .hero { padding: 32px 24px; }
+  .content { padding: 0 24px; }
+  .hero h1 { font-size: 1.55rem; }
+}
+
+/* ===== PRINT ===== */
+@media print {
+  #sidebar { display: none; }
+  #main { margin-left: 0; }
+}
+
+hr.section-divider {
+  border: none;
+  border-top: 1px solid var(--border-light);
+  margin: 40px 0 0;
+}
+
+/* ===== Interactive layer: glossary terms, shared tooltip, SVG hotspots ===== */
+.gloss {
+  border-bottom: 1px dashed var(--accent);
+  cursor: help;
+  white-space: nowrap;
+}
+.gloss:hover { background: var(--accent-light); }
+
+#av-tip {
+  position: fixed;
+  z-index: 10000;
+  max-width: 320px;
+  background: #0d2233;
+  color: #eaf2fa;
+  padding: 10px 13px;
+  border-radius: 8px;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.32);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity .12s ease, transform .12s ease;
+  border: 1px solid rgba(255,255,255,0.12);
+}
+#av-tip.show { opacity: 1; transform: translateY(0); }
+#av-tip .tt-h { display: block; font-weight: 700; color: #7fc0ff; margin-bottom: 3px; }
+
+/* SVG hotspots sit invisibly over fixes/segments */
+svg .hot { cursor: pointer; }
+svg .hot.dot:hover { fill: rgba(26,110,181,0.18); }
+svg .hot.seg:hover { stroke: rgba(26,110,181,0.22); }
+.diagram-hint {
+  font-size: .8rem;
+  color: var(--text-muted);
+  margin: 6px 0 0;
+  text-align: center;
+}
+
+/* Floating glossary button + slide-in panel */
+#gloss-fab {
+  position: fixed; right: 22px; bottom: 22px; z-index: 9998;
+  background: var(--accent); color: #fff; border: none;
+  border-radius: 24px; padding: 11px 17px; font-size: .88rem; font-weight: 700;
+  cursor: pointer; box-shadow: 0 6px 20px rgba(0,0,0,.25);
+}
+#gloss-fab:hover { background: var(--accent-dark); }
+#gloss-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.32); z-index: 9998;
+  opacity: 0; pointer-events: none; transition: opacity .25s;
+}
+#gloss-overlay.open { opacity: 1; pointer-events: auto; }
+#gloss-panel {
+  position: fixed; top: 0; right: 0; height: 100%; width: 360px; max-width: 88vw;
+  background: var(--surface); z-index: 9999; box-shadow: -8px 0 32px rgba(0,0,0,.22);
+  transform: translateX(100%); transition: transform .26s ease;
+  overflow-y: auto; padding: 22px 22px 60px;
+}
+#gloss-panel.open { transform: translateX(0); }
+#gloss-panel h3 { margin: 0 0 4px; }
+#gloss-panel .gp-sub { color: var(--text-muted); font-size: .82rem; margin: 0 0 14px; }
+#gloss-close { float: right; cursor: pointer; border: none; background: none; font-size: 1.4rem; line-height: 1; color: var(--text-secondary); }
+.gp-item { padding: 9px 0; border-bottom: 1px solid var(--border-light); }
+.gp-term { font-weight: 700; color: var(--accent); }
+.gp-full { color: var(--text-secondary); font-size: .82rem; }
+.gp-def { font-size: .84rem; margin-top: 2px; color: var(--text); }
+@media print { #gloss-fab, #av-tip, #gloss-panel, #gloss-overlay { display: none !important; } }
+</style>
+</head>
+<body>
+
+<!-- ===== SIDEBAR ===== -->
+<nav id="sidebar" aria-label="Table of Contents">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#intro">Introduction: What Is an Instrument Approach Chart?</a></li>
+    <li><a href="#plate-layout">Overall Chart Layout</a></li>
+    <li><a href="#header">Header — Field by Field</a></li>
+    <li><a href="#plan-view">Plan View: The Route from Above</a></li>
+    <li><a href="#profile-view">Profile View: The Vertical Step-Down</a></li>
+    <li><a href="#four-segments">The Four Approach Segments</a></li>
+    <li><a href="#minima">The Minima Box</a></li>
+    <li><a href="#alt-qualifiers">Reading Altitude Restrictions</a></li>
+    <li><a href="#cifp">A Glimpse at CIFP Leg Coding</a></li>
+    <li><a href="#aeroviz">Cross-Referencing in AeroViz</a></li>
+    <li><a href="#glossary">Quick-Reference Glossary</a></li>
+    <li><a href="#references">Further Reading</a></li>
+  </ol>
+</nav>
+
+<!-- ===== MAIN ===== -->
+<main id="main">
+
+<div class="hero">
+  <div class="badge">Aviation Navigation · Beginner Tutorial</div>
+  <h1>How to Read an RNAV (GPS) Approach Chart</h1>
+  <p>Using <strong>KRDU RNAV (GPS) Y RWY 5L</strong> (Raleigh-Durham International Airport, Runway 05L) as a complete worked example,
+     this tutorial walks you through every number and symbol on a U.S. instrument approach chart — starting from zero.</p>
+  <div class="meta">
+    <span>Amdt 2, 25FEB21</span>
+    <span>APP CRS 054°</span>
+    <span>GPA 3.00°</span>
+    <span>LPV DA 598 ft</span>
+    <span>For complete beginners</span>
+  </div>
+</div>
+
+<div class="content">
+
+<!-- ==================== §1 Introduction ==================== -->
+<section id="intro">
+<h2><span class="sec-num">1</span>Introduction: What Is an Instrument Approach Chart?</h2>
+
+<p>
+  Imagine you are flying an airliner. The clouds are low, you can see nothing out the window,
+  and you need to land precisely on the correct runway.
+  In that situation, pilots rely on an <strong>Instrument Approach Procedure (IAP)</strong> —
+  an officially designed, published set of flight paths and altitude requirements.
+  The <strong>approach chart</strong> (also called an approach plate) is the "instruction manual" for that procedure.
+</p>
+
+<p>
+  An approach chart tells the pilot four things:
+</p>
+<ul>
+  <li>Where to begin the approach and which heading to fly toward the runway;</li>
+  <li>The altitude that must be maintained at each key fix (too low risks terrain; too high means misalignment with the runway);</li>
+  <li>When and along which route to execute a missed approach if landing conditions are not met;</li>
+  <li>The minimum visibility and ceiling required to be allowed to land (the minima).</li>
+</ul>
+
+<div class="callout callout-key">
+  <div class="callout-title"><span class="icon">🛩</span>Key Concept: What Is an RNAV (GPS) Approach?</div>
+  <p>
+    <strong>RNAV (Area Navigation)</strong> is a technology that lets an aircraft navigate precisely using
+    satellites (GPS/WAAS) or onboard computers — without relying on ground-based radio beacons.
+    An RNAV (GPS) approach guides the aircraft to the runway entirely via GPS signals,
+    with no ILS system required at the runway end.
+    Combined with the U.S. <strong>WAAS (Wide Area Augmentation System)</strong>, it can deliver
+    vertical guidance comparable to an ILS, allowing a Decision Altitude as low as about 200 ft above the ground.
+  </p>
+</div>
+
+<p>
+  This tutorial uses <strong>KRDU RNAV (GPS) Y RWY 5L</strong> as its example,
+  walking you through every block and every number on a complete approach chart.
+  No prior flying experience is needed — just follow along patiently.
+</p>
+</section>
+
+<!-- ==================== §2 Overall Layout ==================== -->
+<section id="plate-layout">
+<h2><span class="sec-num">2</span>Overall Chart Layout</h2>
+
+<p>
+  FAA-published approach charts (whether from Jeppesen or FAA NACO/Aeronav)
+  all follow a standard layout, divided top-to-bottom into four main areas:
+</p>
+
+<div class="diagram">
+  <div class="diagram-caption">Fig. 2-1 · Approach chart layout diagram (FAA standard)</div>
+  <svg viewBox="0 0 760 520" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif">
+    <!-- background -->
+    <rect width="760" height="520" fill="#f0f4f8"/>
+
+    <!-- ① Header / Briefing Strip -->
+    <rect x="20" y="16" width="720" height="96" rx="6" fill="#1e3a5f" stroke="#0a2040" stroke-width="1.5"/>
+    <text x="380" y="44" text-anchor="middle" fill="#cde4f8" font-size="14" font-weight="700">① Header / Briefing Strip</text>
+    <text x="380" y="64" text-anchor="middle" fill="#a0c0df" font-size="11">Approach name · APP CRS · Frequencies · Weather notes · Missed approach text · MSA</text>
+    <text x="380" y="82" text-anchor="middle" fill="#a0c0df" font-size="11">RNAV (GPS) Y RWY 5L — KRDU — APP CRS 054° — Amdt 2, 25FEB21</text>
+    <text x="50" y="104" fill="#6aa0cc" font-size="10">← Pilots scan here first: find frequencies and briefing items</text>
+
+    <!-- ② Plan View -->
+    <rect x="20" y="122" width="420" height="200" rx="6" fill="#e8f4f0" stroke="#3a9a7a" stroke-width="1.5"/>
+    <text x="230" y="148" text-anchor="middle" fill="#1a5c40" font-size="13" font-weight="700">② Plan View</text>
+    <text x="230" y="168" text-anchor="middle" fill="#2a7a5a" font-size="10.5">Top-down view · Routes · Fixes · Restricted areas · MSA circle</text>
+    <!-- simple plan sketch -->
+    <circle cx="340" cy="230" r="40" fill="none" stroke="#3a9a7a" stroke-width="1" stroke-dasharray="4,3"/>
+    <text x="340" y="234" text-anchor="middle" fill="#3a9a7a" font-size="9">25 NM MSA</text>
+    <!-- runway -->
+    <rect x="300" y="268" width="10" height="38" rx="2" fill="#888" transform="rotate(-36,305,287)"/>
+    <!-- approach path -->
+    <line x1="100" y1="215" x2="295" y2="268" stroke="#1a6eb5" stroke-width="2" marker-end="url(#arr)"/>
+    <text x="160" y="205" fill="#1a6eb5" font-size="9" font-weight="700">054°</text>
+    <!-- fixes dots -->
+    <circle cx="100" cy="215" r="5" fill="#1a6eb5"/>
+    <text x="106" y="213" fill="#1a2a3a" font-size="8">OTTOS/CHWDR (IAF)</text>
+    <circle cx="157" cy="230" r="4" fill="#2d7a3a"/>
+    <text x="163" y="228" fill="#1a2a3a" font-size="8">BOULE</text>
+    <circle cx="210" cy="245" r="4" fill="#2d7a3a"/>
+    <text x="216" y="243" fill="#1a2a3a" font-size="8">SCHOO (IF)</text>
+    <circle cx="255" cy="258" r="5" fill="#c05000"/>
+    <text x="261" y="256" fill="#1a2a3a" font-size="8">WEPAS (FAF) ▼</text>
+    <!-- missed approach arrow -->
+    <path d="M 305 278 Q 380 240 390 185" fill="none" stroke="#9c2b2b" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrred)"/>
+    <text x="395" y="182" fill="#9c2b2b" font-size="8">DUHAM (Missed approach)</text>
+
+    <defs>
+      <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L8,3 z" fill="#1a6eb5"/>
+      </marker>
+      <marker id="arrred" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L8,3 z" fill="#9c2b2b"/>
+      </marker>
+    </defs>
+
+    <!-- ③ Profile View -->
+    <rect x="450" y="122" width="290" height="200" rx="6" fill="#fef8ee" stroke="#c08020" stroke-width="1.5"/>
+    <text x="595" y="148" text-anchor="middle" fill="#6a3a00" font-size="13" font-weight="700">③ Profile View</text>
+    <text x="595" y="168" text-anchor="middle" fill="#8a5a10" font-size="10.5">Side view · Step-down altitudes · Glidepath · TDZE</text>
+    <!-- staircase sketch in profile -->
+    <rect x="466" y="200" width="40" height="10" fill="#e0b060"/>
+    <text x="468" y="196" fill="#6a3a00" font-size="7">5000</text>
+    <rect x="506" y="208" width="40" height="10" fill="#e0b060"/>
+    <text x="508" y="204" fill="#6a3a00" font-size="7">4000</text>
+    <rect x="546" y="220" width="35" height="10" fill="#e0b060"/>
+    <text x="548" y="216" fill="#6a3a00" font-size="7">3000</text>
+    <rect x="581" y="232" width="30" height="10" fill="#e0b060"/>
+    <text x="583" y="228" fill="#6a3a00" font-size="7">2200</text>
+    <!-- glidepath line -->
+    <line x1="611" y1="232" x2="720" y2="295" stroke="#c05000" stroke-width="2"/>
+    <text x="650" y="255" fill="#c05000" font-size="8">3.00° glidepath</text>
+    <!-- runway end -->
+    <rect x="710" y="295" width="14" height="6" fill="#555"/>
+    <text x="694" y="312" fill="#6a3a00" font-size="7">RW05L 384ft</text>
+
+    <!-- ④ Minima Box -->
+    <rect x="20" y="332" width="720" height="168" rx="6" fill="#fff8f0" stroke="#c06020" stroke-width="1.5"/>
+    <text x="380" y="358" text-anchor="middle" fill="#6a3000" font-size="13" font-weight="700">④ Minima Box</text>
+    <text x="380" y="378" text-anchor="middle" fill="#8a4a10" font-size="10.5">LPV · LNAV/VNAV · LNAV · CIRCLING minima</text>
+    <!-- mini minima boxes -->
+    <!-- LPV -->
+    <rect x="40" y="392" width="155" height="88" rx="4" fill="#e8f5ea" stroke="#2d7a3a" stroke-width="1.5"/>
+    <text x="118" y="410" text-anchor="middle" fill="#1a5c28" font-size="10" font-weight="700">LPV</text>
+    <text x="118" y="432" text-anchor="middle" fill="#1a5c28" font-size="15" font-weight="700">598</text>
+    <text x="118" y="450" text-anchor="middle" fill="#1a5c28" font-size="9">DA / RVR 1800</text>
+    <text x="118" y="468" text-anchor="middle" fill="#3a8a50" font-size="8">HAT 214 ft</text>
+
+    <!-- LNAV/VNAV -->
+    <rect x="210" y="392" width="155" height="88" rx="4" fill="#e8f0fb" stroke="#1a6eb5" stroke-width="1.5"/>
+    <text x="288" y="410" text-anchor="middle" fill="#0d3a6b" font-size="10" font-weight="700">LNAV/VNAV</text>
+    <text x="288" y="432" text-anchor="middle" fill="#0d3a6b" font-size="15" font-weight="700">748</text>
+    <text x="288" y="450" text-anchor="middle" fill="#0d3a6b" font-size="9">DA / RVR 3500</text>
+    <text x="288" y="468" text-anchor="middle" fill="#2a5a9a" font-size="8">HAT 364 ft</text>
+
+    <!-- LNAV -->
+    <rect x="380" y="392" width="155" height="88" rx="4" fill="#fff3cd" stroke="#c08000" stroke-width="1.5"/>
+    <text x="458" y="410" text-anchor="middle" fill="#6a4000" font-size="10" font-weight="700">LNAV</text>
+    <text x="458" y="432" text-anchor="middle" fill="#6a4000" font-size="15" font-weight="700">840</text>
+    <text x="458" y="450" text-anchor="middle" fill="#6a4000" font-size="9">MDA / 24 (½ mile)</text>
+    <text x="458" y="468" text-anchor="middle" fill="#8a6020" font-size="8">HAT 456 ft</text>
+
+    <!-- CIRC -->
+    <rect x="550" y="392" width="165" height="88" rx="4" fill="#f5f0fa" stroke="#7a40b0" stroke-width="1.5"/>
+    <text x="633" y="410" text-anchor="middle" fill="#5a1a8a" font-size="10" font-weight="700">CIRCLING</text>
+    <text x="633" y="432" text-anchor="middle" fill="#5a1a8a" font-size="15" font-weight="700">960/1020…</text>
+    <text x="633" y="450" text-anchor="middle" fill="#5a1a8a" font-size="9">MDA / by aircraft Cat</text>
+    <text x="633" y="468" text-anchor="middle" fill="#7a4aaa" font-size="8">HAA 525~745 ft</text>
+  </svg>
+</div>
+
+<p>
+  The typical reading order is:
+  <strong>① Header</strong> (quickly verify airport, approach name, and frequencies) →
+  <strong>② Plan View</strong> (understand the overall route layout) →
+  <strong>③ Profile View</strong> (understand the altitude restrictions along each segment) →
+  <strong>④ Minima Box</strong> (determine whether today's weather permits a landing).
+</p>
+</section>
+
+<!-- ==================== §3 Header ==================== -->
+<section id="header">
+<h2><span class="sec-num">3</span>Header — Field by Field</h2>
+
+<h3>3.1 Approach Name and the Letter "Y"</h3>
+<p>
+  The chart title is <strong>RNAV (GPS) Y RWY 5L</strong>.
+</p>
+<ul>
+  <li><strong>RNAV (GPS)</strong>: This is an Area Navigation GPS approach that does not rely on ground-based radio aids.</li>
+  <li><strong>Y</strong>: The letter suffix is simply a chart-sequence identifier — it does not represent any navigation point or quality level.
+      When multiple RNAV (GPS) charts exist for the same runway, they are lettered from the bottom up: Z, Y, X….
+      At KRDU Runway 05L, the Z chart is a different approach procedure; the Y chart is this tutorial's chart.</li>
+  <li><strong>RWY 5L</strong>: Aligned to Runway 05L (magnetic bearing 054°, left-side runway).</li>
+</ul>
+
+<div class="callout callout-warn">
+  <div class="callout-title"><span class="icon">⚠️</span>Common Misconception: Y Is Not a Fix</div>
+  <p>
+    Beginners often assume Y is the name of a navigation aid or fix.
+    In fact it is purely a distinguishing letter meaning "the second chart for this runway" and has no connection to any point on the flight path.
+  </p>
+</div>
+
+<h3>3.2 APP CRS (Final Approach Course)</h3>
+<p>
+  <strong>APP CRS 054°</strong>: The aircraft flies on a magnetic bearing of <strong>054°</strong> during the final approach segment —
+  roughly northeast toward the runway. The runway designation "05L" corresponds to 054°
+  (the runway magnetic bearing rounded to the nearest 10°, then the trailing zero dropped).
+</p>
+
+<h3>3.3 Runway Length and Elevations</h3>
+<ul>
+  <li><strong>Rwy Ldg 10000 ft</strong>: Available landing distance 10,000 ft (approximately 3,048 m).</li>
+  <li><strong>TDZE 384 ft</strong>: Touchdown Zone Elevation (TDZE) 384 ft — the elevation of the runway touchdown area above mean sea level; used as the reference for computing HAT (Height Above Touchdown).</li>
+  <li><strong>Apt Elev 435 ft</strong>: Airport elevation 435 ft — the highest point of the entire airport above MSL; used as the reference for computing HAA (Height Above Airport).</li>
+</ul>
+
+<h3>3.4 WAAS Channel and RNP Information</h3>
+<p>
+  <strong>CH 48813 / W05A</strong>: The WAAS channel number and WAAS approach ID, allowing a WAAS-capable flight management system to automatically load the precise approach data.
+  The annotation <strong>"RNP APCH-GPS"</strong> indicates that this procedure is published to ICAO RNP APCH standards, requiring a minimum navigation accuracy of 0.3 NM (0.1 NM on the final approach segment).
+</p>
+
+<h3>3.5 Pilot Briefing Notes</h3>
+<p>This chart carries several important pilot notes in the header area:</p>
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Original Text (English)</th><th>Meaning</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Simultaneous approach authorized</td>
+      <td>Simultaneous approaches to two runways are permitted (KRDU 05L and another runway may be used at the same time)</td>
+    </tr>
+    <tr>
+      <td>LNAV procedure NA during simultaneous operations</td>
+      <td>LNAV minima may not be used during simultaneous approach operations (only LPV or LNAV/VNAV)</td>
+    </tr>
+    <tr>
+      <td>For uncompensated Baro-VNAV systems, LNAV/VNAV NA below −12°C or above 54°C</td>
+      <td>When the barometric vertical navigation system does not have temperature compensation, LNAV/VNAV is not authorized at extreme temperatures</td>
+    </tr>
+    <tr>
+      <td>For inop ALS, increase LNAV/VNAV all Cats visibility to RVR 5500</td>
+      <td>If the approach lighting system is inoperative, LNAV/VNAV visibility requirement increases to RVR 5500</td>
+    </tr>
+    <tr>
+      <td>Use of FD or AP required during simultaneous operations</td>
+      <td>A flight director (FD) or autopilot (AP) must be used during simultaneous approach operations</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3>3.6 Missed Approach Text</h3>
+<p>
+  The missed approach text in the header describes in words what to do if a go-around is required:
+</p>
+<div class="callout callout-info">
+  <div class="callout-title"><span class="icon">🔄</span>Missed Approach Instructions</div>
+  <p><em>"Climb to 1000 then climbing left turn to 2200 direct DUHAM and hold."</em></p>
+  <p>
+    In plain language: climb to 1,000 ft, then turn left while continuing to climb,
+    level off at 2,200 ft, fly direct to fix DUHAM,
+    and enter a holding pattern there.
+  </p>
+</div>
+
+<h3>3.7 Communication Frequencies</h3>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Frequency</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td>D-ATIS 123.8</td><td>Automatic Terminal Information Service (broadcasts weather, runway status)</td></tr>
+    <tr><td>Raleigh APP CON 127.675 / 307.9</td><td>Approach Control (guides aircraft from en route to the airport area)</td></tr>
+    <tr><td>Raleigh TOWER 127.45 / 257.8</td><td>Tower Control (landing and departure clearances)</td></tr>
+    <tr><td>GND CON 121.9 / 348.6</td><td>Ground Control (taxiing on the ramp)</td></tr>
+    <tr><td>CLNC DEL 120.1</td><td>Clearance Delivery (request flight clearance before departure)</td></tr>
+    <tr><td>CPDLC available</td><td>Controller–Pilot Data Link Communications available (text instructions, reducing radio congestion)</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>3.8 MSA (Minimum Safe Altitude)</h3>
+<p>
+  <strong>MSA 3400 ft</strong>, centered on RW05L, within a radius of 25 NM — the emergency obstacle clearance altitude.
+  This is a "safety altitude": if a pilot is uncertain of navigation, climbing to MSA guarantees obstacle clearance anywhere within the 25 NM circle.
+  It is not the altitude used during a normal approach.
+</p>
+</section>
+
+<!-- ==================== §4 Plan View ==================== -->
+<section id="plan-view">
+<h2><span class="sec-num">4</span>Plan View: The Route from Above</h2>
+
+<p>
+  The plan view is a top-down diagram of the entire approach procedure.
+  It shows all fixes, flight tracks, the missed approach route, and surrounding terrain/airspace information.
+</p>
+
+<h3>4.1 The Fix Chain</h3>
+<p>The fixes on the final approach segment, from farthest to nearest, are:</p>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th>Fix</th><th>Role</th><th>Published Altitude</th><th>Distance to Next</th><th>Notes</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>OTTOS</strong></td>
+      <td><span class="fix-badge badge-iaf">IAF</span></td>
+      <td>5000 ft</td>
+      <td>—</td>
+      <td>Initial Approach Fix; one of the entry points where aircraft transition from the en-route structure to the approach</td>
+    </tr>
+    <tr>
+      <td><strong>CHWDR</strong></td>
+      <td><span class="fix-badge badge-iaf">IAF</span></td>
+      <td>5000 ft</td>
+      <td>—</td>
+      <td>A second IAF for aircraft arriving from a different direction</td>
+    </tr>
+    <tr>
+      <td><strong>BOULE</strong></td>
+      <td>Step-down fix</td>
+      <td>4000 ft</td>
+      <td>3.1 NM</td>
+      <td>Intermediate step-down; aircraft descend from 5,000 to 4,000 ft</td>
+    </tr>
+    <tr>
+      <td><strong>SCHOO</strong></td>
+      <td><span class="fix-badge badge-if">IF</span></td>
+      <td>3000 ft</td>
+      <td>2.7 NM</td>
+      <td>Intermediate Fix; aircraft are now aligned with the runway and continue descending</td>
+    </tr>
+    <tr>
+      <td><strong>WEPAS</strong></td>
+      <td><span class="fix-badge badge-faf">FAF</span></td>
+      <td>2200 ft</td>
+      <td>—</td>
+      <td>Final Approach Fix; the glidepath begins here — denoted by the ▼ symbol</td>
+    </tr>
+    <tr>
+      <td><strong>RW05L</strong></td>
+      <td><span class="fix-badge badge-mapt">MAPt</span></td>
+      <td>TDZE 384 ft</td>
+      <td>—</td>
+      <td>Runway threshold = LNAV Missed Approach Point (when no vertical guidance is used)</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout callout-key">
+  <div class="callout-title"><span class="icon">📍</span>Key Concept: Fix Roles</div>
+  <ul>
+    <li><strong>IAF (Initial Approach Fix)</strong>: The entry gate to the approach. This chart has two IAFs (OTTOS and CHWDR), giving aircraft a convenient starting point regardless of which direction they approach from.</li>
+    <li><strong>IF (Intermediate Fix)</strong>: SCHOO. By this point the aircraft is aligned with the runway, speed and configuration are stabilizing, and it is ready for the final approach.</li>
+    <li><strong>FAF (Final Approach Fix)</strong>: WEPAS. The glidepath is established here and the aircraft begins the final 3° descent. Marked on the chart with a black triangle ▼.</li>
+    <li><strong>MAPt (Missed Approach Point)</strong>: For an LNAV approach (no vertical guidance), the MAPt is at RW05L (the runway threshold). For LPV/LNAV-VNAV approaches, the MAPt is the instant the aircraft descends to the DA — not a ground fix, but an altitude.</li>
+  </ul>
+</div>
+
+<h3>4.2 Plan View SVG</h3>
+
+<div class="diagram">
+  <div class="diagram-caption">Fig. 4-1 · KRDU RNAV Y RWY 5L plan view schematic (not to scale — for instructional purposes only)</div>
+  <svg viewBox="0 0 800 480" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif">
+    <defs>
+      <marker id="blu-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L9,3 z" fill="#1a6eb5"/>
+      </marker>
+      <marker id="red-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L9,3 z" fill="#9c2b2b"/>
+      </marker>
+      <marker id="grn-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L9,3 z" fill="#2d7a3a"/>
+      </marker>
+    </defs>
+
+    <!-- background sky blue light -->
+    <rect width="800" height="480" fill="#eef5fc"/>
+
+    <!-- MSA circle -->
+    <circle cx="600" cy="280" r="140" fill="none" stroke="#7ab0d8" stroke-width="1" stroke-dasharray="6,4"/>
+    <text x="600" y="134" text-anchor="middle" fill="#7ab0d8" font-size="10">25 NM MSA 3400 ft</text>
+
+    <!-- compass rose hint -->
+    <text x="760" y="30" text-anchor="end" fill="#9ab8cc" font-size="11" font-weight="700">N ↑</text>
+
+    <!-- ======= APPROACH PATH ======= -->
+    <!-- OTTOS → BOULE (feeder from IAF) -->
+    <line x1="120" y1="175" x2="290" y2="255" stroke="#1a6eb5" stroke-width="2.5" marker-end="url(#blu-arr)"/>
+    <text x="180" y="198" fill="#1a6eb5" font-size="10" font-weight="700" transform="rotate(28,180,198)">054° / 6.4 NM</text>
+
+    <!-- CHWDR feeding in from the south -->
+    <line x1="210" y1="370" x2="290" y2="255" stroke="#1a6eb5" stroke-width="2" stroke-dasharray="7,4" marker-end="url(#blu-arr)"/>
+    <text x="225" y="330" fill="#1a6eb5" font-size="9" transform="rotate(-55,225,330)">CHWDR arrival</text>
+
+    <!-- BOULE → SCHOO -->
+    <line x1="290" y1="255" x2="395" y2="306" stroke="#1a6eb5" stroke-width="2.5" marker-end="url(#blu-arr)"/>
+    <text x="325" y="268" fill="#1a6eb5" font-size="9" font-weight="700" transform="rotate(26,325,268)">054° / 3.1 NM</text>
+
+    <!-- SCHOO → WEPAS -->
+    <line x1="395" y1="306" x2="490" y2="354" stroke="#1a6eb5" stroke-width="2.5" marker-end="url(#blu-arr)"/>
+    <text x="428" y="316" fill="#1a6eb5" font-size="9" font-weight="700" transform="rotate(26,428,316)">054° / 2.7 NM</text>
+
+    <!-- WEPAS → RW05L (final, orange) -->
+    <line x1="490" y1="354" x2="615" y2="416" stroke="#c05000" stroke-width="3" marker-end="url(#blu-arr)"/>
+    <text x="535" y="370" fill="#c05000" font-size="9" font-weight="700" transform="rotate(26,535,370)">3.00° glidepath</text>
+
+    <!-- ======= FIXES ======= -->
+    <!-- OTTOS -->
+    <polygon points="120,161 113,178 127,178" fill="#1a6eb5"/>
+    <rect x="108" y="184" width="6" height="6" fill="none" stroke="#1a6eb5" stroke-width="1.5" transform="rotate(45,111,187)"/>
+    <text x="120" y="155" text-anchor="middle" fill="#0d3a6b" font-size="11" font-weight="700">OTTOS</text>
+    <text x="120" y="204" text-anchor="middle" fill="#1a6eb5" font-size="9">IAF  5000 ft</text>
+
+    <!-- CHWDR -->
+    <polygon points="210,356 203,373 217,373" fill="#1a6eb5"/>
+    <rect x="198" y="378" width="6" height="6" fill="none" stroke="#1a6eb5" stroke-width="1.5" transform="rotate(45,201,381)"/>
+    <text x="210" y="350" text-anchor="middle" fill="#0d3a6b" font-size="11" font-weight="700">CHWDR</text>
+    <text x="210" y="395" text-anchor="middle" fill="#1a6eb5" font-size="9">IAF  5000 ft</text>
+
+    <!-- BOULE -->
+    <circle cx="290" cy="255" r="6" fill="#2d7a3a" stroke="#fff" stroke-width="1.5"/>
+    <text x="290" y="241" text-anchor="middle" fill="#1a4c20" font-size="11" font-weight="700">BOULE</text>
+    <text x="290" y="272" text-anchor="middle" fill="#2d7a3a" font-size="9">Step-down  4000 ft</text>
+
+    <!-- SCHOO -->
+    <circle cx="395" cy="306" r="7" fill="#2d7a3a" stroke="#fff" stroke-width="1.5"/>
+    <text x="395" y="292" text-anchor="middle" fill="#1a4c20" font-size="11" font-weight="700">SCHOO</text>
+    <text x="395" y="324" text-anchor="middle" fill="#2d7a3a" font-size="9">IF  3000 ft</text>
+
+    <!-- WEPAS (FAF) -->
+    <polygon points="490,340 480,366 500,366" fill="#c05000"/>
+    <text x="490" y="334" text-anchor="middle" fill="#6a2200" font-size="11" font-weight="700">WEPAS</text>
+    <text x="490" y="376" text-anchor="middle" fill="#c05000" font-size="9">FAF  2200 ft ▼</text>
+
+    <!-- RW05L (runway) -->
+    <g transform="translate(620,415) rotate(-36)">
+      <rect x="-6" y="-24" width="12" height="48" rx="2" fill="#666"/>
+      <line x1="0" y1="-24" x2="0" y2="-16" stroke="#fff" stroke-width="1.5"/>
+      <line x1="0" y1="-10" x2="0" y2="-2" stroke="#fff" stroke-width="1.5"/>
+      <line x1="0" y1="4" x2="0" y2="12" stroke="#fff" stroke-width="1.5"/>
+      <line x1="0" y1="18" x2="0" y2="24" stroke="#fff" stroke-width="1.5"/>
+    </g>
+    <text x="638" y="430" fill="#333" font-size="11" font-weight="700">RW05L</text>
+    <text x="638" y="444" fill="#666" font-size="9">MAPt / TDZE 384 ft</text>
+
+    <!-- ======= MISSED APPROACH ======= -->
+    <!-- from RW05L, left turn to DUHAM -->
+    <path d="M 620 408 C 640 370 660 330 650 290 C 640 250 600 230 560 220" fill="none" stroke="#9c2b2b" stroke-width="2" stroke-dasharray="8,4" marker-end="url(#red-arr)"/>
+    <text x="660" y="310" fill="#9c2b2b" font-size="9" font-weight="700">Missed approach: left turn, climb</text>
+    <text x="660" y="322" fill="#9c2b2b" font-size="9">to 2200 ft</text>
+
+    <!-- DUHAM holding -->
+    <ellipse cx="540" cy="210" rx="35" ry="18" fill="none" stroke="#9c2b2b" stroke-width="2" stroke-dasharray="5,3"/>
+    <circle cx="540" cy="210" r="5" fill="#9c2b2b"/>
+    <text x="540" y="198" text-anchor="middle" fill="#6a0a0a" font-size="11" font-weight="700">DUHAM</text>
+    <text x="540" y="236" text-anchor="middle" fill="#9c2b2b" font-size="8">MAHF / Hold / 173°/353°</text>
+    <text x="540" y="248" text-anchor="middle" fill="#9c2b2b" font-size="8">4 NM leg length</text>
+
+    <!-- 1000 ft climb note -->
+    <text x="670" y="394" fill="#9c2b2b" font-size="8">Climb to 1000 ft first</text>
+
+    <!-- legend -->
+    <rect x="18" y="18" width="200" height="120" rx="6" fill="rgba(255,255,255,0.85)" stroke="#ccc" stroke-width="1"/>
+    <text x="118" y="37" text-anchor="middle" fill="#333" font-size="11" font-weight="700">Legend</text>
+    <line x1="30" y1="52" x2="68" y2="52" stroke="#1a6eb5" stroke-width="2.5"/>
+    <text x="76" y="56" fill="#333" font-size="10">Approach route</text>
+    <line x1="30" y1="70" x2="68" y2="70" stroke="#c05000" stroke-width="3"/>
+    <text x="76" y="74" fill="#333" font-size="10">Final approach / glidepath</text>
+    <line x1="30" y1="88" x2="68" y2="88" stroke="#9c2b2b" stroke-width="2" stroke-dasharray="6,3"/>
+    <text x="76" y="92" fill="#333" font-size="10">Missed approach route</text>
+    <polygon points="45,104 38,118 52,118" fill="#1a6eb5"/>
+    <text x="76" y="113" fill="#333" font-size="10">IAF (Initial Approach Fix)</text>
+    <polygon points="45,124 38,132 52,132" fill="#c05000"/>
+    <text x="76" y="133" fill="#333" font-size="10">FAF (Final Approach Fix)</text>
+
+    <!-- ===== Interactive hotspots (hover for details) ===== -->
+    <g class="hotspots">
+      <line class="hot seg" x1="120" y1="175" x2="290" y2="255" stroke="transparent" stroke-width="16" pointer-events="all"
+            data-t="Feeder: OTTOS → BOULE" data-d="054° track, 6.4 NM. The aircraft flies inbound from the OTTOS IAF toward the BOULE step-down fix."></line>
+      <line class="hot seg" x1="210" y1="370" x2="290" y2="255" stroke="transparent" stroke-width="16" pointer-events="all"
+            data-t="Arrival: CHWDR → BOULE" data-d="An alternate entry. CHWDR is the second IAF; traffic joining from the south merges toward BOULE here."></line>
+      <line class="hot seg" x1="290" y1="255" x2="395" y2="306" stroke="transparent" stroke-width="16" pointer-events="all"
+            data-t="BOULE → SCHOO" data-d="054° track, 3.1 NM. Descending from 4000 ft toward SCHOO, the intermediate fix, at 3000 ft."></line>
+      <line class="hot seg" x1="395" y1="306" x2="490" y2="354" stroke="transparent" stroke-width="16" pointer-events="all"
+            data-t="SCHOO → WEPAS" data-d="054° track, 2.7 NM. The intermediate segment that lines the aircraft up for final approach at WEPAS (the FAF)."></line>
+      <line class="hot seg" x1="490" y1="354" x2="615" y2="416" stroke="transparent" stroke-width="18" pointer-events="all"
+            data-t="Final approach: WEPAS → RW05L" data-d="The 3.00° glidepath from the FAF down to the runway threshold — where the final descent begins."></line>
+      <circle class="hot dot" cx="120" cy="178" r="22" fill="transparent" pointer-events="all"
+            data-t="OTTOS — IAF" data-d="Initial Approach Fix. Cross at 5000 ft. One of two entry points where the aircraft joins the published approach from the en-route structure."></circle>
+      <circle class="hot dot" cx="210" cy="372" r="22" fill="transparent" pointer-events="all"
+            data-t="CHWDR — IAF" data-d="Initial Approach Fix. Cross at 5000 ft. The second entry fix, used by traffic arriving from a different direction."></circle>
+      <circle class="hot dot" cx="290" cy="255" r="18" fill="transparent" pointer-events="all"
+            data-t="BOULE — Step-down fix" data-d="Cross at 4000 ft (at or above). A step-down fix on the way to the intermediate fix."></circle>
+      <circle class="hot dot" cx="395" cy="306" r="18" fill="transparent" pointer-events="all"
+            data-t="SCHOO — IF" data-d="Intermediate Fix. Cross at 3000 ft. Aligns and stabilises the aircraft before final approach."></circle>
+      <circle class="hot dot" cx="490" cy="354" r="18" fill="transparent" pointer-events="all"
+            data-t="WEPAS — FAF" data-d="Final Approach Fix. Cross at 2200 ft. The final descent on the 3.00° glidepath starts here (marked ▼ on the chart)."></circle>
+      <circle class="hot dot" cx="620" cy="415" r="22" fill="transparent" pointer-events="all"
+            data-t="RW05L — Runway / MAPt" data-d="Runway 05L threshold, TDZE 384 ft. For LNAV this is the Missed Approach Point — decide to land or go missed by here."></circle>
+      <circle class="hot dot" cx="540" cy="210" r="24" fill="transparent" pointer-events="all"
+            data-t="DUHAM — MAHF" data-d="Missed Approach Holding Fix. After a missed approach, climb to 2200 ft, fly direct DUHAM, and hold (4 NM legs, inbound/outbound 173°/353°)."></circle>
+    </g>
+  </svg>
+</div>
+
+<h3>4.3 TAA and the OTTOS Holding Pattern</h3>
+<p>
+  Near OTTOS the chart shows <strong>"2T0K"</strong> and an altitude circle of 6,000 ft — this is the
+  <strong>TAA (Terminal Arrival Area)</strong> annotation.
+  The TAA defines the minimum arrival altitude for each sector when joining the approach from different directions,
+  ensuring the aircraft has adequate altitude margin before reaching the IAF.
+  The details are beyond this tutorial's scope; the key takeaway is: when reaching OTTOS, the aircraft must be at or above 6,000 ft.
+</p>
+</section>
+
+<!-- ==================== §5 Profile View ==================== -->
+<section id="profile-view">
+<h2><span class="sec-num">5</span>Profile View: The Vertical Step-Down</h2>
+
+<p>
+  The profile view shows the aircraft's descent from a side perspective — like a staircase,
+  where each step represents an altitude to which descent is authorized.
+  The final approach segment also displays a <strong>3° glidepath line</strong> extending from the FAF (WEPAS) to the runway threshold.
+</p>
+
+<div class="diagram">
+  <div class="diagram-caption">Fig. 5-1 · KRDU RNAV Y RWY 5L profile view schematic (altitudes and distances are illustrative, not to scale)</div>
+  <svg viewBox="0 0 800 380" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif">
+    <defs>
+      <marker id="blkarr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L8,3 z" fill="#333"/>
+      </marker>
+    </defs>
+
+    <!-- background -->
+    <rect width="800" height="380" fill="#f0f6ff"/>
+
+    <!-- sky gradient suggestion -->
+    <rect x="0" y="0" width="800" height="220" fill="#e8f4ff" opacity="0.5"/>
+
+    <!-- ground / terrain suggestion -->
+    <rect x="0" y="300" width="800" height="80" fill="#d8e8d0"/>
+
+    <!-- ======= ALTITUDE AXIS ======= -->
+    <!-- y=310 → 384 ft (TDZE), y=30 → ~5200 ft (top) -->
+    <!-- scale: (alt - 384) * (310-30) / (5200-384) = (alt-384) * 280/4816 -->
+    <!-- alt 5000 → y = 30 + (5200-5000)*280/4816 = 30+11.6 = 41 -->
+    <!-- alt 4000 → y = 30 + (5200-4000)*280/4816 = 30+69.7 = 100 -->
+    <!-- alt 3000 → y = 30 + (5200-3000)*280/4816 = 30+128 = 158 -->
+    <!-- alt 2200 → y = 30 + (5200-2200)*280/4816 = 30+174 = 204 -->
+    <!-- alt 840 →  y = 30 + (5200-840)*280/4816 = 30+253 = 283 -->
+    <!-- alt 748 →  y = 30 + (5200-748)*280/4816 = 30+259 = 289 -->
+    <!-- alt 598 →  y = 30 + (5200-598)*280/4816 = 30+267 = 297 -->
+    <!-- alt 384 →  y = 310 -->
+
+    <!-- Y axis -->
+    <line x1="70" y1="20" x2="70" y2="320" stroke="#aaa" stroke-width="1"/>
+    <line x1="65" y1="41" x2="75" y2="41" stroke="#aaa" stroke-width="1"/>
+    <text x="60" y="44" text-anchor="end" fill="#666" font-size="9">5000</text>
+    <line x1="65" y1="100" x2="75" y2="100" stroke="#aaa" stroke-width="1"/>
+    <text x="60" y="103" text-anchor="end" fill="#666" font-size="9">4000</text>
+    <line x1="65" y1="158" x2="75" y2="158" stroke="#aaa" stroke-width="1"/>
+    <text x="60" y="161" text-anchor="end" fill="#666" font-size="9">3000</text>
+    <line x1="65" y1="204" x2="75" y2="204" stroke="#aaa" stroke-width="1"/>
+    <text x="60" y="207" text-anchor="end" fill="#666" font-size="9">2200</text>
+    <line x1="65" y1="283" x2="75" y2="283" stroke="#aaa" stroke-width="1"/>
+    <text x="60" y="286" text-anchor="end" fill="#666" font-size="9">840</text>
+    <line x1="65" y1="289" x2="75" y2="289" stroke="#aaa" stroke-width="1"/>
+    <text x="60" y="292" text-anchor="end" fill="#666" font-size="9">748</text>
+    <line x1="65" y1="297" x2="75" y2="297" stroke="#aaa" stroke-width="1"/>
+    <text x="60" y="300" text-anchor="end" fill="#666" font-size="9">598</text>
+    <line x1="65" y1="310" x2="75" y2="310" stroke="#aaa" stroke-width="1"/>
+    <text x="60" y="313" text-anchor="end" fill="#666" font-size="9">384</text>
+    <text x="20" y="170" text-anchor="middle" fill="#888" font-size="10" transform="rotate(-90,20,170)">Altitude (ft MSL)</text>
+
+    <!-- X axis positions (approx, for teaching) -->
+    <!-- x: IAF=90, BOULE=230, SCHOO=340, WEPAS=450, RW05L=720 -->
+    <line x1="70" y1="320" x2="760" y2="320" stroke="#aaa" stroke-width="1"/>
+
+    <!-- ======= STEP-DOWN STAIRCASE ======= -->
+    <!-- IAF/CHWDR at 5000 (x=90..160) -->
+    <rect x="90" y="41" width="1" height="269" fill="#ccc" stroke-dasharray="3,2"/>
+    <line x1="90" y1="41" x2="230" y2="41" stroke="#1a6eb5" stroke-width="3"/>
+    <!-- down step to 4000 at BOULE (x=230) -->
+    <line x1="230" y1="41" x2="230" y2="100" stroke="#1a6eb5" stroke-width="2" stroke-dasharray="4,2"/>
+    <line x1="230" y1="100" x2="340" y2="100" stroke="#1a6eb5" stroke-width="3"/>
+    <!-- down step to 3000 at SCHOO (x=340) -->
+    <line x1="340" y1="100" x2="340" y2="158" stroke="#1a6eb5" stroke-width="2" stroke-dasharray="4,2"/>
+    <line x1="340" y1="158" x2="450" y2="158" stroke="#1a6eb5" stroke-width="3"/>
+    <!-- down step to 2200 at WEPAS (x=450) -->
+    <line x1="450" y1="158" x2="450" y2="204" stroke="#1a6eb5" stroke-width="2" stroke-dasharray="4,2"/>
+
+    <!-- ======= GLIDEPATH LINE from WEPAS (x=450,y=204) to threshold (x=720,y=310) ======= -->
+    <line x1="450" y1="204" x2="720" y2="310" stroke="#c05000" stroke-width="3"/>
+    <!-- glidepath label -->
+    <text x="570" y="242" fill="#c05000" font-size="10" font-weight="700" transform="rotate(21,570,242)">3.00° glidepath  GP=3.00°</text>
+
+    <!-- LPV DA line at 598 -->
+    <line x1="70" y1="297" x2="720" y2="297" stroke="#2d7a3a" stroke-width="1" stroke-dasharray="6,3" opacity="0.7"/>
+    <text x="724" y="300" fill="#2d7a3a" font-size="8.5" font-weight="700">LPV DA 598</text>
+
+    <!-- LNAV/VNAV DA at 748 -->
+    <line x1="70" y1="289" x2="720" y2="289" stroke="#1a6eb5" stroke-width="1" stroke-dasharray="6,3" opacity="0.6"/>
+    <text x="724" y="292" fill="#1a6eb5" font-size="8.5" font-weight="700">L/V DA 748</text>
+
+    <!-- LNAV MDA at 840 -->
+    <line x1="70" y1="283" x2="720" y2="283" stroke="#c08000" stroke-width="1.5" stroke-dasharray="6,3" opacity="0.7"/>
+    <text x="724" y="286" fill="#c08000" font-size="8.5" font-weight="700">LNAV MDA 840</text>
+
+    <!-- ======= FIX LABELS ON PROFILE ======= -->
+    <!-- IAF -->
+    <rect x="78" y="34" width="8" height="14" fill="#1a6eb5"/>
+    <text x="90" y="30" text-anchor="middle" fill="#0d3a6b" font-size="9" font-weight="700">OTTOS/CHWDR</text>
+    <text x="90" y="22" text-anchor="middle" fill="#0d3a6b" font-size="8">IAF</text>
+
+    <!-- BOULE -->
+    <circle cx="230" cy="100" r="5" fill="#2d7a3a" stroke="#fff" stroke-width="1.5"/>
+    <text x="230" y="92" text-anchor="middle" fill="#1a4c20" font-size="9" font-weight="700">BOULE</text>
+    <text x="230" y="83" text-anchor="middle" fill="#2d7a3a" font-size="8">4000 ft</text>
+
+    <!-- SCHOO -->
+    <circle cx="340" cy="158" r="5" fill="#2d7a3a" stroke="#fff" stroke-width="1.5"/>
+    <text x="340" y="150" text-anchor="middle" fill="#1a4c20" font-size="9" font-weight="700">SCHOO (IF)</text>
+    <text x="340" y="141" text-anchor="middle" fill="#2d7a3a" font-size="8">3000 ft</text>
+
+    <!-- WEPAS (FAF) -->
+    <polygon points="450,190 443,210 457,210" fill="#c05000"/>
+    <text x="450" y="186" text-anchor="middle" fill="#6a2200" font-size="9" font-weight="700">WEPAS (FAF)</text>
+    <text x="450" y="177" text-anchor="middle" fill="#c05000" font-size="8">2200 ft ▼</text>
+
+    <!-- RW05L -->
+    <rect x="712" y="298" width="16" height="12" rx="1" fill="#555"/>
+    <text x="720" y="330" text-anchor="middle" fill="#333" font-size="9" font-weight="700">RW05L</text>
+    <text x="720" y="341" text-anchor="middle" fill="#555" font-size="8">TDZE 384</text>
+    <text x="720" y="352" text-anchor="middle" fill="#9c2b2b" font-size="8">MAPt (LNAV)</text>
+
+    <!-- TCH annotation -->
+    <line x1="720" y1="298" x2="720" y2="310" stroke="#c05000" stroke-width="2"/>
+    <text x="700" y="295" fill="#c05000" font-size="8">TCH 57 ft</text>
+
+    <!-- 1.3 NM marker -->
+    <line x1="682" y1="316" x2="682" y2="322" stroke="#666" stroke-width="1"/>
+    <text x="682" y="336" text-anchor="middle" fill="#666" font-size="8">1.3 NM</text>
+    <text x="682" y="346" text-anchor="middle" fill="#666" font-size="8">to RW05L</text>
+
+    <!-- ======= MISSED APPROACH sketch ======= -->
+    <path d="M 720 310 L 720 270 Q 700 240 660 220 L 560 200" fill="none" stroke="#9c2b2b" stroke-width="2" stroke-dasharray="6,3"/>
+    <text x="570" y="196" fill="#9c2b2b" font-size="8">Missed approach: climb to 1000 → 2200 → hold at DUHAM</text>
+
+    <!-- ===== Interactive hotspots (hover for details) ===== -->
+    <g class="hotspots">
+      <line class="hot seg" x1="90" y1="41" x2="230" y2="41" stroke="transparent" stroke-width="14" pointer-events="all"
+            data-t="Level at 5000 ft" data-d="From the IAF (OTTOS / CHWDR) the aircraft holds 5000 ft until BOULE."></line>
+      <line class="hot seg" x1="230" y1="100" x2="340" y2="100" stroke="transparent" stroke-width="14" pointer-events="all"
+            data-t="Level at 4000 ft" data-d="After the step-down at BOULE, hold 4000 ft until SCHOO."></line>
+      <line class="hot seg" x1="340" y1="158" x2="450" y2="158" stroke="transparent" stroke-width="14" pointer-events="all"
+            data-t="Level at 3000 ft" data-d="After SCHOO (the IF), hold 3000 ft until WEPAS (the FAF)."></line>
+      <line class="hot seg" x1="450" y1="204" x2="720" y2="310" stroke="transparent" stroke-width="16" pointer-events="all"
+            data-t="3.00° glidepath" data-d="From WEPAS (2200 ft) down to the threshold, crossing it at TCH 57 ft — losing about 320 ft per nautical mile."></line>
+      <circle class="hot dot" cx="90" cy="41" r="16" fill="transparent" pointer-events="all"
+            data-t="IAF — 5000 ft" data-d="OTTOS / CHWDR Initial Approach Fix: the top of the step-down staircase."></circle>
+      <circle class="hot dot" cx="230" cy="100" r="14" fill="transparent" pointer-events="all"
+            data-t="BOULE — 4000 ft" data-d="Step-down fix (at or above 4000 ft)."></circle>
+      <circle class="hot dot" cx="340" cy="158" r="14" fill="transparent" pointer-events="all"
+            data-t="SCHOO — IF, 3000 ft" data-d="Intermediate Fix (at or above 3000 ft)."></circle>
+      <circle class="hot dot" cx="450" cy="204" r="14" fill="transparent" pointer-events="all"
+            data-t="WEPAS — FAF, 2200 ft" data-d="Final Approach Fix; the glidepath descent begins here."></circle>
+      <circle class="hot dot" cx="720" cy="310" r="16" fill="transparent" pointer-events="all"
+            data-t="RW05L — threshold" data-d="Runway threshold, TDZE 384 ft. The glidepath crosses it at TCH 57 ft. This is the MAPt for LNAV."></circle>
+      <line class="hot seg" x1="80" y1="297" x2="715" y2="297" stroke="transparent" stroke-width="6" pointer-events="all"
+            data-t="LPV DA 598 ft" data-d="Lowest minima: with WAAS vertical guidance, decide by 598 ft MSL (HAT 214 ft)."></line>
+      <line class="hot seg" x1="80" y1="289" x2="715" y2="289" stroke="transparent" stroke-width="5" pointer-events="all"
+            data-t="LNAV/VNAV DA 748 ft" data-d="With approved vertical guidance, decide by 748 ft MSL (HAT 364 ft)."></line>
+      <line class="hot seg" x1="80" y1="282" x2="715" y2="282" stroke="transparent" stroke-width="5" pointer-events="all"
+            data-t="LNAV MDA 840 ft" data-d="No vertical guidance: do not descend below 840 ft MSL (HAT 456 ft) until the runway is in sight."></line>
+    </g>
+  </svg>
+</div>
+
+<h3>5.1 What Each Step Means</h3>
+<p>
+  The step-down descent is the classic pattern of an instrument approach:
+</p>
+<ul>
+  <li>Each step-down fix sets a minimum altitude — an <strong>"at or above"</strong> constraint.</li>
+  <li>Between two step-down fixes the aircraft holds at that altitude until reaching the next fix, at which point it may descend further.</li>
+  <li>This design ensures that as long as the aircraft has not yet reached the safe approach path, it remains clear of surrounding terrain and obstacles.</li>
+</ul>
+
+<h3>5.2 Glidepath Angle and TCH</h3>
+<p>
+  From WEPAS (2,200 ft) to RW05L (384 ft) there is a <strong>3.00° glidepath</strong>.
+  This means the aircraft descends approximately 320 ft for every 1 nautical mile (1,852 m) of forward travel.
+  <strong>TCH = 57 ft</strong>: the glidepath crosses the runway threshold at a height of 57 ft —
+  meaning the landing gear is approximately 57 ft above the runway surface as the aircraft passes over the threshold.
+</p>
+
+<div class="callout callout-info">
+  <div class="callout-title"><span class="icon">ℹ️</span>VGSI and RNAV Glidepath Are Not Coincident</div>
+  <p>
+    A note on the chart reads:
+    <em>"VGSI and RNAV glidepath not coincident (VGSI Angle 3.00/TCH 72)"</em>.
+    This means that although the Visual Glideslope Indicator (PAPI/VASI) and the RNAV glidepath share the same 3° angle,
+    their threshold crossing heights differ — PAPI at 72 ft, RNAV at 57 ft.
+    Pilots should not rely solely on the PAPI to judge whether they are on the RNAV glidepath during final approach.
+  </p>
+</div>
+</section>
+
+<!-- ==================== §6 Four Approach Segments ==================== -->
+<section id="four-segments">
+<h2><span class="sec-num">6</span>The Four Approach Segments</h2>
+
+<p>The FAA divides an instrument approach from start to touchdown into four standard segments:</p>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Segment</th><th>Name</th><th>Starts at</th><th>Ends at</th><th>On this chart</th><th>Purpose</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Initial Approach Segment</strong></td>
+      <td>Initial Approach Segment</td>
+      <td>IAF</td>
+      <td>IF or FAF</td>
+      <td>OTTOS/CHWDR → SCHOO</td>
+      <td>Aircraft lose altitude and turn to align with the runway</td>
+    </tr>
+    <tr>
+      <td><strong>Intermediate Approach Segment</strong></td>
+      <td>Intermediate Approach Segment</td>
+      <td>IF (SCHOO)</td>
+      <td>FAF (WEPAS)</td>
+      <td>SCHOO → WEPAS</td>
+      <td>Stabilize configuration and speed in preparation for final approach</td>
+    </tr>
+    <tr>
+      <td><strong>Final Approach Segment</strong></td>
+      <td>Final Approach Segment</td>
+      <td>FAF (WEPAS)</td>
+      <td>MAPt / runway threshold</td>
+      <td>WEPAS → RW05L</td>
+      <td>Descend on the 3° glidepath and decide whether to land</td>
+    </tr>
+    <tr>
+      <td><strong>Missed Approach Segment</strong></td>
+      <td>Missed Approach Segment</td>
+      <td>MAPt</td>
+      <td>MAHF (DUHAM)</td>
+      <td>RW05L → DUHAM</td>
+      <td>If visual contact with the runway is not established, climb and enter the hold</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout callout-tip">
+  <div class="callout-title"><span class="icon">✅</span>Memory Aid</div>
+  <p>
+    Think of the four segments as <strong>Initial → Intermediate → Final → Missed</strong>,
+    with key fixes <strong>IAF → IF → FAF → MAPt → MAHF</strong>.
+    Each segment has a different pilot focus:
+    Initial = lose altitude; Intermediate = stabilize; Final = landing decision; Missed = safe departure.
+  </p>
+</div>
+</section>
+
+<!-- ==================== §7 Minima Box ==================== -->
+<section id="minima">
+<h2><span class="sec-num">7</span>The Minima Box</h2>
+
+<p>
+  The Minima Box is the table at the bottom of the approach chart.
+  It tells the pilot how low the aircraft may descend given prevailing weather conditions.
+  If the pilot <strong>cannot see the runway</strong> upon reaching the Decision Altitude (DA) or
+  Minimum Descent Altitude (MDA), a missed approach must be executed immediately — further descent is not permitted.
+</p>
+
+<h3>7.1 The Three Main Minima Lines</h3>
+
+<div class="minima-grid">
+  <div class="minima-card card-lpv">
+    <div class="label">LPV</div>
+    <div class="da">598 ft</div>
+    <div class="vis">DA · RVR 1800 ft</div>
+    <div class="hat">HAT 214 ft · (200-½)</div>
+  </div>
+  <div class="minima-card card-lv">
+    <div class="label">LNAV / VNAV</div>
+    <div class="da">748 ft</div>
+    <div class="vis">DA · RVR 3500 ft</div>
+    <div class="hat">HAT 364 ft · (400-¾)</div>
+  </div>
+  <div class="minima-card card-lnav">
+    <div class="label">LNAV</div>
+    <div class="da">840 ft</div>
+    <div class="vis">MDA · 24 (½ mile)</div>
+    <div class="hat">HAT 456 ft · A/B/C ½ mi</div>
+  </div>
+  <div class="minima-card card-circ">
+    <div class="label">CIRCLING</div>
+    <div class="da">960~1180 ft</div>
+    <div class="vis">MDA · by aircraft category</div>
+    <div class="hat">HAA 525~745 ft</div>
+  </div>
+</div>
+
+<h3>7.2 DA vs. MDA</h3>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Type</th><th>Full Name</th><th>When Used</th><th>Operating Rule</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>DA</strong></td>
+      <td>Decision Altitude</td>
+      <td>With vertical guidance (LPV / LNAV-VNAV)</td>
+      <td>At this altitude the pilot decides: runway in sight → continue; otherwise → immediately go missed</td>
+    </tr>
+    <tr>
+      <td><strong>MDA</strong></td>
+      <td>Minimum Descent Altitude</td>
+      <td>No vertical guidance (LNAV)</td>
+      <td>Level off at MDA and fly level while looking for the runway visually; go missed at the MAPt if runway not in sight</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3>7.3 HAT and HAA</h3>
+<ul>
+  <li><strong>HAT (Height Above Touchdown)</strong>: The minima altitude <em>minus</em> TDZE (384 ft). For example, LPV DA 598 − 384 = <strong>214 ft HAT</strong> — meaning the pilot must see the runway at 214 ft above the touchdown zone.</li>
+  <li><strong>HAA (Height Above Airport)</strong>: Used for circling approaches only — minima altitude minus airport elevation (435 ft). Because the aircraft is not following the approach centerline during circling, the reference is the overall airport elevation.</li>
+</ul>
+
+<h3>7.4 Why Is the LPV Minimum the Lowest?</h3>
+
+<p>
+  Ranked from lowest to highest DA/MDA (most to least capable):
+</p>
+<ol>
+  <li>
+    <strong>LPV (lowest, DA 598 ft)</strong>: Requires a WAAS receiver and certified aircraft. Provides precise lateral <em>and</em> vertical guidance (similar to an ILS),
+    allowing the pilot to follow a precise 3° glidepath to a DA of 598 ft.
+  </li>
+  <li>
+    <strong>LNAV/VNAV (middle, DA 748 ft)</strong>: Requires barometric vertical navigation (Baro-VNAV) or SBAS. Provides vertical guidance
+    but with less precision than LPV, hence the higher DA. May be unavailable at extreme temperatures (see briefing notes in the header).
+  </li>
+  <li>
+    <strong>LNAV (highest, MDA 840 ft)</strong>: Lateral navigation only — no vertical guidance.
+    The pilot descends by step-down fixes to the MDA and then levels off, visually searching for the runway.
+    The allowed altitude is therefore higher and visibility requirements are expressed in statute miles rather than RVR.
+  </li>
+</ol>
+
+<div class="callout callout-tip">
+  <div class="callout-title"><span class="icon">💡</span>Pilots Prefer LPV</div>
+  <p>
+    When the aircraft is WAAS-capable and the flight plan authorizes LPV,
+    pilots should use LPV minima whenever possible —
+    it offers the most precise guidance, the lowest DA, and the greatest chance of landing in poor weather (low ceilings, low visibility).
+  </p>
+</div>
+
+<h3>7.5 Circling Approach</h3>
+<p>
+  A circling approach is a special case: the aircraft executes an instrument approach aligned with one runway,
+  then maneuvers visually to land on a <em>different</em> runway.
+  Because the aircraft is no longer following the approach centerline, greater altitude margin is required,
+  so the MDA is higher (960–1,180 ft) and varies by aircraft category (Cat A/B/C/D) —
+  faster aircraft have larger turn radii and therefore need more protection altitude.
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Circling Category</th><th>MDA</th><th>HAA</th><th>Visibility</th></tr></thead>
+  <tbody>
+    <tr><td>Cat A / B</td><td>960 ft</td><td>525 ft</td><td>1 mile</td></tr>
+    <tr><td>Cat C</td><td>1020 ft</td><td>585 ft</td><td>(per table)</td></tr>
+    <tr><td>Cat D</td><td>1180 ft</td><td>745 ft</td><td>(per table)</td></tr>
+  </tbody>
+</table>
+</div>
+</section>
+
+<!-- ==================== §8 Altitude Restrictions ==================== -->
+<section id="alt-qualifiers">
+<h2><span class="sec-num">8</span>Reading Altitude Restrictions</h2>
+
+<p>
+  Altitude numbers on an approach chart appear with different symbols that convey different constraint types.
+  Understanding these symbols is critical — flying the wrong altitude can have serious consequences.
+</p>
+
+<h3>8.1 Four Types of Altitude Constraints</h3>
+
+<div class="alt-qual-row">
+  <div class="alt-qual-box">
+    <div class="alt-val mandatory">4000</div>
+    <div class="alt-qual-label">Mandatory (At)<br>Must cross at exactly this altitude</div>
+  </div>
+  <div class="alt-qual-box">
+    <div class="alt-val at-above">4000</div>
+    <div class="alt-qual-label">At or Above<br>Line below the number<br>May cross at or above this altitude</div>
+  </div>
+  <div class="alt-qual-box">
+    <div class="alt-val at-below">4000</div>
+    <div class="alt-qual-label">At or Below<br>Line above the number<br>May cross at or below this altitude</div>
+  </div>
+  <div class="alt-qual-box">
+    <div class="alt-val mandatory" style="font-size:1.1rem">4000<br><span style="font-size:.85rem">3000</span></div>
+    <div class="alt-qual-label">Window (Between)<br>Must cross within this altitude range</div>
+  </div>
+</div>
+
+<h3>8.2 Altitude Constraints at Each Fix on This Chart</h3>
+<p>
+  On the KRDU RNAV Y RWY 5L chart, every step-down fix uses an <strong>"at or above"</strong> constraint —
+  meaning the aircraft must be at the published altitude or higher when it reaches that fix.
+  In CIFP (the FAA's machine-readable Coded Instrument Flight Procedures data), these step-down fixes are encoded with an <strong>"at or above"</strong> qualifier.
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Fix</th><th>Published Altitude</th><th>Constraint Type</th><th>Practical Meaning</th></tr></thead>
+  <tbody>
+    <tr><td>OTTOS / CHWDR (IAF)</td><td>5000 ft</td><td>At or above</td><td>Must not be below 5,000 ft when joining the approach</td></tr>
+    <tr><td>BOULE</td><td>4000 ft</td><td>At or above</td><td>Must not be below 4,000 ft when crossing BOULE</td></tr>
+    <tr><td>SCHOO (IF)</td><td>3000 ft</td><td>At or above</td><td>Must not be below 3,000 ft when crossing SCHOO</td></tr>
+    <tr><td>WEPAS (FAF)</td><td>2200 ft</td><td>At or above</td><td>Glidepath establishment point; must not be below 2,200 ft</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout callout-danger">
+  <div class="callout-title"><span class="icon">🚫</span>Never Do This</div>
+  <p>
+    Never descend below the published altitude before reaching the associated fix.
+    For example, while between SCHOO (IF) and WEPAS (FAF), descending below 2,200 ft is not permitted —
+    even though the FAF altitude is 2,200 ft, the aircraft must first reach WEPAS before beginning that descent.
+    Premature descent means the aircraft may leave the obstacle clearance envelope, creating a collision risk with terrain or structures.
+  </p>
+</div>
+
+<h3>8.3 How to Identify the Symbols on the Chart</h3>
+<p>On the actual chart, an "at or above" altitude has a thin underline below the number; a "mandatory" altitude places the number inside a thin rectangle.
+Recognizing these two symbols is a fundamental skill for reading approach charts.</p>
+</section>
+
+<!-- ==================== §9 CIFP ==================== -->
+<section id="cifp">
+<h2><span class="sec-num">9</span>A Glimpse at CIFP Leg Coding</h2>
+
+<p>
+  The paper chart is designed for human pilots; but aircraft Flight Management Systems (FMS) and analysis tools like AeroViz
+  need a machine-readable version.
+  The FAA publishes <strong>CIFP (Coded Instrument Flight Procedures)</strong>
+  in the <strong>ARINC 424</strong> format, encoding each segment of the chart as a row of fixed-width text records.
+</p>
+
+<h3>9.1 Path and Terminator (P-T) Codes</h3>
+<p>
+  Each leg is described by a <strong>two-letter code (Path and Terminator, P-T)</strong> that describes its geometry:
+</p>
+
+<div class="leg-grid">
+  <div class="leg-cell header">Code</div>
+  <div class="leg-cell header">Full Name and Meaning</div>
+  <div class="leg-cell"><span class="leg-code">IF</span></div>
+  <div class="leg-cell"><strong>Initial Fix</strong>: Declares a starting point; no flight action is taken. The first leg of every procedure is usually an IF leg.</div>
+  <div class="leg-cell"><span class="leg-code">TF</span></div>
+  <div class="leg-cell"><strong>Track to a Fix</strong>: Fly a great-circle track to the next fix. This is the most common encoding for straight segments; most legs on this chart are TF.</div>
+  <div class="leg-cell"><span class="leg-code">CF</span></div>
+  <div class="leg-cell"><strong>Course to a Fix</strong>: Fly a specified magnetic course to the fix (the course is fixed and does not follow the great circle). The final approach segment typically uses CF to ensure precise alignment on 054°.</div>
+  <div class="leg-cell"><span class="leg-code">DF</span></div>
+  <div class="leg-cell"><strong>Direct to a Fix</strong>: Fly direct from the current position to the fix, with no specified course. Commonly used after a missed approach turn to fly direct to DUHAM.</div>
+  <div class="leg-cell"><span class="leg-code">CA</span></div>
+  <div class="leg-cell"><strong>Course to an Altitude</strong>: Fly a specified heading until reaching a specified altitude. The initial climb segment of the missed approach (climb to 1,000 ft) is a CA leg.</div>
+  <div class="leg-cell"><span class="leg-code">HM</span></div>
+  <div class="leg-cell"><strong>Hold to Manual termination</strong>: Enter a standard holding pattern at a fix and hold until the controller clears the aircraft out or the pilot manually exits. The DUHAM hold is an HM leg.</div>
+</div>
+
+<h3>9.2 Approximate Coding Logic for This Chart</h3>
+<div class="callout callout-key">
+  <div class="callout-title"><span class="icon">💻</span>CIFP Coding Illustration</div>
+  <p>The logic of the final approach segment is roughly as follows (simplified example — not actual CIFP record lines):</p>
+  <ul>
+    <li><code>IF  OTTOS  5000A</code> (A = at or above; start at OTTOS, not below 5,000)</li>
+    <li><code>TF  BOULE  4000A</code> (track to BOULE, not below 4,000)</li>
+    <li><code>TF  SCHOO  3000A</code> (continue to SCHOO, not below 3,000)</li>
+    <li><code>TF  WEPAS  2200A</code> (to FAF WEPAS, not below 2,200; glidepath begins)</li>
+    <li><code>CF  RW05L  054°</code> (fly course 054° to the runway threshold — the final approach segment)</li>
+    <li><code>CA  —  1000</code> (missed approach: climb on current course to 1,000 ft)</li>
+    <li><code>DF  DUHAM  2200</code> (fly direct to DUHAM, climb to 2,200 ft)</li>
+    <li><code>HM  DUHAM  —</code> (enter the hold at DUHAM until cleared by ATC)</li>
+  </ul>
+  <p>AeroViz parses the FAA CIFP files and extracts fixes, roles, and altitude constraints from these records, then renders the protection envelope and flight path in the Cesium 3D view.</p>
+</div>
+</section>
+
+<!-- ==================== §10 AeroViz ==================== -->
+<section id="aeroviz">
+<h2><span class="sec-num">10</span>Cross-Referencing in AeroViz</h2>
+
+<p>
+  AeroViz parses FAA CIFP data into a 3D visualization, letting you see everything described in this tutorial on Cesium Earth in real time.
+</p>
+
+<h3>10.1 How to Open It</h3>
+<ol>
+  <li>Start the AeroViz frontend (<code>npm run dev</code>) and navigate to KRDU airport.</li>
+  <li>In the left-hand control panel, find "Layers" and enable <strong>RNAV Procedures</strong>.</li>
+  <li>Select <strong>R05LY</strong> (corresponding to this chart) to see the entire approach path overlaid on the 3D terrain.</li>
+</ol>
+
+<h3>10.2 What Corresponds to What</h3>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>This Tutorial</th><th>What You See in AeroViz</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>Fixes (OTTOS, WEPAS, etc.)</td>
+      <td>Labeled points on the 3D globe, color-coded by role (IAF blue, FAF orange, etc.)</td>
+    </tr>
+    <tr>
+      <td>TF/CF leg segments</td>
+      <td>3D polylines in Cesium showing segment altitudes (the step-down staircase is visible)</td>
+    </tr>
+    <tr>
+      <td>OCS obstacle clearance surface</td>
+      <td>Semi-transparent polygon surfaces showing the approach protection zone (see <code>useOcsLayer</code> and tutorial 03)</td>
+    </tr>
+    <tr>
+      <td>Profile view step-down descent</td>
+      <td>Side-view flight path; the vertical profile can be viewed in the Procedure Details panel</td>
+    </tr>
+    <tr>
+      <td>DUHAM holding pattern</td>
+      <td>Holding racetrack graphic (oval protection area) along the runway extended centerline</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout callout-tip">
+  <div class="callout-title"><span class="icon">🌐</span>Recommended Exercise</div>
+  <p>
+    Open AeroViz, select the R05LY procedure, and cross-reference it with each section of this tutorial:
+    find a fix on the 2D chart, then locate it in the 3D view.
+    This "2D chart ↔ 3D view" exercise is one of the most effective ways to build spatial awareness of approach procedures.
+  </p>
+</div>
+</section>
+
+<!-- ==================== §11 Glossary ==================== -->
+<section id="glossary">
+<h2><span class="sec-num">11</span>Quick-Reference Glossary</h2>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Abbreviation</th><th>Full Name</th><th>Brief Definition</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>RNAV</td><td>Area Navigation</td><td>Technology for navigating without ground-based radio aids; allows an aircraft to fly any desired path within covered airspace</td></tr>
+    <tr><td>GPS</td><td>Global Positioning System</td><td>Satellite-based positioning technology; the core of the RNAV (GPS) approach</td></tr>
+    <tr><td>WAAS</td><td>Wide Area Augmentation System</td><td>FAA-operated GPS augmentation network that improves GPS accuracy to ILS-equivalent levels; required for LPV minima</td></tr>
+    <tr><td>IAF</td><td>Initial Approach Fix</td><td>The entry fix to the approach procedure; used when transitioning from the en-route structure to the approach</td></tr>
+    <tr><td>IF</td><td>Intermediate Fix</td><td>The fix marking the end of the initial segment and the beginning of the intermediate segment; used to stabilize the aircraft for final approach</td></tr>
+    <tr><td>FAF</td><td>Final Approach Fix</td><td>The starting point of the final descent; marked with ▼ on the chart</td></tr>
+    <tr><td>MAPt</td><td>Missed Approach Point</td><td>The point at which the pilot must decide to land or execute a missed approach</td></tr>
+    <tr><td>MAHF</td><td>Missed Approach Holding Fix</td><td>The fix where the aircraft enters the holding pattern after a missed approach (DUHAM on this chart)</td></tr>
+    <tr><td>LPV</td><td>Localizer Performance with Vertical Guidance</td><td>The highest-precision RNAV (GPS) minima type; requires WAAS; pilot descends to a DA</td></tr>
+    <tr><td>LNAV/VNAV</td><td>Lateral Navigation / Vertical Navigation</td><td>Second-tier minima requiring approved vertical guidance; pilot descends to a DA</td></tr>
+    <tr><td>LNAV</td><td>Lateral Navigation only</td><td>Approach minima with no vertical guidance; pilot descends to an MDA</td></tr>
+    <tr><td>DA</td><td>Decision Altitude</td><td>With vertical guidance, the MSL altitude at which the pilot must decide whether to land or go missed</td></tr>
+    <tr><td>MDA</td><td>Minimum Descent Altitude</td><td>With no vertical guidance, the lowest MSL altitude to which the pilot may descend</td></tr>
+    <tr><td>HAT</td><td>Height Above Touchdown</td><td>DA or MDA minus TDZE; used for straight-in approaches</td></tr>
+    <tr><td>HAA</td><td>Height Above Airport</td><td>DA or MDA minus airport elevation; used for circling approaches</td></tr>
+    <tr><td>TDZE</td><td>Touchdown Zone Elevation</td><td>The highest elevation within the touchdown zone of the runway</td></tr>
+    <tr><td>GPA</td><td>Glidepath Angle</td><td>The final approach descent angle (3.00° on this chart)</td></tr>
+    <tr><td>TCH</td><td>Threshold Crossing Height</td><td>The height of the glidepath directly above the runway threshold (57 ft on this chart)</td></tr>
+    <tr><td>MSA</td><td>Minimum Safe Altitude</td><td>Emergency obstacle clearance altitude within a specified radius of a reference fix (25 NM / 3,400 ft on this chart)</td></tr>
+    <tr><td>TAA</td><td>Terminal Arrival Area</td><td>Sector-based minimum arrival altitudes for each direction of entry into an RNAV approach</td></tr>
+    <tr><td>APP CRS</td><td>Approach Course</td><td>The magnetic bearing of the final approach segment (054° on this chart)</td></tr>
+    <tr><td>RVR</td><td>Runway Visual Range</td><td>Instrumentally measured visibility along the runway, reported in feet</td></tr>
+    <tr><td>CIFP</td><td>Coded Instrument Flight Procedures</td><td>FAA machine-readable instrument procedure data in ARINC 424 format</td></tr>
+    <tr><td>P-T</td><td>Path and Terminator</td><td>ARINC 424 two-letter code describing the geometry of each leg (TF/CF/CA/HM, etc.)</td></tr>
+    <tr><td>IF (leg)</td><td>Initial Fix (leg type)</td><td>CIFP leg type: declares a starting point with no associated flight maneuver</td></tr>
+    <tr><td>TF</td><td>Track to a Fix</td><td>Fly a great-circle track to the next fix</td></tr>
+    <tr><td>CF</td><td>Course to a Fix</td><td>Fly a specified magnetic course to the fix</td></tr>
+    <tr><td>DF</td><td>Direct to a Fix</td><td>Fly direct from current position to the fix, no course specified</td></tr>
+    <tr><td>CA</td><td>Course to an Altitude</td><td>Fly a specified course until reaching the specified altitude</td></tr>
+    <tr><td>HM</td><td>Hold to Manual termination</td><td>Enter the holding pattern and hold until manually exited by pilot or ATC</td></tr>
+  </tbody>
+</table>
+</div>
+</section>
+
+<!-- ==================== §12 Further Reading ==================== -->
+<section id="references">
+<h2><span class="sec-num">12</span>Further Reading</h2>
+
+<h3>Official Documents</h3>
+<ul>
+  <li>
+    <strong>FAA Aeronautical Information Manual (AIM) — Chapter 5, Section 4: Instrument Approach Procedures</strong><br>
+    <code>https://www.faa.gov/air_traffic/publications/atpubs/aim_html/chap5_section_4.html</code><br>
+    The authoritative reference on approach procedures, covering definitions, procedures, and flight technique requirements for all approach types.
+  </li>
+  <li>
+    <strong>FAA Pilot/Controller Glossary</strong><br>
+    <code>https://www.faa.gov/air_traffic/publications/atpubs/pcg_html/</code><br>
+    Official definitions of aviation terminology, including authoritative explanations of every abbreviation used in this tutorial.
+  </li>
+  <li>
+    <strong>FAA Order 8260.58 — United States Standard for Performance-Based Navigation (PBN) Instrument Procedure Design</strong><br>
+    <code>https://www.faa.gov/regulations_policies/orders_notices/index.cfm/go/document.information/documentID/1028671</code><br>
+    Design standards for RNAV/RNP approach procedures, including the source specification for OCS geometry derivations.
+  </li>
+</ul>
+
+<h3>Related Documents in This Repository</h3>
+<ul>
+  <li>
+    <strong><code>aeroviz-4d/docs/03-ocs-geometry.zh.md</code></strong>:
+    Mathematical derivation of the Obstacle Clearance Surface (OCS), PANS-OPS geometry, and the KRDU R05LY worked example —
+    provides the geometric background for why approach routes need protection altitudes.
+  </li>
+  <li>
+    <strong><code>aeroviz-4d/docs/22-rnav-vertical-guidance-approach-simulation.zh.md</code></strong> (if present):
+    Documentation on 4D trajectory simulation for RNAV vertical-guidance approaches, showing how AeroViz combines the altitude profile in this tutorial with the time dimension to generate a CZML trajectory for Cesium playback.
+  </li>
+</ul>
+
+<div class="callout callout-key">
+  <div class="callout-title"><span class="icon">🎓</span>Suggested Learning Path</div>
+  <ol>
+    <li>After finishing this tutorial, obtain the actual KRDU R05LY chart (available free via FAA Aeronav or ForeFlight) and verify every number.</li>
+    <li>Open AeroViz, fly the R05LY approach in the 3D view, and observe the step-down descent and OCS protection surface.</li>
+    <li>Read <code>03-ocs-geometry.zh.md</code> to understand the geometric derivation of the OCS surface.</li>
+    <li>Read FAA AIM Chapter 5-4 and locate the official definition corresponding to each concept in this tutorial.</li>
+    <li>Try reading an RNAV (GPS) chart from an airport you are not familiar with — translate each field into plain English and verify your understanding.</li>
+  </ol>
+</div>
+
+<hr class="section-divider">
+<p style="color:var(--text-muted);font-size:.85rem;margin-top:32px;text-align:center;">
+  This document is a tutorial for the AeroViz-4D thesis research project. Diagrams are for instructional purposes only and are not for operational use.<br>
+  All data sourced from: KRDU RNAV (GPS) Y RWY 5L, Amdt 2, 25FEB21, FAA Aeronav.
+</p>
+</section>
+
+</div><!-- /.content -->
+</main>
+
+<script>
+(function () {
+  // ===== Glossary data (term -> [full name, definition]) =====
+  var GLOSSARY = {
+    "RNAV": ["Area Navigation", "Navigating without ground-based radio aids; lets an aircraft fly any desired path within covered airspace."],
+    "WAAS": ["Wide Area Augmentation System", "FAA GPS augmentation that improves accuracy to ILS-equivalent levels; required for LPV minima."],
+    "IAF": ["Initial Approach Fix", "The entry fix to the approach, where the aircraft joins from the en-route structure."],
+    "FAF": ["Final Approach Fix", "The start of the final descent; marked with a ▼ on the chart."],
+    "MAPt": ["Missed Approach Point", "The point at which the pilot must decide to land or fly the missed approach."],
+    "MAHF": ["Missed Approach Holding Fix", "The fix where the aircraft holds after a missed approach (DUHAM on this chart)."],
+    "LPV": ["Localizer Performance with Vertical Guidance", "The highest-precision RNAV (GPS) minima; requires WAAS; flown to a DA."],
+    "LNAV/VNAV": ["Lateral Navigation / Vertical Navigation", "Minima with approved vertical guidance; flown to a DA."],
+    "LNAV": ["Lateral Navigation", "Minima with no vertical guidance; descended in steps to an MDA."],
+    "VNAV": ["Vertical Navigation", "Vertical guidance along the published descent path."],
+    "DA": ["Decision Altitude", "With vertical guidance, the altitude at which the pilot decides to land or go missed."],
+    "MDA": ["Minimum Descent Altitude", "With no vertical guidance, the lowest altitude the pilot may descend to."],
+    "HAT": ["Height Above Touchdown", "DA or MDA minus the TDZE; used for straight-in approaches."],
+    "HAA": ["Height Above Airport", "DA or MDA minus airport elevation; used for circling approaches."],
+    "TDZE": ["Touchdown Zone Elevation", "The highest elevation in the runway touchdown zone (384 ft here)."],
+    "GPA": ["Glidepath Angle", "The final-approach descent angle (3.00° on this chart)."],
+    "TCH": ["Threshold Crossing Height", "Height of the glidepath above the runway threshold (57 ft here)."],
+    "MSA": ["Minimum Safe Altitude", "Emergency obstacle-clearance altitude within a radius of a fix (3,400 ft within 25 NM here)."],
+    "TAA": ["Terminal Arrival Area", "Sector-based minimum arrival altitudes for entering an RNAV approach."],
+    "RVR": ["Runway Visual Range", "Instrument-measured visibility along the runway, reported in feet."],
+    "CIFP": ["Coded Instrument Flight Procedures", "FAA machine-readable instrument procedure data in ARINC 424 format."],
+    "RNP": ["Required Navigation Performance", "RNAV with on-board performance monitoring and alerting."]
+  };
+  var TERMS = Object.keys(GLOSSARY).sort(function (a, b) { return b.length - a.length; });
+
+  // ===== Shared floating tooltip (used by terms AND diagram hotspots) =====
+  var tip = document.createElement('div');
+  tip.id = 'av-tip';
+  document.body.appendChild(tip);
+  function place(x, y) {
+    var pad = 10, w = tip.offsetWidth, h = tip.offsetHeight;
+    if (x + w + pad > window.innerWidth) x = window.innerWidth - w - pad;
+    if (x < pad) x = pad;
+    if (y + h + pad > window.innerHeight) y = y - h - 22;
+    if (y < pad) y = pad;
+    tip.style.left = x + 'px';
+    tip.style.top = y + 'px';
+  }
+  function showTip(html, x, y) { tip.innerHTML = html; tip.classList.add('show'); place(x, y); }
+  function hideTip() { tip.classList.remove('show'); }
+  function termHtml(k) { var g = GLOSSARY[k]; return '<span class="tt-h">' + k + ' — ' + g[0] + '</span>' + g[1]; }
+
+  // ===== Auto-wrap glossary terms in the body text =====
+  var SKIP = { SCRIPT: 1, STYLE: 1, CODE: 1, A: 1, H1: 1, H2: 1, H3: 1, H4: 1, BUTTON: 1 };
+  function skip(node) {
+    for (var el = node.parentNode; el && el !== document.body; el = el.parentNode) {
+      if (el.nodeType !== 1) continue;
+      if (el.tagName === 'svg' || SKIP[el.tagName]) return true;
+      if (el.classList && el.classList.contains('gloss')) return true;
+      if (el.id === 'glossary' || el.id === 'references' || el.id === 'sidebar') return true;
+    }
+    return false;
+  }
+  var content = document.querySelector('.content');
+  if (content) {
+    var rx = new RegExp('\\b(' + TERMS.map(function (t) { return t.replace(/\//g, '\\/'); }).join('|') + ')\\b', 'g');
+    var walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT, null);
+    var nodes = [];
+    while (walker.nextNode()) {
+      var n = walker.currentNode;
+      rx.lastIndex = 0;
+      if (n.nodeValue && rx.test(n.nodeValue) && !skip(n)) nodes.push(n);
+    }
+    nodes.forEach(function (n) {
+      rx.lastIndex = 0;
+      var frag = document.createDocumentFragment(), s = n.nodeValue, last = 0, m;
+      while ((m = rx.exec(s)) !== null) {
+        if (m.index > last) frag.appendChild(document.createTextNode(s.slice(last, m.index)));
+        var span = document.createElement('span');
+        span.className = 'gloss';
+        span.setAttribute('data-k', m[1]);
+        span.textContent = m[1];
+        frag.appendChild(span);
+        last = m.index + m[1].length;
+      }
+      if (last < s.length) frag.appendChild(document.createTextNode(s.slice(last)));
+      n.parentNode.replaceChild(frag, n);
+    });
+  }
+
+  // ===== Hover / tap behaviour for terms and SVG hotspots =====
+  function classed(t, c) { return t && t.classList && t.classList.contains(c); }
+  document.addEventListener('mouseover', function (e) {
+    var t = e.target;
+    if (classed(t, 'gloss') && GLOSSARY[t.getAttribute('data-k')]) {
+      var r = t.getBoundingClientRect();
+      showTip(termHtml(t.getAttribute('data-k')), r.left, r.bottom + 8);
+    } else if (classed(t, 'hot')) {
+      showTip('<span class="tt-h">' + t.getAttribute('data-t') + '</span>' + t.getAttribute('data-d'), e.clientX + 16, e.clientY + 16);
+    }
+  });
+  document.addEventListener('mousemove', function (e) {
+    if (tip.classList.contains('show') && classed(e.target, 'hot')) place(e.clientX + 16, e.clientY + 16);
+  });
+  document.addEventListener('mouseout', function (e) {
+    if (classed(e.target, 'gloss') || classed(e.target, 'hot')) hideTip();
+  });
+  document.addEventListener('click', function (e) {
+    var t = e.target;
+    if (classed(t, 'gloss') && GLOSSARY[t.getAttribute('data-k')]) {
+      var r = t.getBoundingClientRect();
+      showTip(termHtml(t.getAttribute('data-k')), r.left, r.bottom + 8);
+      e.stopPropagation();
+    } else if (classed(t, 'hot')) {
+      showTip('<span class="tt-h">' + t.getAttribute('data-t') + '</span>' + t.getAttribute('data-d'), e.clientX + 16, e.clientY + 16);
+      e.stopPropagation();
+    } else { hideTip(); }
+  });
+
+  // ===== Floating glossary button + slide-in panel =====
+  var fab = document.createElement('button');
+  fab.id = 'gloss-fab'; fab.type = 'button'; fab.textContent = '📖 Glossary';
+  var overlay = document.createElement('div'); overlay.id = 'gloss-overlay';
+  var panel = document.createElement('div'); panel.id = 'gloss-panel';
+  var ph = '<button id="gloss-close" type="button" aria-label="Close">×</button><h3>Quick Glossary</h3>'
+    + '<p class="gp-sub">Hover any underlined term in the text — or browse here. The diagram points and lines are interactive too.</p>';
+  TERMS.slice().sort().forEach(function (k) {
+    var g = GLOSSARY[k];
+    ph += '<div class="gp-item"><span class="gp-term">' + k + '</span> <span class="gp-full">' + g[0] + '</span><div class="gp-def">' + g[1] + '</div></div>';
+  });
+  panel.innerHTML = ph;
+  document.body.appendChild(overlay); document.body.appendChild(panel); document.body.appendChild(fab);
+  function closePanel() { panel.classList.remove('open'); overlay.classList.remove('open'); }
+  fab.addEventListener('click', function () { panel.classList.add('open'); overlay.classList.add('open'); });
+  overlay.addEventListener('click', closePanel);
+  panel.querySelector('#gloss-close').addEventListener('click', closePanel);
+
+  // ===== Usage banner at the top of the content =====
+  if (content) {
+    var banner = document.createElement('div');
+    banner.className = 'callout callout-key';
+    banner.innerHTML = '<div class="callout-title"><span class="icon">💡</span>How to use this tutorial</div>'
+      + 'Hover (or tap) any <span class="gloss" data-k="FAF">underlined term</span> for its definition, and hover the points and lines inside the diagrams for details. The <strong>📖 Glossary</strong> button (bottom-right) opens the full list anytime.';
+    content.insertBefore(banner, content.firstChild);
+  }
+
+  // ===== "Interactive" hint under each diagram that has hotspots =====
+  document.querySelectorAll('svg').forEach(function (svg) {
+    if (svg.querySelector('.hotspots')) {
+      var hint = document.createElement('p');
+      hint.className = 'diagram-hint';
+      hint.textContent = '💡 Hover or tap the points and lines above for details.';
+      svg.parentNode.insertBefore(hint, svg.nextSibling);
+    }
+  });
+
+  // ===== Sidebar scroll-spy (unchanged behaviour) =====
+  var links = document.querySelectorAll('#sidebar ol li a');
+  var sections = [];
+  links.forEach(function (a) {
+    var el = document.getElementById(a.getAttribute('href').slice(1));
+    if (el) sections.push({ el: el, a: a });
+  });
+  function onScroll() {
+    var y = window.scrollY + 80, active = sections[0];
+    for (var i = 0; i < sections.length; i++) if (sections[i].el.offsetTop <= y) active = sections[i];
+    links.forEach(function (a) { a.classList.remove('active'); });
+    if (active) active.a.classList.add('active');
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+})();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,1957 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>如何读懂 RNAV (GPS) 进近图 — 以 KRDU RNAV Y RWY 5L 为例</title>
+<style>
+/* ===== RESET & BASE ===== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #f8f9fa;
+  --surface: #ffffff;
+  --border: #dee2e6;
+  --border-light: #e9ecef;
+  --text: #212529;
+  --text-secondary: #6c757d;
+  --text-muted: #868e96;
+  --accent: #1a6eb5;
+  --accent-light: #e8f0fb;
+  --accent-dark: #0d4e8a;
+  --green: #2d7a3a;
+  --green-light: #e8f5ea;
+  --amber: #a05c00;
+  --amber-light: #fff3cd;
+  --red: #9c2b2b;
+  --red-light: #fce8e8;
+  --purple: #5b2a8a;
+  --purple-light: #f2ebfc;
+  --teal: #0f6b6b;
+  --teal-light: #e0f4f4;
+  --nav-bg: #1e2d40;
+  --nav-text: #c8d6e5;
+  --nav-active: #4fa3e0;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace;
+  --radius: 8px;
+  --radius-sm: 4px;
+  --shadow: 0 2px 8px rgba(0,0,0,.10);
+  --shadow-lg: 0 4px 20px rgba(0,0,0,.14);
+}
+
+html { scroll-behavior: smooth; font-size: 16px; }
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.75;
+  display: flex;
+  min-height: 100vh;
+}
+
+/* ===== SIDEBAR NAV ===== */
+#sidebar {
+  position: fixed;
+  top: 0; left: 0;
+  width: 240px;
+  height: 100vh;
+  background: var(--nav-bg);
+  color: var(--nav-text);
+  overflow-y: auto;
+  overflow-x: hidden;
+  z-index: 100;
+  padding: 24px 0 40px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+#sidebar h2 {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: #7a9bb5;
+  padding: 0 20px 12px;
+}
+
+#sidebar ol {
+  list-style: none;
+  counter-reset: nav-counter;
+}
+
+#sidebar ol li {
+  counter-increment: nav-counter;
+}
+
+#sidebar ol li a {
+  display: block;
+  padding: 6px 20px 6px 16px;
+  color: var(--nav-text);
+  text-decoration: none;
+  transition: background .15s, color .15s;
+  border-left: 3px solid transparent;
+}
+
+#sidebar ol li a::before {
+  content: counter(nav-counter) ". ";
+  color: #4a6a85;
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+#sidebar ol li a:hover {
+  background: rgba(255,255,255,.07);
+  color: #fff;
+  border-left-color: var(--nav-active);
+}
+
+#sidebar ol li a.active {
+  color: var(--nav-active);
+  background: rgba(79,163,224,.10);
+  border-left-color: var(--nav-active);
+}
+
+/* ===== MAIN CONTENT ===== */
+#main {
+  margin-left: 240px;
+  flex: 1;
+  padding: 0 0 80px;
+}
+
+.hero {
+  background: linear-gradient(135deg, #1a3a5c 0%, #0d4e8a 60%, #1a6eb5 100%);
+  color: #fff;
+  padding: 48px 48px 44px;
+  border-bottom: 1px solid #0a2d50;
+}
+
+.hero .badge {
+  display: inline-block;
+  background: rgba(255,255,255,.15);
+  border: 1px solid rgba(255,255,255,.25);
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .05em;
+  padding: 3px 12px;
+  margin-bottom: 16px;
+  color: #cde4f8;
+}
+
+.hero h1 {
+  font-size: 2.0rem;
+  font-weight: 700;
+  line-height: 1.25;
+  margin-bottom: 12px;
+  letter-spacing: -.01em;
+}
+
+.hero p {
+  font-size: 1.05rem;
+  color: #b5d0e8;
+  max-width: 680px;
+  line-height: 1.7;
+}
+
+.hero .meta {
+  margin-top: 20px;
+  font-size: 12.5px;
+  color: #7aadd0;
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.hero .meta span::before { content: "◆ "; }
+
+.content {
+  max-width: 860px;
+  padding: 0 48px;
+  margin: 0 auto;
+}
+
+/* ===== SECTIONS ===== */
+section {
+  padding-top: 56px;
+}
+
+section h2 {
+  font-size: 1.55rem;
+  font-weight: 700;
+  color: var(--accent-dark);
+  margin-bottom: 20px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid var(--accent-light);
+  letter-spacing: -.01em;
+}
+
+section h3 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text);
+  margin: 28px 0 12px;
+}
+
+section h4 {
+  font-size: 1.0rem;
+  font-weight: 700;
+  color: var(--accent);
+  margin: 20px 0 8px;
+}
+
+p { margin-bottom: 14px; }
+
+ul, ol {
+  margin: 10px 0 14px 20px;
+}
+
+li { margin-bottom: 6px; }
+
+strong { color: #1a2a3a; }
+
+code {
+  font-family: var(--font-mono);
+  font-size: .875em;
+  background: #eef2f7;
+  border: 1px solid #d0dae8;
+  border-radius: 3px;
+  padding: 1px 5px;
+  color: #2a4a6a;
+}
+
+/* ===== CALLOUT BOXES ===== */
+.callout {
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  margin: 20px 0;
+  border-left: 4px solid;
+}
+
+.callout-title {
+  font-weight: 700;
+  font-size: .95rem;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.callout-title .icon { font-size: 1.1em; }
+
+.callout p:last-child { margin-bottom: 0; }
+
+.callout-key {
+  background: var(--accent-light);
+  border-color: var(--accent);
+  color: #0d3a6b;
+}
+.callout-key .callout-title { color: var(--accent-dark); }
+
+.callout-warn {
+  background: var(--amber-light);
+  border-color: #d4880a;
+  color: #5a3200;
+}
+.callout-warn .callout-title { color: var(--amber); }
+
+.callout-tip {
+  background: var(--green-light);
+  border-color: var(--green);
+  color: #1a4520;
+}
+.callout-tip .callout-title { color: var(--green); }
+
+.callout-danger {
+  background: var(--red-light);
+  border-color: #c0392b;
+  color: #5a1010;
+}
+.callout-danger .callout-title { color: var(--red); }
+
+.callout-info {
+  background: var(--teal-light);
+  border-color: var(--teal);
+  color: #063a3a;
+}
+.callout-info .callout-title { color: var(--teal); }
+
+/* ===== TABLES ===== */
+.table-wrap {
+  overflow-x: auto;
+  margin: 20px 0;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface);
+  font-size: .92rem;
+}
+
+thead th {
+  background: #1e2d40;
+  color: #c8d6e5;
+  font-weight: 600;
+  padding: 10px 14px;
+  text-align: left;
+  font-size: .85rem;
+  letter-spacing: .03em;
+  white-space: nowrap;
+}
+
+tbody tr:nth-child(even) { background: #f5f7fa; }
+tbody tr:hover { background: var(--accent-light); }
+
+td {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border-light);
+  vertical-align: top;
+}
+
+tbody tr:last-child td { border-bottom: none; }
+
+/* ===== SVG DIAGRAMS ===== */
+.diagram {
+  margin: 24px 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.diagram-caption {
+  background: #1e2d40;
+  color: #c8d6e5;
+  font-size: .8rem;
+  font-weight: 600;
+  padding: 8px 16px;
+  letter-spacing: .04em;
+}
+
+.diagram svg {
+  display: block;
+  width: 100%;
+}
+
+/* ===== MINIMA CARDS ===== */
+.minima-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px;
+  margin: 20px 0;
+}
+
+.minima-card {
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  text-align: center;
+}
+
+.minima-card .label {
+  font-size: .75rem;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.minima-card .da {
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.minima-card .vis { font-size: .85rem; color: var(--text-secondary); }
+.minima-card .hat { font-size: .75rem; color: var(--text-muted); margin-top: 6px; }
+
+.card-lpv { background: var(--green-light); border-color: var(--green); }
+.card-lpv .label { color: var(--green); }
+.card-lpv .da { color: var(--green); }
+
+.card-lv { background: var(--accent-light); border-color: var(--accent); }
+.card-lv .label { color: var(--accent-dark); }
+.card-lv .da { color: var(--accent-dark); }
+
+.card-lnav { background: var(--amber-light); border-color: #d4880a; }
+.card-lnav .label { color: var(--amber); }
+.card-lnav .da { color: var(--amber); }
+
+.card-circ { background: #f5f0fa; border-color: #8b52c0; }
+.card-circ .label { color: #6a3099; }
+.card-circ .da { color: #6a3099; }
+
+/* ===== FIX ROLE BADGES ===== */
+.fix-badge {
+  display: inline-block;
+  border-radius: 3px;
+  font-size: .72rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  letter-spacing: .04em;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+.badge-iaf { background: #1a6eb5; color: #fff; }
+.badge-if  { background: #2d7a3a; color: #fff; }
+.badge-faf { background: #c05000; color: #fff; }
+.badge-mapt{ background: #9c2b2b; color: #fff; }
+
+/* ===== ALTITUDE QUALIFIER DEMO ===== */
+.alt-qual-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+
+.alt-qual-box {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  text-align: center;
+  flex: 1;
+  min-width: 130px;
+  background: var(--surface);
+}
+
+.alt-val {
+  font-size: 1.4rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: #1a2a3a;
+  position: relative;
+  display: inline-block;
+  margin-bottom: 6px;
+}
+
+.alt-val.at-above::after {
+  content: "";
+  display: block;
+  height: 2.5px;
+  background: #1a2a3a;
+  position: absolute;
+  bottom: -3px; left: 0; right: 0;
+}
+
+.alt-val.at-below::before {
+  content: "";
+  display: block;
+  height: 2.5px;
+  background: #1a2a3a;
+  position: absolute;
+  top: -3px; left: 0; right: 0;
+}
+
+.alt-val.mandatory {
+  border: 2px solid #1a2a3a;
+  padding: 2px 8px;
+  border-radius: 2px;
+}
+
+.alt-qual-label {
+  font-size: .78rem;
+  color: var(--text-secondary);
+  font-weight: 600;
+  margin-top: 10px;
+}
+
+/* ===== LEG TYPE TABLE ===== */
+.leg-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1px;
+  background: var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin: 16px 0;
+  box-shadow: var(--shadow);
+}
+
+.leg-cell {
+  background: var(--surface);
+  padding: 9px 14px;
+}
+
+.leg-cell.header {
+  background: #1e2d40;
+  color: #c8d6e5;
+  font-weight: 700;
+  font-size: .82rem;
+}
+
+.leg-code {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: .95rem;
+  color: var(--accent-dark);
+}
+
+/* ===== SECTION NUMBER ===== */
+.sec-num {
+  display: inline-block;
+  background: var(--accent);
+  color: #fff;
+  font-size: .75rem;
+  font-weight: 700;
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  text-align: center;
+  line-height: 26px;
+  margin-right: 10px;
+  vertical-align: middle;
+}
+
+/* ===== GLOSSARY TABLE ===== */
+#glossary table td:first-child {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--accent-dark);
+  white-space: nowrap;
+}
+
+/* ===== RESPONSIVE ===== */
+@media (max-width: 900px) {
+  #sidebar { display: none; }
+  #main { margin-left: 0; }
+  .hero { padding: 32px 24px; }
+  .content { padding: 0 24px; }
+  .hero h1 { font-size: 1.55rem; }
+}
+
+/* ===== PRINT ===== */
+@media print {
+  #sidebar { display: none; }
+  #main { margin-left: 0; }
+}
+
+hr.section-divider {
+  border: none;
+  border-top: 1px solid var(--border-light);
+  margin: 40px 0 0;
+}
+
+/* ===== Interactive layer: glossary terms, shared tooltip, SVG hotspots ===== */
+.gloss {
+  border-bottom: 1px dashed var(--accent);
+  cursor: help;
+  white-space: nowrap;
+}
+.gloss:hover { background: var(--accent-light); }
+
+#av-tip {
+  position: fixed;
+  z-index: 10000;
+  max-width: 320px;
+  background: #0d2233;
+  color: #eaf2fa;
+  padding: 10px 13px;
+  border-radius: 8px;
+  font-size: 0.84rem;
+  line-height: 1.6;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.32);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity .12s ease, transform .12s ease;
+  border: 1px solid rgba(255,255,255,0.12);
+}
+#av-tip.show { opacity: 1; transform: translateY(0); }
+#av-tip .tt-h { display: block; font-weight: 700; color: #7fc0ff; margin-bottom: 3px; }
+
+svg .hot { cursor: pointer; }
+svg .hot.dot:hover { fill: rgba(26,110,181,0.18); }
+svg .hot.seg:hover { stroke: rgba(26,110,181,0.22); }
+.diagram-hint {
+  font-size: .8rem;
+  color: var(--text-muted);
+  margin: 6px 0 0;
+  text-align: center;
+}
+
+#gloss-fab {
+  position: fixed; right: 22px; bottom: 22px; z-index: 9998;
+  background: var(--accent); color: #fff; border: none;
+  border-radius: 24px; padding: 11px 17px; font-size: .88rem; font-weight: 700;
+  cursor: pointer; box-shadow: 0 6px 20px rgba(0,0,0,.25);
+}
+#gloss-fab:hover { background: var(--accent-dark); }
+#gloss-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.32); z-index: 9998;
+  opacity: 0; pointer-events: none; transition: opacity .25s;
+}
+#gloss-overlay.open { opacity: 1; pointer-events: auto; }
+#gloss-panel {
+  position: fixed; top: 0; right: 0; height: 100%; width: 360px; max-width: 88vw;
+  background: var(--surface); z-index: 9999; box-shadow: -8px 0 32px rgba(0,0,0,.22);
+  transform: translateX(100%); transition: transform .26s ease;
+  overflow-y: auto; padding: 22px 22px 60px;
+}
+#gloss-panel.open { transform: translateX(0); }
+#gloss-panel h3 { margin: 0 0 4px; }
+#gloss-panel .gp-sub { color: var(--text-muted); font-size: .82rem; margin: 0 0 14px; }
+#gloss-close { float: right; cursor: pointer; border: none; background: none; font-size: 1.4rem; line-height: 1; color: var(--text-secondary); }
+.gp-item { padding: 9px 0; border-bottom: 1px solid var(--border-light); }
+.gp-term { font-weight: 700; color: var(--accent); }
+.gp-full { color: var(--text-secondary); font-size: .82rem; }
+.gp-def { font-size: .84rem; margin-top: 2px; color: var(--text); }
+@media print { #gloss-fab, #av-tip, #gloss-panel, #gloss-overlay { display: none !important; } }
+</style>
+</head>
+<body>
+
+<!-- ===== SIDEBAR ===== -->
+<nav id="sidebar" aria-label="目录">
+  <h2>目录</h2>
+  <ol>
+    <li><a href="#intro">引言：什么是仪表进近图</a></li>
+    <li><a href="#plate-layout">进近图的整体结构</a></li>
+    <li><a href="#header">表头逐项精读</a></li>
+    <li><a href="#plan-view">平面图：俯视的路线</a></li>
+    <li><a href="#profile-view">剖面图：垂直下降阶梯</a></li>
+    <li><a href="#four-segments">四个进近航段</a></li>
+    <li><a href="#minima">最低标准框</a></li>
+    <li><a href="#alt-qualifiers">高度限制怎么看</a></li>
+    <li><a href="#cifp">CIFP 航段编码一瞥</a></li>
+    <li><a href="#aeroviz">在 AeroViz 里对照看</a></li>
+    <li><a href="#glossary">术语速查表</a></li>
+    <li><a href="#references">延伸阅读</a></li>
+  </ol>
+</nav>
+
+<!-- ===== MAIN ===== -->
+<main id="main">
+
+<div class="hero">
+  <div class="badge">航空导航 · 初学者教程</div>
+  <h1>如何读懂 RNAV (GPS) 进近图</h1>
+  <p>以 <strong>KRDU RNAV (GPS) Y RWY 5L</strong>（罗利-达勒姆国际机场 05L 跑道）为完整工作示例，
+     从零开始带你读懂一张美国仪表进近图的每一个数字和符号。</p>
+  <div class="meta">
+    <span>Amdt 2, 25FEB21</span>
+    <span>APP CRS 054°</span>
+    <span>GPA 3.00°</span>
+    <span>LPV DA 598 ft</span>
+    <span>面向完全初学者</span>
+  </div>
+</div>
+
+<div class="content">
+
+<!-- ==================== §1 引言 ==================== -->
+<section id="intro">
+<h2><span class="sec-num">1</span>引言：什么是仪表进近图</h2>
+
+<p>
+  想象你驾驶一架客机，云层很低，窗外什么都看不见，
+  而你需要在正确的跑道上精准落地。
+  这时候，飞行员依靠的是<strong>仪表进近程序（Instrument Approach Procedure, IAP）</strong>——
+  一套经过官方设计、出版在纸上（或电子设备上）的飞行路线和高度要求。
+  <strong>进近图（Approach Chart / Approach Plate）</strong>就是这套程序的"说明书"。
+</p>
+
+<p>
+  一张进近图告诉飞行员四件事：
+</p>
+<ul>
+  <li>从哪里开始进近、沿什么航向飞向跑道；</li>
+  <li>每个关键点必须在什么高度经过（不能飞太低，否则撞山；也不能飞太高，否则对不准跑道）；</li>
+  <li>如果降落条件不达标，在什么时机、沿什么路线复飞；</li>
+  <li>能见度/云高必须达到什么条件才被允许降落（最低标准）。</li>
+</ul>
+
+<div class="callout callout-key">
+  <div class="callout-title"><span class="icon">🛩</span>关键概念：RNAV (GPS) 进近是什么？</div>
+  <p>
+    <strong>RNAV（区域导航，Area Navigation）</strong>是一种让飞机在没有地面无线电台的情况下，
+    靠卫星（GPS/WAAS）或机载计算机精确导航的技术。
+    RNAV (GPS) 进近就是完全依靠 GPS 信号引导飞机对准跑道的仪表进近程序，
+    不需要跑道端安装 ILS 系统。
+    配合美国 <strong>WAAS（广域增强系统）</strong>，它可以给出媲美 ILS 的垂直引导，
+    让飞行员的决断高度降到离地仅 200 多英尺。
+  </p>
+</div>
+
+<p>
+  本教程以 <strong>KRDU RNAV (GPS) Y RWY 5L</strong> 为例，
+  逐图块、逐数字带你读懂一张完整的进近图。
+  你不需要飞行经验，只需要耐心跟着走。
+</p>
+</section>
+
+<!-- ==================== §2 整体结构 ==================== -->
+<section id="plate-layout">
+<h2><span class="sec-num">2</span>进近图的整体结构</h2>
+
+<p>
+  美国 FAA 发布的进近图（由 Jeppesen 或 FAA NACO/Aeronav 出版）
+  都遵循一套标准版式，从上到下分为四个主要区域：
+</p>
+
+<div class="diagram">
+  <div class="diagram-caption">图 2-1 · 进近图版式示意（FAA 标准）</div>
+  <svg viewBox="0 0 760 520" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif">
+    <!-- background -->
+    <rect width="760" height="520" fill="#f0f4f8"/>
+
+    <!-- ① 表头/简报条 -->
+    <rect x="20" y="16" width="720" height="96" rx="6" fill="#1e3a5f" stroke="#0a2040" stroke-width="1.5"/>
+    <text x="380" y="44" text-anchor="middle" fill="#cde4f8" font-size="14" font-weight="700">① 表头 / 简报条（Header &amp; Briefing Strip）</text>
+    <text x="380" y="64" text-anchor="middle" fill="#a0c0df" font-size="11">进近名称 · APP CRS · 频率 · 天气限制备注 · 复飞文字描述 · MSA</text>
+    <text x="380" y="82" text-anchor="middle" fill="#a0c0df" font-size="11">RNAV (GPS) Y RWY 5L — KRDU — APP CRS 054° — Amdt 2, 25FEB21</text>
+    <text x="50" y="104" fill="#6aa0cc" font-size="10">← 飞行员首先扫这里，找频率和简报要点</text>
+
+    <!-- ② 平面图 -->
+    <rect x="20" y="122" width="420" height="200" rx="6" fill="#e8f4f0" stroke="#3a9a7a" stroke-width="1.5"/>
+    <text x="230" y="148" text-anchor="middle" fill="#1a5c40" font-size="13" font-weight="700">② 平面图（Plan View）</text>
+    <text x="230" y="168" text-anchor="middle" fill="#2a7a5a" font-size="10.5">俯视视角 · 航迹 · 定位点 · 禁区 · MSA 圆圈</text>
+    <!-- simple plan sketch -->
+    <circle cx="340" cy="230" r="40" fill="none" stroke="#3a9a7a" stroke-width="1" stroke-dasharray="4,3"/>
+    <text x="340" y="234" text-anchor="middle" fill="#3a9a7a" font-size="9">25 NM MSA</text>
+    <!-- runway -->
+    <rect x="300" y="268" width="10" height="38" rx="2" fill="#888" transform="rotate(-36,305,287)"/>
+    <!-- approach path -->
+    <line x1="100" y1="215" x2="295" y2="268" stroke="#1a6eb5" stroke-width="2" marker-end="url(#arr)"/>
+    <text x="160" y="205" fill="#1a6eb5" font-size="9" font-weight="700">054°</text>
+    <!-- fixes dots -->
+    <circle cx="100" cy="215" r="5" fill="#1a6eb5"/>
+    <text x="106" y="213" fill="#1a2a3a" font-size="8">OTTOS/CHWDR (IAF)</text>
+    <circle cx="157" cy="230" r="4" fill="#2d7a3a"/>
+    <text x="163" y="228" fill="#1a2a3a" font-size="8">BOULE</text>
+    <circle cx="210" cy="245" r="4" fill="#2d7a3a"/>
+    <text x="216" y="243" fill="#1a2a3a" font-size="8">SCHOO (IF)</text>
+    <circle cx="255" cy="258" r="5" fill="#c05000"/>
+    <text x="261" y="256" fill="#1a2a3a" font-size="8">WEPAS (FAF) ▼</text>
+    <!-- missed approach arrow -->
+    <path d="M 305 278 Q 380 240 390 185" fill="none" stroke="#9c2b2b" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrred)"/>
+    <text x="395" y="182" fill="#9c2b2b" font-size="8">DUHAM (复飞)</text>
+
+    <defs>
+      <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L8,3 z" fill="#1a6eb5"/>
+      </marker>
+      <marker id="arrred" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L8,3 z" fill="#9c2b2b"/>
+      </marker>
+    </defs>
+
+    <!-- ③ 剖面图 -->
+    <rect x="450" y="122" width="290" height="200" rx="6" fill="#fef8ee" stroke="#c08020" stroke-width="1.5"/>
+    <text x="595" y="148" text-anchor="middle" fill="#6a3a00" font-size="13" font-weight="700">③ 剖面图（Profile View）</text>
+    <text x="595" y="168" text-anchor="middle" fill="#8a5a10" font-size="10.5">侧视视角 · 阶梯下降 · 下滑道线 · TDZE</text>
+    <!-- staircase sketch in profile -->
+    <rect x="466" y="200" width="40" height="10" fill="#e0b060"/>
+    <text x="468" y="196" fill="#6a3a00" font-size="7">5000</text>
+    <rect x="506" y="208" width="40" height="10" fill="#e0b060"/>
+    <text x="508" y="204" fill="#6a3a00" font-size="7">4000</text>
+    <rect x="546" y="220" width="35" height="10" fill="#e0b060"/>
+    <text x="548" y="216" fill="#6a3a00" font-size="7">3000</text>
+    <rect x="581" y="232" width="30" height="10" fill="#e0b060"/>
+    <text x="583" y="228" fill="#6a3a00" font-size="7">2200</text>
+    <!-- glidepath line -->
+    <line x1="611" y1="232" x2="720" y2="295" stroke="#c05000" stroke-width="2"/>
+    <text x="650" y="255" fill="#c05000" font-size="8">3.00° 下滑道</text>
+    <!-- runway end -->
+    <rect x="710" y="295" width="14" height="6" fill="#555"/>
+    <text x="694" y="312" fill="#6a3a00" font-size="7">RW05L 384ft</text>
+
+    <!-- ④ 最低标准框 -->
+    <rect x="20" y="332" width="720" height="168" rx="6" fill="#fff8f0" stroke="#c06020" stroke-width="1.5"/>
+    <text x="380" y="358" text-anchor="middle" fill="#6a3000" font-size="13" font-weight="700">④ 最低标准框（Minima Box）</text>
+    <text x="380" y="378" text-anchor="middle" fill="#8a4a10" font-size="10.5">LPV · LNAV/VNAV · LNAV · CIRCLING 各类最低标准</text>
+    <!-- mini minima boxes -->
+    <!-- LPV -->
+    <rect x="40" y="392" width="155" height="88" rx="4" fill="#e8f5ea" stroke="#2d7a3a" stroke-width="1.5"/>
+    <text x="118" y="410" text-anchor="middle" fill="#1a5c28" font-size="10" font-weight="700">LPV</text>
+    <text x="118" y="432" text-anchor="middle" fill="#1a5c28" font-size="15" font-weight="700">598</text>
+    <text x="118" y="450" text-anchor="middle" fill="#1a5c28" font-size="9">DA / RVR 1800</text>
+    <text x="118" y="468" text-anchor="middle" fill="#3a8a50" font-size="8">HAT 214 ft</text>
+
+    <!-- LNAV/VNAV -->
+    <rect x="210" y="392" width="155" height="88" rx="4" fill="#e8f0fb" stroke="#1a6eb5" stroke-width="1.5"/>
+    <text x="288" y="410" text-anchor="middle" fill="#0d3a6b" font-size="10" font-weight="700">LNAV/VNAV</text>
+    <text x="288" y="432" text-anchor="middle" fill="#0d3a6b" font-size="15" font-weight="700">748</text>
+    <text x="288" y="450" text-anchor="middle" fill="#0d3a6b" font-size="9">DA / RVR 3500</text>
+    <text x="288" y="468" text-anchor="middle" fill="#2a5a9a" font-size="8">HAT 364 ft</text>
+
+    <!-- LNAV -->
+    <rect x="380" y="392" width="155" height="88" rx="4" fill="#fff3cd" stroke="#c08000" stroke-width="1.5"/>
+    <text x="458" y="410" text-anchor="middle" fill="#6a4000" font-size="10" font-weight="700">LNAV</text>
+    <text x="458" y="432" text-anchor="middle" fill="#6a4000" font-size="15" font-weight="700">840</text>
+    <text x="458" y="450" text-anchor="middle" fill="#6a4000" font-size="9">MDA / 24 (½ 英里)</text>
+    <text x="458" y="468" text-anchor="middle" fill="#8a6020" font-size="8">HAT 456 ft</text>
+
+    <!-- CIRC -->
+    <rect x="550" y="392" width="165" height="88" rx="4" fill="#f5f0fa" stroke="#7a40b0" stroke-width="1.5"/>
+    <text x="633" y="410" text-anchor="middle" fill="#5a1a8a" font-size="10" font-weight="700">CIRCLING</text>
+    <text x="633" y="432" text-anchor="middle" fill="#5a1a8a" font-size="15" font-weight="700">960/1020…</text>
+    <text x="633" y="450" text-anchor="middle" fill="#5a1a8a" font-size="9">MDA / 按机型 Cat</text>
+    <text x="633" y="468" text-anchor="middle" fill="#7a4aaa" font-size="8">HAA 525~745 ft</text>
+  </svg>
+</div>
+
+<p>
+  读图顺序通常是：
+  <strong>① 表头</strong>（快速核对机场、进近名、频率）→
+  <strong>② 平面图</strong>（理解整个路线布局）→
+  <strong>③ 剖面图</strong>（理解每段的高度限制）→
+  <strong>④ 最低标准框</strong>（确定今天的天气够不够降落）。
+</p>
+</section>
+
+<!-- ==================== §3 表头 ==================== -->
+<section id="header">
+<h2><span class="sec-num">3</span>表头逐项精读</h2>
+
+<h3>3.1 进近名称与"Y"字母</h3>
+<p>
+  图名为 <strong>RNAV (GPS) Y RWY 5L</strong>。
+</p>
+<ul>
+  <li><strong>RNAV (GPS)</strong>：这是一个区域导航 GPS 进近，不依赖地面无线电。</li>
+  <li><strong>Y</strong>：字母后缀只是"图的编号"，不代表任何导航点或质量等级。
+      当同一条跑道有多张 RNAV(GPS) 图时，从下往上依次命名 Z、Y、X……
+      在 KRDU 05L 跑道，Z 图是另一套进近程序，Y 图就是本教程这一张。</li>
+  <li><strong>RWY 5L</strong>：对准 05L 跑道（磁方位 054°，左侧跑道）。</li>
+</ul>
+
+<div class="callout callout-warn">
+  <div class="callout-title"><span class="icon">⚠️</span>常见误区：Y 不是"定位点"</div>
+  <p>
+    初学者常以为 Y 是某个导航台或定位点的名称。
+    实际上它纯粹是"同一跑道第二张图"的区分字母，和飞行路线没有任何关系。
+  </p>
+</div>
+
+<h3>3.2 APP CRS（最终进近航迹）</h3>
+<p>
+  <strong>APP CRS 054°</strong>：飞机在最终进近段的飞行方向为磁方位 <strong>054°</strong>，
+  也就是朝东偏北方向飞向跑道。跑道方向名"05L"正好对应 054°（跑道磁方位向前取整后去掉个位数）。
+</p>
+
+<h3>3.3 跑道长度与高度</h3>
+<ul>
+  <li><strong>Rwy Ldg 10000 ft</strong>：可用着陆距离 10000 英尺（约 3048 米）。</li>
+  <li><strong>TDZE 384 ft</strong>：接地区高程（Touchdown Zone Elevation）384 英尺——跑道落地区域海拔 384 英尺，是计算 HAT 的基准。</li>
+  <li><strong>Apt Elev 435 ft</strong>：机场高程 435 英尺——整个机场最高点海拔，是计算 HAA 的基准。</li>
+</ul>
+
+<h3>3.4 WAAS 信道与 RNP 信息</h3>
+<p>
+  <strong>CH 48813 / W05A</strong>：WAAS 频道号和 WAAS approach ID，让 WAAS 飞行管理系统能自动调出精确的进近数据。
+  标注 <strong>"RNP APCH-GPS"</strong> 表示本程序按 ICAO RNP APCH 规范发布，飞机需要通过的最低导航精度为 0.3 NM（最终进近段 0.1 NM）。
+</p>
+
+<h3>3.5 飞行员简报注记</h3>
+<p>这张图在表头处有几条重要的飞行员备注：</p>
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>原文（英）</th><th>含义（中）</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Simultaneous approach authorized</td>
+      <td>允许两条跑道同时进近（KRDU 05L 和另一条跑道可同时使用）</td>
+    </tr>
+    <tr>
+      <td>LNAV procedure NA during simultaneous operations</td>
+      <td>同时进近时不得使用 LNAV 最低标准（只能用 LPV 或 LNAV/VNAV）</td>
+    </tr>
+    <tr>
+      <td>For uncompensated Baro-VNAV systems, LNAV/VNAV NA below −12°C or above 54°C</td>
+      <td>气压式垂直引导系统未温度补偿时，LNAV/VNAV 在极端气温下不可用</td>
+    </tr>
+    <tr>
+      <td>For inop ALS, increase LNAV/VNAV all Cats visibility to RVR 5500</td>
+      <td>进近灯光系统不工作时，LNAV/VNAV 的能见度要求提高至 RVR 5500</td>
+    </tr>
+    <tr>
+      <td>Use of FD or AP required during simultaneous operations</td>
+      <td>同时进近时必须使用飞行指引仪或自动驾驶</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3>3.6 复飞文字（Missed Approach）</h3>
+<p>
+  表头中的复飞文字给出了"如果需要复飞该怎么飞"的言语描述：
+</p>
+<div class="callout callout-info">
+  <div class="callout-title"><span class="icon">🔄</span>复飞指令原文</div>
+  <p><em>"Climb to 1000 then climbing left turn to 2200 direct DUHAM and hold."</em></p>
+  <p>
+    中文：先爬升到 1000 英尺，然后在爬升过程中向左转，爬到 2200 英尺后直飞 DUHAM 定位点，
+    并在那里进入等待（保持航线飞行）。
+  </p>
+</div>
+
+<h3>3.7 通信频率</h3>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>频率</th><th>用途</th></tr></thead>
+  <tbody>
+    <tr><td>D-ATIS 123.8</td><td>自动终端信息服务（播报天气、跑道状态）</td></tr>
+    <tr><td>Raleigh APP CON 127.675 / 307.9</td><td>进近管制（引导飞机从空中进入机场区域）</td></tr>
+    <tr><td>Raleigh TOWER 127.45 / 257.8</td><td>塔台管制（落地和起飞许可）</td></tr>
+    <tr><td>GND CON 121.9 / 348.6</td><td>地面管制（在机坪滑行）</td></tr>
+    <tr><td>CLNC DEL 120.1</td><td>放行管制（出发前申请飞行许可）</td></tr>
+    <tr><td>CPDLC available</td><td>可用数据链通信（文字指令，减少频道占用）</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>3.8 MSA（最低安全高度）</h3>
+<p>
+  <strong>MSA 3400 ft</strong>，以 RW05L 为圆心，半径 25 NM 范围内的紧急障碍物超越高度。
+  这是一个"保险高度"——飞行员在导航不确定时爬到这个高度，可保证在 25 NM 圆内不撞到任何障碍物。
+  它不是正常进近使用的高度。
+</p>
+</section>
+
+<!-- ==================== §4 平面图 ==================== -->
+<section id="plan-view">
+<h2><span class="sec-num">4</span>平面图：俯视的路线</h2>
+
+<p>
+  平面图是从正上方俯视整个进近程序的示意图。
+  它展示所有定位点（Fix）、飞行航迹、复飞路线，以及周边地形/空域信息。
+</p>
+
+<h3>4.1 定位点链条</h3>
+<p>本进近在最终进近段的定位点从远到近依次为：</p>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th>定位点</th><th>角色</th><th>公布高度</th><th>到下一点距离</th><th>说明</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>OTTOS</strong></td>
+      <td><span class="fix-badge badge-iaf">IAF</span></td>
+      <td>5000 ft</td>
+      <td>—</td>
+      <td>初始进近定位点，飞机从外部航路加入进近的起点之一</td>
+    </tr>
+    <tr>
+      <td><strong>CHWDR</strong></td>
+      <td><span class="fix-badge badge-iaf">IAF</span></td>
+      <td>5000 ft</td>
+      <td>—</td>
+      <td>另一个 IAF，飞机从不同方向加入时使用</td>
+    </tr>
+    <tr>
+      <td><strong>BOULE</strong></td>
+      <td>步降点</td>
+      <td>4000 ft</td>
+      <td>3.1 NM</td>
+      <td>过渡步降，飞机从 5000 下到 4000</td>
+    </tr>
+    <tr>
+      <td><strong>SCHOO</strong></td>
+      <td><span class="fix-badge badge-if">IF</span></td>
+      <td>3000 ft</td>
+      <td>2.7 NM</td>
+      <td>中间定位点，飞机对准跑道方向后继续下降</td>
+    </tr>
+    <tr>
+      <td><strong>WEPAS</strong></td>
+      <td><span class="fix-badge badge-faf">FAF</span></td>
+      <td>2200 ft</td>
+      <td>—</td>
+      <td>最终进近定位点，下滑道在此开始；下滑符号 ▼</td>
+    </tr>
+    <tr>
+      <td><strong>RW05L</strong></td>
+      <td><span class="fix-badge badge-mapt">MAPt</span></td>
+      <td>TDZE 384 ft</td>
+      <td>—</td>
+      <td>跑道头 = LNAV 复飞决断点（如果没有垂直引导）</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout callout-key">
+  <div class="callout-title"><span class="icon">📍</span>关键概念：各定位点角色</div>
+  <ul>
+    <li><strong>IAF（Initial Approach Fix，初始进近定位点）</strong>：飞机从航路转入进近的入口。本图有两个 IAF（OTTOS 和 CHWDR），飞机从不同方向来都有一个合适的起点。</li>
+    <li><strong>IF（Intermediate Fix，中间定位点）</strong>：SCHOO。到这里飞机已经对准跑道方向，速度和构型趋于稳定，为最终进近做好准备。</li>
+    <li><strong>FAF（Final Approach Fix，最终进近定位点）</strong>：WEPAS。下滑道在此建立，飞机开始最终的 3° 下降。地图上用黑色三角形 ▼ 标注。</li>
+    <li><strong>MAPt（Missed Approach Point，复飞点）</strong>：对 LNAV（无垂直引导）进近，复飞点在 RW05L（跑道头）；对 LPV/LNAV-VNAV 进近，复飞点是飞机下降到 DA 的那个瞬间——不是一个地面定位点，而是一个高度。</li>
+  </ul>
+</div>
+
+<h3>4.2 平面图 SVG</h3>
+
+<div class="diagram">
+  <div class="diagram-caption">图 4-1 · KRDU RNAV Y RWY 5L 平面图示意（非比例尺，仅供教学）</div>
+  <svg viewBox="0 0 800 480" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif">
+    <defs>
+      <marker id="blu-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L9,3 z" fill="#1a6eb5"/>
+      </marker>
+      <marker id="red-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L9,3 z" fill="#9c2b2b"/>
+      </marker>
+      <marker id="grn-arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L9,3 z" fill="#2d7a3a"/>
+      </marker>
+    </defs>
+
+    <!-- background sky blue light -->
+    <rect width="800" height="480" fill="#eef5fc"/>
+
+    <!-- MSA circle -->
+    <circle cx="600" cy="280" r="140" fill="none" stroke="#7ab0d8" stroke-width="1" stroke-dasharray="6,4"/>
+    <text x="600" y="134" text-anchor="middle" fill="#7ab0d8" font-size="10">25 NM MSA 3400 ft</text>
+
+    <!-- compass rose hint -->
+    <text x="760" y="30" text-anchor="end" fill="#9ab8cc" font-size="11" font-weight="700">N ↑</text>
+
+    <!-- ======= APPROACH PATH ======= -->
+    <!-- OTTOS → BOULE (feeder from IAF) -->
+    <line x1="120" y1="175" x2="290" y2="255" stroke="#1a6eb5" stroke-width="2.5" marker-end="url(#blu-arr)"/>
+    <text x="180" y="198" fill="#1a6eb5" font-size="10" font-weight="700" transform="rotate(28,180,198)">054° / 6.4 NM</text>
+
+    <!-- CHWDR feeding in from the south -->
+    <line x1="210" y1="370" x2="290" y2="255" stroke="#1a6eb5" stroke-width="2" stroke-dasharray="7,4" marker-end="url(#blu-arr)"/>
+    <text x="225" y="330" fill="#1a6eb5" font-size="9" transform="rotate(-55,225,330)">CHWDR 进场</text>
+
+    <!-- BOULE → SCHOO -->
+    <line x1="290" y1="255" x2="395" y2="306" stroke="#1a6eb5" stroke-width="2.5" marker-end="url(#blu-arr)"/>
+    <text x="325" y="268" fill="#1a6eb5" font-size="9" font-weight="700" transform="rotate(26,325,268)">054° / 3.1 NM</text>
+
+    <!-- SCHOO → WEPAS -->
+    <line x1="395" y1="306" x2="490" y2="354" stroke="#1a6eb5" stroke-width="2.5" marker-end="url(#blu-arr)"/>
+    <text x="428" y="316" fill="#1a6eb5" font-size="9" font-weight="700" transform="rotate(26,428,316)">054° / 2.7 NM</text>
+
+    <!-- WEPAS → RW05L (final, orange) -->
+    <line x1="490" y1="354" x2="615" y2="416" stroke="#c05000" stroke-width="3" marker-end="url(#blu-arr)"/>
+    <text x="535" y="370" fill="#c05000" font-size="9" font-weight="700" transform="rotate(26,535,370)">3.00° 下滑道</text>
+
+    <!-- ======= FIXES ======= -->
+    <!-- OTTOS -->
+    <polygon points="120,161 113,178 127,178" fill="#1a6eb5"/>
+    <rect x="108" y="184" width="6" height="6" fill="none" stroke="#1a6eb5" stroke-width="1.5" transform="rotate(45,111,187)"/>
+    <text x="120" y="155" text-anchor="middle" fill="#0d3a6b" font-size="11" font-weight="700">OTTOS</text>
+    <text x="120" y="204" text-anchor="middle" fill="#1a6eb5" font-size="9">IAF  5000 ft</text>
+
+    <!-- CHWDR -->
+    <polygon points="210,356 203,373 217,373" fill="#1a6eb5"/>
+    <rect x="198" y="378" width="6" height="6" fill="none" stroke="#1a6eb5" stroke-width="1.5" transform="rotate(45,201,381)"/>
+    <text x="210" y="350" text-anchor="middle" fill="#0d3a6b" font-size="11" font-weight="700">CHWDR</text>
+    <text x="210" y="395" text-anchor="middle" fill="#1a6eb5" font-size="9">IAF  5000 ft</text>
+
+    <!-- BOULE -->
+    <circle cx="290" cy="255" r="6" fill="#2d7a3a" stroke="#fff" stroke-width="1.5"/>
+    <text x="290" y="241" text-anchor="middle" fill="#1a4c20" font-size="11" font-weight="700">BOULE</text>
+    <text x="290" y="272" text-anchor="middle" fill="#2d7a3a" font-size="9">步降  4000 ft</text>
+
+    <!-- SCHOO -->
+    <circle cx="395" cy="306" r="7" fill="#2d7a3a" stroke="#fff" stroke-width="1.5"/>
+    <text x="395" y="292" text-anchor="middle" fill="#1a4c20" font-size="11" font-weight="700">SCHOO</text>
+    <text x="395" y="324" text-anchor="middle" fill="#2d7a3a" font-size="9">IF  3000 ft</text>
+
+    <!-- WEPAS (FAF) -->
+    <polygon points="490,340 480,366 500,366" fill="#c05000"/>
+    <text x="490" y="334" text-anchor="middle" fill="#6a2200" font-size="11" font-weight="700">WEPAS</text>
+    <text x="490" y="376" text-anchor="middle" fill="#c05000" font-size="9">FAF  2200 ft ▼</text>
+
+    <!-- RW05L (runway) -->
+    <g transform="translate(620,415) rotate(-36)">
+      <rect x="-6" y="-24" width="12" height="48" rx="2" fill="#666"/>
+      <line x1="0" y1="-24" x2="0" y2="-16" stroke="#fff" stroke-width="1.5"/>
+      <line x1="0" y1="-10" x2="0" y2="-2" stroke="#fff" stroke-width="1.5"/>
+      <line x1="0" y1="4" x2="0" y2="12" stroke="#fff" stroke-width="1.5"/>
+      <line x1="0" y1="18" x2="0" y2="24" stroke="#fff" stroke-width="1.5"/>
+    </g>
+    <text x="638" y="430" fill="#333" font-size="11" font-weight="700">RW05L</text>
+    <text x="638" y="444" fill="#666" font-size="9">MAPt / TDZE 384 ft</text>
+
+    <!-- ======= MISSED APPROACH ======= -->
+    <!-- from RW05L, left turn to DUHAM -->
+    <path d="M 620 408 C 640 370 660 330 650 290 C 640 250 600 230 560 220" fill="none" stroke="#9c2b2b" stroke-width="2" stroke-dasharray="8,4" marker-end="url(#red-arr)"/>
+    <text x="660" y="310" fill="#9c2b2b" font-size="9" font-weight="700">复飞：左转上升</text>
+    <text x="660" y="322" fill="#9c2b2b" font-size="9">至 2200 ft</text>
+
+    <!-- DUHAM holding -->
+    <ellipse cx="540" cy="210" rx="35" ry="18" fill="none" stroke="#9c2b2b" stroke-width="2" stroke-dasharray="5,3"/>
+    <circle cx="540" cy="210" r="5" fill="#9c2b2b"/>
+    <text x="540" y="198" text-anchor="middle" fill="#6a0a0a" font-size="11" font-weight="700">DUHAM</text>
+    <text x="540" y="236" text-anchor="middle" fill="#9c2b2b" font-size="8">MAHF / 等待 / 173°/353°</text>
+    <text x="540" y="248" text-anchor="middle" fill="#9c2b2b" font-size="8">4 NM 腿长</text>
+
+    <!-- 1000 ft climb note -->
+    <text x="670" y="394" fill="#9c2b2b" font-size="8">先爬至 1000 ft</text>
+
+    <!-- legend -->
+    <rect x="18" y="18" width="200" height="120" rx="6" fill="rgba(255,255,255,0.85)" stroke="#ccc" stroke-width="1"/>
+    <text x="118" y="37" text-anchor="middle" fill="#333" font-size="11" font-weight="700">图例</text>
+    <line x1="30" y1="52" x2="68" y2="52" stroke="#1a6eb5" stroke-width="2.5"/>
+    <text x="76" y="56" fill="#333" font-size="10">进近路线</text>
+    <line x1="30" y1="70" x2="68" y2="70" stroke="#c05000" stroke-width="3"/>
+    <text x="76" y="74" fill="#333" font-size="10">最终进近 / 下滑道</text>
+    <line x1="30" y1="88" x2="68" y2="88" stroke="#9c2b2b" stroke-width="2" stroke-dasharray="6,3"/>
+    <text x="76" y="92" fill="#333" font-size="10">复飞路线</text>
+    <polygon points="45,104 38,118 52,118" fill="#1a6eb5"/>
+    <text x="76" y="113" fill="#333" font-size="10">IAF（初始进近定位点）</text>
+    <polygon points="45,124 38,132 52,132" fill="#c05000"/>
+    <text x="76" y="133" fill="#333" font-size="10">FAF（最终进近定位点）</text>
+
+    <!-- ===== 交互热区（悬停查看详情） ===== -->
+    <g class="hotspots">
+      <line class="hot seg" x1="120" y1="175" x2="290" y2="255" stroke="transparent" stroke-width="16" pointer-events="all"
+            data-t="馈送段：OTTOS → BOULE" data-d="054° 航迹，6.4 海里。飞机从 OTTOS（IAF）向 BOULE 步降定位点飞行。"></line>
+      <line class="hot seg" x1="210" y1="370" x2="290" y2="255" stroke="transparent" stroke-width="16" pointer-events="all"
+            data-t="到达：CHWDR → BOULE" data-d="另一条入口。CHWDR 是第二个 IAF；从南侧加入的飞机在此汇入，飞向 BOULE。"></line>
+      <line class="hot seg" x1="290" y1="255" x2="395" y2="306" stroke="transparent" stroke-width="16" pointer-events="all"
+            data-t="BOULE → SCHOO" data-d="054° 航迹，3.1 海里。从 4000 ft 下降，飞向中间定位点 SCHOO（3000 ft）。"></line>
+      <line class="hot seg" x1="395" y1="306" x2="490" y2="354" stroke="transparent" stroke-width="16" pointer-events="all"
+            data-t="SCHOO → WEPAS" data-d="054° 航迹，2.7 海里。中间航段，使飞机对准跑道，准备在 WEPAS（FAF）开始最终进近。"></line>
+      <line class="hot seg" x1="490" y1="354" x2="615" y2="416" stroke="transparent" stroke-width="18" pointer-events="all"
+            data-t="最终进近：WEPAS → RW05L" data-d="从 FAF 沿 3.00° 下滑道下降到跑道入口——最终下降从这里开始。"></line>
+      <circle class="hot dot" cx="120" cy="178" r="22" fill="transparent" pointer-events="all"
+            data-t="OTTOS — IAF（初始进近定位点）" data-d="在 5000 ft 通过。两个入口定位点之一，飞机从航路网络在此加入已公布的进近程序。"></circle>
+      <circle class="hot dot" cx="210" cy="372" r="22" fill="transparent" pointer-events="all"
+            data-t="CHWDR — IAF（初始进近定位点）" data-d="在 5000 ft 通过。第二个入口定位点，供从不同方向到达的飞机使用。"></circle>
+      <circle class="hot dot" cx="290" cy="255" r="18" fill="transparent" pointer-events="all"
+            data-t="BOULE — 步降定位点" data-d="在 4000 ft 及以上通过。飞向中间定位点途中的一个步降点。"></circle>
+      <circle class="hot dot" cx="395" cy="306" r="18" fill="transparent" pointer-events="all"
+            data-t="SCHOO — IF（中间定位点）" data-d="在 3000 ft 通过。在最终进近前使飞机对准并稳定。"></circle>
+      <circle class="hot dot" cx="490" cy="354" r="18" fill="transparent" pointer-events="all"
+            data-t="WEPAS — FAF（最终进近定位点）" data-d="在 2200 ft 通过。沿 3.00° 下滑道的最终下降从这里开始（图上标 ▼）。"></circle>
+      <circle class="hot dot" cx="620" cy="415" r="22" fill="transparent" pointer-events="all"
+            data-t="RW05L — 跑道 / 复飞点" data-d="05L 跑道入口，TDZE 384 ft。对 LNAV 而言这是复飞点——必须在此之前决定落地或复飞。"></circle>
+      <circle class="hot dot" cx="540" cy="210" r="24" fill="transparent" pointer-events="all"
+            data-t="DUHAM — MAHF（复飞等待定位点）" data-d="复飞后爬升至 2200 ft，直飞 DUHAM 并等待（4 海里边长，进/出 173°/353°）。"></circle>
+    </g>
+  </svg>
+</div>
+
+<h3>4.3 TAA 和 OTTOS 的等待程序</h3>
+<p>
+  图上在 OTTOS 附近标有 <strong>"2T0K"</strong> 和 6000 ft 的高度圈，这是 <strong>TAA（Terminal Arrival Area，终端到达区）</strong>的标注。
+  TAA 定义了飞机从不同扇区加入进近时的最低初始高度，确保飞机在进入 IAF 之前已有足够的高度裕度。
+  具体细节超出本教程范围，只需知道：来到 OTTOS 时，飞机应保持 6000 ft 或以上。
+</p>
+</section>
+
+<!-- ==================== §5 剖面图 ==================== -->
+<section id="profile-view">
+<h2><span class="sec-num">5</span>剖面图：垂直下降阶梯</h2>
+
+<p>
+  剖面图从侧面展示飞机从高到低的下降路径，像一个阶梯——每一级台阶就是一个允许下降到的高度。
+  同时，最终进近段有一条 <strong>3° 下滑线</strong> 从 FAF（WEPAS）一直延伸到跑道头。
+</p>
+
+<div class="diagram">
+  <div class="diagram-caption">图 5-1 · KRDU RNAV Y RWY 5L 剖面图示意（高度和距离均为示意，非精确比例）</div>
+  <svg viewBox="0 0 800 380" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif">
+    <defs>
+      <marker id="blkarr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L8,3 z" fill="#333"/>
+      </marker>
+    </defs>
+
+    <!-- background -->
+    <rect width="800" height="380" fill="#f0f6ff"/>
+
+    <!-- sky gradient suggestion -->
+    <rect x="0" y="0" width="800" height="220" fill="#e8f4ff" opacity="0.5"/>
+
+    <!-- ground / terrain suggestion -->
+    <rect x="0" y="300" width="800" height="80" fill="#d8e8d0"/>
+
+    <!-- ======= ALTITUDE AXIS ======= -->
+    <!-- y=310 → 384 ft (TDZE), y=30 → ~5200 ft (top) -->
+    <!-- scale: (alt - 384) * (310-30) / (5200-384) = (alt-384) * 280/4816 -->
+    <!-- alt 5000 → y = 30 + (5200-5000)*280/4816 = 30+11.6 = 41 -->
+    <!-- alt 4000 → y = 30 + (5200-4000)*280/4816 = 30+69.7 = 100 -->
+    <!-- alt 3000 → y = 30 + (5200-3000)*280/4816 = 30+128 = 158 -->
+    <!-- alt 2200 → y = 30 + (5200-2200)*280/4816 = 30+174 = 204 -->
+    <!-- alt 840 →  y = 30 + (5200-840)*280/4816 = 30+253 = 283 -->
+    <!-- alt 748 →  y = 30 + (5200-748)*280/4816 = 30+259 = 289 -->
+    <!-- alt 598 →  y = 30 + (5200-598)*280/4816 = 30+267 = 297 -->
+    <!-- alt 384 →  y = 310 -->
+
+    <!-- Y axis -->
+    <line x1="70" y1="20" x2="70" y2="320" stroke="#aaa" stroke-width="1"/>
+    <line x1="65" y1="41" x2="75" y2="41" stroke="#aaa" stroke-width="1"/>
+    <text x="60" y="44" text-anchor="end" fill="#666" font-size="9">5000</text>
+    <line x1="65" y1="100" x2="75" y2="100" stroke="#aaa" stroke-width="1"/>
+    <text x="60" y="103" text-anchor="end" fill="#666" font-size="9">4000</text>
+    <line x1="65" y1="158" x2="75" y2="158" stroke="#aaa" stroke-width="1"/>
+    <text x="60" y="161" text-anchor="end" fill="#666" font-size="9">3000</text>
+    <line x1="65" y1="204" x2="75" y2="204" stroke="#aaa" stroke-width="1"/>
+    <text x="60" y="207" text-anchor="end" fill="#666" font-size="9">2200</text>
+    <line x1="65" y1="283" x2="75" y2="283" stroke="#aaa" stroke-width="1"/>
+    <text x="60" y="286" text-anchor="end" fill="#666" font-size="9">840</text>
+    <line x1="65" y1="289" x2="75" y2="289" stroke="#aaa" stroke-width="1"/>
+    <text x="60" y="292" text-anchor="end" fill="#666" font-size="9">748</text>
+    <line x1="65" y1="297" x2="75" y2="297" stroke="#aaa" stroke-width="1"/>
+    <text x="60" y="300" text-anchor="end" fill="#666" font-size="9">598</text>
+    <line x1="65" y1="310" x2="75" y2="310" stroke="#aaa" stroke-width="1"/>
+    <text x="60" y="313" text-anchor="end" fill="#666" font-size="9">384</text>
+    <text x="20" y="170" text-anchor="middle" fill="#888" font-size="10" transform="rotate(-90,20,170)">高度 (ft MSL)</text>
+
+    <!-- X axis positions (approx, for teaching) -->
+    <!-- x: IAF=90, BOULE=230, SCHOO=340, WEPAS=450, RW05L=720 -->
+    <line x1="70" y1="320" x2="760" y2="320" stroke="#aaa" stroke-width="1"/>
+
+    <!-- ======= STEP-DOWN STAIRCASE ======= -->
+    <!-- IAF/CHWDR at 5000 (x=90..160) -->
+    <rect x="90" y="41" width="1" height="269" fill="#ccc" stroke-dasharray="3,2"/>
+    <line x1="90" y1="41" x2="230" y2="41" stroke="#1a6eb5" stroke-width="3"/>
+    <!-- down step to 4000 at BOULE (x=230) -->
+    <line x1="230" y1="41" x2="230" y2="100" stroke="#1a6eb5" stroke-width="2" stroke-dasharray="4,2"/>
+    <line x1="230" y1="100" x2="340" y2="100" stroke="#1a6eb5" stroke-width="3"/>
+    <!-- down step to 3000 at SCHOO (x=340) -->
+    <line x1="340" y1="100" x2="340" y2="158" stroke="#1a6eb5" stroke-width="2" stroke-dasharray="4,2"/>
+    <line x1="340" y1="158" x2="450" y2="158" stroke="#1a6eb5" stroke-width="3"/>
+    <!-- down step to 2200 at WEPAS (x=450) -->
+    <line x1="450" y1="158" x2="450" y2="204" stroke="#1a6eb5" stroke-width="2" stroke-dasharray="4,2"/>
+
+    <!-- ======= GLIDEPATH LINE from WEPAS (x=450,y=204) to threshold (x=720,y=310) ======= -->
+    <line x1="450" y1="204" x2="720" y2="310" stroke="#c05000" stroke-width="3"/>
+    <!-- glidepath label -->
+    <text x="570" y="242" fill="#c05000" font-size="10" font-weight="700" transform="rotate(21,570,242)">3.00° 下滑道  GP=3.00°</text>
+
+    <!-- LPV DA line at 598 -->
+    <line x1="70" y1="297" x2="720" y2="297" stroke="#2d7a3a" stroke-width="1" stroke-dasharray="6,3" opacity="0.7"/>
+    <text x="724" y="300" fill="#2d7a3a" font-size="8.5" font-weight="700">LPV DA 598</text>
+
+    <!-- LNAV/VNAV DA at 748 -->
+    <line x1="70" y1="289" x2="720" y2="289" stroke="#1a6eb5" stroke-width="1" stroke-dasharray="6,3" opacity="0.6"/>
+    <text x="724" y="292" fill="#1a6eb5" font-size="8.5" font-weight="700">L/V DA 748</text>
+
+    <!-- LNAV MDA at 840 -->
+    <line x1="70" y1="283" x2="720" y2="283" stroke="#c08000" stroke-width="1.5" stroke-dasharray="6,3" opacity="0.7"/>
+    <text x="724" y="286" fill="#c08000" font-size="8.5" font-weight="700">LNAV MDA 840</text>
+
+    <!-- ======= FIX LABELS ON PROFILE ======= -->
+    <!-- IAF -->
+    <rect x="78" y="34" width="8" height="14" fill="#1a6eb5"/>
+    <text x="90" y="30" text-anchor="middle" fill="#0d3a6b" font-size="9" font-weight="700">OTTOS/CHWDR</text>
+    <text x="90" y="22" text-anchor="middle" fill="#0d3a6b" font-size="8">IAF</text>
+
+    <!-- BOULE -->
+    <circle cx="230" cy="100" r="5" fill="#2d7a3a" stroke="#fff" stroke-width="1.5"/>
+    <text x="230" y="92" text-anchor="middle" fill="#1a4c20" font-size="9" font-weight="700">BOULE</text>
+    <text x="230" y="83" text-anchor="middle" fill="#2d7a3a" font-size="8">4000 ft</text>
+
+    <!-- SCHOO -->
+    <circle cx="340" cy="158" r="5" fill="#2d7a3a" stroke="#fff" stroke-width="1.5"/>
+    <text x="340" y="150" text-anchor="middle" fill="#1a4c20" font-size="9" font-weight="700">SCHOO (IF)</text>
+    <text x="340" y="141" text-anchor="middle" fill="#2d7a3a" font-size="8">3000 ft</text>
+
+    <!-- WEPAS (FAF) -->
+    <polygon points="450,190 443,210 457,210" fill="#c05000"/>
+    <text x="450" y="186" text-anchor="middle" fill="#6a2200" font-size="9" font-weight="700">WEPAS (FAF)</text>
+    <text x="450" y="177" text-anchor="middle" fill="#c05000" font-size="8">2200 ft ▼</text>
+
+    <!-- RW05L -->
+    <rect x="712" y="298" width="16" height="12" rx="1" fill="#555"/>
+    <text x="720" y="330" text-anchor="middle" fill="#333" font-size="9" font-weight="700">RW05L</text>
+    <text x="720" y="341" text-anchor="middle" fill="#555" font-size="8">TDZE 384</text>
+    <text x="720" y="352" text-anchor="middle" fill="#9c2b2b" font-size="8">MAPt (LNAV)</text>
+
+    <!-- TCH annotation -->
+    <line x1="720" y1="298" x2="720" y2="310" stroke="#c05000" stroke-width="2"/>
+    <text x="700" y="295" fill="#c05000" font-size="8">TCH 57 ft</text>
+
+    <!-- 1.3 NM marker -->
+    <line x1="682" y1="316" x2="682" y2="322" stroke="#666" stroke-width="1"/>
+    <text x="682" y="336" text-anchor="middle" fill="#666" font-size="8">1.3 NM</text>
+    <text x="682" y="346" text-anchor="middle" fill="#666" font-size="8">至 RW05L</text>
+
+    <!-- ======= MISSED APPROACH sketch ======= -->
+    <path d="M 720 310 L 720 270 Q 700 240 660 220 L 560 200" fill="none" stroke="#9c2b2b" stroke-width="2" stroke-dasharray="6,3"/>
+    <text x="570" y="196" fill="#9c2b2b" font-size="8">复飞：爬升至 1000 → 2200 → DUHAM 等待</text>
+
+    <!-- ===== 交互热区（悬停查看详情） ===== -->
+    <g class="hotspots">
+      <line class="hot seg" x1="90" y1="41" x2="230" y2="41" stroke="transparent" stroke-width="14" pointer-events="all"
+            data-t="保持 5000 ft" data-d="从 IAF（OTTOS / CHWDR）保持 5000 ft，直到 BOULE。"></line>
+      <line class="hot seg" x1="230" y1="100" x2="340" y2="100" stroke="transparent" stroke-width="14" pointer-events="all"
+            data-t="保持 4000 ft" data-d="在 BOULE 步降后保持 4000 ft，直到 SCHOO。"></line>
+      <line class="hot seg" x1="340" y1="158" x2="450" y2="158" stroke="transparent" stroke-width="14" pointer-events="all"
+            data-t="保持 3000 ft" data-d="过 SCHOO（IF）后保持 3000 ft，直到 WEPAS（FAF）。"></line>
+      <line class="hot seg" x1="450" y1="204" x2="720" y2="310" stroke="transparent" stroke-width="16" pointer-events="all"
+            data-t="3.00° 下滑道" data-d="从 WEPAS（2200 ft）下降到跑道入口，在 TCH 57 ft 处穿越——每海里下降约 320 ft。"></line>
+      <circle class="hot dot" cx="90" cy="41" r="16" fill="transparent" pointer-events="all"
+            data-t="IAF — 5000 ft" data-d="OTTOS / CHWDR 初始进近定位点：步降阶梯的顶端。"></circle>
+      <circle class="hot dot" cx="230" cy="100" r="14" fill="transparent" pointer-events="all"
+            data-t="BOULE — 4000 ft" data-d="步降定位点（4000 ft 及以上）。"></circle>
+      <circle class="hot dot" cx="340" cy="158" r="14" fill="transparent" pointer-events="all"
+            data-t="SCHOO — IF，3000 ft" data-d="中间定位点（3000 ft 及以上）。"></circle>
+      <circle class="hot dot" cx="450" cy="204" r="14" fill="transparent" pointer-events="all"
+            data-t="WEPAS — FAF，2200 ft" data-d="最终进近定位点；下滑道下降从这里开始。"></circle>
+      <circle class="hot dot" cx="720" cy="310" r="16" fill="transparent" pointer-events="all"
+            data-t="RW05L — 跑道入口" data-d="跑道入口，TDZE 384 ft。下滑道在 TCH 57 ft 处穿越。这是 LNAV 的复飞点。"></circle>
+      <line class="hot seg" x1="80" y1="297" x2="715" y2="297" stroke="transparent" stroke-width="6" pointer-events="all"
+            data-t="LPV DA 598 ft" data-d="最低的最低标准：有 WAAS 垂直引导时，在 598 ft（HAT 214 ft）决断。"></line>
+      <line class="hot seg" x1="80" y1="289" x2="715" y2="289" stroke="transparent" stroke-width="5" pointer-events="all"
+            data-t="LNAV/VNAV DA 748 ft" data-d="有批准的垂直引导时，在 748 ft（HAT 364 ft）决断。"></line>
+      <line class="hot seg" x1="80" y1="282" x2="715" y2="282" stroke="transparent" stroke-width="5" pointer-events="all"
+            data-t="LNAV MDA 840 ft" data-d="无垂直引导：在看到跑道前不得低于 840 ft（HAT 456 ft）。"></line>
+    </g>
+  </svg>
+</div>
+
+<h3>5.1 每一级台阶的含义</h3>
+<p>
+  阶梯式下降是仪表进近的典型形态：
+</p>
+<ul>
+  <li>每个步降点（Fix）给飞机设置了一个<strong>"不得低于"（at or above）</strong>的高度。</li>
+  <li>飞机在两个步降点之间可以保持在该高度飞行，直到到达下一个步降点才能继续下降。</li>
+  <li>这样设计的目的是：在你还未飞到安全的进近路径上时，保证飞机始终在周边地形和障碍物之上。</li>
+</ul>
+
+<h3>5.2 下滑角与 TCH</h3>
+<p>
+  从 WEPAS（2200 ft）到 RW05L（384 ft），有一条 <strong>3.00° 的下滑道</strong>。
+  这意味着飞机每前进 1 海里（1852 米），大约下降 320 英尺。
+  <strong>TCH = 57 ft</strong>：下滑道到达跑道头的高度是 57 英尺，
+  也就是飞机飞过跑道入口时，起落架约在跑道面上方 57 英尺。
+</p>
+
+<div class="callout callout-info">
+  <div class="callout-title"><span class="icon">ℹ️</span>VGSI 与 RNAV 下滑道不一致</div>
+  <p>
+    图上有一条注记：
+    <em>"VGSI and RNAV glidepath not coincident (VGSI Angle 3.00/TCH 72)"</em>。
+    这意味着目视助降灯（PAPI/VASI）和 RNAV 下滑道的角度虽然同为 3°，
+    但它们在跑道头的高度不同——PAPI 是 72 英尺，RNAV 是 57 英尺。
+    飞行员在接地前不能单纯依靠 PAPI 来判断 RNAV 下滑道是否正确。
+  </p>
+</div>
+</section>
+
+<!-- ==================== §6 四个进近航段 ==================== -->
+<section id="four-segments">
+<h2><span class="sec-num">6</span>四个进近航段</h2>
+
+<p>FAA 把仪表进近从开始到落地划分为四个标准航段：</p>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>航段</th><th>英文</th><th>起点</th><th>终点</th><th>对应本图</th><th>目的</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>初始进近段</strong></td>
+      <td>Initial Approach Segment</td>
+      <td>IAF</td>
+      <td>IF 或 FAF</td>
+      <td>OTTOS/CHWDR → SCHOO</td>
+      <td>飞机从航路降高并转向跑道方向</td>
+    </tr>
+    <tr>
+      <td><strong>中间进近段</strong></td>
+      <td>Intermediate Approach Segment</td>
+      <td>IF (SCHOO)</td>
+      <td>FAF (WEPAS)</td>
+      <td>SCHOO → WEPAS</td>
+      <td>稳定构型、速度，准备最终进近</td>
+    </tr>
+    <tr>
+      <td><strong>最终进近段</strong></td>
+      <td>Final Approach Segment</td>
+      <td>FAF (WEPAS)</td>
+      <td>MAPt / 跑道头</td>
+      <td>WEPAS → RW05L</td>
+      <td>沿 3° 下滑道下降，决定是否落地</td>
+    </tr>
+    <tr>
+      <td><strong>复飞段</strong></td>
+      <td>Missed Approach Segment</td>
+      <td>MAPt</td>
+      <td>MAHF (DUHAM)</td>
+      <td>RW05L → DUHAM</td>
+      <td>如不能目视跑道，执行爬升并等待</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout callout-tip">
+  <div class="callout-title"><span class="icon">✅</span>记忆技巧</div>
+  <p>
+    四个航段的记忆口诀：<strong>"初中终复"</strong>（初始→中间→最终→复飞），
+    对应的关键定位点是 <strong>IAF → IF → FAF → MAPt → MAHF</strong>。
+    每个航段飞行员都有不同的关注重点：初始段是降高，中间段是稳定，最终段是落地决断，复飞段是安全离场。
+  </p>
+</div>
+</section>
+
+<!-- ==================== §7 最低标准框 ==================== -->
+<section id="minima">
+<h2><span class="sec-num">7</span>最低标准框</h2>
+
+<p>
+  最低标准框（Minima Box）是进近图最下方的一个表格，
+  告诉飞行员在什么天气条件下，飞机可以下降到多低。
+  如果到达决断高度/最低下降高度时，飞行员<strong>看不到跑道</strong>，
+  必须立刻复飞，不得继续下降。
+</p>
+
+<h3>7.1 三种主要最低标准</h3>
+
+<div class="minima-grid">
+  <div class="minima-card card-lpv">
+    <div class="label">LPV</div>
+    <div class="da">598 ft</div>
+    <div class="vis">DA · RVR 1800 ft</div>
+    <div class="hat">HAT 214 ft · (200-½)</div>
+  </div>
+  <div class="minima-card card-lv">
+    <div class="label">LNAV / VNAV</div>
+    <div class="da">748 ft</div>
+    <div class="vis">DA · RVR 3500 ft</div>
+    <div class="hat">HAT 364 ft · (400-¾)</div>
+  </div>
+  <div class="minima-card card-lnav">
+    <div class="label">LNAV</div>
+    <div class="da">840 ft</div>
+    <div class="vis">MDA · 24 (½ 英里)</div>
+    <div class="hat">HAT 456 ft · A/B/C ½ mi</div>
+  </div>
+  <div class="minima-card card-circ">
+    <div class="label">CIRCLING（目视盘旋）</div>
+    <div class="da">960~1180 ft</div>
+    <div class="vis">MDA · 按机型类别</div>
+    <div class="hat">HAA 525~745 ft</div>
+  </div>
+</div>
+
+<h3>7.2 DA 与 MDA 的区别</h3>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>类型</th><th>全称</th><th>使用情景</th><th>操作规则</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>DA</strong></td>
+      <td>Decision Altitude（决断高度）</td>
+      <td>有垂直引导（LPV / LNAV-VNAV）</td>
+      <td>到达该高度时决断：能见跑道→继续；否则→立刻复飞</td>
+    </tr>
+    <tr>
+      <td><strong>MDA</strong></td>
+      <td>Minimum Descent Altitude（最低下降高度）</td>
+      <td>无垂直引导（LNAV）</td>
+      <td>到达该高度后保持水平飞行，等待能见跑道；否则在 MAPt 复飞</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3>7.3 HAT 和 HAA</h3>
+<ul>
+  <li><strong>HAT（Height Above Touchdown）</strong>：最低标准高度<em>减去</em> TDZE（接地区高程 384 ft）。例如 LPV DA 598 − 384 = <strong>214 ft HAT</strong>，即离地 214 英尺时必须能看到跑道。</li>
+  <li><strong>HAA（Height Above Airport）</strong>：盘旋进近专用，最低高度减去机场高程（435 ft）。因为盘旋时飞机不沿进近航线飞行，基准是整个机场高度。</li>
+</ul>
+
+<h3>7.4 为什么 LPV 最低标准最低？</h3>
+
+<p>
+  三种最低标准的能力从高到低排列：
+</p>
+<ol>
+  <li>
+    <strong>LPV（最低，DA 598 ft）</strong>：需要 WAAS 接收机 + 飞机认证，提供精密的侧向<em>和</em>垂直引导（类似 ILS），
+    飞行员沿一条精确的 3° 下滑道飞到决断高 598 ft。
+  </li>
+  <li>
+    <strong>LNAV/VNAV（中等，DA 748 ft）</strong>：需要气压垂直引导（Baro-VNAV）或 SBAS，提供垂直引导，
+    但精度不如 LPV，故决断高更高。在极端气温下可能不适用（见表头简报注记）。
+  </li>
+  <li>
+    <strong>LNAV（最高，MDA 840 ft）</strong>：只有侧向导航，无垂直引导。
+    飞行员按阶梯高度下降到 MDA 后保持水平飞行，用目视寻找跑道，
+    故允许的下降高度更高，视程要求也相对更宽松（按固定英里数而非 RVR）。
+  </li>
+</ol>
+
+<div class="callout callout-tip">
+  <div class="callout-title"><span class="icon">💡</span>飞行员首选 LPV</div>
+  <p>
+    当飞机有 WAAS 能力且飞行计划批准 LPV 时，飞行员应尽量选用 LPV 最低标准——
+    它提供最精确的引导、最低的决断高度，在恶劣天气（低云、低能见度）时提供最大的降落机会。
+  </p>
+</div>
+
+<h3>7.5 CIRCLING（目视盘旋）进近</h3>
+<p>
+  盘旋进近是一种特殊情况：飞机用仪表进近对准一条跑道，然后在目视条件下绕场转弯落在<em>另一条</em>跑道。
+  因为飞机不再沿进近中心线飞行，需要的高度裕度更大，故 MDA 更高（960–1180 ft），且按飞机类别（Cat A/B/C/D）区分——
+  速度越快的飞机转弯半径越大，需要的保护高度越高。
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>盘旋类别</th><th>MDA</th><th>HAA</th><th>能见度</th></tr></thead>
+  <tbody>
+    <tr><td>Cat A / B</td><td>960 ft</td><td>525 ft</td><td>1 英里</td></tr>
+    <tr><td>Cat C</td><td>1020 ft</td><td>585 ft</td><td>（按表）</td></tr>
+    <tr><td>Cat D</td><td>1180 ft</td><td>745 ft</td><td>（按表）</td></tr>
+  </tbody>
+</table>
+</div>
+</section>
+
+<!-- ==================== §8 高度限制 ==================== -->
+<section id="alt-qualifiers">
+<h2><span class="sec-num">8</span>高度限制怎么看</h2>
+
+<p>
+  进近图上的高度数字旁边有不同的符号，表示不同的限制含义。
+  理解这些符号非常重要——飞错高度可能造成严重事故。
+</p>
+
+<h3>8.1 四种高度限定方式</h3>
+
+<div class="alt-qual-row">
+  <div class="alt-qual-box">
+    <div class="alt-val mandatory">4000</div>
+    <div class="alt-qual-label">强制（Mandatory / At）<br>必须精确在此高度经过</div>
+  </div>
+  <div class="alt-qual-box">
+    <div class="alt-val at-above">4000</div>
+    <div class="alt-qual-label">不得低于（At or Above）<br>数字下方有横线<br>可以在此高度或更高飞过</div>
+  </div>
+  <div class="alt-qual-box">
+    <div class="alt-val at-below">4000</div>
+    <div class="alt-qual-label">不得高于（At or Below）<br>数字上方有横线<br>可以在此高度或更低飞过</div>
+  </div>
+  <div class="alt-qual-box">
+    <div class="alt-val mandatory" style="font-size:1.1rem">4000<br><span style="font-size:.85rem">3000</span></div>
+    <div class="alt-qual-label">高度窗口（Window）<br>必须在此范围内经过</div>
+  </div>
+</div>
+
+<h3>8.2 本图各定位点的高度限定</h3>
+<p>
+  在 KRDU RNAV Y RWY 5L 图上，各步降点的高度都是 <strong>"不得低于（At or Above）"</strong> 型——
+  也就是说，飞机到达那个点时，高度必须在公布值或以上。
+  CIFP（机器可读的 FAA 仪表飞行程序数据）将这些步降点编码为 <strong>"at or above"</strong> 限定符。
+</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>定位点</th><th>公布高度</th><th>限定类型</th><th>实际意义</th></tr></thead>
+  <tbody>
+    <tr><td>OTTOS / CHWDR（IAF）</td><td>5000 ft</td><td>不得低于</td><td>加入进近时不得低于 5000</td></tr>
+    <tr><td>BOULE</td><td>4000 ft</td><td>不得低于</td><td>经过 BOULE 时不得低于 4000</td></tr>
+    <tr><td>SCHOO（IF）</td><td>3000 ft</td><td>不得低于</td><td>经过 SCHOO 时不得低于 3000</td></tr>
+    <tr><td>WEPAS（FAF）</td><td>2200 ft</td><td>不得低于</td><td>下滑道建立点，不得低于 2200</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout callout-danger">
+  <div class="callout-title"><span class="icon">🚫</span>绝对不能做的事</div>
+  <p>
+    在步降点之前就提前下降到更低的高度。
+    例如，飞机还在 SCHOO（IF）和 WEPAS（FAF）之间，就不能下降到 2200 ft 以下——
+    即使 FAF 上的高度是 2200，也必须先飞到 WEPAS 才能开始下降到 2200。
+    提前下降意味着飞机可能与障碍物的保护高度不符，存在撞山或撞建筑的风险。
+  </p>
+</div>
+
+<h3>8.3 图形辨认技巧</h3>
+<p>在实际图表上，"不得低于"的高度数字下方画有一条细横线；"强制"高度则把数字放在一个细方框里。
+学会辨认这两种符号，是读懂进近图的基础。</p>
+</section>
+
+<!-- ==================== §9 CIFP ==================== -->
+<section id="cifp">
+<h2><span class="sec-num">9</span>CIFP / 航段编码一瞥</h2>
+
+<p>
+  飞行员手里的纸质图是给人看的；飞机的飞行管理系统（FMS）和 AeroViz 这样的分析工具，
+  需要机器可读的版本。
+  FAA 发布的 <strong>CIFP（Coded Instrument Flight Procedures，编码仪表飞行程序）</strong>
+  遵循 <strong>ARINC 424</strong> 格式，将图上的每一段航迹编码成一行行固定宽度的文字记录。
+</p>
+
+<h3>9.1 路径终止符（Path Terminator）</h3>
+<p>
+  每段航迹都用一个<strong>两字母代码（Path and Terminator, P-T）</strong>描述它的形状：
+</p>
+
+<div class="leg-grid">
+  <div class="leg-cell header">代码</div>
+  <div class="leg-cell header">全称与含义</div>
+  <div class="leg-cell"><span class="leg-code">IF</span></div>
+  <div class="leg-cell"><strong>Initial Fix</strong>：从该定位点开始，无需飞行，只是声明起点。每段程序的第一个腿通常是 IF。</div>
+  <div class="leg-cell"><span class="leg-code">TF</span></div>
+  <div class="leg-cell"><strong>Track to a Fix</strong>：沿两个定位点之间的大圆航迹飞行到下一个定位点。这是直线段最常见的编码方式，本图大多数段都是 TF。</div>
+  <div class="leg-cell"><span class="leg-code">CF</span></div>
+  <div class="leg-cell"><strong>Course to a Fix</strong>：以规定磁方位角飞向该定位点（方位角固定，不随大圆变化）。最终进近段通常用 CF 保证精确对准跑道方向 054°。</div>
+  <div class="leg-cell"><span class="leg-code">DF</span></div>
+  <div class="leg-cell"><strong>Direct to a Fix</strong>：从当前位置直飞某定位点，不规定方位角。常用于复飞转弯后直飞 DUHAM。</div>
+  <div class="leg-cell"><span class="leg-code">CA</span></div>
+  <div class="leg-cell"><strong>Course to an Altitude</strong>：以规定航向飞行直到达到规定高度。复飞的初始爬升段（爬到 1000 ft）就是 CA 腿。</div>
+  <div class="leg-cell"><span class="leg-code">HM</span></div>
+  <div class="leg-cell"><strong>Hold to Manual termination</strong>：在某定位点进入标准等待航线，持续等待直到管制员指令或飞行员手动退出。DUHAM 等待就是 HM 腿。</div>
+</div>
+
+<h3>9.2 本图的大致编码逻辑</h3>
+<div class="callout callout-key">
+  <div class="callout-title"><span class="icon">💻</span>CIFP 编码示意</div>
+  <p>本图最终进近段的逻辑大致如下（简化演示，非原始 CIFP 行）：</p>
+  <ul>
+    <li><code>IF  OTTOS  5000A</code>（A = at or above，从 OTTOS 开始，不低于 5000）</li>
+    <li><code>TF  BOULE  4000A</code>（沿航迹飞向 BOULE，不低于 4000）</li>
+    <li><code>TF  SCHOO  3000A</code>（继续到 SCHOO，不低于 3000）</li>
+    <li><code>TF  WEPAS  2200A</code>（到 FAF WEPAS，不低于 2200，下滑道起点）</li>
+    <li><code>CF  RW05L  054°</code>（以 054° 航向飞向跑道头，即最终进近段）</li>
+    <li><code>CA  —  1000</code>（复飞：以当前航向爬到 1000 ft）</li>
+    <li><code>DF  DUHAM  2200</code>（直飞 DUHAM 到 2200 ft）</li>
+    <li><code>HM  DUHAM  —</code>（在 DUHAM 进入等待，直到管制员许可离开）</li>
+  </ul>
+  <p>AeroViz 解析 FAA CIFP 文件，从这些行中提取出定位点、角色、高度限制，然后在 Cesium 3D 视图里画出保护包线和飞行路径。</p>
+</div>
+</section>
+
+<!-- ==================== §10 AeroViz ==================== -->
+<section id="aeroviz">
+<h2><span class="sec-num">10</span>在 AeroViz 里对照看</h2>
+
+<p>
+  AeroViz 将 FAA CIFP 数据解析为 3D 可视化，让你能在 Cesium 地球上实时看到本教程描述的一切。
+</p>
+
+<h3>10.1 如何打开</h3>
+<ol>
+  <li>启动 AeroViz 前端（<code>npm run dev</code>），进入 KRDU 机场。</li>
+  <li>在左侧控制面板找到"Layers"，开启 <strong>RNAV Procedures</strong>（进近程序）。</li>
+  <li>选择 <strong>R05LY</strong>（对应本图），即可看到整个进近路径叠加在 3D 地形上。</li>
+</ol>
+
+<h3>10.2 对照关系</h3>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>本教程内容</th><th>AeroViz 里看到的</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>定位点（OTTOS、WEPAS 等）</td>
+      <td>3D 球面上的标注点，颜色按角色区分（IAF 蓝色、FAF 橙色等）</td>
+    </tr>
+    <tr>
+      <td>TF/CF 航段连线</td>
+      <td>Cesium 上的 3D 折线，显示航段高度（可见阶梯下降）</td>
+    </tr>
+    <tr>
+      <td>OCS 障碍物超越面</td>
+      <td>半透明多边形面，展示进近保护区域（见 <code>useOcsLayer</code> 和教程 03）</td>
+    </tr>
+    <tr>
+      <td>剖面图的阶梯下降</td>
+      <td>侧视飞行路径，可在 Procedure Details 面板查看垂直剖面</td>
+    </tr>
+    <tr>
+      <td>DUHAM 等待航线</td>
+      <td>跑道延长线方向上的等待图形（椭圆形保护区）</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout callout-tip">
+  <div class="callout-title"><span class="icon">🌐</span>建议操作</div>
+  <p>
+    打开 AeroViz，选中 R05LY 程序，然后对照本教程的每一节：
+    先在 2D 图上找到某个定位点，再在 3D 视图里找到它。
+    这种"纸图 ↔ 3D 对照"的练习能极大地帮助你建立空间感。
+  </p>
+</div>
+</section>
+
+<!-- ==================== §11 术语速查表 ==================== -->
+<section id="glossary">
+<h2><span class="sec-num">11</span>术语速查表</h2>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>缩写</th><th>英文全称</th><th>中文</th><th>简要定义</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>RNAV</td><td>Area Navigation</td><td>区域导航</td><td>不依赖地面导航台飞行的技术；允许飞机在指定空域内沿任意期望路径飞行</td></tr>
+    <tr><td>GPS</td><td>Global Positioning System</td><td>全球定位系统</td><td>卫星定位技术，RNAV(GPS) 进近的核心</td></tr>
+    <tr><td>WAAS</td><td>Wide Area Augmentation System</td><td>广域增强系统</td><td>美国 FAA 运营的 GPS 增强网络，使 GPS 精度达到 ILS 级别；LPV 最低标准需要 WAAS</td></tr>
+    <tr><td>IAF</td><td>Initial Approach Fix</td><td>初始进近定位点</td><td>进近程序的入口定位点，飞机从航路转入进近时使用</td></tr>
+    <tr><td>IF</td><td>Intermediate Fix</td><td>中间定位点</td><td>初始进近结束、最终进近开始前的定位点，用于稳定飞机状态</td></tr>
+    <tr><td>FAF</td><td>Final Approach Fix</td><td>最终进近定位点</td><td>最终进近下降的起点，图上用 ▼ 标注</td></tr>
+    <tr><td>MAPt</td><td>Missed Approach Point</td><td>复飞点</td><td>飞行员必须在此决定落地或复飞</td></tr>
+    <tr><td>MAHF</td><td>Missed Approach Holding Fix</td><td>复飞等待定位点</td><td>复飞后进入等待的定位点（本图为 DUHAM）</td></tr>
+    <tr><td>LPV</td><td>Localizer Performance with Vertical Guidance</td><td>带垂直引导的定位器性能</td><td>RNAV(GPS) 最高精度最低标准，需 WAAS，飞到 DA</td></tr>
+    <tr><td>LNAV/VNAV</td><td>Lateral Navigation / Vertical Navigation</td><td>侧向/垂直导航</td><td>次一级最低标准，需批准的垂直引导，飞到 DA</td></tr>
+    <tr><td>LNAV</td><td>Lateral Navigation only</td><td>仅侧向导航</td><td>无垂直引导的进近最低标准，飞到 MDA</td></tr>
+    <tr><td>DA</td><td>Decision Altitude</td><td>决断高度</td><td>有垂直引导时，到达此海拔高度必须决断</td></tr>
+    <tr><td>MDA</td><td>Minimum Descent Altitude</td><td>最低下降高度</td><td>无垂直引导时不得低于此高度</td></tr>
+    <tr><td>HAT</td><td>Height Above Touchdown</td><td>接地区以上高度</td><td>DA/MDA 减去 TDZE；直接进近使用</td></tr>
+    <tr><td>HAA</td><td>Height Above Airport</td><td>机场以上高度</td><td>DA/MDA 减去机场高程；盘旋进近使用</td></tr>
+    <tr><td>TDZE</td><td>Touchdown Zone Elevation</td><td>接地区高程</td><td>跑道接地区域最高点的海拔高度</td></tr>
+    <tr><td>GPA</td><td>Glidepath Angle</td><td>下滑道角</td><td>最终进近下降角度（本图 3.00°）</td></tr>
+    <tr><td>TCH</td><td>Threshold Crossing Height</td><td>跑道头穿越高度</td><td>下滑道在跑道入口正上方的高度（本图 57 ft）</td></tr>
+    <tr><td>MSA</td><td>Minimum Safe Altitude</td><td>最低安全高度</td><td>以某定位点为圆心规定半径范围内的紧急超障高度（本图 25 NM / 3400 ft）</td></tr>
+    <tr><td>TAA</td><td>Terminal Arrival Area</td><td>终端到达区</td><td>RNAV 进近的各方向扇区最低到达高度</td></tr>
+    <tr><td>APP CRS</td><td>Approach Course</td><td>进近航迹</td><td>最终进近段的磁方位（本图 054°）</td></tr>
+    <tr><td>RVR</td><td>Runway Visual Range</td><td>跑道视程</td><td>用仪器测量的沿跑道方向能见度，单位英尺</td></tr>
+    <tr><td>CIFP</td><td>Coded Instrument Flight Procedures</td><td>编码仪表飞行程序</td><td>FAA 发布的机器可读进近程序数据（ARINC 424 格式）</td></tr>
+    <tr><td>P-T</td><td>Path and Terminator</td><td>路径终止符</td><td>ARINC 424 两字母代码，描述每个航段的形状（TF/CF/CA/HM 等）</td></tr>
+    <tr><td>IF (腿)</td><td>Initial Fix (leg type)</td><td>初始定位点腿</td><td>CIFP 腿类型：声明一个起点，不含飞行动作</td></tr>
+    <tr><td>TF</td><td>Track to a Fix</td><td>跟踪到定位点</td><td>沿大圆航迹直线飞向下一个定位点</td></tr>
+    <tr><td>CF</td><td>Course to a Fix</td><td>按航向飞到定位点</td><td>以规定磁方位角飞向定位点</td></tr>
+    <tr><td>DF</td><td>Direct to a Fix</td><td>直飞到定位点</td><td>从当前位置直飞，不规定方位角</td></tr>
+    <tr><td>CA</td><td>Course to an Altitude</td><td>按航向飞到高度</td><td>以规定航向飞行直到达到规定高度</td></tr>
+    <tr><td>HM</td><td>Hold to Manual termination</td><td>人工终止等待</td><td>进入等待航线，直到飞行员/管制员手动退出</td></tr>
+  </tbody>
+</table>
+</div>
+</section>
+
+<!-- ==================== §12 延伸阅读 ==================== -->
+<section id="references">
+<h2><span class="sec-num">12</span>延伸阅读</h2>
+
+<h3>官方文件</h3>
+<ul>
+  <li>
+    <strong>FAA Aeronautical Information Manual (AIM) — Chapter 5, Section 4: Instrument Approach Procedures</strong><br>
+    <code>https://www.faa.gov/air_traffic/publications/atpubs/aim_html/chap5_section_4.html</code><br>
+    权威进近程序说明，覆盖所有进近类型的定义、程序和飞行技术要求。
+  </li>
+  <li>
+    <strong>FAA Pilot/Controller Glossary</strong><br>
+    <code>https://www.faa.gov/air_traffic/publications/atpubs/pcg_html/</code><br>
+    航空术语官方定义，包含本教程所有缩写的权威解释。
+  </li>
+  <li>
+    <strong>FAA Order 8260.58 — United States Standard for Performance-Based Navigation (PBN) Instrument Procedure Design</strong><br>
+    <code>https://www.faa.gov/regulations_policies/orders_notices/index.cfm/go/document.information/documentID/1028671</code><br>
+    RNAV/RNP 进近程序设计标准，包含 OCS 几何推导的原始规范。
+  </li>
+</ul>
+
+<h3>本仓库相关文档</h3>
+<ul>
+  <li>
+    <strong><code>aeroviz-4d/docs/03-ocs-geometry.zh.md</code></strong>：
+    障碍物超越面（OCS）的数学推导、PANS-OPS 几何与 KRDU R05LY 示例；
+    补充本教程"为什么进近路线要有保护高度"的几何背景。
+  </li>
+  <li>
+    <strong><code>aeroviz-4d/docs/22-rnav-vertical-guidance-approach-simulation.zh.md</code></strong>（如存在）：
+    RNAV 垂直引导进近的 4D 轨迹仿真说明，展示 AeroViz 如何将本教程的高度剖面与时间维度结合，
+    生成可在 Cesium 上回放的 CZML 轨迹。
+  </li>
+</ul>
+
+<div class="callout callout-key">
+  <div class="callout-title"><span class="icon">🎓</span>学习路线建议</div>
+  <ol>
+    <li>读完本教程，对照 KRDU R05LY 真实图表（FAA Aeronav 或 ForeFlight 免费查看），逐项核对数字。</li>
+    <li>打开 AeroViz，在 3D 视图里飞一次 R05LY 进近，观察阶梯下降和 OCS 保护面。</li>
+    <li>阅读 <code>03-ocs-geometry.zh.md</code>，理解 OCS 表面的几何推导。</li>
+    <li>阅读 FAA AIM 5-4，对照本教程里每个概念找到官方定义。</li>
+    <li>尝试读一张你不熟悉机场的 RNAV(GPS) 图，把每个字段翻译成中文含义，验证你的理解。</li>
+  </ol>
+</div>
+
+<hr class="section-divider">
+<p style="color:var(--text-muted);font-size:.85rem;margin-top:32px;text-align:center;">
+  本文件为 AeroViz-4D 论文项目教程文档。图表仅供教学，非飞行操作参考。<br>
+  所有数字来源：KRDU RNAV (GPS) Y RWY 5L，Amdt 2，25FEB21，FAA Aeronav。
+</p>
+</section>
+
+</div><!-- /.content -->
+</main>
+
+<script>
+(function () {
+  // ===== 术语数据（缩写 -> [中文名, 释义]） =====
+  var GLOSSARY = {
+    "RNAV": ["区域导航", "不依赖地面导航台飞行的技术；允许飞机在指定空域内沿任意期望路径飞行。"],
+    "WAAS": ["广域增强系统", "美国 FAA 运营的 GPS 增强网络，使精度达到 ILS 级别；LPV 最低标准需要它。"],
+    "IAF": ["初始进近定位点", "进近程序的入口定位点，飞机从航路转入进近时使用。"],
+    "FAF": ["最终进近定位点", "最终进近下降的起点，图上用 ▼ 标注。"],
+    "MAPt": ["复飞点", "飞行员必须在此决定落地或复飞。"],
+    "MAHF": ["复飞等待定位点", "复飞后进入等待的定位点（本图为 DUHAM）。"],
+    "LPV": ["带垂直引导的定位器性能", "RNAV(GPS) 最高精度最低标准，需 WAAS，飞到 DA。"],
+    "LNAV/VNAV": ["侧向/垂直导航", "次一级最低标准，需批准的垂直引导，飞到 DA。"],
+    "LNAV": ["仅侧向导航", "无垂直引导的最低标准，分段下降到 MDA。"],
+    "VNAV": ["垂直导航", "沿已公布下降路径的垂直引导。"],
+    "DA": ["决断高度", "有垂直引导时，到达此海拔高度必须决断落地或复飞。"],
+    "MDA": ["最低下降高度", "无垂直引导时不得低于此高度。"],
+    "HAT": ["接地区以上高度", "DA/MDA 减去 TDZE；直接进近使用。"],
+    "HAA": ["机场以上高度", "DA/MDA 减去机场高程；盘旋进近使用。"],
+    "TDZE": ["接地区高程", "跑道接地区域最高点的海拔高度（本图 384 ft）。"],
+    "GPA": ["下滑道角", "最终进近下降角度（本图 3.00°）。"],
+    "TCH": ["跑道头穿越高度", "下滑道在跑道入口正上方的高度（本图 57 ft）。"],
+    "MSA": ["最低安全高度", "以定位点为圆心规定半径内的紧急超障高度（本图 25 NM 内 3400 ft）。"],
+    "TAA": ["终端到达区", "RNAV 进近各方向扇区的最低到达高度。"],
+    "RVR": ["跑道视程", "用仪器测量的沿跑道方向能见度，单位英尺。"],
+    "CIFP": ["编码仪表飞行程序", "FAA 发布的机器可读进近程序数据（ARINC 424 格式）。"],
+    "RNP": ["所需导航性能", "带机载性能监视与告警的区域导航。"]
+  };
+  var TERMS = Object.keys(GLOSSARY).sort(function (a, b) { return b.length - a.length; });
+
+  // ===== 共享浮动提示框（术语与图中热区共用） =====
+  var tip = document.createElement('div');
+  tip.id = 'av-tip';
+  document.body.appendChild(tip);
+  function place(x, y) {
+    var pad = 10, w = tip.offsetWidth, h = tip.offsetHeight;
+    if (x + w + pad > window.innerWidth) x = window.innerWidth - w - pad;
+    if (x < pad) x = pad;
+    if (y + h + pad > window.innerHeight) y = y - h - 22;
+    if (y < pad) y = pad;
+    tip.style.left = x + 'px';
+    tip.style.top = y + 'px';
+  }
+  function showTip(html, x, y) { tip.innerHTML = html; tip.classList.add('show'); place(x, y); }
+  function hideTip() { tip.classList.remove('show'); }
+  function termHtml(k) { var g = GLOSSARY[k]; return '<span class="tt-h">' + k + ' — ' + g[0] + '</span>' + g[1]; }
+
+  // ===== 自动为正文中的术语加上可悬停标记 =====
+  var SKIP = { SCRIPT: 1, STYLE: 1, CODE: 1, A: 1, H1: 1, H2: 1, H3: 1, H4: 1, BUTTON: 1 };
+  function skip(node) {
+    for (var el = node.parentNode; el && el !== document.body; el = el.parentNode) {
+      if (el.nodeType !== 1) continue;
+      if (el.tagName === 'svg' || SKIP[el.tagName]) return true;
+      if (el.classList && el.classList.contains('gloss')) return true;
+      if (el.id === 'glossary' || el.id === 'references' || el.id === 'sidebar') return true;
+    }
+    return false;
+  }
+  var content = document.querySelector('.content');
+  if (content) {
+    var rx = new RegExp('\\b(' + TERMS.map(function (t) { return t.replace(/\//g, '\\/'); }).join('|') + ')\\b', 'g');
+    var walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT, null);
+    var nodes = [];
+    while (walker.nextNode()) {
+      var n = walker.currentNode;
+      rx.lastIndex = 0;
+      if (n.nodeValue && rx.test(n.nodeValue) && !skip(n)) nodes.push(n);
+    }
+    nodes.forEach(function (n) {
+      rx.lastIndex = 0;
+      var frag = document.createDocumentFragment(), s = n.nodeValue, last = 0, m;
+      while ((m = rx.exec(s)) !== null) {
+        if (m.index > last) frag.appendChild(document.createTextNode(s.slice(last, m.index)));
+        var span = document.createElement('span');
+        span.className = 'gloss';
+        span.setAttribute('data-k', m[1]);
+        span.textContent = m[1];
+        frag.appendChild(span);
+        last = m.index + m[1].length;
+      }
+      if (last < s.length) frag.appendChild(document.createTextNode(s.slice(last)));
+      n.parentNode.replaceChild(frag, n);
+    });
+  }
+
+  // ===== 术语与图中热区的悬停 / 点按行为 =====
+  function classed(t, c) { return t && t.classList && t.classList.contains(c); }
+  document.addEventListener('mouseover', function (e) {
+    var t = e.target;
+    if (classed(t, 'gloss') && GLOSSARY[t.getAttribute('data-k')]) {
+      var r = t.getBoundingClientRect();
+      showTip(termHtml(t.getAttribute('data-k')), r.left, r.bottom + 8);
+    } else if (classed(t, 'hot')) {
+      showTip('<span class="tt-h">' + t.getAttribute('data-t') + '</span>' + t.getAttribute('data-d'), e.clientX + 16, e.clientY + 16);
+    }
+  });
+  document.addEventListener('mousemove', function (e) {
+    if (tip.classList.contains('show') && classed(e.target, 'hot')) place(e.clientX + 16, e.clientY + 16);
+  });
+  document.addEventListener('mouseout', function (e) {
+    if (classed(e.target, 'gloss') || classed(e.target, 'hot')) hideTip();
+  });
+  document.addEventListener('click', function (e) {
+    var t = e.target;
+    if (classed(t, 'gloss') && GLOSSARY[t.getAttribute('data-k')]) {
+      var r = t.getBoundingClientRect();
+      showTip(termHtml(t.getAttribute('data-k')), r.left, r.bottom + 8);
+      e.stopPropagation();
+    } else if (classed(t, 'hot')) {
+      showTip('<span class="tt-h">' + t.getAttribute('data-t') + '</span>' + t.getAttribute('data-d'), e.clientX + 16, e.clientY + 16);
+      e.stopPropagation();
+    } else { hideTip(); }
+  });
+
+  // ===== 浮动术语表按钮 + 侧滑面板 =====
+  var fab = document.createElement('button');
+  fab.id = 'gloss-fab'; fab.type = 'button'; fab.textContent = '📖 术语表';
+  var overlay = document.createElement('div'); overlay.id = 'gloss-overlay';
+  var panel = document.createElement('div'); panel.id = 'gloss-panel';
+  var ph = '<button id="gloss-close" type="button" aria-label="关闭">×</button><h3>快速术语表</h3>'
+    + '<p class="gp-sub">将鼠标悬停在正文中任意带下划线的术语上，或在此浏览。图中的点和线同样可交互。</p>';
+  TERMS.slice().sort().forEach(function (k) {
+    var g = GLOSSARY[k];
+    ph += '<div class="gp-item"><span class="gp-term">' + k + '</span> <span class="gp-full">' + g[0] + '</span><div class="gp-def">' + g[1] + '</div></div>';
+  });
+  panel.innerHTML = ph;
+  document.body.appendChild(overlay); document.body.appendChild(panel); document.body.appendChild(fab);
+  function closePanel() { panel.classList.remove('open'); overlay.classList.remove('open'); }
+  fab.addEventListener('click', function () { panel.classList.add('open'); overlay.classList.add('open'); });
+  overlay.addEventListener('click', closePanel);
+  panel.querySelector('#gloss-close').addEventListener('click', closePanel);
+
+  // ===== 正文顶部使用说明 =====
+  if (content) {
+    var banner = document.createElement('div');
+    banner.className = 'callout callout-key';
+    banner.innerHTML = '<div class="callout-title"><span class="icon">💡</span>如何使用本教程</div>'
+      + '将鼠标悬停（或点按）任意<span class="gloss" data-k="FAF">带下划线的术语</span>即可查看释义；把鼠标移到图中的点和线上也会显示详情。右下角的 <strong>📖 术语表</strong> 按钮可随时打开完整列表。';
+    content.insertBefore(banner, content.firstChild);
+  }
+
+  // ===== 在每张可交互图下方加提示 =====
+  document.querySelectorAll('svg').forEach(function (svg) {
+    if (svg.querySelector('.hotspots')) {
+      var hint = document.createElement('p');
+      hint.className = 'diagram-hint';
+      hint.textContent = '💡 将鼠标悬停或点按上图中的点和线查看详情。';
+      svg.parentNode.insertBefore(hint, svg.nextSibling);
+    }
+  });
+
+  // ===== 侧栏滚动高亮（行为不变） =====
+  var links = document.querySelectorAll('#sidebar ol li a');
+  var sections = [];
+  links.forEach(function (a) {
+    var el = document.getElementById(a.getAttribute('href').slice(1));
+    if (el) sections.push({ el: el, a: a });
+  });
+  function onScroll() {
+    var y = window.scrollY + 80, active = sections[0];
+    for (var i = 0; i < sections.length; i++) if (sections[i].el.offsetTop <= y) active = sections[i];
+    links.forEach(function (a) { a.classList.remove('active'); });
+    if (active) active.a.classList.add('active');
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+})();
+</script>
+
+</body>
+</html>
