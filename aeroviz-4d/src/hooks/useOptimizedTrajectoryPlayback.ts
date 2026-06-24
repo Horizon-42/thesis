@@ -57,10 +57,14 @@ export function useOptimizedTrajectoryPlayback({
   follow,
   onSample,
 }: UseOptimizedTrajectoryPlaybackParams): UseOptimizedTrajectoryPlaybackResult {
-  const { viewer, setPlaybackSpeed, autoReplay } = useApp();
+  const { viewer, setPlaybackSpeed, playbackSpeed, autoReplay } = useApp();
   const dsRef = useRef<Cesium.CzmlDataSource | null>(null);
   const aircraftRef = useRef<Cesium.Entity | null>(null);
   const startTimeRef = useRef<Cesium.JulianDate | null>(null);
+  // Remember the playback rate the user last used for Trajectory Play, so a new
+  // run keeps it instead of snapping back to the CZML doc multiplier (1×). null
+  // until the first run, where we fall back to the doc multiplier.
+  const lastSpeedRef = useRef<number | null>(null);
   const [status, setStatus] = useState<OptimizedTrajectoryPlaybackStatus>("idle");
   const [error, setError] = useState<string | null>(null);
 
@@ -98,7 +102,10 @@ export function useOptimizedTrajectoryPlayback({
           const start = loadedDs.clock.startTime.clone();
           const stop = loadedDs.clock.stopTime.clone();
           if (Cesium.JulianDate.lessThan(start, stop)) {
-            const multiplier = loadedDs.clock.multiplier || 1;
+            // Keep the user's last Trajectory-Play rate across runs; fall back to
+            // the CZML doc multiplier (1×, not the default 60×) on the first run.
+            const multiplier = lastSpeedRef.current ?? (loadedDs.clock.multiplier || 1);
+            lastSpeedRef.current = multiplier;
             startTimeRef.current = start.clone();
             viewer.clock.startTime = start;
             viewer.clock.stopTime = stop;
@@ -109,8 +116,7 @@ export function useOptimizedTrajectoryPlayback({
             viewer.clock.multiplier = multiplier;
             viewer.clock.shouldAnimate = true;
             viewer.timeline?.zoomTo(start, stop);
-            // Keep the ControlPanel's displayed speed in step with the clock the
-            // CZML just set (it starts at 1×, not the default 60×).
+            // Keep the ControlPanel's displayed speed in step with the clock.
             setPlaybackSpeed(multiplier);
           }
         }
@@ -139,6 +145,15 @@ export function useOptimizedTrajectoryPlayback({
       setStatus("idle");
     };
   }, [viewer, enabled, czml]);
+
+  // ── Effect 1b: remember the user's live rate changes during playback ─────────
+  // While a Trajectory Play is loaded, mirror any speed the user picks (via the
+  // ControlPanel) into lastSpeedRef, so the NEXT run resumes at that rate. Gated
+  // on "loaded" so speeds set in other modes (e.g. a downloaded trajectory at
+  // 60×) don't leak into the Trajectory-Play default.
+  useEffect(() => {
+    if (status === "loaded") lastSpeedRef.current = playbackSpeed;
+  }, [playbackSpeed, status]);
 
   // ── Effect 2: camera follow ──────────────────────────────────────────────────
   useEffect(() => {
