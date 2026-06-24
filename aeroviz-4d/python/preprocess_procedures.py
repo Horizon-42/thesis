@@ -687,6 +687,27 @@ def rf_path_metadata(leg: ProcedureLeg, fix_records: dict[str, FixRecord]) -> di
     return metadata
 
 
+def leg_altitude_constraint(leg: ProcedureLeg) -> dict | None:
+    """The coded altitude constraint for a leg ({qualifier, valueFt, rawText}).
+
+    A block descriptor carries TWO bounds (a window); its ``rawText`` lists both
+    so the single canonical CIFP->window conversion downstream recovers the full
+    window instead of collapsing it to a single value.
+    """
+    if leg.altitude_ft is None:
+        return None
+    if leg.altitude_qualifier == "block" and leg.altitude_ft_2 is not None:
+        low, high = sorted((leg.altitude_ft, leg.altitude_ft_2))
+        raw_text = f"{low}-{high} ft"
+    else:
+        raw_text = f"{leg.altitude_ft} ft"
+    return {
+        "qualifier": leg.altitude_qualifier or "at",
+        "valueFt": leg.altitude_ft,
+        "rawText": raw_text,
+    }
+
+
 def build_branch_document(
     *,
     branch_ident: str,
@@ -731,15 +752,7 @@ def build_branch_document(
                     "fixRef": normalize_fix_ref(leg.fix_ident),
                 },
                 "constraints": {
-                    "altitude": (
-                        {
-                            "qualifier": leg.altitude_qualifier or "at",
-                            "valueFt": leg.altitude_ft,
-                            "rawText": f"{leg.altitude_ft} ft",
-                        }
-                        if leg.altitude_ft is not None
-                        else None
-                    ),
+                    "altitude": leg_altitude_constraint(leg),
                     "speedKt": None,
                     "geometryAltitudeFt": geometry_altitude_ft,
                 },

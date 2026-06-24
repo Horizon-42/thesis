@@ -90,6 +90,43 @@ def test_parse_leg_altitude_reads_at_or_above_crossing_constraint() -> None:
     assert parse_leg_altitude_qualifier(line) == "atOrAbove"
 
 
+def test_block_altitude_descriptor_keeps_both_window_bounds() -> None:
+    """A block ("B") altitude descriptor is a WINDOW (at or below Altitude 1,
+    at or above Altitude 2). KSTL H30RZ FDRKO codes "B 07000 06000"; the parser
+    must keep BOTH bounds so the 6000-7000 ft block is not silently collapsed to
+    a single 7000 ft value (an audit gap fixed alongside the front/back
+    canonical altitude consolidation)."""
+    document = build_procedure_detail_document(
+        cifp_root=CIFP_ROOT,
+        airport="KSTL",
+        procedure_type="SIAP",
+        procedure="H30RZ",
+        nominal_speed_kt=140.0,
+        tunnel_half_width_nm=0.3,
+        tunnel_half_height_ft=300.0,
+        sample_spacing_m=250.0,
+    )
+
+    block_altitudes = {
+        leg["path"]["endFixRef"]: leg["constraints"]["altitude"]
+        for branch in document["branches"]
+        for leg in branch["legs"]
+        if (leg["constraints"]["altitude"] or {}).get("qualifier") == "block"
+    }
+    # FDRKO: "B 07000 06000" -> at or below 7000, at or above 6000.
+    assert block_altitudes["fix:FDRKO"] == {
+        "qualifier": "block",
+        "valueFt": 7000,
+        "rawText": "6000-7000 ft",
+    }
+    # TEEBE: "B 09000 08000".
+    assert block_altitudes["fix:TEEBE"] == {
+        "qualifier": "block",
+        "valueFt": 9000,
+        "rawText": "8000-9000 ft",
+    }
+
+
 def test_parse_leg_course_reads_ca_course_field() -> None:
     line = (
         "SUSAP 00R K4FR30   R      040         0  M     CA"
@@ -549,6 +586,79 @@ def test_build_krdu_r05ly_procedure_detail_document() -> None:
     assert document["verticalProfiles"][0]["pathPointSourceLine"] == 300869
     assert document["validation"]["expectedFAF"] == "fix:WEPAS"
     assert document["displayHints"]["defaultVisibleBranchIds"] == ["branch:R"]
+
+
+def test_krdu_r05ly_matches_published_rnav_gps_chart() -> None:
+    """Golden cross-reference of the parser output for KRDU R05LY against the
+    authoritative published FAA chart **RNAV (GPS) Y RWY 5L** (00516RY5L.pdf,
+    Amdt 2, dated 25FEB21).
+
+    Every asserted number is annotated with what the chart prints. Unlike the
+    self-referential snapshot/structure tests, this guards the *parser*: a
+    systematic misparse (wrong column offset, dropped altitude descriptor, a
+    transition-altitude leak like docs/33-...) would change one of these values
+    and fail here, even though the parser still "agrees with itself".
+    """
+    document = build_procedure_detail_document(
+        cifp_root=CIFP_ROOT,
+        airport="KRDU",
+        procedure_type="SIAP",
+        procedure="R05LY",
+        nominal_speed_kt=140.0,
+        tunnel_half_width_nm=0.3,
+        tunnel_half_height_ft=300.0,
+        sample_spacing_m=250.0,
+    )
+
+    branches = {branch["branchIdent"]: branch for branch in document["branches"]}
+
+    def leg_to(branch_ident: str, fix_ident: str) -> dict:
+        for leg in branches[branch_ident]["legs"]:
+            if leg["path"]["endFixRef"] == f"fix:{fix_ident}":
+                return leg
+        raise AssertionError(f"{fix_ident} not found on branch {branch_ident}")
+
+    def crossing_ft(branch_ident: str, fix_ident: str) -> int:
+        return leg_to(branch_ident, fix_ident)["constraints"]["altitude"]["valueFt"]
+
+    # Header block --------------------------------------------------------
+    assert document["procedure"]["chartName"] == "RNAV(GPS) Y RWY 05L"
+    assert document["procedure"]["procedureFamily"] == "RNAV_GPS"
+    # Chart: TDZE 384, threshold (LDA side) charted elevation 367.
+    assert document["runway"]["threshold"]["elevationFt"] == 367
+
+    # Final approach (branch R): SCHOO (IF) -> WEPAS (FAF) -> RW05L (MAPt) ---
+    final_roles = [leg["roleAtEnd"] for leg in branches["R"]["legs"][:3]]
+    assert final_roles == ["IF", "FAF", "MAPt"]
+    # Chart profile crossing altitudes:
+    assert crossing_ft("R", "SCHOO") == 3000   # chart: SCHOO 3000 (IF)
+    assert crossing_ft("R", "WEPAS") == 2200    # chart: WEPAS 2200 (FAF)
+    # Chart glidepath crosses the threshold at TCH 57 ft above the 367 ft
+    # threshold -> 424 ft MSL (367 + 57).
+    assert crossing_ft("R", "RW05L") == 424
+    assert leg_to("R", "WEPAS")["constraints"]["altitude"]["qualifier"] == "atOrAbove"
+
+    # Coded final glidepath -- chart: GP 3.00 deg, TCH 57.
+    vertical = document["verticalProfiles"][0]
+    assert vertical["glidepathAngleDeg"] == pytest.approx(3.0)
+    assert vertical["thresholdCrossingHeightFt"] == pytest.approx(57.4, abs=0.5)
+
+    # CHWDR transition (chart: CHWDR 5000 -> BOULE 4000 -> SCHOO) -----------
+    assert crossing_ft("CHWDR", "CHWDR") == 5000  # chart: CHWDR 5000
+    assert crossing_ft("CHWDR", "BOULE") == 4000  # chart: BOULE 4000
+
+    # OTTOS transition (chart: OTTOS IAF, 6000 holding depiction) -----------
+    assert crossing_ft("OTTOS", "OTTOS") == 6000  # chart: OTTOS 6000 (2T0K hold)
+
+    # Missed approach (chart: "Climb to 1000 then climbing left turn to 2200
+    # direct DUHAM and hold") ----------------------------------------------
+    missed = {leg["path"]["pathTerminator"]: leg for leg in branches["R"]["legs"][3:]}
+    assert set(missed) == {"CA", "DF", "HM"}
+    # CA climb course == the 054 deg final approach course on the chart.
+    assert missed["CA"]["path"]["courseDeg"] == pytest.approx(54.0, abs=1.0)
+    assert missed["DF"]["path"]["endFixRef"] == "fix:DUHAM"   # direct DUHAM
+    assert missed["HM"]["roleAtEnd"] == "MAHF"                # and hold
+    assert document["validation"]["expectedMissedHoldFix"] == "fix:DUHAM"
 
 
 def test_chart_filename_inference_and_sanitizing() -> None:

@@ -45,6 +45,10 @@ class ProcedureLeg:
     altitude_ft: int | None
     source_line: int
     altitude_qualifier: str | None = None
+    # Second altitude bound, set only for a block ("B") descriptor: a WINDOW of
+    # "at or below Altitude 1, at or above Altitude 2". ``altitude_ft`` holds
+    # Altitude 1 (the ceiling); this holds Altitude 2 (the floor).
+    altitude_ft_2: int | None = None
     fix_region_code: str | None = None
     procedure_type: str | None = None
     transition_ident: str | None = None
@@ -912,6 +916,15 @@ def parse_procedure_legs(
             if altitude_ft is not None
             else None
         )
+        # A block ("B") descriptor is a WINDOW: at or below Altitude 1, at or
+        # above Altitude 2.  Capture the second bound so the window survives
+        # downstream instead of collapsing to a single value (e.g. KSTL H30RZ
+        # FDRKO codes "B 07000 06000" = the 6000-7000 ft block).
+        altitude_ft_2 = (
+            normalize_int(primary.get("alt_2"))
+            if altitude_qualifier == "block"
+            else None
+        )
 
         legs.append(
             ProcedureLeg(
@@ -922,6 +935,7 @@ def parse_procedure_legs(
                 role=role_from_cifparse(primary, leg_type, fix_ident, sequence),
                 altitude_ft=altitude_ft,
                 altitude_qualifier=altitude_qualifier,
+                altitude_ft_2=altitude_ft_2,
                 source_line=cifparse_source_line(primary.get("record_number"), data.header_line_count),
                 fix_region_code=str(primary.get("fix_region") or "").strip().upper() or None,
                 procedure_type=str(primary.get("procedure_type") or "").strip().upper() or None,
