@@ -567,16 +567,349 @@ dgamadt= g * (n * <span class="tok-fn">cos</span>(mu) - <span class="tok-fn">cos
       <section id="radii">
         <h2>5. 数学预备：WGS 84 的两个曲率半径 \(R_M,R_N\)<span class="en" lang="en">Math Primer: The Two WGS 84 Radii of Curvature \(R_M,R_N\)</span></h2>
         <p class="section-intro">
-          要把“米/秒”换成“纬度/经度的弧度每秒”，需要知道在某一点上“走一米，方向上转过几弧度”。椭球在不同方向曲率不同，于是有两个半径：南北向的子午圈半径 \(R_M\)，东西向的卯酉圈半径 \(R_N\)。
-          <span class="en" lang="en">To convert “metres/second” into “radians of latitude/longitude per second,” we need to know how many radians one metre of travel sweeps at a given point. An ellipsoid curves differently in different directions, so there are two radii: the meridional radius \(R_M\) (north–south) and the prime-vertical radius \(R_N\) (east–west).</span>
+          这一节要算两个“曲率半径” \(R_M,R_N\)——它们是第 6 节把“走了几米”换成“纬度/经度变了几弧度”的换算系数。但在用它们之前，得先真正搞懂：地球这个“椭球”是什么形状？公式里到处都是的那个 \(W=\sqrt{1-e^2\sin^2\phi}\) 又是从哪冒出来的？下面<strong>假设你只学过初中数学</strong>，从圆和椭圆一步步来。
+          <span class="en" lang="en">This section computes the two “radii of curvature” \(R_M,R_N\) — the factors Section 6 uses to turn “metres travelled” into “radians of latitude/longitude.” But before using them, we should really understand: what shape is this “ellipsoid”? And where does that \(W=\sqrt{1-e^2\sin^2\phi}\), which appears everywhere, come from? Below, <strong>assuming only middle-school maths</strong>, we build it up from circles and ellipses.</span>
         </p>
 
         <div class="grid-2">
           <article class="card">
-            <h3>两个半径的公式<span class="en" lang="en">The Two Radius Formulas</span></h3>
+            <h3>第 0 步：圆 → 椭圆（认识 \(a,b,f,e^2\)）<span class="en" lang="en">Step 0: Circle → Ellipse (meet \(a,b,f,e^2\))</span></h3>
             <p>
-              它们只依赖纬度 \(\phi\) 和椭球常数 \(a,e^2\)。记 \(W=\sqrt{1-e^2\sin^2\phi}\)：
-              <span class="en" lang="en">They depend only on latitude \(\phi\) and the ellipsoid constants \(a,e^2\). Writing \(W=\sqrt{1-e^2\sin^2\phi}\):</span>
+              一个圆：所有点到圆心的距离都等于 \(a\)。把它在竖直方向<strong>压扁</strong>（乘以一个小于 1 的比例 \(b/a\)），就得到椭圆。地球绕自转轴转，被“甩”得赤道略鼓、两极略扁，所以它的<strong>子午剖面</strong>（切开看的纵截面）就是这样一个椭圆。
+              <span class="en" lang="en">A circle: every point is distance \(a\) from the centre. <strong>Squash</strong> it vertically (multiply by a ratio \(b/a<1\)) and you get an ellipse. The spinning Earth bulges at the equator and flattens at the poles, so its <strong>meridian cross-section</strong> is exactly such an ellipse.</span>
+            </p>
+            <div class="formula"><span class="formula-line">\[
+\frac{x^2}{a^2}+\frac{z^2}{b^2}=1
+\]</span></div>
+            <div class="var-list">
+              <div><strong>\(x\)</strong>：离自转轴的水平距离。<span class="en" lang="en">horizontal distance from the spin axis.</span></div>
+              <div><strong>\(z\)</strong>：沿自转轴的高度。<span class="en" lang="en">height along the spin axis.</span></div>
+              <div><strong>\(a\)</strong>：半长轴 = 赤道半径 = 6378.137 km。<span class="en" lang="en">semi-major axis = equatorial radius.</span></div>
+              <div><strong>\(b\)</strong>：半短轴 = 极半径 = 6356.752 km。<span class="en" lang="en">semi-minor axis = polar radius.</span></div>
+            </div>
+            <p style="margin-top:10px">
+              两个“扁”的度量：扁率 \(f=\dfrac{a-b}{a}\approx\dfrac1{298}\)；偏心率平方 \(e^2=1-\dfrac{b^2}{a^2}=f(2-f)\approx0.0067\)。都很小——地球其实<strong>非常接近正球</strong>（\(a,b\) 只差 21 km）。
+              <span class="en" lang="en">Two measures of “flatness”: flattening \(f=\dfrac{a-b}{a}\approx\dfrac1{298}\); eccentricity-squared \(e^2=1-\dfrac{b^2}{a^2}=f(2-f)\approx0.0067\). Both tiny — Earth is <strong>very nearly a sphere</strong> (\(a,b\) differ by only 21 km).</span>
+            </p>
+          </article>
+          <article class="card">
+            <h3>第 1 步：大地纬度 \(\phi\) 是“法线”的角度，不是“中心连线”的角度<span class="en" lang="en">Step 1: Geodetic Latitude \(\phi\) Is the Angle of the <em>Normal</em>, Not the Centre Line</span></h3>
+            <p>
+              我们平时说的“纬度”，是当地<strong>铅垂方向</strong>（垂直于地面、也就是椭圆的<strong>法线</strong>）和赤道面的夹角——叫<strong>大地纬度 \(\phi\)</strong>。它<strong>不是</strong>“从地心连到你”的那条线和赤道面的夹角（那个叫<strong>地心纬度 \(\psi\)</strong>）。
+              <span class="en" lang="en">The everyday “latitude” is the angle between the local <strong>vertical</strong> (perpendicular to the ground = the ellipse <strong>normal</strong>) and the equatorial plane — the <strong>geodetic latitude \(\phi\)</strong>. It is <strong>not</strong> the angle of the line from the Earth’s centre to you (that is the <strong>geocentric latitude \(\psi\)</strong>).</span>
+            </p>
+            <p>
+              在正球上，法线正好穿过球心，两者相同。但椭圆被压扁后，<strong>法线一般不穿过中心</strong>（只有赤道和两极例外），所以 \(\phi\ne\psi\)（在地球上只差零点几度，但这是后面一切的根源）。下图把这个区别画出来——形状<strong>故意夸张</strong>了才看得清。
+              <span class="en" lang="en">On a sphere the normal passes through the centre, so the two agree. But once the ellipse is squashed, <strong>the normal generally misses the centre</strong> (except at the equator and poles), so \(\phi\ne\psi\) (only a fraction of a degree on Earth, but the root of everything later). The figure below shows this — the shape is <strong>deliberately exaggerated</strong> to make it visible.</span>
+            </p>
+          </article>
+        </div>
+
+        <figure class="viz">
+          <div id="viz-ellipse" class="plot" style="height:460px"></div>
+          <div class="controls">
+            <span><label for="ell-lat">大地纬度 φ / geodetic latitude</label></span>
+            <input id="ell-lat" type="range" min="0" max="89" value="35" step="1">
+            <span class="chip"><span class="dot" style="background:#3d58a8"></span>法线 + φ + N=a/W normal</span>
+            <span class="chip"><span class="dot" style="background:#b65b13"></span>中心连线 + ψ centre line</span>
+            <span class="chip"><span class="dot" style="background:#c2cdd8"></span>原始圆（半径 a）aux circle</span>
+          </div>
+          <div class="readout" id="ell-out"></div>
+          <figcaption>
+            图 2a ·（形状已强烈夸张）灰色虚线圆是“没压扁前”的圆（半径 \(a\)）；深色椭圆是压扁后的地球子午剖面。蓝线是过 P 的<strong>法线</strong>，它和水平的夹角就是<strong>大地纬度 \(\phi\)</strong>；蓝色粗段是法线从 P 一直到自转轴的<strong>长度</strong>（记作 \(N\)；第 2 步会<strong>算出</strong>它 \(=a/W=R_N\)）。橙色是 O→P 的<strong>中心连线</strong>，它和水平的夹角是<strong>地心纬度 \(\psi\)</strong>。拖动滑块：看 \(\phi\) 和 \(\psi\) 怎么分开，\(W\) 和 \(N\) 怎么变（读数为真实 WGS 84 值）。
+            <span class="en" lang="en">Figure 2a · (shape strongly exaggerated) The dashed grey circle is the “before-squashing” circle (radius \(a\)); the dark ellipse is the squashed Earth meridian section. The blue line is the <strong>normal</strong> at P; its angle from horizontal is the <strong>geodetic latitude \(\phi\)</strong>; the thick blue segment is the normal’s <strong>length</strong> from P to the spin axis (call it \(N\); Step 2 will <strong>derive</strong> it \(=a/W=R_N\)). The orange line O→P is the <strong>centre line</strong>; its angle is the <strong>geocentric latitude \(\psi\)</strong>. Drag the slider to watch \(\phi\) and \(\psi\) separate, and \(W,N\) change (readouts are real WGS 84 values).</span>
+          </figcaption>
+        </figure>
+
+        <div class="card" style="margin-top:18px">
+          <h3>第 2 步：\(W\) 是怎么冒出来的（只用初中代数，一步都不跳）<span class="en" lang="en">Step 2: Where \(W\) Comes From (middle-school algebra, no skipped steps)</span></h3>
+          <p>
+            目标：只用初中代数，从椭圆推出 \(W\) 和 \(N=a/W\)。下面拆成 5 个小步，<strong>每步只做一件事</strong>。
+            <span class="en" lang="en">Goal: with only middle-school algebra, derive \(W\) and \(N=a/W\) from the ellipse. Split into 5 micro-steps, <strong>each doing exactly one thing</strong>.</span>
+          </p>
+
+          <h4>2.1 先搞清“法线方向”长什么样<span class="en" lang="en">2.1 First, what does the “normal direction” look like?</span></h4>
+          <p>
+            <strong>法线</strong> = 垂直于<strong>切线</strong>的方向；切线 = 在 P 点“擦着碰一下”的那条直线。我们要的是 P 处指向<strong>外面</strong>的那条垂线方向。用两个初中工具就能拿到它：
+            <span class="en" lang="en">The <strong>normal</strong> is the direction perpendicular to the <strong>tangent</strong>; the tangent is the straight line that just grazes the curve at P. We want the outward perpendicular at P. Two middle-school tools give it:</span>
+          </p>
+          <ul>
+            <li><strong>工具一（直线的法线）：</strong>直线 \(A\,x+B\,z=C\)，和它垂直的方向就是把系数拼起来的 \((A,B)\)。例：直线 \(3x+4z=5\) 的垂直方向是 \((3,4)\)。<span class="en" lang="en"><strong>Tool 1 (a line’s normal):</strong> the line \(A\,x+B\,z=C\) is perpendicular to the direction \((A,B)\) made from its coefficients. E.g. \(3x+4z=5\) is perpendicular to \((3,4)\).</span></li>
+            <li><strong>工具二（切线公式）：</strong>圆 \(x^2+z^2=R^2\) 在点 \((x_0,z_0)\) 的切线是 \(x_0x+z_0z=R^2\)（法线 \((x_0,z_0)\)，正是“圆心指向该点”，符合直觉）。椭圆只是把 \(x^2\) 换成 \(\frac{x^2}{a^2}\)：切线是 \(\dfrac{x_0}{a^2}x+\dfrac{z_0}{b^2}z=1\)。<span class="en" lang="en"><strong>Tool 2 (the tangent formula):</strong> a circle \(x^2+z^2=R^2\) at \((x_0,z_0)\) has tangent \(x_0x+z_0z=R^2\) (normal \((x_0,z_0)\) = “centre-to-point”, as expected). The ellipse just replaces \(x^2\) by \(\frac{x^2}{a^2}\): the tangent is \(\dfrac{x_0}{a^2}x+\dfrac{z_0}{b^2}z=1\).</span></li>
+          </ul>
+          <p>
+            把工具一用到这条切线上：它的系数是 \(\big(\frac{x_0}{a^2},\frac{z_0}{b^2}\big)\)，所以椭圆在 P 的<strong>法线方向就是 \(\big(\frac{x_0}{a^2},\frac{z_0}{b^2}\big)\)</strong>。下图把这件事画出来：
+            <span class="en" lang="en">Apply Tool 1 to that tangent: its coefficients are \(\big(\frac{x_0}{a^2},\frac{z_0}{b^2}\big)\), so the ellipse’s <strong>normal direction at P is \(\big(\frac{x_0}{a^2},\frac{z_0}{b^2}\big)\)</strong>. The figure below shows exactly this:</span>
+          </p>
+
+          <figure class="viz" style="margin:14px 0 4px">
+            <svg viewBox="0 0 540 292" role="img" aria-label="椭圆在 P 点的切线与法线示意图"
+                 style="display:block;width:100%;height:auto;background:linear-gradient(180deg,#fbfdff 0%,#f3f7fa 100%);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif">
+              <defs>
+                <marker id="ah-indigo" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0,0 L10,5 L0,10 z" fill="#3d58a8"></path>
+                </marker>
+              </defs>
+              <!-- axes through O -->
+              <line x1="90" y1="160" x2="432" y2="160" stroke="#cdd7e0" stroke-width="1.2" stroke-dasharray="5 5"></line>
+              <line x1="250" y1="55" x2="250" y2="272" stroke="#cdd7e0" stroke-width="1.2" stroke-dasharray="5 5"></line>
+              <text x="424" y="153" fill="#8795a8" font-size="13">x</text>
+              <text x="256" y="66" fill="#8795a8" font-size="13">z</text>
+              <!-- ellipse -->
+              <ellipse cx="250" cy="160" rx="150" ry="98" fill="#eaf4f5" stroke="#3a4a5c" stroke-width="2.4"></ellipse>
+              <!-- tangent line at P -->
+              <line x1="276.4" y1="32.8" x2="446.6" y2="156.0" stroke="#b65b13" stroke-width="2.2"></line>
+              <text x="430" y="150" fill="#9a4c10" font-size="13">切线 tangent</text>
+              <!-- normal arrow (outward) at P -->
+              <line x1="361.5" y1="94.4" x2="412.0" y2="24.8" stroke="#3d58a8" stroke-width="2.8" marker-end="url(#ah-indigo)"></line>
+              <text x="300" y="20" fill="#314b99" font-size="14" font-weight="700">法线 normal = (x₀/a², z₀/b²)</text>
+              <!-- right-angle mark at P -->
+              <polyline points="349.3,85.6 358.1,73.5 370.3,82.3" fill="none" stroke="#314b99" stroke-width="1.6"></polyline>
+              <!-- points -->
+              <circle cx="250" cy="160" r="3.5" fill="#16212f"></circle>
+              <text x="232" y="178" fill="#607084" font-size="13">O</text>
+              <circle cx="361.5" cy="94.4" r="5" fill="#16212f"></circle>
+              <text x="369" y="92" fill="#16212f" font-size="14" font-weight="700">P=(x₀,z₀)</text>
+            </svg>
+            <figcaption>
+              示意图（形状已夸张）：切线（橙）在 P 擦着椭圆；法线（蓝箭头）和它<strong>垂直</strong>（直角标记），方向就是切线方程的系数 \(\big(\tfrac{x_0}{a^2},\tfrac{z_0}{b^2}\big)\)，指向椭圆外。
+              <span class="en" lang="en">Sketch (shape exaggerated): the tangent (orange) grazes the ellipse at P; the normal (blue arrow) is <strong>perpendicular</strong> to it (right-angle mark), and its direction is the tangent equation’s coefficients \(\big(\tfrac{x_0}{a^2},\tfrac{z_0}{b^2}\big)\), pointing outward.</span>
+            </figcaption>
+          </figure>
+
+          <h4>2.2 大地纬度把法线方向“钉”成 \((\cos\phi,\sin\phi)\)<span class="en" lang="en">2.2 Geodetic latitude pins the normal to \((\cos\phi,\sin\phi)\)</span></h4>
+          <div class="note">
+            <strong>先约定记号（这点容易混）：</strong>我们关心的那个<strong>固定点</strong>记作 \(P=(x_0,z_0)\)。注意 2.1 切线方程 \(\frac{x_0}{a^2}x+\frac{z_0}{b^2}z=1\) 里的 \((x,z)\) 是<strong>切线上的流动坐标</strong>（动点），和固定点 \(P\) 不是一回事——它只在写“那条直线”时出现，下面<strong>不再用到</strong>。从这里起，所有运算只针对固定点，一律写带下标的 \((x_0,z_0)\)。\(P\) 的法线方向就是 \(\bigl(\tfrac{x_0}{a^2},\tfrac{z_0}{b^2}\bigr)\)。
+            <span class="en" lang="en"><strong>Fix the notation first (this is the easy-to-confuse part):</strong> the <strong>fixed point</strong> we care about is \(P=(x_0,z_0)\). In the 2.1 tangent equation \(\frac{x_0}{a^2}x+\frac{z_0}{b^2}z=1\), the \((x,z)\) are the <strong>running coordinates of the tangent line</strong> (a moving point), <strong>not</strong> the point \(P\) — they appear only to write “that line” and are <strong>not used again</strong>. From here on every step is about the fixed point, written with subscripts \((x_0,z_0)\). Its normal direction is \(\bigl(\tfrac{x_0}{a^2},\tfrac{z_0}{b^2}\bigr)\).</span>
+          </div>
+          <p>
+            回忆第 1 步：\(\phi\) 就是法线和水平的夹角。一个与水平成 \(\phi\) 角、长度为 1 的方向，写出来正是 \((\cos\phi,\sin\phi)\)。既然 \(P\) 的法线方向 \(\big(\frac{x_0}{a^2},\frac{z_0}{b^2}\big)\) 和 \((\cos\phi,\sin\phi)\) 指向<strong>同一个方向</strong>，它们必<strong>成比例</strong>。设比例为 \(k\)：
+            <span class="en" lang="en">Recall Step 1: \(\phi\) is the angle between the normal and horizontal. A unit direction at angle \(\phi\) from horizontal is exactly \((\cos\phi,\sin\phi)\). Since \(P\)’s normal \(\big(\frac{x_0}{a^2},\frac{z_0}{b^2}\big)\) points the <strong>same way</strong> as \((\cos\phi,\sin\phi)\), they must be <strong>proportional</strong>. Call the ratio \(k\):</span>
+          </p>
+          <div class="formula">
+            <span class="formula-line">\[
+\frac{x_0}{a^2}=k\cos\phi,\qquad \frac{z_0}{b^2}=k\sin\phi
+\qquad\Longrightarrow\qquad
+x_0=k\,a^2\cos\phi,\quad z_0=k\,b^2\sin\phi
+\]</span>
+          </div>
+          <p>（右边只是两边各乘回 \(a^2\)、\(b^2\) 消掉分母。\(k\) 还不知道，下一步定它。）<span class="en" lang="en">(The right side just multiplies both sides by \(a^2\), \(b^2\) to clear denominators. \(k\) is still unknown — pinned next.)</span></p>
+
+          <h4>2.3 用“P 在椭圆上”把 \(k\) 算出来<span class="en" lang="en">2.3 Use “P lies on the ellipse” to find \(k\)</span></h4>
+          <p>固定点 \(P=(x_0,z_0)\) 在椭圆上，必满足 \(\frac{x_0^2}{a^2}+\frac{z_0^2}{b^2}=1\)。把 2.2 的 \(x_0,z_0\) 代进去，<strong>一项一项</strong>算：<span class="en" lang="en">The fixed point \(P=(x_0,z_0)\) is on the ellipse, so \(\frac{x_0^2}{a^2}+\frac{z_0^2}{b^2}=1\). Substitute the \(x_0,z_0\) from 2.2, <strong>term by term</strong>:</span></p>
+          <div class="formula">
+            <span class="formula-line">\[
+\frac{x_0^2}{a^2}=\frac{(k a^2\cos\phi)^2}{a^2}=\frac{k^2a^4\cos^2\phi}{a^2}=k^2a^2\cos^2\phi
+\]</span>
+            <span class="formula-line">\[
+\frac{z_0^2}{b^2}=\frac{(k b^2\sin\phi)^2}{b^2}=k^2b^2\sin^2\phi
+\]</span>
+          </div>
+          <p>两式相加 \(=1\)，把 \(k^2\) 提出来，就能解出 \(k\)：<span class="en" lang="en">Add the two \(=1\), factor out \(k^2\), and solve for \(k\):</span></p>
+          <div class="formula">
+            <span class="formula-line">\[
+k^2\bigl(a^2\cos^2\phi+b^2\sin^2\phi\bigr)=1
+\quad\Longrightarrow\quad
+k=\frac{1}{\sqrt{a^2\cos^2\phi+b^2\sin^2\phi}}
+\]</span>
+          </div>
+
+          <h4>2.4 化简那个根号——\(W\) 就在这里冒出来<span class="en" lang="en">2.4 Simplify that root — \(W\) is born here</span></h4>
+          <p>盯住根号里的 \(a^2\cos^2\phi+b^2\sin^2\phi\)，三步整理：<span class="en" lang="en">Stare at \(a^2\cos^2\phi+b^2\sin^2\phi\) inside the root; tidy it in three moves:</span></p>
+          <div class="formula">
+            <span class="formula-line">\[
+a^2\cos^2\phi+b^2\sin^2\phi
+\;\overset{(1)}{=}\;a^2\Bigl(\cos^2\phi+\tfrac{b^2}{a^2}\sin^2\phi\Bigr)
+\;\overset{(2)}{=}\;a^2\Bigl(\cos^2\phi+(1-e^2)\sin^2\phi\Bigr)
+\]</span>
+            <span class="formula-line">\[
+\overset{(3)}{=}\;a^2\bigl(\underbrace{\cos^2\phi+\sin^2\phi}_{=\,1}-\,e^2\sin^2\phi\bigr)
+=a^2\bigl(1-e^2\sin^2\phi\bigr)
+\]</span>
+          </div>
+          <p>（(1) 提出 \(a^2\)；(2) 用第 0 步的 \(\frac{b^2}{a^2}=1-e^2\)；(3) 展开后用 \(\cos^2\phi+\sin^2\phi=1\)。）开方：<span class="en" lang="en">((1) factor out \(a^2\); (2) use Step 0’s \(\frac{b^2}{a^2}=1-e^2\); (3) expand and use \(\cos^2\phi+\sin^2\phi=1\).) Take the square root:</span></p>
+          <div class="formula">
+            <span class="formula-line">\[
+\sqrt{a^2\cos^2\phi+b^2\sin^2\phi}=a\,\underbrace{\sqrt{1-e^2\sin^2\phi}}_{=\,W}
+\qquad\Longrightarrow\qquad
+\boxed{\,W=\sqrt{1-e^2\sin^2\phi}\,}
+\]</span>
+          </div>
+          <p>所以 \(W\) <strong>不是凭空规定</strong>的——它就是把 \(a^2\cos^2\phi+b^2\sin^2\phi\) 整理后剩下的那个根号因子。<span class="en" lang="en">So \(W\) is <strong>not arbitrary</strong> — it is just the leftover square-root factor after tidying \(a^2\cos^2\phi+b^2\sin^2\phi\).</span></p>
+
+          <h4>2.5 代回，得到 \(P\) 的坐标（先把 \(a/W\) 简记为 \(N\)）<span class="en" lang="en">2.5 Substitute back for \(P\)’s coordinates (abbreviate \(a/W\) as \(N\))</span></h4>
+          <p>由 \(k=\dfrac1{\sqrt{a^2\cos^2\phi+b^2\sin^2\phi}}=\dfrac1{aW}\)（用了 2.4 的根号 \(=aW\)），代回 2.2 的 \(x_0\)：<span class="en" lang="en">From \(k=\dfrac1{\sqrt{a^2\cos^2\phi+b^2\sin^2\phi}}=\dfrac1{aW}\) (using 2.4’s root \(=aW\)), substitute back into 2.2’s \(x_0\):</span></p>
+          <div class="formula">
+            <span class="formula-line">\[
+x_0=k\,a^2\cos\phi=\frac{a^2\cos\phi}{a\,W}=\frac{a}{W}\cos\phi
+=\underbrace{\frac{a}{W}}_{=:\,N}\cos\phi,
+\qquad z_0=\frac{a}{W}(1-e^2)\sin\phi
+\]</span>
+          </div>
+          <p>这里 \(N:=\dfrac{a}{W}\) <strong>暂时只是 \(a/W\) 的缩写</strong>——还<strong>没</strong>说它等于 \(R_N\)。我们得到的是固定点 \(P\) 的两个坐标，其中横坐标 \(x_0=N\cos\phi\) 就是 \(P\) 离自转轴的<strong>水平距离</strong>。
+            <span class="en" lang="en">Here \(N:=\dfrac{a}{W}\) is <strong>so far only an abbreviation</strong> for \(a/W\) — we have <strong>not</strong> yet claimed it equals \(R_N\). What we obtained are \(P\)’s two coordinates; the horizontal one \(x_0=N\cos\phi\) is \(P\)’s <strong>horizontal distance</strong> from the spin axis.</span>
+          </p>
+
+          <h4>2.6 \(R_N\) 是什么？——把 \(R_N=a/W\) <strong>推出来</strong>（不是定义）<span class="en" lang="en">2.6 What is \(R_N\)? — <strong>derive</strong> \(R_N=a/W\) (not define it)</span></h4>
+          <p>
+            到上一步为止 \(N\) 只是缩写。\(R_N\)（卯酉圈半径）有它<strong>自己独立的几何身份</strong>，不是我们随手命名的：它是 \(P\) 处<strong>法线一直延伸到自转轴</strong>的那段长度（图 2a 里的蓝色粗段）。我们把这段长度<strong>算出来</strong>，看它到底等于多少——这才是“推导”。
+            <span class="en" lang="en">Up to here \(N\) is just shorthand. \(R_N\) (the prime-vertical radius) has <strong>its own independent geometric identity</strong>, not something we just named: it is the length of the <strong>normal from \(P\) extended to the spin axis</strong> (the thick blue segment in Figure 2a). Let us <strong>compute</strong> that length and see what it equals — that is the actual derivation.</span>
+          </p>
+          <p>
+            从 \(P=(x_0,z_0)\) 沿法线方向 \((\cos\phi,\sin\phi)\) 往里走，直到横坐标变成 \(0\)（碰到自转轴）。横向一共要走的距离正好是 \(x_0\)；而法线与水平成 \(\phi\) 角，所以这段斜的法线长度 \(\lvert PF\rvert\) 满足“横向 \(=\) 斜边 \(\times\cos\phi\)”：
+            <span class="en" lang="en">From \(P=(x_0,z_0)\), travel inward along the normal \((\cos\phi,\sin\phi)\) until the horizontal coordinate hits \(0\) (the spin axis). The horizontal distance to cover is exactly \(x_0\); the normal makes angle \(\phi\) with horizontal, so its length \(\lvert PF\rvert\) obeys “horizontal \(=\) slant \(\times\cos\phi\)”:</span>
+          </p>
+          <div class="formula"><span class="formula-line">\[
+\lvert PF\rvert\cos\phi=x_0
+\quad\Longrightarrow\quad
+\lvert PF\rvert=\frac{x_0}{\cos\phi}
+\overset{\,x_0=(a/W)\cos\phi\,}{=}\;
+\frac{(a/W)\cos\phi}{\cos\phi}=\frac{a}{W}
+\]</span></div>
+          <p>
+            \(R_N\) 的几何定义就是这段“法线到轴”的长度，而我们刚算出它 \(=a/W\)。所以
+            <span class="en" lang="en">\(R_N\) is <strong>defined</strong> as this normal-to-axis length, and we just computed it \(=a/W\). Therefore</span>
+          </p>
+          <div class="formula"><span class="formula-line">\[
+\boxed{\;R_N=\lvert PF\rvert=\frac{a}{W}\;}\qquad\text{(derived, not assumed)}
+\]</span></div>
+          <p>这下上一步的缩写 \(N\) 才正式有名分：\(N=R_N=a/W\)。\(P\) 的水平距离也就写成 \(x_0=R_N\cos\phi\)（第 6 节、第 3 步都用它）。<span class="en" lang="en">Only now does the shorthand \(N\) earn its name: \(N=R_N=a/W\). And \(P\)’s horizontal distance is \(x_0=R_N\cos\phi\) (used in Section 6 and Step 3).</span></p>
+          <div class="callout good">
+            <strong>所以 \(R_N=\dfrac{a}{W}\) 是<strong>结论</strong>，不是规定。</strong>
+            它把赤道半径 \(a\) 除以 \(W\in[\sqrt{1-e^2},\,1]\)；\(W\) 越小 \(R_N\) 越大，所以卯酉圈半径在两极最大。（更深一层：这段“法线到轴”的长度，同时也正是“卯酉法截面”的曲率半径（后面的图 2b 会画出来）——所以管它叫“曲率半径”名副其实；但那是另一个定理，算经纬度时用不到。）
+            <span class="en" lang="en"><strong>So \(R_N=\dfrac{a}{W}\) is a <strong>conclusion</strong>, not a definition.</strong> It divides the equatorial radius \(a\) by \(W\in[\sqrt{1-e^2},\,1]\); smaller \(W\) → larger \(R_N\), so the prime-vertical radius is largest at the poles. (One layer deeper: this normal-to-axis length is also the radius of curvature of the prime-vertical normal section (drawn later as Figure 2b) — so calling it a “radius of curvature” is fully justified; but that is a separate theorem, not needed for the lat/lon conversion.)</span>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:18px">
+          <h3>第 3 步：\(R_M\) 的完整推导（曲率半径 \(=\dfrac{ds}{d\phi}\)，要用一点微积分）<span class="en" lang="en">Step 3: Full Derivation of \(R_M\) (radius of curvature \(=\dfrac{ds}{d\phi}\), with a bit of calculus)</span></h3>
+
+          <h4>3.1 \(R_M\) 到底是什么<span class="en" lang="en">3.1 What \(R_M\) actually is</span></h4>
+          <p>
+            任意平面曲线的<strong>曲率半径</strong>定义为 \(R=\dfrac{ds}{d\theta}\)：沿曲线走一小段弧长 \(ds\)，切线方向转过 \(d\theta\)，转得越慢（越平直）半径越大。在子午线上，法线（与切线刚性垂直）的仰角正是大地纬度 \(\phi\)，法线转多少切线就转多少，于是 \(d\theta=d\phi\)。所以
+            <span class="en" lang="en">For any plane curve the <strong>radius of curvature</strong> is \(R=\dfrac{ds}{d\theta}\): move an arc length \(ds\) and the tangent turns by \(d\theta\); the slower it turns (the straighter), the larger the radius. On the meridian, the normal (rigidly perpendicular to the tangent) has elevation equal to the geodetic latitude \(\phi\), so the normal and tangent turn together, \(d\theta=d\phi\). Hence</span>
+          </p>
+          <div class="formula"><span class="formula-line">\[
+R_M=\frac{ds}{d\phi}
+\]</span></div>
+          <p style="margin-top:-2px;color:var(--muted);font-size:14px">直观：\(R_M\) 就是“纬度每多 1 弧度，沿子午线要走多少米”。<span class="en" lang="en">Intuitively, \(R_M\) is “how many metres of meridian arc per radian of latitude.”</span></p>
+
+          <h4>3.2 从目标出发：到底要算什么<span class="en" lang="en">3.2 Start from the goal: what exactly we must compute</span></h4>
+          <p>我们要的是 \(R_M=\dfrac{ds}{d\phi}\)。手上只有第 2 步给的、子午线上点 \(P\) 的两个坐标 \(p(\phi),z(\phi)\)：<span class="en" lang="en">We want \(R_M=\dfrac{ds}{d\phi}\). All we have is point \(P\)’s two meridian coordinates \(p(\phi),z(\phi)\) from Step 2:</span></p>
+          <div class="formula"><span class="formula-line">\[
+p(\phi)=\frac{a}{W}\cos\phi,\qquad
+z(\phi)=\frac{a(1-e^2)}{W}\sin\phi,\qquad
+W=\bigl(1-e^2\sin^2\phi\bigr)^{1/2}
+\]</span></div>
+          <p>（\(p\) = 离自转轴的水平距离，\(z\) = 沿轴高度。）弧长满足 \(ds^2=dp^2+dz^2\)，于是<span class="en" lang="en">(\(p\) = horizontal distance from the spin axis, \(z\) = height along it.) Arc length satisfies \(ds^2=dp^2+dz^2\), so</span></p>
+          <div class="formula"><span class="formula-line">\[
+\frac{ds}{d\phi}=\sqrt{\Bigl(\frac{dp}{d\phi}\Bigr)^2+\Bigl(\frac{dz}{d\phi}\Bigr)^2}
+\]</span></div>
+          <p>所以整件事只剩：把 \(p,z\) 对 \(\phi\) <strong>求导</strong>，再代进去。下面一个一个来，<strong>途中需要哪个导数，到那一刻才去算</strong>——不提前准备。（这样才是真的“顺着推”，而不是先知道答案再倒着凑。）<span class="en" lang="en">So the whole task is just to <strong>differentiate</strong> \(p,z\) with respect to \(\phi\) and plug in. We go one at a time and compute any sub-derivative <strong>only at the moment we hit it</strong> — not staged in advance. (That is what makes this a genuine forward derivation rather than reverse-engineering a known answer.)</span></p>
+
+          <h4>3.3 求 \(\dfrac{dp}{d\phi}\)（途中自然碰到 \(\dfrac{dW}{d\phi}\)，到那时再算）<span class="en" lang="en">3.3 Compute \(\dfrac{dp}{d\phi}\) (we hit \(\dfrac{dW}{d\phi}\) along the way — compute it then)</span></h4>
+          <p>\(p=a\cos\phi\cdot W^{-1}\) 是两块相乘，用乘积法则 \((uv)'=u'v+uv'\)，取 \(u=a\cos\phi\)（\(u'=-a\sin\phi\)）、\(v=W^{-1}\)：<span class="en" lang="en">\(p=a\cos\phi\cdot W^{-1}\) is a product; product rule \((uv)'=u'v+uv'\) with \(u=a\cos\phi\) (\(u'=-a\sin\phi\)), \(v=W^{-1}\):</span></p>
+          <div class="formula"><span class="formula-line">\[
+\frac{dp}{d\phi}=-a\sin\phi\cdot W^{-1}+a\cos\phi\cdot\bigl(W^{-1}\bigr)'
+\]</span></div>
+          <p>到这里<strong>卡在 \(\bigl(W^{-1}\bigr)'\)</strong>——要往下走，<strong>现在才需要知道 \(W\) 怎么随 \(\phi\) 变</strong>。于是<strong>这一刻</strong>顺手去算 \(\dfrac{dW}{d\phi}\)：\(W=(1-e^2\sin^2\phi)^{1/2}\)，链式法则；先单独求最里层 \(\dfrac{d}{d\phi}\sin^2\phi=2\sin\phi\cos\phi\)，再往外套：<span class="en" lang="en">Now we are <strong>stuck at \(\bigl(W^{-1}\bigr)'\)</strong> — only <strong>now</strong> do we need how \(W\) changes with \(\phi\). So <strong>at this moment</strong> we compute \(\dfrac{dW}{d\phi}\): \(W=(1-e^2\sin^2\phi)^{1/2}\), chain rule; first the innermost \(\dfrac{d}{d\phi}\sin^2\phi=2\sin\phi\cos\phi\), then work outward:</span></p>
+          <div class="formula">
+            <span class="formula-line">\[
+\frac{dW}{d\phi}
+=\tfrac12\bigl(1-e^2\sin^2\phi\bigr)^{-1/2}\cdot\frac{d}{d\phi}\bigl(1-e^2\sin^2\phi\bigr)
+=\tfrac12\,W^{-1}\cdot\bigl(-e^2\cdot 2\sin\phi\cos\phi\bigr)
+=-\frac{e^2\sin\phi\cos\phi}{W}
+\]</span>
+            <span class="formula-line">\[
+\Rightarrow\quad
+\bigl(W^{-1}\bigr)'=-W^{-2}\frac{dW}{d\phi}
+=-W^{-2}\Bigl(-\frac{e^2\sin\phi\cos\phi}{W}\Bigr)
+=\frac{e^2\sin\phi\cos\phi}{W^3}
+\]</span>
+          </div>
+          <p>（两个负号相乘变正，\(W^{-2}\cdot W^{-1}=W^{-3}\)。）把这块<strong>代回</strong>上面停住的地方，再通分到 \(W^3\)、提公因子，最后把 \(W^2=1-e^2\sin^2\phi\) 展开收拢——简化是自己<strong>冒出来</strong>的，不是凑的：<span class="en" lang="en">(Two minus signs make a plus; \(W^{-2}\cdot W^{-1}=W^{-3}\).) Put this <strong>back</strong> where we paused, then common-denominator \(W^3\), factor, and finally expand \(W^2=1-e^2\sin^2\phi\) and collect — the simplification <strong>emerges</strong>, it is not forced:</span></p>
+          <div class="formula">
+            <span class="formula-line">\[
+\frac{dp}{d\phi}=-a\sin\phi\cdot W^{-1}+a\cos\phi\cdot\frac{e^2\sin\phi\cos\phi}{W^3}
+=-\frac{a\sin\phi}{W}+\frac{a\,e^2\sin\phi\cos^2\phi}{W^3}
+\]</span>
+            <span class="formula-line">\[
+\overset{\text{common denom. }W^3}{=}\;
+\frac{-a\sin\phi\,W^2+a\,e^2\sin\phi\cos^2\phi}{W^3}
+=\frac{a\sin\phi}{W^3}\bigl(-W^2+e^2\cos^2\phi\bigr)
+\]</span>
+            <span class="formula-line">\[
+-W^2+e^2\cos^2\phi
+=-(1-e^2\sin^2\phi)+e^2\cos^2\phi
+=-1+e^2\underbrace{(\sin^2\phi+\cos^2\phi)}_{=\,1}
+=-(1-e^2)
+\]</span>
+            <span class="formula-line">\[
+\Longrightarrow\quad
+\frac{dp}{d\phi}=\frac{a\sin\phi}{W^3}\cdot\bigl(-(1-e^2)\bigr)=-\frac{a(1-e^2)\sin\phi}{W^3}
+\]</span>
+          </div>
+
+          <h4>3.4 求 \(\dfrac{dz}{d\phi}\)（\(\dfrac{dW}{d\phi}\) 已经有了，直接用）<span class="en" lang="en">3.4 Compute \(\dfrac{dz}{d\phi}\) (\(\dfrac{dW}{d\phi}\) is already in hand — reuse it)</span></h4>
+          <p>同样的乘积法则，\(z=a(1-e^2)\sin\phi\cdot W^{-1}\)，常数 \(a(1-e^2)\) 提前，取 \(u=\sin\phi\)（\(u'=\cos\phi\)）、\(v=W^{-1}\)；这次 \(\bigl(W^{-1}\bigr)'\) <strong>不用再算</strong>，就是 3.3 刚得到的 \(\dfrac{e^2\sin\phi\cos\phi}{W^3}\)：<span class="en" lang="en">Same product rule: \(z=a(1-e^2)\sin\phi\cdot W^{-1}\), constant \(a(1-e^2)\) out front, \(u=\sin\phi\) (\(u'=\cos\phi\)), \(v=W^{-1}\); this time \(\bigl(W^{-1}\bigr)'\) <strong>needs no recomputing</strong> — it is 3.3’s \(\dfrac{e^2\sin\phi\cos\phi}{W^3}\):</span></p>
+          <div class="formula">
+            <span class="formula-line">\[
+\frac{dz}{d\phi}=a(1-e^2)\bigl[u'v+uv'\bigr]
+=a(1-e^2)\Bigl[\cos\phi\cdot W^{-1}+\sin\phi\cdot\frac{e^2\sin\phi\cos\phi}{W^3}\Bigr]
+\]</span>
+            <span class="formula-line">\[
+=a(1-e^2)\Bigl[\frac{\cos\phi}{W}+\frac{e^2\sin^2\phi\cos\phi}{W^3}\Bigr]
+\overset{\text{common denom. }W^3}{=}\;
+\frac{a(1-e^2)\cos\phi}{W^3}\bigl(W^2+e^2\sin^2\phi\bigr)
+\]</span>
+            <span class="formula-line">\[
+W^2+e^2\sin^2\phi=(1-e^2\sin^2\phi)+e^2\sin^2\phi=1
+\quad\Longrightarrow\quad
+\frac{dz}{d\phi}=\frac{a(1-e^2)\cos\phi}{W^3}
+\]</span>
+          </div>
+
+          <h4>3.5 代回 3.2 的目标式 → \(R_M\)（每步写全）<span class="en" lang="en">3.5 Plug back into 3.2’s goal → \(R_M\) (every step)</span></h4>
+          <p>两个导数都有了，代进 3.2 的 \(\dfrac{ds}{d\phi}=\sqrt{\bigl(\tfrac{dp}{d\phi}\bigr)^2+\bigl(\tfrac{dz}{d\phi}\bigr)^2}\)。先分别平方（注意 \(\bigl(\tfrac{1}{W^3}\bigr)^2=\tfrac{1}{W^6}\)）：<span class="en" lang="en">Both derivatives are in hand; plug into 3.2’s \(\dfrac{ds}{d\phi}=\sqrt{\bigl(\tfrac{dp}{d\phi}\bigr)^2+\bigl(\tfrac{dz}{d\phi}\bigr)^2}\). Square each first (note \(\bigl(\tfrac{1}{W^3}\bigr)^2=\tfrac{1}{W^6}\)):</span></p>
+          <div class="formula">
+            <span class="formula-line">\[
+\Bigl(\frac{dp}{d\phi}\Bigr)^2=\frac{a^2(1-e^2)^2\sin^2\phi}{W^6},
+\qquad
+\Bigl(\frac{dz}{d\phi}\Bigr)^2=\frac{a^2(1-e^2)^2\cos^2\phi}{W^6}
+\]</span>
+            <span class="formula-line">\[
+\Bigl(\frac{dp}{d\phi}\Bigr)^2+\Bigl(\frac{dz}{d\phi}\Bigr)^2
+=\frac{a^2(1-e^2)^2}{W^6}\,\underbrace{\bigl(\sin^2\phi+\cos^2\phi\bigr)}_{=\,1}
+=\frac{a^2(1-e^2)^2}{W^6}
+\]</span>
+            <span class="formula-line">\[
+\frac{ds}{d\phi}=\sqrt{\Bigl(\frac{dp}{d\phi}\Bigr)^2+\Bigl(\frac{dz}{d\phi}\Bigr)^2}
+=\sqrt{\frac{a^2(1-e^2)^2}{W^6}}=\frac{a(1-e^2)}{W^3}
+\quad(a,\,1-e^2,\,W^3>0)
+\]</span>
+            <span class="formula-line">\[
+\boxed{\;R_M=\frac{ds}{d\phi}=\frac{a(1-e^2)}{W^3}=\frac{a(1-e^2)}{\bigl(1-e^2\sin^2\phi\bigr)^{3/2}}\;}
+\]</span>
+          </div>
+
+          <div class="callout good">
+            <strong>两个漂亮的副产品。</strong>
+            (1) 子午线<strong>切线方向</strong> \(\bigl(\tfrac{dp}{d\phi},\tfrac{dz}{d\phi}\bigr)\propto(-\sin\phi,\cos\phi)\)，正好垂直于第 2 步的法线 \((\cos\phi,\sin\phi)\)——前后自洽。
+            (2) <strong>\(R_N\ge R_M\) 可以直接证</strong>：\(\dfrac{R_M}{R_N}=\dfrac{a(1-e^2)/W^3}{a/W}=\dfrac{1-e^2}{W^2}=\dfrac{1-e^2}{1-e^2\sin^2\phi}\le1\)（因 \(\sin^2\phi\le1\)）；赤道处比值最小 \(=1-e^2\)，两极处 \(R_M=R_N=\dfrac{a}{\sqrt{1-e^2}}\)。
+            <span class="en" lang="en"><strong>Two nice by-products.</strong> (1) The meridian <strong>tangent direction</strong> \(\bigl(\tfrac{dp}{d\phi},\tfrac{dz}{d\phi}\bigr)\propto(-\sin\phi,\cos\phi)\) is exactly perpendicular to Step 2’s normal \((\cos\phi,\sin\phi)\) — fully consistent. (2) <strong>\(R_N\ge R_M\) drops right out</strong>: \(\dfrac{R_M}{R_N}=\dfrac{1-e^2}{W^2}=\dfrac{1-e^2}{1-e^2\sin^2\phi}\le1\) (since \(\sin^2\phi\le1\)); the ratio is smallest at the equator \((=1-e^2)\) and \(R_M=R_N=\dfrac{a}{\sqrt{1-e^2}}\) at the poles.</span>
+          </div>
+          <div class="note">
+            数值自检：上面每一步导数都和数值微分逐点吻合（如 \(\phi=45^\circ\)：\(\tfrac{dp}{d\phi}=\tfrac{dz}{d\phi}\) 同量级、\(R_M=6367.382\) km）；得到的 \(R_M\) 公式与代码里 <code>R_M = WGS84_A*(1.0-WGS84_E2)/denom**1.5</code>（\(\texttt{denom}=W^2\)）逐位一致。
+            <span class="en" lang="en">Numerical self-check: every derivative above matches finite differences pointwise (e.g. at \(\phi=45^\circ\): \(\tfrac{dp}{d\phi}=\tfrac{dz}{d\phi}\) in magnitude, \(R_M=6367.382\) km); the resulting \(R_M\) formula matches the code’s <code>R_M = WGS84_A*(1.0-WGS84_E2)/denom**1.5</code> (\(\texttt{denom}=W^2\)) to the last digit.</span>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <article class="card">
+            <h3>第 4 步：两个半径的公式（小结）<span class="en" lang="en">Step 4: The Two Radius Formulas (summary)</span></h3>
+            <p>
+              前面已经<strong>分别推出</strong>两个半径——\(R_N=a/W\)（第 2 步）和 \(R_M=a(1-e^2)/W^3\)（第 3 步）。这里把它们<strong>并排小结</strong>：形状一模一样，同一个 \(W\)，只是<strong>幂不同</strong>（1 次方 vs 3 次方）：
+              <span class="en" lang="en">Both radii are now <strong>derived</strong> — \(R_N=a/W\) (Step 2) and \(R_M=a(1-e^2)/W^3\) (Step 3). Here they are <strong>side by side</strong>: identical shape, the same \(W\), only a different <strong>power</strong> (1st vs 3rd):</span>
             </p>
             <div class="formula">
               <span class="formula-line">\[
@@ -624,8 +957,8 @@ R_M = WGS84_A * (1.0 - WGS84_E2) / denom**1.5  <span class="tok-com"># meridiona
           </div>
           <div class="readout" id="rad-out"></div>
           <figcaption>
-            图 3-D · 同一点 P 上的两个曲率半径，画成两条互相垂直的<strong>法截面密切圆</strong>（扁率已强烈夸张以便区分）：橙圆在<strong>子午（南北）平面</strong>里，半径 \(R_M\)，描述往南北走时地表多弯；蓝圆在<strong>卯酉（东西）平面</strong>里，半径 \(R_N\)，它的圆心正好落在自转轴上——所以 \(R_N\) 也等于“法线从 P 延伸到自转轴的长度”。两圆都在 P 处与地表相切，但弯曲程度不同：总有 \(R_N\ge R_M\)。可用右上下拉框单独看其中一个。读数为真实 WGS 84 值。
-            <span class="en" lang="en">Figure 3-D · The two radii of curvature at one point P, drawn as two mutually perpendicular <strong>normal-section osculating circles</strong> (flattening strongly exaggerated to tell them apart): the orange circle lies in the <strong>meridian (north–south) plane</strong> with radius \(R_M\) — how sharply the surface bends going north–south; the blue circle lies in the <strong>prime-vertical (east–west) plane</strong> with radius \(R_N\), and its centre sits exactly on the spin axis — so \(R_N\) also equals the “length of the normal from P to the spin axis.” Both circles are tangent to the surface at P but bend differently: always \(R_N\ge R_M\). Use the dropdown to isolate one. Readouts are real WGS 84 values.</span>
+            图 2b · 同一点 P 上的两个曲率半径，画成两条互相垂直的<strong>法截面密切圆</strong>（扁率已强烈夸张以便区分）：橙圆在<strong>子午（南北）平面</strong>里，半径 \(R_M\)，描述往南北走时地表多弯；蓝圆在<strong>卯酉（东西）平面</strong>里，半径 \(R_N\)，它的圆心正好落在自转轴上——所以 \(R_N\) 也等于“法线从 P 延伸到自转轴的长度”。两圆都在 P 处与地表相切，但弯曲程度不同：总有 \(R_N\ge R_M\)。可用右上下拉框单独看其中一个。读数为真实 WGS 84 值。
+            <span class="en" lang="en">Figure 2b · The two radii of curvature at one point P, drawn as two mutually perpendicular <strong>normal-section osculating circles</strong> (flattening strongly exaggerated to tell them apart): the orange circle lies in the <strong>meridian (north–south) plane</strong> with radius \(R_M\) — how sharply the surface bends going north–south; the blue circle lies in the <strong>prime-vertical (east–west) plane</strong> with radius \(R_N\), and its centre sits exactly on the spin axis — so \(R_N\) also equals the “length of the normal from P to the spin axis.” Both circles are tangent to the surface at P but bend differently: always \(R_N\ge R_M\). Use the dropdown to isolate one. Readouts are real WGS 84 values.</span>
           </figcaption>
         </figure>
       </section>
@@ -638,22 +971,95 @@ R_M = WGS84_A * (1.0 - WGS84_E2) / denom**1.5  <span class="tok-com"># meridiona
           <span class="en" lang="en">This is the first real transformation. The flat model writes \(\dot x=V_E,\ \dot y=V_N\) (metres/second). The geodetic model must turn the same linear velocities into <strong>angular rates</strong> of latitude and longitude. The conversion factors are the curvature radii from the previous section.</span>
         </p>
 
+        <div class="note">
+          <strong>先想清楚“为什么是这两个半径”，再写公式。</strong>
+          关键问题不是“\(R_M,R_N\) 怎么算”（第 5 节已解决），而是“凭什么用它们换经纬度”。下面三步把这个逻辑补全——你会看到 \(R_M\) 和 \(R_N\) 进公式靠的是<strong>两条完全不同的理由</strong>。
+          <span class="en" lang="en"><strong>First settle “why these two radii,” then write the formula.</strong> The real question is not “how to compute \(R_M,R_N\)” (Section 5 did that) but “what entitles us to use them to convert to lat/lon.” The three steps below fill in that logic — and you’ll see \(R_M\) and \(R_N\) enter for <strong>two entirely different reasons</strong>.</span>
+        </div>
+
         <div class="steps">
           <div class="step">
-            <strong>北向：纬度率。</strong>沿子午线走一米，纬度增加 \(1/(R_M+h)\) 弧度（半径 \(R_M\) 的圆弧，加上高度 \(h\)）。所以
-            <span class="en" lang="en"><strong>Northward: latitude rate.</strong> Moving one metre along the meridian increases latitude by \(1/(R_M+h)\) radians (an arc of radius \(R_M\), plus height \(h\)). Hence</span>
+            <strong>北向 → 纬度率（用 \(R_M\)，理由 = 它的定义）。</strong>向北 = 沿<strong>子午线</strong>走。第 5 节<strong>第 3 步</strong>已经证明 \(R_M=\dfrac{ds}{d\phi}\)——子午线上每 1 弧度纬度对应 \(R_M\) 米弧长。<strong>反过来</strong>：走 \(\delta N\) 米就转过 \(\delta\phi=\delta N/R_M\)；在高度 \(h\) 处本地子午线半径放大成 \(R_M+h\)。所以
+            <span class="en" lang="en"><strong>North → latitude rate (use \(R_M\); the reason is its very definition).</strong> North = along the <strong>meridian</strong>. Section 5 <strong>Step 3</strong> proved \(R_M=\dfrac{ds}{d\phi}\) — one radian of latitude = \(R_M\) metres of meridian arc. <strong>Invert it</strong>: \(\delta N\) metres turns \(\delta\phi=\delta N/R_M\); at height \(h\) the local meridian radius grows to \(R_M+h\). Hence</span>
             <div class="formula"><span class="formula-line">\[\dot\phi=\frac{V_N}{R_M+h}\]</span></div>
+            这就是 \(R_M\) 能算纬度的<strong>全部</strong>理由：它的定义本身就是“弧长 ÷ 纬度角”。<span class="en" lang="en">That is the <strong>whole</strong> reason \(R_M\) computes latitude: it is defined as “arc length ÷ latitude angle.”</span>
           </div>
           <div class="step">
-            <strong>东向：经度率。</strong>沿纬线走一米，经度增加 \(1/\big((R_N+h)\cos\phi\big)\) 弧度。多出来的 \(\cos\phi\) 是因为纬线圈半径是 \((R_N+h)\cos\phi\)：越往高纬，纬线圈越小，走一米对应更多经度。
-            <span class="en" lang="en"><strong>Eastward: longitude rate.</strong> Moving one metre along the parallel increases longitude by \(1/\big((R_N+h)\cos\phi\big)\) radians. The extra \(\cos\phi\) appears because the parallel’s radius is \((R_N+h)\cos\phi\): at higher latitude the parallel shrinks, so one metre maps to more longitude.</span>
-            <div class="formula"><span class="formula-line">\[\dot\lambda=\frac{V_E}{(R_N+h)\cos\phi}\]</span></div>
+            <strong>东向 → 经度率（用 \(R_N\)，理由完全不同）。</strong>向东 = 沿<strong>纬线圈</strong>（同一纬度的圆）走。一个半径为 \(p\) 的圆，走弧长 \(\delta E\) 转过的圆心角是 \(\delta\lambda=\delta E/p\)。于是只剩一个问题：<strong>纬线圈半径 \(p\)</strong>（= P 到自转轴的垂直距离）等于多少？
+            <span class="en" lang="en"><strong>East → longitude rate (use \(R_N\); for a totally different reason).</strong> East = along the <strong>parallel</strong> (the circle of constant latitude). On a circle of radius \(p\), travelling arc \(\delta E\) sweeps a central angle \(\delta\lambda=\delta E/p\). So the only question left: what is the <strong>parallel radius \(p\)</strong> (the perpendicular distance from P to the spin axis)?</span>
+            <p style="margin:8px 0 0">
+              答案<strong>第 5 节第 2 步早就算出来了</strong>：地表点 \(P\) 的水平坐标 \(x_0=N\cos\phi\)，其中 \(N=R_N=a/W\)（法线到自转轴的长度）。所以地表纬线圈半径 \(p_0=R_N\cos\phi\)。再加高度 \(h\)（沿法线 \(\hat{\mathbf n}\) 向外，\(\hat{\mathbf n}\) 的水平分量是 \(\cos\phi\)，多出 \(h\cos\phi\)）：
+              <span class="en" lang="en">The answer <strong>was already computed in Section 5 Step 2</strong>: the surface point \(P\)’s horizontal coordinate is \(x_0=N\cos\phi\), where \(N=R_N=a/W\) (the normal’s length to the spin axis). So the surface parallel radius is \(p_0=R_N\cos\phi\). Add height \(h\) (outward along \(\hat{\mathbf n}\), whose horizontal part is \(\cos\phi\), adding \(h\cos\phi\)):</span>
+            </p>
+            <div class="formula"><span class="formula-line">\[
+p=(R_N+h)\cos\phi
+\qquad\Longrightarrow\qquad
+\dot\lambda=\frac{V_E}{p}=\frac{V_E}{(R_N+h)\cos\phi}
+\]</span></div>
+            （下图把这条逻辑画出来。）<span class="en" lang="en">(The figure below draws this logic.)</span>
           </div>
           <div class="step">
-            <strong>天向：高度率。</strong>这一维没有曲率换算，沿法线向上的速度就是高度率，和平面模型一致。
-            <span class="en" lang="en"><strong>Up: height rate.</strong> This dimension needs no curvature conversion; the upward velocity along the normal is the height rate, identical to the flat model.</span>
+            <strong>天向 → 高度率。</strong>沿法线向上的速度直接就是高度率，没有曲率换算：
+            <span class="en" lang="en"><strong>Up → height rate.</strong> The upward velocity along the normal is the height rate directly — no curvature conversion:</span>
             <div class="formula"><span class="formula-line">\[\dot h=V_U\]</span></div>
           </div>
+        </div>
+
+        <figure class="viz" style="margin-top:16px">
+          <svg viewBox="0 0 720 300" role="img" aria-label="纬线圈半径与经度率示意图"
+               style="display:block;width:100%;height:auto;background:linear-gradient(180deg,#fbfdff 0%,#f3f7fa 100%);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif">
+            <text x="36" y="26" fill="#16212f" font-size="14" font-weight="700">① 侧视：纬线圈半径 p = R_N·cosφ</text>
+            <text x="402" y="26" fill="#16212f" font-size="14" font-weight="700">② 俯视：δλ = δE / p</text>
+            <line x1="370" y1="40" x2="370" y2="276" stroke="#dbe3ea" stroke-width="1.4" stroke-dasharray="6 6"></line>
+            <!-- Panel ① side view -->
+            <line x1="130" y1="56" x2="130" y2="262" stroke="#16212f" stroke-width="2.2"></line>
+            <text x="84" y="52" fill="#607084" font-size="12">自转轴 axis</text>
+            <!-- parallel radius p (horizontal Q->P) -->
+            <line x1="130" y1="150" x2="248.2" y2="150" stroke="#b65b13" stroke-width="3.2"></line>
+            <text x="138" y="142" fill="#9a4c10" font-size="13" font-weight="700">p = R_N·cosφ</text>
+            <!-- normal P->F (length N=R_N) down to the axis -->
+            <line x1="248.2" y1="150" x2="130" y2="242.4" stroke="#3d58a8" stroke-width="2.4"></line>
+            <text x="150" y="232" fill="#314b99" font-size="13">法线 N = R_N</text>
+            <!-- right angle at Q -->
+            <polyline points="142,150 142,162 130,162" fill="none" stroke="#607084" stroke-width="1.4"></polyline>
+            <!-- phi angle arc at P -->
+            <polyline points="227.7,166.0 223.6,158.5 222.2,150" fill="none" stroke="#3d58a8" stroke-width="1.8"></polyline>
+            <text x="210" y="166" fill="#314b99" font-size="14">φ</text>
+            <circle cx="130" cy="150" r="3" fill="#16212f"></circle><text x="112" y="146" fill="#607084" font-size="12">Q</text>
+            <circle cx="248.2" cy="150" r="5" fill="#16212f"></circle><text x="256" y="148" fill="#16212f" font-size="13" font-weight="700">P</text>
+            <circle cx="130" cy="242.4" r="3" fill="#16212f"></circle>
+            <text x="150" y="285" fill="#607084" font-size="12">P 到自转轴的水平距离 = 纬线圈半径 p</text>
+            <!-- Panel ② top view -->
+            <circle cx="560" cy="150" r="85" fill="#eef6f6" stroke="#3a4a5c" stroke-width="2"></circle>
+            <text x="496" y="255" fill="#607084" font-size="12">纬线圈 parallel (俯视 top view)</text>
+            <circle cx="560" cy="150" r="3.5" fill="#16212f"></circle>
+            <text x="512" y="168" fill="#607084" font-size="12">O′ (自转轴 axis)</text>
+            <!-- two radii -->
+            <line x1="560" y1="150" x2="639.9" y2="120.9" stroke="#3d58a8" stroke-width="2"></line>
+            <line x1="560" y1="150" x2="639.9" y2="179.1" stroke="#3d58a8" stroke-width="2"></line>
+            <text x="588" y="128" fill="#314b99" font-size="13" font-weight="700">p</text>
+            <!-- east arc dE -->
+            <polyline points="639.9,120.9 643.7,135.2 645,150 643.7,164.8 639.9,179.1" fill="none" stroke="#b65b13" stroke-width="3.4"></polyline>
+            <text x="652" y="154" fill="#9a4c10" font-size="13" font-weight="700">δE</text>
+            <!-- dlam angle arc -->
+            <polyline points="588.2,139.7 590,150 588.2,160.3" fill="none" stroke="#b65b13" stroke-width="1.8"></polyline>
+            <text x="596" y="154" fill="#9a4c10" font-size="13">δλ</text>
+            <circle cx="639.9" cy="120.9" r="4" fill="#16212f"></circle><text x="647" y="116" fill="#16212f" font-size="12" font-weight="700">P</text>
+          </svg>
+          <figcaption>
+            示意图（形状已夸张）。<strong>① 侧视</strong>：P 到自转轴的水平距离（橙）就是纬线圈半径 \(p\)；它等于法线长度 \(N=R_N\)（蓝）乘 \(\cos\phi\)，即 \(p=R_N\cos\phi\)（这正是第 5 节第 2 步的 \(x=N\cos\phi\)）。<strong>② 俯视</strong>：沿这个半径 \(p\) 的圆向东走一小段弧 \(\delta E\)，转过的经度 \(\delta\lambda=\delta E/p\)。两图合起来 \(=\dot\lambda=\dfrac{V_E}{(R_N+h)\cos\phi}\)。
+            <span class="en" lang="en">Sketch (shape exaggerated). <strong>① Side view</strong>: the horizontal distance from P to the spin axis (orange) is the parallel radius \(p\); it equals the normal length \(N=R_N\) (blue) times \(\cos\phi\), i.e. \(p=R_N\cos\phi\) (exactly Section 5 Step 2’s \(x=N\cos\phi\)). <strong>② Top view</strong>: stepping east by a small arc \(\delta E\) on that circle of radius \(p\) sweeps longitude \(\delta\lambda=\delta E/p\). Together \(=\dot\lambda=\dfrac{V_E}{(R_N+h)\cos\phi}\).</span>
+          </figcaption>
+        </figure>
+
+        <div class="callout">
+          <strong>两个半径，两条不同的逻辑（这就是你问的“为什么”）。</strong>
+          \(R_M\) 直接当“弧长 ÷ 纬度角”用——这是它的<strong>定义</strong>（第 3 步）。\(R_N\) 是<strong>间接</strong>的：真正进经度公式的是<strong>纬线圈半径</strong> \((R_N+h)\cos\phi\)；\(R_N\) 之所以出现，纯粹是因为第 2 步证明了 \(R_N\cos\phi\) 恰好等于“到自转轴的水平距离”——<strong>和它叫不叫“曲率半径”毫无关系</strong>。
+          <span class="en" lang="en"><strong>Two radii, two different logics (this is the “why” you asked about).</strong> \(R_M\) is used directly as “arc length ÷ latitude angle” — that is its <strong>definition</strong> (Step 3). \(R_N\) is <strong>indirect</strong>: what actually enters the longitude formula is the <strong>parallel radius</strong> \((R_N+h)\cos\phi\); \(R_N\) appears only because Step 2 proved \(R_N\cos\phi\) equals the horizontal distance to the spin axis — <strong>nothing to do with it being called a “radius of curvature.”</strong></span>
+        </div>
+        <div class="note">
+          更深一层（可跳过）：\(R_N\) <strong>确实</strong>也是“卯酉法截面”（含法线、朝东西的竖直切面）的曲率半径；而纬线圈是同样朝东西、但相对法线<strong>倾斜了 \(\phi\)</strong> 的斜截面，按 Meusnier 定理它的半径 \(=R_N\cos\phi\)——和上面的结论一致。但要算经度<strong>位置率</strong>，只需要“纬线圈半径”这一步，不必动用曲率。
+          <span class="en" lang="en">One layer deeper (skippable): \(R_N\) <strong>is</strong> also the radius of curvature of the “prime-vertical normal section” (the east–west vertical slice through the normal); the parallel is the same east–west direction but a section <strong>tilted by \(\phi\)</strong> from the normal, so by Meusnier’s theorem its radius \(=R_N\cos\phi\) — consistent with the above. But for the longitude <strong>position rate</strong> you only need the “parallel radius” step, no curvature required.</span>
         </div>
 
         <div class="grid-2" style="margin-top:18px">
@@ -721,11 +1127,49 @@ h_dot   = V_up</code></pre>
             </p>
             <div class="callout">
               <strong>这正是要走到“终点”的动机。</strong>
-              重锚步进器精确，但离散。要在最优化里用多项式配点，需要一条<strong>连续</strong>的大地 RHS——它在每个点上的瞬时行为，等于“无穷小重锚”的极限。下一节就把这个极限写出来。
-              <span class="en" lang="en"><strong>This is precisely the motivation for the “end.”</strong> The re-anchored stepper is accurate but discrete. To use polynomial collocation in optimization, we need a <strong>continuous</strong> geodetic RHS whose instantaneous behaviour at each point equals the limit of “infinitesimal re-anchoring.” The next section writes that limit down.</span>
+              重锚步进器精确，但离散。要在最优化里用多项式配点，需要一条<strong>连续</strong>的大地 RHS——它在每个点上的瞬时行为，等于“无穷小重锚”的极限。第 8 节先备齐这个极限的另一半（<strong>输运率</strong>），第 9 节再把整条连续 RHS 写出来、并<strong>证明</strong>它正是这个极限。
+              <span class="en" lang="en"><strong>This is precisely the motivation for the “end.”</strong> The re-anchored stepper is accurate but discrete. To use polynomial collocation in optimization, we need a <strong>continuous</strong> geodetic RHS whose instantaneous behaviour at each point equals the limit of “infinitesimal re-anchoring.” Section 8 first supplies the other half of that limit (the <strong>transport rate</strong>), and Section 9 writes the full continuous RHS and <strong>proves</strong> it is exactly this limit.</span>
             </div>
           </article>
         </div>
+
+        <figure class="viz" style="margin-top:16px">
+          <svg viewBox="0 0 720 246" role="img" aria-label="重锚步进器示意图：每步换一块新切平面"
+               style="display:block;width:100%;height:auto;background:linear-gradient(180deg,#fbfdff 0%,#f3f7fa 100%);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif">
+            <defs>
+              <marker id="st-ind" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3d58a8"></path></marker>
+              <marker id="st-org" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b65b13"></path></marker>
+            </defs>
+            <text x="20" y="24" fill="#16212f" font-size="14" font-weight="700">重锚步进器：每一步都贴一块<tspan fill="#b65b13">新</tspan>切平面（注意它在转）</text>
+            <!-- trajectory -->
+            <path d="M 60 120 Q 370 210 680 160" fill="none" stroke="#bcdde0" stroke-width="6"></path>
+            <text x="600" y="205" fill="#607084" font-size="12">飞行轨迹</text>
+            <!-- station P_k -->
+            <line x1="135" y1="140" x2="233" y2="160" stroke="#b65b13" stroke-width="5"></line>
+            <line x1="184" y1="150" x2="192" y2="111" stroke="#3d58a8" stroke-width="2.4" marker-end="url(#st-ind)"></line>
+            <circle cx="184" cy="150" r="4.5" fill="#16212f"></circle>
+            <text x="150" y="146" fill="#16212f" font-size="12" font-weight="700">P_k</text>
+            <text x="118" y="178" fill="#9a4c10" font-size="11">切平面（新建）</text>
+            <!-- step arrow within the plane -->
+            <line x1="184" y1="150" x2="326" y2="178" stroke="#b65b13" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#st-org)"></line>
+            <text x="232" y="150" fill="#9a4c10" font-size="11">平面里走一步</text>
+            <!-- station P_{k+1} -->
+            <line x1="320" y1="172" x2="420" y2="178" stroke="#b65b13" stroke-width="5"></line>
+            <line x1="370" y1="175" x2="372" y2="135" stroke="#3d58a8" stroke-width="2.4" marker-end="url(#st-ind)"></line>
+            <circle cx="370" cy="175" r="4.5" fill="#16212f"></circle>
+            <text x="356" y="198" fill="#16212f" font-size="12" font-weight="700">P_{k+1}</text>
+            <!-- station P_{k+2} -->
+            <line x1="506" y1="178" x2="606" y2="170" stroke="#b65b13" stroke-width="5"></line>
+            <line x1="556" y1="174" x2="553" y2="134" stroke="#3d58a8" stroke-width="2.4" marker-end="url(#st-ind)"></line>
+            <circle cx="556" cy="174" r="4.5" fill="#16212f"></circle>
+            <text x="542" y="197" fill="#16212f" font-size="12" font-weight="700">P_{k+2}</text>
+            <text x="430" y="120" fill="#314b99" font-size="11">蓝箭头 = 当地法线（向上）</text>
+          </svg>
+          <figcaption>
+            示意图 · 逐步重锚 ENU 步进器（曲率已夸张）。在每个点 \(P_k\)：①以当前点为原点贴一块<strong>全新</strong>的本地切平面（橙色，把状态写成 ENU 原点 \((0,0,h,V,\psi,\gamma)\)）；②用<strong>平直</strong> RHS 在这块平面里走<strong>一个</strong> RK4 步；③把结果换回大地坐标 \((\phi,\lambda,h,\dots)\)；④丢弃这块平面，到 \(P_{k+1}\) 再贴一块<strong>新的</strong>。关键：切平面（连同它的“水平/竖直”）<strong>每步都在转</strong>——正是这点旋转，下一节会变成<strong>输运率</strong>。
+            <span class="en" lang="en">Sketch · The per-step re-anchored ENU stepper (curvature exaggerated). At each point \(P_k\): ① attach a <strong>brand-new</strong> local tangent plane at the current point (orange; the state becomes the ENU origin \((0,0,h,V,\psi,\gamma)\)); ② take <strong>one</strong> RK4 step of the <strong>flat</strong> RHS inside that plane; ③ convert back to geodetic \((\phi,\lambda,h,\dots)\); ④ discard the plane and attach a <strong>fresh</strong> one at \(P_{k+1}\). The key: the tangent plane (and its “horizontal/vertical”) <strong>rotates every step</strong> — that rotation is exactly what becomes the <strong>transport rate</strong> in the next section.</span>
+          </figcaption>
+        </figure>
 
         <div class="card" style="margin-top:18px">
           <h3>为什么步进器要绕 ENU→ECEF→大地 一大圈，而连续方案“除以半径”就够了？<span class="en" lang="en">Why the Stepper Round-Trips ENU→ECEF→Geodetic, While the Continuous Scheme Just “Divides by Radius”</span></h3>
@@ -752,8 +1196,8 @@ h_dot   = V_up</code></pre>
 \delta U=\delta h
 \]</span></div>
           <p>
-            “沿子午线走 \(\delta N\) 米，纬度增加 \(\delta N/(R_M+h)\)；沿纬线（半径 \((R_N+h)\cos\phi\)）走 \(\delta E\) 米，经度增加 \(\delta E/((R_N+h)\cos\phi)\)。” 这里的 \(R_M,R_N\) 正是图 2 的两个曲率半径。把它写成雅可比：
-            <span class="en" lang="en">“Walk \(\delta N\) metres along the meridian → latitude rises by \(\delta N/(R_M+h)\); walk \(\delta E\) metres along the parallel (radius \((R_N+h)\cos\phi\)) → longitude rises by \(\delta E/((R_N+h)\cos\phi)\).” The \(R_M,R_N\) here are exactly Figure 2’s two radii of curvature. As a Jacobian:</span>
+            “沿子午线走 \(\delta N\) 米，纬度增加 \(\delta N/(R_M+h)\)；沿纬线（半径 \((R_N+h)\cos\phi\)）走 \(\delta E\) 米，经度增加 \(\delta E/((R_N+h)\cos\phi)\)。” 这里的 \(R_M,R_N\) 正是图 2b 的两个曲率半径。把它写成雅可比：
+            <span class="en" lang="en">“Walk \(\delta N\) metres along the meridian → latitude rises by \(\delta N/(R_M+h)\); walk \(\delta E\) metres along the parallel (radius \((R_N+h)\cos\phi\)) → longitude rises by \(\delta E/((R_N+h)\cos\phi)\).” The \(R_M,R_N\) here are exactly Figure 2b’s two radii of curvature. As a Jacobian:</span>
           </p>
           <div class="formula"><span class="formula-line">\[
 J=\left.\frac{\partial(\phi,\lambda,h)}{\partial(E,N,U)}\right|_{0}
@@ -764,47 +1208,12 @@ J=\left.\frac{\partial(\phi,\lambda,h)}{\partial(E,N,U)}\right|_{0}
 \end{pmatrix}
 \]</span></div>
           <div class="note">
-            关键区别：“除以半径”只是换算的<strong>微分（瞬时率）</strong>。你<strong>不能</strong>用它替换一次<strong>有限</strong>的 ENU→大地换算——那只是某一点的线性化，走远了就偏。所以有限步长的步进器仍得做完整的非线性来回；而连续 RHS 是瞬时的，用线性雅可比正好。两者是<strong>不同的离散算子</strong>，但下面证明它们有<strong>相同的连续极限</strong>。
-            <span class="en" lang="en">The key distinction: “divide by radius” is only the <strong>differential (instantaneous rate)</strong> of the conversion. You <strong>cannot</strong> use it to replace one <strong>finite</strong> ENU→geodetic conversion — that is just the linearization at a point and drifts over distance. So the finite-step stepper still does the full nonlinear round-trip, while the continuous RHS, being instantaneous, uses the linear Jacobian. They are <strong>different discrete operators</strong> — but, as proven next, with the <strong>same continuous limit</strong>.</span>
+            关键区别：“除以半径”只是换算的<strong>微分（瞬时率）</strong>。你<strong>不能</strong>用它替换一次<strong>有限</strong>的 ENU→大地换算——那只是某一点的线性化，走远了就偏。所以有限步长的步进器仍得做完整的非线性来回；而连续 RHS 是瞬时的，用线性雅可比正好。两者是<strong>不同的离散算子</strong>，但它们有<strong>相同的连续极限</strong>（第 9 节给出证明）。
+            <span class="en" lang="en">The key distinction: “divide by radius” is only the <strong>differential (instantaneous rate)</strong> of the conversion. You <strong>cannot</strong> use it to replace one <strong>finite</strong> ENU→geodetic conversion — that is just the linearization at a point and drifts over distance. So the finite-step stepper still does the full nonlinear round-trip, while the continuous RHS, being instantaneous, uses the linear Jacobian. They are <strong>different discrete operators</strong> — but with the <strong>same continuous limit</strong> (proven in Section 9).</span>
           </div>
         </div>
 
-        <div class="card" style="margin-top:18px">
-          <h3>数学证明：步进器的 \(\Delta t\to0\) 极限 = 连续大地 RHS<span class="en" lang="en">Proof: the \(\Delta t\to0\) Limit of the Stepper = the Continuous Geodetic RHS</span></h3>
-          <p>
-            记步进器为一步映射 \(\Phi_{\Delta t}\)。它锚定在当前点，平直 RHS 给出的 ENU 位移是 \((\delta E,\delta N,\delta U)=(V_E,V_N,V_U)\Delta t+O(\Delta t^2)\)。再用<strong>精确</strong>的 ENU→大地映射 \(G\) 换回来。在锚点（ENU 原点 \(\leftrightarrow\) 当前大地点）把 \(G\) 做一阶泰勒展开：
-            <span class="en" lang="en">Write the stepper as a one-step map \(\Phi_{\Delta t}\). Anchored at the current point, the flat RHS gives the ENU displacement \((\delta E,\delta N,\delta U)=(V_E,V_N,V_U)\Delta t+O(\Delta t^2)\). Convert back with the <strong>exact</strong> ENU→geodetic map \(G\). Taylor-expand \(G\) at the anchor (ENU origin \(\leftrightarrow\) current geodetic point) to first order:</span>
-          </p>
-          <div class="formula">
-            <span class="formula-line">\[
-\Phi_{\Delta t}(\mathbf x)\big|_{\text{pos}}
-=G(\delta E,\delta N,\delta U)
-=\underbrace{G(0)}_{(\phi,\lambda,h)}+\,J\begin{pmatrix}\delta E\\\delta N\\\delta U\end{pmatrix}+O(\Delta t^2)
-\]</span>
-            <span class="formula-line">\[
-\Rightarrow\quad
-\lim_{\Delta t\to0}\frac{\Phi_{\Delta t}(\mathbf x)-\mathbf x}{\Delta t}\bigg|_{\text{pos}}
-=J\begin{pmatrix}V_E\\V_N\\V_U\end{pmatrix}
-=\begin{pmatrix}\dfrac{V_N}{R_M+h}\\[6pt]\dfrac{V_E}{(R_N+h)\cos\phi}\\[6pt]V_U\end{pmatrix}
-\]</span>
-          </div>
-          <p>
-            右边正是第 6 节（和第 9 节）的位置 RHS。<strong>姿态部分</strong>同理：步进器每步重锚时把速度重新投影到<strong>新</strong>的当地框架（<code>enu_state_to_geodetic_expr</code> 里的速度再投影），这把 \((\psi,\gamma)\) 转过的角度，在 \(\Delta t\to0\) 时正好是第 8 节的输运率两项。位置 + 姿态合起来：
-            <span class="en" lang="en">The right side is exactly the position RHS of Section 6 (and Section 9). The <strong>attitude part</strong> follows the same way: re-anchoring each step re-projects the velocity into the <strong>new</strong> local frame (the velocity reprojection inside <code>enu_state_to_geodetic_expr</code>); the angle by which this rotates \((\psi,\gamma)\) is, as \(\Delta t\to0\), exactly Section 8’s two transport terms. Position plus attitude together:</span>
-          </p>
-          <div class="formula"><span class="formula-line">\[
-\boxed{\;\lim_{\Delta t\to0}\frac{\Phi_{\Delta t}(\mathbf x,\mathbf u)-\mathbf x}{\Delta t}=f_{\text{geo}}(\mathbf x,\mathbf u)\;}
-\]</span></div>
-          <p>
-            即：步进器和连续大地 RHS 共享<strong>同一个连续向量场</strong>。步进器在每步把坐标换算<strong>数值地</strong>算一遍；连续 RHS 把换算的<strong>导数</strong>（曲率半径 + 输运率）一次性折进 \(f\)。有限 \(\Delta t\) 下两者只差 \(O(\Delta t^2)\) 的逐步截断误差。
-            <span class="en" lang="en">That is: the stepper and the continuous geodetic RHS share <strong>one continuous vector field</strong>. The stepper computes the conversion <strong>numerically</strong> every step; the continuous RHS folds the conversion’s <strong>derivative</strong> (curvature radii + transport) into \(f\) once. At finite \(\Delta t\) they differ only by \(O(\Delta t^2)\) per-step truncation.</span>
-          </p>
-          <div class="callout good">
-            <strong>数值佐证。</strong>
-            \(J\) 与逐点数值换算吻合到约 10 位有效数字；脚本 <code>geodetic_vs_reanchored_error.py</code> 在 5 km 上测得：连续大地 RHS（带输运）与逐步重锚 RK4 仅差约 <strong>0.3 毫米</strong>——正是“同一连续向量场、不同离散算子”的实证。
-            <span class="en" lang="en"><strong>Numerical evidence.</strong> \(J\) matches the pointwise numerical conversion to ~10 significant figures; the script <code>geodetic_vs_reanchored_error.py</code> measures, over 5 km, that the continuous geodetic RHS (with transport) and the per-step re-anchored RK4 differ by only about <strong>0.3 mm</strong> — the same continuous vector field, realised by two different discrete operators.</span>
-          </div>
-        </div>
+        
 
         <figure class="viz">
           <div id="viz-triad" class="plot" style="height:480px"></div>
@@ -884,6 +1293,54 @@ J=\left.\frac{\partial(\phi,\lambda,h)}{\partial(E,N,U)}\right|_{0}
 \underbrace{\frac{V_E\tan\phi}{R_N+h}}_{\omega_U}
 \;\right)
 \]</span></div>
+
+          <figure class="viz" style="margin:14px 0 2px">
+            <svg viewBox="0 0 640 360" role="img" aria-label="当地框架转动角速度 ω_en 的两个来源"
+                 style="display:block;width:100%;height:auto;background:linear-gradient(180deg,#fbfdff 0%,#f3f7fa 100%);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif">
+              <defs>
+                <marker id="w-grn" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2e7d59"></path></marker>
+                <marker id="w-ind" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3d58a8"></path></marker>
+                <marker id="w-org" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b65b13"></path></marker>
+              </defs>
+              <text x="20" y="26" fill="#16212f" font-size="14" font-weight="700">当地框架的转动 ω_en = 两个旋转之和</text>
+              <!-- earth -->
+              <circle cx="205" cy="205" r="140" fill="#eaf4f5" stroke="#3a4a5c" stroke-width="2"></circle>
+              <line x1="70" y1="205" x2="345" y2="205" stroke="#cdd7e0" stroke-width="1.2" stroke-dasharray="5 5"></line>
+              <text x="312" y="222" fill="#8795a8" font-size="11">赤道</text>
+              <!-- spin axis -->
+              <line x1="205" y1="48" x2="205" y2="362" stroke="#16212f" stroke-width="2.2"></line>
+              <circle cx="205" cy="62" r="3.5" fill="#16212f"></circle>
+              <text x="150" y="44" fill="#16212f" font-size="12" font-weight="700">自转轴 ẑ_e</text>
+              <!-- lambda-dot rotation about spin axis -->
+              <path d="M 238 60 A 33 12 0 1 1 236 57" fill="none" stroke="#b65b13" stroke-width="2.2" marker-end="url(#w-org)"></path>
+              <text x="243" y="55" fill="#9a4c10" font-size="14" font-weight="700">①</text>
+              <!-- phi angle at O -->
+              <polyline points="255,205 252,193 246,182 238,173" fill="none" stroke="#607084" stroke-width="1.6"></polyline>
+              <text x="258" y="190" fill="#607084" font-size="13">φ</text>
+              <!-- P -->
+              <circle cx="309" cy="110" r="5" fill="#16212f"></circle>
+              <text x="316" y="106" fill="#16212f" font-size="13" font-weight="700">P</text>
+              <!-- triad at P -->
+              <line x1="309" y1="110" x2="277" y2="75" stroke="#2e7d59" stroke-width="2.4" marker-end="url(#w-grn)"></line>
+              <text x="246" y="72" fill="#2e7d59" font-size="13" font-weight="700">n̂ 北</text>
+              <line x1="309" y1="110" x2="342" y2="80" stroke="#3d58a8" stroke-width="2.4" marker-end="url(#w-ind)"></line>
+              <text x="348" y="78" fill="#314b99" font-size="13" font-weight="700">û 天</text>
+              <circle cx="309" cy="140" r="7" fill="none" stroke="#9a4c10" stroke-width="2"></circle>
+              <circle cx="309" cy="140" r="1.8" fill="#9a4c10"></circle>
+              <text x="320" y="145" fill="#9a4c10" font-size="12">ê 东（出页面）</text>
+              <!-- phi-dot rotation about East axis, drawn to the right -->
+              <path d="M 470 150 A 40 40 0 0 1 470 230" fill="none" stroke="#b65b13" stroke-width="2.2" marker-end="url(#w-org)"></path>
+              <text x="450" y="152" fill="#9a4c10" font-size="14" font-weight="700">②</text>
+              <!-- legend (open area, right of the earth) -->
+              <text x="382" y="296" fill="#9a4c10" font-size="13" font-weight="700">① 向东飞 → 绕自转轴 ẑ_e 转 λ̇</text>
+              <text x="382" y="320" fill="#9a4c10" font-size="13" font-weight="700">② 向北飞 → 绕东轴 ê 转 φ̇</text>
+              <text x="382" y="346" fill="#16212f" font-size="13">分解 ẑ_e = cosφ·n̂ + sinφ·û</text>
+            </svg>
+            <figcaption>
+              示意图 · \(\boldsymbol\omega_{en}\) 的两个来源（侧视子午剖面，\(\hat{\mathbf e}\) 东向<strong>垂直纸面</strong>）。<strong>①</strong> 向东飞改变经度 \(\lambda\)，等于整套框架绕<strong>自转轴 \(\hat{\mathbf z}_e\)</strong> 转 \(\dot\lambda\)；把 \(\hat{\mathbf z}_e=\cos\phi\,\hat{\mathbf n}+\sin\phi\,\hat{\mathbf u}\) 一分解，就给出 \(\omega_N=\dot\lambda\cos\phi\)、\(\omega_U=\dot\lambda\sin\phi\)。<strong>②</strong> 向北飞改变纬度 \(\phi\)，等于框架绕<strong>东轴 \(\hat{\mathbf e}\)</strong> 扳 \(\dot\phi\)，给出 \(\omega_E=-\dot\phi\)。两者相加即 \(\boldsymbol\omega_{en}=(-\dot\phi,\ \dot\lambda\cos\phi,\ \dot\lambda\sin\phi)\)。
+              <span class="en" lang="en">Sketch · the two sources of \(\boldsymbol\omega_{en}\) (meridian section; East \(\hat{\mathbf e}\) is <strong>out of the page</strong>). <strong>①</strong> Flying east changes longitude \(\lambda\) = the whole frame turning about the <strong>spin axis \(\hat{\mathbf z}_e\)</strong> at \(\dot\lambda\); decomposing \(\hat{\mathbf z}_e=\cos\phi\,\hat{\mathbf n}+\sin\phi\,\hat{\mathbf u}\) gives \(\omega_N=\dot\lambda\cos\phi\), \(\omega_U=\dot\lambda\sin\phi\). <strong>②</strong> Flying north changes latitude \(\phi\) = the frame tipping about the <strong>East axis \(\hat{\mathbf e}\)</strong> at \(\dot\phi\), giving \(\omega_E=-\dot\phi\). Their sum is \(\boldsymbol\omega_{en}=(-\dot\phi,\ \dot\lambda\cos\phi,\ \dot\lambda\sin\phi)\).</span>
+            </figcaption>
+          </figure>
         </div>
 
         <div class="card" style="margin-top:18px">
@@ -965,8 +1422,8 @@ J=\left.\frac{\partial(\phi,\lambda,h)}{\partial(E,N,U)}\right|_{0}
 \]</span>
           </div>
           <p>
-            丢弃项同时含 \(\sin\gamma\)（近水平飞行很小）和 \(\bigl(\tfrac{1}{R_N+h}-\tfrac{1}{R_M+h}\bigr)\)（因 \(R_N\approx R_M\)，差仅约 \(e^2\) 量级），实测比保留项小约 \(10^{4}\) 倍，故略去。得到代码里的两行：
-            <span class="en" lang="en">The dropped term carries both \(\sin\gamma\) (tiny in near-level flight) and \(\bigl(\tfrac{1}{R_N+h}-\tfrac{1}{R_M+h}\bigr)\) (since \(R_N\approx R_M\), a difference of order \(e^2\)); numerically it is about \(10^{4}\) times smaller than the kept term, so it is dropped. This yields the two code lines:</span>
+            <strong>物理上看</strong>：航向 \(\psi\) 主要被框架的<strong>竖直</strong>自转分量 \(\omega_U\)（\(=\) 子午线收敛）转动，这就是保留项；水平分量 \(\omega_E,\omega_N\) 只通过 \(\tan\gamma\) 的<strong>倾斜耦合</strong>泄漏进 \(\psi\)，正是被丢弃的那块。它同时含 \(\sin\gamma\)（<strong>在水平飞行 \(\gamma=0\) 时恰好为零</strong>，否则也很小）和 \(\bigl(\tfrac{1}{R_N+h}-\tfrac{1}{R_M+h}\bigr)\)（因 \(R_N\approx R_M\)，差仅约 \(e^2\) 量级）——两个小量相乘，实测比保留项小约 \(10^{4}\) 倍（\(\gamma=-10^\circ\) 也只占 \(0.02\%\)），故略去。注意这是<strong>仅 \(\dot\psi\) 的近似</strong>：\(\dot\gamma\) 那项是<strong>严格</strong>的、不丢任何东西。得到代码里的两行：
+            <span class="en" lang="en"><strong>Physically</strong>: heading \(\psi\) is rotated mainly by the frame’s <strong>vertical</strong> spin component \(\omega_U\) (\(=\) meridian convergence) — that is the kept term; the horizontal components \(\omega_E,\omega_N\) leak into \(\psi\) only through the \(\tan\gamma\) <strong>tilt coupling</strong>, which is exactly the dropped piece. It carries \(\sin\gamma\) (<strong>exactly zero in level flight \(\gamma=0\)</strong>, otherwise small) and \(\bigl(\tfrac{1}{R_N+h}-\tfrac{1}{R_M+h}\bigr)\) (since \(R_N\approx R_M\), of order \(e^2\)) — two small factors multiplied, numerically \(\sim10^{4}\times\) smaller than the kept term (only \(0.02\%\) even at \(\gamma=-10^\circ\)), so it is dropped. Note this approximation is <strong>for \(\dot\psi\) only</strong>: the \(\dot\gamma\) term is <strong>exact</strong>, nothing dropped. This yields the two code lines:</span>
           </p>
           <div class="formula">
             <span class="formula-line">\[
@@ -1003,6 +1460,61 @@ J=\left.\frac{\partial(\phi,\lambda,h)}{\partial(E,N,U)}\right|_{0}
           </article>
         </div>
 
+        <figure class="viz" style="margin-top:16px">
+          <svg viewBox="0 0 760 266" role="img" aria-label="两项输运率的示意图：曲率俯仰与子午线收敛"
+               style="display:block;width:100%;height:auto;background:linear-gradient(180deg,#fbfdff 0%,#f3f7fa 100%);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif">
+            <defs>
+              <marker id="t-grn" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2e7d59"></path></marker>
+              <marker id="t-ind" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3d58a8"></path></marker>
+              <marker id="t-gry" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9aa7b6"></path></marker>
+            </defs>
+            <text x="20" y="24" fill="#16212f" font-size="14" font-weight="700">项一 · 曲率俯仰（侧视）</text>
+            <text x="404" y="24" fill="#16212f" font-size="14" font-weight="700">项二 · 子午线收敛（俯视）</text>
+            <line x1="378" y1="40" x2="378" y2="286" stroke="#dbe3ea" stroke-width="1.4" stroke-dasharray="6 6"></line>
+
+            <!-- Panel 1: curvature pitch-up (side view) -->
+            <path d="M 30 120 Q 200 150 350 230" fill="none" stroke="#3a4a5c" stroke-width="2.4"></path>
+            <text x="250" y="252" fill="#607084" font-size="12">弯曲地表 curved ground</text>
+            <!-- straight (inertial) flight from A -->
+            <line x1="45" y1="123" x2="345" y2="176" stroke="#2e7d59" stroke-width="2.6" marker-end="url(#t-grn)"></line>
+            <text x="120" y="120" fill="#2e7d59" font-size="12">直线飞行（惯性方向不变）</text>
+            <circle cx="45" cy="123" r="4" fill="#16212f"></circle><text x="30" y="116" fill="#607084" font-size="12">A</text>
+            <!-- aircraft further along; local horizon there has tilted down -->
+            <circle cx="300" cy="167" r="4.5" fill="#16212f"></circle>
+            <line x1="255" y1="146" x2="345" y2="188" stroke="#3d58a8" stroke-width="2.2" stroke-dasharray="5 4"></line>
+            <text x="300" y="206" fill="#314b99" font-size="12">当地水平面（已下沉）</text>
+            <!-- pitch-up angle between flight dir and local horizon -->
+            <path d="M 330 182 A 34 34 0 0 0 332 161" fill="none" stroke="#b65b13" stroke-width="2"></path>
+            <text x="344" y="172" fill="#9a4c10" font-size="13" font-weight="700">Δγ</text>
+
+            <!-- Panel 2: meridian convergence (top view) -->
+            <circle cx="560" cy="58" r="5" fill="#16212f"></circle>
+            <text x="572" y="56" fill="#16212f" font-size="13" font-weight="700">极点 pole</text>
+            <!-- meridians fanning from pole -->
+            <line x1="560" y1="58" x2="468" y2="232" stroke="#9fb2c4" stroke-width="1.6"></line>
+            <line x1="560" y1="58" x2="514" y2="244" stroke="#9fb2c4" stroke-width="1.6"></line>
+            <line x1="560" y1="58" x2="606" y2="244" stroke="#9fb2c4" stroke-width="1.6"></line>
+            <line x1="560" y1="58" x2="652" y2="232" stroke="#9fb2c4" stroke-width="1.6"></line>
+            <text x="640" y="210" fill="#607084" font-size="12">子午线 meridians</text>
+            <!-- parallel arc (fly east) -->
+            <path d="M 509 199 Q 560 214 611 199" fill="none" stroke="#007c89" stroke-width="2.6" marker-end="url(#t-grn)"></path>
+            <text x="500" y="232" fill="#006f79" font-size="12">向东飞 fly east</text>
+            <!-- true local north at A2 (toward pole) -->
+            <circle cx="509" cy="199" r="4" fill="#16212f"></circle>
+            <line x1="509" y1="199" x2="529" y2="142" stroke="#3d58a8" stroke-width="2.4" marker-end="url(#t-ind)"></line>
+            <!-- true local north at B2 (toward pole) + carried copy of A2's north -->
+            <circle cx="611" cy="199" r="4" fill="#16212f"></circle>
+            <line x1="611" y1="199" x2="591" y2="142" stroke="#3d58a8" stroke-width="2.4" marker-end="url(#t-ind)"></line>
+            <line x1="611" y1="199" x2="631" y2="142" stroke="#9aa7b6" stroke-width="2.2" stroke-dasharray="5 4" marker-end="url(#t-gry)"></line>
+            <path d="M 600 150 A 60 60 0 0 1 622 150" fill="none" stroke="#b65b13" stroke-width="2"></path>
+            <text x="600" y="132" fill="#9a4c10" font-size="12" font-weight="700">Δλ·sinφ</text>
+          </svg>
+          <figcaption>
+示意图 · 两项输运率的几何来源（均为示意，已夸张）。<strong>项一（左·侧视）</strong>：飞机沿惯性直线飞，弯曲地表（当地水平面）在脚下<strong>下沉</strong>，于是航迹角 \(\gamma\) 相对当地水平面变大——这就是<strong>曲率俯仰</strong>（恒为正）。<strong>项二（右·俯视）</strong>：所有子午线汇于极点，<strong>当地北向</strong>（蓝）处处指向极点、并不平行；向东飞一段，北向相对惯性空间转过 \(\Delta\lambda\sin\phi\)（灰虚线是 A 处北向平移到 B 的对照）——这就是<strong>子午线收敛</strong>（含 \(\tan\phi\)，两极强、赤道为零）。
+            <span class="en" lang="en">Sketch · Geometric origin of the two transport terms (schematic, exaggerated). <strong>Term 1 (left, side view)</strong>: flying a straight inertial line, the curved ground (the local horizon) <strong>drops away</strong> underfoot, so the flight-path angle \(\gamma\) grows relative to the local horizon — this is <strong>curvature pitch-up</strong> (always positive). <strong>Term 2 (right, top view)</strong>: all meridians meet at the pole, so the <strong>local north</strong> (blue) points to the pole everywhere and is not parallel; flying east, north rotates by \(\Delta\lambda\sin\phi\) relative to inertial space (the grey dashed arrow carries A’s north to B for comparison) — this is <strong>meridian convergence</strong> (carries \(\tan\phi\): strong near the poles, zero at the equator).</span>
+          </figcaption>
+        </figure>
+
         <div class="callout">
           <strong>开关 <code>include_transport</code> 量化它有多重要。</strong>
           脚本 <code>geodetic_vs_reanchored_error.py</code> 在 5 km 上比较：带输运项时，连续大地系统与逐步重锚 RK4 吻合到约 <strong>0.3 毫米</strong>；<strong>去掉</strong>输运项（<code>include_transport=False</code>）则漂移约 <strong>2.9 m</strong> 水平、<strong>1.3 m</strong> 高度、<strong>0.04°</strong> 航向——这正好等于输运率的累计。30 km 实验里，去输运（系统 D）约 145 m，带全项（系统 C）约 0.03 m。
@@ -1014,9 +1526,88 @@ J=\left.\frac{\partial(\phi,\lambda,h)}{\partial(E,N,U)}\right|_{0}
       <section id="geodetic">
         <h2>9. 终点：<code>make_geodetic_dynamics_model</code> 完整连续 RHS<span class="en" lang="en">End: The Complete Continuous RHS of <code>make_geodetic_dynamics_model</code></span></h2>
         <p class="section-intro">
-          把变换 A（位置）和变换 B（输运）装进去，其余力学项原样保留，就得到直接写在大地坐标里的连续动力学。没有切平面，没有逐步重锚，只有一条光滑 \(f\)。
-          <span class="en" lang="en">Plug in Transformation A (position) and Transformation B (transport), keep the other force terms unchanged, and you get continuous dynamics written directly in geodetic coordinates. No tangent plane, no per-step re-anchoring — just one smooth \(f\).</span>
+把变换 A（位置，第 6 节）和变换 B（输运，第 8 节）装进去，其余力学项原样保留，就得到直接写在大地坐标里的连续动力学。没有切平面，没有逐步重锚，只有一条光滑 \(f\)。现在两半（位置 + 输运）都齐了，<strong>先证明这条 RHS 正是第 7 节那个重锚步进器的连续极限</strong>（所以它既准又连续），再把它完整写出来。
+          <span class="en" lang="en">Plug in Transformation A (position, Section 6) and Transformation B (transport, Section 8), keep the other force terms unchanged, and you get continuous dynamics written directly in geodetic coordinates. No tangent plane, no per-step re-anchoring — just one smooth \(f\). Now that both halves (position + transport) are in hand, we <strong>first prove this RHS is exactly the continuous limit of Section 7’s re-anchored stepper</strong> (so it is both accurate and continuous), then write it out in full.</span>
         </p>
+
+        <div class="card" style="margin-top:18px">
+          <h3>数学证明：步进器的 \(\Delta t\to0\) 极限 = 连续大地 RHS<span class="en" lang="en">Proof: the \(\Delta t\to0\) Limit of the Stepper = the Continuous Geodetic RHS</span></h3>
+          <p>
+            先把步进器<strong>拆成三个映射的复合</strong> \(\Phi_{\Delta t}=B\circ F\circ A\)，每个都看清楚——证明就水到渠成。
+            <span class="en" lang="en">First write the stepper as a <strong>composition of three maps</strong> \(\Phi_{\Delta t}=B\circ F\circ A\); make each one explicit and the proof falls out.</span>
+          </p>
+          <div class="steps">
+            <div class="step">
+              <strong>\(A\)：大地 → ENU，锚定在当前点。</strong>因为锚点<strong>就是</strong>当前点，位置落在 ENU 原点，而且当前的速度方向角 \((\psi,\gamma)\) 在自己的当地框架里<strong>原封不动</strong>（这正是代码里的 <code>x_enu0=(0,0,h,V,\psi,\gamma)</code>）。
+              <span class="en" lang="en"><strong>\(A\): geodetic → ENU, anchored at the current point.</strong> Because the anchor <strong>is</strong> the current point, the position lands at the ENU origin and the velocity angles \((\psi,\gamma)\) are <strong>unchanged</strong> in their own local frame (exactly the code’s <code>x_enu0=(0,0,h,V,\psi,\gamma)</code>).</span>
+              <div class="formula"><span class="formula-line">\[
+A(\mathbf x)=(\,\underbrace{0,0,h}_{\text{pos}},\;V,\psi,\gamma\,)
+\]</span></div>
+            </div>
+            <div class="step">
+              <strong>\(F\)：平直 RHS 走一个 RK4 步。</strong>平面里“走一米就是一米”，姿态只受<strong>气动</strong>项驱动（平直 RHS <strong>没有</strong>输运项）。到一阶：
+              <span class="en" lang="en"><strong>\(F\): one RK4 step of the flat RHS.</strong> In the plane “one metre is one metre,” and the attitude is driven by the <strong>aerodynamic</strong> terms only (the flat RHS has <strong>no</strong> transport). To first order:</span>
+              <div class="formula"><span class="formula-line">\[
+(\delta E,\delta N,\delta U)=(V_E,V_N,V_U)\,\Delta t+O(\Delta t^2),\qquad
+\begin{aligned}
+\psi&amp;\to\psi+\dot\psi_{\text{aero}}\,\Delta t\\
+\gamma&amp;\to\gamma+\dot\gamma_{\text{aero}}\,\Delta t
+\end{aligned}
+\]</span></div>
+            </div>
+            <div class="step">
+              <strong>\(B\)：ENU → 大地，但仍锚在<strong>老</strong>锚点。</strong>于是 \(B\) 要做<strong>两件事</strong>：(i) 把位移后的位置换回经纬度；(ii) 把速度<strong>重新投影</strong>到<strong>新</strong>点的当地框架（代码 <code>enu_state_to_geodetic_expr</code> 里的速度再投影）。下面证明 (i) 给出曲率半径项、(ii) 给出输运项。
+              <span class="en" lang="en"><strong>\(B\): ENU → geodetic, still anchored at the <strong>old</strong> anchor.</strong> So \(B\) must do <strong>two things</strong>: (i) convert the displaced position back to lat/lon; (ii) <strong>reproject</strong> the velocity into the <strong>new</strong> point’s local frame (the velocity reprojection in <code>enu_state_to_geodetic_expr</code>). Below: (i) yields the curvature-radius terms, (ii) yields the transport terms.</span>
+            </div>
+          </div>
+
+          <p style="margin-top:14px">
+            <strong>位置（\(B\) 的第 i 件事）。</strong>把位移 \((\delta E,\delta N,\delta U)\) 经精确映射 \(G:\text{ENU}\to\text{geodetic}\)（ENU→大地）换回，在锚点（ENU 原点 \(\leftrightarrow\) 当前大地点）做一阶泰勒展开，其雅可比 \(J\) 就是第 7 节“绕一圈 vs 除以半径”那张卡片里的“除以半径”：
+            <span class="en" lang="en"><strong>Position (\(B\)’s task i).</strong> Map the displacement \((\delta E,\delta N,\delta U)\) back through the exact \(G=\text{ENU}\to\text{geodetic}\); Taylor-expand at the anchor (ENU origin \(\leftrightarrow\) current geodetic point), whose Jacobian \(J\) is the “divide by radius” from Section 7’s “round-trip vs divide-by-radius” card:</span>
+          </p>
+          <div class="formula">
+            <span class="formula-line">\[
+\Phi_{\Delta t}(\mathbf x)\big|_{\text{pos}}
+=G(\delta E,\delta N,\delta U)
+=\underbrace{G(\mathbf 0)}_{=\,(\phi,\lambda,h)}+\,J\begin{pmatrix}\delta E\\\delta N\\\delta U\end{pmatrix}+O(\Delta t^2)
+\]</span>
+            <span class="formula-line">\[
+\Rightarrow\quad
+\lim_{\Delta t\to0}\frac{\Phi_{\Delta t}(\mathbf x)-\mathbf x}{\Delta t}\bigg|_{\text{pos}}
+=J\begin{pmatrix}V_E\\V_N\\V_U\end{pmatrix}
+=\begin{pmatrix}\dfrac{V_N}{R_M+h}\\[6pt]\dfrac{V_E}{(R_N+h)\cos\phi}\\[6pt]V_U\end{pmatrix}
+\]</span>
+          </div>
+          <p>这正是第 6 / 9 节的位置 RHS。<span class="en" lang="en">This is exactly the position RHS of Sections 6 / 9.</span></p>
+
+          <p>
+            <strong>姿态（\(B\) 的第 ii 件事）——输运项就在这里诞生。</strong>新点相对老锚点移动了一点，它的当地框架也随之<strong>转</strong>了一个小角度，正好是输运角速度乘步长 \(\boldsymbol\omega_{en}\Delta t+O(\Delta t^2)\)（\(\boldsymbol\omega_{en}\) 见第 8 节）。\(F\) 只把姿态推进了<strong>气动</strong>率；\(B\) 把速度投影进这个<strong>转过 \(\boldsymbol\omega_{en}\Delta t\) 的新框架</strong>，读出的 \((\psi,\gamma)\) 就再加上第 8 节那两项输运增量：
+            <span class="en" lang="en"><strong>Attitude (\(B\)’s task ii) — this is where the transport terms are born.</strong> The new point has moved slightly, so its local frame has <strong>rotated</strong> by a small angle — exactly the transport angular velocity times the step, \(\boldsymbol\omega_{en}\Delta t+O(\Delta t^2)\) (\(\boldsymbol\omega_{en}\) from Section 8). \(F\) advanced the attitude by the <strong>aero</strong> rates only; \(B\) projects the velocity into this <strong>frame rotated by \(\boldsymbol\omega_{en}\Delta t\)</strong>, so the read-off \((\psi,\gamma)\) picks up exactly Section 8’s two transport increments:</span>
+          </p>
+          <div class="formula"><span class="formula-line">\[
+\psi_{\text{next}}=\psi+\bigl(\dot\psi_{\text{aero}}+\underbrace{\Delta\dot\psi}_{\text{transport}}\bigr)\Delta t+O(\Delta t^2),
+\qquad
+\gamma_{\text{next}}=\gamma+\bigl(\dot\gamma_{\text{aero}}+\underbrace{\Delta\dot\gamma}_{\text{transport}}\bigr)\Delta t+O(\Delta t^2)
+\]</span></div>
+          <p>除以 \(\Delta t\) 取极限，姿态率 = 气动 + 输运，正是<strong>本节下面</strong>完整 RHS 里的 \(\dot\psi,\dot\gamma\)。位置 + 姿态合起来：<span class="en" lang="en">Divide by \(\Delta t\) and take the limit: the attitude rate = aero + transport — exactly the \(\dot\psi,\dot\gamma\) of <strong>this section’s</strong> full RHS below. Position and attitude together:</span></p>
+          <div class="formula"><span class="formula-line">\[
+\boxed{\;\lim_{\Delta t\to0}\frac{\Phi_{\Delta t}(\mathbf x,\mathbf u)-\mathbf x}{\Delta t}=f_{\text{geo}}(\mathbf x,\mathbf u)\;}
+\]</span></div>
+          <div class="callout">
+            <strong>这一步把整页串起来了。</strong>
+            输运项<strong>不在</strong> \(F\)（平直 RHS）里，它<strong>只</strong>从 \(B\) 的“投影进重锚后的新框架”冒出来。换句话说：连续大地 RHS 之所以必须<strong>显式</strong>加那两项输运，正是因为它要替代步进器每步偷偷做的这次重锚投影。曲率半径项同理——它替代 \(B\) 的位置换算。
+            <span class="en" lang="en"><strong>This is what ties the whole page together.</strong> The transport terms are <strong>not</strong> in \(F\) (the flat RHS); they emerge <strong>only</strong> from \(B\)’s “projection into the re-anchored new frame.” In other words: the continuous geodetic RHS must add those two transport terms <strong>explicitly</strong> precisely because it replaces the re-anchoring projection the stepper does silently each step. Likewise the curvature-radius terms replace \(B\)’s position conversion.</span>
+          </div>
+          <p>
+            所以步进器与连续大地 RHS 共享<strong>同一个连续向量场</strong>：步进器每步把坐标换算<strong>数值地</strong>算一遍，连续 RHS 把换算的<strong>导数</strong>（曲率半径 + 输运率）一次折进 \(f\)；有限 \(\Delta t\) 下两者只差 \(O(\Delta t^2)\) 的逐步截断。
+            <span class="en" lang="en">So the stepper and the continuous geodetic RHS share <strong>one continuous vector field</strong>: the stepper computes the conversion <strong>numerically</strong> each step, the continuous RHS folds the conversion’s <strong>derivative</strong> (curvature radii + transport) into \(f\) once; at finite \(\Delta t\) they differ only by \(O(\Delta t^2)\) per-step truncation.</span>
+          </p>
+          <div class="callout good">
+            <strong>数值佐证。</strong>
+            \(J\) 与逐点数值换算吻合到约 10 位有效数字；脚本 <code>geodetic_vs_reanchored_error.py</code> 在 5 km 上测得：连续大地 RHS（带输运）与逐步重锚 RK4 仅差约 <strong>0.3 毫米</strong>——正是“同一连续向量场、不同离散算子”的实证。
+            <span class="en" lang="en"><strong>Numerical evidence.</strong> \(J\) matches the pointwise numerical conversion to ~10 significant figures; the script <code>geodetic_vs_reanchored_error.py</code> measures, over 5 km, that the continuous geodetic RHS (with transport) and the per-step re-anchored RK4 differ by only about <strong>0.3 mm</strong> — the same continuous vector field, realised by two different discrete operators.</span>
+          </div>
+        </div>
 
         <div class="card">
           <h3>七维状态 \((\phi,\lambda,h,V,\psi,\gamma,m)\) 的右端<span class="en" lang="en">The Right-Hand Side of the 7-State \((\phi,\lambda,h,V,\psi,\gamma,m)\)</span></h3>
@@ -1417,7 +2008,91 @@ a_{\text{vert}}\approx g\,(1-\cos\theta)\approx \tfrac12 g\,\theta^2
   });
 
   // ============================================================
-  //  FIGURE 2 — radii of curvature as two perpendicular
+  //  FIGURE 2a — the ellipse, the normal, geodetic latitude, W and N
+  // ============================================================
+  onReady(function(){
+    const div = document.getElementById('viz-ellipse');
+    const slider = document.getElementById('ell-lat');
+    const out = document.getElementById('ell-out');
+
+    // strongly-exaggerated DISPLAY ellipse so phi != psi is visible
+    const aD = 1.0, fD = 0.35, bD = aD * (1 - fD), e2D = fD * (2 - fD);
+
+    // static traces: aux circle (radius a), the ellipse, the two axes
+    const ex=[],ey=[],cx=[],cy=[];
+    for (let i=0;i<=240;i++){
+      const t=2*Math.PI*i/240;
+      ex.push(aD*Math.cos(t)); ey.push(bD*Math.sin(t));
+      cx.push(aD*Math.cos(t)); cy.push(aD*Math.sin(t));
+    }
+    const auxCircle={type:'scatter',mode:'lines',x:cx,y:cy,line:{color:'#c2cdd8',width:1.5,dash:'dash'},hoverinfo:'skip'};
+    const ellipse={type:'scatter',mode:'lines',x:ex,y:ey,line:{color:'#3a4a5c',width:2.6},hoverinfo:'skip'};
+    const axisX={type:'scatter',mode:'lines',x:[-1.18,1.3],y:[0,0],line:{color:'#cdd7e0',width:1.2,dash:'dot'},hoverinfo:'skip'};
+    const axisY={type:'scatter',mode:'lines',x:[0,0],y:[-1.18,1.18],line:{color:'#cdd7e0',width:1.2,dash:'dot'},hoverinfo:'skip'};
+
+    function arc(c,r,a0,a1){
+      const x=[],y=[],n=26;
+      for(let i=0;i<=n;i++){const a=a0+(a1-a0)*i/n; x.push(c[0]+r*Math.cos(a)); y.push(c[1]+r*Math.sin(a));}
+      return {x,y};
+    }
+
+    function build(phiDeg){
+      const phi=phiDeg*D2R;
+      const Wd=Math.sqrt(1-e2D*Math.sin(phi)**2), Nd=aD/Wd;
+      const P=[Nd*Math.cos(phi), Nd*(1-e2D)*Math.sin(phi)];
+      const foot=[0, -Nd*e2D*Math.sin(phi)];           // normal hits the spin axis
+      const hcross=[Nd*e2D*Math.cos(phi), 0];          // normal crosses the equatorial axis
+      const nrm=[Math.cos(phi),Math.sin(phi)];
+      const tip=[P[0]+0.42*nrm[0], P[1]+0.42*nrm[1]];  // normal extended outward
+      const psi=Math.atan2(P[1],P[0]);
+
+      const normalLine={type:'scatter',mode:'lines',x:[foot[0],tip[0]],y:[foot[1],tip[1]],
+        line:{color:INDIGO,width:2},hoverinfo:'skip'};
+      const Nseg={type:'scatter',mode:'lines',x:[foot[0],P[0]],y:[foot[1],P[1]],
+        line:{color:INDIGO,width:5},hoverinfo:'skip'};
+      const Nlbl={type:'scatter',mode:'text',x:[(foot[0]+P[0])/2 - 0.03],y:[(foot[1]+P[1])/2],
+        text:['N = a/W'],textfont:{size:13,color:INDIGO},textposition:'middle left',hoverinfo:'skip'};
+      const centerLine={type:'scatter',mode:'lines',x:[0,P[0]],y:[0,P[1]],
+        line:{color:ORANGE,width:2,dash:'dot'},hoverinfo:'skip'};
+      const fa=arc(hcross,0.17,0,phi);
+      const phiArc={type:'scatter',mode:'lines',x:fa.x,y:fa.y,line:{color:INDIGO,width:2},hoverinfo:'skip'};
+      const phiLbl={type:'scatter',mode:'text',x:[hcross[0]+0.30*Math.cos(phi*0.5)],y:[hcross[1]+0.30*Math.sin(phi*0.5)],
+        text:['φ'],textfont:{size:16,color:INDIGO},hoverinfo:'skip'};
+      const pa=arc([0,0],0.32,0,psi);
+      const psiArc={type:'scatter',mode:'lines',x:pa.x,y:pa.y,line:{color:ORANGE,width:2},hoverinfo:'skip'};
+      const psiLbl={type:'scatter',mode:'text',x:[0.44*Math.cos(psi*0.5)],y:[0.44*Math.sin(psi*0.5)],
+        text:['ψ'],textfont:{size:16,color:ORANGE},hoverinfo:'skip'};
+      const Pdot={type:'scatter',mode:'markers+text',x:[P[0]],y:[P[1]],marker:{size:8,color:INK},
+        text:['  P'],textposition:'top right',textfont:{size:14,color:INK},hoverinfo:'skip'};
+      const Odot={type:'scatter',mode:'markers+text',x:[0],y:[0],marker:{size:5,color:INK},
+        text:['O '],textposition:'bottom left',textfont:{size:12,color:MUTED},hoverinfo:'skip'};
+      const aLbl={type:'scatter',mode:'text',x:[aD*0.55],y:[-0.07],text:['a'],
+        textfont:{size:13,color:MUTED},hoverinfo:'skip'};
+      const bLbl={type:'scatter',mode:'text',x:[0.05],y:[bD*0.6],text:['b'],
+        textfont:{size:13,color:MUTED},textposition:'middle right',hoverinfo:'skip'};
+
+      Plotly.react(div, [axisX,axisY,auxCircle,ellipse,centerLine,normalLine,Nseg,phiArc,psiArc,Pdot,Odot,Nlbl,phiLbl,psiLbl,aLbl,bLbl], {
+        paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', height:460,
+        margin:{l:8,r:8,t:8,b:8}, showlegend:false,
+        xaxis:{visible:false, scaleanchor:'y', range:[-1.2,1.4]},
+        yaxis:{visible:false, range:[-1.2,1.2]}
+      }, {displayModeBar:false, responsive:true});
+
+      const Wr=Math.sqrt(1-E2*Math.sin(phi)**2);
+      const Nr=A/Wr/1000;
+      const psiReal=Math.atan2((1-E2)*Math.sin(phi),Math.cos(phi))*R2D;
+      out.innerHTML =
+        '真实 WGS 84 @ φ=' + phiDeg + '°：&nbsp; ' +
+        'W = √(1−e²sin²φ) = <b>' + Wr.toFixed(5) + '</b>（介于 ' + Math.sqrt(1-E2).toFixed(4) + ' ~ 1）&nbsp;·&nbsp; ' +
+        'N = R_N = a/W = <b>' + Nr.toFixed(2) + ' km</b>（a = ' + (A/1000).toFixed(2) + ' km）&nbsp;·&nbsp; ' +
+        '地心纬度 ψ = <b>' + psiReal.toFixed(3) + '°</b>（比 φ 小 ' + (phiDeg-psiReal).toFixed(3) + '°）';
+    }
+    build(+slider.value);
+    slider.addEventListener('input', () => build(+slider.value));
+  });
+
+  // ============================================================
+  //  FIGURE 2b — radii of curvature as two perpendicular
   //  normal-section osculating circles on a 3D ellipsoid
   // ============================================================
   onReady(function(){
