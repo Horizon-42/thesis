@@ -7,6 +7,7 @@ import casadi as ca
 import numpy as np
 import pytest
 
+from geokit import kt_to_ms
 from aircraft.aircraft_sets import C172
 from aircraft.aero_params import AeroParams
 from aerodynamic_model.common import GeodeticState
@@ -123,7 +124,7 @@ def test_make_multiple_shooting_solver_uses_pure_symbolic_parameters(monkeypatch
 def test_optimize_trajectory_runs_real_ipopt_for_fixed_time_target():
     module = load_casadi_optimizer_module()
     duration = 0.2
-    speed = C172.terminal_speed_kt * 0.51444 + 5.0
+    speed = kt_to_ms(C172.terminal_speed_kt) + 5.0
     state = GeodeticState(
         latitude=51.1139,
         longitude=-114.0203,

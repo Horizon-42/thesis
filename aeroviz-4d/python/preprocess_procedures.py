@@ -66,8 +66,7 @@ from cifp_parser import (
     runway_from_procedure_ident,
 )
 from geokit import FT_M as FEET_TO_METRES
-from geokit import NM_M as NM_TO_METRES
-from geokit import haversine_m
+from geokit import haversine_m, kt_to_ms
 DEFAULT_CIFP_ROOT = Path(__file__).parents[2] / "data" / "CIFP" / "CIFP_260319"
 DEFAULT_RNAV_CHARTS_ROOT = Path(__file__).parents[2] / "data" / "RNAV_CHARTS"
 DEFAULT_AIRPORT = "KRDU"
@@ -108,7 +107,7 @@ def build_route_points(
     route_points: list[RoutePoint] = []
     elapsed_seconds = 0.0
     cumulative_distance_m = 0.0
-    speed_mps = nominal_speed_kt * NM_TO_METRES / 3600.0
+    speed_mps = kt_to_ms(nominal_speed_kt)
     previous_fix: FixRecord | None = None
 
     for leg in legs:
@@ -1190,7 +1189,7 @@ def build_geojson_route_from_detail_branch(
     route_id = f"{airport}-{procedure['procedureIdent']}-{branch_key}"
     defaults = document["displayHints"]["tunnelDefaults"]
     nominal_speed_kt = document["displayHints"]["nominalSpeedKt"]
-    speed_mps = nominal_speed_kt * NM_TO_METRES / 3600.0
+    speed_mps = kt_to_ms(nominal_speed_kt)
     warnings = list(branch.get("warnings", []))
 
     points: list[dict[str, Any]] = []

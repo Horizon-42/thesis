@@ -1,9 +1,10 @@
 import {
   FEET_TO_METERS as METRES_PER_FOOT,
-  METERS_PER_NM as METRES_PER_NAUTICAL_MILE,
+  knotsToMetresPerSecond,
 } from "../utils/procedureGeoMath";
 
-const SECONDS_PER_HOUR = 3600;
+// Re-exported so existing importers keep working; the impl lives in procedureGeoMath.
+export { knotsToMetresPerSecond };
 
 export const TARGET_THRESHOLD_CROSSING_HEIGHT_FT = 50;
 export const TARGET_THRESHOLD_CROSSING_HEIGHT_M =
@@ -70,10 +71,6 @@ export function clampHeadingToRunwayTolerance(
       TARGET_RUNWAY_HEADING_TOLERANCE_DEG,
     ),
   );
-}
-
-export function knotsToMetresPerSecond(knots: number): number {
-  return (knots * METRES_PER_NAUTICAL_MILE) / SECONDS_PER_HOUR;
 }
 
 function signedAngularOffsetDeg(valueDeg: number, centerDeg: number): number {

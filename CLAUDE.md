@@ -113,6 +113,15 @@ The project serves dual purposes: thesis visualization/validation, and reusable 
 
 ## Changelog
 
+### 2026-06-28 — `geokit.units`: unify every speed conversion
+
+Follow-up to the geokit consolidation: added a speed-conversion module and routed every speed conversion in the project through it (the previous pass had deliberately left kt→m/s alone).
+
+- **`geokit/src/geokit/units.py` (new)** — `kt_to_ms`/`ms_to_kt`, `ft_min_to_ms`/`ms_to_ft_min`, `kmh_to_ms`/`ms_to_kmh`, `mph_to_ms`/`ms_to_mph`, backed by new factors in `constants.py` (`KT_MS` (moved here), `FT_MIN_MS`, `KMH_MS`, `MPH_MS`). All exported from `geokit`.
+- **Python migration** — every `terminal_speed_kt * 0.51444` (optimizer `casadi_direct_collocation_optimizer`/`casadi_optimizer`, the analysis scripts `geodetic_vs_reanchored_error`/`solver_backend_benchmark`/`collocation_scheme_comparison`, and the optimizer test fixtures) and `preprocess_procedures`' `nominal_speed_kt * NM_TO_METRES / 3600` now call `geokit.kt_to_ms`. This **resolves a real inconsistency**: the optimizer used the truncated `0.51444` while `preprocess_procedures` and all of the TS already used the exact `1852/3600`; everything now uses the exact value. The ~9e-6 shift in the optimizer's `min_terminal_speed` bound is absorbed by the metre-tolerance solves (69 optimizer tests pass; source + test fixtures moved together so targets stay consistent).
+- **Frontend** — `export_constants_json.py` now emits `KNOTS_TO_MPS`/`FT_MIN_TO_MPS`; `utils/procedureGeoMath.ts` gains `knotsToMetresPerSecond`/`metresPerSecondToKnots` (the single TS speed helper). `pilot/trajectoryTargetConstraints.ts` re-exports it (impl moved out of there), and the inline `(kt * NM)/3600` in `procedureGeometry.ts` / `procedureRoutes.ts` now call it. TS values are byte-identical (it already used `1852/3600`).
+- Tests: geokit **25** (incl. `test_units` + the drift guard, which now covers the speed factors). No new failures anywhere — aero 47 · optimizer 69 · backend 65 · trajectory_data_process 44 · aeroviz-4d/python 94 · frontend 292 + tsc + vite build.
+
 ### 2026-06-27 — `geokit`: one coordinate-conversion source across all domains
 
 Consolidated the coordinate / geodetic / unit-conversion math that was re-derived in ~40 places (in several mutually-inconsistent forms) into a single source per runtime. Full findings + decisions + plan in `docs/coordinate-conversion-consolidation.md`.

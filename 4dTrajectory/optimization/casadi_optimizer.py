@@ -1,6 +1,7 @@
 import math
 
 import casadi as ca
+from geokit import kt_to_ms
 from aerodynamic_model.casadi_simulator import make_geo_step_from_enu_integrator
 from aircraft.aero_params import AeroParams
 from aircraft.aircraft_sets import AircraftSpec
@@ -137,7 +138,7 @@ class CasadiOptimizer:
                 "max_thrust": aircraft.max_thrust_n,
                 "min_load_factor": 0.5,
                 "max_load_factor": 2, # need to check the actual limits for the aircraft, these are just example values
-                "min_terminal_speed": aircraft.terminal_speed_kt * 0.51444, # convert from knots to m/s
+                "min_terminal_speed": kt_to_ms(aircraft.terminal_speed_kt),
                 "min_altitude": aircraft.threshold_crossing_height_m + 10.0, # set minimum altitude slightly above threshold crossing height to avoid infeasible solutions, can be tuned
             },)
     

@@ -61,6 +61,7 @@ import casadi as ca
 import numpy as np
 
 from geokit import WGS84_A as _EARTH_RADIUS_M
+from geokit import kt_to_ms
 from aerodynamic_model.casadi_coordinates_converter import degrees_expr, radians_expr
 from aerodynamic_model.casadi_simulator import (
     make_geodetic_dynamics_model,
@@ -950,7 +951,7 @@ class CasadiDirectCollocationOptimizer:
             "max_thrust": aircraft.max_thrust_n,
             "min_load_factor": 0.5,
             "max_load_factor": 2.0,
-            "min_terminal_speed": aircraft.terminal_speed_kt * 0.51444,
+            "min_terminal_speed": kt_to_ms(aircraft.terminal_speed_kt),
             "min_altitude": aircraft.threshold_crossing_height_m + 10.0,
             "min_duration": _DEFAULT_MIN_DURATION_S,
         }

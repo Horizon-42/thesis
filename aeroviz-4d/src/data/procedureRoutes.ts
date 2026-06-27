@@ -16,7 +16,7 @@ import { fetchJson } from "../utils/fetchJson";
 import {
   EARTH_RADIUS_M,
   FEET_TO_METERS,
-  METERS_PER_NM as NM_TO_METERS,
+  knotsToMetresPerSecond,
   toRadians,
 } from "../utils/procedureGeoMath";
 
@@ -247,7 +247,7 @@ export function buildProcedureRoutes(
     const branchById = procedureRouteBranchLookup(document);
     const rawCache = new Map<string, RawRoutePoint[]>();
     const nominalSpeedKt = document.displayHints.nominalSpeedKt;
-    const speedMps = (nominalSpeedKt * NM_TO_METERS) / 3600;
+    const speedMps = knotsToMetresPerSecond(nominalSpeedKt);
 
     return document.branches
       .map((branch) => {

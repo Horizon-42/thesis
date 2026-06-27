@@ -39,12 +39,17 @@ the single source of truth for the Python side; the frontend mirrors it via a ge
 backend 65 · aeroviz-4d/python 94 (+1 pre-existing unrelated `--include-transitions` orchestrator
 failure) · frontend 292 + `tsc` + `vite build` — **no new failures**.
 
-**Scoping note — kt→m/s deferred.** The `0.51444` knot→m/s factor (11 sites) was left as-is: it
-is a *speed* unit conversion (not coordinate), already perfectly consistent everywhere, and
-changing it to the exact `1852/3600` would alter thesis-optimizer physics by ~9e-6 across many
-test fixtures — an unannounced change. `geokit.KT_MS` holds the exact value for new code.
-Pedagogical helpers (`preprocess_airports.runway_bearing_rad`, the flat-Earth bearing) were kept
-local but rebuilt on the shared constants.
+**Speed conversions (follow-up, now unified).** The initial pass deferred the `0.51444`
+knot→m/s factor; a follow-up unified all speed conversions. `geokit.units` adds
+`kt_to_ms`/`ms_to_kt`, `ft_min_to_ms`/`ms_to_ft_min`, `kmh`/`mph` helpers (factors
+`KT_MS`/`FT_MIN_MS`/`KMH_MS`/`MPH_MS`); the codegen exports `KNOTS_TO_MPS`/`FT_MIN_TO_MPS`
+to the frontend, where `procedureGeoMath.knotsToMetresPerSecond` is the single TS helper.
+Every site migrated: the optimizer + analysis scripts + their tests dropped `* 0.51444`
+(which was inconsistent — `preprocess_procedures` and all TS already used the exact
+`1852/3600`), so the optimizer's value moves to the exact `1852/3600` (the ~9e-6 change is
+absorbed by the metre-tolerance solves; 69 optimizer tests still pass). Pedagogical helpers
+(`preprocess_airports.runway_bearing_rad`, the flat-Earth bearing) stay local but rebuilt on
+the shared constants.
 
 ---
 

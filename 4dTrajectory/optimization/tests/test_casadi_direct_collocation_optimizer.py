@@ -8,6 +8,7 @@ import casadi as ca
 import numpy as np
 import pytest
 
+from geokit import kt_to_ms
 from aircraft.aircraft_sets import A320, C172
 from aircraft.aero_params import AeroParams, aero_params_for_aircraft
 from aerodynamic_model.common import GeodeticState
@@ -121,7 +122,7 @@ def test_optimize_handles_heading_wrap_across_180_deg():
     step = make_geodetic_step_integrator(transport="approx")["step_func"]
 
     duration = 2.0
-    speed = C172.terminal_speed_kt * 0.51444 + 10.0
+    speed = kt_to_ms(C172.terminal_speed_kt) + 10.0
     init = GeodeticState(51.1139, -114.0203, 1000.0, speed,
                          math.radians(179.0), 0.0, C172.mass_kg)
     # Propagate a left turn so the heading just crosses +180 deg.
@@ -193,7 +194,7 @@ def test_optimize_trajectory_solves_real_ipopt_problem():
     duration = 2.0
     n_segments = 4
 
-    speed = C172.terminal_speed_kt * 0.51444 + 10.0
+    speed = kt_to_ms(C172.terminal_speed_kt) + 10.0
     state = GeodeticState(
         latitude=51.1139,
         longitude=-114.0203,
@@ -324,7 +325,7 @@ def test_optimize_free_time_solves_real_ipopt_problem():
     feasible_duration = 2.0
     max_duration = 6.0  # generous upper bound
 
-    speed = C172.terminal_speed_kt * 0.51444 + 10.0
+    speed = kt_to_ms(C172.terminal_speed_kt) + 10.0
     state = GeodeticState(
         latitude=51.1139,
         longitude=-114.0203,
@@ -389,7 +390,7 @@ def test_optimize_free_time_raw_is_playback_consistent():
     feasible_duration = 2.0
     max_duration = 6.0
 
-    speed = C172.terminal_speed_kt * 0.51444 + 10.0
+    speed = kt_to_ms(C172.terminal_speed_kt) + 10.0
     state = GeodeticState(
         latitude=51.1139,
         longitude=-114.0203,
@@ -976,13 +977,13 @@ def test_normalized_scheme_solves_loose_window_where_geodetic_fails():
 
     state = GeodeticState(
         latitude=35.91816944, longitude=-78.89327222, altitude=1828.8,
-        V=(A320.terminal_speed_kt + 25) * 0.51444,
+        V=kt_to_ms(A320.terminal_speed_kt + 25),
         psi=math.radians(225.0), gamma=0.0, m=A320.mass_kg,
     )
     target = GeodeticState(
         latitude=35.87446907, longitude=-78.80194912,
         altitude=367.0 * 0.3048 + A320.threshold_crossing_height_m,
-        V=A320.terminal_speed_kt * 0.51444,
+        V=kt_to_ms(A320.terminal_speed_kt),
         psi=math.radians(45.0), gamma=math.radians(-3.0), m=A320.mass_kg,
     )
 
@@ -1026,7 +1027,7 @@ def test_normalized_scheme_matches_plain_geodetic_on_a_benign_problem():
     feasible_duration = 2.0
     max_duration = 6.0
 
-    speed = C172.terminal_speed_kt * 0.51444 + 10.0
+    speed = kt_to_ms(C172.terminal_speed_kt) + 10.0
     state = GeodeticState(51.1139, -114.0203, 1000.0, speed, 0.0, 0.0, C172.mass_kg)
 
     base = module.CasadiDirectCollocationOptimizer(
@@ -1060,7 +1061,7 @@ def test_normalized_full_transport_matches_plain_full_transport():
     feasible_duration = 2.0
     max_duration = 6.0
 
-    speed = C172.terminal_speed_kt * 0.51444 + 10.0
+    speed = kt_to_ms(C172.terminal_speed_kt) + 10.0
     state = GeodeticState(51.1139, -114.0203, 1000.0, speed, 0.0, 0.0, C172.mass_kg)
 
     plain = module.CasadiDirectCollocationOptimizer(

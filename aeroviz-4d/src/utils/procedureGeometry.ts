@@ -13,6 +13,7 @@ import {
   FEET_TO_METERS as FEET_TO_METRES,
   METERS_PER_NM as NM_TO_METRES,
   METRES_PER_DEG_LAT,
+  knotsToMetresPerSecond,
 } from "./procedureGeoMath";
 
 export const DEFAULT_TUNNEL_HALF_WIDTH_M = 0.3 * NM_TO_METRES;
@@ -141,7 +142,7 @@ export function buildTunnelSections(
   const halfHeightM = options.halfHeightM ?? DEFAULT_TUNNEL_HALF_HEIGHT_M;
   const sampleSpacingM = options.sampleSpacingM ?? DEFAULT_TUNNEL_SAMPLE_SPACING_M;
   const nominalSpeedKt = options.nominalSpeedKt ?? DEFAULT_NOMINAL_SPEED_KT;
-  const speedMps = (nominalSpeedKt * NM_TO_METRES) / 3600;
+  const speedMps = knotsToMetresPerSecond(nominalSpeedKt);
   const samples = densifyRoute(route, sampleSpacingM);
 
   return samples.map((sample, index) => {
