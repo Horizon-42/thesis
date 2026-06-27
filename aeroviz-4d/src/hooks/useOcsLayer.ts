@@ -31,6 +31,7 @@ import {
   type GeoPoint3D,
   type Polygon3D,
 } from "../utils/ocsGeometry";
+import { METERS_PER_NM as NAUTICAL_MILE_M } from "../utils/procedureGeoMath";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -43,8 +44,6 @@ const DEFAULT_PRIMARY_HALF_WIDTH_M = 150;
 
 /** Fallback secondary width. Typical PANS-OPS value: equal to primary half-width. */
 const DEFAULT_SECONDARY_WIDTH_M = 150;
-
-const NAUTICAL_MILE_M = 1852;
 
 // ── Styling ────────────────────────────────────────────────────────────────
 

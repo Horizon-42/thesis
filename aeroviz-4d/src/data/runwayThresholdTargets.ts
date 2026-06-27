@@ -1,9 +1,12 @@
 import { airportDataUrl } from "./airportData";
 import { fetchJson } from "../utils/fetchJson";
 import type { RunwayProperties } from "../types/geojson-aviation";
-
-const METRES_PER_FOOT = 0.3048;
-const EARTH_RADIUS_M = 6_378_137;
+import {
+  EARTH_RADIUS_M,
+  FEET_TO_METERS as METRES_PER_FOOT,
+  toDegrees,
+  toRadians,
+} from "../utils/procedureGeoMath";
 
 interface RunwayFeatureProperties extends RunwayProperties {
   zone_type?: string;
@@ -136,12 +139,4 @@ function normalizeRunwayIdent(ident: string): string {
 
 function normalizeDegrees(value: number): number {
   return ((value % 360) + 360) % 360;
-}
-
-function toRadians(value: number): number {
-  return (value * Math.PI) / 180;
-}
-
-function toDegrees(value: number): number {
-  return (value * 180) / Math.PI;
 }

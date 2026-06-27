@@ -3,6 +3,7 @@ import type {
   ProtectionSurfaceStatus,
 } from "../data/procedureProtectionSurfaces";
 import {
+  EARTH_RADIUS_M,
   FEET_TO_METERS,
   METERS_PER_NM,
   distanceNm,
@@ -56,8 +57,8 @@ function pointToLocal(point: GeoPoint, origin: GeoPoint): LocalPoint {
   const meanLatRad = (((point.latDeg + origin.latDeg) / 2) * Math.PI) / 180;
   return {
     eastM:
-      ((point.lonDeg - origin.lonDeg) * Math.PI * 6_378_137 * Math.cos(meanLatRad)) / 180,
-    northM: ((point.latDeg - origin.latDeg) * Math.PI * 6_378_137) / 180,
+      ((point.lonDeg - origin.lonDeg) * Math.PI * EARTH_RADIUS_M * Math.cos(meanLatRad)) / 180,
+    northM: ((point.latDeg - origin.latDeg) * Math.PI * EARTH_RADIUS_M) / 180,
   };
 }
 

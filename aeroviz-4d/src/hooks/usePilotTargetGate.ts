@@ -2,6 +2,7 @@ import { useEffect, useRef, type MutableRefObject } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
+import { METRES_PER_DEG_LAT as METERS_PER_DEGREE_LAT } from "../utils/procedureGeoMath";
 
 export interface PilotTargetGateState {
   runwayThresholdId: string;
@@ -22,7 +23,6 @@ const TARGET_GATE_MARKER_ID = "trajectory-play-target-threshold-marker";
 const TARGET_GATE_WIDTH_M = 90;
 const TARGET_GATE_HEIGHT_M = 42;
 const TARGET_GATE_BASE_HEIGHT_M = 4;
-const METERS_PER_DEGREE_LAT = 111_320;
 
 export function usePilotTargetGate({
   enabled,

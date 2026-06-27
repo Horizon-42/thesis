@@ -9,8 +9,7 @@ import type {
   ProtectionSurfaceKind,
 } from "../data/procedureProtectionSurfaces";
 import type { RunwayProperties } from "../types/geojson-aviation";
-
-const EARTH_RADIUS_M = 6_378_137;
+import { EARTH_RADIUS_M, toRadians, toDegrees } from "./procedureGeoMath";
 
 interface RunwayFeatureProperties extends RunwayProperties {
   zone_type?: string;
@@ -121,14 +120,6 @@ export interface RunwayReferenceMark {
   label: string;
   detail: string;
   priority: number;
-}
-
-function toRadians(value: number): number {
-  return (value * Math.PI) / 180;
-}
-
-function toDegrees(value: number): number {
-  return (value * 180) / Math.PI;
 }
 
 function mod360(value: number): number {

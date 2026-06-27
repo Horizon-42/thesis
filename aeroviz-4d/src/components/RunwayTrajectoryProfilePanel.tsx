@@ -24,9 +24,7 @@ import {
   altitudeConstraintClassName,
   altitudeConstraintLabel,
 } from "../data/altitudeConstraints";
-
-const METERS_PER_NM = 1852;
-const METERS_PER_FOOT = 0.3048;
+import { FEET_TO_METERS as METERS_PER_FOOT, METERS_PER_NM } from "../utils/procedureGeoMath";
 
 type DistanceUnit = "nm" | "m";
 

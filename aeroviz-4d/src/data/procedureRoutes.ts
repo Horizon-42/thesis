@@ -13,10 +13,12 @@ import {
   altitudeConstraintReferenceFt,
 } from "./altitudeConstraints";
 import { fetchJson } from "../utils/fetchJson";
-
-const FEET_TO_METERS = 0.3048;
-const NM_TO_METERS = 1852;
-const EARTH_RADIUS_M = 6_378_137;
+import {
+  EARTH_RADIUS_M,
+  FEET_TO_METERS,
+  METERS_PER_NM as NM_TO_METERS,
+  toRadians,
+} from "../utils/procedureGeoMath";
 
 export interface ProcedureRoutePoint {
   fixId: string;
@@ -81,10 +83,6 @@ interface RawRoutePoint {
   altitudeConstraint: AltitudeConstraint | null;
   geometryAltitudeFt: number | null;
   sourceLine: number;
-}
-
-function toRadians(value: number): number {
-  return (value * Math.PI) / 180;
 }
 
 function distanceM(left: { lon: number; lat: number }, right: { lon: number; lat: number }): number {

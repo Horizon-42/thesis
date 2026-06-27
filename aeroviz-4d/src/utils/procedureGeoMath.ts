@@ -1,6 +1,16 @@
-export const EARTH_RADIUS_M = 6_378_137;
-export const FEET_TO_METERS = 0.3048;
-export const METERS_PER_NM = 1852;
+import geoConstants from "../generated/geoConstants.json";
+
+/**
+ * Canonical geo constants — single-sourced from the geokit Python package via the
+ * generated geoConstants.json. Do not hardcode these elsewhere; import from here.
+ * EARTH_RADIUS_M is the spherical default (WGS84 a) used by the great-circle helpers;
+ * EARTH_RADIUS_MEAN_M is the switchable mean-radius alternative.
+ */
+export const EARTH_RADIUS_M = geoConstants.EARTH_RADIUS_M;
+export const EARTH_RADIUS_MEAN_M = geoConstants.EARTH_RADIUS_MEAN_M;
+export const FEET_TO_METERS = geoConstants.FEET_TO_METERS;
+export const METERS_PER_NM = geoConstants.METERS_PER_NM;
+export const METRES_PER_DEG_LAT = geoConstants.METRES_PER_DEG_LAT;
 
 export interface CartesianPoint {
   x: number;

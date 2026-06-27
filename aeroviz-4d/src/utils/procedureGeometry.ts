@@ -8,9 +8,12 @@
  * TERPS/PANS-OPS containment surface.
  */
 
-const METRES_PER_DEG_LAT = 111_320;
-const NM_TO_METRES = 1852;
-const FEET_TO_METRES = 0.3048;
+import {
+  EARTH_RADIUS_M,
+  FEET_TO_METERS as FEET_TO_METRES,
+  METERS_PER_NM as NM_TO_METRES,
+  METRES_PER_DEG_LAT,
+} from "./procedureGeoMath";
 
 export const DEFAULT_TUNNEL_HALF_WIDTH_M = 0.3 * NM_TO_METRES;
 export const DEFAULT_TUNNEL_HALF_HEIGHT_M = 300 * FEET_TO_METRES;
@@ -45,7 +48,6 @@ function metresPerDegLon(latDeg: number): number {
 }
 
 export function distanceMeters(a: ProcedurePoint3D, b: ProcedurePoint3D): number {
-  const radiusM = 6_371_008.8;
   const phi1 = (a.lat * Math.PI) / 180;
   const phi2 = (b.lat * Math.PI) / 180;
   const dPhi = ((b.lat - a.lat) * Math.PI) / 180;
@@ -53,7 +55,7 @@ export function distanceMeters(a: ProcedurePoint3D, b: ProcedurePoint3D): number
   const hav =
     Math.sin(dPhi / 2) ** 2 +
     Math.cos(phi1) * Math.cos(phi2) * Math.sin(dLambda / 2) ** 2;
-  return radiusM * 2 * Math.atan2(Math.sqrt(hav), Math.sqrt(1 - hav));
+  return EARTH_RADIUS_M * 2 * Math.atan2(Math.sqrt(hav), Math.sqrt(1 - hav));
 }
 
 export function bearingRad(a: ProcedurePoint3D, b: ProcedurePoint3D): number {

@@ -4,6 +4,7 @@ import {
   bearingRad,
   distanceNm,
   interpolateGreatCircle,
+  toDegrees,
   type GeoPoint,
 } from "./procedureGeoMath";
 import {
@@ -54,10 +55,6 @@ const DEFAULT_TURN_JUNCTION_OPTIONS: Required<TurnJunctionBuildOptions> = {
   minTurnAngleDeg: 3,
   maxJoinGapNm: 0.05,
 };
-
-function toDegrees(value: number): number {
-  return (value * 180) / Math.PI;
-}
 
 function signedAngleDifferenceDeg(fromBearingRad: number, toBearingRad: number): number {
   const fromDeg = toDegrees(fromBearingRad);

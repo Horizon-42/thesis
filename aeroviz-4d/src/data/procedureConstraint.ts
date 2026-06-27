@@ -26,9 +26,12 @@ import {
   type ProcedureRoutePoint,
   type ProcedureRouteViewModel,
 } from "./procedureRoutes";
-
-const FEET_TO_METERS = 0.3048;
-const EARTH_RADIUS_M = 6_378_137;
+import {
+  EARTH_RADIUS_M,
+  FEET_TO_METERS,
+  toDegrees,
+  toRadians,
+} from "../utils/procedureGeoMath";
 
 export interface ProcedureConstraintWaypoint {
   /** Stable fix id (matches `ProcedureDetailFix.fixId`). */
@@ -71,14 +74,6 @@ export interface ProcedureConstraint {
 export interface BuildProcedureConstraintOptions {
   /** Which branch (entry transition / final) to anchor the constraint on. */
   branchId?: string;
-}
-
-function toRadians(value: number): number {
-  return (value * Math.PI) / 180;
-}
-
-function toDegrees(value: number): number {
-  return (value * 180) / Math.PI;
 }
 
 function normalizeDegrees(value: number): number {

@@ -4,6 +4,10 @@ import { useApp } from "../context/AppContext";
 import type { RunwayThresholdTarget } from "../data/runwayThresholdTargets";
 import type { PilotAircraftConfig, PilotResetState } from "../pilot/pilotClient";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
+import {
+  EARTH_RADIUS_M,
+  METERS_PER_NM as METRES_PER_NAUTICAL_MILE,
+} from "../utils/procedureGeoMath";
 
 export interface PilotInitialPlacementPosition {
   lon: number;
@@ -32,8 +36,6 @@ const PLACEMENT_AIRCRAFT_ID = "pilot-initial-placement-aircraft";
 const PLACEMENT_GROUND_POINT_ID = "pilot-initial-placement-ground-point";
 const PLACEMENT_DROP_LINE_ID = "pilot-initial-placement-drop-line";
 const PLACEMENT_GUIDANCE_ID = "pilot-initial-placement-guidance";
-const METRES_PER_NAUTICAL_MILE = 1852;
-const EARTH_RADIUS_M = 6_378_137;
 
 export function usePilotInitialPlacement({
   enabled,

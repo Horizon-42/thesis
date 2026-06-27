@@ -1,7 +1,8 @@
 import type { ProcedureDetailDocument, ProcedureDetailVerticalProfile } from "../data/procedureDetails";
 import type { ProcedureBranchPolyline, ProcedureChartPoint } from "./procedureDetailsGeometry";
+import { FEET_TO_METERS } from "./procedureGeoMath";
 
-const FEET_PER_METER = 3.280839895;
+const FEET_PER_METER = 1 / FEET_TO_METERS;
 
 export interface FinalVerticalProfileOverlayPoint {
   fixRef: string;

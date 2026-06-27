@@ -1,0 +1,11 @@
+{
+  "_comment": "Generated from geokit.constants by geokit/scripts/export_constants_json.py. Do not edit by hand; run the script to regenerate.",
+  "EARTH_RADIUS_M": 6378137.0,
+  "EARTH_RADIUS_MEAN_M": 6371008.8,
+  "WGS84_A": 6378137.0,
+  "METERS_PER_NM": 1852.0,
+  "FEET_TO_METERS": 0.3048,
+  "METRES_PER_DEG_LAT": 111320.0,
+  "DEG2RAD": 0.017453292519943295,
+  "RAD2DEG": 57.29577951308232
+}

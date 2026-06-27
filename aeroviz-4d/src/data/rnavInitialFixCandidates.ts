@@ -6,9 +6,12 @@ import {
   type ProcedureDetailLeg,
 } from "./procedureDetails";
 import { fetchJson } from "../utils/fetchJson";
-
-const FEET_TO_METRES = 0.3048;
-const EARTH_RADIUS_M = 6_378_137;
+import {
+  EARTH_RADIUS_M,
+  FEET_TO_METERS as FEET_TO_METRES,
+  toDegrees,
+  toRadians,
+} from "../utils/procedureGeoMath";
 
 export interface RnavInitialFixCandidate {
   key: string;
@@ -284,12 +287,4 @@ function isFiniteNumber(value: unknown): value is number {
 
 function normalizeDegrees(value: number): number {
   return ((value % 360) + 360) % 360;
-}
-
-function toRadians(value: number): number {
-  return (value * Math.PI) / 180;
-}
-
-function toDegrees(value: number): number {
-  return (value * 180) / Math.PI;
 }

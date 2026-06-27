@@ -16,10 +16,9 @@
  * 📖 Tutorial: see docs/03-ocs-geometry.md
  */
 
-// ── Constants ────────────────────────────────────────────────────────────────
+import { METRES_PER_DEG_LAT } from "./procedureGeoMath";
 
-/** Metres per degree of latitude (approximately constant globally) */
-const METRES_PER_DEG_LAT = 111_320;
+// ── Constants ────────────────────────────────────────────────────────────────
 
 /** Metres per degree of longitude at a given latitude */
 function metresPerDegLon(latDeg: number): number {

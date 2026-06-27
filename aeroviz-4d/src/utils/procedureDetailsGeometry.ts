@@ -8,8 +8,7 @@ import {
   procedureRouteBranchLookup,
   procedureRouteFixLookup,
 } from "../data/procedureRoutes";
-
-const EARTH_RADIUS_M = 6_378_137;
+import { EARTH_RADIUS_M, toRadians } from "./procedureGeoMath";
 
 export interface ProcedureChartPoint {
   fixId: string;
@@ -60,10 +59,6 @@ export interface ProcedureRunwayMarker {
   y1: number;
   x2: number;
   y2: number;
-}
-
-function toRadians(value: number): number {
-  return (value * Math.PI) / 180;
 }
 
 export function pointToEastNorth(

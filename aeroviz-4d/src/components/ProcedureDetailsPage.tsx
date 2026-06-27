@@ -56,6 +56,7 @@ import {
   buildFinalVerticalProfileOverlays,
   type FinalVerticalProfileOverlay,
 } from "../utils/procedureVerticalProfileOverlay";
+import { METERS_PER_NM } from "../utils/procedureGeoMath";
 
 const SVG_WIDTH = 1120;
 const PLAN_SVG_HEIGHT = 680;
@@ -71,7 +72,6 @@ const PROFILE_SELECTED_FIX_SYMBOL_SIZE = 7;
 const MISSED_OUTBOUND_ARROW_START_GAP_PX = 92;
 const MISSED_OUTBOUND_PROJECTED_LENGTH_M = 6400;
 const IMPORTANT_FIX_ROLES = new Set(["IAF", "IF", "FAF", "MAPT", "MAHF"]);
-const METERS_PER_NM = 1852;
 
 type DistanceUnit = "nm" | "m";
 
