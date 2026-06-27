@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "geokit"
+version = "0.1.0"
+description = "Canonical geodetic / coordinate / unit conversions for the AeroViz-4D thesis project"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["geokit*"]
