@@ -38,10 +38,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from geokit import SPHERE_RADIUS_M as _R  # noqa: E402
 from aircraft.aircraft_sets import A320  # noqa: E402
 from aircraft.aero_params import aero_params_for_aircraft  # noqa: E402
 from dynamics_comparison import (  # noqa: E402
-    _R,
     compare_dynamics,
     horizontal_error_m as _horiz_m,
     heading_error_deg as _heading_err_deg,

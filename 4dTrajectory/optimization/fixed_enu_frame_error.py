@@ -56,6 +56,9 @@ from typing import Iterable
 
 import numpy as np
 
+from geokit import EARTH_RADIUS_MEAN_M as _EARTH_RADIUS_M
+from geokit import haversine_m
+
 _AERODYNAMIC_MODEL_DIR = Path(__file__).resolve().parents[2] / "aerodynamic_model"
 if str(_AERODYNAMIC_MODEL_DIR.parent) not in sys.path:
     sys.path.insert(0, str(_AERODYNAMIC_MODEL_DIR.parent))
@@ -66,11 +69,10 @@ from aerodynamic_model.coordinates_convertor import (
     GeodeticCoordinate,
 )
 
-# WGS84 mean radius (m). The closed-form curvature scales use a single R
-# rather than picking between N (prime vertical) and M (meridian) — the
-# difference is < 0.3 % at typical airport latitudes and not the dominant
-# error term over 5 km.
-_EARTH_RADIUS_M = 6_371_008.8
+# WGS84 mean radius (m), single-sourced from geokit (EARTH_RADIUS_MEAN_M). The
+# closed-form curvature scales use a single R rather than picking between N (prime
+# vertical) and M (meridian) — the difference is < 0.3 % at typical airport
+# latitudes and not the dominant error term over 5 km.
 
 # Reference horizontal speed used to translate the up-axis tilt (a pure
 # geometric angle) into an apparent vertical velocity component (m/s).
@@ -213,12 +215,7 @@ def compute_point_error(
 
 
 def _haversine_distance_m(a: GeodeticCoordinate, b: GeodeticCoordinate) -> float:
-    lat1 = math.radians(a.latitude)
-    lat2 = math.radians(b.latitude)
-    dlat = lat2 - lat1
-    dlon = math.radians(b.longitude - a.longitude)
-    h = math.sin(dlat / 2.0) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2.0) ** 2
-    return 2.0 * _EARTH_RADIUS_M * math.asin(math.sqrt(h))
+    return haversine_m(a.latitude, a.longitude, b.latitude, b.longitude, radius_m=_EARTH_RADIUS_M)
 
 
 # --------------------------------------------------------------------------

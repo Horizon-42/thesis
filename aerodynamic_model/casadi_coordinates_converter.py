@@ -1,10 +1,8 @@
 import casadi as ca
 
-WGS84_A = 6378137.0
-WGS84_B = 6356752.314245
-WGS84_F = 1.0 / 298.257223563
-WGS84_E2 = WGS84_F * (2.0 - WGS84_F)
-WGS84_E_PRIME2 = WGS84_E2 / (1.0 - WGS84_E2)
+# WGS84 ellipsoid constants come from the shared geokit package (single source of
+# truth). Re-exported here so existing imports of these names keep working.
+from geokit import WGS84_A, WGS84_B, WGS84_E2, WGS84_E_PRIME2, WGS84_F
 
 def radians_expr(degrees):
     return degrees * ca.pi / 180.0

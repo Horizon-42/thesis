@@ -53,6 +53,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from geokit import equirectangular_distance_m
 from aircraft.aircraft_sets import A320, C172  # noqa: E402
 from aerodynamic_model.casadi_simulator import (  # noqa: E402
     AeroParams,
@@ -95,15 +96,9 @@ def build_steppers(aircraft) -> Steppers:
 # --------------------------------------------------------------------------
 
 def _horizontal_m(a: np.ndarray, b: np.ndarray) -> float:
-    """Great-circle-ish horizontal distance between two geodetic points
-    (lat/lon in degrees), accurate at the metre level over a few km."""
-    R = 6_371_000.0
-    lat1, lon1 = math.radians(a[0]), math.radians(a[1])
-    lat2, lon2 = math.radians(b[0]), math.radians(b[1])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    mid = 0.5 * (lat1 + lat2)
-    return R * math.hypot(dlat, dlon * math.cos(mid))
+    """Small-angle horizontal distance between two geodetic points (degrees),
+    accurate at the metre level over a few km. Delegates to geokit."""
+    return equirectangular_distance_m(a[0], a[1], b[0], b[1])
 
 
 def _distance_from_origin_m(state: np.ndarray, origin: np.ndarray) -> float:

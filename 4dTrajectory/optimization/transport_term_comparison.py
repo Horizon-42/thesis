@@ -62,6 +62,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from geokit import equirectangular_distance_m  # noqa: E402
 from aircraft.aircraft_sets import A320, C172  # noqa: E402
 from aerodynamic_model.casadi_coordinates_converter import WGS84_A, WGS84_E2  # noqa: E402
 from aerodynamic_model.casadi_simulator import (  # noqa: E402
@@ -72,7 +73,6 @@ from aerodynamic_model.casadi_simulator import (  # noqa: E402
 )
 
 _AIRCRAFT = {"A320": A320, "C172": C172}
-_R_MEAN = 6_371_000.0  # mean-earth radius for the small-angle ground metric
 
 
 # --------------------------------------------------------------------------
@@ -81,10 +81,7 @@ _R_MEAN = 6_371_000.0  # mean-earth radius for the small-angle ground metric
 
 def _horizontal_m(a: np.ndarray, b: np.ndarray) -> float:
     """Small-angle ground distance (m) between two geodetic points (deg)."""
-    return _R_MEAN * math.hypot(
-        math.radians(a[0] - b[0]),
-        math.radians(a[1] - b[1]) * math.cos(math.radians(b[0])),
-    )
+    return equirectangular_distance_m(a[0], a[1], b[0], b[1])
 
 
 def _arcsec(rad: float) -> float:

@@ -60,6 +60,8 @@ import time
 import casadi as ca
 import numpy as np
 
+from geokit import WGS84_A as _EARTH_RADIUS_M
+from aerodynamic_model.casadi_coordinates_converter import degrees_expr, radians_expr
 from aerodynamic_model.casadi_simulator import (
     make_geodetic_dynamics_model,
     make_dynamics_model,
@@ -83,20 +85,12 @@ CONTROL_DIM = 3
 # Indices into the 6-state decision vector.
 _LAT, _LON, _ALT, _V, _PSI, _GAMMA = range(6)
 
-# Earth radius for the metric position normalization (see _normalization_cb).
-_EARTH_RADIUS_M = 6_378_137.0
+# Earth radius for the metric position normalization (see _normalization_cb) — the
+# WGS84 semi-major axis, single-sourced from geokit (imported as _EARTH_RADIUS_M).
 # Loose metric box for the normalized schemes' position state (metres from the
 # anchor), replacing the radian lat/lon bounds, which are meaningless once
 # position is expressed in metres.
 _NORMALIZED_POS_BOUND_M = 1.0e7
-
-
-def radians_expr(degrees):
-    return degrees * ca.pi / 180.0
-
-
-def degrees_expr(radians):
-    return radians * 180.0 / ca.pi
 
 
 # --------------------------------------------------------------------------

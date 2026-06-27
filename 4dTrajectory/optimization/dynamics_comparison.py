@@ -39,6 +39,8 @@ from pathlib import Path
 import casadi as ca
 import numpy as np
 
+from geokit import WGS84_A, equirectangular_distance_m
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
@@ -53,13 +55,11 @@ from aerodynamic_model.casadi_simulator import (  # noqa: E402
     make_geodetic_step_integrator,
 )
 
-# Mean-earth radius for the small-angle ground-distance metric (matches the
-# 30 km study so the two callers report comparable numbers).
-_R = 6_371_000.0
 # WGS84 equatorial radius for the optimizer's metric-position normalization
-# (system N).  Must match ``casadi_direct_collocation_optimizer._EARTH_RADIUS_M``
-# so N reproduces the optimizer's exact change of variables.
-_NORM_R = 6_378_137.0
+# (system N) -- the ellipsoid semi-major axis the optimizer normalizes with, so N
+# reproduces its exact change of variables.  Single-sourced from geokit (shared with
+# ``casadi_direct_collocation_optimizer._EARTH_RADIUS_M``), so the two cannot drift.
+_NORM_R = WGS84_A
 
 SYSTEM_KEYS = ("A", "B", "C", "D")
 #: The systems whose error is measured against the reference B.
@@ -81,10 +81,7 @@ FULL_TRANSPORT_KEY = "F"
 
 def horizontal_error_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Small-angle ground distance between two geodetic points (metres)."""
-    return _R * math.hypot(
-        math.radians(lat1 - lat2),
-        math.radians(lon1 - lon2) * math.cos(math.radians(lat2)),
-    )
+    return equirectangular_distance_m(lat1, lon1, lat2, lon2)
 
 
 def heading_error_deg(psi1_rad: float, psi2_rad: float) -> float:

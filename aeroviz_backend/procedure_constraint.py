@@ -20,8 +20,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-FEET_TO_METERS = 0.3048
-_EARTH_RADIUS_M = 6_378_137.0
+from geokit import FT_M as FEET_TO_METERS
+from geokit import WGS84_A as _EARTH_RADIUS_M
 
 # Altitude-window kinds, matching the TypeScript ``AltitudeConstraint["kind"]``.
 AT = "AT"
