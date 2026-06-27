@@ -55,6 +55,12 @@ DIRECT_COLLOCATION_SCHEMES = {
     "casadiDirectCollocationLocalEnu": "localEnu",
     "casadiDirectCollocationLocalEnuTrapezoidal": "localEnuTrapezoidal",
     "casadiDirectCollocationLocalEnuHermiteSimpson": "localEnuHermiteSimpson",
+    # Full-transport geodetic: same geodetic RHS but the EXACT transport (adds
+    # the psi cross term the default geodetic schemes drop); the bare name keeps
+    # the Hermite-Simpson default.
+    "casadiDirectCollocationFullTransport": "hermiteSimpsonFullTransport",
+    "casadiDirectCollocationFullTransportTrapezoidal": "trapezoidalFullTransport",
+    "casadiDirectCollocationFullTransportRk4": "rk4FullTransport",
     # Normalized geodetic schemes: same geodetic RHS, but the decision STATE is
     # metric position offsets from the target, which conditions the NLP well so
     # the solve is robust on loose arrival windows / finer meshes (the bare name
@@ -62,6 +68,11 @@ DIRECT_COLLOCATION_SCHEMES = {
     "casadiDirectCollocationNormalized": "hermiteSimpsonNormalized",
     "casadiDirectCollocationNormalizedTrapezoidal": "trapezoidalNormalized",
     "casadiDirectCollocationNormalizedRk4": "rk4Normalized",
+    # Normalized + FULL transport: well-conditioned metric-position state AND the
+    # exact transport (the two compose); the bare name keeps Hermite-Simpson.
+    "casadiDirectCollocationNormalizedFullTransport": "hermiteSimpsonNormalizedFullTransport",
+    "casadiDirectCollocationNormalizedFullTransportTrapezoidal": "trapezoidalNormalizedFullTransport",
+    "casadiDirectCollocationNormalizedFullTransportRk4": "rk4NormalizedFullTransport",
 }
 SUPPORTED_OPTIMIZERS = (
     *DIRECT_COLLOCATION_SCHEMES,

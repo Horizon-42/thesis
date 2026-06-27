@@ -349,5 +349,67 @@ class TestCasadiSimulator(unittest.TestCase):
         self.assertAlmostEqual(next_state[6], state_vec[6])
 
 
+class TestGeodeticTransportModes(unittest.TestCase):
+    """The ``transport`` argument of ``make_geodetic_dynamics_model`` selects how
+    much of the (derived, exact) frame-rotation transport is modelled.  The only
+    approximation is the ``psi`` CROSS term that ``"approx"`` drops; these tests
+    pin that down exactly so it can never be reintroduced silently."""
+
+    def _rhs(self, transport):
+        from aerodynamic_model.casadi_simulator import make_geodetic_dynamics_model
+        return make_geodetic_dynamics_model(transport=transport)["rhs_func"]
+
+    def _eval(self, rhs):
+        # A generic descending, banked, high-latitude state (lat/lon RADIANS) so
+        # every transport term is non-zero.
+        x = ca.DM([
+            math.radians(51.1), math.radians(-114.0), 3000.0,
+            130.0, math.radians(30.0), math.radians(-3.0), A320.mass_kg,
+        ])
+        u = ca.DM([A320.max_thrust_n * 0.3, math.radians(10.0), 1.0])
+        aero = ca.DM([A320.wing_area_m2, 2.7, 0.02, 0.04, 0.9, 0.1])
+        return np.array(rhs(x, u, aero)).reshape(-1), x
+
+    def test_full_minus_approx_is_exactly_the_psi_cross_term(self):
+        """``full`` differs from ``approx`` ONLY in ``psi_dot``, by exactly the
+        analytic cross term ``V sinγ sinψ cosψ (1/(R_N+h) − 1/(R_M+h))``."""
+        from aerodynamic_model.casadi_coordinates_converter import WGS84_A, WGS84_E2
+
+        fa, x = self._eval(self._rhs("approx"))
+        ff, _ = self._eval(self._rhs("full"))
+        lat, h, V, psi, gamma = float(x[0]), float(x[2]), float(x[3]), float(x[4]), float(x[5])
+        den = 1.0 - WGS84_E2 * math.sin(lat) ** 2
+        R_N = WGS84_A / math.sqrt(den)
+        R_M = WGS84_A * (1.0 - WGS84_E2) / den ** 1.5
+        cross = V * math.sin(gamma) * math.sin(psi) * math.cos(psi) * (
+            1.0 / (R_N + h) - 1.0 / (R_M + h)
+        )
+        # psi_dot differs by exactly the cross term...
+        self.assertAlmostEqual(ff[4] - fa[4], cross, places=18)
+        # ...and NOTHING else changes (lat/lon/h/V/gamma/m identical).
+        diff = ff - fa
+        diff[4] = 0.0
+        np.testing.assert_array_equal(diff, np.zeros(7))
+
+    def test_approx_keeps_gamma_exact_and_psi_main_term(self):
+        """``approx`` adds the (exact) gamma transport and the psi MAIN
+        (meridian-convergence) term on top of ``none``; only the cross term is
+        missing vs ``full``."""
+        fn, _ = self._eval(self._rhs("none"))
+        fa, _ = self._eval(self._rhs("approx"))
+        # gamma and psi both move relative to no-transport.
+        self.assertNotAlmostEqual(fa[5], fn[5])  # gamma transport present
+        self.assertNotAlmostEqual(fa[4], fn[4])  # psi main term present
+        # The full gamma transport is already in approx (cross term is psi-only),
+        # so full and approx share gamma_dot exactly.
+        ff, _ = self._eval(self._rhs("full"))
+        self.assertEqual(ff[5], fa[5])
+
+    def test_unknown_transport_raises(self):
+        from aerodynamic_model.casadi_simulator import make_geodetic_dynamics_model
+        with self.assertRaises(ValueError):
+            make_geodetic_dynamics_model(transport="bogus")
+
+
 if __name__ == "__main__":
     unittest.main()

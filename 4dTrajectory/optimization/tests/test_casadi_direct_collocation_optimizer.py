@@ -118,7 +118,7 @@ def test_optimize_handles_heading_wrap_across_180_deg():
     module = load_module()
     ap = aero_params_for_aircraft(C172)
     aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
-    step = make_geodetic_step_integrator(include_transport=True)["step_func"]
+    step = make_geodetic_step_integrator(transport="approx")["step_func"]
 
     duration = 2.0
     speed = C172.terminal_speed_kt * 0.51444 + 10.0
@@ -416,7 +416,7 @@ def test_optimize_free_time_raw_is_playback_consistent():
     # this is the playback path the frontend's dynamics now share.
     from aerodynamic_model.casadi_simulator import make_geodetic_step_integrator
 
-    step = make_geodetic_step_integrator(include_transport=True)["step_func"]
+    step = make_geodetic_step_integrator(transport="approx")["step_func"]
     aero_params = ca.DM([
         optimizer.aero_params.S,
         optimizer.aero_params.Cl_max,
@@ -479,7 +479,7 @@ def test_dense_state_keeps_playback_consistent_on_long_coarse_control_horizon():
     # horizon through the geodetic dynamics (on its own dynamics manifold).
     ap = aero_params_for_aircraft(A320)
     aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
-    gstep = make_geodetic_step_integrator(include_transport=True)["step_func"]
+    gstep = make_geodetic_step_integrator(transport="approx")["step_func"]
     u_nom = ca.DM([A320.approach_thrust_guess_n, 0.0, 1.0])
     xp = ca.DM([state.latitude, state.longitude, state.altitude,
                 state.V, state.psi, state.gamma, state.m])
@@ -568,7 +568,7 @@ def _propagate_with_geodetic_rhs(
     dynamics manifold (no cross-frame discrepancy to absorb)."""
     from aerodynamic_model.casadi_simulator import make_geodetic_step_integrator
 
-    step = make_geodetic_step_integrator(include_transport=True)["step_func"]
+    step = make_geodetic_step_integrator(transport="approx")["step_func"]
     aero_params = ca.DM([
         optimizer.aero_params.S,
         optimizer.aero_params.Cl_max,
@@ -614,13 +614,19 @@ def test_defect_scheme_registry_lists_all_schemes():
     # fittings; the re-anchored ENU is discrete so it is shooting-only.
     assert set(module._DEFECT_SCHEMES) == {
         "trapezoidal", "hermiteSimpson", "rk4",
+        "trapezoidalFullTransport", "hermiteSimpsonFullTransport", "rk4FullTransport",
         "trapezoidalNormalized", "hermiteSimpsonNormalized", "rk4Normalized",
+        "trapezoidalNormalizedFullTransport", "hermiteSimpsonNormalizedFullTransport",
+        "rk4NormalizedFullTransport",
         "localEnuTrapezoidal", "localEnuHermiteSimpson", "localEnu",
         "reanchoredEnu",
     }
-    # Only the *Normalized schemes carry the metric-position decision transform.
+    # Only the *Normalized schemes carry the metric-position decision transform
+    # (both the approx- and the full-transport normalized variants).
     assert module._NORMALIZED_SCHEMES == frozenset({
         "trapezoidalNormalized", "hermiteSimpsonNormalized", "rk4Normalized",
+        "trapezoidalNormalizedFullTransport", "hermiteSimpsonNormalizedFullTransport",
+        "rk4NormalizedFullTransport",
     })
     # The bare optimiser keeps Hermite-Simpson for backward compatibility.
     assert module._DEFAULT_SCHEME == "hermiteSimpson"
@@ -677,7 +683,7 @@ def _replay_geodetic_horiz_miss(aircraft, init, controls, horizon):
         AeroParams, make_geodetic_step_integrator,
     )
 
-    step = make_geodetic_step_integrator(include_transport=True)["step_func"]
+    step = make_geodetic_step_integrator(transport="approx")["step_func"]
     ap = aero_params_for_aircraft(aircraft)
     aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
     x = ca.DM([init.latitude, init.longitude, init.altitude,
@@ -713,7 +719,7 @@ def test_collocation_schemes_form_an_accuracy_ladder():
     )
     ap = aero_params_for_aircraft(A320)
     aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
-    step = make_geodetic_step_integrator(include_transport=True)["step_func"]
+    step = make_geodetic_step_integrator(transport="approx")["step_func"]
     u = ca.DM([A320.approach_thrust_guess_n, 0.0, 1.0])
     xp = ca.DM([init.latitude, init.longitude, init.altitude,
                 init.V, init.psi, init.gamma, init.m])
@@ -758,6 +764,67 @@ def test_collocation_schemes_form_an_accuracy_ladder():
     assert trap_pb > hs_pb
 
 
+def test_full_transport_schemes_registered_and_solve():
+    """The geodetic FULL-transport schemes (exact transport: the psi cross term
+    the default ``approx`` schemes drop) are registered and solve a feasible
+    problem, pinning their nodes on the target.  Full transport changes the
+    optimum only negligibly (the cross term is ~O(e^2 sinγ)), so the whole node
+    path stays within a few metres of the approx-transport optimum."""
+    from aerodynamic_model.aircraft_sets import A320
+    from aerodynamic_model.casadi_simulator import make_geodetic_step_integrator
+
+    module = load_module()
+    for scheme in ("hermiteSimpsonFullTransport", "trapezoidalFullTransport", "rk4FullTransport"):
+        assert scheme in module._DEFECT_SCHEMES
+
+    n_segments = 10
+    horizon = 90.0
+    init = GeodeticState(35.60, -78.50, 1500.0, 90.0,
+                         math.radians(40.0), math.radians(-3.0), A320.mass_kg)
+
+    # On-manifold target: propagate the nominal approach control through the
+    # FULL-transport geodetic RHS (so the full scheme is exactly feasible).
+    ap = aero_params_for_aircraft(A320)
+    aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
+    step = make_geodetic_step_integrator(transport="full")["step_func"]
+    u = ca.DM([A320.approach_thrust_guess_n, 0.0, 1.0])
+    xp = ca.DM([init.latitude, init.longitude, init.altitude,
+                init.V, init.psi, init.gamma, init.m])
+    for _ in range(int(horizon / 0.05)):
+        xp = step(x_geo=xp, u=u, aero_params=aero, dt=0.05)["x_geo_next"]
+    tp = np.array(xp).reshape(-1)
+    target = GeodeticState(tp[0], tp[1], tp[2], tp[3], tp[4], tp[5], A320.mass_kg)
+    R = 6_371_000.0
+
+    def solve(scheme):
+        opt = module.CasadiDirectCollocationOptimizer(
+            n_segments=n_segments, dt=0.2, max_duration=horizon * 1.6,
+            aircraft=A320, collocation_scheme=scheme,
+        )
+        _, controls, states = opt.optimize_trajectory(init, target, duration=horizon)
+        assert controls.shape == (n_segments, 3)
+        node_miss = R * math.hypot(
+            math.radians(states[-1][0] - target.latitude),
+            math.radians(states[-1][1] - target.longitude) * math.cos(math.radians(target.latitude)),
+        )
+        return node_miss, states
+
+    full_miss, full_states = solve("hermiteSimpsonFullTransport")
+    approx_miss, approx_states = solve("hermiteSimpson")
+    assert full_miss < 1.0
+    assert approx_miss < 1.0
+    # Whole-path separation between the full- and approx-transport optima: the
+    # cross term is tiny, so every node agrees to within a few metres.
+    max_sep = max(
+        R * math.hypot(
+            math.radians(f[0] - a[0]),
+            math.radians(f[1] - a[1]) * math.cos(math.radians(target.latitude)),
+        )
+        for f, a in zip(full_states, approx_states)
+    )
+    assert max_sep < 5.0
+
+
 def test_reanchored_enu_scheme_is_consistent_with_the_enu_playback():
     """The ``reanchoredEnu`` defect IS the re-anchored ENU one-step map the
     frontend playback (``CasadiSimulator``) runs, so a solution replayed
@@ -777,7 +844,7 @@ def test_reanchored_enu_scheme_is_consistent_with_the_enu_playback():
 
     ap = aero_params_for_aircraft(A320)
     aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
-    gstep = make_geodetic_step_integrator(include_transport=True)["step_func"]
+    gstep = make_geodetic_step_integrator(transport="approx")["step_func"]
     u = ca.DM([A320.approach_thrust_guess_n, 0.0, 1.0])
     xp = ca.DM([init.latitude, init.longitude, init.altitude,
                 init.V, init.psi, init.gamma, init.m])
@@ -865,7 +932,7 @@ def test_local_enu_scheme_solves_with_every_fitting():
 
     ap = aero_params_for_aircraft(A320)
     aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
-    gstep = make_geodetic_step_integrator(include_transport=True)["step_func"]
+    gstep = make_geodetic_step_integrator(transport="approx")["step_func"]
     u = ca.DM([A320.approach_thrust_guess_n, 0.0, 1.0])
     xp = ca.DM([init.latitude, init.longitude, init.altitude,
                 init.V, init.psi, init.gamma, init.m])
@@ -979,3 +1046,51 @@ def test_normalized_scheme_matches_plain_geodetic_on_a_benign_problem():
     assert norm.free_time_solver.stats()["success"]
     assert t_norm == pytest.approx(t_base, abs=0.05)
     np.testing.assert_allclose(s_norm[-1], s_base[-1], atol=1e-3)
+
+
+def test_normalized_full_transport_matches_plain_full_transport():
+    """The metric-position normalization is orthogonal to the transport model:
+    on a benign problem the normalized FULL-transport scheme returns the SAME
+    trajectory as the plain FULL-transport scheme (same arrival time + terminal
+    state) — exactly as the approx-transport pair does above."""
+    from aerodynamic_model.casadi_simulator import make_geodetic_step_integrator
+
+    module = load_module()
+    n_segments = 4
+    feasible_duration = 2.0
+    max_duration = 6.0
+
+    speed = C172.terminal_speed_kt * 0.51444 + 10.0
+    state = GeodeticState(51.1139, -114.0203, 1000.0, speed, 0.0, 0.0, C172.mass_kg)
+
+    plain = module.CasadiDirectCollocationOptimizer(
+        n_segments=n_segments, dt=0.2, max_duration=max_duration, aircraft=C172,
+        collocation_scheme="hermiteSimpsonFullTransport",
+    )
+    # Feasible target ON the full-transport manifold (propagate the full RHS).
+    step = make_geodetic_step_integrator(transport="full")["step_func"]
+    aero = ca.DM([
+        plain.aero_params.S, plain.aero_params.Cl_max, plain.aero_params.Cd0,
+        plain.aero_params.k, plain.aero_params.stall_threshold, plain.aero_params.k_stall,
+    ])
+    u = ca.DM([C172.approach_thrust_guess_n, 0.0, 1.0])
+    x = ca.DM([state.latitude, state.longitude, state.altitude,
+               state.V, state.psi, state.gamma, state.m])
+    n_steps = max(1, int(round(feasible_duration / 0.05)))
+    for _ in range(n_steps):
+        x = step(x_geo=x, u=u, aero_params=aero, dt=feasible_duration / n_steps)["x_geo_next"]
+    xt = np.array(x).reshape(-1)
+    target = GeodeticState(xt[0], xt[1], xt[2], xt[3], xt[4], xt[5], C172.mass_kg)
+
+    norm = module.CasadiDirectCollocationOptimizer(
+        n_segments=n_segments, dt=0.2, max_duration=max_duration, aircraft=C172,
+        collocation_scheme="hermiteSimpsonNormalizedFullTransport",
+    )
+
+    t_plain, _, s_plain = plain.optimize_free_time(state, target, max_duration)
+    t_norm, _, s_norm = norm.optimize_free_time(state, target, max_duration)
+
+    assert plain.free_time_solver.stats()["success"]
+    assert norm.free_time_solver.stats()["success"]
+    assert t_norm == pytest.approx(t_plain, abs=0.05)
+    np.testing.assert_allclose(s_norm[-1], s_plain[-1], atol=1e-3)

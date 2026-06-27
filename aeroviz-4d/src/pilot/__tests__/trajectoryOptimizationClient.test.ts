@@ -20,6 +20,12 @@ describe("optimizer dynamics × fitting decomposition", () => {
       "casadiDirectCollocationNormalized",
       "casadiDirectCollocationNormalizedTrapezoidal",
       "casadiDirectCollocationNormalizedRk4",
+      "casadiDirectCollocationFullTransport",
+      "casadiDirectCollocationFullTransportTrapezoidal",
+      "casadiDirectCollocationFullTransportRk4",
+      "casadiDirectCollocationNormalizedFullTransport",
+      "casadiDirectCollocationNormalizedFullTransportTrapezoidal",
+      "casadiDirectCollocationNormalizedFullTransportRk4",
     ] as const;
     for (const opt of optimizers) {
       const { dynamics, fitting } = optimizerToParts(opt);
@@ -66,6 +72,49 @@ describe("optimizer dynamics × fitting decomposition", () => {
     );
     expect(optimizerToParts("casadiDirectCollocationNormalizedRk4")).toEqual({
       dynamics: "geodeticNormalized",
+      fitting: "shooting",
+    });
+  });
+
+  it("full-transport geodetic is a continuous RHS: takes every fitting", () => {
+    // Same geodetic RHS but the EXACT transport (adds the psi cross term the
+    // default geodetic schemes drop), so it composes with each fitting.
+    expect(validFittingsForDynamics("geodeticFullTransport")).toEqual([
+      "hermiteSimpson", "trapezoidal", "shooting",
+    ]);
+    expect(partsToOptimizer("geodeticFullTransport", "hermiteSimpson")).toBe(
+      "casadiDirectCollocationFullTransport",
+    );
+    expect(partsToOptimizer("geodeticFullTransport", "trapezoidal")).toBe(
+      "casadiDirectCollocationFullTransportTrapezoidal",
+    );
+    expect(partsToOptimizer("geodeticFullTransport", "shooting")).toBe(
+      "casadiDirectCollocationFullTransportRk4",
+    );
+    expect(optimizerToParts("casadiDirectCollocationFullTransport")).toEqual({
+      dynamics: "geodeticFullTransport",
+      fitting: "hermiteSimpson",
+    });
+  });
+
+  it("normalized + full-transport geodetic composes both, takes every fitting", () => {
+    // The metric-position normalization (well-conditioned decision state) and the
+    // exact transport are orthogonal, so they compose into one continuous-RHS
+    // dynamics that takes every fitting.
+    expect(validFittingsForDynamics("geodeticNormalizedFullTransport")).toEqual([
+      "hermiteSimpson", "trapezoidal", "shooting",
+    ]);
+    expect(partsToOptimizer("geodeticNormalizedFullTransport", "hermiteSimpson")).toBe(
+      "casadiDirectCollocationNormalizedFullTransport",
+    );
+    expect(partsToOptimizer("geodeticNormalizedFullTransport", "trapezoidal")).toBe(
+      "casadiDirectCollocationNormalizedFullTransportTrapezoidal",
+    );
+    expect(partsToOptimizer("geodeticNormalizedFullTransport", "shooting")).toBe(
+      "casadiDirectCollocationNormalizedFullTransportRk4",
+    );
+    expect(optimizerToParts("casadiDirectCollocationNormalizedFullTransportRk4")).toEqual({
+      dynamics: "geodeticNormalizedFullTransport",
       fitting: "shooting",
     });
   });

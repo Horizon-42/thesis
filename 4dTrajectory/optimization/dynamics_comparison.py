@@ -10,11 +10,16 @@ MODEL/frame differences, not discretisation noise (all share the same RK4 step):
   B  per-step re-anchored ENU             (make_geo_step_from_enu_integrator)
        - rebuilds the tangent frame every step.  Most faithful discrete
          integrator, so it is the REFERENCE.
-  C  full geodetic RHS, WITH transport    (make_geodetic_step_integrator(True))
+  C  geodetic RHS, APPROX transport       (make_geodetic_step_integrator("approx"))
        - one continuous RHS in (lat, lon, h); curvature + frame-rotation folded
-         in.  Matches B to ~mm: validates the RHS.
-  D  geodetic RHS, NO transport           (make_geodetic_step_integrator(False))
+         in, but the psi cross term DROPPED.  Matches B to ~mm: validates the RHS.
+  D  geodetic RHS, NO transport           (make_geodetic_step_integrator("none"))
        - drops the transport terms; isolates how much they matter.
+
+Optionally a sixth system (``include_full_transport=True``):
+  F  geodetic RHS, FULL (exact) transport (make_geodetic_step_integrator("full"))
+       - adds the exact psi cross term that C ("approx") drops, so a run can
+         formally compare the APPROX (C) vs FULL (F) transport against truth B.
 
 This is the parameterised engine shared by:
   * ``dynamics_comparison_30km.py``      — the documented 30 km study (HTML doc), and
@@ -66,6 +71,12 @@ REFERENCE_KEY = "B"
 #: ``*Normalized`` optimizer schemes are a pure change of variables — they do not
 #: change the dynamics or the goal.  Opt-in so the 30 km study stays unchanged.
 NORMALIZED_KEY = "N"
+#: Optional system F: the geodetic RHS with the EXACT (FULL) transport -- adds
+#: the psi cross term that system C ("approx") drops.  Opt-in via
+#: ``compare_dynamics(include_full_transport=True)`` so the 30 km study stays
+#: byte-identical; lets a run formally compare the APPROX (C) vs FULL (F)
+#: transport models, both against the discrete truth B.
+FULL_TRANSPORT_KEY = "F"
 
 
 def horizontal_error_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -149,8 +160,9 @@ def _integrators() -> dict:
                 _INTEGRATORS = {
                     "flat_rhs": make_dynamics_model()["rhs_func"],
                     "reanchored": make_geo_step_from_enu_integrator()["step_func"],
-                    "geodetic_transport": make_geodetic_step_integrator(include_transport=True)["step_func"],
-                    "geodetic_no_transport": make_geodetic_step_integrator(include_transport=False)["step_func"],
+                    "geodetic_transport": make_geodetic_step_integrator(transport="approx")["step_func"],
+                    "geodetic_no_transport": make_geodetic_step_integrator(transport="none")["step_func"],
+                    "geodetic_full_transport": make_geodetic_step_integrator(transport="full")["step_func"],
                     "normalized_geodetic": _make_normalized_geodetic_stepper(),
                 }
     return _INTEGRATORS
@@ -186,6 +198,7 @@ def compare_dynamics(
     max_range_m: float | None = None,
     stop_below_ground: bool = True,
     include_normalized: bool = False,
+    include_full_transport: bool = False,
 ) -> DynamicsComparison:
     """Integrate the four systems from ``start`` under a constant ``control``.
 
@@ -214,6 +227,11 @@ def compare_dynamics(
         overlays system C to machine precision, so it is a live proof that the
         ``*Normalized`` optimizer schemes are a pure change of variables.  Off by
         default so the 30 km study (which does not pass it) is unchanged.
+    include_full_transport
+        Also integrate system ``F`` — the geodetic RHS with the EXACT (FULL)
+        transport (the psi cross term system C drops).  Lets a run compare the
+        APPROX (C) vs FULL (F) transport, both against the discrete truth B.  Off
+        by default so the 30 km study stays byte-identical.
     """
     integ = _integrators()
     flat_rhs = integ["flat_rhs"]
@@ -223,6 +241,8 @@ def compare_dynamics(
         "C": integ["geodetic_transport"],
         "D": integ["geodetic_no_transport"],
     }
+    if include_full_transport:
+        geo_step_funcs[FULL_TRANSPORT_KEY] = integ["geodetic_full_transport"]
     norm_step = integ["normalized_geodetic"] if include_normalized else None
 
     u = ca.DM([control[0], control[1], control[2]])
@@ -260,8 +280,16 @@ def compare_dynamics(
         arr = np.array(norm_step(ca.DM(x), u, aero, dt, x0[0], x0[1])).ravel()  # anchored at start
         return [float(v) for v in arr]
 
-    geo_keys = "BCDN" if norm_step is not None else "BCD"
-    keys = (*SYSTEM_KEYS, NORMALIZED_KEY) if norm_step is not None else SYSTEM_KEYS
+    # Optional systems append after the core A/B/C/D, in a fixed order: F (full
+    # transport) then N (normalized coords).  ``geo_keys`` are the geodetic-
+    # stepper systems advanced via ``geo_step`` each step (N is advanced via
+    # ``normalized_step`` instead); A lives in its own fixed ENU frame.
+    optional_keys = (
+        ([FULL_TRANSPORT_KEY] if include_full_transport else [])
+        + ([NORMALIZED_KEY] if norm_step is not None else [])
+    )
+    keys = (*SYSTEM_KEYS, *optional_keys)
+    geo_keys = "".join(["B", "C", "D"] + optional_keys)
     paths: dict[str, list[list[float]]] = {k: [list(x0)] for k in keys}
     state = {k: list(x0) for k in geo_keys}
     enu_A = geo_to_enu(x0)  # system A lives in the fixed ENU frame

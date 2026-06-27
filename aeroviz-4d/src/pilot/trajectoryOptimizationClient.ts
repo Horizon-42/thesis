@@ -20,6 +20,12 @@ export type TrajectoryOptimizer =
   | "casadiDirectCollocationLocalEnu"
   | "casadiDirectCollocationLocalEnuTrapezoidal"
   | "casadiDirectCollocationLocalEnuHermiteSimpson"
+  // Full-transport geodetic: same geodetic RHS but the EXACT transport (adds the
+  // psi cross term the default geodetic schemes drop). The fitting is selectable;
+  // the bare name is Hermite-Simpson.
+  | "casadiDirectCollocationFullTransport"
+  | "casadiDirectCollocationFullTransportTrapezoidal"
+  | "casadiDirectCollocationFullTransportRk4"
   // Normalized geodetic: same geodetic RHS, but the decision STATE is metric
   // position offsets from the target, so the NLP is well-conditioned and the
   // solve is robust on loose arrival windows / finer meshes. The fitting is
@@ -27,6 +33,11 @@ export type TrajectoryOptimizer =
   | "casadiDirectCollocationNormalized"
   | "casadiDirectCollocationNormalizedTrapezoidal"
   | "casadiDirectCollocationNormalizedRk4"
+  // Normalized geodetic with the EXACT (full) transport — the well-conditioned
+  // metric-position decision state AND the exact transport (the two compose).
+  | "casadiDirectCollocationNormalizedFullTransport"
+  | "casadiDirectCollocationNormalizedFullTransportTrapezoidal"
+  | "casadiDirectCollocationNormalizedFullTransportRk4"
   // Legacy optimizers: still served by the backend, no longer offered in
   // the UI (kept here so a response naming one still parses).
   | "casadiIpopt"
@@ -52,7 +63,13 @@ export type TrajectoryOptimizer =
 // loose arrival windows / finer meshes.  It is a continuous RHS, so it takes
 // every fitting (Hermite-Simpson / trapezoidal / shooting) just like the plain
 // geodetic dynamics; only the decision-state scaling differs.
-export type OptimizerDynamics = "geodetic" | "reanchoredEnu" | "localEnu" | "geodeticNormalized";
+export type OptimizerDynamics =
+  | "geodetic"
+  | "reanchoredEnu"
+  | "localEnu"
+  | "geodeticNormalized"
+  | "geodeticFullTransport"
+  | "geodeticNormalizedFullTransport";
 export type OptimizerFitting = "hermiteSimpson" | "trapezoidal" | "shooting";
 
 const COMBO_TO_OPTIMIZER: Record<string, TrajectoryOptimizer> = {
@@ -66,6 +83,12 @@ const COMBO_TO_OPTIMIZER: Record<string, TrajectoryOptimizer> = {
   "geodeticNormalized|hermiteSimpson": "casadiDirectCollocationNormalized",
   "geodeticNormalized|trapezoidal": "casadiDirectCollocationNormalizedTrapezoidal",
   "geodeticNormalized|shooting": "casadiDirectCollocationNormalizedRk4",
+  "geodeticFullTransport|hermiteSimpson": "casadiDirectCollocationFullTransport",
+  "geodeticFullTransport|trapezoidal": "casadiDirectCollocationFullTransportTrapezoidal",
+  "geodeticFullTransport|shooting": "casadiDirectCollocationFullTransportRk4",
+  "geodeticNormalizedFullTransport|hermiteSimpson": "casadiDirectCollocationNormalizedFullTransport",
+  "geodeticNormalizedFullTransport|trapezoidal": "casadiDirectCollocationNormalizedFullTransportTrapezoidal",
+  "geodeticNormalizedFullTransport|shooting": "casadiDirectCollocationNormalizedFullTransportRk4",
 };
 
 const OPTIMIZER_TO_COMBO: Record<string, { dynamics: OptimizerDynamics; fitting: OptimizerFitting }> = {
@@ -80,11 +103,18 @@ const OPTIMIZER_TO_COMBO: Record<string, { dynamics: OptimizerDynamics; fitting:
   casadiDirectCollocationNormalized: { dynamics: "geodeticNormalized", fitting: "hermiteSimpson" },
   casadiDirectCollocationNormalizedTrapezoidal: { dynamics: "geodeticNormalized", fitting: "trapezoidal" },
   casadiDirectCollocationNormalizedRk4: { dynamics: "geodeticNormalized", fitting: "shooting" },
+  casadiDirectCollocationFullTransport: { dynamics: "geodeticFullTransport", fitting: "hermiteSimpson" },
+  casadiDirectCollocationFullTransportTrapezoidal: { dynamics: "geodeticFullTransport", fitting: "trapezoidal" },
+  casadiDirectCollocationFullTransportRk4: { dynamics: "geodeticFullTransport", fitting: "shooting" },
+  casadiDirectCollocationNormalizedFullTransport: { dynamics: "geodeticNormalizedFullTransport", fitting: "hermiteSimpson" },
+  casadiDirectCollocationNormalizedFullTransportTrapezoidal: { dynamics: "geodeticNormalizedFullTransport", fitting: "trapezoidal" },
+  casadiDirectCollocationNormalizedFullTransportRk4: { dynamics: "geodeticNormalizedFullTransport", fitting: "shooting" },
 };
 
 /** Fittings valid for a given dynamics: only the re-anchored ENU stepper is
- * discrete (shooting-only).  Geodetic, fixed local-ENU, and the normalized
- * geodetic dynamics all refine a continuous RHS, so they take every fitting. */
+ * discrete (shooting-only).  Geodetic (approx or full transport), fixed
+ * local-ENU, and the normalized geodetic dynamics all refine a continuous RHS,
+ * so they take every fitting. */
 export function validFittingsForDynamics(dynamics: OptimizerDynamics): OptimizerFitting[] {
   if (dynamics === "reanchoredEnu") return ["shooting"];
   return ["hermiteSimpson", "trapezoidal", "shooting"];
@@ -313,6 +343,12 @@ function readOptimizer(value: Record<string, unknown>): TrajectoryOptimizer {
     nested === "casadiDirectCollocationNormalized" ||
     nested === "casadiDirectCollocationNormalizedTrapezoidal" ||
     nested === "casadiDirectCollocationNormalizedRk4" ||
+    nested === "casadiDirectCollocationFullTransport" ||
+    nested === "casadiDirectCollocationFullTransportTrapezoidal" ||
+    nested === "casadiDirectCollocationFullTransportRk4" ||
+    nested === "casadiDirectCollocationNormalizedFullTransport" ||
+    nested === "casadiDirectCollocationNormalizedFullTransportTrapezoidal" ||
+    nested === "casadiDirectCollocationNormalizedFullTransportRk4" ||
     nested === "casadiIpopt" ||
     nested === "transcription" ||
     nested === "leastSquaresTranscription" ||

@@ -277,22 +277,42 @@ def make_geo_step_from_enu_integrator():
 # (ENU) frame.  As the aircraft moves, that frame rotates over the curved
 # earth, so ``psi`` and ``gamma`` change even with zero aerodynamic moment.
 # That apparent rate is the **transport rate**.  The re-anchored ENU stepper
-# captures it implicitly (it re-projects the velocity into the new local
-# frame every step); to match it, the continuous geodetic RHS must carry the
-# transport terms explicitly.  They are derived from the ENU transport
-# angular velocity of the local frame relative to earth,
+# captures it EXACTLY (it re-projects the velocity into the new local frame
+# every step); to match it, the continuous geodetic RHS must carry the
+# transport terms explicitly.
+#
+# Derivation.  A velocity direction fixed in the earth frame changes, inside
+# the rotating ENU frame, at ``d(u_hat)/dt = -omega_en x u_hat`` with the
+# transport angular velocity of the local frame relative to earth
 #
 #   omega_en (ENU) = ( -V_north/(R_M+h),  V_east/(R_N+h),  V_east*tan(lat)/(R_N+h) )
 #
-# projected onto the heading/flight-path rotation axes:
+# Differentiating ``psi = atan2(u_N, u_E)`` and ``gamma = atan2(u_U, |u_h|)``
+# and substituting gives the EXACT transport contribution:
 #
-#   gamma_dot += V cos(gamma) * ( sin^2(psi)/(R_M+h) + cos^2(psi)/(R_N+h) )   (earth curves away -> pitch up)
-#   psi_dot   += -V cos(gamma) cos(psi) tan(lat) / (R_N+h)                    (meridian convergence)
+#   gamma_dot += V cos(gamma) * ( sin^2(psi)/(R_M+h) + cos^2(psi)/(R_N+h) )           (exact, two terms)
+#   psi_dot   += -V cos(gamma) cos(psi) tan(lat) / (R_N+h)                            (MAIN: meridian convergence = -omega_U)
+#              +  V sin(gamma) sin(psi) cos(psi) * ( 1/(R_N+h) - 1/(R_M+h) )          (CROSS term)
 #
-# ``include_transport=False`` drops them, which is useful for quantifying how
-# much they matter (see the 5 km comparison script).
+# The ``gamma`` expression is exact as written.  The ``psi`` MAIN term
+# dominates; the ``psi`` CROSS term is a product of two small factors --
+# ``sin(gamma)`` (zero in level flight) and the curvature-radius difference
+# ``1/(R_N+h) - 1/(R_M+h) = O(e^2)`` (zero on a sphere) -- so it is ~3-4
+# orders of magnitude smaller in terminal-area flight.  It is NOT dropped
+# silently: the ``transport`` argument selects how much is modelled.
+#
+#   "none"   -- no transport terms          (isolates how much they matter)
+#   "approx" -- gamma (exact) + psi MAIN     (drops the cross term; historical default)
+#   "full"   -- gamma + psi main + psi CROSS (the EXACT transport)
+#
+# See ``transport_term_comparison`` for the approx-vs-full quantification and
+# ``geodetic_vs_reanchored_error`` for the transport-vs-no-transport one.
 
-def make_geodetic_dynamics_model(include_transport: bool = True):
+#: Valid ``transport`` modes for the geodetic dynamics (see comment above).
+_TRANSPORT_MODES = ("none", "approx", "full")
+
+
+def make_geodetic_dynamics_model(transport: str = "approx"):
     """Continuous point-mass dynamics expressed DIRECTLY in geodetic
     coordinates.
 
@@ -300,7 +320,18 @@ def make_geodetic_dynamics_model(include_transport: bool = True):
     radians**, ``h`` geodetic altitude in metres.  Control and aero
     parameters match ``make_dynamics_model`` so the same callers and
     ``AeroParams`` work unchanged.
+
+    ``transport`` selects the frame-rotation (transport-rate) model on
+    ``psi``/``gamma`` -- one of ``"none"`` / ``"approx"`` / ``"full"`` (see
+    the comment block above).  ``"approx"`` (the historical default) keeps
+    the exact ``gamma`` transport and the dominant ``psi`` meridian-
+    convergence term but DROPS the ``psi`` cross term; ``"full"`` adds it
+    back for the exact transport; ``"none"`` drops all transport terms.
     """
+    if transport not in _TRANSPORT_MODES:
+        raise ValueError(
+            f"unknown transport {transport!r}; choose from {list(_TRANSPORT_MODES)}"
+        )
     lat = ca.SX.sym('lat')   # latitude (rad)
     lon = ca.SX.sym('lon')   # longitude (rad)
     h = ca.SX.sym('h')       # geodetic altitude (m)
@@ -358,11 +389,19 @@ def make_geodetic_dynamics_model(include_transport: bool = True):
     psi_dot = g * n * ca.sin(mu) / (V * cos_g)
     gamma_dot = g * (n * ca.cos(mu) - cos_g) / V
 
-    if include_transport:
+    if transport in ("approx", "full"):
+        # gamma transport is exact (both terms); psi gets the dominant
+        # meridian-convergence (MAIN) term.
         gamma_dot = gamma_dot + V * cos_g * (
             ca.sin(psi)**2 / (R_M + h) + ca.cos(psi)**2 / (R_N + h)
         )
         psi_dot = psi_dot - V * cos_g * ca.cos(psi) * ca.tan(lat) / (R_N + h)
+    if transport == "full":
+        # Exact psi CROSS term that "approx" drops -- the product of
+        # sin(gamma) and the curvature-radius difference (O(e^2 sin gamma)).
+        psi_dot = psi_dot + V * ca.sin(gamma) * ca.sin(psi) * ca.cos(psi) * (
+            1.0 / (R_N + h) - 1.0 / (R_M + h)
+        )
 
     dmdt = 0.0
     xdot = ca.vertcat(lat_dot, lon_dot, h_dot, V_dot, psi_dot, gamma_dot, dmdt)
@@ -385,7 +424,7 @@ def make_geodetic_dynamics_model(include_transport: bool = True):
         'xdot': xdot,
         'dae': dae,
         'rhs_func': rhs_func,
-        'include_transport': include_transport,
+        'transport': transport,
         'aux': {
             'rho': rho,
             'Cl': aero_coeffs['Cl'],
@@ -399,7 +438,7 @@ def make_geodetic_dynamics_model(include_transport: bool = True):
     }
 
 
-def make_geodetic_step_integrator(include_transport: bool = True):
+def make_geodetic_step_integrator(transport: str = "approx"):
     """RK4 stepper for ``make_geodetic_dynamics_model``.
 
     The external state uses lat/lon in **degrees** (so it is a drop-in
@@ -407,8 +446,11 @@ def make_geodetic_step_integrator(include_transport: bool = True):
     ``GeodeticState``), while the RK4 advance happens in radians on the
     continuous geodetic RHS.  Unlike the re-anchored stepper, there is no
     per-step frame swap: it integrates one continuous ODE.
+
+    ``transport`` is forwarded to ``make_geodetic_dynamics_model`` (``"none"``
+    / ``"approx"`` / ``"full"``).
     """
-    model = make_geodetic_dynamics_model(include_transport=include_transport)
+    model = make_geodetic_dynamics_model(transport=transport)
     rhs_expr = model['rhs_func']
 
     lat = ca.SX.sym('lat')   # degrees

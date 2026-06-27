@@ -9,10 +9,10 @@ physically faithful reference at every point along the path:
   (B) per-step re-anchored ENU                          (make_geo_step_from_enu_integrator)
         - rebuilds the tangent frame every step (ref = current point).  This is
           the most faithful discrete integrator, so it is the REFERENCE.
-  (C) full geodetic RHS, WITH transport                 (make_geodetic_step_integrator(True))
+  (C) geodetic RHS, APPROX transport                    (make_geodetic_step_integrator("approx"))
         - one continuous RHS in (lat, lon, h); curvature + frame-rotation
           (transport) folded in.  Should match (B) to ~mm: validates the RHS.
-  (D) geodetic RHS, NO transport                        (make_geodetic_step_integrator(False))
+  (D) geodetic RHS, NO transport                        (make_geodetic_step_integrator("none"))
         - same but drops the transport terms; isolates how much they matter.
 
 All four are integrated with the SAME RK4 step (dt below) from the SAME start,

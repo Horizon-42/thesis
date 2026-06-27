@@ -204,9 +204,14 @@ def enu_step_defect_expr(step_func, x_k, x_kp1, u_k, aero_params, h):
 #                                     ``defect(x_k, x_kp1, u, aero, h)``.
 # (the target is the fixed ENU anchor; geodetic / re-anchored schemes ignore it)
 
-def _geodetic_scheme(fitting_fn):
+def _geodetic_scheme(fitting_fn, transport: str = "approx"):
+    """A geodetic scheme = the continuous geodetic RHS (with the chosen
+    ``transport`` model) collocated by ``fitting_fn``.  ``transport="approx"``
+    is the historical default (exact gamma + psi meridian-convergence, psi cross
+    term dropped); ``transport="full"`` uses the EXACT transport (adds the psi
+    cross term) -- see ``make_geodetic_dynamics_model``."""
     def make_dynamics():
-        return make_geodetic_dynamics_model()["rhs_func"]
+        return make_geodetic_dynamics_model(transport=transport)["rhs_func"]
 
     def make_defect(rhs, target_state):
         return lambda x_k, x_kp1, u, aero, h: fitting_fn(rhs, x_k, x_kp1, u, aero, h)
@@ -294,14 +299,17 @@ def _identity_cb():
     return ca.DM.ones(STATE_DIM), ca.DM.zeros(STATE_DIM)
 
 
-def _geodetic_normalized_scheme(fitting_fn):
+def _geodetic_normalized_scheme(fitting_fn, transport: str = "approx"):
     """A geodetic scheme whose decision STATE is metric position offsets from
-    the target (see above).  Same continuous geodetic RHS; the defect evaluates
-    it on the reconstructed physical state and scales the derivative back into
-    metric coords, so the residual is metric.  Anchored at the target, like
-    ``localEnu`` (reuses the ``target_state`` the builder already passes)."""
+    the target (see above).  Same continuous geodetic RHS (with the chosen
+    ``transport`` model); the defect evaluates it on the reconstructed physical
+    state and scales the derivative back into metric coords, so the residual is
+    metric.  Anchored at the target, like ``localEnu`` (reuses the
+    ``target_state`` the builder already passes).  ``transport="full"`` uses the
+    EXACT transport (adds the psi cross term); the metric-position change of
+    variables is orthogonal to the transport model, so it composes cleanly."""
     def make_dynamics():
-        return make_geodetic_dynamics_model()["rhs_func"]
+        return make_geodetic_dynamics_model(transport=transport)["rhs_func"]
 
     def make_defect(rhs, target_state):
         c, b = _normalization_cb(target_state)
@@ -325,9 +333,22 @@ _DEFECT_SCHEMES = {
     "trapezoidal":            _geodetic_scheme(trapezoidal_defect_expr),
     "hermiteSimpson":         _geodetic_scheme(hermite_simpson_defect_expr),
     "rk4":                    _geodetic_scheme(rk4_defect_expr),
+    # FULL-transport geodetic: the EXACT transport (adds the psi cross term the
+    # default "approx" geodetic schemes drop).  Same fittings; an explicit
+    # opt-in so the default geodetic results are unchanged.
+    "trapezoidalFullTransport":    _geodetic_scheme(trapezoidal_defect_expr, transport="full"),
+    "hermiteSimpsonFullTransport": _geodetic_scheme(hermite_simpson_defect_expr, transport="full"),
+    "rk4FullTransport":            _geodetic_scheme(rk4_defect_expr, transport="full"),
     "trapezoidalNormalized":  _geodetic_normalized_scheme(trapezoidal_defect_expr),
     "hermiteSimpsonNormalized": _geodetic_normalized_scheme(hermite_simpson_defect_expr),
     "rk4Normalized":          _geodetic_normalized_scheme(rk4_defect_expr),
+    # Normalized + FULL transport: the well-conditioned metric-position decision
+    # state AND the EXACT transport.  The two are orthogonal (change of variables
+    # vs RHS model), so they compose; a new opt-in, the approx-transport
+    # normalized schemes above are unchanged.
+    "trapezoidalNormalizedFullTransport":    _geodetic_normalized_scheme(trapezoidal_defect_expr, transport="full"),
+    "hermiteSimpsonNormalizedFullTransport": _geodetic_normalized_scheme(hermite_simpson_defect_expr, transport="full"),
+    "rk4NormalizedFullTransport":            _geodetic_normalized_scheme(rk4_defect_expr, transport="full"),
     "localEnuTrapezoidal":    _local_enu_scheme(trapezoidal_defect_expr),
     "localEnuHermiteSimpson": _local_enu_scheme(hermite_simpson_defect_expr),
     "localEnu":               _local_enu_scheme(rk4_defect_expr),
@@ -338,6 +359,8 @@ _DEFECT_SCHEMES = {
 # and the identity for all others.
 _NORMALIZED_SCHEMES = frozenset({
     "trapezoidalNormalized", "hermiteSimpsonNormalized", "rk4Normalized",
+    "trapezoidalNormalizedFullTransport", "hermiteSimpsonNormalizedFullTransport",
+    "rk4NormalizedFullTransport",
 })
 _DEFAULT_SCHEME = "hermiteSimpson"
 

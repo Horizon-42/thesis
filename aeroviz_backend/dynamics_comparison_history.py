@@ -29,10 +29,11 @@ from aeroviz_backend import paths
 # One JSON file per run, kept out of the source tree's tracked code.
 HISTORY_DIR = paths.REPO_ROOT / "dynamics_comparison_history"
 
-# A/C/D vs the reference B, plus N (the normalized-coords geodetic run, which
-# overlays C).  Records written before a key existed (legacy runs without "N",
-# or without the "fpa" field) simply contribute zeros for it — see below.
-_CHART_KEYS = ("A", "C", "D", "N")
+# A/C/D vs the reference B, plus F (the FULL/exact-transport geodetic run) and N
+# (the normalized-coords geodetic run, which overlays C).  Records written before
+# a key existed (legacy runs without "F"/"N", or without the "fpa" field) simply
+# contribute zeros for it — see below.  Mirrors dynamics_comparison_backend._CHART_KEYS.
+_CHART_KEYS = ("A", "C", "D", "F", "N")
 _ERROR_FIELDS = ("horiz", "alt", "head", "speed", "fpa")
 _AVERAGE_GRID_POINTS = 120
 

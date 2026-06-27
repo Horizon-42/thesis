@@ -104,10 +104,12 @@ const DEFAULT_COMPARISON_CONTROL: DynamicsComparisonControl = {
 };
 const DEFAULT_TRAJECTORY_OPTIMIZER: TrajectoryOptimizer = "casadiDirectCollocation";
 const OPTIMIZER_DYNAMICS_OPTIONS: { value: OptimizerDynamics; label: string }[] = [
-  { value: "geodetic", label: "Geodetic RHS (+transport)" },
+  { value: "geodetic", label: "Geodetic RHS (+transport, approx)" },
   { value: "reanchoredEnu", label: "Re-anchored ENU (playback model)" },
   { value: "localEnu", label: "Local ENU @ target (fixed tangent, drifts far out)" },
   { value: "geodeticNormalized", label: "Geodetic RHS (normalized, robust)" },
+  { value: "geodeticFullTransport", label: "Geodetic RHS (+transport, full/exact)" },
+  { value: "geodeticNormalizedFullTransport", label: "Geodetic RHS (normalized + full/exact transport)" },
 ];
 const OPTIMIZER_FITTING_OPTIONS: { value: OptimizerFitting; label: string }[] = [
   { value: "hermiteSimpson", label: "Hermite-Simpson (cubic, 4th order)" },

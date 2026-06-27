@@ -310,6 +310,15 @@ class TestOptimizationBackend(unittest.TestCase):
         self.assertEqual(seen["casadiDirectCollocationNormalized"], "hermiteSimpsonNormalized")
         self.assertEqual(seen["casadiDirectCollocationNormalizedTrapezoidal"], "trapezoidalNormalized")
         self.assertEqual(seen["casadiDirectCollocationNormalizedRk4"], "rk4Normalized")
+        # The full-transport names select the EXACT-transport geodetic schemes
+        # (same geodetic RHS plus the psi cross term the default schemes drop).
+        self.assertEqual(seen["casadiDirectCollocationFullTransport"], "hermiteSimpsonFullTransport")
+        self.assertEqual(seen["casadiDirectCollocationFullTransportTrapezoidal"], "trapezoidalFullTransport")
+        self.assertEqual(seen["casadiDirectCollocationFullTransportRk4"], "rk4FullTransport")
+        # Normalized + full transport (the two compose into one scheme).
+        self.assertEqual(seen["casadiDirectCollocationNormalizedFullTransport"], "hermiteSimpsonNormalizedFullTransport")
+        self.assertEqual(seen["casadiDirectCollocationNormalizedFullTransportTrapezoidal"], "trapezoidalNormalizedFullTransport")
+        self.assertEqual(seen["casadiDirectCollocationNormalizedFullTransportRk4"], "rk4NormalizedFullTransport")
 
     def test_optimize_reuses_casadi_optimizer_for_same_solver_key(self):
         constructions = []

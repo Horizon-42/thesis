@@ -1,0 +1,88 @@
+{
+  "meta": {
+    "aircraft": "A320",
+    "refLat": 51.1138,
+    "refLon": -114.0203,
+    "refAltM": 3000.0,
+    "speedMps": 130.0,
+    "headingDeg": 30.0,
+    "fpaDeg": -3.0,
+    "bankDeg": 15.0,
+    "fineDtS": 0.005
+  },
+  "rhsDifference": {
+    "labels": [
+      "lat_dot",
+      "lon_dot",
+      "h_dot",
+      "V_dot",
+      "psi_dot",
+      "gamma_dot",
+      "m_dot"
+    ],
+    "diff": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1.2231955899555391e-09,
+      0.0,
+      0.0
+    ],
+    "analyticCross": 1.2231955890945496e-09,
+    "psiMatchesCross": true,
+    "nonPsiAllZero": true
+  },
+  "horizonSweep": [
+    {
+      "horizonS": 30.0,
+      "horizMm": 0.13250041194297812,
+      "psiArcsec": 0.014779666014196417,
+      "gammaArcsec": 9.921422273357294e-09,
+      "altMm": 6.730260793119669e-08
+    },
+    {
+      "horizonS": 60.0,
+      "horizMm": 0.6941692173654622,
+      "psiArcsec": 0.028886912688989658,
+      "gammaArcsec": 2.6220492793985233e-08,
+      "altMm": 6.459686119342223e-07
+    },
+    {
+      "horizonS": 120.0,
+      "horizMm": 1.2483643508938302,
+      "psiArcsec": 0.03332961062503065,
+      "gammaArcsec": 2.3712943483119397e-08,
+      "altMm": 1.7643060346017592e-06
+    }
+  ],
+  "dtIndependence": [
+    {
+      "dtS": 0.05,
+      "horizMm": 0.6942088021544542,
+      "psiArcsec": 0.02888691383398934
+    },
+    {
+      "dtS": 0.02,
+      "horizMm": 0.6941887492287349,
+      "psiArcsec": 0.028886915162188973
+    },
+    {
+      "dtS": 0.01,
+      "horizMm": 0.6942028646888415,
+      "psiArcsec": 0.02888691333018948
+    },
+    {
+      "dtS": 0.005,
+      "horizMm": 0.6941692173654622,
+      "psiArcsec": 0.028886912688989658
+    }
+  ],
+  "vsTruth": {
+    "horizonS": 120.0,
+    "approxHorizMm": 4.463887243555459,
+    "fullHorizMm": 4.485836183846676,
+    "approxPsiArcsec": 0.07286209079136528,
+    "fullPsiArcsec": 0.03953248016633463
+  }
+}

@@ -84,8 +84,8 @@ def build_steppers(aircraft) -> Steppers:
     aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
     return Steppers(
         reanchored=make_geo_step_from_enu_integrator()["step_func"],
-        geodetic_transport=make_geodetic_step_integrator(include_transport=True)["step_func"],
-        geodetic_no_transport=make_geodetic_step_integrator(include_transport=False)["step_func"],
+        geodetic_transport=make_geodetic_step_integrator(transport="approx")["step_func"],
+        geodetic_no_transport=make_geodetic_step_integrator(transport="none")["step_func"],
         aero_params=aero,
     )
 

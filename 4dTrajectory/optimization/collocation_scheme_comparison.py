@@ -79,7 +79,7 @@ def _aero_dm(aircraft):
 def _feasible_target(aircraft, init, horizon):
     """Forward-propagate the nominal approach control to get an on-manifold
     target the optimiser can recover with any scheme."""
-    step = make_geodetic_step_integrator(include_transport=True)["step_func"]
+    step = make_geodetic_step_integrator(transport="approx")["step_func"]
     aero = _aero_dm(aircraft)
     u = ca.DM([aircraft.approach_thrust_guess_n, 0.0, 1.0])
     x = ca.DM([init.latitude, init.longitude, init.altitude,
@@ -93,7 +93,7 @@ def _feasible_target(aircraft, init, horizon):
 def _replay_terminal(aircraft, init, controls, horizon, dt=0.05):
     """Replay piecewise-constant controls through the fine geodetic integrator
     and return (terminal GeodeticState, min altitude)."""
-    step = make_geodetic_step_integrator(include_transport=True)["step_func"]
+    step = make_geodetic_step_integrator(transport="approx")["step_func"]
     aero = _aero_dm(aircraft)
     x = ca.DM([init.latitude, init.longitude, init.altitude,
                init.V, init.psi, init.gamma, init.m])

@@ -62,7 +62,7 @@ def _horiz_m(lat, lon, ref):
 
 
 def _feasible_target(aircraft, init, horizon):
-    step = make_geodetic_step_integrator(include_transport=True)["step_func"]
+    step = make_geodetic_step_integrator(transport="approx")["step_func"]
     ap = aero_params_for_aircraft(aircraft)
     aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
     u = ca.DM([aircraft.approach_thrust_guess_n, 0.0, 1.0])

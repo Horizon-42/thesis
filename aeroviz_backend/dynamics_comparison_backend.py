@@ -48,17 +48,22 @@ from common import GeodeticState, LoadFactorControl
 from aerodynamic_model.casadi_simulator import aero_params_for_aircraft
 from dynamics_comparison import (
     COMPARED_KEYS,
+    FULL_TRANSPORT_KEY,
     NORMALIZED_KEY,
     compare_dynamics,
     error_series,
     even_sample_indices,
 )
 
-# The interactive Compare mode also flies system N (the geodetic RHS in the
-# optimizer's NORMALIZED metric coordinates), so its error vs B is charted
-# alongside A/C/D.  N overlays C to machine precision, demonstrating the
-# *Normalized optimizer schemes do not change the dynamics or the goal.
-_CHART_KEYS = (*COMPARED_KEYS, NORMALIZED_KEY)
+# The interactive Compare mode also flies systems F and N, so their error vs B is
+# charted alongside A/C/D:
+#   F — the geodetic RHS with the EXACT (FULL) transport (adds the psi cross term
+#       system C's "approx" transport drops); lets the user formally compare the
+#       APPROX (C) vs FULL (F) transport, both against the discrete truth B.
+#   N — the geodetic RHS in the optimizer's NORMALIZED metric coordinates, which
+#       overlays C to machine precision, showing the *Normalized optimizer
+#       schemes do not change the dynamics or the goal.
+_CHART_KEYS = (*COMPARED_KEYS, FULL_TRANSPORT_KEY, NORMALIZED_KEY)
 
 
 _ENTITY_PREFIX = "dyncmp-"
@@ -96,7 +101,7 @@ _SYSTEMS = (
     },
     {
         "key": "C",
-        "label": "C · geodetic RHS, +transport",
+        "label": "C · geodetic RHS, +transport (approx)",
         "color": (56, 189, 248, 240),
         "reference": False,
     },
@@ -104,6 +109,16 @@ _SYSTEMS = (
         "key": "D",
         "label": "D · geodetic RHS, no transport",
         "color": (250, 204, 21, 240),
+        "reference": False,
+    },
+    {
+        # The geodetic RHS with the EXACT (FULL) transport — adds the psi cross
+        # term C's "approx" transport drops.  It sits even closer to truth B than
+        # C, so this is the formal APPROX-vs-FULL transport comparison.  Magenta
+        # so it reads distinctly against cyan C, which it overlaps physically.
+        "key": "F",
+        "label": "F · geodetic RHS, +transport (full/exact)",
+        "color": (236, 72, 153, 240),
         "reference": False,
     },
     {
@@ -168,8 +183,11 @@ class DynamicsComparisonBackend:
             # diverge as they fly away from it (clearest "different dynamics ->
             # different drift" picture for an interactive run).
             anchor_geo=None,
-            # Also fly system N (geodetic RHS in normalized coords) so the user
-            # can verify it overlays C (i.e. normalization changes nothing).
+            # Also fly system F (exact/full transport) so the user can formally
+            # compare it against C (approx transport), and system N (geodetic RHS
+            # in normalized coords) so they can verify it overlays C (i.e.
+            # normalization changes nothing).
+            include_full_transport=True,
             include_normalized=True,
         )
 

@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>近似 vs 完整 transport：那一个被丢掉的 ψ 交叉项</title>
+<script>
+  window.MathJax = {
+    tex: { inlineMath: [['$', '$']], displayMath: [['$$', '$$']] },
+    svg: { fontCache: 'global' }
+  };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js" async></script>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+<style>
+  :root{
+    --bg:#0f1419; --panel:#161b22; --ink:#e6edf3; --muted:#9aa7b4;
+    --approx:#38bdf8;  /* 近似 = 系统 C 的青色 */
+    --full:#ec4899;    /* 完整 = 系统 F 的品红 */
+    --conv:#3fb950; --pitch:#e3873c;
+    --bad:#f85149; --line:#2a323c; --codebg:#0b0f14; --accent:#7ee0ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);line-height:1.85;font-size:16.5px;
+       font-family:-apple-system,"PingFang SC","Microsoft YaHei",Segoe UI,Roboto,sans-serif;}
+  .wrap{max-width:920px;margin:0 auto;padding:34px 22px 120px}
+  h1{font-size:30px;line-height:1.3;margin:6px 0 6px}
+  .lede{color:var(--muted);font-size:17px;margin:0 0 28px}
+  h2{font-size:23px;margin:54px 0 14px}
+  h2 .badge{display:inline-block;width:30px;height:30px;line-height:30px;text-align:center;
+    border-radius:50%;background:#1d2733;color:var(--accent);font-size:16px;margin-right:10px;vertical-align:2px}
+  h3{font-size:18px;margin:30px 0 8px}
+  p{margin:13px 0}
+  a{color:var(--accent)}
+  code{background:var(--codebg);padding:1px 6px;border-radius:5px;font-size:14px;
+    font-family:"SF Mono",Menlo,Consolas,monospace;color:#cfe0f0}
+  pre{background:var(--codebg);border:1px solid var(--line);border-radius:9px;padding:14px 16px;overflow-x:auto;font-size:13.5px}
+  pre code{background:none;padding:0}
+  .approx{color:var(--approx);font-weight:600}
+  .full{color:var(--full);font-weight:600}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:18px 20px;margin:18px 0}
+  .box{border-left:4px solid var(--accent);background:#10212e66;border-radius:0 9px 9px 0;padding:11px 16px;margin:16px 0}
+  .box.intuition{border-color:#f0c75e;background:#2a230f55}
+  .box.think{border-color:#b985ff;background:#1e1530aa}
+  .box .tag{display:block;font-size:13px;letter-spacing:.04em;color:var(--muted);margin-bottom:3px}
+  .box.intuition .tag{color:#f0c75e}
+  .box.think .tag{color:#c6a0ff}
+  .fig{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:14px;margin:22px 0}
+  .fig .plot{width:100%}
+  .cap{color:var(--muted);font-size:14px;margin:9px 4px 2px}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13.5px}
+  th,td{border:1px solid var(--line);padding:6px 9px;text-align:right;font-variant-numeric:tabular-nums}
+  th{background:#1c2430}
+  td.l,th.l{text-align:left}
+  .mono{font-family:"SF Mono",Menlo,Consolas,monospace}
+  .small{font-size:14px;color:var(--muted)}
+  hr{border:none;border-top:1px solid var(--line);margin:40px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>近似 vs 完整 transport<br>——那一个被丢掉的 ψ 交叉项</h1>
+<p class="lede">
+大圆地球上的连续测地动力学 RHS（<code>make_geodetic_dynamics_model</code>）在 ψ、γ 上带有
+<b>输运率（transport rate）</b>。历史默认实现用了一个<b>近似</b>：γ 的输运是精确的，ψ 只保留了主项
+（子午线收敛），而<b>悄悄丢掉了一个 ψ 交叉项</b>。本文把这个被丢掉的项<b>从头推导出来</b>、解释为何它小、
+并<b>定量</b>给出"丢掉它到底差多少"——让"用近似还是用精确"成为一个有据可查的显式选择，而不是一个无人知晓的近似。
+</p>
+
+<div class="box">
+<span class="tag">本文符号约定</span>
+ψ＝航向角（从正东起算，向北为正）；γ＝航迹倾角；lat＝纬度；h＝测地高度；
+$R_M$＝子午圈曲率半径，$R_N$＝卯酉圈曲率半径；$e^2$＝WGS84 偏心率平方（≈0.0067）。
+</div>
+
+<!-- ───────────────────────────────────────────── -->
+<h2><span class="badge">1</span>问题：局部坐标系在转，ψ、γ 也跟着变</h2>
+
+<p>
+飞机的航向 ψ 和航迹倾角 γ 是相对<b>当地</b>地理（ENU）坐标系定义的。飞机一旦移动，这个当地坐标系就在
+弯曲的地球上<b>转动</b>——于是即使没有任何气动力矩，ψ、γ 也会变。这个"凭空"的变化率就是<b>输运率</b>。
+</p>
+
+<p>当地 ENU 坐标系相对地球的转动角速度（投影到 ENU 三轴）是标准结果：</p>
+$$
+\boldsymbol{\omega}_{en}^{ENU}=\Big(\,\underbrace{-\tfrac{V_N}{R_M+h}}_{\omega_E},\;
+\underbrace{\tfrac{V_E}{R_N+h}}_{\omega_N},\;
+\underbrace{\tfrac{V_E\tan\mathrm{lat}}{R_N+h}}_{\omega_U}\,\Big)
+$$
+
+<div class="box intuition">
+<span class="tag">直觉</span>
+$\omega_U$（绕"天向"轴转）就是<b>子午线收敛</b>：越往高纬，经线越收拢，沿大圆直飞时"正北"方向本身在转，
+所以航向 ψ 会变——这是平飞时也存在的主导效应。$\omega_E,\omega_N$（水平两轴）主要让<b>俯仰</b> γ 变：
+地球往脚下弯下去，要保持沿地表飞就得不断"低头"。
+</div>
+
+<!-- ───────────────────────────────────────────── -->
+<h2><span class="badge">2</span>从零推导：把 $-\boldsymbol\omega\times\hat u$ 投到 ψ、γ 上</h2>
+
+<p>
+设速度方向单位矢量（在 ENU 系里）为
+$\hat u=(u_E,u_N,u_U)=(\cos\gamma\cos\psi,\ \cos\gamma\sin\psi,\ \sin\gamma)$。
+只看输运效应时，速度在<b>地球系</b>里方向不变；那么它在<b>转动的 ENU 系</b>里的分量变化率是
+</p>
+$$ \frac{d\hat u}{dt}\Big|_{\text{frame}} = -\,\boldsymbol\omega_{en}\times\hat u. $$
+
+<p>ψ、γ 都能从 $\hat u$ 反解出来，对它们求导（链式法则）即可：</p>
+
+<h3>2.1 对 γ 求导——结果恰好精确（两项）</h3>
+<p>
+$\gamma=\operatorname{atan2}(u_U,\ \rho)$，其中 $\rho=\sqrt{u_E^2+u_N^2}=\cos\gamma$。代入
+$\tfrac{d\hat u}{dt}$ 化简（绕天向轴 $\omega_U$ 的分量在这里完全抵消，因为绕竖直轴转不改变仰角）：
+</p>
+$$
+\boxed{\ \dot\gamma_{\text{transport}} = V\cos\gamma\Big(\frac{\sin^2\psi}{R_M+h}+\frac{\cos^2\psi}{R_N+h}\Big)\ }
+$$
+<p>这是<span class="full">精确</span>表达式，两项都必须保留——它在代码里就是 <code>gamma_dot</code> 的输运项，<b>无任何近似</b>。</p>
+
+<h3>2.2 对 ψ 求导——出现"主项 + 交叉项"</h3>
+<p>
+$\psi=\operatorname{atan2}(u_N,u_E)$，于是
+$\dot\psi=\dfrac{u_E\,\dot u_N-u_N\,\dot u_E}{u_E^2+u_N^2}$。同样代入 $-\boldsymbol\omega\times\hat u$ 并化简，得到<b>精确</b>结果：
+</p>
+$$
+\dot\psi_{\text{transport}}=
+\underbrace{-\,V\cos\gamma\cos\psi\,\frac{\tan\mathrm{lat}}{R_N+h}}_{\textbf{主项 }=\,-\omega_U\text{（子午线收敛）}}
+\;+\;
+\underbrace{V\sin\gamma\,\sin\psi\cos\psi\Big(\frac{1}{R_N+h}-\frac{1}{R_M+h}\Big)}_{\textbf{交叉项（被 approx 丢掉）}}
+$$
+
+<div class="box think">
+<span class="tag">关键观察</span>
+γ 的输运"凑巧"精确；ψ 却多出一个交叉项。物理上：<b>竖直输运</b> $\omega_U$ 纯粹绕天向轴转 → 只改 ψ（这就是保留的主项，也是平飞就存在的）；
+<b>水平输运</b> $\omega_E,\omega_N$ 主要去转 γ（§2.1 的两项），只通过姿态俯仰 $\sin\gamma$ 才"漏"一点点进 ψ——这就是交叉项。
+</div>
+
+<!-- ───────────────────────────────────────────── -->
+<h2><span class="badge">3</span>为什么 approx 敢丢它：两个小量之积</h2>
+
+<p>被丢掉的交叉项 $V\sin\gamma\,\sin\psi\cos\psi\,(\tfrac{1}{R_N+h}-\tfrac{1}{R_M+h})$ 同时带<b>两个独立的小因子</b>：</p>
+<ul>
+<li><b>$\sin\gamma$</b> ——平飞时 $\gamma=0$，此项<b>恒为零</b>；进近 $\gamma\approx-3^\circ$ 时 $\sin\gamma\approx-0.05$。</li>
+<li><b>$\dfrac{1}{R_N+h}-\dfrac{1}{R_M+h}$</b> ——两个曲率半径之差，<b>只因地球椭率才非零</b>，量级 $O(e^2)\approx0.7\%$；在<b>球面</b>上 $R_M=R_N$，此因子<b>恒等于零</b>。</li>
+</ul>
+<p>
+两个小量相乘，使交叉项比主项小约 <b>3–4 个数量级</b>。所以 approx 丢掉它在工程上无可指摘——
+但<b>本文坚持把它量化并作为显式可选项</b>：γ 的输运精确、ψ 主项精确，唯一的近似就是这一项，量化它才能在论文里逐项交代。
+</p>
+
+<!-- ───────────────────────────────────────────── -->
+<h2><span class="badge">4</span>RHS 级别的铁证：差别只在 ψ，且恰好是交叉项</h2>
+
+<p>
+直接对比两套 RHS：<code>make_geodetic_dynamics_model("full")</code> 减去 <code>("approx")</code>，
+在同一个状态上逐分量求值。结果（与解析交叉项对照）——这是 <b>dt 无关、精确</b>的对比：
+</p>
+
+<table id="rhs-table">
+<thead><tr><th class="l">分量</th><th>full − approx (rad/s 等)</th><th class="l">说明</th></tr></thead>
+<tbody></tbody>
+</table>
+<p class="small" id="rhs-note"></p>
+
+<div class="box">
+<span class="tag">结论（§4）</span>
+<code>full − approx</code> 只在 <code>psi_dot</code> 一个分量上非零，数值与解析交叉项相符到机器精度；
+其余六个分量（含 <code>gamma_dot</code>）<b>逐位为零</b>。即：这个近似<b>只扰动航向率</b>，不碰位置、速度、俯仰、质量。
+</div>
+
+<!-- ───────────────────────────────────────────── -->
+<h2><span class="badge">5</span>轨迹级别的量化：丢掉它到底差多少</h2>
+
+<p>
+把同一初始状态、同一恒定操纵，分别用 approx 和 full 积分（<b>同一套 RK4 格式，只有矢量场差一个交叉项</b>），
+直接看两条轨迹的分歧 $|\text{approx}-\text{full}|$。因为格式相同，这个分歧就是<b>纯粹的交叉项积分</b>，没有截断噪声。
+</p>
+
+<p class="small" id="case-note"></p>
+
+<div class="fig"><div id="plot-horizon" class="plot" style="height:330px"></div>
+<div class="cap">图 1 · $|\text{approx}-\text{full}|$ 随飞行时长增长：水平偏差（左轴，mm）与航向偏差（右轴，角秒）。
+γ、高度偏差恒为 0（交叉项不碰它们）。</div></div>
+
+<div class="fig"><div id="plot-dt" class="plot" style="height:300px"></div>
+<div class="cap">图 2 · 同一 60 s 飞行下，$|\text{approx}-\text{full}|$ <b>不随步长 dt 变化</b>——这证明它是<b>矢量场</b>差异
+（交叉项的积分），而非数值截断误差（截断误差会随 dt 显著变化）。</div></div>
+
+<div class="box intuition">
+<span class="tag">怎么读这两张图</span>
+图 1：交叉项的效果随飞行时长缓慢累积，但 120 s 也不过<b>毫米级</b>水平、<b>~0.03 角秒</b>航向。
+图 2：曲线是平的——这是"它确实是被丢掉的物理项、而不是格式噪声"的判据。
+</div>
+
+<!-- ───────────────────────────────────────────── -->
+<h2><span class="badge">6</span>放进语境：两者都贴着"离散真值 B"</h2>
+
+<p>
+逐步重锚的 ENU 步进器（系统 <b>B</b>，也是前端回放真正运行的积分器）每步把速度重新投影到新的当地系，
+<b>精确</b>捕获全部输运。把 approx、full 都和 B 比，二者都贴到 B <b>毫米级</b>——它们之间的差，正是 §5 那个交叉项：
+</p>
+
+<table id="truth-table">
+<thead><tr><th class="l">模型</th><th>vs 真值 B 水平 [mm]</th><th>vs 真值 B 航向 [角秒]</th></tr></thead>
+<tbody></tbody>
+</table>
+<p class="small" id="truth-note"></p>
+
+<!-- ───────────────────────────────────────────── -->
+<h2><span class="badge">7</span>结论 &amp; 如何使用</h2>
+
+<div class="card">
+<p><b>一句话：</b>approx 与 full 的唯一差别，是 ψ 输运里那个 $\propto\sin\gamma\cdot O(e^2)$ 的交叉项；
+它<b>只</b>影响航向率，积分到终端航段是<b>亚毫米水平 / ~0.03 角秒航向</b>——可忽略，但现已<b>精确量化</b>、且 full（精确）已是显式可选项。</p>
+</div>
+
+<h3>在哪里选 full（精确）transport</h3>
+<ul>
+<li><b>模型层：</b><code>make_geodetic_dynamics_model(transport="full")</code> / <code>make_geodetic_step_integrator(transport="full")</code>（三态：<code>"none" / "approx" / "full"</code>）。</li>
+<li><b>优化器：</b>前端 <b>Dynamics</b> 下拉新增 <i>"Geodetic RHS (+transport, full/exact)"</i>（后端 <code>casadiDirectCollocationFullTransport</code>，三种 fitting 都可配）。</li>
+<li><b>Compare 模式：</b>新增系统 <span class="full">F · geodetic RHS, +transport (full/exact)</span>，与 <span class="approx">C（近似）</span>、参考 B 同框对比。</li>
+</ul>
+
+<p class="small">
+复现：<code class="mono">PYTHONPATH=&lt;repo&gt; python 4dTrajectory/optimization/transport_term_comparison.py</code>
+（写出 <code>transport_term_comparison_data.json</code>，本文图表即用其数据）。相关：
+<code>geodetic_vs_reanchored_error.py</code>（transport 有/无 的对比）、<code>geodetic_dynamics_transport.zh.html</code>（输运项的几何来源）。
+</p>
+
+<hr>
+<p class="small">本页自包含（仅用 CDN 的 MathJax + Plotly）。数据由 <code>transport_term_comparison.py</code> 计算并内嵌。</p>
+
+</div>
+
+<script>
+// ── 计算结果（由 transport_term_comparison.py 内嵌；A320，51.1°N，3000 m，130 m/s，hdg30°，γ−3°，bank15°） ──
+const DATA = {
+  "meta": {"aircraft":"A320","refLat":51.1138,"refLon":-114.0203,"refAltM":3000.0,
+           "speedMps":130.0,"headingDeg":30.0,"fpaDeg":-3.0,"bankDeg":15.0,"fineDtS":0.005},
+  "rhsDifference": {
+    "labels":["lat_dot","lon_dot","h_dot","V_dot","psi_dot","gamma_dot","m_dot"],
+    "diff":[0.0,0.0,0.0,0.0,1.2231955899555391e-9,0.0,0.0],
+    "analyticCross":1.2231955890945496e-9,"psiMatchesCross":true,"nonPsiAllZero":true
+  },
+  "horizonSweep":[
+    {"horizonS":30.0,"horizMm":0.13250041194297812,"psiArcsec":0.014779666014196417,"gammaArcsec":9.92e-9,"altMm":6.73e-8},
+    {"horizonS":60.0,"horizMm":0.6941692173654622,"psiArcsec":0.028886912688989658,"gammaArcsec":2.62e-8,"altMm":6.46e-7},
+    {"horizonS":120.0,"horizMm":1.2483643508938302,"psiArcsec":0.03332961062503065,"gammaArcsec":2.37e-8,"altMm":1.76e-6}
+  ],
+  "dtIndependence":[
+    {"dtS":0.05,"horizMm":0.6942088021544542,"psiArcsec":0.02888691383398934},
+    {"dtS":0.02,"horizMm":0.6941887492287349,"psiArcsec":0.028886915162188973},
+    {"dtS":0.01,"horizMm":0.6942028646888415,"psiArcsec":0.02888691333018948},
+    {"dtS":0.005,"horizMm":0.6941692173654622,"psiArcsec":0.028886912688989658}
+  ],
+  "vsTruth":{"horizonS":120.0,"approxHorizMm":4.463887243555459,"fullHorizMm":4.485836183846676,
+             "approxPsiArcsec":0.07286209079136528,"fullPsiArcsec":0.03953248016633463}
+};
+
+const FONT = {family:'-apple-system,PingFang SC,Segoe UI,sans-serif', color:'#9aa7b4', size:12};
+const AX = {gridcolor:'#2a323c', zerolinecolor:'#2a323c', color:'#9aa7b4'};
+const LAYOUT = {paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', font:FONT,
+                margin:{l:64,r:64,t:14,b:44}, showlegend:true,
+                legend:{orientation:'h', y:1.14, x:0, font:{color:'#e6edf3'}}};
+const C_APPROX='#38bdf8', C_FULL='#ec4899', C_CONV='#3fb950', C_PITCH='#e3873c';
+
+// ── §4 RHS 表 ──
+(function(){
+  const tb = document.querySelector('#rhs-table tbody');
+  const notes = {psi_dot:'← 唯一非零：恰好是交叉项', gamma_dot:'γ 输运 full=approx（交叉项不碰 γ）'};
+  DATA.rhsDifference.labels.forEach((lbl,i)=>{
+    const v = DATA.rhsDifference.diff[i];
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td class="l mono">${lbl}</td><td class="mono">${v.toExponential(4)}</td>`+
+                   `<td class="l small">${notes[lbl]||(v===0?'恒为 0':'')}</td>`;
+    if(lbl==='psi_dot') tr.style.background='#2a1020';
+    tb.appendChild(tr);
+  });
+  document.querySelector('#rhs-note').innerHTML =
+    `解析交叉项 = <span class="mono">${DATA.rhsDifference.analyticCross.toExponential(4)}</span> rad/s；`+
+    `与 <span class="mono">psi_dot</span> 之差 &lt; 1e-18（匹配：${DATA.rhsDifference.psiMatchesCross}），`+
+    `非 ψ 分量全零：${DATA.rhsDifference.nonPsiAllZero}。`;
+})();
+
+// ── §5 案例说明 ──
+document.querySelector('#case-note').innerHTML =
+  `算例：A320，${DATA.meta.refLat}°N，${DATA.meta.refAltM} m，V=${DATA.meta.speedMps} m/s，`+
+  `航向 ${DATA.meta.headingDeg}°，γ=${DATA.meta.fpaDeg}°，坡度 ${DATA.meta.bankDeg}°（取较高纬度 + 下降转弯，使交叉项尽量"显形"）。`;
+
+// ── 图 1：随时长 ──
+(function(){
+  const T = DATA.horizonSweep.map(r=>r.horizonS);
+  Plotly.newPlot('plot-horizon', [
+    {x:T, y:DATA.horizonSweep.map(r=>r.horizMm), name:'水平偏差 [mm]', mode:'lines+markers',
+     line:{color:C_FULL,width:2.5}, marker:{size:7}},
+    {x:T, y:DATA.horizonSweep.map(r=>r.psiArcsec), name:'航向偏差 [角秒]', yaxis:'y2',
+     mode:'lines+markers', line:{color:C_APPROX,width:2.5,dash:'dot'}, marker:{size:7}}
+  ], Object.assign({}, LAYOUT, {
+    xaxis:Object.assign({title:'飞行时长 [s]'},AX),
+    yaxis:Object.assign({title:'水平 [mm]'},AX),
+    yaxis2:Object.assign({title:'航向 [角秒]',overlaying:'y',side:'right'},AX)
+  }), {displayModeBar:false, responsive:true});
+})();
+
+// ── 图 2：dt 无关 ──
+(function(){
+  const dt = DATA.dtIndependence.map(r=>r.dtS);
+  Plotly.newPlot('plot-dt', [
+    {x:dt, y:DATA.dtIndependence.map(r=>r.horizMm), name:'水平 |approx−full| [mm]',
+     mode:'lines+markers', line:{color:C_FULL,width:2.5}, marker:{size:8}}
+  ], Object.assign({}, LAYOUT, {
+    xaxis:Object.assign({title:'积分步长 dt [s]',type:'log'},AX),
+    yaxis:Object.assign({title:'水平偏差 [mm]', range:[0, 1.0]},AX),
+    showlegend:true
+  }), {displayModeBar:false, responsive:true});
+})();
+
+// ── §6 vs 真值 B 表 ──
+(function(){
+  const vt = DATA.vsTruth, tb = document.querySelector('#truth-table tbody');
+  const rows = [
+    ['<span class="approx">approx（近似）</span>', vt.approxHorizMm, vt.approxPsiArcsec],
+    ['<span class="full">full（精确）</span>',     vt.fullHorizMm,   vt.fullPsiArcsec],
+  ];
+  rows.forEach(([n,h,p])=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td class="l">${n}</td><td>${h.toFixed(4)}</td><td>${p.toFixed(4)}</td>`;
+    tb.appendChild(tr);
+  });
+  document.querySelector('#truth-note').innerHTML =
+    `在 ${vt.horizonS.toFixed(0)} s 飞行末端：两者都贴 B 到毫米级；二者航向相差约 `+
+    `${(vt.approxPsiArcsec - vt.fullPsiArcsec).toFixed(4)} 角秒，正是交叉项的量级。`;
+})();
+</script>
+</body>
+</html>
