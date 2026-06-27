@@ -10,8 +10,7 @@ import csv
 from dataclasses import dataclass
 from pathlib import Path
 
-
-FT_TO_M = 0.3048
+from geokit import FT_M as FT_TO_M
 
 
 @dataclass(frozen=True)

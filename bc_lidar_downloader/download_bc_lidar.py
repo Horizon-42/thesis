@@ -30,7 +30,6 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import math
 import re
 import sys
 import time
@@ -41,6 +40,8 @@ from typing import Any, Iterable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
+
+from geokit import bounds_from_radius_km
 
 
 SERVICE_ROOT = (
@@ -353,19 +354,10 @@ def airport_bbox(airport: Airport, radius_km: float) -> list[float]:
     if radius_km <= 0:
         raise ValueError("--airport-radius-km must be greater than zero")
 
-    lat_delta = radius_km / 111.32
-    cos_lat = math.cos(math.radians(airport.latitude))
-    if abs(cos_lat) < 0.000001:
-        lon_delta = 180.0
-    else:
-        lon_delta = radius_km / (111.32 * cos_lat)
-
-    return [
-        airport.longitude - lon_delta,
-        airport.latitude - lat_delta,
-        airport.longitude + lon_delta,
-        airport.latitude + lat_delta,
-    ]
+    west, south, east, north = bounds_from_radius_km(
+        airport.latitude, airport.longitude, radius_km
+    )
+    return [west, south, east, north]
 
 
 def safe_path_component(value: str) -> str:

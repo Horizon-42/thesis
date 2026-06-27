@@ -34,11 +34,10 @@ from data_layout import (
     resolve_common_csv,
     upsert_airports_index,
 )
+from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon
+from geokit import FT_M as METRES_PER_FOOT
 
 # ── Constants ────────────────────────────────────────────────────────────────
-
-METRES_PER_FOOT = 0.3048
-METRES_PER_DEG_LAT = 111_320.0  # approximately constant globally
 
 DEFAULT_CAMERA_HEIGHT_M = 15_000
 
@@ -66,11 +65,6 @@ class RunwayEnds(NamedTuple):
 
 
 # ── Geometry helpers ──────────────────────────────────────────────────────────
-
-def metres_per_deg_lon(lat_deg: float) -> float:
-    """Metres per degree of longitude at the given latitude."""
-    return METRES_PER_DEG_LAT * math.cos(math.radians(lat_deg))
-
 
 def local_m_to_lonlat(
     east_m: float,

@@ -1,30 +1,18 @@
-"""Great-circle distance helpers shared across processing stages."""
+"""Great-circle distance helpers shared across processing stages.
+
+Thin re-export of the canonical implementations in the ``geokit`` package, kept here so
+existing imports (``trajectory_data_process.geo``) and the km-based public API keep
+working. The actual math/constants live in one place now — see
+``docs/coordinate-conversion-consolidation.md``.
+"""
 
 from __future__ import annotations
 
-import math
+from geokit import NM_M, bounds_from_radius_km, haversine_km
 
-
-EARTH_RADIUS_KM = 6371.0
-KM_PER_NM = 1.852
-
-
-def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Great-circle distance between two WGS84 coordinates in kilometres."""
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlambda = math.radians(lon2 - lon1)
-    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
-    return 2 * EARTH_RADIUS_KM * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+__all__ = ["haversine_km", "distance_nm", "bounds_from_radius_km"]
 
 
 def distance_nm(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Great-circle distance in nautical miles."""
-    return haversine_km(lat1, lon1, lat2, lon2) / KM_PER_NM
-
-
-def bounds_from_radius_km(lat: float, lon: float, radius_km: float) -> tuple[float, float, float, float]:
-    """Bounding box of +/- ``radius_km`` around a point, as west, south, east, north."""
-    dlat = radius_km / 110.574
-    dlon = radius_km / (111.320 * math.cos(math.radians(lat)))
-    return (lon - dlon, lat - dlat, lon + dlon, lat + dlat)
+    return haversine_km(lat1, lon1, lat2, lon2) / (NM_M / 1000.0)

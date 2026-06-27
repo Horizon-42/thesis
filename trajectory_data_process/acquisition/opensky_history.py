@@ -13,6 +13,8 @@ from typing import Any
 
 import pandas as pd
 
+from geokit import FT_M
+
 
 # State-vector columns requested from the history database. ``geoaltitude`` is
 # mandatory: every downloaded trajectory must carry geometric altitude.
@@ -40,7 +42,6 @@ AIRPORT_HISTORY_COLUMNS = (
 
 # ``traffic`` returns altitudes in feet (its aviation-unit convention), whereas the
 # rest of this package works in metres. Convert these columns on the way out.
-FEET_TO_M = 0.3048
 ALTITUDE_COLUMNS = ("altitude", "geoaltitude", "baroaltitude")
 
 
@@ -162,7 +163,7 @@ def _altitudes_to_metres(df: pd.DataFrame) -> pd.DataFrame:
     """Convert traffic's feet-based altitude columns to metres in place."""
     for column in ALTITUDE_COLUMNS:
         if column in df.columns:
-            df[column] = pd.to_numeric(df[column], errors="coerce") * FEET_TO_M
+            df[column] = pd.to_numeric(df[column], errors="coerce") * FT_M
     return df
 
 

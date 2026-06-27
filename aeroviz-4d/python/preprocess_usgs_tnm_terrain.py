@@ -50,6 +50,8 @@ from data_layout import (
     airport_local_terrain_sources_dir,
     normalize_airport_code,
 )
+from geokit import FT_M, bounds_from_radius_km
+from geokit import metres_per_degree_precise as metres_per_degree_at_latitude
 
 
 SourceKind = Literal["dem", "dsm"]
@@ -58,7 +60,7 @@ DEFAULT_AIRPORT_CODE = "KRDU"
 DEFAULT_USGS_TNM_ROOT = AEROVIZ_ROOT.parent / "data" / "usgs_tnm_elevation"
 DEFAULT_FALLBACK_RADIUS_KM = 20.0
 DEFAULT_DSM_RESOLUTION_M = 2.0
-DEFAULT_LAZ_VERTICAL_SCALE = 0.3048
+DEFAULT_LAZ_VERTICAL_SCALE = FT_M
 DEFAULT_NODATA = -999999.0
 PROGRESS_BAR_WIDTH = 28
 COMMAND_HEARTBEAT_SECONDS = 10.0
@@ -121,14 +123,8 @@ def union_bboxes(bboxes: list[GeoBBox]) -> GeoBBox:
 
 
 def bbox_from_center_radius(lon: float, lat: float, radius_km: float) -> GeoBBox:
-    lat_delta = radius_km / 111.32
-    lon_delta = radius_km / (111.32 * max(0.01, math.cos(math.radians(lat))))
-    return GeoBBox(
-        west=lon - lon_delta,
-        south=lat - lat_delta,
-        east=lon + lon_delta,
-        north=lat + lat_delta,
-    )
+    west, south, east, north = bounds_from_radius_km(lat, lon, radius_km)
+    return GeoBBox(west=west, south=south, east=east, north=north)
 
 
 def read_manifest_bboxes(
@@ -398,22 +394,6 @@ def ensure_readable_source_files(
         )
 
     return source_paths
-
-
-def metres_per_degree_at_latitude(lat_deg: float) -> tuple[float, float]:
-    lat_rad = math.radians(lat_deg)
-    metres_per_degree_lat = (
-        111132.92
-        - 559.82 * math.cos(2 * lat_rad)
-        + 1.175 * math.cos(4 * lat_rad)
-        - 0.0023 * math.cos(6 * lat_rad)
-    )
-    metres_per_degree_lon = (
-        111412.84 * math.cos(lat_rad)
-        - 93.5 * math.cos(3 * lat_rad)
-        + 0.118 * math.cos(5 * lat_rad)
-    )
-    return metres_per_degree_lon, metres_per_degree_lat
 
 
 def horizontal_resolution_from_gdalinfo(geotiff_path: Path) -> float:

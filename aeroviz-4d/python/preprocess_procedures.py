@@ -65,9 +65,9 @@ from cifp_parser import (
     procedure_variant,
     runway_from_procedure_ident,
 )
-
-FEET_TO_METRES = 0.3048
-NM_TO_METRES = 1852.0
+from geokit import FT_M as FEET_TO_METRES
+from geokit import NM_M as NM_TO_METRES
+from geokit import haversine_m
 DEFAULT_CIFP_ROOT = Path(__file__).parents[2] / "data" / "CIFP" / "CIFP_260319"
 DEFAULT_RNAV_CHARTS_ROOT = Path(__file__).parents[2] / "data" / "RNAV_CHARTS"
 DEFAULT_AIRPORT = "KRDU"
@@ -94,17 +94,8 @@ class RoutePoint:
 
 
 def distance_m(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
-    """Great-circle distance in metres."""
-    radius_m = 6_371_008.8
-    phi1 = math.radians(lat1)
-    phi2 = math.radians(lat2)
-    d_phi = math.radians(lat2 - lat1)
-    d_lambda = math.radians(lon2 - lon1)
-    a = (
-        math.sin(d_phi / 2.0) ** 2
-        + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2.0) ** 2
-    )
-    return radius_m * 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+    """Great-circle distance in metres (lon/lat order; delegates to geokit)."""
+    return haversine_m(lat1, lon1, lat2, lon2)
 
 
 def build_route_points(

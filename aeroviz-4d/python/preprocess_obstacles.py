@@ -42,10 +42,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 from pathlib import Path
 
 from data_layout import airport_data_path, normalize_airport_code
+from geokit import FT_M as FEET_TO_METRES
+from geokit import haversine_km as _haversine_km
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 
@@ -53,7 +54,6 @@ DEFAULT_AIRPORT_CODE = "KRDU"
 DEFAULT_RADIUS_KM = 20.0
 
 HEADER_LINES = 4
-FEET_TO_METRES = 0.3048
 
 # ── Coordinate math ──────────────────────────────────────────────────────────
 
@@ -69,20 +69,6 @@ def dof_dms_to_decimal(
     if hemisphere in ("S", "W"):
         decimal = -decimal
     return decimal
-
-
-def haversine_km(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
-    """Great-circle distance between two points in kilometres."""
-    R = 6371.0
-    d_lat = math.radians(lat2 - lat1)
-    d_lon = math.radians(lon2 - lon1)
-    a = (
-        math.sin(d_lat / 2) ** 2
-        + math.cos(math.radians(lat1))
-        * math.cos(math.radians(lat2))
-        * math.sin(d_lon / 2) ** 2
-    )
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
 # ── DOF parsing ──────────────────────────────────────────────────────────────
@@ -335,7 +321,7 @@ def main() -> None:
                 continue
 
             # Distance filter
-            dist = haversine_km(center_lon, center_lat, record["lon"], record["lat"])
+            dist = _haversine_km(center_lat, center_lon, record["lat"], record["lon"])
             if dist > args.radius_km:
                 skipped_distance += 1
                 continue

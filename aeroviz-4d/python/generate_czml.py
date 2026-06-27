@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from data_layout import airport_data_path
+from geokit import bearing_rad, haversine_m
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -49,41 +50,8 @@ def default_output_path(airport_code: str) -> Path:
 
 
 # ── Velocity / orientation math ───────────────────────────────────────────────
-# All helpers are pure math — no external dependencies beyond the stdlib.
-
-_EARTH_RADIUS_M = 6_371_000  # mean Earth radius in metres
-
-
-def _great_circle_bearing(
-    lon1_deg: float, lat1_deg: float,
-    lon2_deg: float, lat2_deg: float,
-) -> float:
-    """
-    Initial bearing from point 1 to point 2 on a sphere.
-
-    Returns radians, 0 = North, positive = clockwise (East).
-    """
-    lon1, lat1 = math.radians(lon1_deg), math.radians(lat1_deg)
-    lon2, lat2 = math.radians(lon2_deg), math.radians(lat2_deg)
-    dlon = lon2 - lon1
-    y = math.sin(dlon) * math.cos(lat2)
-    x = (math.cos(lat1) * math.sin(lat2)
-         - math.sin(lat1) * math.cos(lat2) * math.cos(dlon))
-    return math.atan2(y, x)
-
-
-def _haversine_distance(
-    lon1_deg: float, lat1_deg: float,
-    lon2_deg: float, lat2_deg: float,
-) -> float:
-    """Great-circle distance between two points, in metres."""
-    lon1, lat1 = math.radians(lon1_deg), math.radians(lat1_deg)
-    lon2, lat2 = math.radians(lon2_deg), math.radians(lat2_deg)
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = (math.sin(dlat / 2) ** 2
-         + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2)
-    return 2 * _EARTH_RADIUS_M * math.asin(math.sqrt(a))
+# Great-circle bearing + distance come from the shared geokit package; the
+# matrix/quaternion helpers further below are pure stdlib math.
 
 
 def compute_velocity_orientation(
@@ -119,8 +87,8 @@ def compute_velocity_orientation(
         _, lon1, lat1, alt1 = waypoints[i]
         _, lon2, lat2, alt2 = waypoints[j]
 
-        heading = _great_circle_bearing(lon1, lat1, lon2, lat2)
-        horiz = _haversine_distance(lon1, lat1, lon2, lat2)
+        heading = bearing_rad(lat1, lon1, lat2, lon2)
+        horiz = haversine_m(lat1, lon1, lat2, lon2)
         pitch = math.atan2(alt2 - alt1, horiz) if horiz > 1e-6 else 0.0
 
         result.append((heading, pitch))

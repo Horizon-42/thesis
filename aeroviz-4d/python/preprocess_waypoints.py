@@ -20,13 +20,13 @@ from __future__ import annotations
 import argparse
 import html
 import json
-import math
 import re
 from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
 
 from data_layout import airport_data_path, find_airport_record, resolve_common_csv
+from geokit import haversine_km
 
 DEFAULT_SOURCE_URL = "https://opennav.com/waypoint/CA"
 DEFAULT_AIRPORT = "CYLW"
@@ -103,22 +103,6 @@ def dms_to_decimal(raw_value: str) -> float | None:
         return None
 
 
-def haversine_km(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
-    """Great-circle distance in kilometers."""
-    r_earth_km = 6371.0088
-    phi1 = math.radians(lat1)
-    phi2 = math.radians(lat2)
-    d_phi = math.radians(lat2 - lat1)
-    d_lambda = math.radians(lon2 - lon1)
-
-    a = (
-        math.sin(d_phi / 2.0) ** 2
-        + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2.0) ** 2
-    )
-    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
-    return r_earth_km * c
-
-
 def assign_waypoint_role(rank: int, total: int) -> str:
     """Assign role from far-to-near ordering for display purposes."""
     if total <= 1:
@@ -168,7 +152,7 @@ def build_waypoint_geojson(
         if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
             continue
 
-        distance = haversine_km(center_lon, center_lat, lon, lat)
+        distance = haversine_km(center_lat, center_lon, lat, lon)
         if distance <= radius_km:
             selected.append(
                 {
