@@ -15,7 +15,7 @@ from typing import Any
 from aerodynamic_model.common import GeodeticState
 from aircraft.aero_params import AeroParams
 from aircraft.aircraft_sets import AIRCRAFT_PRESETS, AircraftSpec
-
+from aircraft.query_aircraft_parameters import AircraftGeometry, AircraftMass, AircraftDrag, AircraftEngine, AircraftParameters, get_aircraft_parameters
 
 def aircraft_for_code(aircraft_id: str) -> AircraftSpec:
     """Resolve an aircraft code (e.g. ``"A320"``) to its :class:`AircraftSpec` preset.
@@ -25,11 +25,35 @@ def aircraft_for_code(aircraft_id: str) -> AircraftSpec:
     the presets are needed; callers and serialization stay unchanged.
     """
     code = aircraft_id.strip().upper()
-    try:
-        return AIRCRAFT_PRESETS[code]
-    except KeyError:
-        available = ", ".join(sorted(AIRCRAFT_PRESETS))
-        raise KeyError(f"unknown aircraft '{aircraft_id}'; known presets: {available}") from None
+
+    aircraft_params: AircraftParameters = get_aircraft_parameters(code)
+    
+    if aircraft_params is None:
+        raise ValueError(f"unknown aircraft code: {code}")
+    
+    # Extract the relevant parameters from the AircraftParameters object
+    geometry: AircraftGeometry = aircraft_params.geometry
+    mass: AircraftMass = aircraft_params.mass
+    drag: AircraftDrag = aircraft_params.drag
+    engine: AircraftEngine = aircraft_params.engine
+
+    return AircraftSpec(
+        code=code,
+        name=aircraft_params.name,
+        category=aircraft_params.category,
+        wing_area_m2=geometry.wing_area_m2,
+        mass_kg=mass.max_takeoff_mass_kg,
+        max_thrust_n=engine.max_thrust_n,
+        approach_thrust_guess_n=engine.approach_thrust_guess_n,
+        terminal_speed_kt=drag.terminal_speed_kt,
+        terminal_speed_min_kt=drag.terminal_speed_min_kt,
+        terminal_speed_max_kt=drag.terminal_speed_max_kt,
+        final_approach_min_nm=drag.final_approach_min_nm,
+        final_approach_max_nm=drag.final_approach_max_nm,
+        final_approach_lateral_half_width_nm=drag.final_approach_lateral_half_width_nm,
+        final_approach_glide_angle_deg=drag.final_approach_glide_angle_deg,
+        threshold_crossing_height_m=drag.threshold_crossing_height_m,   
+    )
 
 
 @dataclass
