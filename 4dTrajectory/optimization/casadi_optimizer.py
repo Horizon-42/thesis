@@ -1,7 +1,6 @@
 import math
 
 import casadi as ca
-from geokit import kt_to_ms
 from aerodynamic_model.casadi_simulator import make_geo_step_from_enu_integrator
 from aircraft.aero_params import AeroParams
 from aircraft.aircraft_sets import AircraftSpec

@@ -37,13 +37,17 @@ from .geodesy import (
 )
 from .units import (
     ft_min_to_ms,
+    ft_to_m,
     kmh_to_ms,
     kt_to_ms,
+    m_to_ft,
+    m_to_nm,
     mph_to_ms,
     ms_to_ft_min,
     ms_to_kmh,
     ms_to_kt,
     ms_to_mph,
+    nm_to_m,
 )
 
 __all__ = [
@@ -82,4 +86,9 @@ __all__ = [
     "ms_to_kmh",
     "mph_to_ms",
     "ms_to_mph",
+    # length units
+    "nm_to_m",
+    "m_to_nm",
+    "ft_to_m",
+    "m_to_ft",
 ]

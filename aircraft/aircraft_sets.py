@@ -1,16 +1,6 @@
 from dataclasses import dataclass, field
 
-from geokit import KT_MS, NM_M
-
-
-def knots_to_ms(speed_kt: float) -> float:
-    """Convert a speed in knots to metres per second (SI)."""
-    return speed_kt * KT_MS
-
-
-def nm_to_m(distance_nm: float) -> float:
-    """Convert a distance in nautical miles to metres (SI)."""
-    return distance_nm * NM_M
+from geokit import kt_to_ms, nm_to_m
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,9 +33,10 @@ class AircraftSpec:
 
     def __post_init__(self) -> None:
         # frozen dataclass: bypass the blocked __setattr__ to set derived fields.
-        object.__setattr__(self, "terminal_speed_ms", knots_to_ms(self.terminal_speed_kt))
-        object.__setattr__(self, "terminal_speed_min_ms", knots_to_ms(self.terminal_speed_min_kt))
-        object.__setattr__(self, "terminal_speed_max_ms", knots_to_ms(self.terminal_speed_max_kt))
+        # Conversions come from geokit (single source) — see the SI-mirror comment above.
+        object.__setattr__(self, "terminal_speed_ms", kt_to_ms(self.terminal_speed_kt))
+        object.__setattr__(self, "terminal_speed_min_ms", kt_to_ms(self.terminal_speed_min_kt))
+        object.__setattr__(self, "terminal_speed_max_ms", kt_to_ms(self.terminal_speed_max_kt))
         object.__setattr__(self, "final_approach_min_m", nm_to_m(self.final_approach_min_nm))
         object.__setattr__(self, "final_approach_max_m", nm_to_m(self.final_approach_max_nm))
         object.__setattr__(

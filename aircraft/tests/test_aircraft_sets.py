@@ -1,31 +1,19 @@
 import unittest
 
-from geokit import KT_MS, NM_M
+from geokit import KT_MS, NM_M, kt_to_ms, nm_to_m
 
 from aircraft.aircraft_sets import (
     A320,
     AIRCRAFT_PRESETS,
     AircraftSpec,
-    knots_to_ms,
-    nm_to_m,
 )
-
-
-class TestUnitConversions(unittest.TestCase):
-    def test_knots_to_ms_uses_geokit_factor(self):
-        self.assertAlmostEqual(knots_to_ms(100.0), 100.0 * KT_MS)
-        self.assertEqual(knots_to_ms(0.0), 0.0)
-
-    def test_nm_to_m_uses_geokit_factor(self):
-        self.assertAlmostEqual(nm_to_m(1.0), NM_M)
-        self.assertAlmostEqual(nm_to_m(2.5), 2.5 * NM_M)
 
 
 class TestAircraftSpecDerivedSiFields(unittest.TestCase):
     def test_speed_fields_are_kt_converted_to_ms(self):
-        self.assertAlmostEqual(A320.terminal_speed_ms, knots_to_ms(A320.terminal_speed_kt))
-        self.assertAlmostEqual(A320.terminal_speed_min_ms, knots_to_ms(A320.terminal_speed_min_kt))
-        self.assertAlmostEqual(A320.terminal_speed_max_ms, knots_to_ms(A320.terminal_speed_max_kt))
+        self.assertAlmostEqual(A320.terminal_speed_ms, kt_to_ms(A320.terminal_speed_kt))
+        self.assertAlmostEqual(A320.terminal_speed_min_ms, kt_to_ms(A320.terminal_speed_min_kt))
+        self.assertAlmostEqual(A320.terminal_speed_max_ms, kt_to_ms(A320.terminal_speed_max_kt))
 
     def test_approach_fields_are_nm_converted_to_m(self):
         self.assertAlmostEqual(A320.final_approach_min_m, nm_to_m(A320.final_approach_min_nm))
@@ -68,7 +56,7 @@ class TestAircraftSpecDerivedSiFields(unittest.TestCase):
             final_approach_glide_angle_deg=3.0,
             threshold_crossing_height_m=15.0,
         )
-        self.assertAlmostEqual(spec.terminal_speed_ms, knots_to_ms(140.0))
+        self.assertAlmostEqual(spec.terminal_speed_ms, kt_to_ms(140.0))
         self.assertAlmostEqual(spec.final_approach_min_m, nm_to_m(4.0))
 
 
