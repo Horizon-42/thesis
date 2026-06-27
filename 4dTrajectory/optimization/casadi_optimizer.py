@@ -138,7 +138,7 @@ class CasadiOptimizer:
                 "max_thrust": aircraft.max_thrust_n,
                 "min_load_factor": 0.5,
                 "max_load_factor": 2, # need to check the actual limits for the aircraft, these are just example values
-                "min_terminal_speed": kt_to_ms(aircraft.terminal_speed_kt),
+                "min_terminal_speed": aircraft.terminal_speed_ms,
                 "min_altitude": aircraft.threshold_crossing_height_m + 10.0, # set minimum altitude slightly above threshold crossing height to avoid infeasible solutions, can be tuned
             },)
     
