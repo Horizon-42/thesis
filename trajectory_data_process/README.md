@@ -78,6 +78,10 @@ The flow is built on one model: `trajectory.Trajectory`, a time-sorted list of
 trajectories on a time gap (`--segment-gap-sec`) or a change of departure/arrival
 airport.
 
+For the **structure of each JSON shape** — the raw Trino rows, the CZML-input, and
+the final CZML — with worked examples, see
+[docs/06-data-formats-trino-to-czml.md](docs/06-data-formats-trino-to-czml.md).
+
 ## CZML mode (default)
 
 ```bash
@@ -314,6 +318,6 @@ python -m pytest trajectory_data_process/tests -q
   quota. If you ever do exhaust it (e.g. a hard kill), clear stuck queries at
   <https://trino.opensky-network.org/ui/> (filter by your user, then Kill).
 - The design notes under `docs/01`–`docs/05` predate this refactor and describe the
-  former REST/live training pipeline; they are kept only as history. This README is
-  authoritative.
+  former REST/live training pipeline; they are kept only as history. This README and
+  `docs/06-data-formats-trino-to-czml.md` are authoritative.
 ```
