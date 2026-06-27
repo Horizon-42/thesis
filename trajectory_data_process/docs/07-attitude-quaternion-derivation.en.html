@@ -1,0 +1,904 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Attitude → Quaternion: how a trajectory gets its nose direction | trajectory_data_process</title>
+
+  <!-- MathJax for the static derivation -->
+  <script>
+    window.MathJax = {
+      tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] },
+      svg: { fontCache: 'global' }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+
+  <!-- three.js for the interactive 3D scenes -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --panel-strong: #f0f4f8;
+      --ink: #17202a;
+      --muted: #5f6f7e;
+      --line: #d8e0e8;
+      --accent: #006d77;
+      --accent-2: #b54708;
+      --accent-3: #2f6f4e;
+      --accent-soft: #e4f4f3;
+      --warn-soft: #fff2df;
+      --good-soft: #e9f7ee;
+      --bad-soft: #fdecec;
+      --code-bg: #111827;
+      --code-ink: #e5e7eb;
+      --shadow: 0 10px 28px rgba(17, 24, 39, 0.08);
+      --nose: #d6336c;   /* model +X  / nose / velocity            */
+      --left: #2f9e44;   /* model +Y  / left wing                  */
+      --up:   #1c7ed6;   /* model +Z  / body up                    */
+      --east: #e8590c;   /* ENU East                               */
+      --north:#2f9e44;   /* ENU North                              */
+      --upclr:#1c7ed6;   /* ENU Up                                 */
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
+      line-height: 1.62;
+    }
+
+    a { color: var(--accent); text-decoration: none; border-bottom: 1px solid rgba(0,109,119,0.28); }
+    a:hover { border-bottom-color: currentColor; }
+
+    .page { width: min(1180px, calc(100vw - 32px)); margin: 0 auto; padding: 28px 0 56px; }
+
+    header.hero { padding: 36px 0 18px; }
+    .eyebrow { color: var(--accent); font-size: 13px; font-weight: 700; text-transform: uppercase; }
+    h1 { margin: 10px 0 12px; font-size: clamp(30px, 4.6vw, 50px); line-height: 1.07; max-width: 980px; }
+    h2 { margin: 0 0 14px; font-size: 27px; }
+    h3 { margin: 22px 0 10px; font-size: 19px; }
+    h4 { margin: 16px 0 8px; font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    p  { margin: 0 0 12px; }
+    code, kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.9em; }
+    .lead { max-width: 900px; color: var(--muted); font-size: 18px; }
+
+    .meta-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; margin-top: 24px; }
+    .meta { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; box-shadow: var(--shadow); }
+    .meta .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    .meta .value { font-size: 15px; font-weight: 600; margin-top: 4px; }
+
+    nav.toc { position: sticky; top: 0; z-index: 30; background: rgba(246,247,249,0.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); margin: 26px 0 8px; padding: 10px 0; }
+    nav.toc ul { list-style: none; display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 0; padding: 0; }
+    nav.toc a { font-size: 13.5px; border: none; color: var(--muted); font-weight: 600; }
+    nav.toc a:hover { color: var(--accent); }
+
+    section { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 26px 28px; margin: 18px 0; box-shadow: var(--shadow); }
+    .section-kicker { color: var(--accent); font-weight: 700; font-size: 13px; letter-spacing: .05em; text-transform: uppercase; margin-bottom: 6px; }
+
+    .note, .warn, .good { border-radius: 10px; padding: 12px 16px; margin: 14px 0; font-size: 15px; }
+    .note { background: var(--accent-soft); border: 1px solid #bfe3e1; }
+    .warn { background: var(--warn-soft); border: 1px solid #f3d9a8; }
+    .good { background: var(--good-soft); border: 1px solid #b9e6c6; }
+    .note b, .warn b, .good b { color: var(--ink); }
+
+    pre.code { background: var(--code-bg); color: var(--code-ink); border-radius: 10px; padding: 14px 16px; overflow-x: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; line-height: 1.55; }
+    pre.code .cmt { color: #8b98a9; }
+    pre.code .kw { color: #93c5fd; }
+    pre.code .fn { color: #fcd34d; }
+
+    table.tbl { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 14.5px; }
+    table.tbl th, table.tbl td { border: 1px solid var(--line); padding: 8px 11px; text-align: left; vertical-align: top; }
+    table.tbl th { background: var(--panel-strong); }
+
+    /* ── interactive widget chrome ───────────────────────────── */
+    .widget { border: 1px solid var(--line); border-radius: 12px; background: var(--panel-strong); padding: 16px; margin: 18px 0; }
+    .widget-title { font-weight: 700; font-size: 14px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    .widget-title .tag { background: var(--accent); color: #fff; border-radius: 6px; font-size: 11px; padding: 2px 8px; letter-spacing: .03em; }
+    .wgrid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+    @media (max-width: 820px) { .wgrid { grid-template-columns: 1fr; } .meta-grid { grid-template-columns: repeat(2,1fr); } }
+
+    .stage { background: #0e1726; border-radius: 10px; overflow: hidden; position: relative; }
+    .stage canvas { display: block; width: 100%; }
+    .stage .hint { position: absolute; left: 10px; bottom: 8px; color: #9fb0c4; font-size: 11.5px; pointer-events: none; }
+    .stage .loaderr { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #cbd5e1; font-size: 13px; padding: 18px; text-align: center; }
+
+    .controls { display: flex; flex-direction: column; gap: 10px; }
+    .slider-row { display: grid; grid-template-columns: 70px 1fr 64px; align-items: center; gap: 10px; font-size: 13px; }
+    .slider-row label { color: var(--muted); font-weight: 600; }
+    .slider-row input[type=range] { width: 100%; accent-color: var(--accent); }
+    .slider-row .val { font-family: ui-monospace, monospace; font-size: 13px; text-align: right; font-weight: 600; }
+
+    .readout { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 13px; }
+    .readout .kv { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; }
+    .readout .kv span:last-child { font-family: ui-monospace, monospace; font-weight: 600; }
+
+    .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; margin-top: 8px; }
+    .legend .key { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+    .swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+
+    /* live matrix */
+    .matwrap { display: flex; align-items: stretch; gap: 4px; margin: 8px 0; }
+    .matwrap .brk { width: 8px; border: 2px solid var(--muted); border-right: none; border-radius: 3px 0 0 3px; }
+    .matwrap .brk.r { border: 2px solid var(--muted); border-left: none; border-radius: 0 3px 3px 0; }
+    .mat { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px 8px; padding: 6px 8px; flex: 1; }
+    .mat .cell { font-family: ui-monospace, monospace; font-size: 12.5px; text-align: right; padding: 1px 4px; border-radius: 4px; }
+    .mat .c0 { color: var(--nose); background: rgba(214,51,108,0.07); }
+    .mat .c1 { color: var(--left); background: rgba(47,158,68,0.07); }
+    .mat .c2 { color: var(--up);   background: rgba(28,126,214,0.07); }
+    .matlabel { font-size: 12px; color: var(--muted); margin: 10px 0 2px; font-weight: 600; }
+    .quat { font-family: ui-monospace, monospace; font-size: 14px; background: #111827; color: #e5e7eb; border-radius: 8px; padding: 10px 12px; margin-top: 6px; }
+    .quat b { color: #fcd34d; }
+
+    .axis-pill { font-family: ui-monospace, monospace; font-weight: 700; padding: 1px 6px; border-radius: 5px; font-size: 12.5px; }
+    .pill-nose { color: #fff; background: var(--nose); }
+    .pill-left { color: #fff; background: var(--left); }
+    .pill-up   { color: #fff; background: var(--up); }
+
+    footer { color: var(--muted); font-size: 13px; margin-top: 24px; text-align: center; }
+    .crumbs { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <div class="eyebrow">trajectory_data_process / Stage 3 · CZML orientation</div>
+    <h1>Attitude → Quaternion: how a trajectory learns which way its nose points</h1>
+    <p class="lead">
+      The CZML <code>position</code> property says <em>where</em> an aircraft is. The
+      <code>orientation</code> property says <em>which way it points</em> — and unlike position,
+      it is <b>nowhere in the data</b>. This page derives it from scratch, the way
+      <code>generate_czml.py</code> does: velocity&nbsp;→&nbsp;heading&nbsp;+&nbsp;pitch, then two
+      frame rotations into a single ECEF unit quaternion. Every step has a 3-D widget you can drive.
+    </p>
+
+    <div class="meta-grid">
+      <div class="meta"><div class="label">Companion doc</div><div class="value"><code>06-data-formats-trino-to-czml.md</code></div></div>
+      <div class="meta"><div class="label">Source code</div><div class="value"><code>aeroviz-4d/python/generate_czml.py</code></div></div>
+      <div class="meta"><div class="label">Output field</div><div class="value">CZML <code>orientation.unitQuaternion</code></div></div>
+      <div class="meta"><div class="label">Key assumption</div><div class="value">nose follows velocity, roll = 0</div></div>
+    </div>
+  </header>
+
+  <nav class="toc" aria-label="Contents">
+    <ul>
+      <li><a href="#problem">1 · The missing field</a></li>
+      <li><a href="#quaternion">2 · Frames &amp; quaternions</a></li>
+      <li><a href="#step1">3 · Velocity → heading + pitch</a></li>
+      <li><a href="#model-enu">4 · Model → ENU</a></li>
+      <li><a href="#enu-ecef">5 · ENU → ECEF</a></li>
+      <li><a href="#compose">6 · Compose → quaternion</a></li>
+      <li><a href="#sandbox">7 · Full sandbox</a></li>
+      <li><a href="#caveats">8 · Caveats</a></li>
+    </ul>
+  </nav>
+
+  <!-- ───────────────────────────── 1 ───────────────────────────── -->
+  <section id="problem">
+    <div class="section-kicker">1 / The missing field</div>
+    <h2>Position is measured; attitude has to be invented</h2>
+    <p>
+      By the time a flight reaches Stage&nbsp;3, each waypoint is just
+      <code>[offset_sec, lon, lat, alt]</code> — four numbers, no heading, no pitch, no roll. The raw
+      ADS-B <code>track</code> angle existed back in Stage&nbsp;1 but was deliberately dropped at the
+      interchange seam. So before Cesium can point a glTF model down the flight path, Stage&nbsp;3 must
+      <b>reconstruct the full 3-D nose direction</b> from the geometry of the path itself.
+    </p>
+    <p>The reconstruction rests on one physical idea and one admission:</p>
+    <table class="tbl">
+      <thead><tr><th>Attitude angle</th><th>Recoverable?</th><th>How</th></tr></thead>
+      <tbody>
+        <tr><td><b>heading</b> (yaw)</td><td>✅ yes</td><td>direction of travel to the next waypoint</td></tr>
+        <tr><td><b>pitch</b></td><td>✅ yes</td><td>climb/descent angle of that same segment</td></tr>
+        <tr><td><b>roll</b> (bank)</td><td>❌ no</td><td>no bank information in position data → <b>assumed&nbsp;0</b></td></tr>
+      </tbody>
+    </table>
+    <div class="note">
+      <b>The plan.</b> Two steps. <b>Step&nbsp;1</b> turns the velocity vector between consecutive
+      waypoints into a <code>(heading, pitch)</code> pair. <b>Step&nbsp;2</b> turns that pair — at a
+      given <code>(lon, lat)</code> — into the ECEF unit quaternion CZML wants. Step&nbsp;2 is itself two
+      nested rotations: <em>model&nbsp;→&nbsp;ENU</em> then <em>ENU&nbsp;→&nbsp;ECEF</em>.
+    </div>
+  </section>
+
+  <!-- ───────────────────────────── 2 ───────────────────────────── -->
+  <section id="quaternion">
+    <div class="section-kicker">2 / Frames &amp; quaternions</div>
+    <h2>What the quaternion actually encodes</h2>
+    <p>
+      Cesium renders everything in <b>ECEF</b> — Earth-Centered, Earth-Fixed: the origin sits at the
+      planet's centre and the axes are bolted to the rotating Earth. An aircraft's orientation is the
+      single rotation that carries the model's own <b>body axes</b> onto ECEF axes. That rotation is
+      stored as a <b>unit quaternion</b> \((x,y,z,w)\).
+    </p>
+    <p>Three frames appear throughout this page. Keep them straight and the rest is bookkeeping:</p>
+    <table class="tbl">
+      <thead><tr><th>Frame</th><th>Axes</th><th>Depends on</th></tr></thead>
+      <tbody>
+        <tr><td><b>Model / body</b></td>
+            <td><span class="axis-pill pill-nose">+X nose</span> <span class="axis-pill pill-left">+Y left</span> <span class="axis-pill pill-up">+Z up</span></td>
+            <td>the glTF file</td></tr>
+        <tr><td><b>ENU</b> (local tangent)</td><td>X = East, Y = North, Z = Up</td><td>the position <code>(lon, lat)</code></td></tr>
+        <tr><td><b>ECEF</b> (world)</td><td>fixed to the planet</td><td>nothing — it is the global frame</td></tr>
+      </tbody>
+    </table>
+    <h4>Why a quaternion and not three angles?</h4>
+    <table class="tbl">
+      <tbody>
+        <tr><td><b>No gimbal lock</b></td><td>Euler angles degenerate as pitch → ±90°; a quaternion never does.</td></tr>
+        <tr><td><b>Clean interpolation</b></td><td>Between samples Cesium does <b>SLERP</b> — a constant-speed, shortest-arc blend — smooth even through steep turns.</td></tr>
+        <tr><td><b>Native CZML type</b></td><td><code>orientation.unitQuaternion</code> is exactly this 4-number rotation, one sample per waypoint.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ───────────────────────────── 3 ───────────────────────────── -->
+  <section id="step1">
+    <div class="section-kicker">3 / Step 1 — velocity → heading + pitch</div>
+    <h2>Reading the flight path as a velocity vector</h2>
+    <p>
+      <code>compute_velocity_orientation()</code> walks the waypoints. For each one it builds the
+      segment to the <b>next</b> waypoint (a forward difference); the final waypoint has no "next", so it
+      reuses the <em>previous</em> segment (a backward difference) — that keeps the parked model pointing
+      sensibly at the end of playback instead of snapping to a default heading.
+    </p>
+    <p>From a segment \(P_1=(\lambda_1,\varphi_1,h_1)\) to \(P_2=(\lambda_2,\varphi_2,h_2)\):</p>
+    <p><b>Heading</b> is the initial <em>great-circle bearing</em> (geokit <code>bearing_rad</code>) —
+       \(0=\text{North}\), increasing clockwise:</p>
+    \[ \theta_{\text{hdg}}=\operatorname{atan2}\!\Big(\sin\Delta\lambda\,\cos\varphi_2,\;\;
+       \cos\varphi_1\sin\varphi_2-\sin\varphi_1\cos\varphi_2\cos\Delta\lambda\Big),\qquad \Delta\lambda=\lambda_2-\lambda_1 \]
+    <p><b>Pitch</b> is the climb angle of the same segment — the vertical rise over the horizontal run
+       \(d\) (geokit <code>haversine_m</code>, the great-circle ground distance):</p>
+    \[ \theta_{\text{pitch}}=\operatorname{atan2}\big(h_2-h_1,\;\; d\big),\qquad
+       d=\text{haversine}(P_1,P_2) \]
+    <p><b>Roll</b> \(=0\). And the degenerate cases are explicit: an empty track yields no samples; a
+       single lonely waypoint yields \((\text{heading}=0,\ \text{pitch}=0)\).</p>
+
+    <div class="widget">
+      <div class="widget-title"><span class="tag">interactive</span> Drag waypoint B — watch heading &amp; pitch fall out of the geometry</div>
+      <div class="wgrid">
+        <div>
+          <div class="stage" id="stageA" style="display:grid; grid-template-columns:1fr 1fr; gap:0;">
+            <canvas id="planA" height="300"></canvas>
+            <canvas id="profA" height="300"></canvas>
+            <div class="hint">left: plan view (N up) · right: vertical profile — drag the blue dot in either</div>
+          </div>
+          <div class="legend">
+            <span class="key"><span class="swatch" style="background:#94a3b8"></span>waypoint A (fixed)</span>
+            <span class="key"><span class="swatch" style="background:var(--nose)"></span>waypoint B (drag)</span>
+            <span class="key"><span class="swatch" style="background:var(--up)"></span>velocity vector</span>
+          </div>
+        </div>
+        <div class="controls">
+          <div class="readout" id="readA"></div>
+          <div class="note" style="margin:6px 0 0; font-size:13.5px">
+            The plan view sets <b>heading</b> and the horizontal run \(d\); the profile sets the rise
+            \(\Delta h\) and therefore <b>pitch</b>. Both feed Step&nbsp;2 below.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────────────────────── 4 ───────────────────────────── -->
+  <section id="model-enu">
+    <div class="section-kicker">4 / Step 2a — model → ENU</div>
+    <h2>Placing the aircraft in the local horizon</h2>
+    <p>
+      The recovered \((heading, pitch)\) are angles in the aircraft's <b>local horizon</b>. The first
+      rotation, <code>m_model</code>, expresses the model's three body axes as vectors in the ENU frame.
+      The trick to reading it: <b>each column is where one body axis goes</b>.
+    </p>
+    \[ R_{\text{model}\to\text{ENU}}=
+      \begin{bmatrix}
+        \sin h\cos\theta & -\cos h & -\sin h\sin\theta \\
+        \cos h\cos\theta & \;\;\sin h & -\cos h\sin\theta \\
+        \sin\theta & 0 & \cos\theta
+      \end{bmatrix}
+      \quad{\scriptstyle(h=\text{heading},\ \theta=\text{pitch})} \]
+    <table class="tbl">
+      <thead><tr><th>Column</th><th>Body axis</th><th>As an ENU vector \((E,N,U)\)</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td>0</td><td><span class="axis-pill pill-nose">+X nose</span></td><td>\((\sin h\cos\theta,\ \cos h\cos\theta,\ \sin\theta)\)</td><td>the velocity direction: bearing \(h\), tilted up by \(\theta\)</td></tr>
+        <tr><td>1</td><td><span class="axis-pill pill-left">+Y left</span></td><td>\((-\cos h,\ \sin h,\ 0)\)</td><td>horizontal, 90° to port — no \(\theta\) term because roll = 0 keeps the wings level</td></tr>
+        <tr><td>2</td><td><span class="axis-pill pill-up">+Z up</span></td><td>\((-\sin h\sin\theta,\ -\cos h\sin\theta,\ \cos\theta)\)</td><td>body-up, tilted back by the pitch; equals ENU "up" when \(\theta=0\)</td></tr>
+      </tbody>
+    </table>
+
+    <div class="widget">
+      <div class="widget-title"><span class="tag">interactive</span> The body axes living in the ENU box — orbit it, then move the sliders</div>
+      <div class="wgrid">
+        <div>
+          <div class="stage" id="stageB" style="height:340px"><div class="hint">drag to orbit · scroll to zoom</div></div>
+          <div class="legend">
+            <span class="key"><span class="swatch" style="background:var(--east)"></span>ENU East</span>
+            <span class="key"><span class="swatch" style="background:var(--north)"></span>ENU North</span>
+            <span class="key"><span class="swatch" style="background:var(--upclr)"></span>ENU Up</span>
+            <span class="key"><span class="swatch" style="background:var(--nose)"></span>nose (+X)</span>
+          </div>
+        </div>
+        <div class="controls">
+          <div class="slider-row"><label>heading</label><input id="bHdg" type="range" min="0" max="360" value="60" step="1"><span class="val" id="bHdgV">60°</span></div>
+          <div class="slider-row"><label>pitch</label><input id="bPit" type="range" min="-30" max="30" value="-3" step="0.5"><span class="val" id="bPitV">-3°</span></div>
+          <div class="matlabel">m_model — columns are the body axes in ENU</div>
+          <div class="matwrap"><div class="brk"></div><div class="mat" id="bMat"></div><div class="brk r"></div></div>
+          <div class="note" style="margin:6px 0 0; font-size:13px">Notice the <span style="color:var(--left);font-weight:700">left</span> column never tilts: roll is pinned to 0.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────────────────────── 5 ───────────────────────────── -->
+  <section id="enu-ecef">
+    <div class="section-kicker">5 / Step 2b — ENU → ECEF</div>
+    <h2>The local horizon is itself tilted on the globe</h2>
+    <p>
+      "Up" in Raleigh is not "up" in London. The local ENU frame is tilted relative to the planet's fixed
+      axes by <b>where you stand on Earth</b>. The second rotation, <code>m_enu</code>, captures that — at
+      longitude \(\lambda\) and latitude \(\varphi\), its columns are the East, North and Up directions
+      written in ECEF:
+    </p>
+    \[ R_{\text{ENU}\to\text{ECEF}}=
+      \begin{bmatrix}
+        -\sin\lambda & -\sin\varphi\cos\lambda & \cos\varphi\cos\lambda \\
+        \;\;\cos\lambda & -\sin\varphi\sin\lambda & \cos\varphi\sin\lambda \\
+        0 & \cos\varphi & \sin\varphi
+      \end{bmatrix} \]
+    <p>
+      The third column \((\cos\varphi\cos\lambda,\ \cos\varphi\sin\lambda,\ \sin\varphi)\) is just the
+      outward radial unit vector — "Up" always points straight away from the Earth's centre. The other two
+      columns are the tangent directions. You can watch this matrix swing around as you fly the aircraft
+      across the globe in the <a href="#sandbox">full sandbox</a> below.
+    </p>
+  </section>
+
+  <!-- ───────────────────────────── 6 ───────────────────────────── -->
+  <section id="compose">
+    <div class="section-kicker">6 / Compose → quaternion</div>
+    <h2>Two rotations, then a stable matrix → quaternion conversion</h2>
+    <p>Apply model→ENU first, then ENU→ECEF. Matrix multiplication composes them right-to-left:</p>
+    \[ R_{\text{model}\to\text{ECEF}} \;=\; R_{\text{ENU}\to\text{ECEF}}\; R_{\text{model}\to\text{ENU}}
+       \;=\; \texttt{m\_enu} \cdot \texttt{m\_model} \]
+    <p>
+      That 3×3 rotation is finally turned into the unit quaternion CZML stores, using
+      <b>Shepperd's method</b> (<code>_mat3_to_quaternion</code>). The naïve formula
+      \(w=\tfrac12\sqrt{1+\operatorname{tr}R}\) divides by a quantity that collapses to zero near a 180°
+      rotation; Shepperd's method instead picks whichever of the four pivots
+      \(\{\operatorname{tr}R,\;R_{00},\;R_{11},\;R_{22}\}\) is largest, so the divisor is always safely
+      away from zero:
+    </p>
+    <pre class="code"><span class="cmt"># the trace branch (largest pivot = trace); three symmetric branches handle the rest</span>
+<span class="kw">if</span> trace &gt; 0:
+    s = 0.5 / sqrt(trace + 1.0)
+    w = 0.25 / s
+    x = (m[2][1] - m[1][2]) * s
+    y = (m[0][2] - m[2][0]) * s
+    z = (m[1][0] - m[0][1]) * s</pre>
+    <p>
+      The result \((x,y,z,w)\) is written once per waypoint into the flat
+      <code>unitQuaternion</code> array. The <a href="#sandbox">sandbox</a> uses this <em>exact</em>
+      quaternion to orient its aircraft — so if the plane points down its velocity arrow there, the whole
+      chain is verified end to end.
+    </p>
+    <pre class="code"><span class="cmt"># generate_czml.py — the whole pipeline in four lines</span>
+heading, pitch = <span class="fn">compute_velocity_orientation</span>(waypoints)[i]   <span class="cmt"># step 1</span>
+m_model        = <span class="fn">model_to_enu</span>(heading, pitch)                  <span class="cmt"># step 2a</span>
+m_ecef         = <span class="fn">mat3_multiply</span>(<span class="fn">enu_to_ecef</span>(lon, lat), m_model) <span class="cmt"># step 2b + compose</span>
+x, y, z, w     = <span class="fn">mat3_to_quaternion</span>(m_ecef)                  <span class="cmt"># Shepperd</span></pre>
+  </section>
+
+  <!-- ───────────────────────────── 7 ───────────────────────────── -->
+  <section id="sandbox">
+    <div class="section-kicker">7 / Full sandbox</div>
+    <h2>The complete chain, on the globe</h2>
+    <p>
+      Position the aircraft with <b>lon/lat</b>, set its <b>heading/pitch</b>, and the panel computes
+      <code>m_model</code>, <code>m_enu</code>, their product, and the final quaternion live. The aircraft
+      is oriented by that quaternion; the bright <span style="color:var(--nose);font-weight:700">nose
+      arrow</span> is column&nbsp;0 of the composed matrix — they should always coincide.
+    </p>
+    <div class="widget">
+      <div class="widget-title"><span class="tag">interactive</span> Fly it anywhere — every matrix updates from the same math as <code>generate_czml.py</code></div>
+      <div class="wgrid">
+        <div>
+          <div class="stage" id="stageC" style="height:420px"><div class="hint">drag to orbit · scroll to zoom</div></div>
+          <div class="legend">
+            <span class="key"><span class="swatch" style="background:var(--east)"></span>East</span>
+            <span class="key"><span class="swatch" style="background:var(--north)"></span>North</span>
+            <span class="key"><span class="swatch" style="background:var(--upclr)"></span>Up</span>
+            <span class="key"><span class="swatch" style="background:var(--nose)"></span>nose / velocity</span>
+            <span class="key"><span class="swatch" style="background:#8aa0b6"></span>ECEF X/Y/Z</span>
+          </div>
+        </div>
+        <div class="controls">
+          <div class="slider-row"><label>longitude</label><input id="cLon" type="range" min="-180" max="180" value="-78" step="1"><span class="val" id="cLonV">-78°</span></div>
+          <div class="slider-row"><label>latitude</label><input id="cLat" type="range" min="-85" max="85" value="36" step="1"><span class="val" id="cLatV">36°</span></div>
+          <div class="slider-row"><label>heading</label><input id="cHdg" type="range" min="0" max="360" value="50" step="1"><span class="val" id="cHdgV">50°</span></div>
+          <div class="slider-row"><label>pitch</label><input id="cPit" type="range" min="-30" max="30" value="-3" step="0.5"><span class="val" id="cPitV">-3°</span></div>
+
+          <div class="matlabel">m_model &nbsp;(model → ENU)</div>
+          <div class="matwrap"><div class="brk"></div><div class="mat" id="cMatM"></div><div class="brk r"></div></div>
+          <div class="matlabel">m_enu &nbsp;(ENU → ECEF)</div>
+          <div class="matwrap"><div class="brk"></div><div class="mat" id="cMatE"></div><div class="brk r"></div></div>
+          <div class="matlabel">m_enu · m_model &nbsp;(model → ECEF)</div>
+          <div class="matwrap"><div class="brk"></div><div class="mat" id="cMatR"></div><div class="brk r"></div></div>
+          <div class="quat" id="cQuat"></div>
+        </div>
+      </div>
+    </div>
+    <div class="good">
+      <b>Closing the loop.</b> The aircraft above is rotated by the computed quaternion, while the nose
+      arrow is drawn straight from the matrix. They never drift apart — that is the same correctness check
+      the unit tests encode, made visible.
+    </div>
+  </section>
+
+  <!-- ───────────────────────────── 8 ───────────────────────────── -->
+  <section id="caveats">
+    <div class="section-kicker">8 / Caveats</div>
+    <h2>What the derivation cannot know</h2>
+    <table class="tbl">
+      <thead><tr><th>Limitation</th><th>Consequence</th></tr></thead>
+      <tbody>
+        <tr><td><b>Roll = 0</b></td><td>The model never visibly banks into a turn — it yaws wings-level. There is simply no bank signal in position-only data.</td></tr>
+        <tr><td><b>Finite differences</b></td><td>Heading and pitch come from consecutive samples, so noisy or sparse tracks give a jittery nose. Cesium's SLERP smooths the playback, not the source angles.</td></tr>
+        <tr><td><b>Last waypoint</b></td><td>It has no successor, so it inherits the previous segment's direction — a parked aircraft keeps its final heading rather than snapping to north.</td></tr>
+        <tr><td><b>Stationary points</b></td><td>If two samples share a position, \(d\to0\) and pitch is forced to 0 to avoid an undefined climb angle.</td></tr>
+      </tbody>
+    </table>
+    <div class="note">
+      <b>Why it is "computed, not carried."</b> Heading existed in Stage&nbsp;1 as <code>track</code>;
+      pitch and roll were never measured. Rather than thread an aviation heading through the neutral
+      interchange format, the pipeline keeps Stage&nbsp;2 attitude-free and re-derives the full 3-D nose
+      direction at the only stage that needs it — keeping the seam simple at the cost of the wings-level
+      approximation. Full prose in
+      <a href="06-data-formats-trino-to-czml.md">06-data-formats-trino-to-czml.md</a>.
+    </div>
+  </section>
+
+  <footer>
+    Self-contained tutorial · math mirrors <code>aeroviz-4d/python/generate_czml.py</code> ·
+    3-D via three.js, formulas via MathJax (CDN).
+  </footer>
+</div>
+
+<script type="module">
+  // ════════════════════════════════════════════════════════════════════
+  //  Shared math — a faithful JS port of generate_czml.py's derivation
+  // ════════════════════════════════════════════════════════════════════
+  const DEG = Math.PI / 180, RADd = 180 / Math.PI;
+  const { sin, cos, atan2, sqrt } = Math;
+
+  // great-circle bearing (geokit.bearing_rad): 0 = N, CW positive
+  function bearingRad(lat1, lon1, lat2, lon2) {
+    const p1 = lat1 * DEG, p2 = lat2 * DEG, dl = (lon2 - lon1) * DEG;
+    const y = sin(dl) * cos(p2);
+    const x = cos(p1) * sin(p2) - sin(p1) * cos(p2) * cos(dl);
+    return atan2(y, x);
+  }
+  // great-circle distance in metres (geokit.haversine_m, R = WGS84 a)
+  function haversineM(lat1, lon1, lat2, lon2, R = 6378137) {
+    const p1 = lat1 * DEG, p2 = lat2 * DEG;
+    const dp = (lat2 - lat1) * DEG, dl = (lon2 - lon1) * DEG;
+    const a = sin(dp / 2) ** 2 + cos(p1) * cos(p2) * sin(dl / 2) ** 2;
+    return 2 * R * Math.asin(sqrt(a));
+  }
+  // model → ENU  (columns: nose +X, left +Y, up +Z), row-major
+  function matModel(h, th) {
+    const ch = cos(h), sh = sin(h), cp = cos(th), sp = sin(th);
+    return [
+      [sh * cp, -ch, -sh * sp],
+      [ch * cp,  sh, -ch * sp],
+      [sp,        0,  cp],
+    ];
+  }
+  // ENU → ECEF at (lon, lat) in degrees, row-major
+  function matEnu(lonDeg, latDeg) {
+    const lo = lonDeg * DEG, la = latDeg * DEG;
+    const sl = sin(lo), cl = cos(lo), sf = sin(la), cf = cos(la);
+    return [
+      [-sl, -sf * cl, cf * cl],
+      [ cl, -sf * sl, cf * sl],
+      [  0,  cf,      sf],
+    ];
+  }
+  function mat3mul(a, b) {
+    const o = [[0,0,0],[0,0,0],[0,0,0]];
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++)
+      o[i][j] = a[i][0]*b[0][j] + a[i][1]*b[1][j] + a[i][2]*b[2][j];
+    return o;
+  }
+  // Shepperd's method, returns [x, y, z, w]
+  function mat3ToQuat(m) {
+    const tr = m[0][0] + m[1][1] + m[2][2];
+    let x, y, z, w, s;
+    if (tr > 0) {
+      s = 0.5 / sqrt(tr + 1.0); w = 0.25 / s;
+      x = (m[2][1]-m[1][2])*s; y = (m[0][2]-m[2][0])*s; z = (m[1][0]-m[0][1])*s;
+    } else if (m[0][0] > m[1][1] && m[0][0] > m[2][2]) {
+      s = 2*sqrt(1+m[0][0]-m[1][1]-m[2][2]);
+      w = (m[2][1]-m[1][2])/s; x = 0.25*s; y = (m[0][1]+m[1][0])/s; z = (m[0][2]+m[2][0])/s;
+    } else if (m[1][1] > m[2][2]) {
+      s = 2*sqrt(1+m[1][1]-m[0][0]-m[2][2]);
+      w = (m[0][2]-m[2][0])/s; x = (m[0][1]+m[1][0])/s; y = 0.25*s; z = (m[1][2]+m[2][1])/s;
+    } else {
+      s = 2*sqrt(1+m[2][2]-m[0][0]-m[1][1]);
+      w = (m[1][0]-m[0][1])/s; x = (m[0][2]+m[2][0])/s; y = (m[1][2]+m[2][1])/s; z = 0.25*s;
+    }
+    return [x, y, z, w];
+  }
+  const col = (m, j) => [m[0][j], m[1][j], m[2][j]];
+
+  // live 3×3 matrix renderer (columns coloured by body/ENU axis)
+  function renderMat(el, m) {
+    el.innerHTML = '';
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+      const c = document.createElement('div');
+      c.className = 'cell c' + j;
+      c.textContent = (m[i][j] >= 0 ? ' ' : '') + m[i][j].toFixed(3);
+      el.appendChild(c);
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  //  Widget A — Step 1: drag waypoint B, read heading + pitch (2-D canvas)
+  // ════════════════════════════════════════════════════════════════════
+  (function widgetA() {
+    const plan = document.getElementById('planA');
+    const prof = document.getElementById('profA');
+    const read = document.getElementById('readA');
+    if (!plan || !prof) return;
+
+    function fit(cv) {
+      const w = cv.parentElement.clientWidth / 2;   // two side-by-side canvases
+      const dpr = window.devicePixelRatio || 1;
+      cv.style.width = w + 'px'; cv.style.height = '300px';
+      cv.width = w * dpr; cv.height = 300 * dpr;
+      const ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      return { w, h: 300, ctx };
+    }
+
+    // A at plan centre. B offset in metres; altitude diff dh in metres.
+    const M_PER_PX = 22;                 // plan scale (metres per pixel)
+    const V_PER_PX = 6;                  // profile altitude scale (metres per pixel)
+    const PROF_BASE_Y = 210;             // profile: A's altitude reference line (px)
+    let bx = 1500, by = -1900;           // metres East / North of A
+    let dh = -127;                       // metres: B altitude minus A → ~ -3° pitch
+    const latA = 36, lonA = -78;
+
+    function bGeo() {
+      // invert local ENU offset → lat/lon for an honest bearing/haversine
+      const lat2 = latA + (by / 111320);
+      const lon2 = lonA + (bx / (111320 * Math.cos(latA * DEG)));
+      return { lat2, lon2 };
+    }
+
+    function draw() {
+      const P = fit(plan), R = fit(prof);
+      // ----- plan view (N up, E right) -----
+      const ctx = P.ctx, cx = P.w/2, cy = P.h/2;
+      ctx.clearRect(0,0,P.w,P.h);
+      ctx.fillStyle = '#0e1726'; ctx.fillRect(0,0,P.w,P.h);
+      // grid + compass
+      ctx.strokeStyle = 'rgba(148,163,184,0.18)'; ctx.lineWidth = 1;
+      for (let g = 0; g <= P.w; g += 30) { ctx.beginPath(); ctx.moveTo(g,0); ctx.lineTo(g,P.h); ctx.stroke(); }
+      for (let g = 0; g <= P.h; g += 30) { ctx.beginPath(); ctx.moveTo(0,g); ctx.lineTo(P.w,g); ctx.stroke(); }
+      ctx.fillStyle = '#9fb0c4'; ctx.font = '11px ui-monospace, monospace';
+      ctx.fillText('N', cx - 4, 14); ctx.fillText('S', cx - 4, P.h - 5);
+      ctx.fillText('E', P.w - 14, cy + 4); ctx.fillText('W', 5, cy + 4);
+      ctx.strokeStyle = 'rgba(148,163,184,0.4)';
+      ctx.beginPath(); ctx.moveTo(cx,0); ctx.lineTo(cx,P.h); ctx.moveTo(0,cy); ctx.lineTo(P.w,cy); ctx.stroke();
+
+      const bpx = cx + bx / M_PER_PX, bpy = cy - by / M_PER_PX;  // N up → minus
+      // velocity arrow A→B
+      ctx.strokeStyle = getCss('--up'); ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(bpx, bpy); ctx.stroke();
+      drawArrowHead(ctx, cx, cy, bpx, bpy, getCss('--up'));
+      // bearing arc from north
+      const hdg = bearingRad(latA, lonA, bGeo().lat2, bGeo().lon2);
+      ctx.strokeStyle = 'rgba(214,51,108,0.8)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(cx, cy, 26, -Math.PI/2, -Math.PI/2 + hdg, hdg < 0); ctx.stroke();
+      // dots
+      dot(ctx, cx, cy, '#94a3b8', 'A');
+      dot(ctx, bpx, bpy, getCss('--nose'), 'B');
+
+      // ----- profile view (horizontal run vs altitude) -----
+      const c2 = R.ctx;
+      c2.clearRect(0,0,R.w,R.h); c2.fillStyle = '#0e1726'; c2.fillRect(0,0,R.w,R.h);
+      const d = haversineM(latA, lonA, bGeo().lat2, bGeo().lon2);
+      const baseY = PROF_BASE_Y, ax = 46;
+      const bx2 = ax + d / M_PER_PX;
+      const by2 = baseY - dh / V_PER_PX;
+      // ground + axes
+      c2.strokeStyle = 'rgba(148,163,184,0.25)';
+      c2.beginPath(); c2.moveTo(ax, 12); c2.lineTo(ax, baseY); c2.lineTo(R.w - 8, baseY); c2.stroke();
+      c2.fillStyle = '#9fb0c4'; c2.font = '11px ui-monospace, monospace';
+      c2.fillText('alt', 8, 18); c2.fillText('horizontal run  d', ax + 8, baseY + 16);
+      // run + rise guides
+      c2.strokeStyle = 'rgba(148,163,184,0.45)'; c2.setLineDash([4,3]);
+      c2.beginPath(); c2.moveTo(ax, baseY); c2.lineTo(bx2, baseY); c2.moveTo(bx2, baseY); c2.lineTo(bx2, by2); c2.stroke();
+      c2.setLineDash([]);
+      // velocity vector A→B in profile
+      c2.strokeStyle = getCss('--up'); c2.lineWidth = 2.5;
+      c2.beginPath(); c2.moveTo(ax, baseY); c2.lineTo(bx2, by2); c2.stroke();
+      drawArrowHead(c2, ax, baseY, bx2, by2, getCss('--up'));
+      // pitch arc
+      const pit = atan2(dh, d);
+      c2.strokeStyle = 'rgba(214,51,108,0.8)'; c2.lineWidth = 1.5;
+      c2.beginPath(); c2.arc(ax, baseY, 30, 0, -pit, pit > 0); c2.stroke();
+      dot(c2, ax, baseY, '#94a3b8', 'A');
+      dot(c2, bx2, by2, getCss('--nose'), 'B');
+
+      // ----- readout -----
+      const hdgDeg = (hdg * RADd + 360) % 360;
+      read.innerHTML =
+        kv('heading θ_hdg', hdgDeg.toFixed(1) + '°') +
+        kv('pitch θ_pitch', (pit * RADd).toFixed(2) + '°') +
+        kv('horizontal run d', (d).toFixed(0) + ' m') +
+        kv('altitude rise Δh', dh.toFixed(0) + ' m') +
+        '<div class="kv" style="border-top:1px solid var(--line);margin-top:4px;padding-top:6px;color:var(--muted)">' +
+        '<span>θ_pitch = atan2(Δh, d)</span><span>= atan2(' + dh.toFixed(0) + ', ' + d.toFixed(0) + ')</span></div>';
+    }
+
+    function kv(k, v) { return '<div class="kv"><span>' + k + '</span><span>' + v + '</span></div>'; }
+    function getCss(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+    function dot(ctx, x, y, c, label) {
+      ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x, y, 6, 0, 7); ctx.fill();
+      ctx.fillStyle = '#e5e7eb'; ctx.font = 'bold 12px ui-monospace, monospace'; ctx.fillText(label, x + 9, y - 8);
+    }
+    function drawArrowHead(ctx, x0, y0, x1, y1, c) {
+      const a = atan2(y1 - y0, x1 - x0), L = 9;
+      ctx.fillStyle = c; ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x1 - L*cos(a - 0.4), y1 - L*sin(a - 0.4));
+      ctx.lineTo(x1 - L*cos(a + 0.4), y1 - L*sin(a + 0.4));
+      ctx.closePath(); ctx.fill();
+    }
+
+    // dragging — plan sets bx/by, profile sets dh
+    let drag = null;
+    function planXY(e) { const r = plan.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+    function profXY(e) { const r = prof.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+    plan.addEventListener('pointerdown', e => { drag = 'plan'; plan.setPointerCapture(e.pointerId); onPlan(e); });
+    plan.addEventListener('pointermove', e => { if (drag === 'plan') onPlan(e); });
+    prof.addEventListener('pointerdown', e => { drag = 'prof'; prof.setPointerCapture(e.pointerId); onProf(e); });
+    prof.addEventListener('pointermove', e => { if (drag === 'prof') onProf(e); });
+    window.addEventListener('pointerup', () => drag = null);
+    function onPlan(e) { const p = planXY(e); const cx = plan.clientWidth/2, cy = 150;
+      bx = (p.x - cx) * M_PER_PX; by = (cy - p.y) * M_PER_PX; draw(); }
+    function onProf(e) { const p = profXY(e); dh = (PROF_BASE_Y - p.y) * V_PER_PX;
+      dh = Math.max(-1400, Math.min(1400, dh)); draw(); }
+
+    window.addEventListener('resize', draw);
+    draw();
+  })();
+
+  // ════════════════════════════════════════════════════════════════════
+  //  three.js scenes — Widget B (local ENU) and Widget C (globe)
+  // ════════════════════════════════════════════════════════════════════
+  let THREE, OrbitControls;
+  try {
+    THREE = await import('three');
+    ({ OrbitControls } = await import('three/addons/controls/OrbitControls.js'));
+  } catch (err) {
+    for (const id of ['stageB', 'stageC']) {
+      const el = document.getElementById(id);
+      if (el) el.insertAdjacentHTML('beforeend',
+        '<div class="loaderr">3-D view needs network access to load three.js (CDN). ' +
+        'The math sections and Widget&nbsp;A work offline.</div>');
+    }
+    THREE = null;
+  }
+
+  function cssv(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+
+  // build a small aircraft in BODY coordinates: +X nose, +Y left, +Z up
+  function makeAircraft(THREE, scale) {
+    const g = new THREE.Group();
+    const body = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, metalness: 0.2, roughness: 0.6 });
+    const accent = new THREE.MeshStandardMaterial({ color: cssv('--nose'), metalness: 0.2, roughness: 0.5 });
+    // fuselage (cylinder along +X)
+    const fus = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 1.7, 20), body);
+    fus.rotation.z = Math.PI / 2; g.add(fus);
+    // nose cone
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.5, 20), accent);
+    nose.rotation.z = -Math.PI / 2; nose.position.x = 1.1; g.add(nose);
+    // main wing (span along Y)
+    const wing = new THREE.Mesh(new THREE.BoxGeometry(0.42, 2.3, 0.05), body);
+    wing.position.x = -0.05; g.add(wing);
+    // horizontal stabiliser
+    const stab = new THREE.Mesh(new THREE.BoxGeometry(0.3, 1.0, 0.04), body);
+    stab.position.x = -0.78; g.add(stab);
+    // vertical tail (up = +Z)
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.05, 0.5), accent);
+    tail.position.set(-0.74, 0, 0.27); g.add(tail);
+    g.scale.setScalar(scale);
+    return g;
+  }
+
+  function addArrow(THREE, scene, dir, origin, len, color, head = 0.12) {
+    const a = new THREE.ArrowHelper(dir.clone().normalize(), origin, len, color, head, head * 0.6);
+    scene.add(a); return a;
+  }
+
+  function baseScene(THREE, OrbitControls, el, camPos) {
+    const w = el.clientWidth, h = el.clientHeight;
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(w, h); renderer.setClearColor(0x0e1726, 1);
+    el.appendChild(renderer.domElement);
+    const scene = new THREE.Scene();
+    const cam = new THREE.PerspectiveCamera(45, w / h, 0.01, 100);
+    cam.up.set(0, 0, 1); cam.position.set(...camPos);
+    const ctr = new OrbitControls(cam, renderer.domElement);
+    ctr.enableDamping = true; ctr.enablePan = false;
+    scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+    const dl = new THREE.DirectionalLight(0xffffff, 0.9); dl.position.set(3, 4, 5); scene.add(dl);
+    const dl2 = new THREE.DirectionalLight(0xffffff, 0.35); dl2.position.set(-3, -2, -4); scene.add(dl2);
+    window.addEventListener('resize', () => {
+      const W = el.clientWidth, H = el.clientHeight;
+      renderer.setSize(W, H); cam.aspect = W / H; cam.updateProjectionMatrix();
+    });
+    return { renderer, scene, cam, ctr };
+  }
+
+  // ── Widget B: aircraft in a local ENU box (scene coords = ENU) ──────────
+  function widgetB() {
+    if (!THREE) return;
+    const el = document.getElementById('stageB');
+    const { renderer, scene, cam, ctr } = baseScene(THREE, OrbitControls, el, [3.2, -3.6, 2.4]);
+
+    // ground grid on the E–N (XY) plane
+    const grid = new THREE.GridHelper(5, 10, 0x33405a, 0x222d40);
+    grid.rotation.x = Math.PI / 2; scene.add(grid);
+    // ENU axes
+    const O = new THREE.Vector3(0, 0, 0);
+    addArrow(THREE, scene, new THREE.Vector3(1,0,0), O, 1.7, cssv('--east'));
+    addArrow(THREE, scene, new THREE.Vector3(0,1,0), O, 1.7, cssv('--north'));
+    addArrow(THREE, scene, new THREE.Vector3(0,0,1), O, 1.4, cssv('--upclr'));
+    labelSprite(THREE, scene, 'E', new THREE.Vector3(1.85,0,0), cssv('--east'));
+    labelSprite(THREE, scene, 'N', new THREE.Vector3(0,1.85,0), cssv('--north'));
+    labelSprite(THREE, scene, 'Up', new THREE.Vector3(0,0,1.55), cssv('--upclr'));
+
+    const plane = makeAircraft(THREE, 0.34);
+    plane.position.set(0, 0, 0.02); scene.add(plane);
+    const noseArrow = addArrow(THREE, scene, new THREE.Vector3(1,0,0), new THREE.Vector3(0,0,0.02), 1.5, cssv('--nose'), 0.14);
+
+    const hS = document.getElementById('bHdg'), pS = document.getElementById('bPit');
+    const hV = document.getElementById('bHdgV'), pV = document.getElementById('bPitV');
+    const matEl = document.getElementById('bMat');
+
+    function update() {
+      const h = (+hS.value) * DEG, th = (+pS.value) * DEG;
+      hV.textContent = (+hS.value).toFixed(0) + '°';
+      pV.textContent = (+pS.value).toFixed(1) + '°';
+      const m = matModel(h, th);
+      renderMat(matEl, m);
+      const q = mat3ToQuat(m);
+      plane.quaternion.set(q[0], q[1], q[2], q[3]);
+      const n = col(m, 0);                                  // nose direction in ENU
+      noseArrow.setDirection(new THREE.Vector3(n[0], n[1], n[2]).normalize());
+    }
+    hS.addEventListener('input', update); pS.addEventListener('input', update); update();
+
+    (function loop() { requestAnimationFrame(loop); ctr.update(); renderer.render(scene, cam); })();
+  }
+
+  // ── Widget C: aircraft on the globe (scene coords = ECEF) ───────────────
+  function widgetC() {
+    if (!THREE) return;
+    const el = document.getElementById('stageC');
+    const { renderer, scene, cam, ctr } = baseScene(THREE, OrbitControls, el, [2.0, -2.4, 1.7]);
+    ctr.minDistance = 1.4; ctr.maxDistance = 7;
+
+    const R = 1.0;
+    // globe
+    const globe = new THREE.Mesh(
+      new THREE.SphereGeometry(R, 48, 36),
+      new THREE.MeshStandardMaterial({ color: 0x16324a, metalness: 0.1, roughness: 0.95, transparent: true, opacity: 0.96 }));
+    scene.add(globe);
+    // graticule
+    scene.add(graticule(THREE, R * 1.001));
+    // ECEF axes (faint, labelled)
+    const O = new THREE.Vector3(0,0,0);
+    addArrow(THREE, scene, new THREE.Vector3(1,0,0), O, 1.55, 0x8aa0b6, 0.08);
+    addArrow(THREE, scene, new THREE.Vector3(0,1,0), O, 1.55, 0x8aa0b6, 0.08);
+    addArrow(THREE, scene, new THREE.Vector3(0,0,1), O, 1.55, 0x8aa0b6, 0.08);
+    labelSprite(THREE, scene, 'X', new THREE.Vector3(1.7,0,0), '#aab8c8');
+    labelSprite(THREE, scene, 'Y', new THREE.Vector3(0,1.7,0), '#aab8c8');
+    labelSprite(THREE, scene, 'Z', new THREE.Vector3(0,0,1.7), '#aab8c8');
+
+    // ENU + nose arrows at the moving point (recreated as helpers we re-aim)
+    const enuE = addArrow(THREE, scene, new THREE.Vector3(1,0,0), O, 0.5, cssv('--east'), 0.06);
+    const enuN = addArrow(THREE, scene, new THREE.Vector3(1,0,0), O, 0.5, cssv('--north'), 0.06);
+    const enuU = addArrow(THREE, scene, new THREE.Vector3(1,0,0), O, 0.5, cssv('--upclr'), 0.06);
+    const noseA = addArrow(THREE, scene, new THREE.Vector3(1,0,0), O, 0.7, cssv('--nose'), 0.09);
+    const plane = makeAircraft(THREE, 0.12); scene.add(plane);
+
+    const lonS = document.getElementById('cLon'), latS = document.getElementById('cLat');
+    const hdgS = document.getElementById('cHdg'), pitS = document.getElementById('cPit');
+    const lonV = document.getElementById('cLonV'), latV = document.getElementById('cLatV');
+    const hdgV = document.getElementById('cHdgV'), pitV = document.getElementById('cPitV');
+    const matM = document.getElementById('cMatM'), matE = document.getElementById('cMatE'), matR = document.getElementById('cMatR');
+    const quatEl = document.getElementById('cQuat');
+
+    function update() {
+      const lon = +lonS.value, lat = +latS.value, h = (+hdgS.value) * DEG, th = (+pitS.value) * DEG;
+      lonV.textContent = lon + '°'; latV.textContent = lat + '°';
+      hdgV.textContent = (+hdgS.value).toFixed(0) + '°'; pitV.textContent = (+pitS.value).toFixed(1) + '°';
+
+      const mModel = matModel(h, th);
+      const mEnu = matEnu(lon, lat);
+      const mEcef = mat3mul(mEnu, mModel);
+      const q = mat3ToQuat(mEcef);
+
+      renderMat(matM, mModel); renderMat(matE, mEnu); renderMat(matR, mEcef);
+      quatEl.innerHTML = 'quaternion&nbsp; <b>x</b>=' + q[0].toFixed(3) +
+        '&nbsp; <b>y</b>=' + q[1].toFixed(3) + '&nbsp; <b>z</b>=' + q[2].toFixed(3) +
+        '&nbsp; <b>w</b>=' + q[3].toFixed(3);
+
+      // position on the globe = ENU "up" column = radial unit vector
+      const up = col(mEnu, 2), east = col(mEnu, 0), north = col(mEnu, 1);
+      const P = new THREE.Vector3(up[0], up[1], up[2]).multiplyScalar(R * 1.012);
+      plane.position.copy(P);
+      plane.quaternion.set(q[0], q[1], q[2], q[3]);
+
+      enuE.position.copy(P); enuE.setDirection(new THREE.Vector3(...east).normalize());
+      enuN.position.copy(P); enuN.setDirection(new THREE.Vector3(...north).normalize());
+      enuU.position.copy(P); enuU.setDirection(new THREE.Vector3(...up).normalize());
+      const n = col(mEcef, 0);                              // nose direction in ECEF
+      noseA.position.copy(P); noseA.setDirection(new THREE.Vector3(n[0], n[1], n[2]).normalize());
+    }
+    [lonS, latS, hdgS, pitS].forEach(s => s.addEventListener('input', update));
+    update();
+
+    (function loop() { requestAnimationFrame(loop); ctr.update(); renderer.render(scene, cam); })();
+  }
+
+  // graticule: latitude circles + longitude meridians
+  function graticule(THREE, R) {
+    const g = new THREE.Group();
+    const mat = new THREE.LineBasicMaterial({ color: 0x3a5066, transparent: true, opacity: 0.55 });
+    for (let lat = -60; lat <= 60; lat += 30) {
+      const pts = [], r = R * cos(lat * DEG), z = R * sin(lat * DEG);
+      for (let a = 0; a <= 360; a += 6) pts.push(new THREE.Vector3(r*cos(a*DEG), r*sin(a*DEG), z));
+      g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+    }
+    for (let lon = 0; lon < 360; lon += 30) {
+      const pts = [];
+      for (let a = -90; a <= 90; a += 6) pts.push(new THREE.Vector3(R*cos(a*DEG)*cos(lon*DEG), R*cos(a*DEG)*sin(lon*DEG), R*sin(a*DEG)));
+      g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+    }
+    return g;
+  }
+
+  // tiny text sprite for axis labels
+  function labelSprite(THREE, scene, text, pos, color) {
+    const cv = document.createElement('canvas'); cv.width = 64; cv.height = 64;
+    const c = cv.getContext('2d'); c.fillStyle = color; c.font = 'bold 40px ui-monospace, monospace';
+    c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(text, 32, 34);
+    const tex = new THREE.CanvasTexture(cv);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
+    sp.position.copy(pos); sp.scale.setScalar(0.28); scene.add(sp);
+  }
+
+  widgetB();
+  widgetC();
+</script>
+</body>
+</html>
