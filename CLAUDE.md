@@ -113,6 +113,15 @@ The project serves dual purposes: thesis visualization/validation, and reusable 
 
 ## Changelog
 
+### 2026-06-28 — `flight_scenarios`: the data→modeling seam (start state + aircraft)
+
+New top-level package that builds **neutral modeling inputs** from observed trajectory data: it reads a CZML-input flight + an aircraft id and produces a serializable `FlightScenario` (initial `GeodeticState` + `AircraftSpec` + `AeroParams` + source metadata) usable by **both** the optimizer (`4dTrajectory/optimization`) and a future data-driven model.
+
+- **Architecture — a new seam.** It sits between the decoupled *data plane* (`trajectory_data_process` → CZML-input) and *modeling plane* (`aircraft`, `aerodynamic_model`, `geokit`, the optimizer). It depends *downward* on the modeling primitives and reads the neutral CZML-input format; it is imported *upward* by both consumers, so neither depends on the other (no cycles). It is a **top-level package** (not under `4dTrajectory/optimization`, which would make the data-driven model transitively depend on the solver; and `4dTrajectory` isn't an importable name).
+- **Modules.** `scenario.py` (`FlightScenario` record + JSON round-trip + `aircraft_for_code`), `start_state.py` (track → initial `GeodeticState`), `build.py` (orchestration: CZML-input flight + aircraft id → scenario), `__main__.py` (CLI: `python -m flight_scenarios --input … --aircraft A320 --output …`), `README.md` (architecture + the start-state derivation).
+- **Built as a tutorial scaffold** (per the project convention): the architecture is fully wired and working; the one piece of physics — estimating `V`/`psi`/`gamma` from two track samples by finite difference — is left as a documented `TODO ①` in `start_state.initial_state_from_track` (formulas + which `geokit` helpers, derivation in the README). Verified solvable (the formulas reproduce the test's synthetic `V=100, psi=π/2, gamma=0`).
+- Tests: **5 pass** (serialization, aircraft resolution, save/load, the input guard) + **4 `xfail`** (the kinematics + end-to-end build — the implementation targets; they xpass once the TODO is filled). The CLI wires end-to-end against a real landings file up to the TODO. Purely additive — no existing code touched.
+
 ### 2026-06-28 — `geokit.units`: unify every speed conversion
 
 Follow-up to the geokit consolidation: added a speed-conversion module and routed every speed conversion in the project through it (the previous pass had deliberately left kt→m/s alone).
