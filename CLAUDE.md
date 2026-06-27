@@ -113,6 +113,16 @@ The project serves dual purposes: thesis visualization/validation, and reusable 
 
 ## Changelog
 
+### 2026-06-28 — Scenario → optimization → CZML comparison pipeline (teaching scaffolds)
+
+A pipeline that optimizes observed flights and visualizes the result three ways (observed ADS-B vs optimizer plan vs simulator rollout). The architecture is wired; the core steps are documented TODOs — see `docs/scenario-pipeline-todos.md`.
+
+- **`flight_scenarios` target state** — `final_state_from_track` (end-of-track kinematics, mirror of `initial_state_from_track`) + `build_scenario` now populates `FlightScenario.target`, so the optimizer has `initial → target`.
+- **`4dTrajectory/optimization/scenario_optimization.py` (new)** — reads `FlightScenario`s, writes one `*_states.json` per scenario = `{source, final_time_s, optimizer_states[], simulator_states[]}` (each state `{t,lat,lon,alt,V,psi,gamma,m}`). `optimizer_states` = the NLP node states; `simulator_states` = the controls rolled forward through `CasadiSimulator` (in the `aerodynamic_model` layer, so it does NOT import the backend, which sits above it). Loop/IO/CLI wired; **TODO ①** the optimizer call, **TODO ②** the rollout.
+- **`aeroviz-4d/python/build_scenario_comparison_czml.py` (new)** — reads a `*_states.json` and writes one combined CZML with three coloured time-dynamic paths: reference (copied from the airport's `trajectories.czml`), optimizer (cyan), simulator (orange). Reuses `generate_czml`'s document/position builders. **TODO ①** state-seq→CZML waypoints, **TODO ②** copy+recolour the matching ADS-B flight.
+- Both scaffolds verified solvable (the TODO algorithms were run inline against the real simulator / synthetic CZML). Additive — optimizer suite collects 74 clean, aeroviz-4d/python 95 pass; scaffold tests pass plumbing + xfail the TODO targets.
+- Note: `flight_scenarios.aircraft_for_code` is being extended to resolve types from the OpenAP database (work in progress; field-mapping gaps documented in the TODO doc) — left to the author; `HEAD` keeps the working preset lookup.
+
 ### 2026-06-28 — `flight_scenarios`: the data→modeling seam (start state + aircraft)
 
 New top-level package that builds **neutral modeling inputs** from observed trajectory data: it reads a CZML-input flight + an aircraft id and produces a serializable `FlightScenario` (initial `GeodeticState` + `AircraftSpec` + `AeroParams` + source metadata) usable by **both** the optimizer (`4dTrajectory/optimization`) and a future data-driven model.
