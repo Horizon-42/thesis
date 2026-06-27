@@ -8,10 +8,12 @@ import numpy as np
 
 
 MODEL_DIR = Path(__file__).resolve().parents[1]
-if str(MODEL_DIR) not in sys.path:
-    sys.path.insert(0, str(MODEL_DIR))
+REPO_ROOT = MODEL_DIR.parent
+for _path in (REPO_ROOT, MODEL_DIR):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
-from aircraft_sets import A320  # noqa: E402
+from aircraft.aircraft_sets import A320  # noqa: E402
 from common import Atmosphere, State  # noqa: E402
 from simulator_simple import LoadFactorControl, LoadFactorSimulator  # noqa: E402
 

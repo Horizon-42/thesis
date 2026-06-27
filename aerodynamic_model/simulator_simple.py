@@ -1,11 +1,10 @@
 # Simple Aerodynamic Simulator, with load factor, assume alpha = 0
 import numpy as np
 import math
+from aircraft.aircraft_sets import AircraftSpec, A320
 try:
-    from .aircraft_sets import AircraftSpec, A320
     from .common import State, Atmosphere, rk4_step, LoadFactorControl
 except ImportError:  # pragma: no cover - compatibility for flat script imports.
-    from aircraft_sets import AircraftSpec, A320
     from common import State, Atmosphere, rk4_step, LoadFactorControl
 
 class LoadFactorSimulator:

@@ -5,16 +5,17 @@ from typing import Any
 
 
 MODEL_DIR = Path(__file__).resolve().parent
-if str(MODEL_DIR) not in sys.path:
-    sys.path.insert(0, str(MODEL_DIR))
+REPO_ROOT = MODEL_DIR.parent
+for _path in (REPO_ROOT, MODEL_DIR):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
+from aircraft.aircraft_sets import AircraftSpec, A320
 try:
-    from .aircraft_sets import AircraftSpec, A320
     from .coordinates_convertor import CoordinateConverter, GeodeticCoordinate, ENUCoordinate
     from .simulator import Atmosphere, Simulator, State
     from .common import GeodeticState
 except ImportError:  # pragma: no cover - compatibility for flat script imports.
-    from aircraft_sets import AircraftSpec, A320
     from coordinates_convertor import CoordinateConverter, GeodeticCoordinate, ENUCoordinate
     from simulator import Atmosphere, Simulator, State
     from common import GeodeticState

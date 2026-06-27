@@ -1,8 +1,9 @@
 import math
 
 import casadi as ca
-from aerodynamic_model.casadi_simulator import make_geo_step_from_enu_integrator, AeroParams
-from aerodynamic_model.aircraft_sets import AircraftSpec
+from aerodynamic_model.casadi_simulator import make_geo_step_from_enu_integrator
+from aircraft.aero_params import AeroParams
+from aircraft.aircraft_sets import AircraftSpec
 from aerodynamic_model.common import GeodeticState
 
 def radians_expr(degrees):

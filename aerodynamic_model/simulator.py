@@ -1,10 +1,9 @@
 import math
 import numpy as np
+from aircraft.aircraft_sets import AIRCRAFT_PRESETS, AircraftSpec, A320
 try:
-    from .aircraft_sets import AIRCRAFT_PRESETS, AircraftSpec, A320
     from .common import State, Atmosphere, rk4_step, Control
 except ImportError:  # pragma: no cover - compatibility for flat script imports.
-    from aircraft_sets import AIRCRAFT_PRESETS, AircraftSpec, A320
     from common import State, Atmosphere, rk4_step, Control
 
 

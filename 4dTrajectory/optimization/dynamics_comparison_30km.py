@@ -38,8 +38,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from aerodynamic_model.aircraft_sets import A320  # noqa: E402
-from aerodynamic_model.casadi_simulator import aero_params_for_aircraft  # noqa: E402
+from aircraft.aircraft_sets import A320  # noqa: E402
+from aircraft.aero_params import aero_params_for_aircraft  # noqa: E402
 from dynamics_comparison import (  # noqa: E402
     _R,
     compare_dynamics,

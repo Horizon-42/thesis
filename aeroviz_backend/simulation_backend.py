@@ -6,7 +6,7 @@ from typing import Any
 from aeroviz_backend import paths  # noqa: F401
 
 from aerodynamic_model.casadi_simulator import CasadiSimulator
-from aircraft_sets import AIRCRAFT_PRESETS, AircraftSpec, A320
+from aircraft.aircraft_sets import AIRCRAFT_PRESETS, AircraftSpec, A320
 from common import Atmosphere, Control, GeodeticState, LoadFactorControl
 from geodetic_simulator import GeodeticSimulator
 from simulator_simple import LoadFactorSimulator

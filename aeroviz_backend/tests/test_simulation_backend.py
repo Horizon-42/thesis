@@ -3,7 +3,7 @@ import unittest
 
 from aeroviz_backend.simulation_backend import SimulationBackend, aircraft_catalog
 from aerodynamic_model.casadi_simulator import CasadiSimulator
-from aircraft_sets import B77W
+from aircraft.aircraft_sets import B77W
 from geodetic_simulator import GeodeticSimulator
 from simulator_simple import LoadFactorSimulator
 

@@ -6,7 +6,7 @@ import numpy as np
 
 from aeroviz_backend import optimization_backend
 from aeroviz_backend.simulation_backend import GeodeticSimulator
-from aerodynamic_model.aircraft_sets import A320
+from aircraft.aircraft_sets import A320
 
 
 class TestOptimizationBackend(unittest.TestCase):

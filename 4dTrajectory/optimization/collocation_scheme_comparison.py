@@ -50,7 +50,7 @@ _OPT_DIR = Path(__file__).resolve().parent
 if str(_OPT_DIR) not in sys.path:
     sys.path.insert(0, str(_OPT_DIR))
 
-from aerodynamic_model.aircraft_sets import A320, C172  # noqa: E402
+from aircraft.aircraft_sets import A320, C172  # noqa: E402
 from aerodynamic_model.common import GeodeticState  # noqa: E402
 from aerodynamic_model.casadi_simulator import (  # noqa: E402
     aero_params_for_aircraft, make_geodetic_step_integrator,

@@ -8,8 +8,8 @@ import casadi as ca
 import numpy as np
 import pytest
 
-from aerodynamic_model.aircraft_sets import A320, C172
-from aerodynamic_model.casadi_simulator import AeroParams, aero_params_for_aircraft
+from aircraft.aircraft_sets import A320, C172
+from aircraft.aero_params import AeroParams, aero_params_for_aircraft
 from aerodynamic_model.common import GeodeticState
 
 # Keep the optimisation dir importable for modules loaded via importlib.
@@ -455,7 +455,7 @@ def test_dense_state_keeps_playback_consistent_on_long_coarse_control_horizon():
     re-anchored RK4 playback simulator still lands within a few metres --
     because the state is collocated on N*M sub-intervals (auto-selected M).
     """
-    from aerodynamic_model.aircraft_sets import A320
+    from aircraft.aircraft_sets import A320
     from aerodynamic_model.casadi_simulator import (
         AeroParams, CasadiSimulator, make_geodetic_step_integrator,
     )
@@ -704,7 +704,7 @@ def test_collocation_schemes_form_an_accuracy_ladder():
     their NODES on the target; replaying the controls reveals the order
     ladder -- the crude trapezoidal (2nd order) drifts more than the
     higher-order Hermite-Simpson and rk4 (both 4th order)."""
-    from aerodynamic_model.aircraft_sets import A320
+    from aircraft.aircraft_sets import A320
 
     module = load_module()
     n_segments = 10
@@ -770,7 +770,7 @@ def test_full_transport_schemes_registered_and_solve():
     problem, pinning their nodes on the target.  Full transport changes the
     optimum only negligibly (the cross term is ~O(e^2 sinγ)), so the whole node
     path stays within a few metres of the approx-transport optimum."""
-    from aerodynamic_model.aircraft_sets import A320
+    from aircraft.aircraft_sets import A320
     from aerodynamic_model.casadi_simulator import make_geodetic_step_integrator
 
     module = load_module()
@@ -830,7 +830,7 @@ def test_reanchored_enu_scheme_is_consistent_with_the_enu_playback():
     frontend playback (``CasadiSimulator``) runs, so a solution replayed
     through that exact simulator lands on the target with a small miss
     (no geodetic-vs-ENU model gap; only the step-size discretisation remains)."""
-    from aerodynamic_model.aircraft_sets import A320
+    from aircraft.aircraft_sets import A320
     from aerodynamic_model.casadi_simulator import (
         AeroParams, CasadiSimulator, make_geodetic_step_integrator,
     )
@@ -919,7 +919,7 @@ def test_local_enu_scheme_solves_with_every_fitting():
     All three variants solve and return the standard tuple shape; the terminal
     node is pinned on the target.  (Its accuracy far from the anchor is studied
     in dynamics_comparison_30km, not here.)"""
-    from aerodynamic_model.aircraft_sets import A320
+    from aircraft.aircraft_sets import A320
     from aerodynamic_model.casadi_simulator import (
         AeroParams, make_geodetic_step_integrator,
     )

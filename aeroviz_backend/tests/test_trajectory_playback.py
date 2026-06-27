@@ -4,7 +4,7 @@ import unittest
 import numpy as np
 
 from aeroviz_backend import trajectory_playback
-from aircraft_sets import A320
+from aircraft.aircraft_sets import A320
 from common import GeodeticState
 
 

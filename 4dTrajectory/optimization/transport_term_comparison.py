@@ -62,7 +62,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from aerodynamic_model.aircraft_sets import A320, C172  # noqa: E402
+from aircraft.aircraft_sets import A320, C172  # noqa: E402
 from aerodynamic_model.casadi_coordinates_converter import WGS84_A, WGS84_E2  # noqa: E402
 from aerodynamic_model.casadi_simulator import (  # noqa: E402
     AeroParams,

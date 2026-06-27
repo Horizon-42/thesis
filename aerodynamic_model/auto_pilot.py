@@ -1,4 +1,4 @@
-from aircraft_sets import AircraftSpec
+from aircraft.aircraft_sets import AircraftSpec
 from simulator import Atmosphere, Control, Simulator, State
 import math
 

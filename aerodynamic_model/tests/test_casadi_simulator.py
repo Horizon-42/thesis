@@ -5,7 +5,7 @@ import casadi as ca
 import numpy as np
 
 
-from aerodynamic_model.aircraft_sets import A320  # noqa: E402
+from aircraft.aircraft_sets import A320  # noqa: E402
 from aerodynamic_model.casadi_exprs import (  # noqa: E402
     aerodynamic_coefficients_expr,
     isa_density_expr,

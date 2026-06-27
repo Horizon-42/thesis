@@ -12,6 +12,8 @@ that updates while the trajectory is animated.
 
 import math
 import subprocess
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import matplotlib.pyplot as plt
@@ -19,16 +21,21 @@ import numpy as np
 from matplotlib.animation import FuncAnimation
 from matplotlib.widgets import Button, TextBox
 
+# Keep the repo root importable so ``aircraft`` resolves when this file is run
+# directly (``python aerodynamic_model/visualize_simulator.py``).
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from aircraft.aircraft_sets import AIRCRAFT_PRESETS, AircraftSpec, A320, B77W, C172
 try:
     # Works when this file is executed as a package module.
     from .simulator import Atmosphere, Control, Simulator, State
-    from .aircraft_sets import AIRCRAFT_PRESETS, AircraftSpec, A320, B77W, C172
     from .auto_pilot import NaiveAutoPilot
 except ImportError:
     # Works when this file is executed directly:
     # python aerodynamic_model/visualize_simulator.py
     from simulator import Atmosphere, Control, Simulator, State
-    from aircraft_sets import AIRCRAFT_PRESETS, AircraftSpec, A320, B77W, C172
     from auto_pilot import NaiveAutoPilot
 
 

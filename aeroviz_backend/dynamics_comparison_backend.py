@@ -45,7 +45,7 @@ from aeroviz_backend.simulation_backend import (
 )
 from common import GeodeticState, LoadFactorControl
 
-from aerodynamic_model.casadi_simulator import aero_params_for_aircraft
+from aircraft.aero_params import aero_params_for_aircraft
 from dynamics_comparison import (
     COMPARED_KEYS,
     FULL_TRANSPORT_KEY,

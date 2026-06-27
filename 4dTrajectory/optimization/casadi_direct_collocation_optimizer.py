@@ -66,10 +66,9 @@ from aerodynamic_model.casadi_simulator import (
     make_geo_step_from_enu_integrator,
     geodetic_state_to_enu_expr,
     rk4_step_expr,
-    AeroParams,
-    aero_params_for_aircraft,
 )
-from aerodynamic_model.aircraft_sets import AircraftSpec
+from aircraft.aero_params import AeroParams, aero_params_for_aircraft
+from aircraft.aircraft_sets import AircraftSpec
 from aerodynamic_model.common import GeodeticState
 
 

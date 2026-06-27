@@ -7,8 +7,8 @@ import casadi as ca
 import numpy as np
 import pytest
 
-from aerodynamic_model.aircraft_sets import C172
-from aerodynamic_model.casadi_simulator import AeroParams
+from aircraft.aircraft_sets import C172
+from aircraft.aero_params import AeroParams
 from aerodynamic_model.common import GeodeticState
 
 
