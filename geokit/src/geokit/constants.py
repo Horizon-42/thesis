@@ -34,9 +34,15 @@ SPHERE_RADIUS_M = WGS84_A                    # default; set to EARTH_RADIUS_MEAN
 # ── Flat-Earth metres-per-degree (cheap local-tangent helpers) ───────────────
 METRES_PER_DEG_LAT = 111_320.0              # mean degree of latitude, metres
 
-# ── Unit conversions ─────────────────────────────────────────────────────────
+# ── Length / angle unit conversions ──────────────────────────────────────────
 NM_M = 1852.0                               # nautical mile -> metre (exact, by definition)
 FT_M = 0.3048                               # international foot -> metre (exact)
-KT_MS = NM_M / 3600.0                        # knot -> metre/second (= 0.5144444...)
 DEG2RAD = math.pi / 180.0
 RAD2DEG = 180.0 / math.pi
+
+# ── Speed unit conversions (multiply the source unit by these to get m/s) ─────
+# Prefer the helper functions in geokit.units over using these factors directly.
+KT_MS = NM_M / 3600.0                        # knot (nm/h)    -> metre/second (= 0.5144444...)
+FT_MIN_MS = FT_M / 60.0                       # foot/minute    -> metre/second (vertical rate)
+KMH_MS = 1000.0 / 3600.0                      # kilometre/hour -> metre/second
+MPH_MS = 1609.344 / 3600.0                    # mile/hour      -> metre/second

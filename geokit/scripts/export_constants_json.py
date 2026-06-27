@@ -28,6 +28,9 @@ CONSTANTS = {
     "METRES_PER_DEG_LAT": C.METRES_PER_DEG_LAT,
     "DEG2RAD": C.DEG2RAD,
     "RAD2DEG": C.RAD2DEG,
+    # speed factors (multiply source unit -> m/s)
+    "KNOTS_TO_MPS": C.KT_MS,
+    "FT_MIN_TO_MPS": C.FT_MIN_MS,
 }
 
 OUTPUT_PATH = (

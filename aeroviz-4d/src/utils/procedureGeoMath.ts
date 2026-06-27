@@ -12,6 +12,20 @@ export const FEET_TO_METERS = geoConstants.FEET_TO_METERS;
 export const METERS_PER_NM = geoConstants.METERS_PER_NM;
 export const METRES_PER_DEG_LAT = geoConstants.METRES_PER_DEG_LAT;
 
+/** Speed conversion factors (source unit × factor → m/s), mirrored from geokit. */
+export const KNOTS_TO_MPS = geoConstants.KNOTS_TO_MPS;
+export const FT_MIN_TO_MPS = geoConstants.FT_MIN_TO_MPS;
+
+/** Knots → metres/second (the single TS speed helper; matches geokit.kt_to_ms). */
+export function knotsToMetresPerSecond(knots: number): number {
+  return knots * KNOTS_TO_MPS;
+}
+
+/** Metres/second → knots. */
+export function metresPerSecondToKnots(metresPerSecond: number): number {
+  return metresPerSecond / KNOTS_TO_MPS;
+}
+
 export interface CartesianPoint {
   x: number;
   y: number;

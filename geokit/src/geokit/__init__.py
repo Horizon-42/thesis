@@ -11,8 +11,11 @@ from .constants import (
     DEG2RAD,
     EARTH_RADIUS_MEAN_M,
     FT_M,
+    FT_MIN_MS,
+    KMH_MS,
     KT_MS,
     METRES_PER_DEG_LAT,
+    MPH_MS,
     NM_M,
     RAD2DEG,
     SPHERE_RADIUS_M,
@@ -32,6 +35,16 @@ from .geodesy import (
     metres_per_deg_lon,
     metres_per_degree_precise,
 )
+from .units import (
+    ft_min_to_ms,
+    kmh_to_ms,
+    kt_to_ms,
+    mph_to_ms,
+    ms_to_ft_min,
+    ms_to_kmh,
+    ms_to_kt,
+    ms_to_mph,
+)
 
 __all__ = [
     # constants
@@ -46,6 +59,9 @@ __all__ = [
     "NM_M",
     "FT_M",
     "KT_MS",
+    "FT_MIN_MS",
+    "KMH_MS",
+    "MPH_MS",
     "DEG2RAD",
     "RAD2DEG",
     # geodesy
@@ -57,4 +73,13 @@ __all__ = [
     "flat_distance_m",
     "metres_per_degree_precise",
     "bounds_from_radius_km",
+    # speed units
+    "kt_to_ms",
+    "ms_to_kt",
+    "ft_min_to_ms",
+    "ms_to_ft_min",
+    "kmh_to_ms",
+    "ms_to_kmh",
+    "mph_to_ms",
+    "ms_to_mph",
 ]
