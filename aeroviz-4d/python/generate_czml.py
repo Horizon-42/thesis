@@ -9,7 +9,7 @@ CesiumJS frontend.  The frontend loads trajectories.czml as-is —
 you never need to touch the React code to update the visualisation.
 
 Usage:
-  python generate_czml.py                  # uses built-in mock data
+  python generate_czml.py --input my_flights.json
   python generate_czml.py --input my_flights.json --output custom.czml
 
 Input JSON format (when using --input):
@@ -33,8 +33,6 @@ from data_layout import airport_data_path
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 DEFAULT_AIRPORT = "KRDU"
-REPO_ROOT = Path(__file__).resolve().parents[2]
-TRAJECTORY_OUTPUT_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs"
 
 # Colour palette for trail polylines (RGBA 0-255)
 TRAIL_COLORS = [
@@ -44,20 +42,6 @@ TRAIL_COLORS = [
     (255,  20, 147, 200),   # deep pink
     (138,  43, 226, 200),   # blue violet
 ]
-
-
-def default_input_path(airport_code: str) -> Path:
-    airport_tag = airport_code.strip().lower()
-    airport_output_dir = TRAJECTORY_OUTPUT_ROOT / airport_tag
-    if airport_output_dir.exists():
-        candidates = sorted(
-            airport_output_dir.glob(f"{airport_tag}_czml_input_*.json"),
-            key=lambda path: path.stat().st_mtime,
-        )
-        if candidates:
-            return candidates[-1]
-
-    return airport_output_dir / f"{airport_tag}_czml_input_latest.json"
 
 
 def default_output_path(airport_code: str) -> Path:
@@ -442,14 +426,14 @@ def main() -> None:
     parser.add_argument("--airport", default=DEFAULT_AIRPORT, help="Airport ICAO for default output path")
     parser.add_argument(
         "--input",
-        default=None,
-        help="JSON file with flight data (defaults to the latest OpenSky pipeline output for --airport)",
+        required=True,
+        help="CZML-input JSON file with flight data (a *_czml_input_*.json from the trajectory pipeline)",
     )
     parser.add_argument("--output", default=None, help="Output CZML path")
     parser.add_argument("--multiplier", type=int, default=60, help="Clock speed multiplier")
     args = parser.parse_args()
 
-    input_path = Path(args.input) if args.input else default_input_path(args.airport)
+    input_path = Path(args.input)
     if not input_path.exists():
         print(f"✗ Input file not found: {input_path}")
         print("  Run trajectory_data_process/download_trajectories.py or run_asd-b_fetch_and_generate.py first.")
