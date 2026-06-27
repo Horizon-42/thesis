@@ -1,4 +1,16 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+from geokit import KT_MS, NM_M
+
+
+def knots_to_ms(speed_kt: float) -> float:
+    """Convert a speed in knots to metres per second (SI)."""
+    return speed_kt * KT_MS
+
+
+def nm_to_m(distance_nm: float) -> float:
+    """Convert a distance in nautical miles to metres (SI)."""
+    return distance_nm * NM_M
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,6 +30,27 @@ class AircraftSpec:
     final_approach_lateral_half_width_nm: float
     final_approach_glide_angle_deg: float
     threshold_crossing_height_m: float
+
+    # SI mirrors of the aviation-unit fields above, derived in __post_init__ so
+    # callers never re-derive kt->m/s or nm->m inline. Not constructor args:
+    # they are computed from the kt/nm fields, the existing fields are unchanged.
+    terminal_speed_ms: float = field(init=False)
+    terminal_speed_min_ms: float = field(init=False)
+    terminal_speed_max_ms: float = field(init=False)
+    final_approach_min_m: float = field(init=False)
+    final_approach_max_m: float = field(init=False)
+    final_approach_lateral_half_width_m: float = field(init=False)
+
+    def __post_init__(self) -> None:
+        # frozen dataclass: bypass the blocked __setattr__ to set derived fields.
+        object.__setattr__(self, "terminal_speed_ms", knots_to_ms(self.terminal_speed_kt))
+        object.__setattr__(self, "terminal_speed_min_ms", knots_to_ms(self.terminal_speed_min_kt))
+        object.__setattr__(self, "terminal_speed_max_ms", knots_to_ms(self.terminal_speed_max_kt))
+        object.__setattr__(self, "final_approach_min_m", nm_to_m(self.final_approach_min_nm))
+        object.__setattr__(self, "final_approach_max_m", nm_to_m(self.final_approach_max_nm))
+        object.__setattr__(
+            self, "final_approach_lateral_half_width_m", nm_to_m(self.final_approach_lateral_half_width_nm)
+        )
 
 A320 = AircraftSpec(
     code="A320",
