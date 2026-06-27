@@ -17,7 +17,7 @@ from typing import Any
 from aircraft.aero_params import aero_params_for_aircraft
 
 from .scenario import FlightScenario, aircraft_for_code
-from .start_state import DEFAULT_WINDOW_S, initial_state_from_track
+from .start_state import DEFAULT_WINDOW_S, final_state_from_track, initial_state_from_track
 
 
 def build_scenario(
@@ -38,7 +38,11 @@ def build_scenario(
     mass = mass_kg if mass_kg is not None else aircraft.mass_kg
 
     waypoints = flight["waypoints"]
+    # The optimizer flies initial -> target. Both ends of the observed track give the
+    # boundary states (so the optimizer reproduces the observed approach, and the result
+    # can be compared against the real flight).
     initial = initial_state_from_track(waypoints, mass_kg=mass, window_s=window_s)
+    target = final_state_from_track(waypoints, mass_kg=mass, window_s=window_s)
     aero = aero_params_for_aircraft(aircraft)
 
     source = {
@@ -50,7 +54,7 @@ def build_scenario(
         "n_samples": len(waypoints),
         "window_s": window_s,
     }
-    return FlightScenario(initial=initial, aircraft=aircraft, aero=aero, source=source)
+    return FlightScenario(initial=initial, aircraft=aircraft, aero=aero, source=source, target=target)
 
 
 def build_scenarios_from_czml_input(

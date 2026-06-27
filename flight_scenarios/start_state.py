@@ -68,18 +68,60 @@ def initial_state_from_track(
     #     gamma = math.atan2(vertical_m, horizontal_m)                # rad, + = climbing
     #
     # Assign those three, then return the state below (delete this raise):
-    raise NotImplementedError(
-        "Implement the V / psi / gamma estimate in initial_state_from_track "
-        "(flight_scenarios/start_state.py). The three formulas are in the TODO ① comment; "
-        "see flight_scenarios/README.md for the derivation."
+
+    V = math.sqrt(horizontal_m**2 + vertical_m**2) / dt
+    psi = bearing_rad(lat0, lon0, lat1, lon1)
+    gamma = math.atan2(vertical_m, horizontal_m)
+
+    return GeodeticState(
+        latitude=lat0,
+        longitude=lon0,
+        altitude=alt0,
+        V=V,
+        psi=psi,
+        gamma=gamma,
+        m=mass_kg,
     )
 
-    # return GeodeticState(
-    #     latitude=lat0,
-    #     longitude=lon0,
-    #     altitude=alt0,
-    #     V=V,
-    #     psi=psi,
-    #     gamma=gamma,
-    #     m=mass_kg,
-    # )
+
+def final_state_from_track(
+    waypoints: list[Waypoint],
+    *,
+    mass_kg: float,
+    window_s: float = DEFAULT_WINDOW_S,
+) -> GeodeticState:
+    """Estimate the :class:`GeodeticState` at the **end** of ``waypoints`` (the target).
+
+    The mirror of :func:`initial_state_from_track`, anchored at the *last* sample: the
+    velocity is the step *into* the final point (from a sample about ``window_s`` earlier),
+    and the position is the final sample. Same V/psi/gamma kinematics, evaluated at the end.
+    """
+    if len(waypoints) < 2:
+        raise ValueError("need at least two waypoints to estimate V / psi / gamma")
+
+    tN, lonN, latN, altN = waypoints[-1]
+    # Earlier point: the last sample at least `window_s` before the end.
+    p0 = next((wp for wp in reversed(waypoints[:-1]) if tN - wp[0] >= window_s), waypoints[0])
+    t0, lon0, lat0, alt0 = p0
+
+    dt = tN - t0
+    if dt <= 0:
+        raise ValueError("waypoint time offsets must be strictly increasing")
+
+    horizontal_m = haversine_m(lat0, lon0, latN, lonN)
+    vertical_m = altN - alt0
+
+    # Same three formulas as initial_state_from_track, evaluated at the track's end:
+    V = math.sqrt(horizontal_m**2 + vertical_m**2) / dt
+    psi = bearing_rad(lat0, lon0, latN, lonN)
+    gamma = math.atan2(vertical_m, horizontal_m)
+
+    return GeodeticState(
+        latitude=latN,
+        longitude=lonN,
+        altitude=altN,
+        V=V,
+        psi=psi,
+        gamma=gamma,
+        m=mass_kg,
+    )

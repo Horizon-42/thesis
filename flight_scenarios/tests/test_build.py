@@ -1,7 +1,4 @@
-"""End-to-end build wiring. These are the integration target — ``xfail`` until the
-start_state TODO is implemented, then they turn green (xpass)."""
-
-import pytest
+"""End-to-end build wiring: CZML-input flight + aircraft id -> FlightScenario."""
 
 from aircraft.aircraft_sets import A320
 from flight_scenarios.build import build_scenario, build_scenarios_from_czml_input
@@ -21,8 +18,7 @@ FLIGHT = {
 }
 
 
-@pytest.mark.xfail(reason="end-to-end build needs the start_state TODO implemented", strict=False)
-def test_build_scenario_wires_aircraft_and_source():
+def test_build_scenario_wires_aircraft_source_and_endpoints():
     scen = build_scenario(FLIGHT, "A320")
     assert scen.aircraft is A320
     assert scen.aero.S == A320.wing_area_m2
@@ -30,9 +26,12 @@ def test_build_scenario_wires_aircraft_and_source():
     assert scen.source["id"] == "AFR074"
     assert scen.source["runway"] == "05L"
     assert scen.source["n_samples"] == 3
+    # both boundary states are populated (initial = track start, target = track end)
+    assert scen.initial.longitude == FLIGHT["waypoints"][0][1]
+    assert scen.target is not None
+    assert scen.target.longitude == FLIGHT["waypoints"][-1][1]
 
 
-@pytest.mark.xfail(reason="end-to-end build needs the start_state TODO implemented", strict=False)
 def test_build_scenarios_from_list():
     scens = build_scenarios_from_czml_input([FLIGHT, FLIGHT], "C172")
     assert len(scens) == 2
