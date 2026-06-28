@@ -365,12 +365,16 @@ _SOLVER_BACKENDS = ("ipopt", "sqpmethod")
 _DEFAULT_SOLVER_BACKEND = "ipopt"
 
 
-def _make_nlp_solver(nlp, solver_backend):
+def _make_nlp_solver(nlp, solver_backend, verbose=False):
     """Build the NLP solver for the chosen backend (see ``_SOLVER_BACKENDS``).
 
     The exact Hessian of the point-mass dynamics is nonconvex, so the SQP
     backend regularises it (``convexify_strategy``) to keep its QP subproblem
     solvable, and tells the QP not to throw on a failed subproblem.
+
+    The solver is **silent by default** — no IPOPT banner, no per-iteration
+    table, no CasADi timing line — so a batch of solves doesn't flood the
+    console. Pass ``verbose=True`` to restore the full solver log for debugging.
     """
     if solver_backend == "sqpmethod":
         return ca.nlpsol('solver', 'sqpmethod', nlp, {
@@ -378,11 +382,17 @@ def _make_nlp_solver(nlp, solver_backend):
             'qpsol_options': {'printLevel': 'none', 'error_on_fail': False},
             'convexify_strategy': 'regularize',
             'max_iter': 100,
-            'print_iteration': False,
-            'print_header': False,
-            'print_time': False,
+            'print_iteration': verbose,
+            'print_header': verbose,
+            'print_time': verbose,
         })
-    return ca.nlpsol('solver', 'ipopt', nlp)
+    if verbose:
+        return ca.nlpsol('solver', 'ipopt', nlp)
+    return ca.nlpsol('solver', 'ipopt', nlp, {
+        'ipopt.print_level': 0,   # no per-iteration table
+        'ipopt.sb': 'yes',        # no IPOPT startup banner
+        'print_time': False,      # no CasADi wall-time line
+    })
 
 
 # --------------------------------------------------------------------------
@@ -658,6 +668,7 @@ def make_direct_collocation_solver(
     smoothness_weights: tuple = _DEFAULT_SMOOTHNESS_WEIGHTS,
     collocation_scheme: str = _DEFAULT_SCHEME,
     solver_backend: str = _DEFAULT_SOLVER_BACKEND,
+    verbose: bool = False,
 ):
     """Build the fixed-time NLP symbolically with the chosen defect scheme.
 
@@ -745,7 +756,7 @@ def make_direct_collocation_solver(
         'g': g,
         'p': ca.vertcat(start_state, target_state, duration),
     }
-    solver = _make_nlp_solver(nlp, solver_backend)
+    solver = _make_nlp_solver(nlp, solver_backend, verbose)
     return solver, lbw, ubw, lbg, ubg
 
 
@@ -776,6 +787,7 @@ def make_direct_collocation_solver_free_time(
     smoothness_weights: tuple = _DEFAULT_SMOOTHNESS_WEIGHTS,
     collocation_scheme: str = _DEFAULT_SCHEME,
     solver_backend: str = _DEFAULT_SOLVER_BACKEND,
+    verbose: bool = False,
 ):
     """Build the free-final-time NLP with ``T`` as a decision variable.
 
@@ -874,7 +886,7 @@ def make_direct_collocation_solver_free_time(
         'g': g,
         'p': ca.vertcat(start_state, target_state, max_duration),
     }
-    solver = _make_nlp_solver(nlp, solver_backend)
+    solver = _make_nlp_solver(nlp, solver_backend, verbose)
     return solver, lbw, ubw, lbg, ubg
 
 
@@ -900,6 +912,7 @@ class CasadiDirectCollocationOptimizer:
         collocation_scheme: str = _DEFAULT_SCHEME,
         solver_backend: str = _DEFAULT_SOLVER_BACKEND,
         min_speed_ms: float | None = None,
+        verbose: bool = False,
     ):
         if n_segments < 2:
             raise ValueError("n_segments must be at least 2 for direct collocation")
@@ -926,6 +939,9 @@ class CasadiDirectCollocationOptimizer:
         self.last_solve_timings: dict[str, float] | None = None
         # NLP solver backend: ipopt (default) or sqpmethod.
         self.solver_backend = solver_backend
+        # Solver console verbosity. Default False keeps every solve silent (no
+        # IPOPT banner / iteration table / timing line); True restores the log.
+        self.verbose = verbose
         # Keep the realised bank at the terminal node below this angle (a
         # pure state constraint).
         self.max_terminal_bank_deg = max_terminal_bank_deg
@@ -978,6 +994,7 @@ class CasadiDirectCollocationOptimizer:
                 smoothness_weights=smoothness_weights,
                 collocation_scheme=collocation_scheme,
                 solver_backend=solver_backend,
+                verbose=verbose,
             )
         )
 
@@ -1000,6 +1017,7 @@ class CasadiDirectCollocationOptimizer:
             smoothness_weights=smoothness_weights,
             collocation_scheme=collocation_scheme,
             solver_backend=solver_backend,
+            verbose=verbose,
         )
 
     # ------------------------------------------------------------------
