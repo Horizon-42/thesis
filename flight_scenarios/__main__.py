@@ -6,9 +6,11 @@
     python -m flight_scenarios
     # a single explicit file:
     python -m flight_scenarios --input outputs/landings/KRDU/KRDU_05L_landings.json --output scen.json
+    # one combined file for every discovered flight (instead of one per runway):
+    python -m flight_scenarios --airport KRDU --combined
 
-Each flight becomes one FlightScenario; each landings file yields one scenario JSON (one per
-runway), written under --output-dir (or --output for a single --input).
+Each flight becomes one FlightScenario. By default each landings file yields one scenario JSON
+(one per runway) under --output-dir; with --combined, all flights go into a single file.
 """
 
 from __future__ import annotations
@@ -53,6 +55,15 @@ def _output_path(landings_file: Path, *, output: str | None, single_input: bool,
     return Path(output_dir) / f"{stem}_scenarios.json"
 
 
+def combined_output_name(*, input_path: str | None = None, airport: str | None = None) -> str:
+    """Filename for the single combined scenario file (--combined)."""
+    if input_path:
+        return f"{Path(input_path).stem.replace('_landings', '')}_scenarios.json"
+    if airport:
+        return f"{airport}_combined_scenarios.json"
+    return "all_combined_scenarios.json"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build flight scenarios from CZML-input landings data")
     target = parser.add_mutually_exclusive_group()
@@ -78,6 +89,11 @@ def main() -> None:
         help=f"Directory for per-runway scenario files (default: {DEFAULT_OUTPUT_DIR})",
     )
     parser.add_argument(
+        "--combined", action="store_true",
+        help="Write ONE combined scenario file for every discovered flight, instead of one file per runway "
+             "(path: --output, else --output-dir/<airport-or-all>_combined_scenarios.json)",
+    )
+    parser.add_argument(
         "--aircraft-type", default="A320",
         help="Fallback aircraft code for flights whose icao24 can't be resolved (default: A320); "
              "aircraft is normally auto-resolved per flight from its icao24",
@@ -86,8 +102,8 @@ def main() -> None:
     parser.add_argument("--window-s", type=float, default=DEFAULT_WINDOW_S, help="Finite-difference window for the start state")
     args = parser.parse_args()
 
-    if args.output and not args.input:
-        parser.error("--output is only valid with --input; batch modes write to --output-dir")
+    if args.output and not (args.input or args.combined):
+        parser.error("--output is only valid with --input or --combined; per-runway batch writes to --output-dir")
 
     landings_files = discover_landings(input_path=args.input, airport=args.airport, landings_dir=args.landings_dir)
     if not landings_files:
@@ -95,6 +111,22 @@ def main() -> None:
             "no *_landings.json files found to process "
             f"(input={args.input!r}, airport={args.airport!r}, landings-dir={args.landings_dir!r})"
         )
+
+    if args.combined:
+        scenarios = []
+        for landings_file in landings_files:
+            scenarios.extend(build_scenarios_from_czml_input(
+                str(landings_file), args.aircraft_type, mass_kg=args.mass_kg, window_s=args.window_s
+            ))
+        out_path = Path(args.output) if args.output else (
+            Path(args.output_dir) / combined_output_name(input_path=args.input, airport=args.airport)
+        )
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        save_scenarios(scenarios, out_path)
+        distribution = Counter(scenario.aircraft.code for scenario in scenarios)
+        print(f"✓ combined {len(landings_files)} file(s), {len(scenarios)} scenario(s) -> {out_path}")
+        print(f"    aircraft: {dict(distribution)}  (fallback type: {args.aircraft_type})")
+        return
 
     total = 0
     for landings_file in landings_files:

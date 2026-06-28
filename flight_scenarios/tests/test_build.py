@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from aircraft.aircraft_sets import A320
-from flight_scenarios.__main__ import discover_landings
+from flight_scenarios.__main__ import combined_output_name, discover_landings
 from flight_scenarios.build import build_scenario, build_scenarios_from_czml_input
 
 # A minimal CZML-input flight (one element of a *_czml_input_*.json / *_landings.json).
@@ -87,3 +87,9 @@ def test_discover_landings_all_airports(tmp_path):
         "KRDU_05L_landings.json",
         "KRDU_23R_landings.json",
     ]
+
+
+def test_combined_output_name_by_mode():
+    assert combined_output_name(airport="KRDU") == "KRDU_combined_scenarios.json"
+    assert combined_output_name() == "all_combined_scenarios.json"
+    assert combined_output_name(input_path="a/b/KRDU_05L_landings.json") == "KRDU_05L_scenarios.json"

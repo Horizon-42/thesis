@@ -103,6 +103,9 @@ python -m flight_scenarios --output-dir flight_scenarios/outputs
 # every runway of one airport:
 python -m flight_scenarios --airport KRDU --output-dir flight_scenarios/outputs
 
+# one combined file for every discovered flight (instead of one per runway):
+python -m flight_scenarios --airport KRDU --combined --output-dir flight_scenarios/outputs
+
 # a single explicit file:
 python -m flight_scenarios \
   --input trajectory_data_process/outputs/landings/KRDU/KRDU_05L_landings.json \
