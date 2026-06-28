@@ -1,9 +1,9 @@
 """Tests for the scenario-optimization scaffold.
 
 Plumbing (records, the node-state reshape, the target guard, filenames) passes already.
-``test_simulate_controls_rolls_forward`` is the TODO ② target (xfail until implemented).
-The full ``optimize_scenario`` path runs the solver, so it is exercised by the CLI, not
-the unit suite.
+``test_simulate_controls_rolls_forward`` guards the forward rollout (TODO ②, now wired
+through ``aerodynamic_model.rollout_piecewise_constant``). The full ``optimize_scenario``
+path runs the solver, so it is exercised by the CLI, not the unit suite.
 """
 
 import sys
@@ -71,7 +71,6 @@ def test_optimize_scenario_requires_target():
         so.optimize_scenario(_scenario(target=None))
 
 
-@pytest.mark.xfail(reason="implement TODO ② in scenario_optimization.simulate_controls", strict=False)
 def test_simulate_controls_rolls_forward():
     initial = GeodeticState(35.6, -78.5, 2000.0, 130.0, 1.5, -0.05, A320.mass.max_takeoff_kg)
     # two constant-control segments over a short 4 s horizon

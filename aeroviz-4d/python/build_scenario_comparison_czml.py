@@ -48,10 +48,7 @@ def _states_to_waypoints(states: list[dict[str, Any]]) -> list[tuple[float, floa
 
     # TODO ①: return [(s["t"], s["lon"], s["lat"], s["alt"]) for s in states]
     """
-    raise NotImplementedError(
-        "TODO ①: convert the state dicts to (t, lon, lat, alt) waypoints — see the comment."
-    )
-
+    return [(s["t"], s["lon"], s["lat"], s["alt"]) for s in states]
 
 # ── TODO ② — copy the matching reference flight from the ADS-B CZML ────────────
 
@@ -77,9 +74,14 @@ def _reference_entity_from_adsb(
     #           return entity
     #   return None        # no matching flight in the ADS-B CZML
     """
-    raise NotImplementedError(
-        "TODO ②: find + deep-copy + recolour the matching ADS-B flight — see the comment."
-    )
+    for packet in adsb_czml:
+        if packet.get("id") == flight_id:
+            entity = copy.deepcopy(packet)
+            entity["id"] = "scenario-reference"
+            entity["name"] = f"Reference {flight_id}"
+            entity["path"]["material"]["solidColor"]["color"]["rgba"] = list(color_rgba)
+            return entity
+    return None        # no matching flight in the ADS-B CZML
 
 
 # ── Wired: entity assembly + document + combined CZML ─────────────────────────
