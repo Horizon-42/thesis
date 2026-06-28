@@ -14,6 +14,7 @@
 import * as Cesium from "cesium";
 import { useApp, type LayerKey } from "../context/AppContext";
 import { useLandingsManifest } from "../hooks/useLandingsManifest";
+import { useComparisonCategories } from "../hooks/useComparisonCategories";
 import { useEffect, useRef, useState } from "react";
 
 /** Predefined speed options shown as buttons */
@@ -121,10 +122,27 @@ export default function ControlPanel() {
     setActiveAirportCode,
     selectedRunway,
     setSelectedRunway,
+    trajectoryComparison,
+    setTrajectoryComparison,
+    trajectoryComparisonCategory,
+    setTrajectoryComparisonCategory,
+    trajectorySampleCount,
+    setTrajectorySampleCount,
     rangeRingRadiusKm,
     setRangeRingRadiusKm,
   } = useApp();
   const { manifest: landingsManifest } = useLandingsManifest(activeAirportCode);
+  const { categories: comparisonCategories } = useComparisonCategories(activeAirportCode);
+
+  // Default the comparison category to the first available, and keep it valid as airports change.
+  useEffect(() => {
+    if (comparisonCategories.length === 0) {
+      if (trajectoryComparisonCategory !== null) setTrajectoryComparisonCategory(null);
+      return;
+    }
+    const stillValid = comparisonCategories.some((c) => c.dir === trajectoryComparisonCategory);
+    if (!stillValid) setTrajectoryComparisonCategory(comparisonCategories[0].dir);
+  }, [comparisonCategories, trajectoryComparisonCategory, setTrajectoryComparisonCategory]);
   const landingRunways = landingsManifest?.runways ?? [];
   const [isAnimating, setIsAnimating] = useState<boolean>(false);
 
@@ -281,6 +299,63 @@ export default function ControlPanel() {
           </label>
         ))}
       </section>
+
+      {layers.trajectories ? (
+        <section className="control-panel-trajectory-options" aria-label="Trajectory options">
+          <h4>Trajectories</h4>
+          <label>
+            <input
+              type="checkbox"
+              checked={trajectoryComparison}
+              onChange={(event) => setTrajectoryComparison(event.target.checked)}
+            />
+            Optimizer comparison (3-colour)
+          </label>
+          {trajectoryComparison ? (
+            comparisonCategories.length > 0 ? (
+              <label className="control-panel-airport-selector">
+                <span>Optimization category</span>
+                <select
+                  className="control-panel-airport-selector-input"
+                  value={trajectoryComparisonCategory ?? ""}
+                  onChange={(event) => setTrajectoryComparisonCategory(event.target.value || null)}
+                >
+                  {comparisonCategories.map((category) => (
+                    <option key={category.key} value={category.dir}>
+                      {category.label} ({category.groups})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <p className="control-panel-comparison-empty">
+                No comparison data found for this airport.
+              </p>
+            )
+          ) : null}
+          <label className="control-panel-airport-selector">
+            <span>Sample count (0 = all)</span>
+            <input
+              type="number"
+              min={0}
+              step={1}
+              className="control-panel-airport-selector-input"
+              value={trajectorySampleCount}
+              onChange={(event) => {
+                const parsed = Number.parseInt(event.target.value, 10);
+                setTrajectorySampleCount(Number.isFinite(parsed) && parsed > 0 ? parsed : 0);
+              }}
+            />
+          </label>
+          {trajectoryComparison ? (
+            <div className="control-panel-comparison-legend">
+              <span><i style={{ background: "rgb(235, 235, 235)" }} /> Reference</span>
+              <span><i style={{ background: "rgb(0, 200, 255)" }} /> Optimizer</span>
+              <span><i style={{ background: "rgb(255, 140, 0)" }} /> Simulator</span>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       {layers.rangeRing ? (
         <section className="control-panel-range-ring" aria-label="Range ring radius">

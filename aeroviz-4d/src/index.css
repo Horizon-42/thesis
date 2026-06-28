@@ -348,6 +348,35 @@ body,
   color: #aebbd0;
 }
 
+.control-panel-comparison-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: #aebbd0;
+}
+
+.control-panel-comparison-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.control-panel-comparison-legend i {
+  width: 12px;
+  height: 3px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+.control-panel-comparison-empty {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: #8a97ab;
+  font-style: italic;
+}
+
 .control-panel label {
   display: flex;
   align-items: center;

@@ -154,6 +154,19 @@ interface FlightSessionState {
   /** The loaded CZML datasource for trajectory sampling and profile views */
   trajectoryDataSource: Cesium.CzmlDataSource | null;
   setTrajectoryDataSource: (dataSource: Cesium.CzmlDataSource | null) => void;
+
+  /** When true, the Trajectories layer shows the 3-colour optimizer comparison instead
+   *  of the observed tracks (driven by the same runway selection). */
+  trajectoryComparison: boolean;
+  setTrajectoryComparison: (enabled: boolean) => void;
+
+  /** Selected optimization category dir (e.g. "asdb"); which comparison set to show. */
+  trajectoryComparisonCategory: string | null;
+  setTrajectoryComparisonCategory: (categoryDir: string | null) => void;
+
+  /** How many trajectories to render (0 = all); applies to both normal and comparison modes. */
+  trajectorySampleCount: number;
+  setTrajectorySampleCount: (count: number) => void;
 }
 
 interface ProcedureSessionState {
@@ -221,6 +234,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [selectedRunway, setSelectedRunway] = useState<string | null>(null);
   const [trajectoryDataSource, setTrajectoryDataSource] =
     useState<Cesium.CzmlDataSource | null>(null);
+  const [trajectoryComparison, setTrajectoryComparison] = useState<boolean>(false);
+  const [trajectoryComparisonCategory, setTrajectoryComparisonCategory] =
+    useState<string | null>(null);
+  const [trajectorySampleCount, setTrajectorySampleCount] = useState<number>(0);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(60);
   const [autoReplay, setAutoReplay] = useState<boolean>(true);
   const [procedureVisibility, setProcedureVisibility] = useState<Record<string, boolean>>({});
@@ -380,7 +397,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSelectedRunway,
     trajectoryDataSource,
     setTrajectoryDataSource,
-  }), [selectedFlightId, selectedRunway, trajectoryDataSource]);
+    trajectoryComparison,
+    setTrajectoryComparison,
+    trajectoryComparisonCategory,
+    setTrajectoryComparisonCategory,
+    trajectorySampleCount,
+    setTrajectorySampleCount,
+  }), [selectedFlightId, selectedRunway, trajectoryDataSource, trajectoryComparison,
+    trajectoryComparisonCategory, trajectorySampleCount]);
   const procedureSessionState: ProcedureSessionState = useMemo(() => ({
     procedureVisibility,
     setProcedureBranchVisible,

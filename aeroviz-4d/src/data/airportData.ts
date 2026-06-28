@@ -73,6 +73,123 @@ export function airportLandingsRunwayUrl(airportCode: string, runway: string): s
   return airportDataUrl(code, `landings/${code}_${runway.toUpperCase()}.czml`);
 }
 
+// ── Optimizer-comparison trajectories (three-coloured: reference/optimizer/simulator) ─────
+//
+// Produced by `aeroviz-4d/python/build_scenario_comparison_czml.py` into
+// `<airport>/comparison/`: one `comparison_<ICAO>_<RWY>.czml` per runway plus a single
+// `comparison_index.json`. The index lets the frontend sample a subset of flight groups
+// without loading every (large) per-runway CZML.
+
+export function airportComparisonRootUrl(airportCode: string): string {
+  return `${airportDataRootUrl(airportCode)}/comparison`;
+}
+
+/** Manifest of available optimization categories (ADS-B / runway target, ±constraints). */
+export function airportComparisonCategoriesUrl(airportCode: string): string {
+  return `${airportComparisonRootUrl(airportCode)}/categories.json`;
+}
+
+/** The index for one category's comparison data (one record per flight group). */
+export function airportComparisonIndexUrl(airportCode: string, categoryDir: string): string {
+  return `${airportComparisonRootUrl(airportCode)}/${categoryDir}/comparison_index.json`;
+}
+
+/** One runway's comparison CZML within a category, named as the index's `czml` field. */
+export function airportComparisonCzmlUrl(
+  airportCode: string,
+  categoryDir: string,
+  czmlFile: string,
+): string {
+  return `${airportComparisonRootUrl(airportCode)}/${categoryDir}/${czmlFile}`;
+}
+
+/** One optimization category, as listed in `comparison/categories.json`. */
+export interface ComparisonCategory {
+  /** Stable key, e.g. "asdb" / "runway" / "runwayConstrained". */
+  key: string;
+  /** Display label, e.g. "ADS-B target". */
+  label: string;
+  /** Subdirectory under `comparison/` holding this category's index + CZMLs. */
+  dir: string;
+  /** Number of flight groups in this category. */
+  groups: number;
+}
+
+export interface ComparisonCategoriesManifest {
+  categories: ComparisonCategory[];
+}
+
+export function isComparisonCategory(value: unknown): value is ComparisonCategory {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.key === "string" &&
+    typeof candidate.label === "string" &&
+    typeof candidate.dir === "string"
+  );
+}
+
+export function isComparisonCategoriesManifest(value: unknown): value is ComparisonCategoriesManifest {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return Array.isArray(candidate.categories) && candidate.categories.every(isComparisonCategory);
+}
+
+export interface ComparisonInitialState {
+  lat: number;
+  lon: number;
+  alt: number;
+  V: number;
+  psi: number;
+  gamma: number;
+}
+
+/** One flight's comparison group: the entity ids of its (up to) three coloured paths. */
+export interface ComparisonGroup {
+  /** Unique group key, `${flightId}_${runway}`. */
+  group: string;
+  flightId: string;
+  runway: string;
+  airport: string;
+  status: "solved" | "failed";
+  finalTimeS: number | null;
+  initialState: ComparisonInitialState | null;
+  /** CZML entity ids belonging to this group (e.g. ref-/opt-/sim-`${group}`). */
+  entities: string[];
+  /** The CZML file (within `comparison/`) that holds this group's entities. */
+  czml: string;
+}
+
+export interface ComparisonIndex {
+  epoch: string;
+  startHidden: boolean;
+  groups: ComparisonGroup[];
+}
+
+export function isComparisonGroup(value: unknown): value is ComparisonGroup {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.group === "string" &&
+    typeof candidate.flightId === "string" &&
+    typeof candidate.runway === "string" &&
+    typeof candidate.czml === "string" &&
+    (candidate.status === "solved" || candidate.status === "failed") &&
+    Array.isArray(candidate.entities) &&
+    candidate.entities.every((entity) => typeof entity === "string")
+  );
+}
+
+export function isComparisonIndex(value: unknown): value is ComparisonIndex {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.epoch === "string" &&
+    Array.isArray(candidate.groups) &&
+    candidate.groups.every(isComparisonGroup)
+  );
+}
+
 /** One runway's landing CZML, as listed in landings/index.json. */
 export interface LandingRunwayEntry {
   runway: string;

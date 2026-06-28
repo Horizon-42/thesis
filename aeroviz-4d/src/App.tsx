@@ -25,16 +25,20 @@ import RunwayTrajectoryProfilePanel from "./components/RunwayTrajectoryProfilePa
 import { useApp } from "./context/AppContext";
 import { airportDataUrl, airportLandingsRunwayUrl } from "./data/airportData";
 import { useCzmlLoader } from "./hooks/useCzmlLoader";
+import { useComparisonTrajectoryLayer } from "./hooks/useComparisonTrajectoryLayer";
 import { useEffect, useState } from "react";
 
 function FlightApp() {
-  const { activeAirportCode, selectedRunway } = useApp();
-  const czmlUrl = activeAirportCode
+  const { activeAirportCode, selectedRunway, trajectoryComparison } = useApp();
+  // In comparison mode the normal observed-track CZML is suppressed (empty url unloads it)
+  // and useComparisonTrajectoryLayer drives the three-colour optimizer trajectories instead.
+  const czmlUrl = activeAirportCode && !trajectoryComparison
     ? selectedRunway
       ? airportLandingsRunwayUrl(activeAirportCode, selectedRunway)
       : airportDataUrl(activeAirportCode, "trajectories.czml")
     : "";
   const { flightIds, warning, error } = useCzmlLoader(czmlUrl);
+  useComparisonTrajectoryLayer();
   const czmlStatus = error ?? warning;
 
   return (

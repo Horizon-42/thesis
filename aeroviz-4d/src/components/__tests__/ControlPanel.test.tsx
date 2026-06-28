@@ -8,6 +8,9 @@ const {
   setPlaybackSpeed,
   setActiveAirportCode,
   setSelectedRunway,
+  setTrajectoryComparison,
+  setTrajectoryComparisonCategory,
+  setTrajectorySampleCount,
   landingsRef,
 } = vi.hoisted(() => {
   const defaultLayers = {
@@ -49,6 +52,9 @@ const {
       { code: "CYVR", name: "Vancouver International Airport", lat: 49.193901, lon: -123.183998 },
     ],
     activeAirportCode: "KRDU",
+    trajectoryComparison: false,
+    trajectoryComparisonCategory: null,
+    trajectorySampleCount: 0,
   };
 
   return {
@@ -62,6 +68,9 @@ const {
     setPlaybackSpeed: vi.fn(),
     setActiveAirportCode: vi.fn(),
     setSelectedRunway: vi.fn(),
+    setTrajectoryComparison: vi.fn(),
+    setTrajectoryComparisonCategory: vi.fn(),
+    setTrajectorySampleCount: vi.fn(),
     landingsRef: { current: { manifest: null as unknown, status: "empty" } },
   };
 });
@@ -74,11 +83,18 @@ vi.mock("../../context/AppContext", () => ({
     setPlaybackSpeed,
     setActiveAirportCode,
     setSelectedRunway,
+    setTrajectoryComparison,
+    setTrajectoryComparisonCategory,
+    setTrajectorySampleCount,
   }),
 }));
 
 vi.mock("../../hooks/useLandingsManifest", () => ({
   useLandingsManifest: () => landingsRef.current,
+}));
+
+vi.mock("../../hooks/useComparisonCategories", () => ({
+  useComparisonCategories: () => ({ categories: [], status: "empty" }),
 }));
 
 import ControlPanel from "../ControlPanel";

@@ -27,6 +27,7 @@ import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
+import { sampleSubset } from "../utils/sampleTrajectories";
 
 const LAYER_NAME = "czml-trajectories";
 
@@ -46,7 +47,14 @@ export interface CzmlLoaderState {
  * @param czmlUrl - path to the CZML file, e.g. "/data/airports/KRDU/trajectories.czml"
  */
 export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
-  const { viewer, layers, autoReplay, setSelectedFlightId, setTrajectoryDataSource } = useApp();
+  const {
+    viewer,
+    layers,
+    autoReplay,
+    trajectorySampleCount,
+    setSelectedFlightId,
+    setTrajectoryDataSource,
+  } = useApp();
   // Hold a direct reference — the CZML document packet can overwrite the
   // datasource name, making getByName() unreliable for visibility sync.
   const dsRef = useRef<Cesium.CzmlDataSource | null>(null);
@@ -169,6 +177,20 @@ export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
   useEffect(() => {
     if (dsRef.current) dsRef.current.show = layers.trajectories;
   }, [layers.trajectories, state.isLoaded]);
+
+  // ── Sample: render only `trajectorySampleCount` random flights (0 = all) ─────
+  // Re-samples whenever the count changes or a new CZML loads.
+  useEffect(() => {
+    const ds = dsRef.current;
+    if (!ds || !state.isLoaded) return;
+    const flights = ds.entities.values.filter((entity) => entity.id !== "document");
+    if (!(trajectorySampleCount > 0) || trajectorySampleCount >= flights.length) {
+      flights.forEach((entity) => { entity.show = true; });
+      return;
+    }
+    const shown = new Set(sampleSubset(flights.map((entity) => entity.id), trajectorySampleCount));
+    flights.forEach((entity) => { entity.show = shown.has(entity.id); });
+  }, [trajectorySampleCount, state.isLoaded, state.flightIds]);
 
   return state;
 }

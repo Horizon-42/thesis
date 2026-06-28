@@ -90,6 +90,7 @@ vi.mock("../../context/AppContext", () => ({
   useApp: () => ({
     viewer: mockViewer,
     layers: { trajectories: getTrajectoriesVisible() },
+    trajectorySampleCount: 0,
     setSelectedFlightId,
     setTrajectoryDataSource,
   }),
@@ -166,7 +167,7 @@ describe("useCzmlLoader", () => {
     expect(result.current.warning).toContain("has no duration");
     expect(mockViewer.dataSources.add).toHaveBeenCalledTimes(1);
     expect(setTrajectoryDataSource).toHaveBeenLastCalledWith(expect.objectContaining({
-      entities: { values: [{ id: "flight-1" }] },
+      entities: { values: [expect.objectContaining({ id: "flight-1" })] },
     }));
     expect(mockViewer.timeline.zoomTo).not.toHaveBeenCalled();
   });
@@ -189,7 +190,7 @@ describe("useCzmlLoader", () => {
     expect(mockViewer.clock.stopTime.seconds).toBe(70);
     expect(mockViewer.clock.shouldAnimate).toBe(true);
     expect(setTrajectoryDataSource).toHaveBeenLastCalledWith(expect.objectContaining({
-      entities: { values: [{ id: "flight-1" }, { id: "flight-2" }] },
+      entities: { values: [expect.objectContaining({ id: "flight-1" }), expect.objectContaining({ id: "flight-2" })] },
     }));
     expect(mockViewer.timeline.zoomTo).toHaveBeenCalledWith(
       mockViewer.clock.startTime,
