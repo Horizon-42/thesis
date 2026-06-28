@@ -45,9 +45,9 @@ from aerodynamic_model.rollout import rollout_piecewise_constant  # noqa: E402
 from casadi_direct_collocation_optimizer import CasadiDirectCollocationOptimizer  # noqa: E402
 
 # Optimizer + rollout defaults (override on the CLI).
-DEFAULT_N_SEGMENTS = 10
+DEFAULT_N_SEGMENTS = 8
 DEFAULT_DT = 1.0                 # optimizer dt (API parity; state mesh is auto-selected)
-DEFAULT_MAX_DURATION_S = 1000.0  # free-time upper bound; the solver minimises T below this
+DEFAULT_MAX_DURATION_S = 2000.0  # free-time upper bound; the solver minimises T below this
 DEFAULT_ROLLOUT_DT_S = 0.5       # forward-integration step for the simulator rollout
 
 
@@ -117,7 +117,7 @@ def optimize_scenario(
     # ── TODO ① — run the optimizer (initial -> target) ────────────────────────────
     # Construct the direct-collocation optimizer and solve the free-time NLP:
     #
-    optimizer = CasadiDirectCollocationOptimizer(n_segments, dt, max_duration, aircraft)
+    optimizer = CasadiDirectCollocationOptimizer(n_segments, dt, max_duration, aircraft, collocation_scheme="trapezoidalNormalizedFullTransport")
     final_time, node_control, node_state = optimizer.optimize_free_time(
         initial, target, max_duration)
     #   • node_state  rows are [lat, lon, alt, V, psi, gamma]   — the optimizer's plan
