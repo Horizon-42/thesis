@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -66,7 +67,9 @@ def normalize_id(value: str | None) -> str:
     return (value or "").strip().upper()
 
 
+@lru_cache(maxsize=None)
 def load_json(path: Path) -> dict[str, Any]:
+    """Load + cache a JSON file (the OpenAP cache is large and read once per aircraft)."""
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
 

@@ -97,11 +97,20 @@ python -m pytest flight_scenarios/tests -q
 ## 4. Usage
 
 ```bash
-# one scenario per flight; aircraft auto-resolved per flight from its icao24:
+# every runway of every airport under the landings dir -> one scenario file per runway:
+python -m flight_scenarios --output-dir flight_scenarios/outputs
+
+# every runway of one airport:
+python -m flight_scenarios --airport KRDU --output-dir flight_scenarios/outputs
+
+# a single explicit file:
 python -m flight_scenarios \
   --input trajectory_data_process/outputs/landings/KRDU/KRDU_05L_landings.json \
   --output scenarios_krdu_05l.json
-# --aircraft-type A320  (optional) is the fallback for flights whose icao24 can't be resolved
+
+# Aircraft is auto-resolved per flight from its icao24; --aircraft-type A320 (default) is the
+# fallback for flights whose icao24 can't be resolved. Output files are named
+# <AIRPORT>_<RUNWAY>_scenarios.json (the *_combined_czml_input.json files are skipped).
 ```
 
 ```python

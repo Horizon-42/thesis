@@ -1,8 +1,11 @@
 """End-to-end build wiring: CZML-input flight + aircraft resolution -> FlightScenario."""
 
+from pathlib import Path
+
 import pytest
 
 from aircraft.aircraft_sets import A320
+from flight_scenarios.__main__ import discover_landings
 from flight_scenarios.build import build_scenario, build_scenarios_from_czml_input
 
 # A minimal CZML-input flight (one element of a *_czml_input_*.json / *_landings.json).
@@ -52,3 +55,35 @@ def test_build_scenarios_from_list_resolves_each_flight():
     scens = build_scenarios_from_czml_input([FLIGHT, FLIGHT])
     assert len(scens) == 2
     assert all(s.aircraft.code == "B772" for s in scens)
+
+
+# ── CLI discovery (single file / one airport / all airports) ──────────────────
+
+def _make_landings_tree(root: Path) -> None:
+    (root / "KRDU").mkdir()
+    (root / "KMSY").mkdir()
+    for name in ("KRDU_05L_landings.json", "KRDU_23R_landings.json", "KRDU_combined_czml_input.json"):
+        (root / "KRDU" / name).write_text("[]")
+    (root / "KMSY" / "KMSY_02_landings.json").write_text("[]")
+    (root / "KMSY" / "KMSY_combined_czml_input.json").write_text("[]")
+
+
+def test_discover_landings_single_input():
+    found = discover_landings(input_path="a/b/KRDU_05L_landings.json")
+    assert found == [Path("a/b/KRDU_05L_landings.json")]
+
+
+def test_discover_landings_one_airport_excludes_combined(tmp_path):
+    _make_landings_tree(tmp_path)
+    found = discover_landings(airport="KRDU", landings_dir=tmp_path)
+    assert [p.name for p in found] == ["KRDU_05L_landings.json", "KRDU_23R_landings.json"]
+
+
+def test_discover_landings_all_airports(tmp_path):
+    _make_landings_tree(tmp_path)
+    found = discover_landings(landings_dir=tmp_path)
+    assert sorted(p.name for p in found) == [
+        "KMSY_02_landings.json",
+        "KRDU_05L_landings.json",
+        "KRDU_23R_landings.json",
+    ]
