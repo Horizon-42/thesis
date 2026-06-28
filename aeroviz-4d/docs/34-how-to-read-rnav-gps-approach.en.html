@@ -997,6 +997,15 @@ svg .hot.zone:hover { fill: rgba(26,110,181,0.13); stroke: rgba(26,110,181,0.8);
   </ul>
 </div>
 
+<div class="callout callout-key">
+  <div class="callout-title"><span class="icon">🏷</span>Why does BOULE have no role — and is a fix like it in every approach?</div>
+  Fixes on an approach come in two kinds. <strong>Segment-boundary fixes</strong> — IAF, IF, FAF, MAP — each mark where one segment ends and the next begins, so each carries a role label (the chart prints it in parentheses, e.g. "(IF) SCHOO"). There is normally just <em>one</em> IF per approach; here it is <strong>SCHOO</strong>. <strong>BOULE is a step-down fix</strong>: an extra point placed <em>inside</em> a segment only to permit a lower "at or above" altitude (one step down) while staying clear of obstacles. It defines no segment, so it gets no IAF/IF/FAF role — just its name and an altitude (4,000 ft). That is also why it has no "(…)" tag on the chart.
+  <br><br>
+  <strong>Are step-down fixes in every RNAV (GPS) approach? No.</strong> They are optional and added only where the descent must be broken into steps; a clean approach may run IAF → IF → FAF → runway with none, while another may have several. The fixes that are essentially always present are the segment-defining ones — an IAF, the IF, the FAF and the MAP. A step-down fix can sit in <em>any</em> segment — initial, intermediate or final. The classic place is the <strong>final</strong> segment of a non-precision (LNAV) approach, where it lets you descend to a lower MDA once a controlling obstacle is behind you. On R05LY the only one — BOULE — happens to fall early, between the IAF and the IF, but that is just this chart's layout, not a rule.
+  <br><br>
+  <em>One more trap:</em> "IF" means two different things — the <strong>Intermediate Fix</strong> (a role; SCHOO) and the CIFP <strong>"IF" leg type</strong> (Initial Fix, the path-terminator that simply starts a transition, e.g. at OTTOS / CHWDR). Same letters, different meaning.
+</div>
+
 <h3>4.2 Plan View SVG</h3>
 
 <div class="diagram">
@@ -1213,13 +1222,39 @@ svg .hot.zone:hover { fill: rgba(26,110,181,0.13); stroke: rgba(26,110,181,0.8);
 <p>
   How the difference is coded: in the FAA's CIFP / ARINC 424 data every waypoint carries a description code, and a fly-over fix is flagged there (for R05LY, RW05L and DUHAM carry the fly-over flag; the approach fixes do not). The leg type matters too — most legs here are <strong>TF</strong> (Track to a Fix, a straight line between two fixes), while some RNP procedures use <strong>RF</strong> (Radius to a Fix), a constant-radius arc the aircraft must track exactly.
 </p>
+<div class="callout callout-key">
+  <div class="callout-title"><span class="icon">🎯</span>So how <em>do</em> you pass a fly-by fix — can you ignore it?</div>
+  No — a fly-by fix is never ignored. It is the geometric anchor where one leg ends and the next begins, and it still carries its altitude (and any speed) constraint, which you must satisfy. "Fly-by" only means you do not pass <em>over</em> the point: the navigation system starts a smooth turn <em>before</em> the fix and rolls out established on the next leg, staying inside the procedure's protected turn area. You cut the corner — but the fix fully defines the path, and throughout the turn the aircraft must stay within the lateral tolerance (the RNP value) of the published track.
+</div>
+<h3 style="font-size:1.05rem;margin-top:1.2em;">What is the RNP value?</h3>
+<p>
+  <strong>RNP (Required Navigation Performance)</strong> is the lateral accuracy a procedure requires, in nautical miles. RNP&nbsp;<em>x</em> means the aircraft must stay within ±<em>x</em>&nbsp;NM of the centreline for 95% of the time, <em>and</em> the system must monitor itself and alert the crew if it cannot — that on-board monitoring is what makes it "RNP" rather than plain "RNAV". Typical values for an <strong>RNP&nbsp;APCH</strong> like R05LY are about <strong>RNP&nbsp;1.0</strong> on the initial / intermediate / missed segments and <strong>RNP&nbsp;0.3</strong> on final; <strong>RNP&nbsp;AR</strong> procedures (the sister "RNAV (RNP)" chart for this runway) can be tighter — down to RNP&nbsp;0.1–0.3 — and print the value on the chart.
+</p>
+<p>
+  <strong>Is the RNP value in CIFP?</strong> ARINC&nbsp;424 does define an RNP field in the procedure leg records, but in the FAA CIFP dataset it is usually left blank for a standard RNP&nbsp;APCH (the standard 1.0 / 0.3 values are implied); RNP&nbsp;AR values are the ones actually published. The chart header tells you the type — for R05LY it reads <strong>"RNP&nbsp;APCH-GPS"</strong>. (AeroViz's parser does not yet read the RNP field.)
+</p>
+<h3 style="font-size:1.05rem;margin-top:1.2em;">Joining the final approach course — is there an angle limit?</h3>
+<p>
+  Yes — in two different places, and neither prints a number on this chart:
+</p>
+<ul>
+  <li><strong>On the published procedure (built into the geometry).</strong> Procedure-design criteria cap how much the course may turn at the fix where you join final, and require the final approach course to be aligned with the runway (within small offset limits). The chart draws the leg courses, so you can <em>see</em> the turn — but the limit value itself is in the design criteria, not printed. On <strong>R05LY the final is dead straight</strong>: CHWDR → BOULE → SCHOO (IF) → WEPAS (FAF) → RW05L all sit on 054°, so the turn at the IF and the FAF is <strong>0°</strong> — you are already aligned long before the FAF, and the only turns are back at the IAFs.</li>
+  <li><strong>When ATC vectors you onto final.</strong> If you are radar-vectored to intercept the final approach course (instead of flying a published transition), the intercept angle is limited — normally <strong>≤ 30°</strong>, and you must be established on final before the FAF / glidepath intercept. That is an air-traffic rule, not anything on the approach chart.</li>
+</ul>
+<div class="callout callout-key">
+  <div class="callout-title"><span class="icon">↔</span>Intercept angle vs RNP — different things</div>
+  <strong>RNP</strong> is an <em>accuracy</em>: how tightly you must hold whatever path you are on (±NM, with monitoring). The <strong>intercept angle</strong> is a <em>geometry</em>: how many degrees your heading changes as you join final, or how steeply ATC may turn you onto it. RNP does not set the turn angle — the angle limits come from procedure design (Order 8260.58) and ATC vectoring rules; the turn must still be flown within the RNP-protected area. (Separately, the <strong>3.00° glidepath</strong> is the <em>vertical</em> angle you intercept at the FAF, and <em>that</em> one is printed on the chart: "GP 3.00°".)
+</div>
 <p style="font-size:.86rem;color:var(--text-secondary);">
   <strong>Authoritative sources:</strong>
-  FAA Pilot/Controller Glossary — "Fly-by Waypoint" and "Fly-over Waypoint";
-  FAA Aeronautical Information Manual (AIM) 1-2-2 (Performance-Based Navigation) and 5-4 (Instrument Approach Procedures);
-  FAA Instrument Procedures Handbook (FAA-H-8083-16B) — turn anticipation;
-  FAA Order 8260.58 (United States Standard for PBN Instrument Procedure Design) — leg types and turn construction;
-  ARINC 424 — waypoint description coding (fly-over flag).
+  FAA Pilot/Controller Glossary — "Fly-by Waypoint" / "Fly-over Waypoint" / "Required Navigation Performance";
+  FAA AIM 1-2-1 / 1-2-2 (Performance-Based Navigation) and 5-4 / 5-4-7 (Instrument Approach Procedures; intercepting the final approach course);
+  FAA Advisory Circular AC&nbsp;90-105A (RNP operations);
+  ICAO Doc&nbsp;9613 (PBN Manual);
+  FAA Order&nbsp;8260.58 (PBN design — course-change &amp; runway-alignment limits);
+  FAA Order&nbsp;7110.65 (Air Traffic Control — vectoring &amp; intercept angles);
+  ARINC&nbsp;424 (waypoint &amp; RNP coding).
+  <strong>Where to look up the value:</strong> the published chart — FAA d-TPP, <code>https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/dtpp/</code> — and the coded data — FAA CIFP, <code>https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/cifp/</code>.
 </p>
 </section>
 
@@ -1507,7 +1542,35 @@ svg .hot.zone:hover { fill: rgba(26,110,181,0.13); stroke: rgba(26,110,181,0.8);
   </div>
 </div>
 
-<h3>7.2 DA vs. MDA</h3>
+<h3>7.2 What Each Line Is — and Which One You Fly</h3>
+<p>
+  A single RNAV (GPS) chart prints several minima lines because one published path can be flown to different levels of precision depending on your aircraft's equipment. The rule: fly the <strong>lowest line your aircraft is equipped and authorised for</strong>; if you cannot meet it, step up to the next line.
+</p>
+<div class="table-wrap"><table>
+  <thead><tr><th>Line</th><th>Full name</th><th>Guidance</th><th>Needs</th><th>Flown to</th></tr></thead>
+  <tbody>
+    <tr><td><strong>LPV</strong></td><td>Localizer Performance with Vertical guidance</td><td>Angular lateral + vertical, like an ILS (it is <em>not</em> a real localizer — the name only describes the performance)</td><td>WAAS (SBAS) receiver</td><td>DA — lowest, often to 200 ft</td></tr>
+    <tr><td><strong>LNAV/VNAV</strong></td><td>Lateral Navigation / Vertical Navigation</td><td>Lateral RNAV + an approved vertical path (Baro-VNAV from the FMS, or WAAS)</td><td>Baro-VNAV or WAAS</td><td>DA</td></tr>
+    <tr><td><strong>LNAV</strong></td><td>Lateral Navigation only</td><td>Lateral only — no vertical guidance; you step down to an MDA</td><td>Basic IFR GPS (no WAAS)</td><td>MDA</td></tr>
+    <tr><td><strong>Circling</strong></td><td>Circling minima</td><td>Lateral only; used when you fly this approach but land on a <em>different</em> runway</td><td>any of the above</td><td>MDA, by aircraft category</td></tr>
+  </tbody>
+</table></div>
+<p>
+  (A fourth straight-in type, <strong>LP</strong> — Localizer Performance without vertical guidance — appears on some WAAS charts: angular lateral guidance flown to an MDA. It is not published on R05LY.)
+</p>
+<div class="callout callout-key">
+  <div class="callout-title"><span class="icon">🛰</span>Relationship to RNAV (GPS), and what is in CIFP</div>
+  All of these lines belong to the <em>same</em> RNAV (GPS) approach — they share (almost) the same lateral path; what differs is the type of guidance and how low you may go. The FAA's CIFP / ARINC 424 navigation data <strong>does</strong> code which lines a procedure supports (R05LY's data explicitly lists <code>LPV</code>, <code>LNAV/VNAV</code> and <code>LNAV</code>) and the precise LPV / LNAV-VNAV final-approach geometry — the <em>FAS data block</em>: landing-threshold point, glidepath angle, TCH and the WAAS channel (48813 / W05A for R05LY). But the actual <strong>DA / MDA / visibility numbers are NOT in CIFP</strong>; they are computed by the procedure designer and published only on the chart (the FAA Terminal Procedures Publication). Your avionics fly the path from CIFP — you read the minima off the chart.
+</div>
+<p style="font-size:.86rem;color:var(--text-secondary);">
+  <strong>Sources &amp; where to look things up:</strong>
+  FAA AIM 5-4-5 (approach minima) and 1-1-17 / 1-2-2 (WAAS &amp; PBN);
+  published charts (FAA d-TPP): <code>https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/dtpp/</code>;
+  coded nav data incl. the FAS data block (FAA CIFP): <code>https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/cifp/</code>;
+  LPV / WAAS overview: <code>https://www.faa.gov/about/office_org/headquarters_offices/ato/service_units/techops/navservices/gnss/nas/procedures/lpv</code>.
+</p>
+
+<h3>7.3 DA vs. MDA</h3>
 
 <div class="table-wrap">
 <table>
@@ -1529,13 +1592,13 @@ svg .hot.zone:hover { fill: rgba(26,110,181,0.13); stroke: rgba(26,110,181,0.8);
 </table>
 </div>
 
-<h3>7.3 HAT and HAA</h3>
+<h3>7.4 HAT and HAA</h3>
 <ul>
   <li><strong>HAT (Height Above Touchdown)</strong>: The minima altitude <em>minus</em> TDZE (384 ft). For example, LPV DA 598 − 384 = <strong>214 ft HAT</strong> — meaning the pilot must see the runway at 214 ft above the touchdown zone.</li>
   <li><strong>HAA (Height Above Airport)</strong>: Used for circling approaches only — minima altitude minus airport elevation (435 ft). Because the aircraft is not following the approach centerline during circling, the reference is the overall airport elevation.</li>
 </ul>
 
-<h3>7.4 Why Is the LPV Minimum the Lowest?</h3>
+<h3>7.5 Why Is the LPV Minimum the Lowest?</h3>
 
 <p>
   Ranked from lowest to highest DA/MDA (most to least capable):
@@ -1565,7 +1628,7 @@ svg .hot.zone:hover { fill: rgba(26,110,181,0.13); stroke: rgba(26,110,181,0.8);
   </p>
 </div>
 
-<h3>7.5 Circling Approach</h3>
+<h3>7.6 Circling Approach</h3>
 <p>
   A circling approach is a special case: the aircraft executes an instrument approach aligned with one runway,
   then maneuvers visually to land on a <em>different</em> runway.

@@ -993,6 +993,15 @@ svg .hot.zone:hover { fill: rgba(26,110,181,0.13); stroke: rgba(26,110,181,0.8);
   </ul>
 </div>
 
+<div class="callout callout-key">
+  <div class="callout-title"><span class="icon">🏷</span>为什么 BOULE 没有角色——这样的点每个进近都有吗？</div>
+  进近上的定位点分两类。<strong>分段边界定位点</strong>——IAF、IF、FAF、MAP——每个都标记一个航段的起止，所以都带角色标签（图上用括号印出，如“(IF) SCHOO”）。一个进近通常只有<em>一个</em> IF，这里就是 <strong>SCHOO</strong>。<strong>BOULE 是步降定位点</strong>：放在某个航段<em>内部</em>的额外点，只是为了在保证超障的前提下允许一个更低的“及以上”高度（步降一档）。它不定义任何航段，因此没有 IAF/IF/FAF 角色——只有名字和一个高度（4000 ft）。这也是它在图上没有“(…)”标签的原因。
+  <br><br>
+  <strong>步降定位点是每个 RNAV (GPS) 进近都有的吗？不是。</strong>它是可选的，只在下降需要分段时才加；干净的进近可能 IAF → IF → FAF → 跑道 一个步降点都没有，另一个则可能有好几个。基本上总会有的，是定义航段的那些点——一个 IAF、那个 IF、那个 FAF，以及 MAP。步降定位点可以出现在<em>任何</em>航段——初始、中间或最终。最经典的位置是非精密（LNAV）进近的<strong>最终</strong>航段：一旦越过了控制性障碍物，就用它下降到更低的 MDA。R05LY 上唯一的步降点 BOULE 恰好落在较前面（IAF 与 IF 之间），但这只是本图的布局，并非规则。
+  <br><br>
+  <em>还有一个坑：</em>“IF”有两个意思——<strong>中间定位点（Intermediate Fix）</strong>（一种角色；SCHOO），以及 CIFP 里的 <strong>“IF”航段类型</strong>（Initial Fix，仅用于起始一段过渡的路径终止符，例如在 OTTOS / CHWDR）。字母相同，含义不同。
+</div>
+
 <h3>4.2 平面图 SVG</h3>
 
 <div class="diagram">
@@ -1207,13 +1216,39 @@ svg .hot.zone:hover { fill: rgba(26,110,181,0.13); stroke: rgba(26,110,181,0.8);
 <p>
   差别是如何编码的：在 FAA 的 CIFP / ARINC 424 数据中，每个航路点都带一个描述代码，飞越型会在其中被标记（R05LY 中 RW05L 和 DUHAM 带飞越标记，进近定位点则没有）。航段类型也很重要——本图大多数航段是 <strong>TF</strong>（Track to a Fix，两定位点之间的直线）；一些 RNP 程序使用 <strong>RF</strong>（Radius to a Fix，飞机必须精确跟踪的等半径圆弧）。
 </p>
+<div class="callout callout-key">
+  <div class="callout-title"><span class="icon">🎯</span>那通过型定位点到底怎么过——可以完全忽略吗？</div>
+  不可以——通过型定位点绝不能忽略。它是一个航段结束、下一个航段开始的几何锚点，并且仍带有它的高度（及速度）限制，必须满足。“通过型”只表示你不<em>飞越</em>该点：导航系统会在到达定位点<em>之前</em>开始平滑转弯，并在下一航段上对正改出，全程保持在程序的保护转弯区内。你抄了近路，但这个定位点完整定义了航迹；整个转弯过程中，飞机都必须保持在已公布航迹的横向容差（即 RNP 值）之内。
+</div>
+<h3 style="font-size:1.05rem;margin-top:1.2em;">RNP 值是什么？</h3>
+<p>
+  <strong>RNP（Required Navigation Performance，所需导航性能）</strong>是一个程序所要求的横向精度，单位是海里。RNP&nbsp;<em>x</em> 表示飞机必须在 95% 的时间里保持在中心线 ±<em>x</em>&nbsp;海里之内，<em>并且</em>系统必须自我监视、达不到时向机组告警——正是这种机载监视使它成为“RNP”而非普通“RNAV”。像 R05LY 这样的 <strong>RNP&nbsp;APCH</strong>，典型值约为：初始/中间/复飞段 <strong>RNP&nbsp;1.0</strong>，最终进近 <strong>RNP&nbsp;0.3</strong>；<strong>RNP&nbsp;AR</strong> 程序（本跑道的姊妹图“RNAV (RNP)”）可以更紧——低至 RNP&nbsp;0.1–0.3——并把数值印在图上。
+</p>
+<p>
+  <strong>RNP 值在 CIFP 里吗？</strong>ARINC&nbsp;424 确实在航段记录里定义了一个 RNP 字段，但在 FAA 的 CIFP 数据集中，对标准 RNP&nbsp;APCH 通常留空（隐含标准的 1.0 / 0.3）；真正公布出来的是 RNP&nbsp;AR 的数值。图的表头会告诉你类型——R05LY 写的是 <strong>“RNP&nbsp;APCH-GPS”</strong>。（AeroViz 的解析器目前尚未读取 RNP 字段。）
+</p>
+<h3 style="font-size:1.05rem;margin-top:1.2em;">切入最终进近航迹——有没有角度限制？</h3>
+<p>
+  有，但分两处，而且本图都不会印出具体数值：
+</p>
+<ul>
+  <li><strong>在已公布程序里（写进几何）。</strong>程序设计规范限制了在切入最终进近的那个定位点上航向能转多少，并要求最终进近航迹与跑道对正（偏置在很小的范围内）。图上画出了各航段航向，所以你能<em>看出</em>转弯角——但限值本身在设计规范里，不印在图上。<strong>R05LY 的最终段是笔直的</strong>：CHWDR → BOULE → SCHOO（IF）→ WEPAS（FAF）→ RW05L 全在 054° 上，所以在 IF 和 FAF 处的转弯是 <strong>0°</strong>——你早在 FAF 之前就已经对正，唯一的转弯发生在 IAF 那边。</li>
+  <li><strong>当 ATC 雷达引导你切入最终时。</strong>如果你被雷达引导去切入最终进近航迹（而不是飞已公布的进场过渡），切入角是有限制的——通常 <strong>≤ 30°</strong>，并且必须在 FAF / 下滑道截获之前对正最终。这是空管规则，不在进近图上。</li>
+</ul>
+<div class="callout callout-key">
+  <div class="callout-title"><span class="icon">↔</span>切入角 vs RNP——是两回事</div>
+  <strong>RNP</strong> 是<em>精度</em>：你必须把所在航迹保持得多紧（±海里，且带监视）。<strong>切入角</strong>是<em>几何</em>：你切入最终时航向变化多少度，或空管能以多陡的角度把你引导上去。RNP 不决定转弯角——角度限值来自程序设计（Order 8260.58）和空管引导规则；这个转弯仍必须在 RNP 保护区内飞完。（另外，<strong>3.00° 下滑道</strong>是你在 FAF 截获的<em>垂直</em>角，这个角度<em>确实</em>印在图上：“GP 3.00°”。）
+</div>
 <p style="font-size:.86rem;color:var(--text-secondary);">
   <strong>权威出处：</strong>
-  FAA 飞行员/管制员术语表（Pilot/Controller Glossary）——“Fly-by Waypoint”与“Fly-over Waypoint”；
-  FAA 航空信息手册（AIM）1-2-2（基于性能的导航 PBN）与 5-4（仪表进近程序）；
-  FAA 仪表程序手册（FAA-H-8083-16B）——转弯提前量；
-  FAA Order 8260.58（美国 PBN 仪表程序设计标准）——航段类型与转弯构造；
-  ARINC 424——航路点描述编码（飞越标记）。
+  FAA 飞行员/管制员术语表——“Fly-by Waypoint”/“Fly-over Waypoint”/“Required Navigation Performance”；
+  FAA AIM 1-2-1 / 1-2-2（基于性能的导航 PBN）与 5-4 / 5-4-7（仪表进近程序；切入最终进近航迹）；
+  FAA 咨询通告 AC&nbsp;90-105A（RNP 运行）；
+  ICAO Doc&nbsp;9613（PBN 手册）；
+  FAA Order&nbsp;8260.58（PBN 设计——航向变化与跑道对正限制）；
+  FAA Order&nbsp;7110.65（空管——雷达引导与切入角）；
+  ARINC&nbsp;424（航路点与 RNP 编码）。
+  <strong>到哪里查具体数值：</strong>已公布航图——FAA d-TPP，<code>https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/dtpp/</code>；以及编码数据——FAA CIFP，<code>https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/cifp/</code>。
 </p>
 </section>
 
@@ -1499,7 +1534,35 @@ svg .hot.zone:hover { fill: rgba(26,110,181,0.13); stroke: rgba(26,110,181,0.8);
   </div>
 </div>
 
-<h3>7.2 DA 与 MDA 的区别</h3>
+<h3>7.2 各条线到底是什么——以及你该飞哪一条</h3>
+<p>
+  一张 RNAV (GPS) 图会印出好几条最低标准线，因为<strong>同一条已公布航迹</strong>可以按不同精度飞行，取决于你飞机的设备。原则：飞你飞机<strong>有设备、且获批可以飞的最低那一条</strong>；达不到就退到上一条。
+</p>
+<div class="table-wrap"><table>
+  <thead><tr><th>线</th><th>英文全称</th><th>引导</th><th>需要</th><th>飞到</th></tr></thead>
+  <tbody>
+    <tr><td><strong>LPV</strong></td><td>Localizer Performance with Vertical guidance（带垂直引导的定位器性能）</td><td>角度式横向+垂直引导，类似 ILS（它<em>不是</em>真正的定位器，名字只描述性能）</td><td>WAAS（SBAS）接收机</td><td>DA——最低，常达 200 ft</td></tr>
+    <tr><td><strong>LNAV/VNAV</strong></td><td>Lateral / Vertical Navigation（侧向/垂直导航）</td><td>横向 RNAV + 经批准的垂直路径（FMS 的气压 VNAV，或 WAAS）</td><td>气压 VNAV 或 WAAS</td><td>DA</td></tr>
+    <tr><td><strong>LNAV</strong></td><td>Lateral Navigation only（仅侧向导航）</td><td>仅横向，无垂直引导；分段下降到 MDA</td><td>基本 IFR GPS（不需 WAAS）</td><td>MDA</td></tr>
+    <tr><td><strong>Circling</strong></td><td>盘旋最低标准</td><td>仅横向；当你飞本进近但落到<em>另一条</em>跑道时使用</td><td>以上任一</td><td>MDA，按飞机类别</td></tr>
+  </tbody>
+</table></div>
+<p>
+  （还有一种直接进近类型 <strong>LP</strong>——Localizer Performance，无垂直引导——见于部分 WAAS 图：角度式横向引导，飞到 MDA。R05LY 没有这一条。）
+</p>
+<div class="callout callout-key">
+  <div class="callout-title"><span class="icon">🛰</span>与 RNAV (GPS) 的关系，以及 CIFP 里有什么</div>
+  这些线都属于<em>同一个</em> RNAV (GPS) 进近——它们共用（几乎）同一条横向航迹，差别在于引导类型和能下到多低。FAA 的 CIFP / ARINC 424 导航数据<strong>确实</strong>编码了一个程序支持哪些线（R05LY 的数据明确列出 <code>LPV</code>、<code>LNAV/VNAV</code>、<code>LNAV</code>），以及 LPV / LNAV-VNAV 的精密最终进近几何——即 <em>FAS 数据块</em>：着陆入口点、下滑道角、TCH 和 WAAS 信道（R05LY 为 48813 / W05A）。但具体的 <strong>DA / MDA / 能见度数值不在 CIFP 里</strong>；它们由程序设计者计算，只印在航图上（FAA 终端程序出版物 TPP）。你的航电按 CIFP 飞航迹，最低标准要从图上读。
+</div>
+<p style="font-size:.86rem;color:var(--text-secondary);">
+  <strong>出处与查询网址：</strong>
+  FAA AIM 5-4-5（进近最低标准）与 1-1-17 / 1-2-2（WAAS 与 PBN）；
+  已公布航图（FAA d-TPP）：<code>https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/dtpp/</code>；
+  编码导航数据（含 FAS 数据块，FAA CIFP）：<code>https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/cifp/</code>；
+  LPV / WAAS 概述：<code>https://www.faa.gov/about/office_org/headquarters_offices/ato/service_units/techops/navservices/gnss/nas/procedures/lpv</code>。
+</p>
+
+<h3>7.3 DA 与 MDA 的区别</h3>
 
 <div class="table-wrap">
 <table>
@@ -1521,13 +1584,13 @@ svg .hot.zone:hover { fill: rgba(26,110,181,0.13); stroke: rgba(26,110,181,0.8);
 </table>
 </div>
 
-<h3>7.3 HAT 和 HAA</h3>
+<h3>7.4 HAT 和 HAA</h3>
 <ul>
   <li><strong>HAT（Height Above Touchdown）</strong>：最低标准高度<em>减去</em> TDZE（接地区高程 384 ft）。例如 LPV DA 598 − 384 = <strong>214 ft HAT</strong>，即离地 214 英尺时必须能看到跑道。</li>
   <li><strong>HAA（Height Above Airport）</strong>：盘旋进近专用，最低高度减去机场高程（435 ft）。因为盘旋时飞机不沿进近航线飞行，基准是整个机场高度。</li>
 </ul>
 
-<h3>7.4 为什么 LPV 最低标准最低？</h3>
+<h3>7.5 为什么 LPV 最低标准最低？</h3>
 
 <p>
   三种最低标准的能力从高到低排列：
@@ -1556,7 +1619,7 @@ svg .hot.zone:hover { fill: rgba(26,110,181,0.13); stroke: rgba(26,110,181,0.8);
   </p>
 </div>
 
-<h3>7.5 CIRCLING（目视盘旋）进近</h3>
+<h3>7.6 CIRCLING（目视盘旋）进近</h3>
 <p>
   盘旋进近是一种特殊情况：飞机用仪表进近对准一条跑道，然后在目视条件下绕场转弯落在<em>另一条</em>跑道。
   因为飞机不再沿进近中心线飞行，需要的高度裕度更大，故 MDA 更高（960–1180 ft），且按飞机类别（Cat A/B/C/D）区分——
