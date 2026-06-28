@@ -14,11 +14,7 @@
 #   ./run_all_tests.sh -x         # extra args are forwarded to pytest (stop on first fail)
 #   ./run_all_tests.sh -k rollout # ...or filter by keyword
 #
-# Known PRE-EXISTING failures on this branch (unrelated to current work — see CLAUDE.md):
-#   - 4dTrajectory/tests/test_single_shooting_optimizor.py  (initial guess not simulatable) x2
-#   - aeroviz-4d/python  test_run_asd_b_pipeline / test_run_fetch_and_generate
-#     (run_asd-b orchestrator: --include-transitions / _airport_output_dir)
-# "Green except those four" == healthy.
+# All suites are expected to pass (modeling+backend and aeroviz-4d/python both exit 0).
 
 set -uo pipefail
 
@@ -67,9 +63,6 @@ echo " Summary"
 echo "=================================================================="
 echo "  modeling + backend : exit $rc_modeling"
 echo "  aeroviz-4d/python  : exit $rc_frontend"
-echo
-echo "  Note: 3 failures + 1 collection error are PRE-EXISTING on this branch"
-echo "        (single-shooting x2, run_asd-b orchestrator x2) — see this script's header."
 
 # Exit non-zero if either suite reported a problem.
 if [ "$rc_modeling" -ne 0 ] || [ "$rc_frontend" -ne 0 ]; then

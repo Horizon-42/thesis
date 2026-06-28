@@ -163,6 +163,10 @@ def test_optimize_trajectory_builds_single_shooting_minimize_problem(monkeypatch
                 [12000.0, 0.0, math.radians(4.0)],
             ]),
         )
+        # optimize_trajectory runs a feasibility pre-check (one terminal_objective +
+        # one terminal_position_constraint) before handing the problem to minimize;
+        # drop those calls so we measure only the solver-evaluation rollouts below.
+        simulator.calls.clear()
         assert math.isclose(fun(x0), final_time * 1e-4)
         np.testing.assert_allclose(constraints["fun"](x0), np.zeros(3))
         assert len(simulator.calls) == optimizer.n_control_segments * 2
@@ -184,7 +188,25 @@ def test_optimize_trajectory_builds_single_shooting_minimize_problem(monkeypatch
     assert node_state is None
 
 
-def test_objective_and_constraint_penalize_unsimulatable_candidates(monkeypatch):
+def test_objective_and_constraint_penalize_unsimulatable_candidates():
+    module = load_single_shooting_module()
+    optimizer = module.SingleShootingOptimizor(
+        sim=FailingGeodeticSimulator(),
+        n_control_segments=1,
+    )
+    state = module.GeodeticState(1.0, 2.0, 1000.0, 120.0, 0.1, -0.01, 70000.0)
+    candidate = np.array([10.0, 12000.0, 0.0, math.radians(4.0)])
+
+    # An unsimulatable candidate is scored with the infeasible sentinel (not raised),
+    # so the solver can still evaluate and step away from it.
+    assert optimizer.terminal_objective(candidate, state, state) == module._INFEASIBLE_OBJECTIVE_VALUE
+    np.testing.assert_array_equal(
+        optimizer.terminal_position_constraint(candidate, state, state),
+        np.full(3, module._INFEASIBLE_OBJECTIVE_VALUE),
+    )
+
+
+def test_optimize_trajectory_rejects_unsimulatable_initial_guess():
     module = load_single_shooting_module()
     optimizer = module.SingleShootingOptimizor(
         sim=FailingGeodeticSimulator(),
@@ -192,22 +214,10 @@ def test_objective_and_constraint_penalize_unsimulatable_candidates(monkeypatch)
     )
     state = module.GeodeticState(1.0, 2.0, 1000.0, 120.0, 0.1, -0.01, 70000.0)
 
-    def fake_minimize(fun, x0, method, bounds, constraints, options):
-        del method, bounds, options
-        assert fun(x0) == module._INFEASIBLE_OBJECTIVE_VALUE
-        np.testing.assert_array_equal(
-            constraints["fun"](x0),
-            np.full(3, module._INFEASIBLE_OBJECTIVE_VALUE),
-        )
-        return SimpleNamespace(success=True, x=x0, message="")
-
-    monkeypatch.setattr(module, "minimize", fake_minimize)
-
-    final_time, controls, node_state = optimizer.optimize_trajectory(state, state)
-
-    assert final_time == 1.0
-    assert controls.shape == (1, 3)
-    assert node_state is None
+    # The pre-flight feasibility check fails loudly rather than handing the solver a
+    # problem whose initial guess cannot even be simulated.
+    with pytest.raises(ValueError, match="not simulatable"):
+        optimizer.optimize_trajectory(state, state)
 
 
 def test_single_shooting_optimizor_rejects_invalid_dt():
