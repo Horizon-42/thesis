@@ -142,6 +142,9 @@ interface AirportSessionState {
   setAirport: (airport: AirportConfig | null) => void;
 }
 
+/** The three coloured trajectories in an optimizer comparison. */
+export type ComparisonKind = "reference" | "optimizer" | "simulator";
+
 interface FlightSessionState {
   /** The currently tracked/selected flight callsign */
   selectedFlightId: string | null;
@@ -163,6 +166,10 @@ interface FlightSessionState {
   /** Selected optimization category dir (e.g. "asdb"); which comparison set to show. */
   trajectoryComparisonCategory: string | null;
   setTrajectoryComparisonCategory: (categoryDir: string | null) => void;
+
+  /** Per-kind visibility for the 3-colour comparison (reference / optimizer / simulator). */
+  trajectoryComparisonKinds: Record<ComparisonKind, boolean>;
+  setTrajectoryComparisonKind: (kind: ComparisonKind, visible: boolean) => void;
 
   /** How many trajectories to render (0 = all); applies to both normal and comparison modes. */
   trajectorySampleCount: number;
@@ -237,6 +244,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [trajectoryComparison, setTrajectoryComparison] = useState<boolean>(false);
   const [trajectoryComparisonCategory, setTrajectoryComparisonCategory] =
     useState<string | null>(null);
+  const [trajectoryComparisonKinds, setTrajectoryComparisonKinds] =
+    useState<Record<ComparisonKind, boolean>>({ reference: true, optimizer: true, simulator: true });
+  const setTrajectoryComparisonKind = useCallback((kind: ComparisonKind, visible: boolean) => {
+    setTrajectoryComparisonKinds((prev) => ({ ...prev, [kind]: visible }));
+  }, []);
   const [trajectorySampleCount, setTrajectorySampleCount] = useState<number>(0);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(60);
   const [autoReplay, setAutoReplay] = useState<boolean>(true);
@@ -401,10 +413,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTrajectoryComparison,
     trajectoryComparisonCategory,
     setTrajectoryComparisonCategory,
+    trajectoryComparisonKinds,
+    setTrajectoryComparisonKind,
     trajectorySampleCount,
     setTrajectorySampleCount,
   }), [selectedFlightId, selectedRunway, trajectoryDataSource, trajectoryComparison,
-    trajectoryComparisonCategory, trajectorySampleCount]);
+    trajectoryComparisonCategory, trajectoryComparisonKinds, setTrajectoryComparisonKind,
+    trajectorySampleCount]);
   const procedureSessionState: ProcedureSessionState = useMemo(() => ({
     procedureVisibility,
     setProcedureBranchVisible,

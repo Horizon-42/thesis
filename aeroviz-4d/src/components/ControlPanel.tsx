@@ -12,7 +12,7 @@
  */
 
 import * as Cesium from "cesium";
-import { useApp, type LayerKey } from "../context/AppContext";
+import { useApp, type ComparisonKind, type LayerKey } from "../context/AppContext";
 import { useLandingsManifest } from "../hooks/useLandingsManifest";
 import { useComparisonCategories } from "../hooks/useComparisonCategories";
 import { useEffect, useRef, useState } from "react";
@@ -56,6 +56,13 @@ const ACTIVE_LAYER_KEYS: LayerKey[] = [
   "procedures",
   "ocsSurfaces",
   "rangeRing",
+];
+
+/** The three comparison trajectories, each a colour-keyed visibility checkbox. */
+const COMPARISON_KINDS: Array<{ kind: ComparisonKind; label: string; color: string }> = [
+  { kind: "reference", label: "Reference", color: "rgb(235, 235, 235)" },
+  { kind: "optimizer", label: "Optimizer", color: "rgb(0, 200, 255)" },
+  { kind: "simulator", label: "Simulator", color: "rgb(255, 140, 0)" },
 ];
 
 const RANGE_RING_MIN_KM = 1;
@@ -126,6 +133,8 @@ export default function ControlPanel() {
     setTrajectoryComparison,
     trajectoryComparisonCategory,
     setTrajectoryComparisonCategory,
+    trajectoryComparisonKinds,
+    setTrajectoryComparisonKind,
     trajectorySampleCount,
     setTrajectorySampleCount,
     rangeRingRadiusKm,
@@ -348,10 +357,18 @@ export default function ControlPanel() {
             />
           </label>
           {trajectoryComparison ? (
-            <div className="control-panel-comparison-legend">
-              <span><i style={{ background: "rgb(235, 235, 235)" }} /> Reference</span>
-              <span><i style={{ background: "rgb(0, 200, 255)" }} /> Optimizer</span>
-              <span><i style={{ background: "rgb(255, 140, 0)" }} /> Simulator</span>
+            <div className="control-panel-comparison-kinds">
+              {COMPARISON_KINDS.map(({ kind, label, color }) => (
+                <label key={kind}>
+                  <input
+                    type="checkbox"
+                    checked={trajectoryComparisonKinds[kind]}
+                    onChange={(event) => setTrajectoryComparisonKind(kind, event.target.checked)}
+                  />
+                  <i style={{ background: color }} />
+                  {label}
+                </label>
+              ))}
             </div>
           ) : null}
         </section>

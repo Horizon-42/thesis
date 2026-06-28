@@ -10,6 +10,7 @@ const {
   setSelectedRunway,
   setTrajectoryComparison,
   setTrajectoryComparisonCategory,
+  setTrajectoryComparisonKind,
   setTrajectorySampleCount,
   landingsRef,
 } = vi.hoisted(() => {
@@ -54,6 +55,7 @@ const {
     activeAirportCode: "KRDU",
     trajectoryComparison: false,
     trajectoryComparisonCategory: null,
+    trajectoryComparisonKinds: { reference: true, optimizer: true, simulator: true },
     trajectorySampleCount: 0,
   };
 
@@ -70,6 +72,7 @@ const {
     setSelectedRunway: vi.fn(),
     setTrajectoryComparison: vi.fn(),
     setTrajectoryComparisonCategory: vi.fn(),
+    setTrajectoryComparisonKind: vi.fn(),
     setTrajectorySampleCount: vi.fn(),
     landingsRef: { current: { manifest: null as unknown, status: "empty" } },
   };
@@ -85,6 +88,7 @@ vi.mock("../../context/AppContext", () => ({
     setSelectedRunway,
     setTrajectoryComparison,
     setTrajectoryComparisonCategory,
+    setTrajectoryComparisonKind,
     setTrajectorySampleCount,
   }),
 }));

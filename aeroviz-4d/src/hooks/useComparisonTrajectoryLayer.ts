@@ -5,19 +5,19 @@
  * reference / optimizer / simulator) when the Trajectories layer is in "comparison"
  * mode. It is index-driven so it never loads every (large) per-runway CZML:
  *
- *   1. fetch `comparison/comparison_index.json` (one record per flight group);
+ *   1. fetch the selected category's `comparison_index.json` (one record per flight group);
  *   2. filter to the selected runway (null = all) and randomly sample N groups;
  *   3. load ONLY the CZML files those sampled groups live in;
- *   4. reveal only the sampled groups' entities (they ship `show:false`).
+ *   4. reveal the sampled groups' entities, gated per kind (the three checkboxes).
  *
- * Follows `useCzmlLoader`'s pattern: each load happens inside the effect, and the
- * effect's cleanup removes exactly the datasources that run added — so changing the
- * runway / sample count / airport tears down and reloads cleanly.
+ * Loading happens in one effect (keyed on airport/category/runway/sample); a separate
+ * visibility effect re-applies per-entity `show` when the per-kind toggles change, so
+ * flipping a kind checkbox is instant (no reload/refetch).
  */
 
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as Cesium from "cesium";
-import { useApp } from "../context/AppContext";
+import { useApp, type ComparisonKind } from "../context/AppContext";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import {
@@ -27,19 +27,26 @@ import {
 } from "../data/airportData";
 import { selectComparisonGroups } from "../utils/sampleTrajectories";
 
+/** The entity id prefix encodes its kind: ref-/opt-/sim-. */
+function kindOfEntityId(id: string): ComparisonKind {
+  if (id.startsWith("ref-")) return "reference";
+  if (id.startsWith("opt-")) return "optimizer";
+  return "simulator";
+}
+
 export function useComparisonTrajectoryLayer(): void {
   const {
     viewer,
     layers,
     trajectoryComparison,
     trajectoryComparisonCategory,
+    trajectoryComparisonKinds,
     activeAirportCode,
     selectedRunway,
     trajectorySampleCount,
   } = useApp();
 
-  // Only active when the Trajectories layer is on, comparison mode is on, AND a category
-  // (which optimization to show) is selected.
+  // Active when the Trajectories layer is on, comparison mode is on, and a category is chosen.
   const active =
     !!viewer &&
     trajectoryComparison &&
@@ -47,6 +54,11 @@ export function useComparisonTrajectoryLayer(): void {
     !!activeAirportCode &&
     !!trajectoryComparisonCategory;
 
+  const sourcesRef = useRef<Cesium.CzmlDataSource[]>([]);
+  const shownRef = useRef<Set<string>>(new Set());
+  const [loadVersion, setLoadVersion] = useState(0);
+
+  // ── Load: fetch index, sample groups, load only the needed CZML files ────────
   useEffect(() => {
     if (!viewer || !active || !trajectoryComparisonCategory) return;
     const categoryDir = trajectoryComparisonCategory;
@@ -60,7 +72,7 @@ export function useComparisonTrajectoryLayer(): void {
       try {
         const raw = await fetchJson<unknown>(airportComparisonIndexUrl(activeAirportCode, categoryDir));
         if (!isComparisonIndex(raw)) {
-          console.warn(`[comparison] ${activeAirportCode} comparison_index.json is malformed.`);
+          console.warn(`[comparison] ${activeAirportCode}/${categoryDir} index is malformed.`);
           return;
         }
         index = raw;
@@ -74,7 +86,7 @@ export function useComparisonTrajectoryLayer(): void {
       const selection = selectComparisonGroups(index, selectedRunway, trajectorySampleCount);
       if (selection.files.length === 0) return;
 
-      // 3. Load only the sampled groups' CZML files; reveal only their entities.
+      // 3. Load only the sampled groups' CZML files.
       let start: Cesium.JulianDate | null = null;
       let stop: Cesium.JulianDate | null = null;
       for (const file of selection.files) {
@@ -92,10 +104,6 @@ export function useComparisonTrajectoryLayer(): void {
 
         viewer.dataSources.add(loaded);
         added.push(loaded);
-        loaded.show = layers.trajectories;
-        for (const entity of loaded.entities.values) {
-          if (entity.id !== "document") entity.show = selection.shownEntityIds.has(entity.id);
-        }
         if (loaded.clock) {
           if (!start || Cesium.JulianDate.lessThan(loaded.clock.startTime, start)) {
             start = loaded.clock.startTime.clone();
@@ -105,9 +113,15 @@ export function useComparisonTrajectoryLayer(): void {
           }
         }
       }
+      if (cancelled) return;
 
-      // 4. Span the clock over every loaded comparison trajectory.
-      if (!cancelled && start && stop && Cesium.JulianDate.lessThan(start, stop)) {
+      // Publish to the refs and trigger the visibility pass below.
+      sourcesRef.current = added;
+      shownRef.current = selection.shownEntityIds;
+      setLoadVersion((version) => version + 1);
+
+      // Span the clock over every loaded comparison trajectory.
+      if (start && stop && Cesium.JulianDate.lessThan(start, stop)) {
         viewer.clock.startTime = start;
         viewer.clock.stopTime = stop;
         viewer.clock.currentTime = start.clone();
@@ -122,7 +136,21 @@ export function useComparisonTrajectoryLayer(): void {
       if (isCesiumViewerUsable(viewer)) {
         for (const ds of added) viewer.dataSources.remove(ds, true);
       }
+      sourcesRef.current = [];
+      shownRef.current = new Set();
     };
   }, [viewer, active, activeAirportCode, trajectoryComparisonCategory, selectedRunway,
     trajectorySampleCount, layers.trajectories]);
+
+  // ── Visibility: reveal sampled entities, gated per kind (instant, no reload) ──
+  useEffect(() => {
+    for (const ds of sourcesRef.current) {
+      ds.show = true;
+      for (const entity of ds.entities.values) {
+        if (entity.id === "document") continue;
+        entity.show =
+          shownRef.current.has(entity.id) && trajectoryComparisonKinds[kindOfEntityId(entity.id)];
+      }
+    }
+  }, [loadVersion, trajectoryComparisonKinds]);
 }
