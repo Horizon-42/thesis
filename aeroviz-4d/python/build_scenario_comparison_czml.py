@@ -318,6 +318,27 @@ def _load_adsb(airport: str, override: str | None) -> list[dict[str, Any]]:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
+def _upsert_category(
+    manifest_path: Path, *, key: str, label: str, directory: str, group_count: int
+) -> int:
+    """Add/replace one category in the shared ``categories.json`` manifest.
+
+    Each ``--category`` run writes its CZMLs into its own subdir and records itself here, so
+    the frontend can offer a selector listing exactly the optimization categories that exist
+    (e.g. ADS-B target / runway target / …, with/without constraints). Returns the new total.
+    """
+    manifest: dict[str, Any] = {"categories": []}
+    if manifest_path.exists():
+        loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict) and isinstance(loaded.get("categories"), list):
+            manifest = loaded
+    kept = [c for c in manifest["categories"] if c.get("key") != key]
+    kept.append({"key": key, "label": label, "dir": directory, "groups": group_count})
+    manifest["categories"] = sorted(kept, key=lambda c: c["key"])
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return len(manifest["categories"])
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build comparison CZML(s) for optimized scenarios")
     mode = parser.add_mutually_exclusive_group(required=True)
@@ -332,6 +353,16 @@ def main() -> None:
         "--start-visible", action="store_true",
         help="batch mode: emit entities with show=true (default hidden, so the frontend "
              "reveals only the groups it samples from comparison_index.json)",
+    )
+    parser.add_argument(
+        "--category", default=None,
+        help="optimization-category key (e.g. asdb / runway / runwayConstrained). When set, "
+             "the output-dir is treated as that category's subdir and a categories.json manifest "
+             "is written to its parent so the frontend can offer a category selector.",
+    )
+    parser.add_argument(
+        "--category-label", default=None,
+        help="display label for --category (defaults to the key)",
     )
     args = parser.parse_args()
 
@@ -366,6 +397,7 @@ def main() -> None:
     index: dict[str, Any] = {
         "epoch": EPOCH.isoformat(),
         "startHidden": not args.start_visible,
+        "category": args.category,
         "groups": [],
     }
     for (airport, runway), results in sorted(groups.items()):
@@ -387,6 +419,15 @@ def main() -> None:
     rate_str = f"{rate:.1%}" if isinstance(rate, (int, float)) else "n/a"
     print(f"✓ wrote {len(groups)} runway CZML(s) + index ({len(index['groups'])} groups) "
           f"to {out_dir}; overall failure rate {rate_str}")
+
+    if args.category:
+        total = _upsert_category(
+            out_dir.parent / "categories.json",
+            key=args.category, label=args.category_label or args.category,
+            directory=out_dir.name, group_count=len(index["groups"]),
+        )
+        print(f"✓ registered category {args.category!r} -> {out_dir.parent / 'categories.json'} "
+              f"({total} categor{'y' if total == 1 else 'ies'})")
 
 
 if __name__ == "__main__":

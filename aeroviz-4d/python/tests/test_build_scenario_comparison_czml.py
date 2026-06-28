@@ -10,6 +10,7 @@ from build_scenario_comparison_czml import (
     _last_time,
     _reference_entity_from_adsb,
     _states_to_waypoints,
+    _upsert_category,
     build_comparison_czml,
     build_runway_comparison,
     group_results_by_runway,
@@ -156,3 +157,17 @@ def test_build_runway_comparison_start_visible(tmp_path):
     results = [{"id": "AFR074", "runway": "05L", "status": "solved", "states_file": "AFR074_05L_states.json"}]
     czml, _ = build_runway_comparison(results, tmp_path, [ADSB_CZML[0]], airport="KRDU", start_hidden=False)
     assert next(p for p in czml if p["id"] == "opt-AFR074_05L")["show"] is True
+
+
+def test_upsert_category_adds_and_replaces(tmp_path):
+    manifest = tmp_path / "categories.json"
+    _upsert_category(manifest, key="runway", label="Runway target", directory="runway", group_count=10)
+    total = _upsert_category(manifest, key="asdb", label="ADS-B target", directory="asdb", group_count=20)
+    assert total == 2
+    cats = json.loads(manifest.read_text())["categories"]
+    assert [c["key"] for c in cats] == ["asdb", "runway"]  # sorted by key
+    # re-registering an existing key replaces it in place (no duplicate)
+    _upsert_category(manifest, key="asdb", label="ADS-B target", directory="asdb", group_count=21)
+    cats = json.loads(manifest.read_text())["categories"]
+    assert len(cats) == 2
+    assert next(c for c in cats if c["key"] == "asdb")["groups"] == 21
