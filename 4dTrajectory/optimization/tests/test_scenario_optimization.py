@@ -6,6 +6,7 @@ through ``aerodynamic_model.rollout_piecewise_constant``). The full ``optimize_s
 path runs the solver, so it is exercised by the CLI, not the unit suite.
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -85,9 +86,40 @@ def test_optimize_scenarios_skips_failures_and_continues(monkeypatch, tmp_path):
         return so.ScenarioOptimization(scenario.source, 12.0, [], [])
 
     monkeypatch.setattr(so, "optimize_scenario", fake_optimize_scenario)
-    written = so.optimize_scenarios(scenarios, output_dir=tmp_path)
+    # jobs=1 (serial): the stub + shared counter live in this process, so the solve must
+    # run here — spawned workers re-import the module fresh and would not see the
+    # monkeypatch. The skip-and-continue orchestration under test is identical on both paths.
+    written = so.optimize_scenarios(scenarios, output_dir=tmp_path, jobs=1)
     assert attempts["n"] == 2      # both attempted — did NOT abort on the first failure
     assert len(written) == 1       # the infeasible one is skipped, the feasible one written
+
+
+def test_resolve_jobs_auto_and_explicit():
+    # auto (0) leaves cores free: half the CPUs, capped at the task count, floored at 1
+    assert so._resolve_jobs(0, 100) == max(1, (os.cpu_count() or 2) // 2)
+    assert so._resolve_jobs(4, 100) == 4          # explicit count honoured
+    assert so._resolve_jobs(8, 3) == 3            # never more workers than scenarios
+    assert so._resolve_jobs(0, 0) == 1            # empty batch -> serial
+
+
+def test_optimize_one_scenario_returns_record(monkeypatch):
+    # The process-pool worker wraps optimize_scenario into a picklable record and
+    # captures failures instead of raising (so one bad scenario never kills the pool).
+    target = GeodeticState(35.59, -78.49, 500.0, 80.0, 1.5, -0.05, A320.landing_mass)
+    scenario = _scenario(target=target)
+
+    monkeypatch.setattr(so, "optimize_scenario",
+                        lambda s, **k: so.ScenarioOptimization(s.source, 12.0, [], []))
+    index, flight_id, result_dict, error = so._optimize_one_scenario((3, scenario, {}))
+    assert index == 3 and flight_id == "AFR074" and error is None
+    assert result_dict["final_time_s"] == 12.0
+
+    def boom(scenario, **kwargs):
+        raise ValueError("Infeasible_Problem_Detected")
+    monkeypatch.setattr(so, "optimize_scenario", boom)
+    index, flight_id, result_dict, error = so._optimize_one_scenario((4, scenario, {}))
+    assert index == 4 and result_dict is None
+    assert error.startswith("ValueError:")
 
 
 def test_simulate_controls_rolls_forward():

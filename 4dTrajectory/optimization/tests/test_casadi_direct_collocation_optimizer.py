@@ -166,9 +166,10 @@ def test_make_direct_collocation_solver_builds_symbolic_nlp(monkeypatch):
     module = load_module()
     captured = {}
 
-    def fake_nlpsol(name, plugin, nlp):
+    def fake_nlpsol(name, plugin, nlp, opts=None):
         captured["plugin"] = plugin
         captured["nlp"] = nlp
+        captured["opts"] = opts
         return SimpleNamespace(name=name)
 
     monkeypatch.setattr(module.ca, "nlpsol", fake_nlpsol)
@@ -299,9 +300,10 @@ def test_make_direct_collocation_solver_free_time_builds_symbolic_nlp(monkeypatc
     module = load_module()
     captured = {}
 
-    def fake_nlpsol(name, plugin, nlp):
+    def fake_nlpsol(name, plugin, nlp, opts=None):
         captured["plugin"] = plugin
         captured["nlp"] = nlp
+        captured["opts"] = opts
         return SimpleNamespace(name=name)
 
     monkeypatch.setattr(module.ca, "nlpsol", fake_nlpsol)

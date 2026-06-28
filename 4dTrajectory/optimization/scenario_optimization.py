@@ -26,8 +26,10 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import re
 import sys
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -116,6 +118,7 @@ def optimize_scenario(
     dt: float = DEFAULT_DT,
     max_duration: float = DEFAULT_MAX_DURATION_S,
     rollout_dt_s: float = DEFAULT_ROLLOUT_DT_S,
+    verbose: bool = False,
 ) -> ScenarioOptimization:
     """Optimize ``scenario`` and return its optimizer + simulator state sequences."""
     initial = scenario.initial
@@ -137,6 +140,7 @@ def optimize_scenario(
         n_segments, dt, max_duration, aircraft,
         collocation_scheme="trapezoidalNormalizedFullTransport",
         min_speed_ms=min_speed_ms,
+        verbose=verbose,
     )
     final_time, node_control, node_state = optimizer.optimize_free_time(
         initial, target, max_duration)
@@ -201,6 +205,50 @@ def simulate_controls(
 
 # ── Batch + IO (wired) ────────────────────────────────────────────────────────
 
+def _optimize_one_scenario(
+    payload: tuple[int, FlightScenario, dict[str, Any]],
+) -> tuple[int, str, dict[str, Any] | None, str | None]:
+    """Solve one scenario and return a picklable record (process-pool worker).
+
+    Returns ``(index, flight_id, result_dict | None, error | None)``. Per-scenario
+    failures are captured (not raised) so one infeasible scenario never kills the
+    pool; the parent writes/logs from the returned record. The result is the plain
+    ``to_dict()`` (pure JSON types) so it crosses the process boundary cheaply.
+    """
+    index, scenario, params = payload
+    flight_id = scenario.source.get("id") or f"scenario{index}"
+    try:
+        result = optimize_scenario(scenario, **params)
+    except Exception as exc:  # noqa: BLE001 — batch tool: skip + log per-scenario failures
+        return (index, flight_id, None,
+                f"{type(exc).__name__}: {str(exc).splitlines()[0][:90]}")
+    return (index, flight_id, result.to_dict(), None)
+
+
+def _resolve_jobs(jobs: int, n_tasks: int) -> int:
+    """Resolve the requested worker count (``0`` ⇒ auto = half the CPU cores).
+
+    Auto leaves cores free for other work; capped at the number of scenarios so we
+    never spawn idle workers.
+    """
+    workers = jobs if jobs and jobs > 0 else max(1, (os.cpu_count() or 2) // 2)
+    return max(1, min(workers, n_tasks)) if n_tasks else 1
+
+
+def _limit_solver_threads() -> None:
+    """Pin each worker's BLAS/OpenMP pools to one thread to avoid oversubscription.
+
+    With ``spawn`` (the macOS default) child processes inherit ``os.environ``, so
+    setting these BEFORE the pool is created makes every worker import numpy / casadi
+    single-threaded. Without it, N worker processes would each spin up a full BLAS
+    thread pool and fight over the cores — *slowing* the batch down instead of
+    speeding it up. ``setdefault`` respects any value the caller already exported.
+    """
+    for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+                "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+        os.environ.setdefault(var, "1")
+
+
 def optimize_scenarios(
     scenarios: list[FlightScenario],
     *,
@@ -209,8 +257,17 @@ def optimize_scenarios(
     dt: float = DEFAULT_DT,
     max_duration: float = DEFAULT_MAX_DURATION_S,
     rollout_dt_s: float = DEFAULT_ROLLOUT_DT_S,
+    jobs: int = 0,
+    verbose: bool = False,
+    scenarios_label: str | None = None,
 ) -> list[Path]:
     """Optimize each scenario and write one ``*_states.json`` per scenario.
+
+    Each scenario is an independent NLP solve, so they run across a process pool
+    (``jobs`` workers; ``0`` ⇒ half the CPU cores). Processes — not threads — because
+    the IPOPT solve is CPU-bound C++; a pool sidesteps the GIL entirely. All file IO
+    and logging stay in the parent (collected as workers finish), so the output is the
+    same regardless of worker count, only the per-scenario order differs.
 
     Infeasible / failed scenarios are **skipped and logged** (a real landings file mixes
     feasible approaches with too-slow or noisy ones), so one bad scenario never aborts the
@@ -218,29 +275,63 @@ def optimize_scenarios(
     """
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
+    params: dict[str, Any] = {
+        "n_segments": n_segments, "dt": dt, "max_duration": max_duration,
+        "rollout_dt_s": rollout_dt_s, "verbose": verbose,
+    }
+    payloads = [(index, scenario, params) for index, scenario in enumerate(scenarios)]
+    workers = _resolve_jobs(jobs, len(scenarios))
+
     written: list[Path] = []
     failures: list[tuple[str, str]] = []
-    for index, scenario in enumerate(scenarios):
-        flight_id = scenario.source.get("id") or f"scenario{index}"
-        try:
-            result = optimize_scenario(
-                scenario,
-                n_segments=n_segments,
-                dt=dt,
-                max_duration=max_duration,
-                rollout_dt_s=rollout_dt_s,
+    records: dict[int, dict[str, Any]] = {}  # index -> summary record (parallel-safe ordering)
+
+    def _handle(record: tuple[int, str, dict[str, Any] | None, str | None]) -> None:
+        index, flight_id, result_dict, error = record
+        if error is not None:
+            failures.append((flight_id, error))
+            records[index] = _summary_record(
+                scenarios[index], status="failed", states_file=None, final_time_s=None, reason=error
             )
-        except Exception as exc:  # noqa: BLE001 — batch tool: skip + log per-scenario failures
-            failures.append((flight_id, f"{type(exc).__name__}: {str(exc).splitlines()[0][:90]}"))
-            print(f"✗ {flight_id}: skipped ({type(exc).__name__})")
-            continue
-        path = out / _scenario_filename(scenario, index)
-        path.write_text(json.dumps(result.to_dict(), indent=2), encoding="utf-8")
+            print(f"✗ {flight_id}: skipped ({error.split(':', 1)[0]})")
+            return
+        name = _scenario_filename(scenarios[index], index)
+        path = out / name
+        path.write_text(json.dumps(result_dict, indent=2), encoding="utf-8")
         written.append(path)
-        print(
-            f"✓ {path.name}: optimizer {len(result.optimizer_states)} states, "
-            f"simulator {len(result.simulator_states)} states, T={result.final_time_s:.1f}s"
+        records[index] = _summary_record(
+            scenarios[index], status="solved", states_file=name,
+            final_time_s=float(result_dict["final_time_s"]), reason=None,
         )
+        print(
+            f"✓ {path.name}: optimizer {len(result_dict['optimizer_states'])} states, "
+            f"simulator {len(result_dict['simulator_states'])} states, "
+            f"T={result_dict['final_time_s']:.1f}s"
+        )
+
+    if workers == 1:
+        for payload in payloads:
+            _handle(_optimize_one_scenario(payload))
+    else:
+        _limit_solver_threads()
+        print(f"… solving {len(scenarios)} scenario(s) across {workers} worker process(es)")
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(_optimize_one_scenario, payload) for payload in payloads]
+            for future in as_completed(futures):
+                _handle(future.result())
+
+    # One summary per run: the failure rate + which flights solved/failed, with the ids
+    # needed to find each flight's reference (e.g. for the comparison CZML).
+    total = len(scenarios)
+    summary = {
+        "scenarios": scenarios_label,
+        "total": total,
+        "solved": len(written),
+        "failed": len(failures),
+        "failure_rate": (len(failures) / total) if total else 0.0,
+        "results": [records[i] for i in sorted(records)],
+    }
+    (out / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     if failures:
         print(f"\n⚠ {len(failures)}/{len(scenarios)} scenario(s) skipped:")
@@ -248,8 +339,34 @@ def optimize_scenarios(
             print(f"    {flight_id}: {reason}")
         if len(failures) > 15:
             print(f"    … and {len(failures) - 15} more")
-    print(f"✓ solved {len(written)}/{len(scenarios)} scenario(s) -> {out}")
+    print(f"✓ solved {len(written)}/{total} scenario(s) "
+          f"(failure rate {summary['failure_rate']:.1%}) -> {out}")
+    print(f"  summary -> {out / 'summary.json'}")
     return written
+
+
+def _summary_record(
+    scenario: FlightScenario,
+    *,
+    status: str,
+    states_file: str | None,
+    final_time_s: float | None,
+    reason: str | None,
+) -> dict[str, Any]:
+    """One summary row: the flight's identity (so its reference can be found by id) + status."""
+    src = scenario.source
+    return {
+        "id": src.get("id"),
+        "callsign": src.get("callsign"),
+        "icao24": src.get("icao24"),
+        "arr_airport": src.get("arr_airport"),
+        "runway": src.get("runway"),
+        "target_source": src.get("target_source"),
+        "status": status,
+        "states_file": states_file,
+        "final_time_s": final_time_s,
+        "reason": reason,
+    }
 
 
 def _scenario_filename(scenario: FlightScenario, index: int) -> str:
@@ -268,6 +385,15 @@ def main() -> None:
     parser.add_argument("--dt", type=float, default=DEFAULT_DT)
     parser.add_argument("--max-duration", type=float, default=DEFAULT_MAX_DURATION_S)
     parser.add_argument("--rollout-dt", type=float, default=DEFAULT_ROLLOUT_DT_S)
+    parser.add_argument(
+        "--jobs", type=int, default=0,
+        help="parallel worker processes (0 = auto: half the CPU cores; 1 = serial)",
+    )
+    parser.add_argument(
+        "--verbose", action="store_true",
+        help="show the full IPOPT solver log (per-iteration table); default is quiet "
+             "(best paired with --jobs 1, since parallel logs interleave)",
+    )
     args = parser.parse_args()
 
     scenarios = load_scenarios(args.scenarios)
@@ -278,6 +404,9 @@ def main() -> None:
         dt=args.dt,
         max_duration=args.max_duration,
         rollout_dt_s=args.rollout_dt,
+        jobs=args.jobs,
+        verbose=args.verbose,
+        scenarios_label=args.scenarios,
     )
     print(f"✓ wrote {len(paths)} state file(s) to {args.output_dir}")
 

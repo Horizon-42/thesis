@@ -1,12 +1,9 @@
-"""Tests for the scenario-comparison CZML builder.
+"""Tests for the scenario-comparison CZML builder (single + per-runway batch)."""
 
-``_last_time`` passes already. The rest are the TODO targets (xfail until the two TODOs in
-build_scenario_comparison_czml are implemented), since the builder is gated on them.
-"""
-
-import pytest
+import json
 
 from build_scenario_comparison_czml import (
+    FAILED_COLOR,
     OPTIMIZER_COLOR,
     REFERENCE_COLOR,
     SIMULATOR_COLOR,
@@ -14,6 +11,8 @@ from build_scenario_comparison_czml import (
     _reference_entity_from_adsb,
     _states_to_waypoints,
     build_comparison_czml,
+    build_runway_comparison,
+    group_results_by_runway,
 )
 
 STATES = [
@@ -42,14 +41,12 @@ def test_last_time():
     assert _last_time([]) == 0.0
 
 
-@pytest.mark.xfail(reason="implement TODO ① in _states_to_waypoints", strict=False)
 def test_states_to_waypoints_order():
     waypoints = _states_to_waypoints(STATES)
     assert waypoints[0] == (0.0, -78.45, 35.74, 2500.0)   # (t, lon, lat, alt) — lon before lat
     assert waypoints[1] == (5.0, -78.46, 35.73, 2400.0)
 
 
-@pytest.mark.xfail(reason="implement TODO ② in _reference_entity_from_adsb", strict=False)
 def test_reference_entity_copies_and_recolors():
     entity = _reference_entity_from_adsb(ADSB_CZML, "AFR074", REFERENCE_COLOR)
     assert entity is not None
@@ -59,20 +56,56 @@ def test_reference_entity_copies_and_recolors():
     assert ADSB_CZML[1]["path"]["material"]["solidColor"]["color"]["rgba"] == [255, 140, 0, 200]
 
 
-@pytest.mark.xfail(reason="depends on TODO ① + ②", strict=False)
 def test_build_comparison_czml_has_three_trajectories():
     czml = build_comparison_czml(STATE_DATA, ADSB_CZML)
     assert czml[0]["id"] == "document"
     ids = [packet["id"] for packet in czml[1:]]
     assert ids == ["scenario-reference", "scenario-optimizer", "scenario-simulator"]
-    # colours wired through
     opt = next(p for p in czml if p["id"] == "scenario-optimizer")
     assert opt["path"]["material"]["solidColor"]["color"]["rgba"] == list(OPTIMIZER_COLOR)
 
 
-@pytest.mark.xfail(reason="depends on TODO ② (reference lookup)", strict=False)
 def test_no_reference_when_flight_missing():
     czml = build_comparison_czml({**STATE_DATA, "source": {"id": "NOPE"}}, ADSB_CZML)
     ids = [packet["id"] for packet in czml[1:]]
     assert "scenario-reference" not in ids
     assert "scenario-optimizer" in ids and "scenario-simulator" in ids
+
+
+# ── Batch: per-runway combined CZML + failed coloring ─────────────────────────
+
+def test_group_results_by_runway_keys_by_airport_and_runway():
+    summary = {"results": [
+        {"id": "A", "arr_airport": "KRDU", "runway": "05L", "status": "solved"},
+        {"id": "B", "arr_airport": "KRDU", "runway": "05L", "status": "failed"},
+        {"id": "C", "arr_airport": "KRDU", "runway": "23R", "status": "solved"},
+    ]}
+    groups = group_results_by_runway(summary)
+    assert set(groups) == {("KRDU", "05L"), ("KRDU", "23R")}
+    assert len(groups[("KRDU", "05L")]) == 2
+
+
+def test_build_runway_comparison_solved_three_paths_failed_red(tmp_path):
+    (tmp_path / "AFR074_05L_states.json").write_text(json.dumps(STATE_DATA), encoding="utf-8")
+    results = [
+        {"id": "AFR074", "runway": "05L", "status": "solved", "states_file": "AFR074_05L_states.json"},
+        {"id": "DAL1312", "runway": "05L", "status": "failed", "states_file": None},
+    ]
+    adsb = [
+        ADSB_CZML[0],
+        ADSB_CZML[1],
+        {**ADSB_CZML[1], "id": "DAL1312", "name": "DAL1312"},
+    ]
+    czml = build_runway_comparison(results, tmp_path, adsb)
+    ids = [p["id"] for p in czml[1:]]
+
+    # solved flight -> three namespaced entities
+    assert {"ref-AFR074", "opt-AFR074", "sim-AFR074"} <= set(ids)
+    sim = next(p for p in czml if p["id"] == "sim-AFR074")
+    assert sim["path"]["material"]["solidColor"]["color"]["rgba"] == list(SIMULATOR_COLOR)
+
+    # failed flight -> reference only, dark red, no optimizer/simulator
+    assert "ref-DAL1312" in ids
+    assert "opt-DAL1312" not in ids and "sim-DAL1312" not in ids
+    failed_ref = next(p for p in czml if p["id"] == "ref-DAL1312")
+    assert failed_ref["path"]["material"]["solidColor"]["color"]["rgba"] == list(FAILED_COLOR)
