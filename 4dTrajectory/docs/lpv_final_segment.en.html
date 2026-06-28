@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The LPV Final Approach Segment — and what "LPV minimums" actually mean</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root{
+  --bg:#f7f8fa; --surface:#fff; --border:#dde2e7; --border-light:#eceff2;
+  --text:#1f2630; --text-secondary:#5b6571; --text-muted:#8a939d;
+  --accent:#1a6eb5; --accent-light:#e8f0fb; --accent-dark:#0d4e8a;
+  --green:#2d7a3a; --green-light:#e8f5ea; --amber:#9a5a00; --amber-light:#fff4d9;
+  --red:#9c2b2b; --red-light:#fce8e8; --purple:#5b2a8a; --purple-light:#f2ebfc;
+  --font-sans:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;
+  --font-mono:'SFMono-Regular','Consolas','Liberation Mono',monospace;
+  --radius:8px; --shadow:0 2px 8px rgba(0,0,0,.10); --shadow-lg:0 4px 22px rgba(0,0,0,.16);
+}
+html{scroll-behavior:smooth;font-size:16px;}
+body{font-family:var(--font-sans);background:var(--bg);color:var(--text);line-height:1.75;display:flex;min-height:100vh;}
+
+#sidebar{position:fixed;top:0;left:0;width:248px;height:100vh;background:#1e2d40;color:#c8d6e5;overflow-y:auto;z-index:100;padding:24px 0 40px;font-size:13px;line-height:1.5;}
+#sidebar h2{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#7a9bb5;padding:0 20px 12px;}
+#sidebar ol{list-style:none;counter-reset:n;}
+#sidebar ol li{counter-increment:n;}
+#sidebar ol li a{display:block;padding:6px 18px 6px 16px;color:#c8d6e5;text-decoration:none;border-left:3px solid transparent;transition:.15s;}
+#sidebar ol li a::before{content:counter(n) ". ";color:#4a6a85;font-weight:600;margin-right:4px;}
+#sidebar ol li a:hover{background:rgba(255,255,255,.07);color:#fff;border-left-color:#4fa3e0;}
+#sidebar ol li a.active{color:#4fa3e0;background:rgba(79,163,224,.10);border-left-color:#4fa3e0;}
+
+#main{margin-left:248px;flex:1;padding:0 0 80px;}
+.content{max-width:880px;margin:0 auto;padding:0 32px;}
+header.hero{background:linear-gradient(135deg,#0d4e8a,#1a6eb5);color:#fff;padding:46px 0 40px;margin-bottom:34px;}
+header.hero .content{padding-top:0;}
+header.hero h1{font-size:1.85rem;font-weight:750;line-height:1.25;margin-bottom:10px;}
+header.hero p{font-size:1.02rem;opacity:.94;max-width:680px;}
+h2.sec{font-size:1.5rem;margin:46px 0 14px;padding-top:14px;border-top:2px solid var(--border);font-weight:720;}
+h3{font-size:1.16rem;margin:26px 0 8px;color:var(--accent-dark);font-weight:680;}
+p{margin:10px 0;} ul,ol.body{margin:10px 0 10px 26px;} li{margin:5px 0;}
+code{font-family:var(--font-mono);background:#eef1f4;padding:1px 5px;border-radius:4px;font-size:.86em;color:#0d4e8a;}
+.formula{font-family:var(--font-mono);background:#0d2233;color:#eaf2fa;padding:12px 16px;border-radius:8px;margin:14px 0;font-size:.9rem;overflow-x:auto;}
+.formula .c{color:#7fc0ff;}
+strong{font-weight:680;}
+figure{margin:22px 0;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow);}
+figure svg{display:block;width:100%;height:auto;}
+figcaption{font-size:.86rem;color:var(--text-secondary);margin-top:10px;text-align:center;}
+
+.callout{border-radius:var(--radius);padding:14px 16px 14px 18px;margin:18px 0;border-left:4px solid;}
+.callout-title{font-weight:720;margin-bottom:4px;display:flex;align-items:center;gap:7px;}
+.callout-key{background:var(--accent-light);border-color:var(--accent);}
+.callout-min{background:var(--green-light);border-color:var(--green);}
+.callout-warn{background:var(--amber-light);border-color:var(--amber);}
+.callout-map{background:var(--purple-light);border-color:var(--purple);}
+
+table.data{width:100%;border-collapse:collapse;margin:16px 0;font-size:.9rem;background:var(--surface);box-shadow:var(--shadow);border-radius:var(--radius);overflow:hidden;}
+table.data th,table.data td{border:1px solid var(--border-light);padding:8px 11px;text-align:left;vertical-align:top;}
+table.data th{background:#eef3f8;font-weight:700;}
+table.data td:first-child{font-weight:600;white-space:nowrap;}
+
+/* glossary terms + shared tooltip + hotspots */
+.gloss{border-bottom:1px dashed var(--accent);cursor:help;white-space:nowrap;}
+.gloss:hover{background:var(--accent-light);}
+#av-tip{position:fixed;z-index:10000;max-width:340px;background:#0d2233;color:#eaf2fa;padding:11px 14px;border-radius:8px;font-size:.84rem;line-height:1.5;box-shadow:0 10px 30px rgba(0,0,0,.34);pointer-events:none;opacity:0;transform:translateY(4px);transition:opacity .12s,transform .12s;border:1px solid rgba(255,255,255,.12);}
+#av-tip.show{opacity:1;transform:translateY(0);}
+#av-tip .tt-h{display:block;font-weight:700;color:#7fc0ff;margin-bottom:3px;}
+#av-tip .tt-zh{display:block;margin-top:7px;padding-top:7px;border-top:1px solid rgba(255,255,255,.16);color:#cfe6ff;}
+#av-tip .tt-zh b{color:#9fd0ff;}
+svg .hot{cursor:pointer;}
+svg .hot.dot:hover{fill:rgba(26,110,181,.18);}
+svg .hot.seg:hover{stroke:rgba(26,110,181,.28);}
+svg .hot.zone{fill:transparent;}
+svg .hot.zone:hover{fill:rgba(26,110,181,.12);stroke:rgba(26,110,181,.8);stroke-width:1.4;}
+.diagram-hint{font-size:.8rem;color:var(--text-muted);margin:6px 0 0;text-align:center;}
+
+#gloss-fab{position:fixed;right:22px;bottom:22px;z-index:9998;background:var(--accent);color:#fff;border:none;border-radius:24px;padding:11px 17px;font-size:.88rem;font-weight:700;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.25);}
+#gloss-fab:hover{background:var(--accent-dark);}
+#gloss-overlay{position:fixed;inset:0;background:rgba(0,0,0,.32);z-index:9998;opacity:0;pointer-events:none;transition:opacity .25s;}
+#gloss-overlay.open{opacity:1;pointer-events:auto;}
+#gloss-panel{position:fixed;top:0;right:0;height:100%;width:380px;max-width:90vw;background:var(--surface);z-index:9999;box-shadow:-8px 0 32px rgba(0,0,0,.22);transform:translateX(100%);transition:transform .26s;overflow-y:auto;padding:22px 22px 60px;}
+#gloss-panel.open{transform:translateX(0);}
+#gloss-panel h3{margin:0 0 4px;color:var(--text);}
+#gloss-panel .gp-sub{color:var(--text-muted);font-size:.82rem;margin:0 0 14px;}
+#gloss-close{float:right;cursor:pointer;border:none;background:none;font-size:1.4rem;line-height:1;color:var(--text-secondary);}
+.gp-item{padding:9px 0;border-bottom:1px solid var(--border-light);}
+.gp-term{font-weight:700;color:var(--accent);}
+.gp-full{color:var(--text-secondary);font-size:.82rem;}
+.gp-def{font-size:.84rem;margin-top:2px;}
+.gp-zh{font-size:.84rem;margin-top:3px;color:var(--text-secondary);}
+.gp-zh b{color:var(--accent-dark);}
+@media print{#gloss-fab,#av-tip,#gloss-panel,#gloss-overlay,#sidebar{display:none!important;}#main{margin-left:0;}}
+@media(max-width:980px){#sidebar{display:none;}#main{margin-left:0;}}
+</style>
+</head>
+<body>
+
+<nav id="sidebar" aria-label="Contents">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#overview">What "LPV minimums" mean</a></li>
+    <li><a href="#fas">The FAS data block</a></li>
+    <li><a href="#lateral">Lateral geometry (angular course)</a></li>
+    <li><a href="#vertical">Vertical geometry (glidepath)</a></li>
+    <li><a href="#ocs">Obstacle Clearance Surfaces</a></li>
+    <li><a href="#da">The Decision Altitude = the minimum</a></li>
+    <li><a href="#optimizer">From chart to our optimizer</a></li>
+    <li><a href="#glossary">Glossary</a></li>
+    <li><a href="#references">References</a></li>
+  </ol>
+</nav>
+
+<main id="main">
+<header class="hero">
+  <div class="content">
+    <h1>The LPV Final Approach Segment<br>— and what "LPV minimums" actually mean</h1>
+    <p>A visual companion to <code>optimization_constraint_design.md</code>. Built on FAA Order 8260.58D, Chapter 3 (RNAV (GPS) Approach). Body in English; hover any underlined term for a bilingual (EN + 中文) definition.</p>
+  </div>
+</header>
+
+<div class="content">
+
+<section id="overview">
+<h2 class="sec">1. What "LPV minimums" actually mean</h2>
+<p>An <span class="gloss" data-k="LPV">LPV</span> approach is the most precise kind of <span class="gloss" data-k="RNAV">RNAV</span> (GPS) approach. Powered by <span class="gloss" data-k="WAAS">WAAS</span>/<span class="gloss" data-k="SBAS">SBAS</span>, it gives the pilot ILS-like guidance in <em>both</em> dimensions:</p>
+<ul>
+  <li><strong>Laterally</strong> — an <em>angular</em> course that behaves like a localizer: it is wide far out and <strong>narrows as you approach the runway</strong> (§3).</li>
+  <li><strong>Vertically</strong> — a published straight-line <span class="gloss" data-k="GPA">glidepath</span>, normally 3.0° (§4).</li>
+</ul>
+<p>Because both are guided, the pilot flies down to a <strong><span class="gloss" data-k="DA">DA</span></strong> — a single altitude at which they either see the runway and land, or go missed. <em>That DA is the "LPV minimum".</em> It is the headline number printed in the LPV row at the bottom of the approach chart.</p>
+
+<div class="callout callout-min">
+  <div class="callout-title">📉 The number itself</div>
+  Per 8260.58D §3-4-5: when the final <span class="gloss" data-k="OCS">OCS</span> is clear of obstacles, the minimum <span class="gloss" data-k="HAT">HAT</span> is <strong>200 ft</strong>. So a clean LPV gives <strong>DA ≈ <span class="gloss" data-k="TDZE">TDZE</span> + 200 ft</strong> — essentially a Category-I ILS minimum, but with no ground equipment. If the OCS is penetrated, or the course is offset, the floor rises to <strong>250 ft</strong> HAT.
+</div>
+<p>The rest of this page builds up the geometry that produces that number — the <span class="gloss" data-k="FAS">FAS</span> data block, the angular course, the glidepath, and the obstacle-clearance surfaces — and then maps each piece onto our trajectory-optimizer constraints.</p>
+</section>
+
+<section id="fas">
+<h2 class="sec">2. The FAS data block — five numbers that define the final</h2>
+<p>Unlike LNAV (which is just a lateral box), an LPV final is fully defined by a small coded record called the <span class="gloss" data-k="FAS">FAS</span> data block (8260.58D §3-1-1.f). Five fields drive everything:</p>
+<table class="data">
+  <tr><th>Field</th><th>What it is</th><th>How it is fixed (8260.58D)</th></tr>
+  <tr><td><span class="gloss" data-k="LTP">LTP</span>/<span class="gloss" data-k="FTP">FTP</span></td><td>The runway threshold reference point. Its elevation is the <span class="gloss" data-k="TDZE">TDZE</span>; it is the origin everything is measured from.</td><td>Surveyed runway threshold.</td></tr>
+  <tr><td><span class="gloss" data-k="FPAP">FPAP</span></td><td>Sets the <em>direction</em> of the lateral course.</td><td>From LTP toward the <span class="gloss" data-k="DER">DER</span>, a distance = <strong>greater of (runway length, 9023 ft)</strong>.</td></tr>
+  <tr><td>Length offset</td><td>Where lateral sensitivity switches to missed-approach sensitivity.</td><td>DER-to-FPAP distance (0 for offset procedures).</td></tr>
+  <tr><td>Course width</td><td>The lateral <span class="gloss" data-k="FSD">full-scale</span> half-width <em>at the threshold</em>.</td><td><code>max(350 ft, tan(1.5°)·d<sub>GARP</sub>)</code> — typically ≈ <strong>108 m / 350 ft</strong> (§3).</td></tr>
+  <tr><td><span class="gloss" data-k="GPA">GPA</span> &amp; <span class="gloss" data-k="TCH">TCH</span></td><td>The glidepath angle and its height over the threshold.</td><td>GPA normally 3.0° (max 3.5°); TCH ≤ 60 ft (§4).</td></tr>
+</table>
+<p>One derived point matters a lot: the <span class="gloss" data-k="GARP">GARP</span>, located <strong>1000 ft beyond the FPAP</strong>. It is the apex from which the angular lateral guidance fans out.</p>
+</section>
+
+<section id="lateral">
+<h2 class="sec">3. Lateral geometry — an angular course, not a box</h2>
+<p>This is the single biggest difference from LNAV. The lateral guidance is a <strong>sector</strong> that originates at the <span class="gloss" data-k="GARP">GARP</span> and opens out toward the <span class="gloss" data-k="PFAF">PFAF</span>. Its angular half-width is the <span class="gloss" data-k="LGSA">LGSA</span>, between ±1.5° and ±2°. Converted to a distance, the edge of <span class="gloss" data-k="FSD">full-scale deflection</span> (a <span class="gloss" data-k="CDI">CDI</span> reading of ±1.0) is:</p>
+<div class="formula">half-width(P) = course_width · d<span class="c">GARP</span>(P) / d<span class="c">GARP</span>(LTP)
+course_width = greater of <span class="c">350 ft</span> or tan(<span class="c">1.5°</span>) · d<span class="c">GARP</span>(LTP)   <span class="c">// 8260.58D Formula 3-1-1</span></div>
+<p>So the corridor is <strong>widest at the PFAF and squeezes down to ±350 ft (≈108 m) at the threshold</strong> — exactly like an ILS localizer. Compare that to LNAV, whose protected area is a constant ±0.6 NM box. (Note: ±350 ft is the <em>guidance</em> full-scale; the obstacle-evaluation surfaces in §5 are wider.)</p>
+
+<figure>
+<svg viewBox="0 0 960 360" role="img" aria-label="Plan view of the LPV angular lateral course">
+  <!-- background -->
+  <rect x="0" y="0" width="960" height="360" fill="#fbfcfe"/>
+  <!-- guidance sector (full-scale) -->
+  <polygon points="900,180 120,52 120,308" fill="rgba(26,110,181,0.08)" stroke="none"/>
+  <!-- sector edges -->
+  <line x1="900" y1="180" x2="120" y2="52"  stroke="#1a6eb5" stroke-width="2" stroke-dasharray="7 4"/>
+  <line x1="900" y1="180" x2="120" y2="308" stroke="#1a6eb5" stroke-width="2" stroke-dasharray="7 4"/>
+  <!-- centerline / FAC -->
+  <line x1="120" y1="180" x2="912" y2="180" stroke="#444" stroke-width="1.6"/>
+  <!-- runway -->
+  <rect x="720" y="171" width="130" height="18" fill="#2b3440"/>
+  <line x1="785" y1="171" x2="785" y2="189" stroke="#fff" stroke-width="1" stroke-dasharray="3 3"/>
+  <!-- course-width bracket at LTP -->
+  <line x1="720" y1="150" x2="720" y2="210" stroke="#2d7a3a" stroke-width="2"/>
+  <line x1="714" y1="150" x2="726" y2="150" stroke="#2d7a3a" stroke-width="2"/>
+  <line x1="714" y1="210" x2="726" y2="210" stroke="#2d7a3a" stroke-width="2"/>
+  <!-- markers -->
+  <circle cx="120" cy="180" r="5" fill="#9c2b2b"/>
+  <circle cx="720" cy="180" r="5" fill="#0d4e8a"/>
+  <circle cx="850" cy="180" r="5" fill="#5b2a8a"/>
+  <circle cx="900" cy="180" r="5" fill="#9a5a00"/>
+  <!-- labels -->
+  <text x="120" y="332" font-size="13" fill="#9c2b2b" text-anchor="middle" font-weight="700">PFAF</text>
+  <text x="120" y="40"  font-size="12" fill="#1a6eb5" text-anchor="middle">corridor widest here</text>
+  <text x="708" y="142" font-size="12" fill="#2d7a3a" text-anchor="end" font-weight="700">±350 ft (≈108 m)</text>
+  <text x="720" y="232" font-size="12" fill="#0d4e8a" text-anchor="middle" font-weight="700">LTP</text>
+  <text x="850" y="232" font-size="12" fill="#5b2a8a" text-anchor="middle" font-weight="700">FPAP</text>
+  <text x="850" y="248" font-size="10.5" fill="#5b2a8a" text-anchor="middle">(DER)</text>
+  <text x="905" y="166" font-size="12" fill="#9a5a00" text-anchor="middle" font-weight="700">GARP</text>
+  <text x="905" y="150" font-size="10.5" fill="#9a5a00" text-anchor="middle">apex</text>
+  <text x="430" y="120" font-size="12.5" fill="#1a6eb5" transform="rotate(-9 430 120)">full-scale edge (CDI ±1) — LGSA ±1.5°…2°</text>
+  <text x="470" y="174" font-size="11.5" fill="#444">final approach course (FAC)</text>
+  <text x="430" y="300" font-size="11" fill="#888" text-anchor="middle">horizontal angles exaggerated for clarity</text>
+
+  <!-- ===== hotspots ===== -->
+  <g class="hotspots">
+    <circle class="hot dot" cx="120" cy="180" r="16" data-t="PFAF — Precise Final Approach Fix" data-d="Where the final segment begins and the glidepath is intercepted. The lateral corridor is at its widest here. 精密最终进近定位点：最终段起点、截获下滑道处，横向走廊在此最宽。"/>
+    <circle class="hot dot" cx="720" cy="180" r="16" data-t="LTP — Landing Threshold Point" data-d="The runway threshold; the origin of all FAS geometry. Elevation = TDZE. 着陆入口点：跑道入口，FAS 几何的原点，高程即 TDZE。"/>
+    <circle class="hot dot" cx="850" cy="180" r="16" data-t="FPAP — Flight Path Alignment Point" data-d="Sets the course direction. From LTP toward the DER, the greater of runway length or 9023 ft. 飞行航径对准点：决定航道方向，自 LTP 朝离场端取 跑道长 与 9023 ft 的较大者。"/>
+    <circle class="hot dot" cx="900" cy="180" r="16" data-t="GARP — GNSS Azimuth Reference Point" data-d="1000 ft beyond the FPAP. The apex from which the angular lateral guidance sector fans out. GNSS 方位基准点：FPAP 外 1000 ft，横向角度引导扇区从此点张开。"/>
+    <rect class="hot zone" x="712" y="148" width="16" height="64" data-t="Course width at threshold" data-d="Lateral full-scale half-width at the LTP: max(350 ft, tan(1.5°)·dGARP) ≈ 108 m. This is the narrow end of the angular corridor. 入口处航道宽度：LTP 处横向满刻度半宽 = max(350 ft, tan1.5°·dGARP) ≈ 108 m，即角度走廊最窄端。"/>
+    <polygon class="hot zone" points="900,180 120,52 120,308" data-t="Lateral guidance sector (full-scale)" data-d="Angular corridor from the GARP; full-scale deflection (CDI ±1) at its edges. Wide at the PFAF, narrowing to ±350 ft at the threshold — like a localizer. 横向引导扇区：自 GARP 张开的角度走廊，边缘为满刻度（CDI ±1）；PFAF 处最宽，入口收窄到 ±350 ft，类似 localizer。"/>
+  </g>
+</svg>
+<figcaption>Figure 1 — Plan (top-down) view. The lateral course is an <strong>angular sector</strong> anchored at the GARP, narrowing to ±350 ft at the threshold.</figcaption>
+</figure>
+</section>
+
+<section id="vertical">
+<h2 class="sec">4. Vertical geometry — the published glidepath</h2>
+<p>The glidepath is treated as a <strong>straight line in space</strong> (8260.58D §3-4-4.d): it leaves the threshold at height <span class="gloss" data-k="TCH">TCH</span> above the <span class="gloss" data-k="LTP">LTP</span> and climbs back along the course at the <span class="gloss" data-k="GPA">GPA</span>. For a straight-in approach the path altitude at horizontal distance <code>d</code> back from the LTP is, to first order:</p>
+<div class="formula">h<span class="c">GP</span>(d) = TDZE + TCH + d · tan(GPA)        <span class="c">// straight-in; LTP elevation = TDZE</span></div>
+<p>Key LPV-specific limits (8260.58D §3-4-1, §1-3-1.f):</p>
+<ul>
+  <li><strong>GPA</strong> normally <strong>3.0°</strong>; <strong>maximum 3.5°</strong> (only for a HAT below 250 ft).</li>
+  <li><strong>TCH</strong> rounded to the nearest foot, <strong>maximum 60 ft</strong>; the default gives a 30 ft <span class="gloss" data-k="WCH">WCH</span>.</li>
+  <li>The point where the glidepath meets the runway is the <span class="gloss" data-k="GPIP">GPIP</span>, at <code>TCH / tan(GPA)</code> beyond the LTP (e.g. 55 ft @ 3.1° ≈ 1018 ft).</li>
+</ul>
+
+<figure>
+<svg viewBox="0 0 960 440" role="img" aria-label="Profile view of the LPV glidepath, DA and OCS">
+  <rect x="0" y="0" width="960" height="440" fill="#fbfcfe"/>
+  <!-- sky/ground split -->
+  <line x1="60" y1="380" x2="920" y2="380" stroke="#b9c2cc" stroke-width="1"/>
+  <!-- runway -->
+  <rect x="740" y="376" width="170" height="8" fill="#2b3440"/>
+  <text x="824" y="402" font-size="11.5" fill="#5b6571" text-anchor="middle">runway · TDZE</text>
+  <!-- W OCS surface (shallower than glidepath) -->
+  <polygon points="736,380 110,168 110,380" fill="rgba(154,90,0,0.07)"/>
+  <line x1="736" y1="380" x2="110" y2="168" stroke="#9a5a00" stroke-width="2"/>
+  <!-- glidepath -->
+  <line x1="740" y1="356" x2="110" y2="70" stroke="#1a6eb5" stroke-width="2.6"/>
+  <!-- glidepath beyond LTP to GPIP -->
+  <line x1="740" y1="356" x2="800" y2="380" stroke="#1a6eb5" stroke-width="1.4" stroke-dasharray="4 3"/>
+  <!-- TCH bracket -->
+  <line x1="740" y1="356" x2="740" y2="380" stroke="#2d7a3a" stroke-width="2"/>
+  <text x="752" y="372" font-size="11.5" fill="#2d7a3a">TCH (≤60 ft)</text>
+  <!-- DA line -->
+  <line x1="470" y1="334" x2="775" y2="334" stroke="#9c2b2b" stroke-width="1.8" stroke-dasharray="6 4"/>
+  <circle cx="694" cy="334" r="5.5" fill="#9c2b2b"/>
+  <text x="464" y="330" font-size="12.5" fill="#9c2b2b" text-anchor="end" font-weight="700">DA = TDZE + 200 ft (HAT)</text>
+  <text x="464" y="346" font-size="11" fill="#9c2b2b" text-anchor="end">↑ the LPV minimum</text>
+  <!-- markers -->
+  <circle cx="110" cy="70" r="5" fill="#9c2b2b"/>
+  <circle cx="740" cy="356" r="4.5" fill="#0d4e8a"/>
+  <circle cx="800" cy="380" r="4.5" fill="#0d4e8a"/>
+  <!-- labels -->
+  <text x="120" y="64" font-size="13" fill="#9c2b2b" font-weight="700">PFAF</text>
+  <text x="360" y="150" font-size="12.5" fill="#1a6eb5" transform="rotate(-24 360 150)" font-weight="700">glidepath (GPA ≈ 3°)</text>
+  <text x="300" y="300" font-size="12" fill="#9a5a00" transform="rotate(-18 300 300)">W OCS (slope 102/θ ≈ 34:1)</text>
+  <text x="745" y="350" font-size="11.5" fill="#0d4e8a">LTP</text>
+  <text x="808" y="376" font-size="11" fill="#0d4e8a">GPIP</text>
+  <text x="430" y="424" font-size="11" fill="#888" text-anchor="middle">vertical scale exaggerated for clarity</text>
+
+  <g class="hotspots">
+    <circle class="hot dot" cx="110" cy="70" r="16" data-t="PFAF — Precise Final Approach Fix" data-d="Top of the final segment, where the aircraft intercepts the glidepath. 精密最终进近定位点：最终段顶端，飞机在此截获下滑道。"/>
+    <line class="hot seg" x1="740" y1="356" x2="110" y2="70" stroke="transparent" stroke-width="18" data-t="Glidepath (GPA ≈ 3°)" data-d="A straight line in space from TDZE+TCH up the course at the glidepath angle. h(d)=TDZE+TCH+d·tan(GPA). 下滑道：自 TDZE+TCH 沿航道以下滑角上升的空间直线。"/>
+    <line class="hot seg" x1="470" y1="334" x2="775" y2="334" stroke="transparent" stroke-width="18" data-t="DA — Decision Altitude (the LPV minimum)" data-d="Where the pilot decides to land or go missed. Clean OCS → minimum HAT 200 ft, so DA ≈ TDZE+200 ft. 决断高度（即 LPV 最低标准）：决定落地或复飞之高度；OCS 无穿透时最小 HAT 200 ft，DA ≈ TDZE+200 ft。"/>
+    <line class="hot seg" x1="736" y1="380" x2="110" y2="168" stroke="transparent" stroke-width="18" data-t="W OCS — primary obstacle clearance surface" data-d="A flat sloping plane below the glidepath (slope 102/θ). If clear, DA may use the 200 ft HAT; a penetration pushes the DA up. W 越障面：下滑道下方的倾斜平面（坡度 102/θ）；无穿透则可用 200 ft HAT，被穿透则抬高 DA。"/>
+    <line class="hot seg" x1="740" y1="356" x2="740" y2="380" stroke="transparent" stroke-width="16" data-t="TCH — Threshold Crossing Height" data-d="Height of the glidepath over the threshold; LPV maximum 60 ft, default ≈30 ft wheel clearance. 入口穿越高度：下滑道在入口上方的高度；LPV 上限 60 ft，默认约 30 ft 轮触余度。"/>
+    <circle class="hot dot" cx="800" cy="380" r="14" data-t="GPIP — Glidepath Intercept Point" data-d="Where the straight glidepath reaches the runway, TCH/tan(GPA) beyond the LTP. 下滑道截获点：下滑道直线触及跑道处，位于 LTP 外 TCH/tan(GPA)。"/>
+  </g>
+</svg>
+<figcaption>Figure 2 — Profile (side) view. The glidepath descends to TCH over the LTP; the <strong>DA</strong> is where it crosses TDZE + 200 ft. The <strong>W OCS</strong> sits below and, if clear, lets the DA use the 200 ft floor.</figcaption>
+</figure>
+</section>
+
+<section id="ocs">
+<h2 class="sec">5. Obstacle Clearance Surfaces — W, X, Y</h2>
+<p>The <span class="gloss" data-k="DA">DA</span> is not just "200 ft" by decree — it is the <em>lowest</em> altitude at which the protected airspace under the glidepath is still obstacle-free. That protected airspace is built from three surfaces (8260.58D §3-4-4):</p>
+<ul>
+  <li><strong><span class="gloss" data-k="W-surface">W surface</span></strong> — the primary surface. It slopes <em>along</em> the track and is <em>level perpendicular</em> to it. Its slope is <code>102/θ</code> (≈ 34:1 for a 3° GPA), i.e. an <span class="gloss" data-k="OCS">OCS</span> angle of only <code>atan(θ/102) ≈ 1.74°</code>. Half-width grows from <strong>400 ft at the origin to 2200 ft</strong> far out: <code>W = 0.036·d<sub>LTP</sub> + 392.8</code> ft.</li>
+  <li><strong><span class="gloss" data-k="X-surface">X surface</span></strong> — slopes <em>upward</em> from the edge of the W surface, perpendicular to track (secondary protection).</li>
+  <li><strong><span class="gloss" data-k="Y-surface">Y surface</span></strong> — an early missed-approach transitional surface outboard of X.</li>
+</ul>
+<p>An obstacle in X or Y is first raised to its <span class="gloss" data-k="OEE">effective elevation</span> and then evaluated against the W surface. If anything pokes through, the DA is raised (or the GPA steepened / TCH adjusted) until clearance is restored.</p>
+
+<figure>
+<svg viewBox="0 0 760 360" role="img" aria-label="Perpendicular cross-section of the W, X, Y obstacle clearance surfaces">
+  <rect x="0" y="0" width="760" height="360" fill="#fbfcfe"/>
+  <!-- centerline -->
+  <line x1="380" y1="60" x2="380" y2="300" stroke="#b9c2cc" stroke-width="1" stroke-dasharray="4 4"/>
+  <!-- glidepath point -->
+  <circle cx="380" cy="96" r="6" fill="#1a6eb5"/>
+  <!-- clearance arrow -->
+  <line x1="380" y1="102" x2="380" y2="228" stroke="#2d7a3a" stroke-width="1.4" marker-end="url(#ar)"/>
+  <defs><marker id="ar" markerWidth="9" markerHeight="9" refX="5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#2d7a3a"/></marker></defs>
+  <!-- W surface (level) -->
+  <line x1="250" y1="232" x2="510" y2="232" stroke="#9a5a00" stroke-width="3"/>
+  <!-- X surfaces (slope up from W edge) -->
+  <line x1="250" y1="232" x2="120" y2="150" stroke="#b5762a" stroke-width="2.4"/>
+  <line x1="510" y1="232" x2="640" y2="150" stroke="#b5762a" stroke-width="2.4"/>
+  <!-- Y surfaces -->
+  <line x1="120" y1="150" x2="46" y2="106" stroke="#caa15a" stroke-width="2.2" stroke-dasharray="6 3"/>
+  <line x1="640" y1="150" x2="714" y2="106" stroke="#caa15a" stroke-width="2.2" stroke-dasharray="6 3"/>
+  <!-- shaded protected region -->
+  <polygon points="250,232 510,232 640,150 714,106 46,106 120,150" fill="rgba(154,90,0,0.06)"/>
+  <!-- labels -->
+  <text x="380" y="86" font-size="12" fill="#1a6eb5" text-anchor="middle" font-weight="700">glidepath (straight line in space)</text>
+  <text x="392" y="172" font-size="11.5" fill="#2d7a3a">required clearance</text>
+  <text x="380" y="252" font-size="12" fill="#9a5a00" text-anchor="middle" font-weight="700">W surface — primary, level ⟂ track</text>
+  <text x="380" y="268" font-size="10.5" fill="#9a5a00" text-anchor="middle">half-width 400 → 2200 ft</text>
+  <text x="150" y="196" font-size="11.5" fill="#b5762a" transform="rotate(-32 150 196)">X surface</text>
+  <text x="600" y="196" font-size="11.5" fill="#b5762a" transform="rotate(32 600 196)">X surface</text>
+  <text x="70" y="128" font-size="11" fill="#a07a30" transform="rotate(-32 70 128)">Y surface</text>
+  <text x="690" y="128" font-size="11" fill="#a07a30" transform="rotate(32 690 128)">Y surface</text>
+
+  <g class="hotspots">
+    <circle class="hot dot" cx="380" cy="96" r="16" data-t="Glidepath point" data-d="The protected straight-line glidepath at this cross-section. The DA is set so this stays clear of every surface below. 该剖面处受保护的下滑道直线点；DA 取使其高于下方各面之值。"/>
+    <line class="hot seg" x1="250" y1="232" x2="510" y2="232" stroke="transparent" stroke-width="20" data-t="W surface — primary OCS" data-d="Level perpendicular to track, sloping 102/θ along track. The surface obstacles are evaluated against. W 越障面：垂直航迹方向水平、沿航迹按 102/θ 上坡；障碍物在此面评估。"/>
+    <line class="hot seg" x1="250" y1="232" x2="120" y2="150" stroke="transparent" stroke-width="18" data-t="X surface — secondary OCS" data-d="Slopes upward from the W edge, perpendicular to track. X 越障面：自 W 边缘垂直航迹方向向上倾斜的二级面。"/>
+    <line class="hot seg" x1="510" y1="232" x2="640" y2="150" stroke="transparent" stroke-width="18" data-t="X surface — secondary OCS" data-d="Slopes upward from the W edge, perpendicular to track. X 越障面：自 W 边缘垂直航迹方向向上倾斜的二级面。"/>
+    <line class="hot seg" x1="120" y1="150" x2="46" y2="106" stroke="transparent" stroke-width="16" data-t="Y surface — early missed-approach transitional" data-d="Outboard transitional surface protecting the early go-around. Y 越障面：最外侧过渡面，保护早期复飞。"/>
+    <line class="hot seg" x1="640" y1="150" x2="714" y2="106" stroke="transparent" stroke-width="16" data-t="Y surface — early missed-approach transitional" data-d="Outboard transitional surface protecting the early go-around. Y 越障面：最外侧过渡面，保护早期复飞。"/>
+  </g>
+</svg>
+<figcaption>Figure 3 — Cross-section looking down the approach. The glidepath rides above the <strong>W</strong> (level), <strong>X</strong> (up-slope) and <strong>Y</strong> (transitional) surfaces; obstacle clearance against them sets the DA.</figcaption>
+</figure>
+</section>
+
+<section id="da">
+<h2 class="sec">6. The Decision Altitude = the minimum (putting it together)</h2>
+<p>The published <span class="gloss" data-k="DA">DA</span> is the <strong>highest</strong> of three candidate altitudes (8260.58D §3-4-5):</p>
+<ol class="body">
+  <li>the DA from the applicable <strong>minimum <span class="gloss" data-k="HAT">HAT</span></strong> — <strong>200 ft</strong> if the OCS is clear, <strong>250 ft</strong> if the OCS is penetrated or the course is offset;</li>
+  <li>the DA required by the <strong><span class="gloss" data-k="GPA">GPA</span></strong> (steeper paths need more height — per 8260.3 table 3-2-2);</li>
+  <li>the DA from the <strong>OCS evaluation</strong> — pushed up by any obstacle penetration of the W/X/Y surfaces (§5).</li>
+</ol>
+<div class="callout callout-key">
+  <div class="callout-title">🎯 In one sentence</div>
+  The "LPV minimum" is the <strong>DA</strong>: fly the angular course and the 3° glidepath down to <strong>≈ TDZE + 200 ft</strong> (best case), and at that altitude either land or go missed. Everything in §2–§5 exists to justify that one number.
+</div>
+</section>
+
+<section id="optimizer">
+<h2 class="sec">7. From chart to our optimizer constraints</h2>
+<p>Each piece of LPV geometry maps directly onto a constraint in <code>optimization_constraint_design.md</code> (final segment, PFAF → LTP):</p>
+<table class="data">
+  <tr><th>LPV chart concept</th><th>Optimizer constraint</th></tr>
+  <tr><td>Angular lateral course (§3)</td><td>Lateral corridor with half-width <code>k · w_FS(P)</code>, <code>w_FS(P)=course_width·d<sub>GARP</sub>(P)/d<sub>GARP</sub>(LTP)</code> — a converging cone, evaluated at every state node.</td></tr>
+  <tr><td>Published glidepath (§4)</td><td>Altitude window around <code>h_GP(d)=TDZE+TCH+d·tan(GPA)</code>; flight-path-angle held near the GPA.</td></tr>
+  <tr><td>LTP + TCH</td><td>The optimization <strong>target/anchor</strong> — also the origin <code>(0,0)</code> of the normalized metric frame the optimizer already uses.</td></tr>
+  <tr><td>FPAP / GARP</td><td>Pre-converted once into that same <code>(n,e)</code> frame; they define the course bearing <code>atan2(Δe,Δn)</code> and the cone apex.</td></tr>
+  <tr><td>W OCS (§5)</td><td>The final-segment analog of the <code>MOC_floor(s)</code> minimum-altitude floor — the path must stay above it.</td></tr>
+  <tr><td>DA (§6)</td><td>The operational termination gate (TDZE + 200 ft); the optimization may stop at DA or continue to LTP+TCH.</td></tr>
+</table>
+<div class="callout callout-map">
+  <div class="callout-title">🧭 Coordinates</div>
+  Because we optimize with <code>trapezoidalNormalizedFullTransport</code>, the state is already metres in one target-anchored frame (origin = LTP). Convert every fix (PFAF, FPAP, GARP) into that one frame <em>once</em>; no per-leg transforms. See §2 of the constraint-design doc.
+</div>
+</section>
+
+<section id="glossary">
+<h2 class="sec">8. Glossary</h2>
+<p>Hover any underlined term in the text for this same definition. Full bilingual list below; the 📖 button (bottom-right) opens it anywhere.</p>
+<table class="data" id="glossary-table">
+  <tr><th>Term</th><th>English</th><th>中文</th></tr>
+</table>
+</section>
+
+<section id="references">
+<h2 class="sec">9. References</h2>
+<ul>
+  <li>FAA Order <strong>8260.58D</strong>, <em>U.S. Standard for PBN Instrument Procedures</em> — Chapter 3 (RNAV (GPS) Approach): §3-1-1.f FAS data block &amp; Formula 3-1-1; §3-4 LPV/GLS Final (OCS, Formulas 3-4-1…3-4-6); §3-4-5 Decision Altitude. <code>docs/regulation/Order_8260.58D.pdf</code>.</li>
+  <li>FAA Order <strong>8260.3</strong> (TERPS) — general vertical-path and DA criteria (table 3-2-2). <code>docs/regulation/Order_8260.3F.pdf</code>.</li>
+  <li>SKYbrary — <a href="https://skybrary.aero/articles/localiser-performance-vertical-guidance-lpv">Localiser Performance with Vertical Guidance (LPV)</a>.</li>
+  <li>FAA — <a href="https://www.faa.gov/about/office_org/headquarters_offices/ato/service_units/techops/navservices/gnss/approaches">Satellite Navigation, GPS/WAAS Approaches</a>.</li>
+</ul>
+</section>
+
+</div><!-- /.content -->
+</main>
+
+<script>
+(function(){
+  // term -> [enFull, enDef, zhFull, zhDef]
+  var G = {
+    "LPV":["Localizer Performance with Vertical Guidance","The most precise RNAV (GPS) approach; WAAS-based, ILS-like lateral + vertical guidance, flown to a DA.","带垂直引导的航向性能","最精密的 RNAV (GPS) 进近；基于 WAAS，提供类 ILS 的横向+垂直引导，飞至 DA。"],
+    "RNAV":["Area Navigation","Flying any desired path within covered airspace without ground-based radio aids.","区域导航","无需地面台，可在覆盖空域内沿任意期望航径飞行。"],
+    "WAAS":["Wide Area Augmentation System","FAA SBAS that augments GPS to ILS-equivalent accuracy; required for LPV.","广域增强系统","FAA 的 SBAS，将 GPS 增强到 ILS 等效精度；LPV 必需。"],
+    "SBAS":["Satellite-Based Augmentation System","Satellite-broadcast corrections that improve GNSS accuracy/integrity (WAAS, EGNOS…).","星基增强系统","以卫星播发改正量提升 GNSS 精度/完好性（WAAS、EGNOS 等）。"],
+    "FAS":["Final Approach Segment (data block)","The coded record {LTP/FTP, FPAP, length offset, course width, TCH, GPA} defining the LPV final.","最终进近段（数据块）","编码记录 {LTP/FTP、FPAP、长度偏置、航道宽度、TCH、GPA}，定义 LPV 最终段。"],
+    "LTP":["Landing Threshold Point","Runway threshold reference; elevation = TDZE; the origin of all FAS geometry.","着陆入口点","跑道入口基准点；高程 = TDZE；FAS 几何的原点。"],
+    "FTP":["Fictitious Threshold Point","Stand-in threshold used when the course is offset or there is no physical threshold.","虚拟入口点","当航道偏置或无实体入口时使用的替代入口点。"],
+    "FPAP":["Flight Path Alignment Point","Sets the lateral course direction; from LTP toward the DER, greater of runway length or 9023 ft.","飞行航径对准点","决定横向航道方向；自 LTP 朝离场端，取跑道长与 9023 ft 较大者。"],
+    "GARP":["GNSS Azimuth Reference Point","1000 ft beyond the FPAP; the apex of the angular lateral guidance sector.","GNSS 方位基准点","FPAP 外 1000 ft；横向角度引导扇区的顶点。"],
+    "DER":["Departure End of Runway","The far (stop) end of the runway from the approach threshold.","跑道离场端","相对进近入口的跑道另一端（停止端）。"],
+    "RCL":["Runway Centerline","The centerline of the runway, extended for course alignment.","跑道中心线","跑道中线，延长用于航道对准。"],
+    "FAC":["Final Approach Course","The published inbound course of the final approach segment.","最终进近航道","最终进近段已公布的进场航道。"],
+    "LGSA":["Lateral Guidance Sector Angle","Angular half-width of lateral guidance from the GARP: ±1.5° to ±2°.","横向引导扇区角","自 GARP 起的横向引导角半宽：±1.5° 至 ±2°。"],
+    "GPA":["Glidepath Angle","The final-approach descent angle; normally 3.0°, LPV maximum 3.5°.","下滑道角","最终进近下降角；标称 3.0°，LPV 上限 3.5°。"],
+    "VPA":["Vertical Path Angle","General term for the published vertical descent angle.","垂直航径角","已公布垂直下降角的统称。"],
+    "TCH":["Threshold Crossing Height","Height of the glidepath above the threshold; LPV maximum 60 ft.","入口穿越高度","下滑道在入口上方的高度；LPV 上限 60 ft。"],
+    "WCH":["Wheel Crossing Height","Main-wheel height over the threshold = TCH minus glidepath-to-wheel height; default 30 ft.","轮触穿越高度","主轮过入口高度 = TCH 减去下滑道到轮的高度；默认 30 ft。"],
+    "GPIP":["Glidepath Intercept Point","Where the straight glidepath meets the runway, TCH/tan(GPA) beyond the LTP.","下滑道截获点","下滑道直线触及跑道处，位于 LTP 外 TCH/tan(GPA)。"],
+    "PFAF":["Precise Final Approach Fix","The fix where the final segment begins and the glidepath is intercepted.","精密最终进近定位点","最终段起点、截获下滑道的定位点。"],
+    "FAF":["Final Approach Fix","Start of the final descent; the PFAF for vertically-guided approaches.","最终进近定位点","最终下降起点；带垂直引导时即 PFAF。"],
+    "IF":["Intermediate Fix","Junction between the initial and intermediate segments.","中间定位点","起始段与中间段的连接点。"],
+    "IAF":["Initial Approach Fix","Entry fix where the approach joins from the en-route structure.","起始进近定位点","进近自航路结构衔接的入口定位点。"],
+    "DA":["Decision Altitude","With vertical guidance, the altitude to decide land vs. go-missed; the LPV minimum.","决断高度","有垂直引导时决定落地/复飞的高度；即 LPV 最低标准。"],
+    "HAT":["Height Above Touchdown","DA minus TDZE; the height the minima are quoted in. Clean LPV → 200 ft.","接地区上高度","DA 减 TDZE；最低标准以此为单位。无穿透 LPV → 200 ft。"],
+    "TDZE":["Touchdown Zone Elevation","Highest elevation in the first 3000 ft of the runway; the LTP elevation.","接地带标高","跑道前 3000 ft 内的最高标高；即 LTP 高程。"],
+    "OCS":["Obstacle Clearance Surface","Surface(s) below the glidepath that must stay obstacle-free; sets the DA.","越障面","下滑道下方须保持无障的面；决定 DA。"],
+    "OEA":["Obstacle Evaluation Area","The lateral area within which obstacles are assessed against the OCS.","障碍物评估区","在其内对照 OCS 评估障碍物的横向区域。"],
+    "OEE":["Obstacle Effective Elevation","An obstacle's MSL elevation adjusted for Earth curvature / X-Y rise before W evaluation.","障碍物有效标高","对照 W 面前，按地球曲率/X-Y 抬升修正后的障碍物海拔。"],
+    "W-surface":["W surface (primary OCS)","Primary surface: slopes along track (102/θ), level perpendicular to track.","W 面（主越障面）","主面：沿航迹按 102/θ 上坡，垂直航迹方向水平。"],
+    "X-surface":["X surface (secondary OCS)","Slopes upward from the W-surface edge, perpendicular to track.","X 面（二级越障面）","自 W 面边缘、垂直航迹方向向上倾斜。"],
+    "Y-surface":["Y surface (transitional)","Outboard early missed-approach transitional surface beyond X.","Y 面（过渡面）","X 外侧、保护早期复飞的过渡面。"],
+    "CDI":["Course Deviation Indicator","Cockpit display of lateral/vertical deviation in fractions of full-scale.","航道偏离指示器","以满刻度比例显示横向/垂直偏差的座舱仪表。"],
+    "FSD":["Full-Scale Deflection","The ±1.0 CDI limit; the edge of the guidance corridor.","满刻度偏转","CDI 的 ±1.0 极限；引导走廊的边界。"],
+    "RNP":["Required Navigation Performance","RNAV with on-board performance monitoring and alerting.","所需导航性能","带机载性能监控与告警的 RNAV。"],
+    "MOC":["Minimum Obstacle Clearance","Clearance margin built into a segment's minimum altitude.","最小越障余度","计入某段最低高度中的越障余度。"],
+    "MAPt":["Missed Approach Point","The point at which a missed approach must begin if not landing.","复飞点","若不落地必须开始复飞的点。"]
+  };
+  var TERMS = Object.keys(G).sort(function(a,b){return b.length-a.length;});
+  // text-form keys (some keys differ from displayed text, e.g. "W-surface" shows "W surface")
+  var DISPLAY = {"W-surface":"W surface","X-surface":"X surface","Y-surface":"Y surface"};
+  function disp(k){return DISPLAY[k]||k;}
+
+  // shared tooltip
+  var tip=document.createElement('div');tip.id='av-tip';document.body.appendChild(tip);
+  function place(x,y){var pad=10,w=tip.offsetWidth,h=tip.offsetHeight;if(x+w+pad>innerWidth)x=innerWidth-w-pad;if(x<pad)x=pad;if(y+h+pad>innerHeight)y=y-h-22;if(y<pad)y=pad;tip.style.left=x+'px';tip.style.top=y+'px';}
+  function showTip(html,x,y){tip.innerHTML=html;tip.classList.add('show');place(x,y);}
+  function hideTip(){tip.classList.remove('show');}
+  function termHtml(k){var g=G[k];return '<span class="tt-h">'+disp(k)+' — '+g[0]+'</span>'+g[1]+'<span class="tt-zh"><b>'+disp(k)+' — '+g[2]+'</b>：'+g[3]+'</span>';}
+
+  // auto-wrap terms in body text
+  var SKIP={SCRIPT:1,STYLE:1,CODE:1,A:1,H1:1,H2:1,H3:1,H4:1,BUTTON:1,TH:1};
+  function skip(node){for(var el=node.parentNode;el&&el!==document.body;el=el.parentNode){if(el.nodeType!==1)continue;if(el.tagName==='svg'||SKIP[el.tagName])return true;if(el.classList&&el.classList.contains('gloss'))return true;if(el.id==='glossary'||el.id==='references'||el.id==='sidebar')return true;}return false;}
+  var content=document.querySelector('.content');
+  if(content){
+    var pats=TERMS.map(function(k){return disp(k).replace(/[-\/]/g,'\\$&');});
+    var rx=new RegExp('\\b('+pats.join('|')+')\\b','g');
+    var rev={};TERMS.forEach(function(k){rev[disp(k)]=k;});
+    var walker=document.createTreeWalker(content,NodeFilter.SHOW_TEXT,null),nodes=[];
+    while(walker.nextNode()){var n=walker.currentNode;rx.lastIndex=0;if(n.nodeValue&&rx.test(n.nodeValue)&&!skip(n))nodes.push(n);}
+    nodes.forEach(function(n){rx.lastIndex=0;var frag=document.createDocumentFragment(),s=n.nodeValue,last=0,m;while((m=rx.exec(s))!==null){if(m.index>last)frag.appendChild(document.createTextNode(s.slice(last,m.index)));var sp=document.createElement('span');sp.className='gloss';sp.setAttribute('data-k',rev[m[1]]||m[1]);sp.textContent=m[1];frag.appendChild(sp);last=m.index+m[1].length;}if(last<s.length)frag.appendChild(document.createTextNode(s.slice(last)));n.parentNode.replaceChild(frag,n);});
+  }
+
+  // hover/tap for terms + hotspots
+  function classed(t,c){return t&&t.classList&&t.classList.contains(c);}
+  document.addEventListener('mouseover',function(e){var t=e.target;if(classed(t,'gloss')&&G[t.getAttribute('data-k')]){var r=t.getBoundingClientRect();showTip(termHtml(t.getAttribute('data-k')),r.left,r.bottom+8);}else if(classed(t,'hot')){showTip('<span class="tt-h">'+t.getAttribute('data-t')+'</span>'+t.getAttribute('data-d'),e.clientX+16,e.clientY+16);}});
+  document.addEventListener('mousemove',function(e){if(tip.classList.contains('show')&&classed(e.target,'hot'))place(e.clientX+16,e.clientY+16);});
+  document.addEventListener('mouseout',function(e){if(classed(e.target,'gloss')||classed(e.target,'hot'))hideTip();});
+  document.addEventListener('click',function(e){var t=e.target;if(classed(t,'gloss')&&G[t.getAttribute('data-k')]){var r=t.getBoundingClientRect();showTip(termHtml(t.getAttribute('data-k')),r.left,r.bottom+8);e.stopPropagation();}else if(classed(t,'hot')){showTip('<span class="tt-h">'+t.getAttribute('data-t')+'</span>'+t.getAttribute('data-d'),e.clientX+16,e.clientY+16);e.stopPropagation();}else hideTip();});
+
+  // fill glossary table
+  var gt=document.getElementById('glossary-table');
+  if(gt){TERMS.slice().sort().forEach(function(k){var g=G[k];var tr=document.createElement('tr');tr.innerHTML='<td>'+disp(k)+'</td><td><b>'+g[0]+'</b><br>'+g[1]+'</td><td><b>'+g[2]+'</b><br>'+g[3]+'</td>';gt.appendChild(tr);});}
+
+  // slide-in glossary panel
+  var fab=document.createElement('button');fab.id='gloss-fab';fab.type='button';fab.textContent='📖 Glossary 术语';
+  var overlay=document.createElement('div');overlay.id='gloss-overlay';
+  var panel=document.createElement('div');panel.id='gloss-panel';
+  var ph='<button id="gloss-close" type="button" aria-label="Close">×</button><h3>Glossary · 术语</h3><p class="gp-sub">Hover any underlined term in the text, or browse here. Diagram points and lines are interactive too.</p>';
+  TERMS.slice().sort().forEach(function(k){var g=G[k];ph+='<div class="gp-item"><span class="gp-term">'+disp(k)+'</span> <span class="gp-full">'+g[0]+'</span><div class="gp-def">'+g[1]+'</div><div class="gp-zh"><b>'+g[2]+'</b>：'+g[3]+'</div></div>';});
+  panel.innerHTML=ph;
+  document.body.appendChild(overlay);document.body.appendChild(panel);document.body.appendChild(fab);
+  function closeP(){panel.classList.remove('open');overlay.classList.remove('open');}
+  fab.addEventListener('click',function(){panel.classList.add('open');overlay.classList.add('open');});
+  overlay.addEventListener('click',closeP);
+  panel.querySelector('#gloss-close').addEventListener('click',closeP);
+
+  // usage banner
+  if(content){var b=document.createElement('div');b.className='callout callout-key';b.innerHTML='<div class="callout-title">💡 How to use this page</div>Hover (or tap) any <span class="gloss" data-k="DA">underlined term</span> for a bilingual definition, and hover the points and lines inside the diagrams for details. The <strong>📖 Glossary</strong> button (bottom-right) opens the full list anytime.';content.insertBefore(b,content.firstChild);}
+
+  // interactive hint under diagrams
+  document.querySelectorAll('svg').forEach(function(svg){if(svg.querySelector('.hotspots')){var h=document.createElement('p');h.className='diagram-hint';h.textContent='💡 Hover or tap the points and lines above for details.';svg.parentNode.insertBefore(h,svg.nextSibling);}});
+
+  // scroll-spy
+  var links=document.querySelectorAll('#sidebar ol li a'),secs=[];
+  links.forEach(function(a){var el=document.getElementById(a.getAttribute('href').slice(1));if(el)secs.push({el:el,a:a});});
+  function onScroll(){var y=scrollY+90,act=secs[0];for(var i=0;i<secs.length;i++)if(secs[i].el.offsetTop<=y)act=secs[i];links.forEach(function(a){a.classList.remove('active');});if(act)act.a.classList.add('active');}
+  addEventListener('scroll',onScroll,{passive:true});onScroll();
+})();
+</script>
+</body>
+</html>
