@@ -1,0 +1,77 @@
+"""Build a target :class:`GeodeticState` from a published runway threshold.
+
+An alternative to deriving the target from the end of the observed track (which, near the
+ground, is noisy / at touchdown / sometimes corrupt): the **runway threshold** is a clean,
+well-defined approach endpoint — the threshold position at the threshold-crossing height, on
+the runway heading, at the aircraft's reference approach speed and glidepath descent.
+
+Threshold geometry comes from ``trajectory_data_process/config/runway_thresholds.json``
+(``airports[CODE].runways[].thresholds[] = {ident, lat, lon, elevation_m, heading_deg}``).
+"""
+
+from __future__ import annotations
+
+import json
+import math
+from functools import lru_cache
+from pathlib import Path
+from typing import Any
+
+from aerodynamic_model.common import GeodeticState
+from aircraft.aircraft_sets import Aircraft
+
+_THRESHOLDS_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "trajectory_data_process" / "config" / "runway_thresholds.json"
+)
+
+
+@lru_cache(maxsize=None)
+def _load_airports(path: Path = _THRESHOLDS_PATH) -> dict[str, Any]:
+    return json.loads(Path(path).read_text(encoding="utf-8"))["airports"]
+
+
+def find_threshold(
+    airport: str | None, runway: str | None, *, path: Path = _THRESHOLDS_PATH
+) -> dict[str, Any] | None:
+    """The threshold record ``{ident, lat, lon, elevation_m, heading_deg}`` for
+    ``(airport, runway)``, or ``None`` if it isn't in the config."""
+    airports = _load_airports(path)
+    record = airports.get((airport or "").upper())
+    if record is None:
+        return None
+    want = (runway or "").upper()
+    for runway_pair in record.get("runways", []):
+        for threshold in runway_pair.get("thresholds", []):
+            if str(threshold.get("ident", "")).upper() == want:
+                return threshold
+    return None
+
+
+def threshold_target_state(
+    airport: str | None,
+    runway: str | None,
+    aircraft: Aircraft,
+    *,
+    mass_kg: float,
+) -> GeodeticState | None:
+    """A target state at the runway threshold, or ``None`` if the threshold is unknown.
+
+    Position = threshold lat/lon at ``elevation + threshold_crossing_height``; ``V`` = the
+    aircraft's reference approach speed (Vref); ``psi`` = the runway heading; ``gamma`` = the
+    coded glidepath descent (negative).
+    """
+    threshold = find_threshold(airport, runway)
+    if threshold is None:
+        return None
+    psi = math.radians(float(threshold["heading_deg"]))
+    psi = (psi + math.pi) % (2.0 * math.pi) - math.pi  # wrap to [-pi, pi]
+    return GeodeticState(
+        latitude=float(threshold["lat"]),
+        longitude=float(threshold["lon"]),
+        altitude=float(threshold["elevation_m"]) + aircraft.approach.threshold_crossing_height_m,
+        V=aircraft.approach.reference_speed_ms,
+        psi=psi,
+        gamma=math.radians(-aircraft.approach.glide_angle_deg),
+        m=mass_kg,
+    )

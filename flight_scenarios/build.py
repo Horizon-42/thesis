@@ -16,6 +16,7 @@ from typing import Any
 
 from aircraft.aero_params import aero_params_for_aircraft
 
+from .runway_target import threshold_target_state
 from .scenario import FlightScenario, aircraft_for_code
 from .start_state import DEFAULT_WINDOW_S, final_state_from_track, initial_state_from_track
 
@@ -24,36 +25,54 @@ def build_scenario(
     flight: dict[str, Any],
     aircraft_type: str | None = None,
     *,
+    airport: str | None = None,
     mass_kg: float | None = None,
     window_s: float = DEFAULT_WINDOW_S,
+    target_from_threshold: bool = False,
 ) -> FlightScenario:
     """Build one :class:`FlightScenario` from a single CZML-input ``flight`` dict.
 
-    ``flight`` is one element of a CZML-input file: ``{id, callsign, icao24, runway,
-    waypoints: [[t, lon, lat, alt], ...], ...}``. The aircraft is resolved from the flight's
-    transponder address (``icao24``) via the OpenAP lookup; ``aircraft_type`` (e.g. ``"A320"``)
-    is an explicit fallback, used only when the ``icao24`` can't be resolved. ``mass_kg``
-    defaults to the resolved aircraft's max-take-off mass.
+    ``flight`` is one element of a CZML-input file: ``{id, callsign, icao24, arr_airport,
+    runway, waypoints: [[t, lon, lat, alt], ...], ...}``. The aircraft is resolved from the
+    flight's transponder address (``icao24``) via the OpenAP lookup; ``aircraft_type`` (e.g.
+    ``"A320"``) is an explicit fallback, used only when the ``icao24`` can't be resolved.
+    ``mass_kg`` defaults to the aircraft's landing mass (these are approach scenarios).
+
+    ``target_from_threshold`` chooses the **target** state: when ``False`` (default) it is
+    derived from the end of the observed track; when ``True`` it is the published runway
+    threshold (a clean approach endpoint — at the threshold-crossing height, Vref, runway
+    heading, glidepath), falling back to the track end if the threshold isn't in the config.
+    ``airport`` supplies the arrival airport for the threshold lookup (the CZML-input flight's
+    own ``arr_airport`` is often empty — the airport lives in the file path).
     """
     aircraft = _resolve_aircraft(flight, aircraft_type)
-    mass = mass_kg if mass_kg is not None else aircraft.mass.max_takeoff_kg
+    mass = mass_kg if mass_kg is not None else aircraft.landing_mass
+    arr_airport = airport or flight.get("arr_airport")
 
     waypoints = flight["waypoints"]
-    # The optimizer flies initial -> target. Both ends of the observed track give the
-    # boundary states (so the optimizer reproduces the observed approach, and the result
-    # can be compared against the real flight).
+    # The optimizer flies initial -> target. The initial state is the start of the observed
+    # track; the target is either the track end or the runway threshold (see below).
     initial = initial_state_from_track(waypoints, mass_kg=mass, window_s=window_s)
-    target = final_state_from_track(waypoints, mass_kg=mass, window_s=window_s)
+    target_source = "track_end"
+    target = None
+    if target_from_threshold:
+        target = threshold_target_state(arr_airport, flight.get("runway"), aircraft, mass_kg=mass)
+        if target is not None:
+            target_source = "runway_threshold"
+    if target is None:
+        target = final_state_from_track(waypoints, mass_kg=mass, window_s=window_s)
     aero = aero_params_for_aircraft(aircraft)
 
     source = {
         "id": flight.get("id"),
         "callsign": flight.get("callsign"),
         "icao24": flight.get("icao24"),
+        "arr_airport": arr_airport,
         "runway": flight.get("runway"),
         "landing_time_utc": flight.get("landing_time_utc"),
         "n_samples": len(waypoints),
         "window_s": window_s,
+        "target_source": target_source,
     }
     return FlightScenario(initial=initial, aircraft=aircraft, aero=aero, source=source, target=target)
 
@@ -62,19 +81,25 @@ def build_scenarios_from_czml_input(
     czml_input: str | Path | list[dict[str, Any]],
     aircraft_type: str | None = None,
     *,
+    airport: str | None = None,
     mass_kg: float | None = None,
     window_s: float = DEFAULT_WINDOW_S,
+    target_from_threshold: bool = False,
 ) -> list[FlightScenario]:
     """Build a scenario per flight in a CZML-input file (or already-loaded list).
 
     ``czml_input`` may be a path to a ``*_czml_input_*.json`` / ``*_landings.json`` file,
     or the parsed list of flight dicts. Each flight's aircraft is resolved from its own
     ``icao24`` (so a mixed-fleet file gets per-flight types); ``aircraft_type`` is the
-    fallback when an ``icao24`` can't be resolved.
+    fallback when an ``icao24`` can't be resolved. ``airport`` and ``target_from_threshold``
+    are forwarded to :func:`build_scenario`.
     """
     flights = _load_flights(czml_input)
     return [
-        build_scenario(flight, aircraft_type, mass_kg=mass_kg, window_s=window_s)
+        build_scenario(
+            flight, aircraft_type, airport=airport, mass_kg=mass_kg, window_s=window_s,
+            target_from_threshold=target_from_threshold,
+        )
         for flight in flights
     ]
 

@@ -29,7 +29,7 @@ def test_build_scenario_resolves_aircraft_from_icao24():
     scen = build_scenario(FLIGHT)
     assert scen.aircraft.code == "B772"
     assert scen.aero.S == scen.aircraft.geometry.wing_area_m2
-    assert scen.initial.m == scen.aircraft.mass.max_takeoff_kg
+    assert scen.initial.m == scen.aircraft.landing_mass  # landing weight, not MTOW
     assert scen.source["id"] == "AFR074"
     assert scen.source["runway"] == "05L"
     assert scen.source["n_samples"] == 3
@@ -55,6 +55,22 @@ def test_build_scenarios_from_list_resolves_each_flight():
     scens = build_scenarios_from_czml_input([FLIGHT, FLIGHT])
     assert len(scens) == 2
     assert all(s.aircraft.code == "B772" for s in scens)
+
+
+def test_build_scenario_target_from_threshold():
+    from flight_scenarios.runway_target import find_threshold
+    flight = {**FLIGHT, "arr_airport": "KRDU", "runway": "05L"}
+    scen = build_scenario(flight, target_from_threshold=True)
+    thr = find_threshold("KRDU", "05L")
+    assert scen.source["target_source"] == "runway_threshold"
+    assert (scen.target.latitude, scen.target.longitude) == (thr["lat"], thr["lon"])
+    assert scen.target.V == scen.aircraft.approach.reference_speed_ms
+
+
+def test_build_scenario_target_from_threshold_falls_back_when_unknown():
+    flight = {**FLIGHT, "arr_airport": "KRDU", "runway": "99X"}  # no such threshold
+    scen = build_scenario(flight, "A320", target_from_threshold=True)
+    assert scen.source["target_source"] == "track_end"
 
 
 # ── CLI discovery (single file / one airport / all airports) ──────────────────

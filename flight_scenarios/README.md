@@ -106,6 +106,9 @@ python -m flight_scenarios --airport KRDU --output-dir flight_scenarios/outputs
 # one combined file for every discovered flight (instead of one per runway):
 python -m flight_scenarios --airport KRDU --combined --output-dir flight_scenarios/outputs
 
+# target the runway THRESHOLD instead of the (noisy) track end -> *_threshold_*.json:
+python -m flight_scenarios --airport KRDU --combined --target-from-threshold --output-dir flight_scenarios/outputs
+
 # a single explicit file:
 python -m flight_scenarios \
   --input trajectory_data_process/outputs/landings/KRDU/KRDU_05L_landings.json \
@@ -133,7 +136,15 @@ aero  = scenarios[0].aero             # AeroParams for the same run
   approach default). `build_scenario` prefers the `icao24`; the CLI `--aircraft-type` is the
   fallback when an `icao24` isn't in the OpenAP lookup. Serialization stores `aircraft.code`,
   so round-trips stay unchanged.
-- **`target`** is optional. The same kinematics at the *end* of the track (or a runway
-  threshold) gives a target state; wire it into `build_scenario` when needed.
+- **Target state** — two modes. By default the target is the **end of the observed track**
+  (least-squares velocity over the last ~15 s — robust to ADS-B jitter). With
+  `--target-from-threshold` (or `build_scenario(..., target_from_threshold=True)`) it is the
+  **published runway threshold** instead: threshold position at the crossing height, on the
+  runway heading, at Vref and the coded glidepath (`runway_target.threshold_target_state`,
+  from `trajectory_data_process/config/runway_thresholds.json`). The threshold is a clean,
+  always-feasible endpoint — it sidesteps the noisy / touchdown / corrupt track tail. The
+  arrival airport comes from the landings file path (the flight's own `arr_airport` is empty);
+  threshold-target outputs get a `_threshold` filename tag so they don't overwrite the
+  track-target files. `source["target_source"]` records which was used.
 - Read **CZML-input**, not CZML — CZML is the rendered presentation format (quaternions,
   styling); CZML-input is the neutral `[[t, lon, lat, alt], …]` track this package wants.
