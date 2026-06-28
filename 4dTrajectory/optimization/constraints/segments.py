@@ -88,33 +88,33 @@ class SegmentSpec:
             raise ValueError(f"{self.kind.value} segment needs halfwidth_m (the RNP corridor)")
 
 
-def segment_violations(seg: SegmentSpec, nodes: np.ndarray) -> dict[str, np.ndarray]:
-    """Evaluate every constraint of ``seg`` on its state ``nodes`` (a ``(k, 7)`` array).
+def segment_violations_from_components(seg: SegmentSpec, n, e, h, gamma) -> dict:
+    """Evaluate every constraint of ``seg`` from the state's **scalar components**.
 
-    Returns ``{name: violation_array}`` with the package convention ``≤ 0 ⇔ satisfied``. This is
-    pure composition of the primitives you implement — no new math. Coordinates are passed as
-    scalar components (``n``, ``e``, …) so the exact same call works when ``nodes`` carries CasADi
-    symbols instead of a NumPy array.
+    ``n``, ``e``, ``h``, ``gamma`` are the node coordinates as scalar components — a NumPy array
+    of node values **or** a CasADi vector (the optimizer feeds the latter). Returns
+    ``{name: violation}`` with the package convention ``≤ 0 ⇔ satisfied``. Pure composition of the
+    backend-agnostic primitives — no new math, no NumPy-only ops, so it serves both backends.
     """
-    n = north(nodes)                     # (k,)
-    e = east(nodes)                      # (k,)
-    h = altitudes(nodes)                 # (k,)
-    gamma = flight_path_angles(nodes)    # (k,)
-    out: dict[str, np.ndarray] = {}
+    out: dict = {}
     tag = f"{seg.kind.value}[{seg.start_ident}->{seg.end_ident}]"
 
     if seg.kind is SegmentKind.FINAL_LPV:
         lpv = seg.lpv
-        out[f"{tag}.lateral"] = lateral.lpv_corridor_violation(n, e, lpv, seg.k_margin)
+        right, left = lateral.lpv_corridor_violation(n, e, lpv, seg.k_margin)
+        out[f"{tag}.lateral_right"] = right
+        out[f"{tag}.lateral_left"] = left
         # along-course distance BACK from the LTP (0 at threshold, + toward the PFAF)
         d_to_ltp = geo.along_track(n, e, lpv.ltp_ne, seg.start_ne)
         low, high = vertical.glidepath_window_violation(h, d_to_ltp, lpv)
         out[f"{tag}.glidepath_low"] = low
         out[f"{tag}.glidepath_high"] = high
     else:
-        out[f"{tag}.lateral"] = lateral.box_corridor_violation(
+        right, left = lateral.box_corridor_violation(
             n, e, seg.start_ne, seg.end_ne, seg.halfwidth_m, seg.k_margin
         )
+        out[f"{tag}.lateral_right"] = right
+        out[f"{tag}.lateral_left"] = left
         s = geo.along_track(n, e, seg.start_ne, seg.end_ne)   # from the segment start
         out[f"{tag}.floor"] = vertical.moc_floor_violation(
             h, s, seg.step_downs, seg.base_floor_m
@@ -124,3 +124,14 @@ def segment_violations(seg: SegmentSpec, nodes: np.ndarray) -> dict[str, np.ndar
         out[f"{tag}.descent"] = vertical.descent_gradient_violation(gamma, seg.max_descent_deg)
 
     return out
+
+
+def segment_violations(seg: SegmentSpec, nodes: np.ndarray) -> dict[str, np.ndarray]:
+    """Evaluate every constraint of ``seg`` on its state ``nodes`` (a ``(k, 7)`` array).
+
+    Thin NumPy wrapper: extracts the scalar columns and calls
+    :func:`segment_violations_from_components`.
+    """
+    return segment_violations_from_components(
+        seg, north(nodes), east(nodes), altitudes(nodes), flight_path_angles(nodes)
+    )

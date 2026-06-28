@@ -44,7 +44,9 @@ Geometry:
     centerline   the desired path line: ``A→B`` (box) or ``GARP→LTP`` (final).
     along-track  distance measured ALONG the centerline.
     cross-track (e_xt)  SIGNED perpendicular (sideways) distance from the centerline; the sign
-          says which side. Corridor checks use the magnitude ``mathx.fabs(e_xt)``.
+          says which side. The corridor is enforced as two SMOOTH rows (``e_xt − margin`` and
+          ``−e_xt − margin``), not ``|e_xt| − margin`` — the abs kink at the centerline breaks the
+          gradient-based NLP.
     half-width   half the corridor width = how far sideways the node may stray on each side.
     dP = d_GARP(node)  along-track distance from the GARP to the node (how far down the cone).
     dL = d_GARP(LTP)   distance GARP→LTP = ‖LTP − GARP‖ (the reference length; ‖·‖ = vector
@@ -69,19 +71,26 @@ Software:
 from __future__ import annotations
 
 from . import geometry as geo
-from . import mathx
 
 
 def box_corridor_violation(n, e, A, B, halfwidth_m: float, k: float = 0.5):
-    """TODO ⑤ — RNP box corridor: ``|cross-track| − k · halfwidth ≤ 0``.
+    """RNP box corridor: keep ``|cross-track| ≤ k · halfwidth``, as TWO smooth rows.
+
+    Returns the pair ``(e_xt − margin, −e_xt − margin)`` (``margin = k · halfwidth``); both ``≤ 0``
+    iff inside. We do **not** return ``|e_xt| − margin``: the absolute value has a
+    non-differentiable kink at ``e_xt = 0`` — exactly where an on-centerline optimum sits — which
+    makes the gradient-based NLP (IPOPT) fail to converge. Two linear rows are smooth everywhere
+    and equivalent (their max is ``|e_xt| − margin``).
 
     ``halfwidth_m`` is the segment's containment half-width (``2·RNP`` or ``1·RNP`` — design-doc
-    §3.2/§8); ``k`` is the design-margin fraction. One violation per node.
+    §3.2/§8); ``k`` is the design-margin fraction.
 
-    Worked check: A=(0,0), B=(10,0), node=(3,7), halfwidth=20, k=0.5 → |−7| − 10 = −3 (inside).
-    Hint: ``mathx.fabs(geo.cross_track(n, e, A, B)) - k * halfwidth_m`` (uses TODO ②).
+    Worked check: A=(0,0), B=(10,0), node=(3,7), halfwidth=20, k=0.5 → e_xt=−7, margin=10 →
+    ``(−17, +3)``? no: ``(e_xt−margin, −e_xt−margin) = (−17, −3)`` → max −3 (inside).
     """
-    return mathx.fabs(geo.cross_track(n, e, A, B)) - k * halfwidth_m
+    e_xt = geo.cross_track(n, e, A, B)
+    margin = k * halfwidth_m
+    return e_xt - margin, -e_xt - margin
 
 
 def lpv_course_halfwidth(n, e, lpv):
@@ -107,16 +116,19 @@ def lpv_course_halfwidth(n, e, lpv):
 
 
 def lpv_corridor_violation(n, e, lpv, k: float = 0.5):
-    """TODO ⑦ — LPV angular corridor: ``|cross-track to FAC| − k · halfwidth(node) ≤ 0``.
+    """LPV angular corridor: keep ``|cross-track to FAC| ≤ k · halfwidth(node)``, as TWO smooth rows.
 
     The final approach course is the line through the GARP and the LTP. Combine the cross-track
-    from that line with the position-dependent half-width from TODO ⑥::
+    from that line with the position-dependent half-width (the converging cone)::
 
-        e_xt      = cross_track(n, e, GARP, LTP)              # signed, TODO ②
-        halfwidth = lpv_course_halfwidth(n, e, lpv)          # TODO ⑥
-        violation = |e_xt| − k · halfwidth
+        e_xt      = cross_track(n, e, GARP, LTP)              # signed
+        margin    = k · lpv_course_halfwidth(n, e, lpv)      # converging toward the runway
+        return (e_xt − margin, −e_xt − margin)               # both ≤ 0  ⇔  |e_xt| ≤ margin
 
-    On the centerline (``e_xt = 0``) the violation is ``−k·halfwidth < 0`` (inside) for any node.
-    Hint: compose ``mathx.fabs(geo.cross_track(...))`` and ``lpv_course_halfwidth(...)``.
+    Returns the pair, NOT ``|e_xt| − margin``: the absolute value's kink at ``e_xt = 0`` (where the
+    on-centerline LPV optimum sits) makes the gradient-based NLP fail to converge; two linear rows
+    are smooth and equivalent.
     """
-    return mathx.fabs(geo.cross_track(n, e, lpv.garp_ne, lpv.ltp_ne)) - k * lpv_course_halfwidth(n, e, lpv)
+    e_xt = geo.cross_track(n, e, lpv.garp_ne, lpv.ltp_ne)
+    margin = k * lpv_course_halfwidth(n, e, lpv)
+    return e_xt - margin, -e_xt - margin

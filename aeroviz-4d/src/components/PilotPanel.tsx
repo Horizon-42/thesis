@@ -15,6 +15,15 @@ import {
   fetchRnavInitialFixCandidates,
   type RnavInitialFixCandidate,
 } from "../data/rnavInitialFixCandidates";
+import {
+  procedureDetailsDocumentUrl,
+  type ProcedureDetailDocument,
+} from "../data/procedureDetails";
+import {
+  buildProcedureConstraint,
+  type ProcedureConstraint,
+} from "../data/procedureConstraint";
+import { fetchJson } from "../utils/fetchJson";
 import { usePilotAircraft, type PilotAircraftPose } from "../hooks/usePilotAircraft";
 import { usePilotTargetGate } from "../hooks/usePilotTargetGate";
 import { useOptimizedTrajectoryPlayback } from "../hooks/useOptimizedTrajectoryPlayback";
@@ -229,6 +238,9 @@ export default function PilotPanel() {
     RnavInitialFixCandidate[]
   >([]);
   const [selectedRnavInitialFixKey, setSelectedRnavInitialFixKey] = useState("");
+  // Enforce the published approach as NLP path constraints. Only meaningful on the normalized
+  // full-transport scheme (see the checkbox gating + computeTrajectory below).
+  const [enforceConstraints, setEnforceConstraints] = useState(false);
 
   const pose = snapshotToPose(snapshot);
   const selectedAircraft = aircraftConfigs.find(
@@ -1070,6 +1082,32 @@ export default function PilotPanel() {
     clearOptimizedPlayback();
     setError(null);
     try {
+      // Build the canonical procedure constraint when enforcement is on (normalized
+      // full-transport only). The selected RNAV initial fix identifies the procedure + branch;
+      // the backend enforces it as NLP path constraints (corridor / glidepath / step-down floors).
+      let procedureConstraint: ProcedureConstraint | undefined;
+      const { dynamics } = optimizerToParts(trajectoryOptimizer);
+      if (enforceConstraints && dynamics === "geodeticNormalizedFullTransport") {
+        const candidate = rnavInitialFixCandidates.find(
+          (current) => current.key === selectedRnavInitialFixKey,
+        );
+        if (!activeAirportCode || !candidate) {
+          throw new Error(
+            "Select an RNAV initial fix to enforce procedure constraints.",
+          );
+        }
+        const document = await fetchJson<ProcedureDetailDocument>(
+          procedureDetailsDocumentUrl(activeAirportCode, candidate.procedureUid),
+        );
+        const built = buildProcedureConstraint(document, { branchId: candidate.branchId });
+        if (!built) {
+          throw new Error(
+            "Could not build a procedure constraint for the selected approach.",
+          );
+        }
+        procedureConstraint = built;
+      }
+
       const result = await runTrajectoryOptimization({
         optimizer: trajectoryOptimizer,
         initialState,
@@ -1082,6 +1120,7 @@ export default function PilotPanel() {
         arrivalTimeS,
         dtS: trajectoryDtS,
         maxIterations,
+        procedureConstraint,
       });
       setOptimizedTrajectory(result);
     } catch (computeError: unknown) {
@@ -1305,6 +1344,9 @@ export default function PilotPanel() {
   const { dynamics: optimizerDynamics, fitting: optimizerFitting } =
     optimizerToParts(trajectoryOptimizer);
   const allowedFittings = validFittingsForDynamics(optimizerDynamics);
+  // Procedure path-constraints are only wired into the normalized full-transport scheme
+  // (its state nodes are metric, so the corridor/glidepath constraints stay well conditioned).
+  const canEnforceConstraints = optimizerDynamics === "geodeticNormalizedFullTransport";
   const trajectorySegmentDurationS = optimizedTrajectory
     ? optimizedTrajectory.finalTimeS / Math.max(1, optimizedTrajectory.controls.length)
     : null;
@@ -1538,6 +1580,22 @@ export default function PilotPanel() {
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
+            </label>
+            <label
+              className="pilot-checkbox-label"
+              title={
+                canEnforceConstraints
+                  ? "Enforce the published approach (corridor / glidepath / step-down floors) as NLP path constraints."
+                  : "Procedure constraints require the “Geodetic RHS (normalized + full/exact transport)” dynamics."
+              }
+            >
+              <input
+                type="checkbox"
+                checked={enforceConstraints && canEnforceConstraints}
+                disabled={targetControlsDisabled || !canEnforceConstraints}
+                onChange={(event) => setEnforceConstraints(event.target.checked)}
+              />
+              <span>Procedure constraints</span>
             </label>
             <label>
               <span>Segments</span>

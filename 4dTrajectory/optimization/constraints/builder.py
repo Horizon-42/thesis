@@ -86,3 +86,34 @@ def split_contiguous(traj: np.ndarray, counts: list[int]) -> list[np.ndarray]:
         out.append(traj[i:i + c])
         i += c
     return out
+
+
+def partition_node_indices(num_nodes: int, spans: list[tuple[float, float]]) -> list[list[int]]:
+    """Assign each of ``num_nodes`` ordered state nodes to a segment — a FIXED partition.
+
+    ``spans[j] = (along_start_m, along_end_m)`` is segment ``j``'s along-track interval on the
+    procedure (cumulative distance, ascending and contiguous, starting at 0). Node ``i`` is placed
+    at the nominal along-track ``(i + 0.5)/num_nodes · total`` and assigned to the segment whose
+    interval contains it. This is **constant** (it does not depend on the decision variables) —
+    required, because node→segment membership can't be decided from the (variable) node positions
+    inside the NLP. It is an approximation (nodes are time-spaced, not distance-spaced); see
+    design-doc §7. Returns one index list per segment (some may be empty).
+    """
+    groups: list[list[int]] = [[] for _ in spans]
+    if not spans:
+        return groups
+    total = spans[-1][1]
+    if total <= 0.0:                      # degenerate -> everything in the first segment
+        groups[0] = list(range(num_nodes))
+        return groups
+    edges = [s[0] for s in spans] + [total]
+    last = len(spans) - 1
+    for i in range(num_nodes):
+        along = (i + 0.5) / num_nodes * total
+        j = last
+        for jj in range(len(spans)):
+            if along < edges[jj + 1]:
+                j = jj
+                break
+        groups[j].append(i)
+    return groups

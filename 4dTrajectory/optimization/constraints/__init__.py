@@ -23,9 +23,21 @@ Design source: ``4dTrajectory/docs/optimization_constraint_design.md`` +
 
 from __future__ import annotations
 
-from .builder import ConstraintReport, ConstraintSet, split_contiguous
+from .builder import (
+    ConstraintReport,
+    ConstraintSet,
+    partition_node_indices,
+    split_contiguous,
+)
 from .frame import TargetFrame
-from .segments import LpvFinalSpec, SegmentKind, SegmentSpec, StepDown, segment_violations
+from .segments import (
+    LpvFinalSpec,
+    SegmentKind,
+    SegmentSpec,
+    StepDown,
+    segment_violations,
+    segment_violations_from_components,
+)
 
 __all__ = [
     "TargetFrame",
@@ -34,7 +46,9 @@ __all__ = [
     "LpvFinalSpec",
     "StepDown",
     "segment_violations",
+    "segment_violations_from_components",
     "ConstraintSet",
     "ConstraintReport",
+    "partition_node_indices",
     "split_contiguous",
 ]

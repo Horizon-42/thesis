@@ -73,6 +73,8 @@ from aircraft.aero_params import AeroParams, aero_params_for_aircraft
 from aircraft.aircraft_sets import Aircraft
 from aerodynamic_model.common import GeodeticState
 
+import constraints as approach_constraints  # approach-procedure path constraints (same sys.path dir)
+
 
 # 6 geodetic optimisation states (lat, lon, h, V, psi, gamma) with
 # lat/lon in RADIANS.  The shape matches the existing CasadiOptimizer
@@ -589,6 +591,49 @@ def terminal_bank_constraint_expr(state_nodes, start_state, state_h, max_bank_ra
     return expr, -bound, bound
 
 
+# Approach-procedure path constraints (constraints package) are only wired into the
+# *Normalized* full-transport schemes: the state nodes there are metric (n, e) offsets from
+# the target, so the corridor/glidepath/floor inequalities are written directly on the decision
+# variables and stay well-conditioned (the whole reason the Normalized scheme exists). See
+# 4dTrajectory/optimization/constraints/ and docs/optimization_constraint_design.md.
+_NORMALIZED_FULL_TRANSPORT_SCHEMES = frozenset({
+    "trapezoidalNormalizedFullTransport",
+    "hermiteSimpsonNormalizedFullTransport",
+    "rk4NormalizedFullTransport",
+})
+
+
+def procedure_constraint_g(state_nodes, segments, spans):
+    """Build the procedure path-constraint inequality rows ``g(z) ≤ 0`` for the dense state nodes.
+
+    ``state_nodes`` are the ``N·M`` decision-state 6-vectors ``(n, e, h, V, psi, gamma)`` in the
+    Normalized metric frame (metres from the target anchor). ``segments`` are
+    :class:`constraints.SegmentSpec` whose fixes are in that SAME frame; ``spans`` are the
+    per-segment along-track intervals for the fixed node→segment partition (see
+    ``constraints.partition_node_indices``).
+
+    Returns ``(g_expr, n_rows)`` — a CasADi column of violations (``≤ 0`` satisfied) and its
+    length — or ``(None, 0)`` if no rows. The violation expressions are the SAME backend-agnostic
+    functions the package tests exercise; here they receive CasADi vectors and return CasADi
+    expressions.
+    """
+    groups = approach_constraints.partition_node_indices(len(state_nodes), spans)
+    rows = []
+    for seg, idxs in zip(segments, groups):
+        if not idxs:
+            continue
+        n = ca.vertcat(*[state_nodes[i][_LAT] for i in idxs])      # _LAT == 0 == n in z-coords
+        e = ca.vertcat(*[state_nodes[i][_LON] for i in idxs])      # _LON == 1 == e
+        h = ca.vertcat(*[state_nodes[i][_ALT] for i in idxs])
+        gamma = ca.vertcat(*[state_nodes[i][_GAMMA] for i in idxs])
+        violations = approach_constraints.segment_violations_from_components(seg, n, e, h, gamma)
+        rows.extend(violations.values())
+    if not rows:
+        return None, 0
+    g_expr = ca.vertcat(*rows)
+    return g_expr, int(g_expr.shape[0])
+
+
 # Per-control smoothness weights on the scaled segment-to-segment change
 # (thrust, bank μ, load n).  Bank and load factor are attitude-driven and
 # physically smooth in real flight, so they are penalised most; thrust gets a
@@ -668,6 +713,8 @@ def make_direct_collocation_solver(
     smoothness_weights: tuple = _DEFAULT_SMOOTHNESS_WEIGHTS,
     collocation_scheme: str = _DEFAULT_SCHEME,
     solver_backend: str = _DEFAULT_SOLVER_BACKEND,
+    constraint_segments=None,
+    constraint_spans=None,
     verbose: bool = False,
 ):
     """Build the fixed-time NLP symbolically with the chosen defect scheme.
@@ -742,6 +789,16 @@ def make_direct_collocation_solver(
     lbg = [0.0] * n_defect_rows + [bank_lb]
     ubg = [0.0] * n_defect_rows + [bank_ub]
 
+    # Approach-procedure path constraints (corridor / glidepath / step-down floors),
+    # appended as one-sided inequalities (lb = -inf, ub = 0). Only the normalized
+    # full-transport schemes pass these (state nodes are metric there).
+    if constraint_segments:
+        pc_g, pc_rows = procedure_constraint_g(state_nodes, constraint_segments, constraint_spans)
+        if pc_g is not None:
+            g = ca.vertcat(g, pc_g)
+            lbg = lbg + [-float("inf")] * pc_rows
+            ubg = ubg + [0.0] * pc_rows
+
     # 6. Objective: control effort + segment-to-segment smoothness (mostly
     # on bank μ and load n).  Keeps the NLP well-posed when arrival time is
     # fixed and discourages control jumps.
@@ -787,6 +844,8 @@ def make_direct_collocation_solver_free_time(
     smoothness_weights: tuple = _DEFAULT_SMOOTHNESS_WEIGHTS,
     collocation_scheme: str = _DEFAULT_SCHEME,
     solver_backend: str = _DEFAULT_SOLVER_BACKEND,
+    constraint_segments=None,
+    constraint_spans=None,
     verbose: bool = False,
 ):
     """Build the free-final-time NLP with ``T`` as a decision variable.
@@ -869,6 +928,16 @@ def make_direct_collocation_solver_free_time(
     lbg = [0.0] * n_defect_rows + [bank_lb]
     ubg = [0.0] * n_defect_rows + [bank_ub]
 
+    # Approach-procedure path constraints (corridor / glidepath / step-down floors),
+    # appended as one-sided inequalities (lb = -inf, ub = 0). Only the normalized
+    # full-transport schemes pass these (state nodes are metric there).
+    if constraint_segments:
+        pc_g, pc_rows = procedure_constraint_g(state_nodes, constraint_segments, constraint_spans)
+        if pc_g is not None:
+            g = ca.vertcat(g, pc_g)
+            lbg = lbg + [-float("inf")] * pc_rows
+            ubg = ubg + [0.0] * pc_rows
+
     # 6. Objective.  Time dominates; control effort is a tiny tie-breaker.
     # Smoothness (mostly bank μ and load n) is added directly (NOT scaled by
     # time_regularization) so it actually shapes the control profile on the
@@ -912,6 +981,8 @@ class CasadiDirectCollocationOptimizer:
         collocation_scheme: str = _DEFAULT_SCHEME,
         solver_backend: str = _DEFAULT_SOLVER_BACKEND,
         min_speed_ms: float | None = None,
+        constraint_segments=None,
+        constraint_spans=None,
         verbose: bool = False,
     ):
         if n_segments < 2:
@@ -928,15 +999,32 @@ class CasadiDirectCollocationOptimizer:
                 f"unknown solver_backend {solver_backend!r}; "
                 f"choose from {list(_SOLVER_BACKENDS)}"
             )
+        if constraint_segments:
+            if collocation_scheme not in _NORMALIZED_FULL_TRANSPORT_SCHEMES:
+                raise ValueError(
+                    "procedure constraints are only supported on the normalized full-transport "
+                    f"schemes {sorted(_NORMALIZED_FULL_TRANSPORT_SCHEMES)}; got "
+                    f"{collocation_scheme!r}"
+                )
+            if constraint_spans is None or len(constraint_spans) != len(constraint_segments):
+                raise ValueError("constraint_spans must align 1:1 with constraint_segments")
         self.n_segments = n_segments
         # Defect scheme = dynamics x fitting (e.g. hermiteSimpson, localEnu,
         # reanchoredEnu, or a *Normalized* metric-position variant).  Both the
         # fixed-time and free-time solvers use it.
         self.collocation_scheme = collocation_scheme
+        # Approach-procedure path constraints (constraints package SegmentSpecs + their
+        # along-track spans), baked into both NLPs. None unless the caller (backend) supplies
+        # them for a normalized full-transport scheme.
+        self.constraint_segments = constraint_segments
+        self.constraint_spans = constraint_spans
         # Wall-clock breakdown of the most recent ``optimize_free_time`` call
         # (cold-start solve vs free-time solve); read by the backend for the
         # whole-flow timing log.  ``None`` until the first solve.
         self.last_solve_timings: dict[str, float] | None = None
+        # Full dense (N*M, 6) geodetic planned trajectory from the most recent solve
+        # (vs the N segment endpoints in the return). ``None`` until the first solve.
+        self.last_dense_states_geo: np.ndarray | None = None
         # NLP solver backend: ipopt (default) or sqpmethod.
         self.solver_backend = solver_backend
         # Solver console verbosity. Default False keeps every solve silent (no
@@ -994,6 +1082,8 @@ class CasadiDirectCollocationOptimizer:
                 smoothness_weights=smoothness_weights,
                 collocation_scheme=collocation_scheme,
                 solver_backend=solver_backend,
+                constraint_segments=constraint_segments,
+                constraint_spans=constraint_spans,
                 verbose=verbose,
             )
         )
@@ -1017,6 +1107,8 @@ class CasadiDirectCollocationOptimizer:
             smoothness_weights=smoothness_weights,
             collocation_scheme=collocation_scheme,
             solver_backend=solver_backend,
+            constraint_segments=constraint_segments,
+            constraint_spans=constraint_spans,
             verbose=verbose,
         )
 
@@ -1063,6 +1155,9 @@ class CasadiDirectCollocationOptimizer:
         # 4. Return one geodetic state per control segment (segment
         # endpoints), so the response stays aligned with the N controls.
         state_geo = self._extract_node_states_geo(
+            w_opt[self.n_segments * CONTROL_DIM:], initial_state.m, target_param,
+        )
+        self.last_dense_states_geo = self._extract_dense_states_geo(
             w_opt[self.n_segments * CONTROL_DIM:], initial_state.m, target_param,
         )
         return solve_duration, control_opt, state_geo
@@ -1159,6 +1254,11 @@ class CasadiDirectCollocationOptimizer:
         ]
         final_time = float(w_opt[-1])
         state_geo = self._extract_node_states_geo(state_block, initial_state.m, target_param)
+        # Also stash the full dense (N*M) planned trajectory for callers that want a smooth
+        # path (e.g. the scenario states export) rather than the coarse N segment endpoints.
+        self.last_dense_states_geo = self._extract_dense_states_geo(
+            state_block, initial_state.m, target_param,
+        )
         return final_time, control_opt, state_geo
 
     # ------------------------------------------------------------------
@@ -1187,21 +1287,33 @@ class CasadiDirectCollocationOptimizer:
         c, b = _scheme_normalization(self.collocation_scheme, ca.DM(target_param))
         return np.array(c).flatten(), np.array(b).flatten()
 
-    def _extract_node_states_geo(self, state_block, mass: float, target_param) -> np.ndarray:
-        """Pick the segment-endpoint state of each of the N control
-        segments from the dense ``N*M`` state block and convert to
-        geodetic degrees -- returns an ``(N, 6)`` array.  The block is in the
-        scheme's decision coordinates ``z``; map back to physical via
-        ``x = b + c (.*) z`` before converting to geodetic."""
+    def _decision_block_to_geo(
+        self, state_block, mass: float, target_param, *, dense: bool
+    ) -> np.ndarray:
+        """Convert the dense ``N*M`` decision-coord state block to geodetic-degree rows.
+
+        The block is in the scheme's decision coordinates ``z``; map back to physical via
+        ``x = b + c (.*) z`` before converting to geodetic.  ``dense=False`` keeps only the
+        N control-segment endpoints (the response contract, aligned with the N controls);
+        ``dense=True`` keeps every collocation node, i.e. the full ``N*M``-point trajectory."""
         c, b = self._normalize_cb_numeric(target_param)
         nodes = np.asarray(state_block).reshape(
             (self.n_segments * self.state_substeps, STATE_DIM),
         )
-        endpoints = nodes[self.state_substeps - 1 :: self.state_substeps]
-        phys_endpoints = endpoints * c + b
-        return np.array([
-            self._decision_row_to_geo_array(row, mass) for row in phys_endpoints
-        ])
+        if not dense:
+            nodes = nodes[self.state_substeps - 1 :: self.state_substeps]
+        phys = nodes * c + b
+        return np.array([self._decision_row_to_geo_array(row, mass) for row in phys])
+
+    def _extract_node_states_geo(self, state_block, mass: float, target_param) -> np.ndarray:
+        """The N control-segment endpoints in geodetic degrees -- the ``(N, 6)`` response
+        contract, aligned with the N controls."""
+        return self._decision_block_to_geo(state_block, mass, target_param, dense=False)
+
+    def _extract_dense_states_geo(self, state_block, mass: float, target_param) -> np.ndarray:
+        """Every collocation node (``N*M``, 6) in geodetic degrees -- the smooth planned
+        trajectory the optimiser actually solved (vs the coarse N-endpoint subsample)."""
+        return self._decision_block_to_geo(state_block, mass, target_param, dense=True)
 
     def _build_initial_guess(self, initial_param, target_param):
         """Straight-line interpolation across the N*M state nodes (in the

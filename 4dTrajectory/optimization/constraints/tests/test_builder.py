@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from constraints import examples
-from constraints.builder import ConstraintSet, split_contiguous
+from constraints.builder import ConstraintSet, partition_node_indices, split_contiguous
 
 
 def test_constraint_set_structure_is_wired():
@@ -14,6 +14,21 @@ def test_constraint_set_structure_is_wired():
     assert len(cset.segments) == 4
     nodes = examples.feasible_segment_nodes()
     assert [n.shape for n in nodes] == [(6, 7)] * 4
+
+
+def test_partition_node_indices():
+    # two equal-length segments, 10 nodes -> 5 each, contiguous and exhaustive
+    spans = [(0.0, 1000.0), (1000.0, 2000.0)]
+    groups = partition_node_indices(10, spans)
+    assert [len(g) for g in groups] == [5, 5]
+    assert sorted(i for g in groups for i in g) == list(range(10))
+    assert groups[0] == [0, 1, 2, 3, 4] and groups[1] == [5, 6, 7, 8, 9]
+    # uneven spans: a short final leg gets proportionally fewer nodes
+    spans2 = [(0.0, 8000.0), (8000.0, 10000.0)]   # final = last 20%
+    g2 = partition_node_indices(10, spans2)
+    assert len(g2[1]) == 2 and g2[1] == [8, 9]
+    # degenerate total -> all in first
+    assert partition_node_indices(4, [(0.0, 0.0)]) == [[0, 1, 2, 3]]
 
 
 def test_split_contiguous_roundtrip():

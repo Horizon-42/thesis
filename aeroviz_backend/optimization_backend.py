@@ -22,12 +22,16 @@ from aeroviz_backend.simulation_backend import (
 
 from geodetic_simulator import GeodeticSimulator, GeodeticState
 from casadi_optimizer import CasadiOptimizer
-from casadi_direct_collocation_optimizer import CasadiDirectCollocationOptimizer
+from casadi_direct_collocation_optimizer import (
+    CasadiDirectCollocationOptimizer,
+    _NORMALIZED_FULL_TRANSPORT_SCHEMES,
+)
 from common import LoadFactorControl
 from least_squares_transcription_optimizor import LeastSquaresTranscriptionOptimizor
 from single_shooting_optimizor import SingleShootingOptimizor
 from simulator import Control
 from aeroviz_backend.procedure_constraint import ProcedureConstraint
+from aeroviz_backend.procedure_segments import build_constraint_segments
 from aeroviz_backend.trajectory_playback import build_optimized_trajectory_playback
 from transcription_optimizor import TranscriptionOptimizor
 from variable_time_warm_start_transcription_optimizor import (
@@ -111,6 +115,29 @@ class OptimizationBackend:
         initial_state = read_geodetic_state(initial_payload, DEFAULT_STATE, aircraft)
         target_state = read_geodetic_state(target_payload, initial_state, aircraft)
 
+        # Canonical procedure constraint (the front↔back shared path/altitude structure). It is
+        # ENFORCED as NLP path constraints only on the normalized full-transport schemes (whose
+        # state nodes are metric (n,e), so the corridor/glidepath/floor inequalities are well
+        # conditioned). For any other scheme it is parsed and echoed but not enforced.
+        procedure_constraint = ProcedureConstraint.from_payload(
+            payload.get("procedureConstraint")
+        )
+        collocation_scheme = DIRECT_COLLOCATION_SCHEMES.get(optimizer_name)
+        constraints_enforced = (
+            procedure_constraint is not None
+            and collocation_scheme in _NORMALIZED_FULL_TRANSPORT_SCHEMES
+        )
+        constraint_segments = None
+        constraint_spans = None
+        if constraints_enforced:
+            constraint_segments, constraint_spans = build_constraint_segments(
+                procedure_constraint,
+                target_state.latitude,
+                target_state.longitude,
+                target_state.altitude,
+            )
+            constraints_enforced = bool(constraint_segments)
+
         # Time the WHOLE optimization flow, not just the solver call: building
         # (compiling) the NLP, the solve (which for direct collocation is itself
         # a cold-start solve + a free-time solve), and rolling the controls
@@ -124,6 +151,8 @@ class OptimizationBackend:
             dt,
             max_iterations,
             arrival_time_s=arrival_time_s,
+            constraint_segments=constraint_segments,
+            constraint_spans=constraint_spans,
         )
         build_s = time.perf_counter() - flow_started
 
@@ -181,17 +210,11 @@ class OptimizationBackend:
         if playback is not None:
             result["playback"] = playback
 
-        # Plumbing for the canonical procedure constraint (the front↔back shared
-        # path/altitude/speed structure). The NLP does not yet enforce the
-        # intermediate waypoint windows as path constraints -- that is a
-        # self-contained follow-up -- so here we parse the same shape the
-        # frontend ships and echo a cheap validation summary, which both proves
-        # the contract round-trips and is testable.
-        procedure_constraint = ProcedureConstraint.from_payload(
-            payload.get("procedureConstraint")
-        )
+        # Echo the canonical procedure constraint summary (parsed above) plus whether it was
+        # enforced as NLP path constraints (only on the normalized full-transport schemes).
         if procedure_constraint is not None:
             result["procedureConstraintSummary"] = procedure_constraint.summary()
+            result["procedureConstraintEnforced"] = constraints_enforced
 
         log_optimization_timing(
             optimizer_name,
@@ -211,6 +234,8 @@ class OptimizationBackend:
         dt: float,
         max_iterations: int,
         arrival_time_s: float,
+        constraint_segments=None,
+        constraint_spans=None,
     ) -> Any:
         if optimizer_name in CASADI_OPTIMIZERS:
             # CasADi optimisers recompile a (potentially large) NLP at
@@ -219,6 +244,21 @@ class OptimizationBackend:
             # request.  ``optimizer_name`` is included in the key
             # because the multiple-shooting and direct-collocation
             # solvers have different NLP layouts.
+            #
+            # Procedure-constrained NLPs bake request-specific geometry into the
+            # constraint vector, so they cannot be cached across requests -- build
+            # fresh and skip the cache.
+            if constraint_segments:
+                return make_optimizer(
+                    optimizer_name,
+                    geodetic_simulator,
+                    n_segments,
+                    dt,
+                    max_iterations,
+                    arrival_time_s,
+                    constraint_segments=constraint_segments,
+                    constraint_spans=constraint_spans,
+                )
             aircraft = geodetic_simulator.simulator.aircraft
             key = (optimizer_name, aircraft.code, n_segments, dt, arrival_time_s)
             if self._casadi_optimizer_key != key:
@@ -295,6 +335,8 @@ def make_optimizer(
     dt: float,
     max_iterations: int,
     arrival_time_s: float,
+    constraint_segments=None,
+    constraint_spans=None,
 ) -> Any:
     if optimizer_name == "casadiIpopt":
         return CasadiOptimizer(
@@ -311,6 +353,8 @@ def make_optimizer(
             max_duration=arrival_time_s,
             aircraft=geodetic_simulator.simulator.aircraft,
             collocation_scheme=DIRECT_COLLOCATION_SCHEMES[optimizer_name],
+            constraint_segments=constraint_segments,
+            constraint_spans=constraint_spans,
         )
 
     if optimizer_name == "singleShooting":

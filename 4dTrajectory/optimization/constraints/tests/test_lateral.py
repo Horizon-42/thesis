@@ -22,12 +22,16 @@ def _lpv():
     )
 
 
-@pytest.mark.xfail(reason="TODO ⑤ box_corridor_violation", strict=False)
 def test_box_corridor():
-    assert np.isclose(lateral.box_corridor_violation(3.0, 7.0, A, B, 20.0, k=0.5), -3.0)
-    n = np.array([3.0, 3.0])
-    e = np.array([7.0, 15.0])
-    assert np.allclose(lateral.box_corridor_violation(n, e, A, B, 20.0, k=0.5), [-3.0, 5.0])
+    # two smooth rows (right, left); their max is the |e_xt| - margin "abs" form
+    right, left = lateral.box_corridor_violation(3.0, 7.0, A, B, 20.0, k=0.5)
+    assert np.isclose(max(right, left), -3.0)        # inside by 3 m
+    right2, left2 = lateral.box_corridor_violation(3.0, 15.0, A, B, 20.0, k=0.5)
+    assert np.isclose(max(right2, left2), 5.0)       # outside by 5 m
+    # vectorised over nodes
+    n = np.array([3.0, 3.0]); e = np.array([7.0, 15.0])
+    r, l = lateral.box_corridor_violation(n, e, A, B, 20.0, k=0.5)
+    assert np.allclose(np.maximum(r, l), [-3.0, 5.0])
 
 
 @pytest.mark.xfail(reason="TODO ⑥ lpv_course_halfwidth", strict=False)
@@ -39,8 +43,9 @@ def test_lpv_halfwidth_converges_to_course_width_at_ltp():
     assert wide > 106.7
 
 
-@pytest.mark.xfail(reason="TODO ⑦ lpv_corridor_violation", strict=False)
 def test_lpv_corridor_on_and_off_centerline():
     lpv = _lpv()
-    assert lateral.lpv_corridor_violation(5000.0, 0.0, lpv, k=0.5) < 0.0   # on centerline -> inside
-    assert lateral.lpv_corridor_violation(0.0, 200.0, lpv, k=0.5) > 0.0    # 200 m off near threshold
+    r, l = lateral.lpv_corridor_violation(5000.0, 0.0, lpv, k=0.5)   # on centerline -> inside
+    assert max(r, l) < 0.0
+    r2, l2 = lateral.lpv_corridor_violation(0.0, 200.0, lpv, k=0.5)  # 200 m off near threshold
+    assert max(r2, l2) > 0.0

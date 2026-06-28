@@ -681,4 +681,29 @@ describe("PilotPanel trajectory play mode", () => {
     expect(within(panel).queryByText("Lat Error")).toBeNull();
     expect(panel.querySelectorAll(".pilot-realtime-delta").length).toBeGreaterThan(0);
   });
+
+  it("gates the procedure-constraints checkbox to the normalized full-transport scheme", async () => {
+    render(<PilotPanel />);
+    expect(await screen.findByText("A320")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
+    expect(await screen.findByText("Target State")).toBeTruthy();
+
+    const checkbox = screen.getByRole("checkbox", {
+      name: "Procedure constraints",
+    }) as HTMLInputElement;
+    // Default dynamics is plain geodetic -> the checkbox is disabled.
+    expect(checkbox.disabled).toBe(true);
+
+    // Switching to the normalized full-transport dynamics enables it.
+    fireEvent.change(screen.getByRole("combobox", { name: "Dynamics" }), {
+      target: { value: "geodeticNormalizedFullTransport" },
+    });
+    expect(checkbox.disabled).toBe(false);
+
+    // Switching away disables it again.
+    fireEvent.change(screen.getByRole("combobox", { name: "Dynamics" }), {
+      target: { value: "geodetic" },
+    });
+    expect(checkbox.disabled).toBe(true);
+  });
 });

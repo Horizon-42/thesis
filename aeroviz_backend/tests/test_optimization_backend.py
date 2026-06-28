@@ -202,7 +202,7 @@ class TestOptimizationBackend(unittest.TestCase):
 
         class FakeCasadiDirectCollocationOptimizer:
             def __init__(self, n_segments, dt, max_duration, aircraft,
-                         collocation_scheme="hermiteSimpson"):
+                         collocation_scheme="hermiteSimpson", **_kwargs):
                 calls.append({
                     "aircraft": aircraft.code,
                     "n_segments": n_segments,
@@ -288,7 +288,7 @@ class TestOptimizationBackend(unittest.TestCase):
 
         class RecordingOptimizer:
             def __init__(self, n_segments, dt, max_duration, aircraft,
-                         collocation_scheme="hermiteSimpson"):
+                         collocation_scheme="hermiteSimpson", **_kwargs):
                 self.collocation_scheme = collocation_scheme
 
         original = optimization_backend.CasadiDirectCollocationOptimizer
@@ -423,7 +423,7 @@ class TestOptimizationBackend(unittest.TestCase):
 
         class FakeCasadiDirectCollocationOptimizer:
             def __init__(self, n_segments, dt, max_duration, aircraft,
-                         collocation_scheme="hermiteSimpson"):
+                         collocation_scheme="hermiteSimpson", **_kwargs):
                 self.instance_id = len(constructions) + 1
                 constructions.append({
                     "aircraft": aircraft.code,
@@ -480,6 +480,58 @@ class TestOptimizationBackend(unittest.TestCase):
 
         self.assertEqual([c["dt"] for c in constructions], [0.25, 0.2])
         self.assertEqual([s["instance_id"] for s in solves], [1, 1, 2])
+
+    def test_procedure_constraint_enforced_only_for_normalized_full_transport(self):
+        """A procedureConstraint becomes NLP constraint_segments only on the normalized
+        full-transport schemes; other schemes parse/echo it but do not enforce it."""
+        captured = []
+
+        class FakeOpt:
+            def __init__(self, *a, constraint_segments=None, **k):
+                captured.append(constraint_segments)
+
+            def optimize_free_time(self, initial_state, target_state, max_duration):
+                return (60.0, np.array([[15000.0, 0.0, 1.0]]),
+                        np.array([[51.0, -114.0, 1000.0, 130.0, 0.3, -0.05]]))
+
+        proc = {
+            "procedureUid": "P", "airportIcao": "K", "runwayIdent": "05L", "branchId": "B",
+            "approachCourseDeg": 180.0, "nominalSpeedKt": 180.0,
+            "glidepath": {"angleDeg": 3.0, "tchFt": 50.0},
+            "waypoints": [
+                {"ident": "FAF", "role": "FAF", "legType": "IF",
+                 "latDeg": 51.05, "lonDeg": -114.0, "altitude": None, "distanceFromStartM": 0.0},
+                {"ident": "RW", "role": "MAPt", "legType": "TF",
+                 "latDeg": 51.0, "lonDeg": -114.0, "altitude": None, "distanceFromStartM": 5000.0},
+            ],
+        }
+
+        def payload(optimizer):
+            return {
+                "optimizer": optimizer, "nSegments": 2, "arrivalTimeS": 120.0, "dtS": 0.25,
+                "initialState": {"lat": 51.05, "lon": -114.0, "altM": 1300.0, "speedMps": 95.0,
+                                 "headingDeg": 180.0, "flightPathDeg": -3.0, "aircraftType": "A320"},
+                "targetState": {"lat": 51.0, "lon": -114.0, "altM": 200.0, "speedMps": 70.0,
+                                "headingDeg": 180.0, "flightPathDeg": -3.0},
+                "procedureConstraint": proc,
+            }
+
+        original = optimization_backend.CasadiDirectCollocationOptimizer
+        optimization_backend.CasadiDirectCollocationOptimizer = FakeOpt
+        try:
+            backend = optimization_backend.OptimizationBackend()
+            r_norm = backend.optimize(payload("casadiDirectCollocationNormalizedFullTransport"))
+            r_plain = backend.optimize(payload("casadiDirectCollocation"))  # hermiteSimpson, not enforced
+        finally:
+            optimization_backend.CasadiDirectCollocationOptimizer = original
+
+        # normalized full transport: real segments passed + enforced flag True
+        self.assertTrue(r_norm["procedureConstraintEnforced"])
+        self.assertIsNotNone(captured[0])
+        self.assertGreaterEqual(len(captured[0]), 1)
+        # other scheme: not enforced, no segments passed
+        self.assertFalse(r_plain["procedureConstraintEnforced"])
+        self.assertIsNone(captured[1])
 
     def test_optimize_can_select_single_shooting_optimizer(self):
         calls = []
@@ -799,7 +851,7 @@ class TestOptimizationBackend(unittest.TestCase):
         # exposes a cold-start / free-time split, both appear in the line.
         class FakeCasadiDirectCollocationOptimizer:
             def __init__(self, n_segments, dt, max_duration, aircraft,
-                         collocation_scheme="hermiteSimpson"):
+                         collocation_scheme="hermiteSimpson", **_kwargs):
                 self.last_solve_timings = {
                     "coldStartS": 0.4,
                     "freeTimeSolveS": 0.6,
