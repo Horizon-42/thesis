@@ -34,6 +34,21 @@ def _latest_czml_input(folder: Path, pattern: str, before: set[Path]) -> Path | 
     return (created_now or candidates)[-1] if (created_now or candidates) else None
 
 
+def _airport_output_dir(output_root: Path, airport: str) -> Path:
+    """Download output subdirectory for an airport (e.g. <root>/cyvr)."""
+    return output_root / airport.lower()
+
+
+def _default_czml_output(aeroviz_root: Path, airport: str) -> Path:
+    """Default front-end CZML path for an airport's trajectories."""
+    return aeroviz_root / "public" / "data" / "airports" / airport.upper() / "trajectories.czml"
+
+
+def _default_procedure_output(aeroviz_root: Path, airport: str) -> Path:
+    """Default front-end GeoJSON path for an airport's RNAV/RNP procedures."""
+    return aeroviz_root / "public" / "data" / "airports" / airport.upper() / "procedures.geojson"
+
+
 def parse_args() -> tuple[argparse.Namespace, list[str]]:
     parser = argparse.ArgumentParser(
         description="Run trajectory download and CZML generation in one command",
@@ -51,6 +66,10 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
     parser.add_argument("--cifp-root", default=None, help="CIFP cycle directory for --generate-procedures")
     parser.add_argument("--procedure-type", default="SIAP", help="CIFP procedure type for --generate-procedures")
     parser.add_argument("--procedure-output", default=None, help="Output GeoJSON for --generate-procedures")
+    parser.add_argument("--include-procedure-transitions", action="store_true",
+                        help="Pass --include-transitions to procedure preprocessing")
+    parser.add_argument("--procedure-charts-root", default=None,
+                        help="Optional charts root forwarded to procedure preprocessing as --charts-root")
     args, passthrough = parser.parse_known_args()
     return args, passthrough
 
@@ -75,7 +94,7 @@ def main() -> None:
             raise RuntimeError(f"Input JSON not found: {czml_input_path}")
         print("[pipeline] Using existing CZML-input JSON; download stage skipped.", flush=True)
     else:
-        airport_dir = output_root / airport.lower()
+        airport_dir = _airport_output_dir(output_root, airport)
         pattern = f"{airport.lower()}_czml_input_*.json"
         before = {p.resolve() for p in airport_dir.glob(pattern)}
 
@@ -96,7 +115,7 @@ def main() -> None:
     czml_output_path = (
         Path(args.czml_output)
         if args.czml_output
-        else aeroviz_root / "public" / "data" / "airports" / airport / "trajectories.czml"
+        else _default_czml_output(aeroviz_root, airport)
     )
     generate_cmd = [
         sys.executable, str(generator_script),
@@ -117,21 +136,23 @@ def main() -> None:
         procedure_output = (
             Path(args.procedure_output)
             if args.procedure_output
-            else aeroviz_root / "public" / "data" / "airports" / airport / "procedures.geojson"
+            else _default_procedure_output(aeroviz_root, airport)
         )
         cifp_root = Path(args.cifp_root) if args.cifp_root else repo_root / "data" / "CIFP" / "CIFP_260319"
+        procedure_cmd = [
+            sys.executable, str(procedure_script),
+            "--cifp-root", str(cifp_root),
+            "--airport", airport,
+            "--procedure-type", args.procedure_type,
+            "--include-all-rnav",
+            "--output", str(procedure_output),
+        ]
+        if args.include_procedure_transitions:
+            procedure_cmd.append("--include-transitions")
+        if args.procedure_charts_root:
+            procedure_cmd.extend(["--charts-root", str(args.procedure_charts_root)])
         print("[pipeline] Running procedure asset generation stage...", flush=True)
-        subprocess.run(
-            [
-                sys.executable, str(procedure_script),
-                "--cifp-root", str(cifp_root),
-                "--airport", airport,
-                "--procedure-type", args.procedure_type,
-                "--include-all-rnav",
-                "--output", str(procedure_output),
-            ],
-            check=True,
-        )
+        subprocess.run(procedure_cmd, check=True)
         print(f"[pipeline] procedures:  {procedure_output}")
 
     print(f"[pipeline] airport:     {airport}")
