@@ -64,7 +64,29 @@ def test_scenario_optimization_serialization():
 
 
 def test_scenario_filename():
+    # No icao24 / landing time in source -> falls back to the plain id_runway base.
     assert so._scenario_filename(_scenario(target=None), 0) == "AFR074_05L_states.json"
+
+
+def test_compact_time():
+    assert so._compact_time("2026-06-18T21:37:36Z") == "20260618T213736Z"
+    assert so._compact_time(None) is None
+
+
+def test_scenario_filename_disambiguates_by_icao24_and_time():
+    # Same callsign + runway + aircraft, different landing -> distinct, collision-free names
+    # (the old id_runway name silently overwrote one of these).
+    def scn(icao24, landing):
+        return FlightScenario(
+            initial=GeodeticState(35.6, -78.5, 2000.0, 130.0, 1.5, -0.05, A320.mass.max_takeoff_kg),
+            aircraft=A320, aero=aero_params_for_aircraft(A320),
+            source={"id": "EJA969", "runway": "05R", "icao24": icao24, "landing_time_utc": landing},
+            target=None,
+        )
+    a = so._scenario_filename(scn("ad7f04", "2026-06-18T21:37:36Z"), 0)
+    b = so._scenario_filename(scn("ad7f04", "2026-06-23T18:45:21Z"), 1)
+    assert a == "EJA969_05R_ad7f04_20260618T213736Z_states.json"
+    assert a != b
 
 
 def test_optimize_scenario_requires_target():

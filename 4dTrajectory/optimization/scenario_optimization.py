@@ -369,11 +369,27 @@ def _summary_record(
     }
 
 
+def _compact_time(iso: str | None) -> str | None:
+    """``2026-06-18T21:37:36Z`` -> ``20260618T213736Z`` (a filename-safe stamp); None if absent."""
+    if not iso:
+        return None
+    return re.sub(r"[^0-9TZ]", "", iso)
+
+
 def _scenario_filename(scenario: FlightScenario, index: int) -> str:
-    flight_id = scenario.source.get("id") or f"scenario{index}"
-    runway = scenario.source.get("runway")
-    base = f"{flight_id}_{runway}" if runway else str(flight_id)
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", base)
+    """A unique, stable filename for one scenario's states JSON.
+
+    A callsign + runway is NOT unique: the same aircraft can land more than once, and a
+    callsign can recur across days — so ``id_runway`` silently overwrote sibling scenarios.
+    The name now keys on the full identity ``id_runway_icao24_landingTime``, which is unique
+    per scenario in the dataset. Missing fields are skipped; ``index`` is the final fallback.
+    """
+    src = scenario.source
+    parts = [str(src.get("id") or f"scenario{index}")]
+    for value in (src.get("runway"), src.get("icao24"), _compact_time(src.get("landing_time_utc"))):
+        if value:
+            parts.append(str(value))
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", "_".join(parts))
     return f"{safe}_states.json"
 
 
