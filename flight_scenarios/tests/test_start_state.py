@@ -55,3 +55,21 @@ def test_final_state_is_anchored_at_track_end():
 def test_final_state_too_few_waypoints_raises():
     with pytest.raises(ValueError):
         final_state_from_track([[0.0, 0.0, 0.0, 1000.0]], mass_kg=78000.0)
+
+
+def test_velocity_is_robust_to_a_stuck_sample():
+    # Clean 100 m/s due-east motion with one *stuck* (duplicate-position) sample in the
+    # middle — the kind of low-altitude ADS-B jitter that makes a 2-point estimate under-read.
+    # The least-squares fit must drop the stuck report and recover the true speed.
+    step = _LON_STEP_DEG / 5.0  # one second of 100 m/s due east
+    stuck = [
+        [0.0, 0.0, 0.0, 1000.0],
+        [1.0, 1 * step, 0.0, 1000.0],
+        [2.0, 1 * step, 0.0, 1000.0],  # STUCK: identical position to t=1
+        [3.0, 3 * step, 0.0, 1000.0],
+        [4.0, 4 * step, 0.0, 1000.0],
+        [5.0, 5 * step, 0.0, 1000.0],
+    ]
+    s = final_state_from_track(stuck, mass_kg=78000.0)
+    assert s.V == pytest.approx(100.0, rel=2e-2)          # not dragged down by the stuck sample
+    assert s.psi == pytest.approx(math.pi / 2, abs=1e-2)  # still due east
