@@ -96,16 +96,63 @@ def test_build_runway_comparison_solved_three_paths_failed_red(tmp_path):
         ADSB_CZML[1],
         {**ADSB_CZML[1], "id": "DAL1312", "name": "DAL1312"},
     ]
-    czml = build_runway_comparison(results, tmp_path, adsb)
+    czml, index = build_runway_comparison(results, tmp_path, adsb, airport="KRDU")
     ids = [p["id"] for p in czml[1:]]
 
-    # solved flight -> three namespaced entities
-    assert {"ref-AFR074", "opt-AFR074", "sim-AFR074"} <= set(ids)
-    sim = next(p for p in czml if p["id"] == "sim-AFR074")
+    # solved flight -> three entities, ids namespaced by {flightId}_{runway} (collision-free)
+    assert {"ref-AFR074_05L", "opt-AFR074_05L", "sim-AFR074_05L"} <= set(ids)
+    sim = next(p for p in czml if p["id"] == "sim-AFR074_05L")
     assert sim["path"]["material"]["solidColor"]["color"]["rgba"] == list(SIMULATOR_COLOR)
+    assert sim["properties"]["kind"] == "simulator" and sim["properties"]["group"] == "AFR074_05L"
+    assert sim["show"] is False                         # hidden by default (sampling mode)
 
     # failed flight -> reference only, dark red, no optimizer/simulator
-    assert "ref-DAL1312" in ids
-    assert "opt-DAL1312" not in ids and "sim-DAL1312" not in ids
-    failed_ref = next(p for p in czml if p["id"] == "ref-DAL1312")
+    assert "ref-DAL1312_05L" in ids
+    assert "opt-DAL1312_05L" not in ids and "sim-DAL1312_05L" not in ids
+    failed_ref = next(p for p in czml if p["id"] == "ref-DAL1312_05L")
     assert failed_ref["path"]["material"]["solidColor"]["color"]["rgba"] == list(FAILED_COLOR)
+
+    # index: one record per group, carrying its entity ids + initial state
+    by_group = {r["group"]: r for r in index}
+    assert set(by_group) == {"AFR074_05L", "DAL1312_05L"}
+    solved_rec = by_group["AFR074_05L"]
+    assert solved_rec["status"] == "solved"
+    assert solved_rec["entities"] == ["ref-AFR074_05L", "opt-AFR074_05L", "sim-AFR074_05L"]
+    assert solved_rec["initialState"]["lat"] == STATES[0]["lat"]
+    assert by_group["DAL1312_05L"]["status"] == "failed"
+
+
+def test_build_runway_comparison_dedupes_collided_rows(tmp_path):
+    # Two summary rows for the same (flightId, runway) point at the SAME states file
+    # (the filename collides on overwrite). They must collapse to ONE group/one entity set.
+    (tmp_path / "AFR074_05L_states.json").write_text(json.dumps(STATE_DATA), encoding="utf-8")
+    results = [
+        {"id": "AFR074", "runway": "05L", "status": "solved", "states_file": "AFR074_05L_states.json"},
+        {"id": "AFR074", "runway": "05L", "status": "solved", "states_file": "AFR074_05L_states.json"},
+    ]
+    czml, index = build_runway_comparison(results, tmp_path, [ADSB_CZML[0]], airport="KRDU")
+    assert [p["id"] for p in czml if p["id"].startswith("opt-")] == ["opt-AFR074_05L"]
+    assert len(index) == 1
+
+
+def test_build_runway_comparison_solved_wins_over_failed_same_group(tmp_path):
+    # A flight can appear as BOTH a failed and a solved row for the same (flightId, runway).
+    # Solved must win regardless of order -> exactly one group, one set of entities, no
+    # duplicate ids (the failed row must not also emit a colliding ref-).
+    (tmp_path / "AFR074_05L_states.json").write_text(json.dumps(STATE_DATA), encoding="utf-8")
+    results = [
+        {"id": "AFR074", "runway": "05L", "status": "failed", "states_file": None},
+        {"id": "AFR074", "runway": "05L", "status": "solved", "states_file": "AFR074_05L_states.json"},
+    ]
+    czml, index = build_runway_comparison(results, tmp_path, [ADSB_CZML[0], ADSB_CZML[1]], airport="KRDU")
+    entity_ids = [p["id"] for p in czml[1:]]
+    assert len(entity_ids) == len(set(entity_ids))            # no colliding ids
+    assert len(index) == 1 and index[0]["status"] == "solved"
+    assert {"ref-AFR074_05L", "opt-AFR074_05L", "sim-AFR074_05L"} == set(entity_ids)
+
+
+def test_build_runway_comparison_start_visible(tmp_path):
+    (tmp_path / "AFR074_05L_states.json").write_text(json.dumps(STATE_DATA), encoding="utf-8")
+    results = [{"id": "AFR074", "runway": "05L", "status": "solved", "states_file": "AFR074_05L_states.json"}]
+    czml, _ = build_runway_comparison(results, tmp_path, [ADSB_CZML[0]], airport="KRDU", start_hidden=False)
+    assert next(p for p in czml if p["id"] == "opt-AFR074_05L")["show"] is True

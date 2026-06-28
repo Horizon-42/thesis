@@ -9,10 +9,15 @@ Two modes:
     • optimizer  (cyan)   — the optimizer's plan        (optimizer_states)
     • simulator  (orange) — the real forward rollout    (simulator_states)
 
-* **Batch** (``--summary``) — the run's ``summary.json`` → **one combined CZML per runway**.
-  Every flight on one map: solved flights get the three paths above (entity ids namespaced by
-  flight id); **unsolved flights get their reference only, in dark red (FAILED_COLOR)** so the
-  success/failure spread is visible at a glance. The reference is found by flight id.
+* **Batch** (``--summary``) — the run's ``summary.json`` → **one combined CZML per runway**
+  plus a single ``comparison_index.json``. Every flight on one map: solved flights get the
+  three paths above; **unsolved flights get their reference only, in dark red (FAILED_COLOR)**.
+  Each entity has a globally-unique id ``{kind}-{flightId}_{runway}`` and a ``properties`` bag
+  (``group``/``flightId``/``kind``/``runway``/``airport``/``status``) so the frontend can
+  group and **randomly sample** trajectories. Entities default to ``show=false`` (override with
+  ``--start-visible``); the frontend reads ``comparison_index.json`` (one record per group, with
+  its ``initialState`` and the CZML file + entity ids it owns), samples a subset, and reveals
+  only those. The reference is found by flight id in the airport's ``trajectories.czml``.
 """
 
 from __future__ import annotations
@@ -61,6 +66,8 @@ def _reference_entity_from_adsb(
     *,
     entity_id: str = "scenario-reference",
     name: str | None = None,
+    properties: dict[str, Any] | None = None,
+    show: bool = True,
 ) -> dict[str, Any] | None:
     """Find the observed flight in ``adsb_czml`` and copy it as the reference trajectory.
 
@@ -69,13 +76,19 @@ def _reference_entity_from_adsb(
     whose ``id`` matches ``flight_id``, **deep-copy** it (so we don't mutate the source),
     recolour its ``path`` material to ``color_rgba``, and re-id/-name it (``entity_id`` /
     ``name``) so several references can coexist in one combined CZML.
+
+    ``properties`` attaches a CZML custom-property bag (so the frontend can group/sample)
+    and ``show`` sets the entity-level visibility (``False`` ⇒ hidden until revealed).
     """
     for packet in adsb_czml:
         if packet.get("id") == flight_id:
             entity = copy.deepcopy(packet)
             entity["id"] = entity_id
             entity["name"] = name or f"Reference {flight_id}"
+            entity["show"] = show
             entity["path"]["material"]["solidColor"]["color"]["rgba"] = list(color_rgba)
+            if properties is not None:
+                entity["properties"] = properties
             return entity
     return None        # no matching flight in the ADS-B CZML
 
@@ -87,12 +100,21 @@ def _build_trajectory_entity(
     name: str,
     states: list[dict[str, Any]],
     color_rgba: tuple[int, int, int, int],
+    *,
+    properties: dict[str, Any] | None = None,
+    show: bool = True,
 ) -> dict[str, Any]:
-    """A coloured, time-dynamic path entity from a state sequence (uses TODO ①)."""
+    """A coloured, time-dynamic path entity from a state sequence.
+
+    ``properties`` attaches a CZML custom-property bag (so the frontend can group/sample
+    by ``group``/``kind``/…) and ``show`` sets entity-level visibility (``False`` ⇒ the
+    whole entity is hidden until the frontend reveals it).
+    """
     waypoints = _states_to_waypoints(states)
-    return {
+    entity: dict[str, Any] = {
         "id": entity_id,
         "name": name,
+        "show": show,
         "position": build_position_property(EPOCH, waypoints),
         "point": {"pixelSize": 9, "color": {"rgba": list(color_rgba)}},
         "path": {
@@ -113,6 +135,9 @@ def _build_trajectory_entity(
             "pixelOffset": {"cartesian2": [0, -28]},
         },
     }
+    if properties is not None:
+        entity["properties"] = properties
+    return entity
 
 
 def build_comparison_czml(
@@ -147,51 +172,131 @@ def _last_time(states: list[dict[str, Any]]) -> float:
 
 # ── Batch: one combined comparison CZML per runway (from a summary.json) ───────
 
+_INITIAL_STATE_KEYS = ("lat", "lon", "alt", "V", "psi", "gamma")
+
+
+def _initial_state(states: list[dict[str, Any]]) -> dict[str, float] | None:
+    """The first sample's kinematic state (used as a group's ``initialState`` in the index)."""
+    if not states:
+        return None
+    first = states[0]
+    return {key: first[key] for key in _INITIAL_STATE_KEYS}
+
+
+def _traj_properties(
+    group: str, flight_id: str | None, kind: str, runway: str, airport: str, status: str
+) -> dict[str, Any]:
+    """CZML custom-property bag the frontend uses to group / sample / colour-key entities.
+
+    ``group`` is the per-flight key (unique within the run); ``kind`` is one of
+    ``reference`` / ``optimizer`` / ``simulator``.
+    """
+    return {
+        "group": group, "flightId": flight_id, "kind": kind,
+        "runway": runway, "airport": airport, "status": status,
+    }
+
+
 def build_runway_comparison(
     results: list[dict[str, Any]],
     states_dir: str | Path,
     adsb_czml: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Combined CZML for one runway: every flight on one map.
+    *,
+    airport: str = "UNK",
+    start_hidden: bool = True,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Combined CZML for one runway **plus** its index records (every flight on one map).
 
     Each result (a row from ``scenario_optimization``'s ``summary.json``) becomes:
-      • solved → reference (white) + optimizer (cyan) + simulator (orange), entity ids
-        namespaced by flight id so they don't collide;
+      • solved → reference (white) + optimizer (cyan) + simulator (orange);
       • failed → reference only, in the dark-red FAILED_COLOR, labelled "(unsolved)".
 
-    The reference is found in ``adsb_czml`` by the flight id (see ``_reference_entity_from_adsb``).
+    Every entity gets a globally-unique id ``{kind}-{flightId}_{runway}`` (so duplicate
+    ``(flightId, runway)`` rows — which collide on the *same* states file — can't produce
+    colliding CZML ids) and a ``properties`` bag (``group``/``kind``/…). Entities are
+    ``show=False`` when ``start_hidden`` so the frontend renders only the groups it samples.
+
+    Returns ``(czml_packets, index_records)``. Each index record describes one group:
+    its id, flight id, runway, status, initial state, and the entity ids that belong to it.
     """
     states_dir = Path(states_dir)
-    entities: list[dict[str, Any]] = []
-    max_t = 0.0
+    show = not start_hidden
+
+    # Collapse to one row per group (= ``flightId_runway``), preferring a solved row. A flight
+    # can appear in the summary as both a failed attempt and a solved one (their states
+    # filenames collide on overwrite); the solved result is the one to show, regardless of row
+    # order. One-per-group also subsumes the duplicate-states-file dedup (group ↔ file is 1:1).
+    best: dict[str, dict[str, Any]] = {}
     for result in results:
+        group = f"{result.get('id')}_{result.get('runway') or 'unknown'}"
+        is_solved = result.get("status") == "solved" and result.get("states_file")
+        current = best.get(group)
+        if current is None or (is_solved and current.get("status") != "solved"):
+            best[group] = result
+
+    entities: list[dict[str, Any]] = []
+    index_records: list[dict[str, Any]] = []
+    max_t = 0.0
+
+    for group, result in best.items():
         flight_id = result.get("id")
+        runway = result.get("runway") or "unknown"
         solved = result.get("status") == "solved" and result.get("states_file")
+        entity_ids: list[str] = []
+
         if solved:
-            state_data = json.loads((states_dir / result["states_file"]).read_text(encoding="utf-8"))
+            states_file = result["states_file"]
+            state_data = json.loads((states_dir / states_file).read_text(encoding="utf-8"))
             optimizer_states = state_data["optimizer_states"]
             simulator_states = state_data["simulator_states"]
             max_t = max(max_t, float(state_data.get("final_time_s", 0.0)),
                         _last_time(optimizer_states), _last_time(simulator_states))
+
             reference = _reference_entity_from_adsb(
                 adsb_czml, flight_id, REFERENCE_COLOR,
-                entity_id=f"ref-{flight_id}", name=f"Ref {flight_id}",
+                entity_id=f"ref-{group}", name=f"Ref {flight_id}",
+                properties=_traj_properties(group, flight_id, "reference", runway, airport, "solved"),
+                show=show,
             )
             if reference is not None:
                 entities.append(reference)
-            entities.append(_build_trajectory_entity(f"opt-{flight_id}", f"Opt {flight_id}", optimizer_states, OPTIMIZER_COLOR))
-            entities.append(_build_trajectory_entity(f"sim-{flight_id}", f"Sim {flight_id}", simulator_states, SIMULATOR_COLOR))
+                entity_ids.append(f"ref-{group}")
+            entities.append(_build_trajectory_entity(
+                f"opt-{group}", f"Opt {flight_id}", optimizer_states, OPTIMIZER_COLOR,
+                properties=_traj_properties(group, flight_id, "optimizer", runway, airport, "solved"),
+                show=show))
+            entity_ids.append(f"opt-{group}")
+            entities.append(_build_trajectory_entity(
+                f"sim-{group}", f"Sim {flight_id}", simulator_states, SIMULATOR_COLOR,
+                properties=_traj_properties(group, flight_id, "simulator", runway, airport, "solved"),
+                show=show))
+            entity_ids.append(f"sim-{group}")
+
+            index_records.append({
+                "group": group, "flightId": flight_id, "runway": runway, "airport": airport,
+                "status": "solved", "finalTimeS": float(state_data.get("final_time_s", 0.0)),
+                "initialState": _initial_state(optimizer_states or simulator_states),
+                "entities": entity_ids,
+            })
         else:
             reference = _reference_entity_from_adsb(
                 adsb_czml, flight_id, FAILED_COLOR,
-                entity_id=f"ref-{flight_id}", name=f"Ref {flight_id} (unsolved)",
+                entity_id=f"ref-{group}", name=f"Ref {flight_id} (unsolved)",
+                properties=_traj_properties(group, flight_id, "reference", runway, airport, "failed"),
+                show=show,
             )
             if reference is not None:
                 entities.append(reference)
+                entity_ids.append(f"ref-{group}")
+            index_records.append({
+                "group": group, "flightId": flight_id, "runway": runway, "airport": airport,
+                "status": "failed", "finalTimeS": None, "initialState": None,
+                "entities": entity_ids,
+            })
 
     end_dt = EPOCH.fromtimestamp(EPOCH.timestamp() + max(max_t, 1.0), tz=timezone.utc)
     document = build_document_packet(EPOCH, end_dt, multiplier=30)
-    return [document] + entities
+    return [document] + entities, index_records
 
 
 def group_results_by_runway(
@@ -223,6 +328,11 @@ def main() -> None:
     parser.add_argument("--adsb-czml", default=None, help="ADS-B CZML path override (single mode)")
     parser.add_argument("--output", default=None, help="Output CZML path (single mode)")
     parser.add_argument("--output-dir", default=None, help="Output dir for per-runway CZMLs (batch mode)")
+    parser.add_argument(
+        "--start-visible", action="store_true",
+        help="batch mode: emit entities with show=true (default hidden, so the frontend "
+             "reveals only the groups it samples from comparison_index.json)",
+    )
     args = parser.parse_args()
 
     if args.state_file:
@@ -253,16 +363,30 @@ def main() -> None:
         return adsb_cache[airport]
 
     groups = group_results_by_runway(summary, fallback_airport=args.airport)
+    index: dict[str, Any] = {
+        "epoch": EPOCH.isoformat(),
+        "startHidden": not args.start_visible,
+        "groups": [],
+    }
     for (airport, runway), results in sorted(groups.items()):
-        czml = build_runway_comparison(results, states_dir, adsb_for(airport))
+        czml, records = build_runway_comparison(
+            results, states_dir, adsb_for(airport),
+            airport=airport, start_hidden=not args.start_visible,
+        )
         out_path = out_dir / f"comparison_{airport}_{runway}.czml"
         out_path.write_text(json.dumps(czml, indent=2), encoding="utf-8")
-        failed = sum(1 for r in results if r.get("status") != "solved")
-        print(f"✓ {out_path.name}: {len(results)} flight(s), {failed} unsolved (red) -> {len(czml)} packets")
+        for record in records:
+            record["czml"] = out_path.name        # which CZML file this group lives in
+        index["groups"].extend(records)
+        failed = sum(1 for r in records if r["status"] != "solved")
+        print(f"✓ {out_path.name}: {len(records)} group(s), {failed} unsolved (red) -> {len(czml)} packets")
 
+    index_path = out_dir / "comparison_index.json"
+    index_path.write_text(json.dumps(index, indent=2), encoding="utf-8")
     rate = summary.get("failure_rate")
     rate_str = f"{rate:.1%}" if isinstance(rate, (int, float)) else "n/a"
-    print(f"✓ wrote {len(groups)} runway CZML(s) to {out_dir}; overall failure rate {rate_str}")
+    print(f"✓ wrote {len(groups)} runway CZML(s) + index ({len(index['groups'])} groups) "
+          f"to {out_dir}; overall failure rate {rate_str}")
 
 
 if __name__ == "__main__":
