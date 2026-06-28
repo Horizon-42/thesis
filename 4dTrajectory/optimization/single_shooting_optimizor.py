@@ -64,9 +64,11 @@ class SingleShootingOptimizor:
         self.max_iterations = max_iterations
         self.ftol = ftol
         aircraft = getattr(getattr(sim, "simulator", None), "aircraft", None)
-        self.max_thrust_n = float(getattr(aircraft, "max_thrust_n", 1000000.0))
+        self.max_thrust_n = float(
+            aircraft.engine.max_thrust_total_n if aircraft is not None else 1000000.0
+        )
         self.default_thrust_guess_n = float(
-            getattr(aircraft, "approach_thrust_guess_n", _DEFAULT_THRUST_GUESS_N)
+            aircraft.approach.thrust_guess_n if aircraft is not None else _DEFAULT_THRUST_GUESS_N
         )
     
     def unpack_z(self, z: np.ndarray) -> tuple[float, np.ndarray]:

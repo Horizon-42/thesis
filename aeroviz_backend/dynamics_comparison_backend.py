@@ -155,8 +155,8 @@ class DynamicsComparisonBackend:
         aircraft = read_aircraft(initial_payload, DEFAULT_AIRCRAFT_TYPE)
         initial_state = read_geodetic_state(initial_payload, DEFAULT_STATE, aircraft)
 
-        thrust = clamp(read_float(control_payload, "thrustN", aircraft.approach_thrust_guess_n),
-                       0.0, aircraft.max_thrust_n)
+        thrust = clamp(read_float(control_payload, "thrustN", aircraft.approach.thrust_guess_n),
+                       0.0, aircraft.engine.max_thrust_total_n)
         bank_rad = math.radians(clamp(read_float(control_payload, "bankDeg", 0.0), -60.0, 60.0))
         load_factor = clamp(read_float(control_payload, "loadFactor", 1.0), 0.0, 3.0)
 

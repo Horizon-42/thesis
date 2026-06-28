@@ -124,7 +124,7 @@ def test_make_multiple_shooting_solver_uses_pure_symbolic_parameters(monkeypatch
 def test_optimize_trajectory_runs_real_ipopt_for_fixed_time_target():
     module = load_casadi_optimizer_module()
     duration = 0.2
-    speed = kt_to_ms(C172.terminal_speed_kt) + 5.0
+    speed = kt_to_ms(C172.approach.reference_speed_kt) + 5.0
     state = GeodeticState(
         latitude=51.1139,
         longitude=-114.0203,
@@ -132,7 +132,7 @@ def test_optimize_trajectory_runs_real_ipopt_for_fixed_time_target():
         V=speed,
         psi=0.0,
         gamma=0.0,
-        m=C172.mass_kg,
+        m=C172.mass.max_takeoff_kg,
     )
     optimizer = module.CasadiOptimizer(
         n_segments=2,
@@ -187,7 +187,7 @@ def test_optimize_trajectory_uses_supplied_initial_guess():
             return {"success": True}
 
     optimizer.solver = FakeSolver()
-    state = GeodeticState(51.0, -114.0, 1000.0, 40.0, 0.1, 0.0, C172.mass_kg)
+    state = GeodeticState(51.0, -114.0, 1000.0, 40.0, 0.1, 0.0, C172.mass.max_takeoff_kg)
 
     optimizer.optimize_trajectory(
         state,
@@ -265,7 +265,7 @@ def test_optimize_time_to_target_raises_when_first_solve_fails():
 def propagate_with_nominal_control(module, optimizer, state, duration):
     step_func = module.make_geo_step_from_enu_integrator()["step_func"]
     x = ca.DM(optimizer.geo_state_to_decision_vector(state))
-    u = ca.DM([C172.approach_thrust_guess_n, 0.0, 1.0])
+    u = ca.DM([C172.approach.thrust_guess_n, 0.0, 1.0])
     aero_params = ca.DM([
         optimizer.aero_params.S,
         optimizer.aero_params.Cl_max,

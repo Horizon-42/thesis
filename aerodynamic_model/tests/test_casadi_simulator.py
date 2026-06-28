@@ -63,7 +63,7 @@ class TestCasadiSimulator(unittest.TestCase):
         # Keep this order aligned with casadi_simulator.make_dynamics_model().
         self.aero_params = np.array(
             [
-                A320.wing_area_m2,
+                A320.geometry.wing_area_m2,
                 1.5,  # Cl_max
                 0.02,  # Cd0
                 0.04,  # induced drag factor
@@ -80,7 +80,7 @@ class TestCasadiSimulator(unittest.TestCase):
         altitude: float = 1000.0,
         psi: float = 0.0,
         gamma: float = 0.0,
-        mass: float = A320.mass_kg,
+        mass: float = A320.mass.max_takeoff_kg,
     ) -> np.ndarray:
         # State order: x, y, h, V, psi, gamma, m.
         return np.array([0.0, 0.0, altitude, speed, psi, gamma, mass], dtype=float)
@@ -88,7 +88,7 @@ class TestCasadiSimulator(unittest.TestCase):
     def _control_vector(
         self,
         *,
-        thrust: float = A320.approach_thrust_guess_n,
+        thrust: float = A320.approach.thrust_guess_n,
         bank_rad: float = 0.0,
         load_factor: float = 1.0,
     ) -> np.ndarray:
@@ -113,7 +113,7 @@ class TestCasadiSimulator(unittest.TestCase):
         load_factor: float,
         speed: float,
         altitude: float,
-        mass: float = A320.mass_kg,
+        mass: float = A320.mass.max_takeoff_kg,
     ) -> dict[str, float]:
         result = self.coefficients_func(
             n_cmd=load_factor,
@@ -168,7 +168,7 @@ class TestCasadiSimulator(unittest.TestCase):
 
         rho = self._density(altitude)
         wing_area_m2, cl_max, cd0, induced_drag_factor = self.aero_params[:4]
-        expected_cl_req = load_factor * A320.mass_kg * 9.81 / (
+        expected_cl_req = load_factor * A320.mass.max_takeoff_kg * 9.81 / (
             0.5 * rho * wing_area_m2 * speed**2
         )
         expected_cd = cd0 + induced_drag_factor * expected_cl_req**2
@@ -261,7 +261,7 @@ class TestCasadiSimulator(unittest.TestCase):
         rho = self._density(altitude)
         wing_area_m2, cl_max = self.aero_params[:2]
         actual_load_factor = 0.5 * rho * speed**2 * cl_max * wing_area_m2 / (
-            A320.mass_kg * 9.81
+            A320.mass.max_takeoff_kg * 9.81
         )
         expected_gamma_rate = 9.81 * (actual_load_factor - 1.0) / speed
 
@@ -277,10 +277,10 @@ class TestCasadiSimulator(unittest.TestCase):
             V=150.0,
             psi=0.0,
             gamma=0.0,
-            m=A320.mass_kg,
+            m=A320.mass.max_takeoff_kg,
         )
         control = LoadFactorControl(
-            thrust=A320.approach_thrust_guess_n,
+            thrust=A320.approach.thrust_guess_n,
             bank_rad=0.0,
             load_factor=1.0,
         )
@@ -364,10 +364,10 @@ class TestGeodeticTransportModes(unittest.TestCase):
         # every transport term is non-zero.
         x = ca.DM([
             math.radians(51.1), math.radians(-114.0), 3000.0,
-            130.0, math.radians(30.0), math.radians(-3.0), A320.mass_kg,
+            130.0, math.radians(30.0), math.radians(-3.0), A320.mass.max_takeoff_kg,
         ])
-        u = ca.DM([A320.max_thrust_n * 0.3, math.radians(10.0), 1.0])
-        aero = ca.DM([A320.wing_area_m2, 2.7, 0.02, 0.04, 0.9, 0.1])
+        u = ca.DM([A320.engine.max_thrust_total_n * 0.3, math.radians(10.0), 1.0])
+        aero = ca.DM([A320.geometry.wing_area_m2, 2.7, 0.02, 0.04, 0.9, 0.1])
         return np.array(rhs(x, u, aero)).reshape(-1), x
 
     def test_full_minus_approx_is_exactly_the_psi_cross_term(self):

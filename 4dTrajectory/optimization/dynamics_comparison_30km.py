@@ -78,7 +78,7 @@ def main() -> int:
     # documented setup; see dynamics_comparison.py for the shared engine).
     comparison = compare_dynamics(
         start=dict(lat=start["lat"], lon=start["lon"], alt=start["alt"],
-                   V=V0, psi=psi0, gamma=gamma0, mass=aircraft.mass_kg),
+                   V=V0, psi=psi0, gamma=gamma0, mass=aircraft.mass.max_takeoff_kg),
         control=(control["thrust_n"], math.radians(control["bank_deg"]), control["load_factor"]),
         aero_params=[ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall],
         duration_s=duration,

@@ -9,7 +9,7 @@ from .casadi_coordinates_converter import (
     WGS84_E2,
 )
 
-from aircraft.aircraft_sets import AircraftSpec
+from aircraft.aircraft_sets import Aircraft
 from aircraft.aero_params import AeroParams, aero_params_for_aircraft
 
 from .common import GeodeticState, LoadFactorControl
@@ -509,7 +509,7 @@ def make_geodetic_step_integrator(transport: str = "approx"):
 class CasadiSimulator:
     g = 9.81  # gravity (m/s^2)
 
-    def __init__(self, aircraft: AircraftSpec, dt: float):
+    def __init__(self, aircraft: Aircraft, dt: float):
         self.aircraft = aircraft
         self.aero_params = aero_params_for_aircraft(aircraft)
         self.geo_step = make_geo_step_from_enu_integrator()["step_func"]

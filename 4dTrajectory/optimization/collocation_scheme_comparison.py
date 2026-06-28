@@ -83,13 +83,13 @@ def _feasible_target(aircraft, init, horizon):
     target the optimiser can recover with any scheme."""
     step = make_geodetic_step_integrator(transport="approx")["step_func"]
     aero = _aero_dm(aircraft)
-    u = ca.DM([aircraft.approach_thrust_guess_n, 0.0, 1.0])
+    u = ca.DM([aircraft.approach.thrust_guess_n, 0.0, 1.0])
     x = ca.DM([init.latitude, init.longitude, init.altitude,
                init.V, init.psi, init.gamma, init.m])
     for _ in range(int(horizon / 0.05)):
         x = step(x_geo=x, u=u, aero_params=aero, dt=0.05)["x_geo_next"]
     a = np.array(x).reshape(-1)
-    return GeodeticState(a[0], a[1], a[2], a[3], a[4], a[5], aircraft.mass_kg)
+    return GeodeticState(a[0], a[1], a[2], a[3], a[4], a[5], aircraft.mass.max_takeoff_kg)
 
 
 def _replay_terminal(aircraft, init, controls, horizon, dt=0.05):
@@ -110,7 +110,7 @@ def _replay_terminal(aircraft, init, controls, horizon, dt=0.05):
             rem -= h
             min_alt = min(min_alt, float(x[2]))
     a = np.array(x).reshape(-1)
-    return GeodeticState(a[0], a[1], a[2], a[3], a[4], a[5], aircraft.mass_kg), min_alt
+    return GeodeticState(a[0], a[1], a[2], a[3], a[4], a[5], aircraft.mass.max_takeoff_kg), min_alt
 
 
 def main(argv=None) -> int:
@@ -121,8 +121,8 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     aircraft = _AIRCRAFT[args.aircraft]
-    speed = kt_to_ms(aircraft.terminal_speed_kt) + 12.0
-    init = GeodeticState(35.60, -78.50, 1500.0, speed, math.radians(40.0), math.radians(-3.0), aircraft.mass_kg)
+    speed = kt_to_ms(aircraft.approach.reference_speed_kt) + 12.0
+    init = GeodeticState(35.60, -78.50, 1500.0, speed, math.radians(40.0), math.radians(-3.0), aircraft.mass.max_takeoff_kg)
     target = _feasible_target(aircraft, init, args.horizon)
 
     print(f"\nCollocation defect-scheme comparison — aircraft={args.aircraft}, "

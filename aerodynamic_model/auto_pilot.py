@@ -1,9 +1,9 @@
-from aircraft.aircraft_sets import AircraftSpec
+from aircraft.aircraft_sets import Aircraft
 from simulator import Atmosphere, Control, Simulator, State
 import math
 
 class NaiveAutoPilot:
-    def __init__(self, aircraft: AircraftSpec, atmosphere: Atmosphere):
+    def __init__(self, aircraft: Aircraft, atmosphere: Atmosphere):
         self.aircraft = aircraft
         self.simulator = Simulator(aircraft=aircraft)
         self.atmosphere = atmosphere

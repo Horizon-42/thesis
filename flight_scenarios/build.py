@@ -3,7 +3,7 @@
 Orchestration only — it wires the pieces together:
 
     CZML-input flight ──► initial_state_from_track ──► GeodeticState
-    aircraft id       ──► aircraft_for_code        ──► AircraftSpec ──► aero_params_for_aircraft
+    aircraft id       ──► aircraft_for_code        ──► Aircraft ──► aero_params_for_aircraft
                                                                             └──► AeroParams
     => FlightScenario(initial, aircraft, aero, source)
 """
@@ -35,7 +35,7 @@ def build_scenario(
     defaults to the aircraft's spec mass.
     """
     aircraft = aircraft_for_code(aircraft_id)
-    mass = mass_kg if mass_kg is not None else aircraft.mass_kg
+    mass = mass_kg if mass_kg is not None else aircraft.mass.max_takeoff_kg
 
     waypoints = flight["waypoints"]
     # The optimizer flies initial -> target. Both ends of the observed track give the

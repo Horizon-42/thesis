@@ -81,7 +81,7 @@ class Steppers:
 
 
 def build_steppers(aircraft) -> Steppers:
-    ap = AeroParams(S=aircraft.wing_area_m2)
+    ap = AeroParams(S=aircraft.geometry.wing_area_m2)
     aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
     return Steppers(
         reanchored=make_geo_step_from_enu_integrator()["step_func"],
@@ -147,13 +147,13 @@ def compare_heading(
     """Propagate all three steppers in lockstep from a common state and
     record the divergence whenever the re-anchored stepper crosses each
     distance milestone."""
-    V0 = kt_to_ms(aircraft.terminal_speed_kt) + 10.0
+    V0 = kt_to_ms(aircraft.approach.reference_speed_kt) + 10.0
     psi0 = math.radians(heading_deg)
     gamma0 = 0.0
-    u = ca.DM([aircraft.approach_thrust_guess_n, 0.0, 1.0])
+    u = ca.DM([aircraft.approach.thrust_guess_n, 0.0, 1.0])
     aero = steppers.aero_params
 
-    x0 = _state(ref_lat, ref_lon, ref_alt, V0, psi0, gamma0, aircraft.mass_kg)
+    x0 = _state(ref_lat, ref_lon, ref_alt, V0, psi0, gamma0, aircraft.mass.max_takeoff_kg)
     origin = np.array(x0).reshape(-1)[:2]
 
     x_re = x0

@@ -21,8 +21,8 @@ FLIGHT = {
 def test_build_scenario_wires_aircraft_source_and_endpoints():
     scen = build_scenario(FLIGHT, "A320")
     assert scen.aircraft is A320
-    assert scen.aero.S == A320.wing_area_m2
-    assert scen.initial.m == A320.mass_kg
+    assert scen.aero.S == A320.geometry.wing_area_m2
+    assert scen.initial.m == A320.mass.max_takeoff_kg
     assert scen.source["id"] == "AFR074"
     assert scen.source["runway"] == "05L"
     assert scen.source["n_samples"] == 3

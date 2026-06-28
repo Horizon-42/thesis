@@ -122,11 +122,11 @@ def test_optimize_handles_heading_wrap_across_180_deg():
     step = make_geodetic_step_integrator(transport="approx")["step_func"]
 
     duration = 2.0
-    speed = kt_to_ms(C172.terminal_speed_kt) + 10.0
+    speed = kt_to_ms(C172.approach.reference_speed_kt) + 10.0
     init = GeodeticState(51.1139, -114.0203, 1000.0, speed,
-                         math.radians(179.0), 0.0, C172.mass_kg)
+                         math.radians(179.0), 0.0, C172.mass.max_takeoff_kg)
     # Propagate a left turn so the heading just crosses +180 deg.
-    u = ca.DM([C172.approach_thrust_guess_n, math.radians(10.0), 1.05])
+    u = ca.DM([C172.approach.thrust_guess_n, math.radians(10.0), 1.05])
     x = ca.DM([init.latitude, init.longitude, init.altitude,
                init.V, init.psi, init.gamma, init.m])
     for _ in range(int(duration / 0.05)):
@@ -135,7 +135,7 @@ def test_optimize_handles_heading_wrap_across_180_deg():
     # Supply the target heading WRAPPED into [-180, 180] deg, as the frontend would.
     wrapped_psi = (a[4] + math.pi) % (2 * math.pi) - math.pi
     assert wrapped_psi < 0  # crossed +180 -> now negative branch
-    target = GeodeticState(a[0], a[1], a[2], a[3], wrapped_psi, a[5], C172.mass_kg)
+    target = GeodeticState(a[0], a[1], a[2], a[3], wrapped_psi, a[5], C172.mass.max_takeoff_kg)
 
     optimizer = module.CasadiDirectCollocationOptimizer(
         n_segments=4, dt=0.2, max_duration=6.0, aircraft=C172,
@@ -194,7 +194,7 @@ def test_optimize_trajectory_solves_real_ipopt_problem():
     duration = 2.0
     n_segments = 4
 
-    speed = kt_to_ms(C172.terminal_speed_kt) + 10.0
+    speed = kt_to_ms(C172.approach.reference_speed_kt) + 10.0
     state = GeodeticState(
         latitude=51.1139,
         longitude=-114.0203,
@@ -202,7 +202,7 @@ def test_optimize_trajectory_solves_real_ipopt_problem():
         V=speed,
         psi=0.0,
         gamma=0.0,
-        m=C172.mass_kg,
+        m=C172.mass.max_takeoff_kg,
     )
 
     optimizer = module.CasadiDirectCollocationOptimizer(
@@ -266,7 +266,7 @@ def test_optimize_trajectory_uses_supplied_initial_guess():
             return {"success": True}
 
     optimizer.solver = FakeSolver()
-    state = GeodeticState(51.0, -114.0, 1000.0, 40.0, 0.1, 0.0, C172.mass_kg)
+    state = GeodeticState(51.0, -114.0, 1000.0, 40.0, 0.1, 0.0, C172.mass.max_takeoff_kg)
 
     optimizer.optimize_trajectory(
         state,
@@ -325,7 +325,7 @@ def test_optimize_free_time_solves_real_ipopt_problem():
     feasible_duration = 2.0
     max_duration = 6.0  # generous upper bound
 
-    speed = kt_to_ms(C172.terminal_speed_kt) + 10.0
+    speed = kt_to_ms(C172.approach.reference_speed_kt) + 10.0
     state = GeodeticState(
         latitude=51.1139,
         longitude=-114.0203,
@@ -333,7 +333,7 @@ def test_optimize_free_time_solves_real_ipopt_problem():
         V=speed,
         psi=0.0,
         gamma=0.0,
-        m=C172.mass_kg,
+        m=C172.mass.max_takeoff_kg,
     )
 
     optimizer = module.CasadiDirectCollocationOptimizer(
@@ -390,7 +390,7 @@ def test_optimize_free_time_raw_is_playback_consistent():
     feasible_duration = 2.0
     max_duration = 6.0
 
-    speed = kt_to_ms(C172.terminal_speed_kt) + 10.0
+    speed = kt_to_ms(C172.approach.reference_speed_kt) + 10.0
     state = GeodeticState(
         latitude=51.1139,
         longitude=-114.0203,
@@ -398,7 +398,7 @@ def test_optimize_free_time_raw_is_playback_consistent():
         V=speed,
         psi=0.0,
         gamma=0.0,
-        m=C172.mass_kg,
+        m=C172.mass.max_takeoff_kg,
     )
 
     optimizer = module.CasadiDirectCollocationOptimizer(
@@ -467,7 +467,7 @@ def test_dense_state_keeps_playback_consistent_on_long_coarse_control_horizon():
     horizon = 150.0
     max_duration = 260.0
     state = GeodeticState(35.60, -78.50, 1600.0, 90.0,
-                          math.radians(-40), math.radians(-3), A320.mass_kg)
+                          math.radians(-40), math.radians(-3), A320.mass.max_takeoff_kg)
 
     optimizer = module.CasadiDirectCollocationOptimizer(
         n_segments=n_segments, dt=0.2, max_duration=max_duration, aircraft=A320,
@@ -481,13 +481,13 @@ def test_dense_state_keeps_playback_consistent_on_long_coarse_control_horizon():
     ap = aero_params_for_aircraft(A320)
     aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
     gstep = make_geodetic_step_integrator(transport="approx")["step_func"]
-    u_nom = ca.DM([A320.approach_thrust_guess_n, 0.0, 1.0])
+    u_nom = ca.DM([A320.approach.thrust_guess_n, 0.0, 1.0])
     xp = ca.DM([state.latitude, state.longitude, state.altitude,
                 state.V, state.psi, state.gamma, state.m])
     for _ in range(int(horizon / 0.05)):
         xp = gstep(x_geo=xp, u=u_nom, aero_params=aero, dt=0.05)["x_geo_next"]
     tp = np.array(xp).reshape(-1)
-    target = GeodeticState(tp[0], tp[1], tp[2], tp[3], tp[4], tp[5], A320.mass_kg)
+    target = GeodeticState(tp[0], tp[1], tp[2], tp[3], tp[4], tp[5], A320.mass.max_takeoff_kg)
 
     # Fixed-time path (robust convergence); the dense-state behaviour under
     # test is identical for the free-time path.
@@ -552,7 +552,7 @@ def test_optimize_trajectory_raises_on_solver_failure():
             return {"success": False, "return_status": "infeasible"}
 
     optimizer.solver = FailingSolver()
-    state = GeodeticState(51.0, -114.0, 1000.0, 40.0, 0.1, 0.0, C172.mass_kg)
+    state = GeodeticState(51.0, -114.0, 1000.0, 40.0, 0.1, 0.0, C172.mass.max_takeoff_kg)
 
     with pytest.raises(ValueError, match="infeasible"):
         optimizer.optimize_trajectory(state, state, duration=2.0)
@@ -578,7 +578,7 @@ def _propagate_with_geodetic_rhs(
         optimizer.aero_params.stall_threshold,
         optimizer.aero_params.k_stall,
     ])
-    u = ca.DM([C172.approach_thrust_guess_n, 0.0, 1.0])
+    u = ca.DM([C172.approach.thrust_guess_n, 0.0, 1.0])
 
     x = ca.DM([
         state.latitude,
@@ -711,7 +711,7 @@ def test_collocation_schemes_form_an_accuracy_ladder():
     n_segments = 10
     horizon = 90.0
     init = GeodeticState(35.60, -78.50, 1500.0, 90.0,
-                         math.radians(40.0), math.radians(-3.0), A320.mass_kg)
+                         math.radians(40.0), math.radians(-3.0), A320.mass.max_takeoff_kg)
 
     # Feasible on-manifold target: propagate the A320 nominal approach
     # control through the optimiser's own geodetic RHS.
@@ -721,13 +721,13 @@ def test_collocation_schemes_form_an_accuracy_ladder():
     ap = aero_params_for_aircraft(A320)
     aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
     step = make_geodetic_step_integrator(transport="approx")["step_func"]
-    u = ca.DM([A320.approach_thrust_guess_n, 0.0, 1.0])
+    u = ca.DM([A320.approach.thrust_guess_n, 0.0, 1.0])
     xp = ca.DM([init.latitude, init.longitude, init.altitude,
                 init.V, init.psi, init.gamma, init.m])
     for _ in range(int(horizon / 0.05)):
         xp = step(x_geo=xp, u=u, aero_params=aero, dt=0.05)["x_geo_next"]
     tp = np.array(xp).reshape(-1)
-    target = GeodeticState(tp[0], tp[1], tp[2], tp[3], tp[4], tp[5], A320.mass_kg)
+    target = GeodeticState(tp[0], tp[1], tp[2], tp[3], tp[4], tp[5], A320.mass.max_takeoff_kg)
 
     R = 6_371_000.0
 
@@ -781,20 +781,20 @@ def test_full_transport_schemes_registered_and_solve():
     n_segments = 10
     horizon = 90.0
     init = GeodeticState(35.60, -78.50, 1500.0, 90.0,
-                         math.radians(40.0), math.radians(-3.0), A320.mass_kg)
+                         math.radians(40.0), math.radians(-3.0), A320.mass.max_takeoff_kg)
 
     # On-manifold target: propagate the nominal approach control through the
     # FULL-transport geodetic RHS (so the full scheme is exactly feasible).
     ap = aero_params_for_aircraft(A320)
     aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
     step = make_geodetic_step_integrator(transport="full")["step_func"]
-    u = ca.DM([A320.approach_thrust_guess_n, 0.0, 1.0])
+    u = ca.DM([A320.approach.thrust_guess_n, 0.0, 1.0])
     xp = ca.DM([init.latitude, init.longitude, init.altitude,
                 init.V, init.psi, init.gamma, init.m])
     for _ in range(int(horizon / 0.05)):
         xp = step(x_geo=xp, u=u, aero_params=aero, dt=0.05)["x_geo_next"]
     tp = np.array(xp).reshape(-1)
-    target = GeodeticState(tp[0], tp[1], tp[2], tp[3], tp[4], tp[5], A320.mass_kg)
+    target = GeodeticState(tp[0], tp[1], tp[2], tp[3], tp[4], tp[5], A320.mass.max_takeoff_kg)
     R = 6_371_000.0
 
     def solve(scheme):
@@ -841,18 +841,18 @@ def test_reanchored_enu_scheme_is_consistent_with_the_enu_playback():
     n_segments = 10
     horizon = 90.0
     init = GeodeticState(35.60, -78.50, 1500.0, 90.0,
-                         math.radians(40.0), math.radians(-3.0), A320.mass_kg)
+                         math.radians(40.0), math.radians(-3.0), A320.mass.max_takeoff_kg)
 
     ap = aero_params_for_aircraft(A320)
     aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
     gstep = make_geodetic_step_integrator(transport="approx")["step_func"]
-    u = ca.DM([A320.approach_thrust_guess_n, 0.0, 1.0])
+    u = ca.DM([A320.approach.thrust_guess_n, 0.0, 1.0])
     xp = ca.DM([init.latitude, init.longitude, init.altitude,
                 init.V, init.psi, init.gamma, init.m])
     for _ in range(int(horizon / 0.05)):
         xp = gstep(x_geo=xp, u=u, aero_params=aero, dt=0.05)["x_geo_next"]
     tp = np.array(xp).reshape(-1)
-    target = GeodeticState(tp[0], tp[1], tp[2], tp[3], tp[4], tp[5], A320.mass_kg)
+    target = GeodeticState(tp[0], tp[1], tp[2], tp[3], tp[4], tp[5], A320.mass.max_takeoff_kg)
 
     opt = module.CasadiDirectCollocationOptimizer(
         n_segments=n_segments, dt=0.2, max_duration=horizon * 1.6,
@@ -929,18 +929,18 @@ def test_local_enu_scheme_solves_with_every_fitting():
     n_segments = 10
     horizon = 90.0
     init = GeodeticState(35.60, -78.50, 1500.0, 90.0,
-                         math.radians(40.0), math.radians(-3.0), A320.mass_kg)
+                         math.radians(40.0), math.radians(-3.0), A320.mass.max_takeoff_kg)
 
     ap = aero_params_for_aircraft(A320)
     aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
     gstep = make_geodetic_step_integrator(transport="approx")["step_func"]
-    u = ca.DM([A320.approach_thrust_guess_n, 0.0, 1.0])
+    u = ca.DM([A320.approach.thrust_guess_n, 0.0, 1.0])
     xp = ca.DM([init.latitude, init.longitude, init.altitude,
                 init.V, init.psi, init.gamma, init.m])
     for _ in range(int(horizon / 0.05)):
         xp = gstep(x_geo=xp, u=u, aero_params=aero, dt=0.05)["x_geo_next"]
     tp = np.array(xp).reshape(-1)
-    target = GeodeticState(tp[0], tp[1], tp[2], tp[3], tp[4], tp[5], A320.mass_kg)
+    target = GeodeticState(tp[0], tp[1], tp[2], tp[3], tp[4], tp[5], A320.mass.max_takeoff_kg)
     R = 6_371_000.0
 
     for scheme in ("localEnuTrapezoidal", "localEnuHermiteSimpson", "localEnu"):
@@ -977,14 +977,14 @@ def test_normalized_scheme_solves_loose_window_where_geodetic_fails():
 
     state = GeodeticState(
         latitude=35.91816944, longitude=-78.89327222, altitude=1828.8,
-        V=kt_to_ms(A320.terminal_speed_kt + 25),
-        psi=math.radians(225.0), gamma=0.0, m=A320.mass_kg,
+        V=kt_to_ms(A320.approach.reference_speed_kt + 25),
+        psi=math.radians(225.0), gamma=0.0, m=A320.mass.max_takeoff_kg,
     )
     target = GeodeticState(
         latitude=35.87446907, longitude=-78.80194912,
-        altitude=367.0 * 0.3048 + A320.threshold_crossing_height_m,
-        V=kt_to_ms(A320.terminal_speed_kt),
-        psi=math.radians(45.0), gamma=math.radians(-3.0), m=A320.mass_kg,
+        altitude=367.0 * 0.3048 + A320.approach.threshold_crossing_height_m,
+        V=kt_to_ms(A320.approach.reference_speed_kt),
+        psi=math.radians(45.0), gamma=math.radians(-3.0), m=A320.mass.max_takeoff_kg,
     )
 
     optimizer = module.CasadiDirectCollocationOptimizer(
@@ -1027,8 +1027,8 @@ def test_normalized_scheme_matches_plain_geodetic_on_a_benign_problem():
     feasible_duration = 2.0
     max_duration = 6.0
 
-    speed = kt_to_ms(C172.terminal_speed_kt) + 10.0
-    state = GeodeticState(51.1139, -114.0203, 1000.0, speed, 0.0, 0.0, C172.mass_kg)
+    speed = kt_to_ms(C172.approach.reference_speed_kt) + 10.0
+    state = GeodeticState(51.1139, -114.0203, 1000.0, speed, 0.0, 0.0, C172.mass.max_takeoff_kg)
 
     base = module.CasadiDirectCollocationOptimizer(
         n_segments=n_segments, dt=0.2, max_duration=max_duration, aircraft=C172,
@@ -1061,8 +1061,8 @@ def test_normalized_full_transport_matches_plain_full_transport():
     feasible_duration = 2.0
     max_duration = 6.0
 
-    speed = kt_to_ms(C172.terminal_speed_kt) + 10.0
-    state = GeodeticState(51.1139, -114.0203, 1000.0, speed, 0.0, 0.0, C172.mass_kg)
+    speed = kt_to_ms(C172.approach.reference_speed_kt) + 10.0
+    state = GeodeticState(51.1139, -114.0203, 1000.0, speed, 0.0, 0.0, C172.mass.max_takeoff_kg)
 
     plain = module.CasadiDirectCollocationOptimizer(
         n_segments=n_segments, dt=0.2, max_duration=max_duration, aircraft=C172,
@@ -1074,14 +1074,14 @@ def test_normalized_full_transport_matches_plain_full_transport():
         plain.aero_params.S, plain.aero_params.Cl_max, plain.aero_params.Cd0,
         plain.aero_params.k, plain.aero_params.stall_threshold, plain.aero_params.k_stall,
     ])
-    u = ca.DM([C172.approach_thrust_guess_n, 0.0, 1.0])
+    u = ca.DM([C172.approach.thrust_guess_n, 0.0, 1.0])
     x = ca.DM([state.latitude, state.longitude, state.altitude,
                state.V, state.psi, state.gamma, state.m])
     n_steps = max(1, int(round(feasible_duration / 0.05)))
     for _ in range(n_steps):
         x = step(x_geo=x, u=u, aero_params=aero, dt=feasible_duration / n_steps)["x_geo_next"]
     xt = np.array(x).reshape(-1)
-    target = GeodeticState(xt[0], xt[1], xt[2], xt[3], xt[4], xt[5], C172.mass_kg)
+    target = GeodeticState(xt[0], xt[1], xt[2], xt[3], xt[4], xt[5], C172.mass.max_takeoff_kg)
 
     norm = module.CasadiDirectCollocationOptimizer(
         n_segments=n_segments, dt=0.2, max_duration=max_duration, aircraft=C172,

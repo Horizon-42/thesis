@@ -6,7 +6,7 @@ from typing import Any
 from aeroviz_backend import paths  # noqa: F401
 
 from aerodynamic_model.casadi_simulator import CasadiSimulator
-from aircraft.aircraft_sets import AIRCRAFT_PRESETS, AircraftSpec, A320
+from aircraft.aircraft_sets import AIRCRAFT_PRESETS, Aircraft, A320
 from common import Atmosphere, Control, GeodeticState, LoadFactorControl
 from geodetic_simulator import GeodeticSimulator
 from simulator_simple import LoadFactorSimulator
@@ -19,11 +19,11 @@ DEFAULT_STATE = GeodeticState(
     V=120.0,
     psi=0.0,
     gamma=0.0,
-    m=A320.mass_kg,
+    m=A320.mass.max_takeoff_kg,
 )
 
 DEFAULT_CONTROL = Control(
-    thrust=A320.approach_thrust_guess_n,
+    thrust=A320.approach.thrust_guess_n,
     bank_rad=0.0,
     attack_rad=0.0,
 )
@@ -38,7 +38,7 @@ MAX_LOAD_FACTOR = 3.0
 
 
 class CasadiGeodeticSimulator:
-    def __init__(self, aircraft: AircraftSpec) -> None:
+    def __init__(self, aircraft: Aircraft) -> None:
         self.simulator = CasadiSimulator(aircraft, DEFAULT_DT)
 
     def step(
@@ -191,7 +191,7 @@ def read_simulation_mode(payload: dict[str, Any], default: str) -> str:
 
 def read_simulation_control(
     payload: dict[str, Any],
-    aircraft: AircraftSpec,
+    aircraft: Aircraft,
     simulation_mode: str,
     fallback: Control | LoadFactorControl,
 ) -> Control | LoadFactorControl:
@@ -217,13 +217,13 @@ def read_simulation_control(
 def read_control(
     payload: dict[str, Any],
     fallback: Control,
-    aircraft: AircraftSpec,
+    aircraft: Aircraft,
 ) -> Control:
     return Control(
         thrust=clamp(
             read_float(payload, "thrustN", fallback.thrust),
             0.0,
-            aircraft.max_thrust_n,
+            aircraft.engine.max_thrust_total_n,
         ),
         bank_rad=math.radians(
             clamp(
@@ -245,13 +245,13 @@ def read_control(
 def read_load_factor_control(
     payload: dict[str, Any],
     fallback: LoadFactorControl,
-    aircraft: AircraftSpec,
+    aircraft: Aircraft,
 ) -> LoadFactorControl:
     return LoadFactorControl(
         thrust=clamp(
             read_float(payload, "thrustN", fallback.thrust),
             0.0,
-            aircraft.max_thrust_n,
+            aircraft.engine.max_thrust_total_n,
         ),
         bank_rad=math.radians(
             clamp(
@@ -268,24 +268,24 @@ def read_load_factor_control(
     )
 
 
-def default_control_for_aircraft(aircraft: AircraftSpec) -> Control:
+def default_control_for_aircraft(aircraft: Aircraft) -> Control:
     return Control(
-        thrust=aircraft.approach_thrust_guess_n,
+        thrust=aircraft.approach.thrust_guess_n,
         bank_rad=DEFAULT_CONTROL.bank_rad,
         attack_rad=DEFAULT_CONTROL.attack_rad,
     )
 
 
-def default_load_factor_control_for_aircraft(aircraft: AircraftSpec) -> LoadFactorControl:
+def default_load_factor_control_for_aircraft(aircraft: Aircraft) -> LoadFactorControl:
     return LoadFactorControl(
-        thrust=aircraft.approach_thrust_guess_n,
+        thrust=aircraft.approach.thrust_guess_n,
         bank_rad=DEFAULT_CONTROL.bank_rad,
         load_factor=1.0,
     )
 
 
 def default_control_for_mode(
-    aircraft: AircraftSpec,
+    aircraft: Aircraft,
     simulation_mode: str,
 ) -> Control | LoadFactorControl:
     if simulation_mode in ("loadFactor", "casadi"):
@@ -295,7 +295,7 @@ def default_control_for_mode(
 
 def fallback_control_for_mode(
     control: Control | LoadFactorControl,
-    aircraft: AircraftSpec,
+    aircraft: Aircraft,
     simulation_mode: str,
 ) -> Control | LoadFactorControl:
     if simulation_mode in ("loadFactor", "casadi"):
@@ -312,7 +312,7 @@ def fallback_control_for_mode(
 
 
 def make_geodetic_simulator(
-    aircraft: AircraftSpec,
+    aircraft: Aircraft,
     simulation_mode: str,
 ) -> GeodeticSimulator | CasadiGeodeticSimulator:
     if simulation_mode == "casadi":
@@ -325,7 +325,7 @@ def make_geodetic_simulator(
     return GeodeticSimulator(aircraft)
 
 
-def read_aircraft(payload: dict[str, Any], default_code: str) -> AircraftSpec:
+def read_aircraft(payload: dict[str, Any], default_code: str) -> Aircraft:
     value = payload.get("aircraftType", default_code)
     if not isinstance(value, str):
         raise ValueError("aircraftType must be a string")
@@ -341,7 +341,7 @@ def read_aircraft(payload: dict[str, Any], default_code: str) -> AircraftSpec:
 def read_geodetic_state(
     payload: dict[str, Any],
     fallback: GeodeticState,
-    aircraft: AircraftSpec,
+    aircraft: Aircraft,
 ) -> GeodeticState:
     return GeodeticState(
         latitude=read_float(payload, "lat", fallback.latitude),
@@ -352,7 +352,7 @@ def read_geodetic_state(
         gamma=math.radians(
             read_float(payload, "flightPathDeg", math.degrees(fallback.gamma))
         ),
-        m=aircraft.mass_kg,
+        m=aircraft.mass.max_takeoff_kg,
     )
 
 
@@ -455,22 +455,22 @@ def aircraft_catalog() -> dict[str, Any]:
                 "code": aircraft.code,
                 "name": aircraft.name,
                 "category": aircraft.category,
-                "massKg": aircraft.mass_kg,
-                "wingAreaM2": aircraft.wing_area_m2,
-                "maxThrustN": aircraft.max_thrust_n,
-                "approachThrustGuessN": aircraft.approach_thrust_guess_n,
-                "terminalSpeedKt": aircraft.terminal_speed_kt,
-                "terminalSpeedMinKt": aircraft.terminal_speed_min_kt,
-                "terminalSpeedMaxKt": aircraft.terminal_speed_max_kt,
-                "finalApproachMinNm": aircraft.final_approach_min_nm,
-                "finalApproachMaxNm": aircraft.final_approach_max_nm,
+                "massKg": aircraft.mass.max_takeoff_kg,
+                "wingAreaM2": aircraft.geometry.wing_area_m2,
+                "maxThrustN": aircraft.engine.max_thrust_total_n,
+                "approachThrustGuessN": aircraft.approach.thrust_guess_n,
+                "terminalSpeedKt": aircraft.approach.reference_speed_kt,
+                "terminalSpeedMinKt": aircraft.approach.min_speed_kt,
+                "terminalSpeedMaxKt": aircraft.approach.max_speed_kt,
+                "finalApproachMinNm": aircraft.approach.final_segment_min_nm,
+                "finalApproachMaxNm": aircraft.approach.final_segment_max_nm,
                 "finalApproachLateralHalfWidthNm": (
-                    aircraft.final_approach_lateral_half_width_nm
+                    aircraft.approach.protection_half_width_nm
                 ),
                 "finalApproachGlideAngleDeg": (
-                    aircraft.final_approach_glide_angle_deg
+                    aircraft.approach.glide_angle_deg
                 ),
-                "thresholdCrossingHeightM": aircraft.threshold_crossing_height_m,
+                "thresholdCrossingHeightM": aircraft.approach.threshold_crossing_height_m,
             }
             for aircraft in AIRCRAFT_PRESETS.values()
         ],

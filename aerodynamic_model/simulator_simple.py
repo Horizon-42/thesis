@@ -1,14 +1,14 @@
 # Simple Aerodynamic Simulator, with load factor, assume alpha = 0
 import numpy as np
 import math
-from aircraft.aircraft_sets import AircraftSpec, A320
+from aircraft.aircraft_sets import Aircraft, A320
 try:
     from .common import State, Atmosphere, rk4_step, LoadFactorControl
 except ImportError:  # pragma: no cover - compatibility for flat script imports.
     from common import State, Atmosphere, rk4_step, LoadFactorControl
 
 class LoadFactorSimulator:
-    aircraft: AircraftSpec
+    aircraft: Aircraft
 
     S: float # wing area in m^2, set by aircraft config
 
@@ -25,9 +25,9 @@ class LoadFactorSimulator:
     stall_threshold: float = 0.9 # threshold for stall onset, as a fraction of Cl_max
     K_stall: float = 0.1 # stall drag coefficient factor, can be tuned based on aircraft type
 
-    def __init__(self, aircraft: AircraftSpec = A320):
+    def __init__(self, aircraft: Aircraft = A320):
         self.aircraft = aircraft
-        self.S = aircraft.wing_area_m2
+        self.S = aircraft.geometry.wing_area_m2
     
     def _get_Cl_required(
         self,

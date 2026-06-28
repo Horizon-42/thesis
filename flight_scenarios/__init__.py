@@ -5,7 +5,7 @@ flight's observed track (the CZML-input format produced by ``trajectory_data_pro
 and an aircraft identity, and produces a serializable :class:`FlightScenario`:
 
     FlightScenario = initial GeodeticState  (lat, lon, alt, V, psi, gamma, m)
-                   + aircraft AircraftSpec
+                   + aircraft Aircraft
                    + AeroParams
                    + source metadata
 

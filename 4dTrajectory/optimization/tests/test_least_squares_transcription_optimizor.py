@@ -37,8 +37,8 @@ def test_least_squares_transcription_imports():
 def test_variable_scale_uses_aircraft_specific_thrust_bound():
     module = load_least_squares_module()
     aircraft = SimpleNamespace(
-        max_thrust_n=1026000.0,
-        approach_thrust_guess_n=140000.0,
+        engine=SimpleNamespace(max_thrust_total_n=1026000.0),
+        approach=SimpleNamespace(thrust_guess_n=140000.0),
     )
     optimizer = module.LeastSquaresTranscriptionOptimizor(
         sim_server=SimpleNamespace(simulator=SimpleNamespace(aircraft=aircraft)),

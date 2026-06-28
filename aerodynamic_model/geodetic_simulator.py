@@ -10,7 +10,7 @@ for _path in (REPO_ROOT, MODEL_DIR):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
-from aircraft.aircraft_sets import AircraftSpec, A320
+from aircraft.aircraft_sets import Aircraft, A320
 try:
     from .coordinates_convertor import CoordinateConverter, GeodeticCoordinate, ENUCoordinate
     from .simulator import Atmosphere, Simulator, State
@@ -24,7 +24,7 @@ except ImportError:  # pragma: no cover - compatibility for flat script imports.
 
 
 class GeodeticSimulator:
-    def __init__(self, aircraft: AircraftSpec = A320, simulator: Any | None = None):
+    def __init__(self, aircraft: Aircraft = A320, simulator: Any | None = None):
         self.simulator = simulator or Simulator(aircraft=aircraft)
         self.atmosphere = Atmosphere()
 

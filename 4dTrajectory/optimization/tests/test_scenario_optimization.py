@@ -26,7 +26,7 @@ from flight_scenarios import FlightScenario  # noqa: E402
 
 
 def _scenario(*, target: GeodeticState | None) -> FlightScenario:
-    initial = GeodeticState(35.6, -78.5, 2000.0, 130.0, 1.5, -0.05, A320.mass_kg)
+    initial = GeodeticState(35.6, -78.5, 2000.0, 130.0, 1.5, -0.05, A320.mass.max_takeoff_kg)
     return FlightScenario(
         initial=initial,
         aircraft=A320,
@@ -73,7 +73,7 @@ def test_optimize_scenario_requires_target():
 
 @pytest.mark.xfail(reason="implement TODO ② in scenario_optimization.simulate_controls", strict=False)
 def test_simulate_controls_rolls_forward():
-    initial = GeodeticState(35.6, -78.5, 2000.0, 130.0, 1.5, -0.05, A320.mass_kg)
+    initial = GeodeticState(35.6, -78.5, 2000.0, 130.0, 1.5, -0.05, A320.mass.max_takeoff_kg)
     # two constant-control segments over a short 4 s horizon
     node_control = [[40000.0, 0.0, 1.0], [40000.0, 0.0, 1.0]]
     samples = so.simulate_controls(initial, node_control, final_time=4.0, aircraft=A320, dt=1.0)

@@ -70,7 +70,7 @@ from aerodynamic_model.casadi_simulator import (
     rk4_step_expr,
 )
 from aircraft.aero_params import AeroParams, aero_params_for_aircraft
-from aircraft.aircraft_sets import AircraftSpec
+from aircraft.aircraft_sets import Aircraft
 from aerodynamic_model.common import GeodeticState
 
 
@@ -894,7 +894,7 @@ class CasadiDirectCollocationOptimizer:
         n_segments: int,
         dt: float,
         max_duration: float,
-        aircraft: AircraftSpec,
+        aircraft: Aircraft,
         max_terminal_bank_deg: float = _DEFAULT_MAX_TERMINAL_BANK_DEG,
         smoothness_weights: tuple = _DEFAULT_SMOOTHNESS_WEIGHTS,
         collocation_scheme: str = _DEFAULT_SCHEME,
@@ -947,11 +947,11 @@ class CasadiDirectCollocationOptimizer:
         self.aero_params = aero_params_for_aircraft(aircraft)
         
         aircraft_meta = {
-            "max_thrust": aircraft.max_thrust_n,
+            "max_thrust": aircraft.engine.max_thrust_total_n,
             "min_load_factor": 0.5,
             "max_load_factor": 2.0,
-            "min_terminal_speed": aircraft.terminal_speed_ms,
-            "min_altitude": aircraft.threshold_crossing_height_m + 10.0,
+            "min_terminal_speed": aircraft.approach.reference_speed_ms,
+            "min_altitude": aircraft.approach.threshold_crossing_height_m + 10.0,
             "min_duration": _DEFAULT_MIN_DURATION_S,
         }
 
@@ -1183,7 +1183,7 @@ class CasadiDirectCollocationOptimizer:
         schemes, radians otherwise), plus a neutral approach control profile."""
         c, b = self._normalize_cb_numeric(target_param)
         control_guess = [
-            self.aircraft.approach_thrust_guess_n,
+            self.aircraft.approach.thrust_guess_n,
             0.0,
             1.0,
         ] * self.n_segments

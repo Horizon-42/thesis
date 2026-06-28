@@ -1,6 +1,6 @@
 import math
 import numpy as np
-from aircraft.aircraft_sets import AIRCRAFT_PRESETS, AircraftSpec, A320
+from aircraft.aircraft_sets import AIRCRAFT_PRESETS, Aircraft, A320
 try:
     from .common import State, Atmosphere, rk4_step, Control
 except ImportError:  # pragma: no cover - compatibility for flat script imports.
@@ -8,7 +8,7 @@ except ImportError:  # pragma: no cover - compatibility for flat script imports.
 
 
 class Simulator:
-    aircraft: AircraftSpec
+    aircraft: Aircraft
     S: float # wing area in m^2, set by aircraft config
 
     # Alpha max
@@ -24,9 +24,9 @@ class Simulator:
     Cd0: float = 0.02 # zero-lift drag coefficient
     k: float = 0.04 # induced drag factor
 
-    def __init__(self, aircraft: AircraftSpec = A320):
+    def __init__(self, aircraft: Aircraft = A320):
         self.aircraft = aircraft
-        self.S = aircraft.wing_area_m2
+        self.S = aircraft.geometry.wing_area_m2
 
     def _get_lift_coefficient(self, attack_angle: float) -> float: 
         # need to consider stall behavior

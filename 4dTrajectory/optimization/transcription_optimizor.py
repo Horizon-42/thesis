@@ -33,7 +33,7 @@ _HEADING_RESIDUAL_SCALE_RAD = math.radians(10.0)
 _FLIGHT_PATH_RESIDUAL_SCALE_RAD = math.radians(2.0)
 
 # For state value normalization, the optimizer only needs to compare relative
-# magnitudes of defects. Thrust bounds now come from AircraftSpec.
+# magnitudes of defects. Thrust bounds now come from Aircraft.
 # Max Latitude difference, half the globe
 _MAX_LATITUDE_DEG = 90.0
 # Max Longitude difference, half the globe
@@ -79,10 +79,10 @@ class TranscriptionOptimizor:
         self.ftol = ftol
         aircraft = getattr(getattr(sim_server, "simulator", None), "aircraft", None)
         self.max_thrust_n = float(
-            getattr(aircraft, "max_thrust_n", _DEFAULT_THRUST_GUESS_N)
+            aircraft.engine.max_thrust_total_n if aircraft is not None else _DEFAULT_THRUST_GUESS_N
         )
         self.default_thrust_guess_n = float(
-            getattr(aircraft, "approach_thrust_guess_n", _DEFAULT_THRUST_GUESS_N)
+            aircraft.approach.thrust_guess_n if aircraft is not None else _DEFAULT_THRUST_GUESS_N
         )
 
     def unpack_z(self, z):

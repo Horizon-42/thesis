@@ -111,7 +111,7 @@ def _analytic_cross_term(state_deg: list[float]) -> float:
 # --------------------------------------------------------------------------
 
 def _build(aircraft):
-    ap = AeroParams(S=aircraft.wing_area_m2)
+    ap = AeroParams(S=aircraft.geometry.wing_area_m2)
     aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
     return {
         "aero": aero,
@@ -152,14 +152,14 @@ def compare(
     aero = funcs["aero"]
     x0 = [
         ref_lat, ref_lon, ref_alt, speed,
-        math.radians(heading_deg), math.radians(fpa_deg), aircraft.mass_kg,
+        math.radians(heading_deg), math.radians(fpa_deg), aircraft.mass.max_takeoff_kg,
     ]
-    u = ca.DM([aircraft.approach_thrust_guess_n, math.radians(bank_deg), 1.0])
+    u = ca.DM([aircraft.approach.thrust_guess_n, math.radians(bank_deg), 1.0])
 
     # ── 1. RHS-level difference vs the analytic cross term ────────────────────
     x_rad = ca.DM([
         math.radians(ref_lat), math.radians(ref_lon), ref_alt, speed,
-        math.radians(heading_deg), math.radians(fpa_deg), aircraft.mass_kg,
+        math.radians(heading_deg), math.radians(fpa_deg), aircraft.mass.max_takeoff_kg,
     ])
     f_approx = np.array(funcs["rhs_approx"](x_rad, u, aero)).reshape(-1)
     f_full = np.array(funcs["rhs_full"](x_rad, u, aero)).reshape(-1)

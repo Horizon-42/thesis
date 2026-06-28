@@ -36,7 +36,7 @@ class TestSimulationBackend(unittest.TestCase):
         self.assertAlmostEqual(snapshot["state"]["lat"], 51.1139)
         self.assertAlmostEqual(snapshot["state"]["headingDeg"], 12.0)
         self.assertEqual(snapshot["state"]["aircraftType"], "B77W")
-        self.assertAlmostEqual(snapshot["state"]["massKg"], B77W.mass_kg)
+        self.assertAlmostEqual(snapshot["state"]["massKg"], B77W.mass.max_takeoff_kg)
         self.assertEqual(backend.geodetic_simulator.simulator.aircraft, B77W)
         self.assertAlmostEqual(snapshot["control"]["bankDeg"], 5.0)
         self.assertAlmostEqual(snapshot["control"]["attackDeg"], 4.0)

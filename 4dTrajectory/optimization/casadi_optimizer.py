@@ -3,7 +3,7 @@ import math
 import casadi as ca
 from aerodynamic_model.casadi_simulator import make_geo_step_from_enu_integrator
 from aircraft.aero_params import AeroParams
-from aircraft.aircraft_sets import AircraftSpec
+from aircraft.aircraft_sets import Aircraft
 from aerodynamic_model.common import GeodeticState
 
 def radians_expr(degrees):
@@ -119,7 +119,7 @@ def make_multiple_shooting_solver(segment_num: int, dt: float, max_duration: flo
     return solver, lbw, ubw, lbg, ubg
 
 class CasadiOptimizer:
-    def __init__(self, n_segments: int, dt: float, max_duration: float, aircraft: AircraftSpec):
+    def __init__(self, n_segments: int, dt: float, max_duration: float, aircraft: Aircraft):
         if n_segments < 2:
             raise ValueError("n_segments must be at least 2 for this multiple-shooting NLP")
         self.n_segments = n_segments
@@ -127,18 +127,18 @@ class CasadiOptimizer:
         self.max_duration = max_duration
         self.aircraft = aircraft
         # build AeroParams from aircraft spec
-        self.aero_params = AeroParams(S=aircraft.wing_area_m2)
+        self.aero_params = AeroParams(S=aircraft.geometry.wing_area_m2)
         self.solver, self.lbw, self.ubw, self.lbg, self.ubg = make_multiple_shooting_solver(
             segment_num=n_segments,
             dt=dt,
             max_duration=max_duration,
             aero_params_obj=self.aero_params,
             aircraft_meta={
-                "max_thrust": aircraft.max_thrust_n,
+                "max_thrust": aircraft.engine.max_thrust_total_n,
                 "min_load_factor": 0.5,
                 "max_load_factor": 2, # need to check the actual limits for the aircraft, these are just example values
-                "min_terminal_speed": aircraft.terminal_speed_ms,
-                "min_altitude": aircraft.threshold_crossing_height_m + 10.0, # set minimum altitude slightly above threshold crossing height to avoid infeasible solutions, can be tuned
+                "min_terminal_speed": aircraft.approach.reference_speed_ms,
+                "min_altitude": aircraft.approach.threshold_crossing_height_m + 10.0, # set minimum altitude slightly above threshold crossing height to avoid infeasible solutions, can be tuned
             },)
     
     @staticmethod
@@ -151,7 +151,7 @@ class CasadiOptimizer:
     
     def build_initial_guess(self, initial, target):
         control_guess = [
-            self.aircraft.approach_thrust_guess_n,
+            self.aircraft.approach.thrust_guess_n,
             0.0,
             1.0,
         ] * self.n_segments

@@ -77,8 +77,8 @@ def test_geodetic_state_to_array_uses_geodetic_state_field_names():
 def test_transcription_uses_aircraft_thrust_defaults_for_control_guess():
     module = load_transcription_module()
     aircraft = SimpleNamespace(
-        max_thrust_n=3200.0,
-        approach_thrust_guess_n=800.0,
+        engine=SimpleNamespace(max_thrust_total_n=3200.0),
+        approach=SimpleNamespace(thrust_guess_n=800.0),
     )
     optimizer = module.TranscriptionOptimizor(
         sim_server=SimpleNamespace(simulator=SimpleNamespace(aircraft=aircraft)),

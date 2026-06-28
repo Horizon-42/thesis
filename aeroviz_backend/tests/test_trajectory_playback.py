@@ -23,7 +23,7 @@ def _initial_state() -> GeodeticState:
         V=95.0,
         psi=math.radians(220.0),
         gamma=math.radians(-2.0),
-        m=A320.mass_kg,
+        m=A320.mass.max_takeoff_kg,
     )
 
 

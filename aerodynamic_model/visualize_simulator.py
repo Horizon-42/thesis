@@ -27,7 +27,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from aircraft.aircraft_sets import AIRCRAFT_PRESETS, AircraftSpec, A320, B77W, C172
+from aircraft.aircraft_sets import AIRCRAFT_PRESETS, Aircraft, A320, B77W, C172
 try:
     # Works when this file is executed as a package module.
     from .simulator import Atmosphere, Control, Simulator, State
@@ -196,7 +196,7 @@ class FlightVisualizer:
             V=120.0,
             psi=0.0,
             gamma=0.0,
-            m=A320.mass_kg,
+            m=A320.mass.max_takeoff_kg,
         )
 
         # Runtime objects updated after each Run click. current_control is kept

@@ -67,13 +67,13 @@ def _feasible_target(aircraft, init, horizon):
     step = make_geodetic_step_integrator(transport="approx")["step_func"]
     ap = aero_params_for_aircraft(aircraft)
     aero = ca.DM([ap.S, ap.Cl_max, ap.Cd0, ap.k, ap.stall_threshold, ap.k_stall])
-    u = ca.DM([aircraft.approach_thrust_guess_n, 0.0, 1.0])
+    u = ca.DM([aircraft.approach.thrust_guess_n, 0.0, 1.0])
     x = ca.DM([init.latitude, init.longitude, init.altitude,
                init.V, init.psi, init.gamma, init.m])
     for _ in range(int(horizon / 0.05)):
         x = step(x_geo=x, u=u, aero_params=aero, dt=0.05)["x_geo_next"]
     a = np.array(x).reshape(-1)
-    return GeodeticState(a[0], a[1], a[2], a[3], a[4], a[5], aircraft.mass_kg)
+    return GeodeticState(a[0], a[1], a[2], a[3], a[4], a[5], aircraft.mass.max_takeoff_kg)
 
 
 def _time_solve(fn, repeats):
@@ -116,14 +116,14 @@ def main(argv=None) -> int:
 
     aircraft = _AIRCRAFT[args.aircraft]
     init = GeodeticState(35.60, -78.50, 1500.0,
-                         kt_to_ms(aircraft.terminal_speed_kt) + 12.0,
-                         math.radians(40.0), math.radians(-3.0), aircraft.mass_kg)
+                         kt_to_ms(aircraft.approach.reference_speed_kt) + 12.0,
+                         math.radians(40.0), math.radians(-3.0), aircraft.mass.max_takeoff_kg)
     feasible = _feasible_target(aircraft, init, args.horizon)
     # Aggressive: a steep straight-in to a near-stall terminal speed.
     aggressive = GeodeticState(
         feasible.latitude, feasible.longitude, init.altitude - 1300.0,
-        kt_to_ms(aircraft.terminal_speed_kt), init.psi, math.radians(-4.0),
-        aircraft.mass_kg,
+        kt_to_ms(aircraft.approach.reference_speed_kt), init.psi, math.radians(-4.0),
+        aircraft.mass.max_takeoff_kg,
     )
 
     print(f"\nSolver-backend benchmark — aircraft={args.aircraft}, N={args.n_segments}, "

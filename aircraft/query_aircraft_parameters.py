@@ -1,109 +1,41 @@
 #!/usr/bin/env python3
-"""Read aircraft parameters by ICAO24, registration, or typecode.
+"""Resolve an aircraft (by ICAO24, registration, or typecode) to an ``Aircraft``.
+
+The OpenAP cache supplies geometry / mass / engine / drag. OpenAP has no *approach*
+envelope (reference speeds, final-approach geometry), so a category-based default fills
+that group — refine per type as needed.
 
 CLI:
     python aircraft/query_aircraft_parameters.py 4951d9
 
 Python:
     from aircraft.query_aircraft_parameters import get_aircraft_parameters
-
-    aircraft = get_aircraft_parameters("4951d9")
-    print(aircraft.typecode)
-    print(aircraft.geometry.wing_area_m2)
+    aircraft = get_aircraft_parameters("A320")
+    print(aircraft.geometry.wing_area_m2, aircraft.engine.max_thrust_total_n)
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from aircraft.aircraft_sets import Aircraft, Approach, Drag, Engine, Geometry, Mass
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PARAMETERS_PATH = SCRIPT_DIR / "openap_aircraft_parameters.json"
 LOOKUP_PATH = SCRIPT_DIR / "aircraft_id_lookup.json"
 
 
-@dataclass(frozen=True, slots=True)
-class AircraftGeometry:
-    wing_area_m2: float | None
-    wing_span_m: float | None
-    wing_mac_m: float | None
-    wing_sweep_deg: float | None
-    fuselage_length_m: float | None
-    fuselage_width_m: float | None
-    fuselage_height_m: float | None
-
-
-@dataclass(frozen=True, slots=True)
-class AircraftMass:
-    mtow_kg: float | None
-    oew_kg: float | None
-    mlw_kg: float | None
-    maximum_fuel_capacity_kg: float | None
-
-
-@dataclass(frozen=True, slots=True)
-class AircraftDrag:
-    cd0: float | None
-    k: float | None
-    e: float | None
-    landing_gear_drag_increment: float | None
-
-
-@dataclass(frozen=True, slots=True)
-class AircraftEngine:
-    default: str | None
-    type: str | None
-    number: int | None
-    max_thrust_n_each: float | None
-    cruise_thrust_n_each: float | None
-    cruise_sfc: float | None
-
-
-@dataclass(frozen=True, slots=True)
-class AircraftParameters:
-    input_id: str
-    resolved_by: str
-    typecode: str
-    name: str | None
-    category: str | None
-    geometry: AircraftGeometry
-    mass: AircraftMass
-    drag: AircraftDrag
-    engine: AircraftEngine
-    representative_metadata: dict[str, Any] | None
-
-    def __str__(self) -> str:
-        lines = [
-            "AircraftParameters",
-            f"  input_id     : {self.input_id}",
-            f"  resolved_by  : {self.resolved_by}",
-            f"  typecode     : {self.typecode}",
-            f"  name         : {self.name or 'n/a'}",
-            f"  category     : {self.category or 'n/a'}",
-            "  geometry",
-            f"    wing_area_m2 : {fmt(self.geometry.wing_area_m2)}",
-            f"    wing_span_m  : {fmt(self.geometry.wing_span_m)}",
-            f"    wing_mac_m   : {fmt(self.geometry.wing_mac_m)}",
-            f"    sweep_deg    : {fmt(self.geometry.wing_sweep_deg)}",
-            "  mass",
-            f"    mtow_kg      : {fmt(self.mass.mtow_kg)}",
-            f"    oew_kg       : {fmt(self.mass.oew_kg)}",
-            f"    mlw_kg       : {fmt(self.mass.mlw_kg)}",
-            f"    fuel_cap_kg  : {fmt(self.mass.maximum_fuel_capacity_kg)}",
-            "  drag",
-            f"    cd0          : {fmt(self.drag.cd0)}",
-            f"    k            : {fmt(self.drag.k)}",
-            f"    e            : {fmt(self.drag.e)}",
-            "  engine",
-            f"    default      : {self.engine.default or 'n/a'}",
-            f"    number       : {fmt(self.engine.number)}",
-            f"    thrust_each_N: {fmt(self.engine.max_thrust_n_each)}",
-        ]
-        return "\n".join(lines)
+# OpenAP carries no approach envelope; default it by category (mirrors the hand-tuned
+# presets in aircraft_sets). Refine per type when better data is available.
+_DEFAULT_APPROACH = {
+    "narrow_body": Approach(145.0, 135.0, 155.0, 5.0, 10.0, 0.8, 3.0, 15.0, 40000.0),
+    "wide_body": Approach(155.0, 145.0, 165.0, 6.0, 12.0, 1.0, 3.0, 15.0, 140000.0),
+    "general_aviation": Approach(65.0, 60.0, 75.0, 2.0, 5.0, 0.5, 3.0, 15.0, 800.0),
+}
+_FALLBACK_APPROACH = _DEFAULT_APPROACH["narrow_body"]
 
 
 class AircraftLookupError(LookupError):
@@ -139,67 +71,76 @@ def resolve_typecode(aircraft_id: str, parameters: dict[str, Any], lookup: dict[
     raise AircraftLookupError(f"Aircraft id {normalized} was not found in {LOOKUP_PATH.name}.")
 
 
-def get_aircraft_parameters(aircraft_id: str) -> AircraftParameters:
+def get_aircraft_parameters(aircraft_id: str) -> Aircraft:
+    """Resolve ``aircraft_id`` to an :class:`Aircraft` built from the OpenAP cache."""
     parameters = load_json(PARAMETERS_PATH)
     lookup = load_json(LOOKUP_PATH)
-    input_id = normalize_id(aircraft_id)
-    typecode, resolved_by = resolve_typecode(input_id, parameters, lookup)
+    typecode, _resolved_by = resolve_typecode(normalize_id(aircraft_id), parameters, lookup)
 
-    typecode_record = parameters.get("typecodes", {}).get(typecode)
-    if not typecode_record:
+    record = parameters.get("typecodes", {}).get(typecode)
+    if not record:
         raise AircraftLookupError(f"Typecode {typecode} is not present in {PARAMETERS_PATH.name}.")
-    if not typecode_record.get("openap_supported"):
-        reason = typecode_record.get("error", "not supported by OpenAP")
-        raise AircraftLookupError(f"{input_id} resolves to {typecode}, but {reason}")
+    if not record.get("openap_supported"):
+        reason = record.get("error", "not supported by OpenAP")
+        raise AircraftLookupError(f"{aircraft_id} resolves to {typecode}, but {reason}")
 
-    data = typecode_record["parameters"]
+    data = record["parameters"]
     geometry = data.get("geometry", {})
     mass = data.get("mass", {})
     drag = data.get("drag", {})
     engine = data.get("engine", {})
+    category = data.get("category")
 
-    return AircraftParameters(
-        input_id=input_id,
-        resolved_by=resolved_by,
-        typecode=typecode,
-        name=data.get("aircraft_name"),
-        category=data.get("category"),
-        geometry=AircraftGeometry(
+    return Aircraft(
+        code=typecode,
+        name=data.get("aircraft_name") or typecode,
+        category=category or "unknown",
+        geometry=Geometry(
             wing_area_m2=geometry.get("wing_area_m2"),
             wing_span_m=geometry.get("wing_span_m"),
-            wing_mac_m=geometry.get("wing_mac_m"),
+            wing_mean_chord_m=geometry.get("wing_mac_m"),
             wing_sweep_deg=geometry.get("wing_sweep_deg"),
             fuselage_length_m=geometry.get("fuselage_length_m"),
             fuselage_width_m=geometry.get("fuselage_width_m"),
             fuselage_height_m=geometry.get("fuselage_height_m"),
         ),
-        mass=AircraftMass(
-            mtow_kg=mass.get("mtow_kg"),
-            oew_kg=mass.get("oew_kg"),
-            mlw_kg=mass.get("mlw_kg"),
-            maximum_fuel_capacity_kg=mass.get("maximum_fuel_capacity_kg"),
+        mass=Mass(
+            max_takeoff_kg=mass.get("mtow_kg"),
+            max_landing_kg=mass.get("mlw_kg"),
+            operating_empty_kg=mass.get("oew_kg"),
+            max_fuel_kg=mass.get("maximum_fuel_capacity_kg"),
         ),
-        drag=AircraftDrag(
-            cd0=drag.get("cd0"),
-            k=drag.get("k"),
-            e=drag.get("e"),
-            landing_gear_drag_increment=drag.get("landing_gear_drag_increment"),
-        ),
-        engine=AircraftEngine(
-            default=engine.get("default"),
-            type=engine.get("type"),
-            number=engine.get("number"),
+        engine=Engine(
+            count=engine.get("number"),
             max_thrust_n_each=engine.get("max_thrust_n_each"),
+            model=engine.get("default") or engine.get("type"),
             cruise_thrust_n_each=engine.get("cruise_thrust_n_each"),
             cruise_sfc=engine.get("cruise_sfc"),
         ),
-        representative_metadata=typecode_record.get("representative_metadata"),
+        approach=_DEFAULT_APPROACH.get(category, _FALLBACK_APPROACH),
+        drag=Drag(
+            zero_lift_cd0=drag.get("cd0"),
+            induced_drag_factor=drag.get("k"),
+            oswald_efficiency=drag.get("e"),
+            landing_gear_drag_increment=drag.get("landing_gear_drag_increment"),
+        ),
     )
+
+
+def format_aircraft(aircraft: Aircraft) -> str:
+    g, m, e = aircraft.geometry, aircraft.mass, aircraft.engine
+    return "\n".join([
+        f"Aircraft {aircraft.code} ({aircraft.name}, {aircraft.category})",
+        f"  geometry  wing_area_m2={fmt(g.wing_area_m2)}  wing_span_m={fmt(g.wing_span_m)}",
+        f"  mass      max_takeoff_kg={fmt(m.max_takeoff_kg)}  max_landing_kg={fmt(m.max_landing_kg)}",
+        f"  engine    count={fmt(e.count)}  max_thrust_n_each={fmt(e.max_thrust_n_each)}  total_n={fmt(e.max_thrust_total_n)}",
+        f"  approach  Vref_kt={fmt(aircraft.approach.reference_speed_kt)} (category default)",
+    ])
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Print cached aircraft parameters for one ICAO24, registration, or typecode."
+        description="Print the resolved Aircraft for one ICAO24, registration, or typecode."
     )
     parser.add_argument("aircraft_id", help="Example: 4951d9, CS-TNY, or A320.")
     return parser.parse_args()
@@ -208,7 +149,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     try:
-        print(get_aircraft_parameters(args.aircraft_id))
+        print(format_aircraft(get_aircraft_parameters(args.aircraft_id)))
     except AircraftLookupError as exc:
         print(f"Aircraft lookup failed: {exc}")
         return 1
