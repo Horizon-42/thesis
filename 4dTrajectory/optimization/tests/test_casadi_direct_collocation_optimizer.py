@@ -390,6 +390,15 @@ def test_optimize_free_time_solves_real_ipopt_problem():
         atol=1e-3,
     )
 
+    # The dense planned trajectory is also exported (every collocation node, N*M),
+    # for smooth visualisation; subsampling it to the segment endpoints must reproduce
+    # the returned N-endpoint contract exactly.
+    dense = optimizer.last_dense_states_geo
+    assert dense.shape == (n_segments * optimizer.state_substeps, 6)
+    np.testing.assert_allclose(
+        dense[optimizer.state_substeps - 1 :: optimizer.state_substeps], states, atol=1e-9,
+    )
+
 
 def test_optimize_free_time_raw_is_playback_consistent():
     """The geodetic transcription shares ONE continuous RHS with the

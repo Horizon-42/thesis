@@ -142,14 +142,18 @@ def optimize_scenario(
         min_speed_ms=min_speed_ms,
         verbose=verbose,
     )
-    final_time, node_control, node_state = optimizer.optimize_free_time(
+    final_time, node_control, _node_endpoints = optimizer.optimize_free_time(
         initial, target, max_duration)
-    #   • node_state  rows are [lat, lon, alt, V, psi, gamma]   — the optimizer's plan
     #   • node_control rows are [thrust_N, bank_rad, load_factor]
+    #   • optimizer.last_dense_states_geo: the DENSE (N*M, 6) collocation nodes the optimiser
+    #     actually solved — [lat, lon, alt, V, psi, gamma] per row. We export these (prefixed
+    #     with the initial state at t=0) so the planned trajectory is smooth; the returned
+    #     N segment endpoints alone draw as a coarse, kinked polyline.
     #
-    # Then build the two sequences (the helpers below do the work) and return:
-    #
-    optimizer_states = _node_states_to_samples(node_state, final_time, initial.m)
+    initial_row = [initial.latitude, initial.longitude, initial.altitude,
+                   initial.V, initial.psi, initial.gamma]
+    dense_rows = [list(row) for row in optimizer.last_dense_states_geo]
+    optimizer_states = _node_states_to_samples([initial_row] + dense_rows, final_time, initial.m)
     simulator_states = simulate_controls(initial, node_control, final_time, aircraft,
                                              dt=rollout_dt_s)
     return ScenarioOptimization(scenario.source, float(final_time),
