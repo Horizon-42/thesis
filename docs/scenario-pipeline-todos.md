@@ -119,7 +119,7 @@ Run it: `python aeroviz-4d/python/build_scenario_comparison_czml.py --state-file
 ```bash
 # 1. observed flights -> scenarios (aircraft resolution already works)
 python -m flight_scenarios --input trajectory_data_process/outputs/landings/KRDU/KRDU_05L_landings.json \
-    --aircraft A320 --output scen.json
+    --output scen.json   # aircraft auto-resolved per flight from icao24; --aircraft-type A320 is the fallback
 # 2. scenarios -> optimizer + simulator state files
 python 4dTrajectory/optimization/scenario_optimization.py --scenarios scen.json --output-dir states/
 # 3. state files -> comparison CZML (one per scenario)

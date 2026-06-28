@@ -97,27 +97,30 @@ python -m pytest flight_scenarios/tests -q
 ## 4. Usage
 
 ```bash
-# one scenario per flight in a landings file, as an A320:
+# one scenario per flight; aircraft auto-resolved per flight from its icao24:
 python -m flight_scenarios \
   --input trajectory_data_process/outputs/landings/KRDU/KRDU_05L_landings.json \
-  --aircraft A320 \
   --output scenarios_krdu_05l.json
+# --aircraft-type A320  (optional) is the fallback for flights whose icao24 can't be resolved
 ```
 
 ```python
 from flight_scenarios import build_scenarios_from_czml_input, load_scenarios
 
-scenarios = build_scenarios_from_czml_input("…_landings.json", "A320")
+scenarios = build_scenarios_from_czml_input("…_landings.json")   # per-flight icao24 -> Aircraft
 state = scenarios[0].initial          # a GeodeticState ready for the optimizer
 aero  = scenarios[0].aero             # AeroParams for the same run
 ```
 
 ## 5. Notes / extension points
 
-- **Aircraft identity is not in CZML-input** (`type` is `"UNK"`), so the typecode is a CLI
-  argument. `aircraft_for_code` currently resolves the `AIRCRAFT_PRESETS` (A320/B77W/C172);
-  extend it there to derive a spec from an OpenAP typecode
-  (`aircraft/query_aircraft_parameters.py`) — callers and serialization stay unchanged.
+- **Aircraft identity is resolved from the flight's `icao24`** (CZML-input's `type` is
+  `"UNK"`). `aircraft_for_code` checks the hand-tuned `AIRCRAFT_PRESETS` (A320/B77W/C172)
+  first, then resolves any OpenAP-supported typecode via
+  `aircraft/query_aircraft_parameters.py` (geometry/mass/engine/drag + an MTOW-bucketed
+  approach default). `build_scenario` prefers the `icao24`; the CLI `--aircraft-type` is the
+  fallback when an `icao24` isn't in the OpenAP lookup. Serialization stores `aircraft.code`,
+  so round-trips stay unchanged.
 - **`target`** is optional. The same kinematics at the *end* of the track (or a runway
   threshold) gives a target state; wire it into `build_scenario` when needed.
 - Read **CZML-input**, not CZML — CZML is the rendered presentation format (quaternions,

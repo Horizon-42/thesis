@@ -3,8 +3,8 @@
 Orchestration only — it wires the pieces together:
 
     CZML-input flight ──► initial_state_from_track ──► GeodeticState
-    aircraft id       ──► aircraft_for_code        ──► Aircraft ──► aero_params_for_aircraft
-                                                                            └──► AeroParams
+    flight icao24     ──► aircraft_for_code (OpenAP) ──► Aircraft ──► aero_params_for_aircraft
+      (else --aircraft-type fallback)                                       └──► AeroParams
     => FlightScenario(initial, aircraft, aero, source)
 """
 
@@ -22,7 +22,7 @@ from .start_state import DEFAULT_WINDOW_S, final_state_from_track, initial_state
 
 def build_scenario(
     flight: dict[str, Any],
-    aircraft_id: str,
+    aircraft_type: str | None = None,
     *,
     mass_kg: float | None = None,
     window_s: float = DEFAULT_WINDOW_S,
@@ -30,11 +30,12 @@ def build_scenario(
     """Build one :class:`FlightScenario` from a single CZML-input ``flight`` dict.
 
     ``flight`` is one element of a CZML-input file: ``{id, callsign, icao24, runway,
-    waypoints: [[t, lon, lat, alt], ...], ...}``. ``aircraft_id`` selects the spec
-    (CZML-input's own ``type`` is ``"UNK"``, so the type must be supplied here). ``mass_kg``
-    defaults to the aircraft's spec mass.
+    waypoints: [[t, lon, lat, alt], ...], ...}``. The aircraft is resolved from the flight's
+    transponder address (``icao24``) via the OpenAP lookup; ``aircraft_type`` (e.g. ``"A320"``)
+    is an explicit fallback, used only when the ``icao24`` can't be resolved. ``mass_kg``
+    defaults to the resolved aircraft's max-take-off mass.
     """
-    aircraft = aircraft_for_code(aircraft_id)
+    aircraft = _resolve_aircraft(flight, aircraft_type)
     mass = mass_kg if mass_kg is not None else aircraft.mass.max_takeoff_kg
 
     waypoints = flight["waypoints"]
@@ -59,7 +60,7 @@ def build_scenario(
 
 def build_scenarios_from_czml_input(
     czml_input: str | Path | list[dict[str, Any]],
-    aircraft_id: str,
+    aircraft_type: str | None = None,
     *,
     mass_kg: float | None = None,
     window_s: float = DEFAULT_WINDOW_S,
@@ -67,13 +68,43 @@ def build_scenarios_from_czml_input(
     """Build a scenario per flight in a CZML-input file (or already-loaded list).
 
     ``czml_input`` may be a path to a ``*_czml_input_*.json`` / ``*_landings.json`` file,
-    or the parsed list of flight dicts.
+    or the parsed list of flight dicts. Each flight's aircraft is resolved from its own
+    ``icao24`` (so a mixed-fleet file gets per-flight types); ``aircraft_type`` is the
+    fallback when an ``icao24`` can't be resolved.
     """
     flights = _load_flights(czml_input)
     return [
-        build_scenario(flight, aircraft_id, mass_kg=mass_kg, window_s=window_s)
+        build_scenario(flight, aircraft_type, mass_kg=mass_kg, window_s=window_s)
         for flight in flights
     ]
+
+
+def _resolve_aircraft(flight: dict[str, Any], fallback_type: str | None):
+    """Resolve a flight's :class:`Aircraft`, preferring its transponder address.
+
+    Order: the flight's declared ``type`` (if real — CZML-input writes ``"UNK"``), then its
+    ``icao24`` via the OpenAP lookup, then ``fallback_type`` (the CLI ``--aircraft-type``).
+    Raises if none resolve — fail loudly rather than guess a type.
+    """
+    candidates: list[str] = []
+    declared = (flight.get("type") or "").strip().upper()
+    if declared and declared != "UNK":
+        candidates.append(declared)
+    icao24 = (flight.get("icao24") or "").strip()
+    if icao24:
+        candidates.append(icao24)
+    if fallback_type:
+        candidates.append(fallback_type)
+
+    for candidate in candidates:
+        try:
+            return aircraft_for_code(candidate)
+        except KeyError:
+            continue
+    raise KeyError(
+        f"could not resolve an aircraft for flight {flight.get('id')!r}: tried "
+        f"{candidates or ['<nothing>']}; pass --aircraft-type as a fallback"
+    )
 
 
 def _load_flights(czml_input: str | Path | list[dict[str, Any]]) -> list[dict[str, Any]]:

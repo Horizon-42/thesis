@@ -28,14 +28,30 @@ PARAMETERS_PATH = SCRIPT_DIR / "openap_aircraft_parameters.json"
 LOOKUP_PATH = SCRIPT_DIR / "aircraft_id_lookup.json"
 
 
-# OpenAP carries no approach envelope; default it by category (mirrors the hand-tuned
-# presets in aircraft_sets). Refine per type when better data is available.
-_DEFAULT_APPROACH = {
-    "narrow_body": Approach(145.0, 135.0, 155.0, 5.0, 10.0, 0.8, 3.0, 15.0, 40000.0),
-    "wide_body": Approach(155.0, 145.0, 165.0, 6.0, 12.0, 1.0, 3.0, 15.0, 140000.0),
-    "general_aviation": Approach(65.0, 60.0, 75.0, 2.0, 5.0, 0.5, 3.0, 15.0, 800.0),
-}
-_FALLBACK_APPROACH = _DEFAULT_APPROACH["narrow_body"]
+# OpenAP carries no approach envelope; default one by MTOW class (mirrors the hand-tuned
+# presets in aircraft_sets). OpenAP's own ``category`` (transport_jet /
+# business_or_general_aviation / unknown) can't discriminate — it lumps the A318 and the
+# 777 into "transport_jet" — so weight is the right key. Refine per type when better data
+# is available.
+_GENERAL_AVIATION_APPROACH = Approach(65.0, 60.0, 75.0, 2.0, 5.0, 0.5, 3.0, 15.0, 800.0)
+_NARROW_BODY_APPROACH = Approach(145.0, 135.0, 155.0, 5.0, 10.0, 0.8, 3.0, 15.0, 40000.0)
+_WIDE_BODY_APPROACH = Approach(155.0, 145.0, 165.0, 6.0, 12.0, 1.0, 3.0, 15.0, 140000.0)
+
+# MTOW class boundaries (kg): 5 700 = the light/large-aircraft regulatory split;
+# 150 000 ≈ the narrow-body/wide-body split (A321 ~93 t … B767 ~186 t).
+_LIGHT_MAX_TAKEOFF_KG = 5_700.0
+_WIDE_BODY_MIN_TAKEOFF_KG = 150_000.0
+
+
+def _default_approach(max_takeoff_kg: float | None) -> Approach:
+    """Pick a default approach envelope by maximum take-off weight."""
+    if max_takeoff_kg is None:
+        return _NARROW_BODY_APPROACH
+    if max_takeoff_kg < _LIGHT_MAX_TAKEOFF_KG:
+        return _GENERAL_AVIATION_APPROACH
+    if max_takeoff_kg >= _WIDE_BODY_MIN_TAKEOFF_KG:
+        return _WIDE_BODY_APPROACH
+    return _NARROW_BODY_APPROACH
 
 
 class AircraftLookupError(LookupError):
@@ -117,7 +133,7 @@ def get_aircraft_parameters(aircraft_id: str) -> Aircraft:
             cruise_thrust_n_each=engine.get("cruise_thrust_n_each"),
             cruise_sfc=engine.get("cruise_sfc"),
         ),
-        approach=_DEFAULT_APPROACH.get(category, _FALLBACK_APPROACH),
+        approach=_default_approach(mass.get("mtow_kg")),
         drag=Drag(
             zero_lift_cd0=drag.get("cd0"),
             induced_drag_factor=drag.get("k"),
