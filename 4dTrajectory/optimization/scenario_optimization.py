@@ -41,6 +41,7 @@ if str(_OPT_DIR) not in sys.path:
 from flight_scenarios import FlightScenario, load_scenarios  # noqa: E402
 from aerodynamic_model.common import GeodeticState, LoadFactorControl  # noqa: E402
 from aerodynamic_model.casadi_simulator import CasadiSimulator  # noqa: E402
+from aerodynamic_model.rollout import rollout_piecewise_constant  # noqa: E402
 from casadi_direct_collocation_optimizer import CasadiDirectCollocationOptimizer  # noqa: E402
 
 # Optimizer + rollout defaults (override on the CLI).
@@ -116,24 +117,19 @@ def optimize_scenario(
     # ── TODO ① — run the optimizer (initial -> target) ────────────────────────────
     # Construct the direct-collocation optimizer and solve the free-time NLP:
     #
-    #   optimizer = CasadiDirectCollocationOptimizer(n_segments, dt, max_duration, aircraft)
-    #   final_time, node_control, node_state = optimizer.optimize_free_time(
-    #       initial, target, max_duration
-    #   )
-    #
+    optimizer = CasadiDirectCollocationOptimizer(n_segments, dt, max_duration, aircraft)
+    final_time, node_control, node_state = optimizer.optimize_free_time(
+        initial, target, max_duration)
     #   • node_state  rows are [lat, lon, alt, V, psi, gamma]   — the optimizer's plan
     #   • node_control rows are [thrust_N, bank_rad, load_factor]
     #
     # Then build the two sequences (the helpers below do the work) and return:
     #
-    #   optimizer_states = _node_states_to_samples(node_state, final_time, initial.m)
-    #   simulator_states = simulate_controls(initial, node_control, final_time, aircraft,
-    #                                         dt=rollout_dt_s)
-    #   return ScenarioOptimization(scenario.source, float(final_time),
-    #                               optimizer_states, simulator_states)
-    raise NotImplementedError(
-        "TODO ①: run the optimizer and assemble the result — see the comment above."
-    )
+    optimizer_states = _node_states_to_samples(node_state, final_time, initial.m)
+    simulator_states = simulate_controls(initial, node_control, final_time, aircraft,
+                                             dt=rollout_dt_s)
+    return ScenarioOptimization(scenario.source, float(final_time),
+                                   optimizer_states, simulator_states)
 
 
 def _node_states_to_samples(
@@ -165,34 +161,23 @@ def simulate_controls(
 
     This produces the "simulator real states": the optimizer's own controls integrated
     through the actual dynamics, which differ from the optimizer's node states (the plan).
-    """
-    # ── TODO ② — implement the forward rollout ────────────────────────────────────
-    # Controls are piecewise-constant over N = len(node_control) equal segments spanning
-    # [0, final_time]. Build the load-factor simulator and step it:
-    #
-    #   controls = list(node_control)
-    #   segment_duration = final_time / len(controls)
-    #   sim = CasadiSimulator(aircraft, dt)
-    #   state = initial_state
-    #   t = 0.0
-    #   samples = [StateSample.from_state(0.0, state)]
-    #   for segment_index, row in enumerate(controls):
-    #       control = LoadFactorControl(thrust=float(row[0]), bank_rad=float(row[1]),
-    #                                   load_factor=float(row[2]))
-    #       segment_end = (segment_index + 1) * segment_duration
-    #       while t < segment_end - 1e-9:
-    #           step_dt = min(dt, segment_end - t)
-    #           try:
-    #               state = sim.step(state, control, step_dt)
-    #           except ValueError:
-    #               return samples          # left the flight envelope — truncate, don't crash
-    #           t += step_dt
-    #           samples.append(StateSample.from_state(t, state))
-    #   return samples
-    raise NotImplementedError(
-        "TODO ②: roll the controls forward through CasadiSimulator — see the comment above."
-    )
 
+    Thin adapter over ``aerodynamic_model.rollout_piecewise_constant`` — builds the
+    load-factor controls + the simulator, runs the shared rollout (truncating silently if
+    the replay leaves the envelope — this is a viz aid), and maps each neutral
+    ``(t, state)`` sample onto a serializable :class:`StateSample`.
+    """
+    controls = [
+        LoadFactorControl(thrust=float(row[0]), bank_rad=float(row[1]),
+                          load_factor=float(row[2]))
+        for row in node_control
+    ]
+    sim = CasadiSimulator(aircraft, dt)
+    samples = rollout_piecewise_constant(
+        sim, initial_state, controls, final_time,
+        integrator_dt=dt, truncate_on_envelope_exit=True,
+    )
+    return [StateSample.from_state(s.t, s.state) for s in samples]
 
 # ── Batch + IO (wired) ────────────────────────────────────────────────────────
 

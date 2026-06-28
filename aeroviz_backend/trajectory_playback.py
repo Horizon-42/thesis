@@ -49,6 +49,7 @@ from aeroviz_backend.simulation_backend import (
     make_geodetic_simulator,
     read_snapshot_aero,
 )
+from aerodynamic_model.rollout import rollout_piecewise_constant
 from common import Control, GeodeticState, LoadFactorControl
 
 
@@ -142,46 +143,34 @@ def _rollout(
     aircraft: Any,
     simulation_mode: str,
 ) -> list[TrajectorySample]:
-    segment_count = len(node_control)
-    segment_duration = final_time / segment_count
     output_dt = max(_MIN_OUTPUT_DT_S, final_time / _MAX_SAMPLES)
-    integrator_dt = min(_INTEGRATOR_DT_S, output_dt)
 
     simulator = make_geodetic_simulator(aircraft, simulation_mode)
     controls = [_build_control(row, simulation_mode) for row in node_control]
 
-    state = initial_state
-    t = 0.0
-    samples = [
-        _make_sample(t, state, controls[0], 0, simulator, simulation_mode)
+    def _log_truncation(t: float, exc: ValueError) -> None:
+        # The replay left the valid flight envelope (e.g. altitude below ground).
+        # A real optimized solution lands on the target and never does this; the
+        # shared rollout truncates rather than failing the whole optimize call —
+        # surface it here so it is not silent.
+        sys.stderr.write(
+            f"[aeroviz-backend] playback rollout truncated at t={t:.1f}s: {exc}\n"
+        )
+
+    rollout = rollout_piecewise_constant(
+        simulator,
+        initial_state,
+        controls,
+        final_time,
+        integrator_dt=_INTEGRATOR_DT_S,
+        output_dt=output_dt,
+        truncate_on_envelope_exit=True,
+        on_truncate=_log_truncation,
+    )
+    return [
+        _make_sample(s.t, s.state, s.control, s.segment_index, simulator, simulation_mode)
+        for s in rollout
     ]
-
-    for segment_index, control in enumerate(controls):
-        segment_end = (segment_index + 1) * segment_duration
-        next_output_t = t + output_dt
-        while t < segment_end - 1e-9:
-            step_dt = min(integrator_dt, segment_end - t)
-            try:
-                state = simulator.step(state, control, step_dt)
-            except ValueError as exc:
-                # The replay left the valid flight envelope (e.g. altitude
-                # below ground).  A real optimized solution lands on the target
-                # and never does this; truncate rather than fail the whole
-                # optimize call, and surface it so it is not silent.
-                sys.stderr.write(
-                    "[aeroviz-backend] playback rollout truncated at "
-                    f"t={t:.1f}s: {exc}\n"
-                )
-                return samples
-            t += step_dt
-            at_segment_end = t >= segment_end - 1e-9
-            if t >= next_output_t - 1e-9 or at_segment_end:
-                samples.append(
-                    _make_sample(t, state, control, segment_index, simulator, simulation_mode)
-                )
-                next_output_t = t + output_dt
-
-    return samples
 
 
 def _build_control(row: Any, simulation_mode: str) -> Control | LoadFactorControl:

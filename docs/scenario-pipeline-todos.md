@@ -16,35 +16,36 @@ flight_scenarios  ──►  4dTrajectory/optimization/scenario_optimization.py 
 
 | # | File | Function | What to implement | Verify (turns the xfail green) |
 |---|------|----------|-------------------|--------------------------------|
-| 0 | `flight_scenarios/scenario.py` | `aircraft_for_code` | *(your WIP)* finish the OpenAP→`AircraftSpec` mapping, or keep the preset lookup | `pytest flight_scenarios/tests` |
 | 1 | `4dTrajectory/optimization/scenario_optimization.py` | `optimize_scenario` (TODO ①) | run the optimizer, assemble the result | (CLI; runs the solver) |
 | 2 | `4dTrajectory/optimization/scenario_optimization.py` | `simulate_controls` (TODO ②) | roll the controls through `CasadiSimulator` | `pytest …/test_scenario_optimization.py::test_simulate_controls_rolls_forward` |
 | 3 | `aeroviz-4d/python/build_scenario_comparison_czml.py` | `_states_to_waypoints` (TODO ①) | state dicts → `(t, lon, lat, alt)` | `pytest …/test_build_scenario_comparison_czml.py::test_states_to_waypoints_order` |
 | 4 | `aeroviz-4d/python/build_scenario_comparison_czml.py` | `_reference_entity_from_adsb` (TODO ②) | copy + recolour the matching ADS-B flight | `…::test_reference_entity_copies_and_recolors` |
 
-> `flight_scenarios/start_state.py` (the start/target kinematics) is **already done** — no TODO there.
+> Two prerequisites are **already done** — no TODO in either:
+> - `flight_scenarios/start_state.py` — the start/target kinematics.
+> - `flight_scenarios/scenario.py` `aircraft_for_code` — aircraft resolution (see below).
 
 ---
 
-## 0. `flight_scenarios/scenario.py` — `aircraft_for_code` *(your in-progress edit)*
+## ✅ Done — `flight_scenarios/scenario.py` `aircraft_for_code` (aircraft resolution)
 
-You changed this to build an `AircraftSpec` from the OpenAP database
-(`get_aircraft_parameters`). The field names don't match the real dataclasses in
-`aircraft/query_aircraft_parameters.py`:
+This was a WIP that tried to build the old flat `AircraftSpec` from OpenAP with mismatched
+field names. It's now **resolved** by the `AircraftSpec → Aircraft` refactor (2026-06-28),
+which unified the flat `AircraftSpec` and the OpenAP `AircraftParameters` into one nested
+[`Aircraft`](../aircraft/aircraft_sets.py) (`geometry` / `mass` / `engine` / `approach` /
+`drag`):
 
-| Your code | Actual field |
-|---|---|
-| `mass.max_takeoff_mass_kg` | `mass.mtow_kg` |
-| `engine.max_thrust_n` | `engine.max_thrust_n_each` × `engine.number` |
-| `engine.approach_thrust_guess_n` | *(not in OpenAP)* |
-| `drag.terminal_speed_kt` / `…_min_kt` / `…_max_kt` | *(not in OpenAP — `AircraftDrag` has only `cd0, k, e, landing_gear_drag_increment`)* |
-| `drag.final_approach_*` / `drag.threshold_crossing_height_m` | *(not in OpenAP)* |
+- `get_aircraft_parameters(code)` now returns an **`Aircraft`** directly — OpenAP supplies
+  `geometry`/`mass`/`engine`/`drag`; OpenAP has **no approach envelope**, so a
+  **category-default `approach`** (narrow_body / wide_body / general_aviation, mirroring the
+  presets) fills that group. That closes the gap that blocked the old mapping.
+- `aircraft_for_code(code)` resolves **presets first** (A320/B77W/C172 — they carry a
+  calibrated approach envelope), then falls back to `get_aircraft_parameters` for any other
+  OpenAP-supported type. Unknown codes raise `KeyError`.
 
-**The gap:** OpenAP gives geometry / mass / drag-coefficients / engine, but **not** the
-approach speeds or final-approach geometry that `AircraftSpec` needs. So a spec can't be
-built purely from OpenAP — overlay the OpenAP-available fields on a preset's approach
-defaults, or supply those defaults explicitly. (Until then, the preset lookup on `HEAD`
-works for A320/B77W/C172.)
+`FlightScenario.aircraft` is now typed `Aircraft`; serialization is unchanged (stored by
+`aircraft.code`, rebuilt via `aircraft_for_code`). Verify: `pytest flight_scenarios/tests`
+(11 pass).
 
 ---
 
@@ -116,7 +117,7 @@ Run it: `python aeroviz-4d/python/build_scenario_comparison_czml.py --state-file
 ## End-to-end, once the TODOs are filled
 
 ```bash
-# 1. observed flights -> scenarios (needs aircraft_for_code working)
+# 1. observed flights -> scenarios (aircraft resolution already works)
 python -m flight_scenarios --input trajectory_data_process/outputs/landings/KRDU/KRDU_05L_landings.json \
     --aircraft A320 --output scen.json
 # 2. scenarios -> optimizer + simulator state files
