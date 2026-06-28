@@ -71,6 +71,25 @@ def test_optimize_scenario_requires_target():
         so.optimize_scenario(_scenario(target=None))
 
 
+def test_optimize_scenarios_skips_failures_and_continues(monkeypatch, tmp_path):
+    # A real landings file mixes feasible and infeasible scenarios; one failure must not
+    # abort the batch. Stub the per-scenario solve: first raises, second succeeds.
+    target = GeodeticState(35.59, -78.49, 500.0, 80.0, 1.5, -0.05, A320.landing_mass)
+    scenarios = [_scenario(target=target), _scenario(target=target)]
+    attempts = {"n": 0}
+
+    def fake_optimize_scenario(scenario, **kwargs):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise ValueError("Direct collocation free-time optimization failed: Infeasible_Problem_Detected")
+        return so.ScenarioOptimization(scenario.source, 12.0, [], [])
+
+    monkeypatch.setattr(so, "optimize_scenario", fake_optimize_scenario)
+    written = so.optimize_scenarios(scenarios, output_dir=tmp_path)
+    assert attempts["n"] == 2      # both attempted — did NOT abort on the first failure
+    assert len(written) == 1       # the infeasible one is skipped, the feasible one written
+
+
 def test_simulate_controls_rolls_forward():
     initial = GeodeticState(35.6, -78.5, 2000.0, 130.0, 1.5, -0.05, A320.mass.max_takeoff_kg)
     # two constant-control segments over a short 4 s horizon

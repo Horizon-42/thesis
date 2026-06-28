@@ -899,9 +899,12 @@ class CasadiDirectCollocationOptimizer:
         smoothness_weights: tuple = _DEFAULT_SMOOTHNESS_WEIGHTS,
         collocation_scheme: str = _DEFAULT_SCHEME,
         solver_backend: str = _DEFAULT_SOLVER_BACKEND,
+        min_speed_ms: float | None = None,
     ):
         if n_segments < 2:
             raise ValueError("n_segments must be at least 2 for direct collocation")
+        if min_speed_ms is not None and min_speed_ms <= 0:
+            raise ValueError("min_speed_ms must be positive when given")
         if collocation_scheme not in _DEFECT_SCHEMES:
             raise ValueError(
                 f"unknown collocation_scheme {collocation_scheme!r}; "
@@ -950,7 +953,12 @@ class CasadiDirectCollocationOptimizer:
             "max_thrust": aircraft.engine.max_thrust_total_n,
             "min_load_factor": 0.5,
             "max_load_factor": 2.0,
-            "min_terminal_speed": aircraft.approach.reference_speed_ms,
+            # Velocity floor over the whole trajectory. Defaults to the aircraft's reference
+            # approach speed (Vref); callers facing slower terminal targets (e.g. observed
+            # touchdown speeds) can pass a lower, stall-margin floor via ``min_speed_ms``.
+            "min_terminal_speed": (
+                min_speed_ms if min_speed_ms is not None else aircraft.approach.reference_speed_ms
+            ),
             "min_altitude": aircraft.approach.threshold_crossing_height_m + 10.0,
             "min_duration": _DEFAULT_MIN_DURATION_S,
         }

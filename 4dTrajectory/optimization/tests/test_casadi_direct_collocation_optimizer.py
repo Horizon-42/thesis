@@ -41,6 +41,20 @@ def test_module_imports_from_repo_root():
     )
 
 
+def test_min_speed_ms_param_validation():
+    module = load_module()
+    # A non-positive floor is rejected.
+    with pytest.raises(ValueError):
+        module.CasadiDirectCollocationOptimizer(
+            n_segments=4, dt=0.2, max_duration=6.0, aircraft=C172, min_speed_ms=-1.0,
+        )
+    # A positive override constructs (default None keeps the aircraft's Vref floor).
+    opt = module.CasadiDirectCollocationOptimizer(
+        n_segments=4, dt=0.2, max_duration=6.0, aircraft=C172, min_speed_ms=20.0,
+    )
+    assert opt.aircraft is C172
+
+
 def test_hermite_simpson_defect_is_zero_for_constant_state_with_zero_rhs():
     module = load_module()
     # A trivial rhs that returns 0 everywhere should produce a zero

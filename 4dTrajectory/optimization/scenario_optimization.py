@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 from dataclasses import asdict, dataclass
@@ -49,6 +50,18 @@ DEFAULT_N_SEGMENTS = 8
 DEFAULT_DT = 1.0                 # optimizer dt (API parity; state mesh is auto-selected)
 DEFAULT_MAX_DURATION_S = 2000.0  # free-time upper bound; the solver minimises T below this
 DEFAULT_ROLLOUT_DT_S = 0.5       # forward-integration step for the simulator rollout
+
+# Velocity floor = STALL_MARGIN x stall speed (at the scenario's landing mass), so the
+# optimizer admits realistic touchdown-speed targets instead of forcing V >= Vref. Capped at
+# Vref so it never raises the optimizer's default floor.
+_STALL_MARGIN = 1.10
+_RHO_SEA_LEVEL = 1.225
+_GRAVITY = 9.81
+
+
+def _stall_speed_ms(mass_kg: float, aero: Any) -> float:
+    """Level-flight stall speed: V = sqrt(2 m g / (rho S Cl_max))."""
+    return math.sqrt(2.0 * mass_kg * _GRAVITY / (_RHO_SEA_LEVEL * aero.S * aero.Cl_max))
 
 
 # ── Output records (plumbing) ─────────────────────────────────────────────────
@@ -114,10 +127,17 @@ def optimize_scenario(
             "build_scenario populates target) before optimizing."
         )
 
-    # ── TODO ① — run the optimizer (initial -> target) ────────────────────────────
-    # Construct the direct-collocation optimizer and solve the free-time NLP:
-    #
-    optimizer = CasadiDirectCollocationOptimizer(n_segments, dt, max_duration, aircraft, collocation_scheme="trapezoidalNormalizedFullTransport")
+    # Run the optimizer (initial -> target). Floor the velocity at a stall margin (not Vref)
+    # so observed touchdown-speed targets are admissible; never above the aircraft's Vref.
+    min_speed_ms = min(
+        _STALL_MARGIN * _stall_speed_ms(initial.m, scenario.aero),
+        aircraft.approach.reference_speed_ms,
+    )
+    optimizer = CasadiDirectCollocationOptimizer(
+        n_segments, dt, max_duration, aircraft,
+        collocation_scheme="trapezoidalNormalizedFullTransport",
+        min_speed_ms=min_speed_ms,
+    )
     final_time, node_control, node_state = optimizer.optimize_free_time(
         initial, target, max_duration)
     #   • node_state  rows are [lat, lon, alt, V, psi, gamma]   — the optimizer's plan
@@ -190,18 +210,30 @@ def optimize_scenarios(
     max_duration: float = DEFAULT_MAX_DURATION_S,
     rollout_dt_s: float = DEFAULT_ROLLOUT_DT_S,
 ) -> list[Path]:
-    """Optimize each scenario and write one ``*_states.json`` per scenario."""
+    """Optimize each scenario and write one ``*_states.json`` per scenario.
+
+    Infeasible / failed scenarios are **skipped and logged** (a real landings file mixes
+    feasible approaches with too-slow or noisy ones), so one bad scenario never aborts the
+    batch. A summary of failures is printed at the end.
+    """
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
+    failures: list[tuple[str, str]] = []
     for index, scenario in enumerate(scenarios):
-        result = optimize_scenario(
-            scenario,
-            n_segments=n_segments,
-            dt=dt,
-            max_duration=max_duration,
-            rollout_dt_s=rollout_dt_s,
-        )
+        flight_id = scenario.source.get("id") or f"scenario{index}"
+        try:
+            result = optimize_scenario(
+                scenario,
+                n_segments=n_segments,
+                dt=dt,
+                max_duration=max_duration,
+                rollout_dt_s=rollout_dt_s,
+            )
+        except Exception as exc:  # noqa: BLE001 — batch tool: skip + log per-scenario failures
+            failures.append((flight_id, f"{type(exc).__name__}: {str(exc).splitlines()[0][:90]}"))
+            print(f"✗ {flight_id}: skipped ({type(exc).__name__})")
+            continue
         path = out / _scenario_filename(scenario, index)
         path.write_text(json.dumps(result.to_dict(), indent=2), encoding="utf-8")
         written.append(path)
@@ -209,6 +241,14 @@ def optimize_scenarios(
             f"✓ {path.name}: optimizer {len(result.optimizer_states)} states, "
             f"simulator {len(result.simulator_states)} states, T={result.final_time_s:.1f}s"
         )
+
+    if failures:
+        print(f"\n⚠ {len(failures)}/{len(scenarios)} scenario(s) skipped:")
+        for flight_id, reason in failures[:15]:
+            print(f"    {flight_id}: {reason}")
+        if len(failures) > 15:
+            print(f"    … and {len(failures) - 15} more")
+    print(f"✓ solved {len(written)}/{len(scenarios)} scenario(s) -> {out}")
     return written
 
 

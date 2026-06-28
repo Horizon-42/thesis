@@ -49,6 +49,23 @@ class TestPresets(unittest.TestCase):
             )
 
 
+class TestLandingMass(unittest.TestCase):
+    def test_uses_max_landing_kg_when_set(self):
+        aircraft = Aircraft(
+            code="X", name="X", category="x",
+            geometry=Geometry(wing_area_m2=122.6),
+            mass=Mass(max_takeoff_kg=78000.0, max_landing_kg=66000.0),
+            engine=Engine(count=2, max_thrust_n_each=120000.0),
+            approach=A320.approach,
+        )
+        self.assertEqual(aircraft.landing_mass, 66000.0)
+
+    def test_falls_back_to_fraction_of_mtow(self):
+        # A320 preset carries no max_landing_kg -> 0.85 * MTOW.
+        self.assertAlmostEqual(A320.landing_mass, 0.85 * 78000.0)
+        self.assertLess(A320.landing_mass, A320.mass.max_takeoff_kg)
+
+
 class TestFrozen(unittest.TestCase):
     def test_aircraft_is_frozen(self):
         with self.assertRaises(Exception):

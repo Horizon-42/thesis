@@ -16,6 +16,10 @@ from dataclasses import dataclass
 
 from geokit import kt_to_ms, nm_to_m
 
+# Used by ``Aircraft.landing_mass`` when no max-landing weight is known: a typical
+# landing/take-off weight ratio (e.g. A320 66 t / 78 t ≈ 0.85).
+_LANDING_MASS_FRACTION_OF_MTOW = 0.85
+
 
 # ── Nested groups ─────────────────────────────────────────────────────────────
 
@@ -110,6 +114,20 @@ class Aircraft:
     engine: Engine
     approach: Approach
     drag: Drag | None = None
+
+    @property
+    def landing_mass(self) -> float:
+        """Representative mass on approach/landing (kg) — the initial mass for approach
+        scenarios fed to the simulator and optimizer.
+
+        Max-landing weight when OpenAP provides it, else a typical fraction of MTOW. NOT
+        MTOW: a landing aircraft is much lighter, and using MTOW inflates the stall speed so
+        realistic approach speeds become infeasible. Computed (``@property``), so the rule
+        lives in one place and is easy to change.
+        """
+        if self.mass.max_landing_kg is not None:
+            return float(self.mass.max_landing_kg)
+        return _LANDING_MASS_FRACTION_OF_MTOW * self.mass.max_takeoff_kg
 
 
 # ── Presets (hand-tuned; values match the former AircraftSpec) ──
