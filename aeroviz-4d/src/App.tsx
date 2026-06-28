@@ -14,6 +14,7 @@
 import CesiumViewerComponent from "./components/CesiumViewer";
 import ControlPanel from "./components/ControlPanel";
 import AirportLocalTerrainDemoPage from "./components/AirportLocalTerrainDemoPage";
+import ChartAnnotatedPage from "./components/ChartAnnotatedPage";
 import AirportLocalTerrainAlert from "./components/AirportLocalTerrainAlert";
 import HUD from "./components/HUD";
 import FlightOperationsPanel from "./components/FlightOperationsPanel";
@@ -94,9 +95,12 @@ export default function App() {
     locationState.pathname === "/local-terrain-demo" || routeToken === "#local-terrain-demo";
   const isProcedureDetails =
     locationState.pathname === "/procedure-details" || routeToken === "#procedure-details";
+  const isChartAnnotated =
+    locationState.pathname === "/chart-annotated" || routeToken === "#chart-annotated";
 
   if (isLocalTerrainDemo) return <AirportLocalTerrainDemoPage />;
   if (isProcedureDetails) return <ProcedureDetailsPage />;
+  if (isChartAnnotated) return <ChartAnnotatedPage />;
 
   return <FlightApp />;
 }

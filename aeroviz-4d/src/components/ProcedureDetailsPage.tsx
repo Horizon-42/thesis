@@ -2364,14 +2364,29 @@ export default function ProcedureDetailsPage() {
                     Open FAA Procedure Search
                   </a>
                   {localChart ? (
-                    <a
-                      href={localChart.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="procedure-details-link-button is-secondary"
-                    >
-                      Open Local Chart PDF
-                    </a>
+                    <>
+                      <a
+                        href={localChart.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="procedure-details-link-button is-secondary"
+                      >
+                        Open Local Chart PDF
+                      </a>
+                      {procedureDocument && selectedAirportCode ? (
+                        <button
+                          type="button"
+                          className="procedure-details-link-button is-secondary"
+                          onClick={() =>
+                            navigateWithinApp(
+                              `#chart-annotated?airport=${selectedAirportCode}&procedure=${procedureDocument.procedureUid}`,
+                            )
+                          }
+                        >
+                          Annotate on Chart
+                        </button>
+                      ) : null}
+                    </>
                   ) : (
                     <p className="procedure-details-muted">
                       No local chart PDF published yet.
