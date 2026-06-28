@@ -1,0 +1,39 @@
+"""TODO ①–④ (geometry). xfail until implemented; scalar-component (backend-agnostic) API."""
+
+import numpy as np
+import pytest
+
+from constraints import geometry as geo
+
+A = np.array([0.0, 0.0])
+B = np.array([10.0, 0.0])      # leg points due-north (+n) by 10 m
+
+
+@pytest.mark.xfail(reason="TODO ① along_track", strict=False)
+def test_along_track_scalar_and_array():
+    assert np.isclose(geo.along_track(3.0, 7.0, A, B), 3.0)
+    n = np.array([3.0, 10.0, -1.0])
+    e = np.array([7.0, -2.0, 0.0])
+    assert np.allclose(geo.along_track(n, e, A, B), [3.0, 10.0, -1.0])
+
+
+@pytest.mark.xfail(reason="TODO ② cross_track", strict=False)
+def test_cross_track_is_signed():
+    assert np.isclose(geo.cross_track(3.0, 7.0, A, B), -7.0)     # +e side -> negative
+    assert np.isclose(geo.cross_track(3.0, -7.0, A, B), 7.0)
+    n = np.array([3.0, 5.0])
+    e = np.array([7.0, 0.0])
+    assert np.allclose(np.abs(geo.cross_track(n, e, A, B)), [7.0, 0.0])
+
+
+@pytest.mark.xfail(reason="TODO ③ course_bearing", strict=False)
+def test_course_bearing():
+    assert np.isclose(geo.course_bearing([0.0, 0.0], [5.0, 0.0]), 0.0)            # due north
+    assert np.isclose(geo.course_bearing([0.0, 0.0], [0.0, 5.0]), np.pi / 2)      # due east
+    assert np.isclose(geo.course_bearing([0.0, 0.0], [-5.0, 0.0]), np.pi)         # due south
+
+
+@pytest.mark.xfail(reason="TODO ④ intercept_angle_deg", strict=False)
+def test_intercept_angle_wraps():
+    assert np.isclose(geo.intercept_angle_deg(np.deg2rad(10.0), np.deg2rad(350.0)), 20.0)
+    assert np.isclose(geo.intercept_angle_deg(np.deg2rad(30.0), 0.0), 30.0)
