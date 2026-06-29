@@ -227,6 +227,27 @@ describe("trajectoryOptimizationClient", () => {
     });
   });
 
+  it("accepts a multiphase optimizer name in the response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        optimizer: "casadiMultiphaseNormalizedFullTransport",
+        finalTimeS: 348,
+        nSegments: 16,
+        dtS: 0.2,
+        controls: [{ thrustN: 12000, bankDeg: 1, loadFactor: 1.2 }],
+        states: [request.targetState],
+      }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    ));
+
+    const result = await runTrajectoryOptimization({
+      ...request,
+      optimizer: "casadiMultiphaseNormalizedFullTransport",
+    });
+
+    expect(result.optimizer).toBe("casadiMultiphaseNormalizedFullTransport");
+  });
+
   it("parses the procedure-constraint summary the backend echoes back", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
       new Response(JSON.stringify({

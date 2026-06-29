@@ -332,14 +332,17 @@ describe("PilotPanel trajectory play mode", () => {
     expect(await screen.findByText("Target State")).toBeTruthy();
     expect(screen.getByText("RW05L")).toBeTruthy();
 
-    // Optimizer is chosen as two dropdowns: dynamics × fitting.  Defaults =
-    // geodetic + Hermite-Simpson (= casadiDirectCollocation).
+    // Optimizer is chosen as two dropdowns: dynamics × fitting.  Default dynamics is the
+    // multiphase mode; this test exercises the plain geodetic Rk4 flow, so switch to it.
     expect((screen.getByRole("combobox", { name: "Dynamics" }) as HTMLSelectElement).value)
-      .toBe("geodetic");
+      .toBe("geodeticMultiphase");
     expect((screen.getByRole("combobox", { name: "Fitting" }) as HTMLSelectElement).value)
       .toBe("hermiteSimpson");
     expect((screen.getByLabelText("Max iter") as HTMLInputElement).value).toBe("300");
     // geodetic + shooting => casadiDirectCollocationRk4.
+    fireEvent.change(screen.getByRole("combobox", { name: "Dynamics" }), {
+      target: { value: "geodetic" },
+    });
     fireEvent.change(screen.getByRole("combobox", { name: "Fitting" }), {
       target: { value: "shooting" },
     });
@@ -452,8 +455,8 @@ describe("PilotPanel trajectory play mode", () => {
     const fittingSelect = screen.getByRole("combobox", { name: "Fitting" }) as HTMLSelectElement;
     const arrivalInput = screen.getByLabelText("Arrival time") as HTMLInputElement;
 
-    // Defaults: geodetic + Hermite-Simpson; all three fittings available.
-    expect(dynamicsSelect.value).toBe("geodetic");
+    // Default: multiphase + Hermite-Simpson; all three fittings available.
+    expect(dynamicsSelect.value).toBe("geodeticMultiphase");
     expect(fittingSelect.value).toBe("hermiteSimpson");
     expect(fittingSelect.querySelectorAll("option").length).toBe(3);
     expect(fittingSelect.disabled).toBe(false);
@@ -499,6 +502,11 @@ describe("PilotPanel trajectory play mode", () => {
     fireEvent.blur(headingInput);
     fireEvent.click(within(targetEditor).getByRole("button", { name: "Close" }));
 
+    // Default optimizer is the multiphase mode (needs an RNAV approach); this test only checks
+    // target clamping, so use the plain geodetic optimizer.
+    fireEvent.change(screen.getByRole("combobox", { name: "Dynamics" }), {
+      target: { value: "geodetic" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Optimize" }));
 
     await waitFor(() => {
@@ -583,6 +591,10 @@ describe("PilotPanel trajectory play mode", () => {
 
     expect(await screen.findByText("A320")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
+    // Default is the multiphase mode; this test plays a plain (unconstrained) optimized run.
+    fireEvent.change(screen.getByRole("combobox", { name: "Dynamics" }), {
+      target: { value: "geodetic" },
+    });
     fireEvent.click(await screen.findByRole("button", { name: "Optimize" }));
 
     await waitFor(() => {
@@ -660,6 +672,10 @@ describe("PilotPanel trajectory play mode", () => {
 
     expect(await screen.findByText("A320")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
+    // Default is the multiphase mode; this test exercises a plain optimized run.
+    fireEvent.change(screen.getByRole("combobox", { name: "Dynamics" }), {
+      target: { value: "geodetic" },
+    });
     fireEvent.click(await screen.findByRole("button", { name: "Optimize" }));
 
     await waitFor(() => {
@@ -689,19 +705,19 @@ describe("PilotPanel trajectory play mode", () => {
     expect(await screen.findByText("Target State")).toBeTruthy();
 
     const hint = "Per-leg constraints from the selected RNAV approach";
-    // Default dynamics is plain geodetic -> no procedure-constraint hint.
-    expect(screen.queryByText(hint)).toBeNull();
-
-    // The multiphase option is offered and, when selected, shows the per-leg hint.
-    fireEvent.change(screen.getByRole("combobox", { name: "Dynamics" }), {
-      target: { value: "geodeticMultiphase" },
-    });
+    // Multiphase is the DEFAULT dynamics -> the per-leg hint is shown on open.
     expect(screen.getByText(hint)).toBeTruthy();
 
-    // Switching away hides it again.
+    // Switching to a non-multiphase dynamics hides it.
     fireEvent.change(screen.getByRole("combobox", { name: "Dynamics" }), {
       target: { value: "geodetic" },
     });
     expect(screen.queryByText(hint)).toBeNull();
+
+    // Switching back shows it again.
+    fireEvent.change(screen.getByRole("combobox", { name: "Dynamics" }), {
+      target: { value: "geodeticMultiphase" },
+    });
+    expect(screen.getByText(hint)).toBeTruthy();
   });
 });

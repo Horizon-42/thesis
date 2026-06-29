@@ -367,6 +367,9 @@ function readOptimizer(value: Record<string, unknown>): TrajectoryOptimizer {
     nested === "casadiDirectCollocationNormalizedFullTransport" ||
     nested === "casadiDirectCollocationNormalizedFullTransportTrapezoidal" ||
     nested === "casadiDirectCollocationNormalizedFullTransportRk4" ||
+    nested === "casadiMultiphaseNormalizedFullTransport" ||
+    nested === "casadiMultiphaseNormalizedFullTransportTrapezoidal" ||
+    nested === "casadiMultiphaseNormalizedFullTransportRk4" ||
     nested === "casadiIpopt" ||
     nested === "transcription" ||
     nested === "leastSquaresTranscription" ||

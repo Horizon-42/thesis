@@ -103,7 +103,9 @@ const STEP_INTERVAL_MS = 120;
 const MAX_TRAIL_POINTS = 360;
 const DEFAULT_TARGET_GAMMA_DEG = -3;
 const DEFAULT_MAX_ITERATIONS = 300;
-const DEFAULT_ARRIVAL_TIME_S = 100;
+// A full RNAV approach optimizes to ~250-350 s, and for the multiphase optimizer this is the
+// per-phase cap (the longest leg alone is ~130 s), so the default must clear that comfortably.
+const DEFAULT_ARRIVAL_TIME_S = 600;
 const DEFAULT_COMPARISON_DURATION_S = 240;
 const DEFAULT_COMPARISON_DT_S = 0.1;
 const DEFAULT_COMPARISON_CONTROL: DynamicsComparisonControl = {
@@ -111,7 +113,7 @@ const DEFAULT_COMPARISON_CONTROL: DynamicsComparisonControl = {
   bankDeg: 0,
   loadFactor: 1,
 };
-const DEFAULT_TRAJECTORY_OPTIMIZER: TrajectoryOptimizer = "casadiDirectCollocation";
+const DEFAULT_TRAJECTORY_OPTIMIZER: TrajectoryOptimizer = "casadiMultiphaseNormalizedFullTransport";
 const OPTIMIZER_DYNAMICS_OPTIONS: { value: OptimizerDynamics; label: string }[] = [
   { value: "geodetic", label: "Geodetic RHS (+transport, approx)" },
   { value: "reanchoredEnu", label: "Re-anchored ENU (playback model)" },
