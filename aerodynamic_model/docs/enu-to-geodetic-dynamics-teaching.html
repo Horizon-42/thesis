@@ -1295,50 +1295,25 @@ J=\left.\frac{\partial(\phi,\lambda,h)}{\partial(E,N,U)}\right|_{0}
 \]</span></div>
 
           <figure class="viz" style="margin:14px 0 2px">
-            <svg viewBox="0 0 640 360" role="img" aria-label="当地框架转动角速度 ω_en 的两个来源"
-                 style="display:block;width:100%;height:auto;background:linear-gradient(180deg,#fbfdff 0%,#f3f7fa 100%);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif">
-              <defs>
-                <marker id="w-grn" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2e7d59"></path></marker>
-                <marker id="w-ind" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3d58a8"></path></marker>
-                <marker id="w-org" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b65b13"></path></marker>
-              </defs>
-              <text x="20" y="26" fill="#16212f" font-size="14" font-weight="700">当地框架的转动 ω_en = 两个旋转之和</text>
-              <!-- earth -->
-              <circle cx="205" cy="205" r="140" fill="#eaf4f5" stroke="#3a4a5c" stroke-width="2"></circle>
-              <line x1="70" y1="205" x2="345" y2="205" stroke="#cdd7e0" stroke-width="1.2" stroke-dasharray="5 5"></line>
-              <text x="312" y="222" fill="#8795a8" font-size="11">赤道</text>
-              <!-- spin axis -->
-              <line x1="205" y1="48" x2="205" y2="362" stroke="#16212f" stroke-width="2.2"></line>
-              <circle cx="205" cy="62" r="3.5" fill="#16212f"></circle>
-              <text x="150" y="44" fill="#16212f" font-size="12" font-weight="700">自转轴 ẑ_e</text>
-              <!-- lambda-dot rotation about spin axis -->
-              <path d="M 238 60 A 33 12 0 1 1 236 57" fill="none" stroke="#b65b13" stroke-width="2.2" marker-end="url(#w-org)"></path>
-              <text x="243" y="55" fill="#9a4c10" font-size="14" font-weight="700">①</text>
-              <!-- phi angle at O -->
-              <polyline points="255,205 252,193 246,182 238,173" fill="none" stroke="#607084" stroke-width="1.6"></polyline>
-              <text x="258" y="190" fill="#607084" font-size="13">φ</text>
-              <!-- P -->
-              <circle cx="309" cy="110" r="5" fill="#16212f"></circle>
-              <text x="316" y="106" fill="#16212f" font-size="13" font-weight="700">P</text>
-              <!-- triad at P -->
-              <line x1="309" y1="110" x2="277" y2="75" stroke="#2e7d59" stroke-width="2.4" marker-end="url(#w-grn)"></line>
-              <text x="246" y="72" fill="#2e7d59" font-size="13" font-weight="700">n̂ 北</text>
-              <line x1="309" y1="110" x2="342" y2="80" stroke="#3d58a8" stroke-width="2.4" marker-end="url(#w-ind)"></line>
-              <text x="348" y="78" fill="#314b99" font-size="13" font-weight="700">û 天</text>
-              <circle cx="309" cy="140" r="7" fill="none" stroke="#9a4c10" stroke-width="2"></circle>
-              <circle cx="309" cy="140" r="1.8" fill="#9a4c10"></circle>
-              <text x="320" y="145" fill="#9a4c10" font-size="12">ê 东（出页面）</text>
-              <!-- phi-dot rotation about East axis, drawn to the right -->
-              <path d="M 470 150 A 40 40 0 0 1 470 230" fill="none" stroke="#b65b13" stroke-width="2.2" marker-end="url(#w-org)"></path>
-              <text x="450" y="152" fill="#9a4c10" font-size="14" font-weight="700">②</text>
-              <!-- legend (open area, right of the earth) -->
-              <text x="382" y="296" fill="#9a4c10" font-size="13" font-weight="700">① 向东飞 → 绕自转轴 ẑ_e 转 λ̇</text>
-              <text x="382" y="320" fill="#9a4c10" font-size="13" font-weight="700">② 向北飞 → 绕东轴 ê 转 φ̇</text>
-              <text x="382" y="346" fill="#16212f" font-size="13">分解 ẑ_e = cosφ·n̂ + sinφ·û</text>
-            </svg>
+            <div id="viz-omega" class="plot" style="height:500px"></div>
+            <div class="controls">
+              <span><label for="om-lat">纬度 φ / latitude</label></span>
+              <input id="om-lat" type="range" min="5" max="80" value="45" step="1">
+              <span><label for="om-lon">向东移动（改变经度 λ）/ move east (longitude λ)</label></span>
+              <input id="om-lon" type="range" min="-10" max="80" value="25" step="1">
+              <span><label for="om-show">展示 / show</label></span>
+              <select id="om-show" style="font-size:13px;padding:3px 6px;border-radius:6px;border:1px solid var(--line)">
+                <option value="lon">① 经度变化 λ̇ → 绕自转轴 ẑ_e（含投影）</option>
+                <option value="lat">② 纬度变化 φ̇ → 绕东轴 ê</option>
+                <option value="both">③ 两者叠加 = ω_en</option>
+              </select>
+              <span class="chip"><span class="dot" style="background:#7b3fb5"></span>λ̇ ẑ_e（绕自转轴 spin axis）</span>
+              <span class="chip"><span class="dot" style="background:#007c89"></span>−φ̇ ê（绕东轴 East axis）</span>
+            </div>
+            <div class="readout" id="om-out"></div>
             <figcaption>
-              示意图 · \(\boldsymbol\omega_{en}\) 的两个来源（侧视子午剖面，\(\hat{\mathbf e}\) 东向<strong>垂直纸面</strong>）。<strong>①</strong> 向东飞改变经度 \(\lambda\)，等于整套框架绕<strong>自转轴 \(\hat{\mathbf z}_e\)</strong> 转 \(\dot\lambda\)；把 \(\hat{\mathbf z}_e=\cos\phi\,\hat{\mathbf n}+\sin\phi\,\hat{\mathbf u}\) 一分解，就给出 \(\omega_N=\dot\lambda\cos\phi\)、\(\omega_U=\dot\lambda\sin\phi\)。<strong>②</strong> 向北飞改变纬度 \(\phi\)，等于框架绕<strong>东轴 \(\hat{\mathbf e}\)</strong> 扳 \(\dot\phi\)，给出 \(\omega_E=-\dot\phi\)。两者相加即 \(\boldsymbol\omega_{en}=(-\dot\phi,\ \dot\lambda\cos\phi,\ \dot\lambda\sin\phi)\)。
-              <span class="en" lang="en">Sketch · the two sources of \(\boldsymbol\omega_{en}\) (meridian section; East \(\hat{\mathbf e}\) is <strong>out of the page</strong>). <strong>①</strong> Flying east changes longitude \(\lambda\) = the whole frame turning about the <strong>spin axis \(\hat{\mathbf z}_e\)</strong> at \(\dot\lambda\); decomposing \(\hat{\mathbf z}_e=\cos\phi\,\hat{\mathbf n}+\sin\phi\,\hat{\mathbf u}\) gives \(\omega_N=\dot\lambda\cos\phi\), \(\omega_U=\dot\lambda\sin\phi\). <strong>②</strong> Flying north changes latitude \(\phi\) = the frame tipping about the <strong>East axis \(\hat{\mathbf e}\)</strong> at \(\dot\phi\), giving \(\omega_E=-\dot\phi\). Their sum is \(\boldsymbol\omega_{en}=(-\dot\phi,\ \dot\lambda\cos\phi,\ \dot\lambda\sin\phi)\).</span>
+              互动图 · 当地 ENU 框架转动角速度 \(\boldsymbol\omega_{en}\) 的两个来源（真实球面，可用鼠标拖动旋转视角；球体与箭头长度为示意）。<strong>拖“经度 λ”滑块</strong>：飞机沿纬线向东走，整套三轴<strong>绕自转轴 \(\hat{\mathbf z}_e\) 转</strong>——这正是 \(\dot\lambda\) 那一项（紫色弧）。<strong>拖“纬度 φ”滑块</strong>：三轴<strong>绕东轴 \(\hat{\mathbf e}\) 倾倒</strong>——这正是 \(\dot\phi\) 那一项（青色弧）。下拉选 ①，紫色箭头 \(\hat{\mathbf z}_e\) 被拆成一个<strong>直角三角形</strong>：沿北的 \(\cos\phi\,\hat{\mathbf n}\)（绿虚线）+ 沿天的 \(\sin\phi\,\hat{\mathbf u}\)（蓝虚线）——这就是公式里那条投影 \(\hat{\mathbf z}_e=\cos\phi\,\hat{\mathbf n}+\sin\phi\,\hat{\mathbf u}\)，因此 \(\omega_N=\dot\lambda\cos\phi\)、\(\omega_U=\dot\lambda\sin\phi\)。读数给出当前 \(\phi\) 的真实 \(\cos\phi,\sin\phi\)。
+              <span class="en" lang="en">Interactive · the two sources of the local ENU frame’s angular velocity \(\boldsymbol\omega_{en}\) (real sphere, drag with the mouse to orbit; sphere and arrow lengths are schematic). <strong>Drag “longitude λ”</strong>: the aircraft moves east along the parallel and the whole triad <strong>rotates about the spin axis \(\hat{\mathbf z}_e\)</strong> — exactly the \(\dot\lambda\) term (purple arc). <strong>Drag “latitude φ”</strong>: the triad <strong>tips about the East axis \(\hat{\mathbf e}\)</strong> — exactly the \(\dot\phi\) term (teal arc). Choose ① and the purple \(\hat{\mathbf z}_e\) arrow splits into a <strong>right triangle</strong>: \(\cos\phi\,\hat{\mathbf n}\) along north (green dashed) + \(\sin\phi\,\hat{\mathbf u}\) along up (blue dashed) — exactly the projection \(\hat{\mathbf z}_e=\cos\phi\,\hat{\mathbf n}+\sin\phi\,\hat{\mathbf u}\), so \(\omega_N=\dot\lambda\cos\phi\) and \(\omega_U=\dot\lambda\sin\phi\). The readout gives the real \(\cos\phi,\sin\phi\) at the current \(\phi\).</span>
             </figcaption>
           </figure>
         </div>
@@ -2204,6 +2179,132 @@ a_{\text{vert}}\approx g\,(1-\cos\theta)\approx \tfrac12 g\,\theta^2
     }
     build();
     slider.addEventListener('input', build);
+    sel.addEventListener('change', build);
+  });
+
+  // ============================================================
+  //  FIGURE 2c — omega_en: the two rotation sources + the z_e projection
+  //  Longitude change -> rotation about the spin axis z_e (and its
+  //  cos(phi)*n + sin(phi)*u projection); latitude change -> tip about
+  //  the East axis. Latitude/longitude sliders move the triad live.
+  // ============================================================
+  onReady(function(){
+    const div  = document.getElementById('viz-omega');
+    const sLat = document.getElementById('om-lat');
+    const sLon = document.getElementById('om-lon');
+    const sel  = document.getElementById('om-show');
+    const out  = document.getElementById('om-out');
+
+    const R = 1, L = 0.55;
+    const PURPLE = '#7b3fb5';                       // lambda-dot axis (parallel to spin axis)
+
+    const globe = sphereSurface(R, '#e3f1f2', 0.5);
+    const spinAxis = { type:'scatter3d', mode:'lines', x:[0,0], y:[0,0], z:[-1.34, 1.55],
+      line:{color:INK, width:3}, hoverinfo:'skip' };
+    const eqx=[],eqy=[],eqz=[];
+    for (let i=0;i<=120;i++){ const t=2*Math.PI*i/120; eqx.push(Math.cos(t)); eqy.push(Math.sin(t)); eqz.push(0); }
+    const equator = { type:'scatter3d', mode:'lines', x:eqx, y:eqy, z:eqz,
+      line:{color:'#c2cfdb', width:1.4, dash:'dot'}, hoverinfo:'skip' };
+
+    function parallelCircle(latr){          // the constant-latitude path ("move east")
+      const x=[],y=[],z=[], r=Math.cos(latr), zz=Math.sin(latr);
+      for (let i=0;i<=120;i++){ const t=2*Math.PI*i/120; x.push(r*Math.cos(t)); y.push(r*Math.sin(t)); z.push(zz); }
+      return { type:'scatter3d', mode:'lines', x, y, z, line:{color:'#a6d4d9', width:2}, hoverinfo:'skip' };
+    }
+    function txt(p, s, color, pos){
+      return { type:'scatter3d', mode:'text', x:[p[0]], y:[p[1]], z:[p[2]],
+        text:[s], textposition:pos||'middle center', textfont:{size:12, color:color}, hoverinfo:'skip' };
+    }
+    function dline(a, b2, color){            // a dashed segment a -> b2
+      return { type:'scatter3d', mode:'lines', x:[a[0],b2[0]], y:[a[1],b2[1]], z:[a[2],b2[2]],
+        line:{color:color, width:5, dash:'dash'}, hoverinfo:'skip' };
+    }
+    // a curved arrow: arc in the (uA,uB) plane around center, plus a cone head tangent at the end
+    function arcArrow(center, radius, uA, uB, sweepDeg, color){
+      const n=28, x=[],y=[],z=[];
+      for (let i=0;i<=n;i++){ const a=sweepDeg*D2R*i/n, c=Math.cos(a), s=Math.sin(a);
+        x.push(center[0]+radius*(c*uA[0]+s*uB[0]));
+        y.push(center[1]+radius*(c*uA[1]+s*uB[1]));
+        z.push(center[2]+radius*(c*uA[2]+s*uB[2])); }
+      const aE=sweepDeg*D2R;
+      const tang=[-Math.sin(aE)*uA[0]+Math.cos(aE)*uB[0],
+                  -Math.sin(aE)*uA[1]+Math.cos(aE)*uB[1],
+                  -Math.sin(aE)*uA[2]+Math.cos(aE)*uB[2]];
+      return [
+        { type:'scatter3d', mode:'lines', x, y, z, line:{color:color, width:5}, hoverinfo:'skip' },
+        { type:'cone', x:[x[n]], y:[y[n]], z:[z[n]], u:[tang[0]], v:[tang[1]], w:[tang[2]],
+          sizemode:'absolute', sizeref:0.05, anchor:'tip', showscale:false,
+          colorscale:[[0,color],[1,color]], hoverinfo:'skip' }
+      ];
+    }
+
+    function build(){
+      const latDeg=+sLat.value, lonDeg=+sLon.value, show=sel.value;
+      const latr=latDeg*D2R, lonr=lonDeg*D2R;
+      const cphi=Math.cos(latr), sphi=Math.sin(latr);
+      const P=[cphi*Math.cos(lonr), cphi*Math.sin(lonr), sphi];   // on the unit sphere
+      const b=enuBasis(latr, lonr);                                // e, n, u (unit)
+      const zhat=[0,0,1];
+
+      let traces=[globe, spinAxis, equator, parallelCircle(latr)];
+
+      // ENU triad at P (always shown)
+      traces = traces.concat(arrow(P, scl(b.e, L), ORANGE, 0.05));
+      traces = traces.concat(arrow(P, scl(b.n, L), GREEN, 0.05));
+      traces = traces.concat(arrow(P, scl(b.u, L), INDIGO, 0.05));
+      traces.push(txt(add(P, scl(b.e, L*1.14)), 'ê 东', ORANGE));
+      traces.push(txt(add(P, scl(b.n, L*1.14)), 'n̂ 北', GREEN));
+      traces.push(txt(add(P, scl(b.u, L*1.14)), 'û 天', INDIGO));
+      traces.push({ type:'scatter3d', mode:'markers', x:[P[0]], y:[P[1]], z:[P[2]],
+        marker:{size:4, color:INK}, hoverinfo:'skip' });
+      traces.push(txt([0,0,1.66], 'ẑ_e 自转轴', INK));
+
+      const showLon=(show==='lon'||show==='both');
+      const showLat=(show==='lat'||show==='both');
+
+      if (showLon){
+        const Lz=L;
+        const zTip=add(P, scl(zhat, Lz));
+        traces = traces.concat(arrow(P, scl(zhat, Lz), PURPLE, 0.05));
+        traces.push(txt(add(zTip,[0,0,0.07]), 'λ̇ ẑ_e', PURPLE, 'top center'));
+        // projection right-triangle  z_e = cos(phi)*n + sin(phi)*u  (head-to-tail)
+        const Apt=add(P, scl(b.n, Lz*cphi));
+        traces.push(dline(P, Apt, GREEN));                 // cos(phi)*n
+        traces.push(dline(Apt, zTip, INDIGO));             // sin(phi)*u  (right angle at Apt)
+        traces.push(txt(add(P, scl(b.n, Lz*cphi*0.5)), 'cosφ·n̂', GREEN, 'bottom center'));
+        traces.push(txt(add(Apt, scl(b.u, Lz*sphi*0.5)), 'sinφ·û', INDIGO, 'middle right'));
+        // sense of lambda-dot: an east-going arc along the parallel, about the spin axis
+        const axisC=[0,0,sphi];
+        const uA=[Math.cos(lonr), Math.sin(lonr), 0];
+        const uB=[-Math.sin(lonr), Math.cos(lonr), 0];
+        traces = traces.concat(arcArrow(axisC, cphi, uA, uB, 34, PURPLE));
+      }
+      if (showLat){
+        // rotation axis -e and the north-tipping arc in the meridian (n-u) plane
+        traces = traces.concat(arrow(P, scl(b.e, -L*0.85), TEAL, 0.05));
+        traces.push(txt(add(P, scl(b.e, -L*1.02)), '−φ̇ ê', TEAL, 'middle center'));
+        traces = traces.concat(arcArrow(P, L*0.62, b.u, b.n, 40, TEAL));
+      }
+
+      Plotly.react(div, traces, Object.assign(LAYOUT(500), {
+        scene: scene3d({ camera:{ eye:{x:1.35, y:1.15, z:0.95} } })
+      }), {displayModeBar:false, responsive:true});
+
+      const parts = ['真实 @ φ=' + latDeg + '°：&nbsp; cosφ = <b>' + cphi.toFixed(4) + '</b> &nbsp; sinφ = <b>' + sphi.toFixed(4) + '</b>'];
+      if (show==='lon'){
+        parts.push('ẑ_e 在 ENU 里 = (0, cosφ, sinφ) = <b>(0, ' + cphi.toFixed(3) + ', ' + sphi.toFixed(3) + ')</b>');
+        parts.push('⟹ ω_N = λ̇·cosφ,&nbsp; ω_U = λ̇·sinφ');
+      } else if (show==='lat'){
+        parts.push('绕东轴：ω_E = <b>−φ̇</b>（向北走时整个框架绕 ê 倾倒）');
+      } else {
+        parts.push('ω_en = (ω_E, ω_N, ω_U) = <b>(−φ̇,&nbsp; λ̇·' + cphi.toFixed(3) + ',&nbsp; λ̇·' + sphi.toFixed(3) + ')</b>');
+      }
+      out.innerHTML = parts.join(' &nbsp;·&nbsp; ') +
+        ' &nbsp;<span style="color:'+MUTED+'">（球面与箭头为示意 / sphere &amp; arrows schematic）</span>';
+    }
+    build();
+    sLat.addEventListener('input', build);
+    sLon.addEventListener('input', build);
     sel.addEventListener('change', build);
   });
 
