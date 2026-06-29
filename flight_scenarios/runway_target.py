@@ -58,13 +58,15 @@ def threshold_target_state(
     """A target state at the runway threshold, or ``None`` if the threshold is unknown.
 
     Position = threshold lat/lon at ``elevation + threshold_crossing_height``; ``V`` = the
-    aircraft's reference approach speed (Vref); ``psi`` = the runway heading; ``gamma`` = the
-    coded glidepath descent (negative).
+    aircraft's reference approach speed (Vref); ``psi`` = the runway heading (in the model's
+    math-ENU convention); ``gamma`` = the coded glidepath descent (negative).
     """
     threshold = find_threshold(airport, runway)
     if threshold is None:
         return None
-    psi = math.radians(float(threshold["heading_deg"]))
+    # ``heading_deg`` is a compass bearing (0 = N, clockwise); the modeling layer's psi is the
+    # math-ENU heading (0 = E, CCW toward N), so psi = 90deg - bearing (then wrap to [-pi, pi]).
+    psi = math.radians(90.0 - float(threshold["heading_deg"]))
     psi = (psi + math.pi) % (2.0 * math.pi) - math.pi  # wrap to [-pi, pi]
     return GeodeticState(
         latitude=float(threshold["lat"]),

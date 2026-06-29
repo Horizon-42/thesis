@@ -31,8 +31,23 @@ def test_due_east_level_track():
     assert s.m == 78000.0
     # kinematics estimated over the 5 s window
     assert s.V == pytest.approx(100.0, rel=1e-2)
-    assert s.psi == pytest.approx(math.pi / 2, abs=1e-2)   # due east
+    # math-ENU heading: psi = 0 is due East (NOT the compass bearing pi/2)
+    assert s.psi == pytest.approx(0.0, abs=1e-2)           # due east
     assert s.gamma == pytest.approx(0.0, abs=1e-3)          # level
+
+
+def test_due_north_level_track():
+    # Locks the convention on the other axis: due North must be psi = +pi/2 in math-ENU
+    # (the compass bearing of due North is 0 — the reflection bug would return 0 here).
+    lat_step_deg = 500.0 / (math.pi / 180.0 * 6378137.0)
+    due_north = [
+        [0.0, 0.0, 0.0, 1000.0],
+        [5.0, 0.0, lat_step_deg, 1000.0],
+        [10.0, 0.0, 2 * lat_step_deg, 1000.0],
+    ]
+    s = initial_state_from_track(due_north, mass_kg=78000.0)
+    assert s.V == pytest.approx(100.0, rel=1e-2)
+    assert s.psi == pytest.approx(math.pi / 2, abs=1e-2)   # due north
 
 
 def test_climbing_track_has_positive_gamma():
@@ -48,7 +63,7 @@ def test_final_state_is_anchored_at_track_end():
     s = final_state_from_track(DUE_EAST_LEVEL, mass_kg=78000.0)
     assert (s.latitude, s.longitude, s.altitude) == (0.0, 2 * _LON_STEP_DEG, 1000.0)
     assert s.V == pytest.approx(100.0, rel=1e-2)
-    assert s.psi == pytest.approx(math.pi / 2, abs=1e-2)   # still due east
+    assert s.psi == pytest.approx(0.0, abs=1e-2)           # still due east (math-ENU)
     assert s.gamma == pytest.approx(0.0, abs=1e-3)
 
 
@@ -72,4 +87,4 @@ def test_velocity_is_robust_to_a_stuck_sample():
     ]
     s = final_state_from_track(stuck, mass_kg=78000.0)
     assert s.V == pytest.approx(100.0, rel=2e-2)          # not dragged down by the stuck sample
-    assert s.psi == pytest.approx(math.pi / 2, abs=1e-2)  # still due east
+    assert s.psi == pytest.approx(0.0, abs=1e-2)          # still due east (math-ENU)

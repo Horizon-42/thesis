@@ -8,8 +8,15 @@ The point-mass model state is ``(lat, lon, alt, V, psi, gamma, m)``:
   directly. They are *estimated* from the motion over a short window:
 
       V     = speed along the flight path         = |velocity|
-      psi   = heading (0 = North, CW, radians)    = atan2(east_velocity, north_velocity)
+      psi   = heading (0 = East, CCW toward North, radians) = atan2(north_velocity, east_velocity)
       gamma = flight-path angle (+ = climb, rad)  = atan2(vertical_velocity, ground_speed)
+
+``psi`` follows the **math-ENU convention used by the modeling layer**
+(``aerodynamic_model``: ``V_east = V cos psi``, ``V_north = V sin psi`` — ``psi = 0`` is
+due East, increasing counter-clockwise toward North). This is NOT the compass/aviation
+bearing (0 = North, clockwise) that ``generate_czml`` renders the track with; the two are a
+reflection apart (``psi_enu = pi/2 - bearing``). The state produced here is integrated and
+rendered by the modeling layer, so it must use the modeling-layer convention.
 
 The velocity is a **least-squares fit** of the ENU position against time over the window,
 not a 2-point finite difference. Low-altitude ADS-B is jittery — duplicate / "stuck"
@@ -121,7 +128,9 @@ def _velocity_lsq(window: list[Waypoint]) -> tuple[float, float, float]:
 
     ground_speed = math.hypot(ve, vn)
     V = math.sqrt(ve * ve + vn * vn + vu * vu)
-    psi = math.atan2(ve, vn) if ground_speed > 0.0 else 0.0
+    # math-ENU heading (0 = East, CCW toward North), matching the modeling layer's
+    # V_east = V cos psi / V_north = V sin psi — NOT the compass bearing atan2(ve, vn).
+    psi = math.atan2(vn, ve) if ground_speed > 0.0 else 0.0
     gamma = math.atan2(vu, ground_speed) if ground_speed > 0.0 else 0.0
     return V, psi, gamma
 

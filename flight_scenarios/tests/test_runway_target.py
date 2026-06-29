@@ -28,9 +28,21 @@ def test_threshold_target_uses_threshold_and_approach_envelope():
     # crosses the threshold at the coded crossing height above its elevation
     assert t.altitude == pytest.approx(thr["elevation_m"] + A320.approach.threshold_crossing_height_m)
     assert t.V == pytest.approx(A320.approach.reference_speed_ms)          # Vref
-    assert t.psi == pytest.approx(math.radians(45.0))                       # runway heading
+    # 05L is a compass bearing of 45deg; in math-ENU psi = 90 - 45 = 45deg (the diagonal is
+    # the reflection's fixed point, so this case alone can't catch the convention — see below).
+    assert t.psi == pytest.approx(math.radians(45.0))
     assert t.gamma == pytest.approx(math.radians(-A320.approach.glide_angle_deg))  # descending
     assert t.m == 66000.0
+
+
+def test_threshold_target_psi_is_math_enu_not_compass():
+    # A non-diagonal runway, where compass bearing != math-ENU heading, locks the convention.
+    thr = find_threshold("KSTL", "30L")
+    assert thr["heading_deg"] == 302.0                    # compass bearing
+    t = threshold_target_state("KSTL", "30L", A320, mass_kg=66000.0)
+    expected = math.radians(90.0 - 302.0)                 # math-ENU
+    expected = (expected + math.pi) % (2.0 * math.pi) - math.pi  # wrap to [-pi, pi]
+    assert t.psi == pytest.approx(expected)               # = radians(148), NOT radians(302)
 
 
 def test_threshold_target_unknown_returns_none():

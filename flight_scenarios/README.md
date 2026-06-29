@@ -71,7 +71,7 @@ Then:
         │  ╱│
    path │ ╱ │ vertical_m         V     = √(horizontal_m² + vertical_m²) / dt
         │╱  │                    gamma = atan2(vertical_m, horizontal_m)   (+ = climb)
-     p0 └───┘                    psi   = bearing(p0 → p1)                  (0 = N, CW)
+     p0 └───┘                    psi   = atan2(north_m, east_m)   (0 = E, CCW toward N)
         horizontal_m
 ```
 
@@ -80,7 +80,12 @@ Then:
   climb; for a 3° approach the difference is tiny, but the along-path speed is what the
   point-mass `V` means.)
 - **`gamma`** is the angle of that hypotenuse above the horizontal — `atan2(rise, run)`.
-- **`psi`** is the compass heading of the horizontal step — a great-circle bearing.
+- **`psi`** is the heading of the horizontal step in the **math-ENU convention used by the
+  modeling layer** (`aerodynamic_model`: `V_east = V cos psi`, `V_north = V sin psi`, so
+  `psi = 0` is due East, increasing CCW toward North): `psi = atan2(north_m, east_m)`. This
+  is NOT the compass bearing (0 = N, clockwise) — the two are a reflection apart
+  (`psi_enu = pi/2 - bearing`). The state is consumed (integrated + rendered) by the
+  modeling layer, so it must use that layer's convention.
 
 ### → The TODO
 
