@@ -593,13 +593,14 @@ def _solve_iaf(
     pc, scenario: FlightScenario, target: GeodeticState, aircraft: Any, min_speed_ms: float,
     *, n_segments: int, dt: float, max_duration: float, verbose: bool,
 ) -> _IafSolve:
-    """Full CONSTRAINED solve from ONE IAF path to the runway. Raises on infeasibility.
+    """Full CONSTRAINED solve from the scenario's OBSERVED start to the runway via one IAF path.
 
     Uses the backend's ``build_constraint_segments`` (constraint geometry) and the **multiphase**
-    optimiser: one phase per leg (the IAF-state→first-fix transition + each procedure leg), fixes
-    pinned at the phase boundaries, exact per-leg constraints (no along-track partition).
-    ``n_segments``/``dt`` are accepted for CLI/API parity but unused by the multiphase optimiser,
-    which sets its own per-phase control/state mesh.
+    optimiser. The start is the observed ``scenario.initial`` (so the result is comparable to the
+    ADS-B track), NOT a synthetic IAF state: the optimiser flies a free transition from there to the
+    procedure's first fix (pre-FAF legs are unpinned, altitude-only), then each procedure leg with
+    its corridor / glidepath / floor. Raises on infeasibility. ``n_segments``/``dt`` are accepted
+    for CLI/API parity but unused by the multiphase optimiser (it sets its own per-phase mesh).
     """
     from aeroviz_backend.procedure_segments import build_constraint_segments
     from multiphase_collocation_optimizer import MultiphaseCollocationOptimizer
@@ -608,16 +609,16 @@ def _solve_iaf(
     )
     if not segments:
         raise ValueError("no constraint segments")
-    iaf_initial = _iaf_initial_state(pc, scenario)
+    start_state = scenario.initial
     optimizer = MultiphaseCollocationOptimizer(
         aircraft, segments,
         scheme="hermiteSimpsonNormalizedFullTransport",
         min_speed_ms=min_speed_ms,
         verbose=verbose,
     )
-    final_time, node_control, _ = optimizer.optimize_free_time(iaf_initial, target, max_duration)
+    final_time, node_control, _ = optimizer.optimize_free_time(start_state, target, max_duration)
     return _IafSolve(
-        float(final_time), pc, iaf_initial, node_control,
+        float(final_time), pc, start_state, node_control,
         optimizer.last_dense_states_geo, list(optimizer.segment_durations_s),
     )
 
