@@ -894,7 +894,7 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   grid-area: ops;
   align-self: stretch;
   justify-self: end;
-  width: clamp(260px, 22vw, 340px);
+  width: var(--overlay-left-width);
   max-width: min(100%, calc(100vw - 36px));
   min-height: 0;
   max-height: 100%;
@@ -2558,7 +2558,8 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   color: #c8d8ec;
   border-radius: 8px;
   padding: 7px 10px;
-  width: clamp(190px, 15vw, 230px);
+  box-sizing: border-box;
+  width: var(--overlay-left-width);
   font-family: "Inter", "Segoe UI", sans-serif;
   font-size: 12px;
   user-select: none;

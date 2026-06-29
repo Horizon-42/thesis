@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 
 vi.mock("cesium", () => ({
   ClockRange: { LOOP_STOP: "LOOP_STOP", CLAMPED: "CLAMPED" },
+  ClockStep: { SYSTEM_CLOCK_MULTIPLIER: "SYSTEM_CLOCK_MULTIPLIER" },
 }));
 
 const { appState, setPlaybackSpeed, setAutoReplay, makeClock } = vi.hoisted(() => {
@@ -45,10 +46,10 @@ describe("WorkbenchBottomBar", () => {
     vi.clearAllMocks();
   });
 
-  it("renders nothing in the procedures (non-time) mode", () => {
-    appState.mode = "procedures";
-    const { container } = render(<WorkbenchBottomBar />);
-    expect(container.firstChild).toBeNull();
+  it("renders the transport in every time-based task (e.g. optimize)", () => {
+    appState.mode = "optimize";
+    render(<WorkbenchBottomBar />);
+    expect(screen.getByRole("button", { name: /Play/ })).toBeTruthy();
   });
 
   it("toggles play/pause on the clock", () => {
@@ -57,11 +58,20 @@ describe("WorkbenchBottomBar", () => {
     expect(appState.viewer.clock.shouldAnimate).toBe(true);
   });
 
-  it("changes the clock multiplier and playback speed", () => {
+  it("changes the clock multiplier (in multiplier mode) and playback speed", () => {
     render(<WorkbenchBottomBar />);
     fireEvent.click(screen.getByRole("button", { name: "120×" }));
     expect(setPlaybackSpeed).toHaveBeenCalledWith(120);
     expect(appState.viewer.clock.multiplier).toBe(120);
+    expect(appState.viewer.clock.clockStep).toBe("SYSTEM_CLOCK_MULTIPLIER");
+  });
+
+  it("highlights the preset matching the LIVE clock multiplier (synced with the native dial)", () => {
+    // The native Cesium dial moves viewer.clock.multiplier; the bar reads it on mount.
+    appState.viewer.clock.multiplier = 30;
+    render(<WorkbenchBottomBar />);
+    expect(screen.getByRole("button", { name: "30×" }).classList.contains("active")).toBe(true);
+    expect(screen.getByRole("button", { name: "60×" }).classList.contains("active")).toBe(false);
   });
 
   it("resets the clock to the start time", () => {

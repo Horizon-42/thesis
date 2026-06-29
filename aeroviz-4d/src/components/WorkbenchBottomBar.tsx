@@ -1,11 +1,15 @@
 /**
  * WorkbenchBottomBar.tsx
  * ----------------------
- * The transport bar docked along the bottom (above Cesium's timeline scrubber):
- * play/pause, reset, clock-speed presets, and auto-replay. The controls operate
- * generically on `viewer.clock`, so they drive whichever source set the clock
- * (observed CZML, optimizer comparison, or the pilot sim). Shown only in the
- * time-based tasks; hidden in Procedures.
+ * The transport bar docked bottom-center (above Cesium's timeline, clear of the
+ * native clock dial at bottom-left): play/pause, reset, clock-speed presets, and
+ * auto-replay. The controls operate generically on `viewer.clock`, so they stay in
+ * sync (联动) with Cesium's own animation dial — both read and drive the SAME clock.
+ *
+ * The play/pause icon and the highlighted speed reflect the LIVE clock state (read
+ * each tick), so dragging the native dial updates this bar, and clicking a preset
+ * here moves the dial. The discrete presets + Reset + loop toggle are the extras the
+ * native dial's continuous shuttle ring doesn't offer.
  */
 
 import * as Cesium from "cesium";
@@ -23,18 +27,24 @@ const SPEED_OPTIONS: Array<{ label: string; value: number }> = [
 const TIME_MODES = new Set(["observe", "fly", "optimize", "compare"]);
 
 export default function WorkbenchBottomBar() {
-  const { viewer, mode, playbackSpeed, setPlaybackSpeed, autoReplay, setAutoReplay } = useApp();
+  const { viewer, mode, setPlaybackSpeed, autoReplay, setAutoReplay } = useApp();
   const [isAnimating, setIsAnimating] = useState<boolean>(false);
+  const [liveMultiplier, setLiveMultiplier] = useState<number>(60);
 
+  // Mirror the live clock so the bar stays in sync with the native Cesium dial:
+  // whichever control moves viewer.clock, this reflects it (play state + speed).
   useEffect(() => {
     if (!viewer) {
       setIsAnimating(false);
       return;
     }
     setIsAnimating(viewer.clock.shouldAnimate);
+    setLiveMultiplier(viewer.clock.multiplier);
     const removeListener = viewer.clock.onTick.addEventListener(() => {
-      const next = viewer.clock.shouldAnimate;
-      setIsAnimating((prev) => (prev === next ? prev : next));
+      const animating = viewer.clock.shouldAnimate;
+      const multiplier = viewer.clock.multiplier;
+      setIsAnimating((prev) => (prev === animating ? prev : animating));
+      setLiveMultiplier((prev) => (prev === multiplier ? prev : multiplier));
     });
     return () => removeListener();
   }, [viewer]);
@@ -43,7 +53,13 @@ export default function WorkbenchBottomBar() {
 
   function handleSpeedChange(speed: number) {
     setPlaybackSpeed(speed);
-    if (viewer) viewer.clock.multiplier = speed;
+    if (viewer) {
+      // Leave real-time (SYSTEM_CLOCK) mode so the multiplier actually takes effect —
+      // the same thing the native dial's speed control does, keeping the two in sync.
+      viewer.clock.clockStep = Cesium.ClockStep.SYSTEM_CLOCK_MULTIPLIER;
+      viewer.clock.multiplier = speed;
+    }
+    setLiveMultiplier(speed);
   }
 
   function handlePlayPause() {
@@ -75,7 +91,7 @@ export default function WorkbenchBottomBar() {
         {SPEED_OPTIONS.map((opt) => (
           <button
             key={opt.value}
-            className={playbackSpeed === opt.value ? "active" : ""}
+            className={liveMultiplier === opt.value ? "active" : ""}
             onClick={() => handleSpeedChange(opt.value)}
           >
             {opt.label}
