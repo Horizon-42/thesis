@@ -30,7 +30,7 @@ import os
 import re
 import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -397,6 +397,452 @@ def _scenario_filename(scenario: FlightScenario, index: int) -> str:
     return f"{safe}_states.json"
 
 
+# ── Constrained, min-time IAF optimization (NEW) ──────────────────────────────
+#
+# A wrapper around the per-IAF solve: for one scenario, optimize a CONSTRAINED trajectory
+# from each of its runway RNAV(GPS) procedure's IAFs to the runway, and keep the single
+# FASTEST (min final_time). Each scenario still yields exactly one trajectory.
+#
+# Everything heavy is reused: the canonical ``ProcedureConstraint`` + the backend's
+# ``build_constraint_segments`` (constraint geometry), the optimizer's ``constraint_segments``/
+# ``constraint_spans`` path constraints, and this module's existing dense-export / rollout /
+# batch-IO helpers. The functions above are untouched.
+
+DEFAULT_PROCEDURE_ROOT = _REPO_ROOT / "aeroviz-4d" / "public" / "data" / "airports"
+DEFAULT_AIRPORT = "KRDU"
+
+
+@dataclass
+class _IafSolve:
+    """One feasible IAF candidate's solve, kept while searching for the fastest."""
+    final_time: float
+    pc: Any                 # the IAF→runway ProcedureConstraint (carries the chosen IAF)
+    initial: GeodeticState  # the IAF initial state
+    controls: Any           # node controls (for the rollout)
+    dense_states: Any       # the optimizer's dense planned states
+
+
+def _resolve_procedure_path(procedure_root: str | Path, airport: str, runway: str) -> Path:
+    """Path to the runway's RNAV(GPS) procedure detail document, via the airport's index.json."""
+    root = Path(procedure_root) / airport.upper() / "procedure-details"
+    index = json.loads((root / "index.json").read_text(encoding="utf-8"))
+    runway_ident = f"RW{runway.upper()}"
+    for entry in index.get("runways", []):
+        if entry.get("runwayIdent") != runway_ident:
+            continue
+        for proc in entry.get("procedures", []):
+            if proc.get("procedureFamily") == "RNAV_GPS":
+                return root / f"{proc['procedureUid']}.json"
+    raise ValueError(f"no RNAV(GPS) procedure for {airport} {runway_ident}")
+
+
+def _recompute_distances(waypoints: list) -> list:
+    """Recompute each waypoint's along-track ``distance_from_start_m`` over a merged path."""
+    from geokit import haversine_m
+    out: list = []
+    cumulative = 0.0
+    previous = None
+    for wp in waypoints:
+        if previous is not None:
+            cumulative += haversine_m(previous.lat_deg, previous.lon_deg, wp.lat_deg, wp.lon_deg)
+        out.append(replace(wp, distance_from_start_m=round(cumulative, 1)))
+        previous = wp
+    return out
+
+
+def _concat_to_runway(trans_pc, final_pc):
+    """Join a transition (IAF→connecting fix) to the final (connecting fix→runway) into one
+    IAF→runway ``ProcedureConstraint``, recomputing along-track distances. Returns ``None`` when
+    the transition does not end at the final's first fix (so it doesn't feed this final)."""
+    join = trans_pc.waypoints[-1]
+    final_start = final_pc.waypoints[0]
+    if join.fix_id != final_start.fix_id and join.ident != final_start.ident:
+        return None
+    merged = list(trans_pc.waypoints[:-1]) + list(final_pc.waypoints)
+    return replace(
+        final_pc,                              # glidepath / course / runway / nominal speed
+        branch_id=trans_pc.branch_id,          # label the IAF by its transition branch
+        waypoints=tuple(_recompute_distances(merged)),
+    )
+
+
+def _iaf_full_paths(document: dict[str, Any]) -> list:
+    """All IAF→runway ``ProcedureConstraint``s for a procedure document.
+
+    The final branch's own entry is one IAF; each transition branch is concatenated onto the
+    final to form a complete IAF→runway path. Reuses ``ProcedureConstraint.from_detail_document``
+    (single-branch) and concatenates here — the only glue this feature adds.
+    """
+    from aeroviz_backend.procedure_constraint import ProcedureConstraint
+    branches = document.get("branches", [])
+    final = next((b for b in branches if b.get("branchRole") == "final"), None)
+    if final is None:
+        return []
+    final_pc = ProcedureConstraint.from_detail_document(document, final["branchId"])
+    if final_pc is None or len(final_pc.waypoints) < 2:
+        return []
+    paths = [final_pc]
+    for branch in branches:
+        if branch.get("branchRole") != "transition":
+            continue
+        trans_pc = ProcedureConstraint.from_detail_document(document, branch["branchId"])
+        if trans_pc is None or not trans_pc.waypoints:
+            continue
+        merged = _concat_to_runway(trans_pc, final_pc)
+        if merged is not None:
+            paths.append(merged)
+    return paths
+
+
+def _iaf_initial_state(pc, scenario: FlightScenario) -> GeodeticState:
+    """The physics initial state at a path's IAF: coded altitude, the procedure's nominal speed,
+    heading toward the next fix, level flight, the scenario's landing mass."""
+    from geokit import FT_M, KT_MS, bearing_rad
+    iaf, nxt = pc.waypoints[0], pc.waypoints[1]
+    alt_ft = iaf.altitude_ref_ft if iaf.altitude_ref_ft is not None else iaf.geometry_alt_ft
+    speed_ms = (
+        pc.nominal_speed_kt * KT_MS
+        if pc.nominal_speed_kt
+        else scenario.aircraft.approach.reference_speed_ms
+    )
+    return GeodeticState(
+        latitude=iaf.lat_deg,
+        longitude=iaf.lon_deg,
+        altitude=(alt_ft or 0.0) * FT_M,
+        V=speed_ms,
+        psi=bearing_rad(iaf.lat_deg, iaf.lon_deg, nxt.lat_deg, nxt.lon_deg),
+        gamma=0.0,
+        m=scenario.initial.m,
+    )
+
+
+def _lagrange_eval(xs, ys, query):
+    """Evaluate the Lagrange polynomial through ``(xs, ys)`` at ``query`` (vectorized numpy)."""
+    import numpy as np
+    xs = np.asarray(xs, dtype=float)
+    ys = np.asarray(ys, dtype=float)
+    query = np.asarray(query, dtype=float)
+    out = np.zeros_like(query)
+    for i in range(len(xs)):
+        basis = np.ones_like(query)
+        for j in range(len(xs)):
+            if j != i:
+                basis *= (query - xs[j]) / (xs[i] - xs[j])
+        out += ys[i] * basis
+    return out
+
+
+def _path_curve_length_m(pc) -> float:
+    """A cheap 3D path-length proxy for ranking IAFs (NO NLP solve).
+
+    Fits a Lagrange curve through the IAF→runway waypoints in a runway-anchored metric frame
+    ``(north, east, alt)`` and returns its arc length. Falls back to the straight 3D polyline
+    length if the chord parameterisation is degenerate (coincident waypoints).
+    """
+    import numpy as np
+    from geokit import FT_M, METRES_PER_DEG_LAT, metres_per_deg_lon
+    wps = pc.waypoints
+    if len(wps) < 2:
+        return float("inf")
+    lat0, lon0 = wps[-1].lat_deg, wps[-1].lon_deg
+    m_per_lon = metres_per_deg_lon(lat0)
+    points = np.array([
+        [(w.lat_deg - lat0) * METRES_PER_DEG_LAT,
+         (w.lon_deg - lon0) * m_per_lon,
+         (w.altitude_ref_ft if w.altitude_ref_ft is not None else (w.geometry_alt_ft or 0.0)) * FT_M]
+        for w in wps
+    ])
+    chord = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(points, axis=0), axis=1))])
+    if chord[-1] <= 0.0 or np.any(np.diff(chord) <= 0.0):
+        return float(chord[-1])
+    samples = np.linspace(chord[0], chord[-1], 200)
+    curve = np.stack([_lagrange_eval(chord, points[:, dim], samples) for dim in range(3)], axis=1)
+    return float(np.linalg.norm(np.diff(curve, axis=0), axis=1).sum())
+
+
+def _iaf_setup(scenario: FlightScenario, procedure_root: str | Path, airport: str | None):
+    """Shared prologue for the IAF optimizers: resolve the runway's RNAV(GPS) procedure and return
+    ``(target, iaf_paths, aircraft, min_speed_ms)``. Raises if the procedure / paths are missing."""
+    target = scenario.target
+    if target is None:
+        raise ValueError("scenario has no target state; build it with flight_scenarios first.")
+    runway = scenario.source.get("runway")
+    if not runway:
+        raise ValueError("scenario has no runway; cannot resolve its approach procedure.")
+    apt = airport or scenario.source.get("arr_airport") or DEFAULT_AIRPORT
+    document = json.loads(
+        _resolve_procedure_path(procedure_root, apt, runway).read_text(encoding="utf-8")
+    )
+    paths = _iaf_full_paths(document)
+    if not paths:
+        raise ValueError(f"no IAF->runway paths in the procedure for {apt} {runway}")
+    aircraft = scenario.aircraft
+    min_speed_ms = min(
+        _STALL_MARGIN * _stall_speed_ms(scenario.initial.m, scenario.aero),
+        aircraft.approach.reference_speed_ms,
+    )
+    return target, paths, aircraft, min_speed_ms
+
+
+def _solve_iaf(
+    pc, scenario: FlightScenario, target: GeodeticState, aircraft: Any, min_speed_ms: float,
+    *, n_segments: int, dt: float, max_duration: float, verbose: bool,
+) -> _IafSolve:
+    """Full CONSTRAINED solve from ONE IAF path to the runway. Raises on infeasibility.
+
+    Reuses the backend's ``build_constraint_segments`` (constraint geometry) and the optimizer's
+    ``constraint_segments``/``constraint_spans`` path constraints.
+    """
+    from aeroviz_backend.procedure_segments import build_constraint_segments
+    segments, spans = build_constraint_segments(
+        pc, target.latitude, target.longitude, target.altitude,
+    )
+    if not segments:
+        raise ValueError("no constraint segments")
+    iaf_initial = _iaf_initial_state(pc, scenario)
+    optimizer = CasadiDirectCollocationOptimizer(
+        n_segments, dt, max_duration, aircraft,
+        collocation_scheme="trapezoidalNormalizedFullTransport",
+        min_speed_ms=min_speed_ms,
+        verbose=verbose,
+        constraint_segments=segments,
+        constraint_spans=spans,
+    )
+    final_time, node_control, _ = optimizer.optimize_free_time(iaf_initial, target, max_duration)
+    return _IafSolve(float(final_time), pc, iaf_initial, node_control, optimizer.last_dense_states_geo)
+
+
+def _iaf_result(
+    best: _IafSolve, scenario: FlightScenario, aircraft: Any,
+    *, candidates: int, rollout_dt_s: float, selection: str,
+) -> ScenarioOptimization:
+    """Assemble the chosen IAF solve into a :class:`ScenarioOptimization` (dense export + rollout)."""
+    initial_row = [best.initial.latitude, best.initial.longitude, best.initial.altitude,
+                   best.initial.V, best.initial.psi, best.initial.gamma]
+    dense_rows = [list(row) for row in best.dense_states]
+    optimizer_states = _node_states_to_samples(
+        [initial_row] + dense_rows, best.final_time, best.initial.m,
+    )
+    simulator_states = simulate_controls(
+        best.initial, best.controls, best.final_time, aircraft, dt=rollout_dt_s,
+    )
+    source = {
+        **scenario.source,
+        "chosenIaf": best.pc.waypoints[0].ident,
+        "iafBranchId": best.pc.branch_id,
+        "iafCandidates": candidates,
+        "iafSelection": selection,
+    }
+    return ScenarioOptimization(source, best.final_time, optimizer_states, simulator_states)
+
+
+def optimize_scenario_min_time_iaf(
+    scenario: FlightScenario,
+    *,
+    procedure_root: str | Path = DEFAULT_PROCEDURE_ROOT,
+    airport: str | None = None,
+    n_segments: int = DEFAULT_N_SEGMENTS,
+    dt: float = DEFAULT_DT,
+    max_duration: float = DEFAULT_MAX_DURATION_S,
+    rollout_dt_s: float = DEFAULT_ROLLOUT_DT_S,
+    verbose: bool = False,
+) -> ScenarioOptimization:
+    """Constrained, fastest-IAF optimization for one scenario (one trajectory out).
+
+    The EXACT (slow) IAF selection: solve a CONSTRAINED trajectory from EVERY IAF of the
+    scenario's runway RNAV(GPS) procedure and return the single FASTEST (min ``final_time``).
+    Infeasible IAFs are skipped; the scenario fails only if every IAF fails. For a cheap
+    alternative that solves once, see :func:`optimize_scenario_shortest_iaf`.
+    """
+    target, paths, aircraft, min_speed_ms = _iaf_setup(scenario, procedure_root, airport)
+
+    best: _IafSolve | None = None
+    attempts: list[tuple[str, str]] = []
+    for pc in paths:
+        try:
+            candidate = _solve_iaf(
+                pc, scenario, target, aircraft, min_speed_ms,
+                n_segments=n_segments, dt=dt, max_duration=max_duration, verbose=verbose,
+            )
+        except Exception as exc:  # noqa: BLE001 — try the next IAF; fail only if all IAFs fail
+            attempts.append((pc.waypoints[0].ident, type(exc).__name__))
+            continue
+        if best is None or candidate.final_time < best.final_time:
+            best = candidate
+
+    if best is None:
+        raise ValueError(
+            f"all {len(paths)} IAF(s) infeasible for "
+            f"{scenario.source.get('id')}: {attempts[:4]}"
+        )
+    return _iaf_result(
+        best, scenario, aircraft,
+        candidates=len(paths), rollout_dt_s=rollout_dt_s, selection="minTime",
+    )
+
+
+def optimize_scenario_shortest_iaf(
+    scenario: FlightScenario,
+    *,
+    procedure_root: str | Path = DEFAULT_PROCEDURE_ROOT,
+    airport: str | None = None,
+    n_segments: int = DEFAULT_N_SEGMENTS,
+    dt: float = DEFAULT_DT,
+    max_duration: float = DEFAULT_MAX_DURATION_S,
+    rollout_dt_s: float = DEFAULT_ROLLOUT_DT_S,
+    verbose: bool = False,
+) -> ScenarioOptimization:
+    """Cheap, naive IAF selection: pick the IAF whose 3D Lagrange-curve path to the runway is
+    SHORTEST, then run the full constrained optimization once for it.
+
+    Avoids :func:`optimize_scenario_min_time_iaf`'s solve-every-IAF cost: the IAF is chosen by a
+    pure-geometry path length (no NLP), so the common case is a single solve. It is greedy /
+    robust — if the shortest IAF turns out infeasible it falls through to the next-shortest, so
+    the scenario fails only if every IAF fails. The exact full-search remains available above.
+    """
+    target, paths, aircraft, min_speed_ms = _iaf_setup(scenario, procedure_root, airport)
+
+    attempts: list[tuple[str, str]] = []
+    for pc in sorted(paths, key=_path_curve_length_m):   # shortest 3D path first
+        try:
+            best = _solve_iaf(
+                pc, scenario, target, aircraft, min_speed_ms,
+                n_segments=n_segments, dt=dt, max_duration=max_duration, verbose=verbose,
+            )
+        except Exception as exc:  # noqa: BLE001 — fall through to the next-shortest IAF
+            attempts.append((pc.waypoints[0].ident, type(exc).__name__))
+            continue
+        return _iaf_result(
+            best, scenario, aircraft,
+            candidates=len(paths), rollout_dt_s=rollout_dt_s, selection="shortestPath",
+        )
+
+    raise ValueError(
+        f"all {len(paths)} IAF(s) infeasible (shortest-first) for "
+        f"{scenario.source.get('id')}: {attempts[:4]}"
+    )
+
+
+# Selection strategies for the per-scenario IAF optimization (picked by name in the batch/CLI).
+_IAF_SELECTORS = {
+    "minTime": optimize_scenario_min_time_iaf,    # exact: solve every IAF, keep the fastest
+    "shortest": optimize_scenario_shortest_iaf,   # naive: shortest 3D path, one solve
+}
+
+
+def _optimize_one_scenario_iaf(
+    payload: tuple[int, FlightScenario, dict[str, Any]],
+) -> tuple[int, str, dict[str, Any] | None, str | None]:
+    """Process-pool worker for the constrained-IAF batch; ``params['selection']`` chooses the
+    per-scenario strategy (mirrors ``_optimize_one_scenario``)."""
+    index, scenario, params = payload
+    params = dict(params)
+    selector = _IAF_SELECTORS[params.pop("selection", "shortest")]
+    flight_id = scenario.source.get("id") or f"scenario{index}"
+    try:
+        result = selector(scenario, **params)
+    except Exception as exc:  # noqa: BLE001 — skip + log per-scenario failures
+        return (index, flight_id, None,
+                f"{type(exc).__name__}: {str(exc).splitlines()[0][:90]}")
+    return (index, flight_id, result.to_dict(), None)
+
+
+def optimize_scenarios_constrained_iaf(
+    scenarios: list[FlightScenario],
+    *,
+    output_dir: str | Path,
+    selection: str = "shortest",
+    procedure_root: str | Path = DEFAULT_PROCEDURE_ROOT,
+    airport: str | None = None,
+    n_segments: int = DEFAULT_N_SEGMENTS,
+    dt: float = DEFAULT_DT,
+    max_duration: float = DEFAULT_MAX_DURATION_S,
+    rollout_dt_s: float = DEFAULT_ROLLOUT_DT_S,
+    jobs: int = 0,
+    verbose: bool = False,
+    scenarios_label: str | None = None,
+) -> list[Path]:
+    """Batch constrained-IAF optimization — one trajectory per scenario, IAF chosen by ``selection``.
+
+    ``selection``: ``"minTime"`` solves every IAF and keeps the fastest (exact, slow);
+    ``"shortest"`` picks the shortest 3D path and solves once (naive, fast). Same output shape/IO
+    as :func:`optimize_scenarios` (``*_states.json`` + ``summary.json``, parallel across
+    scenarios), reusing its summary/filename/jobs helpers; each scenario reports the chosen IAF.
+    """
+    if selection not in _IAF_SELECTORS:
+        raise ValueError(f"unknown selection {selection!r}; choose from {sorted(_IAF_SELECTORS)}")
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    params: dict[str, Any] = {
+        "selection": selection,
+        "procedure_root": str(procedure_root), "airport": airport,
+        "n_segments": n_segments, "dt": dt, "max_duration": max_duration,
+        "rollout_dt_s": rollout_dt_s, "verbose": verbose,
+    }
+    payloads = [(index, scenario, params) for index, scenario in enumerate(scenarios)]
+    workers = _resolve_jobs(jobs, len(scenarios))
+
+    written: list[Path] = []
+    failures: list[tuple[str, str]] = []
+    records: dict[int, dict[str, Any]] = {}
+
+    def _handle(record: tuple[int, str, dict[str, Any] | None, str | None]) -> None:
+        index, flight_id, result_dict, error = record
+        if error is not None:
+            failures.append((flight_id, error))
+            records[index] = _summary_record(
+                scenarios[index], status="failed", states_file=None, final_time_s=None, reason=error,
+            )
+            print(f"✗ {flight_id}: skipped ({error.split(':', 1)[0]})")
+            return
+        name = _scenario_filename(scenarios[index], index)
+        (out / name).write_text(json.dumps(result_dict, indent=2), encoding="utf-8")
+        written.append(out / name)
+        record_row = _summary_record(
+            scenarios[index], status="solved", states_file=name,
+            final_time_s=float(result_dict["final_time_s"]), reason=None,
+        )
+        record_row["chosenIaf"] = result_dict["source"].get("chosenIaf")
+        records[index] = record_row
+        print(f"✓ {name}: IAF {result_dict['source'].get('chosenIaf')}, "
+              f"T={result_dict['final_time_s']:.1f}s")
+
+    if workers == 1:
+        for payload in payloads:
+            _handle(_optimize_one_scenario_iaf(payload))
+    else:
+        _limit_solver_threads()
+        print(f"… solving {len(scenarios)} scenario(s) [constrained IAF: {selection}] "
+              f"across {workers} worker process(es)")
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(_optimize_one_scenario_iaf, payload) for payload in payloads]
+            for future in as_completed(futures):
+                _handle(future.result())
+
+    total = len(scenarios)
+    summary = {
+        "scenarios": scenarios_label,
+        "mode": f"constrainedIaf:{selection}",
+        "total": total,
+        "solved": len(written),
+        "failed": len(failures),
+        "failure_rate": (len(failures) / total) if total else 0.0,
+        "results": [records[i] for i in sorted(records)],
+    }
+    (out / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+
+    if failures:
+        print(f"\n⚠ {len(failures)}/{total} scenario(s) skipped:")
+        for flight_id, reason in failures[:15]:
+            print(f"    {flight_id}: {reason}")
+        if len(failures) > 15:
+            print(f"    … and {len(failures) - 15} more")
+    print(f"✓ solved {len(written)}/{total} scenario(s) [constrained IAF: {selection}] "
+          f"(failure rate {summary['failure_rate']:.1%}) -> {out}")
+    print(f"  summary -> {out / 'summary.json'}")
+    return written
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Optimize flight scenarios -> state JSON files")
     parser.add_argument("--scenarios", required=True, help="Scenario JSON from flight_scenarios")
@@ -414,20 +860,55 @@ def main() -> None:
         help="show the full IPOPT solver log (per-iteration table); default is quiet "
              "(best paired with --jobs 1, since parallel logs interleave)",
     )
+    parser.add_argument(
+        "--constrained-iaf", action="store_true",
+        help="constrained-IAF mode: per scenario, optimize from its runway's RNAV(GPS) procedure "
+             "IAFs with path constraints and keep one trajectory (IAF chosen by --iaf-selection)",
+    )
+    parser.add_argument(
+        "--iaf-selection", choices=("minTime", "shortest"), default="shortest",
+        help="how to pick the IAF (constrained-iaf mode): 'shortest' (default) picks the shortest "
+             "3D path and solves once (fast); 'minTime' solves every IAF and keeps the fastest "
+             "(exact, slow)",
+    )
+    parser.add_argument(
+        "--procedure-root", default=str(DEFAULT_PROCEDURE_ROOT),
+        help="root holding <ICAO>/procedure-details (constrained-iaf mode)",
+    )
+    parser.add_argument(
+        "--airport", default=None,
+        help="airport ICAO fallback when a scenario has no arr_airport (constrained-iaf mode)",
+    )
     args = parser.parse_args()
 
     scenarios = load_scenarios(args.scenarios)
-    paths = optimize_scenarios(
-        scenarios,
-        output_dir=args.output_dir,
-        n_segments=args.n_segments,
-        dt=args.dt,
-        max_duration=args.max_duration,
-        rollout_dt_s=args.rollout_dt,
-        jobs=args.jobs,
-        verbose=args.verbose,
-        scenarios_label=args.scenarios,
-    )
+    if args.constrained_iaf:
+        paths = optimize_scenarios_constrained_iaf(
+            scenarios,
+            output_dir=args.output_dir,
+            selection=args.iaf_selection,
+            procedure_root=args.procedure_root,
+            airport=args.airport,
+            n_segments=args.n_segments,
+            dt=args.dt,
+            max_duration=args.max_duration,
+            rollout_dt_s=args.rollout_dt,
+            jobs=args.jobs,
+            verbose=args.verbose,
+            scenarios_label=args.scenarios,
+        )
+    else:
+        paths = optimize_scenarios(
+            scenarios,
+            output_dir=args.output_dir,
+            n_segments=args.n_segments,
+            dt=args.dt,
+            max_duration=args.max_duration,
+            rollout_dt_s=args.rollout_dt,
+            jobs=args.jobs,
+            verbose=args.verbose,
+            scenarios_label=args.scenarios,
+        )
     print(f"✓ wrote {len(paths)} state file(s) to {args.output_dir}")
 
 

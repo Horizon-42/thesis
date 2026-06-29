@@ -6,6 +6,7 @@ through ``aerodynamic_model.rollout_piecewise_constant``). The full ``optimize_s
 path runs the solver, so it is exercised by the CLI, not the unit suite.
 """
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -153,3 +154,79 @@ def test_simulate_controls_rolls_forward():
     assert samples[0].t == 0.0
     assert samples[0].lat == initial.latitude  # first sample is the initial state
     assert samples[-1].t == pytest.approx(4.0, abs=1.0)
+
+
+# ── Constrained min-time-IAF glue (synthetic; the real procedure data is gitignored) ──
+
+def _pc(waypoints, *, branch_id="branch:X", nominal_kt=140.0):
+    from aeroviz_backend.procedure_constraint import Glidepath, ProcedureConstraint
+    return ProcedureConstraint(
+        procedure_uid="UID", airport_icao="KRDU", runway_ident="RW05L",
+        branch_id=branch_id, approach_course_deg=45.0,
+        glidepath=Glidepath(3.0, 50.0), nominal_speed_kt=nominal_kt,
+        waypoints=tuple(waypoints),
+    )
+
+
+def _wp(ident, lat, lon, *, alt_ft=None):
+    from aeroviz_backend.procedure_constraint import ProcedureConstraintWaypoint
+    return ProcedureConstraintWaypoint(
+        fix_id=ident, ident=ident, role="IF", leg_type="TF",
+        lon_deg=lon, lat_deg=lat, altitude=None, altitude_ref_ft=alt_ft,
+        geometry_alt_ft=None, speed_max_kt=None, distance_from_start_m=0.0,
+    )
+
+
+def test_concat_to_runway_joins_transition_and_final():
+    # transition CHWDR -> SCHOO  +  final SCHOO -> RW05L  =>  CHWDR -> SCHOO -> RW05L
+    trans = _pc([_wp("CHWDR", 36.10, -78.70), _wp("SCHOO", 36.00, -78.60)], branch_id="branch:T")
+    final = _pc([_wp("SCHOO", 36.00, -78.60), _wp("RW05L", 35.88, -78.78)], branch_id="branch:R")
+    merged = so._concat_to_runway(trans, final)
+    assert [w.ident for w in merged.waypoints] == ["CHWDR", "SCHOO", "RW05L"]
+    assert merged.branch_id == "branch:T"                 # labelled by the transition (the IAF)
+    dists = [w.distance_from_start_m for w in merged.waypoints]
+    assert dists[0] == 0.0 and dists[1] < dists[2]        # cumulative, recomputed
+
+    # a transition that does not end at the final's first fix does not feed it
+    stray = _pc([_wp("CHWDR", 36.10, -78.70), _wp("ELSEW", 36.20, -78.90)], branch_id="branch:T")
+    assert so._concat_to_runway(stray, final) is None
+
+
+def test_resolve_procedure_path_picks_rnav_gps(tmp_path):
+    details = tmp_path / "KRDU" / "procedure-details"
+    details.mkdir(parents=True)
+    (details / "index.json").write_text(json.dumps({"runways": [{
+        "runwayIdent": "RW05L",
+        "procedures": [
+            {"procedureUid": "KRDU-H05LZ-RW05L", "procedureFamily": "RNAV_RNP"},
+            {"procedureUid": "KRDU-R05LY-RW05L", "procedureFamily": "RNAV_GPS"},
+        ],
+    }]}), encoding="utf-8")
+    path = so._resolve_procedure_path(tmp_path, "KRDU", "05L")
+    assert path.name == "KRDU-R05LY-RW05L.json"           # RNAV(GPS), not the RNP
+    with pytest.raises(ValueError):
+        so._resolve_procedure_path(tmp_path, "KRDU", "99X")
+
+
+def test_path_curve_length_ranks_shorter_path_lower():
+    # The naive selector ranks IAFs by this 3D path length (no solve). A near, direct path
+    # must score lower than a longer one that enters farther out.
+    short = _pc([_wp("SCHOO", 36.00, -78.60, alt_ft=3000.0), _wp("RW05L", 35.88, -78.78, alt_ft=400.0)])
+    long = _pc([
+        _wp("OTTOS", 36.30, -78.40, alt_ft=6000.0), _wp("CHWDR", 36.15, -78.55, alt_ft=5000.0),
+        _wp("SCHOO", 36.00, -78.60, alt_ft=3000.0), _wp("RW05L", 35.88, -78.78, alt_ft=400.0),
+    ])
+    assert so._path_curve_length_m(short) < so._path_curve_length_m(long)
+    assert so._path_curve_length_m(_pc([_wp("X", 36.0, -78.6)])) == float("inf")  # single point
+
+
+def test_iaf_initial_state_from_published_fix():
+    from geokit import FT_M, KT_MS
+    pc = _pc([_wp("CHWDR", 36.10, -78.70, alt_ft=5000.0), _wp("SCHOO", 36.00, -78.60)])
+    state = so._iaf_initial_state(pc, _scenario(target=None))
+    assert state.latitude == 36.10 and state.longitude == -78.70
+    assert state.altitude == pytest.approx(5000.0 * FT_M)
+    assert state.V == pytest.approx(140.0 * KT_MS)        # the procedure nominal speed
+    assert state.gamma == 0.0
+    assert state.m == A320.mass.max_takeoff_kg            # the scenario's mass
+    assert 0.0 <= state.psi <= 2 * 3.14159                # heading toward the next fix (radians)
