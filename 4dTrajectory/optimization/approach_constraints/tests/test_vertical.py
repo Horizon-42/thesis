@@ -1,16 +1,11 @@
-"""TODO ⑧, ⑨, ⑩ (vertical). xfail until implemented; scalar-component API.
-
-The window/floor *wrappers* are provided but call the TODO functions, so they xfail too until the
-underlying piece is done.
-"""
+"""Vertical constraints ⑧–⑩: glidepath altitude/window, step-down floor, descent cap."""
 
 import math
 
 import numpy as np
-import pytest
 
-from constraints import vertical
-from constraints.segments import LpvFinalSpec, StepDown
+from approach_constraints import vertical
+from approach_constraints.segments import LpvFinalSpec, StepDown
 
 
 def _lpv():
@@ -27,7 +22,6 @@ def _lpv():
     )
 
 
-@pytest.mark.xfail(reason="TODO ⑧ glidepath_altitude", strict=False)
 def test_glidepath_altitude():
     lpv = _lpv()
     assert np.isclose(vertical.glidepath_altitude(0.0, lpv), 120.0 + 15.24)
@@ -37,7 +31,6 @@ def test_glidepath_altitude():
     )
 
 
-@pytest.mark.xfail(reason="TODO ⑧ via the provided window wrapper", strict=False)
 def test_glidepath_window_on_path_is_satisfied():
     lpv = _lpv()
     gp = 120.0 + 15.24 + 1000.0 * math.tan(math.radians(3.0))
@@ -47,7 +40,6 @@ def test_glidepath_window_on_path_is_satisfied():
     assert low2 > 0.0
 
 
-@pytest.mark.xfail(reason="TODO ⑨ moc_floor", strict=False)
 def test_moc_floor_staircase():
     steps = [StepDown(2000.0, 1524.0), StepDown(5000.0, 914.0)]
     assert np.isclose(vertical.moc_floor(3000.0, steps), 914.0)   # only the 5000 m step ahead
@@ -58,7 +50,6 @@ def test_moc_floor_staircase():
                        [1524.0, 914.0, 0.0])
 
 
-@pytest.mark.xfail(reason="TODO ⑩ (bonus) descent_gradient_violation", strict=False)
 def test_descent_gradient_cap():
     assert vertical.descent_gradient_violation(math.radians(-2.5), 3.0) < 0.0   # shallow -> ok
     assert vertical.descent_gradient_violation(math.radians(-4.0), 3.0) > 0.0   # too steep

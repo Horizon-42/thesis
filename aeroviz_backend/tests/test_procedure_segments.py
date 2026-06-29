@@ -9,7 +9,7 @@ from aeroviz_backend import paths  # noqa: F401  (puts the optimization dir on s
 from aeroviz_backend.procedure_constraint import ProcedureConstraint
 from aeroviz_backend.procedure_segments import build_constraint_segments
 
-import constraints as ac
+import approach_constraints as ac
 from geokit import DEG2RAD, FT_M, WGS84_A
 
 TARGET_LAT, TARGET_LON, TARGET_ALT = 35.0, -78.0, 120.0
@@ -82,3 +82,33 @@ def test_threshold_waypoint_maps_to_origin():
     pc = ProcedureConstraint.from_payload(_payload())
     frame = ac.TargetFrame(TARGET_LAT, TARGET_LON)
     assert np.allclose(frame.to_ne(pc.waypoints[-1].lat_deg, pc.waypoints[-1].lon_deg), [0.0, 0.0])
+
+
+def test_initial_state_must_match_first_fix():
+    pc = ProcedureConstraint.from_payload(_payload())
+    if_lat = _lat_n_metres_north(11000.0)  # the procedure's first fix (the IF)
+    # At the IF -> fine.
+    segs, _ = build_constraint_segments(
+        pc, TARGET_LAT, TARGET_LON, TARGET_ALT,
+        initial_lat_deg=if_lat, initial_lon_deg=TARGET_LON,
+    )
+    assert len(segs) == 2
+    # Moved ~5.5 km north of the IF -> the spans no longer describe the trajectory -> raise.
+    with pytest.raises(ValueError, match="first fix"):
+        build_constraint_segments(
+            pc, TARGET_LAT, TARGET_LON, TARGET_ALT,
+            initial_lat_deg=if_lat + 0.05, initial_lon_deg=TARGET_LON,
+        )
+
+
+def _lon_e_metres_east(e_m: float) -> float:
+    return TARGET_LON + e_m / (DEG2RAD * WGS84_A * math.cos(math.radians(TARGET_LAT)))
+
+
+def test_warns_on_excessive_pfaf_intercept():
+    # IF offset far east so the IF->FAF track meets the (due-south) final course at ~45°.
+    payload = _payload()
+    payload["waypoints"][0]["lonDeg"] = _lon_e_metres_east(6000.0)
+    pc = ProcedureConstraint.from_payload(payload)
+    with pytest.warns(UserWarning, match="intercept angle"):
+        build_constraint_segments(pc, TARGET_LAT, TARGET_LON, TARGET_ALT)

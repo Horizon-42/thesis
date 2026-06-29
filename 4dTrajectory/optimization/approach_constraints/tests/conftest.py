@@ -1,4 +1,4 @@
-"""Put the optimization dir (for ``import constraints``) and the repo root (for ``geokit``) on the path."""
+"""Put the optimization dir (for ``import approach_constraints``) and the repo root (for ``geokit``) on the path."""
 
 import sys
 from pathlib import Path

@@ -73,7 +73,9 @@ from aircraft.aero_params import AeroParams, aero_params_for_aircraft
 from aircraft.aircraft_sets import Aircraft
 from aerodynamic_model.common import GeodeticState
 
-import constraints as approach_constraints  # approach-procedure path constraints (same sys.path dir)
+# NOTE: the ``constraints`` (approach path-constraints) package is imported LAZILY inside
+# ``procedure_constraint_g`` — only when a procedure constraint is actually supplied — so the
+# unconstrained optimiser neither pays for nor depends on it at import time.
 
 
 # 6 geodetic optimisation states (lat, lon, h, V, psi, gamma) with
@@ -595,7 +597,7 @@ def terminal_bank_constraint_expr(state_nodes, start_state, state_h, max_bank_ra
 # *Normalized* full-transport schemes: the state nodes there are metric (n, e) offsets from
 # the target, so the corridor/glidepath/floor inequalities are written directly on the decision
 # variables and stay well-conditioned (the whole reason the Normalized scheme exists). See
-# 4dTrajectory/optimization/constraints/ and docs/optimization_constraint_design.md.
+# 4dTrajectory/optimization/approach_constraints/ and docs/optimization_constraint_design.md.
 _NORMALIZED_FULL_TRANSPORT_SCHEMES = frozenset({
     "trapezoidalNormalizedFullTransport",
     "hermiteSimpsonNormalizedFullTransport",
@@ -617,6 +619,8 @@ def procedure_constraint_g(state_nodes, segments, spans):
     functions the package tests exercise; here they receive CasADi vectors and return CasADi
     expressions.
     """
+    import approach_constraints  # lazy: only imported when a constraint is supplied
+
     groups = approach_constraints.partition_node_indices(len(state_nodes), spans)
     rows = []
     for seg, idxs in zip(segments, groups):
@@ -1008,6 +1012,13 @@ class CasadiDirectCollocationOptimizer:
                 )
             if constraint_spans is None or len(constraint_spans) != len(constraint_segments):
                 raise ValueError("constraint_spans must align 1:1 with constraint_segments")
+            # The path-constraint rows use -inf lower bounds; CasADi's sqpmethod/qpOASES backend
+            # does not accept them. Require the interior-point (ipopt) backend.
+            if solver_backend != "ipopt":
+                raise ValueError(
+                    "procedure constraints require the 'ipopt' solver_backend; got "
+                    f"{solver_backend!r}"
+                )
         self.n_segments = n_segments
         # Defect scheme = dynamics x fitting (e.g. hermiteSimpson, localEnu,
         # reanchoredEnu, or a *Normalized* metric-position variant).  Both the

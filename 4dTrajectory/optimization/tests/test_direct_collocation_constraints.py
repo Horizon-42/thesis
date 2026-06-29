@@ -17,8 +17,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-import constraints as ac  # noqa: E402
-from constraints import examples as ac_examples  # noqa: E402
+import approach_constraints as ac  # noqa: E402
+from approach_constraints import examples as ac_examples  # noqa: E402
 from casadi_direct_collocation_optimizer import (  # noqa: E402
     _NORMALIZED_FULL_TRANSPORT_SCHEMES,
     CasadiDirectCollocationOptimizer,

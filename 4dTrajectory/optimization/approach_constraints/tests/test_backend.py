@@ -1,8 +1,7 @@
 """Backend-agnosticism: the SAME functions must work for NumPy (tests) and CasADi (optimizer).
 
-``test_mathx_*`` pass now (the dispatch layer is provided). The equivalence tests xfail until the
-corresponding TODO is implemented — once it is, they prove the function returns a CasADi
-expression that evaluates to the same number as the NumPy call (the "写完即可用" guarantee).
+The equivalence tests prove each function returns a CasADi expression that evaluates to the same
+number as the NumPy call (the "写完即可用" guarantee).
 """
 
 import math
@@ -12,9 +11,9 @@ import pytest
 
 ca = pytest.importorskip("casadi")
 
-from constraints import geometry as geo  # noqa: E402
-from constraints import mathx, vertical   # noqa: E402
-from constraints.segments import StepDown  # noqa: E402
+from approach_constraints import geometry as geo  # noqa: E402
+from approach_constraints import mathx, vertical   # noqa: E402
+from approach_constraints.segments import StepDown  # noqa: E402
 
 A = np.array([0.0, 0.0])
 B = np.array([10.0, 0.0])
@@ -35,7 +34,6 @@ def test_mathx_dispatch_casadi():
     assert np.isclose(float(f(4.0)), 4.0 + 2.0)
 
 
-@pytest.mark.xfail(reason="needs TODO ① ② implemented", strict=False)
 def test_along_and_cross_track_casadi_match_numpy():
     n_sym, e_sym = ca.SX.sym("n"), ca.SX.sym("e")
     s_sym = geo.along_track(n_sym, e_sym, A, B)
@@ -47,7 +45,6 @@ def test_along_and_cross_track_casadi_match_numpy():
     assert np.isclose(float(x_val), geo.cross_track(3.0, 7.0, A, B))
 
 
-@pytest.mark.xfail(reason="needs TODO ⑨ implemented", strict=False)
 def test_moc_floor_casadi_matches_numpy():
     steps = [StepDown(2000.0, 1524.0), StepDown(5000.0, 914.0)]
     s = ca.SX.sym("s")

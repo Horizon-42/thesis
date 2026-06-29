@@ -1,4 +1,4 @@
-"""constraints — approach-procedure constraints for the trajectory optimizer (teaching scaffold).
+"""approach_constraints — approach-procedure constraints for the trajectory optimizer (scaffold).
 
 Turns an LPV approach (segments + FAS geometry) into a set of inequality constraints
 ``g(z) ≤ 0`` over the optimizer's NORMALIZED state nodes ``z = (n, e, h, V, psi, gamma, m)``.
@@ -16,7 +16,7 @@ Architecture (what is provided vs. what YOU implement):
 
 Convention: every ``*_violation`` returns ``g`` with ``g ≤ 0  ⇔  satisfied``.
 
-See ``constraints/README.md`` for the math, the TODO checklist, and the optimizer integration.
+See ``approach_constraints/README.md`` for the math, the TODO checklist, and the optimizer integration.
 Design source: ``4dTrajectory/docs/optimization_constraint_design.md`` +
 ``4dTrajectory/docs/lpv_final_segment.en.html``.
 """
@@ -31,6 +31,8 @@ from .builder import (
 )
 from .frame import TargetFrame
 from .segments import (
+    DEFAULT_GLIDEPATH_ABOVE_M,
+    DEFAULT_GLIDEPATH_BELOW_M,
     LpvFinalSpec,
     SegmentKind,
     SegmentSpec,
@@ -51,4 +53,6 @@ __all__ = [
     "ConstraintReport",
     "partition_node_indices",
     "split_contiguous",
+    "DEFAULT_GLIDEPATH_BELOW_M",
+    "DEFAULT_GLIDEPATH_ABOVE_M",
 ]

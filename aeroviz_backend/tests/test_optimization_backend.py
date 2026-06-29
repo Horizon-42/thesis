@@ -481,14 +481,24 @@ class TestOptimizationBackend(unittest.TestCase):
         self.assertEqual([c["dt"] for c in constructions], [0.25, 0.2])
         self.assertEqual([s["instance_id"] for s in solves], [1, 1, 2])
 
-    def test_procedure_constraint_enforced_only_for_normalized_full_transport(self):
-        """A procedureConstraint becomes NLP constraint_segments only on the normalized
-        full-transport schemes; other schemes parse/echo it but do not enforce it."""
-        captured = []
+    def test_procedure_constraint_enforced_via_multiphase_scheme_only(self):
+        """A procedureConstraint is enforced via the MULTIPHASE optimiser only when an explicit
+        casadiMultiphase* scheme is selected; other schemes parse/echo it but do not enforce it."""
+        mp_segments = []  # the segments the multiphase optimiser receives
 
-        class FakeOpt:
-            def __init__(self, *a, constraint_segments=None, **k):
-                captured.append(constraint_segments)
+        class FakeMultiphase:
+            def __init__(self, aircraft, segments, *, scheme=None, **k):
+                mp_segments.append(segments)
+                self.segment_durations_s = [10.0]
+                self.last_solve_timings = None
+
+            def optimize_free_time(self, initial_state, target_state, max_duration):
+                return (60.0, np.array([[15000.0, 0.0, 1.0]]),
+                        np.array([[51.0, -114.0, 1000.0, 130.0, 0.3, -0.05]]))
+
+        class FakeSingle:
+            def __init__(self, *a, **k):
+                pass
 
             def optimize_free_time(self, initial_state, target_state, max_duration):
                 return (60.0, np.array([[15000.0, 0.0, 1.0]]),
@@ -509,29 +519,32 @@ class TestOptimizationBackend(unittest.TestCase):
         def payload(optimizer):
             return {
                 "optimizer": optimizer, "nSegments": 2, "arrivalTimeS": 120.0, "dtS": 0.25,
-                "initialState": {"lat": 51.05, "lon": -114.0, "altM": 1300.0, "speedMps": 95.0,
+                "initialState": {"lat": 51.2, "lon": -114.0, "altM": 1300.0, "speedMps": 95.0,
                                  "headingDeg": 180.0, "flightPathDeg": -3.0, "aircraftType": "A320"},
                 "targetState": {"lat": 51.0, "lon": -114.0, "altM": 200.0, "speedMps": 70.0,
                                 "headingDeg": 180.0, "flightPathDeg": -3.0},
                 "procedureConstraint": proc,
             }
 
-        original = optimization_backend.CasadiDirectCollocationOptimizer
-        optimization_backend.CasadiDirectCollocationOptimizer = FakeOpt
+        omp = optimization_backend.MultiphaseCollocationOptimizer
+        osingle = optimization_backend.CasadiDirectCollocationOptimizer
+        optimization_backend.MultiphaseCollocationOptimizer = FakeMultiphase
+        optimization_backend.CasadiDirectCollocationOptimizer = FakeSingle
         try:
             backend = optimization_backend.OptimizationBackend()
-            r_norm = backend.optimize(payload("casadiDirectCollocationNormalizedFullTransport"))
-            r_plain = backend.optimize(payload("casadiDirectCollocation"))  # hermiteSimpson, not enforced
+            r_norm = backend.optimize(payload("casadiMultiphaseNormalizedFullTransport"))
+            r_plain = backend.optimize(payload("casadiDirectCollocation"))  # not a multiphase scheme
         finally:
-            optimization_backend.CasadiDirectCollocationOptimizer = original
+            optimization_backend.MultiphaseCollocationOptimizer = omp
+            optimization_backend.CasadiDirectCollocationOptimizer = osingle
 
-        # normalized full transport: real segments passed + enforced flag True
+        # multiphase scheme: multiphase used with real segments + enforced flag True
         self.assertTrue(r_norm["procedureConstraintEnforced"])
-        self.assertIsNotNone(captured[0])
-        self.assertGreaterEqual(len(captured[0]), 1)
-        # other scheme: not enforced, no segments passed
+        self.assertEqual(len(mp_segments), 1)
+        self.assertGreaterEqual(len(mp_segments[0]), 1)
+        # other scheme: not enforced, multiphase not called again
         self.assertFalse(r_plain["procedureConstraintEnforced"])
-        self.assertIsNone(captured[1])
+        self.assertEqual(len(mp_segments), 1)
 
     def test_optimize_can_select_single_shooting_optimizer(self):
         calls = []

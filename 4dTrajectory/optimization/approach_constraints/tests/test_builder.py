@@ -1,11 +1,9 @@
-"""End-to-end (builder + segments + examples). Plumbing passes; the feasibility checks xfail
-until the geometry/lateral/vertical TODOs are implemented."""
+"""End-to-end: builder + segments + examples (partition, split, feasible/infeasible scoring)."""
 
 import numpy as np
-import pytest
 
-from constraints import examples
-from constraints.builder import ConstraintSet, partition_node_indices, split_contiguous
+from approach_constraints import examples
+from approach_constraints.builder import ConstraintSet, partition_node_indices, split_contiguous
 
 
 def test_constraint_set_structure_is_wired():
@@ -38,14 +36,12 @@ def test_split_contiguous_roundtrip():
     assert np.array_equal(np.concatenate(parts), traj)
 
 
-@pytest.mark.xfail(reason="needs TODO ①–⑨ implemented", strict=False)
 def test_feasible_trajectory_is_feasible():
     cset = examples.build_example_constraint_set()
     report = cset.evaluate(examples.feasible_segment_nodes())
     assert report.is_feasible(tol_m=1.0), report.summary()
 
 
-@pytest.mark.xfail(reason="needs TODO ①–⑨ implemented", strict=False)
 def test_infeasible_trajectory_flags_final_corridor():
     cset = examples.build_example_constraint_set()
     report = cset.evaluate(examples.infeasible_segment_nodes())

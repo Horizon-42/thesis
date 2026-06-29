@@ -1,4 +1,4 @@
-# `constraints` — approach-procedure constraints (teaching scaffold)
+# `approach_constraints` — approach-procedure constraints (teaching scaffold)
 
 Turns an **LPV** approach (segments + FAS geometry) into a set of inequality constraints
 `g(z) ≤ 0` over the optimizer's state nodes. The architecture is fully wired and tested; the
@@ -102,14 +102,14 @@ both flow through the same scalar-component code.
 
 ```bash
 # from the repo root (uses the conda `aviation` env)
-python -m pytest 4dTrajectory/optimization/constraints/tests/ -q
+python -m pytest 4dTrajectory/optimization/approach_constraints/tests/ -q
 
 # the end-to-end demo (feasible vs. deliberately-infeasible trajectory)
-PYTHONPATH=4dTrajectory/optimization python -m constraints
+PYTHONPATH=4dTrajectory/optimization python -m approach_constraints
 ```
 
 Before you start: **6 pass, 13 xfail**. As you finish TODOs the xfails become **xpass**; when all
-are done, `python -m constraints` prints a feasible report for the on-path trajectory and flags the
+are done, `python -m approach_constraints` prints a feasible report for the on-path trajectory and flags the
 final-leg corridor on the off-path one.
 
 ## 6. Wiring into the CasADi optimizer

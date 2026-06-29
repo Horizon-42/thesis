@@ -1,6 +1,6 @@
 # Applying procedure path-constraints to the NLP — debugging take-aways
 
-What I learned wiring the `constraints` package into the direct-collocation optimiser
+What I learned wiring the `approach_constraints` package into the direct-collocation optimiser
 (`casadi_direct_collocation_optimizer.py`) so an approach is enforced as IPOPT path constraints.
 Read this before adding or changing any NLP constraint — most of these cost real debugging time.
 
@@ -52,7 +52,7 @@ constant floor per segment** so its `if_else` never switches inside a segment.
 
 The whole reason the constraints are gated to `*NormalizedFullTransport`: in those schemes the
 decision state node is `z = (n, e, h, V, psi, gamma)` with `n, e` in **metres from the target
-(LTP)** — i.e. exactly the `constraints` package's `(n, e)` frame. So the corridor / glidepath /
+(LTP)** — i.e. exactly the `approach_constraints` package's `(n, e)` frame. So the corridor / glidepath /
 floor expressions are written **directly on the decision variables** and stay well-conditioned.
 
 - Convert every **fix** into that same frame once (`TargetFrame` anchored at the target), with the
@@ -121,6 +121,6 @@ An isolation ladder, cheapest first — each step rules a class of cause in or o
 
 ---
 
-*See also:* `4dTrajectory/optimization/constraints/README.md` (the package),
+*See also:* `4dTrajectory/optimization/approach_constraints/README.md` (the package),
 `4dTrajectory/docs/optimization_constraint_design.md` (the design),
 `4dTrajectory/docs/lpv_final_segment.en.html` (LPV geometry).

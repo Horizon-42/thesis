@@ -37,6 +37,14 @@ class StepDown:
     min_alt_m: float
 
 
+# Glidepath vertical-window half-tolerances (metres) for the OPTIMIZED REFERENCE path — the
+# SINGLE source of truth (the backend's ``build_constraint_segments`` reuses these, so there is
+# only one default). Below is the dangerous side, hence tighter, but not so tight that an
+# otherwise-flyable approach becomes infeasible.
+DEFAULT_GLIDEPATH_BELOW_M = 60.0
+DEFAULT_GLIDEPATH_ABOVE_M = 120.0
+
+
 @dataclass(frozen=True)
 class LpvFinalSpec:
     """The FAS-data-block geometry for the LPV final (all positions in the ``(n, e)`` frame).
@@ -54,8 +62,8 @@ class LpvFinalSpec:
     tch_m: float
     gpa_deg: float = 3.0
     da_hat_m: float = 60.96  # 200 ft
-    below_m: float = 15.0
-    above_m: float = 30.0
+    below_m: float = DEFAULT_GLIDEPATH_BELOW_M
+    above_m: float = DEFAULT_GLIDEPATH_ABOVE_M
 
 
 @dataclass
@@ -88,13 +96,18 @@ class SegmentSpec:
             raise ValueError(f"{self.kind.value} segment needs halfwidth_m (the RNP corridor)")
 
 
-def segment_violations_from_components(seg: SegmentSpec, n, e, h, gamma) -> dict:
+def segment_violations_from_components(seg: SegmentSpec, n, e, h, gamma, *, include_lateral=True) -> dict:
     """Evaluate every constraint of ``seg`` from the state's **scalar components**.
 
     ``n``, ``e``, ``h``, ``gamma`` are the node coordinates as scalar components — a NumPy array
     of node values **or** a CasADi vector (the optimizer feeds the latter). Returns
     ``{name: violation}`` with the package convention ``≤ 0 ⇔ satisfied``. Pure composition of the
     backend-agnostic primitives — no new math, no NumPy-only ops, so it serves both backends.
+
+    ``include_lateral=False`` drops the **non-final** box corridor (the centerline containment),
+    keeping only the vertical floor + descent cap. The multiphase optimiser uses this so the
+    pre-final horizontal path is free (only altitude + a FAF intercept angle are constrained); the
+    final LPV corridor is the protected segment and is always kept.
     """
     out: dict = {}
     tag = f"{seg.kind.value}[{seg.start_ident}->{seg.end_ident}]"
@@ -110,11 +123,12 @@ def segment_violations_from_components(seg: SegmentSpec, n, e, h, gamma) -> dict
         out[f"{tag}.glidepath_low"] = low
         out[f"{tag}.glidepath_high"] = high
     else:
-        right, left = lateral.box_corridor_violation(
-            n, e, seg.start_ne, seg.end_ne, seg.halfwidth_m, seg.k_margin
-        )
-        out[f"{tag}.lateral_right"] = right
-        out[f"{tag}.lateral_left"] = left
+        if include_lateral:
+            right, left = lateral.box_corridor_violation(
+                n, e, seg.start_ne, seg.end_ne, seg.halfwidth_m, seg.k_margin
+            )
+            out[f"{tag}.lateral_right"] = right
+            out[f"{tag}.lateral_left"] = left
         s = geo.along_track(n, e, seg.start_ne, seg.end_ne)   # from the segment start
         out[f"{tag}.floor"] = vertical.moc_floor_violation(
             h, s, seg.step_downs, seg.base_floor_m

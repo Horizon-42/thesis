@@ -1,8 +1,8 @@
 """Translate a canonical :class:`ProcedureConstraint` into constraints-package ``SegmentSpec``s.
 
 This bridge lives in the backend on purpose: it depends on *both* the request-side
-:mod:`aeroviz_backend.procedure_constraint` and the optimizer-side ``constraints`` package
-(``4dTrajectory/optimization/constraints``). The optimizer itself depends only on ``constraints``,
+:mod:`aeroviz_backend.procedure_constraint` and the optimizer-side ``approach_constraints`` package
+(``4dTrajectory/optimization/approach_constraints``). The optimizer itself depends only on ``approach_constraints``,
 so the dependency direction stays clean (backend → {constraints, optimizer}; optimizer →
 constraints; constraints → nothing).
 
@@ -23,13 +23,15 @@ target), matching the optimizer's Normalized decision state:
 from __future__ import annotations
 
 import math
+import warnings
 
 import numpy as np
 
 from aeroviz_backend import paths  # noqa: F401  (puts the optimization dir on sys.path)
 from geokit import FT_M, NM_M
 
-import constraints as ac
+import approach_constraints as ac
+from approach_constraints import geometry as _geo
 from aeroviz_backend.procedure_constraint import ProcedureConstraint
 
 _DEFAULT_RNP_NM = 1.0          # RNP APCH initial/intermediate lateral accuracy
@@ -40,11 +42,15 @@ _DEFAULT_GPA_DEG = 3.0
 _DEFAULT_TCH_M = 50.0 * FT_M
 _INTERMEDIATE_CAP_DEG = 3.0    # ≈ 318 ft/NM
 _INITIAL_CAP_DEG = 4.7         # ≈ 500 ft/NM
-# Glidepath vertical window half-tolerances (metres) for the OPTIMIZED REFERENCE path: how far the
-# trajectory may sit below / above the published glidepath. Below is the dangerous side so it is
-# tighter, but not so tight that an otherwise-flyable approach becomes infeasible. Tunable.
-_DEFAULT_BELOW_M = 60.0
-_DEFAULT_ABOVE_M = 120.0
+# Glidepath vertical-window defaults live in the approach_constraints package (single source of truth);
+# build_constraint_segments reuses them so there is exactly one default.
+_DEFAULT_BELOW_M = ac.DEFAULT_GLIDEPATH_BELOW_M
+_DEFAULT_ABOVE_M = ac.DEFAULT_GLIDEPATH_ABOVE_M
+# The trajectory's start must coincide with the procedure's first fix (the IF), or the
+# along-track spans no longer describe the trajectory and the node→segment partition is wrong.
+_INITIAL_FIX_MATCH_TOLERANCE_M = 2000.0
+# FAA standard intercept onto the final approach course at the PFAF (data-validation check).
+_MAX_INTERCEPT_DEG = 30.0
 
 
 def _floor_alt_m(waypoint) -> float | None:
@@ -101,6 +107,8 @@ def build_constraint_segments(
     target_lon_deg: float,
     target_alt_m: float,
     *,
+    initial_lat_deg: float | None = None,
+    initial_lon_deg: float | None = None,
     rnp_nm: float = _DEFAULT_RNP_NM,
     k_margin: float = _DEFAULT_K_MARGIN,
     glidepath_below_m: float = _DEFAULT_BELOW_M,
@@ -111,23 +119,59 @@ def build_constraint_segments(
     ``segments`` are ``constraints.SegmentSpec`` (fixes in the target ``(n,e)`` frame); ``spans``
     are each segment's along-track interval (for the optimizer's fixed node→segment partition).
     Returns ``([], [])`` if the procedure has fewer than two waypoints.
+
+    If ``initial_lat_deg``/``initial_lon_deg`` are given, the optimizer's start must coincide with
+    the procedure's first fix (within ``_INITIAL_FIX_MATCH_TOLERANCE_M``) — otherwise the spans no
+    longer describe the trajectory and the partition would be silently wrong, so this raises.
     """
     wps = pc.waypoints
     if len(wps) < 2:
         return [], []
     frame = ac.TargetFrame(target_lat_deg, target_lon_deg)
     ne = [frame.to_ne(wp.lat_deg, wp.lon_deg) for wp in wps]
+
+    # (#1) The trajectory starts at the optimizer's initial state; the spans are measured from the
+    # procedure's first waypoint. They must be the same point or the partition is meaningless.
+    if initial_lat_deg is not None and initial_lon_deg is not None:
+        start_ne = frame.to_ne(initial_lat_deg, initial_lon_deg)
+        gap_m = float(np.hypot(start_ne[0] - ne[0][0], start_ne[1] - ne[0][1]))
+        if gap_m > _INITIAL_FIX_MATCH_TOLERANCE_M:
+            raise ValueError(
+                f"initial state is {gap_m:.0f} m from the procedure's first fix "
+                f"'{wps[0].ident}' (> {_INITIAL_FIX_MATCH_TOLERANCE_M:.0f} m); procedure "
+                "constraints require the trajectory to start at that fix."
+            )
+
     dists = [wp.distance_from_start_m for wp in wps]
     d0 = dists[0]
     faf = _faf_index(wps)
     rnp_half = rnp_nm * NM_M
+
+    # (#6) Derive the FAS geometry ONCE, from the FAF, and share it across every final leg — the
+    # FAS (FPAP/GARP/course width/glidepath) is one record per approach, not per leg.
+    final_lpv = _lpv_spec(
+        np.asarray(ne[faf], dtype=float), target_alt_m, pc, glidepath_below_m, glidepath_above_m,
+    )
+
+    # (#5) Data-validation: warn if the intermediate→final intercept at the PFAF exceeds 30°.
+    if faf >= 1:
+        intercept = _geo.intercept_angle_deg(
+            _geo.course_bearing(ne[faf - 1], ne[faf]),   # intermediate (IF→FAF) track
+            _geo.course_bearing(ne[faf], ne[-1]),        # final approach course (FAF→threshold)
+        )
+        if float(intercept) > _MAX_INTERCEPT_DEG:
+            warnings.warn(
+                f"PFAF intercept angle {float(intercept):.0f}° exceeds {_MAX_INTERCEPT_DEG:.0f}° "
+                f"at '{wps[faf].ident}' — the coded procedure may be irregular.",
+                stacklevel=2,
+            )
 
     segments: list = []
     spans: list[tuple[float, float]] = []
     for j in range(len(wps) - 1):
         a_ne, b_ne = ne[j], ne[j + 1]
         span = (dists[j] - d0, dists[j + 1] - d0)
-        if j >= faf:  # FAF onward -> the LPV final segment(s)
+        if j >= faf:  # FAF onward -> the LPV final segment(s); share the one FAS spec
             seg = ac.SegmentSpec(
                 ac.SegmentKind.FINAL_LPV,
                 start_ne=a_ne,
@@ -135,10 +179,7 @@ def build_constraint_segments(
                 start_ident=wps[j].ident,
                 end_ident=wps[j + 1].ident,
                 k_margin=k_margin,
-                lpv=_lpv_spec(
-                    np.asarray(a_ne, dtype=float), target_alt_m, pc,
-                    glidepath_below_m, glidepath_above_m,
-                ),
+                lpv=final_lpv,
             )
         else:
             kind = (

@@ -89,10 +89,10 @@ class TrajectorySample:
 
 
 def simulation_mode_for_optimizer(optimizer_name: str) -> str:
-    # Covers casadiIpopt and every casadiDirectCollocation* defect-scheme
+    # Covers casadiIpopt and every casadiDirectCollocation*/casadiMultiphase* defect-scheme
     # variant (load-factor controls); everything else is alpha-based.
     is_casadi = optimizer_name == "casadiIpopt" or optimizer_name.startswith(
-        "casadiDirectCollocation"
+        ("casadiDirectCollocation", "casadiMultiphase")
     )
     return "casadi" if is_casadi else "alpha"
 
@@ -103,11 +103,14 @@ def build_optimized_trajectory_playback(
     node_control: Any,
     final_time: float,
     aircraft: Any,
+    segment_durations: Any = None,
 ) -> dict[str, Any] | None:
     """Roll the controls forward once and return ``{czml, samples, ...}``.
 
     Returns ``None`` when there is nothing to play (no controls or a
     non-positive horizon), so the caller can simply omit the field.
+    ``segment_durations`` (one per control) drives the multiphase non-uniform schedule; ``None``
+    keeps the equal-segment default.
     """
     controls = list(node_control) if node_control is not None else []
     if not controls or final_time <= 0.0:
@@ -120,6 +123,7 @@ def build_optimized_trajectory_playback(
         float(final_time),
         aircraft,
         simulation_mode,
+        segment_durations=list(segment_durations) if segment_durations is not None else None,
     )
     if len(samples) < 2:
         return None
@@ -142,6 +146,7 @@ def _rollout(
     final_time: float,
     aircraft: Any,
     simulation_mode: str,
+    segment_durations: list[float] | None = None,
 ) -> list[TrajectorySample]:
     output_dt = max(_MIN_OUTPUT_DT_S, final_time / _MAX_SAMPLES)
 
@@ -164,6 +169,7 @@ def _rollout(
         final_time,
         integrator_dt=_INTEGRATOR_DT_S,
         output_dt=output_dt,
+        segment_durations=segment_durations,
         truncate_on_envelope_exit=True,
         on_truncate=_log_truncation,
     )

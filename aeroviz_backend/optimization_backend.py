@@ -22,10 +22,8 @@ from aeroviz_backend.simulation_backend import (
 
 from geodetic_simulator import GeodeticSimulator, GeodeticState
 from casadi_optimizer import CasadiOptimizer
-from casadi_direct_collocation_optimizer import (
-    CasadiDirectCollocationOptimizer,
-    _NORMALIZED_FULL_TRANSPORT_SCHEMES,
-)
+from casadi_direct_collocation_optimizer import CasadiDirectCollocationOptimizer
+from multiphase_collocation_optimizer import MultiphaseCollocationOptimizer
 from common import LoadFactorControl
 from least_squares_transcription_optimizor import LeastSquaresTranscriptionOptimizor
 from single_shooting_optimizor import SingleShootingOptimizor
@@ -78,8 +76,17 @@ DIRECT_COLLOCATION_SCHEMES = {
     "casadiDirectCollocationNormalizedFullTransportTrapezoidal": "trapezoidalNormalizedFullTransport",
     "casadiDirectCollocationNormalizedFullTransportRk4": "rk4NormalizedFullTransport",
 }
+# Multiphase transcription: one phase per leg (start->IAF transition + each procedure leg), fixes
+# pinned at the phase boundaries, exact per-leg constraints (no along-track partition). Each name
+# maps to the per-phase collocation scheme; these schemes REQUIRE a procedureConstraint.
+MULTIPHASE_SCHEMES = {
+    "casadiMultiphaseNormalizedFullTransport": "hermiteSimpsonNormalizedFullTransport",
+    "casadiMultiphaseNormalizedFullTransportTrapezoidal": "trapezoidalNormalizedFullTransport",
+    "casadiMultiphaseNormalizedFullTransportRk4": "rk4NormalizedFullTransport",
+}
 SUPPORTED_OPTIMIZERS = (
     *DIRECT_COLLOCATION_SCHEMES,
+    *MULTIPHASE_SCHEMES,
     "casadiIpopt",
     "transcription",
     "leastSquaresTranscription",
@@ -116,27 +123,28 @@ class OptimizationBackend:
         target_state = read_geodetic_state(target_payload, initial_state, aircraft)
 
         # Canonical procedure constraint (the front↔back shared path/altitude structure). It is
-        # ENFORCED as NLP path constraints only on the normalized full-transport schemes (whose
-        # state nodes are metric (n,e), so the corridor/glidepath/floor inequalities are well
-        # conditioned). For any other scheme it is parsed and echoed but not enforced.
+        # ENFORCED only by the explicit MULTIPHASE schemes (which require it — one phase per leg);
+        # any other scheme parses and echoes it but does not enforce it.
         procedure_constraint = ProcedureConstraint.from_payload(
             payload.get("procedureConstraint")
         )
-        collocation_scheme = DIRECT_COLLOCATION_SCHEMES.get(optimizer_name)
-        constraints_enforced = (
-            procedure_constraint is not None
-            and collocation_scheme in _NORMALIZED_FULL_TRANSPORT_SCHEMES
-        )
+        is_multiphase = optimizer_name in MULTIPHASE_SCHEMES
         constraint_segments = None
-        constraint_spans = None
-        if constraints_enforced:
-            constraint_segments, constraint_spans = build_constraint_segments(
+        constraints_enforced = False
+        if is_multiphase:
+            if procedure_constraint is None:
+                raise ValueError("the multiphase optimizer requires a procedureConstraint")
+            # The multiphase optimiser models start->IAF as phase 0, so the start need NOT equal
+            # the procedure's first fix.
+            constraint_segments, _constraint_spans = build_constraint_segments(
                 procedure_constraint,
                 target_state.latitude,
                 target_state.longitude,
                 target_state.altitude,
             )
-            constraints_enforced = bool(constraint_segments)
+            if not constraint_segments:
+                raise ValueError("the procedureConstraint produced no legs")
+            constraints_enforced = True
 
         # Time the WHOLE optimization flow, not just the solver call: building
         # (compiling) the NLP, the solve (which for direct collocation is itself
@@ -144,47 +152,62 @@ class OptimizationBackend:
         # forward into the playback CZML.  The breakdown is logged to the server
         # log (stderr) below.
         flow_started = time.perf_counter()
-        optimizer = self.make_optimizer(
-            optimizer_name,
-            GeodeticSimulator(aircraft),
-            n_segments,
-            dt,
-            max_iterations,
-            arrival_time_s=arrival_time_s,
-            constraint_segments=constraint_segments,
-            constraint_spans=constraint_spans,
-        )
-        build_s = time.perf_counter() - flow_started
-
-        solve_started = time.perf_counter()
-        if optimizer_name in DIRECT_COLLOCATION_SCHEMES:
-            # Direct collocation includes T as a decision variable, so
-            # one solve returns both the optimal trajectory and the
-            # optimal arrival time -- no outer bisection needed.
+        segment_durations = None
+        if is_multiphase:
+            # Multiphase transcription: one phase per leg (start->IAF transition + each procedure
+            # leg), fixes pinned at the phase boundaries, exact per-leg constraints (replaces the
+            # single-phase along-track partition). One NLP, free per-phase time, min total time.
+            optimizer = MultiphaseCollocationOptimizer(
+                aircraft, constraint_segments, scheme=MULTIPHASE_SCHEMES[optimizer_name],
+            )
+            build_s = time.perf_counter() - flow_started
+            solve_started = time.perf_counter()
             final_time, node_control, node_state = optimizer.optimize_free_time(
-                initial_state,
-                target_state,
-                arrival_time_s,
+                initial_state, target_state, arrival_time_s,
             )
-        elif optimizer_name == "casadiIpopt":
-            # Multiple shooting uses a fixed-time NLP; finding the
-            # shortest feasible duration still requires bisecting on T.
-            final_time, node_control, node_state = optimizer.optimize_time_to_target(
-                initial_state,
-                target_state,
-                arrival_time_s,
-            )
+            segment_durations = optimizer.segment_durations_s
+            solve_s = time.perf_counter() - solve_started
         else:
-            final_time, node_control, node_state = optimizer.optimize_trajectory(
-                initial_state,
-                target_state,
+            optimizer = self.make_optimizer(
+                optimizer_name,
+                GeodeticSimulator(aircraft),
+                n_segments,
+                dt,
+                max_iterations,
+                arrival_time_s=arrival_time_s,
             )
-        solve_s = time.perf_counter() - solve_started
+            build_s = time.perf_counter() - flow_started
+            solve_started = time.perf_counter()
+            if optimizer_name in DIRECT_COLLOCATION_SCHEMES:
+                # Direct collocation includes T as a decision variable, so
+                # one solve returns both the optimal trajectory and the
+                # optimal arrival time -- no outer bisection needed.
+                final_time, node_control, node_state = optimizer.optimize_free_time(
+                    initial_state,
+                    target_state,
+                    arrival_time_s,
+                )
+            elif optimizer_name == "casadiIpopt":
+                # Multiple shooting uses a fixed-time NLP; finding the
+                # shortest feasible duration still requires bisecting on T.
+                final_time, node_control, node_state = optimizer.optimize_time_to_target(
+                    initial_state,
+                    target_state,
+                    arrival_time_s,
+                )
+            else:
+                final_time, node_control, node_state = optimizer.optimize_trajectory(
+                    initial_state,
+                    target_state,
+                )
+            solve_s = time.perf_counter() - solve_started
 
         result = {
             "ok": True,
             "finalTimeS": float(final_time),
-            "nSegments": n_segments,
+            # Multiphase emits its own per-phase control mesh, so the actual control count is the
+            # one to report (not the request's nSegments, which it ignores).
+            "nSegments": len(node_control) if is_multiphase else n_segments,
             "dtS": dt,
             "optimizer": optimizer_name,
             "controls": [
@@ -205,6 +228,7 @@ class OptimizationBackend:
             node_control,
             float(final_time),
             aircraft,
+            segment_durations=segment_durations,
         )
         playback_s = time.perf_counter() - playback_started
         if playback is not None:
@@ -405,9 +429,9 @@ def format_optimizer_control(
     optimizer_name: str,
     control_values: Any,
 ) -> dict[str, float]:
-    # Both CasADi optimisers use the load-factor parameterisation
+    # The CasADi + multiphase optimisers use the load-factor parameterisation
     # (T, mu, n_cmd); the alpha-based optimisers use (T, mu, alpha).
-    if optimizer_name in CASADI_OPTIMIZERS:
+    if optimizer_name in CASADI_OPTIMIZERS or optimizer_name in MULTIPHASE_SCHEMES:
         return format_control(LoadFactorControl(*control_values))
     return format_control(Control(*control_values))
 

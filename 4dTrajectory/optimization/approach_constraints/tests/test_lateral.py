@@ -1,10 +1,9 @@
-"""TODO ⑤–⑦ (lateral). xfail until implemented; scalar-component API."""
+"""Lateral corridor ⑤–⑦: box + LPV angular corridor + course half-width (scalar-component API)."""
 
 import numpy as np
-import pytest
 
-from constraints import lateral
-from constraints.segments import LpvFinalSpec
+from approach_constraints import lateral
+from approach_constraints.segments import LpvFinalSpec
 
 A = np.array([0.0, 0.0])
 B = np.array([10.0, 0.0])
@@ -34,7 +33,6 @@ def test_box_corridor():
     assert np.allclose(np.maximum(r, l), [-3.0, 5.0])
 
 
-@pytest.mark.xfail(reason="TODO ⑥ lpv_course_halfwidth", strict=False)
 def test_lpv_halfwidth_converges_to_course_width_at_ltp():
     lpv = _lpv()
     assert np.isclose(lateral.lpv_course_halfwidth(0.0, 0.0, lpv), 106.7, rtol=1e-3)

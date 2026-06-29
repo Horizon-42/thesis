@@ -3,7 +3,7 @@
 import numpy as np
 from geokit import DEG2RAD, WGS84_A
 
-from constraints.frame import TargetFrame
+from approach_constraints.frame import TargetFrame
 
 
 def test_target_maps_to_origin():

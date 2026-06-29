@@ -1,8 +1,8 @@
 """CLI demo: build the synthetic LPV approach, evaluate a feasible and an infeasible trajectory.
 
-    python -m constraints          # from the 4dTrajectory/optimization directory
+    python -m approach_constraints          # from the 4dTrajectory/optimization directory
     # or, from the repo root:
-    PYTHONPATH=4dTrajectory/optimization python -m constraints
+    PYTHONPATH=4dTrajectory/optimization python -m approach_constraints
 
 Before you implement the TODOs it prints which one to do first; afterwards it prints a violation
 report for both trajectories (feasible → all ≤ 0; infeasible → the final-leg corridor flags).
