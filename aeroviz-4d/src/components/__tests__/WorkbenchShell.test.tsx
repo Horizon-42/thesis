@@ -38,6 +38,7 @@ describe("WorkbenchShell", () => {
     expect(screen.getByText("LEFT")).toBeTruthy();
     expect(screen.getByText("RIGHT")).toBeTruthy();
     expect(screen.getByText("BOTTOM")).toBeTruthy();
+    expect(screen.getByText("OVERLAY")).toBeTruthy();
     expect(screen.queryByText("Exit presentation (Esc)")).toBeNull();
   });
 

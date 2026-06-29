@@ -280,6 +280,18 @@ body,
   color: #fff;
 }
 
+/* Procedures is an independent toggle, not an exclusive task — set it apart with a
+   gap and a distinct (teal) active state matching the Layers/Present toggles. */
+.workbench-task-tab-toggle {
+  margin-left: 14px;
+}
+
+.workbench-task-tab-toggle.active {
+  background: #14532d;
+  border-color: #34d399;
+  color: #ecfdf5;
+}
+
 .workbench-topbar-actions {
   display: flex;
   gap: 6px;
@@ -416,7 +428,11 @@ body,
   overflow-y: auto;
 }
 
-/* ── Bottom transport bar (above Cesium's timeline) ────────────────────────── */
+/* Playback uses Cesium's native console (animation widget bottom-left + timeline),
+   plus this transport bar of extras (discrete speeds / reset / loop), kept in sync. */
+
+/* ── Bottom transport bar — docked bottom-center, above the timeline, clear of the
+   native dial at bottom-left. ───────────────────────────────────────────────────── */
 .workbench-bottom-bar {
   position: absolute;
   bottom: 36px;
@@ -473,19 +489,18 @@ body,
   color: #aebbd0;
 }
 
-.workbench--presentation .workbench-bottom-bar,
+/* Presentation mode hides all docks + the native console, leaving a clean globe. */
+.workbench--presentation .left-overlay-panel-stack,
 .workbench--presentation .workbench-right-inspector,
-.workbench--presentation .left-overlay-panel-stack {
+.workbench--presentation .workbench-bottom-bar,
+.workbench--presentation .procedure-panel {
   display: none;
 }
 
-/* Cesium's timeline scrubber is a sibling of .workbench, reached via the body class. */
-body.workbench-presentation-active .cesium-viewer-timelineContainer {
-  display: none;
-}
-
-/* The custom transport bar replaces Cesium's animation wheel; keep the timeline. */
-.cesium-viewer-animationContainer {
+/* Cesium's timeline + animation widget are siblings of .workbench, reached via the body
+   class so presentation mode can hide the native console too. */
+body.workbench-presentation-active .cesium-viewer-timelineContainer,
+body.workbench-presentation-active .cesium-viewer-animationContainer {
   display: none;
 }
 
@@ -523,10 +538,14 @@ body.workbench-presentation-active .cesium-viewer-timelineContainer {
   min-height: 0;
   max-height: 100%;
   overflow: hidden;
+  box-sizing: border-box;
+  /* Clear the bottom-left so Cesium's native animation widget (clock dial) shows through. */
+  padding-bottom: 92px;
 }
 
-/* The per-task left dock fills the stack and scrolls; it is the single card, and the
-   panels it hosts (ControlPanel / ProcedurePanel / PilotPanel) render flat inside it. */
+/* The per-task left dock fills the stack and scrolls; it is a card, and the panels it
+   hosts (ControlPanel / PilotPanel) render flat inside it. The Procedures panel is a
+   separate card stacked below it (capped, scrollable) when proceduresOpen. */
 .left-overlay-panel-stack > .workbench-left-dock {
   flex: 1 1 auto;
   min-height: 0;
@@ -543,8 +562,7 @@ body.workbench-presentation-active .cesium-viewer-timelineContainer {
   backdrop-filter: blur(7px);
 }
 
-.workbench-left-dock > .control-panel,
-.workbench-left-dock > .procedure-panel {
+.workbench-left-dock > .control-panel {
   width: auto;
   padding: 0;
   border: none;
@@ -870,18 +888,24 @@ body.workbench-presentation-active .cesium-viewer-timelineContainer {
 }
 
 /* ── Procedure Panel overlay ─────────────────────────────────────────────── */
-/* Nested inside the Geometry & Constraints category (no longer a floating panel):
-   a subtle sub-card that flows in the scrolling control panel. */
+/* The procedures panel is an independent card docked bottom-right (grid-area ops),
+   coexisting with whichever task is active in the left dock. */
 .procedure-panel {
-  width: 100%;
+  grid-area: ops;
+  align-self: stretch;
+  justify-self: end;
+  width: clamp(260px, 22vw, 340px);
+  max-width: min(100%, calc(100vw - 36px));
   min-height: 0;
-  margin-top: 4px;
+  max-height: 100%;
+  overflow-y: auto;
   pointer-events: auto;
-  background: rgba(13, 17, 27, 0.55);
-  border: 1px solid rgba(103, 232, 249, 0.16);
+  background: rgba(16, 22, 33, 0.9);
+  backdrop-filter: blur(7px);
+  border: 1px solid rgba(103, 232, 249, 0.2);
   color: #e0e6f0;
-  border-radius: 6px;
-  padding: 10px;
+  border-radius: 8px;
+  padding: 12px;
   box-sizing: border-box;
   font-family: "Inter", "Segoe UI", sans-serif;
   font-size: 12px;

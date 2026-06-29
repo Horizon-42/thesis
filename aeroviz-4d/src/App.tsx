@@ -31,17 +31,23 @@ import { useComparisonTrajectoryLayer } from "./hooks/useComparisonTrajectoryLay
 import { useEffect, useState } from "react";
 
 function FlightApp() {
-  const { activeAirportCode, selectedRunway, trajectoryComparison, mode, isRunwayProfileOpen } =
-    useApp();
-  // The observed-track CZML is large (100+ MB per airport), so it loads only when a
-  // trajectory-relevant task actually needs it: Observe mode, or Procedures mode with a
-  // runway profile open (the profile overlays observed tracks vs the procedure). In the
-  // 3-colour optimizer-comparison view it is suppressed (useComparisonTrajectoryLayer
-  // drives those instead), and the Fly/Optimize/Compare tasks have their own playback.
+  const {
+    activeAirportCode,
+    selectedRunway,
+    trajectoryComparison,
+    mode,
+    proceduresOpen,
+    isRunwayProfileOpen,
+  } = useApp();
+  // The observed-track CZML is large (100+ MB per airport), so it loads only when it is
+  // actually needed: in Observe, or whenever a runway profile is open (the profile
+  // overlays observed tracks vs the procedure, in any task). It is suppressed in the
+  // 3-colour optimizer-comparison view (useComparisonTrajectoryLayer drives those), and
+  // the Fly/Optimize/Compare tasks otherwise have their own playback.
   const wantsObserved =
     !!activeAirportCode &&
     !trajectoryComparison &&
-    (mode === "observe" || (mode === "procedures" && isRunwayProfileOpen));
+    (mode === "observe" || isRunwayProfileOpen);
   const czmlUrl = wantsObserved
     ? selectedRunway
       ? airportLandingsRunwayUrl(activeAirportCode, selectedRunway)
@@ -59,7 +65,7 @@ function FlightApp() {
       {/* Layer 1: the workbench shell — top context bar + a per-task left dock over the
           overlay host (clicks fall through to the globe; each dock re-enables them). */}
       <WorkbenchShell
-        left={<WorkbenchLeftDock flightIds={flightIds} procedures={<ProcedurePanel />} />}
+        left={<WorkbenchLeftDock flightIds={flightIds} />}
         right={
           <WorkbenchRightInspector>
             <HUD />
@@ -70,6 +76,9 @@ function FlightApp() {
         <AirportLocalTerrainAlert />
         <ProcedureAnnotationPopup />
         <RunwayTrajectoryProfilePanel />
+        {/* Procedures is an independent panel docked bottom-right (grid-area ops); it
+            coexists with the active task and keeps its state across task switches. */}
+        {proceduresOpen ? <ProcedurePanel /> : null}
         {czmlStatus ? (
           <div
             className={`czml-status ${

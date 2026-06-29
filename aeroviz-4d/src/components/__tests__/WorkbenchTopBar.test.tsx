@@ -6,6 +6,7 @@ const {
   setActiveAirportCode,
   setSelectedRunway,
   setMode,
+  setProceduresOpen,
   setLayersDrawerOpen,
   setPresentationMode,
   landingsRef,
@@ -18,6 +19,7 @@ const {
     activeAirportCode: "KRDU",
     selectedRunway: null,
     mode: "observe",
+    proceduresOpen: false,
     layersDrawerOpen: false,
     presentationMode: false,
   };
@@ -26,6 +28,7 @@ const {
     setActiveAirportCode: vi.fn(),
     setSelectedRunway: vi.fn(),
     setMode: vi.fn(),
+    setProceduresOpen: vi.fn(),
     setLayersDrawerOpen: vi.fn(),
     setPresentationMode: vi.fn(),
     landingsRef: { current: { manifest: null as unknown, status: "empty" } },
@@ -38,6 +41,7 @@ vi.mock("../../context/AppContext", () => ({
     setActiveAirportCode,
     setSelectedRunway,
     setMode,
+    setProceduresOpen,
     setLayersDrawerOpen,
     setPresentationMode,
   }),
@@ -53,21 +57,34 @@ describe("WorkbenchTopBar", () => {
   beforeEach(() => {
     landingsRef.current = { manifest: null, status: "empty" };
     appState.mode = "observe";
+    appState.proceduresOpen = false;
     appState.selectedRunway = null;
     appState.layersDrawerOpen = false;
     appState.presentationMode = false;
     vi.clearAllMocks();
   });
 
-  it("renders the five task tabs and switches mode on click", () => {
+  it("renders the four exclusive task tabs and switches mode on click", () => {
     render(<WorkbenchTopBar />);
 
-    for (const label of ["Observe", "Procedures", "Fly", "Optimize", "Compare"]) {
+    for (const label of ["Observe", "Fly", "Optimize", "Compare"]) {
       expect(screen.getByRole("button", { name: label })).toBeTruthy();
     }
 
     fireEvent.click(screen.getByRole("button", { name: "Optimize" }));
     expect(setMode).toHaveBeenCalledWith("optimize");
+  });
+
+  it("toggles the procedures panel independently of the active task", () => {
+    appState.mode = "observe";
+    render(<WorkbenchTopBar />);
+
+    const procedures = screen.getByRole("button", { name: "Procedures" });
+    expect(procedures.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(procedures);
+    expect(setProceduresOpen).toHaveBeenCalledWith(true);
+    // Toggling procedures does not change the active task.
+    expect(setMode).not.toHaveBeenCalled();
   });
 
   it("marks the active task tab pressed", () => {

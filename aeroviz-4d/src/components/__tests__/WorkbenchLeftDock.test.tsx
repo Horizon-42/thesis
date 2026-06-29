@@ -22,9 +22,7 @@ vi.mock("../PilotPanel", () => ({
 import WorkbenchLeftDock from "../WorkbenchLeftDock";
 
 function renderDock() {
-  return render(
-    <WorkbenchLeftDock flightIds={["a", "b", "c"]} procedures={<div>PROCEDURES</div>} />,
-  );
+  return render(<WorkbenchLeftDock flightIds={["a", "b", "c"]} />);
 }
 
 describe("WorkbenchLeftDock", () => {
@@ -40,24 +38,17 @@ describe("WorkbenchLeftDock", () => {
     expect(screen.queryByText(/PILOT:/)).toBeNull();
   });
 
-  it("shows the procedure tree in procedures mode", () => {
-    appState.mode = "procedures";
-    renderDock();
-    expect(screen.getByText("PROCEDURES")).toBeTruthy();
-    expect(screen.queryByText("CONTROL_PANEL")).toBeNull();
-  });
-
   it("drives the PilotPanel sub-mode for fly / optimize / compare", () => {
     appState.mode = "fly";
     const { rerender } = renderDock();
     expect(screen.getByText("PILOT:pilot")).toBeTruthy();
 
     appState.mode = "optimize";
-    rerender(<WorkbenchLeftDock flightIds={[]} procedures={<div>PROCEDURES</div>} />);
+    rerender(<WorkbenchLeftDock flightIds={[]} />);
     expect(screen.getByText("PILOT:trajectory")).toBeTruthy();
 
     appState.mode = "compare";
-    rerender(<WorkbenchLeftDock flightIds={[]} procedures={<div>PROCEDURES</div>} />);
+    rerender(<WorkbenchLeftDock flightIds={[]} />);
     expect(screen.getByText("PILOT:comparison")).toBeTruthy();
   });
 });

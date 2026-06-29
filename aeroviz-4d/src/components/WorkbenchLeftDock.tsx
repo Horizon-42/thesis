@@ -2,15 +2,14 @@
  * WorkbenchLeftDock.tsx
  * ---------------------
  * The left working dock. It shows only the controls for the active task, switching
- * on the global workbench `mode`:
- *   • observe              → trajectory playback/options + the flight list
- *   • procedures           → the RNAV procedure tree (runway-scoped)
+ * on the global workbench `mode` (the four mutually-exclusive tasks):
+ *   • observe                  → trajectory playback/options + the flight list
  *   • fly / optimize / compare → the PilotPanel, driven in the matching sub-mode
  *
- * This is the seam that unifies the app's two former mode systems into one.
+ * Procedures is NOT a task — the procedure panel is rendered separately (gated on
+ * `proceduresOpen`) so it can coexist with whichever task is active.
  */
 
-import type { ReactNode } from "react";
 import { useApp, type WorkbenchMode } from "../context/AppContext";
 import ControlPanel from "./ControlPanel";
 import FlightTable from "./FlightTable";
@@ -33,16 +32,10 @@ const PILOT_TO_MODE: Record<PilotPanelMode, WorkbenchMode> = {
 interface WorkbenchLeftDockProps {
   /** Observed-flight ids for the Observe-mode flight list. */
   flightIds: string[];
-  /** The RNAV procedure tree, shown in Procedures mode. */
-  procedures: ReactNode;
 }
 
-export default function WorkbenchLeftDock({ flightIds, procedures }: WorkbenchLeftDockProps) {
+export default function WorkbenchLeftDock({ flightIds }: WorkbenchLeftDockProps) {
   const { mode, setMode } = useApp();
-
-  if (mode === "procedures") {
-    return <div className="workbench-left-dock">{procedures}</div>;
-  }
 
   if (mode === "fly" || mode === "optimize" || mode === "compare") {
     return (

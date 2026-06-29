@@ -15,7 +15,6 @@ import { useLandingsManifest } from "../hooks/useLandingsManifest";
 
 const TASK_TABS: Array<{ mode: WorkbenchMode; label: string }> = [
   { mode: "observe", label: "Observe" },
-  { mode: "procedures", label: "Procedures" },
   { mode: "fly", label: "Fly" },
   { mode: "optimize", label: "Optimize" },
   { mode: "compare", label: "Compare" },
@@ -30,6 +29,8 @@ export default function WorkbenchTopBar() {
     setSelectedRunway,
     mode,
     setMode,
+    proceduresOpen,
+    setProceduresOpen,
     layersDrawerOpen,
     setLayersDrawerOpen,
     presentationMode,
@@ -88,6 +89,16 @@ export default function WorkbenchTopBar() {
             {tab.label}
           </button>
         ))}
+        {/* Procedures is an independent toggle, not a task — it coexists with the
+            active task above (separated here to signal that). */}
+        <button
+          type="button"
+          className={`workbench-task-tab workbench-task-tab-toggle${proceduresOpen ? " active" : ""}`}
+          aria-pressed={proceduresOpen}
+          onClick={() => setProceduresOpen(!proceduresOpen)}
+        >
+          Procedures
+        </button>
       </nav>
 
       <div className="workbench-topbar-actions">

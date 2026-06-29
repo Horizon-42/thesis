@@ -220,17 +220,24 @@ interface RunwayProfileSessionState {
 }
 
 /**
- * The single top-level task the workbench is on. Replaces the app's two former
- * "mode" systems (the left-panel Geometry/Trajectories categories and the Pilot
- * panel's Pilot/Trajectory/Compare tabs) with one switcher: `fly`/`optimize`/
- * `compare` map onto the PilotPanel's pilot/trajectory/comparison sub-modes.
+ * The active top-level task. These four are mutually exclusive — one drives the
+ * left dock at a time. `fly`/`optimize`/`compare` map onto the PilotPanel's
+ * pilot/trajectory/comparison sub-modes. Procedures is intentionally NOT a mode:
+ * it is an independent panel (`proceduresOpen`) that coexists with any task.
  */
-export type WorkbenchMode = "observe" | "procedures" | "fly" | "optimize" | "compare";
+export type WorkbenchMode = "observe" | "fly" | "optimize" | "compare";
 
 interface WorkbenchUiState {
-  /** Active task in the workbench shell. */
+  /** Active task in the workbench shell (one of the four exclusive tasks). */
   mode: WorkbenchMode;
   setMode: (mode: WorkbenchMode) => void;
+  /**
+   * Whether the RNAV procedure panel is shown. Independent of `mode` so procedures
+   * can stay open (and keep their state) across any task — e.g. browse procedures
+   * while observing traffic. The panel's own "On" switch controls the 3D geometry.
+   */
+  proceduresOpen: boolean;
+  setProceduresOpen: (open: boolean) => void;
   /** When true, every dock/chrome is hidden, leaving a clean globe (demos/figures). */
   presentationMode: boolean;
   setPresentationMode: (enabled: boolean) => void;
@@ -296,6 +303,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     useState<RunwayProfileViewMode>("split");
   const [rangeRingRadiusKm, setRangeRingRadiusKm] = useState<number>(5);
   const [mode, setMode] = useState<WorkbenchMode>("observe");
+  const [proceduresOpen, setProceduresOpen] = useState<boolean>(false);
   const [presentationMode, setPresentationMode] = useState<boolean>(false);
   const [layersDrawerOpen, setLayersDrawerOpen] = useState<boolean>(false);
   const [rightInspectorCollapsed, setRightInspectorCollapsed] = useState<boolean>(false);
@@ -490,13 +498,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const workbenchUiState: WorkbenchUiState = useMemo(() => ({
     mode,
     setMode,
+    proceduresOpen,
+    setProceduresOpen,
     presentationMode,
     setPresentationMode,
     layersDrawerOpen,
     setLayersDrawerOpen,
     rightInspectorCollapsed,
     setRightInspectorCollapsed,
-  }), [mode, presentationMode, layersDrawerOpen, rightInspectorCollapsed]);
+  }), [mode, proceduresOpen, presentationMode, layersDrawerOpen, rightInspectorCollapsed]);
 
   return (
     <AirportSessionContext.Provider value={airportSessionState}>
