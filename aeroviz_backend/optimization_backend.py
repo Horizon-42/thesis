@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import math
 import sys
+import threading
 import time
 from typing import Any
 
@@ -99,12 +101,23 @@ SUPPORTED_OPTIMIZERS = (
 CASADI_OPTIMIZERS = ("casadiIpopt", *DIRECT_COLLOCATION_SCHEMES)
 
 
+# CasADi/IPOPT's MUMPS linear solver is Fortran and NOT thread-safe. The ThreadingHTTPServer
+# runs each request in its own thread, so two optimize() calls (e.g. the panel firing a request
+# twice) would run two solves at once and corrupt or CRASH the process. Serialize every solve
+# through one process-wide lock — solves are CPU-bound, so concurrency wouldn't help throughput.
+_SOLVE_LOCK = threading.Lock()
+
+
 class OptimizationBackend:
     def __init__(self) -> None:
         self._casadi_optimizer_key = None
         self._casadi_optimizer = None
 
     def optimize(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        with _SOLVE_LOCK:
+            return self._optimize(payload)
+
+    def _optimize(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = payload or {}
         initial_payload = read_required_mapping(payload, "initialState")
         target_payload = read_required_mapping(payload, "targetState")
@@ -145,6 +158,12 @@ class OptimizationBackend:
             if not constraint_segments:
                 raise ValueError("the procedureConstraint produced no legs")
             constraints_enforced = True
+            # Debug: dump exactly what is being optimized (start / target / the procedure legs),
+            # so a failed multiphase solve can be reproduced from the server log.
+            _log_multiphase_request(
+                optimizer_name, arrival_time_s, initial_state, target_state,
+                procedure_constraint, constraint_segments,
+            )
 
         # Time the WHOLE optimization flow, not just the solver call: building
         # (compiling) the NLP, the solve (which for direct collocation is itself
@@ -305,6 +324,29 @@ class OptimizationBackend:
             max_iterations,
             arrival_time_s,
         )
+
+
+def _log_multiphase_request(
+    optimizer_name: str,
+    arrival_time_s: float,
+    initial_state: Any,
+    target_state: Any,
+    procedure_constraint: Any,
+    constraint_segments: Any,
+) -> None:
+    """Dump a multiphase request (start / target / legs) to the server log so a failed solve can
+    be reproduced. One line; positions to 5 dp, headings/gamma in degrees."""
+    def fmt(s: Any) -> str:
+        return (f"lat={s.latitude:.5f},lon={s.longitude:.5f},alt={s.altitude:.0f}m,"
+                f"V={s.V:.0f},hdg={math.degrees(s.psi):.0f},gam={math.degrees(s.gamma):.1f}")
+    waypoints = "->".join(w.ident for w in procedure_constraint.waypoints)
+    legs = ",".join(s.kind.value for s in constraint_segments)
+    sys.stderr.write(
+        f"[aeroviz-backend] multiphase request optimizer={optimizer_name} "
+        f"arrivalTimeS={arrival_time_s:.0f} init=({fmt(initial_state)}) "
+        f"target=({fmt(target_state)}) waypoints=[{waypoints}] legs=[{legs}]\n"
+    )
+    sys.stderr.flush()
 
 
 def log_optimization_timing(
