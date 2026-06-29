@@ -7,6 +7,7 @@ import {
   useRunwayTrajectoryProfile,
   type ProfileAircraftTrack,
 } from "../hooks/useRunwayTrajectoryProfile";
+import { normalizeRunwayIdent } from "../utils/runwayIdent";
 import type {
   HorizontalPlateAssessmentSegment,
   HorizontalPlateRoute,
@@ -979,17 +980,25 @@ export default function RunwayTrajectoryProfilePanel() {
   const {
     activeAirportCode,
     isRunwayProfileOpen,
-    selectedProfileRunwayIdent,
+    selectedRunway,
     runwayProfileViewMode,
     setRunwayProfileOpen,
     setRunwayProfileViewMode,
     trajectoryDataSource,
+    optimizedTrajectoryDataSource,
     procedureDisplayLevel,
   } = useApp();
+  // The profile's runway is the global Landing-Runway selection (RW-prefixed spelling);
+  // there is no separate profile-runway selection.
+  const profileRunwayIdent = selectedRunway ? normalizeRunwayIdent(selectedRunway) : null;
+  // The profile plots both the observed and optimized tracks, so it is "linked"
+  // whenever either source is loaded.
+  const trajectorySourceLinked = !!trajectoryDataSource || !!optimizedTrajectoryDataSource;
   const profile = useRunwayTrajectoryProfile();
   const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>("nm");
 
-  if (!isRunwayProfileOpen || !selectedProfileRunwayIdent) return null;
+  // Needs a specific runway: "All runways" (null) has no single profile to show.
+  if (!isRunwayProfileOpen || !profileRunwayIdent) return null;
 
   const viewModes: Array<{ label: string; value: RunwayProfileViewMode }> = [
     { label: "Split", value: "split" },
@@ -1037,7 +1046,7 @@ export default function RunwayTrajectoryProfilePanel() {
       <header className="runway-profile-panel-header">
         <div>
           <h3>
-            {activeAirportCode} {selectedProfileRunwayIdent} trajectory profile
+            {activeAirportCode} {profileRunwayIdent} trajectory profile
           </h3>
           <p>
             Time: {formatIsoTime(profile.currentTimeIso)}{" "}
@@ -1079,7 +1088,7 @@ export default function RunwayTrajectoryProfilePanel() {
       <div className="runway-profile-summary">
         <span>{routeCount} active RNAV branches in plate</span>
         <span>{trackCount} aircraft currently inside plate</span>
-        <span>{trajectoryDataSource ? "CZML linked" : "CZML missing"}</span>
+        <span>{trajectorySourceLinked ? "CZML linked" : "CZML missing"}</span>
       </div>
 
       <p className="runway-profile-procedure-list">

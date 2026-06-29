@@ -88,4 +88,48 @@ describe("AppContext", () => {
     expect(result.current.layers.runways).toBe(true);
     expect(viewer.trackedEntity).toBeUndefined();
   });
+
+  it("defaults the workbench UI state and updates via its setters", async () => {
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <AppProvider>{children}</AppProvider>
+    );
+    const { result } = renderHook(() => useApp(), { wrapper });
+
+    await waitFor(() => expect(result.current.activeAirportCode).toBe("KRDU"));
+    expect(result.current.mode).toBe("observe");
+    expect(result.current.presentationMode).toBe(false);
+    expect(result.current.layersDrawerOpen).toBe(false);
+    expect(result.current.rightInspectorCollapsed).toBe(false);
+
+    act(() => {
+      result.current.setMode("optimize");
+      result.current.setPresentationMode(true);
+      result.current.setLayersDrawerOpen(true);
+      result.current.setRightInspectorCollapsed(true);
+    });
+
+    expect(result.current.mode).toBe("optimize");
+    expect(result.current.presentationMode).toBe(true);
+    expect(result.current.layersDrawerOpen).toBe(true);
+    expect(result.current.rightInspectorCollapsed).toBe(true);
+  });
+
+  it("preserves the active workbench mode across an airport switch", async () => {
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <AppProvider>{children}</AppProvider>
+    );
+    const { result } = renderHook(() => useApp(), { wrapper });
+
+    await waitFor(() => expect(result.current.activeAirportCode).toBe("KRDU"));
+
+    act(() => {
+      result.current.setMode("procedures");
+    });
+    act(() => {
+      result.current.setActiveAirportCode("CYVR");
+    });
+
+    expect(result.current.activeAirportCode).toBe("CYVR");
+    expect(result.current.mode).toBe("procedures");
+  });
 });

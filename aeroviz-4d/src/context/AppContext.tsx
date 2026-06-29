@@ -154,9 +154,14 @@ interface FlightSessionState {
   selectedRunway: string | null;
   setSelectedRunway: (runway: string | null) => void;
 
-  /** The loaded CZML datasource for trajectory sampling and profile views */
+  /** The loaded observed-track CZML datasource for trajectory sampling and profile views */
   trajectoryDataSource: Cesium.CzmlDataSource | null;
   setTrajectoryDataSource: (dataSource: Cesium.CzmlDataSource | null) => void;
+
+  /** The optimized-trajectory playback CZML datasource (Optimize / Trajectory-Play mode),
+   *  exposed so the runway profile can plot the optimized track alongside the observed one. */
+  optimizedTrajectoryDataSource: Cesium.CzmlDataSource | null;
+  setOptimizedTrajectoryDataSource: (dataSource: Cesium.CzmlDataSource | null) => void;
 
   /** When true, the Trajectories layer shows the 3-colour optimizer comparison instead
    *  of the observed tracks (driven by the same runway selection). */
@@ -205,13 +210,36 @@ interface PlaybackState {
 }
 
 interface RunwayProfileSessionState {
-  /** Selected runway for the 2D runway profile overlay */
-  selectedProfileRunwayIdent: string | null;
-  setSelectedProfileRunwayIdent: (runwayIdent: string | null) => void;
+  // The profile's runway is NOT stored separately — it is the global `selectedRunway`
+  // (see FlightSessionState), so the procedure/profile runway and the top-bar Landing
+  // Runway selector are always one and the same.
   isRunwayProfileOpen: boolean;
   setRunwayProfileOpen: (open: boolean) => void;
   runwayProfileViewMode: RunwayProfileViewMode;
   setRunwayProfileViewMode: (mode: RunwayProfileViewMode) => void;
+}
+
+/**
+ * The single top-level task the workbench is on. Replaces the app's two former
+ * "mode" systems (the left-panel Geometry/Trajectories categories and the Pilot
+ * panel's Pilot/Trajectory/Compare tabs) with one switcher: `fly`/`optimize`/
+ * `compare` map onto the PilotPanel's pilot/trajectory/comparison sub-modes.
+ */
+export type WorkbenchMode = "observe" | "procedures" | "fly" | "optimize" | "compare";
+
+interface WorkbenchUiState {
+  /** Active task in the workbench shell. */
+  mode: WorkbenchMode;
+  setMode: (mode: WorkbenchMode) => void;
+  /** When true, every dock/chrome is hidden, leaving a clean globe (demos/figures). */
+  presentationMode: boolean;
+  setPresentationMode: (enabled: boolean) => void;
+  /** Whether the on-demand Layers drawer is open. */
+  layersDrawerOpen: boolean;
+  setLayersDrawerOpen: (open: boolean) => void;
+  /** Whether the right inspector dock is collapsed. */
+  rightInspectorCollapsed: boolean;
+  setRightInspectorCollapsed: (collapsed: boolean) => void;
 }
 
 interface AppState extends
@@ -220,7 +248,8 @@ interface AppState extends
   FlightSessionState,
   ProcedureSessionState,
   PlaybackState,
-  RunwayProfileSessionState {}
+  RunwayProfileSessionState,
+  WorkbenchUiState {}
 
 // The defaults are `null`; useApp asserts all providers are present so consumers
 // get a helpful error if they forget to wrap with AppProvider.
@@ -230,6 +259,7 @@ const FlightSessionContext = createContext<FlightSessionState | null>(null);
 const ProcedureSessionContext = createContext<ProcedureSessionState | null>(null);
 const PlaybackContext = createContext<PlaybackState | null>(null);
 const RunwayProfileSessionContext = createContext<RunwayProfileSessionState | null>(null);
+const WorkbenchUiContext = createContext<WorkbenchUiState | null>(null);
 
 // ── Provider ──────────────────────────────────────────────────────────────────
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -240,6 +270,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [selectedFlightId, setSelectedFlightId] = useState<string | null>(null);
   const [selectedRunway, setSelectedRunway] = useState<string | null>(null);
   const [trajectoryDataSource, setTrajectoryDataSource] =
+    useState<Cesium.CzmlDataSource | null>(null);
+  const [optimizedTrajectoryDataSource, setOptimizedTrajectoryDataSource] =
     useState<Cesium.CzmlDataSource | null>(null);
   const [trajectoryComparison, setTrajectoryComparison] = useState<boolean>(false);
   const [trajectoryComparisonCategory, setTrajectoryComparisonCategory] =
@@ -259,13 +291,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     useState<ProcedureDisplayLevel>("PROTECTION");
   const [selectedProcedureAnnotation, setSelectedProcedureAnnotation] =
     useState<ProcedureEntityAnnotation | null>(null);
-  const [selectedProfileRunwayIdent, setSelectedProfileRunwayIdent] = useState<string | null>(
-    null,
-  );
   const [isRunwayProfileOpen, setRunwayProfileOpen] = useState(false);
   const [runwayProfileViewMode, setRunwayProfileViewMode] =
     useState<RunwayProfileViewMode>("split");
   const [rangeRingRadiusKm, setRangeRingRadiusKm] = useState<number>(5);
+  const [mode, setMode] = useState<WorkbenchMode>("observe");
+  const [presentationMode, setPresentationMode] = useState<boolean>(false);
+  const [layersDrawerOpen, setLayersDrawerOpen] = useState<boolean>(false);
+  const [rightInspectorCollapsed, setRightInspectorCollapsed] = useState<boolean>(false);
   const [airportLocalTerrain, setAirportLocalTerrain] = useState<AirportLocalTerrainState>({
     status: "disabled",
     airportCode: null,
@@ -374,7 +407,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setProcedureWidthMeasurementEnabled(false);
       setProcedureDisplayLevel("PROTECTION");
       setSelectedProcedureAnnotation(null);
-      setSelectedProfileRunwayIdent(null);
       setRunwayProfileOpen(false);
       setAirportLocalTerrain(
         airportLocalTerrainStateForLayer(normalizedCode, layers.airportLocalTerrain),
@@ -409,6 +441,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSelectedRunway,
     trajectoryDataSource,
     setTrajectoryDataSource,
+    optimizedTrajectoryDataSource,
+    setOptimizedTrajectoryDataSource,
     trajectoryComparison,
     setTrajectoryComparison,
     trajectoryComparisonCategory,
@@ -417,9 +451,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTrajectoryComparisonKind,
     trajectorySampleCount,
     setTrajectorySampleCount,
-  }), [selectedFlightId, selectedRunway, trajectoryDataSource, trajectoryComparison,
-    trajectoryComparisonCategory, trajectoryComparisonKinds, setTrajectoryComparisonKind,
-    trajectorySampleCount]);
+  }), [selectedFlightId, selectedRunway, trajectoryDataSource, optimizedTrajectoryDataSource,
+    trajectoryComparison, trajectoryComparisonCategory, trajectoryComparisonKinds,
+    setTrajectoryComparisonKind, trajectorySampleCount]);
   const procedureSessionState: ProcedureSessionState = useMemo(() => ({
     procedureVisibility,
     setProcedureBranchVisible,
@@ -448,13 +482,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setAutoReplay,
   }), [playbackSpeed, autoReplay]);
   const runwayProfileSessionState: RunwayProfileSessionState = useMemo(() => ({
-    selectedProfileRunwayIdent,
-    setSelectedProfileRunwayIdent,
     isRunwayProfileOpen,
     setRunwayProfileOpen,
     runwayProfileViewMode,
     setRunwayProfileViewMode,
-  }), [isRunwayProfileOpen, runwayProfileViewMode, selectedProfileRunwayIdent]);
+  }), [isRunwayProfileOpen, runwayProfileViewMode]);
+  const workbenchUiState: WorkbenchUiState = useMemo(() => ({
+    mode,
+    setMode,
+    presentationMode,
+    setPresentationMode,
+    layersDrawerOpen,
+    setLayersDrawerOpen,
+    rightInspectorCollapsed,
+    setRightInspectorCollapsed,
+  }), [mode, presentationMode, layersDrawerOpen, rightInspectorCollapsed]);
 
   return (
     <AirportSessionContext.Provider value={airportSessionState}>
@@ -463,7 +505,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           <ProcedureSessionContext.Provider value={procedureSessionState}>
             <PlaybackContext.Provider value={playbackState}>
               <RunwayProfileSessionContext.Provider value={runwayProfileSessionState}>
-                {children}
+                <WorkbenchUiContext.Provider value={workbenchUiState}>
+                  {children}
+                </WorkbenchUiContext.Provider>
               </RunwayProfileSessionContext.Provider>
             </PlaybackContext.Provider>
           </ProcedureSessionContext.Provider>
@@ -487,13 +531,15 @@ export function useApp(): AppState {
   const procedureSessionState = useContext(ProcedureSessionContext);
   const playbackState = useContext(PlaybackContext);
   const runwayProfileSessionState = useContext(RunwayProfileSessionContext);
+  const workbenchUiState = useContext(WorkbenchUiContext);
   if (
     !sceneState ||
     !airportSessionState ||
     !flightSessionState ||
     !procedureSessionState ||
     !playbackState ||
-    !runwayProfileSessionState
+    !runwayProfileSessionState ||
+    !workbenchUiState
   ) {
     throw new Error(
       "useApp() was called outside of <AppProvider>. " +
@@ -507,5 +553,6 @@ export function useApp(): AppState {
     ...procedureSessionState,
     ...playbackState,
     ...runwayProfileSessionState,
+    ...workbenchUiState,
   };
 }

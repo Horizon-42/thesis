@@ -166,9 +166,20 @@ interface PlacementBackup {
   trail: PilotAircraftPose[];
 }
 
-export default function PilotPanel() {
+interface PilotPanelProps {
+  /**
+   * When provided, the panel's mode is controlled by the workbench shell (the global
+   * task switcher) and the panel's own tab row is hidden. Omitted → the panel keeps its
+   * own internal tab switching (used standalone / in tests).
+   */
+  mode?: PilotPanelMode;
+  onRequestMode?: (mode: PilotPanelMode) => void;
+}
+
+export default function PilotPanel({ mode: controlledMode, onRequestMode }: PilotPanelProps = {}) {
   const { activeAirportCode, airport, viewer } = useApp();
-  const [activeMode, setActiveMode] = useState<PilotPanelMode>("pilot");
+  const [internalActiveMode, setActiveMode] = useState<PilotPanelMode>("pilot");
+  const activeMode = controlledMode ?? internalActiveMode;
   const [isEnabled, setIsEnabled] = useState(false);
   const [isFlying, setIsFlying] = useState(false);
   // Optimized-trajectory playback now runs on Cesium's own clock from a backend
@@ -952,12 +963,19 @@ export default function PilotPanel() {
     setIsChartsOpen(false);
   }
 
+  // When the panel is shell-controlled, mode changes are requested upward (the shell
+  // updates the global mode → controlledMode flows back in); otherwise switch locally.
+  function applyMode(next: PilotPanelMode) {
+    if (onRequestMode) onRequestMode(next);
+    else setActiveMode(next);
+  }
+
   function openTrajectoryMode() {
     if (isPlacingInitialPosition) return;
     setIsFlying(false);
     suspendPlaybacks();
     setIsInitialEditorOpen(false);
-    setActiveMode("trajectory");
+    applyMode("trajectory");
     setError(null);
   }
 
@@ -965,7 +983,7 @@ export default function PilotPanel() {
     if (isPlacingInitialPosition) return;
     suspendPlaybacks();
     setIsTargetEditorOpen(false);
-    setActiveMode("pilot");
+    applyMode("pilot");
     setError(null);
   }
 
@@ -975,9 +993,26 @@ export default function PilotPanel() {
     suspendPlaybacks();
     setIsTargetEditorOpen(false);
     setIsInitialEditorOpen(false);
-    setActiveMode("comparison");
+    applyMode("comparison");
     setError(null);
   }
+
+  // When the shell drives the mode, run the same side-effects the internal tab handlers
+  // would (release the clock, close editors) on each external mode change.
+  const previousControlledModeRef = useRef(controlledMode);
+  useEffect(() => {
+    if (controlledMode === undefined || previousControlledModeRef.current === controlledMode) {
+      previousControlledModeRef.current = controlledMode;
+      return;
+    }
+    previousControlledModeRef.current = controlledMode;
+    if (isPlacingInitialPosition) return;
+    suspendPlaybacks();
+    setIsInitialEditorOpen(false);
+    setIsTargetEditorOpen(false);
+    if (controlledMode !== "pilot") setIsFlying(false);
+    setError(null);
+  }, [controlledMode]);
 
   function openTargetEditor() {
     if (isBusy || isTrajectoryPlaying || runwayTargets.length === 0) return;
@@ -1392,24 +1427,26 @@ export default function PilotPanel() {
             {statusLabel}
           </span>
         </div>
-        <div className="pilot-panel-mode-row pilot-panel-mode-switch" role="group" aria-label="Panel mode">
-          {([
-            { mode: "pilot", label: "Pilot", onClick: openPilotMode },
-            { mode: "trajectory", label: "Trajectory", onClick: openTrajectoryMode },
-            { mode: "comparison", label: "Compare", onClick: openComparisonMode },
-          ] as const).map((entry) => (
-            <button
-              key={entry.mode}
-              type="button"
-              className={`pilot-mode-toggle${activeMode === entry.mode ? " active" : ""}`}
-              onClick={entry.onClick}
-              disabled={isPlacingInitialPosition}
-              aria-pressed={activeMode === entry.mode}
-            >
-              {entry.label}
-            </button>
-          ))}
-        </div>
+        {controlledMode === undefined ? (
+          <div className="pilot-panel-mode-row pilot-panel-mode-switch" role="group" aria-label="Panel mode">
+            {([
+              { mode: "pilot", label: "Pilot", onClick: openPilotMode },
+              { mode: "trajectory", label: "Trajectory", onClick: openTrajectoryMode },
+              { mode: "comparison", label: "Compare", onClick: openComparisonMode },
+            ] as const).map((entry) => (
+              <button
+                key={entry.mode}
+                type="button"
+                className={`pilot-mode-toggle${activeMode === entry.mode ? " active" : ""}`}
+                onClick={entry.onClick}
+                disabled={isPlacingInitialPosition}
+                aria-pressed={activeMode === entry.mode}
+              >
+                {entry.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </header>
 
       <section className="pilot-initial-summary" aria-label="Initial aircraft state summary">

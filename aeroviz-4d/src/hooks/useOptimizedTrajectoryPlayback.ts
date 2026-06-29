@@ -57,7 +57,8 @@ export function useOptimizedTrajectoryPlayback({
   follow,
   onSample,
 }: UseOptimizedTrajectoryPlaybackParams): UseOptimizedTrajectoryPlaybackResult {
-  const { viewer, setPlaybackSpeed, playbackSpeed, autoReplay } = useApp();
+  const { viewer, setPlaybackSpeed, playbackSpeed, autoReplay, setOptimizedTrajectoryDataSource } =
+    useApp();
   const dsRef = useRef<Cesium.CzmlDataSource | null>(null);
   const aircraftRef = useRef<Cesium.Entity | null>(null);
   const startTimeRef = useRef<Cesium.JulianDate | null>(null);
@@ -97,6 +98,8 @@ export function useOptimizedTrajectoryPlayback({
         dsRef.current = loadedDs;
         aircraftRef.current = loadedDs.entities.getById(OPTIMIZED_AIRCRAFT_ID) ?? null;
         viewer.dataSources.add(loadedDs);
+        // Expose it so the runway profile can plot the optimized track.
+        setOptimizedTrajectoryDataSource(loadedDs);
 
         if (loadedDs.clock) {
           const start = loadedDs.clock.startTime.clone();
@@ -136,6 +139,7 @@ export function useOptimizedTrajectoryPlayback({
       aircraftRef.current = null;
       startTimeRef.current = null;
       onSampleRef.current(null);
+      setOptimizedTrajectoryDataSource(null);
       if (dataSource && isCesiumViewerUsable(viewer)) {
         if (viewer.trackedEntity === dataSource.entities.getById(OPTIMIZED_AIRCRAFT_ID)) {
           viewer.trackedEntity = undefined;

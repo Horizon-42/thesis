@@ -12,6 +12,7 @@ import {
   type SampledRunwayPoint,
 } from "../data/runwayTrajectoryProfileAnalysis";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
+import { normalizeRunwayIdent } from "../utils/runwayIdent";
 import {
   buildRunwayReferenceMarksFromPlateRoutes,
   buildRunwayFrame,
@@ -93,11 +94,15 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
     viewer,
     activeAirportCode,
     procedureVisibility,
-    selectedProfileRunwayIdent,
+    selectedRunway,
     isRunwayProfileOpen,
     trajectoryDataSource,
+    optimizedTrajectoryDataSource,
     selectedFlightId,
   } = useApp();
+  // The profile's runway is the global Landing-Runway selection, in the procedure
+  // (RW-prefixed) spelling. `null` when "All runways" is selected — no single profile.
+  const profileRunwayIdent = selectedRunway ? normalizeRunwayIdent(selectedRunway) : null;
   const [currentTime, setCurrentTime] = useState<Cesium.JulianDate | null>(null);
   const [loadedData, setLoadedData] = useState<LoadedProfileData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -124,7 +129,7 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
   }, [viewer, isRunwayProfileOpen]);
 
   useEffect(() => {
-    if (!activeAirportCode || !selectedProfileRunwayIdent || !isRunwayProfileOpen) {
+    if (!activeAirportCode || !profileRunwayIdent || !isRunwayProfileOpen) {
       setLoadedData(null);
       setIsLoading(false);
       setError(null);
@@ -142,11 +147,11 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
       .then(([runwayCollection, procedureRenderData]) => {
         if (cancelled) return;
 
-        const runwayFrame = buildRunwayFrame(runwayCollection, selectedProfileRunwayIdent);
+        const runwayFrame = buildRunwayFrame(runwayCollection, profileRunwayIdent);
         const procedureProfileProjection = buildProcedureProfileProjection(
           procedureRenderData,
           runwayFrame,
-          selectedProfileRunwayIdent,
+          profileRunwayIdent,
         );
         setLoadedData({
           runwayFrame,
@@ -170,7 +175,7 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
     return () => {
       cancelled = true;
     };
-  }, [activeAirportCode, isRunwayProfileOpen, selectedProfileRunwayIdent]);
+  }, [activeAirportCode, isRunwayProfileOpen, profileRunwayIdent]);
 
   const activePlateRoutes = useMemo(
     () => activeHorizontalPlateRoutes(loadedData?.plateRoutes ?? [], procedureVisibility),
@@ -178,13 +183,23 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
   );
 
   const aircraftTracks = useMemo<ProfileAircraftTrack[]>(() => {
-    if (!trajectoryDataSource || !currentTime || !loadedData || activePlateRoutes.length === 0) {
+    // Sample every loaded trajectory source — the observed ADS-B tracks AND the
+    // optimized playback — so the profile shows whichever passes through the
+    // procedure, in any mode (observed in Observe/Procedures, optimized in Optimize).
+    const sources = [trajectoryDataSource, optimizedTrajectoryDataSource].filter(
+      (dataSource): dataSource is Cesium.CzmlDataSource => dataSource !== null,
+    );
+    if (sources.length === 0 || !currentTime || !loadedData || activePlateRoutes.length === 0) {
       return [];
     }
 
     const currentTimeIso = formatJulianTime(currentTime);
-    const aircraft: ProfileAircraftInput[] = trajectoryDataSource.entities.values
-      .filter((entity) => entity.id !== "document")
+    // Only entities with a time-dynamic position are aircraft (the optimized CZML also
+    // carries trail polylines, which have no `position`).
+    const trajectoryEntities = sources.flatMap((dataSource) =>
+      dataSource.entities.values.filter((entity) => entity.id !== "document" && entity.position),
+    );
+    const aircraft: ProfileAircraftInput[] = trajectoryEntities
       .map((entity): ProfileAircraftInput => {
         const current = sampleRunwayPoint(
           entity,
@@ -226,14 +241,21 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
       runwayFrame: loadedData.runwayFrame,
       selectedFlightId,
     });
-  }, [activePlateRoutes, currentTime, loadedData, selectedFlightId, trajectoryDataSource]);
+  }, [
+    activePlateRoutes,
+    currentTime,
+    loadedData,
+    selectedFlightId,
+    trajectoryDataSource,
+    optimizedTrajectoryDataSource,
+  ]);
 
   const activeReferenceMarks = useMemo(
     () =>
-      loadedData && selectedProfileRunwayIdent
-        ? buildRunwayReferenceMarksFromPlateRoutes(activePlateRoutes, selectedProfileRunwayIdent)
+      loadedData && profileRunwayIdent
+        ? buildRunwayReferenceMarksFromPlateRoutes(activePlateRoutes, profileRunwayIdent)
         : [],
-    [activePlateRoutes, loadedData, selectedProfileRunwayIdent],
+    [activePlateRoutes, loadedData, profileRunwayIdent],
   );
   const activeProcedureNames = useMemo(
     () => [...new Set(activePlateRoutes.map((route) => route.procedureName))],

@@ -2,7 +2,7 @@
  * App.tsx
  * -------
  * Root layout component.  Stacks the 3D globe (full-screen) with floating
- * UI panels (ControlPanel, FlightOperationsPanel, HUD) layered on top.
+ * UI docks (WorkbenchShell: top bar, per-task left dock, HUD) layered on top.
  *
  * Layout principle:
  *   - CesiumViewer            → position: absolute, fills 100vw × 100vh
@@ -12,12 +12,14 @@
  */
 
 import CesiumViewerComponent from "./components/CesiumViewer";
-import ControlPanel from "./components/ControlPanel";
+import WorkbenchShell from "./components/WorkbenchShell";
+import WorkbenchLeftDock from "./components/WorkbenchLeftDock";
 import AirportLocalTerrainDemoPage from "./components/AirportLocalTerrainDemoPage";
 import ChartAnnotatedPage from "./components/ChartAnnotatedPage";
 import AirportLocalTerrainAlert from "./components/AirportLocalTerrainAlert";
 import HUD from "./components/HUD";
-import FlightOperationsPanel from "./components/FlightOperationsPanel";
+import WorkbenchRightInspector from "./components/WorkbenchRightInspector";
+import WorkbenchBottomBar from "./components/WorkbenchBottomBar";
 import ProcedureDetailsPage from "./components/ProcedureDetailsPage";
 import ProcedureAnnotationPopup from "./components/ProcedureAnnotationPopup";
 import ProcedurePanel from "./components/ProcedurePanel";
@@ -29,12 +31,18 @@ import { useComparisonTrajectoryLayer } from "./hooks/useComparisonTrajectoryLay
 import { useEffect, useState } from "react";
 
 function FlightApp() {
-  const { activeAirportCode, selectedRunway, trajectoryComparison, layers } = useApp();
-  // The observed-track CZML is large (100+ MB per airport), so it loads only when the
-  // Trajectories layer is on (matching the "heavyweight layers opt-in" philosophy) — no
-  // eager parse on startup. In comparison mode it is suppressed (empty url unloads it)
-  // and useComparisonTrajectoryLayer drives the three-colour optimizer trajectories instead.
-  const czmlUrl = activeAirportCode && layers.trajectories && !trajectoryComparison
+  const { activeAirportCode, selectedRunway, trajectoryComparison, mode, isRunwayProfileOpen } =
+    useApp();
+  // The observed-track CZML is large (100+ MB per airport), so it loads only when a
+  // trajectory-relevant task actually needs it: Observe mode, or Procedures mode with a
+  // runway profile open (the profile overlays observed tracks vs the procedure). In the
+  // 3-colour optimizer-comparison view it is suppressed (useComparisonTrajectoryLayer
+  // drives those instead), and the Fly/Optimize/Compare tasks have their own playback.
+  const wantsObserved =
+    !!activeAirportCode &&
+    !trajectoryComparison &&
+    (mode === "observe" || (mode === "procedures" && isRunwayProfileOpen));
+  const czmlUrl = wantsObserved
     ? selectedRunway
       ? airportLandingsRunwayUrl(activeAirportCode, selectedRunway)
       : airportDataUrl(activeAirportCode, "trajectories.czml")
@@ -48,11 +56,17 @@ function FlightApp() {
       {/* Layer 0: the 3D globe canvas */}
       <CesiumViewerComponent />
 
-      {/* Layer 1: overlay grid — panels anchored to corners, clicks pass through */}
-      <div className="cesium-overlay-container">
-        <div className="left-overlay-panel-stack">
-          <ControlPanel procedures={<ProcedurePanel />} />
-        </div>
+      {/* Layer 1: the workbench shell — top context bar + a per-task left dock over the
+          overlay host (clicks fall through to the globe; each dock re-enables them). */}
+      <WorkbenchShell
+        left={<WorkbenchLeftDock flightIds={flightIds} procedures={<ProcedurePanel />} />}
+        right={
+          <WorkbenchRightInspector>
+            <HUD />
+          </WorkbenchRightInspector>
+        }
+        bottom={<WorkbenchBottomBar />}
+      >
         <AirportLocalTerrainAlert />
         <ProcedureAnnotationPopup />
         <RunwayTrajectoryProfilePanel />
@@ -66,9 +80,7 @@ function FlightApp() {
             {czmlStatus}
           </div>
         ) : null}
-        <HUD />
-        <FlightOperationsPanel flightIds={flightIds} />
-      </div>
+      </WorkbenchShell>
     </>
   );
 }

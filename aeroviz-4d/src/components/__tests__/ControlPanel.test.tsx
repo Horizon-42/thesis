@@ -110,96 +110,17 @@ describe("ControlPanel", () => {
     vi.clearAllMocks();
   });
 
-  it("shows a landing-runway selector from the manifest and selects a runway", () => {
-    landingsRef.current = {
-      manifest: {
-        airport: "KRDU",
-        combined: "trajectories.czml",
-        runways: [
-          { runway: "23R", file: "landings/KRDU_23R.czml", count: 40 },
-          { runway: "05L", file: "landings/KRDU_05L.czml", count: 12 },
-        ],
-      },
-      status: "ready",
-    };
-
+  // Airport + landing-runway selection moved to the top bar (see WorkbenchTopBar.test);
+  // ControlPanel is now the Observe-mode trajectory controls.
+  it("toggles the trajectories layer", () => {
+    appState.layers.trajectories = false;
     render(<ControlPanel />);
 
-    const select = screen.getByLabelText("Landing Runway") as HTMLSelectElement;
-    expect(Array.from(select.options).map((o) => o.textContent)).toEqual([
-      "All runways",
-      "23R (40)",
-      "05L (12)",
-    ]);
-
-    fireEvent.change(select, { target: { value: "23R" } });
-    expect(setSelectedRunway).toHaveBeenCalledWith("23R");
-
-    fireEvent.change(select, { target: { value: "" } });
-    expect(setSelectedRunway).toHaveBeenCalledWith(null);
-  });
-
-  it("hides the runway selector when there are no landings", () => {
-    render(<ControlPanel />);
-    expect(screen.queryByLabelText("Landing Runway")).toBeNull();
-  });
-
-  it("switches the active airport from the selector", () => {
-    render(<ControlPanel />);
-
-    fireEvent.change(screen.getByRole("combobox"), {
-      target: { value: "CYVR" },
-    });
-
-    expect(setActiveAirportCode).toHaveBeenCalledWith("CYVR");
-  });
-
-  it("toggles obstacle labels independently", () => {
-    render(<ControlPanel />);
-
-    const checkbox = screen.getByLabelText("Obstacle Labels") as HTMLInputElement;
+    const checkbox = screen.getByLabelText("Trajectories") as HTMLInputElement;
     expect(checkbox.checked).toBe(false);
 
     fireEvent.click(checkbox);
 
-    expect(toggleLayer).toHaveBeenCalledWith("obstacleLabels");
-  });
-
-  it("places satellite imagery before terrain in the layer toggles", () => {
-    render(<ControlPanel />);
-
-    const layerLabels = screen.getAllByRole("checkbox").map((checkbox) => {
-      return checkbox.closest("label")?.textContent;
-    });
-
-    expect(layerLabels.indexOf("Satellite Imagery")).toBeLessThan(
-      layerLabels.indexOf("Terrain"),
-    );
-  });
-
-  it("shows local terrain metadata when airport local terrain is enabled", () => {
-    appState.layers.airportLocalTerrain = true;
-    appState.airportLocalTerrain = {
-      status: "active",
-      airportCode: "KRDU",
-      sourceLabel: "Airport local heightmap terrain",
-      sourceKind: "dsm",
-      sourceName: "USGS TNM DSM",
-      horizontalResolutionM: 2,
-      sourceCrsCode: "EPSG:26917",
-      sourceCrsName: "EPSG:26917 / UTM zone 17 projected metres",
-      minimumHeightM: 89,
-      maximumHeightM: 243,
-      loadedTiles: 12,
-      totalTiles: 12,
-      error: null,
-    };
-
-    render(<ControlPanel />);
-
-    expect(screen.getByText("Source spacing")).toBeTruthy();
-    expect(screen.getByText("2 m spacing")).toBeTruthy();
-    expect(screen.getByText("DSM (USGS TNM DSM)")).toBeTruthy();
-    expect(screen.getByText("EPSG:26917")).toBeTruthy();
+    expect(toggleLayer).toHaveBeenCalledWith("trajectories");
   });
 });

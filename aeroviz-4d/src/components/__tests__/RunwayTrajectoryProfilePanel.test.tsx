@@ -16,11 +16,13 @@ vi.mock("../../context/AppContext", () => ({
   useApp: () => ({
     activeAirportCode: "KRDU",
     isRunwayProfileOpen: true,
-    selectedProfileRunwayIdent: "RW23R",
+    // The profile's runway is the global Landing-Runway selection (bare "23R" → "RW23R").
+    selectedRunway: "23R",
     runwayProfileViewMode: appMock.runwayProfileViewMode,
     setRunwayProfileOpen: vi.fn(),
     setRunwayProfileViewMode: vi.fn(),
     trajectoryDataSource: null,
+    optimizedTrajectoryDataSource: null,
     procedureDisplayLevel: appMock.procedureDisplayLevel,
   }),
 }));

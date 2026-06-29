@@ -10,7 +10,7 @@ import {
 } from "../data/procedureAnnotations";
 import { isMissingJsonAsset } from "../utils/fetchJson";
 import { navigateWithinApp } from "../utils/navigation";
-import { runwayMatchesSelection } from "../utils/runwayIdent";
+import { bareRunwayIdent, runwayMatchesSelection } from "../utils/runwayIdent";
 
 const RUNWAY_ORDER = ["RW05L", "RW05R", "RW23L", "RW23R", "RW32"];
 
@@ -209,6 +209,7 @@ function firstProcedureBranches(branches: ProcedureBranchItem[]): ProcedureBranc
 export default function ProcedurePanel() {
   const {
     layers,
+    toggleLayer,
     procedureVisibility,
     setProcedureBranchVisible,
     setProcedureBranchesVisible,
@@ -220,8 +221,7 @@ export default function ProcedurePanel() {
     setProcedureDisplayLevel,
     activeAirportCode,
     selectedRunway,
-    selectedProfileRunwayIdent,
-    setSelectedProfileRunwayIdent,
+    setSelectedRunway,
     isRunwayProfileOpen,
     setRunwayProfileOpen,
   } = useApp();
@@ -313,12 +313,15 @@ export default function ProcedurePanel() {
     });
   };
 
+  // Opening a runway's profile focuses the GLOBAL Landing-Runway selection on it
+  // (so the procedure list, the loaded trajectories, and the profile all stay in sync);
+  // clicking the already-shown runway again closes the profile.
   const toggleRunwayProfile = (runwayIdent: string) => {
-    if (isRunwayProfileOpen && selectedProfileRunwayIdent === runwayIdent) {
+    if (isRunwayProfileOpen && runwayMatchesSelection(selectedRunway, runwayIdent)) {
       setRunwayProfileOpen(false);
       return;
     }
-    setSelectedProfileRunwayIdent(runwayIdent);
+    setSelectedRunway(bareRunwayIdent(runwayIdent));
     setRunwayProfileOpen(true);
   };
 
@@ -335,6 +338,14 @@ export default function ProcedurePanel() {
           <p>{(sourceAirport ?? activeAirportCode) || "Unknown"} CIFP {sourceCycle ?? "unknown"}</p>
         </div>
         <div className="procedure-panel-toggle-grid">
+          <label className="procedure-master-toggle">
+            <input
+              type="checkbox"
+              checked={layers.procedures}
+              onChange={() => toggleLayer("procedures")}
+            />
+            On
+          </label>
           <label className="procedure-master-toggle">
             <input
               type="checkbox"
@@ -426,13 +437,13 @@ export default function ProcedurePanel() {
                 <button
                   type="button"
                   className={
-                    isRunwayProfileOpen && selectedProfileRunwayIdent === group.runwayIdent
+                    isRunwayProfileOpen && runwayMatchesSelection(selectedRunway, group.runwayIdent)
                       ? "procedure-runway-profile-button active"
                       : "procedure-runway-profile-button"
                   }
                   onClick={() => toggleRunwayProfile(group.runwayIdent)}
                 >
-                  {isRunwayProfileOpen && selectedProfileRunwayIdent === group.runwayIdent
+                  {isRunwayProfileOpen && runwayMatchesSelection(selectedRunway, group.runwayIdent)
                     ? "Profile On"
                     : "Profile"}
                 </button>

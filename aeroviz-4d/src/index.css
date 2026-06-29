@@ -177,6 +177,342 @@ body,
   grid-template-rows: auto minmax(0, 1fr);
 }
 
+/* ── Workbench shell ───────────────────────────────────────────────────────── */
+/* The globe-first layout: a top context bar over the full-bleed globe, with the
+ * overlay docks below it. pointer-events fall through to the globe; bar + docks
+ * re-enable. The original `.cesium-overlay-container` is kept as the overlay/portal
+ * host and is re-flowed below the top bar via the scoped override below. */
+.workbench {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+}
+
+.workbench > .cesium-overlay-container {
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.workbench-topbar {
+  flex: 0 0 auto;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 16px;
+  box-sizing: border-box;
+  background: rgba(15, 19, 30, 0.92);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(103, 232, 249, 0.22);
+  color: #e0e6f0;
+  font-family: "Inter", "Segoe UI", sans-serif;
+  font-size: 13px;
+}
+
+.workbench-topbar-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #7eb8f7;
+  white-space: nowrap;
+}
+
+.workbench-topbar-context {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.workbench-topbar-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.workbench-topbar-field > span {
+  color: #9fb3c8;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.workbench-topbar-field select {
+  border: 1px solid #3a4a6a;
+  border-radius: 4px;
+  background: #10182a;
+  color: #e0e6f0;
+  padding: 4px 7px;
+  font-size: 12px;
+  max-width: 220px;
+}
+
+.workbench-task-switcher {
+  display: flex;
+  gap: 4px;
+  margin: 0 auto;
+}
+
+.workbench-task-tab {
+  background: #1e2840;
+  border: 1px solid #3a4a6a;
+  color: #c8d8ec;
+  border-radius: 4px;
+  padding: 5px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.15s;
+}
+
+.workbench-task-tab:hover {
+  background: #2a3f6a;
+}
+
+.workbench-task-tab.active {
+  background: #1a5fb4;
+  border-color: #4a8fe8;
+  color: #fff;
+}
+
+.workbench-topbar-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.workbench-topbar-button {
+  background: #2a3550;
+  border: 1px solid #3a4a6a;
+  color: #c8d8ec;
+  border-radius: 4px;
+  padding: 5px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.workbench-topbar-button:hover {
+  background: #3a4f78;
+}
+
+.workbench-topbar-button.active {
+  background: #14532d;
+  border-color: #34d399;
+  color: #ecfdf5;
+}
+
+/* Presentation mode: hide all chrome, leaving the clean globe (state survives). */
+.workbench--presentation .workbench-topbar {
+  display: none;
+}
+
+/* ── Layers drawer (opened from the top bar) ───────────────────────────────── */
+.layers-drawer {
+  position: absolute;
+  top: 56px;
+  right: 16px;
+  z-index: 120;
+  width: 248px;
+  max-height: calc(100% - 96px);
+  overflow-y: auto;
+  pointer-events: auto;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border: 1px solid rgba(103, 232, 249, 0.24);
+  border-radius: 8px;
+  background: rgba(20, 24, 35, 0.94);
+  backdrop-filter: blur(8px);
+  color: #e0e6f0;
+  box-shadow: 0 18px 42px rgba(2, 8, 23, 0.4);
+  font-family: "Inter", "Segoe UI", sans-serif;
+  font-size: 13px;
+  user-select: none;
+}
+
+.layers-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.layers-drawer-header h3 {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8898aa;
+}
+
+.layers-drawer-header button {
+  background: none;
+  border: none;
+  color: #9fb3c8;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 4px;
+}
+
+.layers-drawer-header button:hover {
+  color: #e0e6f0;
+}
+
+.layers-drawer-list {
+  display: grid;
+  gap: 4px;
+}
+
+.layers-drawer label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.workbench--presentation .layers-drawer {
+  display: none;
+}
+
+/* ── Right inspector (collapsible HUD / selected-flight detail) ─────────────── */
+.workbench-right-inspector {
+  grid-area: hud;
+  align-self: start;
+  justify-self: end;
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  min-height: 0;
+  max-height: 100%;
+}
+
+.workbench-inspector-toggle {
+  flex: 0 0 auto;
+  margin-top: 8px;
+  padding: 6px 7px;
+  border: 1px solid rgba(103, 232, 249, 0.24);
+  border-radius: 4px;
+  background: rgba(20, 24, 35, 0.9);
+  color: #c8d8ec;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.workbench-inspector-toggle:hover {
+  background: #2a3f6a;
+}
+
+.workbench-inspector-body {
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+/* ── Bottom transport bar (above Cesium's timeline) ────────────────────────── */
+.workbench-bottom-bar {
+  position: absolute;
+  bottom: 36px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 110;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  box-sizing: border-box;
+  border: 1px solid rgba(103, 232, 249, 0.24);
+  border-radius: 8px;
+  background: rgba(15, 19, 30, 0.92);
+  backdrop-filter: blur(8px);
+  color: #e0e6f0;
+  font-family: "Inter", "Segoe UI", sans-serif;
+  font-size: 12px;
+  box-shadow: 0 12px 30px rgba(2, 8, 23, 0.34);
+}
+
+.workbench-bottom-bar button {
+  background: #2a3550;
+  border: 1px solid #3a4a6a;
+  color: #c8d8ec;
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.15s;
+}
+
+.workbench-bottom-bar button:hover {
+  background: #3a4f78;
+}
+
+.workbench-bottom-bar button.active {
+  background: #1a5fb4;
+  border-color: #4a8fe8;
+  color: #fff;
+}
+
+.workbench-bottom-bar-speeds {
+  display: flex;
+  gap: 4px;
+}
+
+.workbench-bottom-bar-replay {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  color: #aebbd0;
+}
+
+.workbench--presentation .workbench-bottom-bar,
+.workbench--presentation .workbench-right-inspector,
+.workbench--presentation .left-overlay-panel-stack {
+  display: none;
+}
+
+/* Cesium's timeline scrubber is a sibling of .workbench, reached via the body class. */
+body.workbench-presentation-active .cesium-viewer-timelineContainer {
+  display: none;
+}
+
+/* The custom transport bar replaces Cesium's animation wheel; keep the timeline. */
+.cesium-viewer-animationContainer {
+  display: none;
+}
+
+/* The way out of presentation mode (the top-bar toggle is hidden in this mode). */
+.workbench-presentation-exit {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 130;
+  pointer-events: auto;
+  padding: 7px 12px;
+  border: 1px solid rgba(103, 232, 249, 0.4);
+  border-radius: 6px;
+  background: rgba(15, 19, 30, 0.78);
+  backdrop-filter: blur(6px);
+  color: #c8d8ec;
+  cursor: pointer;
+  font-family: "Inter", "Segoe UI", sans-serif;
+  font-size: 12px;
+  opacity: 0.55;
+  transition: opacity 0.15s;
+}
+
+.workbench-presentation-exit:hover {
+  opacity: 1;
+}
+
 .left-overlay-panel-stack {
   grid-area: leftStack;
   align-self: stretch;
@@ -189,10 +525,32 @@ body,
   overflow: hidden;
 }
 
-.left-overlay-panel-stack > .control-panel {
+/* The per-task left dock fills the stack and scrolls; it is the single card, and the
+   panels it hosts (ControlPanel / ProcedurePanel / PilotPanel) render flat inside it. */
+.left-overlay-panel-stack > .workbench-left-dock {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-sizing: border-box;
+  padding: 12px;
+  border: 1px solid rgba(103, 232, 249, 0.2);
+  border-radius: 8px;
+  background: rgba(16, 22, 33, 0.9);
+  backdrop-filter: blur(7px);
+}
+
+.workbench-left-dock > .control-panel,
+.workbench-left-dock > .procedure-panel {
+  width: auto;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  backdrop-filter: none;
 }
 
 .czml-status {

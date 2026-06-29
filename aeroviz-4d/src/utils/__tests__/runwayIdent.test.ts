@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeRunwayIdent, runwayMatchesSelection } from "../runwayIdent";
+import { bareRunwayIdent, normalizeRunwayIdent, runwayMatchesSelection } from "../runwayIdent";
 
 describe("normalizeRunwayIdent", () => {
   it("prefixes bare identifiers with RW", () => {
@@ -11,6 +11,22 @@ describe("normalizeRunwayIdent", () => {
     expect(normalizeRunwayIdent("RW05L")).toBe("RW05L");
     expect(normalizeRunwayIdent("  rw23r ")).toBe("RW23R");
     expect(normalizeRunwayIdent("05l")).toBe("RW05L");
+  });
+});
+
+describe("bareRunwayIdent", () => {
+  it("drops the RW prefix to the bare landings spelling", () => {
+    expect(bareRunwayIdent("RW05L")).toBe("05L");
+    expect(bareRunwayIdent("rw23r")).toBe("23R");
+  });
+
+  it("leaves an already-bare identifier unchanged", () => {
+    expect(bareRunwayIdent("05L")).toBe("05L");
+    expect(bareRunwayIdent(" 32 ")).toBe("32");
+  });
+
+  it("round-trips with normalizeRunwayIdent", () => {
+    expect(bareRunwayIdent(normalizeRunwayIdent("23R"))).toBe("23R");
   });
 });
 

@@ -27,6 +27,15 @@ export function normalizeRunwayIdent(runwayIdent: string): string {
 }
 
 /**
+ * The bare landings/trajectory spelling, dropping the "RW" prefix ("RW05L" → "05L").
+ * The global `selectedRunway` lives in this form (it indexes the landings CZML files
+ * and the top-bar selector), so use this when setting it from a procedure runwayId.
+ */
+export function bareRunwayIdent(runwayIdent: string): string {
+  return runwayIdent.trim().toUpperCase().replace(/^RW/, "");
+}
+
+/**
  * Does a runway-scoped feature belong to the selected landing runway?
  *
  * @param selected   the active Landing-Runway selection ("05L" / "RW05L" / null).

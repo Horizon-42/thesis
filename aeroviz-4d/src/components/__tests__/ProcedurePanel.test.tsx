@@ -16,9 +16,7 @@ const {
   setProcedureBranchVisible,
   setProcedureBranchesVisible,
   getProcedureVisibility,
-  setSelectedProfileRunwayIdent,
   setRunwayProfileOpen,
-  getSelectedProfileRunwayIdent,
   getRunwayProfileOpen,
   setProcedureAnnotationEnabled,
   setProcedureWidthMeasurementEnabled,
@@ -29,15 +27,14 @@ const {
   resetProcedureVisibility,
 } = vi.hoisted(() => {
   let procedureVisibility: Record<string, boolean> = {};
-  let selectedProfileRunwayIdent: string | null = null;
   let isRunwayProfileOpen = false;
   let procedureDisplayLevel = "PROTECTION";
   let selectedRunway: string | null = null;
   return {
     fetchMock: vi.fn(),
-    setSelectedRunway: (runway: string | null) => {
+    setSelectedRunway: vi.fn((runway: string | null) => {
       selectedRunway = runway;
-    },
+    }),
     getSelectedRunway: () => selectedRunway,
     navigateWithinApp: vi.fn(),
     toggleLayer: vi.fn(),
@@ -50,9 +47,6 @@ const {
         next[branchId] = visible;
       });
       procedureVisibility = next;
-    }),
-    setSelectedProfileRunwayIdent: vi.fn((runwayIdent: string | null) => {
-      selectedProfileRunwayIdent = runwayIdent;
     }),
     setRunwayProfileOpen: vi.fn((open: boolean) => {
       isRunwayProfileOpen = open;
@@ -69,7 +63,6 @@ const {
       procedureDisplayLevel = "PROTECTION";
       selectedRunway = null;
     },
-    getSelectedProfileRunwayIdent: () => selectedProfileRunwayIdent,
     getRunwayProfileOpen: () => isRunwayProfileOpen,
   };
 });
@@ -79,12 +72,11 @@ vi.mock("../../context/AppContext", () => ({
     layers: { procedures: true },
     activeAirportCode: "KRDU",
     selectedRunway: getSelectedRunway(),
+    setSelectedRunway,
     toggleLayer,
     procedureVisibility: getProcedureVisibility(),
     setProcedureBranchVisible,
     setProcedureBranchesVisible,
-    selectedProfileRunwayIdent: getSelectedProfileRunwayIdent(),
-    setSelectedProfileRunwayIdent,
     isRunwayProfileOpen: getRunwayProfileOpen(),
     setRunwayProfileOpen,
     procedureAnnotationEnabled: false,
@@ -298,7 +290,7 @@ describe("ProcedurePanel", () => {
     toggleLayer.mockClear();
     setProcedureBranchVisible.mockClear();
     setProcedureBranchesVisible.mockClear();
-    setSelectedProfileRunwayIdent.mockClear();
+    setSelectedRunway.mockClear();
     setRunwayProfileOpen.mockClear();
     setProcedureAnnotationEnabled.mockClear();
     setProcedureWidthMeasurementEnabled.mockClear();
@@ -388,14 +380,28 @@ describe("ProcedurePanel", () => {
     );
   });
 
-  it("opens the runway trajectory profile for a runway group", async () => {
+  it("focuses the global runway and opens the profile for a runway group", async () => {
     render(<ProcedurePanel />);
     await waitFor(() => expect(screen.getByText("RW05L")).toBeTruthy());
 
     fireEvent.click(screen.getAllByRole("button", { name: "Profile" })[0]);
 
-    expect(setSelectedProfileRunwayIdent).toHaveBeenCalledWith("RW05L");
+    // The profile uses the global Landing-Runway selection (bare spelling), so opening
+    // RW05L's profile sets selectedRunway to "05L" — one source of truth, not a separate
+    // profile-runway state.
+    expect(setSelectedRunway).toHaveBeenCalledWith("05L");
     expect(setRunwayProfileOpen).toHaveBeenCalledWith(true);
+  });
+
+  it("toggles the RNAV procedures layer from the panel's master switch", async () => {
+    render(<ProcedurePanel />);
+    await waitFor(() => expect(screen.getByText("RW05L")).toBeTruthy());
+
+    const master = screen.getByLabelText("On") as HTMLInputElement;
+    expect(master.checked).toBe(true);
+    fireEvent.click(master);
+
+    expect(toggleLayer).toHaveBeenCalledWith("procedures");
   });
 
   it("toggles 3D procedure annotations", async () => {

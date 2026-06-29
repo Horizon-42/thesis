@@ -15,6 +15,8 @@ const {
   setProcedureWidthMeasurementEnabled,
   getProcedureDisplayLevel,
   setProcedureDisplayLevel,
+  getSelectedRunway,
+  setSelectedRunway,
 } = vi.hoisted(() => {
   const entities: any[] = [];
   let proceduresVisible = true;
@@ -22,6 +24,7 @@ const {
   let procedureAnnotationEnabled = false;
   let procedureWidthMeasurementEnabled = false;
   let procedureDisplayLevel = "PROTECTION";
+  let selectedRunway: string | null = null;
   const mockViewer = {
     entities: {
       values: entities,
@@ -61,6 +64,10 @@ const {
     setProcedureDisplayLevel: (value: string) => {
       procedureDisplayLevel = value;
     },
+    getSelectedRunway: () => selectedRunway,
+    setSelectedRunway: (value: string | null) => {
+      selectedRunway = value;
+    },
   };
 });
 
@@ -99,6 +106,7 @@ vi.mock("../../context/AppContext", () => ({
     activeAirportCode: "KRDU",
     layers: { procedures: getProceduresVisible() },
     procedureVisibility: getProcedureVisibility(),
+    selectedRunway: getSelectedRunway(),
     procedureAnnotationEnabled: getProcedureAnnotationEnabled(),
     procedureWidthMeasurementEnabled: getProcedureWidthMeasurementEnabled(),
     procedureDisplayLevel: getProcedureDisplayLevel(),
@@ -109,7 +117,7 @@ vi.mock("../../data/procedureRenderBundle", () => ({
   loadProcedureRenderBundleData: vi.fn(),
 }));
 
-import { useProcedureSegmentLayer } from "../useProcedureSegmentLayer";
+import { useProcedureSegmentLayer, scopeVisibilityToRunway } from "../useProcedureSegmentLayer";
 
 const geoPositions = [
   { lonDeg: -78.84, latDeg: 35.84, altM: 670 },
@@ -820,6 +828,7 @@ describe("useProcedureSegmentLayer", () => {
     setProcedureAnnotationEnabled(false);
     setProcedureWidthMeasurementEnabled(false);
     setProcedureDisplayLevel("PROTECTION");
+    setSelectedRunway(null);
     setProcedureBranchVisible("KRDU-R05LY-RW05L:branch:R", true);
   });
 
@@ -1202,5 +1211,50 @@ describe("useProcedureSegmentLayer", () => {
 
     expect(loadProcedureRenderBundleData).toHaveBeenCalledTimes(1);
     expect(entities.every((entity) => entity.show === false)).toBe(true);
+  });
+
+  it("does not render a visible branch from a non-selected landing runway", async () => {
+    // The only branch is RW05L; selecting 23R must scope its geometry out entirely.
+    setSelectedRunway("23R");
+
+    renderHook(() => useProcedureSegmentLayer());
+    await waitFor(() => expect(loadProcedureRenderBundleData).toHaveBeenCalledTimes(1));
+
+    expect(mockViewer.entities.add).not.toHaveBeenCalled();
+    expect(entities).toHaveLength(0);
+  });
+
+  it("renders a visible branch when the selected runway matches (bare spelling)", async () => {
+    setSelectedRunway("05L"); // matches the RW05L branch across the bare/RW gap
+
+    renderHook(() => useProcedureSegmentLayer());
+    await waitFor(() => expect(mockViewer.entities.add).toHaveBeenCalled());
+
+    expect(entities.some((entity) => String(entity.id).endsWith("-centerline"))).toBe(true);
+  });
+});
+
+describe("scopeVisibilityToRunway", () => {
+  const branchRunway = new Map([
+    ["a:RW05L", "RW05L"],
+    ["b:RW23R", "RW23R"],
+  ]);
+
+  it("returns the input unchanged when nothing is selected", () => {
+    const vis = { "a:RW05L": true, "b:RW23R": true };
+    expect(scopeVisibilityToRunway(vis, null, branchRunway)).toBe(vis);
+  });
+
+  it("masks branches whose runway does not match the selection", () => {
+    const vis = { "a:RW05L": true, "b:RW23R": true };
+    expect(scopeVisibilityToRunway(vis, "05L", branchRunway)).toEqual({
+      "a:RW05L": true,
+      "b:RW23R": false,
+    });
+  });
+
+  it("leaves branches with an unknown runway untouched", () => {
+    const vis = { "c:unknown": true };
+    expect(scopeVisibilityToRunway(vis, "05L", branchRunway)).toEqual({ "c:unknown": true });
   });
 });
