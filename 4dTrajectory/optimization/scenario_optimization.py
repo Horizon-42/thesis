@@ -184,6 +184,7 @@ def simulate_controls(
     aircraft: Any,
     *,
     dt: float = DEFAULT_ROLLOUT_DT_S,
+    segment_durations: Any = None,
 ) -> list[StateSample]:
     """Roll the piecewise-constant optimizer controls through the REAL simulator.
 
@@ -193,7 +194,8 @@ def simulate_controls(
     Thin adapter over ``aerodynamic_model.rollout_piecewise_constant`` — builds the
     load-factor controls + the simulator, runs the shared rollout (truncating silently if
     the replay leaves the envelope — this is a viz aid), and maps each neutral
-    ``(t, state)`` sample onto a serializable :class:`StateSample`.
+    ``(t, state)`` sample onto a serializable :class:`StateSample`. ``segment_durations``
+    (one per control) drives the multiphase non-uniform schedule; ``None`` = equal segments.
     """
     controls = [
         LoadFactorControl(thrust=float(row[0]), bank_rad=float(row[1]),
@@ -203,7 +205,9 @@ def simulate_controls(
     sim = CasadiSimulator(aircraft, dt)
     samples = rollout_piecewise_constant(
         sim, initial_state, controls, final_time,
-        integrator_dt=dt, truncate_on_envelope_exit=True,
+        integrator_dt=dt,
+        segment_durations=list(segment_durations) if segment_durations is not None else None,
+        truncate_on_envelope_exit=True,
     )
     return [StateSample.from_state(s.t, s.state) for s in samples]
 
@@ -404,9 +408,9 @@ def _scenario_filename(scenario: FlightScenario, index: int) -> str:
 # FASTEST (min final_time). Each scenario still yields exactly one trajectory.
 #
 # Everything heavy is reused: the canonical ``ProcedureConstraint`` + the backend's
-# ``build_constraint_segments`` (constraint geometry), the optimizer's ``constraint_segments``/
-# ``constraint_spans`` path constraints, and this module's existing dense-export / rollout /
-# batch-IO helpers. The functions above are untouched.
+# ``build_constraint_segments`` (constraint geometry), the **multiphase** optimiser (one phase per
+# leg, fixes pinned, exact per-leg constraints), and this module's dense-export / rollout / batch-IO
+# helpers. The functions above are untouched.
 
 DEFAULT_PROCEDURE_ROOT = _REPO_ROOT / "aeroviz-4d" / "public" / "data" / "airports"
 DEFAULT_AIRPORT = "KRDU"
@@ -420,6 +424,7 @@ class _IafSolve:
     initial: GeodeticState  # the IAF initial state
     controls: Any           # node controls (for the rollout)
     dense_states: Any       # the optimizer's dense planned states
+    segment_durations: Any  # per-control-segment durations (multiphase non-uniform)
 
 
 def _resolve_procedure_path(procedure_root: str | Path, airport: str, runway: str) -> Path:
@@ -590,26 +595,31 @@ def _solve_iaf(
 ) -> _IafSolve:
     """Full CONSTRAINED solve from ONE IAF path to the runway. Raises on infeasibility.
 
-    Reuses the backend's ``build_constraint_segments`` (constraint geometry) and the optimizer's
-    ``constraint_segments``/``constraint_spans`` path constraints.
+    Uses the backend's ``build_constraint_segments`` (constraint geometry) and the **multiphase**
+    optimiser: one phase per leg (the IAF-state→first-fix transition + each procedure leg), fixes
+    pinned at the phase boundaries, exact per-leg constraints (no along-track partition).
+    ``n_segments``/``dt`` are accepted for CLI/API parity but unused by the multiphase optimiser,
+    which sets its own per-phase control/state mesh.
     """
     from aeroviz_backend.procedure_segments import build_constraint_segments
-    segments, spans = build_constraint_segments(
+    from multiphase_collocation_optimizer import MultiphaseCollocationOptimizer
+    segments, _spans = build_constraint_segments(
         pc, target.latitude, target.longitude, target.altitude,
     )
     if not segments:
         raise ValueError("no constraint segments")
     iaf_initial = _iaf_initial_state(pc, scenario)
-    optimizer = CasadiDirectCollocationOptimizer(
-        n_segments, dt, max_duration, aircraft,
-        collocation_scheme="trapezoidalNormalizedFullTransport",
+    optimizer = MultiphaseCollocationOptimizer(
+        aircraft, segments,
+        scheme="hermiteSimpsonNormalizedFullTransport",
         min_speed_ms=min_speed_ms,
         verbose=verbose,
-        constraint_segments=segments,
-        constraint_spans=spans,
     )
     final_time, node_control, _ = optimizer.optimize_free_time(iaf_initial, target, max_duration)
-    return _IafSolve(float(final_time), pc, iaf_initial, node_control, optimizer.last_dense_states_geo)
+    return _IafSolve(
+        float(final_time), pc, iaf_initial, node_control,
+        optimizer.last_dense_states_geo, list(optimizer.segment_durations_s),
+    )
 
 
 def _iaf_result(
@@ -625,6 +635,7 @@ def _iaf_result(
     )
     simulator_states = simulate_controls(
         best.initial, best.controls, best.final_time, aircraft, dt=rollout_dt_s,
+        segment_durations=best.segment_durations,
     )
     source = {
         **scenario.source,
