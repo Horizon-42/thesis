@@ -38,6 +38,12 @@ export type TrajectoryOptimizer =
   | "casadiDirectCollocationNormalizedFullTransport"
   | "casadiDirectCollocationNormalizedFullTransportTrapezoidal"
   | "casadiDirectCollocationNormalizedFullTransportRk4"
+  // Multiphase: one phase per procedure leg (start->IAF transition + each leg),
+  // fixes pinned at the phase boundaries, exact per-leg constraints. Requires a
+  // procedureConstraint in the request.
+  | "casadiMultiphaseNormalizedFullTransport"
+  | "casadiMultiphaseNormalizedFullTransportTrapezoidal"
+  | "casadiMultiphaseNormalizedFullTransportRk4"
   // Legacy optimizers: still served by the backend, no longer offered in
   // the UI (kept here so a response naming one still parses).
   | "casadiIpopt"
@@ -63,13 +69,19 @@ export type TrajectoryOptimizer =
 // loose arrival windows / finer meshes.  It is a continuous RHS, so it takes
 // every fitting (Hermite-Simpson / trapezoidal / shooting) just like the plain
 // geodetic dynamics; only the decision-state scaling differs.
+// ``geodeticMultiphase`` is the constrained mode: the geodetic RHS (normalized +
+// full transport) flown as a MULTIPHASE problem — one phase per procedure leg
+// (start->IAF transition + each leg), fixes pinned at the phase boundaries with
+// that leg's corridor/glidepath/floor.  It REQUIRES a procedure (the panel sends
+// the selected approach's ProcedureConstraint) and takes every fitting.
 export type OptimizerDynamics =
   | "geodetic"
   | "reanchoredEnu"
   | "localEnu"
   | "geodeticNormalized"
   | "geodeticFullTransport"
-  | "geodeticNormalizedFullTransport";
+  | "geodeticNormalizedFullTransport"
+  | "geodeticMultiphase";
 export type OptimizerFitting = "hermiteSimpson" | "trapezoidal" | "shooting";
 
 const COMBO_TO_OPTIMIZER: Record<string, TrajectoryOptimizer> = {
@@ -89,6 +101,9 @@ const COMBO_TO_OPTIMIZER: Record<string, TrajectoryOptimizer> = {
   "geodeticNormalizedFullTransport|hermiteSimpson": "casadiDirectCollocationNormalizedFullTransport",
   "geodeticNormalizedFullTransport|trapezoidal": "casadiDirectCollocationNormalizedFullTransportTrapezoidal",
   "geodeticNormalizedFullTransport|shooting": "casadiDirectCollocationNormalizedFullTransportRk4",
+  "geodeticMultiphase|hermiteSimpson": "casadiMultiphaseNormalizedFullTransport",
+  "geodeticMultiphase|trapezoidal": "casadiMultiphaseNormalizedFullTransportTrapezoidal",
+  "geodeticMultiphase|shooting": "casadiMultiphaseNormalizedFullTransportRk4",
 };
 
 const OPTIMIZER_TO_COMBO: Record<string, { dynamics: OptimizerDynamics; fitting: OptimizerFitting }> = {
@@ -109,6 +124,9 @@ const OPTIMIZER_TO_COMBO: Record<string, { dynamics: OptimizerDynamics; fitting:
   casadiDirectCollocationNormalizedFullTransport: { dynamics: "geodeticNormalizedFullTransport", fitting: "hermiteSimpson" },
   casadiDirectCollocationNormalizedFullTransportTrapezoidal: { dynamics: "geodeticNormalizedFullTransport", fitting: "trapezoidal" },
   casadiDirectCollocationNormalizedFullTransportRk4: { dynamics: "geodeticNormalizedFullTransport", fitting: "shooting" },
+  casadiMultiphaseNormalizedFullTransport: { dynamics: "geodeticMultiphase", fitting: "hermiteSimpson" },
+  casadiMultiphaseNormalizedFullTransportTrapezoidal: { dynamics: "geodeticMultiphase", fitting: "trapezoidal" },
+  casadiMultiphaseNormalizedFullTransportRk4: { dynamics: "geodeticMultiphase", fitting: "shooting" },
 };
 
 /** Fittings valid for a given dynamics: only the re-anchored ENU stepper is

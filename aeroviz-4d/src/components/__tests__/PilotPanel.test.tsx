@@ -682,28 +682,26 @@ describe("PilotPanel trajectory play mode", () => {
     expect(panel.querySelectorAll(".pilot-realtime-delta").length).toBeGreaterThan(0);
   });
 
-  it("gates the procedure-constraints checkbox to the normalized full-transport scheme", async () => {
+  it("offers a multiphase dynamics that surfaces the per-leg constraint hint", async () => {
     render(<PilotPanel />);
     expect(await screen.findByText("A320")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
     expect(await screen.findByText("Target State")).toBeTruthy();
 
-    const checkbox = screen.getByRole("checkbox", {
-      name: "Procedure constraints",
-    }) as HTMLInputElement;
-    // Default dynamics is plain geodetic -> the checkbox is disabled.
-    expect(checkbox.disabled).toBe(true);
+    const hint = "Per-leg constraints from the selected RNAV approach";
+    // Default dynamics is plain geodetic -> no procedure-constraint hint.
+    expect(screen.queryByText(hint)).toBeNull();
 
-    // Switching to the normalized full-transport dynamics enables it.
+    // The multiphase option is offered and, when selected, shows the per-leg hint.
     fireEvent.change(screen.getByRole("combobox", { name: "Dynamics" }), {
-      target: { value: "geodeticNormalizedFullTransport" },
+      target: { value: "geodeticMultiphase" },
     });
-    expect(checkbox.disabled).toBe(false);
+    expect(screen.getByText(hint)).toBeTruthy();
 
-    // Switching away disables it again.
+    // Switching away hides it again.
     fireEvent.change(screen.getByRole("combobox", { name: "Dynamics" }), {
       target: { value: "geodetic" },
     });
-    expect(checkbox.disabled).toBe(true);
+    expect(screen.queryByText(hint)).toBeNull();
   });
 });

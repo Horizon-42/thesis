@@ -1855,6 +1855,13 @@ body,
   color: #cbd5e1;
 }
 
+.pilot-multiphase-hint {
+  align-self: center;
+  font-size: 11px;
+  color: #7dd3fc;
+  cursor: help;
+}
+
 .pilot-number-input,
 .pilot-select-input {
   display: block;

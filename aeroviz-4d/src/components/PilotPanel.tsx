@@ -119,6 +119,7 @@ const OPTIMIZER_DYNAMICS_OPTIONS: { value: OptimizerDynamics; label: string }[] 
   { value: "geodeticNormalized", label: "Geodetic RHS (normalized, robust)" },
   { value: "geodeticFullTransport", label: "Geodetic RHS (+transport, full/exact)" },
   { value: "geodeticNormalizedFullTransport", label: "Geodetic RHS (normalized + full/exact transport)" },
+  { value: "geodeticMultiphase", label: "Multiphase (per-leg procedure constraints)" },
 ];
 const OPTIMIZER_FITTING_OPTIONS: { value: OptimizerFitting; label: string }[] = [
   { value: "hermiteSimpson", label: "Hermite-Simpson (cubic, 4th order)" },
@@ -238,9 +239,6 @@ export default function PilotPanel() {
     RnavInitialFixCandidate[]
   >([]);
   const [selectedRnavInitialFixKey, setSelectedRnavInitialFixKey] = useState("");
-  // Enforce the published approach as NLP path constraints. Only meaningful on the normalized
-  // full-transport scheme (see the checkbox gating + computeTrajectory below).
-  const [enforceConstraints, setEnforceConstraints] = useState(false);
 
   const pose = snapshotToPose(snapshot);
   const selectedAircraft = aircraftConfigs.find(
@@ -1082,18 +1080,18 @@ export default function PilotPanel() {
     clearOptimizedPlayback();
     setError(null);
     try {
-      // Build the canonical procedure constraint when enforcement is on (normalized
-      // full-transport only). The selected RNAV initial fix identifies the procedure + branch;
-      // the backend enforces it as NLP path constraints (corridor / glidepath / step-down floors).
+      // The multiphase dynamics REQUIRES the selected approach's procedure constraint (it builds
+      // one phase per leg). The selected RNAV initial fix identifies the procedure + branch; the
+      // backend enforces each leg's corridor / glidepath / step-down floor as NLP path constraints.
       let procedureConstraint: ProcedureConstraint | undefined;
       const { dynamics } = optimizerToParts(trajectoryOptimizer);
-      if (enforceConstraints && dynamics === "geodeticNormalizedFullTransport") {
+      if (dynamics === "geodeticMultiphase") {
         const candidate = rnavInitialFixCandidates.find(
           (current) => current.key === selectedRnavInitialFixKey,
         );
         if (!activeAirportCode || !candidate) {
           throw new Error(
-            "Select an RNAV initial fix to enforce procedure constraints.",
+            "Select an RNAV initial fix to run the multiphase (per-leg constraints) optimizer.",
           );
         }
         const document = await fetchJson<ProcedureDetailDocument>(
@@ -1344,9 +1342,6 @@ export default function PilotPanel() {
   const { dynamics: optimizerDynamics, fitting: optimizerFitting } =
     optimizerToParts(trajectoryOptimizer);
   const allowedFittings = validFittingsForDynamics(optimizerDynamics);
-  // Procedure path-constraints are only wired into the normalized full-transport scheme
-  // (its state nodes are metric, so the corridor/glidepath constraints stay well conditioned).
-  const canEnforceConstraints = optimizerDynamics === "geodeticNormalizedFullTransport";
   const trajectorySegmentDurationS = optimizedTrajectory
     ? optimizedTrajectory.finalTimeS / Math.max(1, optimizedTrajectory.controls.length)
     : null;
@@ -1581,22 +1576,14 @@ export default function PilotPanel() {
                 ))}
               </select>
             </label>
-            <label
-              className="pilot-checkbox-label"
-              title={
-                canEnforceConstraints
-                  ? "Enforce the published approach (corridor / glidepath / step-down floors) as NLP path constraints."
-                  : "Procedure constraints require the “Geodetic RHS (normalized + full/exact transport)” dynamics."
-              }
-            >
-              <input
-                type="checkbox"
-                checked={enforceConstraints && canEnforceConstraints}
-                disabled={targetControlsDisabled || !canEnforceConstraints}
-                onChange={(event) => setEnforceConstraints(event.target.checked)}
-              />
-              <span>Procedure constraints</span>
-            </label>
+            {optimizerDynamics === "geodeticMultiphase" && (
+              <span
+                className="pilot-multiphase-hint"
+                title="Multiphase optimises one phase per procedure leg (start->IAF, then each leg), enforcing that leg's corridor / glidepath / step-down floor as NLP path constraints. Select an RNAV initial fix to identify the approach."
+              >
+                Per-leg constraints from the selected RNAV approach
+              </span>
+            )}
             <label>
               <span>Segments</span>
               <EnglishNumberInput
