@@ -29,10 +29,12 @@ import { useComparisonTrajectoryLayer } from "./hooks/useComparisonTrajectoryLay
 import { useEffect, useState } from "react";
 
 function FlightApp() {
-  const { activeAirportCode, selectedRunway, trajectoryComparison } = useApp();
-  // In comparison mode the normal observed-track CZML is suppressed (empty url unloads it)
+  const { activeAirportCode, selectedRunway, trajectoryComparison, layers } = useApp();
+  // The observed-track CZML is large (100+ MB per airport), so it loads only when the
+  // Trajectories layer is on (matching the "heavyweight layers opt-in" philosophy) — no
+  // eager parse on startup. In comparison mode it is suppressed (empty url unloads it)
   // and useComparisonTrajectoryLayer drives the three-colour optimizer trajectories instead.
-  const czmlUrl = activeAirportCode && !trajectoryComparison
+  const czmlUrl = activeAirportCode && layers.trajectories && !trajectoryComparison
     ? selectedRunway
       ? airportLandingsRunwayUrl(activeAirportCode, selectedRunway)
       : airportDataUrl(activeAirportCode, "trajectories.czml")
@@ -49,8 +51,7 @@ function FlightApp() {
       {/* Layer 1: overlay grid — panels anchored to corners, clicks pass through */}
       <div className="cesium-overlay-container">
         <div className="left-overlay-panel-stack">
-          <ControlPanel />
-          <ProcedurePanel />
+          <ControlPanel procedures={<ProcedurePanel />} />
         </div>
         <AirportLocalTerrainAlert />
         <ProcedureAnnotationPopup />

@@ -15,7 +15,7 @@ import * as Cesium from "cesium";
 import { useApp, type ComparisonKind, type LayerKey } from "../context/AppContext";
 import { useLandingsManifest } from "../hooks/useLandingsManifest";
 import { useComparisonCategories } from "../hooks/useComparisonCategories";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 /** Predefined speed options shown as buttons */
 const SPEED_OPTIONS: Array<{ label: string; value: number }> = [
@@ -43,14 +43,16 @@ const LAYER_LABELS: Record<LayerKey, string> = {
   rangeRing:    "Range Ring",
 };
 
-const ACTIVE_LAYER_KEYS: LayerKey[] = [
+// Geometry & Constraints category — every static scene/constraint layer. The
+// `trajectories` layer lives in its own category below (with playback + options),
+// so the Landing-Runway selector can drive geometry and trajectories orthogonally.
+const GEOMETRY_LAYER_KEYS: LayerKey[] = [
   "satelliteImagery",
   "terrain",
   "airportLocalTerrain",
   "terrainHillshade",
   "terrainHeightTint",
   "runways",
-  "trajectories",
   "obstacles",
   "obstacleLabels",
   "procedures",
@@ -114,7 +116,7 @@ function formatTerrainCrs(code: string | null): string {
   return code ?? "Pending";
 }
 
-export default function ControlPanel() {
+export default function ControlPanel({ procedures }: { procedures?: ReactNode }) {
   const {
     viewer,
     layers,
@@ -223,10 +225,9 @@ export default function ControlPanel() {
 
   return (
     <div className="control-panel">
-      <h3>AeroViz-4D</h3>
-
-      <section>
-        <h4>Airport</h4>
+      {/* ── Shared header: the orthogonal selectors (airport + landing runway) ── */}
+      <header className="left-panel-header">
+        <h3>AeroViz-4D</h3>
         <label className="control-panel-airport-selector">
           <span>Active Airport</span>
           <select
@@ -260,191 +261,214 @@ export default function ControlPanel() {
             </select>
           </label>
         ) : null}
-      </section>
+      </header>
 
-      {/* ── Playback controls ────────────────────────────────────────────── */}
-      <section>
-        <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-          <button onClick={handlePlayPause}>{isAnimating ? "⏸ Pause" : "▶ Play"}</button>
-          <button onClick={handleReset}>⏮ Reset</button>
-        </div>
-
-        <div className="speed-buttons">
-          {SPEED_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              className={playbackSpeed === opt.value ? "active" : ""}
-              onClick={() => handleSpeedChange(opt.value)}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-
-        <label className="control-panel-auto-replay">
-          <input
-            type="checkbox"
-            checked={autoReplay}
-            onChange={(event) => handleAutoReplayChange(event.target.checked)}
-          />
-          Auto-replay (loop)
-        </label>
-      </section>
-
-      {/* ── Layer toggles ────────────────────────────────────────────────── */}
-      <section>
-        <h4>Layers</h4>
-        {ACTIVE_LAYER_KEYS.map((key) => (
-          <label
-            key={key}
-            className={key === "obstacleLabels" ? "control-panel-layer-toggle-dependent" : undefined}
-          >
-            <input
-              type="checkbox"
-              checked={layers[key]}
-              onChange={() => toggleLayer(key)}
-            />
-            {LAYER_LABELS[key]}
-          </label>
-        ))}
-      </section>
-
-      {layers.trajectories ? (
-        <section className="control-panel-trajectory-options" aria-label="Trajectory options">
-          <h4>Trajectories</h4>
-          <label>
-            <input
-              type="checkbox"
-              checked={trajectoryComparison}
-              onChange={(event) => setTrajectoryComparison(event.target.checked)}
-            />
-            Optimizer comparison (3-colour)
-          </label>
-          {trajectoryComparison ? (
-            comparisonCategories.length > 0 ? (
-              <label className="control-panel-airport-selector">
-                <span>Optimization category</span>
-                <select
-                  className="control-panel-airport-selector-input"
-                  value={trajectoryComparisonCategory ?? ""}
-                  onChange={(event) => setTrajectoryComparisonCategory(event.target.value || null)}
-                >
-                  {comparisonCategories.map((category) => (
-                    <option key={category.key} value={category.dir}>
-                      {category.label} ({category.groups})
-                    </option>
-                  ))}
-                </select>
+      {/* ── Category 1: static scene + constraint geometry ─────────────────── */}
+      <details className="panel-category" open>
+        <summary>Geometry &amp; Constraints</summary>
+        <div className="panel-category-body">
+          <section className="control-panel-layers">
+            {GEOMETRY_LAYER_KEYS.map((key) => (
+              <label
+                key={key}
+                className={key === "obstacleLabels" ? "control-panel-layer-toggle-dependent" : undefined}
+              >
+                <input
+                  type="checkbox"
+                  checked={layers[key]}
+                  onChange={() => toggleLayer(key)}
+                />
+                {LAYER_LABELS[key]}
               </label>
-            ) : (
-              <p className="control-panel-comparison-empty">
-                No comparison data found for this airport.
-              </p>
-            )
+            ))}
+          </section>
+
+          {layers.rangeRing ? (
+            <section className="control-panel-range-ring" aria-label="Range ring radius">
+              <h4>Range Ring Radius</h4>
+              <div className="control-panel-range-ring-value">{rangeRingRadiusKm.toFixed(1)} km</div>
+              <div className="control-panel-range-ring-inputs">
+                <input
+                  type="range"
+                  min={RANGE_RING_MIN_KM}
+                  max={RANGE_RING_MAX_KM}
+                  step={RANGE_RING_STEP_KM}
+                  value={rangeRingRadiusKm}
+                  onChange={(event) =>
+                    setRangeRingRadiusKm(clampRangeRingRadiusKm(Number(event.target.value)))
+                  }
+                />
+                <input
+                  type="number"
+                  min={RANGE_RING_MIN_KM}
+                  max={RANGE_RING_MAX_KM}
+                  step={RANGE_RING_STEP_KM}
+                  value={rangeRingRadiusDraft}
+                  onFocus={() => {
+                    rangeRingRadiusFocusedRef.current = true;
+                  }}
+                  onChange={(event) => {
+                    const raw = event.target.value;
+                    setRangeRingRadiusDraft(raw);
+                    // Let the field sit empty/partial mid-edit; only commit a clamped
+                    // value once it parses to a finite number.
+                    if (raw.trim() === "") return;
+                    const parsed = Number(raw);
+                    if (Number.isFinite(parsed)) {
+                      setRangeRingRadiusKm(clampRangeRingRadiusKm(parsed));
+                    }
+                  }}
+                  onBlur={() => {
+                    rangeRingRadiusFocusedRef.current = false;
+                    const next = clampRangeRingRadiusKm(Number(rangeRingRadiusDraft));
+                    setRangeRingRadiusKm(next);
+                    setRangeRingRadiusDraft(formatRangeRingRadiusDraft(next));
+                  }}
+                />
+              </div>
+            </section>
           ) : null}
-          <label className="control-panel-airport-selector">
-            <span>Sample count (0 = all)</span>
-            <input
-              type="number"
-              min={0}
-              step={1}
-              className="control-panel-airport-selector-input"
-              value={trajectorySampleCount}
-              onChange={(event) => {
-                const parsed = Number.parseInt(event.target.value, 10);
-                setTrajectorySampleCount(Number.isFinite(parsed) && parsed > 0 ? parsed : 0);
-              }}
-            />
-          </label>
-          {trajectoryComparison ? (
-            <div className="control-panel-comparison-kinds">
-              {COMPARISON_KINDS.map(({ kind, label, color }) => (
-                <label key={kind}>
-                  <input
-                    type="checkbox"
-                    checked={trajectoryComparisonKinds[kind]}
-                    onChange={(event) => setTrajectoryComparisonKind(kind, event.target.checked)}
-                  />
-                  <i style={{ background: color }} />
-                  {label}
-                </label>
+
+          {layers.airportLocalTerrain ? (
+            <section className="control-panel-local-terrain" aria-label="Airport local terrain details">
+              <h4>Local Terrain</h4>
+              <dl className="control-panel-terrain-details">
+                <div>
+                  <dt>Status</dt>
+                  <dd>{formatTerrainStatus(airportLocalTerrain.status)}</dd>
+                </div>
+                <div>
+                  <dt>Source spacing</dt>
+                  <dd>{formatTerrainResolution(airportLocalTerrain.horizontalResolutionM)}</dd>
+                </div>
+                <div>
+                  <dt>Source</dt>
+                  <dd>{formatTerrainSource(airportLocalTerrain.sourceKind, airportLocalTerrain.sourceName)}</dd>
+                </div>
+                <div>
+                  <dt>CRS</dt>
+                  <dd title={airportLocalTerrain.sourceCrsName ?? undefined}>
+                    {formatTerrainCrs(airportLocalTerrain.sourceCrsCode)}
+                  </dd>
+                </div>
+              </dl>
+            </section>
+          ) : null}
+
+          {/* The RNAV procedure panel slots in here; its list is scoped to the
+              Landing Runway selected in the header above. */}
+          {procedures}
+        </div>
+      </details>
+
+      {/* ── Category 2: trajectory playback + the trajectories layer ───────── */}
+      <details className="panel-category" open>
+        <summary>Trajectories</summary>
+        <div className="panel-category-body">
+          <section className="control-panel-playback">
+            <div className="control-panel-playback-buttons">
+              <button onClick={handlePlayPause}>{isAnimating ? "⏸ Pause" : "▶ Play"}</button>
+              <button onClick={handleReset}>⏮ Reset</button>
+            </div>
+
+            <div className="speed-buttons">
+              {SPEED_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  className={playbackSpeed === opt.value ? "active" : ""}
+                  onClick={() => handleSpeedChange(opt.value)}
+                >
+                  {opt.label}
+                </button>
               ))}
             </div>
-          ) : null}
-        </section>
-      ) : null}
 
-      {layers.rangeRing ? (
-        <section className="control-panel-range-ring" aria-label="Range ring radius">
-          <h4>Range Ring Radius</h4>
-          <div className="control-panel-range-ring-value">{rangeRingRadiusKm.toFixed(1)} km</div>
-          <div className="control-panel-range-ring-inputs">
-            <input
-              type="range"
-              min={RANGE_RING_MIN_KM}
-              max={RANGE_RING_MAX_KM}
-              step={RANGE_RING_STEP_KM}
-              value={rangeRingRadiusKm}
-              onChange={(event) =>
-                setRangeRingRadiusKm(clampRangeRingRadiusKm(Number(event.target.value)))
-              }
-            />
-            <input
-              type="number"
-              min={RANGE_RING_MIN_KM}
-              max={RANGE_RING_MAX_KM}
-              step={RANGE_RING_STEP_KM}
-              value={rangeRingRadiusDraft}
-              onFocus={() => {
-                rangeRingRadiusFocusedRef.current = true;
-              }}
-              onChange={(event) => {
-                const raw = event.target.value;
-                setRangeRingRadiusDraft(raw);
-                // Let the field sit empty/partial mid-edit; only commit a clamped
-                // value once it parses to a finite number.
-                if (raw.trim() === "") return;
-                const parsed = Number(raw);
-                if (Number.isFinite(parsed)) {
-                  setRangeRingRadiusKm(clampRangeRingRadiusKm(parsed));
-                }
-              }}
-              onBlur={() => {
-                rangeRingRadiusFocusedRef.current = false;
-                const next = clampRangeRingRadiusKm(Number(rangeRingRadiusDraft));
-                setRangeRingRadiusKm(next);
-                setRangeRingRadiusDraft(formatRangeRingRadiusDraft(next));
-              }}
-            />
-          </div>
-        </section>
-      ) : null}
+            <label className="control-panel-auto-replay">
+              <input
+                type="checkbox"
+                checked={autoReplay}
+                onChange={(event) => handleAutoReplayChange(event.target.checked)}
+              />
+              Auto-replay (loop)
+            </label>
+          </section>
 
-      {layers.airportLocalTerrain ? (
-        <section className="control-panel-local-terrain" aria-label="Airport local terrain details">
-          <h4>Local Terrain</h4>
-          <dl className="control-panel-terrain-details">
-            <div>
-              <dt>Status</dt>
-              <dd>{formatTerrainStatus(airportLocalTerrain.status)}</dd>
-            </div>
-            <div>
-              <dt>Source spacing</dt>
-              <dd>{formatTerrainResolution(airportLocalTerrain.horizontalResolutionM)}</dd>
-            </div>
-            <div>
-              <dt>Source</dt>
-              <dd>{formatTerrainSource(airportLocalTerrain.sourceKind, airportLocalTerrain.sourceName)}</dd>
-            </div>
-            <div>
-              <dt>CRS</dt>
-              <dd title={airportLocalTerrain.sourceCrsName ?? undefined}>
-                {formatTerrainCrs(airportLocalTerrain.sourceCrsCode)}
-              </dd>
-            </div>
-          </dl>
-        </section>
-      ) : null}
+          <section className="control-panel-trajectory-layer">
+            <label>
+              <input
+                type="checkbox"
+                checked={layers.trajectories}
+                onChange={() => toggleLayer("trajectories")}
+              />
+              {LAYER_LABELS.trajectories}
+            </label>
+
+            {layers.trajectories ? (
+              <div className="control-panel-trajectory-options" aria-label="Trajectory options">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={trajectoryComparison}
+                    onChange={(event) => setTrajectoryComparison(event.target.checked)}
+                  />
+                  Optimizer comparison (3-colour)
+                </label>
+                {trajectoryComparison ? (
+                  comparisonCategories.length > 0 ? (
+                    <label className="control-panel-airport-selector">
+                      <span>Optimization category</span>
+                      <select
+                        className="control-panel-airport-selector-input"
+                        value={trajectoryComparisonCategory ?? ""}
+                        onChange={(event) => setTrajectoryComparisonCategory(event.target.value || null)}
+                      >
+                        {comparisonCategories.map((category) => (
+                          <option key={category.key} value={category.dir}>
+                            {category.label} ({category.groups})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : (
+                    <p className="control-panel-comparison-empty">
+                      No comparison data found for this airport.
+                    </p>
+                  )
+                ) : null}
+                <label className="control-panel-airport-selector">
+                  <span>Sample count (0 = all)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    className="control-panel-airport-selector-input"
+                    value={trajectorySampleCount}
+                    onChange={(event) => {
+                      const parsed = Number.parseInt(event.target.value, 10);
+                      setTrajectorySampleCount(Number.isFinite(parsed) && parsed > 0 ? parsed : 0);
+                    }}
+                  />
+                </label>
+                {trajectoryComparison ? (
+                  <div className="control-panel-comparison-kinds">
+                    {COMPARISON_KINDS.map(({ kind, label, color }) => (
+                      <label key={kind}>
+                        <input
+                          type="checkbox"
+                          checked={trajectoryComparisonKinds[kind]}
+                          onChange={(event) => setTrajectoryComparisonKind(kind, event.target.checked)}
+                        />
+                        <i style={{ background: color }} />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </section>
+        </div>
+      </details>
     </div>
   );
 }

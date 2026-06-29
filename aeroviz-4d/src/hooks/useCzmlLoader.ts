@@ -28,6 +28,7 @@ import { useApp } from "../context/AppContext";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import { sampleSubset } from "../utils/sampleTrajectories";
+import { planTrajectoryModels, TRAJECTORY_PATH_WIDTH } from "../utils/trajectoryRenderModel";
 
 const LAYER_NAME = "czml-trajectories";
 
@@ -52,12 +53,18 @@ export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
     layers,
     autoReplay,
     trajectorySampleCount,
+    selectedFlightId,
     setSelectedFlightId,
     setTrajectoryDataSource,
   } = useApp();
   // Hold a direct reference — the CZML document packet can overwrite the
   // datasource name, making getByName() unreliable for visibility sync.
   const dsRef = useRef<Cesium.CzmlDataSource | null>(null);
+  // The shown sample + the (random) subset that carries an aircraft model. Held in
+  // refs so re-selecting a flight re-applies the render model WITHOUT reshuffling the
+  // subset (the random pick only recomputes when the data / sample count changes).
+  const shownIdsRef = useRef<Set<string>>(new Set());
+  const modelIdsRef = useRef<Set<string>>(new Set());
   const [state, setState] = useState<CzmlLoaderState>({
     isLoaded: false,
     flightIds: [],
@@ -178,19 +185,44 @@ export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
     if (dsRef.current) dsRef.current.show = layers.trajectories;
   }, [layers.trajectories, state.isLoaded]);
 
-  // ── Sample: render only `trajectorySampleCount` random flights (0 = all) ─────
-  // Re-samples whenever the count changes or a new CZML loads.
+  // ── Recompute the shown sample + the model subset (random) ───────────────────
+  // `trajectorySampleCount` flights are shown (0 = all); of those, a capped subset is
+  // chosen to carry an aircraft model. Only recomputes when the data / count changes,
+  // so selecting a flight (below) never reshuffles which flights are planes.
   useEffect(() => {
     const ds = dsRef.current;
     if (!ds || !state.isLoaded) return;
-    const flights = ds.entities.values.filter((entity) => entity.id !== "document");
-    if (!(trajectorySampleCount > 0) || trajectorySampleCount >= flights.length) {
-      flights.forEach((entity) => { entity.show = true; });
-      return;
-    }
-    const shown = new Set(sampleSubset(flights.map((entity) => entity.id), trajectorySampleCount));
-    flights.forEach((entity) => { entity.show = shown.has(entity.id); });
+    const ids = ds.entities.values
+      .filter((entity) => entity.id !== "document")
+      .map((entity) => entity.id);
+    const allShown = !(trajectorySampleCount > 0) || trajectorySampleCount >= ids.length;
+    shownIdsRef.current = allShown ? new Set(ids) : new Set(sampleSubset(ids, trajectorySampleCount));
+    modelIdsRef.current = planTrajectoryModels([...shownIdsRef.current], null).modelIds;
   }, [trajectorySampleCount, state.isLoaded, state.flightIds]);
+
+  // ── Apply the render model to entities ───────────────────────────────────────
+  // Every shown flight draws as a uniform-width path; only the subset (plus the
+  // selected flight) carries an aircraft model; glTF animation is off; the label
+  // shows for the selected flight alone (1000 labels is the dominant Cesium cost).
+  // Re-runs on selection change so the tracked aircraft always shows its model+label.
+  useEffect(() => {
+    const ds = dsRef.current;
+    if (!ds || !state.isLoaded) return;
+    for (const entity of ds.entities.values) {
+      if (entity.id === "document") continue;
+      const shown = shownIdsRef.current.has(entity.id);
+      entity.show = shown;
+      if (entity.path) entity.path.width = new Cesium.ConstantProperty(TRAJECTORY_PATH_WIDTH);
+      if (entity.model) {
+        const hasModel = shown && (modelIdsRef.current.has(entity.id) || entity.id === selectedFlightId);
+        entity.model.show = new Cesium.ConstantProperty(hasModel);
+        entity.model.runAnimations = new Cesium.ConstantProperty(false);
+      }
+      if (entity.label) {
+        entity.label.show = new Cesium.ConstantProperty(shown && entity.id === selectedFlightId);
+      }
+    }
+  }, [trajectorySampleCount, state.isLoaded, state.flightIds, selectedFlightId]);
 
   return state;
 }

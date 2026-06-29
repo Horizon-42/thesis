@@ -18,6 +18,7 @@ import { useEffect, useRef, useState } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
+import { makeStableVelocityOrientation } from "../utils/velocityOrientation";
 import { sampleTrajectoryAt } from "./useOptimizedTrajectoryPlayback";
 import type { TrajectorySample } from "../pilot/trajectoryOptimizationClient";
 import {
@@ -34,28 +35,6 @@ const READOUT_THROTTLE_MS = 80;
 /** The system key (e.g. "B") for a dyncmp entity, or null for any other entity. */
 function systemKeyOf(entity: Cesium.Entity): string | null {
   return entity.id.startsWith(ENTITY_PREFIX) ? entity.id.slice(ENTITY_PREFIX.length) : null;
-}
-
-/**
- * A VelocityOrientationProperty that holds its last valid value. The position
- * series uses HOLD extrapolation, so once playback reaches the final sample the
- * velocity drops to zero and the underlying property returns `undefined` — which
- * would snap the model to a default attitude. Returning the last in-flight
- * orientation keeps the parked aircraft pointing along its final state instead.
- */
-function makeStableVelocityOrientation(
-  position: Cesium.PositionProperty,
-): Cesium.CallbackProperty {
-  const velocity = new Cesium.VelocityOrientationProperty(position);
-  let last: Cesium.Quaternion | undefined;
-  return new Cesium.CallbackProperty((time, result) => {
-    const value = time ? velocity.getValue(time, result) : undefined;
-    if (value) {
-      last = Cesium.Quaternion.clone(value, last);
-      return value;
-    }
-    return last;
-  }, false);
 }
 
 export type DynamicsComparisonPlaybackStatus = "idle" | "loading" | "loaded" | "error";

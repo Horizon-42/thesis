@@ -24,14 +24,21 @@ const {
   setProcedureWidthMeasurementEnabled,
   setProcedureDisplayLevel,
   getProcedureDisplayLevel,
+  setSelectedRunway,
+  getSelectedRunway,
   resetProcedureVisibility,
 } = vi.hoisted(() => {
   let procedureVisibility: Record<string, boolean> = {};
   let selectedProfileRunwayIdent: string | null = null;
   let isRunwayProfileOpen = false;
   let procedureDisplayLevel = "PROTECTION";
+  let selectedRunway: string | null = null;
   return {
     fetchMock: vi.fn(),
+    setSelectedRunway: (runway: string | null) => {
+      selectedRunway = runway;
+    },
+    getSelectedRunway: () => selectedRunway,
     navigateWithinApp: vi.fn(),
     toggleLayer: vi.fn(),
     setProcedureBranchVisible: vi.fn((branchId: string, visible: boolean) => {
@@ -60,6 +67,7 @@ const {
     resetProcedureVisibility: () => {
       procedureVisibility = {};
       procedureDisplayLevel = "PROTECTION";
+      selectedRunway = null;
     },
     getSelectedProfileRunwayIdent: () => selectedProfileRunwayIdent,
     getRunwayProfileOpen: () => isRunwayProfileOpen,
@@ -70,6 +78,7 @@ vi.mock("../../context/AppContext", () => ({
   useApp: () => ({
     layers: { procedures: true },
     activeAirportCode: "KRDU",
+    selectedRunway: getSelectedRunway(),
     toggleLayer,
     procedureVisibility: getProcedureVisibility(),
     setProcedureBranchVisible,
@@ -424,5 +433,27 @@ describe("ProcedurePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Procedure Details" }));
 
     expect(navigateWithinApp).toHaveBeenCalledWith("/procedure-details?airport=KRDU");
+  });
+
+  it("scopes the listed procedures to the selected landing runway (bare ident)", async () => {
+    setSelectedRunway("23R"); // bare spelling, matches the RW-prefixed group
+    render(<ProcedurePanel />);
+
+    await waitFor(() => expect(screen.getByText("RW23R")).toBeTruthy());
+
+    // Only the selected runway's group is listed; 05L is filtered out.
+    expect(screen.queryByText("RW05L")).toBeNull();
+    expect(screen.getByText("1 branches")).toBeTruthy();
+    expect(screen.getByText("1 runways")).toBeTruthy();
+  });
+
+  it("shows an empty-state note for a runway with no RNAV procedures", async () => {
+    setSelectedRunway("14"); // KRDU sample has no procedures for 14
+    render(<ProcedurePanel />);
+
+    await waitFor(() =>
+      expect(screen.getByText("No RNAV procedures for runway 14.")).toBeTruthy(),
+    );
+    expect(screen.getByText("0 runways")).toBeTruthy();
   });
 });

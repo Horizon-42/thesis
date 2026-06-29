@@ -190,13 +190,9 @@ body,
 }
 
 .left-overlay-panel-stack > .control-panel {
-  flex: 0 0 auto;
-}
-
-.left-overlay-panel-stack > .procedure-panel {
-  flex: 0 1 min(38vh, 450px);
-  height: auto;
+  flex: 1 1 auto;
   min-height: 0;
+  overflow-y: auto;
 }
 
 .czml-status {
@@ -319,6 +315,58 @@ body,
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: #8898aa;
+}
+
+/* ── Shared header (airport + landing-runway selectors) ───────────────────── */
+.left-panel-header {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.left-panel-header h3 {
+  margin: 0 0 4px;
+}
+
+/* ── Collapsible categories (Geometry & Constraints / Trajectories) ───────── */
+.panel-category {
+  border-top: 1px solid rgba(126, 184, 247, 0.18);
+  padding-top: 6px;
+}
+
+.panel-category > summary {
+  cursor: pointer;
+  list-style: none;
+  margin: 2px 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8898aa;
+}
+
+.panel-category > summary::-webkit-details-marker {
+  display: none;
+}
+
+.panel-category > summary::before {
+  content: "▸ ";
+  color: #5f6f86;
+}
+
+.panel-category[open] > summary::before {
+  content: "▾ ";
+}
+
+.panel-category-body {
+  display: grid;
+  gap: 6px;
+}
+
+.control-panel-playback-buttons {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
 }
 
 .control-panel button {
@@ -464,18 +512,18 @@ body,
 }
 
 /* ── Procedure Panel overlay ─────────────────────────────────────────────── */
+/* Nested inside the Geometry & Constraints category (no longer a floating panel):
+   a subtle sub-card that flows in the scrolling control panel. */
 .procedure-panel {
-  align-self: start;
-  width: var(--overlay-left-width);
-  height: min(38vh, 450px);
+  width: 100%;
   min-height: 0;
-  overflow: auto;
+  margin-top: 4px;
   pointer-events: auto;
-  background: rgba(20, 24, 35, 0.88);
-  backdrop-filter: blur(6px);
+  background: rgba(13, 17, 27, 0.55);
+  border: 1px solid rgba(103, 232, 249, 0.16);
   color: #e0e6f0;
-  border-radius: 8px;
-  padding: 12px;
+  border-radius: 6px;
+  padding: 10px;
   box-sizing: border-box;
   font-family: "Inter", "Segoe UI", sans-serif;
   font-size: 12px;
@@ -824,6 +872,13 @@ body,
 .procedure-branch-list {
   display: grid;
   gap: 7px;
+}
+
+/* Cap the runway list so a long procedure list scrolls within the sub-card
+   instead of stretching the whole control panel. */
+.procedure-runway-list {
+  max-height: min(36vh, 360px);
+  overflow-y: auto;
 }
 
 .procedure-runway-group {

@@ -10,6 +10,10 @@ import type {
 } from "../data/procedureProtectionSurfaces";
 import type { RunwayProperties } from "../types/geojson-aviation";
 import { EARTH_RADIUS_M, toRadians, toDegrees } from "./procedureGeoMath";
+import { normalizeRunwayIdent } from "./runwayIdent";
+
+// Re-exported so existing importers of this module keep resolving the symbol.
+export { normalizeRunwayIdent };
 
 interface RunwayFeatureProperties extends RunwayProperties {
   zone_type?: string;
@@ -358,11 +362,6 @@ function pointInsidePlateRoute(
     }
   }
   return false;
-}
-
-export function normalizeRunwayIdent(runwayIdent: string): string {
-  const trimmed = runwayIdent.trim().toUpperCase();
-  return trimmed.startsWith("RW") ? trimmed : `RW${trimmed}`;
 }
 
 export function buildRunwayFrame(

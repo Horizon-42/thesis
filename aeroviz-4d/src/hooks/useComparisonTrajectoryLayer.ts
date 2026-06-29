@@ -26,12 +26,40 @@ import {
   isComparisonIndex,
 } from "../data/airportData";
 import { selectComparisonGroups } from "../utils/sampleTrajectories";
+import { TRAJECTORY_PATH_WIDTH } from "../utils/trajectoryRenderModel";
+import { makeStableVelocityOrientation } from "../utils/velocityOrientation";
 
 /** The entity id prefix encodes its kind: ref-/opt-/sim-. */
 function kindOfEntityId(id: string): ComparisonKind {
   if (id.startsWith("ref-")) return "reference";
   if (id.startsWith("opt-")) return "optimizer";
   return "simulator";
+}
+
+/**
+ * Make a comparison entity render like the observed tracks: uniform path width, an
+ * aircraft model (with glTF animation off) pointing down its path, no per-frame label
+ * churn. The reference (ref-) entity is copied from trajectories.czml so it already
+ * has a model; the optimizer/simulator (opt-/sim-) entities are state-sequence paths
+ * with only a point marker, so we attach a model + orientation and drop the marker.
+ * Per-kind colour still comes from the CZML path material.
+ */
+function applyComparisonRenderModel(entity: Cesium.Entity): void {
+  if (entity.id === "document") return;
+  if (entity.path) entity.path.width = new Cesium.ConstantProperty(TRAJECTORY_PATH_WIDTH);
+  if (entity.model) {
+    entity.model.runAnimations = new Cesium.ConstantProperty(false);
+    return;
+  }
+  if (!entity.position) return;
+  entity.model = new Cesium.ModelGraphics({
+    uri: "/models/aircraft.glb",
+    scale: 3,
+    minimumPixelSize: 32,
+    runAnimations: false,
+  });
+  entity.orientation = makeStableVelocityOrientation(entity.position);
+  if (entity.point) entity.point.show = new Cesium.ConstantProperty(false);
 }
 
 export function useComparisonTrajectoryLayer(): void {
@@ -104,6 +132,7 @@ export function useComparisonTrajectoryLayer(): void {
 
         viewer.dataSources.add(loaded);
         added.push(loaded);
+        for (const entity of loaded.entities.values) applyComparisonRenderModel(entity);
         if (loaded.clock) {
           if (!start || Cesium.JulianDate.lessThan(loaded.clock.startTime, start)) {
             start = loaded.clock.startTime.clone();

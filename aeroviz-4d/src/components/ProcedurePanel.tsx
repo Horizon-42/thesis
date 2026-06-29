@@ -10,6 +10,7 @@ import {
 } from "../data/procedureAnnotations";
 import { isMissingJsonAsset } from "../utils/fetchJson";
 import { navigateWithinApp } from "../utils/navigation";
+import { runwayMatchesSelection } from "../utils/runwayIdent";
 
 const RUNWAY_ORDER = ["RW05L", "RW05R", "RW23L", "RW23R", "RW32"];
 
@@ -208,7 +209,6 @@ function firstProcedureBranches(branches: ProcedureBranchItem[]): ProcedureBranc
 export default function ProcedurePanel() {
   const {
     layers,
-    toggleLayer,
     procedureVisibility,
     setProcedureBranchVisible,
     setProcedureBranchesVisible,
@@ -219,6 +219,7 @@ export default function ProcedurePanel() {
     procedureDisplayLevel,
     setProcedureDisplayLevel,
     activeAirportCode,
+    selectedRunway,
     selectedProfileRunwayIdent,
     setSelectedProfileRunwayIdent,
     isRunwayProfileOpen,
@@ -285,8 +286,16 @@ export default function ProcedurePanel() {
     };
   }, [activeAirportCode, layers.procedures, setProcedureBranchesVisible]);
 
-  const groups = useMemo(() => buildGroups(branches), [branches]);
-  const totalWarnings = branches.reduce((sum, branch) => sum + branch.warnings.length, 0);
+  // The Landing-Runway selection is the orthogonal axis: it only scopes WHICH
+  // procedures are listed (manual per-branch toggles + their visibility state are
+  // untouched). `null` ("All runways") lists everything. Procedure runwayIdents are
+  // "RW"-prefixed, the selection is bare — runwayMatchesSelection bridges that.
+  const visibleBranches = useMemo(
+    () => branches.filter((branch) => runwayMatchesSelection(selectedRunway, branch.runwayIdent)),
+    [branches, selectedRunway],
+  );
+  const groups = useMemo(() => buildGroups(visibleBranches), [visibleBranches]);
+  const totalWarnings = visibleBranches.reduce((sum, branch) => sum + branch.warnings.length, 0);
 
   const setBranchesVisible = (targetBranches: ProcedureBranchItem[], visible: boolean) => {
     setProcedureBranchesVisible(
@@ -314,7 +323,7 @@ export default function ProcedurePanel() {
   };
 
   const openAllProcedures = () => {
-    setBranchesVisible(branches, true);
+    setBranchesVisible(visibleBranches, true);
   };
   const displayLevelNotice = hiddenGeometryNotice(geometryStatus, procedureDisplayLevel);
 
@@ -326,14 +335,6 @@ export default function ProcedurePanel() {
           <p>{(sourceAirport ?? activeAirportCode) || "Unknown"} CIFP {sourceCycle ?? "unknown"}</p>
         </div>
         <div className="procedure-panel-toggle-grid">
-          <label className="procedure-master-toggle">
-            <input
-              type="checkbox"
-              checked={layers.procedures}
-              onChange={() => toggleLayer("procedures")}
-            />
-            On
-          </label>
           <label className="procedure-master-toggle">
             <input
               type="checkbox"
@@ -373,10 +374,10 @@ export default function ProcedurePanel() {
       {loadError ? <p className="procedure-panel-error">{loadError}</p> : null}
 
       <div className="procedure-panel-summary">
-        <span>{branches.length} branches</span>
+        <span>{visibleBranches.length} branches</span>
         <span>{groups.length} runways</span>
         <span>{totalWarnings} warnings</span>
-        <button type="button" onClick={openAllProcedures} disabled={branches.length === 0}>
+        <button type="button" onClick={openAllProcedures} disabled={visibleBranches.length === 0}>
           All On
         </button>
       </div>
@@ -396,6 +397,12 @@ export default function ProcedurePanel() {
       ) : null}
       {displayLevelNotice ? (
         <p className="procedure-panel-display-notice">{displayLevelNotice}</p>
+      ) : null}
+
+      {selectedRunway && groups.length === 0 && branches.length > 0 ? (
+        <p className="procedure-panel-display-notice">
+          No RNAV procedures for runway {selectedRunway}.
+        </p>
       ) : null}
 
       <div className="procedure-runway-list">

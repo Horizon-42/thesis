@@ -7,6 +7,7 @@ import {
   toDegrees,
   toRadians,
 } from "../utils/procedureGeoMath";
+import { normalizeRunwayIdent } from "../utils/runwayIdent";
 
 interface RunwayFeatureProperties extends RunwayProperties {
   zone_type?: string;
@@ -130,11 +131,6 @@ function simulatorPsiDeg(
   const east = toRadians(toLon - fromLon) * EARTH_RADIUS_M * Math.cos(meanLat);
   const north = toRadians(toLat - fromLat) * EARTH_RADIUS_M;
   return normalizeDegrees(toDegrees(Math.atan2(north, east)));
-}
-
-function normalizeRunwayIdent(ident: string): string {
-  const normalized = ident.trim().toUpperCase();
-  return normalized.startsWith("RW") ? normalized : `RW${normalized}`;
 }
 
 function normalizeDegrees(value: number): number {
