@@ -6,8 +6,8 @@ Two modes:
   ``4dTrajectory/optimization/scenario_optimization.py`` → one CZML with three coloured,
   time-dynamic trajectories:
     • reference  (white)  — the observed ADS-B track, copied from the airport's trajectories.czml
-    • optimizer  (cyan)   — the optimizer's plan        (optimizer_states)
-    • simulator  (orange) — the real forward rollout    (simulator_states)
+    • optimizer  (orange) — the optimizer's plan        (optimizer_states)
+    • simulator  (cyan)   — the real forward rollout    (simulator_states)
 
 * **Batch** (``--summary``) — the run's ``summary.json`` → **one combined CZML per runway**
   plus a single ``comparison_index.json``. Every flight on one map: solved flights get the
@@ -39,8 +39,8 @@ EPOCH = datetime(2026, 4, 1, 8, 0, 0, tzinfo=timezone.utc)
 
 # RGBA colours (0-255) for the three trajectories.
 REFERENCE_COLOR = (235, 235, 235, 200)   # observed ADS-B (white)
-OPTIMIZER_COLOR = (0, 200, 255, 220)     # optimizer plan (cyan)
-SIMULATOR_COLOR = (255, 140, 0, 220)     # simulator rollout (orange)
+OPTIMIZER_COLOR = (255, 140, 0, 220)     # optimizer plan (orange)
+SIMULATOR_COLOR = (0, 200, 255, 220)     # simulator rollout (cyan)
 FAILED_COLOR = (200, 60, 60, 200)        # unsolved scenario — reference only, flagged dark red
 
 _TRAIL_TIME_S = 100000  # keep the whole path drawn
@@ -208,7 +208,7 @@ def build_runway_comparison(
     """Combined CZML for one runway **plus** its index records (every flight on one map).
 
     Each result (a row from ``scenario_optimization``'s ``summary.json``) becomes:
-      • solved → reference (white) + optimizer (cyan) + simulator (orange);
+      • solved → reference (white) + optimizer (orange) + simulator (cyan);
       • failed → reference only, in the dark-red FAILED_COLOR, labelled "(unsolved)".
 
     Every entity gets a globally-unique id ``{kind}-{flightId}_{runway}`` (so duplicate
