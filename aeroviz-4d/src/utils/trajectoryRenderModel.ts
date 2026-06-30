@@ -16,9 +16,25 @@
  */
 
 import { sampleSubset, type Rng } from "./sampleTrajectories";
+import type { ComparisonKind } from "../context/AppContext";
 
 /** Uniform path width for every trajectory (observed + comparison), in px. */
 export const TRAJECTORY_PATH_WIDTH = 2;
+
+/**
+ * The single source of truth for the optimizer-comparison kind colours. Both the legend
+ * swatches (ControlPanel) and the rendered path/label colours (useComparisonTrajectoryLayer)
+ * read this, so they can never drift. The CZML bakes its own colours in, but they vary by
+ * category and don't necessarily match the legend, so the frontend overrides each opt/sim
+ * path to these. The reference is intentionally NOT overridden — it keeps the CZML's white,
+ * or the dark-red `FAILED_COLOR` for failed optimizations. Keep these RGB values in sync
+ * with `python/build_scenario_comparison_czml.py` (OPTIMIZER_COLOR / SIMULATOR_COLOR).
+ */
+export const COMPARISON_KIND_COLORS: Record<ComparisonKind, string> = {
+  reference: "rgb(235, 235, 235)",
+  optimizer: "rgb(255, 140, 0)", // "Optimize states"
+  simulator: "rgb(40, 120, 255)", // "Optimize results"
+};
 
 /** How many shown trajectories carry an aircraft model (the rest are path-only). */
 export const DEFAULT_MODEL_BUDGET = 20;

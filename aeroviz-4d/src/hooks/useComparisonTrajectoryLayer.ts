@@ -26,8 +26,17 @@ import {
   isComparisonIndex,
 } from "../data/airportData";
 import { selectComparisonGroups } from "../utils/sampleTrajectories";
-import { TRAJECTORY_PATH_WIDTH } from "../utils/trajectoryRenderModel";
+import { TRAJECTORY_PATH_WIDTH, COMPARISON_KIND_COLORS } from "../utils/trajectoryRenderModel";
 import { makeStableVelocityOrientation } from "../utils/velocityOrientation";
+import { addDataSourceHidden } from "../utils/cesiumDataSource";
+
+/** Path/label alpha for the recoloured comparison tracks (matches the CZML's ~220/255). */
+const COMPARISON_PATH_ALPHA = 0.86;
+
+/** The legend colour for a kind, as a Cesium.Color (single source of truth, see render-model). */
+function comparisonKindColor(kind: ComparisonKind): Cesium.Color {
+  return Cesium.Color.fromCssColorString(COMPARISON_KIND_COLORS[kind]).withAlpha(COMPARISON_PATH_ALPHA);
+}
 
 /** The entity id prefix encodes its kind: ref-/opt-/sim-. */
 function kindOfEntityId(id: string): ComparisonKind {
@@ -47,7 +56,18 @@ function kindOfEntityId(id: string): ComparisonKind {
  */
 function applyComparisonRenderModel(entity: Cesium.Entity, shownEntityIds: Set<string>): void {
   if (entity.id === "document") return;
-  if (entity.path) entity.path.width = new Cesium.ConstantProperty(TRAJECTORY_PATH_WIDTH);
+  const kind = kindOfEntityId(entity.id);
+  if (entity.path) {
+    entity.path.width = new Cesium.ConstantProperty(TRAJECTORY_PATH_WIDTH);
+    // Colour the path from the legend (single source of truth) so the rendered track always
+    // matches its checkbox swatch — regardless of which colour this category's CZML baked in.
+    // The reference keeps the CZML colour (white, or dark-red for failed optimizations).
+    if (kind !== "reference") {
+      const color = comparisonKindColor(kind);
+      entity.path.material = new Cesium.ColorMaterialProperty(color);
+      if (entity.label) entity.label.fillColor = new Cesium.ConstantProperty(color);
+    }
+  }
   if (!shownEntityIds.has(entity.id)) return;
   if (entity.model) {
     entity.model.runAnimations = new Cesium.ConstantProperty(false);
@@ -132,7 +152,9 @@ export function useComparisonTrajectoryLayer(): void {
         }
         if (cancelled || !isCesiumViewerUsable(viewer)) return;
 
-        viewer.dataSources.add(loaded);
+        // Add hidden — the visibility pass below reveals only the sampled subset. Adding it
+        // visible flashes every entity of each file on load (see addDataSourceHidden).
+        addDataSourceHidden(viewer, loaded);
         added.push(loaded);
         for (const entity of loaded.entities.values) {
           applyComparisonRenderModel(entity, selection.shownEntityIds);

@@ -11,15 +11,19 @@
 
 import { useApp, type ComparisonKind } from "../context/AppContext";
 import { useComparisonCategories } from "../hooks/useComparisonCategories";
+import { COMPARISON_KIND_COLORS } from "../utils/trajectoryRenderModel";
 import { useEffect } from "react";
 
-/** The three comparison trajectories, each a colour-keyed visibility checkbox. */
-const COMPARISON_KINDS: Array<{ kind: ComparisonKind; label: string; color: string }> = [
-  { kind: "reference", label: "Reference", color: "rgb(235, 235, 235)" },
-  // Note: kind keys ("optimizer"/"simulator") stay as the backend's entity-id prefixes;
-  // only the display labels + swatch colours + order change. Swatch colours match the backend CZML.
-  { kind: "simulator", label: "Optimize results", color: "rgb(40, 120, 255)" },
-  { kind: "optimizer", label: "Optimize states", color: "rgb(255, 140, 0)" },
+/**
+ * The three comparison trajectories, each a colour-keyed visibility checkbox. The kind keys
+ * ("optimizer"/"simulator") stay as the backend's entity-id prefixes; the swatch colour comes
+ * from the shared COMPARISON_KIND_COLORS (the same source the rendered paths are recoloured to),
+ * so the legend and the tracks can never disagree.
+ */
+const COMPARISON_KINDS: Array<{ kind: ComparisonKind; label: string }> = [
+  { kind: "reference", label: "Reference" },
+  { kind: "simulator", label: "Optimize results" },
+  { kind: "optimizer", label: "Optimize states" },
 ];
 
 export default function ControlPanel() {
@@ -108,14 +112,14 @@ export default function ControlPanel() {
             </label>
             {trajectoryComparison ? (
               <div className="control-panel-comparison-kinds">
-                {COMPARISON_KINDS.map(({ kind, label, color }) => (
+                {COMPARISON_KINDS.map(({ kind, label }) => (
                   <label key={kind}>
                     <input
                       type="checkbox"
                       checked={trajectoryComparisonKinds[kind]}
                       onChange={(event) => setTrajectoryComparisonKind(kind, event.target.checked)}
                     />
-                    <i style={{ background: color }} />
+                    <i style={{ background: COMPARISON_KIND_COLORS[kind] }} />
                     {label}
                   </label>
                 ))}

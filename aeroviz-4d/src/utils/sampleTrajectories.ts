@@ -40,9 +40,13 @@ export interface ComparisonSelection {
 }
 
 /**
- * Filter the comparison index to the eligible (solved, non-empty) groups for the selected
- * runway (`null` = every runway), randomly sample `count` of them, and collect the CZML
- * files + entity ids needed to render them.
+ * Filter the comparison index to the eligible (non-empty) groups for the selected runway
+ * (`null` = every runway), randomly sample `count` of them, and collect the CZML files +
+ * entity ids needed to render them.
+ *
+ * Failed-optimization groups (`status: "failed"`) are kept in the pool: they carry only a
+ * dark-red `ref-` track (no opt/sim), and are sampled alongside the solved groups so the
+ * failures show up in proportion to the sample count (gated by the Reference toggle).
  */
 export function selectComparisonGroups(
   index: ComparisonIndex,
@@ -52,7 +56,6 @@ export function selectComparisonGroups(
 ): ComparisonSelection {
   const eligible = index.groups.filter(
     (group) =>
-      group.status === "solved" &&
       group.entities.length > 0 &&
       (selectedRunway === null || group.runway === selectedRunway),
   );

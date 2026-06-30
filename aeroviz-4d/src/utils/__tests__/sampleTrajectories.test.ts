@@ -66,18 +66,20 @@ const INDEX: ComparisonIndex = {
 };
 
 describe("selectComparisonGroups", () => {
-  it("filters to a single runway and excludes failed / empty groups", () => {
+  it("filters to a single runway and excludes empty groups", () => {
     const sel = selectComparisonGroups(INDEX, "05L", 0, seededRng());
     expect(sel.groups.map((g) => g.group).sort()).toEqual(["A_05L", "B_05L"]); // not E (empty), not 23R
     expect(sel.files).toEqual(["comparison_KRDU_05L.czml"]);
     expect(sel.shownEntityIds.has("opt-A_05L")).toBe(true);
-    expect(sel.shownEntityIds.has("ref-D_23R")).toBe(false);
+    expect(sel.shownEntityIds.has("ref-D_23R")).toBe(false); // different runway
   });
 
-  it("null runway spans all runways and collects every needed file", () => {
+  it("null runway spans all runways and includes failed (dark-red) groups", () => {
     const sel = selectComparisonGroups(INDEX, null, 0, seededRng());
-    expect(sel.groups.map((g) => g.group).sort()).toEqual(["A_05L", "B_05L", "C_23R"]);
+    expect(sel.groups.map((g) => g.group).sort()).toEqual(["A_05L", "B_05L", "C_23R", "D_23R"]);
     expect(sel.files.sort()).toEqual(["comparison_KRDU_05L.czml", "comparison_KRDU_23R.czml"]);
+    // the failed group's dark-red reference is revealed (no opt/sim for it)
+    expect(sel.shownEntityIds.has("ref-D_23R")).toBe(true);
   });
 
   it("samples `count` groups and only lists the files those groups live in", () => {
