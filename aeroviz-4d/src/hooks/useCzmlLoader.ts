@@ -29,6 +29,7 @@ import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import { sampleSubset } from "../utils/sampleTrajectories";
 import { planTrajectoryModels, TRAJECTORY_PATH_WIDTH } from "../utils/trajectoryRenderModel";
+import { addDataSourceHidden } from "../utils/cesiumDataSource";
 
 const LAYER_NAME = "czml-trajectories";
 
@@ -45,9 +46,15 @@ export interface CzmlLoaderState {
 /**
  * Load a CZML trajectory file and drive the Cesium clock from it.
  *
- * @param czmlUrl - path to the CZML file, e.g. "/data/airports/KRDU/trajectories.czml"
+ * Loading is keyed on `czmlUrl` ONLY — the source is loaded once per file and released when the
+ * url changes (airport/runway) or empties. `visible` toggles the layer's visibility WITHOUT
+ * reloading, so callers can hide the (large) observed layer while the comparison view is on and
+ * bring it back instantly, instead of re-parsing 100 MB on every toggle.
+ *
+ * @param czmlUrl - path to the CZML file, e.g. "/data/airports/KRDU/trajectories.czml" ("" = none)
+ * @param visible - whether the layer should be shown (still gated by the Trajectories toggle)
  */
-export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
+export function useCzmlLoader(czmlUrl: string, visible: boolean = true): CzmlLoaderState {
   const {
     viewer,
     layers,
@@ -115,9 +122,11 @@ export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
 
         dataSource = loadedDs;
         dsRef.current = loadedDs;
-        viewer.dataSources.add(loadedDs);
+        // Add hidden: the render-model pass below samples + sets each entity's `show`, and the
+        // visibility-sync effect then reveals the source. Adding it visible here would flash
+        // EVERY flight for a frame before the sample is applied (see addDataSourceHidden).
+        addDataSourceHidden(viewer, loadedDs);
         setTrajectoryDataSource(loadedDs);
-        loadedDs.show = layers.trajectories;
 
         let warning: string | null = null;
         if (loadedDs.clock) {
@@ -180,10 +189,10 @@ export function useCzmlLoader(czmlUrl: string): CzmlLoaderState {
     };
   }, [viewer, czmlUrl, setSelectedFlightId, setTrajectoryDataSource]);
 
-  // ── Sync visibility ───────────────────────────────────────────────────────
+  // ── Sync visibility (toggles the loaded layer's show WITHOUT reloading) ──────
   useEffect(() => {
-    if (dsRef.current) dsRef.current.show = layers.trajectories;
-  }, [layers.trajectories, state.isLoaded]);
+    if (dsRef.current) dsRef.current.show = visible && layers.trajectories;
+  }, [visible, layers.trajectories, state.isLoaded]);
 
   // ── Recompute the shown sample + the model subset (random) ───────────────────
   // `trajectorySampleCount` flights are shown (0 = all); of those, a capped subset is

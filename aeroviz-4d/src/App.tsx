@@ -39,21 +39,22 @@ function FlightApp() {
     proceduresOpen,
     isRunwayProfileOpen,
   } = useApp();
-  // The observed-track CZML is large (100+ MB per airport), so it loads only when it is
-  // actually needed: in Observe, or whenever a runway profile is open (the profile
-  // overlays observed tracks vs the procedure, in any task). It is suppressed in the
-  // 3-colour optimizer-comparison view (useComparisonTrajectoryLayer drives those), and
-  // the Fly/Optimize/Compare tasks otherwise have their own playback.
-  const wantsObserved =
-    !!activeAirportCode &&
-    !trajectoryComparison &&
-    (mode === "observe" || isRunwayProfileOpen);
-  const czmlUrl = wantsObserved
+  // The observed-track CZML is large (100+ MB per airport). LOADING is kept separate from
+  // VISIBILITY so flipping the 3-colour comparison doesn't re-parse it (a multi-second freeze):
+  //   • the file is loaded whenever the observed tracks are relevant — in Observe, or whenever a
+  //     runway profile is open (it overlays observed tracks vs the procedure, in any task) —
+  //     regardless of the comparison toggle, and is RELEASED when that relevance ends or the
+  //     airport/runway changes (so at most one airport's CZML is in memory);
+  //   • it is merely HIDDEN (not unloaded) while the comparison view is on, so toggling the
+  //     comparison off shows it again instantly.
+  const observedRelevant = !!activeAirportCode && (mode === "observe" || isRunwayProfileOpen);
+  const observedFileUrl = observedRelevant
     ? selectedRunway
       ? airportLandingsRunwayUrl(activeAirportCode, selectedRunway)
       : airportDataUrl(activeAirportCode, "trajectories.czml")
     : "";
-  const { flightIds, warning, error } = useCzmlLoader(czmlUrl);
+  const observedVisible = observedRelevant && !trajectoryComparison;
+  const { flightIds, warning, error } = useCzmlLoader(observedFileUrl, observedVisible);
   useComparisonTrajectoryLayer();
   const czmlStatus = error ?? warning;
 

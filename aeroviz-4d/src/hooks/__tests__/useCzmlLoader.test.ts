@@ -197,4 +197,31 @@ describe("useCzmlLoader", () => {
       mockViewer.clock.stopTime,
     );
   });
+
+  it("loads the source but keeps it hidden when visible=false (no reload needed to toggle)", async () => {
+    loadCzml.mockResolvedValue({
+      entities: { values: [{ id: "flight-1" }] },
+      clock: { startTime: makeTime(10), stopTime: makeTime(70) },
+    });
+
+    const { result } = renderHook(() => useCzmlLoader(CZML_URL, false));
+    await waitFor(() => expect(result.current.isLoaded).toBe(true));
+
+    // The file is still loaded (parsed + added) ...
+    expect(mockViewer.dataSources.add).toHaveBeenCalledTimes(1);
+    // ... but the layer is hidden, so flipping `visible` later only toggles show.
+    expect(mockViewer.dataSources.add.mock.calls[0][0].show).toBe(false);
+  });
+
+  it("shows the loaded source when visible=true", async () => {
+    loadCzml.mockResolvedValue({
+      entities: { values: [{ id: "flight-1" }] },
+      clock: { startTime: makeTime(10), stopTime: makeTime(70) },
+    });
+
+    const { result } = renderHook(() => useCzmlLoader(CZML_URL, true));
+    await waitFor(() => expect(result.current.isLoaded).toBe(true));
+
+    expect(mockViewer.dataSources.add.mock.calls[0][0].show).toBe(true);
+  });
 });
