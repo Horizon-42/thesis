@@ -6,8 +6,8 @@ Two modes:
   ``4dTrajectory/optimization/scenario_optimization.py`` → one CZML with three coloured,
   time-dynamic trajectories:
     • reference  (white)  — the observed ADS-B track, copied from the airport's trajectories.czml
-    • optimizer  (orange) — the optimizer's plan        (optimizer_states)
-    • simulator  (cyan)   — the real forward rollout    (simulator_states)
+    • optimizer  (orange) — the optimizer's plan        (optimizer_states)  ["Optimize states"]
+    • simulator  (blue)   — the real forward rollout    (simulator_states)  ["Optimize results"]
 
 * **Batch** (``--summary``) — the run's ``summary.json`` → **one combined CZML per runway**
   plus a single ``comparison_index.json``. Every flight on one map: solved flights get the
@@ -37,10 +37,12 @@ from generate_czml import build_document_packet, build_position_property
 # convention generate_czml uses. The relative motion is what matters, not the wall clock.
 EPOCH = datetime(2026, 4, 1, 8, 0, 0, tzinfo=timezone.utc)
 
-# RGBA colours (0-255) for the three trajectories.
+# RGBA colours (0-255) for the three trajectories. These must stay in sync with the frontend
+# legend / path colours in aeroviz-4d/src/utils/trajectoryRenderModel.ts (COMPARISON_KIND_COLORS):
+#   optimizer → "Optimize states" (orange),  simulator → "Optimize results" (blue).
 REFERENCE_COLOR = (235, 235, 235, 200)   # observed ADS-B (white)
-OPTIMIZER_COLOR = (255, 140, 0, 220)     # optimizer plan (orange)
-SIMULATOR_COLOR = (0, 200, 255, 220)     # simulator rollout (cyan)
+OPTIMIZER_COLOR = (255, 140, 0, 220)     # optimizer plan — "Optimize states" (orange)
+SIMULATOR_COLOR = (40, 120, 255, 220)    # simulator rollout — "Optimize results" (blue)
 FAILED_COLOR = (200, 60, 60, 200)        # unsolved scenario — reference only, flagged dark red
 
 _TRAIL_TIME_S = 100000  # keep the whole path drawn
@@ -149,25 +151,36 @@ def build_comparison_czml(
     simulator_states = state_data["simulator_states"]
     flight_id = state_data.get("source", {}).get("id")
 
-    max_t = max(
-        float(state_data.get("final_time_s", 0.0)),
-        _last_time(optimizer_states),
-        _last_time(simulator_states),
-    )
-    end_dt = EPOCH.fromtimestamp(EPOCH.timestamp() + max_t, tz=timezone.utc)
-    document = build_document_packet(EPOCH, end_dt, multiplier=30)
-
-    packets = [document]
     reference = _reference_entity_from_adsb(adsb_czml, flight_id, REFERENCE_COLOR)
-    if reference is not None:
-        packets.append(reference)
-    packets.append(_build_trajectory_entity("scenario-optimizer", "Optimizer", optimizer_states, OPTIMIZER_COLOR))
-    packets.append(_build_trajectory_entity("scenario-simulator", "Simulator", simulator_states, SIMULATOR_COLOR))
-    return packets
+    optimizer = _build_trajectory_entity("scenario-optimizer", "Optimizer", optimizer_states, OPTIMIZER_COLOR)
+    simulator = _build_trajectory_entity("scenario-simulator", "Simulator", simulator_states, SIMULATOR_COLOR)
+    entities = [e for e in (reference, optimizer, simulator) if e is not None]
+
+    # Clock spans the longest of the trajectories actually present — reference included, so the
+    # observed track (usually the longest) is never truncated.
+    max_t = max((_entity_last_time(e) for e in entities), default=0.0)
+    end_dt = EPOCH.fromtimestamp(EPOCH.timestamp() + max(max_t, 1.0), tz=timezone.utc)
+    document = build_document_packet(EPOCH, end_dt, multiplier=30)
+    return [document] + entities
 
 
 def _last_time(states: list[dict[str, Any]]) -> float:
     return float(states[-1]["t"]) if states else 0.0
+
+
+def _entity_last_time(entity: dict[str, Any] | None) -> float:
+    """Last time offset (sec) of a built entity's time-sampled position; 0 if it has none.
+
+    The document clock must span the LONGEST trajectory in the file. The reference (observed)
+    tracks routinely run far longer than the optimizer/simulator — and on a runway with no
+    solved scenarios they are the ONLY trajectories — so the clock has to be derived from every
+    entity's position, not just the optimizer/simulator states. (All entities share `EPOCH`, so
+    their offsets are directly comparable.)
+    """
+    if entity is None:
+        return 0.0
+    cd = entity.get("position", {}).get("cartographicDegrees", [])
+    return float(cd[-4]) if len(cd) >= 4 else 0.0
 
 
 # ── Batch: one combined comparison CZML per runway (from a summary.json) ───────
@@ -208,7 +221,7 @@ def build_runway_comparison(
     """Combined CZML for one runway **plus** its index records (every flight on one map).
 
     Each result (a row from ``scenario_optimization``'s ``summary.json``) becomes:
-      • solved → reference (white) + optimizer (orange) + simulator (cyan);
+      • solved → reference (white) + optimizer (orange) + simulator (blue);
       • failed → reference only, in the dark-red FAILED_COLOR, labelled "(unsolved)".
 
     Every entity gets a globally-unique id ``{kind}-{flightId}_{runway}`` (so duplicate
@@ -236,7 +249,6 @@ def build_runway_comparison(
 
     entities: list[dict[str, Any]] = []
     index_records: list[dict[str, Any]] = []
-    max_t = 0.0
 
     for group, result in best.items():
         flight_id = result.get("id")
@@ -249,8 +261,6 @@ def build_runway_comparison(
             state_data = json.loads((states_dir / states_file).read_text(encoding="utf-8"))
             optimizer_states = state_data["optimizer_states"]
             simulator_states = state_data["simulator_states"]
-            max_t = max(max_t, float(state_data.get("final_time_s", 0.0)),
-                        _last_time(optimizer_states), _last_time(simulator_states))
 
             reference = _reference_entity_from_adsb(
                 adsb_czml, flight_id, REFERENCE_COLOR,
@@ -294,6 +304,10 @@ def build_runway_comparison(
                 "entities": entity_ids,
             })
 
+    # Span the clock over the LONGEST trajectory actually in the file — references included.
+    # (Deriving it only from solved opt/sim states collapsed the clock to ~1 s on runways with
+    #  no solved scenarios, freezing every reference track at its start point.)
+    max_t = max((_entity_last_time(e) for e in entities), default=0.0)
     end_dt = EPOCH.fromtimestamp(EPOCH.timestamp() + max(max_t, 1.0), tz=timezone.utc)
     document = build_document_packet(EPOCH, end_dt, multiplier=30)
     return [document] + entities, index_records

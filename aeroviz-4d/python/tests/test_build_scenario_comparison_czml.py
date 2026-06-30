@@ -159,6 +159,46 @@ def test_build_runway_comparison_start_visible(tmp_path):
     assert next(p for p in czml if p["id"] == "opt-AFR074_05L")["show"] is True
 
 
+def test_clock_spans_reference_on_failed_only_runway(tmp_path):
+    """A runway with ONLY failed scenarios must still span its reference tracks' full duration.
+
+    The clock used to be derived from solved opt/sim states only, so a failed-only runway
+    collapsed to a ~1s clock and every (much longer) reference froze at its start point.
+    """
+    from datetime import datetime
+
+    long_ref = {
+        "id": "N999XX", "name": "N999XX",
+        "position": {"epoch": "2026-04-01T08:00:00Z",
+                     "cartographicDegrees": [0.0, -78.7, 35.8, 2000.0, 900.0, -78.6, 35.9, 500.0]},
+        "path": {"material": {"solidColor": {"color": {"rgba": [235, 235, 235, 200]}}}},
+    }
+    adsb = [{"id": "document", "clock": {}}, long_ref]
+    results = [{"id": "N999XX", "runway": "32", "status": "failed", "states_file": None}]
+    czml, _ = build_runway_comparison(results, tmp_path, adsb, airport="KRDU")
+
+    start_s, end_s = czml[0]["clock"]["interval"].split("/")
+    duration = (datetime.fromisoformat(end_s.replace("Z", "+00:00"))
+                - datetime.fromisoformat(start_s.replace("Z", "+00:00"))).total_seconds()
+    assert duration == 900.0   # spans the 900s reference, not ~1s
+
+
+def test_clock_spans_long_reference_past_short_optimizer(tmp_path):
+    """When the reference outlasts the optimizer/simulator, the clock follows the reference."""
+    from datetime import datetime
+
+    (tmp_path / "AFR074_05L_states.json").write_text(json.dumps(STATE_DATA), encoding="utf-8")  # opt/sim only 5s
+    long_ref = {**ADSB_CZML[1], "position": {"epoch": "2026-04-01T08:00:00Z",
+                "cartographicDegrees": [0.0, -78.45, 35.74, 2500.0, 600.0, -78.5, 35.8, 400.0]}}
+    adsb = [ADSB_CZML[0], long_ref]
+    results = [{"id": "AFR074", "runway": "05L", "status": "solved", "states_file": "AFR074_05L_states.json"}]
+    czml, _ = build_runway_comparison(results, tmp_path, adsb, airport="KRDU")
+    start_s, end_s = czml[0]["clock"]["interval"].split("/")
+    duration = (datetime.fromisoformat(end_s.replace("Z", "+00:00"))
+                - datetime.fromisoformat(start_s.replace("Z", "+00:00"))).total_seconds()
+    assert duration == 600.0   # the 600s reference, not the 5s opt/sim
+
+
 def test_upsert_category_adds_and_replaces(tmp_path):
     manifest = tmp_path / "categories.json"
     _upsert_category(manifest, key="runway", label="Runway target", directory="runway", group_count=10)
