@@ -13,6 +13,10 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from aeroviz_backend.dynamics_comparison_backend import DynamicsComparisonBackend
+from aeroviz_backend.isolated_backend import (
+    IsolatedDynamicsComparisonBackend,
+    IsolatedOptimizationBackend,
+)
 from aeroviz_backend.optimization_backend import OptimizationBackend
 from aeroviz_backend.simulation_backend import SimulationBackend, aircraft_catalog
 
@@ -24,10 +28,18 @@ class AeroVizBackendApp:
         optimization_backend: OptimizationBackend | None = None,
         dynamics_comparison_backend: DynamicsComparisonBackend | None = None,
     ) -> None:
+        # The simulation endpoints run in-process (they are high-frequency and use
+        # only casadi function evaluation, not the crash-prone NLP construction).
+        # The optimizer and dynamics comparison BUILD casadi NLPs, which can abort
+        # the whole process natively, so by default they run in an isolated worker
+        # subprocess (see isolated_backend). Tests inject their own backends, so
+        # they stay in-process and pay no subprocess cost.
         self.simulation_backend = simulation_backend or SimulationBackend()
-        self.optimization_backend = optimization_backend or OptimizationBackend()
+        self.optimization_backend = (
+            optimization_backend or IsolatedOptimizationBackend()
+        )
         self.dynamics_comparison_backend = (
-            dynamics_comparison_backend or DynamicsComparisonBackend()
+            dynamics_comparison_backend or IsolatedDynamicsComparisonBackend()
         )
 
     def handle_get(self, path: str) -> tuple[int, dict[str, Any]]:
@@ -50,8 +62,18 @@ class AeroVizBackendApp:
             return 200, self.simulation_backend.step(payload), None
         if path == "/optimization/run":
             return 200, self.optimization_backend.optimize(payload), None
+        # Tab lifecycle: keep the casadi worker resident while the Optimize/Compare
+        # tab is open, and decommission it (free its memory) when the tab closes.
+        if path == "/optimization/session/open":
+            return 200, self.optimization_backend.open_session(payload), None
+        if path == "/optimization/session/close":
+            return 200, self.optimization_backend.close_session(payload), None
         if path == "/dynamics-comparison/run":
             return 200, self.dynamics_comparison_backend.run(payload), None
+        if path == "/dynamics-comparison/session/open":
+            return 200, self.dynamics_comparison_backend.open_session(payload), None
+        if path == "/dynamics-comparison/session/close":
+            return 200, self.dynamics_comparison_backend.close_session(payload), None
         if path == "/dynamics-comparison/history/average":
             return 200, self.dynamics_comparison_backend.average(payload), None
         if path == "/dynamics-comparison/history/clear":

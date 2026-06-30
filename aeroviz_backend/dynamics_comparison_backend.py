@@ -24,6 +24,7 @@ import math
 from typing import Any
 
 from aeroviz_backend import paths  # noqa: F401
+from aeroviz_backend.casadi_lock import CASADI_LOCK
 from aeroviz_backend.czml_common import EPOCH, document_packet, iso
 from aeroviz_backend.dynamics_comparison_history import (
     average_history,
@@ -149,6 +150,13 @@ def _systems_payload() -> list[dict[str, Any]]:
 
 class DynamicsComparisonBackend:
     def run(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        # compare_dynamics builds + evaluates casadi steppers (not thread-safe);
+        # serialise with the shared casadi lock (see casadi_lock). Default runs in
+        # an isolated worker, where this lock is the worker's own, uncontended.
+        with CASADI_LOCK:
+            return self._run(payload)
+
+    def _run(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = payload or {}
         initial_payload = read_required_mapping(payload, "initialState")
         control_payload = read_required_mapping(payload, "control")

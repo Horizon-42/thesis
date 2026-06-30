@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import math
 import sys
-import threading
 import time
 from typing import Any
 
 from aeroviz_backend import paths  # noqa: F401
+from aeroviz_backend.casadi_lock import CASADI_LOCK
 from aeroviz_backend.simulation_backend import (
     DEFAULT_AIRCRAFT_TYPE,
     DEFAULT_DT,
@@ -101,20 +101,18 @@ SUPPORTED_OPTIMIZERS = (
 CASADI_OPTIMIZERS = ("casadiIpopt", *DIRECT_COLLOCATION_SCHEMES)
 
 
-# CasADi/IPOPT's MUMPS linear solver is Fortran and NOT thread-safe. The ThreadingHTTPServer
-# runs each request in its own thread, so two optimize() calls (e.g. the panel firing a request
-# twice) would run two solves at once and corrupt or CRASH the process. Serialize every solve
-# through one process-wide lock — solves are CPU-bound, so concurrency wouldn't help throughput.
-_SOLVE_LOCK = threading.Lock()
-
-
 class OptimizationBackend:
     def __init__(self) -> None:
         self._casadi_optimizer_key = None
         self._casadi_optimizer = None
 
     def optimize(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-        with _SOLVE_LOCK:
+        # casadi NLP construction (the SXElem symbolic graph) is NOT thread-safe;
+        # concurrent builds across ThreadingHTTPServer threads corrupt the heap and
+        # abort the process. Serialise all in-process casadi work through one
+        # shared lock. (By default this runs inside an isolated worker subprocess,
+        # where the lock is simply the worker's own, uncontended.)
+        with CASADI_LOCK:
             return self._optimize(payload)
 
     def _optimize(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:

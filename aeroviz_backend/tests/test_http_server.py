@@ -78,6 +78,45 @@ class TestAeroVizBackendApp(unittest.TestCase):
         self.assertIsNone(log_event)
         self.assertEqual(optimization_backend.calls, [request_payload])
 
+    def test_optimization_session_routes_delegate(self):
+        optimization_backend = FakeOptimizationBackend()
+        app = AeroVizBackendApp(
+            simulation_backend=FakeSimulationBackend(),
+            optimization_backend=optimization_backend,
+        )
+
+        open_status, open_payload, _ = app.handle_post("/optimization/session/open", {})
+        close_status, close_payload, _ = app.handle_post("/optimization/session/close", {})
+
+        self.assertEqual(open_status, 200)
+        self.assertEqual(open_payload, {"ok": True, "sessions": 1})
+        self.assertEqual(close_status, 200)
+        self.assertEqual(close_payload, {"ok": True, "sessions": 0})
+        self.assertEqual(
+            [name for name, _ in optimization_backend.session_calls],
+            ["open", "close"],
+        )
+
+    def test_dynamics_comparison_session_routes_delegate(self):
+        dynamics_comparison_backend = FakeDynamicsComparisonBackend()
+        app = AeroVizBackendApp(
+            simulation_backend=FakeSimulationBackend(),
+            optimization_backend=FakeOptimizationBackend(),
+            dynamics_comparison_backend=dynamics_comparison_backend,
+        )
+
+        open_status, open_payload, _ = app.handle_post(
+            "/dynamics-comparison/session/open", {}
+        )
+        close_status, close_payload, _ = app.handle_post(
+            "/dynamics-comparison/session/close", {}
+        )
+
+        self.assertEqual(open_status, 200)
+        self.assertEqual(open_payload, {"ok": True, "sessions": 1})
+        self.assertEqual(close_status, 200)
+        self.assertEqual(close_payload, {"ok": True, "sessions": 0})
+
     def test_dynamics_comparison_route_delegates_to_its_backend(self):
         dynamics_comparison_backend = FakeDynamicsComparisonBackend()
         app = AeroVizBackendApp(
@@ -152,19 +191,42 @@ class FakeSimulationBackend:
 class FakeOptimizationBackend:
     def __init__(self):
         self.calls = []
+        self.session_calls = []
+        self._sessions = 0
 
     def optimize(self, payload):
         self.calls.append(payload)
         return {"ok": True, "finalTimeS": 12.0}
 
+    def open_session(self, payload=None):
+        self.session_calls.append(("open", payload))
+        self._sessions += 1
+        return {"ok": True, "sessions": self._sessions}
+
+    def close_session(self, payload=None):
+        self.session_calls.append(("close", payload))
+        self._sessions = max(0, self._sessions - 1)
+        return {"ok": True, "sessions": self._sessions}
+
 
 class FakeDynamicsComparisonBackend:
     def __init__(self):
         self.calls = []
+        self._sessions = 0
 
     def run(self, payload):
         self.calls.append(("run", payload))
         return {"ok": True, "route": "comparison"}
+
+    def open_session(self, payload=None):
+        self.calls.append(("open_session", payload))
+        self._sessions += 1
+        return {"ok": True, "sessions": self._sessions}
+
+    def close_session(self, payload=None):
+        self.calls.append(("close_session", payload))
+        self._sessions = max(0, self._sessions - 1)
+        return {"ok": True, "sessions": self._sessions}
 
     def history_count(self, payload=None):
         self.calls.append(("history_count", payload))

@@ -44,6 +44,9 @@ const mocks = vi.hoisted(() => ({
   useOptimizedTrajectoryPlayback: vi.fn(),
   useDynamicsComparisonPlayback: vi.fn(),
   runDynamicsComparison: vi.fn(),
+  openWorkerSession: vi.fn(),
+  closeWorkerSession: vi.fn(),
+  beaconCloseWorkerSession: vi.fn(),
 }));
 
 vi.mock("../../context/AppContext", () => ({
@@ -76,6 +79,12 @@ vi.mock("../../hooks/useDynamicsComparisonPlayback", () => ({
 
 vi.mock("../../pilot/dynamicsComparisonClient", () => ({
   runDynamicsComparison: mocks.runDynamicsComparison,
+}));
+
+vi.mock("../../pilot/workerSessionClient", () => ({
+  openWorkerSession: mocks.openWorkerSession,
+  closeWorkerSession: mocks.closeWorkerSession,
+  beaconCloseWorkerSession: mocks.beaconCloseWorkerSession,
 }));
 
 vi.mock("../../pilot/pilotClient", () => ({
@@ -237,6 +246,19 @@ describe("PilotPanel trajectory play mode", () => {
         actualLoadFactor: control.loadFactor ?? 1.12,
       },
     }));
+  });
+
+  it("keeps the casadi worker resident while the Optimize tab is open and releases it on close", async () => {
+    mocks.openWorkerSession.mockResolvedValue(undefined);
+    mocks.closeWorkerSession.mockResolvedValue(undefined);
+
+    const optimize = render(<PilotPanel mode="trajectory" />);
+    await waitFor(() => {
+      expect(mocks.openWorkerSession).toHaveBeenCalledWith("optimizer");
+    });
+    // Leaving the tab (unmount) decommissions the worker.
+    optimize.unmount();
+    expect(mocks.closeWorkerSession).toHaveBeenCalledWith("optimizer");
   });
 
   it("hides backend URL and switches pilot controls between alpha and load factor", async () => {

@@ -87,6 +87,12 @@ import {
   type DynamicsComparisonResult,
   type DynamicsComparisonSystem,
 } from "../pilot/dynamicsComparisonClient";
+import {
+  openWorkerSession,
+  closeWorkerSession,
+  beaconCloseWorkerSession,
+  type WorkerSessionKind,
+} from "../pilot/workerSessionClient";
 import { haversineDistanceM } from "../utils/procedureGeoMath";
 
 const DEFAULT_SIMULATION_MODE: PilotSimulationMode = "alpha";
@@ -552,6 +558,30 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     targetState.speedMps,
     targetState.flightPathDeg,
   ]);
+
+  // Keep the backend's casadi solver worker resident (warm) while the Optimize
+  // (trajectory) or Compare (comparison) tab is open, and decommission it when
+  // the tab closes — so repeated solves are fast but the worker's memory is
+  // reclaimed once the user leaves. A `pagehide` beacon also releases it when
+  // the whole tab/window closes, where this cleanup would not run.
+  useEffect(() => {
+    const kind: WorkerSessionKind | null =
+      activeMode === "trajectory"
+        ? "optimizer"
+        : activeMode === "comparison"
+          ? "comparison"
+          : null;
+    if (kind === null) {
+      return undefined;
+    }
+    void openWorkerSession(kind);
+    const releaseOnUnload = () => beaconCloseWorkerSession(kind);
+    window.addEventListener("pagehide", releaseOnUnload);
+    return () => {
+      window.removeEventListener("pagehide", releaseOnUnload);
+      void closeWorkerSession(kind);
+    };
+  }, [activeMode]);
 
   useEffect(() => {
     const aircraft = aircraftConfigs[0] ?? null;

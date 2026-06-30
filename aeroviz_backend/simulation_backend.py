@@ -4,6 +4,7 @@ import math
 from typing import Any
 
 from aeroviz_backend import paths  # noqa: F401
+from aeroviz_backend.casadi_lock import CASADI_LOCK
 
 from aerodynamic_model.casadi_simulator import CasadiSimulator
 from aircraft.aircraft_sets import AIRCRAFT_PRESETS, Aircraft, A320
@@ -70,6 +71,13 @@ class SimulationBackend:
         self.elapsed = 0.0
 
     def reset(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        # Building the CasadiSimulator (and the step/snapshot evaluation) touches
+        # casadi's thread-unsafe globals, and these methods mutate shared instance
+        # state; serialise both through the shared casadi lock (see casadi_lock).
+        with CASADI_LOCK:
+            return self._reset(payload)
+
+    def _reset(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = payload or {}
         state_payload = read_optional_mapping(payload, "state")
         control_payload = read_optional_mapping(payload, "control")
@@ -89,6 +97,10 @@ class SimulationBackend:
         return self.snapshot()
 
     def step(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        with CASADI_LOCK:
+            return self._step(payload)
+
+    def _step(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = payload or {}
         aircraft = self.geodetic_simulator.simulator.aircraft
         simulation_mode = read_simulation_mode(payload, self.simulation_mode)
