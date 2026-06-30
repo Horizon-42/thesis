@@ -284,11 +284,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [trajectoryComparisonCategory, setTrajectoryComparisonCategory] =
     useState<string | null>(null);
   const [trajectoryComparisonKinds, setTrajectoryComparisonKinds] =
-    useState<Record<ComparisonKind, boolean>>({ reference: true, optimizer: true, simulator: true });
+    useState<Record<ComparisonKind, boolean>>({ reference: true, optimizer: false, simulator: true });
   const setTrajectoryComparisonKind = useCallback((kind: ComparisonKind, visible: boolean) => {
     setTrajectoryComparisonKinds((prev) => ({ ...prev, [kind]: visible }));
   }, []);
-  const [trajectorySampleCount, setTrajectorySampleCount] = useState<number>(0);
+  const [trajectorySampleCount, setTrajectorySampleCount] = useState<number>(200);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(60);
   const [autoReplay, setAutoReplay] = useState<boolean>(true);
   const [procedureVisibility, setProcedureVisibility] = useState<Record<string, boolean>>({});

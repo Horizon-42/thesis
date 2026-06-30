@@ -16,8 +16,10 @@ import { useEffect } from "react";
 /** The three comparison trajectories, each a colour-keyed visibility checkbox. */
 const COMPARISON_KINDS: Array<{ kind: ComparisonKind; label: string; color: string }> = [
   { kind: "reference", label: "Reference", color: "rgb(235, 235, 235)" },
-  { kind: "optimizer", label: "Optimizer", color: "rgb(0, 200, 255)" },
-  { kind: "simulator", label: "Simulator", color: "rgb(255, 140, 0)" },
+  // Note: kind keys ("optimizer"/"simulator") stay as the backend's entity-id prefixes;
+  // only the display labels + swatch colours + order change. Swatch colours match the backend CZML.
+  { kind: "simulator", label: "Optimize results", color: "rgb(40, 120, 255)" },
+  { kind: "optimizer", label: "Optimize states", color: "rgb(255, 140, 0)" },
 ];
 
 export default function ControlPanel() {
