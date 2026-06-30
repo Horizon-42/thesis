@@ -48,6 +48,9 @@ describe("PilotRealtimeStatePanel", () => {
     expect(screen.getByText("Live State")).toBeTruthy();
     expect(screen.getByText("Altitude")).toBeTruthy();
     expect(screen.getByText("Heading Angle (psi)")).toBeTruthy();
+    // compass heading = 90 - psi (math-ENU -> compass); -14.2 -> 104.2
+    expect(screen.getByText("Heading (compass)")).toBeTruthy();
+    expect(screen.getByText("104.2 deg")).toBeTruthy();
     expect(screen.getByText("Flight Path Angle (gamma)")).toBeTruthy();
     expect(screen.getByText("Attack Angle (alpha)")).toBeTruthy();
     expect(screen.getByText("Actual n")).toBeTruthy();

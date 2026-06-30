@@ -125,6 +125,9 @@ class AeroVizRequestHandler(BaseHTTPRequestHandler):
             control_text = f"loadFactor={control['loadFactor']:.3f} "
         else:
             control_text = f"alpha={control['attackDeg']:.2f}deg "
+        # state['headingDeg'] holds psi (math-ENU: 0 = East, CCW). Log the true compass
+        # bearing (0 = North, CW) as 'heading', keeping the raw psi alongside it.
+        compass_heading = (90.0 - state["headingDeg"]) % 360.0
         line = (
             "[aeroviz-backend] "
             f"{event} "
@@ -133,7 +136,8 @@ class AeroVizRequestHandler(BaseHTTPRequestHandler):
             f"lon={state['lon']:.7f} "
             f"alt={state['altM']:.2f}m "
             f"speed={state['speedMps']:.2f}m/s "
-            f"heading={state['headingDeg']:.2f}deg "
+            f"heading={compass_heading:.2f}deg "
+            f"psi={state['headingDeg']:.2f}deg "
             f"fpa={state['flightPathDeg']:.2f}deg "
             f"mass={state['massKg']:.1f}kg "
             f"type={state['aircraftType']} "

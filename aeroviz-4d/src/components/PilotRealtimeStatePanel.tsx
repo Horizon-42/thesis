@@ -9,6 +9,15 @@ import type {
 } from "../pilot/dynamicsComparisonClient";
 import { formatCoord } from "./PilotInitialStateOverlay";
 
+/**
+ * The live state's ``headingDeg`` carries psi in the modeling layer's math-ENU
+ * convention (0 = East, CCW toward North). Convert it to a true compass bearing
+ * (0 = North, clockwise) for the human-facing readout: ``compass = 90 - psi``.
+ */
+function compassHeadingDeg(psiDeg: number): number {
+  return (((90 - psiDeg) % 360) + 360) % 360;
+}
+
 interface PilotRealtimeStatePanelProps {
   snapshot: PilotSnapshot | null;
   visible: boolean;
@@ -97,6 +106,10 @@ export default function PilotRealtimeStatePanel({
           label="Heading Angle (psi)"
           value={`${snapshot.state.headingDeg.toFixed(1)} deg`}
           extra={compareExtra("head", 2, false)}
+        />
+        <RealtimeReadout
+          label="Heading (compass)"
+          value={`${compassHeadingDeg(snapshot.state.headingDeg).toFixed(1)} deg`}
         />
         <RealtimeReadout
           label="Flight Path Angle (gamma)"
