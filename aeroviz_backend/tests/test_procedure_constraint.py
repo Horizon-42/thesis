@@ -137,6 +137,23 @@ class TestProcedureConstraintFromDetailDocument(unittest.TestCase):
             },
         )
 
+    def test_missed_approach_after_mapt_is_dropped(self):
+        # A detail document whose final branch carries a leg PAST the MAPt — the published missed
+        # approach (a climb back up, e.g. KRDU R32's RW32 -> DUHAM). The constraint must END at the
+        # runway threshold (MAPt): a leg climbing away after the landing point made the constrained
+        # LANDING optimization infeasible for every flight (target IS the threshold).
+        doc = json.loads(json.dumps(R05LY_DOCUMENT))  # deep copy
+        doc["fixes"].append(
+            {"fixId": "fix:MISSD", "ident": "MISSD", "position": {"lon": -78.70, "lat": 35.95}})
+        doc["branches"][0]["legs"].append(
+            _leg(40, "TF", "fix:MISSD", "Route",
+                 {"qualifier": "atOrAbove", "valueFt": 2200, "rawText": "2200 ft"}, 2200))
+
+        constraint = ProcedureConstraint.from_detail_document(doc)
+        idents = [wp.ident for wp in constraint.waypoints]
+        self.assertEqual(idents, ["SCHOO", "WEPAS", "RW05L"])   # MISSD (post-MAPt) dropped
+        self.assertEqual(constraint.waypoints[-1].role, "MAPt")
+
 
 class TestProcedureConstraintRoundTrip(unittest.TestCase):
     """The frontend builds the constraint and ships JSON; the backend parses the

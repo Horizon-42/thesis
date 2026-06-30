@@ -256,6 +256,20 @@ class ProcedureConstraint:
                 )
             )
 
+        # The constraint ends at the runway threshold (the landing point); drop any legs after it.
+        # The published MISSED APPROACH (e.g. RW32 -> DUHAM, a climb back up) must NOT be a path
+        # constraint for a landing optimization whose target IS the threshold — including it made
+        # the problem infeasible for every flight on a runway whose detail document carries a
+        # post-threshold leg (KRDU R32). The runway threshold is the MAPt for a straight-in.
+        threshold_fix_id = document.get("runway", {}).get("landingThresholdFixRef")
+        end = next(
+            (i for i, wp in enumerate(waypoints)
+             if (threshold_fix_id and wp.fix_id == threshold_fix_id) or wp.role == "MAPt"),
+            None,
+        )
+        if end is not None:
+            del waypoints[end + 1:]
+
         if len(waypoints) < 2:
             return None
 

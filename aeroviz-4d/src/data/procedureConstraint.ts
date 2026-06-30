@@ -169,7 +169,19 @@ export function buildProcedureConstraint(
   if (!route || route.points.length < 2) return null;
 
   const speeds = speedByFix(document);
-  const waypoints = route.points.map((point) => waypointFromRoutePoint(point, speeds));
+  const allWaypoints = route.points.map((point) => waypointFromRoutePoint(point, speeds));
+
+  // The constraint ends at the runway threshold (the landing point); drop any legs after it. The
+  // published MISSED APPROACH (e.g. RW32 -> DUHAM, a climb back up) must NOT be a path constraint
+  // for a landing optimization whose target IS the threshold — including it makes the problem
+  // infeasible. The threshold is the MAPt for a straight-in. Mirrors the Python builder
+  // (aeroviz_backend/procedure_constraint.py). The render/profile views keep the full procedure.
+  const thresholdFixId = document.runway.landingThresholdFixRef;
+  const mapt = allWaypoints.findIndex(
+    (wp) => (thresholdFixId !== null && wp.fixId === thresholdFixId) || wp.role === "MAPt",
+  );
+  const waypoints = mapt >= 0 ? allWaypoints.slice(0, mapt + 1) : allWaypoints;
+  if (waypoints.length < 2) return null;
 
   const penultimate = waypoints[waypoints.length - 2];
   const last = waypoints[waypoints.length - 1];

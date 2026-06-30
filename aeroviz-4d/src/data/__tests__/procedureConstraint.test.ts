@@ -138,6 +138,37 @@ describe("buildProcedureConstraint", () => {
     expect(constraint!.waypoints.map((wp) => wp.role)).toEqual(["IF", "FAF", "MAPt"]);
   });
 
+  it("ends at the runway threshold and drops a post-MAPt missed-approach leg", () => {
+    // A final branch that continues PAST the MAPt — the published missed approach (a climb back
+    // up, like KRDU R32's RW32 -> DUHAM). The constraint must end at the threshold; the missed
+    // approach must NOT constrain a landing optimization. (Render/profile views keep the full one.)
+    const withMissed: ProcedureDetailDocument = {
+      ...document,
+      fixes: [
+        ...document.fixes,
+        { fixId: "fix:MISSD", ident: "MISSD", kind: "named_fix", position: { lon: -78.70, lat: 35.95 }, elevationFt: null, roleHints: [], sourceRefs: [] },
+      ],
+      branches: [
+        {
+          ...finalBranch,
+          legs: [
+            ...finalBranch.legs,
+            leg({
+              legId: "leg:R:040",
+              sequence: 40,
+              path: { pathTerminator: "TF", constructionMethod: "track_to_fix", startFixRef: "fix:RW05L", endFixRef: "fix:MISSD" },
+              roleAtEnd: "Route",
+              constraints: { altitude: { qualifier: "atOrAbove", valueFt: 2200, rawText: "2200 ft" }, speedKt: null, geometryAltitudeFt: 2200 },
+            }),
+          ],
+        },
+      ],
+    };
+    const constraint = buildProcedureConstraint(withMissed)!;
+    expect(constraint.waypoints.map((wp) => wp.ident)).toEqual(["SCHOO", "WEPAS", "RW05L"]);
+    expect(constraint.waypoints[constraint.waypoints.length - 1].role).toBe("MAPt");
+  });
+
   it("carries the canonical altitude window, reference altitude and speed", () => {
     const constraint = buildProcedureConstraint(document)!;
     const [schoo, wepas, threshold] = constraint.waypoints;
