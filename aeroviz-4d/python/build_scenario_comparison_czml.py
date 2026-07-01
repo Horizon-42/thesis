@@ -45,7 +45,11 @@ OPTIMIZER_COLOR = (255, 140, 0, 220)     # optimizer plan — "Optimize states" 
 SIMULATOR_COLOR = (40, 120, 255, 220)    # simulator rollout — "Optimize results" (blue)
 FAILED_COLOR = (200, 60, 60, 200)        # unsolved scenario — reference only, flagged dark red
 
-_TRAIL_TIME_S = 100000  # keep the whole path drawn
+# Trailing-tail length (seconds) for the optimizer/simulator paths: the tail fades behind the
+# moving aircraft as playback advances, so the head (current position) is distinguishable from the
+# tail. Matches generate_czml.py's observed-track trail (300 s) — which the reference inherits — so
+# all three comparison trajectories fade identically.
+_TRAIL_TIME_S = 300
 
 
 # ── state sequence -> CZML geometry ───────────────────────────────────────────

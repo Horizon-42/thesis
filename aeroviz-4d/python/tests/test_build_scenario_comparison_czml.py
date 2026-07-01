@@ -7,6 +7,7 @@ from build_scenario_comparison_czml import (
     OPTIMIZER_COLOR,
     REFERENCE_COLOR,
     SIMULATOR_COLOR,
+    _TRAIL_TIME_S,
     _last_time,
     _reference_entity_from_adsb,
     _states_to_waypoints,
@@ -32,7 +33,8 @@ ADSB_CZML = [
         "id": "AFR074",
         "name": "AFR074",
         "position": {"cartographicDegrees": [0, -78.45, 35.74, 2500.0]},
-        "path": {"material": {"solidColor": {"color": {"rgba": [255, 140, 0, 200]}}}},
+        # A short trailTime like the real trajectories.czml — the reference builder must OVERRIDE it.
+        "path": {"leadTime": 0, "trailTime": 300, "material": {"solidColor": {"color": {"rgba": [255, 140, 0, 200]}}}},
     },
 ]
 
@@ -53,8 +55,22 @@ def test_reference_entity_copies_and_recolors():
     assert entity is not None
     assert entity["id"] == "scenario-reference"
     assert entity["path"]["material"]["solidColor"]["color"]["rgba"] == list(REFERENCE_COLOR)
+    # the reference inherits the observed-track fading trail (it is copied, not rebuilt)
+    assert entity["path"]["trailTime"] == 300
     # the source CZML must not be mutated
     assert ADSB_CZML[1]["path"]["material"]["solidColor"]["color"]["rgba"] == [255, 140, 0, 200]
+
+
+def test_all_three_trajectories_share_a_fading_trail():
+    # All three comparison paths must FADE (finite trailTime), so the moving aircraft head is
+    # distinguishable from the tail. The optimizer/simulator used to persist (trailTime 100000)
+    # while the reference faded — that mismatch was the bug. They must now trail identically.
+    czml = build_comparison_czml(STATE_DATA, ADSB_CZML)
+    ref, opt, sim = czml[1], czml[2], czml[3]
+    assert _TRAIL_TIME_S < 100000                              # a trailing tail, not "keep whole path"
+    assert opt["path"]["trailTime"] == _TRAIL_TIME_S
+    assert sim["path"]["trailTime"] == _TRAIL_TIME_S
+    assert ref["path"]["trailTime"] == opt["path"]["trailTime"]   # reference fades the same way
 
 
 def test_build_comparison_czml_has_three_trajectories():
