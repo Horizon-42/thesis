@@ -88,7 +88,7 @@ def _faf_intercept_deg(states, frame, faf_ne):
     """Heading-vs-final-approach-course angle (deg) at the state nearest the FAF."""
     ne = np.array([frame.to_ne(s[0], s[1]) for s in states])
     i = int(np.argmin([np.hypot(*(p - faf_ne)) for p in ne]))
-    fac = math.degrees(math.atan2(-faf_ne[1], -faf_ne[0]))   # FAF -> LTP(0,0)
+    fac = math.degrees(math.atan2(-faf_ne[0], -faf_ne[1]))   # FAF -> LTP(0,0), model-ENU (0=E, CCW)
     return abs(((math.degrees(states[i][4]) - fac + 180) % 360) - 180)
 
 
@@ -141,3 +141,28 @@ def test_multiphase_intercepts_final_from_an_offset_start():
     ne = np.array([frame.to_ne(s[0], s[1]) for s in states])
     assert float(np.hypot(*(ne[-1] - LTP))) < 1.0
     assert _faf_intercept_deg(states, frame, FAF) <= 30.0 + 1e-6
+
+
+@pytest.mark.parametrize("heading_deg", [135.0, -100.0])
+def test_multiphase_solves_a_non_fixed_point_runway_heading(heading_deg):
+    # REGRESSION (KRDU RW32). The FAF final-approach course must be the model's math-ENU heading
+    # (0 = East, CCW toward North) — the SAME convention as the state ``psi`` the FAF-intercept is
+    # compared against — NOT the compass bearing. The two agree ONLY near the 45deg/225deg fixed
+    # points: KRDU's 05/23 runways sit there and masked a 180deg convention error in ``fac_rad``,
+    # while RW32 (~315deg) hit it and made EVERY constrained solve infeasible (the intercept
+    # demanded a heading ~180deg opposed to the pinned target). A runway heading well away from a
+    # fixed point (here NW ~135deg and SE ~-100deg) reproduces it: infeasible before the fix, and a
+    # clean aligned solve after. (The two existing tests above use ~40deg == on the fixed point, so
+    # they could not catch this.)
+    init = GeodeticState(35.60, -78.50, 1500.0, 90.0, math.radians(heading_deg), math.radians(-3.0),
+                         A320.mass.max_takeoff_kg)
+    S = _rollout_samples(init, 120.0)
+    target = GeodeticState(*S[-1][:6], A320.mass.max_takeoff_kg)
+    frame = ac.TargetFrame(target.latitude, target.longitude)
+    segments, FAF, LTP = _approach(S, frame)
+
+    opt = MultiphaseCollocationOptimizer(A320, segments)
+    _t, _c, states = opt.optimize_free_time(init, target, 120.0 * 1.6)   # raised Infeasible pre-fix
+    ne = np.array([frame.to_ne(s[0], s[1]) for s in states])
+    assert float(np.hypot(*(ne[-1] - LTP))) < 1.0                        # threshold reached
+    assert _faf_intercept_deg(states, frame, FAF) <= 30.0 + 1e-6         # aligned at the FAF

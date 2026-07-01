@@ -165,9 +165,15 @@ class MultiphaseCollocationOptimizer:
             lpv = self.segments[first_final].lpv
             faf_ne = np.asarray(self.segments[first_final].start_ne, float)
             ltp = np.asarray(lpv.ltp_ne, float)
-            # Inbound final approach course = the heading the aircraft flies on final, FAF -> LTP.
-            # (NOT GARP -> LTP: the GARP sits BEYOND the LTP, so that direction is reversed 180°.)
-            fac_rad = math.atan2(ltp[1] - faf_ne[1], ltp[0] - faf_ne[0])
+            # Inbound final approach course = the heading the aircraft flies on final, FAF -> LTP,
+            # in the model's psi convention (math-ENU: 0 = East, CCW toward North — the SAME psi
+            # the state carries and the FAF-intercept below compares against). ne = (north, east),
+            # so the ENU heading of the direction (dn, de) is atan2(dn, de). Using atan2(de, dn)
+            # instead yields the COMPASS bearing, which equals psi ONLY at the 45deg/225deg fixed
+            # points (why KRDU's 05/23 runways masked this) and is 180deg off for e.g. RW32 (315deg)
+            # -> the intercept demanded SE while the target pinned NW -> the solve was infeasible.
+            # (NOT GARP -> LTP: the GARP sits BEYOND the LTP, so that direction is reversed 180deg.)
+            fac_rad = math.atan2(ltp[0] - faf_ne[0], ltp[1] - faf_ne[1])
         intercept_floor = math.cos(math.radians(self.max_intercept_deg))
 
         phase_plan = [(np.asarray(s.end_ne, float), s) for s in self.segments]
