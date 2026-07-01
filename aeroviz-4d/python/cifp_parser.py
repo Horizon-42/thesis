@@ -354,9 +354,14 @@ def parse_procedure_list(raw_value: str) -> list[str]:
 
 
 def runway_from_procedure_ident(procedure: str) -> str | None:
-    """Infer runway ident from common KRDU-style CIFP approach idents."""
+    """Infer runway ident from a CIFP approach ident.
+
+    Handles both ARINC 424 encodings of the multiple-approach indicator:
+      * side-lettered runway, indicator appended:  ``R05LY`` -> RW05L
+      * no runway side, a ``-`` fills the side slot: ``R11-Y`` -> RW11
+    """
     ident = procedure.upper()
-    match = re.match(r"^[RHIL]?(\d{2})([LRC]?)([YZ]?)$", ident)
+    match = re.match(r"^[RHIL]?(\d{2})([LRC]?)-?([YZ]?)$", ident)
     if not match:
         return None
 

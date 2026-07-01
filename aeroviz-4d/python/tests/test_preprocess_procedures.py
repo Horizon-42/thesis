@@ -670,6 +670,30 @@ def test_chart_filename_inference_and_sanitizing() -> None:
     )
 
 
+def test_runway_from_procedure_ident_handles_hyphenated_variants() -> None:
+    # ARINC 424 encodes the multiple-approach indicator (Y/Z) two ways. When the
+    # runway has a side letter it is appended (R05LY); when it does NOT, a '-'
+    # placeholder fills the side slot (R11-Y). The hyphenated form must still
+    # resolve the runway -- KMSY/KSTL RW11/RW20/RW29 approaches use it, and the
+    # old regex dropped them to UNKNOWN (every constrained solve then failed with
+    # "no RNAV(GPS) procedure for <airport> RW##").
+    from_ident = cifp_parser.runway_from_procedure_ident
+    # hyphenated (previously broken)
+    assert from_ident("R11-Y") == "RW11"
+    assert from_ident("R29-Y") == "RW29"
+    assert from_ident("R20-Y") == "RW20"
+    assert from_ident("H11-Z") == "RW11"
+    assert from_ident("H29-Z") == "RW29"
+    # side-lettered + plain (must stay byte-identical)
+    assert from_ident("R05LY") == "RW05L"
+    assert from_ident("H23LZ") == "RW23L"
+    assert from_ident("R30RY") == "RW30R"
+    assert from_ident("R02") == "RW02"
+    assert from_ident("R32") == "RW32"
+    # non-approach idents still reject
+    assert from_ident("BOBBY") is None
+
+
 def test_publish_procedure_details_assets_writes_manifest_and_chart_links(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
