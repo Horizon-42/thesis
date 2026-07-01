@@ -19,10 +19,11 @@ START = datetime(2026, 4, 19, 12, 0, 0, tzinfo=timezone.utc)
 
 
 def _landing_df() -> pd.DataFrame:
+    # Descends south-west into the 23R threshold, aligned with its 225° heading.
     rows = []
     for sec, lat, lon, geo in [
-        ("2026-04-19T11:30:00Z", 35.95, -78.79, 900.0),
-        ("2026-04-19T11:30:30Z", 35.92, -78.785, 500.0),
+        ("2026-04-19T11:30:00Z", 35.9338, -78.7286, 900.0),
+        ("2026-04-19T11:30:30Z", 35.9138, -78.7533, 500.0),
         ("2026-04-19T11:31:00Z", 35.8938, -78.778, 150.0),
     ]:
         rows.append(
@@ -30,6 +31,26 @@ def _landing_df() -> pd.DataFrame:
                 "time": sec, "icao24": "abc123", "lat": lat, "lon": lon,
                 "baroaltitude": geo + 20, "geoaltitude": geo, "heading": 225.0,
                 "onground": False, "callsign": "LND1",
+                "estarrivalairport": "KRDU", "estdepartureairport": "KJFK",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _misaligned_landing_df() -> pd.DataFrame:
+    # Descends onto the 23R threshold but tracks due south (~180°), 45° off the 225°
+    # runway heading — a landing the direction test sets aside for review.
+    rows = []
+    for sec, lat, geo in [
+        ("2026-04-19T11:30:00Z", 35.9538, 900.0),
+        ("2026-04-19T11:30:30Z", 35.9238, 500.0),
+        ("2026-04-19T11:31:00Z", 35.8938, 150.0),
+    ]:
+        rows.append(
+            {
+                "time": sec, "icao24": "mis999", "lat": lat, "lon": -78.778,
+                "baroaltitude": geo + 20, "geoaltitude": geo, "heading": 225.0,
+                "onground": False, "callsign": "MIS9",
                 "estarrivalairport": "KRDU", "estdepartureairport": "KJFK",
             }
         )
@@ -57,27 +78,45 @@ class LandingDownloadTests(unittest.TestCase):
     def test_collects_requested_count(self) -> None:
         fetch = _StubFetch(_landing_df())
 
-        collected = download_airport_landings(
+        harvest = download_airport_landings(
             profile=PROFILE, thresholds=[THRESHOLD], count=1, start=START,
             max_lookback_days=1.0, chunk_hours=6.0, fetch_history_fn=fetch,
         )
 
-        self.assertEqual(len(collected["23R"]), 1)
-        self.assertEqual(collected["23R"][0]["runway"], "23R")
+        self.assertEqual(len(harvest.accepted["23R"]), 1)
+        self.assertEqual(harvest.accepted["23R"][0]["runway"], "23R")
+        self.assertTrue(harvest.accepted["23R"][0]["heading_ok"])
+        self.assertEqual(harvest.rejected["23R"], [])
         self.assertEqual(fetch.calls, 1)  # stops as soon as the count is met
+
+    def test_saves_heading_rejected_landing_for_review(self) -> None:
+        fetch = _StubFetch(_misaligned_landing_df())
+
+        harvest = download_airport_landings(
+            profile=PROFILE, thresholds=[THRESHOLD], count=1, start=START,
+            max_lookback_days=1.0, chunk_hours=6.0, dry_give_up_days=0.5,
+            fetch_history_fn=fetch,
+        )
+
+        self.assertEqual(harvest.accepted["23R"], [])          # misaligned -> not accepted
+        self.assertEqual(len(harvest.rejected["23R"]), 1)      # ...but kept for review
+        rejected = harvest.rejected["23R"][0]
+        self.assertFalse(rejected["heading_ok"])
+        self.assertEqual(rejected["runway"], "23R")
+        self.assertAlmostEqual(rejected["course_error_deg"], 45.0, delta=1.0)
 
     def test_gives_up_after_fixed_days_independent_of_chunk_hours(self) -> None:
         empty = _StubFetch(pd.DataFrame(columns=list(_landing_df().columns)), always=True)
 
         # 1 day of give-up at 12 h chunks -> gives up after 2 chunks (24 h scanned),
         # regardless of the 10-day max lookback.
-        collected = download_airport_landings(
+        harvest = download_airport_landings(
             profile=PROFILE, thresholds=[THRESHOLD], count=5, start=START,
             max_lookback_days=10.0, chunk_hours=12.0, dry_give_up_days=1.0,
             fetch_history_fn=empty,
         )
 
-        self.assertEqual(len(collected["23R"]), 0)
+        self.assertEqual(len(harvest.accepted["23R"]), 0)
         self.assertEqual(empty.calls, 2)
 
     def test_give_up_depth_is_independent_of_chunk_size(self) -> None:
@@ -95,12 +134,12 @@ class LandingDownloadTests(unittest.TestCase):
     def test_dedupes_same_landing_across_chunks(self) -> None:
         fetch = _StubFetch(_landing_df(), always=True)
 
-        collected = download_airport_landings(
+        harvest = download_airport_landings(
             profile=PROFILE, thresholds=[THRESHOLD], count=5, start=START,
             max_lookback_days=0.75, chunk_hours=6.0, fetch_history_fn=fetch,
         )
 
-        self.assertEqual(len(collected["23R"]), 1)  # same landing not double-counted
+        self.assertEqual(len(harvest.accepted["23R"]), 1)  # same landing not double-counted
         self.assertGreaterEqual(fetch.calls, 2)
 
 
@@ -109,25 +148,25 @@ class ResumeTests(unittest.TestCase):
         fetch = _StubFetch(_landing_df(), always=True)
         preloaded = {"23R": [{"icao24": "old1", "landing_time_utc": "2026-04-01T00:00:00Z", "runway": "23R"}]}
 
-        collected = download_airport_landings(
+        harvest = download_airport_landings(
             profile=PROFILE, thresholds=[THRESHOLD], count=1, start=START,
             max_lookback_days=1.0, preloaded=preloaded, fetch_history_fn=fetch,
         )
 
         self.assertEqual(fetch.calls, 0)            # already satisfied: no download
-        self.assertEqual(collected["23R"], preloaded["23R"])
+        self.assertEqual(harvest.accepted["23R"], preloaded["23R"])
 
     def test_preloaded_partial_merges_and_dedupes(self) -> None:
         fetch = _StubFetch(_landing_df(), always=True)
         preloaded = {"23R": [{"icao24": "old1", "landing_time_utc": "2026-04-01T00:00:00Z", "runway": "23R"}]}
 
-        collected = download_airport_landings(
+        harvest = download_airport_landings(
             profile=PROFILE, thresholds=[THRESHOLD], count=2, start=START,
             max_lookback_days=0.75, preloaded=preloaded, fetch_history_fn=fetch,
         )
 
-        self.assertEqual(len(collected["23R"]), 2)  # kept the old one, added one new landing
-        self.assertEqual(collected["23R"][0]["icao24"], "old1")
+        self.assertEqual(len(harvest.accepted["23R"]), 2)  # kept the old one, added one new landing
+        self.assertEqual(harvest.accepted["23R"][0]["icao24"], "old1")
 
 
 class BboxQueryTests(unittest.TestCase):
@@ -136,7 +175,7 @@ class BboxQueryTests(unittest.TestCase):
 
         download_airport_landings(
             profile=PROFILE, thresholds=[THRESHOLD], count=1, start=START,
-            max_lookback_days=1.0, bbox_radius_km=30.0, fetch_history_fn=fetch,
+            max_lookback_days=1.0, radius_km=30.0, fetch_history_fn=fetch,
         )
 
         self.assertIn("bounds", fetch.last_kwargs)

@@ -23,6 +23,7 @@ if __package__ is None or __package__ == "":  # pragma: no cover - direct execut
 
 from trajectory_data_process.acquisition.opensky_history import install_query_cancel_on_interrupt
 from trajectory_data_process.landings import (
+    DEFAULT_HEADING_TOLERANCE_DEG,
     check_history_access,
     download_airport_landings,
     iter_airport_entries,
@@ -38,10 +39,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--airports", nargs="+", default=None, help="Subset of airport codes (default: all in config)")
     p.add_argument("--start", default=None, help="Scan backward from this UTC time (ISO, default: now)")
     p.add_argument("--max-lookback-days", type=float, default=30.0)
-    p.add_argument("--chunk-hours", type=float, default=6.0, help="Hours per history query")
-    p.add_argument("--dry-give-up-days", type=float, default=4.0, help="Give up a runway after this many days scanned with no new landing")
-    p.add_argument("--bbox-radius-km", type=float, default=30.0, help="Terminal-area query box radius around the airport")
-    p.add_argument("--runway-threshold-radius-m", type=float, default=1000.0)
+    p.add_argument("--radius-km", type=float, default=30.0,
+                   help="Terminal-area radius around the airport: both the query box AND the "
+                        "radius each kept landing's track is cropped to")
+    p.add_argument("--heading-tolerance-deg", type=float, default=DEFAULT_HEADING_TOLERANCE_DEG,
+                   help="Max approach-direction vs runway-heading error to accept a landing "
+                        "(misaligned ones are saved to *_heading_rejected.json for review)")
     p.add_argument("--output-root", default=str(here / "outputs" / "landings"))
     p.add_argument("--overwrite", action="store_true", help="Refetch from scratch instead of resuming existing files")
     return p.parse_args()
@@ -92,7 +95,7 @@ def main() -> None:
 
     first = next(profile for profile, _t, _p, needs in plans if needs)
     print("[landings] preflight: checking OpenSky history access (one small probe query)...", flush=True)
-    check_history_access(profile=first, reference=start, bbox_radius_km=args.bbox_radius_km)
+    check_history_access(profile=first, reference=start, radius_km=args.radius_km)
     print("[landings] preflight: access OK, starting download", flush=True)
 
     summary: dict[str, dict[str, int]] = {}
@@ -105,24 +108,29 @@ def main() -> None:
             print(f"[landings] {profile.code}: already complete, skipped (use --overwrite to refetch)")
             continue
 
-        collected = download_airport_landings(
+        harvest = download_airport_landings(
             profile=profile,
             thresholds=thresholds,
             count=args.count,
             start=start,
             max_lookback_days=args.max_lookback_days,
-            chunk_hours=args.chunk_hours,
-            bbox_radius_km=args.bbox_radius_km,
-            runway_threshold_radius_m=args.runway_threshold_radius_m,
-            dry_give_up_days=args.dry_give_up_days,
+            radius_km=args.radius_km,
+            heading_tolerance_deg=args.heading_tolerance_deg,
             preloaded=None if args.overwrite else preloaded,
         )
         airport_dir.mkdir(parents=True, exist_ok=True)
-        for ident, flights in collected.items():
+        for ident, flights in harvest.accepted.items():
             path = airport_dir / f"{profile.code}_{ident}_landings.json"
             path.write_text(json.dumps(flights, indent=2), encoding="utf-8")
             summary[profile.code][ident] = len(flights)
-            print(f"[landings] {profile.code} {ident}: {len(flights)}/{args.count} -> {path}")
+
+            rejected = harvest.rejected.get(ident, [])
+            note = ""
+            if rejected:
+                rejected_path = airport_dir / f"{profile.code}_{ident}_heading_rejected.json"
+                rejected_path.write_text(json.dumps(rejected, indent=2), encoding="utf-8")
+                note = f"  (+{len(rejected)} heading-rejected -> {rejected_path.name})"
+            print(f"[landings] {profile.code} {ident}: {len(flights)}/{args.count} -> {path}{note}")
 
     summary_path = output_root / f"summary_{start.strftime('%Y%m%dT%H%M%SZ')}.json"
     summary_path.parent.mkdir(parents=True, exist_ok=True)

@@ -141,7 +141,6 @@ def write_czml_input(
         trajectories,
         airport_lat=profile.lat,
         airport_lon=profile.lon,
-        match_radius_km=args.match_radius_km,
         max_end_distance_km=args.max_end_distance_km,
         approach_window_min=args.approach_window_min,
         exclude_ground=args.exclude_ground,
@@ -235,7 +234,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--runway", default=None, help="Keep only trajectories arriving at this runway threshold, e.g. 23R")
     p.add_argument("--runway-threshold-radius-m", type=float, default=600.0)
 
-    p.add_argument("--match-radius-km", type=float, default=35.0, help="Trajectory must approach within this distance of the airport")
     p.add_argument("--max-end-distance-km", type=float, default=2.5, help="Arrival anchor must be within this distance of the airport (ignored when --runway is set)")
     p.add_argument("--approach-window-min", type=int, default=20, help="Keep this many minutes before the arrival anchor")
     p.add_argument("--exclude-ground", action="store_true", help="Drop on-ground points from exported trajectories")

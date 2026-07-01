@@ -5,7 +5,7 @@ issues a single history query per time chunk and reuses the resulting trajectori
 for every threshold, scanning backward in time until each threshold has the
 requested number of landings (or a maximum lookback is reached).
 
-Queries use a bounding box around the airport (``bbox_radius_km``) rather than the
+Queries use a bounding box around the airport (``radius_km``) rather than the
 full-track airport join, so only terminal-area state vectors are downloaded. Landing
 detection keys off runway-heading alignment and descent geometry, not the flight's
 arrival-airport metadata, so the bbox query (which omits that metadata) is sufficient.
@@ -14,7 +14,8 @@ arrival-airport metadata, so the bbox query (which omits that metadata) is suffi
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -29,12 +30,35 @@ from trajectory_data_process.acquisition.airports import AirportProfile
 from trajectory_data_process.acquisition.opensky_history import STATE_VECTOR_COLUMNS, fetch_history_dataframe
 from trajectory_data_process.acquisition.runways import RunwayThreshold
 from trajectory_data_process.geo import bounds_from_radius_km
-from trajectory_data_process.processing.czml_export import trajectories_to_czml_input
+from trajectory_data_process.processing.czml_export import (
+    DEFAULT_HEADING_TOLERANCE_DEG,
+    classify_landing_flights,
+)
 from trajectory_data_process.trajectory import build_trajectories_from_history
 
-DEFAULT_BBOX_RADIUS_KM = 30.0
+DEFAULT_RADIUS_KM = 30.0
+
+# Internal scan/detection knobs — not CLI-exposed (implementation details, not
+# research requirements). Change here if a run ever needs them tuned.
+DEFAULT_CHUNK_HOURS = 6.0            # hours per history query (Trino batching)
+DEFAULT_DRY_GIVE_UP_DAYS = 4.0       # give up a runway after this long with no new landing
+RUNWAY_THRESHOLD_RADIUS_M = 1000.0   # a landing's closest point must fall this near the threshold
 
 FetchHistory = Callable[..., pd.DataFrame]
+
+
+@dataclass
+class LandingHarvest:
+    """Per-threshold landings, split by the runway-direction test.
+
+    ``accepted`` are landings whose approach direction lines up with the runway.
+    ``rejected`` otherwise look like landings (near the threshold, low, descending)
+    but their direction disagrees; they are kept — tagged with the measured heading
+    errors — so a run can be audited for false kills instead of dropping them.
+    """
+
+    accepted: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    rejected: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
 
 def load_runway_config(path: Path) -> dict[str, Any]:
@@ -69,7 +93,7 @@ def check_history_access(
     *,
     profile: AirportProfile,
     reference: datetime,
-    bbox_radius_km: float = DEFAULT_BBOX_RADIUS_KM,
+    radius_km: float = DEFAULT_RADIUS_KM,
     fetch_history_fn: FetchHistory = fetch_history_dataframe,
 ) -> None:
     """Run one tiny probe query so a whole run fails fast on missing access.
@@ -83,7 +107,7 @@ def check_history_access(
     fetch_history_fn(
         start=start,
         stop=stop,
-        bounds=bounds_from_radius_km(profile.lat, profile.lon, bbox_radius_km),
+        bounds=bounds_from_radius_km(profile.lat, profile.lon, radius_km),
         selected_columns=STATE_VECTOR_COLUMNS,
         cached=True,
     )
@@ -96,35 +120,45 @@ def download_airport_landings(
     count: int,
     start: datetime,
     max_lookback_days: float,
-    chunk_hours: float = 6.0,
-    bbox_radius_km: float = DEFAULT_BBOX_RADIUS_KM,
-    runway_threshold_radius_m: float = 1000.0,
-    approach_window_min: int = 25,
+    chunk_hours: float = DEFAULT_CHUNK_HOURS,
+    radius_km: float = DEFAULT_RADIUS_KM,
+    runway_threshold_radius_m: float = RUNWAY_THRESHOLD_RADIUS_M,
+    heading_tolerance_deg: float = DEFAULT_HEADING_TOLERANCE_DEG,
     segment_gap_sec: int = 900,
-    dry_give_up_days: float = 4.0,
+    dry_give_up_days: float = DEFAULT_DRY_GIVE_UP_DAYS,
     cached: bool = True,
     preloaded: dict[str, list[dict[str, Any]]] | None = None,
     fetch_history_fn: FetchHistory = fetch_history_dataframe,
-) -> dict[str, list[dict[str, Any]]]:
+) -> LandingHarvest:
     """Collect up to ``count`` landings for each threshold, scanning backward.
 
-    Each chunk is fetched as a ``bbox_radius_km`` box around the airport. A threshold
+    Each chunk is fetched as a ``radius_km`` box around the airport, and each kept
+    landing's waypoints are cropped to that same ``radius_km`` circle (so the query
+    footprint and the exported track share one radius). A threshold
     is given up once the scan has gone ``dry_give_up_days`` past its last new landing
     (idle runway ends would otherwise drag the whole airport back to
     ``max_lookback_days``); this depth is a fixed duration, independent of
     ``chunk_hours``. The scan stops once every threshold is at ``count`` or given up.
     ``preloaded`` seeds already-collected flights per threshold (for resume),
     de-duplicated by ``(icao24, landing_time_utc)``.
+
+    Returns a :class:`LandingHarvest`: the accepted landings plus the ones the
+    runway-direction test (``heading_tolerance_deg``) set aside, so a run can be
+    reviewed for false kills. Only accepted landings count toward ``count`` and drive
+    the scan; the rejected list is best-effort review data (not resumed via
+    ``preloaded``).
     """
     preloaded = preloaded or {}
-    bounds = bounds_from_radius_km(profile.lat, profile.lon, bbox_radius_km)
+    bounds = bounds_from_radius_km(profile.lat, profile.lon, radius_km)
     collected: dict[str, list[dict[str, Any]]] = {
         t.ident: list(preloaded.get(t.ident, []))[:count] for t in thresholds
     }
+    rejected: dict[str, list[dict[str, Any]]] = {t.ident: [] for t in thresholds}
     seen: dict[str, set[tuple[str, str | None]]] = {
         t.ident: {(f["icao24"], f.get("landing_time_utc")) for f in collected[t.ident]}
         for t in thresholds
     }
+    seen_rejected: dict[str, set[tuple[str, str | None]]] = {t.ident: set() for t in thresholds}
     # The deepest time each threshold last found a landing (init: top of the scan).
     # When the scan goes more than dry_give_up_days past it, the threshold is given up.
     dry_floor: dict[str, datetime] = {t.ident: start for t in thresholds}
@@ -156,17 +190,17 @@ def download_airport_landings(
             if not active(threshold.ident):
                 continue
             before = len(collected[threshold.ident])
-            flights = trajectories_to_czml_input(
+            accepted, heading_rejected = classify_landing_flights(
                 trajectories,
                 airport_lat=profile.lat,
                 airport_lon=profile.lon,
                 runway_threshold=threshold,
                 runway_threshold_radius_m=runway_threshold_radius_m,
-                landing_only=True,
-                approach_window_min=approach_window_min,
-                max_flights=count - before + 10,
+                heading_tolerance_deg=heading_tolerance_deg,
+                crop_radius_km=radius_km,
+                max_accepted=count - before + 10,
             )
-            for flight in flights:
+            for flight in accepted:
                 key = (flight["icao24"], flight.get("landing_time_utc"))
                 if key in seen[threshold.ident]:
                     continue
@@ -174,6 +208,12 @@ def download_airport_landings(
                 collected[threshold.ident].append(flight)
                 if len(collected[threshold.ident]) >= count:
                     break
+            for flight in heading_rejected:
+                key = (flight["icao24"], flight.get("landing_time_utc"))
+                if key in seen_rejected[threshold.ident]:
+                    continue
+                seen_rejected[threshold.ident].add(key)
+                rejected[threshold.ident].append(flight)
 
             if len(collected[threshold.ident]) > before:
                 dry_floor[threshold.ident] = chunk_start
@@ -185,7 +225,7 @@ def download_airport_landings(
 
         cursor = chunk_start
 
-    return collected
+    return LandingHarvest(accepted=collected, rejected=rejected)
 
 
 def _progress(collected: dict[str, list[dict[str, Any]]], count: int) -> str:
