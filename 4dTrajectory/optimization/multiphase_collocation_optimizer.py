@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import math
 import time
+from collections import namedtuple
 
 import casadi as ca
 import numpy as np
@@ -38,6 +39,10 @@ STATE_DIM = _dc.STATE_DIM
 CONTROL_DIM = _dc.CONTROL_DIM
 _DEFAULT_SCHEME = "hermiteSimpsonNormalizedFullTransport"
 _INF = 1e9
+
+# The FAF-intercept spec for the one leg that leads INTO a protected final approach:
+# which phase it is, and the final-approach course to align with there.
+_FafIntercept = namedtuple("_FafIntercept", ("phase", "course_rad"))
 
 
 class MultiphaseCollocationOptimizer:
@@ -158,22 +163,7 @@ class MultiphaseCollocationOptimizer:
         #   * the leg INTO the FAF — pin the FAF position + require the heading there to be within
         #     ``max_intercept_deg`` of the final approach course (a standard final intercept).
         #   * the final LPV leg(s) — full corridor + glidepath; the last leg pins the threshold.
-        first_final = next((i for i, s in enumerate(self.segments) if s.lpv is not None), None)
-        faf_phase = (first_final - 1) if (first_final is not None and first_final >= 1) else None
-        fac_rad = None
-        if first_final is not None:
-            lpv = self.segments[first_final].lpv
-            faf_ne = np.asarray(self.segments[first_final].start_ne, float)
-            ltp = np.asarray(lpv.ltp_ne, float)
-            # Inbound final approach course = the heading the aircraft flies on final, FAF -> LTP,
-            # in the model's psi convention (math-ENU: 0 = East, CCW toward North — the SAME psi
-            # the state carries and the FAF-intercept below compares against). ne = (north, east),
-            # so the ENU heading of the direction (dn, de) is atan2(dn, de). Using atan2(de, dn)
-            # instead yields the COMPASS bearing, which equals psi ONLY at the 45deg/225deg fixed
-            # points (why KRDU's 05/23 runways masked this) and is 180deg off for e.g. RW32 (315deg)
-            # -> the intercept demanded SE while the target pinned NW -> the solve was infeasible.
-            # (NOT GARP -> LTP: the GARP sits BEYOND the LTP, so that direction is reversed 180deg.)
-            fac_rad = math.atan2(ltp[0] - faf_ne[0], ltp[1] - faf_ne[1])
+        faf = self._faf_intercept()     # None | _FafIntercept(phase, course_rad); see the method
         intercept_floor = math.cos(math.radians(self.max_intercept_deg))
 
         phase_plan = [(np.asarray(s.end_ne, float), s) for s in self.segments]
@@ -217,13 +207,13 @@ class MultiphaseCollocationOptimizer:
                 g.append(nodes[-1] - ca.DM(tgt_z))
                 lbg += [0.0] * STATE_DIM
                 ubg += [0.0] * STATE_DIM
-            elif p == faf_phase:
+            elif faf is not None and p == faf.phase:
                 g.append(nodes[-1][0:2] - ca.DM(end_fix))
                 lbg += [0.0, 0.0]
                 ubg += [0.0, 0.0]
                 # heading at the FAF within max_intercept of the FAC (smooth: cos form, no kink):
                 #   cos(intercept) − cos(psi_FAF − FAC) ≤ 0  ⇔  |psi_FAF − FAC| ≤ intercept
-                g.append(intercept_floor - ca.cos(nodes[-1][_dc._PSI] - fac_rad))
+                g.append(intercept_floor - ca.cos(nodes[-1][_dc._PSI] - faf.course_rad))
                 lbg.append(-_INF)
                 ubg.append(0.0)
 
@@ -284,6 +274,30 @@ class MultiphaseCollocationOptimizer:
         nlp = {"f": cost, "x": ca.vertcat(*w), "g": ca.vertcat(*g)}
         layout = {"n_phases": n_phases, "c": c_np, "b": b_np}
         return nlp, lbw, ubw, lbg, ubg, x0, layout
+
+    # ------------------------------------------------------------------
+    def _faf_intercept(self):
+        """The FAF-intercept for the one leg that leads INTO the protected final approach, or
+        ``None`` when there is no such leg.
+
+        The protected final approach is the first LPV segment (``lpv is not None``); its start IS
+        the FAF, so the leg into it is the phase one earlier (``first_final - 1``). ``course_rad``
+        is the inbound final-approach course FAF -> LTP in the model's math-ENU convention
+        (0 = East, CCW toward North) — the SAME convention as the state ``psi`` the intercept is
+        compared against. It is NOT the compass bearing ``atan2(de, dn)``: ne = (north, east), so
+        the ENU heading of a direction (dn, de) is ``atan2(dn, de)``. The two agree ONLY at the
+        45deg/225deg fixed points (why KRDU's 05/23 runways masked a 180deg error) and are ~180deg
+        apart for e.g. RW32 (~315deg), which had made every constrained solve there infeasible.
+
+        ``None`` when there is no LPV segment, or it is the very first segment (no pre-final leg).
+        """
+        first_final = next((i for i, s in enumerate(self.segments) if s.lpv is not None), None)
+        if first_final is None or first_final == 0:
+            return None
+        faf_ne = np.asarray(self.segments[first_final].start_ne, float)
+        ltp = np.asarray(self.segments[first_final].lpv.ltp_ne, float)
+        course_rad = math.atan2(ltp[0] - faf_ne[0], ltp[1] - faf_ne[1])
+        return _FafIntercept(first_final - 1, course_rad)
 
     # ------------------------------------------------------------------
     def _extract(self, x, layout):
