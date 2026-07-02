@@ -67,13 +67,15 @@ import {
 } from "../pilot/trajectoryTargetConstraints";
 import {
   runTrajectoryOptimization,
-  optimizerToParts,
-  partsToOptimizer,
-  validFittingsForDynamics,
+  decomposeOptimizer,
+  composeOptimizer,
+  validFittingsForFrame,
   type TrajectoryOptimizer,
   type TrajectoryOptimizationResult,
   type TrajectorySample,
-  type OptimizerDynamics,
+  type OptimizerParts,
+  type OptimizerFrame,
+  type OptimizerTransport,
   type OptimizerFitting,
 } from "../pilot/trajectoryOptimizationClient";
 import {
@@ -120,14 +122,20 @@ const DEFAULT_COMPARISON_CONTROL: DynamicsComparisonControl = {
   loadFactor: 1,
 };
 const DEFAULT_TRAJECTORY_OPTIMIZER: TrajectoryOptimizer = "casadiMultiphaseNormalizedFullTransport";
-const OPTIMIZER_DYNAMICS_OPTIONS: { value: OptimizerDynamics; label: string }[] = [
-  { value: "geodetic", label: "Geodetic RHS (+transport, approx)" },
-  { value: "reanchoredEnu", label: "Re-anchored ENU (playback model)" },
+// The optimizer is edited as orthogonal axes (see trajectoryOptimizationClient): the constraint
+// MODE, the base frame, and — for the geodetic frame — transport + normalization.
+const OPTIMIZER_CONSTRAINTS_OPTIONS: { value: "none" | "procedure"; label: string }[] = [
+  { value: "none", label: "None — direct (initial → target)" },
+  { value: "procedure", label: "RNAV procedure — per-leg constraints" },
+];
+const OPTIMIZER_FRAME_OPTIONS: { value: OptimizerFrame; label: string }[] = [
+  { value: "geodetic", label: "Geodetic RHS" },
   { value: "localEnu", label: "Local ENU @ target (fixed tangent, drifts far out)" },
-  { value: "geodeticNormalized", label: "Geodetic RHS (normalized, robust)" },
-  { value: "geodeticFullTransport", label: "Geodetic RHS (+transport, full/exact)" },
-  { value: "geodeticNormalizedFullTransport", label: "Geodetic RHS (normalized + full/exact transport)" },
-  { value: "geodeticMultiphase", label: "Multiphase (per-leg procedure constraints)" },
+  { value: "reanchoredEnu", label: "Re-anchored ENU (playback model)" },
+];
+const OPTIMIZER_TRANSPORT_OPTIONS: { value: OptimizerTransport; label: string }[] = [
+  { value: "approx", label: "Approx (drops ψ cross term)" },
+  { value: "full", label: "Full / exact" },
 ];
 const OPTIMIZER_FITTING_OPTIONS: { value: OptimizerFitting; label: string }[] = [
   { value: "hermiteSimpson", label: "Hermite-Simpson (cubic, 4th order)" },
@@ -211,9 +219,21 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   const [targetState, setTargetState] = useState<PilotTargetState>(() =>
     makeDefaultTrajectoryTarget(null, null),
   );
-  const [trajectoryOptimizer, setTrajectoryOptimizer] =
-    useState<TrajectoryOptimizer>(DEFAULT_TRAJECTORY_OPTIMIZER);
+  // The optimizer is edited as orthogonal axes (constraints mode, frame, transport, normalization,
+  // fitting). Holding the AXES as the source of truth — not the composed wire string — is what lets
+  // the hidden advanced axes survive toggling Constraints (the wire string can't encode them in
+  // constrained mode). The wire name is derived from the axes for the request + playback.
+  const [optimizerParts, setOptimizerParts] = useState<OptimizerParts>(() =>
+    decomposeOptimizer(DEFAULT_TRAJECTORY_OPTIMIZER),
+  );
+  const trajectoryOptimizer = useMemo(
+    () => composeOptimizer(optimizerParts),
+    [optimizerParts],
+  );
   const [nSegments, setNSegments] = useState(10);
+  // Constrained (procedure) mode: control segments PER LEG (total = legs × this).
+  const [nSegPerPhase, setNSegPerPhase] = useState(4);
+  const [showAdvancedNumerics, setShowAdvancedNumerics] = useState(false);
   const [arrivalTimeS, setArrivalTimeS] = useState(DEFAULT_ARRIVAL_TIME_S);
   const [trajectoryDtS, setTrajectoryDtS] = useState(DEFAULT_TRAJECTORY_DT_S);
   const [maxIterations, setMaxIterations] = useState(DEFAULT_MAX_ITERATIONS);
@@ -1112,7 +1132,26 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
 
   function updateNSegments(value: number) {
     if (!Number.isFinite(value)) return;
-    setNSegments(Math.round(clamp(value, 1, 80)));
+    setNSegments(Math.round(clamp(value, 2, 80)));   // CollocationOptimizer requires n_segments >= 2
+    clearOptimizedPlayback();
+  }
+
+  function updateNSegPerPhase(value: number) {
+    if (!Number.isFinite(value)) return;
+    setNSegPerPhase(Math.round(clamp(value, 1, 16)));
+    clearOptimizedPlayback();
+  }
+
+  /** Edit one axis of the optimizer, snapping the fitting to one the (possibly changed) frame
+   * allows. Patches the AXES state directly, so a locked/hidden axis (e.g. Frame in constrained
+   * mode) keeps its value across the toggle instead of being flattened by the wire round-trip. */
+  function updateOptimizerParts(patch: Partial<OptimizerParts>) {
+    setOptimizerParts((prev) => {
+      const next: OptimizerParts = { ...prev, ...patch };
+      const allowed = validFittingsForFrame(next.constrained ? "geodetic" : next.frame);
+      if (!allowed.includes(next.fitting)) next.fitting = allowed[0];
+      return next;
+    });
     clearOptimizedPlayback();
   }
 
@@ -1134,11 +1173,6 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     clearOptimizedPlayback();
   }
 
-  function updateTrajectoryOptimizer(value: TrajectoryOptimizer) {
-    setTrajectoryOptimizer(value);
-    clearOptimizedPlayback();
-  }
-
   async function computeTrajectory() {
     if (!hasAircraftConfigs || runwayTargets.length === 0) return;
 
@@ -1151,8 +1185,8 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
       // one phase per leg). The selected RNAV initial fix identifies the procedure + branch; the
       // backend enforces each leg's corridor / glidepath / step-down floor as NLP path constraints.
       let procedureConstraint: ProcedureConstraint | undefined;
-      const { dynamics } = optimizerToParts(trajectoryOptimizer);
-      if (dynamics === "geodeticMultiphase") {
+      const { constrained } = optimizerParts;
+      if (constrained) {
         const candidate = rnavInitialFixCandidates.find(
           (current) => current.key === selectedRnavInitialFixKey,
         );
@@ -1182,6 +1216,7 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
           initialState.massKg,
         ),
         nSegments,
+        nSegPerPhase: constrained ? nSegPerPhase : undefined,
         arrivalTimeS,
         dtS: trajectoryDtS,
         maxIterations,
@@ -1405,10 +1440,11 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   const initialControlsDisabled = isFlying || isAnyPlaying || isBusy || !hasAircraftConfigs;
   const targetControlsDisabled = isBusy || isTrajectoryPlaying || runwayTargets.length === 0;
   const comparisonControlsDisabled = isBusy || isComparisonPlaying || !hasAircraftConfigs;
-  // The single optimizer name is shown as two dropdowns: dynamics × fitting.
-  const { dynamics: optimizerDynamics, fitting: optimizerFitting } =
-    optimizerToParts(trajectoryOptimizer);
-  const allowedFittings = validFittingsForDynamics(optimizerDynamics);
+  // ``optimizerParts`` is the axes state (above); the fittings a frame allows drive the Fitting
+  // dropdown (re-anchored ENU is shooting-only).
+  const allowedFittings = validFittingsForFrame(
+    optimizerParts.constrained ? "geodetic" : optimizerParts.frame,
+  );
   const trajectorySegmentDurationS = optimizedTrajectory
     ? optimizedTrajectory.finalTimeS / Math.max(1, optimizedTrajectory.controls.length)
     : null;
@@ -1612,18 +1648,16 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
 
           <section className="pilot-optimization-row" aria-label="Trajectory optimization settings">
             <label>
-              <span>Dynamics</span>
+              <span>Constraints</span>
               <select
                 className="pilot-select-input"
-                value={optimizerDynamics}
+                value={optimizerParts.constrained ? "procedure" : "none"}
                 disabled={targetControlsDisabled}
                 onChange={(event) =>
-                  updateTrajectoryOptimizer(
-                    partsToOptimizer(event.target.value as OptimizerDynamics, optimizerFitting),
-                  )
+                  updateOptimizerParts({ constrained: event.target.value === "procedure" })
                 }
               >
-                {OPTIMIZER_DYNAMICS_OPTIONS.map((o) => (
+                {OPTIMIZER_CONSTRAINTS_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
@@ -1632,12 +1666,10 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
               <span>Fitting</span>
               <select
                 className="pilot-select-input"
-                value={optimizerFitting}
+                value={optimizerParts.fitting}
                 disabled={targetControlsDisabled || allowedFittings.length === 1}
                 onChange={(event) =>
-                  updateTrajectoryOptimizer(
-                    partsToOptimizer(optimizerDynamics, event.target.value as OptimizerFitting),
-                  )
+                  updateOptimizerParts({ fitting: event.target.value as OptimizerFitting })
                 }
               >
                 {OPTIMIZER_FITTING_OPTIONS.filter((o) => allowedFittings.includes(o.value)).map((o) => (
@@ -1645,25 +1677,43 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
                 ))}
               </select>
             </label>
-            {optimizerDynamics === "geodeticMultiphase" && (
+            {optimizerParts.constrained ? (
+              <label>
+                <span title="Piecewise-constant control intervals PER procedure leg; the total control count is legs × this.">
+                  Control segs / leg
+                </span>
+                <EnglishNumberInput
+                  value={nSegPerPhase}
+                  min={1}
+                  max={16}
+                  step="1"
+                  disabled={targetControlsDisabled}
+                  onCommit={updateNSegPerPhase}
+                />
+              </label>
+            ) : (
+              <label>
+                <span title="Piecewise-constant control intervals over the whole trajectory.">
+                  Control segments
+                </span>
+                <EnglishNumberInput
+                  value={nSegments}
+                  min={2}
+                  max={80}
+                  step="1"
+                  disabled={targetControlsDisabled}
+                  onCommit={updateNSegments}
+                />
+              </label>
+            )}
+            {optimizerParts.constrained && (
               <span
                 className="pilot-multiphase-hint"
-                title="Multiphase optimises one phase per procedure leg (start->IAF, then each leg), enforcing that leg's corridor / glidepath / step-down floor as NLP path constraints. Select an RNAV initial fix to identify the approach."
+                title="One phase per procedure leg (start->IAF, then each leg), enforcing that leg's corridor / glidepath / step-down floor as NLP path constraints. Select an RNAV initial fix to identify the approach."
               >
                 Per-leg constraints from the selected RNAV approach
               </span>
             )}
-            <label>
-              <span>Segments</span>
-              <EnglishNumberInput
-                value={nSegments}
-                min={1}
-                max={80}
-                step="1"
-                disabled={targetControlsDisabled}
-                onCommit={updateNSegments}
-              />
-            </label>
             <label>
               <span>Arrival time</span>
               <EnglishNumberInput
@@ -1697,6 +1747,69 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
                 onCommit={updateMaxIterations}
               />
             </label>
+
+            <details
+              className="pilot-advanced-numerics"
+              open={showAdvancedNumerics}
+              onToggle={(event) => setShowAdvancedNumerics(event.currentTarget.open)}
+            >
+              <summary>Advanced dynamics</summary>
+              <div className="pilot-advanced-grid">
+                <label>
+                  <span>Frame</span>
+                  <select
+                    className="pilot-select-input"
+                    value={optimizerParts.frame}
+                    disabled={targetControlsDisabled || optimizerParts.constrained}
+                    onChange={(event) =>
+                      updateOptimizerParts({ frame: event.target.value as OptimizerFrame })
+                    }
+                  >
+                    {OPTIMIZER_FRAME_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </label>
+                {optimizerParts.frame === "geodetic" && (
+                  <>
+                    <label>
+                      <span>Transport</span>
+                      <select
+                        className="pilot-select-input"
+                        value={optimizerParts.transport}
+                        disabled={targetControlsDisabled || optimizerParts.constrained}
+                        onChange={(event) =>
+                          updateOptimizerParts({ transport: event.target.value as OptimizerTransport })
+                        }
+                      >
+                        {OPTIMIZER_TRANSPORT_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="pilot-advanced-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={optimizerParts.normalized}
+                        disabled={targetControlsDisabled || optimizerParts.constrained}
+                        onChange={(event) =>
+                          updateOptimizerParts({ normalized: event.target.checked })
+                        }
+                      />
+                      <span title="Decision STATE is metric position offsets from the target — a pure change of variables that conditions the NLP well (robust on loose windows / fine meshes).">
+                        Normalized state (well-conditioned)
+                      </span>
+                    </label>
+                  </>
+                )}
+                {optimizerParts.constrained && (
+                  <span className="pilot-locked-hint">
+                    Locked to geodetic · full transport · normalized — the per-leg path constraints
+                    live on the metric-position state.
+                  </span>
+                )}
+              </div>
+            </details>
           </section>
 
           <div className="pilot-actions">

@@ -103,8 +103,8 @@ vi.mock("../../data/rnavInitialFixCandidates", () => ({
 }));
 
 vi.mock("../../pilot/trajectoryOptimizationClient", async (importOriginal) => ({
-  // Keep the real pure helpers (optimizerToParts / partsToOptimizer /
-  // validFittingsForDynamics); only stub the network call.
+  // Keep the real pure helpers (decomposeOptimizer / composeOptimizer /
+  // validFittingsForFrame); only stub the network call.
   ...(await importOriginal<typeof import("../../pilot/trajectoryOptimizationClient")>()),
   runTrajectoryOptimization: mocks.runTrajectoryOptimization,
 }));
@@ -354,19 +354,16 @@ describe("PilotPanel trajectory play mode", () => {
     expect(await screen.findByText("Target State")).toBeTruthy();
     expect(screen.getByText("RW05L")).toBeTruthy();
 
-    // Optimizer is chosen as two dropdowns: dynamics × fitting.  Default dynamics is the
-    // multiphase mode; this test exercises the plain geodetic Rk4 flow, so switch to it.
-    expect((screen.getByRole("combobox", { name: "Dynamics" }) as HTMLSelectElement).value)
-      .toBe("geodeticMultiphase");
+    // The optimizer is edited as orthogonal axes.  The DEFAULT is the procedure-constrained
+    // mode; this test exercises a plain (unconstrained) optimized run, so switch Constraints
+    // to "none" (direct initial -> target, no procedure).
+    expect((screen.getByRole("combobox", { name: "Constraints" }) as HTMLSelectElement).value)
+      .toBe("procedure");
     expect((screen.getByRole("combobox", { name: "Fitting" }) as HTMLSelectElement).value)
       .toBe("hermiteSimpson");
     expect((screen.getByLabelText("Max iter") as HTMLInputElement).value).toBe("300");
-    // geodetic + shooting => casadiDirectCollocationRk4.
-    fireEvent.change(screen.getByRole("combobox", { name: "Dynamics" }), {
-      target: { value: "geodetic" },
-    });
-    fireEvent.change(screen.getByRole("combobox", { name: "Fitting" }), {
-      target: { value: "shooting" },
+    fireEvent.change(screen.getByRole("combobox", { name: "Constraints" }), {
+      target: { value: "none" },
     });
 
     await waitFor(() => {
@@ -414,7 +411,7 @@ describe("PilotPanel trajectory play mode", () => {
     fireEvent.change(gammaInput, { target: { value: "-4" } });
     fireEvent.blur(gammaInput);
 
-    const segmentInput = screen.getByLabelText("Segments");
+    const segmentInput = screen.getByLabelText("Control segments");
     fireEvent.change(segmentInput, { target: { value: "12" } });
     fireEvent.blur(segmentInput);
     const arrivalInput = screen.getByLabelText("Arrival time");
@@ -434,7 +431,6 @@ describe("PilotPanel trajectory play mode", () => {
     const calls = mocks.runTrajectoryOptimization.mock.calls;
     const request = calls[calls.length - 1]?.[0];
     expect(request).toMatchObject({
-      optimizer: "casadiDirectCollocationRk4",
       initialState: expect.objectContaining({
         lon: -78.92647222,
         lat: 35.77341389,
@@ -458,10 +454,14 @@ describe("PilotPanel trajectory play mode", () => {
       dtS: 2,
       maxIterations: 300,
     });
+    // Unconstrained run: the request carries nSegments (whole-trajectory control count)
+    // and NO procedure — not the per-leg nSegPerPhase / procedureConstraint.
+    expect(request.procedureConstraint).toBeUndefined();
+    expect(request.nSegPerPhase).toBeUndefined();
     expect(request.initialState.headingDeg).toBeCloseTo(39.1);
   });
 
-  it("chooses the optimizer as dynamics × fitting; ENU dynamics force shooting", async () => {
+  it("chooses the optimizer via frame × fitting; ENU frame forces shooting", async () => {
     render(<PilotPanel />);
 
     expect(await screen.findByText("A320")).toBeTruthy();
@@ -473,18 +473,28 @@ describe("PilotPanel trajectory play mode", () => {
       );
     });
 
-    const dynamicsSelect = screen.getByRole("combobox", { name: "Dynamics" }) as HTMLSelectElement;
+    const constraintsSelect = screen.getByRole("combobox", { name: "Constraints" }) as HTMLSelectElement;
+    // The Frame select lives in the collapsed "Advanced dynamics" <details>; jsdom
+    // renders its content, so it is queryable without opening the disclosure.
+    const frameSelect = screen.getByRole("combobox", { name: "Frame" }) as HTMLSelectElement;
     const fittingSelect = screen.getByRole("combobox", { name: "Fitting" }) as HTMLSelectElement;
     const arrivalInput = screen.getByLabelText("Arrival time") as HTMLInputElement;
 
-    // Default: multiphase + Hermite-Simpson; all three fittings available.
-    expect(dynamicsSelect.value).toBe("geodeticMultiphase");
+    // Default: procedure-constrained + Hermite-Simpson; all three fittings available,
+    // but the advanced frame axis is LOCKED (the constrained mode pins the dynamics).
+    expect(constraintsSelect.value).toBe("procedure");
     expect(fittingSelect.value).toBe("hermiteSimpson");
     expect(fittingSelect.querySelectorAll("option").length).toBe(3);
     expect(fittingSelect.disabled).toBe(false);
     expect(arrivalInput.disabled).toBe(false);
+    expect(frameSelect.disabled).toBe(true);
 
-    // geodetic supports all three fittings; arrival time stays editable.
+    // Unconstrained (direct) mode unlocks the frame axis.
+    fireEvent.change(constraintsSelect, { target: { value: "none" } });
+    expect(frameSelect.disabled).toBe(false);
+    expect(frameSelect.value).toBe("geodetic");
+
+    // Geodetic supports all three fittings; arrival time stays editable.
     for (const fitting of ["trapezoidal", "shooting", "hermiteSimpson"]) {
       fireEvent.change(fittingSelect, { target: { value: fitting } });
       expect(fittingSelect.value).toBe(fitting);
@@ -492,18 +502,38 @@ describe("PilotPanel trajectory play mode", () => {
     }
 
     // Re-anchored ENU is discrete (re-anchors each step) -> shooting-only.
-    fireEvent.change(dynamicsSelect, { target: { value: "reanchoredEnu" } });
+    fireEvent.change(frameSelect, { target: { value: "reanchoredEnu" } });
     expect(fittingSelect.value).toBe("shooting");
     expect(fittingSelect.querySelectorAll("option").length).toBe(1);
     expect(fittingSelect.disabled).toBe(true);
 
     // Local ENU @ target is a continuous RHS too -> all three fittings, like
     // geodetic.  (Its dynamics differ; the transcription is free to vary.)
-    fireEvent.change(dynamicsSelect, { target: { value: "localEnu" } });
+    fireEvent.change(frameSelect, { target: { value: "localEnu" } });
     expect(fittingSelect.querySelectorAll("option").length).toBe(3);
     expect(fittingSelect.disabled).toBe(false);
     fireEvent.change(fittingSelect, { target: { value: "hermiteSimpson" } });
     expect(fittingSelect.value).toBe("hermiteSimpson");
+  });
+
+  it("preserves the hidden Advanced axes across a Constraints toggle", async () => {
+    // REGRESSION: the panel holds the optimizer AXES as state (not the composed wire string, which
+    // can't encode frame/transport/normalized in constrained mode). So picking a non-default frame,
+    // flipping Constraints to procedure and back, must return the SAME frame — not silently reset.
+    render(<PilotPanel />);
+    expect(await screen.findByText("A320")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
+
+    const constraintsSelect = screen.getByRole("combobox", { name: "Constraints" }) as HTMLSelectElement;
+    const frameSelect = screen.getByRole("combobox", { name: "Frame" }) as HTMLSelectElement;
+
+    fireEvent.change(constraintsSelect, { target: { value: "none" } });
+    fireEvent.change(frameSelect, { target: { value: "localEnu" } });
+    expect(frameSelect.value).toBe("localEnu");
+
+    fireEvent.change(constraintsSelect, { target: { value: "procedure" } });   // frame locked/hidden
+    fireEvent.change(constraintsSelect, { target: { value: "none" } });        // ...and back
+    expect(frameSelect.value).toBe("localEnu");                                 // choice survived
   });
 
   it("clamps trajectory target speed and heading to threshold constraints", async () => {
@@ -524,10 +554,10 @@ describe("PilotPanel trajectory play mode", () => {
     fireEvent.blur(headingInput);
     fireEvent.click(within(targetEditor).getByRole("button", { name: "Close" }));
 
-    // Default optimizer is the multiphase mode (needs an RNAV approach); this test only checks
-    // target clamping, so use the plain geodetic optimizer.
-    fireEvent.change(screen.getByRole("combobox", { name: "Dynamics" }), {
-      target: { value: "geodetic" },
+    // Default optimizer is the procedure-constrained mode (needs an RNAV approach); this
+    // test only checks target clamping, so switch to the unconstrained (direct) optimizer.
+    fireEvent.change(screen.getByRole("combobox", { name: "Constraints" }), {
+      target: { value: "none" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Optimize" }));
 
@@ -613,9 +643,9 @@ describe("PilotPanel trajectory play mode", () => {
 
     expect(await screen.findByText("A320")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
-    // Default is the multiphase mode; this test plays a plain (unconstrained) optimized run.
-    fireEvent.change(screen.getByRole("combobox", { name: "Dynamics" }), {
-      target: { value: "geodetic" },
+    // Default is the procedure-constrained mode; this test plays a plain (unconstrained) run.
+    fireEvent.change(screen.getByRole("combobox", { name: "Constraints" }), {
+      target: { value: "none" },
     });
     fireEvent.click(await screen.findByRole("button", { name: "Optimize" }));
 
@@ -694,9 +724,9 @@ describe("PilotPanel trajectory play mode", () => {
 
     expect(await screen.findByText("A320")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
-    // Default is the multiphase mode; this test exercises a plain optimized run.
-    fireEvent.change(screen.getByRole("combobox", { name: "Dynamics" }), {
-      target: { value: "geodetic" },
+    // Default is the procedure-constrained mode; this test exercises a plain optimized run.
+    fireEvent.change(screen.getByRole("combobox", { name: "Constraints" }), {
+      target: { value: "none" },
     });
     fireEvent.click(await screen.findByRole("button", { name: "Optimize" }));
 
@@ -720,25 +750,25 @@ describe("PilotPanel trajectory play mode", () => {
     expect(panel.querySelectorAll(".pilot-realtime-delta").length).toBeGreaterThan(0);
   });
 
-  it("offers a multiphase dynamics that surfaces the per-leg constraint hint", async () => {
+  it("surfaces the per-leg constraint hint when Constraints = procedure", async () => {
     render(<PilotPanel />);
     expect(await screen.findByText("A320")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
     expect(await screen.findByText("Target State")).toBeTruthy();
 
     const hint = "Per-leg constraints from the selected RNAV approach";
-    // Multiphase is the DEFAULT dynamics -> the per-leg hint is shown on open.
+    // Procedure-constrained is the DEFAULT -> the per-leg hint is shown on open.
     expect(screen.getByText(hint)).toBeTruthy();
 
-    // Switching to a non-multiphase dynamics hides it.
-    fireEvent.change(screen.getByRole("combobox", { name: "Dynamics" }), {
-      target: { value: "geodetic" },
+    // Switching Constraints to "none" (direct) hides it.
+    fireEvent.change(screen.getByRole("combobox", { name: "Constraints" }), {
+      target: { value: "none" },
     });
     expect(screen.queryByText(hint)).toBeNull();
 
-    // Switching back shows it again.
-    fireEvent.change(screen.getByRole("combobox", { name: "Dynamics" }), {
-      target: { value: "geodeticMultiphase" },
+    // Switching back to "procedure" shows it again.
+    fireEvent.change(screen.getByRole("combobox", { name: "Constraints" }), {
+      target: { value: "procedure" },
     });
     expect(screen.getByText(hint)).toBeTruthy();
   });

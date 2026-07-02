@@ -1,124 +1,68 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   runTrajectoryOptimization,
-  optimizerToParts,
-  partsToOptimizer,
-  validFittingsForDynamics,
+  decomposeOptimizer,
+  composeOptimizer,
+  validFittingsForFrame,
   type TrajectoryOptimizationRequest,
+  type OptimizerParts,
 } from "../trajectoryOptimizationClient";
 
-describe("optimizer dynamics × fitting decomposition", () => {
-  it("round-trips every direct-collocation optimizer through parts", () => {
-    const optimizers = [
-      "casadiDirectCollocation",
-      "casadiDirectCollocationTrapezoidal",
-      "casadiDirectCollocationRk4",
-      "casadiDirectCollocationReanchoredEnu",
-      "casadiDirectCollocationLocalEnu",
-      "casadiDirectCollocationLocalEnuTrapezoidal",
-      "casadiDirectCollocationLocalEnuHermiteSimpson",
-      "casadiDirectCollocationNormalized",
-      "casadiDirectCollocationNormalizedTrapezoidal",
-      "casadiDirectCollocationNormalizedRk4",
-      "casadiDirectCollocationFullTransport",
-      "casadiDirectCollocationFullTransportTrapezoidal",
-      "casadiDirectCollocationFullTransportRk4",
-      "casadiDirectCollocationNormalizedFullTransport",
-      "casadiDirectCollocationNormalizedFullTransportTrapezoidal",
-      "casadiDirectCollocationNormalizedFullTransportRk4",
-    ] as const;
-    for (const opt of optimizers) {
-      const { dynamics, fitting } = optimizerToParts(opt);
-      expect(partsToOptimizer(dynamics, fitting)).toBe(opt);
+describe("optimizer orthogonal-axis decomposition (the panel-facing API)", () => {
+  const WIRE_OPTIMIZERS = [
+    "casadiDirectCollocation",
+    "casadiDirectCollocationTrapezoidal",
+    "casadiDirectCollocationRk4",
+    "casadiDirectCollocationReanchoredEnu",
+    "casadiDirectCollocationLocalEnu",
+    "casadiDirectCollocationLocalEnuHermiteSimpson",
+    "casadiDirectCollocationFullTransport",
+    "casadiDirectCollocationNormalized",
+    "casadiDirectCollocationNormalizedFullTransport",
+    "casadiMultiphaseNormalizedFullTransport",
+    "casadiMultiphaseNormalizedFullTransportRk4",
+  ] as const;
+
+  it("round-trips every optimizer through the axes", () => {
+    for (const opt of WIRE_OPTIMIZERS) {
+      expect(composeOptimizer(decomposeOptimizer(opt))).toBe(opt);
     }
   });
 
-  it("maps geodetic + fitting to the right scheme", () => {
-    expect(partsToOptimizer("geodetic", "hermiteSimpson")).toBe("casadiDirectCollocation");
-    expect(partsToOptimizer("geodetic", "trapezoidal")).toBe("casadiDirectCollocationTrapezoidal");
-    expect(partsToOptimizer("geodetic", "shooting")).toBe("casadiDirectCollocationRk4");
-  });
-
-  it("local ENU is continuous too: takes every fitting; only re-anchored ENU is shooting-only", () => {
-    expect(validFittingsForDynamics("geodetic")).toEqual([
-      "hermiteSimpson", "trapezoidal", "shooting",
-    ]);
-    expect(validFittingsForDynamics("localEnu")).toEqual([
-      "hermiteSimpson", "trapezoidal", "shooting",
-    ]);
-    expect(validFittingsForDynamics("reanchoredEnu")).toEqual(["shooting"]);
-    // localEnu composes with each fitting.
-    expect(partsToOptimizer("localEnu", "hermiteSimpson")).toBe("casadiDirectCollocationLocalEnuHermiteSimpson");
-    expect(partsToOptimizer("localEnu", "trapezoidal")).toBe("casadiDirectCollocationLocalEnuTrapezoidal");
-    expect(partsToOptimizer("localEnu", "shooting")).toBe("casadiDirectCollocationLocalEnu");
-    // The re-anchored stepper snaps any polynomial request to shooting.
-    expect(partsToOptimizer("reanchoredEnu", "hermiteSimpson")).toBe("casadiDirectCollocationReanchoredEnu");
-  });
-
-  it("normalized geodetic is a continuous RHS: takes every fitting", () => {
-    // Same geodetic RHS, just a metric-position change of decision variables, so
-    // the normalized dynamics composes with each fitting.
-    expect(validFittingsForDynamics("geodeticNormalized")).toEqual([
-      "hermiteSimpson", "trapezoidal", "shooting",
-    ]);
-    expect(partsToOptimizer("geodeticNormalized", "hermiteSimpson")).toBe(
-      "casadiDirectCollocationNormalized",
-    );
-    expect(partsToOptimizer("geodeticNormalized", "trapezoidal")).toBe(
-      "casadiDirectCollocationNormalizedTrapezoidal",
-    );
-    expect(partsToOptimizer("geodeticNormalized", "shooting")).toBe(
-      "casadiDirectCollocationNormalizedRk4",
-    );
-    expect(optimizerToParts("casadiDirectCollocationNormalizedRk4")).toEqual({
-      dynamics: "geodeticNormalized",
-      fitting: "shooting",
+  it("splits the conflated geodetic flags into independent transport + normalized axes", () => {
+    expect(decomposeOptimizer("casadiDirectCollocation")).toEqual<OptimizerParts>({
+      constrained: false, frame: "geodetic", transport: "approx", normalized: false, fitting: "hermiteSimpson",
     });
+    expect(decomposeOptimizer("casadiDirectCollocationFullTransport")).toMatchObject({ transport: "full", normalized: false });
+    expect(decomposeOptimizer("casadiDirectCollocationNormalized")).toMatchObject({ transport: "approx", normalized: true });
+    expect(decomposeOptimizer("casadiDirectCollocationNormalizedFullTransport")).toMatchObject({ transport: "full", normalized: true });
   });
 
-  it("full-transport geodetic is a continuous RHS: takes every fitting", () => {
-    // Same geodetic RHS but the EXACT transport (adds the psi cross term the
-    // default geodetic schemes drop), so it composes with each fitting.
-    expect(validFittingsForDynamics("geodeticFullTransport")).toEqual([
-      "hermiteSimpson", "trapezoidal", "shooting",
-    ]);
-    expect(partsToOptimizer("geodeticFullTransport", "hermiteSimpson")).toBe(
-      "casadiDirectCollocationFullTransport",
-    );
-    expect(partsToOptimizer("geodeticFullTransport", "trapezoidal")).toBe(
-      "casadiDirectCollocationFullTransportTrapezoidal",
-    );
-    expect(partsToOptimizer("geodeticFullTransport", "shooting")).toBe(
-      "casadiDirectCollocationFullTransportRk4",
-    );
-    expect(optimizerToParts("casadiDirectCollocationFullTransport")).toEqual({
-      dynamics: "geodeticFullTransport",
-      fitting: "hermiteSimpson",
-    });
+  it("treats procedure constraints as a MODE, not a dynamics (forces geodetic+full+normalized)", () => {
+    const parts = decomposeOptimizer("casadiMultiphaseNormalizedFullTransport");
+    expect(parts.constrained).toBe(true);
+    expect(parts).toMatchObject({ frame: "geodetic", transport: "full", normalized: true });
+    // constrained composes to the multiphase wire name regardless of the frame/transport/normalized axes.
+    expect(composeOptimizer({ ...parts, frame: "localEnu", transport: "approx", normalized: false }))
+      .toBe("casadiMultiphaseNormalizedFullTransport");
   });
 
-  it("normalized + full-transport geodetic composes both, takes every fitting", () => {
-    // The metric-position normalization (well-conditioned decision state) and the
-    // exact transport are orthogonal, so they compose into one continuous-RHS
-    // dynamics that takes every fitting.
-    expect(validFittingsForDynamics("geodeticNormalizedFullTransport")).toEqual([
-      "hermiteSimpson", "trapezoidal", "shooting",
-    ]);
-    expect(partsToOptimizer("geodeticNormalizedFullTransport", "hermiteSimpson")).toBe(
-      "casadiDirectCollocationNormalizedFullTransport",
-    );
-    expect(partsToOptimizer("geodeticNormalizedFullTransport", "trapezoidal")).toBe(
-      "casadiDirectCollocationNormalizedFullTransportTrapezoidal",
-    );
-    expect(partsToOptimizer("geodeticNormalizedFullTransport", "shooting")).toBe(
-      "casadiDirectCollocationNormalizedFullTransportRk4",
-    );
-    expect(optimizerToParts("casadiDirectCollocationNormalizedFullTransportRk4")).toEqual({
-      dynamics: "geodeticNormalizedFullTransport",
-      fitting: "shooting",
-    });
+  it("composes the axes into the right wire name (snapping fitting where a frame is shooting-only)", () => {
+    expect(composeOptimizer({ constrained: false, frame: "geodetic", transport: "full", normalized: true, fitting: "trapezoidal" }))
+      .toBe("casadiDirectCollocationNormalizedFullTransportTrapezoidal");
+    expect(composeOptimizer({ constrained: true, frame: "geodetic", transport: "full", normalized: true, fitting: "shooting" }))
+      .toBe("casadiMultiphaseNormalizedFullTransportRk4");
+    expect(composeOptimizer({ constrained: false, frame: "reanchoredEnu", transport: "approx", normalized: false, fitting: "hermiteSimpson" }))
+      .toBe("casadiDirectCollocationReanchoredEnu");
+  });
+
+  it("re-anchored ENU is shooting-only; other frames take every fitting", () => {
+    expect(validFittingsForFrame("reanchoredEnu")).toEqual(["shooting"]);
+    expect(validFittingsForFrame("geodetic")).toEqual(["hermiteSimpson", "trapezoidal", "shooting"]);
+    expect(validFittingsForFrame("localEnu")).toEqual(["hermiteSimpson", "trapezoidal", "shooting"]);
   });
 });
+
 
 const request: TrajectoryOptimizationRequest = {
   optimizer: "singleShooting",

@@ -2299,6 +2299,61 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   cursor: help;
 }
 
+/* Collapsible "Advanced dynamics" group (frame / transport / normalization). */
+.pilot-advanced-numerics {
+  grid-column: 1 / -1;              /* span the full settings grid */
+  margin-top: 2px;
+  border-top: 1px solid #26324a;
+  padding-top: 4px;
+}
+
+.pilot-advanced-numerics > summary {
+  color: #94a3b8;
+  font-size: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.pilot-advanced-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 5px;
+  margin-top: 4px;
+  align-items: center;
+}
+
+.pilot-advanced-grid label {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pilot-advanced-grid label span {
+  color: #cbd5e1;
+  font-size: 9px;
+  line-height: 1.1;
+}
+
+.pilot-advanced-grid .pilot-advanced-checkbox {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 5px;
+}
+
+.pilot-advanced-grid .pilot-advanced-checkbox input {
+  flex: 0 0 auto;
+}
+
+.pilot-locked-hint {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  color: #94a3b8;
+  cursor: help;
+}
+
 .pilot-number-input,
 .pilot-select-input {
   display: block;

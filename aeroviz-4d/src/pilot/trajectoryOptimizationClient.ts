@@ -74,7 +74,8 @@ export type TrajectoryOptimizer =
 // (start->IAF transition + each leg), fixes pinned at the phase boundaries with
 // that leg's corridor/glidepath/floor.  It REQUIRES a procedure (the panel sends
 // the selected approach's ProcedureConstraint) and takes every fitting.
-export type OptimizerDynamics =
+// internal: the combined geodetic dynamics tag (frame×transport×normalized) behind the axis API.
+type OptimizerDynamics =
   | "geodetic"
   | "reanchoredEnu"
   | "localEnu"
@@ -133,12 +134,12 @@ const OPTIMIZER_TO_COMBO: Record<string, { dynamics: OptimizerDynamics; fitting:
  * discrete (shooting-only).  Geodetic (approx or full transport), fixed
  * local-ENU, and the normalized geodetic dynamics all refine a continuous RHS,
  * so they take every fitting. */
-export function validFittingsForDynamics(dynamics: OptimizerDynamics): OptimizerFitting[] {
+function validFittingsForDynamics(dynamics: OptimizerDynamics): OptimizerFitting[] {
   if (dynamics === "reanchoredEnu") return ["shooting"];
   return ["hermiteSimpson", "trapezoidal", "shooting"];
 }
 
-export function optimizerToParts(
+function optimizerToParts(
   optimizer: TrajectoryOptimizer,
 ): { dynamics: OptimizerDynamics; fitting: OptimizerFitting } {
   return OPTIMIZER_TO_COMBO[optimizer] ?? { dynamics: "geodetic", fitting: "hermiteSimpson" };
@@ -146,7 +147,7 @@ export function optimizerToParts(
 
 /** Compose a (dynamics, fitting) pair back into the optimizer name, snapping
  * the fitting to a valid one for the dynamics if needed. */
-export function partsToOptimizer(
+function partsToOptimizer(
   dynamics: OptimizerDynamics,
   fitting: OptimizerFitting,
 ): TrajectoryOptimizer {
@@ -155,11 +156,82 @@ export function partsToOptimizer(
   return COMBO_TO_OPTIMIZER[`${dynamics}|${chosen}`];
 }
 
+// ── Orthogonal-axis view (the UI-facing decomposition) ─────────────────────
+// The single `OptimizerDynamics` string above pre-multiplies four INDEPENDENT
+// choices; the panel exposes them separately so each is clear:
+//   constrained — the MODE: procedure-constrained (multiphase, one phase per leg,
+//                 REQUIRES a ProcedureConstraint) vs free initial→target.
+//   frame       — the base dynamics: geodetic RHS / fixed local-ENU / re-anchored ENU.
+//   transport   — geodetic only: approx (drops the ψ cross term) vs full/exact.
+//   normalized  — geodetic only: metric-position decision state (well-conditioned).
+//   fitting     — the transcription (Hermite-Simpson / trapezoidal / RK4-shooting).
+// The constrained mode forces frame=geodetic, transport=full, normalized=on (its
+// per-leg path constraints live on the metric-position state), so only `fitting`
+// is free there. These compose back into the wire string via `composeOptimizer`.
+export type OptimizerFrame = "geodetic" | "localEnu" | "reanchoredEnu";
+export type OptimizerTransport = "approx" | "full";
+export interface OptimizerParts {
+  constrained: boolean;
+  frame: OptimizerFrame;
+  transport: OptimizerTransport;
+  normalized: boolean;
+  fitting: OptimizerFitting;
+}
+
+const GEODETIC_DYNAMICS: Record<string, OptimizerDynamics> = {
+  "approx|false": "geodetic",
+  "full|false": "geodeticFullTransport",
+  "approx|true": "geodeticNormalized",
+  "full|true": "geodeticNormalizedFullTransport",
+};
+
+/** Split a wire optimizer name into the orthogonal axes the panel edits. Defined only for the
+ * editable direct-collocation / multiphase family; the 6 legacy names (casadiIpopt, transcription,
+ * …) are parse-only (see `readOptimizer`) and are never fed here — the panel holds the axes as
+ * state and seeds them from a canonical default, so a legacy name can never reach the editor. */
+export function decomposeOptimizer(optimizer: TrajectoryOptimizer): OptimizerParts {
+  const { dynamics, fitting } = optimizerToParts(optimizer);
+  if (dynamics === "geodeticMultiphase") {
+    return { constrained: true, frame: "geodetic", transport: "full", normalized: true, fitting };
+  }
+  if (dynamics === "reanchoredEnu" || dynamics === "localEnu") {
+    return { constrained: false, frame: dynamics, transport: "approx", normalized: false, fitting };
+  }
+  return {
+    constrained: false,
+    frame: "geodetic",
+    transport: dynamics.includes("FullTransport") ? "full" : "approx",
+    normalized: dynamics.includes("Normalized"),
+    fitting,
+  };
+}
+
+/** Compose the orthogonal axes back into the wire optimizer name. In constrained
+ * mode the frame/transport/normalized are forced (only the fitting varies). */
+export function composeOptimizer(parts: OptimizerParts): TrajectoryOptimizer {
+  if (parts.constrained) return partsToOptimizer("geodeticMultiphase", parts.fitting);
+  const dynamics: OptimizerDynamics =
+    parts.frame === "reanchoredEnu" || parts.frame === "localEnu"
+      ? parts.frame
+      : GEODETIC_DYNAMICS[`${parts.transport}|${parts.normalized}`];
+  return partsToOptimizer(dynamics, parts.fitting);
+}
+
+/** Fittings valid for a base frame: the re-anchored ENU stepper is discrete
+ * (shooting-only); the continuous frames take every fitting. */
+export function validFittingsForFrame(frame: OptimizerFrame): OptimizerFitting[] {
+  return frame === "reanchoredEnu" ? ["shooting"] : ["hermiteSimpson", "trapezoidal", "shooting"];
+}
+
 export interface TrajectoryOptimizationRequest {
   optimizer: TrajectoryOptimizer;
   initialState: PilotResetState;
   targetState: PilotResetState;
+  /** Control (piecewise-constant) segments for the FREE/direct solve (total over the trajectory). */
   nSegments: number;
+  /** Control segments PER LEG for the procedure-constrained (multiphase) solve; the total is
+   * legs × this. Only read by the multiphase backend path; omit for the direct solve. */
+  nSegPerPhase?: number;
   arrivalTimeS: number;
   dtS: number;
   maxIterations: number;
