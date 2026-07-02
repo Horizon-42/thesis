@@ -6,6 +6,7 @@ boundaries (exact membership, no along-track partition); free per-phase time.
 
 import math
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -25,6 +26,7 @@ from aerodynamic_model.casadi_simulator import make_geodetic_step_integrator  # 
 from aircraft.aircraft_sets import A320  # noqa: E402
 from aircraft.aero_params import aero_params_for_aircraft  # noqa: E402
 from multiphase_collocation_optimizer import MultiphaseCollocationOptimizer  # noqa: E402
+from casadi_direct_collocation_optimizer import CasadiDirectCollocationOptimizer  # noqa: E402
 
 
 def _final_segment(ltp, faf):
@@ -188,3 +190,62 @@ def test_multiphase_solves_a_near_sea_level_threshold():
     ne = np.array([frame.to_ne(s[0], s[1]) for s in states])
     assert float(np.hypot(*(ne[-1] - LTP))) < 1.0                        # threshold reached
     assert states[-1][2] == pytest.approx(target.altitude, abs=1.0)      # lands at the low target alt
+
+
+def _shared_scenarios(headings):
+    """Build ``(initial, target, segments)`` per heading from rollout-reachable straight-ins, so
+    both optimisers are fed the SAME scenarios (target = end of the rollout; segments = the derived
+    IAF->IF->FAF->LTP approach)."""
+    scenarios = []
+    for h in headings:
+        init = GeodeticState(35.60, -78.50, 1500.0, 90.0, math.radians(h), math.radians(-3.0),
+                             A320.mass.max_takeoff_kg)
+        S = _rollout_samples(init, 120.0)
+        target = GeodeticState(*S[-1][:6], A320.mass.max_takeoff_kg)
+        frame = ac.TargetFrame(target.latitude, target.longitude)
+        segments, _FAF, _LTP = _approach(S, frame)
+        scenarios.append((init, target, segments))
+    return scenarios
+
+
+def test_multiphase_vs_single_phase_speed_and_success_rate(capsys):
+    """Compare, on ONE shared scenario set, the two optimisers the pipeline actually uses:
+    the single-phase ``CasadiDirectCollocationOptimizer`` (unconstrained initial->target — the
+    ``asdb`` / ``runway`` modes) vs the ``MultiphaseCollocationOptimizer`` (procedure-constrained
+    — the ``runway_cons`` mode). Reports each one's success rate + solve time; both must solve the
+    shared (reachable) set. The multiphase does strictly more work (one phase per leg + corridor /
+    glidepath / FAF-intercept constraints), so this quantifies that cost on identical inputs."""
+    scenarios = _shared_scenarios([40.0, 135.0, -100.0])   # mix of on- and off-fixed-point headings
+    max_duration = 120.0 * 1.6
+
+    def benchmark(make_optimizer):
+        solved, total_s = 0, 0.0
+        for init, target, segments in scenarios:
+            optimizer = make_optimizer(segments)
+            started = time.perf_counter()
+            try:
+                optimizer.optimize_free_time(init, target, max_duration)
+                solved += 1
+            except Exception:      # noqa: BLE001 — a failed solve counts against the success rate
+                pass
+            total_s += time.perf_counter() - started
+        return solved, total_s
+
+    # single-phase config mirrors scenario_optimization._optimize_one_scenario (the asdb/runway path)
+    single_ok, single_s = benchmark(
+        lambda _segments: CasadiDirectCollocationOptimizer(
+            8, 1.0, 2000.0, A320, collocation_scheme="trapezoidalNormalizedFullTransport",
+        )
+    )
+    multi_ok, multi_s = benchmark(lambda segments: MultiphaseCollocationOptimizer(A320, segments))
+
+    n = len(scenarios)
+    with capsys.disabled():
+        print(f"\n  optimizer comparison over {n} shared scenarios (success | total | per-scenario):")
+        print(f"    single-phase (unconstrained): {single_ok}/{n} | {single_s:5.2f}s | {single_s / n:.2f}s")
+        print(f"    multiphase   (constrained)  : {multi_ok}/{n} | {multi_s:5.2f}s | {multi_s / n:.2f}s")
+
+    # Both approaches must solve the shared, reachable set; timings must be recorded.
+    assert single_ok == n
+    assert multi_ok == n
+    assert single_s > 0.0 and multi_s > 0.0
