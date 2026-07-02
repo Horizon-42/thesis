@@ -15,6 +15,7 @@ vi.mock("../ControlPanel", () => ({ default: () => <div>CONTROL_PANEL</div> }));
 vi.mock("../FlightTable", () => ({
   default: ({ flightIds }: { flightIds: string[] }) => <div>FLIGHTS:{flightIds.length}</div>,
 }));
+vi.mock("../OptimizationSummary", () => ({ default: () => <div>OPT_SUMMARY</div> }));
 vi.mock("../PilotPanel", () => ({
   default: ({ mode }: { mode: string }) => <div>PILOT:{mode}</div>,
 }));

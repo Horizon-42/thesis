@@ -19,6 +19,7 @@ import {
   airportComparisonIndexUrl,
   isComparisonIndex,
   type ComparisonGroup,
+  type OptimizationStats,
 } from "../data/airportData";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 
@@ -37,6 +38,8 @@ export interface FlightOptimizerData {
   byFlightId: Map<string, FlightOptimizerDatum>;
   /** True when the comparison overlay is on and a category is selected → show the optimized column. */
   comparisonActive: boolean;
+  /** The loaded category's optimization stats (solve rate + placeholders), or null. */
+  stats: OptimizationStats | null;
 }
 
 const EMPTY: Map<string, FlightOptimizerDatum> = new Map();
@@ -52,10 +55,12 @@ export function useFlightOptimizerData(): FlightOptimizerData {
   const comparisonActive = trajectoryComparison && !!trajectoryComparisonCategory;
 
   const [byFlightId, setByFlightId] = useState<Map<string, FlightOptimizerDatum>>(EMPTY);
+  const [stats, setStats] = useState<OptimizationStats | null>(null);
 
   useEffect(() => {
     if (!activeAirportCode || !categoryDir) {
       setByFlightId(EMPTY);
+      setStats(null);
       return;
     }
 
@@ -77,6 +82,7 @@ export function useFlightOptimizerData(): FlightOptimizerData {
           });
         }
         setByFlightId(map);
+        setStats(data.optimization ?? null);
       })
       .catch((error) => {
         if (cancelled) return;
@@ -84,6 +90,7 @@ export function useFlightOptimizerData(): FlightOptimizerData {
           console.warn("[useFlightOptimizerData] failed to load comparison index", error);
         }
         setByFlightId(EMPTY);
+        setStats(null);
       });
 
     return () => {
@@ -91,5 +98,5 @@ export function useFlightOptimizerData(): FlightOptimizerData {
     };
   }, [activeAirportCode, categoryDir]);
 
-  return useMemo(() => ({ byFlightId, comparisonActive }), [byFlightId, comparisonActive]);
+  return useMemo(() => ({ byFlightId, comparisonActive, stats }), [byFlightId, comparisonActive, stats]);
 }

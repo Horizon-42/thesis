@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDuration, formatSpeed, formatMass } from "../flightListFormat";
+import { formatDuration, formatSpeed, formatMass, formatPercent } from "../flightListFormat";
 
 describe("flightListFormat", () => {
   it("formats durations as m:ss and h:mm:ss", () => {
@@ -25,5 +25,12 @@ describe("flightListFormat", () => {
     expect(formatMass(66300)).toBe("66.3");
     expect(formatMass(6804)).toBe("6.8");
     expect(formatMass(null)).toBe("—");
+  });
+
+  it("formats a fraction as a percentage", () => {
+    expect(formatPercent(0.6267)).toBe("62.7%");
+    expect(formatPercent(1)).toBe("100.0%");
+    expect(formatPercent(null)).toBe("—");
+    expect(formatPercent(undefined)).toBe("—");
   });
 });

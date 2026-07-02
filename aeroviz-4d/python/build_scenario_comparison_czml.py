@@ -490,6 +490,18 @@ def main() -> None:
         failed = sum(1 for r in records if r["status"] != "solved")
         print(f"✓ {out_path.name}: {len(records)} group(s), {failed} unsolved (red) -> {len(czml)} packets")
 
+    # Optimization stats taken straight from the run's summary.json (NOT recomputed from the
+    # CZML/records). Only the solve rate (converged / attempted) is known here; the evaluation
+    # package will later add successRate / avgStateError / avgTimeS to this same object.
+    solved = summary.get("solved")
+    total = summary.get("total")
+    index["optimization"] = {
+        "total": total,
+        "solved": solved,
+        "failed": summary.get("failed"),
+        "solveRate": (solved / total) if isinstance(solved, (int, float)) and total else None,
+    }
+
     index_path = out_dir / "comparison_index.json"
     index_path.write_text(json.dumps(index, indent=2), encoding="utf-8")
     rate = summary.get("failure_rate")

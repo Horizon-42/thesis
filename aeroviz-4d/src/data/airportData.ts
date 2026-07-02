@@ -169,10 +169,26 @@ export interface ComparisonGroup {
   czml: string;
 }
 
+/**
+ * Optimization-run stats for one category, taken from its summary.json (not recomputed).
+ * `solveRate` (converged / attempted) is known now; the rest are filled by the future
+ * evaluation package.
+ */
+export interface OptimizationStats {
+  total?: number | null;
+  solved?: number | null;
+  failed?: number | null;
+  solveRate?: number | null;
+  successRate?: number | null;
+  avgStateErrorM?: number | null;
+  avgTimeS?: number | null;
+}
+
 export interface ComparisonIndex {
   epoch: string;
   startHidden: boolean;
   groups: ComparisonGroup[];
+  optimization?: OptimizationStats;
 }
 
 export function isComparisonGroup(value: unknown): value is ComparisonGroup {

@@ -27,3 +27,9 @@ export function formatMass(kg: number | null): string {
   if (kg == null || !Number.isFinite(kg)) return "—";
   return `${(kg / 1000).toFixed(1)}`;
 }
+
+/** Fraction (0..1) → "62.7%". Returns "—" for null/undefined/non-finite. */
+export function formatPercent(fraction: number | null | undefined): string {
+  if (fraction == null || !Number.isFinite(fraction)) return "—";
+  return `${(fraction * 100).toFixed(1)}%`;
+}
