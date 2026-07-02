@@ -97,10 +97,14 @@ class Plan:
     """The resolved paths + the three commands for one pipeline run (pure data, so
     it can be previewed with --dry-run or asserted in a test)."""
 
-    def __init__(self, airport: str, target_type: str, with_constraint: bool) -> None:
+    def __init__(self, airport: str, target_type: str, with_constraint: bool,
+                 jobs: int = 0) -> None:
         self.airport = airport.strip().upper()
         self.target_type = target_type
         self.with_constraint = with_constraint
+        # Parallel optimizer worker processes (passed through to scenario_optimization's
+        # --jobs; 0 = auto = half the CPU cores, 1 = serial).
+        self.jobs = jobs
         self.threshold = target_type == "runway"
         self.category = category_key(target_type, with_constraint)
         self.label = _CATEGORY_LABELS[self.category]
@@ -133,6 +137,7 @@ class Plan:
             py, str(OPT_SCRIPT),
             "--scenarios", str(self.scenarios),
             "--output-dir", str(self.opt_dir),
+            "--jobs", str(self.jobs),
         ]
         if self.with_constraint:
             # Constrained-IAF: optimize via the runway's RNAV(GPS) procedure (one
@@ -162,10 +167,11 @@ def run_for_airport(
     *,
     dry_run: bool,
     skip_optimize: bool,
+    jobs: int = 0,
 ) -> bool:
     """Run (or preview) the pipeline for one airport. Returns True if it ran /
     would run, False if it was skipped (missing input and nothing to reuse)."""
-    plan = Plan(airport, target_type, with_constraint)
+    plan = Plan(airport, target_type, with_constraint, jobs=jobs)
     reuse = skip_optimize and plan.optimization_exists()
 
     mode = "reuse optimization → CZML only" if reuse else "full pipeline"
@@ -215,6 +221,11 @@ def main() -> None:
         help="enforce the runway's RNAV(GPS) procedure (constrained-IAF optimization)",
     )
     parser.add_argument(
+        "--jobs", type=int, default=0,
+        help="parallel optimizer worker processes (passed to scenario_optimization --jobs; "
+             "0 = auto = half the CPU cores, 1 = serial)",
+    )
+    parser.add_argument(
         "--skip-optimize", action="store_true",
         help="if this airport+category already has an optimization result "
              "(summary.json), skip steps 1–2 and only (re)build the comparison CZML; "
@@ -239,7 +250,7 @@ def main() -> None:
     for airport in airports:
         if run_for_airport(
             airport, args.target_type, args.with_constraint,
-            dry_run=args.dry_run, skip_optimize=args.skip_optimize,
+            dry_run=args.dry_run, skip_optimize=args.skip_optimize, jobs=args.jobs,
         ):
             ran += 1
 

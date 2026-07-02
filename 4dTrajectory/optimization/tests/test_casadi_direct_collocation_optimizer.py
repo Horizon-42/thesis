@@ -400,6 +400,39 @@ def test_optimize_free_time_solves_real_ipopt_problem():
     )
 
 
+def test_altitude_floor_is_a_margin_below_the_target():
+    # REGRESSION (KMSY / KSMF). The altitude state lower bound must be a margin BELOW the target
+    # (the trajectory's lowest point), anchored to the target — NOT an absolute MSL constant. The
+    # old floor (``threshold_crossing + 10`` ≈ 25 m) sat ABOVE a near-sea-level threshold (KMSY
+    # ≈ 16 m), so the pinned terminal contradicted the bound and every solve was infeasible.
+    module = load_module()
+    assert module.altitude_floor_m(1000.0) == 1000.0 - module.ALTITUDE_FLOOR_MARGIN_M
+    assert module.altitude_floor_m(16.0) < 16.0      # below a near-sea-level threshold
+    assert module.altitude_floor_m(150.0) < 150.0    # and below a high-elevation one
+
+
+def test_optimize_free_time_solves_a_near_sea_level_target():
+    # REGRESSION (KMSY / KSMF). Same solve as above but with the endpoints near sea level, so the
+    # target altitude (~20 m) is BELOW the old absolute 25 m floor. The target-relative floor makes
+    # this solve feasible (it raised Infeasible before the fix) and it must land on the low target.
+    module = load_module()
+    n_segments, feasible_duration, max_duration = 4, 2.0, 6.0
+    speed = kt_to_ms(C172.approach.reference_speed_kt) + 10.0
+    state = GeodeticState(
+        latitude=51.1139, longitude=-114.0203, altitude=20.0,   # near sea level (< old 25 m floor)
+        V=speed, psi=0.0, gamma=0.0, m=C172.mass.max_takeoff_kg,
+    )
+    optimizer = module.CasadiDirectCollocationOptimizer(
+        n_segments=n_segments, dt=0.2, max_duration=max_duration, aircraft=C172,
+    )
+    target = _propagate_with_geodetic_rhs(state, optimizer, feasible_duration)
+    assert target.altitude < 25.0                                # below the old absolute floor
+
+    final_time, controls, states = optimizer.optimize_free_time(state, target, max_duration)
+    assert optimizer.free_time_solver.stats()["success"]
+    assert states[-1][2] == pytest.approx(target.altitude, abs=1e-2)   # lands on the low target alt
+
+
 def test_optimize_free_time_raw_is_playback_consistent():
     """The geodetic transcription shares ONE continuous RHS with the
     playback integrator, so the raw (un-polished) controls already land

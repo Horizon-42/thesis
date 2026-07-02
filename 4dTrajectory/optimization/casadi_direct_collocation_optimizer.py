@@ -434,6 +434,24 @@ def make_state_bounds(min_altitude: float, min_velocity: float):
     )
 
 
+# The altitude state lower bound is a NUMERICAL search box, not a physical/operational limit:
+# the glidepath window + the pinned terminal already enforce the real low-altitude protection.
+# It only has to sit safely BELOW the destination threshold (the trajectory's lowest point) so
+# the pinned terminal state never contradicts it. It MUST therefore be anchored to the target,
+# not an absolute MSL constant: the target altitude is ``field_elevation + threshold_crossing``,
+# so an absolute floor (the old ``threshold_crossing + 10`` ≈ 25 m) wrongly sat ABOVE the target
+# for near-sea-level airports (KMSY threshold ≈ 16 m), making every solve genuinely infeasible.
+# The margin is generous barrier breathing room: a floor at/just-below the target puts IPOPT's
+# log-barrier ``-μ·ln(alt - lb)`` right on the pinned terminal and stiffens the solve, so the box
+# is kept well clear of it (the floor never binds — it is not an operational minimum).
+ALTITUDE_FLOOR_MARGIN_M = 300.0
+
+
+def altitude_floor_m(target_altitude_m: float) -> float:
+    """Altitude state lower bound: a generous margin below the destination threshold."""
+    return target_altitude_m - ALTITUDE_FLOOR_MARGIN_M
+
+
 # Boundary bookkeeping is now just a units conversion: ``GeodeticState``
 # carries lat/lon in degrees, the RHS and decision variables in radians.
 # There is no tangent-plane projection any more, so nothing here can
@@ -1074,7 +1092,10 @@ class CasadiDirectCollocationOptimizer:
             "min_terminal_speed": (
                 min_speed_ms if min_speed_ms is not None else aircraft.approach.reference_speed_ms
             ),
-            "min_altitude": aircraft.approach.threshold_crossing_height_m + 10.0,
+            # Placeholder floor: the compiled NLP needs SOME numeric altitude lower bound, but
+            # the real floor is target-relative and only known at solve time, so it is applied
+            # then via ``_lbw_with_target_altitude_floor`` (see ``altitude_floor_m``).
+            "min_altitude": altitude_floor_m(0.0),
             "min_duration": _DEFAULT_MIN_DURATION_S,
         }
 
@@ -1225,7 +1246,7 @@ class CasadiDirectCollocationOptimizer:
         # with a placeholder upper bound (1e6); we tighten it here to
         # the caller's max_duration so IPOPT does not search outside
         # the operational window.
-        lbw = list(self.free_time_lbw)
+        lbw = self._lbw_with_target_altitude_floor(self.free_time_lbw, target_state.altitude)
         ubw = list(self.free_time_ubw)
         ubw[-1] = max_duration
         # If the caller asked for an unrealistically short max_duration,
@@ -1276,12 +1297,25 @@ class CasadiDirectCollocationOptimizer:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _lbw_with_target_altitude_floor(self, base_lbw, target_altitude_m):
+        """Copy ``base_lbw`` with every state node's altitude lower bound set to a margin below
+        the target (the trajectory's lowest point). The NLP is compiled once with a placeholder
+        floor; the real, target-relative floor is only known at solve time (see
+        ``altitude_floor_m``)."""
+        lbw = list(base_lbw)
+        floor = altitude_floor_m(float(target_altitude_m))
+        base = self.n_segments * CONTROL_DIM
+        for i in range(self.n_segments * self.state_substeps):
+            lbw[base + i * STATE_DIM + _ALT] = floor
+        return lbw
+
     def _solve_fixed_time_raw(self, initial_param, target_param, duration, x0):
         """Run the fixed-time solver and return the raw decision vector
         ``[controls(3N), states(6*N*M)]`` (radians).  Raises on failure."""
         p = ca.vertcat(initial_param, target_param, duration)
+        lbw = self._lbw_with_target_altitude_floor(self.lbw, target_param[_ALT])
         sol = self.solver(
-            x0=x0, lbx=self.lbw, ubx=self.ubw, lbg=self.lbg, ubg=self.ubg, p=p,
+            x0=x0, lbx=lbw, ubx=self.ubw, lbg=self.lbg, ubg=self.ubg, p=p,
         )
         stats = self.solver.stats()
         if not stats.get("success", False):

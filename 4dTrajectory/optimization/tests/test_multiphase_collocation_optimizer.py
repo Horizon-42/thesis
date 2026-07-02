@@ -166,3 +166,25 @@ def test_multiphase_solves_a_non_fixed_point_runway_heading(heading_deg):
     ne = np.array([frame.to_ne(s[0], s[1]) for s in states])
     assert float(np.hypot(*(ne[-1] - LTP))) < 1.0                        # threshold reached
     assert _faf_intercept_deg(states, frame, FAF) <= 30.0 + 1e-6         # aligned at the FAF
+
+
+def test_multiphase_solves_a_near_sea_level_threshold():
+    # REGRESSION (KMSY / KSMF). The optimiser's altitude state lower bound must sit BELOW the
+    # destination threshold, anchored to the target — not an absolute MSL constant. The old floor
+    # was ``threshold_crossing_height + 10`` ≈ 25 m MSL, which for a near-sea-level airport lands
+    # ABOVE the target (KMSY threshold ≈ 16 m): the pinned terminal altitude then contradicts the
+    # bound and EVERY solve is genuinely infeasible. Here the target ends ~17.8 m MSL (below the old
+    # 25 m floor); it must solve and actually land on that low threshold altitude.
+    init = GeodeticState(35.60, -78.50, 620.0, 90.0, math.radians(40.0), math.radians(-3.0),
+                         A320.mass.max_takeoff_kg)
+    S = _rollout_samples(init, 120.0)
+    target = GeodeticState(*S[-1][:6], A320.mass.max_takeoff_kg)
+    assert target.altitude < 25.0                                        # below the old absolute floor
+    frame = ac.TargetFrame(target.latitude, target.longitude)
+    segments, FAF, LTP = _approach(S, frame)
+
+    opt = MultiphaseCollocationOptimizer(A320, segments)
+    _t, _c, states = opt.optimize_free_time(init, target, 120.0 * 1.6)   # raised Infeasible pre-fix
+    ne = np.array([frame.to_ne(s[0], s[1]) for s in states])
+    assert float(np.hypot(*(ne[-1] - LTP))) < 1.0                        # threshold reached
+    assert states[-1][2] == pytest.approx(target.altitude, abs=1.0)      # lands at the low target alt

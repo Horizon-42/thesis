@@ -147,7 +147,7 @@ class MultiphaseCollocationOptimizer:
             self.aero_params.S, self.aero_params.Cl_max, self.aero_params.Cd0,
             self.aero_params.k, self.aero_params.stall_threshold, self.aero_params.k_stall,
         )
-        meta = self._aircraft_meta()
+        meta = self._aircraft_meta(target_state.altitude)
         state_lb, state_ub = _dc._normalized_position_bounds(
             *_dc.make_state_bounds(meta["min_altitude"], meta["min_terminal_speed"]), self.scheme
         )
@@ -334,7 +334,7 @@ class MultiphaseCollocationOptimizer:
             phys_row[3], phys_row[4], phys_row[5],
         ]
 
-    def _aircraft_meta(self):
+    def _aircraft_meta(self, target_altitude_m):
         a = self.aircraft
         return {
             "max_thrust": a.engine.max_thrust_total_n,
@@ -344,7 +344,11 @@ class MultiphaseCollocationOptimizer:
                 self.min_speed_ms if self.min_speed_ms is not None
                 else a.approach.reference_speed_ms
             ),
-            "min_altitude": a.approach.threshold_crossing_height_m + 10.0,
+            # Altitude floor: a generous margin below the destination threshold (the trajectory's
+            # lowest point), anchored to the target so it is correct at every field elevation —
+            # an absolute floor sat above the target for near-sea-level airports and made every
+            # constrained solve infeasible (see ``_dc.altitude_floor_m``).
+            "min_altitude": _dc.altitude_floor_m(target_altitude_m),
             "min_duration": 1.0,
         }
 
