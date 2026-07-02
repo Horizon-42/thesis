@@ -189,15 +189,39 @@ def _entity_last_time(entity: dict[str, Any] | None) -> float:
 
 # ── Batch: one combined comparison CZML per runway (from a summary.json) ───────
 
-_INITIAL_STATE_KEYS = ("lat", "lon", "alt", "V", "psi", "gamma")
+_INITIAL_STATE_KEYS = ("lat", "lon", "alt", "V", "psi", "gamma", "m")
 
 
 def _initial_state(states: list[dict[str, Any]]) -> dict[str, float] | None:
-    """The first sample's kinematic state (used as a group's ``initialState`` in the index)."""
+    """The first sample's kinematic state (used as a group's ``initialState`` in the index).
+
+    Includes ``m`` (the optimizer's aircraft mass, in kg) so the frontend flight list can show
+    it; mass is (near-)constant over an approach, so the initial sample is representative.
+    """
     if not states:
         return None
     first = states[0]
     return {key: first[key] for key in _INITIAL_STATE_KEYS}
+
+
+def scenario_initial_map(scenario_paths: list[str | Path]) -> dict[tuple[str, str], dict[str, float]]:
+    """Map ``(flightId, runway)`` → the scenario's initial state, from one or more scenario files.
+
+    The ``FlightScenario`` initial state (``V``/``m``/…) is derived from the observed track and the
+    resolved aircraft **before** optimization, so it exists for EVERY flight — solved or failed —
+    and is the single source the optimizer's own initial state was built from. This lets the flight
+    list show V + mass for failed optimizations too, consistent with the solved ones. The initial
+    state is target-independent, so multiple scenario files (track-end / threshold) agree; later
+    files fill any gaps in earlier ones.
+    """
+    out: dict[tuple[str, str], dict[str, float]] = {}
+    for path in scenario_paths:
+        scenarios = json.loads(Path(path).read_text(encoding="utf-8"))
+        for scenario in scenarios:
+            source = scenario.get("source", {})
+            key = (source.get("id"), source.get("runway") or "unknown")
+            out.setdefault(key, scenario["initial"])
+    return out
 
 
 def _traj_properties(
@@ -214,6 +238,20 @@ def _traj_properties(
     }
 
 
+def _flight_facts(
+    initial_state: dict[str, float] | None,
+    scenario_initial: dict[str, float] | None,
+) -> tuple[float | None, float | None]:
+    """``(initialVMps, massKg)`` for a group — the optimizer's own initial state when solved,
+    else the scenario's (so failed optimizations still get V + mass)."""
+    source = initial_state if initial_state else scenario_initial
+    if not source:
+        return None, None
+    v = source.get("V")
+    m = source.get("m")
+    return (float(v) if v is not None else None), (float(m) if m is not None else None)
+
+
 def build_runway_comparison(
     results: list[dict[str, Any]],
     states_dir: str | Path,
@@ -221,6 +259,7 @@ def build_runway_comparison(
     *,
     airport: str = "UNK",
     start_hidden: bool = True,
+    scenario_initial: dict[tuple[str, str], dict[str, float]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Combined CZML for one runway **plus** its index records (every flight on one map).
 
@@ -286,10 +325,13 @@ def build_runway_comparison(
                 show=show))
             entity_ids.append(f"sim-{group}")
 
+            initial_state = _initial_state(optimizer_states or simulator_states)
+            scen = (scenario_initial or {}).get((flight_id, runway))
+            initial_v, mass_kg = _flight_facts(initial_state, scen)
             index_records.append({
                 "group": group, "flightId": flight_id, "runway": runway, "airport": airport,
                 "status": "solved", "finalTimeS": float(state_data.get("final_time_s", 0.0)),
-                "initialState": _initial_state(optimizer_states or simulator_states),
+                "initialState": initial_state, "initialVMps": initial_v, "massKg": mass_kg,
                 "entities": entity_ids,
             })
         else:
@@ -302,9 +344,14 @@ def build_runway_comparison(
             if reference is not None:
                 entities.append(reference)
                 entity_ids.append(f"ref-{group}")
+            # A failed optimization has no states, but the scenario still carries the resolved
+            # aircraft mass + observed V — surface them so the flight list shows them (and flags red).
+            scen = (scenario_initial or {}).get((flight_id, runway))
+            initial_v, mass_kg = _flight_facts(None, scen)
             index_records.append({
                 "group": group, "flightId": flight_id, "runway": runway, "airport": airport,
                 "status": "failed", "finalTimeS": None, "initialState": None,
+                "initialVMps": initial_v, "massKg": mass_kg,
                 "entities": entity_ids,
             })
 
@@ -382,6 +429,12 @@ def main() -> None:
         "--category-label", default=None,
         help="display label for --category (defaults to the key)",
     )
+    parser.add_argument(
+        "--scenarios", default=None,
+        help="batch mode: comma-separated *_scenarios.json path(s). Their per-flight initial "
+             "state (V + mass) is added to every index record — including FAILED optimizations "
+             "(which have no states), so the flight list shows V + mass for those too.",
+    )
     args = parser.parse_args()
 
     if args.state_file:
@@ -411,6 +464,11 @@ def main() -> None:
             adsb_cache[airport] = _load_adsb(airport, None)
         return adsb_cache[airport]
 
+    scenario_initial = (
+        scenario_initial_map([p.strip() for p in args.scenarios.split(",") if p.strip()])
+        if args.scenarios else None
+    )
+
     groups = group_results_by_runway(summary, fallback_airport=args.airport)
     index: dict[str, Any] = {
         "epoch": EPOCH.isoformat(),
@@ -422,6 +480,7 @@ def main() -> None:
         czml, records = build_runway_comparison(
             results, states_dir, adsb_for(airport),
             airport=airport, start_hidden=not args.start_visible,
+            scenario_initial=scenario_initial,
         )
         out_path = out_dir / f"comparison_{airport}_{runway}.czml"
         out_path.write_text(json.dumps(czml, indent=2), encoding="utf-8")

@@ -153,6 +153,11 @@ class Plan:
             "--category", self.category,
             "--category-label", self.label,
         ]
+        # Feed the scenario initial states so the index carries V + mass for EVERY flight —
+        # including failed optimizations (which have no states file). Target-independent, so the
+        # category's own scenario file (track-end / threshold) is the right one.
+        if self.scenarios.exists():
+            comparison_cmd += ["--scenarios", str(self.scenarios)]
         return [
             ("1/3 scenarios", scenarios_cmd),
             ("2/3 optimization", optimize_cmd),

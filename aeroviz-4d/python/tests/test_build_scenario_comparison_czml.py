@@ -113,7 +113,15 @@ def test_build_runway_comparison_solved_three_paths_failed_red(tmp_path):
         ADSB_CZML[1],
         {**ADSB_CZML[1], "id": "DAL1312", "name": "DAL1312"},
     ]
-    czml, index = build_runway_comparison(results, tmp_path, adsb, airport="KRDU")
+    # The scenario map carries every flight's initial V + mass (built before optimization), so a
+    # FAILED optimization still gets V + mass in the index.
+    scenario_initial = {
+        ("AFR074", "05L"): {"V": 130.0, "m": 78000.0},
+        ("DAL1312", "05L"): {"V": 122.5, "m": 61000.0},
+    }
+    czml, index = build_runway_comparison(
+        results, tmp_path, adsb, airport="KRDU", scenario_initial=scenario_initial
+    )
     ids = [p["id"] for p in czml[1:]]
 
     # solved flight -> three entities, ids namespaced by {flightId}_{runway} (collision-free)
@@ -136,7 +144,18 @@ def test_build_runway_comparison_solved_three_paths_failed_red(tmp_path):
     assert solved_rec["status"] == "solved"
     assert solved_rec["entities"] == ["ref-AFR074_05L", "opt-AFR074_05L", "sim-AFR074_05L"]
     assert solved_rec["initialState"]["lat"] == STATES[0]["lat"]
-    assert by_group["DAL1312_05L"]["status"] == "failed"
+    # mass is carried so the frontend flight list can show the optimizer's aircraft mass
+    assert solved_rec["initialState"]["m"] == STATES[0]["m"]
+    # solved: top-level V + mass come from the optimizer's own initial state
+    assert solved_rec["initialVMps"] == STATES[0]["V"]
+    assert solved_rec["massKg"] == STATES[0]["m"]
+
+    # failed: no states, but the scenario still supplies V + mass (so the list shows + reds them)
+    failed_rec = by_group["DAL1312_05L"]
+    assert failed_rec["status"] == "failed"
+    assert failed_rec["initialState"] is None
+    assert failed_rec["initialVMps"] == 122.5
+    assert failed_rec["massKg"] == 61000.0
 
 
 def test_build_runway_comparison_dedupes_collided_rows(tmp_path):
