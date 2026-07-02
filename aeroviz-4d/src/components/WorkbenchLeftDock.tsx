@@ -14,6 +14,7 @@ import { useApp, type WorkbenchMode } from "../context/AppContext";
 import ControlPanel from "./ControlPanel";
 import FlightTable from "./FlightTable";
 import PilotPanel from "./PilotPanel";
+import type { ObservedFlightSummary } from "../hooks/useCzmlLoader";
 
 type PilotPanelMode = "pilot" | "trajectory" | "comparison";
 
@@ -32,9 +33,11 @@ const PILOT_TO_MODE: Record<PilotPanelMode, WorkbenchMode> = {
 interface WorkbenchLeftDockProps {
   /** Observed-flight ids for the Observe-mode flight list. */
   flightIds: string[];
+  /** Per-flight duration + initial ground speed for the flight list. */
+  flightSummaries: Record<string, ObservedFlightSummary>;
 }
 
-export default function WorkbenchLeftDock({ flightIds }: WorkbenchLeftDockProps) {
+export default function WorkbenchLeftDock({ flightIds, flightSummaries }: WorkbenchLeftDockProps) {
   const { mode, setMode } = useApp();
 
   if (mode === "fly" || mode === "optimize" || mode === "compare") {
@@ -52,7 +55,7 @@ export default function WorkbenchLeftDock({ flightIds }: WorkbenchLeftDockProps)
   return (
     <div className="workbench-left-dock">
       <ControlPanel />
-      <FlightTable flightIds={flightIds} />
+      <FlightTable flightIds={flightIds} flightSummaries={flightSummaries} />
     </div>
   );
 }

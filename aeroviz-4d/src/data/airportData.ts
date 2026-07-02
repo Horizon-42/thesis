@@ -142,6 +142,8 @@ export interface ComparisonInitialState {
   V: number;
   psi: number;
   gamma: number;
+  /** Optimizer aircraft mass in kg (added 2026-07; absent in indexes generated before then). */
+  m?: number;
 }
 
 /** One flight's comparison group: the entity ids of its (up to) three coloured paths. */
@@ -154,6 +156,13 @@ export interface ComparisonGroup {
   status: "solved" | "failed";
   finalTimeS: number | null;
   initialState: ComparisonInitialState | null;
+  /**
+   * Per-flight facts present on EVERY record (solved + failed), from the flight's scenario
+   * initial state — so the flight list can show V + mass even for failed optimizations.
+   * (Added 2026-07; absent in indexes generated before then.)
+   */
+  initialVMps?: number | null;
+  massKg?: number | null;
   /** CZML entity ids belonging to this group (e.g. ref-/opt-/sim-`${group}`). */
   entities: string[];
   /** The CZML file (within `comparison/`) that holds this group's entities. */

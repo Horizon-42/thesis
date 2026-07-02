@@ -49,7 +49,7 @@ function FlightApp() {
     isRunwayProfileOpen,
     trajectoryComparison,
   });
-  const { flightIds, warning, error } = useCzmlLoader(observedFileUrl, observedVisible);
+  const { flightIds, flightSummaries, warning, error } = useCzmlLoader(observedFileUrl, observedVisible);
   useComparisonTrajectoryLayer();
   const czmlStatus = error ?? warning;
 
@@ -61,7 +61,7 @@ function FlightApp() {
       {/* Layer 1: the workbench shell — top context bar + a per-task left dock over the
           overlay host (clicks fall through to the globe; each dock re-enables them). */}
       <WorkbenchShell
-        left={<WorkbenchLeftDock flightIds={flightIds} />}
+        left={<WorkbenchLeftDock flightIds={flightIds} flightSummaries={flightSummaries} />}
         right={
           <WorkbenchRightInspector>
             <HUD />

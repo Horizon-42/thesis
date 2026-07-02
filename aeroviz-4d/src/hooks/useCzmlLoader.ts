@@ -30,6 +30,9 @@ import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import { sampleSubset } from "../utils/sampleTrajectories";
 import { planTrajectoryModels, TRAJECTORY_PATH_WIDTH } from "../utils/trajectoryRenderModel";
 import { addDataSourceHidden } from "../utils/cesiumDataSource";
+import { summarizeObservedCzml, type ObservedFlightSummary } from "../utils/observedFlightSummary";
+
+export type { ObservedFlightSummary };
 
 const LAYER_NAME = "czml-trajectories";
 
@@ -38,6 +41,8 @@ export interface CzmlLoaderState {
   isLoaded: boolean;
   /** IDs of all aircraft entities found in the CZML (excludes "document") */
   flightIds: string[];
+  /** Per-flight duration + initial ground speed, keyed by flight id (for the flight list). */
+  flightSummaries: Record<string, ObservedFlightSummary>;
   /** Non-fatal data issue that should be shown to the user. */
   warning: string | null;
   error: string | null;
@@ -75,6 +80,7 @@ export function useCzmlLoader(czmlUrl: string, visible: boolean = true): CzmlLoa
   const [state, setState] = useState<CzmlLoaderState>({
     isLoaded: false,
     flightIds: [],
+    flightSummaries: {},
     warning: null,
     error: null,
   });
@@ -82,7 +88,7 @@ export function useCzmlLoader(czmlUrl: string, visible: boolean = true): CzmlLoa
   useEffect(() => {
     if (!viewer || !czmlUrl) {
       setTrajectoryDataSource(null);
-      setState({ isLoaded: false, flightIds: [], warning: null, error: null });
+      setState({ isLoaded: false, flightIds: [], flightSummaries: {}, warning: null, error: null });
       return;
     }
 
@@ -90,14 +96,20 @@ export function useCzmlLoader(czmlUrl: string, visible: boolean = true): CzmlLoa
     let dataSource: Cesium.CzmlDataSource | undefined;
     let cancelled = false;
 
-    setState({ isLoaded: false, flightIds: [], warning: null, error: null });
+    setState({ isLoaded: false, flightIds: [], flightSummaries: {}, warning: null, error: null });
     setTrajectoryDataSource(null);
 
     // ── Step 1: Fetch once, then hand the parsed packet array to Cesium.
-    // This preserves the missing-asset guard without downloading the CZML twice.
+    // This preserves the missing-asset guard without downloading the CZML twice, and lets us read
+    // the flight-list facts (duration + initial ground speed) straight off the raw packets — the
+    // observed CZML carries no `availability`, so Cesium entities have none to derive duration from.
     const ds = new Cesium.CzmlDataSource(LAYER_NAME);
+    let flightSummaries: Record<string, ObservedFlightSummary> = {};
     fetchJson<unknown>(czmlUrl)
-      .then((czml) => ds.load(czml))
+      .then((czml) => {
+        flightSummaries = summarizeObservedCzml(czml);
+        return ds.load(czml);
+      })
       .then((loadedDs) => {
         if (cancelled) return;
 
@@ -116,7 +128,7 @@ export function useCzmlLoader(czmlUrl: string, visible: boolean = true): CzmlLoa
           viewer.trackedEntity = undefined;
           setSelectedFlightId(null);
           setTrajectoryDataSource(null);
-          setState({ isLoaded: true, flightIds: [], warning, error: null });
+          setState({ isLoaded: true, flightIds: [], flightSummaries: {}, warning, error: null });
           return;
         }
 
@@ -156,7 +168,7 @@ export function useCzmlLoader(czmlUrl: string, visible: boolean = true): CzmlLoa
         viewer.trackedEntity = undefined;
         setSelectedFlightId(null);
 
-        setState({ isLoaded: true, flightIds: ids, warning, error: null });
+        setState({ isLoaded: true, flightIds: ids, flightSummaries, warning, error: null });
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -168,13 +180,13 @@ export function useCzmlLoader(czmlUrl: string, visible: boolean = true): CzmlLoa
           viewer.trackedEntity = undefined;
           setSelectedFlightId(null);
           setTrajectoryDataSource(null);
-          setState({ isLoaded: true, flightIds: [], warning, error: null });
+          setState({ isLoaded: true, flightIds: [], flightSummaries: {}, warning, error: null });
           return;
         }
 
         const message = err instanceof Error ? err.message : String(err);
         setTrajectoryDataSource(null);
-        setState({ isLoaded: false, flightIds: [], warning: null, error: message });
+        setState({ isLoaded: false, flightIds: [], flightSummaries: {}, warning: null, error: message });
       });
 
     // ── Cleanup ───────────────────────────────────────────────────────────────

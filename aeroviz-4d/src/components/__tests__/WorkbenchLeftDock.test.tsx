@@ -22,7 +22,7 @@ vi.mock("../PilotPanel", () => ({
 import WorkbenchLeftDock from "../WorkbenchLeftDock";
 
 function renderDock() {
-  return render(<WorkbenchLeftDock flightIds={["a", "b", "c"]} />);
+  return render(<WorkbenchLeftDock flightIds={["a", "b", "c"]} flightSummaries={{}} />);
 }
 
 describe("WorkbenchLeftDock", () => {
@@ -44,11 +44,11 @@ describe("WorkbenchLeftDock", () => {
     expect(screen.getByText("PILOT:pilot")).toBeTruthy();
 
     appState.mode = "optimize";
-    rerender(<WorkbenchLeftDock flightIds={[]} />);
+    rerender(<WorkbenchLeftDock flightIds={[]} flightSummaries={{}} />);
     expect(screen.getByText("PILOT:trajectory")).toBeTruthy();
 
     appState.mode = "compare";
-    rerender(<WorkbenchLeftDock flightIds={[]} />);
+    rerender(<WorkbenchLeftDock flightIds={[]} flightSummaries={{}} />);
     expect(screen.getByText("PILOT:comparison")).toBeTruthy();
   });
 });

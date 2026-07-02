@@ -2831,29 +2831,82 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   min-width: 0;
 }
 
+.flight-table-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 4px 2px;
+  color: #c8d8ec;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+
+.flight-table-toggle:hover { color: #ffffff; }
+
+.flight-table-caret {
+  display: inline-block;
+  width: 10px;
+  color: #7f95b0;
+  font-size: 10px;
+}
+
+/* The list can hold ~1000 rows and up to six columns — scroll it (both axes) inside the dock
+   instead of growing the layout or squeezing columns to nothing. */
+.flight-table-scroll {
+  max-height: 46vh;
+  overflow: auto;
+}
+
+/* Content-sized columns (not fixed) so the Flight ID keeps its width when the optimized
+   column appears; the wrapper scrolls horizontally on the rare overflow. */
 .flight-table table {
   border-collapse: collapse;
-  table-layout: fixed;
   width: 100%;
 }
 
 .flight-table th, .flight-table td {
-  padding: 4px 5px;
+  padding: 2px 4px;
   text-align: left;
   border-bottom: 1px solid #2a3550;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.flight-table th:first-child,
-.flight-table td:first-child {
-  width: 28px;
+/* Compact unit suffix in numeric headers (keeps the values themselves unit-free and narrow). */
+.flight-table-unit {
+  margin-left: 2px;
+  font-size: 9px;
+  font-weight: 400;
+  color: #6f86a2;
 }
 
-.flight-table th:last-child,
-.flight-table td:last-child {
-  width: 54px;
+/* Flight ID first (capped + ellipsis so long callsigns can't hog width), then right-aligned numerics. */
+.flight-table td.flight-table-id {
+  max-width: 62px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A flight whose optimization failed — its id is flagged red. */
+.flight-table td.flight-table-failed {
+  color: #ff6b6b;
+}
+
+.flight-table th:nth-child(n + 2),
+.flight-table td:nth-child(n + 2) {
+  text-align: right;
+}
+
+.flight-table thead th {
+  position: sticky;
+  top: 0;
+  background: #0f1c30;
+  color: #91a7c2;
+  font-weight: 600;
 }
 
 .flight-table tr.selected td { background: #1a3a6a; }

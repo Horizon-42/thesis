@@ -1,25 +1,35 @@
 /**
  * FlightTable.tsx
  * ---------------
- * Floating table that lists all loaded flights and highlights the selected one.
- * Clicking a row sets it as the tracked entity in the Cesium Viewer.
- *
- * Data flow:
- *   useCzmlLoader → sets flightIds in state
- *   FlightTable reads flightIds from props (passed down from App or via context)
- *   Clicking a row → setSelectedFlightId → viewer.trackedEntity
+ * Collapsible list of the loaded observed flights (collapsed by default). Each row shows the
+ * flight id plus facts read off its track (initial ground speed V, total flight time) and, from
+ * the optimizer, its aircraft mass. When the Optimizer comparison is on, a fourth column adds
+ * the optimized final time for the selected category, in the optimizer "results" colour (blue).
+ * Clicking a row tracks that flight in the Cesium viewer.
  */
 
+import { useState } from "react";
 import { useApp } from "../context/AppContext";
 import type * as Cesium from "cesium";
+import type { ObservedFlightSummary } from "../hooks/useCzmlLoader";
+import { useFlightOptimizerData } from "../hooks/useFlightOptimizerData";
+import { formatDuration, formatSpeed, formatMass } from "../utils/flightListFormat";
+import { COMPARISON_KIND_COLORS } from "../utils/trajectoryRenderModel";
 
 interface FlightTableProps {
-  /** Flight IDs from useCzmlLoader */
+  /** Flight IDs from useCzmlLoader. */
   flightIds: string[];
+  /** Per-flight duration + initial ground speed from useCzmlLoader. */
+  flightSummaries: Record<string, ObservedFlightSummary>;
 }
 
-export default function FlightTable({ flightIds }: FlightTableProps) {
+/** The optimized final time reuses the "Optimize results" (simulator) path colour. */
+const OPTIMIZED_TIME_COLOR = COMPARISON_KIND_COLORS.simulator;
+
+export default function FlightTable({ flightIds, flightSummaries }: FlightTableProps) {
   const { viewer, selectedFlightId, setSelectedFlightId } = useApp();
+  const { byFlightId, comparisonActive } = useFlightOptimizerData();
+  const [collapsed, setCollapsed] = useState(true);
 
   if (flightIds.length === 0) return null; // hide if no data loaded
 
@@ -40,29 +50,68 @@ export default function FlightTable({ flightIds }: FlightTableProps) {
 
   return (
     <div className="flight-table">
-      <table>
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Flight ID</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {flightIds.map((id, index) => (
-            <tr
-              key={id}
-              className={id === selectedFlightId ? "selected" : ""}
-              onClick={() => handleRowClick(id)}
-              style={{ cursor: "pointer" }}
-            >
-              <td>{index + 1}</td>
-              <td>{id}</td>
-              <td>{id === selectedFlightId ? "Tracking" : ""}</td>
+      <button
+        type="button"
+        className="flight-table-toggle"
+        aria-expanded={!collapsed}
+        onClick={() => setCollapsed((prev) => !prev)}
+      >
+        <span className="flight-table-caret">{collapsed ? "▸" : "▾"}</span>
+        Flights ({flightIds.length})
+      </button>
+
+      {collapsed ? null : (
+        <div className="flight-table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Flight</th>
+              <th title="Initial ground speed (m/s)">
+                V<span className="flight-table-unit">m/s</span>
+              </th>
+              <th title="Optimizer aircraft mass (tonnes)">
+                Mass<span className="flight-table-unit">t</span>
+              </th>
+              <th title="Observed track duration (m:ss)">Time</th>
+              {comparisonActive ? (
+                <th style={{ color: OPTIMIZED_TIME_COLOR }} title="Optimized final time for the selected category (m:ss)">
+                  Opt
+                </th>
+              ) : null}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {flightIds.map((id) => {
+              const summary = flightSummaries[id];
+              const optimizer = byFlightId.get(id);
+              return (
+                <tr
+                  key={id}
+                  className={id === selectedFlightId ? "selected" : ""}
+                  onClick={() => handleRowClick(id)}
+                  style={{ cursor: "pointer" }}
+                >
+                  <td
+                    className={`flight-table-id${optimizer?.failed ? " flight-table-failed" : ""}`}
+                    title={optimizer?.failed ? `${id} — optimization failed` : id}
+                  >
+                    {id}
+                  </td>
+                  <td>{formatSpeed(optimizer?.initialVMps ?? null)}</td>
+                  <td>{formatMass(optimizer?.massKg ?? null)}</td>
+                  <td>{formatDuration(summary?.durationS ?? null)}</td>
+                  {comparisonActive ? (
+                    <td style={{ color: OPTIMIZED_TIME_COLOR }}>
+                      {formatDuration(optimizer?.optimizedTimeS ?? null)}
+                    </td>
+                  ) : null}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        </div>
+      )}
     </div>
   );
 }
