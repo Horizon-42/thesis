@@ -56,6 +56,9 @@ function kindOfEntityId(id: string): ComparisonKind {
  */
 function applyComparisonRenderModel(entity: Cesium.Entity, shownEntityIds: Set<string>): void {
   if (entity.id === "document") return;
+  // The overlay aggregates up to N flights, so its per-entity name labels are hidden by default
+  // (hundreds of them just clutter the globe); the hover/pick effect reveals only the one under
+  // the cursor or clicked. The observed layer likewise labels only the selected flight.
   const kind = kindOfEntityId(entity.id);
   if (entity.path) {
     entity.path.width = new Cesium.ConstantProperty(TRAJECTORY_PATH_WIDTH);
@@ -68,6 +71,7 @@ function applyComparisonRenderModel(entity: Cesium.Entity, shownEntityIds: Set<s
       if (entity.label) entity.label.fillColor = new Cesium.ConstantProperty(color);
     }
   }
+  if (entity.label) entity.label.show = new Cesium.ConstantProperty(false);
   if (!shownEntityIds.has(entity.id)) return;
   if (entity.model) {
     entity.model.runAnimations = new Cesium.ConstantProperty(false);
@@ -82,6 +86,43 @@ function applyComparisonRenderModel(entity: Cesium.Entity, shownEntityIds: Set<s
   });
   entity.orientation = makeStableVelocityOrientation(entity.position);
   if (entity.point) entity.point.show = new Cesium.ConstantProperty(false);
+}
+
+/** Prefixes that mark a comparison-overlay entity (vs. anything else the user might pick). */
+function isComparisonEntity(entity: Cesium.Entity | undefined): entity is Cesium.Entity {
+  const id = entity?.id;
+  return typeof id === "string" && (id.startsWith("ref-") || id.startsWith("opt-") || id.startsWith("sim-"));
+}
+
+/**
+ * An availability interval per entity, matching its own position samples, keyed by entity id.
+ *
+ * The comparison packets bake in NO `availability`, and the position uses HOLD extrapolation, so a
+ * short optimizer/simulator trajectory would otherwise FREEZE at its end and hang in the scene
+ * while the clock runs on to the far-longer reference tracks. Giving each entity an availability =
+ * [firstSample, lastSample] makes it simply DISAPPEAR when its trajectory ends. Derived from the
+ * CZML `position.epoch` + first/last time offset (seconds).
+ */
+export function availabilityByEntityId(czml: unknown): Map<string, Cesium.TimeIntervalCollection> {
+  const out = new Map<string, Cesium.TimeIntervalCollection>();
+  if (!Array.isArray(czml)) return out;
+  for (const raw of czml as unknown[]) {
+    const packet = raw as { id?: unknown; position?: { epoch?: unknown; cartographicDegrees?: unknown } };
+    const id = packet.id;
+    const cd = packet.position?.cartographicDegrees;
+    const epochIso = packet.position?.epoch;
+    if (typeof id !== "string" || id === "document" || typeof epochIso !== "string") continue;
+    if (!Array.isArray(cd) || cd.length < 4) continue;
+    const epoch = Cesium.JulianDate.fromIso8601(epochIso);
+    const nums = cd as number[];
+    out.set(id, new Cesium.TimeIntervalCollection([
+      new Cesium.TimeInterval({
+        start: Cesium.JulianDate.addSeconds(epoch, nums[0], new Cesium.JulianDate()),
+        stop: Cesium.JulianDate.addSeconds(epoch, nums[nums.length - 4], new Cesium.JulianDate()),
+      }),
+    ]));
+  }
+  return out;
 }
 
 export function useComparisonTrajectoryLayer(): void {
@@ -146,10 +187,12 @@ export function useComparisonTrajectoryLayer(): void {
       let stop: Cesium.JulianDate | null = null;
       for (const file of selection.files) {
         let loaded: Cesium.CzmlDataSource;
+        let availability: Map<string, Cesium.TimeIntervalCollection>;
         try {
           const czml = await fetchJson<unknown>(
             airportComparisonCzmlUrl(activeAirportCode, categoryDir, file),
           );
+          availability = availabilityByEntityId(czml);
           loaded = await new Cesium.CzmlDataSource(`comparison-${categoryDir}-${file}`).load(czml);
         } catch (err) {
           if (!isMissingJsonAsset(err)) console.warn(`[comparison] failed to load ${file}`, err);
@@ -162,6 +205,8 @@ export function useComparisonTrajectoryLayer(): void {
         addDataSourceHidden(viewer, loaded);
         added.push(loaded);
         for (const entity of loaded.entities.values) {
+          const iv = availability.get(entity.id);
+          if (iv) entity.availability = iv;
           applyComparisonRenderModel(entity, selection.shownEntityIds);
         }
         if (loaded.clock) {
@@ -213,4 +258,49 @@ export function useComparisonTrajectoryLayer(): void {
       }
     }
   }, [loadVersion, trajectoryComparisonKinds]);
+
+  // ── Hover / click reveals a single label ─────────────────────────────────────
+  // Labels are hidden by default (applyComparisonRenderModel). Show only the label of the
+  // comparison entity under the cursor (hover) plus the last one clicked (pinned) — so a flight's
+  // identity is reachable without hundreds of labels cluttering the aggregate view.
+  useEffect(() => {
+    if (!viewer || !active) return;
+    const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+    const labelled = new Set<Cesium.Entity>();
+    let hovered: Cesium.Entity | null = null;
+    let pinned: Cesium.Entity | null = null;
+
+    const setLabelShown = (entity: Cesium.Entity, show: boolean) => {
+      if (entity.label) entity.label.show = new Cesium.ConstantProperty(show);
+    };
+    const refresh = () => {
+      const desired = new Set<Cesium.Entity>();
+      if (hovered) desired.add(hovered);
+      if (pinned) desired.add(pinned);
+      for (const e of labelled) if (!desired.has(e)) setLabelShown(e, false);
+      for (const e of desired) if (!labelled.has(e)) setLabelShown(e, true);
+      labelled.clear();
+      desired.forEach((e) => labelled.add(e));
+    };
+    const pickComparison = (position: Cesium.Cartesian2): Cesium.Entity | null => {
+      const picked = viewer.scene.pick(position);
+      const entity = picked && picked.id;
+      return isComparisonEntity(entity) ? entity : null;
+    };
+
+    handler.setInputAction((m: { endPosition: Cesium.Cartesian2 }) => {
+      hovered = pickComparison(m.endPosition);
+      refresh();
+    }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+    handler.setInputAction((m: { position: Cesium.Cartesian2 }) => {
+      const clicked = pickComparison(m.position);
+      pinned = clicked === pinned ? null : clicked; // click again (or empty space) to unpin
+      refresh();
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+    return () => {
+      handler.destroy();
+      for (const e of labelled) setLabelShown(e, false);
+    };
+  }, [viewer, active, loadVersion]);
 }
