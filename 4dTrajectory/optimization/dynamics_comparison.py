@@ -58,7 +58,7 @@ from aerodynamic_model.casadi_simulator import (  # noqa: E402
 # WGS84 equatorial radius for the optimizer's metric-position normalization
 # (system N) -- the ellipsoid semi-major axis the optimizer normalizes with, so N
 # reproduces its exact change of variables.  Single-sourced from geokit (shared with
-# ``casadi_direct_collocation_optimizer._EARTH_RADIUS_M``), so the two cannot drift.
+# ``collocation.schemes._EARTH_RADIUS_M``), so the two cannot drift.
 _NORM_R = WGS84_A
 
 SYSTEM_KEYS = ("A", "B", "C", "D")

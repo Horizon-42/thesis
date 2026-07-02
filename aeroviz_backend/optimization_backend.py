@@ -24,8 +24,7 @@ from aeroviz_backend.simulation_backend import (
 
 from geodetic_simulator import GeodeticSimulator, GeodeticState
 from casadi_optimizer import CasadiOptimizer
-from casadi_direct_collocation_optimizer import CasadiDirectCollocationOptimizer
-from multiphase_collocation_optimizer import MultiphaseCollocationOptimizer
+from collocation import CollocationOptimizer
 from common import LoadFactorControl
 from least_squares_transcription_optimizor import LeastSquaresTranscriptionOptimizor
 from single_shooting_optimizor import SingleShootingOptimizor
@@ -41,6 +40,7 @@ from warm_start_transcription_optimizor import WarmStartTranscriptionOptimizor
 
 
 DEFAULT_N_SEGMENTS = 10
+DEFAULT_N_SEG_PER_PHASE = 4      # constrained (multiphase) control segments per leg
 DEFAULT_MAX_ITERATIONS = 1000
 MIN_ARRIVAL_TIME_S = 1.0
 MAX_ARRIVAL_TIME_S = 1000.0
@@ -48,7 +48,7 @@ MIN_OPTIMIZATION_DT = 0.001
 DEFAULT_OPTIMIZER = "casadiDirectCollocation"
 
 # Direct-collocation variants exposed as distinct optimizer names, each
-# selecting a defect "fitting equation" (see casadi_direct_collocation_optimizer).
+# selecting a defect "fitting equation" (see collocation.schemes).
 # The bare name keeps the default (Hermite-Simpson) for backward compatibility.
 DIRECT_COLLOCATION_SCHEMES = {
     "casadiDirectCollocation": "hermiteSimpson",
@@ -120,6 +120,10 @@ class OptimizationBackend:
         initial_payload = read_required_mapping(payload, "initialState")
         target_payload = read_required_mapping(payload, "targetState")
         n_segments = read_positive_int(payload, "nSegments", DEFAULT_N_SEGMENTS)
+        # Constrained (multiphase) control mesh: piecewise-constant control segments PER LEG
+        # (the total is legs × this). Only used by the multiphase branch; the direct branch uses
+        # nSegments. Defaults to the optimiser's own per-phase default.
+        n_seg_per_phase = read_positive_int(payload, "nSegPerPhase", DEFAULT_N_SEG_PER_PHASE)
         max_iterations = read_positive_int(
             payload,
             "maxIterations",
@@ -174,8 +178,9 @@ class OptimizationBackend:
             # Multiphase transcription: one phase per leg (start->IAF transition + each procedure
             # leg), fixes pinned at the phase boundaries, exact per-leg constraints (replaces the
             # single-phase along-track partition). One NLP, free per-phase time, min total time.
-            optimizer = MultiphaseCollocationOptimizer(
-                aircraft, constraint_segments, scheme=MULTIPHASE_SCHEMES[optimizer_name],
+            optimizer = CollocationOptimizer(
+                aircraft, segments=constraint_segments, scheme=MULTIPHASE_SCHEMES[optimizer_name],
+                n_seg_per_phase=n_seg_per_phase,
             )
             build_s = time.perf_counter() - flow_started
             solve_started = time.perf_counter()
@@ -275,31 +280,13 @@ class OptimizationBackend:
         dt: float,
         max_iterations: int,
         arrival_time_s: float,
-        constraint_segments=None,
-        constraint_spans=None,
     ) -> Any:
         if optimizer_name in CASADI_OPTIMIZERS:
-            # CasADi optimisers recompile a (potentially large) NLP at
-            # construction.  Caching one instance per (aircraft, mesh,
-            # dt, arrival_time, optimizer_name) avoids the cost on every
-            # request.  ``optimizer_name`` is included in the key
-            # because the multiple-shooting and direct-collocation
-            # solvers have different NLP layouts.
-            #
-            # Procedure-constrained NLPs bake request-specific geometry into the
-            # constraint vector, so they cannot be cached across requests -- build
-            # fresh and skip the cache.
-            if constraint_segments:
-                return make_optimizer(
-                    optimizer_name,
-                    geodetic_simulator,
-                    n_segments,
-                    dt,
-                    max_iterations,
-                    arrival_time_s,
-                    constraint_segments=constraint_segments,
-                    constraint_spans=constraint_spans,
-                )
+            # Cache one instance per (aircraft, mesh, dt, arrival_time, optimizer_name). This
+            # amortizes the ``casadiIpopt`` multiple-shooting solver, whose NLP is compiled once at
+            # construction. The direct-collocation ``CollocationOptimizer`` rebuilds its NLP per
+            # solve (initial/target are baked in, not parameters), so the cache only saves its cheap
+            # __init__ there — harmless, and it keeps one code path for all CasADi optimisers.
             aircraft = geodetic_simulator.simulator.aircraft
             key = (optimizer_name, aircraft.code, n_segments, dt, arrival_time_s)
             if self._casadi_optimizer_key != key:
@@ -399,8 +386,6 @@ def make_optimizer(
     dt: float,
     max_iterations: int,
     arrival_time_s: float,
-    constraint_segments=None,
-    constraint_spans=None,
 ) -> Any:
     if optimizer_name == "casadiIpopt":
         return CasadiOptimizer(
@@ -411,14 +396,11 @@ def make_optimizer(
         )
 
     if optimizer_name in DIRECT_COLLOCATION_SCHEMES:
-        return CasadiDirectCollocationOptimizer(
+        return CollocationOptimizer(
+            geodetic_simulator.simulator.aircraft,
+            scheme=DIRECT_COLLOCATION_SCHEMES[optimizer_name],
             n_segments=n_segments,
-            dt=dt,
             max_duration=arrival_time_s,
-            aircraft=geodetic_simulator.simulator.aircraft,
-            collocation_scheme=DIRECT_COLLOCATION_SCHEMES[optimizer_name],
-            constraint_segments=constraint_segments,
-            constraint_spans=constraint_spans,
         )
 
     if optimizer_name == "singleShooting":

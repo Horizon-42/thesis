@@ -1,7 +1,7 @@
 """The target-anchored metric frame — convert fixes (lat/lon) into the optimizer's ``(n, e)``.
 
 This is the **reference implementation** of the coordinate transform the ``*Normalized``
-collocation schemes use (``casadi_direct_collocation_optimizer._normalization_cb``). It is
+collocation schemes use (``collocation.schemes._normalization_cb``). It is
 provided complete — getting it wrong silently misaligns the fixes from the aircraft state, so
 it is plumbing, not an exercise. Study it; the constraint math (geometry.py, lateral.py,
 vertical.py) is what you implement.

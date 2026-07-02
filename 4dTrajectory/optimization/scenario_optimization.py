@@ -45,7 +45,7 @@ from flight_scenarios import FlightScenario, load_scenarios  # noqa: E402
 from aerodynamic_model.common import GeodeticState, LoadFactorControl  # noqa: E402
 from aerodynamic_model.casadi_simulator import CasadiSimulator  # noqa: E402
 from aerodynamic_model.rollout import rollout_piecewise_constant  # noqa: E402
-from casadi_direct_collocation_optimizer import CasadiDirectCollocationOptimizer  # noqa: E402
+from collocation import CollocationOptimizer  # noqa: E402
 
 # Optimizer + rollout defaults (override on the CLI).
 DEFAULT_N_SEGMENTS = 8
@@ -136,9 +136,11 @@ def optimize_scenario(
         _STALL_MARGIN * _stall_speed_ms(initial.m, scenario.aero),
         aircraft.approach.reference_speed_ms,
     )
-    optimizer = CasadiDirectCollocationOptimizer(
-        n_segments, dt, max_duration, aircraft,
-        collocation_scheme="trapezoidalNormalizedFullTransport",
+    optimizer = CollocationOptimizer(
+        aircraft,
+        scheme="trapezoidalNormalizedFullTransport",
+        n_segments=n_segments,
+        max_duration=max_duration,
         min_speed_ms=min_speed_ms,
         verbose=verbose,
     )
@@ -603,15 +605,14 @@ def _solve_iaf(
     for CLI/API parity but unused by the multiphase optimiser (it sets its own per-phase mesh).
     """
     from aeroviz_backend.procedure_segments import build_constraint_segments
-    from multiphase_collocation_optimizer import MultiphaseCollocationOptimizer
     segments, _spans = build_constraint_segments(
         pc, target.latitude, target.longitude, target.altitude,
     )
     if not segments:
         raise ValueError("no constraint segments")
     start_state = scenario.initial
-    optimizer = MultiphaseCollocationOptimizer(
-        aircraft, segments,
+    optimizer = CollocationOptimizer(
+        aircraft, segments=segments,
         scheme="hermiteSimpsonNormalizedFullTransport",
         min_speed_ms=min_speed_ms,
         verbose=verbose,

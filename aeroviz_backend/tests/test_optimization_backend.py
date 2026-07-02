@@ -201,14 +201,13 @@ class TestOptimizationBackend(unittest.TestCase):
         calls = []
 
         class FakeCasadiDirectCollocationOptimizer:
-            def __init__(self, n_segments, dt, max_duration, aircraft,
-                         collocation_scheme="hermiteSimpson", **_kwargs):
+            def __init__(self, aircraft, *, scheme="hermiteSimpson", segments=None,
+                         n_segments=None, max_duration=None, **_kwargs):
                 calls.append({
                     "aircraft": aircraft.code,
                     "n_segments": n_segments,
-                    "dt": dt,
                     "max_duration": max_duration,
-                    "collocation_scheme": collocation_scheme,
+                    "scheme": scheme,
                 })
 
             def optimize_free_time(self, initial_state, target_state, max_duration):
@@ -226,8 +225,8 @@ class TestOptimizationBackend(unittest.TestCase):
                     ]),
                 )
 
-        original_optimizer = optimization_backend.CasadiDirectCollocationOptimizer
-        optimization_backend.CasadiDirectCollocationOptimizer = (
+        original_optimizer = optimization_backend.CollocationOptimizer
+        optimization_backend.CollocationOptimizer = (
             FakeCasadiDirectCollocationOptimizer
         )
         try:
@@ -255,16 +254,15 @@ class TestOptimizationBackend(unittest.TestCase):
                 },
             })
         finally:
-            optimization_backend.CasadiDirectCollocationOptimizer = original_optimizer
+            optimization_backend.CollocationOptimizer = original_optimizer
 
         self.assertEqual(
             calls[0],
             {
                 "aircraft": "A320",
                 "n_segments": 2,
-                "dt": 0.25,
                 "max_duration": 84.0,
-                "collocation_scheme": "hermiteSimpson",
+                "scheme": "hermiteSimpson",
             },
         )
         self.assertAlmostEqual(calls[1]["initial"].longitude, -114.0203)
@@ -283,24 +281,24 @@ class TestOptimizationBackend(unittest.TestCase):
 
     def test_direct_collocation_variant_names_select_their_defect_scheme(self):
         # Each scheme-suffixed optimizer name must reach
-        # CasadiDirectCollocationOptimizer with the matching collocation_scheme.
+        # CollocationOptimizer with the matching scheme.
         seen = {}
 
         class RecordingOptimizer:
-            def __init__(self, n_segments, dt, max_duration, aircraft,
-                         collocation_scheme="hermiteSimpson", **_kwargs):
-                self.collocation_scheme = collocation_scheme
+            def __init__(self, aircraft, *, scheme="hermiteSimpson", segments=None,
+                         n_segments=None, max_duration=None, **_kwargs):
+                self.scheme = scheme
 
-        original = optimization_backend.CasadiDirectCollocationOptimizer
-        optimization_backend.CasadiDirectCollocationOptimizer = RecordingOptimizer
+        original = optimization_backend.CollocationOptimizer
+        optimization_backend.CollocationOptimizer = RecordingOptimizer
         try:
             for name, scheme in optimization_backend.DIRECT_COLLOCATION_SCHEMES.items():
                 opt = optimization_backend.make_optimizer(
                     name, GeodeticSimulator(A320), 10, 0.2, 300, arrival_time_s=120.0,
                 )
-                seen[name] = opt.collocation_scheme
+                seen[name] = opt.scheme
         finally:
-            optimization_backend.CasadiDirectCollocationOptimizer = original
+            optimization_backend.CollocationOptimizer = original
 
         self.assertEqual(seen, dict(optimization_backend.DIRECT_COLLOCATION_SCHEMES))
         self.assertEqual(seen["casadiDirectCollocation"], "hermiteSimpson")
@@ -422,15 +420,14 @@ class TestOptimizationBackend(unittest.TestCase):
         solves = []
 
         class FakeCasadiDirectCollocationOptimizer:
-            def __init__(self, n_segments, dt, max_duration, aircraft,
-                         collocation_scheme="hermiteSimpson", **_kwargs):
+            def __init__(self, aircraft, *, scheme="hermiteSimpson", segments=None,
+                         n_segments=None, max_duration=None, **_kwargs):
                 self.instance_id = len(constructions) + 1
                 constructions.append({
                     "aircraft": aircraft.code,
                     "n_segments": n_segments,
-                    "dt": dt,
                     "max_duration": max_duration,
-                    "collocation_scheme": collocation_scheme,
+                    "scheme": scheme,
                 })
 
             def optimize_free_time(self, initial_state, target_state, max_duration):
@@ -466,8 +463,8 @@ class TestOptimizationBackend(unittest.TestCase):
                 },
             }
 
-        original_optimizer = optimization_backend.CasadiDirectCollocationOptimizer
-        optimization_backend.CasadiDirectCollocationOptimizer = (
+        original_optimizer = optimization_backend.CollocationOptimizer
+        optimization_backend.CollocationOptimizer = (
             FakeCasadiDirectCollocationOptimizer
         )
         try:
@@ -476,29 +473,31 @@ class TestOptimizationBackend(unittest.TestCase):
             backend.optimize(make_payload())  # same key -> reuse
             backend.optimize(make_payload(dt=0.2))  # new key -> rebuild
         finally:
-            optimization_backend.CasadiDirectCollocationOptimizer = original_optimizer
+            optimization_backend.CollocationOptimizer = original_optimizer
 
-        self.assertEqual([c["dt"] for c in constructions], [0.25, 0.2])
+        # The optimizer no longer receives ``dt`` (it is not a CollocationOptimizer
+        # arg), but ``dt`` is still part of the backend's cache key, so the two
+        # same-dt payloads reuse instance 1 and the changed-dt payload rebuilds
+        # instance 2 -> exactly two constructions.
+        self.assertEqual(len(constructions), 2)
         self.assertEqual([s["instance_id"] for s in solves], [1, 1, 2])
 
     def test_procedure_constraint_enforced_via_multiphase_scheme_only(self):
         """A procedureConstraint is enforced via the MULTIPHASE optimiser only when an explicit
         casadiMultiphase* scheme is selected; other schemes parse/echo it but do not enforce it."""
-        mp_segments = []  # the segments the multiphase optimiser receives
+        # The unified CollocationOptimizer distinguishes the two paths by its
+        # constructor: the multiphase/constrained solve passes ``segments=`` (one
+        # phase per leg), the plain direct-collocation solve does not.
+        mp_segments = []  # the segments the multiphase (constrained) construction receives
 
-        class FakeMultiphase:
-            def __init__(self, aircraft, segments, *, scheme=None, **k):
-                mp_segments.append(segments)
+        class FakeCollocation:
+            def __init__(self, aircraft, *, scheme=None, segments=None,
+                         n_segments=None, max_duration=None, **_kwargs):
+                if segments is not None:
+                    mp_segments.append(segments)
                 self.segment_durations_s = [10.0]
+                self.last_dense_states_geo = None
                 self.last_solve_timings = None
-
-            def optimize_free_time(self, initial_state, target_state, max_duration):
-                return (60.0, np.array([[15000.0, 0.0, 1.0]]),
-                        np.array([[51.0, -114.0, 1000.0, 130.0, 0.3, -0.05]]))
-
-        class FakeSingle:
-            def __init__(self, *a, **k):
-                pass
 
             def optimize_free_time(self, initial_state, target_state, max_duration):
                 return (60.0, np.array([[15000.0, 0.0, 1.0]]),
@@ -526,23 +525,21 @@ class TestOptimizationBackend(unittest.TestCase):
                 "procedureConstraint": proc,
             }
 
-        omp = optimization_backend.MultiphaseCollocationOptimizer
-        osingle = optimization_backend.CasadiDirectCollocationOptimizer
-        optimization_backend.MultiphaseCollocationOptimizer = FakeMultiphase
-        optimization_backend.CasadiDirectCollocationOptimizer = FakeSingle
+        original = optimization_backend.CollocationOptimizer
+        optimization_backend.CollocationOptimizer = FakeCollocation
         try:
             backend = optimization_backend.OptimizationBackend()
             r_norm = backend.optimize(payload("casadiMultiphaseNormalizedFullTransport"))
             r_plain = backend.optimize(payload("casadiDirectCollocation"))  # not a multiphase scheme
         finally:
-            optimization_backend.MultiphaseCollocationOptimizer = omp
-            optimization_backend.CasadiDirectCollocationOptimizer = osingle
+            optimization_backend.CollocationOptimizer = original
 
-        # multiphase scheme: multiphase used with real segments + enforced flag True
+        # multiphase scheme: constructed WITH real segments + enforced flag True
         self.assertTrue(r_norm["procedureConstraintEnforced"])
         self.assertEqual(len(mp_segments), 1)
         self.assertGreaterEqual(len(mp_segments[0]), 1)
-        # other scheme: not enforced, multiphase not called again
+        # other scheme: not enforced, and constructed WITHOUT segments so the
+        # segments-based (multiphase) construction did not repeat
         self.assertFalse(r_plain["procedureConstraintEnforced"])
         self.assertEqual(len(mp_segments), 1)
 
@@ -863,8 +860,8 @@ class TestOptimizationBackend(unittest.TestCase):
         # writes a breakdown to the server log (stderr).  When the optimiser
         # exposes a cold-start / free-time split, both appear in the line.
         class FakeCasadiDirectCollocationOptimizer:
-            def __init__(self, n_segments, dt, max_duration, aircraft,
-                         collocation_scheme="hermiteSimpson", **_kwargs):
+            def __init__(self, aircraft, *, scheme="hermiteSimpson", segments=None,
+                         n_segments=None, max_duration=None, **_kwargs):
                 self.last_solve_timings = {
                     "coldStartS": 0.4,
                     "freeTimeSolveS": 0.6,
@@ -878,8 +875,8 @@ class TestOptimizationBackend(unittest.TestCase):
                     np.array([[51.0, -114.0, 1000.0, 130.0, 0.3, -0.05]]),
                 )
 
-        original = optimization_backend.CasadiDirectCollocationOptimizer
-        optimization_backend.CasadiDirectCollocationOptimizer = (
+        original = optimization_backend.CollocationOptimizer
+        optimization_backend.CollocationOptimizer = (
             FakeCasadiDirectCollocationOptimizer
         )
         buffer = io.StringIO()
@@ -908,7 +905,7 @@ class TestOptimizationBackend(unittest.TestCase):
                     },
                 })
         finally:
-            optimization_backend.CasadiDirectCollocationOptimizer = original
+            optimization_backend.CollocationOptimizer = original
 
         log = buffer.getvalue()
         self.assertIn("optimization timing", log)

@@ -48,8 +48,8 @@ from aerodynamic_model.common import GeodeticState  # noqa: E402
 from aerodynamic_model.casadi_simulator import (  # noqa: E402
     aero_params_for_aircraft, make_geodetic_step_integrator,
 )
-from casadi_direct_collocation_optimizer import (  # noqa: E402
-    CasadiDirectCollocationOptimizer, _SOLVER_BACKENDS,
+from collocation import (  # noqa: E402
+    CollocationOptimizer, _SOLVER_BACKENDS,
 )
 
 _AIRCRAFT = {"A320": A320, "C172": C172}
@@ -132,9 +132,9 @@ def main(argv=None) -> int:
     print("  " + "-" * 64)
 
     for backend in _SOLVER_BACKENDS:
-        opt = CasadiDirectCollocationOptimizer(
-            n_segments=args.n_segments, dt=0.2, max_duration=args.horizon * 1.6,
-            aircraft=aircraft, solver_backend=backend,
+        opt = CollocationOptimizer(
+            aircraft, n_segments=args.n_segments, max_duration=args.horizon * 1.6,
+            solver_backend=backend,
         )
         secs, res = _time_solve(
             lambda o=opt: o.optimize_trajectory(init, feasible, duration=args.horizon),

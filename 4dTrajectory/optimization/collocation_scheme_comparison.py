@@ -1,6 +1,6 @@
 """Compare the selectable collocation defect schemes on one problem.
 
-The optimiser (``casadi_direct_collocation_optimizer``) supports five defect
+The optimiser (``collocation``) supports several defect
 "fitting equations":
 
     trapezoidal     – state piecewise-linear, 2nd order, cheapest
@@ -57,8 +57,8 @@ from aerodynamic_model.common import GeodeticState  # noqa: E402
 from aerodynamic_model.casadi_simulator import (  # noqa: E402
     aero_params_for_aircraft, make_geodetic_step_integrator,
 )
-from casadi_direct_collocation_optimizer import (  # noqa: E402
-    CasadiDirectCollocationOptimizer, _DEFECT_SCHEMES,
+from collocation import (  # noqa: E402
+    CollocationOptimizer, _DEFECT_SCHEMES,
 )
 
 _AIRCRAFT = {"A320": A320, "C172": C172}
@@ -136,14 +136,14 @@ def main(argv=None) -> int:
               "reanchoredEnu": 4, "localEnu": 4,
               "localEnuTrapezoidal": 2, "localEnuHermiteSimpson": 4}
     for scheme in _SCHEMES:
-        opt = CasadiDirectCollocationOptimizer(
-            n_segments=args.n_segments, dt=0.2, max_duration=args.horizon * 1.6,
-            aircraft=aircraft, collocation_scheme=scheme,
+        opt = CollocationOptimizer(
+            aircraft, scheme=scheme,
+            n_segments=args.n_segments, max_duration=args.horizon * 1.6,
         )
         try:
             with contextlib.redirect_stdout(io.StringIO()):
                 _, controls, states = opt.optimize_trajectory(init, target, duration=args.horizon)
-            ok = bool(opt.solver.stats().get("success", False))
+            ok = True   # optimize_trajectory raises on solver failure, so reaching here == success
             node_miss = _horiz_m(states[-1][0], states[-1][1], target)
             pb, min_alt = _replay_terminal(aircraft, init, controls, args.horizon)
             print(f"  {scheme:<16}{orders.get(scheme, '?'):>6}{('yes' if ok else 'no'):>11}"

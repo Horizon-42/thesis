@@ -60,8 +60,8 @@ class ConstraintSet:
     """An ordered list of approach segments to evaluate a trajectory against.
 
     NumPy evaluation path — used by the demo/tests to score a concrete trajectory. The optimizer
-    does NOT use this; it builds the symbolic rows directly via
-    ``casadi_direct_collocation_optimizer.procedure_constraint_g`` (same `segment_violations_*`
+    does NOT use this; it builds the symbolic rows directly (inline in
+    ``collocation.optimizer``), using the same `segment_violations_*`
     primitives, fed CasADi vectors). Keep the two in sync if you change the violation set.
     """
 
