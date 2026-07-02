@@ -88,6 +88,7 @@ export function useComparisonTrajectoryLayer(): void {
   const {
     viewer,
     layers,
+    mode,
     trajectoryComparison,
     trajectoryComparisonCategory,
     trajectoryComparisonKinds,
@@ -96,9 +97,13 @@ export function useComparisonTrajectoryLayer(): void {
     trajectorySampleCount,
   } = useApp();
 
-  // Active when the Trajectories layer is on, comparison mode is on, and a category is chosen.
+  // The 3-colour comparison is an Observe-mode overlay (its toggle lives in the Observe dock),
+  // so it is painted only in Observe — switching to Fly/Optimize/Compare tears it down, keeping
+  // the tasks visually exclusive. It also needs the Trajectories layer on, comparison mode on,
+  // and a category chosen.
   const active =
     !!viewer &&
+    mode === "observe" &&
     trajectoryComparison &&
     layers.trajectories &&
     !!activeAirportCode &&
