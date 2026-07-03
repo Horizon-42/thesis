@@ -113,6 +113,16 @@ The project serves dual purposes: thesis visualization/validation, and reusable 
 
 ## Changelog
 
+### 2026-07-03 — CIFP thresholds everywhere: index hoisting + unconstrained targets + runway-polygon fix + regeneration
+
+The two follow-ups from the displaced-threshold postmortem (entry below).
+
+- **`procedure-details/index.json` now carries each runway's CIFP landing threshold** (`build_procedure_details_index` hoists `runway.threshold` = `{lon, lat, elevationFt}` from the first detail document; `null` when uncoded, key always present). Threshold consumers read ONE small index instead of fetching every per-procedure document. Index files for all 5 airports rebuilt from the existing detail documents (verified: identical apart from the new field; all 25 runway entries got thresholds).
+- **Unconstrained optimizer targets prefer CIFP.** `fetchRunwayThresholdTargets` also fetches the procedure-details index (best-effort; airports without procedures fall back), and `buildRunwayThresholdTargets(collection, index?)` overrides each target's position + elevation with the runway's CIFP threshold when present. The HEADING stays pavement-derived (the polygon's axis direction is accurate even where its ends are not). `ProcedureDetailsIndexRunwaySummary` gains the optional `threshold` field.
+- **`preprocess_airports.py` `build_runway_ring` rewritten — polygon anchored on the OurAirports endpoints.** The old code re-centred the declared `length_ft` on the endpoint midpoint and applied displaced offsets asymmetrically, rigidly shifting the whole polygon by `(he_disp − le_disp)/2` (~190 m at KSJC). Now: `runway_surface` corners sit ON the OA endpoint coordinates (they ARE the pavement ends — verified against declared lengths); `landing_zone` moves each end INWARD by its displaced distance. Dead local `flat_distance_m` removed. **runway.geojson + airport.json regenerated for all 5 airports** (public/data is git-ignored — local artifacts).
+- **Verified against CIFP after regeneration:** landing_zone edges now match the CIFP thresholds to ≤ 24 m everywhere except pure OurAirports data gaps (KSTL 30L 61 m = its displacement OA omits; KSMF 35L/R ~40 m) — which is exactly why the frontend prefers the CIFP index threshold over even the fixed landing_zone. Pavement-end gaps now equal the pure displaced distances (KSJC 30L: 777 m ≈ its 775 m displacement; the ±190 m centering shift is gone).
+- Tests: python +3 (surface edges ON the OA endpoints; landing-zone ends moved inward by exactly the displacement; index threshold hoisting incl. first-doc-wins + null) — **115 aeroviz-4d python pass**; frontend +2 (CIFP preference incl. per-end fallback; null-elevation fallback) — **391 frontend + tsc + vite build clean**.
+
 ### 2026-07-03 — Multiphase target = the procedure's CIFP threshold (not runway.geojson); displaced-threshold root cause
 
 Follow-up to the review-fix pass below. Empirical seam check found the frontend's optimizer target (runway.geojson `runway_surface` edge midpoints, OurAirports-derived) sits up to **970 m** (KSJC 30R) from the CIFP landing threshold the procedure ends at — the frame-anchor guard would reject those runways (KSJC 30L/30R ~965 m, KSJC 12L/12R ~200 m, KSTL 12R ~215 m; KRDU ≤ 2.6 m fine).

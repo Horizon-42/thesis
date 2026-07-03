@@ -111,14 +111,6 @@ def runway_bearing_from_metadata(runway: RunwayEnds) -> float:
     return runway_bearing_rad(runway.le_lon, runway.le_lat, runway.he_lon, runway.he_lat)
 
 
-def flat_distance_m(lon_a: float, lat_a: float, lon_b: float, lat_b: float) -> float:
-    """Approximate ground distance for short segments (< 20 km)."""
-    mid_lat = (lat_a + lat_b) / 2
-    dx = (lon_b - lon_a) * metres_per_deg_lon(mid_lat)
-    dy = (lat_b - lat_a) * METRES_PER_DEG_LAT
-    return math.hypot(dx, dy)
-
-
 def offset_point_deg(
     lon: float, lat: float,
     bearing_rad: float,
@@ -192,17 +184,21 @@ def build_runway_ring(
     include_displaced: bool,
     lateral_offset_m: float = 0.0,
 ) -> list[list[float]]:
-    """Build a runway-width polygon ring using threshold centres or physical ends."""
+    """Build a runway-width polygon ring anchored on the OurAirports endpoint coordinates.
+
+    The OurAirports ``le_/he_`` coordinates are the physical PAVEMENT ends (they match the
+    declared ``length_ft`` to metres). ``runway_surface`` (``include_displaced=True``) uses
+    them directly; ``landing_zone`` (``False``) moves each end INWARD along the runway axis by
+    that end's displaced-threshold distance, yielding the landing thresholds. Do NOT re-derive
+    the ends from the declared length about the endpoint midpoint: applying the (asymmetric)
+    displaced offsets to a symmetric layout rigidly shifts the whole polygon by
+    ``(he_disp − le_disp)/2`` toward the more-displaced end (~190 m at KSJC) — the 2026-07-03
+    displaced-threshold postmortem in CLAUDE.md.
+    """
     bearing = runway_bearing_from_metadata(runway)
 
     le_disp_m = runway.le_displaced_threshold_ft * METRES_PER_FOOT
     he_disp_m = runway.he_displaced_threshold_ft * METRES_PER_FOOT
-
-    # Use declared dimensions when available to avoid endpoint coordinate noise.
-    raw_threshold_len_m = flat_distance_m(runway.le_lon, runway.le_lat, runway.he_lon, runway.he_lat)
-    declared_len_m = runway.length_ft * METRES_PER_FOOT if runway.length_ft > 0 else 0.0
-    declared_landing_len_m = declared_len_m - le_disp_m - he_disp_m
-    landing_len_m = declared_landing_len_m if declared_landing_len_m > 0 else raw_threshold_len_m
 
     ref_lon = (runway.le_lon + runway.he_lon) / 2
     ref_lat = (runway.le_lat + runway.he_lat) / 2
@@ -213,18 +209,19 @@ def build_runway_ring(
     right_e = fwd_n
     right_n = -fwd_e
 
-    half_landing_m = landing_len_m / 2
-    le_center_e = -fwd_e * half_landing_m
-    le_center_n = -fwd_n * half_landing_m
-    he_center_e = fwd_e * half_landing_m
-    he_center_n = fwd_n * half_landing_m
+    # Pavement ends in the local frame — the OurAirports endpoints themselves
+    # (exact inverse of local_m_to_lonlat, same ref_lat).
+    le_center_e = (runway.le_lon - ref_lon) * metres_per_deg_lon(ref_lat)
+    le_center_n = (runway.le_lat - ref_lat) * METRES_PER_DEG_LAT
+    he_center_e = (runway.he_lon - ref_lon) * metres_per_deg_lon(ref_lat)
+    he_center_n = (runway.he_lat - ref_lat) * METRES_PER_DEG_LAT
 
-    # Expand from thresholds to pavement ends only for runway_surface.
-    if include_displaced:
-        le_center_e -= fwd_e * le_disp_m
-        le_center_n -= fwd_n * le_disp_m
-        he_center_e += fwd_e * he_disp_m
-        he_center_n += fwd_n * he_disp_m
+    # Contract from pavement ends to the landing thresholds for landing_zone.
+    if not include_displaced:
+        le_center_e += fwd_e * le_disp_m
+        le_center_n += fwd_n * le_disp_m
+        he_center_e -= fwd_e * he_disp_m
+        he_center_n -= fwd_n * he_disp_m
 
     # Optional fine-tuning for imagery alignment.
     # Positive value shifts polygon to the right side of runway bearing.

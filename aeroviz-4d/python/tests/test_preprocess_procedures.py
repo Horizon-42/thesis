@@ -798,3 +798,40 @@ def test_publish_chart_manifest_links_existing_public_rnp_chart(
     assert chart["title"] == "RNAV(RNP) Z RWY 23L"
     assert chart["originalFileName"] == "00516RRZ23L.PDF"
     assert chart["url"] == "/data/airports/KRDU/charts/00516RRZ23L.pdf"
+
+
+def test_details_index_hoists_the_cifp_threshold_per_runway() -> None:
+    # The index must carry each runway's CIFP landing threshold so threshold consumers (the
+    # frontend runway-target list) never fall back to runway.geojson pavement edges.
+    def doc(uid: str, runway_ident: str, threshold: dict | None) -> dict:
+        return {
+            "procedureUid": uid,
+            "procedure": {
+                "procedureIdent": uid.split("-")[1],
+                "runwayIdent": runway_ident,
+                "chartName": f"RNAV {runway_ident}",
+                "procedureFamily": "RNAV_GPS",
+                "variant": None,
+                "approachModes": ["LNAV"],
+                "baseBranchIdent": "R",
+            },
+            "runway": {"ident": runway_ident, "threshold": threshold},
+        }
+
+    thr = {"lon": -78.80196389, "lat": 35.87445, "elevationFt": 367}
+    index = procedures_module.build_procedure_details_index(
+        airport="krdu",
+        airport_name="Raleigh-Durham",
+        source_cycle="2603",
+        documents=[
+            doc("KRDU-R05LY-RW05L", "RW05L", thr),
+            doc("KRDU-H05LZ-RW05L", "RW05L", {"lon": 0.0, "lat": 0.0, "elevationFt": 0}),
+            doc("KRDU-R32-RW32", "RW32", None),
+        ],
+    )
+
+    by_ident = {entry["runwayIdent"]: entry for entry in index["runways"]}
+    # first document with a threshold wins; a later doc must not overwrite it
+    assert by_ident["RW05L"]["threshold"] == thr
+    # a runway whose documents carry no threshold still has the key (schema-stable), as null
+    assert by_ident["RW32"]["threshold"] is None

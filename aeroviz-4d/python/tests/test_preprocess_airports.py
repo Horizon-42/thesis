@@ -187,6 +187,35 @@ class TestRunwayToPolygon:
 
         assert flat_dist_m(surface_le, surface_he) > flat_dist_m(landing_le, landing_he)
 
+    def test_surface_edges_sit_on_the_ourairports_endpoints(self):
+        # REGRESSION (displaced-threshold postmortem): the runway_surface edge midpoints must be
+        # the OurAirports endpoint coordinates themselves. The old implementation re-centred the
+        # declared length on the endpoint midpoint and applied the displaced offsets
+        # asymmetrically, rigidly shifting the polygon by (he_disp - le_disp)/2 (~120 m here).
+        ring = runway_to_polygon(RWY_WITH_DISPLACED)
+        le_mid = ((ring[0][0] + ring[1][0]) / 2, (ring[0][1] + ring[1][1]) / 2)
+        he_mid = ((ring[2][0] + ring[3][0]) / 2, (ring[2][1] + ring[3][1]) / 2)
+        assert math.isclose(le_mid[0], RWY_WITH_DISPLACED.le_lon, abs_tol=1e-9)
+        assert math.isclose(le_mid[1], RWY_WITH_DISPLACED.le_lat, abs_tol=1e-9)
+        assert math.isclose(he_mid[0], RWY_WITH_DISPLACED.he_lon, abs_tol=1e-9)
+        assert math.isclose(he_mid[1], RWY_WITH_DISPLACED.he_lat, abs_tol=1e-9)
+
+    def test_landing_zone_edges_are_endpoints_moved_inward_by_the_displacement(self):
+        ring = landing_zone_polygon(RWY_WITH_DISPLACED)
+        le_mid = ((ring[0][0] + ring[1][0]) / 2, (ring[0][1] + ring[1][1]) / 2)
+        he_mid = ((ring[2][0] + ring[3][0]) / 2, (ring[2][1] + ring[3][1]) / 2)
+
+        def flat_dist_m(a_lon, a_lat, b_lon, b_lat):
+            lat = (a_lat + b_lat) / 2
+            dx = (b_lon - a_lon) * metres_per_deg_lon(lat)
+            dy = (b_lat - a_lat) * METRES_PER_DEG_LAT
+            return math.hypot(dx, dy)
+
+        le_inward_m = flat_dist_m(RWY_WITH_DISPLACED.le_lon, RWY_WITH_DISPLACED.le_lat, *le_mid)
+        he_inward_m = flat_dist_m(RWY_WITH_DISPLACED.he_lon, RWY_WITH_DISPLACED.he_lat, *he_mid)
+        assert math.isclose(le_inward_m, 1200 * 0.3048, rel_tol=1e-3)
+        assert math.isclose(he_inward_m, 400 * 0.3048, rel_tol=1e-3)
+
 
 class TestRunwayGeojson:
     def test_outputs_two_polygons_per_runway(self):

@@ -18,6 +18,12 @@ export interface ProcedureDetailsIndexProcedureSummary {
 export interface ProcedureDetailsIndexRunwaySummary {
   runwayIdent: string;
   chartName: string;
+  /**
+   * CIFP landing threshold hoisted from the runway's detail documents — the authoritative
+   * (displaced) landing threshold. Optional: older index.json files predate the field; null
+   * when the runway's documents carry no coded threshold.
+   */
+  threshold?: { lon: number; lat: number; elevationFt: number | null } | null;
   procedureUids: string[];
   procedures: ProcedureDetailsIndexProcedureSummary[];
 }

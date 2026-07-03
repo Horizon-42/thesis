@@ -2,6 +2,10 @@ import { airportDataUrl } from "./airportData";
 import { fetchJson } from "../utils/fetchJson";
 import type { RunwayProperties } from "../types/geojson-aviation";
 import {
+  procedureDetailsIndexUrl,
+  type ProcedureDetailsIndexManifest,
+} from "./procedureDetails";
+import {
   EARTH_RADIUS_M,
   FEET_TO_METERS as METRES_PER_FOOT,
   toDegrees,
@@ -44,12 +48,32 @@ export async function fetchRunwayThresholdTargets(
   const collection = await fetchJson<RunwayFeatureCollection>(
     airportDataUrl(airportCode, "runway.geojson"),
   );
-  return buildRunwayThresholdTargets(collection);
+  // CIFP landing thresholds from the procedure-details index (authoritative — the geojson
+  // runway_surface edges are PAVEMENT ends, up to ~970 m from the displaced landing threshold).
+  // Airports without procedure data fall back to the pavement geometry.
+  const index = await fetchJson<ProcedureDetailsIndexManifest>(
+    procedureDetailsIndexUrl(airportCode),
+  ).catch(() => null);
+  return buildRunwayThresholdTargets(collection, index);
 }
 
 export function buildRunwayThresholdTargets(
   collection: RunwayFeatureCollection,
+  index: ProcedureDetailsIndexManifest | null = null,
 ): RunwayThresholdTarget[] {
+  // The CIFP threshold per runway (the displaced landing threshold). Position + elevation come
+  // from here when present; the HEADING stays pavement-derived — the runway axis direction is
+  // accurate in the polygon even where its ends are not.
+  const cifpByIdent = new Map<
+    string,
+    { lon: number; lat: number; elevationFt: number | null }
+  >();
+  for (const runway of index?.runways ?? []) {
+    if (runway.threshold) {
+      cifpByIdent.set(normalizeRunwayIdent(runway.runwayIdent), runway.threshold);
+    }
+  }
+
   return collection.features
     .filter((feature) =>
       feature.geometry.type === "Polygon" &&
@@ -71,23 +95,31 @@ export function buildRunwayThresholdTargets(
         centers.le.lon,
         centers.le.lat,
       );
+      const leIdent = normalizeRunwayIdent(feature.properties.le_ident);
+      const heIdent = normalizeRunwayIdent(feature.properties.he_ident);
+      const leCifp = cifpByIdent.get(leIdent) ?? null;
+      const heCifp = cifpByIdent.get(heIdent) ?? null;
       return [
         {
-          id: normalizeRunwayIdent(feature.properties.le_ident),
-          runwayIdent: normalizeRunwayIdent(feature.properties.le_ident),
+          id: leIdent,
+          runwayIdent: leIdent,
           runwayPairIdent: feature.properties.runway_ident ?? "",
-          lon: centers.le.lon,
-          lat: centers.le.lat,
-          altM: feature.properties.le_elevation_ft * METRES_PER_FOOT,
+          lon: leCifp?.lon ?? centers.le.lon,
+          lat: leCifp?.lat ?? centers.le.lat,
+          altM: leCifp?.elevationFt != null
+            ? leCifp.elevationFt * METRES_PER_FOOT
+            : feature.properties.le_elevation_ft * METRES_PER_FOOT,
           psiDeg: lePsiDeg,
         },
         {
-          id: normalizeRunwayIdent(feature.properties.he_ident),
-          runwayIdent: normalizeRunwayIdent(feature.properties.he_ident),
+          id: heIdent,
+          runwayIdent: heIdent,
           runwayPairIdent: feature.properties.runway_ident ?? "",
-          lon: centers.he.lon,
-          lat: centers.he.lat,
-          altM: feature.properties.he_elevation_ft * METRES_PER_FOOT,
+          lon: heCifp?.lon ?? centers.he.lon,
+          lat: heCifp?.lat ?? centers.he.lat,
+          altM: heCifp?.elevationFt != null
+            ? heCifp.elevationFt * METRES_PER_FOOT
+            : feature.properties.he_elevation_ft * METRES_PER_FOOT,
           psiDeg: hePsiDeg,
         },
       ];

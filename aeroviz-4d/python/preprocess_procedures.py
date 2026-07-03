@@ -1415,10 +1415,18 @@ def build_procedure_details_index(
             {
                 "runwayIdent": runway_ident,
                 "chartName": procedure["chartName"],
+                # CIFP landing threshold {lon, lat, elevationFt}, hoisted from the detail
+                # document so threshold consumers (the frontend's runway-target list) can read
+                # the authoritative displaced landing threshold WITHOUT fetching every
+                # per-procedure document. runway.geojson's runway_surface edges are PAVEMENT
+                # ends — up to ~970 m away on displaced-threshold runways (KSJC 30R).
+                "threshold": None,
                 "procedureUids": [],
                 "procedures": [],
             },
         )
+        if runway_entry["threshold"] is None:
+            runway_entry["threshold"] = document.get("runway", {}).get("threshold")
         runway_entry["procedureUids"].append(document["procedureUid"])
         runway_entry["procedures"].append(
             {
