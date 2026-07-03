@@ -1,130 +1,18 @@
 import { describe, expect, it } from "vitest";
-import type {
-  ProcedureDetailBranch,
-  ProcedureDetailDocument,
-  ProcedureDetailLeg,
-} from "../procedureDetails";
+import type { ProcedureDetailDocument } from "../procedureDetails";
 import {
   buildProcedureConstraint,
   procedureConstraintAltitudesM,
+  procedureThresholdAnchor,
 } from "../procedureConstraint";
+import {
+  krduR05lyDocument,
+  krduR05lyFinalBranch as finalBranch,
+  leg,
+} from "./krduR05lyDetailDocument.fixture";
 
-function leg(
-  partial: Pick<ProcedureDetailLeg, "legId" | "sequence" | "path" | "roleAtEnd"> &
-    Partial<ProcedureDetailLeg>,
-): ProcedureDetailLeg {
-  return {
-    segmentType: "final",
-    termination: { kind: "fix", fixRef: partial.path.endFixRef },
-    constraints: { altitude: null, speedKt: null, geometryAltitudeFt: null },
-    sourceRefs: ["src:cifp-detail"],
-    quality: { status: "exact", sourceLine: partial.sequence, renderedInPlanView: true },
-    ...partial,
-  };
-}
+const document = krduR05lyDocument;
 
-const finalBranch: ProcedureDetailBranch = {
-  branchId: "branch:R",
-  branchKey: "R",
-  branchIdent: "R",
-  branchRole: "final",
-  sequenceOrder: 1,
-  mergeFixRef: null,
-  continuesWithBranchId: null,
-  defaultVisible: true,
-  warnings: [],
-  legs: [
-    leg({
-      legId: "leg:R:010",
-      sequence: 10,
-      path: { pathTerminator: "IF", constructionMethod: "if_to_fix", startFixRef: null, endFixRef: "fix:SCHOO" },
-      roleAtEnd: "IF",
-      constraints: {
-        altitude: { qualifier: "atOrAbove", valueFt: 3000, rawText: "3000 ft" },
-        speedKt: null,
-        geometryAltitudeFt: 3000,
-      },
-    }),
-    leg({
-      legId: "leg:R:020",
-      sequence: 20,
-      path: { pathTerminator: "TF", constructionMethod: "track_to_fix", startFixRef: "fix:SCHOO", endFixRef: "fix:WEPAS" },
-      roleAtEnd: "FAF",
-      constraints: {
-        altitude: { qualifier: "atOrAbove", valueFt: 2200, rawText: "2200 ft" },
-        speedKt: 170,
-        geometryAltitudeFt: 2200,
-      },
-    }),
-    leg({
-      legId: "leg:R:030",
-      sequence: 30,
-      path: { pathTerminator: "TF", constructionMethod: "track_to_fix", startFixRef: "fix:WEPAS", endFixRef: "fix:RW05L" },
-      roleAtEnd: "MAPt",
-      constraints: {
-        altitude: { qualifier: "at", valueFt: 424, rawText: "424 ft" },
-        speedKt: null,
-        geometryAltitudeFt: 367,
-      },
-    }),
-  ],
-};
-
-const document: ProcedureDetailDocument = {
-  schemaVersion: "1.0.0",
-  modelType: "rnav-procedure-runway",
-  procedureUid: "KRDU-R05LY-RW05L",
-  provenance: { assemblyMode: "cifp_primary_export", researchUseOnly: true, sources: [], warnings: [] },
-  airport: { icao: "KRDU", faa: "RDU", name: "Raleigh-Durham International Airport" },
-  runway: {
-    ident: "RW05L",
-    landingThresholdFixRef: "fix:RW05L",
-    threshold: { lon: -78.80196389, lat: 35.87445, elevationFt: 367 },
-  },
-  procedure: {
-    procedureType: "SIAP",
-    procedureFamily: "RNAV_GPS",
-    procedureIdent: "R05LY",
-    chartName: "RNAV(GPS) Y RWY 05L",
-    variant: "Y",
-    runwayIdent: "RW05L",
-    baseBranchIdent: "R",
-    approachModes: ["LPV", "LNAV/VNAV", "LNAV"],
-  },
-  fixes: [
-    { fixId: "fix:SCHOO", ident: "SCHOO", kind: "named_fix", position: { lon: -78.92647222, lat: 35.77341389 }, elevationFt: null, roleHints: ["IF"], sourceRefs: [] },
-    { fixId: "fix:WEPAS", ident: "WEPAS", kind: "final_approach_fix", position: { lon: -78.88295556, lat: 35.80876667 }, elevationFt: null, roleHints: ["FAF"], sourceRefs: [] },
-    { fixId: "fix:RW05L", ident: "RW05L", kind: "runway_threshold", position: { lon: -78.80196389, lat: 35.87445 }, elevationFt: 367, roleHints: ["MAPt"], sourceRefs: [] },
-  ],
-  branches: [finalBranch],
-  verticalProfiles: [
-    {
-      profileId: "vp:final",
-      appliesToModes: ["LPV", "LNAV/VNAV", "LNAV"],
-      branchId: "branch:R",
-      fromFixRef: "fix:SCHOO",
-      toFixRef: "fix:RW05L",
-      basis: "cifp_leg_constraints",
-      glidepathAngleDeg: 3.0,
-      thresholdCrossingHeightFt: 57,
-      constraintSamples: [],
-      warnings: [],
-    },
-  ],
-  validation: {
-    expectedRunwayIdent: "RW05L",
-    expectedIF: "fix:SCHOO",
-    expectedFAF: "fix:WEPAS",
-    expectedMAPt: "fix:RW05L",
-    expectedMissedHoldFix: null,
-    knownSimplifications: [],
-  },
-  displayHints: {
-    nominalSpeedKt: 140,
-    defaultVisibleBranchIds: ["branch:R"],
-    tunnelDefaults: { lateralHalfWidthNm: 0.3, verticalHalfHeightFt: 300, sampleSpacingM: 250, mode: "visualApproximation" },
-  },
-};
 
 describe("buildProcedureConstraint", () => {
   it("derives the canonical waypoint sequence from the detail document", () => {
@@ -194,6 +82,30 @@ describe("buildProcedureConstraint", () => {
     const altitudesM = procedureConstraintAltitudesM(constraint);
     expect(altitudesM[0]).toBeCloseTo(3000 * 0.3048, 6);
     expect(altitudesM[2]).toBeCloseTo(424 * 0.3048, 6);
+  });
+
+  it("anchors the optimizer target on the CIFP threshold, course in simulator convention", () => {
+    // The optimizer target must be the procedure's OWN threshold (the frame anchor the backend
+    // validates), not the runway.geojson pavement midpoint (can be hundreds of metres off).
+    const constraint = buildProcedureConstraint(document)!;
+    const anchor = procedureThresholdAnchor(constraint, document);
+    expect(anchor.lon).toBeCloseTo(-78.80196389, 8);
+    expect(anchor.lat).toBeCloseTo(35.87445, 8);
+    expect(anchor.elevationM).toBeCloseTo(367 * 0.3048, 3);
+    // WEPAS -> RW05L runs ~045 deg true (compass). The SIMULATOR convention is 0 = East, CCW
+    // toward North, so the same course reads as 90 - 45 = ~45 deg — and critically it must NOT
+    // equal the compass approachCourseDeg except by the 45-deg coincidence of this runway; assert
+    // the exact convention via the complement identity.
+    expect(anchor.psiDeg).toBeCloseTo(90 - constraint.approachCourseDeg!, 6);
+  });
+
+  it("threshold anchor reports a null elevation when the document has none", () => {
+    const constraint = buildProcedureConstraint(document)!;
+    const withoutElevation: ProcedureDetailDocument = {
+      ...document,
+      runway: { ...document.runway, threshold: { lon: -78.80196389, lat: 35.87445, elevationFt: null } },
+    };
+    expect(procedureThresholdAnchor(constraint, withoutElevation).elevationM).toBeNull();
   });
 
   it("returns null when no renderable branch yields two waypoints", () => {

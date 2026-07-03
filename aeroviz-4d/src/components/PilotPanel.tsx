@@ -21,6 +21,7 @@ import {
 } from "../data/procedureDetails";
 import {
   buildProcedureConstraint,
+  procedureThresholdAnchor,
   type ProcedureConstraint,
 } from "../data/procedureConstraint";
 import { fetchJson } from "../utils/fetchJson";
@@ -121,7 +122,7 @@ const DEFAULT_COMPARISON_CONTROL: DynamicsComparisonControl = {
   bankDeg: 0,
   loadFactor: 1,
 };
-const DEFAULT_TRAJECTORY_OPTIMIZER: TrajectoryOptimizer = "casadiMultiphaseNormalizedFullTransport";
+const DEFAULT_TRAJECTORY_OPTIMIZER: TrajectoryOptimizer = "casadiMultiphaseNormalizedFullTransportTrapezoidal";
 // The optimizer is edited as orthogonal axes (see trajectoryOptimizationClient): the constraint
 // MODE, the base frame, and — for the geodetic frame — transport + normalization.
 const OPTIMIZER_CONSTRAINTS_OPTIONS: { value: "none" | "procedure"; label: string }[] = [
@@ -232,7 +233,7 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   );
   const [nSegments, setNSegments] = useState(10);
   // Constrained (procedure) mode: control segments PER LEG (total = legs × this).
-  const [nSegPerPhase, setNSegPerPhase] = useState(4);
+  const [nSegPerPhase, setNSegPerPhase] = useState(2);
   const [showAdvancedNumerics, setShowAdvancedNumerics] = useState(false);
   const [arrivalTimeS, setArrivalTimeS] = useState(DEFAULT_ARRIVAL_TIME_S);
   const [trajectoryDtS, setTrajectoryDtS] = useState(DEFAULT_TRAJECTORY_DT_S);
@@ -1185,6 +1186,11 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
       // one phase per leg). The selected RNAV initial fix identifies the procedure + branch; the
       // backend enforces each leg's corridor / glidepath / step-down floor as NLP path constraints.
       let procedureConstraint: ProcedureConstraint | undefined;
+      let pilotTargetState = trajectoryTargetToPilotState(
+        targetState,
+        initialState.aircraftType,
+        initialState.massKg,
+      );
       const { constrained } = optimizerParts;
       if (constrained) {
         const candidate = rnavInitialFixCandidates.find(
@@ -1205,16 +1211,26 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
           );
         }
         procedureConstraint = built;
+        // Anchor the target on the procedure's OWN threshold (CIFP). The backend anchors the
+        // constraint (n, e) frame at the target and rejects a procedure that does not end there;
+        // the runway.geojson pavement midpoint can sit hundreds of metres from the CIFP landing
+        // threshold (displaced thresholds / OurAirports endpoint quality).
+        const anchor = procedureThresholdAnchor(built, document);
+        pilotTargetState = {
+          ...pilotTargetState,
+          lon: anchor.lon,
+          lat: anchor.lat,
+          headingDeg: runwayAlignedHeadingDeg(anchor.psiDeg),
+          ...(anchor.elevationM !== null
+            ? { altM: targetAltitudeMForThreshold(anchor.elevationM, selectedAircraft ?? null) }
+            : {}),
+        };
       }
 
       const result = await runTrajectoryOptimization({
         optimizer: trajectoryOptimizer,
         initialState,
-        targetState: trajectoryTargetToPilotState(
-          targetState,
-          initialState.aircraftType,
-          initialState.massKg,
-        ),
+        targetState: pilotTargetState,
         nSegments,
         nSegPerPhase: constrained ? nSegPerPhase : undefined,
         arrivalTimeS,

@@ -5,6 +5,7 @@ import {
   knotsToMetresPerSecond,
   targetAltitudeMForThreshold,
 } from "../../pilot/trajectoryTargetConstraints";
+import { krduR05lyDocument } from "../../data/__tests__/krduR05lyDetailDocument.fixture";
 import type {
   PilotControls,
   PilotResetState,
@@ -37,6 +38,7 @@ const mocks = vi.hoisted(() => ({
   stepPilotSimulation: vi.fn(),
   fetchRunwayThresholdTargets: vi.fn(),
   fetchRnavInitialFixCandidates: vi.fn(),
+  fetchJson: vi.fn(),
   runTrajectoryOptimization: vi.fn(),
   usePilotAircraft: vi.fn(),
   usePilotInitialPlacement: vi.fn(),
@@ -102,6 +104,11 @@ vi.mock("../../data/rnavInitialFixCandidates", () => ({
   fetchRnavInitialFixCandidates: mocks.fetchRnavInitialFixCandidates,
 }));
 
+// PilotPanel uses fetchJson only for the procedure detail document (the constrained optimizer).
+vi.mock("../../utils/fetchJson", () => ({
+  fetchJson: mocks.fetchJson,
+}));
+
 vi.mock("../../pilot/trajectoryOptimizationClient", async (importOriginal) => ({
   // Keep the real pure helpers (decomposeOptimizer / composeOptimizer /
   // validFittingsForFrame); only stub the network call.
@@ -145,6 +152,7 @@ describe("PilotPanel trajectory play mode", () => {
         headingDeg: 39.1,
       },
     ]);
+    mocks.fetchJson.mockResolvedValue(krduR05lyDocument);
     mocks.runTrajectoryOptimization.mockResolvedValue({
       ok: true,
       optimizer: "casadiIpopt",
@@ -360,7 +368,7 @@ describe("PilotPanel trajectory play mode", () => {
     expect((screen.getByRole("combobox", { name: "Constraints" }) as HTMLSelectElement).value)
       .toBe("procedure");
     expect((screen.getByRole("combobox", { name: "Fitting" }) as HTMLSelectElement).value)
-      .toBe("hermiteSimpson");
+      .toBe("trapezoidal");
     expect((screen.getByLabelText("Max iter") as HTMLInputElement).value).toBe("300");
     fireEvent.change(screen.getByRole("combobox", { name: "Constraints" }), {
       target: { value: "none" },
@@ -480,10 +488,10 @@ describe("PilotPanel trajectory play mode", () => {
     const fittingSelect = screen.getByRole("combobox", { name: "Fitting" }) as HTMLSelectElement;
     const arrivalInput = screen.getByLabelText("Arrival time") as HTMLInputElement;
 
-    // Default: procedure-constrained + Hermite-Simpson; all three fittings available,
+    // Default: procedure-constrained + Trapezoidal; all three fittings available,
     // but the advanced frame axis is LOCKED (the constrained mode pins the dynamics).
     expect(constraintsSelect.value).toBe("procedure");
-    expect(fittingSelect.value).toBe("hermiteSimpson");
+    expect(fittingSelect.value).toBe("trapezoidal");
     expect(fittingSelect.querySelectorAll("option").length).toBe(3);
     expect(fittingSelect.disabled).toBe(false);
     expect(arrivalInput.disabled).toBe(false);
@@ -570,6 +578,50 @@ describe("PilotPanel trajectory play mode", () => {
       knotsToMetresPerSecond(a320Config.terminalSpeedMaxKt),
     );
     expect(request.targetState.headingDeg).toBe(46);
+  });
+
+  it("anchors the constrained optimizer target on the procedure's CIFP threshold", async () => {
+    // REGRESSION: the multiphase target must be the procedure's OWN threshold (the backend
+    // anchors the constraint (n, e) frame at the target and rejects a procedure ending
+    // elsewhere) — NOT the runway.geojson pavement midpoint, which sits hundreds of metres off
+    // on displaced-threshold runways. The mocked runway target here is deliberately offset from
+    // the CIFP threshold so the assertion discriminates the two sources.
+    render(<PilotPanel />);
+
+    expect(await screen.findByText("A320")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
+    await waitFor(() => {
+      expect(mocks.fetchRnavInitialFixCandidates).toHaveBeenCalled();
+    });
+
+    // Select the RNAV initial fix (identifies the procedure + branch).
+    const initialSummary = screen.getByLabelText("Initial aircraft state summary");
+    fireEvent.click(within(initialSummary).getByRole("button", { name: "Edit" }));
+    const initialEditor = await screen.findByLabelText("Initial aircraft setup");
+    fireEvent.change(within(initialEditor).getByLabelText("RNAV IF"), {
+      target: { value: "KRDU-R05LY-RW05L|branch:R|fix:SCHOO|fix:WEPAS|914.4" },
+    });
+    fireEvent.click(within(initialEditor).getByRole("button", { name: "Close" }));
+
+    // Default Constraints = procedure (the multiphase optimizer).
+    fireEvent.click(screen.getByRole("button", { name: "Optimize" }));
+    await waitFor(() => {
+      expect(mocks.runTrajectoryOptimization).toHaveBeenCalled();
+    });
+
+    const calls = mocks.runTrajectoryOptimization.mock.calls;
+    const request = calls[calls.length - 1]?.[0];
+    expect(request.procedureConstraint?.waypoints).toHaveLength(3);
+    // CIFP threshold (fixture: RW05L), not the mocked runway.geojson target (-78.802, 35.874).
+    expect(request.targetState.lat).toBeCloseTo(35.87445, 8);
+    expect(request.targetState.lon).toBeCloseTo(-78.80196389, 8);
+    // altitude = CIFP threshold elevation + the aircraft's threshold-crossing height
+    expect(request.targetState.altM).toBeCloseTo(
+      targetAltitudeMForThreshold(367 * 0.3048, a320Config),
+      4,
+    );
+    // final course WEPAS -> RW05L in the simulator heading convention (0 = East, CCW)
+    expect(request.targetState.headingDeg).toBeCloseTo(45.0, 0);
   });
 
   it("keeps the initial aircraft editor open after placing the aircraft", async () => {

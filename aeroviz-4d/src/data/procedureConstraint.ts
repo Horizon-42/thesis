@@ -206,3 +206,48 @@ export function procedureConstraintAltitudesM(
     waypoint.altitudeRefFt === null ? null : waypoint.altitudeRefFt * FEET_TO_METERS,
   );
 }
+
+export interface ProcedureThresholdAnchor {
+  lon: number;
+  lat: number;
+  /** CIFP threshold elevation (metres MSL); null when the document carries none. */
+  elevationM: number | null;
+  /** Final course into the anchor in the SIMULATOR's heading convention (deg; 0 = East, CCW). */
+  psiDeg: number;
+}
+
+/** Course (deg) in the simulator's heading convention (0 = East, CCW toward North). */
+function simulatorCourseDeg(
+  from: { lonDeg: number; latDeg: number },
+  to: { lonDeg: number; latDeg: number },
+): number {
+  const meanLat = toRadians((from.latDeg + to.latDeg) / 2);
+  const east = toRadians(to.lonDeg - from.lonDeg) * EARTH_RADIUS_M * Math.cos(meanLat);
+  const north = toRadians(to.latDeg - from.latDeg) * EARTH_RADIUS_M;
+  return normalizeDegrees(toDegrees(Math.atan2(north, east)));
+}
+
+/**
+ * The optimization target anchor a procedure constraint implies: the constraint's LAST waypoint
+ * (the CIFP landing threshold the backend anchors its (n, e) constraint frame on), the CIFP
+ * threshold elevation, and the final-approach course in the simulator's heading convention.
+ *
+ * Use THIS as the optimizer target whenever the constraint is attached — NOT the runway.geojson
+ * threshold: the pavement-polygon midpoints derived from OurAirports can sit hundreds of metres
+ * from the CIFP landing threshold point (displaced thresholds, endpoint quality), and the
+ * backend rejects a procedure that does not end at the target (the frame-anchor guard).
+ */
+export function procedureThresholdAnchor(
+  constraint: ProcedureConstraint,
+  document: ProcedureDetailDocument,
+): ProcedureThresholdAnchor {
+  const last = constraint.waypoints[constraint.waypoints.length - 1];
+  const previous = constraint.waypoints[constraint.waypoints.length - 2];
+  const elevationFt = document.runway.threshold?.elevationFt ?? null;
+  return {
+    lon: last.lonDeg,
+    lat: last.latDeg,
+    elevationM: elevationFt === null ? null : elevationFt * FEET_TO_METERS,
+    psiDeg: simulatorCourseDeg(previous, last),
+  };
+}
