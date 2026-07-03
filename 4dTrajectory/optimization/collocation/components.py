@@ -153,13 +153,15 @@ _MAX_STATE_SUBSTEPS = 16
 _DEFAULT_MAX_TERMINAL_BANK_DEG = 5.0
 
 
-def select_state_substeps(max_duration: float, segment_num: int) -> int:
-    """Pick M so the state step ``T/(N*M)`` is about ``_TARGET_STATE_STEP_S``.
+def select_state_substeps(duration_s: float, segment_num: int) -> int:
+    """Pick M so the state step ``duration/(N*M)`` is about ``_TARGET_STATE_STEP_S``.
 
-    ``max_duration`` is the horizon upper bound; if the solved time comes
-    out shorter the state step is only finer, never coarser.
+    ``duration_s`` is the (per-phase) duration estimate — the horizon upper
+    bound for a single free phase, or the leg's duration guess for a
+    procedure phase; if the solved time comes out shorter the state step is
+    only finer, never coarser.
     """
-    control_step = max_duration / segment_num
+    control_step = duration_s / segment_num
     substeps = round(control_step / _TARGET_STATE_STEP_S)
     return max(1, min(_MAX_STATE_SUBSTEPS, int(substeps)))
 
@@ -175,6 +177,9 @@ def terminal_bank_constraint_expr(state_nodes, start_state, state_h, max_bank_ra
     ``tan(mu) = V cos(gamma) * psi_dot / g``.  We reconstruct ``psi_dot`` at
     the terminal from the last two STATE sub-nodes (``Δpsi / state_h``) — so
     this is a pure state constraint, never touching the control ``mu``.
+    ``start_state`` is the node ONE STEP BEFORE ``state_nodes[0]`` (the
+    phase's start state); it is the ``prev`` sample when the phase has a
+    single node, so it must be a real state, not a placeholder.
 
     Returns ``(expr, lb, ub)`` for the scalar inequality ``lb <= expr <= ub``
     with ``expr = V·cos(gamma)·psi_dot = g·tan(mu_eff)`` and

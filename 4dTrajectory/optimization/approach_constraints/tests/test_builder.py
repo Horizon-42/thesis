@@ -1,39 +1,18 @@
-"""End-to-end: builder + segments + examples (partition, split, feasible/infeasible scoring)."""
+"""End-to-end: builder + segments + examples (feasible/infeasible scoring, unit-aware report)."""
+
+import math
 
 import numpy as np
 
 from approach_constraints import examples
-from approach_constraints.builder import ConstraintSet, partition_node_indices, split_contiguous
+from approach_constraints.builder import ConstraintSet
 
 
 def test_constraint_set_structure_is_wired():
-    # plumbing only (no TODO math) — passes now.
     cset = examples.build_example_constraint_set()
     assert len(cset.segments) == 4
     nodes = examples.feasible_segment_nodes()
     assert [n.shape for n in nodes] == [(6, 7)] * 4
-
-
-def test_partition_node_indices():
-    # two equal-length segments, 10 nodes -> 5 each, contiguous and exhaustive
-    spans = [(0.0, 1000.0), (1000.0, 2000.0)]
-    groups = partition_node_indices(10, spans)
-    assert [len(g) for g in groups] == [5, 5]
-    assert sorted(i for g in groups for i in g) == list(range(10))
-    assert groups[0] == [0, 1, 2, 3, 4] and groups[1] == [5, 6, 7, 8, 9]
-    # uneven spans: a short final leg gets proportionally fewer nodes
-    spans2 = [(0.0, 8000.0), (8000.0, 10000.0)]   # final = last 20%
-    g2 = partition_node_indices(10, spans2)
-    assert len(g2[1]) == 2 and g2[1] == [8, 9]
-    # degenerate total -> all in first
-    assert partition_node_indices(4, [(0.0, 0.0)]) == [[0, 1, 2, 3]]
-
-
-def test_split_contiguous_roundtrip():
-    traj = np.arange(24 * 7).reshape(24, 7).astype(float)
-    parts = split_contiguous(traj, [6, 6, 6, 6])
-    assert sum(p.shape[0] for p in parts) == 24
-    assert np.array_equal(np.concatenate(parts), traj)
 
 
 def test_feasible_trajectory_is_feasible():
@@ -48,3 +27,17 @@ def test_infeasible_trajectory_flags_final_corridor():
     assert not report.is_feasible(tol_m=1.0)
     worst_key = max(report.violations, key=lambda k: float(np.ravel(report.violations[k]).max()))
     assert "final_lpv" in worst_key and "lateral" in worst_key
+
+
+def test_descent_violation_is_not_masked_by_the_metre_tolerance():
+    # REGRESSION (mixed units): the descent rows are RADIANS. A 10 deg-too-steep descent is a
+    # violation of ~0.18 rad — far under the 1.0 METRE tolerance — and used to read as feasible.
+    nodes = examples.feasible_segment_nodes()
+    nodes[0][:, 5] = math.radians(-15.0)      # feeder cap is 4.7 deg -> ~10 deg too steep
+    report = examples.build_example_constraint_set().evaluate(nodes)
+    assert not report.is_feasible()
+    assert report.max_angular_violation() > math.radians(5.0)
+    assert report.max_violation() <= 1.0      # the metre rows are still fine
+    # the summary reports the descent row in degrees and flags it
+    line = next(l for l in report.summary().splitlines() if "feeder" in l and "descent" in l)
+    assert "deg" in line and "VIOLATED" in line

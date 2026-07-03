@@ -22,6 +22,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 import casadi as ca  # noqa: E402
 import approach_constraints as ac  # noqa: E402
+from approach_constraints import geometry as ac_geo  # noqa: E402
 from aerodynamic_model.common import GeodeticState  # noqa: E402
 from aerodynamic_model.casadi_simulator import make_geodetic_step_integrator  # noqa: E402
 from aircraft.aircraft_sets import A320  # noqa: E402
@@ -90,7 +91,8 @@ def _one_lpv_segment(ltp, faf):
 def _faf_intercept_deg(states, frame, faf_ne):
     ne = np.array([frame.to_ne(s[0], s[1]) for s in states])
     i = int(np.argmin([np.hypot(*(p - faf_ne)) for p in ne]))
-    fac = math.degrees(math.atan2(-faf_ne[0], -faf_ne[1]))   # FAF -> LTP(0,0), model-ENU (0=E, CCW)
+    # FAF -> LTP(0,0) course from the ONE course-math source, in the model's psi convention.
+    fac = math.degrees(ac_geo.course_bearing(faf_ne, [0.0, 0.0]))
     return abs(((math.degrees(states[i][4]) - fac + 180) % 360) - 180)
 
 
@@ -148,6 +150,33 @@ def test_guards():
         CollocationOptimizer(A320, solver_backend="nope")
     with pytest.raises(ValueError):
         CollocationOptimizer(A320, min_speed_ms=-1.0)
+
+
+def test_guards_frame_anchor_contract():
+    # The segments must be in the TARGET-anchored (n, e) frame: the procedure must END at the
+    # origin (= the LTP = the pinned terminal), and every LPV spec must anchor its LTP there.
+    from dataclasses import replace
+    off_origin = [_one_lpv_segment(np.array([4000.0, 0.0]), np.array([9000.0, 0.0]))]
+    with pytest.raises(ValueError, match="target-anchored"):
+        CollocationOptimizer(A320, segments=off_origin)
+    good = _one_lpv_segment(np.array([0.0, 0.0]), np.array([5000.0, 0.0]))
+    bad_lpv = replace(good, lpv=replace(good.lpv, ltp_ne=np.array([500.0, 0.0])))
+    with pytest.raises(ValueError, match="LPV segment"):
+        CollocationOptimizer(A320, segments=[bad_lpv])
+
+
+def test_phase_plan_adds_transition_phase_only_for_a_far_start():
+    # Start > 2 km from the first leg's start fix -> an UNCONSTRAINED start->first-fix transition
+    # phase is prepended (so leg-0's floor/descent-cap no longer bind before the procedure);
+    # a start at/near the first fix joins the procedure directly.
+    seg = [_one_lpv_segment(np.array([0.0, 0.0]), np.array([5000.0, 0.0]))]
+    opt = CollocationOptimizer(A320, segments=seg)
+    near = opt._phase_plan(np.array([5100.0, 0.0]), None)
+    assert len(near) == 1 and near[0][1] is seg[0]
+    far = opt._phase_plan(np.array([9000.0, 0.0]), None)
+    assert len(far) == 2
+    assert far[0][1] is None and np.allclose(far[0][0], [5000.0, 0.0])   # transition -> the FAF
+    assert far[1][1] is seg[0]
 
 
 # ── unconstrained solves ───────────────────────────────────────────────────
@@ -267,15 +296,16 @@ def test_constrained_pins_faf_and_threshold_only():
     opt = CollocationOptimizer(A320, segments=segments)
     final_time, controls, states = opt.optimize_free_time(init, target, 120.0 * 1.6)
     nsp = opt.n_seg_per_phase
-    assert controls.shape == (len(segments) * nsp, 3)
+    # the start is well away from the IAF -> a start->IAF transition phase is prepended
+    assert controls.shape == ((len(segments) + 1) * nsp, 3)
     assert final_time == pytest.approx(sum(opt.segment_durations_s), rel=1e-6)
     ne = np.array([frame.to_ne(s[0], s[1]) for s in states])
     assert min(float(np.hypot(*(p - FAF))) for p in ne) < 1.0          # FAF crossed
     assert float(np.hypot(*(ne[-1] - LTP))) < 1.0                       # threshold reached
     assert _faf_intercept_deg(states, frame, FAF) <= 30.0 + 1e-6        # standard intercept
-    blk = slice((len(segments) - 1) * nsp, len(segments) * nsp)
+    blk = slice(-nsp, None)                                             # the final LPV leg's block
     viol = ac.segment_violations_from_components(
-        segments[-1], ne[blk, 0], ne[blk, 1], states[blk, 2], np.radians(states[blk, 5]))
+        segments[-1], ne[blk, 0], ne[blk, 1], states[blk, 2], states[blk, 5])
     assert max(float(np.ravel(v).max()) for v in viol.values()) <= 1.0
 
 
@@ -310,6 +340,83 @@ def test_constrained_solves_a_non_fixed_point_runway_heading(heading_deg):
     ne = np.array([frame.to_ne(s[0], s[1]) for s in states])
     assert float(np.hypot(*(ne[-1] - LTP))) < 1.0
     assert _faf_intercept_deg(states, frame, FAF) <= 30.0 + 1e-6
+
+
+def test_constrained_fixed_time_hits_the_duration():
+    init = _straight_in()
+    S = _rollout_samples(init, 120.0)
+    target = GeodeticState(*S[-1][:6], MTOW)
+    frame = ac.TargetFrame(target.latitude, target.longitude)
+    segments, _FAF, LTP = _approach(S, frame)
+    opt = CollocationOptimizer(A320, segments=segments)
+    final_time, _c, states = opt.optimize_trajectory(init, target, duration=150.0)
+    assert final_time == pytest.approx(150.0, abs=1e-2)
+    ne = np.array([frame.to_ne(s[0], s[1]) for s in states])
+    assert float(np.hypot(*(ne[-1] - LTP))) < 1.0
+
+
+def test_constrained_enforces_step_down_floor_and_descent_cap():
+    # The backend always codes an at-or-above floor + a descent cap on the pre-final legs; this
+    # exercises those NLP rows end-to-end (incl. the moc_floor staircase on a CasADi vector).
+    from dataclasses import replace
+    init = _straight_in()
+    S = _rollout_samples(init, 120.0)
+    target = GeodeticState(*S[-1][:6], MTOW)
+    frame = ac.TargetFrame(target.latitude, target.longitude)
+
+    def _segments_with(floor_offset_m, caps=(4.7, 3.5)):
+        segments, FAF, LTP = _approach(S, frame)
+        smp = lambda f: S[int(f * (len(S) - 1))]
+        for i, (cap, end_frac) in enumerate(zip(caps, (0.55, 0.78))):
+            leg_len = float(np.hypot(*(np.asarray(segments[i].end_ne) - np.asarray(segments[i].start_ne))))
+            floor_alt = smp(end_frac)[2] + floor_offset_m
+            segments[i] = replace(
+                segments[i],
+                step_downs=[ac.StepDown(s_from_start_m=leg_len, min_alt_m=floor_alt)],
+                max_descent_deg=cap,
+            )
+        return segments, FAF, LTP
+
+    # Floors slightly below the flown altitudes -> feasible, solves, and each leg's own phase
+    # nodes (the ones the NLP applies that leg's rows to) satisfy the coded floor.
+    segments, _FAF, LTP = _segments_with(floor_offset_m=-150.0)
+    opt = CollocationOptimizer(A320, segments=segments)
+    _t, _c, states = opt.optimize_free_time(init, target, 120.0 * 1.6)
+    ne = np.array([frame.to_ne(s[0], s[1]) for s in states])
+    assert float(np.hypot(*(ne[-1] - LTP))) < 1.0
+    nsp = opt.n_seg_per_phase          # phase 0 is the start->IAF transition
+    for i, seg in enumerate(segments[:2]):
+        blk = slice((i + 1) * nsp, (i + 2) * nsp)
+        viol = ac.segment_violations_from_components(
+            seg, ne[blk, 0], ne[blk, 1], states[blk, 2], states[blk, 5], include_lateral=False)
+        floor_key = next(k for k in viol if k.endswith(".floor"))
+        assert float(np.ravel(viol[floor_key]).max()) <= 1.0
+
+    # An impossible floor (1 km above the start) -> the rows bind -> infeasible, raises.
+    bad_segments, _FAF, _LTP = _segments_with(floor_offset_m=2000.0)
+    bad = CollocationOptimizer(A320, segments=bad_segments)
+    with pytest.raises(ValueError, match="failed"):
+        bad.optimize_free_time(init, target, 120.0 * 1.6)
+
+
+def test_terminal_bank_uses_previous_node_when_last_phase_has_one_node():
+    # REGRESSION: with a single state node in the last phase, the terminal bank's psi_dot needs
+    # the PREVIOUS phase's terminal node as ``prev``. A zeros placeholder turned the row into a
+    # bogus bound on the ABSOLUTE heading (V·cosγ·ψ) instead of the heading RATE.
+    init = _straight_in()
+    target = _reachable_target(init, 120.0)
+    ltp, mid, faf = np.array([0.0, 0.0]), np.array([2500.0, 0.0]), np.array([5000.0, 0.0])
+    segments = [
+        ac.SegmentSpec(ac.SegmentKind.INITIAL, faf, mid, "FAF", "MID", halfwidth_m=1852.0),
+        _one_lpv_segment(ltp, mid),
+    ]
+    opt = CollocationOptimizer(A320, segments=segments, n_seg_per_phase=1, state_substeps=1)
+    nlp, *_rest, layout = opt._build(init, target, 200.0)
+    n_phases = len(layout["phase_nseg"])
+    per_block = _schemes.CONTROL_DIM + _schemes.STATE_DIM      # n_seg = 1, m_sub = 1
+    psi_prev = nlp["x"][(n_phases - 2) * per_block + _schemes.CONTROL_DIM + 4]
+    bank_row = nlp["g"][-1]                                    # free-time build: bank is last
+    assert ca.depends_on(bank_row, psi_prev)
 
 
 def test_constrained_solves_a_near_sea_level_threshold():

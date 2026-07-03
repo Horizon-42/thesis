@@ -7,18 +7,23 @@ Constraints are OPTIONAL:
   * ``segments=None``  -> one free phase ``initial -> target`` (no path constraints). The
                          unconstrained optimiser used by the ADS-B / runway-target modes.
   * ``segments=[...]`` -> one phase per procedure leg, each with its corridor / glidepath /
-                         step-down floor + a FAF-intercept, the target pinned at the end. The
-                         procedure-constrained optimiser.
+                         step-down floor + a FAF-intercept, the target pinned at the end. When the
+                         start is away from the first leg's start fix, an UNCONSTRAINED
+                         start -> first-fix transition phase is prepended, so leg constraints only
+                         apply on the procedure itself. The procedure-constrained optimiser.
 
 Both build the NLP fresh per solve (initial/target are concrete, not symbolic parameters) — the
 procedure geometry differs per scenario, so there is nothing to amortise across solves. Free time
 minimises ``Σ Tₚ``; fixed time adds ``Σ Tₚ = duration`` and drops the time term. The dense-state
-transcription (control over N segments, state on N·M sub-intervals) makes the raw solution
-playback-consistent without a post-solve polish.
+transcription (control over N segments, state on N·M sub-intervals, M auto-selected per phase
+from the phase's duration guess) makes the raw solution playback-consistent without a post-solve
+polish. Mass is frozen at the initial mass (not a decision state; the RHS's fuel-burn rate is
+discarded) — a deliberate approximation, small over an approach.
 
-Reuses the whole foundation: :mod:`.schemes` (dynamics × fitting + metric-position normalization)
-and :mod:`.components` (bounds, altitude floor, control costs, terminal bank, solver factory,
-state ↔ decision conversions).
+Reuses the whole foundation: :mod:`.schemes` (dynamics × fitting + metric-position normalization),
+:mod:`.components` (bounds, altitude floor, control costs, terminal bank, solver factory,
+state ↔ decision conversions), and :mod:`approach_constraints` (the ONE source of the
+corridor / glidepath / floor / course math — nothing is re-derived here).
 """
 
 from __future__ import annotations
@@ -34,6 +39,9 @@ from aircraft.aircraft_sets import Aircraft
 from aircraft.aero_params import aero_params_for_aircraft
 from aerodynamic_model.common import GeodeticState
 
+import approach_constraints as ac
+from approach_constraints import geometry as _acgeo
+
 from . import schemes as _schemes
 from . import components as _components
 
@@ -41,6 +49,14 @@ STATE_DIM = _schemes.STATE_DIM
 CONTROL_DIM = _schemes.CONTROL_DIM
 _PSI = _schemes._PSI
 _INF = 1e9
+
+# Constrained solves: the segments' (n, e) coordinates MUST be in the frame the optimizer solves
+# in — metric offsets anchored at the TARGET = the LTP. Validated at construction (a silent
+# mis-anchor would shift every corridor); the tolerance absorbs threshold-vs-target data noise.
+_FRAME_ANCHOR_TOLERANCE_M = 150.0
+# A start farther than this from the first leg's start fix gets a dedicated unconstrained
+# transition phase (closer counts as "joining the procedure at the first fix").
+_TRANSITION_JOIN_TOLERANCE_M = 2000.0
 
 # The FAF-intercept spec for the one leg that leads INTO a protected final approach:
 # which phase it is, and the final-approach course to align with there.
@@ -67,7 +83,7 @@ class CollocationOptimizer:
         max_terminal_bank_deg: float = _components._DEFAULT_MAX_TERMINAL_BANK_DEG,
         smoothness_weights: tuple = _components._DEFAULT_SMOOTHNESS_WEIGHTS,
         min_speed_ms: float | None = None,
-        max_intercept_deg: float = 30.0,
+        max_intercept_deg: float = ac.STANDARD_INTERCEPT_MAX_DEG,
         solver_backend: str = _components._DEFAULT_SOLVER_BACKEND,
         verbose: bool = False,
     ):
@@ -93,6 +109,20 @@ class CollocationOptimizer:
                 )
             if solver_backend != "ipopt":
                 raise ValueError("procedure constraints require the 'ipopt' solver_backend")
+            # Frame-coincidence contract: the terminal node is pinned at the (n, e) origin, so the
+            # procedure must END there and every LPV spec must anchor its LTP there.
+            end_gap = float(np.hypot(*np.asarray(segments[-1].end_ne, float)))
+            if end_gap > _FRAME_ANCHOR_TOLERANCE_M:
+                raise ValueError(
+                    f"the final segment must end at the LTP/target — the (n, e) origin — but ends "
+                    f"{end_gap:.0f} m away; the segments are not in the target-anchored frame"
+                )
+            for s in segments:
+                if s.lpv is not None and float(np.hypot(*np.asarray(s.lpv.ltp_ne, float))) > _FRAME_ANCHOR_TOLERANCE_M:
+                    raise ValueError(
+                        f"LPV segment [{s.start_ident}->{s.end_ident}] has ltp_ne away from the "
+                        "(n, e) origin; the LTP must be the frame anchor (the optimizer target)"
+                    )
 
         self.aircraft = aircraft
         self.scheme = scheme
@@ -101,9 +131,12 @@ class CollocationOptimizer:
         # free (one phase, initial→target). Derived once so the mode is defined in exactly one place.
         self.constrained = segments is not None
         self.n_seg_per_phase = n_seg_per_phase
+        # Constrained: the per-leg count, EXCLUDING the optional start->first-fix transition phase
+        # (whether one exists depends on the initial state, known only at solve time).
         self.n_segments = len(segments) * n_seg_per_phase if self.constrained else n_segments
-        # State substeps: fixed 3 per (short) constrained leg; auto from the horizon otherwise.
-        self.state_substeps = state_substeps if state_substeps is not None else (3 if self.constrained else None)
+        # State substeps M: None -> auto-selected PER PHASE from that phase's duration guess
+        # (~3 s state step, components.select_state_substeps); an explicit value applies to all.
+        self.state_substeps = state_substeps
         self.max_duration = max_duration
         self.max_terminal_bank_deg = max_terminal_bank_deg
         self.smoothness_weights = smoothness_weights
@@ -207,7 +240,6 @@ class CollocationOptimizer:
             self.aero_params.k, self.aero_params.stall_threshold, self.aero_params.k_stall,
         )
         meta = self._aircraft_meta(target_state.altitude)
-        m_sub = self.state_substeps or _components.select_state_substeps(max_duration, self.n_segments)
         state_lb, state_ub = _schemes._normalized_position_bounds(
             *_components.make_state_bounds(meta["min_altitude"], meta["min_terminal_speed"]), self.scheme
         )
@@ -215,20 +247,36 @@ class CollocationOptimizer:
             meta["max_thrust"], meta["min_load_factor"], meta["max_load_factor"]
         )
 
-        faf = self._faf_intercept()
+        phase_plan = self._phase_plan(init_z[:2], tgt_z)   # [(end_fix, seg_or_None, n_seg)]
+        faf = self._faf_intercept(phase_plan)
         intercept_floor = math.cos(math.radians(self.max_intercept_deg))
-        phase_plan = self._phase_plan(tgt_z)          # [(end_fix, seg_or_None, n_seg)]
         n_phases = len(phase_plan)
-        total_dist = self._cumulative_dist(init_z[:2], [pf for pf, _s, _n in phase_plan])
+        fixes = [pf for pf, _s, _n in phase_plan]
+        total_dist = self._cumulative_dist(init_z[:2], fixes)
+        # Per-phase duration guesses. ``leg_guesses`` (fixed_duration-independent) drive the
+        # state-substep selection so the fixed- and free-time NLPs share ONE decision layout (the
+        # fixed solve seeds the free one); the x0 guess is rescaled to a fixed total when given.
+        leg_guesses = self._leg_duration_guesses(init_z[:2], fixes, max_duration)
+        if fixed_duration is not None:
+            scale = fixed_duration / sum(leg_guesses)
+            dur_guesses = [lg * scale for lg in leg_guesses]
+        else:
+            dur_guesses = leg_guesses
 
         w, lbw, ubw, x0 = [], [], [], []
         g, lbg, ubg = [], [], []
-        durations, phase_nodes, all_controls, phase_nseg = [], [], [], []
+        durations, phase_nodes, phase_starts, all_controls = [], [], [], []
+        phase_nseg, phase_msub = [], []
         start_z, start_np, cum = ca.DM(init_z), init_z.copy(), 0.0
         for p, (end_fix, seg, n_seg) in enumerate(phase_plan):
             last = p == n_phases - 1
+            phase_starts.append(start_z)   # the node one step before this phase's first node
             Tp = ca.SX.sym(f"T_{p}")
             durations.append(Tp)
+            # State substeps per phase, from the phase's duration guess (~3 s state step), so a
+            # long leg keeps its playback-consistent state density instead of a one-size M.
+            m_sub = self.state_substeps or _components.select_state_substeps(leg_guesses[p], n_seg)
+            phase_msub.append(m_sub)
             leg = float(np.hypot(end_fix[0] - start_np[0], end_fix[1] - start_np[1]))
             state_h = (Tp / n_seg) / m_sub
             end_alt = tgt_z[2] if last else (
@@ -263,9 +311,9 @@ class CollocationOptimizer:
                 ubg.append(0.0)
 
             # Leg path constraints (protected LPV final keeps the lateral corridor; pre-final legs
-            # contribute altitude floor + descent cap only). Unconstrained phases (seg None) skip it.
+            # contribute altitude floor + descent cap only). Unconstrained phases (seg None — the
+            # single free phase, or the start->first-fix transition) skip it.
             if seg is not None:
-                import approach_constraints as ac  # lazy
                 n_vec = ca.vertcat(*[nd[0] for nd in nodes])
                 e_vec = ca.vertcat(*[nd[1] for nd in nodes])
                 h_vec = ca.vertcat(*[nd[2] for nd in nodes])
@@ -303,7 +351,7 @@ class CollocationOptimizer:
         w += durations
         lbw += [min(meta["min_duration"], upper * 0.5)] * n_phases
         ubw += [upper] * n_phases
-        x0 += self._duration_guesses(init_z[:2], [pf for pf, _s, _n in phase_plan], max_duration, fixed_duration)
+        x0 += dur_guesses
 
         # Fixed time: constrain the total; else the objective minimises it.
         if fixed_duration is not None:
@@ -311,9 +359,12 @@ class CollocationOptimizer:
             lbg.append(0.0)
             ubg.append(0.0)
 
-        # Terminal realised-bank inequality on the last phase's last node.
+        # Terminal realised-bank inequality on the last phase's last node. The last phase's START
+        # node is the ``prev`` sample when that phase has a single state node — it must be the
+        # real preceding state, never a placeholder (a zeros vector would constrain V·cosγ·ψ,
+        # i.e. the absolute heading).
         bank_expr, bank_lb, bank_ub = _components.terminal_bank_constraint_expr(
-            phase_nodes[-1], ca.DM(np.zeros(7)), (durations[-1] / phase_nseg[-1]) / m_sub,
+            phase_nodes[-1], phase_starts[-1], (durations[-1] / phase_nseg[-1]) / phase_msub[-1],
             math.radians(self.max_terminal_bank_deg),
         )
         g.append(bank_expr)
@@ -332,42 +383,55 @@ class CollocationOptimizer:
             cost = ca.sum1(ca.vertcat(*durations)) / max_duration \
                 + _components._DEFAULT_TIME_REGULARIZATION * effort + smoothness
         nlp = {"f": cost, "x": ca.vertcat(*w), "g": ca.vertcat(*g)}
-        layout = {"phase_nseg": phase_nseg, "m_sub": m_sub, "c": c_np, "b": b_np}
+        layout = {"phase_nseg": phase_nseg, "phase_msub": phase_msub, "c": c_np, "b": b_np}
         return nlp, lbw, ubw, lbg, ubg, x0, layout
 
     # ------------------------------------------------------------------ helpers
-    def _phase_plan(self, tgt_z):
-        """``[(end_fix, seg_or_None, n_seg)]``: one phase per constrained leg, or a single free
-        phase to the target when unconstrained."""
-        if self.constrained:
-            return [(np.asarray(s.end_ne, float), s, self.n_seg_per_phase) for s in self.segments]
-        return [(np.asarray(tgt_z[:2], float), None, self.n_segments)]
-
-    def _faf_intercept(self):
-        """The FAF-intercept for the leg leading INTO the protected final approach, or ``None``.
-
-        The final approach is the first LPV segment; its start IS the FAF, so the leg into it is
-        the phase one earlier. ``course_rad`` is the inbound course FAF -> LTP in the model's
-        math-ENU convention (0 = East, CCW toward North) — the SAME convention as the state ``psi``
-        the intercept is compared against, NOT the compass bearing (they agree only at 45°/225°)."""
+    def _phase_plan(self, init_ne, tgt_z):
+        """``[(end_fix, seg_or_None, n_seg)]``: one phase per constrained leg — prefixed by an
+        UNCONSTRAINED start -> first-fix transition phase when the start is farther than
+        ``_TRANSITION_JOIN_TOLERANCE_M`` from the first leg's start fix — or a single free phase
+        to the target when unconstrained. The transition end fix is guess geometry only (not
+        pinned), consistent with the pre-final path being horizontally free."""
         if not self.constrained:
+            return [(np.asarray(tgt_z[:2], float), None, self.n_segments)]
+        plan = [(np.asarray(s.end_ne, float), s, self.n_seg_per_phase) for s in self.segments]
+        first_fix = np.asarray(self.segments[0].start_ne, float)
+        gap = float(np.hypot(*(np.asarray(init_ne, float) - first_fix)))
+        if gap > _TRANSITION_JOIN_TOLERANCE_M:
+            plan.insert(0, (first_fix, None, self.n_seg_per_phase))
+        return plan
+
+    def _faf_intercept(self, phase_plan):
+        """The FAF-intercept for the phase leading INTO the protected final approach, or ``None``.
+
+        The final approach is the first LPV phase; its segment's start IS the FAF, so the
+        intercept applies to the phase one earlier (which may be the start -> first-fix
+        transition phase). The inbound course FAF -> LTP comes from
+        ``approach_constraints.geometry.course_bearing`` — the single source of course math, in
+        the model's heading convention (0 = East, CCW toward North), the SAME convention as the
+        state ``psi`` the intercept is compared against."""
+        final_idx = next(
+            (i for i, (_f, seg, _n) in enumerate(phase_plan)
+             if seg is not None and seg.lpv is not None),
+            None,
+        )
+        if final_idx is None or final_idx == 0:
             return None
-        first_final = next((i for i, s in enumerate(self.segments) if s.lpv is not None), None)
-        if first_final is None or first_final == 0:
-            return None
-        faf_ne = np.asarray(self.segments[first_final].start_ne, float)
-        ltp = np.asarray(self.segments[first_final].lpv.ltp_ne, float)
-        course_rad = math.atan2(ltp[0] - faf_ne[0], ltp[1] - faf_ne[1])
-        return _FafIntercept(first_final - 1, course_rad)
+        final_seg = phase_plan[final_idx][1]
+        course_rad = _acgeo.course_bearing(
+            np.asarray(final_seg.start_ne, float), np.asarray(final_seg.lpv.ltp_ne, float)
+        )
+        return _FafIntercept(final_idx - 1, float(course_rad))
 
     def _extract(self, x, layout):
-        phase_nseg, m_sub = layout["phase_nseg"], layout["m_sub"]
+        phase_nseg, phase_msub = layout["phase_nseg"], layout["phase_msub"]
         c_np, b_np = layout["c"], layout["b"]
         n_phases = len(phase_nseg)
         durations = x[-n_phases:]
         controls, states, dense, seg_durations = [], [], [], []
         base = 0
-        for p, n_seg in enumerate(phase_nseg):
+        for p, (n_seg, m_sub) in enumerate(zip(phase_nseg, phase_msub)):
             cpp, spp = n_seg * CONTROL_DIM, n_seg * m_sub * STATE_DIM
             ctrl = x[base: base + cpp].reshape((n_seg, CONTROL_DIM))
             nodes = x[base + cpp: base + cpp + spp].reshape((n_seg * m_sub, STATE_DIM))
@@ -408,13 +472,14 @@ class CollocationOptimizer:
         pts = [np.asarray(start_ne, float)] + [np.asarray(f, float) for f in fixes]
         return float(sum(np.hypot(*(pts[i] - pts[i - 1])) for i in range(1, len(pts))))
 
-    def _duration_guesses(self, start_ne, fixes, max_duration, fixed_duration):
-        """Per-phase duration guess. Metric legs (constrained) guess distance / 90 m·s⁻¹; the
-        unconstrained single phase seeds at the horizon (a fixed-time seed / free-time shrink
-        refines it). A fixed-time build splits the total evenly."""
-        total = fixed_duration if fixed_duration is not None else max_duration
-        if fixed_duration is not None or not self.constrained:
-            return [total / len(fixes)] * len(fixes)
+    def _leg_duration_guesses(self, start_ne, fixes, max_duration):
+        """Per-phase duration guess: metric legs (constrained, transition phase included) at
+        distance / 90 m·s⁻¹ (min 5 s); the unconstrained single phase seeds at the horizon (a
+        fixed-time seed / free-time shrink refines it). Also the basis of the per-phase
+        state-substep selection, so it deliberately does NOT depend on ``fixed_duration``: the
+        fixed- and free-time NLPs must share one decision layout."""
+        if not self.constrained:
+            return [max_duration] * len(fixes)     # a single free phase
         guesses, prev = [], np.asarray(start_ne, float)
         for f in fixes:
             f = np.asarray(f, float)

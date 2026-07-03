@@ -5,9 +5,9 @@ Everything is laid out in the ``(n, e)`` frame (frame.py), with the final approa
 8260.58D FAS data block: FPAP behind the threshold, GARP 1000 ft beyond that, a 3° glidepath.
 
 The altitudes in :func:`feasible_segment_nodes` are placed *on* the glidepath (final) and on a
-gentle step-down descent (the rest), computed here directly — so once you implement the TODOs,
+gentle step-down descent (the rest), computed here directly — so
 ``ConstraintSet.evaluate(feasible_segment_nodes())`` reports feasible, and the infeasible variant
-reports a clear violation. Nothing here is a TODO.
+reports a clear violation.
 """
 
 from __future__ import annotations
@@ -97,7 +97,8 @@ def _nodes(n_start, n_end, alt_start, alt_end, *, on_glidepath, e_off=0.0):
     rows[:, E_] = e_off
     rows[:, H] = _glidepath_alt(n) if on_glidepath else alt_start + fr * (alt_end - alt_start)
     rows[:, V_] = 90.0
-    rows[:, PSI] = math.pi  # flying due south (toward the LTP along −n)
+    # flying due south (toward the LTP along −n); model convention 0 = East, CCW → south = −π/2
+    rows[:, PSI] = -math.pi / 2.0
     # descent slope as the flight-path angle (negative = descending)
     span = abs(n_start - n_end)
     dh = rows[-1, H] - rows[0, H]

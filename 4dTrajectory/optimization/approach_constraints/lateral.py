@@ -72,8 +72,13 @@ from __future__ import annotations
 
 from . import geometry as geo
 
+# Lateral design-margin fraction of the corridor half-width (0.5 ⇒ use only half the legal
+# corridor — stay off the containment edge). SINGLE source: SegmentSpec.k_margin and the
+# backend's ``build_constraint_segments`` default to it too.
+DEFAULT_K_MARGIN = 0.5
 
-def box_corridor_violation(n, e, A, B, halfwidth_m: float, k: float = 0.5):
+
+def box_corridor_violation(n, e, A, B, halfwidth_m: float, k: float = DEFAULT_K_MARGIN):
     """RNP box corridor: keep ``|cross-track| ≤ k · halfwidth``, as TWO smooth rows.
 
     Returns the pair ``(e_xt − margin, −e_xt − margin)`` (``margin = k · halfwidth``); both ``≤ 0``
@@ -86,7 +91,7 @@ def box_corridor_violation(n, e, A, B, halfwidth_m: float, k: float = 0.5):
     §3.2/§8); ``k`` is the design-margin fraction.
 
     Worked check: A=(0,0), B=(10,0), node=(3,7), halfwidth=20, k=0.5 → e_xt=−7, margin=10 →
-    ``(−17, +3)``? no: ``(e_xt−margin, −e_xt−margin) = (−17, −3)`` → max −3 (inside).
+    ``(e_xt−margin, −e_xt−margin) = (−17, −3)`` → max −3 (inside).
     """
     e_xt = geo.cross_track(n, e, A, B)
     margin = k * halfwidth_m
@@ -115,7 +120,7 @@ def lpv_course_halfwidth(n, e, lpv):
     return lpv.course_width_m * dP / dL
 
 
-def lpv_corridor_violation(n, e, lpv, k: float = 0.5):
+def lpv_corridor_violation(n, e, lpv, k: float = DEFAULT_K_MARGIN):
     """LPV angular corridor: keep ``|cross-track to FAC| ≤ k · halfwidth(node)``, as TWO smooth rows.
 
     The final approach course is the line through the GARP and the LTP. Combine the cross-track

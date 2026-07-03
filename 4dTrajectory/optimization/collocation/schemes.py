@@ -20,19 +20,30 @@ from aerodynamic_model.casadi_simulator import (
     rk4_step_expr,
 )
 
-# 6 geodetic optimisation states (lat, lon, h, V, psi, gamma), lat/lon in RADIANS.
+# 6 geodetic optimisation states (lat, lon, h, V, psi, gamma), lat/lon in RADIANS. Mass is NOT a
+# decision state: it is frozen at the initial mass for the whole solve (the RHS's m-dot is
+# discarded) — a deliberate, announced approximation (approach-length fuel burn is < 1% of MTOW).
+# Under the *Normalized* schemes the first two states are metric (n, e) offsets from the target —
+# positionally the same columns the ``approach_constraints.state`` layout reads.
 STATE_DIM = 6
 CONTROL_DIM = 3
 # Indices into the 6-state decision vector.
 _LAT, _LON, _ALT, _V, _PSI, _GAMMA = range(6)
-# Loose metric box for the normalized schemes' position state (metres from the anchor).
-_NORMALIZED_POS_BOUND_M = 1.0e7
+# Loose metric box for the normalized schemes' position state (metres from the anchor). Generous
+# for any TMA (~18° of latitude) but deliberately NOT wider: the physical lat/lon bounds are
+# replaced by this box, and a much larger one would let IPOPT line-search across a pole, where
+# cos(lat) → 0 blows up the geodetic RHS's lon_dot.
+_NORMALIZED_POS_BOUND_M = 2.0e6
 
 
 # The dynamics RHS / stepper is a pure function of (at most) the transport model — it does NOT
 # depend on the aircraft (aero is a symbolic input), the initial/target, or the mesh. A compiled
 # casadi Function is stateless and reusable, so build each ONCE and reuse across every _build
 # (avoids reconstructing the full symbolic point-mass graph on every solve).
+# THREAD-SAFETY: the first call constructs a casadi symbolic graph, and casadi symbol
+# construction is NOT thread-safe (see CLAUDE.md 2026-06-30 — it corrupted the heap once).
+# lru_cache does not serialize concurrent first calls; callers must ensure casadi entry points
+# are serialized (the backend does: CASADI_LOCK / the isolated worker).
 @lru_cache(maxsize=None)
 def _geodetic_rhs(transport):
     return make_geodetic_dynamics_model(transport=transport)["rhs_func"]
@@ -66,8 +77,8 @@ def hermite_simpson_defect_expr(rhs_func, x_k, x_kp1, u_k, aero_params, h):
     x_mid = 0.5 * (x_k + x_kp1) + (h / 8.0) * (f_k - f_kp1)
     f_mid = rhs_func(x_mid, u_k, aero_params)
 
-    # Simpson quadrature of the interpolant, rearranged so the defect is
-    # zero when the dynamics are satisfied to third order in h.
+    # Simpson quadrature of the interpolant, rearranged so the defect is zero
+    # when the dynamics are satisfied (4th-order scheme; O(h^5) local defect).
     return x_kp1 - x_k - (h / 6.0) * (f_k + 4.0 * f_mid + f_kp1)
 
 

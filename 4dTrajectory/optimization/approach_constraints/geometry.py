@@ -2,8 +2,9 @@
 
 Backend-agnostic by design: a node's coordinates ``n``/``e`` come in as **scalar components**
 (each may be a NumPy array of node values, or a CasADi symbol). Write the bodies with plain
-``+ - * /`` and the :mod:`constraints.mathx` helpers — then the *same* function produces a NumPy
-number for tests and a CasADi expression for the optimizer (that is the "写完即可用" guarantee).
+``+ - * /`` and the :mod:`approach_constraints.mathx` helpers — then the *same* function produces
+a NumPy number for tests and a CasADi expression for the optimizer (that is the "写完即可用"
+guarantee).
 
 A leg is the straight centerline from fix ``A`` to fix ``B`` (each a constant ``(2,)`` array
 ``[n, e]``). For a node ``(n, e)`` we need (design-doc §2):
@@ -13,10 +14,18 @@ A leg is the straight centerline from fix ``A`` to fix ``B`` (each a constant ``
 
 plus a course **bearing** and the **intercept angle** between a track and a course.
 
+HEADING CONVENTION — the ONE convention used everywhere in the modeling plane: the dynamics
+model's ``psi`` is **0 = East (+e), counter-clockwise toward North (+n)** (math-ENU;
+``aerodynamic_model/casadi_simulator.py``: ``V_east = V·cosγ·cos ψ``, ``V_north = V·cosγ·sin ψ``).
+:func:`course_bearing` returns courses in this SAME convention so they compare directly against
+``psi``. It is NOT the compass bearing (0 = North, clockwise) — the two agree only at 45°/225°,
+and mixing them was a real bug once (KRDU RW32).
+
 ────────────────────────────────────────────────────────────────────────────────────────────
-YOU IMPLEMENT the four functions below (TODO ①–④). Fixes (``A``, ``B``) are constants, so
-``leg_unit`` may use NumPy; the node coords ``n``/``e`` are variables, so combine them with only
-``+ - * /`` and ``mathx.*``. Each docstring has the formula, the convention, and a worked check.
+The four functions below were the teaching TODOs ①–④ (now implemented). Fixes (``A``, ``B``)
+are constants, so ``leg_unit`` may use NumPy; the node coords ``n``/``e`` are variables, so they
+combine with only ``+ - * /`` and ``mathx.*``. Each docstring keeps the formula, the convention,
+and a worked check.
 """
 
 from __future__ import annotations
@@ -78,30 +87,36 @@ def cross_track(n, e, A, B):
 
 
 def course_bearing(A, B) -> float:
-    """③ — bearing of the leg ``A → B`` (radians, 0 = North/+n, +clockwise toward +e).
+    """③ — course of the leg ``A → B`` in the MODEL's heading convention
+    (radians, 0 = East/+e, counter-clockwise toward North/+n).
 
-    ``A``, ``B`` are constants, so this returns a plain float::
+    This is the SAME convention as the dynamics state ``psi`` (``V_east = V·cosγ·cos ψ``,
+    ``V_north = V·cosγ·sin ψ``), so the result compares directly against ``psi`` — e.g. in
+    :func:`intercept_angle_deg`. It is NOT the compass bearing ``atan2(Δe, Δn)`` (0 = North,
+    clockwise); the two agree only at 45°/225°. ``A``, ``B`` are constants, so this returns a
+    plain float::
 
-        bearing = atan2(e_B − e_A, n_B − n_A)
+        course = atan2(n_B − n_A, e_B − e_A)
 
-    Worked check: A=(0,0), B=(0,5) (due east) → atan2(5, 0) = +π/2.
-    Hint: ``mathx.atan2(B[1] - A[1], B[0] - A[0])`` (or ``np.arctan2`` — both fine for constants).
+    Worked check: A=(0,0), B=(5,0) (due north) → atan2(5, 0) = +π/2;
+    A=(0,0), B=(0,5) (due east) → atan2(0, 5) = 0.
     """
-    return mathx.atan2(B[1] - A[1], B[0] - A[0])
+    return mathx.atan2(B[0] - A[0], B[1] - A[1])
 
 
 def intercept_angle_deg(track_bearing_rad, course_bearing_rad):
     """④ — absolute angle (degrees, 0…180) between a track and a course.
 
-    For the ≤ 30° final-course intercept at the PFAF (design-doc §4.4). ``track_bearing_rad`` may
-    be the *variable* heading (``psi``), so use ``mathx.*``. Wrap the difference into ``(−π, π]``
-    before taking the magnitude (so 350° vs 10° reads as 20°, not 340°)::
+    For the ≤ 30° final-course intercept at the PFAF (design-doc §4.4). Both arguments must be
+    in the model convention (0 = East, CCW) — pass the state heading ``psi`` directly and a
+    course from :func:`course_bearing`. ``track_bearing_rad`` may be the *variable* heading, so
+    use ``mathx.*``. Wrap the difference into ``(−π, π]`` before taking the magnitude (so 350°
+    vs 10° reads as 20°, not 340°)::
 
         d = atan2(sin(track − course), cos(track − course)); use unit circle trig to wrap into (−π, π]
         angle = |d| · (180/π)
 
     Worked check: track = 10°, course = 350° → 20°. ``RAD2DEG`` is imported for the last step.
-    Hint: ``d = mathx.atan2(mathx.sin(t - c), mathx.cos(t - c))``; ``return mathx.fabs(d) * RAD2DEG``.
     """
     d = mathx.atan2(mathx.sin(track_bearing_rad - course_bearing_rad), mathx.cos(track_bearing_rad - course_bearing_rad))
     return mathx.fabs(d) * RAD2DEG

@@ -149,9 +149,10 @@ class OptimizationBackend:
         if is_multiphase:
             if procedure_constraint is None:
                 raise ValueError("the multiphase optimizer requires a procedureConstraint")
-            # The multiphase optimiser models start->IAF as phase 0, so the start need NOT equal
-            # the procedure's first fix.
-            constraint_segments, _constraint_spans = build_constraint_segments(
+            # The multiphase optimiser prepends an UNCONSTRAINED start->first-fix transition phase
+            # when the start is away from the procedure's first fix, so the start need NOT equal
+            # that fix and leg constraints only bind on the procedure itself.
+            constraint_segments = build_constraint_segments(
                 procedure_constraint,
                 target_state.latitude,
                 target_state.longitude,
@@ -175,9 +176,10 @@ class OptimizationBackend:
         flow_started = time.perf_counter()
         segment_durations = None
         if is_multiphase:
-            # Multiphase transcription: one phase per leg (start->IAF transition + each procedure
-            # leg), fixes pinned at the phase boundaries, exact per-leg constraints (replaces the
-            # single-phase along-track partition). One NLP, free per-phase time, min total time.
+            # Multiphase transcription: an unconstrained start->first-fix transition phase (when
+            # the start is away from the first fix) + one phase per procedure leg with its
+            # corridor / glidepath / floor rows; the FAF and the target are the pinned boundaries.
+            # One NLP, free per-phase time, min total time.
             optimizer = CollocationOptimizer(
                 aircraft, segments=constraint_segments, scheme=MULTIPHASE_SCHEMES[optimizer_name],
                 n_seg_per_phase=n_seg_per_phase,

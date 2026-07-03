@@ -10,7 +10,9 @@ A *trajectory* here is a NumPy array of shape ``(K, 7)``; each row is one state 
     n, e    metres from the target anchor (the LTP), in the target ENU-like frame  (see frame.py)
     h       altitude (metres, MSL)
     V       true airspeed (m/s)
-    psi     heading (radians; 0 = North, +clockwise toward East)
+    psi     heading (radians; 0 = East/+e, counter-clockwise toward North/+n — the DYNAMICS
+            MODEL's convention: V_east = V·cosγ·cos ψ, V_north = V·cosγ·sin ψ. NOT the compass
+            bearing; see geometry.course_bearing)
     gamma   flight-path angle (radians; + = climb)
     m       mass (kg)
 

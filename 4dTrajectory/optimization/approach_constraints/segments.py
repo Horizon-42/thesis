@@ -19,6 +19,7 @@ import numpy as np
 
 from . import lateral, vertical
 from . import geometry as geo
+from .lateral import DEFAULT_K_MARGIN
 from .state import altitudes, east, flight_path_angles, north
 
 
@@ -44,6 +45,11 @@ class StepDown:
 DEFAULT_GLIDEPATH_BELOW_M = 60.0
 DEFAULT_GLIDEPATH_ABOVE_M = 120.0
 
+# FAA standard maximum intercept angle onto the final approach course at the PFAF (degrees,
+# design-doc §4.4). Single source for the optimizer's intercept constraint and the backend's
+# procedure data-validation warning.
+STANDARD_INTERCEPT_MAX_DEG = 30.0
+
 
 @dataclass(frozen=True)
 class LpvFinalSpec:
@@ -61,7 +67,6 @@ class LpvFinalSpec:
     tdze_m: float
     tch_m: float
     gpa_deg: float = 3.0
-    da_hat_m: float = 60.96  # 200 ft
     below_m: float = DEFAULT_GLIDEPATH_BELOW_M
     above_m: float = DEFAULT_GLIDEPATH_ABOVE_M
 
@@ -80,7 +85,7 @@ class SegmentSpec:
     end_ne: np.ndarray
     start_ident: str = ""
     end_ident: str = ""
-    k_margin: float = 0.5
+    k_margin: float = DEFAULT_K_MARGIN
     halfwidth_m: float | None = None          # box corridor (non-final)
     step_downs: list[StepDown] = field(default_factory=list)
     base_floor_m: float = 0.0
@@ -117,8 +122,11 @@ def segment_violations_from_components(seg: SegmentSpec, n, e, h, gamma, *, incl
         right, left = lateral.lpv_corridor_violation(n, e, lpv, seg.k_margin)
         out[f"{tag}.lateral_right"] = right
         out[f"{tag}.lateral_left"] = left
-        # along-course distance BACK from the LTP (0 at threshold, + toward the PFAF)
-        d_to_ltp = geo.along_track(n, e, lpv.ltp_ne, seg.start_ne)
+        # Along-course distance BACK from the LTP (0 at threshold, + toward the PFAF), measured
+        # on the SAME GARP→LTP axis the lateral corridor uses — one final-approach-course axis
+        # for both lateral and vertical, whatever the leg's own start fix is.
+        _, _, d_garp_ltp = geo.leg_unit(lpv.garp_ne, lpv.ltp_ne)
+        d_to_ltp = geo.along_track(n, e, lpv.garp_ne, lpv.ltp_ne) - d_garp_ltp
         low, high = vertical.glidepath_window_violation(h, d_to_ltp, lpv)
         out[f"{tag}.glidepath_low"] = low
         out[f"{tag}.glidepath_high"] = high

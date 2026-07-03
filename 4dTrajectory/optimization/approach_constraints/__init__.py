@@ -1,22 +1,26 @@
-"""approach_constraints — approach-procedure constraints for the trajectory optimizer (scaffold).
+"""approach_constraints — approach-procedure constraints for the trajectory optimizer.
 
 Turns an LPV approach (segments + FAS geometry) into a set of inequality constraints
 ``g(z) ≤ 0`` over the optimizer's NORMALIZED state nodes ``z = (n, e, h, V, psi, gamma, m)``.
 
-Architecture (what is provided vs. what YOU implement):
+Module map:
 
-    frame.py     TargetFrame: fixes (lat/lon) → (n, e)            [provided — matches optimizer]
-    state.py     decision-state column layout                      [provided]
-    geometry.py  along/cross-track, bearing, intercept angle       [TODO ①②③④]
-    lateral.py   RNP box corridor + LPV angular corridor           [TODO ⑤⑥⑦]
-    vertical.py  glidepath window, step-down floor, descent cap     [TODO ⑧⑨, ⑩ bonus]
-    segments.py  SegmentSpec + per-segment assembly                [provided — composes the above]
-    builder.py   ConstraintSet + ConstraintReport                  [provided]
-    examples.py  a synthetic straight-in LPV approach               [provided]
+    frame.py     TargetFrame: fixes (lat/lon) → (n, e)              [matches the optimizer]
+    mathx.py     NumPy/CasADi op dispatch (fabs, atan2, if_else, …)
+    state.py     decision-state column layout
+    geometry.py  along/cross-track, course bearing, intercept angle
+    lateral.py   RNP box corridor + LPV angular corridor
+    vertical.py  glidepath window, step-down floor, descent cap
+    segments.py  SegmentSpec + per-segment assembly                  [composes the primitives]
+    builder.py   ConstraintSet + ConstraintReport                    [NumPy evaluation path]
+    examples.py  a synthetic straight-in LPV approach
 
-Convention: every ``*_violation`` returns ``g`` with ``g ≤ 0  ⇔  satisfied``.
+Conventions: every ``*_violation`` returns ``g`` with ``g ≤ 0  ⇔  satisfied``; headings/courses
+use the DYNAMICS MODEL's convention (0 = East, CCW toward North — see geometry.course_bearing).
+The optimizer consumer is ``collocation.optimizer`` (one phase per segment, symbolic node
+columns through ``segment_violations_from_components``).
 
-See ``approach_constraints/README.md`` for the math, the TODO checklist, and the optimizer integration.
+See ``approach_constraints/README.md`` for the math and the optimizer integration.
 Design source: ``4dTrajectory/docs/optimization_constraint_design.md`` +
 ``4dTrajectory/docs/lpv_final_segment.en.html``.
 """
@@ -24,15 +28,17 @@ Design source: ``4dTrajectory/docs/optimization_constraint_design.md`` +
 from __future__ import annotations
 
 from .builder import (
+    DEFAULT_TOL_M,
+    DEFAULT_TOL_RAD,
     ConstraintReport,
     ConstraintSet,
-    partition_node_indices,
-    split_contiguous,
 )
 from .frame import TargetFrame
+from .lateral import DEFAULT_K_MARGIN
 from .segments import (
     DEFAULT_GLIDEPATH_ABOVE_M,
     DEFAULT_GLIDEPATH_BELOW_M,
+    STANDARD_INTERCEPT_MAX_DEG,
     LpvFinalSpec,
     SegmentKind,
     SegmentSpec,
@@ -51,8 +57,10 @@ __all__ = [
     "segment_violations_from_components",
     "ConstraintSet",
     "ConstraintReport",
-    "partition_node_indices",
-    "split_contiguous",
     "DEFAULT_GLIDEPATH_BELOW_M",
     "DEFAULT_GLIDEPATH_ABOVE_M",
+    "DEFAULT_K_MARGIN",
+    "DEFAULT_TOL_M",
+    "DEFAULT_TOL_RAD",
+    "STANDARD_INTERCEPT_MAX_DEG",
 ]

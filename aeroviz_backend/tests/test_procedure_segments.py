@@ -46,25 +46,25 @@ def _build():
     return build_constraint_segments(pc, TARGET_LAT, TARGET_LON, TARGET_ALT)
 
 
-def test_segments_and_spans_shape():
-    segments, spans = _build()
+def test_segment_kinds():
+    segments = _build()
     assert [s.kind for s in segments] == [ac.SegmentKind.INTERMEDIATE, ac.SegmentKind.FINAL_LPV]
-    assert spans == [(0.0, 6000.0), (6000.0, 11000.0)]
 
 
 def test_intermediate_box_and_floor():
-    segments, _ = _build()
+    segments = _build()
     inter = segments[0]
     assert inter.halfwidth_m == pytest.approx(1852.0)            # 1 x RNP
     assert inter.start_ident == "SCHOO" and inter.end_ident == "WEPAS"
-    # floor = the FAF's at-or-above altitude (1253 ft -> metres)
+    # floor = the FAF's at-or-above altitude (1253 ft -> metres), held over the leg's coded length
     assert len(inter.step_downs) == 1
     assert inter.step_downs[0].min_alt_m == pytest.approx(1253.0 * FT_M)
+    assert inter.step_downs[0].s_from_start_m == pytest.approx(6000.0)
     assert inter.max_descent_deg == pytest.approx(3.0)
 
 
 def test_final_lpv_geometry():
-    segments, _ = _build()
+    segments = _build()
     final = segments[1]
     assert final.kind is ac.SegmentKind.FINAL_LPV
     lpv = final.lpv
@@ -82,23 +82,6 @@ def test_threshold_waypoint_maps_to_origin():
     pc = ProcedureConstraint.from_payload(_payload())
     frame = ac.TargetFrame(TARGET_LAT, TARGET_LON)
     assert np.allclose(frame.to_ne(pc.waypoints[-1].lat_deg, pc.waypoints[-1].lon_deg), [0.0, 0.0])
-
-
-def test_initial_state_must_match_first_fix():
-    pc = ProcedureConstraint.from_payload(_payload())
-    if_lat = _lat_n_metres_north(11000.0)  # the procedure's first fix (the IF)
-    # At the IF -> fine.
-    segs, _ = build_constraint_segments(
-        pc, TARGET_LAT, TARGET_LON, TARGET_ALT,
-        initial_lat_deg=if_lat, initial_lon_deg=TARGET_LON,
-    )
-    assert len(segs) == 2
-    # Moved ~5.5 km north of the IF -> the spans no longer describe the trajectory -> raise.
-    with pytest.raises(ValueError, match="first fix"):
-        build_constraint_segments(
-            pc, TARGET_LAT, TARGET_LON, TARGET_ALT,
-            initial_lat_deg=if_lat + 0.05, initial_lon_deg=TARGET_LON,
-        )
 
 
 def _lon_e_metres_east(e_m: float) -> float:

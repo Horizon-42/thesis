@@ -35,22 +35,19 @@ from approach_constraints import geometry as _geo
 from aeroviz_backend.procedure_constraint import ProcedureConstraint
 
 _DEFAULT_RNP_NM = 1.0          # RNP APCH initial/intermediate lateral accuracy
-_DEFAULT_K_MARGIN = 0.5        # design-margin fraction of the corridor half-width
 _FPAP_FLOOR_M = 9023.0 * FT_M  # FAS: distance LTP→FPAP = max(runway length, 9023 ft)
 _GARP_BEYOND_M = 1000.0 * FT_M
 _DEFAULT_GPA_DEG = 3.0
 _DEFAULT_TCH_M = 50.0 * FT_M
 _INTERMEDIATE_CAP_DEG = 3.0    # ≈ 318 ft/NM
 _INITIAL_CAP_DEG = 4.7         # ≈ 500 ft/NM
-# Glidepath vertical-window defaults live in the approach_constraints package (single source of truth);
-# build_constraint_segments reuses them so there is exactly one default.
+# Defaults sourced from the approach_constraints package (the single source of truth):
+# glidepath vertical-window half-tolerances, the lateral design margin, and the FAA standard
+# PFAF intercept limit (data-validation check).
 _DEFAULT_BELOW_M = ac.DEFAULT_GLIDEPATH_BELOW_M
 _DEFAULT_ABOVE_M = ac.DEFAULT_GLIDEPATH_ABOVE_M
-# The trajectory's start must coincide with the procedure's first fix (the IF), or the
-# along-track spans no longer describe the trajectory and the node→segment partition is wrong.
-_INITIAL_FIX_MATCH_TOLERANCE_M = 2000.0
-# FAA standard intercept onto the final approach course at the PFAF (data-validation check).
-_MAX_INTERCEPT_DEG = 30.0
+_DEFAULT_K_MARGIN = ac.DEFAULT_K_MARGIN
+_MAX_INTERCEPT_DEG = ac.STANDARD_INTERCEPT_MAX_DEG
 
 
 def _floor_alt_m(waypoint) -> float | None:
@@ -107,44 +104,27 @@ def build_constraint_segments(
     target_lon_deg: float,
     target_alt_m: float,
     *,
-    initial_lat_deg: float | None = None,
-    initial_lon_deg: float | None = None,
     rnp_nm: float = _DEFAULT_RNP_NM,
     k_margin: float = _DEFAULT_K_MARGIN,
     glidepath_below_m: float = _DEFAULT_BELOW_M,
     glidepath_above_m: float = _DEFAULT_ABOVE_M,
-) -> tuple[list, list[tuple[float, float]]]:
-    """Build ``(segments, spans)`` from a ProcedureConstraint anchored at the target (LTP).
+) -> list:
+    """Build the ``SegmentSpec`` list from a ProcedureConstraint anchored at the target (LTP).
 
-    ``segments`` are ``constraints.SegmentSpec`` (fixes in the target ``(n,e)`` frame); ``spans``
-    are each segment's along-track interval (for the optimizer's fixed node→segment partition).
-    Returns ``([], [])`` if the procedure has fewer than two waypoints.
-
-    If ``initial_lat_deg``/``initial_lon_deg`` are given, the optimizer's start must coincide with
-    the procedure's first fix (within ``_INITIAL_FIX_MATCH_TOLERANCE_M``) — otherwise the spans no
-    longer describe the trajectory and the partition would be silently wrong, so this raises.
+    Fixes are in the target ``(n,e)`` frame — the frame the optimizer solves in (it validates the
+    anchoring at construction). The optimizer maps one PHASE per segment and prepends an
+    unconstrained start→first-fix transition phase when the start is away from the first fix, so
+    the start does NOT need to coincide with the procedure. Returns ``[]`` if the procedure has
+    fewer than two waypoints.
     """
     wps = pc.waypoints
     if len(wps) < 2:
-        return [], []
+        return []
     frame = ac.TargetFrame(target_lat_deg, target_lon_deg)
     ne = [frame.to_ne(wp.lat_deg, wp.lon_deg) for wp in wps]
 
-    # (#1) The trajectory starts at the optimizer's initial state; the spans are measured from the
-    # procedure's first waypoint. They must be the same point or the partition is meaningless.
-    if initial_lat_deg is not None and initial_lon_deg is not None:
-        start_ne = frame.to_ne(initial_lat_deg, initial_lon_deg)
-        gap_m = float(np.hypot(start_ne[0] - ne[0][0], start_ne[1] - ne[0][1]))
-        if gap_m > _INITIAL_FIX_MATCH_TOLERANCE_M:
-            raise ValueError(
-                f"initial state is {gap_m:.0f} m from the procedure's first fix "
-                f"'{wps[0].ident}' (> {_INITIAL_FIX_MATCH_TOLERANCE_M:.0f} m); procedure "
-                "constraints require the trajectory to start at that fix."
-            )
-
-    dists = [wp.distance_from_start_m for wp in wps]
-    d0 = dists[0]
     faf = _faf_index(wps)
+    dists = [wp.distance_from_start_m for wp in wps]
     rnp_half = rnp_nm * NM_M
 
     # (#6) Derive the FAS geometry ONCE, from the FAF, and share it across every final leg — the
@@ -167,10 +147,8 @@ def build_constraint_segments(
             )
 
     segments: list = []
-    spans: list[tuple[float, float]] = []
     for j in range(len(wps) - 1):
         a_ne, b_ne = ne[j], ne[j + 1]
-        span = (dists[j] - d0, dists[j + 1] - d0)
         if j >= faf:  # FAF onward -> the LPV final segment(s); share the one FAS spec
             seg = ac.SegmentSpec(
                 ac.SegmentKind.FINAL_LPV,
@@ -188,8 +166,10 @@ def build_constraint_segments(
                 else ac.SegmentKind.INITIAL
             )
             floor = _floor_alt_m(wps[j + 1])
+            # "at or above the END waypoint's floor over the whole leg": the step-down covers
+            # the leg's coded along-track length.
             step_downs = (
-                [ac.StepDown(s_from_start_m=span[1] - span[0], min_alt_m=floor)]
+                [ac.StepDown(s_from_start_m=dists[j + 1] - dists[j], min_alt_m=floor)]
                 if floor is not None
                 else []
             )
@@ -206,5 +186,4 @@ def build_constraint_segments(
                 max_descent_deg=cap,
             )
         segments.append(seg)
-        spans.append(span)
-    return segments, spans
+    return segments
