@@ -49,6 +49,10 @@ const mocks = vi.hoisted(() => ({
   openWorkerSession: vi.fn(),
   closeWorkerSession: vi.fn(),
   beaconCloseWorkerSession: vi.fn(),
+  setSelectedRunway: vi.fn(),
+  setProceduresOpen: vi.fn(),
+  toggleLayer: vi.fn(),
+  layers: { procedures: false } as Record<string, boolean>,
 }));
 
 vi.mock("../../context/AppContext", () => ({
@@ -56,6 +60,12 @@ vi.mock("../../context/AppContext", () => ({
     activeAirportCode: "KRDU",
     airport: mocks.airport,
     viewer: null,
+    selectedRunway: null,
+    setSelectedRunway: mocks.setSelectedRunway,
+    proceduresOpen: false,
+    setProceduresOpen: mocks.setProceduresOpen,
+    layers: mocks.layers,
+    toggleLayer: mocks.toggleLayer,
   }),
 }));
 
@@ -542,6 +552,29 @@ describe("PilotPanel trajectory play mode", () => {
     fireEvent.change(constraintsSelect, { target: { value: "procedure" } });   // frame locked/hidden
     fireEvent.change(constraintsSelect, { target: { value: "none" } });        // ...and back
     expect(frameSelect.value).toBe("localEnu");                                 // choice survived
+  });
+
+  it("reveals the target runway's procedure geometry when switching ON procedure constraints", async () => {
+    render(<PilotPanel />);
+    expect(await screen.findByText("A320")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
+    // Wait until the target runway (RW05L) resolves so `selectedTargetRunway` exists.
+    await waitFor(() => {
+      expect(mocks.fetchRnavInitialFixCandidates).toHaveBeenCalledWith("KRDU", "RW05L");
+    });
+
+    const constraintsSelect = screen.getByRole("combobox", { name: "Constraints" }) as HTMLSelectElement;
+    // Default is procedure; switch away first so the switch BACK fires the reveal.
+    fireEvent.change(constraintsSelect, { target: { value: "none" } });
+    expect(mocks.setProceduresOpen).not.toHaveBeenCalled();
+
+    fireEvent.change(constraintsSelect, { target: { value: "procedure" } });
+
+    // Scope the app to the target runway (BARE form, matching the top-bar selector),
+    // open the Procedures panel, and enable the geometry layer (off by default).
+    expect(mocks.setSelectedRunway).toHaveBeenCalledWith("05L");
+    expect(mocks.setProceduresOpen).toHaveBeenCalledWith(true);
+    expect(mocks.toggleLayer).toHaveBeenCalledWith("procedures");
   });
 
   it("clamps trajectory target speed and heading to threshold constraints", async () => {

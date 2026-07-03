@@ -66,6 +66,7 @@ import {
   targetAltitudeMForThreshold,
   targetSpeedBoundsMps,
 } from "../pilot/trajectoryTargetConstraints";
+import { bareRunwayIdent } from "../utils/runwayIdent";
 import {
   runTrajectoryOptimization,
   decomposeOptimizer,
@@ -192,7 +193,15 @@ interface PilotPanelProps {
 }
 
 export default function PilotPanel({ mode: controlledMode, onRequestMode }: PilotPanelProps = {}) {
-  const { activeAirportCode, airport, viewer } = useApp();
+  const {
+    activeAirportCode,
+    airport,
+    viewer,
+    setSelectedRunway,
+    setProceduresOpen,
+    layers,
+    toggleLayer,
+  } = useApp();
   const [internalActiveMode, setActiveMode] = useState<PilotPanelMode>("pilot");
   const activeMode = controlledMode ?? internalActiveMode;
   const [isEnabled, setIsEnabled] = useState(false);
@@ -1154,6 +1163,16 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
       return next;
     });
     clearOptimizedPlayback();
+    // Switching ON procedure constraints reveals the target runway's published
+    // approach geometry, so the user can see the per-leg corridors / glidepath /
+    // step-down floors the solve will enforce. Scope the app to that runway,
+    // open the Procedures panel, and enable the geometry layer. Only on the
+    // explicit switch — mount seeds `constrained` via useState, not through here.
+    if (patch.constrained === true && selectedTargetRunway) {
+      setSelectedRunway(bareRunwayIdent(selectedTargetRunway.runwayIdent));
+      setProceduresOpen(true);
+      if (!layers.procedures) toggleLayer("procedures");
+    }
   }
 
   function updateArrivalTime(value: number) {
