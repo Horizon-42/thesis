@@ -19,6 +19,7 @@ import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import { makeStableVelocityOrientation } from "../utils/velocityOrientation";
+import { frameTrajectoryCamera } from "../utils/frameTrajectoryCamera";
 import { sampleTrajectoryAt } from "./useOptimizedTrajectoryPlayback";
 import type { TrajectorySample } from "../pilot/trajectoryOptimizationClient";
 import {
@@ -89,6 +90,10 @@ export function useDynamicsComparisonPlayback({
   chartRef.current = chart;
   const onDeltasRef = useRef(onDeltas);
   onDeltasRef.current = onDeltas;
+  // Read the live follow state from inside the async load without re-running
+  // effect 1 when it flips.
+  const followRef = useRef(follow);
+  followRef.current = follow;
 
   // Join so the visibility effect re-runs only when the hidden set changes.
   const hiddenKey = [...hiddenKeys].sort().join(",");
@@ -144,6 +149,13 @@ export function useDynamicsComparisonPlayback({
             viewer.timeline?.zoomTo(start, stop);
             setPlaybackSpeed(multiplier);
           }
+        }
+
+        // Frame the whole comparison in view on load (reference B spans the full
+        // start→target extent that A/C/D share). Skip when following: effect 4
+        // takes over the camera in that case.
+        if (!followRef.current) {
+          frameTrajectoryCamera(viewer, samplesRef.current);
         }
 
         setStatus("loaded");

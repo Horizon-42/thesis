@@ -23,6 +23,7 @@ import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
+import { frameTrajectoryCamera } from "../utils/frameTrajectoryCamera";
 import type { TrajectorySample } from "../pilot/trajectoryOptimizationClient";
 
 const OPTIMIZED_DATASOURCE_NAME = "optimized-trajectory";
@@ -75,6 +76,10 @@ export function useOptimizedTrajectoryPlayback({
   samplesRef.current = samples;
   const onSampleRef = useRef(onSample);
   onSampleRef.current = onSample;
+  // Read the live follow state from inside the async load without re-running
+  // effect 1 when it flips.
+  const followRef = useRef(follow);
+  followRef.current = follow;
 
   // ── Effect 1: load / unload the CZML and sync the clock ──────────────────────
   useEffect(() => {
@@ -125,6 +130,13 @@ export function useOptimizedTrajectoryPlayback({
         }
 
         attachOrientation(aircraftRef.current, startTimeRef, samplesRef);
+
+        // Frame the whole trajectory in view on load. Skip when following: the
+        // camera-follow effect below takes over the camera in that case.
+        if (!followRef.current) {
+          frameTrajectoryCamera(viewer, samplesRef.current);
+        }
+
         setStatus("loaded");
       })
       .catch((loadError: unknown) => {
