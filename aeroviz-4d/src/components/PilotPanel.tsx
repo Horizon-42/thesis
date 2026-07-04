@@ -197,7 +197,9 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     activeAirportCode,
     airport,
     viewer,
+    selectedRunway,
     setSelectedRunway,
+    proceduresOpen,
     setProceduresOpen,
     layers,
     toggleLayer,
@@ -1172,16 +1174,9 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
       return next;
     });
     clearOptimizedPlayback();
-    // Switching ON procedure constraints reveals the target runway's published
-    // approach geometry, so the user can see the per-leg corridors / glidepath /
-    // step-down floors the solve will enforce. Scope the app to that runway,
-    // open the Procedures panel, and enable the geometry layer. Only on the
-    // explicit switch — mount seeds `constrained` via useState, not through here.
-    if (patch.constrained === true && selectedTargetRunway) {
-      setSelectedRunway(bareRunwayIdent(selectedTargetRunway.runwayIdent));
-      setProceduresOpen(true);
-      if (!layers.procedures) toggleLayer("procedures");
-    }
+    // NOTE: the constraint → procedure-display link is NOT here (a one-shot on the
+    // switch would miss the default constrained state and never revert). It is a
+    // reactive, Optimize-scoped drive/restore effect below.
   }
 
   function updateArrivalTime(value: number) {
@@ -1527,6 +1522,62 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     bottomResetPilot,
     setPilotTransport,
   ]);
+
+  // ── Optimize-scoped procedure display (drive & restore) ──────────────────────
+  // While in Optimize (trajectory) mode WITH procedure constraints on, drive the
+  // shared procedure display to the target runway's approach — open the panel,
+  // enable the geometry layer, scope the runway — so you see the corridors /
+  // glidepath / step-down floors the solve enforces. The prior display is saved
+  // and RESTORED when the force ends (constraints off, or leaving Optimize — which
+  // unmounts this panel), so in every OTHER mode procedures obey only their own
+  // switch. Reactive (not a one-shot), so the default constrained state forces it
+  // on entry too.
+  const forcedRunwayIdent = selectedTargetRunway
+    ? bareRunwayIdent(selectedTargetRunway.runwayIdent)
+    : null;
+  const procedureForced =
+    activeMode === "trajectory" && optimizerParts.constrained && forcedRunwayIdent !== null;
+
+  // Live snapshot of the procedure display, read (not depended on) when saving.
+  const procedureDisplayRef = useRef({ proceduresOpen, layerOn: layers.procedures, selectedRunway });
+  procedureDisplayRef.current = { proceduresOpen, layerOn: layers.procedures, selectedRunway };
+  // The user's pre-force display, held while the constraint drives it (null = not driving).
+  const savedProcedureDisplayRef = useRef<
+    { proceduresOpen: boolean; layerOn: boolean; selectedRunway: string | null } | null
+  >(null);
+  // Restore is invoked from the effect's "force ended" branch AND on unmount; keep
+  // it in a ref so the unmount effect stays dependency-free.
+  const restoreProcedureDisplay = () => {
+    const saved = savedProcedureDisplayRef.current;
+    if (saved === null) return;
+    savedProcedureDisplayRef.current = null;
+    setSelectedRunway(saved.selectedRunway);
+    setProceduresOpen(saved.proceduresOpen);
+    if (procedureDisplayRef.current.layerOn !== saved.layerOn) toggleLayer("procedures");
+  };
+  const restoreProcedureDisplayRef = useRef(restoreProcedureDisplay);
+  restoreProcedureDisplayRef.current = restoreProcedureDisplay;
+
+  useEffect(() => {
+    if (procedureForced && forcedRunwayIdent !== null) {
+      if (savedProcedureDisplayRef.current === null) {
+        savedProcedureDisplayRef.current = { ...procedureDisplayRef.current };
+      }
+      if (procedureDisplayRef.current.selectedRunway !== forcedRunwayIdent) {
+        setSelectedRunway(forcedRunwayIdent);
+      }
+      if (!procedureDisplayRef.current.proceduresOpen) setProceduresOpen(true);
+      if (!procedureDisplayRef.current.layerOn) toggleLayer("procedures");
+    } else {
+      restoreProcedureDisplayRef.current();
+    }
+  }, [procedureForced, forcedRunwayIdent, setSelectedRunway, setProceduresOpen, toggleLayer]);
+
+  useEffect(() => {
+    // Leaving Optimize for Observe unmounts this panel, so the branch above can't
+    // run there — restore on unmount too.
+    return () => restoreProcedureDisplayRef.current();
+  }, []);
 
   return (
     <div className="pilot-panel">

@@ -556,27 +556,31 @@ describe("PilotPanel trajectory play mode", () => {
     expect(frameSelect.value).toBe("localEnu");                                 // choice survived
   });
 
-  it("reveals the target runway's procedure geometry when switching ON procedure constraints", async () => {
+  it("drives the target runway's procedure display in Optimize+constrained, and restores on exit", async () => {
     render(<PilotPanel />);
     expect(await screen.findByText("A320")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
-    // Wait until the target runway (RW05L) resolves so `selectedTargetRunway` exists.
+
+    // Reactive (not a one-shot): entering Optimize with the DEFAULT constrained mode
+    // drives the target runway's procedures on — no manual switch needed. Scopes to
+    // the target runway (BARE form), opens the panel, enables the geometry layer.
     await waitFor(() => {
-      expect(mocks.fetchRnavInitialFixCandidates).toHaveBeenCalledWith("KRDU", "RW05L");
+      expect(mocks.setProceduresOpen).toHaveBeenCalledWith(true);
     });
-
-    const constraintsSelect = screen.getByRole("combobox", { name: "Constraints" }) as HTMLSelectElement;
-    // Default is procedure; switch away first so the switch BACK fires the reveal.
-    fireEvent.change(constraintsSelect, { target: { value: "none" } });
-    expect(mocks.setProceduresOpen).not.toHaveBeenCalled();
-
-    fireEvent.change(constraintsSelect, { target: { value: "procedure" } });
-
-    // Scope the app to the target runway (BARE form, matching the top-bar selector),
-    // open the Procedures panel, and enable the geometry layer (off by default).
     expect(mocks.setSelectedRunway).toHaveBeenCalledWith("05L");
-    expect(mocks.setProceduresOpen).toHaveBeenCalledWith(true);
     expect(mocks.toggleLayer).toHaveBeenCalledWith("procedures");
+
+    mocks.setProceduresOpen.mockClear();
+    mocks.setSelectedRunway.mockClear();
+
+    // Turning constraints OFF restores the user's pre-force display (the mock's own
+    // state: procedures closed / no runway) — so procedures are no longer forced.
+    const constraintsSelect = screen.getByRole("combobox", { name: "Constraints" }) as HTMLSelectElement;
+    fireEvent.change(constraintsSelect, { target: { value: "none" } });
+    await waitFor(() => {
+      expect(mocks.setProceduresOpen).toHaveBeenCalledWith(false);
+    });
+    expect(mocks.setSelectedRunway).toHaveBeenCalledWith(null);
   });
 
   it("clamps trajectory target speed and heading to threshold constraints", async () => {
