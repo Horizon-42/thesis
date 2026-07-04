@@ -17,7 +17,7 @@ from enum import Enum
 
 import numpy as np
 
-from . import lateral, vertical
+from . import lateral, mathx, vertical
 from . import geometry as geo
 from .lateral import DEFAULT_K_MARGIN
 from .state import altitudes, east, flight_path_angles, north
@@ -58,6 +58,12 @@ class LpvFinalSpec:
     ``ltp_ne`` is the target/origin ``(0, 0)``. ``course_width_m`` = ``max(350 ft,
     tan(1.5°)·d_GARP(LTP))``. ``below_m``/``above_m`` are the glidepath window half-tolerances
     (keep ``below_m`` tight — below the glidepath is the dangerous side).
+
+    ``d_faf_m``/``prefaf_floor_m`` drive the VERTICAL GATE for the flexible FAC join (README
+    §4b): with ``d_faf_m`` set, the glidepath window binds only from the FAF toward the runway
+    (``d ≤ d_faf_m``); upstream of the FAF the published pre-FAF floor ``prefaf_floor_m`` (the
+    FAF crossing minimum, m MSL) applies instead. Both default to ``None`` — gate off, the
+    window binds on every final node exactly as before.
     """
 
     ltp_ne: np.ndarray
@@ -69,6 +75,8 @@ class LpvFinalSpec:
     gpa_deg: float = 3.0
     below_m: float = DEFAULT_GLIDEPATH_BELOW_M
     above_m: float = DEFAULT_GLIDEPATH_ABOVE_M
+    d_faf_m: float | None = None
+    prefaf_floor_m: float | None = None
 
 
 @dataclass
@@ -125,9 +133,22 @@ def segment_violations_from_components(seg: SegmentSpec, n, e, h, gamma, *, incl
         # Along-course distance BACK from the LTP (0 at threshold, + toward the PFAF), measured
         # on the SAME GARP→LTP axis the lateral corridor uses — one final-approach-course axis
         # for both lateral and vertical, whatever the leg's own start fix is.
-        _, _, d_garp_ltp = geo.leg_unit(lpv.garp_ne, lpv.ltp_ne)
-        d_to_ltp = geo.along_track(n, e, lpv.garp_ne, lpv.ltp_ne) - d_garp_ltp
+        d_to_ltp = lateral.fac_distance_to_ltp(n, e, lpv)
         low, high = vertical.glidepath_window_violation(h, d_to_ltp, lpv)
+        if lpv.d_faf_m is not None:
+            # Vertical gate for the flexible FAC join (README §4b): PUBLISHED semantics — the
+            # glidepath window binds only from the FAF toward the runway; upstream of the FAF
+            # (the early-join stretch) the published pre-FAF floor applies instead. The lateral
+            # join slides; the vertical rules stay tied to the published geography. Same
+            # mathx.if_else machinery as the step-down staircase (both backends); -1.0 is the
+            # always-satisfied metre-scale row for the inactive side.
+            after_faf = d_to_ltp <= lpv.d_faf_m
+            low = mathx.if_else(after_faf, low, -1.0)
+            high = mathx.if_else(after_faf, high, -1.0)
+            if lpv.prefaf_floor_m is not None:
+                out[f"{tag}.prefaf_floor"] = mathx.if_else(
+                    after_faf, -1.0, lpv.prefaf_floor_m - h
+                )
         out[f"{tag}.glidepath_low"] = low
         out[f"{tag}.glidepath_high"] = high
     else:

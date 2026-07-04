@@ -53,3 +53,36 @@ def test_moc_floor_casadi_matches_numpy():
     f = ca.Function("f", [s], [floor])
     for query in (1000.0, 3000.0, 6000.0):
         assert np.isclose(float(f(query)), float(vertical.moc_floor(query, steps)))
+
+
+def test_gated_final_segment_casadi_matches_numpy():
+    # The flexible-join vertical gate (if_else on d vs d_faf) and the join primitives must lower
+    # identically to both backends — they run inside the CasADi NLP.
+    from approach_constraints import examples, lateral
+    from approach_constraints.segments import segment_violations_from_components
+
+    final = examples.build_example_segments()[-1]       # gated: d_faf_m + prefaf_floor_m set
+    n_sym, e_sym, h_sym = ca.SX.sym("n"), ca.SX.sym("e"), ca.SX.sym("h")
+    viol = segment_violations_from_components(final, n_sym, e_sym, h_sym, ca.SX(0.0))
+    keys = sorted(k for k in viol if "glidepath" in k or "prefaf" in k)
+    f = ca.Function("g", [n_sym, e_sym, h_sym], [viol[k] for k in keys])
+    for node in ((final.lpv.d_faf_m + 4000.0, 0.0, 720.0),     # upstream of the FAF
+                 (final.lpv.d_faf_m - 2000.0, 0.0, 500.0)):    # downstream
+        got = [float(v) for v in f(*node)]
+        want_all = segment_violations_from_components(
+            final, np.array([node[0]]), np.array([node[1]]), np.array([node[2]]), np.zeros(1))
+        want = [float(np.ravel(want_all[k])[0]) for k in keys]
+        assert np.allclose(got, want)
+
+    # join primitives: SX in, same numbers out
+    tol = 926.0
+    fix = np.array([1000.0, -500.0])
+    expr = lateral.fix_passage_violation(n_sym, e_sym, fix, tol)
+    g = ca.Function("g", [n_sym, e_sym], [expr])
+    assert np.isclose(float(g(1000.0, 436.0)),
+                      float(lateral.fix_passage_violation(1000.0, 436.0, fix, tol)))
+    win = lateral.fac_join_window_violation(n_sym, e_sym, final.lpv, 9260.0, 2500.0)
+    w = ca.Function("w", [n_sym, e_sym], list(win))
+    got = [float(v) for v in w(10000.0, 0.0)]
+    want = [float(v) for v in lateral.fac_join_window_violation(10000.0, 0.0, final.lpv, 9260.0, 2500.0)]
+    assert np.allclose(got, want)

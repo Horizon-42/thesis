@@ -132,6 +132,17 @@ def _geodetic_state_to_decision(state: GeodeticState) -> list[float]:
     ]
 
 
+def unwrap_angle(value_rad: float, toward_rad: float) -> float:
+    """``value_rad`` shifted by the multiple of 2π that brings it within π of ``toward_rad``.
+
+    THE one angle-unwrap of the optimizer: the target-heading unwrap, the route-chained ψ
+    branch, the branch-aware join course and the per-phase heading guesses all go through it.
+    The decision ψ is an ACCUMULATING real (a full turn changes it by 2π), so "which 2π branch"
+    is always resolved by unwrapping toward a reference value.
+    """
+    return value_rad + 2.0 * math.pi * round((toward_rad - value_rad) / (2.0 * math.pi))
+
+
 def _unwrap_target_heading(initial_param: list[float], target_param: list[float]) -> list[float]:
     """Shift the target heading by multiples of 2π so it lies within π of the
     initial heading — i.e. the aircraft turns the SHORT way to the target
@@ -140,8 +151,7 @@ def _unwrap_target_heading(initial_param: list[float], target_param: list[float]
     ``target_param`` with only the psi entry adjusted.
     """
     unwrapped = list(target_param)
-    dpsi = initial_param[_PSI] - target_param[_PSI]
-    unwrapped[_PSI] = target_param[_PSI] + 2.0 * math.pi * round(dpsi / (2.0 * math.pi))
+    unwrapped[_PSI] = unwrap_angle(target_param[_PSI], initial_param[_PSI])
     return unwrapped
 
 

@@ -67,7 +67,7 @@ def _faf_index(waypoints) -> int:
 
 
 def _lpv_spec(faf_ne: np.ndarray, target_alt_m: float, pc: ProcedureConstraint,
-             below_m: float, above_m: float):
+             below_m: float, above_m: float, prefaf_floor_m: float | None):
     ltp = np.array([0.0, 0.0])
     norm = float(np.hypot(faf_ne[0], faf_ne[1]))
     # inbound unit vector: from the FAF toward the LTP (= -faf_ne / |faf_ne|)
@@ -85,6 +85,10 @@ def _lpv_spec(faf_ne: np.ndarray, target_alt_m: float, pc: ProcedureConstraint,
     # The optimizer's terminal node is pinned to the target, so the glidepath must pass through
     # the target altitude AT the threshold (d = 0): glidepath(0) = tdze + tch = target_alt.
     # Hence tdze = target_alt - tch (the target altitude is taken as the LTP+TCH aim point).
+    # d_faf_m / prefaf_floor_m drive the flexible-join VERTICAL GATE (approach_constraints
+    # README §4b): the glidepath window binds from the FAF toward the runway; upstream of the
+    # FAF the published FAF crossing minimum applies. The GARP/LTP/FAF are collinear by
+    # construction here, so the FAF's along-course distance back from the LTP is |faf_ne|.
     return ac.LpvFinalSpec(
         ltp_ne=ltp,
         fpap_ne=fpap,
@@ -95,6 +99,8 @@ def _lpv_spec(faf_ne: np.ndarray, target_alt_m: float, pc: ProcedureConstraint,
         gpa_deg=gpa,
         below_m=below_m,
         above_m=above_m,
+        d_faf_m=norm if norm > 0.0 else None,
+        prefaf_floor_m=prefaf_floor_m,
     )
 
 
@@ -128,9 +134,11 @@ def build_constraint_segments(
     rnp_half = rnp_nm * NM_M
 
     # (#6) Derive the FAS geometry ONCE, from the FAF, and share it across every final leg — the
-    # FAS (FPAP/GARP/course width/glidepath) is one record per approach, not per leg.
+    # FAS (FPAP/GARP/course width/glidepath) is one record per approach, not per leg. The FAF's
+    # own at-or-above altitude is the published pre-FAF floor for the flexible-join gate.
     final_lpv = _lpv_spec(
         np.asarray(ne[faf], dtype=float), target_alt_m, pc, glidepath_below_m, glidepath_above_m,
+        prefaf_floor_m=_floor_alt_m(wps[faf]),
     )
 
     # (#5) Data-validation: warn if the intermediate→final intercept at the PFAF exceeds 30°.

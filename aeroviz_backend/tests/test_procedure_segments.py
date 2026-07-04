@@ -76,6 +76,10 @@ def test_final_lpv_geometry():
     assert lpv.tdze_m + lpv.tch_m == pytest.approx(TARGET_ALT)
     # GARP/FPAP are past the LTP on the inbound axis (north side here -> negative n)
     assert lpv.garp_ne[0] < 0.0 and lpv.fpap_ne[0] < 0.0
+    # flexible-join vertical gate: FAF at 5 km on the course; the pre-FAF floor is the FAF's
+    # own at-or-above altitude (1253 ft)
+    assert lpv.d_faf_m == pytest.approx(5000.0, rel=1e-3)
+    assert lpv.prefaf_floor_m == pytest.approx(1253.0 * FT_M)
 
 
 def test_threshold_waypoint_maps_to_origin():

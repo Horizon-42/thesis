@@ -31,6 +31,7 @@ from aircraft.aero_params import aero_params_for_aircraft  # noqa: E402
 from collocation import CollocationOptimizer, _DEFECT_SCHEMES, altitude_floor_m, ALTITUDE_FLOOR_MARGIN_M  # noqa: E402
 from collocation import schemes as _schemes  # noqa: E402
 from collocation import components as _components  # noqa: E402
+from collocation import optimizer as _optimizer  # noqa: E402
 
 MTOW = A320.mass.max_takeoff_kg
 
@@ -66,6 +67,10 @@ def _approach(S, frame, fracs=(0.30, 0.55, 0.78, 1.0)):
         ltp_ne=LTP, fpap_ne=9023.0 * ft * inbound, garp_ne=d_garp * inbound,
         course_width_m=max(350.0 * ft, math.tan(math.radians(1.5)) * d_garp),
         tdze_m=S[-1][2] - 50.0 * ft, tch_m=50.0 * ft, gpa_deg=gpa, below_m=120.0, above_m=120.0,
+        # Vertical gate, as the backend always sets it: glidepath window binds from the FAF
+        # toward the runway; upstream, the published FAF floor (below the flown altitude here).
+        d_faf_m=float(np.hypot(*(FAF - LTP))),
+        prefaf_floor_m=float(smp(fracs[2])[2]) - 200.0,
     )
     segments = [
         ac.SegmentSpec(ac.SegmentKind.INITIAL, IAF, IF, "IAF", "IF", halfwidth_m=1852.0),
@@ -134,6 +139,104 @@ def test_altitude_floor_is_a_margin_below_the_target():
     assert altitude_floor_m(150.0) < 150.0
 
 
+def test_unwrap_angle_picks_the_nearest_branch():
+    assert _components.unwrap_angle(0.785, 7.0) == pytest.approx(0.785 + 2.0 * math.pi)
+    assert _components.unwrap_angle(0.785, 0.9) == pytest.approx(0.785)
+    assert _components.unwrap_angle(-2.356, 3.93) == pytest.approx(-2.356 + 2.0 * math.pi)
+
+
+# ── procedure constraint row functions (white-box) ─────────────────────────
+def _join_for_rows():
+    """A _FinalJoin over the _one_lpv_segment geometry: FAF at (5000, 0), course −π/2
+    (flying south toward the LTP at the origin), branch course −π/2, window [1000, 2000]
+    upstream of the FAF."""
+    seg = _one_lpv_segment(np.array([0.0, 0.0]), np.array([5000.0, 0.0]))
+    return _optimizer._FinalJoin(
+        phase=0, lpv=seg.lpv, d_faf_m=5000.0, max_offset_m=2000.0, min_offset_m=1000.0,
+        course_branch_rad=-math.pi / 2.0,
+    )
+
+
+def _eval_rows(rows, node_syms, values):
+    f = ca.Function("f", node_syms, [expr for expr, _lb, _ub in rows])
+    outs = f(*values)
+    outs = outs if isinstance(outs, (list, tuple)) else [outs]
+    return [np.array(o).ravel() for o in outs], [(lb, ub) for _e, lb, ub in rows]
+
+
+def test_fac_join_rows_contract():
+    join = _join_for_rows()
+    node = ca.SX.sym("x", 6)
+    rows = _optimizer._fac_join_rows(node, join, math.radians(30.0))
+    assert len(rows) == 4                                    # xtk eq + window lo/hi + psi box
+    assert rows[0][1] == rows[0][2] == 0.0                   # cross-track is an EQUALITY
+    assert rows[3][1] == pytest.approx(-math.radians(30.0))  # psi box bounds
+    # a node ON the course, 1.5 km before the FAF, aligned: every row inside its bounds
+    vals, bounds = _eval_rows(rows, [node], [ca.DM([6500.0, 0.0, 800.0, 80.0, -math.pi / 2, 0.0])])
+    for v, (lb, ub) in zip(vals, bounds):
+        assert lb - 1e-9 <= float(v[0]) <= ub + 1e-9
+    # at the FAF exactly: the window's lower row is violated (too late to join)
+    vals, _ = _eval_rows(rows, [node], [ca.DM([5000.0, 0.0, 800.0, 80.0, -math.pi / 2, 0.0])])
+    assert float(vals[1][0]) > 0.0
+
+
+def test_fac_alignment_rows_switch_tiers_at_the_faf():
+    join = _join_for_rows()
+    nodes = [ca.SX.sym(f"x{i}", 6) for i in range(2)]
+    rows = _optimizer._fac_alignment_rows(
+        nodes, join, math.radians(10.0), math.radians(30.0))
+    assert len(rows) == 2 and all(ub == 0.0 for _e, _lb, ub in rows)
+    course = -math.pi / 2.0
+
+    def violations(d_upstream, dev_rad):
+        vals, _ = _eval_rows(
+            rows, nodes,
+            [ca.DM([join.d_faf_m + d_upstream, 0.0, 800.0, 80.0, course + dev_rad, 0.0]),
+             ca.DM([join.d_faf_m + d_upstream, 0.0, 800.0, 80.0, course + dev_rad, 0.0])],
+        )
+        return max(float(v.max()) for v in vals)
+
+    assert violations(+1500.0, math.radians(20.0)) <= 0.0    # upstream: 20 deg ok (loose 30)
+    assert violations(-1500.0, math.radians(20.0)) > 0.0     # past the FAF: 20 deg VIOLATES (10)
+    assert violations(-1500.0, math.radians(5.0)) <= 0.0     # past the FAF: 5 deg ok
+    assert violations(-1500.0, math.radians(-20.0)) > 0.0    # symmetric on the other side
+
+
+def test_psi_corridor_bounds_forbid_full_windings():
+    # The constrained ψ variable bounds are the route's heading hull ± the manoeuvre slack —
+    # a ±2π winding excursion (the nsp=2 looping local optima) is OUTSIDE the variable box and
+    # cannot even be visited. Unconstrained solves keep the generic ±3π.
+    init = _straight_in()
+    S = _rollout_samples(init, 120.0)
+    target = GeodeticState(*S[-1][:6], MTOW)
+    frame = ac.TargetFrame(target.latitude, target.longitude)
+    segments, _FAF, _LTP = _approach(S, frame)
+    opt = CollocationOptimizer(A320, segments=segments)
+    nlp, lbw, ubw, *_rest, layout = opt._build(init, target, 200.0)
+    n_seg = opt.n_seg_per_phase
+    psi_idx = n_seg * _schemes.CONTROL_DIM + 4          # first node's ψ slot in phase 0's block
+    lo, hi = lbw[psi_idx], ubw[psi_idx]
+    assert hi - lo < 2.0 * math.pi + 2.0 * math.radians(90.0) + 1e-9   # hull(≤2π... route ≈ small) + slack
+    assert hi < 3.0 * math.pi - 1e-9 and lo > -3.0 * math.pi + 1e-9    # tighter than the generic box
+    # winding a full turn from the initial heading leaves the corridor
+    assert init.psi + 2.0 * math.pi > hi
+    # unconstrained: generic ±3π untouched
+    unopt = CollocationOptimizer(A320, scheme="trapezoidalNormalizedFullTransport")
+    _n, ulbw, uubw, *_r, _l = unopt._build(init, target, 200.0)
+    upsi = unopt.n_segments * _schemes.CONTROL_DIM + 4
+    assert uubw[upsi] == pytest.approx(3.0 * math.pi)
+    assert ulbw[upsi] == pytest.approx(-3.0 * math.pi)
+
+
+def test_prefaf_and_terminal_row_shapes():
+    node = ca.SX.sym("x", 6)
+    disc = _optimizer._prefaf_fix_rows(node, np.array([100.0, 200.0]), 926.0)
+    assert len(disc) == 1 and disc[0][2] == 0.0
+    pin = _optimizer._terminal_pin_rows(node, np.zeros(6))
+    assert len(pin) == 1 and int(pin[0][0].shape[0]) == 6
+    assert pin[0][1] == pin[0][2] == 0.0
+
+
 # ── guards ─────────────────────────────────────────────────────────────────
 def test_guards():
     seg = [_one_lpv_segment(np.array([0.0, 0.0]), np.array([5000.0, 0.0]))]
@@ -150,6 +253,8 @@ def test_guards():
         CollocationOptimizer(A320, solver_backend="nope")
     with pytest.raises(ValueError):
         CollocationOptimizer(A320, min_speed_ms=-1.0)
+    with pytest.raises(ValueError, match="max_join_offset_m"):
+        CollocationOptimizer(A320, max_join_offset_m=-1.0)
 
 
 def test_guards_frame_anchor_contract():
@@ -166,9 +271,10 @@ def test_guards_frame_anchor_contract():
 
 
 def test_phase_plan_adds_transition_phase_only_for_a_far_start():
-    # Start > 2 km from the first leg's start fix -> an UNCONSTRAINED start->first-fix transition
-    # phase is prepended (so leg-0's floor/descent-cap no longer bind before the procedure);
-    # a start at/near the first fix joins the procedure directly.
+    # A start farther than the fix-passage tolerance from the first leg's start fix -> an
+    # UNCONSTRAINED start->first-fix transition phase is prepended (whose end node must then
+    # PASS the fix); a start within the tolerance joins the procedure directly. For an LPV-first
+    # procedure (no RNP box) the generic 2 km fallback applies.
     seg = [_one_lpv_segment(np.array([0.0, 0.0]), np.array([5000.0, 0.0]))]
     opt = CollocationOptimizer(A320, segments=seg)
     near = opt._phase_plan(np.array([5100.0, 0.0]), None)
@@ -177,6 +283,20 @@ def test_phase_plan_adds_transition_phase_only_for_a_far_start():
     assert len(far) == 2
     assert far[0][1] is None and np.allclose(far[0][0], [5000.0, 0.0])   # transition -> the FAF
     assert far[1][1] is seg[0]
+
+    # Box-first procedure: the threshold IS the passage-disc radius (k·RNP = 0.5·1852 = 926 m) —
+    # one decision, no dead zone where a near-but-not-at start would skip the fix.
+    boxed = [
+        ac.SegmentSpec(ac.SegmentKind.INITIAL, [9000.0, 0.0], [5000.0, 0.0], "IAF", "FAF",
+                       halfwidth_m=1852.0),
+        _one_lpv_segment(np.array([0.0, 0.0]), np.array([5000.0, 0.0])),
+    ]
+    opt_boxed = CollocationOptimizer(A320, segments=boxed)
+    assert opt_boxed._first_fix_join_tolerance_m() == pytest.approx(926.0)
+    inside = opt_boxed._phase_plan(np.array([9500.0, 0.0]), None)      # 500 m -> at the fix
+    assert len(inside) == 2
+    between = opt_boxed._phase_plan(np.array([10500.0, 0.0]), None)    # 1.5 km -> must fly to it
+    assert len(between) == 3 and between[0][1] is None
 
 
 # ── unconstrained solves ───────────────────────────────────────────────────
@@ -286,7 +406,7 @@ def test_normalized_matches_plain_geodetic_on_a_benign_problem():
 
 
 # ── procedure-constrained solves ───────────────────────────────────────────
-def test_constrained_pins_faf_and_threshold_only():
+def test_constrained_joins_the_course_passes_fixes_and_reaches_threshold():
     init = _straight_in()
     S = _rollout_samples(init, 120.0)
     target = GeodeticState(*S[-1][:6], MTOW)
@@ -300,13 +420,140 @@ def test_constrained_pins_faf_and_threshold_only():
     assert controls.shape == ((len(segments) + 1) * nsp, 3)
     assert final_time == pytest.approx(sum(opt.segment_durations_s), rel=1e-6)
     ne = np.array([frame.to_ne(s[0], s[1]) for s in states])
-    assert min(float(np.hypot(*(p - FAF))) for p in ne) < 1.0          # FAF crossed
     assert float(np.hypot(*(ne[-1] - LTP))) < 1.0                       # threshold reached
+
+    # Pre-FAF fix passage: the phase ending at the START of the leg into the FAF (the IF here)
+    # must deliver the aircraft within that leg's k·RNP disc. The ONLY fix-passage requirement.
+    if_fix = np.asarray(segments[1].start_ne, float)
+    join_tolerance = segments[1].k_margin * segments[1].halfwidth_m
+    assert float(np.hypot(*(ne[2 * nsp - 1] - if_fix))) <= join_tolerance + 1.0
+
+    # FAC join, established EARLY: on the course, at least 1/5 of the final leg BEFORE the FAF
+    # and at most half the previous (intermediate) leg before it.
+    lpv = segments[-1].lpv
+    jn = ne[(len(segments)) * nsp - 1]                  # end of the pre-final phase's block
+    assert abs(float(ac.fac_cross_track(jn[0], jn[1], lpv))) < 1.0
+    d_join = float(ac.fac_distance_to_ltp(jn[0], jn[1], lpv))
+    d_faf = float(ac.fac_distance_to_ltp(FAF[0], FAF[1], lpv))
+    prev = segments[-2]
+    max_offset = 0.5 * float(np.hypot(*(np.asarray(prev.end_ne) - np.asarray(prev.start_ne))))
+    max_offset = max(max_offset, 0.2 * d_faf)
+    assert d_faf + 0.2 * d_faf - 1.0 <= d_join <= d_faf + max_offset + 1.0
     assert _faf_intercept_deg(states, frame, FAF) <= 30.0 + 1e-6        # standard intercept
+
     blk = slice(-nsp, None)                                             # the final LPV leg's block
     viol = ac.segment_violations_from_components(
         segments[-1], ne[blk, 0], ne[blk, 1], states[blk, 2], states[blk, 5])
     assert max(float(np.ravel(v).max()) for v in viol.values()) <= 1.0
+
+
+def test_route_unwrapped_terminal_heading_solves_double_dogleg():
+    # REGRESSION (KRDU H05LZ): two same-direction 90° corners accumulate the route heading to
+    # target_psi + 2π. The plain initial-heading unwrap ties at exactly π and can pick the wrong
+    # branch — pinning a terminal ψ the fix-by-fix route cannot reach without an impossible
+    # extra turn inside the final corridor (Infeasible_Problem_Detected). The route-chained
+    # unwrap pins the branch the route actually reaches.
+    from dataclasses import replace
+    frame = ac.TargetFrame(35.60, -78.50)
+    ltp = np.array([0.0, 0.0])
+    faf = np.array([-7071.0, -7071.0])            # final course = +π/4 (model convention)
+    f2 = np.array([-707.0, -13435.0])             # intermediate course −π/4: +90° at the FAF
+    f1 = np.array([4879.0, -7849.0])              # initial course −3π/4: +90° at F2
+    # Backend-realistic floors + the pre-FAF vertical gate regularize the otherwise wildly
+    # under-constrained vertical (without them IPOPT wanders through dive-and-climb iterates).
+    final = _one_lpv_segment(ltp, faf)
+    final = replace(final, lpv=replace(final.lpv, d_faf_m=10000.0, prefaf_floor_m=600.0))
+    segments = [
+        ac.SegmentSpec(ac.SegmentKind.INITIAL, f1, f2, "F1", "F2", halfwidth_m=1852.0,
+                       step_downs=[ac.StepDown(s_from_start_m=7900.0, min_alt_m=750.0)],
+                       max_descent_deg=4.7),
+        ac.SegmentSpec(ac.SegmentKind.INTERMEDIATE, f2, faf, "F2", "FAF", halfwidth_m=1852.0,
+                       step_downs=[ac.StepDown(s_from_start_m=9000.0, min_alt_m=600.0)],
+                       max_descent_deg=4.7),
+        final,
+    ]
+    init_ll = frame.to_latlon([11243.0, -1485.0])
+    init = GeodeticState(float(init_ll[0]), float(init_ll[1]), 1300.0, 90.0,
+                         5.0 * math.pi / 4.0, 0.0, MTOW)      # heading = target ψ + π (the tie)
+    tll = frame.to_latlon(ltp)
+    target = GeodeticState(float(tll[0]), float(tll[1]), 120.0 + 50.0 * 0.3048, 76.0,
+                           math.pi / 4.0, math.radians(-3.0), MTOW)
+    # Unit-level: the chained-course unwrap picks the route's branch (ψ_target + 2π), where the
+    # plain initial-heading unwrap ties at exactly π and can pick ψ_target. The hull spans the
+    # chain (init 3.93 … target 7.07), feeding the ψ-corridor variable bounds.
+    probe = CollocationOptimizer(A320, segments=segments)
+    unwrapped, hull_lo, hull_hi = probe._route_psi_profile(
+        np.array([11243.0, -1485.0]), 5.0 * math.pi / 4.0, math.pi / 4.0)
+    assert unwrapped == pytest.approx(math.pi / 4.0 + 2.0 * math.pi, abs=1e-9)
+    assert hull_lo == pytest.approx(5.0 * math.pi / 4.0, abs=0.15)   # init heading end of hull
+    assert hull_hi == pytest.approx(unwrapped, abs=1e-9)             # target end of hull
+    # Solve-level, at a configuration that converges on this double-90° geometry (several nsp
+    # values crawl to Max_Iterations — a known NLP-hardness limit of the knife-edge synthetic,
+    # not a branch bug; the deterministic branch check is the unit assert above; see CLAUDE.md
+    # 2026-07-04).
+    opt = CollocationOptimizer(A320, segments=segments,
+                               scheme="trapezoidalNormalizedFullTransport", n_seg_per_phase=5)
+    _t, _c, states = opt.optimize_free_time(init, target, 600.0)
+    ne = np.array([frame.to_ne(s[0], s[1]) for s in states])
+    assert float(np.hypot(*(ne[-1] - ltp))) < 1.0
+    # the terminal heading lands on the ROUTE's branch: ψ_target + 2π
+    assert states[-1][4] == pytest.approx(math.pi / 4.0 + 2.0 * math.pi, abs=1e-3)
+    # the pre-FAF fix (F2) is the one forced passage (end of the F1->F2 phase, which is the
+    # second block: [transition, F1-leg, F2-leg(join), final])
+    nsp = opt.n_seg_per_phase
+    assert float(np.hypot(*(ne[2 * nsp - 1] - f2))) <= 0.5 * 1852.0 + 1.0
+
+
+def test_only_the_prefaf_fix_carries_a_passage_disc():
+    # E -> A -> B -> FAF -> LTP with A ~3 km OFF the direct E->B line: A (and the entry E) are
+    # laterally FREE, so min-time cuts the corner past A; B (the pre-FAF fix) must be passed
+    # within its leg's k·RNP disc.
+    frame = ac.TargetFrame(35.60, -78.50)
+    ltp = np.array([0.0, 0.0])
+    faf = np.array([8000.0, 0.0])
+    b = np.array([12000.0, 0.0])
+    a = np.array([16000.0, 3000.0])
+    e = np.array([20000.0, 0.0])
+    segments = [
+        ac.SegmentSpec(ac.SegmentKind.INITIAL, e, a, "E", "A", halfwidth_m=1852.0),
+        ac.SegmentSpec(ac.SegmentKind.INITIAL, a, b, "A", "B", halfwidth_m=1852.0),
+        ac.SegmentSpec(ac.SegmentKind.INTERMEDIATE, b, faf, "B", "FAF", halfwidth_m=1852.0),
+        _one_lpv_segment(ltp, faf),
+    ]
+    e_ll = frame.to_latlon(e)
+    init = GeodeticState(float(e_ll[0]), float(e_ll[1]), 1200.0, 90.0,
+                         -math.pi / 2.0, 0.0, MTOW)            # at E, heading down-course
+    tll = frame.to_latlon(ltp)
+    target = GeodeticState(float(tll[0]), float(tll[1]), 120.0 + 50.0 * 0.3048, 76.0,
+                           -math.pi / 2.0, math.radians(-3.0), MTOW)
+    opt = CollocationOptimizer(A320, segments=segments)
+    _t, _c, states = opt.optimize_free_time(init, target, 400.0)
+    ne = np.array([frame.to_ne(s[0], s[1]) for s in states])
+    nsp = opt.n_seg_per_phase
+    tol = 0.5 * 1852.0
+    assert float(np.hypot(*(ne[-1] - ltp))) < 1.0
+    assert float(np.hypot(*(ne[nsp - 1] - a))) > tol + 100.0        # A skipped (free)
+    assert float(np.hypot(*(ne[2 * nsp - 1] - b))) <= tol + 1.0     # B passed (the disc)
+
+
+def test_zero_join_offset_clamps_to_the_min_upstream_point():
+    # max_join_offset_m=0 is clamped up to the 1/5-final minimum: the join collapses to the
+    # single on-course point 1/5 of the final leg BEFORE the FAF (never at/after the FAF).
+    init = _straight_in()
+    S = _rollout_samples(init, 120.0)
+    target = GeodeticState(*S[-1][:6], MTOW)
+    frame = ac.TargetFrame(target.latitude, target.longitude)
+    segments, FAF, LTP = _approach(S, frame)
+    opt = CollocationOptimizer(A320, segments=segments, max_join_offset_m=0.0)
+    _t, _c, states = opt.optimize_free_time(init, target, 120.0 * 1.6)
+    ne = np.array([frame.to_ne(s[0], s[1]) for s in states])
+    nsp = opt.n_seg_per_phase
+    lpv = segments[-1].lpv
+    jn = ne[(len(segments)) * nsp - 1]
+    d_faf = float(ac.fac_distance_to_ltp(FAF[0], FAF[1], lpv))
+    assert abs(float(ac.fac_cross_track(jn[0], jn[1], lpv))) < 1.0
+    assert float(ac.fac_distance_to_ltp(jn[0], jn[1], lpv)) == pytest.approx(1.2 * d_faf, abs=1.0)
+    assert float(np.hypot(*(ne[-1] - LTP))) < 1.0
 
 
 def test_constrained_intercepts_final_from_an_offset_start():

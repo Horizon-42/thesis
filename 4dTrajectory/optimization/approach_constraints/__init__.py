@@ -34,7 +34,13 @@ from .builder import (
     ConstraintSet,
 )
 from .frame import TargetFrame
-from .lateral import DEFAULT_K_MARGIN
+from .lateral import (
+    DEFAULT_K_MARGIN,
+    fac_cross_track,
+    fac_distance_to_ltp,
+    fac_join_window_violation,
+    fix_passage_violation,
+)
 from .segments import (
     DEFAULT_GLIDEPATH_ABOVE_M,
     DEFAULT_GLIDEPATH_BELOW_M,
@@ -57,6 +63,10 @@ __all__ = [
     "segment_violations_from_components",
     "ConstraintSet",
     "ConstraintReport",
+    "fac_cross_track",
+    "fac_distance_to_ltp",
+    "fac_join_window_violation",
+    "fix_passage_violation",
     "DEFAULT_GLIDEPATH_BELOW_M",
     "DEFAULT_GLIDEPATH_ABOVE_M",
     "DEFAULT_K_MARGIN",

@@ -60,6 +60,10 @@ def _lpv_spec() -> LpvFinalSpec:
         tdze_m=_TDZE,
         tch_m=_TCH,
         gpa_deg=_GPA,
+        # Flexible-join vertical gate (README §4b): glidepath window binds from the PFAF toward
+        # the runway; upstream the intermediate leg's 700 m floor is the published minimum.
+        d_faf_m=_PFAF_N,
+        prefaf_floor_m=700.0,
     )
 
 

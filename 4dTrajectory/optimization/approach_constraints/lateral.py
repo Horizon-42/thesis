@@ -120,6 +120,60 @@ def lpv_course_halfwidth(n, e, lpv):
     return lpv.course_width_m * dP / dL
 
 
+def fix_passage_violation(n, e, fix_ne, tolerance_m: float):
+    """⑪ — pass a fix within ``tolerance_m``: a SMOOTH disc constraint, metre-scaled.
+
+    The node must lie inside the disc of radius ``tolerance_m`` around ``fix_ne`` (the pre-FAF
+    fix in the optimizer's wiring; the tolerance comes from the procedure — the leg's RNP
+    containment half-width scaled by the design margin, never a hardcoded number). Enforced in
+    the squared
+    form — the Euclidean distance has a non-differentiable kink AT the fix, the squared form is
+    smooth everywhere — and rescaled by ``1/(2·tol)`` so the violation reads in METRES near the
+    boundary (first order: ``(d² − tol²)/(2·tol) ≈ d − tol``), keeping the report's metre family
+    honest::
+
+        g = ((n − fix_n)² + (e − fix_e)² − tol²) / (2·tol)     # ≤ 0  ⇔  inside the disc
+    """
+    dn = n - fix_ne[0]
+    de = e - fix_ne[1]
+    return (dn * dn + de * de - tolerance_m * tolerance_m) / (2.0 * tolerance_m)
+
+
+def fac_cross_track(n, e, lpv):
+    """Signed cross-track distance (metres) of node ``(n, e)`` from the final approach course
+    (the GARP→LTP line). Zero ⇔ the node is ON the course — used as a LINEAR equality row for
+    the flexible FAC join (§4b of the README). One source: the same axis the corridor and the
+    glidepath distance use."""
+    return geo.cross_track(n, e, lpv.garp_ne, lpv.ltp_ne)
+
+
+def fac_distance_to_ltp(n, e, lpv):
+    """Along-course distance (metres) of node ``(n, e)`` BACK from the LTP, measured on the
+    GARP→LTP axis (0 at the threshold, + toward the PFAF/FAF). The single distance measure for
+    the glidepath window, the vertical gate and the FAC join window."""
+    _, _, d_garp_ltp = geo.leg_unit(lpv.garp_ne, lpv.ltp_ne)
+    return geo.along_track(n, e, lpv.garp_ne, lpv.ltp_ne) - d_garp_ltp
+
+
+def fac_join_window_violation(n, e, lpv, d_faf_m: float, max_offset_m: float,
+                              min_offset_m: float = 0.0):
+    """⑫ — hold the FAC join node inside the along-track window
+    ``[d_FAF + min_offset, d_FAF + max_offset]`` — strictly UPSTREAM of the FAF.
+
+    The intersection with the final approach course must happen EARLY: at least ``min_offset_m``
+    before the FAF (the optimizer sets that to 1/5 of the final leg's length — established on
+    the course with margin before the FAF), and no earlier than ``max_offset_m`` before it.
+    Never between the FAF and the runway. Returns the pair (both ≤ 0 ⇔ inside)::
+
+        ((d_FAF + min_offset) − d,  d − (d_FAF + max_offset))   # d = fac_distance_to_ltp(...)
+
+    With both offsets 0 the window collapses to ``d = d_FAF``, which together with the
+    on-course equality (:func:`fac_cross_track` = 0) reproduces the exact-FAF pin.
+    """
+    d = fac_distance_to_ltp(n, e, lpv)
+    return (d_faf_m + min_offset_m) - d, d - (d_faf_m + max_offset_m)
+
+
 def lpv_corridor_violation(n, e, lpv, k: float = DEFAULT_K_MARGIN):
     """LPV angular corridor: keep ``|cross-track to FAC| ≤ k · halfwidth(node)``, as TWO smooth rows.
 
