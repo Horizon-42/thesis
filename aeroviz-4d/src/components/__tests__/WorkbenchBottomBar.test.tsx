@@ -22,6 +22,7 @@ const { appState, setPlaybackSpeed, setAutoReplay, makeClock } = vi.hoisted(() =
     viewer: { clock: makeClock() },
     playbackSpeed: 60,
     autoReplay: true,
+    pilotTransport: null,
   };
   return {
     appState,
@@ -43,6 +44,7 @@ describe("WorkbenchBottomBar", () => {
     appState.viewer = { clock: makeClock() };
     appState.playbackSpeed = 60;
     appState.autoReplay = true;
+    appState.pilotTransport = null;
     vi.clearAllMocks();
   });
 
@@ -87,5 +89,41 @@ describe("WorkbenchBottomBar", () => {
     fireEvent.click(screen.getByRole("checkbox"));
     expect(setAutoReplay).toHaveBeenCalledWith(false);
     expect(appState.viewer.clock.clockRange).toBe("CLAMPED");
+  });
+
+  // ── Fly (pilot) mode: the aircraft runs on a manual sim loop, NOT viewer.clock,
+  // so the bar drives the published pilot transport instead of the clock. ────────
+  it("in Fly mode, drives the pilot sim transport (Play/Reset), not the clock", () => {
+    const togglePlay = vi.fn();
+    const reset = vi.fn();
+    appState.mode = "fly";
+    appState.pilotTransport = { running: false, playPauseDisabled: false, resetDisabled: false, togglePlay, reset };
+    render(<WorkbenchBottomBar />);
+
+    // No clock-only controls in fly mode (speed presets + loop toggle).
+    expect(screen.queryByRole("button", { name: "120×" })).toBeNull();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Play/ }));
+    expect(togglePlay).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: /Reset/ }));
+    expect(reset).toHaveBeenCalledTimes(1);
+    // The clock is untouched (pilot mode isn't clock-driven).
+    expect(appState.viewer.clock.shouldAnimate).toBe(false);
+  });
+
+  it("in Fly mode, shows Pause while the sim is running", () => {
+    appState.mode = "fly";
+    appState.pilotTransport = { running: true, playPauseDisabled: false, resetDisabled: false, togglePlay: vi.fn(), reset: vi.fn() };
+    render(<WorkbenchBottomBar />);
+    expect(screen.getByRole("button", { name: /Pause/ })).toBeTruthy();
+  });
+
+  it("in Fly mode, disables the transport until PilotPanel publishes it", () => {
+    appState.mode = "fly";
+    appState.pilotTransport = null;
+    render(<WorkbenchBottomBar />);
+    expect((screen.getByRole("button", { name: /Play/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /Reset/ }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

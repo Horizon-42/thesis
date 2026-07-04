@@ -27,7 +27,7 @@ const SPEED_OPTIONS: Array<{ label: string; value: number }> = [
 const TIME_MODES = new Set(["observe", "fly", "optimize", "compare"]);
 
 export default function WorkbenchBottomBar() {
-  const { viewer, mode, setPlaybackSpeed, autoReplay, setAutoReplay } = useApp();
+  const { viewer, mode, setPlaybackSpeed, autoReplay, setAutoReplay, pilotTransport } = useApp();
   const [isAnimating, setIsAnimating] = useState<boolean>(false);
   const [liveMultiplier, setLiveMultiplier] = useState<number>(60);
 
@@ -50,6 +50,29 @@ export default function WorkbenchBottomBar() {
   }, [viewer]);
 
   if (!TIME_MODES.has(mode)) return null;
+
+  // Fly (pilot) mode runs a MANUAL sim loop, not viewer.clock — so the transport
+  // drives the simulation here (Play/Pause/Reset only; the speed presets + loop
+  // toggle are clock concepts that don't apply). PilotPanel publishes the sim
+  // transport as `pilotTransport`; it is briefly null while the panel mounts.
+  if (mode === "fly") {
+    return (
+      <div className="workbench-bottom-bar" aria-label="Flight simulation transport">
+        <button
+          onClick={() => pilotTransport?.togglePlay()}
+          disabled={!pilotTransport || pilotTransport.playPauseDisabled}
+        >
+          {pilotTransport?.running ? "⏸ Pause" : "▶ Play"}
+        </button>
+        <button
+          onClick={() => pilotTransport?.reset()}
+          disabled={!pilotTransport || pilotTransport.resetDisabled}
+        >
+          ⏮ Reset
+        </button>
+      </div>
+    );
+  }
 
   function handleSpeedChange(speed: number) {
     setPlaybackSpeed(speed);

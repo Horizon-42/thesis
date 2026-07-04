@@ -122,7 +122,10 @@ export function useOptimizedTrajectoryPlayback({
               ? Cesium.ClockRange.LOOP_STOP
               : Cesium.ClockRange.CLAMPED;
             viewer.clock.multiplier = multiplier;
-            viewer.clock.shouldAnimate = true;
+            // Load PAUSED — the CZML is loaded whenever you're in this mode with a
+            // result (so the shared clock transport is bound to it), but it animates
+            // only when the user presses Play (panel button or bottom bar/native dial).
+            viewer.clock.shouldAnimate = false;
             viewer.timeline?.zoomTo(start, stop);
             // Keep the ControlPanel's displayed speed in step with the clock.
             setPlaybackSpeed(multiplier);

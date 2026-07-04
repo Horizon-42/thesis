@@ -201,15 +201,17 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     setProceduresOpen,
     layers,
     toggleLayer,
+    setPilotTransport,
   } = useApp();
   const [internalActiveMode, setActiveMode] = useState<PilotPanelMode>("pilot");
   const activeMode = controlledMode ?? internalActiveMode;
   const [isEnabled, setIsEnabled] = useState(false);
   const [isFlying, setIsFlying] = useState(false);
-  // Optimized-trajectory playback now runs on Cesium's own clock from a backend
-  // CZML.  `isTrajectoryPlaybackActive` means the CZML is loaded into the scene;
+  // Optimized-trajectory playback runs on Cesium's own clock from a backend CZML.
   // `isTrajectoryPlaying` mirrors the intended clock animation (play vs pause).
-  const [isTrajectoryPlaybackActive, setIsTrajectoryPlaybackActive] = useState(false);
+  // ("Is the CZML loaded" — isTrajectoryPlaybackActive — is DERIVED below from the
+  // active mode + a computed result, so the shared clock transport stays bound to
+  // the current mode instead of unloading on every switch.)
   const [isTrajectoryPlaying, setIsTrajectoryPlaying] = useState(false);
   const [isInitialEditorOpen, setIsInitialEditorOpen] = useState(false);
   const [isTargetEditorOpen, setIsTargetEditorOpen] = useState(false);
@@ -260,9 +262,17 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   const [comparisonDtS, setComparisonDtS] = useState(DEFAULT_COMPARISON_DT_S);
   const [comparisonResult, setComparisonResult] =
     useState<DynamicsComparisonResult | null>(null);
-  const [isComparisonPlaybackActive, setIsComparisonPlaybackActive] = useState(false);
   const [isComparisonPlaying, setIsComparisonPlaying] = useState(false);
   const [hiddenComparisonKeys, setHiddenComparisonKeys] = useState<string[]>([]);
+  // A mode's playback is LOADED (its CZML on the clock) exactly while you are in
+  // that mode AND it has a computed result. Deriving this — rather than toggling
+  // it on Play and clearing it on every mode switch — keeps the shared bottom bar
+  // + native clock dial bound to the current mode's trajectory the moment you
+  // enter it (the playback hooks load it paused; Play animates).
+  const isTrajectoryPlaybackActive =
+    activeMode === "trajectory" && optimizedTrajectory?.playback != null;
+  const isComparisonPlaybackActive =
+    activeMode === "comparison" && comparisonResult != null;
   // A/C/D deviations vs the reference B at the current clock time, overlaid on
   // the Live-State readout during a Compare playback.
   const [comparisonDeltas, setComparisonDeltas] =
@@ -335,7 +345,6 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   const clearOptimizedPlayback = useCallback(() => {
     setOptimizedTrajectory(null);
     setIsTrajectoryPlaying(false);
-    setIsTrajectoryPlaybackActive(false);
   }, []);
 
   // Invalidate any computed/loaded dynamics comparison. Used whenever an input
@@ -343,7 +352,6 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   const clearComparisonPlayback = useCallback(() => {
     setComparisonResult(null);
     setIsComparisonPlaying(false);
-    setIsComparisonPlaybackActive(false);
     setIsChartsOpen(false);
     setHiddenComparisonKeys([]);
     setChartMode("run");
@@ -369,7 +377,10 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
 
   const updateInitialPosition = useCallback(
     (position: PilotInitialPlacementPosition) => {
-      setSelectedRnavInitialFixKey("");
+      // Deliberately KEEPS the RNAV IF selection: the selector identifies the PROCEDURE (entry
+      // fix); the start is independent. The multiphase optimizer flies a free transition from a
+      // custom start and must PASS the selected fix within the leg's k·RNP disc — clearing the
+      // selection here used to make a custom-start constrained optimize impossible.
       setInitialState((current) => ({
         ...current,
         lon: clamp(position.lon, -180, 180),
@@ -628,7 +639,6 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     setIsInitialPreviewVisible(false);
     setIsFlying(false);
     setIsTrajectoryPlaying(false);
-    setIsTrajectoryPlaybackActive(false);
     setIsEnabled(false);
     setSnapshot(null);
     setTrail([]);
@@ -981,8 +991,9 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   ) {
     if (!Number.isFinite(value) || isFlying || isTrajectoryPlaying) return;
 
+    // Field edits keep the RNAV IF selection (same rationale as updateInitialPosition: the
+    // selector names the procedure; the start may differ — the optimizer flies to the fix).
     setInitialState((current) => ({ ...current, [key]: clamp(value, min, max) }));
-    setSelectedRnavInitialFixKey("");
     setIsInitialPreviewVisible(true);
     clearSnapshotForInitialEdit();
   }
@@ -1017,9 +1028,7 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   // replay without recomputing.
   function suspendPlaybacks() {
     setIsTrajectoryPlaying(false);
-    setIsTrajectoryPlaybackActive(false);
     setIsComparisonPlaying(false);
-    setIsComparisonPlaybackActive(false);
     setIsChartsOpen(false);
   }
 
@@ -1272,7 +1281,6 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     setError(null);
     setIsFlying(false);
     setIsEnabled(false);
-    setIsTrajectoryPlaybackActive(true);
     setIsTrajectoryPlaying(true);
     if (isCesiumViewerUsable(viewer)) {
       viewer.clock.shouldAnimate = true;
@@ -1391,7 +1399,6 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     setError(null);
     setIsFlying(false);
     setIsEnabled(false);
-    setIsComparisonPlaybackActive(true);
     setIsComparisonPlaying(true);
     if (isCesiumViewerUsable(viewer)) {
       viewer.clock.shouldAnimate = true;
@@ -1483,6 +1490,43 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   const trajectorySegmentDurationS = optimizedTrajectory
     ? optimizedTrajectory.finalTimeS / Math.max(1, optimizedTrajectory.controls.length)
     : null;
+
+  // ── Fly-mode transport for the shared bottom bar ─────────────────────────────
+  // The Fly (pilot) aircraft runs on the manual sim loop (`isFlying`), NOT
+  // viewer.clock, so the bottom bar's generic clock Play/Reset can't drive it.
+  // Publish the sim transport to context — via stable, ref-backed callbacks so
+  // the effect doesn't churn — and WorkbenchBottomBar renders Play/Pause/Reset
+  // for it in fly mode. Cleared (null) whenever the panel leaves pilot mode.
+  const pilotTransportImplRef = useRef({ startPilot, resetPilot, isFlying });
+  pilotTransportImplRef.current = { startPilot, resetPilot, isFlying };
+  const bottomTogglePilotPlay = useCallback(() => {
+    const impl = pilotTransportImplRef.current;
+    if (impl.isFlying) setIsFlying(false);
+    else void impl.startPilot();
+  }, []);
+  const bottomResetPilot = useCallback(() => {
+    void pilotTransportImplRef.current.resetPilot();
+  }, []);
+  useEffect(() => {
+    if (activeMode !== "pilot") return undefined;
+    setPilotTransport({
+      running: isFlying,
+      playPauseDisabled: isBusy || isPlacingInitialPosition || (!isFlying && !hasAircraftConfigs),
+      resetDisabled: isBusy || isPlacingInitialPosition || !hasAircraftConfigs,
+      togglePlay: bottomTogglePilotPlay,
+      reset: bottomResetPilot,
+    });
+    return () => setPilotTransport(null);
+  }, [
+    activeMode,
+    isFlying,
+    isBusy,
+    isPlacingInitialPosition,
+    hasAircraftConfigs,
+    bottomTogglePilotPlay,
+    bottomResetPilot,
+    setPilotTransport,
+  ]);
 
   return (
     <div className="pilot-panel">

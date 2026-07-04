@@ -227,6 +227,27 @@ interface RunwayProfileSessionState {
  */
 export type WorkbenchMode = "observe" | "fly" | "optimize" | "compare";
 
+/**
+ * Fly (pilot) mode's transport, published by PilotPanel so the shared bottom bar
+ * can drive the MANUAL simulation loop (`isFlying`) — which, unlike the
+ * optimize/compare CZML playback, does NOT run on `viewer.clock`, so the generic
+ * clock transport can't touch it. `null` unless the pilot panel is active in fly
+ * mode. The callbacks are stable (ref-backed); the booleans reflect live sim
+ * state so the bar's Play/Pause icon and disabled states track it.
+ */
+export interface PilotTransport {
+  /** The sim loop is running (show Pause) vs paused (show Play). */
+  running: boolean;
+  /** Play/Pause is disabled (busy, placing the aircraft, or nothing to start). */
+  playPauseDisabled: boolean;
+  /** Reset is disabled. */
+  resetDisabled: boolean;
+  /** Toggle play/pause of the manual sim. */
+  togglePlay: () => void;
+  /** Reset the sim to the start (paused). */
+  reset: () => void;
+}
+
 interface WorkbenchUiState {
   /** Active task in the workbench shell (one of the four exclusive tasks). */
   mode: WorkbenchMode;
@@ -247,6 +268,12 @@ interface WorkbenchUiState {
   /** Whether the right inspector dock is collapsed. */
   rightInspectorCollapsed: boolean;
   setRightInspectorCollapsed: (collapsed: boolean) => void;
+  /**
+   * Fly-mode manual-sim transport (see PilotTransport). Published by PilotPanel
+   * while in fly mode so the shared bottom bar drives the sim; `null` otherwise.
+   */
+  pilotTransport: PilotTransport | null;
+  setPilotTransport: (transport: PilotTransport | null) => void;
 }
 
 interface AppState extends
@@ -304,6 +331,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [rangeRingRadiusKm, setRangeRingRadiusKm] = useState<number>(5);
   const [mode, setMode] = useState<WorkbenchMode>("observe");
   const [proceduresOpen, setProceduresOpen] = useState<boolean>(false);
+  const [pilotTransport, setPilotTransport] = useState<PilotTransport | null>(null);
   const [presentationMode, setPresentationMode] = useState<boolean>(false);
   const [layersDrawerOpen, setLayersDrawerOpen] = useState<boolean>(false);
   const [rightInspectorCollapsed, setRightInspectorCollapsed] = useState<boolean>(false);
@@ -506,7 +534,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setLayersDrawerOpen,
     rightInspectorCollapsed,
     setRightInspectorCollapsed,
-  }), [mode, proceduresOpen, presentationMode, layersDrawerOpen, rightInspectorCollapsed]);
+    pilotTransport,
+    setPilotTransport,
+  }), [mode, proceduresOpen, presentationMode, layersDrawerOpen, rightInspectorCollapsed, pilotTransport]);
 
   return (
     <AirportSessionContext.Provider value={airportSessionState}>

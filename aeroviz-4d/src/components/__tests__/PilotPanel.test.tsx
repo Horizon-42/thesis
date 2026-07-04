@@ -53,6 +53,7 @@ const mocks = vi.hoisted(() => ({
   setProceduresOpen: vi.fn(),
   toggleLayer: vi.fn(),
   layers: { procedures: false } as Record<string, boolean>,
+  setPilotTransport: vi.fn(),
 }));
 
 vi.mock("../../context/AppContext", () => ({
@@ -66,6 +67,7 @@ vi.mock("../../context/AppContext", () => ({
     setProceduresOpen: mocks.setProceduresOpen,
     layers: mocks.layers,
     toggleLayer: mocks.toggleLayer,
+    setPilotTransport: mocks.setPilotTransport,
   }),
 }));
 
@@ -657,6 +659,54 @@ describe("PilotPanel trajectory play mode", () => {
     expect(request.targetState.headingDeg).toBeCloseTo(45.0, 0);
   });
 
+  it("keeps the RNAV fix selection on a custom start so the optimizer flies TO the fix", async () => {
+    // REGRESSION: editing the initial state used to CLEAR the RNAV IF selection, which made a
+    // custom-start constrained optimize impossible (the panel demanded a selection, and
+    // re-selecting snapped the start back onto the fix). The selector names the PROCEDURE; the
+    // start is independent — the backend adds a transition phase + the fix-passage disc.
+    render(<PilotPanel />);
+
+    expect(await screen.findByText("A320")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
+    await waitFor(() => {
+      expect(mocks.fetchRnavInitialFixCandidates).toHaveBeenCalled();
+    });
+
+    const initialSummary = screen.getByLabelText("Initial aircraft state summary");
+    fireEvent.click(within(initialSummary).getByRole("button", { name: "Edit" }));
+    const initialEditor = await screen.findByLabelText("Initial aircraft setup");
+    const rnavSelect = within(initialEditor).getByLabelText("RNAV IF") as HTMLSelectElement;
+    fireEvent.change(rnavSelect, {
+      target: { value: "KRDU-R05LY-RW05L|branch:R|fix:SCHOO|fix:WEPAS|914.4" },
+    });
+
+    // Simulate a map placement ~8 km away from SCHOO — the selection must survive it.
+    const placementCalls = mocks.usePilotInitialPlacement.mock.calls;
+    const placement = placementCalls[placementCalls.length - 1]?.[0];
+    act(() => {
+      placement.onPositionChange({ lon: -78.95, lat: 35.84 });
+    });
+    expect(rnavSelect.value).toBe("KRDU-R05LY-RW05L|branch:R|fix:SCHOO|fix:WEPAS|914.4");
+    // ...and a field edit must survive too.
+    const altInput = within(initialEditor).getByLabelText("Alt m");
+    fireEvent.change(altInput, { target: { value: "1500" } });
+    fireEvent.blur(altInput);
+    expect(rnavSelect.value).toBe("KRDU-R05LY-RW05L|branch:R|fix:SCHOO|fix:WEPAS|914.4");
+    fireEvent.click(within(initialEditor).getByRole("button", { name: "Close" }));
+
+    // Constrained optimize now runs from the CUSTOM start with the procedure attached.
+    fireEvent.click(screen.getByRole("button", { name: "Optimize" }));
+    await waitFor(() => {
+      expect(mocks.runTrajectoryOptimization).toHaveBeenCalled();
+    });
+    const calls = mocks.runTrajectoryOptimization.mock.calls;
+    const request = calls[calls.length - 1]?.[0];
+    expect(request.procedureConstraint?.waypoints).toHaveLength(3);
+    expect(request.initialState.lat).toBeCloseTo(35.84, 6);
+    expect(request.initialState.lon).toBeCloseTo(-78.95, 6);
+    expect(request.initialState.altM).toBe(1500);
+  });
+
   it("keeps the initial aircraft editor open after placing the aircraft", async () => {
     render(<PilotPanel />);
 
@@ -741,6 +791,13 @@ describe("PilotPanel trajectory play mode", () => {
       expect((screen.getByRole("button", { name: "Play" }) as HTMLButtonElement).disabled)
         .toBe(false);
     });
+
+    // Derived loading: the CZML is loaded (hook enabled) as soon as a result
+    // exists — BEFORE pressing Play — so the shared bottom transport bar / native
+    // clock dial are bound to it (the hook loads it paused; Play animates).
+    expect(mocks.useOptimizedTrajectoryPlayback).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enabled: true }),
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Play" }));
 
