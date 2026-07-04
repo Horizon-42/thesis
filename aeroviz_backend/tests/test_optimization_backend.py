@@ -882,7 +882,7 @@ class TestOptimizationBackend(unittest.TestCase):
         buffer = io.StringIO()
         try:
             with redirect_stderr(buffer):
-                optimization_backend.OptimizationBackend().optimize({
+                result = optimization_backend.OptimizationBackend().optimize({
                     "optimizer": "casadiDirectCollocationNormalized",
                     "nSegments": 2,
                     "arrivalTimeS": 84.0,
@@ -915,6 +915,42 @@ class TestOptimizationBackend(unittest.TestCase):
         self.assertIn("freeTime=0.600s", log)
         self.assertIn("playback=", log)
         self.assertIn("total=", log)
+        # the resolved scheme + fitting are announced BEFORE the solve/timing line
+        self.assertIn("optimizer config", log)
+        self.assertIn("scheme=hermiteSimpsonNormalized ", log)
+        self.assertIn("fitting=hermiteSimpson", log)
+        self.assertLess(log.index("optimizer config"), log.index("optimization timing"))
+        # the drift guard measured the (fake-controls) rollout end vs the target — a large
+        # drift is expected here and must be BOTH in the response and loudly flagged
+        self.assertIn("playbackDriftM", result)
+        self.assertGreater(result["playbackDriftM"], optimization_backend.PLAYBACK_DRIFT_WARN_M)
+        self.assertIn("playback terminal drift", log)
+
+    def test_log_optimizer_config_decomposes_scheme_and_fitting(self):
+        def line_for(name, constrained=False):
+            buffer = io.StringIO()
+            with redirect_stderr(buffer):
+                optimization_backend.log_optimizer_config(name, constrained=constrained)
+            return buffer.getvalue()
+
+        multiphase = line_for("casadiMultiphaseNormalizedFullTransportTrapezoidal", constrained=True)
+        self.assertIn("scheme=trapezoidalNormalizedFullTransport", multiphase)
+        self.assertIn("fitting=trapezoidal", multiphase)
+        self.assertIn("dynamics=geodeticNormalized", multiphase)
+        self.assertIn("transport=full", multiphase)
+        self.assertIn("constrained=True", multiphase)
+
+        local_enu = line_for("casadiDirectCollocationLocalEnu")
+        self.assertIn("scheme=localEnu ", local_enu)
+        self.assertIn("fitting=rk4", local_enu)
+        self.assertIn("dynamics=localEnu", local_enu)
+
+        reanchored = line_for("casadiDirectCollocationReanchoredEnu")
+        self.assertIn("fitting=shooting", reanchored)
+
+        non_collocation = line_for("casadiIpopt")
+        self.assertIn("scheme=-", non_collocation)
+        self.assertIn("constrained=False", non_collocation)
 
     def test_optimize_rejects_unknown_optimizer(self):
         with self.assertRaisesRegex(ValueError, "optimizer must be one of"):

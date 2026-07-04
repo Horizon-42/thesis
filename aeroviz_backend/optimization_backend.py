@@ -31,7 +31,10 @@ from single_shooting_optimizor import SingleShootingOptimizor
 from simulator import Control
 from aeroviz_backend.procedure_constraint import ProcedureConstraint
 from aeroviz_backend.procedure_segments import build_constraint_segments
-from aeroviz_backend.trajectory_playback import build_optimized_trajectory_playback
+from aeroviz_backend.trajectory_playback import (
+    build_optimized_trajectory_playback,
+    playback_terminal_drift_m,
+)
 from transcription_optimizor import TranscriptionOptimizor
 from variable_time_warm_start_transcription_optimizor import (
     VariableTimeWarmStartTranscriptionOptimizor,
@@ -50,6 +53,10 @@ DEFAULT_OPTIMIZER = "casadiDirectCollocation"
 # Direct-collocation variants exposed as distinct optimizer names, each
 # selecting a defect "fitting equation" (see collocation.schemes).
 # The bare name keeps the default (Hermite-Simpson) for backward compatibility.
+# Playback terminal drift (true-dynamics rollout end vs the target) above which the response
+# is loudly flagged — a faithful plan lands within metres (see playback_terminal_drift_m).
+PLAYBACK_DRIFT_WARN_M = 50.0
+
 DIRECT_COLLOCATION_SCHEMES = {
     "casadiDirectCollocation": "hermiteSimpson",
     "casadiDirectCollocationTrapezoidal": "trapezoidal",
@@ -144,6 +151,9 @@ class OptimizationBackend:
             payload.get("procedureConstraint")
         )
         is_multiphase = optimizer_name in MULTIPHASE_SCHEMES
+        # Announce the resolved scheme + fitting BEFORE any solving, so a failed or hanging
+        # solve's configuration is visible in the server log up front.
+        log_optimizer_config(optimizer_name, constrained=is_multiphase)
         constraint_segments = None
         constraints_enforced = False
         if is_multiphase:
@@ -257,6 +267,23 @@ class OptimizationBackend:
         playback_s = time.perf_counter() - playback_started
         if playback is not None:
             result["playback"] = playback
+            # Drift guard (SOFT): the playback is the true-dynamics re-integration of the
+            # solved controls, so its terminal gap to the target measures whether the NLP's
+            # discrete plan is dynamically faithful. Always reported; loudly flagged above the
+            # threshold instead of silently rendering a wrong trajectory. Pure measurement of
+            # the already-built samples — never affects the solve.
+            drift_m = playback_terminal_drift_m(
+                playback, target_state.latitude, target_state.longitude
+            )
+            if drift_m is not None:
+                result["playbackDriftM"] = drift_m
+                if drift_m > PLAYBACK_DRIFT_WARN_M:
+                    sys.stderr.write(
+                        f"[aeroviz-backend] WARNING playback terminal drift {drift_m:.0f} m "
+                        f"(> {PLAYBACK_DRIFT_WARN_M:.0f} m): the discrete plan is not "
+                        "dynamically faithful — treat this trajectory as suspect\n"
+                    )
+                    sys.stderr.flush()
 
         # Echo the canonical procedure constraint summary (parsed above) plus whether it was
         # enforced as NLP path constraints (only on the normalized full-transport schemes).
@@ -311,6 +338,41 @@ class OptimizationBackend:
             max_iterations,
             arrival_time_s,
         )
+
+
+def _scheme_for_optimizer(optimizer_name: str) -> str | None:
+    """The collocation scheme an optimizer name resolves to (None for non-collocation ones)."""
+    if optimizer_name in MULTIPHASE_SCHEMES:
+        return MULTIPHASE_SCHEMES[optimizer_name]
+    return DIRECT_COLLOCATION_SCHEMES.get(optimizer_name)
+
+
+def log_optimizer_config(optimizer_name: str, constrained: bool) -> None:
+    """One stderr line BEFORE the solve: the resolved collocation scheme decomposed into its
+    FITTING (transcription) and DYNAMICS, so a failed or hanging solve's configuration is
+    visible up front (non-collocation optimizers log ``scheme=-``)."""
+    scheme = _scheme_for_optimizer(optimizer_name)
+    if scheme is None:
+        detail = "scheme=- fitting=- dynamics=-"
+    elif scheme == "reanchoredEnu":
+        detail = "scheme=reanchoredEnu fitting=shooting dynamics=reanchoredEnu"
+    elif scheme.startswith("localEnu"):
+        fitting = {
+            "localEnuTrapezoidal": "trapezoidal",
+            "localEnuHermiteSimpson": "hermiteSimpson",
+            "localEnu": "rk4",
+        }[scheme]
+        detail = f"scheme={scheme} fitting={fitting} dynamics=localEnu"
+    else:
+        fitting = next(f for f in ("trapezoidal", "hermiteSimpson", "rk4") if scheme.startswith(f))
+        dynamics = "geodeticNormalized" if "Normalized" in scheme else "geodetic"
+        transport = "full" if "FullTransport" in scheme else "approx"
+        detail = f"scheme={scheme} fitting={fitting} dynamics={dynamics} transport={transport}"
+    sys.stderr.write(
+        f"[aeroviz-backend] optimizer config optimizer={optimizer_name} {detail} "
+        f"constrained={constrained}\n"
+    )
+    sys.stderr.flush()
 
 
 def _log_multiphase_request(

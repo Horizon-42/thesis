@@ -51,6 +51,7 @@ from aeroviz_backend.simulation_backend import (
 )
 from aerodynamic_model.rollout import rollout_piecewise_constant
 from common import Control, GeodeticState, LoadFactorControl
+from geokit import haversine_m
 
 
 # Optimizers that emit LoadFactorControl-shaped controls (T, mu, n); everything
@@ -136,6 +137,27 @@ def build_optimized_trajectory_playback(
         "czml": czml,
         "samples": [_serialize_sample(sample) for sample in samples],
     }
+
+
+def playback_terminal_drift_m(
+    playback: dict[str, Any],
+    target_lat_deg: float,
+    target_lon_deg: float,
+) -> float | None:
+    """Horizontal distance (metres) between the rollout's FINAL sample and the target.
+
+    The playback re-integrates the solved controls through the true dynamics, so this measures
+    how faithful the NLP's discrete plan is to the continuous physics: a clean solution lands
+    on the target to metre scale; a large value means the plan was dynamically meaningless
+    even though its nodes were feasible (e.g. a coarse-mesh winding solution — km-scale drift
+    was observed on nsp=2 loops). Pure measurement over the ALREADY-built ``samples`` — no
+    re-simulation. ``None`` when the playback carries no samples.
+    """
+    samples = playback.get("samples") or []
+    if not samples:
+        return None
+    last = samples[-1]
+    return float(haversine_m(target_lat_deg, target_lon_deg, last["lat"], last["lon"]))
 
 
 # ── Forward rollout ───────────────────────────────────────────────────────────

@@ -168,3 +168,26 @@ class TestTrajectoryPlayback(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPlaybackTerminalDrift(unittest.TestCase):
+    """The drift guard's measurement: last rollout sample vs the target, no re-simulation."""
+
+    def test_zero_drift_when_the_rollout_ends_on_the_target(self):
+        playback = {"samples": [
+            {"lat": 35.9, "lon": -78.9}, {"lat": 35.87445, "lon": -78.80196},
+        ]}
+        drift = trajectory_playback.playback_terminal_drift_m(playback, 35.87445, -78.80196)
+        self.assertAlmostEqual(drift, 0.0, places=6)
+
+    def test_drift_measures_the_final_sample_only(self):
+        # ~0.01 deg of latitude ≈ 1113 m; the earlier (far) sample must not matter.
+        playback = {"samples": [
+            {"lat": 40.0, "lon": -70.0}, {"lat": 35.88445, "lon": -78.80196},
+        ]}
+        drift = trajectory_playback.playback_terminal_drift_m(playback, 35.87445, -78.80196)
+        self.assertAlmostEqual(drift, 1113.0, delta=5.0)
+
+    def test_none_without_samples(self):
+        self.assertIsNone(trajectory_playback.playback_terminal_drift_m({"samples": []}, 0.0, 0.0))
+        self.assertIsNone(trajectory_playback.playback_terminal_drift_m({}, 0.0, 0.0))

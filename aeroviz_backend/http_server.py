@@ -205,13 +205,15 @@ class AeroVizRequestHandler(BaseHTTPRequestHandler):
         elapsed_s: float,
     ) -> None:
         self._finish_live_log_line()
+        drift = payload.get("playbackDriftM")
         sys.stderr.write(
             "[aeroviz-backend] optimization done "
             f"status={status} "
             f"elapsed={elapsed_s:.3f}s "
             f"finalTime={payload.get('finalTimeS', 'n/a')} "
             f"states={len(payload.get('states', []))} "
-            f"controls={len(payload.get('controls', []))}\n"
+            f"controls={len(payload.get('controls', []))} "
+            f"playbackDrift={f'{drift:.1f}m' if isinstance(drift, (int, float)) else 'n/a'}\n"
         )
         sys.stderr.flush()
 
