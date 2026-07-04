@@ -20,7 +20,7 @@ import { useApp } from "../context/AppContext";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import { makeStableVelocityOrientation } from "../utils/velocityOrientation";
 import { frameTrajectoryCamera } from "../utils/frameTrajectoryCamera";
-import { sampleTrajectoryAt } from "./useOptimizedTrajectoryPlayback";
+import { makeReadoutEmitter, sampleTrajectoryAt } from "./useOptimizedTrajectoryPlayback";
 import type { TrajectorySample } from "../pilot/trajectoryOptimizationClient";
 import {
   interpolateComparisonDeltas,
@@ -30,8 +30,6 @@ import {
 
 const DATASOURCE_NAME = "dynamics-comparison";
 const ENTITY_PREFIX = "dyncmp-";
-/** Min wall-clock gap between readout updates, to cap re-renders at ~12 Hz. */
-const READOUT_THROTTLE_MS = 80;
 
 /** The system key (e.g. "B") for a dyncmp entity, or null for any other entity. */
 function systemKeyOf(entity: Cesium.Entity): string | null {
@@ -234,18 +232,11 @@ export function useDynamicsComparisonPlayback({
   useEffect(() => {
     if (!isCesiumViewerUsable(viewer) || status !== "loaded") return;
 
-    let lastEmitMs = 0;
-    const emit = () => {
-      const start = startTimeRef.current;
-      if (!start) return;
-      const now = performance.now();
-      if (now - lastEmitMs < READOUT_THROTTLE_MS) return;
-      lastEmitMs = now;
-      const elapsedS = Cesium.JulianDate.secondsDifference(viewer.clock.currentTime, start);
-      onSampleRef.current(sampleTrajectoryAt(samplesRef.current, elapsedS));
+    const emit = makeReadoutEmitter(viewer, startTimeRef, (tSimS) => {
+      onSampleRef.current(sampleTrajectoryAt(samplesRef.current, tSimS));
       const chartNow = chartRef.current;
-      onDeltasRef.current(chartNow ? interpolateComparisonDeltas(chartNow, elapsedS) : null);
-    };
+      onDeltasRef.current(chartNow ? interpolateComparisonDeltas(chartNow, tSimS) : null);
+    });
 
     emit();
     const remove = viewer.clock.onTick.addEventListener(emit);
