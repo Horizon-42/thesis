@@ -380,7 +380,7 @@ describe("PilotPanel trajectory play mode", () => {
     expect((screen.getByRole("combobox", { name: "Constraints" }) as HTMLSelectElement).value)
       .toBe("procedure");
     expect((screen.getByRole("combobox", { name: "Fitting" }) as HTMLSelectElement).value)
-      .toBe("trapezoidal");
+      .toBe("hermiteSimpson");
     expect((screen.getByLabelText("Max iter") as HTMLInputElement).value).toBe("300");
     fireEvent.change(screen.getByRole("combobox", { name: "Constraints" }), {
       target: { value: "none" },
@@ -500,10 +500,11 @@ describe("PilotPanel trajectory play mode", () => {
     const fittingSelect = screen.getByRole("combobox", { name: "Fitting" }) as HTMLSelectElement;
     const arrivalInput = screen.getByLabelText("Arrival time") as HTMLInputElement;
 
-    // Default: procedure-constrained + Trapezoidal; all three fittings available,
+    // Default: procedure-constrained + Hermite-Simpson (4th order — playback-faithful to
+    // sub-metre; see CLAUDE.md 2026-07-05); all three fittings available,
     // but the advanced frame axis is LOCKED (the constrained mode pins the dynamics).
     expect(constraintsSelect.value).toBe("procedure");
-    expect(fittingSelect.value).toBe("trapezoidal");
+    expect(fittingSelect.value).toBe("hermiteSimpson");
     expect(fittingSelect.querySelectorAll("option").length).toBe(3);
     expect(fittingSelect.disabled).toBe(false);
     expect(arrivalInput.disabled).toBe(false);

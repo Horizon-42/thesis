@@ -123,7 +123,10 @@ const DEFAULT_COMPARISON_CONTROL: DynamicsComparisonControl = {
   bankDeg: 0,
   loadFactor: 1,
 };
-const DEFAULT_TRAJECTORY_OPTIMIZER: TrajectoryOptimizer = "casadiMultiphaseNormalizedFullTransportTrapezoidal";
+// Hermite-Simpson default: with the ψ corridor both fittings converge everywhere, and the
+// measured playback fidelity is ~0.7-0.9 m (HS, 4th order) vs 227-296 m (trapezoidal, 2nd
+// order) on doglegged approaches for ~2x the solve time — see CLAUDE.md 2026-07-05.
+const DEFAULT_TRAJECTORY_OPTIMIZER: TrajectoryOptimizer = "casadiMultiphaseNormalizedFullTransport";
 // The optimizer is edited as orthogonal axes (see trajectoryOptimizationClient): the constraint
 // MODE, the base frame, and — for the geodetic frame — transport + normalization.
 const OPTIMIZER_CONSTRAINTS_OPTIONS: { value: "none" | "procedure"; label: string }[] = [
