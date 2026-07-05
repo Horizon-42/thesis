@@ -48,7 +48,12 @@ REFERENCE_COLOR = (235, 235, 235, 200)   # observed ADS-B (white)
 OPTIMIZER_COLOR = (255, 140, 0, 220)     # optimizer plan — "Optimize states" (orange)
 SIMULATOR_COLOR = (40, 120, 255, 220)    # simulator rollout — "Optimize results" (blue)
 FAILED_COLOR = (200, 60, 60, 200)        # unsolved scenario — reference only, flagged dark red
-OFF_TARGET_COLOR = (255, 205, 40, 220)   # solved but FAILED the evaluation gates — reference in yellow
+# Solved but FAILED the evaluation gates ("off target"): the OPTIMIZATION RESULT (simulator)
+# path renders bright yellow — it is the trajectory that missed (or truncated at the ground
+# guard mid-flight), so the marking must be on IT, not just the reference — and the reference
+# renders a darker amber so the pair reads as one flagged group.
+OFF_TARGET_COLOR = (255, 205, 40, 235)       # the simulator/result path
+OFF_TARGET_REF_COLOR = (150, 118, 25, 200)   # the observed reference (dark amber)
 
 # Trailing-tail length (seconds) for the optimizer/simulator paths: the tail fades behind the
 # moving aircraft as playback advances, so the head (current position) is distinguishable from the
@@ -327,7 +332,8 @@ def build_runway_comparison(
                 verdict is not None and verdict.get("solved") and not verdict.get("success")
             )
             status = "offTarget" if off_target else "solved"
-            ref_color = OFF_TARGET_COLOR if off_target else REFERENCE_COLOR
+            ref_color = OFF_TARGET_REF_COLOR if off_target else REFERENCE_COLOR
+            sim_color = OFF_TARGET_COLOR if off_target else SIMULATOR_COLOR
             ref_name = f"Ref {flight_id} (off target)" if off_target else f"Ref {flight_id}"
 
             reference = _reference_entity_from_adsb(
@@ -345,7 +351,9 @@ def build_runway_comparison(
                 show=show))
             entity_ids.append(f"opt-{group}")
             entities.append(_build_trajectory_entity(
-                f"sim-{group}", f"Sim {flight_id}", simulator_states, SIMULATOR_COLOR,
+                f"sim-{group}",
+                f"Sim {flight_id} (off target)" if off_target else f"Sim {flight_id}",
+                simulator_states, sim_color,
                 properties=_traj_properties(group, flight_id, "simulator", runway, airport, status),
                 show=show))
             entity_ids.append(f"sim-{group}")

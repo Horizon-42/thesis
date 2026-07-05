@@ -113,6 +113,15 @@ The project serves dual purposes: thesis visualization/validation, and reusable 
 
 ## Changelog
 
+### 2026-07-05 — "Successful flights ending mid-air" postmortem + off-target marking moved onto the RESULT path
+
+The user saw runway_cons flights that "look successful but end far from the target". Diagnosis on the CURRENT (post-floor-fix) KRDU batch: the data is coherent — every SUCCESSFUL flight's rollout is complete and lands on target (0 exceptions). The sightings are **off-target flights with rollouts TRUNCATED by the new ground guard** (68 of 119 offTarget rows end mid-air ~10 km out at the altitude floor — dynamically-unfaithful solves whose replay diverges; correctly classified offTarget, correctly NOT "failed"). They READ as successful because the previous design marked off-target groups only on the REFERENCE (yellow) while the result path kept its legend blue.
+
+- **Marking moved per user decision**: the SIMULATOR/"Optimize results" path — the trajectory that actually missed/truncated — now bakes the bright yellow `OFF_TARGET_COLOR` (255,205,40) with an "(off target)" name; the reference drops to the new dark-amber `OFF_TARGET_REF_COLOR` (150,118,25); the optimizer PLAN keeps legend orange.
+- **Frontend**: `useComparisonTrajectoryLayer` normally repaints opt/sim to the legend colours — it now SKIPS the repaint for entities whose `properties.status == "offTarget"`, so the baked yellow survives; colour-contract comment in `trajectoryRenderModel` updated.
+- Builder test updated (off-target sim yellow + named, ref dark amber, plan stays orange); **18 builder + 407 frontend tests pass, tsc clean**. KRDU runway_cons comparison regenerated (23L 7 / 23R 6 / 32 77 off-target yellow groups) and CZML colours verified in the output files.
+- NOTE: runway 32's 77/200 off-target (vs 6-7 on 23L/23R) is a real quality signal worth a look — likely the same replay-divergence family the drift guard flags.
+
 ### 2026-07-05 — Below-ground trajectories: target-anchored altitude floor + transition floor + rollout ground guard
 
 The user spotted KRDU optimized trajectories flying below field elevation. Diagnosis (data-verified, initial leg-floor suspicion RETRACTED): the per-leg step-down floors work perfectly (0 of 132 dips on legs; FAF crossings exact) — the dives live where no floor exists.

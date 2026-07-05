@@ -64,8 +64,12 @@ function applyComparisonRenderModel(entity: Cesium.Entity, shownEntityIds: Set<s
     entity.path.width = new Cesium.ConstantProperty(TRAJECTORY_PATH_WIDTH);
     // Colour the path from the legend (single source of truth) so the rendered track always
     // matches its checkbox swatch — regardless of which colour this category's CZML baked in.
-    // The reference keeps the CZML colour (white, or dark-red for failed optimizations).
-    if (kind !== "reference") {
+    // Exceptions keep their CZML-baked verdict colours: the reference (white / dark-red
+    // failed / dark-amber off-target) always, and EVERY path of an off-target group (the
+    // builder bakes the simulator/result path bright yellow — the marking must sit on the
+    // trajectory that missed the target, not just the reference).
+    const status = entity.properties?.status?.getValue(Cesium.JulianDate.now());
+    if (kind !== "reference" && status !== "offTarget") {
       const color = comparisonKindColor(kind);
       entity.path.material = new Cesium.ColorMaterialProperty(color);
       if (entity.label) entity.label.fillColor = new Cesium.ConstantProperty(color);

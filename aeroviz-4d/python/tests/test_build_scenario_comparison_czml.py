@@ -5,6 +5,7 @@ import json
 from build_scenario_comparison_czml import (
     FAILED_COLOR,
     OFF_TARGET_COLOR,
+    OFF_TARGET_REF_COLOR,
     OPTIMIZER_COLOR,
     REFERENCE_COLOR,
     SIMULATOR_COLOR,
@@ -264,13 +265,18 @@ def test_off_target_group_yellow_reference_and_verdict_metrics(tmp_path):
     by_id = {p["id"]: p for p in czml[1:]}
 
     off_ref = by_id["ref-DAL1312_05L"]
-    assert off_ref["path"]["material"]["solidColor"]["color"]["rgba"] == list(OFF_TARGET_COLOR)
+    assert off_ref["path"]["material"]["solidColor"]["color"]["rgba"] == list(OFF_TARGET_REF_COLOR)
     assert off_ref["name"].endswith("(off target)")
     assert off_ref["properties"]["status"] == "offTarget"
-    assert by_id["sim-DAL1312_05L"]["properties"]["status"] == "offTarget"
-    # opt/sim keep their legend colours — the marking is the reference + status.
-    assert by_id["sim-DAL1312_05L"]["path"]["material"]["solidColor"]["color"]["rgba"] \
-        == list(SIMULATOR_COLOR)
+    # The RESULT path is the trajectory that missed the target — IT carries the bright
+    # yellow (the frontend keeps the CZML colour for off-target groups); the reference is
+    # dark amber. The optimizer PLAN keeps its legend orange.
+    off_sim = by_id["sim-DAL1312_05L"]
+    assert off_sim["properties"]["status"] == "offTarget"
+    assert off_sim["path"]["material"]["solidColor"]["color"]["rgba"] == list(OFF_TARGET_COLOR)
+    assert off_sim["name"].endswith("(off target)")
+    assert by_id["opt-DAL1312_05L"]["path"]["material"]["solidColor"]["color"]["rgba"] \
+        == list(OPTIMIZER_COLOR)
 
     ok_ref = by_id["ref-AFR074_05L"]
     assert ok_ref["path"]["material"]["solidColor"]["color"]["rgba"] == list(REFERENCE_COLOR)

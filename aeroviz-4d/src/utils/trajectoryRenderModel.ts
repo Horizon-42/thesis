@@ -26,9 +26,11 @@ export const TRAJECTORY_PATH_WIDTH = 2;
  * swatches (ControlPanel) and the rendered path/label colours (useComparisonTrajectoryLayer)
  * read this, so they can never drift. The CZML bakes its own colours in, but they vary by
  * category and don't necessarily match the legend, so the frontend overrides each opt/sim
- * path to these. The reference is intentionally NOT overridden — it keeps the CZML's white,
- * the dark-red `FAILED_COLOR` for failed optimizations, or the yellow `OFF_TARGET_COLOR`
- * for solved-but-off-target ones. Keep these RGB values in sync with
+ * path to these. Exceptions keep the CZML-baked verdict colours: the reference always
+ * (white / dark-red `FAILED_COLOR` / dark-amber `OFF_TARGET_REF_COLOR`), and every path
+ * of an off-target group (the builder bakes the simulator/result path bright yellow —
+ * `OFF_TARGET_COLOR` — because the marking belongs on the trajectory that missed the
+ * target). Keep these RGB values in sync with
  * `python/build_scenario_comparison_czml.py` (OPTIMIZER_COLOR / SIMULATOR_COLOR).
  */
 export const COMPARISON_KIND_COLORS: Record<ComparisonKind, string> = {
