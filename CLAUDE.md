@@ -113,6 +113,17 @@ The project serves dual purposes: thesis visualization/validation, and reusable 
 
 ## Changelog
 
+### 2026-07-06 — Arrival-segment truncation: depart-and-return tracks cut at the 25 km entry ring; locals excluded
+
+Harvested landing tracks are validated by their END only, so flights that departed the same airport and returned (or local pattern circuits) were kept whole — starting ON the field next to the target. With multi-aircraft interaction ahead, the user chose entry-ring truncation (R=25 km) + excluding locals.
+
+- **`trajectory_data_process/arrival_segment.py` (new).** `arrival_segment(waypoints, lat, lon)` walks BACKWARD from touchdown; the arrival starts after the LAST run of ≥3 consecutive samples (`ENTRY_HYSTERESIS_SAMPLES` — one jittery fix can't cut) outside the 25 km ring (`ENTRY_RADIUS_KM`, inside the 30 km harvest crop) — i.e. the final entry into the ring. PLAIN arrivals get their pre-ring annulus dropped too, so EVERY arrival shares one entry boundary (the on-ring state distribution = the interaction studies' boundary condition). Never-outside tracks: `local` if they start ≤5 km from the field (`LOCAL_START_RADIUS_KM`, a takeoff→circuit), else a coverage-limited arrival kept whole. `truncate_flights` splits (arrivals, locals), rebases times to 0, and annotates `arrival_truncated`/`cut_samples`/`arrival_duration_s`/`entry_time_utc` (= landing_time − duration).
+- **`landings_to_czml.py` integration.** Raw `*_landings.json` stay untouched; derived `*_arrivals.json` feed the per-runway CZMLs and the combined czml-input (scenario building + reference records consume the truncated arrivals); locals go to `<ICAO>_local_rejected.json` (reviewed, never silently dropped). Airport centre from `config/runway_thresholds.json`.
+- **`flight_scenarios` carries `entry_time_utc`** in `FlightScenario.source` — the co-temporal placement key for multi-aircraft studies.
+- **Regenerated all 5 airports** (landings CZML + combined inputs + both scenario sets). KRDU: 996 arrivals (5 locals excluded), 104 depart-and-return loops truncated (median cut 47 samples, max 2585; e.g. AAL1286 now starts 25 km out at 1250 m instead of on the runway); scenario initial-distance distribution: median/max exactly 25.0 km, min 8.2 km (coverage-limited). Totals: KMSY 400, KRDU 996, KSJC 319, KSMF 714, KSTL 1054, `entry_time_utc` on all.
+- Tests: `test_arrival_segment.py` (ring cut, depart-return, hysteresis outlier, local circuit, coverage-limited arrival, annotation/non-mutation/entry-time math) + a build passthrough assert. **59 trajectory_data_process + 28 flight_scenarios pass** (full modeling sweep 453).
+- NOTE: all existing optimization batches / evaluation reports / comparison CZMLs are built from the PRE-truncation scenarios (and pre-altitude-floor fixes) — stale twice over; re-run `run_scenario_pipeline.py` before comparing.
+
 ### 2026-07-05 — Evaluation detail window: legible deviation profiles + one colour language
 
 User feedback on the in-app evaluation window: the deviation "bar wall" charts were illegible at n≈900 (sub-pixel bars), the card red/green (an arbitrary ≥90% threshold) had NO relation to the chart red/green, and the time scatter's colours were unexplained.

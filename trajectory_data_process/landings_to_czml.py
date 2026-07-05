@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """Render downloaded landings into per-runway + combined CZML for the frontend.
 
-``download_landings.py`` writes one CZML-input file per runway threshold. The
-frontend can load a single runway or all of them, so this writes, into the
-airport's frontend folder:
+``download_landings.py`` writes one CZML-input file per runway threshold. Each
+raw track is first cut to its ARRIVAL SEGMENT (final entry into the 25 km ring
+→ touchdown; see ``arrival_segment.py``) — pure local circuits that never left
+the ring are excluded into ``<ICAO>_local_rejected.json`` for review. The raw
+``*_landings.json`` stay untouched; the truncated arrivals are written as
+derived ``*_arrivals.json`` next to them, and everything downstream (the CZMLs,
+the combined czml-input that scenario building and reference records consume)
+is built from those. The frontend can load a single runway or all of them, so
+this writes, into the airport's frontend folder:
 
   public/data/airports/<ICAO>/landings/<ICAO>_<RWY>.czml   one CZML per runway
   public/data/airports/<ICAO>/landings/index.json          manifest of runways
@@ -25,6 +31,21 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from trajectory_data_process.arrival_segment import truncate_flights
+
+
+def _airport_reference(code: str) -> tuple[float, float]:
+    """The airport's (lat, lon) from the runway-thresholds config — the entry ring's centre."""
+    config_path = Path(__file__).resolve().parent / "config" / "runway_thresholds.json"
+    airports = json.loads(config_path.read_text(encoding="utf-8"))["airports"]
+    record = airports.get(code.upper())
+    if record is None:
+        raise SystemExit(f"airport {code} not in {config_path} — cannot place the entry ring")
+    return float(record["lat"]), float(record["lon"])
 
 
 def landing_files(airport_dir: Path, code: str, runways: list[str] | None) -> list[Path]:
@@ -102,25 +123,45 @@ def render_airport(
     source_dir = source_root / code
     airport_dir = aeroviz_root / "public" / "data" / "airports" / code
     landings_dir = airport_dir / "landings"
+    airport_lat, airport_lon = _airport_reference(code)
 
     paths = landing_files(source_dir, code, runways)
     runway_manifest: list[dict[str, Any]] = []
+    arrival_paths: list[Path] = []
+    local_flights: list[dict[str, Any]] = []
     for path in paths:
         flights = json.loads(path.read_text(encoding="utf-8"))
         if not flights:
             continue  # an idle runway end with no landings: skip it
+        # Cut each raw track to its arrival segment (final 25 km ring entry ->
+        # touchdown); pure local circuits are set aside, never silently dropped.
+        arrivals, locals_ = truncate_flights(flights, airport_lat, airport_lon)
+        local_flights.extend(locals_)
+        if not arrivals:
+            continue
         ident = runway_ident_from_path(path, code)
+        arrivals_path = path.with_name(path.name.replace("_landings.json", "_arrivals.json"))
+        arrivals_path.write_text(json.dumps(arrivals, indent=2), encoding="utf-8")
+        arrival_paths.append(arrivals_path)
         czml_path = landings_dir / f"{code}_{ident}.czml"
-        _generate_czml(generator, code, path, czml_path, multiplier)
-        runway_manifest.append({"runway": ident, "file": f"landings/{czml_path.name}", "count": len(flights)})
-        print(f"[landings->czml] {code} {ident}: {len(flights)} -> {czml_path}")
+        _generate_czml(generator, code, arrivals_path, czml_path, multiplier)
+        truncated = sum(1 for f in arrivals if f.get("arrival_truncated"))
+        runway_manifest.append({"runway": ident, "file": f"landings/{czml_path.name}", "count": len(arrivals)})
+        print(f"[landings->czml] {code} {ident}: {len(arrivals)} arrival(s) "
+              f"({truncated} truncated, {len(locals_)} local excluded) -> {czml_path}")
+
+    if local_flights:
+        local_path = source_dir / f"{code}_local_rejected.json"
+        local_path.write_text(json.dumps(local_flights, indent=2), encoding="utf-8")
+        print(f"[landings->czml] {code}: {len(local_flights)} local circuit(s) "
+              f"(never left the entry ring) -> {local_path}")
 
     if not runway_manifest:
         print(f"[landings->czml] {code}: no landings, skipped")
         return 0
 
     # Combined (all runways) -> the airport's default trajectories.czml.
-    combined_flights = merge_landing_flights(paths)
+    combined_flights = merge_landing_flights(arrival_paths)
     combined_input = source_dir / f"{code}_combined_czml_input.json"
     combined_input.write_text(json.dumps(combined_flights, indent=2), encoding="utf-8")
     _generate_czml(generator, code, combined_input, airport_dir / "trajectories.czml", multiplier)

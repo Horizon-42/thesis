@@ -70,6 +70,9 @@ def build_scenario(
         "arr_airport": arr_airport,
         "runway": flight.get("runway"),
         "landing_time_utc": flight.get("landing_time_utc"),
+        # Terminal-ring entry time (absolute UTC, from the arrival-segment cut) — the
+        # co-temporal boundary condition multi-aircraft interaction studies place by.
+        "entry_time_utc": flight.get("entry_time_utc"),
         "n_samples": len(waypoints),
         "window_s": window_s,
         "target_source": target_source,

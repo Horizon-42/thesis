@@ -16,6 +16,7 @@ FLIGHT = {
     "type": "UNK",
     "icao24": "3949ea",
     "runway": "05L",
+    "entry_time_utc": "2026-06-18T10:03:07Z",
     "waypoints": [
         [0.0, -78.45, 35.74, 2500.0],
         [5.0, -78.46, 35.74, 2450.0],
@@ -32,6 +33,7 @@ def test_build_scenario_resolves_aircraft_from_icao24():
     assert scen.initial.m == scen.aircraft.landing_mass  # landing weight, not MTOW
     assert scen.source["id"] == "AFR074"
     assert scen.source["runway"] == "05L"
+    assert scen.source["entry_time_utc"] == "2026-06-18T10:03:07Z"  # ring-entry carried through
     assert scen.source["n_samples"] == 3
     # both boundary states are populated (initial = track start, target = track end)
     assert scen.initial.longitude == FLIGHT["waypoints"][0][1]
