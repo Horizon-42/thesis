@@ -327,6 +327,56 @@ def _wp(ident, lat, lon, *, alt_ft=None):
     )
 
 
+def test_solve_iaf_feeds_the_optimizer_a_segment_list(monkeypatch):
+    # SEAM regression: build_constraint_segments returns a plain LIST of SegmentSpec
+    # (its old (segments, spans) tuple return is gone). _solve_iaf must pass that list
+    # through to CollocationOptimizer(segments=...) verbatim — a stale 2-tuple unpack
+    # here broke EVERY constrained batch (ValueError for != 2 legs, and for exactly
+    # 2 legs a lone SegmentSpec reached the optimizer -> TypeError).
+    from approach_constraints import SegmentSpec
+
+    target = GeodeticState(35.88, -78.78, 130.0, 75.0, 0.8, -0.05, A320.landing_mass)
+    # Three waypoints (two legs) ending AT the target -> the frame anchors at the runway.
+    pc = _pc([
+        _wp("CHWDR", 36.10, -78.70, alt_ft=5000),
+        _wp("SCHOO", 36.00, -78.60, alt_ft=3000),
+        _wp("RW05L", 35.88, -78.78),
+    ])
+    scenario = _scenario(target=target)
+
+    captured = {}
+
+    class FakeOptimizer:
+        def __init__(self, aircraft, *, segments=None, **kwargs):
+            captured["segments"] = segments
+            self.last_dense_states_geo = [[35.9, -78.7, 500.0, 80.0, 0.8, -0.05]]
+            self.segment_durations_s = [10.0]
+
+        def optimize_free_time(self, initial, tgt, max_duration):
+            return 100.0, [[1e5, 0.0, 1.0]], None
+
+    monkeypatch.setattr(so, "CollocationOptimizer", FakeOptimizer)
+    solve = so._solve_iaf(pc, scenario, target, A320, 60.0,
+                          n_segments=8, dt=1.0, max_duration=600.0, verbose=False)
+    assert solve.final_time == 100.0
+    assert isinstance(captured["segments"], list) and len(captured["segments"]) >= 2
+    assert all(isinstance(s, SegmentSpec) for s in captured["segments"])
+
+
+def test_snap_target_to_procedure_uses_the_cifp_threshold():
+    # The config-derived threshold can sit hundreds of metres from the procedure's
+    # CIFP threshold (displaced thresholds, e.g. KSJC 12L: 390 m) — the solve target
+    # must snap horizontally onto the procedure's last waypoint, keeping the vertical/
+    # kinematic components (threshold+TCH altitude, Vref, pavement heading, glidepath).
+    config_target = GeodeticState(37.375, -121.94, 26.58, 70.0, -0.9, -0.052, 60000.0)
+    pc = _pc([_wp("ROSTE", 37.30, -121.80), _wp("OMSEE", 37.34, -121.87),
+              _wp("RW12L", 37.3712, -121.9365)])
+    snapped = so._snap_target_to_procedure(config_target, [pc])
+    assert (snapped.latitude, snapped.longitude) == (37.3712, -121.9365)
+    assert snapped.altitude == 26.58 and snapped.V == 70.0
+    assert snapped.psi == -0.9 and snapped.gamma == -0.052
+
+
 def test_concat_to_runway_joins_transition_and_final():
     # transition CHWDR -> SCHOO  +  final SCHOO -> RW05L  =>  CHWDR -> SCHOO -> RW05L
     trans = _pc([_wp("CHWDR", 36.10, -78.70), _wp("SCHOO", 36.00, -78.60)], branch_id="branch:T")

@@ -48,11 +48,14 @@ class TestTrajectoryPlayback(unittest.TestCase):
         self.assertEqual(playback["multiplier"], 1)
         czml = playback["czml"]
 
-        # document packet first, with a clock spanning the horizon
+        # document packet first, with a clock spanning the horizon. The interval
+        # end keeps millisecond precision — a second-truncated end parks the
+        # frontend clock up to 1 s (≈75 m of flight) before the true final
+        # sample (the phantom "25 m final horiz err").
         self.assertEqual(czml[0]["id"], "document")
         self.assertEqual(
             czml[0]["clock"]["interval"],
-            "2026-01-01T00:00:00Z/2026-01-01T00:00:40Z",
+            "2026-01-01T00:00:00Z/2026-01-01T00:00:40.000Z",
         )
 
         # one aircraft entity with time-sampled position; orientation is set on
@@ -191,3 +194,14 @@ class TestPlaybackTerminalDrift(unittest.TestCase):
     def test_none_without_samples(self):
         self.assertIsNone(trajectory_playback.playback_terminal_drift_m({"samples": []}, 0.0, 0.0))
         self.assertIsNone(trajectory_playback.playback_terminal_drift_m({}, 0.0, 0.0))
+
+
+def test_document_packet_keeps_fractional_end_seconds():
+    # Regression: iso() second-truncation of the clock interval end parked the
+    # frontend clock 0-1 s before the trajectory's final sample (~25 m at 75 m/s).
+    from datetime import timedelta
+
+    from aeroviz_backend.czml_common import EPOCH, document_packet
+
+    packet = document_packet(EPOCH + timedelta(seconds=324.3384), 1, "x")
+    assert packet["clock"]["interval"] == "2026-01-01T00:00:00Z/2026-01-01T00:05:24.338Z"

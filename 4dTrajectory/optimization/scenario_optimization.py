@@ -711,9 +711,26 @@ def _path_curve_length_m(pc) -> float:
     return float(np.linalg.norm(np.diff(curve, axis=0), axis=1).sum())
 
 
+def _snap_target_to_procedure(target: GeodeticState, paths: list) -> GeodeticState:
+    """Anchor the constrained solve's target ON the procedure's CIFP threshold.
+
+    The CIFP landing threshold (the procedure's LAST waypoint — every IAF path of
+    one procedure shares it) is the authoritative landing point (CLAUDE.md
+    2026-07-03); the scenario's config-derived threshold can sit hundreds of
+    metres away (displaced thresholds, e.g. KSJC 12L: 390 m), which the
+    optimizer's target-anchored frame guard rightly rejects. Horizontal position
+    snaps to the CIFP fix; altitude (threshold + TCH), speed, heading (pavement
+    axis) and glidepath stay from the scenario target.
+    """
+    runway_wp = paths[0].waypoints[-1]
+    return replace(target, latitude=runway_wp.lat_deg, longitude=runway_wp.lon_deg)
+
+
 def _iaf_setup(scenario: FlightScenario, procedure_root: str | Path, airport: str | None):
     """Shared prologue for the IAF optimizers: resolve the runway's RNAV(GPS) procedure and return
-    ``(target, iaf_paths, aircraft, min_speed_ms)``. Raises if the procedure / paths are missing."""
+    ``(target, iaf_paths, aircraft, min_speed_ms)`` — the target snapped onto the procedure's
+    CIFP threshold (see :func:`_snap_target_to_procedure`). Raises if the procedure / paths are
+    missing."""
     target = scenario.target
     if target is None:
         raise ValueError("scenario has no target state; build it with flight_scenarios first.")
@@ -727,6 +744,7 @@ def _iaf_setup(scenario: FlightScenario, procedure_root: str | Path, airport: st
     paths = _iaf_full_paths(document)
     if not paths:
         raise ValueError(f"no IAF->runway paths in the procedure for {apt} {runway}")
+    target = _snap_target_to_procedure(target, paths)
     aircraft = scenario.aircraft
     min_speed_ms = min(
         _STALL_MARGIN * _stall_speed_ms(scenario.initial.m, scenario.aero),
@@ -749,7 +767,7 @@ def _solve_iaf(
     for CLI/API parity but unused by the multiphase optimiser (it sets its own per-phase mesh).
     """
     from aeroviz_backend.procedure_segments import build_constraint_segments
-    segments, _spans = build_constraint_segments(
+    segments = build_constraint_segments(
         pc, target.latitude, target.longitude, target.altitude,
     )
     if not segments:
@@ -770,9 +788,14 @@ def _solve_iaf(
 
 def _iaf_result(
     best: _IafSolve, scenario: FlightScenario, aircraft: Any,
-    *, candidates: int, rollout_dt_s: float, selection: str,
+    *, target: GeodeticState, candidates: int, rollout_dt_s: float, selection: str,
 ) -> ScenarioOptimization:
-    """Assemble the chosen IAF solve into a :class:`ScenarioOptimization` (dense export + rollout)."""
+    """Assemble the chosen IAF solve into a :class:`ScenarioOptimization` (dense export + rollout).
+
+    ``target`` is the SNAPPED solve target (CIFP threshold) — the evaluation record
+    must judge against the state the optimizer actually flew to, not the scenario's
+    config-derived threshold.
+    """
     initial_row = [best.initial.latitude, best.initial.longitude, best.initial.altitude,
                    best.initial.V, best.initial.psi, best.initial.gamma]
     dense_rows = [list(row) for row in best.dense_states]
@@ -793,7 +816,7 @@ def _iaf_result(
     return ScenarioOptimization(
         source, best.final_time, optimizer_states,
         [StateSample.from_state(s.t, s.state) for s in rollout],
-        evaluation=evaluation_record(best.initial, scenario.target, rollout, source),
+        evaluation=evaluation_record(best.initial, target, rollout, source),
     )
 
 
@@ -838,7 +861,7 @@ def optimize_scenario_min_time_iaf(
         )
     return _iaf_result(
         best, scenario, aircraft,
-        candidates=len(paths), rollout_dt_s=rollout_dt_s, selection="minTime",
+        target=target, candidates=len(paths), rollout_dt_s=rollout_dt_s, selection="minTime",
     )
 
 
@@ -875,7 +898,8 @@ def optimize_scenario_shortest_iaf(
             continue
         return _iaf_result(
             best, scenario, aircraft,
-            candidates=len(paths), rollout_dt_s=rollout_dt_s, selection="shortestPath",
+            target=target, candidates=len(paths), rollout_dt_s=rollout_dt_s,
+            selection="shortestPath",
         )
 
     raise ValueError(
