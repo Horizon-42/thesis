@@ -88,21 +88,25 @@ def make_state_bounds(min_altitude: float, min_velocity: float):
     )
 
 
-# The altitude state lower bound is a NUMERICAL search box, not a physical/operational limit:
-# the glidepath window + the pinned terminal already enforce the real low-altitude protection.
-# It only has to sit safely BELOW the destination threshold (the trajectory's lowest point) so
-# the pinned terminal state never contradicts it. It MUST therefore be anchored to the target,
-# not an absolute MSL constant: the target altitude is ``field_elevation + threshold_crossing``,
-# so an absolute floor (the old ``threshold_crossing + 10`` ≈ 25 m) wrongly sat ABOVE the target
-# for near-sea-level airports (KMSY threshold ≈ 16 m), making every solve genuinely infeasible.
-# The margin is generous barrier breathing room: a floor at/just-below the target puts IPOPT's
-# log-barrier ``-μ·ln(alt - lb)`` right on the pinned terminal and stiffens the solve, so the box
-# is kept well clear of it (the floor never binds — it is not an operational minimum).
-ALTITUDE_FLOOR_MARGIN_M = 300.0
+# The altitude state lower bound is a REAL operational floor anchored to the LANDING
+# TARGET: an approach trajectory never needs to fly below the altitude it lands at, and
+# anything lower is the min-time "dive for speed" pathology. The old generous 300 m
+# margin was documented as "a numerical box that never binds" — empirically false: real
+# batches RODE the bound (60%+ of solved trajectories dipped below field elevation
+# mid-flight, to exactly target − 300 m, before climbing back to the procedure).
+# Anchoring to the TARGET, not an absolute MSL constant, remains essential: the target
+# altitude is ``field_elevation + threshold_crossing``, so an absolute floor (the very
+# old ``threshold_crossing + 10`` ≈ 25 m) wrongly sat ABOVE the target for near-sea-level
+# airports (KMSY threshold ≈ 16 m), making every solve genuinely infeasible. The small
+# margin keeps IPOPT's log-barrier ``-μ·ln(alt - lb)`` finite at the pinned terminal
+# (which sits exactly ``margin`` above the bound). A start below the floor is bad input
+# data and fails loudly as an infeasible boundary condition (landing trajectories start
+# ABOVE their target).
+ALTITUDE_FLOOR_MARGIN_M = 5.0
 
 
 def altitude_floor_m(target_altitude_m: float) -> float:
-    """Altitude state lower bound: a generous margin below the destination threshold."""
+    """Altitude state lower bound: a small slack below the landing target."""
     return target_altitude_m - ALTITUDE_FLOOR_MARGIN_M
 
 

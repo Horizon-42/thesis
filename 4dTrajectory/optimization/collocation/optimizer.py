@@ -54,6 +54,7 @@ from . import components as _components
 STATE_DIM = _schemes.STATE_DIM
 CONTROL_DIM = _schemes.CONTROL_DIM
 _PSI = _schemes._PSI
+_ALT = 2   # altitude's index in the (n, e, alt, V, psi, gamma) decision state
 _INF = 1e9
 
 # Constrained solves: the segments' (n, e) coordinates MUST be in the frame the optimizer solves
@@ -162,6 +163,23 @@ def _fac_alignment_rows(nodes, join, tight_rad, loose_rad):
     limit = _acmathx.if_else(d <= join.d_faf_m, tight_rad, loose_rad)
     dev = psi_vec - join.course_branch_rad
     return [(dev - limit, -_INF, 0.0), (-dev - limit, -_INF, 0.0)]
+
+
+def _first_leg_entry_floor_m(seg) -> float:
+    """The published minimum crossing altitude at the first leg's START fix.
+
+    This is the altitude the start→first-fix transition phase must deliver the
+    aircraft at-or-above, so it caps how low the (otherwise leg-row-free)
+    transition may fly. Non-final legs: the HIGHEST step of the leg's step-down
+    staircase (steps descend along track, so the first one binds at entry), else
+    the leg's base floor. An LPV-first leg: the published FAF crossing minimum
+    (``prefaf_floor_m``) when coded, else no extra floor beyond the global one.
+    """
+    if seg.lpv is not None:
+        return float(seg.lpv.prefaf_floor_m) if seg.lpv.prefaf_floor_m is not None else 0.0
+    if seg.step_downs:
+        return max(float(sd.min_alt_m) for sd in seg.step_downs)
+    return float(seg.base_floor_m)
 
 
 class CollocationOptimizer:
@@ -377,6 +395,20 @@ class CollocationOptimizer:
         )
 
         phase_plan = self._phase_plan(init_z[:2], tgt_z)   # [(end_fix, seg_or_None, n_seg)]
+        # TRANSITION altitude floor (constrained solves with a start→first-fix phase): that
+        # phase carries no leg rows, so without this the only thing under it is the global
+        # target-anchored floor — and min-time solves DIVE to it for speed before climbing
+        # back to the procedure (observed: 66% of a real batch dipped below field elevation
+        # there). The aircraft must deliver itself at-or-above the first leg's published
+        # entry altitude anyway, so cap the transition at min(start altitude, that entry
+        # floor) − the margin. min() is required here (unlike the global floor): a start
+        # BELOW the first fix's altitude is legitimate geometry (climb to join), not bad data.
+        transition_state_lb = state_lb
+        if self.constrained and phase_plan[0][1] is None:
+            entry_floor = _first_leg_entry_floor_m(self.segments[0])
+            floor = min(float(init_z[_ALT]), entry_floor) - _components.ALTITUDE_FLOOR_MARGIN_M
+            transition_state_lb = list(state_lb)
+            transition_state_lb[_ALT] = max(float(state_lb[_ALT]), floor)
         join = self._final_join(phase_plan, tp[4])
         n_phases = len(phase_plan)
         fixes = [pf for pf, _s, _n in phase_plan]
@@ -479,7 +511,7 @@ class CollocationOptimizer:
             lbw += control_lb * n_seg
             ubw += control_ub * n_seg
             w += nodes
-            lbw += state_lb * len(nodes)
+            lbw += (transition_state_lb if (p == 0 and seg is None) else state_lb) * len(nodes)
             ubw += state_ub * len(nodes)
             for _ in range(n_seg):
                 x0 += [self.aircraft.approach.thrust_guess_n, 0.0, 1.0]

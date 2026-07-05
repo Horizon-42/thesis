@@ -720,3 +720,61 @@ def test_unconstrained_vs_constrained_speed_and_success_rate(capsys):
     assert un_ok == n
     assert co_ok == n
     assert un_s > 0.0 and co_s > 0.0
+
+
+def test_first_leg_entry_floor():
+    from collocation.optimizer import _first_leg_entry_floor_m
+    from dataclasses import replace
+    stepped = ac.SegmentSpec(
+        ac.SegmentKind.INITIAL, np.array([1000.0, 0.0]), np.array([0.0, 0.0]), "A", "B",
+        halfwidth_m=1852.0,
+        step_downs=[ac.StepDown(s_from_start_m=400.0, min_alt_m=750.0),
+                    ac.StepDown(s_from_start_m=800.0, min_alt_m=600.0)],
+    )
+    # the HIGHEST step binds at the leg's entry (the staircase descends along track)
+    assert _first_leg_entry_floor_m(stepped) == 750.0
+    plain = ac.SegmentSpec(
+        ac.SegmentKind.INITIAL, np.array([1000.0, 0.0]), np.array([0.0, 0.0]), "A", "B",
+        halfwidth_m=1852.0, base_floor_m=42.0,
+    )
+    assert _first_leg_entry_floor_m(plain) == 42.0
+    lpv_seg = _one_lpv_segment(np.array([0.0, 0.0]), np.array([8000.0, 0.0]))
+    with_prefaf = replace(lpv_seg, lpv=replace(lpv_seg.lpv, prefaf_floor_m=600.0))
+    assert _first_leg_entry_floor_m(with_prefaf) == 600.0
+    without = replace(lpv_seg, lpv=replace(lpv_seg.lpv, prefaf_floor_m=None))
+    assert _first_leg_entry_floor_m(without) == 0.0
+
+
+def test_transition_phase_altitude_floor_binds():
+    # The start->first-fix transition carries no leg rows; its altitude is capped at
+    # min(start altitude, the first leg's published entry floor) - the margin, so the
+    # min-time "dive for speed then climb back" excursion (observed to target-300 m on
+    # real batches) cannot exist. The whole plan also respects the global target floor.
+    frame = ac.TargetFrame(35.60, -78.50)
+    ltp = np.array([0.0, 0.0])
+    faf = np.array([8000.0, 0.0])
+    b = np.array([12000.0, 0.0])
+    segments = [
+        ac.SegmentSpec(ac.SegmentKind.INTERMEDIATE, b, faf, "B", "FAF", halfwidth_m=1852.0,
+                       step_downs=[ac.StepDown(s_from_start_m=3000.0, min_alt_m=700.0)]),
+        _one_lpv_segment(ltp, faf),
+    ]
+    s_ll = frame.to_latlon(np.array([22000.0, 0.0]))   # 10 km before B -> transition phase
+    init = GeodeticState(float(s_ll[0]), float(s_ll[1]), 1500.0, 90.0,
+                         -math.pi / 2.0, 0.0, MTOW)
+    tll = frame.to_latlon(ltp)
+    target = GeodeticState(float(tll[0]), float(tll[1]), 120.0 + 50.0 * 0.3048, 76.0,
+                           -math.pi / 2.0, math.radians(-3.0), MTOW)
+    opt = CollocationOptimizer(A320, segments=segments)
+    _t, _c, states = opt.optimize_free_time(init, target, 400.0)
+
+    transition_floor = min(init.altitude, 700.0) - ALTITUDE_FLOOR_MARGIN_M
+    nsp = opt.n_seg_per_phase
+    assert min(s[2] for s in states[:nsp]) >= transition_floor - 1e-3
+    # global floor over the DENSE plan: never below target - margin anywhere
+    global_floor = target.altitude - ALTITUDE_FLOOR_MARGIN_M
+    dense_alts = [float(row[2]) for row in opt.last_dense_states_geo]
+    assert min(dense_alts) >= global_floor - 1e-3
+    # and the solve still lands on the target
+    ne = np.array([frame.to_ne(s[0], s[1]) for s in states])
+    assert float(np.hypot(*(ne[-1] - ltp))) < 1.0

@@ -295,6 +295,20 @@ def test_rollout_controls_carries_active_control_per_sample():
     assert samples[-1].control.thrust == 50000.0 and samples[-1].segment_index == 1
 
 
+def test_rollout_truncates_below_the_trajectory_floor():
+    # The raw CasadiSimulator has NO envelope checks — a diverged replay used to record
+    # kilometres below sea level. With min_altitude_m (the solve's own altitude floor)
+    # the rollout truncates at the floor instead.
+    initial = GeodeticState(35.6, -78.5, 2000.0, 130.0, 1.5, -0.05, A320.mass.max_takeoff_kg)
+    descending = [[0.0, 0.0, 0.98]]         # idle thrust, n slightly < 1 -> gentle descent
+    full = so.rollout_controls(initial, descending, 60.0, A320, dt=0.5)
+    capped = so.rollout_controls(initial, descending, 60.0, A320, dt=0.5,
+                                 min_altitude_m=1900.0)
+    assert full[-1].t == pytest.approx(60.0, abs=1.0)          # sea-level backstop far away
+    assert capped[-1].t < full[-1].t                            # truncated at the floor
+    assert all(s.state.altitude >= 1900.0 for s in capped)
+
+
 def test_simulate_controls_rolls_forward():
     initial = GeodeticState(35.6, -78.5, 2000.0, 130.0, 1.5, -0.05, A320.mass.max_takeoff_kg)
     # two constant-control segments over a short 4 s horizon

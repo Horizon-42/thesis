@@ -113,6 +113,16 @@ The project serves dual purposes: thesis visualization/validation, and reusable 
 
 ## Changelog
 
+### 2026-07-05 — Below-ground trajectories: target-anchored altitude floor + transition floor + rollout ground guard
+
+The user spotted KRDU optimized trajectories flying below field elevation. Diagnosis (data-verified, initial leg-floor suspicion RETRACTED): the per-leg step-down floors work perfectly (0 of 132 dips on legs; FAF crossings exact) — the dives live where no floor exists.
+
+- **Root cause 1 — the global altitude bound was a "never-binding" 300 m guard that BINDS.** `components.altitude_floor_m` was `target − 300 m`, documented as a numerical box; empirically min-time solves DIVE to it for speed: 66% of KRDU 05L constrained flights (and ~90% of unconstrained ones, most below sea level) dipped to exactly target−300 mid-flight before climbing back. FIXED: margin **300 → 5 m** (user-chosen) — a REAL operational floor: an approach never needs to fly below the altitude it lands at; `min(initial, target)` was deliberately NOT used (landing trajectories start ABOVE the target; a start below the floor is bad data and fails loudly as an infeasible boundary). Comment block rewritten preserving the KMSY target-anchoring lesson + the log-barrier note.
+- **Root cause 2 — the start→first-fix transition phase carries no leg rows** (by design), so it had NO floor above the global one — FFT2071 dove to −173 m at 35% of flight, 11 km before SCHOO, then climbed back to the staircase. FIXED: the transition phase's altitude variable bound = **min(start altitude, the first leg's published entry floor) − margin** (`_first_leg_entry_floor_m`: highest step of the first leg's staircase / LPV `prefaf_floor_m` / base floor; min() IS needed here — a start below the first fix's altitude is legitimate climb-to-join geometry).
+- **Root cause 3 (exposure) — the batch rollout had no ground envelope**: `CasadiSimulator.step` has NO checks at all (the backend's live sim wraps it; the batch didn't), so diverged replays recorded −17 km. FIXED: `_GroundCheckedSimulator` + `rollout_controls(min_altitude_m=…)` — callers pass the SAME `altitude_floor_m(target)` the NLP flies with (sea-level 0.0 backstop by default); below-floor replays truncate via the shared rollout's envelope handling.
+- Also: the evaluation gates judge the FINAL state only, so these mid-flight dives never failed a gate (dive-then-land-on-target counted successful) — success rates before this fix are inflated.
+- Verified: FFT2071 re-solved — min plan altitude **126.9 m = exactly the target** (was −173.1 m), textbook staircase profile, rollout untruncated; T 390→446 s (the underground shortcut's 56 s "gain" is gone). Tests: `_first_leg_entry_floor_m` unit, a transition-floor solve regression (floor binds, target still hit exactly), rollout truncation at the floor. **447 modeling+backend tests pass.** ALL batch outputs (incl. today's re-runs) predate this fix and need RE-RUNNING; expect longer flight times and lower (honest) success-vs-observed deltas.
+
 ### 2026-07-05 — In-app evaluation report window (Optimization block "Details")
 
 The Observe dock's Optimization block gains a **Details** button opening a full evaluation view inside the app — the same data as the standalone `python -m evaluation.visualize` HTML, restyled to the workbench.

@@ -53,6 +53,7 @@ from aerodynamic_model.common import GeodeticState, LoadFactorControl  # noqa: E
 from aerodynamic_model.casadi_simulator import CasadiSimulator  # noqa: E402
 from aerodynamic_model.rollout import RolloutSample, rollout_piecewise_constant  # noqa: E402
 from collocation import CollocationOptimizer  # noqa: E402
+from collocation.components import altitude_floor_m  # noqa: E402
 from evaluation_export import (  # noqa: E402
     evaluation_record,
     failed_evaluation_record,
@@ -171,9 +172,10 @@ def optimize_scenario(
                    initial.V, initial.psi, initial.gamma]
     dense_rows = [list(row) for row in optimizer.last_dense_states_geo]
     optimizer_states = _node_states_to_samples([initial_row] + dense_rows, final_time, initial.m)
-    rollout = _require_usable_rollout(
-        rollout_controls(initial, node_control, final_time, aircraft, dt=rollout_dt_s)
-    )
+    rollout = _require_usable_rollout(rollout_controls(
+        initial, node_control, final_time, aircraft, dt=rollout_dt_s,
+        min_altitude_m=altitude_floor_m(target.altitude),
+    ))
     return ScenarioOptimization(
         scenario.source, float(final_time),
         optimizer_states,
@@ -199,6 +201,30 @@ def _node_states_to_samples(
     return samples
 
 
+class _GroundCheckedSimulator:
+    """``CasadiSimulator`` plus a ground guard (the raw simulator has NO envelope checks).
+
+    A replay stepping below ``min_altitude_m`` raises, so the shared rollout TRUNCATES
+    (its envelope handling) instead of recording subterranean samples — a diverged
+    replay used to record kilometres below sea level. The floor is the SAME
+    target-anchored ``altitude_floor_m`` the NLP flies with, so plan and replay share
+    one notion of "below ground".
+    """
+
+    def __init__(self, simulator: CasadiSimulator, min_altitude_m: float) -> None:
+        self._simulator = simulator
+        self._min_altitude_m = float(min_altitude_m)
+
+    def step(self, state: GeodeticState, control: Any, dt: float) -> GeodeticState:
+        next_state = self._simulator.step(state, control, dt)
+        if next_state.altitude < self._min_altitude_m:
+            raise ValueError(
+                f"altitude {next_state.altitude:.1f} m below the trajectory floor "
+                f"{self._min_altitude_m:.1f} m"
+            )
+        return next_state
+
+
 def rollout_controls(
     initial_state: GeodeticState,
     node_control: Any,
@@ -207,6 +233,7 @@ def rollout_controls(
     *,
     dt: float = DEFAULT_ROLLOUT_DT_S,
     segment_durations: Any = None,
+    min_altitude_m: float = 0.0,
 ) -> list[RolloutSample]:
     """Roll the piecewise-constant optimizer controls through the REAL simulator.
 
@@ -219,13 +246,15 @@ def rollout_controls(
     samples: each carries its state AND the control active at that time, which is what
     the evaluation export needs (aligned state/control lists). ``segment_durations``
     (one per control) drives the multiphase non-uniform schedule; ``None`` = equal segments.
+    ``min_altitude_m`` truncates a replay that descends below it (callers pass the solve's
+    own ``altitude_floor_m(target)``; the default 0.0 keeps a sea-level backstop).
     """
     controls = [
         LoadFactorControl(thrust=float(row[0]), bank_rad=float(row[1]),
                           load_factor=float(row[2]))
         for row in node_control
     ]
-    sim = CasadiSimulator(aircraft, dt)
+    sim = _GroundCheckedSimulator(CasadiSimulator(aircraft, dt), min_altitude_m)
     return rollout_piecewise_constant(
         sim, initial_state, controls, final_time,
         integrator_dt=dt,
@@ -255,11 +284,12 @@ def simulate_controls(
     *,
     dt: float = DEFAULT_ROLLOUT_DT_S,
     segment_durations: Any = None,
+    min_altitude_m: float = 0.0,
 ) -> list[StateSample]:
     """:func:`rollout_controls` mapped onto serializable :class:`StateSample`s."""
     samples = rollout_controls(
         initial_state, node_control, final_time, aircraft,
-        dt=dt, segment_durations=segment_durations,
+        dt=dt, segment_durations=segment_durations, min_altitude_m=min_altitude_m,
     )
     return [StateSample.from_state(s.t, s.state) for s in samples]
 
@@ -805,6 +835,7 @@ def _iaf_result(
     rollout = _require_usable_rollout(rollout_controls(
         best.initial, best.controls, best.final_time, aircraft, dt=rollout_dt_s,
         segment_durations=best.segment_durations,
+        min_altitude_m=altitude_floor_m(target.altitude),
     ))
     source = {
         **scenario.source,
