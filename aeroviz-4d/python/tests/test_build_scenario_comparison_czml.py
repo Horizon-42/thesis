@@ -4,6 +4,7 @@ import json
 
 from build_scenario_comparison_czml import (
     FAILED_COLOR,
+    OFF_TARGET_COLOR,
     OPTIMIZER_COLOR,
     REFERENCE_COLOR,
     SIMULATOR_COLOR,
@@ -15,6 +16,8 @@ from build_scenario_comparison_czml import (
     build_comparison_czml,
     build_runway_comparison,
     group_results_by_runway,
+    load_verdicts,
+    optimization_stats,
 )
 
 STATES = [
@@ -232,6 +235,86 @@ def test_clock_spans_long_reference_past_short_optimizer(tmp_path):
     duration = (datetime.fromisoformat(end_s.replace("Z", "+00:00"))
                 - datetime.fromisoformat(start_s.replace("Z", "+00:00"))).total_seconds()
     assert duration == 600.0   # the 600s reference, not the 5s opt/sim
+
+
+def test_off_target_group_yellow_reference_and_verdict_metrics(tmp_path):
+    # A solved flight whose evaluation verdict says success=false is OFF TARGET: its
+    # reference renders yellow with status "offTarget" (on all three entities + the index
+    # record), and the verdict's final deviations are copied onto the record. A flight whose
+    # verdict says success=true stays plain "solved" with the white reference.
+    (tmp_path / "AFR074_05L_states.json").write_text(json.dumps(STATE_DATA), encoding="utf-8")
+    miss_data = {**STATE_DATA, "source": {"id": "DAL1312"}}
+    (tmp_path / "DAL1312_05L_states.json").write_text(json.dumps(miss_data), encoding="utf-8")
+    results = [
+        {"id": "AFR074", "runway": "05L", "status": "solved",
+         "states_file": "AFR074_05L_states.json", "eval_file": "AFR074_05L_eval.json"},
+        {"id": "DAL1312", "runway": "05L", "status": "solved",
+         "states_file": "DAL1312_05L_states.json", "eval_file": "DAL1312_05L_eval.json"},
+    ]
+    adsb = [ADSB_CZML[0], ADSB_CZML[1], {**ADSB_CZML[1], "id": "DAL1312", "name": "DAL1312"}]
+    verdicts = load_verdicts({"trajectories": [
+        {"file": "AFR074_05L_eval.json", "solved": True, "success": True,
+         "lateral_m": 2.8, "vertical_m": 0.1},
+        {"file": "DAL1312_05L_eval.json", "solved": True, "success": False,
+         "lateral_m": 179.5, "vertical_m": -25.4},
+    ]})
+
+    czml, index = build_runway_comparison(results, tmp_path, adsb, airport="KRDU",
+                                          verdicts=verdicts)
+    by_id = {p["id"]: p for p in czml[1:]}
+
+    off_ref = by_id["ref-DAL1312_05L"]
+    assert off_ref["path"]["material"]["solidColor"]["color"]["rgba"] == list(OFF_TARGET_COLOR)
+    assert off_ref["name"].endswith("(off target)")
+    assert off_ref["properties"]["status"] == "offTarget"
+    assert by_id["sim-DAL1312_05L"]["properties"]["status"] == "offTarget"
+    # opt/sim keep their legend colours — the marking is the reference + status.
+    assert by_id["sim-DAL1312_05L"]["path"]["material"]["solidColor"]["color"]["rgba"] \
+        == list(SIMULATOR_COLOR)
+
+    ok_ref = by_id["ref-AFR074_05L"]
+    assert ok_ref["path"]["material"]["solidColor"]["color"]["rgba"] == list(REFERENCE_COLOR)
+    assert ok_ref["properties"]["status"] == "solved"
+
+    by_group = {r["group"]: r for r in index}
+    assert by_group["DAL1312_05L"]["status"] == "offTarget"
+    assert by_group["DAL1312_05L"]["lateralErrM"] == 179.5
+    assert by_group["DAL1312_05L"]["verticalErrM"] == -25.4
+    assert by_group["AFR074_05L"]["status"] == "solved"
+    assert by_group["AFR074_05L"]["lateralErrM"] == 2.8
+
+
+def test_no_verdicts_keeps_solved_plain(tmp_path):
+    (tmp_path / "AFR074_05L_states.json").write_text(json.dumps(STATE_DATA), encoding="utf-8")
+    results = [{"id": "AFR074", "runway": "05L", "status": "solved",
+                "states_file": "AFR074_05L_states.json", "eval_file": "AFR074_05L_eval.json"}]
+    czml, index = build_runway_comparison(results, tmp_path, [ADSB_CZML[0], ADSB_CZML[1]],
+                                          airport="KRDU")
+    ref = next(p for p in czml if p["id"] == "ref-AFR074_05L")
+    assert ref["path"]["material"]["solidColor"]["color"]["rgba"] == list(REFERENCE_COLOR)
+    assert index[0]["status"] == "solved"
+    assert "lateralErrM" not in index[0]
+
+
+def test_optimization_stats_merges_summary_and_report():
+    summary = {"total": 4, "solved": 3, "failed": 1}
+    report = {
+        "successful": 2, "success_rate": 0.5,
+        "lateral_m": {"mean": 61.4, "p95": 170.0, "max": 179.5},
+        "final_time_s": {"mean": 335.9, "min": 284.1, "max": 393.5},
+    }
+    stats = optimization_stats(summary, report)
+    assert stats["solveRate"] == 0.75
+    assert stats["successful"] == 2 and stats["successRate"] == 0.5
+    assert stats["avgStateErrorM"] == 61.4
+    assert stats["avgTimeS"] == 335.9
+    # Without a report: solve stats only (no evaluation keys).
+    bare = optimization_stats(summary, None)
+    assert bare["solveRate"] == 0.75 and "successRate" not in bare
+    # An all-unsolved report has null spreads — the means stay None, not a crash.
+    empty = optimization_stats(summary, {"successful": 0, "success_rate": 0.0,
+                                         "lateral_m": None, "final_time_s": None})
+    assert empty["avgStateErrorM"] is None and empty["avgTimeS"] is None
 
 
 def test_upsert_category_adds_and_replaces(tmp_path):

@@ -153,9 +153,22 @@ export interface ComparisonGroup {
   flightId: string;
   runway: string;
   airport: string;
-  status: "solved" | "failed";
+  /**
+   * `solved` = optimized (and, when the run was evaluated, inside the gates);
+   * `offTarget` = optimized but the final state FAILED the evaluation gates
+   * (yellow reference; added 2026-07 — absent in older indexes);
+   * `failed` = no solution (dark-red reference only).
+   */
+  status: "solved" | "offTarget" | "failed";
   finalTimeS: number | null;
   initialState: ComparisonInitialState | null;
+  /**
+   * Final-state deviations from the evaluation report (present when the run was
+   * evaluated; added 2026-07). `lateralErrM` = horizontal miss distance;
+   * `verticalErrM` = signed altitude miss (+ = high).
+   */
+  lateralErrM?: number | null;
+  verticalErrM?: number | null;
   /**
    * Per-flight facts present on EVERY record (solved + failed), from the flight's scenario
    * initial state — so the flight list can show V + mass even for failed optimizations.
@@ -170,15 +183,17 @@ export interface ComparisonGroup {
 }
 
 /**
- * Optimization-run stats for one category, taken from its summary.json (not recomputed).
- * `solveRate` (converged / attempted) is known now; the rest are filled by the future
- * evaluation package.
+ * Optimization-run stats for one category: solve counts from the run's summary.json,
+ * plus — when the run was evaluated — the evaluation report's batch metrics
+ * (`successRate` = inside-the-gates / total; `avgStateErrorM` = mean final lateral
+ * deviation over solved flights; `avgTimeS` = mean optimized flight time).
  */
 export interface OptimizationStats {
   total?: number | null;
   solved?: number | null;
   failed?: number | null;
   solveRate?: number | null;
+  successful?: number | null;
   successRate?: number | null;
   avgStateErrorM?: number | null;
   avgTimeS?: number | null;
@@ -199,7 +214,9 @@ export function isComparisonGroup(value: unknown): value is ComparisonGroup {
     typeof candidate.flightId === "string" &&
     typeof candidate.runway === "string" &&
     typeof candidate.czml === "string" &&
-    (candidate.status === "solved" || candidate.status === "failed") &&
+    (candidate.status === "solved" ||
+      candidate.status === "offTarget" ||
+      candidate.status === "failed") &&
     Array.isArray(candidate.entities) &&
     candidate.entities.every((entity) => typeof entity === "string")
   );

@@ -12,6 +12,10 @@ Two modes:
 * **Batch** (``--summary``) — the run's ``summary.json`` → **one combined CZML per runway**
   plus a single ``comparison_index.json``. Every flight on one map: solved flights get the
   three paths above; **unsolved flights get their reference only, in dark red (FAILED_COLOR)**.
+  With ``--evaluation-report`` (the evaluation package's report JSON), solved flights whose
+  final state FAILED the evaluation gates render their reference in **yellow
+  (OFF_TARGET_COLOR)** with status ``offTarget``, and the index's ``optimization`` block
+  carries the report's batch metrics (successRate / avgStateErrorM / avgTimeS).
   Each entity has a globally-unique id ``{kind}-{flightId}_{runway}`` and a ``properties`` bag
   (``group``/``flightId``/``kind``/``runway``/``airport``/``status``) so the frontend can
   group and **randomly sample** trajectories. Entities default to ``show=false`` (override with
@@ -44,6 +48,7 @@ REFERENCE_COLOR = (235, 235, 235, 200)   # observed ADS-B (white)
 OPTIMIZER_COLOR = (255, 140, 0, 220)     # optimizer plan — "Optimize states" (orange)
 SIMULATOR_COLOR = (40, 120, 255, 220)    # simulator rollout — "Optimize results" (blue)
 FAILED_COLOR = (200, 60, 60, 200)        # unsolved scenario — reference only, flagged dark red
+OFF_TARGET_COLOR = (255, 205, 40, 220)   # solved but FAILED the evaluation gates — reference in yellow
 
 # Trailing-tail length (seconds) for the optimizer/simulator paths: the tail fades behind the
 # moving aircraft as playback advances, so the head (current position) is distinguishable from the
@@ -260,12 +265,22 @@ def build_runway_comparison(
     airport: str = "UNK",
     start_hidden: bool = True,
     scenario_initial: dict[tuple[str, str], dict[str, float]] | None = None,
+    verdicts: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Combined CZML for one runway **plus** its index records (every flight on one map).
 
     Each result (a row from ``scenario_optimization``'s ``summary.json``) becomes:
-      • solved → reference (white) + optimizer (orange) + simulator (blue);
+      • solved (+ inside the gates) → reference (white) + optimizer (orange) + simulator (blue);
+      • solved but OFF TARGET → the same three paths, reference in the yellow
+        OFF_TARGET_COLOR, labelled "(off target)", status ``offTarget``;
       • failed → reference only, in the dark-red FAILED_COLOR, labelled "(unsolved)".
+
+    ``verdicts`` maps an eval-record filename (the summary row's ``eval_file``) to its
+    evaluation-report row (``{"solved", "success", "lateral_m", "vertical_m", …}`` — see
+    ``evaluation.metrics.evaluate_batch``). A solved flight whose row says ``success: false``
+    missed the regulation gates; its final lateral/vertical deviations are copied onto the
+    index record (``lateralErrM``/``verticalErrM``). ``None`` (no report) keeps every solved
+    flight plain "solved".
 
     Every entity gets a globally-unique id ``{kind}-{flightId}_{runway}`` (so duplicate
     ``(flightId, runway)`` rows — which collide on the *same* states file — can't produce
@@ -305,10 +320,20 @@ def build_runway_comparison(
             optimizer_states = state_data["optimizer_states"]
             simulator_states = state_data["simulator_states"]
 
+            # The evaluation verdict for this flight (joined by the summary row's eval_file):
+            # solved-but-outside-the-gates renders as "off target" (yellow reference).
+            verdict = (verdicts or {}).get(result.get("eval_file") or "")
+            off_target = (
+                verdict is not None and verdict.get("solved") and not verdict.get("success")
+            )
+            status = "offTarget" if off_target else "solved"
+            ref_color = OFF_TARGET_COLOR if off_target else REFERENCE_COLOR
+            ref_name = f"Ref {flight_id} (off target)" if off_target else f"Ref {flight_id}"
+
             reference = _reference_entity_from_adsb(
-                adsb_czml, flight_id, REFERENCE_COLOR,
-                entity_id=f"ref-{group}", name=f"Ref {flight_id}",
-                properties=_traj_properties(group, flight_id, "reference", runway, airport, "solved"),
+                adsb_czml, flight_id, ref_color,
+                entity_id=f"ref-{group}", name=ref_name,
+                properties=_traj_properties(group, flight_id, "reference", runway, airport, status),
                 show=show,
             )
             if reference is not None:
@@ -316,24 +341,29 @@ def build_runway_comparison(
                 entity_ids.append(f"ref-{group}")
             entities.append(_build_trajectory_entity(
                 f"opt-{group}", f"Opt {flight_id}", optimizer_states, OPTIMIZER_COLOR,
-                properties=_traj_properties(group, flight_id, "optimizer", runway, airport, "solved"),
+                properties=_traj_properties(group, flight_id, "optimizer", runway, airport, status),
                 show=show))
             entity_ids.append(f"opt-{group}")
             entities.append(_build_trajectory_entity(
                 f"sim-{group}", f"Sim {flight_id}", simulator_states, SIMULATOR_COLOR,
-                properties=_traj_properties(group, flight_id, "simulator", runway, airport, "solved"),
+                properties=_traj_properties(group, flight_id, "simulator", runway, airport, status),
                 show=show))
             entity_ids.append(f"sim-{group}")
 
             initial_state = _initial_state(optimizer_states or simulator_states)
             scen = (scenario_initial or {}).get((flight_id, runway))
             initial_v, mass_kg = _flight_facts(initial_state, scen)
-            index_records.append({
+            record = {
                 "group": group, "flightId": flight_id, "runway": runway, "airport": airport,
-                "status": "solved", "finalTimeS": float(state_data.get("final_time_s", 0.0)),
+                "status": status, "finalTimeS": float(state_data.get("final_time_s", 0.0)),
                 "initialState": initial_state, "initialVMps": initial_v, "massKg": mass_kg,
                 "entities": entity_ids,
-            })
+            }
+            if verdict is not None:
+                # Final-state deviations from the evaluation (shown by the flight list).
+                record["lateralErrM"] = verdict.get("lateral_m")
+                record["verticalErrM"] = verdict.get("vertical_m")
+            index_records.append(record)
         else:
             reference = _reference_entity_from_adsb(
                 adsb_czml, flight_id, FAILED_COLOR,
@@ -362,6 +392,45 @@ def build_runway_comparison(
     end_dt = EPOCH.fromtimestamp(EPOCH.timestamp() + max(max_t, 1.0), tz=timezone.utc)
     document = build_document_packet(EPOCH, end_dt, multiplier=30)
     return [document] + entities, index_records
+
+
+def load_verdicts(evaluation_report: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Per-trajectory verdict rows of an evaluation report, keyed by eval-record filename.
+
+    The key is the report row's ``file`` (``<identity>_eval.json``), which the optimization
+    summary rows carry as ``eval_file`` — the unambiguous join between the two artifacts.
+    """
+    return {
+        row["file"]: row
+        for row in evaluation_report.get("trajectories", [])
+        if row.get("file")
+    }
+
+
+def optimization_stats(
+    summary: dict[str, Any], evaluation_report: dict[str, Any] | None
+) -> dict[str, Any]:
+    """The index's ``optimization`` block: solve stats from the run's summary.json, and —
+    when an evaluation report is given — the evaluation's batch metrics (success rate,
+    mean final lateral deviation, mean flight time). Nothing is recomputed here."""
+    solved = summary.get("solved")
+    total = summary.get("total")
+    stats: dict[str, Any] = {
+        "total": total,
+        "solved": solved,
+        "failed": summary.get("failed"),
+        "solveRate": (solved / total) if isinstance(solved, (int, float)) and total else None,
+    }
+    if evaluation_report is not None:
+        lateral = evaluation_report.get("lateral_m") or {}
+        times = evaluation_report.get("final_time_s") or {}
+        stats.update({
+            "successful": evaluation_report.get("successful"),
+            "successRate": evaluation_report.get("success_rate"),
+            "avgStateErrorM": lateral.get("mean"),
+            "avgTimeS": times.get("mean"),
+        })
+    return stats
 
 
 def group_results_by_runway(
@@ -435,6 +504,13 @@ def main() -> None:
              "state (V + mass) is added to every index record — including FAILED optimizations "
              "(which have no states), so the flight list shows V + mass for those too.",
     )
+    parser.add_argument(
+        "--evaluation-report", default=None,
+        help="batch mode: the evaluation package's report JSON for this run. Solved flights "
+             "whose final state failed the gates render with a YELLOW reference (status "
+             "offTarget), and the index's optimization block carries the batch metrics "
+             "(successRate / avgStateErrorM / avgTimeS).",
+    )
     args = parser.parse_args()
 
     if args.state_file:
@@ -468,6 +544,11 @@ def main() -> None:
         scenario_initial_map([p.strip() for p in args.scenarios.split(",") if p.strip()])
         if args.scenarios else None
     )
+    evaluation_report = (
+        json.loads(Path(args.evaluation_report).read_text(encoding="utf-8"))
+        if args.evaluation_report else None
+    )
+    verdicts = load_verdicts(evaluation_report) if evaluation_report is not None else None
 
     groups = group_results_by_runway(summary, fallback_airport=args.airport)
     index: dict[str, Any] = {
@@ -480,27 +561,21 @@ def main() -> None:
         czml, records = build_runway_comparison(
             results, states_dir, adsb_for(airport),
             airport=airport, start_hidden=not args.start_visible,
-            scenario_initial=scenario_initial,
+            scenario_initial=scenario_initial, verdicts=verdicts,
         )
         out_path = out_dir / f"comparison_{airport}_{runway}.czml"
         out_path.write_text(json.dumps(czml, indent=2), encoding="utf-8")
         for record in records:
             record["czml"] = out_path.name        # which CZML file this group lives in
         index["groups"].extend(records)
-        failed = sum(1 for r in records if r["status"] != "solved")
-        print(f"✓ {out_path.name}: {len(records)} group(s), {failed} unsolved (red) -> {len(czml)} packets")
+        failed = sum(1 for r in records if r["status"] == "failed")
+        off_target = sum(1 for r in records if r["status"] == "offTarget")
+        print(f"✓ {out_path.name}: {len(records)} group(s), {failed} unsolved (red), "
+              f"{off_target} off-target (yellow) -> {len(czml)} packets")
 
-    # Optimization stats taken straight from the run's summary.json (NOT recomputed from the
-    # CZML/records). Only the solve rate (converged / attempted) is known here; the evaluation
-    # package will later add successRate / avgStateError / avgTimeS to this same object.
-    solved = summary.get("solved")
-    total = summary.get("total")
-    index["optimization"] = {
-        "total": total,
-        "solved": solved,
-        "failed": summary.get("failed"),
-        "solveRate": (solved / total) if isinstance(solved, (int, float)) and total else None,
-    }
+    # Solve stats from the run's summary.json + (when given) the evaluation report's batch
+    # metrics — nothing recomputed here.
+    index["optimization"] = optimization_stats(summary, evaluation_report)
 
     index_path = out_dir / "comparison_index.json"
     index_path.write_text(json.dumps(index, indent=2), encoding="utf-8")

@@ -32,6 +32,8 @@ export interface FlightOptimizerDatum {
   optimizedTimeS: number | null;
   /** True when this flight's optimization failed (no optimized trajectory). */
   failed: boolean;
+  /** True when it solved but the final state FAILED the evaluation gates (off target). */
+  offTarget: boolean;
 }
 
 export interface FlightOptimizerData {
@@ -77,8 +79,11 @@ export function useFlightOptimizerData(): FlightOptimizerData {
           map.set(group.flightId, {
             initialVMps: group.initialVMps ?? group.initialState?.V ?? null,
             massKg: group.massKg ?? group.initialState?.m ?? null,
-            optimizedTimeS: group.status === "solved" ? group.finalTimeS : null,
+            // offTarget groups ARE solved (they carry an optimized trajectory + time);
+            // they just missed the evaluation gates at the end.
+            optimizedTimeS: group.status !== "failed" ? group.finalTimeS : null,
             failed: group.status === "failed",
+            offTarget: group.status === "offTarget",
           });
         }
         setByFlightId(map);

@@ -17,12 +17,15 @@ Steps, chained by shelling out to the existing CLIs (each already tested):
                                       {*_states.json, *_eval.json, summary.json}
                                         (every eval record points at its reference via
                                          reference_file; failed ones included)
-  3. [czml] build_scenario_comparison_czml
-                                    summary ─► aeroviz-4d/public/data/airports/<ICAO>/
-                                                 comparison/<category>/{*.czml, index, categories.json}
-  4. [eval] python -m evaluation    eval records ─► <opt_dir>/evaluation_report.json
-  5. [eval] python -m evaluation.visualize
+  3. python -m evaluation           eval records ─► <opt_dir>/evaluation_report.json
+       (always — the CZML tail consumes its per-flight verdicts + batch metrics)
+  4. [eval] python -m evaluation.visualize
                                     eval records ─► <opt_dir>/evaluation_report.html
+  5. [czml] build_scenario_comparison_czml (--evaluation-report)
+                                    summary + report ─► aeroviz-4d/public/data/airports/<ICAO>/
+                                                 comparison/<category>/{*.czml, index, categories.json}
+                                      (solved-but-off-target flights yellow; the index's
+                                       optimization block carries the evaluation metrics)
 
 The ``category`` (output sub-folder + frontend category key) is derived from
 (target_type, with_constraint):
@@ -169,6 +172,29 @@ class Plan:
                                  "--airport", self.airport]
             named.append(("references + optimization", optimize_cmd))
 
+        # The evaluation report always runs (it is cheap): the eval tail renders it and
+        # the CZML tail consumes its verdicts (off-target yellow) + batch metrics. The one
+        # exception: reusing an optimization from BEFORE the evaluation package exists no
+        # eval records to judge — skip the evaluation steps loudly and build a plain CZML
+        # (re-run without --skip-optimize to get verdicts/metrics).
+        evaluable = not reuse or any(self.opt_dir.glob("*_eval.json"))
+        if not evaluable:
+            print("   ⚠ reused optimization has no *_eval.json records (pre-evaluation run) "
+                  "— skipping evaluation; comparison CZML gets no verdicts/metrics")
+        if evaluable:
+            named.append(("evaluation report", [
+                py, "-m", "evaluation",
+                "--input", str(self.opt_dir),
+                "--output", str(self.report),
+            ]))
+
+            if "eval" in self.outputs:
+                named.append(("evaluation HTML", [
+                    py, "-m", "evaluation.visualize",
+                    "--input", str(self.opt_dir),
+                    "--output", str(self.report_html),
+                ]))
+
         if "czml" in self.outputs:
             comparison_cmd = [
                 py, str(CZML_SCRIPT),
@@ -178,24 +204,14 @@ class Plan:
                 "--category", self.category,
                 "--category-label", self.label,
             ]
+            if evaluable:
+                comparison_cmd += ["--evaluation-report", str(self.report)]
             # Feed the scenario initial states so the index carries V + mass for EVERY
             # flight — including failed optimizations (which have no states file). On a
             # full run step 1 writes the file before this step; on reuse it may be absent.
             if not reuse or self.scenarios.exists():
                 comparison_cmd += ["--scenarios", str(self.scenarios)]
             named.append(("comparison CZML", comparison_cmd))
-
-        if "eval" in self.outputs:
-            named.append(("evaluation report", [
-                py, "-m", "evaluation",
-                "--input", str(self.opt_dir),
-                "--output", str(self.report),
-            ]))
-            named.append(("evaluation HTML", [
-                py, "-m", "evaluation.visualize",
-                "--input", str(self.opt_dir),
-                "--output", str(self.report_html),
-            ]))
 
         total = len(named)
         return [(f"{i}/{total} {name}", cmd) for i, (name, cmd) in enumerate(named, 1)]

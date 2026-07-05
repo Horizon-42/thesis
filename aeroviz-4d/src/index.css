@@ -2896,6 +2896,12 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   color: #ff6b6b;
 }
 
+/* Solved but the final state failed the evaluation gates (off target) — matches the
+   scene's yellow OFF_TARGET_COLOR reference. */
+.flight-table td.flight-table-offtarget {
+  color: #ffcd28;
+}
+
 .flight-table th:nth-child(n + 2),
 .flight-table td:nth-child(n + 2) {
   text-align: right;

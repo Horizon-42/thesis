@@ -92,8 +92,20 @@ export default function FlightTable({ flightIds, flightSummaries }: FlightTableP
                   style={{ cursor: "pointer" }}
                 >
                   <td
-                    className={`flight-table-id${optimizer?.failed ? " flight-table-failed" : ""}`}
-                    title={optimizer?.failed ? `${id} — optimization failed` : id}
+                    className={`flight-table-id${
+                      optimizer?.failed
+                        ? " flight-table-failed"
+                        : optimizer?.offTarget
+                          ? " flight-table-offtarget"
+                          : ""
+                    }`}
+                    title={
+                      optimizer?.failed
+                        ? `${id} — optimization failed`
+                        : optimizer?.offTarget
+                          ? `${id} — optimized but missed the target (off target)`
+                          : id
+                    }
                   >
                     {id}
                   </td>

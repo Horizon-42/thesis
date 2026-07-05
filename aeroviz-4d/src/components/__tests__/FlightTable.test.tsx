@@ -6,6 +6,7 @@ type Datum = {
   massKg: number | null;
   optimizedTimeS: number | null;
   failed: boolean;
+  offTarget?: boolean;
 };
 
 const { appState, optimizerData } = vi.hoisted(() => ({
@@ -86,6 +87,24 @@ describe("FlightTable", () => {
     expect(screen.getByText("136.0")).toBeTruthy();
     // The non-failed flight's id is not flagged.
     expect(screen.getByText("FDX1738").className).not.toContain("flight-table-failed");
+  });
+
+  it("marks an OFF-TARGET flight's id yellow but keeps its optimized time", () => {
+    optimizerData.comparisonActive = true;
+    optimizerData.byFlightId = new Map<string, Datum>([
+      // solved but missed the evaluation gates: yellow flag, optimized time still shown.
+      ["UPS1276", { initialVMps: 141.85, massKg: 66300, optimizedTimeS: 576, failed: false, offTarget: true }],
+      ["FDX1738", { initialVMps: 148.7, massKg: 77800, optimizedTimeS: 309, failed: false, offTarget: false }],
+    ]);
+    render(<FlightTable flightIds={flightIds} flightSummaries={flightSummaries} />);
+    fireEvent.click(screen.getByRole("button", { name: /Flights/ }));
+
+    const offTargetId = screen.getByText("UPS1276");
+    expect(offTargetId.className).toContain("flight-table-offtarget");
+    expect(offTargetId.className).not.toContain("flight-table-failed");
+    expect(offTargetId.getAttribute("title")).toContain("off target");
+    expect(screen.getByText("9:36")).toBeTruthy(); // 576 s optimized time still shown
+    expect(screen.getByText("FDX1738").className).not.toContain("flight-table-offtarget");
   });
 
   it("shows a dash where the optimizer has no data for a flight", () => {
