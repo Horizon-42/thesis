@@ -16,6 +16,12 @@ The two sequences are NOT identical — the optimizer's node states are the idea
 the simulator states are what the dynamics actually do under those controls. The gap is the
 point of the exercise (and what the CZML builder in ``aeroviz-4d/python`` visualizes).
 
+Alongside each ``*_states.json`` the batch writes a ``*_eval.json`` — the neutral
+evaluation-input record (initial/target state + the rollout states with a 1:1 aligned
+control list; see ``evaluation_export.py`` and the root ``evaluation`` package). Failed
+scenarios get one too, with EMPTY state/control lists, so the evaluation batch can compute
+the solve rate from the file set alone.
+
 This is a **teaching scaffold**: the loop / IO / serialization / CLI are wired; the two core
 steps — running the optimizer (TODO ①) and the forward rollout (TODO ②) — are documented
 TODOs. See ``flight_scenarios/README.md`` and the comments below.
@@ -41,11 +47,17 @@ _OPT_DIR = Path(__file__).resolve().parent
 if str(_OPT_DIR) not in sys.path:
     sys.path.insert(0, str(_OPT_DIR))
 
-from flight_scenarios import FlightScenario, load_scenarios  # noqa: E402
+from flight_scenarios import FlightScenario, load_scenarios, state_samples_from_track  # noqa: E402
+from flight_scenarios.start_state import DEFAULT_WINDOW_S  # noqa: E402
 from aerodynamic_model.common import GeodeticState, LoadFactorControl  # noqa: E402
 from aerodynamic_model.casadi_simulator import CasadiSimulator  # noqa: E402
-from aerodynamic_model.rollout import rollout_piecewise_constant  # noqa: E402
+from aerodynamic_model.rollout import RolloutSample, rollout_piecewise_constant  # noqa: E402
 from collocation import CollocationOptimizer  # noqa: E402
+from evaluation_export import (  # noqa: E402
+    evaluation_record,
+    failed_evaluation_record,
+    reference_evaluation_record,
+)
 
 # Optimizer + rollout defaults (override on the CLI).
 DEFAULT_N_SEGMENTS = 8
@@ -99,6 +111,9 @@ class ScenarioOptimization:
     final_time_s: float
     optimizer_states: list[StateSample]
     simulator_states: list[StateSample]
+    # The neutral evaluation-input record (evaluation_export.evaluation_record) —
+    # written to its own *_eval.json by the batch, NOT part of the states file.
+    evaluation: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -156,10 +171,15 @@ def optimize_scenario(
                    initial.V, initial.psi, initial.gamma]
     dense_rows = [list(row) for row in optimizer.last_dense_states_geo]
     optimizer_states = _node_states_to_samples([initial_row] + dense_rows, final_time, initial.m)
-    simulator_states = simulate_controls(initial, node_control, final_time, aircraft,
-                                             dt=rollout_dt_s)
-    return ScenarioOptimization(scenario.source, float(final_time),
-                                   optimizer_states, simulator_states)
+    rollout = _require_usable_rollout(
+        rollout_controls(initial, node_control, final_time, aircraft, dt=rollout_dt_s)
+    )
+    return ScenarioOptimization(
+        scenario.source, float(final_time),
+        optimizer_states,
+        [StateSample.from_state(s.t, s.state) for s in rollout],
+        evaluation=evaluation_record(initial, target, rollout, scenario.source),
+    )
 
 
 def _node_states_to_samples(
@@ -179,6 +199,54 @@ def _node_states_to_samples(
     return samples
 
 
+def rollout_controls(
+    initial_state: GeodeticState,
+    node_control: Any,
+    final_time: float,
+    aircraft: Any,
+    *,
+    dt: float = DEFAULT_ROLLOUT_DT_S,
+    segment_durations: Any = None,
+) -> list[RolloutSample]:
+    """Roll the piecewise-constant optimizer controls through the REAL simulator.
+
+    This produces the "simulator real states": the optimizer's own controls integrated
+    through the actual dynamics, which differ from the optimizer's node states (the plan).
+
+    Thin adapter over ``aerodynamic_model.rollout_piecewise_constant`` — builds the
+    load-factor controls + the simulator and runs the shared rollout (truncating silently
+    if the replay leaves the envelope — this is a viz aid). Returns the RAW rollout
+    samples: each carries its state AND the control active at that time, which is what
+    the evaluation export needs (aligned state/control lists). ``segment_durations``
+    (one per control) drives the multiphase non-uniform schedule; ``None`` = equal segments.
+    """
+    controls = [
+        LoadFactorControl(thrust=float(row[0]), bank_rad=float(row[1]),
+                          load_factor=float(row[2]))
+        for row in node_control
+    ]
+    sim = CasadiSimulator(aircraft, dt)
+    return rollout_piecewise_constant(
+        sim, initial_state, controls, final_time,
+        integrator_dt=dt,
+        segment_durations=list(segment_durations) if segment_durations is not None else None,
+        truncate_on_envelope_exit=True,
+    )
+
+
+def _require_usable_rollout(samples: list[RolloutSample]) -> list[RolloutSample]:
+    """A rollout truncated before its first full step (envelope exit at t=0) has
+    no usable trajectory — fail the scenario loudly instead of exporting a
+    degenerate one-sample "solved" record (zero horizontal extent, which nothing
+    downstream can arc-length match)."""
+    if len(samples) < 2:
+        raise ValueError(
+            "control rollout exited the flight envelope at its first step — "
+            "no usable trajectory"
+        )
+    return samples
+
+
 def simulate_controls(
     initial_state: GeodeticState,
     node_control: Any,
@@ -188,28 +256,10 @@ def simulate_controls(
     dt: float = DEFAULT_ROLLOUT_DT_S,
     segment_durations: Any = None,
 ) -> list[StateSample]:
-    """Roll the piecewise-constant optimizer controls through the REAL simulator.
-
-    This produces the "simulator real states": the optimizer's own controls integrated
-    through the actual dynamics, which differ from the optimizer's node states (the plan).
-
-    Thin adapter over ``aerodynamic_model.rollout_piecewise_constant`` — builds the
-    load-factor controls + the simulator, runs the shared rollout (truncating silently if
-    the replay leaves the envelope — this is a viz aid), and maps each neutral
-    ``(t, state)`` sample onto a serializable :class:`StateSample`. ``segment_durations``
-    (one per control) drives the multiphase non-uniform schedule; ``None`` = equal segments.
-    """
-    controls = [
-        LoadFactorControl(thrust=float(row[0]), bank_rad=float(row[1]),
-                          load_factor=float(row[2]))
-        for row in node_control
-    ]
-    sim = CasadiSimulator(aircraft, dt)
-    samples = rollout_piecewise_constant(
-        sim, initial_state, controls, final_time,
-        integrator_dt=dt,
-        segment_durations=list(segment_durations) if segment_durations is not None else None,
-        truncate_on_envelope_exit=True,
+    """:func:`rollout_controls` mapped onto serializable :class:`StateSample`s."""
+    samples = rollout_controls(
+        initial_state, node_control, final_time, aircraft,
+        dt=dt, segment_durations=segment_durations,
     )
     return [StateSample.from_state(s.t, s.state) for s in samples]
 
@@ -217,22 +267,22 @@ def simulate_controls(
 
 def _optimize_one_scenario(
     payload: tuple[int, FlightScenario, dict[str, Any]],
-) -> tuple[int, str, dict[str, Any] | None, str | None]:
+) -> tuple[int, str, dict[str, Any] | None, dict[str, Any] | None, str | None]:
     """Solve one scenario and return a picklable record (process-pool worker).
 
-    Returns ``(index, flight_id, result_dict | None, error | None)``. Per-scenario
-    failures are captured (not raised) so one infeasible scenario never kills the
-    pool; the parent writes/logs from the returned record. The result is the plain
-    ``to_dict()`` (pure JSON types) so it crosses the process boundary cheaply.
+    Returns ``(index, flight_id, states_dict | None, eval_dict | None, error | None)``.
+    Per-scenario failures are captured (not raised) so one infeasible scenario never
+    kills the pool; the parent writes/logs from the returned record. Both dicts are
+    pure JSON types so they cross the process boundary cheaply.
     """
     index, scenario, params = payload
     flight_id = scenario.source.get("id") or f"scenario{index}"
     try:
         result = optimize_scenario(scenario, **params)
     except Exception as exc:  # noqa: BLE001 — batch tool: skip + log per-scenario failures
-        return (index, flight_id, None,
+        return (index, flight_id, None, None,
                 f"{type(exc).__name__}: {str(exc).splitlines()[0][:90]}")
-    return (index, flight_id, result.to_dict(), None)
+    return (index, flight_id, result.to_dict(), result.evaluation, None)
 
 
 def _resolve_jobs(jobs: int, n_tasks: int) -> int:
@@ -270,8 +320,13 @@ def optimize_scenarios(
     jobs: int = 0,
     verbose: bool = False,
     scenarios_label: str | None = None,
+    references_dir: str | None = None,
 ) -> list[Path]:
     """Optimize each scenario and write one ``*_states.json`` per scenario.
+
+    ``references_dir`` (a directory name under ``output_dir``, see
+    :func:`write_reference_records`) makes every eval record — solved and failed —
+    carry a ``reference_file`` pointer at its observed-track reference record.
 
     Each scenario is an independent NLP solve, so they run across a process pool
     (``jobs`` workers; ``0`` ⇒ half the CPU cores). Processes — not threads — because
@@ -296,21 +351,40 @@ def optimize_scenarios(
     failures: list[tuple[str, str]] = []
     records: dict[int, dict[str, Any]] = {}  # index -> summary record (parallel-safe ordering)
 
-    def _handle(record: tuple[int, str, dict[str, Any] | None, str | None]) -> None:
-        index, flight_id, result_dict, error = record
+    def _handle(
+        record: tuple[int, str, dict[str, Any] | None, dict[str, Any] | None, str | None],
+    ) -> None:
+        index, flight_id, result_dict, eval_dict, error = record
+        scenario = scenarios[index]
+        name = _scenario_filename(scenario, index)
+        eval_name = _eval_filename(name)
+        reference_file = (
+            f"{references_dir}/{_reference_filename(name)}" if references_dir else None
+        )
         if error is not None:
             failures.append((flight_id, error))
+            # Unsolved configurations still get an evaluation record (empty lists) —
+            # that is how the evaluation batch computes the solve rate.
+            failed_record = failed_evaluation_record(
+                scenario.initial, scenario.target, scenario.source, error,
+            )
+            if reference_file:
+                failed_record["reference_file"] = reference_file
+            (out / eval_name).write_text(json.dumps(failed_record, indent=2), encoding="utf-8")
             records[index] = _summary_record(
-                scenarios[index], status="failed", states_file=None, final_time_s=None, reason=error
+                scenario, status="failed", states_file=None, eval_file=eval_name,
+                final_time_s=None, reason=error,
             )
             print(f"✗ {flight_id}: skipped ({error.split(':', 1)[0]})")
             return
-        name = _scenario_filename(scenarios[index], index)
         path = out / name
         path.write_text(json.dumps(result_dict, indent=2), encoding="utf-8")
+        if reference_file:
+            eval_dict["reference_file"] = reference_file
+        (out / eval_name).write_text(json.dumps(eval_dict, indent=2), encoding="utf-8")
         written.append(path)
         records[index] = _summary_record(
-            scenarios[index], status="solved", states_file=name,
+            scenario, status="solved", states_file=name, eval_file=eval_name,
             final_time_s=float(result_dict["final_time_s"]), reason=None,
         )
         print(
@@ -360,6 +434,7 @@ def _summary_record(
     *,
     status: str,
     states_file: str | None,
+    eval_file: str | None,
     final_time_s: float | None,
     reason: str | None,
 ) -> dict[str, Any]:
@@ -374,9 +449,78 @@ def _summary_record(
         "target_source": src.get("target_source"),
         "status": status,
         "states_file": states_file,
+        "eval_file": eval_file,
         "final_time_s": final_time_s,
         "reason": reason,
     }
+
+
+def _eval_filename(states_name: str) -> str:
+    """``<flight>_states.json`` → ``<flight>_eval.json`` (same identity key)."""
+    return states_name.removesuffix("_states.json") + "_eval.json"
+
+
+def _reference_filename(states_name: str) -> str:
+    """``<flight>_states.json`` → ``<flight>_reference_eval.json`` (same identity key)."""
+    return states_name.removesuffix("_states.json") + "_reference_eval.json"
+
+
+REFERENCES_DIR = "references"
+
+
+def write_reference_records(
+    scenarios: list[FlightScenario],
+    observed_tracks: str | Path | list[dict[str, Any]],
+    *,
+    output_dir: str | Path,
+    references_dir: str = REFERENCES_DIR,
+) -> list[Path]:
+    """One reference eval record per scenario, from its OBSERVED track.
+
+    ``observed_tracks`` is the CZML-input flight list the scenarios came from
+    (e.g. a landings file). Each scenario's flight is looked up in it by its full
+    identity ``(id, icao24, landing_time_utc)`` — the same key the output
+    filenames disambiguate on. The track becomes a reference record in the
+    evaluation contract (per-sample kinematics via
+    ``flight_scenarios.state_samples_from_track``, EMPTY controls, the SAME target
+    the optimizer flies to), written under ``<output_dir>/<references_dir>/`` and
+    named by the scenario's identity — so the batch can point every eval record at
+    its reference deterministically (``reference_file``). Missing flights raise:
+    references and solves must come from the same dataset.
+    """
+    if isinstance(observed_tracks, (str, Path)):
+        flights = json.loads(Path(observed_tracks).read_text(encoding="utf-8"))
+    else:
+        flights = observed_tracks
+    by_identity = {
+        (f.get("id"), f.get("icao24"), f.get("landing_time_utc")): f for f in flights
+    }
+    out = Path(output_dir) / references_dir
+    out.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    for index, scenario in enumerate(scenarios):
+        src = scenario.source
+        if scenario.target is None:
+            raise ValueError(
+                f"scenario {src.get('id')!r} has no target state; build scenarios with "
+                "flight_scenarios (its build_scenario populates target) first."
+            )
+        identity = (src.get("id"), src.get("icao24"), src.get("landing_time_utc"))
+        flight = by_identity.get(identity)
+        if flight is None:
+            raise ValueError(
+                f"no observed flight in the reference-tracks file for identity {identity}"
+            )
+        timed_states = state_samples_from_track(
+            flight["waypoints"], mass_kg=scenario.initial.m,
+            window_s=float(src.get("window_s") or DEFAULT_WINDOW_S),
+        )
+        record = reference_evaluation_record(scenario.initial, scenario.target, timed_states, src)
+        path = out / _reference_filename(_scenario_filename(scenario, index))
+        path.write_text(json.dumps(record, indent=2), encoding="utf-8")
+        written.append(path)
+    print(f"✓ wrote {len(written)} reference record(s) -> {out}")
+    return written
 
 
 def _compact_time(iso: str | None) -> str | None:
@@ -635,10 +779,10 @@ def _iaf_result(
     optimizer_states = _node_states_to_samples(
         [initial_row] + dense_rows, best.final_time, best.initial.m,
     )
-    simulator_states = simulate_controls(
+    rollout = _require_usable_rollout(rollout_controls(
         best.initial, best.controls, best.final_time, aircraft, dt=rollout_dt_s,
         segment_durations=best.segment_durations,
-    )
+    ))
     source = {
         **scenario.source,
         "chosenIaf": best.pc.waypoints[0].ident,
@@ -646,7 +790,11 @@ def _iaf_result(
         "iafCandidates": candidates,
         "iafSelection": selection,
     }
-    return ScenarioOptimization(source, best.final_time, optimizer_states, simulator_states)
+    return ScenarioOptimization(
+        source, best.final_time, optimizer_states,
+        [StateSample.from_state(s.t, s.state) for s in rollout],
+        evaluation=evaluation_record(best.initial, scenario.target, rollout, source),
+    )
 
 
 def optimize_scenario_min_time_iaf(
@@ -745,7 +893,7 @@ _IAF_SELECTORS = {
 
 def _optimize_one_scenario_iaf(
     payload: tuple[int, FlightScenario, dict[str, Any]],
-) -> tuple[int, str, dict[str, Any] | None, str | None]:
+) -> tuple[int, str, dict[str, Any] | None, dict[str, Any] | None, str | None]:
     """Process-pool worker for the constrained-IAF batch; ``params['selection']`` chooses the
     per-scenario strategy (mirrors ``_optimize_one_scenario``)."""
     index, scenario, params = payload
@@ -755,9 +903,9 @@ def _optimize_one_scenario_iaf(
     try:
         result = selector(scenario, **params)
     except Exception as exc:  # noqa: BLE001 — skip + log per-scenario failures
-        return (index, flight_id, None,
+        return (index, flight_id, None, None,
                 f"{type(exc).__name__}: {str(exc).splitlines()[0][:90]}")
-    return (index, flight_id, result.to_dict(), None)
+    return (index, flight_id, result.to_dict(), result.evaluation, None)
 
 
 def optimize_scenarios_constrained_iaf(
@@ -774,6 +922,7 @@ def optimize_scenarios_constrained_iaf(
     jobs: int = 0,
     verbose: bool = False,
     scenarios_label: str | None = None,
+    references_dir: str | None = None,
 ) -> list[Path]:
     """Batch constrained-IAF optimization — one trajectory per scenario, IAF chosen by ``selection``.
 
@@ -799,20 +948,37 @@ def optimize_scenarios_constrained_iaf(
     failures: list[tuple[str, str]] = []
     records: dict[int, dict[str, Any]] = {}
 
-    def _handle(record: tuple[int, str, dict[str, Any] | None, str | None]) -> None:
-        index, flight_id, result_dict, error = record
+    def _handle(
+        record: tuple[int, str, dict[str, Any] | None, dict[str, Any] | None, str | None],
+    ) -> None:
+        index, flight_id, result_dict, eval_dict, error = record
+        scenario = scenarios[index]
+        name = _scenario_filename(scenario, index)
+        eval_name = _eval_filename(name)
+        reference_file = (
+            f"{references_dir}/{_reference_filename(name)}" if references_dir else None
+        )
         if error is not None:
             failures.append((flight_id, error))
+            failed_record = failed_evaluation_record(
+                scenario.initial, scenario.target, scenario.source, error,
+            )
+            if reference_file:
+                failed_record["reference_file"] = reference_file
+            (out / eval_name).write_text(json.dumps(failed_record, indent=2), encoding="utf-8")
             records[index] = _summary_record(
-                scenarios[index], status="failed", states_file=None, final_time_s=None, reason=error,
+                scenario, status="failed", states_file=None, eval_file=eval_name,
+                final_time_s=None, reason=error,
             )
             print(f"✗ {flight_id}: skipped ({error.split(':', 1)[0]})")
             return
-        name = _scenario_filename(scenarios[index], index)
         (out / name).write_text(json.dumps(result_dict, indent=2), encoding="utf-8")
+        if reference_file:
+            eval_dict["reference_file"] = reference_file
+        (out / eval_name).write_text(json.dumps(eval_dict, indent=2), encoding="utf-8")
         written.append(out / name)
         record_row = _summary_record(
-            scenarios[index], status="solved", states_file=name,
+            scenario, status="solved", states_file=name, eval_file=eval_name,
             final_time_s=float(result_dict["final_time_s"]), reason=None,
         )
         record_row["chosenIaf"] = result_dict["source"].get("chosenIaf")
@@ -874,6 +1040,13 @@ def main() -> None:
              "(best paired with --jobs 1, since parallel logs interleave)",
     )
     parser.add_argument(
+        "--reference-tracks", default=None,
+        help="the observed-tracks CZML-input JSON the scenarios came from (e.g. a "
+             "landings file); when given, reference eval records are written FIRST "
+             "(observed tracks -> <output-dir>/references/) and every eval record "
+             "points at its reference via reference_file",
+    )
+    parser.add_argument(
         "--constrained-iaf", action="store_true",
         help="constrained-IAF mode: per scenario, optimize from its runway's RNAV(GPS) procedure "
              "IAFs with path constraints and keep one trajectory (IAF chosen by --iaf-selection)",
@@ -895,6 +1068,12 @@ def main() -> None:
     args = parser.parse_args()
 
     scenarios = load_scenarios(args.scenarios)
+    # Reference eval records come FIRST (the observed baseline exists whether or not a
+    # solve succeeds); the batch then points every eval record at its reference.
+    references_dir = None
+    if args.reference_tracks:
+        write_reference_records(scenarios, args.reference_tracks, output_dir=args.output_dir)
+        references_dir = REFERENCES_DIR
     if args.constrained_iaf:
         paths = optimize_scenarios_constrained_iaf(
             scenarios,
@@ -909,6 +1088,7 @@ def main() -> None:
             jobs=args.jobs,
             verbose=args.verbose,
             scenarios_label=args.scenarios,
+            references_dir=references_dir,
         )
     else:
         paths = optimize_scenarios(
@@ -921,6 +1101,7 @@ def main() -> None:
             jobs=args.jobs,
             verbose=args.verbose,
             scenarios_label=args.scenarios,
+            references_dir=references_dir,
         )
     print(f"✓ wrote {len(paths)} state file(s) to {args.output_dir}")
 

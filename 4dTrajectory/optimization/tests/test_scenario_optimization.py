@@ -20,8 +20,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+import evaluation_export as ee  # noqa: E402
 import scenario_optimization as so  # noqa: E402
-from aerodynamic_model.common import GeodeticState  # noqa: E402
+from aerodynamic_model.common import GeodeticState, LoadFactorControl  # noqa: E402
+from aerodynamic_model.rollout import RolloutSample  # noqa: E402
 from aircraft.aero_params import aero_params_for_aircraft  # noqa: E402
 from aircraft.aircraft_sets import A320  # noqa: E402
 from flight_scenarios import FlightScenario  # noqa: E402
@@ -36,6 +38,19 @@ def _scenario(*, target: GeodeticState | None) -> FlightScenario:
         source={"id": "AFR074", "runway": "05L"},
         target=target,
     )
+
+
+def _rollout_samples(initial: GeodeticState) -> list[RolloutSample]:
+    """Three hand-built rollout samples spanning two control segments."""
+    c0 = LoadFactorControl(thrust=1.0e5, bank_rad=0.1, load_factor=1.02)
+    c1 = LoadFactorControl(thrust=8.0e4, bank_rad=-0.1, load_factor=0.98)
+    mid = GeodeticState(35.7, -78.6, 1500.0, 120.0, 1.4, -0.05, initial.m)
+    end = GeodeticState(35.8, -78.7, 1000.0, 110.0, 1.3, -0.05, initial.m)
+    return [
+        RolloutSample(0.0, initial, c0, 0),
+        RolloutSample(5.0, mid, c0, 0),
+        RolloutSample(10.0, end, c1, 1),
+    ]
 
 
 def test_node_states_to_samples_assigns_even_times():
@@ -99,14 +114,22 @@ def test_optimize_scenarios_skips_failures_and_continues(monkeypatch, tmp_path):
     # A real landings file mixes feasible and infeasible scenarios; one failure must not
     # abort the batch. Stub the per-scenario solve: first raises, second succeeds.
     target = GeodeticState(35.59, -78.49, 500.0, 80.0, 1.5, -0.05, A320.landing_mass)
+    # Distinct identities so the two scenarios write distinct files (as real batches do).
     scenarios = [_scenario(target=target), _scenario(target=target)]
+    scenarios[0].source["id"] = "BAD001"
     attempts = {"n": 0}
 
     def fake_optimize_scenario(scenario, **kwargs):
         attempts["n"] += 1
         if attempts["n"] == 1:
             raise ValueError("Direct collocation free-time optimization failed: Infeasible_Problem_Detected")
-        return so.ScenarioOptimization(scenario.source, 12.0, [], [])
+        return so.ScenarioOptimization(
+            scenario.source, 12.0, [], [],
+            evaluation=ee.evaluation_record(
+                scenario.initial, scenario.target, _rollout_samples(scenario.initial),
+                scenario.source,
+            ),
+        )
 
     monkeypatch.setattr(so, "optimize_scenario", fake_optimize_scenario)
     # jobs=1 (serial): the stub + shared counter live in this process, so the solve must
@@ -115,6 +138,22 @@ def test_optimize_scenarios_skips_failures_and_continues(monkeypatch, tmp_path):
     written = so.optimize_scenarios(scenarios, output_dir=tmp_path, jobs=1)
     assert attempts["n"] == 2      # both attempted — did NOT abort on the first failure
     assert len(written) == 1       # the infeasible one is skipped, the feasible one written
+
+    # BOTH scenarios got an evaluation record: the solved one with aligned lists, the
+    # failed one with EMPTY lists (that is how the evaluation batch sees the solve rate).
+    eval_files = sorted(tmp_path.glob("*_eval.json"))
+    assert len(eval_files) == 2
+    payloads = [json.loads(p.read_text(encoding="utf-8")) for p in eval_files]
+    solved = [p for p in payloads if p["states"]]
+    failed = [p for p in payloads if not p["states"]]
+    assert len(solved) == 1 and len(failed) == 1
+    assert len(solved[0]["controls"]) == len(solved[0]["states"])
+    assert failed[0]["controls"] == [] and failed[0]["final_time_s"] is None
+    assert failed[0]["reason"].startswith("ValueError")
+    assert failed[0]["target_state"]["lat"] == pytest.approx(35.59)
+
+    summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
+    assert all(row["eval_file"].endswith("_eval.json") for row in summary["results"])
 
 
 def test_resolve_jobs_auto_and_explicit():
@@ -131,18 +170,129 @@ def test_optimize_one_scenario_returns_record(monkeypatch):
     target = GeodeticState(35.59, -78.49, 500.0, 80.0, 1.5, -0.05, A320.landing_mass)
     scenario = _scenario(target=target)
 
-    monkeypatch.setattr(so, "optimize_scenario",
-                        lambda s, **k: so.ScenarioOptimization(s.source, 12.0, [], []))
-    index, flight_id, result_dict, error = so._optimize_one_scenario((3, scenario, {}))
+    monkeypatch.setattr(
+        so, "optimize_scenario",
+        lambda s, **k: so.ScenarioOptimization(s.source, 12.0, [], [],
+                                               evaluation={"states": [], "controls": []}),
+    )
+    index, flight_id, result_dict, eval_dict, error = so._optimize_one_scenario((3, scenario, {}))
     assert index == 3 and flight_id == "AFR074" and error is None
     assert result_dict["final_time_s"] == 12.0
+    assert eval_dict == {"states": [], "controls": []}   # the evaluation record rides along
 
     def boom(scenario, **kwargs):
         raise ValueError("Infeasible_Problem_Detected")
     monkeypatch.setattr(so, "optimize_scenario", boom)
-    index, flight_id, result_dict, error = so._optimize_one_scenario((4, scenario, {}))
-    assert index == 4 and result_dict is None
+    index, flight_id, result_dict, eval_dict, error = so._optimize_one_scenario((4, scenario, {}))
+    assert index == 4 and result_dict is None and eval_dict is None
     assert error.startswith("ValueError:")
+
+
+def test_evaluation_record_aligns_controls_with_states():
+    # The eval record maps the rollout samples 1:1: controls[i] is the ZOH control
+    # active at states[i].t — no re-derivation of the control schedule.
+    initial = GeodeticState(35.6, -78.5, 2000.0, 130.0, 1.5, -0.05, 60000.0)
+    target = GeodeticState(35.9, -78.8, 130.0, 70.0, 0.8, -0.05, 60000.0)
+    record = ee.evaluation_record(initial, target, _rollout_samples(initial), {"id": "AFR074"})
+    assert len(record["states"]) == len(record["controls"]) == 3
+    assert record["final_time_s"] == 10.0
+    assert record["states"][0] == {"t": 0.0, "lat": 35.6, "lon": -78.5, "alt": 2000.0,
+                                   "V": 130.0, "psi": 1.5, "gamma": -0.05, "m": 60000.0}
+    # ZOH: the mid sample still flies segment 0's control; the last flies segment 1's.
+    assert record["controls"][1]["thrust"] == pytest.approx(1.0e5)
+    assert record["controls"][2]["thrust"] == pytest.approx(8.0e4)
+    assert record["target_state"]["alt"] == 130.0
+    assert record["source"] == {"id": "AFR074"}
+
+
+def test_failed_evaluation_record_keeps_boundary_conditions_with_empty_lists():
+    initial = GeodeticState(35.6, -78.5, 2000.0, 130.0, 1.5, -0.05, 60000.0)
+    record = ee.failed_evaluation_record(initial, None, {"id": "BAD"}, "ValueError: infeasible")
+    assert record["states"] == [] and record["controls"] == []
+    assert record["final_time_s"] is None and record["target_state"] is None
+    assert record["initial_state"]["lat"] == 35.6
+    assert record["reason"] == "ValueError: infeasible"
+
+
+def test_eval_filename_mirrors_states_filename():
+    assert so._eval_filename("EJA969_05R_ad7f04_20260618T213736Z_states.json") == \
+        "EJA969_05R_ad7f04_20260618T213736Z_eval.json"
+    assert so._reference_filename("EJA969_05R_states.json") == "EJA969_05R_reference_eval.json"
+
+
+def test_write_reference_records_from_observed_tracks(tmp_path):
+    # A due-north 100 m/s descending synthetic track matching the scenario's identity.
+    import math
+    lat_step = 500.0 / (math.pi / 180.0 * 6378137.0)  # 500 m of latitude in degrees
+    waypoints = [[10.0 + 5.0 * k, -78.5, 35.6 + lat_step * k, 2000.0 - 50.0 * k]
+                 for k in range(4)]
+    flight = {"id": "AFR074", "icao24": "ad7f04", "landing_time_utc": "2026-06-18T21:37:36Z",
+              "waypoints": waypoints}
+    target = GeodeticState(35.62, -78.5, 1850.0, 100.0, math.pi / 2, -0.1, 60000.0)
+    scenario = _scenario(target=target)
+    scenario.source.update({"icao24": "ad7f04", "landing_time_utc": "2026-06-18T21:37:36Z"})
+
+    written = so.write_reference_records([scenario], [flight], output_dir=tmp_path)
+    assert written == [tmp_path / "references" /
+                       "AFR074_05L_ad7f04_20260618T213736Z_reference_eval.json"]
+    record = json.loads(written[0].read_text(encoding="utf-8"))
+    assert record["controls"] == [] and len(record["states"]) == 4
+    assert record["final_time_s"] == pytest.approx(15.0)          # rebased to 0
+    assert record["states"][0]["t"] == 0.0 and record["states"][0]["lat"] == 35.6
+    assert record["states"][1]["V"] == pytest.approx(math.hypot(100.0, 10.0), rel=1e-3)
+    assert record["target_state"]["alt"] == 1850.0                # the scenario's target
+    assert record["states"][0]["m"] == scenario.initial.m
+
+    # A scenario whose flight is missing from the landings fails loudly.
+    orphan = _scenario(target=target)
+    orphan.source["id"] = "GHOST"
+    with pytest.raises(ValueError, match="no observed flight"):
+        so.write_reference_records([orphan], [flight], output_dir=tmp_path)
+
+
+def test_batch_embeds_reference_pointers(monkeypatch, tmp_path):
+    target = GeodeticState(35.59, -78.49, 500.0, 80.0, 1.5, -0.05, A320.landing_mass)
+    scenarios = [_scenario(target=target), _scenario(target=target)]
+    scenarios[0].source["id"] = "BAD001"
+
+    def fake_optimize_scenario(scenario, **kwargs):
+        if scenario.source["id"] == "BAD001":
+            raise ValueError("Infeasible_Problem_Detected")
+        return so.ScenarioOptimization(
+            scenario.source, 12.0, [], [],
+            evaluation=ee.evaluation_record(
+                scenario.initial, scenario.target, _rollout_samples(scenario.initial),
+                scenario.source,
+            ),
+        )
+
+    monkeypatch.setattr(so, "optimize_scenario", fake_optimize_scenario)
+    so.optimize_scenarios(scenarios, output_dir=tmp_path, jobs=1, references_dir="references")
+
+    solved = json.loads((tmp_path / "AFR074_05L_eval.json").read_text(encoding="utf-8"))
+    failed = json.loads((tmp_path / "BAD001_05L_eval.json").read_text(encoding="utf-8"))
+    assert solved["reference_file"] == "references/AFR074_05L_reference_eval.json"
+    assert failed["reference_file"] == "references/BAD001_05L_reference_eval.json"
+
+
+def test_require_usable_rollout_rejects_first_step_truncation():
+    # An envelope exit at the very first integration step leaves a single-sample
+    # rollout (zero horizontal extent) — that must FAIL the scenario (worker catches
+    # it into a failed eval record) instead of exporting a degenerate "solved" one.
+    initial = GeodeticState(35.6, -78.5, 2000.0, 130.0, 1.5, -0.05, 60000.0)
+    control = LoadFactorControl(thrust=1e5, bank_rad=0.0, load_factor=1.0)
+    with pytest.raises(ValueError, match="envelope"):
+        so._require_usable_rollout([RolloutSample(0.0, initial, control, 0)])
+    usable = [RolloutSample(0.0, initial, control, 0), RolloutSample(1.0, initial, control, 0)]
+    assert so._require_usable_rollout(usable) is usable
+
+
+def test_rollout_controls_carries_active_control_per_sample():
+    initial = GeodeticState(35.6, -78.5, 2000.0, 130.0, 1.5, -0.05, A320.mass.max_takeoff_kg)
+    node_control = [[40000.0, 0.0, 1.0], [50000.0, 0.1, 1.01]]
+    samples = so.rollout_controls(initial, node_control, final_time=4.0, aircraft=A320, dt=1.0)
+    assert samples[0].t == 0.0 and samples[0].control.thrust == 40000.0
+    assert samples[-1].control.thrust == 50000.0 and samples[-1].segment_index == 1
 
 
 def test_simulate_controls_rolls_forward():

@@ -7,6 +7,7 @@ import pytest
 from flight_scenarios.start_state import (
     final_state_from_track,
     initial_state_from_track,
+    state_samples_from_track,
 )
 
 # A synthetic 100 m/s due-EAST, level track at the equator. Using the WGS84 semi-major
@@ -88,3 +89,22 @@ def test_velocity_is_robust_to_a_stuck_sample():
     s = final_state_from_track(stuck, mass_kg=78000.0)
     assert s.V == pytest.approx(100.0, rel=2e-2)          # not dragged down by the stuck sample
     assert s.psi == pytest.approx(0.0, abs=1e-2)          # still due east (math-ENU)
+
+
+def test_state_samples_from_track_derives_every_sample():
+    samples = state_samples_from_track(DUE_EAST_LEVEL, mass_kg=78000.0)
+    assert len(samples) == len(DUE_EAST_LEVEL)
+    assert [t for t, _ in samples] == pytest.approx([0.0, 5.0, 10.0])
+    for _, state in samples:
+        assert state.V == pytest.approx(100.0, rel=1e-4)   # 500 m per 5 s window
+        assert state.psi == pytest.approx(0.0, abs=1e-9)   # due east (math-ENU)
+        assert state.gamma == pytest.approx(0.0, abs=1e-9)
+        assert state.m == 78000.0
+    # positions read straight off the samples
+    assert samples[1][1].longitude == pytest.approx(_LON_STEP_DEG)
+    assert samples[-1][1].altitude == 1000.0
+
+
+def test_state_samples_from_track_requires_two_waypoints():
+    with pytest.raises(ValueError):
+        state_samples_from_track([[0.0, 0.0, 0.0, 1000.0]], mass_kg=78000.0)

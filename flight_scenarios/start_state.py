@@ -83,6 +83,34 @@ def final_state_from_track(
     )
 
 
+def state_samples_from_track(
+    waypoints: list[Waypoint],
+    *,
+    mass_kg: float,
+    window_s: float = DEFAULT_WINDOW_S,
+) -> list[tuple[float, GeodeticState]]:
+    """The physics state at EVERY track sample, times rebased to 0 at the first.
+
+    The per-sample analogue of the boundary estimators above (e.g. for expressing
+    an observed track as a reference state sequence): position read straight off
+    each sample; ``V / psi / gamma`` from the same least-squares velocity fit,
+    over a window CENTERED on the sample (clipped at the track ends, falling back
+    to the nearest pair when the window holds a single report).
+    """
+    if len(waypoints) < 2:
+        raise ValueError("need at least two waypoints to estimate V / psi / gamma")
+    t0 = waypoints[0][0]
+    samples: list[tuple[float, GeodeticState]] = []
+    for index, (t, lon, lat, alt) in enumerate(waypoints):
+        V, psi, gamma = _velocity_lsq(_window_around(waypoints, index, window_s))
+        samples.append((
+            t - t0,
+            GeodeticState(latitude=lat, longitude=lon, altitude=alt,
+                          V=V, psi=psi, gamma=gamma, m=mass_kg),
+        ))
+    return samples
+
+
 # ── Velocity estimation ───────────────────────────────────────────────────────
 
 def _window_from_start(waypoints: list[Waypoint], window_s: float) -> list[Waypoint]:
@@ -97,6 +125,17 @@ def _window_from_end(waypoints: list[Waypoint], window_s: float) -> list[Waypoin
     tN = waypoints[-1][0]
     window = [wp for wp in waypoints if tN - wp[0] <= window_s]
     return window if len(window) >= 2 else waypoints[-2:]
+
+
+def _window_around(waypoints: list[Waypoint], index: int, window_s: float) -> list[Waypoint]:
+    """Samples within ``window_s/2`` of sample ``index`` (at least a neighbouring pair)."""
+    t_center = waypoints[index][0]
+    half = window_s / 2.0
+    window = [wp for wp in waypoints if abs(wp[0] - t_center) <= half]
+    if len(window) >= 2:
+        return window
+    low = max(index - 1, 0)
+    return waypoints[low:low + 2]
 
 
 def _velocity_lsq(window: list[Waypoint]) -> tuple[float, float, float]:

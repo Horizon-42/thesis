@@ -38,6 +38,7 @@ MODELING_SUITES=(
   aerodynamic_model/tests
   4dTrajectory
   aircraft
+  evaluation/tests
   flight_scenarios
   geokit/tests
   trajectory_data_process
