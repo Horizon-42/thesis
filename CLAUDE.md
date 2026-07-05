@@ -113,6 +113,15 @@ The project serves dual purposes: thesis visualization/validation, and reusable 
 
 ## Changelog
 
+### 2026-07-05 — In-app evaluation report window (Optimization block "Details")
+
+The Observe dock's Optimization block gains a **Details** button opening a full evaluation view inside the app — the same data as the standalone `python -m evaluation.visualize` HTML, restyled to the workbench.
+
+- **Single backend exit, enforced by construction**: the comparison builder now PUBLISHES the evaluation report verbatim (`publish_evaluation_report` → `comparison/<category>/evaluation_report.json`) whenever `--evaluation-report` is given; the frontend fetches that copy and ONLY formats/sorts/plots (documented in `src/data/evaluationReport.ts` — "if a new metric is needed, add it to evaluation/metrics.py"). No metric is ever recomputed client-side.
+- **`EvaluationReportWindow.tsx`** (new): a draggable floating window reusing the Dynamics-Comparison window shell (portal to body, pointer-capture drag, same `.dyncmp-*` chart styling): summary cards (total / solve / success / among-solved / mean T / mean Δt vs observed), the 8260.58D gates note (values from `report.thresholds`), the aggregates table, three SVG charts (per-flight final lateral deviation — log scale with the gate line, sorted by |deviation| as a presentation choice; final vertical deviation with the WCH window band; optimized-vs-observed flight-time scatter) and the full per-trajectory verdict table (sticky header, gate-fail rows flagged, unsolved grayed with the solver reason). Track overlays are deliberately NOT duplicated — the 3D scene renders every flight's paths already.
+- **`OptimizationSummary`**: header row with the Details button; the report is fetched lazily on first open and cached per `(airport, category)` (switching closes the window and never shows a stale report); a missing report (pre-evaluation categories) shows "No evaluation report published for this category — re-run the pipeline's czml tail."; `useFlightOptimizerData` exposes `categoryDir`. New `airportEvaluationReportUrl` + `src/data/evaluationReport.ts` (typed mirror of the report schema + validator).
+- Tests: EvaluationReportWindow (cards/aggregates/verdict-row flags from a fixture, Close, no-reference/no-solved degradation), OptimizationSummary (+3: Details disabled without a category, fetch+open with the right URL, missing-report message), builder `publish_evaluation_report` verbatim copy. **18 builder python + 407 frontend tests pass, tsc clean.** Verified in-browser on the REAL freshly re-run KSMF runway_cons (712/714 solved, 703/714 successful, mean Δt −139.8 s; 5 off-target yellow flights): left-dock metrics all render (99.7% / 98.5% / 123 m / 5:32), the window's cards/charts/table render, the pre-evaluation asdb category shows the helpful error. Zero console errors.
+
 ### 2026-07-05 — Comparison CZML: off-target yellow + evaluation metrics into the frontend
 
 Two user asks: mark solved-but-missed-the-target trajectories YELLOW in the comparison scene, and surface the evaluation batch metrics in the frontend (the Observe dock's Optimization block had placeholders waiting for them).

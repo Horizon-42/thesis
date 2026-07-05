@@ -394,6 +394,18 @@ def build_runway_comparison(
     return [document] + entities, index_records
 
 
+def publish_evaluation_report(evaluation_report: dict[str, Any], out_dir: Path) -> Path:
+    """Publish the evaluation report VERBATIM into the category dir the frontend serves.
+
+    The frontend's detailed evaluation view visualizes this copy directly — every number
+    in it was computed by ``python -m evaluation`` (the one backend exit); the frontend
+    never recomputes a metric.
+    """
+    path = out_dir / "evaluation_report.json"
+    path.write_text(json.dumps(evaluation_report, indent=2), encoding="utf-8")
+    return path
+
+
 def load_verdicts(evaluation_report: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Per-trajectory verdict rows of an evaluation report, keyed by eval-record filename.
 
@@ -576,6 +588,9 @@ def main() -> None:
     # Solve stats from the run's summary.json + (when given) the evaluation report's batch
     # metrics — nothing recomputed here.
     index["optimization"] = optimization_stats(summary, evaluation_report)
+    if evaluation_report is not None:
+        report_path = publish_evaluation_report(evaluation_report, out_dir)
+        print(f"✓ published evaluation report -> {report_path}")
 
     index_path = out_dir / "comparison_index.json"
     index_path.write_text(json.dumps(index, indent=2), encoding="utf-8")

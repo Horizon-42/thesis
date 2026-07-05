@@ -94,6 +94,12 @@ export function airportComparisonIndexUrl(airportCode: string, categoryDir: stri
   return `${airportComparisonRootUrl(airportCode)}/${categoryDir}/comparison_index.json`;
 }
 
+/** The category's published evaluation report (a verbatim copy of the backend's
+ * `python -m evaluation` output — the frontend only visualizes it). */
+export function airportEvaluationReportUrl(airportCode: string, categoryDir: string): string {
+  return `${airportComparisonRootUrl(airportCode)}/${categoryDir}/evaluation_report.json`;
+}
+
 /** One runway's comparison CZML within a category, named as the index's `czml` field. */
 export function airportComparisonCzmlUrl(
   airportCode: string,

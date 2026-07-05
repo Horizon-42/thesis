@@ -2917,6 +2917,128 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 
 .flight-table tr.selected td { background: #1a3a6a; }
 
+
+/* Optimization block header row: title + the Details (evaluation report) button. */
+.optimization-summary-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.optimization-summary-details {
+  background: #1d2a44;
+  color: #9fc3ff;
+  border: 1px solid #33507e;
+  border-radius: 4px;
+  font-size: 10px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.optimization-summary-details:hover:not(:disabled) {
+  background: #24365a;
+}
+
+.optimization-summary-details:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.optimization-summary-error {
+  color: #ff9d7a;
+  font-size: 10px;
+  margin: 4px 0 0;
+}
+
+/* ── Evaluation report window (reuses the dyncmp floating-window shell) ────── */
+.eval-report-window {
+  width: min(760px, 92vw);
+}
+
+.eval-report-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.eval-report-card {
+  background: #16223a;
+  border: 1px solid #2a3550;
+  border-radius: 6px;
+  padding: 6px 12px;
+  min-width: 96px;
+}
+
+.eval-report-card-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: #e8f1ff;
+}
+
+.eval-report-card.is-ok .eval-report-card-value {
+  color: #3fbf72;
+}
+
+.eval-report-card.is-bad .eval-report-card-value {
+  color: #e05b5b;
+}
+
+.eval-report-card-label {
+  font-size: 10px;
+  color: #8ea4c4;
+  margin-top: 2px;
+}
+
+.eval-report-gates {
+  font-size: 10.5px;
+  color: #8ea4c4;
+  line-height: 1.45;
+  margin: 0 0 10px;
+}
+
+.eval-report-aggregates {
+  margin-bottom: 12px;
+}
+
+.eval-report-empty {
+  color: #8ea4c4;
+  font-size: 11px;
+}
+
+.eval-report-rows {
+  max-height: 240px;
+  overflow: auto;
+  border: 1px solid #2a3550;
+  border-radius: 6px;
+}
+
+.eval-report-table {
+  width: 100%;
+}
+
+.eval-report-table thead th {
+  position: sticky;
+  top: 0;
+  background: #16223a;
+}
+
+.eval-report-table tr.eval-row-fail {
+  color: #ffb3a1;
+}
+
+.eval-report-table tr.eval-row-unsolved {
+  color: #6d7d96;
+}
+
+.eval-report-table td.eval-row-why {
+  text-align: left;
+  white-space: normal;
+  max-width: 260px;
+  font-size: 10px;
+}
+
 /* ── Optimization summary (below the flight list) ─────────────────────────── */
 .optimization-summary {
   color: #c8d8ec;

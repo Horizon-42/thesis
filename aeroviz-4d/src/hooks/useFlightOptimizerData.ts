@@ -40,8 +40,10 @@ export interface FlightOptimizerData {
   byFlightId: Map<string, FlightOptimizerDatum>;
   /** True when the comparison overlay is on and a category is selected → show the optimized column. */
   comparisonActive: boolean;
-  /** The loaded category's optimization stats (solve rate + placeholders), or null. */
+  /** The loaded category's optimization stats (solve rate + evaluation metrics), or null. */
   stats: OptimizationStats | null;
+  /** The category dir the stats were read from (e.g. "runway_cons"), or null. */
+  categoryDir: string | null;
 }
 
 const EMPTY: Map<string, FlightOptimizerDatum> = new Map();
@@ -103,5 +105,8 @@ export function useFlightOptimizerData(): FlightOptimizerData {
     };
   }, [activeAirportCode, categoryDir]);
 
-  return useMemo(() => ({ byFlightId, comparisonActive, stats }), [byFlightId, comparisonActive, stats]);
+  return useMemo(
+    () => ({ byFlightId, comparisonActive, stats, categoryDir }),
+    [byFlightId, comparisonActive, stats, categoryDir],
+  );
 }

@@ -317,6 +317,17 @@ def test_optimization_stats_merges_summary_and_report():
     assert empty["avgStateErrorM"] is None and empty["avgTimeS"] is None
 
 
+def test_publish_evaluation_report_copies_verbatim(tmp_path):
+    # The frontend's evaluation view reads this published copy — every number in it comes
+    # from `python -m evaluation` (the one backend exit), so the copy must be verbatim.
+    from build_scenario_comparison_czml import publish_evaluation_report
+
+    report = {"total": 3, "solve_rate": 0.5, "trajectories": [{"id": "X"}]}
+    path = publish_evaluation_report(report, tmp_path)
+    assert path == tmp_path / "evaluation_report.json"
+    assert json.loads(path.read_text(encoding="utf-8")) == report
+
+
 def test_upsert_category_adds_and_replaces(tmp_path):
     manifest = tmp_path / "categories.json"
     _upsert_category(manifest, key="runway", label="Runway target", directory="runway", group_count=10)
