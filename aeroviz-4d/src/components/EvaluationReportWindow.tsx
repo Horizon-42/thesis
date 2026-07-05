@@ -111,13 +111,16 @@ const DeviationProfile = memo(function DeviationProfile({
     CHART.left + (sorted.length > 1 ? (i / (sorted.length - 1)) * plotWidth : plotWidth / 2);
 
   // Decade ticks (…0.1, 1, 10, 100, 1000…), signed for the symlog axis + 0.
+  // On the symlog axis every |v| < 1 collapses onto ~0 (log10(1+|v|) ≈ 0), so the
+  // sub-1 decades (±0.01, ±0.1) would stack their labels on top of the 0 tick —
+  // skip them there and keep only 0, ±1, ±10, ±100…, which space out cleanly.
   const ticks = useMemo(() => {
     const out: number[] = [];
     for (let e = -2; e <= 5; e += 1) {
       const v = 10 ** e;
       if (scale === "log") {
         if (logScale(v) >= lo && logScale(v) <= hi) out.push(v);
-      } else {
+      } else if (e >= 0) {
         for (const s of [v, -v]) {
           if (symlogScale(s) >= lo && symlogScale(s) <= hi) out.push(s);
         }
