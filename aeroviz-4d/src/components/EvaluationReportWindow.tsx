@@ -41,7 +41,7 @@ function formatPct(value: number | null | undefined): string {
 }
 
 /** Shared axes math for the small SVG charts. */
-const CHART = { width: 320, height: 170, left: 46, right: 10, top: 12, bottom: 26 };
+const CHART = { width: 320, height: 186, left: 50, right: 12, top: 14, bottom: 30 };
 
 function plotFrame() {
   return {
@@ -50,39 +50,84 @@ function plotFrame() {
   };
 }
 
+const LOG_FLOOR = 0.01;
+/** log10 magnitude (deviations span 0.1 m … km). */
+const logScale = (v: number) => Math.log10(Math.max(Math.abs(v), LOG_FLOOR));
+/** Signed symlog: linear feel near 0, log beyond — keeps the ±m window visible
+ * next to km-scale outliers. */
+const symlogScale = (v: number) => Math.sign(v) * Math.log10(1 + Math.abs(v));
+
+interface ProfilePoint {
+  label: string;
+  value: number;
+  /** Whether this flight passes THIS chart's own gate (colours the dot). */
+  pass: boolean;
+}
+
 /**
- * Per-flight deviation bars, sorted descending (a presentation choice — the
- * values themselves come straight from the report rows). Optional log scale
- * (deviations span 0.1 m … km), gate line, and window band.
+ * Per-flight deviation profile: one dot per solved flight, RANKED by deviation
+ * (a presentation choice — the values come straight from the report rows), on a
+ * log/symlog axis so metre-scale landings and km-scale misses share one plot.
+ * The chart's own gate is drawn (dashed line or shaded window) and each dot is
+ * coloured by whether the flight passes THAT gate.
  */
-const DeviationBars = memo(function DeviationBars({
+const DeviationProfile = memo(function DeviationProfile({
   title,
-  values,
-  log = false,
+  points,
+  scale,
   gate,
   band,
 }: {
   title: string;
-  values: { label: string; value: number }[];
-  log?: boolean;
-  /** Horizontal limit line (e.g. the lateral gate). */
+  points: ProfilePoint[];
+  scale: "log" | "symlog";
+  /** Dashed limit line (the lateral gate), in metres. */
   gate?: number;
-  /** Shaded acceptance window [low, high] (e.g. the vertical WCH window). */
+  /** Shaded acceptance window [low, high] (the vertical WCH window), in metres. */
   band?: [number, number];
 }) {
   const { plotWidth, plotHeight } = plotFrame();
+  const transform = scale === "log" ? logScale : symlogScale;
   const sorted = useMemo(
-    () => [...values].sort((a, b) => Math.abs(b.value) - Math.abs(a.value)),
-    [values],
+    () =>
+      scale === "log"
+        ? [...points].sort((a, b) => b.value - a.value)      // worst on the left
+        : [...points].sort((a, b) => a.value - b.value),     // low → high, band in view
+    [points, scale],
   );
-  const transform = (v: number) => (log ? Math.log10(Math.max(Math.abs(v), 0.01)) : v);
-  const transformed = sorted.map((v) => transform(v.value));
-  let lo = Math.min(0, ...transformed, band ? transform(band[0]) : 0);
-  let hi = Math.max(0, ...transformed, gate != null ? transform(gate) : 0, band ? transform(band[1]) : 0);
+  const transformed = sorted.map((p) => transform(p.value));
+  const anchors = [
+    ...(gate != null ? [transform(gate)] : []),
+    ...(band ? [transform(band[0]), transform(band[1])] : []),
+  ];
+  let lo = Math.min(...transformed, ...anchors);
+  let hi = Math.max(...transformed, ...anchors);
   if (lo === hi) hi = lo + 1;
-  const span = hi - lo;
-  const y = (v: number) => CHART.top + ((hi - v) / span) * plotHeight;
-  const barW = Math.max(1, plotWidth / Math.max(1, sorted.length) - 0.5);
+  const pad = (hi - lo) * 0.08;
+  lo -= pad;
+  hi += pad;
+  const y = (t: number) => CHART.top + ((hi - t) / (hi - lo)) * plotHeight;
+  const x = (i: number) =>
+    CHART.left + (sorted.length > 1 ? (i / (sorted.length - 1)) * plotWidth : plotWidth / 2);
+
+  // Decade ticks (…0.1, 1, 10, 100, 1000…), signed for the symlog axis + 0.
+  const ticks = useMemo(() => {
+    const out: number[] = [];
+    for (let e = -2; e <= 5; e += 1) {
+      const v = 10 ** e;
+      if (scale === "log") {
+        if (logScale(v) >= lo && logScale(v) <= hi) out.push(v);
+      } else {
+        for (const s of [v, -v]) {
+          if (symlogScale(s) >= lo && symlogScale(s) <= hi) out.push(s);
+        }
+      }
+    }
+    if (scale === "symlog" && 0 >= lo && 0 <= hi) out.push(0);
+    return out.sort((a, b) => a - b);
+  }, [scale, lo, hi]);
+
+  const failures = points.filter((p) => !p.pass).length;
 
   return (
     <figure className="dyncmp-chart">
@@ -98,42 +143,54 @@ const DeviationBars = memo(function DeviationBars({
             fill={BAND_COLOR}
           />
         ) : null}
-        {[lo, (lo + hi) / 2, hi].map((tick) => (
-          <text key={tick} x={CHART.left - 5} y={y(tick) + 3} textAnchor="end" className="dyncmp-chart-tick">
-            {log ? formatNum(10 ** tick, 10 ** tick >= 10 ? 0 : 1) : formatNum(tick, Math.abs(hi - lo) >= 10 ? 0 : 1)}
-          </text>
-        ))}
-        {sorted.map((item, i) => {
-          const v = transform(item.value);
-          const y0 = y(Math.max(0, Math.min(v, hi)));
-          const y1 = y(Math.max(lo, Math.min(0, v)));
-          const inside =
-            (gate == null || Math.abs(item.value) <= gate) &&
-            (band == null || (item.value >= band[0] && item.value <= band[1]));
+        {ticks.map((tick) => {
+          const ty = y(transform(tick));
           return (
-            <rect
-              key={item.label}
-              x={CHART.left + (i / sorted.length) * plotWidth}
-              y={Math.min(y0, y1)}
-              width={barW}
-              height={Math.max(1, Math.abs(y1 - y0))}
-              fill={inside ? OK_COLOR : FAIL_COLOR}
-            >
-              <title>{`${item.label}: ${formatNum(item.value, 2)} m`}</title>
-            </rect>
+            <g key={tick}>
+              <line x1={CHART.left} x2={CHART.left + plotWidth} y1={ty} y2={ty} className="dyncmp-chart-grid" />
+              <text x={CHART.left - 5} y={ty + 3} textAnchor="end" className="dyncmp-chart-tick">
+                {Math.abs(tick) >= 1000 ? `${tick / 1000}k` : tick}
+              </text>
+            </g>
           );
         })}
         {gate != null ? (
-          <line
-            x1={CHART.left} x2={CHART.left + plotWidth}
-            y1={y(transform(gate))} y2={y(transform(gate))}
-            stroke={GATE_COLOR} strokeDasharray="4 3" strokeWidth={1.4}
-          />
+          <g>
+            <line
+              x1={CHART.left} x2={CHART.left + plotWidth}
+              y1={y(transform(gate))} y2={y(transform(gate))}
+              stroke={GATE_COLOR} strokeDasharray="4 3" strokeWidth={1.4}
+            />
+            <text
+              x={CHART.left + plotWidth - 2} y={y(transform(gate)) - 3}
+              textAnchor="end" fill={GATE_COLOR} fontSize={9}
+            >
+              gate {formatNum(gate, 2)} m
+            </text>
+          </g>
         ) : null}
+        {band ? (
+          <text
+            x={CHART.left + 4} y={y(transform(band[1])) - 3}
+            fill={OK_COLOR} fontSize={9}
+          >
+            window −{formatNum(Math.abs(band[0]), 2)} / +{formatNum(band[1], 2)} m
+          </text>
+        ) : null}
+        {sorted.map((p, i) => (
+          <circle key={p.label + i} cx={x(i)} cy={y(transformed[i])} r={2}
+                  fill={p.pass ? OK_COLOR : FAIL_COLOR} fillOpacity={0.85}>
+            <title>{`${p.label}: ${formatNum(p.value, 2)} m`}</title>
+          </circle>
+        ))}
         <text x={CHART.left + plotWidth / 2} y={CHART.height - 4} textAnchor="middle" className="dyncmp-chart-axis-label">
-          solved flights (sorted by |deviation|) · m
+          one dot per solved flight, ranked · m ({scale} scale)
         </text>
       </svg>
+      <p className="eval-chart-note">
+        <span style={{ color: OK_COLOR }}>●</span> passes this gate&nbsp;&nbsp;
+        <span style={{ color: FAIL_COLOR }}>●</span> outside ({failures} of {points.length})
+      </p>
     </figure>
   );
 });
@@ -178,9 +235,13 @@ const TimeScatter = memo(function TimeScatter({
           </circle>
         ))}
         <text x={CHART.left + plotWidth / 2} y={CHART.height - 4} textAnchor="middle" className="dyncmp-chart-axis-label">
-          observed (s) — diagonal = equal
+          observed (s) — below the diagonal = optimized is faster
         </text>
       </svg>
+      <p className="eval-chart-note">
+        <span style={{ color: OK_COLOR }}>●</span> successful (all gates)&nbsp;&nbsp;
+        <span style={{ color: FAIL_COLOR }}>●</span> off target (failed a gate)
+      </p>
     </figure>
   );
 });
@@ -196,13 +257,26 @@ export default function EvaluationReportWindow({ report, subtitle, onClose }: Pr
     [solvedRows],
   );
 
+  const th = report.thresholds;
   const lateralValues = useMemo(
-    () => solvedRows.map((r) => ({ label: r.id, value: r.lateral_m ?? 0 })),
-    [solvedRows],
+    () =>
+      solvedRows.map((r) => ({
+        label: r.id,
+        value: r.lateral_m ?? 0,
+        pass: (r.lateral_m ?? 0) <= th.lateral_max_m,
+      })),
+    [solvedRows, th],
   );
   const verticalValues = useMemo(
-    () => solvedRows.map((r) => ({ label: r.id, value: r.vertical_m ?? 0 })),
-    [solvedRows],
+    () =>
+      solvedRows.map((r) => ({
+        label: r.id,
+        value: r.vertical_m ?? 0,
+        pass:
+          (r.vertical_m ?? 0) >= -th.vertical_below_max_m &&
+          (r.vertical_m ?? 0) <= th.vertical_above_max_m,
+      })),
+    [solvedRows, th],
   );
   const timePoints = useMemo(
     () =>
@@ -214,8 +288,6 @@ export default function EvaluationReportWindow({ report, subtitle, onClose }: Pr
       })),
     [referenceRows],
   );
-
-  const th = report.thresholds;
 
   // Draggable floating window (same pattern as DynamicsComparisonCharts):
   // starts centered, then tracks the dragged title bar; portal to <body> so the
@@ -253,17 +325,17 @@ export default function EvaluationReportWindow({ report, subtitle, onClose }: Pr
     event.currentTarget.releasePointerCapture?.(event.pointerId);
   }
 
-  const cards: { value: string; label: string; tone?: "ok" | "bad" }[] = [
+  // Cards are deliberately NEUTRAL: red/green in this window means exactly one thing —
+  // a per-flight gate verdict (see the chart legends) — not an arbitrary rate threshold.
+  const cards: { value: string; label: string }[] = [
     { value: String(report.total), label: "total trajectories" },
     {
       value: `${report.solved}/${report.total}`,
       label: `solve rate ${formatPct(report.solve_rate)}`,
-      tone: report.solve_rate >= 0.9 ? "ok" : "bad",
     },
     {
       value: `${report.successful}/${report.total}`,
       label: `success rate ${formatPct(report.success_rate)}`,
-      tone: report.success_rate >= 0.9 ? "ok" : "bad",
     },
   ];
   if (report.success_rate_among_solved != null) {
@@ -305,7 +377,7 @@ export default function EvaluationReportWindow({ report, subtitle, onClose }: Pr
       <div className="dyncmp-charts-body">
         <div className="eval-report-cards">
           {cards.map((card) => (
-            <div key={card.label} className={`eval-report-card${card.tone ? ` is-${card.tone}` : ""}`}>
+            <div key={card.label} className="eval-report-card">
               <div className="eval-report-card-value">{card.value}</div>
               <div className="eval-report-card-label">{card.label}</div>
             </div>
@@ -375,15 +447,16 @@ export default function EvaluationReportWindow({ report, subtitle, onClose }: Pr
 
         {solvedRows.length > 0 ? (
           <div className="dyncmp-charts-grid">
-            <DeviationBars
-              title="Final lateral deviation (log; dashed = gate)"
-              values={lateralValues}
-              log
+            <DeviationProfile
+              title="Final lateral deviation, worst → best"
+              points={lateralValues}
+              scale="log"
               gate={th.lateral_max_m}
             />
-            <DeviationBars
-              title="Final vertical deviation (band = WCH window)"
-              values={verticalValues}
+            <DeviationProfile
+              title="Final vertical deviation, low → high"
+              points={verticalValues}
+              scale="symlog"
               band={[-th.vertical_below_max_m, th.vertical_above_max_m]}
             />
             {timePoints.length > 0 ? <TimeScatter points={timePoints} /> : null}

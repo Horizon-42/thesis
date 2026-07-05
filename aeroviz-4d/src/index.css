@@ -2977,18 +2977,18 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   color: #e8f1ff;
 }
 
-.eval-report-card.is-ok .eval-report-card-value {
-  color: #3fbf72;
-}
-
-.eval-report-card.is-bad .eval-report-card-value {
-  color: #e05b5b;
-}
 
 .eval-report-card-label {
   font-size: 10px;
   color: #8ea4c4;
   margin-top: 2px;
+}
+
+.eval-chart-note {
+  font-size: 10px;
+  color: #8ea4c4;
+  margin: 2px 0 0;
+  text-align: center;
 }
 
 .eval-report-gates {

@@ -113,6 +113,14 @@ The project serves dual purposes: thesis visualization/validation, and reusable 
 
 ## Changelog
 
+### 2026-07-05 — Evaluation detail window: legible deviation profiles + one colour language
+
+User feedback on the in-app evaluation window: the deviation "bar wall" charts were illegible at n≈900 (sub-pixel bars), the card red/green (an arbitrary ≥90% threshold) had NO relation to the chart red/green, and the time scatter's colours were unexplained.
+
+- **`DeviationProfile` replaces the bars**: one dot per solved flight, RANKED (lateral: worst→best on a log axis with decade ticks; vertical: low→high on a signed SYMLOG axis — ``sign·log10(1+|v|)`` keeps the ±metres window readable next to km outliers). The chart's own gate is drawn AND labelled in-plot ("gate 106.75 m" / "window −3.05/+6.10 m"), dots are coloured by whether the flight passes THAT gate, and each chart carries a legend with the outside count ("● outside (113 of 920)"). Ranking/scales are presentation-only — every value is the backend report's row verbatim.
+- **One colour language**: red/green in the window now means exactly one thing — a per-flight gate verdict. The summary cards are NEUTRAL (the old ≥90% ok/bad tint removed; it was unrelated to the charts and read as if it were). The time scatter's legend states its colours: green = successful (all gates), red = off target (failed a gate); axis note "below the diagonal = optimized is faster".
+- **407 frontend tests + tsc pass**; verified in-browser on the full KRDU runway_cons report (1001 trajectories): both profiles legible with in-plot threshold labels, legends and counts correct.
+
 ### 2026-07-05 — "Successful flights ending mid-air" postmortem + off-target marking moved onto the RESULT path
 
 The user saw runway_cons flights that "look successful but end far from the target". Diagnosis on the CURRENT (post-floor-fix) KRDU batch: the data is coherent — every SUCCESSFUL flight's rollout is complete and lands on target (0 exceptions). The sightings are **off-target flights with rollouts TRUNCATED by the new ground guard** (68 of 119 offTarget rows end mid-air ~10 km out at the altitude floor — dynamically-unfaithful solves whose replay diverges; correctly classified offTarget, correctly NOT "failed"). They READ as successful because the previous design marked off-target groups only on the REFERENCE (yellow) while the result path kept its legend blue.
