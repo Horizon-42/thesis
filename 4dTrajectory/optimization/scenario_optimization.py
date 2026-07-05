@@ -152,9 +152,15 @@ def optimize_scenario(
         _STALL_MARGIN * _stall_speed_ms(initial.m, scenario.aero),
         aircraft.approach.reference_speed_ms,
     )
+    # Hermite-Simpson fitting (4th order), matching the constrained path and the frontend
+    # default. Trapezoidal (2nd order) produced node-feasible plans whose TRUE-dynamics
+    # replays drifted km-scale on aggressive min-time floor-riding solves — the evaluation
+    # gates judge the replay, so the batch success rate collapsed (KRDU runway: 14%
+    # success with a 0.00 m plan-vs-target error but 5-15 km rollout-vs-target error;
+    # the same flight re-solved with HS lands 3.4 m out).
     optimizer = CollocationOptimizer(
         aircraft,
-        scheme="trapezoidalNormalizedFullTransport",
+        scheme="hermiteSimpsonNormalizedFullTransport",
         n_segments=n_segments,
         max_duration=max_duration,
         min_speed_ms=min_speed_ms,

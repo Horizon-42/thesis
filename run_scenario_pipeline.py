@@ -34,6 +34,9 @@ The ``category`` (output sub-folder + frontend category key) is derived from
     target_type=runway · with_constraint=False ─► runway       (Runway target)
     target_type=runway · with_constraint=True  ─► runway_cons  (Runway target, constrained)
 
+Omitting --target-type runs ALL THREE modes (asdb, runway, runway_cons) per
+airport — the full category sweep the frontend's comparison picker offers.
+
 Airport selection:
   * --airport <ICAO>  runs that one airport.
   * (omitted)         runs EVERY K-prefixed airport that has landings data.
@@ -45,6 +48,8 @@ already has a summary.json, steps 1–2 are skipped and only the selected tails
 Usage:
     # one airport, both outputs (frontend CZML + evaluation report/HTML):
     python run_scenario_pipeline.py --airport KRDU --target-type runway --with-constraint
+    # one airport, ALL THREE modes (asdb + runway + runway_cons):
+    python run_scenario_pipeline.py --airport KRDU
     # evaluation only:
     python run_scenario_pipeline.py --airport KRDU --outputs eval
     # rebuild only the comparison CZML from an existing optimization:
@@ -72,6 +77,10 @@ CZML_SCRIPT = REPO_ROOT / "aeroviz-4d" / "python" / "build_scenario_comparison_c
 
 TARGET_TYPES = ("adsb", "runway")
 OUTPUT_KINDS = ("czml", "eval")
+
+# The full category sweep, run when --target-type is omitted: every mode the
+# frontend's comparison picker offers, as (target_type, with_constraint).
+ALL_MODES = (("adsb", False), ("runway", False), ("runway", True))
 
 # category key (= output sub-folder + frontend category key) and its display label.
 _CATEGORY_LABELS = {
@@ -280,13 +289,15 @@ def main() -> None:
         help="airport ICAO; OMIT to run every K-prefixed airport that has landings data",
     )
     parser.add_argument(
-        "--target-type", choices=TARGET_TYPES, default="runway",
-        help="target state: 'runway' = the published runway threshold (default — the "
-             "evaluation gates are threshold-referenced); 'adsb' = end of the observed track",
+        "--target-type", choices=TARGET_TYPES, default=None,
+        help="target state: 'runway' = the published runway threshold (the evaluation "
+             "gates are threshold-referenced); 'adsb' = end of the observed track. "
+             "OMIT to run all three modes (asdb, runway, runway_cons) per airport",
     )
     parser.add_argument(
         "--with-constraint", action="store_true",
-        help="enforce the runway's RNAV(GPS) procedure (constrained-IAF optimization)",
+        help="enforce the runway's RNAV(GPS) procedure (constrained-IAF optimization); "
+             "requires --target-type (the all-modes sweep already includes runway_cons)",
     )
     parser.add_argument(
         "--outputs", type=_parse_outputs, default=OUTPUT_KINDS, metavar="czml,eval",
@@ -310,6 +321,16 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.target_type is None:
+        if args.with_constraint:
+            parser.error("--with-constraint requires --target-type "
+                         "(the all-modes sweep already includes runway_cons)")
+        modes = ALL_MODES
+        print(f"no --target-type given → running all {len(modes)} modes per airport: "
+              + ", ".join(category_key(t, c) for t, c in modes))
+    else:
+        modes = ((args.target_type, args.with_constraint),)
+
     if args.airport:
         airports = [args.airport.strip().upper()]
     else:
@@ -320,16 +341,18 @@ def main() -> None:
               f"{', '.join(airports)}")
 
     ran = 0
-    for airport in airports:
+    runs = [(airport, mode) for airport in airports for mode in modes]
+    for airport, (target_type, with_constraint) in runs:
         if run_for_airport(
-            airport, args.target_type, args.with_constraint, tuple(args.outputs),
+            airport, target_type, with_constraint, tuple(args.outputs),
             dry_run=args.dry_run, skip_optimize=args.skip_optimize, jobs=args.jobs,
         ):
             ran += 1
 
     verb = "previewed" if args.dry_run else "completed"
-    print(f"\n✓ {verb} {ran}/{len(airports)} airport(s)  "
-          f"[target-type={args.target_type}, with-constraint={args.with_constraint}, "
+    print(f"\n✓ {verb} {ran}/{len(runs)} run(s) "
+          f"({len(airports)} airport(s) × {len(modes)} mode(s))  "
+          f"[modes={','.join(category_key(t, c) for t, c in modes)}, "
           f"outputs={','.join(args.outputs)}, skip-optimize={args.skip_optimize}]")
 
 
