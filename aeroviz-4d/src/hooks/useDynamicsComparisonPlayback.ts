@@ -232,16 +232,18 @@ export function useDynamicsComparisonPlayback({
   useEffect(() => {
     if (!isCesiumViewerUsable(viewer) || status !== "loaded") return;
 
-    const emit = makeReadoutEmitter(viewer, startTimeRef, (tSimS) => {
+    const emitter = makeReadoutEmitter(viewer, startTimeRef, (tSimS) => {
       onSampleRef.current(sampleTrajectoryAt(samplesRef.current, tSimS));
       const chartNow = chartRef.current;
       onDeltasRef.current(chartNow ? interpolateComparisonDeltas(chartNow, tSimS) : null);
     });
 
-    emit();
-    const remove = viewer.clock.onTick.addEventListener(emit);
+    emitter.tick();
+    const removeTick = viewer.clock.onTick.addEventListener(emitter.tick);
+    const removeStop = viewer.clock.onStop.addEventListener(emitter.stop);
     return () => {
-      remove();
+      removeTick();
+      removeStop();
     };
   }, [viewer, status]);
 

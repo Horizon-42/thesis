@@ -29,13 +29,20 @@ def iso_ms(dt: datetime) -> str:
 
 
 def document_packet(end_dt: datetime, multiplier: float, name: str) -> dict[str, Any]:
-    """The CZML ``document`` packet: a LOOP_STOP clock over ``EPOCH``..``end_dt``."""
+    """The CZML ``document`` packet: a LOOP_STOP clock over ``EPOCH``..``end_dt``.
+
+    The interval end keeps MILLISECOND precision: a second-truncated end shifts
+    the frontend clock's stopTime up to 1 s before the trajectory's true final
+    sample, so the readout parked/looped at the "end" reads the state up to
+    ~75 m short of the real terminal state (a truncated 324.3384 s horizon
+    showed exactly that as a phantom 25 m final error).
+    """
     return {
         "id": "document",
         "name": name,
         "version": "1.0",
         "clock": {
-            "interval": f"{iso(EPOCH)}/{iso(end_dt)}",
+            "interval": f"{iso(EPOCH)}/{iso_ms(end_dt)}",
             "currentTime": iso(EPOCH),
             "multiplier": multiplier,
             "range": "LOOP_STOP",

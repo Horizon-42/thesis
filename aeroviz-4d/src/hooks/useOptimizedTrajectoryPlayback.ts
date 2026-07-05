@@ -185,14 +185,16 @@ export function useOptimizedTrajectoryPlayback({
   useEffect(() => {
     if (!isCesiumViewerUsable(viewer) || status !== "loaded") return;
 
-    const emit = makeReadoutEmitter(viewer, startTimeRef, (tSimS) => {
+    const emitter = makeReadoutEmitter(viewer, startTimeRef, (tSimS) => {
       onSampleRef.current(sampleTrajectoryAt(samplesRef.current, tSimS));
     });
 
-    emit();
-    const remove = viewer.clock.onTick.addEventListener(emit);
+    emitter.tick();
+    const removeTick = viewer.clock.onTick.addEventListener(emitter.tick);
+    const removeStop = viewer.clock.onStop.addEventListener(emitter.stop);
     return () => {
-      remove();
+      removeTick();
+      removeStop();
     };
   }, [viewer, status]);
 
@@ -200,46 +202,53 @@ export function useOptimizedTrajectoryPlayback({
 }
 
 /**
- * Per-tick readout emitter shared by the playback hooks (this one and the
- * dynamics-comparison playback): wall-clock throttled (~12 Hz) while the clock
- * runs, plus ONE throttle-bypassed emit at exactly the stop time when playback
- * ends. The readout is WALL-throttled while the clock runs at multiplier× sim
- * speed, so the last throttled tick can land up to (throttle × multiplier)
- * sim-seconds short of the end — ~25-50 m of flight at 8× — and under
- * LOOP_STOP the clock wraps without ever dwelling at the end. Detecting the
- * end (CLAMPED: first tick at/past stop; LOOP_STOP: the wrap signature) and
- * emitting the exact end sample makes the final readout match the rollout's
- * true terminal state (= the backend's playbackDriftM reference).
+ * Readout emitter shared by the playback hooks (this one and the
+ * dynamics-comparison playback). Two handlers:
+ *
+ *   `tick` — attach to `clock.onTick`: samples the current clock time,
+ *   wall-clock throttled (~12 Hz) to cap re-renders.
+ *
+ *   `stop` — attach to `clock.onStop`: emits the EXACT stop-time sample,
+ *   bypassing the throttle. The readout is wall-throttled while the clock runs
+ *   at multiplier× sim speed, so the last throttled tick can land up to
+ *   (throttle × multiplier) sim-seconds short of the end — ~25-50 m of flight
+ *   at 8×. Cesium raises `onStop` precisely when the clock reaches the stop
+ *   time, BOTH when CLAMPED clamps there and when LOOP_STOP wraps past it
+ *   (Clock.js raises it inside the wrap — the wrapped currentTime keeps the
+ *   overshoot and never dwells at the end, so no tick-side elapsed heuristic
+ *   can see the terminal instant reliably). Hooking the event makes the final
+ *   readout match the rollout's true terminal state (= the backend's
+ *   playbackDriftM reference); Reset and backward scrubs never raise it.
  */
 export function makeReadoutEmitter(
   viewer: Cesium.Viewer,
   startTimeRef: MutableRefObject<Cesium.JulianDate | null>,
   emitAt: (tSimS: number) => void,
-): () => void {
+): { tick: () => void; stop: () => void } {
   let lastEmitMs = 0;
-  let prevElapsedS = Number.NEGATIVE_INFINITY;
-  return () => {
-    const start = startTimeRef.current;
-    if (!start) return;
-    const elapsedS = Cesium.JulianDate.secondsDifference(viewer.clock.currentTime, start);
-    const stopS = Cesium.JulianDate.secondsDifference(viewer.clock.stopTime, start);
-    const reachedEnd = elapsedS >= stopS - 1e-9 && prevElapsedS < stopS - 1e-9;
-    // A LOOP_STOP wrap lands exactly at the start time coming from within one
-    // frame (at multiplier×) of the stop — distinguish it from a Reset or a
-    // backward timeline scrub, which must NOT flash the end reading.
-    const multiplier = Math.abs(viewer.clock.multiplier) || 1;
-    const wrapped =
-      elapsedS <= 1e-3 && prevElapsedS > stopS - Math.max(0.5, multiplier * 0.25);
-    prevElapsedS = elapsedS;
-    if (reachedEnd || wrapped) {
+  let lastEmitT: number | null = null;
+  return {
+    tick: () => {
+      const start = startTimeRef.current;
+      if (!start) return;
+      const now = performance.now();
+      if (now - lastEmitMs < READOUT_THROTTLE_MS) return;
+      lastEmitMs = now;
+      const elapsedS = Cesium.JulianDate.secondsDifference(viewer.clock.currentTime, start);
+      lastEmitT = elapsedS;
+      emitAt(elapsedS);
+    },
+    stop: () => {
+      const start = startTimeRef.current;
+      if (!start) return;
+      const stopS = Cesium.JulianDate.secondsDifference(viewer.clock.stopTime, start);
+      // While parked at a CLAMPED end Cesium re-raises onStop every animated
+      // frame — emit only when the reading would actually change.
+      if (lastEmitT === stopS) return;
       lastEmitMs = performance.now();
+      lastEmitT = stopS;
       emitAt(stopS);
-      return;
-    }
-    const now = performance.now();
-    if (now - lastEmitMs < READOUT_THROTTLE_MS) return;
-    lastEmitMs = now;
-    emitAt(elapsedS);
+    },
   };
 }
 
