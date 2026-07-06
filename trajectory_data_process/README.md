@@ -245,19 +245,27 @@ Each flight additionally carries `landing_time_utc` (the absolute time it reache
 threshold). The files are CZML **input**, not CZML — the frontend loads one
 `trajectories.czml` per airport, so convert before using them in the app.
 
-### Render to the frontend (per-runway + combined)
+### Build the arrivals dataset + frontend CZMLs (per-runway + combined)
 
-`landings_to_czml.py` renders landing files into the frontend folder, **one CZML per
-runway plus a combined CZML**, with a manifest. With no `--airport` it processes
-**every downloaded airport** under `outputs/landings/`:
+`build_arrivals.py` (renamed from `landings_to_czml.py`) first cuts every raw
+landing track to its ARRIVAL SEGMENT — the final entry into the terminal ring
+(`--entry-radius-km`, default 25 km; see `arrival_segment.py`) down to
+touchdown — excluding pure local circuits into `<ICAO>_local_rejected.json`;
+raw `*_landings.json` stay untouched, the derived `*_arrivals.json` feed
+everything downstream. It then renders **one CZML per runway plus a combined
+CZML**, with a manifest. With no `--airport` it processes **every downloaded
+airport** under `outputs/landings/`:
 
 ```bash
 # all downloaded airports (default)
-python trajectory_data_process/landings_to_czml.py
+python trajectory_data_process/build_arrivals.py
 
 # one airport, or a subset of its runways
-python trajectory_data_process/landings_to_czml.py --airport KRDU
-python trajectory_data_process/landings_to_czml.py --airport KRDU --runway 23R 23L
+python trajectory_data_process/build_arrivals.py --airport KRDU
+python trajectory_data_process/build_arrivals.py --airport KRDU --runway 23R 23L
+
+# custom terminal-entry ring (km; must sit inside the 30 km harvest crop)
+python trajectory_data_process/build_arrivals.py --airport KRDU --entry-radius-km 20
 ```
 
 Output under `aeroviz-4d/public/data/airports/<ICAO>/`:

@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Render downloaded landings into per-runway + combined CZML for the frontend.
+"""Build the ARRIVALS dataset from downloaded landings (+ the frontend CZMLs).
+
+(Renamed from ``landings_to_czml.py`` — the arrival-segment truncation made this
+the dataset builder, not just a CZML renderer.)
 
 ``download_landings.py`` writes one CZML-input file per runway threshold. Each
-raw track is first cut to its ARRIVAL SEGMENT (final entry into the 25 km ring
-→ touchdown; see ``arrival_segment.py``) — pure local circuits that never left
-the ring are excluded into ``<ICAO>_local_rejected.json`` for review. The raw
+raw track is first cut to its ARRIVAL SEGMENT (final entry into the
+``--entry-radius-km`` ring, default 25 km → touchdown; see
+``arrival_segment.py``) — pure local circuits that never left the ring are
+excluded into ``<ICAO>_local_rejected.json`` for review. The raw
 ``*_landings.json`` stay untouched; the truncated arrivals are written as
 derived ``*_arrivals.json`` next to them, and everything downstream (the CZMLs,
 the combined czml-input that scenario building and reference records consume)
@@ -16,11 +20,14 @@ this writes, into the airport's frontend folder:
   public/data/airports/<ICAO>/trajectories.czml            all runways combined
 
     # all downloaded airports (default)
-    python trajectory_data_process/landings_to_czml.py
+    python trajectory_data_process/build_arrivals.py
 
     # one airport, or a subset of its runways
-    python trajectory_data_process/landings_to_czml.py --airport KRDU
-    python trajectory_data_process/landings_to_czml.py --airport KRDU --runway 23R 23L
+    python trajectory_data_process/build_arrivals.py --airport KRDU
+    python trajectory_data_process/build_arrivals.py --airport KRDU --runway 23R 23L
+
+    # custom terminal-entry ring
+    python trajectory_data_process/build_arrivals.py --airport KRDU --entry-radius-km 20
 """
 
 from __future__ import annotations
@@ -35,7 +42,7 @@ from typing import Any
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from trajectory_data_process.arrival_segment import truncate_flights
+from trajectory_data_process.arrival_segment import ENTRY_RADIUS_KM, truncate_flights
 
 
 def _airport_reference(code: str) -> tuple[float, float]:
@@ -115,9 +122,12 @@ def render_airport(
     aeroviz_root: Path,
     generator: Path,
     multiplier: int | None,
+    entry_radius_km: float = ENTRY_RADIUS_KM,
 ) -> int:
-    """Render one airport's landings into per-runway + combined CZML + manifest.
+    """Build one airport's arrivals + per-runway/combined CZML + manifest.
 
+    ``entry_radius_km`` is the terminal-entry ring for the arrival-segment cut
+    (must sit inside the 30 km harvest crop, or nothing is ever "outside").
     Returns the number of runways rendered (0 if the airport has no landings).
     """
     source_dir = source_root / code
@@ -133,9 +143,11 @@ def render_airport(
         flights = json.loads(path.read_text(encoding="utf-8"))
         if not flights:
             continue  # an idle runway end with no landings: skip it
-        # Cut each raw track to its arrival segment (final 25 km ring entry ->
+        # Cut each raw track to its arrival segment (final ring entry ->
         # touchdown); pure local circuits are set aside, never silently dropped.
-        arrivals, locals_ = truncate_flights(flights, airport_lat, airport_lon)
+        arrivals, locals_ = truncate_flights(
+            flights, airport_lat, airport_lon, entry_radius_km=entry_radius_km,
+        )
         local_flights.extend(locals_)
         if not arrivals:
             continue
@@ -147,17 +159,17 @@ def render_airport(
         _generate_czml(generator, code, arrivals_path, czml_path, multiplier)
         truncated = sum(1 for f in arrivals if f.get("arrival_truncated"))
         runway_manifest.append({"runway": ident, "file": f"landings/{czml_path.name}", "count": len(arrivals)})
-        print(f"[landings->czml] {code} {ident}: {len(arrivals)} arrival(s) "
+        print(f"[build-arrivals] {code} {ident}: {len(arrivals)} arrival(s) "
               f"({truncated} truncated, {len(locals_)} local excluded) -> {czml_path}")
 
     if local_flights:
         local_path = source_dir / f"{code}_local_rejected.json"
         local_path.write_text(json.dumps(local_flights, indent=2), encoding="utf-8")
-        print(f"[landings->czml] {code}: {len(local_flights)} local circuit(s) "
+        print(f"[build-arrivals] {code}: {len(local_flights)} local circuit(s) "
               f"(never left the entry ring) -> {local_path}")
 
     if not runway_manifest:
-        print(f"[landings->czml] {code}: no landings, skipped")
+        print(f"[build-arrivals] {code}: no landings, skipped")
         return 0
 
     # Combined (all runways) -> the airport's default trajectories.czml.
@@ -165,7 +177,7 @@ def render_airport(
     combined_input = source_dir / f"{code}_combined_czml_input.json"
     combined_input.write_text(json.dumps(combined_flights, indent=2), encoding="utf-8")
     _generate_czml(generator, code, combined_input, airport_dir / "trajectories.czml", multiplier)
-    print(f"[landings->czml] {code} combined: {len(combined_flights)} -> {airport_dir / 'trajectories.czml'}")
+    print(f"[build-arrivals] {code} combined: {len(combined_flights)} -> {airport_dir / 'trajectories.czml'}")
 
     manifest = {
         "airport": code,
@@ -173,22 +185,31 @@ def render_airport(
         "runways": sorted(runway_manifest, key=lambda r: r["runway"]),
     }
     (landings_dir / "index.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    print(f"[landings->czml] {code} manifest: {landings_dir / 'index.json'}")
+    print(f"[build-arrivals] {code} manifest: {landings_dir / 'index.json'}")
     return len(runway_manifest)
 
 
 def main() -> None:
     here = Path(__file__).resolve().parent
-    p = argparse.ArgumentParser(description="Render landings into per-runway + combined CZML for the frontend")
+    p = argparse.ArgumentParser(
+        description="Build the arrivals dataset from downloaded landings "
+                    "(arrival-segment truncation + per-runway/combined CZML + manifest)")
     p.add_argument("--airport", default=None, help="Airport ICAO code (default: all downloaded airports)")
     p.add_argument("--runway", nargs="+", default=None, help="Runway ends to include (requires --airport)")
     p.add_argument("--multiplier", type=int, default=None, help="Optional CZML clock multiplier")
     p.add_argument("--output-root", default=str(here / "outputs" / "landings"), help="Where the *_landings.json live")
     p.add_argument("--aeroviz-root", default=str(here.parents[0] / "aeroviz-4d"), help="Frontend root to write CZML into")
+    p.add_argument("--entry-radius-km", type=float, default=ENTRY_RADIUS_KM,
+                   help="Terminal-entry ring radius in km for the arrival-segment cut "
+                        f"(default {ENTRY_RADIUS_KM:g}; must sit inside the 30 km harvest "
+                        "crop, or no track is ever outside it)")
     args = p.parse_args()
 
     if args.runway and not args.airport:
         raise SystemExit("--runway requires --airport")
+    if not 0.0 < args.entry_radius_km < 30.0:
+        raise SystemExit(f"--entry-radius-km must be in (0, 30) km (the harvest crop radius), "
+                         f"got {args.entry_radius_km:g}")
 
     source_root = Path(args.output_root)
     aeroviz_root = Path(args.aeroviz_root)
@@ -209,8 +230,9 @@ def main() -> None:
             aeroviz_root=aeroviz_root,
             generator=generator,
             multiplier=args.multiplier,
+            entry_radius_km=args.entry_radius_km,
         )
-    print(f"[landings->czml] done: {len(codes)} airport(s), {total} runway file(s)")
+    print(f"[build-arrivals] done: {len(codes)} airport(s), {total} runway file(s)")
 
 
 if __name__ == "__main__":

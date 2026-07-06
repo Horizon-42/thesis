@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from trajectory_data_process.landings_to_czml import (
+from trajectory_data_process.build_arrivals import (
     discover_airports,
     landing_files,
     merge_landing_flights,
