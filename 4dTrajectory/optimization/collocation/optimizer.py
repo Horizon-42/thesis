@@ -199,7 +199,7 @@ class CollocationOptimizer:
         scheme: str | None = None,
         segments: list | None = None,
         n_segments: int = 8,
-        n_seg_per_phase: int = 4,
+        n_seg_per_phase: int = 3,
         state_substeps: int | None = None,
         max_duration: float = 600.0,
         max_terminal_bank_deg: float = _components._DEFAULT_MAX_TERMINAL_BANK_DEG,
