@@ -50,6 +50,8 @@ Usage:
     python run_scenario_pipeline.py --airport KRDU --target-type runway --with-constraint
     # one airport, ALL THREE modes (asdb + runway + runway_cons):
     python run_scenario_pipeline.py --airport KRDU
+    # trapezoidal-fitting comparison run (default is Hermite-Simpson):
+    python run_scenario_pipeline.py --airport KRDU --target-type runway --fitting-type trapezoidal
     # evaluation only:
     python run_scenario_pipeline.py --airport KRDU --outputs eval
     # rebuild only the comparison CZML from an existing optimization:
@@ -119,7 +121,8 @@ class Plan:
     it can be previewed with --dry-run or asserted in a test)."""
 
     def __init__(self, airport: str, target_type: str, with_constraint: bool,
-                 outputs: tuple[str, ...], jobs: int = 0) -> None:
+                 outputs: tuple[str, ...], jobs: int = 0,
+                 fitting: str = "hs") -> None:
         self.airport = airport.strip().upper()
         self.target_type = target_type
         self.with_constraint = with_constraint
@@ -127,6 +130,11 @@ class Plan:
         # Parallel optimizer worker processes (passed through to scenario_optimization's
         # --jobs; 0 = auto = half the CPU cores, 1 = serial).
         self.jobs = jobs
+        # Transcription fitting for the solves (scenario_optimization --fitting):
+        # "hs" = Hermite-Simpson (default) or "trapezoidal" (comparison runs). Both
+        # fittings write into the SAME category dir — an experiment overwrites the
+        # previous batch there (the optimizer's stale-record cleanup keeps it consistent).
+        self.fitting = fitting
         self.threshold = target_type == "runway"
         self.category = category_key(target_type, with_constraint)
         self.label = _CATEGORY_LABELS[self.category]
@@ -173,6 +181,7 @@ class Plan:
                 "--output-dir", str(self.opt_dir),
                 "--reference-tracks", str(self.czml_input),
                 "--jobs", str(self.jobs),
+                "--fitting", self.fitting,
             ]
             if self.with_constraint:
                 # Constrained-IAF: optimize via the runway's RNAV(GPS) procedure (one
@@ -235,14 +244,16 @@ def run_for_airport(
     dry_run: bool,
     skip_optimize: bool,
     jobs: int = 0,
+    fitting: str = "hs",
 ) -> bool:
     """Run (or preview) the pipeline for one airport. Returns True if it ran /
     would run, False if it was skipped (missing input and nothing to reuse)."""
-    plan = Plan(airport, target_type, with_constraint, outputs, jobs=jobs)
+    plan = Plan(airport, target_type, with_constraint, outputs, jobs=jobs, fitting=fitting)
     reuse = skip_optimize and plan.optimization_exists()
 
     mode = "reuse optimization" if reuse else "full pipeline"
-    print(f"\n━━ {plan.airport}  [{plan.category}]  ·  {mode}  ·  outputs: {', '.join(outputs)}")
+    fit = "" if reuse else f"  ·  fitting: {plan.fitting}"
+    print(f"\n━━ {plan.airport}  [{plan.category}]  ·  {mode}{fit}  ·  outputs: {', '.join(outputs)}")
     print(f"   scenarios : {plan.scenarios}")
     print(f"   states    : {plan.opt_dir}")
     if "czml" in outputs:
@@ -310,6 +321,13 @@ def main() -> None:
              "0 = auto = half the CPU cores, 1 = serial)",
     )
     parser.add_argument(
+        "--fitting-type", choices=("hs", "trapezoidal"), default="hs",
+        help="transcription fitting for the solves (scenario_optimization --fitting): "
+             "'hs' = Hermite-Simpson (4th order, default), 'trapezoidal' = 2nd order "
+             "(comparison runs; replays drift km-scale on aggressive min-time solves). "
+             "Both write into the same category dir — a run overwrites the previous batch",
+    )
+    parser.add_argument(
         "--skip-optimize", action="store_true",
         help="if this airport+category already has an optimization result "
              "(summary.json), skip steps 1–2 and only (re)build the selected outputs; "
@@ -346,6 +364,7 @@ def main() -> None:
         if run_for_airport(
             airport, target_type, with_constraint, tuple(args.outputs),
             dry_run=args.dry_run, skip_optimize=args.skip_optimize, jobs=args.jobs,
+            fitting=args.fitting_type,
         ):
             ran += 1
 

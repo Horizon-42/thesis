@@ -40,6 +40,25 @@ def _scenario(*, target: GeodeticState | None) -> FlightScenario:
     )
 
 
+def _fake_optimizer(dense_states_geo, final_time, controls, *, on_init=None, segment_durations_s=None):
+    """A minimal CollocationOptimizer stand-in for seam tests — the one shared shape
+    (``monkeypatch.setattr(so, "CollocationOptimizer", _fake_optimizer(...))``), so an
+    interface change to the real optimizer is chased in one place."""
+
+    class FakeOptimizer:
+        def __init__(self, *args, **kwargs):
+            if on_init is not None:
+                on_init(*args, **kwargs)
+            self.last_dense_states_geo = dense_states_geo
+            if segment_durations_s is not None:
+                self.segment_durations_s = segment_durations_s
+
+        def optimize_free_time(self, initial, tgt, max_duration):
+            return final_time, controls, None
+
+    return FakeOptimizer
+
+
 def _rollout_samples(initial: GeodeticState) -> list[RolloutSample]:
     """Three hand-built rollout samples spanning two control segments."""
     c0 = LoadFactorControl(thrust=1.0e5, bank_rad=0.1, load_factor=1.02)
@@ -232,7 +251,15 @@ def test_write_reference_records_from_observed_tracks(tmp_path):
     scenario = _scenario(target=target)
     scenario.source.update({"icao24": "ad7f04", "landing_time_utc": "2026-06-18T21:37:36Z"})
 
+    # A reference from an earlier run over a DIFFERENT flight set must not survive
+    # (same stale-accumulation class as _clear_stale_records).
+    refs_dir = tmp_path / "references"
+    refs_dir.mkdir()
+    stale_ref = refs_dir / "OLD1_23L_dead00_20260101T000000Z_reference_eval.json"
+    stale_ref.write_text("{}")
+
     written = so.write_reference_records([scenario], [flight], output_dir=tmp_path)
+    assert not stale_ref.exists()
     assert written == [tmp_path / "references" /
                        "AFR074_05L_ad7f04_20260618T213736Z_reference_eval.json"]
     record = json.loads(written[0].read_text(encoding="utf-8"))
@@ -290,18 +317,19 @@ def test_require_usable_rollout_rejects_first_step_truncation():
 def test_rollout_controls_carries_active_control_per_sample():
     initial = GeodeticState(35.6, -78.5, 2000.0, 130.0, 1.5, -0.05, A320.mass.max_takeoff_kg)
     node_control = [[40000.0, 0.0, 1.0], [50000.0, 0.1, 1.01]]
-    samples = so.rollout_controls(initial, node_control, final_time=4.0, aircraft=A320, dt=1.0)
+    samples = so.rollout_controls(initial, node_control, final_time=4.0, aircraft=A320, dt=1.0,
+                                  min_altitude_m=0.0)
     assert samples[0].t == 0.0 and samples[0].control.thrust == 40000.0
     assert samples[-1].control.thrust == 50000.0 and samples[-1].segment_index == 1
 
 
 def test_rollout_truncates_below_the_trajectory_floor():
     # The raw CasadiSimulator has NO envelope checks — a diverged replay used to record
-    # kilometres below sea level. With min_altitude_m (the solve's own altitude floor)
-    # the rollout truncates at the floor instead.
+    # kilometres below sea level. With min_altitude_m (the solve's guard altitude)
+    # the rollout truncates at the guard instead.
     initial = GeodeticState(35.6, -78.5, 2000.0, 130.0, 1.5, -0.05, A320.mass.max_takeoff_kg)
     descending = [[0.0, 0.0, 0.98]]         # idle thrust, n slightly < 1 -> gentle descent
-    full = so.rollout_controls(initial, descending, 60.0, A320, dt=0.5)
+    full = so.rollout_controls(initial, descending, 60.0, A320, dt=0.5, min_altitude_m=0.0)
     capped = so.rollout_controls(initial, descending, 60.0, A320, dt=0.5,
                                  min_altitude_m=1900.0)
     assert full[-1].t == pytest.approx(60.0, abs=1.0)          # sea-level backstop far away
@@ -309,11 +337,97 @@ def test_rollout_truncates_below_the_trajectory_floor():
     assert all(s.state.altitude >= 1900.0 for s in capped)
 
 
+def test_rollout_guard_sits_a_margin_below_the_nlp_floor():
+    # Min-time plans RIDE the NLP's altitude floor, and a faithful replay oscillates
+    # centimetres around it — a guard placed AT the floor truncated those replays on
+    # integration noise (97% of an unconstrained batch failed on cm-scale dips). The
+    # guard therefore sits ROLLOUT_GUARD_MARGIN_M below the floor: noise passes,
+    # genuine divergence (tens of metres+) still truncates.
+    from collocation.components import altitude_floor_m
+
+    target_alt = 144.8
+    guard = so.rollout_guard_altitude_m(target_alt)
+    assert guard == pytest.approx(altitude_floor_m(target_alt) - so.ROLLOUT_GUARD_MARGIN_M)
+    assert guard < altitude_floor_m(target_alt)
+
+
+def test_optimize_scenario_passes_the_guard_altitude_to_the_rollout(monkeypatch):
+    # White-box seam test: the rollout guard must be rollout_guard_altitude_m(target),
+    # NOT the NLP floor itself (the zero-margin regression).
+    target = GeodeticState(35.59, -78.49, 500.0, 80.0, 1.5, -0.05, A320.landing_mass)
+    scenario = _scenario(target=target)
+    captured: dict[str, float] = {}
+
+    def fake_rollout(initial, node_control, final_time, aircraft, **kwargs):
+        captured["min_altitude_m"] = kwargs["min_altitude_m"]
+        return _rollout_samples(initial)
+
+    monkeypatch.setattr(so, "CollocationOptimizer", _fake_optimizer(
+        [[35.6, -78.5, 1000.0, 100.0, 1.5, -0.05],
+         [35.59, -78.49, 500.0, 80.0, 1.5, -0.05]],
+        10.0, [[40000.0, 0.0, 1.0]],
+    ))
+    monkeypatch.setattr(so, "rollout_controls", fake_rollout)
+    so.optimize_scenario(scenario)
+    assert captured["min_altitude_m"] == pytest.approx(
+        so.rollout_guard_altitude_m(target.altitude)
+    )
+
+
+def test_scheme_for_fitting_maps_and_rejects():
+    assert so._scheme_for_fitting("hs") == "hermiteSimpsonNormalizedFullTransport"
+    assert so._scheme_for_fitting("trapezoidal") == "trapezoidalNormalizedFullTransport"
+    with pytest.raises(ValueError, match="unknown fitting"):
+        so._scheme_for_fitting("rk4")
+
+
+def test_optimize_scenario_fitting_selects_the_scheme(monkeypatch):
+    # SEAM: the CLI's --fitting must reach CollocationOptimizer(scheme=...) — both
+    # fittings compose with the normalized full-transport dynamics.
+    target = GeodeticState(35.59, -78.49, 500.0, 80.0, 1.5, -0.05, A320.landing_mass)
+    captured: dict[str, str] = {}
+
+    monkeypatch.setattr(so, "CollocationOptimizer", _fake_optimizer(
+        [[35.6, -78.5, 1000.0, 100.0, 1.5, -0.05],
+         [35.59, -78.49, 500.0, 80.0, 1.5, -0.05]],
+        10.0, [[40000.0, 0.0, 1.0]],
+        on_init=lambda *a, **kw: captured.update(scheme=kw.get("scheme")),
+    ))
+    monkeypatch.setattr(so, "rollout_controls",
+                        lambda initial, *a, **kw: _rollout_samples(initial))
+
+    so.optimize_scenario(_scenario(target=target), fitting="trapezoidal")
+    assert captured["scheme"] == "trapezoidalNormalizedFullTransport"
+    so.optimize_scenario(_scenario(target=target))          # default stays HS
+    assert captured["scheme"] == "hermiteSimpsonNormalizedFullTransport"
+
+
+def test_batch_clears_stale_records_from_a_previous_run(tmp_path):
+    # Records from an earlier batch over a DIFFERENT scenario set survive by filename
+    # and pollute every directory scan (python -m evaluation counted orphans into a
+    # report). A fresh batch clears them; references/ is untouched (the CLI writes it
+    # immediately before the batch).
+    (tmp_path / "OLD1_23L_dead00_20260101T000000Z_states.json").write_text("{}")
+    (tmp_path / "OLD1_23L_dead00_20260101T000000Z_eval.json").write_text("{}")
+    refs = tmp_path / "references"
+    refs.mkdir()
+    keep = refs / "OLD1_23L_dead00_20260101T000000Z_reference_eval.json"
+    keep.write_text("{}")
+
+    so.optimize_scenarios([], output_dir=tmp_path, jobs=1)
+
+    assert not list(tmp_path.glob("*_states.json"))
+    assert not list(tmp_path.glob("*_eval.json"))
+    assert keep.exists()
+    assert (tmp_path / "summary.json").exists()
+
+
 def test_simulate_controls_rolls_forward():
     initial = GeodeticState(35.6, -78.5, 2000.0, 130.0, 1.5, -0.05, A320.mass.max_takeoff_kg)
     # two constant-control segments over a short 4 s horizon
     node_control = [[40000.0, 0.0, 1.0], [40000.0, 0.0, 1.0]]
-    samples = so.simulate_controls(initial, node_control, final_time=4.0, aircraft=A320, dt=1.0)
+    samples = so.simulate_controls(initial, node_control, final_time=4.0, aircraft=A320, dt=1.0,
+                                   min_altitude_m=0.0)
     assert len(samples) >= 2
     assert samples[0].t == 0.0
     assert samples[0].lat == initial.latitude  # first sample is the initial state
@@ -360,21 +474,25 @@ def test_solve_iaf_feeds_the_optimizer_a_segment_list(monkeypatch):
 
     captured = {}
 
-    class FakeOptimizer:
-        def __init__(self, aircraft, *, segments=None, **kwargs):
-            captured["segments"] = segments
-            self.last_dense_states_geo = [[35.9, -78.7, 500.0, 80.0, 0.8, -0.05]]
-            self.segment_durations_s = [10.0]
-
-        def optimize_free_time(self, initial, tgt, max_duration):
-            return 100.0, [[1e5, 0.0, 1.0]], None
-
-    monkeypatch.setattr(so, "CollocationOptimizer", FakeOptimizer)
+    monkeypatch.setattr(so, "CollocationOptimizer", _fake_optimizer(
+        [[35.9, -78.7, 500.0, 80.0, 0.8, -0.05]],
+        100.0, [[1e5, 0.0, 1.0]],
+        on_init=lambda *args, **kwargs: captured.update(
+            segments=kwargs.get("segments"), scheme=kwargs.get("scheme")),
+        segment_durations_s=[10.0],
+    ))
     solve = so._solve_iaf(pc, scenario, target, A320, 60.0,
                           n_segments=8, dt=1.0, max_duration=600.0, verbose=False)
     assert solve.final_time == 100.0
     assert isinstance(captured["segments"], list) and len(captured["segments"]) >= 2
     assert all(isinstance(s, SegmentSpec) for s in captured["segments"])
+    assert captured["scheme"] == "hermiteSimpsonNormalizedFullTransport"  # default fitting
+
+    # --fitting reaches the CONSTRAINED path too
+    so._solve_iaf(pc, scenario, target, A320, 60.0,
+                  n_segments=8, dt=1.0, max_duration=600.0, verbose=False,
+                  fitting="trapezoidal")
+    assert captured["scheme"] == "trapezoidalNormalizedFullTransport"
 
 
 def test_snap_target_to_procedure_uses_the_cifp_threshold():

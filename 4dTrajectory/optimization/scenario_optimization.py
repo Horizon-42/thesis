@@ -66,12 +66,47 @@ DEFAULT_DT = 1.0                 # optimizer dt (API parity; state mesh is auto-
 DEFAULT_MAX_DURATION_S = 2000.0  # free-time upper bound; the solver minimises T below this
 DEFAULT_ROLLOUT_DT_S = 0.5       # forward-integration step for the simulator rollout
 
+# Fitting (transcription) selection for BOTH solve paths (unconstrained + constrained-IAF);
+# each composes with the normalized full-transport dynamics. "hs" (Hermite-Simpson,
+# 4th order) is the default — see the comment in optimize_scenario for why trapezoidal
+# (2nd order) collapsed the batch success rate; it stays selectable for comparison runs.
+FITTING_SCHEMES = {
+    "hs": "hermiteSimpsonNormalizedFullTransport",
+    "trapezoidal": "trapezoidalNormalizedFullTransport",
+}
+DEFAULT_FITTING = "hs"
+
+
+def _scheme_for_fitting(fitting: str) -> str:
+    try:
+        return FITTING_SCHEMES[fitting]
+    except KeyError:
+        raise ValueError(
+            f"unknown fitting {fitting!r}; choose from {sorted(FITTING_SCHEMES)}"
+        ) from None
+
 # Velocity floor = STALL_MARGIN x stall speed (at the scenario's landing mass), so the
 # optimizer admits realistic touchdown-speed targets instead of forcing V >= Vref. Capped at
 # Vref so it never raises the optimizer's default floor.
 _STALL_MARGIN = 1.10
 _RHO_SEA_LEVEL = 1.225
 _GRAVITY = 9.81
+
+# The replay ground guard sits this far BELOW the NLP's altitude floor. The guard exists
+# to truncate DIVERGED replays (tens of metres to kilometres below the floor); but
+# min-time plans deliberately RIDE the floor, and a faithful replay oscillates
+# centimetres around it (measured: a 3.9 cm dip on a floor-riding HS solve whose
+# unguarded replay landed 0.7 m from the target — a zero-margin guard cut that same
+# replay 10 km short and failed 97% of an unconstrained batch). 5 m is two orders above
+# that noise and far below any real divergence; the evaluation's vertical gate
+# (final state, −3.05/+6.10 m) is unaffected by where the mid-flight guard sits.
+ROLLOUT_GUARD_MARGIN_M = 5.0
+
+
+def rollout_guard_altitude_m(target_altitude_m: float) -> float:
+    """The replay truncation altitude for a solve flying to ``target_altitude_m``:
+    the NLP's own floor minus :data:`ROLLOUT_GUARD_MARGIN_M`."""
+    return altitude_floor_m(target_altitude_m) - ROLLOUT_GUARD_MARGIN_M
 
 
 def _stall_speed_ms(mass_kg: float, aero: Any) -> float:
@@ -134,9 +169,13 @@ def optimize_scenario(
     dt: float = DEFAULT_DT,
     max_duration: float = DEFAULT_MAX_DURATION_S,
     rollout_dt_s: float = DEFAULT_ROLLOUT_DT_S,
+    fitting: str = DEFAULT_FITTING,
     verbose: bool = False,
 ) -> ScenarioOptimization:
-    """Optimize ``scenario`` and return its optimizer + simulator state sequences."""
+    """Optimize ``scenario`` and return its optimizer + simulator state sequences.
+
+    ``fitting`` picks the transcription (a :data:`FITTING_SCHEMES` key).
+    """
     initial = scenario.initial
     target = scenario.target
     aircraft = scenario.aircraft
@@ -152,15 +191,15 @@ def optimize_scenario(
         _STALL_MARGIN * _stall_speed_ms(initial.m, scenario.aero),
         aircraft.approach.reference_speed_ms,
     )
-    # Hermite-Simpson fitting (4th order), matching the constrained path and the frontend
-    # default. Trapezoidal (2nd order) produced node-feasible plans whose TRUE-dynamics
-    # replays drifted km-scale on aggressive min-time floor-riding solves — the evaluation
-    # gates judge the replay, so the batch success rate collapsed (KRDU runway: 14%
-    # success with a 0.00 m plan-vs-target error but 5-15 km rollout-vs-target error;
-    # the same flight re-solved with HS lands 3.4 m out).
+    # Default fitting is Hermite-Simpson (4th order), matching the constrained path and
+    # the frontend default. Trapezoidal (2nd order) produced node-feasible plans whose
+    # TRUE-dynamics replays drifted km-scale on aggressive min-time floor-riding solves —
+    # the evaluation gates judge the replay, so the batch success rate collapsed (KRDU
+    # runway: 14% success with a 0.00 m plan-vs-target error but 5-15 km rollout-vs-target
+    # error; the same flight re-solved with HS lands 3.4 m out).
     optimizer = CollocationOptimizer(
         aircraft,
-        scheme="hermiteSimpsonNormalizedFullTransport",
+        scheme=_scheme_for_fitting(fitting),
         n_segments=n_segments,
         max_duration=max_duration,
         min_speed_ms=min_speed_ms,
@@ -180,7 +219,7 @@ def optimize_scenario(
     optimizer_states = _node_states_to_samples([initial_row] + dense_rows, final_time, initial.m)
     rollout = _require_usable_rollout(rollout_controls(
         initial, node_control, final_time, aircraft, dt=rollout_dt_s,
-        min_altitude_m=altitude_floor_m(target.altitude),
+        min_altitude_m=rollout_guard_altitude_m(target.altitude),
     ))
     return ScenarioOptimization(
         scenario.source, float(final_time),
@@ -212,9 +251,10 @@ class _GroundCheckedSimulator:
 
     A replay stepping below ``min_altitude_m`` raises, so the shared rollout TRUNCATES
     (its envelope handling) instead of recording subterranean samples — a diverged
-    replay used to record kilometres below sea level. The floor is the SAME
-    target-anchored ``altitude_floor_m`` the NLP flies with, so plan and replay share
-    one notion of "below ground".
+    replay used to record kilometres below sea level. Callers pass
+    :func:`rollout_guard_altitude_m` (the NLP's floor minus a divergence margin), NOT
+    the floor itself: plans ride the floor, and a zero-margin guard truncates faithful
+    replays on centimetre-scale integration noise.
     """
 
     def __init__(self, simulator: CasadiSimulator, min_altitude_m: float) -> None:
@@ -239,7 +279,7 @@ def rollout_controls(
     *,
     dt: float = DEFAULT_ROLLOUT_DT_S,
     segment_durations: Any = None,
-    min_altitude_m: float = 0.0,
+    min_altitude_m: float,
 ) -> list[RolloutSample]:
     """Roll the piecewise-constant optimizer controls through the REAL simulator.
 
@@ -252,8 +292,11 @@ def rollout_controls(
     samples: each carries its state AND the control active at that time, which is what
     the evaluation export needs (aligned state/control lists). ``segment_durations``
     (one per control) drives the multiphase non-uniform schedule; ``None`` = equal segments.
-    ``min_altitude_m`` truncates a replay that descends below it (callers pass the solve's
-    own ``altitude_floor_m(target)``; the default 0.0 keeps a sea-level backstop).
+    ``min_altitude_m`` truncates a replay that descends below it — REQUIRED: solve
+    replays pass ``rollout_guard_altitude_m(target)``; a target-less replay states
+    ``0.0`` (sea level) explicitly. It used to default to 0.0, which never fires for
+    an elevated-airport target — a caller that forgot it silently recorded diverged
+    replays kilometres below the field as valid rollouts.
     """
     controls = [
         LoadFactorControl(thrust=float(row[0]), bank_rad=float(row[1]),
@@ -290,9 +333,10 @@ def simulate_controls(
     *,
     dt: float = DEFAULT_ROLLOUT_DT_S,
     segment_durations: Any = None,
-    min_altitude_m: float = 0.0,
+    min_altitude_m: float,
 ) -> list[StateSample]:
-    """:func:`rollout_controls` mapped onto serializable :class:`StateSample`s."""
+    """:func:`rollout_controls` mapped onto serializable :class:`StateSample`s
+    (``min_altitude_m`` REQUIRED — see there)."""
     samples = rollout_controls(
         initial_state, node_control, final_time, aircraft,
         dt=dt, segment_durations=segment_durations, min_altitude_m=min_altitude_m,
@@ -345,6 +389,32 @@ def _limit_solver_threads() -> None:
         os.environ.setdefault(var, "1")
 
 
+# Single source of the record-filename suffixes for every writer and glob in this module.
+# NOTE: ``*_reference_eval.json`` also matches the ``*_eval.json`` glob — reference records
+# survive _clear_stale_records only because they live under references/ and the glob is
+# non-recursive. (evaluation/records.py's CLI default pattern mirrors _EVAL_SUFFIX but is
+# owned by that package's public interface.)
+_STATES_SUFFIX = "_states.json"
+_EVAL_SUFFIX = "_eval.json"
+_REFERENCE_EVAL_SUFFIX = "_reference_eval.json"
+
+
+def _clear_stale_records(out: Path) -> None:
+    """Delete leftover per-trajectory records from a previous batch in ``out``.
+
+    A fresh batch writes one ``*_states.json`` + ``*_eval.json`` per CURRENT scenario;
+    records from an earlier run over a DIFFERENT scenario set survive by filename and
+    pollute everything that scans the directory (``python -m evaluation`` once counted
+    27 orphans into a KRDU report). The ``references/`` subdirectory is untouched —
+    the CLI writes the reference records immediately before the batch.
+    """
+    stale = sorted(out.glob(f"*{_STATES_SUFFIX}")) + sorted(out.glob(f"*{_EVAL_SUFFIX}"))
+    for path in stale:
+        path.unlink()
+    if stale:
+        print(f"… cleared {len(stale)} record file(s) from a previous batch in {out}")
+
+
 def optimize_scenarios(
     scenarios: list[FlightScenario],
     *,
@@ -353,6 +423,7 @@ def optimize_scenarios(
     dt: float = DEFAULT_DT,
     max_duration: float = DEFAULT_MAX_DURATION_S,
     rollout_dt_s: float = DEFAULT_ROLLOUT_DT_S,
+    fitting: str = DEFAULT_FITTING,
     jobs: int = 0,
     verbose: bool = False,
     scenarios_label: str | None = None,
@@ -376,9 +447,10 @@ def optimize_scenarios(
     """
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
+    _clear_stale_records(out)
     params: dict[str, Any] = {
         "n_segments": n_segments, "dt": dt, "max_duration": max_duration,
-        "rollout_dt_s": rollout_dt_s, "verbose": verbose,
+        "rollout_dt_s": rollout_dt_s, "fitting": fitting, "verbose": verbose,
     }
     payloads = [(index, scenario, params) for index, scenario in enumerate(scenarios)]
     workers = _resolve_jobs(jobs, len(scenarios))
@@ -493,12 +565,12 @@ def _summary_record(
 
 def _eval_filename(states_name: str) -> str:
     """``<flight>_states.json`` → ``<flight>_eval.json`` (same identity key)."""
-    return states_name.removesuffix("_states.json") + "_eval.json"
+    return states_name.removesuffix(_STATES_SUFFIX) + _EVAL_SUFFIX
 
 
 def _reference_filename(states_name: str) -> str:
     """``<flight>_states.json`` → ``<flight>_reference_eval.json`` (same identity key)."""
-    return states_name.removesuffix("_states.json") + "_reference_eval.json"
+    return states_name.removesuffix(_STATES_SUFFIX) + _REFERENCE_EVAL_SUFFIX
 
 
 REFERENCES_DIR = "references"
@@ -533,6 +605,14 @@ def write_reference_records(
     }
     out = Path(output_dir) / references_dir
     out.mkdir(parents=True, exist_ok=True)
+    # Fresh reference set = fresh directory: references from an earlier run over a
+    # different flight set would otherwise accumulate (same stale-record class as
+    # _clear_stale_records — dormant, but unbounded growth).
+    stale = sorted(out.glob(f"*{_REFERENCE_EVAL_SUFFIX}"))
+    for path in stale:
+        path.unlink()
+    if stale:
+        print(f"… cleared {len(stale)} reference record(s) from a previous run in {out}")
     written: list[Path] = []
     for index, scenario in enumerate(scenarios):
         src = scenario.source
@@ -580,7 +660,7 @@ def _scenario_filename(scenario: FlightScenario, index: int) -> str:
         if value:
             parts.append(str(value))
     safe = re.sub(r"[^A-Za-z0-9._-]+", "_", "_".join(parts))
-    return f"{safe}_states.json"
+    return f"{safe}{_STATES_SUFFIX}"
 
 
 # ── Constrained, min-time IAF optimization (NEW) ──────────────────────────────
@@ -792,6 +872,7 @@ def _iaf_setup(scenario: FlightScenario, procedure_root: str | Path, airport: st
 def _solve_iaf(
     pc, scenario: FlightScenario, target: GeodeticState, aircraft: Any, min_speed_ms: float,
     *, n_segments: int, dt: float, max_duration: float, verbose: bool,
+    fitting: str = DEFAULT_FITTING,
 ) -> _IafSolve:
     """Full CONSTRAINED solve from the scenario's OBSERVED start to the runway via one IAF path.
 
@@ -811,7 +892,7 @@ def _solve_iaf(
     start_state = scenario.initial
     optimizer = CollocationOptimizer(
         aircraft, segments=segments,
-        scheme="hermiteSimpsonNormalizedFullTransport",
+        scheme=_scheme_for_fitting(fitting),
         min_speed_ms=min_speed_ms,
         verbose=verbose,
     )
@@ -841,7 +922,7 @@ def _iaf_result(
     rollout = _require_usable_rollout(rollout_controls(
         best.initial, best.controls, best.final_time, aircraft, dt=rollout_dt_s,
         segment_durations=best.segment_durations,
-        min_altitude_m=altitude_floor_m(target.altitude),
+        min_altitude_m=rollout_guard_altitude_m(target.altitude),
     ))
     source = {
         **scenario.source,
@@ -866,6 +947,7 @@ def optimize_scenario_min_time_iaf(
     dt: float = DEFAULT_DT,
     max_duration: float = DEFAULT_MAX_DURATION_S,
     rollout_dt_s: float = DEFAULT_ROLLOUT_DT_S,
+    fitting: str = DEFAULT_FITTING,
     verbose: bool = False,
 ) -> ScenarioOptimization:
     """Constrained, fastest-IAF optimization for one scenario (one trajectory out).
@@ -884,6 +966,7 @@ def optimize_scenario_min_time_iaf(
             candidate = _solve_iaf(
                 pc, scenario, target, aircraft, min_speed_ms,
                 n_segments=n_segments, dt=dt, max_duration=max_duration, verbose=verbose,
+                fitting=fitting,
             )
         except Exception as exc:  # noqa: BLE001 — try the next IAF; fail only if all IAFs fail
             attempts.append((pc.waypoints[0].ident, type(exc).__name__))
@@ -911,6 +994,7 @@ def optimize_scenario_shortest_iaf(
     dt: float = DEFAULT_DT,
     max_duration: float = DEFAULT_MAX_DURATION_S,
     rollout_dt_s: float = DEFAULT_ROLLOUT_DT_S,
+    fitting: str = DEFAULT_FITTING,
     verbose: bool = False,
 ) -> ScenarioOptimization:
     """Cheap, naive IAF selection: pick the IAF whose 3D Lagrange-curve path to the runway is
@@ -929,6 +1013,7 @@ def optimize_scenario_shortest_iaf(
             best = _solve_iaf(
                 pc, scenario, target, aircraft, min_speed_ms,
                 n_segments=n_segments, dt=dt, max_duration=max_duration, verbose=verbose,
+                fitting=fitting,
             )
         except Exception as exc:  # noqa: BLE001 — fall through to the next-shortest IAF
             attempts.append((pc.waypoints[0].ident, type(exc).__name__))
@@ -980,6 +1065,7 @@ def optimize_scenarios_constrained_iaf(
     dt: float = DEFAULT_DT,
     max_duration: float = DEFAULT_MAX_DURATION_S,
     rollout_dt_s: float = DEFAULT_ROLLOUT_DT_S,
+    fitting: str = DEFAULT_FITTING,
     jobs: int = 0,
     verbose: bool = False,
     scenarios_label: str | None = None,
@@ -996,11 +1082,12 @@ def optimize_scenarios_constrained_iaf(
         raise ValueError(f"unknown selection {selection!r}; choose from {sorted(_IAF_SELECTORS)}")
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
+    _clear_stale_records(out)
     params: dict[str, Any] = {
         "selection": selection,
         "procedure_root": str(procedure_root), "airport": airport,
         "n_segments": n_segments, "dt": dt, "max_duration": max_duration,
-        "rollout_dt_s": rollout_dt_s, "verbose": verbose,
+        "rollout_dt_s": rollout_dt_s, "fitting": fitting, "verbose": verbose,
     }
     payloads = [(index, scenario, params) for index, scenario in enumerate(scenarios)]
     workers = _resolve_jobs(jobs, len(scenarios))
@@ -1092,6 +1179,11 @@ def main() -> None:
     parser.add_argument("--max-duration", type=float, default=DEFAULT_MAX_DURATION_S)
     parser.add_argument("--rollout-dt", type=float, default=DEFAULT_ROLLOUT_DT_S)
     parser.add_argument(
+        "--fitting", choices=sorted(FITTING_SCHEMES), default=DEFAULT_FITTING,
+        help="transcription fitting for the solves: 'hs' = Hermite-Simpson (4th order, "
+             "default) or 'trapezoidal' (2nd order; its replays drift km-scale on "
+             "aggressive min-time solves — kept for comparison runs)")
+    parser.add_argument(
         "--jobs", type=int, default=0,
         help="parallel worker processes (0 = auto: half the CPU cores; 1 = serial)",
     )
@@ -1146,6 +1238,7 @@ def main() -> None:
             dt=args.dt,
             max_duration=args.max_duration,
             rollout_dt_s=args.rollout_dt,
+            fitting=args.fitting,
             jobs=args.jobs,
             verbose=args.verbose,
             scenarios_label=args.scenarios,
@@ -1159,6 +1252,7 @@ def main() -> None:
             dt=args.dt,
             max_duration=args.max_duration,
             rollout_dt_s=args.rollout_dt,
+            fitting=args.fitting,
             jobs=args.jobs,
             verbose=args.verbose,
             scenarios_label=args.scenarios,
