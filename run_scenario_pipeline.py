@@ -52,6 +52,8 @@ Usage:
     python run_scenario_pipeline.py --airport KRDU
     # trapezoidal-fitting comparison run (default is Hermite-Simpson):
     python run_scenario_pipeline.py --airport KRDU --target-type runway --fitting-type trapezoidal
+    # custom control mesh (n-segments = unconstrained; n-seg-per-phase = constrained):
+    python run_scenario_pipeline.py --airport KRDU --n-segments 12 --n-seg-per-phase 4
     # evaluation only:
     python run_scenario_pipeline.py --airport KRDU --outputs eval
     # rebuild only the comparison CZML from an existing optimization:
@@ -79,6 +81,12 @@ CZML_SCRIPT = REPO_ROOT / "aeroviz-4d" / "python" / "build_scenario_comparison_c
 
 TARGET_TYPES = ("adsb", "runway")
 OUTPUT_KINDS = ("czml", "eval")
+
+# Control-mesh defaults — MUST mirror CollocationOptimizer's (collocation/optimizer.py:
+# DEFAULT_N_SEGMENTS / DEFAULT_N_SEG_PER_PHASE). The pipeline shells out (import-light: no
+# casadi), so it cannot import them; kept in sync by this comment.
+DEFAULT_N_SEGMENTS = 8         # unconstrained: control segments over the whole trajectory
+DEFAULT_N_SEG_PER_PHASE = 3    # constrained: control segments PER procedure leg
 
 # The full category sweep, run when --target-type is omitted: every mode the
 # frontend's comparison picker offers, as (target_type, with_constraint).
@@ -122,7 +130,9 @@ class Plan:
 
     def __init__(self, airport: str, target_type: str, with_constraint: bool,
                  outputs: tuple[str, ...], jobs: int = 0,
-                 fitting: str = "hs", state_substeps: int | None = None) -> None:
+                 fitting: str = "hs", state_substeps: int | None = None,
+                 n_segments: int = DEFAULT_N_SEGMENTS,
+                 n_seg_per_phase: int = DEFAULT_N_SEG_PER_PHASE) -> None:
         self.airport = airport.strip().upper()
         self.target_type = target_type
         self.with_constraint = with_constraint
@@ -130,6 +140,11 @@ class Plan:
         # Parallel optimizer worker processes (passed through to scenario_optimization's
         # --jobs; 0 = auto = half the CPU cores, 1 = serial).
         self.jobs = jobs
+        # Control-mesh sizes: n_segments for the unconstrained solve (whole-trajectory
+        # control count), n_seg_per_phase for the constrained multiphase solve (control
+        # segments PER procedure leg). Each mode uses only its own knob (see steps()).
+        self.n_segments = n_segments
+        self.n_seg_per_phase = n_seg_per_phase
         # Transcription fitting for the solves (scenario_optimization --fitting):
         # "hs" = Hermite-Simpson (default) or "trapezoidal" (comparison runs). Both
         # fittings write into the SAME category dir — an experiment overwrites the
@@ -190,9 +205,14 @@ class Plan:
                 optimize_cmd += ["--state-substeps", str(self.state_substeps)]
             if self.with_constraint:
                 # Constrained-IAF: optimize via the runway's RNAV(GPS) procedure (one
-                # trajectory per scenario, IAF chosen by shortest 3D path).
+                # trajectory per scenario, IAF chosen by shortest 3D path). The multiphase
+                # mesh is set PER LEG (n_seg_per_phase); n_segments does not apply here.
                 optimize_cmd += ["--constrained-iaf", "--iaf-selection", "shortest",
-                                 "--airport", self.airport]
+                                 "--airport", self.airport,
+                                 "--n-seg-per-phase", str(self.n_seg_per_phase)]
+            else:
+                # Unconstrained: one phase, control over the whole trajectory (n_segments).
+                optimize_cmd += ["--n-segments", str(self.n_segments)]
             named.append(("references + optimization", optimize_cmd))
 
         # The evaluation report always runs (it is cheap): the eval tail renders it and
@@ -253,11 +273,14 @@ def run_for_airport(
     jobs: int = 0,
     fitting: str = "hs",
     state_substeps: int | None = None,
+    n_segments: int = DEFAULT_N_SEGMENTS,
+    n_seg_per_phase: int = DEFAULT_N_SEG_PER_PHASE,
 ) -> bool:
     """Run (or preview) the pipeline for one airport. Returns True if it ran /
     would run, False if it was skipped (missing input and nothing to reuse)."""
     plan = Plan(airport, target_type, with_constraint, outputs, jobs=jobs, fitting=fitting,
-                state_substeps=state_substeps)
+                state_substeps=state_substeps, n_segments=n_segments,
+                n_seg_per_phase=n_seg_per_phase)
     reuse = skip_optimize and plan.optimization_exists()
 
     mode = "reuse optimization" if reuse else "full pipeline"
@@ -336,6 +359,16 @@ def main() -> None:
              "capped at 16). Higher M = denser plan states = slower solves",
     )
     parser.add_argument(
+        "--n-segments", type=int, default=DEFAULT_N_SEGMENTS,
+        help=f"UNCONSTRAINED control segments over the whole trajectory (asdb/runway modes; "
+             f"default {DEFAULT_N_SEGMENTS}, = CollocationOptimizer's). Ignored by constrained runs",
+    )
+    parser.add_argument(
+        "--n-seg-per-phase", type=int, default=DEFAULT_N_SEG_PER_PHASE,
+        help=f"CONSTRAINED control segments PER procedure leg (runway_cons mode; default "
+             f"{DEFAULT_N_SEG_PER_PHASE}, = CollocationOptimizer's). Ignored by unconstrained runs",
+    )
+    parser.add_argument(
         "--fitting-type", choices=("hs", "trapezoidal", "rk4"), default="hs",
         help="transcription fitting for the solves (scenario_optimization --fitting): "
              "'hs' = Hermite-Simpson (4th order, default), 'trapezoidal' = 2nd order "
@@ -357,6 +390,10 @@ def main() -> None:
 
     if args.state_substeps is not None and args.state_substeps < 1:
         parser.error(f"--state-substeps must be >= 1, got {args.state_substeps}")
+    if args.n_segments < 2:
+        parser.error(f"--n-segments must be >= 2, got {args.n_segments}")
+    if args.n_seg_per_phase < 1:
+        parser.error(f"--n-seg-per-phase must be >= 1, got {args.n_seg_per_phase}")
 
     if args.target_type is None:
         if args.with_constraint:
@@ -385,6 +422,8 @@ def main() -> None:
             dry_run=args.dry_run, skip_optimize=args.skip_optimize, jobs=args.jobs,
             fitting=args.fitting_type,
             state_substeps=args.state_substeps,
+            n_segments=args.n_segments,
+            n_seg_per_phase=args.n_seg_per_phase,
         ):
             ran += 1
 

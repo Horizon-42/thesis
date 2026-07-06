@@ -57,6 +57,11 @@ _PSI = _schemes._PSI
 _ALT = 2   # altitude's index in the (n, e, alt, V, psi, gamma) decision state
 _INF = 1e9
 
+# Default control-mesh sizes, named so callers/CLIs (scenario_optimization, the pipeline)
+# can mirror them instead of duplicating magic numbers.
+DEFAULT_N_SEGMENTS = 8         # unconstrained: control segments over the whole trajectory
+DEFAULT_N_SEG_PER_PHASE = 3    # constrained: control segments PER procedure leg
+
 # Constrained solves: the segments' (n, e) coordinates MUST be in the frame the optimizer solves
 # in — metric offsets anchored at the TARGET = the LTP. Validated at construction (a silent
 # mis-anchor would shift every corridor); the tolerance absorbs threshold-vs-target data noise.
@@ -198,8 +203,8 @@ class CollocationOptimizer:
         *,
         scheme: str | None = None,
         segments: list | None = None,
-        n_segments: int = 8,
-        n_seg_per_phase: int = 3,
+        n_segments: int = DEFAULT_N_SEGMENTS,
+        n_seg_per_phase: int = DEFAULT_N_SEG_PER_PHASE,
         state_substeps: int | None = None,
         max_duration: float = 600.0,
         max_terminal_bank_deg: float = _components._DEFAULT_MAX_TERMINAL_BANK_DEG,

@@ -501,7 +501,8 @@ def test_solve_iaf_feeds_the_optimizer_a_segment_list(monkeypatch):
         100.0, [[1e5, 0.0, 1.0]],
         on_init=lambda *args, **kwargs: captured.update(
             segments=kwargs.get("segments"), scheme=kwargs.get("scheme"),
-            state_substeps=kwargs.get("state_substeps")),
+            state_substeps=kwargs.get("state_substeps"),
+            n_seg_per_phase=kwargs.get("n_seg_per_phase")),
         segment_durations_s=[10.0],
     ))
     solve = so._solve_iaf(pc, scenario, target, A320, 60.0,
@@ -510,13 +511,16 @@ def test_solve_iaf_feeds_the_optimizer_a_segment_list(monkeypatch):
     assert isinstance(captured["segments"], list) and len(captured["segments"]) >= 2
     assert all(isinstance(s, SegmentSpec) for s in captured["segments"])
     assert captured["scheme"] == "hermiteSimpsonNormalizedFullTransport"  # default fitting
+    # n_seg_per_phase defaults to the optimizer's own default (single-sourced)
+    assert captured["n_seg_per_phase"] == so.DEFAULT_N_SEG_PER_PHASE
 
-    # --fitting and --state-substeps reach the CONSTRAINED path too
+    # --fitting / --state-substeps / --n-seg-per-phase all reach the CONSTRAINED path
     so._solve_iaf(pc, scenario, target, A320, 60.0,
                   n_segments=8, dt=1.0, max_duration=600.0, verbose=False,
-                  fitting="trapezoidal", state_substeps=6)
+                  fitting="trapezoidal", state_substeps=6, n_seg_per_phase=5)
     assert captured["scheme"] == "trapezoidalNormalizedFullTransport"
     assert captured["state_substeps"] == 6
+    assert captured["n_seg_per_phase"] == 5
 
 
 def test_snap_target_to_procedure_uses_the_cifp_threshold():

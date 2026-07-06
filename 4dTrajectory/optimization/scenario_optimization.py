@@ -54,14 +54,16 @@ from aerodynamic_model.casadi_simulator import CasadiSimulator  # noqa: E402
 from aerodynamic_model.rollout import RolloutSample, rollout_piecewise_constant  # noqa: E402
 from collocation import CollocationOptimizer  # noqa: E402
 from collocation.components import altitude_floor_m  # noqa: E402
+# Single source for the control-mesh defaults (mirrored by the CLI + the pipeline).
+from collocation.optimizer import DEFAULT_N_SEGMENTS, DEFAULT_N_SEG_PER_PHASE  # noqa: E402
 from evaluation_export import (  # noqa: E402
     evaluation_record,
     failed_evaluation_record,
     reference_evaluation_record,
 )
 
-# Optimizer + rollout defaults (override on the CLI).
-DEFAULT_N_SEGMENTS = 8
+# Optimizer + rollout defaults (override on the CLI). DEFAULT_N_SEGMENTS / the constrained
+# DEFAULT_N_SEG_PER_PHASE are imported above from the optimizer (its own construction defaults).
 DEFAULT_DT = 1.0                 # optimizer dt (API parity; state mesh is auto-selected)
 DEFAULT_MAX_DURATION_S = 2000.0  # free-time upper bound; the solver minimises T below this
 DEFAULT_ROLLOUT_DT_S = 0.5       # forward-integration step for the simulator rollout
@@ -883,6 +885,7 @@ def _solve_iaf(
     *, n_segments: int, dt: float, max_duration: float, verbose: bool,
     fitting: str = DEFAULT_FITTING,
     state_substeps: int | None = None,
+    n_seg_per_phase: int = DEFAULT_N_SEG_PER_PHASE,
 ) -> _IafSolve:
     """Full CONSTRAINED solve from the scenario's OBSERVED start to the runway via one IAF path.
 
@@ -890,8 +893,9 @@ def _solve_iaf(
     optimiser. The start is the observed ``scenario.initial`` (so the result is comparable to the
     ADS-B track), NOT a synthetic IAF state: the optimiser flies a free transition from there to the
     procedure's first fix (pre-FAF legs are unpinned, altitude-only), then each procedure leg with
-    its corridor / glidepath / floor. Raises on infeasibility. ``n_segments``/``dt`` are accepted
-    for CLI/API parity but unused by the multiphase optimiser (it sets its own per-phase mesh).
+    its corridor / glidepath / floor. Raises on infeasibility. ``n_seg_per_phase`` sets the control
+    segments PER leg (the multiphase mesh); ``n_segments``/``dt`` are accepted for CLI/API parity
+    but unused here (the multiphase optimiser derives its total mesh from n_seg_per_phase × legs).
     """
     from aeroviz_backend.procedure_segments import build_constraint_segments
     segments = build_constraint_segments(
@@ -903,6 +907,7 @@ def _solve_iaf(
     optimizer = CollocationOptimizer(
         aircraft, segments=segments,
         scheme=_scheme_for_fitting(fitting),
+        n_seg_per_phase=n_seg_per_phase,
         min_speed_ms=min_speed_ms,
         state_substeps=state_substeps,
         verbose=verbose,
@@ -960,6 +965,7 @@ def optimize_scenario_min_time_iaf(
     rollout_dt_s: float = DEFAULT_ROLLOUT_DT_S,
     fitting: str = DEFAULT_FITTING,
     state_substeps: int | None = None,
+    n_seg_per_phase: int = DEFAULT_N_SEG_PER_PHASE,
     verbose: bool = False,
 ) -> ScenarioOptimization:
     """Constrained, fastest-IAF optimization for one scenario (one trajectory out).
@@ -979,6 +985,7 @@ def optimize_scenario_min_time_iaf(
                 pc, scenario, target, aircraft, min_speed_ms,
                 n_segments=n_segments, dt=dt, max_duration=max_duration, verbose=verbose,
                 fitting=fitting, state_substeps=state_substeps,
+                n_seg_per_phase=n_seg_per_phase,
             )
         except Exception as exc:  # noqa: BLE001 — try the next IAF; fail only if all IAFs fail
             attempts.append((pc.waypoints[0].ident, type(exc).__name__))
@@ -1008,6 +1015,7 @@ def optimize_scenario_shortest_iaf(
     rollout_dt_s: float = DEFAULT_ROLLOUT_DT_S,
     fitting: str = DEFAULT_FITTING,
     state_substeps: int | None = None,
+    n_seg_per_phase: int = DEFAULT_N_SEG_PER_PHASE,
     verbose: bool = False,
 ) -> ScenarioOptimization:
     """Cheap, naive IAF selection: pick the IAF whose 3D Lagrange-curve path to the runway is
@@ -1027,6 +1035,7 @@ def optimize_scenario_shortest_iaf(
                 pc, scenario, target, aircraft, min_speed_ms,
                 n_segments=n_segments, dt=dt, max_duration=max_duration, verbose=verbose,
                 fitting=fitting, state_substeps=state_substeps,
+                n_seg_per_phase=n_seg_per_phase,
             )
         except Exception as exc:  # noqa: BLE001 — fall through to the next-shortest IAF
             attempts.append((pc.waypoints[0].ident, type(exc).__name__))
@@ -1080,6 +1089,7 @@ def optimize_scenarios_constrained_iaf(
     rollout_dt_s: float = DEFAULT_ROLLOUT_DT_S,
     fitting: str = DEFAULT_FITTING,
     state_substeps: int | None = None,
+    n_seg_per_phase: int = DEFAULT_N_SEG_PER_PHASE,
     jobs: int = 0,
     verbose: bool = False,
     scenarios_label: str | None = None,
@@ -1102,7 +1112,8 @@ def optimize_scenarios_constrained_iaf(
         "procedure_root": str(procedure_root), "airport": airport,
         "n_segments": n_segments, "dt": dt, "max_duration": max_duration,
         "rollout_dt_s": rollout_dt_s, "fitting": fitting,
-        "state_substeps": state_substeps, "verbose": verbose,
+        "state_substeps": state_substeps, "n_seg_per_phase": n_seg_per_phase,
+        "verbose": verbose,
     }
     payloads = [(index, scenario, params) for index, scenario in enumerate(scenarios)]
     workers = _resolve_jobs(jobs, len(scenarios))
@@ -1189,7 +1200,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Optimize flight scenarios -> state JSON files")
     parser.add_argument("--scenarios", required=True, help="Scenario JSON from flight_scenarios")
     parser.add_argument("--output-dir", required=True, help="Where to write the *_states.json files")
-    parser.add_argument("--n-segments", type=int, default=DEFAULT_N_SEGMENTS)
+    parser.add_argument("--n-segments", type=int, default=DEFAULT_N_SEGMENTS,
+                        help="unconstrained: control segments over the whole trajectory")
+    parser.add_argument("--n-seg-per-phase", type=int, default=DEFAULT_N_SEG_PER_PHASE,
+                        help="constrained-iaf: control segments PER procedure leg (the "
+                             "multiphase mesh; unconstrained runs ignore it)")
     parser.add_argument("--dt", type=float, default=DEFAULT_DT)
     parser.add_argument("--max-duration", type=float, default=DEFAULT_MAX_DURATION_S)
     parser.add_argument("--rollout-dt", type=float, default=DEFAULT_ROLLOUT_DT_S)
@@ -1241,6 +1256,8 @@ def main() -> None:
 
     if args.state_substeps is not None and args.state_substeps < 1:
         parser.error(f"--state-substeps must be >= 1, got {args.state_substeps}")
+    if args.n_seg_per_phase < 1:
+        parser.error(f"--n-seg-per-phase must be >= 1, got {args.n_seg_per_phase}")
     scenarios = load_scenarios(args.scenarios)
     # Reference eval records come FIRST (the observed baseline exists whether or not a
     # solve succeeds); the batch then points every eval record at its reference.
@@ -1261,6 +1278,7 @@ def main() -> None:
             rollout_dt_s=args.rollout_dt,
             fitting=args.fitting,
             state_substeps=args.state_substeps,
+            n_seg_per_phase=args.n_seg_per_phase,
             jobs=args.jobs,
             verbose=args.verbose,
             scenarios_label=args.scenarios,
