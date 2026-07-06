@@ -114,6 +114,7 @@ def make_multiple_shooting_solver(segment_num: int, dt: float, max_duration: flo
     #     "ipopt.max_iter": 200,
     #     "ipopt.print_level": 5,
     # }
+    # TODO maybe try another solver?
     solver = ca.nlpsol('solver', 'ipopt', nlp)
 
     return solver, lbw, ubw, lbg, ubg
