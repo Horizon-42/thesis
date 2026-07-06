@@ -14,21 +14,26 @@ from dataclasses import dataclass
 class DeviationThresholds:
     """Pass/fail limits for the final state vs the target state.
 
-    lateral_max_m — FAA Order 8260.58D §3-1-3(3), Formula 3-1-1: the LPV lateral
-        guidance course SEMIWIDTH at the threshold (LTP) is
-        ``max(350 ft, tan(1.5°) · d_GARP)``. The 350 ft floor ≈ 106.75 m (the
-        order rounds course widths to 0.25 m increments) is the TIGHTEST
-        full-scale deflection any LPV final can have at the threshold — a final
-        state farther off laterally is outside the lateral guidance sector of
-        every LPV approach.
+    lateral_max_m — FAA Order 8260.58D §3-1-5.c(3) "Course width at threshold"
+        (pages 3-7/3-8), Formula 3-1-1: the course width at the threshold (LTP)
+        is ``greater of 350 ft or tan(1.5°) · d_GARP`` — a ONE-SIDED value (the
+        order's term is "course width", but Figure 3-1-7 annotates it ±350 ft
+        about the centerline, i.e. what this package calls the semiwidth /
+        full-scale deflection). 350 ft = 106.68 m, and the order's own rule
+        ("convert the result to meters and round to the nearest 0.25-meter
+        increment") makes it 106.75 m — the value never appears verbatim in the
+        PDF. It is the TIGHTEST deflection any LPV final can have at the
+        threshold — a final state farther off laterally is outside the lateral
+        guidance sector of every LPV approach.
 
-    vertical_below_max_m / vertical_above_max_m — FAA Order 8260.58D §1-3-2
-        (Threshold Crossing Height): the default TCH is designed for a 30 ft
-        wheel crossing height (WCH); the minimum WCH is 20 ft and the maximum is
-        50 ft. Relative to a target placed AT the published TCH point, the
-        acceptable window is therefore −10 ft (3.05 m low) to +20 ft (6.10 m
-        high). This assumes the target altitude is threshold elevation + TCH,
-        which holds for this project's CIFP-anchored optimizer targets.
+    vertical_below_max_m / vertical_above_max_m — FAA Order 8260.58D
+        §1-3-1.f(2)(b) "Threshold crossing height" (page 1-27), item 1: "The
+        default TCH provides a 30-foot WCH. The minimum WCH is 20 feet and the
+        maximum WCH is 50 feet." Relative to a target placed AT the published
+        TCH point (WCH 30), the acceptable window is therefore −10 ft (3.05 m
+        low) to +20 ft (6.10 m high) — derived offsets, not verbatim numbers.
+        This assumes the target altitude is threshold elevation + TCH, which
+        holds for this project's CIFP-anchored optimizer targets.
     """
 
     lateral_max_m: float = 106.75
