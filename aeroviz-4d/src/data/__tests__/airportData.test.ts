@@ -8,6 +8,7 @@ import {
   airportLocalTerrainUrl,
   airportChartsIndexUrl,
   isAirportsIndexManifest,
+  isComparisonCategoriesManifest,
   normalizeAirportCode,
   sortAirportCatalog,
 } from "../airportData";
@@ -43,5 +44,18 @@ describe("airportData helpers", () => {
       "CYVR",
       "KRDU",
     ]);
+  });
+
+  it("requires the explicit constrained boolean on every comparison category", () => {
+    const entry = { key: "runway_cons", label: "Runway (constrained)", dir: "runway_cons", groups: 3 };
+    // Constrained-ness is a manifest FIELD, not a key/dir spelling — an entry
+    // without the boolean is rejected so a stale manifest fails loudly.
+    expect(isComparisonCategoriesManifest({ categories: [entry] })).toBe(false);
+    expect(
+      isComparisonCategoriesManifest({ categories: [{ ...entry, constrained: true }] }),
+    ).toBe(true);
+    expect(
+      isComparisonCategoriesManifest({ categories: [{ ...entry, constrained: "yes" }] }),
+    ).toBe(false);
   });
 });

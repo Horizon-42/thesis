@@ -493,13 +493,17 @@ def _load_adsb(airport: str, override: str | None) -> list[dict[str, Any]]:
 
 
 def _upsert_category(
-    manifest_path: Path, *, key: str, label: str, directory: str, group_count: int
+    manifest_path: Path, *, key: str, label: str, directory: str, group_count: int,
+    constrained: bool,
 ) -> int:
     """Add/replace one category in the shared ``categories.json`` manifest.
 
     Each ``--category`` run writes its CZMLs into its own subdir and records itself here, so
     the frontend can offer a selector listing exactly the optimization categories that exist
-    (e.g. ADS-B target / runway target / …, with/without constraints). Returns the new total.
+    (e.g. ADS-B target / runway target / …, with/without constraints). ``constrained`` is
+    stamped as an explicit manifest field — the frontend keys constraint-scoped behavior
+    (the Observe procedure auto-open) off it, never off the key/dir spelling. Returns the
+    new total.
     """
     manifest: dict[str, Any] = {"categories": []}
     if manifest_path.exists():
@@ -507,7 +511,8 @@ def _upsert_category(
         if isinstance(loaded, dict) and isinstance(loaded.get("categories"), list):
             manifest = loaded
     kept = [c for c in manifest["categories"] if c.get("key") != key]
-    kept.append({"key": key, "label": label, "dir": directory, "groups": group_count})
+    kept.append({"key": key, "label": label, "dir": directory, "groups": group_count,
+                 "constrained": constrained})
     manifest["categories"] = sorted(kept, key=lambda c: c["key"])
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return len(manifest["categories"])
@@ -530,13 +535,19 @@ def main() -> None:
     )
     parser.add_argument(
         "--category", default=None,
-        help="optimization-category key (e.g. asdb / runway / runwayConstrained). When set, "
+        help="optimization-category key (e.g. asdb / runway / runway_cons). When set, "
              "the output-dir is treated as that category's subdir and a categories.json manifest "
              "is written to its parent so the frontend can offer a category selector.",
     )
     parser.add_argument(
         "--category-label", default=None,
         help="display label for --category (defaults to the key)",
+    )
+    parser.add_argument(
+        "--constrained", action="store_true",
+        help="mark --category as a constrained-optimization category (its solves enforce "
+             "the runway's RNAV procedure); stamped into the manifest as an explicit field "
+             "so the frontend never derives it from the key/dir spelling",
     )
     parser.add_argument(
         "--scenarios", default=None,
@@ -633,6 +644,7 @@ def main() -> None:
             out_dir.parent / "categories.json",
             key=args.category, label=args.category_label or args.category,
             directory=out_dir.name, group_count=len(index["groups"]),
+            constrained=args.constrained,
         )
         print(f"✓ registered category {args.category!r} -> {out_dir.parent / 'categories.json'} "
               f"({total} categor{'y' if total == 1 else 'ies'})")

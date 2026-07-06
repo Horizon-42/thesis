@@ -222,6 +222,8 @@ class Plan:
                 "--category", self.category,
                 "--category-label", self.label,
             ]
+            if self.with_constraint:
+                comparison_cmd.append("--constrained")
             if evaluable:
                 comparison_cmd += ["--evaluation-report", str(self.report)]
             # Feed the scenario initial states so the index carries V + mass for EVERY

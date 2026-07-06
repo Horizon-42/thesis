@@ -358,13 +358,30 @@ def test_clear_stale_outputs_removes_previous_build(tmp_path):
 
 def test_upsert_category_adds_and_replaces(tmp_path):
     manifest = tmp_path / "categories.json"
-    _upsert_category(manifest, key="runway", label="Runway target", directory="runway", group_count=10)
-    total = _upsert_category(manifest, key="asdb", label="ADS-B target", directory="asdb", group_count=20)
+    _upsert_category(manifest, key="runway", label="Runway target", directory="runway",
+                     group_count=10, constrained=False)
+    total = _upsert_category(manifest, key="asdb", label="ADS-B target", directory="asdb",
+                             group_count=20, constrained=False)
     assert total == 2
     cats = json.loads(manifest.read_text())["categories"]
     assert [c["key"] for c in cats] == ["asdb", "runway"]  # sorted by key
     # re-registering an existing key replaces it in place (no duplicate)
-    _upsert_category(manifest, key="asdb", label="ADS-B target", directory="asdb", group_count=21)
+    _upsert_category(manifest, key="asdb", label="ADS-B target", directory="asdb",
+                     group_count=21, constrained=False)
     cats = json.loads(manifest.read_text())["categories"]
     assert len(cats) == 2
     assert next(c for c in cats if c["key"] == "asdb")["groups"] == 21
+
+
+def test_upsert_category_stamps_the_explicit_constrained_field(tmp_path):
+    # Constrained-ness is a manifest FIELD the frontend keys off — never derived
+    # from the key/dir spelling (docs once said "runwayConstrained", which no
+    # suffix check would match).
+    manifest = tmp_path / "categories.json"
+    _upsert_category(manifest, key="runway", label="Runway target", directory="runway",
+                     group_count=10, constrained=False)
+    _upsert_category(manifest, key="runway_cons", label="Runway (constrained)",
+                     directory="runway_cons", group_count=9, constrained=True)
+    cats = {c["key"]: c for c in json.loads(manifest.read_text())["categories"]}
+    assert cats["runway"]["constrained"] is False
+    assert cats["runway_cons"]["constrained"] is True

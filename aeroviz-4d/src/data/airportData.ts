@@ -111,7 +111,7 @@ export function airportComparisonCzmlUrl(
 
 /** One optimization category, as listed in `comparison/categories.json`. */
 export interface ComparisonCategory {
-  /** Stable key, e.g. "asdb" / "runway" / "runwayConstrained". */
+  /** Stable key, e.g. "asdb" / "runway" / "runway_cons". */
   key: string;
   /** Display label, e.g. "ADS-B target". */
   label: string;
@@ -119,6 +119,13 @@ export interface ComparisonCategory {
   dir: string;
   /** Number of flight groups in this category. */
   groups: number;
+  /**
+   * Whether this category's solves enforce the runway's RNAV(GPS) procedure as per-leg
+   * NLP path constraints. An EXPLICIT manifest field (stamped by the pipeline's
+   * `--constrained`), never derived from the key/dir spelling — a `_cons` suffix is a
+   * naming convention, not a contract.
+   */
+  constrained: boolean;
 }
 
 export interface ComparisonCategoriesManifest {
@@ -131,7 +138,8 @@ export function isComparisonCategory(value: unknown): value is ComparisonCategor
   return (
     typeof candidate.key === "string" &&
     typeof candidate.label === "string" &&
-    typeof candidate.dir === "string"
+    typeof candidate.dir === "string" &&
+    typeof candidate.constrained === "boolean"
   );
 }
 
