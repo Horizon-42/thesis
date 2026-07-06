@@ -402,6 +402,26 @@ def build_runway_comparison(
     return [document] + entities, index_records
 
 
+def clear_stale_outputs(out_dir: Path, *, keep_report: bool) -> list[Path]:
+    """Delete a previous build's files from the category dir before writing this one.
+
+    A runway present in an EARLIER batch but absent from this summary would leave its
+    stale ``comparison_*.czml`` behind (dormant — the rewritten index stops referencing
+    it — but unbounded growth). And when this run publishes NO evaluation report
+    (``keep_report=False``), a previously published ``evaluation_report.json`` must go
+    too: the frontend's Details window fetches it by path and would show outdated
+    metrics next to the fresh index. Returns the deleted paths.
+    """
+    stale = sorted(out_dir.glob("comparison_*.czml"))
+    if not keep_report:
+        stale += [p for p in [out_dir / "evaluation_report.json"] if p.exists()]
+    for path in stale:
+        path.unlink()
+    if stale:
+        print(f"… cleared {len(stale)} file(s) from a previous build in {out_dir}")
+    return stale
+
+
 def publish_evaluation_report(evaluation_report: dict[str, Any], out_dir: Path) -> Path:
     """Publish the evaluation report VERBATIM into the category dir the frontend serves.
 
@@ -552,6 +572,7 @@ def main() -> None:
     states_dir = Path(args.states_dir) if args.states_dir else summary_path.parent
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    clear_stale_outputs(out_dir, keep_report=args.evaluation_report is not None)
 
     adsb_cache: dict[str, list[dict[str, Any]]] = {}
 

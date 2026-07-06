@@ -334,6 +334,28 @@ def test_publish_evaluation_report_copies_verbatim(tmp_path):
     assert json.loads(path.read_text(encoding="utf-8")) == report
 
 
+def test_clear_stale_outputs_removes_previous_build(tmp_path):
+    # A runway present in an earlier batch but absent now must not leave its CZML
+    # behind; a previously PUBLISHED report must go when this run publishes none
+    # (the frontend Details window fetches it by path and would show stale metrics).
+    from build_scenario_comparison_czml import clear_stale_outputs
+
+    (tmp_path / "comparison_KRDU_36.czml").write_text("[]")
+    (tmp_path / "evaluation_report.json").write_text("{}")
+    (tmp_path / "comparison_index.json").write_text("{}")
+
+    deleted = clear_stale_outputs(tmp_path, keep_report=False)
+    assert not (tmp_path / "comparison_KRDU_36.czml").exists()
+    assert not (tmp_path / "evaluation_report.json").exists()
+    assert (tmp_path / "comparison_index.json").exists()   # rewritten later, not cleared
+    assert len(deleted) == 2
+
+    # with a report to publish, an existing published copy is left for the overwrite
+    (tmp_path / "evaluation_report.json").write_text("{}")
+    assert clear_stale_outputs(tmp_path, keep_report=True) == []
+    assert (tmp_path / "evaluation_report.json").exists()
+
+
 def test_upsert_category_adds_and_replaces(tmp_path):
     manifest = tmp_path / "categories.json"
     _upsert_category(manifest, key="runway", label="Runway target", directory="runway", group_count=10)
