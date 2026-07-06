@@ -121,11 +121,12 @@ describe("trajectoryOptimizationClient", () => {
 
     const result = await runTrajectoryOptimization(request);
 
-    // No `playback`/`procedureConstraintSummary` in the response → both null.
+    // No `playback`/`procedureConstraintSummary`/`timings` in the response → all null.
     expect(result).toEqual({
       ...responsePayload,
       playback: null,
       procedureConstraintSummary: null,
+      timings: null,
     });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://127.0.0.1:8765/optimization/run",
@@ -135,6 +136,24 @@ describe("trajectoryOptimizationClient", () => {
         body: JSON.stringify(request),
       }),
     );
+  });
+
+  it("parses the optimization timing breakdown when present", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        optimizer: "variableTimeWarmStartTranscription",
+        finalTimeS: 80,
+        nSegments: 4,
+        dtS: 0.2,
+        controls: [{ thrustN: 12000, bankDeg: 1, attackDeg: 4 }],
+        states: [request.targetState],
+        timings: { buildS: 0.06, solveS: 0.9, playbackS: 0.1, totalS: 1.06 },
+      }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    ));
+
+    const result = await runTrajectoryOptimization(request);
+    expect(result.timings).toEqual({ buildS: 0.06, solveS: 0.9, playbackS: 0.1, totalS: 1.06 });
   });
 
   it("parses CasADi optimizer load-factor controls", async () => {

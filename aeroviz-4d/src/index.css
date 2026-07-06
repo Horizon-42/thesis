@@ -2406,21 +2406,24 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 
 .pilot-plan-readouts {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 5px;
+  grid-template-columns: 1fr;   /* stacked vertically — full-width rows show the whole value */
+  gap: 4px;
   margin: 0;
 }
 
 .pilot-plan-readouts div {
-  display: grid;
-  gap: 2px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
   min-width: 0;
-  padding: 5px 6px;
+  padding: 5px 8px;
   border-radius: 5px;
   background: rgba(2, 6, 23, 0.28);
 }
 
 .pilot-plan-readouts dt {
+  flex: none;
   color: #93a4b8;
   font-size: 9px;
   line-height: 1.2;
@@ -2429,13 +2432,12 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 
 .pilot-plan-readouts dd {
   min-width: 0;
-  overflow: hidden;
   margin: 0;
   color: #f8fafc;
   font-family: "Courier New", monospace;
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.2;
-  text-overflow: ellipsis;
+  text-align: right;
   white-space: nowrap;
 }
 

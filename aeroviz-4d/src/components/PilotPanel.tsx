@@ -246,6 +246,9 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   const [nSegments, setNSegments] = useState(10);
   // Constrained (procedure) mode: control segments PER LEG (total = legs × this).
   const [nSegPerPhase, setNSegPerPhase] = useState(2);
+  // State-collocation subintervals per control segment (M); 0 = the optimizer's auto
+  // per-phase density (~3 s state step, capped at 16).
+  const [stateSubsteps, setStateSubsteps] = useState(0);
   const [showAdvancedNumerics, setShowAdvancedNumerics] = useState(false);
   const [arrivalTimeS, setArrivalTimeS] = useState(DEFAULT_ARRIVAL_TIME_S);
   const [trajectoryDtS, setTrajectoryDtS] = useState(DEFAULT_TRAJECTORY_DT_S);
@@ -1162,6 +1165,12 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     clearOptimizedPlayback();
   }
 
+  function updateStateSubsteps(value: number) {
+    if (!Number.isFinite(value)) return;
+    setStateSubsteps(Math.round(clamp(value, 0, 64)));   // 0 = auto density
+    clearOptimizedPlayback();
+  }
+
   /** Edit one axis of the optimizer, snapping the fitting to one the (possibly changed) frame
    * allows. Patches the AXES state directly, so a locked/hidden axis (e.g. Frame in constrained
    * mode) keeps its value across the toggle instead of being flattened by the wire round-trip. */
@@ -1255,6 +1264,7 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
         targetState: pilotTargetState,
         nSegments,
         nSegPerPhase: constrained ? nSegPerPhase : undefined,
+        stateSubsteps: stateSubsteps > 0 ? stateSubsteps : undefined,
         arrivalTimeS,
         dtS: trajectoryDtS,
         maxIterations,
@@ -1807,6 +1817,19 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
                 />
               </label>
             )}
+            <label>
+              <span title="State-collocation subintervals per control segment (state nodes = segments × this). 0 = auto: a ~3 s state step, capped at 16. Higher = a denser, more dynamically faithful plan; slower solve.">
+                State substeps
+              </span>
+              <EnglishNumberInput
+                value={stateSubsteps}
+                min={0}
+                max={64}
+                step="1"
+                disabled={targetControlsDisabled}
+                onCommit={updateStateSubsteps}
+              />
+            </label>
             {optimizerParts.constrained && (
               <span
                 className="pilot-multiphase-hint"
@@ -1982,6 +2005,14 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
                   <dt>Segment</dt>
                   <dd>{formatNumberInputValue(trajectorySegmentDurationS ?? 0)} s</dd>
                 </div>
+                {optimizedTrajectory.timings ? (
+                  <div>
+                    <dt title="Wall-clock time for the whole optimization: NLP build + solve + playback rollout.">
+                      Solve time
+                    </dt>
+                    <dd>{optimizedTrajectory.timings.totalS.toFixed(2)} s</dd>
+                  </div>
+                ) : null}
               </dl>
             ) : null}
           </section>

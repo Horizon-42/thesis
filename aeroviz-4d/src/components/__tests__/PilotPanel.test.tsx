@@ -203,6 +203,7 @@ describe("PilotPanel trajectory play mode", () => {
           },
         ],
       },
+      timings: { buildS: 0.05, solveS: 0.8, playbackS: 0.1, totalS: 0.95 },
     });
     // The real playback hook drives the live readout by sampling the rollout on
     // each Cesium clock tick. Here we stand in for that: when enabled, emit the
@@ -437,6 +438,10 @@ describe("PilotPanel trajectory play mode", () => {
     const segmentInput = screen.getByLabelText("Control segments");
     fireEvent.change(segmentInput, { target: { value: "12" } });
     fireEvent.blur(segmentInput);
+    const substepsInput = screen.getByLabelText("State substeps");
+    expect((substepsInput as HTMLInputElement).value).toBe("0");   // 0 = auto density
+    fireEvent.change(substepsInput, { target: { value: "24" } });
+    fireEvent.blur(substepsInput);
     const arrivalInput = screen.getByLabelText("Arrival time");
     fireEvent.change(arrivalInput, { target: { value: "96" } });
     fireEvent.blur(arrivalInput);
@@ -473,6 +478,7 @@ describe("PilotPanel trajectory play mode", () => {
         aircraftType: "A320",
       }),
       nSegments: 12,
+      stateSubsteps: 24,
       arrivalTimeS: 96,
       dtS: 2,
       maxIterations: 300,
@@ -678,6 +684,8 @@ describe("PilotPanel trajectory play mode", () => {
     );
     // final course WEPAS -> RW05L in the simulator heading convention (0 = East, CCW)
     expect(request.targetState.headingDeg).toBeCloseTo(45.0, 0);
+    // untouched State substeps (0 = auto) must be OMITTED, keeping the backend's auto density
+    expect(request.stateSubsteps).toBeUndefined();
   });
 
   it("keeps the RNAV fix selection on a custom start so the optimizer flies TO the fix", async () => {

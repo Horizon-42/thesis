@@ -232,6 +232,9 @@ export interface TrajectoryOptimizationRequest {
   /** Control segments PER LEG for the procedure-constrained (multiphase) solve; the total is
    * legs × this. Only read by the multiphase backend path; omit for the direct solve. */
   nSegPerPhase?: number;
+  /** State-collocation subintervals per control segment (M; state nodes = segments × M).
+   * Omit for the optimizer's auto per-phase density (~3 s state step, capped at 16). */
+  stateSubsteps?: number;
   arrivalTimeS: number;
   dtS: number;
   maxIterations: number;
@@ -294,6 +297,14 @@ export interface ProcedureConstraintSummary {
   lastFixIdent: string | null;
 }
 
+/** Wall-clock breakdown of the whole optimization flow (seconds); null pre-timing responses. */
+export interface OptimizationTimings {
+  buildS: number;
+  solveS: number;
+  playbackS: number;
+  totalS: number;
+}
+
 export interface TrajectoryOptimizationResult {
   ok: true;
   optimizer: TrajectoryOptimizer;
@@ -304,6 +315,7 @@ export interface TrajectoryOptimizationResult {
   states: PilotResetState[];
   playback: TrajectoryPlayback | null;
   procedureConstraintSummary: ProcedureConstraintSummary | null;
+  timings: OptimizationTimings | null;
 }
 
 interface TrajectoryOptimizationErrorResponse {
@@ -359,6 +371,17 @@ function parseTrajectoryOptimizationResult(
     procedureConstraintSummary: parseProcedureConstraintSummary(
       value.procedureConstraintSummary,
     ),
+    timings: parseTimings(value.timings),
+  };
+}
+
+function parseTimings(value: unknown): OptimizationTimings | null {
+  if (!isRecord(value)) return null;   // pre-timing backend response
+  return {
+    buildS: readOptionalNumber(value, "buildS") ?? 0,
+    solveS: readOptionalNumber(value, "solveS") ?? 0,
+    playbackS: readOptionalNumber(value, "playbackS") ?? 0,
+    totalS: readOptionalNumber(value, "totalS") ?? 0,
   };
 }
 
