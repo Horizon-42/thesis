@@ -71,6 +71,13 @@ def _failed_payload():
     }
 
 
+def _manifest(dirpath, *eval_files):
+    """The batch roster load_records requires — results[].eval_file names the run's records."""
+    (dirpath / "summary.json").write_text(json.dumps({
+        "results": [{"eval_file": name} for name in eval_files],
+    }), encoding="utf-8")
+
+
 def _write_batch(tmp_path):
     (tmp_path / "references").mkdir()
     (tmp_path / "references" / "AFR074_reference_eval.json").write_text(
@@ -79,6 +86,7 @@ def _write_batch(tmp_path):
         json.dumps(_solved_payload(reference_file="references/AFR074_reference_eval.json")),
         encoding="utf-8")
     (tmp_path / "b_eval.json").write_text(json.dumps(_failed_payload()), encoding="utf-8")
+    _manifest(tmp_path, "a_eval.json", "b_eval.json")
 
 
 def test_build_payload_embeds_report_and_tracks(tmp_path):
@@ -128,6 +136,7 @@ def test_degenerate_record_excluded_from_tracks_and_html_is_escaped(tmp_path):
         "controls": [{"thrust": 1e5, "bank_rad": 0.0, "load_factor": 1.0}],
     }
     (tmp_path / "c_eval.json").write_text(json.dumps(degenerate), encoding="utf-8")
+    _manifest(tmp_path, "a_eval.json", "b_eval.json", "c_eval.json")
 
     out = tmp_path / "report.html"
     visualize_main(["--input", str(tmp_path), "--output", str(out)])

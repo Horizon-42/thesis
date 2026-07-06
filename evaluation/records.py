@@ -123,12 +123,32 @@ def load_record(path: str | Path) -> TrajectoryRecord:
     return record_from_dict(json.loads(p.read_text(encoding="utf-8")), path=p)
 
 
-def load_records(path: str | Path, *, pattern: str = "*_eval.json") -> list[TrajectoryRecord]:
-    """One record file, or every ``pattern`` file under a directory (sorted by name)."""
+def load_records(path: str | Path) -> list[TrajectoryRecord]:
+    """One record file, or a batch directory read via its ``summary.json`` manifest.
+
+    The manifest's ``results[].eval_file`` entries enumerate exactly the CURRENT
+    run's records (the optimization batch writes one for every scenario, failed
+    included, and rewrites the manifest each run — it cannot go stale), so files
+    left behind by an earlier batch over a different scenario set are ignored
+    instead of counted into the report (the orphan-record failure mode — a KRDU
+    report once counted 27 stale files). There is deliberately NO directory-glob
+    mode: guessing a directory's batch membership by filename is exactly how
+    orphans get in, so a directory without a manifest raises. A listed file
+    missing on disk also raises — the manifest and the records must come from
+    the same run. To evaluate loose records without a batch, pass a record FILE.
+    """
     p = Path(path)
-    if p.is_dir():
-        files = sorted(p.glob(pattern))
-        if not files:
-            raise ValueError(f"no {pattern} files under {p}")
-        return [load_record(f) for f in files]
-    return [load_record(p)]
+    if not p.is_dir():
+        return [load_record(p)]
+    manifest = p / "summary.json"
+    if not manifest.exists():
+        raise ValueError(
+            f"{p} has no summary.json manifest; a batch directory is read via its "
+            "manifest (results[].eval_file). Pass a record file to evaluate one "
+            "record without a batch."
+        )
+    rows = json.loads(manifest.read_text(encoding="utf-8"))["results"]
+    if not rows:
+        raise ValueError(f"{manifest} lists no records (empty batch)")
+    files = sorted(p / row["eval_file"] for row in rows)
+    return [load_record(f) for f in files]

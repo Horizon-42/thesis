@@ -88,9 +88,8 @@ def main(argv: list[str] | None = None) -> None:
         description="Render an evaluation batch as an HTML report (tables + charts)."
     )
     parser.add_argument("--input", required=True,
-                        help="one record JSON, or a directory of them")
-    parser.add_argument("--pattern", default="*_eval.json",
-                        help="filename glob when --input is a directory")
+                        help="one record JSON, or a batch directory (read via its "
+                             "summary.json manifest)")
     parser.add_argument("--output", default="evaluation_report.html",
                         help="where to write the HTML report")
     parser.add_argument("--title", default="Trajectory Evaluation Report")
@@ -108,7 +107,7 @@ def main(argv: list[str] | None = None) -> None:
         vertical_below_max_m=args.vertical_below_max_m,
         vertical_above_max_m=args.vertical_above_max_m,
     )
-    records = load_records(args.input, pattern=args.pattern)
+    records = load_records(args.input)
     payload = build_payload(records, thresholds, max_tracks=args.max_tracks)
     out = Path(args.output)
     out.write_text(
@@ -214,8 +213,8 @@ _TEMPLATE = """<!DOCTYPE html>
   <div class="note">
     Gate sources (FAA Order 8260.58D): lateral — the LPV (Localizer Performance with
     Vertical guidance) lateral-guidance semiwidth floor at the runway threshold
-    (Formula 3-1-1, 350 ft); vertical — the WCH (Wheel Crossing Height) window around
-    the published TCH (Threshold Crossing Height) (§1-3-2, 20–50 ft about the 30 ft design value).
+    (§3-1-5.c(3), Formula 3-1-1, 350 ft); vertical — the WCH (Wheel Crossing Height) window around
+    the published TCH (Threshold Crossing Height) (§1-3-1.f(2)(b), 20–50 ft about the 30 ft design value).
   </div>
 
   <h2>Final-state deviations vs regulation gates</h2>

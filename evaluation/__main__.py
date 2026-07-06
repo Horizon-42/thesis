@@ -1,13 +1,15 @@
 """CLI: evaluate trajectory record files → one JSON report.
 
-    python -m evaluation --input <record.json | directory> \
-        [--pattern '*_eval.json'] [--output evaluation_report.json] \
+    python -m evaluation --input <record.json | batch directory> \
+        [--output evaluation_report.json] \
         [--lateral-max-m 106.75] [--vertical-below-max-m 3.05] [--vertical-above-max-m 6.10]
 
 Input records follow the contract in ``records.py`` (the optimization batch writes
-them as ``*_eval.json``, including empty records for unsolved configurations).
-The report JSON carries the batch metrics + one row per trajectory; a compact
-summary is printed to stdout.
+them as ``*_eval.json``, including empty records for unsolved configurations). A
+directory input must be a batch directory: its ``summary.json`` manifest names the
+run's records (no filename guessing — see ``load_records``). The report JSON
+carries the batch metrics + one row per trajectory; a compact summary is printed
+to stdout.
 """
 
 from __future__ import annotations
@@ -28,9 +30,8 @@ def main(argv: list[str] | None = None) -> None:
         description="Evaluate optimized-trajectory records against their target states."
     )
     parser.add_argument("--input", required=True,
-                        help="one record JSON, or a directory of them")
-    parser.add_argument("--pattern", default="*_eval.json",
-                        help="filename glob when --input is a directory")
+                        help="one record JSON, or a batch directory (read via its "
+                             "summary.json manifest)")
     parser.add_argument("--output", default="evaluation_report.json",
                         help="where to write the report JSON")
     parser.add_argument("--lateral-max-m", type=float, default=defaults.lateral_max_m,
@@ -48,7 +49,7 @@ def main(argv: list[str] | None = None) -> None:
         vertical_below_max_m=args.vertical_below_max_m,
         vertical_above_max_m=args.vertical_above_max_m,
     )
-    records = load_records(args.input, pattern=args.pattern)
+    records = load_records(args.input)
     report = evaluate_batch(records, thresholds)
     report["input"] = str(args.input)
     out = Path(args.output)

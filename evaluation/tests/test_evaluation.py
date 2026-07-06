@@ -61,6 +61,13 @@ def _failed_payload():
     }
 
 
+def _manifest(dirpath, *eval_files):
+    """The batch roster load_records requires — results[].eval_file names the run's records."""
+    (dirpath / "summary.json").write_text(json.dumps({
+        "results": [{"eval_file": name} for name in eval_files],
+    }), encoding="utf-8")
+
+
 # ── record contract ───────────────────────────────────────────────────────────
 
 def test_record_round_trip_and_solved_flag():
@@ -269,6 +276,7 @@ def test_compare_to_reference_measures_offset_and_time_delta(tmp_path):
     )
     record_file = tmp_path / "AFR074_eval.json"
     record_file.write_text(json.dumps(record_payload), encoding="utf-8")
+    _manifest(tmp_path, "AFR074_eval.json")
 
     records = load_records(tmp_path)
     assert len(records) == 1 and records[0].reference_file == "refs/AFR074_reference_eval.json"
@@ -300,6 +308,7 @@ def test_batch_integrates_reference_rows_and_aggregate(tmp_path):
     unsolved["reference_file"] = "references/AFR074_reference_eval.json"
     (tmp_path / "a_eval.json").write_text(json.dumps(solved), encoding="utf-8")
     (tmp_path / "b_eval.json").write_text(json.dumps(unsolved), encoding="utf-8")
+    _manifest(tmp_path, "a_eval.json", "b_eval.json")
 
     report = evaluate_batch(load_records(tmp_path))
     rows = {row["id"]: row for row in report["trajectories"]}
@@ -347,6 +356,7 @@ def test_degenerate_solved_record_does_not_abort_the_batch(tmp_path):
     healthy["reference_file"] = "references/AFR074_reference_eval.json"
     (tmp_path / "a_eval.json").write_text(json.dumps(degenerate), encoding="utf-8")
     (tmp_path / "b_eval.json").write_text(json.dumps(healthy), encoding="utf-8")
+    _manifest(tmp_path, "a_eval.json", "b_eval.json")
 
     report = evaluate_batch(load_records(tmp_path))
     rows = {row["id"]: row for row in report["trajectories"]}
@@ -365,6 +375,7 @@ def test_load_records_directory_and_cli(tmp_path, capsys):
     (tmp_path / "a_eval.json").write_text(json.dumps(_payload()), encoding="utf-8")
     (tmp_path / "b_eval.json").write_text(json.dumps(_failed_payload()), encoding="utf-8")
     (tmp_path / "a_states.json").write_text("{}", encoding="utf-8")  # must be ignored
+    _manifest(tmp_path, "a_eval.json", "b_eval.json")
 
     records = load_records(tmp_path)
     assert len(records) == 2
@@ -378,6 +389,44 @@ def test_load_records_directory_and_cli(tmp_path, capsys):
     assert "solve rate" in out and "1/2" in out
 
 
-def test_load_records_empty_directory_raises(tmp_path):
-    with pytest.raises(ValueError, match="no .* files"):
+def test_load_records_directory_without_a_manifest_raises(tmp_path):
+    # No glob mode: guessing a directory's batch membership by filename is exactly
+    # how orphan records get counted — a manifest-less directory is an error.
+    (tmp_path / "a_eval.json").write_text(json.dumps(_payload()), encoding="utf-8")
+    with pytest.raises(ValueError, match="no summary.json manifest"):
+        load_records(tmp_path)
+
+
+def test_load_records_follows_the_batch_manifest_and_ignores_orphans(tmp_path):
+    # A batch directory is read via summary.json's results[].eval_file roster — a
+    # record left behind by an EARLIER batch (different filename) must not be
+    # counted into the report (a KRDU report once counted 27 such orphans).
+    (tmp_path / "a_eval.json").write_text(json.dumps(_payload()), encoding="utf-8")
+    (tmp_path / "b_eval.json").write_text(json.dumps(_failed_payload()), encoding="utf-8")
+    (tmp_path / "ORPHAN_eval.json").write_text(json.dumps(_payload()), encoding="utf-8")
+    (tmp_path / "summary.json").write_text(json.dumps({
+        "total": 2, "solved": 1, "failed": 1,
+        "results": [
+            {"id": "AFR074", "status": "solved", "eval_file": "a_eval.json"},
+            {"id": "BAD001", "status": "failed", "eval_file": "b_eval.json"},
+        ],
+    }), encoding="utf-8")
+
+    records = load_records(tmp_path)
+    assert [r.path.name for r in records] == ["a_eval.json", "b_eval.json"]
+
+
+def test_load_records_manifest_pointing_at_a_missing_file_fails_loudly(tmp_path):
+    # The manifest and the records must come from the same run — a listed file
+    # missing on disk is corruption, not something to skip over.
+    (tmp_path / "summary.json").write_text(json.dumps({
+        "results": [{"id": "AFR074", "status": "solved", "eval_file": "gone_eval.json"}],
+    }), encoding="utf-8")
+    with pytest.raises(FileNotFoundError):
+        load_records(tmp_path)
+
+
+def test_load_records_manifest_with_no_results_raises(tmp_path):
+    (tmp_path / "summary.json").write_text(json.dumps({"results": []}), encoding="utf-8")
+    with pytest.raises(ValueError, match="lists no records"):
         load_records(tmp_path)
