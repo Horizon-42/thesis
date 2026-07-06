@@ -677,6 +677,18 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   user-select: none;
 }
 
+.control-panel-profile-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(126, 184, 247, 0.18);
+  color: #c8d8ec;
+  font-weight: 600;
+}
+
 .control-panel h3 {
   margin-bottom: 12px;
   font-size: 15px;
@@ -2005,6 +2017,13 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 .pilot-initial-summary-header button {
   flex: 0 0 auto;
   padding: 2px 6px;
+}
+
+.pilot-initial-summary-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
 }
 
 .pilot-initial-summary-header .pilot-select-input {

@@ -11,7 +11,9 @@
 
 import { useApp, type ComparisonKind } from "../context/AppContext";
 import { useComparisonCategories } from "../hooks/useComparisonCategories";
+import { useForcedProcedureDisplay } from "../hooks/useForcedProcedureDisplay";
 import { COMPARISON_KIND_COLORS } from "../utils/trajectoryRenderModel";
+import RunwayProfileToggle from "./RunwayProfileToggle";
 import { useEffect } from "react";
 
 /**
@@ -31,6 +33,7 @@ export default function ControlPanel() {
     layers,
     toggleLayer,
     activeAirportCode,
+    selectedRunway,
     trajectoryComparison,
     setTrajectoryComparison,
     trajectoryComparisonCategory,
@@ -52,8 +55,31 @@ export default function ControlPanel() {
     if (!stillValid) setTrajectoryComparisonCategory(comparisonCategories[0].dir);
   }, [comparisonCategories, trajectoryComparisonCategory, setTrajectoryComparisonCategory]);
 
+  // ── Constraint-scoped procedure display (drive & restore) ────────────────────
+  // When the comparison overlay is showing a CONSTRAINED category (the manifest's
+  // explicit `constrained` field — its solves enforce the runway's RNAV procedure) and a
+  // global landing runway is selected, drive the procedure display on for that runway —
+  // the same affordance Optimize gives, so you see the corridors / glidepath the shown
+  // solves flew. `forceRunway: null`: the runway IS the user-owned global selectedRunway,
+  // so the hook only opens the panel + layer and never touches the runway (it must not
+  // fight the top-bar selector nor revert it on exit).
+  const activeComparisonCategory =
+    comparisonCategories.find((c) => c.dir === trajectoryComparisonCategory) ?? null;
+  useForcedProcedureDisplay({
+    active:
+      layers.trajectories &&
+      trajectoryComparison &&
+      activeComparisonCategory?.constrained === true &&
+      selectedRunway !== null,
+    forceRunway: null,
+  });
+
   return (
     <div className="control-panel">
+      <div className="control-panel-profile-row">
+        <span>Approach profile</span>
+        <RunwayProfileToggle runwayIdent={selectedRunway} />
+      </div>
       <section className="control-panel-trajectory-layer">
         <label>
           <input

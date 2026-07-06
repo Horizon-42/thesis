@@ -10,7 +10,8 @@ import {
 } from "../data/procedureAnnotations";
 import { isMissingJsonAsset } from "../utils/fetchJson";
 import { navigateWithinApp } from "../utils/navigation";
-import { bareRunwayIdent, runwayMatchesSelection } from "../utils/runwayIdent";
+import { runwayMatchesSelection } from "../utils/runwayIdent";
+import RunwayProfileToggle from "./RunwayProfileToggle";
 
 const RUNWAY_ORDER = ["RW05L", "RW05R", "RW23L", "RW23R", "RW32"];
 
@@ -221,9 +222,6 @@ export default function ProcedurePanel() {
     setProcedureDisplayLevel,
     activeAirportCode,
     selectedRunway,
-    setSelectedRunway,
-    isRunwayProfileOpen,
-    setRunwayProfileOpen,
   } = useApp();
   const [branches, setBranches] = useState<ProcedureBranchItem[]>([]);
   const [sourceCycle, setSourceCycle] = useState<string | null>(null);
@@ -311,18 +309,6 @@ export default function ProcedurePanel() {
       else next.add(runwayIdent);
       return next;
     });
-  };
-
-  // Opening a runway's profile focuses the GLOBAL Landing-Runway selection on it
-  // (so the procedure list, the loaded trajectories, and the profile all stay in sync);
-  // clicking the already-shown runway again closes the profile.
-  const toggleRunwayProfile = (runwayIdent: string) => {
-    if (isRunwayProfileOpen && runwayMatchesSelection(selectedRunway, runwayIdent)) {
-      setRunwayProfileOpen(false);
-      return;
-    }
-    setSelectedRunway(bareRunwayIdent(runwayIdent));
-    setRunwayProfileOpen(true);
   };
 
   const openAllProcedures = () => {
@@ -434,19 +420,7 @@ export default function ProcedurePanel() {
                 >
                   {isExpanded ? "Hide" : "Show"}
                 </button>
-                <button
-                  type="button"
-                  className={
-                    isRunwayProfileOpen && runwayMatchesSelection(selectedRunway, group.runwayIdent)
-                      ? "procedure-runway-profile-button active"
-                      : "procedure-runway-profile-button"
-                  }
-                  onClick={() => toggleRunwayProfile(group.runwayIdent)}
-                >
-                  {isRunwayProfileOpen && runwayMatchesSelection(selectedRunway, group.runwayIdent)
-                    ? "Profile On"
-                    : "Profile"}
-                </button>
+                <RunwayProfileToggle runwayIdent={group.runwayIdent} />
                 <label>
                   <input
                     type="checkbox"

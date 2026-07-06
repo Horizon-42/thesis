@@ -67,6 +67,8 @@ import {
   targetSpeedBoundsMps,
 } from "../pilot/trajectoryTargetConstraints";
 import { bareRunwayIdent } from "../utils/runwayIdent";
+import { useForcedProcedureDisplay } from "../hooks/useForcedProcedureDisplay";
+import RunwayProfileToggle from "./RunwayProfileToggle";
 import {
   runTrajectoryOptimization,
   decomposeOptimizer,
@@ -200,12 +202,6 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     activeAirportCode,
     airport,
     viewer,
-    selectedRunway,
-    setSelectedRunway,
-    proceduresOpen,
-    setProceduresOpen,
-    layers,
-    toggleLayer,
     setPilotTransport,
   } = useApp();
   const [internalActiveMode, setActiveMode] = useState<PilotPanelMode>("pilot");
@@ -1530,57 +1526,17 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   // While in Optimize (trajectory) mode WITH procedure constraints on, drive the
   // shared procedure display to the target runway's approach — open the panel,
   // enable the geometry layer, scope the runway — so you see the corridors /
-  // glidepath / step-down floors the solve enforces. The prior display is saved
-  // and RESTORED when the force ends (constraints off, or leaving Optimize — which
-  // unmounts this panel), so in every OTHER mode procedures obey only their own
-  // switch. Reactive (not a one-shot), so the default constrained state forces it
-  // on entry too.
+  // glidepath / step-down floors the solve enforces (the hook saves the user's prior
+  // display and restores it when the force ends or this panel unmounts). The target
+  // runway is INDEPENDENT of the global selection, so we hand the hook a non-null
+  // forceRunway — it then owns selectedRunway; Observe passes null (see ControlPanel).
   const forcedRunwayIdent = selectedTargetRunway
     ? bareRunwayIdent(selectedTargetRunway.runwayIdent)
     : null;
-  const procedureForced =
-    activeMode === "trajectory" && optimizerParts.constrained && forcedRunwayIdent !== null;
-
-  // Live snapshot of the procedure display, read (not depended on) when saving.
-  const procedureDisplayRef = useRef({ proceduresOpen, layerOn: layers.procedures, selectedRunway });
-  procedureDisplayRef.current = { proceduresOpen, layerOn: layers.procedures, selectedRunway };
-  // The user's pre-force display, held while the constraint drives it (null = not driving).
-  const savedProcedureDisplayRef = useRef<
-    { proceduresOpen: boolean; layerOn: boolean; selectedRunway: string | null } | null
-  >(null);
-  // Restore is invoked from the effect's "force ended" branch AND on unmount; keep
-  // it in a ref so the unmount effect stays dependency-free.
-  const restoreProcedureDisplay = () => {
-    const saved = savedProcedureDisplayRef.current;
-    if (saved === null) return;
-    savedProcedureDisplayRef.current = null;
-    setSelectedRunway(saved.selectedRunway);
-    setProceduresOpen(saved.proceduresOpen);
-    if (procedureDisplayRef.current.layerOn !== saved.layerOn) toggleLayer("procedures");
-  };
-  const restoreProcedureDisplayRef = useRef(restoreProcedureDisplay);
-  restoreProcedureDisplayRef.current = restoreProcedureDisplay;
-
-  useEffect(() => {
-    if (procedureForced && forcedRunwayIdent !== null) {
-      if (savedProcedureDisplayRef.current === null) {
-        savedProcedureDisplayRef.current = { ...procedureDisplayRef.current };
-      }
-      if (procedureDisplayRef.current.selectedRunway !== forcedRunwayIdent) {
-        setSelectedRunway(forcedRunwayIdent);
-      }
-      if (!procedureDisplayRef.current.proceduresOpen) setProceduresOpen(true);
-      if (!procedureDisplayRef.current.layerOn) toggleLayer("procedures");
-    } else {
-      restoreProcedureDisplayRef.current();
-    }
-  }, [procedureForced, forcedRunwayIdent, setSelectedRunway, setProceduresOpen, toggleLayer]);
-
-  useEffect(() => {
-    // Leaving Optimize for Observe unmounts this panel, so the branch above can't
-    // run there — restore on unmount too.
-    return () => restoreProcedureDisplayRef.current();
-  }, []);
+  useForcedProcedureDisplay({
+    active: activeMode === "trajectory" && optimizerParts.constrained && forcedRunwayIdent !== null,
+    forceRunway: forcedRunwayIdent,
+  });
 
   return (
     <div className="pilot-panel">
@@ -1723,13 +1679,25 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
           <section className="pilot-initial-summary" aria-label="Target aircraft state summary">
             <div className="pilot-initial-summary-header">
               <h4>Target State</h4>
-              <button
-                type="button"
-                onClick={openTargetEditor}
-                disabled={targetControlsDisabled}
-              >
-                Edit
-              </button>
+              <div className="pilot-initial-summary-actions">
+                {/* Open the target runway's 2D approach profile (side + plan). The runway
+                    is INDEPENDENT of the global selection, so the toggle focuses it — and
+                    BORROWS the selection (restored on close/dock exit) so viewing the
+                    target's profile can't permanently clobber the user's runway scoping.
+                    Constrained solves don't borrow: useForcedProcedureDisplay already owns
+                    the runway + profile state there. */}
+                <RunwayProfileToggle
+                  runwayIdent={selectedTargetRunway?.runwayIdent ?? null}
+                  borrowSelection={!optimizerParts.constrained}
+                />
+                <button
+                  type="button"
+                  onClick={openTargetEditor}
+                  disabled={targetControlsDisabled}
+                >
+                  Edit
+                </button>
+              </div>
             </div>
 
             <dl className="pilot-initial-position">
