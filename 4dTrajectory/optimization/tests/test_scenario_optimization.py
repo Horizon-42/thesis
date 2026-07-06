@@ -377,8 +377,9 @@ def test_optimize_scenario_passes_the_guard_altitude_to_the_rollout(monkeypatch)
 def test_scheme_for_fitting_maps_and_rejects():
     assert so._scheme_for_fitting("hs") == "hermiteSimpsonNormalizedFullTransport"
     assert so._scheme_for_fitting("trapezoidal") == "trapezoidalNormalizedFullTransport"
+    assert so._scheme_for_fitting("rk4") == "rk4NormalizedFullTransport"
     with pytest.raises(ValueError, match="unknown fitting"):
-        so._scheme_for_fitting("rk4")
+        so._scheme_for_fitting("euler")
 
 
 def test_optimize_scenario_fitting_selects_the_scheme(monkeypatch):
@@ -400,6 +401,27 @@ def test_optimize_scenario_fitting_selects_the_scheme(monkeypatch):
     assert captured["scheme"] == "trapezoidalNormalizedFullTransport"
     so.optimize_scenario(_scenario(target=target))          # default stays HS
     assert captured["scheme"] == "hermiteSimpsonNormalizedFullTransport"
+
+
+def test_optimize_scenario_passes_state_substeps(monkeypatch):
+    # SEAM: --state-substeps must reach CollocationOptimizer(state_substeps=...);
+    # None (the default) keeps the optimizer's auto per-phase density.
+    target = GeodeticState(35.59, -78.49, 500.0, 80.0, 1.5, -0.05, A320.landing_mass)
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(so, "CollocationOptimizer", _fake_optimizer(
+        [[35.6, -78.5, 1000.0, 100.0, 1.5, -0.05],
+         [35.59, -78.49, 500.0, 80.0, 1.5, -0.05]],
+        10.0, [[40000.0, 0.0, 1.0]],
+        on_init=lambda *a, **kw: captured.update(state_substeps=kw.get("state_substeps")),
+    ))
+    monkeypatch.setattr(so, "rollout_controls",
+                        lambda initial, *a, **kw: _rollout_samples(initial))
+
+    so.optimize_scenario(_scenario(target=target), state_substeps=8)
+    assert captured["state_substeps"] == 8
+    so.optimize_scenario(_scenario(target=target))
+    assert captured["state_substeps"] is None               # default: auto density
 
 
 def test_batch_clears_stale_records_from_a_previous_run(tmp_path):
@@ -478,7 +500,8 @@ def test_solve_iaf_feeds_the_optimizer_a_segment_list(monkeypatch):
         [[35.9, -78.7, 500.0, 80.0, 0.8, -0.05]],
         100.0, [[1e5, 0.0, 1.0]],
         on_init=lambda *args, **kwargs: captured.update(
-            segments=kwargs.get("segments"), scheme=kwargs.get("scheme")),
+            segments=kwargs.get("segments"), scheme=kwargs.get("scheme"),
+            state_substeps=kwargs.get("state_substeps")),
         segment_durations_s=[10.0],
     ))
     solve = so._solve_iaf(pc, scenario, target, A320, 60.0,
@@ -488,11 +511,12 @@ def test_solve_iaf_feeds_the_optimizer_a_segment_list(monkeypatch):
     assert all(isinstance(s, SegmentSpec) for s in captured["segments"])
     assert captured["scheme"] == "hermiteSimpsonNormalizedFullTransport"  # default fitting
 
-    # --fitting reaches the CONSTRAINED path too
+    # --fitting and --state-substeps reach the CONSTRAINED path too
     so._solve_iaf(pc, scenario, target, A320, 60.0,
                   n_segments=8, dt=1.0, max_duration=600.0, verbose=False,
-                  fitting="trapezoidal")
+                  fitting="trapezoidal", state_substeps=6)
     assert captured["scheme"] == "trapezoidalNormalizedFullTransport"
+    assert captured["state_substeps"] == 6
 
 
 def test_snap_target_to_procedure_uses_the_cifp_threshold():

@@ -70,9 +70,12 @@ DEFAULT_ROLLOUT_DT_S = 0.5       # forward-integration step for the simulator ro
 # each composes with the normalized full-transport dynamics. "hs" (Hermite-Simpson,
 # 4th order) is the default — see the comment in optimize_scenario for why trapezoidal
 # (2nd order) collapsed the batch success rate; it stays selectable for comparison runs.
+# "rk4" is the 4th-order EXPLICIT shooting defect (same one-step map family as the replay
+# integrator — playback-consistent by construction) at trapezoidal-like per-node cost.
 FITTING_SCHEMES = {
     "hs": "hermiteSimpsonNormalizedFullTransport",
     "trapezoidal": "trapezoidalNormalizedFullTransport",
+    "rk4": "rk4NormalizedFullTransport",
 }
 DEFAULT_FITTING = "hs"
 
@@ -170,11 +173,14 @@ def optimize_scenario(
     max_duration: float = DEFAULT_MAX_DURATION_S,
     rollout_dt_s: float = DEFAULT_ROLLOUT_DT_S,
     fitting: str = DEFAULT_FITTING,
+    state_substeps: int | None = None,
     verbose: bool = False,
 ) -> ScenarioOptimization:
     """Optimize ``scenario`` and return its optimizer + simulator state sequences.
 
     ``fitting`` picks the transcription (a :data:`FITTING_SCHEMES` key).
+    ``state_substeps`` fixes the per-control-segment state density M (``None`` =
+    auto: ~3 s state step, capped at 16 — ``components.select_state_substeps``).
     """
     initial = scenario.initial
     target = scenario.target
@@ -203,6 +209,7 @@ def optimize_scenario(
         n_segments=n_segments,
         max_duration=max_duration,
         min_speed_ms=min_speed_ms,
+        state_substeps=state_substeps,
         verbose=verbose,
     )
     final_time, node_control, _node_endpoints = optimizer.optimize_free_time(
@@ -424,6 +431,7 @@ def optimize_scenarios(
     max_duration: float = DEFAULT_MAX_DURATION_S,
     rollout_dt_s: float = DEFAULT_ROLLOUT_DT_S,
     fitting: str = DEFAULT_FITTING,
+    state_substeps: int | None = None,
     jobs: int = 0,
     verbose: bool = False,
     scenarios_label: str | None = None,
@@ -450,7 +458,8 @@ def optimize_scenarios(
     _clear_stale_records(out)
     params: dict[str, Any] = {
         "n_segments": n_segments, "dt": dt, "max_duration": max_duration,
-        "rollout_dt_s": rollout_dt_s, "fitting": fitting, "verbose": verbose,
+        "rollout_dt_s": rollout_dt_s, "fitting": fitting,
+        "state_substeps": state_substeps, "verbose": verbose,
     }
     payloads = [(index, scenario, params) for index, scenario in enumerate(scenarios)]
     workers = _resolve_jobs(jobs, len(scenarios))
@@ -873,6 +882,7 @@ def _solve_iaf(
     pc, scenario: FlightScenario, target: GeodeticState, aircraft: Any, min_speed_ms: float,
     *, n_segments: int, dt: float, max_duration: float, verbose: bool,
     fitting: str = DEFAULT_FITTING,
+    state_substeps: int | None = None,
 ) -> _IafSolve:
     """Full CONSTRAINED solve from the scenario's OBSERVED start to the runway via one IAF path.
 
@@ -894,6 +904,7 @@ def _solve_iaf(
         aircraft, segments=segments,
         scheme=_scheme_for_fitting(fitting),
         min_speed_ms=min_speed_ms,
+        state_substeps=state_substeps,
         verbose=verbose,
     )
     final_time, node_control, _ = optimizer.optimize_free_time(start_state, target, max_duration)
@@ -948,6 +959,7 @@ def optimize_scenario_min_time_iaf(
     max_duration: float = DEFAULT_MAX_DURATION_S,
     rollout_dt_s: float = DEFAULT_ROLLOUT_DT_S,
     fitting: str = DEFAULT_FITTING,
+    state_substeps: int | None = None,
     verbose: bool = False,
 ) -> ScenarioOptimization:
     """Constrained, fastest-IAF optimization for one scenario (one trajectory out).
@@ -966,7 +978,7 @@ def optimize_scenario_min_time_iaf(
             candidate = _solve_iaf(
                 pc, scenario, target, aircraft, min_speed_ms,
                 n_segments=n_segments, dt=dt, max_duration=max_duration, verbose=verbose,
-                fitting=fitting,
+                fitting=fitting, state_substeps=state_substeps,
             )
         except Exception as exc:  # noqa: BLE001 — try the next IAF; fail only if all IAFs fail
             attempts.append((pc.waypoints[0].ident, type(exc).__name__))
@@ -995,6 +1007,7 @@ def optimize_scenario_shortest_iaf(
     max_duration: float = DEFAULT_MAX_DURATION_S,
     rollout_dt_s: float = DEFAULT_ROLLOUT_DT_S,
     fitting: str = DEFAULT_FITTING,
+    state_substeps: int | None = None,
     verbose: bool = False,
 ) -> ScenarioOptimization:
     """Cheap, naive IAF selection: pick the IAF whose 3D Lagrange-curve path to the runway is
@@ -1013,7 +1026,7 @@ def optimize_scenario_shortest_iaf(
             best = _solve_iaf(
                 pc, scenario, target, aircraft, min_speed_ms,
                 n_segments=n_segments, dt=dt, max_duration=max_duration, verbose=verbose,
-                fitting=fitting,
+                fitting=fitting, state_substeps=state_substeps,
             )
         except Exception as exc:  # noqa: BLE001 — fall through to the next-shortest IAF
             attempts.append((pc.waypoints[0].ident, type(exc).__name__))
@@ -1066,6 +1079,7 @@ def optimize_scenarios_constrained_iaf(
     max_duration: float = DEFAULT_MAX_DURATION_S,
     rollout_dt_s: float = DEFAULT_ROLLOUT_DT_S,
     fitting: str = DEFAULT_FITTING,
+    state_substeps: int | None = None,
     jobs: int = 0,
     verbose: bool = False,
     scenarios_label: str | None = None,
@@ -1087,7 +1101,8 @@ def optimize_scenarios_constrained_iaf(
         "selection": selection,
         "procedure_root": str(procedure_root), "airport": airport,
         "n_segments": n_segments, "dt": dt, "max_duration": max_duration,
-        "rollout_dt_s": rollout_dt_s, "fitting": fitting, "verbose": verbose,
+        "rollout_dt_s": rollout_dt_s, "fitting": fitting,
+        "state_substeps": state_substeps, "verbose": verbose,
     }
     payloads = [(index, scenario, params) for index, scenario in enumerate(scenarios)]
     workers = _resolve_jobs(jobs, len(scenarios))
@@ -1179,6 +1194,10 @@ def main() -> None:
     parser.add_argument("--max-duration", type=float, default=DEFAULT_MAX_DURATION_S)
     parser.add_argument("--rollout-dt", type=float, default=DEFAULT_ROLLOUT_DT_S)
     parser.add_argument(
+        "--state-substeps", type=int, default=None,
+        help="state-collocation subintervals per control segment (M; state nodes = N*M). "
+             "Default: auto per phase — a ~3 s state step, capped at 16")
+    parser.add_argument(
         "--fitting", choices=sorted(FITTING_SCHEMES), default=DEFAULT_FITTING,
         help="transcription fitting for the solves: 'hs' = Hermite-Simpson (4th order, "
              "default) or 'trapezoidal' (2nd order; its replays drift km-scale on "
@@ -1220,6 +1239,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.state_substeps is not None and args.state_substeps < 1:
+        parser.error(f"--state-substeps must be >= 1, got {args.state_substeps}")
     scenarios = load_scenarios(args.scenarios)
     # Reference eval records come FIRST (the observed baseline exists whether or not a
     # solve succeeds); the batch then points every eval record at its reference.
@@ -1239,6 +1260,7 @@ def main() -> None:
             max_duration=args.max_duration,
             rollout_dt_s=args.rollout_dt,
             fitting=args.fitting,
+            state_substeps=args.state_substeps,
             jobs=args.jobs,
             verbose=args.verbose,
             scenarios_label=args.scenarios,
@@ -1253,6 +1275,7 @@ def main() -> None:
             max_duration=args.max_duration,
             rollout_dt_s=args.rollout_dt,
             fitting=args.fitting,
+            state_substeps=args.state_substeps,
             jobs=args.jobs,
             verbose=args.verbose,
             scenarios_label=args.scenarios,

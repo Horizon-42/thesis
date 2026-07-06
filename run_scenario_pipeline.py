@@ -122,7 +122,7 @@ class Plan:
 
     def __init__(self, airport: str, target_type: str, with_constraint: bool,
                  outputs: tuple[str, ...], jobs: int = 0,
-                 fitting: str = "hs") -> None:
+                 fitting: str = "hs", state_substeps: int | None = None) -> None:
         self.airport = airport.strip().upper()
         self.target_type = target_type
         self.with_constraint = with_constraint
@@ -135,6 +135,9 @@ class Plan:
         # fittings write into the SAME category dir — an experiment overwrites the
         # previous batch there (the optimizer's stale-record cleanup keeps it consistent).
         self.fitting = fitting
+        # State-collocation density M per control segment (scenario_optimization
+        # --state-substeps); None = the optimizer's auto (~3 s state step, cap 16).
+        self.state_substeps = state_substeps
         self.threshold = target_type == "runway"
         self.category = category_key(target_type, with_constraint)
         self.label = _CATEGORY_LABELS[self.category]
@@ -183,6 +186,8 @@ class Plan:
                 "--jobs", str(self.jobs),
                 "--fitting", self.fitting,
             ]
+            if self.state_substeps is not None:
+                optimize_cmd += ["--state-substeps", str(self.state_substeps)]
             if self.with_constraint:
                 # Constrained-IAF: optimize via the runway's RNAV(GPS) procedure (one
                 # trajectory per scenario, IAF chosen by shortest 3D path).
@@ -247,10 +252,12 @@ def run_for_airport(
     skip_optimize: bool,
     jobs: int = 0,
     fitting: str = "hs",
+    state_substeps: int | None = None,
 ) -> bool:
     """Run (or preview) the pipeline for one airport. Returns True if it ran /
     would run, False if it was skipped (missing input and nothing to reuse)."""
-    plan = Plan(airport, target_type, with_constraint, outputs, jobs=jobs, fitting=fitting)
+    plan = Plan(airport, target_type, with_constraint, outputs, jobs=jobs, fitting=fitting,
+                state_substeps=state_substeps)
     reuse = skip_optimize and plan.optimization_exists()
 
     mode = "reuse optimization" if reuse else "full pipeline"
@@ -323,11 +330,18 @@ def main() -> None:
              "0 = auto = half the CPU cores, 1 = serial)",
     )
     parser.add_argument(
-        "--fitting-type", choices=("hs", "trapezoidal"), default="hs",
+        "--state-substeps", type=int, default=None, metavar="M",
+        help="state-collocation subintervals per control segment (scenario_optimization "
+             "--state-substeps); omit for the optimizer's auto density (~3 s state step, "
+             "capped at 16). Higher M = denser plan states = slower solves",
+    )
+    parser.add_argument(
+        "--fitting-type", choices=("hs", "trapezoidal", "rk4"), default="hs",
         help="transcription fitting for the solves (scenario_optimization --fitting): "
              "'hs' = Hermite-Simpson (4th order, default), 'trapezoidal' = 2nd order "
-             "(comparison runs; replays drift km-scale on aggressive min-time solves). "
-             "Both write into the same category dir — a run overwrites the previous batch",
+             "(comparison runs; replays drift km-scale on aggressive min-time solves), "
+             "'rk4' = 4th-order explicit shooting defect (playback-consistent). "
+             "All write into the same category dir — a run overwrites the previous batch",
     )
     parser.add_argument(
         "--skip-optimize", action="store_true",
@@ -340,6 +354,9 @@ def main() -> None:
         help="print the resolved paths + the commands without running them",
     )
     args = parser.parse_args()
+
+    if args.state_substeps is not None and args.state_substeps < 1:
+        parser.error(f"--state-substeps must be >= 1, got {args.state_substeps}")
 
     if args.target_type is None:
         if args.with_constraint:
@@ -367,6 +384,7 @@ def main() -> None:
             airport, target_type, with_constraint, tuple(args.outputs),
             dry_run=args.dry_run, skip_optimize=args.skip_optimize, jobs=args.jobs,
             fitting=args.fitting_type,
+            state_substeps=args.state_substeps,
         ):
             ran += 1
 
