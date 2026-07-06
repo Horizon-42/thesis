@@ -255,6 +255,19 @@ def test_guards():
         CollocationOptimizer(A320, min_speed_ms=-1.0)
     with pytest.raises(ValueError, match="max_join_offset_m"):
         CollocationOptimizer(A320, max_join_offset_m=-1.0)
+    with pytest.raises(ValueError, match="max_iterations"):
+        CollocationOptimizer(A320, max_iterations=0)
+
+
+def test_max_iterations_caps_ipopt_and_terminates():
+    # The termination guarantee: before this, ipopt.max_iter was UNSET (IPOPT default 3000)
+    # and a crawling over-meshed NLP could grind for hours behind the backend's solve lock.
+    # A 1-iteration ceiling must make the solve FAIL FAST with Maximum_Iterations_Exceeded.
+    init = _straight_in()
+    target = _reachable_target(init, 120.0)
+    opt = CollocationOptimizer(A320, max_iterations=1)
+    with pytest.raises(ValueError, match="Maximum_Iterations_Exceeded"):
+        opt.optimize_free_time(init, target, 120.0 * 1.6)
 
 
 def test_guards_frame_anchor_contract():

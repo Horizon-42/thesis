@@ -6,6 +6,7 @@ optimizer and by the benchmark / comparison scripts.
 """
 
 import math
+import os
 
 import casadi as ca
 import numpy as np
@@ -23,7 +24,35 @@ _SOLVER_BACKENDS = ("ipopt", "sqpmethod")
 _DEFAULT_SOLVER_BACKEND = "ipopt"
 
 
-def _make_nlp_solver(nlp, solver_backend, verbose=False):
+# IPOPT iteration ceiling. IPOPT's own default is 3000; we set it EXPLICITLY so every
+# solve is guaranteed to terminate (with Maximum_Iterations_Exceeded) — before this the
+# option was unset and a crawling high-density NLP (e.g. an over-meshed constrained
+# solve) could grind for hours while the backend's solve lock queued every request.
+DEFAULT_MAX_ITERATIONS = 3000
+
+# Optional HSL linear solver, opt-in via environment so the repo default stays portable
+# (the committed default is MUMPS — bundled with the casadi wheel, no license). On a machine
+# with a compiled CoinHSL library, set:
+#   AEROVIZ_IPOPT_LINSOL=ma57     (or ma27)   — the HSL solver to use for IPOPT's KKT step
+#   AEROVIZ_IPOPT_HSLLIB=/abs/path/to/libcoinhsl.dylib   — the library IPOPT dlopens at runtime
+# MA57/MA27 are typically 2–4x faster than MUMPS on these small-medium sparse KKT systems.
+# The casadi wheel's IPOPT is built with the runtime HSL loader (the `hsllib` option), so this
+# needs NO rebuild of IPOPT/casadi — only the CoinHSL library. See docs (build guide).
+_IPOPT_LINEAR_SOLVER = os.environ.get("AEROVIZ_IPOPT_LINSOL", "mumps").strip() or "mumps"
+_IPOPT_HSLLIB = (os.environ.get("AEROVIZ_IPOPT_HSLLIB") or "").strip()
+
+
+def _ipopt_linear_solver_options() -> dict:
+    """IPOPT linear-solver options from the environment (empty = the default MUMPS)."""
+    if _IPOPT_LINEAR_SOLVER == "mumps":
+        return {}
+    opts = {"ipopt.linear_solver": _IPOPT_LINEAR_SOLVER}
+    if _IPOPT_HSLLIB:
+        opts["ipopt.hsllib"] = _IPOPT_HSLLIB   # the CoinHSL lib IPOPT loads at runtime
+    return opts
+
+
+def _make_nlp_solver(nlp, solver_backend, verbose=False, max_iterations=DEFAULT_MAX_ITERATIONS):
     """Build the NLP solver for the chosen backend (see ``_SOLVER_BACKENDS``).
 
     The exact Hessian of the point-mass dynamics is nonconvex, so the SQP
@@ -33,6 +62,7 @@ def _make_nlp_solver(nlp, solver_backend, verbose=False):
     The solver is **silent by default** — no IPOPT banner, no per-iteration
     table, no CasADi timing line — so a batch of solves doesn't flood the
     console. Pass ``verbose=True`` to restore the full solver log for debugging.
+    ``max_iterations`` caps the IPOPT iteration count (the termination guarantee).
     """
     if solver_backend == "sqpmethod":
         return ca.nlpsol('solver', 'sqpmethod', nlp, {
@@ -44,12 +74,15 @@ def _make_nlp_solver(nlp, solver_backend, verbose=False):
             'print_header': verbose,
             'print_time': verbose,
         })
+    linsol = _ipopt_linear_solver_options()
     if verbose:
-        return ca.nlpsol('solver', 'ipopt', nlp)
+        return ca.nlpsol('solver', 'ipopt', nlp, {'ipopt.max_iter': int(max_iterations), **linsol})
     return ca.nlpsol('solver', 'ipopt', nlp, {
+        'ipopt.max_iter': int(max_iterations),
         'ipopt.print_level': 0,   # no per-iteration table
         'ipopt.sb': 'yes',        # no IPOPT startup banner
         'print_time': False,      # no CasADi wall-time line
+        **linsol,
     })
 
 

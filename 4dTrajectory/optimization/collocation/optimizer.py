@@ -208,6 +208,7 @@ class CollocationOptimizer:
         max_intercept_deg: float = ac.STANDARD_INTERCEPT_MAX_DEG,
         max_join_offset_m: float | None = None,
         solver_backend: str = _components._DEFAULT_SOLVER_BACKEND,
+        max_iterations: int = _components.DEFAULT_MAX_ITERATIONS,
         verbose: bool = False,
     ):
         if scheme is None:
@@ -222,6 +223,8 @@ class CollocationOptimizer:
             raise ValueError("max_join_offset_m must be >= 0 when given (0 = exact FAF join)")
         if n_segments < 2 or n_seg_per_phase < 1 or (state_substeps is not None and state_substeps < 1):
             raise ValueError("n_segments must be >= 2, n_seg_per_phase and state_substeps >= 1")
+        if max_iterations < 1:
+            raise ValueError("max_iterations must be >= 1")
         if segments is not None and not segments:
             raise ValueError("segments must be None (unconstrained) or a non-empty list of legs")
         if segments:
@@ -262,6 +265,9 @@ class CollocationOptimizer:
         # State substeps M: None -> auto-selected PER PHASE from that phase's duration guess
         # (~3 s state step, components.select_state_substeps); an explicit value applies to all.
         self.state_substeps = state_substeps
+        # IPOPT iteration ceiling — the termination guarantee (a crawling over-meshed NLP
+        # must FAIL loudly with Maximum_Iterations_Exceeded, never grind unboundedly).
+        self.max_iterations = max_iterations
         self.max_duration = max_duration
         self.max_terminal_bank_deg = max_terminal_bank_deg
         self.smoothness_weights = smoothness_weights
@@ -309,7 +315,7 @@ class CollocationOptimizer:
                 # surfaces if the free-time solve below also fails (rather than vanishing).
                 seed_error = str(exc)
             cold_s = time.perf_counter() - cs_started
-        solver = _components._make_nlp_solver(nlp, self.solver_backend, self.verbose)
+        solver = _components._make_nlp_solver(nlp, self.solver_backend, self.verbose, self.max_iterations)
         ft_started = time.perf_counter()
         sol = solver(x0=x0, lbx=lbw, ubx=ubw, lbg=lbg, ubg=ubg)
         if not solver.stats()["success"]:
@@ -331,7 +337,7 @@ class CollocationOptimizer:
             initial_state, target_state, fixed, fixed_duration=fixed)
         if initial_guess is not None:
             x0 = list(initial_guess)
-        solver = _components._make_nlp_solver(nlp, self.solver_backend, self.verbose)
+        solver = _components._make_nlp_solver(nlp, self.solver_backend, self.verbose, self.max_iterations)
         sol = solver(x0=x0, lbx=lbw, ubx=ubw, lbg=lbg, ubg=ubg)
         if not solver.stats()["success"]:
             raise ValueError(f"collocation optimization failed: {solver.stats().get('return_status', 'unknown')}")
@@ -344,7 +350,7 @@ class CollocationOptimizer:
         share a decision layout, the per-phase durations already sum to ``duration``)."""
         nlp, lbw, ubw, lbg, ubg, x0, _ = self._build(
             initial_state, target_state, duration, fixed_duration=duration)
-        solver = _components._make_nlp_solver(nlp, self.solver_backend, self.verbose)
+        solver = _components._make_nlp_solver(nlp, self.solver_backend, self.verbose, self.max_iterations)
         sol = solver(x0=x0, lbx=lbw, ubx=ubw, lbg=lbg, ubg=ubg)
         if not solver.stats()["success"]:
             raise ValueError(f"fixed-time seed failed: {solver.stats().get('return_status', 'unknown')}")
