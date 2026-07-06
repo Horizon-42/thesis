@@ -115,6 +115,9 @@ const STEP_INTERVAL_MS = 120;
 const MAX_TRAIL_POINTS = 360;
 const DEFAULT_TARGET_GAMMA_DEG = -3;
 const DEFAULT_MAX_ITERATIONS = 300;
+// Constrained (multiphase) control segments per procedure leg — aligned with the backend +
+// CollocationOptimizer's own default (3), so a frontend solve matches the batch pipeline.
+const DEFAULT_N_SEG_PER_PHASE = 3;
 // A full RNAV approach optimizes to ~250-350 s, and for the multiphase optimizer this is the
 // per-phase cap (the longest leg alone is ~130 s), so the default must clear that comfortably.
 const DEFAULT_ARRIVAL_TIME_S = 600;
@@ -245,7 +248,7 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   );
   const [nSegments, setNSegments] = useState(10);
   // Constrained (procedure) mode: control segments PER LEG (total = legs × this).
-  const [nSegPerPhase, setNSegPerPhase] = useState(2);
+  const [nSegPerPhase, setNSegPerPhase] = useState(DEFAULT_N_SEG_PER_PHASE);
   // State-collocation subintervals per control segment (M); 0 = the optimizer's auto
   // per-phase density (~3 s state step, capped at 16).
   const [stateSubsteps, setStateSubsteps] = useState(0);

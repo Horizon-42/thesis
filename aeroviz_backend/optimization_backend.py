@@ -25,6 +25,7 @@ from aeroviz_backend.simulation_backend import (
 from geodetic_simulator import GeodeticSimulator, GeodeticState
 from casadi_optimizer import CasadiOptimizer
 from collocation import CollocationOptimizer
+from collocation.optimizer import DEFAULT_N_SEG_PER_PHASE  # single source (constrained mesh default = 3)
 from common import LoadFactorControl
 from least_squares_transcription_optimizor import LeastSquaresTranscriptionOptimizor
 from single_shooting_optimizor import SingleShootingOptimizor
@@ -43,7 +44,8 @@ from warm_start_transcription_optimizor import WarmStartTranscriptionOptimizor
 
 
 DEFAULT_N_SEGMENTS = 10
-DEFAULT_N_SEG_PER_PHASE = 4      # constrained (multiphase) control segments per leg
+# DEFAULT_N_SEG_PER_PHASE (constrained multiphase segments per leg) is imported above
+# from collocation.optimizer so it stays aligned with the optimizer's own default (3).
 DEFAULT_MAX_ITERATIONS = 1000
 MIN_ARRIVAL_TIME_S = 1.0
 MAX_ARRIVAL_TIME_S = 1000.0
