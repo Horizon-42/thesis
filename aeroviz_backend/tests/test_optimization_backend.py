@@ -87,6 +87,12 @@ class TestOptimizationBackend(unittest.TestCase):
         self.assertEqual(result["finalTimeS"], 42.0)
         self.assertEqual(result["nSegments"], 1)
         self.assertEqual(result["dtS"], 0.25)
+        # the timing breakdown is surfaced in the response (was log-only)
+        self.assertIn("timings", result)
+        self.assertGreaterEqual(result["timings"]["totalS"], 0.0)
+        self.assertEqual(
+            set(result["timings"]), {"buildS", "solveS", "playbackS", "totalS"}
+        )
         self.assertEqual(result["optimizer"], "transcription")
         self.assertEqual(result["controls"][0]["thrustN"], 15000.0)
         self.assertAlmostEqual(result["controls"][0]["bankDeg"], np.degrees(0.1))
@@ -317,6 +323,35 @@ class TestOptimizationBackend(unittest.TestCase):
         self.assertEqual(seen["casadiDirectCollocationNormalizedFullTransport"], "hermiteSimpsonNormalizedFullTransport")
         self.assertEqual(seen["casadiDirectCollocationNormalizedFullTransportTrapezoidal"], "trapezoidalNormalizedFullTransport")
         self.assertEqual(seen["casadiDirectCollocationNormalizedFullTransportRk4"], "rk4NormalizedFullTransport")
+
+    def test_make_optimizer_passes_state_substeps_and_max_iterations(self):
+        # SEAM: the request's optional stateSubsteps must reach
+        # CollocationOptimizer(state_substeps=...) — absent = None = auto density —
+        # and the request's maxIterations must cap IPOPT (the termination guarantee;
+        # this arg used to be accepted and silently IGNORED by the collocation branch).
+        seen = {}
+
+        class RecordingOptimizer:
+            def __init__(self, aircraft, *, state_substeps=None, max_iterations=3000, **_kwargs):
+                seen["state_substeps"] = state_substeps
+                seen["max_iterations"] = max_iterations
+
+        original = optimization_backend.CollocationOptimizer
+        optimization_backend.CollocationOptimizer = RecordingOptimizer
+        try:
+            optimization_backend.make_optimizer(
+                "casadiDirectCollocation", GeodeticSimulator(A320), 10, 0.2, 300,
+                arrival_time_s=120.0, state_substeps=12,
+            )
+            self.assertEqual(seen["state_substeps"], 12)
+            self.assertEqual(seen["max_iterations"], 300)
+            optimization_backend.make_optimizer(
+                "casadiDirectCollocation", GeodeticSimulator(A320), 10, 0.2, 300,
+                arrival_time_s=120.0,
+            )
+            self.assertIsNone(seen["state_substeps"])
+        finally:
+            optimization_backend.CollocationOptimizer = original
 
     def test_optimize_reuses_casadi_optimizer_for_same_solver_key(self):
         constructions = []

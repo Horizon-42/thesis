@@ -131,6 +131,12 @@ class OptimizationBackend:
         # (the total is legs × this). Only used by the multiphase branch; the direct branch uses
         # nSegments. Defaults to the optimiser's own per-phase default.
         n_seg_per_phase = read_positive_int(payload, "nSegPerPhase", DEFAULT_N_SEG_PER_PHASE)
+        # Optional state-collocation density M per control segment (state nodes = N×M);
+        # absent/null = the optimizer's auto per-phase density (~3 s state step, cap 16).
+        state_substeps = (
+            read_positive_int(payload, "stateSubsteps", 1)
+            if payload.get("stateSubsteps") is not None else None
+        )
         max_iterations = read_positive_int(
             payload,
             "maxIterations",
@@ -193,6 +199,8 @@ class OptimizationBackend:
             optimizer = CollocationOptimizer(
                 aircraft, segments=constraint_segments, scheme=MULTIPHASE_SCHEMES[optimizer_name],
                 n_seg_per_phase=n_seg_per_phase,
+                state_substeps=state_substeps,
+                max_iterations=max_iterations,
             )
             build_s = time.perf_counter() - flow_started
             solve_started = time.perf_counter()
@@ -209,6 +217,7 @@ class OptimizationBackend:
                 dt,
                 max_iterations,
                 arrival_time_s=arrival_time_s,
+                state_substeps=state_substeps,
             )
             build_s = time.perf_counter() - flow_started
             solve_started = time.perf_counter()
@@ -291,12 +300,22 @@ class OptimizationBackend:
             result["procedureConstraintSummary"] = procedure_constraint.summary()
             result["procedureConstraintEnforced"] = constraints_enforced
 
+        total_s = time.perf_counter() - flow_started
+        # Surface the timing breakdown in the response (was log-only): the whole flow
+        # (NLP build + solve + playback rollout) plus the parts, so the frontend can show
+        # how long the optimization took. Seconds, plain floats.
+        result["timings"] = {
+            "buildS": build_s,
+            "solveS": solve_s,
+            "playbackS": playback_s,
+            "totalS": total_s,
+        }
         log_optimization_timing(
             optimizer_name,
             build_s=build_s,
             solve_s=solve_s,
             playback_s=playback_s,
-            total_s=time.perf_counter() - flow_started,
+            total_s=total_s,
             solve_breakdown=getattr(optimizer, "last_solve_timings", None),
         )
         return result
@@ -309,6 +328,7 @@ class OptimizationBackend:
         dt: float,
         max_iterations: int,
         arrival_time_s: float,
+        state_substeps: int | None = None,
     ) -> Any:
         if optimizer_name in CASADI_OPTIMIZERS:
             # Cache one instance per (aircraft, mesh, dt, arrival_time, optimizer_name). This
@@ -317,7 +337,8 @@ class OptimizationBackend:
             # solve (initial/target are baked in, not parameters), so the cache only saves its cheap
             # __init__ there — harmless, and it keeps one code path for all CasADi optimisers.
             aircraft = geodetic_simulator.simulator.aircraft
-            key = (optimizer_name, aircraft.code, n_segments, dt, arrival_time_s)
+            key = (optimizer_name, aircraft.code, n_segments, dt, arrival_time_s,
+                   state_substeps, max_iterations)
             if self._casadi_optimizer_key != key:
                 self._casadi_optimizer_key = key
                 self._casadi_optimizer = make_optimizer(
@@ -327,6 +348,7 @@ class OptimizationBackend:
                     dt,
                     max_iterations,
                     arrival_time_s,
+                    state_substeps=state_substeps,
                 )
             return self._casadi_optimizer
 
@@ -337,6 +359,7 @@ class OptimizationBackend:
             dt,
             max_iterations,
             arrival_time_s,
+            state_substeps=state_substeps,
         )
 
 
@@ -450,6 +473,7 @@ def make_optimizer(
     dt: float,
     max_iterations: int,
     arrival_time_s: float,
+    state_substeps: int | None = None,
 ) -> Any:
     if optimizer_name == "casadiIpopt":
         return CasadiOptimizer(
@@ -465,6 +489,8 @@ def make_optimizer(
             scheme=DIRECT_COLLOCATION_SCHEMES[optimizer_name],
             n_segments=n_segments,
             max_duration=arrival_time_s,
+            state_substeps=state_substeps,
+            max_iterations=max_iterations,
         )
 
     if optimizer_name == "singleShooting":
