@@ -27,6 +27,8 @@ A snapshot lives at ``data/archive/<name>/`` and is one of two forms:
     Falls back to a stdlib ``archive.tar.xz`` when ``zstd`` is not on PATH.
 
 ``restore`` auto-detects the form; both carry an ``_archive_manifest.json``.
+A TREE snapshot can be turned into a COMPRESSED one later, in place, with
+``compress`` — archive fast (move + tree) now, reclaim space when convenient.
 
 Usage:
     # snapshot the current pipeline data as "hs-run-jul06" (working tree emptied):
@@ -34,6 +36,10 @@ Usage:
 
     # same, but compressed to ~10× smaller (a single archive.tar.zst):
     python archive_pipeline_data.py archive hs-run-jul06 --compress
+
+    # compress a snapshot that was already archived as a tree (in place):
+    python archive_pipeline_data.py compress hs-run-jul06        # one snapshot
+    python archive_pipeline_data.py compress --all               # every tree snapshot
 
     # bring it back (snapshot consumed; --keep leaves a copy in the archive):
     python archive_pipeline_data.py restore hs-run-jul06
@@ -180,8 +186,14 @@ def _tar_base() -> list[str]:
     return cmd
 
 
-def _compress(relpaths: list[Path], snapshot: Path) -> tuple[str, int]:
-    """Write the repo-relative ``relpaths`` into a single tarball in ``snapshot``.
+def _compress(relpaths: list[Path], snapshot: Path, *,
+              base: Path = REPO_ROOT) -> tuple[str, int]:
+    """Write the ``base``-relative ``relpaths`` into a single tarball in ``snapshot``.
+
+    ``base`` is what the paths resolve against AND the tar arcname root: REPO_ROOT
+    for a fresh archive (paths are repo-relative), or the snapshot dir itself when
+    compressing an existing tree in place — the snapshot already mirrors the
+    repo-relative layout, so the arcnames still restore straight into REPO_ROOT.
 
     Returns ``(codec, compressed_bytes)``. Uses ``tar | zstd -19 --long=27`` when
     available (its long-range window dedups the repeated reference tracks), else
@@ -194,7 +206,7 @@ def _compress(relpaths: list[Path], snapshot: Path) -> tuple[str, int]:
         try:
             with open(tarball, "wb") as out:
                 tar = subprocess.Popen(
-                    [*_tar_base(), "-cf", "-", "-C", str(REPO_ROOT), "-T", str(listfile)],
+                    [*_tar_base(), "-cf", "-", "-C", str(base), "-T", str(listfile)],
                     stdout=subprocess.PIPE)
                 zstd = subprocess.Popen(
                     ["zstd", *ZSTD_ARGS, "-q", "-c"], stdin=tar.stdout, stdout=out)
@@ -213,7 +225,7 @@ def _compress(relpaths: list[Path], snapshot: Path) -> tuple[str, int]:
     tarball = snapshot / TARBALL_XZ
     with tarfile.open(tarball, "w:xz") as tf:
         for rel in relpaths:
-            tf.add(REPO_ROOT / rel, arcname=str(rel))
+            tf.add(base / rel, arcname=str(rel))
     return "xz", tarball.stat().st_size
 
 
@@ -327,6 +339,97 @@ def cmd_archive(name: str, archive_root: Path, *,
               + ("" if copy else "  (working tree emptied)"))
 
 
+def _compress_snapshot(snapshot: Path, *, force: bool, dry_run: bool) -> bool:
+    """Convert one TREE snapshot at ``snapshot`` into a COMPRESSED one, in place.
+
+    Tars the tree's files (their layout already mirrors the repo) into a single
+    ``archive.tar.zst``, deletes the loose files, prunes the emptied dirs, and
+    rewrites the manifest to the compressed form (prior provenance preserved).
+    Returns True if it (would) compress, False if skipped."""
+    name = snapshot.name
+    tarball, _ = _find_tarball(snapshot)
+    # Files that ARE the snapshot's own bookkeeping, never pipeline data.
+    reserved = {snapshot / n for n in
+                (MANIFEST_NAME, TARBALL_ZSTD, TARBALL_XZ, "_filelist.txt")}
+    files = [p for p in sorted(snapshot.rglob("*"))
+             if p.is_file() and p not in reserved and p.name != ".DS_Store"]
+
+    if not files:
+        why = "already compressed" if tarball is not None else "empty"
+        print(f"   skip {name!r} — {why}, nothing to compress")
+        return False
+    if tarball is not None and not force:
+        print(f"   skip {name!r} — a stray {tarball.name} sits beside the tree "
+              f"(partial run?); pass --force to redo")
+        return False
+
+    relpaths = [f.relative_to(snapshot) for f in files]
+    total_bytes = sum(f.stat().st_size for f in files)
+    print(f"\n━━ compress {name!r}  ·  {len(files)} files  "
+          f"{_human(total_bytes)}  ·  {snapshot}")
+
+    if dry_run:
+        dest = snapshot / (TARBALL_ZSTD if _zstd_available() else TARBALL_XZ)
+        print(f"   (dry-run — nothing changed)")
+        print(f"   -> {dest}  (est ~10× smaller)")
+        return True
+
+    if tarball is not None:  # --force redo: drop the stale/partial tarball first
+        tarball.unlink()
+    print(f"   compressing {len(files)} files …", flush=True)
+    codec, compressed_bytes = _compress(relpaths, snapshot, base=snapshot)
+
+    for rel in relpaths:  # the tree is now inside the tarball — drop the loose copies
+        (snapshot / rel).unlink(missing_ok=True)
+    _prune_empty_dirs(snapshot)
+
+    manifest_path = snapshot / MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
+    manifest.update({
+        "name": name,
+        "format": "compressed",
+        "codec": codec,
+        "file_count": len(files),
+        "total_bytes": total_bytes,
+        "compressed_bytes": compressed_bytes,
+        "compressed_utc": datetime.now(timezone.utc).isoformat(),
+    })
+    manifest.setdefault("created_utc", manifest["compressed_utc"])
+    manifest.setdefault("mode", "compress")
+    manifest.setdefault("repo_root", str(REPO_ROOT))
+    manifest.setdefault("sources", [])
+    manifest_path.write_text(json.dumps(manifest, indent=2))
+
+    ratio = total_bytes / compressed_bytes if compressed_bytes else 0
+    print(f"✓ compressed {name!r}: {_human(total_bytes)} -> "
+          f"{_human(compressed_bytes)} ({ratio:.1f}× smaller)  (tree replaced)")
+    return True
+
+
+def cmd_compress(name: str | None, archive_root: Path, *,
+                 all_: bool, force: bool, dry_run: bool) -> None:
+    if not archive_root.exists():
+        _fail(f"no archive root at {archive_root} (nothing to compress)")
+
+    if all_:
+        snapshots = sorted(p for p in archive_root.iterdir() if p.is_dir())
+        if not snapshots:
+            _fail(f"no snapshots under {archive_root}")
+        done = sum(_compress_snapshot(s, force=force, dry_run=dry_run)
+                   for s in snapshots)
+        tag = "(dry-run) would compress" if dry_run else "compressed"
+        print(f"\n{tag} {done} of {len(snapshots)} snapshot(s)")
+        return
+
+    if not name:
+        _fail("give a snapshot name, or --all to compress every tree snapshot")
+    snapshot = archive_root / name
+    if not snapshot.exists():
+        _fail(f"no snapshot {name!r} under {archive_root} "
+              f"(run `list` to see what is archived)")
+    _compress_snapshot(snapshot, force=force, dry_run=dry_run)
+
+
 def cmd_restore(name: str, archive_root: Path, *,
                 keep: bool, force: bool, dry_run: bool) -> None:
     snapshot = archive_root / name
@@ -437,6 +540,17 @@ def main() -> None:
     p_arc.add_argument("--dry-run", action="store_true",
                        help="print the plan without moving anything")
 
+    p_cmp = sub.add_parser(
+        "compress", help="compress an existing tree snapshot in place (tree -> tar.zst)")
+    p_cmp.add_argument("name", nargs="?",
+                       help="snapshot name to compress (omit when using --all)")
+    p_cmp.add_argument("--all", action="store_true", dest="all_",
+                       help="compress every uncompressed tree snapshot under the archive root")
+    p_cmp.add_argument("--force", action="store_true",
+                       help="redo even if a stray tarball already sits beside the tree")
+    p_cmp.add_argument("--dry-run", action="store_true",
+                       help="print the plan without compressing anything")
+
     p_res = sub.add_parser("restore", help="restore a named snapshot into the working tree")
     p_res.add_argument("name", help="snapshot name to restore")
     p_res.add_argument("--keep", action="store_true",
@@ -452,6 +566,9 @@ def main() -> None:
     if args.command == "archive":
         cmd_archive(args.name, args.archive_root, copy=args.copy,
                     compress=args.compress, force=args.force, dry_run=args.dry_run)
+    elif args.command == "compress":
+        cmd_compress(args.name, args.archive_root,
+                     all_=args.all_, force=args.force, dry_run=args.dry_run)
     elif args.command == "restore":
         cmd_restore(args.name, args.archive_root,
                     keep=args.keep, force=args.force, dry_run=args.dry_run)
