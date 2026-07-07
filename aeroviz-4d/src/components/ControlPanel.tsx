@@ -13,7 +13,7 @@ import { useApp, type ComparisonKind } from "../context/AppContext";
 import { useComparisonCategories } from "../hooks/useComparisonCategories";
 import { useForcedProcedureDisplay } from "../hooks/useForcedProcedureDisplay";
 import { COMPARISON_KIND_COLORS } from "../utils/trajectoryRenderModel";
-import RunwayProfileToggle from "./RunwayProfileToggle";
+import ApproachViewToggle from "./ApproachViewToggle";
 import { useEffect } from "react";
 
 /**
@@ -76,14 +76,14 @@ export default function ControlPanel() {
 
   return (
     <div className="control-panel">
-      <div className="control-panel-profile">
-        <div className="control-panel-profile-row">
-          <span>Approach profile</span>
-          <RunwayProfileToggle runwayIdent={selectedRunway} />
+      <div className="control-panel-approach-view">
+        <div className="control-panel-approach-view-row">
+          <span>Approach view</span>
+          <ApproachViewToggle runwayIdent={selectedRunway} />
         </div>
         {selectedRunway === null ? (
-          <p className="control-panel-profile-hint">
-            No landing runway selected — pick one in the top bar to view its approach profile.
+          <p className="control-panel-approach-view-hint">
+            No landing runway selected — pick one in the top bar to view its approach view.
           </p>
         ) : null}
       </div>

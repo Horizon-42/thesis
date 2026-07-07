@@ -8,7 +8,7 @@
  * painting it, and re-show it instantly without re-parsing:
  *
  *   • LOADED only in Observe — the observed tracks are Observe's content, and the
- *     runway profile samples them only in Observe (planProfileTrajectorySources),
+ *     runway profile samples them only in Observe (planApproachViewSources),
  *     so no other task needs them in memory. Outside Observe `fileUrl` is "" so the
  *     caller releases the source. (This also matters because useCzmlLoader drives
  *     the shared viewer clock from the observed CZML's span; loading it behind a

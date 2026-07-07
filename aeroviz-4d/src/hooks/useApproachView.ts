@@ -6,16 +6,16 @@ import { buildProcedureProfileProjection } from "../data/procedureProfileProject
 import { loadProcedureRenderBundleData } from "../data/procedureRenderBundle";
 import {
   activeHorizontalPlateRoutes,
-  classifyProfileSample,
+  classifyApproachViewSample,
   classifyTrackSamples,
   colorForFlightId,
-  sortProfileTracksBySelection,
+  sortApproachViewTracksBySelection,
   trackEngagesProcedure,
-  type ProfileAircraftSample,
-  type ProfileAircraftTrack,
+  type ApproachViewSample,
+  type ApproachViewTrack,
   type SampledRunwayPoint,
-} from "../data/runwayTrajectoryProfileAnalysis";
-import { planProfileTrajectorySources } from "../data/profileTrajectorySources";
+} from "../data/approachViewAnalysis";
+import { planApproachViewSources } from "../data/approachViewSources";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 import { normalizeRunwayIdent } from "../utils/runwayIdent";
 import {
@@ -29,9 +29,9 @@ import {
 } from "../utils/runwayProfileGeometry";
 
 export type {
-  ProfileAircraftSample,
-  ProfileAircraftTrack,
-} from "../data/runwayTrajectoryProfileAnalysis";
+  ApproachViewSample,
+  ApproachViewTrack,
+} from "../data/approachViewAnalysis";
 
 const TICK_THROTTLE_MS = 120;
 // The profile plots each aircraft's WHOLE track across the procedure, not a short trailing
@@ -41,7 +41,7 @@ const TICK_THROTTLE_MS = 120;
 const TRACK_SAMPLE_STEP_SECONDS = 5;
 const MAX_TRACK_SAMPLES_PER_DIRECTION = 600;
 
-export interface RunwayTrajectoryProfileState {
+export interface ApproachViewState {
   isLoading: boolean;
   error: string | null;
   currentTimeIso: string | null;
@@ -50,13 +50,13 @@ export interface RunwayTrajectoryProfileState {
   referenceMarks: RunwayReferenceMark[];
   procedureNames: string[];
   sourceCycle: string | null;
-  aircraftTracks: ProfileAircraftTrack[];
+  aircraftTracks: ApproachViewTrack[];
   /** Whether a trajectory source belonging to the CURRENT tab is loaded (the
-   *  profile's "CZML linked" indicator). Mirrors what the profile actually plots. */
+   *  profile's "CZML linked" indicator). Mirrors what the approach view actually plots. */
   sourceLinked: boolean;
 }
 
-interface LoadedProfileData {
+interface LoadedApproachViewData {
   runwayFrame: RunwayFrame;
   plateRoutes: HorizontalPlateRoute[];
   sourceCycle: string | null;
@@ -187,25 +187,25 @@ export function sampleEntityTrack(
   return { current, trail: sampleWholeTrack(entity, currentTime, runwayFrame) };
 }
 
-export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
+export function useApproachView(): ApproachViewState {
   const {
     viewer,
     mode,
     activeAirportCode,
     procedureVisibility,
     selectedRunway,
-    isRunwayProfileOpen,
+    isApproachViewOpen,
     trajectoryComparison,
     trajectoryDataSource,
     optimizedTrajectoryDataSource,
     selectedFlightId,
   } = useApp();
-  // Which trajectory sources are the CURRENT tab's globe content — the profile plots
+  // Which trajectory sources are the CURRENT tab's globe content — the approach view plots
   // only those, so it mirrors the active task instead of also drawing the observed
-  // tracks that stay loaded (but hidden) behind a profile opened in Optimize/Fly/Compare.
+  // tracks that stay loaded (but hidden) behind an approach view opened in Optimize/Fly/Compare.
   const sourceSelection = useMemo(
     () =>
-      planProfileTrajectorySources({
+      planApproachViewSources({
         mode,
         activeAirportCode,
         selectedRunway,
@@ -223,22 +223,22 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
   const sourceLinked =
     (sourceSelection.observed && trajectoryDataSource !== null) ||
     (sourceSelection.optimized && optimizedTrajectoryDataSource !== null);
-  // The profile's runway is the global Landing-Runway selection, in the procedure
+  // The approach view's runway is the global Landing-Runway selection, in the procedure
   // (RW-prefixed) spelling. `null` when "All runways" is selected — no single profile.
-  const profileRunwayIdent = selectedRunway ? normalizeRunwayIdent(selectedRunway) : null;
+  const approachRunwayIdent = selectedRunway ? normalizeRunwayIdent(selectedRunway) : null;
   const [currentTime, setCurrentTime] = useState<Cesium.JulianDate | null>(null);
-  const [loadedData, setLoadedData] = useState<LoadedProfileData | null>(null);
+  const [loadedData, setLoadedData] = useState<LoadedApproachViewData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Per-entity cache of the classified whole track (keyed by flight id); rebuilt only when the
   // geometry it depends on changes, never per clock tick. See the aircraftTracks memo.
-  const trackCacheRef = useRef<{ deps: unknown[]; tracks: Map<string, ProfileAircraftSample[]> }>({
+  const trackCacheRef = useRef<{ deps: unknown[]; tracks: Map<string, ApproachViewSample[]> }>({
     deps: [],
     tracks: new Map(),
   });
 
   useEffect(() => {
-    if (!viewer || !isRunwayProfileOpen) {
+    if (!viewer || !isApproachViewOpen) {
       setCurrentTime(null);
       return;
     }
@@ -255,10 +255,10 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
     return () => {
       removeListener();
     };
-  }, [viewer, isRunwayProfileOpen]);
+  }, [viewer, isApproachViewOpen]);
 
   useEffect(() => {
-    if (!activeAirportCode || !profileRunwayIdent || !isRunwayProfileOpen) {
+    if (!activeAirportCode || !approachRunwayIdent || !isApproachViewOpen) {
       setLoadedData(null);
       setIsLoading(false);
       setError(null);
@@ -276,11 +276,11 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
       .then(([runwayCollection, procedureRenderData]) => {
         if (cancelled) return;
 
-        const runwayFrame = buildRunwayFrame(runwayCollection, profileRunwayIdent);
+        const runwayFrame = buildRunwayFrame(runwayCollection, approachRunwayIdent);
         const procedureProfileProjection = buildProcedureProfileProjection(
           procedureRenderData,
           runwayFrame,
-          profileRunwayIdent,
+          approachRunwayIdent,
         );
         setLoadedData({
           runwayFrame,
@@ -304,18 +304,18 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
     return () => {
       cancelled = true;
     };
-  }, [activeAirportCode, isRunwayProfileOpen, profileRunwayIdent]);
+  }, [activeAirportCode, isApproachViewOpen, approachRunwayIdent]);
 
   const activePlateRoutes = useMemo(
     () => activeHorizontalPlateRoutes(loadedData?.plateRoutes ?? [], procedureVisibility),
     [loadedData, procedureVisibility],
   );
 
-  const aircraftTracks = useMemo<ProfileAircraftTrack[]>(() => {
+  const aircraftTracks = useMemo<ApproachViewTrack[]>(() => {
     // Sample only the sources that are the CURRENT tab's globe content (sourceSelection):
     // the observed ADS-B tracks in Observe, the optimized playback in Optimize. This is
-    // what keeps the profile in step with the active task — the observed tracks stay
-    // loaded behind a profile opened in another tab, but are NOT plotted there.
+    // what keeps the approach view in step with the active task — the observed tracks stay
+    // loaded behind an approach view opened in another tab, but are NOT plotted there.
     const sources = [
       sourceSelection.observed ? trajectoryDataSource : null,
       sourceSelection.optimized ? optimizedTrajectoryDataSource : null,
@@ -342,7 +342,7 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
       dataSource.entities.values.filter((entity) => entity.id !== "document" && entity.position),
     );
 
-    const tracks: ProfileAircraftTrack[] = [];
+    const tracks: ApproachViewTrack[] = [];
     for (const entity of trajectoryEntities) {
       const currentPoint = currentIfLive(entity, currentTime, runwayFrame);
       if (!currentPoint) continue; // not airborne / parked — the only work for most entities
@@ -356,7 +356,7 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
         );
         cache.set(entity.id, trail);
       }
-      const current = classifyProfileSample(currentPoint, activePlateRoutes, runwayFrame);
+      const current = classifyApproachViewSample(currentPoint, activePlateRoutes, runwayFrame);
       if (!current) continue;
       // Plot only aircraft that fly this procedure (trail or the current point reaches PRIMARY).
       if (!trackEngagesProcedure(trail) && current.segmentAssessment.containment !== "PRIMARY") {
@@ -370,7 +370,7 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
         isSelected: entity.id === selectedFlightId,
       });
     }
-    return sortProfileTracksBySelection(tracks);
+    return sortApproachViewTracksBySelection(tracks);
   }, [
     activePlateRoutes,
     currentTime,
@@ -383,10 +383,10 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
 
   const activeReferenceMarks = useMemo(
     () =>
-      loadedData && profileRunwayIdent
-        ? buildRunwayReferenceMarksFromPlateRoutes(activePlateRoutes, profileRunwayIdent)
+      loadedData && approachRunwayIdent
+        ? buildRunwayReferenceMarksFromPlateRoutes(activePlateRoutes, approachRunwayIdent)
         : [],
-    [activePlateRoutes, loadedData, profileRunwayIdent],
+    [activePlateRoutes, loadedData, approachRunwayIdent],
   );
   const activeProcedureNames = useMemo(
     () => [...new Set(activePlateRoutes.map((route) => route.procedureName))],

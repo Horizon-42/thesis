@@ -51,7 +51,7 @@ const mocks = vi.hoisted(() => ({
   beaconCloseWorkerSession: vi.fn(),
   setSelectedRunway: vi.fn(),
   setProceduresOpen: vi.fn(),
-  setRunwayProfileOpen: vi.fn(),
+  setApproachViewOpen: vi.fn(),
   toggleLayer: vi.fn(),
   layers: { procedures: false } as Record<string, boolean>,
   setPilotTransport: vi.fn(),
@@ -66,8 +66,8 @@ vi.mock("../../context/AppContext", () => ({
     setSelectedRunway: mocks.setSelectedRunway,
     proceduresOpen: false,
     setProceduresOpen: mocks.setProceduresOpen,
-    isRunwayProfileOpen: false,
-    setRunwayProfileOpen: mocks.setRunwayProfileOpen,
+    isApproachViewOpen: false,
+    setApproachViewOpen: mocks.setApproachViewOpen,
     layers: mocks.layers,
     toggleLayer: mocks.toggleLayer,
     setPilotTransport: mocks.setPilotTransport,
@@ -593,17 +593,17 @@ describe("PilotPanel trajectory play mode", () => {
     expect(mocks.setSelectedRunway).toHaveBeenCalledWith(null);
   });
 
-  it("opens the target runway's approach profile from the Profile toggle", async () => {
+  it("opens the target runway's approach view from the Approach-view toggle", async () => {
     render(<PilotPanel />);
     expect(await screen.findByText("A320")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
 
-    // The target summary carries a Profile toggle for the target runway (RW05L → "05L").
-    const profileButton = await screen.findByRole("button", { name: "Profile" });
+    // The target summary carries a Approach-view toggle for the target runway (RW05L → "05L").
+    const profileButton = await screen.findByRole("button", { name: "View" });
     fireEvent.click(profileButton);
 
     expect(mocks.setSelectedRunway).toHaveBeenCalledWith("05L");
-    expect(mocks.setRunwayProfileOpen).toHaveBeenCalledWith(true);
+    expect(mocks.setApproachViewOpen).toHaveBeenCalledWith(true);
   });
 
   it("clamps trajectory target speed and heading to threshold constraints", async () => {

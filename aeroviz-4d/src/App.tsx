@@ -23,7 +23,7 @@ import WorkbenchBottomBar from "./components/WorkbenchBottomBar";
 import ProcedureDetailsPage from "./components/ProcedureDetailsPage";
 import ProcedureAnnotationPopup from "./components/ProcedureAnnotationPopup";
 import ProcedurePanel from "./components/ProcedurePanel";
-import RunwayTrajectoryProfilePanel from "./components/RunwayTrajectoryProfilePanel";
+import ApproachViewPanel from "./components/ApproachViewPanel";
 import { useApp } from "./context/AppContext";
 import { planObservedTracks } from "./data/observedTracks";
 import { useCzmlLoader } from "./hooks/useCzmlLoader";
@@ -69,7 +69,7 @@ function FlightApp() {
       >
         <AirportLocalTerrainAlert />
         <ProcedureAnnotationPopup />
-        <RunwayTrajectoryProfilePanel />
+        <ApproachViewPanel />
         {/* Procedures is an independent panel docked bottom-right (grid-area ops); it
             coexists with the active task and keeps its state across task switches. */}
         {proceduresOpen ? <ProcedurePanel /> : null}

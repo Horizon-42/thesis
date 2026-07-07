@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildProfileAircraftTracks,
+  buildApproachViewTracks,
   splitTrackByContainment,
-  type ProfileAircraftInput,
-  type ProfileAircraftSample,
+  type ApproachViewInput,
+  type ApproachViewSample,
   type SampledRunwayPoint,
-} from "./runwayTrajectoryProfileAnalysis";
+} from "./approachViewAnalysis";
 import type {
   HorizontalPlateContainment,
   HorizontalPlateSegmentAssessment,
@@ -47,11 +47,11 @@ function point(xM: number, yM: number, timeIso: string): SampledRunwayPoint {
   return { xM, yM, zM: 500, geoPosition: { lonDeg: 0, latDeg: 0, altM: 500 }, timeIso };
 }
 
-describe("buildProfileAircraftTracks", () => {
+describe("buildApproachViewTracks", () => {
   it("keeps the WHOLE track (in- and out-of-corridor) for an aircraft that engages the procedure", () => {
     // Cuts the corner (OUTSIDE) then joins the corridor (PRIMARY) near the threshold, and is
     // currently still OUTSIDE — the whole track must survive, tagged by containment.
-    const input: ProfileAircraftInput = {
+    const input: ApproachViewInput = {
       flightId: "AAL1",
       current: point(20000, 3000, "t3"), // OUTSIDE right now
       trail: [
@@ -62,7 +62,7 @@ describe("buildProfileAircraftTracks", () => {
       ],
     };
 
-    const [track] = buildProfileAircraftTracks({
+    const [track] = buildApproachViewTracks({
       aircraft: [input],
       activePlateRoutes: [ROUTE],
       runwayFrame: FRAME,
@@ -80,13 +80,13 @@ describe("buildProfileAircraftTracks", () => {
   });
 
   it("drops an aircraft whose whole track never reaches the corridor (unrelated traffic)", () => {
-    const input: ProfileAircraftInput = {
+    const input: ApproachViewInput = {
       flightId: "FAROFF",
       current: point(15000, 8000, "t1"),
       trail: [point(20000, 9000, "t0"), point(15000, 8000, "t1")],
     };
 
-    const tracks = buildProfileAircraftTracks({
+    const tracks = buildApproachViewTracks({
       aircraft: [input],
       activePlateRoutes: [ROUTE],
       runwayFrame: FRAME,
@@ -98,7 +98,7 @@ describe("buildProfileAircraftTracks", () => {
 });
 
 describe("splitTrackByContainment", () => {
-  const sample = (containment: HorizontalPlateContainment, xM: number): ProfileAircraftSample => ({
+  const sample = (containment: HorizontalPlateContainment, xM: number): ApproachViewSample => ({
     xM,
     yM: 0,
     zM: 0,

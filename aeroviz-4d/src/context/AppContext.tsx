@@ -61,7 +61,7 @@ export type LayerKey =
   | "procedures"
   | "rangeRing";
 
-export type RunwayProfileViewMode = "split" | "side-xz" | "top-xy";
+export type ApproachViewMode = "split" | "side-xz" | "top-xy";
 
 export type AirportLocalTerrainStatus =
   | "disabled"
@@ -159,7 +159,7 @@ interface FlightSessionState {
   setTrajectoryDataSource: (dataSource: Cesium.CzmlDataSource | null) => void;
 
   /** The optimized-trajectory playback CZML datasource (Optimize / Trajectory-Play mode),
-   *  exposed so the runway profile can plot the optimized track alongside the observed one. */
+   *  exposed so the approach view can plot the optimized track alongside the observed one. */
   optimizedTrajectoryDataSource: Cesium.CzmlDataSource | null;
   setOptimizedTrajectoryDataSource: (dataSource: Cesium.CzmlDataSource | null) => void;
 
@@ -209,14 +209,14 @@ interface PlaybackState {
   setAutoReplay: (value: boolean) => void;
 }
 
-interface RunwayProfileSessionState {
-  // The profile's runway is NOT stored separately — it is the global `selectedRunway`
+interface ApproachViewSessionState {
+  // The approach view's runway is NOT stored separately — it is the global `selectedRunway`
   // (see FlightSessionState), so the procedure/profile runway and the top-bar Landing
   // Runway selector are always one and the same.
-  isRunwayProfileOpen: boolean;
-  setRunwayProfileOpen: (open: boolean) => void;
-  runwayProfileViewMode: RunwayProfileViewMode;
-  setRunwayProfileViewMode: (mode: RunwayProfileViewMode) => void;
+  isApproachViewOpen: boolean;
+  setApproachViewOpen: (open: boolean) => void;
+  approachViewMode: ApproachViewMode;
+  setApproachViewMode: (mode: ApproachViewMode) => void;
 }
 
 /**
@@ -282,7 +282,7 @@ interface AppState extends
   FlightSessionState,
   ProcedureSessionState,
   PlaybackState,
-  RunwayProfileSessionState,
+  ApproachViewSessionState,
   WorkbenchUiState {}
 
 // The defaults are `null`; useApp asserts all providers are present so consumers
@@ -292,7 +292,7 @@ const AirportSessionContext = createContext<AirportSessionState | null>(null);
 const FlightSessionContext = createContext<FlightSessionState | null>(null);
 const ProcedureSessionContext = createContext<ProcedureSessionState | null>(null);
 const PlaybackContext = createContext<PlaybackState | null>(null);
-const RunwayProfileSessionContext = createContext<RunwayProfileSessionState | null>(null);
+const ApproachViewSessionContext = createContext<ApproachViewSessionState | null>(null);
 const WorkbenchUiContext = createContext<WorkbenchUiState | null>(null);
 
 // ── Provider ──────────────────────────────────────────────────────────────────
@@ -325,9 +325,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     useState<ProcedureDisplayLevel>("PROTECTION");
   const [selectedProcedureAnnotation, setSelectedProcedureAnnotation] =
     useState<ProcedureEntityAnnotation | null>(null);
-  const [isRunwayProfileOpen, setRunwayProfileOpen] = useState(false);
-  const [runwayProfileViewMode, setRunwayProfileViewMode] =
-    useState<RunwayProfileViewMode>("split");
+  const [isApproachViewOpen, setApproachViewOpen] = useState(false);
+  const [approachViewMode, setApproachViewMode] =
+    useState<ApproachViewMode>("split");
   const [rangeRingRadiusKm, setRangeRingRadiusKm] = useState<number>(5);
   const [mode, setMode] = useState<WorkbenchMode>("observe");
   const [proceduresOpen, setProceduresOpen] = useState<boolean>(false);
@@ -443,7 +443,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setProcedureWidthMeasurementEnabled(false);
       setProcedureDisplayLevel("PROTECTION");
       setSelectedProcedureAnnotation(null);
-      setRunwayProfileOpen(false);
+      setApproachViewOpen(false);
       setAirportLocalTerrain(
         airportLocalTerrainStateForLayer(normalizedCode, layers.airportLocalTerrain),
       );
@@ -517,12 +517,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     autoReplay,
     setAutoReplay,
   }), [playbackSpeed, autoReplay]);
-  const runwayProfileSessionState: RunwayProfileSessionState = useMemo(() => ({
-    isRunwayProfileOpen,
-    setRunwayProfileOpen,
-    runwayProfileViewMode,
-    setRunwayProfileViewMode,
-  }), [isRunwayProfileOpen, runwayProfileViewMode]);
+  const approachViewSessionState: ApproachViewSessionState = useMemo(() => ({
+    isApproachViewOpen,
+    setApproachViewOpen,
+    approachViewMode,
+    setApproachViewMode,
+  }), [isApproachViewOpen, approachViewMode]);
   const workbenchUiState: WorkbenchUiState = useMemo(() => ({
     mode,
     setMode,
@@ -544,11 +544,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         <FlightSessionContext.Provider value={flightSessionState}>
           <ProcedureSessionContext.Provider value={procedureSessionState}>
             <PlaybackContext.Provider value={playbackState}>
-              <RunwayProfileSessionContext.Provider value={runwayProfileSessionState}>
+              <ApproachViewSessionContext.Provider value={approachViewSessionState}>
                 <WorkbenchUiContext.Provider value={workbenchUiState}>
                   {children}
                 </WorkbenchUiContext.Provider>
-              </RunwayProfileSessionContext.Provider>
+              </ApproachViewSessionContext.Provider>
             </PlaybackContext.Provider>
           </ProcedureSessionContext.Provider>
         </FlightSessionContext.Provider>
@@ -570,7 +570,7 @@ export function useApp(): AppState {
   const flightSessionState = useContext(FlightSessionContext);
   const procedureSessionState = useContext(ProcedureSessionContext);
   const playbackState = useContext(PlaybackContext);
-  const runwayProfileSessionState = useContext(RunwayProfileSessionContext);
+  const approachViewSessionState = useContext(ApproachViewSessionContext);
   const workbenchUiState = useContext(WorkbenchUiContext);
   if (
     !sceneState ||
@@ -578,7 +578,7 @@ export function useApp(): AppState {
     !flightSessionState ||
     !procedureSessionState ||
     !playbackState ||
-    !runwayProfileSessionState ||
+    !approachViewSessionState ||
     !workbenchUiState
   ) {
     throw new Error(
@@ -592,7 +592,7 @@ export function useApp(): AppState {
     ...flightSessionState,
     ...procedureSessionState,
     ...playbackState,
-    ...runwayProfileSessionState,
+    ...approachViewSessionState,
     ...workbenchUiState,
   };
 }

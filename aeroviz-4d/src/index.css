@@ -677,13 +677,13 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   user-select: none;
 }
 
-.control-panel-profile {
+.control-panel-approach-view {
   margin-bottom: 10px;
   padding-bottom: 10px;
   border-bottom: 1px solid rgba(126, 184, 247, 0.18);
 }
 
-.control-panel-profile-row {
+.control-panel-approach-view-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -692,7 +692,7 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   font-weight: 600;
 }
 
-.control-panel-profile-hint {
+.control-panel-approach-view-hint {
   margin: 6px 0 0;
   font-size: 11px;
   font-weight: 400;
@@ -1304,7 +1304,7 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   font-weight: 600;
 }
 
-.procedure-runway-profile-button.active {
+.approach-view-toggle-button.active {
   background: #14532d;
   border-color: #34d399;
   color: #ecfdf5;
@@ -1367,7 +1367,7 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 }
 
 /* ── Runway profile panel ────────────────────────────────────────────────── */
-.runway-profile-panel {
+.approach-view-panel {
   position: absolute;
   top: 42px;
   left: calc(var(--overlay-left-width) + 34px);
@@ -1389,38 +1389,38 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   overflow: hidden;
 }
 
-.runway-profile-panel-header {
+.approach-view-panel-header {
   display: flex;
   align-items: start;
   justify-content: space-between;
   gap: 16px;
 }
 
-.runway-profile-panel-header h3 {
+.approach-view-panel-header h3 {
   margin: 0;
   font-size: 16px;
   color: #ccfbf1;
 }
 
-.runway-profile-panel-header p {
+.approach-view-panel-header p {
   margin: 4px 0 0;
   color: #93c5fd;
   font-size: 12px;
 }
 
-.runway-profile-panel-actions {
+.approach-view-panel-actions {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.runway-profile-view-modes,
-.runway-profile-unit-switch {
+.approach-view-modes,
+.approach-view-unit-switch {
   display: flex;
   gap: 6px;
 }
 
-.runway-profile-panel button {
+.approach-view-panel button {
   border: 1px solid #284266;
   border-radius: 6px;
   background: #132238;
@@ -1430,23 +1430,23 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   font-size: 12px;
 }
 
-.runway-profile-panel button:hover {
+.approach-view-panel button:hover {
   background: #1d3352;
 }
 
-.runway-profile-panel button.active {
+.approach-view-panel button.active {
   background: #0f766e;
   border-color: #5eead4;
   color: #f0fdfa;
 }
 
-.runway-profile-summary {
+.approach-view-summary {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.runway-profile-summary span {
+.approach-view-summary span {
   padding: 4px 8px;
   border-radius: 999px;
   border: 1px solid rgba(96, 165, 250, 0.24);
@@ -1455,16 +1455,16 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   font-size: 12px;
 }
 
-.runway-profile-procedure-list,
-.runway-profile-status,
-.runway-profile-empty,
-.runway-profile-error {
+.approach-view-procedure-list,
+.approach-view-status,
+.approach-view-empty,
+.approach-view-error {
   margin: 0;
   font-size: 12px;
   line-height: 1.45;
 }
 
-.runway-profile-procedure-list {
+.approach-view-procedure-list {
   color: #a7f3d0;
   min-height: 17px;
   white-space: nowrap;
@@ -1472,145 +1472,145 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   text-overflow: ellipsis;
 }
 
-.runway-profile-status {
+.approach-view-status {
   min-height: 17px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.runway-profile-empty {
+.approach-view-empty {
   color: #cbd5e1;
 }
 
-.runway-profile-error {
+.approach-view-error {
   color: #fecaca;
 }
 
-.runway-profile-plots {
+.approach-view-plots {
   min-height: 0;
   display: grid;
   gap: 12px;
   overflow: hidden;
 }
 
-.runway-profile-plots-split {
+.approach-view-plots-split {
   grid-template-columns: 1fr;
   grid-template-rows: repeat(2, minmax(300px, 1fr));
 }
 
-.runway-profile-plots-side-xz,
-.runway-profile-plots-top-xy {
+.approach-view-plots-side-xz,
+.approach-view-plots-top-xy {
   grid-template-columns: 1fr;
 }
 
-.runway-profile-plot {
+.approach-view-plot {
   min-height: 0;
   display: grid;
   gap: 8px;
 }
 
-.runway-profile-plot header {
+.approach-view-plot header {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
 }
 
-.runway-profile-plot h4 {
+.approach-view-plot h4 {
   margin: 0;
   color: #e0f2fe;
   font-size: 13px;
 }
 
-.runway-profile-plot p {
+.approach-view-plot p {
   margin: 0;
   color: #93c5fd;
   font-size: 11px;
   text-align: right;
 }
 
-.runway-profile-svg {
+.approach-view-svg {
   width: 100%;
   height: 100%;
   min-height: 300px;
 }
 
-.runway-profile-plot-frame {
+.approach-view-plot-frame {
   fill: rgba(15, 23, 42, 0.72);
   stroke: rgba(96, 165, 250, 0.2);
   stroke-width: 1.2;
 }
 
-.runway-profile-axis,
-.runway-profile-threshold-line,
-.runway-profile-centerline,
-.runway-profile-ground-line,
-.runway-profile-route-line,
-.runway-profile-route-band,
-.runway-profile-assessment-primary-band,
-.runway-profile-assessment-secondary-band,
-.runway-profile-final-vertical-reference-band,
-.runway-profile-final-vertical-reference-line,
-.runway-profile-final-vertical-reference-plan-line,
-.runway-profile-lnav-vnav-ocs-primary-band,
-.runway-profile-lnav-vnav-ocs-secondary-band,
-.runway-profile-lnav-vnav-ocs-line,
-.runway-profile-precision-surface-line,
-.runway-profile-grid-line,
-.runway-profile-reference-line,
-.runway-profile-reference-tick {
+.approach-view-axis,
+.approach-view-threshold-line,
+.approach-view-centerline,
+.approach-view-ground-line,
+.approach-view-route-line,
+.approach-view-route-band,
+.approach-view-assessment-primary-band,
+.approach-view-assessment-secondary-band,
+.approach-view-final-vertical-reference-band,
+.approach-view-final-vertical-reference-line,
+.approach-view-final-vertical-reference-plan-line,
+.approach-view-lnav-vnav-ocs-primary-band,
+.approach-view-lnav-vnav-ocs-secondary-band,
+.approach-view-lnav-vnav-ocs-line,
+.approach-view-precision-surface-line,
+.approach-view-grid-line,
+.approach-view-reference-line,
+.approach-view-reference-tick {
   fill: none;
 }
 
-.runway-profile-axis {
+.approach-view-axis {
   stroke: rgba(148, 163, 184, 0.45);
   stroke-width: 1.2;
 }
 
-.runway-profile-grid-line {
+.approach-view-grid-line {
   stroke: rgba(148, 163, 184, 0.13);
   stroke-width: 1;
 }
 
-.runway-profile-threshold-line {
+.approach-view-threshold-line {
   stroke: rgba(250, 204, 21, 0.78);
   stroke-width: 1.4;
   stroke-dasharray: 6 5;
 }
 
-.runway-profile-ground-line,
-.runway-profile-centerline {
+.approach-view-ground-line,
+.approach-view-centerline {
   stroke: rgba(148, 163, 184, 0.3);
   stroke-width: 1.1;
   stroke-dasharray: 4 6;
 }
 
-.runway-profile-route-band {
+.approach-view-route-band {
   stroke: rgba(34, 211, 238, 0.12);
   stroke-linecap: butt;
   stroke-linejoin: round;
 }
 
-.runway-profile-assessment-secondary-band {
+.approach-view-assessment-secondary-band {
   stroke: rgba(125, 211, 252, 0.08);
   stroke-linecap: butt;
   stroke-linejoin: round;
 }
 
-.runway-profile-assessment-primary-band {
+.approach-view-assessment-primary-band {
   stroke: rgba(34, 211, 238, 0.16);
   stroke-linecap: butt;
   stroke-linejoin: round;
 }
 
-.runway-profile-final-vertical-reference-band {
+.approach-view-final-vertical-reference-band {
   stroke: rgba(250, 204, 21, 0.18);
   stroke-linecap: butt;
   stroke-linejoin: round;
 }
 
-.runway-profile-final-vertical-reference-line {
+.approach-view-final-vertical-reference-line {
   stroke: rgba(250, 204, 21, 0.84);
   stroke-width: 5;
   stroke-linecap: round;
@@ -1618,7 +1618,7 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   opacity: 0.86;
 }
 
-.runway-profile-final-vertical-reference-plan-line {
+.approach-view-final-vertical-reference-plan-line {
   stroke: rgba(250, 204, 21, 0.68);
   stroke-width: 2.4;
   stroke-linecap: round;
@@ -1626,19 +1626,19 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   stroke-dasharray: 7 5;
 }
 
-.runway-profile-lnav-vnav-ocs-secondary-band {
+.approach-view-lnav-vnav-ocs-secondary-band {
   stroke: rgba(244, 114, 182, 0.14);
   stroke-linecap: butt;
   stroke-linejoin: round;
 }
 
-.runway-profile-lnav-vnav-ocs-primary-band {
+.approach-view-lnav-vnav-ocs-primary-band {
   stroke: rgba(244, 114, 182, 0.28);
   stroke-linecap: butt;
   stroke-linejoin: round;
 }
 
-.runway-profile-lnav-vnav-ocs-line {
+.approach-view-lnav-vnav-ocs-line {
   stroke: rgba(244, 114, 182, 0.92);
   stroke-width: 4.2;
   stroke-linecap: round;
@@ -1646,7 +1646,7 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   stroke-dasharray: 10 4;
 }
 
-.runway-profile-precision-surface-line {
+.approach-view-precision-surface-line {
   stroke: rgba(248, 113, 113, 0.72);
   stroke-width: 2;
   stroke-linecap: round;
@@ -1654,18 +1654,18 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   stroke-dasharray: 3 4;
 }
 
-.runway-profile-route-line {
+.approach-view-route-line {
   stroke: rgba(34, 211, 238, 0.82);
   stroke-width: 1.8;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
-.runway-profile-route-line.is-transition {
+.approach-view-route-line.is-transition {
   stroke: rgba(246, 183, 77, 0.78);
 }
 
-.runway-profile-route-label {
+.approach-view-route-label {
   fill: #dbeafe;
   font-size: 10px;
   font-weight: 700;
@@ -1675,11 +1675,11 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   stroke-width: 3px;
 }
 
-.runway-profile-route-label.is-transition {
+.approach-view-route-label.is-transition {
   fill: #ffd38a;
 }
 
-.runway-profile-final-vertical-reference-label {
+.approach-view-final-vertical-reference-label {
   fill: #fde68a;
   font-family: "Inter", "Segoe UI", sans-serif;
   font-size: 10px;
@@ -1690,7 +1690,7 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   stroke-width: 3px;
 }
 
-.runway-profile-segment-debug-label {
+.approach-view-segment-debug-label {
   fill: #fca5a5;
   font-family: "Inter", "Segoe UI", sans-serif;
   font-size: 9px;
@@ -1701,94 +1701,94 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   stroke-width: 3px;
 }
 
-.runway-profile-reference-line {
+.approach-view-reference-line {
   stroke: rgba(167, 243, 208, 0.22);
   stroke-width: 1;
   stroke-dasharray: 3 6;
 }
 
-.runway-profile-reference-tick {
+.approach-view-reference-tick {
   stroke: rgba(167, 243, 208, 0.9);
   stroke-width: 1.4;
 }
 
-.runway-profile-reference-point {
+.approach-view-reference-point {
   fill: #d1fae5;
   stroke: rgba(15, 23, 42, 0.92);
   stroke-width: 1.4;
 }
 
-.runway-profile-altitude-constraint-point {
+.approach-view-altitude-constraint-point {
   fill: #bef264;
   stroke: rgba(15, 23, 42, 0.94);
   stroke-width: 1.8;
 }
 
-.runway-profile-altitude-constraint-point.is-at {
+.approach-view-altitude-constraint-point.is-at {
   fill: #bef264;
 }
 
-.runway-profile-altitude-constraint-point.is-at-or-above {
+.approach-view-altitude-constraint-point.is-at-or-above {
   fill: #67e8f9;
 }
 
-.runway-profile-altitude-constraint-point.is-at-or-below {
+.approach-view-altitude-constraint-point.is-at-or-below {
   fill: #fbbf24;
 }
 
-.runway-profile-altitude-constraint-point.is-window {
+.approach-view-altitude-constraint-point.is-window {
   fill: #c4b5fd;
 }
 
-.runway-profile-altitude-constraint-point.is-unknown {
+.approach-view-altitude-constraint-point.is-unknown {
   fill: #cbd5e1;
 }
 
-.runway-profile-altitude-constraint-station-line {
+.approach-view-altitude-constraint-station-line {
   stroke: rgba(190, 242, 100, 0.22);
   stroke-width: 1;
   stroke-dasharray: 3 5;
 }
 
-.runway-profile-altitude-constraint-station-line.is-at-or-above {
+.approach-view-altitude-constraint-station-line.is-at-or-above {
   stroke: rgba(103, 232, 249, 0.24);
 }
 
-.runway-profile-altitude-constraint-station-line.is-at-or-below {
+.approach-view-altitude-constraint-station-line.is-at-or-below {
   stroke: rgba(251, 191, 36, 0.26);
 }
 
-.runway-profile-altitude-constraint-station-line.is-window {
+.approach-view-altitude-constraint-station-line.is-window {
   stroke: rgba(196, 181, 253, 0.26);
 }
 
-.runway-profile-altitude-constraint-station-line.is-unknown {
+.approach-view-altitude-constraint-station-line.is-unknown {
   stroke: rgba(203, 213, 225, 0.22);
 }
 
-.runway-profile-altitude-constraint-link {
+.approach-view-altitude-constraint-link {
   stroke: rgba(190, 242, 100, 0.48);
   stroke-width: 1.4;
   stroke-dasharray: 5 4;
 }
 
-.runway-profile-altitude-constraint-link.is-at-or-above {
+.approach-view-altitude-constraint-link.is-at-or-above {
   stroke: rgba(103, 232, 249, 0.54);
 }
 
-.runway-profile-altitude-constraint-link.is-at-or-below {
+.approach-view-altitude-constraint-link.is-at-or-below {
   stroke: rgba(251, 191, 36, 0.56);
 }
 
-.runway-profile-altitude-constraint-link.is-window {
+.approach-view-altitude-constraint-link.is-window {
   stroke: rgba(196, 181, 253, 0.56);
 }
 
-.runway-profile-altitude-constraint-link.is-unknown {
+.approach-view-altitude-constraint-link.is-unknown {
   stroke: rgba(203, 213, 225, 0.48);
 }
 
-.runway-profile-altitude-constraint-label {
+.approach-view-altitude-constraint-label {
   fill: #ecfccb;
   font-family: "Inter", "Segoe UI", sans-serif;
   font-size: 10px;
@@ -1799,60 +1799,60 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   stroke-width: 3px;
 }
 
-.runway-profile-altitude-constraint-label.is-at-or-above {
+.approach-view-altitude-constraint-label.is-at-or-above {
   fill: #cffafe;
 }
 
-.runway-profile-altitude-constraint-label.is-at-or-below {
+.approach-view-altitude-constraint-label.is-at-or-below {
   fill: #fef3c7;
 }
 
-.runway-profile-altitude-constraint-label.is-window {
+.approach-view-altitude-constraint-label.is-window {
   fill: #ede9fe;
 }
 
-.runway-profile-altitude-constraint-label.is-unknown {
+.approach-view-altitude-constraint-label.is-unknown {
   fill: #e2e8f0;
 }
 
-.runway-profile-axis-label,
-.runway-profile-axis-tick,
-.runway-profile-threshold-label,
-.runway-profile-centerline-label,
-.runway-profile-flight-label,
-.runway-profile-reference-label {
+.approach-view-axis-label,
+.approach-view-axis-tick,
+.approach-view-threshold-label,
+.approach-view-centerline-label,
+.approach-view-flight-label,
+.approach-view-reference-label {
   font-family: "Inter", "Segoe UI", sans-serif;
 }
 
-.runway-profile-axis-label {
+.approach-view-axis-label {
   fill: #cbd5e1;
   font-size: 12px;
 }
 
-.runway-profile-axis-tick {
+.approach-view-axis-tick {
   fill: #94a3b8;
   font-size: 11px;
 }
 
-.runway-profile-threshold-label,
-.runway-profile-centerline-label {
+.approach-view-threshold-label,
+.approach-view-centerline-label {
   fill: #fef3c7;
   font-size: 11px;
 }
 
-.runway-profile-flight-label {
+.approach-view-flight-label {
   fill: #f8fafc;
   font-size: 11px;
   font-weight: 600;
 }
 
-.runway-profile-reference-label {
+.approach-view-reference-label {
   fill: #d1fae5;
   font-size: 10px;
 }
 
 @media (max-width: 1320px) {
-  .runway-profile-panel {
+  .approach-view-panel {
     top: 56px;
     right: 16px;
     left: calc(var(--overlay-left-width) + 24px);
@@ -1861,24 +1861,24 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 }
 
 @media (max-width: 980px) {
-  .runway-profile-panel {
+  .approach-view-panel {
     left: 16px;
     right: 16px;
     top: 150px;
     bottom: 132px;
   }
 
-  .runway-profile-plots {
+  .approach-view-plots {
     overflow: auto;
   }
 
-  .runway-profile-panel-header,
-  .runway-profile-plot header {
+  .approach-view-panel-header,
+  .approach-view-plot header {
     flex-direction: column;
     align-items: start;
   }
 
-  .runway-profile-plot p {
+  .approach-view-plot p {
     text-align: left;
   }
 }

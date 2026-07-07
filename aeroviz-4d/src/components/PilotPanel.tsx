@@ -68,7 +68,7 @@ import {
 } from "../pilot/trajectoryTargetConstraints";
 import { bareRunwayIdent } from "../utils/runwayIdent";
 import { useForcedProcedureDisplay } from "../hooks/useForcedProcedureDisplay";
-import RunwayProfileToggle from "./RunwayProfileToggle";
+import ApproachViewToggle from "./ApproachViewToggle";
 import {
   runTrajectoryOptimization,
   decomposeOptimizer,
@@ -1693,13 +1693,13 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
             <div className="pilot-initial-summary-header">
               <h4>Target State</h4>
               <div className="pilot-initial-summary-actions">
-                {/* Open the target runway's 2D approach profile (side + plan). The runway
+                {/* Open the target runway's 2D approach view (side + plan). The runway
                     is INDEPENDENT of the global selection, so the toggle focuses it — and
                     BORROWS the selection (restored on close/dock exit) so viewing the
                     target's profile can't permanently clobber the user's runway scoping.
                     Constrained solves don't borrow: useForcedProcedureDisplay already owns
-                    the runway + profile state there. */}
-                <RunwayProfileToggle
+                    the runway + approach view state there. */}
+                <ApproachViewToggle
                   runwayIdent={selectedTargetRunway?.runwayIdent ?? null}
                   borrowSelection={!optimizerParts.constrained}
                 />

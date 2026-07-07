@@ -113,6 +113,16 @@ The project serves dual purposes: thesis visualization/validation, and reusable 
 
 ## Changelog
 
+### 2026-07-07 — Rename the "Profile" feature → "Approach view" (systematic)
+
+"Profile" was ambiguous (it also names the vertical-profile GEOMETRY). The 2D approach page/toggle is now **Approach view** throughout — UI text, identifiers, files, CSS. Deliberately NOT renamed: the geometric "profile" — `runwayProfileGeometry` / `RunwayProfilePoint`, `procedureProfileProjection`, `procedureVerticalProfileOverlay`, `ProfilePlot`/`ProfileOverlay`, and the "Vertical profile" side-view mode label — those are the correct term for the altitude cross-section, a different meaning.
+
+- Files: `useRunwayTrajectoryProfile.ts`→`useApproachView.ts`, `RunwayTrajectoryProfilePanel.tsx`→`ApproachViewPanel.tsx`, `RunwayProfileToggle.tsx`→`ApproachViewToggle.tsx`, `runwayTrajectoryProfileAnalysis.ts`→`approachViewAnalysis.ts`, `profileTrajectorySources.ts`→`approachViewSources.ts` (+ their tests; `git mv` preserves history).
+- Identifiers: `isRunwayProfileOpen`→`isApproachViewOpen`, `setRunwayProfileOpen`→`setApproachViewOpen`, `runwayProfileViewMode`→`approachViewMode`, `RunwayProfileViewMode`→`ApproachViewMode`, `RunwayProfileSessionState/Context`, `RunwayProfileToggle`→`ApproachViewToggle`, `useRunwayTrajectoryProfile`→`useApproachView`, `RunwayTrajectoryProfileState`→`ApproachViewState`, `ProfileAircraftTrack/Sample/Input`→`ApproachViewTrack/Sample/Input`, `buildProfileAircraftTracks`→`buildApproachViewTracks`, `ProfileTrackRun`→`ApproachViewTrackRun`, `planProfileTrajectorySources`→`planApproachViewSources`, etc.
+- UI text: "Approach profile"→"Approach view"; toggle label "Profile"/"Hide profile"→"View"/"Hide view"; tooltips/hint/aria-labels updated.
+- CSS: `.runway-profile-*`→`.approach-view-*`, `.control-panel-profile*`→`.control-panel-approach-view*`, `.procedure-runway-profile-button`→`.approach-view-toggle-button`.
+- **447 frontend tests (74 files) + tsc + vite build clean.** Residue check confirms only the geometric `runwayProfileGeometry`/`RunwayProfilePoint` refs remain. NOTE: verified via tests/tsc/build; not re-checked in-browser.
+
 ### 2026-07-07 — Runway profile performance: cache each track's classification (was re-sampled every clock tick)
 
 The profile lagged badly with many trajectories: the `aircraftTracks` memo depends on `currentTime`, so every ~120ms tick it re-sampled AND re-classified every entity's whole track (getValue + projection + a protection-surface/segment classification per point) — O(live aircraft × track length) × ~8/s — even though the track geometry never changes, only the current-position marker moves.

@@ -1,26 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import type { RunwayTrajectoryProfileState } from "../../hooks/useRunwayTrajectoryProfile";
-import RunwayTrajectoryProfilePanel from "../RunwayTrajectoryProfilePanel";
+import type { ApproachViewState } from "../../hooks/useApproachView";
+import ApproachViewPanel from "../ApproachViewPanel";
 
 const appMock = vi.hoisted(() => ({
-  runwayProfileViewMode: "side-xz" as "side-xz" | "top-xy",
+  approachViewMode: "side-xz" as "side-xz" | "top-xy",
   procedureDisplayLevel: "PROTECTION" as "CORE" | "PROTECTION" | "ESTIMATED" | "DEBUG",
 }));
 
-const profileMock = vi.hoisted(() => ({
-  state: null as RunwayTrajectoryProfileState | null,
+const approachViewMock = vi.hoisted(() => ({
+  state: null as ApproachViewState | null,
 }));
 
 vi.mock("../../context/AppContext", () => ({
   useApp: () => ({
     activeAirportCode: "KRDU",
-    isRunwayProfileOpen: true,
+    isApproachViewOpen: true,
     // The profile's runway is the global Landing-Runway selection (bare "23R" → "RW23R").
     selectedRunway: "23R",
-    runwayProfileViewMode: appMock.runwayProfileViewMode,
-    setRunwayProfileOpen: vi.fn(),
-    setRunwayProfileViewMode: vi.fn(),
+    approachViewMode: appMock.approachViewMode,
+    setApproachViewOpen: vi.fn(),
+    setApproachViewMode: vi.fn(),
     trajectoryDataSource: null,
     optimizedTrajectoryDataSource: null,
     procedureDisplayLevel: appMock.procedureDisplayLevel,
@@ -165,9 +165,9 @@ const assessedFinalRoute = {
 };
 
 function makeProfileState(
-  plateRoutes: RunwayTrajectoryProfileState["plateRoutes"],
-  aircraftTracks: RunwayTrajectoryProfileState["aircraftTracks"] = [],
-): RunwayTrajectoryProfileState {
+  plateRoutes: ApproachViewState["plateRoutes"],
+  aircraftTracks: ApproachViewState["aircraftTracks"] = [],
+): ApproachViewState {
   return {
     isLoading: false,
     error: null,
@@ -188,8 +188,8 @@ function makeProfileState(
 }
 
 function makeAircraftTrack(
-  overrides: Partial<RunwayTrajectoryProfileState["aircraftTracks"][number]["current"]> = {},
-): RunwayTrajectoryProfileState["aircraftTracks"][number] {
+  overrides: Partial<ApproachViewState["aircraftTracks"][number]["current"]> = {},
+): ApproachViewState["aircraftTracks"][number] {
   const current = {
     xM: 20_000,
     yM: 185.2,
@@ -219,28 +219,28 @@ function makeAircraftTrack(
   };
 }
 
-vi.mock("../../hooks/useRunwayTrajectoryProfile", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../hooks/useRunwayTrajectoryProfile")>();
+vi.mock("../../hooks/useApproachView", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../hooks/useApproachView")>();
   return {
     ...actual,
-    useRunwayTrajectoryProfile: () => profileMock.state,
+    useApproachView: () => approachViewMock.state,
   };
 });
 
-describe("RunwayTrajectoryProfilePanel", () => {
+describe("ApproachViewPanel", () => {
   beforeEach(() => {
-    appMock.runwayProfileViewMode = "side-xz";
+    appMock.approachViewMode = "side-xz";
     appMock.procedureDisplayLevel = "PROTECTION";
-    profileMock.state = makeProfileState([closeXRoute]);
+    approachViewMock.state = makeProfileState([closeXRoute]);
   });
 
   it("draws every side-view route fix even when nearby labels are de-conflicted", () => {
-    const { container } = render(<RunwayTrajectoryProfilePanel />);
+    const { container } = render(<ApproachViewPanel />);
 
     const routePointCount = closeXRoute.points.length;
     const thresholdCount = 1;
-    const referencePoints = container.querySelectorAll(".runway-profile-reference-point");
-    const referenceLabels = container.querySelectorAll(".runway-profile-reference-label");
+    const referencePoints = container.querySelectorAll(".approach-view-reference-point");
+    const referenceLabels = container.querySelectorAll(".approach-view-reference-label");
 
     expect(referencePoints).toHaveLength(routePointCount + thresholdCount);
     expect(referenceLabels.length).toBeLessThan(referencePoints.length);
@@ -249,34 +249,34 @@ describe("RunwayTrajectoryProfilePanel", () => {
   });
 
   it("marks source altitude constraints in the vertical profile", () => {
-    const { container } = render(<RunwayTrajectoryProfilePanel />);
+    const { container } = render(<ApproachViewPanel />);
 
-    expect(container.querySelectorAll(".runway-profile-altitude-constraint-point")).toHaveLength(2);
-    expect(container.querySelectorAll(".runway-profile-altitude-constraint-station-line")).toHaveLength(2);
-    expect(container.querySelectorAll(".runway-profile-altitude-constraint-link")).toHaveLength(2);
-    expect(container.querySelectorAll(".runway-profile-altitude-constraint-point.is-at-or-above")).toHaveLength(1);
-    expect(container.querySelectorAll(".runway-profile-altitude-constraint-point.is-at-or-below")).toHaveLength(1);
+    expect(container.querySelectorAll(".approach-view-altitude-constraint-point")).toHaveLength(2);
+    expect(container.querySelectorAll(".approach-view-altitude-constraint-station-line")).toHaveLength(2);
+    expect(container.querySelectorAll(".approach-view-altitude-constraint-link")).toHaveLength(2);
+    expect(container.querySelectorAll(".approach-view-altitude-constraint-point.is-at-or-above")).toHaveLength(1);
+    expect(container.querySelectorAll(".approach-view-altitude-constraint-point.is-at-or-below")).toHaveLength(1);
     expect(container.textContent).toContain("BUTTS >= 5,200 ft");
     expect(container.textContent).toContain("DABKE <= 3,900 ft");
     expect(container.textContent).not.toContain("WARMS 1,500 ft");
   });
 
   it("removes side-view route fix dots when the active route set changes", () => {
-    const { container, rerender } = render(<RunwayTrajectoryProfilePanel />);
+    const { container, rerender } = render(<ApproachViewPanel />);
 
     expect(container.querySelectorAll('[data-fix-ident="WARMS"]')).toHaveLength(1);
 
-    profileMock.state = makeProfileState([shorterRoute]);
-    rerender(<RunwayTrajectoryProfilePanel />);
+    approachViewMock.state = makeProfileState([shorterRoute]);
+    rerender(<ApproachViewPanel />);
 
     expect(container.querySelectorAll('[data-fix-ident="WARMS"]')).toHaveLength(0);
     expect(container.querySelectorAll('[data-fix-ident="DABKE"]')).toHaveLength(1);
   });
 
   it("draws every top-view route fix even when nearby labels are de-conflicted", () => {
-    appMock.runwayProfileViewMode = "top-xy";
+    appMock.approachViewMode = "top-xy";
 
-    const { container } = render(<RunwayTrajectoryProfilePanel />);
+    const { container } = render(<ApproachViewPanel />);
 
     expect(container.querySelectorAll('[data-fix-ident="BUTTS"]')).toHaveLength(1);
     expect(container.querySelectorAll('[data-fix-ident="WARMS"]')).toHaveLength(1);
@@ -285,59 +285,59 @@ describe("RunwayTrajectoryProfilePanel", () => {
   });
 
   it("gates profile protection geometry by procedure display level", () => {
-    appMock.runwayProfileViewMode = "top-xy";
+    appMock.approachViewMode = "top-xy";
     appMock.procedureDisplayLevel = "CORE";
-    const { container, rerender } = render(<RunwayTrajectoryProfilePanel />);
+    const { container, rerender } = render(<ApproachViewPanel />);
 
-    expect(container.querySelectorAll(".runway-profile-route-band")).toHaveLength(0);
+    expect(container.querySelectorAll(".approach-view-route-band")).toHaveLength(0);
 
     appMock.procedureDisplayLevel = "PROTECTION";
-    rerender(<RunwayTrajectoryProfilePanel />);
+    rerender(<ApproachViewPanel />);
 
-    expect(container.querySelectorAll(".runway-profile-route-band")).toHaveLength(1);
-    expect(container.querySelector("clipPath#runway-profile-plot-clip-top")).toBeTruthy();
+    expect(container.querySelectorAll(".approach-view-route-band")).toHaveLength(1);
+    expect(container.querySelector("clipPath#approach-view-plot-clip-top")).toBeTruthy();
     expect(
-      container.querySelector(".runway-profile-route-band")?.getAttribute("clip-path"),
-    ).toBe("url(#runway-profile-plot-clip-top)");
+      container.querySelector(".approach-view-route-band")?.getAttribute("clip-path"),
+    ).toBe("url(#approach-view-plot-clip-top)");
   });
 
   it("gates profile vertical references and segment debug labels by procedure display level", () => {
-    profileMock.state = makeProfileState([assessedRoute]);
+    approachViewMock.state = makeProfileState([assessedRoute]);
     appMock.procedureDisplayLevel = "PROTECTION";
-    const { container, rerender } = render(<RunwayTrajectoryProfilePanel />);
+    const { container, rerender } = render(<ApproachViewPanel />);
 
-    expect(container.querySelectorAll(".runway-profile-final-vertical-reference-line")).toHaveLength(0);
-    expect(container.querySelectorAll(".runway-profile-lnav-vnav-ocs-line")).toHaveLength(0);
-    expect(container.querySelectorAll(".runway-profile-segment-debug-label")).toHaveLength(0);
+    expect(container.querySelectorAll(".approach-view-final-vertical-reference-line")).toHaveLength(0);
+    expect(container.querySelectorAll(".approach-view-lnav-vnav-ocs-line")).toHaveLength(0);
+    expect(container.querySelectorAll(".approach-view-segment-debug-label")).toHaveLength(0);
 
     appMock.procedureDisplayLevel = "ESTIMATED";
-    rerender(<RunwayTrajectoryProfilePanel />);
+    rerender(<ApproachViewPanel />);
 
-    expect(container.querySelectorAll(".runway-profile-final-vertical-reference-line")).toHaveLength(1);
-    expect(container.querySelectorAll(".runway-profile-lnav-vnav-ocs-line")).toHaveLength(1);
+    expect(container.querySelectorAll(".approach-view-final-vertical-reference-line")).toHaveLength(1);
+    expect(container.querySelectorAll(".approach-view-lnav-vnav-ocs-line")).toHaveLength(1);
     expect(container.textContent).toContain("GPA 3.0 deg");
-    expect(container.querySelectorAll(".runway-profile-segment-debug-label")).toHaveLength(0);
+    expect(container.querySelectorAll(".approach-view-segment-debug-label")).toHaveLength(0);
 
     appMock.procedureDisplayLevel = "DEBUG";
-    rerender(<RunwayTrajectoryProfilePanel />);
+    rerender(<ApproachViewPanel />);
 
-    expect(container.querySelectorAll(".runway-profile-final-vertical-reference-line")).toHaveLength(1);
-    expect(container.querySelectorAll(".runway-profile-segment-debug-label")).toHaveLength(1);
+    expect(container.querySelectorAll(".approach-view-final-vertical-reference-line")).toHaveLength(1);
+    expect(container.querySelectorAll(".approach-view-segment-debug-label")).toHaveLength(1);
   });
 
   it("keeps final-route GPA visible in vertical profile when transitions are active", () => {
     appMock.procedureDisplayLevel = "ESTIMATED";
-    profileMock.state = makeProfileState([closeXRoute, assessedFinalRoute]);
+    approachViewMock.state = makeProfileState([closeXRoute, assessedFinalRoute]);
 
-    const { container } = render(<RunwayTrajectoryProfilePanel />);
+    const { container } = render(<ApproachViewPanel />);
 
     expect(container.querySelectorAll('[data-route-id="KRDU-R23RY-ABUTTS"]')).toHaveLength(4);
-    expect(container.querySelectorAll(".runway-profile-final-vertical-reference-line")).toHaveLength(1);
+    expect(container.querySelectorAll(".approach-view-final-vertical-reference-line")).toHaveLength(1);
     expect(container.textContent).toContain("GPA 3.0 deg");
   });
 
   it("switches profile distance axes from nautical miles to metres", () => {
-    const { container } = render(<RunwayTrajectoryProfilePanel />);
+    const { container } = render(<ApproachViewPanel />);
 
     expect(container.textContent).toContain("x: approach distance from threshold (NM)");
 
@@ -348,38 +348,38 @@ describe("RunwayTrajectoryProfilePanel", () => {
   });
 
   it("grows the plot domain to fit an aircraft track beyond the procedure frame (so it is not clipped)", () => {
-    const { container, rerender } = render(<RunwayTrajectoryProfilePanel />);
+    const { container, rerender } = render(<ApproachViewPanel />);
 
     const procedureOnlyThresholdX = container
-      .querySelector(".runway-profile-threshold-line")
+      .querySelector(".approach-view-threshold-line")
       ?.getAttribute("x1");
-    expect(container.querySelectorAll(".runway-profile-summary span")).toHaveLength(3);
-    expect(container.querySelector(".runway-profile-status")?.textContent).toContain(
+    expect(container.querySelectorAll(".approach-view-summary span")).toHaveLength(3);
+    expect(container.querySelector(".approach-view-status")?.textContent).toContain(
       "No aircraft are inside",
     );
 
     // A track running far beyond the procedure extent must EXPAND the domain to include it —
     // otherwise the whole out-of-corridor stretch this view exists to show is clipped away.
-    profileMock.state = makeProfileState(
+    approachViewMock.state = makeProfileState(
       [closeXRoute],
       [makeAircraftTrack({ xM: 80_000, yM: 0, zM: 15_000 })],
     );
-    rerender(<RunwayTrajectoryProfilePanel />);
+    rerender(<ApproachViewPanel />);
 
-    expect(container.querySelectorAll(".runway-profile-summary span")).toHaveLength(3);
-    expect(container.querySelector(".runway-profile-status")?.textContent).toContain("AAL123:");
+    expect(container.querySelectorAll(".approach-view-summary span")).toHaveLength(3);
+    expect(container.querySelector(".approach-view-status")?.textContent).toContain("AAL123:");
     // The domain grew (the x=0 threshold line projects to a new position), so the far track fits.
-    expect(container.querySelector(".runway-profile-threshold-line")?.getAttribute("x1")).not.toBe(
+    expect(container.querySelector(".approach-view-threshold-line")?.getAttribute("x1")).not.toBe(
       procedureOnlyThresholdX,
     );
-    expect(container.querySelector('path[clip-path="url(#runway-profile-plot-clip-side)"]')).toBeTruthy();
-    expect(container.querySelector('circle[clip-path="url(#runway-profile-plot-clip-side)"]')).toBeTruthy();
+    expect(container.querySelector('path[clip-path="url(#approach-view-plot-clip-side)"]')).toBeTruthy();
+    expect(container.querySelector('circle[clip-path="url(#approach-view-plot-clip-side)"]')).toBeTruthy();
   });
 
   it("shows segment assessment for the selected aircraft", () => {
-    profileMock.state = makeProfileState([closeXRoute], [makeAircraftTrack()]);
+    approachViewMock.state = makeProfileState([closeXRoute], [makeAircraftTrack()]);
 
-    render(<RunwayTrajectoryProfilePanel />);
+    render(<ApproachViewPanel />);
 
     expect(screen.getByText(/AAL123:/).textContent).toContain(
       "branch:ABUTTS:profile-segment:2",

@@ -16,8 +16,8 @@ const {
   setProcedureBranchVisible,
   setProcedureBranchesVisible,
   getProcedureVisibility,
-  setRunwayProfileOpen,
-  getRunwayProfileOpen,
+  setApproachViewOpen,
+  getApproachViewOpen,
   setProcedureAnnotationEnabled,
   setProcedureWidthMeasurementEnabled,
   setProcedureDisplayLevel,
@@ -27,7 +27,7 @@ const {
   resetProcedureVisibility,
 } = vi.hoisted(() => {
   let procedureVisibility: Record<string, boolean> = {};
-  let isRunwayProfileOpen = false;
+  let isApproachViewOpen = false;
   let procedureDisplayLevel = "PROTECTION";
   let selectedRunway: string | null = null;
   return {
@@ -48,8 +48,8 @@ const {
       });
       procedureVisibility = next;
     }),
-    setRunwayProfileOpen: vi.fn((open: boolean) => {
-      isRunwayProfileOpen = open;
+    setApproachViewOpen: vi.fn((open: boolean) => {
+      isApproachViewOpen = open;
     }),
     setProcedureAnnotationEnabled: vi.fn(),
     setProcedureWidthMeasurementEnabled: vi.fn(),
@@ -63,7 +63,7 @@ const {
       procedureDisplayLevel = "PROTECTION";
       selectedRunway = null;
     },
-    getRunwayProfileOpen: () => isRunwayProfileOpen,
+    getApproachViewOpen: () => isApproachViewOpen,
   };
 });
 
@@ -77,8 +77,8 @@ vi.mock("../../context/AppContext", () => ({
     procedureVisibility: getProcedureVisibility(),
     setProcedureBranchVisible,
     setProcedureBranchesVisible,
-    isRunwayProfileOpen: getRunwayProfileOpen(),
-    setRunwayProfileOpen,
+    isApproachViewOpen: getApproachViewOpen(),
+    setApproachViewOpen,
     procedureAnnotationEnabled: false,
     setProcedureAnnotationEnabled,
     procedureWidthMeasurementEnabled: false,
@@ -291,7 +291,7 @@ describe("ProcedurePanel", () => {
     setProcedureBranchVisible.mockClear();
     setProcedureBranchesVisible.mockClear();
     setSelectedRunway.mockClear();
-    setRunwayProfileOpen.mockClear();
+    setApproachViewOpen.mockClear();
     setProcedureAnnotationEnabled.mockClear();
     setProcedureWidthMeasurementEnabled.mockClear();
     setProcedureDisplayLevel.mockClear();
@@ -380,17 +380,17 @@ describe("ProcedurePanel", () => {
     );
   });
 
-  it("focuses the global runway and opens the profile for a runway group", async () => {
+  it("focuses the global runway and opens the approach view for a runway group", async () => {
     render(<ProcedurePanel />);
     await waitFor(() => expect(screen.getByText("RW05L")).toBeTruthy());
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Profile" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "View" })[0]);
 
     // The profile uses the global Landing-Runway selection (bare spelling), so opening
     // RW05L's profile sets selectedRunway to "05L" — one source of truth, not a separate
     // profile-runway state.
     expect(setSelectedRunway).toHaveBeenCalledWith("05L");
-    expect(setRunwayProfileOpen).toHaveBeenCalledWith(true);
+    expect(setApproachViewOpen).toHaveBeenCalledWith(true);
   });
 
   it("toggles the RNAV procedures layer from the panel's master switch", async () => {

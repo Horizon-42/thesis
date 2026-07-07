@@ -1,17 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/react";
 
-const { appState, setSelectedRunway, setProceduresOpen, toggleLayer, setRunwayProfileOpen } = vi.hoisted(() => ({
+const { appState, setSelectedRunway, setProceduresOpen, toggleLayer, setApproachViewOpen } = vi.hoisted(() => ({
   appState: {
     selectedRunway: null as string | null,
     proceduresOpen: false as boolean,
     layers: { procedures: false } as Record<string, boolean>,
-    isRunwayProfileOpen: false as boolean,
+    isApproachViewOpen: false as boolean,
   },
   setSelectedRunway: vi.fn(),
   setProceduresOpen: vi.fn(),
   toggleLayer: vi.fn(),
-  setRunwayProfileOpen: vi.fn(),
+  setApproachViewOpen: vi.fn(),
 }));
 
 vi.mock("../../context/AppContext", () => ({
@@ -22,8 +22,8 @@ vi.mock("../../context/AppContext", () => ({
     setProceduresOpen,
     layers: appState.layers,
     toggleLayer,
-    isRunwayProfileOpen: appState.isRunwayProfileOpen,
-    setRunwayProfileOpen,
+    isApproachViewOpen: appState.isApproachViewOpen,
+    setApproachViewOpen,
   }),
 }));
 
@@ -39,7 +39,7 @@ describe("useForcedProcedureDisplay", () => {
     appState.selectedRunway = null;
     appState.proceduresOpen = false;
     appState.layers = { procedures: false };
-    appState.isRunwayProfileOpen = false;
+    appState.isApproachViewOpen = false;
     vi.clearAllMocks();
   });
 
@@ -56,18 +56,18 @@ describe("useForcedProcedureDisplay", () => {
     appState.selectedRunway = "05L";
     appState.proceduresOpen = true;
     appState.layers = { procedures: true };
-    appState.isRunwayProfileOpen = true;
+    appState.isApproachViewOpen = true;
     vi.clearAllMocks();
 
     rerender(<Harness active={false} forceRunway="05L" />);
 
     // Restore to the pre-force snapshot (runway null, panel closed, layer back off) —
-    // including the profile page keyed on the owned runway (closed at save time), so it
+    // including the approach view keyed on the owned runway (closed at save time), so it
     // can't silently retarget to (or blank on) the restored runway.
     expect(setSelectedRunway).toHaveBeenCalledWith(null);
     expect(setProceduresOpen).toHaveBeenCalledWith(false);
     expect(toggleLayer).toHaveBeenCalledWith("procedures");
-    expect(setRunwayProfileOpen).toHaveBeenCalledWith(false);
+    expect(setApproachViewOpen).toHaveBeenCalledWith(false);
   });
 
   it("restores on unmount", () => {
@@ -83,16 +83,16 @@ describe("useForcedProcedureDisplay", () => {
     expect(setSelectedRunway).toHaveBeenCalledWith(null);
   });
 
-  it("NEVER touches selectedRunway (nor the profile) when forceRunway is null (Observe)", () => {
+  it("NEVER touches selectedRunway (nor the approach view) when forceRunway is null (Observe)", () => {
     appState.selectedRunway = "05L"; // the user-owned global selection
-    appState.isRunwayProfileOpen = true; // a user-opened profile — also user-owned here
+    appState.isApproachViewOpen = true; // a user-opened profile — also user-owned here
     const { rerender } = render(<Harness active forceRunway={null} />);
 
     // Only the panel + layer are driven; the runway and profile are left entirely alone.
     expect(setProceduresOpen).toHaveBeenCalledWith(true);
     expect(toggleLayer).toHaveBeenCalledWith("procedures");
     expect(setSelectedRunway).not.toHaveBeenCalled();
-    expect(setRunwayProfileOpen).not.toHaveBeenCalled();
+    expect(setApproachViewOpen).not.toHaveBeenCalled();
 
     appState.proceduresOpen = true;
     appState.layers = { procedures: true };
@@ -104,7 +104,7 @@ describe("useForcedProcedureDisplay", () => {
     // it can't revert the user's top-bar selection (or close their profile) on exit.
     expect(setProceduresOpen).toHaveBeenCalledWith(false);
     expect(setSelectedRunway).not.toHaveBeenCalled();
-    expect(setRunwayProfileOpen).not.toHaveBeenCalled();
+    expect(setApproachViewOpen).not.toHaveBeenCalled();
   });
 
   it("does not force anything while inactive", () => {

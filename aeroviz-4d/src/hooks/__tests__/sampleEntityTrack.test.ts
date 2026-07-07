@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as Cesium from "cesium";
-import { sampleEntityTrack } from "../useRunwayTrajectoryProfile";
+import { sampleEntityTrack } from "../useApproachView";
 import type { RunwayFrame } from "../../utils/runwayProfileGeometry";
 
 // A runway frame at KRDU-ish coordinates; the projection only needs a valid frame — the test
@@ -80,7 +80,7 @@ describe("sampleEntityTrack", () => {
     const early = sampleEntityTrack(heldTrackEntity(200), at(40), FRAME)!;
     const late = sampleEntityTrack(heldTrackEntity(200), at(160), FRAME)!;
     expect(early.trail[0].timeIso).toBe(late.trail[0].timeIso); // same start
-    expect(early.trail.at(-1)!.timeIso).toBe(late.trail.at(-1)!.timeIso); // same end
+    expect(early.trail[early.trail.length - 1].timeIso).toBe(late.trail[late.trail.length - 1].timeIso);
     expect(early.trail.length).toBe(late.trail.length);
   });
 });

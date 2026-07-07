@@ -11,16 +11,16 @@ import type {
   RunwayProfilePoint,
 } from "../utils/runwayProfileGeometry";
 
-export interface ProfileAircraftSample extends RunwayProfilePoint {
+export interface ApproachViewSample extends RunwayProfilePoint {
   timeIso: string;
   segmentAssessment: HorizontalPlateSegmentAssessment;
 }
 
-export interface ProfileAircraftTrack {
+export interface ApproachViewTrack {
   flightId: string;
   color: string;
-  current: ProfileAircraftSample;
-  trail: ProfileAircraftSample[];
+  current: ApproachViewSample;
+  trail: ApproachViewSample[];
   isSelected: boolean;
 }
 
@@ -29,7 +29,7 @@ export interface SampledRunwayPoint extends RunwayProfilePoint {
   timeIso: string;
 }
 
-export interface ProfileAircraftInput {
+export interface ApproachViewInput {
   flightId: string;
   /** The current-time sample. Non-null: the sampler drops entities not live now (returns
    *  null for them), so an input always has a current point. */
@@ -78,10 +78,10 @@ function classifyProfilePoint(
   );
 }
 
-function profileAircraftSample(
+function toApproachViewSample(
   point: SampledRunwayPoint,
   segmentAssessment: HorizontalPlateSegmentAssessment,
-): ProfileAircraftSample {
+): ApproachViewSample {
   const { geoPosition: _geoPosition, ...profilePoint } = point;
   return {
     ...profilePoint,
@@ -90,13 +90,13 @@ function profileAircraftSample(
 }
 
 /** Classify one sampled point against the active procedure, or null if unclassifiable. */
-export function classifyProfileSample(
+export function classifyApproachViewSample(
   point: SampledRunwayPoint,
   activePlateRoutes: HorizontalPlateRoute[],
   runwayFrame: RunwayFrame,
-): ProfileAircraftSample | null {
+): ApproachViewSample | null {
   const assessment = classifyProfilePoint(point, activePlateRoutes, runwayFrame);
-  return assessment ? profileAircraftSample(point, assessment) : null;
+  return assessment ? toApproachViewSample(point, assessment) : null;
 }
 
 /** Classify a whole track's samples (drops any unclassifiable). This is the expensive,
@@ -106,10 +106,10 @@ export function classifyTrackSamples(
   points: SampledRunwayPoint[],
   activePlateRoutes: HorizontalPlateRoute[],
   runwayFrame: RunwayFrame,
-): ProfileAircraftSample[] {
+): ApproachViewSample[] {
   return points
-    .map((point) => classifyProfileSample(point, activePlateRoutes, runwayFrame))
-    .filter((sample): sample is ProfileAircraftSample => sample !== null);
+    .map((point) => classifyApproachViewSample(point, activePlateRoutes, runwayFrame))
+    .filter((sample): sample is ApproachViewSample => sample !== null);
 }
 
 /**
@@ -118,12 +118,12 @@ export function classifyTrackSamples(
  * the aircraft that do fly it. A min-time solve that cuts the corner is out-of-corridor until
  * it joins the final approach; plotting only the in-corridor points left just that segment.
  */
-export function trackEngagesProcedure(trail: ProfileAircraftSample[]): boolean {
+export function trackEngagesProcedure(trail: ApproachViewSample[]): boolean {
   return trail.some((sample) => sample.segmentAssessment.containment === "PRIMARY");
 }
 
 /** Selected track first, then by flight id — the panel's stable draw/list order. */
-export function sortProfileTracksBySelection(tracks: ProfileAircraftTrack[]): ProfileAircraftTrack[] {
+export function sortApproachViewTracksBySelection(tracks: ApproachViewTrack[]): ApproachViewTrack[] {
   return [...tracks].sort((left, right) => {
     if (left.isSelected === right.isSelected) {
       return left.flightId.localeCompare(right.flightId);
@@ -134,20 +134,20 @@ export function sortProfileTracksBySelection(tracks: ProfileAircraftTrack[]): Pr
 
 /**
  * Convert sampled Cesium trajectory points into runway profile tracks (the batch form used in
- * tests; the hook assembles incrementally with a per-entity cache — see useRunwayTrajectoryProfile).
+ * tests; the hook assembles incrementally with a per-entity cache — see useApproachView).
  */
-export function buildProfileAircraftTracks(args: {
-  aircraft: ProfileAircraftInput[];
+export function buildApproachViewTracks(args: {
+  aircraft: ApproachViewInput[];
   activePlateRoutes: HorizontalPlateRoute[];
   runwayFrame: RunwayFrame;
   selectedFlightId: string | null;
-}): ProfileAircraftTrack[] {
+}): ApproachViewTrack[] {
   const { aircraft, activePlateRoutes, runwayFrame, selectedFlightId } = args;
   if (activePlateRoutes.length === 0) return [];
 
   const tracks = aircraft
-    .map((input): ProfileAircraftTrack | null => {
-      const current = classifyProfileSample(input.current, activePlateRoutes, runwayFrame);
+    .map((input): ApproachViewTrack | null => {
+      const current = classifyApproachViewSample(input.current, activePlateRoutes, runwayFrame);
       if (!current) return null;
       const trail = classifyTrackSamples(input.trail, activePlateRoutes, runwayFrame);
       // Engages if the trail OR the current point reaches the primary corridor (current is not
@@ -163,16 +163,16 @@ export function buildProfileAircraftTracks(args: {
         isSelected: input.flightId === selectedFlightId,
       };
     })
-    .filter((track): track is ProfileAircraftTrack => track !== null);
-  return sortProfileTracksBySelection(tracks);
+    .filter((track): track is ApproachViewTrack => track !== null);
+  return sortApproachViewTracksBySelection(tracks);
 }
 
-export interface ProfileTrackRun {
+export interface ApproachViewTrackRun {
   /** The containment tier of this stretch. PRIMARY and SECONDARY are both CONTAINED (the
    *  panel draws them solid, primary brighter); only OUTSIDE is drawn dashed/dimmed — so a
    *  secondary-protection stretch never reads as an out-of-corridor breach. */
   containment: HorizontalPlateContainment;
-  points: ProfileAircraftSample[];
+  points: ApproachViewSample[];
 }
 
 /**
@@ -180,13 +180,13 @@ export interface ProfileTrackRun {
  * can draw each stretch in its own style. Consecutive runs share their boundary point, so the
  * rendered polyline has no gap where the track crosses a containment edge.
  */
-export function splitTrackByContainment(trail: ProfileAircraftSample[]): ProfileTrackRun[] {
-  const runs: ProfileTrackRun[] = [];
+export function splitTrackByContainment(trail: ApproachViewSample[]): ApproachViewTrackRun[] {
+  const runs: ApproachViewTrackRun[] = [];
   for (let index = 0; index < trail.length; index += 1) {
     const containment = trail[index].segmentAssessment.containment;
     const lastRun = runs[runs.length - 1];
     if (!lastRun || lastRun.containment !== containment) {
-      const points: ProfileAircraftSample[] = [];
+      const points: ApproachViewSample[] = [];
       if (lastRun) points.push(trail[index - 1]); // bridge the two runs — no visual gap
       runs.push({ containment, points });
     }

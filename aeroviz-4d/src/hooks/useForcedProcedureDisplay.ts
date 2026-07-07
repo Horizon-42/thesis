@@ -13,11 +13,11 @@
  * The optimize-vs-observe asymmetry is captured in the single nullable `forceRunway`:
  *   • Optimize passes the target runway (INDEPENDENT of the global selection) → the hook
  *     OWNS selectedRunway: it saves, forces, and restores it. Owning the runway also
- *     means owning the 2D profile page keyed on it (isRunwayProfileOpen): reverting the
+ *     means owning the 2D approach view keyed on it (isApproachViewOpen): reverting the
  *     runway under an open profile would silently retarget (or blank) that page, so the
  *     profile open-state is saved and restored together with the runway.
  *   • Observe passes `null` (the scoped runway IS the user-owned global selectedRunway)
- *     → the hook never reads or writes selectedRunway or the profile state, so it can
+ *     → the hook never reads or writes selectedRunway or the approach view state, so it can
  *     neither fight the user changing the top-bar runway nor revert it on exit; only the
  *     panel + layer are driven.
  *
@@ -55,11 +55,11 @@ interface DisplaySnapshot {
   proceduresOpen: boolean;
   layerOn: boolean;
   selectedRunway: string | null;
-  runwayProfileOpen: boolean;
+  approachViewOpen: boolean;
 }
 
 interface SavedDisplay extends DisplaySnapshot {
-  /** Whether this snapshot owns selectedRunway (and the profile page keyed on it) — baked
+  /** Whether this snapshot owns selectedRunway (and the approach view keyed on it) — baked
    *  in at save time so restore stays correct if `forceRunway` flips to null while active
    *  (the hook DID force the runway; a live read would skip the restore and leak it). */
   ownsRunway: boolean;
@@ -73,8 +73,8 @@ export function useForcedProcedureDisplay({ active, forceRunway }: ForcedProcedu
     setProceduresOpen,
     layers,
     toggleLayer,
-    isRunwayProfileOpen,
-    setRunwayProfileOpen,
+    isApproachViewOpen,
+    setApproachViewOpen,
   } = useApp();
 
   // Live snapshot of the display, read (not depended on) when saving/restoring — a mid-force
@@ -84,7 +84,7 @@ export function useForcedProcedureDisplay({ active, forceRunway }: ForcedProcedu
     proceduresOpen,
     layerOn: layers.procedures,
     selectedRunway,
-    runwayProfileOpen: isRunwayProfileOpen,
+    approachViewOpen: isApproachViewOpen,
   };
   const liveRef = useRef(snapshot);
   liveRef.current = snapshot;
@@ -100,7 +100,7 @@ export function useForcedProcedureDisplay({ active, forceRunway }: ForcedProcedu
     savedRef.current = null;
     if (saved.ownsRunway) {
       setSelectedRunway(saved.selectedRunway);
-      setRunwayProfileOpen(saved.runwayProfileOpen);
+      setApproachViewOpen(saved.approachViewOpen);
     }
     setProceduresOpen(saved.proceduresOpen);
     if (liveRef.current.layerOn !== saved.layerOn) toggleLayer("procedures");

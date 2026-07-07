@@ -9,7 +9,7 @@ const {
   setActiveAirportCode,
   setSelectedRunway,
   setProceduresOpen,
-  setRunwayProfileOpen,
+  setApproachViewOpen,
   setTrajectoryComparison,
   setTrajectoryComparisonCategory,
   setTrajectoryComparisonKind,
@@ -57,7 +57,7 @@ const {
     activeAirportCode: "KRDU",
     selectedRunway: null as string | null,
     proceduresOpen: false,
-    isRunwayProfileOpen: false,
+    isApproachViewOpen: false,
     trajectoryComparison: false,
     trajectoryComparisonCategory: null as string | null,
     trajectoryComparisonKinds: { reference: true, optimizer: true, simulator: true },
@@ -73,7 +73,7 @@ const {
       appState.activeAirportCode = "KRDU";
       appState.selectedRunway = null;
       appState.proceduresOpen = false;
-      appState.isRunwayProfileOpen = false;
+      appState.isApproachViewOpen = false;
       appState.trajectoryComparison = false;
       appState.trajectoryComparisonCategory = null;
       appState.comparisonCategories = [];
@@ -83,7 +83,7 @@ const {
     setActiveAirportCode: vi.fn(),
     setSelectedRunway: vi.fn(),
     setProceduresOpen: vi.fn(),
-    setRunwayProfileOpen: vi.fn(),
+    setApproachViewOpen: vi.fn(),
     setTrajectoryComparison: vi.fn(),
     setTrajectoryComparisonCategory: vi.fn(),
     setTrajectoryComparisonKind: vi.fn(),
@@ -101,7 +101,7 @@ vi.mock("../../context/AppContext", () => ({
     setActiveAirportCode,
     setSelectedRunway,
     setProceduresOpen,
-    setRunwayProfileOpen,
+    setApproachViewOpen,
     setTrajectoryComparison,
     setTrajectoryComparisonCategory,
     setTrajectoryComparisonKind,
@@ -194,28 +194,28 @@ describe("ControlPanel", () => {
     expect(setProceduresOpen).not.toHaveBeenCalledWith(true);
   });
 
-  // ── Approach-profile toggle (Feature B) ──────────────────────────────────────
-  it("disables the profile toggle and shows a hint when no landing runway is selected", () => {
+  // ── Approach-approach-view toggle (Feature B) ──────────────────────────────────────
+  it("disables the approach-view toggle and shows a hint when no landing runway is selected", () => {
     appState.selectedRunway = null;
     const { container } = render(<ControlPanel />);
-    const button = screen.getByRole("button", { name: "Profile" }) as HTMLButtonElement;
+    const button = screen.getByRole("button", { name: "View" }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
     // A VISIBLE hint (not just the hover tooltip) explains why clicking does nothing.
-    expect(container.querySelector(".control-panel-profile-hint")?.textContent).toContain(
+    expect(container.querySelector(".control-panel-approach-view-hint")?.textContent).toContain(
       "No landing runway selected",
     );
   });
 
-  it("opens the approach profile for the selected runway, with no hint", () => {
+  it("opens the approach view for the selected runway, with no hint", () => {
     appState.selectedRunway = "05L";
     const { container } = render(<ControlPanel />);
-    const button = screen.getByRole("button", { name: "Profile" }) as HTMLButtonElement;
+    const button = screen.getByRole("button", { name: "View" }) as HTMLButtonElement;
     expect(button.disabled).toBe(false);
-    expect(container.querySelector(".control-panel-profile-hint")).toBeNull();
+    expect(container.querySelector(".control-panel-approach-view-hint")).toBeNull();
 
     fireEvent.click(button);
 
     expect(setSelectedRunway).toHaveBeenCalledWith("05L");
-    expect(setRunwayProfileOpen).toHaveBeenCalledWith(true);
+    expect(setApproachViewOpen).toHaveBeenCalledWith(true);
   });
 });

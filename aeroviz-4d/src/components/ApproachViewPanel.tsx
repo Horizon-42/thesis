@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
 import {
   useApp,
-  type RunwayProfileViewMode,
+  type ApproachViewMode,
 } from "../context/AppContext";
 import {
-  useRunwayTrajectoryProfile,
-  type ProfileAircraftTrack,
-} from "../hooks/useRunwayTrajectoryProfile";
+  useApproachView,
+  type ApproachViewTrack,
+} from "../hooks/useApproachView";
 import { normalizeRunwayIdent } from "../utils/runwayIdent";
 import type {
   HorizontalPlateAssessmentSegment,
@@ -25,7 +25,7 @@ import {
   altitudeConstraintClassName,
   altitudeConstraintLabel,
 } from "../data/altitudeConstraints";
-import { splitTrackByContainment } from "../data/runwayTrajectoryProfileAnalysis";
+import { splitTrackByContainment } from "../data/approachViewAnalysis";
 import { FEET_TO_METERS as METERS_PER_FOOT, METERS_PER_NM } from "../utils/procedureGeoMath";
 
 type DistanceUnit = "nm" | "m";
@@ -43,7 +43,7 @@ interface ProfilePlotProps {
   mode: "side" | "top";
   displayLevel: ProcedureDisplayLevel;
   distanceUnit: DistanceUnit;
-  tracks: ProfileAircraftTrack[];
+  tracks: ApproachViewTrack[];
   plateRoutes: HorizontalPlateRoute[];
   referenceMarks: RunwayReferenceMark[];
 }
@@ -68,7 +68,7 @@ function collectViewDomain(
   mode: "side" | "top",
   plateRoutes: HorizontalPlateRoute[],
   referenceMarks: RunwayReferenceMark[],
-  tracks: ProfileAircraftTrack[],
+  tracks: ApproachViewTrack[],
 ): PlotDomain {
   const xValues = [0];
   const yValues = [0];
@@ -370,7 +370,7 @@ function ProfilePlot({
 
   const xSpan = Math.max(1, domain.maxX - domain.minX);
   const ySpan = Math.max(1, domain.maxY - domain.minY);
-  const plotClipId = `runway-profile-plot-clip-${mode}`;
+  const plotClipId = `approach-view-plot-clip-${mode}`;
   const plotX = (value: number) => marginLeft + ((domain.maxX - value) / xSpan) * plotWidth;
   const plotY = (value: number) => marginTop + ((domain.maxY - value) / ySpan) * plotHeight;
   const zeroX = plotX(0);
@@ -397,7 +397,7 @@ function ProfilePlot({
   const plottedReferenceMarks = displayedReferenceMarks.filter(
     (mark) => mark.detail === "Threshold",
   );
-  // Keep the embedded profile aligned with the same semantic display levels as the 3D procedure layer.
+  // Keep the embedded approach view aligned with the same semantic display levels as the 3D procedure layer.
   const showProtectionGeometry = showProfileElement(
     "SEGMENT_ENVELOPE_PRIMARY",
     "SOURCE_BACKED",
@@ -425,14 +425,14 @@ function ProfilePlot({
   );
 
   return (
-    <section className="runway-profile-plot">
+    <section className="approach-view-plot">
       <header>
         <h4>{title}</h4>
         <p>{subtitle}</p>
       </header>
 
       <svg
-        className="runway-profile-svg"
+        className="approach-view-svg"
         viewBox={`0 0 ${width} ${height}`}
         role="img"
         aria-label={title}
@@ -448,7 +448,7 @@ function ProfilePlot({
           width={plotWidth}
           height={plotHeight}
           rx={10}
-          className="runway-profile-plot-frame"
+          className="approach-view-plot-frame"
         />
 
         <line
@@ -456,14 +456,14 @@ function ProfilePlot({
           y1={marginTop + plotHeight}
           x2={marginLeft + plotWidth}
           y2={marginTop + plotHeight}
-          className="runway-profile-axis"
+          className="approach-view-axis"
         />
         <line
           x1={marginLeft}
           y1={marginTop}
           x2={marginLeft}
           y2={marginTop + plotHeight}
-          className="runway-profile-axis"
+          className="approach-view-axis"
         />
 
         {xTicks.map((tick) => {
@@ -475,20 +475,20 @@ function ProfilePlot({
                 y1={marginTop}
                 x2={tickX}
                 y2={marginTop + plotHeight}
-                className="runway-profile-grid-line"
+                className="approach-view-grid-line"
               />
               <line
                 x1={tickX}
                 y1={marginTop + plotHeight}
                 x2={tickX}
                 y2={marginTop + plotHeight + 6}
-                className="runway-profile-axis"
+                className="approach-view-axis"
               />
               <text
                 x={tickX}
                 y={marginTop + plotHeight + 22}
                 textAnchor="middle"
-                className="runway-profile-axis-tick"
+                className="approach-view-axis-tick"
               >
                 {formatDistance(tick, distanceUnit)}
               </text>
@@ -501,9 +501,9 @@ function ProfilePlot({
           y1={marginTop}
           x2={zeroX}
           y2={marginTop + plotHeight}
-          className="runway-profile-threshold-line"
+          className="approach-view-threshold-line"
         />
-        <text x={zeroX + 6} y={marginTop + 14} className="runway-profile-threshold-label">
+        <text x={zeroX + 6} y={marginTop + 14} className="approach-view-threshold-label">
           Threshold
         </text>
 
@@ -514,9 +514,9 @@ function ProfilePlot({
               y1={zeroY}
               x2={marginLeft + plotWidth}
               y2={zeroY}
-              className="runway-profile-centerline"
+              className="approach-view-centerline"
             />
-            <text x={marginLeft + 8} y={zeroY - 8} className="runway-profile-centerline-label">
+            <text x={marginLeft + 8} y={zeroY - 8} className="approach-view-centerline-label">
               Centerline y = 0
             </text>
           </>
@@ -527,9 +527,9 @@ function ProfilePlot({
               y1={zeroY}
               x2={marginLeft + plotWidth}
               y2={zeroY}
-              className="runway-profile-ground-line"
+              className="approach-view-ground-line"
             />
-            <text x={marginLeft + 8} y={zeroY - 8} className="runway-profile-centerline-label">
+            <text x={marginLeft + 8} y={zeroY - 8} className="approach-view-centerline-label">
               Threshold elevation z = 0
             </text>
           </>
@@ -547,13 +547,13 @@ function ProfilePlot({
                 y1={marginTop}
                 x2={markX}
                 y2={marginTop + plotHeight}
-                className="runway-profile-reference-line"
+                className="approach-view-reference-line"
               />
               <circle
                 cx={markX}
                 cy={markY}
                 r={4.1}
-                className="runway-profile-reference-point"
+                className="approach-view-reference-point"
                 data-fix-ident={mark.label}
               />
               <line
@@ -561,7 +561,7 @@ function ProfilePlot({
                 y1={marginTop + plotHeight}
                 x2={markX}
                 y2={marginTop + plotHeight + 20}
-                className="runway-profile-reference-tick"
+                className="approach-view-reference-tick"
               />
               {shouldLabel ? (
                 <text
@@ -569,7 +569,7 @@ function ProfilePlot({
                   y={marginTop + plotHeight + 56}
                   transform={`rotate(-28 ${markX + 4} ${marginTop + plotHeight + 56})`}
                   textAnchor="start"
-                  className="runway-profile-reference-label"
+                  className="approach-view-reference-label"
                 >
                   {label}
                 </text>
@@ -588,21 +588,21 @@ function ProfilePlot({
                 y1={marginTop}
                 x2={markX}
                 y2={marginTop + plotHeight}
-                className="runway-profile-reference-line"
+                className="approach-view-reference-line"
               />
               <line
                 x1={markX}
                 y1={marginTop + plotHeight}
                 x2={markX}
                 y2={marginTop + plotHeight + 20}
-                className="runway-profile-reference-tick"
+                className="approach-view-reference-tick"
               />
               <text
                 x={markX + 4}
                 y={marginTop + plotHeight + 56}
                 transform={`rotate(-28 ${markX + 4} ${marginTop + plotHeight + 56})`}
                 textAnchor="start"
-                className="runway-profile-reference-label"
+                className="approach-view-reference-label"
               >
                 {label}
               </text>
@@ -633,7 +633,7 @@ function ProfilePlot({
               {mode === "top" && showProtectionGeometry && assessmentSegments.length === 0 ? (
                 <path
                   d={d}
-                  className="runway-profile-route-band"
+                  className="approach-view-route-band"
                   clipPath={`url(#${plotClipId})`}
                   style={{ strokeWidth: bandWidth }}
                 />
@@ -654,7 +654,7 @@ function ProfilePlot({
                         {segment.secondaryHalfWidthM ? (
                           <path
                             d={segmentPath}
-                            className="runway-profile-assessment-secondary-band"
+                            className="approach-view-assessment-secondary-band"
                             clipPath={`url(#${plotClipId})`}
                             style={{
                               strokeWidth: Math.max(2, segment.secondaryHalfWidthM * yScale * 2),
@@ -663,7 +663,7 @@ function ProfilePlot({
                         ) : null}
                         <path
                           d={segmentPath}
-                          className="runway-profile-assessment-primary-band"
+                          className="approach-view-assessment-primary-band"
                           clipPath={`url(#${plotClipId})`}
                           style={{
                             strokeWidth: Math.max(2, segment.primaryHalfWidthM * yScale * 2),
@@ -695,7 +695,7 @@ function ProfilePlot({
                               {ocs.secondaryHalfWidthM ? (
                                 <path
                                   d={segmentPath}
-                                  className="runway-profile-lnav-vnav-ocs-secondary-band"
+                                  className="approach-view-lnav-vnav-ocs-secondary-band"
                                   clipPath={`url(#${plotClipId})`}
                                   style={{
                                     strokeWidth: Math.max(2, ocs.secondaryHalfWidthM * yScale * 2),
@@ -704,7 +704,7 @@ function ProfilePlot({
                               ) : null}
                               <path
                                 d={segmentPath}
-                                className="runway-profile-lnav-vnav-ocs-primary-band"
+                                className="approach-view-lnav-vnav-ocs-primary-band"
                                 clipPath={`url(#${plotClipId})`}
                                 style={{
                                   strokeWidth: Math.max(2, ocs.primaryHalfWidthM * yScale * 2),
@@ -714,7 +714,7 @@ function ProfilePlot({
                           ) : (
                             <path
                               d={segmentPath}
-                              className="runway-profile-lnav-vnav-ocs-line"
+                              className="approach-view-lnav-vnav-ocs-line"
                               clipPath={`url(#${plotClipId})`}
                               data-segment-id={segment.segmentId}
                             />
@@ -749,7 +749,7 @@ function ProfilePlot({
                           {mode === "top" ? (
                             <path
                               d={referencePath}
-                              className="runway-profile-final-vertical-reference-band"
+                              className="approach-view-final-vertical-reference-band"
                               clipPath={`url(#${plotClipId})`}
                               style={{
                                 strokeWidth: Math.max(2, reference.halfWidthM * yScale * 2),
@@ -761,8 +761,8 @@ function ProfilePlot({
                             d={referencePath}
                             className={
                               mode === "side"
-                                ? "runway-profile-final-vertical-reference-line"
-                                : "runway-profile-final-vertical-reference-plan-line"
+                                ? "approach-view-final-vertical-reference-line"
+                                : "approach-view-final-vertical-reference-plan-line"
                             }
                             clipPath={`url(#${plotClipId})`}
                             data-segment-id={segment.segmentId}
@@ -770,7 +770,7 @@ function ProfilePlot({
                           <text
                             x={referenceLabelX}
                             y={referenceLabelY}
-                            className="runway-profile-final-vertical-reference-label"
+                            className="approach-view-final-vertical-reference-label"
                             data-segment-id={segment.segmentId}
                           >
                             {reference.label}
@@ -781,7 +781,7 @@ function ProfilePlot({
                 : null}
               <path
                 d={d}
-                className={`runway-profile-route-line ${
+                className={`approach-view-route-line ${
                   isTransition ? "is-transition" : "is-final"
                 }`}
               />
@@ -791,7 +791,7 @@ function ProfilePlot({
                   cx={plotX(point.xM)}
                   cy={plotY(mode === "side" ? point.zM : point.yM)}
                   r={4.1}
-                  className="runway-profile-reference-point"
+                  className="approach-view-reference-point"
                   data-route-id={route.routeId}
                   data-fix-ident={point.fixIdent}
                 />
@@ -813,27 +813,27 @@ function ProfilePlot({
                             y1={marginTop}
                             x2={cx}
                             y2={marginTop + plotHeight}
-                            className={`runway-profile-altitude-constraint-station-line ${constraintClassName}`}
+                            className={`approach-view-altitude-constraint-station-line ${constraintClassName}`}
                           />
                           <line
                             x1={cx}
                             y1={plotY(0)}
                             x2={cx}
                             y2={cy}
-                            className={`runway-profile-altitude-constraint-link ${constraintClassName}`}
+                            className={`approach-view-altitude-constraint-link ${constraintClassName}`}
                           />
                           <circle
                             cx={cx}
                             cy={cy}
                             r={5.2}
-                            className={`runway-profile-altitude-constraint-point ${constraintClassName}`}
+                            className={`approach-view-altitude-constraint-point ${constraintClassName}`}
                             data-constraint-route-id={route.routeId}
                             data-constraint-fix-ident={point.fixIdent}
                           />
                           <text
                             x={cx + 7}
                             y={cy - 7}
-                            className={`runway-profile-altitude-constraint-label ${constraintClassName}`}
+                            className={`approach-view-altitude-constraint-label ${constraintClassName}`}
                           >
                             {label}
                           </text>
@@ -845,7 +845,7 @@ function ProfilePlot({
                 <text
                   x={labelX + 7}
                   y={labelY - 7}
-                  className="runway-profile-route-label is-transition"
+                  className="approach-view-route-label is-transition"
                 >
                   {routeLabel(route)}
                 </text>
@@ -871,7 +871,7 @@ function ProfilePlot({
                           >
                             <path
                               d={surfacePath}
-                              className="runway-profile-precision-surface-line"
+                              className="approach-view-precision-surface-line"
                               clipPath={`url(#${plotClipId})`}
                               data-segment-id={segment.segmentId}
                             />
@@ -879,7 +879,7 @@ function ProfilePlot({
                               <text
                                 x={plotX(surfacePoint.xM) + 6}
                                 y={plotY(mode === "side" ? surfacePoint.zM : surfacePoint.yM) + 12}
-                                className="runway-profile-segment-debug-label"
+                                className="approach-view-segment-debug-label"
                                 data-segment-id={segment.segmentId}
                               >
                                 {surface.label}
@@ -899,7 +899,7 @@ function ProfilePlot({
                         key={`${route.routeId}-segment-debug-${segment.segmentId}-${index}`}
                         x={textX}
                         y={textY}
-                        className="runway-profile-segment-debug-label"
+                        className="approach-view-segment-debug-label"
                         data-segment-id={segment.segmentId}
                       >
                         {segmentDebugLabel(segment, index)}
@@ -928,7 +928,7 @@ function ProfilePlot({
                 return (
                   <path
                     key={runIndex}
-                    className={`runway-profile-track-run runway-profile-track-run-${run.containment.toLowerCase()}`}
+                    className={`approach-view-track-run approach-view-track-run-${run.containment.toLowerCase()}`}
                     d={plotPointPath(run.points, domain, plotWidth, plotHeight, marginLeft, marginTop, mode)}
                     fill="none"
                     stroke={track.color}
@@ -960,7 +960,7 @@ function ProfilePlot({
                 <text
                   x={cx + 8}
                   y={cy - 8}
-                  className="runway-profile-flight-label"
+                  className="approach-view-flight-label"
                   clipPath={`url(#${plotClipId})`}
                 >
                   {track.flightId}
@@ -974,7 +974,7 @@ function ProfilePlot({
           x={marginLeft + plotWidth / 2}
           y={height - 12}
           textAnchor="middle"
-          className="runway-profile-axis-label"
+          className="approach-view-axis-label"
         >
           x: approach distance from threshold ({distanceUnitLabel(distanceUnit)})
         </text>
@@ -983,17 +983,17 @@ function ProfilePlot({
           y={marginTop + plotHeight / 2}
           textAnchor="middle"
           transform={`rotate(-90 18 ${marginTop + plotHeight / 2})`}
-          className="runway-profile-axis-label"
+          className="approach-view-axis-label"
         >
           {mode === "side"
             ? "z: height above threshold (ft)"
             : `y: lateral offset from centerline (${distanceUnitLabel(distanceUnit)})`}
         </text>
 
-        <text x={18} y={marginTop + 10} className="runway-profile-axis-tick">
+        <text x={18} y={marginTop + 10} className="approach-view-axis-tick">
           {formatProfileAxisValue(mode, domain.maxY, distanceUnit)}
         </text>
-        <text x={18} y={marginTop + plotHeight} className="runway-profile-axis-tick">
+        <text x={18} y={marginTop + plotHeight} className="approach-view-axis-tick">
           {formatProfileAxisValue(mode, domain.minY, distanceUnit)}
         </text>
       </svg>
@@ -1001,39 +1001,39 @@ function ProfilePlot({
   );
 }
 
-export default function RunwayTrajectoryProfilePanel() {
+export default function ApproachViewPanel() {
   const {
     activeAirportCode,
-    isRunwayProfileOpen,
+    isApproachViewOpen,
     selectedRunway,
-    runwayProfileViewMode,
-    setRunwayProfileOpen,
-    setRunwayProfileViewMode,
+    approachViewMode,
+    setApproachViewOpen,
+    setApproachViewMode,
     procedureDisplayLevel,
   } = useApp();
-  // The profile's runway is the global Landing-Runway selection (RW-prefixed spelling);
+  // The approach view's runway is the global Landing-Runway selection (RW-prefixed spelling);
   // there is no separate profile-runway selection.
-  const profileRunwayIdent = selectedRunway ? normalizeRunwayIdent(selectedRunway) : null;
-  const profile = useRunwayTrajectoryProfile();
+  const approachRunwayIdent = selectedRunway ? normalizeRunwayIdent(selectedRunway) : null;
+  const approachView = useApproachView();
   // "Linked" iff a trajectory source belonging to the CURRENT tab is loaded — the hook
-  // owns that decision (same source-selection the profile plots), so the indicator can
+  // owns that decision (same source-selection the approach view plots), so the indicator can
   // never disagree with what is drawn.
-  const trajectorySourceLinked = profile.sourceLinked;
+  const trajectorySourceLinked = approachView.sourceLinked;
   const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>("nm");
 
-  // Needs a specific runway: "All runways" (null) has no single profile to show.
-  if (!isRunwayProfileOpen || !profileRunwayIdent) return null;
+  // Needs a specific runway: "All runways" (null) has no single approach view to show.
+  if (!isApproachViewOpen || !approachRunwayIdent) return null;
 
-  const viewModes: Array<{ label: string; value: RunwayProfileViewMode }> = [
+  const viewModes: Array<{ label: string; value: ApproachViewMode }> = [
     { label: "Split", value: "split" },
     { label: "Vertical", value: "side-xz" },
     { label: "Plan", value: "top-xy" },
   ];
 
-  const routeCount = profile.plateRoutes.length;
-  const trackCount = profile.aircraftTracks.length;
+  const routeCount = approachView.plateRoutes.length;
+  const trackCount = approachView.aircraftTracks.length;
   const assessmentTrack =
-    profile.aircraftTracks.find((track) => track.isSelected) ?? profile.aircraftTracks[0];
+    approachView.aircraftTracks.find((track) => track.isSelected) ?? approachView.aircraftTracks[0];
   const assessmentStatus = assessmentTrack
     ? `${assessmentTrack.flightId}: ${assessmentTrack.current.segmentAssessment.activeSegmentId} · ` +
       `station ${formatDistance(assessmentTrack.current.segmentAssessment.stationM, distanceUnit)} · ` +
@@ -1048,9 +1048,9 @@ export default function RunwayTrajectoryProfilePanel() {
       )
     : null;
   const statusText =
-    profile.error ??
-    (profile.isLoading
-      ? "Loading runway profile..."
+    approachView.error ??
+    (approachView.isLoading
+      ? "Loading approach view..."
       : routeCount === 0
         ? "No RNAV arrival branches were found for this runway."
         : trackCount === 0
@@ -1058,40 +1058,40 @@ export default function RunwayTrajectoryProfilePanel() {
           : assessmentStatus) ??
     "\u00a0";
   const statusClassName = [
-    "runway-profile-status",
-    profile.error ? "runway-profile-error" : null,
-    !profile.error && !profile.isLoading && trackCount === 0 ? "runway-profile-empty" : null,
+    "approach-view-status",
+    approachView.error ? "approach-view-error" : null,
+    !approachView.error && !approachView.isLoading && trackCount === 0 ? "approach-view-empty" : null,
   ]
     .filter(Boolean)
     .join(" ");
 
   return (
-    <aside className="runway-profile-panel" aria-label="Runway trajectory profile">
-      <header className="runway-profile-panel-header">
+    <aside className="approach-view-panel" aria-label="Approach view">
+      <header className="approach-view-panel-header">
         <div>
           <h3>
-            {activeAirportCode} {profileRunwayIdent} trajectory profile
+            {activeAirportCode} {approachRunwayIdent} approach view
           </h3>
           <p>
-            Time: {formatIsoTime(profile.currentTimeIso)}{" "}
-            {profile.sourceCycle ? `· CIFP ${profile.sourceCycle}` : ""}
+            Time: {formatIsoTime(approachView.currentTimeIso)}{" "}
+            {approachView.sourceCycle ? `· CIFP ${approachView.sourceCycle}` : ""}
           </p>
         </div>
 
-        <div className="runway-profile-panel-actions">
-          <div className="runway-profile-view-modes" role="tablist" aria-label="Profile view mode">
+        <div className="approach-view-panel-actions">
+          <div className="approach-view-modes" role="tablist" aria-label="Approach view mode">
             {viewModes.map((mode) => (
               <button
                 key={mode.value}
                 type="button"
-                className={runwayProfileViewMode === mode.value ? "active" : ""}
-                onClick={() => setRunwayProfileViewMode(mode.value)}
+                className={approachViewMode === mode.value ? "active" : ""}
+                onClick={() => setApproachViewMode(mode.value)}
               >
                 {mode.label}
               </button>
             ))}
           </div>
-          <div className="runway-profile-unit-switch" role="group" aria-label="Distance unit">
+          <div className="approach-view-unit-switch" role="group" aria-label="Distance unit">
             {(["nm", "m"] as const).map((unit) => (
               <button
                 key={unit}
@@ -1103,52 +1103,52 @@ export default function RunwayTrajectoryProfilePanel() {
               </button>
             ))}
           </div>
-          <button type="button" onClick={() => setRunwayProfileOpen(false)}>
+          <button type="button" onClick={() => setApproachViewOpen(false)}>
             Close
           </button>
         </div>
       </header>
 
-      <div className="runway-profile-summary">
+      <div className="approach-view-summary">
         <span>{routeCount} active RNAV branches in plate</span>
         <span>{trackCount} aircraft currently inside plate</span>
         <span>{trajectorySourceLinked ? "CZML linked" : "CZML missing"}</span>
       </div>
 
-      <p className="runway-profile-procedure-list">
-        {profile.procedureNames.join(" · ") || "\u00a0"}
+      <p className="approach-view-procedure-list">
+        {approachView.procedureNames.join(" · ") || "\u00a0"}
       </p>
 
       <p className={statusClassName} title={statusText.trim() || undefined}>
         {statusText}
       </p>
 
-      {!profile.isLoading && !profile.error && routeCount > 0 ? (
+      {!approachView.isLoading && !approachView.error && routeCount > 0 ? (
         <div
-          className={`runway-profile-plots runway-profile-plots-${runwayProfileViewMode}`}
+          className={`approach-view-plots approach-view-plots-${approachViewMode}`}
         >
-          {runwayProfileViewMode !== "top-xy" ? (
+          {approachViewMode !== "top-xy" ? (
             <ProfilePlot
               title="Vertical profile"
               subtitle="Runway-aligned x-z profile: follows the active procedure branch selected in the 3D procedure panel"
               mode="side"
               displayLevel={procedureDisplayLevel}
               distanceUnit={distanceUnit}
-              tracks={profile.aircraftTracks}
-              plateRoutes={profile.plateRoutes}
-              referenceMarks={profile.referenceMarks}
+              tracks={approachView.aircraftTracks}
+              plateRoutes={approachView.plateRoutes}
+              referenceMarks={approachView.referenceMarks}
             />
           ) : null}
-          {runwayProfileViewMode !== "side-xz" ? (
+          {approachViewMode !== "side-xz" ? (
             <ProfilePlot
               title="Plan view"
               subtitle="Runway-centered x-y plate: shows active procedure branches selected in the 3D procedure panel"
               mode="top"
               displayLevel={procedureDisplayLevel}
               distanceUnit={distanceUnit}
-              tracks={profile.aircraftTracks}
-              plateRoutes={profile.plateRoutes}
-              referenceMarks={profile.referenceMarks}
+              tracks={approachView.aircraftTracks}
+              plateRoutes={approachView.plateRoutes}
+              referenceMarks={approachView.referenceMarks}
             />
           ) : null}
         </div>

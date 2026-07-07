@@ -11,7 +11,7 @@ import {
 import { isMissingJsonAsset } from "../utils/fetchJson";
 import { navigateWithinApp } from "../utils/navigation";
 import { runwayMatchesSelection } from "../utils/runwayIdent";
-import RunwayProfileToggle from "./RunwayProfileToggle";
+import ApproachViewToggle from "./ApproachViewToggle";
 
 const RUNWAY_ORDER = ["RW05L", "RW05R", "RW23L", "RW23R", "RW32"];
 
@@ -420,7 +420,7 @@ export default function ProcedurePanel() {
                 >
                   {isExpanded ? "Hide" : "Show"}
                 </button>
-                <RunwayProfileToggle runwayIdent={group.runwayIdent} />
+                <ApproachViewToggle runwayIdent={group.runwayIdent} />
                 <label>
                   <input
                     type="checkbox"
