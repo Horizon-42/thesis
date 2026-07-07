@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { airportDataUrl } from "../data/airportData";
@@ -6,8 +6,12 @@ import { buildProcedureProfileProjection } from "../data/procedureProfileProject
 import { loadProcedureRenderBundleData } from "../data/procedureRenderBundle";
 import {
   activeHorizontalPlateRoutes,
-  buildProfileAircraftTracks,
-  type ProfileAircraftInput,
+  classifyProfileSample,
+  classifyTrackSamples,
+  colorForFlightId,
+  sortProfileTracksBySelection,
+  trackEngagesProcedure,
+  type ProfileAircraftSample,
   type ProfileAircraftTrack,
   type SampledRunwayPoint,
 } from "../data/runwayTrajectoryProfileAnalysis";
@@ -110,26 +114,21 @@ function samePosition(a: SampledRunwayPoint, b: SampledRunwayPoint): boolean {
 }
 
 /**
- * Sample a LIVE aircraft's whole track around the current time, or `null` if it is not live.
+ * The current-time sample IF the aircraft is LIVE (actually moving) there, else `null`.
  *
- * "Live" = the aircraft is actually MOVING at currentTime. This matters because of the HOLD
- * extrapolation (see `samePosition`): a landed flight reads as frozen on the threshold
- * forever, and a walk-until-undefined would run to the cap over the held tail. So we:
- *   • drop the entity when its sample one step back equals `current` — that is the held tail
- *     (landed/parked, not live; a `null` prior instead means it just appeared = live), and
- *   • stop each walk when the position stops changing (the real track end for a HOLD entity)
- *     as well as on `null` (the start, where backward extrapolation is NONE).
- * The result spans exactly the real approach — the whole flown + remaining path — both
- * directions from currentTime, and never samples the held tail.
+ * "Live" matters because of the HOLD extrapolation (see `samePosition`): a landed flight
+ * reads as frozen on the threshold forever. An entity whose sample one step back equals
+ * `current` is on that held tail (landed/parked, not live); a `null` current means it is not
+ * airborne yet (before its first sample). This is the ONLY per-tick work for most entities —
+ * one or two cheap `getValue`s — so non-flying traffic is rejected before the expensive walk.
  */
-export function sampleEntityTrack(
+function currentIfLive(
   entity: Cesium.Entity,
   currentTime: Cesium.JulianDate,
   runwayFrame: RunwayFrame,
-): { current: SampledRunwayPoint; trail: SampledRunwayPoint[] } | null {
+): SampledRunwayPoint | null {
   const current = sampleRunwayPoint(entity, currentTime, runwayFrame, formatJulianTime(currentTime));
-  if (!current) return null; // not airborne at currentTime (before its first sample)
-
+  if (!current) return null;
   const priorTime = Cesium.JulianDate.addSeconds(
     currentTime,
     -TRACK_SAMPLE_STEP_SECONDS,
@@ -137,19 +136,34 @@ export function sampleEntityTrack(
   );
   const prior = sampleRunwayPoint(entity, priorTime, runwayFrame, formatJulianTime(priorTime));
   if (prior && samePosition(prior, current)) return null; // past its last sample — landed/parked
+  return current;
+}
+
+/**
+ * Sample an entity's WHOLE track (the real approach, both directions from an anchor time),
+ * stopping each walk at the track end: `null` (NONE extrapolation before the first sample) or
+ * an unchanged position (the HOLD-extrapolated tail past the last real sample). The result is
+ * INDEPENDENT of where playback sits — walking out from any in-track anchor yields the same
+ * path — so the hook samples it ONCE per entity and caches it, rather than every clock tick.
+ */
+function sampleWholeTrack(
+  entity: Cesium.Entity,
+  anchorTime: Cesium.JulianDate,
+  runwayFrame: RunwayFrame,
+): SampledRunwayPoint[] {
+  const anchor = sampleRunwayPoint(entity, anchorTime, runwayFrame, formatJulianTime(anchorTime));
+  if (!anchor) return [];
 
   const walk = (direction: 1 | -1): SampledRunwayPoint[] => {
     const points: SampledRunwayPoint[] = [];
-    let previous = current;
+    let previous = anchor;
     for (let step = 1; step <= MAX_TRACK_SAMPLES_PER_DIRECTION; step += 1) {
       const time = Cesium.JulianDate.addSeconds(
-        currentTime,
+        anchorTime,
         direction * step * TRACK_SAMPLE_STEP_SECONDS,
         new Cesium.JulianDate(),
       );
       const point = sampleRunwayPoint(entity, time, runwayFrame, formatJulianTime(time));
-      // null = the track end (NONE extrapolation before the first sample); an unchanged
-      // position = the HOLD-extrapolated tail past the last real sample. Either ends the walk.
       if (!point || samePosition(point, previous)) break;
       points.push(point);
       previous = point;
@@ -157,9 +171,20 @@ export function sampleEntityTrack(
     return points;
   };
 
-  const backward = walk(-1).reverse(); // oldest → toward current
-  const forward = walk(1); // after current → newest
-  return { current, trail: [...backward, current, ...forward] };
+  return [...walk(-1).reverse(), anchor, ...walk(1)];
+}
+
+/** A live aircraft's current sample + its whole track, or null if not live. The tested
+ *  composition of {@link currentIfLive} + {@link sampleWholeTrack}; the hook uses the two
+ *  parts separately so the whole track can be cached across ticks. */
+export function sampleEntityTrack(
+  entity: Cesium.Entity,
+  currentTime: Cesium.JulianDate,
+  runwayFrame: RunwayFrame,
+): { current: SampledRunwayPoint; trail: SampledRunwayPoint[] } | null {
+  const current = currentIfLive(entity, currentTime, runwayFrame);
+  if (!current) return null;
+  return { current, trail: sampleWholeTrack(entity, currentTime, runwayFrame) };
 }
 
 export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
@@ -205,6 +230,12 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
   const [loadedData, setLoadedData] = useState<LoadedProfileData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Per-entity cache of the classified whole track (keyed by flight id); rebuilt only when the
+  // geometry it depends on changes, never per clock tick. See the aircraftTracks memo.
+  const trackCacheRef = useRef<{ deps: unknown[]; tracks: Map<string, ProfileAircraftSample[]> }>({
+    deps: [],
+    tracks: new Map(),
+  });
 
   useEffect(() => {
     if (!viewer || !isRunwayProfileOpen) {
@@ -292,25 +323,54 @@ export function useRunwayTrajectoryProfile(): RunwayTrajectoryProfileState {
     if (sources.length === 0 || !currentTime || !loadedData || activePlateRoutes.length === 0) {
       return [];
     }
+    const { runwayFrame } = loadedData;
+
+    // Drop the per-entity whole-track cache when the geometry it depends on changes (the loaded
+    // procedure/frame, the active routes, or the source set) — but NOT when currentTime moves.
+    // This is the performance fix: each entity's track is sampled + classified ONCE (both are
+    // expensive: getValue + projection + a protection-surface/segment classification per point),
+    // and every clock tick then only re-checks liveness and the current marker.
+    const cacheDeps = [loadedData, activePlateRoutes, trajectoryDataSource, optimizedTrajectoryDataSource];
+    if (cacheDeps.some((dep, index) => dep !== trackCacheRef.current.deps[index])) {
+      trackCacheRef.current = { deps: cacheDeps, tracks: new Map() };
+    }
+    const cache = trackCacheRef.current.tracks;
 
     // Only entities with a time-dynamic position are aircraft (the optimized CZML also
     // carries trail polylines, which have no `position`).
     const trajectoryEntities = sources.flatMap((dataSource) =>
       dataSource.entities.values.filter((entity) => entity.id !== "document" && entity.position),
     );
-    const aircraft: ProfileAircraftInput[] = trajectoryEntities
-      .map((entity) => {
-        const sampled = sampleEntityTrack(entity, currentTime, loadedData.runwayFrame);
-        return sampled ? { flightId: entity.id, ...sampled } : null;
-      })
-      .filter((input): input is ProfileAircraftInput => input !== null);
 
-    return buildProfileAircraftTracks({
-      aircraft,
-      activePlateRoutes,
-      runwayFrame: loadedData.runwayFrame,
-      selectedFlightId,
-    });
+    const tracks: ProfileAircraftTrack[] = [];
+    for (const entity of trajectoryEntities) {
+      const currentPoint = currentIfLive(entity, currentTime, runwayFrame);
+      if (!currentPoint) continue; // not airborne / parked — the only work for most entities
+
+      let trail = cache.get(entity.id);
+      if (!trail) {
+        trail = classifyTrackSamples(
+          sampleWholeTrack(entity, currentTime, runwayFrame),
+          activePlateRoutes,
+          runwayFrame,
+        );
+        cache.set(entity.id, trail);
+      }
+      const current = classifyProfileSample(currentPoint, activePlateRoutes, runwayFrame);
+      if (!current) continue;
+      // Plot only aircraft that fly this procedure (trail or the current point reaches PRIMARY).
+      if (!trackEngagesProcedure(trail) && current.segmentAssessment.containment !== "PRIMARY") {
+        continue;
+      }
+      tracks.push({
+        flightId: entity.id,
+        color: colorForFlightId(entity.id),
+        current,
+        trail,
+        isSelected: entity.id === selectedFlightId,
+      });
+    }
+    return sortProfileTracksBySelection(tracks);
   }, [
     activePlateRoutes,
     currentTime,

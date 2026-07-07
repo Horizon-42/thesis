@@ -54,14 +54,14 @@ describe("sampleEntityTrack", () => {
     const result = sampleEntityTrack(heldTrackEntity(200), at(0), FRAME);
     expect(result).not.toBeNull();
     expect(result!.trail.length).toBe(41); // current (t=0) + forward to t=200
-    expect(result!.trail[0]).toBe(result!.current); // current is the earliest point
+    expect(result!.trail[0].timeIso).toBe(result!.current.timeIso); // current is the earliest point
   });
 
   it("shows the whole track when parked at the END (all-backward, no held-tail padding)", () => {
     const result = sampleEntityTrack(heldTrackEntity(200), at(200), FRAME);
     expect(result).not.toBeNull();
     expect(result!.trail.length).toBe(41); // backward to t=0 + current (t=200)
-    expect(result!.trail[result!.trail.length - 1]).toBe(result!.current); // current is the last point
+    expect(result!.trail[result!.trail.length - 1].timeIso).toBe(result!.current.timeIso); // current is last
   });
 
   it("drops a LANDED aircraft parked on the held tail (no ghost frozen at the threshold)", () => {
@@ -72,5 +72,15 @@ describe("sampleEntityTrack", () => {
 
   it("drops an aircraft not yet airborne (no position at currentTime)", () => {
     expect(sampleEntityTrack(heldTrackEntity(200), at(-50), FRAME)).toBeNull();
+  });
+
+  it("spans the same track regardless of playback position (so the hook can cache it once)", () => {
+    // The whole-track geometry does not depend on where playback sits — the hook relies on
+    // this to sample+classify each track ONCE and reuse it across ticks (the perf fix).
+    const early = sampleEntityTrack(heldTrackEntity(200), at(40), FRAME)!;
+    const late = sampleEntityTrack(heldTrackEntity(200), at(160), FRAME)!;
+    expect(early.trail[0].timeIso).toBe(late.trail[0].timeIso); // same start
+    expect(early.trail.at(-1)!.timeIso).toBe(late.trail.at(-1)!.timeIso); // same end
+    expect(early.trail.length).toBe(late.trail.length);
   });
 });

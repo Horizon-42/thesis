@@ -113,6 +113,13 @@ The project serves dual purposes: thesis visualization/validation, and reusable 
 
 ## Changelog
 
+### 2026-07-07 — Runway profile performance: cache each track's classification (was re-sampled every clock tick)
+
+The profile lagged badly with many trajectories: the `aircraftTracks` memo depends on `currentTime`, so every ~120ms tick it re-sampled AND re-classified every entity's whole track (getValue + projection + a protection-surface/segment classification per point) — O(live aircraft × track length) × ~8/s — even though the track geometry never changes, only the current-position marker moves.
+
+- **Per-entity cache of the classified whole track** (`trackCacheRef`, keyed by flight id), rebuilt only when the geometry it depends on changes (loaded procedure/frame, active routes, source set) — NOT when currentTime moves. Each track is sampled + classified ONCE; every tick then only re-checks liveness (1–2 `getValue`) and re-classifies the single current marker. `sampleEntityTrack` split into `currentIfLive` (cheap per-tick liveness) + `sampleWholeTrack` (the cacheable, playback-position-independent geometry). The analysis module exposes the pieces the hook composes with the cache: `classifyProfileSample` / `classifyTrackSamples` (the expensive currentTime-independent classification) / `trackEngagesProcedure` / `sortProfileTracksBySelection`; `buildProfileAircraftTracks` is kept (tests) as their batch composition.
+- Tests: `sampleEntityTrack` gains "same track regardless of playback position" (the cacheability premise); analysis + panel suites unchanged. **447 frontend tests (74 files) + tsc + vite build clean.** NOTE: the algorithmic win (per-tick work drops from O(aircraft × track length) to O(aircraft)) is verified by construction + tests; not yet profiled in-browser.
+
 ### 2026-07-07 — Review fixes for the whole-track profile (HOLD-tail overrun, ghost aircraft, domain clipping)
 
 A max-effort review of the whole-track change (previous entry) found real regressions; fixed:

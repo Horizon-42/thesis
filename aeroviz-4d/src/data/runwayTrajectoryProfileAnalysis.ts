@@ -89,19 +89,52 @@ function profileAircraftSample(
   };
 }
 
+/** Classify one sampled point against the active procedure, or null if unclassifiable. */
+export function classifyProfileSample(
+  point: SampledRunwayPoint,
+  activePlateRoutes: HorizontalPlateRoute[],
+  runwayFrame: RunwayFrame,
+): ProfileAircraftSample | null {
+  const assessment = classifyProfilePoint(point, activePlateRoutes, runwayFrame);
+  return assessment ? profileAircraftSample(point, assessment) : null;
+}
+
+/** Classify a whole track's samples (drops any unclassifiable). This is the expensive,
+ *  currentTime-INDEPENDENT part — the caller caches it per entity so it runs once, not per
+ *  clock tick (each point does a protection-surface + nearest-segment projection). */
+export function classifyTrackSamples(
+  points: SampledRunwayPoint[],
+  activePlateRoutes: HorizontalPlateRoute[],
+  runwayFrame: RunwayFrame,
+): ProfileAircraftSample[] {
+  return points
+    .map((point) => classifyProfileSample(point, activePlateRoutes, runwayFrame))
+    .filter((sample): sample is ProfileAircraftSample => sample !== null);
+}
+
 /**
- * Converts sampled Cesium trajectory points into runway profile tracks.
- *
- * The sampling adapter provides time-stamped runway-frame points; this module owns the
- * domain decisions: which routes are active, each point's containment tier, and which
- * aircraft to plot.
- *
- * The WHOLE track is kept — points in AND out of the procedure corridor, each tagged with
- * its containment so the panel can style the out-of-corridor stretches (a min-time solve
- * that cuts the corner is out-of-corridor until it joins the final approach; showing only
- * the in-corridor points left just that final segment). An aircraft is plotted only if it
- * ENGAGES the procedure — some sample reaches PRIMARY containment — which keeps unrelated
- * traffic out while still drawing the full approach of the ones that fly it.
+ * Whether a track flies this procedure — some sample reaches PRIMARY containment. Used to keep
+ * unrelated traffic out while still drawing the full approach (in AND out of the corridor) of
+ * the aircraft that do fly it. A min-time solve that cuts the corner is out-of-corridor until
+ * it joins the final approach; plotting only the in-corridor points left just that segment.
+ */
+export function trackEngagesProcedure(trail: ProfileAircraftSample[]): boolean {
+  return trail.some((sample) => sample.segmentAssessment.containment === "PRIMARY");
+}
+
+/** Selected track first, then by flight id — the panel's stable draw/list order. */
+export function sortProfileTracksBySelection(tracks: ProfileAircraftTrack[]): ProfileAircraftTrack[] {
+  return [...tracks].sort((left, right) => {
+    if (left.isSelected === right.isSelected) {
+      return left.flightId.localeCompare(right.flightId);
+    }
+    return left.isSelected ? -1 : 1;
+  });
+}
+
+/**
+ * Convert sampled Cesium trajectory points into runway profile tracks (the batch form used in
+ * tests; the hook assembles incrementally with a per-entity cache — see useRunwayTrajectoryProfile).
  */
 export function buildProfileAircraftTracks(args: {
   aircraft: ProfileAircraftInput[];
@@ -112,45 +145,26 @@ export function buildProfileAircraftTracks(args: {
   const { aircraft, activePlateRoutes, runwayFrame, selectedFlightId } = args;
   if (activePlateRoutes.length === 0) return [];
 
-  return aircraft
+  const tracks = aircraft
     .map((input): ProfileAircraftTrack | null => {
-      const currentAssessment = classifyProfilePoint(
-        input.current,
-        activePlateRoutes,
-        runwayFrame,
-      );
-      if (!currentAssessment) return null;
-
-      const trail = input.trail
-        .map((point): ProfileAircraftSample | null => {
-          const segmentAssessment = classifyProfilePoint(point, activePlateRoutes, runwayFrame);
-          return segmentAssessment ? profileAircraftSample(point, segmentAssessment) : null;
-        })
-        .filter((sample): sample is ProfileAircraftSample => sample !== null);
-
-      // Plot the aircraft only if it actually flies this procedure at some point along the
-      // sampled track — not merely because it is nearby. `current` is part of `trail`
-      // (sampleEntityTrack injects it), so scanning the trail already covers the current point.
-      const engagesProcedure = trail.some(
-        (sample) => sample.segmentAssessment.containment === "PRIMARY",
-      );
-      if (!engagesProcedure) return null;
-
+      const current = classifyProfileSample(input.current, activePlateRoutes, runwayFrame);
+      if (!current) return null;
+      const trail = classifyTrackSamples(input.trail, activePlateRoutes, runwayFrame);
+      // Engages if the trail OR the current point reaches the primary corridor (current is not
+      // necessarily one of the trail's grid samples).
+      if (!trackEngagesProcedure(trail) && current.segmentAssessment.containment !== "PRIMARY") {
+        return null;
+      }
       return {
         flightId: input.flightId,
         color: colorForFlightId(input.flightId),
-        current: profileAircraftSample(input.current, currentAssessment),
+        current,
         trail,
         isSelected: input.flightId === selectedFlightId,
       };
     })
-    .filter((track): track is ProfileAircraftTrack => track !== null)
-    .sort((left, right) => {
-      if (left.isSelected === right.isSelected) {
-        return left.flightId.localeCompare(right.flightId);
-      }
-      return left.isSelected ? -1 : 1;
-    });
+    .filter((track): track is ProfileAircraftTrack => track !== null);
+  return sortProfileTracksBySelection(tracks);
 }
 
 export interface ProfileTrackRun {
