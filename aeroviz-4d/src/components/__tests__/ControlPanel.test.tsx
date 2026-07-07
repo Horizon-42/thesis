@@ -195,18 +195,23 @@ describe("ControlPanel", () => {
   });
 
   // ── Approach-profile toggle (Feature B) ──────────────────────────────────────
-  it("disables the profile toggle when no landing runway is selected", () => {
+  it("disables the profile toggle and shows a hint when no landing runway is selected", () => {
     appState.selectedRunway = null;
-    render(<ControlPanel />);
+    const { container } = render(<ControlPanel />);
     const button = screen.getByRole("button", { name: "Profile" }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
+    // A VISIBLE hint (not just the hover tooltip) explains why clicking does nothing.
+    expect(container.querySelector(".control-panel-profile-hint")?.textContent).toContain(
+      "No landing runway selected",
+    );
   });
 
-  it("opens the approach profile for the selected runway", () => {
+  it("opens the approach profile for the selected runway, with no hint", () => {
     appState.selectedRunway = "05L";
-    render(<ControlPanel />);
+    const { container } = render(<ControlPanel />);
     const button = screen.getByRole("button", { name: "Profile" }) as HTMLButtonElement;
     expect(button.disabled).toBe(false);
+    expect(container.querySelector(".control-panel-profile-hint")).toBeNull();
 
     fireEvent.click(button);
 
