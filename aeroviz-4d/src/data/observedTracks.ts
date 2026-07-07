@@ -7,13 +7,15 @@
  * VISIBILITY are kept independent — you can hold a source in memory without
  * painting it, and re-show it instantly without re-parsing:
  *
- *   • LOADED whenever the tracks are relevant — in Observe, or whenever a runway
- *     profile is open (the profile chart samples the loaded data source in ANY
- *     task). When neither holds, `fileUrl` is "" so the caller releases the source.
- *   • painted on the globe ONLY in Observe — the observed tracks are Observe's
- *     content, so switching to Fly / Optimize / Compare stays visually exclusive
- *     even while a profile keeps them loaded. The 3-colour optimizer comparison
- *     hides them too.
+ *   • LOADED only in Observe — the observed tracks are Observe's content, and the
+ *     runway profile samples them only in Observe (planProfileTrajectorySources),
+ *     so no other task needs them in memory. Outside Observe `fileUrl` is "" so the
+ *     caller releases the source. (This also matters because useCzmlLoader drives
+ *     the shared viewer clock from the observed CZML's span; loading it behind a
+ *     profile in Optimize/Fly would hijack the optimized playback's clock and make
+ *     that track vanish — so we simply don't load it there.)
+ *   • painted on the globe ONLY in Observe with no comparison — the 3-colour
+ *     optimizer comparison hides the plain tracks in favour of its own source.
  */
 
 import { airportDataUrl, airportLandingsRunwayUrl } from "./airportData";
@@ -23,7 +25,6 @@ export interface ObservedTrackInputs {
   mode: WorkbenchMode;
   activeAirportCode: string | null;
   selectedRunway: string | null;
-  isRunwayProfileOpen: boolean;
   trajectoryComparison: boolean;
 }
 
@@ -38,10 +39,9 @@ export function planObservedTracks({
   mode,
   activeAirportCode,
   selectedRunway,
-  isRunwayProfileOpen,
   trajectoryComparison,
 }: ObservedTrackInputs): ObservedTrackPlan {
-  const relevant = !!activeAirportCode && (mode === "observe" || isRunwayProfileOpen);
+  const relevant = !!activeAirportCode && mode === "observe";
   let fileUrl = "";
   if (relevant && activeAirportCode) {
     fileUrl = selectedRunway

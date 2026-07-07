@@ -183,6 +183,7 @@ function makeProfileState(
     procedureNames: ["RNAV(GPS) Y RWY 23R"],
     sourceCycle: "2603",
     aircraftTracks,
+    sourceLinked: true,
   };
 }
 
@@ -346,20 +347,19 @@ describe("RunwayTrajectoryProfilePanel", () => {
     expect(container.textContent).toContain("m");
   });
 
-  it("keeps the plot domain stable when aircraft tracks enter or move outside the profile frame", () => {
+  it("grows the plot domain to fit an aircraft track beyond the procedure frame (so it is not clipped)", () => {
     const { container, rerender } = render(<RunwayTrajectoryProfilePanel />);
 
-    const thresholdX = container
+    const procedureOnlyThresholdX = container
       .querySelector(".runway-profile-threshold-line")
       ?.getAttribute("x1");
-    const yAxisLabels = Array.from(container.querySelectorAll(".runway-profile-axis-tick"))
-      .map((element) => element.textContent);
-    const yMaxLabel = yAxisLabels[yAxisLabels.length - 2];
     expect(container.querySelectorAll(".runway-profile-summary span")).toHaveLength(3);
     expect(container.querySelector(".runway-profile-status")?.textContent).toContain(
       "No aircraft are inside",
     );
 
+    // A track running far beyond the procedure extent must EXPAND the domain to include it —
+    // otherwise the whole out-of-corridor stretch this view exists to show is clipped away.
     profileMock.state = makeProfileState(
       [closeXRoute],
       [makeAircraftTrack({ xM: 80_000, yM: 0, zM: 15_000 })],
@@ -368,16 +368,10 @@ describe("RunwayTrajectoryProfilePanel", () => {
 
     expect(container.querySelectorAll(".runway-profile-summary span")).toHaveLength(3);
     expect(container.querySelector(".runway-profile-status")?.textContent).toContain("AAL123:");
-    expect(container.querySelector(".runway-profile-threshold-line")?.getAttribute("x1")).toBe(
-      thresholdX,
+    // The domain grew (the x=0 threshold line projects to a new position), so the far track fits.
+    expect(container.querySelector(".runway-profile-threshold-line")?.getAttribute("x1")).not.toBe(
+      procedureOnlyThresholdX,
     );
-    expect(
-      (() => {
-        const updatedLabels = Array.from(container.querySelectorAll(".runway-profile-axis-tick"))
-          .map((element) => element.textContent);
-        return updatedLabels[updatedLabels.length - 2];
-      })(),
-    ).toBe(yMaxLabel);
     expect(container.querySelector('path[clip-path="url(#runway-profile-plot-clip-side)"]')).toBeTruthy();
     expect(container.querySelector('circle[clip-path="url(#runway-profile-plot-clip-side)"]')).toBeTruthy();
   });

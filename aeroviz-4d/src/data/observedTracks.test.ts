@@ -6,7 +6,6 @@ const base: ObservedTrackInputs = {
   mode: "observe",
   activeAirportCode: "KRDU",
   selectedRunway: null,
-  isRunwayProfileOpen: false,
   trajectoryComparison: false,
 };
 
@@ -26,25 +25,22 @@ describe("planObservedTracks", () => {
   });
 
   it.each(["fly", "optimize", "compare"] as const)(
-    "releases the tracks (no load, hidden) in %s with no profile open",
+    "releases the tracks (no load, hidden) in %s",
     (mode) => {
       expect(planObservedTracks({ ...base, mode })).toEqual({ fileUrl: "", visible: false });
     },
   );
 
   it.each(["fly", "optimize", "compare"] as const)(
-    "keeps the tracks LOADED but HIDDEN in %s while a runway profile is open (the leak regression)",
+    "does NOT load the observed tracks in %s even with a runway profile open",
     (mode) => {
-      const plan = planObservedTracks({
-        ...base,
-        mode,
-        selectedRunway: "05L",
-        isRunwayProfileOpen: true,
+      // The profile samples observed tracks only in Observe, so no other task needs them
+      // loaded. Loading them here previously let useCzmlLoader hijack the shared clock and
+      // made the optimized playback vanish — so they must stay released.
+      expect(planObservedTracks({ ...base, mode, selectedRunway: "05L" })).toEqual({
+        fileUrl: "",
+        visible: false,
       });
-      // Loaded so the profile chart can still sample it...
-      expect(plan.fileUrl).toBe(airportLandingsRunwayUrl("KRDU", "05L"));
-      // ...but NOT painted on the globe — tasks stay visually exclusive.
-      expect(plan.visible).toBe(false);
     },
   );
 

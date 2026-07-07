@@ -25,6 +25,7 @@ import {
   altitudeConstraintClassName,
   altitudeConstraintLabel,
 } from "../data/altitudeConstraints";
+import { splitTrackByContainment } from "../data/runwayTrajectoryProfileAnalysis";
 import { FEET_TO_METERS as METERS_PER_FOOT, METERS_PER_NM } from "../utils/procedureGeoMath";
 
 type DistanceUnit = "nm" | "m";
@@ -67,6 +68,7 @@ function collectViewDomain(
   mode: "side" | "top",
   plateRoutes: HorizontalPlateRoute[],
   referenceMarks: RunwayReferenceMark[],
+  tracks: ProfileAircraftTrack[],
 ): PlotDomain {
   const xValues = [0];
   const yValues = [0];
@@ -107,6 +109,13 @@ function collectViewDomain(
 
   referenceMarks.forEach((mark) => {
     xValues.push(mark.xM);
+  });
+
+  // Grow the domain to fit the plotted tracks — otherwise a whole track that runs beyond the
+  // procedure extent (a corner-cut's cross-track, or a sample from farther out / higher than
+  // the IF) is clipped by the plot rect, hiding the very out-of-corridor stretch we draw.
+  tracks.forEach((track) => {
+    track.trail.forEach((sample) => pushPoint(sample));
   });
 
   const minX = Math.min(...xValues, -250);
@@ -355,8 +364,8 @@ function ProfilePlot({
     [displayedPlateRoutes, mode, referenceMarks],
   );
   const domain = useMemo(
-    () => collectViewDomain(mode, displayedPlateRoutes, displayedReferenceMarks),
-    [displayedPlateRoutes, displayedReferenceMarks, mode],
+    () => collectViewDomain(mode, displayedPlateRoutes, displayedReferenceMarks, tracks),
+    [displayedPlateRoutes, displayedReferenceMarks, mode, tracks],
   );
 
   const xSpan = Math.max(1, domain.maxX - domain.minX);
@@ -903,30 +912,41 @@ function ProfilePlot({
         })}
 
         {tracks.map((track) => {
-          const d = plotPointPath(
-            track.trail,
-            domain,
-            plotWidth,
-            plotHeight,
-            marginLeft,
-            marginTop,
-            mode,
-          );
           const currentYValue = mode === "side" ? track.current.zM : track.current.yM;
           const cx = plotX(track.current.xM);
           const cy = plotY(currentYValue);
+          // Draw the whole track, split into containment runs so each stretch carries its own
+          // style: PRIMARY and SECONDARY are both CONTAINED (solid, primary brighter); only
+          // OUTSIDE is dashed + dimmed. So a corner-cut reads as out-of-corridor while a
+          // secondary-protection stretch is not mistaken for a containment breach.
+          const runs = splitTrackByContainment(track.trail);
           return (
             <g key={`${mode}-${track.flightId}`}>
-              <path
-                d={d}
-                fill="none"
-                stroke={track.color}
-                strokeWidth={track.isSelected ? 3.2 : 2.2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                opacity={track.isSelected ? 0.96 : 0.74}
-                clipPath={`url(#${plotClipId})`}
-              />
+              {runs.map((run, runIndex) => {
+                const outside = run.containment === "OUTSIDE";
+                const primary = run.containment === "PRIMARY";
+                return (
+                  <path
+                    key={runIndex}
+                    className={`runway-profile-track-run runway-profile-track-run-${run.containment.toLowerCase()}`}
+                    d={plotPointPath(run.points, domain, plotWidth, plotHeight, marginLeft, marginTop, mode)}
+                    fill="none"
+                    stroke={track.color}
+                    strokeWidth={track.isSelected ? 3.2 : 2.2}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeDasharray={outside ? "6 5" : undefined}
+                    opacity={
+                      primary
+                        ? track.isSelected ? 0.96 : 0.74
+                        : outside
+                          ? track.isSelected ? 0.5 : 0.34
+                          : track.isSelected ? 0.82 : 0.6
+                    }
+                    clipPath={`url(#${plotClipId})`}
+                  />
+                );
+              })}
               <circle
                 cx={cx}
                 cy={cy}
@@ -937,7 +957,12 @@ function ProfilePlot({
                 clipPath={`url(#${plotClipId})`}
               />
               {track.isSelected ? (
-                <text x={cx + 8} y={cy - 8} className="runway-profile-flight-label">
+                <text
+                  x={cx + 8}
+                  y={cy - 8}
+                  className="runway-profile-flight-label"
+                  clipPath={`url(#${plotClipId})`}
+                >
                   {track.flightId}
                 </text>
               ) : null}
@@ -984,17 +1009,16 @@ export default function RunwayTrajectoryProfilePanel() {
     runwayProfileViewMode,
     setRunwayProfileOpen,
     setRunwayProfileViewMode,
-    trajectoryDataSource,
-    optimizedTrajectoryDataSource,
     procedureDisplayLevel,
   } = useApp();
   // The profile's runway is the global Landing-Runway selection (RW-prefixed spelling);
   // there is no separate profile-runway selection.
   const profileRunwayIdent = selectedRunway ? normalizeRunwayIdent(selectedRunway) : null;
-  // The profile plots both the observed and optimized tracks, so it is "linked"
-  // whenever either source is loaded.
-  const trajectorySourceLinked = !!trajectoryDataSource || !!optimizedTrajectoryDataSource;
   const profile = useRunwayTrajectoryProfile();
+  // "Linked" iff a trajectory source belonging to the CURRENT tab is loaded — the hook
+  // owns that decision (same source-selection the profile plots), so the indicator can
+  // never disagree with what is drawn.
+  const trajectorySourceLinked = profile.sourceLinked;
   const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>("nm");
 
   // Needs a specific runway: "All runways" (null) has no single profile to show.

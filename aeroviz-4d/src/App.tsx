@@ -37,16 +37,14 @@ function FlightApp() {
     trajectoryComparison,
     mode,
     proceduresOpen,
-    isRunwayProfileOpen,
   } = useApp();
-  // Observed tracks are loaded whenever relevant (Observe, or any task with a runway profile
-  // open — the profile chart samples the loaded source) but painted on the globe only in
-  // Observe, so switching tasks stays visually exclusive. See planObservedTracks.
+  // Observed tracks are loaded AND painted only in Observe (see planObservedTracks): the
+  // runway profile samples them only in Observe too, so no other task needs them in memory
+  // — and loading them elsewhere would let useCzmlLoader hijack the shared clock.
   const { fileUrl: observedFileUrl, visible: observedVisible } = planObservedTracks({
     mode,
     activeAirportCode,
     selectedRunway,
-    isRunwayProfileOpen,
     trajectoryComparison,
   });
   const { flightIds, flightSummaries, warning, error } = useCzmlLoader(observedFileUrl, observedVisible);
