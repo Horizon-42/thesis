@@ -1,0 +1,59 @@
+# ts_transformer — learned 4D trajectory prediction (iTransformer / PatchTST)
+#
+# Target env: conda `aeroviz` (Python 3.12) — the single thesis environment.
+#
+#   conda activate aeroviz
+#   pip install -r 4dTrajectory/ts_transformer/requirements.txt
+#
+# Why aeroviz and not a separate ML env: `aeroviz` already carries the data
+# acquisition stack (traffic, pyopensky), the CIFP parser (cifparse, arinc424),
+# casadi and the geospatial stack. Consolidating the other way was tried and is
+# BLOCKED — cifparse >= 2.0.4 uses PEP 701 f-strings and requires Python 3.12,
+# so a 3.11 env cannot run the CIFP parser at its current version.
+#
+# The package code itself remains casadi-free (it shares the data plane with
+# 4dTrajectory/optimization, not the solver), so it stays runnable in a lean
+# torch-only env if one is ever wanted — nothing here imports casadi.
+#
+# CUDA: the torch wheel must match the driver. Verified on this machine
+# with an RTX 4060 (compute capability 8.9) on the cu128 wheel index:
+#
+#   pip install torch --index-url https://download.pytorch.org/whl/cu128
+#
+# The plain `torch` requirement here resolves to the default (CPU or bundled
+# CUDA) wheel; install from the index above FIRST if you want a specific CUDA
+# build, then run this file — pip will leave the satisfied requirement alone.
+
+# --- core ---------------------------------------------------------------
+# Models, training loop, inference. Checkpoints are loaded with an explicit
+# weights_only=True (train.load_checkpoint) — the payload is tensors +
+# primitives, never pickled objects. 2.6 is where that became torch's default
+# and the oldest version this package has been developed/tested against.
+torch>=2.6
+# Windowing, resampling, and the ENU feature build. 2.0 floor: the package was
+# built and verified against numpy 2.x only (2.5.1 on this machine); 1.x is
+# untested, not known-broken.
+numpy>=2.0
+
+# --- repo-local, installed editable (NOT on PyPI) -----------------------
+# Canonical geodesy/units. Verified present in `aeroviz`; if a fresh env is
+# ever built, install it from the repo root before this file:
+#   pip install -e geokit
+# It is listed here as a comment rather than a `-e ../../geokit` line so that
+# `pip install -r` stays runnable from any working directory.
+
+# --- test ---------------------------------------------------------------
+pytest>=8.0
+
+# Verified working set on this machine (2026-07-19):
+#   conda aeroviz, py3.12: torch 2.11.0+cu128, numpy 2.5.1, geokit 0.1.0 (editable)
+#
+# Deliberately NOT required:
+#   einops           — only the Reformer/Flash attention variants need it, and
+#                      those were dropped when iTransformer was vendored.
+#   pandas           — the data plane is JSON; stdlib json + numpy cover it.
+#   tqdm             — training progress prints plain epoch lines, matching the
+#                      batch-print style in 4dTrajectory/optimization.
+#   matplotlib       — only for optional diagnostic plots; import it lazily.
+#   reformer_pytorch — upstream iTransformer dependency, dropped with the
+#                      Reformer variant. See vendor/itransformer/PROVENANCE.md.
