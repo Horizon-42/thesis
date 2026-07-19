@@ -67,7 +67,7 @@ passes both positional gates.
 
 ## Regulation-derived gates (`thresholds.py`, overridable)
 
-| Gate | Default | Source (in `docs/regulation/Order_8260.58D.pdf`) |
+| Gate | Default | Source (FAA Order 8260.58D — public, not vendored here) |
 |---|---|---|
 | lateral | ≤ 106.75 m | §3-1-5.c(3) "Course width at threshold" (pp. 3-7/3-8), Formula 3-1-1 — the course width at the LTP is `greater of 350 ft or tan(1.5°)·d_GARP`, a **one-sided** value (Figure 3-1-7 draws it ±350 ft about the centerline — the order says "course width" where this package says semiwidth). 350 ft = 106.68 m → **106.75 m** via the order's own "round to the nearest 0.25-meter increment" rule (so the number never appears verbatim); it is the tightest full-scale deflection any LPV final can have at the LTP |
 | vertical (low) | ≥ −3.05 m | §1-3-1.f(2)(b) "Threshold crossing height" (p. 1-27), item 1: default TCH ⇒ 30 ft wheel crossing height, minimum WCH 20 ft ⇒ 10 ft below the target (derived offset) |

@@ -1,8 +1,9 @@
 """Regulation-derived gates on the final-state deviation.
 
 Both gates are threshold-referenced (the targets in this project anchor on the
-CIFP landing threshold) and cite FAA Order 8260.3F / 8260.58D — the documents in
-``docs/regulation/``. Override any value per run (constructor / CLI flags).
+CIFP landing threshold) and cite FAA Order 8260.3F / 8260.58D, which are public
+documents and are NOT vendored in this repo — the section numbers below are the
+citation. Override any value per run (constructor / CLI flags).
 """
 
 from __future__ import annotations
