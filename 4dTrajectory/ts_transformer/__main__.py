@@ -32,6 +32,7 @@ also works, but only from inside ``4dTrajectory/``, so the path form is what the
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -50,6 +51,7 @@ from config import (  # noqa: E402
 )
 from dataset import build_series, flight_key, load_flight_dicts  # noqa: E402
 from export import build_prediction_record, observed_series_metrics, write_batch  # noqa: E402
+from flyability import report_for_records  # noqa: E402
 from forecast import forecast_approach  # noqa: E402
 from models import resolve_device  # noqa: E402
 from train import load_checkpoint, train  # noqa: E402
@@ -207,6 +209,23 @@ def main(argv: list[str] | None = None) -> int:
         mean_fde = sum(m["fde_m"] for m in finite) / len(finite)
         print(f"  vs observed track: ADE {mean_ade:.1f} m   FDE {mean_fde:.1f} m "
               f"(over {len(finite)} flight(s))")
+
+    # Flyability: what controls would these trajectories have REQUIRED, and does that sit
+    # inside the airframe's envelope? Reported against the observed tracks measured the same
+    # way — the check carries a known systematic bias (one clean-configuration drag polar
+    # against approaches actually flown dirty), so the delta is the meaningful number and
+    # the observed baseline is the floor, not 100%.
+    flyability = report_for_records(
+        [record.eval_record["states"] for record in records],
+        [record.reference_record["states"] for record in records],
+        series[0].scenario.aircraft,
+    )
+    (Path(args.output_dir) / "flyability_report.json").write_text(
+        json.dumps(flyability, indent=2), encoding="utf-8")
+    predicted, observed = flyability["predicted"], flyability["observed_baseline"]
+    print(f"  flyability: {predicted['fully_flyable_rate'] * 100:.1f}% of predictions fully "
+          f"flyable vs {observed['fully_flyable_rate'] * 100:.1f}% of the observed tracks "
+          f"({flyability['delta']['fully_flyable_rate'] * 100:+.1f} pp)")
 
     print(f"✓ wrote {len(paths)} evaluation record(s) to {args.output_dir}")
     print(f"  grade them with:  python -m evaluation --input {args.output_dir}")
