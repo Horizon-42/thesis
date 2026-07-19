@@ -219,6 +219,18 @@ def main(argv: list[str] | None = None) -> int:
     # way — the check carries a known systematic bias (one clean-configuration drag polar
     # against approaches actually flown dirty), so the delta is the meaningful number and
     # the observed baseline is the floor, not 100%.
+    # One envelope grades the whole batch. That holds today because every harvested arrival
+    # carries type "UNK" and resolves to the single --aircraft-type fallback; it stops holding
+    # the moment real types are extracted (README "Known gaps"), and a silently wrong envelope
+    # would mis-grade stall and thrust for every flight. Stated once, here, rather than
+    # re-checked per record.
+    aircraft_codes = {s.scenario.aircraft.code for s in series}
+    if len(aircraft_codes) > 1:
+        parser.error(
+            f"flyability grades a batch against ONE envelope, but this batch spans "
+            f"{sorted(aircraft_codes)} — give report_for_records a per-flight aircraft "
+            f"before predicting mixed types"
+        )
     flyability = report_for_records(
         [record.eval_record["states"] for record in records],
         [record.reference_record["states"] for record in records],
