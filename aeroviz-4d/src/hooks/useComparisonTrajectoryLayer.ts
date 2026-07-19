@@ -55,7 +55,9 @@ function kindOfEntityId(id: string): ComparisonKind {
  * glТF model. The reference (ref-) entity copied from trajectories.czml already has a
  * model; opt-/sim- are state-sequence paths. Per-kind colour comes from the CZML path.
  */
-function applyComparisonRenderModel(entity: Cesium.Entity, shownEntityIds: Set<string>): void {
+export function applyComparisonRenderModel(
+  entity: Cesium.Entity, shownEntityIds: Set<string>
+): void {
   if (entity.id === "document") return;
   // The overlay aggregates up to N flights, so its per-entity name labels are hidden by default
   // (hundreds of them just clutter the globe); the hover/pick effect reveals only the one under
@@ -69,8 +71,17 @@ function applyComparisonRenderModel(entity: Cesium.Entity, shownEntityIds: Set<s
     // failed / dark-amber off-target) always, and EVERY path of an off-target group (the
     // builder bakes the simulator/result path bright yellow — the marking must sit on the
     // trajectory that missed the target, not just the reference).
+    //
+    // Predictions are excluded from that second exception because the builder never bakes
+    // the yellow for them: a forecast almost always misses the 106.75 m gate, so marking it
+    // would repaint every prediction and say nothing. `status` stays "offTarget" (it is
+    // true, and comparison_index.json reports it), but there is no verdict colour to
+    // preserve — so predictions take the legend colour like any other kind, instead of
+    // depending on the builder's PREDICTION_COLOR happening to equal the legend's.
     const status = entity.properties?.status?.getValue(Cesium.JulianDate.now());
-    if (kind !== "reference" && status !== "offTarget") {
+    const keepsBakedVerdictColor =
+      kind === "reference" || (status === "offTarget" && kind !== "predicted");
+    if (!keepsBakedVerdictColor) {
       const color = comparisonKindColor(kind);
       entity.path.material = new Cesium.ColorMaterialProperty(color);
       if (entity.label) entity.label.fillColor = new Cesium.ConstantProperty(color);
