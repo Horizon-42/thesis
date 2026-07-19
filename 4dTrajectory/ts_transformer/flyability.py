@@ -289,7 +289,8 @@ def required_controls(
     return out
 
 
-def flyability_summary(controls: Sequence[RequiredControl]) -> dict[str, Any]:
+def flyability_summary(controls: Sequence[RequiredControl], *,
+                       aircraft_code: str) -> dict[str, Any]:
     """Per-trajectory verdict: the fraction of samples inside the envelope, and why not.
 
     "Flyable" counts HARD violations only — see :data:`SOFT_VIOLATIONS` for why negative
@@ -307,6 +308,7 @@ def flyability_summary(controls: Sequence[RequiredControl]) -> dict[str, Any]:
 
     finite = [c for c in controls if not math.isnan(c.load_factor)]
     return {
+        "aircraft": aircraft_code,
         "samples": total,
         "flyable_samples": total - len(unflyable),
         "flyable_fraction": (total - len(unflyable)) / total if total else 0.0,
@@ -321,10 +323,30 @@ def flyability_summary(controls: Sequence[RequiredControl]) -> dict[str, Any]:
     }
 
 
+def _envelope_block(envelope: Envelope) -> dict[str, Any]:
+    return {
+        "max_thrust_n": envelope.max_thrust_n,
+        "cl_max": envelope.cl_max,
+        "max_bank_deg": math.degrees(envelope.max_bank_rad),
+        "load_factor": [envelope.min_load_factor, envelope.max_load_factor],
+        # Stated, not silent: two of these are the project's working numbers rather
+        # than certified aircraft limits (see Envelope's docstring).
+        "note": "load-factor and bank bounds are the optimizer's working values; "
+                "Cl_max is from aero_params_for_aircraft and is the physical one",
+    }
+
+
 def flyability_batch(
-    per_trajectory: Sequence[dict[str, Any]], *, envelope: Envelope, aircraft_code: str
+    per_trajectory: Sequence[dict[str, Any]], *, envelopes: dict[str, Envelope]
 ) -> dict[str, Any]:
-    """Batch roll-up over :func:`flyability_summary` results."""
+    """Batch roll-up over :func:`flyability_summary` results.
+
+    ``envelopes`` maps aircraft code -> the envelope that code's trajectories were judged
+    against, and every code appearing in the summaries is reported. A batch is a real fleet
+    (the KRDU harvest spans 14 types), and judging an E170 against an A320's Cl_max and max
+    thrust silently mis-scores stall and thrust for most of it — so the envelope is per
+    aircraft and the roll-up states which ones it used.
+    """
     total = len(per_trajectory)
     fully = sum(1 for s in per_trajectory if s["fully_flyable"])
     samples = sum(s["samples"] for s in per_trajectory)
@@ -338,18 +360,14 @@ def flyability_batch(
         for reason, count in summary.get("soft", {}).items():
             soft[reason] = soft.get(reason, 0) + count
 
+    fleet: dict[str, int] = {}
+    for summary in per_trajectory:
+        code = summary["aircraft"]
+        fleet[code] = fleet.get(code, 0) + 1
+
     return {
-        "aircraft": aircraft_code,
-        "envelope": {
-            "max_thrust_n": envelope.max_thrust_n,
-            "cl_max": envelope.cl_max,
-            "max_bank_deg": math.degrees(envelope.max_bank_rad),
-            "load_factor": [envelope.min_load_factor, envelope.max_load_factor],
-            # Stated, not silent: two of these are the project's working numbers rather
-            # than certified aircraft limits (see Envelope's docstring).
-            "note": "load-factor and bank bounds are the optimizer's working values; "
-                    "Cl_max is from aero_params_for_aircraft and is the physical one",
-        },
+        "fleet": dict(sorted(fleet.items())),
+        "envelopes": {code: _envelope_block(envelopes[code]) for code in sorted(fleet)},
         "trajectories": total,
         "fully_flyable": fully,
         "fully_flyable_rate": fully / total if total else 0.0,
@@ -364,38 +382,54 @@ def flyability_batch(
 def report_for_records(
     predicted_states: Sequence[Sequence[dict[str, Any]]],
     observed_states: Sequence[Sequence[dict[str, Any]]],
-    aircraft: Aircraft,
+    aircraft: Sequence[Aircraft],
     *,
-    aero: AeroParams | None = None,
     transport: str = "approx",
 ) -> dict[str, Any]:
     """The whole check for one batch: invert both sides, summarise, calibrate.
 
     ``predicted_states`` / ``observed_states`` are the ``states`` lists of a batch's
-    evaluation records and of their span-matched reference records.
+    evaluation records and of their span-matched reference records. ``aircraft`` is the
+    airframe of each of those flights, positionally aligned — a batch is a real fleet, and
+    each flight is judged against its OWN envelope.
     """
-    aero = aero or aero_params_for_aircraft(aircraft)
-    envelope = Envelope.for_aircraft(aircraft, aero)
+    if not (len(aircraft) == len(predicted_states) == len(observed_states)):
+        raise ValueError(
+            f"report_for_records needs one aircraft per flight and matching prediction / "
+            f"observation lists: got {len(aircraft)} aircraft, "
+            f"{len(predicted_states)} predicted, {len(observed_states)} observed"
+        )
+
+    # One envelope per distinct type, not per flight — Envelope.for_aircraft is pure, and a
+    # 152-flight batch spans ~14 types.
+    aero_by_code: dict[str, AeroParams] = {}
+    envelopes: dict[str, Envelope] = {}
+    for craft in aircraft:
+        if craft.code not in envelopes:
+            aero_by_code[craft.code] = aero_params_for_aircraft(craft)
+            envelopes[craft.code] = Envelope.for_aircraft(craft, aero_by_code[craft.code])
 
     def summarise(batch: Sequence[Sequence[dict[str, Any]]]) -> list[dict[str, Any]]:
         return [
-            flyability_summary(required_controls(states, aircraft, aero=aero,
-                                                 envelope=envelope, transport=transport))
-            for states in batch
+            flyability_summary(
+                required_controls(states, craft, aero=aero_by_code[craft.code],
+                                  envelope=envelopes[craft.code], transport=transport),
+                aircraft_code=craft.code,
+            )
+            for states, craft in zip(batch, aircraft)
             # Two samples is the minimum to difference; anything shorter carries no rates.
             if len(states) >= 3
         ]
 
     return calibrated_report(summarise(predicted_states), summarise(observed_states),
-                             envelope=envelope, aircraft_code=aircraft.code)
+                             envelopes=envelopes)
 
 
 def calibrated_report(
     predicted: Sequence[dict[str, Any]],
     observed: Sequence[dict[str, Any]],
     *,
-    envelope: Envelope,
-    aircraft_code: str,
+    envelopes: dict[str, Envelope],
 ) -> dict[str, Any]:
     """Predictions' flyability RELATIVE to the observed tracks measured the same way.
 
@@ -410,8 +444,8 @@ def calibrated_report(
     score alike, the predictor is as flyable as the thing it was trained on; a gap is the
     predictor's own doing.
     """
-    pred = flyability_batch(predicted, envelope=envelope, aircraft_code=aircraft_code)
-    obs = flyability_batch(observed, envelope=envelope, aircraft_code=aircraft_code)
+    pred = flyability_batch(predicted, envelopes=envelopes)
+    obs = flyability_batch(observed, envelopes=envelopes)
     return {
         "predicted": pred,
         "observed_baseline": obs,

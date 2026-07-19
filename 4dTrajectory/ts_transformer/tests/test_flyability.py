@@ -28,7 +28,7 @@ from aircraft.aero_params import aero_params_for_aircraft  # noqa: E402
 from aircraft.aircraft_sets import AIRCRAFT_PRESETS  # noqa: E402
 from flyability import (  # noqa: E402
     G, HARD_VIOLATIONS, SOFT_VIOLATIONS, Envelope, calibrated_report, flyability_batch,
-    flyability_summary, isa_density, required_controls,
+    flyability_summary, isa_density, report_for_records, required_controls,
 )
 
 A320 = AIRCRAFT_PRESETS["A320"]
@@ -144,7 +144,8 @@ def test_negative_required_thrust_is_reported_but_not_counted_as_unflyable():
     assert control.flyable
     assert control.hard_violations == ()
 
-    summary = flyability_summary(required_controls(steep, A320, aero=AERO, transport="none"))
+    summary = flyability_summary(required_controls(steep, A320, aero=AERO, transport="none"),
+                                 aircraft_code="A320")
     assert summary["soft"]["thrust_negative"] > 0
     assert "thrust_negative" not in summary["violations"]
 
@@ -182,14 +183,14 @@ def test_required_controls_rejects_a_trajectory_too_short_to_difference():
 
 def test_calibrated_report_states_the_observed_baseline_and_the_delta():
     # The headline is the DELTA, because both sides carry the same clean-polar bias.
-    envelope = Envelope.for_aircraft(A320, AERO)
+    envelopes = {"A320": Envelope.for_aircraft(A320, AERO)}
     flyable = [flyability_summary(required_controls(_level_turn(10.0), A320, aero=AERO,
-                                                    transport="none"))]
+                                                    transport="none"), aircraft_code="A320")]
     stalled = [flyability_summary(required_controls(
         [_state(i * 2.0, V=45.0, alt=0.0) for i in range(5)], A320, aero=AERO,
-        transport="none"))]
+        transport="none"), aircraft_code="A320")]
 
-    report = calibrated_report(stalled, flyable, envelope=envelope, aircraft_code="A320")
+    report = calibrated_report(stalled, flyable, envelopes=envelopes)
     assert report["observed_baseline"]["fully_flyable_rate"] == 1.0
     assert report["predicted"]["fully_flyable_rate"] == 0.0
     assert report["delta"]["fully_flyable_rate"] == pytest.approx(-1.0)
@@ -197,12 +198,39 @@ def test_calibrated_report_states_the_observed_baseline_and_the_delta():
 
 
 def test_batch_roll_up_records_the_envelope_it_judged_against():
-    envelope = Envelope.for_aircraft(A320, AERO)
+    envelopes = {"A320": Envelope.for_aircraft(A320, AERO)}
     summaries = [flyability_summary(required_controls(_level_turn(15.0), A320, aero=AERO,
-                                                      transport="none"))]
-    batch = flyability_batch(summaries, envelope=envelope, aircraft_code="A320")
+                                                      transport="none"),
+                                    aircraft_code="A320")]
+    batch = flyability_batch(summaries, envelopes=envelopes)
 
     assert batch["trajectories"] == 1 and batch["fully_flyable"] == 1
-    assert batch["envelope"]["cl_max"] == 2.7
+    assert batch["fleet"] == {"A320": 1}
+    assert batch["envelopes"]["A320"]["cl_max"] == 2.7
     # The bounds that are the project's working numbers rather than certified limits say so.
-    assert "working values" in batch["envelope"]["note"]
+    assert "working values" in batch["envelopes"]["A320"]["note"]
+
+
+# ── Mixed fleet ──────────────────────────────────────────────────────────────
+
+def test_each_flight_is_judged_against_its_own_airframe():
+    # The KRDU harvest spans 14 types. A shared envelope grades a regional jet by an A320's
+    # Cl_max and max thrust, which silently mis-scores stall and thrust for most of a batch.
+    # Same trajectory, two airframes -> judged against two different envelopes.
+    heavy = AIRCRAFT_PRESETS["B77W"]
+    states = [_state(i * 2.0, V=70.0, alt=300.0) for i in range(5)]
+
+    report = report_for_records([states, states], [states, states], [A320, heavy],
+                                transport="none")
+    assert report["predicted"]["fleet"] == {"A320": 1, "B77W": 1}
+    assert set(report["predicted"]["envelopes"]) == {"A320", "B77W"}
+
+    # The two envelopes really do differ — otherwise this test would pass vacuously.
+    envelopes = report["predicted"]["envelopes"]
+    assert envelopes["A320"]["max_thrust_n"] != envelopes["B77W"]["max_thrust_n"]
+
+
+def test_report_for_records_rejects_a_fleet_that_does_not_line_up():
+    states = [_state(i * 2.0) for i in range(5)]
+    with pytest.raises(ValueError, match="one aircraft per flight"):
+        report_for_records([states, states], [states, states], [A320])
