@@ -105,10 +105,16 @@ for a prediction batch; the entity-id prefix is already what the frontend keys `
   CZML — matching their legend swatch only because `PREDICTION_COLOR` and the TS legend entry
   happen to hold the same RGB. Now keyed on whether a verdict colour was actually baked.
 
-**Not verified in-browser** — the Chrome extension was not connected for this session. Backed by
-tsc clean, 451 frontend tests, `npm run build`, 52 ts_transformer + 25 CZML-builder tests, and a
-structural check of the published artifacts against every contract point the frontend reads
-(categories.json fields incl. `constrained`, entity-id → kind mapping, status, position samples).
+**Verified in-browser** (Linux Chrome, KRDU, all 4 categories): purple prediction + white
+reference paths render together, the `Predicted` legend checkbox removes only the purple, and
+the Optimization panel's metrics follow the selected category (752 m / 2.0% iTransformer full
+vs 3184 m / 0.0% PatchTST window, matching the evaluation reports — and PatchTST window is
+visibly the more scattered fan, an independent read of the same gap). Also backed by tsc clean,
+451 frontend tests, `npm run build`, 54 ts_transformer + 25 CZML-builder tests, and a structural
+check of the published artifacts against every contract point the frontend reads. Gotcha found
+while verifying: comparison entities are time-windowed, so at a clock time outside a group's
+availability the scene is legitimately empty — pause inside a window before concluding the
+overlay is broken.
 
 ### 2026-07-19 — code review fixes: ts_transformer contracts, env resolution, identity single-sourcing
 
