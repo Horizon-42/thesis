@@ -38,10 +38,11 @@ function comparisonKindColor(kind: ComparisonKind): Cesium.Color {
   return Cesium.Color.fromCssColorString(COMPARISON_KIND_COLORS[kind]).withAlpha(COMPARISON_PATH_ALPHA);
 }
 
-/** The entity id prefix encodes its kind: ref-/opt-/sim-. */
+/** The entity id prefix encodes its kind: ref-/opt-/sim-/pred-. */
 function kindOfEntityId(id: string): ComparisonKind {
   if (id.startsWith("ref-")) return "reference";
   if (id.startsWith("opt-")) return "optimizer";
+  if (id.startsWith("pred-")) return "predicted";
   return "simulator";
 }
 

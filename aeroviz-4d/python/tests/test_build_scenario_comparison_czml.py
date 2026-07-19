@@ -4,6 +4,7 @@ import json
 
 from build_scenario_comparison_czml import (
     FAILED_COLOR,
+    PREDICTION_COLOR,
     OFF_TARGET_COLOR,
     OFF_TARGET_REF_COLOR,
     OPTIMIZER_COLOR,
@@ -19,6 +20,7 @@ from build_scenario_comparison_czml import (
     group_results_by_runway,
     load_verdicts,
     optimization_stats,
+    states_schema,
 )
 
 STATES = [
@@ -385,3 +387,86 @@ def test_upsert_category_stamps_the_explicit_constrained_field(tmp_path):
     cats = {c["key"]: c for c in json.loads(manifest.read_text())["categories"]}
     assert cats["runway"]["constrained"] is False
     assert cats["runway_cons"]["constrained"] is True
+
+
+# ── Prediction schema (4dTrajectory/ts_transformer) ──────────────────────────
+
+PREDICTION_STATE_DATA = {
+    "source": {"id": "AFR074", "predictor": "itransformer"},
+    "final_time_s": 5.0,
+    "predicted_states": STATES,
+    "observed_states": STATES,
+}
+
+
+def test_states_schema_distinguishes_the_two_producers():
+    assert states_schema(STATE_DATA) == "optimizer"
+    assert states_schema(PREDICTION_STATE_DATA) == "predicted"
+
+
+def test_states_schema_rejects_a_file_matching_neither():
+    import pytest
+
+    with pytest.raises(KeyError, match="neither the optimizer schema"):
+        states_schema({"source": {}, "final_time_s": 1.0})
+
+
+def test_prediction_states_render_as_one_purple_path_plus_the_reference(tmp_path):
+    # A learned predictor has no plan-vs-replay split: one trajectory, prefixed `pred-` so
+    # the frontend's kindOfEntityId maps it to the "predicted" kind (and its own legend
+    # colour) rather than mislabelling it as an optimizer plan.
+    (tmp_path / "AFR074_05L_states.json").write_text(
+        json.dumps(PREDICTION_STATE_DATA), encoding="utf-8")
+    results = [{"id": "AFR074", "runway": "05L", "status": "solved",
+                "states_file": "AFR074_05L_states.json", "eval_file": "AFR074_05L_eval.json"}]
+
+    czml, index = build_runway_comparison(results, tmp_path, ADSB_CZML, airport="KRDU")
+    ids = [p["id"] for p in czml if p.get("id") != "document"]
+    assert ids == ["ref-AFR074_05L", "pred-AFR074_05L"]
+
+    prediction = next(p for p in czml if p["id"] == "pred-AFR074_05L")
+    assert prediction["path"]["material"]["solidColor"]["color"]["rgba"] == list(PREDICTION_COLOR)
+    assert prediction["properties"]["kind"] == "predicted"
+    assert index[0]["entities"] == ["ref-AFR074_05L", "pred-AFR074_05L"]
+
+
+def test_a_prediction_missing_the_gates_keeps_its_own_colour(tmp_path):
+    # An optimizer result that misses the gates is recoloured off-target yellow so the few
+    # bad ones stand out. A forecast essentially NEVER makes the 106.75 m lateral gate, so
+    # ~100% of a prediction batch would go yellow — the marking would carry no information
+    # and would erase the kind's colour. Status stays accurate; only the colouring is skipped.
+    (tmp_path / "AFR074_05L_states.json").write_text(
+        json.dumps(PREDICTION_STATE_DATA), encoding="utf-8")
+    results = [{"id": "AFR074", "runway": "05L", "status": "solved",
+                "states_file": "AFR074_05L_states.json", "eval_file": "AFR074_05L_eval.json"}]
+    verdicts = {"AFR074_05L_eval.json": {"solved": True, "success": False,
+                                         "lateral_m": 413.5, "vertical_m": 12.0}}
+
+    czml, index = build_runway_comparison(results, tmp_path, ADSB_CZML, airport="KRDU",
+                                          verdicts=verdicts)
+    prediction = next(p for p in czml if p["id"] == "pred-AFR074_05L")
+    reference = next(p for p in czml if p["id"] == "ref-AFR074_05L")
+
+    assert prediction["path"]["material"]["solidColor"]["color"]["rgba"] == list(PREDICTION_COLOR)
+    assert reference["path"]["material"]["solidColor"]["color"]["rgba"] == list(REFERENCE_COLOR)
+    assert "off target" not in prediction["name"]
+    # ...but the verdict is NOT hidden: status and the per-flight deviation still carry it.
+    assert prediction["properties"]["status"] == "offTarget"
+    assert index[0]["lateralErrM"] == 413.5
+
+
+def test_an_optimizer_result_missing_the_gates_still_goes_off_target_yellow(tmp_path):
+    # The guard above must not have disabled off-target marking for the optimizer path.
+    (tmp_path / "AFR074_05L_states.json").write_text(json.dumps(STATE_DATA), encoding="utf-8")
+    results = [{"id": "AFR074", "runway": "05L", "status": "solved",
+                "states_file": "AFR074_05L_states.json", "eval_file": "AFR074_05L_eval.json"}]
+    verdicts = {"AFR074_05L_eval.json": {"solved": True, "success": False,
+                                         "lateral_m": 900.0, "vertical_m": 30.0}}
+
+    czml, _ = build_runway_comparison(results, tmp_path, ADSB_CZML, airport="KRDU",
+                                      verdicts=verdicts)
+    simulator = next(p for p in czml if p["id"] == "sim-AFR074_05L")
+    reference = next(p for p in czml if p["id"] == "ref-AFR074_05L")
+    assert simulator["path"]["material"]["solidColor"]["color"]["rgba"] == list(OFF_TARGET_COLOR)
+    assert reference["path"]["material"]["solidColor"]["color"]["rgba"] == list(OFF_TARGET_REF_COLOR)
+    assert "(off target)" in simulator["name"]

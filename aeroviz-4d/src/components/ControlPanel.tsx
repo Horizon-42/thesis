@@ -17,15 +17,21 @@ import ApproachViewToggle from "./ApproachViewToggle";
 import { useEffect } from "react";
 
 /**
- * The three comparison trajectories, each a colour-keyed visibility checkbox. The kind keys
- * ("optimizer"/"simulator") stay as the backend's entity-id prefixes; the swatch colour comes
- * from the shared COMPARISON_KIND_COLORS (the same source the rendered paths are recoloured to),
- * so the legend and the tracks can never disagree.
+ * The comparison trajectories, each a colour-keyed visibility checkbox. The kind keys
+ * ("optimizer"/"simulator"/"predicted") stay as the backend's entity-id prefixes; the swatch
+ * colour comes from the shared COMPARISON_KIND_COLORS (the same source the rendered paths are
+ * recoloured to), so the legend and the tracks can never disagree.
+ *
+ * Which kinds a category actually contains depends on its producer: an optimizer batch emits
+ * reference + optimizer + simulator, a ts_transformer batch emits reference + predicted. A
+ * checkbox for a kind the loaded category has none of is harmless — it toggles nothing — so
+ * the list stays static rather than being derived per category.
  */
 const COMPARISON_KINDS: Array<{ kind: ComparisonKind; label: string }> = [
   { kind: "reference", label: "Reference" },
   { kind: "simulator", label: "Optimize results" },
   { kind: "optimizer", label: "Optimize states" },
+  { kind: "predicted", label: "Predicted" },
 ];
 
 export default function ControlPanel() {

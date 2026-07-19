@@ -31,12 +31,13 @@ export const TRAJECTORY_PATH_WIDTH = 2;
  * of an off-target group (the builder bakes the simulator/result path bright yellow —
  * `OFF_TARGET_COLOR` — because the marking belongs on the trajectory that missed the
  * target). Keep these RGB values in sync with
- * `python/build_scenario_comparison_czml.py` (OPTIMIZER_COLOR / SIMULATOR_COLOR).
+ * `python/build_scenario_comparison_czml.py` (OPTIMIZER_COLOR / SIMULATOR_COLOR / PREDICTION_COLOR).
  */
 export const COMPARISON_KIND_COLORS: Record<ComparisonKind, string> = {
   reference: "rgb(235, 235, 235)",
   optimizer: "rgb(255, 140, 0)", // "Optimize states"
   simulator: "rgb(40, 120, 255)", // "Optimize results"
+  predicted: "rgb(170, 90, 230)", // "Predicted" — ts_transformer forecast
 };
 
 /** How many shown trajectories carry an aircraft model (the rest are path-only). */

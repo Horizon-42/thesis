@@ -54,6 +54,7 @@ FAILED_COLOR = (200, 60, 60, 200)        # unsolved scenario — reference only,
 # renders a darker amber so the pair reads as one flagged group.
 OFF_TARGET_COLOR = (255, 205, 40, 235)       # the simulator/result path
 OFF_TARGET_REF_COLOR = (150, 118, 25, 200)   # the observed reference (dark amber)
+PREDICTION_COLOR = (170, 90, 230, 225)       # learned prediction — "Predicted" (purple)
 
 # Trailing-tail length (seconds) for the optimizer/simulator paths: the tail fades behind the
 # moving aircraft as playback advances, so the head (current position) is distinguishable from the
@@ -234,13 +235,38 @@ def scenario_initial_map(scenario_paths: list[str | Path]) -> dict[tuple[str, st
     return out
 
 
+# The two states-file schemas this builder understands, each mapping to the entity
+# prefixes the frontend derives `kind` from (kindOfEntityId in useComparisonTrajectoryLayer).
+#
+#   optimizer (4dTrajectory/optimization)     opt- the NLP's plan, sim- the true-dynamics replay
+#   predicted (4dTrajectory/ts_transformer)   pred- the learned forecast
+#
+# A learned predictor has no plan/replay split — it emits one trajectory and no controls —
+# so it gets its own kind rather than borrowing `optimizer`, which would make the legend
+# ("Optimize states") lie about what is drawn.
+_OPTIMIZER_SCHEMA = ("optimizer_states", "simulator_states")
+_PREDICTION_SCHEMA = ("predicted_states",)
+
+
+def states_schema(state_data: dict[str, Any]) -> str:
+    """``"optimizer"`` or ``"predicted"``, from which state keys a states file carries."""
+    if all(key in state_data for key in _OPTIMIZER_SCHEMA):
+        return "optimizer"
+    if all(key in state_data for key in _PREDICTION_SCHEMA):
+        return "predicted"
+    raise KeyError(
+        f"states file has neither the optimizer schema {_OPTIMIZER_SCHEMA} nor the "
+        f"prediction schema {_PREDICTION_SCHEMA}; got keys {sorted(state_data)}"
+    )
+
+
 def _traj_properties(
     group: str, flight_id: str | None, kind: str, runway: str, airport: str, status: str
 ) -> dict[str, Any]:
     """CZML custom-property bag the frontend uses to group / sample / colour-key entities.
 
     ``group`` is the per-flight key (unique within the run); ``kind`` is one of
-    ``reference`` / ``optimizer`` / ``simulator``.
+    ``reference`` / ``optimizer`` / ``simulator`` / ``predicted``.
     """
     return {
         "group": group, "flightId": flight_id, "kind": kind,
@@ -322,8 +348,14 @@ def build_runway_comparison(
         if solved:
             states_file = result["states_file"]
             state_data = json.loads((states_dir / states_file).read_text(encoding="utf-8"))
-            optimizer_states = state_data["optimizer_states"]
-            simulator_states = state_data["simulator_states"]
+            schema = states_schema(state_data)
+            if schema == "optimizer":
+                optimizer_states = state_data["optimizer_states"]
+                simulator_states = state_data["simulator_states"]
+                predicted_states = None
+            else:
+                optimizer_states = simulator_states = None
+                predicted_states = state_data["predicted_states"]
 
             # The evaluation verdict for this flight (joined by the summary row's eval_file):
             # solved-but-outside-the-gates renders as "off target" (yellow reference).
@@ -332,9 +364,19 @@ def build_runway_comparison(
                 verdict is not None and verdict.get("solved") and not verdict.get("success")
             )
             status = "offTarget" if off_target else "solved"
-            ref_color = OFF_TARGET_REF_COLOR if off_target else REFERENCE_COLOR
-            sim_color = OFF_TARGET_COLOR if off_target else SIMULATOR_COLOR
-            ref_name = f"Ref {flight_id} (off target)" if off_target else f"Ref {flight_id}"
+            # The off-target COLOURING exists to make the few results that missed their
+            # target stand out among mostly-successful ones. For a learned prediction that
+            # is backwards: a forecast essentially never lands inside the 106.75 m lateral
+            # gate (that limit is FAA containment for a planned/flown approach, not a
+            # forecast-accuracy target), so ~100% of a prediction batch would go yellow —
+            # the marking would carry no information and would erase the kind's own colour.
+            # The `status` property stays accurate either way, and the per-flight deviation
+            # is still surfaced by the index's lateralErrM/verticalErrM and the evaluation
+            # report, which say far more than a binary colour.
+            mark_off_target = off_target and schema == "optimizer"
+            ref_color = OFF_TARGET_REF_COLOR if mark_off_target else REFERENCE_COLOR
+            sim_color = OFF_TARGET_COLOR if mark_off_target else SIMULATOR_COLOR
+            ref_name = f"Ref {flight_id} (off target)" if mark_off_target else f"Ref {flight_id}"
 
             reference = _reference_entity_from_adsb(
                 adsb_czml, flight_id, ref_color,
@@ -345,20 +387,31 @@ def build_runway_comparison(
             if reference is not None:
                 entities.append(reference)
                 entity_ids.append(f"ref-{group}")
-            entities.append(_build_trajectory_entity(
-                f"opt-{group}", f"Opt {flight_id}", optimizer_states, OPTIMIZER_COLOR,
-                properties=_traj_properties(group, flight_id, "optimizer", runway, airport, status),
-                show=show))
-            entity_ids.append(f"opt-{group}")
-            entities.append(_build_trajectory_entity(
-                f"sim-{group}",
-                f"Sim {flight_id} (off target)" if off_target else f"Sim {flight_id}",
-                simulator_states, sim_color,
-                properties=_traj_properties(group, flight_id, "simulator", runway, airport, status),
-                show=show))
-            entity_ids.append(f"sim-{group}")
+            if schema == "optimizer":
+                entities.append(_build_trajectory_entity(
+                    f"opt-{group}", f"Opt {flight_id}", optimizer_states, OPTIMIZER_COLOR,
+                    properties=_traj_properties(group, flight_id, "optimizer", runway, airport, status),
+                    show=show))
+                entity_ids.append(f"opt-{group}")
+                entities.append(_build_trajectory_entity(
+                    f"sim-{group}",
+                    f"Sim {flight_id} (off target)" if mark_off_target else f"Sim {flight_id}",
+                    simulator_states, sim_color,
+                    properties=_traj_properties(group, flight_id, "simulator", runway, airport, status),
+                    show=show))
+                entity_ids.append(f"sim-{group}")
+            else:
+                # One path, not two: a learned predictor has no plan-vs-replay split. The
+                # off-target colour still applies — it marks the trajectory that missed the
+                # gates, and here that is the prediction itself.
+                entities.append(_build_trajectory_entity(
+                    f"pred-{group}", f"Pred {flight_id}",
+                    predicted_states, PREDICTION_COLOR,
+                    properties=_traj_properties(group, flight_id, "predicted", runway, airport, status),
+                    show=show))
+                entity_ids.append(f"pred-{group}")
 
-            initial_state = _initial_state(optimizer_states or simulator_states)
+            initial_state = _initial_state(optimizer_states or simulator_states or predicted_states)
             scen = (scenario_initial or {}).get((flight_id, runway))
             initial_v, mass_kg = _flight_facts(initial_state, scen)
             record = {

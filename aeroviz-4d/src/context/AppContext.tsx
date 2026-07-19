@@ -143,7 +143,13 @@ interface AirportSessionState {
 }
 
 /** The three coloured trajectories in an optimizer comparison. */
-export type ComparisonKind = "reference" | "optimizer" | "simulator";
+/**
+ * A comparison entity's role. `optimizer`/`simulator` are the two halves of an optimizer
+ * run (the NLP's plan and its true-dynamics replay); `predicted` is a learned forecast,
+ * which has no such split — one trajectory, no controls. It is a separate kind rather than
+ * reusing `optimizer` so the legend cannot claim a prediction is an optimizer plan.
+ */
+export type ComparisonKind = "reference" | "optimizer" | "simulator" | "predicted";
 
 interface FlightSessionState {
   /** The currently tracked/selected flight callsign */
@@ -311,7 +317,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [trajectoryComparisonCategory, setTrajectoryComparisonCategory] =
     useState<string | null>(null);
   const [trajectoryComparisonKinds, setTrajectoryComparisonKinds] =
-    useState<Record<ComparisonKind, boolean>>({ reference: true, optimizer: false, simulator: true });
+    useState<Record<ComparisonKind, boolean>>({ reference: true, optimizer: false, simulator: true, predicted: true });
   const setTrajectoryComparisonKind = useCallback((kind: ComparisonKind, visible: boolean) => {
     setTrajectoryComparisonKinds((prev) => ({ ...prev, [kind]: visible }));
   }, []);
