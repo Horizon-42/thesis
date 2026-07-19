@@ -12,10 +12,11 @@ AeroViz-4D: Airport 4D trajectory and terrain digital-twin visualization system 
 - **trajectory_data_process/** — Trajectory acquisition, processing, and dataset helpers
 - **bc_lidar_downloader/** — BC LiDAR terrain data downloader
 - **run_asd-b_fetch_and_generate.py** — Orchestrator: fetch -> normalize -> generate CZML pipeline
-- **geokit/** — Shared geodesy/units package (src-layout, `pip install -e` into conda `aviation`)
+- **geokit/** — Shared geodesy/units package (src-layout, `pip install -e` into conda `aeroviz`)
 - **flight_scenarios/** — Data→modeling seam (observed track → `FlightScenario`)
 - **evaluation/** — File-based trajectory judging + batch metrics (geokit + stdlib only)
 - **4dTrajectory/optimization/** — Optimizers, constraints, batch tooling
+- **4dTrajectory/ts_transformer/** — Learned trajectory prediction (vendored iTransformer + PatchTST, torch)
 - **aeroviz_backend/** — Python HTTP backend (simulation / optimization / dynamics-comparison)
 - **run_scenario_pipeline.py** — Batch runner: scenarios → optimize → CZML comparison + evaluation
 
@@ -60,6 +61,18 @@ python run_asd-b_fetch_and_generate.py --input-json trajectory_data_process/outp
 python run_scenario_pipeline.py --jobs 6
 ```
 
+### Learned prediction (4dTrajectory/ts_transformer/)
+
+```bash
+conda activate aeroviz                                     # the single thesis env (has torch)
+TS=4dTrajectory/ts_transformer/__main__.py
+python $TS train   --data <arrivals.json|dir> --airport KRDU --model itransformer \
+                   --horizon-mode window --output-dir 4dTrajectory/outputs/KRDU/ts_itr
+python $TS predict --checkpoint .../checkpoint.pt --data ... --output-dir .../ts_pred
+python -m evaluation --input .../ts_pred                   # same gates as the optimizer
+python -m pytest 4dTrajectory/ts_transformer/tests -q --import-mode=importlib
+```
+
 ## Architecture
 
 ### Frontend State & Component Structure
@@ -101,11 +114,33 @@ Modeling pipeline: `*_czml_input_*.json` → `flight_scenarios` (`FlightScenario
 
 ## Environment
 
+- **`aeroviz` (Python 3.12) is THE thesis env on this machine** — data acquisition (`traffic`,
+  `pyopensky`), CIFP parsing (`cifparse`, `arinc424`), `casadi` + IPOPT, `openap`, the
+  conda-forge geospatial stack, editable `geokit`, and `torch`. One env runs everything;
+  `run_all_tests.sh` picks it and its `4dTrajectory` entry covers the ts_transformer suite.
+- **`aviation` on this machine is NOT the thesis env** — it belongs to
+  `/home/supercomputing/studys/AivationTransformer` (a different project; pure-pip, py3.11).
+  The name collides because on another machine the thesis env IS called `aviation`.
+  **Do not install thesis packages into it and do not delete it.** `run_all_tests.sh` and
+  `start_aeroviz_fullstack.sh` both resolve the env via `scripts/activate_aeroviz_env.sh`,
+  which probes candidates with `import casadi` (so the wrong-project `aviation` here is
+  skipped by content, not trusted by name), keeps a qualifying already-active env,
+  ACTIVATES (never direct-execs `envs/<env>/bin/python` — activate.d hooks must run), and
+  treats an explicit `AEROVIZ_CONDA_ENV` as the only candidate (a typo fails loudly).
+- **Consolidating the thesis into a py3.11 env is BLOCKED**, tested: `cifparse` >= 2.0.4
+  (aeroviz has 2.0.9) uses PEP 701 f-strings — nested same-type quotes — which is Python
+  3.12+ syntax; every version from 2.0.4 up fails `compileall` on 3.11. Only 2.0.0 and
+  earlier import there, i.e. a 9-patch regression in the ARINC 424 parser that feeds
+  `approach_constraints`. Its PyPI metadata claims `>=3.10` and is simply wrong.
+- Env spec backups (regenerate `aeroviz` if ever needed): `.env-backup/aeroviz-pip-freeze.txt`,
+  `aeroviz-conda-explicit.txt`, `aeroviz-environment.yml`.
+- GPU: RTX 4060, 8 GB (compute capability 8.9), cu128 wheels.
 - Requires `VITE_CESIUM_ION_TOKEN` in `.env` (Cesium Ion access token)
 - Vite config uses `vite-plugin-cesium` (asset copying, `CESIUM_BASE_URL`)
 - TypeScript strict mode (strict null checks, noUnusedLocals, noUnusedParameters)
 - Test environment: jsdom with vitest globals
-- Python env: conda `aviation`; `geokit` is `pip install -e`'d
+- Python env: conda `aeroviz` (see the env bullets above — this line used to say `aviation`,
+  which is a DIFFERENT project's env on this machine and caused a near-miss deletion)
 - This machine: 16 GB RAM, frequently swap-bound — memory pressure (Cesium + casadi + IDE + browser) causes UI lag independent of code changes
 
 ## Domain Context
@@ -144,6 +179,14 @@ Dual purpose: thesis visualization/validation + reusable research component libr
 - **"Batch edition" seam class**: the batch callers in `scenario_optimization.py` duplicate wiring the backend HTTP path also has — several bugs (stale `_solve_iaf` unpack, trapezoidal left behind after the HS flip, missing `n_seg_per_phase`) came from updating one path and missing the other. When changing optimizer wiring, update BOTH and their seam tests.
 - Pre-existing, unrelated: two `run_asd-b` orchestrator tests fail on this branch (missing `--include-transitions` / `_airport_output_dir`) — untouched.
 - Stale docs (historically inaccurate, kept): `4dTrajectory/docs/direct_collocation_hermite_simpson.zh.md` §5 and `geodetic_dynamics_transport.zh.html` describe the old HS-planner + RK4-polish pipeline.
+- **`import torch` BEFORE `import traffic` used to break matplotlib** — pip's manylinux torch wheel resolves `libstdc++.so.6` from `/lib/x86_64-linux-gnu` (CXXABI ≤ 1.3.13); once that SONAME is loaded, conda-forge matplotlib's `_c_internal_utils.so` (needs CXXABI_1.3.15) fails. The reverse import order worked, and `run_all_tests.sh` runs both suites in ONE pytest process with `4dTrajectory` (torch) ahead of `trajectory_data_process` (traffic) — i.e. exactly the failing order. Fixed by `$CONDA_PREFIX/etc/conda/activate.d/zz-libstdcxx.sh`, which prepends `$CONDA_PREFIX/lib` to `LD_LIBRARY_PATH` (with a matching `deactivate.d`). **This only applies under `conda activate`** — invoking `envs/aeroviz/bin/python` directly bypasses it and the old failure returns.
+- **A harvest directory holds five overlapping views of the same flights**: `*_arrivals.json` (truncated at the ring — the training input), `*_landings.json` (SAME flights untruncated), `*_combined_czml_input.json` (all runways merged), plus `*_heading_rejected.json` / `*_local_rejected.json` (tracks the harvester THREW OUT). A naive `glob("*.json")` loaded every flight three times over plus the known-bad ones — invisible in a loss curve. `dataset.select_flight_files` takes the first matching pattern only, never mixes, always excludes `*_rejected*`, and prints what it skipped.
+- **Every harvested arrival has `"type": "UNK"`** (`czml_export` hardcodes it) and `flight_scenarios._resolve_aircraft` RAISES rather than guessing, so a batch dies on flight #1 without a fallback. `ts_transformer` takes `--aircraft-type` (train default `A320`, printed on every run); the resolved value is a `TSConfig` field, so it is **recorded in the checkpoint and predict defaults to the train-time value** (an explicit differing `--aircraft-type` at predict prints a WARNING — it shifts the ENU frames and gate targets away from what the normalizer was fit under). Not cosmetic: it sets the target state's Vref and threshold-crossing height, which is what the evaluation gates measure the final state against.
+- **ts_transformer is a purely kinematic BASELINE — no dynamics/aerodynamics is connected, by design.** Channels in, channels out; the only symbol it imports from `aerodynamic_model` is the `GeodeticState` dataclass (no equations), vs the optimizer's `CasadiSimulator` + `rollout_piecewise_constant`. Predictions therefore carry NO flyability guarantee (speeds/turn rates/thrust/`Cl_max` are unchecked) — the survey's "statistically plausible but unflyable" problem. Do NOT treat this as an unfinished TODO; it is what lets the learned component be measured on its own. The four routes if it is ever added (post-hoc flyability check → post-hoc casadi projection → soft physical loss → differentiable torch dynamics) are written up in the package README. Same for single-aircraft-only and deterministic-point-prediction: scope decisions, listed separately from real gaps in that README.
+- **ts_transformer: instance normalisation is OFF and must stay off by default.** iTransformer's `use_norm` and PatchTST's `revin` are ON upstream; both strip a window's absolute level as "nuisance". In a threshold-anchored ENU frame absolute position IS the signal (it decides where the turn onto final is, when the descent starts, where the approach ends). Measured on synthetic KRDU, all four model×mode cells: off wins by 2.4–6.5× on ADE, and on *converges sooner* to the worse optimum. Re-ablate with `--instance-norm` once real data lands.
+- **ts_transformer: a flight's identity is `id_runway_icao24_landingTime` (`flight_scenarios.identity.flight_key`), never `id` alone.** `id` is the callsign and repeats daily and across runway files; keying the split on it leaks train/val/test and makes `predict --split test` return every namesake (48 flights for an 18-flight split). The SAME function produces the ts record stems AND the optimizer batch's record filenames (`_scenario_filename` wraps it), so split key and both writers' filenames cannot drift.
+- **ts_transformer: prediction records are anchored at `t=0` = the anchor sample**, `initial_state` is the observed state THERE (not the track start), and the reference record covers the SAME span. `evaluation.reference.compare_to_reference` resamples both paths at 101 fractions of *their own* arc length, so a whole-track reference against an anchor→threshold prediction reports kilometres of pure span mismatch (measured: 4349 m → 833 m once span-matched).
+- Pre-existing, unrelated: `4dTrajectory/optimization/collocation/tests/test_optimizer.py::test_fixed_time_objective_weights_control_effort_at_one` fails with `TypeError: only 0-dimensional arrays can be converted to Python scalars` (numpy scalar-conversion deprecation), independent of ts_transformer.
 
 ## Key Defaults & Constants (current)
 
@@ -159,9 +202,10 @@ Dual purpose: thesis visualization/validation + reusable research component libr
 - Playback drift guard: `playbackDriftM` on every optimize response; stderr WARNING above `PLAYBACK_DRIFT_WARN_M = 50`.
 - Arrival truncation (`trajectory_data_process/arrival_segment.py`): `ENTRY_RADIUS_KM = 25` (builder `--entry-radius-km`, in (0, 30)), `ENTRY_HYSTERESIS_SAMPLES = 3`, `LOCAL_START_RADIUS_KM = 5`.
 - Worker sessions: `AEROVIZ_WORKER_IDLE_TIMEOUT_S` (default 600) idle watchdog reclaims a stranded resident solver worker.
+- **ts_transformer** (`config.py`, single source; all serialised into every checkpoint, incl. `aircraft_type`): `dt_s = 2.0`, `seq_len = 60` (120 s), `pred_len` = 30 (window, 60 s) / **300** (full, 600 s). Sized from the MEASURED duration distribution of the 3747 harvested arrivals (p50 328 s / p95 651 s / p99 920 s): full-mode L+H covers **97.8%** of flights (150 would cover 57.6%). The old "an arrival is ~3.5–5 min" straight-line estimate was WRONG (real arrivals are vectored) — do not resize from it. The ~2% of flights longer than the horizon are cut at H and flagged `horizonCapped`/`horizon_capped` in record + summary (predict prints a WARNING; their gate verdicts are cap artifacts). `load_checkpoint` refuses a checkpoint whose channel order differs from `channels.CHANNELS`, and loads with `weights_only=True`. Train/val/test split is per-flight sha256 of `(seed, flight_id)` — stable under harvest growth, fractions approximate. Channels = `(e, n, u, ve, vn, vu)` in a threshold-anchored ENU frame (`channels.CHANNELS`, order is load-bearing — it indexes tensors, normalizer stats and checkpoints). `psi`/`gamma` are never regressed directly (±π wrap); they fall out of the velocity components as `atan2(vn, ve)`, which IS the math-ENU convention. Records are reference-shaped (`controls == []`) and emitted via `optimization/evaluation_export.py` (casadi-free, so it imports into the torch env).
 - Comparison CZML colour contract: group status lives on entity `properties.status` ∈ solved/offTarget/failed. Reference: white / dark-red (failed) / dark-amber `OFF_TARGET_REF_COLOR` (off-target); simulator/result path bakes bright yellow `OFF_TARGET_COLOR` (255,205,40) + "(off target)" name (frontend repaint skips `status=="offTarget"`); optimizer plan keeps legend orange/cyan.
 - Categories manifest: `categories.json` entries carry an explicit `"constrained": bool` (frontend validator REQUIRES it; `_cons`-suffix detection deleted). Evaluation read side is manifest-ONLY: `load_records` reads a batch dir via `summary.json` roster (`results[].eval_file`); manifest-less dir / listed-missing file / empty roster raise (no glob fallback — globbing counted orphans).
-- Stale-artifact hygiene (write side): `_clear_stale_records` deletes top-level `*_states.json`/`*_eval.json` at batch start; `write_reference_records` clears `references/*_reference_eval.json` first; CZML builder `clear_stale_outputs` deletes previous `comparison_*.czml` + a stale published `evaluation_report.json`. Record-filename suffixes single-sourced (`_STATES_SUFFIX`/`_EVAL_SUFFIX`/`_REFERENCE_EVAL_SUFFIX`).
+- Stale-artifact hygiene (write side): `_clear_stale_records` deletes top-level `*_states.json`/`*_eval.json` at batch start; `write_reference_records` clears `references/*_reference_eval.json` first; CZML builder `clear_stale_outputs` deletes previous `comparison_*.czml` + a stale published `evaluation_report.json`. Record-filename suffixes + `REFERENCES_DIR` + the `summary.json` row shape (`summary_row`) single-sourced in `optimization/evaluation_export.py` (imported by both the batch and `ts_transformer/export.py`).
 
 ## Changelog
 
@@ -179,4 +223,6 @@ Maintenance convention:
 - Per-leg RNP is not extracted from CIFP — RNP-AR procedures (H05LZ) get the default RNP 1.0 disc (~926 m at k=0.5) instead of ~278 m (RNP 0.3).
 - CIFP leg speed restrictions not extracted (no speed-bearing data source in the dataset yet; the canonical `speedMaxKt` field is ready).
 - HSL linear-solver hook dormant (free MA27 measured slower than MUMPS); revisit with an MA57 academic license.
+- **`ts_transformer` first real run is DONE (KRDU, 995 arrivals; see `docs/CHANGELOG.md` 2026-07-19)** — artifacts in `4dTrajectory/outputs/KRDU/ts_{model}_{mode}/` + `ts_pred_*`. Headline: one-pass `full` beats chained `window` on whole-approach prediction (lateral p95 3136 vs 6898 m — compounding cost lands in the TAIL, not the mean); iTransformer beats PatchTST at long lead (channel-independence can't represent the east/north coupling of a turn), but PatchTST wins at 10 s lead where the aircraft is near-straight; 0/149 gate passes in all four runs is expected, not failure. Remaining: only KRDU trained (4 other airports harvested, cross-airport generalisation untested and the per-threshold ENU frame makes pooling a real design question); `--instance-norm` still not re-ablated on real data.
+- ts_transformer follow-ups: predictions are not fed to `build_scenario_comparison_czml.py` (it expects `optimizer_states`/`simulator_states`; ts writes `predicted_states`/`observed_states`); aircraft type is `"UNK"` in czml-input so `flight_scenarios` falls back to a default aircraft, and Vref sets the target state the gates measure against; single-aircraft only (no traffic interaction / ATC intent) and deterministic (no multimodality) — both are the survey's named open problems.
 - Approach-view interior-gap `break` is latent (current CZMLs are single-interval); the 07-07 approach-view changes were verified via tests/tsc/build but not re-checked in-browser.
