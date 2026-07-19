@@ -14,7 +14,17 @@
 #   ./run_all_tests.sh -x         # extra args are forwarded to pytest (stop on first fail)
 #   ./run_all_tests.sh -k rollout # ...or filter by keyword
 #
-# All suites are expected to pass (modeling+backend and aeroviz-4d/python both exit 0).
+# Environment: needs the thesis conda env — casadi (optimizer, backend, aero model) AND
+# torch (the ts_transformer suite, collected under 4dTrajectory). Resolution is delegated
+# to scripts/activate_aeroviz_env.sh; see CLAUDE.md "Environment" for why the env is
+# probed for casadi rather than trusted by name.
+#
+# Expected result: aeroviz-4d/python exits 0. Modeling+backend exits 1 on ONE known,
+# pre-existing, unrelated failure —
+#   4dTrajectory/optimization/collocation/tests/test_optimizer.py
+#     ::test_fixed_time_objective_weights_control_effort_at_one
+#   TypeError: only 0-dimensional arrays can be converted to Python scalars
+# (a numpy scalar-conversion deprecation). Anything beyond that one is a real regression.
 
 set -uo pipefail
 
@@ -27,10 +37,17 @@ cd "$REPO_ROOT"
 # shellcheck disable=SC1091
 source "$REPO_ROOT/scripts/activate_aeroviz_env.sh"
 if ! aeroviz_activate_env; then
+  # Not fatal — a system python may still run some suites — but say what is coming, so a
+  # wall of ImportErrors reads as "wrong env" rather than as broken code.
   echo "warning: continuing with the current python ($(command -v python))" >&2
+  echo "         expect collection errors from every suite needing casadi or torch" >&2
+else
+  echo "env: $CONDA_DEFAULT_ENV ($(command -v python))"
 fi
 
-# Modeling + backend suites (geokit, aircraft, flight_scenarios, optimizer, backend, …).
+# Modeling + backend suites (geokit, aircraft, flight_scenarios, optimizer, backend, and
+# the learned-prediction suite — ts_transformer/tests is collected under 4dTrajectory,
+# which is why this group needs torch as well as casadi).
 MODELING_SUITES=(
   aerodynamic_model/tests
   4dTrajectory
