@@ -4,6 +4,112 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-07-19 — flyability check, instance-norm re-ablation on real data, predictions in the frontend
+
+Three things asked for together: the post-hoc flyability check (route 1 of the README's four),
+re-ablating `--instance-norm` on real data, and getting prediction results to render in the
+frontend alongside the optimizer's.
+
+**Post-hoc flyability (`4dTrajectory/ts_transformer/flyability.py`, 16 tests).** The
+load-factor point-mass model inverts in closed form — `A = psi_dot V cos(gamma)/g = n sin(mu)`,
+`B = gamma_dot V/g + cos(gamma) = n cos(mu)`, so `n = hypot(A,B)`, `mu = atan2(A,B)`; `n` fixes
+`Cl`, `Cl` fixes drag, and `T = m(V_dot + g sin(gamma)) + D` closes it. One pass, no solver, no
+casadi, so it lives in the torch env. Earth-frame transport terms are subtracted first.
+`predict` writes `flyability_report.json` and prints a summary line.
+
+- **The calibration matters more than the check.** First run against REAL flown tracks scored
+  **0/149 fully flyable** — those are trajectories real aircraft flew, so the check was wrong.
+  Cause: `thrust_negative`. Median required thrust on a real arrival is **0.43 kN** (idle), and
+  a negative requirement means the aircraft needed more drag than a clean airframe has —
+  speedbrake, flaps, gear. Every approach does this; one clean-configuration polar cannot
+  represent it. Reclassified as SOFT (reported, not counted unflyable), and the report leads
+  with the delta against the observed tracks measured by identical code, because both sides
+  carry the same polar bias. **The observed baseline is the floor, not 100%.**
+- `Cl_max` from `aero_params_for_aircraft` (2.7 for an A320), NOT `LoadFactorSimulator`'s
+  hardcoded 1.5 — they disagree by 80% and `aero_params.py` is the documented source of truth.
+
+**Instance-norm re-ablation on real KRDU data — the synthetic OFF default holds.** All 8 cells
+(2 models × 2 horizon modes × on/off), same hyperparameters, each graded on its own
+checkpoint's test split; artifacts in `4dTrajectory/outputs/KRDU/_ablation_norm/`, roll-up in
+`ablation_results.json`.
+
+- **OFF wins 19 of 20 accuracy comparisons, one tie**: every cell on val loss, FDE, ADE p95 and
+  lateral p95; 3 of 4 on mean ADE with PatchTST window a dead heat (2580 vs 2571 m — the cell
+  where OFF wins the other four metrics). A sweep that lopsided is not run-to-run variance,
+  which was the open question: individual gaps here are much smaller than on synthetic data
+  (1.2–2.7× vs 2.4–6.5×), and an earlier partial pass on ONE metric had shown an apparent
+  reversal in that same PatchTST window cell. It did not survive consistent scoring.
+- **The signature is lateral p95**: all four instance-norm-ON cells land at 14.28–14.50 km —
+  near-constant across both architectures and both horizon modes. That is a model that cannot
+  place the endpoint at all; strip the absolute level and the prediction ends at a distance set
+  by the frame, not by the flight. OFF spans 2.6–8.5 km, i.e. it varies with the flight.
+- **Flyability moves the OPPOSITE way** (ON better in 3 of 4 cells; PatchTST window 89.3% vs
+  29.6%, i.e. the configuration 2.2× worse at the threshold looks three times more flyable).
+  Instance norm is not flying better, it is predicting blander paths — easy to fly, far from
+  the truth. A straight line is perfectly flyable and completely wrong. Recorded in the README
+  because it is the standing argument for never reading flyability alone. (iTransformer full is
+  the exception at 46.1% off vs 34.9% on.)
+
+**Headline KRDU runs retrained, and two published conclusions did not survive it.** The 4
+published checkpoints carried a split that `hash(flight_key)` reproduces for only 552/995
+flights — they predate the per-flight-hash split fix, exactly the "retrain before comparing"
+note in the entry below. The partition itself is clean (train/val/test verified disjoint), so
+the published numbers were not wrong, just on a split no current run can reproduce and not
+comparable with the ablation. Retrained on the current keying (702/141/152):
+
+- **"The compounding cost lands in the tail, not the mean" — withdrawn.** It rested on lateral
+  mean 1.5× vs p95 2.2×; on the new split the two ratios are equal to within noise
+  (iTransformer 1.55× vs 1.61×). A tail effect survives in FDE (PatchTST p95 1.78× against a
+  1.36× mean) but that is a different claim than the one written.
+- **"Zero gate passes in all four runs" — withdrawn.** iTransformer now passes 3/152 (full)
+  and 1/152 (chained). The substance holds (2% is not a usable predictor) but "zero, always"
+  was a property of that split.
+- **Survived:** one-pass full beats chained window on whole-approach lateral error for both
+  models on both splits (1.5–1.6× mean, 1.5–2.1× p95), and the short-lead/long-lead crossover
+  between PatchTST and iTransformer (now cleanest within the full-mode pair: 184 vs 571 m at
+  10 s, reversing by 300 s).
+
+Standing lesson recorded in the README and CLAUDE.md: **treat any single-split margin under
+~1.5× as provisional** — that is the size of effect a split change moved here.
+
+**Flyability shipped with a wrong assumption, caught by its own guard.** The check graded a
+whole batch against ONE envelope, documented as safe because "every harvested arrival is type
+UNK and resolves to the single `--aircraft-type` fallback". A boundary assertion added to state
+that assumption fired on the first real batch: `_resolve_aircraft` falls through to an
+**`icao24` → OpenAP lookup** that recovers the real airframe — 20 distinct types across 400 KRDU
+arrivals, A320 only 224 of them. So ~44% of every batch was being judged by an A320's `Cl_max`
+and max thrust, invisibly, because the report never named the airframe it used.
+`report_for_records` now takes one `Aircraft` per flight, builds one envelope per distinct type,
+and the roll-up carries `fleet` + `envelopes`. All flyability numbers moved: the observed-track
+baseline went 58.4% → **63.2%**. The CLAUDE.md/README claims about UNK were corrected.
+
+**`summary.json` now carries an `accuracy` block** (+ per-row `ade_m`/`fde_m`/`overlap_steps`).
+A batch's error against the observed tracks is its headline result and it existed only as a
+printed mean — comparing eight ablation cells meant scraping stdout. Mean AND p95, because
+chained window-mode error compounds into the tail. `overlap` is a required argument to
+`write_batch`, not optional: an optional metric is one that silently goes missing.
+
+**Predictions render in the frontend.** `build_scenario_comparison_czml.py` detects the record
+schema (`optimizer_states`/`simulator_states` vs `predicted_states`) and emits `pred-` entities
+for a prediction batch; the entity-id prefix is already what the frontend keys `kind` off, so
+`predicted` gets its own purple colour and legend checkbox. Two follow-on fixes:
+
+- **Off-target recolouring restricted to the optimizer schema.** A forecast essentially always
+  misses the 106.75 m gate, so it marked 27/27 groups off-target and repainted every prediction
+  yellow — the kind colour was never once visible and a marker that fires on everything carries
+  no information. `properties.status` stays accurate; deviation is reported by the evaluation
+  report and comparison index.
+- **The frontend repaint skip was keyed on the wrong thing.** It skipped legend repaint whenever
+  `status === "offTarget"`, but what it exists to preserve is a baked VERDICT colour (the
+  yellow). Predictions never get that bake yet are always `offTarget`, so they rendered from the
+  CZML — matching their legend swatch only because `PREDICTION_COLOR` and the TS legend entry
+  happen to hold the same RGB. Now keyed on whether a verdict colour was actually baked.
+
+**Not verified in-browser** — the Chrome extension was not connected for this session. Backed by
+tsc clean, 451 frontend tests, `npm run build`, 52 ts_transformer + 25 CZML-builder tests, and a
+structural check of the published artifacts against every contract point the frontend reads
+(categories.json fields incl. `constrained`, entity-id → kind mapping, status, position samples).
+
 ### 2026-07-19 — code review fixes: ts_transformer contracts, env resolution, identity single-sourcing
 
 Applied the 15 findings of a full-diff review (ts_transformer + the uncommitted env-script changes):

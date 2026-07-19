@@ -48,6 +48,7 @@ before changing anything here.
 | `forecast.py` | one-pass and chained (`recursive_forecast`) prediction, threshold truncation |
 | `metrics.py` | ADE / FDE plus the along-track / cross-track / altitude decomposition |
 | `export.py` | evaluation records + `summary.json` manifest, via the optimizer's own record emitters |
+| `flyability.py` | closed-form control inversion — what a predicted path would have required, vs the envelope |
 | `synthetic.py` | synthetic arrivals, so the pipeline is runnable before real data lands |
 | `vendor/` | upstream model code, byte-identical, with `LICENSE` + `PROVENANCE.md` each |
 
@@ -146,9 +147,16 @@ Two wrong guesses got corrected here, both by measuring rather than reasoning:
 
 ## First real-data results (KRDU)
 
-995 arrivals across 6 runways, split by flight into 697 train / 149 val / 149 test
-(96k training windows). Both models, both horizon modes, 120-epoch cap with patience 15,
-`lr=5e-4`, on an RTX 4060. Every prediction batch was graded by `python -m evaluation`.
+995 arrivals across 6 runways, split by flight into 702 train / 141 val / 152 test. Both
+models, both horizon modes, 120-epoch cap with patience 15, `lr=5e-4`, on an RTX 4060. Every
+prediction batch was graded by `python -m evaluation`.
+
+> These numbers replace an earlier set trained under the pre-`flight_key` split, which
+> `hash(flight_key)` reproduces for only 552/995 flights. That partition was clean
+> (train/val/test verified disjoint) but is not reproducible from current code, so it was
+> retrained rather than quoted. Two conclusions did not survive the change of split; they are
+> marked below. **Treat any single-split margin under ~1.5× as provisional** — this is one
+> seed on one split, and that is the size of effect it turned out to move.
 
 **Displacement error at matched lead times.** This is the only axis on which the two
 horizon modes can be compared — the headline ADE/FDE cannot, because they average over
@@ -156,51 +164,65 @@ different horizon-length distributions.
 
 | model | mode | 10 s | 30 s | 60 s | 120 s | 300 s | 600 s |
 |---|---|---:|---:|---:|---:|---:|---:|
-| iTransformer | window | **259 m** | **390 m** | **687 m** | — | — | — |
-| iTransformer | full | 587 m | 611 m | 840 m | **1502 m** | **3227 m** | **6135 m** |
-| PatchTST | window | **158 m** | 409 m | 995 m | — | — | — |
-| PatchTST | full | 253 m | 399 m | 830 m | 1914 m | 3983 m | 7142 m |
+| iTransformer | window | 266 m | **400 m** | **756 m** | — | — | — |
+| iTransformer | full | 571 m | 618 m | 893 m | **1717 m** | **4131 m** | **5407 m** |
+| PatchTST | window | 536 m | 689 m | 1163 m | — | — | — |
+| PatchTST | full | **184 m** | 372 m | 869 m | 2052 m | 4293 m | 6962 m |
 
-**Whole-approach prediction, graded at the threshold** (149 test flights). Directly
+**Whole-approach prediction, graded at the threshold** (152 test flights). Directly
 comparable across all four — every row predicts the complete remaining approach.
 
-| model | mode | lateral mean | lateral p95 | path deviation | gate pass |
-|---|---|---:|---:|---:|---:|
-| iTransformer | **full** | **1070 m** | **3136 m** | **1895 m** | 0/149 |
-| iTransformer | window (chained ×10) | 1594 m | 6898 m | 1918 m | 0/149 |
-| PatchTST | full | 1804 m | 4666 m | 2488 m | 0/149 |
-| PatchTST | window (chained ×10) | 2815 m | 7354 m | 3152 m | 0/149 |
+| model | mode | ADE | lateral mean | lateral p95 | path deviation | flyable (vs observed 63.2%) | gate pass |
+|---|---|---:|---:|---:|---:|---:|---:|
+| iTransformer | **full** | **1746 m** | **752 m** | **2531 m** | 1671 m | 48.0% (−15.1 pp) | **3/152** |
+| iTransformer | window (chained ×10) | 1889 m | 1168 m | 4069 m | **1619 m** | **69.7% (+6.6 pp)** | 1/152 |
+| PatchTST | full | 1903 m | 2030 m | 5675 m | 2122 m | 27.0% (−36.2 pp) | 0/152 |
+| PatchTST | window (chained ×10) | 2580 m | 3184 m | 8464 m | 4189 m | 29.6% (−33.6 pp) | 0/152 |
 
 ### What the numbers say
 
-**Short lead → window; long lead or whole approach → full.** Window mode wins inside the
-60 s it was trained for (687 vs 840 m), but chaining it out to a whole approach degrades
-badly. The cost of compounding lands in the **tail, not the mean**: lateral mean is only
-1.5× worse, but p95 is 2.2× worse (6898 vs 3136 m). Once a chained pass goes wrong, the
-next nine extrapolate from a wrong history. Training directly for the long horizon beats
-chaining a short one.
+**Whole approach → full, and this is the robust result.** One-pass full mode beats chained
+window on lateral error at the threshold for both architectures, on both splits, by
+1.5–1.6× on the mean and 1.5–2.1× on p95. Once a chained pass goes wrong the next nine
+extrapolate from a wrong history. Training directly for the long horizon beats chaining a
+short one.
 
-**iTransformer beats PatchTST at long lead, for a structural reason.** PatchTST is
-channel-**independent** (`TSTiEncoder` — every channel forecast in isolation by shared
-weights), while iTransformer's attention runs *across* variates. For a turning aircraft
-east and north are strongly coupled, and PatchTST cannot represent that by construction.
-Note the reversal at 10 s, where PatchTST is *better* (158 vs 259 m): at that scale the
-aircraft is nearly straight and channel independence costs nothing. **The coupling only
-starts paying once the turn develops** — which is exactly what the two architectures'
-designs predict.
+**Did NOT survive the split change: "the compounding cost lands in the tail, not the mean".**
+On the old split the lateral mean was 1.5× worse while p95 was 2.2× worse. Here the two
+ratios are the same to within noise (iTransformer 1.55× mean vs 1.61× p95). The tail effect
+is still visible in *final* displacement — PatchTST FDE p95 12471 m chained vs 7022 m
+one-pass, 1.78× against a 1.36× mean — but it is a claim about FDE, not about lateral error
+at the threshold, and it is not the clean 1.5-vs-2.2 story originally written here.
 
-**Zero gate passes, in all four runs, is the honest result — not a failure.** The 106.75 m
-lateral limit is FAA containment for a *planned or flown* approach; this is a *forecast*
-extrapolating 5–10 minutes from 120 s of history. The number quantifies the distance
-between a statistical prediction and a certifiable trajectory — the flyability gap the
-survey in `4dTrajectory/docs` is about, now measured rather than asserted.
+**Short lead → PatchTST; long lead → iTransformer.** Comparing like for like within full
+mode: PatchTST leads at 10 s (184 vs 571 m) and the ordering reverses by 300 s (4293 vs
+4131) and widens at 600 s (6962 vs 5407). PatchTST is channel-**independent**
+(`TSTiEncoder` — every channel forecast in isolation by shared weights) while iTransformer's
+attention runs *across* variates; for a turning aircraft east and north are strongly coupled
+and PatchTST cannot represent that by construction. Near-straight flight costs it nothing,
+so **the coupling only starts paying once the turn develops** — exactly what the two designs
+predict. (The old split showed this same crossover between the two *window* runs; on this
+split PatchTST window is the weakest cell everywhere, so the full-mode pair is the honest
+comparison.)
 
-**Real data is much harder than synthetic**, as it should be: iTransformer window went from
-286 m (synthetic) to 423 m ADE. Synthetic approaches are straight-in, so the model only has
-to extrapolate a line. Real arrivals are vectored, and *when* the turn onto final happens is
-a controller's decision — information a single-aircraft model with no traffic context and no
-ATC intent input structurally cannot have. That is the survey's central open problem, and
-this baseline is where it gets measured from.
+**Did NOT survive the split change: "zero gate passes in all four runs".** iTransformer now
+passes 3/152 in full mode and 1/152 chained. The point stands in substance — 2% is not a
+usable approach predictor — but "zero, always" was a property of that split, not of the
+method. The 106.75 m lateral limit is FAA containment for a *planned or flown* approach,
+while this is a *forecast* extrapolating 5–10 minutes from 120 s of history; the number
+quantifies the distance between a statistical prediction and a certifiable trajectory.
+
+**Flyability and accuracy disagree, deliberately.** iTransformer window is the *most* flyable
+run (69.7%, above the observed tracks' 63.2%) while being worse than full mode on every
+error metric; PatchTST full is the least flyable (27.0%) at comparable ADE. Chaining short
+windows produces smooth, conservative paths — easy to fly, not where the aircraft went.
+Neither metric substitutes for the other.
+
+**Real data is much harder than synthetic**, as it should be. Synthetic approaches are
+straight-in, so the model only has to extrapolate a line. Real arrivals are vectored, and
+*when* the turn onto final happens is a controller's decision — information a single-aircraft
+model with no traffic context and no ATC intent input structurally cannot have. That is the
+survey's central open problem, and this baseline is where it gets measured from.
 
 ## Channels
 
@@ -277,13 +299,12 @@ now would make it impossible to say what the learned component contributes on it
 Listed in increasing order of intrusiveness, so a future change can pick deliberately rather
 than drift into one:
 
-1. **Post-hoc flyability check** — invert the point-mass equations on the predicted
-   trajectory to recover the required load factor / bank / thrust, and report what fraction
-   sits inside the envelope. Does not touch training, and needs **no casadi** (the inversion
-   is algebra), so it can live in this package and needs no second environment. Highest value
-   per unit of work: it is what makes the head-to-head against the optimizer meaningful —
-   *"the learned model tracks the observed path closely but X% of its output is unflyable;
-   the optimizer is 100% flyable but is not what the aircraft actually flew."*
+1. **Post-hoc flyability check** — ✅ **DONE**, see "Flyability" below (`flyability.py`).
+   Inverts the point-mass equations on the predicted trajectory to recover the required load
+   factor / bank / thrust and reports what fraction sits inside the envelope. Does not touch
+   training, and needs **no casadi** (the inversion is algebra), so it lives in this package
+   and needs no second environment. Note that it measures the gap; it does not close it —
+   routes 2–4 are still the ways to actually make predictions flyable.
 2. **Post-hoc dynamics projection** — treat the prediction as a reference and solve for the
    nearest flyable trajectory with `CasadiSimulator`. Pulls casadi back in, so it has to run
    as a second stage in the `aeroviz` env.
@@ -292,6 +313,50 @@ than drift into one:
 4. **Predict controls and integrate them** — structurally guarantees flyability, but needs a
    *differentiable* dynamics model; casadi cannot backpropagate into torch, so the point-mass
    model would have to be reimplemented in torch. Largest effort.
+
+## Flyability — measuring the gap this baseline deliberately leaves open
+
+`predict` writes a `flyability_report.json` beside its records and prints a one-line
+summary. It answers: *what controls would this trajectory have required, and do they fit
+inside the airframe's envelope?*
+
+The load-factor point-mass model inverts in **closed form** — no solver, no casadi. Its two
+rotational equations rearrange directly:
+
+```
+A = psi_dot   * V * cos(gamma) / g   = n sin(mu)      n  = hypot(A, B)      -> load factor
+B = gamma_dot * V / g + cos(gamma)   = n cos(mu)      mu = atan2(A, B)      -> bank
+```
+
+`n` fixes the required lift coefficient (→ stall check), lift fixes drag, and the along-track
+equation `T = m (V_dot + g sin(gamma)) + D` gives thrust explicitly. Earth-frame transport
+terms are subtracted first, or the inversion bills the aircraft for a bank that the rotating
+tangent plane produced rather than the pilot.
+
+**Read the delta, not the absolute rate.** Run against *real flown tracks*, the check first
+scored 0/149 fully flyable. Those trajectories were flown by real aircraft, so the check was
+wrong, not the flights. The cause: `thrust_negative`. Median required thrust on a real
+arrival is 0.43 kN — essentially idle — and a negative requirement simply means the aircraft
+needed **more drag than a clean airframe has**: speedbrake, flaps, gear. Every approach does
+this; a single clean-configuration drag polar cannot represent it. So `thrust_negative` is a
+**soft** violation (reported, not counted as unflyable), and the report leads with the
+comparison against the observed tracks measured by the identical code, because both sides
+carry the same polar bias:
+
+```
+flyability: 46.3% of predictions fully flyable vs 58.4% of the observed tracks (-12.1 pp)
+```
+
+The observed baseline is the floor, not 100%. `HARD_VIOLATIONS` (stall, bank, load factor,
+thrust over max) vs `SOFT_VIOLATIONS` (thrust below idle) is where that judgement lives.
+
+`Cl_max` comes from `aero_params_for_aircraft` (2.7 for an A320), **not** from
+`LoadFactorSimulator`'s hardcoded 1.5 — the two disagree by 80%, and `aero_params.py`
+documents itself as the source of truth for the stall model.
+
+**Flyability is not a quality metric on its own.** A straight line is perfectly flyable and
+completely wrong; see the instance-norm table below, where the *worse* predictor scores
+*higher* on flyability by being blander. Pair it with the error metrics or it misleads.
 
 ## Instance normalisation is OFF by default
 
@@ -323,9 +388,53 @@ frame that assumption is inverted: **absolute position is the signal.** Where th
 determines where the turn onto final happens, when the descent starts, and where the approach
 ends. Normalising it away leaves the model guessing at the geometry it most needs.
 
-Turn it back on with `--instance-norm` — it is worth re-ablating on real data, where the
-distribution shift the technique was designed for (mixed aircraft types, runway configurations,
-wind) is genuinely present and may pay for what it costs.
+### Re-ablated on real data — the synthetic result holds
+
+The obvious objection to the synthetic table was that instance norm exists for distribution
+shift, and synthetic straight-ins have none. Real KRDU arrivals have plenty (mixed types,
+6 runways, vectored downwinds, wind). Re-run there, all 8 cells, same hyperparameters
+(`ep=120 lr=5e-4 patience=15 seed=1337`), each graded on its own checkpoint's held-out test
+split — artifacts in `4dTrajectory/outputs/KRDU/_ablation_norm/`:
+
+| model | mode | norm | epochs | val loss | ADE | ADE p95 | FDE | lateral p95 | flyable |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|
+| iTransformer | window | on | 20 | 0.0970 | 2508 m | 9051 m | 4942 m | 14291 m | 81.5% |
+| iTransformer | window | **off** | 33 | **0.0511** | **2090 m** | **5585 m** | **2871 m** | **6224 m** | 71.7% |
+| iTransformer | full | on | 27 | 0.3439 | 2400 m | 8186 m | 4365 m | 14280 m | 34.9% |
+| iTransformer | full | **off** | 34 | **0.0577** | **1756 m** | **4434 m** | **2190 m** | **2560 m** | **46.1%** |
+| PatchTST | window | on | 67 | 0.0845 | **2571 m** | 7172 m | 5683 m | 14498 m | 89.3% |
+| PatchTST | window | **off** | 61 | **0.0648** | 2580 m | **6474 m** | **3987 m** | **8465 m** | 29.6% |
+| PatchTST | full | on | 32 | 0.4016 | 5105 m | 10852 m | 7299 m | 14480 m | 64.5% |
+| PatchTST | full | **off** | 57 | **0.0903** | **1903 m** | **5221 m** | **2942 m** | **5675 m** | 27.0% |
+
+*(flyable = fraction of predictions fully inside the envelope, each flight judged against its
+own airframe; the observed tracks score 63.2% measured the same way.)*
+
+**Off wins 19 of the 20 accuracy comparisons, with one tie.** Every cell on validation loss,
+every cell on FDE, every cell on ADE p95, every cell on lateral error at the threshold; on
+mean ADE it is 3 wins and one dead heat (PatchTST window, 2580 vs 2571 m — a 0.4% difference
+in the cell where off wins the other four metrics). A sweep that lopsided is not run-to-run
+variance, which matters because the individual gaps here are smaller than on synthetic data
+and a single metric on a single cell would not have settled it.
+
+**The tell is the lateral p95 column.** All four instance-norm-on cells land at
+14.28–14.50 km — a near-constant number across two architectures and both horizon modes.
+That is the signature of a model that cannot place the endpoint at all: strip the absolute
+level and the prediction ends at a distance set by the frame, not by the flight. Off spans
+2.6–8.5 km, i.e. it varies with how hard the flight was.
+
+**Flyability moves the opposite way, and that is the point of having both metrics.**
+Instance norm scores *better* on flyability in 3 of the 4 cells — PatchTST window 89.3% vs
+29.6%, i.e. the configuration that is 2.2× worse at the threshold looks three times more
+flyable. It is not flying better; it is predicting smoother, blander paths that are easy to
+fly and far from the truth. A straight line is perfectly flyable and completely wrong.
+(iTransformer full is the exception, 46.1% off vs 34.9% on — there instance norm is bad
+enough that even the smoothing does not save it.) Flyability bounds whether a prediction
+*could* be flown; only the error metrics say whether it is the right trajectory, and neither
+substitutes for the other.
+
+So `use_norm` / `revin` stay **off** by default, now on real-data evidence rather than
+synthetic. `--instance-norm` still turns them on.
 
 ## What gets written
 
@@ -395,14 +504,16 @@ choose to extend, but none is an accident:
   KSMF, KSTL); only KRDU has been trained. Cross-airport generalisation is untested, and the
   ENU frame is per-runway-threshold, so a pooled model is a real design question, not a
   bigger `--data` glob.
-- **`--instance-norm` not re-ablated on real data.** The OFF default was decided on synthetic
-  approaches; real data carries the distribution shift the technique was built for.
-- **No comparison CZML.** Predictions are not yet fed to
-  `aeroviz-4d/python/build_scenario_comparison_czml.py`, which expects
-  `optimizer_states` / `simulator_states` keys. The states file here writes
-  `predicted_states` / `observed_states`.
-- **Aircraft type is `"UNK"` for all 3747 harvested flights** (`czml_export` hardcodes it), so
-  every flight is built with the `--aircraft-type` fallback (default `A320`). Mass only sets a
-  carried constant, but Vref and the threshold-crossing height set the target state the gates
-  measure against — so the whole batch is judged against one assumed aircraft. Extracting real
-  types (ICAO24 → registry) would make the target per-flight.
+- **No flyability *fix*, only a measurement.** `flyability.py` reports how far outside the
+  envelope a prediction sits; nothing projects it back inside. That is routes 2–4 above.
+  The check also judges against one clean-configuration drag polar and one `Cl_max`, which
+  is why it is calibrated against the observed tracks rather than read absolutely — a
+  configuration-aware polar (flap/gear schedule) would make the absolute rate meaningful.
+- **The declared aircraft type is `"UNK"` for all 3747 harvested flights** (`czml_export`
+  hardcodes it), but `_resolve_aircraft` recovers the real airframe from `icao24` via the
+  OpenAP lookup — 20 distinct types across 400 KRDU arrivals (A320 224, B738 38, E75L 25,
+  B737 25, CRJ9 23, …). Only genuinely unresolvable flights use the `--aircraft-type`
+  fallback. **A batch is a real fleet, so nothing may assume one airframe for it** — the
+  flyability check first shipped doing exactly that and graded ~44% of flights against an
+  A320's `Cl_max` and max thrust. What is still missing is coverage checking: how often the
+  fallback is actually hit is not reported per batch.
