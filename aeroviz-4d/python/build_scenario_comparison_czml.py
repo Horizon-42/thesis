@@ -37,6 +37,16 @@ from typing import Any
 from data_layout import airport_data_path
 from generate_czml import build_document_packet, build_position_property
 
+# Record-filename suffixes. MUST match 4dTrajectory/optimization/evaluation_export.py, which
+# is where they are defined and where both writers (the optimizer batch and ts_transformer)
+# stamp `flight_key` into the names. Mirrored rather than imported ON PURPOSE: this package is
+# standalone frontend tooling with its own pytest rootdir, and evaluation_export pulls in
+# aerodynamic_model — importing it would make the CZML builder depend on the whole modeling
+# tree for two string constants. _group_key's tests pin the round-trip, so a drift here fails
+# loudly rather than silently regrouping flights.
+STATES_SUFFIX = "_states.json"
+EVAL_SUFFIX = "_eval.json"
+
 # A fixed display epoch (state times are offsets in seconds from it), matching the
 # convention generate_czml uses. The relative motion is what matters, not the wall clock.
 EPOCH = datetime(2026, 4, 1, 8, 0, 0, tzinfo=timezone.utc)
@@ -260,6 +270,35 @@ def states_schema(state_data: dict[str, Any]) -> str:
     )
 
 
+def _group_key(result: dict[str, Any]) -> str:
+    """The flight identity a comparison group is keyed by.
+
+    Taken from the record filename, whose stem IS ``flight_scenarios.identity.flight_key``
+    (``callsign_runway_icao24_landingTime``) — the same identity that keys the train/val/test
+    split. ``eval_file`` is the fallback because a FAILED row has no ``states_file`` but
+    always has an eval record; both names share the stem, so solved and failed rows of one
+    flight group together.
+
+    It is emphatically NOT ``id_runway``: ``id`` is the callsign (a copy of it, despite the
+    name) and repeats daily, so the same callsign landing on the same runway on two different
+    days collided and one flight silently overwrote the other. Measured on the KRDU harvest,
+    ``id_runway`` yields 778 distinct keys for 996 arrivals — 22% of the batch never drawn.
+    The raw data carries no unique flight id at all (OpenSky stores state vectors by
+    icao24 + time; an "arrival" is a segment this project derives), which is why the
+    identity has to include the landing time.
+    """
+    for name in (result.get("states_file"), result.get("eval_file")):
+        if name:
+            stem = Path(name).name
+            for suffix in (STATES_SUFFIX, EVAL_SUFFIX):
+                if stem.endswith(suffix):
+                    return stem[: -len(suffix)]
+            return Path(stem).stem
+    # No record files at all: nothing to draw but the reference. Fall back to the coarse key
+    # rather than dropping the row — collisions here cost a duplicate reference, not a flight.
+    return f"{result.get('id')}_{result.get('runway') or 'unknown'}"
+
+
 def _traj_properties(
     group: str, flight_id: str | None, kind: str, runway: str, airport: str, status: str
 ) -> dict[str, Any]:
@@ -324,13 +363,13 @@ def build_runway_comparison(
     states_dir = Path(states_dir)
     show = not start_hidden
 
-    # Collapse to one row per group (= ``flightId_runway``), preferring a solved row. A flight
-    # can appear in the summary as both a failed attempt and a solved one (their states
-    # filenames collide on overwrite); the solved result is the one to show, regardless of row
-    # order. One-per-group also subsumes the duplicate-states-file dedup (group ↔ file is 1:1).
+    # Collapse to one row per group, preferring a solved row. A flight can appear in the
+    # summary as both a failed attempt and a solved one; the solved result is the one to show,
+    # regardless of row order. Both rows carry the same record filenames, so they land in the
+    # same group and the dedup still does its job.
     best: dict[str, dict[str, Any]] = {}
     for result in results:
-        group = f"{result.get('id')}_{result.get('runway') or 'unknown'}"
+        group = _group_key(result)
         is_solved = result.get("status") == "solved" and result.get("states_file")
         current = best.get(group)
         if current is None or (is_solved and current.get("status") != "solved"):

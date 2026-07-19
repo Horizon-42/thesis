@@ -108,6 +108,46 @@ def test_group_results_by_runway_keys_by_airport_and_runway():
     assert len(groups[("KRDU", "05L")]) == 2
 
 
+def test_same_callsign_same_runway_on_different_days_are_two_groups(tmp_path):
+    # `id` is the callsign (a copy of it, despite the name) and repeats every day, so keying
+    # groups on id_runway made one flight silently overwrite the other. Measured on the KRDU
+    # harvest that lost 218 of 996 arrivals. The record filename carries the full flight_key
+    # (callsign_runway_icao24_landingTime), which is what the group is keyed by now.
+    for stem in ("ASA677_05R_a54aae_20260629T093123Z", "ASA677_05R_a9e8ce_20260630T093925Z"):
+        (tmp_path / f"{stem}_states.json").write_text(json.dumps(STATE_DATA), encoding="utf-8")
+    results = [
+        {"id": "ASA677", "runway": "05R", "status": "solved",
+         "states_file": "ASA677_05R_a54aae_20260629T093123Z_states.json"},
+        {"id": "ASA677", "runway": "05R", "status": "solved",
+         "states_file": "ASA677_05R_a9e8ce_20260630T093925Z_states.json"},
+    ]
+    czml, index = build_runway_comparison(results, tmp_path, ADSB_CZML, airport="KRDU")
+
+    assert len(index) == 2, "two distinct flights must not collapse into one group"
+    assert {r["group"] for r in index} == {
+        "ASA677_05R_a54aae_20260629T093123Z", "ASA677_05R_a9e8ce_20260630T093925Z",
+    }
+    # Both keep the callsign for display; only the grouping key is the full identity.
+    assert {r["flightId"] for r in index} == {"ASA677"}
+    assert len([p for p in czml[1:] if p["id"].startswith("opt-")]) == 2
+
+
+def test_failed_and_solved_rows_of_one_flight_still_share_a_group(tmp_path):
+    # A failed row has no states_file but always has an eval_file, and the two names share
+    # the flight_key stem — so the dedup that prefers the solved row keeps working.
+    stem = "AFR074_05L_abc123_20260629T101112Z"
+    (tmp_path / f"{stem}_states.json").write_text(json.dumps(STATE_DATA), encoding="utf-8")
+    results = [
+        {"id": "AFR074", "runway": "05L", "status": "failed",
+         "states_file": None, "eval_file": f"{stem}_eval.json"},
+        {"id": "AFR074", "runway": "05L", "status": "solved",
+         "states_file": f"{stem}_states.json", "eval_file": f"{stem}_eval.json"},
+    ]
+    _, index = build_runway_comparison(results, tmp_path, ADSB_CZML, airport="KRDU")
+    assert len(index) == 1
+    assert index[0]["status"] == "solved"       # solved wins regardless of row order
+
+
 def test_build_runway_comparison_solved_three_paths_failed_red(tmp_path):
     (tmp_path / "AFR074_05L_states.json").write_text(json.dumps(STATE_DATA), encoding="utf-8")
     results = [
