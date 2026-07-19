@@ -50,7 +50,9 @@ from config import (  # noqa: E402
     DEFAULT_AIRCRAFT_TYPE, HORIZON_MODES, MODELS, TSConfig, config_for_mode,
 )
 from dataset import build_series, flight_key, load_flight_dicts  # noqa: E402
-from export import build_prediction_record, observed_series_metrics, write_batch  # noqa: E402
+from export import (  # noqa: E402
+    accuracy_block, build_prediction_record, observed_series_metrics, write_batch,
+)
 from flyability import report_for_records  # noqa: E402
 from forecast import forecast_approach  # noqa: E402
 from models import resolve_device  # noqa: E402
@@ -195,7 +197,7 @@ def main(argv: list[str] | None = None) -> int:
         overlap.append(observed_series_metrics(s, forecast))
 
     paths = write_batch(records, output_dir=args.output_dir, config_dict=config.to_dict(),
-                        checkpoint=str(args.checkpoint))
+                        overlap=overlap, checkpoint=str(args.checkpoint))
 
     capped = sum(1 for r in records if r.source.get("horizonCapped"))
     if capped:
@@ -203,12 +205,14 @@ def main(argv: list[str] | None = None) -> int:
               f"forecast horizon ran out — their final states (and gate verdicts) are "
               f"horizon artifacts, marked horizon_capped in summary.json")
 
-    finite = [m for m in overlap if m["n_steps"]]
-    if finite:
-        mean_ade = sum(m["ade_m"] for m in finite) / len(finite)
-        mean_fde = sum(m["fde_m"] for m in finite) / len(finite)
-        print(f"  vs observed track: ADE {mean_ade:.1f} m   FDE {mean_fde:.1f} m "
-              f"(over {len(finite)} flight(s))")
+    # Printed from the block that was just persisted, so the terminal and summary.json
+    # cannot report different numbers for the same run.
+    accuracy = accuracy_block(overlap)
+    if accuracy["flights"]:
+        ade, fde = accuracy["ade_m"], accuracy["fde_m"]
+        print(f"  vs observed track: ADE {ade['mean']:.1f} m (p95 {ade['p95']:.1f})   "
+              f"FDE {fde['mean']:.1f} m (p95 {fde['p95']:.1f})   "
+              f"over {accuracy['flights']} flight(s)")
 
     # Flyability: what controls would these trajectories have REQUIRED, and does that sit
     # inside the airframe's envelope? Reported against the observed tracks measured the same

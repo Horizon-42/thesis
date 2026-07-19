@@ -35,7 +35,9 @@ from dataset import (  # noqa: E402
 )
 from evaluation.metrics import evaluate_batch  # noqa: E402
 from evaluation.records import load_records, record_from_dict  # noqa: E402
-from export import build_prediction_record, record_stem, write_batch  # noqa: E402
+from export import (  # noqa: E402
+    accuracy_block, build_prediction_record, observed_series_metrics, record_stem, write_batch,
+)
 from forecast import Forecast, forecast_approach, recursive_forecast, truncate_at_threshold  # noqa: E402
 from metrics import error_components, trajectory_metrics  # noqa: E402
 from models import build_model  # noqa: E402
@@ -480,13 +482,14 @@ def test_batch_writes_a_manifest_that_evaluation_can_load_and_grade(tmp_path):
     normalizer = Normalizer.fit(series)
     model = build_model(config).eval()
 
-    records = []
+    records, overlap = [], []
     for index, s in enumerate(series):
         forecast = forecast_approach(model, s, config, normalizer, device=torch.device("cpu"))
         records.append(build_prediction_record(s, forecast, index=index,
                                                model_name=config.model,
                                                horizon_mode=config.horizon_mode))
-    write_batch(records, output_dir=tmp_path, config_dict=config.to_dict())
+        overlap.append(observed_series_metrics(s, forecast))
+    write_batch(records, output_dir=tmp_path, config_dict=config.to_dict(), overlap=overlap)
 
     # load_records is manifest-ONLY (no glob fallback), so this also proves summary.json
     # carries a results[] roster with resolvable eval_file entries.
@@ -501,20 +504,80 @@ def test_batch_writes_a_manifest_that_evaluation_can_load_and_grade(tmp_path):
         assert (Path(tmp_path) / record.reference_file).is_file()
 
 
+def test_manifest_carries_the_accuracy_the_run_printed(tmp_path):
+    # The batch's error against the observed tracks is its headline result; it used to exist
+    # only in terminal scrollback, which made any cross-batch comparison (the instance-norm
+    # ablation) a stdout-scraping exercise.
+    series, config = _series(n_flights=4, mode=HORIZON_FULL)
+    normalizer = Normalizer.fit(series)
+    model = build_model(config).eval()
+
+    records, overlap = [], []
+    for index, s in enumerate(series):
+        forecast = forecast_approach(model, s, config, normalizer, device=torch.device("cpu"))
+        records.append(build_prediction_record(s, forecast, index=index,
+                                               model_name=config.model,
+                                               horizon_mode=config.horizon_mode))
+        overlap.append(observed_series_metrics(s, forecast))
+    write_batch(records, output_dir=tmp_path, config_dict=config.to_dict(), overlap=overlap)
+
+    summary = json.loads((Path(tmp_path) / "summary.json").read_text(encoding="utf-8"))
+    assert summary["accuracy"] == accuracy_block(overlap)
+    assert summary["accuracy"]["flights"] == len(series)
+    assert summary["accuracy"]["ade_m"]["mean"] > 0.0
+    # Per-flight too, so a batch can be re-aggregated (per runway, per capped/uncapped)
+    # without re-running the forecast.
+    for row, metrics in zip(summary["results"], overlap):
+        assert row["ade_m"] == pytest.approx(metrics["ade_m"])
+        assert row["overlap_steps"] == metrics["n_steps"]
+
+
+def test_accuracy_block_excludes_and_counts_flights_with_no_overlap():
+    # A forecast that shares no samples with its observed track carries NaN errors. Averaging
+    # those in would poison the batch mean; silently dropping them would overstate coverage.
+    overlap = [{"ade_m": 100.0, "fde_m": 200.0, "cross_track_p95_m": 50.0,
+                "altitude_p95_m": 10.0, "n_steps": 30},
+               {"ade_m": float("nan"), "fde_m": float("nan"), "cross_track_p95_m": float("nan"),
+                "altitude_p95_m": float("nan"), "n_steps": 0}]
+    block = accuracy_block(overlap)
+    assert block["flights"] == 1 and block["flights_without_overlap"] == 1
+    assert block["ade_m"]["mean"] == pytest.approx(100.0)
+
+    empty = accuracy_block([overlap[1]])
+    assert empty["flights"] == 0 and "ade_m" not in empty
+
+
+def test_write_batch_rejects_overlap_that_does_not_line_up_with_the_records(tmp_path):
+    # Positional alignment is the whole contract — a short list would silently zip away the
+    # tail of the batch, attributing metrics to the wrong flights.
+    series, config = _series(n_flights=3, mode=HORIZON_FULL)
+    normalizer = Normalizer.fit(series)
+    model = build_model(config).eval()
+    records = [
+        build_prediction_record(
+            s, forecast_approach(model, s, config, normalizer, device=torch.device("cpu")),
+            index=index, model_name=config.model, horizon_mode=config.horizon_mode)
+        for index, s in enumerate(series)
+    ]
+    with pytest.raises(ValueError, match="once per record"):
+        write_batch(records, output_dir=tmp_path, config_dict=config.to_dict(), overlap=[])
+
+
 def test_stale_records_are_cleared_before_a_rerun(tmp_path):
     series, config = _series(n_flights=3, mode=HORIZON_FULL)
     normalizer = Normalizer.fit(series)
     model = build_model(config).eval()
 
     def batch(count):
-        records = []
+        records, overlap = [], []
         for index, s in enumerate(series[:count]):
             forecast = forecast_approach(model, s, config, normalizer,
                                          device=torch.device("cpu"))
             records.append(build_prediction_record(s, forecast, index=index,
                                                    model_name=config.model,
                                                    horizon_mode=config.horizon_mode))
-        write_batch(records, output_dir=tmp_path, config_dict=config.to_dict())
+            overlap.append(observed_series_metrics(s, forecast))
+        write_batch(records, output_dir=tmp_path, config_dict=config.to_dict(), overlap=overlap)
 
     batch(3)
     batch(1)   # a shrinking flight set must not leave orphans behind
@@ -541,15 +604,16 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
     assert loaded_config == config          # the config survives the round-trip verbatim
     assert set(payload["split"]) == {"train", "val", "test"}
 
-    records = []
+    records, overlap = [], []
     for index, s in enumerate(series[:4]):
         forecast = forecast_approach(model, s, loaded_config, normalizer,
                                      device=torch.device("cpu"))
         records.append(build_prediction_record(s, forecast, index=index,
                                                model_name=loaded_config.model,
                                                horizon_mode=loaded_config.horizon_mode))
+        overlap.append(observed_series_metrics(s, forecast))
     out = tmp_path / "pred"
-    write_batch(records, output_dir=out, config_dict=loaded_config.to_dict())
+    write_batch(records, output_dir=out, config_dict=loaded_config.to_dict(), overlap=overlap)
 
     report = evaluate_batch(load_records(out))
     assert report["total"] == 4

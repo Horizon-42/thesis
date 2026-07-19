@@ -184,14 +184,56 @@ def clear_stale_records(output_dir: Path) -> None:
             path.unlink()
 
 
+def accuracy_block(overlap: Sequence[dict[str, float]]) -> dict[str, Any]:
+    """Roll per-flight overlap errors up into the batch's headline accuracy numbers.
+
+    Flights whose forecast and observed track do not overlap at all (``n_steps == 0``) carry
+    NaN errors and are excluded from the statistics AND counted, rather than being quietly
+    averaged in as zero.
+
+    Both a mean and a p95 are reported because they answer different questions: chained
+    window-mode forecasts compound their error into the TAIL, so a mean alone reads as a much
+    smaller gap to one-pass full mode than the distribution actually shows.
+    """
+    finite = [m for m in overlap if m["n_steps"]]
+    if not finite:
+        return {"flights": 0, "flights_without_overlap": len(overlap)}
+
+    def stats(key: str) -> dict[str, float]:
+        values = np.array([m[key] for m in finite], dtype=np.float64)
+        return {"mean": float(values.mean()), "p95": float(np.percentile(values, 95)),
+                "max": float(values.max())}
+
+    return {
+        "flights": len(finite),
+        "flights_without_overlap": len(overlap) - len(finite),
+        "ade_m": stats("ade_m"),
+        "fde_m": stats("fde_m"),
+        "cross_track_p95_m": stats("cross_track_p95_m"),
+        "altitude_p95_m": stats("altitude_p95_m"),
+    }
+
+
 def write_batch(
     records: Sequence[PredictionRecord],
     *,
     output_dir: str | Path,
     config_dict: dict[str, Any],
+    overlap: Sequence[dict[str, float]],
     checkpoint: str | None = None,
 ) -> list[Path]:
-    """Write every record plus the ``summary.json`` manifest. Returns the eval-file paths."""
+    """Write every record plus the ``summary.json`` manifest. Returns the eval-file paths.
+
+    ``overlap`` is ``observed_series_metrics`` per record, positionally aligned. It is
+    required, not optional: a prediction batch's error against the observed track is its
+    headline result, and leaving it to the caller to print made it live in terminal
+    scrollback only — invisible to any comparison across batches.
+    """
+    if len(overlap) != len(records):
+        raise ValueError(
+            f"overlap has {len(overlap)} entries for {len(records)} records — "
+            "observed_series_metrics must be collected once per record, in order"
+        )
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     (out / REFERENCES_DIR).mkdir(exist_ok=True)
@@ -199,7 +241,7 @@ def write_batch(
 
     written: list[Path] = []
     rows: list[dict[str, Any]] = []
-    for record in records:
+    for record, metrics in zip(records, overlap):
         states_path = out / f"{record.stem}{_STATES_SUFFIX}"
         eval_path = out / f"{record.stem}{_EVAL_SUFFIX}"
         reference_path = out / REFERENCES_DIR / f"{record.stem}{_REFERENCE_EVAL_SUFFIX}"
@@ -221,12 +263,17 @@ def write_batch(
             final_time_s=record.final_time_s,
             reason=None,
         )
-        # ts_transformer additions beyond the optimizer's row.
+        # ts_transformer additions beyond the optimizer's row. The optimizer has no
+        # equivalent of ade/fde — it solves toward a target rather than reproducing a track,
+        # so these are graded against the flight's OWN observed samples over the overlap.
         row.update({
             "predictor": source.get("predictor"),
             "horizon_mode": source.get("horizonMode"),
             "forecast_passes": source.get("forecastPasses"),
             "horizon_capped": source.get("horizonCapped"),
+            "ade_m": metrics["ade_m"],
+            "fde_m": metrics["fde_m"],
+            "overlap_steps": metrics["n_steps"],
         })
         rows.append(row)
 
@@ -239,6 +286,7 @@ def write_batch(
         "solved": len(rows),
         "failed": 0,
         "failure_rate": 0.0,
+        "accuracy": accuracy_block(overlap),
         "results": rows,
     }
     (out / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
