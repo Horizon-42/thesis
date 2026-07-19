@@ -22,6 +22,7 @@ See ``flight_scenarios/README.md`` for the architecture and the start-state math
 from __future__ import annotations
 
 from .build import build_scenario, build_scenarios_from_czml_input
+from .identity import flight_key
 from .runway_target import threshold_target_state
 from .scenario import FlightScenario, aircraft_for_code, load_scenarios, save_scenarios
 from .start_state import (
@@ -39,6 +40,7 @@ __all__ = [
     "state_samples_from_track",
     "threshold_target_state",
     "aircraft_for_code",
+    "flight_key",
     "save_scenarios",
     "load_scenarios",
 ]

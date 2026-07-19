@@ -33,7 +33,6 @@ import argparse
 import json
 import math
 import os
-import re
 import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, replace
@@ -47,7 +46,7 @@ _OPT_DIR = Path(__file__).resolve().parent
 if str(_OPT_DIR) not in sys.path:
     sys.path.insert(0, str(_OPT_DIR))
 
-from flight_scenarios import FlightScenario, load_scenarios, state_samples_from_track  # noqa: E402
+from flight_scenarios import FlightScenario, flight_key, load_scenarios, state_samples_from_track  # noqa: E402
 from flight_scenarios.start_state import DEFAULT_WINDOW_S  # noqa: E402
 from aerodynamic_model.common import GeodeticState, LoadFactorControl  # noqa: E402
 from aerodynamic_model.casadi_simulator import CasadiSimulator  # noqa: E402
@@ -57,9 +56,14 @@ from collocation.components import altitude_floor_m  # noqa: E402
 # Single source for the control-mesh defaults (mirrored by the CLI + the pipeline).
 from collocation.optimizer import DEFAULT_N_SEGMENTS, DEFAULT_N_SEG_PER_PHASE  # noqa: E402
 from evaluation_export import (  # noqa: E402
+    EVAL_SUFFIX as _EVAL_SUFFIX,
+    REFERENCE_EVAL_SUFFIX as _REFERENCE_EVAL_SUFFIX,
+    REFERENCES_DIR,
+    STATES_SUFFIX as _STATES_SUFFIX,
     evaluation_record,
     failed_evaluation_record,
     reference_evaluation_record,
+    summary_row,
 )
 
 # Optimizer + rollout defaults (override on the CLI). DEFAULT_N_SEGMENTS / the constrained
@@ -398,14 +402,8 @@ def _limit_solver_threads() -> None:
         os.environ.setdefault(var, "1")
 
 
-# Single source of the record-filename suffixes for every writer and glob in this module.
-# NOTE: ``*_reference_eval.json`` also matches the ``*_eval.json`` glob — reference records
-# survive _clear_stale_records only because they live under references/ and the glob is
-# non-recursive. (evaluation/records.py's CLI default pattern mirrors _EVAL_SUFFIX but is
-# owned by that package's public interface.)
-_STATES_SUFFIX = "_states.json"
-_EVAL_SUFFIX = "_eval.json"
-_REFERENCE_EVAL_SUFFIX = "_reference_eval.json"
+# The record-filename suffixes are single-sourced in evaluation_export.py (imported above)
+# — shared with ts_transformer/export.py, which writes the same directory shape.
 
 
 def _clear_stale_records(out: Path) -> None:
@@ -557,21 +555,19 @@ def _summary_record(
     final_time_s: float | None,
     reason: str | None,
 ) -> dict[str, Any]:
-    """One summary row: the flight's identity (so its reference can be found by id) + status."""
-    src = scenario.source
-    return {
-        "id": src.get("id"),
-        "callsign": src.get("callsign"),
-        "icao24": src.get("icao24"),
-        "arr_airport": src.get("arr_airport"),
-        "runway": src.get("runway"),
-        "target_source": src.get("target_source"),
-        "status": status,
-        "states_file": states_file,
-        "eval_file": eval_file,
-        "final_time_s": final_time_s,
-        "reason": reason,
-    }
+    """One summary row: the flight's identity (so its reference can be found by id) + status.
+
+    The row shape is single-sourced in ``evaluation_export.summary_row`` (shared with
+    ts_transformer's batch writer).
+    """
+    return summary_row(
+        scenario.source,
+        status=status,
+        states_file=states_file,
+        eval_file=eval_file,
+        final_time_s=final_time_s,
+        reason=reason,
+    )
 
 
 def _eval_filename(states_name: str) -> str:
@@ -582,9 +578,6 @@ def _eval_filename(states_name: str) -> str:
 def _reference_filename(states_name: str) -> str:
     """``<flight>_states.json`` → ``<flight>_reference_eval.json`` (same identity key)."""
     return states_name.removesuffix(_STATES_SUFFIX) + _REFERENCE_EVAL_SUFFIX
-
-
-REFERENCES_DIR = "references"
 
 
 def write_reference_records(
@@ -650,28 +643,17 @@ def write_reference_records(
     return written
 
 
-def _compact_time(iso: str | None) -> str | None:
-    """``2026-06-18T21:37:36Z`` -> ``20260618T213736Z`` (a filename-safe stamp); None if absent."""
-    if not iso:
-        return None
-    return re.sub(r"[^0-9TZ]", "", iso)
-
-
 def _scenario_filename(scenario: FlightScenario, index: int) -> str:
     """A unique, stable filename for one scenario's states JSON.
 
     A callsign + runway is NOT unique: the same aircraft can land more than once, and a
     callsign can recur across days — so ``id_runway`` silently overwrote sibling scenarios.
-    The name now keys on the full identity ``id_runway_icao24_landingTime``, which is unique
-    per scenario in the dataset. Missing fields are skipped; ``index`` is the final fallback.
+    The identity ``id_runway_icao24_landingTime`` is single-sourced in
+    ``flight_scenarios.identity.flight_key`` — the SAME function keys ts_transformer's
+    train/val/test split and record stems, so learned and optimized records for one flight
+    always share a filename stem.
     """
-    src = scenario.source
-    parts = [str(src.get("id") or f"scenario{index}")]
-    for value in (src.get("runway"), src.get("icao24"), _compact_time(src.get("landing_time_utc"))):
-        if value:
-            parts.append(str(value))
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", "_".join(parts))
-    return f"{safe}{_STATES_SUFFIX}"
+    return f"{flight_key(scenario.source, index)}{_STATES_SUFFIX}"
 
 
 # ── Constrained, min-time IAF optimization (NEW) ──────────────────────────────

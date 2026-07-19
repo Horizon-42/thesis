@@ -21,6 +21,18 @@ from typing import Any, Sequence
 from aerodynamic_model.common import GeodeticState
 from aerodynamic_model.rollout import RolloutSample
 
+# Record-filename contract — the single source for every writer and glob (the optimizer
+# batch in scenario_optimization.py AND ts_transformer/export.py; this module is
+# casadi-free, which is what lets the torch env import it).
+# NOTE: ``*_reference_eval.json`` also matches the ``*_eval.json`` glob — reference
+# records survive the stale-record sweeps only because they live under REFERENCES_DIR
+# and those globs are non-recursive. (evaluation/records.py's CLI default pattern
+# mirrors EVAL_SUFFIX but is owned by that package's public interface.)
+STATES_SUFFIX = "_states.json"
+EVAL_SUFFIX = "_eval.json"
+REFERENCE_EVAL_SUFFIX = "_reference_eval.json"
+REFERENCES_DIR = "references"
+
 
 def state_dict(state: GeodeticState) -> dict[str, float]:
     """A ``GeodeticState`` in the evaluation contract's key naming."""
@@ -96,5 +108,36 @@ def failed_evaluation_record(
         "final_time_s": None,
         "states": [],
         "controls": [],
+        "reason": reason,
+    }
+
+
+def summary_row(
+    source: dict[str, Any],
+    *,
+    status: str,
+    states_file: str | None,
+    eval_file: str | None,
+    final_time_s: float | None,
+    reason: str | None,
+) -> dict[str, Any]:
+    """One ``summary.json`` roster row: the flight's identity + outcome.
+
+    The manifest-only read side (``evaluation/records.py`` resolves ``results[].eval_file``)
+    and the batch metrics group on these fields, so the row shape lives here — beside the
+    record shapes — and both writers (the optimizer batch and ``ts_transformer``) build
+    their rows through it. Writers may add columns on top; they must not rename these.
+    """
+    return {
+        "id": source.get("id"),
+        "callsign": source.get("callsign"),
+        "icao24": source.get("icao24"),
+        "arr_airport": source.get("arr_airport"),
+        "runway": source.get("runway"),
+        "target_source": source.get("target_source"),
+        "status": status,
+        "states_file": states_file,
+        "eval_file": eval_file,
+        "final_time_s": final_time_s,
         "reason": reason,
     }

@@ -103,9 +103,15 @@ def test_scenario_filename():
     assert so._scenario_filename(_scenario(target=None), 0) == "AFR074_05L_states.json"
 
 
-def test_compact_time():
-    assert so._compact_time("2026-06-18T21:37:36Z") == "20260618T213736Z"
-    assert so._compact_time(None) is None
+def test_scenario_filename_shares_the_ts_transformer_identity():
+    # The stem is single-sourced in flight_scenarios.identity.flight_key — the same
+    # function keys ts_transformer's split and record stems. If this seam breaks, learned
+    # and optimized records for one flight stop sharing a filename stem.
+    from flight_scenarios import flight_key
+
+    src = {"id": "EJA969", "runway": "05R", "icao24": "ad7f04",
+           "landing_time_utc": "2026-06-18T21:37:36Z"}
+    assert flight_key(src, 0) == "EJA969_05R_ad7f04_20260618T213736Z"
 
 
 def test_scenario_filename_disambiguates_by_icao24_and_time():
