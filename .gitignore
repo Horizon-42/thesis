@@ -38,3 +38,9 @@ __pycache__
 .env
 # Dynamics Comparison run history (generated at runtime)
 dynamics_comparison_history/
+
+# Conda env spec backups (regenerate aeroviz from these; see CLAUDE.md Environment)
+.env-backup/
+# `python -m evaluation` writes its report to CWD by default; a run from the repo
+# root drops one here. Batch reports belong beside their records, not at the root.
+evaluation_report.json

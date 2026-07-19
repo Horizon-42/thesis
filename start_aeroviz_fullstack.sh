@@ -22,7 +22,18 @@ AEROVIZ_BACKEND_HOST="${AEROVIZ_BACKEND_HOST:-127.0.0.1}"
 AEROVIZ_BACKEND_PORT="${AEROVIZ_BACKEND_PORT:-8765}"
 VITE_HOST="${VITE_HOST:-127.0.0.1}"
 VITE_PORT="${VITE_PORT:-5173}"
-PYTHON_BIN="${PYTHON_BIN:-/Users/liudongxu/opt/miniconda3/envs/aviation/bin/python}"
+# Resolve the backend interpreter. PYTHON_BIN wins when set; otherwise ACTIVATE the
+# thesis conda env via the shared helper and take its python. Activation — not a direct
+# envs/<env>/bin/python exec — is deliberate: it runs the env's activate.d hooks (the
+# LD_LIBRARY_PATH libstdc++ fix), which the backend children inherit; a direct exec
+# bypasses them and re-opens the documented CXXABI clash the moment the backend imports
+# torch/matplotlib. Resolution rules (casadi probe, AEROVIZ_CONDA_ENV pin): see the helper.
+if [[ -z "${PYTHON_BIN:-}" ]]; then
+  # shellcheck disable=SC1091
+  source "$ROOT_DIR/scripts/activate_aeroviz_env.sh"
+  aeroviz_activate_env || exit 1
+  PYTHON_BIN="$(command -v python)"
+fi
 MAX_RAPID_RESTARTS="${AEROVIZ_MAX_RAPID_RESTARTS:-5}"
 MIN_HEALTHY_S="${AEROVIZ_MIN_HEALTHY_S:-8}"
 

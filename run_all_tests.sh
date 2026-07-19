@@ -21,16 +21,13 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
-# Ensure the conda `aviation` env (casadi etc.) is active; it isn't in system python.
-if [ "${CONDA_DEFAULT_ENV:-}" != "aviation" ]; then
-  CONDA_BASE="$(conda info --base 2>/dev/null)"
-  if [ -n "$CONDA_BASE" ] && [ -f "$CONDA_BASE/etc/profile.d/conda.sh" ]; then
-    # shellcheck disable=SC1091
-    source "$CONDA_BASE/etc/profile.d/conda.sh"
-    conda activate aviation
-  else
-    echo "warning: could not activate conda env 'aviation' — using current python" >&2
-  fi
+# Activate the thesis conda env (casadi etc. aren't in system python). Resolution rules —
+# including why candidate envs are probed for casadi instead of trusted by name — live in
+# the shared helper, which the fullstack launcher uses too.
+# shellcheck disable=SC1091
+source "$REPO_ROOT/scripts/activate_aeroviz_env.sh"
+if ! aeroviz_activate_env; then
+  echo "warning: continuing with the current python ($(command -v python))" >&2
 fi
 
 # Modeling + backend suites (geokit, aircraft, flight_scenarios, optimizer, backend, …).
