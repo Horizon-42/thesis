@@ -4,6 +4,132 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-07-20 — three vertical/lateral reference bugs in the observed-data plane
+
+Found while trying to answer "what do the 8260.58D gates score REAL ADS-B arrivals at?" —
+the observed baseline the optimizer and the learned predictor are implicitly measured
+against, which had never been computed. The naive answer was 1.8 % pass (18/996 KRDU), i.e.
+completed, safe airline landings graded as failures. Three independent bugs, all upstream of
+`evaluation/`, which is unchanged by this work.
+
+**The measurement that separated them.** Fitting each flight's OWN established final-approach
+line (position + cross-track vs along-track, extrapolated to the threshold) instead of reading
+`states[-1]`: the fitted glidepath came out 3.02–3.13° at all five airports — textbook — while
+the vertical intercept was 20–30 m low. A fleet flying a perfect glidepath to a uniform 25 m
+error is not a fleet error; it is a reference error. Lateral was already 3–10 m median, so the
+two axes were telling opposite stories and had to be chased separately.
+
+**Bug ① — observed altitude is ellipsoidal, targets are MSL.** OpenSky `geoaltitude` is height
+above the WGS84 ellipsoid (HAE); runway thresholds, CIFP altitudes and the gates are MSL. The
+gap is the geoid undulation N ≈ −25 to −33 m over the US. Confirmed independently: KRDU's
+lowest observed sample is 99.1 m against a predicted field elevation + N = 132.59 − 33.53 =
+99.06 m (4 cm). Fixed in a new `flight_scenarios/datum.py` (EGM96 via pyproj), applied at the
+data→modeling seam.
+
+*Not* in the harvest, deliberately: the harvest feeds two consumers with opposite requirements
+— CZML/Cesium positions are documented as metres above the WGS84 ellipsoid
+(`aeroviz-4d/src/types/czml.d.ts`) and are correct as recorded. Converting at the source would
+have fixed modeling and broken the viewer by the same ~33 m. The harvest stays a faithful
+record of what the sensor said; the datum choice is made on the way in.
+
+The conversion reached THREE separate ingest paths (`load_observed_flights`, `build_scenario`,
+`ts_transformer/dataset.py` — the last reads bare waypoints, so it cannot self-protect). It is
+keyed on `altitude_source` and therefore idempotent, and unknown/missing sources raise rather
+than defaulting. Seam tests pin all three.
+
+PROJ trap worth knowing: without the EGM96 grid and with network off, pyproj silently returns
+a "ballpark" no-op vertical transform — a correction that looks applied and does nothing.
+`_geoid_transformer()` probes a known undulation and raises instead.
+
+**Bug ② — `runway_thresholds.json` stored pavement ends, not landing thresholds.**
+`build_runway_config.py` read `le_latitude_deg`/`le_elevation_ft` and ignored
+`le_displaced_threshold_ft` entirely. KSJC 30L/30R are displaced 775 m; on a 3° glidepath that
+is a 40.6 m altitude error, and it moved the OPTIMIZER TARGET, not just the gates. Six
+thresholds moved (KSJC ×4, KSTL 12R 143 m, KMSY 29 93 m); the other 20 are unchanged. Fixed in
+the generator, not the JSON. Schema bumped to `runway-thresholds-v2`; thresholds now carry
+`displaced_threshold_m`.
+
+This is why KSJC looked HEALTHIEST before the fix (+9.7 m vs everyone else's −25 m): its two
+bugs had opposite signs and nearly cancelled (+40.6 − 32.0 = +8.6 predicted). Chasing the
+"anomaly" is what found bug ②.
+
+**Bug ③ — parallel runways captured the same landing twice.** `classify_landing_flights` was
+called once per threshold with no cross-threshold arbitration, and `RUNWAY_THRESHOLD_RADIUS_M`
+is 1000 m while parallel runways sit 250–400 m apart on an identical heading — so both the
+geometry and heading tests accepted either one. Measured: 169 of KSJC 30L's 200 flights were
+also in 30R's file; KSJC 12L∩12R 63; KSTL 30L∩30R 32. KRDU/KSMF/KMSY are unaffected (their
+parallels exceed the capture radius). It surfaced downstream as an observed lateral error
+whose MEDIAN was the parallel separation (KSTL 30L 397 m, KSJC 30R 234 m).
+
+Fixed with a `sibling_thresholds` arbitration restricted to same-direction runways — the
+opposite end of the same runway must be excluded, since a full rollout stops on top of it.
+The discriminator is the median lateral offset from the extended centreline, NOT distance to
+the threshold point: a first attempt using threshold distance failed to separate at all (kept
+763 m vs dropped 791 m) because a displaced threshold sits 775 m past where ADS-B coverage
+ends, so every track is equidistant from it. On the centreline metric the split is clean
+(kept 17.5 m vs dropped 232.8 m at KSJC; 35.9 vs 382.6 at KSTL).
+
+**Effect, end to end** (established-approach threshold crossing, records regenerated through
+the real code path, not a reimplementation):
+
+| airport | vertical median before → after | vertical gate before → after |
+|---|---|---|
+| KRDU | −29.2 → **+4.3 m** | 1 % → **44 %** |
+| KMSY | −19.6 → **+5.7 m** | 0 % → **50 %** |
+| KSTL | −26.9 → **+4.9 m** | 0 % → **31 %** |
+| KSJC | +9.9 → **+0.3 m** | 24 % → **51 %** |
+| KSMF | −27.7 → **+2.7 m** | 0 % → **65 %** |
+
+All five now sit at +0.3 to +5.7 m — a small POSITIVE bias, which is operationally right
+(crossing at or slightly above TCH is correct; low is dangerous). Lateral was already correct
+and is unchanged at 3–10 m median.
+
+**What this makes stale.** Everything derived from observed tracks: `flight_scenarios/outputs`,
+all `4dTrajectory/outputs/<ICAO>/{asdb,runway,runway_cons}`, all
+`public/data/airports/*/comparison`, and the `ts_*` training data + checkpoints. Bug ③
+additionally requires re-harvesting KSJC and KSTL (offline de-duplication is possible but
+would cost KSJC 42 % of its flights, leaving 12L at 12 and 30R at 39).
+
+Note for the ts_transformer re-run: the `u` channel shifts uniformly by +33.5 m at KRDU.
+Accuracy metrics (ADE/FDE, deviation vs reference) are computed against a reference in the
+same frame and should be nearly unchanged, but the GATE verdicts were biased — the recorded
+"gate-pass counts 0–4 of 152" was a ±3 m window scored against data offset by 33 m, so that
+conclusion needs re-deriving rather than quoting.
+
+Tests: 692 pass (557 modeling+backend, 135 aeroviz-4d/python), both suites exit 0. The
+"one known pre-existing failure" in `run_all_tests.sh`'s header
+(`test_fixed_time_objective_weights_control_effort_at_one`, numpy scalar conversion) did NOT
+reproduce — that note and the matching CLAUDE.md Open Item look stale.
+
+**Post-review hardening (same day).** A recall-mode review of the three fixes surfaced and
+closed: ① `resolve_runway_threshold` still returned pavement ends — the `--runway` download
+path would have named a threshold up to 775 m from the config's and drifted
+`landing_time_utc`/`flight_key` between harvest paths; landing-threshold interpolation is now
+single-sourced in `acquisition/runways.py` (`landing_thresholds_from_row`), generator output
+byte-identical, plus a loud `ValueError` when a displaced end has no usable length.
+② `_wins_against_parallel_runways` crashed on a heading-less threshold
+(`math.radians(None)`) and its `inf <= inf` tie silently re-admitted double-assignment when
+no sample fell in the centreline window — now: no competitors → win (no offset computed,
+also removing a dead full-track scan), unestablished centreline vs a competitor → lose from
+both. Also: `_heading_diff` reused instead of an inlined twin; true `statistics.median`.
+③ `datum.py`: the ballpark probe was NaN-transparent (`abs(nan−33.53) > 1.0` is False) —
+inverted to not-within-tolerance; an operator's explicit `PROJ_NETWORK` is no longer
+overridden; `waypoints_to_msl` transforms the altitudes directly (EGM96 N is
+height-independent — verified: +1000 m in → exactly +1000 m out), removing the
+negate-and-subtract dance. ④ `FlightScenario.source` now records `altitude_source`, so
+saved scenario files carry datum provenance (pre-fix HAE-era files lack the key).
+⑤ ts dataset conversion moved after the cheap skip checks; test fixtures now import
+`METRES_PER_DEG_LAT`/`metres_per_deg_lon`/`FT_M` from geokit instead of retired literals.
+⑥ The symmetric OUT seam, closed after review discussion: modeling records (now MSL)
+were packed straight into Cesium ellipsoidal `cartographicDegrees`, so after the batch
+re-run every opt-/sim-/pred- entity would have drawn ~33.5 m above the white HAE
+reference. `build_scenario_comparison_czml._states_to_waypoints` (the single choke point
+all record-derived entities share; the reference bypasses it) now converts MSL→HAE via a
+new `aeroviz-4d/python/vertical_datum.py` — a mirror of `flight_scenarios/datum.py`
+(same KRDU −33.53 pin, ballpark probe, PROJ_NETWORK respect) per the `flight_identity.py`
+precedent. Records are assumed MSL rather than tagged: all pre-datum-fix artifacts are
+discarded wholesale (user decision), never fed back in.
+
 ### 2026-07-20 — B3: transport-consistent velocity channels + physical-velocity fit; third ts training generation
 
 The findings doc's B3 bundle (`docs/findings_and_open_items_2026-07-20.md`), executed. The
