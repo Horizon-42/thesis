@@ -54,8 +54,29 @@ def test_last_time():
 
 def test_states_to_waypoints_order():
     waypoints = _states_to_waypoints(STATES)
-    assert waypoints[0] == (0.0, -78.45, 35.74, 2500.0)   # (t, lon, lat, alt) — lon before lat
-    assert waypoints[1] == (5.0, -78.46, 35.73, 2400.0)
+    # (t, lon, lat, alt) — lon before lat; alt converted MSL -> ellipsoidal for Cesium.
+    from vertical_datum import msl_to_hae
+
+    assert waypoints[0][:3] == (0.0, -78.45, 35.74)
+    assert waypoints[1][:3] == (5.0, -78.46, 35.73)
+    expected = msl_to_hae([-78.45, -78.46], [35.74, 35.73], [2500.0, 2400.0])
+    assert waypoints[0][3] == expected[0]
+    assert waypoints[1][3] == expected[1]
+    # Sanity, non-circularly: over the eastern US the geoid sits 25-40 m below the
+    # ellipsoid, so the CZML altitude must come out that far BELOW the record's MSL.
+    assert 2500.0 - 40.0 < waypoints[0][3] < 2500.0 - 25.0
+
+
+def test_states_to_waypoints_empty_is_empty():
+    assert _states_to_waypoints([]) == []
+
+
+def test_vertical_datum_mirror_pins_the_same_krdu_undulation():
+    """Mirror lockstep with flight_scenarios/datum.py: both probe KRDU N = -33.53 m."""
+    from vertical_datum import msl_to_hae
+
+    (hae,) = msl_to_hae([-78.7794], [35.8792], [0.0])
+    assert abs(hae - (-33.53)) < 0.5
 
 
 def test_reference_entity_copies_and_recolors():

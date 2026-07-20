@@ -37,6 +37,7 @@ from typing import Any
 from data_layout import airport_data_path
 from flight_identity import flight_key
 from generate_czml import build_document_packet, build_position_property
+from vertical_datum import msl_to_hae
 
 # Record-filename suffixes. MUST match 4dTrajectory/optimization/evaluation_export.py, which
 # is where they are defined and where both writers (the optimizer batch and ts_transformer)
@@ -82,8 +83,20 @@ def _states_to_waypoints(states: list[dict[str, Any]]) -> list[tuple[float, floa
 
     ``build_position_property`` wants ``(offset_sec, lon, lat, alt_m)`` tuples — note the
     order: time, then **lon before lat** (GeoJSON/CZML convention), then metres.
+
+    Record ``alt`` is MSL (the modeling plane's datum, converted on ingest); Cesium reads
+    CZML altitude as height above the WGS84 ellipsoid, so the undulation is added back
+    HERE — the single point every record-derived entity (opt-/sim-/pred-) flows through.
+    The observed reference bypasses this function (deep-copied from ``trajectories.czml``,
+    already ellipsoidal). Records are MSL by contract: pre-datum-fix (HAE-era) artifacts
+    are discarded wholesale, never fed back in.
     """
-    return [(s["t"], s["lon"], s["lat"], s["alt"]) for s in states]
+    if not states:
+        return []
+    hae = msl_to_hae(
+        [s["lon"] for s in states], [s["lat"] for s in states], [s["alt"] for s in states]
+    )
+    return [(s["t"], s["lon"], s["lat"], alt) for s, alt in zip(states, hae)]
 
 
 # ── copy the matching reference flight from the ADS-B CZML ─────────────────────
