@@ -23,11 +23,19 @@ it: ``(ve, vn)`` is continuous across the branch cut that ``psi`` is not.
 
 **Projection.** ``east = (lon - lon0) * metres_per_deg_lon(lat0)``,
 ``north = (lat - lat0) * METRES_PER_DEG_LAT`` — the same local flat projection
-``flight_scenarios/start_state.py`` fits velocities in, and the same frame
-``approach_constraints`` anchors at ``ltp_ne = (0, 0)``. Over a 25 km entry ring the flat
-approximation costs well under a metre, and matching the existing frame matters more than
-the last decimetre: a different projection here would show up as apparent model error when
-compared against records built by the other packages.
+``flight_scenarios/start_state.py`` fits velocities in, and the same form + anchor as the
+``approach_constraints`` NE frame (``ltp_ne = (0, 0)``, which scales degrees by
+``WGS84_A·DEG2RAD`` — the definition geokit's ``METRES_PER_DEG_LAT`` aligns to, so the two
+frames share one constant; ``metres_per_deg_lon`` is that times ``cos(lat)``).
+The flat form itself deviates from a true tangent-plane ENU by up to ~40 m at the ring edge
+(the ``e·n·tanφ/R`` cross term — zero on the pure east/north axes), and ``u = Δalt``
+ignores the ~49 m curvature drop there deliberately: the channel is height above the
+THRESHOLD, not tangent-plane z. None of that reaches the metrics: predictions, references
+and the loss all live in the SAME projection, so the systematic distortion cancels; what
+survives on a measured displacement is the local scale distortion (~0.2% at the ring edge,
+→ 0 at the threshold, where the gates judge). Matching the existing frame is what matters —
+a different projection here would show up as apparent model error against records built by
+the other packages.
 
 **Ordering trap.** CZML-input waypoints are ``[t, lon, lat, alt]`` — *lon before lat* — while
 every state dict downstream is ``lat`` before ``lon``. This module is the only place the two
@@ -186,6 +194,7 @@ def resample_uniform(times: np.ndarray, values: np.ndarray, dt_s: float) -> tupl
     grid = times[0] + np.arange(n_steps, dtype=np.float64) * dt_s
     out = np.empty((n_steps, values.shape[1]), dtype=np.float64)
     for c in range(values.shape[1]):
+        # One-dimensional linear interpolation
         out[:, c] = np.interp(grid, times, values[:, c])
     return grid, out
 

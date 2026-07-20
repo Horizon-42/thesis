@@ -32,7 +32,13 @@ EARTH_RADIUS_MEAN_M = 6_371_008.8           # IUGG mean radius R1 = (2a + b)/3
 SPHERE_RADIUS_M = WGS84_A                    # default; set to EARTH_RADIUS_MEAN_M to switch
 
 # ── Flat-Earth metres-per-degree (cheap local-tangent helpers) ───────────────
-METRES_PER_DEG_LAT = 111_320.0              # mean degree of latitude, metres
+# Derived from WGS84_A, NOT the hand-rounded 111 320.0 it used to be: the optimizer's
+# NE frame (approach_constraints.frame, and the NLP's metric-position normalization)
+# scales degrees by WGS84_A·π/180, and the rounded value put a 4.6 ppm seam (~0.11 m at
+# the 25 km entry ring) between that frame and every geokit-derived one (ts_transformer
+# channels, flight_scenarios velocity fits). One definition, bit-identical everywhere
+# (IEEE multiplication is commutative, so A·(π/180) ≡ (π/180)·A).
+METRES_PER_DEG_LAT = WGS84_A * (math.pi / 180.0)   # 111 319.4908... m — equatorial degree of arc
 
 # ── Length / angle unit conversions ──────────────────────────────────────────
 NM_M = 1852.0                               # nautical mile -> metre (exact, by definition)
