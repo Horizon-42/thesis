@@ -46,7 +46,13 @@ _OPT_DIR = Path(__file__).resolve().parent
 if str(_OPT_DIR) not in sys.path:
     sys.path.insert(0, str(_OPT_DIR))
 
-from flight_scenarios import FlightScenario, flight_key, load_scenarios, state_samples_from_track  # noqa: E402
+from flight_scenarios import (  # noqa: E402
+    FlightScenario,
+    flight_key,
+    load_observed_flights,
+    load_scenarios,
+    state_samples_from_track,
+)
 from flight_scenarios.start_state import DEFAULT_WINDOW_S  # noqa: E402
 from aerodynamic_model.common import GeodeticState, LoadFactorControl  # noqa: E402
 from aerodynamic_model.casadi_simulator import CasadiSimulator  # noqa: E402
@@ -600,10 +606,10 @@ def write_reference_records(
     its reference deterministically (``reference_file``). Missing flights raise:
     references and solves must come from the same dataset.
     """
-    if isinstance(observed_tracks, (str, Path)):
-        flights = json.loads(Path(observed_tracks).read_text(encoding="utf-8"))
-    else:
-        flights = observed_tracks
+    # Through the SAME loader the scenarios came from: it converts the observed altitudes
+    # from ellipsoidal (HAE) to MSL. Reading the file directly here would put the reference
+    # record ~30 m below the scenario built from the identical track.
+    flights = load_observed_flights(observed_tracks)
     by_identity = {
         (f.get("id"), f.get("icao24"), f.get("landing_time_utc")): f for f in flights
     }

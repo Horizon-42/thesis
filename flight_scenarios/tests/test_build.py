@@ -17,6 +17,8 @@ FLIGHT = {
     "icao24": "3949ea",
     "runway": "05L",
     "entry_time_utc": "2026-06-18T10:03:07Z",
+    # Real harvest data always declares its datum; the modeling loader converts on it.
+    "altitude_source": "opensky_history_geoaltitude_m",
     "waypoints": [
         [0.0, -78.45, 35.74, 2500.0],
         [5.0, -78.46, 35.74, 2450.0],

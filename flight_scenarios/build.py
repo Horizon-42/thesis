@@ -16,6 +16,7 @@ from typing import Any
 
 from aircraft.aero_params import aero_params_for_aircraft
 
+from .datum import flight_to_msl, flights_to_msl
 from .runway_target import threshold_target_state
 from .scenario import FlightScenario, aircraft_for_code
 from .start_state import DEFAULT_WINDOW_S, final_state_from_track, initial_state_from_track
@@ -44,7 +45,14 @@ def build_scenario(
     heading, glidepath), falling back to the track end if the threshold isn't in the config.
     ``airport`` supplies the arrival airport for the threshold lookup (the CZML-input flight's
     own ``arr_airport`` is often empty — the airport lives in the file path).
+
+    The track's altitudes are converted from ellipsoidal (HAE) to MSL here rather than
+    assumed, so a scenario cannot be built on the wrong vertical datum no matter which
+    loader produced the dict — this bug reached three separate load paths. The conversion
+    is idempotent (keyed on ``altitude_source``), so callers that already used
+    :func:`load_observed_flights` pay only a tag check. See ``flight_scenarios/datum.py``.
     """
+    flight = flight_to_msl(flight)
     aircraft = _resolve_aircraft(flight, aircraft_type)
     mass = mass_kg if mass_kg is not None else aircraft.landing_mass
     arr_airport = airport or flight.get("arr_airport")
@@ -76,6 +84,10 @@ def build_scenario(
         "n_samples": len(waypoints),
         "window_s": window_s,
         "target_source": target_source,
+        # Datum provenance: after flight_to_msl above this is the MSL tag, so a saved
+        # scenarios file records which vertical datum it was built on — pre-datum-fix
+        # (HAE-era) files carry no such key and are thereby distinguishable.
+        "altitude_source": flight.get("altitude_source"),
     }
     return FlightScenario(initial=initial, aircraft=aircraft, aero=aero, source=source, target=target)
 
@@ -97,7 +109,7 @@ def build_scenarios_from_czml_input(
     fallback when an ``icao24`` can't be resolved. ``airport`` and ``target_from_threshold``
     are forwarded to :func:`build_scenario`.
     """
-    flights = _load_flights(czml_input)
+    flights = load_observed_flights(czml_input)
     return [
         build_scenario(
             flight, aircraft_type, airport=airport, mass_kg=mass_kg, window_s=window_s,
@@ -135,7 +147,17 @@ def _resolve_aircraft(flight: dict[str, Any], fallback_type: str | None):
     )
 
 
-def _load_flights(czml_input: str | Path | list[dict[str, Any]]) -> list[dict[str, Any]]:
-    if isinstance(czml_input, (str, Path)):
-        return json.loads(Path(czml_input).read_text(encoding="utf-8"))
-    return czml_input
+def load_observed_flights(czml_input: str | Path | list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """CZML-input flights, read INTO THE MODELING PLANE: altitudes converted HAE -> MSL.
+
+    Every consumer that turns an observed track into modeling state must come through here
+    -- both the scenario builder and ``write_reference_records`` -- because a scenario built
+    on MSL and a reference record built on HAE would be 30 m apart while looking identical.
+    See ``flight_scenarios/datum.py`` for why the conversion is here and not in the harvest.
+    """
+    flights = (
+        json.loads(Path(czml_input).read_text(encoding="utf-8"))
+        if isinstance(czml_input, (str, Path))
+        else czml_input
+    )
+    return flights_to_msl(flights)

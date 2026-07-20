@@ -254,8 +254,13 @@ def test_write_reference_records_from_observed_tracks(tmp_path):
     lat_step = 500.0 / (math.pi / 180.0 * (wgs84_curvature_radii(35.6)[0] + 2000.0))
     waypoints = [[10.0 + 5.0 * k, -78.5, 35.6 + lat_step * k, 2000.0 - 50.0 * k]
                  for k in range(4)]
+    # Tagged "synthetic" (= already MSL): these altitudes are constructed for an exact
+    # velocity fit, and running them through the observed HAE->MSL conversion would perturb
+    # the kinematics this test pins. The conversion itself is covered by
+    # flight_scenarios/tests/test_datum.py, including a seam test seat-belting the fact that
+    # write_reference_records reads through load_observed_flights.
     flight = {"id": "AFR074", "icao24": "ad7f04", "landing_time_utc": "2026-06-18T21:37:36Z",
-              "waypoints": waypoints}
+              "altitude_source": "synthetic", "waypoints": waypoints}
     target = GeodeticState(35.62, -78.5, 1850.0, 100.0, math.pi / 2, -0.1, 60000.0)
     scenario = _scenario(target=target)
     scenario.source.update({"icao24": "ad7f04", "landing_time_utc": "2026-06-18T21:37:36Z"})

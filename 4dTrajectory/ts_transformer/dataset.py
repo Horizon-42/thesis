@@ -35,6 +35,7 @@ from torch.utils.data import DataLoader, Dataset
 # flight_scenarios.identity because the optimizer batch derives its record filenames from
 # the SAME function; the split key here and both writers' filename stems cannot drift.
 from flight_scenarios import FlightScenario, build_scenario, flight_key, state_samples_from_track
+from flight_scenarios.datum import flight_to_msl
 
 from channels import Frame, channels_from_states, frame_for_state, resample_uniform
 from config import DEFAULT_AIRCRAFT_TYPE, HORIZON_FULL, TSConfig
@@ -240,6 +241,15 @@ def build_series(
         if span < config.dt_s * (minimum_samples - 1):
             report.skip(f"track shorter than one window ({config.lookback_s:.0f}s)")
             continue
+
+        # Into the modeling plane: harvested altitude is ellipsoidal (HAE) while the
+        # threshold-anchored channels and the evaluation gates are MSL. Converted HERE, not
+        # inside build_scenario alone, because state_samples_from_track below takes the bare
+        # waypoint list and so cannot convert itself. Idempotent (see flight_scenarios/datum).
+        # Placed after the cheap skips (which read no altitude) so rejected flights don't
+        # pay the pyproj transform; ``waypoints`` must be rebound to the converted rows.
+        flight = flight_to_msl(flight)
+        waypoints = flight["waypoints"]
 
         scenario = build_scenario(flight, aircraft_type, airport=airport,
                                   target_from_threshold=True)
