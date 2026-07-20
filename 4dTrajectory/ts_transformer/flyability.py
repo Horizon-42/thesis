@@ -52,7 +52,7 @@ from typing import Any, Sequence
 
 from aircraft.aero_params import AeroParams, aero_params_for_aircraft
 from aircraft.aircraft_sets import Aircraft
-from geokit import WGS84_A, WGS84_E2
+from geokit import wgs84_curvature_radii
 
 # Gravity: 9.81, matching every dynamics path in this repo (simulator.py, simulator_simple.py,
 # casadi_exprs.py, collocation/components.py) — deliberately NOT 9.80665.
@@ -177,9 +177,7 @@ def _transport_rates(*, speed: float, psi: float, gamma: float, lat_rad: float,
     if transport == "none":
         return 0.0, 0.0
 
-    denom = 1.0 - WGS84_E2 * math.sin(lat_rad) ** 2
-    r_n = WGS84_A / math.sqrt(denom)                    # prime vertical
-    r_m = WGS84_A * (1.0 - WGS84_E2) / denom ** 1.5     # meridional
+    r_m, r_n = wgs84_curvature_radii(math.degrees(lat_rad))
 
     cos_gamma = math.cos(gamma)
     gamma_dot = speed * cos_gamma * (

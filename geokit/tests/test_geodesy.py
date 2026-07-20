@@ -90,6 +90,26 @@ def test_metres_per_degree_precise_is_near_constant():
     assert lon_m == pytest.approx(91_290.0, abs=400.0)
 
 
+def test_wgs84_curvature_radii_pinned_at_the_closed_form_landmarks():
+    # Equator: R_M = a(1 - e^2) (the ellipse's tightest meridional curvature),
+    # R_N = a exactly. Pole: both equal a / sqrt(1 - e^2). Values are the exact
+    # closed forms evaluated independently — a formula regression (e.g. swapping
+    # the exponents, or the two radii) moves them by kilometres.
+    r_m, r_n = G.wgs84_curvature_radii(0.0)
+    assert r_m == pytest.approx(6_335_439.327, abs=1e-3)
+    assert r_n == pytest.approx(C.WGS84_A, abs=1e-9)
+
+    r_m, r_n = G.wgs84_curvature_radii(90.0)
+    assert r_m == pytest.approx(6_399_593.626, abs=1e-3)
+    assert r_n == pytest.approx(r_m, abs=1e-6)
+
+    # Mid-latitude spot check (45 deg), and the ordering R_M < R_N off the poles.
+    r_m, r_n = G.wgs84_curvature_radii(45.0)
+    assert r_m == pytest.approx(6_367_381.816, abs=1e-3)
+    assert r_n == pytest.approx(6_388_838.290, abs=1e-3)
+    assert r_m < r_n
+
+
 # ── Bounding box ─────────────────────────────────────────────────────────────
 
 def test_bounds_from_radius_basic():

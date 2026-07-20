@@ -13,6 +13,8 @@ import math
 from .constants import (
     METRES_PER_DEG_LAT,
     SPHERE_RADIUS_M,
+    WGS84_A,
+    WGS84_E2,
 )
 
 
@@ -80,6 +82,26 @@ def flat_distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float
     dx = (lon2 - lon1) * metres_per_deg_lon(mid_lat)
     dy = (lat2 - lat1) * METRES_PER_DEG_LAT
     return math.hypot(dx, dy)
+
+
+def wgs84_curvature_radii(lat_deg: float) -> tuple[float, float]:
+    """Exact WGS84 curvature radii at a latitude: ``(R_M, R_N)`` in metres.
+
+    ``R_M`` is the meridional (north–south) radius, ``R_N`` the prime-vertical
+    (east–west) radius; the local metres-per-radian scales are ``R_M + h`` and
+    ``(R_N + h)·cos(lat)``. These are the exact closed forms, not the series
+    expansion in :func:`metres_per_degree_precise`.
+
+    The CasADi-symbolic twin lives in
+    ``aerodynamic_model/casadi_simulator.make_geodetic_dynamics_model`` (a symbolic
+    expression cannot call a float function, so that copy MUST match this one);
+    every *numeric* consumer imports this function instead of re-deriving it.
+    """
+    denom = 1.0 - WGS84_E2 * math.sin(math.radians(lat_deg)) ** 2
+    return (
+        WGS84_A * (1.0 - WGS84_E2) / denom**1.5,   # R_M, meridional
+        WGS84_A / math.sqrt(denom),                # R_N, prime vertical
+    )
 
 
 def metres_per_degree_precise(lat_deg: float) -> tuple[float, float]:

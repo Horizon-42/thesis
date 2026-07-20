@@ -34,6 +34,7 @@ from .geodesy import (
     haversine_m,
     metres_per_deg_lon,
     metres_per_degree_precise,
+    wgs84_curvature_radii,
 )
 from .units import (
     ft_min_to_ms,
@@ -76,6 +77,7 @@ __all__ = [
     "metres_per_deg_lon",
     "flat_distance_m",
     "metres_per_degree_precise",
+    "wgs84_curvature_radii",
     "bounds_from_radius_km",
     # speed units
     "kt_to_ms",

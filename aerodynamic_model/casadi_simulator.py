@@ -368,7 +368,9 @@ def make_geodetic_dynamics_model(transport: str = "approx"):
     n = ca.if_else(stalled, 0.5 * rho * V**2 * Cl_max * S / (m * g), n_cmd)
     D = 0.5 * rho * V**2 * Cd * S
 
-    # WGS84 radii of curvature at this latitude.
+    # WGS84 radii of curvature at this latitude. Numeric single source:
+    # geokit.wgs84_curvature_radii — this symbolic copy MUST match it (a CasADi
+    # expression cannot call a float function, hence the mirror).
     sin_lat = ca.sin(lat)
     denom = 1.0 - WGS84_E2 * sin_lat**2
     R_N = WGS84_A / ca.sqrt(denom)                    # prime-vertical radius
