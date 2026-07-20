@@ -4,6 +4,93 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-07-20 — full batch re-run (15/15 fresh), geokit per-degree constant aligned to the optimizer
+
+**Batch.** `run_scenario_pipeline.py --jobs 6`, 5 airports × 3 categories, 10,449 solves,
+≈4 h 39 m wall clock (one harness-side background-task reap mid-run; resumed detached with
+`setsid nohup`, `overall_fail=0`). All artifacts now post-date every 2026-07 fix (arrival
+truncation, altitude floor/rollout guard, HS flip, identity unification) — the standing
+"all batches are STALE" open item is closed. ts predictions were regenerated the same day,
+**test split only** (152 flights per the reproducible flight_key split), for all four
+checkpoints.
+
+Identity contract verified on the fresh artifacts, all green: record stems are full
+flight_keys; summary rows all carry `landing_time_utc`; **reference hit rate 100% in all 19
+comparison categories** (15 optimizer + KRDU's 4 ts_pred — the pre-refactor
+duplicate-callsign dropout was 22%); zero duplicate entity ids in sampled CZMLs; every
+airport's categories.json intact (KRDU keeps 7 categories).
+
+Headline solve/gate rates (success among solved): runway_cons is the cleanest everywhere
+(93–99%), asdb the hardest (76–89%). Finding worth keeping: **KRDU RW32 is systematically
+hard and NOT the old truncation artifact** — runway_cons RW32 79 offTarget + 59 failed of
+198 (all other runways ≤9), and asdb RW32 fails 197/198 (IPOPT infeasible). Likely
+procedure-specific (RNP-AR H05LZ; per-leg RNP still not extracted). KSTL runway_cons has a
+milder cluster (12R/30R/30L/24; repeated single-IAF `PAULY` infeasibility).
+
+**geokit alignment.** `METRES_PER_DEG_LAT` was the hand-rounded `111_320.0`; the
+optimizer's NE frame (`approach_constraints.frame` and the NLP's metric-position
+normalization) derives `WGS84_A·DEG2RAD = 111319.4908…` — a 4.6 ppm seam (~0.11 m at the
+25 km ring) between the two frame families. Now defined as `WGS84_A * (π/180)` in
+`geokit.constants` — bit-identical to the optimizer's product (IEEE commutativity),
+`metres_per_deg_lon` stays pure `·cos(lat)`. Frontend `geoConstants.json` regenerated.
+Applied AFTER the batch finished so all 15 cells share one constant; ts checkpoints are
+unaffected in practice (inputs move ≤0.11 m at the ring edge vs km-scale model error — no
+retrain). Also corrected the `channels.py` projection docstring: the flat chart deviates
+from a true tangent-plane ENU by up to ~40 m at the ring edge (`e·n·tanφ/R` cross term) and
+`u = Δalt` ignores the ~49 m curvature drop by design — the old "well under a metre" claim
+was true only of the quantities the metrics actually measure (same-chart comparisons;
+~0.2% local scale distortion at the ring edge, → 0 at the threshold).
+
+### 2026-07-20 — flight identity unified end-to-end: entity ids = flight_key, positional `_N` re-uniquing deleted
+
+The last identity holdouts (CZML entity ids, the comparison reference lookup, the FlightTable
+optimizer join) still ran on bare callsigns + positional `_2/_3` suffixes. Diagnosis on the real
+KRDU harvest:
+
+- **Per-runway landings/arrivals files held massive duplicate ids** (128 duplicates across five
+  runways; `N993FG` ×10 on RW32). Root cause: `collect_landings` harvests in CHUNKS and
+  `classify_landing_flights` restarted its `_unique_id` numbering per chunk, while the
+  cross-chunk merge de-duplicated by `(icao24, landing_time_utc)` without re-uniquing ids. The
+  per-runway CZMLs inherited them — Cesium merges same-id packets, so two namesake flights
+  rendered as ONE garbled entity (both tracks' samples interleaved from t=0), and
+  `flightSummaries`/React row keys collided.
+- **Cross-view id aliasing**: `merge_landing_flights` re-uniqued ids positionally for the
+  combined file, so the same string (`SWA1692_2`) named DIFFERENT physical flights in the
+  per-runway vs combined views, and the same flight got different `flight_key` stems from the
+  two record writers (optimizer eats combined, ts eats per-runway) — breaking identity.py's
+  "same stem" promise and making the comparison builder's callsign reference-lookup resolve to
+  whichever namesake came first (the "wrong white line" open item).
+- **FlightTable's optimizer join was callsign-keyed** (`byFlightId` from `group.flightId`), so
+  namesakes swapped each other's V/mass/failed/offTarget facts.
+
+Fix — one identity everywhere, display strictly separated:
+
+- `generate_czml.build_czml`: entity id = `flight_key(flight)`, `name` = callsign; RAISES on a
+  duplicate identity (silent Cesium merge → loud input error). Both `trajectories.czml`
+  producers go through it.
+- `_unique_id` deleted from the landing path (`classify_landing_flights`,
+  `merge_landing_flights`); kept ONLY in `trajectories_to_czml_input` (the plain download path
+  has no runway/landing time — the suffixed id is its one discriminator).
+- `aeroviz-4d/python/flight_identity.py`: deliberate MIRROR of
+  `flight_scenarios.identity.flight_key` (frontend tooling can't import the modeling tree);
+  both copies pinned to `EJA969_05R_ad7f04_20260618T213736Z` in their own suites.
+- Comparison builder: reference lookup by `group` (= flight_key = the new entity id) in batch
+  mode and by `flight_key(source)` in single mode; `scenario_initial_map` keyed by flight_key
+  (was `(id, runway)` — namesakes shared one V/mass); `_group_key`'s file-less fallback
+  reconstructs the identity from the row (rows now carry `landing_time_utc` via `summary_row`
+  — it IS part of the identity and was the one missing field).
+- Frontend: `useFlightOptimizerData` keys by `group.group` (renamed `byFlightKey`);
+  FlightTable/approach view display the callsign (`name`) while ids stay the
+  selection/join/cache identity; `ObservedFlightSummary` gained `callsign`.
+
+Verified: 57 aeroviz-4d python tests, 59 trajectory_data_process, 84 optimization+ts, 453
+vitest, tsc + vite build — all green. New pins: namesake entity ids distinct + duplicate
+identity raises (generate_czml); each comparison group copies ITS OWN namesake's reference
+track; FlightTable keeps namesake optimizer facts apart. Artifacts regenerated after this
+change (arrivals/CZML rebuild + full batch re-run); ts checkpoints are UNAFFECTED (per-runway
+arrivals `id` fields — and therefore split keys — are byte-identical; only the combined view
+changed).
+
 ### 2026-07-19 — flyability check, instance-norm re-ablation on real data, predictions in the frontend
 
 Three things asked for together: the post-hoc flyability check (route 1 of the README's four),
