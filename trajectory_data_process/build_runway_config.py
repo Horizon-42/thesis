@@ -22,7 +22,7 @@ if __package__ is None or __package__ == "":  # pragma: no cover - direct execut
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from trajectory_data_process.acquisition.airports import FT_TO_M, airports_csv_path
-from trajectory_data_process.acquisition.runways import runways_csv_path
+from trajectory_data_process.acquisition.runways import landing_thresholds_from_row, runways_csv_path
 
 DEFAULT_AIRPORTS = ["KRDU", "KMSY", "KSJC", "KSMF", "KSTL"]
 
@@ -37,21 +37,13 @@ def _airport_rows(csv_path: Path, codes: set[str]) -> dict[str, dict[str, str]]:
     return rows
 
 
-def _threshold(ident: str, lat: str, lon: str, elev_ft: str, heading: str) -> dict[str, Any]:
-    return {
-        "ident": ident.upper(),
-        "lat": float(lat),
-        "lon": float(lon),
-        "elevation_m": round(float(elev_ft) * FT_TO_M, 2) if elev_ft else None,
-        "heading_deg": float(heading) if heading else None,
-    }
-
-
 def build_config(airports: list[str], aeroviz_root: Path) -> dict[str, Any]:
     codes = {a.upper() for a in airports}
     airport_rows = _airport_rows(airports_csv_path(aeroviz_root), codes)
 
-    out: dict[str, Any] = {"schema_version": "runway-thresholds-v1", "airports": {}}
+    # v2: ``thresholds[].lat/lon/elevation_m`` are the LANDING threshold (displaced where the
+    # source data says so), not the pavement end; ``displaced_threshold_m`` records the shift.
+    out: dict[str, Any] = {"schema_version": "runway-thresholds-v2", "airports": {}}
     runways_by_airport: dict[str, list[dict[str, Any]]] = {code: [] for code in codes}
 
     with runways_csv_path(aeroviz_root).open("r", encoding="utf-8", newline="") as f:
@@ -66,10 +58,9 @@ def build_config(airports: list[str], aeroviz_root: Path) -> dict[str, Any]:
                     "name": f'{row["le_ident"]}/{row["he_ident"]}',
                     "length_ft": int(row["length_ft"]) if row.get("length_ft") else None,
                     "surface": row.get("surface") or None,
-                    "thresholds": [
-                        _threshold(row["le_ident"], row["le_latitude_deg"], row["le_longitude_deg"], row.get("le_elevation_ft", ""), row.get("le_heading_degT", "")),
-                        _threshold(row["he_ident"], row["he_latitude_deg"], row["he_longitude_deg"], row.get("he_elevation_ft", ""), row.get("he_heading_degT", "")),
-                    ],
+                    # Landing thresholds (displaced where published) — the same computation
+                    # resolve_runway_threshold uses, so the two harvest paths agree.
+                    "thresholds": landing_thresholds_from_row(row),
                 }
             )
 

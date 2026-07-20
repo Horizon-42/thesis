@@ -2,6 +2,16 @@
 
 Used to select trajectories by the exact runway threshold an aircraft arrives at,
 rather than by arrival airport alone.
+
+This module is the single source for turning a runways.csv row into LANDING thresholds
+(displaced where the source data says so). Both consumers — ``build_runway_config.py``
+(the runway_thresholds.json generator) and :func:`resolve_runway_threshold` (the
+``download_trajectories.py --runway`` path) — go through :func:`landing_thresholds_from_row`,
+so the two harvest entry points cannot disagree about where a threshold is. They used to:
+the generator learned about displaced thresholds while the resolver kept pavement ends,
+putting the same runway's "threshold" up to 775 m apart (KSJC 30L) between the two paths —
+which also shifted the landing anchor and hence ``landing_time_utc``, the field
+``flight_key`` identity derives from.
 """
 
 from __future__ import annotations
@@ -9,8 +19,10 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from geokit import FT_M as FT_TO_M
+from geokit import haversine_m
 
 
 @dataclass(frozen=True)
@@ -30,11 +42,83 @@ def runways_csv_path(aeroviz_root: Path) -> Path:
     return aeroviz_root / "public" / "data" / "common" / "runways.csv"
 
 
-def resolve_runway_threshold(airport: str, runway_ident: str, csv_path: Path) -> RunwayThreshold:
-    """Find the threshold for ``runway_ident`` (e.g. "05L"/"23R") at an airport.
+def _pavement_end(row: dict[str, str], side: str) -> dict[str, Any] | None:
+    """One pavement end of a runway row, as OurAirports records it (None without coords)."""
+    lat = row.get(f"{side}_latitude_deg")
+    lon = row.get(f"{side}_longitude_deg")
+    if not lat or not lon:
+        return None
+    elev_ft = row.get(f"{side}_elevation_ft", "")
+    heading = row.get(f"{side}_heading_degT", "")
+    return {
+        "ident": row[f"{side}_ident"].upper(),
+        "lat": float(lat),
+        "lon": float(lon),
+        "elevation_m": float(elev_ft) * FT_TO_M if elev_ft else None,
+        "heading_deg": float(heading) if heading else None,
+        "displaced_m": float(row.get(f"{side}_displaced_threshold_ft") or 0.0) * FT_TO_M,
+    }
 
-    Each runways.csv row describes both ends with ``le_*`` and ``he_*`` fields;
-    either end may match the requested ident.
+
+def _landing_threshold(near: dict[str, Any], far: dict[str, Any], length_m: float) -> dict[str, Any]:
+    """The LANDING threshold for one runway end: the pavement end moved down the centreline.
+
+    Where a runway has a displaced threshold, the landing surface begins that far past the
+    pavement end and the pavement before it is unavailable for touchdown. Aircraft fly the
+    glidepath to the DISPLACED point, so that -- not the pavement end -- is the approach
+    target, the along-track origin, and the reference for the threshold-crossing height.
+
+    KSJC 30L/30R are displaced 775 m; taking the pavement end instead put the target 775 m
+    short, which on a 3 deg glidepath is a 40.6 m altitude error at the threshold.
+
+    A runway is straight, so the displaced point is an exact linear interpolation between the
+    two ends -- elevation included, which is what carries the runway's slope.
+    """
+    if near["displaced_m"] and not length_m:
+        raise ValueError(
+            f"runway end {near['ident']} declares a {near['displaced_m']:.0f} m displaced "
+            "threshold but the row gives no usable runway length to place it along -- "
+            "refusing to silently publish the undisplaced pavement end"
+        )
+    fraction = near["displaced_m"] / length_m if length_m else 0.0
+    elevation = near["elevation_m"]
+    if elevation is not None and far["elevation_m"] is not None:
+        elevation += fraction * (far["elevation_m"] - elevation)
+    return {
+        "ident": near["ident"],
+        "lat": round(near["lat"] + fraction * (far["lat"] - near["lat"]), 7),
+        "lon": round(near["lon"] + fraction * (far["lon"] - near["lon"]), 7),
+        "elevation_m": round(elevation, 2) if elevation is not None else None,
+        "heading_deg": near["heading_deg"],
+        "displaced_threshold_m": round(near["displaced_m"], 1),
+    }
+
+
+def landing_thresholds_from_row(row: dict[str, str]) -> list[dict[str, Any]]:
+    """The landing thresholds for every end of one runways.csv row that has coordinates."""
+    le, he = _pavement_end(row, "le"), _pavement_end(row, "he")
+    thresholds = []
+    for near, far in ((le, he), (he, le)):
+        if near is None:
+            continue
+        # An end without a recorded partner can still be a threshold as long as it is not
+        # displaced (fraction 0 needs no interpolation target); _landing_threshold raises
+        # on the displaced-but-lengthless combination rather than guessing.
+        far_or_self = far if far is not None else near
+        # The published ``length_ft`` and the distance between the two ends disagree by
+        # ~0.1 %; the coordinates are what the displacement is interpolated against, so
+        # measure them.
+        length_m = haversine_m(near["lat"], near["lon"], far_or_self["lat"], far_or_self["lon"])
+        thresholds.append(_landing_threshold(near, far_or_self, length_m))
+    return thresholds
+
+
+def resolve_runway_threshold(airport: str, runway_ident: str, csv_path: Path) -> RunwayThreshold:
+    """Find the LANDING threshold for ``runway_ident`` (e.g. "05L"/"23R") at an airport.
+
+    Each runways.csv row describes both ends with ``le_*`` and ``he_*`` fields; either end
+    may match the requested ident. The returned point is the displaced landing threshold
+    where one is published — the same point the runway_thresholds.json generator emits.
     """
     code = airport.upper()
     wanted = runway_ident.upper().lstrip("0") or "0"
@@ -45,31 +129,16 @@ def resolve_runway_threshold(airport: str, runway_ident: str, csv_path: Path) ->
         for row in csv.DictReader(f):
             if (row.get("airport_ident") or "").upper() != code:
                 continue
-            for prefix in ("le", "he"):
-                ident = (row.get(f"{prefix}_ident") or "").upper()
-                if ident.lstrip("0") != wanted:
+            for t in landing_thresholds_from_row(row):
+                if t["ident"].lstrip("0") != wanted:
                     continue
-                threshold = _threshold_from_row(code, ident, row, prefix)
-                if threshold is not None:
-                    return threshold
+                return RunwayThreshold(
+                    airport=code,
+                    ident=t["ident"],
+                    lat=t["lat"],
+                    lon=t["lon"],
+                    elevation_m=t["elevation_m"] if t["elevation_m"] is not None else 0.0,
+                    heading_deg=t["heading_deg"],
+                )
 
     raise RuntimeError(f"Runway {runway_ident} not found for airport {code} in {csv_path}")
-
-
-def _threshold_from_row(
-    airport: str, ident: str, row: dict[str, str], prefix: str
-) -> RunwayThreshold | None:
-    lat = row.get(f"{prefix}_latitude_deg")
-    lon = row.get(f"{prefix}_longitude_deg")
-    if not lat or not lon:
-        return None
-    elev_ft = row.get(f"{prefix}_elevation_ft")
-    heading = row.get(f"{prefix}_heading_degT")
-    return RunwayThreshold(
-        airport=airport,
-        ident=ident,
-        lat=float(lat),
-        lon=float(lon),
-        elevation_m=float(elev_ft) * FT_TO_M if elev_ft not in (None, "") else 0.0,
-        heading_deg=float(heading) if heading not in (None, "") else None,
-    )

@@ -4,6 +4,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from geokit import FT_M
+
 from trajectory_data_process.acquisition.runways import resolve_runway_threshold
 
 
@@ -32,7 +34,9 @@ class RunwayThresholdTests(unittest.TestCase):
         self.assertEqual(t.ident, "05L")
         self.assertAlmostEqual(t.lat, 35.8745002746582)
         self.assertAlmostEqual(t.lon, -78.802001953125)
-        self.assertAlmostEqual(t.elevation_m, 367 * 0.3048, places=3)
+        # The resolver shares the landing-threshold computation with the config generator,
+        # which publishes elevation rounded to 2 decimals (centimetres).
+        self.assertAlmostEqual(t.elevation_m, 367 * FT_M, places=2)
         self.assertEqual(t.heading_deg, 45.0)
 
     def test_resolves_high_end(self) -> None:
