@@ -22,20 +22,23 @@ class MergeTests(unittest.TestCase):
         path.write_text(json.dumps(flights), encoding="utf-8")
         return path
 
-    def test_merges_and_dedupes_across_files(self) -> None:
+    def test_merges_and_dedupes_across_files_without_touching_ids(self) -> None:
         with TemporaryDirectory() as tmp:
             d = Path(tmp)
             a = self._write(d, "KRDU", "23R", [_flight("AAL1", "a1", "2026-06-18T10:00:00Z")])
-            # same landing duplicated in another file + an id collision with a different landing
+            # same landing duplicated in another file + a namesake that is a different landing
             b = self._write(d, "KRDU", "05L", [
                 _flight("AAL1", "a1", "2026-06-18T10:00:00Z"),   # duplicate -> dropped
-                _flight("AAL1", "b2", "2026-06-18T11:00:00Z"),   # id collision -> renamed
+                _flight("AAL1", "b2", "2026-06-18T11:00:00Z"),   # namesake -> kept AS-IS
             ])
 
             merged = merge_landing_flights([a, b])
 
             self.assertEqual(len(merged), 2)
-            self.assertEqual([m["id"] for m in merged], ["AAL1", "AAL1_2"])
+            # ids pass through untouched: positional _N re-uniquing gave one flight
+            # different ids in different views. Uniqueness lives in flight_key
+            # (icao24 + landing time), which CZML generation derives entity ids from.
+            self.assertEqual([m["id"] for m in merged], ["AAL1", "AAL1"])
             self.assertEqual({m["icao24"] for m in merged}, {"a1", "b2"})
 
     def test_landing_files_all_vs_subset(self) -> None:

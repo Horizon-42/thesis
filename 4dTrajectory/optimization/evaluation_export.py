@@ -132,6 +132,9 @@ def summary_row(
         "id": source.get("id"),
         "callsign": source.get("callsign"),
         "icao24": source.get("icao24"),
+        # Part of the flight's identity, not an extra: id is the callsign and repeats
+        # daily, so without the landing time a row cannot name WHICH flight it is.
+        "landing_time_utc": source.get("landing_time_utc"),
         "arr_airport": source.get("arr_airport"),
         "runway": source.get("runway"),
         "target_source": source.get("target_source"),

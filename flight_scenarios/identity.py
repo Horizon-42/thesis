@@ -9,6 +9,13 @@ different splits), and ``predict --split test`` pulls every namesake.
 Both record writers (``4dTrajectory/optimization``'s batch and ``4dTrajectory/
 ts_transformer``'s export) and the ts train/val/test split key derive from THIS function,
 so a record filename and a split key for the same flight cannot drift apart.
+
+The observed-layer CZML entity ids (``aeroviz-4d/python/generate_czml.py``) and the
+comparison builder's reference lookup are this same identity, via the MIRROR
+``aeroviz-4d/python/flight_identity.py`` (that package is standalone frontend tooling and
+must not import the modeling tree this package's ``__init__`` pulls in). Both copies are
+pinned to the same canonical vector — ``EJA969_05R_ad7f04_20260618T213736Z`` — by their
+respective test suites, so drift fails loudly. Change the two files together.
 """
 
 from __future__ import annotations

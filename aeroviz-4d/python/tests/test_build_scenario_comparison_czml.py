@@ -28,15 +28,17 @@ STATES = [
     {"t": 5.0, "lat": 35.73, "lon": -78.46, "alt": 2400.0, "V": 128.0, "psi": 1.0, "gamma": -0.05, "m": 78000.0},
 ]
 STATE_DATA = {
-    "source": {"id": "AFR074"},
+    "source": {"id": "AFR074", "runway": "05L"},
     "final_time_s": 5.0,
     "optimizer_states": STATES,
     "simulator_states": STATES,
 }
+# The observed layer's entity id IS the flight identity (flight_key of the same source
+# fields the record stems carry) — the bare callsign lives only in ``name``.
 ADSB_CZML = [
     {"id": "document", "clock": {}},
     {
-        "id": "AFR074",
+        "id": "AFR074_05L",
         "name": "AFR074",
         "position": {"cartographicDegrees": [0, -78.45, 35.74, 2500.0]},
         # A short trailTime like the real trajectories.czml — the reference builder must OVERRIDE it.
@@ -57,7 +59,7 @@ def test_states_to_waypoints_order():
 
 
 def test_reference_entity_copies_and_recolors():
-    entity = _reference_entity_from_adsb(ADSB_CZML, "AFR074", REFERENCE_COLOR)
+    entity = _reference_entity_from_adsb(ADSB_CZML, "AFR074_05L", REFERENCE_COLOR)
     assert entity is not None
     assert entity["id"] == "scenario-reference"
     assert entity["path"]["material"]["solidColor"]["color"]["rgba"] == list(REFERENCE_COLOR)
@@ -89,7 +91,7 @@ def test_build_comparison_czml_has_three_trajectories():
 
 
 def test_no_reference_when_flight_missing():
-    czml = build_comparison_czml({**STATE_DATA, "source": {"id": "NOPE"}}, ADSB_CZML)
+    czml = build_comparison_czml({**STATE_DATA, "source": {"id": "NOPE", "runway": "05L"}}, ADSB_CZML)
     ids = [packet["id"] for packet in czml[1:]]
     assert "scenario-reference" not in ids
     assert "scenario-optimizer" in ids and "scenario-simulator" in ids
@@ -113,7 +115,8 @@ def test_same_callsign_same_runway_on_different_days_are_two_groups(tmp_path):
     # groups on id_runway made one flight silently overwrite the other. Measured on the KRDU
     # harvest that lost 218 of 996 arrivals. The record filename carries the full flight_key
     # (callsign_runway_icao24_landingTime), which is what the group is keyed by now.
-    for stem in ("ASA677_05R_a54aae_20260629T093123Z", "ASA677_05R_a9e8ce_20260630T093925Z"):
+    stems = ("ASA677_05R_a54aae_20260629T093123Z", "ASA677_05R_a9e8ce_20260630T093925Z")
+    for stem in stems:
         (tmp_path / f"{stem}_states.json").write_text(json.dumps(STATE_DATA), encoding="utf-8")
     results = [
         {"id": "ASA677", "runway": "05R", "status": "solved",
@@ -121,15 +124,28 @@ def test_same_callsign_same_runway_on_different_days_are_two_groups(tmp_path):
         {"id": "ASA677", "runway": "05R", "status": "solved",
          "states_file": "ASA677_05R_a9e8ce_20260630T093925Z_states.json"},
     ]
-    czml, index = build_runway_comparison(results, tmp_path, ADSB_CZML, airport="KRDU")
+    # The observed layer ids the namesakes by their full flight_keys, with distinct
+    # positions — so the test can pin that each group copied ITS OWN track, not
+    # whichever namesake happened to come first (the old callsign-lookup bug).
+    adsb = [
+        ADSB_CZML[0],
+        {**ADSB_CZML[1], "id": stems[0], "name": "ASA677",
+         "position": {"cartographicDegrees": [0, -78.45, 35.74, 2500.0]}},
+        {**ADSB_CZML[1], "id": stems[1], "name": "ASA677",
+         "position": {"cartographicDegrees": [0, -78.99, 35.99, 3000.0]}},
+    ]
+    czml, index = build_runway_comparison(results, tmp_path, adsb, airport="KRDU")
 
     assert len(index) == 2, "two distinct flights must not collapse into one group"
-    assert {r["group"] for r in index} == {
-        "ASA677_05R_a54aae_20260629T093123Z", "ASA677_05R_a9e8ce_20260630T093925Z",
-    }
+    assert {r["group"] for r in index} == set(stems)
     # Both keep the callsign for display; only the grouping key is the full identity.
     assert {r["flightId"] for r in index} == {"ASA677"}
     assert len([p for p in czml[1:] if p["id"].startswith("opt-")]) == 2
+    # Each reference is the RIGHT namesake's track (matched by flight_key, not callsign).
+    refs = {p["id"]: p for p in czml[1:] if p["id"].startswith("ref-")}
+    assert set(refs) == {f"ref-{stems[0]}", f"ref-{stems[1]}"}
+    assert refs[f"ref-{stems[0]}"]["position"]["cartographicDegrees"][1] == -78.45
+    assert refs[f"ref-{stems[1]}"]["position"]["cartographicDegrees"][1] == -78.99
 
 
 def test_failed_and_solved_rows_of_one_flight_still_share_a_group(tmp_path):
@@ -157,20 +173,20 @@ def test_build_runway_comparison_solved_three_paths_failed_red(tmp_path):
     adsb = [
         ADSB_CZML[0],
         ADSB_CZML[1],
-        {**ADSB_CZML[1], "id": "DAL1312", "name": "DAL1312"},
+        {**ADSB_CZML[1], "id": "DAL1312_05L", "name": "DAL1312"},
     ]
     # The scenario map carries every flight's initial V + mass (built before optimization), so a
-    # FAILED optimization still gets V + mass in the index.
+    # FAILED optimization still gets V + mass in the index. Keyed by flight_key (= the group).
     scenario_initial = {
-        ("AFR074", "05L"): {"V": 130.0, "m": 78000.0},
-        ("DAL1312", "05L"): {"V": 122.5, "m": 61000.0},
+        "AFR074_05L": {"V": 130.0, "m": 78000.0},
+        "DAL1312_05L": {"V": 122.5, "m": 61000.0},
     }
     czml, index = build_runway_comparison(
         results, tmp_path, adsb, airport="KRDU", scenario_initial=scenario_initial
     )
     ids = [p["id"] for p in czml[1:]]
 
-    # solved flight -> three entities, ids namespaced by {flightId}_{runway} (collision-free)
+    # solved flight -> three entities, ids namespaced by the group (the record stem)
     assert {"ref-AFR074_05L", "opt-AFR074_05L", "sim-AFR074_05L"} <= set(ids)
     sim = next(p for p in czml if p["id"] == "sim-AFR074_05L")
     assert sim["path"]["material"]["solidColor"]["color"]["rgba"] == list(SIMULATOR_COLOR)
@@ -249,7 +265,9 @@ def test_clock_spans_reference_on_failed_only_runway(tmp_path):
     from datetime import datetime
 
     long_ref = {
-        "id": "N999XX", "name": "N999XX",
+        # A file-less row's group is flight_key over the row fields — here just id_runway —
+        # and the observed entity id must be that same identity for the lookup to hit.
+        "id": "N999XX_32", "name": "N999XX",
         "position": {"epoch": "2026-04-01T08:00:00Z",
                      "cartographicDegrees": [0.0, -78.7, 35.8, 2000.0, 900.0, -78.6, 35.9, 500.0]},
         "path": {"material": {"solidColor": {"color": {"rgba": [235, 235, 235, 200]}}}},
@@ -286,7 +304,7 @@ def test_off_target_group_yellow_reference_and_verdict_metrics(tmp_path):
     # record), and the verdict's final deviations are copied onto the record. A flight whose
     # verdict says success=true stays plain "solved" with the white reference.
     (tmp_path / "AFR074_05L_states.json").write_text(json.dumps(STATE_DATA), encoding="utf-8")
-    miss_data = {**STATE_DATA, "source": {"id": "DAL1312"}}
+    miss_data = {**STATE_DATA, "source": {"id": "DAL1312", "runway": "05L"}}
     (tmp_path / "DAL1312_05L_states.json").write_text(json.dumps(miss_data), encoding="utf-8")
     results = [
         {"id": "AFR074", "runway": "05L", "status": "solved",
@@ -294,7 +312,7 @@ def test_off_target_group_yellow_reference_and_verdict_metrics(tmp_path):
         {"id": "DAL1312", "runway": "05L", "status": "solved",
          "states_file": "DAL1312_05L_states.json", "eval_file": "DAL1312_05L_eval.json"},
     ]
-    adsb = [ADSB_CZML[0], ADSB_CZML[1], {**ADSB_CZML[1], "id": "DAL1312", "name": "DAL1312"}]
+    adsb = [ADSB_CZML[0], ADSB_CZML[1], {**ADSB_CZML[1], "id": "DAL1312_05L", "name": "DAL1312"}]
     verdicts = load_verdicts({"trajectories": [
         {"file": "AFR074_05L_eval.json", "solved": True, "success": True,
          "lateral_m": 2.8, "vertical_m": 0.1},
@@ -342,6 +360,29 @@ def test_no_verdicts_keeps_solved_plain(tmp_path):
     assert ref["path"]["material"]["solidColor"]["color"]["rgba"] == list(REFERENCE_COLOR)
     assert index[0]["status"] == "solved"
     assert "lateralErrM" not in index[0]
+
+
+def test_scenario_initial_map_keys_namesakes_apart_by_flight_key(tmp_path):
+    # Two landings by the same callsign on the same runway (different aircraft/days) must
+    # keep their own V/mass — the old (id, runway) key served one flight's numbers for both.
+    from build_scenario_comparison_czml import scenario_initial_map
+
+    scenarios = [
+        {"source": {"id": "ASA677", "runway": "05R", "icao24": "a54aae",
+                    "landing_time_utc": "2026-06-29T09:31:23Z"},
+         "initial": {"V": 130.0, "m": 78000.0}},
+        {"source": {"id": "ASA677", "runway": "05R", "icao24": "a9e8ce",
+                    "landing_time_utc": "2026-06-30T09:39:25Z"},
+         "initial": {"V": 118.0, "m": 64000.0}},
+    ]
+    path = tmp_path / "scenarios.json"
+    path.write_text(json.dumps(scenarios), encoding="utf-8")
+
+    initial = scenario_initial_map([path])
+    assert initial == {
+        "ASA677_05R_a54aae_20260629T093123Z": {"V": 130.0, "m": 78000.0},
+        "ASA677_05R_a9e8ce_20260630T093925Z": {"V": 118.0, "m": 64000.0},
+    }
 
 
 def test_optimization_stats_merges_summary_and_report():

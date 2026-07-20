@@ -72,30 +72,28 @@ def runway_ident_from_path(path: Path, code: str) -> str:
 
 
 def merge_landing_flights(paths: list[Path]) -> list[dict[str, Any]]:
-    """Concatenate landing flights across files, de-duplicating and re-uniquing ids."""
+    """Concatenate landing flights across files, de-duplicated by (icao24, landing_time_utc).
+
+    ``id`` is passed through EXACTLY as stored. It used to be re-uniqued positionally
+    (``ASA677`` → ``ASA677_2`` by merge order), which gave the same physical flight a
+    different id in the combined view than in its per-runway file — so the optimizer
+    batch (fed the combined file) and ts_transformer (fed per-runway arrivals) derived
+    different ``flight_key`` stems for one flight, and the comparison builder's
+    reference lookup could resolve a bare callsign to the wrong namesake. Uniqueness
+    is not this function's job: entity ids and record stems both come from
+    ``flight_key`` (``id_runway_icao24_landingTime``), which is unique on the
+    (icao24, landing time) pair this merge de-duplicates by.
+    """
     flights: list[dict[str, Any]] = []
     seen: set[tuple[str | None, str | None]] = set()
-    used_ids: set[str] = set()
     for path in paths:
         for flight in json.loads(path.read_text(encoding="utf-8")):
             key = (flight.get("icao24"), flight.get("landing_time_utc"))
             if key in seen:
                 continue
             seen.add(key)
-            flight = dict(flight)
-            flight["id"] = _unique_id(str(flight["id"]), used_ids)
-            used_ids.add(flight["id"])
             flights.append(flight)
     return flights
-
-
-def _unique_id(base: str, used_ids: set[str]) -> str:
-    if base not in used_ids:
-        return base
-    suffix = 2
-    while f"{base}_{suffix}" in used_ids:
-        suffix += 1
-    return f"{base}_{suffix}"
 
 
 def _generate_czml(generator: Path, code: str, input_path: Path, output_path: Path, multiplier: int | None) -> None:

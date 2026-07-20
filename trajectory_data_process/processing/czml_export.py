@@ -143,6 +143,12 @@ def trajectories_to_czml_input(
 ) -> list[dict[str, Any]]:
     """Convert trajectories to CZML-input flights with unique ids.
 
+    This (non-landing) path exports no ``runway``/``landing_time_utc``, so the
+    positionally re-uniqued ``id`` is the only per-flight discriminator a downstream
+    ``flight_key`` gets beyond ``icao24`` — the ``_unique_id`` suffixing here is
+    load-bearing, unlike the landing path (:func:`classify_landing_flights`), whose
+    identity is ``(icao24, landing_time_utc)`` and whose ids stay bare callsigns.
+
     In ``landing_only`` mode a landing whose approach direction does not line up
     with the runway (``heading_ok is False``) is dropped here; use
     :func:`classify_landing_flights` to keep those aside for review.
@@ -194,10 +200,16 @@ def classify_landing_flights(
     kept (tagged with the measured heading errors) so a run can be audited for
     false kills rather than silently discarding them. Collection stops once
     ``max_accepted`` accepted landings are found.
+
+    ``id`` stays the bare callsign — deliberately NOT re-uniqued. A landing's identity
+    is ``(icao24, landing_time_utc)`` (what the harvest de-duplicates by, and what
+    ``flight_scenarios.identity.flight_key`` derives uniqueness from); positional
+    ``_2/_3`` suffixes could never survive the chunked harvest anyway (each chunk
+    restarted the numbering, so merged collections held duplicates regardless) and
+    gave the same flight different ids in different views.
     """
     accepted: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
-    used_ids: set[str] = set()
     for traj in trajectories:
         flight = trajectory_to_czml_flight(
             traj,
@@ -213,8 +225,6 @@ def classify_landing_flights(
         )
         if flight is None:
             continue
-        flight["id"] = _unique_id(flight["id"], used_ids)
-        used_ids.add(flight["id"])
         (accepted if flight["heading_ok"] else rejected).append(flight)
         if len(accepted) >= max_accepted:
             break

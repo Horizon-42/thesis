@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from data_layout import airport_data_path
+from flight_identity import flight_key
 from generate_czml import build_document_packet, build_position_property
 
 # Record-filename suffixes. MUST match 4dTrajectory/optimization/evaluation_export.py, which
@@ -43,7 +44,8 @@ from generate_czml import build_document_packet, build_position_property
 # standalone frontend tooling with its own pytest rootdir, and evaluation_export pulls in
 # aerodynamic_model — importing it would make the CZML builder depend on the whole modeling
 # tree for two string constants. _group_key's tests pin the round-trip, so a drift here fails
-# loudly rather than silently regrouping flights.
+# loudly rather than silently regrouping flights. (flight_key itself is mirrored the same
+# way, in this package's flight_identity module — see its docstring for the shared pin.)
 STATES_SUFFIX = "_states.json"
 EVAL_SUFFIX = "_eval.json"
 
@@ -88,7 +90,7 @@ def _states_to_waypoints(states: list[dict[str, Any]]) -> list[tuple[float, floa
 
 def _reference_entity_from_adsb(
     adsb_czml: list[dict[str, Any]],
-    flight_id: str | None,
+    flight_identity: str | None,
     color_rgba: tuple[int, int, int, int],
     *,
     entity_id: str = "scenario-reference",
@@ -99,19 +101,23 @@ def _reference_entity_from_adsb(
     """Find the observed flight in ``adsb_czml`` and copy it as the reference trajectory.
 
     ``adsb_czml`` is the loaded ``trajectories.czml`` (element 0 is the ``"document"``
-    packet; the rest are flight entities whose ``id`` is the flight id). Find the entity
-    whose ``id`` matches ``flight_id``, **deep-copy** it (so we don't mutate the source),
-    recolour its ``path`` material to ``color_rgba``, and re-id/-name it (``entity_id`` /
-    ``name``) so several references can coexist in one combined CZML.
+    packet; the rest are flight entities whose ``id`` IS the flight_key
+    ``id_runway_icao24_landingTime``). ``flight_identity`` must be that same key — the
+    comparison group key / record-filename stem, NOT the bare callsign: a callsign lookup
+    resolved duplicated callsigns to whichever namesake came first, silently drawing the
+    wrong flight as the white reference line. Find the matching entity, **deep-copy** it
+    (so we don't mutate the source), recolour its ``path`` material to ``color_rgba``,
+    and re-id/-name it (``entity_id`` / ``name``) so several references can coexist in
+    one combined CZML.
 
     ``properties`` attaches a CZML custom-property bag (so the frontend can group/sample)
     and ``show`` sets the entity-level visibility (``False`` ⇒ hidden until revealed).
     """
     for packet in adsb_czml:
-        if packet.get("id") == flight_id:
+        if packet.get("id") == flight_identity:
             entity = copy.deepcopy(packet)
             entity["id"] = entity_id
-            entity["name"] = name or f"Reference {flight_id}"
+            entity["name"] = name or f"Reference {packet.get('name') or flight_identity}"
             entity["show"] = show
             entity["path"]["material"]["solidColor"]["color"]["rgba"] = list(color_rgba)
             if properties is not None:
@@ -174,9 +180,11 @@ def build_comparison_czml(
     """Assemble the combined CZML: [document, reference, optimizer, simulator]."""
     optimizer_states = state_data["optimizer_states"]
     simulator_states = state_data["simulator_states"]
-    flight_id = state_data.get("source", {}).get("id")
+    # The observed entity is looked up by flight_key (the ADS-B CZML's entity id), derived
+    # from the record's own source dict — same fields both writers stamped.
+    identity = flight_key(state_data.get("source", {}), 0)
 
-    reference = _reference_entity_from_adsb(adsb_czml, flight_id, REFERENCE_COLOR)
+    reference = _reference_entity_from_adsb(adsb_czml, identity, REFERENCE_COLOR)
     optimizer = _build_trajectory_entity("scenario-optimizer", "Optimizer", optimizer_states, OPTIMIZER_COLOR)
     simulator = _build_trajectory_entity("scenario-simulator", "Simulator", simulator_states, SIMULATOR_COLOR)
     entities = [e for e in (reference, optimizer, simulator) if e is not None]
@@ -225,8 +233,8 @@ def _initial_state(states: list[dict[str, Any]]) -> dict[str, float] | None:
     return {key: first[key] for key in _INITIAL_STATE_KEYS}
 
 
-def scenario_initial_map(scenario_paths: list[str | Path]) -> dict[tuple[str, str], dict[str, float]]:
-    """Map ``(flightId, runway)`` → the scenario's initial state, from one or more scenario files.
+def scenario_initial_map(scenario_paths: list[str | Path]) -> dict[str, dict[str, float]]:
+    """Map ``flight_key`` (= the comparison group key) → the scenario's initial state.
 
     The ``FlightScenario`` initial state (``V``/``m``/…) is derived from the observed track and the
     resolved aircraft **before** optimization, so it exists for EVERY flight — solved or failed —
@@ -234,13 +242,16 @@ def scenario_initial_map(scenario_paths: list[str | Path]) -> dict[tuple[str, st
     list show V + mass for failed optimizations too, consistent with the solved ones. The initial
     state is target-independent, so multiple scenario files (track-end / threshold) agree; later
     files fill any gaps in earlier ones.
+
+    Keyed by ``flight_key`` — the same identity the record-filename stems carry — NOT
+    ``(id, runway)``: the same callsign lands on the same runway on different days, and the
+    tuple key served one flight's V/mass for every namesake.
     """
-    out: dict[tuple[str, str], dict[str, float]] = {}
+    out: dict[str, dict[str, float]] = {}
     for path in scenario_paths:
         scenarios = json.loads(Path(path).read_text(encoding="utf-8"))
-        for scenario in scenarios:
-            source = scenario.get("source", {})
-            key = (source.get("id"), source.get("runway") or "unknown")
+        for index, scenario in enumerate(scenarios):
+            key = flight_key(scenario.get("source", {}), index)
             out.setdefault(key, scenario["initial"])
     return out
 
@@ -294,9 +305,11 @@ def _group_key(result: dict[str, Any]) -> str:
                 if stem.endswith(suffix):
                     return stem[: -len(suffix)]
             return Path(stem).stem
-    # No record files at all: nothing to draw but the reference. Fall back to the coarse key
-    # rather than dropping the row — collisions here cost a duplicate reference, not a flight.
-    return f"{result.get('id')}_{result.get('runway') or 'unknown'}"
+    # No record files at all: nothing to draw but the reference. Reconstruct the identity
+    # from the row itself — summary rows carry the same id/runway/icao24/landing_time_utc
+    # fields flight_key reads — so this matches the stem the files would have had (and the
+    # observed layer's entity id, which the reference lookup needs).
+    return flight_key(result, 0)
 
 
 def _traj_properties(
@@ -352,10 +365,12 @@ def build_runway_comparison(
     index record (``lateralErrM``/``verticalErrM``). ``None`` (no report) keeps every solved
     flight plain "solved".
 
-    Every entity gets a globally-unique id ``{kind}-{flightId}_{runway}`` (so duplicate
-    ``(flightId, runway)`` rows — which collide on the *same* states file — can't produce
-    colliding CZML ids) and a ``properties`` bag (``group``/``kind``/…). Entities are
-    ``show=False`` when ``start_hidden`` so the frontend renders only the groups it samples.
+    Every entity gets a globally-unique id ``{kind}-{group}`` where ``group`` is the
+    flight_key stem of the record filename, and a ``properties`` bag (``group``/``kind``/…).
+    The reference is looked up in ``adsb_czml`` by that same ``group`` — the observed
+    layer's entity ids ARE flight_keys — so a duplicated callsign can no longer resolve
+    to the wrong namesake's track. Entities are ``show=False`` when ``start_hidden`` so
+    the frontend renders only the groups it samples.
 
     Returns ``(czml_packets, index_records)``. Each index record describes one group:
     its id, flight id, runway, status, initial state, and the entity ids that belong to it.
@@ -418,7 +433,7 @@ def build_runway_comparison(
             ref_name = f"Ref {flight_id} (off target)" if mark_off_target else f"Ref {flight_id}"
 
             reference = _reference_entity_from_adsb(
-                adsb_czml, flight_id, ref_color,
+                adsb_czml, group, ref_color,
                 entity_id=f"ref-{group}", name=ref_name,
                 properties=_traj_properties(group, flight_id, "reference", runway, airport, status),
                 show=show,
@@ -451,7 +466,7 @@ def build_runway_comparison(
                 entity_ids.append(f"pred-{group}")
 
             initial_state = _initial_state(optimizer_states or simulator_states or predicted_states)
-            scen = (scenario_initial or {}).get((flight_id, runway))
+            scen = (scenario_initial or {}).get(group)
             initial_v, mass_kg = _flight_facts(initial_state, scen)
             record = {
                 "group": group, "flightId": flight_id, "runway": runway, "airport": airport,
@@ -466,7 +481,7 @@ def build_runway_comparison(
             index_records.append(record)
         else:
             reference = _reference_entity_from_adsb(
-                adsb_czml, flight_id, FAILED_COLOR,
+                adsb_czml, group, FAILED_COLOR,
                 entity_id=f"ref-{group}", name=f"Ref {flight_id} (unsolved)",
                 properties=_traj_properties(group, flight_id, "reference", runway, airport, "failed"),
                 show=show,
@@ -476,7 +491,7 @@ def build_runway_comparison(
                 entity_ids.append(f"ref-{group}")
             # A failed optimization has no states, but the scenario still carries the resolved
             # aircraft mass + observed V — surface them so the flight list shows them (and flags red).
-            scen = (scenario_initial or {}).get((flight_id, runway))
+            scen = (scenario_initial or {}).get(group)
             initial_v, mass_kg = _flight_facts(None, scen)
             index_records.append({
                 "group": group, "flightId": flight_id, "runway": runway, "airport": airport,

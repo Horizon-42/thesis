@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from data_layout import airport_data_path
+from flight_identity import flight_key
 from geokit import bearing_rad, haversine_m
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -300,7 +301,9 @@ def build_flight_packet(
 
     Parameters
     ----------
-    flight_id     : unique string ID, e.g. "UAL123"
+    flight_id     : unique entity id — the flight_key ``id_runway_icao24_landingTime``
+                    (e.g. "UAL123_05R_a1b2c3_20260618T213736Z"); bare callsigns repeat
+                    and Cesium merges same-id packets
     callsign      : human-readable name, e.g. "United 123"
     aircraft_type : ICAO type code, e.g. "B738"
     waypoints     : list of (offset_sec, lon, lat, alt_m)
@@ -360,6 +363,13 @@ def build_czml(
       type      : str
       waypoints : list of [offset_sec, lon, lat, alt_m]
 
+    The entity id is ``flight_key(flight)`` (``id_runway_icao24_landingTime``), NOT the
+    bare ``id``: ``id`` is the callsign and repeats across days, and Cesium silently
+    merges same-id packets into one entity — two namesake flights' position samples
+    interleaved into one garbled track. The callsign stays the display name/label.
+    Duplicate keys (inputs missing the icao24/landing-time discriminators) are an input
+    error and raise rather than render corrupted.
+
     Returns a CZML array: [document_packet, entity_packet, entity_packet, ...]
     """
     max_offset = max(
@@ -370,10 +380,20 @@ def build_czml(
     doc = build_document_packet(start_dt, end_dt, multiplier)
 
     entity_packets: list[dict[str, Any]] = []
+    entity_ids: dict[str, dict[str, Any]] = {}
     for i, flight in enumerate(flights):
+        entity_id = flight_key(flight, i)
+        if entity_id in entity_ids:
+            raise ValueError(
+                f"duplicate flight identity {entity_id!r}: "
+                f"{entity_ids[entity_id].get('icao24')}@{entity_ids[entity_id].get('landing_time_utc')} vs "
+                f"{flight.get('icao24')}@{flight.get('landing_time_utc')} — Cesium would merge both "
+                "flights into one entity; the input lacks a per-flight discriminator"
+            )
+        entity_ids[entity_id] = flight
         color = TRAIL_COLORS[i % len(TRAIL_COLORS)]
         packet = build_flight_packet(
-            str(flight["id"]),
+            entity_id,
             str(flight["callsign"]),
             str(flight["type"]),
             [tuple(wp) for wp in flight["waypoints"]],

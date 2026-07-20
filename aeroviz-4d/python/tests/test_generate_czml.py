@@ -125,6 +125,44 @@ class TestBuildCzml:
         assert interval.endswith("2026-04-01T08:10:00Z")
 
 
+class TestBuildCzmlEntityIdentity:
+    """Entity ids are flight_keys; callsigns are display names only."""
+
+    @staticmethod
+    def _landing(landing_time: str) -> dict:
+        return {
+            "id": "ASA677", "callsign": "ASA677", "type": "B738", "runway": "05R",
+            "icao24": "a0b1c2", "landing_time_utc": landing_time,
+            "waypoints": [[0, -114.0, 51.0, 5000], [300, -114.01, 51.12, 1100]],
+        }
+
+    def test_namesake_flights_get_distinct_flight_key_entity_ids(self):
+        czml = build_czml(
+            [self._landing("2026-06-18T21:37:36Z"), self._landing("2026-06-19T21:40:00Z")],
+            START_DT,
+        )
+        assert [p["id"] for p in czml[1:]] == [
+            "ASA677_05R_a0b1c2_20260618T213736Z",
+            "ASA677_05R_a0b1c2_20260619T214000Z",
+        ]
+        assert [p["name"] for p in czml[1:]] == ["ASA677", "ASA677"]
+
+    def test_duplicate_identity_raises_instead_of_merging_entities(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="duplicate flight identity"):
+            build_czml(
+                [self._landing("2026-06-18T21:37:36Z"), self._landing("2026-06-18T21:37:36Z")],
+                START_DT,
+            )
+
+    def test_plain_download_flights_fall_back_to_id_as_entity_id(self):
+        # The non-landing path exports no runway/landing time; its (re-uniqued) id
+        # plus icao24 is the whole identity.
+        czml = build_czml(TEST_FLIGHTS, START_DT)
+        assert [p["id"] for p in czml[1:]] == ["TEST1", "TEST2"]
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 class TestComputeVelocityOrientation:
     """Verify heading / pitch derived from the 3-D velocity vector."""
