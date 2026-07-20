@@ -2,9 +2,12 @@
  * FlightTable.tsx
  * ---------------
  * Collapsible list of the loaded observed flights (collapsed by default). Each row shows the
- * flight id plus facts read off its track (initial ground speed V, total flight time) and, from
- * the optimizer, its aircraft mass. When the Optimizer comparison is on, a fourth column adds
- * the optimized final time for the selected category, in the optimizer "results" colour (blue).
+ * flight's callsign (the entity NAME — the entity id is the full flight_key and stays the
+ * row key / selection / lookup identity) plus facts read off its track (initial ground
+ * speed V, total flight time) and, from the optimizer, its aircraft mass. When the
+ * Optimizer comparison is on, a fourth column adds the optimized final time for the
+ * selected category, in the optimizer "results" colour (blue). Namesake flights show the
+ * same callsign on two rows — the row tooltip carries the full identity.
  * Clicking a row tracks that flight in the Cesium viewer.
  */
 
@@ -28,7 +31,7 @@ const OPTIMIZED_TIME_COLOR = COMPARISON_KIND_COLORS.simulator;
 
 export default function FlightTable({ flightIds, flightSummaries }: FlightTableProps) {
   const { viewer, selectedFlightId, setSelectedFlightId } = useApp();
-  const { byFlightId, comparisonActive } = useFlightOptimizerData();
+  const { byFlightKey, comparisonActive } = useFlightOptimizerData();
   const [collapsed, setCollapsed] = useState(true);
 
   if (flightIds.length === 0) return null; // hide if no data loaded
@@ -83,7 +86,10 @@ export default function FlightTable({ flightIds, flightSummaries }: FlightTableP
           <tbody>
             {flightIds.map((id) => {
               const summary = flightSummaries[id];
-              const optimizer = byFlightId.get(id);
+              // Observed entity id === comparison group key (both are the flight_key),
+              // so this is an exact per-flight join — never a callsign match.
+              const optimizer = byFlightKey.get(id);
+              const callsign = summary?.callsign ?? id;
               return (
                 <tr
                   key={id}
@@ -107,7 +113,7 @@ export default function FlightTable({ flightIds, flightSummaries }: FlightTableP
                           : id
                     }
                   >
-                    {id}
+                    {callsign}
                   </td>
                   <td>{formatSpeed(optimizer?.initialVMps ?? null)}</td>
                   <td>{formatMass(optimizer?.massKg ?? null)}</td>

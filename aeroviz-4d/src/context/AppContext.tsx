@@ -7,8 +7,9 @@
  *   - `viewer`           — the CesiumJS Viewer instance.  Shared so any hook
  *                          or component can add entities without prop-drilling.
  *   - `airport`          — the loaded camera target and airport marker config.
- *   - `selectedFlightId` — which callsign is highlighted in the table and
- *                          tracked by the camera.
+ *   - `selectedFlightId` — the selected observed flight's ENTITY id (the flight_key
+ *                          `id_runway_icao24_landingTime`, not the callsign — namesakes
+ *                          repeat daily), highlighted in the table + camera-tracked.
  *   - `layers`           — boolean flags that hooks read to show/hide their
  *                          respective data sources.
  *   - `playbackSpeed`    — mirrors viewer.clock.multiplier so the UI stays
@@ -152,7 +153,7 @@ interface AirportSessionState {
 export type ComparisonKind = "reference" | "optimizer" | "simulator" | "predicted";
 
 interface FlightSessionState {
-  /** The currently tracked/selected flight callsign */
+  /** The tracked/selected observed flight's entity id (the flight_key, not the callsign) */
   selectedFlightId: string | null;
   setSelectedFlightId: (id: string | null) => void;
 

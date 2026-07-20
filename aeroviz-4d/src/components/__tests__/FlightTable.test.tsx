@@ -12,7 +12,7 @@ type Datum = {
 const { appState, optimizerData } = vi.hoisted(() => ({
   appState: { viewer: null, selectedFlightId: null as string | null, setSelectedFlightId: vi.fn() },
   optimizerData: {
-    byFlightId: new Map<string, Datum>(),
+    byFlightKey: new Map<string, Datum>(),
     comparisonActive: false,
   },
 }));
@@ -24,18 +24,23 @@ vi.mock("../../hooks/useFlightOptimizerData", () => ({
 
 import FlightTable from "../FlightTable";
 
-const flightIds = ["UPS1276", "FDX1738"];
+// Entity ids are flight_keys (id_runway_icao24_landingTime); the callsign is display-only
+// and lives on the summary. The optimizer map is keyed by the SAME flight_key (the
+// comparison group), so the join is exact — never a callsign match.
+const UPS = "UPS1276_05L_a1b2c3_20260614T101112Z";
+const FDX = "FDX1738_05L_d4e5f6_20260614T112233Z";
+const flightIds = [UPS, FDX];
 const flightSummaries = {
-  UPS1276: { durationS: 562 },
-  FDX1738: { durationS: 309 },
+  [UPS]: { durationS: 562, callsign: "UPS1276" },
+  [FDX]: { durationS: 309, callsign: "FDX1738" },
 };
 
 describe("FlightTable", () => {
   beforeEach(() => {
     appState.selectedFlightId = null;
-    optimizerData.byFlightId = new Map<string, Datum>([
-      ["UPS1276", { initialVMps: 141.85, massKg: 66300, optimizedTimeS: 576, failed: false }],
-      ["FDX1738", { initialVMps: 148.7, massKg: 77800, optimizedTimeS: 309, failed: false }],
+    optimizerData.byFlightKey = new Map<string, Datum>([
+      [UPS, { initialVMps: 141.85, massKg: 66300, optimizedTimeS: 576, failed: false }],
+      [FDX, { initialVMps: 148.7, massKg: 77800, optimizedTimeS: 309, failed: false }],
     ]);
     optimizerData.comparisonActive = false;
     vi.clearAllMocks();
@@ -71,10 +76,10 @@ describe("FlightTable", () => {
 
   it("shows V + mass for a FAILED flight and marks its id red (no optimized time)", () => {
     optimizerData.comparisonActive = true;
-    optimizerData.byFlightId = new Map<string, Datum>([
+    optimizerData.byFlightKey = new Map<string, Datum>([
       // failed: still has V + mass (from the scenario), but no optimized time.
-      ["UPS1276", { initialVMps: 134.9, massKg: 136000, optimizedTimeS: null, failed: true }],
-      ["FDX1738", { initialVMps: 148.7, massKg: 77800, optimizedTimeS: 309, failed: false }],
+      [UPS, { initialVMps: 134.9, massKg: 136000, optimizedTimeS: null, failed: true }],
+      [FDX, { initialVMps: 148.7, massKg: 77800, optimizedTimeS: 309, failed: false }],
     ]);
     render(<FlightTable flightIds={flightIds} flightSummaries={flightSummaries} />);
     fireEvent.click(screen.getByRole("button", { name: /Flights/ }));
@@ -91,10 +96,10 @@ describe("FlightTable", () => {
 
   it("marks an OFF-TARGET flight's id yellow but keeps its optimized time", () => {
     optimizerData.comparisonActive = true;
-    optimizerData.byFlightId = new Map<string, Datum>([
+    optimizerData.byFlightKey = new Map<string, Datum>([
       // solved but missed the evaluation gates: yellow flag, optimized time still shown.
-      ["UPS1276", { initialVMps: 141.85, massKg: 66300, optimizedTimeS: 576, failed: false, offTarget: true }],
-      ["FDX1738", { initialVMps: 148.7, massKg: 77800, optimizedTimeS: 309, failed: false, offTarget: false }],
+      [UPS, { initialVMps: 141.85, massKg: 66300, optimizedTimeS: 576, failed: false, offTarget: true }],
+      [FDX, { initialVMps: 148.7, massKg: 77800, optimizedTimeS: 309, failed: false, offTarget: false }],
     ]);
     render(<FlightTable flightIds={flightIds} flightSummaries={flightSummaries} />);
     fireEvent.click(screen.getByRole("button", { name: /Flights/ }));
@@ -108,11 +113,40 @@ describe("FlightTable", () => {
   });
 
   it("shows a dash where the optimizer has no data for a flight", () => {
-    optimizerData.byFlightId = new Map<string, Datum>(); // no optimizer record for any flight
+    optimizerData.byFlightKey = new Map<string, Datum>(); // no optimizer record for any flight
     render(<FlightTable flightIds={flightIds} flightSummaries={flightSummaries} />);
     fireEvent.click(screen.getByRole("button", { name: /Flights/ }));
     // Time still comes from the track; V + mass are blank without an optimizer record.
     expect(screen.getByText("9:22")).toBeTruthy();
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+  });
+
+  it("keeps namesake flights' optimizer facts apart (join by flight_key, not callsign)", () => {
+    // Two landings by the same callsign on different days: distinct entity ids/keys, same
+    // display name. Keying the optimizer map by callsign served ONE flight's numbers for
+    // both rows — the join must be the flight_key.
+    const A = "ASA677_05R_a54aae_20260629T093123Z";
+    const B = "ASA677_05R_a9e8ce_20260630T093925Z";
+    optimizerData.byFlightKey = new Map<string, Datum>([
+      [A, { initialVMps: 130, massKg: 78000, optimizedTimeS: 400, failed: false }],
+      [B, { initialVMps: 118, massKg: 64000, optimizedTimeS: 350, failed: true }],
+    ]);
+    render(
+      <FlightTable
+        flightIds={[A, B]}
+        flightSummaries={{
+          [A]: { durationS: 500, callsign: "ASA677" },
+          [B]: { durationS: 480, callsign: "ASA677" },
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Flights/ }));
+
+    const rows = screen.getAllByText("ASA677");
+    expect(rows.length).toBe(2);   // two rows, same displayed callsign
+    // Each row carries its OWN V/mass, and only B is flagged failed.
+    expect(screen.getByText("130")).toBeTruthy();
+    expect(screen.getByText("118")).toBeTruthy();
+    expect(rows.filter((el) => el.className.includes("flight-table-failed")).length).toBe(1);
   });
 });

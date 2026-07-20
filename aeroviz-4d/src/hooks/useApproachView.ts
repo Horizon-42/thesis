@@ -364,6 +364,7 @@ export function useApproachView(): ApproachViewState {
       }
       tracks.push({
         flightId: entity.id,
+        name: entity.name || undefined,
         color: colorForFlightId(entity.id),
         current,
         trail,

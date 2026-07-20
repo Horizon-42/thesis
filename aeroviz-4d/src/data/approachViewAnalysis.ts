@@ -17,7 +17,10 @@ export interface ApproachViewSample extends RunwayProfilePoint {
 }
 
 export interface ApproachViewTrack {
+  /** The entity id (the flight_key) — the selection/cache/colour identity, not display text. */
   flightId: string;
+  /** Display callsign (the entity name); flightId when the source has none. */
+  name?: string;
   color: string;
   current: ApproachViewSample;
   trail: ApproachViewSample[];
@@ -31,6 +34,8 @@ export interface SampledRunwayPoint extends RunwayProfilePoint {
 
 export interface ApproachViewInput {
   flightId: string;
+  /** Display callsign (the entity name), when the source carries one. */
+  name?: string;
   /** The current-time sample. Non-null: the sampler drops entities not live now (returns
    *  null for them), so an input always has a current point. */
   current: SampledRunwayPoint;
@@ -157,6 +162,7 @@ export function buildApproachViewTracks(args: {
       }
       return {
         flightId: input.flightId,
+        name: input.name,
         color: colorForFlightId(input.flightId),
         current,
         trail,

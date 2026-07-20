@@ -37,7 +37,13 @@ export interface FlightOptimizerDatum {
 }
 
 export interface FlightOptimizerData {
-  byFlightId: Map<string, FlightOptimizerDatum>;
+  /**
+   * Keyed by the group's `group` — the flight_key `id_runway_icao24_landingTime`, which is
+   * also the observed layer's CZML entity id, so `byFlightKey.get(observedEntityId)` is an
+   * exact join. NOT keyed by `flightId`: that is the bare callsign, and namesake flights
+   * (same callsign, different day) overwrote each other's V/mass/verdict in the flight list.
+   */
+  byFlightKey: Map<string, FlightOptimizerDatum>;
   /** True when the comparison overlay is on and a category is selected → show the optimized column. */
   comparisonActive: boolean;
   /** The loaded category's optimization stats (solve rate + evaluation metrics), or null. */
@@ -58,12 +64,12 @@ export function useFlightOptimizerData(): FlightOptimizerData {
     (trajectoryComparison && trajectoryComparisonCategory) || categories[0]?.dir || null;
   const comparisonActive = trajectoryComparison && !!trajectoryComparisonCategory;
 
-  const [byFlightId, setByFlightId] = useState<Map<string, FlightOptimizerDatum>>(EMPTY);
+  const [byFlightKey, setByFlightKey] = useState<Map<string, FlightOptimizerDatum>>(EMPTY);
   const [stats, setStats] = useState<OptimizationStats | null>(null);
 
   useEffect(() => {
     if (!activeAirportCode || !categoryDir) {
-      setByFlightId(EMPTY);
+      setByFlightKey(EMPTY);
       setStats(null);
       return;
     }
@@ -78,7 +84,7 @@ export function useFlightOptimizerData(): FlightOptimizerData {
         // Every group (solved AND failed) carries V + mass; only solved carry an optimized time.
         const map = new Map<string, FlightOptimizerDatum>();
         for (const group of data.groups as ComparisonGroup[]) {
-          map.set(group.flightId, {
+          map.set(group.group, {
             initialVMps: group.initialVMps ?? group.initialState?.V ?? null,
             massKg: group.massKg ?? group.initialState?.m ?? null,
             // offTarget groups ARE solved (they carry an optimized trajectory + time);
@@ -88,7 +94,7 @@ export function useFlightOptimizerData(): FlightOptimizerData {
             offTarget: group.status === "offTarget",
           });
         }
-        setByFlightId(map);
+        setByFlightKey(map);
         setStats(data.optimization ?? null);
       })
       .catch((error) => {
@@ -96,7 +102,7 @@ export function useFlightOptimizerData(): FlightOptimizerData {
         if (!isMissingJsonAsset(error)) {
           console.warn("[useFlightOptimizerData] failed to load comparison index", error);
         }
-        setByFlightId(EMPTY);
+        setByFlightKey(EMPTY);
         setStats(null);
       });
 
@@ -106,7 +112,7 @@ export function useFlightOptimizerData(): FlightOptimizerData {
   }, [activeAirportCode, categoryDir]);
 
   return useMemo(
-    () => ({ byFlightId, comparisonActive, stats, categoryDir }),
-    [byFlightId, comparisonActive, stats, categoryDir],
+    () => ({ byFlightKey, comparisonActive, stats, categoryDir }),
+    [byFlightKey, comparisonActive, stats, categoryDir],
   );
 }

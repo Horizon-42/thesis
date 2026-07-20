@@ -963,7 +963,7 @@ function ProfilePlot({
                   className="approach-view-flight-label"
                   clipPath={`url(#${plotClipId})`}
                 >
-                  {track.flightId}
+                  {track.name ?? track.flightId}
                 </text>
               ) : null}
             </g>
@@ -1035,7 +1035,7 @@ export default function ApproachViewPanel() {
   const assessmentTrack =
     approachView.aircraftTracks.find((track) => track.isSelected) ?? approachView.aircraftTracks[0];
   const assessmentStatus = assessmentTrack
-    ? `${assessmentTrack.flightId}: ${assessmentTrack.current.segmentAssessment.activeSegmentId} · ` +
+    ? `${assessmentTrack.name ?? assessmentTrack.flightId}: ${assessmentTrack.current.segmentAssessment.activeSegmentId} · ` +
       `station ${formatDistance(assessmentTrack.current.segmentAssessment.stationM, distanceUnit)} · ` +
       `xtrack ${formatSignedDistance(
         assessmentTrack.current.segmentAssessment.crossTrackErrorM,
