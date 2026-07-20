@@ -47,6 +47,17 @@ export default defineConfig({
     copyPublicDir: false,
   },
 
+  server: {
+    watch: {
+      // public/data is ~40k files (mostly local-terrain .f32 heightmap tiles), and
+      // chokidar takes one inotify watch per file. Two dev servers at once exceeded
+      // fs.inotify.max_user_watches (65536) and vite died on boot with ENOSPC.
+      // Nothing under data/ is a build input — it's git-ignored generated output
+      // fetched over HTTP at runtime — so watching it buys no HMR, only the crash.
+      ignored: ["**/public/data/**"],
+    },
+  },
+
   // ── Test configuration (Vitest) ──────────────────────────────────────────
   // Vitest reads this block when you run `npm test`.
   test: {

@@ -106,7 +106,7 @@ class TSConfig:
     output_attention: bool = False
     # Read by the vendored code but inert on this path — kept so the object stays a drop-in
     # for upstream's run.py. See vendor/itransformer/PROVENANCE.md "Config contract".
-    embed: str = "timeF"
+    embed: str = "timeF" # unused, ignored by iTransformer
     freq: str = "h"
     factor: int = 1
     class_strategy: str = "projection"
