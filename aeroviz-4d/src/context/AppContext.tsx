@@ -150,7 +150,7 @@ interface AirportSessionState {
  * which has no such split — one trajectory, no controls. It is a separate kind rather than
  * reusing `optimizer` so the legend cannot claim a prediction is an optimizer plan.
  */
-export type ComparisonKind = "reference" | "optimizer" | "simulator" | "predicted";
+export type ComparisonKind = "reference" | "optimizer" | "simulator" | "predicted" | "lookback";
 
 interface FlightSessionState {
   /** The tracked/selected observed flight's entity id (the flight_key, not the callsign) */
@@ -318,7 +318,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [trajectoryComparisonCategory, setTrajectoryComparisonCategory] =
     useState<string | null>(null);
   const [trajectoryComparisonKinds, setTrajectoryComparisonKinds] =
-    useState<Record<ComparisonKind, boolean>>({ reference: true, optimizer: false, simulator: true, predicted: true });
+    useState<Record<ComparisonKind, boolean>>({
+      reference: true, optimizer: false, simulator: true, predicted: true, lookback: true });
   const setTrajectoryComparisonKind = useCallback((kind: ComparisonKind, visible: boolean) => {
     setTrajectoryComparisonKinds((prev) => ({ ...prev, [kind]: visible }));
   }, []);

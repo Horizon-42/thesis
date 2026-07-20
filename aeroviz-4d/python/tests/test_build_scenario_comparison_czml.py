@@ -4,6 +4,7 @@ import json
 
 from build_scenario_comparison_czml import (
     FAILED_COLOR,
+    LOOKBACK_COLOR,
     PREDICTION_COLOR,
     OFF_TARGET_COLOR,
     OFF_TARGET_REF_COLOR,
@@ -45,6 +46,19 @@ ADSB_CZML = [
         "path": {"leadTime": 0, "trailTime": 300, "material": {"solidColor": {"color": {"rgba": [255, 140, 0, 200]}}}},
     },
 ]
+
+
+def _offsets(entity):
+    """The time offsets (seconds from the document epoch) of a built entity's position samples."""
+    cd = entity["position"]["cartographicDegrees"]
+    return cd[0::4]
+
+
+def _sample_at(entity, index):
+    """One (lon, lat, alt) sample of a built entity's position, by sample index."""
+    cd = entity["position"]["cartographicDegrees"]
+    start = (index % (len(cd) // 4)) * 4
+    return cd[start + 1 : start + 4]
 
 
 def test_last_time():
@@ -493,11 +507,22 @@ def test_upsert_category_stamps_the_explicit_constrained_field(tmp_path):
 
 # ── Prediction schema (4dTrajectory/ts_transformer) ──────────────────────────
 
+# A prediction record rebases time so t=0 is the ANCHOR: `predicted_states` runs forward from
+# there, and `observed_states` is the WHOLE observed track, so it starts at negative t. Here the
+# model was shown 4 s of lookback (t = -4 … 0) before forecasting, i.e. the anchor sits 4 s into
+# the observed track (`anchorTimeS`).
+LOOKBACK_STATES = [
+    {**STATES[0], "t": -4.0, "lat": 35.76, "lon": -78.43},
+    {**STATES[0], "t": -2.0, "lat": 35.75, "lon": -78.44},
+]
 PREDICTION_STATE_DATA = {
-    "source": {"id": "AFR074", "predictor": "itransformer"},
+    "source": {"id": "AFR074", "predictor": "itransformer", "anchorTimeS": 4.0},
     "final_time_s": 5.0,
     "predicted_states": STATES,
-    "observed_states": STATES,
+    # `+ STATES`, not `+ STATES[1:]`: the anchor sample belongs to both halves — the writer
+    # emits the very same state object at t=0 in each — which is what makes the drawn lookback
+    # meet the forecast with no gap.
+    "observed_states": LOOKBACK_STATES + STATES,
 }
 
 
@@ -516,7 +541,8 @@ def test_states_schema_rejects_a_file_matching_neither():
 def test_prediction_states_render_as_one_purple_path_plus_the_reference(tmp_path):
     # A learned predictor has no plan-vs-replay split: one trajectory, prefixed `pred-` so
     # the frontend's kindOfEntityId maps it to the "predicted" kind (and its own legend
-    # colour) rather than mislabelling it as an optimizer plan.
+    # colour) rather than mislabelling it as an optimizer plan. It comes with `look-`, the
+    # faded lookback window it was conditioned on.
     (tmp_path / "AFR074_05L_states.json").write_text(
         json.dumps(PREDICTION_STATE_DATA), encoding="utf-8")
     results = [{"id": "AFR074", "runway": "05L", "status": "solved",
@@ -524,12 +550,61 @@ def test_prediction_states_render_as_one_purple_path_plus_the_reference(tmp_path
 
     czml, index = build_runway_comparison(results, tmp_path, ADSB_CZML, airport="KRDU")
     ids = [p["id"] for p in czml if p.get("id") != "document"]
-    assert ids == ["ref-AFR074_05L", "pred-AFR074_05L"]
+    assert ids == ["ref-AFR074_05L", "look-AFR074_05L", "pred-AFR074_05L"]
 
     prediction = next(p for p in czml if p["id"] == "pred-AFR074_05L")
     assert prediction["path"]["material"]["solidColor"]["color"]["rgba"] == list(PREDICTION_COLOR)
     assert prediction["properties"]["kind"] == "predicted"
-    assert index[0]["entities"] == ["ref-AFR074_05L", "pred-AFR074_05L"]
+    assert index[0]["entities"] == ["ref-AFR074_05L", "look-AFR074_05L", "pred-AFR074_05L"]
+
+
+def test_prediction_is_shifted_onto_the_references_timeline(tmp_path):
+    # The record's t=0 is the ANCHOR, but the reference copied from the ADS-B CZML starts at
+    # t=0 = the START of the observed track. Writing the record's times through unshifted drew
+    # the forecast `anchorTimeS` seconds early — on real KRDU 05L data the forecast's first
+    # sample (bit-identical to the reference's t=118 s sample) landed at t=0, 12 km from where
+    # the reference was then. Every prediction-schema entity is shifted by anchorTimeS.
+    (tmp_path / "AFR074_05L_states.json").write_text(
+        json.dumps(PREDICTION_STATE_DATA), encoding="utf-8")
+    results = [{"id": "AFR074", "runway": "05L", "status": "solved",
+                "states_file": "AFR074_05L_states.json", "eval_file": "AFR074_05L_eval.json"}]
+
+    czml, _ = build_runway_comparison(results, tmp_path, ADSB_CZML, airport="KRDU")
+    lookback = next(p for p in czml if p["id"] == "look-AFR074_05L")
+    prediction = next(p for p in czml if p["id"] == "pred-AFR074_05L")
+
+    # anchorTimeS = 4.0: the lookback occupies [0, 4] and the forecast starts exactly where it
+    # ends, so the two draw as one continuous track rather than a line beginning in mid-air.
+    assert _offsets(lookback) == [0.0, 2.0, 4.0]
+    assert _offsets(prediction) == [4.0, 9.0]
+    # The shared anchor sample is the same position in both — the join is exact, not merely close.
+    assert _sample_at(lookback, -1) == _sample_at(prediction, 0)
+
+
+def test_lookback_is_faded_and_carries_its_own_kind(tmp_path):
+    # Same hue as the forecast (it is one track), lower alpha (this half was GIVEN to the model,
+    # not produced by it). The frontend keys the fade off `kind`, so both must be right.
+    (tmp_path / "AFR074_05L_states.json").write_text(
+        json.dumps(PREDICTION_STATE_DATA), encoding="utf-8")
+    results = [{"id": "AFR074", "runway": "05L", "status": "solved",
+                "states_file": "AFR074_05L_states.json", "eval_file": "AFR074_05L_eval.json"}]
+
+    czml, _ = build_runway_comparison(results, tmp_path, ADSB_CZML, airport="KRDU")
+    lookback = next(p for p in czml if p["id"] == "look-AFR074_05L")
+
+    assert lookback["path"]["material"]["solidColor"]["color"]["rgba"] == list(LOOKBACK_COLOR)
+    assert lookback["properties"]["kind"] == "lookback"
+    assert LOOKBACK_COLOR[:3] == PREDICTION_COLOR[:3]
+    assert LOOKBACK_COLOR[3] < PREDICTION_COLOR[3]
+
+
+def test_prediction_schema_requires_the_observed_track(tmp_path):
+    # Without `observed_states` there is no lookback to draw and the forecast would start in
+    # mid-air. That is a broken record, not a variant to degrade gracefully around.
+    import pytest
+
+    with pytest.raises(KeyError, match="neither the optimizer schema"):
+        states_schema({"source": {}, "final_time_s": 1.0, "predicted_states": STATES})
 
 
 def test_a_prediction_missing_the_gates_keeps_its_own_colour(tmp_path):
