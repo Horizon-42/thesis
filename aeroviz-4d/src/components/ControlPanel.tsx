@@ -12,7 +12,7 @@
 import { useApp, type ComparisonKind } from "../context/AppContext";
 import { useComparisonCategories } from "../hooks/useComparisonCategories";
 import { useForcedProcedureDisplay } from "../hooks/useForcedProcedureDisplay";
-import { COMPARISON_KIND_COLORS } from "../utils/trajectoryRenderModel";
+import { COMPARISON_KIND_COLORS, COMPARISON_KIND_ALPHA } from "../utils/trajectoryRenderModel";
 import ApproachViewToggle from "./ApproachViewToggle";
 import { useEffect } from "react";
 
@@ -23,15 +23,17 @@ import { useEffect } from "react";
  * recoloured to), so the legend and the tracks can never disagree.
  *
  * Which kinds a category actually contains depends on its producer: an optimizer batch emits
- * reference + optimizer + simulator, a ts_transformer batch emits reference + predicted. A
- * checkbox for a kind the loaded category has none of is harmless — it toggles nothing — so
- * the list stays static rather than being derived per category.
+ * reference + optimizer + simulator, a ts_transformer batch emits reference + predicted +
+ * lookback. A checkbox for a kind the loaded category has none of is harmless — it toggles
+ * nothing — so the list stays static rather than being derived per category.
  */
 const COMPARISON_KINDS: Array<{ kind: ComparisonKind; label: string }> = [
   { kind: "reference", label: "Reference" },
   { kind: "simulator", label: "Optimize results" },
   { kind: "optimizer", label: "Optimize states" },
   { kind: "predicted", label: "Predicted" },
+  // Same hue as "Predicted", faded: the observed window the forecast was conditioned on.
+  { kind: "lookback", label: "Predictor input" },
 ];
 
 export default function ControlPanel() {
@@ -158,7 +160,13 @@ export default function ControlPanel() {
                       checked={trajectoryComparisonKinds[kind]}
                       onChange={(event) => setTrajectoryComparisonKind(kind, event.target.checked)}
                     />
-                    <i style={{ background: COMPARISON_KIND_COLORS[kind] }} />
+                    {/* Opacity, not just hue: "Predicted" and "Predictor input" share a colour
+                        and are told apart by their alpha, so a solid swatch would make the two
+                        rows look identical. Same source the paths are drawn with. */}
+                    <i style={{
+                      background: COMPARISON_KIND_COLORS[kind],
+                      opacity: COMPARISON_KIND_ALPHA[kind],
+                    }} />
                     {label}
                   </label>
                 ))}

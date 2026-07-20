@@ -26,25 +26,52 @@ import {
   isComparisonIndex,
 } from "../data/airportData";
 import { selectComparisonGroups } from "../utils/sampleTrajectories";
-import { TRAJECTORY_PATH_WIDTH, COMPARISON_KIND_COLORS } from "../utils/trajectoryRenderModel";
+import {
+  TRAJECTORY_PATH_WIDTH,
+  COMPARISON_KIND_COLORS,
+  COMPARISON_KIND_ALPHA,
+} from "../utils/trajectoryRenderModel";
 import { makeStableVelocityOrientation } from "../utils/velocityOrientation";
 import { addDataSourceHidden } from "../utils/cesiumDataSource";
 
-/** Path/label alpha for the recoloured comparison tracks (matches the CZML's ~220/255). */
-const COMPARISON_PATH_ALPHA = 0.86;
-
 /** The legend colour for a kind, as a Cesium.Color (single source of truth, see render-model). */
 function comparisonKindColor(kind: ComparisonKind): Cesium.Color {
-  return Cesium.Color.fromCssColorString(COMPARISON_KIND_COLORS[kind]).withAlpha(COMPARISON_PATH_ALPHA);
+  return Cesium.Color.fromCssColorString(COMPARISON_KIND_COLORS[kind])
+    .withAlpha(COMPARISON_KIND_ALPHA[kind]);
 }
 
-/** The entity id prefix encodes its kind: ref-/opt-/sim-/pred-. */
-function kindOfEntityId(id: string): ComparisonKind {
-  if (id.startsWith("ref-")) return "reference";
-  if (id.startsWith("opt-")) return "optimizer";
-  if (id.startsWith("pred-")) return "predicted";
+/**
+ * The entity-id prefix a comparison kind is written with, by the CZML builder. This is the one
+ * place the mapping lives: `kindOfEntityId` reads it to colour and gate an entity, and
+ * `isComparisonEntity` reads it to decide what the hover/click handler may label — those two
+ * drifted apart once already (the prefix list in the picker was missing `pred-`, so prediction
+ * tracks silently could not be hovered for their callsign).
+ *
+ * `look-` is checked before `pred-` only for readability; the prefixes are disjoint.
+ */
+const COMPARISON_KIND_PREFIXES: ReadonlyArray<readonly [string, ComparisonKind]> = [
+  ["ref-", "reference"],
+  ["opt-", "optimizer"],
+  ["sim-", "simulator"],
+  ["look-", "lookback"],
+  ["pred-", "predicted"],
+];
+
+/** The entity id prefix encodes its kind: ref-/opt-/sim-/pred-/look-. */
+export function kindOfEntityId(id: string): ComparisonKind {
+  for (const [prefix, kind] of COMPARISON_KIND_PREFIXES) {
+    if (id.startsWith(prefix)) return kind;
+  }
   return "simulator";
 }
+
+/**
+ * The kinds a ts_transformer (prediction-schema) states file produces. The builder never bakes
+ * the off-target yellow onto these — a forecast essentially always misses the 106.75 m lateral
+ * gate, so marking it would repaint the whole batch — which is why they are excluded from the
+ * "keep the CZML's verdict colour" rule below and simply take their legend colour.
+ */
+const PREDICTION_SCHEMA_KINDS: ReadonlySet<ComparisonKind> = new Set(["predicted", "lookback"]);
 
 /**
  * Make a comparison entity render like the observed tracks: uniform path width, and —
@@ -80,7 +107,7 @@ export function applyComparisonRenderModel(
     // depending on the builder's PREDICTION_COLOR happening to equal the legend's.
     const status = entity.properties?.status?.getValue(Cesium.JulianDate.now());
     const keepsBakedVerdictColor =
-      kind === "reference" || (status === "offTarget" && kind !== "predicted");
+      kind === "reference" || (status === "offTarget" && !PREDICTION_SCHEMA_KINDS.has(kind));
     if (!keepsBakedVerdictColor) {
       const color = comparisonKindColor(kind);
       entity.path.material = new Cesium.ColorMaterialProperty(color);
@@ -88,6 +115,13 @@ export function applyComparisonRenderModel(
     }
   }
   if (entity.label) entity.label.show = new Cesium.ConstantProperty(false);
+  // The lookback is a path-only annotation: it retraces the span the reference track ALREADY
+  // covers, sample for sample, so giving it a model or a point marker draws a second aircraft
+  // exactly on top of the reference's for the whole input window.
+  if (kind === "lookback") {
+    if (entity.point) entity.point.show = new Cesium.ConstantProperty(false);
+    return;
+  }
   if (!shownEntityIds.has(entity.id)) return;
   if (entity.model) {
     entity.model.runAnimations = new Cesium.ConstantProperty(false);
@@ -105,9 +139,9 @@ export function applyComparisonRenderModel(
 }
 
 /** Prefixes that mark a comparison-overlay entity (vs. anything else the user might pick). */
-function isComparisonEntity(entity: Cesium.Entity | undefined): entity is Cesium.Entity {
+export function isComparisonEntity(entity: Cesium.Entity | undefined): entity is Cesium.Entity {
   const id = entity?.id;
-  return typeof id === "string" && (id.startsWith("ref-") || id.startsWith("opt-") || id.startsWith("sim-"));
+  return typeof id === "string" && COMPARISON_KIND_PREFIXES.some(([prefix]) => id.startsWith(prefix));
 }
 
 /**

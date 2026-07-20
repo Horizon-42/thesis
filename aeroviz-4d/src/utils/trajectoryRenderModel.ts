@@ -31,13 +31,31 @@ export const TRAJECTORY_PATH_WIDTH = 2;
  * of an off-target group (the builder bakes the simulator/result path bright yellow —
  * `OFF_TARGET_COLOR` — because the marking belongs on the trajectory that missed the
  * target). Keep these RGB values in sync with
- * `python/build_scenario_comparison_czml.py` (OPTIMIZER_COLOR / SIMULATOR_COLOR / PREDICTION_COLOR).
+ * `python/build_scenario_comparison_czml.py` (OPTIMIZER_COLOR / SIMULATOR_COLOR /
+ * PREDICTION_COLOR / LOOKBACK_COLOR).
  */
 export const COMPARISON_KIND_COLORS: Record<ComparisonKind, string> = {
   reference: "rgb(235, 235, 235)",
   optimizer: "rgb(255, 140, 0)", // "Optimize states"
   simulator: "rgb(40, 120, 255)", // "Optimize results"
   predicted: "rgb(170, 90, 230)", // "Predicted" — ts_transformer forecast
+  // The forecast's INPUT window, deliberately the same hue as the forecast: it is one
+  // continuous track, and what distinguishes the given half from the predicted half is the
+  // alpha (COMPARISON_KIND_ALPHA), not the colour.
+  lookback: "rgb(170, 90, 230)",
+};
+
+/**
+ * Per-kind path/label alpha. Everything renders at the same opacity as the CZML bakes in
+ * (~220/255) except the lookback, which is observed input rather than a result and is faded
+ * so a viewer can see at a glance where the model stopped being told and started guessing.
+ */
+export const COMPARISON_KIND_ALPHA: Record<ComparisonKind, number> = {
+  reference: 0.86,
+  optimizer: 0.86,
+  simulator: 0.86,
+  predicted: 0.86,
+  lookback: 0.33,
 };
 
 /** How many shown trajectories carry an aircraft model (the rest are path-only). */

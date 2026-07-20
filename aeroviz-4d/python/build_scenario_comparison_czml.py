@@ -67,6 +67,11 @@ FAILED_COLOR = (200, 60, 60, 200)        # unsolved scenario — reference only,
 OFF_TARGET_COLOR = (255, 205, 40, 235)       # the simulator/result path
 OFF_TARGET_REF_COLOR = (150, 118, 25, 200)   # the observed reference (dark amber)
 PREDICTION_COLOR = (170, 90, 230, 225)       # learned prediction — "Predicted" (purple)
+# The lookback window the predictor was CONDITIONED on: observed samples, so the same hue as
+# the forecast they lead into but faded, reading as one continuous track that goes from "given"
+# to "predicted". Without it the purple line starts in mid-air at the anchor with nothing
+# joining it to the beginning of the approach.
+LOOKBACK_COLOR = (170, 90, 230, 85)          # model input window — "Lookback" (faded purple)
 
 # Trailing-tail length (seconds) for the optimizer/simulator paths: the tail fades behind the
 # moving aircraft as playback advances, so the head (current position) is distinguishable from the
@@ -84,6 +89,22 @@ def _states_to_waypoints(states: list[dict[str, Any]]) -> list[tuple[float, floa
     order: time, then **lon before lat** (GeoJSON/CZML convention), then metres.
     """
     return [(s["t"], s["lon"], s["lat"], s["alt"]) for s in states]
+
+
+def _time_shifted(states: list[dict[str, Any]], offset_s: float) -> list[dict[str, Any]]:
+    """The same states with every ``t`` moved by ``offset_s`` seconds."""
+    return [{**state, "t": state["t"] + offset_s} for state in states]
+
+
+def _lookback_states(observed_states: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The observed samples the predictor was shown: everything up to and including the anchor.
+
+    A prediction record rebases time so ``t = 0`` IS the anchor, which makes the lookback the
+    negative-``t`` half of ``observed_states``. The anchor sample itself (``t == 0``) belongs to
+    both halves — it is literally the same state object in the record — so keeping it here joins
+    the faded input segment to the prediction with no gap.
+    """
+    return [state for state in observed_states if state["t"] <= 0.0]
 
 
 # ── copy the matching reference flight from the ADS-B CZML ─────────────────────
@@ -260,13 +281,18 @@ def scenario_initial_map(scenario_paths: list[str | Path]) -> dict[str, dict[str
 # prefixes the frontend derives `kind` from (kindOfEntityId in useComparisonTrajectoryLayer).
 #
 #   optimizer (4dTrajectory/optimization)     opt- the NLP's plan, sim- the true-dynamics replay
-#   predicted (4dTrajectory/ts_transformer)   pred- the learned forecast
+#   predicted (4dTrajectory/ts_transformer)   pred- the learned forecast, look- its input window
 #
 # A learned predictor has no plan/replay split — it emits one trajectory and no controls —
 # so it gets its own kind rather than borrowing `optimizer`, which would make the legend
 # ("Optimize states") lie about what is drawn.
+#
+# `observed_states` is part of the prediction schema, not an optional extra: it is the whole
+# observed track (negative t before the anchor) and it is the ONLY source for the lookback the
+# model was conditioned on. Requiring it here fails loudly on a record that cannot be drawn
+# completely, instead of silently emitting a forecast that begins in mid-air.
 _OPTIMIZER_SCHEMA = ("optimizer_states", "simulator_states")
-_PREDICTION_SCHEMA = ("predicted_states",)
+_PREDICTION_SCHEMA = ("predicted_states", "observed_states")
 
 
 def states_schema(state_data: dict[str, Any]) -> str:
@@ -318,7 +344,7 @@ def _traj_properties(
     """CZML custom-property bag the frontend uses to group / sample / colour-key entities.
 
     ``group`` is the per-flight key (unique within the run); ``kind`` is one of
-    ``reference`` / ``optimizer`` / ``simulator`` / ``predicted``.
+    ``reference`` / ``optimizer`` / ``simulator`` / ``predicted`` / ``lookback``.
     """
     return {
         "group": group, "flightId": flight_id, "kind": kind,
@@ -406,10 +432,22 @@ def build_runway_comparison(
             if schema == "optimizer":
                 optimizer_states = state_data["optimizer_states"]
                 simulator_states = state_data["simulator_states"]
-                predicted_states = None
+                predicted_states = lookback_states = None
             else:
                 optimizer_states = simulator_states = None
-                predicted_states = state_data["predicted_states"]
+                # A prediction record rebases its own time so t=0 is the ANCHOR — the last
+                # observed sample the model was shown, typically `seq_len` samples into the
+                # approach. The reference copied from the ADS-B CZML still starts at t=0 = the
+                # start of the track, so writing the prediction's times through unshifted drew
+                # it `anchorTimeS` seconds EARLY on the shared clock: measured on KRDU 05L, the
+                # forecast's first sample (bit-identical to the reference's t=118 s sample) was
+                # plotted at t=0, 12.0 km from where the reference then was. Shifting both the
+                # forecast and its lookback back onto the observed timeline puts every entity
+                # of a group on one clock again.
+                anchor_time_s = float(state_data["source"]["anchorTimeS"])
+                predicted_states = _time_shifted(state_data["predicted_states"], anchor_time_s)
+                lookback_states = _time_shifted(
+                    _lookback_states(state_data["observed_states"]), anchor_time_s)
 
             # The evaluation verdict for this flight (joined by the summary row's eval_file):
             # solved-but-outside-the-gates renders as "off target" (yellow reference).
@@ -455,6 +493,17 @@ def build_runway_comparison(
                     show=show))
                 entity_ids.append(f"sim-{group}")
             else:
+                # Two entities for one continuous track: the faded lookback the model was
+                # conditioned on, then the forecast it produced. Splitting them (rather than
+                # concatenating into one path) is what lets the input segment carry its own,
+                # lower-alpha colour — the point of drawing it at all is that a viewer can see
+                # where "given" ends and "predicted" begins.
+                entities.append(_build_trajectory_entity(
+                    f"look-{group}", f"Lookback {flight_id}",
+                    lookback_states, LOOKBACK_COLOR,
+                    properties=_traj_properties(group, flight_id, "lookback", runway, airport, status),
+                    show=show))
+                entity_ids.append(f"look-{group}")
                 # One path, not two: a learned predictor has no plan-vs-replay split. The
                 # off-target colour still applies — it marks the trajectory that missed the
                 # gates, and here that is the prediction itself.

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import * as Cesium from "cesium";
-import { applyComparisonRenderModel } from "../useComparisonTrajectoryLayer";
-import { COMPARISON_KIND_COLORS } from "../../utils/trajectoryRenderModel";
+import {
+  applyComparisonRenderModel,
+  isComparisonEntity,
+  kindOfEntityId,
+} from "../useComparisonTrajectoryLayer";
+import { COMPARISON_KIND_COLORS, COMPARISON_KIND_ALPHA } from "../../utils/trajectoryRenderModel";
 
 /**
  * Which paths get repainted from the legend, and which keep the colour the CZML baked in.
@@ -66,5 +70,59 @@ describe("applyComparisonRenderModel path colouring", () => {
       applyComparisonRenderModel(e, new Set());
       expect(renderedColor(e)).toEqual(BAKED);
     }
+  });
+
+  it("repaints the lookback from the legend even though its status is offTarget", () => {
+    // Same rule as the prediction it belongs to: the builder bakes no verdict colour onto
+    // prediction-schema entities, so there is nothing to preserve.
+    const e = entity("look-AAL542_05L", "offTarget");
+    applyComparisonRenderModel(e, new Set());
+    expectLegendColor(e, "lookback");
+  });
+
+  it("draws the lookback in the prediction's hue but faded", () => {
+    // One continuous track: the input half is told apart from the forecast half by alpha, not
+    // by colour — so the hue must MATCH and the alpha must not.
+    const e = entity("look-X_05L", "solved");
+    applyComparisonRenderModel(e, new Set());
+    expectLegendColor(e, "predicted");
+    expect(renderedColor(e).alpha).toBeCloseTo(COMPARISON_KIND_ALPHA.lookback);
+    expect(COMPARISON_KIND_ALPHA.lookback).toBeLessThan(COMPARISON_KIND_ALPHA.predicted);
+  });
+
+  it("gives the lookback no aircraft model — the reference already flies that span", () => {
+    // The lookback retraces observed samples the reference track covers exactly, so a model
+    // here would draw a second aircraft on top of the reference's for the whole input window.
+    const e = new Cesium.Entity({
+      id: "look-X_05L",
+      position: new Cesium.ConstantPositionProperty(Cesium.Cartesian3.fromDegrees(-78.4, 35.7, 900)),
+      point: new Cesium.PointGraphics({ pixelSize: 9 }),
+      path: new Cesium.PathGraphics({ material: new Cesium.ColorMaterialProperty(BAKED) }),
+      properties: new Cesium.PropertyBag({ status: "solved" }),
+    });
+    applyComparisonRenderModel(e, new Set(["look-X_05L"]));   // sampled — a pred- would get one
+    expect(e.model).toBeUndefined();
+    expect(e.point!.show!.getValue(Cesium.JulianDate.now())).toBe(false);
+  });
+});
+
+describe("comparison entity ids", () => {
+  it("maps every builder prefix to its kind", () => {
+    expect(kindOfEntityId("ref-X_05L")).toBe("reference");
+    expect(kindOfEntityId("opt-X_05L")).toBe("optimizer");
+    expect(kindOfEntityId("sim-X_05L")).toBe("simulator");
+    expect(kindOfEntityId("pred-X_05L")).toBe("predicted");
+    expect(kindOfEntityId("look-X_05L")).toBe("lookback");
+  });
+
+  it("recognises every comparison prefix as pickable", () => {
+    // The picker's prefix list once omitted `pred-`, so prediction tracks silently could not
+    // be hovered for their callsign. Both readers now share one prefix table.
+    for (const id of ["ref-X_05L", "opt-X_05L", "sim-X_05L", "pred-X_05L", "look-X_05L"]) {
+      expect(isComparisonEntity(new Cesium.Entity({ id }))).toBe(true);
+    }
+    expect(isComparisonEntity(new Cesium.Entity({ id: "AAL542_05L_a15c80_20260701T033111Z" })))
+      .toBe(false);
+    expect(isComparisonEntity(undefined)).toBe(false);
   });
 });

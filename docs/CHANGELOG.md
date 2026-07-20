@@ -4,6 +4,45 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-07-20 — prediction overlay: anchor-time alignment + the lookback window is drawn
+
+Two defects in how a ts_transformer forecast reached the globe, both invisible in the record
+files (which were correct) and both living in `build_scenario_comparison_czml.py`.
+
+**The forecast was drawn a whole lookback early.** A prediction record rebases its own time so
+`t = 0` is the ANCHOR — the last observed sample the model was shown, `seq_len - 1` samples
+into the approach. The reference is copied out of the airport's `trajectories.czml` and still
+starts at `t = 0` = the START of the track. The builder wrote the record's times straight
+through as CZML offsets, so the two shared a clock they did not share a zero on. Measured on
+KRDU 05L / `AAL542_…`: `pred[0]` is bit-identical to the reference's `t = 118 s` sample, and
+was plotted at `t = 0` — **12.0 km** from where the reference was at that instant. Every
+prediction-schema entity is now shifted by `source.anchorTimeS`. Optimizer records were never
+affected: their `t = 0` already is the scenario start.
+
+**The lookback was never rendered.** `export.py` has always written `observed_states` as the
+WHOLE observed track (negative `t` before the anchor) explicitly so a viewer could show the
+input the model was conditioned on — and no viewer ever read it. The purple line simply began
+in mid-air at the anchor. It now emits a second entity per group, `look-{group}`: the `t ≤ 0`
+slice, same hue as the forecast at alpha 85 (`LOOKBACK_COLOR`) vs 225, frontend kind
+`lookback` with its own "Predictor input" legend row. The anchor sample belongs to both halves
+— it is literally the same state object in the record — so the faded half meets the forecast
+exactly, not merely closely (asserted, not eyeballed). `observed_states` moved into
+`_PREDICTION_SCHEMA`: a record that cannot be drawn completely now fails loudly.
+
+Supporting cleanups: the lookback retraces samples the reference already covers, so it renders
+path-only (a model/point there would draw a second aircraft on top of the reference's for the
+whole input window); the entity-id→kind prefix table is now one list shared by `kindOfEntityId`
+and `isComparisonEntity`, which had drifted — the picker's list was missing `pred-`, so
+prediction tracks silently could not be hovered for their callsign; per-kind alpha
+(`COMPARISON_KIND_ALPHA`) drives the legend swatch too, since "Predicted" and "Predictor input"
+share a colour and a solid swatch made the two rows identical.
+
+Rebuilt all four KRDU ts categories (`ts_itr_full` / `ts_itr_window` / `ts_ptst_full` /
+`ts_ptst_window`, 152 groups each). Verified structurally across all 608 lookback entities:
+every one starts at the reference's own `t = 0`, carries exactly `seq_len = 60` samples, ends
+where its forecast begins, and never outruns its reference. 138 CZML-package tests, 460
+frontend tests, tsc clean, `npm run build` clean. NOT re-checked in-browser.
+
 ### 2026-07-20 — B3: transport-consistent velocity channels + physical-velocity fit; third ts training generation
 
 The findings doc's B3 bundle (`docs/findings_and_open_items_2026-07-20.md`), executed. The
