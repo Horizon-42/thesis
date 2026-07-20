@@ -3,12 +3,12 @@
 Two transformer forecasters, **iTransformer** (ICLR 2024) and **PatchTST** (ICLR 2023),
 integrated separately behind one data plane, one training harness, and one export seam.
 
-The sibling `4dTrajectory/optimization` answers *what trajectory should this aircraft fly?*
-(direct collocation, a dynamics model, hard procedure constraints). This package answers a
-different question — *what trajectory will it fly?* — learned from observed ADS-B arrivals
-with no dynamics model at all. Both emit the **same evaluation records**, so
-`python -m evaluation --input <dir>` grades either one against the identical regulatory gates
-(lateral ≤ 106.75 m, vertical ∈ [−3.05, +6.10] m).
+The sibling `4dTrajectory/optimization` computes trajectories by **optimization** — direct
+collocation over a point-mass dynamics model, with hard procedure constraints. This package
+computes them by **data-driven learning** — transformers trained on observed ADS-B
+arrivals, with no dynamics model at all. Both emit the **same evaluation records**, so
+`python -m evaluation --input <dir>` grades either one against the identical regulatory
+gates (lateral ≤ 106.75 m, vertical ∈ [−3.05, +6.10] m).
 
 ```
                 observed arrival tracks (trajectory_data_process)
@@ -18,23 +18,64 @@ with no dynamics model at all. Both emit the **same evaluation records**, so
   flight_scenarios                                    flight_scenarios
         │                                                   │
   optimization/  (casadi, IPOPT)              ts_transformer/  (torch)
-  "what SHOULD it fly"                        "what WILL it fly"
         │                                                   │
         └──────────────► evaluation/ ◄──────────────────────┘
                     same records, same gates
 ```
 
+**Contents** —
+[Status](#status) ·
+[Glossary](#glossary) ·
+[Layout](#layout) ·
+[Running it](#running-it) ·
+[Data selection & flight identity](#data-selection--flight-identity) ·
+[Design](#design) ·
+[Results on real KRDU data](#results-on-real-krdu-data) ·
+[Flyability](#flyability--measuring-the-gap-this-baseline-deliberately-leaves-open) ·
+[Instance normalisation](#instance-normalisation-is-off-by-default) ·
+[Artifacts & contracts](#what-gets-written) ·
+[Vendored code](#vendored-code) ·
+[Testing](#testing) ·
+[Scope & gaps](#deliberate-scope--not-bugs-do-not-fix-without-deciding-to)
+
 ## Status
 
-Trained and evaluated on **real harvested ADS-B** (KRDU, 995 arrivals, 2026-07-19) — see
-[First real-data results](#first-real-data-results-krdu). Earlier synthetic numbers are kept
-where they are labelled as such, because two of the design decisions below were made on
-synthetic data and the real run either confirmed or corrected them.
+Trained and evaluated on **real harvested ADS-B** (KRDU, 995 arrivals). Checkpoints were
+retrained 2026-07-20 on the reproducible `flight_key` split (702 train / 141 val / 152 test);
+prediction artifacts were regenerated the same day, **test split only**, after the repo-wide
+flight-identity unification (see
+[Data selection & flight identity](#data-selection--flight-identity)). Every number in this
+README's result tables is read from those on-disk artifacts
+(`4dTrajectory/outputs/KRDU/ts_pred_*/`). Earlier synthetic numbers are kept where they are
+labelled as such, because two design decisions were made on synthetic data and the real run
+either confirmed or corrected them.
 
 **Scope:** this is a purely kinematic, single-aircraft baseline. No aerodynamic or dynamics
 model is connected — by design, not by omission. See
-[Inputs, outputs, and the deliberate absence of dynamics](#inputs-outputs-and-the-deliberate-absence-of-dynamics)
+[the dynamics section](#inputs-outputs-and-the-deliberate-absence-of-dynamics)
 before changing anything here.
+
+## Glossary
+
+The abbreviations and terms of art this README (and `metrics.py` / the summary JSONs) use:
+
+| term | meaning |
+|---|---|
+| **ADE** | **Average Displacement Error** — 3D distance between the predicted and observed position, averaged over every valid forecast step of a flight, then over flights. The standard headline metric of the trajectory-prediction literature. |
+| **FDE** | **Final Displacement Error** — the same 3D distance, taken only at the **last** valid step (for a full approach: where it ended). Measures endpoint placement rather than the whole path. |
+| **p95** | 95th percentile over the batch — the tail, where compounding error shows up before it moves the mean. |
+| **lead time** | How many seconds ahead of the anchor a predicted step lies. Error *by lead time* is the only axis on which the two horizon modes compare fairly. |
+| **anchor** | The last observed sample the model was conditioned on; records rebase time so the anchor is `t = 0`. |
+| **`L` / `H` / `dt`** | Lookback steps / horizon steps / resample step in seconds. Defaults `L=60, dt=2 s` (120 s of history); `H=30` (window) or `H=300` (full). Baked into layer shapes — changing them means retraining. |
+| **ENU** | Local **E**ast/**N**orth/**U**p Cartesian frame; here anchored at the runway threshold, so `(0,0,0)` is where an approach should end. |
+| **cross-track / along-track** | Horizontal error decomposed across / along the observed track's own course — "beside the path" vs "ahead/behind on it". |
+| **gates** | The evaluation thresholds every record is graded against: final lateral ≤ 106.75 m, vertical ∈ [−3.05, +6.10] m (FAA 8260.58D / 8260.3F derived; see `evaluation/thresholds.py`). |
+| **`flight_key`** | The repo-wide flight identity `id_runway_icao24_landingTime` — the record filename stem, the train/val/test split key, and the observed CZML entity id. |
+| **pp** | Percentage points (a difference of rates, e.g. 69.7% − 63.2% = +6.6 pp). |
+| **chained forecast** | `recursive_forecast`: predict `H` steps, append them to the history, slide, repeat — the model reads its own output from pass 2 on. |
+| **instance norm / RevIN** | Per-window normalisation that strips a window's absolute level before the model sees it (iTransformer `use_norm`, PatchTST `RevIN`). OFF here by default — see [the ablation](#instance-normalisation-is-off-by-default). |
+| **horizon-capped** | A full-mode forecast the fixed `H` ended *before* the predicted path reached the threshold; its final state (what the gates judge) is a cap artifact, flagged `horizonCapped` in the record. |
+| **ADS-B** | Automatic Dependent Surveillance–Broadcast — the aircraft-broadcast position reports the observed tracks come from (via the OpenSky history DB). |
 
 ## Layout
 
@@ -56,7 +97,7 @@ before changing anything here.
 
 Environment is conda **`aeroviz`** (Python 3.12) — the single thesis env: data acquisition
 (`traffic`, `pyopensky`), CIFP parsing (`cifparse`, `arinc424`), `casadi`, `openap`, the
-geospatial stack, and now `torch`. The package code stays casadi-free by design, but it lives
+geospatial stack, and `torch`. The package code stays casadi-free by design, but it lives
 here so one env runs everything.
 
 ```bash
@@ -73,12 +114,17 @@ python $TS train --data trajectory_data_process/outputs/landings/KRDU --airport 
 # predict the held-out split, then grade it exactly like an optimizer batch
 python $TS predict --checkpoint 4dTrajectory/outputs/KRDU/ts_itr_window/checkpoint.pt \
     --data trajectory_data_process/outputs/landings/KRDU --airport KRDU \
-    --output-dir 4dTrajectory/outputs/KRDU/ts_pred
+    --output-dir 4dTrajectory/outputs/KRDU/ts_pred \
+    --split test
 python -m evaluation --input 4dTrajectory/outputs/KRDU/ts_pred
 ```
 
 `--data` takes an arrivals file, a czml-input file, or a directory of either.
-`predict` defaults to `--split test` — the only flights the model never saw.
+`predict` defaults to `--split test` — the only flights the model never saw. The split is
+recorded in the checkpoint and keyed by `flight_key`, so re-predicting later selects exactly
+the same flights (no leakage on a re-run).
+
+## Data selection & flight identity
 
 ⚠️ **Directory mode is selective, and says so.** A harvest directory holds five overlapping
 views of the same flights:
@@ -97,7 +143,35 @@ and prints what it skipped. A naive `glob("*.json")` loaded every flight three t
 plus the known-bad ones — which a loss curve cannot show you. Passing an explicit **file**
 path bypasses all filtering: you chose it.
 
-## Two horizon modes
+**One flight = one `flight_key`** (`id_runway_icao24_landingTime`,
+`flight_scenarios.identity`). The raw data has no unique flight id — `id` is a copy of the
+callsign and the same callsign flies daily — so uniqueness comes from `icao24` + landing
+time. The key names everything about a flight: this package's record stems and its
+train/val/test split, the optimizer's record stems, the comparison-CZML group, and (since
+2026-07-20) the observed layer's CZML entity ids. Keying anything on the bare callsign is
+how a split leaks and how namesake flights swap each other's data.
+
+## Design
+
+### Channels
+
+Six channels in a local ENU frame **anchored at the runway threshold**:
+
+```
+e, n, u      metres from the threshold (u is height above it)
+ve, vn, vu   m/s
+```
+
+The evaluation state `(lat, lon, alt, V, psi, gamma, m)` is a bad regression target directly:
+`lat`/`lon` waste float range on the airport's absolute position, `psi` wraps at ±π (a model
+regressing it averages 179° and −179° to 0°, pointing the aircraft backwards, right where the
+turn onto final happens), and `m` is not observable from ADS-B at all.
+
+Predicting velocity *components* makes the reconstruction exact and the convention automatic:
+`psi = atan2(vn, ve)` **is** the modeling layer's math-ENU heading, so there is no remaining
+place to substitute a compass bearing by accident. `m` is carried, never predicted.
+
+### Two horizon modes
 
 Both models are fixed lookback→horizon (`L → H`); `L` and `H` are baked into the layer
 shapes, so changing either means retraining.
@@ -114,16 +188,14 @@ learns to reproduce its own zero padding and every forecast tail collapses.
 Having both is the point: the gap between them measures what chaining actually costs.
 
 ⚠️ The two modes' headline ADE/FDE are **not** directly comparable — window mode averages over
-a 60 s horizon, full mode over horizons up to 10 min (and over anchors whose remainder is
-mostly padding). The honest comparison is `metrics.error_by_horizon`, which reports error
-against *lead time*, so a chained window forecast and a one-pass full forecast can be read at
-the same number of seconds ahead.
+a 60 s horizon per pass, full mode over horizons up to 10 min. The honest comparison is error
+against **lead time** (same seconds-ahead for both), which the results section reports.
 
 > Naming: `4dTrajectory/optimization` already uses *rollout* for forward-integrating
 > optimizer controls through the true dynamics. That is a different operation, so the ML
 > chaining here is called `recursive_forecast` and never a rollout.
 
-## Sizing (why the defaults are what they are)
+### Sizing (why the defaults are what they are)
 
 Measured from the **3747 harvested arrivals** (5 airports, truncated at the 25 km entry ring):
 
@@ -145,104 +217,7 @@ Two wrong guesses got corrected here, both by measuring rather than reasoning:
   hold — so the flown path is far longer than the straight-line distance to the ring, and the
   real median is 328 s with a tail past 900 s. That guess covered barely half an approach.
 
-## First real-data results (KRDU)
-
-995 arrivals across 6 runways, split by flight into 702 train / 141 val / 152 test. Both
-models, both horizon modes, 120-epoch cap with patience 15, `lr=5e-4`, on an RTX 4060. Every
-prediction batch was graded by `python -m evaluation`.
-
-> These numbers replace an earlier set trained under the pre-`flight_key` split, which
-> `hash(flight_key)` reproduces for only 552/995 flights. That partition was clean
-> (train/val/test verified disjoint) but is not reproducible from current code, so it was
-> retrained rather than quoted. Two conclusions did not survive the change of split; they are
-> marked below. **Treat any single-split margin under ~1.5× as provisional** — this is one
-> seed on one split, and that is the size of effect it turned out to move.
-
-**Displacement error at matched lead times.** This is the only axis on which the two
-horizon modes can be compared — the headline ADE/FDE cannot, because they average over
-different horizon-length distributions.
-
-| model | mode | 10 s | 30 s | 60 s | 120 s | 300 s | 600 s |
-|---|---|---:|---:|---:|---:|---:|---:|
-| iTransformer | window | 266 m | **400 m** | **756 m** | — | — | — |
-| iTransformer | full | 571 m | 618 m | 893 m | **1717 m** | **4131 m** | **5407 m** |
-| PatchTST | window | 536 m | 689 m | 1163 m | — | — | — |
-| PatchTST | full | **184 m** | 372 m | 869 m | 2052 m | 4293 m | 6962 m |
-
-**Whole-approach prediction, graded at the threshold** (152 test flights). Directly
-comparable across all four — every row predicts the complete remaining approach.
-
-| model | mode | ADE | lateral mean | lateral p95 | path deviation | flyable (vs observed 63.2%) | gate pass |
-|---|---|---:|---:|---:|---:|---:|---:|
-| iTransformer | **full** | **1746 m** | **752 m** | **2531 m** | 1671 m | 48.0% (−15.1 pp) | **3/152** |
-| iTransformer | window (chained ×10) | 1889 m | 1168 m | 4069 m | **1619 m** | **69.7% (+6.6 pp)** | 1/152 |
-| PatchTST | full | 1903 m | 2030 m | 5675 m | 2122 m | 27.0% (−36.2 pp) | 0/152 |
-| PatchTST | window (chained ×10) | 2580 m | 3184 m | 8464 m | 4189 m | 29.6% (−33.6 pp) | 0/152 |
-
-### What the numbers say
-
-**Whole approach → full, and this is the robust result.** One-pass full mode beats chained
-window on lateral error at the threshold for both architectures, on both splits, by
-1.5–1.6× on the mean and 1.5–2.1× on p95. Once a chained pass goes wrong the next nine
-extrapolate from a wrong history. Training directly for the long horizon beats chaining a
-short one.
-
-**Did NOT survive the split change: "the compounding cost lands in the tail, not the mean".**
-On the old split the lateral mean was 1.5× worse while p95 was 2.2× worse. Here the two
-ratios are the same to within noise (iTransformer 1.55× mean vs 1.61× p95). The tail effect
-is still visible in *final* displacement — PatchTST FDE p95 12471 m chained vs 7022 m
-one-pass, 1.78× against a 1.36× mean — but it is a claim about FDE, not about lateral error
-at the threshold, and it is not the clean 1.5-vs-2.2 story originally written here.
-
-**Short lead → PatchTST; long lead → iTransformer.** Comparing like for like within full
-mode: PatchTST leads at 10 s (184 vs 571 m) and the ordering reverses by 300 s (4293 vs
-4131) and widens at 600 s (6962 vs 5407). PatchTST is channel-**independent**
-(`TSTiEncoder` — every channel forecast in isolation by shared weights) while iTransformer's
-attention runs *across* variates; for a turning aircraft east and north are strongly coupled
-and PatchTST cannot represent that by construction. Near-straight flight costs it nothing,
-so **the coupling only starts paying once the turn develops** — exactly what the two designs
-predict. (The old split showed this same crossover between the two *window* runs; on this
-split PatchTST window is the weakest cell everywhere, so the full-mode pair is the honest
-comparison.)
-
-**Did NOT survive the split change: "zero gate passes in all four runs".** iTransformer now
-passes 3/152 in full mode and 1/152 chained. The point stands in substance — 2% is not a
-usable approach predictor — but "zero, always" was a property of that split, not of the
-method. The 106.75 m lateral limit is FAA containment for a *planned or flown* approach,
-while this is a *forecast* extrapolating 5–10 minutes from 120 s of history; the number
-quantifies the distance between a statistical prediction and a certifiable trajectory.
-
-**Flyability and accuracy disagree, deliberately.** iTransformer window is the *most* flyable
-run (69.7%, above the observed tracks' 63.2%) while being worse than full mode on every
-error metric; PatchTST full is the least flyable (27.0%) at comparable ADE. Chaining short
-windows produces smooth, conservative paths — easy to fly, not where the aircraft went.
-Neither metric substitutes for the other.
-
-**Real data is much harder than synthetic**, as it should be. Synthetic approaches are
-straight-in, so the model only has to extrapolate a line. Real arrivals are vectored, and
-*when* the turn onto final happens is a controller's decision — information a single-aircraft
-model with no traffic context and no ATC intent input structurally cannot have. That is the
-survey's central open problem, and this baseline is where it gets measured from.
-
-## Channels
-
-Six channels in a local ENU frame **anchored at the runway threshold**:
-
-```
-e, n, u      metres from the threshold (u is height above it)
-ve, vn, vu   m/s
-```
-
-The evaluation state `(lat, lon, alt, V, psi, gamma, m)` is a bad regression target directly:
-`lat`/`lon` waste float range on the airport's absolute position, `psi` wraps at ±π (a model
-regressing it averages 179° and −179° to 0°, pointing the aircraft backwards, right where the
-turn onto final happens), and `m` is not observable from ADS-B at all.
-
-Predicting velocity *components* makes the reconstruction exact and the convention automatic:
-`psi = atan2(vn, ve)` **is** the modeling layer's math-ENU heading, so there is no remaining
-place to substitute a compass bearing by accident. `m` is carried, never predicted.
-
-## Inputs, outputs, and the deliberate absence of dynamics
+### Inputs, outputs, and the deliberate absence of dynamics
 
 > **Read this before "improving" anything here.** This package is a *kinematic baseline*.
 > No aerodynamic or dynamics model is connected, and that is a scope decision, not an
@@ -268,12 +243,11 @@ geometry (present only implicitly, as the frame origin).
 **Not in the output:** controls (thrust, bank, load factor) — which is exactly why the exported
 records carry `controls == []` — and any notion of uncertainty or multimodality.
 
-### What "no dynamics" concretely means
-
-The only symbol this package imports from `aerodynamic_model` is `GeodeticState`
-(`channels.py`) — a plain dataclass holding seven floats. It contains no equations. Compare
-what the optimizer imports from the same package: `CasadiSimulator` (the point-mass dynamics)
-and `rollout_piecewise_constant` (true-dynamics integration).
+**What "no dynamics" concretely means.** The only symbol this package imports from
+`aerodynamic_model` is `GeodeticState` (`channels.py`) — a plain dataclass holding seven
+floats, no equations. Compare what the optimizer imports from the same package:
+`CasadiSimulator` (the point-mass dynamics) and `rollout_piecewise_constant` (true-dynamics
+integration).
 
 ```
 optimization/     initial state ─► NLP (point-mass dynamics + hard constraints)
@@ -294,17 +268,18 @@ That is the correct shape for a baseline. The trajectory-prediction literature r
 ADE/FDE on exactly this kind of purely kinematic, data-driven model, and mixing dynamics in
 now would make it impossible to say what the learned component contributes on its own.
 
-### If dynamics is added later, these are the four routes
+#### If dynamics is added later, these are the four routes
 
 Listed in increasing order of intrusiveness, so a future change can pick deliberately rather
 than drift into one:
 
-1. **Post-hoc flyability check** — ✅ **DONE**, see "Flyability" below (`flyability.py`).
-   Inverts the point-mass equations on the predicted trajectory to recover the required load
-   factor / bank / thrust and reports what fraction sits inside the envelope. Does not touch
-   training, and needs **no casadi** (the inversion is algebra), so it lives in this package
-   and needs no second environment. Note that it measures the gap; it does not close it —
-   routes 2–4 are still the ways to actually make predictions flyable.
+1. **Post-hoc flyability check** — ✅ **DONE**, see
+   [Flyability](#flyability--measuring-the-gap-this-baseline-deliberately-leaves-open)
+   (`flyability.py`). Inverts the point-mass equations on the predicted trajectory to recover
+   the required load factor / bank / thrust and reports what fraction sits inside the
+   envelope. Does not touch training, and needs **no casadi** (the inversion is algebra), so
+   it lives in this package and needs no second environment. Note that it measures the gap;
+   it does not close it — routes 2–4 are still the ways to actually make predictions flyable.
 2. **Post-hoc dynamics projection** — treat the prediction as a reference and solve for the
    nearest flyable trajectory with `CasadiSimulator`. Pulls casadi back in, so it has to run
    as a second stage in the `aeroviz` env.
@@ -313,6 +288,96 @@ than drift into one:
 4. **Predict controls and integrate them** — structurally guarantees flyability, but needs a
    *differentiable* dynamics model; casadi cannot backpropagate into torch, so the point-mass
    model would have to be reimplemented in torch. Largest effort.
+
+## Results on real KRDU data
+
+995 arrivals across 6 runways, split **by flight** (`flight_key`) into 702 train / 141 val /
+152 test. Both models, both horizon modes, 120-epoch cap with patience 15, `lr=5e-4`, on an
+RTX 4060. Every prediction batch is graded by `python -m evaluation`; all numbers below are
+read from the regenerated 2026-07-20 artifacts in `4dTrajectory/outputs/KRDU/ts_pred_*/`.
+
+> These numbers replace an earlier set trained under the pre-`flight_key` split, which
+> `hash(flight_key)` reproduces for only 552/995 flights. That partition was clean
+> (train/val/test verified disjoint) but is not reproducible from current code, so it was
+> retrained rather than quoted. Two conclusions did not survive the change of split; they are
+> marked below. **Treat any single-split margin under ~1.5× as provisional** — this is one
+> seed on one split, and that is the size of effect it turned out to move.
+
+> **Run-to-run jitter, measured.** Re-running `predict` on the same checkpoints and data
+> (CUDA, no retraining) reproduced the one-pass full-mode aggregate ADE to <0.1 m, while the
+> chained-window cells moved 2–4% and one borderline flight crossed the lateral gate
+> (3→4 passes for iTransformer full). Chaining amplifies floating-point nondeterminism the
+> way it amplifies everything else. This is another reason for the provisional-margin rule
+> above.
+
+**Whole-approach prediction, graded at the threshold** (152 test flights). Directly
+comparable across all four — every row predicts the complete remaining approach.
+
+| model | mode | ADE mean/p95 | FDE mean/p95 | lateral mean/p95 | path deviation | flyable (obs. floor 63.2%) | gate pass |
+|---|---|---:|---:|---:|---:|---:|---:|
+| iTransformer | **full** | **1746 / 4539 m** | **2230 / 6021 m** | **767 / 2434 m** | 1608 m | 46.7% (−16.4 pp) | **4/152** |
+| iTransformer | window (chained ×10) | 1930 / 6429 m | 2522 / 7436 m | 1130 / 3979 m | **1590 m** | **69.7% (+6.6 pp)** | 1/152 |
+| PatchTST | full | 1912 / 4996 m | 3110 / 7474 m | 2105 / 6001 m | 2105 m | 28.9% (−34.2 pp) | 0/152 |
+| PatchTST | window (chained ×10) | 2476 / 6414 m | 3873 / 12568 m | 3183 / 8470 m | 4194 m | 32.9% (−30.3 pp) | 0/152 |
+
+**Displacement error at matched lead times** — the axis on which the two horizon modes can be
+compared fairly. Recomputed directly from the exported records: 3D distance between the
+predicted and observed position at the same `t`, mean over the flights whose record reaches
+that lead (`n`; records end at the threshold, so `n` falls with lead — long leads survive
+only for long approaches, and 600 s has n=1, too few to quote).
+
+| model | mode | 10 s | 30 s | 60 s | 120 s | 300 s |
+|---|---|---:|---:|---:|---:|---:|
+| iTransformer | window (chained) | 294 m | **380 m** | **711 m** | **1354 m** | 4765 m |
+| iTransformer | full | 943 m | 886 m | 964 m | 1323 m | **3802 m** |
+| PatchTST | window (chained) | 663 m | 812 m | 1252 m | 2518 m | 6972 m |
+| PatchTST | full | **231 m** | 392 m | 749 m | 1519 m | 3852 m |
+| *n (of 152)* | | *152* | *152* | *152* | *119–146* | *49–80* |
+
+### What the numbers say
+
+**Whole approach → full, and this is the robust result.** One-pass full mode beats chained
+window on lateral error at the threshold for both architectures, on both splits — ≈1.5× on
+the mean (iTransformer 1130/767, PatchTST 3183/2105) and 1.4–1.6× on p95. Once a chained
+pass goes wrong the next nine extrapolate from a wrong history. Training directly for the
+long horizon beats chaining a short one.
+
+**Did NOT survive the split change: "the compounding cost lands in the tail, not the mean".**
+On the old split the lateral mean was 1.5× worse while p95 was 2.2× worse. Here the two
+ratios are the same to within noise. The tail effect is still visible in *final*
+displacement — PatchTST FDE p95 12568 m chained vs 7474 m one-pass (1.68×) against a 1.25×
+mean — but that is a claim about FDE, not about lateral error at the threshold, and it is
+not the clean 1.5-vs-2.2 story originally written here.
+
+**Short lead → PatchTST; long lead → iTransformer, now with a caveat.** Within full mode,
+PatchTST clearly leads at 10 s (231 vs 943 m) and the two are within 2% by 300 s (3852 vs
+3802 m) — on this run the long-lead reversal is inside the provisional band at 300 s; the
+earlier run's raw-tensor curves (which see past threshold truncation) had iTransformer
+clearly ahead at 600 s (5407 vs 6962 m). The mechanism is architectural either way:
+PatchTST is channel-**independent** (`TSTiEncoder` — every channel forecast in isolation by
+shared weights) while iTransformer's attention runs *across* variates; for a turning
+aircraft east and north are strongly coupled and PatchTST cannot represent that by
+construction. Near-straight flight costs it nothing, so **the coupling only starts paying
+once the turn develops.**
+
+**Did NOT survive the split change: "zero gate passes in all four runs".** iTransformer now
+passes 4/152 in full mode and 1/152 chained. The point stands in substance — ~3% is not a
+usable approach predictor — but "zero, always" was a property of that split, not of the
+method. The 106.75 m lateral limit is FAA containment for a *planned or flown* approach,
+while this is a *forecast* extrapolating 5–10 minutes from 120 s of history; the number
+quantifies the distance between a statistical prediction and a certifiable trajectory.
+
+**Flyability and accuracy disagree, deliberately.** iTransformer window is the *most* flyable
+run (69.7%, above the observed tracks' 63.2% floor) while losing to full mode on every error
+metric; PatchTST full is the least flyable (28.9%) at a comparable ADE. Chaining short
+windows produces smooth, conservative paths — easy to fly, not where the aircraft went.
+Neither metric substitutes for the other.
+
+**Real data is much harder than synthetic**, as it should be. Synthetic approaches are
+straight-in, so the model only has to extrapolate a line. Real arrivals are vectored, and
+*when* the turn onto final happens is a controller's decision — information a single-aircraft
+model with no traffic context and no ATC intent input structurally cannot have. That is the
+survey's central open problem, and this baseline is where it gets measured from.
 
 ## Flyability — measuring the gap this baseline deliberately leaves open
 
@@ -344,15 +409,18 @@ comparison against the observed tracks measured by the identical code, because b
 carry the same polar bias:
 
 ```
-flyability: 46.3% of predictions fully flyable vs 58.4% of the observed tracks (-12.1 pp)
+flyability: 46.7% of predictions fully flyable vs 63.2% of the observed tracks (-16.4 pp)
 ```
 
 The observed baseline is the floor, not 100%. `HARD_VIOLATIONS` (stall, bank, load factor,
 thrust over max) vs `SOFT_VIOLATIONS` (thrust below idle) is where that judgement lives.
 
-`Cl_max` comes from `aero_params_for_aircraft` (2.7 for an A320), **not** from
-`LoadFactorSimulator`'s hardcoded 1.5 — the two disagree by 80%, and `aero_params.py`
-documents itself as the source of truth for the stall model.
+Each flight is judged against its **own airframe** (`report_for_records` takes one
+`Aircraft` per flight; the report carries the `fleet` and per-type `envelopes`) — the first
+version shared one A320 envelope and mis-graded ~44% of a mixed batch. `Cl_max` comes from
+`aero_params_for_aircraft` (2.7 for an A320), **not** from `LoadFactorSimulator`'s hardcoded
+1.5 — the two disagree by 80%, and `aero_params.py` documents itself as the source of truth
+for the stall model.
 
 **Flyability is not a quality metric on its own.** A straight line is perfectly flyable and
 completely wrong; see the instance-norm table below, where the *worse* predictor scores
@@ -408,7 +476,9 @@ split — artifacts in `4dTrajectory/outputs/KRDU/_ablation_norm/`:
 | PatchTST | full | **off** | 57 | **0.0903** | **1903 m** | **5221 m** | **2942 m** | **5675 m** | 27.0% |
 
 *(flyable = fraction of predictions fully inside the envelope, each flight judged against its
-own airframe; the observed tracks score 63.2% measured the same way.)*
+own airframe; the observed tracks score 63.2% measured the same way. This table is from the
+ablation's own training runs — its "off" cells are separate checkpoints from the headline
+results above, which is why the numbers differ slightly.)*
 
 **Off wins 19 of the 20 accuracy comparisons, with one tie.** Every cell on validation loss,
 every cell on FDE, every cell on ADE p95, every cell on lateral error at the threshold; on
@@ -440,11 +510,16 @@ synthetic. `--instance-norm` still turns them on.
 
 ```
 <output-dir>/
-  <flight>_states.json                     predicted + observed, side by side
-  <flight>_eval.json                       the evaluation record
-  references/<flight>_reference_eval.json  the observed track, same contract
-  summary.json                             the manifest — load_records reads ONLY this
+  <flight_key>_states.json                     predicted + observed, side by side
+  <flight_key>_eval.json                       the evaluation record
+  references/<flight_key>_reference_eval.json  the observed track, same contract
+  summary.json                                 the manifest — load_records reads ONLY this
 ```
+
+The filename stem IS the flight identity (`flight_key`), shared with the optimizer's record
+filenames and the comparison-CZML group key, so learned and optimized records for one flight
+always share a stem. Summary rows carry the full identity too (`id`, `icao24`, `runway`,
+`landing_time_utc`).
 
 Records are **reference-shaped**: `controls == []`. That is the contract, not a shortcut — a
 learned predictor emits no control schedule, and `evaluation.records` reads an empty control
