@@ -1,0 +1,155 @@
+<svg class="arch-graph" width="609pt" height="655pt"
+ viewBox="0.00 0.00 609.00 655.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 651)">
+<title>arch</title>
+<text text-anchor="middle" x="300.5" y="-631" font-family="Helvetica,sans-Serif" font-size="15.00" fill="var(--ink)">patchtst &#160;· &#160;window mode &#160;· &#160;L=60 H=30 C=6 &#160;· &#160;427,422 trainable parameters</text>
+<!-- @x -->
+<g id="node1" class="node">
+<title>@x</title>
+<path fill="var(--indigo-soft)" stroke="var(--indigo)" stroke-width="1.4" d="M282.5,-622C282.5,-622 250.5,-622 250.5,-622 244.5,-622 238.5,-616 238.5,-610 238.5,-610 238.5,-598 238.5,-598 238.5,-592 244.5,-586 250.5,-586 250.5,-586 282.5,-586 282.5,-586 288.5,-586 294.5,-592 294.5,-598 294.5,-598 294.5,-610 294.5,-610 294.5,-616 288.5,-622 282.5,-622"/>
+<text text-anchor="middle" x="266.5" y="-601.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">input</text>
+</g>
+<!-- @permute -->
+<g id="node2" class="node">
+<title>@permute</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.4" stroke-dasharray="5,2" d="M292,-552C292,-552 241,-552 241,-552 235,-552 229,-546 229,-540 229,-540 229,-528 229,-528 229,-522 235,-516 241,-516 241,-516 292,-516 292,-516 298,-516 304,-522 304,-528 304,-528 304,-540 304,-540 304,-546 298,-552 292,-552"/>
+<text text-anchor="middle" x="266.5" y="-531.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">permute</text>
+</g>
+<!-- @x&#45;&gt;@permute -->
+<g id="edge1" class="edge">
+<title>@x&#45;&gt;@permute</title>
+<path fill="none" stroke="var(--line-strong)" d="M266.5,-585.84C266.5,-578.17 266.5,-568.97 266.5,-560.51"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="269.3,-560.39 266.5,-552.39 263.7,-560.39 269.3,-560.39"/>
+<text text-anchor="middle" x="287" y="-566.4" font-family="Helvetica,sans-Serif" font-size="9.50" fill="var(--muted)">1×60×6</text>
+</g>
+<!-- inner.model -->
+<g id="node3" class="node">
+<title>inner.model</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.4" d="M344,-482C344,-482 189,-482 189,-482 183,-482 177,-476 177,-470 177,-470 177,-442 177,-442 177,-436 183,-430 189,-430 189,-430 344,-430 344,-430 350,-430 356,-436 356,-442 356,-442 356,-470 356,-470 356,-476 350,-482 344,-482"/>
+<text text-anchor="middle" x="266.5" y="-465.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">model.padding_patch_layer</text>
+<text text-anchor="middle" x="266.5" y="-453.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">ReplicationPad1d</text>
+<text text-anchor="middle" x="266.5" y="-441.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">4 ops · 0 params</text>
+</g>
+<!-- @permute&#45;&gt;inner.model -->
+<g id="edge2" class="edge">
+<title>@permute&#45;&gt;inner.model</title>
+<path fill="none" stroke="var(--line-strong)" d="M266.5,-515.75C266.5,-508.25 266.5,-499.2 266.5,-490.46"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="269.3,-490.25 266.5,-482.25 263.7,-490.25 269.3,-490.25"/>
+<text text-anchor="middle" x="287" y="-496.4" font-family="Helvetica,sans-Serif" font-size="9.50" fill="var(--muted)">1×6×60</text>
+</g>
+<!-- inner.model.backbone -->
+<g id="node4" class="node">
+<title>inner.model.backbone</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.4" d="M327.5,-396C327.5,-396 205.5,-396 205.5,-396 199.5,-396 193.5,-390 193.5,-384 193.5,-384 193.5,-356 193.5,-356 193.5,-350 199.5,-344 205.5,-344 205.5,-344 327.5,-344 327.5,-344 333.5,-344 339.5,-350 339.5,-356 339.5,-356 339.5,-384 339.5,-384 339.5,-390 333.5,-396 327.5,-396"/>
+<text text-anchor="middle" x="266.5" y="-379.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">backbone</text>
+<text text-anchor="middle" x="266.5" y="-367.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">Linear</text>
+<text text-anchor="middle" x="266.5" y="-355.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">7 ops · 2,176 params</text>
+</g>
+<!-- inner.model&#45;&gt;inner.model.backbone -->
+<g id="edge4" class="edge">
+<title>inner.model&#45;&gt;inner.model.backbone</title>
+<path fill="none" stroke="var(--line-strong)" d="M266.5,-429.8C266.5,-421.82 266.5,-412.88 266.5,-404.43"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="269.3,-404.18 266.5,-396.18 263.7,-404.19 269.3,-404.18"/>
+<text text-anchor="middle" x="294" y="-410.4" font-family="Helvetica,sans-Serif" font-size="9.50" fill="var(--muted)">1×6×7×16</text>
+</g>
+<!-- inner.model.backbone.encoder.layers.2 -->
+<g id="node7" class="node">
+<title>inner.model.backbone.encoder.layers.2</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.4" d="M348.5,-138C348.5,-138 184.5,-138 184.5,-138 178.5,-138 172.5,-132 172.5,-126 172.5,-126 172.5,-98 172.5,-98 172.5,-92 178.5,-86 184.5,-86 184.5,-86 348.5,-86 348.5,-86 354.5,-86 360.5,-92 360.5,-98 360.5,-98 360.5,-126 360.5,-126 360.5,-132 354.5,-138 348.5,-138"/>
+<text text-anchor="middle" x="266.5" y="-121.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">backbone.encoder.layers.2</text>
+<text text-anchor="middle" x="266.5" y="-109.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">Linear · BatchNorm1d · GELU</text>
+<text text-anchor="middle" x="266.5" y="-97.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">37 ops · 132,480 params</text>
+</g>
+<!-- inner.model&#45;&gt;inner.model.backbone.encoder.layers.2 -->
+<g id="edge3" class="edge">
+<title>inner.model&#45;&gt;inner.model.backbone.encoder.layers.2</title>
+<path fill="none" stroke="var(--line-strong)" stroke-dasharray="5,2" d="M317.25,-429.9C330.43,-420.98 343.22,-409.68 351.5,-396 371.87,-362.34 367.8,-349.06 372.5,-310 379.83,-249.11 403.58,-224.87 372.5,-172 365.45,-160.01 354.99,-150.28 343.33,-142.44"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="344.62,-139.94 336.35,-138.04 341.63,-144.68 344.62,-139.94"/>
+<text text-anchor="middle" x="405.5" y="-282.1" font-family="Helvetica,sans-Serif" font-size="8.00" fill="var(--muted)">shape only</text>
+</g>
+<!-- inner.model.backbone.encoder.layers.0 -->
+<g id="node5" class="node">
+<title>inner.model.backbone.encoder.layers.0</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.4" d="M348.5,-310C348.5,-310 184.5,-310 184.5,-310 178.5,-310 172.5,-304 172.5,-298 172.5,-298 172.5,-270 172.5,-270 172.5,-264 178.5,-258 184.5,-258 184.5,-258 348.5,-258 348.5,-258 354.5,-258 360.5,-264 360.5,-270 360.5,-270 360.5,-298 360.5,-298 360.5,-304 354.5,-310 348.5,-310"/>
+<text text-anchor="middle" x="266.5" y="-293.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">backbone.encoder.layers.0</text>
+<text text-anchor="middle" x="266.5" y="-281.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">Linear · BatchNorm1d · GELU</text>
+<text text-anchor="middle" x="266.5" y="-269.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">35 ops · 132,480 params</text>
+</g>
+<!-- inner.model.backbone&#45;&gt;inner.model.backbone.encoder.layers.0 -->
+<g id="edge5" class="edge">
+<title>inner.model.backbone&#45;&gt;inner.model.backbone.encoder.layers.0</title>
+<path fill="none" stroke="var(--line-strong)" d="M240.86,-343.84C238.28,-340.12 236.04,-336.14 234.5,-332 232.65,-327.02 232.99,-322.06 234.68,-317.33"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="237.22,-318.51 238.33,-310.11 232.22,-315.98 237.22,-318.51"/>
+<text text-anchor="middle" x="258" y="-324.4" font-family="Helvetica,sans-Serif" font-size="9.50" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner.model.backbone&#45;&gt;inner.model.backbone.encoder.layers.0 -->
+<g id="edge6" class="edge">
+<title>inner.model.backbone&#45;&gt;inner.model.backbone.encoder.layers.0</title>
+<path fill="none" stroke="var(--line-strong)" d="M278.93,-343.97C280.41,-340.05 281.68,-335.97 282.5,-332 283.46,-327.35 283.27,-322.52 282.37,-317.81"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="285.07,-317.05 280.28,-310.05 279.66,-318.5 285.07,-317.05"/>
+</g>
+<!-- inner.model.backbone.encoder.layers.1 -->
+<g id="node6" class="node">
+<title>inner.model.backbone.encoder.layers.1</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.4" d="M348.5,-224C348.5,-224 184.5,-224 184.5,-224 178.5,-224 172.5,-218 172.5,-212 172.5,-212 172.5,-184 172.5,-184 172.5,-178 178.5,-172 184.5,-172 184.5,-172 348.5,-172 348.5,-172 354.5,-172 360.5,-178 360.5,-184 360.5,-184 360.5,-212 360.5,-212 360.5,-218 354.5,-224 348.5,-224"/>
+<text text-anchor="middle" x="266.5" y="-207.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">backbone.encoder.layers.1</text>
+<text text-anchor="middle" x="266.5" y="-195.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">Linear · BatchNorm1d · GELU</text>
+<text text-anchor="middle" x="266.5" y="-183.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">36 ops · 132,480 params</text>
+</g>
+<!-- inner.model.backbone.encoder.layers.0&#45;&gt;inner.model.backbone.encoder.layers.1 -->
+<g id="edge7" class="edge">
+<title>inner.model.backbone.encoder.layers.0&#45;&gt;inner.model.backbone.encoder.layers.1</title>
+<path fill="none" stroke="var(--line-strong)" d="M199.6,-257.71C195.71,-254.28 192.26,-250.39 189.5,-246 185.86,-240.21 185.7,-235.03 187.94,-230.41"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="190.17,-232.11 192.82,-224.06 185.73,-228.7 190.17,-232.11"/>
+<text text-anchor="middle" x="214" y="-238.4" font-family="Helvetica,sans-Serif" font-size="9.50" fill="var(--muted)">6×8×7×7</text>
+</g>
+<!-- inner.model.backbone.encoder.layers.0&#45;&gt;inner.model.backbone.encoder.layers.1 -->
+<g id="edge8" class="edge">
+<title>inner.model.backbone.encoder.layers.0&#45;&gt;inner.model.backbone.encoder.layers.1</title>
+<path fill="none" stroke="var(--line-strong)" d="M266.5,-257.8C266.5,-249.82 266.5,-240.88 266.5,-232.43"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="269.3,-232.18 266.5,-224.18 263.7,-232.19 269.3,-232.18"/>
+<text text-anchor="middle" x="290" y="-238.4" font-family="Helvetica,sans-Serif" font-size="9.50" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner.model.backbone.encoder.layers.0&#45;&gt;inner.model.backbone.encoder.layers.1 -->
+<g id="edge9" class="edge">
+<title>inner.model.backbone.encoder.layers.0&#45;&gt;inner.model.backbone.encoder.layers.1</title>
+<path fill="none" stroke="var(--line-strong)" d="M306.1,-257.92C309.45,-254.32 312.36,-250.34 314.5,-246 317.07,-240.78 316.81,-235.81 314.74,-231.19"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="316.88,-229.35 310.12,-224.24 312.21,-232.45 316.88,-229.35"/>
+</g>
+<!-- inner.model.backbone.encoder.layers.1&#45;&gt;inner.model.backbone.encoder.layers.2 -->
+<g id="edge10" class="edge">
+<title>inner.model.backbone.encoder.layers.1&#45;&gt;inner.model.backbone.encoder.layers.2</title>
+<path fill="none" stroke="var(--line-strong)" d="M199.6,-171.71C195.71,-168.28 192.26,-164.39 189.5,-160 185.86,-154.21 185.7,-149.03 187.94,-144.41"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="190.17,-146.11 192.82,-138.06 185.73,-142.7 190.17,-146.11"/>
+<text text-anchor="middle" x="214" y="-152.4" font-family="Helvetica,sans-Serif" font-size="9.50" fill="var(--muted)">6×8×7×7</text>
+</g>
+<!-- inner.model.backbone.encoder.layers.1&#45;&gt;inner.model.backbone.encoder.layers.2 -->
+<g id="edge11" class="edge">
+<title>inner.model.backbone.encoder.layers.1&#45;&gt;inner.model.backbone.encoder.layers.2</title>
+<path fill="none" stroke="var(--line-strong)" d="M266.5,-171.8C266.5,-163.82 266.5,-154.88 266.5,-146.43"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="269.3,-146.18 266.5,-138.18 263.7,-146.19 269.3,-146.18"/>
+<text text-anchor="middle" x="290" y="-152.4" font-family="Helvetica,sans-Serif" font-size="9.50" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner.model.backbone.encoder.layers.1&#45;&gt;inner.model.backbone.encoder.layers.2 -->
+<g id="edge12" class="edge">
+<title>inner.model.backbone.encoder.layers.1&#45;&gt;inner.model.backbone.encoder.layers.2</title>
+<path fill="none" stroke="var(--line-strong)" d="M306.1,-171.92C309.45,-168.32 312.36,-164.34 314.5,-160 317.07,-154.78 316.81,-149.81 314.74,-145.19"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="316.88,-143.35 310.12,-138.24 312.21,-146.45 316.88,-143.35"/>
+</g>
+<!-- inner.model.head -->
+<g id="node8" class="node">
+<title>inner.model.head</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.4" d="M330.5,-52C330.5,-52 202.5,-52 202.5,-52 196.5,-52 190.5,-46 190.5,-40 190.5,-40 190.5,-12 190.5,-12 190.5,-6 196.5,0 202.5,0 202.5,0 330.5,0 330.5,0 336.5,0 342.5,-6 342.5,-12 342.5,-12 342.5,-40 342.5,-40 342.5,-46 336.5,-52 330.5,-52"/>
+<text text-anchor="middle" x="266.5" y="-35.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">head</text>
+<text text-anchor="middle" x="266.5" y="-23.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">Flatten · Linear</text>
+<text text-anchor="middle" x="266.5" y="-11.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">5 ops · 26,910 params</text>
+</g>
+<!-- inner.model.backbone.encoder.layers.2&#45;&gt;inner.model.head -->
+<g id="edge13" class="edge">
+<title>inner.model.backbone.encoder.layers.2&#45;&gt;inner.model.head</title>
+<path fill="none" stroke="var(--line-strong)" d="M266.5,-85.8C266.5,-77.82 266.5,-68.88 266.5,-60.43"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="269.3,-60.18 266.5,-52.18 263.7,-60.19 269.3,-60.18"/>
+<text text-anchor="middle" x="297" y="-66.4" font-family="Helvetica,sans-Serif" font-size="9.50" fill="var(--muted)">1×6×128×7</text>
+</g>
+</g>
+</svg>

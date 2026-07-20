@@ -1,0 +1,1951 @@
+<svg class="arch-graph" width="1606pt" height="8726pt"
+ viewBox="0.00 0.00 1606.00 8726.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 8722)">
+<title>arch</title>
+<text text-anchor="middle" x="799" y="-8702" font-family="Helvetica,sans-Serif" font-size="15.00" fill="var(--ink)">patchtst &#160;· &#160;window mode &#160;· &#160;L=60 H=30 C=6 &#160;· &#160;427,422 trainable parameters</text>
+<g id="clust1" class="cluster">
+<title>cluster_1</title>
+<path fill="var(--panel-strong)" stroke="var(--line-strong)" d="M1464,-8231C1464,-8231 1578,-8231 1578,-8231 1584,-8231 1590,-8237 1590,-8243 1590,-8243 1590,-8530 1590,-8530 1590,-8536 1584,-8542 1578,-8542 1578,-8542 1464,-8542 1464,-8542 1458,-8542 1452,-8536 1452,-8530 1452,-8530 1452,-8243 1452,-8243 1452,-8237 1458,-8231 1464,-8231"/>
+<text text-anchor="middle" x="1521" y="-8530" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--muted)">model</text>
+</g>
+<g id="clust2" class="cluster">
+<title>cluster_2</title>
+<path fill="var(--panel-strong)" stroke="var(--line-strong)" d="M1331,-7756C1331,-7756 1569,-7756 1569,-7756 1575,-7756 1581,-7762 1581,-7768 1581,-7768 1581,-8192 1581,-8192 1581,-8198 1575,-8204 1569,-8204 1569,-8204 1331,-8204 1331,-8204 1325,-8204 1319,-8198 1319,-8192 1319,-8192 1319,-7768 1319,-7768 1319,-7762 1325,-7756 1331,-7756"/>
+<text text-anchor="middle" x="1450" y="-8192" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--muted)">backbone</text>
+</g>
+<g id="clust3" class="cluster">
+<title>cluster_3</title>
+<path fill="var(--panel-strong)" stroke="var(--line-strong)" d="M894,-5393C894,-5393 1299,-5393 1299,-5393 1305,-5393 1311,-5399 1311,-5405 1311,-5405 1311,-7825 1311,-7825 1311,-7831 1305,-7837 1299,-7837 1299,-7837 894,-7837 894,-7837 888,-7837 882,-7831 882,-7825 882,-7825 882,-5405 882,-5405 882,-5399 888,-5393 894,-5393"/>
+<text text-anchor="middle" x="1096.5" y="-7825" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--muted)">backbone.encoder.layers.0</text>
+</g>
+<g id="clust4" class="cluster">
+<title>cluster_4</title>
+<path fill="var(--panel-strong)" stroke="var(--line-strong)" d="M457,-2950C457,-2950 862,-2950 862,-2950 868,-2950 874,-2956 874,-2962 874,-2962 874,-5462 874,-5462 874,-5468 868,-5474 862,-5474 862,-5474 457,-5474 457,-5474 451,-5474 445,-5468 445,-5462 445,-5462 445,-2962 445,-2962 445,-2956 451,-2950 457,-2950"/>
+<text text-anchor="middle" x="659.5" y="-5462" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--muted)">backbone.encoder.layers.1</text>
+</g>
+<g id="clust5" class="cluster">
+<title>cluster_5</title>
+<path fill="var(--panel-strong)" stroke="var(--line-strong)" d="M20,-455C20,-455 425,-455 425,-455 431,-455 437,-461 437,-467 437,-467 437,-3019 437,-3019 437,-3025 431,-3031 425,-3031 425,-3031 20,-3031 20,-3031 14,-3031 8,-3025 8,-3019 8,-3019 8,-467 8,-467 8,-461 14,-455 20,-455"/>
+<text text-anchor="middle" x="222.5" y="-3019" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--muted)">backbone.encoder.layers.2</text>
+</g>
+<g id="clust6" class="cluster">
+<title>cluster_6</title>
+<path fill="var(--panel-strong)" stroke="var(--line-strong)" d="M302,-8C302,-8 386,-8 386,-8 392,-8 398,-14 398,-20 398,-20 398,-416 398,-416 398,-422 392,-428 386,-428 386,-428 302,-428 302,-428 296,-428 290,-422 290,-416 290,-416 290,-20 290,-20 290,-14 296,-8 302,-8"/>
+<text text-anchor="middle" x="344" y="-416" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--muted)">head</text>
+</g>
+<!-- x -->
+<g id="node1" class="node">
+<title>x</title>
+<path fill="var(--indigo-soft)" stroke="var(--indigo)" stroke-width="1.2" d="M1536,-8693C1536,-8693 1506,-8693 1506,-8693 1500,-8693 1494,-8687 1494,-8681 1494,-8681 1494,-8669 1494,-8669 1494,-8663 1500,-8657 1506,-8657 1506,-8657 1536,-8657 1536,-8657 1542,-8657 1548,-8663 1548,-8669 1548,-8669 1548,-8681 1548,-8681 1548,-8687 1542,-8693 1536,-8693"/>
+<text text-anchor="middle" x="1521" y="-8672.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">input</text>
+</g>
+<!-- permute -->
+<g id="node2" class="node">
+<title>permute</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1540,-8613C1540,-8613 1502,-8613 1502,-8613 1496,-8613 1490,-8607 1490,-8601 1490,-8601 1490,-8589 1490,-8589 1490,-8583 1496,-8577 1502,-8577 1502,-8577 1540,-8577 1540,-8577 1546,-8577 1552,-8583 1552,-8589 1552,-8589 1552,-8601 1552,-8601 1552,-8607 1546,-8613 1540,-8613"/>
+<text text-anchor="middle" x="1521" y="-8592.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">permute</text>
+</g>
+<!-- x&#45;&gt;permute -->
+<g id="edge1" class="edge">
+<title>x&#45;&gt;permute</title>
+<path fill="none" stroke="var(--line-strong)" d="M1521,-8656.69C1521,-8645.98 1521,-8632.08 1521,-8620.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1523.45,-8620.26 1521,-8613.26 1518.55,-8620.26 1523.45,-8620.26"/>
+<text text-anchor="middle" x="1541" y="-8632.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">1×60×6</text>
+</g>
+<!-- inner_model_padding_patch_layer -->
+<g id="node3" class="node">
+<title>inner_model_padding_patch_layer</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M1570,-8515C1570,-8515 1472,-8515 1472,-8515 1466,-8515 1460,-8509 1460,-8503 1460,-8503 1460,-8491 1460,-8491 1460,-8485 1466,-8479 1472,-8479 1472,-8479 1570,-8479 1570,-8479 1576,-8479 1582,-8485 1582,-8491 1582,-8491 1582,-8503 1582,-8503 1582,-8509 1576,-8515 1570,-8515"/>
+<text text-anchor="middle" x="1521" y="-8500" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">padding_patch_layer</text>
+<text text-anchor="middle" x="1521" y="-8489" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">ReplicationPad1d</text>
+</g>
+<!-- permute&#45;&gt;inner_model_padding_patch_layer -->
+<g id="edge2" class="edge">
+<title>permute&#45;&gt;inner_model_padding_patch_layer</title>
+<path fill="none" stroke="var(--line-strong)" d="M1521,-8576.84C1521,-8561.68 1521,-8539.42 1521,-8522.41"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1523.45,-8522.01 1521,-8515.01 1518.55,-8522.01 1523.45,-8522.01"/>
+<text text-anchor="middle" x="1541" y="-8552.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">1×6×60</text>
+</g>
+<!-- unfold -->
+<g id="node4" class="node">
+<title>unfold</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1536,-8435C1536,-8435 1506,-8435 1506,-8435 1500,-8435 1494,-8429 1494,-8423 1494,-8423 1494,-8411 1494,-8411 1494,-8405 1500,-8399 1506,-8399 1506,-8399 1536,-8399 1536,-8399 1542,-8399 1548,-8405 1548,-8411 1548,-8411 1548,-8423 1548,-8423 1548,-8429 1542,-8435 1536,-8435"/>
+<text text-anchor="middle" x="1521" y="-8414.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">unfold</text>
+</g>
+<!-- inner_model_padding_patch_layer&#45;&gt;unfold -->
+<g id="edge3" class="edge">
+<title>inner_model_padding_patch_layer&#45;&gt;unfold</title>
+<path fill="none" stroke="var(--line-strong)" d="M1521,-8478.69C1521,-8467.98 1521,-8454.08 1521,-8442.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1523.45,-8442.26 1521,-8435.26 1518.55,-8442.26 1523.45,-8442.26"/>
+<text text-anchor="middle" x="1541" y="-8454.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">1×6×68</text>
+</g>
+<!-- permute_1 -->
+<g id="node5" class="node">
+<title>permute_1</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1540,-8355C1540,-8355 1502,-8355 1502,-8355 1496,-8355 1490,-8349 1490,-8343 1490,-8343 1490,-8331 1490,-8331 1490,-8325 1496,-8319 1502,-8319 1502,-8319 1540,-8319 1540,-8319 1546,-8319 1552,-8325 1552,-8331 1552,-8331 1552,-8343 1552,-8343 1552,-8349 1546,-8355 1540,-8355"/>
+<text text-anchor="middle" x="1521" y="-8334.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">permute</text>
+</g>
+<!-- unfold&#45;&gt;permute_1 -->
+<g id="edge4" class="edge">
+<title>unfold&#45;&gt;permute_1</title>
+<path fill="none" stroke="var(--line-strong)" d="M1521,-8398.69C1521,-8387.98 1521,-8374.08 1521,-8362.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1523.45,-8362.26 1521,-8355.26 1518.55,-8362.26 1523.45,-8362.26"/>
+<text text-anchor="middle" x="1547.5" y="-8374.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">1×6×7×16</text>
+</g>
+<!-- permute_2 -->
+<g id="node6" class="node">
+<title>permute_2</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1540,-8275C1540,-8275 1502,-8275 1502,-8275 1496,-8275 1490,-8269 1490,-8263 1490,-8263 1490,-8251 1490,-8251 1490,-8245 1496,-8239 1502,-8239 1502,-8239 1540,-8239 1540,-8239 1546,-8239 1552,-8245 1552,-8251 1552,-8251 1552,-8263 1552,-8263 1552,-8269 1546,-8275 1540,-8275"/>
+<text text-anchor="middle" x="1521" y="-8254.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">permute</text>
+</g>
+<!-- permute_1&#45;&gt;permute_2 -->
+<g id="edge5" class="edge">
+<title>permute_1&#45;&gt;permute_2</title>
+<path fill="none" stroke="var(--line-strong)" d="M1521,-8318.69C1521,-8307.98 1521,-8294.08 1521,-8282.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1523.45,-8282.26 1521,-8275.26 1518.55,-8282.26 1523.45,-8282.26"/>
+<text text-anchor="middle" x="1547.5" y="-8294.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">1×6×16×7</text>
+</g>
+<!-- inner_model_backbone_w_p -->
+<g id="node7" class="node">
+<title>inner_model_backbone_w_p</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M1552.5,-8177C1552.5,-8177 1489.5,-8177 1489.5,-8177 1483.5,-8177 1477.5,-8171 1477.5,-8165 1477.5,-8165 1477.5,-8133 1477.5,-8133 1477.5,-8127 1483.5,-8121 1489.5,-8121 1489.5,-8121 1552.5,-8121 1552.5,-8121 1558.5,-8121 1564.5,-8127 1564.5,-8133 1564.5,-8133 1564.5,-8165 1564.5,-8165 1564.5,-8171 1558.5,-8177 1552.5,-8177"/>
+<text text-anchor="middle" x="1521" y="-8163" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">W_P</text>
+<text text-anchor="middle" x="1521" y="-8152" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Linear</text>
+<text text-anchor="middle" x="1521" y="-8141" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">16 → 128</text>
+<text text-anchor="middle" x="1521" y="-8130" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">2,176 params</text>
+</g>
+<!-- permute_2&#45;&gt;inner_model_backbone_w_p -->
+<g id="edge6" class="edge">
+<title>permute_2&#45;&gt;inner_model_backbone_w_p</title>
+<path fill="none" stroke="var(--line-strong)" d="M1521,-8238.97C1521,-8224.3 1521,-8202.66 1521,-8184.4"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1523.45,-8184.33 1521,-8177.33 1518.55,-8184.33 1523.45,-8184.33"/>
+<text text-anchor="middle" x="1547.5" y="-8214.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">1×6×7×16</text>
+</g>
+<!-- reshape -->
+<g id="node9" class="node">
+<title>reshape</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1561,-8077C1561,-8077 1525,-8077 1525,-8077 1519,-8077 1513,-8071 1513,-8065 1513,-8065 1513,-8053 1513,-8053 1513,-8047 1519,-8041 1525,-8041 1525,-8041 1561,-8041 1561,-8041 1567,-8041 1573,-8047 1573,-8053 1573,-8053 1573,-8065 1573,-8065 1573,-8071 1567,-8077 1561,-8077"/>
+<text text-anchor="middle" x="1543" y="-8056.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">reshape</text>
+</g>
+<!-- inner_model_backbone_w_p&#45;&gt;reshape -->
+<g id="edge7" class="edge">
+<title>inner_model_backbone_w_p&#45;&gt;reshape</title>
+<path fill="none" stroke="var(--line-strong)" d="M1527.84,-8120.64C1530.76,-8108.97 1534.13,-8095.46 1536.96,-8084.17"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1539.4,-8084.49 1538.72,-8077.1 1534.65,-8083.3 1539.4,-8084.49"/>
+<text text-anchor="middle" x="1562.5" y="-8096.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">1×6×7×128</text>
+</g>
+<!-- mul -->
+<g id="node8" class="node">
+<title>mul</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1443,-8167C1443,-8167 1413,-8167 1413,-8167 1407,-8167 1401,-8161 1401,-8155 1401,-8155 1401,-8143 1401,-8143 1401,-8137 1407,-8131 1413,-8131 1413,-8131 1443,-8131 1443,-8131 1449,-8131 1455,-8137 1455,-8143 1455,-8143 1455,-8155 1455,-8155 1455,-8161 1449,-8167 1443,-8167"/>
+<text text-anchor="middle" x="1428" y="-8146.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">mul</text>
+</g>
+<!-- mul&#45;&gt;reshape -->
+<g id="edge8" class="edge">
+<title>mul&#45;&gt;reshape</title>
+<path fill="none" stroke="var(--line-strong)" d="M1450.45,-8130.82C1468.89,-8116.71 1495.11,-8096.64 1514.94,-8081.47"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1516.54,-8083.33 1520.61,-8077.13 1513.56,-8079.44 1516.54,-8083.33"/>
+</g>
+<!-- add -->
+<g id="node11" class="node">
+<title>add</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1424,-7997C1424,-7997 1394,-7997 1394,-7997 1388,-7997 1382,-7991 1382,-7985 1382,-7985 1382,-7973 1382,-7973 1382,-7967 1388,-7961 1394,-7961 1394,-7961 1424,-7961 1424,-7961 1430,-7961 1436,-7967 1436,-7973 1436,-7973 1436,-7985 1436,-7985 1436,-7991 1430,-7997 1424,-7997"/>
+<text text-anchor="middle" x="1409" y="-7976.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">add</text>
+</g>
+<!-- reshape&#45;&gt;add -->
+<g id="edge9" class="edge">
+<title>reshape&#45;&gt;add</title>
+<path fill="none" stroke="var(--line-strong)" d="M1513.59,-8040.88C1492.56,-8028.64 1464.21,-8012.14 1442.33,-7999.4"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1443.34,-7997.15 1436.06,-7995.75 1440.88,-8001.39 1443.34,-7997.15"/>
+<text text-anchor="middle" x="1507" y="-8016.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_w_pos -->
+<g id="node10" class="node">
+<title>inner_model_backbone_w_pos</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1479,-8077C1479,-8077 1339,-8077 1339,-8077 1333,-8077 1327,-8071 1327,-8065 1327,-8065 1327,-8053 1327,-8053 1327,-8047 1333,-8041 1339,-8041 1339,-8041 1479,-8041 1479,-8041 1485,-8041 1491,-8047 1491,-8053 1491,-8053 1491,-8065 1491,-8065 1491,-8071 1485,-8077 1479,-8077"/>
+<text text-anchor="middle" x="1409" y="-8056.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">inner.model.backbone.W_pos</text>
+</g>
+<!-- inner_model_backbone_w_pos&#45;&gt;add -->
+<g id="edge10" class="edge">
+<title>inner_model_backbone_w_pos&#45;&gt;add</title>
+<path fill="none" stroke="var(--line-strong)" d="M1409,-8040.69C1409,-8029.98 1409,-8016.08 1409,-8004.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1411.45,-8004.26 1409,-7997.26 1406.55,-8004.26 1411.45,-8004.26"/>
+<text text-anchor="middle" x="1425" y="-8016.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">7×128</text>
+</g>
+<!-- inner_model_backbone_dropout -->
+<g id="node12" class="node">
+<title>inner_model_backbone_dropout</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M1401,-7917C1401,-7917 1365,-7917 1365,-7917 1359,-7917 1353,-7911 1353,-7905 1353,-7905 1353,-7884 1353,-7884 1353,-7878 1359,-7872 1365,-7872 1365,-7872 1401,-7872 1401,-7872 1407,-7872 1413,-7878 1413,-7884 1413,-7884 1413,-7905 1413,-7905 1413,-7911 1407,-7917 1401,-7917"/>
+<text text-anchor="middle" x="1383" y="-7903" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">dropout</text>
+<text text-anchor="middle" x="1383" y="-7892" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Dropout</text>
+<text text-anchor="middle" x="1383" y="-7881" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">p=0.1</text>
+</g>
+<!-- add&#45;&gt;inner_model_backbone_dropout -->
+<g id="edge11" class="edge">
+<title>add&#45;&gt;inner_model_backbone_dropout</title>
+<path fill="none" stroke="var(--line-strong)" d="M1403.61,-7960.91C1400.28,-7950.33 1395.92,-7936.49 1392.06,-7924.26"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1394.31,-7923.23 1389.87,-7917.29 1389.63,-7924.7 1394.31,-7923.23"/>
+<text text-anchor="middle" x="1420" y="-7936.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- size -->
+<g id="node13" class="node">
+<title>size</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1369,-7800C1369,-7800 1339,-7800 1339,-7800 1333,-7800 1327,-7794 1327,-7788 1327,-7788 1327,-7776 1327,-7776 1327,-7770 1333,-7764 1339,-7764 1339,-7764 1369,-7764 1369,-7764 1375,-7764 1381,-7770 1381,-7776 1381,-7776 1381,-7788 1381,-7788 1381,-7794 1375,-7800 1369,-7800"/>
+<text text-anchor="middle" x="1354" y="-7779.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">size</text>
+</g>
+<!-- inner_model_backbone_dropout&#45;&gt;size -->
+<g id="edge12" class="edge">
+<title>inner_model_backbone_dropout&#45;&gt;size</title>
+<path fill="none" stroke="var(--line-strong)" d="M1372.32,-7871.87C1369.96,-7866.46 1367.67,-7860.6 1366,-7855 1361.33,-7839.39 1358.33,-7821.29 1356.49,-7807.15"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1358.92,-7806.8 1355.63,-7800.15 1354.05,-7807.39 1358.92,-7806.8"/>
+<text text-anchor="middle" x="1389" y="-7847.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_self_attn_w_q -->
+<g id="node14" class="node">
+<title>inner_model_backbone_encoder_layers_0_self_attn_w_q</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M1291.5,-7810C1291.5,-7810 1222.5,-7810 1222.5,-7810 1216.5,-7810 1210.5,-7804 1210.5,-7798 1210.5,-7798 1210.5,-7766 1210.5,-7766 1210.5,-7760 1216.5,-7754 1222.5,-7754 1222.5,-7754 1291.5,-7754 1291.5,-7754 1297.5,-7754 1303.5,-7760 1303.5,-7766 1303.5,-7766 1303.5,-7798 1303.5,-7798 1303.5,-7804 1297.5,-7810 1291.5,-7810"/>
+<text text-anchor="middle" x="1257" y="-7796" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">W_Q</text>
+<text text-anchor="middle" x="1257" y="-7785" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Linear</text>
+<text text-anchor="middle" x="1257" y="-7774" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">128 → 128</text>
+<text text-anchor="middle" x="1257" y="-7763" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">16,512 params</text>
+</g>
+<!-- inner_model_backbone_dropout&#45;&gt;inner_model_backbone_encoder_layers_0_self_attn_w_q -->
+<g id="edge13" class="edge">
+<title>inner_model_backbone_dropout&#45;&gt;inner_model_backbone_encoder_layers_0_self_attn_w_q</title>
+<path fill="none" stroke="var(--line-strong)" d="M1352.91,-7880.7C1339.55,-7874.16 1324.15,-7865.39 1312,-7855 1299.04,-7843.92 1287.2,-7829.31 1277.85,-7816.15"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1279.74,-7814.58 1273.73,-7810.22 1275.71,-7817.37 1279.74,-7814.58"/>
+<text text-anchor="middle" x="1335" y="-7847.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_self_attn_w_k -->
+<g id="node17" class="node">
+<title>inner_model_backbone_encoder_layers_0_self_attn_w_k</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M1176.5,-7810C1176.5,-7810 1107.5,-7810 1107.5,-7810 1101.5,-7810 1095.5,-7804 1095.5,-7798 1095.5,-7798 1095.5,-7766 1095.5,-7766 1095.5,-7760 1101.5,-7754 1107.5,-7754 1107.5,-7754 1176.5,-7754 1176.5,-7754 1182.5,-7754 1188.5,-7760 1188.5,-7766 1188.5,-7766 1188.5,-7798 1188.5,-7798 1188.5,-7804 1182.5,-7810 1176.5,-7810"/>
+<text text-anchor="middle" x="1142" y="-7796" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">W_K</text>
+<text text-anchor="middle" x="1142" y="-7785" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Linear</text>
+<text text-anchor="middle" x="1142" y="-7774" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">128 → 128</text>
+<text text-anchor="middle" x="1142" y="-7763" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">16,512 params</text>
+</g>
+<!-- inner_model_backbone_dropout&#45;&gt;inner_model_backbone_encoder_layers_0_self_attn_w_k -->
+<g id="edge14" class="edge">
+<title>inner_model_backbone_dropout&#45;&gt;inner_model_backbone_encoder_layers_0_self_attn_w_k</title>
+<path fill="none" stroke="var(--line-strong)" d="M1352.98,-7888.82C1315.15,-7881.94 1249.15,-7866.56 1200,-7837 1190.04,-7831.01 1180.34,-7823.09 1171.81,-7815.18"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1173.42,-7813.32 1166.66,-7810.26 1170.03,-7816.87 1173.42,-7813.32"/>
+<text text-anchor="middle" x="1255" y="-7847.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_self_attn_w_v -->
+<g id="node20" class="node">
+<title>inner_model_backbone_encoder_layers_0_self_attn_w_v</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M1287.5,-7470C1287.5,-7470 1218.5,-7470 1218.5,-7470 1212.5,-7470 1206.5,-7464 1206.5,-7458 1206.5,-7458 1206.5,-7426 1206.5,-7426 1206.5,-7420 1212.5,-7414 1218.5,-7414 1218.5,-7414 1287.5,-7414 1287.5,-7414 1293.5,-7414 1299.5,-7420 1299.5,-7426 1299.5,-7426 1299.5,-7458 1299.5,-7458 1299.5,-7464 1293.5,-7470 1287.5,-7470"/>
+<text text-anchor="middle" x="1253" y="-7456" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">W_V</text>
+<text text-anchor="middle" x="1253" y="-7445" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Linear</text>
+<text text-anchor="middle" x="1253" y="-7434" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">128 → 128</text>
+<text text-anchor="middle" x="1253" y="-7423" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">16,512 params</text>
+</g>
+<!-- inner_model_backbone_dropout&#45;&gt;inner_model_backbone_encoder_layers_0_self_attn_w_v -->
+<g id="edge15" class="edge">
+<title>inner_model_backbone_dropout&#45;&gt;inner_model_backbone_encoder_layers_0_self_attn_w_v</title>
+<path fill="none" stroke="var(--line-strong)" d="M1402.57,-7871.81C1406.5,-7866.59 1410.26,-7860.83 1413,-7855 1426.97,-7825.35 1429,-7815.78 1429,-7783 1429,-7783 1429,-7783 1429,-7571 1429,-7509.71 1358.33,-7474.7 1306.55,-7457.27"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1307.12,-7454.88 1299.7,-7455.03 1305.59,-7459.54 1307.12,-7454.88"/>
+<text text-anchor="middle" x="1452" y="-7649.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- add_1 -->
+<g id="node35" class="node">
+<title>add_1</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1267,-6603C1267,-6603 1237,-6603 1237,-6603 1231,-6603 1225,-6597 1225,-6591 1225,-6591 1225,-6579 1225,-6579 1225,-6573 1231,-6567 1237,-6567 1237,-6567 1267,-6567 1267,-6567 1273,-6567 1279,-6573 1279,-6579 1279,-6579 1279,-6591 1279,-6591 1279,-6597 1273,-6603 1267,-6603"/>
+<text text-anchor="middle" x="1252" y="-6582.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">add</text>
+</g>
+<!-- inner_model_backbone_dropout&#45;&gt;add_1 -->
+<g id="edge16" class="edge">
+<title>inner_model_backbone_dropout&#45;&gt;add_1</title>
+<path fill="none" stroke="var(--line-strong)" d="M1413.18,-7872.86C1419.84,-7867.5 1426.53,-7861.42 1432,-7855 1437.94,-7848.04 1438.89,-7845.61 1442,-7837 1471.17,-7756.32 1480.46,-7732.67 1476,-7647 1454.8,-7239.56 1495.25,-7121.96 1363,-6736 1344.05,-6680.7 1339.88,-6663.66 1301,-6620 1296.3,-6614.72 1290.62,-6609.84 1284.83,-6605.52"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1286.14,-6603.45 1279.02,-6601.4 1283.31,-6607.45 1286.14,-6603.45"/>
+<text text-anchor="middle" x="1486" y="-7220.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- view -->
+<g id="node15" class="node">
+<title>view</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1265,-7710C1265,-7710 1235,-7710 1235,-7710 1229,-7710 1223,-7704 1223,-7698 1223,-7698 1223,-7686 1223,-7686 1223,-7680 1229,-7674 1235,-7674 1235,-7674 1265,-7674 1265,-7674 1271,-7674 1277,-7680 1277,-7686 1277,-7686 1277,-7698 1277,-7698 1277,-7704 1271,-7710 1265,-7710"/>
+<text text-anchor="middle" x="1250" y="-7689.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">view</text>
+</g>
+<!-- size&#45;&gt;view -->
+<g id="edge17" class="edge">
+<title>size&#45;&gt;view</title>
+<path fill="none" stroke="var(--line-strong)" d="M1334.61,-7763.79C1322.46,-7753.1 1306.43,-7739.12 1292,-7727 1287.25,-7723.01 1282.15,-7718.81 1277.2,-7714.78"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1278.47,-7712.66 1271.49,-7710.15 1275.38,-7716.46 1278.47,-7712.66"/>
+</g>
+<!-- view_1 -->
+<g id="node18" class="node">
+<title>view_1</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1177,-7710C1177,-7710 1147,-7710 1147,-7710 1141,-7710 1135,-7704 1135,-7698 1135,-7698 1135,-7686 1135,-7686 1135,-7680 1141,-7674 1147,-7674 1147,-7674 1177,-7674 1177,-7674 1183,-7674 1189,-7680 1189,-7686 1189,-7686 1189,-7698 1189,-7698 1189,-7704 1183,-7710 1177,-7710"/>
+<text text-anchor="middle" x="1162" y="-7689.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">view</text>
+</g>
+<!-- size&#45;&gt;view_1 -->
+<g id="edge18" class="edge">
+<title>size&#45;&gt;view_1</title>
+<path fill="none" stroke="var(--line-strong)" d="M1331.05,-7763.88C1326.17,-7760.47 1320.98,-7757.02 1316,-7754 1293.39,-7740.31 1287.39,-7737.21 1263,-7727 1240.96,-7717.77 1234.64,-7717.62 1212,-7710 1206.81,-7708.25 1201.31,-7706.39 1195.94,-7704.57"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1196.65,-7702.23 1189.24,-7702.29 1195.08,-7706.86 1196.65,-7702.23"/>
+</g>
+<!-- view_2 -->
+<g id="node21" class="node">
+<title>view_2</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1268,-7370C1268,-7370 1238,-7370 1238,-7370 1232,-7370 1226,-7364 1226,-7358 1226,-7358 1226,-7346 1226,-7346 1226,-7340 1232,-7334 1238,-7334 1238,-7334 1268,-7334 1268,-7334 1274,-7334 1280,-7340 1280,-7346 1280,-7346 1280,-7358 1280,-7358 1280,-7364 1274,-7370 1268,-7370"/>
+<text text-anchor="middle" x="1253" y="-7349.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">view</text>
+</g>
+<!-- size&#45;&gt;view_2 -->
+<g id="edge19" class="edge">
+<title>size&#45;&gt;view_2</title>
+<path fill="none" stroke="var(--line-strong)" d="M1348.71,-7763.99C1343.72,-7746.4 1337,-7718.05 1337,-7693 1337,-7693 1337,-7693 1337,-7571 1337,-7487.67 1351.73,-7453.1 1301,-7387 1296.89,-7381.65 1291.7,-7376.79 1286.27,-7372.53"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1287.41,-7370.33 1280.31,-7368.15 1284.5,-7374.27 1287.41,-7370.33"/>
+</g>
+<!-- view_3 -->
+<g id="node31" class="node">
+<title>view_3</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1267,-6961C1267,-6961 1237,-6961 1237,-6961 1231,-6961 1225,-6955 1225,-6949 1225,-6949 1225,-6937 1225,-6937 1225,-6931 1231,-6925 1237,-6925 1237,-6925 1267,-6925 1267,-6925 1273,-6925 1279,-6931 1279,-6937 1279,-6937 1279,-6949 1279,-6949 1279,-6955 1273,-6961 1267,-6961"/>
+<text text-anchor="middle" x="1252" y="-6940.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">view</text>
+</g>
+<!-- size&#45;&gt;view_3 -->
+<g id="edge20" class="edge">
+<title>size&#45;&gt;view_3</title>
+<path fill="none" stroke="var(--line-strong)" d="M1363.34,-7763.69C1371.81,-7746.33 1383,-7718.58 1383,-7693 1383,-7693 1383,-7693 1383,-7571 1383,-7513.97 1392,-7500.03 1392,-7443 1392,-7443 1392,-7443 1392,-7022 1392,-6973.74 1327.72,-6955.07 1286.27,-6948.04"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1286.62,-6945.62 1279.33,-6946.94 1285.85,-6950.46 1286.62,-6945.62"/>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_self_attn_w_q&#45;&gt;view -->
+<g id="edge21" class="edge">
+<title>inner_model_backbone_encoder_layers_0_self_attn_w_q&#45;&gt;view</title>
+<path fill="none" stroke="var(--line-strong)" d="M1248.37,-7753.77C1246.97,-7748.27 1245.74,-7742.49 1245,-7737 1244.41,-7732.59 1244.68,-7731.43 1245,-7727 1245.23,-7723.84 1245.58,-7720.52 1245.99,-7717.25"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1248.43,-7717.51 1246.97,-7710.24 1243.58,-7716.84 1248.43,-7717.51"/>
+<text text-anchor="middle" x="1268" y="-7729.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- transpose -->
+<g id="node16" class="node">
+<title>transpose</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1272.5,-7630C1272.5,-7630 1227.5,-7630 1227.5,-7630 1221.5,-7630 1215.5,-7624 1215.5,-7618 1215.5,-7618 1215.5,-7606 1215.5,-7606 1215.5,-7600 1221.5,-7594 1227.5,-7594 1227.5,-7594 1272.5,-7594 1272.5,-7594 1278.5,-7594 1284.5,-7600 1284.5,-7606 1284.5,-7606 1284.5,-7618 1284.5,-7618 1284.5,-7624 1278.5,-7630 1272.5,-7630"/>
+<text text-anchor="middle" x="1250" y="-7609.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">transpose</text>
+</g>
+<!-- view&#45;&gt;transpose -->
+<g id="edge22" class="edge">
+<title>view&#45;&gt;transpose</title>
+<path fill="none" stroke="var(--line-strong)" d="M1250,-7673.69C1250,-7662.98 1250,-7649.08 1250,-7637.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1252.45,-7637.26 1250,-7630.26 1247.55,-7637.26 1252.45,-7637.26"/>
+<text text-anchor="middle" x="1276.5" y="-7649.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×8×16</text>
+</g>
+<!-- matmul -->
+<g id="node23" class="node">
+<title>matmul</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1290.5,-7550C1290.5,-7550 1255.5,-7550 1255.5,-7550 1249.5,-7550 1243.5,-7544 1243.5,-7538 1243.5,-7538 1243.5,-7526 1243.5,-7526 1243.5,-7520 1249.5,-7514 1255.5,-7514 1255.5,-7514 1290.5,-7514 1290.5,-7514 1296.5,-7514 1302.5,-7520 1302.5,-7526 1302.5,-7526 1302.5,-7538 1302.5,-7538 1302.5,-7544 1296.5,-7550 1290.5,-7550"/>
+<text text-anchor="middle" x="1273" y="-7529.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">matmul</text>
+</g>
+<!-- transpose&#45;&gt;matmul -->
+<g id="edge23" class="edge">
+<title>transpose&#45;&gt;matmul</title>
+<path fill="none" stroke="var(--line-strong)" d="M1255.1,-7593.69C1258.26,-7582.98 1262.36,-7569.08 1265.84,-7557.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1268.28,-7557.67 1267.91,-7550.26 1263.58,-7556.28 1268.28,-7557.67"/>
+<text text-anchor="middle" x="1288.5" y="-7569.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×7×16</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_self_attn_w_k&#45;&gt;view_1 -->
+<g id="edge24" class="edge">
+<title>inner_model_backbone_encoder_layers_0_self_attn_w_k&#45;&gt;view_1</title>
+<path fill="none" stroke="var(--line-strong)" d="M1148.22,-7753.64C1150.87,-7741.97 1153.94,-7728.46 1156.51,-7717.17"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1158.95,-7717.47 1158.11,-7710.1 1154.17,-7716.39 1158.95,-7717.47"/>
+<text text-anchor="middle" x="1176" y="-7729.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- permute_3 -->
+<g id="node19" class="node">
+<title>permute_3</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1181,-7630C1181,-7630 1143,-7630 1143,-7630 1137,-7630 1131,-7624 1131,-7618 1131,-7618 1131,-7606 1131,-7606 1131,-7600 1137,-7594 1143,-7594 1143,-7594 1181,-7594 1181,-7594 1187,-7594 1193,-7600 1193,-7606 1193,-7606 1193,-7618 1193,-7618 1193,-7624 1187,-7630 1181,-7630"/>
+<text text-anchor="middle" x="1162" y="-7609.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">permute</text>
+</g>
+<!-- view_1&#45;&gt;permute_3 -->
+<g id="edge25" class="edge">
+<title>view_1&#45;&gt;permute_3</title>
+<path fill="none" stroke="var(--line-strong)" d="M1162,-7673.69C1162,-7662.98 1162,-7649.08 1162,-7637.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1164.45,-7637.26 1162,-7630.26 1159.55,-7637.26 1164.45,-7637.26"/>
+<text text-anchor="middle" x="1188.5" y="-7649.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×8×16</text>
+</g>
+<!-- permute_3&#45;&gt;matmul -->
+<g id="edge26" class="edge">
+<title>permute_3&#45;&gt;matmul</title>
+<path fill="none" stroke="var(--line-strong)" d="M1175.1,-7593.63C1182.34,-7584.86 1191.9,-7574.52 1202,-7567 1208.13,-7562.44 1222.46,-7555.37 1236.66,-7548.86"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1237.78,-7551.04 1243.14,-7545.92 1235.75,-7546.58 1237.78,-7551.04"/>
+<text text-anchor="middle" x="1228.5" y="-7569.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×16×7</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_self_attn_w_v&#45;&gt;view_2 -->
+<g id="edge27" class="edge">
+<title>inner_model_backbone_encoder_layers_0_self_attn_w_v&#45;&gt;view_2</title>
+<path fill="none" stroke="var(--line-strong)" d="M1253,-7413.64C1253,-7401.97 1253,-7388.46 1253,-7377.17"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1255.45,-7377.1 1253,-7370.1 1250.55,-7377.1 1255.45,-7377.1"/>
+<text text-anchor="middle" x="1276" y="-7389.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- transpose_1 -->
+<g id="node22" class="node">
+<title>transpose_1</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1273.5,-7285.5C1273.5,-7285.5 1228.5,-7285.5 1228.5,-7285.5 1222.5,-7285.5 1216.5,-7279.5 1216.5,-7273.5 1216.5,-7273.5 1216.5,-7261.5 1216.5,-7261.5 1216.5,-7255.5 1222.5,-7249.5 1228.5,-7249.5 1228.5,-7249.5 1273.5,-7249.5 1273.5,-7249.5 1279.5,-7249.5 1285.5,-7255.5 1285.5,-7261.5 1285.5,-7261.5 1285.5,-7273.5 1285.5,-7273.5 1285.5,-7279.5 1279.5,-7285.5 1273.5,-7285.5"/>
+<text text-anchor="middle" x="1251" y="-7265" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">transpose</text>
+</g>
+<!-- view_2&#45;&gt;transpose_1 -->
+<g id="edge28" class="edge">
+<title>view_2&#45;&gt;transpose_1</title>
+<path fill="none" stroke="var(--line-strong)" d="M1252.59,-7333.91C1252.3,-7321.96 1251.91,-7305.84 1251.58,-7292.59"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1254.03,-7292.51 1251.41,-7285.57 1249.13,-7292.63 1254.03,-7292.51"/>
+<text text-anchor="middle" x="1278.5" y="-7309.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×8×16</text>
+</g>
+<!-- matmul_1 -->
+<g id="node28" class="node">
+<title>matmul_1</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1267.5,-7201C1267.5,-7201 1232.5,-7201 1232.5,-7201 1226.5,-7201 1220.5,-7195 1220.5,-7189 1220.5,-7189 1220.5,-7177 1220.5,-7177 1220.5,-7171 1226.5,-7165 1232.5,-7165 1232.5,-7165 1267.5,-7165 1267.5,-7165 1273.5,-7165 1279.5,-7171 1279.5,-7177 1279.5,-7177 1279.5,-7189 1279.5,-7189 1279.5,-7195 1273.5,-7201 1267.5,-7201"/>
+<text text-anchor="middle" x="1250" y="-7180.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">matmul</text>
+</g>
+<!-- transpose_1&#45;&gt;matmul_1 -->
+<g id="edge29" class="edge">
+<title>transpose_1&#45;&gt;matmul_1</title>
+<path fill="none" stroke="var(--line-strong)" d="M1250.79,-7249.41C1250.65,-7237.46 1250.45,-7221.34 1250.29,-7208.09"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1252.74,-7208.04 1250.21,-7201.07 1247.84,-7208.1 1252.74,-7208.04"/>
+<text text-anchor="middle" x="1276.5" y="-7220.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×7×16</text>
+</g>
+<!-- mul_1 -->
+<g id="node25" class="node">
+<title>mul_1</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1171,-7460C1171,-7460 1141,-7460 1141,-7460 1135,-7460 1129,-7454 1129,-7448 1129,-7448 1129,-7436 1129,-7436 1129,-7430 1135,-7424 1141,-7424 1141,-7424 1171,-7424 1171,-7424 1177,-7424 1183,-7430 1183,-7436 1183,-7436 1183,-7448 1183,-7448 1183,-7454 1177,-7460 1171,-7460"/>
+<text text-anchor="middle" x="1156" y="-7439.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">mul</text>
+</g>
+<!-- matmul&#45;&gt;mul_1 -->
+<g id="edge30" class="edge">
+<title>matmul&#45;&gt;mul_1</title>
+<path fill="none" stroke="var(--line-strong)" d="M1250.16,-7513.82C1231.4,-7499.71 1204.72,-7479.64 1184.55,-7464.47"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1185.85,-7462.38 1178.78,-7460.13 1182.9,-7466.3 1185.85,-7462.38"/>
+<text text-anchor="middle" x="1247.5" y="-7489.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×7×7</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_self_attn_sdp_attn_scale -->
+<g id="node24" class="node">
+<title>inner_model_backbone_encoder_layers_0_self_attn_sdp_attn_scale</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1209.5,-7550C1209.5,-7550 902.5,-7550 902.5,-7550 896.5,-7550 890.5,-7544 890.5,-7538 890.5,-7538 890.5,-7526 890.5,-7526 890.5,-7520 896.5,-7514 902.5,-7514 902.5,-7514 1209.5,-7514 1209.5,-7514 1215.5,-7514 1221.5,-7520 1221.5,-7526 1221.5,-7526 1221.5,-7538 1221.5,-7538 1221.5,-7544 1215.5,-7550 1209.5,-7550"/>
+<text text-anchor="middle" x="1056" y="-7529.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">inner.model.backbone.encoder.layers.0.self_attn.sdp_attn.scale</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_self_attn_sdp_attn_scale&#45;&gt;mul_1 -->
+<g id="edge31" class="edge">
+<title>inner_model_backbone_encoder_layers_0_self_attn_sdp_attn_scale&#45;&gt;mul_1</title>
+<path fill="none" stroke="var(--line-strong)" d="M1075.76,-7513.61C1091.61,-7499.66 1113.96,-7479.99 1131.05,-7464.96"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1132.99,-7466.51 1136.62,-7460.05 1129.75,-7462.84 1132.99,-7466.51"/>
+</g>
+<!-- softmax -->
+<g id="node26" class="node">
+<title>softmax</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1174,-7370C1174,-7370 1138,-7370 1138,-7370 1132,-7370 1126,-7364 1126,-7358 1126,-7358 1126,-7346 1126,-7346 1126,-7340 1132,-7334 1138,-7334 1138,-7334 1174,-7334 1174,-7334 1180,-7334 1186,-7340 1186,-7346 1186,-7346 1186,-7358 1186,-7358 1186,-7364 1180,-7370 1174,-7370"/>
+<text text-anchor="middle" x="1156" y="-7349.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">softmax</text>
+</g>
+<!-- mul_1&#45;&gt;softmax -->
+<g id="edge32" class="edge">
+<title>mul_1&#45;&gt;softmax</title>
+<path fill="none" stroke="var(--line-strong)" d="M1156,-7423.61C1156,-7410.39 1156,-7392.03 1156,-7377.35"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1158.45,-7377.05 1156,-7370.05 1153.55,-7377.05 1158.45,-7377.05"/>
+<text text-anchor="middle" x="1179.5" y="-7389.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×7×7</text>
+</g>
+<!-- add_3 -->
+<g id="node61" class="node">
+<title>add_3</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M849,-5017C849,-5017 819,-5017 819,-5017 813,-5017 807,-5011 807,-5005 807,-5005 807,-4993 807,-4993 807,-4987 813,-4981 819,-4981 819,-4981 849,-4981 849,-4981 855,-4981 861,-4987 861,-4993 861,-4993 861,-5005 861,-5005 861,-5011 855,-5017 849,-5017"/>
+<text text-anchor="middle" x="834" y="-4996.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">add</text>
+</g>
+<!-- mul_1&#45;&gt;add_3 -->
+<g id="edge33" class="edge">
+<title>mul_1&#45;&gt;add_3</title>
+<path fill="none" stroke="var(--line-strong)" d="M1177.88,-7423.74C1183.52,-7420.01 1189.76,-7416.45 1196,-7414 1262.97,-7387.64 1346,-7424.97 1346,-7353 1346,-7353 1346,-7353 1346,-6668.5 1346,-5985.18 1387.43,-5770.46 1099,-5151 1072.53,-5094.14 1060.31,-5077.04 1007,-5044 963.78,-5017.21 904.91,-5006.69 868.19,-5002.58"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="868.37,-5000.14 861.15,-5001.85 867.86,-5005.01 868.37,-5000.14"/>
+<text text-anchor="middle" x="1371.5" y="-6232.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×7×7</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_self_attn_sdp_attn_attn_dropout -->
+<g id="node27" class="node">
+<title>inner_model_backbone_encoder_layers_0_self_attn_sdp_attn_attn_dropout</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M1182.5,-7290C1182.5,-7290 1123.5,-7290 1123.5,-7290 1117.5,-7290 1111.5,-7284 1111.5,-7278 1111.5,-7278 1111.5,-7257 1111.5,-7257 1111.5,-7251 1117.5,-7245 1123.5,-7245 1123.5,-7245 1182.5,-7245 1182.5,-7245 1188.5,-7245 1194.5,-7251 1194.5,-7257 1194.5,-7257 1194.5,-7278 1194.5,-7278 1194.5,-7284 1188.5,-7290 1182.5,-7290"/>
+<text text-anchor="middle" x="1153" y="-7276" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">attn_dropout</text>
+<text text-anchor="middle" x="1153" y="-7265" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Dropout</text>
+<text text-anchor="middle" x="1153" y="-7254" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">p=0.0</text>
+</g>
+<!-- softmax&#45;&gt;inner_model_backbone_encoder_layers_0_self_attn_sdp_attn_attn_dropout -->
+<g id="edge34" class="edge">
+<title>softmax&#45;&gt;inner_model_backbone_encoder_layers_0_self_attn_sdp_attn_attn_dropout</title>
+<path fill="none" stroke="var(--line-strong)" d="M1155.38,-7333.91C1155,-7323.43 1154.5,-7309.75 1154.06,-7297.61"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1156.5,-7297.19 1153.79,-7290.29 1151.6,-7297.37 1156.5,-7297.19"/>
+<text text-anchor="middle" x="1177.5" y="-7309.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×7×7</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_self_attn_sdp_attn_attn_dropout&#45;&gt;matmul_1 -->
+<g id="edge35" class="edge">
+<title>inner_model_backbone_encoder_layers_0_self_attn_sdp_attn_attn_dropout&#45;&gt;matmul_1</title>
+<path fill="none" stroke="var(--line-strong)" d="M1171.22,-7244.63C1179.03,-7235.88 1188.52,-7226 1198,-7218 1203.32,-7213.51 1209.26,-7209.13 1215.17,-7205.08"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1216.58,-7207.08 1221.04,-7201.15 1213.86,-7203.01 1216.58,-7207.08"/>
+<text text-anchor="middle" x="1221.5" y="-7220.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×7×7</text>
+</g>
+<!-- transpose_2 -->
+<g id="node29" class="node">
+<title>transpose_2</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1272.5,-7121C1272.5,-7121 1227.5,-7121 1227.5,-7121 1221.5,-7121 1215.5,-7115 1215.5,-7109 1215.5,-7109 1215.5,-7097 1215.5,-7097 1215.5,-7091 1221.5,-7085 1227.5,-7085 1227.5,-7085 1272.5,-7085 1272.5,-7085 1278.5,-7085 1284.5,-7091 1284.5,-7097 1284.5,-7097 1284.5,-7109 1284.5,-7109 1284.5,-7115 1278.5,-7121 1272.5,-7121"/>
+<text text-anchor="middle" x="1250" y="-7100.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">transpose</text>
+</g>
+<!-- matmul_1&#45;&gt;transpose_2 -->
+<g id="edge36" class="edge">
+<title>matmul_1&#45;&gt;transpose_2</title>
+<path fill="none" stroke="var(--line-strong)" d="M1250,-7164.69C1250,-7153.98 1250,-7140.08 1250,-7128.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1252.45,-7128.26 1250,-7121.26 1247.55,-7128.26 1252.45,-7128.26"/>
+<text text-anchor="middle" x="1276.5" y="-7140.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×7×16</text>
+</g>
+<!-- contiguous -->
+<g id="node30" class="node">
+<title>contiguous</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1275,-7041C1275,-7041 1225,-7041 1225,-7041 1219,-7041 1213,-7035 1213,-7029 1213,-7029 1213,-7017 1213,-7017 1213,-7011 1219,-7005 1225,-7005 1225,-7005 1275,-7005 1275,-7005 1281,-7005 1287,-7011 1287,-7017 1287,-7017 1287,-7029 1287,-7029 1287,-7035 1281,-7041 1275,-7041"/>
+<text text-anchor="middle" x="1250" y="-7020.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">contiguous</text>
+</g>
+<!-- transpose_2&#45;&gt;contiguous -->
+<g id="edge37" class="edge">
+<title>transpose_2&#45;&gt;contiguous</title>
+<path fill="none" stroke="var(--line-strong)" d="M1250,-7084.69C1250,-7073.98 1250,-7060.08 1250,-7048.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1252.45,-7048.26 1250,-7041.26 1247.55,-7048.26 1252.45,-7048.26"/>
+<text text-anchor="middle" x="1276.5" y="-7060.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×8×16</text>
+</g>
+<!-- contiguous&#45;&gt;view_3 -->
+<g id="edge38" class="edge">
+<title>contiguous&#45;&gt;view_3</title>
+<path fill="none" stroke="var(--line-strong)" d="M1250.44,-7004.69C1250.72,-6993.98 1251.07,-6980.08 1251.38,-6968.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1253.83,-6968.32 1251.56,-6961.26 1248.93,-6968.2 1253.83,-6968.32"/>
+<text text-anchor="middle" x="1277.5" y="-6980.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×8×16</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_self_attn_to_out_0 -->
+<g id="node32" class="node">
+<title>inner_model_backbone_encoder_layers_0_self_attn_to_out_0</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M1286.5,-6881C1286.5,-6881 1217.5,-6881 1217.5,-6881 1211.5,-6881 1205.5,-6875 1205.5,-6869 1205.5,-6869 1205.5,-6837 1205.5,-6837 1205.5,-6831 1211.5,-6825 1217.5,-6825 1217.5,-6825 1286.5,-6825 1286.5,-6825 1292.5,-6825 1298.5,-6831 1298.5,-6837 1298.5,-6837 1298.5,-6869 1298.5,-6869 1298.5,-6875 1292.5,-6881 1286.5,-6881"/>
+<text text-anchor="middle" x="1252" y="-6867" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">0</text>
+<text text-anchor="middle" x="1252" y="-6856" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Linear</text>
+<text text-anchor="middle" x="1252" y="-6845" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">128 → 128</text>
+<text text-anchor="middle" x="1252" y="-6834" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">16,512 params</text>
+</g>
+<!-- view_3&#45;&gt;inner_model_backbone_encoder_layers_0_self_attn_to_out_0 -->
+<g id="edge39" class="edge">
+<title>view_3&#45;&gt;inner_model_backbone_encoder_layers_0_self_attn_to_out_0</title>
+<path fill="none" stroke="var(--line-strong)" d="M1252,-6924.61C1252,-6914.23 1252,-6900.68 1252,-6888.23"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1254.45,-6888.05 1252,-6881.05 1249.55,-6888.05 1254.45,-6888.05"/>
+<text text-anchor="middle" x="1275" y="-6900.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_self_attn_to_out_1 -->
+<g id="node33" class="node">
+<title>inner_model_backbone_encoder_layers_0_self_attn_to_out_1</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M1270,-6781C1270,-6781 1234,-6781 1234,-6781 1228,-6781 1222,-6775 1222,-6769 1222,-6769 1222,-6748 1222,-6748 1222,-6742 1228,-6736 1234,-6736 1234,-6736 1270,-6736 1270,-6736 1276,-6736 1282,-6742 1282,-6748 1282,-6748 1282,-6769 1282,-6769 1282,-6775 1276,-6781 1270,-6781"/>
+<text text-anchor="middle" x="1252" y="-6767" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">1</text>
+<text text-anchor="middle" x="1252" y="-6756" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Dropout</text>
+<text text-anchor="middle" x="1252" y="-6745" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">p=0.1</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_self_attn_to_out_0&#45;&gt;inner_model_backbone_encoder_layers_0_self_attn_to_out_1 -->
+<g id="edge40" class="edge">
+<title>inner_model_backbone_encoder_layers_0_self_attn_to_out_0&#45;&gt;inner_model_backbone_encoder_layers_0_self_attn_to_out_1</title>
+<path fill="none" stroke="var(--line-strong)" d="M1252,-6824.75C1252,-6813.38 1252,-6800.16 1252,-6788.61"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1254.45,-6788.29 1252,-6781.29 1249.55,-6788.29 1254.45,-6788.29"/>
+<text text-anchor="middle" x="1275" y="-6800.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_dropout_attn -->
+<g id="node34" class="node">
+<title>inner_model_backbone_encoder_layers_0_dropout_attn</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M1281.5,-6692C1281.5,-6692 1222.5,-6692 1222.5,-6692 1216.5,-6692 1210.5,-6686 1210.5,-6680 1210.5,-6680 1210.5,-6659 1210.5,-6659 1210.5,-6653 1216.5,-6647 1222.5,-6647 1222.5,-6647 1281.5,-6647 1281.5,-6647 1287.5,-6647 1293.5,-6653 1293.5,-6659 1293.5,-6659 1293.5,-6680 1293.5,-6680 1293.5,-6686 1287.5,-6692 1281.5,-6692"/>
+<text text-anchor="middle" x="1252" y="-6678" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">dropout_attn</text>
+<text text-anchor="middle" x="1252" y="-6667" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Dropout</text>
+<text text-anchor="middle" x="1252" y="-6656" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">p=0.1</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_self_attn_to_out_1&#45;&gt;inner_model_backbone_encoder_layers_0_dropout_attn -->
+<g id="edge41" class="edge">
+<title>inner_model_backbone_encoder_layers_0_self_attn_to_out_1&#45;&gt;inner_model_backbone_encoder_layers_0_dropout_attn</title>
+<path fill="none" stroke="var(--line-strong)" d="M1252,-6735.99C1252,-6724.91 1252,-6711.24 1252,-6699.26"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1254.45,-6699.06 1252,-6692.06 1249.55,-6699.06 1254.45,-6699.06"/>
+<text text-anchor="middle" x="1275" y="-6711.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_dropout_attn&#45;&gt;add_1 -->
+<g id="edge42" class="edge">
+<title>inner_model_backbone_encoder_layers_0_dropout_attn&#45;&gt;add_1</title>
+<path fill="none" stroke="var(--line-strong)" d="M1252,-6646.82C1252,-6635.62 1252,-6621.92 1252,-6610.35"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1254.45,-6610.11 1252,-6603.11 1249.55,-6610.11 1254.45,-6610.11"/>
+<text text-anchor="middle" x="1275" y="-6622.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- transpose_3 -->
+<g id="node36" class="node">
+<title>transpose_3</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1262.5,-6523C1262.5,-6523 1217.5,-6523 1217.5,-6523 1211.5,-6523 1205.5,-6517 1205.5,-6511 1205.5,-6511 1205.5,-6499 1205.5,-6499 1205.5,-6493 1211.5,-6487 1217.5,-6487 1217.5,-6487 1262.5,-6487 1262.5,-6487 1268.5,-6487 1274.5,-6493 1274.5,-6499 1274.5,-6499 1274.5,-6511 1274.5,-6511 1274.5,-6517 1268.5,-6523 1262.5,-6523"/>
+<text text-anchor="middle" x="1240" y="-6502.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">transpose</text>
+</g>
+<!-- add_1&#45;&gt;transpose_3 -->
+<g id="edge43" class="edge">
+<title>add_1&#45;&gt;transpose_3</title>
+<path fill="none" stroke="var(--line-strong)" d="M1249.34,-6566.69C1247.69,-6555.98 1245.55,-6542.08 1243.74,-6530.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1246.14,-6529.81 1242.66,-6523.26 1241.3,-6530.55 1246.14,-6529.81"/>
+<text text-anchor="middle" x="1269" y="-6542.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_norm_attn_1 -->
+<g id="node37" class="node">
+<title>inner_model_backbone_encoder_layers_0_norm_attn_1</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M1257.5,-6443C1257.5,-6443 1194.5,-6443 1194.5,-6443 1188.5,-6443 1182.5,-6437 1182.5,-6431 1182.5,-6431 1182.5,-6399 1182.5,-6399 1182.5,-6393 1188.5,-6387 1194.5,-6387 1194.5,-6387 1257.5,-6387 1257.5,-6387 1263.5,-6387 1269.5,-6393 1269.5,-6399 1269.5,-6399 1269.5,-6431 1269.5,-6431 1269.5,-6437 1263.5,-6443 1257.5,-6443"/>
+<text text-anchor="middle" x="1226" y="-6429" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">1</text>
+<text text-anchor="middle" x="1226" y="-6418" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">BatchNorm1d</text>
+<text text-anchor="middle" x="1226" y="-6407" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">128</text>
+<text text-anchor="middle" x="1226" y="-6396" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">256 params</text>
+</g>
+<!-- transpose_3&#45;&gt;inner_model_backbone_encoder_layers_0_norm_attn_1 -->
+<g id="edge44" class="edge">
+<title>transpose_3&#45;&gt;inner_model_backbone_encoder_layers_0_norm_attn_1</title>
+<path fill="none" stroke="var(--line-strong)" d="M1237.23,-6486.61C1235.58,-6476.23 1233.43,-6462.68 1231.44,-6450.23"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1233.82,-6449.58 1230.3,-6443.05 1228.98,-6450.35 1233.82,-6449.58"/>
+<text text-anchor="middle" x="1257" y="-6462.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×128×7</text>
+</g>
+<!-- transpose_4 -->
+<g id="node38" class="node">
+<title>transpose_4</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1197.5,-6343C1197.5,-6343 1152.5,-6343 1152.5,-6343 1146.5,-6343 1140.5,-6337 1140.5,-6331 1140.5,-6331 1140.5,-6319 1140.5,-6319 1140.5,-6313 1146.5,-6307 1152.5,-6307 1152.5,-6307 1197.5,-6307 1197.5,-6307 1203.5,-6307 1209.5,-6313 1209.5,-6319 1209.5,-6319 1209.5,-6331 1209.5,-6331 1209.5,-6337 1203.5,-6343 1197.5,-6343"/>
+<text text-anchor="middle" x="1175" y="-6322.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">transpose</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_norm_attn_1&#45;&gt;transpose_4 -->
+<g id="edge45" class="edge">
+<title>inner_model_backbone_encoder_layers_0_norm_attn_1&#45;&gt;transpose_4</title>
+<path fill="none" stroke="var(--line-strong)" d="M1210.14,-6386.64C1203.19,-6374.63 1195.1,-6360.69 1188.45,-6349.2"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1190.54,-6347.93 1184.91,-6343.1 1186.3,-6350.39 1190.54,-6347.93"/>
+<text text-anchor="middle" x="1223" y="-6362.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×128×7</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_ff_0 -->
+<g id="node39" class="node">
+<title>inner_model_backbone_encoder_layers_0_ff_0</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M1137.5,-6263C1137.5,-6263 1068.5,-6263 1068.5,-6263 1062.5,-6263 1056.5,-6257 1056.5,-6251 1056.5,-6251 1056.5,-6219 1056.5,-6219 1056.5,-6213 1062.5,-6207 1068.5,-6207 1068.5,-6207 1137.5,-6207 1137.5,-6207 1143.5,-6207 1149.5,-6213 1149.5,-6219 1149.5,-6219 1149.5,-6251 1149.5,-6251 1149.5,-6257 1143.5,-6263 1137.5,-6263"/>
+<text text-anchor="middle" x="1103" y="-6249" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">0</text>
+<text text-anchor="middle" x="1103" y="-6238" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Linear</text>
+<text text-anchor="middle" x="1103" y="-6227" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">128 → 256</text>
+<text text-anchor="middle" x="1103" y="-6216" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">33,024 params</text>
+</g>
+<!-- transpose_4&#45;&gt;inner_model_backbone_encoder_layers_0_ff_0 -->
+<g id="edge46" class="edge">
+<title>transpose_4&#45;&gt;inner_model_backbone_encoder_layers_0_ff_0</title>
+<path fill="none" stroke="var(--line-strong)" d="M1141.88,-6306.9C1134.95,-6302.16 1128.18,-6296.49 1123,-6290 1118.32,-6284.14 1114.67,-6277.08 1111.84,-6270.02"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1113.99,-6268.75 1109.28,-6263.01 1109.39,-6270.43 1113.99,-6268.75"/>
+<text text-anchor="middle" x="1146" y="-6282.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- add_2 -->
+<g id="node44" class="node">
+<title>add_2</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1116,-5805C1116,-5805 1086,-5805 1086,-5805 1080,-5805 1074,-5799 1074,-5793 1074,-5793 1074,-5781 1074,-5781 1074,-5775 1080,-5769 1086,-5769 1086,-5769 1116,-5769 1116,-5769 1122,-5769 1128,-5775 1128,-5781 1128,-5781 1128,-5793 1128,-5793 1128,-5799 1122,-5805 1116,-5805"/>
+<text text-anchor="middle" x="1101" y="-5784.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">add</text>
+</g>
+<!-- transpose_4&#45;&gt;add_2 -->
+<g id="edge47" class="edge">
+<title>transpose_4&#45;&gt;add_2</title>
+<path fill="none" stroke="var(--line-strong)" d="M1175,-6306.8C1175,-6289.06 1175,-6260.6 1175,-6236 1175,-6236 1175,-6236 1175,-5870.5 1175,-5846.64 1167.6,-5840.05 1152,-5822 1146.89,-5816.08 1140.5,-5810.76 1134,-5806.18"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1135.21,-5804.04 1128.03,-5802.19 1132.49,-5808.11 1135.21,-5804.04"/>
+<text text-anchor="middle" x="1198" y="-6058.3" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_ff_1 -->
+<g id="node40" class="node">
+<title>inner_model_backbone_encoder_layers_0_ff_1</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M1117,-6163C1117,-6163 1087,-6163 1087,-6163 1081,-6163 1075,-6157 1075,-6151 1075,-6151 1075,-6139 1075,-6139 1075,-6133 1081,-6127 1087,-6127 1087,-6127 1117,-6127 1117,-6127 1123,-6127 1129,-6133 1129,-6139 1129,-6139 1129,-6151 1129,-6151 1129,-6157 1123,-6163 1117,-6163"/>
+<text text-anchor="middle" x="1102" y="-6148" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">1</text>
+<text text-anchor="middle" x="1102" y="-6137" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">GELU</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_ff_0&#45;&gt;inner_model_backbone_encoder_layers_0_ff_1 -->
+<g id="edge48" class="edge">
+<title>inner_model_backbone_encoder_layers_0_ff_0&#45;&gt;inner_model_backbone_encoder_layers_0_ff_1</title>
+<path fill="none" stroke="var(--line-strong)" d="M1102.69,-6206.64C1102.56,-6194.97 1102.4,-6181.46 1102.27,-6170.17"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1104.72,-6170.07 1102.19,-6163.1 1099.82,-6170.13 1104.72,-6170.07"/>
+<text text-anchor="middle" x="1125" y="-6182.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×256</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_ff_2 -->
+<g id="node41" class="node">
+<title>inner_model_backbone_encoder_layers_0_ff_2</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M1119,-6083C1119,-6083 1083,-6083 1083,-6083 1077,-6083 1071,-6077 1071,-6071 1071,-6071 1071,-6050 1071,-6050 1071,-6044 1077,-6038 1083,-6038 1083,-6038 1119,-6038 1119,-6038 1125,-6038 1131,-6044 1131,-6050 1131,-6050 1131,-6071 1131,-6071 1131,-6077 1125,-6083 1119,-6083"/>
+<text text-anchor="middle" x="1101" y="-6069" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">2</text>
+<text text-anchor="middle" x="1101" y="-6058" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Dropout</text>
+<text text-anchor="middle" x="1101" y="-6047" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">p=0.1</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_ff_1&#45;&gt;inner_model_backbone_encoder_layers_0_ff_2 -->
+<g id="edge49" class="edge">
+<title>inner_model_backbone_encoder_layers_0_ff_1&#45;&gt;inner_model_backbone_encoder_layers_0_ff_2</title>
+<path fill="none" stroke="var(--line-strong)" d="M1101.79,-6126.91C1101.67,-6116.43 1101.5,-6102.75 1101.35,-6090.61"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1103.8,-6090.26 1101.26,-6083.29 1098.9,-6090.32 1103.8,-6090.26"/>
+<text text-anchor="middle" x="1124" y="-6102.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×256</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_ff_3 -->
+<g id="node42" class="node">
+<title>inner_model_backbone_encoder_layers_0_ff_3</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M1135.5,-5994C1135.5,-5994 1066.5,-5994 1066.5,-5994 1060.5,-5994 1054.5,-5988 1054.5,-5982 1054.5,-5982 1054.5,-5950 1054.5,-5950 1054.5,-5944 1060.5,-5938 1066.5,-5938 1066.5,-5938 1135.5,-5938 1135.5,-5938 1141.5,-5938 1147.5,-5944 1147.5,-5950 1147.5,-5950 1147.5,-5982 1147.5,-5982 1147.5,-5988 1141.5,-5994 1135.5,-5994"/>
+<text text-anchor="middle" x="1101" y="-5980" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">3</text>
+<text text-anchor="middle" x="1101" y="-5969" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Linear</text>
+<text text-anchor="middle" x="1101" y="-5958" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">256 → 128</text>
+<text text-anchor="middle" x="1101" y="-5947" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">32,896 params</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_ff_2&#45;&gt;inner_model_backbone_encoder_layers_0_ff_3 -->
+<g id="edge50" class="edge">
+<title>inner_model_backbone_encoder_layers_0_ff_2&#45;&gt;inner_model_backbone_encoder_layers_0_ff_3</title>
+<path fill="none" stroke="var(--line-strong)" d="M1101,-6037.58C1101,-6026.68 1101,-6013.27 1101,-6001.07"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1103.45,-6001.05 1101,-5994.05 1098.55,-6001.05 1103.45,-6001.05"/>
+<text text-anchor="middle" x="1124" y="-6013.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×256</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_dropout_ffn -->
+<g id="node43" class="node">
+<title>inner_model_backbone_encoder_layers_0_dropout_ffn</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M1127,-5894C1127,-5894 1075,-5894 1075,-5894 1069,-5894 1063,-5888 1063,-5882 1063,-5882 1063,-5861 1063,-5861 1063,-5855 1069,-5849 1075,-5849 1075,-5849 1127,-5849 1127,-5849 1133,-5849 1139,-5855 1139,-5861 1139,-5861 1139,-5882 1139,-5882 1139,-5888 1133,-5894 1127,-5894"/>
+<text text-anchor="middle" x="1101" y="-5880" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">dropout_ffn</text>
+<text text-anchor="middle" x="1101" y="-5869" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Dropout</text>
+<text text-anchor="middle" x="1101" y="-5858" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">p=0.1</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_ff_3&#45;&gt;inner_model_backbone_encoder_layers_0_dropout_ffn -->
+<g id="edge51" class="edge">
+<title>inner_model_backbone_encoder_layers_0_ff_3&#45;&gt;inner_model_backbone_encoder_layers_0_dropout_ffn</title>
+<path fill="none" stroke="var(--line-strong)" d="M1101,-5937.75C1101,-5926.38 1101,-5913.16 1101,-5901.61"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1103.45,-5901.29 1101,-5894.29 1098.55,-5901.29 1103.45,-5901.29"/>
+<text text-anchor="middle" x="1124" y="-5913.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_dropout_ffn&#45;&gt;add_2 -->
+<g id="edge52" class="edge">
+<title>inner_model_backbone_encoder_layers_0_dropout_ffn&#45;&gt;add_2</title>
+<path fill="none" stroke="var(--line-strong)" d="M1101,-5848.82C1101,-5837.62 1101,-5823.92 1101,-5812.35"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1103.45,-5812.11 1101,-5805.11 1098.55,-5812.11 1103.45,-5812.11"/>
+<text text-anchor="middle" x="1124" y="-5824.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- transpose_5 -->
+<g id="node45" class="node">
+<title>transpose_5</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M1116.5,-5725C1116.5,-5725 1071.5,-5725 1071.5,-5725 1065.5,-5725 1059.5,-5719 1059.5,-5713 1059.5,-5713 1059.5,-5701 1059.5,-5701 1059.5,-5695 1065.5,-5689 1071.5,-5689 1071.5,-5689 1116.5,-5689 1116.5,-5689 1122.5,-5689 1128.5,-5695 1128.5,-5701 1128.5,-5701 1128.5,-5713 1128.5,-5713 1128.5,-5719 1122.5,-5725 1116.5,-5725"/>
+<text text-anchor="middle" x="1094" y="-5704.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">transpose</text>
+</g>
+<!-- add_2&#45;&gt;transpose_5 -->
+<g id="edge53" class="edge">
+<title>add_2&#45;&gt;transpose_5</title>
+<path fill="none" stroke="var(--line-strong)" d="M1099.45,-5768.69C1098.49,-5757.98 1097.24,-5744.08 1096.18,-5732.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1098.62,-5732.02 1095.55,-5725.26 1093.73,-5732.45 1098.62,-5732.02"/>
+<text text-anchor="middle" x="1120" y="-5744.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_norm_ffn_1 -->
+<g id="node46" class="node">
+<title>inner_model_backbone_encoder_layers_0_norm_ffn_1</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M1060.5,-5645C1060.5,-5645 997.5,-5645 997.5,-5645 991.5,-5645 985.5,-5639 985.5,-5633 985.5,-5633 985.5,-5601 985.5,-5601 985.5,-5595 991.5,-5589 997.5,-5589 997.5,-5589 1060.5,-5589 1060.5,-5589 1066.5,-5589 1072.5,-5595 1072.5,-5601 1072.5,-5601 1072.5,-5633 1072.5,-5633 1072.5,-5639 1066.5,-5645 1060.5,-5645"/>
+<text text-anchor="middle" x="1029" y="-5631" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">1</text>
+<text text-anchor="middle" x="1029" y="-5620" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">BatchNorm1d</text>
+<text text-anchor="middle" x="1029" y="-5609" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">128</text>
+<text text-anchor="middle" x="1029" y="-5598" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">256 params</text>
+</g>
+<!-- transpose_5&#45;&gt;inner_model_backbone_encoder_layers_0_norm_ffn_1 -->
+<g id="edge54" class="edge">
+<title>transpose_5&#45;&gt;inner_model_backbone_encoder_layers_0_norm_ffn_1</title>
+<path fill="none" stroke="var(--line-strong)" d="M1081.16,-5688.61C1073.2,-5677.84 1062.73,-5663.66 1053.25,-5650.83"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="1055.11,-5649.23 1048.98,-5645.05 1051.17,-5652.14 1055.11,-5649.23"/>
+<text text-anchor="middle" x="1090" y="-5664.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×128×7</text>
+</g>
+<!-- transpose_6 -->
+<g id="node47" class="node">
+<title>transpose_6</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M986.5,-5545C986.5,-5545 941.5,-5545 941.5,-5545 935.5,-5545 929.5,-5539 929.5,-5533 929.5,-5533 929.5,-5521 929.5,-5521 929.5,-5515 935.5,-5509 941.5,-5509 941.5,-5509 986.5,-5509 986.5,-5509 992.5,-5509 998.5,-5515 998.5,-5521 998.5,-5521 998.5,-5533 998.5,-5533 998.5,-5539 992.5,-5545 986.5,-5545"/>
+<text text-anchor="middle" x="964" y="-5524.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">transpose</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_0_norm_ffn_1&#45;&gt;transpose_6 -->
+<g id="edge55" class="edge">
+<title>inner_model_backbone_encoder_layers_0_norm_ffn_1&#45;&gt;transpose_6</title>
+<path fill="none" stroke="var(--line-strong)" d="M1008.79,-5588.64C999.84,-5576.52 989.43,-5562.43 980.9,-5550.89"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="982.76,-5549.28 976.63,-5545.1 978.82,-5552.19 982.76,-5549.28"/>
+<text text-anchor="middle" x="1019" y="-5564.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×128×7</text>
+</g>
+<!-- size_1 -->
+<g id="node48" class="node">
+<title>size_1</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M932,-5437C932,-5437 902,-5437 902,-5437 896,-5437 890,-5431 890,-5425 890,-5425 890,-5413 890,-5413 890,-5407 896,-5401 902,-5401 902,-5401 932,-5401 932,-5401 938,-5401 944,-5407 944,-5413 944,-5413 944,-5425 944,-5425 944,-5431 938,-5437 932,-5437"/>
+<text text-anchor="middle" x="917" y="-5416.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">size</text>
+</g>
+<!-- transpose_6&#45;&gt;size_1 -->
+<g id="edge56" class="edge">
+<title>transpose_6&#45;&gt;size_1</title>
+<path fill="none" stroke="var(--line-strong)" d="M949.57,-5508.74C945.75,-5503.58 941.89,-5497.76 939,-5492 931.41,-5476.88 925.87,-5458.64 922.25,-5444.31"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="924.56,-5443.43 920.53,-5437.2 919.79,-5444.58 924.56,-5443.43"/>
+<text text-anchor="middle" x="962" y="-5484.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_self_attn_w_q -->
+<g id="node49" class="node">
+<title>inner_model_backbone_encoder_layers_1_self_attn_w_q</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M854.5,-5447C854.5,-5447 785.5,-5447 785.5,-5447 779.5,-5447 773.5,-5441 773.5,-5435 773.5,-5435 773.5,-5403 773.5,-5403 773.5,-5397 779.5,-5391 785.5,-5391 785.5,-5391 854.5,-5391 854.5,-5391 860.5,-5391 866.5,-5397 866.5,-5403 866.5,-5403 866.5,-5435 866.5,-5435 866.5,-5441 860.5,-5447 854.5,-5447"/>
+<text text-anchor="middle" x="820" y="-5433" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">W_Q</text>
+<text text-anchor="middle" x="820" y="-5422" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Linear</text>
+<text text-anchor="middle" x="820" y="-5411" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">128 → 128</text>
+<text text-anchor="middle" x="820" y="-5400" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">16,512 params</text>
+</g>
+<!-- transpose_6&#45;&gt;inner_model_backbone_encoder_layers_1_self_attn_w_q -->
+<g id="edge57" class="edge">
+<title>transpose_6&#45;&gt;inner_model_backbone_encoder_layers_1_self_attn_w_q</title>
+<path fill="none" stroke="var(--line-strong)" d="M929.5,-5515.46C914.4,-5509.88 896.98,-5502.08 883,-5492 868.03,-5481.21 854.18,-5466.22 843.31,-5452.71"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="845.09,-5451.01 838.84,-5447.02 841.24,-5454.04 845.09,-5451.01"/>
+<text text-anchor="middle" x="906" y="-5484.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_self_attn_w_k -->
+<g id="node52" class="node">
+<title>inner_model_backbone_encoder_layers_1_self_attn_w_k</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M739.5,-5447C739.5,-5447 670.5,-5447 670.5,-5447 664.5,-5447 658.5,-5441 658.5,-5435 658.5,-5435 658.5,-5403 658.5,-5403 658.5,-5397 664.5,-5391 670.5,-5391 670.5,-5391 739.5,-5391 739.5,-5391 745.5,-5391 751.5,-5397 751.5,-5403 751.5,-5403 751.5,-5435 751.5,-5435 751.5,-5441 745.5,-5447 739.5,-5447"/>
+<text text-anchor="middle" x="705" y="-5433" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">W_K</text>
+<text text-anchor="middle" x="705" y="-5422" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Linear</text>
+<text text-anchor="middle" x="705" y="-5411" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">128 → 128</text>
+<text text-anchor="middle" x="705" y="-5400" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">16,512 params</text>
+</g>
+<!-- transpose_6&#45;&gt;inner_model_backbone_encoder_layers_1_self_attn_w_k -->
+<g id="edge58" class="edge">
+<title>transpose_6&#45;&gt;inner_model_backbone_encoder_layers_1_self_attn_w_k</title>
+<path fill="none" stroke="var(--line-strong)" d="M929.28,-5522.91C887.19,-5517.9 815.28,-5505.19 762,-5474 751.97,-5468.13 742.29,-5460.17 733.85,-5452.17"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="735.48,-5450.34 728.76,-5447.21 732.06,-5453.85 735.48,-5450.34"/>
+<text text-anchor="middle" x="821" y="-5484.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_self_attn_w_v -->
+<g id="node55" class="node">
+<title>inner_model_backbone_encoder_layers_1_self_attn_w_v</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M772.5,-5027C772.5,-5027 703.5,-5027 703.5,-5027 697.5,-5027 691.5,-5021 691.5,-5015 691.5,-5015 691.5,-4983 691.5,-4983 691.5,-4977 697.5,-4971 703.5,-4971 703.5,-4971 772.5,-4971 772.5,-4971 778.5,-4971 784.5,-4977 784.5,-4983 784.5,-4983 784.5,-5015 784.5,-5015 784.5,-5021 778.5,-5027 772.5,-5027"/>
+<text text-anchor="middle" x="738" y="-5013" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">W_V</text>
+<text text-anchor="middle" x="738" y="-5002" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Linear</text>
+<text text-anchor="middle" x="738" y="-4991" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">128 → 128</text>
+<text text-anchor="middle" x="738" y="-4980" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">16,512 params</text>
+</g>
+<!-- transpose_6&#45;&gt;inner_model_backbone_encoder_layers_1_self_attn_w_v -->
+<g id="edge59" class="edge">
+<title>transpose_6&#45;&gt;inner_model_backbone_encoder_layers_1_self_attn_w_v</title>
+<path fill="none" stroke="var(--line-strong)" d="M976.9,-5508.66C980.26,-5503.51 983.61,-5497.71 986,-5492 998.66,-5461.76 1002,-5452.78 1002,-5420 1002,-5420 1002,-5420 1002,-5088 1002,-4992.51 886.67,-5056.93 796,-5027 794.5,-5026.5 792.99,-5025.98 791.47,-5025.43"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="792.2,-5023.09 784.79,-5022.9 790.47,-5027.67 792.2,-5023.09"/>
+<text text-anchor="middle" x="1025" y="-5246.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- add_4 -->
+<g id="node71" class="node">
+<title>add_4</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M826,-4160C826,-4160 796,-4160 796,-4160 790,-4160 784,-4154 784,-4148 784,-4148 784,-4136 784,-4136 784,-4130 790,-4124 796,-4124 796,-4124 826,-4124 826,-4124 832,-4124 838,-4130 838,-4136 838,-4136 838,-4148 838,-4148 838,-4154 832,-4160 826,-4160"/>
+<text text-anchor="middle" x="811" y="-4139.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">add</text>
+</g>
+<!-- transpose_6&#45;&gt;add_4 -->
+<g id="edge60" class="edge">
+<title>transpose_6&#45;&gt;add_4</title>
+<path fill="none" stroke="var(--line-strong)" d="M998.77,-5512.27C1033.57,-5495.96 1082,-5465.16 1082,-5420 1082,-5420 1082,-5420 1082,-5088 1082,-4727.41 1042.27,-4632.23 920,-4293 900.18,-4238.01 896.44,-4221.04 858,-4177 853.82,-4172.21 848.84,-4167.71 843.71,-4163.66"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="845.18,-4161.7 838.12,-4159.44 842.23,-4165.61 845.18,-4161.7"/>
+<text text-anchor="middle" x="1095" y="-4822.3" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- view_4 -->
+<g id="node50" class="node">
+<title>view_4</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M828,-5347C828,-5347 798,-5347 798,-5347 792,-5347 786,-5341 786,-5335 786,-5335 786,-5323 786,-5323 786,-5317 792,-5311 798,-5311 798,-5311 828,-5311 828,-5311 834,-5311 840,-5317 840,-5323 840,-5323 840,-5335 840,-5335 840,-5341 834,-5347 828,-5347"/>
+<text text-anchor="middle" x="813" y="-5326.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">view</text>
+</g>
+<!-- size_1&#45;&gt;view_4 -->
+<g id="edge61" class="edge">
+<title>size_1&#45;&gt;view_4</title>
+<path fill="none" stroke="var(--line-strong)" d="M897.61,-5400.79C885.46,-5390.1 869.43,-5376.12 855,-5364 850.25,-5360.01 845.15,-5355.81 840.2,-5351.78"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="841.47,-5349.66 834.49,-5347.15 838.38,-5353.46 841.47,-5349.66"/>
+</g>
+<!-- view_5 -->
+<g id="node53" class="node">
+<title>view_5</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M740,-5347C740,-5347 710,-5347 710,-5347 704,-5347 698,-5341 698,-5335 698,-5335 698,-5323 698,-5323 698,-5317 704,-5311 710,-5311 710,-5311 740,-5311 740,-5311 746,-5311 752,-5317 752,-5323 752,-5323 752,-5335 752,-5335 752,-5341 746,-5347 740,-5347"/>
+<text text-anchor="middle" x="725" y="-5326.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">view</text>
+</g>
+<!-- size_1&#45;&gt;view_5 -->
+<g id="edge62" class="edge">
+<title>size_1&#45;&gt;view_5</title>
+<path fill="none" stroke="var(--line-strong)" d="M894.05,-5400.88C889.17,-5397.47 883.98,-5394.02 879,-5391 856.39,-5377.31 850.39,-5374.21 826,-5364 803.96,-5354.77 797.64,-5354.62 775,-5347 769.81,-5345.25 764.31,-5343.39 758.94,-5341.57"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="759.65,-5339.23 752.24,-5339.29 758.08,-5343.86 759.65,-5339.23"/>
+</g>
+<!-- view_6 -->
+<g id="node56" class="node">
+<title>view_6</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M828,-4927C828,-4927 798,-4927 798,-4927 792,-4927 786,-4921 786,-4915 786,-4915 786,-4903 786,-4903 786,-4897 792,-4891 798,-4891 798,-4891 828,-4891 828,-4891 834,-4891 840,-4897 840,-4903 840,-4903 840,-4915 840,-4915 840,-4921 834,-4927 828,-4927"/>
+<text text-anchor="middle" x="813" y="-4906.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">view</text>
+</g>
+<!-- size_1&#45;&gt;view_6 -->
+<g id="edge63" class="edge">
+<title>size_1&#45;&gt;view_6</title>
+<path fill="none" stroke="var(--line-strong)" d="M911.71,-5400.99C906.72,-5383.4 900,-5355.05 900,-5330 900,-5330 900,-5330 900,-5168 900,-5079.56 909.18,-5051.24 872,-4971 865.08,-4956.07 852.96,-4942.55 841.5,-4932.06"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="842.82,-4929.95 835.96,-4927.16 839.58,-4933.63 842.82,-4929.95"/>
+</g>
+<!-- view_7 -->
+<g id="node67" class="node">
+<title>view_7</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M828,-4518C828,-4518 798,-4518 798,-4518 792,-4518 786,-4512 786,-4506 786,-4506 786,-4494 786,-4494 786,-4488 792,-4482 798,-4482 798,-4482 828,-4482 828,-4482 834,-4482 840,-4488 840,-4494 840,-4494 840,-4506 840,-4506 840,-4512 834,-4518 828,-4518"/>
+<text text-anchor="middle" x="813" y="-4497.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">view</text>
+</g>
+<!-- size_1&#45;&gt;view_7 -->
+<g id="edge64" class="edge">
+<title>size_1&#45;&gt;view_7</title>
+<path fill="none" stroke="var(--line-strong)" d="M919.56,-5400.8C927.16,-5348.34 949,-5185.63 949,-5050 949,-5050 949,-5050 949,-4579 949,-4532.14 887.49,-4513.03 847.2,-4505.54"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="847.51,-4503.11 840.19,-4504.31 846.67,-4507.93 847.51,-4503.11"/>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_self_attn_w_q&#45;&gt;view_4 -->
+<g id="edge65" class="edge">
+<title>inner_model_backbone_encoder_layers_1_self_attn_w_q&#45;&gt;view_4</title>
+<path fill="none" stroke="var(--line-strong)" d="M811.37,-5390.77C809.97,-5385.27 808.74,-5379.49 808,-5374 807.41,-5369.59 807.68,-5368.43 808,-5364 808.23,-5360.84 808.58,-5357.52 808.99,-5354.25"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="811.43,-5354.51 809.97,-5347.24 806.58,-5353.84 811.43,-5354.51"/>
+<text text-anchor="middle" x="831" y="-5366.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- transpose_7 -->
+<g id="node51" class="node">
+<title>transpose_7</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M835.5,-5267C835.5,-5267 790.5,-5267 790.5,-5267 784.5,-5267 778.5,-5261 778.5,-5255 778.5,-5255 778.5,-5243 778.5,-5243 778.5,-5237 784.5,-5231 790.5,-5231 790.5,-5231 835.5,-5231 835.5,-5231 841.5,-5231 847.5,-5237 847.5,-5243 847.5,-5243 847.5,-5255 847.5,-5255 847.5,-5261 841.5,-5267 835.5,-5267"/>
+<text text-anchor="middle" x="813" y="-5246.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">transpose</text>
+</g>
+<!-- view_4&#45;&gt;transpose_7 -->
+<g id="edge66" class="edge">
+<title>view_4&#45;&gt;transpose_7</title>
+<path fill="none" stroke="var(--line-strong)" d="M813,-5310.69C813,-5299.98 813,-5286.08 813,-5274.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="815.45,-5274.26 813,-5267.26 810.55,-5274.26 815.45,-5274.26"/>
+<text text-anchor="middle" x="839.5" y="-5286.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×8×16</text>
+</g>
+<!-- matmul_2 -->
+<g id="node58" class="node">
+<title>matmul_2</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M853.5,-5187C853.5,-5187 818.5,-5187 818.5,-5187 812.5,-5187 806.5,-5181 806.5,-5175 806.5,-5175 806.5,-5163 806.5,-5163 806.5,-5157 812.5,-5151 818.5,-5151 818.5,-5151 853.5,-5151 853.5,-5151 859.5,-5151 865.5,-5157 865.5,-5163 865.5,-5163 865.5,-5175 865.5,-5175 865.5,-5181 859.5,-5187 853.5,-5187"/>
+<text text-anchor="middle" x="836" y="-5166.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">matmul</text>
+</g>
+<!-- transpose_7&#45;&gt;matmul_2 -->
+<g id="edge67" class="edge">
+<title>transpose_7&#45;&gt;matmul_2</title>
+<path fill="none" stroke="var(--line-strong)" d="M818.1,-5230.69C821.26,-5219.98 825.36,-5206.08 828.84,-5194.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="831.28,-5194.67 830.91,-5187.26 826.58,-5193.28 831.28,-5194.67"/>
+<text text-anchor="middle" x="852.5" y="-5206.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×7×16</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_self_attn_w_k&#45;&gt;view_5 -->
+<g id="edge68" class="edge">
+<title>inner_model_backbone_encoder_layers_1_self_attn_w_k&#45;&gt;view_5</title>
+<path fill="none" stroke="var(--line-strong)" d="M711.22,-5390.64C713.87,-5378.97 716.94,-5365.46 719.51,-5354.17"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="721.95,-5354.47 721.11,-5347.1 717.17,-5353.39 721.95,-5354.47"/>
+<text text-anchor="middle" x="740" y="-5366.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- permute_4 -->
+<g id="node54" class="node">
+<title>permute_4</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M744,-5267C744,-5267 706,-5267 706,-5267 700,-5267 694,-5261 694,-5255 694,-5255 694,-5243 694,-5243 694,-5237 700,-5231 706,-5231 706,-5231 744,-5231 744,-5231 750,-5231 756,-5237 756,-5243 756,-5243 756,-5255 756,-5255 756,-5261 750,-5267 744,-5267"/>
+<text text-anchor="middle" x="725" y="-5246.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">permute</text>
+</g>
+<!-- view_5&#45;&gt;permute_4 -->
+<g id="edge69" class="edge">
+<title>view_5&#45;&gt;permute_4</title>
+<path fill="none" stroke="var(--line-strong)" d="M725,-5310.69C725,-5299.98 725,-5286.08 725,-5274.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="727.45,-5274.26 725,-5267.26 722.55,-5274.26 727.45,-5274.26"/>
+<text text-anchor="middle" x="751.5" y="-5286.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×8×16</text>
+</g>
+<!-- permute_4&#45;&gt;matmul_2 -->
+<g id="edge70" class="edge">
+<title>permute_4&#45;&gt;matmul_2</title>
+<path fill="none" stroke="var(--line-strong)" d="M738.52,-5230.68C745.96,-5221.92 755.76,-5211.57 766,-5204 771.98,-5199.58 785.74,-5192.69 799.5,-5186.25"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="800.89,-5188.31 806.22,-5183.15 798.83,-5183.86 800.89,-5188.31"/>
+<text text-anchor="middle" x="792.5" y="-5206.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×16×7</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_self_attn_w_v&#45;&gt;view_6 -->
+<g id="edge71" class="edge">
+<title>inner_model_backbone_encoder_layers_1_self_attn_w_v&#45;&gt;view_6</title>
+<path fill="none" stroke="var(--line-strong)" d="M732.33,-4970.78C731.83,-4961.64 732.97,-4951.8 738,-4944 738.16,-4943.75 759.22,-4934.21 778.97,-4925.31"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="780.22,-4927.43 785.59,-4922.32 778.2,-4922.97 780.22,-4927.43"/>
+<text text-anchor="middle" x="761" y="-4946.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- transpose_8 -->
+<g id="node57" class="node">
+<title>transpose_8</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M844.5,-4842.5C844.5,-4842.5 799.5,-4842.5 799.5,-4842.5 793.5,-4842.5 787.5,-4836.5 787.5,-4830.5 787.5,-4830.5 787.5,-4818.5 787.5,-4818.5 787.5,-4812.5 793.5,-4806.5 799.5,-4806.5 799.5,-4806.5 844.5,-4806.5 844.5,-4806.5 850.5,-4806.5 856.5,-4812.5 856.5,-4818.5 856.5,-4818.5 856.5,-4830.5 856.5,-4830.5 856.5,-4836.5 850.5,-4842.5 844.5,-4842.5"/>
+<text text-anchor="middle" x="822" y="-4822" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">transpose</text>
+</g>
+<!-- view_6&#45;&gt;transpose_8 -->
+<g id="edge72" class="edge">
+<title>view_6&#45;&gt;transpose_8</title>
+<path fill="none" stroke="var(--line-strong)" d="M814.86,-4890.91C816.17,-4878.96 817.93,-4862.84 819.37,-4849.59"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="821.81,-4849.8 820.14,-4842.57 816.94,-4849.27 821.81,-4849.8"/>
+<text text-anchor="middle" x="844.5" y="-4866.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×8×16</text>
+</g>
+<!-- matmul_3 -->
+<g id="node64" class="node">
+<title>matmul_3</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M830.5,-4758C830.5,-4758 795.5,-4758 795.5,-4758 789.5,-4758 783.5,-4752 783.5,-4746 783.5,-4746 783.5,-4734 783.5,-4734 783.5,-4728 789.5,-4722 795.5,-4722 795.5,-4722 830.5,-4722 830.5,-4722 836.5,-4722 842.5,-4728 842.5,-4734 842.5,-4734 842.5,-4746 842.5,-4746 842.5,-4752 836.5,-4758 830.5,-4758"/>
+<text text-anchor="middle" x="813" y="-4737.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">matmul</text>
+</g>
+<!-- transpose_8&#45;&gt;matmul_3 -->
+<g id="edge73" class="edge">
+<title>transpose_8&#45;&gt;matmul_3</title>
+<path fill="none" stroke="var(--line-strong)" d="M820.14,-4806.41C818.83,-4794.46 817.07,-4778.34 815.63,-4765.09"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="818.06,-4764.77 814.86,-4758.07 813.19,-4765.3 818.06,-4764.77"/>
+<text text-anchor="middle" x="844.5" y="-4777.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×7×16</text>
+</g>
+<!-- mul_2 -->
+<g id="node60" class="node">
+<title>mul_2</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M834,-5107C834,-5107 804,-5107 804,-5107 798,-5107 792,-5101 792,-5095 792,-5095 792,-5083 792,-5083 792,-5077 798,-5071 804,-5071 804,-5071 834,-5071 834,-5071 840,-5071 846,-5077 846,-5083 846,-5083 846,-5095 846,-5095 846,-5101 840,-5107 834,-5107"/>
+<text text-anchor="middle" x="819" y="-5086.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">mul</text>
+</g>
+<!-- matmul_2&#45;&gt;mul_2 -->
+<g id="edge74" class="edge">
+<title>matmul_2&#45;&gt;mul_2</title>
+<path fill="none" stroke="var(--line-strong)" d="M832.23,-5150.69C829.89,-5139.98 826.86,-5126.08 824.29,-5114.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="826.65,-5113.58 822.76,-5107.26 821.86,-5114.62 826.65,-5113.58"/>
+<text text-anchor="middle" x="852.5" y="-5126.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×7×7</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_self_attn_sdp_attn_scale -->
+<g id="node59" class="node">
+<title>inner_model_backbone_encoder_layers_1_self_attn_sdp_attn_scale</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M772.5,-5187C772.5,-5187 465.5,-5187 465.5,-5187 459.5,-5187 453.5,-5181 453.5,-5175 453.5,-5175 453.5,-5163 453.5,-5163 453.5,-5157 459.5,-5151 465.5,-5151 465.5,-5151 772.5,-5151 772.5,-5151 778.5,-5151 784.5,-5157 784.5,-5163 784.5,-5163 784.5,-5175 784.5,-5175 784.5,-5181 778.5,-5187 772.5,-5187"/>
+<text text-anchor="middle" x="619" y="-5166.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">inner.model.backbone.encoder.layers.1.self_attn.sdp_attn.scale</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_self_attn_sdp_attn_scale&#45;&gt;mul_2 -->
+<g id="edge75" class="edge">
+<title>inner_model_backbone_encoder_layers_1_self_attn_sdp_attn_scale&#45;&gt;mul_2</title>
+<path fill="none" stroke="var(--line-strong)" d="M662.89,-5150.88C699.6,-5136.56 751.24,-5116.43 784.9,-5103.3"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="786.17,-5105.43 791.8,-5100.61 784.39,-5100.87 786.17,-5105.43"/>
+</g>
+<!-- mul_2&#45;&gt;add_3 -->
+<g id="edge76" class="edge">
+<title>mul_2&#45;&gt;add_3</title>
+<path fill="none" stroke="var(--line-strong)" d="M821.96,-5070.61C824.22,-5057.39 827.35,-5039.03 829.85,-5024.35"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="832.33,-5024.36 831.09,-5017.05 827.5,-5023.54 832.33,-5024.36"/>
+<text text-anchor="middle" x="850.5" y="-5046.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×7×7</text>
+</g>
+<!-- softmax_1 -->
+<g id="node62" class="node">
+<title>softmax_1</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M752,-4927C752,-4927 716,-4927 716,-4927 710,-4927 704,-4921 704,-4915 704,-4915 704,-4903 704,-4903 704,-4897 710,-4891 716,-4891 716,-4891 752,-4891 752,-4891 758,-4891 764,-4897 764,-4903 764,-4903 764,-4915 764,-4915 764,-4921 758,-4927 752,-4927"/>
+<text text-anchor="middle" x="734" y="-4906.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">softmax</text>
+</g>
+<!-- add_3&#45;&gt;softmax_1 -->
+<g id="edge77" class="edge">
+<title>add_3&#45;&gt;softmax_1</title>
+<path fill="none" stroke="var(--line-strong)" d="M820.39,-4980.93C811.06,-4969.77 798.05,-4955.23 785,-4944 779.91,-4939.61 774.22,-4935.32 768.55,-4931.35"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="769.59,-4929.09 762.43,-4927.17 766.83,-4933.14 769.59,-4929.09"/>
+<text text-anchor="middle" x="819.5" y="-4946.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×7×7</text>
+</g>
+<!-- add_6 -->
+<g id="node97" class="node">
+<title>add_6</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M297,-2574C297,-2574 267,-2574 267,-2574 261,-2574 255,-2568 255,-2562 255,-2562 255,-2550 255,-2550 255,-2544 261,-2538 267,-2538 267,-2538 297,-2538 297,-2538 303,-2538 309,-2544 309,-2550 309,-2550 309,-2562 309,-2562 309,-2568 303,-2574 297,-2574"/>
+<text text-anchor="middle" x="282" y="-2553.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">add</text>
+</g>
+<!-- add_3&#45;&gt;add_6 -->
+<g id="edge78" class="edge">
+<title>add_3&#45;&gt;add_6</title>
+<path fill="none" stroke="var(--line-strong)" d="M850.35,-4980.93C870.76,-4957.77 903,-4914.18 903,-4870 903,-4870 903,-4870 903,-2685 903,-2554.39 445.68,-2631.48 324,-2584 319.76,-2582.35 315.49,-2580.23 311.39,-2577.92"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="312.36,-2575.65 305.1,-2574.16 309.85,-2579.86 312.36,-2575.65"/>
+<text text-anchor="middle" x="926.5" y="-3789.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×7×7</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_self_attn_sdp_attn_attn_dropout -->
+<g id="node63" class="node">
+<title>inner_model_backbone_encoder_layers_1_self_attn_sdp_attn_attn_dropout</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M753.5,-4847C753.5,-4847 694.5,-4847 694.5,-4847 688.5,-4847 682.5,-4841 682.5,-4835 682.5,-4835 682.5,-4814 682.5,-4814 682.5,-4808 688.5,-4802 694.5,-4802 694.5,-4802 753.5,-4802 753.5,-4802 759.5,-4802 765.5,-4808 765.5,-4814 765.5,-4814 765.5,-4835 765.5,-4835 765.5,-4841 759.5,-4847 753.5,-4847"/>
+<text text-anchor="middle" x="724" y="-4833" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">attn_dropout</text>
+<text text-anchor="middle" x="724" y="-4822" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Dropout</text>
+<text text-anchor="middle" x="724" y="-4811" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">p=0.0</text>
+</g>
+<!-- softmax_1&#45;&gt;inner_model_backbone_encoder_layers_1_self_attn_sdp_attn_attn_dropout -->
+<g id="edge79" class="edge">
+<title>softmax_1&#45;&gt;inner_model_backbone_encoder_layers_1_self_attn_sdp_attn_attn_dropout</title>
+<path fill="none" stroke="var(--line-strong)" d="M731.93,-4890.91C730.65,-4880.33 728.97,-4866.49 727.49,-4854.26"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="729.92,-4853.94 726.64,-4847.29 725.05,-4854.53 729.92,-4853.94"/>
+<text text-anchor="middle" x="753.5" y="-4866.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×7×7</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_self_attn_sdp_attn_attn_dropout&#45;&gt;matmul_3 -->
+<g id="edge80" class="edge">
+<title>inner_model_backbone_encoder_layers_1_self_attn_sdp_attn_attn_dropout&#45;&gt;matmul_3</title>
+<path fill="none" stroke="var(--line-strong)" d="M740.47,-4801.69C747.56,-4792.94 756.23,-4783.05 765,-4775 769.81,-4770.59 775.2,-4766.26 780.6,-4762.25"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="782.19,-4764.12 786.42,-4758.03 779.31,-4760.15 782.19,-4764.12"/>
+<text text-anchor="middle" x="788.5" y="-4777.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×7×7</text>
+</g>
+<!-- transpose_9 -->
+<g id="node65" class="node">
+<title>transpose_9</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M835.5,-4678C835.5,-4678 790.5,-4678 790.5,-4678 784.5,-4678 778.5,-4672 778.5,-4666 778.5,-4666 778.5,-4654 778.5,-4654 778.5,-4648 784.5,-4642 790.5,-4642 790.5,-4642 835.5,-4642 835.5,-4642 841.5,-4642 847.5,-4648 847.5,-4654 847.5,-4654 847.5,-4666 847.5,-4666 847.5,-4672 841.5,-4678 835.5,-4678"/>
+<text text-anchor="middle" x="813" y="-4657.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">transpose</text>
+</g>
+<!-- matmul_3&#45;&gt;transpose_9 -->
+<g id="edge81" class="edge">
+<title>matmul_3&#45;&gt;transpose_9</title>
+<path fill="none" stroke="var(--line-strong)" d="M813,-4721.69C813,-4710.98 813,-4697.08 813,-4685.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="815.45,-4685.26 813,-4678.26 810.55,-4685.26 815.45,-4685.26"/>
+<text text-anchor="middle" x="839.5" y="-4697.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×7×16</text>
+</g>
+<!-- contiguous_1 -->
+<g id="node66" class="node">
+<title>contiguous_1</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M838,-4598C838,-4598 788,-4598 788,-4598 782,-4598 776,-4592 776,-4586 776,-4586 776,-4574 776,-4574 776,-4568 782,-4562 788,-4562 788,-4562 838,-4562 838,-4562 844,-4562 850,-4568 850,-4574 850,-4574 850,-4586 850,-4586 850,-4592 844,-4598 838,-4598"/>
+<text text-anchor="middle" x="813" y="-4577.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">contiguous</text>
+</g>
+<!-- transpose_9&#45;&gt;contiguous_1 -->
+<g id="edge82" class="edge">
+<title>transpose_9&#45;&gt;contiguous_1</title>
+<path fill="none" stroke="var(--line-strong)" d="M813,-4641.69C813,-4630.98 813,-4617.08 813,-4605.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="815.45,-4605.26 813,-4598.26 810.55,-4605.26 815.45,-4605.26"/>
+<text text-anchor="middle" x="839.5" y="-4617.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×8×16</text>
+</g>
+<!-- contiguous_1&#45;&gt;view_7 -->
+<g id="edge83" class="edge">
+<title>contiguous_1&#45;&gt;view_7</title>
+<path fill="none" stroke="var(--line-strong)" d="M813,-4561.69C813,-4550.98 813,-4537.08 813,-4525.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="815.45,-4525.26 813,-4518.26 810.55,-4525.26 815.45,-4525.26"/>
+<text text-anchor="middle" x="839.5" y="-4537.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×8×16</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_self_attn_to_out_0 -->
+<g id="node68" class="node">
+<title>inner_model_backbone_encoder_layers_1_self_attn_to_out_0</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M847.5,-4438C847.5,-4438 778.5,-4438 778.5,-4438 772.5,-4438 766.5,-4432 766.5,-4426 766.5,-4426 766.5,-4394 766.5,-4394 766.5,-4388 772.5,-4382 778.5,-4382 778.5,-4382 847.5,-4382 847.5,-4382 853.5,-4382 859.5,-4388 859.5,-4394 859.5,-4394 859.5,-4426 859.5,-4426 859.5,-4432 853.5,-4438 847.5,-4438"/>
+<text text-anchor="middle" x="813" y="-4424" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">0</text>
+<text text-anchor="middle" x="813" y="-4413" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Linear</text>
+<text text-anchor="middle" x="813" y="-4402" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">128 → 128</text>
+<text text-anchor="middle" x="813" y="-4391" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">16,512 params</text>
+</g>
+<!-- view_7&#45;&gt;inner_model_backbone_encoder_layers_1_self_attn_to_out_0 -->
+<g id="edge84" class="edge">
+<title>view_7&#45;&gt;inner_model_backbone_encoder_layers_1_self_attn_to_out_0</title>
+<path fill="none" stroke="var(--line-strong)" d="M813,-4481.61C813,-4471.23 813,-4457.68 813,-4445.23"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="815.45,-4445.05 813,-4438.05 810.55,-4445.05 815.45,-4445.05"/>
+<text text-anchor="middle" x="836" y="-4457.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_self_attn_to_out_1 -->
+<g id="node69" class="node">
+<title>inner_model_backbone_encoder_layers_1_self_attn_to_out_1</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M830,-4338C830,-4338 794,-4338 794,-4338 788,-4338 782,-4332 782,-4326 782,-4326 782,-4305 782,-4305 782,-4299 788,-4293 794,-4293 794,-4293 830,-4293 830,-4293 836,-4293 842,-4299 842,-4305 842,-4305 842,-4326 842,-4326 842,-4332 836,-4338 830,-4338"/>
+<text text-anchor="middle" x="812" y="-4324" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">1</text>
+<text text-anchor="middle" x="812" y="-4313" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Dropout</text>
+<text text-anchor="middle" x="812" y="-4302" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">p=0.1</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_self_attn_to_out_0&#45;&gt;inner_model_backbone_encoder_layers_1_self_attn_to_out_1 -->
+<g id="edge85" class="edge">
+<title>inner_model_backbone_encoder_layers_1_self_attn_to_out_0&#45;&gt;inner_model_backbone_encoder_layers_1_self_attn_to_out_1</title>
+<path fill="none" stroke="var(--line-strong)" d="M812.71,-4381.75C812.58,-4370.38 812.44,-4357.16 812.31,-4345.61"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="814.76,-4345.26 812.24,-4338.29 809.86,-4345.32 814.76,-4345.26"/>
+<text text-anchor="middle" x="836" y="-4357.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_dropout_attn -->
+<g id="node70" class="node">
+<title>inner_model_backbone_encoder_layers_1_dropout_attn</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M841.5,-4249C841.5,-4249 782.5,-4249 782.5,-4249 776.5,-4249 770.5,-4243 770.5,-4237 770.5,-4237 770.5,-4216 770.5,-4216 770.5,-4210 776.5,-4204 782.5,-4204 782.5,-4204 841.5,-4204 841.5,-4204 847.5,-4204 853.5,-4210 853.5,-4216 853.5,-4216 853.5,-4237 853.5,-4237 853.5,-4243 847.5,-4249 841.5,-4249"/>
+<text text-anchor="middle" x="812" y="-4235" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">dropout_attn</text>
+<text text-anchor="middle" x="812" y="-4224" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Dropout</text>
+<text text-anchor="middle" x="812" y="-4213" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">p=0.1</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_self_attn_to_out_1&#45;&gt;inner_model_backbone_encoder_layers_1_dropout_attn -->
+<g id="edge86" class="edge">
+<title>inner_model_backbone_encoder_layers_1_self_attn_to_out_1&#45;&gt;inner_model_backbone_encoder_layers_1_dropout_attn</title>
+<path fill="none" stroke="var(--line-strong)" d="M812,-4292.99C812,-4281.91 812,-4268.24 812,-4256.26"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="814.45,-4256.06 812,-4249.06 809.55,-4256.06 814.45,-4256.06"/>
+<text text-anchor="middle" x="835" y="-4268.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_dropout_attn&#45;&gt;add_4 -->
+<g id="edge87" class="edge">
+<title>inner_model_backbone_encoder_layers_1_dropout_attn&#45;&gt;add_4</title>
+<path fill="none" stroke="var(--line-strong)" d="M811.34,-4203.92C811.2,-4198.4 811.07,-4192.48 811,-4187 810.92,-4180.63 810.89,-4173.74 810.89,-4167.35"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="813.34,-4167.14 810.9,-4160.14 808.44,-4167.13 813.34,-4167.14"/>
+<text text-anchor="middle" x="834" y="-4179.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- transpose_10 -->
+<g id="node72" class="node">
+<title>transpose_10</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M728.5,-4080C728.5,-4080 683.5,-4080 683.5,-4080 677.5,-4080 671.5,-4074 671.5,-4068 671.5,-4068 671.5,-4056 671.5,-4056 671.5,-4050 677.5,-4044 683.5,-4044 683.5,-4044 728.5,-4044 728.5,-4044 734.5,-4044 740.5,-4050 740.5,-4056 740.5,-4056 740.5,-4068 740.5,-4068 740.5,-4074 734.5,-4080 728.5,-4080"/>
+<text text-anchor="middle" x="706" y="-4059.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">transpose</text>
+</g>
+<!-- add_4&#45;&gt;transpose_10 -->
+<g id="edge88" class="edge">
+<title>add_4&#45;&gt;transpose_10</title>
+<path fill="none" stroke="var(--line-strong)" d="M787.96,-4123.88C772.37,-4112.3 751.65,-4096.91 734.94,-4084.5"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="736.07,-4082.29 728.99,-4080.08 733.15,-4086.22 736.07,-4082.29"/>
+<text text-anchor="middle" x="788" y="-4099.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_norm_attn_1 -->
+<g id="node73" class="node">
+<title>inner_model_backbone_encoder_layers_1_norm_attn_1</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M673.5,-4000C673.5,-4000 610.5,-4000 610.5,-4000 604.5,-4000 598.5,-3994 598.5,-3988 598.5,-3988 598.5,-3956 598.5,-3956 598.5,-3950 604.5,-3944 610.5,-3944 610.5,-3944 673.5,-3944 673.5,-3944 679.5,-3944 685.5,-3950 685.5,-3956 685.5,-3956 685.5,-3988 685.5,-3988 685.5,-3994 679.5,-4000 673.5,-4000"/>
+<text text-anchor="middle" x="642" y="-3986" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">1</text>
+<text text-anchor="middle" x="642" y="-3975" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">BatchNorm1d</text>
+<text text-anchor="middle" x="642" y="-3964" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">128</text>
+<text text-anchor="middle" x="642" y="-3953" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">256 params</text>
+</g>
+<!-- transpose_10&#45;&gt;inner_model_backbone_encoder_layers_1_norm_attn_1 -->
+<g id="edge89" class="edge">
+<title>transpose_10&#45;&gt;inner_model_backbone_encoder_layers_1_norm_attn_1</title>
+<path fill="none" stroke="var(--line-strong)" d="M693.36,-4043.61C685.52,-4032.84 675.21,-4018.66 665.88,-4005.83"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="667.77,-4004.27 661.68,-4000.05 663.81,-4007.16 667.77,-4004.27"/>
+<text text-anchor="middle" x="703" y="-4019.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×128×7</text>
+</g>
+<!-- transpose_11 -->
+<g id="node74" class="node">
+<title>transpose_11</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M648.5,-3900C648.5,-3900 603.5,-3900 603.5,-3900 597.5,-3900 591.5,-3894 591.5,-3888 591.5,-3888 591.5,-3876 591.5,-3876 591.5,-3870 597.5,-3864 603.5,-3864 603.5,-3864 648.5,-3864 648.5,-3864 654.5,-3864 660.5,-3870 660.5,-3876 660.5,-3876 660.5,-3888 660.5,-3888 660.5,-3894 654.5,-3900 648.5,-3900"/>
+<text text-anchor="middle" x="626" y="-3879.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">transpose</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_norm_attn_1&#45;&gt;transpose_11 -->
+<g id="edge90" class="edge">
+<title>inner_model_backbone_encoder_layers_1_norm_attn_1&#45;&gt;transpose_11</title>
+<path fill="none" stroke="var(--line-strong)" d="M637.03,-3943.64C634.9,-3931.97 632.45,-3918.46 630.39,-3907.17"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="632.77,-3906.55 629.11,-3900.1 627.95,-3907.43 632.77,-3906.55"/>
+<text text-anchor="middle" x="657" y="-3919.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×128×7</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_ff_0 -->
+<g id="node75" class="node">
+<title>inner_model_backbone_encoder_layers_1_ff_0</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M590.5,-3820C590.5,-3820 521.5,-3820 521.5,-3820 515.5,-3820 509.5,-3814 509.5,-3808 509.5,-3808 509.5,-3776 509.5,-3776 509.5,-3770 515.5,-3764 521.5,-3764 521.5,-3764 590.5,-3764 590.5,-3764 596.5,-3764 602.5,-3770 602.5,-3776 602.5,-3776 602.5,-3808 602.5,-3808 602.5,-3814 596.5,-3820 590.5,-3820"/>
+<text text-anchor="middle" x="556" y="-3806" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">0</text>
+<text text-anchor="middle" x="556" y="-3795" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Linear</text>
+<text text-anchor="middle" x="556" y="-3784" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">128 → 256</text>
+<text text-anchor="middle" x="556" y="-3773" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">33,024 params</text>
+</g>
+<!-- transpose_11&#45;&gt;inner_model_backbone_encoder_layers_1_ff_0 -->
+<g id="edge91" class="edge">
+<title>transpose_11&#45;&gt;inner_model_backbone_encoder_layers_1_ff_0</title>
+<path fill="none" stroke="var(--line-strong)" d="M592.45,-3863.84C585.62,-3859.13 579,-3853.49 574,-3847 569.52,-3841.19 566.12,-3834.21 563.56,-3827.22"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="565.79,-3826.15 561.27,-3820.28 561.14,-3827.69 565.79,-3826.15"/>
+<text text-anchor="middle" x="597" y="-3839.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- add_5 -->
+<g id="node80" class="node">
+<title>add_5</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M567,-3362C567,-3362 537,-3362 537,-3362 531,-3362 525,-3356 525,-3350 525,-3350 525,-3338 525,-3338 525,-3332 531,-3326 537,-3326 537,-3326 567,-3326 567,-3326 573,-3326 579,-3332 579,-3338 579,-3338 579,-3350 579,-3350 579,-3356 573,-3362 567,-3362"/>
+<text text-anchor="middle" x="552" y="-3341.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">add</text>
+</g>
+<!-- transpose_11&#45;&gt;add_5 -->
+<g id="edge92" class="edge">
+<title>transpose_11&#45;&gt;add_5</title>
+<path fill="none" stroke="var(--line-strong)" d="M626,-3863.8C626,-3846.06 626,-3817.6 626,-3793 626,-3793 626,-3793 626,-3427.5 626,-3403.64 618.6,-3397.05 603,-3379 597.89,-3373.08 591.5,-3367.76 585,-3363.18"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="586.21,-3361.04 579.03,-3359.19 583.49,-3365.11 586.21,-3361.04"/>
+<text text-anchor="middle" x="649" y="-3615.3" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_ff_1 -->
+<g id="node76" class="node">
+<title>inner_model_backbone_encoder_layers_1_ff_1</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M568,-3720C568,-3720 538,-3720 538,-3720 532,-3720 526,-3714 526,-3708 526,-3708 526,-3696 526,-3696 526,-3690 532,-3684 538,-3684 538,-3684 568,-3684 568,-3684 574,-3684 580,-3690 580,-3696 580,-3696 580,-3708 580,-3708 580,-3714 574,-3720 568,-3720"/>
+<text text-anchor="middle" x="553" y="-3705" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">1</text>
+<text text-anchor="middle" x="553" y="-3694" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">GELU</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_ff_0&#45;&gt;inner_model_backbone_encoder_layers_1_ff_1 -->
+<g id="edge93" class="edge">
+<title>inner_model_backbone_encoder_layers_1_ff_0&#45;&gt;inner_model_backbone_encoder_layers_1_ff_1</title>
+<path fill="none" stroke="var(--line-strong)" d="M555.07,-3763.64C554.67,-3751.97 554.21,-3738.46 553.82,-3727.17"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="556.27,-3727.02 553.58,-3720.1 551.37,-3727.18 556.27,-3727.02"/>
+<text text-anchor="middle" x="578" y="-3739.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×256</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_ff_2 -->
+<g id="node77" class="node">
+<title>inner_model_backbone_encoder_layers_1_ff_2</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M570,-3640C570,-3640 534,-3640 534,-3640 528,-3640 522,-3634 522,-3628 522,-3628 522,-3607 522,-3607 522,-3601 528,-3595 534,-3595 534,-3595 570,-3595 570,-3595 576,-3595 582,-3601 582,-3607 582,-3607 582,-3628 582,-3628 582,-3634 576,-3640 570,-3640"/>
+<text text-anchor="middle" x="552" y="-3626" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">2</text>
+<text text-anchor="middle" x="552" y="-3615" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Dropout</text>
+<text text-anchor="middle" x="552" y="-3604" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">p=0.1</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_ff_1&#45;&gt;inner_model_backbone_encoder_layers_1_ff_2 -->
+<g id="edge94" class="edge">
+<title>inner_model_backbone_encoder_layers_1_ff_1&#45;&gt;inner_model_backbone_encoder_layers_1_ff_2</title>
+<path fill="none" stroke="var(--line-strong)" d="M552.79,-3683.91C552.67,-3673.43 552.5,-3659.75 552.35,-3647.61"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="554.8,-3647.26 552.26,-3640.29 549.9,-3647.32 554.8,-3647.26"/>
+<text text-anchor="middle" x="576" y="-3659.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×256</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_ff_3 -->
+<g id="node78" class="node">
+<title>inner_model_backbone_encoder_layers_1_ff_3</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M586.5,-3551C586.5,-3551 517.5,-3551 517.5,-3551 511.5,-3551 505.5,-3545 505.5,-3539 505.5,-3539 505.5,-3507 505.5,-3507 505.5,-3501 511.5,-3495 517.5,-3495 517.5,-3495 586.5,-3495 586.5,-3495 592.5,-3495 598.5,-3501 598.5,-3507 598.5,-3507 598.5,-3539 598.5,-3539 598.5,-3545 592.5,-3551 586.5,-3551"/>
+<text text-anchor="middle" x="552" y="-3537" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">3</text>
+<text text-anchor="middle" x="552" y="-3526" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Linear</text>
+<text text-anchor="middle" x="552" y="-3515" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">256 → 128</text>
+<text text-anchor="middle" x="552" y="-3504" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">32,896 params</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_ff_2&#45;&gt;inner_model_backbone_encoder_layers_1_ff_3 -->
+<g id="edge95" class="edge">
+<title>inner_model_backbone_encoder_layers_1_ff_2&#45;&gt;inner_model_backbone_encoder_layers_1_ff_3</title>
+<path fill="none" stroke="var(--line-strong)" d="M552,-3594.58C552,-3583.68 552,-3570.27 552,-3558.07"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="554.45,-3558.05 552,-3551.05 549.55,-3558.05 554.45,-3558.05"/>
+<text text-anchor="middle" x="575" y="-3570.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×256</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_dropout_ffn -->
+<g id="node79" class="node">
+<title>inner_model_backbone_encoder_layers_1_dropout_ffn</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M578,-3451C578,-3451 526,-3451 526,-3451 520,-3451 514,-3445 514,-3439 514,-3439 514,-3418 514,-3418 514,-3412 520,-3406 526,-3406 526,-3406 578,-3406 578,-3406 584,-3406 590,-3412 590,-3418 590,-3418 590,-3439 590,-3439 590,-3445 584,-3451 578,-3451"/>
+<text text-anchor="middle" x="552" y="-3437" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">dropout_ffn</text>
+<text text-anchor="middle" x="552" y="-3426" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Dropout</text>
+<text text-anchor="middle" x="552" y="-3415" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">p=0.1</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_ff_3&#45;&gt;inner_model_backbone_encoder_layers_1_dropout_ffn -->
+<g id="edge96" class="edge">
+<title>inner_model_backbone_encoder_layers_1_ff_3&#45;&gt;inner_model_backbone_encoder_layers_1_dropout_ffn</title>
+<path fill="none" stroke="var(--line-strong)" d="M552,-3494.75C552,-3483.38 552,-3470.16 552,-3458.61"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="554.45,-3458.29 552,-3451.29 549.55,-3458.29 554.45,-3458.29"/>
+<text text-anchor="middle" x="575" y="-3470.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_dropout_ffn&#45;&gt;add_5 -->
+<g id="edge97" class="edge">
+<title>inner_model_backbone_encoder_layers_1_dropout_ffn&#45;&gt;add_5</title>
+<path fill="none" stroke="var(--line-strong)" d="M552,-3405.82C552,-3394.62 552,-3380.92 552,-3369.35"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="554.45,-3369.11 552,-3362.11 549.55,-3369.11 554.45,-3369.11"/>
+<text text-anchor="middle" x="575" y="-3381.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- transpose_12 -->
+<g id="node81" class="node">
+<title>transpose_12</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M570.5,-3282C570.5,-3282 525.5,-3282 525.5,-3282 519.5,-3282 513.5,-3276 513.5,-3270 513.5,-3270 513.5,-3258 513.5,-3258 513.5,-3252 519.5,-3246 525.5,-3246 525.5,-3246 570.5,-3246 570.5,-3246 576.5,-3246 582.5,-3252 582.5,-3258 582.5,-3258 582.5,-3270 582.5,-3270 582.5,-3276 576.5,-3282 570.5,-3282"/>
+<text text-anchor="middle" x="548" y="-3261.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">transpose</text>
+</g>
+<!-- add_5&#45;&gt;transpose_12 -->
+<g id="edge98" class="edge">
+<title>add_5&#45;&gt;transpose_12</title>
+<path fill="none" stroke="var(--line-strong)" d="M551.11,-3325.69C550.56,-3314.98 549.85,-3301.08 549.25,-3289.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="551.69,-3289.13 548.89,-3282.26 546.8,-3289.38 551.69,-3289.13"/>
+<text text-anchor="middle" x="574" y="-3301.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_norm_ffn_1 -->
+<g id="node82" class="node">
+<title>inner_model_backbone_encoder_layers_1_norm_ffn_1</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M578.5,-3202C578.5,-3202 515.5,-3202 515.5,-3202 509.5,-3202 503.5,-3196 503.5,-3190 503.5,-3190 503.5,-3158 503.5,-3158 503.5,-3152 509.5,-3146 515.5,-3146 515.5,-3146 578.5,-3146 578.5,-3146 584.5,-3146 590.5,-3152 590.5,-3158 590.5,-3158 590.5,-3190 590.5,-3190 590.5,-3196 584.5,-3202 578.5,-3202"/>
+<text text-anchor="middle" x="547" y="-3188" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">1</text>
+<text text-anchor="middle" x="547" y="-3177" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">BatchNorm1d</text>
+<text text-anchor="middle" x="547" y="-3166" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">128</text>
+<text text-anchor="middle" x="547" y="-3155" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">256 params</text>
+</g>
+<!-- transpose_12&#45;&gt;inner_model_backbone_encoder_layers_1_norm_ffn_1 -->
+<g id="edge99" class="edge">
+<title>transpose_12&#45;&gt;inner_model_backbone_encoder_layers_1_norm_ffn_1</title>
+<path fill="none" stroke="var(--line-strong)" d="M547.8,-3245.61C547.68,-3235.23 547.53,-3221.68 547.39,-3209.23"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="549.84,-3209.03 547.31,-3202.05 544.94,-3209.08 549.84,-3209.03"/>
+<text text-anchor="middle" x="571" y="-3221.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×128×7</text>
+</g>
+<!-- transpose_13 -->
+<g id="node83" class="node">
+<title>transpose_13</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M549.5,-3102C549.5,-3102 504.5,-3102 504.5,-3102 498.5,-3102 492.5,-3096 492.5,-3090 492.5,-3090 492.5,-3078 492.5,-3078 492.5,-3072 498.5,-3066 504.5,-3066 504.5,-3066 549.5,-3066 549.5,-3066 555.5,-3066 561.5,-3072 561.5,-3078 561.5,-3078 561.5,-3090 561.5,-3090 561.5,-3096 555.5,-3102 549.5,-3102"/>
+<text text-anchor="middle" x="527" y="-3081.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">transpose</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_1_norm_ffn_1&#45;&gt;transpose_13 -->
+<g id="edge100" class="edge">
+<title>inner_model_backbone_encoder_layers_1_norm_ffn_1&#45;&gt;transpose_13</title>
+<path fill="none" stroke="var(--line-strong)" d="M540.78,-3145.64C538.13,-3133.97 535.06,-3120.46 532.49,-3109.17"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="534.83,-3108.39 530.89,-3102.1 530.05,-3109.47 534.83,-3108.39"/>
+<text text-anchor="middle" x="560" y="-3121.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×128×7</text>
+</g>
+<!-- size_2 -->
+<g id="node84" class="node">
+<title>size_2</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M495,-2994C495,-2994 465,-2994 465,-2994 459,-2994 453,-2988 453,-2982 453,-2982 453,-2970 453,-2970 453,-2964 459,-2958 465,-2958 465,-2958 495,-2958 495,-2958 501,-2958 507,-2964 507,-2970 507,-2970 507,-2982 507,-2982 507,-2988 501,-2994 495,-2994"/>
+<text text-anchor="middle" x="480" y="-2973.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">size</text>
+</g>
+<!-- transpose_13&#45;&gt;size_2 -->
+<g id="edge101" class="edge">
+<title>transpose_13&#45;&gt;size_2</title>
+<path fill="none" stroke="var(--line-strong)" d="M512.57,-3065.74C508.75,-3060.58 504.89,-3054.76 502,-3049 494.41,-3033.88 488.87,-3015.64 485.25,-3001.31"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="487.56,-3000.43 483.53,-2994.2 482.79,-3001.58 487.56,-3000.43"/>
+<text text-anchor="middle" x="525" y="-3041.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_self_attn_w_q -->
+<g id="node85" class="node">
+<title>inner_model_backbone_encoder_layers_2_self_attn_w_q</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M417.5,-3004C417.5,-3004 348.5,-3004 348.5,-3004 342.5,-3004 336.5,-2998 336.5,-2992 336.5,-2992 336.5,-2960 336.5,-2960 336.5,-2954 342.5,-2948 348.5,-2948 348.5,-2948 417.5,-2948 417.5,-2948 423.5,-2948 429.5,-2954 429.5,-2960 429.5,-2960 429.5,-2992 429.5,-2992 429.5,-2998 423.5,-3004 417.5,-3004"/>
+<text text-anchor="middle" x="383" y="-2990" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">W_Q</text>
+<text text-anchor="middle" x="383" y="-2979" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Linear</text>
+<text text-anchor="middle" x="383" y="-2968" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">128 → 128</text>
+<text text-anchor="middle" x="383" y="-2957" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">16,512 params</text>
+</g>
+<!-- transpose_13&#45;&gt;inner_model_backbone_encoder_layers_2_self_attn_w_q -->
+<g id="edge102" class="edge">
+<title>transpose_13&#45;&gt;inner_model_backbone_encoder_layers_2_self_attn_w_q</title>
+<path fill="none" stroke="var(--line-strong)" d="M492.17,-3072.04C477.45,-3066.46 460.6,-3058.77 447,-3049 432.03,-3038.24 418.08,-3023.4 407.05,-3009.98"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="408.81,-3008.25 402.51,-3004.33 404.99,-3011.32 408.81,-3008.25"/>
+<text text-anchor="middle" x="470" y="-3041.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_self_attn_w_k -->
+<g id="node88" class="node">
+<title>inner_model_backbone_encoder_layers_2_self_attn_w_k</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M302.5,-3004C302.5,-3004 233.5,-3004 233.5,-3004 227.5,-3004 221.5,-2998 221.5,-2992 221.5,-2992 221.5,-2960 221.5,-2960 221.5,-2954 227.5,-2948 233.5,-2948 233.5,-2948 302.5,-2948 302.5,-2948 308.5,-2948 314.5,-2954 314.5,-2960 314.5,-2960 314.5,-2992 314.5,-2992 314.5,-2998 308.5,-3004 302.5,-3004"/>
+<text text-anchor="middle" x="268" y="-2990" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">W_K</text>
+<text text-anchor="middle" x="268" y="-2979" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Linear</text>
+<text text-anchor="middle" x="268" y="-2968" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">128 → 128</text>
+<text text-anchor="middle" x="268" y="-2957" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">16,512 params</text>
+</g>
+<!-- transpose_13&#45;&gt;inner_model_backbone_encoder_layers_2_self_attn_w_k -->
+<g id="edge103" class="edge">
+<title>transpose_13&#45;&gt;inner_model_backbone_encoder_layers_2_self_attn_w_k</title>
+<path fill="none" stroke="var(--line-strong)" d="M492.31,-3079.87C450.24,-3074.82 378.36,-3062.07 325,-3031 314.95,-3025.15 305.27,-3017.2 296.83,-3009.21"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="298.46,-3007.38 291.74,-3004.24 295.04,-3010.88 298.46,-3007.38"/>
+<text text-anchor="middle" x="384" y="-3041.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_self_attn_w_v -->
+<g id="node91" class="node">
+<title>inner_model_backbone_encoder_layers_2_self_attn_w_v</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M416.5,-2584C416.5,-2584 347.5,-2584 347.5,-2584 341.5,-2584 335.5,-2578 335.5,-2572 335.5,-2572 335.5,-2540 335.5,-2540 335.5,-2534 341.5,-2528 347.5,-2528 347.5,-2528 416.5,-2528 416.5,-2528 422.5,-2528 428.5,-2534 428.5,-2540 428.5,-2540 428.5,-2572 428.5,-2572 428.5,-2578 422.5,-2584 416.5,-2584"/>
+<text text-anchor="middle" x="382" y="-2570" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">W_V</text>
+<text text-anchor="middle" x="382" y="-2559" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Linear</text>
+<text text-anchor="middle" x="382" y="-2548" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">128 → 128</text>
+<text text-anchor="middle" x="382" y="-2537" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">16,512 params</text>
+</g>
+<!-- transpose_13&#45;&gt;inner_model_backbone_encoder_layers_2_self_attn_w_v -->
+<g id="edge104" class="edge">
+<title>transpose_13&#45;&gt;inner_model_backbone_encoder_layers_2_self_attn_w_v</title>
+<path fill="none" stroke="var(--line-strong)" d="M539.9,-3065.66C543.26,-3060.51 546.61,-3054.71 549,-3049 561.66,-3018.76 565,-3009.78 565,-2977 565,-2977 565,-2977 565,-2645 565,-2587.14 489.78,-2567.3 435.79,-2560.51"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="435.89,-2558.06 428.65,-2559.67 435.32,-2562.92 435.89,-2558.06"/>
+<text text-anchor="middle" x="588" y="-2803.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- add_7 -->
+<g id="node107" class="node">
+<title>add_7</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M398,-1717C398,-1717 368,-1717 368,-1717 362,-1717 356,-1711 356,-1705 356,-1705 356,-1693 356,-1693 356,-1687 362,-1681 368,-1681 368,-1681 398,-1681 398,-1681 404,-1681 410,-1687 410,-1693 410,-1693 410,-1705 410,-1705 410,-1711 404,-1717 398,-1717"/>
+<text text-anchor="middle" x="383" y="-1696.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">add</text>
+</g>
+<!-- transpose_13&#45;&gt;add_7 -->
+<g id="edge105" class="edge">
+<title>transpose_13&#45;&gt;add_7</title>
+<path fill="none" stroke="var(--line-strong)" d="M561.69,-3079.33C646.42,-3069.4 857,-3038.53 857,-2977 857,-2977 857,-2977 857,-1782.5 857,-1737.85 526.28,-1710.23 417.34,-1702.34"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="417.34,-1699.89 410.19,-1701.83 416.99,-1704.77 417.34,-1699.89"/>
+<text text-anchor="middle" x="880" y="-2379.3" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- view_8 -->
+<g id="node86" class="node">
+<title>view_8</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M391,-2904C391,-2904 361,-2904 361,-2904 355,-2904 349,-2898 349,-2892 349,-2892 349,-2880 349,-2880 349,-2874 355,-2868 361,-2868 361,-2868 391,-2868 391,-2868 397,-2868 403,-2874 403,-2880 403,-2880 403,-2892 403,-2892 403,-2898 397,-2904 391,-2904"/>
+<text text-anchor="middle" x="376" y="-2883.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">view</text>
+</g>
+<!-- size_2&#45;&gt;view_8 -->
+<g id="edge106" class="edge">
+<title>size_2&#45;&gt;view_8</title>
+<path fill="none" stroke="var(--line-strong)" d="M460.61,-2957.79C448.46,-2947.1 432.43,-2933.12 418,-2921 413.25,-2917.01 408.15,-2912.81 403.2,-2908.78"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="404.47,-2906.66 397.49,-2904.15 401.38,-2910.46 404.47,-2906.66"/>
+</g>
+<!-- view_9 -->
+<g id="node89" class="node">
+<title>view_9</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M303,-2904C303,-2904 273,-2904 273,-2904 267,-2904 261,-2898 261,-2892 261,-2892 261,-2880 261,-2880 261,-2874 267,-2868 273,-2868 273,-2868 303,-2868 303,-2868 309,-2868 315,-2874 315,-2880 315,-2880 315,-2892 315,-2892 315,-2898 309,-2904 303,-2904"/>
+<text text-anchor="middle" x="288" y="-2883.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">view</text>
+</g>
+<!-- size_2&#45;&gt;view_9 -->
+<g id="edge107" class="edge">
+<title>size_2&#45;&gt;view_9</title>
+<path fill="none" stroke="var(--line-strong)" d="M457.05,-2957.88C452.17,-2954.47 446.98,-2951.02 442,-2948 419.39,-2934.31 413.39,-2931.21 389,-2921 366.96,-2911.77 360.64,-2911.62 338,-2904 332.81,-2902.25 327.31,-2900.39 321.94,-2898.57"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="322.65,-2896.23 315.24,-2896.29 321.08,-2900.86 322.65,-2896.23"/>
+</g>
+<!-- view_10 -->
+<g id="node92" class="node">
+<title>view_10</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M397,-2484C397,-2484 367,-2484 367,-2484 361,-2484 355,-2478 355,-2472 355,-2472 355,-2460 355,-2460 355,-2454 361,-2448 367,-2448 367,-2448 397,-2448 397,-2448 403,-2448 409,-2454 409,-2460 409,-2460 409,-2472 409,-2472 409,-2478 403,-2484 397,-2484"/>
+<text text-anchor="middle" x="382" y="-2463.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">view</text>
+</g>
+<!-- size_2&#45;&gt;view_10 -->
+<g id="edge108" class="edge">
+<title>size_2&#45;&gt;view_10</title>
+<path fill="none" stroke="var(--line-strong)" d="M474.71,-2957.99C469.72,-2940.4 463,-2912.05 463,-2887 463,-2887 463,-2887 463,-2555 463,-2525.26 437.65,-2501.26 415.32,-2485.88"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="416.61,-2483.8 409.42,-2481.96 413.9,-2487.88 416.61,-2483.8"/>
+</g>
+<!-- view_11 -->
+<g id="node103" class="node">
+<title>view_11</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M398,-2075C398,-2075 368,-2075 368,-2075 362,-2075 356,-2069 356,-2063 356,-2063 356,-2051 356,-2051 356,-2045 362,-2039 368,-2039 368,-2039 398,-2039 398,-2039 404,-2039 410,-2045 410,-2051 410,-2051 410,-2063 410,-2063 410,-2069 404,-2075 398,-2075"/>
+<text text-anchor="middle" x="383" y="-2054.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">view</text>
+</g>
+<!-- size_2&#45;&gt;view_11 -->
+<g id="edge109" class="edge">
+<title>size_2&#45;&gt;view_11</title>
+<path fill="none" stroke="var(--line-strong)" d="M489.34,-2957.69C497.81,-2940.33 509,-2912.58 509,-2887 509,-2887 509,-2887 509,-2136 509,-2092.71 454.55,-2072.63 417.24,-2063.95"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="417.39,-2061.47 410.03,-2062.36 416.34,-2066.26 417.39,-2061.47"/>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_self_attn_w_q&#45;&gt;view_8 -->
+<g id="edge110" class="edge">
+<title>inner_model_backbone_encoder_layers_2_self_attn_w_q&#45;&gt;view_8</title>
+<path fill="none" stroke="var(--line-strong)" d="M374.37,-2947.77C372.97,-2942.27 371.74,-2936.49 371,-2931 370.41,-2926.59 370.68,-2925.43 371,-2921 371.23,-2917.84 371.58,-2914.52 371.99,-2911.25"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="374.43,-2911.51 372.97,-2904.24 369.58,-2910.84 374.43,-2911.51"/>
+<text text-anchor="middle" x="394" y="-2923.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- transpose_14 -->
+<g id="node87" class="node">
+<title>transpose_14</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M398.5,-2824C398.5,-2824 353.5,-2824 353.5,-2824 347.5,-2824 341.5,-2818 341.5,-2812 341.5,-2812 341.5,-2800 341.5,-2800 341.5,-2794 347.5,-2788 353.5,-2788 353.5,-2788 398.5,-2788 398.5,-2788 404.5,-2788 410.5,-2794 410.5,-2800 410.5,-2800 410.5,-2812 410.5,-2812 410.5,-2818 404.5,-2824 398.5,-2824"/>
+<text text-anchor="middle" x="376" y="-2803.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">transpose</text>
+</g>
+<!-- view_8&#45;&gt;transpose_14 -->
+<g id="edge111" class="edge">
+<title>view_8&#45;&gt;transpose_14</title>
+<path fill="none" stroke="var(--line-strong)" d="M376,-2867.69C376,-2856.98 376,-2843.08 376,-2831.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="378.45,-2831.26 376,-2824.26 373.55,-2831.26 378.45,-2831.26"/>
+<text text-anchor="middle" x="402.5" y="-2843.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×8×16</text>
+</g>
+<!-- matmul_4 -->
+<g id="node94" class="node">
+<title>matmul_4</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M416.5,-2744C416.5,-2744 381.5,-2744 381.5,-2744 375.5,-2744 369.5,-2738 369.5,-2732 369.5,-2732 369.5,-2720 369.5,-2720 369.5,-2714 375.5,-2708 381.5,-2708 381.5,-2708 416.5,-2708 416.5,-2708 422.5,-2708 428.5,-2714 428.5,-2720 428.5,-2720 428.5,-2732 428.5,-2732 428.5,-2738 422.5,-2744 416.5,-2744"/>
+<text text-anchor="middle" x="399" y="-2723.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">matmul</text>
+</g>
+<!-- transpose_14&#45;&gt;matmul_4 -->
+<g id="edge112" class="edge">
+<title>transpose_14&#45;&gt;matmul_4</title>
+<path fill="none" stroke="var(--line-strong)" d="M381.1,-2787.69C384.26,-2776.98 388.36,-2763.08 391.84,-2751.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="394.28,-2751.67 393.91,-2744.26 389.58,-2750.28 394.28,-2751.67"/>
+<text text-anchor="middle" x="415.5" y="-2763.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×7×16</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_self_attn_w_k&#45;&gt;view_9 -->
+<g id="edge113" class="edge">
+<title>inner_model_backbone_encoder_layers_2_self_attn_w_k&#45;&gt;view_9</title>
+<path fill="none" stroke="var(--line-strong)" d="M274.22,-2947.64C276.87,-2935.97 279.94,-2922.46 282.51,-2911.17"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="284.95,-2911.47 284.11,-2904.1 280.17,-2910.39 284.95,-2911.47"/>
+<text text-anchor="middle" x="303" y="-2923.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- permute_5 -->
+<g id="node90" class="node">
+<title>permute_5</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M307,-2824C307,-2824 269,-2824 269,-2824 263,-2824 257,-2818 257,-2812 257,-2812 257,-2800 257,-2800 257,-2794 263,-2788 269,-2788 269,-2788 307,-2788 307,-2788 313,-2788 319,-2794 319,-2800 319,-2800 319,-2812 319,-2812 319,-2818 313,-2824 307,-2824"/>
+<text text-anchor="middle" x="288" y="-2803.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">permute</text>
+</g>
+<!-- view_9&#45;&gt;permute_5 -->
+<g id="edge114" class="edge">
+<title>view_9&#45;&gt;permute_5</title>
+<path fill="none" stroke="var(--line-strong)" d="M288,-2867.69C288,-2856.98 288,-2843.08 288,-2831.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="290.45,-2831.26 288,-2824.26 285.55,-2831.26 290.45,-2831.26"/>
+<text text-anchor="middle" x="314.5" y="-2843.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×8×16</text>
+</g>
+<!-- permute_5&#45;&gt;matmul_4 -->
+<g id="edge115" class="edge">
+<title>permute_5&#45;&gt;matmul_4</title>
+<path fill="none" stroke="var(--line-strong)" d="M301.52,-2787.68C308.96,-2778.92 318.76,-2768.57 329,-2761 334.98,-2756.58 348.74,-2749.69 362.5,-2743.25"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="363.89,-2745.31 369.22,-2740.15 361.83,-2740.86 363.89,-2745.31"/>
+<text text-anchor="middle" x="355.5" y="-2763.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×16×7</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_self_attn_w_v&#45;&gt;view_10 -->
+<g id="edge116" class="edge">
+<title>inner_model_backbone_encoder_layers_2_self_attn_w_v&#45;&gt;view_10</title>
+<path fill="none" stroke="var(--line-strong)" d="M382,-2527.64C382,-2515.97 382,-2502.46 382,-2491.17"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="384.45,-2491.1 382,-2484.1 379.55,-2491.1 384.45,-2491.1"/>
+<text text-anchor="middle" x="405" y="-2503.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- transpose_15 -->
+<g id="node93" class="node">
+<title>transpose_15</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M399.5,-2399.5C399.5,-2399.5 354.5,-2399.5 354.5,-2399.5 348.5,-2399.5 342.5,-2393.5 342.5,-2387.5 342.5,-2387.5 342.5,-2375.5 342.5,-2375.5 342.5,-2369.5 348.5,-2363.5 354.5,-2363.5 354.5,-2363.5 399.5,-2363.5 399.5,-2363.5 405.5,-2363.5 411.5,-2369.5 411.5,-2375.5 411.5,-2375.5 411.5,-2387.5 411.5,-2387.5 411.5,-2393.5 405.5,-2399.5 399.5,-2399.5"/>
+<text text-anchor="middle" x="377" y="-2379" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">transpose</text>
+</g>
+<!-- view_10&#45;&gt;transpose_15 -->
+<g id="edge117" class="edge">
+<title>view_10&#45;&gt;transpose_15</title>
+<path fill="none" stroke="var(--line-strong)" d="M380.96,-2447.91C380.24,-2435.96 379.26,-2419.84 378.46,-2406.59"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="380.9,-2406.41 378.03,-2399.57 376.01,-2406.71 380.9,-2406.41"/>
+<text text-anchor="middle" x="406.5" y="-2423.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×8×16</text>
+</g>
+<!-- matmul_5 -->
+<g id="node100" class="node">
+<title>matmul_5</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M393.5,-2315C393.5,-2315 358.5,-2315 358.5,-2315 352.5,-2315 346.5,-2309 346.5,-2303 346.5,-2303 346.5,-2291 346.5,-2291 346.5,-2285 352.5,-2279 358.5,-2279 358.5,-2279 393.5,-2279 393.5,-2279 399.5,-2279 405.5,-2285 405.5,-2291 405.5,-2291 405.5,-2303 405.5,-2303 405.5,-2309 399.5,-2315 393.5,-2315"/>
+<text text-anchor="middle" x="376" y="-2294.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">matmul</text>
+</g>
+<!-- transpose_15&#45;&gt;matmul_5 -->
+<g id="edge118" class="edge">
+<title>transpose_15&#45;&gt;matmul_5</title>
+<path fill="none" stroke="var(--line-strong)" d="M376.79,-2363.41C376.65,-2351.46 376.45,-2335.34 376.29,-2322.09"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="378.74,-2322.04 376.21,-2315.07 373.84,-2322.1 378.74,-2322.04"/>
+<text text-anchor="middle" x="403.5" y="-2334.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×7×16</text>
+</g>
+<!-- mul_3 -->
+<g id="node96" class="node">
+<title>mul_3</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M297,-2664C297,-2664 267,-2664 267,-2664 261,-2664 255,-2658 255,-2652 255,-2652 255,-2640 255,-2640 255,-2634 261,-2628 267,-2628 267,-2628 297,-2628 297,-2628 303,-2628 309,-2634 309,-2640 309,-2640 309,-2652 309,-2652 309,-2658 303,-2664 297,-2664"/>
+<text text-anchor="middle" x="282" y="-2643.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">mul</text>
+</g>
+<!-- matmul_4&#45;&gt;mul_3 -->
+<g id="edge119" class="edge">
+<title>matmul_4&#45;&gt;mul_3</title>
+<path fill="none" stroke="var(--line-strong)" d="M373.32,-2707.88C355.8,-2696.2 332.46,-2680.64 313.76,-2668.18"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="314.8,-2665.92 307.62,-2664.08 312.08,-2670 314.8,-2665.92"/>
+<text text-anchor="middle" x="371.5" y="-2683.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×7×7</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_self_attn_sdp_attn_scale -->
+<g id="node95" class="node">
+<title>inner_model_backbone_encoder_layers_2_self_attn_sdp_attn_scale</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M335.5,-2744C335.5,-2744 28.5,-2744 28.5,-2744 22.5,-2744 16.5,-2738 16.5,-2732 16.5,-2732 16.5,-2720 16.5,-2720 16.5,-2714 22.5,-2708 28.5,-2708 28.5,-2708 335.5,-2708 335.5,-2708 341.5,-2708 347.5,-2714 347.5,-2720 347.5,-2720 347.5,-2732 347.5,-2732 347.5,-2738 341.5,-2744 335.5,-2744"/>
+<text text-anchor="middle" x="182" y="-2723.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">inner.model.backbone.encoder.layers.2.self_attn.sdp_attn.scale</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_self_attn_sdp_attn_scale&#45;&gt;mul_3 -->
+<g id="edge120" class="edge">
+<title>inner_model_backbone_encoder_layers_2_self_attn_sdp_attn_scale&#45;&gt;mul_3</title>
+<path fill="none" stroke="var(--line-strong)" d="M204.19,-2707.69C218.95,-2696.18 238.45,-2680.97 254.24,-2668.66"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="255.86,-2670.5 259.87,-2664.26 252.84,-2666.64 255.86,-2670.5"/>
+</g>
+<!-- mul_3&#45;&gt;add_6 -->
+<g id="edge121" class="edge">
+<title>mul_3&#45;&gt;add_6</title>
+<path fill="none" stroke="var(--line-strong)" d="M282,-2627.61C282,-2614.39 282,-2596.03 282,-2581.35"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="284.45,-2581.05 282,-2574.05 279.55,-2581.05 284.45,-2581.05"/>
+<text text-anchor="middle" x="305.5" y="-2603.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×7×7</text>
+</g>
+<!-- softmax_2 -->
+<g id="node98" class="node">
+<title>softmax_2</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M298,-2484C298,-2484 262,-2484 262,-2484 256,-2484 250,-2478 250,-2472 250,-2472 250,-2460 250,-2460 250,-2454 256,-2448 262,-2448 262,-2448 298,-2448 298,-2448 304,-2448 310,-2454 310,-2460 310,-2460 310,-2472 310,-2472 310,-2478 304,-2484 298,-2484"/>
+<text text-anchor="middle" x="280" y="-2463.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">softmax</text>
+</g>
+<!-- add_6&#45;&gt;softmax_2 -->
+<g id="edge122" class="edge">
+<title>add_6&#45;&gt;softmax_2</title>
+<path fill="none" stroke="var(--line-strong)" d="M281.6,-2537.61C281.3,-2524.39 280.89,-2506.03 280.55,-2491.35"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="283,-2490.99 280.39,-2484.05 278.1,-2491.1 283,-2490.99"/>
+<text text-anchor="middle" x="304.5" y="-2503.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×7×7</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_self_attn_sdp_attn_attn_dropout -->
+<g id="node99" class="node">
+<title>inner_model_backbone_encoder_layers_2_self_attn_sdp_attn_attn_dropout</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M308.5,-2404C308.5,-2404 249.5,-2404 249.5,-2404 243.5,-2404 237.5,-2398 237.5,-2392 237.5,-2392 237.5,-2371 237.5,-2371 237.5,-2365 243.5,-2359 249.5,-2359 249.5,-2359 308.5,-2359 308.5,-2359 314.5,-2359 320.5,-2365 320.5,-2371 320.5,-2371 320.5,-2392 320.5,-2392 320.5,-2398 314.5,-2404 308.5,-2404"/>
+<text text-anchor="middle" x="279" y="-2390" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">attn_dropout</text>
+<text text-anchor="middle" x="279" y="-2379" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Dropout</text>
+<text text-anchor="middle" x="279" y="-2368" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">p=0.0</text>
+</g>
+<!-- softmax_2&#45;&gt;inner_model_backbone_encoder_layers_2_self_attn_sdp_attn_attn_dropout -->
+<g id="edge123" class="edge">
+<title>softmax_2&#45;&gt;inner_model_backbone_encoder_layers_2_self_attn_sdp_attn_attn_dropout</title>
+<path fill="none" stroke="var(--line-strong)" d="M279.79,-2447.91C279.67,-2437.43 279.5,-2423.75 279.35,-2411.61"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="281.8,-2411.26 279.26,-2404.29 276.9,-2411.32 281.8,-2411.26"/>
+<text text-anchor="middle" x="303.5" y="-2423.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×7×7</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_self_attn_sdp_attn_attn_dropout&#45;&gt;matmul_5 -->
+<g id="edge124" class="edge">
+<title>inner_model_backbone_encoder_layers_2_self_attn_sdp_attn_attn_dropout&#45;&gt;matmul_5</title>
+<path fill="none" stroke="var(--line-strong)" d="M297.73,-2358.71C305.73,-2349.97 315.41,-2340.07 325,-2332 330.31,-2327.53 336.23,-2323.13 342.1,-2319.05"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="343.51,-2321.05 347.93,-2315.09 340.76,-2317 343.51,-2321.05"/>
+<text text-anchor="middle" x="348.5" y="-2334.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×7×7</text>
+</g>
+<!-- transpose_16 -->
+<g id="node101" class="node">
+<title>transpose_16</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M398.5,-2235C398.5,-2235 353.5,-2235 353.5,-2235 347.5,-2235 341.5,-2229 341.5,-2223 341.5,-2223 341.5,-2211 341.5,-2211 341.5,-2205 347.5,-2199 353.5,-2199 353.5,-2199 398.5,-2199 398.5,-2199 404.5,-2199 410.5,-2205 410.5,-2211 410.5,-2211 410.5,-2223 410.5,-2223 410.5,-2229 404.5,-2235 398.5,-2235"/>
+<text text-anchor="middle" x="376" y="-2214.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">transpose</text>
+</g>
+<!-- matmul_5&#45;&gt;transpose_16 -->
+<g id="edge125" class="edge">
+<title>matmul_5&#45;&gt;transpose_16</title>
+<path fill="none" stroke="var(--line-strong)" d="M376,-2278.69C376,-2267.98 376,-2254.08 376,-2242.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="378.45,-2242.26 376,-2235.26 373.55,-2242.26 378.45,-2242.26"/>
+<text text-anchor="middle" x="402.5" y="-2254.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×8×7×16</text>
+</g>
+<!-- contiguous_2 -->
+<g id="node102" class="node">
+<title>contiguous_2</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M401,-2155C401,-2155 351,-2155 351,-2155 345,-2155 339,-2149 339,-2143 339,-2143 339,-2131 339,-2131 339,-2125 345,-2119 351,-2119 351,-2119 401,-2119 401,-2119 407,-2119 413,-2125 413,-2131 413,-2131 413,-2143 413,-2143 413,-2149 407,-2155 401,-2155"/>
+<text text-anchor="middle" x="376" y="-2134.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">contiguous</text>
+</g>
+<!-- transpose_16&#45;&gt;contiguous_2 -->
+<g id="edge126" class="edge">
+<title>transpose_16&#45;&gt;contiguous_2</title>
+<path fill="none" stroke="var(--line-strong)" d="M376,-2198.69C376,-2187.98 376,-2174.08 376,-2162.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="378.45,-2162.26 376,-2155.26 373.55,-2162.26 378.45,-2162.26"/>
+<text text-anchor="middle" x="402.5" y="-2174.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×8×16</text>
+</g>
+<!-- contiguous_2&#45;&gt;view_11 -->
+<g id="edge127" class="edge">
+<title>contiguous_2&#45;&gt;view_11</title>
+<path fill="none" stroke="var(--line-strong)" d="M377.55,-2118.69C378.51,-2107.98 379.76,-2094.08 380.82,-2082.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="383.27,-2082.45 381.45,-2075.26 378.38,-2082.02 383.27,-2082.45"/>
+<text text-anchor="middle" x="406.5" y="-2094.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×8×16</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_self_attn_to_out_0 -->
+<g id="node104" class="node">
+<title>inner_model_backbone_encoder_layers_2_self_attn_to_out_0</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M417.5,-1995C417.5,-1995 348.5,-1995 348.5,-1995 342.5,-1995 336.5,-1989 336.5,-1983 336.5,-1983 336.5,-1951 336.5,-1951 336.5,-1945 342.5,-1939 348.5,-1939 348.5,-1939 417.5,-1939 417.5,-1939 423.5,-1939 429.5,-1945 429.5,-1951 429.5,-1951 429.5,-1983 429.5,-1983 429.5,-1989 423.5,-1995 417.5,-1995"/>
+<text text-anchor="middle" x="383" y="-1981" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">0</text>
+<text text-anchor="middle" x="383" y="-1970" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Linear</text>
+<text text-anchor="middle" x="383" y="-1959" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">128 → 128</text>
+<text text-anchor="middle" x="383" y="-1948" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">16,512 params</text>
+</g>
+<!-- view_11&#45;&gt;inner_model_backbone_encoder_layers_2_self_attn_to_out_0 -->
+<g id="edge128" class="edge">
+<title>view_11&#45;&gt;inner_model_backbone_encoder_layers_2_self_attn_to_out_0</title>
+<path fill="none" stroke="var(--line-strong)" d="M383,-2038.61C383,-2028.23 383,-2014.68 383,-2002.23"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="385.45,-2002.05 383,-1995.05 380.55,-2002.05 385.45,-2002.05"/>
+<text text-anchor="middle" x="406" y="-2014.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_self_attn_to_out_1 -->
+<g id="node105" class="node">
+<title>inner_model_backbone_encoder_layers_2_self_attn_to_out_1</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M401,-1895C401,-1895 365,-1895 365,-1895 359,-1895 353,-1889 353,-1883 353,-1883 353,-1862 353,-1862 353,-1856 359,-1850 365,-1850 365,-1850 401,-1850 401,-1850 407,-1850 413,-1856 413,-1862 413,-1862 413,-1883 413,-1883 413,-1889 407,-1895 401,-1895"/>
+<text text-anchor="middle" x="383" y="-1881" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">1</text>
+<text text-anchor="middle" x="383" y="-1870" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Dropout</text>
+<text text-anchor="middle" x="383" y="-1859" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">p=0.1</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_self_attn_to_out_0&#45;&gt;inner_model_backbone_encoder_layers_2_self_attn_to_out_1 -->
+<g id="edge129" class="edge">
+<title>inner_model_backbone_encoder_layers_2_self_attn_to_out_0&#45;&gt;inner_model_backbone_encoder_layers_2_self_attn_to_out_1</title>
+<path fill="none" stroke="var(--line-strong)" d="M383,-1938.75C383,-1927.38 383,-1914.16 383,-1902.61"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="385.45,-1902.29 383,-1895.29 380.55,-1902.29 385.45,-1902.29"/>
+<text text-anchor="middle" x="406" y="-1914.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_dropout_attn -->
+<g id="node106" class="node">
+<title>inner_model_backbone_encoder_layers_2_dropout_attn</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M412.5,-1806C412.5,-1806 353.5,-1806 353.5,-1806 347.5,-1806 341.5,-1800 341.5,-1794 341.5,-1794 341.5,-1773 341.5,-1773 341.5,-1767 347.5,-1761 353.5,-1761 353.5,-1761 412.5,-1761 412.5,-1761 418.5,-1761 424.5,-1767 424.5,-1773 424.5,-1773 424.5,-1794 424.5,-1794 424.5,-1800 418.5,-1806 412.5,-1806"/>
+<text text-anchor="middle" x="383" y="-1792" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">dropout_attn</text>
+<text text-anchor="middle" x="383" y="-1781" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Dropout</text>
+<text text-anchor="middle" x="383" y="-1770" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">p=0.1</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_self_attn_to_out_1&#45;&gt;inner_model_backbone_encoder_layers_2_dropout_attn -->
+<g id="edge130" class="edge">
+<title>inner_model_backbone_encoder_layers_2_self_attn_to_out_1&#45;&gt;inner_model_backbone_encoder_layers_2_dropout_attn</title>
+<path fill="none" stroke="var(--line-strong)" d="M383,-1849.99C383,-1838.91 383,-1825.24 383,-1813.26"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="385.45,-1813.06 383,-1806.06 380.55,-1813.06 385.45,-1813.06"/>
+<text text-anchor="middle" x="406" y="-1825.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_dropout_attn&#45;&gt;add_7 -->
+<g id="edge131" class="edge">
+<title>inner_model_backbone_encoder_layers_2_dropout_attn&#45;&gt;add_7</title>
+<path fill="none" stroke="var(--line-strong)" d="M383,-1760.82C383,-1749.62 383,-1735.92 383,-1724.35"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="385.45,-1724.11 383,-1717.11 380.55,-1724.11 385.45,-1724.11"/>
+<text text-anchor="middle" x="406" y="-1736.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- transpose_17 -->
+<g id="node108" class="node">
+<title>transpose_17</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M405.5,-1637C405.5,-1637 360.5,-1637 360.5,-1637 354.5,-1637 348.5,-1631 348.5,-1625 348.5,-1625 348.5,-1613 348.5,-1613 348.5,-1607 354.5,-1601 360.5,-1601 360.5,-1601 405.5,-1601 405.5,-1601 411.5,-1601 417.5,-1607 417.5,-1613 417.5,-1613 417.5,-1625 417.5,-1625 417.5,-1631 411.5,-1637 405.5,-1637"/>
+<text text-anchor="middle" x="383" y="-1616.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">transpose</text>
+</g>
+<!-- add_7&#45;&gt;transpose_17 -->
+<g id="edge132" class="edge">
+<title>add_7&#45;&gt;transpose_17</title>
+<path fill="none" stroke="var(--line-strong)" d="M383,-1680.69C383,-1669.98 383,-1656.08 383,-1644.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="385.45,-1644.26 383,-1637.26 380.55,-1644.26 385.45,-1644.26"/>
+<text text-anchor="middle" x="406" y="-1656.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_norm_attn_1 -->
+<g id="node109" class="node">
+<title>inner_model_backbone_encoder_layers_2_norm_attn_1</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M414.5,-1557C414.5,-1557 351.5,-1557 351.5,-1557 345.5,-1557 339.5,-1551 339.5,-1545 339.5,-1545 339.5,-1513 339.5,-1513 339.5,-1507 345.5,-1501 351.5,-1501 351.5,-1501 414.5,-1501 414.5,-1501 420.5,-1501 426.5,-1507 426.5,-1513 426.5,-1513 426.5,-1545 426.5,-1545 426.5,-1551 420.5,-1557 414.5,-1557"/>
+<text text-anchor="middle" x="383" y="-1543" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">1</text>
+<text text-anchor="middle" x="383" y="-1532" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">BatchNorm1d</text>
+<text text-anchor="middle" x="383" y="-1521" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">128</text>
+<text text-anchor="middle" x="383" y="-1510" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">256 params</text>
+</g>
+<!-- transpose_17&#45;&gt;inner_model_backbone_encoder_layers_2_norm_attn_1 -->
+<g id="edge133" class="edge">
+<title>transpose_17&#45;&gt;inner_model_backbone_encoder_layers_2_norm_attn_1</title>
+<path fill="none" stroke="var(--line-strong)" d="M383,-1600.61C383,-1590.23 383,-1576.68 383,-1564.23"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="385.45,-1564.05 383,-1557.05 380.55,-1564.05 385.45,-1564.05"/>
+<text text-anchor="middle" x="406" y="-1576.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×128×7</text>
+</g>
+<!-- transpose_18 -->
+<g id="node110" class="node">
+<title>transpose_18</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M405.5,-1457C405.5,-1457 360.5,-1457 360.5,-1457 354.5,-1457 348.5,-1451 348.5,-1445 348.5,-1445 348.5,-1433 348.5,-1433 348.5,-1427 354.5,-1421 360.5,-1421 360.5,-1421 405.5,-1421 405.5,-1421 411.5,-1421 417.5,-1427 417.5,-1433 417.5,-1433 417.5,-1445 417.5,-1445 417.5,-1451 411.5,-1457 405.5,-1457"/>
+<text text-anchor="middle" x="383" y="-1436.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">transpose</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_norm_attn_1&#45;&gt;transpose_18 -->
+<g id="edge134" class="edge">
+<title>inner_model_backbone_encoder_layers_2_norm_attn_1&#45;&gt;transpose_18</title>
+<path fill="none" stroke="var(--line-strong)" d="M383,-1500.64C383,-1488.97 383,-1475.46 383,-1464.17"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="385.45,-1464.1 383,-1457.1 380.55,-1464.1 385.45,-1464.1"/>
+<text text-anchor="middle" x="406" y="-1476.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×128×7</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_ff_0 -->
+<g id="node111" class="node">
+<title>inner_model_backbone_encoder_layers_2_ff_0</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M346.5,-1377C346.5,-1377 277.5,-1377 277.5,-1377 271.5,-1377 265.5,-1371 265.5,-1365 265.5,-1365 265.5,-1333 265.5,-1333 265.5,-1327 271.5,-1321 277.5,-1321 277.5,-1321 346.5,-1321 346.5,-1321 352.5,-1321 358.5,-1327 358.5,-1333 358.5,-1333 358.5,-1365 358.5,-1365 358.5,-1371 352.5,-1377 346.5,-1377"/>
+<text text-anchor="middle" x="312" y="-1363" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">0</text>
+<text text-anchor="middle" x="312" y="-1352" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Linear</text>
+<text text-anchor="middle" x="312" y="-1341" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">128 → 256</text>
+<text text-anchor="middle" x="312" y="-1330" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">33,024 params</text>
+</g>
+<!-- transpose_18&#45;&gt;inner_model_backbone_encoder_layers_2_ff_0 -->
+<g id="edge135" class="edge">
+<title>transpose_18&#45;&gt;inner_model_backbone_encoder_layers_2_ff_0</title>
+<path fill="none" stroke="var(--line-strong)" d="M349.8,-1420.96C342.87,-1416.22 336.13,-1410.54 331,-1404 326.4,-1398.13 322.87,-1391.07 320.17,-1384.01"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="322.34,-1382.82 317.74,-1377.01 317.71,-1384.42 322.34,-1382.82"/>
+<text text-anchor="middle" x="354" y="-1396.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- add_8 -->
+<g id="node116" class="node">
+<title>add_8</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M359,-919C359,-919 329,-919 329,-919 323,-919 317,-913 317,-907 317,-907 317,-895 317,-895 317,-889 323,-883 329,-883 329,-883 359,-883 359,-883 365,-883 371,-889 371,-895 371,-895 371,-907 371,-907 371,-913 365,-919 359,-919"/>
+<text text-anchor="middle" x="344" y="-898.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">add</text>
+</g>
+<!-- transpose_18&#45;&gt;add_8 -->
+<g id="edge136" class="edge">
+<title>transpose_18&#45;&gt;add_8</title>
+<path fill="none" stroke="var(--line-strong)" d="M383,-1420.8C383,-1403.06 383,-1374.6 383,-1350 383,-1350 383,-1350 383,-984.5 383,-962.83 387.31,-955.57 378,-936 376.07,-931.94 373.45,-928.09 370.51,-924.53"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="372.21,-922.75 365.69,-919.2 368.57,-926.04 372.21,-922.75"/>
+<text text-anchor="middle" x="406" y="-1172.3" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_ff_1 -->
+<g id="node112" class="node">
+<title>inner_model_backbone_encoder_layers_2_ff_1</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M326,-1277C326,-1277 296,-1277 296,-1277 290,-1277 284,-1271 284,-1265 284,-1265 284,-1253 284,-1253 284,-1247 290,-1241 296,-1241 296,-1241 326,-1241 326,-1241 332,-1241 338,-1247 338,-1253 338,-1253 338,-1265 338,-1265 338,-1271 332,-1277 326,-1277"/>
+<text text-anchor="middle" x="311" y="-1262" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">1</text>
+<text text-anchor="middle" x="311" y="-1251" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">GELU</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_ff_0&#45;&gt;inner_model_backbone_encoder_layers_2_ff_1 -->
+<g id="edge137" class="edge">
+<title>inner_model_backbone_encoder_layers_2_ff_0&#45;&gt;inner_model_backbone_encoder_layers_2_ff_1</title>
+<path fill="none" stroke="var(--line-strong)" d="M311.69,-1320.64C311.56,-1308.97 311.4,-1295.46 311.27,-1284.17"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="313.72,-1284.07 311.19,-1277.1 308.82,-1284.13 313.72,-1284.07"/>
+<text text-anchor="middle" x="335" y="-1296.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×256</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_ff_2 -->
+<g id="node113" class="node">
+<title>inner_model_backbone_encoder_layers_2_ff_2</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M327,-1197C327,-1197 291,-1197 291,-1197 285,-1197 279,-1191 279,-1185 279,-1185 279,-1164 279,-1164 279,-1158 285,-1152 291,-1152 291,-1152 327,-1152 327,-1152 333,-1152 339,-1158 339,-1164 339,-1164 339,-1185 339,-1185 339,-1191 333,-1197 327,-1197"/>
+<text text-anchor="middle" x="309" y="-1183" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">2</text>
+<text text-anchor="middle" x="309" y="-1172" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Dropout</text>
+<text text-anchor="middle" x="309" y="-1161" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">p=0.1</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_ff_1&#45;&gt;inner_model_backbone_encoder_layers_2_ff_2 -->
+<g id="edge138" class="edge">
+<title>inner_model_backbone_encoder_layers_2_ff_1&#45;&gt;inner_model_backbone_encoder_layers_2_ff_2</title>
+<path fill="none" stroke="var(--line-strong)" d="M310.59,-1240.91C310.33,-1230.43 310,-1216.75 309.71,-1204.61"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="312.15,-1204.23 309.53,-1197.29 307.25,-1204.34 312.15,-1204.23"/>
+<text text-anchor="middle" x="334" y="-1216.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×256</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_ff_3 -->
+<g id="node114" class="node">
+<title>inner_model_backbone_encoder_layers_2_ff_3</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M345.5,-1108C345.5,-1108 276.5,-1108 276.5,-1108 270.5,-1108 264.5,-1102 264.5,-1096 264.5,-1096 264.5,-1064 264.5,-1064 264.5,-1058 270.5,-1052 276.5,-1052 276.5,-1052 345.5,-1052 345.5,-1052 351.5,-1052 357.5,-1058 357.5,-1064 357.5,-1064 357.5,-1096 357.5,-1096 357.5,-1102 351.5,-1108 345.5,-1108"/>
+<text text-anchor="middle" x="311" y="-1094" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">3</text>
+<text text-anchor="middle" x="311" y="-1083" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Linear</text>
+<text text-anchor="middle" x="311" y="-1072" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">256 → 128</text>
+<text text-anchor="middle" x="311" y="-1061" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">32,896 params</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_ff_2&#45;&gt;inner_model_backbone_encoder_layers_2_ff_3 -->
+<g id="edge139" class="edge">
+<title>inner_model_backbone_encoder_layers_2_ff_2&#45;&gt;inner_model_backbone_encoder_layers_2_ff_3</title>
+<path fill="none" stroke="var(--line-strong)" d="M309.47,-1151.58C309.71,-1140.68 310,-1127.27 310.26,-1115.07"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="312.71,-1115.11 310.42,-1108.05 307.81,-1115 312.71,-1115.11"/>
+<text text-anchor="middle" x="333" y="-1127.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×256</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_dropout_ffn -->
+<g id="node115" class="node">
+<title>inner_model_backbone_encoder_layers_2_dropout_ffn</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M345,-1008C345,-1008 293,-1008 293,-1008 287,-1008 281,-1002 281,-996 281,-996 281,-975 281,-975 281,-969 287,-963 293,-963 293,-963 345,-963 345,-963 351,-963 357,-969 357,-975 357,-975 357,-996 357,-996 357,-1002 351,-1008 345,-1008"/>
+<text text-anchor="middle" x="319" y="-994" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">dropout_ffn</text>
+<text text-anchor="middle" x="319" y="-983" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Dropout</text>
+<text text-anchor="middle" x="319" y="-972" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">p=0.1</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_ff_3&#45;&gt;inner_model_backbone_encoder_layers_2_dropout_ffn -->
+<g id="edge140" class="edge">
+<title>inner_model_backbone_encoder_layers_2_ff_3&#45;&gt;inner_model_backbone_encoder_layers_2_dropout_ffn</title>
+<path fill="none" stroke="var(--line-strong)" d="M313.36,-1051.75C314.35,-1040.27 315.51,-1026.91 316.51,-1015.28"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="318.95,-1015.47 317.12,-1008.29 314.07,-1015.05 318.95,-1015.47"/>
+<text text-anchor="middle" x="339" y="-1027.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_dropout_ffn&#45;&gt;add_8 -->
+<g id="edge141" class="edge">
+<title>inner_model_backbone_encoder_layers_2_dropout_ffn&#45;&gt;add_8</title>
+<path fill="none" stroke="var(--line-strong)" d="M323.81,-962.61C325.81,-954.23 328.3,-944.61 331,-936 332.03,-932.71 333.22,-929.27 334.44,-925.9"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="336.81,-926.57 336.97,-919.15 332.22,-924.85 336.81,-926.57"/>
+<text text-anchor="middle" x="354" y="-938.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- transpose_19 -->
+<g id="node117" class="node">
+<title>transpose_19</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M366.5,-839C366.5,-839 321.5,-839 321.5,-839 315.5,-839 309.5,-833 309.5,-827 309.5,-827 309.5,-815 309.5,-815 309.5,-809 315.5,-803 321.5,-803 321.5,-803 366.5,-803 366.5,-803 372.5,-803 378.5,-809 378.5,-815 378.5,-815 378.5,-827 378.5,-827 378.5,-833 372.5,-839 366.5,-839"/>
+<text text-anchor="middle" x="344" y="-818.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">transpose</text>
+</g>
+<!-- add_8&#45;&gt;transpose_19 -->
+<g id="edge142" class="edge">
+<title>add_8&#45;&gt;transpose_19</title>
+<path fill="none" stroke="var(--line-strong)" d="M344,-882.69C344,-871.98 344,-858.08 344,-846.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="346.45,-846.26 344,-839.26 341.55,-846.26 346.45,-846.26"/>
+<text text-anchor="middle" x="367" y="-858.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_norm_ffn_1 -->
+<g id="node118" class="node">
+<title>inner_model_backbone_encoder_layers_2_norm_ffn_1</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M375.5,-759C375.5,-759 312.5,-759 312.5,-759 306.5,-759 300.5,-753 300.5,-747 300.5,-747 300.5,-715 300.5,-715 300.5,-709 306.5,-703 312.5,-703 312.5,-703 375.5,-703 375.5,-703 381.5,-703 387.5,-709 387.5,-715 387.5,-715 387.5,-747 387.5,-747 387.5,-753 381.5,-759 375.5,-759"/>
+<text text-anchor="middle" x="344" y="-745" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">1</text>
+<text text-anchor="middle" x="344" y="-734" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">BatchNorm1d</text>
+<text text-anchor="middle" x="344" y="-723" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">128</text>
+<text text-anchor="middle" x="344" y="-712" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">256 params</text>
+</g>
+<!-- transpose_19&#45;&gt;inner_model_backbone_encoder_layers_2_norm_ffn_1 -->
+<g id="edge143" class="edge">
+<title>transpose_19&#45;&gt;inner_model_backbone_encoder_layers_2_norm_ffn_1</title>
+<path fill="none" stroke="var(--line-strong)" d="M344,-802.61C344,-792.23 344,-778.68 344,-766.23"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="346.45,-766.05 344,-759.05 341.55,-766.05 346.45,-766.05"/>
+<text text-anchor="middle" x="367" y="-778.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×128×7</text>
+</g>
+<!-- transpose_20 -->
+<g id="node119" class="node">
+<title>transpose_20</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M366.5,-659C366.5,-659 321.5,-659 321.5,-659 315.5,-659 309.5,-653 309.5,-647 309.5,-647 309.5,-635 309.5,-635 309.5,-629 315.5,-623 321.5,-623 321.5,-623 366.5,-623 366.5,-623 372.5,-623 378.5,-629 378.5,-635 378.5,-635 378.5,-647 378.5,-647 378.5,-653 372.5,-659 366.5,-659"/>
+<text text-anchor="middle" x="344" y="-638.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">transpose</text>
+</g>
+<!-- inner_model_backbone_encoder_layers_2_norm_ffn_1&#45;&gt;transpose_20 -->
+<g id="edge144" class="edge">
+<title>inner_model_backbone_encoder_layers_2_norm_ffn_1&#45;&gt;transpose_20</title>
+<path fill="none" stroke="var(--line-strong)" d="M344,-702.64C344,-690.97 344,-677.46 344,-666.17"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="346.45,-666.1 344,-659.1 341.55,-666.1 346.45,-666.1"/>
+<text text-anchor="middle" x="367" y="-678.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×128×7</text>
+</g>
+<!-- reshape_1 -->
+<g id="node120" class="node">
+<title>reshape_1</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M362,-579C362,-579 326,-579 326,-579 320,-579 314,-573 314,-567 314,-567 314,-555 314,-555 314,-549 320,-543 326,-543 326,-543 362,-543 362,-543 368,-543 374,-549 374,-555 374,-555 374,-567 374,-567 374,-573 368,-579 362,-579"/>
+<text text-anchor="middle" x="344" y="-558.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">reshape</text>
+</g>
+<!-- transpose_20&#45;&gt;reshape_1 -->
+<g id="edge145" class="edge">
+<title>transpose_20&#45;&gt;reshape_1</title>
+<path fill="none" stroke="var(--line-strong)" d="M344,-622.69C344,-611.98 344,-598.08 344,-586.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="346.45,-586.26 344,-579.26 341.55,-586.26 346.45,-586.26"/>
+<text text-anchor="middle" x="367" y="-598.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">6×7×128</text>
+</g>
+<!-- permute_6 -->
+<g id="node121" class="node">
+<title>permute_6</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M363,-499C363,-499 325,-499 325,-499 319,-499 313,-493 313,-487 313,-487 313,-475 313,-475 313,-469 319,-463 325,-463 325,-463 363,-463 363,-463 369,-463 375,-469 375,-475 375,-475 375,-487 375,-487 375,-493 369,-499 363,-499"/>
+<text text-anchor="middle" x="344" y="-478.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">permute</text>
+</g>
+<!-- reshape_1&#45;&gt;permute_6 -->
+<g id="edge146" class="edge">
+<title>reshape_1&#45;&gt;permute_6</title>
+<path fill="none" stroke="var(--line-strong)" d="M344,-542.69C344,-531.98 344,-518.08 344,-506.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="346.45,-506.26 344,-499.26 341.55,-506.26 346.45,-506.26"/>
+<text text-anchor="middle" x="373.5" y="-518.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">1×6×7×128</text>
+</g>
+<!-- inner_model_head_flatten -->
+<g id="node122" class="node">
+<title>inner_model_head_flatten</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M359.5,-401C359.5,-401 328.5,-401 328.5,-401 322.5,-401 316.5,-395 316.5,-389 316.5,-389 316.5,-377 316.5,-377 316.5,-371 322.5,-365 328.5,-365 328.5,-365 359.5,-365 359.5,-365 365.5,-365 371.5,-371 371.5,-377 371.5,-377 371.5,-389 371.5,-389 371.5,-395 365.5,-401 359.5,-401"/>
+<text text-anchor="middle" x="344" y="-386" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">flatten</text>
+<text text-anchor="middle" x="344" y="-375" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Flatten</text>
+</g>
+<!-- permute_6&#45;&gt;inner_model_head_flatten -->
+<g id="edge147" class="edge">
+<title>permute_6&#45;&gt;inner_model_head_flatten</title>
+<path fill="none" stroke="var(--line-strong)" d="M344,-462.84C344,-447.68 344,-425.42 344,-408.41"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="346.45,-408.01 344,-401.01 341.55,-408.01 346.45,-408.01"/>
+<text text-anchor="middle" x="373.5" y="-438.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">1×6×128×7</text>
+</g>
+<!-- inner_model_head_linear -->
+<g id="node123" class="node">
+<title>inner_model_head_linear</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M378.5,-321C378.5,-321 309.5,-321 309.5,-321 303.5,-321 297.5,-315 297.5,-309 297.5,-309 297.5,-277 297.5,-277 297.5,-271 303.5,-265 309.5,-265 309.5,-265 378.5,-265 378.5,-265 384.5,-265 390.5,-271 390.5,-277 390.5,-277 390.5,-309 390.5,-309 390.5,-315 384.5,-321 378.5,-321"/>
+<text text-anchor="middle" x="344" y="-307" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">linear</text>
+<text text-anchor="middle" x="344" y="-296" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Linear</text>
+<text text-anchor="middle" x="344" y="-285" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">896 → 30</text>
+<text text-anchor="middle" x="344" y="-274" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">26,910 params</text>
+</g>
+<!-- inner_model_head_flatten&#45;&gt;inner_model_head_linear -->
+<g id="edge148" class="edge">
+<title>inner_model_head_flatten&#45;&gt;inner_model_head_linear</title>
+<path fill="none" stroke="var(--line-strong)" d="M344,-364.61C344,-354.23 344,-340.68 344,-328.23"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="346.45,-328.05 344,-321.05 341.55,-328.05 346.45,-328.05"/>
+<text text-anchor="middle" x="367" y="-340.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">1×6×896</text>
+</g>
+<!-- inner_model_head_dropout -->
+<g id="node124" class="node">
+<title>inner_model_head_dropout</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.2" d="M362,-221C362,-221 326,-221 326,-221 320,-221 314,-215 314,-209 314,-209 314,-188 314,-188 314,-182 320,-176 326,-176 326,-176 362,-176 362,-176 368,-176 374,-182 374,-188 374,-188 374,-209 374,-209 374,-215 368,-221 362,-221"/>
+<text text-anchor="middle" x="344" y="-207" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">dropout</text>
+<text text-anchor="middle" x="344" y="-196" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">Dropout</text>
+<text text-anchor="middle" x="344" y="-185" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">p=0.0</text>
+</g>
+<!-- inner_model_head_linear&#45;&gt;inner_model_head_dropout -->
+<g id="edge149" class="edge">
+<title>inner_model_head_linear&#45;&gt;inner_model_head_dropout</title>
+<path fill="none" stroke="var(--line-strong)" d="M344,-264.75C344,-253.38 344,-240.16 344,-228.61"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="346.45,-228.29 344,-221.29 341.55,-228.29 346.45,-228.29"/>
+<text text-anchor="middle" x="364" y="-240.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">1×6×30</text>
+</g>
+<!-- permute_7 -->
+<g id="node125" class="node">
+<title>permute_7</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.2" stroke-dasharray="5,2" d="M363,-132C363,-132 325,-132 325,-132 319,-132 313,-126 313,-120 313,-120 313,-108 313,-108 313,-102 319,-96 325,-96 325,-96 363,-96 363,-96 369,-96 375,-102 375,-108 375,-108 375,-120 375,-120 375,-126 369,-132 363,-132"/>
+<text text-anchor="middle" x="344" y="-111.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">permute</text>
+</g>
+<!-- inner_model_head_dropout&#45;&gt;permute_7 -->
+<g id="edge150" class="edge">
+<title>inner_model_head_dropout&#45;&gt;permute_7</title>
+<path fill="none" stroke="var(--line-strong)" d="M344,-175.82C344,-164.62 344,-150.92 344,-139.35"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="346.45,-139.11 344,-132.11 341.55,-139.11 346.45,-139.11"/>
+<text text-anchor="middle" x="364" y="-151.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">1×6×30</text>
+</g>
+<!-- output -->
+<g id="node126" class="node">
+<title>output</title>
+<path fill="var(--indigo-soft)" stroke="var(--indigo)" stroke-width="1.2" d="M359,-52C359,-52 329,-52 329,-52 323,-52 317,-46 317,-40 317,-40 317,-28 317,-28 317,-22 323,-16 329,-16 329,-16 359,-16 359,-16 365,-16 371,-22 371,-28 371,-28 371,-40 371,-40 371,-46 365,-52 359,-52"/>
+<text text-anchor="middle" x="344" y="-31.5" font-family="Helvetica,sans-Serif" font-size="10.00" fill="var(--ink)">output</text>
+</g>
+<!-- permute_7&#45;&gt;output -->
+<g id="edge151" class="edge">
+<title>permute_7&#45;&gt;output</title>
+<path fill="none" stroke="var(--line-strong)" d="M344,-95.69C344,-84.98 344,-71.08 344,-59.29"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="346.45,-59.26 344,-52.26 341.55,-59.26 346.45,-59.26"/>
+<text text-anchor="middle" x="364" y="-71.8" font-family="Helvetica,sans-Serif" font-size="9.00" fill="var(--muted)">1×30×6</text>
+</g>
+</g>
+</svg>

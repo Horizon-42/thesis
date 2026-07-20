@@ -1,0 +1,144 @@
+<svg class="arch-graph" width="639pt" height="655pt"
+ viewBox="0.00 0.00 639.00 655.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 651)">
+<title>arch</title>
+<text text-anchor="middle" x="315.5" y="-631" font-family="Helvetica,sans-Serif" font-size="15.00" fill="var(--ink)">itransformer &#160;· &#160;window mode &#160;· &#160;L=60 H=30 C=6 &#160;· &#160;409,374 trainable parameters</text>
+<!-- @x -->
+<g id="node1" class="node">
+<title>@x</title>
+<path fill="var(--indigo-soft)" stroke="var(--indigo)" stroke-width="1.4" d="M296.25,-622C296.25,-622 264.25,-622 264.25,-622 258.25,-622 252.25,-616 252.25,-610 252.25,-610 252.25,-598 252.25,-598 252.25,-592 258.25,-586 264.25,-586 264.25,-586 296.25,-586 296.25,-586 302.25,-586 308.25,-592 308.25,-598 308.25,-598 308.25,-610 308.25,-610 308.25,-616 302.25,-622 296.25,-622"/>
+<text text-anchor="middle" x="280.25" y="-601.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">input</text>
+</g>
+<!-- @permute -->
+<g id="node2" class="node">
+<title>@permute</title>
+<path fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.4" stroke-dasharray="5,2" d="M305.75,-552C305.75,-552 254.75,-552 254.75,-552 248.75,-552 242.75,-546 242.75,-540 242.75,-540 242.75,-528 242.75,-528 242.75,-522 248.75,-516 254.75,-516 254.75,-516 305.75,-516 305.75,-516 311.75,-516 317.75,-522 317.75,-528 317.75,-528 317.75,-540 317.75,-540 317.75,-546 311.75,-552 305.75,-552"/>
+<text text-anchor="middle" x="280.25" y="-531.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">permute</text>
+</g>
+<!-- @x&#45;&gt;@permute -->
+<g id="edge2" class="edge">
+<title>@x&#45;&gt;@permute</title>
+<path fill="none" stroke="var(--line-strong)" d="M280.25,-585.84C280.25,-578.17 280.25,-568.97 280.25,-560.51"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="283.05,-560.39 280.25,-552.39 277.45,-560.39 283.05,-560.39"/>
+<text text-anchor="middle" x="300.75" y="-566.4" font-family="Helvetica,sans-Serif" font-size="9.50" fill="var(--muted)">1×60×6</text>
+</g>
+<!-- inner -->
+<g id="node8" class="node">
+<title>inner</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.4" d="M341.25,-52C341.25,-52 219.25,-52 219.25,-52 213.25,-52 207.25,-46 207.25,-40 207.25,-40 207.25,-12 207.25,-12 207.25,-6 213.25,0 219.25,0 219.25,0 341.25,0 341.25,0 347.25,0 353.25,-6 353.25,-12 353.25,-12 353.25,-40 353.25,-40 353.25,-46 347.25,-52 341.25,-52"/>
+<text text-anchor="middle" x="280.25" y="-35.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">projector</text>
+<text text-anchor="middle" x="280.25" y="-23.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">Linear</text>
+<text text-anchor="middle" x="280.25" y="-11.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">5 ops · 3,870 params</text>
+</g>
+<!-- @x&#45;&gt;inner -->
+<g id="edge1" class="edge">
+<title>@x&#45;&gt;inner</title>
+<path fill="none" stroke="var(--line-strong)" stroke-dasharray="5,2" d="M308.64,-588.88C315.03,-584.74 321.36,-579.75 326.25,-574 355.02,-540.17 351.5,-524.23 365.25,-482 407.99,-350.72 405.44,-308.58 385.25,-172 379.41,-132.5 381.48,-119.17 359.25,-86 351.91,-75.05 341.84,-65.35 331.34,-57.13"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="332.85,-54.77 324.77,-52.21 329.5,-59.25 332.85,-54.77"/>
+<text text-anchor="middle" x="421.25" y="-325.1" font-family="Helvetica,sans-Serif" font-size="8.00" fill="var(--muted)">shape only</text>
+</g>
+<!-- inner.enc_embedding -->
+<g id="node3" class="node">
+<title>inner.enc_embedding</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.4" d="M341.25,-482C341.25,-482 219.25,-482 219.25,-482 213.25,-482 207.25,-476 207.25,-470 207.25,-470 207.25,-442 207.25,-442 207.25,-436 213.25,-430 219.25,-430 219.25,-430 341.25,-430 341.25,-430 347.25,-430 353.25,-436 353.25,-442 353.25,-442 353.25,-470 353.25,-470 353.25,-476 347.25,-482 341.25,-482"/>
+<text text-anchor="middle" x="280.25" y="-465.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">enc_embedding</text>
+<text text-anchor="middle" x="280.25" y="-453.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">Linear</text>
+<text text-anchor="middle" x="280.25" y="-441.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">2 ops · 7,808 params</text>
+</g>
+<!-- @permute&#45;&gt;inner.enc_embedding -->
+<g id="edge3" class="edge">
+<title>@permute&#45;&gt;inner.enc_embedding</title>
+<path fill="none" stroke="var(--line-strong)" d="M280.25,-515.75C280.25,-508.25 280.25,-499.2 280.25,-490.46"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="283.05,-490.25 280.25,-482.25 277.45,-490.25 283.05,-490.25"/>
+<text text-anchor="middle" x="300.75" y="-496.4" font-family="Helvetica,sans-Serif" font-size="9.50" fill="var(--muted)">1×6×60</text>
+</g>
+<!-- inner.encoder.attn_layers.0 -->
+<g id="node4" class="node">
+<title>inner.encoder.attn_layers.0</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.4" d="M361.75,-396C361.75,-396 198.75,-396 198.75,-396 192.75,-396 186.75,-390 186.75,-384 186.75,-384 186.75,-356 186.75,-356 186.75,-350 192.75,-344 198.75,-344 198.75,-344 361.75,-344 361.75,-344 367.75,-344 373.75,-350 373.75,-356 373.75,-356 373.75,-384 373.75,-384 373.75,-390 367.75,-396 361.75,-396"/>
+<text text-anchor="middle" x="280.25" y="-379.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">encoder.attn_layers.0</text>
+<text text-anchor="middle" x="280.25" y="-367.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">Linear · LayerNorm · Conv1d</text>
+<text text-anchor="middle" x="280.25" y="-355.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">28 ops · 132,480 params</text>
+</g>
+<!-- inner.enc_embedding&#45;&gt;inner.encoder.attn_layers.0 -->
+<g id="edge4" class="edge">
+<title>inner.enc_embedding&#45;&gt;inner.encoder.attn_layers.0</title>
+<path fill="none" stroke="var(--line-strong)" stroke-dasharray="5,2" d="M216.25,-429.73C212.39,-426.29 208.97,-422.4 206.25,-418 202.7,-412.26 202.6,-407.1 204.87,-402.48"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="207.1,-404.17 209.74,-396.12 202.65,-400.77 207.1,-404.17"/>
+<text text-anchor="middle" x="229.25" y="-411.1" font-family="Helvetica,sans-Serif" font-size="8.00" fill="var(--muted)">shape only</text>
+</g>
+<!-- inner.enc_embedding&#45;&gt;inner.encoder.attn_layers.0 -->
+<g id="edge5" class="edge">
+<title>inner.enc_embedding&#45;&gt;inner.encoder.attn_layers.0</title>
+<path fill="none" stroke="var(--line-strong)" d="M280.25,-429.8C280.25,-421.82 280.25,-412.88 280.25,-404.43"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="283.05,-404.18 280.25,-396.18 277.45,-404.19 283.05,-404.18"/>
+<text text-anchor="middle" x="303.75" y="-410.4" font-family="Helvetica,sans-Serif" font-size="9.50" fill="var(--muted)">1×6×128</text>
+</g>
+<!-- inner.encoder.attn_layers.1 -->
+<g id="node5" class="node">
+<title>inner.encoder.attn_layers.1</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.4" d="M361.75,-310C361.75,-310 198.75,-310 198.75,-310 192.75,-310 186.75,-304 186.75,-298 186.75,-298 186.75,-270 186.75,-270 186.75,-264 192.75,-258 198.75,-258 198.75,-258 361.75,-258 361.75,-258 367.75,-258 373.75,-264 373.75,-270 373.75,-270 373.75,-298 373.75,-298 373.75,-304 367.75,-310 361.75,-310"/>
+<text text-anchor="middle" x="280.25" y="-293.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">encoder.attn_layers.1</text>
+<text text-anchor="middle" x="280.25" y="-281.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">Linear · LayerNorm · Conv1d</text>
+<text text-anchor="middle" x="280.25" y="-269.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">28 ops · 132,480 params</text>
+</g>
+<!-- inner.encoder.attn_layers.0&#45;&gt;inner.encoder.attn_layers.1 -->
+<g id="edge6" class="edge">
+<title>inner.encoder.attn_layers.0&#45;&gt;inner.encoder.attn_layers.1</title>
+<path fill="none" stroke="var(--line-strong)" stroke-dasharray="5,2" d="M216.25,-343.73C212.39,-340.29 208.97,-336.4 206.25,-332 202.7,-326.26 202.6,-321.1 204.87,-316.48"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="207.1,-318.17 209.74,-310.12 202.65,-314.77 207.1,-318.17"/>
+<text text-anchor="middle" x="229.25" y="-325.1" font-family="Helvetica,sans-Serif" font-size="8.00" fill="var(--muted)">shape only</text>
+</g>
+<!-- inner.encoder.attn_layers.0&#45;&gt;inner.encoder.attn_layers.1 -->
+<g id="edge7" class="edge">
+<title>inner.encoder.attn_layers.0&#45;&gt;inner.encoder.attn_layers.1</title>
+<path fill="none" stroke="var(--line-strong)" d="M280.25,-343.8C280.25,-335.82 280.25,-326.88 280.25,-318.43"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="283.05,-318.18 280.25,-310.18 277.45,-318.19 283.05,-318.18"/>
+<text text-anchor="middle" x="303.75" y="-324.4" font-family="Helvetica,sans-Serif" font-size="9.50" fill="var(--muted)">1×6×128</text>
+</g>
+<!-- inner.encoder.attn_layers.2 -->
+<g id="node6" class="node">
+<title>inner.encoder.attn_layers.2</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.4" d="M361.75,-224C361.75,-224 198.75,-224 198.75,-224 192.75,-224 186.75,-218 186.75,-212 186.75,-212 186.75,-184 186.75,-184 186.75,-178 192.75,-172 198.75,-172 198.75,-172 361.75,-172 361.75,-172 367.75,-172 373.75,-178 373.75,-184 373.75,-184 373.75,-212 373.75,-212 373.75,-218 367.75,-224 361.75,-224"/>
+<text text-anchor="middle" x="280.25" y="-207.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">encoder.attn_layers.2</text>
+<text text-anchor="middle" x="280.25" y="-195.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">Linear · LayerNorm · Conv1d</text>
+<text text-anchor="middle" x="280.25" y="-183.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">28 ops · 132,480 params</text>
+</g>
+<!-- inner.encoder.attn_layers.1&#45;&gt;inner.encoder.attn_layers.2 -->
+<g id="edge8" class="edge">
+<title>inner.encoder.attn_layers.1&#45;&gt;inner.encoder.attn_layers.2</title>
+<path fill="none" stroke="var(--line-strong)" stroke-dasharray="5,2" d="M216.25,-257.73C212.39,-254.29 208.97,-250.4 206.25,-246 202.7,-240.26 202.6,-235.1 204.87,-230.48"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="207.1,-232.17 209.74,-224.12 202.65,-228.77 207.1,-232.17"/>
+<text text-anchor="middle" x="229.25" y="-239.1" font-family="Helvetica,sans-Serif" font-size="8.00" fill="var(--muted)">shape only</text>
+</g>
+<!-- inner.encoder.attn_layers.1&#45;&gt;inner.encoder.attn_layers.2 -->
+<g id="edge9" class="edge">
+<title>inner.encoder.attn_layers.1&#45;&gt;inner.encoder.attn_layers.2</title>
+<path fill="none" stroke="var(--line-strong)" d="M280.25,-257.8C280.25,-249.82 280.25,-240.88 280.25,-232.43"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="283.05,-232.18 280.25,-224.18 277.45,-232.19 283.05,-232.18"/>
+<text text-anchor="middle" x="303.75" y="-238.4" font-family="Helvetica,sans-Serif" font-size="9.50" fill="var(--muted)">1×6×128</text>
+</g>
+<!-- inner.encoder -->
+<g id="node7" class="node">
+<title>inner.encoder</title>
+<path fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.4" d="M335.75,-138C335.75,-138 224.75,-138 224.75,-138 218.75,-138 212.75,-132 212.75,-126 212.75,-126 212.75,-98 212.75,-98 212.75,-92 218.75,-86 224.75,-86 224.75,-86 335.75,-86 335.75,-86 341.75,-86 347.75,-92 347.75,-98 347.75,-98 347.75,-126 347.75,-126 347.75,-132 341.75,-138 335.75,-138"/>
+<text text-anchor="middle" x="280.25" y="-121.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">encoder.norm</text>
+<text text-anchor="middle" x="280.25" y="-109.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">LayerNorm</text>
+<text text-anchor="middle" x="280.25" y="-97.2" font-family="Helvetica,sans-Serif" font-size="11.00" fill="var(--ink)">1 ops · 256 params</text>
+</g>
+<!-- inner.encoder.attn_layers.2&#45;&gt;inner.encoder -->
+<g id="edge10" class="edge">
+<title>inner.encoder.attn_layers.2&#45;&gt;inner.encoder</title>
+<path fill="none" stroke="var(--line-strong)" d="M280.25,-171.8C280.25,-163.82 280.25,-154.88 280.25,-146.43"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="283.05,-146.18 280.25,-138.18 277.45,-146.19 283.05,-146.18"/>
+<text text-anchor="middle" x="303.75" y="-152.4" font-family="Helvetica,sans-Serif" font-size="9.50" fill="var(--muted)">1×6×128</text>
+</g>
+<!-- inner.encoder&#45;&gt;inner -->
+<g id="edge11" class="edge">
+<title>inner.encoder&#45;&gt;inner</title>
+<path fill="none" stroke="var(--line-strong)" d="M280.25,-85.8C280.25,-77.82 280.25,-68.88 280.25,-60.43"/>
+<polygon fill="var(--line-strong)" stroke="var(--line-strong)" points="283.05,-60.18 280.25,-52.18 277.45,-60.19 283.05,-60.18"/>
+<text text-anchor="middle" x="303.75" y="-66.4" font-family="Helvetica,sans-Serif" font-size="9.50" fill="var(--muted)">1×6×128</text>
+</g>
+</g>
+</svg>
