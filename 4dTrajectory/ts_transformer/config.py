@@ -89,8 +89,8 @@ class TSConfig:
     # ── architecture, shared by both models ─────────────────────────────────
     d_model: int = 128
     n_heads: int = 8
-    d_ff: int = 256
-    e_layers: int = 3
+    d_ff: int = 256 # dimension of feed-forward net; need to do ablate experiments
+    e_layers: int = 3 #number of encoder layers; why 3? 
     dropout: float = 0.1
     activation: str = "gelu"
 
