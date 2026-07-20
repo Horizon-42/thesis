@@ -76,6 +76,18 @@ recommended actions. History lives in the two 2026-07-20 entries of `docs/CHANGE
 - Removable in closed form with transport factors (the Jacobian the optimizer's
   full-transport RHS already encodes) by redefining velocity channels as chart
   derivatives — but that changes channel semantics and therefore requires a retrain. See B3.
+- **RESOLVED 2026-07-20 (B3.1), with one correction to the attribution above.** Measured on
+  all 995 KRDU arrivals, the R_M/R_N and h/R terms were NOT in the channels — they were in
+  `flight_scenarios._velocity_lsq`, which fitted velocity through the flat chart scales
+  (`a`, `a·cos lat`) and so overstated physical `V_north` by `a/R_M` (+0.33% at 36°); the
+  old channel code cancelled that bias by accident, leaving only the cos ratio. Redefining
+  the channels alone (B3's literal prescription) *raised* the median north integration
+  drift 2.7 → 8.6 m/min. Both seams were therefore fixed together: the fit now projects
+  through the true tangent scales (`R_M+h`, `(R_N+h)·cos lat` — new
+  `geokit.wgs84_curvature_radii`), and the channels apply the full-transport Jacobian.
+  Final drift: east 3.5 → 2.4, north 2.7 → 2.7, up 0.45 m/min — unbiased LSQ smoothing
+  only. Fitted `V/psi/gamma` everywhere moved ≤ 0.33% / ≤ 0.1° (positions untouched); the
+  optimizer batch artifacts predate this, same as A6.
 
 ### A8. The two lead-time-error accountings are not directly comparable
 - The table recomputed from exported records (predictions truncated at the threshold)
@@ -106,14 +118,21 @@ recommended actions. History lives in the two 2026-07-20 entries of `docs/CHANGE
 - **B2. Audit the KSTL `PAULY` IAF constraint geometry.** The repeated single-IAF
   infeasibility pattern is the same family as A2; plot that IAF→runway leg geometry and
   the ψ corridor first to rule out a coding/direction issue.
-- **B3. Bundle these three into the next retrain** (none justifies a retrain alone):
-  1. transport-consistent velocity channels (A7 — closed-form, removes the
-     position↔velocity inconsistency);
-  2. if finer time resolution is wanted: `dt=1 s` requires L=120 / H=600 to keep the same
-     time coverage (~2× training cost, limited information gain — the source is ≤1 Hz and
-     velocities come from a 15 s window fit);
-  3. recompute the lead-time table with the raw-tensor accounting to restore the 600 s
-     column (A8).
+- **B3. ✅ DONE 2026-07-20 — bundled retrain executed** (third training generation;
+  details in `docs/CHANGELOG.md` and the package README):
+  1. transport-consistent velocity channels: done, **plus the upstream `_velocity_lsq`
+     tangent-scale fix the measurement forced** (see the A7 resolution note — fixing the
+     channels alone made the inconsistency worse). Channels renamed `ve/vn/vu →
+     edot/ndot/udot` so `load_checkpoint` refuses all earlier checkpoints.
+  2. `dt=1 s`: considered and DECLINED (≤1 Hz ragged source + 15 s velocity fit ⇒ ~2×
+     cost for no information; rationale recorded in README "Sizing", `--dt` stays a knob).
+  3. lead-time table restored on the raw-tensor accounting, 600 s column back (n=893):
+     iTransformer leads PatchTST at 600 s in all three generations (5438 vs 7384 m here,
+     margins 1.16–1.36×). README now carries both accountings with their n.
+  - Retrain outcome: full-beats-chained on threshold lateral held again (1.5–1.7× mean);
+    gate passes 0/152 in ALL four cells this generation (was 4/1/0/0 — a borderline pass
+    is jitter, only the "forecast ≠ certifiable approach" conclusion is stable). Pre-B3
+    artifacts: `4dTrajectory/outputs/KRDU/_pre_b3_transport/`.
 - **B4. Report the aircraft-type fallback hit rate in flyability output.** How often the
   `--aircraft-type` fallback is actually used is currently unreported per batch; one
   summary line prevents "UNK all graded as A320" from hiding again.

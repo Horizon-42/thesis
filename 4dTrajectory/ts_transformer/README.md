@@ -41,14 +41,16 @@ gates (lateral ≤ 106.75 m, vertical ∈ [−3.05, +6.10] m).
 ## Status
 
 Trained and evaluated on **real harvested ADS-B** (KRDU, 995 arrivals). Checkpoints were
-retrained 2026-07-20 on the reproducible `flight_key` split (702 train / 141 val / 152 test);
-prediction artifacts were regenerated the same day, **test split only**, after the repo-wide
-flight-identity unification (see
-[Data selection & flight identity](#data-selection--flight-identity)). Every number in this
-README's result tables is read from those on-disk artifacts
-(`4dTrajectory/outputs/KRDU/ts_pred_*/`). Earlier synthetic numbers are kept where they are
-labelled as such, because two design decisions were made on synthetic data and the real run
-either confirmed or corrected them.
+retrained twice on 2026-07-20, both times on the reproducible `flight_key` split
+(702 train / 141 val / 152 test): first after the repo-wide flight-identity unification
+(see [Data selection & flight identity](#data-selection--flight-identity)), then again
+under the **transport-consistent channels + physical-velocity fit** (B3.1 — see
+[Channels](#channels); the B3 rename `ve/vn/vu → edot/ndot/udot` makes `load_checkpoint`
+refuse every earlier checkpoint). Every number in this README's result tables is read from
+the current on-disk artifacts (`4dTrajectory/outputs/KRDU/ts_pred_*/`); the intermediate
+generation is parked in `outputs/KRDU/_pre_b3_transport/`. Earlier synthetic numbers are
+kept where they are labelled as such, because two design decisions were made on synthetic
+data and the real run either confirmed or corrected them.
 
 **Scope:** this is a purely kinematic, single-aircraft baseline. No aerodynamic or dynamics
 model is connected — by design, not by omission. See
@@ -71,7 +73,7 @@ The abbreviations and terms of art this README (and `metrics.py` / the summary J
 | **cross-track / along-track** | Horizontal error decomposed across / along the observed track's own course — "beside the path" vs "ahead/behind on it". |
 | **gates** | The evaluation thresholds every record is graded against: final lateral ≤ 106.75 m, vertical ∈ [−3.05, +6.10] m (FAA 8260.58D / 8260.3F derived; see `evaluation/thresholds.py`). |
 | **`flight_key`** | The repo-wide flight identity `id_runway_icao24_landingTime` — the record filename stem, the train/val/test split key, and the observed CZML entity id. |
-| **pp** | Percentage points (a difference of rates, e.g. 69.7% − 63.2% = +6.6 pp). |
+| **pp** | Percentage points (a difference of rates, e.g. 73.7% − 63.2% = +10.5 pp). |
 | **chained forecast** | `recursive_forecast`: predict `H` steps, append them to the history, slide, repeat — the model reads its own output from pass 2 on. |
 | **instance norm / RevIN** | Per-window normalisation that strips a window's absolute level before the model sees it (iTransformer `use_norm`, PatchTST `RevIN`). OFF here by default — see [the ablation](#instance-normalisation-is-off-by-default). |
 | **horizon-capped** | A full-mode forecast the fixed `H` ended *before* the predicted path reached the threshold; its final state (what the gates judge) is a cap artifact, flagged `horizonCapped` in the record. |
@@ -155,11 +157,11 @@ how a split leaks and how namesake flights swap each other's data.
 
 ### Channels
 
-Six channels in a local ENU frame **anchored at the runway threshold**:
+Six channels in a local ENU chart **anchored at the runway threshold**:
 
 ```
-e, n, u      metres from the threshold (u is height above it)
-ve, vn, vu   m/s
+e, n, u           metres from the threshold (u is height above it)
+edot, ndot, udot  d(e)/dt, d(n)/dt, d(u)/dt — m/s in the chart
 ```
 
 The evaluation state `(lat, lon, alt, V, psi, gamma, m)` is a bad regression target directly:
@@ -168,8 +170,27 @@ regressing it averages 179° and −179° to 0°, pointing the aircraft backward
 turn onto final happens), and `m` is not observable from ADS-B at all.
 
 Predicting velocity *components* makes the reconstruction exact and the convention automatic:
-`psi = atan2(vn, ve)` **is** the modeling layer's math-ENU heading, so there is no remaining
-place to substitute a compass bearing by accident. `m` is carried, never predicted.
+after undoing the transport factors, `psi = atan2(V_north, V_east)` **is** the modeling
+layer's math-ENU heading, so there is no remaining place to substitute a compass bearing by
+accident. `m` is carried, never predicted.
+
+**Transport-consistent since 2026-07-20 (B3.1).** The velocity channels are the exact time
+derivatives of the position channels, not the raw physical ENU components: the chart
+coordinates are scaled angles (`n = Δlat_rad·a`, `e = Δlon_rad·a·cos lat₀`), so a physical
+velocity picks up the full-transport Jacobian the optimizer's geodetic RHS encodes —
+`ndot = V_north·a/(R_M+h)`, `edot = V_east·a·cos(lat₀)/((R_N+h)·cos lat)` with the exact
+WGS84 curvature radii (`geokit.wgs84_curvature_radii`). The factors are 1 ± ~0.3% over a
+TMA. Before the fix the channels mixed chart positions with raw physical velocities, so
+integrating the velocity channels did not reproduce the position channels; the upstream
+least-squares velocity fit (`flight_scenarios.state_samples_from_track`) carried the
+mirror-image bias (chart scales where physical was meant), fixed at the same time. Measured
+on all 995 KRDU arrivals (median whole-track drift of ∫v dt against the position channels,
+m/min): east 3.5 → 2.4, north 2.7 → 2.7, up 0.45 → 0.45 — what remains is unbiased
+least-squares smoothing, no longer a systematic. (Fixing only the channels and not the fit
+would have *added* a +0.33% north systematic — 8.6 m/min — which is why both seams moved
+together.) The rename `ve/vn/vu → edot/ndot/udot` is deliberate: the channel tuple is
+serialised into every checkpoint and `load_checkpoint` refuses a mismatch, so pre-change
+checkpoints fail loudly instead of silently mis-scaling every velocity.
 
 ### Two horizon modes
 
@@ -217,6 +238,14 @@ Two wrong guesses got corrected here, both by measuring rather than reasoning:
   hold — so the flown path is far longer than the straight-line distance to the ring, and the
   real median is 328 s with a tail past 900 s. That guess covered barely half an approach.
 
+**Why not `dt = 1 s`?** Considered for the 2026-07-20 retrain (B3.2) and deliberately not
+taken. Keeping the same time coverage at `dt = 1 s` needs `L = 120, H = 600` — roughly 2×
+the training cost — for very little information: the source reports at ≤ 1 Hz with ragged
+gaps (a finer grid mostly interpolates), and the velocity channels come from a **15 s**
+least-squares window fit, so their bandwidth is unchanged by a denser grid. `--dt` remains
+a CLI knob if a future dataset (e.g. 1 Hz radar) justifies it; resizing `L`/`H` with it is
+mandatory, per the coverage math above.
+
 ### Inputs, outputs, and the deliberate absence of dynamics
 
 > **Read this before "improving" anything here.** This package is a *kinematic baseline*.
@@ -231,7 +260,7 @@ output  y : [B,  30, 6]         window mode (60 s ahead)
         y : [B, 300, 6]         full mode  (600 s ahead)
 ```
 
-Same six channels on both sides (`e, n, u, ve, vn, vu`). The two architectures differ only
+Same six channels on both sides (`e, n, u, edot, ndot, udot`). The two architectures differ only
 in how they read that tensor: iTransformer makes each **channel** a token (attention *across*
 variates), PatchTST patches each channel along **time** and runs them independently (no
 cross-channel coupling at all).
@@ -294,84 +323,104 @@ than drift into one:
 995 arrivals across 6 runways, split **by flight** (`flight_key`) into 702 train / 141 val /
 152 test. Both models, both horizon modes, 120-epoch cap with patience 15, `lr=5e-4`, on an
 RTX 4060. Every prediction batch is graded by `python -m evaluation`; all numbers below are
-read from the regenerated 2026-07-20 artifacts in `4dTrajectory/outputs/KRDU/ts_pred_*/`.
+read from the on-disk artifacts in `4dTrajectory/outputs/KRDU/ts_pred_*/` — the
+**2026-07-20 B3 retrain** under the transport-consistent channels and the physical-velocity
+fit (a ≤ 0.3% rescale of the velocity channels; see [Channels](#channels)).
 
-> These numbers replace an earlier set trained under the pre-`flight_key` split, which
-> `hash(flight_key)` reproduces for only 552/995 flights. That partition was clean
-> (train/val/test verified disjoint) but is not reproducible from current code, so it was
-> retrained rather than quoted. Two conclusions did not survive the change of split; they are
-> marked below. **Treat any single-split margin under ~1.5× as provisional** — this is one
-> seed on one split, and that is the size of effect it turned out to move.
+> This is the third training generation. The first (pre-`flight_key` split) is not
+> reproducible from current code and is never quoted; the second (identity retrain, same
+> day) lives in `4dTrajectory/outputs/KRDU/_pre_b3_transport/`. Same split, same seed, same
+> recipe across generations two and three — yet sub-1.5× margins still moved (e.g. gate
+> passes 4→0, chained lateral mean ±15%). **Treat any margin under ~1.5× as provisional**;
+> only conclusions that held across generations are stated as findings below.
 
-> **Run-to-run jitter, measured.** Re-running `predict` on the same checkpoints and data
-> (CUDA, no retraining) reproduced the one-pass full-mode aggregate ADE to <0.1 m, while the
-> chained-window cells moved 2–4% and one borderline flight crossed the lateral gate
-> (3→4 passes for iTransformer full). Chaining amplifies floating-point nondeterminism the
-> way it amplifies everything else. This is another reason for the provisional-margin rule
+> **Run-to-run jitter, measured** (on the pre-B3 checkpoints). Re-running `predict` on the
+> same checkpoints and data (CUDA, no retraining) reproduced the one-pass full-mode
+> aggregate ADE to <0.1 m, while the chained-window cells moved 2–4% and one borderline
+> flight crossed the lateral gate. Chaining amplifies floating-point nondeterminism the way
+> it amplifies everything else. This is another reason for the provisional-margin rule
 > above.
 
 **Whole-approach prediction, graded at the threshold** (152 test flights). Directly
-comparable across all four — every row predicts the complete remaining approach.
+comparable across all four — every row predicts the complete remaining approach. `capped` =
+flights whose forecast was still short of the threshold when `H` ran out (their gate
+verdicts are cap artifacts; the count is model behaviour, it moves between retrains).
 
-| model | mode | ADE mean/p95 | FDE mean/p95 | lateral mean/p95 | path deviation | flyable (obs. floor 63.2%) | gate pass |
-|---|---|---:|---:|---:|---:|---:|---:|
-| iTransformer | **full** | **1746 / 4539 m** | **2230 / 6021 m** | **767 / 2434 m** | 1608 m | 46.7% (−16.4 pp) | **4/152** |
-| iTransformer | window (chained ×10) | 1930 / 6429 m | 2522 / 7436 m | 1130 / 3979 m | **1590 m** | **69.7% (+6.6 pp)** | 1/152 |
-| PatchTST | full | 1912 / 4996 m | 3110 / 7474 m | 2105 / 6001 m | 2105 m | 28.9% (−34.2 pp) | 0/152 |
-| PatchTST | window (chained ×10) | 2476 / 6414 m | 3873 / 12568 m | 3183 / 8470 m | 4194 m | 32.9% (−30.3 pp) | 0/152 |
+| model | mode | ADE mean/p95 | FDE mean/p95 | lateral mean/p95 | path deviation | flyable (obs. floor 63.2%) | gate pass | capped |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| iTransformer | **full** | **1756 / 4656 m** | **2082 / 6002 m** | **868 / 2750 m** | 1754 m | 46.1% (−17.1 pp) | 0/152 | 14 |
+| iTransformer | window (chained ×10) | 1772 / 5261 m | 2486 / 7679 m | 1302 / 6576 m | **1728 m** | **73.7% (+10.5 pp)** | 0/152 | 4 |
+| PatchTST | full | 1961 / 5075 m | 2945 / 6618 m | 2016 / 5598 m | 2267 m | 25.0% (−38.2 pp) | 0/152 | 30 |
+| PatchTST | window (chained ×10) | 1947 / 5427 m | 2864 / 7145 m | 3433 / 8993 m | 4769 m | 40.8% (−22.4 pp) | 0/152 | 2 |
 
-**Displacement error at matched lead times** — the axis on which the two horizon modes can be
-compared fairly. Recomputed directly from the exported records: 3D distance between the
-predicted and observed position at the same `t`, mean over the flights whose record reaches
-that lead (`n`; records end at the threshold, so `n` falls with lead — long leads survive
-only for long approaches, and 600 s has n=1, too few to quote).
+**Displacement error at matched lead times** — the axis on which the two horizon modes can
+be compared fairly. Two accountings, deliberately both (B3.3): they answer different
+questions and their numbers must not be mixed across tables.
+
+*Record accounting* — one forecast per flight (earliest anchor), truncated at the
+threshold, 3D displacement at the same `t`, mean over the flights whose record reaches
+that lead. Cross-mode comparable (chained cells included), but `n` falls with lead because
+records end at the threshold — 600 s survives for at most one flight and cannot be quoted:
 
 | model | mode | 10 s | 30 s | 60 s | 120 s | 300 s |
 |---|---|---:|---:|---:|---:|---:|
-| iTransformer | window (chained) | 294 m | **380 m** | **711 m** | **1354 m** | 4765 m |
-| iTransformer | full | 943 m | 886 m | 964 m | 1323 m | **3802 m** |
-| PatchTST | window (chained) | 663 m | 812 m | 1252 m | 2518 m | 6972 m |
-| PatchTST | full | **231 m** | 392 m | 749 m | 1519 m | 3852 m |
-| *n (of 152)* | | *152* | *152* | *152* | *119–146* | *49–80* |
+| iTransformer | window (chained) | **284 m** | **365 m** | **656 m** | **1247 m** | 4382 m |
+| iTransformer | full | 1084 m | 934 m | 980 m | 1358 m | **3803 m** |
+| PatchTST | window (chained) | 547 m | 729 m | 1289 m | 2177 m | 6849 m |
+| PatchTST | full | 603 m | 624 m | 854 m | 1594 m | 4037 m |
+| *n (of 152)* | | *152* | *149–152* | *149–152* | *106–146* | *33–79* |
+
+*Raw-tensor accounting* — `history.json` `metrics.test.by_horizon`: every test window
+(21k–25k windows, all anchors), truth past the threshold included, mean per lead. This is
+the accounting that can see 600 s (n = 893 windows); window-mode models only reach their
+own 60 s horizon here (chaining is a forecast-time construction, not a tensor):
+
+| model | mode | 10 s | 30 s | 60 s | 120 s | 300 s | 600 s |
+|---|---|---:|---:|---:|---:|---:|---:|
+| iTransformer | window | **300 m** | **395 m** | **752 m** | — | — | — |
+| iTransformer | full | 615 m | 628 m | 922 m | **1785 m** | **4122 m** | **5438 m** |
+| PatchTST | window | 503 m | 654 m | 1183 m | — | — | — |
+| PatchTST | full | 478 m | 549 m | 937 m | 2074 m | 4316 m | 7384 m |
+| *n (windows)* | | *21k–25k* | *21k–23k* | *21069* | *16543* | *7380* | *893* |
 
 ### What the numbers say
 
 **Whole approach → full, and this is the robust result.** One-pass full mode beats chained
-window on lateral error at the threshold for both architectures, on both splits — ≈1.5× on
-the mean (iTransformer 1130/767, PatchTST 3183/2105) and 1.4–1.6× on p95. Once a chained
-pass goes wrong the next nine extrapolate from a wrong history. Training directly for the
-long horizon beats chaining a short one.
+window on lateral error at the threshold for both architectures, in every training
+generation — this one: 1.5× on the mean for iTransformer (1302/868) and 1.7× for PatchTST
+(3433/2016), 1.6–2.4× on p95. Once a chained pass goes wrong the next nine extrapolate
+from a wrong history. Training directly for the long horizon beats chaining a short one.
 
-**Did NOT survive the split change: "the compounding cost lands in the tail, not the mean".**
-On the old split the lateral mean was 1.5× worse while p95 was 2.2× worse. Here the two
-ratios are the same to within noise. The tail effect is still visible in *final*
-displacement — PatchTST FDE p95 12568 m chained vs 7474 m one-pass (1.68×) against a 1.25×
-mean — but that is a claim about FDE, not about lateral error at the threshold, and it is
-not the clean 1.5-vs-2.2 story originally written here.
+**"The compounding cost lands in the tail" is architecture-dependent, not a law.** The
+claim was withdrawn after the split change, and the B3 generation shows why: iTransformer
+again fits it (mean ratio 1.5× vs p95 ratio 2.4×) while PatchTST does not (1.7× vs 1.6×).
+Chained tails blow up for the model that was otherwise placing the endpoint well; do not
+quote the tail story without naming the architecture.
 
-**Short lead → PatchTST; long lead → iTransformer, now with a caveat.** Within full mode,
-PatchTST clearly leads at 10 s (231 vs 943 m) and the two are within 2% by 300 s (3852 vs
-3802 m) — on this run the long-lead reversal is inside the provisional band at 300 s; the
-earlier run's raw-tensor curves (which see past threshold truncation) had iTransformer
-clearly ahead at 600 s (5407 vs 6962 m). The mechanism is architectural either way:
-PatchTST is channel-**independent** (`TSTiEncoder` — every channel forecast in isolation by
-shared weights) while iTransformer's attention runs *across* variates; for a turning
-aircraft east and north are strongly coupled and PatchTST cannot represent that by
-construction. Near-straight flight costs it nothing, so **the coupling only starts paying
-once the turn develops.**
+**Short lead → PatchTST; long lead → iTransformer — now stated on the restored raw-tensor
+column (B3.3).** Within full mode, PatchTST leads at 10–30 s (478/549 vs 615/628 m raw;
+603 vs 1084 m record) and iTransformer leads at 600 s: **5438 vs 7384 m** over n = 893
+windows. The 600 s direction has held in all three training generations (6135/7142,
+5407/6962, 5438/7384) at margins of 1.16–1.36× — consistent, but each individual margin
+sits under the provisional band, which is why the per-generation history is listed. The
+mechanism is architectural: PatchTST is channel-**independent** (`TSTiEncoder` — every
+channel forecast in isolation by shared weights) while iTransformer's attention runs
+*across* variates; for a turning aircraft east and north are strongly coupled and PatchTST
+cannot represent that by construction. Near-straight flight costs it nothing, so **the
+coupling only starts paying once the turn develops.**
 
-**Did NOT survive the split change: "zero gate passes in all four runs".** iTransformer now
-passes 4/152 in full mode and 1/152 chained. The point stands in substance — ~3% is not a
-usable approach predictor — but "zero, always" was a property of that split, not of the
-method. The 106.75 m lateral limit is FAA containment for a *planned or flown* approach,
-while this is a *forecast* extrapolating 5–10 minutes from 120 s of history; the number
-quantifies the distance between a statistical prediction and a certifiable trajectory.
+**Gate passes: an exact count is noise; the conclusion is not.** Across the three
+generations the four cells produced 0–4 passes per 152 (0–2.6%), and this generation is
+0/152 everywhere — the pre-B3 "4/152 full, 1/152 chained" did not survive a retrain whose
+data moved by ≤ 0.3%. The stable statement: the 106.75 m lateral limit is FAA containment
+for a *planned or flown* approach, while this is a *forecast* extrapolating 5–10 minutes
+from 120 s of history; whether a borderline flight lands inside it is jitter.
 
-**Flyability and accuracy disagree, deliberately.** iTransformer window is the *most* flyable
-run (69.7%, above the observed tracks' 63.2% floor) while losing to full mode on every error
-metric; PatchTST full is the least flyable (28.9%) at a comparable ADE. Chaining short
-windows produces smooth, conservative paths — easy to fly, not where the aircraft went.
-Neither metric substitutes for the other.
+**Flyability and accuracy disagree, deliberately.** iTransformer window is the *most*
+flyable run (73.7%, ten points above the observed tracks' 63.2% floor) while losing to
+full mode on threshold lateral error; PatchTST full is the least flyable (25.0%) at a
+comparable ADE. Chaining short windows produces smooth, conservative paths — easy to fly,
+not where the aircraft went. Neither metric substitutes for the other.
 
 **Real data is much harder than synthetic**, as it should be. Synthetic approaches are
 straight-in, so the model only has to extrapolate a line. Real arrivals are vectored, and
@@ -409,7 +458,7 @@ comparison against the observed tracks measured by the identical code, because b
 carry the same polar bias:
 
 ```
-flyability: 46.7% of predictions fully flyable vs 63.2% of the observed tracks (-16.4 pp)
+flyability: 46.1% of predictions fully flyable vs 63.2% of the observed tracks (-17.1 pp)
 ```
 
 The observed baseline is the floor, not 100%. `HARD_VIOLATIONS` (stall, bank, load factor,
@@ -463,6 +512,11 @@ shift, and synthetic straight-ins have none. Real KRDU arrivals have plenty (mix
 6 runways, vectored downwinds, wind). Re-run there, all 8 cells, same hyperparameters
 (`ep=120 lr=5e-4 patience=15 seed=1337`), each graded on its own checkpoint's held-out test
 split — artifacts in `4dTrajectory/outputs/KRDU/_ablation_norm/`:
+
+> Dating note: this ablation was measured under the pre-B3.1 `ve/vn/vu` channels and was
+> not re-run after the transport-consistency change — the change rescales the velocity
+> channels by ≤ 0.3%, which is far below the 1.2–2.7× margins here, and the argument for
+> "off" is structural (absolute position is the signal), untouched by the channel rescale.
 
 | model | mode | norm | epochs | val loss | ADE | ADE p95 | FDE | lateral p95 | flyable |
 |---|---|---|---:|---:|---:|---:|---:|---:|---:|
@@ -551,10 +605,13 @@ python -m pytest 4dTrajectory/ts_transformer/tests -q --import-mode=importlib
 Picked up automatically by `run_all_tests.sh`, which already lists `4dTrajectory` — since
 `aeroviz` now carries torch, one invocation runs the whole repo.
 
-The tests pin contracts, not quality: the heading convention in both directions, the padding
-mask, the by-flight split, threshold truncation, and — the important one — that an exported
-record satisfies the real `evaluation.records.record_from_dict` validator and that a written
-batch is loadable by the real manifest-only `load_records`.
+The tests pin contracts, not quality: the heading convention in both directions, the
+transport-consistency of the channels (the factor closed form against pinned WGS84 values,
+and that a state sequence generated by the geodetic kinematics integrates its velocity
+channels back into its position channels exactly), the padding mask, the by-flight split,
+threshold truncation, and — the important one — that an exported record satisfies the real
+`evaluation.records.record_from_dict` validator and that a written batch is loadable by the
+real manifest-only `load_records`.
 
 ## Deliberate scope — NOT bugs, do not "fix" without deciding to
 
