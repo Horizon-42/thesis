@@ -10,9 +10,11 @@ from flight_scenarios.start_state import (
     state_samples_from_track,
 )
 
-# A synthetic 100 m/s due-EAST, level track at the equator. Using the WGS84 semi-major
-# axis (geokit's default), 500 m east over a 5 s window is this many degrees of longitude:
-_LON_STEP_DEG = 500.0 / (math.pi / 180.0 * 6378137.0)
+# A synthetic 100 m/s due-EAST, level track at the equator, 1000 m altitude. The fit
+# measures PHYSICAL velocity through the true tangent scale — (R_N + h)·cos(lat) metres
+# per radian of longitude; at the equator R_N is exactly the WGS84 semi-major axis — so
+# 500 m east over a 5 s window is this many degrees of longitude:
+_LON_STEP_DEG = 500.0 / (math.pi / 180.0 * (6378137.0 + 1000.0))
 DUE_EAST_LEVEL = [
     [0.0, 0.0, 0.0, 1000.0],
     [5.0, _LON_STEP_DEG, 0.0, 1000.0],
@@ -40,7 +42,9 @@ def test_due_east_level_track():
 def test_due_north_level_track():
     # Locks the convention on the other axis: due North must be psi = +pi/2 in math-ENU
     # (the compass bearing of due North is 0 — the reflection bug would return 0 here).
-    lat_step_deg = 500.0 / (math.pi / 180.0 * 6378137.0)
+    # North's tangent scale is R_M + h; at the equator R_M = a(1 - e^2), 0.67% below a —
+    # exactly the bias the chart-constant version of the fit used to carry.
+    lat_step_deg = 500.0 / (math.pi / 180.0 * (6335439.327 + 1000.0))
     due_north = [
         [0.0, 0.0, 0.0, 1000.0],
         [5.0, 0.0, lat_step_deg, 1000.0],

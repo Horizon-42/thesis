@@ -248,7 +248,10 @@ def test_eval_filename_mirrors_states_filename():
 def test_write_reference_records_from_observed_tracks(tmp_path):
     # A due-north 100 m/s descending synthetic track matching the scenario's identity.
     import math
-    lat_step = 500.0 / (math.pi / 180.0 * 6378137.0)  # 500 m of latitude in degrees
+    # 500 m of latitude in degrees, through the tangent scale the velocity fit measures
+    # against (R_M + h at the window anchor) — so the fitted V_north is exactly 100 m/s.
+    from geokit import wgs84_curvature_radii
+    lat_step = 500.0 / (math.pi / 180.0 * (wgs84_curvature_radii(35.6)[0] + 2000.0))
     waypoints = [[10.0 + 5.0 * k, -78.5, 35.6 + lat_step * k, 2000.0 - 50.0 * k]
                  for k in range(4)]
     flight = {"id": "AFR074", "icao24": "ad7f04", "landing_time_utc": "2026-06-18T21:37:36Z",

@@ -22,13 +22,24 @@ The velocity is a **least-squares fit** of the ENU position against time over th
 not a 2-point finite difference. Low-altitude ADS-B is jittery — duplicate / "stuck"
 position reports near the ground make a 2-point estimate wildly under/over-read the speed —
 and a line fit over ~15 s of samples (after dropping stuck reports) is robust to that.
+
+The fit projects through the **true local tangent scales** at the window anchor —
+``(R_M + h)`` metres per radian of latitude, ``(R_N + h)·cos(lat)`` per radian of
+longitude (``geokit.wgs84_curvature_radii``) — so the slopes ARE the physical ENU
+velocity components. That is the meaning every consumer assigns them: the geodetic RHS
+integrates ``lat_dot = V_north / (R_M + h)``, the flyability inversion subtracts
+transport rates computed from the same radii, and the ts chart's velocity factors undo
+exactly this definition. The previous version scaled by the spherical chart constants
+(``WGS84_A``, ``WGS84_A·cos lat``) instead, which biased ``V_north`` by ``a/(R_M+h)``
+(+0.33% at 36° latitude) — measured as a systematic ~6 m/min north drift when
+integrating the ts velocity channels against their own positions (2026-07-20, B3.1).
 """
 
 from __future__ import annotations
 
 import math
 
-from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon
+from geokit import wgs84_curvature_radii
 
 from aerodynamic_model.common import GeodeticState
 
@@ -155,10 +166,15 @@ def _velocity_lsq(window: list[Waypoint]) -> tuple[float, float, float]:
         samples = window  # every report was at one point -> keep raw (velocity ~ 0)
 
     t0, lon0, lat0, alt0 = samples[0]
-    m_per_deg_lon = metres_per_deg_lon(lat0)
+    # True tangent scales at the window anchor (module docstring): the slopes below are
+    # physical ENU velocity components, not chart derivatives.
+    r_m, r_n = wgs84_curvature_radii(lat0)
+    deg = math.pi / 180.0
+    m_per_deg_lat = deg * (r_m + alt0)
+    m_per_deg_lon = deg * (r_n + alt0) * math.cos(math.radians(lat0))
     ts = [s[0] - t0 for s in samples]
     east = [(s[1] - lon0) * m_per_deg_lon for s in samples]
-    north = [(s[2] - lat0) * METRES_PER_DEG_LAT for s in samples]
+    north = [(s[2] - lat0) * m_per_deg_lat for s in samples]
     up = [s[3] - alt0 for s in samples]
 
     ve = _slope(ts, east)
