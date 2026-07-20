@@ -130,6 +130,16 @@ new `aeroviz-4d/python/vertical_datum.py` — a mirror of `flight_scenarios/datu
 precedent. Records are assumed MSL rather than tagged: all pre-datum-fix artifacts are
 discarded wholesale (user decision), never fed back in.
 
+**New operational scripts (same day).** `run_ts_pipeline.py` — the ts_transformer sibling
+of `run_scenario_pipeline.py`: per airport runs the 2×2 grid (iTransformer/PatchTST ×
+window/full) as train → predict(test split) → evaluation report/HTML → comparison-CZML
+publish (categories `ts_{itr|ptst}_{mode}`, matching the published naming); dataset build
++ flight_key split happen inside train and travel in the checkpoint. `clean_pipeline_data.py`
+— wipes every generated artifact of both chains (scenarios, 4dTrajectory outputs incl.
+ts dirs, frontend comparison + observed-layer CZML) with plan-print + confirm/`--yes`;
+raw OpenSky downloads and `_`-parked research dirs are kept unless `--include-downloads` /
+`--include-parked`; static airport layers and `data/archive` are never touched.
+
 ### 2026-07-20 — B3: transport-consistent velocity channels + physical-velocity fit; third ts training generation
 
 The findings doc's B3 bundle (`docs/findings_and_open_items_2026-07-20.md`), executed. The
