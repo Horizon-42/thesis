@@ -4,21 +4,27 @@ Each exported flight is ``{id, callsign, type, icao24, dep_airport, arr_airport,
 runway, waypoints}`` where every waypoint is ``[offset_sec, lon, lat, alt_m]`` and
 ``alt_m`` is **geometric** altitude. No barometric bias correction is applied:
 geometric altitude is already referenced to the ellipsoid.
+
+That ellipsoidal reference is deliberate and load-bearing: CZML positions are consumed by
+Cesium as heights above the WGS84 ellipsoid, so this file is correct as written. The
+MODELING plane needs MSL instead, and converts on the way in — see
+``flight_scenarios/datum.py``. Do not "fix" the datum here; it would break the viewer.
 """
 
 from __future__ import annotations
 
 import math
+import statistics
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 if __package__ is None or __package__ == "":  # pragma: no cover - direct execution.
     import sys
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from geokit import bearing_rad
+from geokit import METRES_PER_DEG_LAT, bearing_rad, metres_per_deg_lon
 
 from trajectory_data_process.acquisition.runways import RunwayThreshold
 from trajectory_data_process.geo import haversine_km
@@ -46,6 +52,7 @@ def trajectory_to_czml_flight(
     exclude_ground: bool = False,
     runway_threshold: RunwayThreshold | None = None,
     runway_threshold_radius_m: float = 1000.0,
+    sibling_thresholds: Sequence[RunwayThreshold] = (),
     landing_only: bool = False,
     descent_margin_m: float = 300.0,
     heading_tolerance_deg: float = DEFAULT_HEADING_TOLERANCE_DEG,
@@ -96,6 +103,16 @@ def trajectory_to_czml_flight(
             raise ValueError("landing_only requires a runway_threshold")
         if not _is_landing_geometry(
             points, anchor_index, runway_threshold, descent_margin_m, landing_max_agl_m
+        ):
+            return None
+        # Parallel runways pass the geometry and heading tests for EITHER threshold, so
+        # without this one landing is written into every parallel runway's file.
+        if not _wins_against_parallel_runways(
+            points,
+            runway_threshold,
+            _parallel_thresholds(
+                runway_threshold, sibling_thresholds, heading_tolerance_deg=heading_tolerance_deg
+            ),
         ):
             return None
 
@@ -187,6 +204,7 @@ def classify_landing_flights(
     crop_radius_km: float | None = None,
     exclude_ground: bool = False,
     runway_threshold_radius_m: float = 1000.0,
+    sibling_thresholds: Sequence[RunwayThreshold] = (),
     heading_tolerance_deg: float = DEFAULT_HEADING_TOLERANCE_DEG,
     landing_max_agl_m: float = 1500.0,
     max_accepted: int = 80,
@@ -200,6 +218,12 @@ def classify_landing_flights(
     kept (tagged with the measured heading errors) so a run can be audited for
     false kills rather than silently discarding them. Collection stops once
     ``max_accepted`` accepted landings are found.
+
+    ``sibling_thresholds`` is the airport's other thresholds. It is what keeps a landing
+    on one runway out of its PARALLEL neighbour's file: those share a landing direction
+    and sit inside ``runway_threshold_radius_m`` of each other, so both the geometry and
+    the heading test accept either one. Leave it empty and the classification is
+    per-threshold and independent, which is the bug this parameter exists to prevent.
 
     ``id`` stays the bare callsign — deliberately NOT re-uniqued. A landing's identity
     is ``(icao24, landing_time_utc)`` (what the harvest de-duplicates by, and what
@@ -220,6 +244,7 @@ def classify_landing_flights(
             exclude_ground=exclude_ground,
             runway_threshold=runway_threshold,
             runway_threshold_radius_m=runway_threshold_radius_m,
+            sibling_thresholds=sibling_thresholds,
             heading_tolerance_deg=heading_tolerance_deg,
             landing_max_agl_m=landing_max_agl_m,
         )
@@ -292,6 +317,90 @@ def _approach_window(
     window_start = anchor_time - approach_window_min * 60
     window = [p for p in points[: anchor_index + 1] if window_start <= p.time <= anchor_time]
     return window if len(window) >= 2 else points[: anchor_index + 1]
+
+
+def _parallel_thresholds(
+    threshold: RunwayThreshold,
+    siblings: Sequence[RunwayThreshold],
+    *,
+    heading_tolerance_deg: float,
+) -> list[RunwayThreshold]:
+    """The airport's other thresholds a landing here could genuinely be confused with.
+
+    Only PARALLEL runways are ambiguous: they share a landing direction and sit a few
+    hundred metres apart, well inside ``runway_threshold_radius_m``, so the geometry AND
+    heading tests both pass for either one. The opposite end of the same runway is 180 deg
+    away and already excluded by the heading test — and it must be excluded here too, since
+    a full rollout ends right on top of it and would win any distance comparison.
+    """
+    if threshold.heading_deg is None:
+        return []
+    parallel = []
+    for other in siblings:
+        if other.ident == threshold.ident or other.heading_deg is None:
+            continue
+        if _heading_diff(other.heading_deg, threshold.heading_deg) <= heading_tolerance_deg:
+            parallel.append(other)
+    return parallel
+
+
+# How far back along the approach the centreline offset is measured. Far enough to be
+# established on final, near enough that a base-leg turn is not averaged in.
+_CENTRELINE_WINDOW_M = (-6000.0, 0.0)
+
+
+def _centreline_offset_m(points: list[TrajectoryPoint], threshold: RunwayThreshold) -> float:
+    """Median lateral offset of the final approach from this runway's extended centreline.
+
+    NOT distance to the threshold point: where a runway has a displaced threshold the
+    landing point sits far down the pavement (775 m at KSJC 30L) while ADS-B coverage stops
+    near the pavement end, so EVERY track is ~775 m from it and the measure says nothing
+    about which runway was flown. Parallel runways are separated LATERALLY, so the lateral
+    offset is what distinguishes them.
+    """
+    course = math.radians(threshold.heading_deg)
+    east_hat, north_hat = math.sin(course), math.cos(course)
+    per_deg_lon = metres_per_deg_lon(threshold.lat)
+    offsets = []
+    for p in points:
+        north = (p.lat - threshold.lat) * METRES_PER_DEG_LAT
+        east = (p.lon - threshold.lon) * per_deg_lon
+        along = east * east_hat + north * north_hat
+        if _CENTRELINE_WINDOW_M[0] <= along <= _CENTRELINE_WINDOW_M[1]:
+            offsets.append(abs(-east * north_hat + north * east_hat))
+    if not offsets:
+        return float("inf")
+    return statistics.median(offsets)
+
+
+def _wins_against_parallel_runways(
+    points: list[TrajectoryPoint],
+    threshold: RunwayThreshold,
+    parallel: Sequence[RunwayThreshold],
+) -> bool:
+    """True when this approach tracks ``threshold``'s centreline more closely than a parallel one.
+
+    Without this each threshold was classified independently, so ONE landing was written
+    into every parallel runway's file. Measured before the fix: 169 of KSJC 30L's 200
+    flights were also in 30R's file, and the observed lateral error's median WAS the
+    parallel separation (KSTL 30L 397 m, KSJC 30R 234 m).
+
+    No competitors means no ambiguity to arbitrate — trivially a win. That short-circuit
+    also keeps heading-less thresholds working: without it, ``_centreline_offset_m`` would
+    take ``math.radians(None)`` on a threshold whose runways.csv row publishes no heading,
+    a case the heading test deliberately accepts.
+
+    A flight with NO sample in the centreline window cannot claim the runway when a
+    parallel competitor exists: both sides would measure inf, and ``inf <= inf`` would
+    hand the landing to EVERY parallel runway — the double-assignment this function
+    exists to prevent. Such a flight is dropped from both files instead.
+    """
+    if not parallel:
+        return True
+    own = _centreline_offset_m(points, threshold)
+    if not math.isfinite(own):
+        return False
+    return all(own <= _centreline_offset_m(points, other) for other in parallel)
 
 
 def _is_landing_geometry(

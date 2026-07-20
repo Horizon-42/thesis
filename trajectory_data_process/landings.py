@@ -196,6 +196,9 @@ def download_airport_landings(
                 airport_lon=profile.lon,
                 runway_threshold=threshold,
                 runway_threshold_radius_m=runway_threshold_radius_m,
+                # The airport's full threshold list, so a landing on one runway is not also
+                # written into its parallel neighbour's file (see classify_landing_flights).
+                sibling_thresholds=thresholds,
                 heading_tolerance_deg=heading_tolerance_deg,
                 crop_radius_km=radius_km,
                 max_accepted=count - before + 10,
