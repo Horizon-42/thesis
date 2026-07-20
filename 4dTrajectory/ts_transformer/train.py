@@ -256,10 +256,11 @@ def load_checkpoint(path: str | Path) -> tuple[nn.Module, TSConfig, Normalizer, 
     config = TSConfig.from_dict(payload["config"])
     if config.channels != CHANNELS:
         raise ValueError(
-            f"checkpoint channel order {config.channels} != this build's channels.CHANNELS "
-            f"{CHANNELS} — the model and normalizer index the old order, the data build "
-            f"the new one, and a same-length reorder would load cleanly but silently "
-            f"mis-map every channel. Re-train, or run the matching code version."
+            f"checkpoint channel contract {config.channels} != this build's "
+            f"channels.CHANNELS {CHANNELS} — the model and normalizer index the old "
+            f"contract, the data build the new one, and a same-length mismatch would load "
+            f"cleanly but silently mis-map (or mis-scale: ve/vn/vu -> edot/ndot/udot was a "
+            f"semantics change) every channel. Re-train, or run the matching code version."
         )
     normalizer = Normalizer.from_dict(payload["normalizer"])
     model = build_model(config)

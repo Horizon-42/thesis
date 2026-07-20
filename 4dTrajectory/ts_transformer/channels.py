@@ -1,4 +1,4 @@
-"""What the network actually sees: a local ENU frame anchored at the runway threshold.
+"""What the network actually sees: a local ENU chart anchored at the runway threshold.
 
 The evaluation contract's state is ``(lat, lon, alt, V, psi, gamma, m)`` — degrees, metres,
 and two angles in radians. That is a poor thing to regress directly:
@@ -9,21 +9,21 @@ and two angles in radians. That is a poor thing to regress directly:
   pointing the aircraft backwards — right where the turn onto final happens.
 - ``m`` is not observable from ADS-B at all. It is carried, never predicted.
 
-So the channels are **position and velocity in metres and metres/second**, in a local
-ENU tangent plane whose origin is the runway threshold:
+So the channels are the **chart coordinates and their exact time derivatives**, in a local
+chart whose origin is the runway threshold:
 
-    e, n, u     east / north / up, metres from the threshold
-    ve, vn, vu  velocity components, metres/second
+    e, n, u           east / north / up, metres from the threshold
+    edot, ndot, udot  d(e)/dt, d(n)/dt, d(u)/dt — metres/second IN THE CHART
 
-``psi`` and ``gamma`` then fall out of the velocity components on the way back
+``psi`` and ``gamma`` then fall out of the velocity channels on the way back
 (:func:`states_from_channels`) with the right convention *by construction* —
-``psi = atan2(vn, ve)`` is exactly the modeling layer's math-ENU heading, so there is no
-place left to accidentally substitute a compass bearing. The wrap problem disappears with
-it: ``(ve, vn)`` is continuous across the branch cut that ``psi`` is not.
+after undoing the transport factors, ``psi = atan2(V_north, V_east)`` is exactly the
+modeling layer's math-ENU heading, so there is no place left to accidentally substitute a
+compass bearing. The wrap problem disappears with it: ``(edot, ndot)`` is continuous
+across the branch cut that ``psi`` is not.
 
 **Projection.** ``east = (lon - lon0) * metres_per_deg_lon(lat0)``,
-``north = (lat - lat0) * METRES_PER_DEG_LAT`` — the same local flat projection
-``flight_scenarios/start_state.py`` fits velocities in, and the same form + anchor as the
+``north = (lat - lat0) * METRES_PER_DEG_LAT`` — the same form + anchor as the
 ``approach_constraints`` NE frame (``ltp_ne = (0, 0)``, which scales degrees by
 ``WGS84_A·DEG2RAD`` — the definition geokit's ``METRES_PER_DEG_LAT`` aligns to, so the two
 frames share one constant; ``metres_per_deg_lon`` is that times ``cos(lat)``).
@@ -36,6 +36,35 @@ survives on a measured displacement is the local scale distortion (~0.2% at the 
 → 0 at the threshold, where the gates judge). Matching the existing frame is what matters —
 a different projection here would show up as apparent model error against records built by
 the other packages.
+
+**Transport-consistent velocity channels.** A state's ``(V, psi, gamma)`` is a PHYSICAL
+ENU velocity — the modeling layer's contract (``V_east = V·cosγ·cosψ`` feeding
+``lat_dot = V_north/(R_M+h)`` in the geodetic RHS). The chart coordinates above are scaled
+*angles* (``n = Δlat_rad·WGS84_A``, ``e = Δlon_rad·WGS84_A·cos lat0`` — exact, because
+``METRES_PER_DEG_LAT = WGS84_A·π/180``), so the chart derivative of a physical velocity
+picks up the full-transport Jacobian the optimizer's geodetic RHS encodes:
+
+    ndot = V_north · WGS84_A / (R_M + h)
+    edot = V_east  · WGS84_A·cos(lat0) / ((R_N + h)·cos(lat))
+    udot = V·sin(gamma)                                        (u = Δalt is already exact)
+
+with ``R_M``/``R_N`` the exact WGS84 curvature radii (``geokit.wgs84_curvature_radii``).
+The factors are 1 ± ~0.3% over a TMA (``a/R_M`` ≈ 1.0033 at 36°, the cos ratio ≤ 0.3% at
+the 25 km ring) — small, but before this change the velocity channels stored the physical
+components RAW, so integrating them did not reproduce the position channels (the 2026-07-20
+finding A7: an O(0.2–0.5%) mismatch, a few metres per minute of integration). Now the six
+channels describe ONE curve consistently: for any state sequence whose velocities are the
+true derivatives of its positions, ``∫ edot dt`` IS ``e``. The rename (``ve/vn/vu`` →
+``edot/ndot/udot``) is deliberate: the channel tuple is serialised into every checkpoint
+and ``train.load_checkpoint`` refuses a mismatch, so pre-change checkpoints fail loudly
+instead of silently mis-scaling every velocity.
+
+Fixed at the same time, one seam up: ``state_samples_from_track``'s least-squares fit now
+projects through the true tangent scales (``R_M+h``, ``(R_N+h)·cos lat``), so the
+``(V, psi, gamma)`` it hands this module really IS physical velocity — it used to carry the
+flat-chart scales, an O(0.3%) estimator bias that would otherwise have survived here as
+north integration drift (measured: fixing only the chart moved the median whole-track north
+drift from 2.7 to 8.6 m/min; fixing both restores consistency, leaving only LSQ smoothing).
 
 **Ordering trap.** CZML-input waypoints are ``[t, lon, lat, alt]`` — *lon before lat* — while
 every state dict downstream is ``lat`` before ``lon``. This module is the only place the two
@@ -50,13 +79,15 @@ from typing import Sequence
 
 import numpy as np
 
-from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon
+from geokit import METRES_PER_DEG_LAT, WGS84_A, metres_per_deg_lon, wgs84_curvature_radii
 
 from aerodynamic_model.common import GeodeticState
 
-# The channel contract. Order is load-bearing — it indexes every tensor, the normalizer's
-# per-channel statistics, and the checkpoint. Changing it invalidates trained checkpoints.
-CHANNELS: tuple[str, ...] = ("e", "n", "u", "ve", "vn", "vu")
+# The channel contract. Order AND names are load-bearing — the tuple indexes every tensor,
+# the normalizer's per-channel statistics, and the checkpoint; load_checkpoint refuses a
+# mismatch. The velocity names encode their semantics (chart derivatives, NOT raw physical
+# ENU components) precisely so a semantics change cannot reuse a name and load silently.
+CHANNELS: tuple[str, ...] = ("e", "n", "u", "edot", "ndot", "udot")
 
 # Column indices, so nothing downstream hard-codes a number.
 IDX = {name: i for i, name in enumerate(CHANNELS)}
@@ -65,7 +96,7 @@ POSITION_IDX = (IDX["e"], IDX["n"], IDX["u"])
 
 @dataclass(frozen=True)
 class Frame:
-    """A local ENU tangent plane anchored at a runway threshold.
+    """A local ENU chart anchored at a runway threshold.
 
     ``alt0`` is the threshold's altitude (MSL metres), so ``u`` is height above the
     threshold rather than above the ellipsoid — which keeps the vertical channel centred
@@ -88,6 +119,22 @@ class Frame:
         cannot land on one side only and read as model error on the other.
         """
         return self.lat0 + n / METRES_PER_DEG_LAT, self.lon0 + e / self.m_per_deg_lon
+
+    def chart_velocity_factors(self, lat_deg: float, alt_m: float) -> tuple[float, float]:
+        """``(f_e, f_n)`` such that ``edot = V_east·f_e`` and ``ndot = V_north·f_n``.
+
+        The full-transport Jacobian from a physical ENU velocity at ``(lat, alt)`` to the
+        derivative of this chart's coordinates — the module docstring derives it from the
+        geodetic RHS. Both factors are 1 ± ~0.3% over a TMA; applying them is what makes
+        the velocity channels the exact time derivatives of the position channels.
+        """
+        r_m, r_n = wgs84_curvature_radii(lat_deg)
+        cos_lat0 = math.cos(math.radians(self.lat0))
+        cos_lat = math.cos(math.radians(lat_deg))
+        return (
+            WGS84_A * cos_lat0 / ((r_n + alt_m) * cos_lat),
+            WGS84_A / (r_m + alt_m),
+        )
 
 
 def frame_for_state(state: GeodeticState) -> Frame:
@@ -118,14 +165,15 @@ def channels_from_states(
     out = np.empty((len(samples), len(CHANNELS)), dtype=np.float64)
     for i, (t, s) in enumerate(samples):
         ground_speed = s.V * math.cos(s.gamma)
+        f_e, f_n = frame.chart_velocity_factors(s.latitude, s.altitude)
         times[i] = t
         out[i] = (
-            (s.longitude - frame.lon0) * m_per_deg_lon,   # e
+            (s.longitude - frame.lon0) * m_per_deg_lon,      # e
             (s.latitude - frame.lat0) * METRES_PER_DEG_LAT,  # n
-            s.altitude - frame.alt0,                       # u
-            ground_speed * math.cos(s.psi),                # ve
-            ground_speed * math.sin(s.psi),                # vn
-            s.V * math.sin(s.gamma),                       # vu
+            s.altitude - frame.alt0,                         # u
+            ground_speed * math.cos(s.psi) * f_e,            # edot
+            ground_speed * math.sin(s.psi) * f_n,            # ndot
+            s.V * math.sin(s.gamma),                         # udot
         )
     return times, out
 
@@ -135,34 +183,40 @@ def states_from_channels(
 ) -> list[tuple[float, GeodeticState]]:
     """``(times[N], channels[N, C])`` -> ``[(t, GeodeticState), ...]``.
 
-    The exact inverse of :func:`channels_from_states`, and deliberately the same shape
-    ``flight_scenarios.state_samples_from_track`` returns — which is what
-    ``4dTrajectory/optimization/evaluation_export.reference_evaluation_record`` consumes.
-    Producing that shape here means the evaluation record is emitted by the SAME function
-    the optimizer's reference records go through, instead of this package hand-rolling a
-    second copy of the JSON contract.
+    The exact inverse of :func:`channels_from_states` — the transport factors are undone
+    at the position the channels themselves encode, so the round trip is the identity —
+    and deliberately the same shape ``flight_scenarios.state_samples_from_track`` returns,
+    which is what ``4dTrajectory/optimization/evaluation_export.reference_evaluation_record``
+    consumes. Producing that shape here means the evaluation record is emitted by the SAME
+    function the optimizer's reference records go through, instead of this package
+    hand-rolling a second copy of the JSON contract.
 
     ``m`` is carried from ``mass_kg``, not predicted: ADS-B never observed it, so the model
-    was never given it and cannot return it. ``V`` is the TOTAL speed along the flight path
-    (including the vertical component), matching the evaluation contract — not ground speed.
+    was never given it and cannot return it. ``V`` is the TOTAL physical speed along the
+    flight path (including the vertical component), matching the evaluation contract — not
+    ground speed, and not a chart quantity.
     """
     if len(times) != len(values):
         raise ValueError(f"times ({len(times)}) and values ({len(values)}) must align")
 
     states: list[tuple[float, GeodeticState]] = []
     for t, row in zip(times, values):
-        e, n, u, ve, vn, vu = (float(v) for v in row)
-        ground_speed = math.hypot(ve, vn)
+        e, n, u, edot, ndot, udot = (float(v) for v in row)
         lat, lon = frame.latlon_from_en(e, n)
+        altitude = frame.alt0 + u
+        f_e, f_n = frame.chart_velocity_factors(lat, altitude)
+        v_east = edot / f_e
+        v_north = ndot / f_n
+        ground_speed = math.hypot(v_east, v_north)
         states.append((float(t), GeodeticState(
             latitude=lat,
             longitude=lon,
-            altitude=frame.alt0 + u,
-            V=math.sqrt(ve * ve + vn * vn + vu * vu),
-            # math-ENU: 0 = East, CCW toward North. atan2(vn, ve), NOT the compass
-            # atan2(ve, vn) — see the module docstring.
-            psi=math.atan2(vn, ve) if ground_speed > 0.0 else 0.0,
-            gamma=math.atan2(vu, ground_speed) if ground_speed > 0.0 else 0.0,
+            altitude=altitude,
+            V=math.sqrt(v_east * v_east + v_north * v_north + udot * udot),
+            # math-ENU: 0 = East, CCW toward North. atan2(V_north, V_east), NOT the compass
+            # atan2(V_east, V_north) — see the module docstring.
+            psi=math.atan2(v_north, v_east) if ground_speed > 0.0 else 0.0,
+            gamma=math.atan2(udot, ground_speed) if ground_speed > 0.0 else 0.0,
             m=float(mass_kg),
         )))
     return states

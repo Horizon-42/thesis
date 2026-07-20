@@ -37,12 +37,15 @@ def _positions(values: np.ndarray) -> np.ndarray:
 def _horizontal_unit(values: np.ndarray) -> np.ndarray:
     """Unit vector along the truth's horizontal velocity, [..., 2].
 
-    Where ground speed is ~0 (a stationary or purely vertical sample) the direction is
-    undefined; those steps get a zero vector, which sends their whole horizontal error into
-    the cross-track term rather than splitting it arbitrarily.
+    Built from the chart-derivative channels; their direction differs from the physical
+    heading by the ratio of the two transport factors (< 0.1 deg over a TMA), which is
+    noise for an error DECOMPOSITION frame. Where ground speed is ~0 (a stationary or
+    purely vertical sample) the direction is undefined; those steps get a zero vector,
+    which sends their whole horizontal error into the cross-track term rather than
+    splitting it arbitrarily.
     """
-    ve = values[..., IDX["ve"]]
-    vn = values[..., IDX["vn"]]
+    ve = values[..., IDX["edot"]]
+    vn = values[..., IDX["ndot"]]
     speed = np.hypot(ve, vn)
     safe = speed > 1e-6
     unit = np.zeros(values.shape[:-1] + (2,), dtype=np.float64)

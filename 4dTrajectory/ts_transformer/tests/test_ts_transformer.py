@@ -94,21 +94,79 @@ def test_heading_uses_math_enu_not_compass_bearing():
     # psi = 0 must mean due EAST (math-ENU), not due north. Getting this backwards is a
     # reflection about the 45-degree line: it still produces plausible-looking tracks and
     # plausible-looking metrics, and it silently reads an aligned aircraft as a 90-degree
-    # intercept. Assert the velocity channels directly, both directions.
+    # intercept. Assert the velocity channels directly, both directions. The 0.5%
+    # tolerance absorbs the transport factor (a chart derivative is the physical
+    # component ± ~0.3%); a swapped convention is a 100-vs-0 error, not a 0.5% one.
     frame = _frame()
     eastbound = [(0.0, _state(psi=0.0, gamma=0.0, V=100.0))]
     _, values = ch.channels_from_states(eastbound, frame)
-    assert values[0, ch.IDX["ve"]] == pytest.approx(100.0)
-    assert values[0, ch.IDX["vn"]] == pytest.approx(0.0, abs=1e-9)
+    assert values[0, ch.IDX["edot"]] == pytest.approx(100.0, rel=5e-3)
+    assert values[0, ch.IDX["ndot"]] == pytest.approx(0.0, abs=1e-9)
 
     northbound = [(0.0, _state(psi=math.pi / 2, gamma=0.0, V=100.0))]
     _, values = ch.channels_from_states(northbound, frame)
-    assert values[0, ch.IDX["ve"]] == pytest.approx(0.0, abs=1e-9)
-    assert values[0, ch.IDX["vn"]] == pytest.approx(100.0)
+    assert values[0, ch.IDX["edot"]] == pytest.approx(0.0, abs=1e-9)
+    assert values[0, ch.IDX["ndot"]] == pytest.approx(100.0, rel=5e-3)
 
-    # ...and the inverse agrees: pure-north velocity reads back as psi = +90 deg.
+    # ...and the inverse agrees EXACTLY: pure-north velocity reads back as psi = +90 deg
+    # (the transport factors cancel through the round trip).
     back = ch.states_from_channels(np.array([0.0]), values, frame, mass_kg=1.0)
     assert back[0][1].psi == pytest.approx(math.pi / 2)
+
+
+def test_transport_factors_are_pinned_at_the_closed_form():
+    # The full-transport Jacobian from a physical ENU velocity to this chart's
+    # derivatives: f_n = A/(R_M+h), f_e = A·cos(lat0)/((R_N+h)·cos(lat)). Pinned
+    # against an independent evaluation of the closed form at lat=35.90, h=900 m with
+    # the _frame() anchor — a regression in either radius, either cosine, or the h
+    # term moves these in the 4th–6th decimal.
+    frame = _frame()
+    f_e, f_n = frame.chart_velocity_factors(35.90, 900.0)
+    assert f_e == pytest.approx(0.9990293554373, abs=1e-10)
+    assert f_n == pytest.approx(1.0031236001934, abs=1e-10)
+
+    # Wiring: the factors land on the right axes with the state's own position.
+    northbound = [(0.0, _state(psi=math.pi / 2, gamma=0.0, V=100.0))]
+    _, values = ch.channels_from_states(northbound, frame)
+    assert values[0, ch.IDX["ndot"]] == pytest.approx(100.0 * f_n, rel=1e-12)
+
+
+def test_integrating_the_velocity_channels_reproduces_the_position_channels():
+    # THE transport-consistency property (2026-07-20 finding A7): for a state sequence
+    # whose (V, psi, gamma) is the true physical velocity of its own positions, the
+    # velocity channels are the exact time derivatives of the position channels.
+    # Generate such a sequence with explicit-Euler steps of the geodetic position
+    # kinematics (lat_dot = V_north/(R_M+h) etc. — the optimizer's full-transport RHS)
+    # at constant physical velocity. The chart coordinates are linear in (lat, lon,
+    # alt), so each Euler step's chart displacement is EXACTLY dt times the chart
+    # derivative at the step start — a forward difference against edot/ndot/udot at the
+    # step's left endpoint is an identity up to float rounding. Before the fix the
+    # velocity channels held the raw physical components, off by the transport factors
+    # (~0.3%, i.e. ~0.3 m/s here); the tolerance is ~3000x tighter than that regression.
+    from geokit import wgs84_curvature_radii
+
+    frame = _frame()
+    V, psi, gamma = 100.0, 0.9, -0.05
+    ground = V * math.cos(gamma)
+    v_east, v_north, v_up = ground * math.cos(psi), ground * math.sin(psi), V * math.sin(gamma)
+
+    lat, lon, alt = 35.95, -78.90, 1200.0
+    dt = 0.05
+    samples = []
+    for k in range(3):
+        samples.append((k * dt, _state(lat=lat, lon=lon, alt=alt, V=V, psi=psi, gamma=gamma)))
+        r_m, r_n = wgs84_curvature_radii(lat)
+        lat_rate = math.degrees(v_north / (r_m + alt))
+        lon_rate = math.degrees(v_east / ((r_n + alt) * math.cos(math.radians(lat))))
+        lat, lon, alt = lat + lat_rate * dt, lon + lon_rate * dt, alt + v_up * dt
+
+    times, values = ch.channels_from_states(samples, frame)
+    for step in (0, 1):
+        for position, derivative in (("e", "edot"), ("n", "ndot"), ("u", "udot")):
+            forward = (values[step + 1, ch.IDX[position]] - values[step, ch.IDX[position]]) / dt
+            assert forward == pytest.approx(values[step, ch.IDX[derivative]], rel=1e-6), (
+                f"d({position})/dt != {derivative} at step {step}"
+            )
 
 
 def test_channels_place_the_frame_origin_at_the_threshold():
@@ -321,7 +379,7 @@ def test_error_decomposes_into_along_and_cross_track_in_the_truth_frame():
     # CROSS-track error — the aircraft is on schedule but off the path. If the two came out
     # swapped, a lateral containment failure would read as a harmless timing error.
     truth = np.zeros((1, 1, len(ch.CHANNELS)))
-    truth[0, 0, ch.IDX["ve"]] = 100.0
+    truth[0, 0, ch.IDX["edot"]] = 100.0
     predicted = truth.copy()
     predicted[0, 0, ch.IDX["n"]] = 100.0
     mask = np.ones((1, 1))

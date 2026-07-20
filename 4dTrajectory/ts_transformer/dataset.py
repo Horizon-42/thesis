@@ -61,10 +61,10 @@ class Normalizer:
 
     Both architectures already normalise each window internally (iTransformer's ``use_norm``,
     PatchTST's RevIN), so this is not about conditioning the attention — it is about the
-    LOSS. Predictions come back in physical units, where ``e``/``n`` span ~2.5e4 m and ``vu``
-    spans ~1e1 m/s; an unweighted MSE over raw channels is ~99% a horizontal-position loss and
-    the vertical channel never trains. Standardising first makes the loss weight channels
-    comparably.
+    LOSS. Predictions come back in physical units, where ``e``/``n`` span ~2.5e4 m and
+    ``udot`` spans ~1e1 m/s; an unweighted MSE over raw channels is ~99% a
+    horizontal-position loss and the vertical channel never trains. Standardising first
+    makes the loss weight channels comparably.
     """
 
     mean: np.ndarray   # [C]
