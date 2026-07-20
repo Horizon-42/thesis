@@ -79,11 +79,16 @@ vi.mock("cesium", () => {
     }
   }
 
+  // Cesium's Cartesian3 is a class with static factories, not a bare namespace —
+  // eye-space offsets are built with `new Cesium.Cartesian3(...)`.
+  class Cartesian3 {
+    constructor(public x = 0, public y = 0, public z = 0) {}
+    static fromDegrees = (lon: number, lat: number, alt: number) => ({ lon, lat, alt });
+    static fromDegreesArrayHeights = (values: number[]) => values;
+  }
+
   return {
-    Cartesian3: {
-      fromDegrees: (lon: number, lat: number, alt: number) => ({ lon, lat, alt }),
-      fromDegreesArrayHeights: (values: number[]) => values,
-    },
+    Cartesian3,
     Color: {
       CYAN: new Color("CYAN"),
       DEEPSKYBLUE: new Color("DEEPSKYBLUE"),
@@ -830,6 +835,42 @@ describe("useProcedureSegmentLayer", () => {
     setProcedureDisplayLevel("PROTECTION");
     setSelectedRunway(null);
     setProcedureBranchVisible("KRDU-R05LY-RW05L:branch:R", true);
+  });
+
+  it("places the altitude-constraint marker AT its published altitude, unlifted", async () => {
+    setProcedureAnnotationEnabled(true);
+    renderHook(() => useProcedureSegmentLayer());
+
+    await waitFor(() => expect(mockViewer.entities.add).toHaveBeenCalled());
+
+    // fix:FAF carries "AT 2200 ft" — the same constraint WEPAS carries on KRDU RW05L.
+    const expectedAltM = 2200 * 0.3048;
+    const marker = entities.find(
+      (entity) =>
+        String(entity.id).includes("-altitude-") &&
+        entity.point &&
+        String(entity.name).includes("FAF 2200 ft"),
+    );
+    expect(marker).toBeDefined();
+
+    // The datum, not the datum plus a cosmetic lift. A lifted marker reads in 3D as the
+    // fix floating above an aircraft that has already crossed it.
+    expect(marker.position.alt).toBeCloseTo(expectedAltM, 6);
+    // What the lift used to buy: winning the depth test against the coincident centerline.
+    expect(marker.point.disableDepthTestDistance).toBe(Number.POSITIVE_INFINITY);
+
+    // The leader hangs BELOW the datum, so the marker itself states the altitude.
+    const leader = entities.find((entity) => entity.id === `${marker.id}-link`);
+    const leaderAlts = leader.polyline.positions.filter((_: number, i: number) => i % 3 === 2);
+    expect(Math.max(...leaderAlts)).toBeCloseTo(expectedAltM, 6);
+    expect(Math.min(...leaderAlts)).toBeCloseTo(expectedAltM - 34, 6);
+
+    // The label separates in EYE space, so it also stays anchored at the true altitude.
+    const label = entities.find(
+      (entity) => entity.id === `procedure-annotation-label-${marker.id}`,
+    );
+    expect(label.position.alt).toBeCloseTo(expectedAltM, 6);
+    expect(label.label.eyeOffset.y).toBe(46);
   });
 
   it("renders segment centerline, envelopes, OEA, and connector entities", async () => {

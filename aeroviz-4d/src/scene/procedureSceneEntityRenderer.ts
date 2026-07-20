@@ -80,8 +80,15 @@ const PRECISION_FINAL_SURFACE_HEIGHT_OFFSET_M = 34;
 const FINAL_VERTICAL_REFERENCE_HEIGHT_OFFSET_M = 40;
 const FINAL_VERTICAL_REFERENCE_BAND_HEIGHT_OFFSET_M = 38;
 const SEGMENT_VERTICAL_PROFILE_HEIGHT_OFFSET_M = 44;
-const FINAL_ALTITUDE_CONSTRAINT_HEIGHT_OFFSET_M = 46;
-const ALTITUDE_CONSTRAINT_LINK_HEIGHT_OFFSET_M = 12;
+// The altitude-constraint marker sits AT its published altitude — that altitude is the
+// datum the marker exists to communicate, so it must never be lifted in world space.
+// (It used to carry a +46 m cosmetic lift, which read in 3D as the fix floating above an
+// aircraft that had already crossed it, while the approach view — which applies no lift —
+// showed the crossing correctly.) Depth-ordering against the coincident route centerline,
+// which is what the lift really bought, is handled by disableDepthTestDistance on the dot
+// and by eye-space offset on the label.
+const ALTITUDE_CONSTRAINT_LABEL_EYE_OFFSET_M = 46;
+const ALTITUDE_CONSTRAINT_LEADER_LENGTH_M = 34;
 const CONNECTOR_HEIGHT_OFFSET_M = 45;
 const ALIGNED_CONNECTOR_FILL_HEIGHT_OFFSET_M = ENVELOPE_HEIGHT_OFFSET_M + 4;
 const ALIGNED_CONNECTOR_LINE_HEIGHT_OFFSET_M = CONNECTOR_HEIGHT_OFFSET_M;
@@ -169,6 +176,7 @@ function addPoint(
   color: Cesium.Color,
   altitudeOffsetM = 0,
   annotation?: ProcedureEntityAnnotation,
+  alwaysOnTop = false,
 ): void {
   const entity = viewer.entities.add({
     id,
@@ -180,6 +188,9 @@ function addPoint(
       color,
       outlineColor: OUTLINE_COLOR,
       outlineWidth: 2,
+      // PointGraphics has no eyeOffset, so a marker that must stay at its true altitude
+      // wins the depth test instead of being lifted out of the geometry it collides with.
+      ...(alwaysOnTop ? { disableDepthTestDistance: Number.POSITIVE_INFINITY } : {}),
     },
   });
   if (annotation) attachProcedureAnnotation(entity, annotation);
@@ -837,14 +848,17 @@ function addAnnotationLabel(
   annotation: ProcedureEntityAnnotation,
   anchor: GeoPoint | null,
   visible: boolean,
+  eyeOffsetM?: number,
 ): string | null {
   if (!anchor) return null;
   const id = `${PROCEDURE_ANNOTATION_LABEL_PREFIX}${annotation.entityId}`;
+  // eyeOffsetM anchors the label AT the geo point and separates it in eye space instead,
+  // for labels whose anchor altitude is meaningful data rather than draped decoration.
   const entity = viewer.entities.add({
     id,
     name: `${annotation.title} label`,
     show: visible,
-    position: geoToCartesian(anchor, 18),
+    position: geoToCartesian(anchor, eyeOffsetM === undefined ? 18 : 0),
     label: {
       text: annotation.label,
       font: "12px sans-serif",
@@ -854,6 +868,9 @@ function addAnnotationLabel(
       showBackground: true,
       backgroundColor: Cesium.Color.BLACK.withAlpha(0.55),
       scale: 0.9,
+      ...(eyeOffsetM === undefined
+        ? {}
+        : { eyeOffset: new Cesium.Cartesian3(0, eyeOffsetM, 0) }),
     },
   });
   attachProcedureAnnotation(entity, annotation);
@@ -1224,8 +1241,9 @@ function addSegmentEntities(
         procedureEntityShow(visible, constraintAnnotation, displayLevel),
         9,
         altitudeConstraintColor(constraint, 0.98),
-        FINAL_ALTITUDE_CONSTRAINT_HEIGHT_OFFSET_M,
+        0,
         constraintAnnotation,
+        true,
       );
       ids.push(constraintId);
       const linkId = `${constraintId}-link`;
@@ -1233,9 +1251,10 @@ function addSegmentEntities(
         viewer,
         linkId,
         `${segmentName} altitude constraint link ${endFix.ident}`,
+        // Leader hangs BELOW the datum so the dot itself is the altitude being stated.
         [
-          elevatedPoint(point, ALTITUDE_CONSTRAINT_LINK_HEIGHT_OFFSET_M),
-          elevatedPoint(point, FINAL_ALTITUDE_CONSTRAINT_HEIGHT_OFFSET_M),
+          elevatedPoint(point, -ALTITUDE_CONSTRAINT_LEADER_LENGTH_M),
+          point,
         ],
         procedureEntityShow(visible, constraintAnnotation, displayLevel),
         2,
@@ -1246,8 +1265,9 @@ function addSegmentEntities(
       const constraintLabelId = addAnnotationLabel(
         viewer,
         constraintAnnotation,
-        elevatedPoint(point, FINAL_ALTITUDE_CONSTRAINT_HEIGHT_OFFSET_M),
+        point,
         procedureEntityShow(visible, constraintAnnotation, displayLevel, true, annotationVisible),
+        ALTITUDE_CONSTRAINT_LABEL_EYE_OFFSET_M,
       );
       if (constraintLabelId) ids.push(constraintLabelId);
     });
