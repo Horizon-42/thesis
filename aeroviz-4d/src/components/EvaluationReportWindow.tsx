@@ -400,7 +400,8 @@ export default function EvaluationReportWindow({ report, subtitle, onClose }: Pr
             <tr>
               <th scope="col">metric</th>
               <th scope="col">mean</th>
-              <th scope="col">p95 / min</th>
+              <th scope="col">p95</th>
+              <th scope="col">min</th>
               <th scope="col">max</th>
             </tr>
           </thead>
@@ -410,23 +411,40 @@ export default function EvaluationReportWindow({ report, subtitle, onClose }: Pr
                 <th scope="row">final lateral deviation (m)</th>
                 <td>{formatNum(report.lateral_m.mean)}</td>
                 <td>{formatNum(report.lateral_m.p95)}</td>
+                <td className="eval-report-na">—</td>
                 <td>{formatNum(report.lateral_m.max)}</td>
               </tr>
             ) : null}
             {report.vertical_m ? (
-              <tr>
-                <th scope="row">final vertical |deviation| (m)</th>
-                <td>{formatNum(report.vertical_m.mean_abs)}</td>
-                <td>{formatNum(report.vertical_m.p95_abs)}</td>
-                <td>{formatNum(report.vertical_m.max_abs)}</td>
-              </tr>
+              <>
+                <tr>
+                  <th scope="row">final vertical |deviation| (m)</th>
+                  <td>{formatNum(report.vertical_m.mean_abs)}</td>
+                  <td>{formatNum(report.vertical_m.p95_abs)}</td>
+                  <td className="eval-report-na">—</td>
+                  <td>{formatNum(report.vertical_m.max_abs)}</td>
+                </tr>
+                {/* The row above is computed over |value|, so it cannot show a
+                    high/low bias — cancellation is exactly what it discards.
+                    mean_signed is the only signed statistic the backend emits
+                    (signed_spread has no p95/min/max counterpart), hence one
+                    mean and three dashes. */}
+                <tr>
+                  <th scope="row">final vertical deviation, signed (m, + = high)</th>
+                  <td>{formatNum(report.vertical_m.mean_signed)}</td>
+                  <td className="eval-report-na">—</td>
+                  <td className="eval-report-na">—</td>
+                  <td className="eval-report-na">—</td>
+                </tr>
+              </>
             ) : null}
             {report.final_time_s ? (
               <tr>
                 <th scope="row">flight time (s)</th>
                 <td>{formatNum(report.final_time_s.mean)}</td>
-                <td>{formatNum(report.final_time_s.min)} (min)</td>
-                <td>{formatNum(report.final_time_s.max)} (max)</td>
+                <td className="eval-report-na">—</td>
+                <td>{formatNum(report.final_time_s.min)}</td>
+                <td>{formatNum(report.final_time_s.max)}</td>
               </tr>
             ) : null}
             {report.reference ? (
@@ -434,14 +452,16 @@ export default function EvaluationReportWindow({ report, subtitle, onClose }: Pr
                 <tr>
                   <th scope="row">Δt vs observed (s, {report.reference.compared} flights)</th>
                   <td>{formatNum(report.reference.flight_time_delta_s.mean)}</td>
-                  <td>{formatNum(report.reference.flight_time_delta_s.min)} (min)</td>
-                  <td>{formatNum(report.reference.flight_time_delta_s.max)} (max)</td>
+                  <td className="eval-report-na">—</td>
+                  <td>{formatNum(report.reference.flight_time_delta_s.min)}</td>
+                  <td>{formatNum(report.reference.flight_time_delta_s.max)}</td>
                 </tr>
                 <tr>
                   <th scope="row">path-shape deviation, lateral (m)</th>
                   <td>{formatNum(report.reference.path_lateral_m.mean)}</td>
-                  <td />
-                  <td>{formatNum(report.reference.path_lateral_m.max)} (max)</td>
+                  <td className="eval-report-na">—</td>
+                  <td className="eval-report-na">—</td>
+                  <td>{formatNum(report.reference.path_lateral_m.max)}</td>
                 </tr>
               </>
             ) : null}

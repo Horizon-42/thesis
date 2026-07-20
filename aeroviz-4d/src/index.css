@@ -3039,6 +3039,14 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   margin-bottom: 12px;
 }
 
+/* Not every metric carries every statistic (the backend emits p95 only for the
+   deviation spreads, min only for the time spreads). One column per statistic
+   beats overloading a "p95 / min" column, so absent cells are marked explicitly
+   — a muted dash reads as "not reported", an empty cell reads as a bug. */
+.eval-report-aggregates .eval-report-na {
+  color: #5a6a88;
+}
+
 .eval-report-empty {
   color: #8ea4c4;
   font-size: 11px;

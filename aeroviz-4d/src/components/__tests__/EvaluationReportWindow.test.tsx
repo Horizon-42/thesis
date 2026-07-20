@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import EvaluationReportWindow from "../EvaluationReportWindow";
 import type { EvaluationReport } from "../../data/evaluationReport";
 
@@ -62,6 +62,46 @@ describe("EvaluationReportWindow", () => {
     const unsolvedRow = screen.getByText("UPS1276").closest("tr")!;
     expect(unsolvedRow.className).toContain("eval-row-unsolved");
     expect(unsolvedRow.textContent).toContain("Maximum_Iterations_Exceeded");
+  });
+
+  it("gives each statistic its own aggregates column (p95 and min never share one)", () => {
+    render(<EvaluationReportWindow report={REPORT} subtitle="x" onClose={vi.fn()} />);
+    const aggregates = screen.getByRole("table", { name: /Aggregates/ });
+
+    const headers = Array.from(aggregates.querySelectorAll("thead th")).map((h) => h.textContent);
+    expect(headers).toEqual(["metric", "mean", "p95", "min", "max"]);
+
+    // Read a row as {header: cell} so a column swap fails loudly rather than
+    // passing on a substring match somewhere else in the table.
+    const cellsOf = (rowLabel: string | RegExp) => {
+      const row = within(aggregates).getByText(rowLabel).closest("tr")!;
+      const values = Array.from(row.querySelectorAll("td")).map((td) => td.textContent);
+      return Object.fromEntries(headers.slice(1).map((h, i) => [h!, values[i]]));
+    };
+
+    // Deviation rows report p95, never min.
+    expect(cellsOf("final lateral deviation (m)")).toEqual(
+      { mean: "101.0", p95: "171.7", min: "—", max: "179.5" },
+    );
+    expect(cellsOf("final vertical |deviation| (m)")).toEqual(
+      { mean: "13.5", p95: "24.2", min: "—", max: "25.4" },
+    );
+    // The signed row is the only place a high/low bias is visible; the |…| row
+    // above averages -13.5 to +13.5. Sign must survive to the cell.
+    expect(cellsOf(/final vertical deviation, signed/)).toEqual(
+      { mean: "-13.5", p95: "—", min: "—", max: "—" },
+    );
+    // Time rows report min, never p95 — these used to land in the same column.
+    expect(cellsOf("flight time (s)")).toEqual(
+      { mean: "364.6", p95: "—", min: "329.1", max: "400.2" },
+    );
+    expect(cellsOf(/Δt vs observed/)).toEqual(
+      { mean: "-43.9", p95: "—", min: "-206.9", max: "119.2" },
+    );
+    // Path-shape carries only mean and max.
+    expect(cellsOf("path-shape deviation, lateral (m)")).toEqual(
+      { mean: "11142.1", p95: "—", min: "—", max: "21541.1" },
+    );
   });
 
   it("closes via the Close button", () => {
