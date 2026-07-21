@@ -1,8 +1,35 @@
-"""OpenSky history database access through the `traffic` package.
+"""OpenSky history database access, through `pyopensky` directly.
 
-This is the package's single data source. ``traffic.data.opensky.history`` returns
-state-vector rows that include both barometric and geometric altitude, so no
-secondary altitude join is needed.
+This is the package's single data source. ``Trino.history`` returns state-vector rows
+that include both barometric and geometric altitude, so no secondary altitude join is
+needed.
+
+WHY NOT `traffic`
+-----------------
+This module used ``traffic.data.opensky``, which is a thin wrapper over exactly this
+pyopensky client. It is now unusable: ``traffic`` monkey-patches a pandas INTERNAL class
+at import time (``pandas.core.internals.blocks.DatetimeTZBlock``, to fix interpolation of
+timezone-aware columns), and pandas 3.0 removed that class. The failure is an ImportError
+during ``from traffic.data import opensky`` -- before any credential is read, so it looks
+like an auth problem and is not one. traffic 2.13 is the latest release and no version
+supports pandas 3.
+
+This is not environment drift: ``.env-backup/aeroviz-pip-freeze.txt`` records
+``pandas==3.0.3`` with ``traffic==2.13``, i.e. the pairing has never worked here. Going
+direct removes the dependency rather than pinning the whole thesis env (casadi, torch and
+the geospatial stack all live in it) to an old pandas.
+
+UNITS -- THE TRAP IN THIS SWAP
+------------------------------
+``traffic`` converted OpenSky's metres to FEET (its aviation convention,
+``_format_history``: ``df.altitude / 0.3048``), and this module converted them back.
+pyopensky does NO conversion, so its altitudes are already metres and the return contract
+is unchanged -- but the old back-conversion had to go with the wrapper. Applying it to
+pyopensky output would divide every altitude by 3.28, which does not crash: it silently
+turns a 3 deg approach into a 9.9 deg one.
+
+Column names are unaffected: ``trajectory.canonical_column`` already maps BOTH traffic's
+names and pyopensky's raw ones onto the same canonical set.
 """
 
 from __future__ import annotations
@@ -12,9 +39,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 import pandas as pd
-
-from geokit import FT_M
-
 
 # State-vector columns requested from the history database. ``geoaltitude`` is
 # mandatory: every downloaded trajectory must carry geometric altitude.
@@ -33,29 +57,27 @@ STATE_VECTOR_COLUMNS = (
 )
 
 # When querying by airport, the joined flights table supplies estimated
-# departure/arrival airports and must be prefixed as ``FlightsData4.*``.
+# departure/arrival airports and must be prefixed as ``FlightsData4.*``. These columns
+# are ONLY available with ``airport=`` -- see the check in fetch_history_dataframe.
+_JOINED_TABLE = "FlightsData4."
 AIRPORT_HISTORY_COLUMNS = (
     *STATE_VECTOR_COLUMNS,
     "FlightsData4.estdepartureairport",
     "FlightsData4.estarrivalairport",
 )
 
-# ``traffic`` returns altitudes in feet (its aviation-unit convention), whereas the
-# rest of this package works in metres. Convert these columns on the way out.
-ALTITUDE_COLUMNS = ("altitude", "geoaltitude", "baroaltitude")
 
-
-def require_traffic_opensky() -> Any:
-    """Import and return ``traffic.data.opensky`` with a focused error message."""
+def require_opensky_history() -> Any:
+    """Build the pyopensky Trino client, with a focused error message."""
     try:
-        from traffic.data import opensky  # type: ignore
+        from pyopensky.trino import Trino  # type: ignore
     except ModuleNotFoundError as e:
         raise RuntimeError(
-            "The `traffic` package is required for OpenSky history-DB access. "
-            "Install traffic and configure OpenSky database access first: "
-            "https://traffic-viz.github.io/data_sources/opensky_db.html"
+            "The `pyopensky` package is required for OpenSky history-DB access. "
+            "Install pyopensky and configure historical access first: "
+            "https://open-aviation.github.io/pyopensky/"
         ) from e
-    return opensky
+    return Trino()
 
 
 # ── Cancel in-flight queries on interrupt ─────────────────────────────────────
@@ -129,8 +151,23 @@ def fetch_history_dataframe(
     selected_columns: tuple[str, ...] = AIRPORT_HISTORY_COLUMNS,
     cached: bool = True,
 ) -> pd.DataFrame:
-    """Fetch OpenSky history rows. ``bounds`` order is west, south, east, north."""
-    opensky = require_traffic_opensky()
+    """Fetch OpenSky history rows in METRES. ``bounds`` is west, south, east, north.
+
+    Altitudes come back as OpenSky stores them -- metres -- and are NOT converted here.
+    See the module docstring: the old feet round-trip existed only because ``traffic``
+    imposed nautical units, and re-applying it would scale every altitude by 3.28.
+    """
+    joined = [c for c in selected_columns if c.startswith(_JOINED_TABLE)]
+    if joined and not airport:
+        # The estimated departure/arrival airports live in FlightsData4, which is only
+        # joined in when the query is BY airport. Asking for them off a bbox query makes
+        # pyopensky fail deep in its statement builder with an unrelated-looking
+        # NameError, so it is caught here where the cause is obvious.
+        raise ValueError(
+            f"{', '.join(joined)} require airport=; a bounds-only query does not join "
+            f"{_JOINED_TABLE.rstrip('.')}. Pass STATE_VECTOR_COLUMNS for a bbox query."
+        )
+    opensky = require_opensky_history()
     kwargs: dict[str, Any] = {
         "start": start,
         "stop": stop,
@@ -142,7 +179,7 @@ def fetch_history_dataframe(
     if bounds:
         kwargs["bounds"] = bounds
     try:
-        return _altitudes_to_metres(_as_dataframe(opensky.history(**kwargs)))
+        return _strip_table_prefixes(_as_dataframe(opensky.history(**kwargs)))
     except Exception as e:  # noqa: BLE001 - turn DB driver errors into actionable guidance.
         if "PERMISSION_DENIED" in str(e) or "Access Denied" in str(e):
             raise RuntimeError(
@@ -159,12 +196,16 @@ def fetch_history_dataframe(
         _active_cursors.clear()
 
 
-def _altitudes_to_metres(df: pd.DataFrame) -> pd.DataFrame:
-    """Convert traffic's feet-based altitude columns to metres in place."""
-    for column in ALTITUDE_COLUMNS:
-        if column in df.columns:
-            df[column] = pd.to_numeric(df[column], errors="coerce") * FT_M
-    return df
+def _strip_table_prefixes(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop the ``FlightsData4.`` qualifier joined columns come back carrying.
+
+    ``estdepartureairport`` / ``estarrivalairport`` are requested table-qualified (the
+    Trino join requires it) and are returned that way. Consumers that go through
+    ``trajectory.normalize_history_dataframe`` would have the prefix stripped for them,
+    but the harvest reads the frame's records directly, so it is normalised once here --
+    at the boundary, rather than in each reader.
+    """
+    return df.rename(columns={c: _bare(c) for c in df.columns})
 
 
 def _as_dataframe(result: Any) -> pd.DataFrame:
