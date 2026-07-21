@@ -21,11 +21,11 @@ waypoints.geojson, procedures*, charts/, obstacles.geojson, local-terrain/),
 
 Kept by default, deletable by flag:
 
-  * ``--include-downloads``  also wipes trajectory_data_process/outputs/ — the RAW
-    OpenSky downloads (landings/, raw_tracks/, history_rows/, manifests/,
-    source_responses/). OFF by default: re-creating them needs OpenSky history
-    access and hours of downloading; everything else above is recomputable from
-    them.
+  * ``--include-downloads``  also wipes the current harvest tree at
+    trajectory_data_process/outputs/harvest/. Its categories are listed separately in
+    the plan: measured ``tracks/`` (expensive to recreate through OpenSky history), plus
+    derived ``arrivals/`` and ``approach/``. The former legacy download layouts are not
+    part of the current pipeline and are never inferred as inputs.
   * ``--include-parked``     also wipes the ``_``-prefixed dirs under
     4dTrajectory/outputs (parked research artifacts, e.g. _pre_b3_transport,
     _ablation_norm — the ablation numbers quoted in the ts README live there).
@@ -54,12 +54,14 @@ REPO_ROOT = Path(__file__).resolve().parent
 from archive_pipeline_data import _human, _prune_empty_dirs  # noqa: E402
 from run_scenario_pipeline import (  # noqa: E402
     COMPARISON_AIRPORTS_ROOT,
-    LANDINGS_DIR,
+    HARVEST_TRACKS_ROOT,
     OPT_OUTPUTS_ROOT,
     SCENARIOS_DIR,
 )
 
-DOWNLOADS_ROOT = LANDINGS_DIR.parent  # trajectory_data_process/outputs
+# Despite its historical name in the runner, this is the harvest root, not the
+# per-airport ``tracks/`` directory.
+HARVEST_ROOT = HARVEST_TRACKS_ROOT
 
 
 @functools.lru_cache(maxsize=1)
@@ -95,6 +97,20 @@ def _tree_files(root: Path) -> list[Path]:
         return []
     tracked = _tracked_files()
     return sorted(p for p in root.rglob("*") if p.is_file() and p.resolve() not in tracked)
+
+
+def _harvest_files_by_category() -> dict[str, list[Path]]:
+    """Roster harvest files without hiding the measured/derived boundary.
+
+    The supported layout is ``<ICAO>/{tracks,arrivals,approach}/...``. Unexpected files
+    remain visible in an ``other`` group rather than being silently skipped.
+    """
+    grouped = {"tracks": [], "arrivals": [], "approach": [], "other": []}
+    for path in _tree_files(HARVEST_ROOT):
+        parts = path.relative_to(HARVEST_ROOT).parts
+        category = parts[1] if len(parts) >= 2 else "other"
+        grouped[category if category in grouped else "other"].append(path)
+    return grouped
 
 
 def deletion_groups(*, include_parked: bool, include_downloads: bool):
@@ -146,19 +162,31 @@ def deletion_groups(*, include_parked: bool, include_downloads: bool):
                    observed_files))
 
     if include_downloads:
-        groups.append(("RAW DOWNLOADS (trajectory_data_process/outputs)",
-                       _tree_files(DOWNLOADS_ROOT)))
+        harvest_files = _harvest_files_by_category()
+        groups.extend(
+            [
+                ("harvest tracks    (harvest/*/tracks; measured)",
+                 harvest_files["tracks"]),
+                ("harvest arrivals  (harvest/*/arrivals; derived)",
+                 harvest_files["arrivals"]),
+                ("harvest approach  (harvest/*/approach; derived)",
+                 harvest_files["approach"]),
+            ]
+        )
+        if harvest_files["other"]:
+            groups.append(("harvest other     (unexpected harvest files)",
+                           harvest_files["other"]))
     else:
-        kept.append(f"raw downloads {DOWNLOADS_ROOT.relative_to(REPO_ROOT)}/ "
-                    f"(pass --include-downloads to delete — re-creating them needs "
-                    f"OpenSky history access)")
+        kept.append(f"harvest data {HARVEST_ROOT.relative_to(REPO_ROOT)}/ "
+                    f"(tracks are expensive; pass --include-downloads to delete the "
+                    f"complete harvest, including derived arrivals/approach)")
 
     # Surface, never silently drop, any git-tracked file the guard excluded from the scan
     # (0 today — the roots are git-ignored — but a future ``git add`` under one must be
     # visible, not quietly skipped).
     scanned_roots = [SCENARIOS_DIR, OPT_OUTPUTS_ROOT, *containers]
     if include_downloads:
-        scanned_roots.append(DOWNLOADS_ROOT)
+        scanned_roots.append(HARVEST_ROOT)
     tracked_in_scan = sum(
         1 for f in _tracked_files()
         if any(root == f or root in f.parents for root in scanned_roots)
@@ -176,8 +204,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--include-downloads", action="store_true",
-        help="ALSO delete the raw OpenSky downloads (trajectory_data_process/outputs). "
-             "OFF by default — everything else is recomputable from them; they are not",
+        help="ALSO delete trajectory_data_process/outputs/harvest, including measured "
+             "tracks and derived arrivals/approach (kept by default)",
     )
     parser.add_argument(
         "--include-parked", action="store_true",
@@ -232,11 +260,11 @@ def main() -> None:
 
     # Tidy the emptied trees: prune below the anchors we actually deleted from, and drop
     # the emptied per-airport container dirs (comparison/, landings/) themselves. The
-    # downloads tree is pruned only when --include-downloads deleted from it — otherwise it
-    # is "kept untouched" and must stay exactly as found, empty subdirs and all.
+    # The harvest tree is pruned only when --include-downloads deleted from it — otherwise
+    # it is "kept untouched" and must stay exactly as found, empty subdirs and all.
     prune_anchors = [SCENARIOS_DIR, OPT_OUTPUTS_ROOT]
     if args.include_downloads:
-        prune_anchors.append(DOWNLOADS_ROOT)
+        prune_anchors.append(HARVEST_ROOT)
     for anchor in prune_anchors:
         _prune_empty_dirs(anchor)
     for container in containers:
