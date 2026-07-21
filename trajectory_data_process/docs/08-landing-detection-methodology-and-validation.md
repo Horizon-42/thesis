@@ -1,5 +1,8 @@
 # 08 · 落地数据集方法论:bbox 几何提取的可信度与验证指南
 
+> **归档说明：**本文保留旧实现的方法论讨论；其中 `landings.py`、裸数组输出和旧脚本
+> 已被 manifest 驱动的 `trajectory_data_process.harvest` 取代。当前实现以包 README 为准。
+
 > 面向论文的方法论说明 + 可执行的验证清单。
 > 回答一个核心问题:**「直接用 bbox 下载再重建轨迹、按几何判定落地」这套做法,在论文层面说服力够吗?是不是该改用 full-track 的到达机场元数据(`estarrivalairport`)?**
 

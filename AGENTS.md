@@ -41,14 +41,15 @@ python -m pytest aeroviz-4d/python/tests/ --cov=. --cov-report=html
 ### Data Pipeline (end-to-end)
 
 ```bash
-# Full pipeline: fetch live data → normalize → generate CZML
-python run_asd-b_fetch_and_generate.py --airport CYYC --mode live
+# Full pipeline: harvest history → manifests → observed CZML/evaluation
+conda run -n aviation python run_asd-b_fetch_and_generate.py --airport CYYC --count 200
 
-# Reuse existing raw JSON (skip fetch, run normalization + generation)
-python run_asd-b_fetch_and_generate.py --input-json trajectory_data_process/outputs/cyyc_raw_*.json
+# Reuse tracks/manifest.json and rebuild every derived view without fetching
+conda run -n aviation python -m trajectory_data_process.harvest --airport CYYC --evaluate-only
 
-# Skip straight to CZML generation from already-normalized data
-python run_asd-b_fetch_and_generate.py --input-json trajectory_data_process/outputs/cyyc_czml_input_*.json
+# Explicit standalone rendering utility (does not create a harvest)
+conda run -n aviation python run_asd-b_fetch_and_generate.py \
+  --airport CYYC --input-json path/to/flight_array.json
 ```
 
 ## Architecture
@@ -68,9 +69,11 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 ### Data Flow
 
 ```
-OpenSky history DB → download_trajectories.py (Trajectory model, geometric altitude) → *_czml_input_*.json
-    → generate_czml.py (bearing, velocity, orientation) → trajectories.czml
-    → useCzmlLoader hook → CesiumJS rendering
+OpenSky history DB → trajectory_data_process.harvest → tracks/manifest.json (all outcomes, HAE)
+    ├→ observed evaluation + generate_czml.py → trajectories.czml → useCzmlLoader
+    └→ arrivals/manifest.json (model-ready final arrivals)
+         ├→ flight_scenarios → optimization/evaluation
+         └→ ts_transformer training/prediction
 ```
 
 Static data follows a similar pattern: OurAirports CSV → `preprocess_airports.py` → `runway.geojson`; ARINC 424 CIFP → `preprocess_waypoints.py` → `waypoints.geojson`.

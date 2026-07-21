@@ -1,5 +1,8 @@
 # 4-Airport ADS-B Training Data Collection Plan
 
+> **Archived / pre-harvest:** retained as planning history. Current collection and TS
+> inputs are documented in `trajectory_data_process/README.md`.
+
 Status: development plan, not yet fully implemented.
 
 Date: 2026-05-22.

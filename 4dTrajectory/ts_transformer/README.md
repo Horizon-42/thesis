@@ -97,53 +97,46 @@ The abbreviations and terms of art this README (and `metrics.py` / the summary J
 
 ## Running it
 
-Environment is conda **`aeroviz`** (Python 3.12) — the single thesis env: data acquisition
+Environment is conda **`aviation`** — the thesis env: data acquisition
 (`traffic`, `pyopensky`), CIFP parsing (`cifparse`, `arinc424`), `casadi`, `openap`, the
 geospatial stack, and `torch`. The package code stays casadi-free by design, but it lives
 here so one env runs everything.
 
 ```bash
-conda activate aeroviz
+conda activate aviation
 pip install -r 4dTrajectory/ts_transformer/requirements.txt
 
 TS=4dTrajectory/ts_transformer/__main__.py
 
 # train
-python $TS train --data trajectory_data_process/outputs/landings/KRDU --airport KRDU \
+python $TS train \
+    --data trajectory_data_process/outputs/harvest/KRDU/arrivals/manifest.json \
+    --airport KRDU \
     --model itransformer --horizon-mode window \
     --output-dir 4dTrajectory/outputs/KRDU/ts_itr_window
 
 # predict the held-out split, then grade it exactly like an optimizer batch
 python $TS predict --checkpoint 4dTrajectory/outputs/KRDU/ts_itr_window/checkpoint.pt \
-    --data trajectory_data_process/outputs/landings/KRDU --airport KRDU \
+    --data trajectory_data_process/outputs/harvest/KRDU/arrivals/manifest.json \
+    --airport KRDU \
     --output-dir 4dTrajectory/outputs/KRDU/ts_pred \
     --split test
 python -m evaluation --input 4dTrajectory/outputs/KRDU/ts_pred
 ```
 
-`--data` takes an arrivals file, a czml-input file, or a directory of either.
+`--data` takes an airport harvest directory, its `arrivals/` directory, or the explicit
+`arrivals/manifest.json`. Legacy flight arrays and arbitrary JSON directories are rejected.
 `predict` defaults to `--split test` — the only flights the model never saw. The split is
 recorded in the checkpoint and keyed by `flight_key`, so re-predicting later selects exactly
 the same flights (no leakage on a re-run).
 
 ## Data selection & flight identity
 
-⚠️ **Directory mode is selective, and says so.** A harvest directory holds five overlapping
-views of the same flights:
-
-| file | what it is |
-|---|---|
-| `<ICAO>_<RWY>_arrivals.json` | truncated at the 25 km ring — **what training uses** |
-| `<ICAO>_<RWY>_landings.json` | the same flights, untruncated — duplicates |
-| `<ICAO>_combined_czml_input.json` | all runways merged — duplicates again |
-| `<ICAO>_<RWY>_heading_rejected.json` | flights the harvester **threw out** (bad heading) |
-| `<ICAO>_local_rejected.json` | local circuits, not arrivals |
-
-`select_flight_files` takes the first matching pattern only (`*_arrivals.json` →
-`*_czml_input*.json` → `*_landings.json`), never mixes them, always excludes `*_rejected*`,
-and prints what it skipped. A naive `glob("*.json")` loaded every flight three times over
-plus the known-bad ones — which a loss curve cannot show you. Passing an explicit **file**
-path bypasses all filtering: you chose it.
+Training reads only the `records` roster in `arrivals/manifest.json`. The manifest is built
+from `assigned` tracks with a published CIFP TCH/glidepath, cropped from the final 25 km
+entry to the measured landing anchor; local circuits remain in the audit counts but cannot
+enter training. An orphan JSON beside `records/` is ignored, and a duplicate `flight_key`
+in the roster raises. There is no pattern priority or legacy fallback.
 
 **One flight = one `flight_key`** (`id_runway_icao24_landingTime`,
 `flight_scenarios.identity`). The raw data has no unique flight id — `id` is a copy of the

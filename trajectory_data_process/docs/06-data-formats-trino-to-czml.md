@@ -1,5 +1,9 @@
 # Data formats: from raw Trino rows to CZML
 
+> **Archived format reference:** examples below describe the removed bare-array download
+> path. The current roster and record layout is `tracks/manifest.json` →
+> `arrivals/manifest.json`, documented in `trajectory_data_process/README.md`.
+
 The pipeline carries flight data through **three JSON shapes**. Each stage has one
 owner and one job, and the boundaries between them are deliberately simple so the
 data package and the frontend stay decoupled.

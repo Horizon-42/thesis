@@ -1,5 +1,8 @@
 # METAR QNH-Time Matching for Altitude Correction (Design Document)
 
+> **Archived / pre-harvest:** this proposal is not the current acquisition or altitude
+> pipeline. See `trajectory_data_process/README.md`.
+
 ## Status
 Design proposal. Not implemented in code yet.
 

@@ -1,5 +1,8 @@
 # Current Altitude Bias Correction in trajectory_normalization.py
 
+> **Archived / pre-harvest:** the modules described here are no longer executable. See
+> `trajectory_data_process/README.md` for the current manifest-based harvest pipeline.
+
 ## Scope
 This document describes the altitude correction logic implemented in trajectory_data_process/processing/trajectory_normalization.py, inside function track_to_czml_flight.
 

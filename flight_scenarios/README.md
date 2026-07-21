@@ -1,155 +1,103 @@
 # flight_scenarios
 
-Build **neutral modeling inputs** from observed trajectory data. Given a flight's
-observed track (the CZML-input format) and an aircraft identity, it produces a
-serializable **`FlightScenario`** that feeds *both* the trajectory optimizer and a future
-data-driven model — without depending on either.
+`flight_scenarios` is the data-to-modeling seam. It reads model-ready arrivals through
+`outputs/harvest/<ICAO>/arrivals/manifest.json` and produces serializable
+`FlightScenario` records for optimization and evaluation.
 
-## 1. Where this sits (architecture)
+## Architecture
 
-The project has two planes that are otherwise decoupled:
-
-- **Data plane** — `trajectory_data_process` turns OpenSky history into **CZML-input**
-  JSON (`[{id, callsign, waypoints: [[t, lon, lat, alt], …]}]`). It has *no* dependency
-  on aircraft/dynamics code.
-- **Modeling plane** — `aircraft` (`AircraftSpec`/`AeroParams`), `aerodynamic_model`
-  (`GeodeticState`), `geokit`, the optimizer (`4dTrajectory/optimization`), and a future
-  data-driven model.
-
-`flight_scenarios` is the **seam** between them — exactly analogous to how CZML-input is
-the seam between the data plane and the visualization. It reads the neutral CZML-input
-*format* and produces a neutral modeling-input *record*:
-
-```
-CZML-input JSON ─► flight_scenarios ─► 4dTrajectory/optimization   (a problem instance)
-                        │            └► future data-driven model    (a training example)
-                        ▼
-          aircraft · aerodynamic_model · geokit
+```text
+harvest tracks (HAE)
+  → arrivals/manifest.json (assigned, published CIFP path, final-entry crop)
+  → load_model_arrivals() (HAE → MSL)
+  → FlightScenario
+       ├─ initial: observed state at terminal entry
+       ├─ target: observed end or published runway Path Point
+       ├─ aircraft: per-flight type resolved from type/icao24/fallback
+       └─ aero: matching aerodynamic parameters
+  → optimizer / reference evaluation
 ```
 
-It depends **downward** on the modeling primitives and is imported **upward** by the two
-consumers — so neither consumer depends on the other, and there are no cycles. (That is
-why it is a top-level package, not under `4dTrajectory/optimization`: putting it there
-would make the data-driven model transitively depend on the solver.)
+The package does not glob JSON files and does not accept the removed per-runway landing
+arrays. The arrival manifest is already the all-runway, de-duplicated roster.
 
-## 2. The `FlightScenario` record
+## Scenario record
 
 ```python
 FlightScenario(
-    initial = GeodeticState(lat, lon, alt, V, psi, gamma, m),  # the start state
-    aircraft = AircraftSpec,                                    # e.g. A320
-    aero     = AeroParams,                                      # aero_params_for_aircraft(spec)
-    source   = {"id", "callsign", "icao24", "runway", "n_samples", …},
-    target   = GeodeticState | None,                            # optional (e.g. the threshold)
+    initial=GeodeticState(lat, lon, alt, V, psi, gamma, m),
+    target=GeodeticState(...),
+    aircraft=Aircraft,
+    aero=AeroParams,
+    source={
+        "id": ...,
+        "icao24": ...,
+        "runway": ...,
+        "landing_time_utc": ...,
+        "entry_time_utc": ...,
+        "target_source": ...,
+        "altitude_source": ...,
+    },
 )
 ```
 
-It round-trips through JSON (`to_dict`/`from_dict`, `save_scenarios`/`load_scenarios`),
-so a CLI run produces a small dataset the optimizer can replay and the model can train on.
+Position comes from the track. Velocity, math-ENU heading, and flight-path angle are fit
+from a short sample window. Aircraft resolution tries the declared type, then `icao24`
+through OpenAP, then the explicit `--aircraft-type` fallback.
 
-## 3. The one piece of physics: the start state
+## Target modes
 
-The point-mass state is `(lat, lon, alt, V, psi, gamma, m)`. Three of these come for free
-and one is supplied:
+- Default: target the final observed sample.
+- `--target-from-threshold`: target the arrival record's `runway_target`, whose position,
+  threshold crossing height, course, and glidepath came from the published CIFP Path Point.
 
-- `lat, lon, alt` — read straight off the first track sample.
-- `m` — the aircraft mass (the track says nothing about mass).
+Canonical harvest arrivals always carry that target. The static
+`runway_thresholds.json` lookup remains only for synthetic/in-memory scenarios.
 
-The remaining three, **`V` (speed), `psi` (heading), `gamma` (flight-path angle)**, are
-*not* stored in the track — they are **estimated by finite-differencing** two samples a
-short window apart at the start of the track. Take the anchor sample `p0` and a sample
-`p1` about `window_s` later, and let
+## Vertical datum
 
-- `horizontal_m` = great-circle ground distance `p0 → p1`  (use `geokit.haversine_m`)
-- `vertical_m`   = `alt1 − alt0`
-- `dt`           = `t1 − t0`
+Harvest geometry is HAE because Cesium needs ellipsoidal height. Scenario state, runway
+elevations, CIFP altitudes, and evaluation gates are MSL. `load_model_arrivals()` converts
+HAE → MSL exactly once and tags the result, while `build_scenario()` also protects direct
+in-memory callers. Unknown altitude sources fail instead of being guessed.
 
-Then:
+## CLI
 
-```
-        ┌ p1
-        │  ╱│
-   path │ ╱ │ vertical_m         V     = √(horizontal_m² + vertical_m²) / dt
-        │╱  │                    gamma = atan2(vertical_m, horizontal_m)   (+ = climb)
-     p0 └───┘                    psi   = atan2(north_m, east_m)   (0 = E, CCW toward N)
-        horizontal_m
-```
-
-- **`V`** is the speed *along the flight path*: the hypotenuse of the horizontal run and
-  the vertical rise, divided by the time. (Pure ground speed `horizontal_m/dt` ignores the
-  climb; for a 3° approach the difference is tiny, but the along-path speed is what the
-  point-mass `V` means.)
-- **`gamma`** is the angle of that hypotenuse above the horizontal — `atan2(rise, run)`.
-- **`psi`** is the heading of the horizontal step in the **math-ENU convention used by the
-  modeling layer** (`aerodynamic_model`: `V_east = V cos psi`, `V_north = V sin psi`, so
-  `psi = 0` is due East, increasing CCW toward North): `psi = atan2(north_m, east_m)`. This
-  is NOT the compass bearing (0 = N, clockwise) — the two are a reflection apart
-  (`psi_enu = pi/2 - bearing`). The state is consumed (integrated + rendered) by the
-  modeling layer, so it must use that layer's convention.
-
-### → The TODO
-
-`start_state.initial_state_from_track` has the geometry (`horizontal_m`, `vertical_m`,
-`dt`) computed for you and the three formulas in a `TODO ①` comment. Fill in `V`, `psi`,
-`gamma`, build the `GeodeticState`, and delete the `raise NotImplementedError`. The two
-`xfail` tests in `tests/test_start_state.py` (a level due-east track and a climbing one)
-become green when it is correct — run:
+One airport:
 
 ```bash
-python -m pytest flight_scenarios/tests -q
+conda run -n aviation python -m flight_scenarios \
+  --airport KRDU --target-from-threshold \
+  --output-dir flight_scenarios/outputs
 ```
 
-## 4. Usage
+Explicit manifest and output:
 
 ```bash
-# every runway of every airport under the landings dir -> one scenario file per runway:
-python -m flight_scenarios --output-dir flight_scenarios/outputs
-
-# every runway of one airport:
-python -m flight_scenarios --airport KRDU --output-dir flight_scenarios/outputs
-
-# one combined file for every discovered flight (instead of one per runway):
-python -m flight_scenarios --airport KRDU --combined --output-dir flight_scenarios/outputs
-
-# target the runway THRESHOLD instead of the (noisy) track end -> *_threshold_*.json:
-python -m flight_scenarios --airport KRDU --combined --target-from-threshold --output-dir flight_scenarios/outputs
-
-# a single explicit file:
-python -m flight_scenarios \
-  --input trajectory_data_process/outputs/landings/KRDU/KRDU_05L_landings.json \
-  --output scenarios_krdu_05l.json
-
-# Aircraft is auto-resolved per flight from its icao24; --aircraft-type A320 (default) is the
-# fallback for flights whose icao24 can't be resolved. Output files are named
-# <AIRPORT>_<RUNWAY>_scenarios.json (the *_combined_czml_input.json files are skipped).
+conda run -n aviation python -m flight_scenarios \
+  --input trajectory_data_process/outputs/harvest/KRDU/arrivals/manifest.json \
+  --target-from-threshold \
+  --output flight_scenarios/outputs/KRDU_arrivals_threshold_scenarios.json
 ```
+
+With neither `--airport` nor `--input`, the CLI processes every
+`*/arrivals/manifest.json` under `--harvest-root` and writes one scenario file per airport.
+
+Python API:
 
 ```python
-from flight_scenarios import build_scenarios_from_czml_input, load_scenarios
+from flight_scenarios import build_scenarios_from_arrivals, load_scenarios
 
-scenarios = build_scenarios_from_czml_input("…_landings.json")   # per-flight icao24 -> Aircraft
-state = scenarios[0].initial          # a GeodeticState ready for the optimizer
-aero  = scenarios[0].aero             # AeroParams for the same run
+scenarios = build_scenarios_from_arrivals(
+    "trajectory_data_process/outputs/harvest/KRDU/arrivals/manifest.json",
+    aircraft_type="A320",
+    airport="KRDU",
+    target_from_threshold=True,
+)
 ```
 
-## 5. Notes / extension points
+## Tests
 
-- **Aircraft identity is resolved from the flight's `icao24`** (CZML-input's `type` is
-  `"UNK"`). `aircraft_for_code` checks the hand-tuned `AIRCRAFT_PRESETS` (A320/B77W/C172)
-  first, then resolves any OpenAP-supported typecode via
-  `aircraft/query_aircraft_parameters.py` (geometry/mass/engine/drag + an MTOW-bucketed
-  approach default). `build_scenario` prefers the `icao24`; the CLI `--aircraft-type` is the
-  fallback when an `icao24` isn't in the OpenAP lookup. Serialization stores `aircraft.code`,
-  so round-trips stay unchanged.
-- **Target state** — two modes. By default the target is the **end of the observed track**
-  (least-squares velocity over the last ~15 s — robust to ADS-B jitter). With
-  `--target-from-threshold` (or `build_scenario(..., target_from_threshold=True)`) it is the
-  **published runway threshold** instead: threshold position at the crossing height, on the
-  runway heading, at Vref and the coded glidepath (`runway_target.threshold_target_state`,
-  from `trajectory_data_process/config/runway_thresholds.json`). The threshold is a clean,
-  always-feasible endpoint — it sidesteps the noisy / touchdown / corrupt track tail. The
-  arrival airport comes from the landings file path (the flight's own `arr_airport` is empty);
-  threshold-target outputs get a `_threshold` filename tag so they don't overwrite the
-  track-target files. `source["target_source"]` records which was used.
-- Read **CZML-input**, not CZML — CZML is the rendered presentation format (quaternions,
-  styling); CZML-input is the neutral `[[t, lon, lat, alt], …]` track this package wants.
+```bash
+conda run -n aviation pytest -o "pythonpath=. geokit/src" flight_scenarios/tests -q
+```

@@ -1,5 +1,8 @@
 # OpenSky Training Data Fetch and Store Redesign
 
+> **Archived / pre-harvest:** the partitioned JSONL implementation was removed. TS now
+> reads `outputs/harvest/<ICAO>/arrivals/manifest.json`; see the package README.
+
 ## Status
 Implementation in progress.
 
