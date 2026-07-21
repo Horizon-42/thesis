@@ -30,6 +30,15 @@ Steps, chained by shelling out to the existing CLIs (each already tested):
        (always — the CZML tail consumes its per-flight verdicts + batch metrics)
   4. [eval] python -m evaluation.visualize
                                     eval records ─► <opt_dir>/evaluation_report.html
+  0b. trajectory_data_process.harvest --evaluate-only   (unless --skip-observed)
+                                    harvest tracks/ ─► observed CZML layer
+                                       (public/data/airports/<ICAO>/{trajectories.czml,
+                                        landings/*.czml, landings/index.json})
+                                    ─► approach/evaluation_report.json
+                                    ─► comparison/observed/ + categories.json
+                                    The MEASURED baseline: no download, no optimization.
+                                    Its per-flight verdicts colour the observed layer,
+                                    so tracks and verdicts stay one harvest.
   5. [czml] build_scenario_comparison_czml (--evaluation-report)
                                     summary + report ─► aeroviz-4d/public/data/airports/<ICAO>/
                                                  comparison/<category>/{*.czml, index, categories.json}
@@ -92,6 +101,7 @@ COMPARISON_AIRPORTS_ROOT = REPO_ROOT / "aeroviz-4d" / "public" / "data" / "airpo
 OPT_SCRIPT = REPO_ROOT / "4dTrajectory" / "optimization" / "scenario_optimization.py"
 CZML_SCRIPT = REPO_ROOT / "aeroviz-4d" / "python" / "build_scenario_comparison_czml.py"
 ARRIVALS_SCRIPT = REPO_ROOT / "trajectory_data_process" / "build_arrivals.py"
+HARVEST_TRACKS_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
 
 TARGET_TYPES = ("adsb", "runway")
 OUTPUT_KINDS = ("czml", "eval")
@@ -287,6 +297,35 @@ class Plan:
         return [(f"{i}/{total} {name}", cmd) for i, (name, cmd) in enumerate(named, 1)]
 
 
+def run_observed(airport: str, *, dry_run: bool) -> bool:
+    """The OBSERVED baseline — per airport, independent of any optimization.
+
+    Re-judges the harvested tracks, renders them as the viewer's observed layer, and
+    publishes the report as the ``observed`` comparison category. Runs with
+    ``--evaluate-only``, so it never downloads: it recomputes from ``tracks/``, which is
+    what makes it cheap enough to run every time. Any change to the fit window, the
+    established criteria or the CIFP cycle invalidates the previous answer, and the
+    verdict colours painted on the observed layer come from exactly this report — so the
+    tracks and their verdicts stay one harvest.
+
+    Skipped (not an error) when the airport has no harvest yet: its observed layer still
+    comes from the old build_arrivals path until it is re-downloaded.
+    """
+    manifest = HARVEST_TRACKS_ROOT / airport / "tracks" / "manifest.json"
+    if not manifest.exists():
+        print(f"   ⚠ {airport}: no harvest at {manifest.parent} — skipping the observed "
+              f"stage (run: python -m trajectory_data_process.harvest --airport {airport})")
+        return False
+    cmd = [sys.executable, "-m", "trajectory_data_process.harvest",
+           "--airport", airport, "--evaluate-only"]
+    if dry_run:
+        print(f"   [observed] {' '.join(cmd)}")
+        return True
+    print(f"\n=== [{airport} · observed baseline] ===\n{' '.join(cmd)}", flush=True)
+    subprocess.run(cmd, cwd=REPO_ROOT, check=True)
+    return True
+
+
 def ensure_arrivals(
     airport: str,
     modes: tuple[tuple[str, bool], ...],
@@ -471,6 +510,12 @@ def main() -> None:
              "builds the arrivals (see --rebuild-arrivals)",
     )
     parser.add_argument(
+        "--skip-observed", action="store_true",
+        help="skip the observed-baseline stage (re-judge harvested tracks, render the "
+             "observed CZML layer, publish the 'observed' comparison category). That "
+             "stage never downloads — it recomputes from the stored harvest",
+    )
+    parser.add_argument(
         "--skip-optimize", action="store_true",
         help="if this airport+category already has an optimization result "
              "(summary.json), skip steps 1–2 and only (re)build the selected outputs; "
@@ -516,6 +561,12 @@ def main() -> None:
     ran = 0
     runs = [(airport, mode) for airport in airports for mode in modes]
     for airport in airports:
+        # The observed baseline is per AIRPORT and independent of the optimization —
+        # it is the measured reference every modelled category is read against, and it
+        # is what colours the observed layer. Runs before the categories so the frontend
+        # has a baseline even if a solve later fails.
+        if not args.skip_observed:
+            run_observed(airport, dry_run=args.dry_run)
         # Step 0 is per AIRPORT, not per category: all three modes read the same
         # combined czml-input, so it is built (at most) once here.
         if not ensure_arrivals(

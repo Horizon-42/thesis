@@ -24,6 +24,7 @@ from trajectory_data_process.harvest.observed import (
     load_observed_records,
     write_observed_records,
 )
+from trajectory_data_process.harvest.czml import render_observed_czml
 from trajectory_data_process.harvest.publish import publish_observed_report
 from trajectory_data_process.harvest.runner import HarvestPlan, harvest_airport
 from trajectory_data_process.harvest.store import HarvestPaths, read_manifest
@@ -56,6 +57,8 @@ def build_parser() -> argparse.ArgumentParser:
                              "'observed' comparison category")
     parser.add_argument("--no-publish", action="store_true",
                         help="skip publishing to the frontend")
+    parser.add_argument("--no-czml", action="store_true",
+                        help="skip rendering the observed CZML layer (report only)")
     return parser
 
 
@@ -88,6 +91,11 @@ def main(argv: list[str] | None = None) -> int:
     records = load_observed_records(paths)
     report = evaluate_batch(records)
     (paths.approach / REPORT_NAME).write_text(json.dumps(report, indent=1), encoding="utf-8")
+
+    if not args.no_czml:
+        rendered = render_observed_czml(paths, frontend_data_root=args.frontend_data)
+        print(f"[harvest] observed CZML: {rendered.flights} flights over "
+              f"{len(rendered.runway_czml)} runway(s) -> {rendered.combined_czml}")
 
     if not args.no_publish:
         published = publish_observed_report(

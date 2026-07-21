@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from trajectory_data_process.harvest.airports import Airport, Datum, Runway, load_airport
 from trajectory_data_process.harvest.cifp import PathPoint, read_path_points
+from trajectory_data_process.harvest.czml import RenderedObserved, render_observed_czml
 from trajectory_data_process.harvest.classify import (
     ClassifiedTrack,
     classify_track,
@@ -61,6 +62,8 @@ __all__ = [
     "ClassifiedTrack",
     "classify_track",
     "classify_tracks",
+    "RenderedObserved",
+    "render_observed_czml",
     "HarvestPaths",
     "write_tracks",
     "read_manifest",
