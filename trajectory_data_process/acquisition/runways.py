@@ -81,14 +81,23 @@ def _landing_threshold(near: dict[str, Any], far: dict[str, Any], length_m: floa
             "refusing to silently publish the undisplaced pavement end"
         )
     fraction = near["displaced_m"] / length_m if length_m else 0.0
-    elevation = near["elevation_m"]
+    elevation, source = near["elevation_m"], "runway_end"
     if elevation is not None and far["elevation_m"] is not None:
         elevation += fraction * (far["elevation_m"] - elevation)
+    elif elevation is None and far["elevation_m"] is not None:
+        # OurAirports publishes an elevation for only one end of this runway (KMSY 02/20
+        # is the fleet's one case). The opposite end is the closest available reference --
+        # it differs by the runway's slope, metres at most over a runway's length, and is
+        # far better than the airport field elevation, let alone the silent 0.0 the
+        # previous code substituted. The substitution is RECORDED, not assumed: a
+        # threshold elevation is the vertical origin for every gate measured against it.
+        elevation, source = far["elevation_m"], "opposite_end"
     return {
         "ident": near["ident"],
         "lat": round(near["lat"] + fraction * (far["lat"] - near["lat"]), 7),
         "lon": round(near["lon"] + fraction * (far["lon"] - near["lon"]), 7),
         "elevation_m": round(elevation, 2) if elevation is not None else None,
+        "elevation_source": source if elevation is not None else "missing",
         "heading_deg": near["heading_deg"],
         "displaced_threshold_m": round(near["displaced_m"], 1),
     }

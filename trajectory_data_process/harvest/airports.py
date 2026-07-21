@@ -61,6 +61,10 @@ class Runway:
     geoid_undulation_m: float
     threshold_crossing_height_m: float | None
     published_glidepath_deg: float | None
+    # "cifp_ltp" when the position came from the published Path Point, "runway_geometry"
+    # when it fell back to OurAirports. Carried because the two can differ by tens of
+    # metres and that difference lands directly in the measured deviations.
+    position_source: str = "runway_geometry"
 
     @property
     def elevation_hae_m(self) -> float:
@@ -143,16 +147,23 @@ def load_airport(
     thresholds = [t for runway in entry["runways"] for t in runway["thresholds"]]
     _require_complete(code, thresholds)
 
-    undulations = geoid_undulation_m(
-        [t["lat"] for t in thresholds], [t["lon"] for t in thresholds]
-    )
+    # Where a published LPV exists, its Landing Threshold Point WINS over the runway
+    # geometry derived from OurAirports. The LTP is what the procedure is aimed at, so it
+    # is the correct along-track origin, and the two disagree measurably: KSMF 35L by
+    # 40.7 m cross-track (which showed up as that runway's entire apparent lateral error)
+    # and KSTL 30L by 61.4 m along-track. Where both agree the substitution is a no-op --
+    # 19 of this fleet's 23 LPV runways are within 10 m.
+    positions = [_threshold_position(code, t, published) for t in thresholds]
+
+    undulations = geoid_undulation_m([p[0] for p in positions], [p[1] for p in positions])
 
     runways = tuple(
         Runway(
             airport=code,
             ident=t["ident"],
-            lat=float(t["lat"]),
-            lon=float(t["lon"]),
+            lat=position[0],
+            lon=position[1],
+            position_source=position[2],
             elevation_msl_m=float(t["elevation_m"]),
             course_deg=float(t["heading_deg"]),
             geoid_undulation_m=n,
@@ -167,7 +178,7 @@ def load_airport(
                 else None
             ),
         )
-        for t, n in zip(thresholds, undulations)
+        for t, position, n in zip(thresholds, positions, undulations)
     )
 
     return Airport(
@@ -177,6 +188,16 @@ def load_airport(
         elevation_msl_m=float(entry.get("elevation_m", 0.0)),
         runways=runways,
     )
+
+
+def _threshold_position(
+    code: str, threshold: dict, published: dict[tuple[str, str], PathPoint]
+) -> tuple[float, float, str]:
+    """The threshold's position: the published LTP if there is one, else the geometry."""
+    point = published.get((code, threshold["ident"]))
+    if point is None:
+        return float(threshold["lat"]), float(threshold["lon"]), "runway_geometry"
+    return point.latitude, point.longitude, "cifp_ltp"
 
 
 def _require_complete(code: str, thresholds: Sequence[dict]) -> None:

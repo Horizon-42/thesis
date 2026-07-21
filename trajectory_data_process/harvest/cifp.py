@@ -40,6 +40,8 @@ _SUBSECTION = 12
 _CONTINUATION = slice(24, 27)
 _AIRPORT = slice(6, 10)
 _RUNWAY = slice(19, 24)
+_LTP_LATITUDE = slice(37, 48)             # N/S + DDMMSSssss
+_LTP_LONGITUDE = slice(48, 60)            # E/W + DDDMMSSssss
 _LTP_ELLIPSOIDAL_HEIGHT = slice(60, 66)   # 0.1 m
 _GLIDEPATH_ANGLE = slice(66, 70)          # 0.01 deg
 _COURSE_WIDTH = slice(93, 98)             # 0.01 m
@@ -56,10 +58,23 @@ _DECODE_CONFIDENCE = 0.75
 
 @dataclass(frozen=True)
 class PathPoint:
-    """One published LPV final approach."""
+    """One published LPV final approach.
+
+    ``latitude``/``longitude`` are the **Landing Threshold Point** — where the procedure
+    is actually aimed, and therefore the correct along-track origin for judging an
+    approach to it. It is NOT always where the OurAirports runway geometry puts the
+    threshold: cross-checked over this fleet, the two disagree by up to 61 m, and the
+    disagreement is measurable in the flown data. KSMF 35L's LTP is 40.7 m CROSS-track
+    from the OurAirports point, and the observed lateral median against the latter was
+    41.1 m -- i.e. the entire apparent "lateral error" of that runway's traffic was the
+    reference being in the wrong place. KSTL 30L disagrees by 61.4 m almost entirely
+    ALONG-track, which on a 3 deg path is ~3.2 m of crossing height.
+    """
 
     airport: str
     runway: str
+    latitude: float
+    longitude: float
     glidepath_deg: float
     threshold_crossing_height_m: float
     course_width_m: float
@@ -87,7 +102,9 @@ def read_path_points(cifp_file: Path) -> dict[tuple[str, str], PathPoint]:
             course_width = int(line[_COURSE_WIDTH]) / 100.0
             tch = int(line[_TCH]) / 10.0
             ltp_height = int(line[_LTP_ELLIPSOIDAL_HEIGHT]) / 10.0
-        except ValueError:
+            latitude = _decode_angle(line[_LTP_LATITUDE])
+            longitude = _decode_angle(line[_LTP_LONGITUDE])
+        except (ValueError, IndexError):
             continue  # a continuation/notes record that passed the shape test
 
         units = line[_TCH_UNITS]
@@ -103,6 +120,8 @@ def read_path_points(cifp_file: Path) -> dict[tuple[str, str], PathPoint]:
             PathPoint(
                 airport=key[0],
                 runway=key[1],
+                latitude=latitude,
+                longitude=longitude,
                 glidepath_deg=glidepath,
                 threshold_crossing_height_m=tch * (FT_M if units == "F" else 1.0),
                 course_width_m=course_width,
@@ -112,6 +131,16 @@ def read_path_points(cifp_file: Path) -> dict[tuple[str, str], PathPoint]:
 
     _verify_decode(cifp_file, course_widths, glidepaths)
     return points
+
+
+def _decode_angle(text: str) -> float:
+    """ARINC 424 packed angle: hemisphere letter + DD[D]MMSSssss, to signed degrees."""
+    digits = text[1:]
+    degrees = int(digits[:-8])
+    minutes = int(digits[-8:-6])
+    seconds = int(digits[-6:-4]) + int(digits[-4:]) / 10_000.0
+    value = degrees + minutes / 60.0 + seconds / 3600.0
+    return -value if text[0] in "SW" else value
 
 
 def _verify_decode(cifp_file: Path, course_widths: list[float], glidepaths: list[float]) -> None:

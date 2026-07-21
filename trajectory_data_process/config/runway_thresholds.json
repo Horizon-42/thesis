@@ -17,6 +17,7 @@
               "lat": 35.8745003,
               "lon": -78.802002,
               "elevation_m": 111.86,
+              "elevation_source": "runway_end",
               "heading_deg": 45.0,
               "displaced_threshold_m": 0.0
             },
@@ -25,6 +26,7 @@
               "lat": 35.8937988,
               "lon": -78.7779999,
               "elevation_m": 124.66,
+              "elevation_source": "runway_end",
               "heading_deg": 225.0,
               "displaced_threshold_m": 0.0
             }
@@ -40,6 +42,7 @@
               "lat": 35.8646011,
               "lon": -78.7973022,
               "elevation_m": 121.01,
+              "elevation_source": "runway_end",
               "heading_deg": 45.0,
               "displaced_threshold_m": 0.0
             },
@@ -48,6 +51,7 @@
               "lat": 35.8792,
               "lon": -78.7794037,
               "elevation_m": 131.37,
+              "elevation_source": "runway_end",
               "heading_deg": 225.0,
               "displaced_threshold_m": 0.0
             }
@@ -63,6 +67,7 @@
               "lat": 35.875,
               "lon": -78.7826996,
               "elevation_m": 131.67,
+              "elevation_source": "runway_end",
               "heading_deg": 135.0,
               "displaced_threshold_m": 0.0
             },
@@ -71,6 +76,7 @@
               "lat": 35.8680992,
               "lon": -78.7742004,
               "elevation_m": 129.54,
+              "elevation_source": "runway_end",
               "heading_deg": 315.0,
               "displaced_threshold_m": 0.0
             }
@@ -94,6 +100,7 @@
               "lat": 29.9845009,
               "lon": -90.2514038,
               "elevation_m": 0.91,
+              "elevation_source": "runway_end",
               "heading_deg": 15.0,
               "displaced_threshold_m": 0.0
             },
@@ -101,7 +108,8 @@
               "ident": "20",
               "lat": 30.0030994,
               "lon": -90.2454987,
-              "elevation_m": null,
+              "elevation_m": 0.91,
+              "elevation_source": "opposite_end",
               "heading_deg": 195.0,
               "displaced_threshold_m": 0.0
             }
@@ -117,6 +125,7 @@
               "lat": 29.9965992,
               "lon": -90.2817001,
               "elevation_m": 1.22,
+              "elevation_source": "runway_end",
               "heading_deg": 106.0,
               "displaced_threshold_m": 0.0
             },
@@ -125,6 +134,7 @@
               "lat": 29.9894237,
               "lon": -90.2519253,
               "elevation_m": 0.63,
+              "elevation_source": "runway_end",
               "heading_deg": 286.0,
               "displaced_threshold_m": 92.7
             }
@@ -148,6 +158,7 @@
               "lat": 37.3723072,
               "lon": -121.9370368,
               "elevation_m": 12.2,
+              "elevation_source": "runway_end",
               "heading_deg": 139.0,
               "displaced_threshold_m": 398.4
             },
@@ -156,6 +167,7 @@
               "lat": 37.3575256,
               "lon": -121.9207574,
               "elevation_m": 15.57,
+              "elevation_source": "runway_end",
               "heading_deg": 319.0,
               "displaced_threshold_m": 773.3
             }
@@ -171,6 +183,7 @@
               "lat": 37.3710169,
               "lon": -121.9390468,
               "elevation_m": 12.27,
+              "elevation_source": "runway_end",
               "heading_deg": 138.8,
               "displaced_threshold_m": 396.8
             },
@@ -179,6 +192,7 @@
               "lat": 37.3562385,
               "lon": -121.9227682,
               "elevation_m": 16.04,
+              "elevation_source": "runway_end",
               "heading_deg": 318.8,
               "displaced_threshold_m": 774.8
             }
@@ -202,6 +216,7 @@
               "lat": 38.7071,
               "lon": -121.580002,
               "elevation_m": 8.23,
+              "elevation_source": "runway_end",
               "heading_deg": 181.0,
               "displaced_threshold_m": 0.0
             },
@@ -210,6 +225,7 @@
               "lat": 38.683498,
               "lon": -121.580002,
               "elevation_m": 6.71,
+              "elevation_source": "runway_end",
               "heading_deg": 1.0,
               "displaced_threshold_m": 0.0
             }
@@ -225,6 +241,7 @@
               "lat": 38.7072983,
               "lon": -121.6009979,
               "elevation_m": 7.62,
+              "elevation_source": "runway_end",
               "heading_deg": 181.0,
               "displaced_threshold_m": 0.0
             },
@@ -233,6 +250,7 @@
               "lat": 38.6837006,
               "lon": -121.6009979,
               "elevation_m": 6.71,
+              "elevation_source": "runway_end",
               "heading_deg": 1.0,
               "displaced_threshold_m": 0.0
             }
@@ -256,6 +274,7 @@
               "lat": 38.746684,
               "lon": -90.381218,
               "elevation_m": 167.94,
+              "elevation_source": "runway_end",
               "heading_deg": 63.0,
               "displaced_threshold_m": 0.0
             },
@@ -264,6 +283,7 @@
               "lat": 38.756217,
               "lon": -90.357504,
               "elevation_m": 162.46,
+              "elevation_source": "runway_end",
               "heading_deg": 243.0,
               "displaced_threshold_m": 0.0
             }
@@ -279,6 +299,7 @@
               "lat": 38.759952,
               "lon": -90.409872,
               "elevation_m": 188.06,
+              "elevation_source": "runway_end",
               "heading_deg": 122.0,
               "displaced_threshold_m": 0.0
             },
@@ -287,6 +308,7 @@
               "lat": 38.746792,
               "lon": -90.383163,
               "elevation_m": 169.16,
+              "elevation_source": "runway_end",
               "heading_deg": 302.0,
               "displaced_threshold_m": 0.0
             }
@@ -302,6 +324,7 @@
               "lat": 38.751793,
               "lon": -90.366322,
               "elevation_m": 160.93,
+              "elevation_source": "runway_end",
               "heading_deg": 122.0,
               "displaced_threshold_m": 0.0
             },
@@ -310,6 +333,7 @@
               "lat": 38.738607,
               "lon": -90.339585,
               "elevation_m": 184.4,
+              "elevation_source": "runway_end",
               "heading_deg": 302.0,
               "displaced_threshold_m": 0.0
             }
@@ -325,6 +349,7 @@
               "lat": 38.7532163,
               "lon": -90.3777644,
               "elevation_m": 165.18,
+              "elevation_source": "runway_end",
               "heading_deg": 122.0,
               "displaced_threshold_m": 143.3
             },
@@ -333,6 +358,7 @@
               "lat": 38.737782,
               "lon": -90.346464,
               "elevation_m": 178.31,
+              "elevation_source": "runway_end",
               "heading_deg": 302.0,
               "displaced_threshold_m": 0.0
             }
