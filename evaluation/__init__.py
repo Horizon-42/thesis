@@ -1,22 +1,35 @@
-"""Trajectory evaluation — judge optimized trajectories against their targets.
+"""Trajectory evaluation — judge trajectories against their targets.
 
-File-based seam at the END of the optimization pipeline: inputs are per-trajectory
+File-based seam at the END of the modeling pipeline: inputs are per-trajectory
 record files (initial state + target state + a state list with a 1:1 aligned
 control list — see ``records.py`` for the contract), the output is one JSON report
-with per-trajectory verdicts and batch metrics (solve rate, success rate, lateral /
-vertical deviation spreads, flight times). Pass/fail gates are regulation-derived
-(``thresholds.py``, FAA Order 8260.58D). Depends only on ``geokit`` + stdlib —
-never on the optimizer.
+with per-trajectory verdicts and batch metrics. Pass/fail gates are regulation-
+derived (``thresholds.py``, FAA Order 8260.58D). Depends only on ``geokit`` +
+stdlib — never on the optimizer.
+
+The arrival event is subject-aware (``arrival.py``): optimized and predicted
+records are measured at ``states[-1]`` vs ``target_state``; observed records
+(``source.subject == "observed"``) at their fitted final approach extrapolated
+to the threshold, with an established-on-final precondition (``not_established``
+is a counted outcome, never a drop) and a per-flight ``marginal`` flag where the
+95 % interval straddles a gate.
 
 CLI: ``python -m evaluation --input <dir> --output report.json``
 """
 
+from evaluation.arrival import (
+    ArrivalDeviation,
+    ArrivalOutcome,
+    EstablishedCriteria,
+    Subject,
+    arrival_deviation,
+    final_state_deviation,
+    subject_of,
+)
 from evaluation.metrics import (
-    FinalStateDeviation,
     TrajectoryEvaluation,
     evaluate_batch,
     evaluate_record,
-    final_state_deviation,
 )
 from evaluation.records import (
     STATE_KEYS,
@@ -37,11 +50,15 @@ from evaluation.thresholds import DeviationThresholds
 
 __all__ = [
     "STATE_KEYS",
+    "ArrivalDeviation",
+    "ArrivalOutcome",
     "DeviationThresholds",
-    "FinalStateDeviation",
+    "EstablishedCriteria",
     "ReferenceComparison",
+    "Subject",
     "TrajectoryEvaluation",
     "TrajectoryRecord",
+    "arrival_deviation",
     "compare_to_reference",
     "evaluate_batch",
     "evaluate_record",
@@ -53,4 +70,5 @@ __all__ = [
     "percentile",
     "record_from_dict",
     "resample_by_arc_length",
+    "subject_of",
 ]

@@ -164,8 +164,8 @@ class SegmentFit:
 def _fit_line(xs: Sequence[float], ys: Sequence[float]) -> LineFit:
     """OLS with an autocorrelation-corrected standard error at x = 0.
 
-    Requires at least 3 points (residual variance needs n - 2 degrees of freedom);
-    ``fit_final_segment`` enforces a much larger minimum before calling.
+    Requires at least 3 points (residual variance needs n - 2 degrees of freedom)
+    and non-identical xs; ``fit_final_segment`` validates both at its boundary.
     """
     n = len(xs)
     x_bar = sum(xs) / n
@@ -259,6 +259,10 @@ def fit_final_segment(
     direction of travel, which is the only thing separating the two ends of one
     runway. Order is not verified here; the harvest sorts by timestamp upstream.
     """
+    if min_samples < 3:
+        raise ValueError("min_samples must be >= 3 (the line fit needs n - 2 degrees of freedom)")
+    if min_span_m <= 0.0:
+        raise ValueError("min_span_m must be > 0 (a zero-span segment cannot pin a slope)")
     projected = _final_inbound_run(frame.project_all(points), window_m)
     if len(projected) < min_samples:
         return None

@@ -126,12 +126,15 @@ def arrival_deviation(
 ) -> ArrivalOutcome:
     """Measure where this trajectory arrived, by the semantics its subject deserves."""
     if subject_of(record) != "observed":
-        return ArrivalOutcome(deviation=_final_state(record), established=None)
+        return ArrivalOutcome(deviation=final_state_deviation(record), established=None)
     return _observed_arrival(record, criteria)
 
 
-def _final_state(record: TrajectoryRecord) -> ArrivalDeviation:
-    """states[-1] vs target_state — the existing measure, unchanged."""
+def final_state_deviation(record: TrajectoryRecord) -> ArrivalDeviation:
+    """states[-1] vs target_state — the solve/prediction measure (solved records only).
+
+    The single definition of the final-state deviation; ``evaluation`` re-exports it.
+    """
     final, target = record.states[-1], record.target_state
     return ArrivalDeviation(
         lateral_m=haversine_m(final["lat"], final["lon"], target["lat"], target["lon"]),

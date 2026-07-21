@@ -430,3 +430,25 @@ def test_load_records_manifest_with_no_results_raises(tmp_path):
     (tmp_path / "summary.json").write_text(json.dumps({"results": []}), encoding="utf-8")
     with pytest.raises(ValueError, match="lists no records"):
         load_records(tmp_path)
+
+
+def test_cli_flags_reach_gates_and_established_criteria():
+    # Shared by BOTH entry points (cli.py) so the JSON and HTML reports cannot
+    # be produced with silently different knobs.
+    import argparse
+
+    from evaluation.cli import add_judgement_args, criteria_from_args, thresholds_from_args
+
+    parser = argparse.ArgumentParser()
+    add_judgement_args(parser)
+    args = parser.parse_args([
+        "--fit-window-m", "-8000", "-300",
+        "--glidepath-range-deg", "2.5", "3.5",
+        "--lateral-max-m", "556.0",
+    ])
+    criteria = criteria_from_args(args)
+    assert criteria.window_m == (-8000.0, -300.0)
+    assert criteria.glidepath_range_deg == (2.5, 3.5)
+    assert criteria.max_cross_track_m == 400.0          # untouched default
+    assert thresholds_from_args(args).lateral_max_m == 556.0
+    assert thresholds_from_args(args).vertical_above_max_m == 6.10

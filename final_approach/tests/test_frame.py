@@ -7,7 +7,7 @@ import math
 import pytest
 from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon
 
-from final_approach import RunwayFrame, TrackPoint, heading_difference_deg, track_course_deg
+from final_approach import RunwayFrame, TrackPoint
 
 # A due-north runway keeps the arithmetic checkable by hand: along == north, cross == east.
 NORTH = RunwayFrame(ident="36", lat=35.0, lon=-78.0, elevation_m=100.0, course_deg=0.0)
@@ -66,22 +66,3 @@ def test_opposite_ends_share_a_centreline_but_flip_along():
 def test_distance_is_horizontal_only():
     far = _offset(NORTH, north_m=-3000.0, alt_m=5000.0)
     assert NORTH.distance_m(far) == pytest.approx(3000.0, abs=0.5)
-
-
-def test_track_course_reports_compass_bearing():
-    """A track flying due east reports 90, not 0."""
-    points = [_offset(NORTH, east_m=e, alt_m=0.0) for e in range(-3000, 1, 100)]
-    assert track_course_deg(points, len(points) - 1, lookback_m=1500.0) == pytest.approx(90.0, abs=0.5)
-
-
-def test_track_course_is_none_when_the_track_is_too_short():
-    points = [_offset(NORTH, north_m=n, alt_m=0.0) for n in (-100.0, -50.0, 0.0)]
-    assert track_course_deg(points, 2, lookback_m=1500.0) is None
-
-
-@pytest.mark.parametrize(
-    "a, b, expected",
-    [(0.0, 360.0, 0.0), (10.0, 350.0, 20.0), (45.0, 225.0, 180.0), (100.0, 80.0, 20.0)],
-)
-def test_heading_difference_wraps(a, b, expected):
-    assert heading_difference_deg(a, b) == pytest.approx(expected)

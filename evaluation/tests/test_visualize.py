@@ -121,6 +121,39 @@ def test_cli_writes_html_with_embedded_data(tmp_path, capsys):
     assert "1/1 track overlays" in capsys.readouterr().out
 
 
+def test_observed_batch_builds_with_established_block_and_no_chart_gaps(tmp_path):
+    """An observed batch: the payload carries the established/marginal block, the page
+    builds end-to-end, and a not-established row (which has no crossing to plot) is
+    filtered out of the deviation charts by the measuredRows JS filter."""
+    from evaluation.tests.test_arrival import observed_record
+
+    def record_payload(record):
+        return {"source": record.source, "initial_state": record.initial_state,
+                "target_state": record.target_state, "final_time_s": record.final_time_s,
+                "states": record.states, "controls": record.controls}
+
+    (tmp_path / "g_eval.json").write_text(
+        json.dumps(record_payload(observed_record())), encoding="utf-8")
+    (tmp_path / "b_eval.json").write_text(
+        json.dumps(record_payload(observed_record(glidepath_deg=6.0))), encoding="utf-8")
+    _manifest(tmp_path, "g_eval.json", "b_eval.json")
+
+    payload = build_payload(load_records(tmp_path))
+    report = payload["report"]
+    assert report["subject"] == "observed"
+    assert report["observed"] == {
+        "established": 1, "not_established": 1, "established_rate": 0.5, "marginal": 0,
+    }
+    # Only the established row carries deviations for the charts to draw.
+    assert sum(1 for r in report["trajectories"] if "lateral_m" in r) == 1
+
+    out = tmp_path / "report.html"
+    visualize_main(["--input", str(tmp_path), "--output", str(out)])
+    text = out.read_text(encoding="utf-8")
+    assert "not_established" in text          # the verdict survives into the page data
+    assert "established rate" in text         # the card the solve rate is replaced by
+
+
 def test_degenerate_record_excluded_from_tracks_and_html_is_escaped(tmp_path):
     # A single-sample solved record must not reach the resampler; hostile strings in
     # source ids / reasons must not break out of the embedded <script> JSON.

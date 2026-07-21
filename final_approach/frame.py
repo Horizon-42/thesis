@@ -97,32 +97,3 @@ class RunwayFrame:
         """Horizontal distance from the threshold, metres."""
         p = self.project(point)
         return math.hypot(p.along_m, p.cross_m)
-
-
-def track_course_deg(
-    points: Sequence[TrackPoint], anchor_index: int, *, lookback_m: float = 1500.0
-) -> float | None:
-    """Ground course (compass) over the last ``lookback_m`` into ``points[anchor_index]``.
-
-    Derived from track geometry alone -- no runway, no ADS-B track field -- so it can
-    pre-filter runway candidates without assuming the answer. Returns None when the
-    track does not extend ``lookback_m`` back from the anchor, which is a normal
-    outcome for a short track and is classified by the caller.
-
-    The chart is the same flat-earth pair the frames use, evaluated at the anchor.
-    """
-    if anchor_index <= 0 or anchor_index >= len(points):
-        return None
-    anchor = points[anchor_index]
-    m_per_deg_lon = metres_per_deg_lon(anchor.lat)
-    for i in range(anchor_index - 1, -1, -1):
-        north = (anchor.lat - points[i].lat) * METRES_PER_DEG_LAT
-        east = (anchor.lon - points[i].lon) * m_per_deg_lon
-        if math.hypot(north, east) >= lookback_m:
-            return math.degrees(math.atan2(east, north)) % 360.0
-    return None
-
-
-def heading_difference_deg(a: float, b: float) -> float:
-    """Smallest absolute angle between two compass bearings, in [0, 180]."""
-    return abs((a - b + 180.0) % 360.0 - 180.0)

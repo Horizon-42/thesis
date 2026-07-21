@@ -4,7 +4,45 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
-### 2026-07-20 — three vertical/lateral reference bugs in the observed-data plane
+### 2026-07-21 — final_approach + evaluation review fixes: observed-aware reporting surfaces, one deviation definition
+
+Code review of `final_approach/` + `evaluation/` (no correctness bugs in the geometry or the
+fit statistics; all findings were reporting/duplication/doc-drift). Fixes:
+
+- **The human-facing surfaces caught up with the observed-subject work.** The measurement side
+  (`arrival.py`, the report's `observed` block) was done, but `evaluation/visualize.py` and the
+  `python -m evaluation` console summary still rendered pre-subject reports: a solve-rate card/
+  line (1.0 by construction on observed data — the exact number the subject dispatch exists to
+  stop reporting) and no established rate or marginal count anywhere. Both now suppress the
+  solve rate for pure observed batches and report `established N/M` + marginal. The deviation
+  charts also plotted `solvedRows`, which for observed batches includes not-established rows
+  with NO deviation fields — `Math.max(undefined, 0.01)` → NaN → silent bar gaps; charts now
+  draw `measuredRows` only. Verdict table gains established/marginal columns + ±95 % bounds on
+  the deviations when observed rows exist; not-established rows are styled grey ("no arrival to
+  judge"), not red ("judged and failed").
+- **`EstablishedCriteria` became reachable**: `evaluate_batch(..., criteria=)` and CLI flags
+  (`--fit-window-m/--max-cross-track-m/--glidepath-range-deg/--max-vertical-rms-m`), defined
+  ONCE in the new `evaluation/cli.py` and shared by `__main__` and `visualize` so the JSON and
+  HTML reports cannot be produced with silently different knobs (the gate flags were previously
+  duplicated between the two entry points).
+- **One final-state deviation definition.** `metrics.final_state_deviation` + its
+  `FinalStateDeviation` dataclass duplicated `arrival._final_state` line for line (no external
+  consumers, verified). The single definition now lives in `arrival.final_state_deviation`
+  returning `ArrivalDeviation`; `FinalStateDeviation` deleted.
+- **`_is_marginal` lateral fold fixed**: `abs(lateral − margin)` folded a signed CI containing
+  the centreline past 0, misreading "CI straddles the gate" as a solid verdict whenever
+  1.96σ > gate + offset. Lower bound is now `max(0, lateral − margin)`. Unreachable at real
+  σ ≈ 1–2 m (needs σ > ~55 m) — fixed for correctness, with a regression test.
+- **Dead code removed**: `frame.track_course_deg` / `heading_difference_deg` had no consumer
+  anywhere (the promised harvest heading pre-filter never materialized — the arg-min design made
+  it unnecessary). `fit_final_segment` now validates `min_samples >= 3` / `min_span_m > 0` at
+  the boundary (previously a ZeroDivisionError deep in `_fit_line`). `visualize.RESAMPLE_N`
+  deduped into `reference.N_RESAMPLE`.
+- Docs: `evaluation` README/`__init__` (which still described the pre-subject package, exported
+  nothing from `arrival`) updated; `Assignment.scores` docstring no longer claims rejections
+  carry scores; stale CLAUDE.md open item ("observed evaluation designed but NOT built") removed.
+
+Suites: final_approach + evaluation 88 pass, trajectory_data_process 93 pass.
 
 Found while trying to answer "what do the 8260.58D gates score REAL ADS-B arrivals at?" —
 the observed baseline the optimizer and the learned predictor are implicitly measured

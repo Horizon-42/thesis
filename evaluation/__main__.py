@@ -2,14 +2,18 @@
 
     python -m evaluation --input <record.json | batch directory> \
         [--output evaluation_report.json] \
-        [--lateral-max-m 106.75] [--vertical-below-max-m 3.05] [--vertical-above-max-m 6.10]
+        [--lateral-max-m 106.75] [--vertical-below-max-m 3.05] [--vertical-above-max-m 6.10] \
+        [--fit-window-m -5000 -300] [--max-cross-track-m 400] \
+        [--glidepath-range-deg 2.0 4.5] [--max-vertical-rms-m 6.0]
 
 Input records follow the contract in ``records.py`` (the optimization batch writes
-them as ``*_eval.json``, including empty records for unsolved configurations). A
-directory input must be a batch directory: its ``summary.json`` manifest names the
-run's records (no filename guessing — see ``load_records``). The report JSON
-carries the batch metrics + one row per trajectory; a compact summary is printed
-to stdout.
+them as ``*_eval.json``, including empty records for unsolved configurations; the
+harvest's observed writer emits the same contract with ``source.subject ==
+"observed"``). A directory input must be a batch directory: its ``summary.json``
+manifest names the run's records (no filename guessing — see ``load_records``).
+The report JSON carries the batch metrics + one row per trajectory; a compact
+summary is printed to stdout. Gate and established-criteria flags are shared
+with ``evaluation.visualize`` (``cli.py``), so the two reports cannot disagree.
 """
 
 from __future__ import annotations
@@ -19,38 +23,26 @@ import json
 from pathlib import Path
 from typing import Any
 
+from evaluation.cli import add_judgement_args, criteria_from_args, thresholds_from_args
 from evaluation.metrics import evaluate_batch
 from evaluation.records import load_records
-from evaluation.thresholds import DeviationThresholds
 
 
 def main(argv: list[str] | None = None) -> None:
-    defaults = DeviationThresholds()
     parser = argparse.ArgumentParser(
-        description="Evaluate optimized-trajectory records against their target states."
+        description="Evaluate trajectory records against their target states."
     )
     parser.add_argument("--input", required=True,
                         help="one record JSON, or a batch directory (read via its "
                              "summary.json manifest)")
     parser.add_argument("--output", default="evaluation_report.json",
                         help="where to write the report JSON")
-    parser.add_argument("--lateral-max-m", type=float, default=defaults.lateral_max_m,
-                        help="lateral gate (8260.58D Formula 3-1-1 course semiwidth floor)")
-    parser.add_argument("--vertical-below-max-m", type=float,
-                        default=defaults.vertical_below_max_m,
-                        help="vertical gate below target (8260.58D WCH window)")
-    parser.add_argument("--vertical-above-max-m", type=float,
-                        default=defaults.vertical_above_max_m,
-                        help="vertical gate above target (8260.58D WCH window)")
+    add_judgement_args(parser)
     args = parser.parse_args(argv)
 
-    thresholds = DeviationThresholds(
-        lateral_max_m=args.lateral_max_m,
-        vertical_below_max_m=args.vertical_below_max_m,
-        vertical_above_max_m=args.vertical_above_max_m,
-    )
     records = load_records(args.input)
-    report = evaluate_batch(records, thresholds)
+    report = evaluate_batch(records, thresholds_from_args(args),
+                            criteria=criteria_from_args(args))
     report["input"] = str(args.input)
     out = Path(args.output)
     out.write_text(json.dumps(report, indent=2), encoding="utf-8")
@@ -61,7 +53,18 @@ def _print_summary(report: dict[str, Any], out: Path) -> None:
     """Console digest of a ``metrics.evaluate_batch`` report dict (schema there)."""
     total, solved, ok = report["total"], report["solved"], report["successful"]
     print(f"evaluated {total} trajectories -> {out}")
-    print(f"  solve rate    {solved}/{total} = {report['solve_rate']:.1%}")
+    observed = report.get("observed")
+    if report["subject"] != "observed":
+        # For a pure observed batch this is 1.0 by construction — suppressed, the
+        # established rate below is the honest analogue.
+        print(f"  solve rate    {solved}/{total} = {report['solve_rate']:.1%}")
+    if observed is not None:
+        n_observed = observed["established"] + observed["not_established"]
+        print(
+            f"  established   {observed['established']}/{n_observed} = "
+            f"{observed['established_rate']:.1%}   "
+            f"({observed['marginal']} marginal — 95% CI straddles a gate)"
+        )
     among = report["success_rate_among_solved"]
     suffix = f"   (among solved: {ok}/{solved} = {among:.1%})" if among is not None else ""
     print(f"  success rate  {ok}/{total} = {report['success_rate']:.1%}{suffix}")

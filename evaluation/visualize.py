@@ -7,13 +7,18 @@ Recomputes the evaluation from the record files (same gates / flags as
 written report JSON), embeds everything as one ``const DATA`` blob, and renders:
 
   * summary cards + aggregate tables (solve/success rates, deviation spreads,
-    flight times, observed-track comparison)
-  * charts — per-flight final lateral deviation vs the gate (log scale),
-    final vertical deviation vs the WCH window, optimized-vs-observed flight
-    times + Δtime distribution, per-flight path-shape deviation
+    flight times, observed-track comparison). For an OBSERVED batch the solve
+    rate — 1.0 by construction there — is replaced by the established rate and
+    a marginal count (see ``arrival.py``)
+  * charts — per-flight arrival lateral deviation vs the gate (log scale),
+    arrival vertical deviation vs the WCH window (measured arrivals only: a
+    not-established observed track has no crossing to plot),
+    optimized-vs-observed flight times + Δtime distribution, per-flight
+    path-shape deviation
   * per-flight track overlay (plan view + altitude profile, optimized vs
     observed, arc-length resampled) behind a flight selector
-  * the full per-trajectory verdict table
+  * the full per-trajectory verdict table (established / marginal columns
+    appear when the batch has observed rows)
 
 Plotly comes from its CDN (the same convention as the project's other
 interactive docs, e.g. ``4dTrajectory/docs/dynamics_comparison_30km.zh.html``);
@@ -30,9 +35,12 @@ import json
 from pathlib import Path
 from typing import Any, Sequence
 
+from evaluation.arrival import EstablishedCriteria
+from evaluation.cli import add_judgement_args, criteria_from_args, thresholds_from_args
 from evaluation.metrics import evaluate_batch
 from evaluation.records import TrajectoryRecord, load_records
 from evaluation.reference import (
+    N_RESAMPLE,
     horizontal_arc_length_m,
     load_reference,
     resample_by_arc_length,
@@ -40,13 +48,13 @@ from evaluation.reference import (
 from evaluation.thresholds import DeviationThresholds
 
 DEFAULT_MAX_TRACKS = 30
-RESAMPLE_N = 101
 
 
 def build_payload(
     records: Sequence[TrajectoryRecord],
     thresholds: DeviationThresholds = DeviationThresholds(),
     *,
+    criteria: EstablishedCriteria = EstablishedCriteria(),
     max_tracks: int = DEFAULT_MAX_TRACKS,
 ) -> dict[str, Any]:
     """The HTML page's data blob (embedded as ``const DATA``), JSON-ready:
@@ -56,7 +64,7 @@ def build_payload(
          "tracksShown": int,    # len(tracks)
          "tracksTotal": int}    # all solved records; > tracksShown ⇒ capped/sampled
     """
-    report = evaluate_batch(records, thresholds)
+    report = evaluate_batch(records, thresholds, criteria=criteria)
     # Only arc-length-drawable paths: a zero-horizontal-extent record (e.g. a rollout
     # truncated at its first step) has no path to overlay and would crash the resampler.
     drawable = [r for r in records if r.solved and horizontal_arc_length_m(r.states) > 0.0]
@@ -83,7 +91,6 @@ def render_html(payload: dict[str, Any], *, title: str, source_label: str) -> st
 
 
 def main(argv: list[str] | None = None) -> None:
-    defaults = DeviationThresholds()
     parser = argparse.ArgumentParser(
         description="Render an evaluation batch as an HTML report (tables + charts)."
     )
@@ -95,20 +102,13 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--title", default="Trajectory Evaluation Report")
     parser.add_argument("--max-tracks", type=int, default=DEFAULT_MAX_TRACKS,
                         help="track overlays to embed (evenly sampled over the solved records)")
-    parser.add_argument("--lateral-max-m", type=float, default=defaults.lateral_max_m)
-    parser.add_argument("--vertical-below-max-m", type=float,
-                        default=defaults.vertical_below_max_m)
-    parser.add_argument("--vertical-above-max-m", type=float,
-                        default=defaults.vertical_above_max_m)
+    add_judgement_args(parser)
     args = parser.parse_args(argv)
 
-    thresholds = DeviationThresholds(
-        lateral_max_m=args.lateral_max_m,
-        vertical_below_max_m=args.vertical_below_max_m,
-        vertical_above_max_m=args.vertical_above_max_m,
-    )
     records = load_records(args.input)
-    payload = build_payload(records, thresholds, max_tracks=args.max_tracks)
+    payload = build_payload(records, thresholds_from_args(args),
+                            criteria=criteria_from_args(args),
+                            max_tracks=args.max_tracks)
     out = Path(args.output)
     out.write_text(
         render_html(payload, title=args.title, source_label=str(args.input)),
@@ -136,7 +136,7 @@ def _track_entry(record: TrajectoryRecord) -> dict[str, Any]:
     """
     entry: dict[str, Any] = {
         "id": str(record.source.get("id") or (record.path.stem if record.path else "trajectory")),
-        "optimized": _polyline(resample_by_arc_length(record.states, RESAMPLE_N)),
+        "optimized": _polyline(resample_by_arc_length(record.states, N_RESAMPLE)),
         "target": {
             "lat": record.target_state["lat"],
             "lon": record.target_state["lon"],
@@ -148,7 +148,7 @@ def _track_entry(record: TrajectoryRecord) -> dict[str, Any]:
         # A degenerate observed track (zero horizontal extent) cannot be resampled —
         # draw the optimized path alone rather than crash the page build.
         if horizontal_arc_length_m(reference.states) > 0.0:
-            entry["reference"] = _polyline(resample_by_arc_length(reference.states, RESAMPLE_N))
+            entry["reference"] = _polyline(resample_by_arc_length(reference.states, N_RESAMPLE))
     return entry
 
 
@@ -217,7 +217,7 @@ _TEMPLATE = """<!DOCTYPE html>
     the published TCH (Threshold Crossing Height) (§1-3-1.f(2)(b), 20–50 ft about the 30 ft design value).
   </div>
 
-  <h2>Final-state deviations vs regulation gates</h2>
+  <h2>Arrival deviations vs regulation gates</h2>
   <div class="grid2">
     <div class="chart" id="chartLateral"></div>
     <div class="chart" id="chartVertical"></div>
@@ -251,7 +251,11 @@ _TEMPLATE = """<!DOCTYPE html>
 const DATA = __DATA__;
 const R = DATA.report, ROWS = R.trajectories, TH = R.thresholds;
 const solvedRows = ROWS.filter(r => r.solved);
-const refRows = solvedRows.filter(r => r.reference && r.reference.flight_time_delta_s !== undefined);
+// Rows with an arrival to plot. A not-established observed track is "solved" (it has
+// states) yet carries no crossing — charting it would only draw NaN gaps.
+const measuredRows = solvedRows.filter(r => r.lateral_m !== undefined);
+const hasObserved = ROWS.some(r => r.subject === "observed");
+const refRows = measuredRows.filter(r => r.reference && r.reference.flight_time_delta_s !== undefined);
 const GREEN = "#178a4c", RED = "#c43d3d", GRAY = "#98a2ad", BLUE = "#2f6fed", DARK = "#48505c";
 const fmt = (v, d=1) => (v === null || v === undefined) ? "—" : Number(v).toFixed(d);
 const pct = v => (100 * v).toFixed(1) + "%";
@@ -267,13 +271,21 @@ const LAYOUT = { margin: {l: 60, r: 16, t: 42, b: 46}, height: 330,
 function card(num, lbl, cls) {
   return `<div class="card ${cls || ""}"><div class="num">${num}</div><div class="lbl">${lbl}</div></div>`;
 }
+// For a pure observed batch the solve rate is 1.0 by construction (every track "has
+// states") — the established rate is the honest analogue, so it replaces the card.
 document.getElementById("cards").innerHTML =
   card(R.total, "total trajectories") +
-  card(`${R.solved}/${R.total}`, `solve rate ${pct(R.solve_rate)}`,
-       R.solve_rate >= 0.9 ? "ok" : "bad") +
+  (R.subject === "observed" ? "" :
+    card(`${R.solved}/${R.total}`, `solve rate ${pct(R.solve_rate)}`,
+         R.solve_rate >= 0.9 ? "ok" : "bad")) +
+  (R.observed ?
+    card(`${R.observed.established}/${R.observed.established + R.observed.not_established}`,
+         `established rate ${pct(R.observed.established_rate)}`) +
+    card(R.observed.marginal, "marginal (95% CI straddles a gate)")
+    : "") +
   card(`${R.successful}/${R.total}`, `success rate ${pct(R.success_rate)}`,
        R.success_rate >= 0.9 ? "ok" : "bad") +
-  (R.success_rate_among_solved !== null
+  (R.success_rate_among_solved !== null && R.subject !== "observed"
      ? card(pct(R.success_rate_among_solved), "success among solved") : "") +
   (R.final_time_s ? card(fmt(R.final_time_s.mean) + " s", "mean flight time") : "") +
   (R.reference ? card(fmt(R.reference.flight_time_delta_s.mean, 1) + " s",
@@ -283,8 +295,15 @@ document.getElementById("cards").innerHTML =
 function aggTable() {
   const rows = [];
   rows.push(["gates", `lateral ≤ ${TH.lateral_max_m} m · vertical −${TH.vertical_below_max_m}/+${TH.vertical_above_max_m} m`, "", ""]);
-  if (R.lateral_m) rows.push(["final lateral deviation (m)", fmt(R.lateral_m.mean), fmt(R.lateral_m.p95), fmt(R.lateral_m.max)]);
-  if (R.vertical_m) rows.push(["final vertical |deviation| (m)", fmt(R.vertical_m.mean_abs), fmt(R.vertical_m.p95_abs), fmt(R.vertical_m.max_abs)]);
+  if (R.observed) {
+    const n = R.observed.established + R.observed.not_established;
+    rows.push(["established on final (observed)",
+               `${R.observed.established}/${n} = ${pct(R.observed.established_rate)}`,
+               `${R.observed.not_established} not established`,
+               `${R.observed.marginal} marginal`]);
+  }
+  if (R.lateral_m) rows.push(["arrival lateral deviation (m)", fmt(R.lateral_m.mean), fmt(R.lateral_m.p95), fmt(R.lateral_m.max)]);
+  if (R.vertical_m) rows.push(["arrival vertical |deviation| (m)", fmt(R.vertical_m.mean_abs), fmt(R.vertical_m.p95_abs), fmt(R.vertical_m.max_abs)]);
   if (R.final_time_s) rows.push(["flight time (s)", fmt(R.final_time_s.mean), fmt(R.final_time_s.min) + " (min)", fmt(R.final_time_s.max) + " (max)"]);
   if (R.reference) {
     const d = R.reference.flight_time_delta_s;
@@ -301,14 +320,15 @@ aggTable();
 
 // ── deviation charts ──────────────────────────────────────────────────────────
 function lateralChart() {
-  if (!solvedRows.length) return;
-  const colors = solvedRows.map(r => r.success ? GREEN : RED);
+  if (!measuredRows.length) return;
+  const colors = measuredRows.map(r => r.success ? GREEN : RED);
   Plotly.newPlot("chartLateral", [{
-    type: "bar", x: solvedRows.map(label),
-    y: solvedRows.map(r => Math.max(r.lateral_m, 0.01)),
+    type: "bar", x: measuredRows.map(label),
+    y: measuredRows.map(r => Math.max(r.lateral_m, 0.01)),
     marker: {color: colors},
-    hovertext: solvedRows.map(r => `${esc(label(r))}: ${fmt(r.lateral_m, 2)} m`), hoverinfo: "text",
-  }], {...LAYOUT, title: "Final lateral deviation (log scale; red dashed = gate)",
+    hovertext: measuredRows.map(r => `${esc(label(r))}: ${fmt(r.lateral_m, 2)} m` +
+      (r.lateral_sigma_m ? ` (±${fmt(1.96 * r.lateral_sigma_m, 1)})` : "")), hoverinfo: "text",
+  }], {...LAYOUT, title: "Arrival lateral deviation (log scale; red dashed = gate)",
        yaxis: {type: "log", title: "m"}, xaxis: {tickangle: -40},
        shapes: [{type: "line", xref: "paper", x0: 0, x1: 1,
                  y0: TH.lateral_max_m, y1: TH.lateral_max_m,
@@ -316,13 +336,14 @@ function lateralChart() {
     {displayModeBar: false});
 }
 function verticalChart() {
-  if (!solvedRows.length) return;
-  const ys = solvedRows.map(r => r.vertical_m);
+  if (!measuredRows.length) return;
+  const ys = measuredRows.map(r => r.vertical_m);
   Plotly.newPlot("chartVertical", [{
-    type: "bar", x: solvedRows.map(label), y: ys,
-    marker: {color: solvedRows.map(r => r.success ? GREEN : RED)},
-    hovertext: solvedRows.map(r => `${esc(label(r))}: ${fmt(r.vertical_m, 2)} m`), hoverinfo: "text",
-  }], {...LAYOUT, title: "Final vertical deviation (green band = WCH window)",
+    type: "bar", x: measuredRows.map(label), y: ys,
+    marker: {color: measuredRows.map(r => r.success ? GREEN : RED)},
+    hovertext: measuredRows.map(r => `${esc(label(r))}: ${fmt(r.vertical_m, 2)} m` +
+      (r.vertical_sigma_m ? ` (±${fmt(1.96 * r.vertical_sigma_m, 1)})` : "")), hoverinfo: "text",
+  }], {...LAYOUT, title: "Arrival vertical deviation (green band = WCH window)",
        yaxis: {title: "m"}, xaxis: {tickangle: -40},
        shapes: [{type: "rect", xref: "paper", x0: 0, x1: 1,
                  y0: -TH.vertical_below_max_m, y1: TH.vertical_above_max_m,
@@ -413,16 +434,26 @@ else note.textContent = "No solved trajectories to display.";
 // ── per-trajectory table ──────────────────────────────────────────────────────
 function rowTable() {
   const table = document.getElementById("rowTable");
-  const head = ["flight", "solved", "success", "lateral (m)", "vertical (m)",
+  const head = ["flight", "solved", "success",
+                ...(hasObserved ? ["established", "marginal"] : []),
+                "lateral (m)", "vertical (m)",
                 "ΔV (m/s)", "T (s)", "Δt vs observed (s)", "path dev mean (m)", "notes"];
   const header = "<tr>" + head.map(h => `<th>${h}</th>`).join("") + "</tr>";
   const body = ROWS.map(r => {
-    const cls = !r.solved ? "unsolved" : (r.success ? "" : "fail");
+    // Grey = no arrival to judge (unsolved / not established); red = judged and failed.
+    const notEstablished = (r.violations || []).includes("not_established");
+    const cls = (!r.solved || notEstablished) ? "unsolved" : (r.success ? "" : "fail");
     const ref = r.reference || {};
     const why = r.reason || (r.violations || []).join("; ");
+    const obsCells = hasObserved
+      ? `<td>${r.established === undefined ? "—" : (r.established ? "✓" : "✗")}</td>` +
+        `<td>${r.marginal ? "⚠" : ""}</td>`
+      : "";
+    const sig = (v, s) => fmt(v, 2) + (s ? ` ±${fmt(1.96 * s, 1)}` : "");
     return `<tr class="${cls}">` +
       `<td>${esc(r.id)}</td><td>${r.solved ? "✓" : "✗"}</td><td>${r.success ? "✓" : "✗"}</td>` +
-      `<td>${fmt(r.lateral_m, 2)}</td><td>${fmt(r.vertical_m, 2)}</td>` +
+      obsCells +
+      `<td>${sig(r.lateral_m, r.lateral_sigma_m)}</td><td>${sig(r.vertical_m, r.vertical_sigma_m)}</td>` +
       `<td>${fmt(r.speed_ms, 1)}</td><td>${fmt(r.final_time_s, 1)}</td>` +
       `<td>${fmt(ref.flight_time_delta_s, 1)}</td>` +
       `<td>${ref.path_lateral_m ? fmt(ref.path_lateral_m.mean, 0) : "—"}</td>` +

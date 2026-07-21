@@ -1,10 +1,10 @@
-# evaluation — judge optimized trajectories against their targets
+# evaluation — judge trajectories against their targets
 
-File-based seam at the **end** of the optimization pipeline: inputs are
+File-based seam at the **end** of the modeling pipeline: inputs are
 per-trajectory record files, the output is one JSON report. The package depends
 only on `geokit` + stdlib — it never imports the optimizer, so anything that can
-write the record format (the collocation batch, a future data-driven model, …)
-can be evaluated identically.
+write the record format (the collocation batch, the ts_transformer predictions,
+the harvest's observed tracks, …) is evaluated identically.
 
 ```
 scenario_optimization (batch)                    evaluation (this package)
@@ -59,11 +59,39 @@ Both `scenario_optimization` batch modes write a `*_eval.json` next to every
 
 ## What is judged
 
-Per trajectory (`evaluate_record`): the **final state vs the target state** —
-"did it arrive?". Lateral = great-circle distance (`geokit.haversine_m`),
-vertical = signed altitude difference. Speed / heading deltas are reported for
-context but not gated. A trajectory is **successful** iff it is solved AND
-passes both positional gates.
+Per trajectory (`evaluate_record`): **where did it arrive, vs the target?** The
+arrival event depends on the record's subject (`arrival.py` — `source.subject`,
+defaulting to `optimized`):
+
+- **optimized / predicted** — `states[-1]` vs `target_state`: a solve
+  terminates at its target by construction, so the final state IS the arrival.
+  Lateral = great-circle distance (`geokit.haversine_m`), vertical = signed
+  altitude difference.
+- **observed** — the fitted final approach (`final_approach`), extrapolated to
+  the threshold. An observed track's `states[-1]` records where ADS-B reception
+  stopped (median 325 m short at KRDU), not where the aircraft crossed; graded
+  on it, real completed landings scored ~1% on the vertical gate.
+
+Speed / heading deltas are reported for context but not gated. A trajectory is
+**successful** iff it has a measured arrival inside both positional gates.
+
+## Observed arrivals (`arrival.py`)
+
+- **Established-on-final precondition** (`EstablishedCriteria`, CLI-overridable):
+  median |cross-track| ≤ 400 m, fitted glidepath in [2.0°, 4.5°], vertical fit
+  RMS ≤ 6 m (an RMS, not a max — one blip must not discard a clean approach).
+  `not_established` is a **counted outcome** (own row violation, own tally in
+  the report), never a drop and never a silent extrapolation — and it stays
+  distinct from the harvest's `unassignable` (reception failure).
+- **Uncertainty carried into the verdict**: the crossing is a fitted quantity,
+  so rows carry `lateral_sigma_m` / `vertical_sigma_m` and a `marginal` flag —
+  True when the 95 % CI straddles a gate boundary, i.e. the data cannot decide.
+  On 25 ft-quantised altitudes this is the majority case; read the deviation
+  distribution as primary, the pass rate as secondary.
+- The observed writer (`trajectory_data_process/harvest/observed.py`) stamps
+  `source.subject`, `source.runway_course_deg` (this package cannot read a
+  runway config) and targets threshold + published TCH in MSL; a missing
+  course or an unknown subject **raises** rather than guessing.
 
 ## Regulation-derived gates (`thresholds.py`, overridable)
 
@@ -97,14 +125,25 @@ comparisons against the flight as actually flown:
 
 ## Batch metrics (`evaluate_batch` / the report JSON)
 
-- `solve_rate` — non-empty solutions / all records
+- `subject` — `optimized` / `predicted` / `observed`, or `mixed`
+- `solve_rate` — non-empty solutions / all records. For a pure observed batch
+  this is 1.0 by construction and both renderers suppress it in favour of:
+- `observed` (only when observed records exist) — `established` /
+  `not_established` counts, `established_rate`, and the `marginal` count
 - `success_rate` — passed both gates / all records (+ `success_rate_among_solved`)
-- `lateral_m` — mean / **p95** / max over solved records. p95 is reported because
+- `lateral_m` — mean / **p95** / max over measured records. p95 is reported because
   RNP containment is itself a 95 % statistic (8260.58D: position within the
   leg's RNP radius 95 % of the time), so it compares directly with RNP limits.
 - `vertical_m` — signed mean + abs mean / p95 / max
-- `final_time_s` — mean / min / max flight time over solved records
-- `trajectories` — one row per record (deviations, violations, failure reason)
+- `final_time_s` — mean / min / max flight time over measured records
+- `trajectories` — one row per record (deviations, violations, failure reason;
+  observed rows add `established`, `extrapolated`, the sigmas and `marginal`)
+
+Gate flags and the established criteria are defined once in `cli.py` and shared
+by `python -m evaluation` and `python -m evaluation.visualize`, so the JSON and
+HTML reports cannot be produced with silently different knobs:
+`--fit-window-m -5000 -300 · --max-cross-track-m 400 ·
+--glidepath-range-deg 2.0 4.5 · --max-vertical-rms-m 6.0`.
 
 ## HTML report (`visualize.py`)
 
@@ -113,13 +152,16 @@ python -m evaluation.visualize --input outputs/run1 --output outputs/run1/evalua
 ```
 
 Recomputes the evaluation from the record files (same flags as `python -m evaluation`)
-and renders a single HTML page: summary cards + aggregate tables, per-flight final
-lateral/vertical deviation charts against the gates, optimized-vs-observed flight
+and renders a single HTML page: summary cards + aggregate tables, per-flight arrival
+lateral/vertical deviation charts against the gates (measured arrivals only — a
+not-established observed track has no crossing to plot), optimized-vs-observed flight
 times + Δtime distribution + path-shape deviation (when references exist), a
 per-flight track overlay (plan view + altitude profile behind a flight selector,
 `--max-tracks` evenly-sampled overlays embedded — the cap is stated on the page),
-and the full verdict table. Plotly loads from its CDN (same convention as the
-project's other interactive docs); all data is embedded.
+and the full verdict table (established/marginal columns and ±95 % bounds appear
+when the batch has observed rows; for observed batches the solve-rate card is
+replaced by the established rate). Plotly loads from its CDN (same convention as
+the project's other interactive docs); all data is embedded.
 
 ## Usage
 

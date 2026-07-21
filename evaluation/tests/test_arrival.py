@@ -2,14 +2,25 @@
 
 from __future__ import annotations
 
-import math
+import sys
+from pathlib import Path
 
 import pytest
 
-from evaluation.arrival import EstablishedCriteria, arrival_deviation, subject_of
-from evaluation.metrics import evaluate_batch, evaluate_record
-from evaluation.records import TrajectoryRecord
-from final_approach.tests.test_fit import FRAME, synthetic_approach
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from evaluation.arrival import (  # noqa: E402
+    ArrivalDeviation,
+    EstablishedCriteria,
+    arrival_deviation,
+    subject_of,
+)
+from evaluation.metrics import _is_marginal, evaluate_batch, evaluate_record  # noqa: E402
+from evaluation.records import TrajectoryRecord  # noqa: E402
+from evaluation.thresholds import DeviationThresholds  # noqa: E402
+from final_approach.tests.test_fit import FRAME, synthetic_approach  # noqa: E402
 
 TARGET_TCH_M = 17.5
 
@@ -190,3 +201,55 @@ def test_a_crossing_near_the_gate_edge_is_marked_marginal():
     evaluation = evaluate_record(record)
     assert evaluation.deviation.vertical_m == pytest.approx(6.0, abs=1.5)
     assert evaluation.marginal is True
+
+
+def _measured(lateral_m, *, lateral_sigma_m=None, vertical_m=0.0, vertical_sigma_m=None):
+    return ArrivalDeviation(
+        lateral_m=lateral_m, vertical_m=vertical_m, speed_ms=0.0, heading_rad=0.0,
+        flight_time_s=0.0, extrapolated=True,
+        lateral_sigma_m=lateral_sigma_m, vertical_sigma_m=vertical_sigma_m,
+    )
+
+
+def test_a_lateral_ci_straddling_the_gate_is_marginal():
+    gates = DeviationThresholds()  # lateral gate 106.75 m
+    assert _is_marginal(_measured(100.0, lateral_sigma_m=10.0), gates) is True
+    assert _is_marginal(_measured(100.0, lateral_sigma_m=1.0), gates) is False
+    assert _is_marginal(_measured(150.0, lateral_sigma_m=10.0), gates) is False  # solid fail
+
+
+def test_a_lateral_ci_containing_the_centreline_does_not_fold_past_it():
+    """When 1.96 sigma exceeds the offset, the signed CI contains 0, so the magnitude
+    interval is [0, offset + margin] -- it straddles the gate whenever the upper end
+    clears it. The old abs() fold turned the negative bound into a lower bound above
+    the gate and read this as a solid verdict."""
+    gates = DeviationThresholds()
+    assert _is_marginal(_measured(30.0, lateral_sigma_m=80.0), gates) is True
+
+
+def test_batch_criteria_are_caller_supplied():
+    """EstablishedCriteria must be reachable batch-wide, not just per record."""
+    records = [observed_record(glidepath_deg=6.0)]
+    report = evaluate_batch(
+        records, criteria=EstablishedCriteria(glidepath_range_deg=(5.0, 7.0))
+    )
+    assert report["observed"]["established"] == 1
+
+
+def test_the_console_summary_reports_established_not_solve_rate(capsys, tmp_path):
+    """A printed solve rate of 1.0 over observed data is the exact number the whole
+    subject dispatch exists to stop reporting."""
+    from evaluation.__main__ import _print_summary
+
+    report = evaluate_batch([observed_record(), observed_record(glidepath_deg=6.0)])
+    _print_summary(report, tmp_path / "report.json")
+    out = capsys.readouterr().out
+    assert "established   1/2 = 50.0%" in out
+    assert "marginal" in out
+    assert "solve rate" not in out
+
+    mixed = evaluate_batch([observed_record(), solved_record()])
+    _print_summary(mixed, tmp_path / "report.json")
+    out = capsys.readouterr().out
+    assert "solve rate" in out          # still meaningful for the non-observed part
+    assert "established   1/1" in out

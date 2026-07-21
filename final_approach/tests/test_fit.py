@@ -134,6 +134,14 @@ def test_none_when_the_baseline_is_too_short_to_pin_a_slope():
     assert fit_final_segment(dense, FRAME, min_span_m=500.0) is None
 
 
+def test_degenerate_fit_parameters_are_rejected_at_the_boundary():
+    """min_samples < 3 starves the n-2 dof; min_span_m <= 0 lets s_xx hit zero."""
+    with pytest.raises(ValueError, match="min_samples"):
+        fit_final_segment(synthetic_approach(), FRAME, min_samples=2)
+    with pytest.raises(ValueError, match="min_span_m"):
+        fit_final_segment(synthetic_approach(), FRAME, min_span_m=0.0)
+
+
 def test_window_bounds_are_respected():
     fit = fit_final_segment(synthetic_approach(start_along_m=-9000.0), FRAME, window_m=(-5000.0, -300.0))
     assert fit is not None

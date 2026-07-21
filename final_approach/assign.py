@@ -101,9 +101,11 @@ class Assignment:
     """The verdict, plus every number that produced it.
 
     ``scores`` maps runway ident -> median absolute cross-track offset (metres) for
-    each candidate that yielded a fit. It is kept on every outcome, including the
-    rejections, so a disputed assignment can be audited without re-running anything --
-    and so ``ambiguous`` cases carry the evidence of what they were torn between.
+    each candidate that yielded a usable fit. Both outcomes that fitted anything
+    (``assigned`` and ``ambiguous``) keep every candidate's score, so a disputed
+    assignment can be audited without re-running -- an ``ambiguous`` result carries
+    the evidence of what it was torn between. The rejections (``not_landing``,
+    ``unassignable``) have nothing to score; their evidence is ``reason``.
     """
 
     outcome: Outcome
@@ -206,10 +208,10 @@ def assign_runway(
 
     if not fits:
         if overflown:
-            highest = min(overflown.items(), key=lambda kv: abs(kv[1]))
+            nearest = min(overflown.items(), key=lambda kv: abs(kv[1]))
             return Assignment(
                 "not_landing", None, None, {}, None,
-                f"nearest runway {highest[0]} would be crossed {highest[1]:+.0f} m from its "
+                f"nearest runway {nearest[0]} would be crossed {nearest[1]:+.0f} m from its "
                 f"surface (limit {screen.max_crossing_height_m:.0f} m) — an overflight",
             )
         return Assignment(

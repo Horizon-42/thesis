@@ -58,16 +58,12 @@ from final_approach.frame import (
     Projected,
     RunwayFrame,
     TrackPoint,
-    heading_difference_deg,
-    track_course_deg,
 )
 
 __all__ = [
     "TrackPoint",
     "Projected",
     "RunwayFrame",
-    "track_course_deg",
-    "heading_difference_deg",
     "LineFit",
     "SegmentFit",
     "fit_final_segment",

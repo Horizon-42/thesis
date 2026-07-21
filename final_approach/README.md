@@ -142,7 +142,8 @@ fit at all.
 
 `unassignable` and `not_established` must stay distinct: the first is the receiver's
 fault, the second the approach's. Conflating them charges a reception gap to the pilot.
-Every outcome carries `scores` so a disputed assignment is auditable without a re-run.
+`assigned` and `ambiguous` carry every candidate's `scores` so a disputed assignment is
+auditable without a re-run; the rejections carry their evidence in `reason`.
 
 ## Datum contract
 

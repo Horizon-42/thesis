@@ -1,20 +1,27 @@
-"""Final-state matching + batch metrics.
+"""The arrival judgement + batch metrics.
 
-The core judgement: does the trajectory's LAST state match the target state?
-Lateral deviation = great-circle distance (``geokit.haversine_m``); vertical =
-signed altitude difference. Speed / heading deltas are reported for context but
-NOT gated — the regulation gates (``thresholds.py``) are positional.
+Per record: where did the trajectory arrive, and inside the regulation gates?
+The arrival EVENT depends on the record's subject (``arrival.py``): a solve or a
+prediction is measured at ``states[-1]`` vs ``target_state``, an observed track
+at its fitted final approach extrapolated to the threshold. Lateral deviation =
+great-circle distance (``geokit.haversine_m``) for a final state, |cross-track
+at threshold| for an observed crossing; vertical = signed altitude difference.
+Speed / heading deltas are reported for context but NOT gated — the regulation
+gates (``thresholds.py``) are positional.
 
 Batch metrics over a set of records:
 
   * solve rate    — records with a non-empty solution / all records
-  * success rate  — records whose final state passes BOTH gates / all records
+  * success rate  — records whose arrival passes BOTH gates / all records
                     (also reported among solved only)
-  * lateral / vertical deviation spreads over the solved records — mean, p95
+  * for observed batches, an ``observed`` block: established / not-established
+    counts + rate (the honest analogue of a solve rate, which is 1.0 by
+    construction there) and the marginal count (verdicts the data cannot decide)
+  * lateral / vertical deviation spreads over the measured records — mean, p95
     and max. p95 is reported because RNP containment is itself a 95 % statistic
     (8260.58D: position within the leg's RNP radius 95 % of the time), so the
     p95 lateral deviation compares directly against RNP-style limits.
-  * mean / min / max flight time over the solved records
+  * mean / min / max flight time over the measured records
   * when records carry a ``reference_file`` pointer, the observed-track
     comparison (``reference.py``): per-trajectory flight-time delta + path
     deviation, aggregated over the solved records.
@@ -22,11 +29,8 @@ Batch metrics over a set of records:
 
 from __future__ import annotations
 
-import math
 from dataclasses import asdict, dataclass
 from typing import Any, Sequence
-
-from geokit import haversine_m
 
 from evaluation.arrival import (
     DEFAULT_SUBJECT,
@@ -44,30 +48,6 @@ from evaluation.reference import (
 )
 from evaluation.stats import magnitude_spread, mean, signed_spread
 from evaluation.thresholds import DeviationThresholds
-
-
-@dataclass(frozen=True)
-class FinalStateDeviation:
-    """The last state vs the target state (signed where a sign is meaningful)."""
-
-    lateral_m: float
-    vertical_m: float   # final − target (positive = high)
-    speed_ms: float     # final − target
-    heading_rad: float  # smallest signed angular difference
-    flight_time_s: float
-
-
-def final_state_deviation(record: TrajectoryRecord) -> FinalStateDeviation:
-    """Measure the record's final state against its target (solved records only)."""
-    final = record.states[-1]
-    target = record.target_state
-    return FinalStateDeviation(
-        lateral_m=haversine_m(final["lat"], final["lon"], target["lat"], target["lon"]),
-        vertical_m=final["alt"] - target["alt"],
-        speed_ms=final["V"] - target["V"],
-        heading_rad=math.remainder(final["psi"] - target["psi"], math.tau),
-        flight_time_s=final["t"],
-    )
 
 
 @dataclass(frozen=True)
@@ -183,7 +163,11 @@ def _is_marginal(deviation: ArrivalDeviation, thresholds: DeviationThresholds) -
             return True
     if deviation.lateral_sigma_m is not None:
         margin = half_width * deviation.lateral_sigma_m
-        if abs(deviation.lateral_m - margin) <= thresholds.lateral_max_m <= deviation.lateral_m + margin:
+        # lateral_m is |cross-track|, so the interval on the magnitude is
+        # [max(0, lateral − margin), lateral + margin] — the lower bound clamps at 0
+        # when the signed CI contains the centreline, it never folds past it.
+        low = max(0.0, deviation.lateral_m - margin)
+        if low <= thresholds.lateral_max_m <= deviation.lateral_m + margin:
             return True
     return False
 
@@ -191,6 +175,8 @@ def _is_marginal(deviation: ArrivalDeviation, thresholds: DeviationThresholds) -
 def evaluate_batch(
     records: Sequence[TrajectoryRecord],
     thresholds: DeviationThresholds = DeviationThresholds(),
+    *,
+    criteria: EstablishedCriteria = EstablishedCriteria(),
 ) -> dict[str, Any]:
     """Evaluate every record and aggregate the batch metrics.
 
@@ -199,21 +185,26 @@ def evaluate_batch(
 
         {
           "thresholds": asdict(DeviationThresholds),
+          "subject": "optimized"|"predicted"|"observed"|"mixed",  # of the batch
+          "observed": {...},                  # only when observed records exist:
+                                              #   established / not_established /
+                                              #   established_rate / marginal
           "total": int,                       # all records
+          "measured": int,                    # records with an arrival to grade
           "solved": int,                      # records with a non-empty solution
           "solve_rate": float,                # solved / total (0.0 on an empty batch)
-          "successful": int,                  # solved AND inside both gates
+          "successful": int,                  # measured AND inside both gates
           "success_rate": float,              # successful / total
           "success_rate_among_solved": float | None,   # None when nothing solved
-          "lateral_m": magnitude spread | None,        # final lateral dev over solved
-          "vertical_m": signed spread | None,          # final vertical dev (+ = high)
-          "final_time_s": {"mean","min","max"} | None, # flight times over solved
+          "lateral_m": magnitude spread | None,        # lateral dev over measured
+          "vertical_m": signed spread | None,          # vertical dev (+ = high)
+          "final_time_s": {"mean","min","max"} | None, # flight times over measured
           "reference": _reference_aggregate() result,
           "trajectories": [_row() result per record, input order],
         }
 
     "magnitude/signed spread" are the ``stats.magnitude_spread`` /
-    ``stats.signed_spread`` dicts; ``None`` aggregates mean "no solved records".
+    ``stats.signed_spread`` dicts; ``None`` aggregates mean "nothing measured".
     Rows of records that carry ``reference_file`` gain a ``"reference"`` block —
     always ``{"file", "flight_time_s"}`` (the observed baseline); solved records
     with arc-matchable paths add ``{"flight_time_delta_s", "path_lateral_m",
@@ -221,7 +212,7 @@ def evaluate_batch(
     record whose path (or reference) has zero horizontal extent adds a ``"note"``
     saying the comparison was skipped instead.
     """
-    evaluations = [evaluate_record(record, thresholds) for record in records]
+    evaluations = [evaluate_record(record, thresholds, criteria=criteria) for record in records]
     # "solved" is structural (the record has states); "measured" is the set with an
     # arrival to grade. They differ only for observed subjects, where a track can have
     # states yet no established final approach to extrapolate from.
@@ -268,8 +259,9 @@ def evaluate_batch(
         established = [e for e in observed if e.established]
         subject_block = {
             # An observed track trivially "has states", so a solve rate over observed
-            # data is 1.0 by construction and means nothing. The established rate is the
-            # honest analogue and is reported instead of it, not alongside it.
+            # data is 1.0 by construction and means nothing. The established rate is
+            # the honest analogue; solve_rate stays in the top-level dict only for
+            # schema stability, and the renderers suppress it for observed batches.
             "established": len(established),
             "not_established": len(observed) - len(established),
             "established_rate": len(established) / len(observed),
@@ -329,10 +321,11 @@ def _row(evaluation: TrajectoryEvaluation) -> dict[str, Any]:
     """One report row (flattened :class:`TrajectoryEvaluation`).
 
     Always ``{"id", "file", "solved", "success", "violations": [str, …]}``;
-    solved rows add the :class:`FinalStateDeviation` fields ``{"lateral_m",
-    "vertical_m", "speed_ms", "heading_rad", "final_time_s"}``, unsolved rows
-    add ``"reason"``. (``evaluate_batch`` may attach a ``"reference"`` block on
-    top — documented there.)
+    measured rows add the deviation fields ``{"lateral_m", "vertical_m",
+    "speed_ms", "heading_rad", "final_time_s"}`` (+ the observed extras when
+    ``extrapolated``), unsolved / not-established rows add ``"reason"``.
+    (``evaluate_batch`` may attach a ``"reference"`` block on top — documented
+    there.)
     """
     row: dict[str, Any] = {
         "id": evaluation.record_id,
