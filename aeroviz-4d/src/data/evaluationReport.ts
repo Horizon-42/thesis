@@ -41,7 +41,13 @@ export interface EvaluationRowReference {
   note?: string;
 }
 
-/** One per-trajectory verdict row (`metrics._row`, deviations only when solved). */
+/**
+ * What kind of trajectory a report describes (`arrival.Subject`). Absent means
+ * `optimized` — the backend only stamps it when it is not.
+ */
+export type EvaluationSubject = "optimized" | "predicted" | "observed";
+
+/** One per-trajectory verdict row (`metrics._row`, deviations only when measured). */
 export interface EvaluationRow {
   id: string;
   file: string | null;
@@ -55,6 +61,35 @@ export interface EvaluationRow {
   final_time_s?: number;
   reason?: string;
   reference?: EvaluationRowReference;
+  /** Observed rows only — see `EvaluationObservedAggregate`. */
+  subject?: EvaluationSubject;
+  established?: boolean;
+  /** True when the arrival was the fitted threshold crossing, not the last state. */
+  extrapolated?: boolean;
+  /** True when the 95 % interval straddles a gate boundary: verdict undecidable. */
+  marginal?: boolean;
+  lateral_sigma_m?: number;
+  vertical_sigma_m?: number;
+  glidepath_deg?: number;
+  extrapolation_m?: number;
+}
+
+/**
+ * Observed-batch counts (`metrics.evaluate_batch` → `report.observed`).
+ *
+ * `solve_rate` is meaningless for observed data — an observed track trivially
+ * "has states", so it is 1.0 by construction. `established_rate` is the honest
+ * analogue and the UI shows it INSTEAD, never alongside.
+ *
+ * `marginal` counts flights whose gate verdict the data cannot decide: with
+ * altitudes quantised to 25 ft (7.62 m) against a 9.15 m window, the majority of
+ * real approaches land in this bucket, so a bare pass rate overstates itself.
+ */
+export interface EvaluationObservedAggregate {
+  established: number;
+  not_established: number;
+  established_rate: number;
+  marginal: number;
 }
 
 /** The batch observed-comparison aggregate (`metrics._reference_aggregate`). */
@@ -68,7 +103,13 @@ export interface EvaluationReferenceAggregate {
 /** The report dict (`metrics.evaluate_batch` — schema documented there). */
 export interface EvaluationReport {
   thresholds: EvaluationThresholds;
+  /** "mixed" when a batch holds more than one subject; absent on older reports. */
+  subject?: EvaluationSubject | "mixed";
+  /** Present only for observed batches. */
+  observed?: EvaluationObservedAggregate;
   total: number;
+  /** Records that yielded an arrival to grade — differs from `solved` only for observed. */
+  measured?: number;
   solved: number;
   solve_rate: number;
   successful: number;

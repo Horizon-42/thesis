@@ -330,18 +330,36 @@ export default function EvaluationReportWindow({ report, subtitle, onClose }: Pr
 
   // Cards are deliberately NEUTRAL: red/green in this window means exactly one thing —
   // a per-flight gate verdict (see the chart legends) — not an arbitrary rate threshold.
+  //
+  // An OBSERVED batch is labelled differently, and not merely for wording: every
+  // observed track trivially "has states", so its solve rate is 1.0 by construction and
+  // says nothing. The established rate (did the flight fly a fittable, stabilised final
+  // approach?) replaces it rather than joining it.
+  const observed = report.observed;
   const cards: { value: string; label: string }[] = [
-    { value: String(report.total), label: "total trajectories" },
+    { value: String(report.total), label: observed ? "observed flights" : "total trajectories" },
+    observed
+      ? {
+          value: `${observed.established}/${report.total}`,
+          label: `established rate ${formatPct(observed.established_rate)}`,
+        }
+      : {
+          value: `${report.solved}/${report.total}`,
+          label: `solve rate ${formatPct(report.solve_rate)}`,
+        },
     {
-      value: `${report.solved}/${report.total}`,
-      label: `solve rate ${formatPct(report.solve_rate)}`,
-    },
-    {
-      value: `${report.successful}/${report.total}`,
-      label: `success rate ${formatPct(report.success_rate)}`,
+      value: `${report.successful}/${report.measured ?? report.total}`,
+      label: observed ? "inside both gates" : `success rate ${formatPct(report.success_rate)}`,
     },
   ];
-  if (report.success_rate_among_solved != null) {
+  if (observed) {
+    // Stated, never hidden: with 25 ft altitude quantisation against a 9.15 m window,
+    // most real approaches sit within noise of a gate boundary.
+    cards.push({ value: String(observed.marginal), label: "marginal (undecidable)" });
+    if (observed.not_established > 0) {
+      cards.push({ value: String(observed.not_established), label: "not established" });
+    }
+  } else if (report.success_rate_among_solved != null) {
     cards.push({ value: formatPct(report.success_rate_among_solved), label: "success among solved" });
   }
   if (report.final_time_s) {
