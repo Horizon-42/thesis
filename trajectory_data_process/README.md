@@ -46,7 +46,9 @@ download_landings.py           CLI entry point (bulk landings per threshold)
   account lacks it, queries fail with `PERMISSION_DENIED: Access Denied: Cannot
   execute query` (the downloader turns this into a one-line message). Request access
   via the OpenSky Network ([DB guide](https://traffic-viz.github.io/data_sources/opensky_db.html)).
-- **Configure credentials** in `~/.config/pyopensky/settings.conf`:
+- **Configure credentials** in `~/.config/pyopensky/settings.conf` (Linux) or
+  `~/Library/Application Support/pyopensky/settings.conf` (macOS — pyopensky
+  resolves its config dir via platformdirs, so `~/.config` is never consulted there):
 
   ```ini
   [opensky]
