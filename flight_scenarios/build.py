@@ -10,7 +10,6 @@ Orchestration only — it wires the pieces together:
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -50,7 +49,7 @@ def build_scenario(
     assumed, so a scenario cannot be built on the wrong vertical datum no matter which
     loader produced the dict — this bug reached three separate load paths. The conversion
     is idempotent (keyed on ``altitude_source``), so callers that already used
-    :func:`load_observed_flights` pay only a tag check. See ``flight_scenarios/datum.py``.
+    :func:`load_model_arrivals` pay only a tag check. See ``flight_scenarios/datum.py``.
     """
     flight = flight_to_msl(flight)
     aircraft = _resolve_aircraft(flight, aircraft_type)
@@ -64,7 +63,13 @@ def build_scenario(
     target_source = "track_end"
     target = None
     if target_from_threshold:
-        target = threshold_target_state(arr_airport, flight.get("runway"), aircraft, mass_kg=mass)
+        target = threshold_target_state(
+            arr_airport,
+            flight.get("runway"),
+            aircraft,
+            mass_kg=mass,
+            published_target=flight.get("runway_target"),
+        )
         if target is not None:
             target_source = "runway_threshold"
     if target is None:
@@ -84,6 +89,12 @@ def build_scenario(
         "n_samples": len(waypoints),
         "window_s": window_s,
         "target_source": target_source,
+        "threshold_crossing_height_m": (
+            (flight.get("runway_target") or {}).get("threshold_crossing_height_m")
+        ),
+        "published_glidepath_deg": (
+            (flight.get("runway_target") or {}).get("published_glidepath_deg")
+        ),
         # Datum provenance: after flight_to_msl above this is the MSL tag, so a saved
         # scenarios file records which vertical datum it was built on — pre-datum-fix
         # (HAE-era) files carry no such key and are thereby distinguishable.
@@ -92,8 +103,8 @@ def build_scenario(
     return FlightScenario(initial=initial, aircraft=aircraft, aero=aero, source=source, target=target)
 
 
-def build_scenarios_from_czml_input(
-    czml_input: str | Path | list[dict[str, Any]],
+def build_scenarios_from_arrivals(
+    arrivals: str | Path | list[dict[str, Any]],
     aircraft_type: str | None = None,
     *,
     airport: str | None = None,
@@ -101,15 +112,15 @@ def build_scenarios_from_czml_input(
     window_s: float = DEFAULT_WINDOW_S,
     target_from_threshold: bool = False,
 ) -> list[FlightScenario]:
-    """Build a scenario per flight in a CZML-input file (or already-loaded list).
+    """Build a scenario per flight in an arrival manifest (or already-loaded list).
 
-    ``czml_input`` may be a path to a ``*_czml_input_*.json`` / ``*_landings.json`` file,
-    or the parsed list of flight dicts. Each flight's aircraft is resolved from its own
+    ``arrivals`` may be an airport harvest root, ``arrivals/manifest.json``, or an
+    already-loaded list. Each flight's aircraft is resolved from its own
     ``icao24`` (so a mixed-fleet file gets per-flight types); ``aircraft_type`` is the
     fallback when an ``icao24`` can't be resolved. ``airport`` and ``target_from_threshold``
     are forwarded to :func:`build_scenario`.
     """
-    flights = load_observed_flights(czml_input)
+    flights = load_model_arrivals(arrivals)
     return [
         build_scenario(
             flight, aircraft_type, airport=airport, mass_kg=mass_kg, window_s=window_s,
@@ -147,17 +158,22 @@ def _resolve_aircraft(flight: dict[str, Any], fallback_type: str | None):
     )
 
 
-def load_observed_flights(czml_input: str | Path | list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """CZML-input flights, read INTO THE MODELING PLANE: altitudes converted HAE -> MSL.
+def load_model_arrivals(arrivals: str | Path | list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Manifest-rostered arrivals entering the modeling plane: HAE converted to MSL.
 
     Every consumer that turns an observed track into modeling state must come through here
     -- both the scenario builder and ``write_reference_records`` -- because a scenario built
     on MSL and a reference record built on HAE would be 30 m apart while looking identical.
     See ``flight_scenarios/datum.py`` for why the conversion is here and not in the harvest.
     """
-    flights = (
-        json.loads(Path(czml_input).read_text(encoding="utf-8"))
-        if isinstance(czml_input, (str, Path))
-        else czml_input
-    )
+    if isinstance(arrivals, (str, Path)):
+        # Local import keeps the data-plane package from becoming part of
+        # flight_scenarios' import graph. ``harvest.airports`` imports only the datum
+        # conversion below; an eager arrival import here would loop back into the
+        # partially initialized airport module.
+        from trajectory_data_process.harvest.arrivals import load_arrival_flights
+
+        flights = load_arrival_flights(arrivals)
+    else:
+        flights = arrivals
     return flights_to_msl(flights)

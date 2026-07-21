@@ -78,3 +78,48 @@ def test_root_pipeline_can_regenerate_procedure_assets(
     assert "--include-all-rnav" in procedure_cmd
     assert "--include-transitions" in procedure_cmd
     assert procedure_cmd[procedure_cmd.index("--charts-root") + 1] == str(charts_root)
+
+
+def test_harvest_copies_czml_from_forwarded_frontend_data_root(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    pipeline = load_pipeline_module()
+    aeroviz_root = tmp_path / "aeroviz-4d"
+    default_czml = (
+        aeroviz_root / "public" / "data" / "airports" / "KRDU" / "trajectories.czml"
+    )
+    default_czml.parent.mkdir(parents=True)
+    default_czml.write_text("stale default", encoding="utf-8")
+
+    frontend_data = tmp_path / "custom-public-data"
+    generated_czml = frontend_data / "airports" / "KRDU" / "trajectories.czml"
+    generated_czml.parent.mkdir(parents=True)
+    generated_czml.write_text("fresh harvest", encoding="utf-8")
+    requested_czml = tmp_path / "exports" / "KRDU.czml"
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **kwargs) -> None:
+        calls.append(cmd)
+
+    monkeypatch.setattr(pipeline.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        pipeline.sys,
+        "argv",
+        [
+            "run_asd-b_fetch_and_generate.py",
+            "--airport",
+            "KRDU",
+            "--aeroviz-root",
+            str(aeroviz_root),
+            "--frontend-data",
+            str(frontend_data),
+            "--czml-output",
+            str(requested_czml),
+        ],
+    )
+
+    pipeline.main()
+
+    assert requested_czml.read_text(encoding="utf-8") == "fresh harvest"
+    assert calls[0][calls[0].index("--frontend-data") + 1] == str(frontend_data)

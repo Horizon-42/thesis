@@ -1,14 +1,19 @@
-"""End-to-end build wiring: CZML-input flight + aircraft resolution -> FlightScenario."""
+"""End-to-end build wiring: manifest arrival + aircraft -> FlightScenario."""
 
+import json
 from pathlib import Path
 
 import pytest
 
 from aircraft.aircraft_sets import A320
-from flight_scenarios.__main__ import combined_output_name, discover_landings
-from flight_scenarios.build import build_scenario, build_scenarios_from_czml_input
+from flight_scenarios.__main__ import (
+    airport_for_manifest,
+    discover_arrival_manifests,
+    scenario_output_name,
+)
+from flight_scenarios.build import build_scenario, build_scenarios_from_arrivals
 
-# A minimal CZML-input flight (one element of a *_czml_input_*.json / *_landings.json).
+# A minimal model-ready arrival record.
 # icao24 3949ea is a real Air France transponder address -> resolves to B772 via OpenAP.
 FLIGHT = {
     "id": "AFR074",
@@ -56,7 +61,7 @@ def test_build_scenario_raises_when_unresolvable_and_no_fallback():
 
 
 def test_build_scenarios_from_list_resolves_each_flight():
-    scens = build_scenarios_from_czml_input([FLIGHT, FLIGHT])
+    scens = build_scenarios_from_arrivals([FLIGHT, FLIGHT])
     assert len(scens) == 2
     assert all(s.aircraft.code == "B772" for s in scens)
 
@@ -77,39 +82,40 @@ def test_build_scenario_target_from_threshold_falls_back_when_unknown():
     assert scen.source["target_source"] == "track_end"
 
 
-# ── CLI discovery (single file / one airport / all airports) ──────────────────
+# ── CLI discovery (one manifest per airport) ─────────────────────────────────
 
-def _make_landings_tree(root: Path) -> None:
-    (root / "KRDU").mkdir()
-    (root / "KMSY").mkdir()
-    for name in ("KRDU_05L_landings.json", "KRDU_23R_landings.json", "KRDU_combined_czml_input.json"):
-        (root / "KRDU" / name).write_text("[]")
-    (root / "KMSY" / "KMSY_02_landings.json").write_text("[]")
-    (root / "KMSY" / "KMSY_combined_czml_input.json").write_text("[]")
-
-
-def test_discover_landings_single_input():
-    found = discover_landings(input_path="a/b/KRDU_05L_landings.json")
-    assert found == [Path("a/b/KRDU_05L_landings.json")]
+def _make_manifest_tree(root: Path) -> None:
+    for code in ("KRDU", "KMSY"):
+        directory = root / code / "arrivals"
+        directory.mkdir(parents=True)
+        (directory / "manifest.json").write_text(
+            json.dumps({"schema_version": "harvest-arrivals-v1", "airport": code}),
+            encoding="utf-8",
+        )
 
 
-def test_discover_landings_one_airport_excludes_combined(tmp_path):
-    _make_landings_tree(tmp_path)
-    found = discover_landings(airport="KRDU", landings_dir=tmp_path)
-    assert [p.name for p in found] == ["KRDU_05L_landings.json", "KRDU_23R_landings.json"]
+def test_discover_arrival_manifests_single_input(tmp_path):
+    _make_manifest_tree(tmp_path)
+    manifest = tmp_path / "KRDU" / "arrivals" / "manifest.json"
+    assert discover_arrival_manifests(input_path=manifest) == [manifest]
+    assert airport_for_manifest(manifest) == "KRDU"
 
 
-def test_discover_landings_all_airports(tmp_path):
-    _make_landings_tree(tmp_path)
-    found = discover_landings(landings_dir=tmp_path)
-    assert sorted(p.name for p in found) == [
-        "KMSY_02_landings.json",
-        "KRDU_05L_landings.json",
-        "KRDU_23R_landings.json",
+def test_discover_arrival_manifest_for_one_airport(tmp_path):
+    _make_manifest_tree(tmp_path)
+    found = discover_arrival_manifests(airport="krdu", harvest_root=tmp_path)
+    assert found == [tmp_path / "KRDU" / "arrivals" / "manifest.json"]
+
+
+def test_discover_arrival_manifests_for_all_airports(tmp_path):
+    _make_manifest_tree(tmp_path)
+    found = discover_arrival_manifests(harvest_root=tmp_path)
+    assert found == [
+        tmp_path / "KMSY" / "arrivals" / "manifest.json",
+        tmp_path / "KRDU" / "arrivals" / "manifest.json",
     ]
 
 
-def test_combined_output_name_by_mode():
-    assert combined_output_name(airport="KRDU") == "KRDU_combined_scenarios.json"
-    assert combined_output_name() == "all_combined_scenarios.json"
-    assert combined_output_name(input_path="a/b/KRDU_05L_landings.json") == "KRDU_05L_scenarios.json"
+def test_scenario_output_name_distinguishes_target_mode():
+    assert scenario_output_name("KRDU", threshold=False) == "KRDU_arrivals_scenarios.json"
+    assert scenario_output_name("KRDU", threshold=True) == "KRDU_arrivals_threshold_scenarios.json"

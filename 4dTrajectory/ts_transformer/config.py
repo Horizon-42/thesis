@@ -33,7 +33,7 @@ MODELS = ("itransformer", "patchtst")
 # reports.
 #
 # Everything below is sized from the MEASURED duration distribution of the 3747 harvested
-# arrivals (5 airports, `*_arrivals.json`, truncated at the 25 km entry ring):
+# arrivals (5 airports, rostered by `arrivals/manifest.json`, truncated at the 25 km ring):
 #
 #     p5  235 s | p25 271 s | p50 328 s | p75 533 s | p90 607 s | p95 651 s | p99 920 s
 #

@@ -22,7 +22,6 @@ flights is the only honest option, and it is done here rather than left to the c
 from __future__ import annotations
 
 import hashlib
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator, Sequence
@@ -36,6 +35,7 @@ from torch.utils.data import DataLoader, Dataset
 # the SAME function; the split key here and both writers' filename stems cannot drift.
 from flight_scenarios import FlightScenario, build_scenario, flight_key, state_samples_from_track
 from flight_scenarios.datum import flight_to_msl
+from trajectory_data_process.harvest.arrivals import load_arrival_flights
 
 from channels import Frame, channels_from_states, frame_for_state, resample_uniform
 from config import DEFAULT_AIRCRAFT_TYPE, HORIZON_FULL, TSConfig
@@ -99,81 +99,11 @@ class Normalizer:
 
 # ── Loading ──────────────────────────────────────────────────────────────────
 
-# Directory-mode file selection, in precedence order. A harvest directory holds SEVERAL
-# overlapping views of the same flights, and globbing "*.json" over it silently mixes them:
-#
-#   <ICAO>_<RWY>_arrivals.json          truncated at the 25 km entry ring   <- what we train on
-#   <ICAO>_<RWY>_landings.json          the SAME flights, untruncated       <- duplicates
-#   <ICAO>_combined_czml_input.json     all runways merged                  <- duplicates again
-#   <ICAO>_<RWY>_heading_rejected.json  flights REJECTED for bad heading    <- known-bad data
-#   <ICAO>_local_rejected.json          local circuits, not arrivals        <- known-bad data
-#
-# Loading a KRDU directory naively picked up all five: every flight three times over, plus
-# the tracks the harvester had explicitly thrown out. Precedence is first-match-wins, never
-# a mix, and rejected files are excluded outright.
-_DIR_PATTERNS = ("*_arrivals.json", "*_czml_input*.json", "*_landings.json")
-_DIR_EXCLUDE = "_rejected"
-
-
-def select_flight_files(directory: Path) -> tuple[list[Path], str]:
-    """The files to load from a harvest directory, plus the pattern that matched.
-
-    First pattern in :data:`_DIR_PATTERNS` with any match wins; nothing is mixed across
-    patterns. Raises if the directory holds no recognised flight file.
-    """
-    for pattern in _DIR_PATTERNS:
-        matched = sorted(
-            f for f in directory.glob(pattern) if _DIR_EXCLUDE not in f.name
-        )
-        if matched:
-            return matched, pattern
-    raise ValueError(
-        f"no flight files under {directory} — looked for {', '.join(_DIR_PATTERNS)} "
-        f"(excluding *{_DIR_EXCLUDE}*)"
-    )
-
-
 def load_flight_dicts(path: str | Path, *, verbose: bool = True) -> list[dict[str, Any]]:
-    """Flight dicts from one arrivals / czml-input JSON file, or from a harvest directory.
-
-    All of ``*_arrivals.json``, ``*_combined_czml_input.json`` and ``*_czml_input_*.json``
-    are bare JSON arrays of the same flight-dict shape, so one loader covers them. An
-    explicit FILE path is loaded as given — no filtering, the caller chose it. A DIRECTORY
-    goes through :func:`select_flight_files`, and what it picked (and skipped) is printed
-    rather than left implicit, because "silently trained on the rejects" is invisible in a
-    loss curve.
-    """
-    p = Path(path)
-    if p.is_dir():
-        files, pattern = select_flight_files(p)
-        if pattern == "*_landings.json":
-            # Landings are the UNTRUNCATED view — full tracks, not cut at the 25 km entry
-            # ring. Training on them is a different task with a different duration
-            # distribution than the one the window sizes were derived from, so falling
-            # through to them must never be silent.
-            print(f"  WARNING: {p} has no *_arrivals.json — loading UNTRUNCATED landing "
-                  f"tracks. Run trajectory_data_process/build_arrivals.py to produce the "
-                  f"ring-truncated training view.")
-        if verbose:
-            skipped = sorted(
-                f.name for f in p.glob("*.json") if f not in files
-            )
-            print(f"  {p}: {len(files)} file(s) matching {pattern}")
-            if skipped:
-                print(f"    skipped {len(skipped)}: {', '.join(skipped[:4])}"
-                      + (f", … (+{len(skipped) - 4})" if len(skipped) > 4 else ""))
-    else:
-        files = [p]
-
-    flights: list[dict[str, Any]] = []
-    for f in files:
-        payload = json.loads(f.read_text(encoding="utf-8"))
-        if not isinstance(payload, list):
-            raise ValueError(
-                f"{f} is not a flight array — expected a bare JSON list of flight dicts, "
-                f"got {type(payload).__name__}"
-            )
-        flights.extend(payload)
+    """Model-ready flights from the harvest's authoritative arrival manifest."""
+    flights = load_arrival_flights(path)
+    if verbose:
+        print(f"  {path}: {len(flights)} manifest-rostered arrival(s)")
     return flights
 
 
@@ -228,6 +158,18 @@ def build_series(
     report = BuildReport()
 
     for index, flight in enumerate(flights):
+        # Real inputs come through the harvest arrival manifest and must carry the
+        # published CIFP target that made them model-ready. Synthetic fixtures are built
+        # from the static threshold configuration and intentionally have no manifest
+        # metadata, so they retain that explicit alternate path.
+        if flight.get("altitude_source") != "synthetic":
+            target_meta = flight.get("runway_target") or {}
+            if target_meta.get("threshold_crossing_height_m") is None:
+                report.skip("no published runway TCH")
+                continue
+            if target_meta.get("published_glidepath_deg") is None:
+                report.skip("no published runway glidepath")
+                continue
         waypoints = flight.get("waypoints") or []
         if len(waypoints) < 2:
             report.skip("track has fewer than 2 waypoints")

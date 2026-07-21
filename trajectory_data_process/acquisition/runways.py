@@ -3,15 +3,10 @@
 Used to select trajectories by the exact runway threshold an aircraft arrives at,
 rather than by arrival airport alone.
 
-This module is the single source for turning a runways.csv row into LANDING thresholds
-(displaced where the source data says so). Both consumers — ``build_runway_config.py``
-(the runway_thresholds.json generator) and :func:`resolve_runway_threshold` (the
-``download_trajectories.py --runway`` path) — go through :func:`landing_thresholds_from_row`,
-so the two harvest entry points cannot disagree about where a threshold is. They used to:
-the generator learned about displaced thresholds while the resolver kept pavement ends,
-putting the same runway's "threshold" up to 775 m apart (KSJC 30L) between the two paths —
-which also shifted the landing anchor and hence ``landing_time_utc``, the field
-``flight_key`` identity derives from.
+This module is the single source for turning a runways.csv row into landing thresholds
+(displaced where the source says so). ``build_runway_config.py`` uses it to generate
+``runway_thresholds.json``; harvest then loads that canonical config. The old second
+downloader path that resolved thresholds independently has been removed.
 """
 
 from __future__ import annotations

@@ -113,11 +113,11 @@ class SeamTest(unittest.TestCase):
     def test_scenario_builder_goes_through_the_converting_loader(self) -> None:
         import inspect
 
-        from flight_scenarios import load_observed_flights
-        from flight_scenarios.build import build_scenarios_from_czml_input
+        from flight_scenarios import load_model_arrivals
+        from flight_scenarios.build import build_scenarios_from_arrivals
 
-        self.assertIn("load_observed_flights", inspect.getsource(build_scenarios_from_czml_input))
-        self.assertIn("flights_to_msl", inspect.getsource(load_observed_flights))
+        self.assertIn("load_model_arrivals", inspect.getsource(build_scenarios_from_arrivals))
+        self.assertIn("flights_to_msl", inspect.getsource(load_model_arrivals))
 
     def test_single_flight_builder_converts_by_construction(self) -> None:
         """build_scenario must not trust its caller: the bug reached three load paths."""
@@ -148,7 +148,7 @@ class SeamTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
         start = source.index("def write_reference_records")
         body = source[start : source.index("\ndef ", start + 1)]
-        self.assertIn("load_observed_flights", body)
+        self.assertIn("load_model_arrivals", body)
         self.assertNotIn("json.loads(Path(observed_tracks)", body)
 
 

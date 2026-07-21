@@ -262,46 +262,73 @@ def test_windows_never_straddle_two_flights():
         assert anchor < series[s_idx].n_samples
 
 
-def test_directory_load_takes_arrivals_only_and_never_the_rejects(tmp_path):
-    # Regression: a harvest directory holds arrivals, the SAME flights untruncated as
-    # *_landings.json, a *_combined_czml_input.json of all runways, AND the tracks the
-    # harvester rejected for bad heading / local circuits. Globbing "*.json" loaded every
-    # flight three times over plus the known-bad ones — invisible in a loss curve.
-    from dataset import load_flight_dicts, select_flight_files
+def _write_arrival_manifest(root: Path, ids: list[str]) -> Path:
+    from dataset import flight_key
 
-    def write(name, ids):
-        (tmp_path / name).write_text(json.dumps(
-            [{"id": i, "runway": "05L", "waypoints": [[0, -78.8, 35.8, 500.0]]} for i in ids]
-        ), encoding="utf-8")
+    arrivals = root / "arrivals"
+    records = arrivals / "records"
+    records.mkdir(parents=True)
+    roster = []
+    for index, ident in enumerate(ids):
+        flight = {
+            "id": ident,
+            "callsign": ident,
+            "icao24": f"abc{index:03d}",
+            "runway": "05L",
+            "landing_time_utc": f"2026-01-01T00:00:{index:02d}Z",
+            "altitude_source": "opensky_history_geoaltitude_m",
+            "waypoints": [[0.0, -78.8, 35.8, 500.0]],
+        }
+        key = flight_key(flight, index)
+        relative = f"records/{key}.json"
+        (arrivals / relative).write_text(json.dumps(flight), encoding="utf-8")
+        roster.append({"flight_key": key, "file": relative})
+    manifest = arrivals / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": "harvest-arrivals-v1",
+                "airport": "KRDU",
+                "records": roster,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return manifest
 
-    write("KRDU_05L_arrivals.json", ["A", "B"])
-    write("KRDU_23R_arrivals.json", ["C"])
-    write("KRDU_05L_landings.json", ["A", "B"])            # duplicates, untruncated
-    write("KRDU_combined_czml_input.json", ["A", "B", "C"])  # duplicates again
-    write("KRDU_05L_heading_rejected.json", ["X"])         # known-bad
-    write("KRDU_local_rejected.json", ["Y"])               # known-bad
 
-    files, pattern = select_flight_files(tmp_path)
-    assert pattern == "*_arrivals.json"
-    assert [f.name for f in files] == ["KRDU_05L_arrivals.json", "KRDU_23R_arrivals.json"]
+def test_ts_load_uses_only_the_arrival_manifest_roster(tmp_path):
+    # An orphan beside the roster is deliberately ignored: no glob can leak rejected or
+    # stale flights into the train/validation/test split.
+    from dataset import load_flight_dicts
 
-    ids = [f["id"] for f in load_flight_dicts(tmp_path, verbose=False)]
-    assert ids == ["A", "B", "C"]          # each flight once, rejects absent
+    _write_arrival_manifest(tmp_path, ["A", "B", "C"])
+    (tmp_path / "arrivals" / "records" / "orphan.json").write_text(
+        json.dumps({"id": "ORPHAN"}), encoding="utf-8"
+    )
+
+    assert [f["id"] for f in load_flight_dicts(tmp_path, verbose=False)] == ["A", "B", "C"]
 
 
-def test_directory_load_falls_back_when_there_are_no_arrivals(tmp_path):
-    # A czml-input-only directory (pre-build_arrivals) still loads, and the rejects stay out.
-    from dataset import load_flight_dicts, select_flight_files
+def test_ts_load_rejects_duplicate_manifest_identity(tmp_path):
+    from dataset import load_flight_dicts
 
-    for name, ids in (("CYYC_czml_input_20260101.json", ["P"]),
-                      ("CYYC_heading_rejected.json", ["Z"])):
-        (tmp_path / name).write_text(json.dumps(
-            [{"id": i, "runway": "16", "waypoints": [[0, -114.0, 51.0, 900.0]]} for i in ids]
-        ), encoding="utf-8")
+    manifest_path = _write_arrival_manifest(tmp_path, ["A"])
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["records"].append(dict(manifest["records"][0]))
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
-    _files, pattern = select_flight_files(tmp_path)
-    assert pattern == "*_czml_input*.json"
-    assert [f["id"] for f in load_flight_dicts(tmp_path, verbose=False)] == ["P"]
+    with pytest.raises(ValueError, match="duplicate flight_key"):
+        load_flight_dicts(manifest_path, verbose=False)
+
+
+def test_ts_load_rejects_legacy_json_input(tmp_path):
+    from dataset import load_flight_dicts
+
+    legacy = tmp_path / "KRDU_05L_landings.json"
+    legacy.write_text(json.dumps([{"id": "OLD"}]), encoding="utf-8")
+    with pytest.raises(ValueError, match="arrival manifest"):
+        load_flight_dicts(legacy, verbose=False)
 
 
 def test_flight_identity_separates_the_same_callsign_on_different_runways():

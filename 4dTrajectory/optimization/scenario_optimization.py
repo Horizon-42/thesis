@@ -49,7 +49,7 @@ if str(_OPT_DIR) not in sys.path:
 from flight_scenarios import (  # noqa: E402
     FlightScenario,
     flight_key,
-    load_observed_flights,
+    load_model_arrivals,
     load_scenarios,
     state_samples_from_track,
 )
@@ -595,8 +595,8 @@ def write_reference_records(
 ) -> list[Path]:
     """One reference eval record per scenario, from its OBSERVED track.
 
-    ``observed_tracks`` is the CZML-input flight list the scenarios came from
-    (e.g. a landings file). Each scenario's flight is looked up in it by its full
+    ``observed_tracks`` is the harvest arrival manifest the scenarios came from.
+    Each scenario's flight is looked up in it by its full
     identity ``(id, icao24, landing_time_utc)`` — the same key the output
     filenames disambiguate on. The track becomes a reference record in the
     evaluation contract (per-sample kinematics via
@@ -609,7 +609,7 @@ def write_reference_records(
     # Through the SAME loader the scenarios came from: it converts the observed altitudes
     # from ellipsoidal (HAE) to MSL. Reading the file directly here would put the reference
     # record ~30 m below the scenario built from the identical track.
-    flights = load_observed_flights(observed_tracks)
+    flights = load_model_arrivals(observed_tracks)
     by_identity = {
         (f.get("id"), f.get("icao24"), f.get("landing_time_utc")): f for f in flights
     }
@@ -1216,8 +1216,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--reference-tracks", default=None,
-        help="the observed-tracks CZML-input JSON the scenarios came from (e.g. a "
-             "landings file); when given, reference eval records are written FIRST "
+        help="the harvest arrivals/manifest.json the scenarios came from; when given, "
+             "reference eval records are written FIRST "
              "(observed tracks -> <output-dir>/references/) and every eval record "
              "points at its reference via reference_file",
     )

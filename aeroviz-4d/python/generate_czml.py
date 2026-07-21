@@ -424,7 +424,7 @@ def main() -> None:
     input_path = Path(args.input)
     if not input_path.exists():
         print(f"✗ Input file not found: {input_path}")
-        print("  Run trajectory_data_process/download_trajectories.py or run_asd-b_fetch_and_generate.py first.")
+        print("  Run trajectory_data_process/download_landings.py or run_asd-b_fetch_and_generate.py first.")
         raise SystemExit(1)
 
     with open(input_path) as f:

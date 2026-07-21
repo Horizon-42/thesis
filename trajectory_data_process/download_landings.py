@@ -1,142 +1,117 @@
 #!/usr/bin/env python3
-"""Download N historical landing trajectories for every runway threshold.
+"""Batch entry point for the canonical harvest downloader.
 
-Reads the runway-threshold mapping (config/runway_thresholds.json) and, for each
-airport and each threshold, collects ``--count`` landings into a CZML-input file.
-All the work lives in ``landings.py``; this entry point only wires config to disk.
+``python -m trajectory_data_process.harvest`` is the single-airport implementation.
+This file deliberately contains no acquisition, reconstruction, or runway-assignment
+logic; it only expands an airport list and invokes that implementation once per airport.
 
-    python trajectory_data_process/download_landings.py --count 20
-    python trajectory_data_process/download_landings.py --count 30 --airports KRDU KSJC
+Examples::
+
+    python trajectory_data_process/download_landings.py --airports KRDU KSJC --count 200
+    python trajectory_data_process/download_landings.py --count 200  # every configured airport
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 
-if __package__ is None or __package__ == "":  # pragma: no cover - direct execution.
+if __package__ in (None, ""):  # pragma: no cover - direct script execution
     import sys
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from trajectory_data_process.acquisition.opensky_history import install_query_cancel_on_interrupt
-from trajectory_data_process.landings import (
-    DEFAULT_HEADING_TOLERANCE_DEG,
-    check_history_access,
-    download_airport_landings,
-    iter_airport_entries,
-    load_runway_config,
-)
+from trajectory_data_process.harvest.__main__ import main as harvest_main
+
+HERE = Path(__file__).resolve().parent
+DEFAULT_CONFIG = HERE / "config" / "runway_thresholds.json"
+DEFAULT_OUTPUT = HERE / "outputs" / "harvest"
+DEFAULT_CIFP = HERE.parents[0] / "data" / "CIFP" / "CIFP_260319" / "FAACIFP18"
+DEFAULT_FRONTEND_DATA = HERE.parents[0] / "aeroviz-4d" / "public" / "data"
 
 
-def parse_args() -> argparse.Namespace:
-    here = Path(__file__).resolve().parent
-    p = argparse.ArgumentParser(description="Download landing trajectories per runway threshold")
-    p.add_argument("--count", type=int, default=20, help="Landings to collect per runway threshold")
-    p.add_argument("--config", default=str(here / "config" / "runway_thresholds.json"))
-    p.add_argument("--airports", nargs="+", default=None, help="Subset of airport codes (default: all in config)")
-    p.add_argument("--start", default=None, help="Scan backward from this UTC time (ISO, default: now)")
-    p.add_argument("--max-lookback-days", type=float, default=30.0)
-    p.add_argument("--radius-km", type=float, default=30.0,
-                   help="Terminal-area radius around the airport: both the query box AND the "
-                        "radius each kept landing's track is cropped to")
-    p.add_argument("--heading-tolerance-deg", type=float, default=DEFAULT_HEADING_TOLERANCE_DEG,
-                   help="Max approach-direction vs runway-heading error to accept a landing "
-                        "(misaligned ones are saved to *_heading_rejected.json for review)")
-    p.add_argument("--output-root", default=str(here / "outputs" / "landings"))
-    p.add_argument("--overwrite", action="store_true", help="Refetch from scratch instead of resuming existing files")
-    return p.parse_args()
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Harvest ADS-B tracks and derive model-ready arrivals for airports"
+    )
+    parser.add_argument(
+        "--airports", nargs="+", default=None,
+        help="ICAO codes; omit to harvest every airport in runway_thresholds.json",
+    )
+    parser.add_argument("--count", type=int, default=200)
+    parser.add_argument("--start", default=None, help="ISO UTC instant to scan backward from")
+    parser.add_argument("--max-lookback-days", type=float, default=30.0)
+    parser.add_argument("--chunk-hours", type=float, default=6.0)
+    parser.add_argument("--radius-km", type=float, default=30.0)
+    parser.add_argument("--entry-radius-km", type=float, default=25.0)
+    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument("--cifp", type=Path, default=DEFAULT_CIFP)
+    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--frontend-data", type=Path, default=DEFAULT_FRONTEND_DATA)
+    parser.add_argument("--no-cache", action="store_true")
+    parser.add_argument(
+        "--evaluate-only", action="store_true",
+        help="reuse each airport's tracks/manifest.json and rebuild derived outputs",
+    )
+    parser.add_argument("--no-publish", action="store_true")
+    parser.add_argument("--no-czml", action="store_true")
+    parser.add_argument("--multiplier", type=int, default=None)
+    return parser
 
 
-def _existing_flights(path: Path) -> list[dict]:
-    """Load already-downloaded landings, or an empty list."""
-    if not path.exists():
-        return []
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return []
-
-
-def main() -> None:
-    args = parse_args()
-    config = load_runway_config(Path(args.config))
-    start = datetime.fromisoformat(args.start.replace("Z", "+00:00")) if args.start else datetime.now(timezone.utc)
-    output_root = Path(args.output_root)
-    wanted = {a.upper() for a in args.airports} if args.airports else None
-
-    # Cancel the in-flight Trino query on Ctrl-C so it does not linger and eat the
-    # account's query quota.
-    install_query_cancel_on_interrupt()
-
-    entries = [(p, t) for p, t in iter_airport_entries(config) if not wanted or p.code in wanted]
-    if not entries:
-        raise SystemExit("No matching airports in config for the requested --airports.")
-
-    # By default, resume: load existing files and only work airports still short of --count.
-    def landing_path(code: str, ident: str) -> Path:
-        return output_root / code / f"{code}_{ident}_landings.json"
-
-    plans = []
-    for profile, thresholds in entries:
-        preloaded = (
-            {}
-            if args.overwrite
-            else {t.ident: _existing_flights(landing_path(profile.code, t.ident)) for t in thresholds}
+def configured_airports(config_path: Path, requested: list[str] | None) -> list[str]:
+    configured = json.loads(config_path.read_text(encoding="utf-8"))["airports"]
+    available = {code.upper() for code in configured}
+    if requested is None:
+        return sorted(available)
+    wanted = [code.strip().upper() for code in requested]
+    unknown = sorted(set(wanted) - available)
+    if unknown:
+        raise SystemExit(
+            f"airport(s) not present in {config_path}: {', '.join(unknown)}"
         )
-        needs_work = args.overwrite or any(len(preloaded.get(t.ident, [])) < args.count for t in thresholds)
-        plans.append((profile, thresholds, preloaded, needs_work))
+    return wanted
 
-    if not any(needs_work for *_, needs_work in plans):
-        print("[landings] all thresholds already satisfied; nothing to do (use --overwrite to refetch).")
-        return
 
-    first = next(profile for profile, _t, _p, needs in plans if needs)
-    print("[landings] preflight: checking OpenSky history access (one small probe query)...", flush=True)
-    check_history_access(profile=first, reference=start, radius_km=args.radius_km)
-    print("[landings] preflight: access OK, starting download", flush=True)
+def harvest_argv(args: argparse.Namespace, airport: str) -> list[str]:
+    argv = [
+        "--airport", airport,
+        "--count", str(args.count),
+        "--max-lookback-days", str(args.max_lookback_days),
+        "--chunk-hours", str(args.chunk_hours),
+        "--radius-km", str(args.radius_km),
+        "--entry-radius-km", str(args.entry_radius_km),
+        "--config", str(args.config),
+        "--cifp", str(args.cifp),
+        "--output", str(args.output),
+        "--frontend-data", str(args.frontend_data),
+    ]
+    if args.start:
+        argv += ["--start", args.start]
+    if args.multiplier is not None:
+        argv += ["--multiplier", str(args.multiplier)]
+    for enabled, flag in (
+        (args.no_cache, "--no-cache"),
+        (args.evaluate_only, "--evaluate-only"),
+        (args.no_publish, "--no-publish"),
+        (args.no_czml, "--no-czml"),
+    ):
+        if enabled:
+            argv.append(flag)
+    return argv
 
-    summary: dict[str, dict[str, int]] = {}
-    for profile, thresholds, preloaded, needs_work in plans:
-        airport_dir = output_root / profile.code
-        summary[profile.code] = {}
-        if not needs_work:
-            for t in thresholds:
-                summary[profile.code][t.ident] = len(preloaded[t.ident])
-            print(f"[landings] {profile.code}: already complete, skipped (use --overwrite to refetch)")
-            continue
 
-        harvest = download_airport_landings(
-            profile=profile,
-            thresholds=thresholds,
-            count=args.count,
-            start=start,
-            max_lookback_days=args.max_lookback_days,
-            radius_km=args.radius_km,
-            heading_tolerance_deg=args.heading_tolerance_deg,
-            preloaded=None if args.overwrite else preloaded,
-        )
-        airport_dir.mkdir(parents=True, exist_ok=True)
-        for ident, flights in harvest.accepted.items():
-            path = airport_dir / f"{profile.code}_{ident}_landings.json"
-            path.write_text(json.dumps(flights, indent=2), encoding="utf-8")
-            summary[profile.code][ident] = len(flights)
-
-            rejected = harvest.rejected.get(ident, [])
-            note = ""
-            if rejected:
-                rejected_path = airport_dir / f"{profile.code}_{ident}_heading_rejected.json"
-                rejected_path.write_text(json.dumps(rejected, indent=2), encoding="utf-8")
-                note = f"  (+{len(rejected)} heading-rejected -> {rejected_path.name})"
-            print(f"[landings] {profile.code} {ident}: {len(flights)}/{args.count} -> {path}{note}")
-
-    summary_path = output_root / f"summary_{start.strftime('%Y%m%dT%H%M%SZ')}.json"
-    summary_path.parent.mkdir(parents=True, exist_ok=True)
-    summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    print(f"[landings] summary: {summary_path}")
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    airports = configured_airports(args.config, args.airports)
+    for index, airport in enumerate(airports, 1):
+        print(f"\n=== harvest {airport} ({index}/{len(airports)}) ===", flush=True)
+        result = harvest_main(harvest_argv(args, airport))
+        if result:
+            return result
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -19,7 +19,7 @@ WHY HERE AND NOT IN THE HARVEST
 -------------------------------
 The harvest feeds two consumers with opposite requirements:
 
-    *_landings.json (HAE, as the sensor reported)
+    harvest arrivals/manifest.json records (HAE, as the sensor reported)
        |
        +-- CZML -> Cesium      wants HAE  (``aeroviz-4d/src/types/czml.d.ts``: "altitude in
        |                       METERS above WGS84 ellipsoid") -- correct as recorded
@@ -40,7 +40,7 @@ import functools
 import os
 from typing import Any, Iterable, Sequence
 
-# Source tag written by ``trajectory_data_process/processing/czml_export.py``.
+# Source tag written by ``trajectory_data_process.harvest.store``.
 HAE_ALTITUDE_SOURCE = "opensky_history_geoaltitude_m"
 # What this module rewrites it to, so the conversion is visible and non-repeatable.
 MSL_ALTITUDE_SOURCE = "opensky_history_geoaltitude_m_to_msl_egm96"

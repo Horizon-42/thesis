@@ -47,3 +47,23 @@ def test_threshold_target_psi_is_math_enu_not_compass():
 
 def test_threshold_target_unknown_returns_none():
     assert threshold_target_state("KRDU", "99X", A320, mass_kg=66000.0) is None
+
+
+def test_threshold_target_prefers_the_manifest_published_path_point():
+    target = threshold_target_state(
+        "KRDU",
+        "05L",
+        A320,
+        mass_kg=66000.0,
+        published_target={
+            "lat": 1.0,
+            "lon": 2.0,
+            "elevation_msl_m": 100.0,
+            "course_deg": 180.0,
+            "threshold_crossing_height_m": 17.0,
+            "published_glidepath_deg": 3.2,
+        },
+    )
+    assert (target.latitude, target.longitude, target.altitude) == (1.0, 2.0, 117.0)
+    assert target.psi == pytest.approx(math.radians(-90.0))
+    assert target.gamma == pytest.approx(math.radians(-3.2))

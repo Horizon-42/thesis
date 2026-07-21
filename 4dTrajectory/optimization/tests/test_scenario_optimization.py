@@ -258,7 +258,7 @@ def test_write_reference_records_from_observed_tracks(tmp_path):
     # velocity fit, and running them through the observed HAE->MSL conversion would perturb
     # the kinematics this test pins. The conversion itself is covered by
     # flight_scenarios/tests/test_datum.py, including a seam test seat-belting the fact that
-    # write_reference_records reads through load_observed_flights.
+    # write_reference_records reads through load_model_arrivals.
     flight = {"id": "AFR074", "icao24": "ad7f04", "landing_time_utc": "2026-06-18T21:37:36Z",
               "altitude_source": "synthetic", "waypoints": waypoints}
     target = GeodeticState(35.62, -78.5, 1850.0, 100.0, math.pi / 2, -0.1, 60000.0)

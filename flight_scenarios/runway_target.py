@@ -54,6 +54,7 @@ def threshold_target_state(
     aircraft: Aircraft,
     *,
     mass_kg: float,
+    published_target: dict[str, Any] | None = None,
 ) -> GeodeticState | None:
     """A target state at the runway threshold, or ``None`` if the threshold is unknown.
 
@@ -61,19 +62,40 @@ def threshold_target_state(
     aircraft's reference approach speed (Vref); ``psi`` = the runway heading (in the model's
     math-ENU convention); ``gamma`` = the coded glidepath descent (negative).
     """
-    threshold = find_threshold(airport, runway)
-    if threshold is None:
-        return None
+    if published_target is not None:
+        tch = published_target.get("threshold_crossing_height_m")
+        glidepath = published_target.get("published_glidepath_deg")
+        if tch is None or glidepath is None:
+            return None
+        lat = float(published_target["lat"])
+        lon = float(published_target["lon"])
+        altitude = float(published_target["elevation_msl_m"]) + float(tch)
+        course_deg = float(published_target["course_deg"])
+        glidepath_deg = float(glidepath)
+    else:
+        # Kept for synthetic/in-memory scenarios. Canonical harvested arrivals always
+        # carry ``runway_target`` decoded from the CIFP.
+        threshold = find_threshold(airport, runway)
+        if threshold is None:
+            return None
+        lat = float(threshold["lat"])
+        lon = float(threshold["lon"])
+        altitude = (
+            float(threshold["elevation_m"])
+            + aircraft.approach.threshold_crossing_height_m
+        )
+        course_deg = float(threshold["heading_deg"])
+        glidepath_deg = aircraft.approach.glide_angle_deg
     # ``heading_deg`` is a compass bearing (0 = N, clockwise); the modeling layer's psi is the
     # math-ENU heading (0 = E, CCW toward N), so psi = 90deg - bearing (then wrap to [-pi, pi]).
-    psi = math.radians(90.0 - float(threshold["heading_deg"]))
+    psi = math.radians(90.0 - course_deg)
     psi = (psi + math.pi) % (2.0 * math.pi) - math.pi  # wrap to [-pi, pi]
     return GeodeticState(
-        latitude=float(threshold["lat"]),
-        longitude=float(threshold["lon"]),
-        altitude=float(threshold["elevation_m"]) + aircraft.approach.threshold_crossing_height_m,
+        latitude=lat,
+        longitude=lon,
+        altitude=altitude,
         V=aircraft.approach.reference_speed_ms,
         psi=psi,
-        gamma=math.radians(-aircraft.approach.glide_angle_deg),
+        gamma=math.radians(-glidepath_deg),
         m=mass_kg,
     )

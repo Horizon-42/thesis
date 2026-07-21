@@ -7,16 +7,16 @@ the FULL training chain for ``4dTrajectory/ts_transformer`` — both models
 README's tables compare — per airport, shelling out to the existing CLIs.
 
 Dataset generation and splitting are INSIDE the train step, by design: ``train``
-builds the series from the harvest dir (``dataset.select_flight_files`` picks the
-``*_arrivals.json`` pattern and excludes ``*_rejected*``), converts the datum,
-derives the train/val/test split by ``flight_key`` and persists it in the
-checkpoint — ``predict --split test`` then reads the split back from the
-checkpoint, so the model is only ever graded on flights it never saw. There is
-no separate dataset artifact to build first.
+builds the series strictly from ``harvest/<ICAO>/arrivals/manifest.json``, converts
+the datum, derives the train/val/test split by ``flight_key`` and persists it in the
+checkpoint. ``predict --split test`` reads the split back from the checkpoint, so the
+model is only graded on flights it never saw. There is no glob fallback and no separate
+dataset artifact to build first.
 
 Steps per airport × model × horizon-mode ("cell"):
 
-  1. ts train      landings/<ICAO>/  ─►  4dTrajectory/outputs/<ICAO>/ts_<model>_<mode>/
+  1. ts train      arrivals/manifest.json
+                                     ─►  4dTrajectory/outputs/<ICAO>/ts_<model>_<mode>/
                                           {checkpoint.pt, history.json}
   2. ts predict    checkpoint + the checkpoint's test split
                                      ─►  4dTrajectory/outputs/<ICAO>/ts_pred_<model>_<mode>/
@@ -54,7 +54,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent
 
 # ── Default I/O roots (same layout as run_scenario_pipeline.py) ────────────────
-LANDINGS_DIR = REPO_ROOT / "trajectory_data_process" / "outputs" / "landings"
+HARVEST_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
 OPT_OUTPUTS_ROOT = REPO_ROOT / "4dTrajectory" / "outputs"
 COMPARISON_AIRPORTS_ROOT = REPO_ROOT / "aeroviz-4d" / "public" / "data" / "airports"
 TS_SCRIPT = REPO_ROOT / "4dTrajectory" / "ts_transformer" / "__main__.py"
@@ -74,21 +74,19 @@ MODEL_LABEL = {"itransformer": "iTransformer", "patchtst": "PatchTST"}
 OUTPUT_KINDS = ("czml", "eval")
 
 
-def arrivals_files(airport: str) -> list[Path]:
-    airport_dir = LANDINGS_DIR / airport
-    return sorted(airport_dir.glob("*_arrivals.json")) if airport_dir.exists() else []
+def arrival_manifest_path(airport: str) -> Path:
+    return HARVEST_ROOT / airport.upper() / "arrivals" / "manifest.json"
 
 
 def discover_k_airports() -> list[str]:
-    """Every K-prefixed airport under the landings dir with harvested arrivals
-    (the training input). US ICAO codes start with 'K'."""
-    if not LANDINGS_DIR.exists():
+    """Every K-prefixed airport with a model-ready arrival manifest."""
+    if not HARVEST_ROOT.exists():
         return []
     return sorted(
         child.name.upper()
-        for child in LANDINGS_DIR.iterdir()
+        for child in HARVEST_ROOT.iterdir()
         if child.is_dir() and child.name.upper().startswith("K")
-        and arrivals_files(child.name.upper())
+        and arrival_manifest_path(child.name).exists()
     )
 
 
@@ -114,7 +112,7 @@ class Plan:
         # gate targets, which the ts CLI warns about).
         self.aircraft_type = aircraft_type
 
-        self.data_dir = LANDINGS_DIR / self.airport
+        self.data_manifest = arrival_manifest_path(self.airport)
         self.train_dir = OPT_OUTPUTS_ROOT / self.airport / f"ts_{model}_{mode}"
         self.checkpoint = self.train_dir / "checkpoint.pt"
         self.pred_dir = OPT_OUTPUTS_ROOT / self.airport / f"ts_pred_{model}_{mode}"
@@ -139,7 +137,7 @@ class Plan:
         if not reuse_checkpoint:
             train_cmd = [
                 py, str(TS_SCRIPT), "train",
-                "--data", str(self.data_dir),
+                "--data", str(self.data_manifest),
                 "--airport", self.airport,
                 "--model", self.model,
                 "--horizon-mode", self.mode,
@@ -158,7 +156,7 @@ class Plan:
         predict_cmd = [
             py, str(TS_SCRIPT), "predict",
             "--checkpoint", str(self.checkpoint),
-            "--data", str(self.data_dir),
+            "--data", str(self.data_manifest),
             "--airport", self.airport,
             "--output-dir", str(self.pred_dir),
             "--split", self.split,
@@ -204,14 +202,14 @@ def run_cell(plan: Plan, *, dry_run: bool, skip_train: bool) -> bool:
     mode = "reuse checkpoint" if reuse else "train from scratch"
     print(f"\n━━ {plan.airport}  [{plan.model} · {plan.mode}]  ·  {mode}  "
           f"·  outputs: {', '.join(plan.outputs)}")
-    print(f"   data      : {plan.data_dir}")
+    print(f"   data      : {plan.data_manifest}")
     print(f"   training  : {plan.train_dir}")
     print(f"   prediction: {plan.pred_dir}")
     if "czml" in plan.outputs:
         print(f"   comparison: {plan.comparison_dir}")
 
-    if not arrivals_files(plan.airport):
-        print(f"   ⚠ skip: no *_arrivals.json under {plan.data_dir}")
+    if not plan.data_manifest.exists():
+        print(f"   ⚠ skip: missing {plan.data_manifest}")
         return False
     if skip_train and not reuse:
         print("   (no existing checkpoint found → training from scratch)")
@@ -298,7 +296,9 @@ def main() -> None:
     else:
         airports = discover_k_airports()
         if not airports:
-            parser.error(f"no K-prefixed airports with *_arrivals.json under {LANDINGS_DIR}")
+            parser.error(
+                f"no K-prefixed airports with arrivals/manifest.json under {HARVEST_ROOT}"
+            )
         print(f"no --airport given → running {len(airports)} K-airport(s): "
               f"{', '.join(airports)}")
 

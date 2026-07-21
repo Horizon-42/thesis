@@ -11,7 +11,7 @@ also lists the four routes for adding dynamics later) before changing that.
 
     # train iTransformer on KRDU arrivals, short horizon (chained at predict time)
     python $TS train \
-        --data trajectory_data_process/outputs/landings/KRDU \
+        --data trajectory_data_process/outputs/harvest/KRDU/arrivals/manifest.json \
         --airport KRDU --model itransformer --horizon-mode window \
         --output-dir 4dTrajectory/outputs/KRDU/ts_itransformer_window
 
@@ -61,7 +61,7 @@ from train import load_checkpoint, train  # noqa: E402
 
 def _add_data_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--data", required=True,
-                        help="arrivals/czml-input JSON file, or a directory of them")
+                        help="airport harvest directory or arrivals/manifest.json")
     parser.add_argument("--airport", default=None,
                         help="ICAO code, when the flight dicts do not carry arr_airport")
     parser.add_argument("--aircraft-type", default=None,

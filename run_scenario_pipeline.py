@@ -9,16 +9,12 @@ it — the two tails are selectable with ``--outputs``.
 
 Steps, chained by shelling out to the existing CLIs (each already tested):
 
-  0. build_arrivals                 landings/<ICAO>/<ICAO>_*_landings.json
-       (only when the combined         ─► <ICAO>_*_arrivals.json (arrival-segment cut)
-        input is missing)              ─► <ICAO>_combined_czml_input.json
-                                       ─► the frontend's per-runway + combined CZML
-                                    download_landings.py writes one RAW file per runway
-                                    threshold; this is the step that truncates each track
-                                    to its arrival segment and merges the runways into the
-                                    combined czml-input every later step reads. Run once
-                                    per airport (not per category).
-  1. flight_scenarios               landings/<ICAO>/<ICAO>_combined_czml_input.json
+  0b. trajectory_data_process.harvest --evaluate-only   (unless --skip-observed)
+                                    tracks/manifest.json
+                                    ─► arrivals/manifest.json (assigned, LPV-targeted,
+                                        final terminal entry → threshold)
+                                    ─► observed CZML + evaluation report
+  1. flight_scenarios               arrivals/manifest.json
                                     ─► flight_scenarios/outputs/<ICAO>_…_scenarios.json
   2. scenario_optimization          scenarios + observed tracks ─► 4dTrajectory/outputs/<ICAO>/<category>/
        (--reference-tracks, always)    references/*_reference_eval.json   (written FIRST —
@@ -30,15 +26,6 @@ Steps, chained by shelling out to the existing CLIs (each already tested):
        (always — the CZML tail consumes its per-flight verdicts + batch metrics)
   4. [eval] python -m evaluation.visualize
                                     eval records ─► <opt_dir>/evaluation_report.html
-  0b. trajectory_data_process.harvest --evaluate-only   (unless --skip-observed)
-                                    harvest tracks/ ─► observed CZML layer
-                                       (public/data/airports/<ICAO>/{trajectories.czml,
-                                        landings/*.czml, landings/index.json})
-                                    ─► approach/evaluation_report.json
-                                    ─► comparison/observed/ + categories.json
-                                    The MEASURED baseline: no download, no optimization.
-                                    Its per-flight verdicts colour the observed layer,
-                                    so tracks and verdicts stay one harvest.
   5. [czml] build_scenario_comparison_czml (--evaluation-report)
                                     summary + report ─► aeroviz-4d/public/data/airports/<ICAO>/
                                                  comparison/<category>/{*.czml, index, categories.json}
@@ -57,9 +44,8 @@ airport — the full category sweep the frontend's comparison picker offers.
 
 Airport selection:
   * --airport <ICAO>  runs that one airport.
-  * (omitted)         runs EVERY K-prefixed airport that has landings data — either an
-                      already-built combined czml-input or raw *_landings.json step 0
-                      can build one from.
+  * (omitted)         runs every K-prefixed airport with a harvest track or arrival
+                      manifest. The observed stage promotes tracks into model-ready arrivals.
 
 --skip-optimize reuses an already-computed optimization: if this airport+category
 already has a summary.json, steps 1–2 are skipped and only the selected tails
@@ -78,8 +64,6 @@ Usage:
     python run_scenario_pipeline.py --airport KRDU --outputs eval
     # rebuild only the comparison CZML from an existing optimization:
     python run_scenario_pipeline.py --airport KRDU --outputs czml --skip-optimize
-    # force the arrivals rebuild (e.g. after a fresh download or a new entry ring):
-    python run_scenario_pipeline.py --airport KRDU --rebuild-arrivals --entry-radius-km 20
     # every K-airport, ADS-B target, preview without running:
     python run_scenario_pipeline.py --target-type adsb --dry-run
 """
@@ -94,13 +78,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent
 
 # ── Default I/O roots (per the current examples; not CLI inputs) ───────────────
-LANDINGS_DIR = REPO_ROOT / "trajectory_data_process" / "outputs" / "landings"
 SCENARIOS_DIR = REPO_ROOT / "flight_scenarios" / "outputs"
 OPT_OUTPUTS_ROOT = REPO_ROOT / "4dTrajectory" / "outputs"
 COMPARISON_AIRPORTS_ROOT = REPO_ROOT / "aeroviz-4d" / "public" / "data" / "airports"
 OPT_SCRIPT = REPO_ROOT / "4dTrajectory" / "optimization" / "scenario_optimization.py"
 CZML_SCRIPT = REPO_ROOT / "aeroviz-4d" / "python" / "build_scenario_comparison_czml.py"
-ARRIVALS_SCRIPT = REPO_ROOT / "trajectory_data_process" / "build_arrivals.py"
 HARVEST_TRACKS_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
 
 TARGET_TYPES = ("adsb", "runway")
@@ -130,31 +112,23 @@ def category_key(target_type: str, with_constraint: bool) -> str:
     return f"{base}_cons" if with_constraint else base
 
 
-def czml_input_name(airport: str) -> str:
-    return f"{airport}_combined_czml_input.json"
-
-
-def combined_input_path(airport: str) -> Path:
-    """The combined czml-input every step from 1 on reads (step 0 builds it)."""
-    return LANDINGS_DIR / airport / czml_input_name(airport)
-
-
-def raw_landing_files(airport: str) -> list[Path]:
-    """The raw per-runway-threshold downloads step 0 builds the arrivals from."""
-    return sorted((LANDINGS_DIR / airport).glob(f"{airport}_*_landings.json"))
+def arrival_manifest_path(airport: str) -> Path:
+    return HARVEST_TRACKS_ROOT / airport / "arrivals" / "manifest.json"
 
 
 def discover_k_airports() -> list[str]:
-    """Every K-prefixed airport under the landings dir the pipeline can run: it either
-    has the combined CZML-input already, or has the raw *_landings.json that step 0
-    builds it from. US ICAO codes start with 'K'."""
-    if not LANDINGS_DIR.exists():
+    """Every K-airport the pipeline can run now or promote via evaluate-only."""
+    if not HARVEST_TRACKS_ROOT.exists():
         return []
-    airports: list[str] = []
-    for child in sorted(LANDINGS_DIR.iterdir()):
+    airports = []
+    for child in sorted(HARVEST_TRACKS_ROOT.iterdir()):
         code = child.name.upper()
-        if child.is_dir() and code.startswith("K") \
-                and (combined_input_path(code).exists() or raw_landing_files(code)):
+        tracks = child / "tracks" / "manifest.json"
+        if (
+            child.is_dir()
+            and code.startswith("K")
+            and (arrival_manifest_path(code).exists() or tracks.exists())
+        ):
             airports.append(code)
     return airports
 
@@ -193,8 +167,8 @@ class Plan:
         self.label = _CATEGORY_LABELS[self.category]
 
         tag = "_threshold" if self.threshold else ""
-        self.czml_input = combined_input_path(self.airport)
-        self.scenarios = SCENARIOS_DIR / f"{self.airport}_combined_czml_input{tag}_scenarios.json"
+        self.arrivals_manifest = arrival_manifest_path(self.airport)
+        self.scenarios = SCENARIOS_DIR / f"{self.airport}_arrivals{tag}_scenarios.json"
         self.opt_dir = OPT_OUTPUTS_ROOT / self.airport / self.category
         self.summary = self.opt_dir / "summary.json"
         self.comparison_dir = (
@@ -215,8 +189,7 @@ class Plan:
         if not reuse:
             scenarios_cmd = [
                 py, "-m", "flight_scenarios",
-                "--input", str(self.czml_input),
-                "--combined",
+                "--input", str(self.arrivals_manifest),
                 "--output", str(self.scenarios),
             ]
             if self.threshold:
@@ -232,7 +205,7 @@ class Plan:
                 py, str(OPT_SCRIPT),
                 "--scenarios", str(self.scenarios),
                 "--output-dir", str(self.opt_dir),
-                "--reference-tracks", str(self.czml_input),
+                "--reference-tracks", str(self.arrivals_manifest),
                 "--jobs", str(self.jobs),
                 "--fitting", self.fitting,
             ]
@@ -308,8 +281,7 @@ def run_observed(airport: str, *, dry_run: bool) -> bool:
     verdict colours painted on the observed layer come from exactly this report — so the
     tracks and their verdicts stay one harvest.
 
-    Skipped (not an error) when the airport has no harvest yet: its observed layer still
-    comes from the old build_arrivals path until it is re-downloaded.
+    Skipped (not an error) when the airport has no harvest yet.
     """
     manifest = HARVEST_TRACKS_ROOT / airport / "tracks" / "manifest.json"
     if not manifest.exists():
@@ -326,56 +298,6 @@ def run_observed(airport: str, *, dry_run: bool) -> bool:
     return True
 
 
-def ensure_arrivals(
-    airport: str,
-    modes: tuple[tuple[str, bool], ...],
-    *,
-    dry_run: bool,
-    skip_optimize: bool,
-    rebuild: bool,
-    entry_radius_km: float | None,
-) -> bool:
-    """Step 0, run ONCE per airport (the arrivals dataset is category-independent).
-
-    ``download_landings.py`` leaves only raw ``<ICAO>_<RWY>_landings.json``; the combined
-    czml-input steps 1–2 consume is built by ``build_arrivals.py`` (arrival-segment cut +
-    per-runway merge). Builds it when it is missing (or ``rebuild``), skips the build when
-    every mode is reusing an existing optimization (nothing reads the input then), and
-    returns False when the airport has no landings data at all.
-    """
-    combined = combined_input_path(airport)
-    reuse_all = skip_optimize and all(
-        Plan(airport, target_type, with_constraint, ()).optimization_exists()
-        for target_type, with_constraint in modes
-    )
-    # every mode reuses its optimization (the combined input is not read), or the
-    # arrivals are already built — either way there is nothing to build here.
-    if reuse_all or (combined.exists() and not rebuild):
-        if entry_radius_km is not None:
-            print(f"   ⚠ {airport}: --entry-radius-km ignored — step 0 is not rebuilding "
-                  f"the arrivals (pass --rebuild-arrivals to apply it)")
-        return True
-
-    if not raw_landing_files(airport):
-        what = "rebuild the arrivals" if combined.exists() else f"build {combined.name}"
-        print(f"\n━━ {airport}")
-        print(f"   ⚠ skip: no {airport}_*_landings.json to {what} from — run "
-              f"trajectory_data_process/download_landings.py first")
-        return False
-
-    cmd = [sys.executable, str(ARRIVALS_SCRIPT), "--airport", airport]
-    if entry_radius_km is not None:
-        cmd += ["--entry-radius-km", str(entry_radius_km)]
-    why = "forced rebuild" if combined.exists() else f"missing {combined.name}"
-    print(f"\n━━ {airport}  ·  step 0 arrivals ({why})")
-    if dry_run:
-        print(f"   [0/0 arrivals] {' '.join(cmd)}")
-        return True
-    print(f"\n=== [{airport} · 0 arrivals] ===\n{' '.join(cmd)}", flush=True)
-    subprocess.run(cmd, cwd=REPO_ROOT, check=True)
-    return True
-
-
 def run_for_airport(
     airport: str,
     target_type: str,
@@ -384,7 +306,7 @@ def run_for_airport(
     *,
     dry_run: bool,
     skip_optimize: bool,
-    arrivals_pending: bool = False,
+    input_will_exist: bool = False,
     jobs: int = 0,
     fitting: str = "hs",
     state_substeps: int | None = None,
@@ -394,8 +316,7 @@ def run_for_airport(
     """Run (or preview) the pipeline for one airport. Returns True if it ran /
     would run, False if it was skipped (missing input and nothing to reuse).
 
-    ``arrivals_pending`` = step 0 was previewed but not executed (--dry-run), so the
-    combined czml-input is legitimately not on disk yet."""
+    The arrival manifest is the only data-plane input; no legacy landing-file fallback."""
     plan = Plan(airport, target_type, with_constraint, outputs, jobs=jobs, fitting=fitting,
                 state_substeps=state_substeps, n_segments=n_segments,
                 n_seg_per_phase=n_seg_per_phase)
@@ -412,12 +333,10 @@ def run_for_airport(
         print(f"   report    : {plan.report}")
 
     if not reuse:
-        # ensure_arrivals has already guaranteed the input exists or built it (under
-        # --dry-run it was only previewed, hence arrivals_pending). What is left here is
-        # the real failure: step 0 ran and produced nothing (every runway empty, or every
-        # track a local circuit) — that stays loud.
-        if not plan.czml_input.exists() and not arrivals_pending:
-            print(f"   ⚠ skip: missing input {plan.czml_input}")
+        # The manifest is the data-plane contract. Missing means the harvest/evaluation
+        # stage did not produce a model-ready roster; there is no glob fallback.
+        if not plan.arrivals_manifest.exists() and not (dry_run and input_will_exist):
+            print(f"   ⚠ skip: missing input {plan.arrivals_manifest}")
             return False
         if skip_optimize:
             print("   (no existing optimization found → running from scratch)")
@@ -451,7 +370,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--airport", default=None,
-        help="airport ICAO; OMIT to run every K-prefixed airport that has landings data",
+        help="airport ICAO; omit to run every K-prefixed airport with a harvest manifest",
     )
     parser.add_argument(
         "--target-type", choices=TARGET_TYPES, default=None,
@@ -499,17 +418,6 @@ def main() -> None:
              "All write into the same category dir — a run overwrites the previous batch",
     )
     parser.add_argument(
-        "--rebuild-arrivals", action="store_true",
-        help="re-run step 0 (build_arrivals) even when the combined czml-input already "
-             "exists — use after a fresh download or a changed --entry-radius-km",
-    )
-    parser.add_argument(
-        "--entry-radius-km", type=float, default=None, metavar="KM",
-        help="terminal-entry ring for step 0's arrival-segment cut (build_arrivals "
-             "--entry-radius-km); omit for its default. Only affects a run that actually "
-             "builds the arrivals (see --rebuild-arrivals)",
-    )
-    parser.add_argument(
         "--skip-observed", action="store_true",
         help="skip the observed-baseline stage (re-judge harvested tracks, render the "
              "observed CZML layer, publish the 'observed' comparison category). That "
@@ -550,10 +458,9 @@ def main() -> None:
         airports = discover_k_airports()
         if not airports:
             parser.error(
-                f"no K-prefixed airports with landings data under {LANDINGS_DIR} — an "
-                f"airport needs either <ICAO>_combined_czml_input.json or the raw "
-                f"<ICAO>_<RWY>_landings.json step 0 builds it from "
-                f"(run trajectory_data_process/download_landings.py first)"
+                f"no K-prefixed airports with tracks/manifest.json or "
+                f"arrivals/manifest.json under {HARVEST_TRACKS_ROOT} — run "
+                "trajectory_data_process/download_landings.py first"
             )
         print(f"no --airport given → running {len(airports)} K-airport(s): "
               f"{', '.join(airports)}")
@@ -565,21 +472,15 @@ def main() -> None:
         # it is the measured reference every modelled category is read against, and it
         # is what colours the observed layer. Runs before the categories so the frontend
         # has a baseline even if a solve later fails.
+        observed_scheduled = False
         if not args.skip_observed:
-            run_observed(airport, dry_run=args.dry_run)
-        # Step 0 is per AIRPORT, not per category: all three modes read the same
-        # combined czml-input, so it is built (at most) once here.
-        if not ensure_arrivals(
-            airport, tuple(modes), dry_run=args.dry_run,
-            skip_optimize=args.skip_optimize, rebuild=args.rebuild_arrivals,
-            entry_radius_km=args.entry_radius_km,
-        ):
-            continue
+            observed_scheduled = run_observed(airport, dry_run=args.dry_run)
         for target_type, with_constraint in modes:
             if run_for_airport(
                 airport, target_type, with_constraint, tuple(args.outputs),
                 dry_run=args.dry_run, skip_optimize=args.skip_optimize,
-                arrivals_pending=args.dry_run, jobs=args.jobs,
+                input_will_exist=args.dry_run and observed_scheduled,
+                jobs=args.jobs,
                 fitting=args.fitting_type,
                 state_substeps=args.state_substeps,
                 n_segments=args.n_segments,

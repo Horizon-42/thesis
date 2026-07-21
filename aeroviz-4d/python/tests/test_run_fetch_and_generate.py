@@ -1,6 +1,8 @@
-from pathlib import Path
 import importlib.util
 import sys
+from pathlib import Path
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -14,15 +16,30 @@ assert spec.loader is not None
 runner_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner_module)
 
-_airport_output_dir = runner_module._airport_output_dir
-_default_czml_output = runner_module._default_czml_output
+parse_args = runner_module.parse_args
 
 
-def test_airport_output_dir_is_airport_scoped(tmp_path):
-    output_dir = _airport_output_dir(tmp_path, "CYVR")
-    assert output_dir == tmp_path / "cyvr"
+def test_frontend_data_is_parsed_locally_while_harvest_options_are_forwarded(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frontend_data = tmp_path / "public-data"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_asd-b_fetch_and_generate.py",
+            "--airport",
+            "KRDU",
+            "--frontend-data",
+            str(frontend_data),
+            "--count",
+            "25",
+        ],
+    )
 
+    args, passthrough = parse_args()
 
-def test_default_czml_output_is_airport_scoped(tmp_path):
-    output_path = _default_czml_output(tmp_path, "krdu")
-    assert output_path == tmp_path / "public" / "data" / "airports" / "KRDU" / "trajectories.czml"
+    assert args.airport == "KRDU"
+    assert args.frontend_data == str(frontend_data)
+    assert passthrough == ["--count", "25"]
