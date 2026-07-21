@@ -20,7 +20,7 @@ AeroViz-4D: Airport 4D trajectory and terrain digital-twin visualization system 
 - **4dTrajectory/optimization/** — Optimizers, constraints, batch tooling
 - **4dTrajectory/ts_transformer/** — Learned trajectory prediction (vendored iTransformer + PatchTST, torch)
 - **aeroviz_backend/** — Python HTTP backend (simulation / optimization / dynamics-comparison)
-- **run_scenario_pipeline.py** — Batch runner: scenarios → optimize → CZML comparison + evaluation
+- **run_scenario_pipeline.py** — Batch runner: arrivals (step 0, only when the combined czml-input is missing) → scenarios → optimize → CZML comparison + evaluation
 
 ## Build & Dev Commands
 

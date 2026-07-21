@@ -24,6 +24,7 @@ from trajectory_data_process.harvest.observed import (
     load_observed_records,
     write_observed_records,
 )
+from trajectory_data_process.harvest.publish import publish_observed_report
 from trajectory_data_process.harvest.runner import HarvestPlan, harvest_airport
 from trajectory_data_process.harvest.store import HarvestPaths, read_manifest
 
@@ -31,6 +32,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = REPO_ROOT / "trajectory_data_process/config/runway_thresholds.json"
 DEFAULT_OUTPUT = REPO_ROOT / "trajectory_data_process/outputs/harvest"
 DEFAULT_CIFP = REPO_ROOT / "data/CIFP/CIFP_260319/FAACIFP18"
+DEFAULT_FRONTEND_DATA = REPO_ROOT / "aeroviz-4d/public/data"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -49,6 +51,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--evaluate-only", action="store_true",
                         help="skip the download; rebuild approach/ from the stored tracks")
     parser.add_argument("--no-cache", action="store_true", help="bypass the history query cache")
+    parser.add_argument("--frontend-data", type=Path, default=DEFAULT_FRONTEND_DATA,
+                        help="publish the report into this public/data tree as the "
+                             "'observed' comparison category")
+    parser.add_argument("--no-publish", action="store_true",
+                        help="skip publishing to the frontend")
     return parser
 
 
@@ -81,6 +88,12 @@ def main(argv: list[str] | None = None) -> int:
     records = load_observed_records(paths)
     report = evaluate_batch(records)
     (paths.approach / REPORT_NAME).write_text(json.dumps(report, indent=1), encoding="utf-8")
+
+    if not args.no_publish:
+        published = publish_observed_report(
+            report, frontend_data_root=args.frontend_data, airport=args.airport
+        )
+        print(f"[harvest] published observed category -> {published}")
 
     _print_digest(args.airport, manifest, summary, report)
     return 0

@@ -12,6 +12,7 @@
 
 import { useApp, type WorkbenchMode } from "../context/AppContext";
 import ControlPanel from "./ControlPanel";
+import type { ObservedVerdictState } from "../hooks/useObservedVerdictColors";
 import FlightTable from "./FlightTable";
 import OptimizationSummary from "./OptimizationSummary";
 import PilotPanel from "./PilotPanel";
@@ -36,9 +37,15 @@ interface WorkbenchLeftDockProps {
   flightIds: string[];
   /** Per-flight duration + initial ground speed for the flight list. */
   flightSummaries: Record<string, ObservedFlightSummary>;
+  /** Gate-verdict tally for the plain observed tracks (ControlPanel's legend). */
+  observedVerdicts?: ObservedVerdictState;
 }
 
-export default function WorkbenchLeftDock({ flightIds, flightSummaries }: WorkbenchLeftDockProps) {
+export default function WorkbenchLeftDock({
+  flightIds,
+  flightSummaries,
+  observedVerdicts,
+}: WorkbenchLeftDockProps) {
   const { mode, setMode } = useApp();
 
   if (mode === "fly" || mode === "optimize" || mode === "compare") {
@@ -55,7 +62,7 @@ export default function WorkbenchLeftDock({ flightIds, flightSummaries }: Workbe
   // observe
   return (
     <div className="workbench-left-dock">
-      <ControlPanel />
+      <ControlPanel observedVerdicts={observedVerdicts} />
       <FlightTable flightIds={flightIds} flightSummaries={flightSummaries} />
       <OptimizationSummary />
     </div>

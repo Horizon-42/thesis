@@ -2,7 +2,7 @@
  * sampleTrajectories.ts
  * ---------------------
  * Pure helpers for "show only a random subset of trajectories" — used by both the
- * normal trajectory layer (sample flight entities) and the optimizer-comparison layer
+ * normal trajectory layer (sample flight entities) and the prediction-comparison layer
  * (sample flight groups from the comparison index, then load only the CZML files those
  * groups live in). Kept side-effect-free so the selection logic is unit-testable.
  */

@@ -3,7 +3,7 @@
  * ----------------------
  * Shared orientation helper for time-dynamic entities whose CZML carries position
  * only (no orientation) — used by the dynamics-comparison playback and the
- * optimizer-comparison trajectory layer to point an aircraft model down its path.
+ * prediction-comparison trajectory layer to point an aircraft model down its path.
  */
 
 import * as Cesium from "cesium";

@@ -61,6 +61,11 @@ export interface EvaluationRow {
   final_time_s?: number;
   reason?: string;
   reference?: EvaluationRowReference;
+  /**
+   * Canonical flight identity (`flight_scenarios.identity.flight_key`) and the ONLY
+   * safe join key to a rendered track: `id` is the callsign and is not unique.
+   */
+  flight_key?: string;
   /** Observed rows only — see `EvaluationObservedAggregate`. */
   subject?: EvaluationSubject;
   established?: boolean;

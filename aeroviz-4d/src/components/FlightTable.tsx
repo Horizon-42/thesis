@@ -5,7 +5,7 @@
  * flight's callsign (the entity NAME — the entity id is the full flight_key and stays the
  * row key / selection / lookup identity) plus facts read off its track (initial ground
  * speed V, total flight time) and, from the optimizer, its aircraft mass. When the
- * Optimizer comparison is on, a fourth column adds the optimized final time for the
+ * Prediction comparison is on, a fourth column adds the optimized final time for the
  * selected category, in the optimizer "results" colour (blue). Namesake flights show the
  * same callsign on two rows — the row tooltip carries the full identity.
  * Clicking a row tracks that flight in the Cesium viewer.

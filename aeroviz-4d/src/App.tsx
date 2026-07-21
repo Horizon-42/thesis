@@ -28,6 +28,7 @@ import { useApp } from "./context/AppContext";
 import { planObservedTracks } from "./data/observedTracks";
 import { useCzmlLoader } from "./hooks/useCzmlLoader";
 import { useComparisonTrajectoryLayer } from "./hooks/useComparisonTrajectoryLayer";
+import { useObservedVerdictColors } from "./hooks/useObservedVerdictColors";
 import { useEffect, useState } from "react";
 
 function FlightApp() {
@@ -35,6 +36,7 @@ function FlightApp() {
     activeAirportCode,
     selectedRunway,
     trajectoryComparison,
+    trajectoryComparisonCategory,
     mode,
     proceduresOpen,
   } = useApp();
@@ -49,6 +51,12 @@ function FlightApp() {
   });
   const { flightIds, flightSummaries, warning, error } = useCzmlLoader(observedFileUrl, observedVisible);
   useComparisonTrajectoryLayer();
+  // Colour the plain observed tracks by their gate verdict. Only when they are the
+  // thing on screen — with the comparison on, its own kind colours own the scene.
+  const observedVerdicts = useObservedVerdictColors(
+    trajectoryComparisonCategory,
+    observedVisible && !trajectoryComparison,
+  );
   const czmlStatus = error ?? warning;
 
   return (
@@ -59,7 +67,13 @@ function FlightApp() {
       {/* Layer 1: the workbench shell — top context bar + a per-task left dock over the
           overlay host (clicks fall through to the globe; each dock re-enables them). */}
       <WorkbenchShell
-        left={<WorkbenchLeftDock flightIds={flightIds} flightSummaries={flightSummaries} />}
+        left={
+          <WorkbenchLeftDock
+            flightIds={flightIds}
+            flightSummaries={flightSummaries}
+            observedVerdicts={observedVerdicts}
+          />
+        }
         right={
           <WorkbenchRightInspector>
             <HUD />

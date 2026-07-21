@@ -1,7 +1,7 @@
 /**
  * useComparisonTrajectoryLayer.ts
  * -------------------------------
- * Loads the optimizer-comparison trajectories (three coloured paths per flight:
+ * Loads the prediction-comparison trajectories (three coloured paths per flight:
  * reference / optimizer / simulator) when the Trajectories layer is in "comparison"
  * mode. It is index-driven so it never loads every (large) per-runway CZML:
  *

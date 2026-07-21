@@ -143,7 +143,7 @@ interface AirportSessionState {
   setAirport: (airport: AirportConfig | null) => void;
 }
 
-/** The three coloured trajectories in an optimizer comparison. */
+/** The three coloured trajectories in a prediction comparison. */
 /**
  * A comparison entity's role. `optimizer`/`simulator` are the two halves of an optimizer
  * run (the NLP's plan and its true-dynamics replay); `predicted` is a learned forecast,
@@ -170,7 +170,7 @@ interface FlightSessionState {
   optimizedTrajectoryDataSource: Cesium.CzmlDataSource | null;
   setOptimizedTrajectoryDataSource: (dataSource: Cesium.CzmlDataSource | null) => void;
 
-  /** When true, the Trajectories layer shows the 3-colour optimizer comparison instead
+  /** When true, the Trajectories layer shows the 3-colour prediction comparison instead
    *  of the observed tracks (driven by the same runway selection). */
   trajectoryComparison: boolean;
   setTrajectoryComparison: (enabled: boolean) => void;

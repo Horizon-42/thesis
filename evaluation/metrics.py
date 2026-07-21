@@ -98,6 +98,7 @@ class TrajectoryEvaluation:
     subject: str = DEFAULT_SUBJECT
     established: bool | None = None
     marginal: bool = False
+    flight_key: str | None = None
 
 
 def evaluate_record(
@@ -122,7 +123,7 @@ def evaluate_record(
         return TrajectoryEvaluation(
             record_id, file, solved=False, success=False,
             deviation=None, violations=("unsolved",), reason=record.reason,
-            subject=subject,
+            subject=subject, flight_key=record.source.get("flight_key"),
         )
 
     outcome = arrival_deviation(record, criteria=criteria)
@@ -133,6 +134,7 @@ def evaluate_record(
             record_id, file, solved=True, success=False,
             deviation=None, violations=("not_established",), reason=outcome.reason,
             subject=subject, established=False,
+            flight_key=record.source.get("flight_key"),
         )
 
     deviation = outcome.deviation
@@ -156,6 +158,7 @@ def evaluate_record(
         deviation=deviation, violations=tuple(violations), reason=None,
         subject=subject, established=outcome.established,
         marginal=_is_marginal(deviation, thresholds),
+        flight_key=record.source.get("flight_key"),
     )
 
 
@@ -338,6 +341,12 @@ def _row(evaluation: TrajectoryEvaluation) -> dict[str, Any]:
         "success": evaluation.success,
         "violations": list(evaluation.violations),
     }
+    if evaluation.flight_key is not None:
+        # The join key a consumer needs to match this verdict to a rendered track. `id`
+        # is the callsign and is NOT unique (552 distinct callsigns across 996 KRDU
+        # arrivals), so a UI that joined on it would swap verdicts between namesakes --
+        # which it has done before.
+        row["flight_key"] = evaluation.flight_key
     if evaluation.subject != DEFAULT_SUBJECT:
         row["subject"] = evaluation.subject
     if evaluation.established is not None:

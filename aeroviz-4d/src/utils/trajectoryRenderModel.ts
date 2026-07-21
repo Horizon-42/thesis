@@ -4,7 +4,7 @@
  * Pure helpers that decide HOW the (potentially ~1000) trajectory entities render,
  * so the load hooks stay thin and the policy stays unit-testable.
  *
- * Rendering policy (the same for observed tracks and the optimizer comparison):
+ * Rendering policy (the same for observed tracks and the prediction comparison):
  *   • every SHOWN trajectory draws as a uniform-width coloured path;
  *   • only a capped SUBSET also carries an aircraft glTF model (drawing ~1000 models
  *     is what makes the scene lag), with glTF animation OFF;
@@ -22,7 +22,7 @@ import type { ComparisonKind } from "../context/AppContext";
 export const TRAJECTORY_PATH_WIDTH = 2;
 
 /**
- * The single source of truth for the optimizer-comparison kind colours. Both the legend
+ * The single source of truth for the prediction-comparison kind colours. Both the legend
  * swatches (ControlPanel) and the rendered path/label colours (useComparisonTrajectoryLayer)
  * read this, so they can never drift. The CZML bakes its own colours in, but they vary by
  * category and don't necessarily match the legend, so the frontend overrides each opt/sim

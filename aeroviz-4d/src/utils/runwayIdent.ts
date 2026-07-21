@@ -5,7 +5,7 @@
  * that keys off a runway can speak one language.
  *
  * The app sources runways in two spellings:
- *   • landings manifests / optimizer-comparison groups → bare ("05L", "32")
+ *   • landings manifests / prediction-comparison groups → bare ("05L", "32")
  *   • CIFP procedure render bundles                     → "RW"-prefixed ("RW05L")
  *
  * `normalizeRunwayIdent` collapses both to the canonical "RW"-prefixed form, and

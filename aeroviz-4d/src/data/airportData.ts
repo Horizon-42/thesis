@@ -73,7 +73,7 @@ export function airportLandingsRunwayUrl(airportCode: string, runway: string): s
   return airportDataUrl(code, `landings/${code}_${runway.toUpperCase()}.czml`);
 }
 
-// ── Optimizer-comparison trajectories (three-coloured: reference/optimizer/simulator) ─────
+// ── Prediction-comparison trajectories (three-coloured: reference/optimizer/simulator) ───
 //
 // Produced by `aeroviz-4d/python/build_scenario_comparison_czml.py` into
 // `<airport>/comparison/`: one `comparison_<ICAO>_<RWY>.czml` per runway plus a single
@@ -108,6 +108,14 @@ export function airportComparisonCzmlUrl(
 ): string {
   return `${airportComparisonRootUrl(airportCode)}/${categoryDir}/${czmlFile}`;
 }
+
+/**
+ * The measured-baseline category (`trajectory_data_process/harvest/publish.py`).
+ * Report-only — it ships no CZML, because the flown track it describes is already the
+ * observed layer on screen. Named here so the frontend's default-selection and the
+ * publisher cannot drift.
+ */
+export const OBSERVED_CATEGORY_KEY = "observed";
 
 /** One optimization category, as listed in `comparison/categories.json`. */
 export interface ComparisonCategory {

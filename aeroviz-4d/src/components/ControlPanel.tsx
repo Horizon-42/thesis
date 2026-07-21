@@ -10,7 +10,14 @@
  */
 
 import { useApp, type ComparisonKind } from "../context/AppContext";
+import type { ObservedVerdictState } from "../hooks/useObservedVerdictColors";
+import {
+  OBSERVED_VERDICT_COLORS,
+  OBSERVED_VERDICT_HINTS,
+  OBSERVED_VERDICT_LABELS,
+} from "../utils/observedVerdictColors";
 import { useComparisonCategories } from "../hooks/useComparisonCategories";
+import { OBSERVED_CATEGORY_KEY } from "../data/airportData";
 import { useForcedProcedureDisplay } from "../hooks/useForcedProcedureDisplay";
 import { COMPARISON_KIND_COLORS, COMPARISON_KIND_ALPHA } from "../utils/trajectoryRenderModel";
 import ApproachViewToggle from "./ApproachViewToggle";
@@ -36,7 +43,23 @@ const COMPARISON_KINDS: Array<{ kind: ComparisonKind; label: string }> = [
   { kind: "lookback", label: "Predictor input" },
 ];
 
-export default function ControlPanel() {
+interface ControlPanelProps {
+  /**
+   * Gate-verdict tally for the plain observed tracks. Optional and defaulted: it drives
+   * a legend only, so the panel stays constructible (and testable) without it.
+   */
+  observedVerdicts?: ObservedVerdictState;
+}
+
+const NO_VERDICTS: ObservedVerdictState = {
+  counts: null,
+  matched: 0,
+  total: 0,
+  loading: false,
+  missing: false,
+};
+
+export default function ControlPanel({ observedVerdicts = NO_VERDICTS }: ControlPanelProps) {
   const {
     layers,
     toggleLayer,
@@ -53,14 +76,23 @@ export default function ControlPanel() {
   } = useApp();
   const { categories: comparisonCategories } = useComparisonCategories(activeAirportCode);
 
-  // Default the comparison category to the first available, and keep it valid as airports change.
+  // Default the comparison category, and keep it valid as airports change.
+  //
+  // OBSERVED FIRST when it exists: it is the measured baseline every modelled category
+  // is judged against, and it is what colours the plain observed tracks. Alphabetically
+  // "asdb" sorts ahead of it, and defaulting there would open on the category whose
+  // target IS the last observed sample — a 0 m deviation and a 100 % pass rate for every
+  // flight, which says nothing at all.
   useEffect(() => {
     if (comparisonCategories.length === 0) {
       if (trajectoryComparisonCategory !== null) setTrajectoryComparisonCategory(null);
       return;
     }
     const stillValid = comparisonCategories.some((c) => c.dir === trajectoryComparisonCategory);
-    if (!stillValid) setTrajectoryComparisonCategory(comparisonCategories[0].dir);
+    if (stillValid) return;
+    const preferred =
+      comparisonCategories.find((c) => c.key === OBSERVED_CATEGORY_KEY) ?? comparisonCategories[0];
+    setTrajectoryComparisonCategory(preferred.dir);
   }, [comparisonCategories, trajectoryComparisonCategory, setTrajectoryComparisonCategory]);
 
   // ── Constraint-scoped procedure display (drive & restore) ────────────────────
@@ -107,13 +139,43 @@ export default function ControlPanel() {
 
         {layers.trajectories ? (
           <div className="control-panel-trajectory-options" aria-label="Trajectory options">
+            {observedVerdicts.counts ? (
+              <div className="control-panel-verdict-legend" aria-label="Approach verdict legend">
+                <div className="control-panel-verdict-title">
+                  Approach verdict (FAA 8260.58D gates at the threshold)
+                </div>
+                {(["pass", "fail", "undecided"] as const).map((verdict) => (
+                  <div key={verdict} className="control-panel-verdict-row">
+                    <span
+                      className="control-panel-verdict-swatch"
+                      style={{ background: OBSERVED_VERDICT_COLORS[verdict] }}
+                      aria-hidden="true"
+                    />
+                    <span className="control-panel-verdict-label">
+                      {OBSERVED_VERDICT_LABELS[verdict]}
+                      <strong>{observedVerdicts.counts?.[verdict] ?? 0}</strong>
+                    </span>
+                    <span className="control-panel-verdict-hint">
+                      {OBSERVED_VERDICT_HINTS[verdict]}
+                    </span>
+                  </div>
+                ))}
+                {observedVerdicts.matched < observedVerdicts.total ? (
+                  <div className="control-panel-verdict-note">
+                    {observedVerdicts.total - observedVerdicts.matched} of {observedVerdicts.total}{" "}
+                    tracks have no verdict in this report and keep their original colour — the
+                    tracks and the report were most likely produced by different harvests.
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <label>
               <input
                 type="checkbox"
                 checked={trajectoryComparison}
                 onChange={(event) => setTrajectoryComparison(event.target.checked)}
               />
-              Optimizer comparison (3-colour)
+              Prediction comparison (3-colour)
             </label>
             {trajectoryComparison ? (
               comparisonCategories.length > 0 ? (

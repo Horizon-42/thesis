@@ -15,7 +15,7 @@
  *     profile in Optimize/Fly would hijack the optimized playback's clock and make
  *     that track vanish — so we simply don't load it there.)
  *   • painted on the globe ONLY in Observe with no comparison — the 3-colour
- *     optimizer comparison hides the plain tracks in favour of its own source.
+ *     prediction comparison hides the plain tracks in favour of its own source.
  */
 
 import { airportDataUrl, airportLandingsRunwayUrl } from "./airportData";

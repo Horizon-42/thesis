@@ -28,6 +28,8 @@ from datetime import datetime, timezone
 
 from final_approach import Assignment, LandingScreen, SegmentFit, assign_runway
 
+from flight_scenarios.identity import flight_key
+
 from trajectory_data_process.harvest.airports import Airport
 from trajectory_data_process.harvest.tracks import Track
 
@@ -56,13 +58,27 @@ class ClassifiedTrack:
     def flight_key(self) -> str:
         """``<callsign>_<runway>_<icao24>_<landingtime>`` -- unique by the last two.
 
-        The callsign and runway are in the name for readability only. Unassigned tracks
-        substitute their bucket for the runway and their track end for the landing time,
-        so every bucket can be written to one flat namespace without collisions.
+        Delegates to ``flight_scenarios.identity.flight_key`` rather than formatting the
+        parts here. That function is the canonical identity: the observed CZML's entity
+        ids, the optimizer's record filenames, the ts split keys and the comparison
+        builder's reference lookup all derive from it, and it is pinned to a shared test
+        vector precisely so no second implementation can drift from it. A hand-rolled
+        copy here would be the third, and the join it feeds (verdict -> painted track) is
+        exactly the kind that fails silently -- every flight simply comes out unmatched.
+
+        Unassigned tracks substitute their bucket for the runway and their track end for
+        the landing time, so every bucket writes into one flat namespace without
+        collisions.
         """
-        callsign = (self.track.callsign or self.track.icao24).replace(" ", "")[:16]
-        when = self.landing_time_utc or _iso(self.track.end_s)
-        return f"{callsign}_{self.runway or self.outcome}_{self.track.icao24}_{_compact(when)}"
+        return flight_key(
+            {
+                "id": (self.track.callsign or self.track.icao24).replace(" ", "")[:16],
+                "runway": self.runway or self.outcome,
+                "icao24": self.track.icao24,
+                "landing_time_utc": self.landing_time_utc or _iso(self.track.end_s),
+            },
+            index=0,
+        )
 
 
 def classify_track(
@@ -111,5 +127,3 @@ def _iso(time_s: float) -> str:
     return datetime.fromtimestamp(time_s, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _compact(iso_time: str) -> str:
-    return iso_time.replace("-", "").replace(":", "")
