@@ -41,6 +41,7 @@ class ClassifiedTrack:
     track: Track
     assignment: Assignment
     landing_time_utc: str | None
+    landing_sample_index: int | None
 
     @property
     def outcome(self) -> str:
@@ -95,10 +96,16 @@ def classify_track(
     """
     points = [_track_point(s) for s in track.samples]
     assignment = assign_runway(points, airport.frames("hae"), screen=screen)
+    landing_sample_index = _landing_sample_index(track, airport, assignment)
     return ClassifiedTrack(
         track=track,
         assignment=assignment,
-        landing_time_utc=_landing_time(track, airport, assignment),
+        landing_time_utc=(
+            _iso(track.samples[landing_sample_index].time_s)
+            if landing_sample_index is not None
+            else None
+        ),
+        landing_sample_index=landing_sample_index,
     )
 
 
@@ -114,16 +121,19 @@ def _track_point(sample):
     return TrackPoint(lat=sample.lat, lon=sample.lon, alt_m=sample.alt_hae_m)
 
 
-def _landing_time(track: Track, airport: Airport, assignment: Assignment) -> str | None:
-    """When the aircraft passed closest to the runway it was assigned to."""
+def _landing_sample_index(
+    track: Track, airport: Airport, assignment: Assignment
+) -> int | None:
+    """Sample closest to the assigned threshold; the measured arrival endpoint."""
     if assignment.runway is None:
         return None
     frame = airport.runway(assignment.runway).frame("hae")
-    closest = min(track.samples, key=lambda s: frame.distance_m(_track_point(s)))
-    return _iso(closest.time_s)
+    return min(
+        range(len(track.samples)),
+        key=lambda index: frame.distance_m(_track_point(track.samples[index])),
+    )
 
 
 def _iso(time_s: float) -> str:
     return datetime.fromtimestamp(time_s, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
 

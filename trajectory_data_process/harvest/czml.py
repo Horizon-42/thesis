@@ -26,8 +26,8 @@ feeds the modeling plane — converting here would push the viewer 33 m off.
 RENDERING IS DELEGATED, not reimplemented: the CZML is built by
 ``aeroviz-4d/python/generate_czml.py`` exactly as the old pipeline built it, so entity
 ids, packet shape and clock handling cannot drift between the two. It is invoked as a
-subprocess for the same reason ``build_arrivals.py`` does — that tree is standalone
-frontend tooling and must not be imported from the modeling side.
+subprocess because that tree is standalone frontend tooling and must not be imported
+from the modeling side.
 """
 
 from __future__ import annotations

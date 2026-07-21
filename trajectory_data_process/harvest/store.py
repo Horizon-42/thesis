@@ -104,6 +104,7 @@ def track_record(classified: ClassifiedTrack) -> dict[str, Any]:
         "outcome": classified.outcome,
         "runway": classified.runway,
         "landing_time_utc": classified.landing_time_utc,
+        "landing_sample_index": classified.landing_sample_index,
         "start_time_utc": _iso(track.start_s),
         "duration_s": round(track.end_s - track.start_s, 3),
         "max_sample_gap_s": round(track.max_gap_s, 3),
@@ -157,6 +158,7 @@ def write_tracks(
                 "icao24": item.track.icao24,
                 "callsign": item.track.callsign,
                 "landing_time_utc": item.landing_time_utc,
+                "landing_sample_index": item.landing_sample_index,
             }
         )
 

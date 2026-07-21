@@ -9,7 +9,7 @@ Three vertical references meet at a runway threshold and none of them is optiona
   * the geoid undulation N between them is about -33 m over the continental US.
 
 The harvest keeps tracks in HAE, faithful to the sensor, because the CZML the viewer
-consumes is ellipsoidal (see ``processing/czml_export.py``). The modeling plane needs
+consumes is ellipsoidal (see ``harvest/czml.py``). The modeling plane needs
 MSL. So a runway must be able to present itself in EITHER datum, and the choice must be
 explicit at every call site -- a silent mix is a 33 m error that looks like nothing.
 

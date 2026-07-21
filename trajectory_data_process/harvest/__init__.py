@@ -10,7 +10,9 @@ Pipeline order, and each stage's single responsibility::
       |
     store      measured tracks + manifest                            (store.py)
       |
-    arrival    fitted crossings, MSL, judged                         (evaluation/arrival.py)
+    arrivals   assigned + published path + final-entry crop, HAE     (arrivals.py)
+      |
+    observed   fitted crossings, MSL, judged                         (observed.py)
 
 Two properties this package exists to guarantee:
 
@@ -19,26 +21,29 @@ double-assignment is unrepresentable rather than guarded against. The predecesso
 guard was correct and still shipped artifacts where 72.7% of KSJC's landings sat in two
 runways' files.
 
-**Measured and inferred stay apart.** ``tracks/`` holds what the sensors said (HAE, as
-broadcast, no model). ``approach/`` holds what a fit inferred (MSL, extrapolated to a
-threshold the receivers never saw). The gap between them is 325 m of missing final
-approach, which is precisely why they must not be read as the same kind of thing.
+**Measured and inferred stay apart.** ``tracks/`` and its model-ready ``arrivals/`` view
+hold measured HAE samples; ``approach/`` holds what a fit inferred in MSL. The gap between
+the last measured sample and the inferred crossing is precisely why they must not be read
+as the same kind of thing.
 """
 
 from __future__ import annotations
 
+from importlib import import_module
+from typing import Any
+
 from trajectory_data_process.harvest.airports import Airport, Datum, Runway, load_airport
+from trajectory_data_process.harvest.arrivals import (
+    load_arrival_flights,
+    resolve_arrival_manifest,
+    write_arrival_records,
+)
 from trajectory_data_process.harvest.cifp import PathPoint, read_path_points
 from trajectory_data_process.harvest.czml import RenderedObserved, render_observed_czml
 from trajectory_data_process.harvest.classify import (
     ClassifiedTrack,
     classify_track,
     classify_tracks,
-)
-from trajectory_data_process.harvest.runner import (
-    HarvestPlan,
-    HarvestResult,
-    harvest_airport,
 )
 from trajectory_data_process.harvest.store import (
     HarvestPaths,
@@ -49,11 +54,32 @@ from trajectory_data_process.harvest.store import (
 )
 from trajectory_data_process.harvest.tracks import Sample, Track, reconstruct_tracks
 
+_RUNNER_EXPORTS = frozenset({"HarvestPlan", "HarvestResult", "harvest_airport"})
+
+
+def __getattr__(name: str) -> Any:
+    """Load acquisition-only exports only when a caller actually requests them.
+
+    Importing any ``harvest.*`` submodule executes this package initializer first.  The
+    runner imports the OpenSky dataframe adapter (and therefore pandas), while manifest
+    readers such as the TS loader need none of that acquisition stack.  Keeping these
+    three convenience exports lazy preserves ``from ...harvest import HarvestPlan``
+    without making pandas an import-time dependency of every harvest consumer.
+    """
+    if name not in _RUNNER_EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module("trajectory_data_process.harvest.runner"), name)
+    globals()[name] = value
+    return value
+
 __all__ = [
     "Airport",
     "Runway",
     "Datum",
     "load_airport",
+    "write_arrival_records",
+    "load_arrival_flights",
+    "resolve_arrival_manifest",
     "PathPoint",
     "read_path_points",
     "Sample",

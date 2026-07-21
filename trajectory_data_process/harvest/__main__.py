@@ -3,10 +3,9 @@
     python -m trajectory_data_process.harvest --airport KRDU --count 200
     python -m trajectory_data_process.harvest --airport KRDU --evaluate-only
 
-Two stages, separately runnable, because they cost very differently: ``tracks/`` is
-re-derived only by re-downloading, while ``approach/`` is a pure recomputation that any
-change to the fit window, the established criteria or the TCH source invalidates.
-``--evaluate-only`` rebuilds the second from the first.
+The measured ``tracks/`` roster is re-derived only by downloading. ``arrivals/`` and
+``approach/`` are pure derived views, so ``--evaluate-only`` rebuilds both from the stored
+track manifest after a crop, CIFP, fit, or criteria change.
 """
 
 from __future__ import annotations
@@ -18,7 +17,10 @@ from pathlib import Path
 
 from evaluation.metrics import evaluate_batch
 
+from trajectory_data_process.acquisition.opensky_history import install_query_cancel_on_interrupt
+from trajectory_data_process.arrival_segment import ENTRY_RADIUS_KM
 from trajectory_data_process.harvest.airports import load_airport
+from trajectory_data_process.harvest.arrivals import arrival_manifest_path, write_arrival_records
 from trajectory_data_process.harvest.observed import (
     REPORT_NAME,
     load_observed_records,
@@ -45,12 +47,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-lookback-days", type=float, default=30.0)
     parser.add_argument("--chunk-hours", type=float, default=6.0)
     parser.add_argument("--radius-km", type=float, default=30.0)
+    parser.add_argument("--entry-radius-km", type=float, default=ENTRY_RADIUS_KM,
+                        help="terminal-entry radius for the model-ready arrival dataset")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--cifp", type=Path, default=DEFAULT_CIFP,
                         help="ARINC 424 CIFP file supplying per-runway published TCH")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--evaluate-only", action="store_true",
-                        help="skip the download; rebuild approach/ from the stored tracks")
+                        help="skip download; rebuild arrivals/, approach/, and publication")
     parser.add_argument("--no-cache", action="store_true", help="bypass the history query cache")
     parser.add_argument("--frontend-data", type=Path, default=DEFAULT_FRONTEND_DATA,
                         help="publish the report into this public/data tree as the "
@@ -59,18 +63,27 @@ def build_parser() -> argparse.ArgumentParser:
                         help="skip publishing to the frontend")
     parser.add_argument("--no-czml", action="store_true",
                         help="skip rendering the observed CZML layer (report only)")
+    parser.add_argument("--multiplier", type=int, default=None,
+                        help="optional CZML clock multiplier")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    airport = load_airport(args.airport, config_file=args.config, cifp_file=args.cifp)
-    paths = HarvestPaths(root=args.output, code=args.airport)
+    if not 0.0 < args.entry_radius_km < args.radius_km:
+        raise SystemExit(
+            f"--entry-radius-km must be in (0, --radius-km), got "
+            f"{args.entry_radius_km:g} vs {args.radius_km:g}"
+        )
+    code = args.airport.upper()
+    airport = load_airport(code, config_file=args.config, cifp_file=args.cifp)
+    paths = HarvestPaths(root=args.output, code=code)
 
     if args.evaluate_only:
         manifest = read_manifest(paths)
         print(f"[harvest] reusing stored tracks: {manifest['counts']}")
     else:
+        install_query_cancel_on_interrupt()
         result = harvest_airport(
             airport,
             paths,
@@ -87,23 +100,33 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[harvest] {args.airport}: {manifest['counts']} over "
               f"{result.chunks_fetched} chunks")
 
+    arrivals = write_arrival_records(
+        airport, paths, entry_radius_km=args.entry_radius_km
+    )
+    print(
+        f"[harvest] model-ready arrivals: {arrivals['counts']} -> "
+        f"{arrival_manifest_path(paths)}"
+    )
+
     summary = write_observed_records(airport, paths)
     records = load_observed_records(paths)
     report = evaluate_batch(records)
     (paths.approach / REPORT_NAME).write_text(json.dumps(report, indent=1), encoding="utf-8")
 
     if not args.no_czml:
-        rendered = render_observed_czml(paths, frontend_data_root=args.frontend_data)
+        rendered = render_observed_czml(
+            paths, frontend_data_root=args.frontend_data, multiplier=args.multiplier
+        )
         print(f"[harvest] observed CZML: {rendered.flights} flights over "
               f"{len(rendered.runway_czml)} runway(s) -> {rendered.combined_czml}")
 
     if not args.no_publish:
         published = publish_observed_report(
-            report, frontend_data_root=args.frontend_data, airport=args.airport
+            report, frontend_data_root=args.frontend_data, airport=code
         )
         print(f"[harvest] published observed category -> {published}")
 
-    _print_digest(args.airport, manifest, summary, report)
+    _print_digest(code, manifest, summary, report)
     return 0
 
 
