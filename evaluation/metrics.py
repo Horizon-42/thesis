@@ -28,6 +28,13 @@ from typing import Any, Sequence
 
 from geokit import haversine_m
 
+from evaluation.arrival import (
+    DEFAULT_SUBJECT,
+    ArrivalDeviation,
+    EstablishedCriteria,
+    arrival_deviation,
+    subject_of,
+)
 from evaluation.records import TrajectoryRecord
 from evaluation.reference import (
     ReferenceComparison,
@@ -65,38 +72,70 @@ def final_state_deviation(record: TrajectoryRecord) -> FinalStateDeviation:
 
 @dataclass(frozen=True)
 class TrajectoryEvaluation:
-    """One record's verdict: solved? within the regulation gates?
+    """One record's verdict: did it arrive, and inside the regulation gates?
 
     ``violations`` holds one human-readable string per failed check (empty =
-    success; exactly ``("unsolved",)`` for unsolved records). ``deviation`` is
-    None iff unsolved; ``reason`` is the solver failure (unsolved only).
+    success; exactly ``("unsolved",)`` for unsolved records, ``("not_established",)``
+    for an observed track with no measurable arrival). ``deviation`` is None iff there
+    is no arrival to measure; ``reason`` says why (solver failure, or which established
+    criterion was unmet).
+
+    ``established`` is None for subjects where the notion does not apply (a solve either
+    reaches its target or does not exist). ``marginal`` is True when the arrival's 95%
+    confidence interval straddles a gate boundary — i.e. the data cannot decide the
+    verdict. It is always False for a computed trajectory, which has no measurement
+    uncertainty, and on real observed data it is the MAJORITY case: a bare pass rate
+    over 25 ft-quantised altitudes and a 9.15 m window claims more than it knows.
     """
 
     record_id: str
     file: str | None
     solved: bool
     success: bool
-    deviation: FinalStateDeviation | None
+    deviation: ArrivalDeviation | None
     violations: tuple[str, ...]
     reason: str | None
+    subject: str = DEFAULT_SUBJECT
+    established: bool | None = None
+    marginal: bool = False
 
 
 def evaluate_record(
     record: TrajectoryRecord,
     thresholds: DeviationThresholds = DeviationThresholds(),
+    *,
+    criteria: EstablishedCriteria = EstablishedCriteria(),
 ) -> TrajectoryEvaluation:
-    """Judge one trajectory: unsolved fails outright; solved must pass both gates."""
+    """Judge one trajectory against the gates, at the arrival its subject defines.
+
+    The arrival event is dispatched by ``arrival.arrival_deviation``: a solve or a
+    prediction is measured at ``states[-1]``, an observation at its fitted, extrapolated
+    threshold crossing. See ``arrival.py`` for why those are not the same event.
+    """
     record_id = str(
         record.source.get("id")
         or (record.path.stem if record.path is not None else "trajectory")
     )
     file = record.path.name if record.path is not None else None
+    subject = subject_of(record)
     if not record.solved:
         return TrajectoryEvaluation(
             record_id, file, solved=False, success=False,
             deviation=None, violations=("unsolved",), reason=record.reason,
+            subject=subject,
         )
-    deviation = final_state_deviation(record)
+
+    outcome = arrival_deviation(record, criteria=criteria)
+    if outcome.deviation is None:
+        # An observed track with no measurable arrival. Counted as its own bucket, never
+        # dropped and never extrapolated anyway.
+        return TrajectoryEvaluation(
+            record_id, file, solved=True, success=False,
+            deviation=None, violations=("not_established",), reason=outcome.reason,
+            subject=subject, established=False,
+        )
+
+    deviation = outcome.deviation
     violations: list[str] = []
     if deviation.lateral_m > thresholds.lateral_max_m:
         violations.append(
@@ -115,7 +154,35 @@ def evaluate_record(
     return TrajectoryEvaluation(
         record_id, file, solved=True, success=not violations,
         deviation=deviation, violations=tuple(violations), reason=None,
+        subject=subject, established=outcome.established,
+        marginal=_is_marginal(deviation, thresholds),
     )
+
+
+def _is_marginal(deviation: ArrivalDeviation, thresholds: DeviationThresholds) -> bool:
+    """True when the 95% interval crosses a gate boundary, so the data cannot decide.
+
+    Only ever True for a measured arrival: a computed final state carries no sigma, so
+    ``lateral_sigma_m``/``vertical_sigma_m`` are None and this is False by construction.
+    """
+    if deviation.vertical_sigma_m is None and deviation.lateral_sigma_m is None:
+        return False
+    half_width = 1.96
+    if deviation.vertical_sigma_m is not None:
+        margin = half_width * deviation.vertical_sigma_m
+        if (
+            deviation.vertical_m - margin < -thresholds.vertical_below_max_m
+            or deviation.vertical_m + margin > thresholds.vertical_above_max_m
+        ) and (
+            deviation.vertical_m + margin >= -thresholds.vertical_below_max_m
+            and deviation.vertical_m - margin <= thresholds.vertical_above_max_m
+        ):
+            return True
+    if deviation.lateral_sigma_m is not None:
+        margin = half_width * deviation.lateral_sigma_m
+        if abs(deviation.lateral_m - margin) <= thresholds.lateral_max_m <= deviation.lateral_m + margin:
+            return True
+    return False
 
 
 def evaluate_batch(
@@ -152,11 +219,15 @@ def evaluate_batch(
     saying the comparison was skipped instead.
     """
     evaluations = [evaluate_record(record, thresholds) for record in records]
+    # "solved" is structural (the record has states); "measured" is the set with an
+    # arrival to grade. They differ only for observed subjects, where a track can have
+    # states yet no established final approach to extrapolate from.
     solved = [e for e in evaluations if e.solved]
+    measured = [e for e in evaluations if e.deviation is not None]
     succeeded = [e for e in evaluations if e.success]
-    lateral = [e.deviation.lateral_m for e in solved]
-    vertical = [e.deviation.vertical_m for e in solved]
-    times = [e.deviation.flight_time_s for e in solved]
+    lateral = [e.deviation.lateral_m for e in measured]
+    vertical = [e.deviation.vertical_m for e in measured]
+    times = [e.deviation.flight_time_s for e in measured]
     total = len(evaluations)
 
     rows = []
@@ -187,9 +258,28 @@ def evaluate_batch(
         else:
             rows.append(row)
 
+    subjects = {e.subject for e in evaluations}
+    observed = [e for e in evaluations if e.subject == "observed"]
+    subject_block: dict[str, Any] = {}
+    if observed:
+        established = [e for e in observed if e.established]
+        subject_block = {
+            # An observed track trivially "has states", so a solve rate over observed
+            # data is 1.0 by construction and means nothing. The established rate is the
+            # honest analogue and is reported instead of it, not alongside it.
+            "established": len(established),
+            "not_established": len(observed) - len(established),
+            "established_rate": len(established) / len(observed),
+            # How many verdicts the data cannot actually decide (see _is_marginal).
+            "marginal": sum(1 for e in observed if e.marginal),
+        }
+
     return {
         "thresholds": asdict(thresholds),
+        "subject": sorted(subjects)[0] if len(subjects) == 1 else "mixed",
+        **({"observed": subject_block} if subject_block else {}),
         "total": total,
+        "measured": len(measured),
         "solved": len(solved),
         "solve_rate": len(solved) / total if total else 0.0,
         "successful": len(succeeded),
@@ -248,6 +338,10 @@ def _row(evaluation: TrajectoryEvaluation) -> dict[str, Any]:
         "success": evaluation.success,
         "violations": list(evaluation.violations),
     }
+    if evaluation.subject != DEFAULT_SUBJECT:
+        row["subject"] = evaluation.subject
+    if evaluation.established is not None:
+        row["established"] = evaluation.established
     if evaluation.deviation is not None:
         deviation = evaluation.deviation
         row.update(
@@ -257,6 +351,16 @@ def _row(evaluation: TrajectoryEvaluation) -> dict[str, Any]:
             heading_rad=deviation.heading_rad,
             final_time_s=deviation.flight_time_s,
         )
+        if deviation.extrapolated:
+            # A measured arrival: say so, and carry what makes the verdict readable.
+            row.update(
+                extrapolated=True,
+                marginal=evaluation.marginal,
+                lateral_sigma_m=deviation.lateral_sigma_m,
+                vertical_sigma_m=deviation.vertical_sigma_m,
+                glidepath_deg=deviation.glidepath_deg,
+                extrapolation_m=deviation.extrapolation_m,
+            )
     if evaluation.reason:
         row["reason"] = evaluation.reason
     return row
