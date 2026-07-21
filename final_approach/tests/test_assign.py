@@ -104,6 +104,29 @@ def test_an_overflight_is_not_a_landing():
     assert result.reason is not None
 
 
+def test_a_descent_across_the_field_is_not_a_landing():
+    """The gap the proximity and descent tests cannot close.
+
+    This track descends 3 deg on the runway centreline, gets within 1000 m of the
+    threshold, and descends far more than 300 m — passing every screen — yet is a
+    kilometre up the whole time and lands nowhere. 80 such tracks sat in KSTL runway
+    24's file and one reached the report with a 1148 m threshold crossing.
+    """
+    overflight = synthetic_approach(frame=KSJC_30L, tch_m=1100.0, glidepath_deg=3.0)
+    result = assign_runway(overflight, PARALLELS)
+    assert result.outcome == "not_landing"
+    assert "overflight" in result.reason
+
+
+def test_a_high_but_real_approach_is_still_a_landing():
+    """The bound must not become a quality gate: 60 m high misses the 9.15 m window by
+    six times over and is still unambiguously an approach to that runway."""
+    high = synthetic_approach(frame=KSJC_30L, tch_m=60.0)
+    result = assign_runway(high, PARALLELS)
+    assert result.outcome == "assigned"
+    assert result.runway == "30L"
+
+
 def test_sparse_coverage_is_unassignable_not_misjudged():
     """A coverage failure must never be reported as a badly flown approach.
 

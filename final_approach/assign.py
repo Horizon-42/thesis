@@ -72,11 +72,28 @@ class LandingScreen:
     datum contract applies -- track altitudes and threshold elevation must share a
     datum. A caller that mixes HAE and MSL shifts this test by the geoid undulation
     (~33 m over the US), which is 2.2% of the default and silent.
+
+    ``max_crossing_height_m`` is the test the other two cannot make. They see only where
+    the track passed CLOSEST to the threshold, and ``max_height_m`` is deliberately
+    generous (1500 m) because crowd-sourced ADS-B rarely reaches the ground near a
+    runway. That leaves a gap: an aircraft descending across the airport at ~1150 m,
+    within 1000 m laterally, having descended well over 300 m, passes every test above
+    while never going near the runway. Measured, 80 such tracks at KSTL sat in runway
+    24's file, and one survived every established criterion to report a threshold
+    crossing 1148 m high -- which alone dragged that airport's mean vertical deviation
+    from +4.17 m to +5.27 m.
+
+    Projecting the fitted approach to the threshold settles it: a landing crosses within
+    tens of metres of threshold elevation (published TCH is 15-18 m across this fleet;
+    the regulation window is 9.15 m wide), so 100 m is roughly 5x the highest plausible
+    crossing. This is a CLASSIFICATION bound, not a quality gate -- no approach flown
+    badly enough to fail it landed on that runway at all.
     """
 
     threshold_radius_m: float = 1000.0
     max_height_m: float = 1500.0
     descent_margin_m: float = 300.0
+    max_crossing_height_m: float = 100.0
 
 
 @dataclass(frozen=True)
@@ -167,6 +184,7 @@ def assign_runway(
         return Assignment("not_landing", None, None, {}, None, not_landing)
 
     fits: dict[str, SegmentFit] = {}
+    overflown: dict[str, float] = {}
     for candidate in frames:
         fit = fit_final_segment(
             points,
@@ -177,10 +195,23 @@ def assign_runway(
         )
         # A fit against the opposite end of the same runway is geometrically perfect
         # and completely wrong; direction of travel is what rules it out.
-        if fit is not None and fit.approaching:
-            fits[candidate.ident] = fit
+        if fit is None or not fit.approaching:
+            continue
+        if abs(fit.height_at_threshold_m) > screen.max_crossing_height_m:
+            # Aimed nowhere near this runway's surface — an overflight in descent, not an
+            # approach to it. See LandingScreen.max_crossing_height_m.
+            overflown[candidate.ident] = fit.height_at_threshold_m
+            continue
+        fits[candidate.ident] = fit
 
     if not fits:
+        if overflown:
+            highest = min(overflown.items(), key=lambda kv: abs(kv[1]))
+            return Assignment(
+                "not_landing", None, None, {}, None,
+                f"nearest runway {highest[0]} would be crossed {highest[1]:+.0f} m from its "
+                f"surface (limit {screen.max_crossing_height_m:.0f} m) — an overflight",
+            )
         return Assignment(
             "unassignable", None, None, {}, None,
             f"no runway yielded a final segment in [{window_m[0]:.0f}, {window_m[1]:.0f}] m",
