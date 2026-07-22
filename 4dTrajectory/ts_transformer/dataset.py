@@ -73,13 +73,16 @@ class Normalizer:
 
     @classmethod
     def fit(cls, series: Sequence[FlightSeries]) -> Normalizer:
-        stacked = np.concatenate([s.values for s in series], axis=0)
-        mean = stacked.mean(axis=0)
-        std = stacked.std(axis=0)
+        """Fit a normaliser to the training split."""
+        # series is a list of FlightSeries, each with values [N, C]; stack them to [N_total, C]
+        stacked = np.concatenate([s.values for s in series], axis=0) # [N, C]
+        mean = stacked.mean(axis=0) # [C]
+        std = stacked.std(axis=0) # [C]
         # A channel that never varies across the training set carries no signal; leaving its
         # std at 0 would produce inf on the first divide. Scale it by 1 and let it ride as a
         # constant (the model can still use it as a bias).
-        std = np.where(std > 1e-9, std, 1.0) # 
+        std = np.where(std > 1e-9, std, 1.0) # normal Z-score standardization: z=(x-mean)/std;
+        # For channel with std=0, there is no need to standardize, so we set std=1.0 to avoid division by zero.
         return cls(mean=mean, std=std)
 
     def encode(self, values: np.ndarray) -> np.ndarray:
