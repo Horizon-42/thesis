@@ -29,8 +29,10 @@ the four buckets, whatever it turned out to be.
 from __future__ import annotations
 
 import json
+import socket
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from time import sleep as _sleep
 from typing import Any, Callable, Iterator, Sequence
 
 from final_approach import LandingScreen
@@ -55,6 +57,41 @@ DEFAULT_MAX_LOOKBACK_DAYS = 30.0
 # runway end would otherwise drag the whole airport to the lookback limit.
 DEFAULT_DRY_GIVE_UP_DAYS = 4.0
 CHECKPOINT_VERSION = 1
+# Retry only transport failures. Six retries span 195 seconds, which is long enough to
+# bridge a short Wi-Fi/DNS outage without hiding persistent authentication or query
+# errors indefinitely.
+NETWORK_RETRY_DELAYS_SECONDS = (5.0, 10.0, 20.0, 40.0, 60.0, 60.0)
+_TRANSIENT_TRANSPORT_ERROR_NAMES = {
+    "ConnectError",
+    "ConnectTimeout",
+    "ConnectionError",
+    "ConnectionTimeout",
+    "NetworkError",
+    "PoolTimeout",
+    "ProxyError",
+    "ReadTimeout",
+    "RemoteProtocolError",
+    "TransportError",
+    "WriteTimeout",
+}
+_TRANSIENT_MESSAGE_MARKERS = (
+    "name or service not known",
+    "temporary failure in name resolution",
+    "nodename nor servname provided",
+    "connection reset by peer",
+    "connection refused",
+    "connection timed out",
+    "connect timeout",
+    "read timeout",
+    "network is unreachable",
+    "no route to host",
+    "server disconnected",
+    "remote end closed connection",
+    "502 bad gateway",
+    "503 service unavailable",
+    "504 gateway timeout",
+)
+_TRANSIENT_HTTP_STATUSES = {408, 425, 429, 500, 502, 503, 504}
 
 
 @dataclass
@@ -147,7 +184,10 @@ def harvest_airport(
                 f"[harvest] {airport.code} {chunk_start.isoformat()} -> {cursor.isoformat()} "
                 f"({_progress(per_runway, plan.target_per_runway, given_up)})"
             )
-            frame = fetch(
+            frame = _fetch_with_retries(
+                fetch,
+                airport_code=airport.code,
+                log=log,
                 start=chunk_start,
                 stop=cursor,
                 bounds=bounds,
@@ -252,6 +292,81 @@ def _classify_aircraft(
         altitude_units="m",  # fetch_history_dataframe returns metres
     )
     return classify_tracks(tracks, airport, screen=plan.screen)
+
+
+def _fetch_with_retries(
+    fetch: Callable[..., Any],
+    *,
+    airport_code: str,
+    log: Callable[[str], None],
+    **kwargs: Any,
+) -> Any:
+    total_attempts = len(NETWORK_RETRY_DELAYS_SECONDS) + 1
+    for attempt in range(1, total_attempts + 1):
+        try:
+            return fetch(**kwargs)
+        except Exception as error:  # noqa: BLE001 - narrowed by the predicate below.
+            if not _is_transient_network_error(error):
+                raise
+            if attempt == total_attempts:
+                log(
+                    f"[harvest] {airport_code}: OpenSky network failure persisted "
+                    f"after {total_attempts} attempts; checkpoint retained "
+                    f"({_error_summary(error)})"
+                )
+                raise
+            delay = NETWORK_RETRY_DELAYS_SECONDS[attempt - 1]
+            log(
+                f"[harvest] {airport_code}: temporary OpenSky network failure "
+                f"({_error_summary(error)}); retrying same chunk in {delay:g}s "
+                f"(attempt {attempt + 1}/{total_attempts})"
+            )
+            _sleep(delay)
+    raise AssertionError("unreachable")
+
+
+def _is_transient_network_error(error: BaseException) -> bool:
+    for item in _exception_chain(error):
+        if isinstance(item, (ConnectionError, TimeoutError, socket.gaierror)):
+            return True
+        error_type = type(item)
+        module = error_type.__module__.lower()
+        if (
+            module.startswith(("httpx", "httpcore", "requests", "urllib3"))
+            and error_type.__name__ in _TRANSIENT_TRANSPORT_ERROR_NAMES
+        ):
+            return True
+        response = getattr(item, "response", None)
+        status = getattr(response, "status_code", None)
+        if status in _TRANSIENT_HTTP_STATUSES:
+            return True
+        message = str(item).lower()
+        if any(marker in message for marker in _TRANSIENT_MESSAGE_MARKERS):
+            return True
+    return False
+
+
+def _exception_chain(error: BaseException) -> Iterator[BaseException]:
+    current: BaseException | None = error
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        linked = current.__cause__ or current.__context__
+        if linked is None:
+            candidate = getattr(current, "orig", None)
+            linked = candidate if isinstance(candidate, BaseException) else None
+        current = linked
+
+
+def _error_summary(error: BaseException) -> str:
+    root = error
+    for item in _exception_chain(error):
+        root = item
+    message = " ".join(str(root).split())
+    if len(message) > 200:
+        message = f"{message[:197]}..."
+    return f"{type(root).__name__}: {message or 'no details'}"
 
 
 def _iter_classified(

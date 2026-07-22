@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import socket
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -233,3 +235,78 @@ def test_interrupted_harvest_resumes_at_the_next_unfinished_chunk(
     assert result.chunks_fetched == 3
     assert any("resuming checkpoint" in message for message in messages)
     assert not paths.checkpoint.exists()
+
+
+def test_transient_network_failure_retries_the_same_chunk(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    stop = datetime(2026, 7, 22, tzinfo=timezone.utc)
+    calls: list[dict[str, Any]] = []
+    delays: list[float] = []
+    messages: list[str] = []
+
+    def unstable_fetch(**kwargs: Any) -> None:
+        calls.append(kwargs)
+        if len(calls) == 1:
+            try:
+                raise socket.gaierror(-2, "Name or service not known")
+            except socket.gaierror as cause:
+                # httpx.ConnectError wraps the resolver failure this way.
+                raise RuntimeError("OpenSky connection failed") from cause
+        return None
+
+    monkeypatch.setattr(runner_module, "_sleep", delays.append, raising=False)
+
+    result = harvest_airport(
+        _airport(),
+        HarvestPaths(root=tmp_path, code="KAAA"),
+        HarvestPlan(
+            target_per_runway=1,
+            start=stop,
+            chunk_hours=6.0,
+            max_lookback_days=30.0,
+            dry_give_up_days=0.25,
+        ),
+        fetch=unstable_fetch,
+        log=messages.append,
+    )
+
+    assert len(calls) == 2
+    assert calls[0]["start"] == calls[1]["start"]
+    assert calls[0]["stop"] == calls[1]["stop"]
+    assert result.chunks_fetched == 1
+    assert delays == [5.0]
+    assert any("retrying same chunk" in message for message in messages)
+
+
+def test_persistent_network_failure_keeps_checkpoint_at_current_chunk(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    stop = datetime(2026, 7, 22, tzinfo=timezone.utc)
+    paths = HarvestPaths(root=tmp_path, code="KAAA")
+    calls = 0
+    delays: list[float] = []
+    messages: list[str] = []
+
+    def offline_fetch(**_kwargs: Any) -> None:
+        nonlocal calls
+        calls += 1
+        raise socket.gaierror(-2, "Name or service not known")
+
+    monkeypatch.setattr(runner_module, "_sleep", delays.append)
+
+    with pytest.raises(socket.gaierror, match="Name or service not known"):
+        harvest_airport(
+            _airport(),
+            paths,
+            HarvestPlan(target_per_runway=1, start=stop),
+            fetch=offline_fetch,
+            log=messages.append,
+        )
+
+    checkpoint = json.loads(paths.checkpoint_state.read_text(encoding="utf-8"))
+    assert calls == 7
+    assert delays == [5.0, 10.0, 20.0, 40.0, 60.0, 60.0]
+    assert checkpoint["chunks_fetched"] == 0
+    assert checkpoint["cursor_utc"] == stop.isoformat()
+    assert any("checkpoint retained" in message for message in messages)
