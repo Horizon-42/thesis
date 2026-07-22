@@ -46,6 +46,7 @@ from trajectory_data_process.harvest.classify import ClassifiedTrack
 TRACKS_DIR = "tracks"
 APPROACH_DIR = "approach"
 MANIFEST_NAME = "manifest.json"
+CHECKPOINT_DIR = ".download-checkpoint"
 
 # What the harvest records about its own altitudes, so a consumer can never guess.
 ALTITUDE_SOURCE = "opensky_history_geoaltitude_m"
@@ -76,6 +77,18 @@ class HarvestPaths:
     @property
     def manifest(self) -> Path:
         return self.tracks / MANIFEST_NAME
+
+    @property
+    def checkpoint(self) -> Path:
+        return self.airport / CHECKPOINT_DIR
+
+    @property
+    def checkpoint_state(self) -> Path:
+        return self.checkpoint / "state.json"
+
+    @property
+    def checkpoint_db(self) -> Path:
+        return self.checkpoint / "history.sqlite"
 
     def bucket(self, outcome: str, runway: str | None = None) -> Path:
         return self.tracks / outcome / runway if runway else self.tracks / outcome
