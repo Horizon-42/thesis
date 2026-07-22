@@ -105,7 +105,8 @@ def recursive_forecast(
         produced.append(step)
         passes += 1
         # Slide: the last L samples of (history + this prediction) become the next input.
-        history = np.concatenate([history, step], axis=0)[-config.seq_len :]
+        history = np.concatenate([history, step], axis=0)[-config.seq_len :] # Take the last seq_len samples from the concatenated history and step 
+                                                                             # to form the new history for the next iteration. 
 
     future = np.concatenate(produced, axis=0)[:max_steps]
     times = series.times[anchor] + np.arange(1, len(future) + 1, dtype=np.float64) * config.dt_s
