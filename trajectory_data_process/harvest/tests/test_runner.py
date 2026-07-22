@@ -7,6 +7,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import pandas as pd
+import pytest
+
 from trajectory_data_process.harvest import runner as runner_module
 from trajectory_data_process.harvest.airports import Airport, Runway
 from trajectory_data_process.harvest.runner import HarvestPlan, harvest_airport
@@ -66,6 +69,23 @@ def test_dry_window_restarts_when_runway_count_last_increases(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
     stop = datetime(2026, 7, 22, tzinfo=timezone.utc)
+    frames = iter(
+        [
+            pd.DataFrame(
+                [
+                    {
+                        "time": stop.timestamp() - 1,
+                        "icao24": "abc123",
+                        "lat": 0.0,
+                        "lon": 0.0,
+                        "callsign": "TEST1",
+                        "onground": False,
+                        "geoaltitude": 100.0,
+                    }
+                ]
+            )
+        ]
+    )
 
     # One landing is found in the first chunk and no older landing is found after it.
     # The runway still needs a second landing, so its four-day dry window starts at the
@@ -91,10 +111,125 @@ def test_dry_window_restarts_when_runway_count_last_increases(
             max_lookback_days=30.0,
             dry_give_up_days=4.0,
         ),
-        fetch=lambda **_kwargs: None,
+        fetch=lambda **_kwargs: next(frames, None),
         log=lambda _message: None,
     )
 
     assert result.chunks_fetched == 17
     assert result.scanned_from == stop - timedelta(days=4, hours=6)
     assert result.manifest["provenance"]["given_up"] == ["18"]
+
+
+def test_harvest_reconstructs_only_one_aircraft_at_a_time(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    stop = datetime(2026, 7, 22, tzinfo=timezone.utc)
+    reconstructed_aircraft: list[set[str]] = []
+    frame = pd.DataFrame(
+        [
+            {
+                "time": stop.timestamp() - 1,
+                "icao24": icao24,
+                "lat": 0.0,
+                "lon": 0.0,
+                "callsign": icao24.upper(),
+                "onground": False,
+                "geoaltitude": 100.0,
+            }
+            for icao24 in ("abc123", "def456")
+        ]
+    )
+
+    def record_reconstruction(rows: list[dict[str, Any]], **_kwargs: Any) -> list[Any]:
+        reconstructed_aircraft.append({str(row["icao24"]) for row in rows})
+        return []
+
+    monkeypatch.setattr(runner_module, "reconstruct_tracks", record_reconstruction)
+
+    result = harvest_airport(
+        _airport(),
+        HarvestPaths(root=tmp_path, code="KAAA"),
+        HarvestPlan(
+            target_per_runway=1,
+            start=stop,
+            chunk_hours=6.0,
+            max_lookback_days=30.0,
+            dry_give_up_days=0.25,
+        ),
+        fetch=lambda **_kwargs: frame,
+        log=lambda _message: None,
+    )
+
+    assert result.chunks_fetched == 1
+    assert reconstructed_aircraft
+    assert all(len(aircraft) == 1 for aircraft in reconstructed_aircraft)
+
+
+def test_interrupted_harvest_resumes_at_the_next_unfinished_chunk(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    stop = datetime(2026, 7, 22, tzinfo=timezone.utc)
+    paths = HarvestPaths(root=tmp_path, code="KAAA")
+    plan = HarvestPlan(
+        target_per_runway=2,
+        start=stop,
+        chunk_hours=6.0,
+        max_lookback_days=30.0,
+        dry_give_up_days=0.5,
+    )
+    first_frame = pd.DataFrame(
+        [
+            {
+                "time": stop.timestamp() - 1,
+                "icao24": "abc123",
+                "lat": 0.0,
+                "lon": 0.0,
+                "callsign": "TEST1",
+                "onground": False,
+                "geoaltitude": 100.0,
+            }
+        ]
+    )
+    monkeypatch.setattr(
+        runner_module,
+        "classify_tracks",
+        lambda *_args, **_kwargs: [SimpleNamespace(runway="18")],
+    )
+    monkeypatch.setattr(
+        runner_module,
+        "write_tracks",
+        lambda _classified, _paths, *, provenance: {"provenance": provenance},
+    )
+
+    first_calls: list[dict[str, Any]] = []
+
+    def interrupted_fetch(**kwargs: Any) -> pd.DataFrame:
+        first_calls.append(kwargs)
+        if len(first_calls) == 1:
+            return first_frame
+        raise RuntimeError("simulated interruption")
+
+    with pytest.raises(RuntimeError, match="simulated interruption"):
+        harvest_airport(
+            _airport(), paths, plan, fetch=interrupted_fetch, log=lambda _message: None
+        )
+
+    assert paths.checkpoint_state.exists()
+    assert paths.checkpoint_db.exists()
+
+    resumed_calls: list[dict[str, Any]] = []
+    messages: list[str] = []
+
+    def resumed_fetch(**kwargs: Any) -> None:
+        resumed_calls.append(kwargs)
+        return None
+
+    result = harvest_airport(
+        _airport(), paths, plan, fetch=resumed_fetch, log=messages.append
+    )
+
+    assert resumed_calls[0]["start"] == stop - timedelta(hours=12)
+    assert resumed_calls[0]["stop"] == stop - timedelta(hours=6)
+    assert result.chunks_fetched == 3
+    assert any("resuming checkpoint" in message for message in messages)
+    assert not paths.checkpoint.exists()

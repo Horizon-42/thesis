@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -28,7 +29,12 @@ from trajectory_data_process.harvest.observed import (
 )
 from trajectory_data_process.harvest.czml import render_observed_czml
 from trajectory_data_process.harvest.publish import publish_observed_report
-from trajectory_data_process.harvest.runner import HarvestPlan, harvest_airport
+from trajectory_data_process.harvest.runner import (
+    HarvestPlan,
+    checkpoint_start,
+    clear_harvest_checkpoint,
+    harvest_airport,
+)
 from trajectory_data_process.harvest.store import HarvestPaths, read_manifest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -81,8 +87,28 @@ def main(argv: list[str] | None = None) -> int:
             f"{args.entry_radius_km:g} vs {args.radius_km:g}"
         )
     code = args.airport.upper()
-    airport = load_airport(code, config_file=args.config, cifp_file=args.cifp)
     paths = HarvestPaths(root=args.output, code=code)
+    if not args.evaluate_only and not args.full_redownload:
+        completed = _completed_download_manifest(
+            paths,
+            expected_runways=_configured_runways(args.config, code),
+            target_per_runway=args.count,
+            radius_km=args.radius_km,
+            requested_start=args.start,
+        )
+        if completed is not None:
+            clear_harvest_checkpoint(paths)
+            print(
+                f"[harvest] {code}: completed tracks already exist; skipping "
+                f"({completed['per_runway']}, given up "
+                f"{completed['provenance'].get('given_up', [])}). "
+                "Use --full-redownload to download it again."
+            )
+            return 0
+    if args.full_redownload:
+        clear_harvest_checkpoint(paths)
+
+    airport = load_airport(code, config_file=args.config, cifp_file=args.cifp)
 
     if args.evaluate_only:
         manifest = read_manifest(paths)
@@ -168,6 +194,69 @@ def _parse_start(value: str | None) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
+def _configured_runways(config_path: Path, code: str) -> set[str]:
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    return {
+        str(threshold["ident"])
+        for runway in config["airports"][code]["runways"]
+        for threshold in runway["thresholds"]
+    }
+
+
+def _completed_download_manifest(
+    paths: HarvestPaths,
+    *,
+    expected_runways: set[str],
+    target_per_runway: int,
+    radius_km: float,
+    requested_start: str | None,
+) -> dict | None:
+    """Return a compatible completed manifest, including deliberate give-ups."""
+    try:
+        manifest = read_manifest(paths)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+    provenance = manifest.get("provenance")
+    per_runway = manifest.get("per_runway")
+    records = manifest.get("records")
+    if not isinstance(provenance, dict) or not isinstance(per_runway, dict):
+        return None
+    if not isinstance(records, list) or manifest.get("total") != len(records):
+        return None
+
+    try:
+        stored_radius = float(provenance["radius_km"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not math.isclose(stored_radius, radius_km, rel_tol=0.0, abs_tol=1e-9):
+        return None
+
+    if requested_start is not None:
+        value = provenance.get("start_utc") or provenance.get("scanned_to_utc")
+        if not isinstance(value, str):
+            return None
+        try:
+            if _parse_start(value) != _parse_start(requested_start):
+                return None
+        except ValueError:
+            return None
+
+    given_up_value = provenance.get("given_up", [])
+    if not isinstance(given_up_value, list):
+        return None
+    given_up = {str(ident) for ident in given_up_value}
+
+    def runway_complete(ident: str) -> bool:
+        try:
+            count = int(per_runway.get(ident, 0))
+        except (TypeError, ValueError):
+            return False
+        return count >= target_per_runway or ident in given_up
+
+    return manifest if expected_runways and all(map(runway_complete, expected_runways)) else None
+
+
 def _resolve_download_options(
     *,
     requested_start: str | None,
@@ -201,7 +290,10 @@ def _resolve_download_options(
 
 
 def _stored_download_start(paths: HarvestPaths) -> datetime | None:
-    """Read the prior CLI start anchor, including manifests written before start_utc."""
+    """Read an active checkpoint anchor, then fall back to the completed manifest."""
+    active_start = checkpoint_start(paths)
+    if active_start is not None:
+        return active_start
     try:
         manifest = read_manifest(paths)
     except FileNotFoundError:
