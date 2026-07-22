@@ -137,7 +137,13 @@ def harvest_airport(
                 last_new[ident] = chunk_start
             per_runway[ident] = count
         for ident in list(unfinished()):
-            if stop - last_new[ident] > timedelta(days=plan.dry_give_up_days):
+            # The scan moves backward. ``last_new`` is therefore later than the
+            # current oldest boundary, and their difference is the history searched
+            # since this runway last gained a landing. Using the fixed ``stop`` here
+            # never advanced the dry window for a runway whose few landings were near
+            # the start of the scan, so it incorrectly dragged the harvest to the
+            # maximum lookback.
+            if last_new[ident] - chunk_start >= timedelta(days=plan.dry_give_up_days):
                 given_up.add(ident)
                 log(f"[harvest] {airport.code} {ident}: no new landing in "
                     f"{plan.dry_give_up_days:g} days of scan — giving up at {per_runway[ident]}")
