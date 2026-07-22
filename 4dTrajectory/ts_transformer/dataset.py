@@ -13,7 +13,7 @@ Every one of those steps is an existing, tested seam except the last two. That i
 purpose: the reference records the predictions get judged against are built by the same
 functions, so a divergence here would read as model error rather than as a bug.
 
-**The split is BY FLIGHT, never by window.** Consecutive windows of one approach overlap by
+**The split(train/validation/test) is BY FLIGHT, never by window.** Consecutive windows of one approach overlap by
 ``seq_len - 1`` samples, so splitting windows at random puts near-duplicates of a validation
 window in the training set and the val loss becomes a memorisation score. Splitting whole
 flights is the only honest option, and it is done here rather than left to the caller.
@@ -79,7 +79,7 @@ class Normalizer:
         # A channel that never varies across the training set carries no signal; leaving its
         # std at 0 would produce inf on the first divide. Scale it by 1 and let it ride as a
         # constant (the model can still use it as a bias).
-        std = np.where(std > 1e-9, std, 1.0)
+        std = np.where(std > 1e-9, std, 1.0) # 
         return cls(mean=mean, std=std)
 
     def encode(self, values: np.ndarray) -> np.ndarray:
