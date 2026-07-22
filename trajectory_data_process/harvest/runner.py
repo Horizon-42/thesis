@@ -147,6 +147,9 @@ def harvest_airport(
         classified,
         paths,
         provenance={
+            # This is the CLI --start anchor. Reusing it reproduces the exact chunk
+            # boundaries and lets pyopensky match its per-query cache entries.
+            "start_utc": stop.isoformat(),
             "scanned_from_utc": cursor.isoformat(),
             "scanned_to_utc": stop.isoformat(),
             "chunks_fetched": chunks,

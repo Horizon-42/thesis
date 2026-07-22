@@ -51,6 +51,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--frontend-data", type=Path, default=DEFAULT_FRONTEND_DATA)
     parser.add_argument("--no-cache", action="store_true")
     parser.add_argument(
+        "--full-redownload", action="store_true",
+        help="ignore a stored download start and bypass the OpenSky query cache",
+    )
+    parser.add_argument(
         "--evaluate-only", action="store_true",
         help="reuse each airport's tracks/manifest.json and rebuild derived outputs",
     )
@@ -93,6 +97,7 @@ def harvest_argv(args: argparse.Namespace, airport: str) -> list[str]:
         argv += ["--multiplier", str(args.multiplier)]
     for enabled, flag in (
         (args.no_cache, "--no-cache"),
+        (args.full_redownload, "--full-redownload"),
         (args.evaluate_only, "--evaluate-only"),
         (args.no_publish, "--no-publish"),
         (args.no_czml, "--no-czml"),

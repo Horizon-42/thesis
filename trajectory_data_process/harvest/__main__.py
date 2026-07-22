@@ -56,6 +56,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--evaluate-only", action="store_true",
                         help="skip download; rebuild arrivals/, approach/, and publication")
     parser.add_argument("--no-cache", action="store_true", help="bypass the history query cache")
+    parser.add_argument(
+        "--full-redownload",
+        action="store_true",
+        help="ignore a stored download start and bypass the OpenSky query cache",
+    )
     parser.add_argument("--frontend-data", type=Path, default=DEFAULT_FRONTEND_DATA,
                         help="publish the report into this public/data tree as the "
                              "'observed' comparison category")
@@ -84,16 +89,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[harvest] reusing stored tracks: {manifest['counts']}")
     else:
         install_query_cancel_on_interrupt()
+        download_start, cached = _resolve_download_options(
+            requested_start=args.start,
+            paths=paths,
+            full_redownload=args.full_redownload,
+            no_cache=args.no_cache,
+        )
         result = harvest_airport(
             airport,
             paths,
             HarvestPlan(
                 target_per_runway=args.count,
-                start=_parse_start(args.start),
+                start=download_start,
                 chunk_hours=args.chunk_hours,
                 max_lookback_days=args.max_lookback_days,
                 radius_km=args.radius_km,
-                cached=not args.no_cache,
+                cached=cached,
             ),
         )
         manifest = result.manifest
@@ -155,6 +166,56 @@ def _parse_start(value: str | None) -> datetime | None:
         return None
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _resolve_download_options(
+    *,
+    requested_start: str | None,
+    paths: HarvestPaths,
+    full_redownload: bool,
+    no_cache: bool,
+    log=print,
+) -> tuple[datetime | None, bool]:
+    """Choose a stable scan anchor and whether pyopensky may use its query cache.
+
+    An identical start gives the backward scanner identical chunk boundaries, which is
+    required for pyopensky's per-query cache to match a previous harvest. Explicit CLI
+    input always wins. A full redownload deliberately returns to the old ``now`` anchor
+    and bypasses that cache.
+    """
+    explicit = _parse_start(requested_start)
+    cached = not (no_cache or full_redownload)
+    if explicit is not None:
+        return explicit, cached
+    if full_redownload:
+        log("[harvest] full redownload: using the current time and bypassing OpenSky cache")
+        return None, False
+
+    stored = _stored_download_start(paths)
+    if stored is not None:
+        log(
+            f"[harvest] reusing previous download start {stored.isoformat()} "
+            "to match OpenSky cache entries"
+        )
+    return stored, cached
+
+
+def _stored_download_start(paths: HarvestPaths) -> datetime | None:
+    """Read the prior CLI start anchor, including manifests written before start_utc."""
+    try:
+        manifest = read_manifest(paths)
+    except FileNotFoundError:
+        return None
+    provenance = manifest.get("provenance")
+    if not isinstance(provenance, dict):
+        return None
+    value = provenance.get("start_utc") or provenance.get("scanned_to_utc")
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return _parse_start(value)
+    except ValueError:
+        return None
 
 
 if __name__ == "__main__":
