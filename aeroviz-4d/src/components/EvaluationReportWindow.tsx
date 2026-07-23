@@ -14,9 +14,25 @@
  * renders every flight's observed/optimized paths.
  */
 
-import { memo, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type WheelEvent as ReactWheelEvent,
+} from "react";
 import { createPortal } from "react-dom";
 import type { EvaluationReport, EvaluationRow } from "../data/evaluationReport";
+import {
+  createDeviationScatterRenderer,
+  type DeviationOrbitView,
+  type DeviationScatterDatum,
+  type DeviationScatterHit,
+  type DeviationScatterRenderer,
+} from "../utils/deviationScatterWebgl";
 
 interface Props {
   report: EvaluationReport;
@@ -249,6 +265,235 @@ const TimeScatter = memo(function TimeScatter({
   );
 });
 
+const DEFAULT_3D_VIEW: DeviationOrbitView = {
+  yaw: -0.68,
+  pitch: -0.42,
+  distance: 3.25,
+};
+
+/** GPU-backed, orbitable 3D view of lateral × vertical deviation by flight. */
+const DeviationScatter3D = memo(function DeviationScatter3D({
+  points,
+  lateralGate,
+  verticalBand,
+}: {
+  points: DeviationScatterDatum[];
+  lateralGate: number;
+  verticalBand: [number, number];
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const rendererRef = useRef<DeviationScatterRenderer | null>(null);
+  const viewRef = useRef<DeviationOrbitView>({ ...DEFAULT_3D_VIEW });
+  const dragRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+  const drawFrameRef = useRef<number | null>(null);
+  const [hovered, setHovered] = useState<DeviationScatterHit | null>(null);
+  const [webglAvailable, setWebglAvailable] = useState<boolean | null>(null);
+
+  function requestDraw() {
+    if (drawFrameRef.current !== null) return;
+    drawFrameRef.current = window.requestAnimationFrame(() => {
+      drawFrameRef.current = null;
+      rendererRef.current?.draw(viewRef.current);
+    });
+  }
+
+  function clearHover() {
+    setHovered(null);
+  }
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    if (typeof WebGLRenderingContext === "undefined") {
+      setWebglAvailable(false);
+      return;
+    }
+    const renderer = createDeviationScatterRenderer(
+      canvas,
+      points,
+      lateralGate,
+      verticalBand,
+    );
+    if (!renderer) {
+      setWebglAvailable(false);
+      return;
+    }
+    rendererRef.current = renderer;
+    setWebglAvailable(true);
+
+    const resizeAndDraw = () => {
+      const rect = canvas.getBoundingClientRect();
+      const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+      renderer.resize(
+        Math.max(1, Math.round(rect.width * pixelRatio)),
+        Math.max(1, Math.round(rect.height * pixelRatio)),
+      );
+      renderer.draw(viewRef.current);
+    };
+    resizeAndDraw();
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(resizeAndDraw);
+      resizeObserver.observe(canvas);
+    } else {
+      window.addEventListener("resize", resizeAndDraw);
+    }
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", resizeAndDraw);
+      if (drawFrameRef.current !== null) {
+        window.cancelAnimationFrame(drawFrameRef.current);
+        drawFrameRef.current = null;
+      }
+      renderer.dispose();
+      rendererRef.current = null;
+    };
+  }, [points, lateralGate, verticalBand[0], verticalBand[1]]);
+
+  function onCanvasPointerDown(event: ReactPointerEvent<HTMLCanvasElement>) {
+    if (event.button !== 0) return;
+    dragRef.current = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    event.currentTarget.classList.add("is-dragging");
+    clearHover();
+    event.preventDefault();
+  }
+
+  function onCanvasPointerMove(event: ReactPointerEvent<HTMLCanvasElement>) {
+    const drag = dragRef.current;
+    if (drag && drag.pointerId === event.pointerId) {
+      const dx = event.clientX - drag.x;
+      const dy = event.clientY - drag.y;
+      drag.x = event.clientX;
+      drag.y = event.clientY;
+      viewRef.current.yaw += dx * 0.012;
+      viewRef.current.pitch = Math.min(
+        1.35,
+        Math.max(-1.35, viewRef.current.pitch + dy * 0.012),
+      );
+      requestDraw();
+      event.preventDefault();
+      return;
+    }
+
+    const canvas = event.currentTarget;
+    const rect = canvas.getBoundingClientRect();
+    setHovered(
+      rendererRef.current?.hitTest(
+        event.clientX - rect.left,
+        event.clientY - rect.top,
+        viewRef.current,
+      ) ?? null,
+    );
+  }
+
+  function finishCanvasDrag(event: ReactPointerEvent<HTMLCanvasElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    event.currentTarget.classList.remove("is-dragging");
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    }
+  }
+
+  function onCanvasWheel(event: ReactWheelEvent<HTMLCanvasElement>) {
+    viewRef.current.distance = Math.min(
+      6.5,
+      Math.max(2.15, viewRef.current.distance + event.deltaY * 0.003),
+    );
+    clearHover();
+    requestDraw();
+    event.preventDefault();
+  }
+
+  function onCanvasKeyDown(event: ReactKeyboardEvent<HTMLCanvasElement>) {
+    const view = viewRef.current;
+    let handled = true;
+    if (event.key === "ArrowLeft") view.yaw -= 0.12;
+    else if (event.key === "ArrowRight") view.yaw += 0.12;
+    else if (event.key === "ArrowUp") view.pitch = Math.max(-1.35, view.pitch - 0.1);
+    else if (event.key === "ArrowDown") view.pitch = Math.min(1.35, view.pitch + 0.1);
+    else if (event.key === "+" || event.key === "=") view.distance = Math.max(2.15, view.distance - 0.2);
+    else if (event.key === "-") view.distance = Math.min(6.5, view.distance + 0.2);
+    else handled = false;
+    if (!handled) return;
+    clearHover();
+    requestDraw();
+    event.preventDefault();
+  }
+
+  function resetView() {
+    viewRef.current = { ...DEFAULT_3D_VIEW };
+    clearHover();
+    requestDraw();
+  }
+
+  return (
+    <figure className="dyncmp-chart eval-deviation-3d">
+      <figcaption>3D trajectory deviations: lateral × vertical</figcaption>
+      <div className="eval-deviation-3d-stage">
+        <canvas
+          ref={canvasRef}
+          role="img"
+          aria-label="3D trajectory deviation view"
+          aria-description="Drag to rotate the 3D view. Use the mouse wheel to zoom."
+          data-renderer="webgl"
+          data-point-count={points.length}
+          tabIndex={0}
+          onPointerDown={onCanvasPointerDown}
+          onPointerMove={onCanvasPointerMove}
+          onPointerUp={finishCanvasDrag}
+          onPointerCancel={finishCanvasDrag}
+          onPointerLeave={(event) => {
+            if (!dragRef.current) clearHover();
+            event.currentTarget.classList.remove("is-dragging");
+          }}
+          onWheel={onCanvasWheel}
+          onKeyDown={onCanvasKeyDown}
+        />
+        <div className="eval-deviation-3d-axes" aria-hidden="true">
+          <span className="is-lateral">L · lateral</span>
+          <span className="is-vertical">V · vertical</span>
+          <span className="is-flight">F · flights</span>
+        </div>
+        <button
+          type="button"
+          className="eval-deviation-3d-reset"
+          onClick={resetView}
+          aria-label="Reset 3D view"
+        >
+          Reset
+        </button>
+        {hovered ? (
+          <div
+            className="eval-deviation-3d-tooltip"
+            style={{ left: hovered.screenX, top: hovered.screenY }}
+          >
+            <strong>{hovered.label}</strong>
+            <span>L {formatNum(hovered.lateral, 2)} m</span>
+            <span>V {formatNum(hovered.vertical, 2)} m</span>
+          </div>
+        ) : null}
+        {webglAvailable === false ? (
+          <p className="eval-deviation-3d-unavailable" role="status">
+            WebGL is unavailable in this browser.
+          </p>
+        ) : null}
+      </div>
+      <p className="eval-chart-note">
+        drag to orbit · wheel to zoom · hover a point for L/V · wireframe = gate
+      </p>
+    </figure>
+  );
+});
+
 function rowWhy(row: EvaluationRow): string {
   return row.reason ?? row.violations.join("; ");
 }
@@ -290,6 +535,27 @@ export default function EvaluationReportWindow({ report, subtitle, onClose }: Pr
         success: r.success,
       })),
     [referenceRows],
+  );
+  const deviation3DPoints = useMemo(
+    () =>
+      solvedRows
+        .filter(
+          (row) =>
+            typeof row.lateral_m === "number" &&
+            Number.isFinite(row.lateral_m) &&
+            typeof row.vertical_m === "number" &&
+            Number.isFinite(row.vertical_m),
+        )
+        .map((row) => ({
+          label: row.id,
+          lateral: row.lateral_m!,
+          vertical: row.vertical_m!,
+          pass:
+            row.lateral_m! <= th.lateral_max_m &&
+            row.vertical_m! >= -th.vertical_below_max_m &&
+            row.vertical_m! <= th.vertical_above_max_m,
+        })),
+    [solvedRows, th],
   );
 
   // Draggable floating window (same pattern as DynamicsComparisonCharts):
@@ -500,6 +766,13 @@ export default function EvaluationReportWindow({ report, subtitle, onClose }: Pr
               scale="symlog"
               band={[-th.vertical_below_max_m, th.vertical_above_max_m]}
             />
+            {deviation3DPoints.length > 0 ? (
+              <DeviationScatter3D
+                points={deviation3DPoints}
+                lateralGate={th.lateral_max_m}
+                verticalBand={[-th.vertical_below_max_m, th.vertical_above_max_m]}
+              />
+            ) : null}
             {timePoints.length > 0 ? <TimeScatter points={timePoints} /> : null}
           </div>
         ) : (

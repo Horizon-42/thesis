@@ -55,6 +55,15 @@ describe("EvaluationReportWindow", () => {
     const aggregates = screen.getByRole("table", { name: /Aggregates/ });
     expect(aggregates.textContent).toContain("101.0");
     expect(aggregates.textContent).toContain("171.7");
+    // The combined 3D view exposes both deviations for every measured flight
+    // and sits immediately before (left of, in the two-column grid) flight time.
+    const deviation3D = screen.getByRole("img", { name: "3D trajectory deviation view" });
+    expect(deviation3D.tagName).toBe("CANVAS");
+    expect(deviation3D.getAttribute("data-renderer")).toBe("webgl");
+    expect(screen.getByText(/drag to orbit · wheel to zoom/i)).toBeTruthy();
+    const deviationFigure = deviation3D.closest("figure")!;
+    const timeFigure = screen.getByRole("img", { name: "Flight time scatter" }).closest("figure")!;
+    expect(timeFigure.previousElementSibling).toBe(deviationFigure);
     // verdict rows: gate-failed row flagged, unsolved row grayed with its reason
     const failRow = screen.getByText("FDX1449").closest("tr")!;
     expect(failRow.className).toContain("eval-row-fail");
