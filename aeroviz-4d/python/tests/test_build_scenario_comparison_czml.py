@@ -478,17 +478,38 @@ def test_upsert_category_adds_and_replaces(tmp_path):
     manifest = tmp_path / "categories.json"
     _upsert_category(manifest, key="runway", label="Runway target", directory="runway",
                      group_count=10, constrained=False)
-    total = _upsert_category(manifest, key="asdb", label="ADS-B target", directory="asdb",
+    total = _upsert_category(manifest, key="fitted_adsb", label="Fitted ADS-B crossing",
+                             directory="fitted_adsb",
                              group_count=20, constrained=False)
     assert total == 2
     cats = json.loads(manifest.read_text())["categories"]
-    assert [c["key"] for c in cats] == ["asdb", "runway"]  # sorted by key
+    assert [c["key"] for c in cats] == ["fitted_adsb", "runway"]  # sorted by key
     # re-registering an existing key replaces it in place (no duplicate)
-    _upsert_category(manifest, key="asdb", label="ADS-B target", directory="asdb",
+    _upsert_category(manifest, key="fitted_adsb", label="Fitted ADS-B crossing",
+                     directory="fitted_adsb",
                      group_count=21, constrained=False)
     cats = json.loads(manifest.read_text())["categories"]
     assert len(cats) == 2
-    assert next(c for c in cats if c["key"] == "asdb")["groups"] == 21
+    assert next(c for c in cats if c["key"] == "fitted_adsb")["groups"] == 21
+
+
+def test_fitted_adsb_category_replaces_legacy_asdb_alias(tmp_path):
+    manifest = tmp_path / "categories.json"
+    manifest.write_text(json.dumps({"categories": [
+        {"key": "asdb", "label": "ADS-B target", "dir": "asdb", "groups": 9,
+         "constrained": False},
+        {"key": "asdb_cons", "label": "ADS-B target (constrained)", "dir": "asdb_cons",
+         "groups": 8, "constrained": True},
+        {"key": "runway", "label": "Runway target", "dir": "runway", "groups": 10,
+         "constrained": False},
+    ]}))
+
+    _upsert_category(
+        manifest, key="fitted_adsb", label="Fitted ADS-B crossing",
+        directory="fitted_adsb", group_count=11, constrained=False,
+    )
+    keys = [c["key"] for c in json.loads(manifest.read_text())["categories"]]
+    assert keys == ["fitted_adsb", "runway"]
 
 
 def test_upsert_category_stamps_the_explicit_constrained_field(tmp_path):

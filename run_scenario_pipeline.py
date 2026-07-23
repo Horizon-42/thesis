@@ -35,11 +35,11 @@ Steps, chained by shelling out to the existing CLIs (each already tested):
 The ``category`` (output sub-folder + frontend category key) is derived from
 (target_type, with_constraint):
 
-    target_type=adsb   · with_constraint=False ─► asdb         (ADS-B target)
-    target_type=runway · with_constraint=False ─► runway       (Runway target)
-    target_type=runway · with_constraint=True  ─► runway_cons  (Runway target, constrained)
+    target_type=fitted-adsb · with_constraint=False ─► fitted_adsb (Fitted ADS-B crossing)
+    target_type=runway      · with_constraint=False ─► runway      (Runway target)
+    target_type=runway      · with_constraint=True  ─► runway_cons (Runway target, constrained)
 
-Omitting --target-type runs ALL THREE modes (asdb, runway, runway_cons) per
+Omitting --target-type runs ALL THREE modes (fitted_adsb, runway, runway_cons) per
 airport — the full category sweep the frontend's comparison picker offers.
 
 Airport selection:
@@ -54,7 +54,7 @@ already has a summary.json, steps 1–2 are skipped and only the selected tails
 Usage:
     # one airport, both outputs (frontend CZML + evaluation report/HTML):
     python run_scenario_pipeline.py --airport KRDU --target-type runway --with-constraint
-    # one airport, ALL THREE modes (asdb + runway + runway_cons):
+    # one airport, ALL THREE modes (fitted_adsb + runway + runway_cons):
     python run_scenario_pipeline.py --airport KRDU
     # trapezoidal-fitting comparison run (default is Hermite-Simpson):
     python run_scenario_pipeline.py --airport KRDU --target-type runway --fitting-type trapezoidal
@@ -64,8 +64,8 @@ Usage:
     python run_scenario_pipeline.py --airport KRDU --outputs eval
     # rebuild only the comparison CZML from an existing optimization:
     python run_scenario_pipeline.py --airport KRDU --outputs czml --skip-optimize
-    # every K-airport, ADS-B target, preview without running:
-    python run_scenario_pipeline.py --target-type adsb --dry-run
+    # every K-airport, fitted ADS-B crossing target, preview without running:
+    python run_scenario_pipeline.py --target-type fitted-adsb --dry-run
 """
 
 from __future__ import annotations
@@ -85,7 +85,7 @@ OPT_SCRIPT = REPO_ROOT / "4dTrajectory" / "optimization" / "scenario_optimizatio
 CZML_SCRIPT = REPO_ROOT / "aeroviz-4d" / "python" / "build_scenario_comparison_czml.py"
 HARVEST_TRACKS_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
 
-TARGET_TYPES = ("adsb", "runway")
+TARGET_TYPES = ("fitted-adsb", "runway")
 OUTPUT_KINDS = ("czml", "eval")
 
 # Control-mesh defaults — MUST mirror CollocationOptimizer's (collocation/optimizer.py:
@@ -96,19 +96,24 @@ DEFAULT_N_SEG_PER_PHASE = 3    # constrained: control segments PER procedure leg
 
 # The full category sweep, run when --target-type is omitted: every mode the
 # frontend's comparison picker offers, as (target_type, with_constraint).
-ALL_MODES = (("adsb", False), ("runway", False), ("runway", True))
+ALL_MODES = (("fitted-adsb", False), ("runway", False), ("runway", True))
 
 # category key (= output sub-folder + frontend category key) and its display label.
 _CATEGORY_LABELS = {
-    "asdb": "ADS-B target",
-    "asdb_cons": "ADS-B target (constrained)",
+    "fitted_adsb": "Fitted ADS-B crossing",
     "runway": "Runway target",
     "runway_cons": "Runway target (constrained)",
 }
 
 
 def category_key(target_type: str, with_constraint: bool) -> str:
-    base = "asdb" if target_type == "adsb" else "runway"
+    if target_type not in TARGET_TYPES:
+        raise ValueError(f"unknown target type {target_type!r}; expected one of {TARGET_TYPES}")
+    if target_type == "fitted-adsb":
+        if with_constraint:
+            raise ValueError("fitted-adsb is incompatible with procedure constraints")
+        return "fitted_adsb"
+    base = "runway"
     return f"{base}_cons" if with_constraint else base
 
 
@@ -143,6 +148,10 @@ class Plan:
                  n_segments: int = DEFAULT_N_SEGMENTS,
                  n_seg_per_phase: int = DEFAULT_N_SEG_PER_PHASE) -> None:
         self.airport = airport.strip().upper()
+        if target_type not in TARGET_TYPES:
+            raise ValueError(f"unknown target type {target_type!r}; expected one of {TARGET_TYPES}")
+        if target_type == "fitted-adsb" and with_constraint:
+            raise ValueError("fitted-adsb is incompatible with --with-constraint")
         self.target_type = target_type
         self.with_constraint = with_constraint
         self.outputs = outputs
@@ -163,10 +172,11 @@ class Plan:
         # --state-substeps); None = the optimizer's auto (~3 s state step, cap 16).
         self.state_substeps = state_substeps
         self.threshold = target_type == "runway"
+        self.fitted_adsb = target_type == "fitted-adsb"
         self.category = category_key(target_type, with_constraint)
         self.label = _CATEGORY_LABELS[self.category]
 
-        tag = "_threshold" if self.threshold else ""
+        tag = "_threshold" if self.threshold else "_fitted_adsb"
         self.arrivals_manifest = arrival_manifest_path(self.airport)
         self.scenarios = SCENARIOS_DIR / f"{self.airport}_arrivals{tag}_scenarios.json"
         self.opt_dir = OPT_OUTPUTS_ROOT / self.airport / self.category
@@ -194,6 +204,8 @@ class Plan:
             ]
             if self.threshold:
                 scenarios_cmd.append("--target-from-threshold")
+            elif self.fitted_adsb:
+                scenarios_cmd.append("--target-from-fitted-adsb")
             named.append(("scenarios", scenarios_cmd))
 
             # --reference-tracks makes the optimization CLI write the reference eval
@@ -374,9 +386,10 @@ def main() -> None:
     )
     parser.add_argument(
         "--target-type", choices=TARGET_TYPES, default=None,
-        help="target state: 'runway' = the published runway threshold (the evaluation "
-             "gates are threshold-referenced); 'adsb' = end of the observed track. "
-             "OMIT to run all three modes (asdb, runway, runway_cons) per airport",
+        help="target state: 'runway' = the published runway threshold; 'fitted-adsb' = "
+             "the final_approach OLS threshold crossing (fitted position + measured "
+             "terminal kinematics). OMIT to run all three modes "
+             "(fitted_adsb, runway, runway_cons) per airport",
     )
     parser.add_argument(
         "--with-constraint", action="store_true",
@@ -401,7 +414,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--n-segments", type=int, default=DEFAULT_N_SEGMENTS,
-        help=f"UNCONSTRAINED control segments over the whole trajectory (asdb/runway modes; "
+        help=f"UNCONSTRAINED control segments over the whole trajectory (fitted_adsb/runway modes; "
              f"default {DEFAULT_N_SEGMENTS}, = CollocationOptimizer's). Ignored by constrained runs",
     )
     parser.add_argument(
@@ -450,6 +463,8 @@ def main() -> None:
         print(f"no --target-type given → running all {len(modes)} modes per airport: "
               + ", ".join(category_key(t, c) for t, c in modes))
     else:
+        if args.target_type == "fitted-adsb" and args.with_constraint:
+            parser.error("--target-type fitted-adsb cannot be combined with --with-constraint")
         modes = ((args.target_type, args.with_constraint),)
 
     if args.airport:

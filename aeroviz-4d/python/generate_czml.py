@@ -45,6 +45,15 @@ TRAIL_COLORS = [
     (138,  43, 226, 200),   # blue violet
 ]
 
+# An inferred threshold crossing is not another verdict: it must remain identifiable when
+# the frontend repaints the measured path white (comparison reference), green, red, or grey
+# (observed evaluation). A translucent ice-blue volume is therefore attached to the SAME
+# entity instead of making another flight entity or borrowing the verdict colour.
+EXTRAPOLATED_COLOR = (105, 205, 255, 105)
+EXTRAPOLATED_OUTLINE_COLOR = (175, 230, 255, 190)
+_EXTRAPOLATED_RADIUS_M = 3.0
+_TRAIL_TIME_S = 300.0
+
 
 def default_output_path(airport_code: str) -> Path:
     return airport_data_path(airport_code, "trajectories.czml")
@@ -288,6 +297,52 @@ def build_orientation_property(
     }
 
 
+def build_extrapolated_tail_property(
+    epoch_dt: datetime,
+    waypoints: list[tuple[float, float, float, float]],
+) -> dict[str, Any] | None:
+    """A translucent 3-D overlay for the fitted, non-measured approach extension.
+
+    ``polylineVolume`` is deliberate. The observed-verdict hook recolours an entity's
+    ``path`` and ``polyline`` to green/red/grey; using either for the extension would erase
+    the measured-vs-inferred distinction exactly when evaluation colouring is enabled.
+    Keeping the overlay on the original entity also avoids a synthetic second "flight" in
+    the loader, table, sampling, and comparison reference lookup.
+    """
+    if len(waypoints) < 2:
+        return None
+
+    positions: list[float] = []
+    for _offset, lon, lat, alt_m in waypoints:
+        positions.extend([lon, lat, alt_m])
+
+    start_offset = float(waypoints[0][0])
+    end_offset = float(waypoints[-1][0]) + _TRAIL_TIME_S
+
+    def iso_at(offset_s: float) -> str:
+        return (epoch_dt + timedelta(seconds=offset_s)).astimezone(timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+
+    r = _EXTRAPOLATED_RADIUS_M
+    d = r / math.sqrt(2.0)
+    return {
+        "show": [{"interval": f"{iso_at(start_offset)}/{iso_at(end_offset)}", "boolean": True}],
+        "positions": {"cartographicDegrees": positions},
+        "shape": {
+            "cartesian2": [r, 0.0, d, d, 0.0, r, -d, d, -r, 0.0, -d, -d, 0.0, -r, d, -d]
+        },
+        "cornerType": "ROUNDED",
+        "fill": True,
+        "material": {
+            "solidColor": {"color": {"rgba": list(EXTRAPOLATED_COLOR)}}
+        },
+        "outline": True,
+        "outlineColor": {"rgba": list(EXTRAPOLATED_OUTLINE_COLOR)},
+        "outlineWidth": 1,
+    }
+
+
 def build_flight_packet(
     flight_id: str,
     callsign: str,
@@ -295,6 +350,8 @@ def build_flight_packet(
     waypoints: list[tuple[float, float, float, float]],
     epoch_dt: datetime,
     color_rgba: tuple[int, int, int, int],
+    *,
+    extrapolated_waypoints: list[tuple[float, float, float, float]] | None = None,
 ) -> dict[str, Any]:
     """
     Build a complete CZML entity packet for one aircraft.
@@ -310,7 +367,7 @@ def build_flight_packet(
     epoch_dt      : simulation start time (all offsets relative to this)
     color_rgba    : (R, G, B, A) each 0–255 for the trail polyline
     """
-    return {
+    packet: dict[str, Any] = {
         "id": flight_id,
         "name": callsign,
         "description": f"<b>{callsign}</b><br/>Type: {aircraft_type}",
@@ -345,6 +402,12 @@ def build_flight_packet(
             "pixelOffset": {"cartesian2": [0, -30]},
         },
     }
+    extrapolated_tail = build_extrapolated_tail_property(
+        epoch_dt, extrapolated_waypoints or []
+    )
+    if extrapolated_tail is not None:
+        packet["polylineVolume"] = extrapolated_tail
+    return packet
 
 
 # ── Top-level assembler ───────────────────────────────────────────────────────
@@ -373,7 +436,12 @@ def build_czml(
     Returns a CZML array: [document_packet, entity_packet, entity_packet, ...]
     """
     max_offset = max(
-        (float(wp[0]) for flight in flights for wp in flight.get("waypoints", [])),
+        (
+            float(wp[0])
+            for flight in flights
+            for key in ("waypoints", "extrapolated_waypoints")
+            for wp in flight.get(key, [])
+        ),
         default=0.0,
     )
     end_dt = start_dt + timedelta(seconds=max_offset)
@@ -399,6 +467,9 @@ def build_czml(
             [tuple(wp) for wp in flight["waypoints"]],
             start_dt,
             color,
+            extrapolated_waypoints=[
+                tuple(wp) for wp in flight.get("extrapolated_waypoints", [])
+            ],
         )
         entity_packets.append(packet)
 

@@ -118,4 +118,7 @@ def test_discover_arrival_manifests_for_all_airports(tmp_path):
 
 def test_scenario_output_name_distinguishes_target_mode():
     assert scenario_output_name("KRDU", threshold=False) == "KRDU_arrivals_scenarios.json"
+    assert scenario_output_name(
+        "KRDU", threshold=False, fitted_adsb=True
+    ) == "KRDU_arrivals_fitted_adsb_scenarios.json"
     assert scenario_output_name("KRDU", threshold=True) == "KRDU_arrivals_threshold_scenarios.json"

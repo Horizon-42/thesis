@@ -108,6 +108,14 @@ def main(argv: list[str] | None = None) -> int:
     p_train.add_argument("--epochs", type=int, default=None)
     p_train.add_argument("--batch-size", type=int, default=None)
     p_train.add_argument("--learning-rate", type=float, default=None)
+    p_train.add_argument(
+        "--fitted-tail-weight", type=float, default=None,
+        help="position-only weight for fitted ADS-B tail rows (default: 0.25)",
+    )
+    p_train.add_argument(
+        "--fitted-terminal-weight", type=float, default=None,
+        help="additional position-only weight at the fitted crossing (default: 1.0)",
+    )
     p_train.add_argument("--patience", type=int, default=None, help="early-stopping patience")
     p_train.add_argument("--d-model", type=int, default=None)
     p_train.add_argument("--e-layers", type=int, default=None)
@@ -148,6 +156,8 @@ def main(argv: list[str] | None = None) -> int:
                 ("model", args.model), ("seq_len", args.seq_len), ("pred_len", args.pred_len),
                 ("dt_s", args.dt), ("epochs", args.epochs), ("batch_size", args.batch_size),
                 ("learning_rate", args.learning_rate), ("patience", args.patience),
+                ("fitted_tail_position_weight", args.fitted_tail_weight),
+                ("fitted_terminal_position_weight", args.fitted_terminal_weight),
                 ("d_model", args.d_model), ("e_layers", args.e_layers), ("n_heads", args.n_heads),
                 ("seed", args.seed), ("device", args.device),
                 ("aircraft_type", args.aircraft_type),

@@ -134,6 +134,12 @@ class TSConfig:
     device: str = "auto"            # "auto" -> cuda when available, else cpu
     val_fraction: float = 0.15      # split is BY FLIGHT, never by window — see dataset.py
     test_fraction: float = 0.15
+    # Inferred final-approach geometry is weaker supervision than an observed ADS-B row.
+    # These weights apply to POSITION channels only; fitted velocity channels are always
+    # masked.  The terminal weight is added on the fitted crossing row so the endpoint is
+    # not diluted by the rest of the short extrapolated tail.
+    fitted_tail_position_weight: float = 0.25
+    fitted_terminal_position_weight: float = 1.0
 
     # ── provenance (free-form; recorded in the checkpoint) ──────────────────
     notes: dict[str, Any] = field(default_factory=dict)
@@ -154,6 +160,10 @@ class TSConfig:
                 f"val_fraction + test_fraction must leave a training split "
                 f"(got {self.val_fraction} + {self.test_fraction})"
             )
+        if self.fitted_tail_position_weight < 0.0:
+            raise ValueError("fitted_tail_position_weight must be non-negative")
+        if self.fitted_terminal_position_weight < 0.0:
+            raise ValueError("fitted_terminal_position_weight must be non-negative")
 
     # PatchTST reads configs.enc_in; iTransformer infers the count from the tensor.
     @property

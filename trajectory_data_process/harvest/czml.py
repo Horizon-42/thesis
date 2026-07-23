@@ -33,19 +33,24 @@ from the modeling side.
 from __future__ import annotations
 
 import json
+import math
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from final_approach import RunwayFrame, TrackPoint, fit_final_segment
 from flight_scenarios.identity import flight_key
+from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon
 
 from trajectory_data_process.harvest.store import HarvestPaths, read_manifest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_GENERATOR = REPO_ROOT / "aeroviz-4d" / "python" / "generate_czml.py"
 DEFAULT_FRONTEND_DATA = REPO_ROOT / "aeroviz-4d" / "public" / "data"
+EVALUATION_REPORT_NAME = "evaluation_report.json"
+EVALUATION_RECORDS_DIR = "records"
 
 
 @dataclass(frozen=True)
@@ -102,6 +107,7 @@ def render_observed_czml(
     airport_dir = frontend_data_root / "airports" / paths.code
     landings_dir = airport_dir / "landings"
     landings_dir.mkdir(parents=True, exist_ok=True)
+    extrapolated_records = _extrapolated_record_paths(paths)
 
     by_runway: dict[str, list[dict[str, Any]]] = {}
     for row in read_manifest(paths)["records"]:
@@ -110,6 +116,14 @@ def render_observed_czml(
         track = json.loads((paths.tracks / row["file"]).read_text(encoding="utf-8"))
         flight = czml_input_flight(track)
         verify_identity(flight, track["flight_key"])
+        record_path = extrapolated_records.get(track["flight_key"])
+        if record_path is not None:
+            segment = _extrapolated_waypoints(record_path)
+            if segment is not None:
+                # Kept separate from the measured ``waypoints`` on purpose: the observed
+                # position remains sensor data, while the generator renders this inferred
+                # final-approach extension with its own translucent material.
+                flight["extrapolated_waypoints"] = segment
         by_runway.setdefault(row["runway"], []).append(flight)
 
     if not by_runway:
@@ -157,6 +171,108 @@ def render_observed_czml(
         manifest=manifest_path,
         flights=len(combined_flights),
     )
+
+
+def _extrapolated_record_paths(paths: HarvestPaths) -> dict[str, Path]:
+    """Evaluation records whose verdict actually used an extrapolated crossing.
+
+    The report is the authority for whether ``final_approach`` accepted the segment as
+    established. Re-fitting every assigned track without this guard would draw an inferred
+    tail even for flights the evaluation explicitly classified as ``not_established``.
+    """
+    report_path = paths.approach / EVALUATION_REPORT_NAME
+    if not report_path.exists():
+        return {}
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    records_dir = paths.approach / EVALUATION_RECORDS_DIR
+    return {
+        row["flight_key"]: records_dir / Path(row["file"]).name
+        for row in report.get("trajectories", [])
+        if row.get("extrapolated") is True
+        and isinstance(row.get("flight_key"), str)
+        and isinstance(row.get("file"), str)
+    }
+
+
+def _extrapolated_waypoints(record_path: Path) -> list[list[float]] | None:
+    """The fitted final-approach line from its last fit sample to the threshold.
+
+    Evaluation records are MSL. The returned CZML-input points are converted back to HAE,
+    the altitude datum Cesium expects, using the record's stamped geoid undulation. Both
+    endpoints lie on the same two OLS lines used by ``evaluation.arrival``; no independent
+    visual-only extrapolator is introduced here.
+    """
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    states = record.get("states", [])
+    target = record.get("target_state") or {}
+    source = record.get("source") or {}
+    course = source.get("runway_course_deg")
+    if len(states) < 2 or course is None:
+        return None
+
+    frame = RunwayFrame(
+        ident=str(source.get("runway", "?")),
+        lat=float(target["lat"]),
+        lon=float(target["lon"]),
+        elevation_m=float(target["alt"]),
+        course_deg=float(course),
+    )
+    points = [TrackPoint(float(s["lat"]), float(s["lon"]), float(s["alt"])) for s in states]
+    fit = fit_final_segment(points, frame)
+    if fit is None:
+        return None
+
+    projected = frame.project_all(points)
+    start_index = min(
+        range(len(projected)),
+        key=lambda index: abs(projected[index].along_m - fit.nearest_sample_along_m),
+    )
+    start_t = float(states[start_index]["t"])
+    speed_ms = float(states[start_index].get("V") or 0.0)
+    if not math.isfinite(speed_ms) or speed_ms <= 1.0:
+        speed_ms = 70.0
+    end_t = start_t + fit.extrapolation_m / speed_ms
+
+    geoid_m = float(source.get("geoid_undulation_m") or 0.0)
+    start_along = fit.nearest_sample_along_m
+    start = _fitted_point(
+        frame,
+        along_m=start_along,
+        cross_m=fit.cross.intercept + fit.cross.slope * start_along,
+        height_m=fit.height.intercept + fit.height.slope * start_along,
+        geoid_m=geoid_m,
+    )
+    crossing = _fitted_point(
+        frame,
+        along_m=0.0,
+        cross_m=fit.cross_at_threshold_m,
+        height_m=fit.height_at_threshold_m,
+        geoid_m=geoid_m,
+    )
+    return [
+        [round(start_t, 3), *start],
+        [round(end_t, 3), *crossing],
+    ]
+
+
+def _fitted_point(
+    frame: RunwayFrame,
+    *,
+    along_m: float,
+    cross_m: float,
+    height_m: float,
+    geoid_m: float,
+) -> list[float]:
+    """Inverse of ``RunwayFrame.project`` for one fitted point, returned as lon/lat/HAE."""
+    course = math.radians(frame.course_deg)
+    east_hat = math.sin(course)
+    north_hat = math.cos(course)
+    east_m = along_m * east_hat + cross_m * north_hat
+    north_m = along_m * north_hat - cross_m * east_hat
+    lon = frame.lon + east_m / metres_per_deg_lon(frame.lat)
+    lat = frame.lat + north_m / METRES_PER_DEG_LAT
+    altitude_hae_m = frame.elevation_m + height_m + geoid_m
+    return [round(lon, 7), round(lat, 7), round(altitude_hae_m, 2)]
 
 
 def _generate(

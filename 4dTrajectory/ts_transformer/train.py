@@ -32,15 +32,21 @@ HISTORY_NAME = "history.json"
 
 
 def masked_mse(predicted: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-    """MSE over valid horizon steps only.
+    """Weighted MSE over supervised channel values only.
 
-    ``mask`` is ``[B, H]``; it broadcasts over the channel axis. Dividing by the valid-step
-    count (not the tensor size) keeps the loss scale independent of how much padding a batch
-    happens to carry — otherwise batches of short approaches would report artificially low
-    loss and early stopping would chase batch composition.
+    Legacy ``[B,H]`` masks still broadcast across channels. New datasets pass ``[B,H,C]``:
+    measured rows weight all channels equally, while fitted rows weight position only.
     """
-    error = (predicted - target) ** 2 * mask.unsqueeze(-1)
-    denominator = mask.sum() * predicted.shape[-1]
+    if mask.ndim == predicted.ndim - 1:
+        weights = mask.unsqueeze(-1).expand_as(predicted)
+    elif mask.shape == predicted.shape:
+        weights = mask
+    else:
+        raise ValueError(
+            f"mask shape {tuple(mask.shape)} cannot weight prediction {tuple(predicted.shape)}"
+        )
+    error = (predicted - target) ** 2 * weights
+    denominator = weights.sum()
     return error.sum() / denominator.clamp(min=1.0)
 
 
@@ -71,7 +77,12 @@ def _predict_split(
             # machine is 16 GB and frequently swap-bound.
             predicted_chunks.append(normalizer.decode(out.astype(np.float64)).astype(np.float32))
             truth_chunks.append(normalizer.decode(y.numpy().astype(np.float64)).astype(np.float32))
-            mask_chunks.append(mask.numpy())
+            raw_mask = mask.numpy()
+            # Headline ADE/FDE remain measured-data metrics. Position-only fitted rows are
+            # training labels, not observations, and therefore stay out of this mask.
+            if raw_mask.ndim == 3:
+                raw_mask = np.all(raw_mask > 0.0, axis=-1).astype(np.float32)
+            mask_chunks.append(raw_mask)
     return (
         np.concatenate(predicted_chunks), np.concatenate(truth_chunks), np.concatenate(mask_chunks)
     )

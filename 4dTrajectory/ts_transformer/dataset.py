@@ -7,7 +7,7 @@ Pipeline per flight::
       -> flight_scenarios.state_samples_from_track(...)                     # V/psi/gamma per sample
       -> channels.channels_from_states(...)                                 # ENU metres, threshold origin
       -> channels.resample_uniform(...)                                     # regular dt grid
-      -> FlightSeries
+      -> measured FlightSeries + position-only fitted-tail supervision
 
 Every one of those steps is an existing, tested seam except the last two. That is on
 purpose: the reference records the predictions get judged against are built by the same
@@ -33,27 +33,71 @@ from torch.utils.data import DataLoader, Dataset
 # flight_key is the identity ``id_runway_icao24_landingTime`` — single-sourced in
 # flight_scenarios.identity because the optimizer batch derives its record filenames from
 # the SAME function; the split key here and both writers' filename stems cannot drift.
-from flight_scenarios import FlightScenario, build_scenario, flight_key, state_samples_from_track
+from flight_scenarios import (
+    FlightScenario,
+    build_scenario,
+    fit_flight_final_approach,
+    flight_key,
+    state_samples_from_track,
+)
 from flight_scenarios.datum import flight_to_msl
 from trajectory_data_process.harvest.arrivals import load_arrival_flights
 
-from channels import Frame, channels_from_states, frame_for_state, resample_uniform
+from channels import (
+    CHANNELS,
+    POSITION_IDX,
+    Frame,
+    channels_from_states,
+    frame_for_state,
+    resample_uniform,
+)
 from config import DEFAULT_AIRCRAFT_TYPE, HORIZON_FULL, TSConfig
 
 
 @dataclass
 class FlightSeries:
-    """One arrival, resampled onto the uniform grid and expressed in channel space."""
+    """One observed arrival plus its training-only fitted position supervision."""
 
     flight_id: str
     scenario: FlightScenario
     frame: Frame
     times: np.ndarray        # [N] seconds, uniform dt, rebased to 0 at the first sample
     values: np.ndarray       # [N, C] channel space (see channels.CHANNELS)
+    # The observed arrays above remain the only model INPUT and the only arrays exposed to
+    # forecast/export.  These arrays extend them with a fitted tail for training TARGETS.
+    supervision_times: np.ndarray | None = None    # [M], M >= N
+    supervision_values: np.ndarray | None = None   # [M, C]
+    supervision_weights: np.ndarray | None = None  # [M, C], fitted velocities are zero
+
+    def __post_init__(self) -> None:
+        supplied = (
+            self.supervision_times is not None,
+            self.supervision_values is not None,
+            self.supervision_weights is not None,
+        )
+        if not any(supplied):
+            # Backward-compatible measured-only construction for small fixtures and generic
+            # consumers that do not need fitted labels.
+            self.supervision_times = self.times
+            self.supervision_values = self.values
+            self.supervision_weights = np.full(
+                self.values.shape, 1.0 / self.values.shape[1], dtype=np.float64
+            )
+        elif not all(supplied):
+            raise ValueError("supervision_times/values/weights must be supplied together")
+        if not (
+            len(self.supervision_times) == len(self.supervision_values)
+            == len(self.supervision_weights)
+        ):
+            raise ValueError("supervision times, values, and weights must align")
 
     @property
     def n_samples(self) -> int:
         return len(self.times)
+
+    @property
+    def n_supervision_samples(self) -> int:
+        return len(self.supervision_times)
 
 
 @dataclass(frozen=True)
@@ -210,13 +254,79 @@ def build_series(
             report.skip(f"track shorter than one window ({config.lookback_s:.0f}s)")
             continue
 
+        supervision_times, supervision_values, supervision_weights = _build_supervision(
+            flight, samples, frame, grid, resampled, config
+        )
         series.append(FlightSeries(
             flight_id=flight_key(scenario.source, index), scenario=scenario, frame=frame,
             times=grid, values=resampled,
+            supervision_times=supervision_times,
+            supervision_values=supervision_values,
+            supervision_weights=supervision_weights,
         ))
         report.built += 1
 
     return series, report
+
+
+def _build_supervision(
+    flight: dict[str, Any],
+    measured_samples,
+    frame: Frame,
+    grid: np.ndarray,
+    measured_values: np.ndarray,
+    config: TSConfig,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Observed six-channel labels plus low-weight, position-only fitted tail labels."""
+    channel_count = len(CHANNELS)
+    # Row weights sum to one, preserving the previous all-channel mean-MSE scale.
+    measured_weights = np.full(
+        measured_values.shape, 1.0 / channel_count, dtype=np.float64
+    )
+    if (
+        config.fitted_tail_position_weight == 0.0
+        and config.fitted_terminal_position_weight == 0.0
+    ):
+        return grid, measured_values, measured_weights
+
+    fitted = fit_flight_final_approach(flight)
+    if fitted is None:
+        return grid, measured_values, measured_weights
+    tail = fitted.uniform_tail(after_time_s=float(grid[-1]), dt_s=config.dt_s)
+    if not tail:
+        return grid, measured_values, measured_weights
+
+    # Kinematics are placeholders required by the fixed six-channel tensor shape.  Their
+    # supervision weights below are zero, so no extrapolated velocity enters the loss.
+    terminal_state = measured_samples[-1][1]
+    tail_states = [
+        (
+            row.time_s,
+            type(terminal_state)(
+                latitude=row.point.lat,
+                longitude=row.point.lon,
+                altitude=row.point.alt_m,
+                V=terminal_state.V,
+                psi=terminal_state.psi,
+                gamma=terminal_state.gamma,
+                m=terminal_state.m,
+            ),
+        )
+        for row in tail
+    ]
+    tail_times, tail_values = channels_from_states(tail_states, frame)
+    tail_weights = np.zeros_like(tail_values)
+    for index in POSITION_IDX:
+        tail_weights[:, index] = config.fitted_tail_position_weight / len(POSITION_IDX)
+        tail_weights[-1, index] += (
+            config.fitted_terminal_position_weight / len(POSITION_IDX)
+        )
+
+    return (
+        np.concatenate([grid, tail_times]),
+        np.concatenate([measured_values, tail_values], axis=0),
+        np.concatenate([measured_weights, tail_weights], axis=0),
+    )
 
 
 # ── Windowing ────────────────────────────────────────────────────────────────
@@ -234,19 +344,22 @@ def window_anchors(series: FlightSeries, config: TSConfig) -> range:
     """
     first = config.seq_len - 1
     if config.horizon_mode == HORIZON_FULL:
-        last = series.n_samples - 2          # need at least one future sample
+        # An anchor is always observed; fitted rows can be TARGETS but never model inputs.
+        last = min(series.n_samples - 1, series.n_supervision_samples - 2)
     else:
-        last = series.n_samples - config.pred_len - 1
+        last = min(
+            series.n_samples - 1,
+            series.n_supervision_samples - config.pred_len - 1,
+        )
     return range(first, last + 1) if last >= first else range(0)
 
 
 class TrajectoryWindows(Dataset):
-    """``(x[L, C], y[H, C], mask[H])`` windows over a list of :class:`FlightSeries`.
+    """``(x[L,C], y[H,C], weights[H,C])`` windows over :class:`FlightSeries`.
 
-    ``mask`` is 1.0 on real future samples and 0.0 on padding; in window mode it is all
-    ones. The loss multiplies by it, so padded tail steps contribute nothing — without
-    that, every short approach would train the model to predict its own zero padding and
-    the tail of every forecast would collapse toward the threshold.
+    Measured rows supervise all six channels. Fitted rows supervise only ``e/n/u`` at lower
+    weight, and padding is zero everywhere. Thus extrapolated velocity never becomes a
+    label, while the fitted crossing still contributes terminal position error.
     """
 
     def __init__(self, series: Sequence[FlightSeries], config: TSConfig, normalizer: Normalizer):
@@ -260,7 +373,9 @@ class TrajectoryWindows(Dataset):
         ]
         # Standardise once up front rather than per __getitem__ — the series are small
         # (a few hundred rows each) and this is read on every epoch.
-        self.encoded = [normalizer.encode(s.values).astype(np.float32) for s in self.series]
+        self.encoded = [
+            normalizer.encode(s.supervision_values).astype(np.float32) for s in self.series
+        ]
 
     def __len__(self) -> int:
         return len(self.index)
@@ -272,12 +387,15 @@ class TrajectoryWindows(Dataset):
 
         x = values[anchor - L + 1 : anchor + 1]
         future = values[anchor + 1 : anchor + 1 + H]
+        future_weights = self.series[s_idx].supervision_weights[
+            anchor + 1 : anchor + 1 + H
+        ]
         y = np.zeros((H, C), dtype=np.float32)
-        mask = np.zeros(H, dtype=np.float32)
+        weights = np.zeros((H, C), dtype=np.float32)
         y[: len(future)] = future
-        mask[: len(future)] = 1.0
+        weights[: len(future_weights)] = future_weights
 
-        return torch.from_numpy(x.copy()), torch.from_numpy(y), torch.from_numpy(mask)
+        return torch.from_numpy(x.copy()), torch.from_numpy(y), torch.from_numpy(weights)
 
 
 def _split_fraction(flight_id: str, seed: int) -> float:

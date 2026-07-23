@@ -16,6 +16,7 @@ from typing import Any
 from aircraft.aero_params import aero_params_for_aircraft
 
 from .datum import flight_to_msl, flights_to_msl
+from .fitted_approach import fit_flight_final_approach
 from .runway_target import threshold_target_state
 from .scenario import FlightScenario, aircraft_for_code
 from .start_state import DEFAULT_WINDOW_S, final_state_from_track, initial_state_from_track
@@ -29,6 +30,7 @@ def build_scenario(
     mass_kg: float | None = None,
     window_s: float = DEFAULT_WINDOW_S,
     target_from_threshold: bool = False,
+    target_from_fitted_adsb: bool = False,
 ) -> FlightScenario:
     """Build one :class:`FlightScenario` from a single CZML-input ``flight`` dict.
 
@@ -38,10 +40,10 @@ def build_scenario(
     ``"A320"``) is an explicit fallback, used only when the ``icao24`` can't be resolved.
     ``mass_kg`` defaults to the aircraft's landing mass (these are approach scenarios).
 
-    ``target_from_threshold`` chooses the **target** state: when ``False`` (default) it is
-    derived from the end of the observed track; when ``True`` it is the published runway
-    threshold (a clean approach endpoint — at the threshold-crossing height, Vref, runway
-    heading, glidepath), falling back to the track end if the threshold isn't in the config.
+    ``target_from_threshold`` chooses the published runway endpoint.  The mutually exclusive
+    ``target_from_fitted_adsb`` chooses the OLS-extrapolated flown threshold crossing: fitted
+    position with measured terminal kinematics.  With neither flag the target remains the
+    last observed sample for generic callers.
     ``airport`` supplies the arrival airport for the threshold lookup (the CZML-input flight's
     own ``arr_airport`` is often empty — the airport lives in the file path).
 
@@ -52,6 +54,8 @@ def build_scenario(
     :func:`load_model_arrivals` pay only a tag check. See ``flight_scenarios/datum.py``.
     """
     flight = flight_to_msl(flight)
+    if target_from_threshold and target_from_fitted_adsb:
+        raise ValueError("threshold and fitted ADS-B targets are mutually exclusive")
     aircraft = _resolve_aircraft(flight, aircraft_type)
     mass = mass_kg if mass_kg is not None else aircraft.landing_mass
     arr_airport = airport or flight.get("arr_airport")
@@ -72,6 +76,18 @@ def build_scenario(
         )
         if target is not None:
             target_source = "runway_threshold"
+    elif target_from_fitted_adsb:
+        fitted = fit_flight_final_approach(flight, velocity_window_s=window_s)
+        if fitted is None:
+            raise ValueError(
+                f"flight {flight.get('id')!r} has no usable fitted final approach for "
+                f"runway {flight.get('runway')!r}"
+            )
+        measured_terminal = final_state_from_track(
+            waypoints, mass_kg=mass, window_s=window_s
+        )
+        target = fitted.target_state(measured_terminal)
+        target_source = "fitted_adsb_crossing"
     if target is None:
         target = final_state_from_track(waypoints, mass_kg=mass, window_s=window_s)
     aero = aero_params_for_aircraft(aircraft)
@@ -111,6 +127,7 @@ def build_scenarios_from_arrivals(
     mass_kg: float | None = None,
     window_s: float = DEFAULT_WINDOW_S,
     target_from_threshold: bool = False,
+    target_from_fitted_adsb: bool = False,
 ) -> list[FlightScenario]:
     """Build a scenario per flight in an arrival manifest (or already-loaded list).
 
@@ -125,6 +142,7 @@ def build_scenarios_from_arrivals(
         build_scenario(
             flight, aircraft_type, airport=airport, mass_kg=mass_kg, window_s=window_s,
             target_from_threshold=target_from_threshold,
+            target_from_fitted_adsb=target_from_fitted_adsb,
         )
         for flight in flights
     ]

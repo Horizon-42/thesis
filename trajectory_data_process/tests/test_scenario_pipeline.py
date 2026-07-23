@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 import run_scenario_pipeline as pipeline
 
 
@@ -35,3 +37,28 @@ def test_dry_run_accepts_arrival_manifest_scheduled_by_observed_stage(tmp_path, 
         skip_optimize=False,
         input_will_exist=True,
     ) is True
+
+
+def test_fitted_adsb_plan_uses_fitted_target_and_renamed_category(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline, "HARVEST_TRACKS_ROOT", tmp_path / "harvest")
+    monkeypatch.setattr(pipeline, "SCENARIOS_DIR", tmp_path / "scenarios")
+    monkeypatch.setattr(pipeline, "OPT_OUTPUTS_ROOT", tmp_path / "optimization")
+    monkeypatch.setattr(pipeline, "COMPARISON_AIRPORTS_ROOT", tmp_path / "frontend")
+
+    plan = pipeline.Plan("KRDU", "fitted-adsb", False, ("eval",))
+    assert plan.category == "fitted_adsb"
+    assert plan.label == "Fitted ADS-B crossing"
+    assert plan.scenarios.name == "KRDU_arrivals_fitted_adsb_scenarios.json"
+    scenario_command = plan.steps()[0][1]
+    assert "--target-from-fitted-adsb" in scenario_command
+    assert "adsb" not in pipeline.TARGET_TYPES
+
+
+def test_fitted_adsb_rejects_procedure_constraints():
+    with pytest.raises(ValueError, match="incompatible"):
+        pipeline.Plan("KRDU", "fitted-adsb", True, ("eval",))
+
+
+def test_legacy_adsb_target_type_is_no_longer_a_mode():
+    with pytest.raises(ValueError, match="unknown target type"):
+        pipeline.Plan("KRDU", "adsb", False, ("eval",))

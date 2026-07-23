@@ -669,7 +669,7 @@ def _upsert_category(
 
     Each ``--category`` run writes its CZMLs into its own subdir and records itself here, so
     the frontend can offer a selector listing exactly the optimization categories that exist
-    (e.g. ADS-B target / runway target / …, with/without constraints). ``constrained`` is
+    (e.g. fitted ADS-B crossing / runway target / …). ``constrained`` is
     stamped as an explicit manifest field — the frontend keys constraint-scoped behavior
     (the Observe procedure auto-open) off it, never off the key/dir spelling. Returns the
     new total.
@@ -679,7 +679,13 @@ def _upsert_category(
         loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
         if isinstance(loaded, dict) and isinstance(loaded.get("categories"), list):
             manifest = loaded
-    kept = [c for c in manifest["categories"] if c.get("key") != key]
+    # The old mode was both semantically wrong (raw receiver cutoff) and misspelled
+    # ``asdb``. Once the replacement is published, hide legacy aliases from the picker
+    # without deleting their on-disk output directories.
+    replaced = {key}
+    if key == "fitted_adsb":
+        replaced.update({"adsb", "asdb", "adsb_cons", "asdb_cons"})
+    kept = [c for c in manifest["categories"] if c.get("key") not in replaced]
     kept.append({"key": key, "label": label, "dir": directory, "groups": group_count,
                  "constrained": constrained})
     manifest["categories"] = sorted(kept, key=lambda c: c["key"])
@@ -704,7 +710,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--category", default=None,
-        help="optimization-category key (e.g. asdb / runway / runway_cons). When set, "
+        help="optimization-category key (e.g. fitted_adsb / runway / runway_cons). When set, "
              "the output-dir is treated as that category's subdir and a categories.json manifest "
              "is written to its parent so the frontend can offer a category selector.",
     )

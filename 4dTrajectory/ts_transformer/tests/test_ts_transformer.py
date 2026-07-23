@@ -65,6 +65,35 @@ def _series(n_flights=8, mode=HORIZON_WINDOW, **config_overrides):
     return series, config
 
 
+def _fitted_tail_flight():
+    """A 100 m/s northbound final ending 500 m short of its published threshold."""
+    from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon
+
+    lat0, lon0, elevation = 35.0, -78.0, 100.0
+    cross_m, crossing_height_m = 25.0, 17.5
+    waypoints = []
+    for along_m in range(-5000, 0, 500):
+        time_s = (along_m + 5000) / 100.0
+        height = crossing_height_m - math.tan(math.radians(3.0)) * along_m
+        waypoints.append([
+            time_s,
+            lon0 + cross_m / metres_per_deg_lon(lat0),
+            lat0 + along_m / METRES_PER_DEG_LAT,
+            elevation + height,
+        ])
+    return {
+        "id": "FIT001", "callsign": "FIT001", "type": "A320", "icao24": "abc001",
+        "arr_airport": "KFIT", "runway": "36",
+        "landing_time_utc": "2026-01-01T00:00:00Z",
+        "altitude_source": "opensky_history_geoaltitude_m_to_msl_egm96",
+        "runway_target": {
+            "lat": lat0, "lon": lon0, "elevation_msl_m": elevation, "course_deg": 0.0,
+            "threshold_crossing_height_m": 15.0, "published_glidepath_deg": 3.0,
+        },
+        "waypoints": waypoints,
+    }
+
+
 # ── Channel contract ─────────────────────────────────────────────────────────
 
 def test_channels_round_trip_reproduces_the_original_states():
@@ -209,7 +238,7 @@ def test_window_mode_anchors_require_a_full_unpadded_horizon():
 
     dataset = TrajectoryWindows([s], config, Normalizer.fit([s]))
     _, _, mask = dataset[len(dataset) - 1]
-    assert mask.sum() == config.pred_len  # nothing padded in window mode
+    assert float(mask.sum()) == pytest.approx(config.pred_len)  # nothing padded in window mode
 
 
 def test_full_mode_pads_the_tail_and_masks_it_out():
@@ -237,6 +266,40 @@ def test_masked_mse_ignores_padded_steps():
 
     all_valid = torch.tensor([[1.0, 1.0]])
     assert float(masked_mse(predicted, target, all_valid)) > 1.0
+
+
+def test_fitted_tail_supervises_position_only_and_keeps_observed_inputs_separate():
+    config = config_for_mode(HORIZON_FULL, seq_len=3, pred_len=3, dt_s=2.0)
+    series, report = build_series([_fitted_tail_flight()], config, airport="KFIT")
+    assert report.built == 1
+    s = series[0]
+
+    # Observations stop at t=44 (the raw t=45 endpoint is off-grid); fitted labels continue
+    # at t=46/48/50, but series.values — the forecast input — remains measured-only.
+    assert s.times[-1] == pytest.approx(44.0)
+    assert s.supervision_times[-3:] == pytest.approx([46.0, 48.0, 50.0])
+    assert s.n_supervision_samples == s.n_samples + 3
+
+    tail_weights = s.supervision_weights[s.n_samples:]
+    assert np.all(tail_weights[:, 3:] == 0.0)
+    assert tail_weights.sum(axis=1) == pytest.approx([0.25, 0.25, 1.25])
+    assert s.supervision_values[-1, ch.IDX["e"]] == pytest.approx(25.0, abs=1e-6)
+    assert s.supervision_values[-1, ch.IDX["n"]] == pytest.approx(0.0, abs=1e-6)
+    assert s.supervision_values[-1, ch.IDX["u"]] == pytest.approx(2.5, abs=1e-6)
+
+    dataset = TrajectoryWindows(series, config, Normalizer.fit(series))
+    assert dataset.index[-1] == (0, s.n_samples - 1)
+    x, _, weights = dataset[len(dataset) - 1]
+    assert x.shape == (config.seq_len, len(config.channels))
+    assert weights.sum() == pytest.approx(1.75)
+    assert torch.all(weights[:, 3:] == 0.0)
+
+
+def test_channel_weighted_mse_ignores_fitted_velocity_placeholders():
+    predicted = torch.zeros((1, 1, len(ch.CHANNELS)))
+    target = torch.tensor([[[1.0, 1.0, 1.0, 999.0, 999.0, 999.0]]])
+    weights = torch.tensor([[[1 / 3, 1 / 3, 1 / 3, 0.0, 0.0, 0.0]]])
+    assert float(masked_mse(predicted, target, weights)) == pytest.approx(1.0)
 
 
 def test_split_by_flight_is_disjoint_and_reproducible():
