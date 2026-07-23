@@ -71,6 +71,14 @@ describe("EvaluationReportWindow", () => {
     const deviationFigure = deviation3D.closest("figure")!;
     const timeFigure = screen.getByRole("img", { name: "Flight time scatter" }).closest("figure")!;
     expect(timeFigure.previousElementSibling).toBe(deviationFigure);
+    // The complete plot region is an interaction boundary: events over its
+    // overlays or empty space must not reach and scroll/activate the report.
+    const stage = deviation3D.parentElement!;
+    const dialog = deviation3D.closest('[role="dialog"]')!;
+    const leakedWheel = vi.fn();
+    dialog.addEventListener("wheel", leakedWheel);
+    fireEvent.wheel(stage, { deltaY: 100 });
+    expect(leakedWheel).not.toHaveBeenCalled();
     // verdict rows: gate-failed row flagged, unsolved row grayed with its reason
     const failRow = screen.getByText("FDX1449").closest("tr")!;
     expect(failRow.className).toContain("eval-row-fail");

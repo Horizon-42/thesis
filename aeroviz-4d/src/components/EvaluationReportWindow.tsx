@@ -22,7 +22,6 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
-  type WheelEvent as ReactWheelEvent,
 } from "react";
 import { createPortal } from "react-dom";
 import type { EvaluationReport, EvaluationRow } from "../data/evaluationReport";
@@ -283,6 +282,7 @@ const DeviationScatter3D = memo(function DeviationScatter3D({
   lateralGate: number;
   verticalBand: [number, number];
 }) {
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<DeviationScatterRenderer | null>(null);
   const viewRef = useRef<DeviationOrbitView>({ ...DEFAULT_3D_VIEW });
@@ -302,6 +302,36 @@ const DeviationScatter3D = memo(function DeviationScatter3D({
   function clearHover() {
     setHovered(null);
   }
+
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+
+    // This is intentionally a native, non-passive boundary on the complete
+    // stage rather than a React onWheel on the canvas. It covers the legend,
+    // reset button and empty stage space, and stops the event before it can
+    // reach the report's scroll container.
+    const onStageWheel = (event: WheelEvent) => {
+      viewRef.current.distance = Math.min(
+        6.5,
+        Math.max(2.15, viewRef.current.distance + event.deltaY * 0.003),
+      );
+      clearHover();
+      requestDraw();
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    const onStageContextMenu = (event: MouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    stage.addEventListener("wheel", onStageWheel, { passive: false });
+    stage.addEventListener("contextmenu", onStageContextMenu);
+    return () => {
+      stage.removeEventListener("wheel", onStageWheel);
+      stage.removeEventListener("contextmenu", onStageContextMenu);
+    };
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -355,7 +385,11 @@ const DeviationScatter3D = memo(function DeviationScatter3D({
   }, [points, lateralGate, verticalBand[0], verticalBand[1]]);
 
   function onCanvasPointerDown(event: ReactPointerEvent<HTMLCanvasElement>) {
-    if (event.button !== 0) return;
+    if (event.button !== 0) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     dragRef.current = {
       pointerId: event.pointerId,
       x: event.clientX,
@@ -365,6 +399,7 @@ const DeviationScatter3D = memo(function DeviationScatter3D({
     event.currentTarget.classList.add("is-dragging");
     clearHover();
     event.preventDefault();
+    event.stopPropagation();
   }
 
   function onCanvasPointerMove(event: ReactPointerEvent<HTMLCanvasElement>) {
@@ -381,6 +416,7 @@ const DeviationScatter3D = memo(function DeviationScatter3D({
       );
       requestDraw();
       event.preventDefault();
+      event.stopPropagation();
       return;
     }
 
@@ -393,6 +429,7 @@ const DeviationScatter3D = memo(function DeviationScatter3D({
         viewRef.current,
       ) ?? null,
     );
+    event.stopPropagation();
   }
 
   function finishCanvasDrag(event: ReactPointerEvent<HTMLCanvasElement>) {
@@ -403,19 +440,11 @@ const DeviationScatter3D = memo(function DeviationScatter3D({
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
       event.currentTarget.releasePointerCapture?.(event.pointerId);
     }
-  }
-
-  function onCanvasWheel(event: ReactWheelEvent<HTMLCanvasElement>) {
-    viewRef.current.distance = Math.min(
-      6.5,
-      Math.max(2.15, viewRef.current.distance + event.deltaY * 0.003),
-    );
-    clearHover();
-    requestDraw();
-    event.preventDefault();
+    event.stopPropagation();
   }
 
   function onCanvasKeyDown(event: ReactKeyboardEvent<HTMLCanvasElement>) {
+    event.stopPropagation();
     const view = viewRef.current;
     let handled = true;
     if (event.key === "ArrowLeft") view.yaw -= 0.12;
@@ -425,7 +454,12 @@ const DeviationScatter3D = memo(function DeviationScatter3D({
     else if (event.key === "+" || event.key === "=") view.distance = Math.max(2.15, view.distance - 0.2);
     else if (event.key === "-") view.distance = Math.min(6.5, view.distance + 0.2);
     else handled = false;
-    if (!handled) return;
+    if (!handled) {
+      if ([" ", "PageUp", "PageDown", "Home", "End"].includes(event.key)) {
+        event.preventDefault();
+      }
+      return;
+    }
     clearHover();
     requestDraw();
     event.preventDefault();
@@ -440,7 +474,13 @@ const DeviationScatter3D = memo(function DeviationScatter3D({
   return (
     <figure className="dyncmp-chart eval-deviation-3d">
       <figcaption>3D trajectory deviations: lateral × vertical</figcaption>
-      <div className="eval-deviation-3d-stage">
+      <div
+        ref={stageRef}
+        className="eval-deviation-3d-stage"
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => event.stopPropagation()}
+        onDoubleClick={(event) => event.stopPropagation()}
+      >
         <canvas
           ref={canvasRef}
           role="img"
@@ -457,7 +497,6 @@ const DeviationScatter3D = memo(function DeviationScatter3D({
             if (!dragRef.current) clearHover();
             event.currentTarget.classList.remove("is-dragging");
           }}
-          onWheel={onCanvasWheel}
           onKeyDown={onCanvasKeyDown}
         />
         <div className="eval-deviation-3d-axes" aria-hidden="true">
@@ -468,7 +507,10 @@ const DeviationScatter3D = memo(function DeviationScatter3D({
         <button
           type="button"
           className="eval-deviation-3d-reset"
-          onClick={resetView}
+          onClick={(event) => {
+            event.stopPropagation();
+            resetView();
+          }}
           aria-label="Reset 3D view"
         >
           Reset
