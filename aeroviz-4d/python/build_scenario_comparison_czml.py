@@ -18,6 +18,9 @@ Two modes:
   final state FAILED the evaluation gates render their reference in **yellow
   (OFF_TARGET_COLOR)** with status ``offTarget``, and the index's ``optimization`` block
   carries the report's batch metrics (successRate / avgStateErrorM / avgTimeS).
+  A ts_transformer summary additionally publishes its existing ADE/FDE aggregates in
+  the index's ``prediction`` block; the frontend displays those values without recomputing
+  model accuracy.
   Each entity has a globally-unique id ``{kind}-{flightId}_{runway}`` and a ``properties`` bag
   (``group``/``flightId``/``kind``/``runway``/``airport``/``status``) so the frontend can
   group and **randomly sample** trajectories. Entities default to ``show=false`` (override with
@@ -716,6 +719,49 @@ def optimization_stats(
     return stats
 
 
+def prediction_accuracy_stats(summary: dict[str, Any]) -> dict[str, Any] | None:
+    """Frontend ADE/FDE summary for a ts_transformer batch.
+
+    The predictor already computes these aggregates against the observed overlap and writes
+    them to ``summary.json.accuracy``. Publication only changes field casing; it must never
+    recompute trajectory accuracy from rendered CZML.
+    """
+    mode = summary.get("mode")
+    if not isinstance(mode, str) or not mode.startswith("tsTransformer:"):
+        return None
+
+    accuracy = summary.get("accuracy")
+    if not isinstance(accuracy, dict):
+        raise ValueError("ts_transformer summary is missing its accuracy block")
+
+    def spread(source_key: str) -> dict[str, float] | None:
+        source = accuracy.get(source_key)
+        # `accuracy_block` omits error spreads when no forecast overlaps its observed
+        # reference. That is a valid empty result; the UI renders unavailable metrics.
+        if source is None:
+            return None
+        if not isinstance(source, dict):
+            raise ValueError(
+                f"ts_transformer summary accuracy.{source_key} is malformed"
+            )
+        mean_value = source.get("mean")
+        p95_value = source.get("p95")
+        if not isinstance(mean_value, (int, float)) or not isinstance(
+            p95_value, (int, float)
+        ):
+            raise ValueError(
+                f"ts_transformer summary accuracy.{source_key} requires mean and p95"
+            )
+        return {"mean": float(mean_value), "p95": float(p95_value)}
+
+    return {
+        "flights": accuracy.get("flights"),
+        "flightsWithoutOverlap": accuracy.get("flights_without_overlap"),
+        "adeM": spread("ade_m"),
+        "fdeM": spread("fde_m"),
+    }
+
+
 def group_results_by_runway(
     summary: dict[str, Any], fallback_airport: str | None = None
 ) -> dict[tuple[str, str], list[dict[str, Any]]]:
@@ -804,6 +850,9 @@ def publish_comparison_batch(
             )
 
         index["optimization"] = optimization_stats(summary, evaluation_report)
+        prediction = prediction_accuracy_stats(summary)
+        if prediction is not None:
+            index["prediction"] = prediction
         report_name = f"evaluation_report_{generation}.json"
         report_path = publish_evaluation_report(
             evaluation_report, out_dir, filename=report_name

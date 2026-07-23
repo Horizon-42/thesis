@@ -1,7 +1,7 @@
 /**
  * EvaluationReportWindow.tsx
  * --------------------------
- * The detailed evaluation view behind the Optimization block's "Details" button:
+ * The detailed evaluation view behind the Observe evaluation block's "Details" button:
  * a draggable floating window (same shell/pattern as the Dynamics-Comparison
  * charts) rendering the backend evaluation report — summary cards, gate note,
  * aggregate table, per-flight deviation charts and the full verdict table.
@@ -36,6 +36,8 @@ import {
 
 interface Props {
   report: EvaluationReport;
+  /** Subject-aware heading, e.g. "Observed Baseline Evaluation Report". */
+  title: string;
   /** e.g. "KRDU · Runway target (constrained)" */
   subtitle: string;
   onClose: () => void;
@@ -498,7 +500,7 @@ function rowWhy(row: EvaluationRow): string {
   return row.reason ?? row.violations.join("; ");
 }
 
-export default function EvaluationReportWindow({ report, subtitle, onClose }: Props) {
+export default function EvaluationReportWindow({ report, title, subtitle, onClose }: Props) {
   const solvedRows = useMemo(() => report.trajectories.filter((r) => r.solved), [report]);
   const referenceRows = useMemo(
     () => solvedRows.filter((r) => r.reference?.flight_time_delta_s !== undefined),
@@ -643,7 +645,7 @@ export default function EvaluationReportWindow({ report, subtitle, onClose }: Pr
       ref={windowRef}
       className={`dyncmp-charts-overlay eval-report-window${position ? "" : " is-centered"}`}
       role="dialog"
-      aria-label="Evaluation report"
+      aria-label={title}
       style={position ? { left: position.x, top: position.y } : undefined}
     >
       <header
@@ -653,7 +655,7 @@ export default function EvaluationReportWindow({ report, subtitle, onClose }: Pr
         onPointerUp={onHeaderPointerUp}
       >
         <div className="dyncmp-charts-titles">
-          <h3>Evaluation report</h3>
+          <h3>{title}</h3>
           <p>{subtitle}</p>
         </div>
         <button type="button" className="dyncmp-charts-close" onClick={onClose}>

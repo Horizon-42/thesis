@@ -180,7 +180,7 @@ export default function ControlPanel({ observedVerdicts = NO_VERDICTS }: Control
             {trajectoryComparison ? (
               comparisonCategories.length > 0 ? (
                 <label className="control-panel-airport-selector">
-                  <span>Optimization category</span>
+                  <span>Evaluation category</span>
                   <select
                     className="control-panel-airport-selector-input"
                     value={trajectoryComparisonCategory ?? ""}

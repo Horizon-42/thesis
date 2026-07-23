@@ -2955,15 +2955,15 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 .flight-table tr.selected td { background: #1a3a6a; }
 
 
-/* Optimization block header row: title + the Details (evaluation report) button. */
-.optimization-summary-head {
+/* Subject-aware evaluation block: title, context and Details button. */
+.evaluation-summary-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
 }
 
-.optimization-summary-details {
+.evaluation-summary-details {
   background: #1d2a44;
   color: #9fc3ff;
   border: 1px solid #33507e;
@@ -2973,16 +2973,16 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   cursor: pointer;
 }
 
-.optimization-summary-details:hover:not(:disabled) {
+.evaluation-summary-details:hover:not(:disabled) {
   background: #24365a;
 }
 
-.optimization-summary-details:disabled {
+.evaluation-summary-details:disabled {
   opacity: 0.45;
   cursor: default;
 }
 
-.optimization-summary-error {
+.evaluation-summary-error {
   color: #ff9d7a;
   font-size: 10px;
   margin: 4px 0 0;
@@ -3171,8 +3171,8 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   font-size: 10px;
 }
 
-/* ── Optimization summary (below the flight list) ─────────────────────────── */
-.optimization-summary {
+/* ── Evaluation summary (below the flight list) ───────────────────────────── */
+.evaluation-summary {
   color: #c8d8ec;
   font-size: 11px;
   margin-top: 6px;
@@ -3180,29 +3180,62 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   border-top: 1px solid #2a3550;
 }
 
-.optimization-summary h4 {
+.evaluation-summary h4 {
   margin: 0 0 4px;
   font-size: 12px;
   font-weight: 600;
 }
 
-.optimization-summary dl { margin: 0; }
+.evaluation-summary-context {
+  margin: -2px 0 6px;
+  color: #6f86a2;
+  font-size: 9.5px;
+  line-height: 1.35;
+}
 
-.optimization-summary-row {
+.evaluation-summary dl { margin: 0; }
+
+.evaluation-summary-row {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
   padding: 2px 4px;
 }
 
-.optimization-summary-row dt { color: #91a7c2; }
+.evaluation-summary-row dt {
+  color: #91a7c2;
+  padding-right: 10px;
+}
 
-.optimization-summary-row dd {
+.evaluation-summary-row dd {
   margin: 0;
+  flex-shrink: 0;
   font-variant-numeric: tabular-nums;
 }
 
-.optimization-summary-pending { color: #6f86a2; }
+.evaluation-summary-pending { color: #6f86a2; }
+
+.evaluation-summary-notes {
+  margin-top: 7px;
+  padding: 7px 8px;
+  border: 1px solid #293b59;
+  border-radius: 4px;
+  background: rgba(21, 34, 56, 0.72);
+  color: #8ea4c4;
+  font-size: 9.5px;
+  line-height: 1.4;
+}
+
+.evaluation-summary-notes strong {
+  color: #b8cae2;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.evaluation-summary-notes p {
+  margin: 3px 0 0;
+}
 
 /* ── Procedure details page ──────────────────────────────────────────────── */
 .procedure-details-page {

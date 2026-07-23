@@ -41,9 +41,16 @@ const REPORT: EvaluationReport = {
 
 describe("EvaluationReportWindow", () => {
   it("renders the report's cards, aggregates and verdict rows (backend numbers verbatim)", () => {
-    render(<EvaluationReportWindow report={REPORT} subtitle="KRDU · runway_cons" onClose={vi.fn()} />);
+    render(
+      <EvaluationReportWindow
+        report={REPORT}
+        title="Optimization Evaluation Report"
+        subtitle="KRDU · runway_cons"
+        onClose={vi.fn()}
+      />,
+    );
 
-    expect(screen.getByRole("dialog", { name: "Evaluation report" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Optimization Evaluation Report" })).toBeTruthy();
     expect(screen.getByText("KRDU · runway_cons")).toBeTruthy();
     // cards
     expect(screen.getByText("solve rate 66.7%")).toBeTruthy();
@@ -74,7 +81,14 @@ describe("EvaluationReportWindow", () => {
   });
 
   it("gives each statistic its own aggregates column (p95 and min never share one)", () => {
-    render(<EvaluationReportWindow report={REPORT} subtitle="x" onClose={vi.fn()} />);
+    render(
+      <EvaluationReportWindow
+        report={REPORT}
+        title="Optimization Evaluation Report"
+        subtitle="x"
+        onClose={vi.fn()}
+      />,
+    );
     const aggregates = screen.getByRole("table", { name: /Aggregates/ });
 
     const headers = Array.from(aggregates.querySelectorAll("thead th")).map((h) => h.textContent);
@@ -115,7 +129,14 @@ describe("EvaluationReportWindow", () => {
 
   it("closes via the Close button", () => {
     const onClose = vi.fn();
-    render(<EvaluationReportWindow report={REPORT} subtitle="x" onClose={onClose} />);
+    render(
+      <EvaluationReportWindow
+        report={REPORT}
+        title="Optimization Evaluation Report"
+        subtitle="x"
+        onClose={onClose}
+      />,
+    );
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(onClose).toHaveBeenCalled();
   });
@@ -128,7 +149,14 @@ describe("EvaluationReportWindow", () => {
       lateral_m: null, vertical_m: null, final_time_s: null, reference: null,
       trajectories: [REPORT.trajectories[2]],
     };
-    render(<EvaluationReportWindow report={bare} subtitle="x" onClose={vi.fn()} />);
+    render(
+      <EvaluationReportWindow
+        report={bare}
+        title="Optimization Evaluation Report"
+        subtitle="x"
+        onClose={vi.fn()}
+      />,
+    );
     expect(screen.getByText("No solved trajectories to chart.")).toBeTruthy();
     expect(screen.queryByText(/mean Δt vs observed/)).toBeNull();
   });

@@ -22,6 +22,7 @@ from build_scenario_comparison_czml import (
     group_results_by_runway,
     load_verdicts,
     optimization_stats,
+    prediction_accuracy_stats,
     publish_comparison_batch,
     prune_unreferenced_outputs,
     states_schema,
@@ -467,6 +468,95 @@ def test_optimization_stats_merges_summary_and_report():
     empty = optimization_stats(summary, {"successful": 0, "success_rate": 0.0,
                                          "lateral_m": None, "final_time_s": None})
     assert empty["avgStateErrorM"] is None and empty["avgTimeS"] is None
+
+
+def test_prediction_accuracy_stats_publishes_existing_ade_and_fde():
+    summary = {
+        "mode": "tsTransformer:itransformer:full:test",
+        "accuracy": {
+            "flights": 152,
+            "flights_without_overlap": 0,
+            "ade_m": {"mean": 1755.6, "p95": 4656.2, "max": 9012.0},
+            "fde_m": {"mean": 2082.4, "p95": 6002.1, "max": 10024.0},
+        },
+    }
+    assert prediction_accuracy_stats(summary) == {
+        "flights": 152,
+        "flightsWithoutOverlap": 0,
+        "adeM": {"mean": 1755.6, "p95": 4656.2},
+        "fdeM": {"mean": 2082.4, "p95": 6002.1},
+    }
+    assert prediction_accuracy_stats({"mode": "runway", "total": 4}) is None
+    assert prediction_accuracy_stats({
+        "mode": "tsTransformer:itransformer:full:test",
+        "accuracy": {"flights": 0, "flights_without_overlap": 3},
+    }) == {
+        "flights": 0,
+        "flightsWithoutOverlap": 3,
+        "adeM": None,
+        "fdeM": None,
+    }
+
+
+def test_prediction_accuracy_stats_rejects_incomplete_predictor_summary():
+    import pytest
+
+    with pytest.raises(ValueError, match="missing its accuracy block"):
+        prediction_accuracy_stats({"mode": "tsTransformer:patchtst:window:test"})
+
+
+def test_prediction_batch_commits_accuracy_to_comparison_index(monkeypatch, tmp_path):
+    summary = {
+        "mode": "tsTransformer:itransformer:full:test",
+        "total": 1,
+        "solved": 1,
+        "failed": 0,
+        "results": [{"id": "ONE", "runway": "05L"}],
+        "accuracy": {
+            "flights": 1,
+            "flights_without_overlap": 0,
+            "ade_m": {"mean": 125.0, "p95": 125.0},
+            "fde_m": {"mean": 240.0, "p95": 240.0},
+        },
+    }
+
+    monkeypatch.setattr(
+        comparison_builder,
+        "build_runway_comparison",
+        lambda results, *_args, airport, **_kwargs: (
+            [{"id": "document"}],
+            [{
+                "group": results[0]["id"],
+                "flightId": results[0]["id"],
+                "runway": results[0]["runway"],
+                "airport": airport,
+                "status": "solved",
+                "entities": [],
+            }],
+        ),
+    )
+
+    index = publish_comparison_batch(
+        summary=summary,
+        states_dir=tmp_path,
+        out_dir=tmp_path,
+        airport="KRDU",
+        category="ts_itr_full_test",
+        start_hidden=True,
+        scenario_initial=None,
+        evaluation_report={"total": 1, "successful": 0, "success_rate": 0.0,
+                           "lateral_m": None, "final_time_s": None, "trajectories": []},
+        generation="prediction123",
+    )
+
+    assert index["prediction"] == {
+        "flights": 1,
+        "flightsWithoutOverlap": 0,
+        "adeM": {"mean": 125.0, "p95": 125.0},
+        "fdeM": {"mean": 240.0, "p95": 240.0},
+    }
+    assert json.loads((tmp_path / "comparison_index.json").read_text())["prediction"] \
+        == index["prediction"]
 
 
 def test_publish_evaluation_report_copies_verbatim(tmp_path):

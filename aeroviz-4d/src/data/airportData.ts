@@ -79,7 +79,7 @@ export function airportComparisonRootUrl(airportCode: string): string {
   return `${airportDataRootUrl(airportCode)}/comparison`;
 }
 
-/** Manifest of available optimization categories (ADS-B / runway target, ±constraints). */
+/** Manifest of available observed, optimization and data-driven evaluation categories. */
 export function airportComparisonCategoriesUrl(airportCode: string): string {
   return `${airportComparisonRootUrl(airportCode)}/categories.json`;
 }
@@ -115,7 +115,7 @@ export function airportComparisonCzmlUrl(
  */
 export const OBSERVED_CATEGORY_KEY = "observed";
 
-/** One optimization category, as listed in `comparison/categories.json`. */
+/** One evaluation category, as listed in `comparison/categories.json`. */
 export interface ComparisonCategory {
   /** Stable key, e.g. "asdb" / "runway" / "runway_cons". */
   key: string;
@@ -219,6 +219,19 @@ export interface OptimizationStats {
   avgTimeS?: number | null;
 }
 
+export interface PredictionErrorSpread {
+  mean?: number | null;
+  p95?: number | null;
+}
+
+/** ADE/FDE summary published from a ts_transformer's `summary.json.accuracy` block. */
+export interface PredictionAccuracyStats {
+  flights?: number | null;
+  flightsWithoutOverlap?: number | null;
+  adeM?: PredictionErrorSpread | null;
+  fdeM?: PredictionErrorSpread | null;
+}
+
 export interface ComparisonIndex {
   schemaVersion: "comparison-v2-generation";
   generation: string;
@@ -228,6 +241,8 @@ export interface ComparisonIndex {
   referenceSource: "canonicalObserved";
   groups: ComparisonGroup[];
   optimization?: OptimizationStats;
+  /** Present only for data-driven prediction categories. */
+  prediction?: PredictionAccuracyStats;
   /** Immutable report artifact committed by this same index generation. */
   evaluationReport: string;
 }
