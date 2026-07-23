@@ -87,6 +87,7 @@ def build_prediction_record(
     index: int,
     model_name: str,
     horizon_mode: str,
+    split: str = "test",
 ) -> PredictionRecord:
     """Assemble the record set for one predicted approach.
 
@@ -138,6 +139,7 @@ def build_prediction_record(
         # True = the fixed horizon ended this forecast short of the threshold; its final
         # state (what the gates judge) is a cap artifact, not a prediction.
         "horizonCapped": forecast.horizon_capped,
+        "predictionSplit": split,
     })
 
     eval_record = reference_evaluation_record(
@@ -221,6 +223,7 @@ def write_batch(
     config_dict: dict[str, Any],
     overlap: Sequence[dict[str, float]],
     checkpoint: str | None = None,
+    split: str = "test",
 ) -> list[Path]:
     """Write every record plus the ``summary.json`` manifest. Returns the eval-file paths.
 
@@ -246,10 +249,15 @@ def write_batch(
         eval_path = out / f"{record.stem}{_EVAL_SUFFIX}"
         reference_path = out / REFERENCES_DIR / f"{record.stem}{_REFERENCE_EVAL_SUFFIX}"
 
+        source = dict(record.source)
+        source["predictionSplit"] = split
+        states_payload = dict(record.states_payload)
+        states_payload["source"] = source
         states_path.write_text(
-            json.dumps(record.states_payload, separators=(",", ":")), encoding="utf-8"
+            json.dumps(states_payload, separators=(",", ":")), encoding="utf-8"
         )
         eval_payload = dict(record.eval_record)
+        eval_payload["source"] = source
         eval_payload["states_ref"] = {"file": states_path.name, "key": "predicted_states"}
         eval_payload["states"] = []
         reference_payload = dict(record.reference_record)
@@ -267,7 +275,6 @@ def write_batch(
         )
         written.append(eval_path)
 
-        source = record.source
         row = summary_row(
             source,
             # A forecast always produces states, so the row is "solved" — but a
@@ -287,6 +294,7 @@ def write_batch(
             "horizon_mode": source.get("horizonMode"),
             "forecast_passes": source.get("forecastPasses"),
             "horizon_capped": source.get("horizonCapped"),
+            "split": split,
             "ade_m": metrics["ade_m"],
             "fde_m": metrics["fde_m"],
             "overlap_steps": metrics["n_steps"],
@@ -295,7 +303,11 @@ def write_batch(
 
     summary = {
         "scenarios": None,
-        "mode": f"tsTransformer:{config_dict.get('model')}:{config_dict.get('horizon_mode')}",
+        "mode": (
+            f"tsTransformer:{config_dict.get('model')}:"
+            f"{config_dict.get('horizon_mode')}:{split}"
+        ),
+        "split": split,
         "checkpoint": checkpoint,
         "config": config_dict,
         "total": len(rows),

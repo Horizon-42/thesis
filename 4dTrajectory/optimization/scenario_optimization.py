@@ -72,12 +72,16 @@ from evaluation_export import (  # noqa: E402
     reference_evaluation_record,
     summary_row,
 )
+from optimization_run_config import (  # noqa: E402
+    DEFAULT_MAX_DURATION_S,
+    DEFAULT_ROLLOUT_DT_S,
+    FITTING_SCHEMES,
+    build_optimization_config,
+)
 
 # Optimizer + rollout defaults (override on the CLI). DEFAULT_N_SEGMENTS / the constrained
 # DEFAULT_N_SEG_PER_PHASE are imported above from the optimizer (its own construction defaults).
 DEFAULT_DT = 1.0                 # optimizer dt (API parity; state mesh is auto-selected)
-DEFAULT_MAX_DURATION_S = 2000.0  # free-time upper bound; the solver minimises T below this
-DEFAULT_ROLLOUT_DT_S = 0.5       # forward-integration step for the simulator rollout
 
 # Fitting (transcription) selection for BOTH solve paths (unconstrained + constrained-IAF);
 # each composes with the normalized full-transport dynamics. "hs" (Hermite-Simpson,
@@ -85,11 +89,6 @@ DEFAULT_ROLLOUT_DT_S = 0.5       # forward-integration step for the simulator ro
 # (2nd order) collapsed the batch success rate; it stays selectable for comparison runs.
 # "rk4" is the 4th-order EXPLICIT shooting defect (same one-step map family as the replay
 # integrator — playback-consistent by construction) at trapezoidal-like per-node cost.
-FITTING_SCHEMES = {
-    "hs": "hermiteSimpsonNormalizedFullTransport",
-    "trapezoidal": "trapezoidalNormalizedFullTransport",
-    "rk4": "rk4NormalizedFullTransport",
-}
 DEFAULT_FITTING = "hs"
 
 
@@ -540,6 +539,15 @@ def optimize_scenarios(
     total = len(scenarios)
     summary = {
         "scenarios": scenarios_label,
+        "optimization_config": build_optimization_config(
+            constrained_iaf=False,
+            fitting=fitting,
+            n_segments=n_segments,
+            n_seg_per_phase=DEFAULT_N_SEG_PER_PHASE,
+            state_substeps=state_substeps,
+            max_duration_s=max_duration,
+            rollout_dt_s=rollout_dt_s,
+        ),
         "total": total,
         "solved": len(written),
         "failed": len(failures),
@@ -1271,6 +1279,16 @@ def optimize_scenarios_constrained_iaf(
     summary = {
         "scenarios": scenarios_label,
         "mode": f"constrainedIaf:{selection}",
+        "optimization_config": build_optimization_config(
+            constrained_iaf=True,
+            fitting=fitting,
+            n_segments=n_segments,
+            n_seg_per_phase=n_seg_per_phase,
+            state_substeps=state_substeps,
+            max_duration_s=max_duration,
+            rollout_dt_s=rollout_dt_s,
+            iaf_selection=selection,
+        ),
         "total": total,
         "solved": len(written),
         "failed": len(failures),

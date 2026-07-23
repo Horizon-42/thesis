@@ -44,14 +44,21 @@ DEFAULT_CIFP = REPO_ROOT / "data/CIFP/CIFP_260319/FAACIFP18"
 DEFAULT_FRONTEND_DATA = REPO_ROOT / "aeroviz-4d/public/data"
 
 
+def _positive_float(value: str) -> float:
+    parsed = float(value)
+    if parsed <= 0.0:
+        raise argparse.ArgumentTypeError(f"must be positive, got {value!r}")
+    return parsed
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m trajectory_data_process.harvest")
     parser.add_argument("--airport", required=True, help="ICAO code, e.g. KRDU")
     parser.add_argument("--count", type=int, default=200,
                         help="assigned landings wanted per runway (default: 200)")
     parser.add_argument("--start", help="ISO UTC instant to scan backward from (default: now)")
-    parser.add_argument("--max-lookback-days", type=float, default=30.0)
-    parser.add_argument("--chunk-hours", type=float, default=6.0)
+    parser.add_argument("--max-lookback-days", type=_positive_float, default=30.0)
+    parser.add_argument("--chunk-hours", type=_positive_float, default=6.0)
     parser.add_argument("--radius-km", type=float, default=30.0)
     parser.add_argument("--entry-radius-km", type=float, default=ENTRY_RADIUS_KM,
                         help="terminal-entry radius for the model-ready arrival dataset")

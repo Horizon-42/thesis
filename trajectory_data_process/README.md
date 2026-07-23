@@ -59,11 +59,10 @@ conda run -n aeroviz python -m trajectory_data_process.harvest \
 only by a successful full harvest; it is intentionally not reconstructed by globbing old
 track files.
 
-The visualization convenience command uses this same downloader and then optionally
-generates procedures:
+Procedure assets are a separate static-data pipeline:
 
 ```bash
-conda run -n aeroviz python run_asd-b_fetch_and_generate.py --airport KRDU
+./generate_aeroviz_airport_procedure_data.sh KRDU
 ```
 
 ## On-disk layout

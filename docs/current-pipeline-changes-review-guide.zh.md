@@ -44,6 +44,15 @@ CZML 发布和脚本拆分的一组关联修改。建议按本文顺序 review�
 - comparison 前端只接受完整 `comparison-v2-generation` index；embedded `ref-*`
   和固定名 report fallback 已删除，batch producer 也拒绝缺少 evaluation report
   的发布；
+- TS checkpoint 锚定 arrival manifest SHA-256 与逐航班 source SHA-256；
+  import-light metadata 同时锚定 checkpoint 本身，`--skip-train` 不再只看文件存在；
+- TS prediction 的目录、frontend category、summary 和 source 均包含 split，非 test
+  运行不能覆盖或伪装成 held-out test 结果；
+- optimizer summary 保存实际 transcription、mesh、state substeps、duration/rollout
+  配置，`--skip-optimize` 会拒绝配置不同的批次；
+- harvest checkpoint schema 已包含 `max_lookback_days`，scan window 参数必须为正；
+- 已淘汰无独占能力的 `run_asd-b_fetch_and_generate.py` wrapper；下载、独立 CZML
+  渲染与 procedure 生成分别使用 canonical 入口；
 - 尚未执行第 12 节的真实 KRDU 大型派生数据重建。
 
 ### 30 分钟快速路径
@@ -59,9 +68,11 @@ CZML 发布和脚本拆分的一组关联修改。建议按本文顺序 review�
    canonical observed 文件。
 7. 验证 comparison batch 原子提交、`--skip-optimize` 完整校验和
    shared-reference cache SHA-256 校验已经落实。
-8. 搜索 derived-data 的 `legacy`/`fallback` 分支，确认旧 observed、arrival、
+8. 验证 TS checkpoint 数据 provenance、split-specific publication，以及 optimizer
+   summary 的 solver recipe 与 reuse 校验。
+9. 搜索 derived-data 的 `legacy`/`fallback` 分支，确认旧 observed、arrival、
    comparison 和 reference schema 都是明确拒绝而非兼容读取。
-9. 运行第 11 节测试；真实 KRDU 派生数据重建放到代码 review 通过之后。
+10. 运行第 11 节测试；真实 KRDU 派生数据重建放到代码 review 通过之后。
 
 ## 2. 开始前：确认 diff 边界
 
@@ -434,6 +445,31 @@ TS prediction/reference 应分别引用：
 `evaluation.load_reference` 还应独立核对优化记录与 reference 的
 `id/icao24/landing_time_utc/runway`，防止绕过 cache 的错误指针进入指标。
 
+### 8.3 TS checkpoint、split 与 optimizer recipe
+
+Review：
+
+```bash
+git diff -- \
+  4dTrajectory/ts_transformer/{config.py,dataset.py,train.py,__main__.py,export.py} \
+  run_ts_pipeline.py \
+  optimization_run_config.py \
+  run_scenario_optimization.py
+```
+
+检查：
+
+- checkpoint 内含 arrival manifest SHA-256 和按 `flight_key` 排序的逐航班
+  `source_sha256`；
+- `checkpoint_metadata.json` 只保存 import-light reuse 所需的 checkpoint 与 manifest
+  digest，不复制逐航班 roster；
+- direct predict 与 `--skip-train` 都拒绝旧/不匹配 checkpoint；
+- train/val/test/all 的 prediction dir、comparison category、summary 和 source 明确分开；
+- optimizer 的 `optimization_config` 只记录实际生效参数：unconstrained 使用
+  whole-trajectory segments，constrained 使用 segments-per-phase；
+- `--skip-optimize` 请求的 fitting/mesh/state substeps 与 summary 不一致时重跑，
+  不能把旧实验结果重新发布为当前配置。
+
 ## 9. 第七轮：comparison 与前端 datasource 复用
 
 Review：
@@ -564,11 +600,10 @@ conda run -n aeroviz python -m pytest \
   4dTrajectory/ts_transformer/tests/test_ts_transformer.py \
   aeroviz-4d/python/tests/test_generate_czml.py \
   aeroviz-4d/python/tests/test_build_scenario_comparison_czml.py \
-  aeroviz-4d/python/tests/test_run_asd_b_pipeline.py \
   -q
 ```
 
-2026-07-23 当前验证结果：`328 passed, 1 warning`。warning 是已有的 PFAF
+2026-07-23 当前验证结果：`346 passed, 1 warning`。唯一 warning 是已有的 PFAF
 intercept-angle warning；不应有失败。
 
 ### 11.2 前端
@@ -699,6 +734,11 @@ count、manifest roster、evaluation totals 和 frontend selection。
 | comparison batch 中途失败 | 旧完整 category 或明确不可用状态 | 旧 index 指向已删除/半成品文件 |
 | 旧 arrival v1/v2 | 通过 preparation 重建 | loader 隐式兼容 |
 | 旧 reference cache v1 / 无 hash | 重新优化生成 v2 cache | `--skip-optimize` 复用 |
+| arrival manifest 在 TS 训练后重建 | 重新训练 | 旧 checkpoint 过滤当前 roster |
+| TS `--split train/val/all` | 独立目录/category 且 summary/source 标注 split | 覆盖 test 发布 |
+| optimizer fitting/mesh 改变 | 新优化批次且 summary 可证明配置 | `--skip-optimize` 复用旧配置 |
+| harvest lookback/chunk 非正数 | — | CLI/plan 在下载前明确失败 |
+| harvest resume 时 lookback 改变 | 新 checkpoint 从当前 start 开始 | 复用越界 cursor |
 | canonical downloaded tracks | 原文件复用且不被改写 | 为迁移派生 schema 而重新下载或覆盖 source data |
 
 ## 14. 最终 Review 结论模板
@@ -717,7 +757,7 @@ count、manifest roster、evaluation totals 和 frontend selection。
 - 只列不改变本次数据契约的后续优化
 
 验证：
-- Python: 328 passed, 1 expected warning
+- Python: 346 passed, 1 expected warning
 - Frontend: 478 passed
 - Build: passed
 - KRDU derived-data rebuild: not run / passed（附 counts 与 du）

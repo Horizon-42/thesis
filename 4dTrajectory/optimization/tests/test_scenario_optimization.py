@@ -160,7 +160,15 @@ def test_optimize_scenarios_skips_failures_and_continues(monkeypatch, tmp_path):
     # jobs=1 (serial): the stub + shared counter live in this process, so the solve must
     # run here — spawned workers re-import the module fresh and would not see the
     # monkeypatch. The skip-and-continue orchestration under test is identical on both paths.
-    written = so.optimize_scenarios(scenarios, output_dir=tmp_path, jobs=1)
+    written = so.optimize_scenarios(
+        scenarios,
+        output_dir=tmp_path,
+        jobs=1,
+        n_segments=12,
+        fitting="rk4",
+        state_substeps=5,
+        rollout_dt_s=0.25,
+    )
     assert attempts["n"] == 2      # both attempted — did NOT abort on the first failure
     assert len(written) == 1       # the infeasible one is skipped, the feasible one written
 
@@ -180,6 +188,15 @@ def test_optimize_scenarios_skips_failures_and_continues(monkeypatch, tmp_path):
 
     summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
     assert all(row["eval_file"].endswith("_eval.json") for row in summary["results"])
+    assert summary["optimization_config"] == {
+        "mode": "unconstrained",
+        "fitting": "rk4",
+        "transcription_scheme": "rk4NormalizedFullTransport",
+        "control_mesh": {"segments": 12},
+        "state_substeps": 5,
+        "max_duration_s": so.DEFAULT_MAX_DURATION_S,
+        "rollout_dt_s": 0.25,
+    }
 
 
 def test_resolve_jobs_auto_and_explicit():

@@ -11,7 +11,8 @@ AeroViz-4D: Airport 4D trajectory and terrain digital-twin visualization system 
 - **aeroviz-4d/** — Main visualization app (React + CesiumJS frontend, Python CZML generator)
 - **trajectory_data_process/** — Trajectory acquisition, processing, and dataset helpers
 - **bc_lidar_downloader/** — BC LiDAR terrain data downloader
-- **run_asd-b_fetch_and_generate.py** — Orchestrator: fetch -> normalize -> generate CZML pipeline
+- **prepare_scenario_inputs.py** — Rebuild derived arrivals/observed outputs and scenario JSON
+- **run_scenario_optimization.py** — Optimize prepared scenarios and publish comparisons
 
 ## Build & Dev Commands
 
@@ -41,15 +42,17 @@ conda run -n aeroviz python -m pytest aeroviz-4d/python/tests/ --cov=. --cov-rep
 ### Data Pipeline (end-to-end)
 
 ```bash
-# Full pipeline: harvest history → manifests → observed CZML/evaluation
-conda run -n aeroviz python run_asd-b_fetch_and_generate.py --airport CYYC --count 200
+# Full observed pipeline: harvest history → manifests → observed CZML/evaluation
+conda run -n aeroviz python -m trajectory_data_process.harvest \
+  --airport CYYC --count 200
 
 # Reuse tracks/manifest.json and rebuild every derived view without fetching
 conda run -n aeroviz python -m trajectory_data_process.harvest --airport CYYC --evaluate-only
 
 # Explicit standalone rendering utility (does not create a harvest)
-conda run -n aeroviz python run_asd-b_fetch_and_generate.py \
-  --airport CYYC --input-json path/to/flight_array.json
+conda run -n aeroviz python aeroviz-4d/python/generate_czml.py \
+  --airport CYYC --input path/to/flight_array.json \
+  --output aeroviz-4d/public/data/airports/CYYC/trajectories.czml
 ```
 
 ## Architecture

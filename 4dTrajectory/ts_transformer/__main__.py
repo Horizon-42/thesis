@@ -49,7 +49,13 @@ if str(_TS_DIR) not in sys.path:
 from config import (  # noqa: E402
     DEFAULT_AIRCRAFT_TYPE, HORIZON_MODES, MODELS, TSConfig, config_for_mode,
 )
-from dataset import build_series, flight_key, load_flight_dicts  # noqa: E402
+from dataset import (  # noqa: E402
+    arrival_data_provenance,
+    build_series,
+    flight_key,
+    load_flight_dicts,
+    require_matching_data_provenance,
+)
 from export import (  # noqa: E402
     accuracy_block, build_prediction_record, observed_series_metrics, write_batch,
 )
@@ -168,12 +174,19 @@ def main(argv: list[str] | None = None) -> int:
             if value is not None
         }
         config = config_for_mode(args.horizon_mode, **overrides)
+        data_provenance = arrival_data_provenance(args.data)
         series = _build_series_or_exit(args, config, parser, load_flight_dicts(args.data))
-        train(series, config, output_dir=args.output_dir)
+        train(
+            series,
+            config,
+            output_dir=args.output_dir,
+            data_provenance=data_provenance,
+        )
         return 0
 
     # ── predict ──────────────────────────────────────────────────────────────
     model, config, normalizer, payload = load_checkpoint(args.checkpoint)
+    require_matching_data_provenance(payload, arrival_data_provenance(args.data))
     device = resolve_device(args.device)
     model = model.to(device)
 
@@ -188,12 +201,15 @@ def main(argv: list[str] | None = None) -> int:
         # into scenario.source) — so the expensive per-flight build (aircraft resolution +
         # least-squares velocity fits) never runs for the ~85% of flights a default
         # test-split predict would discard.
-        wanted = set(payload["split"][args.split])
-        flights = [f for i, f in enumerate(flights) if flight_key(f, i) in wanted]
-        if not flights:
+        split_keys = payload["split"][args.split]
+        indexed = {flight_key(flight, index): flight for index, flight in enumerate(flights)}
+        missing = [key for key in split_keys if key not in indexed]
+        if missing:
             parser.error(
-                f"no flights from the checkpoint's {args.split!r} split are present in {args.data}"
+                f"{len(missing)} flight(s) from the checkpoint's {args.split!r} split "
+                f"are absent from {args.data}; first missing key: {missing[0]!r}"
             )
+        flights = [indexed[key] for key in split_keys]
     series = _build_series_or_exit(args, config, parser, flights)
     print(f"predicting {len(series)} flight(s) from the {args.split!r} split")
 
@@ -202,12 +218,17 @@ def main(argv: list[str] | None = None) -> int:
         forecast = forecast_approach(model, s, config, normalizer, device=device,
                                      truncate=not args.no_truncate)
         records.append(build_prediction_record(
-            s, forecast, index=index, model_name=config.model, horizon_mode=config.horizon_mode
+            s,
+            forecast,
+            index=index,
+            model_name=config.model,
+            horizon_mode=config.horizon_mode,
+            split=args.split,
         ))
         overlap.append(observed_series_metrics(s, forecast))
 
     paths = write_batch(records, output_dir=args.output_dir, config_dict=config.to_dict(),
-                        overlap=overlap, checkpoint=str(args.checkpoint))
+                        overlap=overlap, checkpoint=str(args.checkpoint), split=args.split)
 
     capped = sum(1 for r in records if r.source.get("horizonCapped"))
     if capped:

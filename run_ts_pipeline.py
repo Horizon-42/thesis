@@ -19,7 +19,7 @@ Steps per airport × model × horizon-mode ("cell"):
                                      ─►  4dTrajectory/outputs/<ICAO>/ts_<model>_<mode>/
                                           {checkpoint.pt, history.json}
   2. ts predict    checkpoint + the checkpoint's test split
-                                     ─►  4dTrajectory/outputs/<ICAO>/ts_pred_<model>_<mode>/
+                                     ─►  4dTrajectory/outputs/<ICAO>/ts_pred_<model>_<mode>_<split>/
                                           {*_states.json, *_eval.json, references/,
                                            summary.json, flyability_report.json}
                                           (eval/reference records point into the states
@@ -28,8 +28,8 @@ Steps per airport × model × horizon-mode ("cell"):
   4. [eval] evaluation.visualize     ─►  <pred_dir>/evaluation_report.html
   5. [czml] build_scenario_comparison_czml
                                      ─►  aeroviz-4d/public/data/airports/<ICAO>/
-                                           comparison/ts_<itr|ptst>_<mode>/
-                                          (category "Predicted (<Model>, <mode>)",
+                                           comparison/ts_<itr|ptst>_<mode>_<split>/
+                                          (category "Predicted (<Model>, <mode>, <split> split)",
                                            purple pred- entities, upserted into
                                            categories.json beside the optimizer's)
 
@@ -49,6 +49,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -69,11 +71,21 @@ MODELS = ("itransformer", "patchtst")
 HORIZON_MODES = ("window", "full")
 
 # Frontend category naming — matches the published categories on disk
-# (comparison/ts_{itr|ptst}_{window|full}) and the README's table labels.
+# (comparison/ts_{itr|ptst}_{window|full}_{split}) and the README's table labels.
 MODEL_SHORT = {"itransformer": "itr", "patchtst": "ptst"}
 MODEL_LABEL = {"itransformer": "iTransformer", "patchtst": "PatchTST"}
 
 OUTPUT_KINDS = ("czml", "eval")
+CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
+CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v1"
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def arrival_manifest_path(airport: str) -> Path:
@@ -117,19 +129,45 @@ class Plan:
         self.data_manifest = arrival_manifest_path(self.airport)
         self.train_dir = OPT_OUTPUTS_ROOT / self.airport / f"ts_{model}_{mode}"
         self.checkpoint = self.train_dir / "checkpoint.pt"
-        self.pred_dir = OPT_OUTPUTS_ROOT / self.airport / f"ts_pred_{model}_{mode}"
+        self.checkpoint_metadata = self.train_dir / CHECKPOINT_METADATA_NAME
+        self.pred_dir = (
+            OPT_OUTPUTS_ROOT / self.airport / f"ts_pred_{model}_{mode}_{split}"
+        )
         self.summary = self.pred_dir / "summary.json"
         self.report = self.pred_dir / "evaluation_report.json"
         self.report_html = self.pred_dir / "evaluation_report.html"
 
-        self.category = f"ts_{MODEL_SHORT[model]}_{mode}"
-        self.label = f"Predicted ({MODEL_LABEL[model]}, {mode})"
+        self.category = f"ts_{MODEL_SHORT[model]}_{mode}_{split}"
+        self.label = f"Predicted ({MODEL_LABEL[model]}, {mode}, {split} split)"
         self.comparison_dir = (
             COMPARISON_AIRPORTS_ROOT / self.airport / "comparison" / self.category
         )
 
     def checkpoint_exists(self) -> bool:
-        return self.checkpoint.exists()
+        return self.checkpoint_reuse_error() is None
+
+    def checkpoint_reuse_error(self) -> str | None:
+        """Explain why this checkpoint cannot be reused with the current arrivals."""
+        if not self.checkpoint.is_file():
+            return f"missing checkpoint {self.checkpoint}"
+        if not self.checkpoint_metadata.is_file():
+            return f"missing checkpoint metadata {self.checkpoint_metadata}"
+        if not self.data_manifest.is_file():
+            return f"missing arrival manifest {self.data_manifest}"
+        try:
+            metadata = json.loads(self.checkpoint_metadata.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            return f"unreadable checkpoint metadata: {exc}"
+        if (
+            not isinstance(metadata, dict)
+            or metadata.get("schema_version") != CHECKPOINT_METADATA_SCHEMA
+        ):
+            return "checkpoint metadata has the wrong schema"
+        if metadata.get("checkpoint_sha256") != _file_sha256(self.checkpoint):
+            return "checkpoint failed SHA-256 validation"
+        if metadata.get("arrival_manifest_sha256") != _file_sha256(self.data_manifest):
+            return "checkpoint was trained against a different arrival manifest"
+        return None
 
     def steps(self, *, reuse_checkpoint: bool = False) -> list[tuple[str, list[str]]]:
         """The commands to run; ``reuse_checkpoint`` drops the train step."""
@@ -200,7 +238,11 @@ class Plan:
 
 def run_cell(plan: Plan, *, dry_run: bool, skip_train: bool) -> bool:
     """Run (or preview) one cell. Returns True if it ran / would run."""
-    reuse = skip_train and plan.checkpoint_exists()
+    if not plan.data_manifest.exists():
+        print(f"   ⚠ skip: missing {plan.data_manifest}")
+        return False
+    reuse_error = plan.checkpoint_reuse_error() if skip_train else None
+    reuse = skip_train and reuse_error is None
     mode = "reuse checkpoint" if reuse else "train from scratch"
     print(f"\n━━ {plan.airport}  [{plan.model} · {plan.mode}]  ·  {mode}  "
           f"·  outputs: {', '.join(plan.outputs)}")
@@ -210,11 +252,8 @@ def run_cell(plan: Plan, *, dry_run: bool, skip_train: bool) -> bool:
     if "czml" in plan.outputs:
         print(f"   comparison: {plan.comparison_dir}")
 
-    if not plan.data_manifest.exists():
-        print(f"   ⚠ skip: missing {plan.data_manifest}")
-        return False
     if skip_train and not reuse:
-        print("   (no existing checkpoint found → training from scratch)")
+        print(f"   (checkpoint not reusable: {reuse_error} → training from scratch)")
 
     steps = plan.steps(reuse_checkpoint=reuse)
     if dry_run:

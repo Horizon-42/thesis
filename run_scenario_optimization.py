@@ -69,6 +69,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from optimization_run_config import (
+    DEFAULT_MAX_DURATION_S,
+    DEFAULT_ROLLOUT_DT_S,
+    build_optimization_config,
+)
+
 REPO_ROOT = Path(__file__).resolve().parent
 
 # ── Default I/O roots (per the current examples; not CLI inputs) ───────────────
@@ -166,6 +172,16 @@ class Plan:
         # State-collocation density M per control segment (scenario_optimization
         # --state-substeps); None = the optimizer's auto (~3 s state step, cap 16).
         self.state_substeps = state_substeps
+        self.optimization_config = build_optimization_config(
+            constrained_iaf=with_constraint,
+            fitting=fitting,
+            n_segments=n_segments,
+            n_seg_per_phase=n_seg_per_phase,
+            state_substeps=state_substeps,
+            max_duration_s=DEFAULT_MAX_DURATION_S,
+            rollout_dt_s=DEFAULT_ROLLOUT_DT_S,
+            iaf_selection="shortest",
+        )
         self.threshold = target_type == "runway"
         self.fitted_adsb = target_type == "fitted-adsb"
         self.category = category_key(target_type, with_constraint)
@@ -207,6 +223,8 @@ class Plan:
             return f"unreadable summary: {exc}"
         if not isinstance(summary, dict):
             return "summary is not an object"
+        if summary.get("optimization_config") != self.optimization_config:
+            return "summary optimization configuration does not match this run"
         rows = summary.get("results")
         if not isinstance(rows, list):
             return "summary has no results roster"

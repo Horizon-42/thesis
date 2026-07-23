@@ -22,6 +22,7 @@ flights is the only honest option, and it is done here rather than left to the c
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator, Sequence
@@ -41,7 +42,10 @@ from flight_scenarios import (
     state_samples_from_track,
 )
 from flight_scenarios.datum import flight_to_msl
-from trajectory_data_process.harvest.arrivals import load_arrival_flights
+from trajectory_data_process.harvest.arrivals import (
+    load_arrival_flights,
+    resolve_arrival_manifest,
+)
 
 from channels import (
     CHANNELS,
@@ -52,6 +56,72 @@ from channels import (
     resample_uniform,
 )
 from config import DEFAULT_AIRCRAFT_TYPE, HORIZON_FULL, TSConfig
+
+ARRIVAL_DATA_PROVENANCE_SCHEMA = "ts-arrival-data-v1"
+
+
+def arrival_data_provenance(path: str | Path) -> dict[str, Any]:
+    """Fingerprint the exact canonical arrival roster used by a training run.
+
+    The manifest digest catches any roster, slice, target, or metadata change.  Keeping
+    each flight's canonical source digest as well makes the checkpoint independently
+    auditable without reopening every source track.
+    """
+    manifest_path = resolve_arrival_manifest(path)
+    manifest_bytes = manifest_path.read_bytes()
+    manifest = json.loads(manifest_bytes)
+    records = manifest.get("records") if isinstance(manifest, dict) else None
+    if not isinstance(records, list):
+        raise ValueError(f"{manifest_path} lacks an arrival records roster")
+
+    source_records: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for index, row in enumerate(records):
+        if not isinstance(row, dict):
+            raise ValueError(f"{manifest_path}: arrival record {index} is not an object")
+        key = row.get("flight_key")
+        source_sha256 = row.get("source_sha256")
+        if not isinstance(key, str) or not key:
+            raise ValueError(f"{manifest_path}: arrival record {index} lacks flight_key")
+        if key in seen:
+            raise ValueError(f"{manifest_path} lists duplicate flight_key {key!r}")
+        if (
+            not isinstance(source_sha256, str)
+            or len(source_sha256) != 64
+            or any(char not in "0123456789abcdef" for char in source_sha256.lower())
+        ):
+            raise ValueError(
+                f"{manifest_path}: arrival record {index} has invalid source_sha256"
+            )
+        seen.add(key)
+        source_records.append(
+            {"flight_key": key, "source_sha256": source_sha256.lower()}
+        )
+
+    source_records.sort(key=lambda item: item["flight_key"])
+    return {
+        "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
+        "arrival_manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+        "source_records": source_records,
+    }
+
+
+def require_matching_data_provenance(
+    checkpoint_payload: dict[str, Any],
+    current: dict[str, Any],
+) -> None:
+    """Reject old or stale checkpoints before they can filter the current roster."""
+    stored = checkpoint_payload.get("data_provenance")
+    if not isinstance(stored, dict):
+        raise ValueError(
+            "checkpoint has no arrival-data provenance; retrain it against the current "
+            "arrivals/manifest.json"
+        )
+    if stored != current:
+        raise ValueError(
+            "checkpoint training data does not match the current arrivals manifest; "
+            "retrain instead of reusing this checkpoint"
+        )
 
 
 @dataclass

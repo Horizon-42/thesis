@@ -116,13 +116,11 @@ For best vertical alignment in live CYYC data:
 - keep default guard rails initially
 - tighten max-altitude-bias-m if overly large corrections appear in your area
 
-Example:
-
-/Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
-  /Users/liudongxu/Desktop/studys/thesis/run_asd-b_fetch_and_generate.py \
-  --mode live \
-  --airport CYYC \
-  --altitude-mode auto-bias
+> Historical note: the live-fetch wrapper and these altitude-mode flags have been
+> retired. The current observed pipeline is
+> `python -m trajectory_data_process.harvest --airport CYYC`; it preserves downloaded
+> OpenSky geometric altitude as the canonical source rather than applying this legacy
+> per-flight display correction.
 
 ## Limitations
 - This is a per-flight constant offset model, not a full atmospheric correction model.

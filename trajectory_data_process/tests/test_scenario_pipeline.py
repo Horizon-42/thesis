@@ -133,6 +133,7 @@ def test_skip_optimize_rejects_an_incomplete_summary(tmp_path):
     plan.scenarios.write_text("[]")
     plan.arrivals_manifest.write_text("{}")
     plan.summary.write_text(json.dumps({
+        "optimization_config": plan.optimization_config,
         "total": 1,
         "solved": 1,
         "failed": 0,
@@ -173,6 +174,7 @@ def test_skip_optimize_accepts_a_complete_solved_roster(tmp_path):
         "reference_file": reference_name,
     }))
     plan.summary.write_text(json.dumps({
+        "optimization_config": plan.optimization_config,
         "total": 1,
         "solved": 1,
         "failed": 0,
@@ -207,6 +209,34 @@ def test_skip_optimize_accepts_a_complete_solved_roster(tmp_path):
 
     assert plan.optimization_reuse_error() is None
     assert plan.optimization_exists() is True
+
+
+def test_skip_optimize_rejects_a_batch_from_a_different_solver_configuration(
+    tmp_path,
+):
+    plan = optimize.Plan(
+        "KRDU",
+        "runway",
+        False,
+        ("eval",),
+        fitting="rk4",
+        n_segments=12,
+        state_substeps=4,
+    )
+    plan.summary = tmp_path / "summary.json"
+    plan.summary.write_text(json.dumps({
+        "optimization_config": {
+            **plan.optimization_config,
+            "fitting": "hs",
+            "transcription_scheme": "hermiteSimpsonNormalizedFullTransport",
+        },
+        "total": 0,
+        "solved": 0,
+        "failed": 0,
+        "results": [],
+    }))
+
+    assert "configuration" in (plan.optimization_reuse_error() or "")
 
 
 def test_legacy_adsb_target_type_is_no_longer_a_mode():

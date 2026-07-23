@@ -151,6 +151,25 @@ class TSConfig:
             raise ValueError(
                 f"unknown horizon_mode {self.horizon_mode!r}; expected one of {HORIZON_MODES}"
             )
+        for name in (
+            "seq_len",
+            "pred_len",
+            "d_model",
+            "n_heads",
+            "d_ff",
+            "e_layers",
+            "patch_len",
+            "stride",
+            "kernel_size",
+            "batch_size",
+            "epochs",
+            "patience",
+        ):
+            if getattr(self, name) <= 0:
+                raise ValueError(f"{name} must be positive, got {getattr(self, name)!r}")
+        for name in ("dt_s", "learning_rate"):
+            if getattr(self, name) <= 0.0:
+                raise ValueError(f"{name} must be positive, got {getattr(self, name)!r}")
         if self.d_model % self.n_heads:
             raise ValueError(
                 f"d_model={self.d_model} must divide evenly by n_heads={self.n_heads}"

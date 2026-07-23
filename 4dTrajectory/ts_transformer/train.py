@@ -8,6 +8,7 @@ order, the horizon mode, and which flights the model must not be evaluated on.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import time
@@ -22,13 +23,29 @@ import torch.nn as nn
 from channels import CHANNELS
 from config import TSConfig
 from dataset import (
-    FlightSeries, Normalizer, TrajectoryWindows, iter_batches, split_by_flight, window_anchors,
+    ARRIVAL_DATA_PROVENANCE_SCHEMA,
+    FlightSeries,
+    Normalizer,
+    TrajectoryWindows,
+    iter_batches,
+    split_by_flight,
+    window_anchors,
 )
 from metrics import error_by_horizon, trajectory_metrics
 from models import build_model, parameter_count, resolve_device
 
 CHECKPOINT_NAME = "checkpoint.pt"
+CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
+CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v1"
 HISTORY_NAME = "history.json"
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def masked_mse(predicted: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -107,6 +124,7 @@ def train(
     config: TSConfig,
     *,
     output_dir: str | Path,
+    data_provenance: dict[str, Any],
     verbose: bool = True,
 ) -> dict[str, Any]:
     """Train one model on ``series``; write ``checkpoint.pt`` + ``history.json``.
@@ -115,6 +133,12 @@ def train(
     """
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
+    if (
+        data_provenance.get("schema_version") != ARRIVAL_DATA_PROVENANCE_SCHEMA
+        or not isinstance(data_provenance.get("arrival_manifest_sha256"), str)
+        or not isinstance(data_provenance.get("source_records"), list)
+    ):
+        raise ValueError("data_provenance is not a TS arrival-data fingerprint")
 
     torch.manual_seed(config.seed)
     np.random.seed(config.seed)
@@ -224,7 +248,7 @@ def train(
     if len(test_set):
         split_metrics["test"] = evaluate_split(model, test_set, normalizer, config, device)
 
-    torch.save({
+    checkpoint_payload = {
         "config": config.to_dict(),
         "model_state": model.state_dict(),
         "normalizer": normalizer.to_dict(),
@@ -234,7 +258,22 @@ def train(
             "test": [s.flight_id for s in test_series],
         },
         "best_val_loss": best_val,
-    }, out / CHECKPOINT_NAME)
+        "data_provenance": data_provenance,
+    }
+    checkpoint_path = out / CHECKPOINT_NAME
+    checkpoint_tmp = out / f"{CHECKPOINT_NAME}.tmp"
+    torch.save(checkpoint_payload, checkpoint_tmp)
+    checkpoint_tmp.replace(checkpoint_path)
+    checkpoint_sha256 = _file_sha256(checkpoint_path)
+    checkpoint_metadata = {
+        "schema_version": CHECKPOINT_METADATA_SCHEMA,
+        "checkpoint_sha256": checkpoint_sha256,
+        "arrival_manifest_sha256": data_provenance["arrival_manifest_sha256"],
+    }
+    metadata_path = out / CHECKPOINT_METADATA_NAME
+    metadata_tmp = out / f"{CHECKPOINT_METADATA_NAME}.tmp"
+    metadata_tmp.write_text(json.dumps(checkpoint_metadata, indent=2), encoding="utf-8")
+    metadata_tmp.replace(metadata_path)
 
     summary = {
         "config": config.to_dict(),
@@ -245,6 +284,11 @@ def train(
         "flights": {"train": len(train_series), "val": len(val_series), "test": len(test_series)},
         "windows": {"train": len(train_set), "val": len(val_set), "test": len(test_set)},
         "metrics": split_metrics,
+        "data_provenance": {
+            "schema_version": data_provenance["schema_version"],
+            "arrival_manifest_sha256": data_provenance["arrival_manifest_sha256"],
+            "source_record_count": len(data_provenance["source_records"]),
+        },
         "history": [vars(h) for h in history],
     }
     (out / HISTORY_NAME).write_text(json.dumps(summary, indent=2), encoding="utf-8")

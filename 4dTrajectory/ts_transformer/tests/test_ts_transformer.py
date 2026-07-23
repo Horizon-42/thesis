@@ -32,7 +32,8 @@ import channels as ch  # noqa: E402
 from aerodynamic_model.common import GeodeticState  # noqa: E402
 from config import HORIZON_FULL, HORIZON_WINDOW, TSConfig, config_for_mode  # noqa: E402
 from dataset import (  # noqa: E402
-    Normalizer, TrajectoryWindows, build_series, split_by_flight, window_anchors,
+    Normalizer, TrajectoryWindows, arrival_data_provenance, build_series,
+    require_matching_data_provenance, split_by_flight, window_anchors,
 )
 from evaluation.metrics import evaluate_batch  # noqa: E402
 from evaluation.records import load_records, record_from_dict  # noqa: E402
@@ -496,6 +497,26 @@ def test_config_rejects_a_head_count_that_does_not_divide_d_model():
         TSConfig(d_model=100, n_heads=8)
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("seq_len", 0),
+        ("pred_len", 0),
+        ("dt_s", 0.0),
+        ("batch_size", 0),
+        ("epochs", 0),
+        ("learning_rate", 0.0),
+        ("patience", 0),
+        ("d_model", 0),
+        ("n_heads", 0),
+        ("e_layers", 0),
+    ],
+)
+def test_non_positive_training_parameters_are_rejected(field, value):
+    with pytest.raises(ValueError, match=field):
+        TSConfig(**{field: value})
+
+
 def test_config_for_mode_picks_the_horizon_default_but_yields_to_an_override():
     from config import DEFAULT_PRED_LEN_FULL
 
@@ -503,6 +524,31 @@ def test_config_for_mode_picks_the_horizon_default_but_yields_to_an_override():
     # WINDOW pred_len default, silently giving a 60-second "whole approach".
     assert config_for_mode(HORIZON_FULL).pred_len == DEFAULT_PRED_LEN_FULL
     assert config_for_mode(HORIZON_FULL, pred_len=99).pred_len == 99
+
+
+def test_arrival_data_provenance_binds_manifest_and_per_flight_sources(tmp_path):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({
+        "records": [
+            {"flight_key": "B", "source_sha256": "b" * 64},
+            {"flight_key": "A", "source_sha256": "a" * 64},
+        ],
+    }), encoding="utf-8")
+
+    provenance = arrival_data_provenance(manifest)
+    assert provenance["arrival_manifest_sha256"] == hashlib.sha256(
+        manifest.read_bytes()
+    ).hexdigest()
+    assert provenance["source_records"] == [
+        {"flight_key": "A", "source_sha256": "a" * 64},
+        {"flight_key": "B", "source_sha256": "b" * 64},
+    ]
+    require_matching_data_provenance({"data_provenance": provenance}, provenance)
+    with pytest.raises(ValueError, match="does not match"):
+        require_matching_data_provenance(
+            {"data_provenance": provenance},
+            {**provenance, "arrival_manifest_sha256": "c" * 64},
+        )
 
 
 # ── Metrics ──────────────────────────────────────────────────────────────────
@@ -710,9 +756,19 @@ def test_manifest_carries_the_accuracy_the_run_printed(tmp_path):
                                                model_name=config.model,
                                                horizon_mode=config.horizon_mode))
         overlap.append(observed_series_metrics(s, forecast))
-    write_batch(records, output_dir=tmp_path, config_dict=config.to_dict(), overlap=overlap)
+    write_batch(
+        records,
+        output_dir=tmp_path,
+        config_dict=config.to_dict(),
+        overlap=overlap,
+        split="val",
+    )
 
     summary = json.loads((Path(tmp_path) / "summary.json").read_text(encoding="utf-8"))
+    assert summary["split"] == "val"
+    assert all(row["split"] == "val" for row in summary["results"])
+    states = json.loads(next(Path(tmp_path).glob("*_states.json")).read_text(encoding="utf-8"))
+    assert states["source"]["predictionSplit"] == "val"
     assert summary["accuracy"] == accuracy_block(overlap)
     assert summary["accuracy"]["flights"] == len(series)
     assert summary["accuracy"]["ade_m"]["mean"] > 0.0
@@ -787,13 +843,37 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
         batch_size=32, d_model=32, n_heads=4, d_ff=64, e_layers=1, seq_len=20, pred_len=10,
         device="cpu",
     )
-    summary = train(series, config, output_dir=tmp_path / "run", verbose=False)
+    provenance = {
+        "schema_version": "ts-arrival-data-v1",
+        "arrival_manifest_sha256": "a" * 64,
+        "source_records": [
+            {"flight_key": item.flight_id, "source_sha256": f"{index:064x}"}
+            for index, item in enumerate(series)
+        ],
+    }
+    summary = train(
+        series,
+        config,
+        output_dir=tmp_path / "run",
+        data_provenance=provenance,
+        verbose=False,
+    )
     assert summary["epochs_run"] == 2
     assert summary["metrics"]["val"]["ade_m"] > 0.0
 
     model, loaded_config, normalizer, payload = load_checkpoint(tmp_path / "run" / "checkpoint.pt")
     assert loaded_config == config          # the config survives the round-trip verbatim
     assert set(payload["split"]) == {"train", "val", "test"}
+    assert payload["data_provenance"] == provenance
+    checkpoint = tmp_path / "run" / "checkpoint.pt"
+    metadata = json.loads(
+        (tmp_path / "run" / "checkpoint_metadata.json").read_text(encoding="utf-8")
+    )
+    assert metadata == {
+        "schema_version": "ts-checkpoint-metadata-v1",
+        "checkpoint_sha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
+        "arrival_manifest_sha256": provenance["arrival_manifest_sha256"],
+    }
 
     records, overlap = [], []
     for index, s in enumerate(series[:4]):
@@ -815,3 +895,4 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
     history = json.loads((tmp_path / "run" / "history.json").read_text(encoding="utf-8"))
     assert history["config"]["model"] == model_name
     assert len(history["history"]) == 2
+    assert history["data_provenance"]["source_record_count"] == len(series)

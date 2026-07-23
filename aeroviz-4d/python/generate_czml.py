@@ -579,7 +579,7 @@ def main() -> None:
     input_path = Path(args.input or args.input_jsonl)
     if not input_path.exists():
         print(f"✗ Input file not found: {input_path}")
-        print("  Run trajectory_data_process/download_landings.py or run_asd-b_fetch_and_generate.py first.")
+        print("  Run trajectory_data_process/download_landings.py first, or pass an existing flight array.")
         raise SystemExit(1)
 
     start_dt = datetime(2026, 4, 1, 8, 0, 0, tzinfo=timezone.utc)

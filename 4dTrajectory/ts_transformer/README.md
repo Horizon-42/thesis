@@ -127,8 +127,14 @@ python -m evaluation --input 4dTrajectory/outputs/KRDU/ts_pred
 `--data` takes an airport harvest directory, its `arrivals/` directory, or the explicit
 `arrivals/manifest.json`. Legacy flight arrays and arbitrary JSON directories are rejected.
 `predict` defaults to `--split test` — the only flights the model never saw. The split is
-recorded in the checkpoint and keyed by `flight_key`, so re-predicting later selects exactly
-the same flights (no leakage on a re-run).
+recorded in the checkpoint and keyed by `flight_key`. The checkpoint also carries the exact
+arrival-manifest SHA-256 and every flight's canonical source SHA-256; prediction rejects a
+rebuilt or changed manifest instead of silently intersecting its roster with an old split.
+Retrain after rebuilding arrivals.
+
+`run_ts_pipeline.py` namespaces prediction output and frontend categories by split
+(`..._<mode>_<split>`). A diagnostic `--split train`, `val`, or `all` run therefore cannot
+overwrite or masquerade as the default held-out `test` publication.
 
 ## Data selection & flight identity
 
@@ -555,6 +561,17 @@ synthetic. `--instance-norm` still turns them on.
 
 ## What gets written
 
+Training writes:
+
+```
+<training-dir>/
+  checkpoint.pt             weights, config, normalizer, split, and arrival-data provenance
+  checkpoint_metadata.json  checkpoint + arrival-manifest SHA-256 for import-light reuse checks
+  history.json              training history, metrics, manifest SHA-256, and source count
+```
+
+Prediction writes one split-specific batch:
+
 ```
 <output-dir>/
   <flight_key>_states.json                     canonical predicted + observed state arrays
@@ -563,7 +580,8 @@ synthetic. `--instance-norm` still turns them on.
   summary.json                                 the manifest — load_records reads ONLY this
 ```
 
-The filename stem IS the flight identity (`flight_key`), shared with the optimizer's record
+`summary.json`, its result rows, and every predicted source record explicitly name the
+selected split. The filename stem IS the flight identity (`flight_key`), shared with the optimizer's record
 filenames and the comparison-CZML group key, so learned and optimized records for one flight
 always share a stem. Summary rows carry the full identity too (`id`, `icao24`, `runway`,
 `landing_time_utc`).
