@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Run the ts_transformer train → predict → {evaluation, comparison CZML} pipeline.
 
-The learned-prediction sibling of ``run_scenario_pipeline.py``: one command runs
+The learned-prediction sibling of ``run_scenario_optimization.py``: one command runs
 the FULL training chain for ``4dTrajectory/ts_transformer`` — both models
 (iTransformer, PatchTST) × both horizon modes (window, full), the 2×2 grid the
 README's tables compare — per airport, shelling out to the existing CLIs.
@@ -22,6 +22,8 @@ Steps per airport × model × horizon-mode ("cell"):
                                      ─►  4dTrajectory/outputs/<ICAO>/ts_pred_<model>_<mode>/
                                           {*_states.json, *_eval.json, references/,
                                            summary.json, flyability_report.json}
+                                          (eval/reference records point into the states
+                                           file instead of copying state arrays)
   3. evaluation    eval records      ─►  <pred_dir>/evaluation_report.json   (always)
   4. [eval] evaluation.visualize     ─►  <pred_dir>/evaluation_report.html
   5. [czml] build_scenario_comparison_czml
@@ -53,7 +55,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent
 
-# ── Default I/O roots (same layout as run_scenario_pipeline.py) ────────────────
+# ── Default I/O roots (same layout as run_scenario_optimization.py) ────────────
 HARVEST_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
 OPT_OUTPUTS_ROOT = REPO_ROOT / "4dTrajectory" / "outputs"
 COMPARISON_AIRPORTS_ROOT = REPO_ROOT / "aeroviz-4d" / "public" / "data" / "airports"
@@ -167,7 +169,7 @@ class Plan:
 
         # The evaluation report always runs (cheap): the eval tail renders it and the
         # CZML tail consumes its verdicts + batch metrics — same wiring as
-        # run_scenario_pipeline.py.
+        # run_scenario_optimization.py.
         named.append(("evaluation report", [
             py, "-m", "evaluation",
             "--input", str(self.pred_dir),

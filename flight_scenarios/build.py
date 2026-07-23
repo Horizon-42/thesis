@@ -41,9 +41,9 @@ def build_scenario(
     ``mass_kg`` defaults to the aircraft's landing mass (these are approach scenarios).
 
     ``target_from_threshold`` chooses the published runway endpoint.  The mutually exclusive
-    ``target_from_fitted_adsb`` chooses the OLS-extrapolated flown threshold crossing: fitted
-    position with measured terminal kinematics.  With neither flag the target remains the
-    last observed sample for generic callers.
+    ``target_from_fitted_adsb`` chooses the OLS-extrapolated flown threshold crossing:
+    fitted position and fitted approach kinematics.  With neither flag the target remains
+    the last observed sample for generic callers.
     ``airport`` supplies the arrival airport for the threshold lookup (the CZML-input flight's
     own ``arr_airport`` is often empty — the airport lives in the file path).
 
@@ -53,9 +53,14 @@ def build_scenario(
     is idempotent (keyed on ``altitude_source``), so callers that already used
     :func:`load_model_arrivals` pay only a tag check. See ``flight_scenarios/datum.py``.
     """
-    flight = flight_to_msl(flight)
     if target_from_threshold and target_from_fitted_adsb:
         raise ValueError("threshold and fitted ADS-B targets are mutually exclusive")
+    raw_flight = flight
+    fitted_hae = (
+        fit_flight_final_approach(raw_flight)
+        if target_from_fitted_adsb else None
+    )
+    flight = flight_to_msl(flight)
     aircraft = _resolve_aircraft(flight, aircraft_type)
     mass = mass_kg if mass_kg is not None else aircraft.landing_mass
     arr_airport = airport or flight.get("arr_airport")
@@ -77,16 +82,18 @@ def build_scenario(
         if target is not None:
             target_source = "runway_threshold"
     elif target_from_fitted_adsb:
-        fitted = fit_flight_final_approach(flight, velocity_window_s=window_s)
+        fitted = fitted_hae
         if fitted is None:
             raise ValueError(
                 f"flight {flight.get('id')!r} has no usable fitted final approach for "
                 f"runway {flight.get('runway')!r}"
             )
-        measured_terminal = final_state_from_track(
-            waypoints, mass_kg=mass, window_s=window_s
+        target = fitted.target_state(
+            mass_kg=mass,
+            hae_minus_msl_m=float(
+                (flight.get("runway_target") or {})["hae_minus_msl_m"]
+            ),
         )
-        target = fitted.target_state(measured_terminal)
         target_source = "fitted_adsb_crossing"
     if target is None:
         target = final_state_from_track(waypoints, mass_kg=mass, window_s=window_s)
@@ -115,6 +122,8 @@ def build_scenario(
         # scenarios file records which vertical datum it was built on — pre-datum-fix
         # (HAE-era) files carry no such key and are thereby distinguishable.
         "altitude_source": flight.get("altitude_source"),
+        "hae_minus_msl_m": (flight.get("runway_target") or {}).get("hae_minus_msl_m"),
+        "vertical_source": (flight.get("runway_target") or {}).get("vertical_source"),
     }
     return FlightScenario(initial=initial, aircraft=aircraft, aero=aero, source=source, target=target)
 

@@ -7,8 +7,9 @@
  * flight time), all read from the comparison index (never recomputed here).
  *
  * "Details" opens the full evaluation report (EvaluationReportWindow): the published
- * `evaluation_report.json` — a verbatim copy of the backend `python -m evaluation`
- * output — fetched lazily on first open. The frontend only visualizes it.
+ * immutable report artifact named by the committed comparison index — a verbatim
+ * copy of the backend `python -m evaluation` output — fetched lazily on first open.
+ * The frontend only visualizes it.
  */
 
 import { useEffect, useState } from "react";
@@ -27,11 +28,14 @@ function formatMetres(m: number | null | undefined): string {
 
 export default function OptimizationSummary() {
   const { activeAirportCode } = useApp();
-  const { stats, categoryDir } = useFlightOptimizerData();
+  const { stats, categoryDir, reportFile } = useFlightOptimizerData();
 
-  // The report is per (airport, category) — cache it under that key so switching
-  // airport/category never shows a stale report, and close any open window.
-  const reportKey = activeAirportCode && categoryDir ? `${activeAirportCode}/${categoryDir}` : null;
+  // The report is per committed generation, not merely per category. Including the
+  // immutable filename prevents a refreshed index from reusing the previous generation's
+  // cached metrics under the same airport/category.
+  const reportKey = activeAirportCode && categoryDir && reportFile
+    ? `${activeAirportCode}/${categoryDir}/${reportFile}`
+    : null;
   const [cached, setCached] = useState<{ key: string; report: EvaluationReport } | null>(null);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -50,14 +54,20 @@ export default function OptimizationSummary() {
   ];
 
   function openDetails() {
-    if (!activeAirportCode || !categoryDir || !reportKey) return;
+    if (!activeAirportCode || !categoryDir || !reportFile || !reportKey) return;
     setError(null);
     if (report) {
       setOpen(true);
       return;
     }
     setLoading(true);
-    fetchJson<unknown>(airportEvaluationReportUrl(activeAirportCode, categoryDir))
+    fetchJson<unknown>(
+      airportEvaluationReportUrl(
+        activeAirportCode,
+        categoryDir,
+        reportFile,
+      ),
+    )
       .then((data) => {
         if (!isEvaluationReport(data)) {
           throw new Error("evaluation report is malformed");
@@ -83,7 +93,7 @@ export default function OptimizationSummary() {
           type="button"
           className="optimization-summary-details"
           onClick={openDetails}
-          disabled={!activeAirportCode || !categoryDir || loading}
+          disabled={!activeAirportCode || !categoryDir || !reportFile || loading}
           title="Open the full evaluation report (per-flight verdicts + charts)"
         >
           {loading ? "Loading…" : "Details"}

@@ -97,13 +97,13 @@ The abbreviations and terms of art this README (and `metrics.py` / the summary J
 
 ## Running it
 
-Environment is conda **`aviation`** — the thesis env: data acquisition
+Environment is conda **`aeroviz`** — the thesis env: data acquisition
 (`traffic`, `pyopensky`), CIFP parsing (`cifparse`, `arinc424`), `casadi`, `openap`, the
 geospatial stack, and `torch`. The package code stays casadi-free by design, but it lives
 here so one env runs everything.
 
 ```bash
-conda activate aviation
+conda activate aeroviz
 pip install -r 4dTrajectory/ts_transformer/requirements.txt
 
 TS=4dTrajectory/ts_transformer/__main__.py
@@ -557,9 +557,9 @@ synthetic. `--instance-norm` still turns them on.
 
 ```
 <output-dir>/
-  <flight_key>_states.json                     predicted + observed, side by side
-  <flight_key>_eval.json                       the evaluation record
-  references/<flight_key>_reference_eval.json  the observed track, same contract
+  <flight_key>_states.json                     canonical predicted + observed state arrays
+  <flight_key>_eval.json                       evaluation metadata + predicted states_ref
+  references/<flight_key>_reference_eval.json  observed metadata + states_ref into states file
   summary.json                                 the manifest — load_records reads ONLY this
 ```
 
@@ -570,7 +570,9 @@ always share a stem. Summary rows carry the full identity too (`id`, `icao24`, `
 
 Records are **reference-shaped**: `controls == []`. That is the contract, not a shortcut — a
 learned predictor emits no control schedule, and `evaluation.records` reads an empty control
-list as exactly that. Records are built by
+list as exactly that. The two evaluation JSONs do not copy their state arrays: `states_ref`
+selects the appropriate key (and observed anchor slice) from the single states file. Records
+are built by
 `4dTrajectory/optimization/evaluation_export.py` rather than hand-rolled here, so there is one
 definition of the record shape. (That module is casadi-free, which is why it imports into the
 torch env.)

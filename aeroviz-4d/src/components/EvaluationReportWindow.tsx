@@ -7,8 +7,8 @@
  * aggregate table, per-flight deviation charts and the full verdict table.
  *
  * SINGLE SOURCE: every number shown comes from the published
- * `evaluation_report.json` (`python -m evaluation` output copied verbatim by the
- * comparison builder). This component only sorts/formats/plots — the standalone
+ * evaluation-report artifact (`python -m evaluation` output copied verbatim by the
+ * comparison builder and named by its index). This component only sorts/formats/plots — the standalone
  * `python -m evaluation.visualize` HTML shows the same data outside the app.
  * Track overlays are deliberately NOT duplicated here: the 3D scene already
  * renders every flight's observed/optimized paths.

@@ -1,32 +1,22 @@
 #!/usr/bin/env python
-"""Run the scenario → optimization → {comparison CZML, evaluation} pipeline in one shot.
+"""Optimize prepared flight scenarios, then publish evaluation and comparison outputs.
 
-The merge of the former run_scenario_comparison_pipeline.py and
-run_scenario_evaluation_pipeline.py: both shared steps 1–2 (scenarios +
-optimization) and only differed in the tail, so one script now runs the
-expensive optimization ONCE per airport/category and derives every output from
-it — the two tails are selectable with ``--outputs``.
+Run ``prepare_scenario_inputs.py`` first.  This script deliberately does not harvest
+tracks or build scenario JSON: its boundary is the prepared scenario dataset.
 
-Steps, chained by shelling out to the existing CLIs (each already tested):
+Steps, chained by shelling out to the existing CLIs:
 
-  0b. trajectory_data_process.harvest --evaluate-only   (unless --skip-observed)
-                                    tracks/manifest.json
-                                    ─► arrivals/manifest.json (assigned, LPV-targeted,
-                                        final terminal entry → threshold)
-                                    ─► observed CZML + evaluation report
-  1. flight_scenarios               arrivals/manifest.json
-                                    ─► flight_scenarios/outputs/<ICAO>_…_scenarios.json
-  2. scenario_optimization          scenarios + observed tracks ─► 4dTrajectory/outputs/<ICAO>/<category>/
-       (--reference-tracks, always)    references/*_reference_eval.json   (written FIRST —
-                                        the observed tracks in the evaluation contract)
+  1. scenario_optimization          scenarios + observed tracks ─► 4dTrajectory/outputs/<ICAO>/<category>/
+       (--reference-tracks, always)    ../shared_references/<target>/*_reference_eval.json
+                                        (one canonical set per prepared target dataset)
                                       {*_states.json, *_eval.json, summary.json}
                                         (every eval record points at its reference via
                                          reference_file; failed ones included)
-  3. python -m evaluation           eval records ─► <opt_dir>/evaluation_report.json
+  2. python -m evaluation           eval records ─► <opt_dir>/evaluation_report.json
        (always — the CZML tail consumes its per-flight verdicts + batch metrics)
-  4. [eval] python -m evaluation.visualize
+  3. [eval] python -m evaluation.visualize
                                     eval records ─► <opt_dir>/evaluation_report.html
-  5. [czml] build_scenario_comparison_czml (--evaluation-report)
+  4. [czml] build_scenario_comparison_czml (--evaluation-report)
                                     summary + report ─► aeroviz-4d/public/data/airports/<ICAO>/
                                                  comparison/<category>/{*.czml, index, categories.json}
                                       (solved-but-off-target flights yellow; the index's
@@ -44,36 +34,40 @@ airport — the full category sweep the frontend's comparison picker offers.
 
 Airport selection:
   * --airport <ICAO>  runs that one airport.
-  * (omitted)         runs every K-prefixed airport with a harvest track or arrival
-                      manifest. The observed stage promotes tracks into model-ready arrivals.
+  * (omitted)         runs every K-prefixed airport with a prepared scenario JSON.
 
 --skip-optimize reuses an already-computed optimization: if this airport+category
-already has a summary.json, steps 1–2 are skipped and only the selected tails
-(3–5) run; if it does not exist, the full pipeline runs from scratch.
+already has a summary.json, step 1 is skipped and only the selected publication
+steps run; if it does not exist, optimization runs from scratch.
 
 Usage:
+    # first prepare arrivals, observed outputs, and scenario JSON:
+    python prepare_scenario_inputs.py --airport KRDU
     # one airport, both outputs (frontend CZML + evaluation report/HTML):
-    python run_scenario_pipeline.py --airport KRDU --target-type runway --with-constraint
+    python run_scenario_optimization.py --airport KRDU --target-type runway --with-constraint
     # one airport, ALL THREE modes (fitted_adsb + runway + runway_cons):
-    python run_scenario_pipeline.py --airport KRDU
+    python run_scenario_optimization.py --airport KRDU
     # trapezoidal-fitting comparison run (default is Hermite-Simpson):
-    python run_scenario_pipeline.py --airport KRDU --target-type runway --fitting-type trapezoidal
+    python run_scenario_optimization.py --airport KRDU --target-type runway --fitting-type trapezoidal
     # custom control mesh (n-segments = unconstrained; n-seg-per-phase = constrained):
-    python run_scenario_pipeline.py --airport KRDU --n-segments 12 --n-seg-per-phase 4
+    python run_scenario_optimization.py --airport KRDU --n-segments 12 --n-seg-per-phase 4
     # evaluation only:
-    python run_scenario_pipeline.py --airport KRDU --outputs eval
+    python run_scenario_optimization.py --airport KRDU --outputs eval
     # rebuild only the comparison CZML from an existing optimization:
-    python run_scenario_pipeline.py --airport KRDU --outputs czml --skip-optimize
-    # every K-airport, fitted ADS-B crossing target, preview without running:
-    python run_scenario_pipeline.py --target-type fitted-adsb --dry-run
+    python run_scenario_optimization.py --airport KRDU --outputs czml --skip-optimize
+    # every prepared K-airport, fitted ADS-B crossing target, preview without running:
+    python run_scenario_optimization.py --target-type fitted-adsb --dry-run
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent
 
@@ -87,6 +81,14 @@ HARVEST_TRACKS_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harve
 
 TARGET_TYPES = ("fitted-adsb", "runway")
 OUTPUT_KINDS = ("czml", "eval")
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 # Control-mesh defaults — MUST mirror CollocationOptimizer's (collocation/optimizer.py:
 # DEFAULT_N_SEGMENTS / DEFAULT_N_SEG_PER_PHASE). The pipeline shells out (import-light: no
@@ -122,20 +124,13 @@ def arrival_manifest_path(airport: str) -> Path:
 
 
 def discover_k_airports() -> list[str]:
-    """Every K-airport the pipeline can run now or promote via evaluate-only."""
-    if not HARVEST_TRACKS_ROOT.exists():
+    """Every K-airport with at least one prepared scenario dataset."""
+    if not SCENARIOS_DIR.exists():
         return []
-    airports = []
-    for child in sorted(HARVEST_TRACKS_ROOT.iterdir()):
-        code = child.name.upper()
-        tracks = child / "tracks" / "manifest.json"
-        if (
-            child.is_dir()
-            and code.startswith("K")
-            and (arrival_manifest_path(code).exists() or tracks.exists())
-        ):
-            airports.append(code)
-    return airports
+    return sorted({
+        path.name.split("_", 1)[0].upper()
+        for path in SCENARIOS_DIR.glob("K*_arrivals*_scenarios.json")
+    })
 
 
 class Plan:
@@ -180,6 +175,10 @@ class Plan:
         self.arrivals_manifest = arrival_manifest_path(self.airport)
         self.scenarios = SCENARIOS_DIR / f"{self.airport}_arrivals{tag}_scenarios.json"
         self.opt_dir = OPT_OUTPUTS_ROOT / self.airport / self.category
+        # runway and runway_cons consume the same prepared threshold scenarios, so their
+        # observed references are byte-for-byte identical. Keep one sibling anchor.
+        reference_target = "runway" if self.threshold else "fitted_adsb"
+        self.references_dir = f"../shared_references/{reference_target}"
         self.summary = self.opt_dir / "summary.json"
         self.comparison_dir = (
             COMPARISON_AIRPORTS_ROOT / self.airport / "comparison" / self.category
@@ -188,36 +187,184 @@ class Plan:
         self.report_html = self.opt_dir / "evaluation_report.html"
 
     def optimization_exists(self) -> bool:
-        """Whether this airport+category already has an optimization result to reuse."""
-        return self.summary.exists()
+        """Whether this airport+category has one complete, internally consistent batch."""
+        return self.optimization_reuse_error() is None
+
+    def optimization_reuse_error(self) -> str | None:
+        """Explain why ``--skip-optimize`` cannot safely reuse the current batch.
+
+        ``summary.json`` is a roster, not a completion marker. Reuse is allowed only when
+        its counts, every eval record, every solved states file, every ``states_ref`` and
+        every observed reference pointer agree. This check intentionally avoids loading the
+        large state/reference arrays; the evaluation command performs their deep schema
+        validation immediately after reuse.
+        """
+        if not self.summary.is_file():
+            return f"missing summary {self.summary}"
+        try:
+            summary = json.loads(self.summary.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            return f"unreadable summary: {exc}"
+        if not isinstance(summary, dict):
+            return "summary is not an object"
+        rows = summary.get("results")
+        if not isinstance(rows, list):
+            return "summary has no results roster"
+        counts = {key: summary.get(key) for key in ("total", "solved", "failed")}
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in counts.values()
+        ):
+            return f"summary has invalid counts {counts}"
+        if counts["total"] == 0 or len(rows) != counts["total"]:
+            return (
+                f"summary roster length {len(rows)} disagrees with total "
+                f"{counts['total']}"
+            )
+
+        status_counts = {"solved": 0, "failed": 0}
+        seen_eval: set[str] = set()
+        root = self.opt_dir.resolve()
+        reference_manifests: dict[Path, dict[str, Any]] = {}
+        for index, row in enumerate(rows):
+            if not isinstance(row, dict):
+                return f"summary result {index} is not an object"
+            status = row.get("status")
+            if status not in status_counts:
+                return f"summary result {index} has invalid status {status!r}"
+            status_counts[status] += 1
+
+            eval_name = row.get("eval_file")
+            if not isinstance(eval_name, str) or not eval_name:
+                return f"summary result {index} lacks eval_file"
+            if eval_name in seen_eval:
+                return f"summary lists duplicate eval_file {eval_name!r}"
+            seen_eval.add(eval_name)
+            eval_path = (root / eval_name).resolve()
+            if not eval_path.is_relative_to(root) or not eval_path.is_file():
+                return f"missing or unsafe eval_file {eval_name!r}"
+            try:
+                evaluation = json.loads(eval_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                return f"unreadable eval_file {eval_name!r}: {exc}"
+            if not isinstance(evaluation, dict):
+                return f"eval_file {eval_name!r} is not an object"
+
+            source = evaluation.get("source")
+            if not isinstance(source, dict):
+                return f"eval_file {eval_name!r} lacks source identity"
+            for key in ("id", "runway", "icao24", "landing_time_utc"):
+                if row.get(key) != source.get(key):
+                    return f"eval_file {eval_name!r} disagrees on source {key}"
+
+            reference_name = evaluation.get("reference_file")
+            if not isinstance(reference_name, str) or not reference_name:
+                return f"eval_file {eval_name!r} lacks reference_file"
+            reference_path = (eval_path.parent / reference_name).resolve()
+            if not reference_path.is_file():
+                return f"missing reference_file {reference_name!r}"
+            cache_path = reference_path.parent / "manifest.json"
+            cache = reference_manifests.get(cache_path)
+            if cache is None:
+                try:
+                    cache = json.loads(cache_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError) as exc:
+                    return f"missing or unreadable reference cache manifest {cache_path}: {exc}"
+                if (
+                    not isinstance(cache, dict)
+                    or cache.get("schema_version")
+                    != "optimization-references-v2-sha256"
+                    or not isinstance(cache.get("records"), list)
+                ):
+                    return f"reference cache manifest {cache_path} lacks SHA-256 contract"
+                signature = cache.get("source_signature")
+                if not isinstance(signature, dict):
+                    return f"reference cache manifest {cache_path} lacks source_signature"
+                if self.scenarios.is_file() and (
+                    signature.get("scenarios_sha256") != _file_sha256(self.scenarios)
+                ):
+                    return f"reference cache {cache_path} does not match prepared scenarios"
+                if self.arrivals_manifest.is_file() and (
+                    signature.get("arrivals_manifest_sha256")
+                    != _file_sha256(self.arrivals_manifest)
+                ):
+                    return f"reference cache {cache_path} does not match arrival manifest"
+                reference_manifests[cache_path] = cache
+            cached_row = next(
+                (
+                    cached
+                    for cached in cache["records"]
+                    if isinstance(cached, dict)
+                    and cached.get("file") == reference_path.name
+                ),
+                None,
+            )
+            if cached_row is None:
+                return f"reference cache does not roster {reference_path.name!r}"
+            cached_identity = cached_row.get("identity")
+            if not isinstance(cached_identity, dict) or any(
+                cached_identity.get(key) != source.get(key)
+                for key in ("id", "runway", "icao24", "landing_time_utc")
+            ):
+                return f"reference cache identity disagrees for {reference_path.name!r}"
+            expected_hash = cached_row.get("sha256")
+            if (
+                not isinstance(expected_hash, str)
+                or _file_sha256(reference_path) != expected_hash
+            ):
+                return f"reference_file {reference_name!r} failed SHA-256 validation"
+
+            states_name = row.get("states_file")
+            states_ref = evaluation.get("states_ref")
+            if status == "solved":
+                if not isinstance(states_name, str) or not states_name:
+                    return f"solved result {index} lacks states_file"
+                states_path = (root / states_name).resolve()
+                if not states_path.is_relative_to(root) or not states_path.is_file():
+                    return f"missing or unsafe states_file {states_name!r}"
+                if not isinstance(states_ref, dict):
+                    return f"eval_file {eval_name!r} lacks states_ref"
+                ref_name = states_ref.get("file")
+                if (
+                    not isinstance(ref_name, str)
+                    or (eval_path.parent / ref_name).resolve() != states_path
+                    or states_ref.get("key") != "simulator_states"
+                ):
+                    return f"eval_file {eval_name!r} has inconsistent states_ref"
+                if evaluation.get("states") != [] or evaluation.get("final_time_s") is None:
+                    return f"eval_file {eval_name!r} has invalid solved-state metadata"
+            elif (
+                states_name is not None
+                or states_ref is not None
+                or evaluation.get("states") != []
+                or evaluation.get("final_time_s") is not None
+            ):
+                return f"eval_file {eval_name!r} has invalid failed-state metadata"
+
+        if (
+            status_counts["solved"] != counts["solved"]
+            or status_counts["failed"] != counts["failed"]
+            or counts["solved"] + counts["failed"] != counts["total"]
+        ):
+            return f"summary status counts disagree: {status_counts} vs {counts}"
+        return None
 
     def steps(self, *, reuse: bool = False) -> list[tuple[str, list[str]]]:
-        """The commands to run; ``reuse`` drops steps 1–2 and keeps the selected tails."""
+        """The commands to run; ``reuse`` drops optimization and keeps publication."""
         py = sys.executable
         named: list[tuple[str, list[str]]] = []
 
         if not reuse:
-            scenarios_cmd = [
-                py, "-m", "flight_scenarios",
-                "--input", str(self.arrivals_manifest),
-                "--output", str(self.scenarios),
-            ]
-            if self.threshold:
-                scenarios_cmd.append("--target-from-threshold")
-            elif self.fitted_adsb:
-                scenarios_cmd.append("--target-from-fitted-adsb")
-            named.append(("scenarios", scenarios_cmd))
-
             # --reference-tracks makes the optimization CLI write the reference eval
-            # records FIRST (observed tracks -> <opt_dir>/references/) and point every
-            # eval record at its reference. Always on: it is what the evaluation tail
-            # consumes and it is harmless to the CZML tail — and it keeps the
-            # opt_dir contents identical no matter which outputs are selected.
+            # records FIRST in the target dataset's shared sibling directory and point
+            # every eval record at its reference. runway/runway_cons therefore reuse the
+            # same byte-for-byte reference set.
             optimize_cmd = [
                 py, str(OPT_SCRIPT),
                 "--scenarios", str(self.scenarios),
                 "--output-dir", str(self.opt_dir),
                 "--reference-tracks", str(self.arrivals_manifest),
+                "--references-dir", self.references_dir,
                 "--jobs", str(self.jobs),
                 "--fitting", self.fitting,
             ]
@@ -235,28 +382,21 @@ class Plan:
                 optimize_cmd += ["--n-segments", str(self.n_segments)]
             named.append(("references + optimization", optimize_cmd))
 
-        # The evaluation report always runs (it is cheap): the eval tail renders it and
-        # the CZML tail consumes its verdicts (off-target yellow) + batch metrics. The one
-        # exception: reusing an optimization from BEFORE the evaluation package exists no
-        # eval records to judge — skip the evaluation steps loudly and build a plain CZML
-        # (re-run without --skip-optimize to get verdicts/metrics).
-        evaluable = not reuse or any(self.opt_dir.glob("*_eval.json"))
-        if not evaluable:
-            print("   ⚠ reused optimization has no *_eval.json records (pre-evaluation run) "
-                  "— skipping evaluation; comparison CZML gets no verdicts/metrics")
-        if evaluable:
-            named.append(("evaluation report", [
-                py, "-m", "evaluation",
-                "--input", str(self.opt_dir),
-                "--output", str(self.report),
-            ]))
+        # The report is part of the committed comparison generation, so evaluation always
+        # runs before either output tail. A reused batch has already passed
+        # optimization_reuse_error(), including its complete eval roster.
+        named.append(("evaluation report", [
+            py, "-m", "evaluation",
+            "--input", str(self.opt_dir),
+            "--output", str(self.report),
+        ]))
 
-            if "eval" in self.outputs:
-                named.append(("evaluation HTML", [
-                    py, "-m", "evaluation.visualize",
-                    "--input", str(self.opt_dir),
-                    "--output", str(self.report_html),
-                ]))
+        if "eval" in self.outputs:
+            named.append(("evaluation HTML", [
+                py, "-m", "evaluation.visualize",
+                "--input", str(self.opt_dir),
+                "--output", str(self.report_html),
+            ]))
 
         if "czml" in self.outputs:
             comparison_cmd = [
@@ -269,45 +409,16 @@ class Plan:
             ]
             if self.with_constraint:
                 comparison_cmd.append("--constrained")
-            if evaluable:
-                comparison_cmd += ["--evaluation-report", str(self.report)]
+            comparison_cmd += ["--evaluation-report", str(self.report)]
             # Feed the scenario initial states so the index carries V + mass for EVERY
-            # flight — including failed optimizations (which have no states file). On a
-            # full run step 1 writes the file before this step; on reuse it may be absent.
+            # flight — including failed optimizations (which have no states file). A
+            # reused archived optimization may no longer have its prepared scenario file.
             if not reuse or self.scenarios.exists():
                 comparison_cmd += ["--scenarios", str(self.scenarios)]
             named.append(("comparison CZML", comparison_cmd))
 
         total = len(named)
         return [(f"{i}/{total} {name}", cmd) for i, (name, cmd) in enumerate(named, 1)]
-
-
-def run_observed(airport: str, *, dry_run: bool) -> bool:
-    """The OBSERVED baseline — per airport, independent of any optimization.
-
-    Re-judges the harvested tracks, renders them as the viewer's observed layer, and
-    publishes the report as the ``observed`` comparison category. Runs with
-    ``--evaluate-only``, so it never downloads: it recomputes from ``tracks/``, which is
-    what makes it cheap enough to run every time. Any change to the fit window, the
-    established criteria or the CIFP cycle invalidates the previous answer, and the
-    verdict colours painted on the observed layer come from exactly this report — so the
-    tracks and their verdicts stay one harvest.
-
-    Skipped (not an error) when the airport has no harvest yet.
-    """
-    manifest = HARVEST_TRACKS_ROOT / airport / "tracks" / "manifest.json"
-    if not manifest.exists():
-        print(f"   ⚠ {airport}: no harvest at {manifest.parent} — skipping the observed "
-              f"stage (run: python -m trajectory_data_process.harvest --airport {airport})")
-        return False
-    cmd = [sys.executable, "-m", "trajectory_data_process.harvest",
-           "--airport", airport, "--evaluate-only"]
-    if dry_run:
-        print(f"   [observed] {' '.join(cmd)}")
-        return True
-    print(f"\n=== [{airport} · observed baseline] ===\n{' '.join(cmd)}", flush=True)
-    subprocess.run(cmd, cwd=REPO_ROOT, check=True)
-    return True
 
 
 def run_for_airport(
@@ -318,7 +429,6 @@ def run_for_airport(
     *,
     dry_run: bool,
     skip_optimize: bool,
-    input_will_exist: bool = False,
     jobs: int = 0,
     fitting: str = "hs",
     state_substeps: int | None = None,
@@ -328,13 +438,14 @@ def run_for_airport(
     """Run (or preview) the pipeline for one airport. Returns True if it ran /
     would run, False if it was skipped (missing input and nothing to reuse).
 
-    The arrival manifest is the only data-plane input; no legacy landing-file fallback."""
+    Both the scenario JSON and arrival manifest are required prepared inputs."""
     plan = Plan(airport, target_type, with_constraint, outputs, jobs=jobs, fitting=fitting,
                 state_substeps=state_substeps, n_segments=n_segments,
                 n_seg_per_phase=n_seg_per_phase)
-    reuse = skip_optimize and plan.optimization_exists()
+    reuse_error = plan.optimization_reuse_error() if skip_optimize else None
+    reuse = skip_optimize and reuse_error is None
 
-    mode = "reuse optimization" if reuse else "full pipeline"
+    mode = "reuse optimization" if reuse else "optimize prepared scenarios"
     fit = "" if reuse else f"  ·  fitting: {plan.fitting}"
     print(f"\n━━ {plan.airport}  [{plan.category}]  ·  {mode}{fit}  ·  outputs: {', '.join(outputs)}")
     print(f"   scenarios : {plan.scenarios}")
@@ -345,13 +456,18 @@ def run_for_airport(
         print(f"   report    : {plan.report}")
 
     if not reuse:
-        # The manifest is the data-plane contract. Missing means the harvest/evaluation
-        # stage did not produce a model-ready roster; there is no glob fallback.
-        if not plan.arrivals_manifest.exists() and not (dry_run and input_will_exist):
-            print(f"   ⚠ skip: missing input {plan.arrivals_manifest}")
+        missing = [
+            path for path in (plan.scenarios, plan.arrivals_manifest) if not path.exists()
+        ]
+        if missing:
+            print("   ⚠ skip: missing prepared input(s): "
+                  + ", ".join(str(path) for path in missing))
+            print(f"   run: {sys.executable} prepare_scenario_inputs.py "
+                  f"--airport {plan.airport}")
             return False
         if skip_optimize:
-            print("   (no existing optimization found → running from scratch)")
+            print(f"   (existing optimization is not reusable: {reuse_error} "
+                  "→ running from scratch)")
     steps = plan.steps(reuse=reuse)
 
     if dry_run:
@@ -382,13 +498,13 @@ def main() -> None:
     )
     parser.add_argument(
         "--airport", default=None,
-        help="airport ICAO; omit to run every K-prefixed airport with a harvest manifest",
+        help="airport ICAO; omit to run every K-prefixed airport with prepared scenarios",
     )
     parser.add_argument(
         "--target-type", choices=TARGET_TYPES, default=None,
         help="target state: 'runway' = the published runway threshold; 'fitted-adsb' = "
-             "the final_approach OLS threshold crossing (fitted position + measured "
-             "terminal kinematics). OMIT to run all three modes "
+             "the final_approach OLS threshold crossing (fitted position + fitted "
+             "approach kinematics). OMIT to run all three modes "
              "(fitted_adsb, runway, runway_cons) per airport",
     )
     parser.add_argument(
@@ -431,16 +547,10 @@ def main() -> None:
              "All write into the same category dir — a run overwrites the previous batch",
     )
     parser.add_argument(
-        "--skip-observed", action="store_true",
-        help="skip the observed-baseline stage (re-judge harvested tracks, render the "
-             "observed CZML layer, publish the 'observed' comparison category). That "
-             "stage never downloads — it recomputes from the stored harvest",
-    )
-    parser.add_argument(
         "--skip-optimize", action="store_true",
         help="if this airport+category already has an optimization result "
-             "(summary.json), skip steps 1–2 and only (re)build the selected outputs; "
-             "otherwise run the full pipeline from scratch",
+             "(summary.json), skip optimization and only (re)build the selected outputs; "
+             "otherwise optimize the prepared scenario input",
     )
     parser.add_argument(
         "--dry-run", action="store_true",
@@ -473,9 +583,8 @@ def main() -> None:
         airports = discover_k_airports()
         if not airports:
             parser.error(
-                f"no K-prefixed airports with tracks/manifest.json or "
-                f"arrivals/manifest.json under {HARVEST_TRACKS_ROOT} — run "
-                "trajectory_data_process/download_landings.py first"
+                f"no K-prefixed airports with prepared scenario JSON under "
+                f"{SCENARIOS_DIR} — run prepare_scenario_inputs.py first"
             )
         print(f"no --airport given → running {len(airports)} K-airport(s): "
               f"{', '.join(airports)}")
@@ -483,18 +592,10 @@ def main() -> None:
     ran = 0
     runs = [(airport, mode) for airport in airports for mode in modes]
     for airport in airports:
-        # The observed baseline is per AIRPORT and independent of the optimization —
-        # it is the measured reference every modelled category is read against, and it
-        # is what colours the observed layer. Runs before the categories so the frontend
-        # has a baseline even if a solve later fails.
-        observed_scheduled = False
-        if not args.skip_observed:
-            observed_scheduled = run_observed(airport, dry_run=args.dry_run)
         for target_type, with_constraint in modes:
             if run_for_airport(
                 airport, target_type, with_constraint, tuple(args.outputs),
                 dry_run=args.dry_run, skip_optimize=args.skip_optimize,
-                input_will_exist=args.dry_run and observed_scheduled,
                 jobs=args.jobs,
                 fitting=args.fitting_type,
                 state_substeps=args.state_substeps,

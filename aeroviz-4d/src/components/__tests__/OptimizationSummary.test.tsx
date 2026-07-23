@@ -7,6 +7,7 @@ const { data, appState, fetchJsonMock } = vi.hoisted(() => ({
   data: {
     stats: null as OptimizationStats | null,
     categoryDir: null as string | null,
+    reportFile: null as string | null,
   },
   appState: { activeAirportCode: "KRDU" as string | null },
   fetchJsonMock: vi.fn(),
@@ -47,6 +48,7 @@ describe("OptimizationSummary", () => {
   beforeEach(() => {
     data.stats = null;
     data.categoryDir = null;
+    data.reportFile = null;
     appState.activeAirportCode = "KRDU";
     fetchJsonMock.mockReset();
   });
@@ -88,24 +90,33 @@ describe("OptimizationSummary", () => {
     ).toBe(true);
   });
 
-  it("Details fetches the published report and opens the evaluation window", async () => {
+  it("does not guess a fixed report filename before a committed index names one", () => {
     data.stats = { solveRate: 0.5 };
     data.categoryDir = "runway_cons";
+    render(<OptimizationSummary />);
+
+    expect(
+      (screen.getByRole("button", { name: "Details" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(fetchJsonMock).not.toHaveBeenCalled();
+  });
+
+  it("Details follows the immutable report named by the committed index", async () => {
+    data.categoryDir = "runway";
+    data.reportFile = "evaluation_report_batch123.json";
     fetchJsonMock.mockResolvedValue(REPORT);
     render(<OptimizationSummary />);
 
     fireEvent.click(screen.getByRole("button", { name: "Details" }));
     expect(fetchJsonMock).toHaveBeenCalledWith(
-      expect.stringContaining("KRDU/comparison/runway_cons/evaluation_report.json"),
+      expect.stringContaining("KRDU/comparison/runway/evaluation_report_batch123.json"),
     );
-    // the window renders the backend report verbatim
     expect(await screen.findByRole("dialog", { name: "Evaluation report" })).toBeTruthy();
-    expect(screen.getByText("solve rate 50.0%")).toBeTruthy();
-    expect(screen.getByText("DAL1272")).toBeTruthy();
   });
 
   it("surfaces a helpful message when no report was published", async () => {
     data.categoryDir = "runway";
+    data.reportFile = "evaluation_report_batch123.json";
     fetchJsonMock.mockRejectedValue(new Error("missing json asset"));
     render(<OptimizationSummary />);
     fireEvent.click(screen.getByRole("button", { name: "Details" }));

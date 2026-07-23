@@ -24,9 +24,11 @@ Input JSON format (when using --input):
 
 import json
 import math
+import tempfile
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Any
+from collections.abc import Callable, Iterable, Iterator
+from typing import Any, TextIO
 
 from data_layout import airport_data_path
 from flight_identity import flight_key
@@ -352,6 +354,7 @@ def build_flight_packet(
     color_rgba: tuple[int, int, int, int],
     *,
     extrapolated_waypoints: list[tuple[float, float, float, float]] | None = None,
+    properties: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Build a complete CZML entity packet for one aircraft.
@@ -407,6 +410,8 @@ def build_flight_packet(
     )
     if extrapolated_tail is not None:
         packet["polylineVolume"] = extrapolated_tail
+    if properties:
+        packet["properties"] = properties
     return packet
 
 
@@ -470,10 +475,79 @@ def build_czml(
             extrapolated_waypoints=[
                 tuple(wp) for wp in flight.get("extrapolated_waypoints", [])
             ],
+            properties={"runway": flight["runway"]} if flight.get("runway") else None,
         )
         entity_packets.append(packet)
 
     return [doc, *entity_packets]
+
+
+def _max_offset(flights: Iterable[dict[str, Any]]) -> float:
+    return max(
+        (
+            float(wp[0])
+            for flight in flights
+            for key in ("waypoints", "extrapolated_waypoints")
+            for wp in flight.get(key, [])
+        ),
+        default=0.0,
+    )
+
+
+def _jsonl_flights(path: Path) -> Iterator[dict[str, Any]]:
+    with path.open(encoding="utf-8") as source:
+        for line_number, line in enumerate(source, 1):
+            if not line.strip():
+                continue
+            value = json.loads(line)
+            if not isinstance(value, dict):
+                raise ValueError(f"{path}:{line_number}: expected one flight object")
+            yield value
+
+
+def write_czml_stream(
+    output: TextIO,
+    flights_factory: Callable[[], Iterable[dict[str, Any]]],
+    *,
+    start_dt: datetime,
+    max_offset: float,
+    multiplier: int = 60,
+) -> int:
+    """Write CZML one entity at a time without holding the document in memory."""
+    document = build_document_packet(
+        start_dt, start_dt + timedelta(seconds=max_offset), multiplier
+    )
+    output.write("[")
+    json.dump(document, output, ensure_ascii=False, separators=(",", ":"))
+
+    seen: dict[str, tuple[Any, Any]] = {}
+    count = 0
+    for index, flight in enumerate(flights_factory()):
+        entity_id = flight_key(flight, index)
+        identity = (flight.get("icao24"), flight.get("landing_time_utc"))
+        if entity_id in seen:
+            raise ValueError(
+                f"duplicate flight identity {entity_id!r}: {seen[entity_id]} vs "
+                f"{identity} — Cesium would merge both flights"
+            )
+        seen[entity_id] = identity
+        packet = build_flight_packet(
+            entity_id,
+            str(flight["callsign"]),
+            str(flight["type"]),
+            [tuple(wp) for wp in flight["waypoints"]],
+            start_dt,
+            TRAIL_COLORS[index % len(TRAIL_COLORS)],
+            extrapolated_waypoints=[
+                tuple(wp) for wp in flight.get("extrapolated_waypoints", [])
+            ],
+            properties={"runway": flight["runway"]} if flight.get("runway") else None,
+        )
+        output.write(",")
+        json.dump(packet, output, ensure_ascii=False, separators=(",", ":"))
+        count += 1
+    output.write("]\n")
+    return count
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -483,32 +557,73 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="Generate CZML trajectory file")
     parser.add_argument("--airport", default=DEFAULT_AIRPORT, help="Airport ICAO for default output path")
-    parser.add_argument(
+    inputs = parser.add_mutually_exclusive_group(required=True)
+    inputs.add_argument(
         "--input",
-        required=True,
-        help="CZML-input JSON file with flight data (a *_czml_input_*.json from the trajectory pipeline)",
+        help="CZML-input JSON array with flight data",
+    )
+    inputs.add_argument(
+        "--input-jsonl",
+        help="streaming input with one flight object per line",
     )
     parser.add_argument("--output", default=None, help="Output CZML path")
     parser.add_argument("--multiplier", type=int, default=60, help="Clock speed multiplier")
+    parser.add_argument(
+        "--max-offset",
+        type=float,
+        default=None,
+        help="known maximum waypoint offset in seconds (avoids a first JSONL scan)",
+    )
     args = parser.parse_args()
 
-    input_path = Path(args.input)
+    input_path = Path(args.input or args.input_jsonl)
     if not input_path.exists():
         print(f"✗ Input file not found: {input_path}")
         print("  Run trajectory_data_process/download_landings.py or run_asd-b_fetch_and_generate.py first.")
         raise SystemExit(1)
 
-    with open(input_path) as f:
-        flights = json.load(f)
-
     start_dt = datetime(2026, 4, 1, 8, 0, 0, tzinfo=timezone.utc)
-    czml = build_czml(flights, start_dt, args.multiplier)
-
     output_path = Path(args.output) if args.output else default_output_path(args.airport)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(czml, indent=2, ensure_ascii=False))
+    if args.max_offset is not None and args.max_offset < 0:
+        parser.error("--max-offset must be non-negative")
+    if args.input_jsonl:
+        max_offset = (
+            args.max_offset
+            if args.max_offset is not None
+            else _max_offset(_jsonl_flights(input_path))
+        )
+        factory = lambda: _jsonl_flights(input_path)
+    else:
+        with input_path.open(encoding="utf-8") as source:
+            flights = json.load(source)
+        max_offset = _max_offset(flights)
+        factory = lambda: iter(flights)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=output_path.parent,
+            prefix=f".{output_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as output:
+            temporary_path = Path(output.name)
+            flight_count = write_czml_stream(
+                output,
+                factory,
+                start_dt=start_dt,
+                max_offset=max_offset,
+                multiplier=args.multiplier,
+            )
+        temporary_path.replace(output_path)
+    except BaseException:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+        raise
 
-    print(f"✓ Generated CZML for {len(flights)} flight(s)")
+    print(f"✓ Generated CZML for {flight_count} flight(s)")
     print(f"  Input:  {input_path}")
     print(f"  Output: {output_path}")
 

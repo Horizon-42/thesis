@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Archive / restore everything ``run_scenario_pipeline.py`` produces.
+"""Archive / restore prepared scenario JSON and modeled optimization outputs.
 
 The pipeline writes its data production to three places (all git-ignored):
 
@@ -22,8 +22,8 @@ A snapshot lives at ``data/archive/<name>/`` and is one of two forms:
     is the default: the outputs run ~6 GB on the same filesystem, so a move is
     an instant relink and never doubles disk use.
   * COMPRESSED (--compress) — a single ``archive.tar.zst`` (tar piped through
-    ``zstd -19 --long=27``; long-range matching dedups the pipeline's repeated
-    reference tracks + the eval-vs-states rollout overlap, ~10× smaller).
+    ``zstd -19 --long=27``; long-range matching compresses the remaining large,
+    structurally similar trajectory arrays efficiently).
     Falls back to a stdlib ``archive.tar.xz`` when ``zstd`` is not on PATH.
 
 ``restore`` auto-detects the form; both carry an ``_archive_manifest.json``.

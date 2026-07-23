@@ -5,9 +5,9 @@ A prediction batch writes the same directory shape ``4dTrajectory/optimization``
 gates (lateral <= 106.75 m, vertical in [-3.05, +6.10] m) that grade the optimizer::
 
     <output-dir>/
-      <flight>_states.json                     predicted + observed, side by side
-      <flight>_eval.json                       the evaluation record
-      references/<flight>_reference_eval.json  the observed track, same contract
+      <flight>_states.json                     canonical predicted + observed arrays
+      <flight>_eval.json                       metadata + predicted states_ref
+      references/<flight>_reference_eval.json  metadata + observed states_ref
       summary.json                             the manifest — load_records reads ONLY this
 
 The records are **reference-shaped**: ``controls == []``. That is not a shortcut, it is the
@@ -246,9 +246,25 @@ def write_batch(
         eval_path = out / f"{record.stem}{_EVAL_SUFFIX}"
         reference_path = out / REFERENCES_DIR / f"{record.stem}{_REFERENCE_EVAL_SUFFIX}"
 
-        states_path.write_text(json.dumps(record.states_payload, indent=2), encoding="utf-8")
-        eval_path.write_text(json.dumps(record.eval_record, indent=2), encoding="utf-8")
-        reference_path.write_text(json.dumps(record.reference_record, indent=2), encoding="utf-8")
+        states_path.write_text(
+            json.dumps(record.states_payload, separators=(",", ":")), encoding="utf-8"
+        )
+        eval_payload = dict(record.eval_record)
+        eval_payload["states_ref"] = {"file": states_path.name, "key": "predicted_states"}
+        eval_payload["states"] = []
+        reference_payload = dict(record.reference_record)
+        reference_payload["states_ref"] = {
+            "file": f"../{states_path.name}",
+            "key": "observed_states",
+            "start_index": int(record.source["anchorIndex"]),
+        }
+        reference_payload["states"] = []
+        eval_path.write_text(
+            json.dumps(eval_payload, separators=(",", ":")), encoding="utf-8"
+        )
+        reference_path.write_text(
+            json.dumps(reference_payload, separators=(",", ":")), encoding="utf-8"
+        )
         written.append(eval_path)
 
         source = record.source

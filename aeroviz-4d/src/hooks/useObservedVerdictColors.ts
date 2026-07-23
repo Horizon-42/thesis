@@ -24,7 +24,11 @@ import { useEffect, useState } from "react";
 import * as Cesium from "cesium";
 
 import { useApp } from "../context/AppContext";
-import { airportEvaluationReportUrl } from "../data/airportData";
+import {
+  airportComparisonIndexUrl,
+  airportEvaluationReportUrl,
+  isComparisonIndex,
+} from "../data/airportData";
 import { isEvaluationReport } from "../data/evaluationReport";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
@@ -75,7 +79,22 @@ export function useObservedVerdictColors(
     void (async () => {
       let report: unknown;
       try {
-        report = await fetchJson(airportEvaluationReportUrl(activeAirportCode, categoryDir));
+        const index = await fetchJson<unknown>(
+          airportComparisonIndexUrl(activeAirportCode, categoryDir),
+        );
+        if (!isComparisonIndex(index)) {
+          throw new Error(
+            `comparison index for ${activeAirportCode}/${categoryDir} ` +
+              `does not use comparison-v2-generation`,
+          );
+        }
+        report = await fetchJson(
+          airportEvaluationReportUrl(
+            activeAirportCode,
+            categoryDir,
+            index.evaluationReport,
+          ),
+        );
       } catch (error) {
         if (cancelled) return;
         setState({ ...EMPTY, missing: isMissingJsonAsset(error) });

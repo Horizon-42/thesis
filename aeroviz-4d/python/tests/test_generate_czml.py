@@ -9,7 +9,11 @@ are caught here, not in the browser.
 """
 
 from datetime import datetime, timezone
+import json
 import math
+import sys
+
+import pytest
 
 from generate_czml import (
     build_document_packet,
@@ -19,6 +23,7 @@ from generate_czml import (
     build_czml,
     compute_velocity_orientation,
     default_output_path,
+    main,
 )
 
 START_DT = datetime(2026, 4, 1, 8, 0, 0, tzinfo=timezone.utc)
@@ -232,3 +237,29 @@ class TestDefaultPaths:
     def test_default_output_path_is_airport_scoped(self):
         output_path = default_output_path("krdu")
         assert output_path.as_posix().endswith("/public/data/airports/KRDU/trajectories.czml")
+
+
+def test_streaming_failure_preserves_previous_canonical_output(tmp_path, monkeypatch):
+    flight = {
+        "id": "ASA677", "callsign": "ASA677", "type": "B738", "runway": "05R",
+        "icao24": "a0b1c2", "landing_time_utc": "2026-06-18T21:37:36Z",
+        "waypoints": [[0, -114.0, 51.0, 5000], [300, -114.01, 51.12, 1100]],
+    }
+    source = tmp_path / "flights.jsonl"
+    source.write_text(
+        "\n".join(json.dumps(flight) for _ in range(2)) + "\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "trajectories.czml"
+    output.write_text("previous-valid-canonical-file", encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["generate_czml.py", "--input-jsonl", str(source), "--output", str(output)],
+    )
+
+    with pytest.raises(ValueError, match="duplicate flight identity"):
+        main()
+
+    assert output.read_text(encoding="utf-8") == "previous-valid-canonical-file"
+    assert list(tmp_path.glob(".trajectories.czml.*.tmp")) == []

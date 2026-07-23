@@ -24,12 +24,15 @@ Consumers never discover trajectories with a JSON glob. A manifest is the data c
 so stale/orphan files from an earlier run cannot silently enter counts, scenarios, or a
 train/validation/test split.
 
+The cross-pipeline canonical-file and migration contract is documented in
+[`docs/data-pipeline-canonical-storage.zh.md`](../docs/data-pipeline-canonical-storage.zh.md).
+
 ## Commands
 
 Single airport:
 
 ```bash
-conda run -n aviation python -m trajectory_data_process.harvest \
+conda run -n aeroviz python -m trajectory_data_process.harvest \
   --airport KRDU --count 200
 ```
 
@@ -37,17 +40,17 @@ Multiple airports (`download_landings.py` is now only a thin
 multi-airport wrapper around the same harvest implementation):
 
 ```bash
-conda run -n aviation python trajectory_data_process/download_landings.py \
+conda run -n aeroviz python trajectory_data_process/download_landings.py \
   --airports KRDU KSJC --count 200
 
 # omit --airports to process every airport in runway_thresholds.json
-conda run -n aviation python trajectory_data_process/download_landings.py --count 200
+conda run -n aeroviz python trajectory_data_process/download_landings.py --count 200
 ```
 
 Rebuild all derived outputs from an existing track harvest without downloading:
 
 ```bash
-conda run -n aviation python -m trajectory_data_process.harvest \
+conda run -n aeroviz python -m trajectory_data_process.harvest \
   --airport KRDU --evaluate-only
 ```
 
@@ -60,7 +63,7 @@ The visualization convenience command uses this same downloader and then optiona
 generates procedures:
 
 ```bash
-conda run -n aviation python run_asd-b_fetch_and_generate.py --airport KRDU
+conda run -n aeroviz python run_asd-b_fetch_and_generate.py --airport KRDU
 ```
 
 ## On-disk layout
@@ -75,9 +78,8 @@ outputs/harvest/<ICAO>/
     not_landing/<flight_key>.json
   arrivals/
     manifest.json
-    records/<flight_key>.json
   approach/
-    fits/<flight_key>.json
+    records/<flight_key>_eval.json
     summary.json
     evaluation_report.json
 ```
@@ -93,7 +95,10 @@ outputs/harvest/<ICAO>/
 arrivals: assigned tracks with a published CIFP Path Point (TCH and glidepath), cropped at
 the final entry into the terminal ring and stopped at `landing_sample_index`. Exclusions
 such as `local_circuit`, `no_published_tch`, and `no_published_glidepath` remain counted in
-the manifest.
+the manifest. The v3 manifest stores only the source track file and slice indices; consumers
+materialize the crop from that canonical track instead of keeping a second JSON copy. Each
+view row also pins the source file's SHA-256 so a changed track cannot be combined silently
+with stale slice metadata.
 
 ## Responsibilities
 
@@ -104,7 +109,7 @@ harvest/classify.py     one-track/one-runway assignment and landing anchor
 harvest/store.py        complete measured buckets + tracks manifest
 harvest/arrivals.py     model-ready crop/filter + arrivals manifest
 harvest/observed.py     inferred final-approach fit and evaluation records
-harvest/czml.py         observed per-runway/combined CZML publication
+harvest/czml.py         one canonical observed CZML + runway selector metadata
 download_landings.py    airport-list expansion only; no acquisition logic
 arrival_segment.py      final terminal-entry crop and local-circuit rule
 ```
@@ -118,7 +123,7 @@ training store, or per-runway landing-file pipeline. Those implementations were 
 Scenario/optimization:
 
 ```bash
-conda run -n aviation python -m flight_scenarios \
+conda run -n aeroviz python -m flight_scenarios \
   --input trajectory_data_process/outputs/harvest/KRDU/arrivals/manifest.json \
   --target-from-threshold
 ```
@@ -126,7 +131,7 @@ conda run -n aviation python -m flight_scenarios \
 TS training:
 
 ```bash
-conda run -n aviation python 4dTrajectory/ts_transformer/__main__.py train \
+conda run -n aeroviz python 4dTrajectory/ts_transformer/__main__.py train \
   --data trajectory_data_process/outputs/harvest/KRDU/arrivals/manifest.json \
   --airport KRDU --model itransformer --horizon-mode window \
   --output-dir 4dTrajectory/outputs/KRDU/ts_itransformer_window
@@ -160,7 +165,7 @@ would make the visualization wrong by the same geoid offset it fixes for modelin
 ## Tests
 
 ```bash
-conda run -n aviation pytest -o "pythonpath=. geokit/src" \
+conda run -n aeroviz pytest -o "pythonpath=. geokit/src" \
   trajectory_data_process/harvest/tests trajectory_data_process/tests -q
 ```
 

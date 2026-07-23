@@ -50,6 +50,8 @@ export interface FlightOptimizerData {
   stats: OptimizationStats | null;
   /** The category dir the stats were read from (e.g. "runway_cons"), or null. */
   categoryDir: string | null;
+  /** Immutable evaluation report named by the same committed index generation. */
+  reportFile: string | null;
 }
 
 const EMPTY: Map<string, FlightOptimizerDatum> = new Map();
@@ -66,11 +68,13 @@ export function useFlightOptimizerData(): FlightOptimizerData {
 
   const [byFlightKey, setByFlightKey] = useState<Map<string, FlightOptimizerDatum>>(EMPTY);
   const [stats, setStats] = useState<OptimizationStats | null>(null);
+  const [reportFile, setReportFile] = useState<string | null>(null);
 
   useEffect(() => {
     if (!activeAirportCode || !categoryDir) {
       setByFlightKey(EMPTY);
       setStats(null);
+      setReportFile(null);
       return;
     }
 
@@ -79,7 +83,11 @@ export function useFlightOptimizerData(): FlightOptimizerData {
       .then((data) => {
         if (cancelled) return;
         if (!isComparisonIndex(data)) {
-          throw new Error(`comparison index for ${activeAirportCode}/${categoryDir} is malformed`);
+          throw new Error(
+            `comparison index for ${activeAirportCode}/${categoryDir} does not use ` +
+              "comparison-v2-generation; rerun run_scenario_optimization.py " +
+              `--airport ${activeAirportCode}`,
+          );
         }
         // Every group (solved AND failed) carries V + mass; only solved carry an optimized time.
         const map = new Map<string, FlightOptimizerDatum>();
@@ -96,6 +104,7 @@ export function useFlightOptimizerData(): FlightOptimizerData {
         }
         setByFlightKey(map);
         setStats(data.optimization ?? null);
+        setReportFile(data.evaluationReport);
       })
       .catch((error) => {
         if (cancelled) return;
@@ -104,6 +113,7 @@ export function useFlightOptimizerData(): FlightOptimizerData {
         }
         setByFlightKey(EMPTY);
         setStats(null);
+        setReportFile(null);
       });
 
     return () => {
@@ -112,7 +122,7 @@ export function useFlightOptimizerData(): FlightOptimizerData {
   }, [activeAirportCode, categoryDir]);
 
   return useMemo(
-    () => ({ byFlightKey, comparisonActive, stats, categoryDir }),
-    [byFlightKey, comparisonActive, stats, categoryDir],
+    () => ({ byFlightKey, comparisonActive, stats, categoryDir, reportFile }),
+    [byFlightKey, comparisonActive, stats, categoryDir, reportFile],
   );
 }

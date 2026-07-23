@@ -52,8 +52,12 @@ function group(over: Partial<ComparisonGroup>): ComparisonGroup {
 }
 
 const INDEX: ComparisonIndex = {
+  schemaVersion: "comparison-v2-generation",
+  generation: "batch123",
   epoch: "2026-04-01T08:00:00+00:00",
   startHidden: true,
+  referenceSource: "canonicalObserved",
+  evaluationReport: "evaluation_report_batch123.json",
   groups: [
     group({ group: "A_05L", flightId: "A", runway: "05L", entities: ["ref-A_05L", "opt-A_05L", "sim-A_05L"] }),
     group({ group: "B_05L", flightId: "B", runway: "05L", entities: ["ref-B_05L", "opt-B_05L", "sim-B_05L"] }),

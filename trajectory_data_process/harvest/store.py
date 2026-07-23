@@ -158,7 +158,7 @@ def write_tracks(
         path = paths.record(item)
         path.parent.mkdir(parents=True, exist_ok=True)
         record = track_record(item)
-        path.write_text(json.dumps(record, indent=1), encoding="utf-8")
+        path.write_text(json.dumps(record, separators=(",", ":")), encoding="utf-8")
         counts[item.outcome] = counts.get(item.outcome, 0) + 1
         if item.runway:
             per_runway[item.runway] = per_runway.get(item.runway, 0) + 1

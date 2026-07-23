@@ -236,7 +236,7 @@ def build_series(
         # inside build_scenario alone, because state_samples_from_track below takes the bare
         # waypoint list and so cannot convert itself. Idempotent (see flight_scenarios/datum).
         # Placed after the cheap skips (which read no altitude) so rejected flights don't
-        # pay the pyproj transform; ``waypoints`` must be rebound to the converted rows.
+        # pay the conversion; ``waypoints`` must be rebound to the converted rows.
         flight = flight_to_msl(flight)
         waypoints = flight["waypoints"]
 

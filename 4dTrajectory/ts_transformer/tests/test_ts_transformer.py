@@ -11,6 +11,7 @@ The end-to-end test trains for two epochs on synthetic data. That is a plumbing 
 (does a checkpoint round-trip into a gradeable batch), not a quality check.
 """
 
+import hashlib
 import json
 import math
 import sys
@@ -85,10 +86,13 @@ def _fitted_tail_flight():
         "id": "FIT001", "callsign": "FIT001", "type": "A320", "icao24": "abc001",
         "arr_airport": "KFIT", "runway": "36",
         "landing_time_utc": "2026-01-01T00:00:00Z",
-        "altitude_source": "opensky_history_geoaltitude_m_to_msl_egm96",
+        "altitude_source": "opensky_history_geoaltitude_m",
         "runway_target": {
-            "lat": lat0, "lon": lon0, "elevation_msl_m": elevation, "course_deg": 0.0,
+            "lat": lat0, "lon": lon0, "elevation_msl_m": elevation,
+            "elevation_hae_m": elevation, "hae_minus_msl_m": 0.0, "course_deg": 0.0,
             "threshold_crossing_height_m": 15.0, "published_glidepath_deg": 3.0,
+            "position_source": "faa_cifp_path_point",
+            "vertical_source": "faa_cifp_path_point",
         },
         "waypoints": waypoints,
     }
@@ -329,29 +333,68 @@ def _write_arrival_manifest(root: Path, ids: list[str]) -> Path:
     from dataset import flight_key
 
     arrivals = root / "arrivals"
-    records = arrivals / "records"
+    tracks = root / "tracks"
+    records = tracks / "assigned" / "05L"
     records.mkdir(parents=True)
     roster = []
+    source_roster = []
+    runway_target = {
+        "lat": 35.8, "lon": -78.8, "elevation_hae_m": 100.0,
+        "elevation_msl_m": 133.5, "hae_minus_msl_m": -33.5,
+        "course_deg": 50.0, "threshold_crossing_height_m": 15.0,
+        "published_glidepath_deg": 3.0,
+        "position_source": "faa_cifp_path_point",
+        "vertical_source": "faa_cifp_path_point",
+    }
     for index, ident in enumerate(ids):
         flight = {
-            "id": ident,
+            "flight_key": None,
             "callsign": ident,
             "icao24": f"abc{index:03d}",
             "runway": "05L",
             "landing_time_utc": f"2026-01-01T00:00:{index:02d}Z",
             "altitude_source": "opensky_history_geoaltitude_m",
-            "waypoints": [[0.0, -78.8, 35.8, 500.0]],
+            "samples": [[0.0, -78.8, 35.8, 500.0]],
         }
-        key = flight_key(flight, index)
-        relative = f"records/{key}.json"
-        (arrivals / relative).write_text(json.dumps(flight), encoding="utf-8")
-        roster.append({"flight_key": key, "file": relative})
+        key = flight_key(
+            {
+                "id": ident,
+                "runway": "05L",
+                "icao24": flight["icao24"],
+                "landing_time_utc": flight["landing_time_utc"],
+            },
+            index,
+        )
+        flight["flight_key"] = key
+        relative = f"assigned/05L/{key}.json"
+        source_text = json.dumps(flight)
+        (tracks / relative).write_text(source_text, encoding="utf-8")
+        source_roster.append({"flight_key": key, "file": relative})
+        roster.append({
+            "flight_key": key,
+            "source_file": relative,
+            "source_sha256": hashlib.sha256(source_text.encode()).hexdigest(),
+            "first_sample_index": 0,
+            "last_sample_index": 0,
+            "runway": "05L",
+            "arrival_truncated": False,
+            "cut_samples": 0,
+            "arrival_duration_s": 0.0,
+            "entry_time_utc": flight["landing_time_utc"],
+        })
+    (tracks / "manifest.json").write_text(
+        json.dumps({"records": source_roster}), encoding="utf-8"
+    )
     manifest = arrivals / "manifest.json"
+    arrivals.mkdir(parents=True)
     manifest.write_text(
         json.dumps(
             {
-                "schema_version": "harvest-arrivals-v1",
+                "schema_version": "harvest-arrivals-v3-track-slices",
                 "airport": "KRDU",
+                "source_manifest": "../tracks/manifest.json",
+                "altitude_source": "opensky_history_geoaltitude_m",
+                "runway_targets": {"05L": runway_target},
                 "records": roster,
             }
         ),
@@ -366,7 +409,7 @@ def test_ts_load_uses_only_the_arrival_manifest_roster(tmp_path):
     from dataset import load_flight_dicts
 
     _write_arrival_manifest(tmp_path, ["A", "B", "C"])
-    (tmp_path / "arrivals" / "records" / "orphan.json").write_text(
+    (tmp_path / "tracks" / "assigned" / "05L" / "orphan.json").write_text(
         json.dumps({"id": "ORPHAN"}), encoding="utf-8"
     )
 

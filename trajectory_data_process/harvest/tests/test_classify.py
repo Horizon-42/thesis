@@ -24,11 +24,14 @@ def _airport() -> Airport:
         ident="36",
         lat=LAT,
         lon=LON,
+        elevation_hae_m=ELEVATION_M,
         elevation_msl_m=ELEVATION_M,
         course_deg=0.0,
-        geoid_undulation_m=0.0,
+        hae_minus_msl_m=0.0,
         threshold_crossing_height_m=15.0,
         published_glidepath_deg=3.0,
+        position_source="faa_cifp_path_point",
+        vertical_source="faa_cifp_path_point",
     )
     return Airport("KFIT", LAT, LON, ELEVATION_M, (runway,))
 

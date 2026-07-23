@@ -24,7 +24,7 @@ from trajectory_data_process.harvest.airports import load_airport
 from trajectory_data_process.harvest.arrivals import arrival_manifest_path, write_arrival_records
 from trajectory_data_process.harvest.observed import (
     REPORT_NAME,
-    load_observed_records,
+    iter_observed_records,
     write_observed_records,
 )
 from trajectory_data_process.harvest.czml import render_observed_czml
@@ -146,8 +146,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     summary = write_observed_records(airport, paths)
-    records = load_observed_records(paths)
-    report = evaluate_batch(records)
+    report = evaluate_batch(iter_observed_records(paths))
     (paths.approach / REPORT_NAME).write_text(json.dumps(report, indent=1), encoding="utf-8")
 
     if not args.no_czml:
@@ -155,7 +154,7 @@ def main(argv: list[str] | None = None) -> int:
             paths, frontend_data_root=args.frontend_data, multiplier=args.multiplier
         )
         print(f"[harvest] observed CZML: {rendered.flights} flights over "
-              f"{len(rendered.runway_czml)} runway(s) -> {rendered.combined_czml}")
+              f"{len(rendered.runway_counts)} runway(s) -> {rendered.combined_czml}")
 
     if not args.no_publish:
         published = publish_observed_report(

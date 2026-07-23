@@ -59,7 +59,11 @@ export interface CzmlLoaderState {
  * @param czmlUrl - path to the CZML file, e.g. "/data/airports/KRDU/trajectories.czml" ("" = none)
  * @param visible - whether the layer should be shown (still gated by the Trajectories toggle)
  */
-export function useCzmlLoader(czmlUrl: string, visible: boolean = true): CzmlLoaderState {
+export function useCzmlLoader(
+  czmlUrl: string,
+  visible: boolean = true,
+  runwayFilter: string | null = null,
+): CzmlLoaderState {
   const {
     viewer,
     layers,
@@ -77,6 +81,7 @@ export function useCzmlLoader(czmlUrl: string, visible: boolean = true): CzmlLoa
   // subset (the random pick only recomputes when the data / sample count changes).
   const shownIdsRef = useRef<Set<string>>(new Set());
   const modelIdsRef = useRef<Set<string>>(new Set());
+  const runwayByIdRef = useRef<Map<string, string>>(new Map());
   const [state, setState] = useState<CzmlLoaderState>({
     isLoaded: false,
     flightIds: [],
@@ -108,6 +113,7 @@ export function useCzmlLoader(czmlUrl: string, visible: boolean = true): CzmlLoa
     fetchJson<unknown>(czmlUrl)
       .then((czml) => {
         flightSummaries = summarizeObservedCzml(czml);
+        runwayByIdRef.current = runwayIndex(czml);
         return ds.load(czml);
       })
       .then((loadedDs) => {
@@ -206,6 +212,11 @@ export function useCzmlLoader(czmlUrl: string, visible: boolean = true): CzmlLoa
     if (dsRef.current) dsRef.current.show = visible && layers.trajectories;
   }, [visible, layers.trajectories, state.isLoaded]);
 
+  useEffect(() => {
+    setSelectedFlightId(null);
+    if (viewer) viewer.trackedEntity = undefined;
+  }, [runwayFilter, setSelectedFlightId, viewer]);
+
   // ── Recompute the shown sample + the model subset (random) ───────────────────
   // `trajectorySampleCount` flights are shown (0 = all); of those, a capped subset is
   // chosen to carry an aircraft model. Only recomputes when the data / count changes,
@@ -215,11 +226,12 @@ export function useCzmlLoader(czmlUrl: string, visible: boolean = true): CzmlLoa
     if (!ds || !state.isLoaded) return;
     const ids = ds.entities.values
       .filter((entity) => entity.id !== "document")
-      .map((entity) => entity.id);
+      .map((entity) => entity.id)
+      .filter((id) => !runwayFilter || runwayByIdRef.current.get(id) === runwayFilter);
     const allShown = !(trajectorySampleCount > 0) || trajectorySampleCount >= ids.length;
     shownIdsRef.current = allShown ? new Set(ids) : new Set(sampleSubset(ids, trajectorySampleCount));
     modelIdsRef.current = planTrajectoryModels([...shownIdsRef.current], null).modelIds;
-  }, [trajectorySampleCount, state.isLoaded, state.flightIds]);
+  }, [trajectorySampleCount, runwayFilter, state.isLoaded, state.flightIds]);
 
   // ── Apply the render model to entities ───────────────────────────────────────
   // Every shown flight draws as a uniform-width path; only the subset (plus the
@@ -231,7 +243,8 @@ export function useCzmlLoader(czmlUrl: string, visible: boolean = true): CzmlLoa
     if (!ds || !state.isLoaded) return;
     for (const entity of ds.entities.values) {
       if (entity.id === "document") continue;
-      const shown = shownIdsRef.current.has(entity.id);
+      const onRunway = !runwayFilter || runwayByIdRef.current.get(entity.id) === runwayFilter;
+      const shown = onRunway && shownIdsRef.current.has(entity.id);
       entity.show = shown;
       if (entity.path) entity.path.width = new Cesium.ConstantProperty(TRAJECTORY_PATH_WIDTH);
       if (entity.model) {
@@ -243,7 +256,38 @@ export function useCzmlLoader(czmlUrl: string, visible: boolean = true): CzmlLoa
         entity.label.show = new Cesium.ConstantProperty(shown && entity.id === selectedFlightId);
       }
     }
-  }, [trajectorySampleCount, state.isLoaded, state.flightIds, selectedFlightId]);
+  }, [
+    trajectorySampleCount,
+    runwayFilter,
+    visible,
+    state.isLoaded,
+    state.flightIds,
+    selectedFlightId,
+  ]);
 
-  return state;
+  const flightIds = runwayFilter
+    ? state.flightIds.filter((id) => runwayByIdRef.current.get(id) === runwayFilter)
+    : state.flightIds;
+  const flightSummaries: Record<string, ObservedFlightSummary> = {};
+  for (const id of flightIds) {
+    if (state.flightSummaries[id]) flightSummaries[id] = state.flightSummaries[id];
+  }
+  return { ...state, flightIds, flightSummaries };
+}
+
+function runwayIndex(czml: unknown): Map<string, string> {
+  const index = new Map<string, string>();
+  if (!Array.isArray(czml)) return index;
+  for (const packet of czml) {
+    if (!packet || typeof packet !== "object") continue;
+    const value = packet as Record<string, unknown>;
+    const properties =
+      value.properties && typeof value.properties === "object"
+        ? (value.properties as Record<string, unknown>)
+        : null;
+    if (typeof value.id === "string" && typeof properties?.runway === "string") {
+      index.set(value.id, properties.runway);
+    }
+  }
+  return index;
 }

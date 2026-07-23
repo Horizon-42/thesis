@@ -74,8 +74,8 @@ def main(argv: list[str] | None = None) -> int:
     target_mode.add_argument("--target-from-threshold", action="store_true")
     target_mode.add_argument(
         "--target-from-fitted-adsb", action="store_true",
-        help="target the final_approach OLS threshold crossing (position fitted; terminal "
-             "kinematics measured)",
+        help="target the final_approach OLS threshold crossing (position and approach "
+             "kinematics fitted)",
     )
     parser.add_argument("--mass-kg", type=float, default=None)
     parser.add_argument("--window-s", type=float, default=DEFAULT_WINDOW_S)

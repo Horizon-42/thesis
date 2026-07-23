@@ -13,8 +13,6 @@ from flight_scenarios.datum import (
     MSL_ALTITUDE_SOURCE,
     flight_to_msl,
     flights_to_msl,
-    geoid_undulation_m,
-    waypoints_to_msl,
 )
 
 KRDU_LAT, KRDU_LON = 35.8792, -78.7794
@@ -27,6 +25,13 @@ def _flight(**over):
         "icao24": "abc123",
         "runway": "23L",
         "altitude_source": HAE_ALTITUDE_SOURCE,
+        "runway_target": {
+            "elevation_hae_m": 100.0,
+            "elevation_msl_m": 133.5,
+            "hae_minus_msl_m": -33.5,
+            "position_source": "faa_cifp_path_point",
+            "vertical_source": "faa_cifp_path_point",
+        },
         "waypoints": [
             [0.0, KRDU_LON, KRDU_LAT, 1000.0],
             [1.0, KRDU_LON, KRDU_LAT, 900.0],
@@ -36,36 +41,12 @@ def _flight(**over):
     return base
 
 
-class GeoidTest(unittest.TestCase):
-    def test_undulation_matches_published_egm96(self) -> None:
-        (n,) = geoid_undulation_m([KRDU_LAT], [KRDU_LON])
-        self.assertAlmostEqual(n, KRDU_UNDULATION_M, delta=0.5)
-
-    def test_undulation_is_not_zero(self) -> None:
-        """PROJ silently returns a no-op 'ballpark' transform when the grid is missing."""
-        (n,) = geoid_undulation_m([KRDU_LAT], [KRDU_LON])
-        self.assertGreater(abs(n), 10.0)
-
-    def test_undulation_varies_by_location(self) -> None:
-        krdu, ksjc = geoid_undulation_m([KRDU_LAT, 37.3626], [KRDU_LON, -121.9290])
-        self.assertNotAlmostEqual(krdu, ksjc, places=1)
-
-
 class ConversionTest(unittest.TestCase):
     def test_msl_is_higher_than_hae_where_the_geoid_is_below_the_ellipsoid(self) -> None:
         """N is negative over the US, so H_MSL = h_HAE - N comes out ABOVE the input."""
-        converted = waypoints_to_msl([[0.0, KRDU_LON, KRDU_LAT, 1000.0]])
-        self.assertAlmostEqual(converted[0][3], 1000.0 - KRDU_UNDULATION_M, delta=0.5)
-        self.assertGreater(converted[0][3], 1000.0)
-
-    def test_only_altitude_changes(self) -> None:
-        (row,) = waypoints_to_msl([[7.0, KRDU_LON, KRDU_LAT, 500.0]])
-        self.assertEqual(row[0], 7.0)
-        self.assertEqual(row[1], KRDU_LON)
-        self.assertEqual(row[2], KRDU_LAT)
-
-    def test_empty_track_is_not_an_error(self) -> None:
-        self.assertEqual(waypoints_to_msl([]), [])
+        converted = flight_to_msl(_flight())
+        self.assertAlmostEqual(converted["waypoints"][0][3], 1033.5)
+        self.assertGreater(converted["waypoints"][0][3], 1000.0)
 
     def test_conversion_retags_the_altitude_source(self) -> None:
         self.assertEqual(flight_to_msl(_flight())["altitude_source"], MSL_ALTITUDE_SOURCE)

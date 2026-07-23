@@ -20,7 +20,8 @@ AeroViz-4D: Airport 4D trajectory and terrain digital-twin visualization system 
 - **4dTrajectory/optimization/** — Optimizers, constraints, batch tooling
 - **4dTrajectory/ts_transformer/** — Learned trajectory prediction (vendored iTransformer + PatchTST, torch)
 - **aeroviz_backend/** — Python HTTP backend (simulation / optimization / dynamics-comparison)
-- **run_scenario_pipeline.py** — Batch runner: arrivals (step 0, only when the combined czml-input is missing) → scenarios → optimize → CZML comparison + evaluation
+- **prepare_scenario_inputs.py** — Rebuild arrivals/observed outputs from stored tracks and generate fitted-ADS-B + runway-target scenario JSON
+- **run_scenario_optimization.py** — Consume prepared scenario JSON, optimize, evaluate, and publish comparison CZML
 
 ## Build & Dev Commands
 
@@ -59,16 +60,18 @@ python run_asd-b_fetch_and_generate.py --airport CYYC
 python run_asd-b_fetch_and_generate.py --airport CYYC \
     --input-json trajectory_data_process/outputs/cyyc_czml_input_*.json
 
-# Scenario optimization batch (all 3 modes per airport when --target-type omitted)
-python run_scenario_pipeline.py --jobs 6
+# Prepare inputs, then optimize all 3 modes per airport
+python prepare_scenario_inputs.py
+python run_scenario_optimization.py --jobs 6
 
 # ts_transformer full chain (2 models × 2 horizon modes: train → predict → eval → CZML;
 # dataset build + split happen inside train, split persisted in the checkpoint)
 python run_ts_pipeline.py --airport KRDU
 
-# Wipe ALL generated pipeline data (scenarios, optimizer+ts outputs, frontend comparison
-# + observed CZML). Raw downloads and _parked dirs kept unless --include-downloads /
-# --include-parked; archive_pipeline_data.py is the reversible alternative.
+# Wipe ALL generated pipeline data (derived arrivals/approach, scenarios, optimizer+ts
+# outputs, frontend comparison + observed CZML). Downloaded harvest/*/tracks and _parked
+# dirs are kept unless --include-downloads / --include-parked; archive_pipeline_data.py
+# is the reversible alternative.
 python clean_pipeline_data.py --dry-run
 ```
 
@@ -223,7 +226,7 @@ Dual purpose: thesis visualization/validation + reusable research component libr
 
 ## Key Defaults & Constants (current)
 
-- Mesh: `collocation/optimizer.py` `DEFAULT_N_SEGMENTS = 8`, `DEFAULT_N_SEG_PER_PHASE = 3` (single source; backend + batch import them; `run_scenario_pipeline.py` mirrors 8/3 with a "MUST match" comment). Frontend/backend unconstrained `n_segments` default = 10 (a different knob). Multiphase mesh = n_seg_per_phase × legs (`n_segments` doesn't apply).
+- Mesh: `collocation/optimizer.py` `DEFAULT_N_SEGMENTS = 8`, `DEFAULT_N_SEG_PER_PHASE = 3` (single source; backend + batch import them; `run_scenario_optimization.py` mirrors 8/3 with a "MUST match" comment). Frontend/backend unconstrained `n_segments` default = 10 (a different knob). Multiphase mesh = n_seg_per_phase × legs (`n_segments` doesn't apply).
 - State substeps: auto per phase ≈ 3 s state step, cap 16 (`_TARGET_STATE_STEP_S`/`_MAX_STATE_SUBSTEPS`); explicit `--state-substeps`/frontend "State substeps" (0 = auto, clamp 0–64) overrides. Do NOT lower below auto (M=4 → 14.5 km rollout error); on unconstrained solves M=32 improves accuracy/optimum; constrained solves don't need big M (per-node inequality rows make big M explode solve time).
 - Fitting: constrained + unconstrained default = Hermite-Simpson (`hermiteSimpsonNormalizedFullTransport`; frontend `DEFAULT_TRAJECTORY_OPTIMIZER = casadiMultiphaseNormalizedFullTransport`). `FITTING_SCHEMES`: `hs` / `trapezoidal` / `rk4` via `--fitting-type`. Trapezoidal is dynamically unfaithful on aggressive min-time floor-riding solves (5–15 km rollout drift vs HS metres); rk4 is basin-fragile there (needs M=64) — both kept for comparison studies only.
 - IPOPT: `components.DEFAULT_MAX_ITERATIONS = 3000` (`ipopt.max_iter` set explicitly on BOTH IPOPT constructions — verbose and quiet; request `maxIterations` reaches both backend branches). The third construction in that function is the `sqpmethod` backend, which **hardcodes `max_iter: 100` and ignores `max_iterations` entirely**. Linear solver: `AEROVIZ_IPOPT_LINSOL` (default `mumps`) + `AEROVIZ_IPOPT_HSLLIB` — HSL hook dormant (free MA27 measured 3–27× slower than MUMPS on these small NLPs; kept for a future MA57 attempt); batch speed lever is `--jobs`.
@@ -238,7 +241,7 @@ Dual purpose: thesis visualization/validation + reusable research component libr
 - **ts_transformer** (`config.py` is the single source; everything below is serialised into every checkpoint — mechanism and rationale in the package README): `dt_s = 2.0`, `seq_len = 60` (120 s), `pred_len` = 30 (window, 60 s) / **300** (full, 600 s). Channels = `(e, n, u, edot, ndot, udot)` threshold-anchored chart; **names AND order are load-bearing** (the tuple indexes tensors, normalizer stats and checkpoints — `load_checkpoint` refuses a mismatch, which is also what locks out pre-2026-07-20 `ve/vn/vu` checkpoints after the transport-consistency change). The velocity channels are the EXACT chart derivatives of the position channels (full-transport Jacobian, `geokit.wgs84_curvature_radii`), not raw physical ENU components — see the Operational Gotchas transport bullet. Traps: the horizon was sized from the MEASURED duration distribution (p50 328 s / p95 651 s), covering **97.8%** of flights — the old "an arrival is ~3.5–5 min" straight-line estimate was WRONG (real arrivals are vectored), do not resize from it; the ~2% over the horizon are cut at H and flagged `horizonCapped`, so their gate verdicts are cap artifacts, not model error. `summary.json` carries an `accuracy` block (mean AND p95) plus per-row `ade_m`/`fde_m`; `overlap` is a REQUIRED arg to `write_batch` — an optional metric is one that silently goes missing.
 - Comparison CZML colour contract: group status lives on entity `properties.status` ∈ solved/offTarget/failed. Reference: white / dark-red (failed) / dark-amber `OFF_TARGET_REF_COLOR` (off-target); simulator/result path bakes bright yellow `OFF_TARGET_COLOR` (255,205,40) + "(off target)" name; optimizer plan keeps legend orange/cyan. **The frontend repaint skip is keyed on "a verdict colour was baked", NOT on `status` alone** — reference always, plus off-target optimizer/simulator paths. `build_scenario_comparison_czml.states_schema` dispatches on the record keys (`optimizer_states`/`simulator_states` → `opt-`+`sim-` entities; `predicted_states`+`observed_states` → `pred-` (purple `PREDICTION_COLOR`, kind `predicted`) **plus `look-`** (same RGB at alpha 85 `LOOKBACK_COLOR`, kind `lookback`) — see the anchor-shift gotcha). **Predictions never get the off-target bake** (`mark_off_target = off_target and schema == "optimizer"`): a forecast essentially always misses the 106.75 m gate, so marking it repainted 27/27 groups yellow and the kind colour was never visible. Their `status` stays accurate and they ARE repainted from the legend — so `PREDICTION_COLOR` and the TS legend entry are not required to agree.
 - Categories manifest: `categories.json` entries carry an explicit `"constrained": bool` (frontend validator REQUIRES it; `_cons`-suffix detection deleted). Evaluation read side is manifest-ONLY: `load_records` reads a batch dir via `summary.json` roster (`results[].eval_file`); manifest-less dir / listed-missing file / empty roster raise (no glob fallback — globbing counted orphans).
-- Stale-artifact hygiene (write side): `_clear_stale_records` deletes top-level `*_states.json`/`*_eval.json` at batch start; `write_reference_records` clears `references/*_reference_eval.json` first; CZML builder `clear_stale_outputs` deletes previous `comparison_*.czml` + a stale published `evaluation_report.json`. Record-filename suffixes + `REFERENCES_DIR` + the `summary.json` row shape (`summary_row`) single-sourced in `optimization/evaluation_export.py` (imported by both the batch and `ts_transformer/export.py`).
+- Stale-artifact hygiene (write side): `_clear_stale_records` deletes top-level `*_states.json`/`*_eval.json` at optimization-batch start; `write_reference_records` clears reference records when rebuilding and its v2 manifest anchors every record by source identity + SHA-256. Comparison publication never pre-deletes the live batch: immutable generation-suffixed CZML/report files are written first, `comparison_index.json` is the atomic commit point, and only then are unreferenced generations pruned. `--skip-optimize` validates the complete summary/eval/states/reference roster, reference hashes, identities, and available prepared-input signatures before reuse. Record-filename suffixes + `REFERENCES_DIR` + the `summary.json` row shape (`summary_row`) remain single-sourced in `optimization/evaluation_export.py`.
 
 ## Changelog
 

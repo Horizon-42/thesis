@@ -18,7 +18,7 @@
  *     prediction comparison hides the plain tracks in favour of its own source.
  */
 
-import { airportDataUrl, airportLandingsRunwayUrl } from "./airportData";
+import { airportDataUrl, type LandingsManifest } from "./airportData";
 import type { WorkbenchMode } from "../context/AppContext";
 
 export interface ObservedTrackInputs {
@@ -26,6 +26,9 @@ export interface ObservedTrackInputs {
   activeAirportCode: string | null;
   selectedRunway: string | null;
   trajectoryComparison: boolean;
+  /** Canonical publication contract; legacy observed manifests are rejected upstream. */
+  landingsManifest?: LandingsManifest | null;
+  landingsStatus?: "idle" | "loading" | "ready" | "empty" | "error";
 }
 
 export interface ObservedTrackPlan {
@@ -33,6 +36,8 @@ export interface ObservedTrackPlan {
   fileUrl: string;
   /** Whether the loaded tracks are painted on the globe. */
   visible: boolean;
+  /** Runway entity filter; null shows the canonical file's complete roster. */
+  runwayFilter: string | null;
 }
 
 export function planObservedTracks({
@@ -40,14 +45,25 @@ export function planObservedTracks({
   activeAirportCode,
   selectedRunway,
   trajectoryComparison,
+  landingsManifest,
+  landingsStatus,
 }: ObservedTrackInputs): ObservedTrackPlan {
   const relevant = !!activeAirportCode && mode === "observe";
   let fileUrl = "";
+  let runwayFilter: string | null = selectedRunway;
   if (relevant && activeAirportCode) {
-    fileUrl = selectedRunway
-      ? airportLandingsRunwayUrl(activeAirportCode, selectedRunway)
-      : airportDataUrl(activeAirportCode, "trajectories.czml");
+    if (
+      landingsStatus !== undefined &&
+      (landingsStatus !== "ready" || !landingsManifest)
+    ) {
+      // The manifest is the publication commit point. Do not load uncommitted, missing,
+      // invalid, or obsolete observed data by guessing a filename.
+      runwayFilter = null;
+    } else {
+      const published = landingsStatus === "ready" ? landingsManifest?.combined : null;
+      fileUrl = airportDataUrl(activeAirportCode, published || "trajectories.czml");
+    }
   }
   const visible = mode === "observe" && !trajectoryComparison;
-  return { fileUrl, visible };
+  return { fileUrl, visible, runwayFilter };
 }

@@ -51,13 +51,14 @@ def test_dry_run_rosters_each_harvest_category_without_deleting(
     assert all(path.exists() for path in (tracks, arrivals, approach, legacy))
 
 
-def test_default_clean_keeps_every_harvest_category(tmp_path: Path, monkeypatch) -> None:
+def test_default_clean_removes_derived_harvest_but_keeps_downloaded_tracks(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
     harvest = tmp_path / "trajectory_data_process" / "outputs" / "harvest"
-    harvest_files = {
-        _write(harvest / "KAAA" / "tracks" / "manifest.json"),
-        _write(harvest / "KAAA" / "arrivals" / "manifest.json"),
-        _write(harvest / "KAAA" / "approach" / "summary.json"),
-    }
+    tracks = _write(harvest / "KAAA" / "tracks" / "manifest.json")
+    arrivals = _write(harvest / "KAAA" / "arrivals" / "manifest.json")
+    approach = _write(harvest / "KAAA" / "approach" / "summary.json")
 
     monkeypatch.setattr(cleaner, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(cleaner, "SCENARIOS_DIR", tmp_path / "flight_scenarios" / "outputs")
@@ -75,5 +76,60 @@ def test_default_clean_keeps_every_harvest_category(tmp_path: Path, monkeypatch)
     )
 
     planned = {path for _, files in groups for path in files}
-    assert planned.isdisjoint(harvest_files)
-    assert any("harvest data" in note for note in kept)
+    assert tracks not in planned
+    assert {arrivals, approach} <= planned
+    assert any("harvest tracks" in note for note in kept)
+
+
+def test_default_clean_deletes_preparation_outputs_without_touching_tracks_or_static_data(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    harvest = tmp_path / "trajectory_data_process" / "outputs" / "harvest"
+    tracks = _write(harvest / "KAAA" / "tracks" / "manifest.json")
+    arrivals = _write(harvest / "KAAA" / "arrivals" / "manifest.json")
+    approach = _write(harvest / "KAAA" / "approach" / "summary.json")
+    scenarios = _write(
+        tmp_path / "flight_scenarios" / "outputs" /
+        "KAAA_arrivals_fitted_adsb_scenarios.json"
+    )
+    airport_dir = tmp_path / "aeroviz-4d" / "public" / "data" / "airports" / "KAAA"
+    observed = _write(airport_dir / "trajectories.czml")
+    landings = _write(airport_dir / "landings" / "index.json")
+    observed_report = _write(
+        airport_dir / "comparison" / "observed" / "evaluation_report.json"
+    )
+    static_airport = _write(airport_dir / "airport.json")
+
+    monkeypatch.setattr(cleaner, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(
+        cleaner,
+        "SCENARIOS_DIR",
+        tmp_path / "flight_scenarios" / "outputs",
+    )
+    monkeypatch.setattr(
+        cleaner,
+        "OPT_OUTPUTS_ROOT",
+        tmp_path / "4dTrajectory" / "outputs",
+    )
+    monkeypatch.setattr(
+        cleaner,
+        "COMPARISON_AIRPORTS_ROOT",
+        tmp_path / "aeroviz-4d" / "public" / "data" / "airports",
+    )
+    monkeypatch.setattr(cleaner, "HARVEST_ROOT", harvest)
+    monkeypatch.setattr(cleaner, "_tracked_files", lambda: frozenset())
+    monkeypatch.setattr(
+        cleaner.sys,
+        "argv",
+        ["clean_pipeline_data.py", "--yes"],
+    )
+
+    cleaner.main()
+
+    assert tracks.exists()
+    assert static_airport.exists()
+    assert all(
+        not path.exists()
+        for path in (arrivals, approach, scenarios, observed, landings, observed_report)
+    )

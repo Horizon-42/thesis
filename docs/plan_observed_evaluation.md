@@ -150,9 +150,9 @@ the file directly). Target = the runway threshold via `flight_scenarios.threshol
 (`_upsert_category`, with the explicit `constrained: bool`). Add an `observed` category the
 same way. Then **the frontend needs no new plumbing** — see §5.
 
-`run_scenario_pipeline.py` sweeps `("adsb",False),("runway",False),("runway",True)` by
-default (:93). Add the observed category to that sweep, or publish it via the builder's
-`--category observed` path.
+The implemented split now publishes the observed category from
+`prepare_scenario_inputs.py`; `run_scenario_optimization.py` separately sweeps
+`("fitted-adsb",False),("runway",False),("runway",True)`.
 
 Note on the comparison CZML for observed: the observed track already renders as the white
 reference line (deep-copied from `trajectories.czml`, ellipsoidal). The observed *evaluation*

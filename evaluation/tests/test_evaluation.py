@@ -17,6 +17,7 @@ from evaluation import (  # noqa: E402
     evaluate_batch,
     evaluate_record,
     final_state_deviation,
+    load_record,
     load_records,
     percentile,
     record_from_dict,
@@ -77,6 +78,16 @@ def test_record_round_trip_and_solved_flag():
     unsolved = record_from_dict(_failed_payload())
     assert not unsolved.solved
     assert unsolved.reason.startswith("ValueError")
+
+
+def test_evaluate_batch_accepts_a_one_pass_record_iterator():
+    records = (record_from_dict(payload) for payload in [_payload(), _failed_payload()])
+
+    report = evaluate_batch(records)
+
+    assert report["total"] == 2
+    assert report["solved"] == 1
+    assert [row["id"] for row in report["trajectories"]] == ["AFR074", "BAD001"]
 
 
 def test_misaligned_controls_raise():
@@ -226,6 +237,68 @@ def test_reference_record_with_empty_controls_validates():
     assert record.solved and record.controls == []
 
 
+def test_record_can_anchor_states_in_a_sibling_states_file(tmp_path):
+    payload = _payload()
+    states = payload["states"]
+    (tmp_path / "flight_states.json").write_text(
+        json.dumps({"simulator_states": states}), encoding="utf-8"
+    )
+    payload["states"] = []
+    payload["states_ref"] = {
+        "file": "flight_states.json",
+        "key": "simulator_states",
+        "start_index": 1,
+    }
+    payload["initial_state"] = {k: v for k, v in states[1].items() if k != "t"}
+    payload["final_time_s"] = states[1]["t"]
+    payload["controls"] = [payload["controls"][-1]]
+    path = tmp_path / "flight_eval.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    record = load_record(path)
+
+    assert record.states == states[1:]
+    assert record.path == path
+
+
+@pytest.mark.parametrize(
+    ("start", "stop"),
+    [
+        (2, None),
+        (1, 3),
+        (1, 1),
+    ],
+)
+def test_states_ref_rejects_empty_or_out_of_bounds_slices(tmp_path, start, stop):
+    payload = _payload()
+    states = payload["states"]
+    (tmp_path / "flight_states.json").write_text(
+        json.dumps({"simulator_states": states}), encoding="utf-8"
+    )
+    payload["states"] = []
+    payload["controls"] = []
+    payload["states_ref"] = {
+        "file": "flight_states.json",
+        "key": "simulator_states",
+        "start_index": start,
+    }
+    if stop is not None:
+        payload["states_ref"]["stop_index"] = stop
+    path = tmp_path / "flight_eval.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="states_ref slice"):
+        load_record(path)
+
+
+def test_unsolved_record_cannot_keep_a_final_time():
+    payload = _payload()
+    payload["states"] = []
+    payload["controls"] = []
+    with pytest.raises(ValueError, match="unsolved record.*final_time_s"):
+        record_from_dict(payload)
+
+
 def test_solved_record_requires_final_time():
     payload = _payload()
     payload["final_time_s"] = None
@@ -293,10 +366,38 @@ def test_compare_to_reference_measures_offset_and_time_delta(tmp_path):
     assert comparison.path_vertical_m["max_abs"] == pytest.approx(50.0, abs=1e-6)
 
 
+def test_load_reference_rejects_a_different_flight_identity(tmp_path):
+    record_payload = _payload()
+    record_payload["source"].update(
+        icao24="aaa001",
+        runway="05L",
+        landing_time_utc="2026-01-01T00:00:00Z",
+    )
+    record_payload["reference_file"] = "reference.json"
+    reference_payload = _reference_payload()
+    reference_payload["source"].update(
+        icao24="bbb002",
+        runway="05L",
+        landing_time_utc="2026-01-01T00:00:00Z",
+    )
+    (tmp_path / "record.json").write_text(json.dumps(record_payload), encoding="utf-8")
+    (tmp_path / "reference.json").write_text(json.dumps(reference_payload), encoding="utf-8")
+
+    from evaluation import load_reference
+
+    with pytest.raises(ValueError, match="identity"):
+        load_reference(load_record(tmp_path / "record.json"))
+
+
 def test_batch_integrates_reference_rows_and_aggregate(tmp_path):
     (tmp_path / "references").mkdir()
     (tmp_path / "references" / "AFR074_reference_eval.json").write_text(
         json.dumps(_reference_payload()), encoding="utf-8"
+    )
+    failed_reference = _reference_payload()
+    failed_reference["source"]["id"] = "BAD001"
+    (tmp_path / "references" / "BAD001_reference_eval.json").write_text(
+        json.dumps(failed_reference), encoding="utf-8"
     )
     solved = _payload()
     solved["states"] = _path_states(lon_offset_deg=0.0002, t_end=90.0)
@@ -305,7 +406,7 @@ def test_batch_integrates_reference_rows_and_aggregate(tmp_path):
     solved["target_state"] = {k: v for k, v in solved["states"][-1].items() if k != "t"}
     solved["reference_file"] = "references/AFR074_reference_eval.json"
     unsolved = _failed_payload()
-    unsolved["reference_file"] = "references/AFR074_reference_eval.json"
+    unsolved["reference_file"] = "references/BAD001_reference_eval.json"
     (tmp_path / "a_eval.json").write_text(json.dumps(solved), encoding="utf-8")
     (tmp_path / "b_eval.json").write_text(json.dumps(unsolved), encoding="utf-8")
     _manifest(tmp_path, "a_eval.json", "b_eval.json")
@@ -315,7 +416,7 @@ def test_batch_integrates_reference_rows_and_aggregate(tmp_path):
     assert rows["AFR074"]["reference"]["flight_time_delta_s"] == pytest.approx(-10.0)
     # The unsolved record still reports the observed baseline duration.
     assert rows["BAD001"]["reference"] == {
-        "file": "references/AFR074_reference_eval.json", "flight_time_s": 100.0,
+        "file": "references/BAD001_reference_eval.json", "flight_time_s": 100.0,
     }
     aggregate = report["reference"]
     assert aggregate["compared"] == 1
@@ -334,9 +435,12 @@ def test_degenerate_solved_record_does_not_abort_the_batch(tmp_path):
     # with zero horizontal extent — the batch must SKIP its comparison with a note,
     # not raise out of evaluate_batch and lose the whole report.
     (tmp_path / "references").mkdir()
-    (tmp_path / "references" / "AFR074_reference_eval.json").write_text(
-        json.dumps(_reference_payload()), encoding="utf-8"
-    )
+    for flight_id in ("DGN1", "OK1"):
+        reference = _reference_payload()
+        reference["source"]["id"] = flight_id
+        (tmp_path / "references" / f"{flight_id}_reference_eval.json").write_text(
+            json.dumps(reference), encoding="utf-8"
+        )
     single = {"t": 0.0, "lat": 35.6, "lon": -78.5, "alt": 2000.0, "V": 130.0,
               "psi": 1.5, "gamma": -0.05, "m": 60000.0}
     degenerate = {
@@ -346,14 +450,14 @@ def test_degenerate_solved_record_does_not_abort_the_batch(tmp_path):
         "final_time_s": 0.0,
         "states": [single],
         "controls": [{"thrust": 1e5, "bank_rad": 0.0, "load_factor": 1.0}],
-        "reference_file": "references/AFR074_reference_eval.json",
+        "reference_file": "references/DGN1_reference_eval.json",
     }
     healthy = _payload(source={"id": "OK1"})
     healthy["states"] = _path_states(lon_offset_deg=0.0002, t_end=90.0)
     healthy["controls"] = healthy["controls"][:1] * len(healthy["states"])
     healthy["final_time_s"] = 90.0
     healthy["target_state"] = {k: v for k, v in healthy["states"][-1].items() if k != "t"}
-    healthy["reference_file"] = "references/AFR074_reference_eval.json"
+    healthy["reference_file"] = "references/OK1_reference_eval.json"
     (tmp_path / "a_eval.json").write_text(json.dumps(degenerate), encoding="utf-8")
     (tmp_path / "b_eval.json").write_text(json.dumps(healthy), encoding="utf-8")
     _manifest(tmp_path, "a_eval.json", "b_eval.json")

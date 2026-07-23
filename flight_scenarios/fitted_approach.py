@@ -2,20 +2,21 @@
 
 The arrival manifest deliberately stops at the last measured sample.  For most harvested
 arrivals that sample is still short of the runway, so it is not a physical arrival target.
-This module applies :mod:`final_approach` after the modeling seam has converted the flight
-to MSL, and exposes two views of the same fit:
+This module applies :mod:`final_approach` in the flight's declared vertical datum, and
+exposes two views of the same fit:
 
-* one fitted crossing position for an optimizer target; and
+* one fitted crossing state for an optimizer target; and
 * uniformly timed fitted positions after the last observation for TS supervision.
 
-Only position is inferred.  Callers keep measured terminal kinematics or mask velocity
-channels; this module never presents extrapolated velocity as an ADS-B observation.
+The optimizer target uses the spatial fit's tangent plus a constant along-track rate
+estimated across the same approach segment.  TS tail velocity channels remain
+masked: an inferred crossing state is a modeling boundary, not an ADS-B observation.
 """
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any
 
 from aerodynamic_model.common import GeodeticState
@@ -23,7 +24,6 @@ from final_approach import RunwayFrame, SegmentFit, TrackPoint, fit_final_segmen
 from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon
 
 from .datum import HAE_ALTITUDE_SOURCE, MSL_ALTITUDE_SOURCES
-from .start_state import DEFAULT_WINDOW_S
 
 
 @dataclass(frozen=True)
@@ -39,6 +39,7 @@ class TimedFittedPoint:
 class FittedApproach:
     """The fitted threshold crossing and the timing needed to sample its inferred tail."""
 
+    altitude_source: str
     fit: SegmentFit
     frame: RunwayFrame
     crossing: TrackPoint
@@ -47,18 +48,33 @@ class FittedApproach:
     along_rate_mps: float | None
     crossing_time_s: float | None
 
-    def target_state(self, measured_terminal: GeodeticState) -> GeodeticState:
-        """Fitted position plus measured terminal ``V/psi/gamma/m``.
+    def target_state(
+        self, *, mass_kg: float, hae_minus_msl_m: float = 0.0
+    ) -> GeodeticState:
+        """Return the fitted position and approach kinematics in the modeling MSL datum.
 
-        The fit estimates only geometry.  Carrying the last measured LSQ kinematics avoids
-        silently treating an extrapolated speed as ground truth or substituting chart Vref,
-        which would turn this into the published-runway target mode.
+        The crossing retains the datum in which the fit was performed. Direct callers may
+        fit a raw HAE flight, while the standard manifest CLI fits an already-converted MSL
+        flight. Applying the runway offset based on that provenance makes both paths correct
+        and prevents an idempotent input conversion from being followed by a second, hidden
+        conversion here.
         """
-        return replace(
-            measured_terminal,
+        if self.along_rate_mps is None:
+            raise ValueError("fitted approach has no usable along-track velocity")
+        V, psi, gamma = _kinematics_on_fit(
+            self.frame, self.fit, self.along_rate_mps
+        )
+        altitude_msl = self.crossing.alt_m
+        if self.altitude_source == HAE_ALTITUDE_SOURCE:
+            altitude_msl -= hae_minus_msl_m
+        return GeodeticState(
             latitude=self.crossing.lat,
             longitude=self.crossing.lon,
-            altitude=self.crossing.alt_m,
+            altitude=altitude_msl,
+            V=V,
+            psi=psi,
+            gamma=gamma,
+            m=mass_kg,
         )
 
     def uniform_tail(self, *, after_time_s: float, dt_s: float) -> list[TimedFittedPoint]:
@@ -78,7 +94,11 @@ class FittedApproach:
         ):
             return []
 
-        count = int(math.ceil((self.crossing_time_s - after_time_s) / dt_s))
+        # Avoid manufacturing one extra grid row when an LSQ-derived crossing lies only
+        # floating-point epsilon beyond an exact grid instant.
+        count = int(math.ceil(
+            (self.crossing_time_s - after_time_s) / dt_s - 1e-12
+        ))
         rows: list[TimedFittedPoint] = []
         for step in range(1, count + 1):
             time_s = after_time_s + step * dt_s
@@ -96,30 +116,23 @@ class FittedApproach:
         return rows
 
 
-def fit_flight_final_approach(
-    flight: dict[str, Any],
-    *,
-    velocity_window_s: float = DEFAULT_WINDOW_S,
-) -> FittedApproach | None:
-    """Fit one already-MSL flight to its manifest-published runway, or return ``None``.
+def fit_flight_final_approach(flight: dict[str, Any]) -> FittedApproach | None:
+    """Fit one declared-datum flight to its manifest-published runway, or return ``None``.
 
-    ``runway_target`` supplies the landing-threshold frame.  A missing target or unusable
-    final segment is a normal ``None`` for generic/synthetic inputs; an explicit HAE input
-    raises because fitting it against the MSL runway would reproduce the historical geoid
-    datum bug.
+    Harvested ADS-B is fitted in HAE against the CIFP HAE threshold. Synthetic/local-MSL
+    inputs continue to use the MSL threshold.
     """
     altitude_source = flight.get("altitude_source")
-    if altitude_source == HAE_ALTITUDE_SOURCE:
-        raise ValueError(
-            "fit_flight_final_approach requires MSL waypoints; call flight_to_msl first"
-        )
-    if altitude_source not in MSL_ALTITUDE_SOURCES:
+    if altitude_source not in MSL_ALTITUDE_SOURCES | {HAE_ALTITUDE_SOURCE}:
         raise ValueError(
             f"fit_flight_final_approach does not recognize altitude_source {altitude_source!r}"
         )
     waypoints = flight.get("waypoints") or []
     target = flight.get("runway_target") or {}
-    required = ("lat", "lon", "elevation_msl_m", "course_deg")
+    elevation_key = (
+        "elevation_hae_m" if altitude_source == HAE_ALTITUDE_SOURCE else "elevation_msl_m"
+    )
+    required = ("lat", "lon", elevation_key, "course_deg")
     if len(waypoints) < 2 or any(target.get(key) is None for key in required):
         return None
 
@@ -127,7 +140,7 @@ def fit_flight_final_approach(
         ident=str(flight.get("runway") or "?"),
         lat=float(target["lat"]),
         lon=float(target["lon"]),
-        elevation_m=float(target["elevation_msl_m"]),
+        elevation_m=float(target[elevation_key]),
         course_deg=float(target["course_deg"]),
     )
     points = [
@@ -141,13 +154,17 @@ def fit_flight_final_approach(
     projected = frame.project_all(points)
     last_along = float(projected[-1].along_m)
     last_time = float(waypoints[-1][0]) - float(waypoints[0][0])
-    along_rate = _terminal_along_rate(waypoints, projected, velocity_window_s)
+    # Fit one constant speed over the same established segment as the spatial lines.
+    # Arrival records may continue through rollout, but none of those samples enter here.
+    fit_slice = slice(fit.first_sample_index, fit.last_sample_index + 1)
+    along_rate = _fit_along_rate(waypoints[fit_slice], projected[fit_slice])
     crossing_time = (
         last_time - last_along / along_rate
         if last_along < 0.0 and along_rate is not None
         else None
     )
     return FittedApproach(
+        altitude_source=altitude_source,
         fit=fit,
         frame=frame,
         crossing=_point_on_fit(frame, fit, 0.0),
@@ -158,21 +175,24 @@ def fit_flight_final_approach(
     )
 
 
-def _terminal_along_rate(waypoints, projected, window_s: float) -> float | None:
-    """Last-window LSQ runway-direction speed in the same chart as the fitted line."""
-    if window_s <= 0.0:
-        raise ValueError(f"velocity_window_s must be positive, got {window_s}")
-    last_t = float(waypoints[-1][0])
-    selected = [
-        (float(row[0]), float(point.along_m))
-        for row, point in zip(waypoints, projected)
-        if last_t - float(row[0]) <= window_s
-    ]
+def _fit_along_rate(waypoints, projected) -> float | None:
+    """Constant LSQ runway-direction speed over the fitted approach segment.
+
+    This constant-rate estimate is the intentionally small seam for a future deceleration
+    model: replace the linear ``along(t)`` fit with that model's rate at crossing; the
+    spatial tangent and target-state assembly remain unchanged. Consecutive stuck ADS-B
+    positions are collapsed before fitting so a long repeated report cannot imply zero
+    approach speed.
+    """
+    selected = []
+    previous_position = None
+    for row, point in zip(waypoints, projected):
+        position = (row[1], row[2])
+        if position != previous_position:
+            selected.append((float(row[0]), float(point.along_m)))
+            previous_position = position
     if len(selected) < 2:
-        selected = [
-            (float(row[0]), float(point.along_m))
-            for row, point in zip(waypoints[-2:], projected[-2:])
-        ]
+        return None
     mean_t = sum(t for t, _ in selected) / len(selected)
     denominator = sum((t - mean_t) ** 2 for t, _ in selected)
     if denominator <= 0.0:
@@ -180,6 +200,23 @@ def _terminal_along_rate(waypoints, projected, window_s: float) -> float | None:
     mean_along = sum(x for _, x in selected) / len(selected)
     rate = sum((t - mean_t) * (x - mean_along) for t, x in selected) / denominator
     return rate if math.isfinite(rate) and rate > 1.0 else None
+
+
+def _kinematics_on_fit(
+    frame: RunwayFrame, fit: SegmentFit, along_rate_mps: float
+) -> tuple[float, float, float]:
+    """``(V, psi, gamma)`` from the fitted 3-D tangent and its along-track rate."""
+    course = math.radians(frame.course_deg)
+    east_hat, north_hat = math.sin(course), math.cos(course)
+    cross_rate = fit.cross.slope * along_rate_mps
+    vertical_rate = fit.height.slope * along_rate_mps
+    east_rate = along_rate_mps * east_hat + cross_rate * north_hat
+    north_rate = along_rate_mps * north_hat - cross_rate * east_hat
+    ground_speed = math.hypot(east_rate, north_rate)
+    V = math.hypot(ground_speed, vertical_rate)
+    psi = math.atan2(north_rate, east_rate)
+    gamma = math.atan2(vertical_rate, ground_speed)
+    return V, psi, gamma
 
 
 def _point_on_fit(frame: RunwayFrame, fit: SegmentFit, along_m: float) -> TrackPoint:

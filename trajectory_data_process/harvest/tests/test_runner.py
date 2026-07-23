@@ -24,11 +24,14 @@ def _airport() -> Airport:
         ident="18",
         lat=0.0,
         lon=0.0,
+        elevation_hae_m=0.0,
         elevation_msl_m=0.0,
         course_deg=180.0,
-        geoid_undulation_m=0.0,
+        hae_minus_msl_m=0.0,
         threshold_crossing_height_m=None,
         published_glidepath_deg=None,
+        position_source="faa_cifp_path_point",
+        vertical_source="faa_cifp_path_point",
     )
     return Airport(
         code="KAAA",

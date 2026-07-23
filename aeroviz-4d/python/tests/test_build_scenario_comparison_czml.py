@@ -2,6 +2,7 @@
 
 import json
 
+import build_scenario_comparison_czml as comparison_builder
 from build_scenario_comparison_czml import (
     FAILED_COLOR,
     LOOKBACK_COLOR,
@@ -21,6 +22,8 @@ from build_scenario_comparison_czml import (
     group_results_by_runway,
     load_verdicts,
     optimization_stats,
+    publish_comparison_batch,
+    prune_unreferenced_outputs,
     states_schema,
 )
 
@@ -29,7 +32,7 @@ STATES = [
     {"t": 5.0, "lat": 35.73, "lon": -78.46, "alt": 2400.0, "V": 128.0, "psi": 1.0, "gamma": -0.05, "m": 78000.0},
 ]
 STATE_DATA = {
-    "source": {"id": "AFR074", "runway": "05L"},
+    "source": {"id": "AFR074", "runway": "05L", "hae_minus_msl_m": -33.5},
     "final_time_s": 5.0,
     "optimizer_states": STATES,
     "simulator_states": STATES,
@@ -67,30 +70,25 @@ def test_last_time():
 
 
 def test_states_to_waypoints_order():
-    waypoints = _states_to_waypoints(STATES)
-    # (t, lon, lat, alt) — lon before lat; alt converted MSL -> ellipsoidal for Cesium.
-    from vertical_datum import msl_to_hae
+    waypoints = _states_to_waypoints(STATES, -33.5)
 
     assert waypoints[0][:3] == (0.0, -78.45, 35.74)
     assert waypoints[1][:3] == (5.0, -78.46, 35.73)
-    expected = msl_to_hae([-78.45, -78.46], [35.74, 35.73], [2500.0, 2400.0])
-    assert waypoints[0][3] == expected[0]
-    assert waypoints[1][3] == expected[1]
+    assert waypoints[0][3] == 2466.5
+    assert waypoints[1][3] == 2366.5
     # Sanity, non-circularly: over the eastern US the geoid sits 25-40 m below the
     # ellipsoid, so the CZML altitude must come out that far BELOW the record's MSL.
     assert 2500.0 - 40.0 < waypoints[0][3] < 2500.0 - 25.0
 
 
 def test_states_to_waypoints_empty_is_empty():
-    assert _states_to_waypoints([]) == []
+    assert _states_to_waypoints([], -33.5) == []
 
 
-def test_vertical_datum_mirror_pins_the_same_krdu_undulation():
-    """Mirror lockstep with flight_scenarios/datum.py: both probe KRDU N = -33.53 m."""
-    from vertical_datum import msl_to_hae
-
-    (hae,) = msl_to_hae([-78.7794], [35.8792], [0.0])
-    assert abs(hae - (-33.53)) < 0.5
+def test_vertical_datum_uses_record_fixed_offset():
+    assert _states_to_waypoints(
+        [{"t": 0.0, "lon": -78.0, "lat": 35.0, "alt": 100.0}], -33.5
+    )[0][3] == 66.5
 
 
 def test_reference_entity_copies_and_recolors():
@@ -126,7 +124,10 @@ def test_build_comparison_czml_has_three_trajectories():
 
 
 def test_no_reference_when_flight_missing():
-    czml = build_comparison_czml({**STATE_DATA, "source": {"id": "NOPE", "runway": "05L"}}, ADSB_CZML)
+    czml = build_comparison_czml({
+        **STATE_DATA,
+        "source": {"id": "NOPE", "runway": "05L", "hae_minus_msl_m": -33.5},
+    }, ADSB_CZML)
     ids = [packet["id"] for packet in czml[1:]]
     assert "scenario-reference" not in ids
     assert "scenario-optimizer" in ids and "scenario-simulator" in ids
@@ -255,6 +256,31 @@ def test_build_runway_comparison_solved_three_paths_failed_red(tmp_path):
     assert failed_rec["massKg"] == 61000.0
 
 
+def test_batch_can_anchor_references_in_canonical_observed_czml(tmp_path):
+    (tmp_path / "AFR074_05L_states.json").write_text(json.dumps(STATE_DATA), encoding="utf-8")
+    results = [
+        {"id": "AFR074", "runway": "05L", "status": "solved",
+         "states_file": "AFR074_05L_states.json"},
+        {"id": "DAL1312", "runway": "05L", "status": "failed", "states_file": None},
+    ]
+
+    czml, index = build_runway_comparison(
+        results,
+        tmp_path,
+        [],
+        airport="KRDU",
+        include_reference_entities=False,
+    )
+
+    physical_ids = {packet["id"] for packet in czml[1:]}
+    assert physical_ids == {"opt-AFR074_05L", "sim-AFR074_05L"}
+    by_group = {row["group"]: row for row in index}
+    assert by_group["AFR074_05L"]["entities"] == [
+        "ref-AFR074_05L", "opt-AFR074_05L", "sim-AFR074_05L"
+    ]
+    assert by_group["DAL1312_05L"]["entities"] == ["ref-DAL1312_05L"]
+
+
 def test_build_runway_comparison_dedupes_collided_rows(tmp_path):
     # Two summary rows for the same (flightId, runway) point at the SAME states file
     # (the filename collides on overwrite). They must collapse to ONE group/one entity set.
@@ -339,7 +365,9 @@ def test_off_target_group_yellow_reference_and_verdict_metrics(tmp_path):
     # record), and the verdict's final deviations are copied onto the record. A flight whose
     # verdict says success=true stays plain "solved" with the white reference.
     (tmp_path / "AFR074_05L_states.json").write_text(json.dumps(STATE_DATA), encoding="utf-8")
-    miss_data = {**STATE_DATA, "source": {"id": "DAL1312", "runway": "05L"}}
+    miss_data = {**STATE_DATA, "source": {
+        "id": "DAL1312", "runway": "05L", "hae_minus_msl_m": -33.5
+    }}
     (tmp_path / "DAL1312_05L_states.json").write_text(json.dumps(miss_data), encoding="utf-8")
     results = [
         {"id": "AFR074", "runway": "05L", "status": "solved",
@@ -403,10 +431,10 @@ def test_scenario_initial_map_keys_namesakes_apart_by_flight_key(tmp_path):
     from build_scenario_comparison_czml import scenario_initial_map
 
     scenarios = [
-        {"source": {"id": "ASA677", "runway": "05R", "icao24": "a54aae",
+        {"source": {"id": "ASA677", "runway": "05R", "icao24": "a54aae", "hae_minus_msl_m": -33.5,
                     "landing_time_utc": "2026-06-29T09:31:23Z"},
          "initial": {"V": 130.0, "m": 78000.0}},
-        {"source": {"id": "ASA677", "runway": "05R", "icao24": "a9e8ce",
+        {"source": {"id": "ASA677", "runway": "05R", "icao24": "a9e8ce", "hae_minus_msl_m": -33.5,
                     "landing_time_utc": "2026-06-30T09:39:25Z"},
          "initial": {"V": 118.0, "m": 64000.0}},
     ]
@@ -447,31 +475,169 @@ def test_publish_evaluation_report_copies_verbatim(tmp_path):
     from build_scenario_comparison_czml import publish_evaluation_report
 
     report = {"total": 3, "solve_rate": 0.5, "trajectories": [{"id": "X"}]}
-    path = publish_evaluation_report(report, tmp_path)
-    assert path == tmp_path / "evaluation_report.json"
+    path = publish_evaluation_report(
+        report,
+        tmp_path,
+        filename="evaluation_report_batch123.json",
+    )
+    assert path == tmp_path / "evaluation_report_batch123.json"
     assert json.loads(path.read_text(encoding="utf-8")) == report
 
 
-def test_clear_stale_outputs_removes_previous_build(tmp_path):
-    # A runway present in an earlier batch but absent now must not leave its CZML
-    # behind; a previously PUBLISHED report must go when this run publishes none
-    # (the frontend Details window fetches it by path and would show stale metrics).
-    from build_scenario_comparison_czml import clear_stale_outputs
-
-    (tmp_path / "comparison_KRDU_36.czml").write_text("[]")
+def test_prune_unreferenced_outputs_runs_against_the_committed_roster(tmp_path):
+    (tmp_path / "comparison_KRDU_36_old.czml").write_text("[]")
+    (tmp_path / "comparison_KRDU_05L_current.czml").write_text("[]")
     (tmp_path / "evaluation_report.json").write_text("{}")
     (tmp_path / "comparison_index.json").write_text("{}")
 
-    deleted = clear_stale_outputs(tmp_path, keep_report=False)
-    assert not (tmp_path / "comparison_KRDU_36.czml").exists()
+    deleted = prune_unreferenced_outputs(
+        tmp_path, {"comparison_KRDU_05L_current.czml"}
+    )
+    assert not (tmp_path / "comparison_KRDU_36_old.czml").exists()
+    assert (tmp_path / "comparison_KRDU_05L_current.czml").exists()
     assert not (tmp_path / "evaluation_report.json").exists()
-    assert (tmp_path / "comparison_index.json").exists()   # rewritten later, not cleared
+    assert (tmp_path / "comparison_index.json").exists()
     assert len(deleted) == 2
 
-    # with a report to publish, an existing published copy is left for the overwrite
-    (tmp_path / "evaluation_report.json").write_text("{}")
-    assert clear_stale_outputs(tmp_path, keep_report=True) == []
-    assert (tmp_path / "evaluation_report.json").exists()
+
+def test_batch_failure_preserves_the_previous_committed_generation(monkeypatch, tmp_path):
+    import pytest
+
+    old_file = tmp_path / "comparison_KRDU_05L_previous.czml"
+    old_file.write_text("[{\"id\":\"old\"}]")
+    old_index = {
+        "epoch": "2026-01-01T00:00:00Z",
+        "groups": [{"czml": old_file.name}],
+    }
+    index_path = tmp_path / "comparison_index.json"
+    index_path.write_text(json.dumps(old_index))
+
+    summary = {
+        "total": 2,
+        "solved": 2,
+        "failed": 0,
+        "failure_rate": 0.0,
+        "results": [
+            {"id": "ONE", "runway": "05L"},
+            {"id": "TWO", "runway": "23R"},
+        ],
+    }
+
+    def fake_build(results, *_args, airport, **_kwargs):
+        runway = results[0]["runway"]
+        return ([{"id": "document"}], [{
+            "group": results[0]["id"],
+            "flightId": results[0]["id"],
+            "runway": runway,
+            "airport": airport,
+            "status": "solved",
+            "entities": [],
+        }])
+
+    original_write = comparison_builder._write_json_atomic
+
+    def fail_on_second_runway(path, value, *, pretty=False):
+        if "23R" in path.name:
+            raise RuntimeError("injected second-runway failure")
+        original_write(path, value, pretty=pretty)
+
+    monkeypatch.setattr(comparison_builder, "build_runway_comparison", fake_build)
+    monkeypatch.setattr(comparison_builder, "_write_json_atomic", fail_on_second_runway)
+
+    with pytest.raises(RuntimeError, match="second-runway"):
+        publish_comparison_batch(
+            summary=summary,
+            states_dir=tmp_path,
+            out_dir=tmp_path,
+            airport="KRDU",
+            category="runway",
+            start_hidden=True,
+            scenario_initial=None,
+            evaluation_report={"total": 2, "trajectories": []},
+            generation="next",
+        )
+
+    assert json.loads(index_path.read_text()) == old_index
+    assert old_file.exists()
+    assert not (tmp_path / "comparison_KRDU_05L_next.czml").exists()
+
+
+def test_batch_requires_an_evaluation_report_for_the_committed_generation(tmp_path):
+    import pytest
+
+    with pytest.raises(ValueError, match="evaluation report"):
+        publish_comparison_batch(
+            summary={
+                "total": 0,
+                "solved": 0,
+                "failed": 0,
+                "failure_rate": 0.0,
+                "results": [],
+            },
+            states_dir=tmp_path,
+            out_dir=tmp_path,
+            airport="KRDU",
+            category="runway",
+            start_hidden=True,
+            scenario_initial=None,
+            evaluation_report=None,
+            generation="batch123",
+        )
+
+
+def test_batch_index_commits_one_generation_and_then_prunes_old_files(
+    monkeypatch, tmp_path
+):
+    old_file = tmp_path / "comparison_KRDU_23R_previous.czml"
+    old_report = tmp_path / "evaluation_report.json"
+    old_file.write_text("[]")
+    old_report.write_text("{}")
+    summary = {
+        "total": 1,
+        "solved": 1,
+        "failed": 0,
+        "failure_rate": 0.0,
+        "results": [{"id": "ONE", "runway": "05L"}],
+    }
+
+    monkeypatch.setattr(
+        comparison_builder,
+        "build_runway_comparison",
+        lambda results, *_args, airport, **_kwargs: (
+            [{"id": "document"}],
+            [{
+                "group": results[0]["id"],
+                "flightId": results[0]["id"],
+                "runway": results[0]["runway"],
+                "airport": airport,
+                "status": "solved",
+                "entities": [],
+            }],
+        ),
+    )
+
+    published = publish_comparison_batch(
+        summary=summary,
+        states_dir=tmp_path,
+        out_dir=tmp_path,
+        airport="KRDU",
+        category="runway",
+        start_hidden=True,
+        scenario_initial=None,
+        evaluation_report={"total": 1, "trajectories": []},
+        generation="batch123",
+    )
+
+    committed = json.loads((tmp_path / "comparison_index.json").read_text())
+    assert committed == published
+    assert committed["schemaVersion"] == "comparison-v2-generation"
+    assert committed["generation"] == "batch123"
+    assert committed["groups"][0]["czml"] == "comparison_KRDU_05L_batch123.czml"
+    assert committed["evaluationReport"] == "evaluation_report_batch123.json"
+    assert (tmp_path / committed["groups"][0]["czml"]).exists()
+    assert (tmp_path / committed["evaluationReport"]).exists()
+    assert not old_file.exists()
+    assert not old_report.exists()
 
 
 def test_upsert_category_adds_and_replaces(tmp_path):
@@ -537,7 +703,10 @@ LOOKBACK_STATES = [
     {**STATES[0], "t": -2.0, "lat": 35.75, "lon": -78.44},
 ]
 PREDICTION_STATE_DATA = {
-    "source": {"id": "AFR074", "predictor": "itransformer", "anchorTimeS": 4.0},
+    "source": {
+        "id": "AFR074", "predictor": "itransformer", "anchorTimeS": 4.0,
+        "hae_minus_msl_m": -33.5,
+    },
     "final_time_s": 5.0,
     "predicted_states": STATES,
     # `+ STATES`, not `+ STATES[1:]`: the anchor sample belongs to both halves — the writer

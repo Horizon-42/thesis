@@ -4,6 +4,30 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-07-23 — Fitted threshold kinematics; preparation/optimization runner split
+
+- Fitted-ADS-B targets now derive `V/psi/gamma` from the same established final-approach
+  fit as their threshold position. The along-track rate is fitted over that established
+  segment only; the spatial tangent supplies heading and glide angle, so rollout
+  or parked samples can no longer create a threshold target with `V=0`. The constant-rate
+  helper is the single replacement seam for a future deceleration model.
+- The former combined runner was deleted. `prepare_scenario_inputs.py` rebuilds
+  arrivals/observed products and writes the two distinct scenario datasets;
+  `run_scenario_optimization.py` consumes those datasets and owns optimization,
+  evaluation, and comparison-CZML publication. Run preparation first, then optimization.
+- `clean_pipeline_data.py` now removes preparation-derived `arrivals/` and `approach/`
+  by default while preserving downloaded `tracks/`; `--include-downloads` only expands
+  the deletion boundary to measured source tracks.
+- Review hardening made datum provenance explicit on fitted results, rejects invalid
+  `states_ref` ranges and duplicate source identities, and verifies reference identity
+  plus SHA-256 before cache/batch reuse. `--skip-optimize` now validates the complete
+  summary/eval/states/reference roster rather than treating `summary.json` as a marker.
+- Comparison publication now writes immutable generation-suffixed CZML/report artifacts
+  and atomically commits their index last; failures preserve the previous generation.
+  The frontend follows the report named by that index, strictly rejects legacy observed
+  and comparison manifests, never falls back to embedded references or fixed-name
+  reports, and restores canonical entity styles on comparison exit.
+
 ### 2026-07-21 — final_approach + evaluation review fixes: observed-aware reporting surfaces, one deviation definition
 
 Code review of `final_approach/` + `evaluation/` (no correctness bugs in the geometry or the
@@ -169,7 +193,7 @@ precedent. Records are assumed MSL rather than tagged: all pre-datum-fix artifac
 discarded wholesale (user decision), never fed back in.
 
 **New operational scripts (same day).** `run_ts_pipeline.py` — the ts_transformer sibling
-of `run_scenario_pipeline.py`: per airport runs the 2×2 grid (iTransformer/PatchTST ×
+of the scenario optimization runner: per airport runs the 2×2 grid (iTransformer/PatchTST ×
 window/full) as train → predict(test split) → evaluation report/HTML → comparison-CZML
 publish (categories `ts_{itr|ptst}_{mode}`, matching the published naming); dataset build
 + flight_key split happen inside train and travel in the checkpoint. `clean_pipeline_data.py`
@@ -287,7 +311,7 @@ geokit 29. The ts suite is 56 tests (2 new transport pins).
 
 ### 2026-07-20 — full batch re-run (15/15 fresh), geokit per-degree constant aligned to the optimizer
 
-**Batch.** `run_scenario_pipeline.py --jobs 6`, 5 airports × 3 categories, 10,449 solves,
+**Batch.** The former combined runner with `--jobs 6`, 5 airports × 3 categories, 10,449 solves,
 ≈4 h 39 m wall clock (one harness-side background-task reap mid-run; resumed detached with
 `setsid nohup`, `overall_fail=0`). All artifacts now post-date every 2026-07 fix (arrival
 truncation, altitude floor/rollout guard, HS flip, identity unification) — the standing
@@ -593,7 +617,7 @@ The 2D approach page/toggle is now **Approach view** throughout (UI text, identi
 
 ### 2026-07-07 — Pipeline exposes the control mesh; mesh defaults single-sourced
 
-- `run_scenario_pipeline.py --n-segments` (unconstrained) / `--n-seg-per-phase` (constrained), either/or by mode, defaulting to CollocationOptimizer's own 8/3; validated ≥2/≥1 at both CLIs.
+- `run_scenario_optimization.py --n-segments` (unconstrained) / `--n-seg-per-phase` (constrained), either/or by mode, defaulting to CollocationOptimizer's own 8/3; validated ≥2/≥1 at both CLIs.
 - The constrained batch path never passed `n_seg_per_phase` before (stuck at the default with no override) — now threaded main → `optimize_scenarios_constrained_iaf` → `_optimize_one_scenario_iaf` → both IAF selectors → `_solve_iaf` → `CollocationOptimizer`.
 - Defaults single-sourced in `collocation/optimizer.py` (`DEFAULT_N_SEGMENTS`/`DEFAULT_N_SEG_PER_PHASE`); backend + batch import them; frontend "Control segs/leg" default aligned 2→3 (defaults had silently diverged: frontend 2, backend fallback 4, optimizer/batch 3). The frontend→backend HTTP path had always wired `nSegPerPhase` correctly — the gap was batch-only. Verified: nsp 2→4 changes the constrained plan 85→125 nodes.
 
@@ -621,7 +645,7 @@ The 2D approach page/toggle is now **Approach view** throughout (UI text, identi
 - `--state-substeps M` end-to-end through both solve paths + frontend "State substeps" input → backend `state_substeps` on both branches (cache keys include it). Measurements in Key Defaults.
 - `ipopt.max_iter` wired ("backend never finishes" postmortem): constrained M=64 ≈ 640 subintervals × per-node inequality rows, no iter cap, solves serialized behind the worker lock. `DEFAULT_MAX_ITERATIONS = 3000`, `CollocationOptimizer(max_iterations=…)` on all three solver constructions; backend `maxIterations` reaches both branches (make_optimizer had accepted-and-ignored it).
 - Stale-artifact audit closed the `write_reference_records` and CZML-builder (`clear_stale_outputs`) accumulation gaps; single-file overwrites audited clean.
-- NOTE: `runway_cons` off-target populations likely contain the wrongly-truncated family — re-examine after re-run. All categories need re-running: `python run_scenario_pipeline.py --jobs 6`.
+- NOTE: `runway_cons` off-target populations likely contain the wrongly-truncated family — re-examine after re-run. All categories need re-running after preparation: `python run_scenario_optimization.py --jobs 6`.
 
 ### 2026-07-06 — Observe constrained auto-open + shared Profile toggle + forced-display hook
 
@@ -682,9 +706,9 @@ Two stacked causes behind Δ25 m vs playbackDrift 0.6 m: (1) the LOOP_STOP wrap 
 - HTML: embedded JSON escapes `</` as `<\/`; `esc()` on every data-derived string reaching innerHTML/Plotly.
 - Contract: `final_time_s == states[-1].t` required on solved records; `resample_by_arc_length` rejects n<2; chart labels use unique record file basenames.
 
-### 2026-07-05 — One pipeline runner: `run_scenario_pipeline.py`
+### 2026-07-05 — Former combined scenario pipeline runner
 
-The comparison + evaluation runners MERGED (both old scripts deleted). They duplicated the expensive steps and wrote divergent opt_dir contents (the comparison runner silently overwrote `reference_file` pointers away). Now optimization always runs with `--reference-tracks`; tails selectable via `--outputs czml,eval` (default both); `--skip-optimize` reuses an existing summary.json. Category keys `asdb`/`runway`/`runway_cons` unchanged.
+The comparison + evaluation runners merged at the time. They duplicated the expensive steps and wrote divergent opt_dir contents (the comparison runner silently overwrote `reference_file` pointers away). Optimization always runs with `--reference-tracks`; tails remain selectable via `--outputs czml,eval` (default both); `--skip-optimize` reuses an existing summary.json. The combined preparation/optimization entry point described here was superseded by the 2026-07-23 split above.
 
 ### 2026-07-05 — `evaluation` package (regulation-derived gates)
 

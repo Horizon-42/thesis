@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import * as Cesium from "cesium";
 import {
   applyComparisonRenderModel,
+  captureObservedEntityStyle,
   isComparisonEntity,
   kindOfEntityId,
+  restoreObservedEntityStyle,
 } from "../useComparisonTrajectoryLayer";
 import { COMPARISON_KIND_COLORS, COMPARISON_KIND_ALPHA } from "../../utils/trajectoryRenderModel";
 
@@ -11,12 +13,13 @@ import { COMPARISON_KIND_COLORS, COMPARISON_KIND_ALPHA } from "../../utils/traje
  * Which paths get repainted from the legend, and which keep the colour the CZML baked in.
  *
  * The rule is not "off-target groups keep their colour" — it is "paths carrying a baked
- * VERDICT colour keep it". Those are the reference (always) and the optimizer/simulator
- * paths of an off-target group (bright yellow). Predictions never get a verdict bake, so
- * they must be repainted from the legend even though their status is "offTarget": a
- * forecast essentially always misses the 106.75 m gate, and if the skip applied to them
- * the rendered colour would silently depend on the Python builder's PREDICTION_COLOR
- * matching the TypeScript legend's.
+ * VERDICT colour keep it". Those are the optimizer/simulator paths of an off-target group
+ * (bright yellow). The reference comes from the canonical observed datasource and is
+ * styled separately. Predictions never get a verdict bake, so they must be repainted from
+ * the legend even though their status is "offTarget": a forecast essentially always
+ * misses the 106.75 m gate, and if the skip applied to them the rendered colour would
+ * silently depend on the Python builder's PREDICTION_COLOR matching the TypeScript
+ * legend's.
  */
 
 const BAKED = Cesium.Color.fromBytes(1, 2, 3, 255);   // a colour no legend entry uses
@@ -64,14 +67,6 @@ describe("applyComparisonRenderModel path colouring", () => {
     expect(renderedColor(e)).toEqual(BAKED);
   });
 
-  it("never repaints the reference, whatever its status", () => {
-    for (const status of ["solved", "offTarget", "failed"]) {
-      const e = entity("ref-X_05L", status);
-      applyComparisonRenderModel(e, new Set());
-      expect(renderedColor(e)).toEqual(BAKED);
-    }
-  });
-
   it("repaints the lookback from the legend even though its status is offTarget", () => {
     // Same rule as the prediction it belongs to: the builder bakes no verdict colour onto
     // prediction-schema entities, so there is nothing to preserve.
@@ -107,8 +102,7 @@ describe("applyComparisonRenderModel path colouring", () => {
 });
 
 describe("comparison entity ids", () => {
-  it("maps every builder prefix to its kind", () => {
-    expect(kindOfEntityId("ref-X_05L")).toBe("reference");
+  it("maps every result prefix to its kind", () => {
     expect(kindOfEntityId("opt-X_05L")).toBe("optimizer");
     expect(kindOfEntityId("sim-X_05L")).toBe("simulator");
     expect(kindOfEntityId("pred-X_05L")).toBe("predicted");
@@ -118,11 +112,50 @@ describe("comparison entity ids", () => {
   it("recognises every comparison prefix as pickable", () => {
     // The picker's prefix list once omitted `pred-`, so prediction tracks silently could not
     // be hovered for their callsign. Both readers now share one prefix table.
-    for (const id of ["ref-X_05L", "opt-X_05L", "sim-X_05L", "pred-X_05L", "look-X_05L"]) {
+    for (const id of ["opt-X_05L", "sim-X_05L", "pred-X_05L", "look-X_05L"]) {
       expect(isComparisonEntity(new Cesium.Entity({ id }))).toBe(true);
     }
+    // References are canonical observed entities, not embedded ref-* comparison packets.
+    expect(isComparisonEntity(new Cesium.Entity({ id: "ref-X_05L" }))).toBe(false);
     expect(isComparisonEntity(new Cesium.Entity({ id: "AAL542_05L_a15c80_20260701T033111Z" })))
       .toBe(false);
     expect(isComparisonEntity(undefined)).toBe(false);
+  });
+});
+
+describe("canonical observed style lifetime", () => {
+  it("restores the exact pre-comparison property objects", () => {
+    const originalMaterial = new Cesium.ColorMaterialProperty(Cesium.Color.BLUE);
+    const originalWidth = new Cesium.ConstantProperty(2);
+    const originalLabelColor = new Cesium.ConstantProperty(Cesium.Color.WHITE);
+    const originalLabelShow = new Cesium.ConstantProperty(true);
+    const originalAnimation = new Cesium.ConstantProperty(true);
+    const observed = new Cesium.Entity({
+      id: "AFR074_05L",
+      show: true,
+      path: new Cesium.PathGraphics({ material: originalMaterial, width: originalWidth }),
+      label: new Cesium.LabelGraphics({
+        fillColor: originalLabelColor,
+        show: originalLabelShow,
+      }),
+      model: new Cesium.ModelGraphics({ runAnimations: originalAnimation }),
+    });
+    const snapshot = captureObservedEntityStyle(observed);
+
+    observed.show = false;
+    observed.path!.material = new Cesium.ColorMaterialProperty(Cesium.Color.RED);
+    observed.path!.width = new Cesium.ConstantProperty(9);
+    observed.label!.fillColor = new Cesium.ConstantProperty(Cesium.Color.YELLOW);
+    observed.label!.show = new Cesium.ConstantProperty(false);
+    observed.model!.runAnimations = new Cesium.ConstantProperty(false);
+
+    restoreObservedEntityStyle(observed, snapshot);
+
+    expect(observed.show).toBe(true);
+    expect(observed.path!.material).toBe(originalMaterial);
+    expect(observed.path!.width).toBe(originalWidth);
+    expect(observed.label!.fillColor).toBe(originalLabelColor);
+    expect(observed.label!.show).toBe(originalLabelShow);
+    expect(observed.model!.runAnimations).toBe(originalAnimation);
   });
 });

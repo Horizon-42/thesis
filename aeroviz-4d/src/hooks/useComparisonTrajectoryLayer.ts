@@ -1,14 +1,15 @@
 /**
  * useComparisonTrajectoryLayer.ts
  * -------------------------------
- * Loads the prediction-comparison trajectories (three coloured paths per flight:
- * reference / optimizer / simulator) when the Trajectories layer is in "comparison"
- * mode. It is index-driven so it never loads every (large) per-runway CZML:
+ * Loads prediction-comparison trajectories when the Trajectories layer is in
+ * "comparison" mode. Indexes resolve references from the already-loaded canonical
+ * observed datasource; category files contain only optimizer/simulator/prediction paths.
+ * It is index-driven so it never loads every result CZML:
  *
  *   1. fetch the selected category's `comparison_index.json` (one record per flight group);
  *   2. filter to the selected runway (null = all) and randomly sample N groups;
  *   3. load ONLY the CZML files those sampled groups live in;
- *   4. reveal the sampled groups' entities, gated per kind (the three checkboxes).
+ *   4. reveal sampled result entities and matching canonical observed flights.
  *
  * Loading happens in one effect (keyed on airport/category/runway/sample); a separate
  * visibility effect re-applies per-entity `show` when the per-kind toggles change, so
@@ -50,14 +51,13 @@ function comparisonKindColor(kind: ComparisonKind): Cesium.Color {
  * `look-` is checked before `pred-` only for readability; the prefixes are disjoint.
  */
 const COMPARISON_KIND_PREFIXES: ReadonlyArray<readonly [string, ComparisonKind]> = [
-  ["ref-", "reference"],
   ["opt-", "optimizer"],
   ["sim-", "simulator"],
   ["look-", "lookback"],
   ["pred-", "predicted"],
 ];
 
-/** The entity id prefix encodes its kind: ref-/opt-/sim-/pred-/look-. */
+/** The entity id prefix encodes its kind: opt-/sim-/pred-/look-. */
 export function kindOfEntityId(id: string): ComparisonKind {
   for (const [prefix, kind] of COMPARISON_KIND_PREFIXES) {
     if (id.startsWith(prefix)) return kind;
@@ -79,8 +79,8 @@ const PREDICTION_SCHEMA_KINDS: ReadonlySet<ComparisonKind> = new Set(["predicted
  * pointing down its path instead of a point marker. A CZML file packs many flight
  * groups but only the sampled ones are revealed, so models are attached ONLY to
  * `shownEntityIds`; the rest keep their (hidden) point marker and never allocate a
- * glТF model. The reference (ref-) entity copied from trajectories.czml already has a
- * model; opt-/sim- are state-sequence paths. Per-kind colour comes from the CZML path.
+ * glТF model. Canonical observed references are styled by the visibility pass below;
+ * opt-/sim- are state-sequence paths.
  */
 export function applyComparisonRenderModel(
   entity: Cesium.Entity, shownEntityIds: Set<string>
@@ -94,10 +94,8 @@ export function applyComparisonRenderModel(
     entity.path.width = new Cesium.ConstantProperty(TRAJECTORY_PATH_WIDTH);
     // Colour the path from the legend (single source of truth) so the rendered track always
     // matches its checkbox swatch — regardless of which colour this category's CZML baked in.
-    // Exceptions keep their CZML-baked verdict colours: the reference (white / dark-red
-    // failed / dark-amber off-target) always, and EVERY path of an off-target group (the
-    // builder bakes the simulator/result path bright yellow — the marking must sit on the
-    // trajectory that missed the target, not just the reference).
+    // Every path of an off-target group keeps its CZML-baked bright yellow — the marking
+    // must sit on the trajectory that missed the target, not just the canonical reference.
     //
     // Predictions are excluded from that second exception because the builder never bakes
     // the yellow for them: a forecast almost always misses the 106.75 m gate, so marking it
@@ -107,7 +105,7 @@ export function applyComparisonRenderModel(
     // depending on the builder's PREDICTION_COLOR happening to equal the legend's.
     const status = entity.properties?.status?.getValue(Cesium.JulianDate.now());
     const keepsBakedVerdictColor =
-      kind === "reference" || (status === "offTarget" && !PREDICTION_SCHEMA_KINDS.has(kind));
+      status === "offTarget" && !PREDICTION_SCHEMA_KINDS.has(kind);
     if (!keepsBakedVerdictColor) {
       const color = comparisonKindColor(kind);
       entity.path.material = new Cesium.ColorMaterialProperty(color);
@@ -142,6 +140,49 @@ export function applyComparisonRenderModel(
 export function isComparisonEntity(entity: Cesium.Entity | undefined): entity is Cesium.Entity {
   const id = entity?.id;
   return typeof id === "string" && COMPARISON_KIND_PREFIXES.some(([prefix]) => id.startsWith(prefix));
+}
+
+export interface ObservedEntityStyleSnapshot {
+  show: boolean;
+  pathMaterial: Cesium.MaterialProperty | undefined;
+  pathWidth: Cesium.Property | undefined;
+  labelFillColor: Cesium.Property | undefined;
+  labelShow: Cesium.Property | undefined;
+  modelRunAnimations: Cesium.Property | undefined;
+}
+
+/** Capture the canonical entity's exact property objects before comparison owns its style. */
+export function captureObservedEntityStyle(
+  entity: Cesium.Entity,
+): ObservedEntityStyleSnapshot {
+  return {
+    show: entity.show,
+    pathMaterial: entity.path?.material,
+    pathWidth: entity.path?.width,
+    labelFillColor: entity.label?.fillColor,
+    labelShow: entity.label?.show,
+    modelRunAnimations: entity.model?.runAnimations,
+  };
+}
+
+/** Return ownership to the observed layer without reconstructing any Cesium property. */
+export function restoreObservedEntityStyle(
+  entity: Cesium.Entity,
+  snapshot: ObservedEntityStyleSnapshot,
+): void {
+  entity.show = snapshot.show;
+  if (entity.path) {
+    // Cesium's declaration marks the material setter non-optional even though its own
+    // constructor and getter allow no material. Object.assign preserves that valid
+    // pre-comparison `undefined` state without inventing a fallback style.
+    Object.assign(entity.path, { material: snapshot.pathMaterial });
+    entity.path.width = snapshot.pathWidth;
+  }
+  if (entity.label) {
+    entity.label.fillColor = snapshot.labelFillColor;
+    entity.label.show = snapshot.labelShow;
+  }
+  if (entity.model) entity.model.runAnimations = snapshot.modelRunAnimations;
 }
 
 /**
@@ -186,6 +227,7 @@ export function useComparisonTrajectoryLayer(): void {
     activeAirportCode,
     selectedRunway,
     trajectorySampleCount,
+    trajectoryDataSource,
   } = useApp();
 
   // The 3-colour comparison is an Observe-mode overlay (its toggle lives in the Observe dock),
@@ -198,10 +240,18 @@ export function useComparisonTrajectoryLayer(): void {
     trajectoryComparison &&
     layers.trajectories &&
     !!activeAirportCode &&
-    !!trajectoryComparisonCategory;
+    !!trajectoryComparisonCategory &&
+    !!trajectoryDataSource;
 
   const sourcesRef = useRef<Cesium.CzmlDataSource[]>([]);
   const shownRef = useRef<Set<string>>(new Set());
+  const observedGroupsRef = useRef<Map<string, "solved" | "offTarget" | "failed">>(
+    new Map(),
+  );
+  const canonicalStylesRef = useRef<Map<Cesium.Entity, ObservedEntityStyleSnapshot>>(
+    new Map(),
+  );
+  const canonicalDataSourceShowRef = useRef<boolean | null>(null);
   const [loadVersion, setLoadVersion] = useState(0);
 
   // ── Load: fetch index, sample groups, load only the needed CZML files ────────
@@ -218,7 +268,11 @@ export function useComparisonTrajectoryLayer(): void {
       try {
         const raw = await fetchJson<unknown>(airportComparisonIndexUrl(activeAirportCode, categoryDir));
         if (!isComparisonIndex(raw)) {
-          console.warn(`[comparison] ${activeAirportCode}/${categoryDir} index is malformed.`);
+          console.warn(
+            `[comparison] ${activeAirportCode}/${categoryDir} does not use ` +
+              "comparison-v2-generation; rerun run_scenario_optimization.py " +
+              `--airport ${activeAirportCode}.`,
+          );
           return;
         }
         index = raw;
@@ -231,10 +285,17 @@ export function useComparisonTrajectoryLayer(): void {
       // 2. Filter to the selected runway, sample N groups, collect the files to load.
       const selection = selectComparisonGroups(index, selectedRunway, trajectorySampleCount);
       if (selection.files.length === 0) return;
+      observedGroupsRef.current = new Map(
+        selection.groups.map((group) => [group.group, group.status]),
+      );
 
       // 3. Load only the sampled groups' CZML files.
       let start: Cesium.JulianDate | null = null;
       let stop: Cesium.JulianDate | null = null;
+      if (trajectoryDataSource?.clock) {
+        start = trajectoryDataSource.clock.startTime.clone();
+        stop = trajectoryDataSource.clock.stopTime.clone();
+      }
       for (const file of selection.files) {
         let loaded: Cesium.CzmlDataSource;
         let availability: Map<string, Cesium.TimeIntervalCollection>;
@@ -293,9 +354,18 @@ export function useComparisonTrajectoryLayer(): void {
       }
       sourcesRef.current = [];
       shownRef.current = new Set();
+      observedGroupsRef.current = new Map();
+      for (const [entity, snapshot] of canonicalStylesRef.current) {
+        restoreObservedEntityStyle(entity, snapshot);
+      }
+      canonicalStylesRef.current.clear();
+      if (trajectoryDataSource && canonicalDataSourceShowRef.current !== null) {
+        trajectoryDataSource.show = canonicalDataSourceShowRef.current;
+      }
+      canonicalDataSourceShowRef.current = null;
     };
   }, [viewer, active, activeAirportCode, trajectoryComparisonCategory, selectedRunway,
-    trajectorySampleCount, layers.trajectories]);
+    trajectorySampleCount, layers.trajectories, trajectoryDataSource]);
 
   // ── Visibility: reveal sampled entities, gated per kind (instant, no reload) ──
   useEffect(() => {
@@ -307,7 +377,43 @@ export function useComparisonTrajectoryLayer(): void {
           shownRef.current.has(entity.id) && trajectoryComparisonKinds[kindOfEntityId(entity.id)];
       }
     }
-  }, [loadVersion, trajectoryComparisonKinds]);
+    if (trajectoryDataSource) {
+      if (canonicalDataSourceShowRef.current === null) {
+        canonicalDataSourceShowRef.current = trajectoryDataSource.show;
+      }
+      trajectoryDataSource.show = true;
+      for (const entity of trajectoryDataSource.entities.values) {
+        if (entity.id === "document") continue;
+        if (!canonicalStylesRef.current.has(entity)) {
+          canonicalStylesRef.current.set(entity, captureObservedEntityStyle(entity));
+        }
+        const status = observedGroupsRef.current.get(entity.id);
+        entity.show = !!status && trajectoryComparisonKinds.reference;
+        if (!status) continue;
+        const rgba =
+          status === "failed"
+            ? [200, 60, 60, 200]
+            : status === "offTarget"
+              ? [150, 118, 25, 200]
+              : [235, 235, 235, 200];
+        const color = new Cesium.Color(
+          rgba[0] / 255,
+          rgba[1] / 255,
+          rgba[2] / 255,
+          rgba[3] / 255,
+        );
+        if (entity.path) {
+          entity.path.width = new Cesium.ConstantProperty(TRAJECTORY_PATH_WIDTH);
+          entity.path.material = new Cesium.ColorMaterialProperty(color);
+        }
+        if (entity.label) {
+          entity.label.fillColor = new Cesium.ConstantProperty(color);
+          entity.label.show = new Cesium.ConstantProperty(false);
+        }
+        if (entity.model) entity.model.runAnimations = new Cesium.ConstantProperty(false);
+      }
+    }
+  }, [loadVersion, trajectoryComparisonKinds, trajectoryDataSource]);
 
   // ── Hover / click reveals a single label ─────────────────────────────────────
   // Labels are hidden by default (applyComparisonRenderModel). Show only the label of the
@@ -335,7 +441,10 @@ export function useComparisonTrajectoryLayer(): void {
     const pickComparison = (position: Cesium.Cartesian2): Cesium.Entity | null => {
       const picked = viewer.scene.pick(position);
       const entity = picked && picked.id;
-      return isComparisonEntity(entity) ? entity : null;
+      return isComparisonEntity(entity) ||
+        (entity instanceof Cesium.Entity && observedGroupsRef.current.has(entity.id))
+        ? entity
+        : null;
     };
 
     handler.setInputAction((m: { endPosition: Cesium.Cartesian2 }) => {

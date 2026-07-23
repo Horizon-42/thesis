@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from flight_scenarios.build import build_scenario
+from flight_scenarios.build import build_scenario, build_scenarios_from_arrivals
 from flight_scenarios.fitted_approach import fit_flight_final_approach
 from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon
 
@@ -13,13 +13,14 @@ LAT, LON, ELEVATION_M = 35.0, -78.0, 100.0
 CROSS_M, CROSSING_HEIGHT_M = 25.0, 17.5
 
 
-def fitted_flight() -> dict:
+def fitted_flight(*, cross_slope: float = 0.0) -> dict:
     """A 100 m/s due-north 3-degree approach ending 500 m before threshold."""
     waypoints = []
     for along_m in range(-5000, 0, 500):
         time_s = (along_m + 5000) / 100.0
         lat = LAT + along_m / METRES_PER_DEG_LAT
-        lon = LON + CROSS_M / metres_per_deg_lon(LAT)
+        cross_m = CROSS_M + cross_slope * along_m
+        lon = LON + cross_m / metres_per_deg_lon(LAT)
         height = CROSSING_HEIGHT_M - math.tan(math.radians(3.0)) * along_m
         waypoints.append([time_s, lon, lat, ELEVATION_M + height])
     return {
@@ -30,14 +31,18 @@ def fitted_flight() -> dict:
         "arr_airport": "KFIT",
         "runway": "36",
         "landing_time_utc": "2026-01-01T00:00:00Z",
-        "altitude_source": "opensky_history_geoaltitude_m_to_msl_egm96",
+        "altitude_source": "opensky_history_geoaltitude_m",
         "runway_target": {
             "lat": LAT,
             "lon": LON,
             "elevation_msl_m": ELEVATION_M,
+            "elevation_hae_m": ELEVATION_M,
+            "hae_minus_msl_m": 0.0,
             "course_deg": 0.0,
             "threshold_crossing_height_m": 15.0,
             "published_glidepath_deg": 3.0,
+            "position_source": "faa_cifp_path_point",
+            "vertical_source": "faa_cifp_path_point",
         },
         "waypoints": waypoints,
     }
@@ -61,20 +66,52 @@ def test_fit_recovers_crossing_and_uniform_terminal_tail():
     assert [row.terminal for row in tail] == [False, False, True]
 
 
-def test_fitted_target_changes_only_position_from_measured_terminal_state():
-    flight = fitted_flight()
+def test_fitted_target_uses_fitted_threshold_kinematics_not_rollout():
+    cross_slope = 0.1
+    flight = fitted_flight(cross_slope=cross_slope)
+    threshold = [
+        LON + CROSS_M / metres_per_deg_lon(LAT),
+        LAT,
+        ELEVATION_M,
+    ]
+    last_approach_position = flight["waypoints"][-1][1:]
+    flight["waypoints"].extend(
+        [[time_s, *last_approach_position] for time_s in (50.0, 60.0)]
+        + [[time_s, *threshold] for time_s in (70.0, 80.0, 90.0)]
+    )
     measured = build_scenario(flight)
     fitted = build_scenario(flight, target_from_fitted_adsb=True)
 
+    assert measured.target.V == pytest.approx(0.0)
     assert fitted.source["target_source"] == "fitted_adsb_crossing"
     assert fitted.target.latitude == pytest.approx(LAT, abs=1e-9)
     assert fitted.target.altitude == pytest.approx(ELEVATION_M + CROSSING_HEIGHT_M)
-    assert fitted.target.V == pytest.approx(measured.target.V)
-    assert fitted.target.psi == pytest.approx(measured.target.psi)
-    assert fitted.target.gamma == pytest.approx(measured.target.gamma)
+    vertical_rate = -100.0 * math.tan(math.radians(3.0))
+    ground_speed = math.hypot(100.0, cross_slope * 100.0)
+    assert fitted.target.V == pytest.approx(math.hypot(ground_speed, vertical_rate))
+    assert fitted.target.psi == pytest.approx(math.atan2(100.0, cross_slope * 100.0))
+    assert fitted.target.gamma == pytest.approx(math.atan2(vertical_rate, ground_speed))
 
 
-def test_fit_refuses_unconverted_hae_waypoints():
-    flight = {**fitted_flight(), "altitude_source": "opensky_history_geoaltitude_m"}
-    with pytest.raises(ValueError, match="requires MSL"):
-        fit_flight_final_approach(flight)
+def test_fit_uses_hae_before_local_msl_conversion():
+    fitted = fit_flight_final_approach(fitted_flight())
+    assert fitted is not None
+    assert fitted.frame.elevation_m == ELEVATION_M
+
+
+def test_fitted_target_does_not_convert_an_already_msl_fit_twice():
+    flight = fitted_flight()
+    flight["runway_target"].update(
+        elevation_msl_m=133.5,
+        hae_minus_msl_m=-33.5,
+    )
+
+    # This is the standard CLI seam: load_model_arrivals converts the flight first,
+    # then build_scenario receives the already-MSL dict.
+    [scenario] = build_scenarios_from_arrivals(
+        [flight],
+        aircraft_type="A320",
+        target_from_fitted_adsb=True,
+    )
+
+    assert scenario.target.altitude == pytest.approx(133.5 + CROSSING_HEIGHT_M)

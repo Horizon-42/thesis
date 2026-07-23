@@ -9,9 +9,8 @@ nothing for it.
 WHAT IS WRITTEN (the layout the frontend already reads)::
 
     public/data/airports/<ICAO>/
-        trajectories.czml               all runways merged (the default observed layer)
-        landings/<ICAO>_<RWY>.czml      one per runway
-        landings/index.json             manifest: which runways exist, and their counts
+        trajectories.czml               canonical entities for every runway
+        landings/index.json             runway counts + filters into that one file
 
 ONLY THE ``assigned`` BUCKET IS RENDERED. ``not_landing`` is not an approach to this
 airport; ``ambiguous`` and ``unassignable`` have no runway to file under, and drawing
@@ -36,6 +35,7 @@ import json
 import math
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -58,7 +58,7 @@ class RenderedObserved:
     """What the render produced."""
 
     combined_czml: Path
-    runway_czml: dict[str, Path]
+    runway_counts: dict[str, int]
     manifest: Path
     flights: int
 
@@ -103,60 +103,80 @@ def render_observed_czml(
     generator: Path = DEFAULT_GENERATOR,
     multiplier: int | None = None,
 ) -> RenderedObserved:
-    """Write the per-runway + combined observed CZML and the landings manifest."""
+    """Write one canonical observed CZML plus its runway-filter manifest."""
     airport_dir = frontend_data_root / "airports" / paths.code
     landings_dir = airport_dir / "landings"
     landings_dir.mkdir(parents=True, exist_ok=True)
     extrapolated_records = _extrapolated_record_paths(paths)
 
-    by_runway: dict[str, list[dict[str, Any]]] = {}
-    for row in read_manifest(paths)["records"]:
-        if row["outcome"] != "assigned":
-            continue
-        track = json.loads((paths.tracks / row["file"]).read_text(encoding="utf-8"))
-        flight = czml_input_flight(track)
-        verify_identity(flight, track["flight_key"])
-        record_path = extrapolated_records.get(track["flight_key"])
-        if record_path is not None:
-            segment = _extrapolated_waypoints(record_path)
-            if segment is not None:
-                # Kept separate from the measured ``waypoints`` on purpose: the observed
-                # position remains sensor data, while the generator renders this inferred
-                # final-approach extension with its own translucent material.
-                flight["extrapolated_waypoints"] = segment
-        by_runway.setdefault(row["runway"], []).append(flight)
-
-    if not by_runway:
-        raise ValueError(
-            f"{paths.code}: no assigned tracks to render — harvest first, or check the "
-            f"manifest's counts"
-        )
-
-    work = paths.approach / "_czml_input"
-    work.mkdir(parents=True, exist_ok=True)
-    runway_czml: dict[str, Path] = {}
-    manifest_rows: list[dict[str, Any]] = []
-
-    for runway, flights in sorted(by_runway.items()):
-        source = work / f"{paths.code}_{runway}_czml_input.json"
-        source.write_text(json.dumps(flights, indent=1), encoding="utf-8")
-        out = landings_dir / f"{paths.code}_{runway}.czml"
-        _generate(generator, paths.code, source, out, multiplier)
-        runway_czml[runway] = out
-        manifest_rows.append(
-            {"runway": runway, "file": f"landings/{out.name}", "count": len(flights)}
-        )
-
-    combined_flights = [f for _, flights in sorted(by_runway.items()) for f in flights]
-    combined_source = work / f"{paths.code}_combined_czml_input.json"
-    combined_source.write_text(json.dumps(combined_flights, indent=1), encoding="utf-8")
     combined = airport_dir / "trajectories.czml"
-    _generate(generator, paths.code, combined_source, combined, multiplier)
+    runway_counts: dict[str, int] = {}
+    flights = 0
+    max_offset = 0.0
+    with tempfile.TemporaryDirectory(prefix=f"{paths.code}-observed-czml-") as work:
+        source = Path(work) / "flights.jsonl"
+        with source.open("w", encoding="utf-8") as output:
+            for row in read_manifest(paths)["records"]:
+                if row["outcome"] != "assigned":
+                    continue
+                track = json.loads((paths.tracks / row["file"]).read_text(encoding="utf-8"))
+                flight = czml_input_flight(track)
+                verify_identity(flight, track["flight_key"])
+                record_path = extrapolated_records.get(track["flight_key"])
+                if record_path is not None:
+                    segment = _extrapolated_waypoints(record_path)
+                    if segment is not None:
+                        # Kept separate from measured waypoints: this is an inferred tail.
+                        flight["extrapolated_waypoints"] = segment
+                output.write(
+                    json.dumps(flight, ensure_ascii=False, separators=(",", ":")) + "\n"
+                )
+                max_offset = max(
+                    max_offset,
+                    max(
+                        (
+                            float(waypoint[0])
+                            for key in ("waypoints", "extrapolated_waypoints")
+                            for waypoint in flight.get(key, [])
+                        ),
+                        default=0.0,
+                    ),
+                )
+                runway = str(row["runway"])
+                runway_counts[runway] = runway_counts.get(runway, 0) + 1
+                flights += 1
+
+        if flights == 0:
+            raise ValueError(
+                f"{paths.code}: no assigned tracks to render — harvest first, or check "
+                "the manifest's counts"
+            )
+        _generate(
+            generator,
+            paths.code,
+            source,
+            combined,
+            multiplier,
+            input_jsonl=True,
+            max_offset=max_offset,
+        )
+
+    # Remove the superseded physical partitions and the old persistent renderer inputs.
+    # The runway selector now filters entities in the canonical airport-wide file.
+    for old in landings_dir.glob("*.czml"):
+        old.unlink()
+    _remove_legacy_workdir(paths.approach / "_czml_input")
+
+    manifest_rows = [
+        {"runway": runway, "file": "trajectories.czml", "count": count}
+        for runway, count in sorted(runway_counts.items())
+    ]
 
     manifest_path = landings_dir / "index.json"
     manifest_path.write_text(
         json.dumps(
             {
+                "schemaVersion": "observed-landings-v2-canonical",
                 "airport": paths.code,
                 "combined": "trajectories.czml",
                 "runways": sorted(manifest_rows, key=lambda r: r["runway"]),
@@ -167,9 +187,9 @@ def render_observed_czml(
     )
     return RenderedObserved(
         combined_czml=combined,
-        runway_czml=runway_czml,
+        runway_counts=runway_counts,
         manifest=manifest_path,
-        flights=len(combined_flights),
+        flights=flights,
     )
 
 
@@ -233,7 +253,9 @@ def _extrapolated_waypoints(record_path: Path) -> list[list[float]] | None:
         speed_ms = 70.0
     end_t = start_t + fit.extrapolation_m / speed_ms
 
-    geoid_m = float(source.get("geoid_undulation_m") or 0.0)
+    if source.get("hae_minus_msl_m") is None:
+        raise ValueError("record lacks CIFP hae_minus_msl_m; regenerate legacy artifact")
+    geoid_m = float(source["hae_minus_msl_m"])
     start_along = fit.nearest_sample_along_m
     start = _fitted_point(
         frame,
@@ -276,15 +298,35 @@ def _fitted_point(
 
 
 def _generate(
-    generator: Path, code: str, source: Path, output: Path, multiplier: int | None
+    generator: Path,
+    code: str,
+    source: Path,
+    output: Path,
+    multiplier: int | None,
+    *,
+    input_jsonl: bool = False,
+    max_offset: float | None = None,
 ) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         sys.executable, str(generator),
         "--airport", code,
-        "--input", str(source),
+        "--input-jsonl" if input_jsonl else "--input", str(source),
         "--output", str(output),
     ]
     if multiplier is not None:
         cmd += ["--multiplier", str(multiplier)]
+    if max_offset is not None:
+        cmd += ["--max-offset", str(max_offset)]
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
+
+
+def _remove_legacy_workdir(directory: Path) -> None:
+    if not directory.exists():
+        return
+    for path in sorted(directory.rglob("*"), reverse=True):
+        if path.is_file():
+            path.unlink()
+        elif path.is_dir():
+            path.rmdir()
+    directory.rmdir()

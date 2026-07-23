@@ -12,20 +12,23 @@ from a clean slate, with nothing stale left to mix in:
                                                      AND ts training + prediction
                                                      dirs (ts_*/, ts_pred_*/)
   3. aeroviz-4d/public/data/airports/<ICAO>/comparison/     frontend comparison CZML
-  4. aeroviz-4d/public/data/airports/<ICAO>/trajectories.czml*   frontend observed layer
-     aeroviz-4d/public/data/airports/<ICAO>/landings/            (per-runway CZML)
+  4. aeroviz-4d/public/data/airports/<ICAO>/trajectories.czml    canonical observed layer
+     aeroviz-4d/public/data/airports/<ICAO>/landings/            runway selector metadata
+  5. trajectory_data_process/outputs/harvest/<ICAO>/arrivals/    derived arrival manifest
+     trajectory_data_process/outputs/harvest/<ICAO>/approach/    observed evaluation records
 
 NOT touched, ever: the static airport layers (airport.json, runway.geojson,
 waypoints.geojson, procedures*, charts/, obstacles.geojson, local-terrain/),
-``data/archive/`` snapshots, and anything tracked by git.
+``data/archive/`` snapshots, anything tracked by git, and (by default) the downloaded
+``harvest/<ICAO>/tracks/`` source data.
 
 Kept by default, deletable by flag:
 
-  * ``--include-downloads``  also wipes the current harvest tree at
-    trajectory_data_process/outputs/harvest/. Its categories are listed separately in
-    the plan: measured ``tracks/`` (expensive to recreate through OpenSky history), plus
-    derived ``arrivals/`` and ``approach/``. The former legacy download layouts are not
-    part of the current pipeline and are never inferred as inputs.
+  * ``--include-downloads``  also wipes measured ``harvest/<ICAO>/tracks/`` data
+    (expensive to recreate through OpenSky history). Derived ``arrivals/`` and
+    ``approach/`` are always deleted because they are outputs of
+    ``prepare_scenario_inputs.py``. The former legacy download layouts are not part of
+    the current pipeline and are never inferred as inputs.
   * ``--include-parked``     also wipes the ``_``-prefixed dirs under
     4dTrajectory/outputs (parked research artifacts, e.g. _pre_b3_transport,
     _ablation_norm — the ablation numbers quoted in the ts README live there).
@@ -36,7 +39,7 @@ Usage:
     python clean_pipeline_data.py --dry-run              # preview only
     python clean_pipeline_data.py                        # plan + confirm + delete
     python clean_pipeline_data.py --yes                  # no prompt (scripts)
-    python clean_pipeline_data.py --include-downloads    # ALSO drop the raw downloads
+    python clean_pipeline_data.py --include-downloads    # ALSO drop downloaded tracks
 """
 
 from __future__ import annotations
@@ -49,14 +52,13 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent
 
-# Single sources: the pipeline roots come from the runner script, the humanize +
-# empty-dir pruning helpers from the archiver (repo-root scripts import flat).
+# Single sources: the pipeline roots come from the preparation/optimization scripts,
+# the humanize + empty-dir pruning helpers from the archiver (repo-root scripts import flat).
 from archive_pipeline_data import _human, _prune_empty_dirs  # noqa: E402
-from run_scenario_pipeline import (  # noqa: E402
+from prepare_scenario_inputs import HARVEST_TRACKS_ROOT, SCENARIOS_DIR  # noqa: E402
+from run_scenario_optimization import (  # noqa: E402
     COMPARISON_AIRPORTS_ROOT,
-    HARVEST_TRACKS_ROOT,
     OPT_OUTPUTS_ROOT,
-    SCENARIOS_DIR,
 )
 
 # Despite its historical name in the runner, this is the harvest root, not the
@@ -113,6 +115,25 @@ def _harvest_files_by_category() -> dict[str, list[Path]]:
     return grouped
 
 
+def _harvest_category_files(category: str) -> tuple[list[Path], list[Path]]:
+    """Files and existing per-airport dirs for one canonical harvest category.
+
+    Default cleanup needs only ``arrivals`` and ``approach``. Scanning those roots
+    directly avoids walking every downloaded track just to preserve it.
+    """
+    files: list[Path] = []
+    roots: list[Path] = []
+    if not HARVEST_ROOT.exists():
+        return files, roots
+    for airport_dir in sorted(HARVEST_ROOT.iterdir()):
+        category_dir = airport_dir / category
+        if not airport_dir.is_dir() or not category_dir.is_dir():
+            continue
+        files.extend(_tree_files(category_dir))
+        roots.append(category_dir)
+    return files, roots
+
+
 def deletion_groups(*, include_parked: bool, include_downloads: bool):
     """``(label, files)`` groups to delete, the container dirs to remove once
     emptied, and the notes about what is deliberately being kept."""
@@ -161,25 +182,31 @@ def deletion_groups(*, include_parked: bool, include_downloads: bool):
     groups.append(("frontend observed layer (airports/*/{trajectories.czml*, landings})",
                    observed_files))
 
+    arrival_files, arrival_dirs = _harvest_category_files("arrivals")
+    approach_files, approach_dirs = _harvest_category_files("approach")
+    groups.extend(
+        [
+            ("harvest arrivals  (harvest/*/arrivals; derived)", arrival_files),
+            ("harvest approach  (harvest/*/approach; derived)", approach_files),
+        ]
+    )
+    containers.extend(arrival_dirs)
+    containers.extend(approach_dirs)
+
     if include_downloads:
         harvest_files = _harvest_files_by_category()
         groups.extend(
             [
                 ("harvest tracks    (harvest/*/tracks; measured)",
                  harvest_files["tracks"]),
-                ("harvest arrivals  (harvest/*/arrivals; derived)",
-                 harvest_files["arrivals"]),
-                ("harvest approach  (harvest/*/approach; derived)",
-                 harvest_files["approach"]),
             ]
         )
         if harvest_files["other"]:
             groups.append(("harvest other     (unexpected harvest files)",
                            harvest_files["other"]))
     else:
-        kept.append(f"harvest data {HARVEST_ROOT.relative_to(REPO_ROOT)}/ "
-                    f"(tracks are expensive; pass --include-downloads to delete the "
-                    f"complete harvest, including derived arrivals/approach)")
+        kept.append(f"harvest tracks {HARVEST_ROOT.relative_to(REPO_ROOT)}/*/tracks/ "
+                    f"(downloaded source data; pass --include-downloads to delete)")
 
     # Surface, never silently drop, any git-tracked file the guard excluded from the scan
     # (0 today — the roots are git-ignored — but a future ``git add`` under one must be
@@ -204,8 +231,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--include-downloads", action="store_true",
-        help="ALSO delete trajectory_data_process/outputs/harvest, including measured "
-             "tracks and derived arrivals/approach (kept by default)",
+        help="ALSO delete measured trajectory_data_process/outputs/harvest/*/tracks "
+             "(derived arrivals/approach are deleted by default)",
     )
     parser.add_argument(
         "--include-parked", action="store_true",
@@ -260,8 +287,9 @@ def main() -> None:
 
     # Tidy the emptied trees: prune below the anchors we actually deleted from, and drop
     # the emptied per-airport container dirs (comparison/, landings/) themselves. The
-    # The harvest tree is pruned only when --include-downloads deleted from it — otherwise
-    # it is "kept untouched" and must stay exactly as found, empty subdirs and all.
+    # The complete harvest tree is pruned only when --include-downloads deleted tracks.
+    # Otherwise the derived arrivals/approach dirs are handled through ``containers`` and
+    # the downloaded tracks tree is left untouched.
     prune_anchors = [SCENARIOS_DIR, OPT_OUTPUTS_ROOT]
     if args.include_downloads:
         prune_anchors.append(HARVEST_ROOT)

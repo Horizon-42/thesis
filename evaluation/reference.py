@@ -51,7 +51,21 @@ def load_reference(record: TrajectoryRecord) -> TrajectoryRecord:
     if record.reference_file is None:
         raise ValueError(f"record {record.path or record.source} has no reference_file")
     base = record.path.parent if record.path is not None else Path(".")
-    return load_record(base / record.reference_file)
+    reference = load_record(base / record.reference_file)
+    identity_keys = ("id", "icao24", "landing_time_utc", "runway")
+    mismatches = [
+        key
+        for key in identity_keys
+        if record.source.get(key) != reference.source.get(key)
+    ]
+    if mismatches:
+        ours = {key: record.source.get(key) for key in identity_keys}
+        theirs = {key: reference.source.get(key) for key in identity_keys}
+        raise ValueError(
+            f"record/reference flight identity mismatch in {mismatches}: "
+            f"record={ours}, reference={theirs}"
+        )
+    return reference
 
 
 def horizontal_arc_length_m(states: list[dict[str, float]]) -> float:
