@@ -1,24 +1,27 @@
 import { describe, expect, it } from "vitest";
 import { planObservedTracks, type ObservedTrackInputs } from "./observedTracks";
-import { airportDataUrl } from "./airportData";
+
+const BACKEND_URL = "http://backend.test";
 
 const base: ObservedTrackInputs = {
   mode: "observe",
   activeAirportCode: "KRDU",
   selectedRunway: null,
   trajectoryComparison: false,
+  trajectorySampleCount: 200,
+  backendUrl: BACKEND_URL,
 };
 
 describe("planObservedTracks", () => {
   it("loads and shows the airport-wide tracks in Observe", () => {
     expect(planObservedTracks(base)).toEqual({
-      fileUrl: airportDataUrl("KRDU", "trajectories.czml"),
+      fileUrl: `${BACKEND_URL}/trajectories?airport=KRDU&limit=200&seed=0`,
       visible: true,
       runwayFilter: null,
     });
   });
 
-  it("keeps the canonical file and applies a runway filter when selected", () => {
+  it("asks the backend to filter the selected runway before loading", () => {
     expect(planObservedTracks({
       ...base,
       selectedRunway: "05L",
@@ -32,7 +35,8 @@ describe("planObservedTracks", () => {
       },
       landingsStatus: "ready",
     })).toEqual({
-      fileUrl: airportDataUrl("KRDU", "trajectories.czml"),
+      fileUrl:
+        `${BACKEND_URL}/trajectories?airport=KRDU&limit=200&seed=0&runway=05L`,
       visible: true,
       runwayFilter: "05L",
     });
@@ -91,9 +95,17 @@ describe("planObservedTracks", () => {
 
   it("hides observed tracks in Observe while the 3-colour comparison is on (still loaded)", () => {
     const plan = planObservedTracks({ ...base, trajectoryComparison: true });
-    expect(plan.fileUrl).toBe(airportDataUrl("KRDU", "trajectories.czml"));
+    expect(plan.fileUrl).toBe(
+      `${BACKEND_URL}/trajectories?airport=KRDU&limit=200&seed=0`,
+    );
     expect(plan.visible).toBe(false);
     expect(plan.runwayFilter).toBeNull();
+  });
+
+  it("puts sample-count changes in the request URL so the loader refetches", () => {
+    expect(planObservedTracks({ ...base, trajectorySampleCount: 75 }).fileUrl).toBe(
+      `${BACKEND_URL}/trajectories?airport=KRDU&limit=75&seed=0`,
+    );
   });
 
   it("loads nothing when no airport is active", () => {

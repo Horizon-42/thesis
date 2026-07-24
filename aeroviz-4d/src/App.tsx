@@ -30,6 +30,7 @@ import { useCzmlLoader } from "./hooks/useCzmlLoader";
 import { useComparisonTrajectoryLayer } from "./hooks/useComparisonTrajectoryLayer";
 import { useLandingsManifest } from "./hooks/useLandingsManifest";
 import { useObservedVerdictColors } from "./hooks/useObservedVerdictColors";
+import { AEROVIZ_BACKEND_URL } from "./pilot/pilotClient";
 import { useEffect, useState } from "react";
 
 function FlightApp() {
@@ -38,6 +39,7 @@ function FlightApp() {
     selectedRunway,
     trajectoryComparison,
     trajectoryComparisonCategory,
+    trajectorySampleCount,
     mode,
     proceduresOpen,
   } = useApp();
@@ -58,6 +60,8 @@ function FlightApp() {
     activeAirportCode,
     selectedRunway,
     trajectoryComparison,
+    trajectorySampleCount,
+    backendUrl: AEROVIZ_BACKEND_URL,
     landingsManifest,
     landingsStatus,
   });

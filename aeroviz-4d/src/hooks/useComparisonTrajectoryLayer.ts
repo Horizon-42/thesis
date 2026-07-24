@@ -369,6 +369,8 @@ export function useComparisonTrajectoryLayer(): void {
 
   // ── Visibility: reveal sampled entities, gated per kind (instant, no reload) ──
   useEffect(() => {
+    if (!active) return;
+
     for (const ds of sourcesRef.current) {
       ds.show = true;
       for (const entity of ds.entities.values) {
@@ -413,7 +415,7 @@ export function useComparisonTrajectoryLayer(): void {
         if (entity.model) entity.model.runAnimations = new Cesium.ConstantProperty(false);
       }
     }
-  }, [loadVersion, trajectoryComparisonKinds, trajectoryDataSource]);
+  }, [active, loadVersion, trajectoryComparisonKinds, trajectoryDataSource]);
 
   // ── Hover / click reveals a single label ─────────────────────────────────────
   // Labels are hidden by default (applyComparisonRenderModel). Show only the label of the

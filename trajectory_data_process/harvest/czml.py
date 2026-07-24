@@ -36,6 +36,7 @@ import math
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -96,6 +97,34 @@ def verify_identity(flight: dict[str, Any], expected_key: str) -> None:
         )
 
 
+def observed_czml_flights(
+    paths: HarvestPaths,
+    rows: Iterable[dict[str, Any]] | None = None,
+) -> Iterator[dict[str, Any]]:
+    """Yield renderer-ready flight dictionaries for selected manifest rows.
+
+    This is the shared measured/derived join used by both the canonical batch
+    publisher and the HTTP trajectory sampler. Keeping it here guarantees that
+    an API-selected flight has the same identity, HAE positions, and optional
+    fitted threshold extension as the full ``trajectories.czml`` artifact.
+    """
+    source_rows = read_manifest(paths)["records"] if rows is None else rows
+    extrapolated_records = _extrapolated_record_paths(paths)
+    for row in source_rows:
+        if row["outcome"] != "assigned":
+            continue
+        track = json.loads((paths.tracks / row["file"]).read_text(encoding="utf-8"))
+        flight = czml_input_flight(track)
+        verify_identity(flight, track["flight_key"])
+        record_path = extrapolated_records.get(track["flight_key"])
+        if record_path is not None:
+            segment = _extrapolated_waypoints(record_path)
+            if segment is not None:
+                # Kept separate from measured waypoints: this is an inferred tail.
+                flight["extrapolated_waypoints"] = segment
+        yield flight
+
+
 def render_observed_czml(
     paths: HarvestPaths,
     *,
@@ -107,7 +136,6 @@ def render_observed_czml(
     airport_dir = frontend_data_root / "airports" / paths.code
     landings_dir = airport_dir / "landings"
     landings_dir.mkdir(parents=True, exist_ok=True)
-    extrapolated_records = _extrapolated_record_paths(paths)
 
     combined = airport_dir / "trajectories.czml"
     runway_counts: dict[str, int] = {}
@@ -116,18 +144,7 @@ def render_observed_czml(
     with tempfile.TemporaryDirectory(prefix=f"{paths.code}-observed-czml-") as work:
         source = Path(work) / "flights.jsonl"
         with source.open("w", encoding="utf-8") as output:
-            for row in read_manifest(paths)["records"]:
-                if row["outcome"] != "assigned":
-                    continue
-                track = json.loads((paths.tracks / row["file"]).read_text(encoding="utf-8"))
-                flight = czml_input_flight(track)
-                verify_identity(flight, track["flight_key"])
-                record_path = extrapolated_records.get(track["flight_key"])
-                if record_path is not None:
-                    segment = _extrapolated_waypoints(record_path)
-                    if segment is not None:
-                        # Kept separate from measured waypoints: this is an inferred tail.
-                        flight["extrapolated_waypoints"] = segment
+            for flight in observed_czml_flights(paths):
                 output.write(
                     json.dumps(flight, ensure_ascii=False, separators=(",", ":")) + "\n"
                 )
@@ -142,7 +159,7 @@ def render_observed_czml(
                         default=0.0,
                     ),
                 )
-                runway = str(row["runway"])
+                runway = str(flight["runway"])
                 runway_counts[runway] = runway_counts.get(runway, 0) + 1
                 flights += 1
 

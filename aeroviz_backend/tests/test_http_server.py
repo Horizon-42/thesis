@@ -27,6 +27,36 @@ class TestAeroVizBackendApp(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertIn("aircraft", payload)
 
+    def test_trajectory_endpoint_parses_query_and_delegates(self):
+        observed_backend = FakeObservedTrajectoryBackend()
+        app = AeroVizBackendApp(
+            simulation_backend=FakeSimulationBackend(),
+            optimization_backend=FakeOptimizationBackend(),
+            observed_trajectory_backend=observed_backend,
+        )
+
+        status, payload = app.handle_get(
+            "/trajectories?airport=krdu&runway=23R&limit=200&seed=42"
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload[0]["id"], "document")
+        self.assertEqual(observed_backend.calls, [("krdu", "23R", 200, 42)])
+
+    def test_trajectory_endpoint_reports_invalid_query(self):
+        app = AeroVizBackendApp(
+            simulation_backend=FakeSimulationBackend(),
+            optimization_backend=FakeOptimizationBackend(),
+            observed_trajectory_backend=FakeObservedTrajectoryBackend(),
+        )
+
+        status, payload = app.handle_get(
+            "/trajectories?airport=KRDU&limit=not-a-number"
+        )
+
+        self.assertEqual(status, 400)
+        self.assertIn("limit", payload["error"])
+
     def test_simulation_routes_delegate_to_simulation_backend(self):
         simulation_backend = FakeSimulationBackend()
         app = AeroVizBackendApp(
@@ -207,6 +237,15 @@ class FakeOptimizationBackend:
         self.session_calls.append(("close", payload))
         self._sessions = max(0, self._sessions - 1)
         return {"ok": True, "sessions": self._sessions}
+
+
+class FakeObservedTrajectoryBackend:
+    def __init__(self):
+        self.calls = []
+
+    def query(self, airport, *, runway=None, limit=200, seed=0):
+        self.calls.append((airport, runway, limit, seed))
+        return [{"id": "document"}, {"id": "TEST"}]
 
 
 class FakeDynamicsComparisonBackend:

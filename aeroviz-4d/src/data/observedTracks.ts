@@ -18,7 +18,7 @@
  *     prediction comparison hides the plain tracks in favour of its own source.
  */
 
-import { airportDataUrl, type LandingsManifest } from "./airportData";
+import type { LandingsManifest } from "./airportData";
 import type { WorkbenchMode } from "../context/AppContext";
 
 export interface ObservedTrackInputs {
@@ -26,9 +26,16 @@ export interface ObservedTrackInputs {
   activeAirportCode: string | null;
   selectedRunway: string | null;
   trajectoryComparison: boolean;
+  trajectorySampleCount: number;
+  backendUrl: string;
   /** Canonical publication contract; legacy observed manifests are rejected upstream. */
   landingsManifest?: LandingsManifest | null;
   landingsStatus?: "idle" | "loading" | "ready" | "empty" | "error";
+}
+
+export interface ObservedTrackVisibilityInputs {
+  mode: WorkbenchMode;
+  trajectoryComparison: boolean;
 }
 
 export interface ObservedTrackPlan {
@@ -45,6 +52,8 @@ export function planObservedTracks({
   activeAirportCode,
   selectedRunway,
   trajectoryComparison,
+  trajectorySampleCount,
+  backendUrl,
   landingsManifest,
   landingsStatus,
 }: ObservedTrackInputs): ObservedTrackPlan {
@@ -60,10 +69,26 @@ export function planObservedTracks({
       // invalid, or obsolete observed data by guessing a filename.
       runwayFilter = null;
     } else {
-      const published = landingsStatus === "ready" ? landingsManifest?.combined : null;
-      fileUrl = airportDataUrl(activeAirportCode, published || "trajectories.czml");
+      const params = new URLSearchParams({
+        airport: activeAirportCode,
+        limit: String(
+          Number.isFinite(trajectorySampleCount)
+            ? Math.max(0, Math.floor(trajectorySampleCount))
+            : 200,
+        ),
+        seed: "0",
+      });
+      if (selectedRunway) params.set("runway", selectedRunway);
+      fileUrl = `${backendUrl.replace(/\/+$/, "")}/trajectories?${params.toString()}`;
     }
   }
-  const visible = mode === "observe" && !trajectoryComparison;
+  const visible = observedTracksVisible({ mode, trajectoryComparison });
   return { fileUrl, visible, runwayFilter };
+}
+
+export function observedTracksVisible({
+  mode,
+  trajectoryComparison,
+}: ObservedTrackVisibilityInputs): boolean {
+  return mode === "observe" && !trajectoryComparison;
 }
