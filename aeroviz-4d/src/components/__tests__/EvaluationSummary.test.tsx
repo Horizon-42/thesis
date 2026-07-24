@@ -193,7 +193,7 @@ describe("EvaluationSummary", () => {
     expect(screen.getByText(/enforces the selected procedure as path constraints/)).toBeTruthy();
   });
 
-  it("renders ADE and FDE instead of solve metrics for a data-driven model", async () => {
+  it("renders the threshold pass rate and ADE/FDE without a solve rate for a data-driven model", async () => {
     appState.trajectoryComparison = true;
     appState.trajectoryComparisonCategory = PREDICTED.dir;
     fetchJsonMock.mockResolvedValue({
@@ -210,6 +210,7 @@ describe("EvaluationSummary", () => {
     expect(
       await screen.findByRole("region", { name: "Data-Driven Model Evaluation" }),
     ).toBeTruthy();
+    expect(within(metric("Runway-threshold pass rate")).getByText("75.0%")).toBeTruthy();
     expect(within(metric("Mean ADE")).getByText("1756 m")).toBeTruthy();
     expect(within(metric("95th-percentile ADE")).getByText("4656 m")).toBeTruthy();
     expect(within(metric("Mean FDE")).getByText("2082 m")).toBeTruthy();

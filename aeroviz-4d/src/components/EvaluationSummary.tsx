@@ -7,7 +7,7 @@
  * one generic set of "solve/success" labels:
  *   • observed       — quality of the measured final approach at the runway threshold;
  *   • optimization   — solver outcome and error relative to the selected target;
- *   • data-driven    — ADE/FDE against the observed trajectory.
+ *   • data-driven    — runway-threshold gate pass plus ADE/FDE against the observed trajectory.
  *
  * Observed is a report-only category and therefore reads its fixed report directly.
  * Modelled categories first read their immutable comparison index; Details then follows
@@ -186,7 +186,9 @@ function optimizationPresentation(
 function predictionPresentation(
   category: ComparisonCategory,
   prediction: PredictionAccuracyStats | null,
+  stats: OptimizationStats | null,
 ): Presentation {
+  const targetPassRate = passRateAmongSolved(stats);
   const adeMean = prediction?.adeM?.mean;
   const adeP95 = prediction?.adeM?.p95;
   const fdeMean = prediction?.fdeM?.mean;
@@ -198,8 +200,14 @@ function predictionPresentation(
     note:
       "ADE is the mean position error across the predicted trajectory; FDE is the position " +
       "error at the final predicted sample. Both compare the prediction with the observed " +
-      "track over their overlapping samples. A solver success rate does not apply.",
+      "track over their overlapping samples. The runway-threshold pass rate grades the " +
+      "prediction's final state against both evaluation gates. A solver solve rate does not apply.",
     rows: [
+      row(
+        "Runway-threshold pass rate",
+        formatPercent(targetPassRate),
+        targetPassRate != null,
+      ),
       row("Mean ADE", formatMetres(adeMean), adeMean != null),
       row("95th-percentile ADE", formatMetres(adeP95), adeP95 != null),
       row("Mean FDE", formatMetres(fdeMean), fdeMean != null),
@@ -327,6 +335,7 @@ export default function EvaluationSummary() {
       return predictionPresentation(
         category,
         loaded?.key === sourceKey ? loaded.prediction : null,
+        loaded?.key === sourceKey ? loaded.stats : null,
       );
     }
     return optimizationPresentation(
