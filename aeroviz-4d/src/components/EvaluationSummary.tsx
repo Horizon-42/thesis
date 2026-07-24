@@ -18,6 +18,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useApp } from "../context/AppContext";
 import {
   OBSERVED_CATEGORY_KEY,
+  OBSERVED_EVALUATION_REPORT_FILE,
   airportComparisonIndexUrl,
   airportEvaluationReportUrl,
   isComparisonIndex,
@@ -30,8 +31,6 @@ import { useComparisonCategories } from "../hooks/useComparisonCategories";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 import { formatDuration, formatPercent } from "../utils/flightListFormat";
 import EvaluationReportWindow from "./EvaluationReportWindow";
-
-const OBSERVED_REPORT_FILE = "evaluation_report.json";
 
 type EvaluationKind = "observed" | "optimization" | "dataDriven";
 
@@ -210,10 +209,15 @@ function predictionPresentation(
 }
 
 export default function EvaluationSummary() {
-  const { activeAirportCode, trajectoryComparisonCategory } = useApp();
+  const {
+    activeAirportCode,
+    trajectoryComparison,
+    trajectoryComparisonCategory,
+  } = useApp();
   const { categories } = useComparisonCategories(activeAirportCode);
-  const category =
-    categories.find((candidate) => candidate.dir === trajectoryComparisonCategory) ?? null;
+  const category = trajectoryComparison
+    ? categories.find((candidate) => candidate.dir === trajectoryComparisonCategory) ?? null
+    : categories.find((candidate) => candidate.key === OBSERVED_CATEGORY_KEY) ?? null;
   const sourceKey =
     activeAirportCode && category
       ? `${activeAirportCode}/${category.dir}/${category.key}`
@@ -235,13 +239,13 @@ export default function EvaluationSummary() {
     let cancelled = false;
     const kind = evaluationKind(category);
     if (kind === "observed") {
-      const reportKey = `${sourceKey}/${OBSERVED_REPORT_FILE}`;
+      const reportKey = `${sourceKey}/${OBSERVED_EVALUATION_REPORT_FILE}`;
       setLoading(true);
       fetchJson<unknown>(
         airportEvaluationReportUrl(
           activeAirportCode,
           category.dir,
-          OBSERVED_REPORT_FILE,
+          OBSERVED_EVALUATION_REPORT_FILE,
         ),
       )
         .then((data) => {
@@ -252,7 +256,7 @@ export default function EvaluationSummary() {
           setCachedReport({ key: reportKey, report: data });
           setLoaded({
             key: sourceKey,
-            reportFile: OBSERVED_REPORT_FILE,
+            reportFile: OBSERVED_EVALUATION_REPORT_FILE,
             stats: null,
             prediction: null,
             report: data,

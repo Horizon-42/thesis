@@ -17,7 +17,7 @@ import {
   OBSERVED_VERDICT_LABELS,
 } from "../utils/observedVerdictColors";
 import { useComparisonCategories } from "../hooks/useComparisonCategories";
-import { OBSERVED_CATEGORY_KEY } from "../data/airportData";
+import { isDrawableComparisonCategory } from "../data/airportData";
 import { useForcedProcedureDisplay } from "../hooks/useForcedProcedureDisplay";
 import { COMPARISON_KIND_COLORS, COMPARISON_KIND_ALPHA } from "../utils/trajectoryRenderModel";
 import ApproachViewToggle from "./ApproachViewToggle";
@@ -75,24 +75,22 @@ export default function ControlPanel({ observedVerdicts = NO_VERDICTS }: Control
     setTrajectorySampleCount,
   } = useApp();
   const { categories: comparisonCategories } = useComparisonCategories(activeAirportCode);
+  const drawableComparisonCategories = comparisonCategories.filter(
+    isDrawableComparisonCategory,
+  );
 
-  // Default the comparison category, and keep it valid as airports change.
-  //
-  // OBSERVED FIRST when it exists: it is the measured baseline every modelled category
-  // is judged against, and it is what colours the plain observed tracks. Alphabetically
-  // "asdb" sorts ahead of it, and defaulting there would open on the category whose
-  // target IS the last observed sample — a 0 m deviation and a 100 % pass rate for every
-  // flight, which says nothing at all.
+  // A report-only category (notably Observed ADS-B) has no comparison index/CZML and
+  // therefore cannot own this selector. Default to the first drawable category and
+  // keep the selection valid as airports change.
   useEffect(() => {
-    if (comparisonCategories.length === 0) {
+    const drawable = comparisonCategories.filter(isDrawableComparisonCategory);
+    if (drawable.length === 0) {
       if (trajectoryComparisonCategory !== null) setTrajectoryComparisonCategory(null);
       return;
     }
-    const stillValid = comparisonCategories.some((c) => c.dir === trajectoryComparisonCategory);
+    const stillValid = drawable.some((c) => c.dir === trajectoryComparisonCategory);
     if (stillValid) return;
-    const preferred =
-      comparisonCategories.find((c) => c.key === OBSERVED_CATEGORY_KEY) ?? comparisonCategories[0];
-    setTrajectoryComparisonCategory(preferred.dir);
+    setTrajectoryComparisonCategory(drawable[0].dir);
   }, [comparisonCategories, trajectoryComparisonCategory, setTrajectoryComparisonCategory]);
 
   // ── Constraint-scoped procedure display (drive & restore) ────────────────────
@@ -104,7 +102,7 @@ export default function ControlPanel({ observedVerdicts = NO_VERDICTS }: Control
   // so the hook only opens the panel + layer and never touches the runway (it must not
   // fight the top-bar selector nor revert it on exit).
   const activeComparisonCategory =
-    comparisonCategories.find((c) => c.dir === trajectoryComparisonCategory) ?? null;
+    drawableComparisonCategories.find((c) => c.dir === trajectoryComparisonCategory) ?? null;
   useForcedProcedureDisplay({
     active:
       layers.trajectories &&
@@ -163,8 +161,8 @@ export default function ControlPanel({ observedVerdicts = NO_VERDICTS }: Control
                 {observedVerdicts.matched < observedVerdicts.total ? (
                   <div className="control-panel-verdict-note">
                     {observedVerdicts.total - observedVerdicts.matched} of {observedVerdicts.total}{" "}
-                    tracks have no verdict in this report and keep their original colour — the
-                    tracks and the report were most likely produced by different harvests.
+                    tracks have no published verdict and are shown as Undecidable — their runway
+                    may lack a published gate target, or the report may not cover this harvest.
                   </div>
                 ) : null}
               </div>
@@ -178,7 +176,7 @@ export default function ControlPanel({ observedVerdicts = NO_VERDICTS }: Control
               Prediction comparison (3-colour)
             </label>
             {trajectoryComparison ? (
-              comparisonCategories.length > 0 ? (
+              drawableComparisonCategories.length > 0 ? (
                 <label className="control-panel-airport-selector">
                   <span>Evaluation category</span>
                   <select
@@ -186,7 +184,7 @@ export default function ControlPanel({ observedVerdicts = NO_VERDICTS }: Control
                     value={trajectoryComparisonCategory ?? ""}
                     onChange={(event) => setTrajectoryComparisonCategory(event.target.value || null)}
                   >
-                    {comparisonCategories.map((category) => (
+                    {drawableComparisonCategories.map((category) => (
                       <option key={category.key} value={category.dir}>
                         {category.label} ({category.groups})
                       </option>

@@ -9,6 +9,7 @@ import {
   airportChartsIndexUrl,
   isAirportsIndexManifest,
   isComparisonCategoriesManifest,
+  isDrawableComparisonCategory,
   isComparisonIndex,
   normalizeAirportCode,
   sortAirportCatalog,
@@ -58,6 +59,27 @@ describe("airportData helpers", () => {
     expect(
       isComparisonCategoriesManifest({ categories: [{ ...entry, constrained: "yes" }] }),
     ).toBe(false);
+  });
+
+  it("distinguishes report-only evaluation categories from drawable comparisons", () => {
+    expect(
+      isDrawableComparisonCategory({
+        key: "observed",
+        label: "Observed ADS-B",
+        dir: "observed",
+        groups: 0,
+        constrained: false,
+      }),
+    ).toBe(false);
+    expect(
+      isDrawableComparisonCategory({
+        key: "runway",
+        label: "Runway target",
+        dir: "runway",
+        groups: 12,
+        constrained: false,
+      }),
+    ).toBe(true);
   });
 
   it("accepts only the current atomic comparison publication contract", () => {

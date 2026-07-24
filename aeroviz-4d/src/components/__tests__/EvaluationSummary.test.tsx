@@ -6,6 +6,7 @@ import type { EvaluationReport } from "../../data/evaluationReport";
 const { appState, categoryState, fetchJsonMock } = vi.hoisted(() => ({
   appState: {
     activeAirportCode: "KRDU" as string | null,
+    trajectoryComparison: false,
     trajectoryComparisonCategory: "observed" as string | null,
   },
   categoryState: {
@@ -114,6 +115,7 @@ function metric(label: string): HTMLElement {
 describe("EvaluationSummary", () => {
   beforeEach(() => {
     appState.activeAirportCode = "KRDU";
+    appState.trajectoryComparison = false;
     appState.trajectoryComparisonCategory = OBSERVED.dir;
     categoryState.categories = [OBSERVED, FITTED, RUNWAY_CONSTRAINED, PREDICTED];
     fetchJsonMock.mockReset();
@@ -140,7 +142,26 @@ describe("EvaluationSummary", () => {
     );
   });
 
+  it("returns to the observed baseline when comparison is off", async () => {
+    appState.trajectoryComparison = false;
+    appState.trajectoryComparisonCategory = FITTED.dir;
+    fetchJsonMock.mockResolvedValue(OBSERVED_REPORT);
+
+    render(<EvaluationSummary />);
+
+    expect(
+      await screen.findByRole("region", { name: "Observed Baseline Evaluation" }),
+    ).toBeTruthy();
+    expect(fetchJsonMock).toHaveBeenCalledWith(
+      expect.stringContaining("KRDU/comparison/observed/evaluation_report.json"),
+    );
+    expect(fetchJsonMock).not.toHaveBeenCalledWith(
+      expect.stringContaining("fitted_adsb/comparison_index.json"),
+    );
+  });
+
   it("labels fitted ADS-B as an optimization target, not as an observed baseline", async () => {
+    appState.trajectoryComparison = true;
     appState.trajectoryComparisonCategory = FITTED.dir;
     fetchJsonMock.mockResolvedValue(INDEX);
     render(<EvaluationSummary />);
@@ -157,6 +178,7 @@ describe("EvaluationSummary", () => {
   });
 
   it("names the runway target and procedure constraint explicitly", async () => {
+    appState.trajectoryComparison = true;
     appState.trajectoryComparisonCategory = RUNWAY_CONSTRAINED.dir;
     fetchJsonMock.mockResolvedValue(INDEX);
     render(<EvaluationSummary />);
@@ -172,6 +194,7 @@ describe("EvaluationSummary", () => {
   });
 
   it("renders ADE and FDE instead of solve metrics for a data-driven model", async () => {
+    appState.trajectoryComparison = true;
     appState.trajectoryComparisonCategory = PREDICTED.dir;
     fetchJsonMock.mockResolvedValue({
       ...INDEX,
@@ -208,6 +231,7 @@ describe("EvaluationSummary", () => {
   });
 
   it("follows the immutable report named by a modelled category index", async () => {
+    appState.trajectoryComparison = true;
     appState.trajectoryComparisonCategory = FITTED.dir;
     fetchJsonMock.mockImplementation((url: string) =>
       url.endsWith("comparison_index.json") ? Promise.resolve(INDEX) : Promise.resolve(REPORT),

@@ -38,7 +38,6 @@ function FlightApp() {
     activeAirportCode,
     selectedRunway,
     trajectoryComparison,
-    trajectoryComparisonCategory,
     trajectorySampleCount,
     mode,
     proceduresOpen,
@@ -74,7 +73,6 @@ function FlightApp() {
   // Colour the plain observed tracks by their gate verdict. Only when they are the
   // thing on screen — with the comparison on, its own kind colours own the scene.
   const observedVerdicts = useObservedVerdictColors(
-    trajectoryComparisonCategory,
     observedVisible && !trajectoryComparison,
   );
   const czmlError = landingsError ?? error;

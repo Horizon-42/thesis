@@ -11,7 +11,7 @@ The observed category has none: the flown track is already on screen (that IS th
 observed layer), and its verdict colouring is applied there from this very report. A
 second copy of the same geometry would be one more thing to keep in sync for no
 picture the user cannot already see. So ``groups: 0`` — the category exists to carry a
-report, and the frontend's category selector shows it that way.
+report for the evaluation summary and is excluded from the drawable comparison selector.
 
 CATEGORY SHAPE
 --------------

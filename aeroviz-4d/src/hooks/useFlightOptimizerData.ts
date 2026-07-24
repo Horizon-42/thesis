@@ -6,7 +6,7 @@
  *     scenario initial state, so they are the SAME value the optimizer started from (no
  *     independent frontend re-estimate) and exist for EVERY flight, solved OR failed. They are
  *     category-independent, so they show even when the comparison overlay is off (read from
- *     whichever category is active, defaulting to the first);
+ *     whichever drawable category is active, defaulting to the first);
  *   • the optimized **final time** (s) for the currently-selected category — shown only while
  *     the comparison overlay is on (`comparisonActive`), and only for solved flights;
  *   • whether the flight's optimization **failed** — so the list can flag it.
@@ -17,6 +17,7 @@ import { useApp } from "../context/AppContext";
 import { useComparisonCategories } from "./useComparisonCategories";
 import {
   airportComparisonIndexUrl,
+  isDrawableComparisonCategory,
   isComparisonIndex,
   type ComparisonGroup,
   type OptimizationStats,
@@ -60,11 +61,16 @@ export function useFlightOptimizerData(): FlightOptimizerData {
   const { activeAirportCode, trajectoryComparison, trajectoryComparisonCategory } = useApp();
   const { categories } = useComparisonCategories(activeAirportCode);
 
-  // Mass is category-independent, so when the overlay is off we still read the first category's
-  // index for it; when the overlay is on we read the selected category (same mass + its finalTimeS).
-  const categoryDir =
-    (trajectoryComparison && trajectoryComparisonCategory) || categories[0]?.dir || null;
-  const comparisonActive = trajectoryComparison && !!trajectoryComparisonCategory;
+  // Mass is category-independent, so when the overlay is off we still read the first drawable
+  // category's index; when it is on we read the selected drawable category.
+  const drawableCategories = categories.filter(isDrawableComparisonCategory);
+  const selectedCategory = drawableCategories.find(
+    (category) => category.dir === trajectoryComparisonCategory,
+  );
+  const categoryDir = trajectoryComparison
+    ? selectedCategory?.dir ?? null
+    : drawableCategories[0]?.dir ?? null;
+  const comparisonActive = trajectoryComparison && !!selectedCategory;
 
   const [byFlightKey, setByFlightKey] = useState<Map<string, FlightOptimizerDatum>>(EMPTY);
   const [stats, setStats] = useState<OptimizationStats | null>(null);

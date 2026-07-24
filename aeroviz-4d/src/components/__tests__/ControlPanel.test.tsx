@@ -121,11 +121,11 @@ vi.mock("../../hooks/useComparisonCategories", () => ({
 }));
 
 /** A manifest category — `constrained` is the explicit field the panel keys off. */
-const category = (dir: string, constrained: boolean) => ({
+const category = (dir: string, constrained: boolean, groups = 1) => ({
   key: dir,
   label: dir,
   dir,
-  groups: 1,
+  groups,
   constrained,
 });
 
@@ -192,6 +192,28 @@ describe("ControlPanel", () => {
     render(<ControlPanel />);
     await Promise.resolve();
     expect(setProceduresOpen).not.toHaveBeenCalledWith(true);
+  });
+
+  it("keeps report-only categories out of comparison and defaults to a drawable category", async () => {
+    appState.layers.trajectories = true;
+    appState.trajectoryComparison = true;
+    appState.comparisonCategories = [
+      category("observed", false, 0),
+      category("fitted_adsb", false, 10),
+      category("runway", false, 10),
+    ];
+    appState.trajectoryComparisonCategory = "observed";
+
+    render(<ControlPanel />);
+
+    const selector = screen.getByLabelText("Evaluation category") as HTMLSelectElement;
+    expect([...selector.options].map((option) => option.value)).toEqual([
+      "fitted_adsb",
+      "runway",
+    ]);
+    await waitFor(() =>
+      expect(setTrajectoryComparisonCategory).toHaveBeenCalledWith("fitted_adsb"),
+    );
   });
 
   // ── Approach-approach-view toggle (Feature B) ──────────────────────────────────────

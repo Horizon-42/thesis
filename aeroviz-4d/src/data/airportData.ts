@@ -110,10 +110,11 @@ export function airportComparisonCzmlUrl(
 /**
  * The measured-baseline category (`trajectory_data_process/harvest/publish.py`).
  * Report-only — it ships no CZML, because the flown track it describes is already the
- * observed layer on screen. Named here so the frontend's default-selection and the
- * publisher cannot drift.
+ * observed layer on screen. Named here so the frontend's baseline report readers and
+ * the publisher cannot drift.
  */
 export const OBSERVED_CATEGORY_KEY = "observed";
+export const OBSERVED_EVALUATION_REPORT_FILE = "evaluation_report.json";
 
 /** One evaluation category, as listed in `comparison/categories.json`. */
 export interface ComparisonCategory {
@@ -132,6 +133,13 @@ export interface ComparisonCategory {
    * naming convention, not a contract.
    */
   constrained: boolean;
+}
+
+/** Report-only categories have no comparison groups or CZML to draw. */
+export function isDrawableComparisonCategory(
+  category: ComparisonCategory,
+): boolean {
+  return category.groups > 0;
 }
 
 export interface ComparisonCategoriesManifest {
