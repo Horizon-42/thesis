@@ -17,6 +17,7 @@
 
 import { sampleSubset, type Rng } from "./sampleTrajectories";
 import type { ComparisonKind } from "../context/AppContext";
+import type { ComparisonStatusLegend } from "./comparisonLegend";
 
 /** Uniform path width for every trajectory (observed + comparison), in px. */
 export const TRAJECTORY_PATH_WIDTH = 2;
@@ -51,11 +52,40 @@ export const COMPARISON_KIND_COLORS: Record<ComparisonKind, string> = {
  * so a viewer can see at a glance where the model stopped being told and started guessing.
  */
 export const COMPARISON_KIND_ALPHA: Record<ComparisonKind, number> = {
-  reference: 0.86,
-  optimizer: 0.86,
-  simulator: 0.86,
-  predicted: 0.86,
-  lookback: 0.33,
+  reference: 200 / 255,
+  optimizer: 220 / 255,
+  simulator: 220 / 255,
+  predicted: 225 / 255,
+  lookback: 85 / 255,
+};
+
+/**
+ * Outcome colours that override a kind's normal colour. These exact RGB/alpha values are
+ * shared by the rendered canonical references and the dynamic legend; the off-target result
+ * is baked into simulator CZML and preserved by `applyComparisonRenderModel`.
+ *
+ * Keep in sync with build_scenario_comparison_czml.py:
+ * FAILED_COLOR / OFF_TARGET_REF_COLOR / OFF_TARGET_COLOR.
+ */
+export const COMPARISON_STATUS_STYLES: Record<
+  ComparisonStatusLegend,
+  { label: string; color: string; alpha: number }
+> = {
+  failedReference: {
+    label: "Unsolved reference",
+    color: "rgb(200, 60, 60)",
+    alpha: 200 / 255,
+  },
+  offTargetReference: {
+    label: "Off-target reference",
+    color: "rgb(150, 118, 25)",
+    alpha: 200 / 255,
+  },
+  offTargetResult: {
+    label: "Off-target optimize result",
+    color: "rgb(255, 205, 40)",
+    alpha: 235 / 255,
+  },
 };
 
 /** How many shown trajectories carry an aircraft model (the rest are path-only). */

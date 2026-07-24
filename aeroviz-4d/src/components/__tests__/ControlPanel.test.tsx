@@ -60,9 +60,20 @@ const {
     isApproachViewOpen: false,
     trajectoryComparison: false,
     trajectoryComparisonCategory: null as string | null,
-    trajectoryComparisonKinds: { reference: true, optimizer: true, simulator: true },
+    trajectoryComparisonKinds: {
+      reference: true,
+      optimizer: false,
+      simulator: true,
+      predicted: true,
+      lookback: true,
+    },
     trajectorySampleCount: 0,
     comparisonCategories: [] as Array<Record<string, unknown>>,
+    comparisonLegend: {
+      kinds: [] as string[],
+      statuses: [] as string[],
+      status: "idle",
+    },
   };
 
   return {
@@ -77,6 +88,7 @@ const {
       appState.trajectoryComparison = false;
       appState.trajectoryComparisonCategory = null;
       appState.comparisonCategories = [];
+      appState.comparisonLegend = { kinds: [], statuses: [], status: "idle" };
     },
     toggleLayer: vi.fn(),
     setPlaybackSpeed: vi.fn(),
@@ -118,6 +130,10 @@ vi.mock("../../hooks/useComparisonCategories", () => ({
     categories: appState.comparisonCategories,
     status: appState.comparisonCategories.length ? "ready" : "empty",
   }),
+}));
+
+vi.mock("../../hooks/useComparisonLegend", () => ({
+  useComparisonLegend: () => appState.comparisonLegend,
 }));
 
 /** A manifest category — `constrained` is the explicit field the panel keys off. */
@@ -214,6 +230,47 @@ describe("ControlPanel", () => {
     await waitFor(() =>
       expect(setTrajectoryComparisonCategory).toHaveBeenCalledWith("fitted_adsb"),
     );
+  });
+
+  it("shows only optimizer-category paths, explains verdict overrides, and omits Optimize states", () => {
+    appState.trajectoryComparison = true;
+    appState.trajectoryComparisonCategory = "runway";
+    appState.comparisonCategories = [category("runway", false)];
+    appState.comparisonLegend = {
+      kinds: ["reference", "simulator"],
+      statuses: ["failedReference", "offTargetReference", "offTargetResult"],
+      status: "ready",
+    };
+
+    render(<ControlPanel />);
+
+    expect(screen.getByLabelText("Reference")).toBeTruthy();
+    expect(screen.getByLabelText("Optimize results")).toBeTruthy();
+    expect(screen.queryByLabelText("Optimize states")).toBeNull();
+    expect(screen.queryByLabelText("Predicted")).toBeNull();
+    expect(screen.getByText("Unsolved reference")).toBeTruthy();
+    expect(screen.getByText("Off-target reference")).toBeTruthy();
+    expect(screen.getByText("Off-target optimize result")).toBeTruthy();
+  });
+
+  it("switches the legend to the kinds in a prediction category", () => {
+    appState.trajectoryComparison = true;
+    appState.trajectoryComparisonCategory = "ts_transformer";
+    appState.comparisonCategories = [category("ts_transformer", false)];
+    appState.comparisonLegend = {
+      kinds: ["reference", "predicted", "lookback"],
+      statuses: ["offTargetReference"],
+      status: "ready",
+    };
+
+    render(<ControlPanel />);
+
+    expect(screen.getByLabelText("Reference")).toBeTruthy();
+    expect(screen.getByLabelText("Predicted")).toBeTruthy();
+    expect(screen.getByLabelText("Predictor input")).toBeTruthy();
+    expect(screen.queryByLabelText("Optimize results")).toBeNull();
+    expect(screen.queryByLabelText("Optimize states")).toBeNull();
+    expect(screen.queryByText("Off-target optimize result")).toBeNull();
   });
 
   // ── Approach-approach-view toggle (Feature B) ──────────────────────────────────────

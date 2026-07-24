@@ -2,14 +2,14 @@
  * ControlPanel.tsx
  * ----------------
  * Observe-mode trajectory controls: the Trajectories layer toggle and its options
- * (optimizer 3-colour comparison + category, sample count). Playback transport lives
+ * (category-aware comparison legend + sample count). Playback transport lives
  * in the bottom bar and airport/runway selection in the top bar; this panel only
  * owns the trajectory-view options.
  *
  * All interactions go through AppContext — this component never touches Cesium.
  */
 
-import { useApp, type ComparisonKind } from "../context/AppContext";
+import { useApp } from "../context/AppContext";
 import type { ObservedVerdictState } from "../hooks/useObservedVerdictColors";
 import {
   OBSERVED_VERDICT_COLORS,
@@ -17,31 +17,24 @@ import {
   OBSERVED_VERDICT_LABELS,
 } from "../utils/observedVerdictColors";
 import { useComparisonCategories } from "../hooks/useComparisonCategories";
+import { useComparisonLegend } from "../hooks/useComparisonLegend";
+import type { ComparisonLegendKind } from "../utils/comparisonLegend";
 import { isDrawableComparisonCategory } from "../data/airportData";
 import { useForcedProcedureDisplay } from "../hooks/useForcedProcedureDisplay";
-import { COMPARISON_KIND_COLORS, COMPARISON_KIND_ALPHA } from "../utils/trajectoryRenderModel";
+import {
+  COMPARISON_KIND_COLORS,
+  COMPARISON_KIND_ALPHA,
+  COMPARISON_STATUS_STYLES,
+} from "../utils/trajectoryRenderModel";
 import ApproachViewToggle from "./ApproachViewToggle";
 import { useEffect } from "react";
 
-/**
- * The comparison trajectories, each a colour-keyed visibility checkbox. The kind keys
- * ("optimizer"/"simulator"/"predicted") stay as the backend's entity-id prefixes; the swatch
- * colour comes from the shared COMPARISON_KIND_COLORS (the same source the rendered paths are
- * recoloured to), so the legend and the tracks can never disagree.
- *
- * Which kinds a category actually contains depends on its producer: an optimizer batch emits
- * reference + optimizer + simulator, a ts_transformer batch emits reference + predicted +
- * lookback. A checkbox for a kind the loaded category has none of is harmless — it toggles
- * nothing — so the list stays static rather than being derived per category.
- */
-const COMPARISON_KINDS: Array<{ kind: ComparisonKind; label: string }> = [
-  { kind: "reference", label: "Reference" },
-  { kind: "simulator", label: "Optimize results" },
-  { kind: "optimizer", label: "Optimize states" },
-  { kind: "predicted", label: "Predicted" },
-  // Same hue as "Predicted", faded: the observed window the forecast was conditioned on.
-  { kind: "lookback", label: "Predictor input" },
-];
+const COMPARISON_KIND_LABELS: Record<ComparisonLegendKind, string> = {
+  reference: "Reference",
+  simulator: "Optimize results",
+  predicted: "Predicted",
+  lookback: "Predictor input",
+};
 
 interface ControlPanelProps {
   /**
@@ -78,6 +71,14 @@ export default function ControlPanel({ observedVerdicts = NO_VERDICTS }: Control
   const drawableComparisonCategories = comparisonCategories.filter(
     isDrawableComparisonCategory,
   );
+  const activeComparisonCategory =
+    drawableComparisonCategories.find((c) => c.dir === trajectoryComparisonCategory) ?? null;
+  const comparisonLegend = useComparisonLegend(
+    activeAirportCode,
+    activeComparisonCategory?.dir ?? null,
+    selectedRunway,
+    layers.trajectories && trajectoryComparison,
+  );
 
   // A report-only category (notably Observed ADS-B) has no comparison index/CZML and
   // therefore cannot own this selector. Default to the first drawable category and
@@ -101,8 +102,6 @@ export default function ControlPanel({ observedVerdicts = NO_VERDICTS }: Control
   // solves flew. `forceRunway: null`: the runway IS the user-owned global selectedRunway,
   // so the hook only opens the panel + layer and never touches the runway (it must not
   // fight the top-bar selector nor revert it on exit).
-  const activeComparisonCategory =
-    drawableComparisonCategories.find((c) => c.dir === trajectoryComparisonCategory) ?? null;
   useForcedProcedureDisplay({
     active:
       layers.trajectories &&
@@ -173,7 +172,7 @@ export default function ControlPanel({ observedVerdicts = NO_VERDICTS }: Control
                 checked={trajectoryComparison}
                 onChange={(event) => setTrajectoryComparison(event.target.checked)}
               />
-              Prediction comparison (3-colour)
+              Prediction comparison
             </label>
             {trajectoryComparison ? (
               drawableComparisonCategories.length > 0 ? (
@@ -211,9 +210,12 @@ export default function ControlPanel({ observedVerdicts = NO_VERDICTS }: Control
                 }}
               />
             </label>
-            {trajectoryComparison ? (
-              <div className="control-panel-comparison-kinds">
-                {COMPARISON_KINDS.map(({ kind, label }) => (
+            {trajectoryComparison && activeComparisonCategory ? (
+              <div
+                className="control-panel-comparison-kinds"
+                aria-label="Comparison trajectory legend"
+              >
+                {comparisonLegend.kinds.map((kind) => (
                   <label key={kind}>
                     <input
                       type="checkbox"
@@ -227,9 +229,26 @@ export default function ControlPanel({ observedVerdicts = NO_VERDICTS }: Control
                       background: COMPARISON_KIND_COLORS[kind],
                       opacity: COMPARISON_KIND_ALPHA[kind],
                     }} />
-                    {label}
+                    {COMPARISON_KIND_LABELS[kind]}
                   </label>
                 ))}
+                {comparisonLegend.statuses.length > 0 ? (
+                  <div
+                    className="control-panel-comparison-statuses"
+                    aria-label="Outcome colour overrides"
+                  >
+                    <span className="control-panel-comparison-status-title">Outcome colours</span>
+                    {comparisonLegend.statuses.map((status) => {
+                      const style = COMPARISON_STATUS_STYLES[status];
+                      return (
+                        <span key={status} className="control-panel-comparison-status-row">
+                          <i style={{ background: style.color, opacity: style.alpha }} />
+                          {style.label}
+                        </span>
+                      );
+                    })}
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>

@@ -31,6 +31,7 @@ import {
   TRAJECTORY_PATH_WIDTH,
   COMPARISON_KIND_COLORS,
   COMPARISON_KIND_ALPHA,
+  COMPARISON_STATUS_STYLES,
 } from "../utils/trajectoryRenderModel";
 import { makeStableVelocityOrientation } from "../utils/velocityOrientation";
 import { addDataSourceHidden } from "../utils/cesiumDataSource";
@@ -392,18 +393,16 @@ export function useComparisonTrajectoryLayer(): void {
         const status = observedGroupsRef.current.get(entity.id);
         entity.show = !!status && trajectoryComparisonKinds.reference;
         if (!status) continue;
-        const rgba =
+        const style =
           status === "failed"
-            ? [200, 60, 60, 200]
+            ? COMPARISON_STATUS_STYLES.failedReference
             : status === "offTarget"
-              ? [150, 118, 25, 200]
-              : [235, 235, 235, 200];
-        const color = new Cesium.Color(
-          rgba[0] / 255,
-          rgba[1] / 255,
-          rgba[2] / 255,
-          rgba[3] / 255,
-        );
+              ? COMPARISON_STATUS_STYLES.offTargetReference
+              : {
+                  color: COMPARISON_KIND_COLORS.reference,
+                  alpha: COMPARISON_KIND_ALPHA.reference,
+                };
+        const color = Cesium.Color.fromCssColorString(style.color).withAlpha(style.alpha);
         if (entity.path) {
           entity.path.width = new Cesium.ConstantProperty(TRAJECTORY_PATH_WIDTH);
           entity.path.material = new Cesium.ColorMaterialProperty(color);
