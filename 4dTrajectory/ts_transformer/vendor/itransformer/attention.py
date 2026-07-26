@@ -79,8 +79,11 @@ class AttentionLayer(nn.Module):
         self.n_heads = n_heads
 
     def forward(self, queries, keys, values, attn_mask, tau=None, delta=None):
+        # B: batch_size;    L: token length, but here, inverted, so the channel dimension
         B, L, _ = queries.shape
+        # S: key token length
         _, S, _ = keys.shape
+        # H: number of heads
         H = self.n_heads
 
         queries = self.query_projection(queries).view(B, L, H, -1)
