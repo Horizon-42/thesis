@@ -12,7 +12,7 @@ import hashlib
 import json
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -21,13 +21,15 @@ import torch
 import torch.nn as nn
 
 from channels import CHANNELS
-from config import TSConfig
+from batching import resolve_batch_size
+from config import SAMPLING_AIRPORT_FLIGHT_BALANCED, TSConfig
 from dataset import (
     ARRIVAL_DATA_PROVENANCE_SCHEMA,
     FlightSeries,
     Normalizer,
     TrajectoryWindows,
     iter_batches,
+    provenance_manifest_digests,
     split_by_flight,
     window_anchors,
 )
@@ -36,7 +38,7 @@ from models import build_model, parameter_count, resolve_device
 
 CHECKPOINT_NAME = "checkpoint.pt"
 CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
-CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v1"
+CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v2-multi-airport"
 HISTORY_NAME = "history.json"
 
 
@@ -46,6 +48,12 @@ def _file_sha256(path: Path) -> str:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _split_sha256(series: Sequence[FlightSeries]) -> str:
+    """Stable audit digest shared conceptually with cross-validation's split record."""
+    payload = "\n".join(sorted(item.dataset_id for item in series)).encode()
+    return hashlib.sha256(payload).hexdigest()
 
 
 def masked_mse(predicted: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -73,6 +81,21 @@ class EpochResult:
     train_loss: float
     val_loss: float
     seconds: float
+    val_by_airport: dict[str, float]
+
+
+@dataclass
+class FitResult:
+    """In-memory result shared by final training and cross-validation folds."""
+
+    model: nn.Module
+    config: TSConfig
+    normalizer: Normalizer
+    device: torch.device
+    history: list[EpochResult]
+    best_val_loss: float
+    train_windows: int
+    val_windows: int
 
 
 def _predict_split(
@@ -119,51 +142,79 @@ def evaluate_split(
     return block
 
 
-def train(
-    series: Sequence[FlightSeries],
-    config: TSConfig,
-    *,
-    output_dir: str | Path,
-    data_provenance: dict[str, Any],
-    verbose: bool = True,
-) -> dict[str, Any]:
-    """Train one model on ``series``; write ``checkpoint.pt`` + ``history.json``.
-
-    Returns the run summary (also embedded in the history file).
-    """
-    out = Path(output_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    if (
-        data_provenance.get("schema_version") != ARRIVAL_DATA_PROVENANCE_SCHEMA
-        or not isinstance(data_provenance.get("arrival_manifest_sha256"), str)
-        or not isinstance(data_provenance.get("source_records"), list)
-    ):
-        raise ValueError("data_provenance is not a TS arrival-data fingerprint")
-
-    torch.manual_seed(config.seed)
-    np.random.seed(config.seed)
-    device = resolve_device(config.device)
-
-    # In window mode a flight can be long enough to BUILD (seq_len + 1 samples) yet too
-    # short to yield a single training window (seq_len + pred_len). Excluding those here —
-    # counted, never silent — keeps them out of the split roster, where they would occupy
-    # slots while contributing zero windows.
-    usable = [s for s in series if len(window_anchors(s, config)) > 0]
+def usable_series(
+    series: Sequence[FlightSeries], config: TSConfig, *, verbose: bool = True
+) -> list[FlightSeries]:
+    """Drop flights that cannot yield one model window, once and with an audit count."""
+    usable = [item for item in series if len(window_anchors(item, config)) > 0]
     if len(usable) < len(series) and verbose:
         need = config.seq_len + config.pred_len
         print(f"  excluded   {len(series) - len(usable)} flight(s) too short to yield one "
               f"training window (need {need} samples = {need * config.dt_s:.0f}s)")
-    series = usable
+    return usable
 
-    train_series, val_series, test_series = split_by_flight(series, config)
-    normalizer = Normalizer.fit(train_series)
 
+def _validation_datasets(
+    series: Sequence[FlightSeries], config: TSConfig, normalizer: Normalizer
+) -> dict[str, TrajectoryWindows]:
+    by_airport: dict[str, list[FlightSeries]] = {}
+    for item in series:
+        by_airport.setdefault(item.airport or "<unknown>", []).append(item)
+    return {
+        airport: TrajectoryWindows(
+            group, config, normalizer, anchor_policy=config.eval_anchor_policy
+        )
+        for airport, group in sorted(by_airport.items())
+    }
+
+
+def _dataset_loss(
+    model: nn.Module,
+    dataset: TrajectoryWindows,
+    device: torch.device,
+    batch_size: int,
+) -> float:
+    weighted_error = 0.0
+    weight_total = 0.0
+    with torch.no_grad():
+        for x, y, mask in iter_batches(dataset, batch_size, shuffle=False, seed=0):
+            x, y, mask = x.to(device), y.to(device), mask.to(device)
+            predicted = model(x)
+            weights = mask if mask.shape == predicted.shape else mask.unsqueeze(-1).expand_as(predicted)
+            weighted_error += float((((predicted - y) ** 2) * weights).sum())
+            weight_total += float(weights.sum())
+    return weighted_error / max(weight_total, 1.0)
+
+
+def fit_model(
+    train_series: Sequence[FlightSeries],
+    val_series: Sequence[FlightSeries],
+    config: TSConfig,
+    *,
+    auto_batch_size: bool = False,
+    verbose: bool = True,
+) -> FitResult:
+    """Fit one model against explicit train/validation flights, without touching test."""
+    if not train_series or not val_series:
+        raise ValueError("fit_model requires non-empty train and validation flights")
+
+    device = resolve_device(config.device)
+    batch_size = resolve_batch_size(config, device, auto=auto_batch_size, verbose=verbose)
+    config = replace(config, batch_size=batch_size)
+
+    # Reset after the isolated auto-batch probe so probing cannot change final initialisation.
+    torch.manual_seed(config.seed)
+    np.random.seed(config.seed)
+    balanced = config.sampling_strategy == SAMPLING_AIRPORT_FLIGHT_BALANCED
+    normalizer = Normalizer.fit(
+        train_series, balance_airports_and_flights=balanced
+    )
     train_set = TrajectoryWindows(train_series, config, normalizer)
-    val_set = TrajectoryWindows(val_series, config, normalizer)
-    test_set = TrajectoryWindows(test_series, config, normalizer)
-    if not len(train_set) or not len(val_set):
+    val_sets = _validation_datasets(val_series, config, normalizer)
+    val_window_count = sum(len(dataset) for dataset in val_sets.values())
+    if not len(train_set) or not val_window_count:
         raise ValueError(
-            f"empty window set (train={len(train_set)}, val={len(val_set)}) — "
+            f"empty window set (train={len(train_set)}, val={val_window_count}) — "
             f"seq_len={config.seq_len} + pred_len={config.pred_len} may exceed the track lengths"
         )
 
@@ -173,12 +224,19 @@ def train(
     )
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=3)
 
+    requested_samples = config.train_samples_per_epoch or len(train_set)
+    samples_per_epoch = (
+        requested_samples if balanced else min(requested_samples, len(train_set))
+    )
     if verbose:
         print(f"  model      {config.model} ({parameter_count(model):,} params) on {device}")
         print(f"  horizon    {config.horizon_mode}: L={config.seq_len} "
               f"({config.lookback_s:.0f}s) -> H={config.pred_len} ({config.horizon_s:.0f}s)")
-        print(f"  flights    train {len(train_series)} / val {len(val_series)} / test {len(test_series)}")
-        print(f"  windows    train {len(train_set)} / val {len(val_set)} / test {len(test_set)}")
+        print(f"  flights    train {len(train_series)} / val {len(val_series)}")
+        print(f"  windows    train {len(train_set)} / val {val_window_count} "
+              f"(eval anchors: {config.eval_anchor_policy})")
+        sampling = "airport -> flight -> anchor" if balanced else "all windows"
+        print(f"  sampling   {sampling}; {samples_per_epoch} sample(s)/epoch")
 
     history: list[EpochResult] = []
     best_val = math.inf
@@ -190,8 +248,14 @@ def train(
 
         model.train()
         train_total, train_steps = 0.0, 0
-        for x, y, mask in iter_batches(train_set, config.batch_size, shuffle=True,
-                                       seed=config.seed + epoch):
+        for x, y, mask in iter_batches(
+            train_set,
+            config.batch_size,
+            shuffle=not balanced,
+            seed=config.seed + epoch,
+            balanced=balanced,
+            num_samples=samples_per_epoch,
+        ):
             x, y, mask = x.to(device), y.to(device), mask.to(device)
             optimizer.zero_grad()
             loss = masked_mse(model(x), y, mask)
@@ -201,31 +265,26 @@ def train(
             train_steps += 1
 
         model.eval()
-        val_total, val_steps = 0.0, 0
-        with torch.no_grad():
-            for x, y, mask in iter_batches(val_set, config.batch_size, shuffle=False, seed=0):
-                x, y, mask = x.to(device), y.to(device), mask.to(device)
-                val_total += float(masked_mse(model(x), y, mask))
-                val_steps += 1
-
+        val_by_airport = {
+            airport: _dataset_loss(model, dataset, device, config.batch_size)
+            for airport, dataset in val_sets.items()
+        }
         train_loss = train_total / max(train_steps, 1)
-        val_loss = val_total / max(val_steps, 1)
-        # NaN compares False against everything, so a diverged run would sail through the
-        # best-val bookkeeping below: best_state never captured, the LAST (NaN) weights
-        # checkpointed, and "✓ wrote checkpoint.pt" printed as if the run succeeded.
+        # Equal airport weight: a large/long airport cannot control early stopping alone.
+        val_loss = float(np.mean(list(val_by_airport.values())))
         if not (math.isfinite(train_loss) and math.isfinite(val_loss)):
             raise RuntimeError(
                 f"training diverged at epoch {epoch} (train {train_loss}, val {val_loss}) "
                 f"— no checkpoint written; lower --learning-rate"
             )
         scheduler.step(val_loss)
-        history.append(EpochResult(epoch, train_loss, val_loss, time.perf_counter() - started))
+        history.append(EpochResult(
+            epoch, train_loss, val_loss, time.perf_counter() - started, val_by_airport
+        ))
 
         if val_loss < best_val - 1e-9:
             best_val = val_loss
-            # .clone() — state_dict() returns live tensor references, so without it the
-            # "best" snapshot keeps mutating as training continues past the best epoch.
-            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+            best_state = {key: value.detach().clone() for key, value in model.state_dict().items()}
             epochs_without_improvement = 0
             marker = " *"
         else:
@@ -234,7 +293,7 @@ def train(
 
         if verbose:
             print(f"  epoch {epoch:3d}/{config.epochs}  train {train_loss:.6f}  "
-                  f"val {val_loss:.6f}  {history[-1].seconds:5.1f}s{marker}")
+                  f"val-macro {val_loss:.6f}  {history[-1].seconds:5.1f}s{marker}")
 
         if epochs_without_improvement >= config.patience:
             if verbose:
@@ -243,21 +302,70 @@ def train(
 
     if best_state is not None:
         model.load_state_dict(best_state)
+    return FitResult(
+        model=model,
+        config=config,
+        normalizer=normalizer,
+        device=device,
+        history=history,
+        best_val_loss=best_val,
+        train_windows=len(train_set),
+        val_windows=val_window_count,
+    )
 
+
+def train(
+    series: Sequence[FlightSeries],
+    config: TSConfig,
+    *,
+    output_dir: str | Path,
+    data_provenance: dict[str, Any],
+    auto_batch_size: bool = False,
+    verbose: bool = True,
+) -> dict[str, Any]:
+    """Train one model on ``series``; write ``checkpoint.pt`` + ``history.json``.
+
+    Returns the run summary (also embedded in the history file).
+    """
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    if data_provenance.get("schema_version") != ARRIVAL_DATA_PROVENANCE_SCHEMA:
+        raise ValueError("data_provenance is not a TS arrival-data fingerprint")
+    manifest_digests = provenance_manifest_digests(data_provenance)
+
+    series = usable_series(series, config, verbose=verbose)
+    train_series, val_series, test_series = split_by_flight(series, config)
+    fit = fit_model(
+        train_series,
+        val_series,
+        config,
+        auto_batch_size=auto_batch_size,
+        verbose=verbose,
+    )
+    model, config, normalizer, device = (
+        fit.model, fit.config, fit.normalizer, fit.device
+    )
+    val_set = TrajectoryWindows(
+        val_series, config, normalizer, anchor_policy=config.eval_anchor_policy
+    )
+    test_window_count = sum(
+        min(len(window_anchors(item, config)), 1)
+        if config.eval_anchor_policy == "first"
+        else len(window_anchors(item, config))
+        for item in test_series
+    )
     split_metrics = {"val": evaluate_split(model, val_set, normalizer, config, device)}
-    if len(test_set):
-        split_metrics["test"] = evaluate_split(model, test_set, normalizer, config, device)
 
     checkpoint_payload = {
         "config": config.to_dict(),
         "model_state": model.state_dict(),
         "normalizer": normalizer.to_dict(),
         "split": {
-            "train": [s.flight_id for s in train_series],
-            "val": [s.flight_id for s in val_series],
-            "test": [s.flight_id for s in test_series],
+            "train": [s.dataset_id for s in train_series],
+            "val": [s.dataset_id for s in val_series],
+            "test": [s.dataset_id for s in test_series],
         },
-        "best_val_loss": best_val,
+        "best_val_loss": fit.best_val_loss,
         "data_provenance": data_provenance,
     }
     checkpoint_path = out / CHECKPOINT_NAME
@@ -268,7 +376,12 @@ def train(
     checkpoint_metadata = {
         "schema_version": CHECKPOINT_METADATA_SCHEMA,
         "checkpoint_sha256": checkpoint_sha256,
-        "arrival_manifest_sha256": data_provenance["arrival_manifest_sha256"],
+        "arrival_manifests": manifest_digests,
+        "split_sha256": {
+            "train": _split_sha256(train_series),
+            "val": _split_sha256(val_series),
+            "test": _split_sha256(test_series),
+        },
     }
     metadata_path = out / CHECKPOINT_METADATA_NAME
     metadata_tmp = out / f"{CHECKPOINT_METADATA_NAME}.tmp"
@@ -279,17 +392,19 @@ def train(
         "config": config.to_dict(),
         "parameters": parameter_count(model),
         "device": str(device),
-        "epochs_run": len(history),
-        "best_val_loss": best_val,
+        "epochs_run": len(fit.history),
+        "best_val_loss": fit.best_val_loss,
         "flights": {"train": len(train_series), "val": len(val_series), "test": len(test_series)},
-        "windows": {"train": len(train_set), "val": len(val_set), "test": len(test_set)},
+        "windows": {"train": fit.train_windows, "val": len(val_set), "test": test_window_count},
         "metrics": split_metrics,
         "data_provenance": {
             "schema_version": data_provenance["schema_version"],
-            "arrival_manifest_sha256": data_provenance["arrival_manifest_sha256"],
-            "source_record_count": len(data_provenance["source_records"]),
+            "arrival_manifests": manifest_digests,
+            "source_record_count": sum(
+                len(entry["source_records"]) for entry in data_provenance["manifests"]
+            ),
         },
-        "history": [vars(h) for h in history],
+        "history": [vars(h) for h in fit.history],
     }
     (out / HISTORY_NAME).write_text(json.dumps(summary, indent=2), encoding="utf-8")
 

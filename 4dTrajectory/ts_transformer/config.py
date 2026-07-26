@@ -27,6 +27,11 @@ HORIZON_FULL = "full"       # H covers the longest approach; one pass, padded + 
 HORIZON_MODES = (HORIZON_WINDOW, HORIZON_FULL)
 
 MODELS = ("itransformer", "patchtst")
+SAMPLING_ALL_WINDOWS = "all-windows"
+SAMPLING_AIRPORT_FLIGHT_BALANCED = "airport-flight-balanced"
+SAMPLING_STRATEGIES = (SAMPLING_ALL_WINDOWS, SAMPLING_AIRPORT_FLIGHT_BALANCED)
+EVAL_ANCHOR_POLICIES = ("all", "first")
+COORDINATE_FRAMES = ("enu", "runway-aligned")
 
 # Time grid. ADS-B arrives at ~1 Hz but irregularly; 2 s is the resample step — fine enough
 # not to smooth away the turn onto final, coarse enough not to invent samples between
@@ -85,6 +90,10 @@ class TSConfig:
     # frame and the gate target). In the config so the checkpoint records it and predict
     # rebuilds series with the SAME frames the normalizer stats were fit under.
     aircraft_type: str = DEFAULT_AIRCRAFT_TYPE
+    # ``runway-aligned`` rotates the horizontal plane so every threshold course points
+    # along the first axis. It keeps the six-channel tensor shape while removing a major
+    # source of cross-airport orientation variance.
+    coordinate_frame: str = "enu"
 
     # ── architecture, shared by both models ─────────────────────────────────
     d_model: int = 128
@@ -134,6 +143,11 @@ class TSConfig:
     device: str = "auto"            # "auto" -> cuda when available, else cpu
     val_fraction: float = 0.15      # split is BY FLIGHT, never by window — see dataset.py
     test_fraction: float = 0.15
+    sampling_strategy: str = SAMPLING_ALL_WINDOWS
+    train_samples_per_epoch: int | None = None
+    # Full prediction always starts at the earliest anchor. Pooled validation can mirror
+    # that contract instead of materialising every highly-overlapping sliding anchor.
+    eval_anchor_policy: str = "all"
     # Inferred final-approach geometry is weaker supervision than an observed ADS-B row.
     # These weights apply to POSITION channels only; fitted velocity channels are always
     # masked.  The terminal weight is added on the fitted crossing row so the endpoint is
@@ -150,6 +164,21 @@ class TSConfig:
         if self.horizon_mode not in HORIZON_MODES:
             raise ValueError(
                 f"unknown horizon_mode {self.horizon_mode!r}; expected one of {HORIZON_MODES}"
+            )
+        if self.coordinate_frame not in COORDINATE_FRAMES:
+            raise ValueError(
+                f"unknown coordinate_frame {self.coordinate_frame!r}; "
+                f"expected one of {COORDINATE_FRAMES}"
+            )
+        if self.sampling_strategy not in SAMPLING_STRATEGIES:
+            raise ValueError(
+                f"unknown sampling_strategy {self.sampling_strategy!r}; "
+                f"expected one of {SAMPLING_STRATEGIES}"
+            )
+        if self.eval_anchor_policy not in EVAL_ANCHOR_POLICIES:
+            raise ValueError(
+                f"unknown eval_anchor_policy {self.eval_anchor_policy!r}; "
+                f"expected one of {EVAL_ANCHOR_POLICIES}"
             )
         for name in (
             "seq_len",
@@ -183,6 +212,8 @@ class TSConfig:
             raise ValueError("fitted_tail_position_weight must be non-negative")
         if self.fitted_terminal_position_weight < 0.0:
             raise ValueError("fitted_terminal_position_weight must be non-negative")
+        if self.train_samples_per_epoch is not None and self.train_samples_per_epoch <= 0:
+            raise ValueError("train_samples_per_epoch must be positive when supplied")
 
     # PatchTST reads configs.enc_in; iTransformer infers the count from the tensor.
     @property

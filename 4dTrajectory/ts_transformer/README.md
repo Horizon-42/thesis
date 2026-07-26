@@ -125,7 +125,8 @@ python -m evaluation --input 4dTrajectory/outputs/KRDU/ts_pred
 ```
 
 `--data` takes an airport harvest directory, its `arrivals/` directory, or the explicit
-`arrivals/manifest.json`. Legacy flight arrays and arbitrary JSON directories are rejected.
+`arrivals/manifest.json`; repeat the flag to train one model over multiple airports. Legacy
+flight arrays and arbitrary JSON directories are rejected.
 `predict` defaults to `--split test` — the only flights the model never saw. The split is
 recorded in the checkpoint and keyed by `flight_key`. The checkpoint also carries the exact
 arrival-manifest SHA-256 and every flight's canonical source SHA-256; prediction rejects a
@@ -135,6 +136,101 @@ Retrain after rebuilding arrivals.
 `run_ts_pipeline.py` namespaces prediction output and frontend categories by split
 (`..._<mode>_<split>`). A diagnostic `--split train`, `val`, or `all` run therefore cannot
 overwrite or masquerade as the default held-out `test` publication.
+
+### Pooled training and cross-validation
+
+The top-level runner now has two explicit training scopes. `per-airport` retains one model per
+airport; `pooled` runs one CV search and one final fit over all selected manifests, then uses
+that checkpoint to publish each airport separately:
+
+```bash
+# All discovered K-airports -> one checkpoint per model/mode, then per-airport test outputs.
+conda run -n aeroviz python run_ts_pipeline.py \
+  --training-mode pooled \
+  --models itransformer \
+  --modes full \
+  --coordinate-frame runway-aligned
+
+# Inspect every resolved command without training.
+conda run -n aeroviz python run_ts_pipeline.py \
+  --training-mode pooled --models itransformer --modes full --dry-run
+```
+
+Each cell executes `cross-validate -> final train -> predict test -> evaluate/publish`.
+The split boundary is deliberately nested:
+
+1. lock airport-qualified outer train/validation/test flights;
+2. construct K folds from **outer-train only** and select hyperparameters by mean
+   airport-macro fold loss;
+3. fit the selected configuration on outer-train with outer-validation early stopping;
+4. expose outer-test only to `predict` after the final checkpoint is fixed.
+
+`cross_validation/cv_results.json` records split digests, every fold score and explicit
+`outer_validation_used: false` / `outer_test_used: false` guards. `best_config.json` contains
+only the selected `TSConfig` overrides. `--skip-cv` reuses those artifacts only if every
+arrival-manifest digest still matches; otherwise final training uses the base configuration.
+
+Pooled mode defaults to airport -> flight -> anchor sampling with 250,000 draws per epoch and
+one earliest valid validation anchor per flight. This prevents KRDU/long tracks from owning the
+loss and bounds full-horizon validation memory. Its train-only normalizer uses the same
+airport-then-flight weighting rather than reverting to duration-weighted moments. `--samples-per-epoch`, `--cv-folds`,
+`--cv-trials`, `--cv-epochs`, and `--cv-samples-per-epoch` expose the budgets.
+
+The runner defaults to `--batch-size auto`. It probes actual FP32 forward/backward/Adam steps
+for the selected architecture and horizon, chooses a power of two, and backs off one doubling
+for allocator/display headroom; an explicit integer disables probing. On the current RTX 4060
+8 GB workstation the four default model/horizon cells selected 512, but the result is runtime-
+specific rather than a hard-coded GPU-name table.
+
+For a throughput-based batch measurement, run the standalone outer-train-only benchmark while
+the GPU is otherwise idle:
+
+```bash
+conda run --no-capture-output -n aeroviz \
+  python -u detect_ts_best_batch.py \
+  --model itransformer \
+  --mode full \
+  --coordinate-frame enu
+```
+
+Unlike `--batch-size auto`, this script doubles candidates through the configured maximum,
+executes repeated real DataLoader + FP32 forward/backward/Adam steps, and selects the highest
+median samples/second rather than the largest allocation that fits. Split membership is
+computed from manifest `flight_key` values before track files are opened: only outer-train
+source tracks are loaded, and validation/test counts enter the audit JSON without their
+trajectory values being read. The default result is written under
+`4dTrajectory/outputs/POOLED/batch_benchmarks/`; the final terminal line is
+`BEST_BATCH_SIZE=<integer>`. Pass a CV `best_config.json` through `--config-overrides` to
+benchmark an already selected architecture, and use the resulting integer with
+`run_ts_coordinate_ablation.py --batch-size <integer>`.
+
+`--coordinate-frame enu` is the unchanged baseline. `runway-aligned` rotates horizontal
+position and chart-velocity channels into along-runway/cross-runway axes while retaining the
+same six-channel tensor contract; use separate runs as an ablation. Neither mode edits the
+vendored architectures.
+
+Run the paired pooled coordinate-frame ablation with:
+
+```bash
+conda run -n aeroviz python run_ts_coordinate_ablation.py \
+  --model itransformer \
+  --mode full \
+  --outputs eval
+```
+
+The script discovers the same fixed K-airport roster once, runs ENU and runway-aligned CV
+with the same seed, candidates, folds, sampling budget, and batch size, and rejects the
+comparison if their recorded split or fold digests differ. It selects the frame and that
+frame's hyperparameters using outer-train airport-macro CV loss, trains only the winner with
+outer-validation early stopping, and only then predicts each airport's outer-test flights.
+The losing frame never sees outer-validation or outer-test. The auditable decision is written
+under `4dTrajectory/outputs/POOLED/ts_<model>_<mode>_coordinate_frame_ablation/` as
+`coordinate_frame_ablation.json`. Use `--skip-test` to stop after the final fit and retain
+the test set for a later preregistered evaluation; use `--reuse-cv` only to reuse two
+artifacts that pass the complete paired-run contract check. Immediately before the first
+test prediction, the decision file is marked `outer_test_evaluation_started`; the script
+then refuses to evaluate test again from the same experiment directory, including after a
+partially failed test stage.
 
 ## Data selection & flight identity
 
@@ -565,9 +661,12 @@ Training writes:
 
 ```
 <training-dir>/
+  cross_validation/
+    cv_results.json          outer-train-only fold scores + split audit digests
+    best_config.json         selected TSConfig overrides
   checkpoint.pt             weights, config, normalizer, split, and arrival-data provenance
-  checkpoint_metadata.json  checkpoint + arrival-manifest SHA-256 for import-light reuse checks
-  history.json              training history, metrics, manifest SHA-256, and source count
+  checkpoint_metadata.json  checkpoint, manifest, and locked split SHA-256s for audit/reuse
+  history.json              training history, validation metrics, manifests, and source count
 ```
 
 Prediction writes one split-specific batch:

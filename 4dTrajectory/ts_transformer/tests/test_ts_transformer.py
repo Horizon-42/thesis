@@ -12,10 +12,12 @@ The end-to-end test trains for two epochs on synthetic data. That is a plumbing 
 """
 
 import hashlib
+import importlib.util
 import json
 import math
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -28,12 +30,24 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+_CLI_SPEC = importlib.util.spec_from_file_location(
+    "ts_transformer_cli_test", _TS_DIR / "__main__.py"
+)
+assert _CLI_SPEC is not None and _CLI_SPEC.loader is not None
+ts_cli = importlib.util.module_from_spec(_CLI_SPEC)
+_CLI_SPEC.loader.exec_module(ts_cli)
+
 import channels as ch  # noqa: E402
+import cross_validation as cv  # noqa: E402
+import detect_ts_best_batch as batch_probe  # noqa: E402
 from aerodynamic_model.common import GeodeticState  # noqa: E402
+from batching import resolve_batch_size  # noqa: E402
 from config import HORIZON_FULL, HORIZON_WINDOW, TSConfig, config_for_mode  # noqa: E402
 from dataset import (  # noqa: E402
-    Normalizer, TrajectoryWindows, arrival_data_provenance, build_series,
-    require_matching_data_provenance, split_by_flight, window_anchors,
+    ARRIVAL_DATA_PROVENANCE_SCHEMA, AirportFlightWindowSampler, Normalizer,
+    TrajectoryWindows, arrival_data_provenance, build_series, cross_validation_folds,
+    require_matching_data_provenance, split_by_flight, split_name_for_dataset_id,
+    window_anchors,
 )
 from evaluation.metrics import evaluate_batch  # noqa: E402
 from evaluation.records import load_records, record_from_dict  # noqa: E402
@@ -214,6 +228,18 @@ def test_channels_place_the_frame_origin_at_the_threshold():
     assert values[0, ch.IDX["u"]] == pytest.approx(0.0)
 
 
+def test_runway_aligned_frame_rotates_and_round_trips_horizontal_channels():
+    target = _state(psi=0.73)
+    frame = ch.frame_for_state(target, "runway-aligned")
+    times, values = ch.channels_from_states([(0.0, target)], frame)
+    assert values[0, ch.IDX["edot"]] > 0.0
+    assert abs(values[0, ch.IDX["ndot"]]) < values[0, ch.IDX["edot"]] * 0.01
+    restored = ch.states_from_channels(times, values, frame, mass_kg=target.m)[0][1]
+    assert restored.latitude == pytest.approx(target.latitude)
+    assert restored.longitude == pytest.approx(target.longitude)
+    assert restored.psi == pytest.approx(target.psi)
+
+
 def test_resample_lands_on_a_regular_grid_without_extrapolating():
     times = np.array([0.0, 1.0, 3.0, 7.5])
     values = np.tile(np.arange(len(times), dtype=float)[:, None], (1, len(ch.CHANNELS)))
@@ -317,6 +343,19 @@ def test_split_by_flight_is_disjoint_and_reproducible():
 
     everything = ids(train_a) + ids(val_a) + ids(test_a)
     assert len(everything) == len(set(everything)) == len(series)  # partition, no overlap
+    for split_name, group in (("train", train_a), ("val", val_a), ("test", test_a)):
+        assert all(split_name_for_dataset_id(item.dataset_id, config) == split_name
+                   for item in group)
+
+
+def test_pooled_prediction_filters_checkpoint_split_to_current_airport_subset():
+    provenance = {
+        "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
+        "manifests": [{"airport": "KAAA"}],
+    }
+    assert ts_cli.split_keys_for_current_data(
+        ["KAAA:flight-a", "KBBB:flight-b", "KAAA:flight-c"], provenance
+    ) == ["KAAA:flight-a", "KAAA:flight-c"]
 
 
 def test_windows_never_straddle_two_flights():
@@ -330,7 +369,7 @@ def test_windows_never_straddle_two_flights():
         assert anchor < series[s_idx].n_samples
 
 
-def _write_arrival_manifest(root: Path, ids: list[str]) -> Path:
+def _write_arrival_manifest(root: Path, ids: list[str], *, airport: str = "KRDU") -> Path:
     from dataset import flight_key
 
     arrivals = root / "arrivals"
@@ -392,7 +431,7 @@ def _write_arrival_manifest(root: Path, ids: list[str]) -> Path:
         json.dumps(
             {
                 "schema_version": "harvest-arrivals-v3-track-slices",
-                "airport": "KRDU",
+                "airport": airport,
                 "source_manifest": "../tracks/manifest.json",
                 "altitude_source": "opensky_history_geoaltitude_m",
                 "runway_targets": {"05L": runway_target},
@@ -415,6 +454,50 @@ def test_ts_load_uses_only_the_arrival_manifest_roster(tmp_path):
     )
 
     assert [f["id"] for f in load_flight_dicts(tmp_path, verbose=False)] == ["A", "B", "C"]
+
+
+def test_ts_load_aggregates_multiple_airport_manifests(tmp_path):
+    from dataset import load_flight_dicts
+
+    first = _write_arrival_manifest(tmp_path / "first", ["A"], airport="KAAA")
+    second = _write_arrival_manifest(tmp_path / "second", ["B"], airport="KBBB")
+    flights = load_flight_dicts([second, first], verbose=False)
+    assert [(flight["arr_airport"], flight["id"]) for flight in flights] == [
+        ("KAAA", "A"), ("KBBB", "B")
+    ]
+
+
+def test_batch_probe_opens_outer_train_track_files_only(tmp_path):
+    manifest_path = _write_arrival_manifest(
+        tmp_path, [f"F{index:02d}" for index in range(40)]
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    config = config_for_mode(HORIZON_FULL, seed=1337)
+    counts = {"train": 0, "val": 0, "test": 0}
+    for row in manifest["records"]:
+        split = split_name_for_dataset_id(f"KRDU:{row['flight_key']}", config)
+        counts[split] += 1
+        if split != "train":
+            # A filtered loader would fail JSON/SHA validation if it opened this test/val file.
+            source_path = tmp_path / "tracks" / row["source_file"]
+            source_path.write_text("not opened by the batch probe", encoding="utf-8")
+
+    flights, audit = batch_probe.load_outer_train_flights([manifest_path], config)
+    assert len(flights) == counts["train"]
+    assert audit["split_counts_from_manifest_rosters"] == counts
+    assert audit["loaded_source_tracks"] == {
+        "train": counts["train"], "validation": 0, "test": 0,
+    }
+
+
+def test_batch_probe_candidate_grid_and_throughput_selection():
+    assert batch_probe.candidate_batch_sizes(32, 256) == [32, 64, 128, 256]
+    best = batch_probe.select_best_batch([
+        {"batch_size": 64, "status": "ok", "median_samples_per_second": 1000.0},
+        {"batch_size": 128, "status": "ok", "median_samples_per_second": 1400.0},
+        {"batch_size": 256, "status": "oom"},
+    ])
+    assert best["batch_size"] == 128
 
 
 def test_ts_load_rejects_duplicate_manifest_identity(tmp_path):
@@ -463,8 +546,46 @@ def test_split_membership_selects_exactly_the_flights_it_names():
     # filter must return exactly as many series as the split names.
     series, config = _series(n_flights=12)
     train_group, val_group, test_group = split_by_flight(series, config)
-    wanted = {s.flight_id for s in test_group}
-    assert len([s for s in series if s.flight_id in wanted]) == len(test_group)
+    wanted = {s.dataset_id for s in test_group}
+    assert len([s for s in series if s.dataset_id in wanted]) == len(test_group)
+
+
+def test_dataset_identity_qualifies_flight_key_with_airport():
+    series, _ = _series(n_flights=1)
+    assert series[0].dataset_id == f"{AIRPORT}:{series[0].flight_id}"
+
+
+def test_cross_validation_folds_are_disjoint_and_cover_outer_train():
+    series, config = _series(n_flights=30)
+    outer_train, _outer_val, _outer_test = split_by_flight(series, config)
+    folds = cross_validation_folds(outer_train, 3, seed=config.seed)
+    identities = [item.dataset_id for fold in folds for item in fold]
+    assert len(identities) == len(set(identities)) == len(outer_train)
+    assert set(identities) == {item.dataset_id for item in outer_train}
+
+
+def test_first_anchor_policy_keeps_one_validation_window_per_flight():
+    series, config = _series(n_flights=4)
+    dataset = TrajectoryWindows(
+        series, config, Normalizer.fit(series), anchor_policy="first"
+    )
+    assert len(dataset) == len(series)
+    assert all(anchor == config.seq_len - 1 for _series_index, anchor in dataset.index)
+
+
+def test_balanced_sampler_weights_airports_before_flights():
+    series, config = _series(n_flights=8)
+    series[0].scenario.source["arr_airport"] = "KAAA"
+    for item in series[1:]:
+        item.scenario.source["arr_airport"] = "KBBB"
+    dataset = TrajectoryWindows(series, config, Normalizer.fit(series))
+    sampler = AirportFlightWindowSampler(dataset, num_samples=2000, seed=7)
+    counts = {"KAAA": 0, "KBBB": 0}
+    for window_index in sampler:
+        series_index, _anchor = dataset.index[window_index]
+        counts[series[series_index].airport] += 1
+    assert 850 <= counts["KAAA"] <= 1150
+    assert sum(counts.values()) == 2000
 
 
 def test_normalizer_round_trips_and_survives_a_constant_channel():
@@ -479,6 +600,17 @@ def test_normalizer_round_trips_and_survives_a_constant_channel():
         flight_id="x", scenario=series[0].scenario, frame=series[0].frame,
         times=np.arange(10.0), values=flat)])
     assert np.all(np.isfinite(constant.encode(flat)))
+
+
+def test_balanced_normalizer_weights_airports_then_flights_equally():
+    series, _ = _series(n_flights=3)
+    series[0].scenario.source["arr_airport"] = "KAAA"
+    series[0].values[:] = 0.0
+    for value, item in zip((10.0, 20.0), series[1:]):
+        item.scenario.source["arr_airport"] = "KBBB"
+        item.values[:] = value
+    normalizer = Normalizer.fit(series, balance_airports_and_flights=True)
+    assert np.allclose(normalizer.mean, 7.5)
 
 
 # ── Models ───────────────────────────────────────────────────────────────────
@@ -529,6 +661,7 @@ def test_config_for_mode_picks_the_horizon_default_but_yields_to_an_override():
 def test_arrival_data_provenance_binds_manifest_and_per_flight_sources(tmp_path):
     manifest = tmp_path / "manifest.json"
     manifest.write_text(json.dumps({
+        "airport": "KRDU",
         "records": [
             {"flight_key": "B", "source_sha256": "b" * 64},
             {"flight_key": "A", "source_sha256": "a" * 64},
@@ -536,19 +669,129 @@ def test_arrival_data_provenance_binds_manifest_and_per_flight_sources(tmp_path)
     }), encoding="utf-8")
 
     provenance = arrival_data_provenance(manifest)
-    assert provenance["arrival_manifest_sha256"] == hashlib.sha256(
+    entry = provenance["manifests"][0]
+    assert provenance["schema_version"] == ARRIVAL_DATA_PROVENANCE_SCHEMA
+    assert entry["airport"] == "KRDU"
+    assert entry["arrival_manifest_sha256"] == hashlib.sha256(
         manifest.read_bytes()
     ).hexdigest()
-    assert provenance["source_records"] == [
+    assert entry["source_records"] == [
         {"flight_key": "A", "source_sha256": "a" * 64},
         {"flight_key": "B", "source_sha256": "b" * 64},
     ]
     require_matching_data_provenance({"data_provenance": provenance}, provenance)
     with pytest.raises(ValueError, match="does not match"):
+        changed = json.loads(json.dumps(provenance))
+        changed["manifests"][0]["arrival_manifest_sha256"] = "c" * 64
         require_matching_data_provenance(
             {"data_provenance": provenance},
-            {**provenance, "arrival_manifest_sha256": "c" * 64},
+            changed,
         )
+
+
+def test_prediction_provenance_accepts_only_exact_training_airport_subset():
+    stored = {
+        "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
+        "manifests": [
+            {"airport": "KAAA", "arrival_manifest_sha256": "a" * 64, "source_records": []},
+            {"airport": "KBBB", "arrival_manifest_sha256": "b" * 64, "source_records": []},
+        ],
+    }
+    subset = {**stored, "manifests": [stored["manifests"][1]]}
+    require_matching_data_provenance(
+        {"data_provenance": stored}, subset, allow_subset=True
+    )
+    changed = json.loads(json.dumps(subset))
+    changed["manifests"][0]["arrival_manifest_sha256"] = "c" * 64
+    with pytest.raises(ValueError, match="subset"):
+        require_matching_data_provenance(
+            {"data_provenance": stored}, changed, allow_subset=True
+        )
+
+
+def test_auto_batch_uses_config_default_without_cuda():
+    config = TSConfig(batch_size=37)
+    assert resolve_batch_size(
+        config, torch.device("cpu"), auto=True, verbose=False
+    ) == 37
+
+
+def test_cross_validation_never_passes_outer_val_or_test_to_fit(tmp_path, monkeypatch):
+    series, config = _series(
+        n_flights=36, device="cpu", epochs=1, patience=1,
+        d_model=32, d_ff=64, n_heads=4, e_layers=1,
+    )
+    outer_train, outer_val, outer_test = split_by_flight(series, config)
+    forbidden = {item.dataset_id for item in [*outer_val, *outer_test]}
+    observed: list[set[str]] = []
+
+    def fake_fit(train_series, val_series, fold_config, **_kwargs):
+        identities = {item.dataset_id for item in [*train_series, *val_series]}
+        observed.append(identities)
+        score = float(fold_config.learning_rate + fold_config.d_model * 1e-8)
+        row = SimpleNamespace(
+            epoch=1, val_loss=score, val_by_airport={AIRPORT: score}
+        )
+        return SimpleNamespace(
+            history=[row], best_val_loss=score, config=fold_config
+        )
+
+    monkeypatch.setattr(cv, "fit_model", fake_fit)
+    provenance = {
+        "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
+        "manifests": [{
+            "airport": AIRPORT,
+            "arrival_manifest_sha256": "a" * 64,
+            "source_records": [],
+        }],
+    }
+    result = cv.cross_validate(
+        series,
+        config,
+        output_dir=tmp_path,
+        data_provenance=provenance,
+        n_splits=3,
+        max_trials=2,
+        cv_epochs=1,
+        cv_patience=1,
+        verbose=False,
+    )
+    assert observed
+    assert all(not (identities & forbidden) for identities in observed)
+    assert set.union(*observed) == {item.dataset_id for item in outer_train}
+    assert result["leakage_guard"]["outer_test_used"] is False
+    assert (tmp_path / "best_config.json").is_file()
+
+
+def test_cross_validation_runs_real_two_fold_search(tmp_path):
+    series, config = _series(
+        n_flights=20, device="cpu", epochs=1, patience=1,
+        d_model=16, d_ff=32, n_heads=4, e_layers=1,
+        seq_len=20, pred_len=10, batch_size=32,
+        train_samples_per_epoch=64, eval_anchor_policy="first",
+    )
+    provenance = {
+        "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
+        "manifests": [{
+            "airport": AIRPORT,
+            "arrival_manifest_sha256": "a" * 64,
+            "source_records": [],
+        }],
+    }
+    result = cv.cross_validate(
+        series,
+        config,
+        output_dir=tmp_path,
+        data_provenance=provenance,
+        n_splits=2,
+        max_trials=1,
+        cv_epochs=1,
+        cv_patience=1,
+        verbose=False,
+    )
+    assert len(result["trials"]) == 1
+    assert len(result["trials"][0]["folds"]) == 2
+    assert json.loads((tmp_path / "best_config.json").read_text()) == result["best_overrides"]
 
 
 # ── Metrics ──────────────────────────────────────────────────────────────────
@@ -844,12 +1087,15 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
         device="cpu",
     )
     provenance = {
-        "schema_version": "ts-arrival-data-v1",
-        "arrival_manifest_sha256": "a" * 64,
-        "source_records": [
-            {"flight_key": item.flight_id, "source_sha256": f"{index:064x}"}
-            for index, item in enumerate(series)
-        ],
+        "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
+        "manifests": [{
+            "airport": AIRPORT,
+            "arrival_manifest_sha256": "a" * 64,
+            "source_records": [
+                {"flight_key": item.flight_id, "source_sha256": f"{index:064x}"}
+                for index, item in enumerate(series)
+            ],
+        }],
     }
     summary = train(
         series,
@@ -870,9 +1116,13 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
         (tmp_path / "run" / "checkpoint_metadata.json").read_text(encoding="utf-8")
     )
     assert metadata == {
-        "schema_version": "ts-checkpoint-metadata-v1",
+        "schema_version": "ts-checkpoint-metadata-v2-multi-airport",
         "checkpoint_sha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
-        "arrival_manifest_sha256": provenance["arrival_manifest_sha256"],
+        "arrival_manifests": {AIRPORT: "a" * 64},
+        "split_sha256": {
+            split: hashlib.sha256("\n".join(sorted(payload["split"][split])).encode()).hexdigest()
+            for split in ("train", "val", "test")
+        },
     }
 
     records, overlap = [], []

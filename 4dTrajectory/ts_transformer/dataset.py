@@ -29,7 +29,7 @@ from typing import Any, Iterator, Sequence
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, RandomSampler, Sampler
 
 # flight_key is the identity ``id_runway_icao24_landingTime`` — single-sourced in
 # flight_scenarios.identity because the optimizer batch derives its record filenames from
@@ -57,71 +57,156 @@ from channels import (
 )
 from config import DEFAULT_AIRCRAFT_TYPE, HORIZON_FULL, TSConfig
 
-ARRIVAL_DATA_PROVENANCE_SCHEMA = "ts-arrival-data-v1"
+ARRIVAL_DATA_PROVENANCE_SCHEMA = "ts-arrival-data-v2-multi-airport"
 
 
-def arrival_data_provenance(path: str | Path) -> dict[str, Any]:
-    """Fingerprint the exact canonical arrival roster used by a training run.
+def dataset_flight_key(source: dict[str, Any], index: int) -> str:
+    """Airport-qualified identity used by splits and checkpoint membership."""
+    airport = str(source.get("arr_airport") or "").strip().upper()
+    key = flight_key(source, index)
+    return f"{airport}:{key}" if airport else key
+
+
+def _manifest_paths(paths: str | Path | Sequence[str | Path]) -> list[Path]:
+    """Resolve one or more manifests, rejecting duplicate airport inputs."""
+    raw_paths = [paths] if isinstance(paths, (str, Path)) else list(paths)
+    if not raw_paths:
+        raise ValueError("at least one arrival manifest is required")
+
+    resolved: list[tuple[str, Path]] = []
+    seen_airports: set[str] = set()
+    for raw_path in raw_paths:
+        manifest_path = resolve_arrival_manifest(raw_path)
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if not isinstance(manifest, dict):
+            raise ValueError(
+                f"{manifest_path} is not an arrival manifest object; legacy flight-array "
+                "inputs are no longer supported"
+            )
+        airport = str(manifest.get("airport") or "").strip().upper()
+        if not airport:
+            raise ValueError(f"{manifest_path} does not declare an airport")
+        if airport in seen_airports:
+            raise ValueError(f"multiple arrival manifests supplied for airport {airport}")
+        seen_airports.add(airport)
+        resolved.append((airport, manifest_path))
+    return [path for _airport, path in sorted(resolved)]
+
+
+def arrival_data_provenance(
+    paths: str | Path | Sequence[str | Path],
+) -> dict[str, Any]:
+    """Fingerprint the exact canonical arrival rosters used by a training run.
 
     The manifest digest catches any roster, slice, target, or metadata change.  Keeping
     each flight's canonical source digest as well makes the checkpoint independently
     auditable without reopening every source track.
     """
-    manifest_path = resolve_arrival_manifest(path)
-    manifest_bytes = manifest_path.read_bytes()
-    manifest = json.loads(manifest_bytes)
-    records = manifest.get("records") if isinstance(manifest, dict) else None
-    if not isinstance(records, list):
-        raise ValueError(f"{manifest_path} lacks an arrival records roster")
+    manifest_entries: list[dict[str, Any]] = []
+    for manifest_path in _manifest_paths(paths):
+        manifest_bytes = manifest_path.read_bytes()
+        manifest = json.loads(manifest_bytes)
+        records = manifest.get("records") if isinstance(manifest, dict) else None
+        if not isinstance(records, list):
+            raise ValueError(f"{manifest_path} lacks an arrival records roster")
+        airport = str(manifest.get("airport") or "").strip().upper()
 
-    source_records: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for index, row in enumerate(records):
-        if not isinstance(row, dict):
-            raise ValueError(f"{manifest_path}: arrival record {index} is not an object")
-        key = row.get("flight_key")
-        source_sha256 = row.get("source_sha256")
-        if not isinstance(key, str) or not key:
-            raise ValueError(f"{manifest_path}: arrival record {index} lacks flight_key")
-        if key in seen:
-            raise ValueError(f"{manifest_path} lists duplicate flight_key {key!r}")
-        if (
-            not isinstance(source_sha256, str)
-            or len(source_sha256) != 64
-            or any(char not in "0123456789abcdef" for char in source_sha256.lower())
-        ):
-            raise ValueError(
-                f"{manifest_path}: arrival record {index} has invalid source_sha256"
+        source_records: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for index, row in enumerate(records):
+            if not isinstance(row, dict):
+                raise ValueError(f"{manifest_path}: arrival record {index} is not an object")
+            key = row.get("flight_key")
+            source_sha256 = row.get("source_sha256")
+            if not isinstance(key, str) or not key:
+                raise ValueError(f"{manifest_path}: arrival record {index} lacks flight_key")
+            if key in seen:
+                raise ValueError(f"{manifest_path} lists duplicate flight_key {key!r}")
+            if (
+                not isinstance(source_sha256, str)
+                or len(source_sha256) != 64
+                or any(char not in "0123456789abcdef" for char in source_sha256.lower())
+            ):
+                raise ValueError(
+                    f"{manifest_path}: arrival record {index} has invalid source_sha256"
+                )
+            seen.add(key)
+            source_records.append(
+                {"flight_key": key, "source_sha256": source_sha256.lower()}
             )
-        seen.add(key)
-        source_records.append(
-            {"flight_key": key, "source_sha256": source_sha256.lower()}
-        )
 
-    source_records.sort(key=lambda item: item["flight_key"])
+        source_records.sort(key=lambda item: item["flight_key"])
+        manifest_entries.append({
+            "airport": airport,
+            "arrival_manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+            "source_records": source_records,
+        })
+
     return {
         "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
-        "arrival_manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
-        "source_records": source_records,
+        "manifests": manifest_entries,
     }
+
+
+def provenance_manifest_digests(provenance: dict[str, Any]) -> dict[str, str]:
+    """Compact airport -> manifest digest view used by import-light runners."""
+    if provenance.get("schema_version") != ARRIVAL_DATA_PROVENANCE_SCHEMA:
+        raise ValueError("data_provenance is not a multi-airport TS fingerprint")
+    manifests = provenance.get("manifests")
+    if not isinstance(manifests, list) or not manifests:
+        raise ValueError("data_provenance has no arrival manifests")
+    result: dict[str, str] = {}
+    for entry in manifests:
+        if not isinstance(entry, dict):
+            raise ValueError("data_provenance manifest entry is not an object")
+        airport = entry.get("airport")
+        digest = entry.get("arrival_manifest_sha256")
+        if not isinstance(airport, str) or not isinstance(digest, str):
+            raise ValueError("data_provenance manifest entry lacks airport or digest")
+        if airport in result:
+            raise ValueError(f"data_provenance repeats airport {airport}")
+        result[airport] = digest
+    return result
 
 
 def require_matching_data_provenance(
     checkpoint_payload: dict[str, Any],
     current: dict[str, Any],
+    *,
+    allow_subset: bool = False,
 ) -> None:
-    """Reject old or stale checkpoints before they can filter the current roster."""
+    """Reject stale data; prediction may verify an exact airport subset of training data."""
     stored = checkpoint_payload.get("data_provenance")
     if not isinstance(stored, dict):
         raise ValueError(
             "checkpoint has no arrival-data provenance; retrain it against the current "
             "arrivals/manifest.json"
         )
-    if stored != current:
+    if not allow_subset and stored != current:
         raise ValueError(
-            "checkpoint training data does not match the current arrivals manifest; "
+            "checkpoint training data does not match the current arrival manifests; "
             "retrain instead of reusing this checkpoint"
         )
+    if allow_subset:
+        stored_entries = {
+            entry["airport"]: entry for entry in stored.get("manifests", [])
+            if isinstance(entry, dict) and isinstance(entry.get("airport"), str)
+        }
+        current_entries = current.get("manifests")
+        if (
+            current.get("schema_version") != ARRIVAL_DATA_PROVENANCE_SCHEMA
+            or not isinstance(current_entries, list)
+            or not current_entries
+            or any(
+                not isinstance(entry, dict)
+                or stored_entries.get(entry.get("airport")) != entry
+                for entry in current_entries
+            )
+        ):
+            raise ValueError(
+                "prediction data is not an exact airport subset of the checkpoint training "
+                "data; retrain or use the matching manifests"
+            )
 
 
 @dataclass
@@ -169,6 +254,16 @@ class FlightSeries:
     def n_supervision_samples(self) -> int:
         return len(self.supervision_times)
 
+    @property
+    def airport(self) -> str:
+        """Arrival airport carried by the canonical manifest record."""
+        return str(self.scenario.source.get("arr_airport") or "").strip().upper()
+
+    @property
+    def dataset_id(self) -> str:
+        """Cross-airport split/checkpoint identity; export stems remain ``flight_id``."""
+        return f"{self.airport}:{self.flight_id}" if self.airport else self.flight_id
+
 
 @dataclass(frozen=True)
 class Normalizer:
@@ -186,8 +281,28 @@ class Normalizer:
     std: np.ndarray    # [C]
 
     @classmethod
-    def fit(cls, series: Sequence[FlightSeries]) -> Normalizer:
-        """Fit a normaliser to the training split."""
+    def fit(
+        cls,
+        series: Sequence[FlightSeries],
+        *,
+        balance_airports_and_flights: bool = False,
+    ) -> Normalizer:
+        """Fit on training only, optionally matching the hierarchical sampler's measure."""
+        if balance_airports_and_flights:
+            by_airport: dict[str, list[FlightSeries]] = {}
+            for item in series:
+                by_airport.setdefault(item.airport or "<unknown>", []).append(item)
+            airport_means, airport_second_moments = [], []
+            for group in by_airport.values():
+                airport_means.append(np.mean([item.values.mean(axis=0) for item in group], axis=0))
+                airport_second_moments.append(np.mean([
+                    np.square(item.values).mean(axis=0) for item in group
+                ], axis=0))
+            mean = np.mean(airport_means, axis=0)
+            variance = np.maximum(np.mean(airport_second_moments, axis=0) - mean**2, 0.0)
+            std = np.sqrt(variance)
+            std = np.where(std > 1e-9, std, 1.0)
+            return cls(mean=mean, std=std)
         # series is a list of FlightSeries, each with values [N, C]; stack them to [N_total, C]
         stacked = np.concatenate([s.values for s in series], axis=0) # [N, C]
         mean = stacked.mean(axis=0) # [C]
@@ -216,11 +331,16 @@ class Normalizer:
 
 # ── Loading ──────────────────────────────────────────────────────────────────
 
-def load_flight_dicts(path: str | Path, *, verbose: bool = True) -> list[dict[str, Any]]:
-    """Model-ready flights from the harvest's authoritative arrival manifest."""
-    flights = load_arrival_flights(path)
-    if verbose:
-        print(f"  {path}: {len(flights)} manifest-rostered arrival(s)")
+def load_flight_dicts(
+    paths: str | Path | Sequence[str | Path], *, verbose: bool = True
+) -> list[dict[str, Any]]:
+    """Model-ready flights from one or more authoritative arrival manifests."""
+    flights: list[dict[str, Any]] = []
+    for manifest_path in _manifest_paths(paths):
+        manifest_flights = load_arrival_flights(manifest_path)
+        flights.extend(manifest_flights)
+        if verbose:
+            print(f"  {manifest_path}: {len(manifest_flights)} manifest-rostered arrival(s)")
     return flights
 
 
@@ -318,7 +438,7 @@ def build_series(
             continue
 
         samples = state_samples_from_track(waypoints, mass_kg=scenario.initial.m)
-        frame = frame_for_state(scenario.target)
+        frame = frame_for_state(scenario.target, config.coordinate_frame)
         times, values = channels_from_states(samples, frame)
         grid, resampled = resample_uniform(times, values, config.dt_s)
         # Not redundant with the span pre-check: for a non-dyadic dt the multiply and
@@ -435,15 +555,28 @@ class TrajectoryWindows(Dataset):
     label, while the fitted crossing still contributes terminal position error.
     """
 
-    def __init__(self, series: Sequence[FlightSeries], config: TSConfig, normalizer: Normalizer):
+    def __init__(
+        self,
+        series: Sequence[FlightSeries],
+        config: TSConfig,
+        normalizer: Normalizer,
+        *,
+        anchor_policy: str = "all",
+    ):
+        if anchor_policy not in ("all", "first"):
+            raise ValueError(f"unknown anchor policy {anchor_policy!r}")
         self.series = list(series)
         self.config = config
         self.normalizer = normalizer
-        self.index: list[tuple[int, int]] = [
-            (s_idx, anchor)
-            for s_idx, s in enumerate(self.series)
-            for anchor in window_anchors(s, config)
-        ]
+        self.anchor_policy = anchor_policy
+        self.index: list[tuple[int, int]] = []
+        self.series_ranges: dict[int, tuple[int, int]] = {}
+        for s_idx, item in enumerate(self.series):
+            anchors = window_anchors(item, config)
+            chosen = [anchors.start] if anchor_policy == "first" and len(anchors) else anchors
+            start = len(self.index)
+            self.index.extend((s_idx, anchor) for anchor in chosen)
+            self.series_ranges[s_idx] = (start, len(self.index) - start)
         # Standardise once up front rather than per __getitem__ — the series are small
         # (a few hundred rows each) and this is read on every epoch.
         self.encoded = [
@@ -481,12 +614,22 @@ def _split_fraction(flight_id: str, seed: int) -> float:
     return int.from_bytes(digest[:8], "big") / 2**64
 
 
+def split_name_for_dataset_id(dataset_id: str, config: TSConfig) -> str:
+    """Return the locked outer split without reading any trajectory values."""
+    fraction = _split_fraction(dataset_id, config.seed)
+    if fraction < config.test_fraction:
+        return "test"
+    if fraction < config.test_fraction + config.val_fraction:
+        return "val"
+    return "train"
+
+
 def split_by_flight(
     series: Sequence[FlightSeries], config: TSConfig
 ) -> tuple[list[FlightSeries], list[FlightSeries], list[FlightSeries]]:
     """Deterministic train / val / test split at FLIGHT granularity.
 
-    Each flight's split is a pure function of ``(config.seed, flight_id)`` — never of its
+    Each flight's split is a pure function of ``(config.seed, airport:flight_id)`` — never of its
     POSITION in the list. A positional shuffle looks deterministic but reshuffles the whole
     assignment the moment one flight is added to or dropped from the harvest, silently
     promoting old test flights into training on the next retrain. The cost of per-flight
@@ -496,10 +639,10 @@ def split_by_flight(
     """
     train, val, test = [], [], []
     for s in series:
-        fraction = _split_fraction(s.flight_id, config.seed)
-        if fraction < config.test_fraction:
+        split = split_name_for_dataset_id(s.dataset_id, config)
+        if split == "test":
             test.append(s)
-        elif fraction < config.test_fraction + config.val_fraction:
+        elif split == "val":
             val.append(s)
         else:
             train.append(s)
@@ -512,8 +655,93 @@ def split_by_flight(
     return train, val, test
 
 
-def iter_batches(dataset: TrajectoryWindows, batch_size: int, *, shuffle: bool, seed: int) -> Iterator:
+def cross_validation_folds(
+    series: Sequence[FlightSeries], n_splits: int, *, seed: int
+) -> list[list[FlightSeries]]:
+    """Deterministic airport-stratified folds over an already locked outer-train set."""
+    if n_splits < 2:
+        raise ValueError(f"cross validation needs at least 2 folds, got {n_splits}")
+    if len(series) < n_splits:
+        raise ValueError(f"cannot split {len(series)} flight(s) into {n_splits} folds")
+
+    by_airport: dict[str, list[FlightSeries]] = {}
+    for item in series:
+        by_airport.setdefault(item.airport or "<unknown>", []).append(item)
+
+    folds: list[list[FlightSeries]] = [[] for _ in range(n_splits)]
+    for airport, group in sorted(by_airport.items()):
+        if len(group) < n_splits:
+            raise ValueError(
+                f"airport {airport} has only {len(group)} outer-train flight(s), fewer than "
+                f"the requested {n_splits} folds"
+            )
+        ordered = sorted(
+            group,
+            key=lambda item: hashlib.sha256(
+                f"cv:{seed}:{airport}:{item.dataset_id}".encode()
+            ).digest(),
+        )
+        for index, item in enumerate(ordered):
+            folds[index % n_splits].append(item)
+    if any(not fold for fold in folds):
+        raise ValueError("airport-stratified cross validation produced an empty fold")
+    return folds
+
+
+class AirportFlightWindowSampler(Sampler[int]):
+    """Sample airport, then flight, then one of that flight's valid windows uniformly."""
+
+    def __init__(self, dataset: TrajectoryWindows, *, num_samples: int, seed: int):
+        if num_samples <= 0:
+            raise ValueError("num_samples must be positive")
+        self.dataset = dataset
+        self.num_samples = num_samples
+        self.seed = seed
+        self.by_airport: dict[str, list[int]] = {}
+        for s_idx, item in enumerate(dataset.series):
+            _start, count = dataset.series_ranges[s_idx]
+            if count:
+                self.by_airport.setdefault(item.airport or "<unknown>", []).append(s_idx)
+        if not self.by_airport:
+            raise ValueError("balanced sampler received a dataset with no windows")
+        self.airports = sorted(self.by_airport)
+
+    def __len__(self) -> int:
+        return self.num_samples
+
+    def __iter__(self):
+        generator = torch.Generator().manual_seed(self.seed)
+        for _ in range(self.num_samples):
+            airport_idx = int(torch.randint(len(self.airports), (1,), generator=generator))
+            flights = self.by_airport[self.airports[airport_idx]]
+            flight_idx = int(torch.randint(len(flights), (1,), generator=generator))
+            start, count = self.dataset.series_ranges[flights[flight_idx]]
+            offset = int(torch.randint(count, (1,), generator=generator))
+            yield start + offset
+
+
+def iter_batches(
+    dataset: TrajectoryWindows,
+    batch_size: int,
+    *,
+    shuffle: bool,
+    seed: int,
+    balanced: bool = False,
+    num_samples: int | None = None,
+) -> Iterator:
     """A DataLoader with this project's defaults (no workers — the data is already in RAM)."""
+    if balanced:
+        sampler = AirportFlightWindowSampler(
+            dataset, num_samples=num_samples or len(dataset), seed=seed
+        )
+        return DataLoader(dataset, batch_size=batch_size, sampler=sampler, num_workers=0,
+                          drop_last=False)
     generator = torch.Generator().manual_seed(seed) if shuffle else None
+    if shuffle and num_samples is not None and num_samples < len(dataset):
+        sampler = RandomSampler(
+            dataset, replacement=False, num_samples=num_samples, generator=generator
+        )
+        return DataLoader(dataset, batch_size=batch_size, sampler=sampler, num_workers=0,
+                          drop_last=False)
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, generator=generator,
                       num_workers=0, drop_last=False)

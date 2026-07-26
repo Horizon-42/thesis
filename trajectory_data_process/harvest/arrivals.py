@@ -161,8 +161,17 @@ def write_arrival_records(
     return manifest
 
 
-def load_arrival_flights(path: str | Path) -> list[dict[str, Any]]:
-    """Load model-ready arrivals strictly through ``arrivals/manifest.json``."""
+def load_arrival_flights(
+    path: str | Path,
+    *,
+    include_flight_keys: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Load model-ready arrivals strictly through ``arrivals/manifest.json``.
+
+    When ``include_flight_keys`` is supplied, excluded source-track files are never opened.
+    This lets train-only diagnostics lock a split from roster metadata without reading
+    validation/test trajectory values.
+    """
     manifest_path = resolve_arrival_manifest(path)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if not isinstance(manifest, dict):
@@ -211,6 +220,8 @@ def load_arrival_flights(path: str | Path) -> list[dict[str, Any]]:
         if key in seen:
             raise ValueError(f"{manifest_path} lists duplicate flight_key {key!r}")
         seen.add(key)
+        if include_flight_keys is not None and key not in include_flight_keys:
+            continue
         source_row = source_rows.get(key)
         if source_row is None:
             raise ValueError(
@@ -263,6 +274,12 @@ def load_arrival_flights(path: str | Path) -> list[dict[str, Any]]:
         verify_identity(flight, key)
         _validate_runway_target(flight, manifest_path)
         flights.append(flight)
+    if include_flight_keys is not None:
+        missing = include_flight_keys - seen
+        if missing:
+            raise ValueError(
+                f"{manifest_path} does not roster requested flight_key {min(missing)!r}"
+            )
     return flights
 
 

@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import fields
 from pathlib import Path
 
 # Same bootstrap as 4dTrajectory/optimization/*.py: the repo root for the shared packages
@@ -47,12 +48,20 @@ if str(_TS_DIR) not in sys.path:
     sys.path.insert(0, str(_TS_DIR))
 
 from config import (  # noqa: E402
-    DEFAULT_AIRCRAFT_TYPE, HORIZON_MODES, MODELS, TSConfig, config_for_mode,
+    COORDINATE_FRAMES,
+    DEFAULT_AIRCRAFT_TYPE,
+    EVAL_ANCHOR_POLICIES,
+    HORIZON_MODES,
+    MODELS,
+    SAMPLING_STRATEGIES,
+    TSConfig,
+    config_for_mode,
 )
+from cross_validation import cross_validate  # noqa: E402
 from dataset import (  # noqa: E402
     arrival_data_provenance,
     build_series,
-    flight_key,
+    dataset_flight_key,
     load_flight_dicts,
     require_matching_data_provenance,
 )
@@ -66,8 +75,10 @@ from train import load_checkpoint, train  # noqa: E402
 
 
 def _add_data_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--data", required=True,
-                        help="airport harvest directory or arrivals/manifest.json")
+    parser.add_argument(
+        "--data", required=True, action="append",
+        help="airport harvest directory or arrivals/manifest.json; repeat for pooled training",
+    )
     parser.add_argument("--airport", default=None,
                         help="ICAO code, when the flight dicts do not carry arr_airport")
     parser.add_argument("--aircraft-type", default=None,
@@ -77,6 +88,85 @@ def _add_data_args(parser: argparse.ArgumentParser) -> None:
                              "currently 'UNK', so this applies to ALL of them and sets the "
                              "target Vref / threshold-crossing height the gates measure against")
     parser.add_argument("--output-dir", required=True)
+
+
+def _batch_size(value: str) -> int | str:
+    if value == "auto":
+        return value
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("batch size must be a positive integer or 'auto'") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("batch size must be positive")
+    return parsed
+
+
+def _add_training_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--model", choices=MODELS, default=MODELS[0])
+    parser.add_argument("--horizon-mode", choices=HORIZON_MODES, default="window",
+                        help="window: short H, chained at predict time. "
+                             "full: H covers the whole approach in one pass (padded + masked)")
+    parser.add_argument("--seq-len", type=int, default=None, help="lookback L, in steps")
+    parser.add_argument("--pred-len", type=int, default=None,
+                        help="horizon H, in steps (defaults to the horizon mode's own default)")
+    parser.add_argument("--dt", type=float, default=None, help="resample step, seconds")
+    parser.add_argument("--epochs", type=int, default=None)
+    parser.add_argument("--batch-size", type=_batch_size, default=None,
+                        help="positive integer, or 'auto' to probe the active CUDA GPU")
+    parser.add_argument("--learning-rate", type=float, default=None)
+    parser.add_argument("--fitted-tail-weight", type=float, default=None,
+                        help="position-only weight for fitted ADS-B tail rows (default: 0.25)")
+    parser.add_argument("--fitted-terminal-weight", type=float, default=None,
+                        help="additional position-only weight at the fitted crossing (default: 1.0)")
+    parser.add_argument("--patience", type=int, default=None, help="early-stopping patience")
+    parser.add_argument("--d-model", type=int, default=None)
+    parser.add_argument("--e-layers", type=int, default=None)
+    parser.add_argument("--n-heads", type=int, default=None)
+    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--device", default=None, help='"auto" (default), "cpu", "cuda"')
+    parser.add_argument("--coordinate-frame", choices=COORDINATE_FRAMES, default=None)
+    parser.add_argument("--sampling-strategy", choices=SAMPLING_STRATEGIES, default=None)
+    parser.add_argument("--samples-per-epoch", type=int, default=None)
+    parser.add_argument("--eval-anchor-policy", choices=EVAL_ANCHOR_POLICIES, default=None)
+    parser.add_argument("--config-overrides", default=None,
+                        help="JSON object of TSConfig overrides, e.g. CV best_config.json")
+    parser.add_argument("--instance-norm", dest="instance_norm", action="store_true", default=None,
+                        help="per-window de/normalisation; OFF by default because absolute "
+                             "threshold-relative position is signal")
+    parser.add_argument("--no-instance-norm", dest="instance_norm", action="store_false")
+
+
+def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> tuple[TSConfig, bool]:
+    overrides: dict[str, object] = {}
+    if args.config_overrides:
+        try:
+            loaded = json.loads(Path(args.config_overrides).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            parser.error(f"cannot read --config-overrides: {exc}")
+        allowed = {field.name for field in fields(TSConfig)}
+        if not isinstance(loaded, dict) or any(key not in allowed for key in loaded):
+            parser.error("--config-overrides must be a JSON object containing TSConfig fields")
+        overrides.update(loaded)
+
+    batch_auto = args.batch_size == "auto"
+    cli_values = (
+        ("model", args.model), ("seq_len", args.seq_len), ("pred_len", args.pred_len),
+        ("dt_s", args.dt), ("epochs", args.epochs),
+        ("batch_size", args.batch_size if isinstance(args.batch_size, int) else None),
+        ("learning_rate", args.learning_rate), ("patience", args.patience),
+        ("fitted_tail_position_weight", args.fitted_tail_weight),
+        ("fitted_terminal_position_weight", args.fitted_terminal_weight),
+        ("d_model", args.d_model), ("e_layers", args.e_layers), ("n_heads", args.n_heads),
+        ("seed", args.seed), ("device", args.device),
+        ("aircraft_type", args.aircraft_type), ("coordinate_frame", args.coordinate_frame),
+        ("sampling_strategy", args.sampling_strategy),
+        ("train_samples_per_epoch", args.samples_per_epoch),
+        ("eval_anchor_policy", args.eval_anchor_policy),
+        ("use_norm", args.instance_norm), ("revin", args.instance_norm),
+    )
+    overrides.update({key: value for key, value in cli_values if value is not None})
+    return config_for_mode(args.horizon_mode, **overrides), batch_auto
 
 
 def _build_series_or_exit(args: argparse.Namespace, config: TSConfig,
@@ -93,6 +183,25 @@ def _build_series_or_exit(args: argparse.Namespace, config: TSConfig,
     return series
 
 
+def split_keys_for_current_data(
+    checkpoint_split_keys: list[str],
+    current_provenance: dict[str, object],
+) -> list[str]:
+    """Restrict a pooled checkpoint split to the supplied manifest airport subset."""
+    manifests = current_provenance.get("manifests")
+    if not isinstance(manifests, list) or not manifests:
+        raise ValueError("current arrival-data provenance has no manifest entries")
+    airports = {
+        entry.get("airport")
+        for entry in manifests
+        if isinstance(entry, dict) and isinstance(entry.get("airport"), str)
+    }
+    if not airports:
+        raise ValueError("current arrival-data provenance has no airport identities")
+    prefixes = tuple(f"{airport}:" for airport in sorted(airports))
+    return [key for key in checkpoint_split_keys if key.startswith(prefixes)]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="ts_transformer",
@@ -100,41 +209,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    # ── train ────────────────────────────────────────────────────────────────
+    # ── train / cross validation ─────────────────────────────────────────────
     p_train = sub.add_parser("train", help="train a predictor and write a checkpoint")
     _add_data_args(p_train)
-    p_train.add_argument("--model", choices=MODELS, default=MODELS[0])
-    p_train.add_argument("--horizon-mode", choices=HORIZON_MODES, default="window",
-                         help="window: short H, chained at predict time. "
-                              "full: H covers the whole approach in one pass (padded + masked)")
-    p_train.add_argument("--seq-len", type=int, default=None, help="lookback L, in steps")
-    p_train.add_argument("--pred-len", type=int, default=None,
-                         help="horizon H, in steps (defaults to the horizon mode's own default)")
-    p_train.add_argument("--dt", type=float, default=None, help="resample step, seconds")
-    p_train.add_argument("--epochs", type=int, default=None)
-    p_train.add_argument("--batch-size", type=int, default=None)
-    p_train.add_argument("--learning-rate", type=float, default=None)
-    p_train.add_argument(
-        "--fitted-tail-weight", type=float, default=None,
-        help="position-only weight for fitted ADS-B tail rows (default: 0.25)",
+    _add_training_args(p_train)
+
+    p_cv = sub.add_parser(
+        "cross-validate", help="select hyperparameters using outer-train folds only"
     )
-    p_train.add_argument(
-        "--fitted-terminal-weight", type=float, default=None,
-        help="additional position-only weight at the fitted crossing (default: 1.0)",
-    )
-    p_train.add_argument("--patience", type=int, default=None, help="early-stopping patience")
-    p_train.add_argument("--d-model", type=int, default=None)
-    p_train.add_argument("--e-layers", type=int, default=None)
-    p_train.add_argument("--n-heads", type=int, default=None)
-    p_train.add_argument("--seed", type=int, default=None)
-    p_train.add_argument("--device", default=None, help='"auto" (default), "cpu", "cuda"')
-    p_train.add_argument("--instance-norm", dest="instance_norm", action="store_true", default=None,
-                         help="per-window de/normalisation (iTransformer use_norm / PatchTST "
-                              "RevIN). OFF by default here — it strips the absolute position "
-                              "the approach geometry depends on. See README 'Instance "
-                              "normalisation'.")
-    p_train.add_argument("--no-instance-norm", dest="instance_norm", action="store_false",
-                         help="explicitly disable it (this is already the default)")
+    _add_data_args(p_cv)
+    _add_training_args(p_cv)
+    p_cv.add_argument("--folds", type=int, default=3)
+    p_cv.add_argument("--trials", type=int, default=4)
+    p_cv.add_argument("--cv-epochs", type=int, default=12)
+    p_cv.add_argument("--cv-patience", type=int, default=4)
 
     # ── predict ──────────────────────────────────────────────────────────────
     p_predict = sub.add_parser(
@@ -155,38 +243,38 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
 
-    if args.command == "train":
-        overrides = {
-            key: value
-            for key, value in (
-                ("model", args.model), ("seq_len", args.seq_len), ("pred_len", args.pred_len),
-                ("dt_s", args.dt), ("epochs", args.epochs), ("batch_size", args.batch_size),
-                ("learning_rate", args.learning_rate), ("patience", args.patience),
-                ("fitted_tail_position_weight", args.fitted_tail_weight),
-                ("fitted_terminal_position_weight", args.fitted_terminal_weight),
-                ("d_model", args.d_model), ("e_layers", args.e_layers), ("n_heads", args.n_heads),
-                ("seed", args.seed), ("device", args.device),
-                ("aircraft_type", args.aircraft_type),
-                # One flag drives both fields; each model reads only its own
-                # (iTransformer use_norm, PatchTST revin), so setting both is unambiguous.
-                ("use_norm", args.instance_norm), ("revin", args.instance_norm),
-            )
-            if value is not None
-        }
-        config = config_for_mode(args.horizon_mode, **overrides)
+    if args.command in ("train", "cross-validate"):
+        if len(args.data) > 1 and args.airport:
+            parser.error("--airport cannot override flights when multiple --data manifests are used")
+        config, batch_auto = _config_from_args(args, parser)
         data_provenance = arrival_data_provenance(args.data)
         series = _build_series_or_exit(args, config, parser, load_flight_dicts(args.data))
+        if args.command == "cross-validate":
+            cross_validate(
+                series,
+                config,
+                output_dir=args.output_dir,
+                data_provenance=data_provenance,
+                n_splits=args.folds,
+                max_trials=args.trials,
+                cv_epochs=args.cv_epochs,
+                cv_patience=args.cv_patience,
+                auto_batch_size=batch_auto,
+            )
+            return 0
         train(
             series,
             config,
             output_dir=args.output_dir,
             data_provenance=data_provenance,
+            auto_batch_size=batch_auto,
         )
         return 0
 
     # ── predict ──────────────────────────────────────────────────────────────
     model, config, normalizer, payload = load_checkpoint(args.checkpoint)
-    require_matching_data_provenance(payload, arrival_data_provenance(args.data))
+    current_provenance = arrival_data_provenance(args.data)
+    require_matching_data_provenance(payload, current_provenance, allow_subset=True)
     device = resolve_device(args.device)
     model = model.to(device)
 
@@ -196,13 +284,16 @@ def main(argv: list[str] | None = None) -> int:
               f"gate targets will differ from the ones the normalizer was fit under")
     flights = load_flight_dicts(args.data)
     if args.split != "all":
-        # Filter the RAW dicts, keyed exactly as build_series keys them (flight_key reads
-        # only id/runway/icao24/landing_time_utc, which build_scenario copies verbatim
-        # into scenario.source) — so the expensive per-flight build (aircraft resolution +
+        # Filter the RAW dicts by the checkpoint's airport-qualified identity, before the
+        # expensive per-flight build (aircraft resolution +
         # least-squares velocity fits) never runs for the ~85% of flights a default
         # test-split predict would discard.
-        split_keys = payload["split"][args.split]
-        indexed = {flight_key(flight, index): flight for index, flight in enumerate(flights)}
+        split_keys = split_keys_for_current_data(
+            payload["split"][args.split], current_provenance
+        )
+        indexed = {
+            dataset_flight_key(flight, index): flight for index, flight in enumerate(flights)
+        }
         missing = [key for key in split_keys if key not in indexed]
         if missing:
             parser.error(

@@ -106,6 +106,12 @@ class Frame:
     lat0: float
     lon0: float
     alt0: float
+    heading_rad: float = 0.0
+    coordinate_mode: str = "enu"
+
+    def __post_init__(self) -> None:
+        if self.coordinate_mode not in ("enu", "runway-aligned"):
+            raise ValueError(f"unknown coordinate mode {self.coordinate_mode!r}")
 
     @property
     def m_per_deg_lon(self) -> float:
@@ -118,7 +124,25 @@ class Frame:
         ``synthetic.py``'s waypoint generator both go through it, so a projection change
         cannot land on one side only and read as model error on the other.
         """
-        return self.lat0 + n / METRES_PER_DEG_LAT, self.lon0 + e / self.m_per_deg_lon
+        world_e, world_n = self.to_world_horizontal(e, n)
+        return (
+            self.lat0 + world_n / METRES_PER_DEG_LAT,
+            self.lon0 + world_e / self.m_per_deg_lon,
+        )
+
+    def from_world_horizontal(self, east: float, north: float) -> tuple[float, float]:
+        """World EN chart components -> configured horizontal axes."""
+        if self.coordinate_mode == "enu":
+            return east, north
+        cosine, sine = math.cos(self.heading_rad), math.sin(self.heading_rad)
+        return east * cosine + north * sine, -east * sine + north * cosine
+
+    def to_world_horizontal(self, first: float, second: float) -> tuple[float, float]:
+        """Configured horizontal axes -> world EN chart components."""
+        if self.coordinate_mode == "enu":
+            return first, second
+        cosine, sine = math.cos(self.heading_rad), math.sin(self.heading_rad)
+        return first * cosine - second * sine, first * sine + second * cosine
 
     def chart_velocity_factors(self, lat_deg: float, alt_m: float) -> tuple[float, float]:
         """``(f_e, f_n)`` such that ``edot = V_east·f_e`` and ``ndot = V_north·f_n``.
@@ -137,13 +161,19 @@ class Frame:
         )
 
 
-def frame_for_state(state: GeodeticState) -> Frame:
+def frame_for_state(state: GeodeticState, coordinate_mode: str = "enu") -> Frame:
     """The ENU frame anchored at a target state — normally the runway threshold.
 
     Pair with ``flight_scenarios.threshold_target_state``, which builds that target from
     the published threshold (position at threshold-crossing height, runway heading, Vref).
     """
-    return Frame(lat0=state.latitude, lon0=state.longitude, alt0=state.altitude)
+    return Frame(
+        lat0=state.latitude,
+        lon0=state.longitude,
+        alt0=state.altitude,
+        heading_rad=state.psi,
+        coordinate_mode=coordinate_mode,
+    )
 
 
 def channels_from_states(
@@ -167,12 +197,20 @@ def channels_from_states(
         ground_speed = s.V * math.cos(s.gamma)
         f_e, f_n = frame.chart_velocity_factors(s.latitude, s.altitude)
         times[i] = t
+        first, second = frame.from_world_horizontal(
+            (s.longitude - frame.lon0) * m_per_deg_lon,
+            (s.latitude - frame.lat0) * METRES_PER_DEG_LAT,
+        )
+        first_dot, second_dot = frame.from_world_horizontal(
+            ground_speed * math.cos(s.psi) * f_e,
+            ground_speed * math.sin(s.psi) * f_n,
+        )
         out[i] = (
-            (s.longitude - frame.lon0) * m_per_deg_lon,      # e
-            (s.latitude - frame.lat0) * METRES_PER_DEG_LAT,  # n
+            first,
+            second,
             s.altitude - frame.alt0,                         # u
-            ground_speed * math.cos(s.psi) * f_e,            # edot
-            ground_speed * math.sin(s.psi) * f_n,            # ndot
+            first_dot,
+            second_dot,
             s.V * math.sin(s.gamma),                         # udot
         )
     return times, out
@@ -205,8 +243,9 @@ def states_from_channels(
         lat, lon = frame.latlon_from_en(e, n)
         altitude = frame.alt0 + u
         f_e, f_n = frame.chart_velocity_factors(lat, altitude)
-        v_east = edot / f_e
-        v_north = ndot / f_n
+        world_edot, world_ndot = frame.to_world_horizontal(edot, ndot)
+        v_east = world_edot / f_e
+        v_north = world_ndot / f_n
         ground_speed = math.hypot(v_east, v_north)
         states.append((float(t), GeodeticState(
             latitude=lat,
