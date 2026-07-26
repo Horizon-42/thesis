@@ -100,7 +100,7 @@ def recursive_forecast(
 
     produced: list[np.ndarray] = []
     passes = 0
-    while sum(len(chunk) for chunk in produced) < max_steps:
+    while sum(len(chunk) for chunk in produced) < max_steps: # TODO use a more resonable stopping criterion than max_steps, e.g. distance to threshold
         step = _forward(model, history, device)
         produced.append(step)
         passes += 1
