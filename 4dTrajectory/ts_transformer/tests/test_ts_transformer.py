@@ -38,6 +38,7 @@ ts_cli = importlib.util.module_from_spec(_CLI_SPEC)
 _CLI_SPEC.loader.exec_module(ts_cli)
 
 import channels as ch  # noqa: E402
+import coordinate_frames as frames  # noqa: E402
 import cross_validation as cv  # noqa: E402
 import detect_ts_best_batch as batch_probe  # noqa: E402
 from aerodynamic_model.common import GeodeticState  # noqa: E402
@@ -63,8 +64,8 @@ from train import load_checkpoint, masked_mse, train  # noqa: E402
 AIRPORT, RUNWAY = "KRDU", "05L"
 
 
-def _frame() -> ch.Frame:
-    return ch.Frame(lat0=35.8745, lon0=-78.8020, alt0=133.0)
+def _frame() -> frames.ENUFrame:
+    return frames.ENUFrame(lat0=35.8745, lon0=-78.8020, alt0=133.0)
 
 
 def _state(*, lat=35.90, lon=-78.85, alt=900.0, V=90.0, psi=0.5, gamma=-0.05, m=60_000.0):
@@ -230,7 +231,8 @@ def test_channels_place_the_frame_origin_at_the_threshold():
 
 def test_runway_aligned_frame_rotates_and_round_trips_horizontal_channels():
     target = _state(psi=0.73)
-    frame = ch.frame_for_state(target, "runway-aligned")
+    frame = frames.frame_for_state(target, "runway-aligned")
+    assert type(frame) is frames.RunwayAlignedFrame
     times, values = ch.channels_from_states([(0.0, target)], frame)
     assert values[0, ch.IDX["edot"]] > 0.0
     assert abs(values[0, ch.IDX["ndot"]]) < values[0, ch.IDX["edot"]] * 0.01
@@ -238,6 +240,21 @@ def test_runway_aligned_frame_rotates_and_round_trips_horizontal_channels():
     assert restored.latitude == pytest.approx(target.latitude)
     assert restored.longitude == pytest.approx(target.longitude)
     assert restored.psi == pytest.approx(target.psi)
+
+
+def test_coordinate_frame_setting_selects_a_concrete_implementation():
+    target = _state(psi=0.73)
+
+    assert type(frames.frame_for_state(target, "enu")) is frames.ENUFrame
+    assert type(frames.frame_for_state(target, "runway-aligned")) is frames.RunwayAlignedFrame
+    assert not hasattr(frames.frame_for_state(target, "enu"), "coordinate_mode")
+    with pytest.raises(ValueError, match="unknown coordinate frame"):
+        frames.frame_for_state(target, "other")
+
+    enu_series, _ = _series(n_flights=1, coordinate_frame="enu")
+    aligned_series, _ = _series(n_flights=1, coordinate_frame="runway-aligned")
+    assert type(enu_series[0].frame) is frames.ENUFrame
+    assert type(aligned_series[0].frame) is frames.RunwayAlignedFrame
 
 
 def test_resample_lands_on_a_regular_grid_without_extrapolating():

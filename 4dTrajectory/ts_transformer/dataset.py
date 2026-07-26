@@ -50,12 +50,11 @@ from trajectory_data_process.harvest.arrivals import (
 from channels import (
     CHANNELS,
     POSITION_IDX,
-    Frame,
     channels_from_states,
-    frame_for_state,
     resample_uniform,
 )
 from config import DEFAULT_AIRCRAFT_TYPE, HORIZON_FULL, TSConfig
+from coordinate_frames import CoordinateFrame, frame_for_state
 
 ARRIVAL_DATA_PROVENANCE_SCHEMA = "ts-arrival-data-v2-multi-airport"
 
@@ -215,7 +214,7 @@ class FlightSeries:
 
     flight_id: str
     scenario: FlightScenario
-    frame: Frame
+    frame: CoordinateFrame
     times: np.ndarray        # [N] seconds, uniform dt, rebased to 0 at the first sample
     values: np.ndarray       # [N, C] channel space (see channels.CHANNELS)
     # The observed arrays above remain the only model INPUT and the only arrays exposed to
@@ -465,7 +464,7 @@ def build_series(
 def _build_supervision(
     flight: dict[str, Any],
     measured_samples,
-    frame: Frame,
+    frame: CoordinateFrame,
     grid: np.ndarray,
     measured_values: np.ndarray,
     config: TSConfig,

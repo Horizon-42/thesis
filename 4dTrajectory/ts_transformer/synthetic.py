@@ -25,7 +25,7 @@ import numpy as np
 
 from flight_scenarios.runway_target import find_threshold
 
-from channels import Frame
+from coordinate_frames import ENUFrame
 
 ENTRY_RADIUS_M = 25_000.0     # matches trajectory_data_process ENTRY_RADIUS_KM
 FAF_DISTANCE_M = 5.0 * 1852.0  # 5 NM
@@ -60,10 +60,10 @@ def synthetic_arrivals(
 
     elevation_m = float(threshold["elevation_m"])
     heading_deg = float(threshold["heading_deg"])
-    # The SAME frame the data build projects through (channels.Frame), used in reverse —
+    # The SAME ENU projection the data build uses, applied in reverse —
     # so synthetic waypoints and the training-side projection cannot drift apart.
-    frame = Frame(lat0=float(threshold["lat"]), lon0=float(threshold["lon"]),
-                  alt0=elevation_m)
+    frame = ENUFrame(lat0=float(threshold["lat"]), lon0=float(threshold["lon"]),
+                     alt0=elevation_m)
 
     # Direction of TRAVEL on final, in ENU. Compass heading H -> (east, north) = (sin H, cos H).
     course = math.radians(heading_deg)
@@ -115,7 +115,9 @@ def synthetic_arrivals(
         noise = rng.normal(0.0, jitter_m, size=(len(points), 3))
         waypoints = []
         for k, pt in enumerate(points):
-            lat, lon = frame.latlon_from_en(pt[1] + noise[k, 0], pt[2] + noise[k, 1])
+            lat, lon = frame.latlon_from_horizontal(
+                pt[1] + noise[k, 0], pt[2] + noise[k, 1]
+            )
             # Waypoint order is [t, lon, lat, alt] — lon BEFORE lat (the czml-input trap
             # channels.py documents).
             waypoints.append([
