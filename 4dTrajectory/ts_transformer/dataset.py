@@ -23,13 +23,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+from abc import ABC, abstractmethod
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator, Sequence
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Dataset, RandomSampler, Sampler
+from torch.utils.data import Dataset, Sampler
 
 # flight_key is the identity ``id_runway_icao24_landingTime`` — single-sourced in
 # flight_scenarios.identity because the optimizer batch derives its record filenames from
@@ -615,13 +617,17 @@ def window_anchors(
     return range(first, last + 1) if last >= first else range(0)
 
 
-class TrajectoryWindows(Dataset):
-    """``(x[L,C], y[N,C], weights[N,C], final_time_s)`` training samples.
+class TrajectoryWindows(Dataset, ABC):
+    """Shared normalized-target and batch mechanics for an explicit anchor population.
 
     Measured rows supervise all six channels. Fitted rows supervise only ``e/n/u`` at lower
     weight.  Linear interpolation maps the remainder of every approach to a fixed progress
-    grid, so there is no padding and N does not imply a fixed number of seconds.
+    grid, so there is no padding and N does not imply a fixed number of seconds. Concrete
+    subclasses own anchor population and per-epoch index selection; this class contains no
+    fixed-versus-random mode branch.
     """
+
+    anchor_description: str
 
     def __init__(
         self,
@@ -629,15 +635,11 @@ class TrajectoryWindows(Dataset):
         config: TSConfig,
         normalizer: Normalizer,
         *,
-        anchor_policy: str = "all",
         minimum_anchor_index: int | None = None,
     ):
-        if anchor_policy not in ("all", "first"):
-            raise ValueError(f"unknown anchor policy {anchor_policy!r}")
         self.series = list(series)
         self.config = config
         self.normalizer = normalizer
-        self.anchor_policy = anchor_policy
         self.minimum_anchor_index = minimum_anchor_index
         self.index: list[tuple[int, int]] = []
         self.series_ranges: dict[int, tuple[int, int]] = {}
@@ -645,61 +647,191 @@ class TrajectoryWindows(Dataset):
             anchors = window_anchors(
                 item, config, minimum_anchor_index=minimum_anchor_index
             )
-            chosen = [anchors.start] if anchor_policy == "first" and len(anchors) else anchors
+            chosen = self._select_anchors(anchors)
             start = len(self.index)
             self.index.extend((s_idx, anchor) for anchor in chosen)
             self.series_ranges[s_idx] = (start, len(self.index) - start)
+        self.range_starts = np.array(
+            [self.series_ranges[index][0] for index in range(len(self.series))],
+            dtype=np.int64,
+        )
+        self.range_counts = np.array(
+            [self.series_ranges[index][1] for index in range(len(self.series))],
+            dtype=np.int64,
+        )
+        self.eligible_series = np.flatnonzero(self.range_counts)
         # Standardise once up front rather than per __getitem__ — the series are small
         # (a few hundred rows each) and this is read on every epoch.
         self.encoded = [
             normalizer.encode(s.supervision_values).astype(np.float32) for s in self.series
         ]
+        self.progress = (
+            np.arange(1, config.n_segments + 1, dtype=np.float64) / config.n_segments
+        )
+        self.kinematic_channels = np.array(
+            [channel for channel in range(len(config.channels)) if channel not in POSITION_IDX]
+        )
+        # Fitted rows retain placeholder velocity values for tensor shape only. Cache the
+        # final valid supervision time per flight/channel once; recomputing flatnonzero for
+        # every sampled anchor was a substantial part of host-side batch preparation.
+        self.last_supervised_times = [
+            np.array([
+                item.supervision_times[
+                    np.flatnonzero(item.supervision_weights[:, channel] > 0.0)[-1]
+                ]
+                for channel in range(len(config.channels))
+            ])
+            for item in self.series
+        ]
+        eligible_airports = [
+            item.airport or "<unknown>"
+            for series_index, item in enumerate(self.series)
+            if self.series_ranges[series_index][1]
+        ]
+        airport_flights = Counter(eligible_airports)
+        eligible_count = len(eligible_airports)
+        airport_count = len(airport_flights)
+        # The mean weight is one, and summing a complete epoch gives the same
+        # eligible_count / airport_count weight to every airport. This lets a normal batch
+        # mean estimate the airport-macro objective without repeating smaller airports.
+        self.flight_weights = np.array([
+            eligible_count / (
+                airport_count * airport_flights[item.airport or "<unknown>"]
+            )
+            if self.series_ranges[series_index][1]
+            else 0.0
+            for series_index, item in enumerate(self.series)
+        ], dtype=np.float32)
 
     def __len__(self) -> int:
         return len(self.index)
 
-    def __getitem__(
+    @abstractmethod
+    def _select_anchors(self, anchors: range) -> Sequence[int]:
+        """Return the concrete mode's stored anchor population for one flight."""
+
+    @abstractmethod
+    def epoch_indices(self, seed: int) -> np.ndarray:
+        """Return the concrete mode's one-flight-per-epoch sample indices."""
+
+    def _sample_arrays(
         self, i: int
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.float32, np.float32]:
         s_idx, anchor = self.index[i]
         values = self.encoded[s_idx]
         series = self.series[s_idx]
-        L, N, C = self.config.seq_len, self.config.n_segments, len(self.config.channels)
+        L = self.config.seq_len
 
         x = values[anchor - L + 1 : anchor + 1]
         anchor_time = float(series.times[anchor])
         final_time_s = float(series.supervision_times[-1] - anchor_time)
-        progress = np.arange(1, N + 1, dtype=np.float64) / N
-        query_times = anchor_time + progress * final_time_s
+        query_times = anchor_time + self.progress * final_time_s
 
-        y = np.empty((N, C), dtype=np.float32)
-        weights = np.empty((N, C), dtype=np.float32)
-        for channel in range(C):
-            y[:, channel] = np.interp(
-                query_times, series.supervision_times, values[:, channel]
-            )
-            weights[:, channel] = np.interp(
-                query_times,
-                series.supervision_times,
-                series.supervision_weights[:, channel],
-            )
-            if channel not in POSITION_IDX:
-                # Fitted-tail kinematics only preserve the tensor shape. Interpolating
-                # beyond the final positive-weight velocity row must not turn those
-                # placeholders into weak supervision between the two grids. An observed
-                # crossing remains supervised even when it lies off the regular input grid.
-                supervised_rows = series.supervision_weights[:, channel] > 0.0
-                last_supervised_time = series.supervision_times[
-                    np.flatnonzero(supervised_rows)[-1]
-                ]
-                weights[query_times > last_supervised_time, channel] = 0.0
+        # One search locates interpolation neighbours for every output time. The same
+        # [N] neighbour arrays then interpolate all C state and weight channels together;
+        # this replaces 2*C separate np.interp calls without hiding the interpolation math.
+        right = np.searchsorted(series.supervision_times, query_times, side="left")
+        right = np.clip(right, 1, len(series.supervision_times) - 1)
+        left = right - 1
+        interval = series.supervision_times[right] - series.supervision_times[left]
+        fraction = ((query_times - series.supervision_times[left]) / interval)[:, None]
+        y = values[left] + fraction * (values[right] - values[left])
+        source_weights = series.supervision_weights
+        weights = source_weights[left] + fraction * (
+            source_weights[right] - source_weights[left]
+        )
+
+        # An observed crossing remains supervised even when it lies off the regular input
+        # grid, but fitted-tail kinematics beyond the last measured velocity stay masked.
+        weights[:, self.kinematic_channels] = np.where(
+            query_times[:, None]
+            > self.last_supervised_times[s_idx][self.kinematic_channels][None, :],
+            0.0,
+            weights[:, self.kinematic_channels],
+        )
+
+        return (
+            x,
+            y.astype(np.float32),
+            weights.astype(np.float32),
+            np.float32(final_time_s),
+            self.flight_weights[s_idx],
+        )
+
+    def __getitem__(
+        self, i: int
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        x, y, weights, final_time_s, flight_weight = self._sample_arrays(i)
 
         return (
             torch.from_numpy(x.copy()),
             torch.from_numpy(y),
             torch.from_numpy(weights),
-            torch.tensor(final_time_s, dtype=torch.float32),
+            torch.from_numpy(np.asarray(final_time_s)),
+            torch.from_numpy(np.asarray(flight_weight)),
         )
+
+    def batch(
+        self, indices: Sequence[int] | np.ndarray
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Build one contiguous batch without per-sample Tensor creation and collation."""
+        batch_size = len(indices)
+        L, N, C = self.config.seq_len, self.config.n_segments, len(self.config.channels)
+        x = np.empty((batch_size, L, C), dtype=np.float32)
+        y = np.empty((batch_size, N, C), dtype=np.float32)
+        weights = np.empty_like(y)
+        final_time_s = np.empty(batch_size, dtype=np.float32)
+        flight_weights = np.empty(batch_size, dtype=np.float32)
+
+        # Flights are ragged, so locating each source array remains a short explicit loop.
+        # All expensive work inside a sample is vectorized over N progress points and C
+        # channels, and conversion to Torch happens once per complete batch below.
+        for row, index in enumerate(indices):
+            sample_x, sample_y, sample_weights, sample_time, flight_weight = (
+                self._sample_arrays(int(index))
+            )
+            x[row] = sample_x
+            y[row] = sample_y
+            weights[row] = sample_weights
+            final_time_s[row] = sample_time
+            flight_weights[row] = flight_weight
+
+        return tuple(
+            torch.from_numpy(array)
+            for array in (x, y, weights, final_time_s, flight_weights)
+        )
+
+
+class FixedAnchorTrajectoryWindows(TrajectoryWindows):
+    """One deterministic `L-1` (or experiment-supplied common) anchor per flight."""
+
+    anchor_description = "fixed train anchor L-1"
+
+    def _select_anchors(self, anchors: range) -> Sequence[int]:
+        return [anchors.start] if len(anchors) else []
+
+    def epoch_indices(self, seed: int) -> np.ndarray:
+        indices = self.range_starts[self.eligible_series].copy()
+        np.random.default_rng(seed).shuffle(indices)
+        return indices
+
+
+class RandomAnchorTrajectoryWindows(TrajectoryWindows):
+    """All valid anchors available; each epoch selects one uniformly per flight."""
+
+    anchor_description = "one random valid train anchor per flight and epoch"
+
+    def _select_anchors(self, anchors: range) -> Sequence[int]:
+        return anchors
+
+    def epoch_indices(self, seed: int) -> np.ndarray:
+        rng = np.random.default_rng(seed)
+        starts = self.range_starts[self.eligible_series]
+        counts = self.range_counts[self.eligible_series]
+        offsets = np.floor(rng.random(len(starts)) * counts).astype(np.int64)
+        indices = starts + offsets
+        rng.shuffle(indices)
+        return indices
 
 
 def _split_fraction(flight_id: str, seed: int) -> float:
@@ -786,36 +918,18 @@ def cross_validation_folds(
     return folds
 
 
-class AirportFlightWindowSampler(Sampler[int]):
-    """Sample airport, then flight, then one of that flight's valid windows uniformly."""
+class FlightEpochSampler(Sampler[int]):
+    """Select one example per flight, then reshuffle the complete epoch."""
 
-    def __init__(self, dataset: TrajectoryWindows, *, num_samples: int, seed: int):
-        if num_samples <= 0:
-            raise ValueError("num_samples must be positive")
+    def __init__(self, dataset: TrajectoryWindows, *, seed: int):
         self.dataset = dataset
-        self.num_samples = num_samples
         self.seed = seed
-        self.by_airport: dict[str, list[int]] = {}
-        for s_idx, item in enumerate(dataset.series):
-            _start, count = dataset.series_ranges[s_idx]
-            if count:
-                self.by_airport.setdefault(item.airport or "<unknown>", []).append(s_idx)
-        if not self.by_airport:
-            raise ValueError("balanced sampler received a dataset with no windows")
-        self.airports = sorted(self.by_airport)
 
     def __len__(self) -> int:
-        return self.num_samples
+        return len(self.dataset.eligible_series)
 
     def __iter__(self):
-        generator = torch.Generator().manual_seed(self.seed)
-        for _ in range(self.num_samples):
-            airport_idx = int(torch.randint(len(self.airports), (1,), generator=generator))
-            flights = self.by_airport[self.airports[airport_idx]]
-            flight_idx = int(torch.randint(len(flights), (1,), generator=generator))
-            start, count = self.dataset.series_ranges[flights[flight_idx]]
-            offset = int(torch.randint(count, (1,), generator=generator))
-            yield start + offset
+        return iter(self.dataset.epoch_indices(self.seed).tolist())
 
 
 def iter_batches(
@@ -824,22 +938,13 @@ def iter_batches(
     *,
     shuffle: bool,
     seed: int,
-    balanced: bool = False,
-    num_samples: int | None = None,
 ) -> Iterator:
-    """A DataLoader with this project's defaults (no workers — the data is already in RAM)."""
-    if balanced:
-        sampler = AirportFlightWindowSampler(
-            dataset, num_samples=num_samples or len(dataset), seed=seed
-        )
-        return DataLoader(dataset, batch_size=batch_size, sampler=sampler, num_workers=0,
-                          drop_last=False)
-    generator = torch.Generator().manual_seed(seed) if shuffle else None
-    if shuffle and num_samples is not None and num_samples < len(dataset):
-        sampler = RandomSampler(
-            dataset, replacement=False, num_samples=num_samples, generator=generator
-        )
-        return DataLoader(dataset, batch_size=batch_size, sampler=sampler, num_workers=0,
-                          drop_last=False)
-    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, generator=generator,
-                      num_workers=0, drop_last=False)
+    """Yield contiguous in-RAM batches with deterministic index selection."""
+    if shuffle:
+        sampler = FlightEpochSampler(dataset, seed=seed)
+        indices = np.fromiter(sampler, dtype=np.int64, count=len(sampler))
+    else:
+        indices = np.arange(len(dataset), dtype=np.int64)
+
+    for start in range(0, len(indices), batch_size):
+        yield dataset.batch(indices[start : start + batch_size])

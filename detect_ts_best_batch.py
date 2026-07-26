@@ -2,9 +2,9 @@
 """Benchmark the fastest TS training batch using outer-train trajectory data only.
 
 This is a performance probe, not model fitting: every candidate rebuilds the same model,
-runs warm-up plus timed FP32 forward/backward/Adam steps, and discards its weights. Split
-membership is decided from manifest roster identities before source tracks are opened, so
-validation/test trajectory files are never read by this process.
+runs warm-up plus timed in-memory batch construction and FP32 forward/backward/Adam steps,
+then discards its weights. Split membership is decided from manifest roster identities before
+source tracks are opened, so validation/test trajectory files are never read by this process.
 """
 
 from __future__ import annotations
@@ -37,12 +37,13 @@ from config import (  # noqa: E402
     COORDINATE_FRAMES,
     DEFAULT_AIRCRAFT_TYPE,
     MODELS,
-    SAMPLING_AIRPORT_FLIGHT_BALANCED,
     TSConfig,
 )
 from cross_validation import CV_OVERRIDE_FIELDS  # noqa: E402
 from dataset import (  # noqa: E402
+    FixedAnchorTrajectoryWindows,
     Normalizer,
+    RandomAnchorTrajectoryWindows,
     TrajectoryWindows,
     build_series,
     dataset_flight_key,
@@ -56,7 +57,7 @@ from trajectory_data_process.harvest.arrivals import (  # noqa: E402
     resolve_arrival_manifest,
 )
 
-RESULT_SCHEMA = "ts-batch-throughput-benchmark-v2-normalized-time"
+RESULT_SCHEMA = "ts-batch-throughput-benchmark-v4-flight-epochs"
 
 
 def _sha256_bytes(payload: bytes) -> str:
@@ -207,9 +208,9 @@ def benchmark_candidate(
     measure_steps: int,
     repeats: int,
 ) -> dict[str, Any]:
-    """Measure the current end-to-end in-RAM DataLoader + FP32 training path."""
-    model = optimizer = loader = iterator = None
-    x = y = weights = final_time_s = prediction = loss = None
+    """Measure the current end-to-end in-RAM batch builder + FP32 training path."""
+    model = optimizer = iterator = None
+    x = y = weights = final_time_s = flight_weights = prediction = loss = None
     started = time.perf_counter()
     try:
         torch.manual_seed(config.seed)
@@ -218,30 +219,37 @@ def benchmark_candidate(
         optimizer = torch.optim.Adam(
             model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
         )
-        total_steps = warmup_steps + measure_steps * repeats
-        loader = iter_batches(
-            dataset,
-            batch_size,
-            shuffle=False,
-            seed=config.seed,
-            balanced=True,
-            num_samples=batch_size * total_steps,
-        )
-        iterator = iter(loader)
+        epoch = 0
+        iterator = iter(iter_batches(
+            dataset, batch_size, shuffle=True, seed=config.seed + epoch
+        ))
         torch.cuda.reset_peak_memory_stats(device)
 
-        def step() -> None:
-            nonlocal x, y, weights, final_time_s, prediction, loss
-            x, y, weights, final_time_s = next(iterator)
+        def step() -> int:
+            nonlocal epoch, iterator
+            nonlocal x, y, weights, final_time_s, flight_weights, prediction, loss
+            try:
+                batch = next(iterator)
+            except StopIteration:
+                epoch += 1
+                iterator = iter(iter_batches(
+                    dataset, batch_size, shuffle=True, seed=config.seed + epoch
+                ))
+                batch = next(iterator)
+            x, y, weights, final_time_s, flight_weights = batch
             x = x.to(device)
             y = y.to(device)
             weights = weights.to(device)
             final_time_s = final_time_s.to(device)
+            flight_weights = flight_weights.to(device)
             optimizer.zero_grad()
             prediction = model(x)
-            loss = prediction_loss(prediction, y, weights, final_time_s, config)
+            loss = prediction_loss(
+                prediction, y, weights, final_time_s, flight_weights, config
+            )
             loss.backward()
             optimizer.step()
+            return len(x)
 
         for _ in range(warmup_steps):
             step()
@@ -252,11 +260,12 @@ def benchmark_candidate(
         for _ in range(repeats):
             torch.cuda.synchronize(device)
             timed_start = time.perf_counter()
+            measured_samples = 0
             for _step in range(measure_steps):
-                step()
+                measured_samples += step()
             torch.cuda.synchronize(device)
             elapsed = time.perf_counter() - timed_start
-            repeat_samples_per_second.append(batch_size * measure_steps / elapsed)
+            repeat_samples_per_second.append(measured_samples / elapsed)
             repeat_step_ms.append(elapsed * 1000.0 / measure_steps)
 
         return {
@@ -279,7 +288,8 @@ def benchmark_candidate(
             "wall_seconds": time.perf_counter() - started,
         }
     finally:
-        del loss, prediction, final_time_s, weights, y, x, iterator, loader, optimizer, model
+        del loss, prediction, flight_weights, final_time_s, weights, y, x
+        del iterator, optimizer, model
         gc.collect()
         torch.cuda.empty_cache()
 
@@ -306,6 +316,11 @@ def main() -> int:
     parser.add_argument("--aircraft-type", default=DEFAULT_AIRCRAFT_TYPE)
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument(
+        "--random-train-anchor",
+        action="store_true",
+        help="benchmark random-anchor training; default is fixed anchor L-1",
+    )
     parser.add_argument("--min-batch", type=lambda value: _power_of_two(int(value), "--min-batch"),
                         default=32)
     parser.add_argument("--max-batch", type=lambda value: _power_of_two(int(value), "--max-batch"),
@@ -333,8 +348,7 @@ def main() -> int:
         "aircraft_type": args.aircraft_type,
         "seed": args.seed,
         "device": args.device,
-        "sampling_strategy": SAMPLING_AIRPORT_FLIGHT_BALANCED,
-        "eval_anchor_policy": "first",
+        "random_train_anchor": args.random_train_anchor,
     }
     if args.n_segments is not None:
         config_values["n_segments"] = args.n_segments
@@ -379,7 +393,11 @@ def main() -> int:
         raise RuntimeError("non-training flight reached the batch benchmark")
 
     normalizer = Normalizer.fit(series, balance_airports_and_flights=True)
-    dataset = TrajectoryWindows(series, config, normalizer)
+    dataset_class = {
+        False: FixedAnchorTrajectoryWindows,
+        True: RandomAnchorTrajectoryWindows,
+    }[config.random_train_anchor]
+    dataset = dataset_class(series, config, normalizer)
     if not len(dataset):
         parser.error("outer-train produced an empty benchmark dataset")
     data_audit["usable_outer_train_flights"] = len(series)
@@ -387,9 +405,15 @@ def main() -> int:
         [item.dataset_id for item in series]
     )
     data_audit["trajectory_windows"] = len(dataset)
+    data_audit["flights_per_epoch"] = len(dataset.eligible_series)
 
     results: list[dict[str, Any]] = []
-    candidates = candidate_batch_sizes(args.min_batch, args.max_batch)
+    candidates = [
+        size for size in candidate_batch_sizes(args.min_batch, args.max_batch)
+        if size <= len(dataset.eligible_series)
+    ]
+    if not candidates:
+        candidates = [args.min_batch]
     for index, batch_size in enumerate(candidates, 1):
         print(f"\n[{index}/{len(candidates)}] benchmarking batch_size={batch_size}", flush=True)
         result = benchmark_candidate(
@@ -433,7 +457,7 @@ def main() -> int:
         "config": config.to_dict(),
         "benchmark": {
             "precision": "float32",
-            "training_step": "DataLoader + host-to-device + forward + backward + Adam",
+            "training_step": "in-memory batch build + host-to-device + forward + backward + Adam",
             "warmup_steps": args.warmup_steps,
             "measure_steps_per_repeat": args.measure_steps,
             "repeats": args.repeats,

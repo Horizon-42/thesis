@@ -28,12 +28,11 @@ from config import (  # noqa: E402
     COORDINATE_FRAMES,
     DEFAULT_AIRCRAFT_TYPE,
     MODELS,
-    SAMPLING_AIRPORT_FLIGHT_BALANCED,
     TSConfig,
 )
 from dataset import (  # noqa: E402
+    FixedAnchorTrajectoryWindows,
     FlightSeries,
-    TrajectoryWindows,
     arrival_data_provenance,
     build_series,
     cross_validation_folds,
@@ -45,7 +44,7 @@ from dataset import (  # noqa: E402
 from models import build_model, parameter_count, resolve_device  # noqa: E402
 from train import evaluate_split, fit_model, usable_series  # noqa: E402
 
-RESULT_SCHEMA = "ts-history-length-ablation-v1-common-anchor"
+RESULT_SCHEMA = "ts-history-length-ablation-v2-flight-epoch-airport-macro"
 RESULT_NAME = "history_length_ablation.json"
 BEST_CONFIG_NAME = "best_history_length.json"
 DEFAULT_SEQ_LENS = (30, 60, 90)
@@ -90,8 +89,7 @@ def _config_overrides(path: Path | None) -> dict[str, Any]:
     allowed = {field.name for field in fields(TSConfig)}
     protected = {
         "seq_len", "model", "coordinate_frame", "seed", "device", "batch_size",
-        "epochs", "patience", "sampling_strategy", "train_samples_per_epoch",
-        "eval_anchor_policy",
+        "epochs", "patience", "random_train_anchor",
     }
     if not isinstance(payload, dict) or any(key not in allowed for key in payload):
         raise ValueError("config overrides must be a JSON object containing TSConfig fields")
@@ -221,7 +219,6 @@ def run_history_ablation(
             batch_size=resolved_batch,
             epochs=epochs,
             patience=min(patience, epochs),
-            eval_anchor_policy="first",
         )
         anchor_count, anchor_digest = anchor_signature(
             outer_train, config, common_anchor_index
@@ -261,11 +258,10 @@ def run_history_ablation(
                 verbose=verbose,
             )
             best_epoch = min(fit.history, key=lambda row: row.val_loss)
-            validation = TrajectoryWindows(
+            validation = FixedAnchorTrajectoryWindows(
                 fold_val,
                 fit.config,
                 fit.normalizer,
-                anchor_policy="first",
                 minimum_anchor_index=common_anchor_index,
             )
             metrics = evaluate_split(
@@ -326,7 +322,6 @@ def run_history_ablation(
             "epochs": epochs,
             "patience": patience,
             "batch_size": resolved_batch,
-            "train_samples_per_epoch": base_config.train_samples_per_epoch,
             "base_config": population_config.to_dict(),
         },
         "outer_split": {
@@ -476,8 +471,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--folds", type=int, default=3)
     parser.add_argument("--epochs", type=int, default=pipeline.DEFAULT_CV_EPOCHS)
     parser.add_argument("--patience", type=int, default=pipeline.DEFAULT_CV_PATIENCE)
-    parser.add_argument("--samples-per-epoch", type=int,
-                        default=pipeline.DEFAULT_CV_SAMPLES_PER_EPOCH)
     parser.add_argument("--batch-size", type=_batch_size, default="auto")
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--device", default="auto")
@@ -486,7 +479,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 
-    for name in ("epochs", "patience", "samples_per_epoch"):
+    for name in ("epochs", "patience"):
         if getattr(args, name) <= 0:
             parser.error(f"--{name.replace('_', '-')} must be positive")
     if args.folds < 2:
@@ -534,9 +527,7 @@ def main(argv: list[str] | None = None) -> int:
         "seed": args.seed,
         "device": args.device,
         "aircraft_type": args.aircraft_type,
-        "sampling_strategy": SAMPLING_AIRPORT_FLIGHT_BALANCED,
-        "train_samples_per_epoch": args.samples_per_epoch,
-        "eval_anchor_policy": "first",
+        "random_train_anchor": False,
     }
     if args.n_segments is not None:
         config_values["n_segments"] = args.n_segments

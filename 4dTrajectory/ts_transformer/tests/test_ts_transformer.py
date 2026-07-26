@@ -50,10 +50,10 @@ from aerodynamic_model.common import GeodeticState  # noqa: E402
 from batching import resolve_batch_size  # noqa: E402
 from config import TSConfig  # noqa: E402
 from dataset import (  # noqa: E402
-    ARRIVAL_DATA_PROVENANCE_SCHEMA, AirportFlightWindowSampler, Normalizer,
-    TrajectoryWindows, arrival_data_provenance, build_series, cross_validation_folds,
-    require_matching_data_provenance, split_by_flight, split_name_for_dataset_id,
-    window_anchors,
+    ARRIVAL_DATA_PROVENANCE_SCHEMA, FixedAnchorTrajectoryWindows, FlightEpochSampler,
+    Normalizer, RandomAnchorTrajectoryWindows, arrival_data_provenance, build_series,
+    cross_validation_folds, require_matching_data_provenance, split_by_flight,
+    split_name_for_dataset_id, window_anchors,
 )
 from evaluation.metrics import evaluate_batch  # noqa: E402
 from evaluation.records import load_records, record_from_dict  # noqa: E402
@@ -308,8 +308,8 @@ def test_normalized_windows_use_every_anchor_with_a_future_remainder():
     assert anchors.start == config.seq_len - 1
     assert anchors.stop - 1 == min(s.n_samples - 1, s.n_supervision_samples - 2)
 
-    dataset = TrajectoryWindows([s], config, Normalizer.fit([s]))
-    x, y, weights, final_time_s = dataset[len(dataset) - 1]
+    dataset = RandomAnchorTrajectoryWindows([s], config, Normalizer.fit([s]))
+    x, y, weights, final_time_s, _flight_weight = dataset[len(dataset) - 1]
     assert x.shape == (config.seq_len, len(config.channels))
     assert y.shape == (config.n_segments, len(config.channels))
     assert weights.shape == y.shape
@@ -320,9 +320,9 @@ def test_normalized_windows_interpolate_the_endpoint_without_padding():
     series, config = _series(n_flights=2, n_segments=12)
     s = series[0]
     normalizer = Normalizer.fit([s])
-    dataset = TrajectoryWindows([s], config, normalizer)
+    dataset = FixedAnchorTrajectoryWindows([s], config, normalizer)
 
-    x, y, weights, final_time_s = dataset[len(dataset) - 1]
+    x, y, weights, final_time_s, _flight_weight = dataset[len(dataset) - 1]
     assert x.shape == (config.seq_len, len(config.channels))
     assert y.shape == (config.n_segments, len(config.channels))
     assert torch.all(weights > 0.0)
@@ -331,6 +331,30 @@ def test_normalized_windows_interpolate_the_endpoint_without_padding():
     assert float(final_time_s) == pytest.approx(
         s.supervision_times[-1] - s.times[dataset.index[-1][1]]
     )
+
+
+def test_vectorized_interpolation_matches_the_scalar_reference():
+    series, config = _series(n_flights=2, n_segments=17)
+    s = series[0]
+    normalizer = Normalizer.fit([s])
+    dataset = RandomAnchorTrajectoryWindows([s], config, normalizer)
+    sample_index = len(dataset) // 2
+    _x, target, weights, final_time_s, _flight_weight = dataset[sample_index]
+    _series_index, anchor = dataset.index[sample_index]
+    query_times = s.times[anchor] + dataset.progress * float(final_time_s)
+    encoded = normalizer.encode(s.supervision_values).astype(np.float32)
+
+    expected_target = np.column_stack([
+        np.interp(query_times, s.supervision_times, encoded[:, channel])
+        for channel in range(len(config.channels))
+    ]).astype(np.float32)
+    expected_weights = np.column_stack([
+        np.interp(query_times, s.supervision_times, s.supervision_weights[:, channel])
+        for channel in range(len(config.channels))
+    ]).astype(np.float32)
+
+    assert target.numpy() == pytest.approx(expected_target)
+    assert weights.numpy() == pytest.approx(expected_weights)
 
 
 def test_masked_mse_ignores_padded_steps():
@@ -365,9 +389,9 @@ def test_fitted_tail_supervises_position_only_and_keeps_observed_inputs_separate
     assert s.supervision_values[-1, ch.IDX["n"]] == pytest.approx(0.0, abs=1e-6)
     assert s.supervision_values[-1, ch.IDX["u"]] == pytest.approx(2.5, abs=1e-6)
 
-    dataset = TrajectoryWindows(series, config, Normalizer.fit(series))
+    dataset = RandomAnchorTrajectoryWindows(series, config, Normalizer.fit(series))
     assert dataset.index[-1] == (0, s.n_samples - 1)
-    x, _, weights, final_time_s = dataset[len(dataset) - 1]
+    x, _, weights, final_time_s, _flight_weight = dataset[len(dataset) - 1]
     assert x.shape == (config.seq_len, len(config.channels))
     assert weights.sum() == pytest.approx(1.75)
     assert torch.all(weights[:, 3:] == 0.0)
@@ -379,9 +403,9 @@ def test_normalized_interpolation_never_supervises_fitted_velocity_placeholders(
     series, report = build_series([_fitted_tail_flight()], config, airport="KFIT")
     assert report.built == 1
     s = series[0]
-    dataset = TrajectoryWindows(series, config, Normalizer.fit(series))
+    dataset = RandomAnchorTrajectoryWindows(series, config, Normalizer.fit(series))
 
-    _, _, weights, final_time_s = dataset[len(dataset) - 1]
+    _, _, weights, final_time_s, _flight_weight = dataset[len(dataset) - 1]
     first_query_time = s.times[-1] + float(final_time_s) / config.n_segments
     assert s.times[-1] < first_query_time < s.supervision_times[s.n_samples]
     assert torch.all(weights[:, 3:] == 0.0)
@@ -400,8 +424,8 @@ def test_normalized_target_interpolates_and_stops_at_observed_threshold_crossing
     assert s.supervision_values[-1, ch.IDX["n"]] == pytest.approx(0.0, abs=1e-6)
     assert np.all(s.supervision_weights[-1] == pytest.approx(1.0 / len(ch.CHANNELS)))
 
-    dataset = TrajectoryWindows(series, config, Normalizer.fit(series))
-    _, target, _, final_time_s = dataset[len(dataset) - 1]
+    dataset = RandomAnchorTrajectoryWindows(series, config, Normalizer.fit(series))
+    _, target, _, final_time_s, _flight_weight = dataset[len(dataset) - 1]
     assert float(final_time_s) == pytest.approx(2.0)
     endpoint = dataset.normalizer.decode(target[-1:].numpy())[0]
     assert endpoint[ch.IDX["n"]] == pytest.approx(0.0, abs=1e-4)
@@ -434,9 +458,29 @@ def test_prediction_loss_adds_scaled_final_time_error():
         states,
         torch.ones_like(states),
         torch.tensor([600.0]),
+        torch.ones(1),
         config,
     )
     assert float(loss) == pytest.approx(0.5)
+
+
+def test_prediction_loss_applies_per_flight_airport_weights():
+    config = TSConfig(final_time_loss_weight=0.0)
+    target = torch.zeros((2, 1, len(ch.CHANNELS)))
+    prediction = StatePrediction(
+        states=torch.stack((torch.ones_like(target[0]), 3.0 * torch.ones_like(target[0]))),
+        final_time_s=torch.zeros(2),
+    )
+    loss = prediction_loss(
+        prediction,
+        target,
+        torch.ones_like(target),
+        torch.zeros(2),
+        torch.tensor([1.5, 0.5]),
+        config,
+    )
+
+    assert float(loss) == pytest.approx((1.0 * 1.5 + 9.0 * 0.5) / 2.0)
 
 
 def test_split_by_flight_is_disjoint_and_reproducible():
@@ -469,7 +513,7 @@ def test_windows_never_straddle_two_flights():
     # explicitly: concatenating series into one array would be an easy "optimisation" that
     # silently teaches the model to fly from one aircraft's track into another's.
     series, config = _series(n_flights=3)
-    dataset = TrajectoryWindows(series, config, Normalizer.fit(series))
+    dataset = FixedAnchorTrajectoryWindows(series, config, Normalizer.fit(series))
     for s_idx, anchor in dataset.index:
         assert anchor - config.seq_len + 1 >= 0
         assert anchor < series[s_idx].n_samples
@@ -670,13 +714,22 @@ def test_cross_validation_folds_are_disjoint_and_cover_outer_train():
     assert set(identities) == {item.dataset_id for item in outer_train}
 
 
-def test_first_anchor_policy_keeps_one_validation_window_per_flight():
+def test_fixed_anchor_dataset_keeps_one_window_per_flight():
     series, config = _series(n_flights=4)
-    dataset = TrajectoryWindows(
-        series, config, Normalizer.fit(series), anchor_policy="first"
-    )
+    dataset = FixedAnchorTrajectoryWindows(series, config, Normalizer.fit(series))
     assert len(dataset) == len(series)
     assert all(anchor == config.seq_len - 1 for _series_index, anchor in dataset.index)
+
+
+def test_vectorized_batch_matches_individual_random_anchor_samples():
+    series, config = _series(n_flights=3, n_segments=16)
+    dataset = RandomAnchorTrajectoryWindows(series, config, Normalizer.fit(series))
+    indices = np.array([0, len(dataset) // 2, len(dataset) - 1])
+
+    batch = dataset.batch(indices)
+    individual = [dataset[int(index)] for index in indices]
+    for field, values in enumerate(batch):
+        assert torch.equal(values, torch.stack([sample[field] for sample in individual]))
 
 
 def test_common_anchor_is_independent_of_history_length():
@@ -684,11 +737,10 @@ def test_common_anchor_is_independent_of_history_length():
     normalizer = Normalizer.fit(series)
     common_anchor = 89
     datasets = [
-        TrajectoryWindows(
+        FixedAnchorTrajectoryWindows(
             series,
             replace(base, seq_len=seq_len),
             normalizer,
-            anchor_policy="first",
             minimum_anchor_index=common_anchor,
         )
         for seq_len in (30, 60, 90)
@@ -714,9 +766,6 @@ def test_history_ablation_runs_on_common_outer_train_anchors(tmp_path):
         batch_size=32,
         epochs=1,
         patience=1,
-        train_samples_per_epoch=32,
-        sampling_strategy="airport-flight-balanced",
-        eval_anchor_policy="first",
     )
     provenance = {
         "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
@@ -764,19 +813,47 @@ def test_history_ablation_runs_on_common_outer_train_anchors(tmp_path):
         assert (tmp_path / name).is_file(), name
 
 
-def test_balanced_sampler_weights_airports_before_flights():
+def test_fixed_epoch_sampler_uses_every_flight_once_and_reshuffles():
+    series, config = _series(n_flights=8)
+    dataset = FixedAnchorTrajectoryWindows(series, config, Normalizer.fit(series))
+    first = list(FlightEpochSampler(dataset, seed=7))
+    repeated = list(FlightEpochSampler(dataset, seed=7))
+    reshuffled = list(FlightEpochSampler(dataset, seed=8))
+
+    assert first == repeated
+    assert first != reshuffled
+    assert len(first) == len(series)
+    assert {dataset.index[index][0] for index in first} == set(range(len(series)))
+
+
+def test_random_epoch_sampler_selects_one_valid_anchor_per_flight():
+    series, config = _series(n_flights=8)
+    dataset = RandomAnchorTrajectoryWindows(series, config, Normalizer.fit(series))
+    first = list(FlightEpochSampler(dataset, seed=7))
+    second = list(FlightEpochSampler(dataset, seed=8))
+
+    for epoch in (first, second):
+        assert len(epoch) == len(series)
+        assert {dataset.index[index][0] for index in epoch} == set(range(len(series)))
+    assert {dataset.index[index] for index in first} != {
+        dataset.index[index] for index in second
+    }
+
+
+def test_flight_loss_weights_give_every_airport_equal_epoch_weight():
     series, config = _series(n_flights=8)
     series[0].scenario.source["arr_airport"] = "KAAA"
     for item in series[1:]:
         item.scenario.source["arr_airport"] = "KBBB"
-    dataset = TrajectoryWindows(series, config, Normalizer.fit(series))
-    sampler = AirportFlightWindowSampler(dataset, num_samples=2000, seed=7)
-    counts = {"KAAA": 0, "KBBB": 0}
-    for window_index in sampler:
-        series_index, _anchor = dataset.index[window_index]
-        counts[series[series_index].airport] += 1
-    assert 850 <= counts["KAAA"] <= 1150
-    assert sum(counts.values()) == 2000
+    dataset = FixedAnchorTrajectoryWindows(series, config, Normalizer.fit(series))
+
+    totals = {"KAAA": 0.0, "KBBB": 0.0}
+    for index in FlightEpochSampler(dataset, seed=7):
+        series_index, _anchor = dataset.index[index]
+        totals[series[series_index].airport] += float(dataset[index][4])
+
+    assert totals["KAAA"] == pytest.approx(totals["KBBB"])
+    assert sum(totals.values()) == pytest.approx(len(series))
 
 
 def test_normalizer_round_trips_and_survives_a_constant_channel():
@@ -997,7 +1074,6 @@ def test_cross_validation_runs_real_two_fold_search(tmp_path):
         n_flights=20, device="cpu", epochs=1, patience=1,
         d_model=16, d_ff=32, n_heads=4, e_layers=1,
         seq_len=20, n_segments=10, batch_size=32,
-        train_samples_per_epoch=64, eval_anchor_policy="first",
     )
     provenance = {
         "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
@@ -1341,9 +1417,10 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
         (tmp_path / "run" / "checkpoint_metadata.json").read_text(encoding="utf-8")
     )
     assert metadata == {
-        "schema_version": "ts-checkpoint-metadata-v4-runway-crossing",
+        "schema_version": "ts-checkpoint-metadata-v7-anchor-policy",
         "checkpoint_sha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
         "arrival_manifests": {AIRPORT: "a" * 64},
+        "random_train_anchor": False,
         "split_sha256": {
             split: hashlib.sha256("\n".join(sorted(payload["split"][split])).encode()).hexdigest()
             for split in ("train", "val", "test")

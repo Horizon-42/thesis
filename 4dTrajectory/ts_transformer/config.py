@@ -22,10 +22,6 @@ from typing import Any
 from channels import CHANNELS
 
 MODELS = ("itransformer", "patchtst")
-SAMPLING_ALL_WINDOWS = "all-windows"
-SAMPLING_AIRPORT_FLIGHT_BALANCED = "airport-flight-balanced"
-SAMPLING_STRATEGIES = (SAMPLING_ALL_WINDOWS, SAMPLING_AIRPORT_FLIGHT_BALANCED)
-EVAL_ANCHOR_POLICIES = ("all", "first")
 COORDINATE_FRAMES = ("enu", "runway-aligned")
 
 # Time grid. ADS-B arrives at ~1 Hz but irregularly; 2 s is the resample step — fine enough
@@ -134,11 +130,9 @@ class TSConfig:
     device: str = "auto"            # "auto" -> cuda when available, else cpu
     val_fraction: float = 0.15      # split is BY FLIGHT, never by window — see dataset.py
     test_fraction: float = 0.15
-    sampling_strategy: str = SAMPLING_ALL_WINDOWS
-    train_samples_per_epoch: int | None = None
-    # Full prediction always starts at the earliest anchor. Pooled validation can mirror
-    # that contract instead of materialising every highly-overlapping sliding anchor.
-    eval_anchor_policy: str = "all"
+    # One full-trajectory example per flight is the default: observe L samples, then predict
+    # from anchor L-1 to the runway. Rolling/replanning experiments opt into later anchors.
+    random_train_anchor: bool = False
     # Inferred final-approach geometry is weaker supervision than an observed ADS-B row.
     # These weights apply to POSITION channels only; fitted velocity channels are always
     # masked.  The terminal weight is added on the fitted crossing row so the endpoint is
@@ -158,16 +152,6 @@ class TSConfig:
             raise ValueError(
                 f"unknown coordinate_frame {self.coordinate_frame!r}; "
                 f"expected one of {COORDINATE_FRAMES}"
-            )
-        if self.sampling_strategy not in SAMPLING_STRATEGIES:
-            raise ValueError(
-                f"unknown sampling_strategy {self.sampling_strategy!r}; "
-                f"expected one of {SAMPLING_STRATEGIES}"
-            )
-        if self.eval_anchor_policy not in EVAL_ANCHOR_POLICIES:
-            raise ValueError(
-                f"unknown eval_anchor_policy {self.eval_anchor_policy!r}; "
-                f"expected one of {EVAL_ANCHOR_POLICIES}"
             )
         for name in (
             "seq_len",
@@ -203,8 +187,6 @@ class TSConfig:
             raise ValueError("fitted_terminal_position_weight must be non-negative")
         if self.final_time_loss_weight < 0.0:
             raise ValueError("final_time_loss_weight must be non-negative")
-        if self.train_samples_per_epoch is not None and self.train_samples_per_epoch <= 0:
-            raise ValueError("train_samples_per_epoch must be positive when supplied")
 
     # PatchTST reads configs.enc_in; iTransformer infers the count from the tensor.
     @property

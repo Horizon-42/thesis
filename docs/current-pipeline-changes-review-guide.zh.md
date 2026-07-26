@@ -461,8 +461,8 @@ git diff -- \
 
 - checkpoint 内含 arrival manifest SHA-256 和按 `flight_key` 排序的逐航班
   `source_sha256`；
-- `checkpoint_metadata.json` 只保存 import-light reuse 所需的 checkpoint 与 manifest
-  digest，不复制逐航班 roster；
+- `checkpoint_metadata.json` 只保存 import-light reuse 所需的 checkpoint、manifest
+  digest、anchor policy 与 split digest，不复制逐航班 roster；
 - direct predict 与 `--skip-train` 都拒绝旧/不匹配 checkpoint；
 - train/val/test/all 的 prediction dir、comparison category、summary 和 source 明确分开；
 - optimizer 的 `optimization_config` 只记录实际生效参数：unconstrained 使用

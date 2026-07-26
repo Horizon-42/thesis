@@ -22,11 +22,13 @@ import torch.nn as nn
 
 from channels import CHANNELS
 from batching import resolve_batch_size
-from config import SAMPLING_AIRPORT_FLIGHT_BALANCED, TSConfig
+from config import TSConfig
 from dataset import (
     ARRIVAL_DATA_PROVENANCE_SCHEMA,
+    FixedAnchorTrajectoryWindows,
     FlightSeries,
     Normalizer,
+    RandomAnchorTrajectoryWindows,
     TrajectoryWindows,
     iter_batches,
     provenance_manifest_digests,
@@ -39,7 +41,7 @@ from prediction_outputs import StatePrediction
 
 CHECKPOINT_NAME = "checkpoint.pt"
 CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
-CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v4-runway-crossing"
+CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v7-anchor-policy"
 TARGET_CONTRACT = "normalized-time-runway-crossing-v1"
 HISTORY_NAME = "history.json"
 
@@ -74,14 +76,23 @@ def prediction_loss(
     target_states: torch.Tensor,
     state_weights: torch.Tensor,
     target_final_time_s: torch.Tensor,
+    flight_weights: torch.Tensor,
     config: TSConfig,
 ) -> torch.Tensor:
-    """Joint dimensionless objective used by training, validation and CV selection."""
-    state_loss = masked_mse(prediction.states, target_states, state_weights)
+    """Airport-macro joint loss, with every flight represented once per epoch."""
+    state_error = ((prediction.states - target_states) ** 2 * state_weights).sum(
+        dim=(1, 2)
+    )
+    state_denominator = state_weights.sum(dim=(1, 2)).clamp(min=1.0)
+    state_loss = state_error / state_denominator
     time_loss = (
         (prediction.final_time_s - target_final_time_s) / config.final_time_scale_s
-    ).square().mean()
-    return state_loss + config.final_time_loss_weight * time_loss
+    ).square()
+    per_flight = state_loss + config.final_time_loss_weight * time_loss
+    # Weights are normalized to mean one across the complete epoch. Keeping the minibatch
+    # denominator independent of its airport composition gives an unbiased stochastic
+    # estimate of that fixed airport-macro objective.
+    return (per_flight * flight_weights).mean()
 
 
 @dataclass
@@ -119,7 +130,7 @@ def _predict_split(
     predicted_chunks, truth_chunks, mask_chunks = [], [], []
     predicted_time_chunks, truth_time_chunks = [], []
     with torch.no_grad():
-        for x, y, mask, final_time_s in iter_batches(
+        for x, y, mask, final_time_s, _flight_weights in iter_batches(
             dataset, batch_size, shuffle=False, seed=0
         ):
             output = model(x.to(device))
@@ -201,11 +212,10 @@ def _validation_datasets(
     for item in series:
         by_airport.setdefault(item.airport or "<unknown>", []).append(item)
     return {
-        airport: TrajectoryWindows(
+        airport: FixedAnchorTrajectoryWindows(
             group,
             config,
             normalizer,
-            anchor_policy=config.eval_anchor_policy,
             minimum_anchor_index=minimum_anchor_index,
         )
         for airport, group in sorted(by_airport.items())
@@ -218,28 +228,26 @@ def _dataset_loss(
     device: torch.device,
     batch_size: int,
 ) -> float:
-    weighted_error = 0.0
-    weight_total = 0.0
-    time_error = 0.0
-    time_count = 0
+    loss_total = 0.0
+    flight_weight_total = 0.0
     with torch.no_grad():
-        for x, y, mask, final_time_s in iter_batches(
+        for x, y, mask, final_time_s, flight_weights in iter_batches(
             dataset, batch_size, shuffle=False, seed=0
         ):
             x, y, mask = x.to(device), y.to(device), mask.to(device)
             final_time_s = final_time_s.to(device)
+            flight_weights = flight_weights.to(device)
             prediction = model(x)
-            weighted_error += float((((prediction.states - y) ** 2) * mask).sum())
-            weight_total += float(mask.sum())
-            time_error += float((
+            state_error = (((prediction.states - y) ** 2) * mask).sum(dim=(1, 2))
+            state_loss = state_error / mask.sum(dim=(1, 2)).clamp(min=1.0)
+            time_loss = (
                 (prediction.final_time_s - final_time_s)
                 / dataset.config.final_time_scale_s
-            ).square().sum())
-            time_count += len(final_time_s)
-    return (
-        weighted_error / max(weight_total, 1.0)
-        + dataset.config.final_time_loss_weight * time_error / max(time_count, 1)
-    )
+            ).square()
+            per_flight = state_loss + dataset.config.final_time_loss_weight * time_loss
+            loss_total += float((per_flight * flight_weights).sum())
+            flight_weight_total += float(flight_weights.sum())
+    return loss_total / max(flight_weight_total, 1.0)
 
 
 def fit_model(
@@ -262,11 +270,12 @@ def fit_model(
     # Reset after the isolated auto-batch probe so probing cannot change final initialisation.
     torch.manual_seed(config.seed)
     np.random.seed(config.seed)
-    balanced = config.sampling_strategy == SAMPLING_AIRPORT_FLIGHT_BALANCED
-    normalizer = Normalizer.fit(
-        train_series, balance_airports_and_flights=balanced
-    )
-    train_set = TrajectoryWindows(
+    normalizer = Normalizer.fit(train_series, balance_airports_and_flights=True)
+    training_dataset_class = {
+        False: FixedAnchorTrajectoryWindows,
+        True: RandomAnchorTrajectoryWindows,
+    }[config.random_train_anchor]
+    train_set = training_dataset_class(
         train_series,
         config,
         normalizer,
@@ -292,9 +301,8 @@ def fit_model(
     )
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=3)
 
-    requested_samples = config.train_samples_per_epoch or len(train_set)
-    samples_per_epoch = (
-        requested_samples if balanced else min(requested_samples, len(train_set))
+    flights_per_epoch = sum(
+        count > 0 for _start, count in train_set.series_ranges.values()
     )
     if verbose:
         print(f"  model      {config.model} ({parameter_count(model):,} params) on {device}")
@@ -302,12 +310,15 @@ def fit_model(
               f"N={config.n_segments} normalized progress segments + final_time_s")
         print(f"  flights    train {len(train_series)} / val {len(val_series)}")
         print(f"  windows    train {len(train_set)} / val {val_window_count} "
-              f"(eval anchors: {config.eval_anchor_policy})")
+              "(validation anchor: fixed L-1)")
+        print(f"  anchors    {train_set.anchor_description}")
         if minimum_anchor_index is not None:
             print(f"  anchor     common minimum index {minimum_anchor_index} "
                   f"({minimum_anchor_index * config.dt_s:.0f}s after track entry)")
-        sampling = "airport -> flight -> anchor" if balanced else "all windows"
-        print(f"  sampling   {sampling}; {samples_per_epoch} sample(s)/epoch")
+        print(
+            f"  sampling   one shuffled sample/flight; {flights_per_epoch} flight(s)/epoch; "
+            "airport-macro loss weights"
+        )
 
     history: list[EpochResult] = []
     best_val = math.inf
@@ -318,30 +329,33 @@ def fit_model(
         started = time.perf_counter()
 
         model.train()
-        train_total, train_steps = 0.0, 0
-        for x, y, mask, final_time_s in iter_batches(
+        train_total, train_weight_total = 0.0, 0.0
+        for x, y, mask, final_time_s, flight_weights in iter_batches(
             train_set,
             config.batch_size,
-            shuffle=not balanced,
+            shuffle=True,
             seed=config.seed + epoch,
-            balanced=balanced,
-            num_samples=samples_per_epoch,
         ):
+            batch_count = len(flight_weights)
+            batch_weight = float(flight_weights.sum())
             x, y, mask = x.to(device), y.to(device), mask.to(device)
             final_time_s = final_time_s.to(device)
+            flight_weights = flight_weights.to(device)
             optimizer.zero_grad()
-            loss = prediction_loss(model(x), y, mask, final_time_s, config)
+            loss = prediction_loss(
+                model(x), y, mask, final_time_s, flight_weights, config
+            )
             loss.backward()
             optimizer.step()
-            train_total += float(loss.detach())
-            train_steps += 1
+            train_total += float(loss.detach()) * batch_count
+            train_weight_total += batch_weight
 
         model.eval()
         val_by_airport = {
             airport: _dataset_loss(model, dataset, device, config.batch_size)
             for airport, dataset in val_sets.items()
         }
-        train_loss = train_total / max(train_steps, 1)
+        train_loss = train_total / max(train_weight_total, 1.0)
         # Equal airport weight: a large/long airport cannot control early stopping alone.
         val_loss = float(np.mean(list(val_by_airport.values())))
         if not (math.isfinite(train_loss) and math.isfinite(val_loss)):
@@ -417,13 +431,9 @@ def train(
     model, config, normalizer, device = (
         fit.model, fit.config, fit.normalizer, fit.device
     )
-    val_set = TrajectoryWindows(
-        val_series, config, normalizer, anchor_policy=config.eval_anchor_policy
-    )
+    val_set = FixedAnchorTrajectoryWindows(val_series, config, normalizer)
     test_window_count = sum(
         min(len(window_anchors(item, config)), 1)
-        if config.eval_anchor_policy == "first"
-        else len(window_anchors(item, config))
         for item in test_series
     )
     split_metrics = {"val": evaluate_split(model, val_set, normalizer, config, device)}
@@ -450,6 +460,7 @@ def train(
         "schema_version": CHECKPOINT_METADATA_SCHEMA,
         "checkpoint_sha256": checkpoint_sha256,
         "arrival_manifests": manifest_digests,
+        "random_train_anchor": config.random_train_anchor,
         "split_sha256": {
             "train": _split_sha256(train_series),
             "val": _split_sha256(val_series),

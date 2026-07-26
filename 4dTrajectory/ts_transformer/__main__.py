@@ -50,9 +50,7 @@ if str(_TS_DIR) not in sys.path:
 from config import (  # noqa: E402
     COORDINATE_FRAMES,
     DEFAULT_AIRCRAFT_TYPE,
-    EVAL_ANCHOR_POLICIES,
     MODELS,
-    SAMPLING_STRATEGIES,
     TSConfig,
 )
 from cross_validation import (  # noqa: E402
@@ -137,9 +135,12 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--device", default=None, help='"auto" (default), "cpu", "cuda"')
     parser.add_argument("--coordinate-frame", choices=COORDINATE_FRAMES, default=None)
-    parser.add_argument("--sampling-strategy", choices=SAMPLING_STRATEGIES, default=None)
-    parser.add_argument("--samples-per-epoch", type=int, default=None)
-    parser.add_argument("--eval-anchor-policy", choices=EVAL_ANCHOR_POLICIES, default=None)
+    parser.add_argument(
+        "--random-train-anchor",
+        action="store_true",
+        default=None,
+        help="train from random valid anchors instead of the fixed full-trajectory anchor L-1",
+    )
     parser.add_argument("--config-overrides", default=None,
                         help="JSON object of TSConfig overrides, e.g. CV best_config.json")
     parser.add_argument("--instance-norm", dest="instance_norm", action="store_true", default=None,
@@ -172,9 +173,7 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("d_model", args.d_model), ("e_layers", args.e_layers), ("n_heads", args.n_heads),
         ("seed", args.seed), ("device", args.device),
         ("aircraft_type", args.aircraft_type), ("coordinate_frame", args.coordinate_frame),
-        ("sampling_strategy", args.sampling_strategy),
-        ("train_samples_per_epoch", args.samples_per_epoch),
-        ("eval_anchor_policy", args.eval_anchor_policy),
+        ("random_train_anchor", args.random_train_anchor),
         ("use_norm", args.instance_norm), ("revin", args.instance_norm),
     )
     overrides.update({key: value for key, value in cli_values if value is not None})

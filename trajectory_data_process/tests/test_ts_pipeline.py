@@ -52,11 +52,22 @@ def test_simple_cv_runner_uses_the_fixed_default_grid(tmp_path, monkeypatch, cap
 
     assert str(krdu) in output and str(kstl) in output
     assert "--cv-parameters n_segments,learning_rate,d_model" in output
-    assert "--cv-epochs 30" in output
+    assert f"--cv-epochs {pipeline.DEFAULT_CV_EPOCHS}" in output
     assert "--cv-patience 6" in output
     assert "(27 candidates)" in output
     assert "--trials" not in output
     assert "after CV:" in output and "plot_ts_results.py" in output
+
+
+def test_simple_cv_runner_forwards_explicit_batch_size(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(pipeline, "HARVEST_ROOT", tmp_path / "harvest")
+    monkeypatch.setattr(pipeline, "OPT_OUTPUTS_ROOT", tmp_path / "outputs")
+    _manifest(pipeline.HARVEST_ROOT, "KRDU")
+
+    assert cv_runner.main(["--batch-size", "2048", "--dry-run"]) == 0
+    output = capsys.readouterr().out
+
+    assert "--batch-size 2048" in output
 
 
 def test_result_plotter_writes_viewable_charts_and_csv_tables(tmp_path):
@@ -192,13 +203,42 @@ def test_pooled_plan_trains_once_and_publishes_each_airport(tmp_path, monkeypatc
     )]
     assert all(str(krdu) in command and str(kstl) in command for command in commands)
     assert commands[0].count("--data") == 2
-    assert "airport-flight-balanced" in commands[0]
+    assert "--sampling-strategy" not in commands[0]
+    assert "--samples-per-epoch" not in commands[0]
+    assert "--random-train-anchor" not in commands[0]
+
+    rolling = pipeline.TrainingPlan(
+        ("KRDU", "KSTL"), "itransformer", training_mode="pooled",
+        random_train_anchor=True,
+    )
+    assert "--random-train-anchor" in rolling.cv_step()[1]
 
     krdu_prediction = pipeline.PredictionPlan(training, "KRDU", ("eval",))
     kstl_prediction = pipeline.PredictionPlan(training, "KSTL", ("eval",))
     assert krdu_prediction.training.checkpoint == kstl_prediction.training.checkpoint
     assert krdu_prediction.pred_dir != kstl_prediction.pred_dir
     assert "pooled" in krdu_prediction.category
+
+
+def test_fixed_and_random_anchor_modes_use_distinct_artifact_paths(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline, "HARVEST_ROOT", tmp_path / "harvest")
+    monkeypatch.setattr(pipeline, "OPT_OUTPUTS_ROOT", tmp_path / "outputs")
+    monkeypatch.setattr(pipeline, "COMPARISON_AIRPORTS_ROOT", tmp_path / "frontend")
+    _manifest(pipeline.HARVEST_ROOT, "KRDU")
+
+    fixed = pipeline.TrainingPlan(
+        ("KRDU",), "itransformer", training_mode="pooled"
+    )
+    random = pipeline.TrainingPlan(
+        ("KRDU",), "itransformer", training_mode="pooled",
+        random_train_anchor=True,
+    )
+    fixed_prediction = pipeline.PredictionPlan(fixed, "KRDU", ("eval",))
+    random_prediction = pipeline.PredictionPlan(random, "KRDU", ("eval",))
+
+    assert fixed.train_dir != random.train_dir
+    assert fixed_prediction.pred_dir != random_prediction.pred_dir
+    assert fixed_prediction.category != random_prediction.category
 
 
 def test_prediction_outputs_and_categories_are_split_specific(tmp_path, monkeypatch):
@@ -259,6 +299,39 @@ def test_skip_train_rejects_checkpoint_for_different_manifest_set(tmp_path, monk
     }), encoding="utf-8")
 
     assert "arrival manifests" in (plan.checkpoint_reuse_error() or "")
+
+
+@pytest.mark.parametrize(
+    ("trained_policy", "requested_policy"),
+    ((False, True), (True, False)),
+)
+def test_skip_train_rejects_checkpoint_from_opposite_anchor_policy(
+    tmp_path, monkeypatch, trained_policy, requested_policy
+):
+    monkeypatch.setattr(pipeline, "HARVEST_ROOT", tmp_path / "harvest")
+    manifest = _manifest(pipeline.HARVEST_ROOT, "KRDU")
+    shared_output = tmp_path / "shared-run"
+    trained = pipeline.TrainingPlan(
+        ("KRDU",), "itransformer", training_mode="pooled",
+        random_train_anchor=trained_policy, output_dir=shared_output,
+    )
+    requested = pipeline.TrainingPlan(
+        ("KRDU",), "itransformer", training_mode="pooled",
+        random_train_anchor=requested_policy, output_dir=shared_output,
+    )
+    trained.train_dir.mkdir(parents=True)
+    trained.checkpoint.write_bytes(b"checkpoint")
+    trained.checkpoint_metadata.write_text(json.dumps({
+        "schema_version": pipeline.CHECKPOINT_METADATA_SCHEMA,
+        "checkpoint_sha256": hashlib.sha256(trained.checkpoint.read_bytes()).hexdigest(),
+        "arrival_manifests": {
+            "KRDU": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+        },
+        "random_train_anchor": trained_policy,
+    }), encoding="utf-8")
+
+    assert trained.checkpoint_reuse_error() is None
+    assert "random_train_anchor" in (requested.checkpoint_reuse_error() or "")
 
 
 def _ablation_cv_result(plan, manifest_digest, *, score):
@@ -447,6 +520,7 @@ def test_coordinate_ablation_verifies_final_split_before_test(tmp_path, monkeypa
         "schema_version": pipeline.CHECKPOINT_METADATA_SCHEMA,
         "checkpoint_sha256": hashlib.sha256(plan.checkpoint.read_bytes()).hexdigest(),
         "arrival_manifests": result["arrival_manifests"],
+        "random_train_anchor": False,
         "split_sha256": split_sha256,
     }), encoding="utf-8")
 

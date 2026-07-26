@@ -22,7 +22,7 @@ from typing import Any
 import run_ts_pipeline as pipeline
 
 FRAMES = ("enu", "runway-aligned")
-RESULT_SCHEMA = "ts-coordinate-frame-ablation-v4-runway-crossing"
+RESULT_SCHEMA = "ts-coordinate-frame-ablation-v5-flight-epoch-airport-macro"
 RESULT_NAME = "coordinate_frame_ablation.json"
 
 
@@ -159,9 +159,7 @@ def _assert_requested_result(
         "model": plan.model,
         "n_segments": plan._expected_cv_base_config()["n_segments"],
         "coordinate_frame": plan.coordinate_frame,
-        "sampling_strategy": "airport-flight-balanced",
-        "train_samples_per_epoch": plan.cv_samples_per_epoch,
-        "eval_anchor_policy": "first",
+        "random_train_anchor": plan.random_train_anchor,
     }
     if plan.seed is not None:
         expected_config["seed"] = plan.seed
@@ -240,6 +238,10 @@ def verify_final_checkpoint(
         raise AblationContractError(
             "arrival manifests changed between CV selection and final training"
         )
+    if metadata.get("random_train_anchor") != plan.random_train_anchor:
+        raise AblationContractError(
+            "final checkpoint anchor policy differs from the selected experiment"
+        )
     if metadata.get("split_sha256") != expected_splits:
         raise AblationContractError(
             "final train/validation/test split differs from the selected CV outer split"
@@ -284,7 +286,6 @@ def main() -> int:
     parser.add_argument("--device", default=None)
     parser.add_argument("--aircraft-type", default=None)
     parser.add_argument("--batch-size", default="auto")
-    parser.add_argument("--samples-per-epoch", type=int, default=None)
     parser.add_argument("--cv-folds", type=int, default=3)
     parser.add_argument(
         "--cv-parameters",
@@ -297,8 +298,11 @@ def main() -> int:
     )
     parser.add_argument("--cv-epochs", type=int, default=pipeline.DEFAULT_CV_EPOCHS)
     parser.add_argument("--cv-patience", type=int, default=pipeline.DEFAULT_CV_PATIENCE)
-    parser.add_argument("--cv-samples-per-epoch", type=int,
-                        default=pipeline.DEFAULT_CV_SAMPLES_PER_EPOCH)
+    parser.add_argument(
+        "--random-train-anchor",
+        action="store_true",
+        help="use one random valid anchor per flight and epoch; default is fixed L-1",
+    )
     parser.add_argument("--output-dir", type=Path, default=None,
                         help="experiment root; defaults under 4dTrajectory/outputs/POOLED")
     parser.add_argument("--reuse-cv", action="store_true",
@@ -316,9 +320,7 @@ def main() -> int:
             parser.error("--batch-size must be a positive integer or 'auto'")
     if args.epochs is not None and args.epochs <= 0:
         parser.error("--epochs must be positive")
-    if args.samples_per_epoch is not None and args.samples_per_epoch <= 0:
-        parser.error("--samples-per-epoch must be positive")
-    for name in ("cv_epochs", "cv_patience", "cv_samples_per_epoch"):
+    for name in ("cv_epochs", "cv_patience"):
         if getattr(args, name) <= 0:
             parser.error(f"--{name.replace('_', '-')} must be positive")
     if args.cv_folds < 2:
@@ -353,12 +355,11 @@ def main() -> int:
             aircraft_type=args.aircraft_type,
             coordinate_frame=frame,
             batch_size=args.batch_size,
-            samples_per_epoch=args.samples_per_epoch,
             cv_folds=args.cv_folds,
             cv_parameters=args.cv_parameters,
             cv_epochs=args.cv_epochs,
             cv_patience=args.cv_patience,
-            cv_samples_per_epoch=args.cv_samples_per_epoch,
+            random_train_anchor=args.random_train_anchor,
             output_dir=experiment_dir / frame,
         )
         for frame in FRAMES
@@ -367,8 +368,7 @@ def main() -> int:
     print(f"coordinate-frame ablation: model={args.model}, normalized time")
     print(f"airports (locked): {','.join(airports)}")
     print(f"seed={args.seed}, folds={args.cv_folds}, "
-          f"CV parameters={','.join(args.cv_parameters)}, "
-          f"CV samples/epoch={args.cv_samples_per_epoch}")
+          f"CV parameters={','.join(args.cv_parameters)}")
     print(f"experiment: {experiment_dir}")
 
     if args.dry_run:
@@ -412,10 +412,6 @@ def main() -> int:
             "cv_parameters": list(args.cv_parameters),
             "cv_epochs": args.cv_epochs,
             "cv_patience": args.cv_patience,
-            "cv_samples_per_epoch": args.cv_samples_per_epoch,
-            "final_samples_per_epoch": (
-                args.samples_per_epoch or pipeline.DEFAULT_POOLED_SAMPLES_PER_EPOCH
-            ),
             "batch_size": args.batch_size,
             "outer_split": results[winner]["outer_split"],
             "arrival_manifests": results[winner]["arrival_manifests"],

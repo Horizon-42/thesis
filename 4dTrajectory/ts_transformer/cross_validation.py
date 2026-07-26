@@ -32,7 +32,7 @@ from train import fit_model, usable_series
 
 RESULTS_NAME = "cv_results.json"
 BEST_CONFIG_NAME = "best_config.json"
-RESULTS_SCHEMA = "ts-cross-validation-v5-runway-crossing-batch-probe-2048"
+RESULTS_SCHEMA = "ts-cross-validation-v7-flight-epoch-airport-macro"
 CV_PARAMETER_GRIDS: dict[str, tuple[Any, ...]] = {
     "n_segments": (64, 128, 256),
     "learning_rate": (1e-4, 3e-4, 5e-4),

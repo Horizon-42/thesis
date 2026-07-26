@@ -34,30 +34,28 @@ TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
 if str(TS_DIR) not in sys.path:
     sys.path.insert(0, str(TS_DIR))
 
-from config import TSConfig  # noqa: E402
+from config import COORDINATE_FRAMES, MODELS, TSConfig  # noqa: E402
 from cross_validation import (  # noqa: E402
+    BEST_CONFIG_NAME,
     CV_PARAMETER_GRIDS,
     DEFAULT_CV_EPOCHS,
     DEFAULT_CV_PATIENCE,
     DEFAULT_CV_PARAMETERS,
+    RESULTS_NAME as CV_RESULTS_NAME,
     RESULTS_SCHEMA as CV_RESULTS_SCHEMA,
     parameter_grid,
     validate_cv_parameters,
 )
+from train import (  # noqa: E402
+    CHECKPOINT_METADATA_NAME,
+    CHECKPOINT_METADATA_SCHEMA,
+    CHECKPOINT_NAME,
+)
 
-MODELS = ("itransformer", "patchtst")
 TRAINING_MODES = ("per-airport", "pooled")
-COORDINATE_FRAMES = ("enu", "runway-aligned")
 MODEL_SHORT = {"itransformer": "itr", "patchtst": "ptst"}
 MODEL_LABEL = {"itransformer": "iTransformer", "patchtst": "PatchTST"}
 OUTPUT_KINDS = ("czml", "eval")
-
-CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
-CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v4-runway-crossing"
-CV_RESULTS_NAME = "cv_results.json"
-BEST_CONFIG_NAME = "best_config.json"
-DEFAULT_POOLED_SAMPLES_PER_EPOCH = 250_000
-DEFAULT_CV_SAMPLES_PER_EPOCH = 100_000
 
 
 def _file_sha256(path: Path) -> str:
@@ -92,6 +90,10 @@ def _frame_tag(coordinate_frame: str) -> str:
     return "" if coordinate_frame == "enu" else "_runway_aligned"
 
 
+def _anchor_tag(random_train_anchor: bool) -> str:
+    return "_random_anchor" if random_train_anchor else ""
+
+
 class TrainingPlan:
     """One CV/final-training cell, shared by one or more airport predictions."""
 
@@ -108,12 +110,11 @@ class TrainingPlan:
         aircraft_type: str | None = None,
         coordinate_frame: str = "enu",
         batch_size: str = "auto",
-        samples_per_epoch: int | None = None,
         cv_folds: int = 3,
         cv_parameters: tuple[str, ...] = DEFAULT_CV_PARAMETERS,
         cv_epochs: int = DEFAULT_CV_EPOCHS,
         cv_patience: int = DEFAULT_CV_PATIENCE,
-        cv_samples_per_epoch: int = DEFAULT_CV_SAMPLES_PER_EPOCH,
+        random_train_anchor: bool = False,
         output_dir: str | Path | None = None,
     ) -> None:
         self.airports = tuple(sorted(airport.strip().upper() for airport in airports))
@@ -128,16 +129,15 @@ class TrainingPlan:
         self.aircraft_type = aircraft_type
         self.coordinate_frame = coordinate_frame
         self.batch_size = batch_size
-        self.samples_per_epoch = samples_per_epoch
         self.cv_folds = cv_folds
         self.cv_parameters = validate_cv_parameters(cv_parameters)
         self.cv_epochs = cv_epochs
         self.cv_patience = cv_patience
-        self.cv_samples_per_epoch = cv_samples_per_epoch
+        self.random_train_anchor = random_train_anchor
 
         self.data_manifests = tuple(arrival_manifest_path(airport) for airport in self.airports)
         scope = self.airports[0] if training_mode == "per-airport" else "POOLED"
-        suffix = _frame_tag(coordinate_frame)
+        suffix = _frame_tag(coordinate_frame) + _anchor_tag(random_train_anchor)
         self.train_dir = (
             Path(output_dir)
             if output_dir is not None
@@ -146,7 +146,7 @@ class TrainingPlan:
         self.cv_dir = self.train_dir / "cross_validation"
         self.cv_results = self.cv_dir / CV_RESULTS_NAME
         self.best_config = self.cv_dir / BEST_CONFIG_NAME
-        self.checkpoint = self.train_dir / "checkpoint.pt"
+        self.checkpoint = self.train_dir / CHECKPOINT_NAME
         self.checkpoint_metadata = self.train_dir / CHECKPOINT_METADATA_NAME
 
     @property
@@ -160,13 +160,14 @@ class TrainingPlan:
     def _data_args(self) -> list[str]:
         return [token for manifest in self.data_manifests for token in ("--data", str(manifest))]
 
-    def _recipe_args(self, *, cv: bool, include_base_n_segments: bool = True) -> list[str]:
+    def _recipe_args(self, *, include_base_n_segments: bool = True) -> list[str]:
         args = [
             "--model", self.model,
             "--coordinate-frame", self.coordinate_frame,
             "--batch-size", self.batch_size,
-            "--eval-anchor-policy", "first",
         ]
+        if self.random_train_anchor:
+            args.append("--random-train-anchor")
         if self.n_segments is not None and include_base_n_segments:
             args += ["--n-segments", str(self.n_segments)]
         if self.seed is not None:
@@ -175,16 +176,6 @@ class TrainingPlan:
             args += ["--device", self.device]
         if self.aircraft_type is not None:
             args += ["--aircraft-type", self.aircraft_type]
-        if self.pooled:
-            args += [
-                "--sampling-strategy", "airport-flight-balanced",
-                "--samples-per-epoch",
-                str(self.cv_samples_per_epoch if cv else (
-                    self.samples_per_epoch or DEFAULT_POOLED_SAMPLES_PER_EPOCH
-                )),
-            ]
-        elif cv and self.cv_samples_per_epoch:
-            args += ["--samples-per-epoch", str(self.cv_samples_per_epoch)]
         return args
 
     def checkpoint_reuse_error(self) -> str | None:
@@ -207,6 +198,12 @@ class TrainingPlan:
             return "checkpoint failed SHA-256 validation"
         if metadata.get("arrival_manifests") != _manifest_digests(self.airports):
             return "checkpoint was trained against different arrival manifests"
+        if metadata.get("random_train_anchor") != self.random_train_anchor:
+            return (
+                "checkpoint random_train_anchor="
+                f"{metadata.get('random_train_anchor')!r} does not match requested "
+                f"{self.random_train_anchor!r}"
+            )
         return None
 
     def cv_reuse_error(self) -> str | None:
@@ -261,7 +258,7 @@ class TrainingPlan:
         overrides: dict[str, object] = {
             "model": self.model,
             "coordinate_frame": self.coordinate_frame,
-            "eval_anchor_policy": "first",
+            "random_train_anchor": self.random_train_anchor,
         }
         if self.n_segments is not None:
             overrides["n_segments"] = self.n_segments
@@ -273,13 +270,6 @@ class TrainingPlan:
             overrides["aircraft_type"] = self.aircraft_type
         if self.batch_size != "auto":
             overrides["batch_size"] = int(self.batch_size)
-        if self.pooled:
-            overrides.update({
-                "sampling_strategy": "airport-flight-balanced",
-                "train_samples_per_epoch": self.cv_samples_per_epoch,
-            })
-        elif self.cv_samples_per_epoch:
-            overrides["train_samples_per_epoch"] = self.cv_samples_per_epoch
         return TSConfig(**overrides).to_dict()
 
     def cv_step(self) -> tuple[str, list[str]]:
@@ -289,7 +279,7 @@ class TrainingPlan:
             py, str(TS_SCRIPT), "cross-validate",
             *self._data_args(),
             "--output-dir", str(self.cv_dir),
-            *self._recipe_args(cv=True),
+            *self._recipe_args(),
             "--folds", str(self.cv_folds),
             "--cv-parameters", ",".join(self.cv_parameters),
             "--cv-epochs", str(self.cv_epochs),
@@ -304,7 +294,6 @@ class TrainingPlan:
             *self._data_args(),
             "--output-dir", str(self.train_dir),
             *self._recipe_args(
-                cv=False,
                 include_base_n_segments=(
                     not use_best_config or "n_segments" not in self.cv_parameters
                 ),
@@ -348,8 +337,9 @@ class PredictionPlan:
         self.data_manifest = arrival_manifest_path(self.airport)
         scope = "pooled_" if training.pooled else ""
         frame = _frame_tag(training.coordinate_frame)
+        anchor = _anchor_tag(training.random_train_anchor)
         tag = f"_{experiment_tag}" if experiment_tag else ""
-        stem = f"{scope}{training.model}_normalized_time{frame}{tag}_{split}"
+        stem = f"{scope}{training.model}_normalized_time{frame}{anchor}{tag}_{split}"
         self.pred_dir = OPT_OUTPUTS_ROOT / self.airport / f"ts_pred_{stem}"
         self.summary = self.pred_dir / "summary.json"
         self.report = self.pred_dir / "evaluation_report.json"
@@ -357,13 +347,14 @@ class PredictionPlan:
         category_scope = "pooled_" if training.pooled else ""
         self.category = (
             f"ts_{category_scope}{MODEL_SHORT[training.model]}_normalized_time"
-            f"{frame}{tag}_{split}"
+            f"{frame}{anchor}{tag}_{split}"
         )
         model_label = MODEL_LABEL[training.model]
         pooled_label = "pooled, " if training.pooled else ""
+        anchor_label = "random-anchor training, " if training.random_train_anchor else ""
         frame_label = "ENU" if training.coordinate_frame == "enu" else "runway-aligned"
         self.label = (
-            f"Predicted ({model_label}, {pooled_label}normalized time, "
+            f"Predicted ({model_label}, {pooled_label}{anchor_label}normalized time, "
             f"{frame_label}, {split} split)"
         )
         self.comparison_dir = (
@@ -480,8 +471,6 @@ def main() -> None:
     parser.add_argument("--coordinate-frame", choices=COORDINATE_FRAMES, default="enu")
     parser.add_argument("--batch-size", default="auto",
                         help="positive integer or auto (default: actual CUDA training-step probe)")
-    parser.add_argument("--samples-per-epoch", type=int, default=None,
-                        help=f"pooled final-training budget (default: {DEFAULT_POOLED_SAMPLES_PER_EPOCH})")
     parser.add_argument("--cv-folds", type=int, default=3)
     parser.add_argument(
         "--cv-parameters",
@@ -492,8 +481,11 @@ def main() -> None:
     )
     parser.add_argument("--cv-epochs", type=int, default=DEFAULT_CV_EPOCHS)
     parser.add_argument("--cv-patience", type=int, default=DEFAULT_CV_PATIENCE)
-    parser.add_argument("--cv-samples-per-epoch", type=int,
-                        default=DEFAULT_CV_SAMPLES_PER_EPOCH)
+    parser.add_argument(
+        "--random-train-anchor",
+        action="store_true",
+        help="train rolling forecasts from random anchors; default is fixed anchor L-1",
+    )
     parser.add_argument("--skip-cv", action="store_true",
                         help="reuse matching CV artifacts when present, otherwise use base defaults")
     parser.add_argument("--skip-train", action="store_true",
@@ -540,12 +532,11 @@ def main() -> None:
             aircraft_type=args.aircraft_type,
             coordinate_frame=args.coordinate_frame,
             batch_size=args.batch_size,
-            samples_per_epoch=args.samples_per_epoch,
             cv_folds=args.cv_folds,
             cv_parameters=args.cv_parameters,
             cv_epochs=args.cv_epochs,
             cv_patience=args.cv_patience,
-            cv_samples_per_epoch=args.cv_samples_per_epoch,
+            random_train_anchor=args.random_train_anchor,
         )
         if not run_training(
             training,

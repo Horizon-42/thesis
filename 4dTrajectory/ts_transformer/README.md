@@ -174,20 +174,30 @@ The split boundary is deliberately nested:
 only the selected `TSConfig` overrides. `--skip-cv` reuses those artifacts only if every
 arrival-manifest digest still matches; otherwise final training uses the base configuration.
 
-Pooled mode defaults to airport -> flight -> anchor sampling with 250,000 draws per epoch and
-one earliest valid validation anchor per flight. This prevents KRDU/long tracks from owning the
-loss and bounds full-horizon validation memory. Its train-only normalizer uses the same
-airport-then-flight weighting rather than reverting to duration-weighted moments. `--samples-per-epoch`, `--cv-folds`,
-`--cv-parameters`, `--cv-epochs`, and `--cv-samples-per-epoch` expose the search dimensions
-and budgets. CV exhaustively evaluates the selected fixed grids; the default
-`n_segments,learning_rate,d_model` grid has 27 candidates and no random candidate sampling.
-The default CV budget is 30 epochs with patience 6.
+Pooled mode defaults to one full-trajectory example per flight: the fixed training and
+validation anchor is `L-1`, immediately after the first complete lookback. Every eligible
+training flight appears exactly once per epoch and the complete flight order is reshuffled
+for the next epoch. The loss weights each flight by the inverse flight count of its airport,
+normalized to mean one, so every airport has the same total epoch weight without oversampling
+smaller airports. `--random-train-anchor` switches to a separate rolling/replanning dataset:
+it still uses every flight once, but independently selects one uniformly random valid anchor
+for that flight on each epoch. The train-only normalizer uses the same airport-then-flight
+weighting rather than duration-weighted moments. Random-anchor training, CV, predictions and
+frontend categories receive a `_random_anchor` path suffix, so they cannot overwrite the
+fixed-anchor baseline. `--cv-folds`, `--cv-parameters`, and
+`--cv-epochs` expose the search dimensions and budgets. CV exhaustively evaluates the fixed
+grids; the default `n_segments,learning_rate,d_model` grid has 27 candidates and no random
+candidate sampling.
+The default CV budget is 36 epochs with patience 6.
 
 Run pooled CV only, followed by automatic result plotting, with:
 
 ```bash
 conda run -n aeroviz python run_ts_cv.py
 ```
+
+Use `--batch-size 2048` to force a larger batch, or leave the default
+`--batch-size auto` to run the CUDA training-step probe.
 
 Plots and flat CSV tables are kept beside the source artifacts under the same run directory:
 
@@ -246,7 +256,7 @@ conda run --no-capture-output -n aeroviz \
 ```
 
 Unlike `--batch-size auto`, this script doubles candidates through the configured maximum,
-executes repeated real DataLoader + FP32 forward/backward/Adam steps, and selects the highest
+executes repeated real in-memory batch construction + FP32 forward/backward/Adam steps, and selects the highest
 median samples/second rather than the largest allocation that fits. Split membership is
 computed from manifest `flight_key` values before track files are opened: only outer-train
 source tracks are loaded, and validation/test counts enter the audit JSON without their
@@ -340,12 +350,18 @@ checkpoints fail loudly instead of silently mis-scaling every velocity.
 
 ### Normalized-time output (current)
 
-Every anchor predicts the complete remaining approach on the same progress grid
+Each training anchor predicts the complete remaining approach on the same progress grid
 `tau_i = i/N, i=1..N`, together with a learned physical duration `final_time_s`.
 Training linearly interpolates each target remainder at
 `t_i = t_anchor + tau_i * true_final_time_s`; inference reconstructs timestamps with the
 same equation using the predicted duration. There is one forward pass, no padding, no
 recursive self-feeding, no fixed 300-step cap, and no closest-point truncation.
+
+The default anchor is fixed at `L-1`, so every flight contributes its earliest full-trajectory
+forecast once per epoch; flight order is reshuffled between epochs. Pass
+`--random-train-anchor` only when training a rolling predictor that must start from later
+approach phases as well. That mode selects one valid anchor per flight and epoch. Validation
+and exported prediction remain fixed at `L-1`.
 
 `N` controls output resolution, not forecast seconds. It is serialized in checkpoints and
 included in the default cross-validation grid (`64, 128, 256`). The objective is normalized
@@ -740,7 +756,7 @@ Training writes:
     cv_results.json          outer-train-only fold scores + split audit digests
     best_config.json         selected TSConfig overrides
   checkpoint.pt             weights, config, normalizer, split, and arrival-data provenance
-  checkpoint_metadata.json  checkpoint, manifest, and locked split SHA-256s for audit/reuse
+  checkpoint_metadata.json  checkpoint/manifest/split hashes and anchor policy for audit/reuse
   history.json              training history, validation metrics, manifests, and source count
 ```
 
