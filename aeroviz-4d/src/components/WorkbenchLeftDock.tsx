@@ -14,7 +14,7 @@ import { useApp, type WorkbenchMode } from "../context/AppContext";
 import ControlPanel from "./ControlPanel";
 import type { ObservedVerdictState } from "../hooks/useObservedVerdictColors";
 import FlightTable from "./FlightTable";
-import OptimizationSummary from "./OptimizationSummary";
+import EvaluationSummary from "./EvaluationSummary";
 import PilotPanel from "./PilotPanel";
 import type { ObservedFlightSummary } from "../hooks/useCzmlLoader";
 
@@ -64,7 +64,7 @@ export default function WorkbenchLeftDock({
     <div className="workbench-left-dock">
       <ControlPanel observedVerdicts={observedVerdicts} />
       <FlightTable flightIds={flightIds} flightSummaries={flightSummaries} />
-      <OptimizationSummary />
+      <EvaluationSummary />
     </div>
   );
 }

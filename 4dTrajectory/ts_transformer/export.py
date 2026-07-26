@@ -5,9 +5,9 @@ A prediction batch writes the same directory shape ``4dTrajectory/optimization``
 gates (lateral <= 106.75 m, vertical in [-3.05, +6.10] m) that grade the optimizer::
 
     <output-dir>/
-      <flight>_states.json                     predicted + observed, side by side
-      <flight>_eval.json                       the evaluation record
-      references/<flight>_reference_eval.json  the observed track, same contract
+      <flight>_states.json                     canonical predicted + observed arrays
+      <flight>_eval.json                       metadata + predicted states_ref
+      references/<flight>_reference_eval.json  metadata + observed states_ref
       summary.json                             the manifest — load_records reads ONLY this
 
 The records are **reference-shaped**: ``controls == []``. That is not a shortcut, it is the
@@ -86,7 +86,8 @@ def build_prediction_record(
     *,
     index: int,
     model_name: str,
-    horizon_mode: str,
+    n_segments: int,
+    split: str = "test",
 ) -> PredictionRecord:
     """Assemble the record set for one predicted approach.
 
@@ -94,7 +95,7 @@ def build_prediction_record(
 
     1. **``t = 0`` is the anchor** — the last observed sample the model was shown. Times are
        rebased there, so ``states[0]`` IS ``initial_state``, exactly as in an optimizer
-       record, and the prediction proper starts at ``t = dt``.
+       record, and the prediction proper starts at ``final_time_s / N``.
     2. **``initial_state`` is the observed state AT the anchor**, not at the start of the
        track. The model was conditioned on the anchor; scoring it from a state 60 s earlier
        would charge it for a span it never predicted.
@@ -104,9 +105,8 @@ def build_prediction_record(
        an anchor-to-threshold prediction compares mismatched segments and reports a path
        deviation of kilometres that is pure span mismatch.
 
-    ``final_time_s`` comes from the last predicted sample's ``t``, never from the model's
-    horizon length — ``evaluation.records`` requires ``final_time_s == states[-1]["t"]`` to
-    within 1e-6, and truncation at the threshold makes those two differ.
+    ``final_time_s`` comes from the learned duration and therefore from the last predicted
+    sample's ``t``. ``evaluation.records`` requires these to agree within 1e-6.
     """
     scenario = series.scenario
     mass_kg = scenario.initial.m
@@ -130,14 +130,12 @@ def build_prediction_record(
     source = dict(scenario.source)
     source.update({
         "predictor": model_name,
-        "horizonMode": horizon_mode,
-        "forecastPasses": forecast.passes,
+        "predictionOutput": "state",
+        "normalizedTimeSegments": n_segments,
+        "predictedFinalTimeS": forecast.final_time_s,
         "anchorIndex": forecast.anchor,
         "anchorTimeS": anchor_time,
-        "truncatedAtThreshold": forecast.truncated_at_threshold,
-        # True = the fixed horizon ended this forecast short of the threshold; its final
-        # state (what the gates judge) is a cap artifact, not a prediction.
-        "horizonCapped": forecast.horizon_capped,
+        "predictionSplit": split,
     })
 
     eval_record = reference_evaluation_record(
@@ -191,13 +189,22 @@ def accuracy_block(overlap: Sequence[dict[str, float]]) -> dict[str, Any]:
     NaN errors and are excluded from the statistics AND counted, rather than being quietly
     averaged in as zero.
 
-    Both a mean and a p95 are reported because they answer different questions: chained
-    window-mode forecasts compound their error into the TAIL, so a mean alone reads as a much
-    smaller gap to one-pass full mode than the distribution actually shows.
+    Both a mean and a p95 are reported because they answer different questions: a mean alone
+    can hide a small set of badly predicted approaches.
     """
+    time_errors = np.array([m["final_time_error_s"] for m in overlap], dtype=np.float64)
+    time_block = {
+        "mae": float(np.abs(time_errors).mean()),
+        "p95_abs": float(np.percentile(np.abs(time_errors), 95)),
+        "mean_signed": float(time_errors.mean()),
+    }
     finite = [m for m in overlap if m["n_steps"]]
     if not finite:
-        return {"flights": 0, "flights_without_overlap": len(overlap)}
+        return {
+            "flights": 0,
+            "flights_without_overlap": len(overlap),
+            "final_time_s": time_block,
+        }
 
     def stats(key: str) -> dict[str, float]:
         values = np.array([m[key] for m in finite], dtype=np.float64)
@@ -207,6 +214,7 @@ def accuracy_block(overlap: Sequence[dict[str, float]]) -> dict[str, Any]:
     return {
         "flights": len(finite),
         "flights_without_overlap": len(overlap) - len(finite),
+        "final_time_s": time_block,
         "ade_m": stats("ade_m"),
         "fde_m": stats("fde_m"),
         "cross_track_p95_m": stats("cross_track_p95_m"),
@@ -221,6 +229,7 @@ def write_batch(
     config_dict: dict[str, Any],
     overlap: Sequence[dict[str, float]],
     checkpoint: str | None = None,
+    split: str = "test",
 ) -> list[Path]:
     """Write every record plus the ``summary.json`` manifest. Returns the eval-file paths.
 
@@ -246,17 +255,35 @@ def write_batch(
         eval_path = out / f"{record.stem}{_EVAL_SUFFIX}"
         reference_path = out / REFERENCES_DIR / f"{record.stem}{_REFERENCE_EVAL_SUFFIX}"
 
-        states_path.write_text(json.dumps(record.states_payload, indent=2), encoding="utf-8")
-        eval_path.write_text(json.dumps(record.eval_record, indent=2), encoding="utf-8")
-        reference_path.write_text(json.dumps(record.reference_record, indent=2), encoding="utf-8")
+        source = dict(record.source)
+        source["predictionSplit"] = split
+        states_payload = dict(record.states_payload)
+        states_payload["source"] = source
+        states_path.write_text(
+            json.dumps(states_payload, separators=(",", ":")), encoding="utf-8"
+        )
+        eval_payload = dict(record.eval_record)
+        eval_payload["source"] = source
+        eval_payload["states_ref"] = {"file": states_path.name, "key": "predicted_states"}
+        eval_payload["states"] = []
+        reference_payload = dict(record.reference_record)
+        reference_payload["states_ref"] = {
+            "file": f"../{states_path.name}",
+            "key": "observed_states",
+            "start_index": int(record.source["anchorIndex"]),
+        }
+        reference_payload["states"] = []
+        eval_path.write_text(
+            json.dumps(eval_payload, separators=(",", ":")), encoding="utf-8"
+        )
+        reference_path.write_text(
+            json.dumps(reference_payload, separators=(",", ":")), encoding="utf-8"
+        )
         written.append(eval_path)
 
-        source = record.source
         row = summary_row(
             source,
-            # A forecast always produces states, so the row is "solved" — but a
-            # horizon-capped flight's final state is a cap artifact, and its gate verdict
-            # must be read with horizon_capped below.
+            # A state forecast always produces a complete normalized trajectory.
             status="solved",
             states_file=states_path.name,
             eval_file=eval_path.name,
@@ -268,9 +295,12 @@ def write_batch(
         # so these are graded against the flight's OWN observed samples over the overlap.
         row.update({
             "predictor": source.get("predictor"),
-            "horizon_mode": source.get("horizonMode"),
-            "forecast_passes": source.get("forecastPasses"),
-            "horizon_capped": source.get("horizonCapped"),
+            "prediction_output": source.get("predictionOutput"),
+            "n_segments": source.get("normalizedTimeSegments"),
+            "predicted_final_time_s": source.get("predictedFinalTimeS"),
+            "true_final_time_s": metrics["true_final_time_s"],
+            "final_time_error_s": metrics["final_time_error_s"],
+            "split": split,
             "ade_m": metrics["ade_m"],
             "fde_m": metrics["fde_m"],
             "overlap_steps": metrics["n_steps"],
@@ -279,7 +309,11 @@ def write_batch(
 
     summary = {
         "scenarios": None,
-        "mode": f"tsTransformer:{config_dict.get('model')}:{config_dict.get('horizon_mode')}",
+        "mode": (
+            f"tsTransformer:{config_dict.get('model')}:"
+            f"normalized-time:state:{split}"
+        ),
+        "split": split,
         "checkpoint": checkpoint,
         "config": config_dict,
         "total": len(rows),
@@ -296,17 +330,33 @@ def write_batch(
 def observed_series_metrics(series: FlightSeries, forecast: Forecast) -> dict[str, float]:
     """Error of one predicted approach against its own observed track, metres.
 
-    Compares only over the overlap: the forecast is truncated at the threshold and the
-    observed track ends at touchdown, so the two rarely have the same length.
+    The forecast's physical step is learned (``final_time_s / N``), not the input ``dt``.
+    Observations are therefore interpolated at predicted timestamps over their overlap.
     """
-    start = forecast.anchor + 1
-    observed = series.values[start : start + forecast.n_steps]
-    n = len(observed)   # the slice already bounds it by forecast.n_steps
+    valid = forecast.times <= series.times[-1]
+    n = int(valid.sum())
+    true_final_time_s = float(
+        series.supervision_times[-1] - series.times[forecast.anchor]
+    )
+    time_metrics = {
+        "true_final_time_s": true_final_time_s,
+        "final_time_error_s": forecast.final_time_s - true_final_time_s,
+    }
     if n == 0:
-        return {"ade_m": float("nan"), "fde_m": float("nan"), "n_steps": 0}
+        return {
+            "ade_m": float("nan"),
+            "fde_m": float("nan"),
+            "n_steps": 0,
+            **time_metrics,
+        }
 
-    predicted = forecast.values[None, :n]
-    truth = observed[None, :n]
+    query_times = forecast.times[valid]
+    observed = np.column_stack([
+        np.interp(query_times, series.times, series.values[:, channel])
+        for channel in range(series.values.shape[1])
+    ])
+    predicted = forecast.values[valid][None, ...]
+    truth = observed[None, ...]
     mask = np.ones((1, n), dtype=np.float64)
     block = trajectory_metrics(predicted, truth, mask)
     return {
@@ -315,4 +365,5 @@ def observed_series_metrics(series: FlightSeries, forecast: Forecast) -> dict[st
         "cross_track_p95_m": block["cross_track_m"]["p95_abs"],
         "altitude_p95_m": block["altitude_m"]["p95_abs"],
         "n_steps": n,
+        **time_metrics,
     }

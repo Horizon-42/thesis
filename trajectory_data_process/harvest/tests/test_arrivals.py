@@ -9,6 +9,7 @@ import pytest
 from flight_scenarios.identity import flight_key
 from trajectory_data_process.harvest.airports import Airport, Runway
 from trajectory_data_process.harvest.arrivals import (
+    _anchor_index,
     load_arrival_flights,
     write_arrival_records,
 )
@@ -26,12 +27,14 @@ def _runway(
         ident=ident,
         lat=0.0,
         lon=0.0,
+        elevation_hae_m=10.0,
         elevation_msl_m=10.0,
         course_deg=90.0,
-        geoid_undulation_m=0.0,
+        hae_minus_msl_m=0.0,
         threshold_crossing_height_m=tch_m,
         published_glidepath_deg=glidepath_deg,
-        position_source="cifp_ltp",
+        position_source="faa_cifp_path_point",
+        vertical_source="faa_cifp_path_point",
     )
 
 
@@ -137,6 +140,24 @@ def _approach_samples() -> list[list[float]]:
     ]
 
 
+def test_anchor_index_refits_final_pass_instead_of_trusting_stale_metadata():
+    first_pass = [
+        [float(i), -0.045 + i * 0.005, 0.0, 300.0 - i * 30.0]
+        for i in range(10)
+    ]
+    final_pass = [
+        [float(20 + i), -0.045 + i * 0.005, 0.0, 300.0 - i * 30.0]
+        for i in range(10)
+    ]
+    track = {
+        "flight_key": "TWOPASS_18_abc123_19700101T000009Z",
+        "landing_sample_index": 9,
+        "samples": [*first_pass, [10.0, 0.10, 0.0, 500.0], *final_pass],
+    }
+
+    assert _anchor_index(track, _runway("18")) == len(track["samples"]) - 1
+
+
 def test_arrival_manifest_crops_final_entry_to_landing_anchor_and_excludes_non_model_data(
     tmp_path,
 ):
@@ -184,7 +205,7 @@ def test_arrival_manifest_crops_final_entry_to_landing_anchor_and_excludes_non_m
 
     manifest = write_arrival_records(_airport(), paths)
 
-    assert manifest["schema_version"] == "harvest-arrivals-v1"
+    assert manifest["schema_version"] == "harvest-arrivals-v3-track-slices"
     assert manifest["counts"] == {
         "source_total": 4,
         "assigned": 4,
@@ -202,6 +223,10 @@ def test_arrival_manifest_crops_final_entry_to_landing_anchor_and_excludes_non_m
     assert flight["cut_samples"] == 3
     assert flight["runway_target"]["threshold_crossing_height_m"] == 15.0
     assert flight["runway_target"]["published_glidepath_deg"] == 3.0
+    assert not (paths.airport / "arrivals" / "records").exists()
+    assert manifest["records"][0]["source_file"].startswith("assigned/18/")
+    assert manifest["records"][0]["first_sample_index"] == 3
+    assert manifest["records"][0]["last_sample_index"] == 6
 
 
 def test_loader_uses_only_manifest_roster_and_rejects_duplicate_flight_keys(tmp_path):
@@ -217,8 +242,6 @@ def test_loader_uses_only_manifest_roster_and_rejects_duplicate_flight_keys(tmp_
     _write_source_manifest(paths, [row])
     write_arrival_records(_airport(), paths)
 
-    orphan = paths.airport / "arrivals" / "records" / "orphan.json"
-    orphan.write_text(json.dumps({"id": "ORPHAN"}), encoding="utf-8")
     assert [flight["id"] for flight in load_arrival_flights(paths.airport)] == ["ARR1"]
 
     manifest_path = paths.airport / "arrivals" / "manifest.json"
@@ -227,6 +250,46 @@ def test_loader_uses_only_manifest_roster_and_rejects_duplicate_flight_keys(tmp_
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(ValueError, match="duplicate flight_key"):
         load_arrival_flights(manifest_path)
+
+
+def test_loader_rejects_duplicate_identity_in_source_manifest(tmp_path):
+    paths = HarvestPaths(tmp_path, "KAAA")
+    row = _source_track(
+        paths,
+        callsign="ARR1",
+        icao24="aaa001",
+        runway="18",
+        samples=_approach_samples(),
+        landing_sample_index=6,
+    )
+    _write_source_manifest(paths, [row])
+    write_arrival_records(_airport(), paths)
+
+    source = json.loads(paths.manifest.read_text(encoding="utf-8"))
+    source["records"].append(dict(source["records"][0]))
+    paths.manifest.write_text(json.dumps(source), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="source manifest.*duplicate flight_key"):
+        load_arrival_flights(paths.airport)
+
+
+def test_loader_rejects_a_source_track_changed_after_arrival_manifest(tmp_path):
+    paths = HarvestPaths(tmp_path, "KAAA")
+    row = _source_track(
+        paths,
+        callsign="ARR1",
+        icao24="aaa001",
+        runway="18",
+        samples=_approach_samples(),
+        landing_sample_index=6,
+    )
+    _write_source_manifest(paths, [row])
+    write_arrival_records(_airport(), paths)
+    source_path = paths.tracks / row["file"]
+    source_path.write_text(source_path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="canonical source track.*changed"):
+        load_arrival_flights(paths.airport)
 
 
 def test_loader_rejects_a_legacy_flight_array_instead_of_treating_it_as_a_manifest(tmp_path):

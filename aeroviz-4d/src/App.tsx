@@ -28,7 +28,9 @@ import { useApp } from "./context/AppContext";
 import { planObservedTracks } from "./data/observedTracks";
 import { useCzmlLoader } from "./hooks/useCzmlLoader";
 import { useComparisonTrajectoryLayer } from "./hooks/useComparisonTrajectoryLayer";
+import { useLandingsManifest } from "./hooks/useLandingsManifest";
 import { useObservedVerdictColors } from "./hooks/useObservedVerdictColors";
+import { AEROVIZ_BACKEND_URL } from "./pilot/pilotClient";
 import { useEffect, useState } from "react";
 
 function FlightApp() {
@@ -36,28 +38,45 @@ function FlightApp() {
     activeAirportCode,
     selectedRunway,
     trajectoryComparison,
-    trajectoryComparisonCategory,
+    trajectorySampleCount,
     mode,
     proceduresOpen,
   } = useApp();
+  const {
+    manifest: landingsManifest,
+    status: landingsStatus,
+    error: landingsError,
+  } = useLandingsManifest(activeAirportCode ?? "");
   // Observed tracks are loaded AND painted only in Observe (see planObservedTracks): the
   // runway profile samples them only in Observe too, so no other task needs them in memory
   // — and loading them elsewhere would let useCzmlLoader hijack the shared clock.
-  const { fileUrl: observedFileUrl, visible: observedVisible } = planObservedTracks({
+  const {
+    fileUrl: observedFileUrl,
+    visible: observedVisible,
+    runwayFilter: observedRunwayFilter,
+  } = planObservedTracks({
     mode,
     activeAirportCode,
     selectedRunway,
     trajectoryComparison,
+    trajectorySampleCount,
+    backendUrl: AEROVIZ_BACKEND_URL,
+    landingsManifest,
+    landingsStatus,
   });
-  const { flightIds, flightSummaries, warning, error } = useCzmlLoader(observedFileUrl, observedVisible);
+  const { flightIds, flightSummaries, warning, error } = useCzmlLoader(
+    observedFileUrl,
+    observedVisible,
+    observedRunwayFilter,
+  );
   useComparisonTrajectoryLayer();
   // Colour the plain observed tracks by their gate verdict. Only when they are the
   // thing on screen — with the comparison on, its own kind colours own the scene.
   const observedVerdicts = useObservedVerdictColors(
-    trajectoryComparisonCategory,
     observedVisible && !trajectoryComparison,
   );
-  const czmlStatus = error ?? warning;
+  const czmlError = landingsError ?? error;
+  const czmlStatus = czmlError ?? warning;
 
   return (
     <>
@@ -90,7 +109,7 @@ function FlightApp() {
         {czmlStatus ? (
           <div
             className={`czml-status ${
-              error ? "czml-status-error" : "czml-status-warning"
+              czmlError ? "czml-status-error" : "czml-status-warning"
             }`}
             role="alert"
           >

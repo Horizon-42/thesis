@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 from flight_scenarios.datum import MSL_ALTITUDE_SOURCE
 from flight_scenarios.start_state import state_samples_from_track
@@ -63,7 +63,7 @@ def observed_record(
 
     # H_MSL = h_HAE - N, applied once, here.
     waypoints = [
-        [t, lon, lat, alt_hae - runway.geoid_undulation_m]
+        [t, lon, lat, alt_hae - runway.hae_minus_msl_m]
         for t, lon, lat, alt_hae in track["samples"]
     ]
     samples = state_samples_from_track(waypoints, mass_kg=mass_kg)
@@ -101,7 +101,8 @@ def observed_record(
             "published_glidepath_deg": runway.published_glidepath_deg,
             "landing_time_utc": track["landing_time_utc"],
             "altitude_source": MSL_ALTITUDE_SOURCE,
-            "geoid_undulation_m": runway.geoid_undulation_m,
+            "hae_minus_msl_m": runway.hae_minus_msl_m,
+            "vertical_source": runway.vertical_source,
         },
         "initial_state": {k: v for k, v in states[0].items() if k != "t"},
         "target_state": target,
@@ -138,7 +139,9 @@ def write_observed_records(
             continue
         record = observed_record(track, runway, mass_kg=mass_kg)
         name = f"{row['flight_key']}_eval.json"
-        (records_dir / name).write_text(json.dumps(record, indent=1), encoding="utf-8")
+        (records_dir / name).write_text(
+            json.dumps(record, separators=(",", ":")), encoding="utf-8"
+        )
         roster.append(
             {
                 "flight_key": row["flight_key"],
@@ -162,16 +165,24 @@ def write_observed_records(
     return summary
 
 
-def load_observed_records(paths: HarvestPaths) -> list[Any]:
-    """Read the observed batch back as ``TrajectoryRecord``s, via its roster."""
+def iter_observed_records(paths: HarvestPaths) -> Iterator[Any]:
+    """Yield observed ``TrajectoryRecord``s one at a time, via the batch roster.
+
+    An airport such as KRDU has thousands of approach records and hundreds of
+    megabytes of state samples.  Keeping this boundary lazy lets evaluation release
+    each record before the next file is decoded.
+    """
     from evaluation.records import record_from_dict
 
     summary = json.loads((paths.approach / SUMMARY_NAME).read_text(encoding="utf-8"))
-    records = []
     for row in summary["results"]:
         path = paths.approach / row["eval_file"]
-        records.append(record_from_dict(json.loads(path.read_text(encoding="utf-8")), path=path))
-    return records
+        yield record_from_dict(json.loads(path.read_text(encoding="utf-8")), path=path)
+
+
+def load_observed_records(paths: HarvestPaths) -> list[Any]:
+    """Materialize the observed batch; prefer :func:`iter_observed_records` for evaluation."""
+    return list(iter_observed_records(paths))
 
 
 def _clear(directory: Path) -> None:

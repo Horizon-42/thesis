@@ -24,7 +24,7 @@ from trajectory_data_process.harvest.airports import load_airport
 from trajectory_data_process.harvest.arrivals import arrival_manifest_path, write_arrival_records
 from trajectory_data_process.harvest.observed import (
     REPORT_NAME,
-    load_observed_records,
+    iter_observed_records,
     write_observed_records,
 )
 from trajectory_data_process.harvest.czml import render_observed_czml
@@ -44,14 +44,21 @@ DEFAULT_CIFP = REPO_ROOT / "data/CIFP/CIFP_260319/FAACIFP18"
 DEFAULT_FRONTEND_DATA = REPO_ROOT / "aeroviz-4d/public/data"
 
 
+def _positive_float(value: str) -> float:
+    parsed = float(value)
+    if parsed <= 0.0:
+        raise argparse.ArgumentTypeError(f"must be positive, got {value!r}")
+    return parsed
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m trajectory_data_process.harvest")
     parser.add_argument("--airport", required=True, help="ICAO code, e.g. KRDU")
     parser.add_argument("--count", type=int, default=200,
                         help="assigned landings wanted per runway (default: 200)")
     parser.add_argument("--start", help="ISO UTC instant to scan backward from (default: now)")
-    parser.add_argument("--max-lookback-days", type=float, default=30.0)
-    parser.add_argument("--chunk-hours", type=float, default=6.0)
+    parser.add_argument("--max-lookback-days", type=_positive_float, default=30.0)
+    parser.add_argument("--chunk-hours", type=_positive_float, default=6.0)
     parser.add_argument("--radius-km", type=float, default=30.0)
     parser.add_argument("--entry-radius-km", type=float, default=ENTRY_RADIUS_KM,
                         help="terminal-entry radius for the model-ready arrival dataset")
@@ -146,8 +153,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     summary = write_observed_records(airport, paths)
-    records = load_observed_records(paths)
-    report = evaluate_batch(records)
+    report = evaluate_batch(iter_observed_records(paths))
     (paths.approach / REPORT_NAME).write_text(json.dumps(report, indent=1), encoding="utf-8")
 
     if not args.no_czml:
@@ -155,7 +161,7 @@ def main(argv: list[str] | None = None) -> int:
             paths, frontend_data_root=args.frontend_data, multiplier=args.multiplier
         )
         print(f"[harvest] observed CZML: {rendered.flights} flights over "
-              f"{len(rendered.runway_czml)} runway(s) -> {rendered.combined_czml}")
+              f"{len(rendered.runway_counts)} runway(s) -> {rendered.combined_czml}")
 
     if not args.no_publish:
         published = publish_observed_report(

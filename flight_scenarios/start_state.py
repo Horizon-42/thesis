@@ -112,8 +112,23 @@ def state_samples_from_track(
         raise ValueError("need at least two waypoints to estimate V / psi / gamma")
     t0 = waypoints[0][0]
     samples: list[tuple[float, GeodeticState]] = []
+    # Advance two monotone bounds instead of scanning the whole track for every sample.
+    # ADS-B waypoints are time-sorted, so this changes the window search from O(n²) to
+    # O(n); each short window is still sliced and fitted exactly as before.
+    low = 0
+    high = 0
+    half = window_s / 2.0
     for index, (t, lon, lat, alt) in enumerate(waypoints):
-        V, psi, gamma = _velocity_lsq(_window_around(waypoints, index, window_s))
+        while low < len(waypoints) and waypoints[low][0] < t - half:
+            low += 1
+        high = max(high, low)
+        while high < len(waypoints) and waypoints[high][0] <= t + half:
+            high += 1
+        window = waypoints[low:high]
+        if len(window) < 2:
+            neighbour = max(index - 1, 0)
+            window = waypoints[neighbour:neighbour + 2]
+        V, psi, gamma = _velocity_lsq(window)
         samples.append((
             t - t0,
             GeodeticState(latitude=lat, longitude=lon, altitude=alt,

@@ -13,6 +13,7 @@ import pandas as pd
 import pytest
 
 from trajectory_data_process.harvest import runner as runner_module
+from trajectory_data_process.harvest.__main__ import build_parser
 from trajectory_data_process.harvest.airports import Airport, Runway
 from trajectory_data_process.harvest.runner import HarvestPlan, harvest_airport
 from trajectory_data_process.harvest.store import HarvestPaths
@@ -24,11 +25,14 @@ def _airport() -> Airport:
         ident="18",
         lat=0.0,
         lon=0.0,
+        elevation_hae_m=0.0,
         elevation_msl_m=0.0,
         course_deg=180.0,
-        geoid_undulation_m=0.0,
+        hae_minus_msl_m=0.0,
         threshold_crossing_height_m=None,
         published_glidepath_deg=None,
+        position_source="faa_cifp_path_point",
+        vertical_source="faa_cifp_path_point",
     )
     return Airport(
         code="KAAA",
@@ -235,6 +239,48 @@ def test_interrupted_harvest_resumes_at_the_next_unfinished_chunk(
     assert result.chunks_fetched == 3
     assert any("resuming checkpoint" in message for message in messages)
     assert not paths.checkpoint.exists()
+
+
+def test_checkpoint_is_not_reused_with_a_different_lookback(tmp_path: Path) -> None:
+    stop = datetime(2026, 7, 22, tzinfo=timezone.utc)
+    paths = HarvestPaths(root=tmp_path, code="KAAA")
+    original = HarvestPlan(start=stop, max_lookback_days=30.0)
+    paths.checkpoint.mkdir(parents=True)
+    paths.checkpoint_db.touch()
+    runner_module._write_checkpoint(
+        paths,
+        airport=_airport(),
+        plan=original,
+        stop=stop,
+        cursor=stop - timedelta(days=10),
+        chunks=40,
+        per_runway={"18": 0},
+        per_aircraft={},
+        last_new={"18": stop},
+        given_up=set(),
+    )
+
+    changed = HarvestPlan(start=stop, max_lookback_days=5.0)
+    assert runner_module._load_checkpoint(paths, _airport(), changed, stop) is None
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"chunk_hours": 0.0},
+        {"chunk_hours": -1.0},
+        {"max_lookback_days": 0.0},
+    ],
+)
+def test_harvest_plan_rejects_non_positive_scan_windows(kwargs) -> None:
+    with pytest.raises(ValueError):
+        HarvestPlan(**kwargs)
+
+
+@pytest.mark.parametrize("flag", ["--chunk-hours", "--max-lookback-days"])
+def test_harvest_cli_rejects_non_positive_scan_windows(flag) -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["--airport", "KAAA", flag, "0"])
 
 
 def test_transient_network_failure_retries_the_same_chunk(

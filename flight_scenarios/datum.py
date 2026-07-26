@@ -43,7 +43,8 @@ from typing import Any, Iterable, Sequence
 # Source tag written by ``trajectory_data_process.harvest.store``.
 HAE_ALTITUDE_SOURCE = "opensky_history_geoaltitude_m"
 # What this module rewrites it to, so the conversion is visible and non-repeatable.
-MSL_ALTITUDE_SOURCE = "opensky_history_geoaltitude_m_to_msl_egm96"
+MSL_ALTITUDE_SOURCE = "opensky_history_geoaltitude_m_to_local_msl_cifp_threshold"
+LEGACY_EGM96_ALTITUDE_SOURCE = "opensky_history_geoaltitude_m_to_msl_egm96"
 # Sources that are ALREADY MSL and must not be converted:
 #   "synthetic" -- ``ts_transformer/synthetic.py`` builds waypoints as
 #                  ``threshold["elevation_m"] + height``, and threshold elevations are MSL.
@@ -115,6 +116,22 @@ def waypoints_to_msl(waypoints: Iterable[Sequence[float]]) -> list[list[float]]:
     return rows
 
 
+def _runway_offset(flight: dict[str, Any]) -> float:
+    target = flight.get("runway_target") or {}
+    required = ("elevation_hae_m", "elevation_msl_m", "hae_minus_msl_m",
+                "position_source", "vertical_source")
+    missing = [key for key in required if target.get(key) is None]
+    if missing:
+        raise ValueError(
+            f"flight {flight.get('id')!r} runway_target lacks CIFP vertical contract: "
+            + ", ".join(missing)
+        )
+    offset = float(target["hae_minus_msl_m"])
+    if abs(float(target["elevation_hae_m"]) - float(target["elevation_msl_m"]) - offset) > 1e-6:
+        raise ValueError(f"flight {flight.get('id')!r} has inconsistent runway_target datum")
+    return offset
+
+
 def flight_to_msl(flight: dict[str, Any]) -> dict[str, Any]:
     """One CZML-input flight with its track converted HAE -> MSL.
 
@@ -122,6 +139,8 @@ def flight_to_msl(flight: dict[str, Any]) -> dict[str, Any]:
     raises, because guessing a datum is how a 30 m error survives review.
     """
     source = flight.get("altitude_source")
+    if source == LEGACY_EGM96_ALTITUDE_SOURCE:
+        raise ValueError("legacy EGM96 altitude artifact; re-harvest/regenerate from CIFP")
     if source in MSL_ALTITUDE_SOURCES:
         return flight
     if source != HAE_ALTITUDE_SOURCE:
@@ -130,8 +149,13 @@ def flight_to_msl(flight: dict[str, Any]) -> dict[str, Any]:
             f"plane only knows how to convert {HAE_ALTITUDE_SOURCE!r} (ellipsoidal) to MSL"
         )
     converted = dict(flight)
-    converted["waypoints"] = waypoints_to_msl(flight.get("waypoints") or [])
+    offset = _runway_offset(flight)
+    converted["waypoints"] = [
+        [row[0], row[1], row[2], float(row[3]) - offset]
+        for row in (flight.get("waypoints") or [])
+    ]
     converted["altitude_source"] = MSL_ALTITUDE_SOURCE
+    converted["hae_minus_msl_m"] = offset
     return converted
 
 

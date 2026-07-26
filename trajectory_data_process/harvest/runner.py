@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import json
 import socket
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from time import sleep as _sleep
 from typing import Any, Callable, Iterator, Sequence
@@ -56,7 +56,7 @@ DEFAULT_MAX_LOOKBACK_DAYS = 30.0
 # Give a runway up once the scan has gone this long past its last new landing: an idle
 # runway end would otherwise drag the whole airport to the lookback limit.
 DEFAULT_DRY_GIVE_UP_DAYS = 4.0
-CHECKPOINT_VERSION = 1
+CHECKPOINT_VERSION = 2
 # Retry only transport failures. Six retries span 195 seconds, which is long enough to
 # bridge a short Wi-Fi/DNS outage without hiding persistent authentication or query
 # errors indefinitely.
@@ -106,6 +106,14 @@ class HarvestPlan:
     radius_km: float = DEFAULT_CROP_RADIUS_KM
     screen: LandingScreen = field(default_factory=LandingScreen)
     cached: bool = True
+
+    def __post_init__(self) -> None:
+        if self.chunk_hours <= 0.0:
+            raise ValueError(f"chunk_hours must be positive, got {self.chunk_hours!r}")
+        if self.max_lookback_days <= 0.0:
+            raise ValueError(
+                f"max_lookback_days must be positive, got {self.max_lookback_days!r}"
+            )
 
 
 @dataclass
@@ -428,10 +436,7 @@ def _load_checkpoint(
     try:
         compatible = (
             state["version"] == CHECKPOINT_VERSION
-            and state["airport"] == airport.code
-            and _parse_utc(state["start_utc"]) == stop
-            and float(state["radius_km"]) == plan.radius_km
-            and float(state["chunk_hours"]) == plan.chunk_hours
+            and state["compatibility"] == _checkpoint_compatibility(airport, plan, stop)
             and isinstance(state["per_runway"], dict)
             and isinstance(state["per_aircraft"], dict)
             and isinstance(state["last_new"], dict)
@@ -459,8 +464,10 @@ def _write_checkpoint(
         "version": CHECKPOINT_VERSION,
         "airport": airport.code,
         "start_utc": stop.isoformat(),
+        "compatibility": _checkpoint_compatibility(airport, plan, stop),
         "cursor_utc": cursor.isoformat(),
         "chunk_hours": plan.chunk_hours,
+        "max_lookback_days": plan.max_lookback_days,
         "radius_km": plan.radius_km,
         "chunks_fetched": chunks,
         "per_runway": per_runway,
@@ -472,6 +479,30 @@ def _write_checkpoint(
     temporary = paths.checkpoint / "state.json.tmp"
     temporary.write_text(json.dumps(state, separators=(",", ":")), encoding="utf-8")
     temporary.replace(paths.checkpoint_state)
+
+
+def _checkpoint_compatibility(
+    airport: Airport,
+    plan: HarvestPlan,
+    stop: datetime,
+) -> dict[str, Any]:
+    """All inputs that can change accumulated classification or scan termination."""
+    return {
+        "airport": {
+            "code": airport.code,
+            "lat": airport.lat,
+            "lon": airport.lon,
+            "elevation_msl_m": airport.elevation_msl_m,
+            "runways": [asdict(runway) for runway in airport.runways],
+        },
+        "start_utc": stop.isoformat(),
+        "target_per_runway": plan.target_per_runway,
+        "chunk_hours": plan.chunk_hours,
+        "max_lookback_days": plan.max_lookback_days,
+        "dry_give_up_days": plan.dry_give_up_days,
+        "radius_km": plan.radius_km,
+        "landing_screen": asdict(plan.screen),
+    }
 
 
 def _integer_counts(

@@ -2,8 +2,10 @@
  * evaluationReport.ts
  * -------------------
  * Types + validation for the backend evaluation report (`python -m evaluation`
- * → `evaluation_report.json`, published verbatim into each comparison category
- * dir by `build_scenario_comparison_czml.py --evaluation-report`).
+ * → an immutable `evaluation_report_<generation>.json`, named by the category's
+ * committed comparison index and published verbatim by
+ * `build_scenario_comparison_czml.py --evaluation-report`). Legacy indexes use
+ * the former fixed `evaluation_report.json` name.
  *
  * SINGLE SOURCE: every number here was computed by the backend evaluation
  * package — the frontend only formats and plots. Do not derive metrics from

@@ -24,6 +24,14 @@ FLIGHT = {
     "entry_time_utc": "2026-06-18T10:03:07Z",
     # Real harvest data always declares its datum; the modeling loader converts on it.
     "altitude_source": "opensky_history_geoaltitude_m",
+    "runway_target": {
+        "lat": 35.74, "lon": -78.47, "elevation_hae_m": 100.0,
+        "elevation_msl_m": 133.5, "hae_minus_msl_m": -33.5,
+        "course_deg": 50.0, "threshold_crossing_height_m": 15.0,
+        "published_glidepath_deg": 3.0,
+        "position_source": "faa_cifp_path_point",
+        "vertical_source": "faa_cifp_path_point",
+    },
     "waypoints": [
         [0.0, -78.45, 35.74, 2500.0],
         [5.0, -78.46, 35.74, 2450.0],
@@ -60,6 +68,15 @@ def test_build_scenario_raises_when_unresolvable_and_no_fallback():
         build_scenario(flight)
 
 
+def test_build_scenario_rejects_mutually_exclusive_targets_before_processing():
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        build_scenario(
+            {"waypoints": []},
+            target_from_threshold=True,
+            target_from_fitted_adsb=True,
+        )
+
+
 def test_build_scenarios_from_list_resolves_each_flight():
     scens = build_scenarios_from_arrivals([FLIGHT, FLIGHT])
     assert len(scens) == 2
@@ -67,19 +84,19 @@ def test_build_scenarios_from_list_resolves_each_flight():
 
 
 def test_build_scenario_target_from_threshold():
-    from flight_scenarios.runway_target import find_threshold
     flight = {**FLIGHT, "arr_airport": "KRDU", "runway": "05L"}
     scen = build_scenario(flight, target_from_threshold=True)
-    thr = find_threshold("KRDU", "05L")
     assert scen.source["target_source"] == "runway_threshold"
-    assert (scen.target.latitude, scen.target.longitude) == (thr["lat"], thr["lon"])
+    assert (scen.target.latitude, scen.target.longitude) == (
+        FLIGHT["runway_target"]["lat"], FLIGHT["runway_target"]["lon"]
+    )
     assert scen.target.V == scen.aircraft.approach.reference_speed_ms
 
 
 def test_build_scenario_target_from_threshold_falls_back_when_unknown():
     flight = {**FLIGHT, "arr_airport": "KRDU", "runway": "99X"}  # no such threshold
     scen = build_scenario(flight, "A320", target_from_threshold=True)
-    assert scen.source["target_source"] == "track_end"
+    assert scen.source["target_source"] == "runway_threshold"
 
 
 # ── CLI discovery (one manifest per airport) ─────────────────────────────────
@@ -118,4 +135,7 @@ def test_discover_arrival_manifests_for_all_airports(tmp_path):
 
 def test_scenario_output_name_distinguishes_target_mode():
     assert scenario_output_name("KRDU", threshold=False) == "KRDU_arrivals_scenarios.json"
+    assert scenario_output_name(
+        "KRDU", threshold=False, fitted_adsb=True
+    ) == "KRDU_arrivals_fitted_adsb_scenarios.json"
     assert scenario_output_name("KRDU", threshold=True) == "KRDU_arrivals_threshold_scenarios.json"

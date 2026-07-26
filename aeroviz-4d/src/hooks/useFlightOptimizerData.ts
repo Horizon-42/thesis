@@ -6,7 +6,7 @@
  *     scenario initial state, so they are the SAME value the optimizer started from (no
  *     independent frontend re-estimate) and exist for EVERY flight, solved OR failed. They are
  *     category-independent, so they show even when the comparison overlay is off (read from
- *     whichever category is active, defaulting to the first);
+ *     whichever drawable category is active, defaulting to the first);
  *   • the optimized **final time** (s) for the currently-selected category — shown only while
  *     the comparison overlay is on (`comparisonActive`), and only for solved flights;
  *   • whether the flight's optimization **failed** — so the list can flag it.
@@ -17,6 +17,7 @@ import { useApp } from "../context/AppContext";
 import { useComparisonCategories } from "./useComparisonCategories";
 import {
   airportComparisonIndexUrl,
+  isDrawableComparisonCategory,
   isComparisonIndex,
   type ComparisonGroup,
   type OptimizationStats,
@@ -50,6 +51,8 @@ export interface FlightOptimizerData {
   stats: OptimizationStats | null;
   /** The category dir the stats were read from (e.g. "runway_cons"), or null. */
   categoryDir: string | null;
+  /** Immutable evaluation report named by the same committed index generation. */
+  reportFile: string | null;
 }
 
 const EMPTY: Map<string, FlightOptimizerDatum> = new Map();
@@ -58,19 +61,26 @@ export function useFlightOptimizerData(): FlightOptimizerData {
   const { activeAirportCode, trajectoryComparison, trajectoryComparisonCategory } = useApp();
   const { categories } = useComparisonCategories(activeAirportCode);
 
-  // Mass is category-independent, so when the overlay is off we still read the first category's
-  // index for it; when the overlay is on we read the selected category (same mass + its finalTimeS).
-  const categoryDir =
-    (trajectoryComparison && trajectoryComparisonCategory) || categories[0]?.dir || null;
-  const comparisonActive = trajectoryComparison && !!trajectoryComparisonCategory;
+  // Mass is category-independent, so when the overlay is off we still read the first drawable
+  // category's index; when it is on we read the selected drawable category.
+  const drawableCategories = categories.filter(isDrawableComparisonCategory);
+  const selectedCategory = drawableCategories.find(
+    (category) => category.dir === trajectoryComparisonCategory,
+  );
+  const categoryDir = trajectoryComparison
+    ? selectedCategory?.dir ?? null
+    : drawableCategories[0]?.dir ?? null;
+  const comparisonActive = trajectoryComparison && !!selectedCategory;
 
   const [byFlightKey, setByFlightKey] = useState<Map<string, FlightOptimizerDatum>>(EMPTY);
   const [stats, setStats] = useState<OptimizationStats | null>(null);
+  const [reportFile, setReportFile] = useState<string | null>(null);
 
   useEffect(() => {
     if (!activeAirportCode || !categoryDir) {
       setByFlightKey(EMPTY);
       setStats(null);
+      setReportFile(null);
       return;
     }
 
@@ -79,7 +89,11 @@ export function useFlightOptimizerData(): FlightOptimizerData {
       .then((data) => {
         if (cancelled) return;
         if (!isComparisonIndex(data)) {
-          throw new Error(`comparison index for ${activeAirportCode}/${categoryDir} is malformed`);
+          throw new Error(
+            `comparison index for ${activeAirportCode}/${categoryDir} does not use ` +
+              "comparison-v2-generation; rerun run_scenario_optimization.py " +
+              `--airport ${activeAirportCode}`,
+          );
         }
         // Every group (solved AND failed) carries V + mass; only solved carry an optimized time.
         const map = new Map<string, FlightOptimizerDatum>();
@@ -96,6 +110,7 @@ export function useFlightOptimizerData(): FlightOptimizerData {
         }
         setByFlightKey(map);
         setStats(data.optimization ?? null);
+        setReportFile(data.evaluationReport);
       })
       .catch((error) => {
         if (cancelled) return;
@@ -104,6 +119,7 @@ export function useFlightOptimizerData(): FlightOptimizerData {
         }
         setByFlightKey(EMPTY);
         setStats(null);
+        setReportFile(null);
       });
 
     return () => {
@@ -112,7 +128,7 @@ export function useFlightOptimizerData(): FlightOptimizerData {
   }, [activeAirportCode, categoryDir]);
 
   return useMemo(
-    () => ({ byFlightKey, comparisonActive, stats, categoryDir }),
-    [byFlightKey, comparisonActive, stats, categoryDir],
+    () => ({ byFlightKey, comparisonActive, stats, categoryDir, reportFile }),
+    [byFlightKey, comparisonActive, stats, categoryDir, reportFile],
   );
 }

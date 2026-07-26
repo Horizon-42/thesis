@@ -95,7 +95,7 @@ export AEROVIZ_IPOPT_HSLLIB="$CONDA_PREFIX/hsl/libcoinhsl.dylib"
 ```
 
 Put these in the shell (or the backend launcher `start_aeroviz_fullstack.sh`) before running
-any solve — the batch (`run_scenario_pipeline.py` / `scenario_optimization.py`) and the live
+any solve — the batch (`run_scenario_optimization.py` / `scenario_optimization.py`) and the live
 backend both go through `_make_nlp_solver`, so both pick it up. Unset them → back to MUMPS.
 
 ## 4. Verify it loaded and measure the speedup

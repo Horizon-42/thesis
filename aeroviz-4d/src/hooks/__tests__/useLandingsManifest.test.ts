@@ -13,11 +13,12 @@ function notFound() {
 }
 
 const MANIFEST = {
+  schemaVersion: "observed-landings-v2-canonical",
   airport: "KRDU",
   combined: "trajectories.czml",
   runways: [
-    { runway: "23R", file: "landings/KRDU_23R.czml", count: 40 },
-    { runway: "05L", file: "landings/KRDU_05L.czml", count: 12 },
+    { runway: "23R", file: "trajectories.czml", count: 40 },
+    { runway: "05L", file: "trajectories.czml", count: 12 },
   ],
 };
 
@@ -35,7 +36,24 @@ describe("useLandingsManifest", () => {
 
     await waitFor(() => expect(result.current.status).toBe("ready"));
     expect(result.current.manifest?.runways.map((r) => r.runway)).toEqual(["23R", "05L"]);
+    expect(result.current.error).toBeNull();
     expect(fetchMock).toHaveBeenCalledWith("/data/airports/KRDU/landings/index.json");
+  });
+
+  it("rejects a legacy manifest and tells the operator to rebuild it", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      airport: "KRDU",
+      combined: "trajectories.czml",
+      runways: [
+        { runway: "05L", file: "landings/KRDU_05L.czml", count: 12 },
+      ],
+    }));
+
+    const { result } = renderHook(() => useLandingsManifest("KRDU"));
+
+    await waitFor(() => expect(result.current.status).toBe("error"));
+    expect(result.current.manifest).toBeNull();
+    expect(result.current.error).toContain("prepare_scenario_inputs.py --airport KRDU");
   });
 
   it("reports a missing manifest as empty, not error", async () => {
@@ -45,6 +63,7 @@ describe("useLandingsManifest", () => {
 
     await waitFor(() => expect(result.current.status).toBe("empty"));
     expect(result.current.manifest).toBeNull();
+    expect(result.current.error).toBeNull();
   });
 
   it("is idle with no airport selected", () => {

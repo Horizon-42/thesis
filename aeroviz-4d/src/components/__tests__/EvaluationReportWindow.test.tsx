@@ -41,9 +41,16 @@ const REPORT: EvaluationReport = {
 
 describe("EvaluationReportWindow", () => {
   it("renders the report's cards, aggregates and verdict rows (backend numbers verbatim)", () => {
-    render(<EvaluationReportWindow report={REPORT} subtitle="KRDU · runway_cons" onClose={vi.fn()} />);
+    render(
+      <EvaluationReportWindow
+        report={REPORT}
+        title="Optimization Evaluation Report"
+        subtitle="KRDU · runway_cons"
+        onClose={vi.fn()}
+      />,
+    );
 
-    expect(screen.getByRole("dialog", { name: "Evaluation report" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Optimization Evaluation Report" })).toBeTruthy();
     expect(screen.getByText("KRDU · runway_cons")).toBeTruthy();
     // cards
     expect(screen.getByText("solve rate 66.7%")).toBeTruthy();
@@ -55,6 +62,23 @@ describe("EvaluationReportWindow", () => {
     const aggregates = screen.getByRole("table", { name: /Aggregates/ });
     expect(aggregates.textContent).toContain("101.0");
     expect(aggregates.textContent).toContain("171.7");
+    // The combined 3D view exposes both deviations for every measured flight
+    // and sits immediately before (left of, in the two-column grid) flight time.
+    const deviation3D = screen.getByRole("img", { name: "3D trajectory deviation view" });
+    expect(deviation3D.tagName).toBe("CANVAS");
+    expect(deviation3D.getAttribute("data-renderer")).toBe("webgl");
+    expect(screen.getByText(/drag to orbit · wheel to zoom/i)).toBeTruthy();
+    const deviationFigure = deviation3D.closest("figure")!;
+    const timeFigure = screen.getByRole("img", { name: "Flight time scatter" }).closest("figure")!;
+    expect(timeFigure.previousElementSibling).toBe(deviationFigure);
+    // The complete plot region is an interaction boundary: events over its
+    // overlays or empty space must not reach and scroll/activate the report.
+    const stage = deviation3D.parentElement!;
+    const dialog = deviation3D.closest('[role="dialog"]')!;
+    const leakedWheel = vi.fn();
+    dialog.addEventListener("wheel", leakedWheel);
+    fireEvent.wheel(stage, { deltaY: 100 });
+    expect(leakedWheel).not.toHaveBeenCalled();
     // verdict rows: gate-failed row flagged, unsolved row grayed with its reason
     const failRow = screen.getByText("FDX1449").closest("tr")!;
     expect(failRow.className).toContain("eval-row-fail");
@@ -65,7 +89,14 @@ describe("EvaluationReportWindow", () => {
   });
 
   it("gives each statistic its own aggregates column (p95 and min never share one)", () => {
-    render(<EvaluationReportWindow report={REPORT} subtitle="x" onClose={vi.fn()} />);
+    render(
+      <EvaluationReportWindow
+        report={REPORT}
+        title="Optimization Evaluation Report"
+        subtitle="x"
+        onClose={vi.fn()}
+      />,
+    );
     const aggregates = screen.getByRole("table", { name: /Aggregates/ });
 
     const headers = Array.from(aggregates.querySelectorAll("thead th")).map((h) => h.textContent);
@@ -106,7 +137,14 @@ describe("EvaluationReportWindow", () => {
 
   it("closes via the Close button", () => {
     const onClose = vi.fn();
-    render(<EvaluationReportWindow report={REPORT} subtitle="x" onClose={onClose} />);
+    render(
+      <EvaluationReportWindow
+        report={REPORT}
+        title="Optimization Evaluation Report"
+        subtitle="x"
+        onClose={onClose}
+      />,
+    );
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(onClose).toHaveBeenCalled();
   });
@@ -119,7 +157,14 @@ describe("EvaluationReportWindow", () => {
       lateral_m: null, vertical_m: null, final_time_s: null, reference: null,
       trajectories: [REPORT.trajectories[2]],
     };
-    render(<EvaluationReportWindow report={bare} subtitle="x" onClose={vi.fn()} />);
+    render(
+      <EvaluationReportWindow
+        report={bare}
+        title="Optimization Evaluation Report"
+        subtitle="x"
+        onClose={vi.fn()}
+      />,
+    );
     expect(screen.getByText("No solved trajectories to chart.")).toBeTruthy();
     expect(screen.queryByText(/mean Δt vs observed/)).toBeNull();
   });

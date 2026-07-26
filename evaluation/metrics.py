@@ -30,7 +30,7 @@ Batch metrics over a set of records:
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any, Sequence
+from typing import Any, Iterable
 
 from evaluation.arrival import (
     DEFAULT_SUBJECT,
@@ -173,7 +173,7 @@ def _is_marginal(deviation: ArrivalDeviation, thresholds: DeviationThresholds) -
 
 
 def evaluate_batch(
-    records: Sequence[TrajectoryRecord],
+    records: Iterable[TrajectoryRecord],
     thresholds: DeviationThresholds = DeviationThresholds(),
     *,
     criteria: EstablishedCriteria = EstablishedCriteria(),
@@ -212,21 +212,12 @@ def evaluate_batch(
     record whose path (or reference) has zero horizontal extent adds a ``"note"``
     saying the comparison was skipped instead.
     """
-    evaluations = [evaluate_record(record, thresholds, criteria=criteria) for record in records]
-    # "solved" is structural (the record has states); "measured" is the set with an
-    # arrival to grade. They differ only for observed subjects, where a track can have
-    # states yet no established final approach to extrapolate from.
-    solved = [e for e in evaluations if e.solved]
-    measured = [e for e in evaluations if e.deviation is not None]
-    succeeded = [e for e in evaluations if e.success]
-    lateral = [e.deviation.lateral_m for e in measured]
-    vertical = [e.deviation.vertical_m for e in measured]
-    times = [e.deviation.flight_time_s for e in measured]
-    total = len(evaluations)
-
+    evaluations: list[TrajectoryEvaluation] = []
     rows = []
     comparisons: list[ReferenceComparison] = []
-    for record, evaluation in zip(records, evaluations):
+    for record in records:
+        evaluation = evaluate_record(record, thresholds, criteria=criteria)
+        evaluations.append(evaluation)
         row = _row(evaluation)
         if record.reference_file is not None:
             reference = load_reference(record)
@@ -251,6 +242,17 @@ def evaluate_batch(
             rows.append({**row, "reference": block})
         else:
             rows.append(row)
+
+    # "solved" is structural (the record has states); "measured" is the set with an
+    # arrival to grade. They differ only for observed subjects, where a track can have
+    # states yet no established final approach to extrapolate from.
+    solved = [e for e in evaluations if e.solved]
+    measured = [e for e in evaluations if e.deviation is not None]
+    succeeded = [e for e in evaluations if e.success]
+    lateral = [e.deviation.lateral_m for e in measured]
+    vertical = [e.deviation.vertical_m for e in measured]
+    times = [e.deviation.flight_time_s for e in measured]
+    total = len(evaluations)
 
     subjects = {e.subject for e in evaluations}
     observed = [e for e in evaluations if e.subject == "observed"]

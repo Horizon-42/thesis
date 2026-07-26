@@ -47,8 +47,12 @@ def airport_for_manifest(path: Path) -> str:
     return str(code).upper()
 
 
-def scenario_output_name(airport: str, *, threshold: bool) -> str:
-    tag = "_threshold" if threshold else ""
+def scenario_output_name(
+    airport: str, *, threshold: bool, fitted_adsb: bool = False
+) -> str:
+    if threshold and fitted_adsb:
+        raise ValueError("threshold and fitted ADS-B targets are mutually exclusive")
+    tag = "_threshold" if threshold else "_fitted_adsb" if fitted_adsb else ""
     return f"{airport}_arrivals{tag}_scenarios.json"
 
 
@@ -66,7 +70,13 @@ def main(argv: list[str] | None = None) -> int:
         "--aircraft-type", default="A320",
         help="fallback aircraft code when icao24 cannot be resolved",
     )
-    parser.add_argument("--target-from-threshold", action="store_true")
+    target_mode = parser.add_mutually_exclusive_group()
+    target_mode.add_argument("--target-from-threshold", action="store_true")
+    target_mode.add_argument(
+        "--target-from-fitted-adsb", action="store_true",
+        help="target the final_approach OLS threshold crossing (position and approach "
+             "kinematics fitted)",
+    )
     parser.add_argument("--mass-kg", type=float, default=None)
     parser.add_argument("--window-s", type=float, default=DEFAULT_WINDOW_S)
     args = parser.parse_args(argv)
@@ -91,12 +101,17 @@ def main(argv: list[str] | None = None) -> int:
             mass_kg=args.mass_kg,
             window_s=args.window_s,
             target_from_threshold=args.target_from_threshold,
+            target_from_fitted_adsb=args.target_from_fitted_adsb,
         )
         output = (
             Path(args.output)
             if args.output
             else Path(args.output_dir)
-            / scenario_output_name(airport, threshold=args.target_from_threshold)
+            / scenario_output_name(
+                airport,
+                threshold=args.target_from_threshold,
+                fitted_adsb=args.target_from_fitted_adsb,
+            )
         )
         output.parent.mkdir(parents=True, exist_ok=True)
         save_scenarios(scenarios, output)

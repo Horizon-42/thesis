@@ -5,12 +5,11 @@ model is called: iTransformer keeps the four-argument Autoformer-family signatur
 ``model(x_enc, x_mark_enc, x_dec, x_mark_dec)`` (ignoring the last three on the inverted
 path), while PatchTST takes a bare ``model(x)``. Rather than teach the training loop to
 branch on architecture — or edit the vendored code and forfeit the clean upstream diff —
-each is wrapped in a thin adapter with one signature::
+each state forecaster is wrapped in a thin adapter with one signature::
 
-    model(x: Tensor[B, seq_len, C]) -> Tensor[B, pred_len, C]
+    forecaster(x: Tensor[B, seq_len, C]) -> Tensor[B, N, C]
 
-The adapters hold no parameters of their own, so ``state_dict()`` keys are the vendored
-module's own names prefixed with ``inner.`` — a checkpoint stays readable against upstream.
+The replaceable output layer then adds ``final_time_s`` and returns a typed prediction.
 """
 
 from __future__ import annotations
@@ -19,6 +18,7 @@ import torch
 import torch.nn as nn
 
 from config import TSConfig
+from prediction_outputs import StateOutputLayer
 from vendor.itransformer import Model as VendoredITransformer
 from vendor.patchtst import Model as VendoredPatchTST
 
@@ -67,9 +67,14 @@ BUILDERS = {
 }
 
 
-def build_model(config: TSConfig) -> nn.Module:
-    """The adapter for ``config.model``. ``TSConfig`` already validated the name."""
+def build_state_forecaster(config: TSConfig) -> nn.Module:
+    """The vendored state forecaster selected by ``config.model``."""
     return BUILDERS[config.model](config)
+
+
+def build_model(config: TSConfig) -> StateOutputLayer:
+    """Current state-output model with a separately replaceable prediction layer."""
+    return StateOutputLayer(build_state_forecaster(config), config)
 
 
 def resolve_device(spec: str) -> torch.device:

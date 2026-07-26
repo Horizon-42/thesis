@@ -224,4 +224,32 @@ describe("useCzmlLoader", () => {
 
     expect(mockViewer.dataSources.add.mock.calls[0][0].show).toBe(true);
   });
+
+  it("filters runways without fetching or loading a second CZML file", async () => {
+    fetchMock.mockResolvedValue(jsonResponse([
+      { id: "document" },
+      { id: "flight-05L", properties: { runway: "05L" } },
+      { id: "flight-23R", properties: { runway: "23R" } },
+    ]));
+    const entities = [{ id: "flight-05L", show: true }, { id: "flight-23R", show: true }];
+    loadCzml.mockResolvedValue({
+      entities: { values: entities },
+      clock: { startTime: makeTime(10), stopTime: makeTime(70) },
+    });
+
+    const { result, rerender } = renderHook(
+      ({ runway }) => useCzmlLoader(CZML_URL, true, runway),
+      { initialProps: { runway: "05L" as string | null } },
+    );
+    await waitFor(() => expect(result.current.isLoaded).toBe(true));
+
+    expect(result.current.flightIds).toEqual(["flight-05L"]);
+    expect(entities.map((entity) => entity.show)).toEqual([true, false]);
+
+    rerender({ runway: "23R" });
+    await waitFor(() => expect(result.current.flightIds).toEqual(["flight-23R"]));
+    expect(entities.map((entity) => entity.show)).toEqual([false, true]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(loadCzml).toHaveBeenCalledTimes(1);
+  });
 });

@@ -1161,11 +1161,13 @@ Keep these existing output types working:
 
 Do not change the existing CZML input schema consumed by `aeroviz-4d/python/generate_czml.py`.
 
-The new training dataset should be additive and should not break:
+The implemented pipeline retired the former root convenience wrapper. The canonical
+boundaries are now explicit:
 
-- `run_asd-b_fetch_and_generate.py`
-- `generate_czml.py`
-- existing `--input-raw-json` reuse flow
+- `python -m trajectory_data_process.harvest` owns downloaded tracks and derived
+  observed publication;
+- `generate_czml.py` remains the standalone renderer for an explicit flight array;
+- rebuilding derived data never rewrites the downloaded `tracks/` source.
 
 ## Implementation Plan
 

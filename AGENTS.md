@@ -11,7 +11,8 @@ AeroViz-4D: Airport 4D trajectory and terrain digital-twin visualization system 
 - **aeroviz-4d/** — Main visualization app (React + CesiumJS frontend, Python CZML generator)
 - **trajectory_data_process/** — Trajectory acquisition, processing, and dataset helpers
 - **bc_lidar_downloader/** — BC LiDAR terrain data downloader
-- **run_asd-b_fetch_and_generate.py** — Orchestrator: fetch -> normalize -> generate CZML pipeline
+- **prepare_scenario_inputs.py** — Rebuild derived arrivals/observed outputs and scenario JSON
+- **run_scenario_optimization.py** — Optimize prepared scenarios and publish comparisons
 
 ## Build & Dev Commands
 
@@ -33,23 +34,25 @@ npm run build:dsm-heightmap-terrain  # Generate heightmap terrain tiles
 ### Python (aeroviz-4d/python/)
 
 ```bash
-pip install -r aeroviz-4d/python/requirements.txt
-python -m pytest aeroviz-4d/python/tests/test_generate_czml.py -v
-python -m pytest aeroviz-4d/python/tests/ --cov=. --cov-report=html
+conda run -n aeroviz pip install -r aeroviz-4d/python/requirements.txt
+conda run -n aeroviz python -m pytest aeroviz-4d/python/tests/test_generate_czml.py -v
+conda run -n aeroviz python -m pytest aeroviz-4d/python/tests/ --cov=. --cov-report=html
 ```
 
 ### Data Pipeline (end-to-end)
 
 ```bash
-# Full pipeline: harvest history → manifests → observed CZML/evaluation
-conda run -n aviation python run_asd-b_fetch_and_generate.py --airport CYYC --count 200
+# Full observed pipeline: harvest history → manifests → observed CZML/evaluation
+conda run -n aeroviz python -m trajectory_data_process.harvest \
+  --airport CYYC --count 200
 
 # Reuse tracks/manifest.json and rebuild every derived view without fetching
-conda run -n aviation python -m trajectory_data_process.harvest --airport CYYC --evaluate-only
+conda run -n aeroviz python -m trajectory_data_process.harvest --airport CYYC --evaluate-only
 
 # Explicit standalone rendering utility (does not create a harvest)
-conda run -n aviation python run_asd-b_fetch_and_generate.py \
-  --airport CYYC --input-json path/to/flight_array.json
+conda run -n aeroviz python aeroviz-4d/python/generate_czml.py \
+  --airport CYYC --input path/to/flight_array.json \
+  --output aeroviz-4d/public/data/airports/CYYC/trajectories.czml
 ```
 
 ## Architecture
@@ -95,9 +98,10 @@ Static data follows a similar pattern: OurAirports CSV → `preprocess_airports.
 - Vite config uses `vite-plugin-cesium` which handles Cesium asset copying and `CESIUM_BASE_URL` setup
 - TypeScript strict mode is enabled (strict null checks, noUnusedLocals, noUnusedParameters)
 - Test environment: jsdom with vitest globals enabled
-- Run all Python scripts and Python tests in the conda `aviation` environment.
-- Use `conda run -n aviation ...` for non-interactive Python test commands.
-- In this workspace, `conda run -n aviation python` may resolve to Homebrew Python instead of the conda environment interpreter. Prefer `/Users/liudongxu/opt/miniconda3/envs/aviation/bin/python3.13` for scripts and `conda run -n aviation pytest ...` for tests.
+- Prefer the conda `aeroviz` environment for all Python scripts and Python tests.
+- Use `conda run -n aeroviz ...` for non-interactive Python commands. On the Linux
+  workstation, `/home/supercomputing/miniconda3/envs/aeroviz/bin/python3` is also an
+  acceptable explicit interpreter when conda activation is unnecessary.
 - Do not run project Python commands with the system Python, Homebrew Python, or an unqualified `python` command.
 
 ## Change Scope
@@ -105,6 +109,18 @@ Static data follows a similar pattern: OurAirports CSV → `preprocess_airports.
 - Each turn must only make the changes explicitly requested by the user.
 - Do not modify additional files, modules, APIs, tests, or docs merely to make broader test suites pass or to synchronize adjacent code.
 - If a requested change exposes unrelated failures or stale interfaces, report them clearly instead of fixing them without explicit permission.
+
+## Compatibility and Risk Decisions
+
+- Backward compatibility is opt-in, not the default. For regenerable artifacts and
+  derived data, retire obsolete formats and require regeneration instead of adding
+  dual-read paths, fallbacks, migration branches, or speculative defensive code.
+- Add compatibility or migration protection only when dropping it could damage or
+  discard non-regenerable data, such as downloaded/raw source data. Keep that protection
+  no broader than necessary.
+- If a change presents a meaningful compatibility, data-loss, architecture, or migration
+  risk, stop and ask the user to choose. Do not make that product/design decision
+  autonomously.
 
 ## Domain Context
 

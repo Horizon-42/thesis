@@ -91,7 +91,7 @@ def test_download_reuses_interrupted_checkpoint_start_for_cache_keys(tmp_path: P
     paths.checkpoint_state.write_text(
         json.dumps(
             {
-                "version": 1,
+                "version": 2,
                 "start_utc": "2026-07-22T11:50:11.064893+00:00",
             }
         ),

@@ -9,19 +9,24 @@ Two modes:
     • optimizer  (orange) — the optimizer's plan        (optimizer_states)  ["Optimize states"]
     • simulator  (blue)   — the real forward rollout    (simulator_states)  ["Optimize results"]
 
-* **Batch** (``--summary``) — the run's ``summary.json`` → **one combined CZML per runway**
-  plus a single ``comparison_index.json``. Every flight on one map: solved flights get the
-  three paths above; **unsolved flights get their reference only, in dark red (FAILED_COLOR)**.
+* **Batch** (``--summary``) — the run's ``summary.json`` → **one result CZML per runway**
+  plus a single ``comparison_index.json``. Optimizer/simulator/prediction paths live in
+  those files; reference ids point to the airport's one canonical ``trajectories.czml``
+  datasource, so the observed positions are not copied into every category. Solved flights
+  get result paths plus that logical reference; unsolved flights get the reference only.
   With ``--evaluation-report`` (the evaluation package's report JSON), solved flights whose
   final state FAILED the evaluation gates render their reference in **yellow
   (OFF_TARGET_COLOR)** with status ``offTarget``, and the index's ``optimization`` block
   carries the report's batch metrics (successRate / avgStateErrorM / avgTimeS).
+  A ts_transformer summary additionally publishes its existing ADE/FDE aggregates in
+  the index's ``prediction`` block; the frontend displays those values without recomputing
+  model accuracy.
   Each entity has a globally-unique id ``{kind}-{flightId}_{runway}`` and a ``properties`` bag
   (``group``/``flightId``/``kind``/``runway``/``airport``/``status``) so the frontend can
   group and **randomly sample** trajectories. Entities default to ``show=false`` (override with
   ``--start-visible``); the frontend reads ``comparison_index.json`` (one record per group, with
   its ``initialState`` and the CZML file + entity ids it owns), samples a subset, and reveals
-  only those. The reference is found by flight id in the airport's ``trajectories.czml``.
+  only those. The reference is resolved by flight key in the canonical observed datasource.
 """
 
 from __future__ import annotations
@@ -29,6 +34,8 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import tempfile
+import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,7 +44,6 @@ from typing import Any
 from data_layout import airport_data_path
 from flight_identity import flight_key
 from generate_czml import build_document_packet, build_position_property
-from vertical_datum import msl_to_hae
 
 # Record-filename suffixes. MUST match 4dTrajectory/optimization/evaluation_export.py, which
 # is where they are defined and where both writers (the optimizer batch and ts_transformer)
@@ -53,6 +59,33 @@ EVAL_SUFFIX = "_eval.json"
 # A fixed display epoch (state times are offsets in seconds from it), matching the
 # convention generate_czml uses. The relative motion is what matters, not the wall clock.
 EPOCH = datetime(2026, 4, 1, 8, 0, 0, tzinfo=timezone.utc)
+
+
+def _write_json_atomic(path: Path, value: Any, *, pretty: bool = False) -> None:
+    """Stream JSON to a sibling temp file, then publish it as one atomic artifact."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as output:
+            temporary = Path(output.name)
+            json.dump(
+                value,
+                output,
+                indent=2 if pretty else None,
+                separators=None if pretty else (",", ":"),
+            )
+        temporary.replace(path)
+    except BaseException:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+        raise
 
 # RGBA colours (0-255) for the three trajectories. These must stay in sync with the frontend
 # legend / path colours in aeroviz-4d/src/utils/trajectoryRenderModel.ts (COMPARISON_KIND_COLORS):
@@ -83,7 +116,9 @@ _TRAIL_TIME_S = 300
 
 # ── state sequence -> CZML geometry ───────────────────────────────────────────
 
-def _states_to_waypoints(states: list[dict[str, Any]]) -> list[tuple[float, float, float, float]]:
+def _states_to_waypoints(
+    states: list[dict[str, Any]], hae_minus_msl_m: float
+) -> list[tuple[float, float, float, float]]:
     """Convert a list of state dicts (``{t, lat, lon, alt, …}``) to CZML waypoints.
 
     ``build_position_property`` wants ``(offset_sec, lon, lat, alt_m)`` tuples — note the
@@ -98,10 +133,20 @@ def _states_to_waypoints(states: list[dict[str, Any]]) -> list[tuple[float, floa
     """
     if not states:
         return []
-    hae = msl_to_hae(
-        [s["lon"] for s in states], [s["lat"] for s in states], [s["alt"] for s in states]
-    )
-    return [(s["t"], s["lon"], s["lat"], alt) for s, alt in zip(states, hae)]
+    return [
+        (s["t"], s["lon"], s["lat"], float(s["alt"]) + hae_minus_msl_m)
+        for s in states
+    ]
+
+
+def _record_offset(record: dict[str, Any]) -> float:
+    source = record.get("source") or {}
+    value = source.get("hae_minus_msl_m")
+    if value is None:
+        raise ValueError(
+            "record lacks source.hae_minus_msl_m; regenerate legacy vertical-datum artifact"
+        )
+    return float(value)
 
 
 def _time_shifted(states: list[dict[str, Any]], offset_s: float) -> list[dict[str, Any]]:
@@ -168,6 +213,7 @@ def _build_trajectory_entity(
     states: list[dict[str, Any]],
     color_rgba: tuple[int, int, int, int],
     *,
+    hae_minus_msl_m: float,
     properties: dict[str, Any] | None = None,
     show: bool = True,
 ) -> dict[str, Any]:
@@ -177,7 +223,7 @@ def _build_trajectory_entity(
     by ``group``/``kind``/…) and ``show`` sets entity-level visibility (``False`` ⇒ the
     whole entity is hidden until the frontend reveals it).
     """
-    waypoints = _states_to_waypoints(states)
+    waypoints = _states_to_waypoints(states, hae_minus_msl_m)
     entity: dict[str, Any] = {
         "id": entity_id,
         "name": name,
@@ -217,10 +263,17 @@ def build_comparison_czml(
     # The observed entity is looked up by flight_key (the ADS-B CZML's entity id), derived
     # from the record's own source dict — same fields both writers stamped.
     identity = flight_key(state_data.get("source", {}), 0)
+    offset = _record_offset(state_data)
 
     reference = _reference_entity_from_adsb(adsb_czml, identity, REFERENCE_COLOR)
-    optimizer = _build_trajectory_entity("scenario-optimizer", "Optimizer", optimizer_states, OPTIMIZER_COLOR)
-    simulator = _build_trajectory_entity("scenario-simulator", "Simulator", simulator_states, SIMULATOR_COLOR)
+    optimizer = _build_trajectory_entity(
+        "scenario-optimizer", "Optimizer", optimizer_states, OPTIMIZER_COLOR,
+        hae_minus_msl_m=offset,
+    )
+    simulator = _build_trajectory_entity(
+        "scenario-simulator", "Simulator", simulator_states, SIMULATOR_COLOR,
+        hae_minus_msl_m=offset,
+    )
     entities = [e for e in (reference, optimizer, simulator) if e is not None]
 
     # Clock spans the longest of the trajectories actually present — reference included, so the
@@ -388,6 +441,7 @@ def build_runway_comparison(
     start_hidden: bool = True,
     scenario_initial: dict[tuple[str, str], dict[str, float]] | None = None,
     verdicts: dict[str, dict[str, Any]] | None = None,
+    include_reference_entities: bool = True,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Combined CZML for one runway **plus** its index records (every flight on one map).
 
@@ -469,6 +523,7 @@ def build_runway_comparison(
                 verdict is not None and verdict.get("solved") and not verdict.get("success")
             )
             status = "offTarget" if off_target else "solved"
+            offset = _record_offset(state_data)
             # The off-target COLOURING exists to make the few results that missed their
             # target stand out among mostly-successful ones. For a learned prediction that
             # is backwards: a forecast essentially never lands inside the 106.75 m lateral
@@ -483,18 +538,26 @@ def build_runway_comparison(
             sim_color = OFF_TARGET_COLOR if mark_off_target else SIMULATOR_COLOR
             ref_name = f"Ref {flight_id} (off target)" if mark_off_target else f"Ref {flight_id}"
 
-            reference = _reference_entity_from_adsb(
-                adsb_czml, group, ref_color,
-                entity_id=f"ref-{group}", name=ref_name,
-                properties=_traj_properties(group, flight_id, "reference", runway, airport, status),
-                show=show,
-            )
-            if reference is not None:
-                entities.append(reference)
+            if include_reference_entities:
+                reference = _reference_entity_from_adsb(
+                    adsb_czml, group, ref_color,
+                    entity_id=f"ref-{group}", name=ref_name,
+                    properties=_traj_properties(
+                        group, flight_id, "reference", runway, airport, status
+                    ),
+                    show=show,
+                )
+                if reference is not None:
+                    entities.append(reference)
+                    entity_ids.append(f"ref-{group}")
+            else:
+                # Logical entity id: the frontend resolves this to the same flight in
+                # the canonical observed datasource instead of storing its CZML again.
                 entity_ids.append(f"ref-{group}")
             if schema == "optimizer":
                 entities.append(_build_trajectory_entity(
                     f"opt-{group}", f"Opt {flight_id}", optimizer_states, OPTIMIZER_COLOR,
+                    hae_minus_msl_m=offset,
                     properties=_traj_properties(group, flight_id, "optimizer", runway, airport, status),
                     show=show))
                 entity_ids.append(f"opt-{group}")
@@ -502,6 +565,7 @@ def build_runway_comparison(
                     f"sim-{group}",
                     f"Sim {flight_id} (off target)" if mark_off_target else f"Sim {flight_id}",
                     simulator_states, sim_color,
+                    hae_minus_msl_m=offset,
                     properties=_traj_properties(group, flight_id, "simulator", runway, airport, status),
                     show=show))
                 entity_ids.append(f"sim-{group}")
@@ -514,6 +578,7 @@ def build_runway_comparison(
                 entities.append(_build_trajectory_entity(
                     f"look-{group}", f"Lookback {flight_id}",
                     lookback_states, LOOKBACK_COLOR,
+                    hae_minus_msl_m=offset,
                     properties=_traj_properties(group, flight_id, "lookback", runway, airport, status),
                     show=show))
                 entity_ids.append(f"look-{group}")
@@ -523,6 +588,7 @@ def build_runway_comparison(
                 entities.append(_build_trajectory_entity(
                     f"pred-{group}", f"Pred {flight_id}",
                     predicted_states, PREDICTION_COLOR,
+                    hae_minus_msl_m=offset,
                     properties=_traj_properties(group, flight_id, "predicted", runway, airport, status),
                     show=show))
                 entity_ids.append(f"pred-{group}")
@@ -542,14 +608,19 @@ def build_runway_comparison(
                 record["verticalErrM"] = verdict.get("vertical_m")
             index_records.append(record)
         else:
-            reference = _reference_entity_from_adsb(
-                adsb_czml, group, FAILED_COLOR,
-                entity_id=f"ref-{group}", name=f"Ref {flight_id} (unsolved)",
-                properties=_traj_properties(group, flight_id, "reference", runway, airport, "failed"),
-                show=show,
-            )
-            if reference is not None:
-                entities.append(reference)
+            if include_reference_entities:
+                reference = _reference_entity_from_adsb(
+                    adsb_czml, group, FAILED_COLOR,
+                    entity_id=f"ref-{group}", name=f"Ref {flight_id} (unsolved)",
+                    properties=_traj_properties(
+                        group, flight_id, "reference", runway, airport, "failed"
+                    ),
+                    show=show,
+                )
+                if reference is not None:
+                    entities.append(reference)
+                    entity_ids.append(f"ref-{group}")
+            else:
                 entity_ids.append(f"ref-{group}")
             # A failed optimization has no states, but the scenario still carries the resolved
             # aircraft mass + observed V — surface them so the flight list shows them (and flags red).
@@ -571,19 +642,20 @@ def build_runway_comparison(
     return [document] + entities, index_records
 
 
-def clear_stale_outputs(out_dir: Path, *, keep_report: bool) -> list[Path]:
-    """Delete a previous build's files from the category dir before writing this one.
+def prune_unreferenced_outputs(out_dir: Path, keep_names: set[str]) -> list[Path]:
+    """Delete old generations only after the new index has committed.
 
-    A runway present in an EARLIER batch but absent from this summary would leave its
-    stale ``comparison_*.czml`` behind (dormant — the rewritten index stops referencing
-    it — but unbounded growth). And when this run publishes NO evaluation report
-    (``keep_report=False``), a previously published ``evaluation_report.json`` must go
-    too: the frontend's Details window fetches it by path and would show outdated
-    metrics next to the fresh index. Returns the deleted paths.
+    Physical batch artifacts are immutable and generation-named. The index is the single
+    commit point: until its atomic replace succeeds, the previous index and every file it
+    references remain untouched. Once committed, files outside ``keep_names`` are dormant
+    and may be removed without exposing a partial batch.
     """
-    stale = sorted(out_dir.glob("comparison_*.czml"))
-    if not keep_report:
-        stale += [p for p in [out_dir / "evaluation_report.json"] if p.exists()]
+    stale = [
+        path
+        for pattern in ("comparison_*.czml", "evaluation_report*.json")
+        for path in sorted(out_dir.glob(pattern))
+        if path.name not in keep_names
+    ]
     for path in stale:
         path.unlink()
     if stale:
@@ -591,15 +663,20 @@ def clear_stale_outputs(out_dir: Path, *, keep_report: bool) -> list[Path]:
     return stale
 
 
-def publish_evaluation_report(evaluation_report: dict[str, Any], out_dir: Path) -> Path:
+def publish_evaluation_report(
+    evaluation_report: dict[str, Any],
+    out_dir: Path,
+    *,
+    filename: str,
+) -> Path:
     """Publish the evaluation report VERBATIM into the category dir the frontend serves.
 
     The frontend's detailed evaluation view visualizes this copy directly — every number
     in it was computed by ``python -m evaluation`` (the one backend exit); the frontend
     never recomputes a metric.
     """
-    path = out_dir / "evaluation_report.json"
-    path.write_text(json.dumps(evaluation_report, indent=2), encoding="utf-8")
+    path = out_dir / filename
+    _write_json_atomic(path, evaluation_report, pretty=True)
     return path
 
 
@@ -642,6 +719,49 @@ def optimization_stats(
     return stats
 
 
+def prediction_accuracy_stats(summary: dict[str, Any]) -> dict[str, Any] | None:
+    """Frontend ADE/FDE summary for a ts_transformer batch.
+
+    The predictor already computes these aggregates against the observed overlap and writes
+    them to ``summary.json.accuracy``. Publication only changes field casing; it must never
+    recompute trajectory accuracy from rendered CZML.
+    """
+    mode = summary.get("mode")
+    if not isinstance(mode, str) or not mode.startswith("tsTransformer:"):
+        return None
+
+    accuracy = summary.get("accuracy")
+    if not isinstance(accuracy, dict):
+        raise ValueError("ts_transformer summary is missing its accuracy block")
+
+    def spread(source_key: str) -> dict[str, float] | None:
+        source = accuracy.get(source_key)
+        # `accuracy_block` omits error spreads when no forecast overlaps its observed
+        # reference. That is a valid empty result; the UI renders unavailable metrics.
+        if source is None:
+            return None
+        if not isinstance(source, dict):
+            raise ValueError(
+                f"ts_transformer summary accuracy.{source_key} is malformed"
+            )
+        mean_value = source.get("mean")
+        p95_value = source.get("p95")
+        if not isinstance(mean_value, (int, float)) or not isinstance(
+            p95_value, (int, float)
+        ):
+            raise ValueError(
+                f"ts_transformer summary accuracy.{source_key} requires mean and p95"
+            )
+        return {"mean": float(mean_value), "p95": float(p95_value)}
+
+    return {
+        "flights": accuracy.get("flights"),
+        "flightsWithoutOverlap": accuracy.get("flights_without_overlap"),
+        "adeM": spread("ade_m"),
+        "fdeM": spread("fde_m"),
+    }
+
+
 def group_results_by_runway(
     summary: dict[str, Any], fallback_airport: str | None = None
 ) -> dict[tuple[str, str], list[dict[str, Any]]]:
@@ -652,6 +772,114 @@ def group_results_by_runway(
         runway = result.get("runway") or "unknown"
         grouped[(airport, runway)].append(result)
     return grouped
+
+
+def publish_comparison_batch(
+    *,
+    summary: dict[str, Any],
+    states_dir: Path,
+    out_dir: Path,
+    airport: str,
+    category: str | None,
+    start_hidden: bool,
+    scenario_initial: dict[str, dict[str, Any]] | None,
+    evaluation_report: dict[str, Any] | None,
+    generation: str | None = None,
+) -> dict[str, Any]:
+    """Build and atomically publish one complete comparison generation.
+
+    Every CZML and the report receive an immutable generation suffix. They are
+    written first; ``comparison_index.json`` is atomically replaced last and is therefore
+    the batch commit point. A failed build removes only its unpublished generation. Old
+    files are pruned only after commit, so a reader can never observe an old index whose
+    files were pre-deleted or an index that mixes two generations.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    generation = generation or uuid.uuid4().hex[:16]
+    safe_generation_chars = (
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+    )
+    if not generation or any(ch not in safe_generation_chars for ch in generation):
+        raise ValueError(f"invalid comparison generation {generation!r}")
+    if evaluation_report is None:
+        raise ValueError(
+            "comparison-v2-generation requires an evaluation report; "
+            "run evaluation before publishing comparison data"
+        )
+
+    verdicts = load_verdicts(evaluation_report)
+    groups = group_results_by_runway(summary, fallback_airport=airport)
+    index: dict[str, Any] = {
+        "schemaVersion": "comparison-v2-generation",
+        "generation": generation,
+        "epoch": EPOCH.isoformat(),
+        "startHidden": start_hidden,
+        "category": category,
+        "referenceSource": "canonicalObserved",
+        "groups": [],
+    }
+    created: list[Path] = []
+    try:
+        for (group_airport, runway), results in sorted(groups.items()):
+            czml, records = build_runway_comparison(
+                results,
+                states_dir,
+                [],
+                airport=group_airport,
+                start_hidden=start_hidden,
+                scenario_initial=scenario_initial,
+                verdicts=verdicts,
+                include_reference_entities=False,
+            )
+            out_path = (
+                out_dir / f"comparison_{group_airport}_{runway}_{generation}.czml"
+            )
+            _write_json_atomic(out_path, czml)
+            created.append(out_path)
+            for record in records:
+                record["czml"] = out_path.name
+            index["groups"].extend(records)
+            failed = sum(1 for record in records if record["status"] == "failed")
+            off_target = sum(
+                1 for record in records if record["status"] == "offTarget"
+            )
+            print(
+                f"✓ staged {out_path.name}: {len(records)} group(s), "
+                f"{failed} unsolved (red), {off_target} off-target (yellow) "
+                f"-> {len(czml)} packets"
+            )
+
+        index["optimization"] = optimization_stats(summary, evaluation_report)
+        prediction = prediction_accuracy_stats(summary)
+        if prediction is not None:
+            index["prediction"] = prediction
+        report_name = f"evaluation_report_{generation}.json"
+        report_path = publish_evaluation_report(
+            evaluation_report, out_dir, filename=report_name
+        )
+        created.append(report_path)
+        index["evaluationReport"] = report_name
+
+        index_path = out_dir / "comparison_index.json"
+        _write_json_atomic(index_path, index, pretty=True)
+    except BaseException:
+        for path in created:
+            path.unlink(missing_ok=True)
+        raise
+
+    keep_names = {
+        group["czml"]
+        for group in index["groups"]
+        if isinstance(group.get("czml"), str)
+    }
+    keep_names.add(index["evaluationReport"])
+    try:
+        prune_unreferenced_outputs(out_dir, keep_names)
+    except OSError as exc:
+        # Garbage collection is not part of the commit. The new index is already complete;
+        # leaving dormant old files is safer than reporting the valid publication as failed.
+        print(f"⚠ comparison generation committed; stale-file cleanup failed: {exc}")
+    return index
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -669,7 +897,7 @@ def _upsert_category(
 
     Each ``--category`` run writes its CZMLs into its own subdir and records itself here, so
     the frontend can offer a selector listing exactly the optimization categories that exist
-    (e.g. ADS-B target / runway target / …, with/without constraints). ``constrained`` is
+    (e.g. fitted ADS-B crossing / runway target / …). ``constrained`` is
     stamped as an explicit manifest field — the frontend keys constraint-scoped behavior
     (the Observe procedure auto-open) off it, never off the key/dir spelling. Returns the
     new total.
@@ -679,11 +907,17 @@ def _upsert_category(
         loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
         if isinstance(loaded, dict) and isinstance(loaded.get("categories"), list):
             manifest = loaded
-    kept = [c for c in manifest["categories"] if c.get("key") != key]
+    # The old mode was both semantically wrong (raw receiver cutoff) and misspelled
+    # ``asdb``. Once the replacement is published, hide legacy aliases from the picker
+    # without deleting their on-disk output directories.
+    replaced = {key}
+    if key == "fitted_adsb":
+        replaced.update({"adsb", "asdb", "adsb_cons", "asdb_cons"})
+    kept = [c for c in manifest["categories"] if c.get("key") not in replaced]
     kept.append({"key": key, "label": label, "dir": directory, "groups": group_count,
                  "constrained": constrained})
     manifest["categories"] = sorted(kept, key=lambda c: c["key"])
-    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    _write_json_atomic(manifest_path, manifest, pretty=True)
     return len(manifest["categories"])
 
 
@@ -704,7 +938,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--category", default=None,
-        help="optimization-category key (e.g. asdb / runway / runway_cons). When set, "
+        help="optimization-category key (e.g. fitted_adsb / runway / runway_cons). When set, "
              "the output-dir is treated as that category's subdir and a categories.json manifest "
              "is written to its parent so the frontend can offer a category selector.",
     )
@@ -740,26 +974,19 @@ def main() -> None:
         czml = build_comparison_czml(state_data, _load_adsb(args.airport, args.adsb_czml))
         output = Path(args.output)
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(czml, indent=2), encoding="utf-8")
+        _write_json_atomic(output, czml)
         print(f"✓ wrote comparison CZML ({len(czml)} packets) -> {output}")
         return
 
     # Batch: one combined CZML per (airport, runway), driven by the summary.
     if not args.output_dir:
         parser.error("--summary requires --output-dir")
+    if not args.evaluation_report:
+        parser.error("--summary batch requires --evaluation-report")
     summary_path = Path(args.summary)
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     states_dir = Path(args.states_dir) if args.states_dir else summary_path.parent
     out_dir = Path(args.output_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    clear_stale_outputs(out_dir, keep_report=args.evaluation_report is not None)
-
-    adsb_cache: dict[str, list[dict[str, Any]]] = {}
-
-    def adsb_for(airport: str) -> list[dict[str, Any]]:
-        if airport not in adsb_cache:
-            adsb_cache[airport] = _load_adsb(airport, None)
-        return adsb_cache[airport]
 
     scenario_initial = (
         scenario_initial_map([p.strip() for p in args.scenarios.split(",") if p.strip()])
@@ -769,40 +996,17 @@ def main() -> None:
         json.loads(Path(args.evaluation_report).read_text(encoding="utf-8"))
         if args.evaluation_report else None
     )
-    verdicts = load_verdicts(evaluation_report) if evaluation_report is not None else None
-
+    index = publish_comparison_batch(
+        summary=summary,
+        states_dir=states_dir,
+        out_dir=out_dir,
+        airport=args.airport,
+        category=args.category,
+        start_hidden=not args.start_visible,
+        scenario_initial=scenario_initial,
+        evaluation_report=evaluation_report,
+    )
     groups = group_results_by_runway(summary, fallback_airport=args.airport)
-    index: dict[str, Any] = {
-        "epoch": EPOCH.isoformat(),
-        "startHidden": not args.start_visible,
-        "category": args.category,
-        "groups": [],
-    }
-    for (airport, runway), results in sorted(groups.items()):
-        czml, records = build_runway_comparison(
-            results, states_dir, adsb_for(airport),
-            airport=airport, start_hidden=not args.start_visible,
-            scenario_initial=scenario_initial, verdicts=verdicts,
-        )
-        out_path = out_dir / f"comparison_{airport}_{runway}.czml"
-        out_path.write_text(json.dumps(czml, indent=2), encoding="utf-8")
-        for record in records:
-            record["czml"] = out_path.name        # which CZML file this group lives in
-        index["groups"].extend(records)
-        failed = sum(1 for r in records if r["status"] == "failed")
-        off_target = sum(1 for r in records if r["status"] == "offTarget")
-        print(f"✓ {out_path.name}: {len(records)} group(s), {failed} unsolved (red), "
-              f"{off_target} off-target (yellow) -> {len(czml)} packets")
-
-    # Solve stats from the run's summary.json + (when given) the evaluation report's batch
-    # metrics — nothing recomputed here.
-    index["optimization"] = optimization_stats(summary, evaluation_report)
-    if evaluation_report is not None:
-        report_path = publish_evaluation_report(evaluation_report, out_dir)
-        print(f"✓ published evaluation report -> {report_path}")
-
-    index_path = out_dir / "comparison_index.json"
-    index_path.write_text(json.dumps(index, indent=2), encoding="utf-8")
     rate = summary.get("failure_rate")
     rate_str = f"{rate:.1%}" if isinstance(rate, (int, float)) else "n/a"
     print(f"✓ wrote {len(groups)} runway CZML(s) + index ({len(index['groups'])} groups) "

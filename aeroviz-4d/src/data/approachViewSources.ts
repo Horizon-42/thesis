@@ -25,9 +25,14 @@
  * wired in). Wiring the comparison overlay into the approach view is a follow-up.
  */
 
-import { planObservedTracks, type ObservedTrackInputs } from "./observedTracks";
+import {
+  observedTracksVisible,
+  type ObservedTrackVisibilityInputs,
+} from "./observedTracks";
 
-export interface ApproachViewSourceInputs extends ObservedTrackInputs {
+export interface ApproachViewSourceInputs extends ObservedTrackVisibilityInputs {
+  activeAirportCode: string | null;
+  selectedRunway: string | null;
   /** Whether an optimized-playback datasource is currently loaded. */
   hasOptimizedSource: boolean;
 }
@@ -45,7 +50,7 @@ export function planApproachViewSources(
   return {
     // Observed tracks are painted only in Observe — mirror that exact decision so
     // the approach view never plots them in a tab that hides them on the globe.
-    observed: planObservedTracks(inputs).visible,
+    observed: observedTracksVisible(inputs),
     // The optimized playback belongs to the Optimize tab. It only ever exists there
     // (PilotPanel clears it on leaving), but gate on mode too so a lingering source
     // could never leak into another tab's profile.

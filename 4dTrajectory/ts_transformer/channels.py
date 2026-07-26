@@ -1,4 +1,4 @@
-"""What the network actually sees: a local ENU chart anchored at the runway threshold.
+"""What the network actually sees: a local chart anchored at the runway threshold.
 
 The evaluation contract's state is ``(lat, lon, alt, V, psi, gamma, m)`` — degrees, metres,
 and two angles in radians. That is a poor thing to regress directly:
@@ -12,8 +12,12 @@ and two angles in radians. That is a poor thing to regress directly:
 So the channels are the **chart coordinates and their exact time derivatives**, in a local
 chart whose origin is the runway threshold:
 
-    e, n, u           east / north / up, metres from the threshold
+    e, n, u           horizontal-axis 1 / horizontal-axis 2 / up, metres from the threshold
     edot, ndot, udot  d(e)/dt, d(n)/dt, d(u)/dt — metres/second IN THE CHART
+
+The stable channel names represent east/north in :class:`coordinate_frames.ENUFrame` and
+along-runway/cross-runway in :class:`coordinate_frames.RunwayAlignedFrame`. The concrete
+frame owns that distinction; the channel encoder and model remain frame-agnostic.
 
 ``psi`` and ``gamma`` then fall out of the velocity channels on the way back
 (:func:`states_from_channels`) with the right convention *by construction* —
@@ -74,14 +78,14 @@ orders meet; nothing else should be indexing a waypoint by position.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
 from typing import Sequence
 
 import numpy as np
 
-from geokit import METRES_PER_DEG_LAT, WGS84_A, metres_per_deg_lon, wgs84_curvature_radii
+from geokit import METRES_PER_DEG_LAT
 
 from aerodynamic_model.common import GeodeticState
+from coordinate_frames import CoordinateFrame
 
 # The channel contract. Order AND names are load-bearing — the tuple indexes every tensor,
 # the normalizer's per-channel statistics, and the checkpoint; load_checkpoint refuses a
@@ -94,60 +98,8 @@ IDX = {name: i for i, name in enumerate(CHANNELS)}
 POSITION_IDX = (IDX["e"], IDX["n"], IDX["u"])
 
 
-@dataclass(frozen=True)
-class Frame:
-    """A local ENU chart anchored at a runway threshold.
-
-    ``alt0`` is the threshold's altitude (MSL metres), so ``u`` is height above the
-    threshold rather than above the ellipsoid — which keeps the vertical channel centred
-    near zero at the one point the evaluation gates care about.
-    """
-
-    lat0: float
-    lon0: float
-    alt0: float
-
-    @property
-    def m_per_deg_lon(self) -> float:
-        return metres_per_deg_lon(self.lat0)
-
-    def latlon_from_en(self, e: float, n: float) -> tuple[float, float]:
-        """``(east, north)`` metres -> ``(lat, lon)`` degrees: the inverse projection.
-
-        The single home of the inverse formula — :func:`states_from_channels` and
-        ``synthetic.py``'s waypoint generator both go through it, so a projection change
-        cannot land on one side only and read as model error on the other.
-        """
-        return self.lat0 + n / METRES_PER_DEG_LAT, self.lon0 + e / self.m_per_deg_lon
-
-    def chart_velocity_factors(self, lat_deg: float, alt_m: float) -> tuple[float, float]:
-        """``(f_e, f_n)`` such that ``edot = V_east·f_e`` and ``ndot = V_north·f_n``.
-
-        The full-transport Jacobian from a physical ENU velocity at ``(lat, alt)`` to the
-        derivative of this chart's coordinates — the module docstring derives it from the
-        geodetic RHS. Both factors are 1 ± ~0.3% over a TMA; applying them is what makes
-        the velocity channels the exact time derivatives of the position channels.
-        """
-        r_m, r_n = wgs84_curvature_radii(lat_deg)
-        cos_lat0 = math.cos(math.radians(self.lat0))
-        cos_lat = math.cos(math.radians(lat_deg))
-        return (
-            WGS84_A * cos_lat0 / ((r_n + alt_m) * cos_lat),
-            WGS84_A / (r_m + alt_m),
-        )
-
-
-def frame_for_state(state: GeodeticState) -> Frame:
-    """The ENU frame anchored at a target state — normally the runway threshold.
-
-    Pair with ``flight_scenarios.threshold_target_state``, which builds that target from
-    the published threshold (position at threshold-crossing height, runway heading, Vref).
-    """
-    return Frame(lat0=state.latitude, lon0=state.longitude, alt0=state.altitude)
-
-
 def channels_from_states(
-    samples: Sequence[tuple[float, GeodeticState]], frame: Frame
+    samples: Sequence[tuple[float, GeodeticState]], frame: CoordinateFrame
 ) -> tuple[np.ndarray, np.ndarray]:
     """``[(t, GeodeticState), ...]`` -> ``(times[N], channels[N, C])``.
 
@@ -167,19 +119,27 @@ def channels_from_states(
         ground_speed = s.V * math.cos(s.gamma)
         f_e, f_n = frame.chart_velocity_factors(s.latitude, s.altitude)
         times[i] = t
+        first, second = frame.from_world_horizontal(
+            (s.longitude - frame.lon0) * m_per_deg_lon,
+            (s.latitude - frame.lat0) * METRES_PER_DEG_LAT,
+        )
+        first_dot, second_dot = frame.from_world_horizontal(
+            ground_speed * math.cos(s.psi) * f_e,
+            ground_speed * math.sin(s.psi) * f_n,
+        )
         out[i] = (
-            (s.longitude - frame.lon0) * m_per_deg_lon,      # e
-            (s.latitude - frame.lat0) * METRES_PER_DEG_LAT,  # n
+            first,
+            second,
             s.altitude - frame.alt0,                         # u
-            ground_speed * math.cos(s.psi) * f_e,            # edot
-            ground_speed * math.sin(s.psi) * f_n,            # ndot
+            first_dot,
+            second_dot,
             s.V * math.sin(s.gamma),                         # udot
         )
     return times, out
 
 
 def states_from_channels(
-    times: np.ndarray, values: np.ndarray, frame: Frame, *, mass_kg: float
+    times: np.ndarray, values: np.ndarray, frame: CoordinateFrame, *, mass_kg: float
 ) -> list[tuple[float, GeodeticState]]:
     """``(times[N], channels[N, C])`` -> ``[(t, GeodeticState), ...]``.
 
@@ -202,11 +162,12 @@ def states_from_channels(
     states: list[tuple[float, GeodeticState]] = []
     for t, row in zip(times, values):
         e, n, u, edot, ndot, udot = (float(v) for v in row)
-        lat, lon = frame.latlon_from_en(e, n)
+        lat, lon = frame.latlon_from_horizontal(e, n)
         altitude = frame.alt0 + u
         f_e, f_n = frame.chart_velocity_factors(lat, altitude)
-        v_east = edot / f_e
-        v_north = ndot / f_n
+        world_edot, world_ndot = frame.to_world_horizontal(edot, ndot)
+        v_east = world_edot / f_e
+        v_north = world_ndot / f_n
         ground_speed = math.hypot(v_east, v_north)
         states.append((float(t), GeodeticState(
             latitude=lat,
@@ -251,12 +212,3 @@ def resample_uniform(times: np.ndarray, values: np.ndarray, dt_s: float) -> tupl
         # One-dimensional linear interpolation
         out[:, c] = np.interp(grid, times, values[:, c])
     return grid, out
-
-
-def horizontal_distance_m(values: np.ndarray) -> np.ndarray:
-    """Horizontal distance from the frame origin (the threshold) for each row, metres.
-
-    Used to decide where a predicted approach reaches the runway — see
-    ``forecast.truncate_at_threshold``.
-    """
-    return np.hypot(values[:, IDX["e"]], values[:, IDX["n"]])

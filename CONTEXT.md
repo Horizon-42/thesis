@@ -40,9 +40,10 @@ whether the trajectory looks plausible in the runway/approach context.
 - `trajectory_data_process/`: standalone ADS-B acquisition, normalization, and
   training dataset helpers. Kept outside `aeroviz-4d` so data acquisition is not
   coupled to the frontend.
-- `run_asd-b_fetch_and_generate.py`: root orchestration wrapper for fetch or
-  reuse JSON, normalize if needed, generate CZML, and optionally regenerate
-  procedure assets.
+- `trajectory_data_process.harvest`: canonical observed-track download, derivation,
+  evaluation, and CZML publication entry point.
+- `prepare_scenario_inputs.py` / `run_scenario_optimization.py`: prepared modeling
+  data and optimizer/publication entry points.
 - `preprocess_aeroviz_airport.sh`: full airport data preprocessing pipeline for
   AeroViz browser assets.
 - `generate_aeroviz_airport_procedure_data.sh`: RNAV/RNP procedure asset
@@ -234,11 +235,12 @@ Pipeline examples:
 ./generate_aeroviz_airport_procedure_data.sh KRDU
 
 /Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
-  run_asd-b_fetch_and_generate.py --airport CYYC --mode live
+  -m trajectory_data_process.harvest --airport CYYC
 
 /Users/liudongxu/opt/miniconda3/envs/aviation/bin/python \
-  run_asd-b_fetch_and_generate.py \
-  --input-json trajectory_data_process/outputs/cyyc_raw_20260415T152417Z.json
+  aeroviz-4d/python/generate_czml.py --airport CYYC \
+  --input path/to/flight_array.json \
+  --output aeroviz-4d/public/data/airports/CYYC/trajectories.czml
 ```
 
 FAA RNAV charts:

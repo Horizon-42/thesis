@@ -9,6 +9,8 @@ import {
   airportChartsIndexUrl,
   isAirportsIndexManifest,
   isComparisonCategoriesManifest,
+  isDrawableComparisonCategory,
+  isComparisonIndex,
   normalizeAirportCode,
   sortAirportCatalog,
 } from "../airportData";
@@ -57,5 +59,44 @@ describe("airportData helpers", () => {
     expect(
       isComparisonCategoriesManifest({ categories: [{ ...entry, constrained: "yes" }] }),
     ).toBe(false);
+  });
+
+  it("distinguishes report-only evaluation categories from drawable comparisons", () => {
+    expect(
+      isDrawableComparisonCategory({
+        key: "observed",
+        label: "Observed ADS-B",
+        dir: "observed",
+        groups: 0,
+        constrained: false,
+      }),
+    ).toBe(false);
+    expect(
+      isDrawableComparisonCategory({
+        key: "runway",
+        label: "Runway target",
+        dir: "runway",
+        groups: 12,
+        constrained: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("accepts only the current atomic comparison publication contract", () => {
+    const current = {
+      schemaVersion: "comparison-v2-generation",
+      generation: "batch123",
+      epoch: "2026-07-23T12:00:00Z",
+      startHidden: true,
+      referenceSource: "canonicalObserved",
+      evaluationReport: "evaluation_report_batch123.json",
+      groups: [],
+    };
+
+    expect(isComparisonIndex(current)).toBe(true);
+    expect(isComparisonIndex({ ...current, schemaVersion: undefined })).toBe(false);
+    expect(isComparisonIndex({ ...current, generation: undefined })).toBe(false);
+    expect(isComparisonIndex({ ...current, referenceSource: undefined })).toBe(false);
+    expect(isComparisonIndex({ ...current, evaluationReport: undefined })).toBe(false);
   });
 });

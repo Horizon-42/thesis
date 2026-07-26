@@ -15,10 +15,11 @@ that keyed on the callsign has been bitten -- the ts train/val/test split leaked
 comparison CZML dropped 22% of a batch, the frontend table swapped verdicts between
 namesakes, and Cesium merged two flights into one entity.
 
-The landing time here is the time of the sample closest to the assigned threshold, which
-is well defined precisely because ``tracks.reconstruct_tracks`` guarantees the track is
-one contiguous flight -- under the old segmentation this timestamp could come from a
-different pass entirely.
+The landing time here is the time of the sample closest to the assigned threshold ON THE
+FINAL INBOUND PASS selected by ``final_approach``.  Contiguity alone is not enough: one
+flight can overfly a threshold, go around, and later land without any time discontinuity.
+Searching the whole track would let the earlier pass steal both the landing timestamp and
+the arrival crop merely because its discrete ADS-B sample happened to lie closer.
 """
 
 from __future__ import annotations
@@ -124,16 +125,30 @@ def _track_point(sample):
 def _landing_sample_index(
     track: Track, airport: Airport, assignment: Assignment
 ) -> int | None:
-    """Sample closest to the assigned threshold; the measured arrival endpoint."""
+    """Sample closest to the threshold on the assigned fit's final inbound pass.
+
+    ``fit_final_segment`` records the exact source indices of the pass it fitted. Start the
+    endpoint search at that fit's last sample, so an earlier overflight/go-around cannot
+    become the landing identity and this code cannot drift from the assignment geometry.
+    """
     if assignment.runway is None:
         return None
+    if assignment.fit is None:
+        raise ValueError(
+            f"assigned runway {assignment.runway!r} has no final-approach fit"
+        )
     frame = airport.runway(assignment.runway).frame("hae")
+    final_pass_index = assignment.fit.last_sample_index
+    if not 0 <= final_pass_index < len(track.samples):
+        raise ValueError(
+            f"assigned runway {assignment.runway!r} fit ends at invalid sample index "
+            f"{final_pass_index} for a {len(track.samples)}-sample track"
+        )
     return min(
-        range(len(track.samples)),
+        range(final_pass_index, len(track.samples)),
         key=lambda index: frame.distance_m(_track_point(track.samples[index])),
     )
 
 
 def _iso(time_s: float) -> str:
     return datetime.fromtimestamp(time_s, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-

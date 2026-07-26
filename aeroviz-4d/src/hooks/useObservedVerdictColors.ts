@@ -15,16 +15,20 @@
  * Entity ids in the observed CZML are `flight_scenarios.identity.flight_key`, and the
  * report rows carry the same key. Nothing here falls back to the callsign: it is not
  * unique, and joining on it swaps verdicts between namesakes. A row that fails to
- * match simply keeps its CZML colour, and `matched` / `total` are returned so a
- * wholesale mismatch (e.g. tracks regenerated from a different harvest than the
- * report) is visible in the UI instead of silently painting everything grey.
+ * match is painted neutral grey: it has no defensible pass/fail verdict, but must not
+ * leak the CZML's five-colour identity palette into the three-state evaluation view.
+ * `matched` / `total` are still returned so missing evaluation coverage remains visible.
  */
 
 import { useEffect, useState } from "react";
 import * as Cesium from "cesium";
 
 import { useApp } from "../context/AppContext";
-import { airportEvaluationReportUrl } from "../data/airportData";
+import {
+  airportEvaluationReportUrl,
+  OBSERVED_CATEGORY_KEY,
+  OBSERVED_EVALUATION_REPORT_FILE,
+} from "../data/airportData";
 import { isEvaluationReport } from "../data/evaluationReport";
 import { fetchJson, isMissingJsonAsset } from "../utils/fetchJson";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
@@ -36,9 +40,9 @@ import {
 } from "../utils/observedVerdictColors";
 
 export interface ObservedVerdictState {
-  /** Verdict counts over the tracks actually painted, or null when inactive. */
+  /** Verdict counts over every painted track, or null when inactive. */
   counts: Record<ObservedVerdict, number> | null;
-  /** How many painted entities found a verdict, and how many exist. */
+  /** How many entities found a published verdict, and how many exist. */
   matched: number;
   total: number;
   /** True while the report is being fetched. */
@@ -56,14 +60,13 @@ const EMPTY: ObservedVerdictState = {
 };
 
 export function useObservedVerdictColors(
-  categoryDir: string | null,
   active: boolean,
 ): ObservedVerdictState {
   const { viewer, trajectoryDataSource, activeAirportCode } = useApp();
   const [state, setState] = useState<ObservedVerdictState>(EMPTY);
 
   useEffect(() => {
-    if (!active || !activeAirportCode || !categoryDir || !trajectoryDataSource) {
+    if (!active || !activeAirportCode || !trajectoryDataSource) {
       setState(EMPTY);
       return;
     }
@@ -75,7 +78,13 @@ export function useObservedVerdictColors(
     void (async () => {
       let report: unknown;
       try {
-        report = await fetchJson(airportEvaluationReportUrl(activeAirportCode, categoryDir));
+        report = await fetchJson(
+          airportEvaluationReportUrl(
+            activeAirportCode,
+            OBSERVED_CATEGORY_KEY,
+            OBSERVED_EVALUATION_REPORT_FILE,
+          ),
+        );
       } catch (error) {
         if (cancelled) return;
         setState({ ...EMPTY, missing: isMissingJsonAsset(error) });
@@ -88,12 +97,14 @@ export function useObservedVerdictColors(
 
       const byKey = verdictsByFlightKey(report.trajectories);
       const painted: ObservedVerdict[] = [];
+      let matched = 0;
       let total = 0;
       for (const entity of trajectoryDataSource.entities.values) {
         if (entity.id === "document") continue;
         total += 1;
-        const verdict = byKey.get(entity.id);
-        if (!verdict) continue;
+        const publishedVerdict = byKey.get(entity.id);
+        if (publishedVerdict) matched += 1;
+        const verdict = publishedVerdict ?? "undecided";
         painted.push(verdict);
         const color = Cesium.Color.fromCssColorString(OBSERVED_VERDICT_COLORS[verdict]);
         if (entity.path?.material instanceof Cesium.ColorMaterialProperty) {
@@ -108,7 +119,7 @@ export function useObservedVerdictColors(
       if (cancelled) return;
       setState({
         counts: countVerdicts(painted),
-        matched: painted.length,
+        matched,
         total,
         loading: false,
         missing: false,
@@ -118,7 +129,7 @@ export function useObservedVerdictColors(
     return () => {
       cancelled = true;
     };
-  }, [viewer, trajectoryDataSource, activeAirportCode, categoryDir, active]);
+  }, [viewer, trajectoryDataSource, activeAirportCode, active]);
 
   return state;
 }

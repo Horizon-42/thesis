@@ -30,6 +30,7 @@ TODOs. See ``flight_scenarios/README.md`` and the comments below.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -71,12 +72,16 @@ from evaluation_export import (  # noqa: E402
     reference_evaluation_record,
     summary_row,
 )
+from optimization_run_config import (  # noqa: E402
+    DEFAULT_MAX_DURATION_S,
+    DEFAULT_ROLLOUT_DT_S,
+    FITTING_SCHEMES,
+    build_optimization_config,
+)
 
 # Optimizer + rollout defaults (override on the CLI). DEFAULT_N_SEGMENTS / the constrained
 # DEFAULT_N_SEG_PER_PHASE are imported above from the optimizer (its own construction defaults).
 DEFAULT_DT = 1.0                 # optimizer dt (API parity; state mesh is auto-selected)
-DEFAULT_MAX_DURATION_S = 2000.0  # free-time upper bound; the solver minimises T below this
-DEFAULT_ROLLOUT_DT_S = 0.5       # forward-integration step for the simulator rollout
 
 # Fitting (transcription) selection for BOTH solve paths (unconstrained + constrained-IAF);
 # each composes with the normalized full-transport dynamics. "hs" (Hermite-Simpson,
@@ -84,11 +89,6 @@ DEFAULT_ROLLOUT_DT_S = 0.5       # forward-integration step for the simulator ro
 # (2nd order) collapsed the batch success rate; it stays selectable for comparison runs.
 # "rk4" is the 4th-order EXPLICIT shooting defect (same one-step map family as the replay
 # integrator — playback-consistent by construction) at trapezoidal-like per-node cost.
-FITTING_SCHEMES = {
-    "hs": "hermiteSimpsonNormalizedFullTransport",
-    "trapezoidal": "trapezoidalNormalizedFullTransport",
-    "rk4": "rk4NormalizedFullTransport",
-}
 DEFAULT_FITTING = "hs"
 
 
@@ -493,7 +493,9 @@ def optimize_scenarios(
             )
             if reference_file:
                 failed_record["reference_file"] = reference_file
-            (out / eval_name).write_text(json.dumps(failed_record, indent=2), encoding="utf-8")
+            (out / eval_name).write_text(
+                json.dumps(failed_record, separators=(",", ":")), encoding="utf-8"
+            )
             records[index] = _summary_record(
                 scenario, status="failed", states_file=None, eval_file=eval_name,
                 final_time_s=None, reason=error,
@@ -501,10 +503,15 @@ def optimize_scenarios(
             print(f"✗ {flight_id}: skipped ({error.split(':', 1)[0]})")
             return
         path = out / name
-        path.write_text(json.dumps(result_dict, indent=2), encoding="utf-8")
+        path.write_text(json.dumps(result_dict, separators=(",", ":")), encoding="utf-8")
+        eval_dict = dict(eval_dict)
+        eval_dict["states_ref"] = {"file": name, "key": "simulator_states"}
+        eval_dict["states"] = []
         if reference_file:
             eval_dict["reference_file"] = reference_file
-        (out / eval_name).write_text(json.dumps(eval_dict, indent=2), encoding="utf-8")
+        (out / eval_name).write_text(
+            json.dumps(eval_dict, separators=(",", ":")), encoding="utf-8"
+        )
         written.append(path)
         records[index] = _summary_record(
             scenario, status="solved", states_file=name, eval_file=eval_name,
@@ -532,6 +539,15 @@ def optimize_scenarios(
     total = len(scenarios)
     summary = {
         "scenarios": scenarios_label,
+        "optimization_config": build_optimization_config(
+            constrained_iaf=False,
+            fitting=fitting,
+            n_segments=n_segments,
+            n_seg_per_phase=DEFAULT_N_SEG_PER_PHASE,
+            state_substeps=state_substeps,
+            max_duration_s=max_duration,
+            rollout_dt_s=rollout_dt_s,
+        ),
         "total": total,
         "solved": len(written),
         "failed": len(failures),
@@ -592,6 +608,7 @@ def write_reference_records(
     *,
     output_dir: str | Path,
     references_dir: str = REFERENCES_DIR,
+    source_signature: dict[str, Any] | None = None,
 ) -> list[Path]:
     """One reference eval record per scenario, from its OBSERVED track.
 
@@ -606,6 +623,55 @@ def write_reference_records(
     its reference deterministically (``reference_file``). Missing flights raise:
     references and solves must come from the same dataset.
     """
+    out = (Path(output_dir) / references_dir).resolve()
+    expected = [
+        out / _reference_filename(_scenario_filename(scenario, index))
+        for index, scenario in enumerate(scenarios)
+    ]
+    expected_cache_rows = [
+        {
+            "file": path.name,
+            "identity": {
+                "flight_key": flight_key(scenario.source, index),
+                **{
+                    key: scenario.source.get(key)
+                    for key in ("id", "runway", "icao24", "landing_time_utc")
+                },
+            },
+        }
+        for index, (path, scenario) in enumerate(zip(expected, scenarios))
+    ]
+    cache_manifest = out / "manifest.json"
+    if source_signature is not None and cache_manifest.exists():
+        try:
+            cached = json.loads(cache_manifest.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            cached = {}
+        cached_rows = cached.get("records")
+        cache_matches = (
+            cached.get("schema_version") == "optimization-references-v2-sha256"
+            and cached.get("source_signature") == source_signature
+            and isinstance(cached_rows, list)
+            and len(cached_rows) == len(expected_cache_rows)
+        )
+        if cache_matches:
+            for path, expected_row, cached_row in zip(
+                expected, expected_cache_rows, cached_rows
+            ):
+                if (
+                    not isinstance(cached_row, dict)
+                    or cached_row.get("file") != expected_row["file"]
+                    or cached_row.get("identity") != expected_row["identity"]
+                    or not isinstance(cached_row.get("sha256"), str)
+                    or not path.is_file()
+                    or _file_sha256(path) != cached_row["sha256"]
+                ):
+                    cache_matches = False
+                    break
+        if cache_matches:
+            print(f"✓ reusing {len(expected)} canonical reference record(s) -> {out}")
+            return expected
+
     # Through the SAME loader the scenarios came from: it converts the observed altitudes
     # from ellipsoidal (HAE) to MSL. Reading the file directly here would put the reference
     # record ~30 m below the scenario built from the identical track.
@@ -613,7 +679,6 @@ def write_reference_records(
     by_identity = {
         (f.get("id"), f.get("icao24"), f.get("landing_time_utc")): f for f in flights
     }
-    out = Path(output_dir) / references_dir
     out.mkdir(parents=True, exist_ok=True)
     # Fresh reference set = fresh directory: references from an earlier run over a
     # different flight set would otherwise accumulate (same stale-record class as
@@ -643,10 +708,51 @@ def write_reference_records(
         )
         record = reference_evaluation_record(scenario.initial, scenario.target, timed_states, src)
         path = out / _reference_filename(_scenario_filename(scenario, index))
-        path.write_text(json.dumps(record, indent=2), encoding="utf-8")
+        path.write_text(json.dumps(record, separators=(",", ":")), encoding="utf-8")
         written.append(path)
+    if source_signature is not None:
+        records = [
+            {**row, "sha256": _file_sha256(path)}
+            for row, path in zip(expected_cache_rows, written)
+        ]
+        manifest_payload = {
+            "schema_version": "optimization-references-v2-sha256",
+            "source_signature": source_signature,
+            "records": records,
+        }
+        temporary = cache_manifest.with_name(f".{cache_manifest.name}.tmp")
+        temporary.write_text(
+            json.dumps(manifest_payload, indent=2), encoding="utf-8",
+        )
+        temporary.replace(cache_manifest)
     print(f"✓ wrote {len(written)} reference record(s) -> {out}")
     return written
+
+
+def _file_sha256(path: str | Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _remove_legacy_category_references(output_dir: str | Path) -> None:
+    """Drop only the old per-category reference copies after moving to a sibling anchor."""
+    legacy = Path(output_dir) / REFERENCES_DIR
+    if not legacy.is_dir():
+        return
+    removed = 0
+    for path in legacy.glob(f"*{_REFERENCE_EVAL_SUFFIX}"):
+        path.unlink()
+        removed += 1
+    (legacy / "manifest.json").unlink(missing_ok=True)
+    try:
+        legacy.rmdir()
+    except OSError:
+        return
+    if removed:
+        print(f"… removed {removed} superseded per-category reference copy/copies -> {legacy}")
 
 
 def _scenario_filename(scenario: FlightScenario, index: int) -> str:
@@ -1127,17 +1233,26 @@ def optimize_scenarios_constrained_iaf(
             )
             if reference_file:
                 failed_record["reference_file"] = reference_file
-            (out / eval_name).write_text(json.dumps(failed_record, indent=2), encoding="utf-8")
+            (out / eval_name).write_text(
+                json.dumps(failed_record, separators=(",", ":")), encoding="utf-8"
+            )
             records[index] = _summary_record(
                 scenario, status="failed", states_file=None, eval_file=eval_name,
                 final_time_s=None, reason=error,
             )
             print(f"✗ {flight_id}: skipped ({error.split(':', 1)[0]})")
             return
-        (out / name).write_text(json.dumps(result_dict, indent=2), encoding="utf-8")
+        (out / name).write_text(
+            json.dumps(result_dict, separators=(",", ":")), encoding="utf-8"
+        )
+        eval_dict = dict(eval_dict)
+        eval_dict["states_ref"] = {"file": name, "key": "simulator_states"}
+        eval_dict["states"] = []
         if reference_file:
             eval_dict["reference_file"] = reference_file
-        (out / eval_name).write_text(json.dumps(eval_dict, indent=2), encoding="utf-8")
+        (out / eval_name).write_text(
+            json.dumps(eval_dict, separators=(",", ":")), encoding="utf-8"
+        )
         written.append(out / name)
         record_row = _summary_record(
             scenario, status="solved", states_file=name, eval_file=eval_name,
@@ -1164,6 +1279,16 @@ def optimize_scenarios_constrained_iaf(
     summary = {
         "scenarios": scenarios_label,
         "mode": f"constrainedIaf:{selection}",
+        "optimization_config": build_optimization_config(
+            constrained_iaf=True,
+            fitting=fitting,
+            n_segments=n_segments,
+            n_seg_per_phase=n_seg_per_phase,
+            state_substeps=state_substeps,
+            max_duration_s=max_duration,
+            rollout_dt_s=rollout_dt_s,
+            iaf_selection=selection,
+        ),
         "total": total,
         "solved": len(written),
         "failed": len(failures),
@@ -1218,8 +1343,14 @@ def main() -> None:
         "--reference-tracks", default=None,
         help="the harvest arrivals/manifest.json the scenarios came from; when given, "
              "reference eval records are written FIRST "
-             "(observed tracks -> <output-dir>/references/) and every eval record "
+             "(observed tracks -> --references-dir) and every eval record "
              "points at its reference via reference_file",
+    )
+    parser.add_argument(
+        "--references-dir",
+        default=REFERENCES_DIR,
+        help="reference directory relative to --output-dir; sibling paths such as "
+             "../shared_references/runway let compatible categories share one canonical set",
     )
     parser.add_argument(
         "--constrained-iaf", action="store_true",
@@ -1251,8 +1382,20 @@ def main() -> None:
     # solve succeeds); the batch then points every eval record at its reference.
     references_dir = None
     if args.reference_tracks:
-        write_reference_records(scenarios, args.reference_tracks, output_dir=args.output_dir)
-        references_dir = REFERENCES_DIR
+        if args.references_dir != REFERENCES_DIR:
+            _remove_legacy_category_references(args.output_dir)
+        source_signature = {
+            "scenarios_sha256": _file_sha256(args.scenarios),
+            "arrivals_manifest_sha256": _file_sha256(args.reference_tracks),
+        }
+        write_reference_records(
+            scenarios,
+            args.reference_tracks,
+            output_dir=args.output_dir,
+            references_dir=args.references_dir,
+            source_signature=source_signature,
+        )
+        references_dir = args.references_dir
     if args.constrained_iaf:
         paths = optimize_scenarios_constrained_iaf(
             scenarios,

@@ -160,25 +160,43 @@ def test_optimize_scenarios_skips_failures_and_continues(monkeypatch, tmp_path):
     # jobs=1 (serial): the stub + shared counter live in this process, so the solve must
     # run here — spawned workers re-import the module fresh and would not see the
     # monkeypatch. The skip-and-continue orchestration under test is identical on both paths.
-    written = so.optimize_scenarios(scenarios, output_dir=tmp_path, jobs=1)
+    written = so.optimize_scenarios(
+        scenarios,
+        output_dir=tmp_path,
+        jobs=1,
+        n_segments=12,
+        fitting="rk4",
+        state_substeps=5,
+        rollout_dt_s=0.25,
+    )
     assert attempts["n"] == 2      # both attempted — did NOT abort on the first failure
     assert len(written) == 1       # the infeasible one is skipped, the feasible one written
 
-    # BOTH scenarios got an evaluation record: the solved one with aligned lists, the
-    # failed one with EMPTY lists (that is how the evaluation batch sees the solve rate).
+    # BOTH scenarios got an evaluation record: the solved one points at the simulator
+    # states in its canonical states file; the failed one has no state reference.
     eval_files = sorted(tmp_path.glob("*_eval.json"))
     assert len(eval_files) == 2
     payloads = [json.loads(p.read_text(encoding="utf-8")) for p in eval_files]
-    solved = [p for p in payloads if p["states"]]
-    failed = [p for p in payloads if not p["states"]]
+    solved = [p for p in payloads if p.get("states_ref")]
+    failed = [p for p in payloads if not p.get("states_ref")]
     assert len(solved) == 1 and len(failed) == 1
-    assert len(solved[0]["controls"]) == len(solved[0]["states"])
+    assert solved[0]["states"] == []
+    assert solved[0]["states_ref"]["key"] == "simulator_states"
     assert failed[0]["controls"] == [] and failed[0]["final_time_s"] is None
     assert failed[0]["reason"].startswith("ValueError")
     assert failed[0]["target_state"]["lat"] == pytest.approx(35.59)
 
     summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
     assert all(row["eval_file"].endswith("_eval.json") for row in summary["results"])
+    assert summary["optimization_config"] == {
+        "mode": "unconstrained",
+        "fitting": "rk4",
+        "transcription_scheme": "rk4NormalizedFullTransport",
+        "control_mesh": {"segments": 12},
+        "state_substeps": 5,
+        "max_duration_s": so.DEFAULT_MAX_DURATION_S,
+        "rollout_dt_s": 0.25,
+    }
 
 
 def test_resolve_jobs_auto_and_explicit():
@@ -289,6 +307,84 @@ def test_write_reference_records_from_observed_tracks(tmp_path):
     orphan.source["id"] = "GHOST"
     with pytest.raises(ValueError, match="no observed flight"):
         so.write_reference_records([orphan], [flight], output_dir=tmp_path)
+
+
+def test_reference_records_reuse_a_matching_canonical_source(monkeypatch, tmp_path):
+    flight = {
+        "id": "AFR074",
+        "icao24": "ad7f04",
+        "landing_time_utc": "2026-06-18T21:37:36Z",
+        "altitude_source": "synthetic",
+        "waypoints": [
+            [0.0, -78.5, 35.6, 2000.0],
+            [5.0, -78.49, 35.6, 1900.0],
+        ],
+    }
+    target = GeodeticState(35.6, -78.48, 1800.0, 100.0, 0.0, -0.1, 60000.0)
+    scenario = _scenario(target=target)
+    scenario.source.update({"icao24": "ad7f04", "landing_time_utc": flight["landing_time_utc"]})
+    signature = {"scenarios_sha256": "one", "arrivals_manifest_sha256": "two"}
+
+    first = so.write_reference_records(
+        [scenario],
+        [flight],
+        output_dir=tmp_path / "runway",
+        references_dir="../shared_references/runway",
+        source_signature=signature,
+    )
+    monkeypatch.setattr(
+        so,
+        "load_model_arrivals",
+        lambda _path: (_ for _ in ()).throw(AssertionError("cache was not reused")),
+    )
+    second = so.write_reference_records(
+        [scenario],
+        [flight],
+        output_dir=tmp_path / "runway_cons",
+        references_dir="../shared_references/runway",
+        source_signature=signature,
+    )
+
+    assert second == first
+    assert first[0].parent == tmp_path / "shared_references" / "runway"
+
+
+def test_reference_cache_rebuilds_when_a_record_changes(monkeypatch, tmp_path):
+    flight = {
+        "id": "AFR074",
+        "icao24": "ad7f04",
+        "landing_time_utc": "2026-06-18T21:37:36Z",
+        "altitude_source": "synthetic",
+        "waypoints": [
+            [0.0, -78.5, 35.6, 2000.0],
+            [5.0, -78.49, 35.6, 1900.0],
+        ],
+    }
+    target = GeodeticState(35.6, -78.48, 1800.0, 100.0, 0.0, -0.1, 60000.0)
+    scenario = _scenario(target=target)
+    scenario.source.update({"icao24": "ad7f04", "landing_time_utc": flight["landing_time_utc"]})
+    signature = {"scenarios_sha256": "one", "arrivals_manifest_sha256": "two"}
+
+    [path] = so.write_reference_records(
+        [scenario], [flight], output_dir=tmp_path, source_signature=signature,
+    )
+    changed = json.loads(path.read_text(encoding="utf-8"))
+    changed["source"]["id"] = "DIFFERENT"
+    path.write_text(json.dumps(changed), encoding="utf-8")
+
+    calls = {"n": 0}
+
+    def load_again(_tracks):
+        calls["n"] += 1
+        return [flight]
+
+    monkeypatch.setattr(so, "load_model_arrivals", load_again)
+    so.write_reference_records(
+        [scenario], [flight], output_dir=tmp_path, source_signature=signature,
+    )
+
+    assert calls["n"] == 1
+    assert json.loads(path.read_text(encoding="utf-8"))["source"]["id"] == "AFR074"
 
 
 def test_batch_embeds_reference_pointers(monkeypatch, tmp_path):

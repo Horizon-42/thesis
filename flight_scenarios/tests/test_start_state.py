@@ -112,3 +112,19 @@ def test_state_samples_from_track_derives_every_sample():
 def test_state_samples_from_track_requires_two_waypoints():
     with pytest.raises(ValueError):
         state_samples_from_track([[0.0, 0.0, 0.0, 1000.0]], mass_kg=78000.0)
+
+
+def test_linear_window_walk_matches_the_original_centered_window_definition():
+    from flight_scenarios.start_state import DEFAULT_WINDOW_S, _velocity_lsq, _window_around
+
+    irregular = [
+        [float(t), t * _LON_STEP_DEG / 5.0, 0.0, 1000.0 - 2.0 * t]
+        for t in (0, 1, 2, 7, 8, 15, 16, 24, 25, 31)
+    ]
+    samples = state_samples_from_track(irregular, mass_kg=78000.0)
+    expected = [
+        _velocity_lsq(_window_around(irregular, index, DEFAULT_WINDOW_S))
+        for index in range(len(irregular))
+    ]
+
+    assert [(state.V, state.psi, state.gamma) for _, state in samples] == pytest.approx(expected)

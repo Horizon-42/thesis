@@ -8,6 +8,8 @@ One JSON file per trajectory:
       "target_state":  {same keys} | null (unsolved records only),
       "final_time_s":  <float> | null,
       "states":   [ {"t", "lat", "lon", "alt", "V", "psi", "gamma", "m"}, ... ],
+      "states_ref": {"file": "<states.json>", "key": "simulator_states",
+                     "start_index": 0},  # optional on-disk indirection
       "controls": [ {<control fields, e.g. thrust/bank_rad/load_factor>}, ... ],
       "reference_file": "references/<id>_reference_eval.json",   # optional pointer
       "reason":   "<solver failure>"        # unsolved records only
@@ -104,6 +106,8 @@ def record_from_dict(data: dict[str, Any], *, path: Path | None = None) -> Traje
                 f"{where}: final_time_s ({data['final_time_s']}) must equal the "
                 f"last state sample's t ({states[-1]['t']})"
             )
+    elif data["final_time_s"] is not None:
+        raise ValueError(f"{where}: an unsolved record requires final_time_s == null")
     return TrajectoryRecord(
         source=data.get("source", {}),
         initial_state=data["initial_state"],
@@ -120,7 +124,37 @@ def record_from_dict(data: dict[str, Any], *, path: Path | None = None) -> Traje
 def load_record(path: str | Path) -> TrajectoryRecord:
     """Read + validate one record file."""
     p = Path(path)
-    return record_from_dict(json.loads(p.read_text(encoding="utf-8")), path=p)
+    data = json.loads(p.read_text(encoding="utf-8"))
+    states_ref = data.get("states_ref")
+    if states_ref is not None:
+        if not isinstance(states_ref, dict):
+            raise ValueError(f"{p}: states_ref must be an object")
+        file_name = states_ref.get("file")
+        key = states_ref.get("key")
+        if not isinstance(file_name, str) or not isinstance(key, str):
+            raise ValueError(f"{p}: states_ref requires string file and key")
+        source_path = p.parent / file_name
+        source = json.loads(source_path.read_text(encoding="utf-8"))
+        states = source.get(key)
+        if not isinstance(states, list):
+            raise ValueError(f"{p}: {source_path} has no state list {key!r}")
+        start = states_ref.get("start_index", 0)
+        stop = states_ref.get("stop_index")
+        effective_stop = len(states) if stop is None else stop
+        if (
+            isinstance(start, bool)
+            or not isinstance(start, int)
+            or start < 0
+            or start >= len(states)
+            or isinstance(effective_stop, bool)
+            or not isinstance(effective_stop, int)
+            or effective_stop <= start
+            or effective_stop > len(states)
+        ):
+            raise ValueError(f"{p}: invalid states_ref slice [{start!r}, {stop!r}]")
+        data = dict(data)
+        data["states"] = states[start:effective_stop]
+    return record_from_dict(data, path=p)
 
 
 def load_records(path: str | Path) -> list[TrajectoryRecord]:

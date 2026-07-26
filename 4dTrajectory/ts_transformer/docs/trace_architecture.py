@@ -16,7 +16,7 @@ Usage (from the repo root, with the thesis env active)::
     export PYTHONPATH=$PWD:$PWD/4dTrajectory/ts_transformer
     python 4dTrajectory/ts_transformer/docs/trace_architecture.py
 
-Writes ``arch_<model>_<mode>.svg`` next to this file, plus a layer table on stdout.
+Writes ``arch_<model>_normalized_time.svg`` next to this file, plus a layer table on stdout.
 
 **Shape-bookkeeping nodes.** A traced graph contains nodes that only read a tensor's shape
 (``getattr(x, 'shape')`` and the ``getitem``s that unpack it) so a later ``reshape`` can be
@@ -37,7 +37,7 @@ import torch
 import torch.fx as fx
 from torch.fx.passes.shape_prop import ShapeProp
 
-from config import config_for_mode
+from config import TSConfig
 from models import build_model, parameter_count
 
 HERE = Path(__file__).resolve().parent
@@ -414,7 +414,7 @@ def embed(name: str, marker: str, svg_path: Path) -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--mode", default="window", choices=["window", "full"])
+    ap.add_argument("--n-segments", type=int, default=128)
     ap.add_argument("--batch", type=int, default=1)
     ap.add_argument("--keep-shape-ops", action="store_true",
                     help="draw the shape-bookkeeping nodes instead of folding them")
@@ -424,23 +424,23 @@ def main() -> None:
     args = ap.parse_args()
 
     for name in ("itransformer", "patchtst"):
-        cfg = config_for_mode(args.mode, model=name)
+        cfg = TSConfig(model=name, n_segments=args.n_segments)
         model = build_model(cfg).eval()
         example = torch.randn(args.batch, cfg.seq_len, cfg.enc_in)
-        title = (f"{name}  ·  {args.mode} mode  ·  L={cfg.seq_len} H={cfg.pred_len} "
+        title = (f"{name}  ·  normalized time  ·  L={cfg.seq_len} N={cfg.n_segments} "
                  f"C={cfg.enc_in}  ·  {parameter_count(model):,} trainable parameters")
 
         dot_src, folded = build_dot(model, example, title, args.keep_shape_ops)
         # The full graph ships twice: a standalone file (concrete colours, for opening in a
         # browser tab where page CSS cannot reach it) and an inline copy (CSS variables, so
         # the embedded version follows the document's theme).
-        out = HERE / f"arch_{name}_{args.mode}.svg"
+        out = HERE / f"arch_{name}_normalized_time.svg"
         render(dot_src, out, inline=False)
-        full_inline = HERE / f"arch_{name}_{args.mode}_full_inline.svg"
+        full_inline = HERE / f"arch_{name}_normalized_time_full_inline.svg"
         render(dot_src, full_inline, inline=True)
 
         overview_dot = build_collapsed_dot(model, example, title)
-        overview = HERE / f"arch_{name}_{args.mode}_overview.svg"
+        overview = HERE / f"arch_{name}_normalized_time_overview.svg"
         render(overview_dot, overview, inline=True)
 
         if args.embed:

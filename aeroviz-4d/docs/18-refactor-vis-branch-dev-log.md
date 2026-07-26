@@ -2,6 +2,13 @@
 
 This document contains the procedure/protected-geometry development log entries split out from `docs/15-procedure-details-page-dev-log.md` for the current `refactor_vis` branch.
 
+> Current-status note (2026-07-23): the root
+> `run_asd-b_fetch_and_generate.py` wrapper described in the historical entries below was
+> retired because it duplicated canonical CLIs. Use
+> `python -m trajectory_data_process.harvest` for observed data,
+> `aeroviz-4d/python/generate_czml.py` for explicit standalone rendering, and
+> `generate_aeroviz_airport_procedure_data.sh` for procedure assets.
+
 ## 2026-05-01 23:11 CEST
 
 ### Goal Of This Session

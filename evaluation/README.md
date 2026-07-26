@@ -14,8 +14,9 @@ scenario_optimization (batch)                    evaluation (this package)
   └─ summary.json                                    └─► evaluation_report.json
 ```
 
-One-shot runner (scenarios → references → optimization → selected tails, per airport):
-`python run_scenario_pipeline.py --airport KRDU --target-type runway [--with-constraint] [--outputs eval]`
+Pipeline runners (prepare scenarios, then references → optimization → selected tails):
+`python prepare_scenario_inputs.py --airport KRDU --target-type runway`, then
+`python run_scenario_optimization.py --airport KRDU --target-type runway [--with-constraint] [--outputs eval]`
 (`--outputs czml,eval` default: also rebuilds the frontend comparison CZML from the same solve)
 
 ## Input contract (one JSON per trajectory)

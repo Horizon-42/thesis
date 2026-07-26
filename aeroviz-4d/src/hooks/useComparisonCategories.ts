@@ -1,9 +1,9 @@
 /**
  * useComparisonCategories.ts
  * --------------------------
- * Fetches the per-airport optimization-category manifest
- * (public/data/airports/<ICAO>/comparison/categories.json) listing which comparison
- * categories exist — e.g. ADS-B target / runway target, with or without constraints.
+ * Fetches the per-airport evaluation-category manifest
+ * (public/data/airports/<ICAO>/comparison/categories.json) listing which observed,
+ * optimization and data-driven comparison categories exist.
  * Airports without comparison data simply 404, reported as status "empty" (no error).
  */
 

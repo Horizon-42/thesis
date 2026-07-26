@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import time
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 
 if __package__ in (None, ""):
@@ -18,6 +19,7 @@ from aeroviz_backend.isolated_backend import (
     IsolatedOptimizationBackend,
 )
 from aeroviz_backend.optimization_backend import OptimizationBackend
+from aeroviz_backend.observed_trajectories import ObservedTrajectoryBackend
 from aeroviz_backend.simulation_backend import SimulationBackend, aircraft_catalog
 
 
@@ -27,6 +29,7 @@ class AeroVizBackendApp:
         simulation_backend: SimulationBackend | None = None,
         optimization_backend: OptimizationBackend | None = None,
         dynamics_comparison_backend: DynamicsComparisonBackend | None = None,
+        observed_trajectory_backend: ObservedTrajectoryBackend | None = None,
     ) -> None:
         # The simulation endpoints run in-process (they are high-frequency and use
         # only casadi function evaluation, not the crash-prone NLP construction).
@@ -41,14 +44,35 @@ class AeroVizBackendApp:
         self.dynamics_comparison_backend = (
             dynamics_comparison_backend or IsolatedDynamicsComparisonBackend()
         )
+        self.observed_trajectory_backend = (
+            observed_trajectory_backend or ObservedTrajectoryBackend()
+        )
 
-    def handle_get(self, path: str) -> tuple[int, dict[str, Any]]:
-        if path == "/health":
+    def handle_get(self, path: str) -> tuple[int, Any]:
+        parsed = urlsplit(path)
+        if parsed.path == "/health":
             return 200, {"ok": True, "service": "aeroviz-backend"}
-        if path == "/simulation/aircraft":
+        if parsed.path == "/simulation/aircraft":
             return 200, aircraft_catalog()
-        if path == "/dynamics-comparison/history":
+        if parsed.path == "/dynamics-comparison/history":
             return 200, self.dynamics_comparison_backend.history_count()
+        if parsed.path == "/trajectories":
+            try:
+                query = parse_qs(parsed.query, keep_blank_values=True)
+                airport = _query_value(query, "airport", required=True)
+                runway = _query_value(query, "runway")
+                limit = _query_int(query, "limit", default=200)
+                seed = _query_int(query, "seed", default=0)
+                return 200, self.observed_trajectory_backend.query(
+                    airport,
+                    runway=runway,
+                    limit=limit,
+                    seed=seed,
+                )
+            except FileNotFoundError as exc:
+                return 404, {"ok": False, "error": str(exc)}
+            except ValueError as exc:
+                return 400, {"ok": False, "error": str(exc)}
         return 404, {"ok": False, "error": "not found"}
 
     def handle_post(
@@ -248,8 +272,8 @@ class AeroVizRequestHandler(BaseHTTPRequestHandler):
             raise ValueError("request body must be a JSON object")
         return parsed
 
-    def _send_json(self, payload: dict[str, Any], status: int = 200) -> None:
-        body = json.dumps(payload).encode("utf-8")
+    def _send_json(self, payload: Any, status: int = 200) -> None:
+        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -266,6 +290,36 @@ class AeroVizRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
+
+def _query_value(
+    query: dict[str, list[str]],
+    name: str,
+    *,
+    required: bool = False,
+) -> str | None:
+    values = query.get(name, [])
+    if len(values) > 1:
+        raise ValueError(f"{name} must be provided once")
+    value = values[0].strip() if values else ""
+    if required and not value:
+        raise ValueError(f"{name} is required")
+    return value or None
+
+
+def _query_int(
+    query: dict[str, list[str]],
+    name: str,
+    *,
+    default: int,
+) -> int:
+    value = _query_value(query, name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
 
 
 def make_request_handler(

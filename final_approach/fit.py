@@ -120,6 +120,8 @@ class SegmentFit:
     n_samples: int
     span_m: float
     window_m: tuple[float, float]
+    first_sample_index: int
+    last_sample_index: int
 
     cross: LineFit
     height: LineFit
@@ -200,7 +202,7 @@ def _fit_line(xs: Sequence[float], ys: Sequence[float]) -> LineFit:
 
 def _final_inbound_run(
     projected: Sequence[Projected], window_m: tuple[float, float]
-) -> list[Projected]:
+) -> list[tuple[int, Projected]]:
     """The LAST contiguous stretch of one inbound approach inside ``window_m``.
 
     Selecting purely by along-track range is not enough, because a real arrival can
@@ -224,13 +226,13 @@ def _final_inbound_run(
     )
     if inner is None:
         return []
-    run = [projected[inner]]
+    run = [(inner, projected[inner])]
     for i in range(inner - 1, -1, -1):
         if projected[i].along_m < window_m[0]:
             break
         if projected[i].along_m > projected[i + 1].along_m + _INBOUND_TOLERANCE_M:
             break
-        run.append(projected[i])
+        run.append((i, projected[i]))
     run.reverse()
     return run
 
@@ -263,9 +265,11 @@ def fit_final_segment(
         raise ValueError("min_samples must be >= 3 (the line fit needs n - 2 degrees of freedom)")
     if min_span_m <= 0.0:
         raise ValueError("min_span_m must be > 0 (a zero-span segment cannot pin a slope)")
-    projected = _final_inbound_run(frame.project_all(points), window_m)
-    if len(projected) < min_samples:
+    indexed = _final_inbound_run(frame.project_all(points), window_m)
+    if len(indexed) < min_samples:
         return None
+    sample_indices = [index for index, _ in indexed]
+    projected = [point for _, point in indexed]
     alongs = [p.along_m for p in projected]
     span = max(alongs) - min(alongs)
     if span < min_span_m:
@@ -277,6 +281,8 @@ def fit_final_segment(
         n_samples=len(projected),
         span_m=span,
         window_m=window_m,
+        first_sample_index=sample_indices[0],
+        last_sample_index=sample_indices[-1],
         cross=_fit_line(alongs, crosses),
         height=_fit_line(alongs, [p.height_m for p in projected]),
         median_abs_cross_m=statistics.median(abs(c) for c in crosses),

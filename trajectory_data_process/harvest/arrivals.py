@@ -12,11 +12,12 @@ the geoid correction twice to one of the two consumers.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
 
-from final_approach import TrackPoint
+from final_approach import TrackPoint, fit_final_segment
 
 from trajectory_data_process.arrival_segment import ENTRY_RADIUS_KM, truncate_flights
 from trajectory_data_process.harvest.airports import Airport, Runway
@@ -24,9 +25,8 @@ from trajectory_data_process.harvest.czml import czml_input_flight, verify_ident
 from trajectory_data_process.harvest.store import HarvestPaths, read_manifest
 
 ARRIVALS_DIR = "arrivals"
-RECORDS_DIR = "records"
 MANIFEST_NAME = "manifest.json"
-SCHEMA_VERSION = "harvest-arrivals-v1"
+SCHEMA_VERSION = "harvest-arrivals-v3-track-slices"
 
 
 def arrival_manifest_path(paths: HarvestPaths) -> Path:
@@ -48,19 +48,20 @@ def write_arrival_records(
     """
     source = read_manifest(paths)
     root = paths.airport / ARRIVALS_DIR
-    records_dir = root / RECORDS_DIR
     _clear(root)
-    records_dir.mkdir(parents=True, exist_ok=True)
+    root.mkdir(parents=True, exist_ok=True)
 
     roster: list[dict[str, Any]] = []
     excluded: list[dict[str, Any]] = []
+    runway_targets: dict[str, dict[str, Any]] = {}
     assigned = 0
 
     for row in source["records"]:
         if row["outcome"] != "assigned":
             continue
         assigned += 1
-        track = json.loads((paths.tracks / row["file"]).read_text(encoding="utf-8"))
+        source_bytes = (paths.tracks / row["file"]).read_bytes()
+        track = json.loads(source_bytes)
         runway = airport.runway(row["runway"])
 
         if runway.threshold_crossing_height_m is None:
@@ -108,18 +109,27 @@ def write_arrival_records(
             continue
 
         arrival = arrivals[0]
-        record_path = records_dir / f"{row['flight_key']}.json"
-        record_path.write_text(json.dumps(arrival, indent=1), encoding="utf-8")
+        first_sample_index = int(arrival["cut_samples"])
+        last_sample_index = anchor
+        runway_targets.setdefault(runway.ident, _runway_target(runway))
         roster.append(
             {
                 "flight_key": row["flight_key"],
-                "file": str(record_path.relative_to(root)),
+                # The waypoint payload lives only in tracks/. This manifest is a view:
+                # it names the inclusive source slice and the metadata derived from it.
+                "source_file": row["file"],
+                "source_sha256": hashlib.sha256(source_bytes).hexdigest(),
+                "first_sample_index": first_sample_index,
+                "last_sample_index": last_sample_index,
                 "runway": runway.ident,
                 "icao24": row["icao24"],
                 "callsign": row["callsign"],
                 "landing_time_utc": row["landing_time_utc"],
                 "entry_time_utc": arrival.get("entry_time_utc"),
                 "samples": len(arrival["waypoints"]),
+                "arrival_truncated": bool(arrival["arrival_truncated"]),
+                "cut_samples": int(arrival["cut_samples"]),
+                "arrival_duration_s": float(arrival["arrival_duration_s"]),
             }
         )
 
@@ -141,6 +151,7 @@ def write_arrival_records(
         "altitude_source": source["altitude_source"],
         "altitude_datum": source["altitude_datum"],
         "counts": counts,
+        "runway_targets": runway_targets,
         "excluded": excluded,
         "records": roster,
     }
@@ -150,8 +161,17 @@ def write_arrival_records(
     return manifest
 
 
-def load_arrival_flights(path: str | Path) -> list[dict[str, Any]]:
-    """Load model-ready arrivals strictly through ``arrivals/manifest.json``."""
+def load_arrival_flights(
+    path: str | Path,
+    *,
+    include_flight_keys: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Load model-ready arrivals strictly through ``arrivals/manifest.json``.
+
+    When ``include_flight_keys`` is supplied, excluded source-track files are never opened.
+    This lets train-only diagnostics lock a split from roster metadata without reading
+    validation/test trajectory values.
+    """
     manifest_path = resolve_arrival_manifest(path)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if not isinstance(manifest, dict):
@@ -164,7 +184,35 @@ def load_arrival_flights(path: str | Path) -> list[dict[str, Any]]:
             f"{manifest_path} has schema {manifest.get('schema_version')!r}; "
             f"expected {SCHEMA_VERSION!r}"
         )
-    root = manifest_path.parent
+    if manifest.get("altitude_source") != "opensky_history_geoaltitude_m":
+        raise ValueError(
+            f"{manifest_path} has unsupported altitude_source "
+            f"{manifest.get('altitude_source')!r}; perform a full re-harvest"
+        )
+    source_manifest_value = manifest.get("source_manifest")
+    if not isinstance(source_manifest_value, str):
+        raise ValueError(f"{manifest_path} lacks source_manifest")
+    source_manifest_path = (manifest_path.parent / source_manifest_value).resolve()
+    source_manifest = json.loads(source_manifest_path.read_text(encoding="utf-8"))
+    source_root = source_manifest_path.parent
+    source_records = source_manifest.get("records")
+    if not isinstance(source_records, list):
+        raise ValueError(f"{source_manifest_path} lacks a records roster")
+    source_rows: dict[str, dict[str, Any]] = {}
+    for index, row in enumerate(source_records):
+        if not isinstance(row, dict) or not isinstance(row.get("flight_key"), str):
+            raise ValueError(
+                f"{source_manifest_path}: source manifest record {index} lacks flight_key"
+            )
+        key = row["flight_key"]
+        if key in source_rows:
+            raise ValueError(
+                f"{source_manifest_path}: source manifest lists duplicate flight_key {key!r}"
+            )
+        source_rows[key] = row
+    runway_targets = manifest.get("runway_targets")
+    if not isinstance(runway_targets, dict):
+        raise ValueError(f"{manifest_path} lacks runway_targets")
     flights: list[dict[str, Any]] = []
     seen: set[str] = set()
     for row in manifest.get("records", []):
@@ -172,9 +220,66 @@ def load_arrival_flights(path: str | Path) -> list[dict[str, Any]]:
         if key in seen:
             raise ValueError(f"{manifest_path} lists duplicate flight_key {key!r}")
         seen.add(key)
-        flight = json.loads((root / row["file"]).read_text(encoding="utf-8"))
+        if include_flight_keys is not None and key not in include_flight_keys:
+            continue
+        source_row = source_rows.get(key)
+        if source_row is None:
+            raise ValueError(
+                f"{manifest_path} references flight_key {key!r} absent from "
+                f"{source_manifest_path}"
+            )
+        if source_row.get("file") != row.get("source_file"):
+            raise ValueError(
+                f"{manifest_path}: flight {key!r} source_file disagrees with "
+                f"{source_manifest_path}"
+            )
+        source_path = source_root / source_row["file"]
+        source_bytes = source_path.read_bytes()
+        source_sha256 = row.get("source_sha256")
+        if (
+            not isinstance(source_sha256, str)
+            or hashlib.sha256(source_bytes).hexdigest() != source_sha256
+        ):
+            raise ValueError(
+                f"{manifest_path}: canonical source track for flight {key!r} changed at "
+                f"{source_path}; regenerate arrivals from tracks/manifest.json"
+            )
+        track = json.loads(source_bytes)
+        first = row.get("first_sample_index")
+        last = row.get("last_sample_index")
+        if (
+            not isinstance(first, int)
+            or not isinstance(last, int)
+            or first < 0
+            or last < first
+            or last >= len(track.get("samples", []))
+        ):
+            raise ValueError(
+                f"{manifest_path}: flight {key!r} has invalid source sample slice "
+                f"[{first!r}, {last!r}]"
+            )
+        waypoints = track["samples"][first:last + 1]
+        t0 = waypoints[0][0]
+        flight = czml_input_flight(track)
+        flight["waypoints"] = [
+            [sample[0] - t0, sample[1], sample[2], sample[3]]
+            for sample in waypoints
+        ]
+        flight["arr_airport"] = manifest["airport"]
+        flight["runway_target"] = runway_targets.get(row["runway"])
+        flight["arrival_truncated"] = bool(row["arrival_truncated"])
+        flight["cut_samples"] = int(row["cut_samples"])
+        flight["arrival_duration_s"] = float(row["arrival_duration_s"])
+        flight["entry_time_utc"] = row.get("entry_time_utc")
         verify_identity(flight, key)
+        _validate_runway_target(flight, manifest_path)
         flights.append(flight)
+    if include_flight_keys is not None:
+        missing = include_flight_keys - seen
+        if missing:
+            raise ValueError(
+                f"{manifest_path} does not roster requested flight_key {min(missing)!r}"
+            )
     return flights
 
 
@@ -196,19 +301,27 @@ def resolve_arrival_manifest(path: str | Path) -> Path:
 
 
 def _anchor_index(track: dict[str, Any], runway: Runway) -> int:
-    stored = track.get("landing_sample_index")
-    if isinstance(stored, int) and 0 <= stored < len(track["samples"]):
-        return stored
+    points = [
+        TrackPoint(lat=float(row[2]), lon=float(row[1]), alt_m=float(row[3]))
+        for row in track["samples"]
+    ]
     frame = runway.frame("hae")
-    return min(
-        range(len(track["samples"])),
-        key=lambda index: frame.distance_m(
-            TrackPoint(
-                lat=float(track["samples"][index][2]),
-                lon=float(track["samples"][index][1]),
-                alt_m=float(track["samples"][index][3]),
-            )
-        ),
+    fit = fit_final_segment(points, frame)
+    if fit is not None and fit.approaching:
+        # Refit against the current runway definition before deriving arrivals. Stored
+        # tracks can predate the final-inbound-pass anchor rule or a CIFP LTP update; a
+        # syntactically valid old index may therefore point at an earlier overflight.
+        return min(
+            range(fit.last_sample_index, len(points)),
+            key=lambda index: frame.distance_m(points[index]),
+        )
+    stored = track.get("landing_sample_index")
+    if isinstance(stored, int) and 0 <= stored < len(points):
+        return stored
+    raise ValueError(
+        f"track {track.get('flight_key')!r} has neither a usable final inbound pass "
+        f"against runway {runway.ident!r} nor a valid stored landing_sample_index; "
+        "perform a full re-harvest"
     )
 
 
@@ -217,11 +330,35 @@ def _runway_target(runway: Runway) -> dict[str, Any]:
         "lat": runway.lat,
         "lon": runway.lon,
         "elevation_msl_m": runway.elevation_msl_m,
+        "elevation_hae_m": runway.elevation_hae_m,
+        "hae_minus_msl_m": runway.hae_minus_msl_m,
         "course_deg": runway.course_deg,
         "threshold_crossing_height_m": runway.threshold_crossing_height_m,
         "published_glidepath_deg": runway.published_glidepath_deg,
         "position_source": runway.position_source,
+        "vertical_source": runway.vertical_source,
     }
+
+
+def _validate_runway_target(flight: dict[str, Any], path: Path) -> None:
+    target = flight.get("runway_target") or {}
+    required = (
+        "lat", "lon", "elevation_hae_m", "elevation_msl_m", "hae_minus_msl_m",
+        "course_deg", "threshold_crossing_height_m", "published_glidepath_deg",
+        "position_source", "vertical_source",
+    )
+    missing = [key for key in required if target.get(key) is None]
+    if missing:
+        raise ValueError(
+            f"{path}: flight {flight.get('id')!r} lacks runway_target fields "
+            f"{missing}; perform a full re-harvest"
+        )
+    if abs(
+        float(target["elevation_hae_m"])
+        - float(target["elevation_msl_m"])
+        - float(target["hae_minus_msl_m"])
+    ) > 1e-6:
+        raise ValueError(f"{path}: flight {flight.get('id')!r} has inconsistent runway datum")
 
 
 def _clear(directory: Path) -> None:

@@ -68,23 +68,18 @@ export function airportLandingsIndexUrl(airportCode: string): string {
   return `${airportDataRootUrl(airportCode)}/landings/index.json`;
 }
 
-export function airportLandingsRunwayUrl(airportCode: string, runway: string): string {
-  const code = normalizeAirportCode(airportCode);
-  return airportDataUrl(code, `landings/${code}_${runway.toUpperCase()}.czml`);
-}
-
 // ── Prediction-comparison trajectories (three-coloured: reference/optimizer/simulator) ───
 //
 // Produced by `aeroviz-4d/python/build_scenario_comparison_czml.py` into
-// `<airport>/comparison/`: one `comparison_<ICAO>_<RWY>.czml` per runway plus a single
-// `comparison_index.json`. The index lets the frontend sample a subset of flight groups
-// without loading every (large) per-runway CZML.
+// `<airport>/comparison/`: one result CZML per runway plus a single
+// `comparison_index.json`. References are selected from the canonical observed datasource;
+// the index lets the frontend sample groups without loading every result file.
 
 export function airportComparisonRootUrl(airportCode: string): string {
   return `${airportDataRootUrl(airportCode)}/comparison`;
 }
 
-/** Manifest of available optimization categories (ADS-B / runway target, ±constraints). */
+/** Manifest of available observed, optimization and data-driven evaluation categories. */
 export function airportComparisonCategoriesUrl(airportCode: string): string {
   return `${airportComparisonRootUrl(airportCode)}/categories.json`;
 }
@@ -94,10 +89,13 @@ export function airportComparisonIndexUrl(airportCode: string, categoryDir: stri
   return `${airportComparisonRootUrl(airportCode)}/${categoryDir}/comparison_index.json`;
 }
 
-/** The category's published evaluation report (a verbatim copy of the backend's
- * `python -m evaluation` output — the frontend only visualizes it). */
-export function airportEvaluationReportUrl(airportCode: string, categoryDir: string): string {
-  return `${airportComparisonRootUrl(airportCode)}/${categoryDir}/evaluation_report.json`;
+/** The category's immutable evaluation report named by its committed comparison index. */
+export function airportEvaluationReportUrl(
+  airportCode: string,
+  categoryDir: string,
+  reportFile: string,
+): string {
+  return `${airportComparisonRootUrl(airportCode)}/${categoryDir}/${reportFile}`;
 }
 
 /** One runway's comparison CZML within a category, named as the index's `czml` field. */
@@ -112,12 +110,13 @@ export function airportComparisonCzmlUrl(
 /**
  * The measured-baseline category (`trajectory_data_process/harvest/publish.py`).
  * Report-only — it ships no CZML, because the flown track it describes is already the
- * observed layer on screen. Named here so the frontend's default-selection and the
- * publisher cannot drift.
+ * observed layer on screen. Named here so the frontend's baseline report readers and
+ * the publisher cannot drift.
  */
 export const OBSERVED_CATEGORY_KEY = "observed";
+export const OBSERVED_EVALUATION_REPORT_FILE = "evaluation_report.json";
 
-/** One optimization category, as listed in `comparison/categories.json`. */
+/** One evaluation category, as listed in `comparison/categories.json`. */
 export interface ComparisonCategory {
   /** Stable key, e.g. "asdb" / "runway" / "runway_cons". */
   key: string;
@@ -134,6 +133,13 @@ export interface ComparisonCategory {
    * naming convention, not a contract.
    */
   constrained: boolean;
+}
+
+/** Report-only categories have no comparison groups or CZML to draw. */
+export function isDrawableComparisonCategory(
+  category: ComparisonCategory,
+): boolean {
+  return category.groups > 0;
 }
 
 export interface ComparisonCategoriesManifest {
@@ -221,11 +227,32 @@ export interface OptimizationStats {
   avgTimeS?: number | null;
 }
 
+export interface PredictionErrorSpread {
+  mean?: number | null;
+  p95?: number | null;
+}
+
+/** ADE/FDE summary published from a ts_transformer's `summary.json.accuracy` block. */
+export interface PredictionAccuracyStats {
+  flights?: number | null;
+  flightsWithoutOverlap?: number | null;
+  adeM?: PredictionErrorSpread | null;
+  fdeM?: PredictionErrorSpread | null;
+}
+
 export interface ComparisonIndex {
+  schemaVersion: "comparison-v2-generation";
+  generation: string;
   epoch: string;
   startHidden: boolean;
+  /** References reuse the airport's canonical observed datasource. */
+  referenceSource: "canonicalObserved";
   groups: ComparisonGroup[];
   optimization?: OptimizationStats;
+  /** Present only for data-driven prediction categories. */
+  prediction?: PredictionAccuracyStats;
+  /** Immutable report artifact committed by this same index generation. */
+  evaluationReport: string;
 }
 
 export function isComparisonGroup(value: unknown): value is ComparisonGroup {
@@ -248,21 +275,27 @@ export function isComparisonIndex(value: unknown): value is ComparisonIndex {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Record<string, unknown>;
   return (
+    candidate.schemaVersion === "comparison-v2-generation" &&
+    typeof candidate.generation === "string" &&
     typeof candidate.epoch === "string" &&
+    typeof candidate.startHidden === "boolean" &&
+    candidate.referenceSource === "canonicalObserved" &&
+    typeof candidate.evaluationReport === "string" &&
     Array.isArray(candidate.groups) &&
     candidate.groups.every(isComparisonGroup)
   );
 }
 
-/** One runway's landing CZML, as listed in landings/index.json. */
+/** One runway selector entry in landings/index.json. */
 export interface LandingRunwayEntry {
   runway: string;
-  /** Path relative to the airport folder, e.g. "landings/KRDU_23R.czml" */
+  /** Path relative to the airport folder; v2 entries share "trajectories.czml". */
   file: string;
   count: number;
 }
 
 export interface LandingsManifest {
+  schemaVersion: "observed-landings-v2-canonical";
   airport: string;
   /** Combined (all-runway) CZML file name, e.g. "trajectories.czml" */
   combined: string;
@@ -323,9 +356,14 @@ export function isLandingsManifest(value: unknown): value is LandingsManifest {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Record<string, unknown>;
   return (
+    candidate.schemaVersion === "observed-landings-v2-canonical" &&
     typeof candidate.airport === "string" &&
     typeof candidate.combined === "string" &&
     Array.isArray(candidate.runways) &&
-    candidate.runways.every(isLandingRunwayEntry)
+    candidate.runways.every(
+      (entry) =>
+        isLandingRunwayEntry(entry) &&
+        entry.file === candidate.combined,
+    )
   );
 }

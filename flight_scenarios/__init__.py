@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from .build import build_scenario, build_scenarios_from_arrivals, load_model_arrivals
 from .datum import flights_to_msl, geoid_undulation_m
+from .fitted_approach import FittedApproach, TimedFittedPoint, fit_flight_final_approach
 from .identity import flight_key
 from .runway_target import threshold_target_state
 from .scenario import FlightScenario, aircraft_for_code, load_scenarios, save_scenarios
@@ -39,6 +40,9 @@ __all__ = [
     "load_model_arrivals",
     "flights_to_msl",
     "geoid_undulation_m",
+    "FittedApproach",
+    "TimedFittedPoint",
+    "fit_flight_final_approach",
     "initial_state_from_track",
     "final_state_from_track",
     "state_samples_from_track",
