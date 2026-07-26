@@ -9,18 +9,18 @@ also lists the four routes for adding dynamics later) before changing that.
 
     TS=4dTrajectory/ts_transformer/__main__.py
 
-    # train iTransformer on KRDU arrivals, short horizon (chained at predict time)
+    # train iTransformer on N normalized progress segments plus final_time_s
     python $TS train \
         --data trajectory_data_process/outputs/harvest/KRDU/arrivals/manifest.json \
-        --airport KRDU --model itransformer --horizon-mode window \
-        --output-dir 4dTrajectory/outputs/KRDU/ts_itransformer_window
+        --airport KRDU --model itransformer --n-segments 128 \
+        --output-dir 4dTrajectory/outputs/KRDU/ts_itransformer_normalized_time
 
-    # the same data, PatchTST, whole-approach horizon in one pass
-    python $TS train --data ... --model patchtst --horizon-mode full ...
+    # the same normalized-time target with PatchTST
+    python $TS train --data ... --model patchtst --n-segments 128 ...
 
     # predict, then grade with the same gates the optimizer is graded by
     python $TS predict \
-        --checkpoint 4dTrajectory/outputs/KRDU/ts_itransformer_window/checkpoint.pt \
+        --checkpoint 4dTrajectory/outputs/KRDU/ts_itransformer_normalized_time/checkpoint.pt \
         --data ... --airport KRDU --output-dir 4dTrajectory/outputs/KRDU/ts_pred
     python -m evaluation --input 4dTrajectory/outputs/KRDU/ts_pred
 
@@ -51,13 +51,18 @@ from config import (  # noqa: E402
     COORDINATE_FRAMES,
     DEFAULT_AIRCRAFT_TYPE,
     EVAL_ANCHOR_POLICIES,
-    HORIZON_MODES,
     MODELS,
     SAMPLING_STRATEGIES,
     TSConfig,
-    config_for_mode,
 )
-from cross_validation import cross_validate  # noqa: E402
+from cross_validation import (  # noqa: E402
+    CV_PARAMETER_GRIDS,
+    DEFAULT_CV_EPOCHS,
+    DEFAULT_CV_PATIENCE,
+    DEFAULT_CV_PARAMETERS,
+    cross_validate,
+    validate_cv_parameters,
+)
 from dataset import (  # noqa: E402
     arrival_data_provenance,
     build_series,
@@ -102,14 +107,20 @@ def _batch_size(value: str) -> int | str:
     return parsed
 
 
+def _cv_parameters(value: str) -> tuple[str, ...]:
+    try:
+        return validate_cv_parameters(
+            name.strip() for name in value.split(",") if name.strip()
+        )
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 def _add_training_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--model", choices=MODELS, default=MODELS[0])
-    parser.add_argument("--horizon-mode", choices=HORIZON_MODES, default="window",
-                        help="window: short H, chained at predict time. "
-                             "full: H covers the whole approach in one pass (padded + masked)")
     parser.add_argument("--seq-len", type=int, default=None, help="lookback L, in steps")
-    parser.add_argument("--pred-len", type=int, default=None,
-                        help="horizon H, in steps (defaults to the horizon mode's own default)")
+    parser.add_argument("--n-segments", type=int, default=None,
+                        help="N endpoints on the fixed normalized progress grid")
     parser.add_argument("--dt", type=float, default=None, help="resample step, seconds")
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--batch-size", type=_batch_size, default=None,
@@ -151,7 +162,8 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
 
     batch_auto = args.batch_size == "auto"
     cli_values = (
-        ("model", args.model), ("seq_len", args.seq_len), ("pred_len", args.pred_len),
+        ("model", args.model), ("seq_len", args.seq_len),
+        ("n_segments", args.n_segments),
         ("dt_s", args.dt), ("epochs", args.epochs),
         ("batch_size", args.batch_size if isinstance(args.batch_size, int) else None),
         ("learning_rate", args.learning_rate), ("patience", args.patience),
@@ -166,7 +178,7 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("use_norm", args.instance_norm), ("revin", args.instance_norm),
     )
     overrides.update({key: value for key, value in cli_values if value is not None})
-    return config_for_mode(args.horizon_mode, **overrides), batch_auto
+    return TSConfig(**overrides), batch_auto
 
 
 def _build_series_or_exit(args: argparse.Namespace, config: TSConfig,
@@ -220,18 +232,24 @@ def main(argv: list[str] | None = None) -> int:
     _add_data_args(p_cv)
     _add_training_args(p_cv)
     p_cv.add_argument("--folds", type=int, default=3)
-    p_cv.add_argument("--trials", type=int, default=4)
-    p_cv.add_argument("--cv-epochs", type=int, default=12)
-    p_cv.add_argument("--cv-patience", type=int, default=4)
+    p_cv.add_argument(
+        "--cv-parameters",
+        type=_cv_parameters,
+        default=DEFAULT_CV_PARAMETERS,
+        metavar=",".join(DEFAULT_CV_PARAMETERS),
+        help=(
+            "comma-separated parameters to search exhaustively; default: "
+            f"{','.join(DEFAULT_CV_PARAMETERS)}; available: {','.join(CV_PARAMETER_GRIDS)}"
+        ),
+    )
+    p_cv.add_argument("--cv-epochs", type=int, default=DEFAULT_CV_EPOCHS)
+    p_cv.add_argument("--cv-patience", type=int, default=DEFAULT_CV_PATIENCE)
 
     # ── predict ──────────────────────────────────────────────────────────────
     p_predict = sub.add_parser(
         "predict", help="forecast approaches with a checkpoint; write evaluation records")
     _add_data_args(p_predict)
     p_predict.add_argument("--checkpoint", required=True)
-    p_predict.add_argument("--no-truncate", action="store_true",
-                           help="keep the forecast past the threshold instead of cutting it "
-                                "at closest approach")
     p_predict.add_argument("--split", choices=("test", "val", "train", "all"), default="test",
                            help="which of the checkpoint's flight splits to predict "
                                 "(default: test — the only one the model never saw)")
@@ -256,7 +274,7 @@ def main(argv: list[str] | None = None) -> int:
                 output_dir=args.output_dir,
                 data_provenance=data_provenance,
                 n_splits=args.folds,
-                max_trials=args.trials,
+                cv_parameters=args.cv_parameters,
                 cv_epochs=args.cv_epochs,
                 cv_patience=args.cv_patience,
                 auto_batch_size=batch_auto,
@@ -306,26 +324,19 @@ def main(argv: list[str] | None = None) -> int:
 
     records, overlap = [], []
     for index, s in enumerate(series):
-        forecast = forecast_approach(model, s, config, normalizer, device=device,
-                                     truncate=not args.no_truncate)
+        forecast = forecast_approach(model, s, config, normalizer, device=device)
         records.append(build_prediction_record(
             s,
             forecast,
             index=index,
             model_name=config.model,
-            horizon_mode=config.horizon_mode,
+            n_segments=config.n_segments,
             split=args.split,
         ))
         overlap.append(observed_series_metrics(s, forecast))
 
     paths = write_batch(records, output_dir=args.output_dir, config_dict=config.to_dict(),
                         overlap=overlap, checkpoint=str(args.checkpoint), split=args.split)
-
-    capped = sum(1 for r in records if r.source.get("horizonCapped"))
-    if capped:
-        print(f"  WARNING: {capped} flight(s) were still short of the threshold when the "
-              f"forecast horizon ran out — their final states (and gate verdicts) are "
-              f"horizon artifacts, marked horizon_capped in summary.json")
 
     # Printed from the block that was just persisted, so the terminal and summary.json
     # cannot report different numbers for the same run.
@@ -335,6 +346,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  vs observed track: ADE {ade['mean']:.1f} m (p95 {ade['p95']:.1f})   "
               f"FDE {fde['mean']:.1f} m (p95 {fde['p95']:.1f})   "
               f"over {accuracy['flights']} flight(s)")
+    timing = accuracy["final_time_s"]
+    print(f"  final time: MAE {timing['mae']:.1f} s   "
+          f"p95 {timing['p95_abs']:.1f} s   bias {timing['mean_signed']:+.1f} s")
 
     # Flyability: what controls would these trajectories have REQUIRED, and does that sit
     # inside the airframe's envelope? Reported against the observed tracks measured the same

@@ -1,8 +1,8 @@
 """Resolve an efficient batch size against the actual model and CUDA device.
 
 The auto path probes complete FP32 training steps (forward, backward, Adam update) on
-synthetic tensors with the run's real ``L/H/C`` and architecture.  That is more reliable
-than naming GPU models in a table: free memory, model width, layer count and horizon all
+synthetic tensors with the run's real ``L/N/C`` and architecture.  That is more reliable
+than naming GPU models in a table: free memory, model width, layer count and output grid all
 matter.  The largest successful power of two is backed off once for runtime headroom.
 """
 
@@ -15,7 +15,7 @@ import torch
 from config import TSConfig
 from models import build_model
 
-_CANDIDATES = (8, 16, 32, 64, 128, 256, 512, 1024)
+_CANDIDATES = (8, 16, 32, 64, 128, 256, 512, 1024, 2048)
 
 
 def _is_cuda_oom(exc: BaseException) -> bool:
@@ -24,7 +24,7 @@ def _is_cuda_oom(exc: BaseException) -> bool:
 
 def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device) -> None:
     """Run one isolated optimizer step or raise CUDA OOM."""
-    model = optimizer = x = target = predicted = loss = None
+    model = optimizer = x = prediction = loss = None
     try:
         torch.manual_seed(config.seed)
         model = build_model(config).to(device)
@@ -36,14 +36,15 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
             dtype=torch.float32,
             device=device,
         )
-        predicted = model(x)
-        target = torch.zeros_like(predicted)
-        loss = (predicted - target).square().mean()
+        prediction = model(x)
+        loss = prediction.states.square().mean() + config.final_time_loss_weight * (
+            prediction.final_time_s / config.final_time_scale_s
+        ).square().mean()
         loss.backward()
         optimizer.step()
         torch.cuda.synchronize(device)
     finally:
-        del loss, predicted, target, x, optimizer, model
+        del loss, prediction, x, optimizer, model
         gc.collect()
         torch.cuda.empty_cache()
 

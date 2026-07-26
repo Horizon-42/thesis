@@ -1,4 +1,4 @@
-"""Observed arrival tracks -> uniformly-sampled channel series -> (x, y, mask) windows.
+"""Observed arrivals -> uniform histories -> normalized-progress trajectory targets.
 
 Pipeline per flight::
 
@@ -35,6 +35,7 @@ from torch.utils.data import DataLoader, Dataset, RandomSampler, Sampler
 # flight_scenarios.identity because the optimizer batch derives its record filenames from
 # the SAME function; the split key here and both writers' filename stems cannot drift.
 from flight_scenarios import (
+    FittedApproach,
     FlightScenario,
     build_scenario,
     fit_flight_final_approach,
@@ -53,7 +54,7 @@ from channels import (
     channels_from_states,
     resample_uniform,
 )
-from config import DEFAULT_AIRCRAFT_TYPE, HORIZON_FULL, TSConfig
+from config import DEFAULT_AIRCRAFT_TYPE, TSConfig
 from coordinate_frames import CoordinateFrame, frame_for_state
 
 ARRIVAL_DATA_PROVENANCE_SCHEMA = "ts-arrival-data-v2-multi-airport"
@@ -446,8 +447,31 @@ def build_series(
             report.skip(f"track shorter than one window ({config.lookback_s:.0f}s)")
             continue
 
+        fitted = fit_flight_final_approach(flight)
+        observed_crossing = _observed_threshold_crossing(
+            times,
+            values,
+            frame,
+            runway_heading_rad=scenario.target.psi,
+            fitted=fitted,
+        )
+        if observed_crossing is not None:
+            crossing_time, _crossing_values = observed_crossing
+            before_crossing = grid < crossing_time
+            grid = grid[before_crossing]
+            resampled = resampled[before_crossing]
+            if len(grid) < config.seq_len:
+                report.skip(f"track shorter than one window ({config.lookback_s:.0f}s)")
+                continue
+
         supervision_times, supervision_values, supervision_weights = _build_supervision(
-            flight, samples, frame, grid, resampled, config
+            samples,
+            frame,
+            grid,
+            resampled,
+            config,
+            fitted=fitted,
+            observed_crossing=observed_crossing,
         )
         series.append(FlightSeries(
             flight_id=flight_key(scenario.source, index), scenario=scenario, frame=frame,
@@ -461,13 +485,50 @@ def build_series(
     return series, report
 
 
+def _observed_threshold_crossing(
+    measured_times: np.ndarray,
+    measured_values: np.ndarray,
+    frame: CoordinateFrame,
+    *,
+    runway_heading_rad: float,
+    fitted: FittedApproach | None,
+) -> tuple[float, np.ndarray] | None:
+    """Interpolate the measured final's first crossing of the runway threshold plane."""
+    cosine = np.cos(runway_heading_rad)
+    sine = np.sin(runway_heading_rad)
+    along = np.asarray([
+        east * cosine + north * sine
+        for east, north in (
+            frame.to_world_horizontal(float(row[0]), float(row[1]))
+            for row in measured_values
+        )
+    ])
+    first_right_index = fitted.fit.last_sample_index + 1 if fitted is not None else 1
+    for right_index in range(first_right_index, len(along)):
+        left_index = right_index - 1
+        left_along = along[left_index]
+        right_along = along[right_index]
+        if left_along <= 0.0 <= right_along and right_along > left_along:
+            fraction = -left_along / (right_along - left_along)
+            crossing_time = measured_times[left_index] + fraction * (
+                measured_times[right_index] - measured_times[left_index]
+            )
+            crossing_values = measured_values[left_index] + fraction * (
+                measured_values[right_index] - measured_values[left_index]
+            )
+            return float(crossing_time), crossing_values
+    return None
+
+
 def _build_supervision(
-    flight: dict[str, Any],
     measured_samples,
     frame: CoordinateFrame,
     grid: np.ndarray,
     measured_values: np.ndarray,
     config: TSConfig,
+    *,
+    fitted: FittedApproach | None,
+    observed_crossing: tuple[float, np.ndarray] | None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Observed six-channel labels plus low-weight, position-only fitted tail labels."""
     channel_count = len(CHANNELS)
@@ -475,13 +536,22 @@ def _build_supervision(
     measured_weights = np.full(
         measured_values.shape, 1.0 / channel_count, dtype=np.float64
     )
+    if observed_crossing is not None:
+        crossing_time, crossing_values = observed_crossing
+        return (
+            np.concatenate([grid, np.asarray([crossing_time])]),
+            np.concatenate([measured_values, crossing_values[None, :]], axis=0),
+            np.concatenate([
+                measured_weights,
+                np.full((1, channel_count), 1.0 / channel_count, dtype=np.float64),
+            ], axis=0),
+        )
     if (
         config.fitted_tail_position_weight == 0.0
         and config.fitted_terminal_position_weight == 0.0
     ):
         return grid, measured_values, measured_weights
 
-    fitted = fit_flight_final_approach(flight)
     if fitted is None:
         return grid, measured_values, measured_weights
     tail = fitted.uniform_tail(after_time_s=float(grid[-1]), dt_s=config.dt_s)
@@ -529,29 +599,21 @@ def window_anchors(series: FlightSeries, config: TSConfig) -> range:
     An anchor ``i`` is the index of the LAST observed sample: the model is shown
     ``values[i - seq_len + 1 : i + 1]`` and must predict what follows.
 
-    - window mode requires a full, unpadded horizon after the anchor.
-    - full mode requires only that something follows; a short remainder is padded and
-      masked. Where the remainder EXCEEDS ``pred_len``, the target is truncated to
-      ``pred_len`` — the model predicts as far ahead as the architecture allows.
+    Every anchor must leave a non-empty remainder.  That remainder is resampled to the same
+    N endpoints on normalized progress ``tau = 1/N, ..., 1`` regardless of wall-clock time.
     """
     first = config.seq_len - 1
-    if config.horizon_mode == HORIZON_FULL:
-        # An anchor is always observed; fitted rows can be TARGETS but never model inputs.
-        last = min(series.n_samples - 1, series.n_supervision_samples - 2)
-    else:
-        last = min(
-            series.n_samples - 1,
-            series.n_supervision_samples - config.pred_len - 1,
-        )
+    # An anchor is always observed; fitted rows can be targets but never model inputs.
+    last = min(series.n_samples - 1, series.n_supervision_samples - 2)
     return range(first, last + 1) if last >= first else range(0)
 
 
 class TrajectoryWindows(Dataset):
-    """``(x[L,C], y[H,C], weights[H,C])`` windows over :class:`FlightSeries`.
+    """``(x[L,C], y[N,C], weights[N,C], final_time_s)`` training samples.
 
     Measured rows supervise all six channels. Fitted rows supervise only ``e/n/u`` at lower
-    weight, and padding is zero everywhere. Thus extrapolated velocity never becomes a
-    label, while the fitted crossing still contributes terminal position error.
+    weight.  Linear interpolation maps the remainder of every approach to a fixed progress
+    grid, so there is no padding and N does not imply a fixed number of seconds.
     """
 
     def __init__(
@@ -585,22 +647,48 @@ class TrajectoryWindows(Dataset):
     def __len__(self) -> int:
         return len(self.index)
 
-    def __getitem__(self, i: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def __getitem__(
+        self, i: int
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         s_idx, anchor = self.index[i]
         values = self.encoded[s_idx]
-        L, H, C = self.config.seq_len, self.config.pred_len, len(self.config.channels)
+        series = self.series[s_idx]
+        L, N, C = self.config.seq_len, self.config.n_segments, len(self.config.channels)
 
         x = values[anchor - L + 1 : anchor + 1]
-        future = values[anchor + 1 : anchor + 1 + H]
-        future_weights = self.series[s_idx].supervision_weights[
-            anchor + 1 : anchor + 1 + H
-        ]
-        y = np.zeros((H, C), dtype=np.float32)
-        weights = np.zeros((H, C), dtype=np.float32)
-        y[: len(future)] = future
-        weights[: len(future_weights)] = future_weights
+        anchor_time = float(series.times[anchor])
+        final_time_s = float(series.supervision_times[-1] - anchor_time)
+        progress = np.arange(1, N + 1, dtype=np.float64) / N
+        query_times = anchor_time + progress * final_time_s
 
-        return torch.from_numpy(x.copy()), torch.from_numpy(y), torch.from_numpy(weights)
+        y = np.empty((N, C), dtype=np.float32)
+        weights = np.empty((N, C), dtype=np.float32)
+        for channel in range(C):
+            y[:, channel] = np.interp(
+                query_times, series.supervision_times, values[:, channel]
+            )
+            weights[:, channel] = np.interp(
+                query_times,
+                series.supervision_times,
+                series.supervision_weights[:, channel],
+            )
+            if channel not in POSITION_IDX:
+                # Fitted-tail kinematics only preserve the tensor shape. Interpolating
+                # beyond the final positive-weight velocity row must not turn those
+                # placeholders into weak supervision between the two grids. An observed
+                # crossing remains supervised even when it lies off the regular input grid.
+                supervised_rows = series.supervision_weights[:, channel] > 0.0
+                last_supervised_time = series.supervision_times[
+                    np.flatnonzero(supervised_rows)[-1]
+                ]
+                weights[query_times > last_supervised_time, channel] = 0.0
+
+        return (
+            torch.from_numpy(x.copy()),
+            torch.from_numpy(y),
+            torch.from_numpy(weights),
+            torch.tensor(final_time_s, dtype=torch.float32),
+        )
 
 
 def _split_fraction(flight_id: str, seed: int) -> float:

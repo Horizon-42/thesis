@@ -2,7 +2,7 @@
 
 Two families, because they answer different questions:
 
-**Displacement** — ADE (average displacement error, mean over the horizon) and FDE (final
+**Displacement** — ADE (average displacement error, mean over normalized progress) and FDE (final
 displacement error, at the last valid step). The standard pair in the trajectory-prediction
 literature and what the survey in ``4dTrajectory/docs`` reports for every method.
 
@@ -13,9 +13,8 @@ the evaluation gates check. The decomposition is taken in the frame of the TRUE 
 each step: the along-track unit vector is the truth's own horizontal heading, so
 along-track error is a timing/speed error and cross-track error is a path error.
 
-All inputs are PHYSICAL units (metres, m/s) — decode through the normalizer first. Masked
-(padded) horizon steps are excluded everywhere; a metric over a padded tail would report
-the model's agreement with zeros.
+All inputs are PHYSICAL units (metres, m/s) — decode through the normalizer first. State
+weights can exclude fitted position-only supervision from observed-track headline metrics.
 """
 
 from __future__ import annotations
@@ -59,8 +58,8 @@ def error_components(
 ) -> dict[str, np.ndarray]:
     """Flat, mask-filtered per-step error components in metres.
 
-    ``predicted`` / ``truth`` are ``[B, H, C]`` in physical units, ``mask`` is ``[B, H]``.
-    Returns 1-D arrays over the valid steps: ``displacement`` (3D), ``horizontal``,
+    ``predicted`` / ``truth`` are ``[B, N, C]`` in physical units, ``mask`` is ``[B, N]``.
+    Returns 1-D arrays over the valid progress points: ``displacement`` (3D), ``horizontal``,
     ``along`` (signed, + = predicted ahead of truth), ``cross`` (signed, + = left of the
     true course), ``vertical`` (signed, + = predicted high) — plus ``displacement_grid``,
     the UNMASKED ``[B, H]`` displacement, kept for per-sample indexing (FDE).
@@ -103,7 +102,7 @@ def _spread(values: np.ndarray) -> dict[str, float]:
 
 
 def final_index(mask: np.ndarray) -> np.ndarray:
-    """Index of the last valid horizon step per sample, ``[B]``."""
+    """Index of the last valid progress point per sample, ``[B]``."""
     return mask.shape[1] - 1 - np.argmax(mask[:, ::-1] > 0.5, axis=1)
 
 
@@ -115,9 +114,8 @@ def trajectory_metrics(
     ``{ade_m, fde_m, ..., along_track_m: {...}, cross_track_m: {...},
        altitude_m: {...}, n_steps, n_samples}``
 
-    ADE averages per-step displacement across every valid step. FDE takes each sample's
-    LAST valid step — which in full horizon mode is where that approach actually ended,
-    not a fixed column, so a padded short approach still reports its true endpoint error.
+    ADE averages per-progress-point displacement. FDE is the error at normalized progress
+    one, the predicted endpoint of each approach.
     """
     components = error_components(predicted, truth, mask)
     displacement = components["displacement"]
@@ -141,16 +139,10 @@ def trajectory_metrics(
     }
 
 
-def error_by_horizon(
-    predicted: np.ndarray, truth: np.ndarray, mask: np.ndarray, dt_s: float
+def error_by_progress(
+    predicted: np.ndarray, truth: np.ndarray, mask: np.ndarray
 ) -> list[dict[str, float]]:
-    """Displacement error as a function of how far ahead it was predicted.
-
-    This is the curve that shows what a horizon costs — flat means the model degrades
-    gracefully, steep means error compounds. In window mode, comparing this against a
-    chained ``recursive_forecast`` over the same total time is the whole point of having
-    both horizon modes.
-    """
+    """Displacement error over the shared normalized progress domain ``(0, 1]``."""
     per_step = np.sqrt(((_positions(predicted) - _positions(truth)) ** 2).sum(axis=-1))
     rows = []
     for h in range(predicted.shape[1]):
@@ -159,8 +151,8 @@ def error_by_horizon(
             continue
         errors = per_step[valid, h]
         rows.append({
-            "step": h + 1,
-            "lead_time_s": (h + 1) * dt_s,
+            "segment": h + 1,
+            "progress": (h + 1) / predicted.shape[1],
             "mean_m": float(errors.mean()),
             "p95_m": float(np.percentile(errors, P95)),
             "n": int(valid.sum()),

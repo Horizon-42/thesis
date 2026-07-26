@@ -36,13 +36,11 @@ import run_ts_pipeline as pipeline  # noqa: E402
 from config import (  # noqa: E402
     COORDINATE_FRAMES,
     DEFAULT_AIRCRAFT_TYPE,
-    HORIZON_MODES,
     MODELS,
     SAMPLING_AIRPORT_FLIGHT_BALANCED,
     TSConfig,
-    config_for_mode,
 )
-from cross_validation import TUNED_FIELDS  # noqa: E402
+from cross_validation import CV_OVERRIDE_FIELDS  # noqa: E402
 from dataset import (  # noqa: E402
     Normalizer,
     TrajectoryWindows,
@@ -52,13 +50,13 @@ from dataset import (  # noqa: E402
     split_name_for_dataset_id,
 )
 from models import build_model, parameter_count, resolve_device  # noqa: E402
-from train import masked_mse, usable_series  # noqa: E402
+from train import prediction_loss, usable_series  # noqa: E402
 from trajectory_data_process.harvest.arrivals import (  # noqa: E402
     load_arrival_flights,
     resolve_arrival_manifest,
 )
 
-RESULT_SCHEMA = "ts-batch-throughput-benchmark-v1-outer-train-only"
+RESULT_SCHEMA = "ts-batch-throughput-benchmark-v2-normalized-time"
 
 
 def _sha256_bytes(payload: bytes) -> str:
@@ -113,7 +111,7 @@ def _load_tuned_overrides(path: str | None) -> dict[str, Any]:
     allowed_config = {field.name for field in fields(TSConfig)}
     if not isinstance(loaded, dict) or any(key not in allowed_config for key in loaded):
         raise ValueError("--config-overrides must be a JSON object containing TSConfig fields")
-    unsupported = sorted(set(loaded) - set(TUNED_FIELDS))
+    unsupported = sorted(set(loaded) - set(CV_OVERRIDE_FIELDS))
     if unsupported:
         raise ValueError(
             "--config-overrides is for CV best_config.json; unsupported field(s): "
@@ -211,7 +209,7 @@ def benchmark_candidate(
 ) -> dict[str, Any]:
     """Measure the current end-to-end in-RAM DataLoader + FP32 training path."""
     model = optimizer = loader = iterator = None
-    x = y = weights = predicted = loss = None
+    x = y = weights = final_time_s = prediction = loss = None
     started = time.perf_counter()
     try:
         torch.manual_seed(config.seed)
@@ -233,14 +231,15 @@ def benchmark_candidate(
         torch.cuda.reset_peak_memory_stats(device)
 
         def step() -> None:
-            nonlocal x, y, weights, predicted, loss
-            x, y, weights = next(iterator)
+            nonlocal x, y, weights, final_time_s, prediction, loss
+            x, y, weights, final_time_s = next(iterator)
             x = x.to(device)
             y = y.to(device)
             weights = weights.to(device)
+            final_time_s = final_time_s.to(device)
             optimizer.zero_grad()
-            predicted = model(x)
-            loss = masked_mse(predicted, y, weights)
+            prediction = model(x)
+            loss = prediction_loss(prediction, y, weights, final_time_s, config)
             loss.backward()
             optimizer.step()
 
@@ -280,7 +279,7 @@ def benchmark_candidate(
             "wall_seconds": time.perf_counter() - started,
         }
     finally:
-        del loss, predicted, weights, y, x, iterator, loader, optimizer, model
+        del loss, prediction, final_time_s, weights, y, x, iterator, loader, optimizer, model
         gc.collect()
         torch.cuda.empty_cache()
 
@@ -300,7 +299,7 @@ def main() -> int:
     parser.add_argument("--airports", type=_parse_airports, default=None,
                         help="comma-separated airport roster; default: all discovered K-airports")
     parser.add_argument("--model", choices=MODELS, default="itransformer")
-    parser.add_argument("--mode", choices=HORIZON_MODES, default="full")
+    parser.add_argument("--n-segments", type=int, default=None)
     parser.add_argument("--coordinate-frame", choices=COORDINATE_FRAMES, default="enu")
     parser.add_argument("--config-overrides", default=None,
                         help="optional CV best_config.json for the exact selected architecture")
@@ -327,17 +326,19 @@ def main() -> int:
     except ValueError as exc:
         parser.error(str(exc))
 
-    config = config_for_mode(
-        args.mode,
+    config_values = {
         **tuned,
-        model=args.model,
-        coordinate_frame=args.coordinate_frame,
-        aircraft_type=args.aircraft_type,
-        seed=args.seed,
-        device=args.device,
-        sampling_strategy=SAMPLING_AIRPORT_FLIGHT_BALANCED,
-        eval_anchor_policy="first",
-    )
+        "model": args.model,
+        "coordinate_frame": args.coordinate_frame,
+        "aircraft_type": args.aircraft_type,
+        "seed": args.seed,
+        "device": args.device,
+        "sampling_strategy": SAMPLING_AIRPORT_FLIGHT_BALANCED,
+        "eval_anchor_policy": "first",
+    }
+    if args.n_segments is not None:
+        config_values["n_segments"] = args.n_segments
+    config = TSConfig(**config_values)
     device = resolve_device(config.device)
     if device.type != "cuda" or not torch.cuda.is_available():
         parser.error("this benchmark requires an available CUDA GPU")
@@ -352,7 +353,7 @@ def main() -> int:
 
     output_path = (args.output or (
         pipeline.OPT_OUTPUTS_ROOT / "POOLED" / "batch_benchmarks" /
-        f"{args.model}_{args.mode}_{args.coordinate_frame.replace('-', '_')}.json"
+        f"{args.model}_normalized_time_{args.coordinate_frame.replace('-', '_')}.json"
     )).resolve()
     properties = torch.cuda.get_device_properties(device)
     free_bytes, total_bytes = torch.cuda.mem_get_info(device)
@@ -362,8 +363,8 @@ def main() -> int:
         flush=True,
     )
     print(
-        f"model={config.model}, mode={config.horizon_mode}, frame={config.coordinate_frame}, "
-        f"L={config.seq_len}, H={config.pred_len}, parameters={parameter_count(build_model(config)):,}",
+        f"model={config.model}, frame={config.coordinate_frame}, "
+        f"L={config.seq_len}, N={config.n_segments}, parameters={parameter_count(build_model(config)):,}",
         flush=True,
     )
     print("loading outer-train source tracks only (validation/test trajectory files stay closed)",

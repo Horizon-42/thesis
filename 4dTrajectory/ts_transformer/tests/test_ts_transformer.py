@@ -13,6 +13,7 @@ The end-to-end test trains for two epochs on synthetic data. That is a plumbing 
 
 import hashlib
 import importlib.util
+import itertools
 import json
 import math
 import sys
@@ -38,12 +39,14 @@ ts_cli = importlib.util.module_from_spec(_CLI_SPEC)
 _CLI_SPEC.loader.exec_module(ts_cli)
 
 import channels as ch  # noqa: E402
+import batching  # noqa: E402
 import coordinate_frames as frames  # noqa: E402
 import cross_validation as cv  # noqa: E402
+import dataset as dataset_module  # noqa: E402
 import detect_ts_best_batch as batch_probe  # noqa: E402
 from aerodynamic_model.common import GeodeticState  # noqa: E402
 from batching import resolve_batch_size  # noqa: E402
-from config import HORIZON_FULL, HORIZON_WINDOW, TSConfig, config_for_mode  # noqa: E402
+from config import TSConfig  # noqa: E402
 from dataset import (  # noqa: E402
     ARRIVAL_DATA_PROVENANCE_SCHEMA, AirportFlightWindowSampler, Normalizer,
     TrajectoryWindows, arrival_data_provenance, build_series, cross_validation_folds,
@@ -55,11 +58,12 @@ from evaluation.records import load_records, record_from_dict  # noqa: E402
 from export import (  # noqa: E402
     accuracy_block, build_prediction_record, observed_series_metrics, record_stem, write_batch,
 )
-from forecast import Forecast, forecast_approach, recursive_forecast, truncate_at_threshold  # noqa: E402
+from forecast import Forecast, forecast_approach  # noqa: E402
 from metrics import error_components, trajectory_metrics  # noqa: E402
 from models import build_model  # noqa: E402
+from prediction_outputs import ControlBounds, ControlOutputHead, StatePrediction  # noqa: E402
 from synthetic import synthetic_arrivals  # noqa: E402
-from train import load_checkpoint, masked_mse, train  # noqa: E402
+from train import load_checkpoint, masked_mse, prediction_loss, train  # noqa: E402
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 
@@ -73,9 +77,9 @@ def _state(*, lat=35.90, lon=-78.85, alt=900.0, V=90.0, psi=0.5, gamma=-0.05, m=
                          gamma=gamma, m=m)
 
 
-def _series(n_flights=8, mode=HORIZON_WINDOW, **config_overrides):
+def _series(n_flights=8, **config_overrides):
     """Synthetic KRDU arrivals, built into FlightSeries. Returns ``(series, config)``."""
-    config = config_for_mode(mode, **config_overrides)
+    config = TSConfig(**config_overrides)
     flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=n_flights, seed=3)
     series, report = build_series(flights, config, airport=AIRPORT)
     assert report.built == n_flights, report.format()
@@ -112,6 +116,25 @@ def _fitted_tail_flight():
         },
         "waypoints": waypoints,
     }
+
+
+def _post_threshold_flight():
+    """The fitted-tail fixture continued 500 m beyond the threshold."""
+    from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon
+
+    flight = _fitted_tail_flight()
+    lat0, lon0, elevation = 35.0, -78.0, 100.0
+    cross_m, crossing_height_m = 25.0, 17.5
+    along_m = 500.0
+    time_s = 55.0
+    height = crossing_height_m - math.tan(math.radians(3.0)) * along_m
+    flight["waypoints"].append([
+        time_s,
+        lon0 + cross_m / metres_per_deg_lon(lat0),
+        lat0 + along_m / METRES_PER_DEG_LAT,
+        elevation + height,
+    ])
+    return flight
 
 
 # ── Channel contract ─────────────────────────────────────────────────────────
@@ -276,31 +299,36 @@ def test_resample_rejects_a_track_shorter_than_one_step():
 
 # ── Windowing + masking ──────────────────────────────────────────────────────
 
-def test_window_mode_anchors_require_a_full_unpadded_horizon():
-    series, config = _series(n_flights=2, mode=HORIZON_WINDOW)
+def test_normalized_windows_use_every_anchor_with_a_future_remainder():
+    series, config = _series(n_flights=2, n_segments=16)
     s = series[0]
     anchors = window_anchors(s, config)
     assert anchors.start == config.seq_len - 1
-    # Last anchor must leave pred_len real samples after it.
-    assert anchors.stop - 1 + config.pred_len <= s.n_samples - 1
+    assert anchors.stop - 1 == min(s.n_samples - 1, s.n_supervision_samples - 2)
 
     dataset = TrajectoryWindows([s], config, Normalizer.fit([s]))
-    _, _, mask = dataset[len(dataset) - 1]
-    assert float(mask.sum()) == pytest.approx(config.pred_len)  # nothing padded in window mode
-
-
-def test_full_mode_pads_the_tail_and_masks_it_out():
-    series, config = _series(n_flights=2, mode=HORIZON_FULL)
-    s = series[0]
-    dataset = TrajectoryWindows([s], config, Normalizer.fit([s]))
-
-    # The very last anchor has exactly one real future sample; the rest is padding.
-    x, y, mask = dataset[len(dataset) - 1]
+    x, y, weights, final_time_s = dataset[len(dataset) - 1]
     assert x.shape == (config.seq_len, len(config.channels))
-    assert y.shape == (config.pred_len, len(config.channels))
-    assert mask.sum() == pytest.approx(1.0)
-    assert torch.all(y[1:] == 0.0)          # padded rows are zeros...
-    assert torch.all(mask[1:] == 0.0)       # ...and the mask says so
+    assert y.shape == (config.n_segments, len(config.channels))
+    assert weights.shape == y.shape
+    assert float(final_time_s) > 0.0
+
+
+def test_normalized_windows_interpolate_the_endpoint_without_padding():
+    series, config = _series(n_flights=2, n_segments=12)
+    s = series[0]
+    normalizer = Normalizer.fit([s])
+    dataset = TrajectoryWindows([s], config, normalizer)
+
+    x, y, weights, final_time_s = dataset[len(dataset) - 1]
+    assert x.shape == (config.seq_len, len(config.channels))
+    assert y.shape == (config.n_segments, len(config.channels))
+    assert torch.all(weights > 0.0)
+    expected_endpoint = normalizer.encode(s.supervision_values[-1:])[0]
+    assert y[-1].numpy() == pytest.approx(expected_endpoint)
+    assert float(final_time_s) == pytest.approx(
+        s.supervision_times[-1] - s.times[dataset.index[-1][1]]
+    )
 
 
 def test_masked_mse_ignores_padded_steps():
@@ -309,15 +337,15 @@ def test_masked_mse_ignores_padded_steps():
     # reproduce its own zero padding and forecast tails collapse toward the threshold.
     predicted = torch.tensor([[[1.0], [999.0]]])
     target = torch.tensor([[[0.0], [0.0]]])
-    mask = torch.tensor([[1.0, 0.0]])
+    mask = torch.tensor([[[1.0], [0.0]]])
     assert float(masked_mse(predicted, target, mask)) == pytest.approx(1.0)
 
-    all_valid = torch.tensor([[1.0, 1.0]])
+    all_valid = torch.tensor([[[1.0], [1.0]]])
     assert float(masked_mse(predicted, target, all_valid)) > 1.0
 
 
 def test_fitted_tail_supervises_position_only_and_keeps_observed_inputs_separate():
-    config = config_for_mode(HORIZON_FULL, seq_len=3, pred_len=3, dt_s=2.0)
+    config = TSConfig(seq_len=3, n_segments=3, dt_s=2.0)
     series, report = build_series([_fitted_tail_flight()], config, airport="KFIT")
     assert report.built == 1
     s = series[0]
@@ -337,10 +365,55 @@ def test_fitted_tail_supervises_position_only_and_keeps_observed_inputs_separate
 
     dataset = TrajectoryWindows(series, config, Normalizer.fit(series))
     assert dataset.index[-1] == (0, s.n_samples - 1)
-    x, _, weights = dataset[len(dataset) - 1]
+    x, _, weights, final_time_s = dataset[len(dataset) - 1]
     assert x.shape == (config.seq_len, len(config.channels))
     assert weights.sum() == pytest.approx(1.75)
     assert torch.all(weights[:, 3:] == 0.0)
+    assert float(final_time_s) == pytest.approx(6.0)
+
+
+def test_normalized_interpolation_never_supervises_fitted_velocity_placeholders():
+    config = TSConfig(seq_len=3, n_segments=4, dt_s=2.0)
+    series, report = build_series([_fitted_tail_flight()], config, airport="KFIT")
+    assert report.built == 1
+    s = series[0]
+    dataset = TrajectoryWindows(series, config, Normalizer.fit(series))
+
+    _, _, weights, final_time_s = dataset[len(dataset) - 1]
+    first_query_time = s.times[-1] + float(final_time_s) / config.n_segments
+    assert s.times[-1] < first_query_time < s.supervision_times[s.n_samples]
+    assert torch.all(weights[:, 3:] == 0.0)
+    assert torch.all(weights[:, :3].sum(dim=-1) > 0.0)
+
+
+def test_normalized_target_interpolates_and_stops_at_observed_threshold_crossing():
+    config = TSConfig(seq_len=3, n_segments=4, dt_s=2.0)
+    series, report = build_series([_post_threshold_flight()], config, airport="KFIT")
+    assert report.built == 1
+    s = series[0]
+
+    assert s.times[-1] == pytest.approx(48.0)
+    assert s.supervision_times[-1] == pytest.approx(50.0)
+    assert s.supervision_values[-1, ch.IDX["e"]] == pytest.approx(25.0, abs=1e-6)
+    assert s.supervision_values[-1, ch.IDX["n"]] == pytest.approx(0.0, abs=1e-6)
+    assert np.all(s.supervision_weights[-1] == pytest.approx(1.0 / len(ch.CHANNELS)))
+
+    dataset = TrajectoryWindows(series, config, Normalizer.fit(series))
+    _, target, _, final_time_s = dataset[len(dataset) - 1]
+    assert float(final_time_s) == pytest.approx(2.0)
+    endpoint = dataset.normalizer.decode(target[-1:].numpy())[0]
+    assert endpoint[ch.IDX["n"]] == pytest.approx(0.0, abs=1e-4)
+
+
+def test_observed_threshold_crossing_does_not_depend_on_a_fitted_tail(monkeypatch):
+    monkeypatch.setattr(dataset_module, "fit_flight_final_approach", lambda _flight: None)
+    config = TSConfig(seq_len=3, n_segments=4, dt_s=2.0)
+    series, report = build_series([_post_threshold_flight()], config, airport="KFIT")
+
+    assert report.built == 1
+    assert series[0].times[-1] == pytest.approx(48.0)
+    assert series[0].supervision_times[-1] == pytest.approx(50.0)
+    assert series[0].supervision_values[-1, ch.IDX["n"]] == pytest.approx(0.0, abs=1e-6)
 
 
 def test_channel_weighted_mse_ignores_fitted_velocity_placeholders():
@@ -348,6 +421,20 @@ def test_channel_weighted_mse_ignores_fitted_velocity_placeholders():
     target = torch.tensor([[[1.0, 1.0, 1.0, 999.0, 999.0, 999.0]]])
     weights = torch.tensor([[[1 / 3, 1 / 3, 1 / 3, 0.0, 0.0, 0.0]]])
     assert float(masked_mse(predicted, target, weights)) == pytest.approx(1.0)
+
+
+def test_prediction_loss_adds_scaled_final_time_error():
+    config = TSConfig(final_time_scale_s=600.0, final_time_loss_weight=2.0)
+    states = torch.zeros((1, 2, len(ch.CHANNELS)))
+    prediction = StatePrediction(states=states, final_time_s=torch.tensor([900.0]))
+    loss = prediction_loss(
+        prediction,
+        states,
+        torch.ones_like(states),
+        torch.tensor([600.0]),
+        config,
+    )
+    assert float(loss) == pytest.approx(0.5)
 
 
 def test_split_by_flight_is_disjoint_and_reproducible():
@@ -489,7 +576,7 @@ def test_batch_probe_opens_outer_train_track_files_only(tmp_path):
         tmp_path, [f"F{index:02d}" for index in range(40)]
     )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    config = config_for_mode(HORIZON_FULL, seed=1337)
+    config = TSConfig(seed=1337)
     counts = {"train": 0, "val": 0, "test": 0}
     for row in manifest["records"]:
         split = split_name_for_dataset_id(f"KRDU:{row['flight_key']}", config)
@@ -633,12 +720,44 @@ def test_balanced_normalizer_weights_airports_then_flights_equally():
 # ── Models ───────────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
-def test_both_models_map_lookback_to_horizon(model_name):
-    config = TSConfig(model=model_name, seq_len=32, pred_len=16, d_model=32, n_heads=4,
+def test_both_models_return_structured_states_and_final_time(model_name):
+    config = TSConfig(model=model_name, seq_len=32, n_segments=16, d_model=32, n_heads=4,
                       d_ff=64, e_layers=1)
     model = build_model(config)
     x = torch.randn(3, config.seq_len, config.enc_in)
-    assert model(x).shape == (3, config.pred_len, config.enc_in)
+    prediction = model(x)
+    assert prediction.states.shape == (3, config.n_segments, config.enc_in)
+    assert prediction.final_time_s.shape == (3,)
+    assert torch.all(prediction.final_time_s > 0.0)
+
+
+def test_control_head_bounds_controls_and_partitions_time_non_uniformly():
+    bounds = ControlBounds(
+        lower=(0.0, -math.pi / 4, 0.5),
+        upper=(120_000.0, math.pi / 4, 2.0),
+    )
+    head = ControlOutputHead(input_dim=8, n_segments=5, bounds=bounds)
+    result = head(torch.randn(3, 8), torch.tensor([100.0, 240.0, 60.0]))
+
+    assert result.controls.shape == (3, 5, 3)
+    assert result.segment_durations.shape == (3, 5)
+    assert torch.all(result.segment_durations > 0.0)
+    assert torch.allclose(result.segment_durations.sum(dim=-1), result.final_time_s)
+    assert torch.all(result.controls >= head.lower)
+    assert torch.all(result.controls <= head.upper)
+
+
+@pytest.mark.parametrize(
+    ("lower", "upper"),
+    [
+        ((0.0,), (1.0,)),
+        ((0.0, -1.0, 0.5), (1.0, 1.0)),
+        ((0.0, -1.0, 0.5, 2.0), (1.0, 1.0, 2.0, 3.0)),
+    ],
+)
+def test_control_bounds_require_one_bound_per_control(lower, upper):
+    with pytest.raises(ValueError, match="exactly 3"):
+        ControlBounds(lower=lower, upper=upper)
 
 
 def test_config_rejects_a_head_count_that_does_not_divide_d_model():
@@ -650,11 +769,12 @@ def test_config_rejects_a_head_count_that_does_not_divide_d_model():
     ("field", "value"),
     [
         ("seq_len", 0),
-        ("pred_len", 0),
+        ("n_segments", 0),
         ("dt_s", 0.0),
         ("batch_size", 0),
         ("epochs", 0),
         ("learning_rate", 0.0),
+        ("final_time_scale_s", 0.0),
         ("patience", 0),
         ("d_model", 0),
         ("n_heads", 0),
@@ -666,13 +786,8 @@ def test_non_positive_training_parameters_are_rejected(field, value):
         TSConfig(**{field: value})
 
 
-def test_config_for_mode_picks_the_horizon_default_but_yields_to_an_override():
-    from config import DEFAULT_PRED_LEN_FULL
-
-    # The bug this guards: constructing TSConfig(horizon_mode="full") directly keeps the
-    # WINDOW pred_len default, silently giving a 60-second "whole approach".
-    assert config_for_mode(HORIZON_FULL).pred_len == DEFAULT_PRED_LEN_FULL
-    assert config_for_mode(HORIZON_FULL, pred_len=99).pred_len == 99
+def test_vendor_pred_len_contract_tracks_n_segments():
+    assert TSConfig(n_segments=99).pred_len == 99
 
 
 def test_arrival_data_provenance_binds_manifest_and_per_flight_sources(tmp_path):
@@ -733,6 +848,16 @@ def test_auto_batch_uses_config_default_without_cuda():
     ) == 37
 
 
+def test_auto_batch_selects_1024_when_2048_probe_succeeds(monkeypatch):
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "get_device_properties", lambda _device: None)
+    monkeypatch.setattr(batching, "_probe_training_step", lambda *_args: None)
+
+    assert batching.resolve_batch_size(
+        TSConfig(), torch.device("cuda"), auto=True, verbose=False
+    ) == 1024
+
+
 def test_cross_validation_never_passes_outer_val_or_test_to_fit(tmp_path, monkeypatch):
     series, config = _series(
         n_flights=36, device="cpu", epochs=1, patience=1,
@@ -768,7 +893,7 @@ def test_cross_validation_never_passes_outer_val_or_test_to_fit(tmp_path, monkey
         output_dir=tmp_path,
         data_provenance=provenance,
         n_splits=3,
-        max_trials=2,
+        cv_parameters=("learning_rate",),
         cv_epochs=1,
         cv_patience=1,
         verbose=False,
@@ -784,7 +909,7 @@ def test_cross_validation_runs_real_two_fold_search(tmp_path):
     series, config = _series(
         n_flights=20, device="cpu", epochs=1, patience=1,
         d_model=16, d_ff=32, n_heads=4, e_layers=1,
-        seq_len=20, pred_len=10, batch_size=32,
+        seq_len=20, n_segments=10, batch_size=32,
         train_samples_per_epoch=64, eval_anchor_policy="first",
     )
     provenance = {
@@ -801,14 +926,32 @@ def test_cross_validation_runs_real_two_fold_search(tmp_path):
         output_dir=tmp_path,
         data_provenance=provenance,
         n_splits=2,
-        max_trials=1,
+        cv_parameters=("weight_decay",),
         cv_epochs=1,
         cv_patience=1,
         verbose=False,
     )
-    assert len(result["trials"]) == 1
-    assert len(result["trials"][0]["folds"]) == 2
+    assert len(result["candidates"]) == 2
+    assert all(len(candidate["folds"]) == 2 for candidate in result["candidates"])
+    assert result["base_config"]["n_segments"] == config.n_segments
+    assert "n_segments" not in result["best_overrides"]
     assert json.loads((tmp_path / "best_config.json").read_text()) == result["best_overrides"]
+
+
+def test_cross_validation_exhausts_the_default_three_parameter_grid():
+    config = TSConfig(n_segments=128)
+    candidates = cv._candidate_overrides(config)
+
+    assert len(candidates) == 27
+    assert {
+        (candidate["n_segments"], candidate["learning_rate"], candidate["d_model"])
+        for candidate in candidates
+    } == set(itertools.product(
+        (64, 128, 256),
+        (1e-4, 3e-4, 5e-4),
+        (64, 128, 256),
+    ))
+    assert all(candidate["d_ff"] == 2 * candidate["d_model"] for candidate in candidates)
 
 
 # ── Metrics ──────────────────────────────────────────────────────────────────
@@ -865,48 +1008,20 @@ def test_fde_reads_each_sample_own_last_valid_step():
 
 # ── Forecast ─────────────────────────────────────────────────────────────────
 
-def test_truncate_cuts_the_forecast_at_closest_approach_to_the_threshold():
-    # A forecast that flies past the runway and out the other side must be cut at the
-    # runway, not at the horizon's end — the evaluation gates read the FINAL state, so an
-    # untruncated forecast would be judged somewhere beyond the airport.
-    values = np.zeros((5, len(ch.CHANNELS)))
-    values[:, ch.IDX["e"]] = [4000.0, 2000.0, 50.0, -2000.0, -4000.0]
-    forecast = Forecast(times=np.arange(5.0), values=values, anchor=0, passes=1,
-                        truncated_at_threshold=False)
-
-    cut = truncate_at_threshold(forecast)
-    assert cut.n_steps == 3 and cut.truncated_at_threshold
-    assert cut.values[-1, ch.IDX["e"]] == pytest.approx(50.0)
-
-
-def test_truncate_leaves_a_forecast_that_never_reaches_the_runway_alone():
-    values = np.zeros((4, len(ch.CHANNELS)))
-    values[:, ch.IDX["e"]] = [8000.0, 6000.0, 4000.0, 2000.0]   # still inbound at the end
-    forecast = Forecast(times=np.arange(4.0), values=values, anchor=0, passes=1,
-                        truncated_at_threshold=False)
-    assert truncate_at_threshold(forecast).n_steps == 4
-
-
-def test_recursive_forecast_chains_enough_passes_to_cover_the_request():
-    series, config = _series(n_flights=2, mode=HORIZON_WINDOW, pred_len=10, seq_len=20)
-    normalizer = Normalizer.fit(series)
-    model = build_model(config).eval()
-
-    forecast = recursive_forecast(model, series[0], config, normalizer, max_steps=35,
-                                  device=torch.device("cpu"))
-    assert forecast.n_steps == 35
-    assert forecast.passes == 4              # ceil(35 / 10)
-    # Times continue the series' own grid, one dt past the anchor.
-    assert forecast.times[0] == pytest.approx(series[0].times[forecast.anchor] + config.dt_s)
-
-
-def test_full_mode_forecasts_in_a_single_pass():
-    series, config = _series(n_flights=2, mode=HORIZON_FULL)
+def test_forecast_uses_n_normalized_points_and_the_predicted_final_time():
+    series, config = _series(n_flights=2, n_segments=10, seq_len=20)
     normalizer = Normalizer.fit(series)
     model = build_model(config).eval()
     forecast = forecast_approach(model, series[0], config, normalizer,
-                                 device=torch.device("cpu"), truncate=False)
-    assert forecast.passes == 1 and forecast.n_steps == config.pred_len
+                                 device=torch.device("cpu"))
+
+    anchor_time = series[0].times[forecast.anchor]
+    assert forecast.n_steps == config.n_segments
+    assert forecast.normalized_progress == pytest.approx(np.arange(1, 11) / 10)
+    assert forecast.times[-1] - anchor_time == pytest.approx(forecast.final_time_s)
+    assert np.diff(np.concatenate([[anchor_time], forecast.times])) == pytest.approx(
+        np.full(config.n_segments, forecast.final_time_s / config.n_segments)
+    )
 
 
 # ── Export seam ──────────────────────────────────────────────────────────────
@@ -923,17 +1038,16 @@ def test_record_stem_disambiguates_flights_sharing_a_callsign():
 
 def test_exported_record_satisfies_the_evaluation_contract():
     # The real validator, not a copy of it: record_from_dict enforces the state keys, the
-    # target, and final_time_s == states[-1]["t"] within 1e-6. Truncation at the threshold
-    # makes final_time_s differ from pred_len * dt, which is exactly how that check gets
-    # violated if final_time_s is ever derived from the horizon length instead.
-    series, config = _series(n_flights=3, mode=HORIZON_FULL)
+    # target, and final_time_s == states[-1]["t"] within 1e-6. Here final_time_s is learned,
+    # so deriving it from N or dt would violate the record contract.
+    series, config = _series(n_flights=3)
     normalizer = Normalizer.fit(series)
     model = build_model(config).eval()
 
     forecast = forecast_approach(model, series[0], config, normalizer,
                                  device=torch.device("cpu"))
     record = build_prediction_record(series[0], forecast, index=0,
-                                     model_name=config.model, horizon_mode=config.horizon_mode)
+                                     model_name=config.model, n_segments=config.n_segments)
 
     parsed = record_from_dict(record.eval_record)
     assert parsed.solved
@@ -955,13 +1069,13 @@ def test_reference_covers_the_same_span_as_the_prediction():
     # mismatch. Both must start at the anchor.
     from evaluation.reference import compare_to_reference
 
-    series, config = _series(n_flights=3, mode=HORIZON_FULL)
+    series, config = _series(n_flights=3)
     normalizer = Normalizer.fit(series)
     model = build_model(config).eval()
     forecast = forecast_approach(model, series[0], config, normalizer,
                                  device=torch.device("cpu"))
     record = build_prediction_record(series[0], forecast, index=0,
-                                     model_name=config.model, horizon_mode=config.horizon_mode)
+                                     model_name=config.model, n_segments=config.n_segments)
 
     predicted = record_from_dict(record.eval_record)
     reference = record_from_dict(record.reference_record)
@@ -975,7 +1089,7 @@ def test_reference_covers_the_same_span_as_the_prediction():
 
 
 def test_batch_writes_a_manifest_that_evaluation_can_load_and_grade(tmp_path):
-    series, config = _series(n_flights=4, mode=HORIZON_FULL)
+    series, config = _series(n_flights=4)
     normalizer = Normalizer.fit(series)
     model = build_model(config).eval()
 
@@ -984,7 +1098,7 @@ def test_batch_writes_a_manifest_that_evaluation_can_load_and_grade(tmp_path):
         forecast = forecast_approach(model, s, config, normalizer, device=torch.device("cpu"))
         records.append(build_prediction_record(s, forecast, index=index,
                                                model_name=config.model,
-                                               horizon_mode=config.horizon_mode))
+                                               n_segments=config.n_segments))
         overlap.append(observed_series_metrics(s, forecast))
     write_batch(records, output_dir=tmp_path, config_dict=config.to_dict(), overlap=overlap)
 
@@ -1005,7 +1119,7 @@ def test_manifest_carries_the_accuracy_the_run_printed(tmp_path):
     # The batch's error against the observed tracks is its headline result; it used to exist
     # only in terminal scrollback, which made any cross-batch comparison (the instance-norm
     # ablation) a stdout-scraping exercise.
-    series, config = _series(n_flights=4, mode=HORIZON_FULL)
+    series, config = _series(n_flights=4)
     normalizer = Normalizer.fit(series)
     model = build_model(config).eval()
 
@@ -1014,7 +1128,7 @@ def test_manifest_carries_the_accuracy_the_run_printed(tmp_path):
         forecast = forecast_approach(model, s, config, normalizer, device=torch.device("cpu"))
         records.append(build_prediction_record(s, forecast, index=index,
                                                model_name=config.model,
-                                               horizon_mode=config.horizon_mode))
+                                               n_segments=config.n_segments))
         overlap.append(observed_series_metrics(s, forecast))
     write_batch(
         records,
@@ -1032,23 +1146,28 @@ def test_manifest_carries_the_accuracy_the_run_printed(tmp_path):
     assert summary["accuracy"] == accuracy_block(overlap)
     assert summary["accuracy"]["flights"] == len(series)
     assert summary["accuracy"]["ade_m"]["mean"] > 0.0
+    assert summary["accuracy"]["final_time_s"]["mae"] >= 0.0
     # Per-flight too, so a batch can be re-aggregated (per runway, per capped/uncapped)
     # without re-running the forecast.
     for row, metrics in zip(summary["results"], overlap):
         assert row["ade_m"] == pytest.approx(metrics["ade_m"])
         assert row["overlap_steps"] == metrics["n_steps"]
+        assert row["final_time_error_s"] == pytest.approx(metrics["final_time_error_s"])
 
 
 def test_accuracy_block_excludes_and_counts_flights_with_no_overlap():
     # A forecast that shares no samples with its observed track carries NaN errors. Averaging
     # those in would poison the batch mean; silently dropping them would overstate coverage.
     overlap = [{"ade_m": 100.0, "fde_m": 200.0, "cross_track_p95_m": 50.0,
-                "altitude_p95_m": 10.0, "n_steps": 30},
+                "altitude_p95_m": 10.0, "n_steps": 30,
+                "true_final_time_s": 300.0, "final_time_error_s": 20.0},
                {"ade_m": float("nan"), "fde_m": float("nan"), "cross_track_p95_m": float("nan"),
-                "altitude_p95_m": float("nan"), "n_steps": 0}]
+                "altitude_p95_m": float("nan"), "n_steps": 0,
+                "true_final_time_s": 400.0, "final_time_error_s": -10.0}]
     block = accuracy_block(overlap)
     assert block["flights"] == 1 and block["flights_without_overlap"] == 1
     assert block["ade_m"]["mean"] == pytest.approx(100.0)
+    assert block["final_time_s"]["mae"] == pytest.approx(15.0)
 
     empty = accuracy_block([overlap[1]])
     assert empty["flights"] == 0 and "ade_m" not in empty
@@ -1057,13 +1176,13 @@ def test_accuracy_block_excludes_and_counts_flights_with_no_overlap():
 def test_write_batch_rejects_overlap_that_does_not_line_up_with_the_records(tmp_path):
     # Positional alignment is the whole contract — a short list would silently zip away the
     # tail of the batch, attributing metrics to the wrong flights.
-    series, config = _series(n_flights=3, mode=HORIZON_FULL)
+    series, config = _series(n_flights=3)
     normalizer = Normalizer.fit(series)
     model = build_model(config).eval()
     records = [
         build_prediction_record(
             s, forecast_approach(model, s, config, normalizer, device=torch.device("cpu")),
-            index=index, model_name=config.model, horizon_mode=config.horizon_mode)
+            index=index, model_name=config.model, n_segments=config.n_segments)
         for index, s in enumerate(series)
     ]
     with pytest.raises(ValueError, match="once per record"):
@@ -1071,7 +1190,7 @@ def test_write_batch_rejects_overlap_that_does_not_line_up_with_the_records(tmp_
 
 
 def test_stale_records_are_cleared_before_a_rerun(tmp_path):
-    series, config = _series(n_flights=3, mode=HORIZON_FULL)
+    series, config = _series(n_flights=3)
     normalizer = Normalizer.fit(series)
     model = build_model(config).eval()
 
@@ -1082,7 +1201,7 @@ def test_stale_records_are_cleared_before_a_rerun(tmp_path):
                                          device=torch.device("cpu"))
             records.append(build_prediction_record(s, forecast, index=index,
                                                    model_name=config.model,
-                                                   horizon_mode=config.horizon_mode))
+                                                   n_segments=config.n_segments))
             overlap.append(observed_series_metrics(s, forecast))
         write_batch(records, output_dir=tmp_path, config_dict=config.to_dict(), overlap=overlap)
 
@@ -1099,8 +1218,9 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
     # Plumbing, not quality: two epochs on synthetic straight-ins. Proves a checkpoint
     # round-trips (config + normalizer + weights) into records `evaluation` can grade.
     series, config = _series(
-        n_flights=12, mode=HORIZON_WINDOW, model=model_name, epochs=2, patience=2,
-        batch_size=32, d_model=32, n_heads=4, d_ff=64, e_layers=1, seq_len=20, pred_len=10,
+        n_flights=12, model=model_name, epochs=2, patience=2,
+        batch_size=32, d_model=32, n_heads=4, d_ff=64, e_layers=1, seq_len=20,
+        n_segments=10,
         device="cpu",
     )
     provenance = {
@@ -1126,6 +1246,7 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
 
     model, loaded_config, normalizer, payload = load_checkpoint(tmp_path / "run" / "checkpoint.pt")
     assert loaded_config == config          # the config survives the round-trip verbatim
+    assert payload["target_contract"] == "normalized-time-runway-crossing-v1"
     assert set(payload["split"]) == {"train", "val", "test"}
     assert payload["data_provenance"] == provenance
     checkpoint = tmp_path / "run" / "checkpoint.pt"
@@ -1133,7 +1254,7 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
         (tmp_path / "run" / "checkpoint_metadata.json").read_text(encoding="utf-8")
     )
     assert metadata == {
-        "schema_version": "ts-checkpoint-metadata-v2-multi-airport",
+        "schema_version": "ts-checkpoint-metadata-v4-runway-crossing",
         "checkpoint_sha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
         "arrival_manifests": {AIRPORT: "a" * 64},
         "split_sha256": {
@@ -1148,7 +1269,7 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
                                      device=torch.device("cpu"))
         records.append(build_prediction_record(s, forecast, index=index,
                                                model_name=loaded_config.model,
-                                               horizon_mode=loaded_config.horizon_mode))
+                                               n_segments=loaded_config.n_segments))
         overlap.append(observed_series_metrics(s, forecast))
     out = tmp_path / "pred"
     write_batch(records, output_dir=out, config_dict=loaded_config.to_dict(), overlap=overlap)

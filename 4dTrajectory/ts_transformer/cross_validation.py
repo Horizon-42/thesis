@@ -11,7 +11,6 @@ import gc
 import hashlib
 import itertools
 import json
-import random
 from collections import Counter
 from dataclasses import replace
 from pathlib import Path
@@ -33,45 +32,64 @@ from train import fit_model, usable_series
 
 RESULTS_NAME = "cv_results.json"
 BEST_CONFIG_NAME = "best_config.json"
-TUNED_FIELDS = (
+RESULTS_SCHEMA = "ts-cross-validation-v5-runway-crossing-batch-probe-2048"
+CV_PARAMETER_GRIDS: dict[str, tuple[Any, ...]] = {
+    "n_segments": (64, 128, 256),
+    "learning_rate": (1e-4, 3e-4, 5e-4),
+    "d_model": (64, 128, 256),
+    "e_layers": (2, 3),
+    "n_heads": (4, 8),
+    "dropout": (0.05, 0.1, 0.2),
+    "weight_decay": (0.0, 1e-4),
+}
+CV_OVERRIDE_FIELDS = (*CV_PARAMETER_GRIDS, "d_ff")
+DEFAULT_CV_PARAMETERS = (
+    "n_segments",
     "learning_rate",
     "d_model",
-    "d_ff",
-    "e_layers",
-    "n_heads",
-    "dropout",
-    "weight_decay",
 )
+DEFAULT_CV_EPOCHS = 30
+DEFAULT_CV_PATIENCE = 6
 
 
-def _candidate_overrides(base: TSConfig, max_trials: int) -> list[dict[str, Any]]:
-    """A deterministic random subset of a bounded, architecture-valid grid."""
-    if max_trials <= 0:
-        raise ValueError("max_trials must be positive")
-    baseline = {field: getattr(base, field) for field in TUNED_FIELDS}
-    grid: list[dict[str, Any]] = []
-    for learning_rate, d_model, e_layers, n_heads, dropout, weight_decay in itertools.product(
-        (1e-4, 3e-4, 5e-4),
-        (64, 128, 256),
-        (2, 3),
-        (4, 8),
-        (0.05, 0.1, 0.2),
-        (0.0, 1e-4),
-    ):
+def validate_cv_parameters(parameters: Sequence[str]) -> tuple[str, ...]:
+    selected = tuple(parameters)
+    if not selected:
+        raise ValueError("at least one CV parameter is required")
+    if len(set(selected)) != len(selected):
+        raise ValueError("CV parameters must not contain duplicates")
+    unknown = [name for name in selected if name not in CV_PARAMETER_GRIDS]
+    if unknown:
+        raise ValueError(
+            f"unsupported CV parameter {unknown[0]!r}; choose from "
+            f"{tuple(CV_PARAMETER_GRIDS)}"
+        )
+    return selected
+
+
+def parameter_grid(parameters: Sequence[str]) -> dict[str, list[Any]]:
+    selected = validate_cv_parameters(parameters)
+    return {name: list(CV_PARAMETER_GRIDS[name]) for name in selected}
+
+
+def _candidate_overrides(
+    base: TSConfig,
+    parameters: Sequence[str] = DEFAULT_CV_PARAMETERS,
+) -> list[dict[str, Any]]:
+    """Return the complete, architecture-valid grid for the selected parameters."""
+    selected = validate_cv_parameters(parameters)
+    candidates: list[dict[str, Any]] = []
+    value_grid = (CV_PARAMETER_GRIDS[name] for name in selected)
+    for values in itertools.product(*value_grid):
+        overrides = dict(zip(selected, values))
+        d_model = int(overrides.get("d_model", base.d_model))
+        n_heads = int(overrides.get("n_heads", base.n_heads))
         if d_model % n_heads:
             continue
-        grid.append({
-            "learning_rate": learning_rate,
-            "d_model": d_model,
-            "d_ff": d_model * 2,
-            "e_layers": e_layers,
-            "n_heads": n_heads,
-            "dropout": dropout,
-            "weight_decay": weight_decay,
-        })
-    grid = [candidate for candidate in grid if candidate != baseline]
-    random.Random(base.seed).shuffle(grid)
-    return [baseline, *grid[: max(0, max_trials - 1)]]
+        if "d_model" in overrides:
+            overrides["d_ff"] = d_model * 2
+        candidates.append(overrides)
+    return candidates
 
 
 def _split_digest(series: Sequence[FlightSeries]) -> str:
@@ -96,9 +114,9 @@ def cross_validate(
     output_dir: str | Path,
     data_provenance: dict[str, Any],
     n_splits: int = 3,
-    max_trials: int = 4,
-    cv_epochs: int = 12,
-    cv_patience: int = 4,
+    cv_parameters: Sequence[str] = DEFAULT_CV_PARAMETERS,
+    cv_epochs: int = DEFAULT_CV_EPOCHS,
+    cv_patience: int = DEFAULT_CV_PATIENCE,
     auto_batch_size: bool = False,
     verbose: bool = True,
 ) -> dict[str, Any]:
@@ -111,7 +129,8 @@ def cross_validate(
     usable = usable_series(series, base_config, verbose=verbose)
     outer_train, outer_val, outer_test = split_by_flight(usable, base_config)
     folds = cross_validation_folds(outer_train, n_splits, seed=base_config.seed)
-    candidates = _candidate_overrides(base_config, max_trials)
+    selected_parameters = validate_cv_parameters(cv_parameters)
+    candidates = _candidate_overrides(base_config, selected_parameters)
 
     if verbose:
         print(f"  outer split (locked): train {len(outer_train)} / val {len(outer_val)} / "
@@ -119,21 +138,21 @@ def cross_validate(
         print(f"  CV isolation: {n_splits} folds over outer-train only; outer-val/test untouched")
         print(f"  candidates: {len(candidates)}; epochs {cv_epochs}; patience {cv_patience}")
 
-    trial_results: list[dict[str, Any]] = []
-    for trial_index, overrides in enumerate(candidates, 1):
-        trial_config = replace(
+    candidate_results: list[dict[str, Any]] = []
+    for candidate_index, overrides in enumerate(candidates, 1):
+        candidate_config = replace(
             base_config,
             **overrides,
             epochs=cv_epochs,
             patience=min(cv_patience, cv_epochs),
         )
-        device = resolve_device(trial_config.device)
+        device = resolve_device(candidate_config.device)
         resolved_batch = resolve_batch_size(
-            trial_config, device, auto=auto_batch_size, verbose=verbose
+            candidate_config, device, auto=auto_batch_size, verbose=verbose
         )
-        trial_config = replace(trial_config, batch_size=resolved_batch)
+        candidate_config = replace(candidate_config, batch_size=resolved_batch)
         if verbose:
-            print(f"\n  CV trial {trial_index}/{len(candidates)}: {overrides}")
+            print(f"\n  CV candidate {candidate_index}/{len(candidates)}: {overrides}")
 
         fold_results: list[dict[str, Any]] = []
         for fold_index, fold_val in enumerate(folds):
@@ -143,7 +162,7 @@ def cross_validate(
                 if other_index != fold_index
                 for item in fold
             ]
-            fold_config = replace(trial_config, seed=base_config.seed + fold_index)
+            fold_config = replace(candidate_config, seed=base_config.seed + fold_index)
             if verbose:
                 print(f"  fold {fold_index + 1}/{n_splits}: train {len(fold_train)} / "
                       f"validate {len(fold_val)}")
@@ -172,19 +191,24 @@ def cross_validate(
                 torch.cuda.empty_cache()
 
         scores = [row["best_val_macro_loss"] for row in fold_results]
-        trial_results.append({
-            "trial": trial_index - 1,
+        candidate_results.append({
+            "candidate": candidate_index - 1,
             "overrides": overrides,
             "mean_val_macro_loss": fmean(scores),
             "std_val_macro_loss": pstdev(scores),
             "folds": fold_results,
         })
 
-    best = min(trial_results, key=lambda row: (row["mean_val_macro_loss"], row["trial"]))
+    best = min(
+        candidate_results,
+        key=lambda row: (row["mean_val_macro_loss"], row["candidate"]),
+    )
     best_overrides = dict(best["overrides"])
     results = {
-        "schema_version": "ts-cross-validation-v1",
-        "selection_metric": "mean outer-train-fold airport-macro normalized MSE",
+        "schema_version": RESULTS_SCHEMA,
+        "selection_metric": (
+            "mean outer-train-fold airport-macro joint normalized state/time MSE"
+        ),
         "leakage_guard": {
             "search_population": "outer_train_only",
             "outer_validation_used": False,
@@ -202,20 +226,23 @@ def cross_validate(
             "test_by_airport": _airport_counts(outer_test),
         },
         "n_splits": n_splits,
-        "max_trials": max_trials,
+        "search_strategy": "exhaustive_grid",
+        "tuned_parameters": list(selected_parameters),
+        "parameter_grid": parameter_grid(selected_parameters),
+        "candidate_count": len(candidates),
         "cv_epochs": cv_epochs,
         "cv_patience": cv_patience,
         "auto_batch_size": auto_batch_size,
         "base_config": base_config.to_dict(),
         "arrival_manifests": provenance_manifest_digests(data_provenance),
-        "trials": trial_results,
-        "best_trial": best["trial"],
+        "candidates": candidate_results,
+        "best_candidate": best["candidate"],
         "best_mean_val_macro_loss": best["mean_val_macro_loss"],
         "best_overrides": best_overrides,
     }
     _write_json_atomic(out / RESULTS_NAME, results)
     _write_json_atomic(out / BEST_CONFIG_NAME, best_overrides)
     if verbose:
-        print(f"✓ cross validation selected trial {best['trial']}: {best_overrides}")
+        print(f"✓ cross validation selected candidate {best['candidate']}: {best_overrides}")
         print(f"  wrote {out / RESULTS_NAME} and {out / BEST_CONFIG_NAME}")
     return results

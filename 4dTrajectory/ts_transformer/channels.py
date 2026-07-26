@@ -212,12 +212,3 @@ def resample_uniform(times: np.ndarray, values: np.ndarray, dt_s: float) -> tupl
         # One-dimensional linear interpolation
         out[:, c] = np.interp(grid, times, values[:, c])
     return grid, out
-
-
-def horizontal_distance_m(values: np.ndarray) -> np.ndarray:
-    """Horizontal distance from the frame origin (the threshold) for each row, metres.
-
-    Used to decide where a predicted approach reaches the runway — see
-    ``forecast.truncate_at_threshold``.
-    """
-    return np.hypot(values[:, IDX["e"]], values[:, IDX["n"]])

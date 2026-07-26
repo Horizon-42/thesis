@@ -22,7 +22,7 @@ from typing import Any
 import run_ts_pipeline as pipeline
 
 FRAMES = ("enu", "runway-aligned")
-RESULT_SCHEMA = "ts-coordinate-frame-ablation-v1"
+RESULT_SCHEMA = "ts-coordinate-frame-ablation-v4-runway-crossing"
 RESULT_NAME = "coordinate_frame_ablation.json"
 
 
@@ -80,7 +80,10 @@ def _load_cv(plan: pipeline.TrainingPlan) -> dict[str, Any]:
         raise AblationContractError(
             f"cannot read {plan.coordinate_frame} CV artifacts under {plan.cv_dir}: {exc}"
         ) from exc
-    if not isinstance(result, dict) or result.get("schema_version") != "ts-cross-validation-v1":
+    if (
+        not isinstance(result, dict)
+        or result.get("schema_version") != pipeline.CV_RESULTS_SCHEMA
+    ):
         raise AblationContractError(
             f"{plan.coordinate_frame} CV result has an unsupported schema"
         )
@@ -93,10 +96,10 @@ def _load_cv(plan: pipeline.TrainingPlan) -> dict[str, Any]:
 
 def _fold_signature(result: dict[str, Any]) -> list[dict[str, Any]]:
     signature: list[dict[str, Any]] = []
-    for trial in result.get("trials", []):
+    for candidate in result.get("candidates", []):
         signature.append({
-            "trial": trial.get("trial"),
-            "overrides": trial.get("overrides"),
+            "candidate": candidate.get("candidate"),
+            "overrides": candidate.get("overrides"),
             "folds": [
                 {
                     "fold": fold.get("fold"),
@@ -106,7 +109,7 @@ def _fold_signature(result: dict[str, Any]) -> list[dict[str, Any]]:
                     "validation_split_sha256": fold.get("validation_split_sha256"),
                     "batch_size": fold.get("batch_size"),
                 }
-                for fold in trial.get("folds", [])
+                for fold in candidate.get("folds", [])
             ],
         })
     return signature
@@ -140,7 +143,9 @@ def _assert_requested_result(
         )
     expected_budget = {
         "n_splits": plan.cv_folds,
-        "max_trials": plan.cv_trials,
+        "search_strategy": "exhaustive_grid",
+        "tuned_parameters": list(plan.cv_parameters),
+        "parameter_grid": pipeline.parameter_grid(plan.cv_parameters),
         "cv_epochs": plan.cv_epochs,
         "cv_patience": plan.cv_patience,
     }
@@ -152,7 +157,7 @@ def _assert_requested_result(
     config = result.get("base_config")
     expected_config = {
         "model": plan.model,
-        "horizon_mode": plan.mode,
+        "n_segments": plan._expected_cv_base_config()["n_segments"],
         "coordinate_frame": plan.coordinate_frame,
         "sampling_strategy": "airport-flight-balanced",
         "train_samples_per_epoch": plan.cv_samples_per_epoch,
@@ -184,7 +189,8 @@ def assert_comparable(
     enu, aligned = results["enu"], results["runway-aligned"]
     scalar_fields = (
         "selection_metric", "arrival_manifests", "outer_split",
-        "n_splits", "max_trials", "cv_epochs", "cv_patience",
+        "n_splits", "search_strategy", "tuned_parameters", "parameter_grid",
+        "candidate_count", "cv_epochs", "cv_patience",
     )
     for field in scalar_fields:
         if enu.get(field) != aligned.get(field):
@@ -268,7 +274,8 @@ def main() -> int:
     parser.add_argument("--airports", type=_parse_airports, default=None,
                         help="comma-separated fixed airport roster; default: all discovered K-airports")
     parser.add_argument("--model", choices=pipeline.MODELS, default="itransformer")
-    parser.add_argument("--mode", choices=pipeline.HORIZON_MODES, default="full")
+    parser.add_argument("--n-segments", type=int, default=None,
+                        help="base N for normalized progress; CV also tunes N")
     parser.add_argument("--outputs", type=_parse_outputs, default=("eval",),
                         help="test publication outputs: eval, czml, or eval,czml")
     parser.add_argument("--epochs", type=int, default=None,
@@ -279,9 +286,17 @@ def main() -> int:
     parser.add_argument("--batch-size", default="auto")
     parser.add_argument("--samples-per-epoch", type=int, default=None)
     parser.add_argument("--cv-folds", type=int, default=3)
-    parser.add_argument("--cv-trials", type=int, default=4)
-    parser.add_argument("--cv-epochs", type=int, default=12)
-    parser.add_argument("--cv-patience", type=int, default=4)
+    parser.add_argument(
+        "--cv-parameters",
+        type=lambda raw: pipeline._parse_csv(
+            raw, tuple(pipeline.CV_PARAMETER_GRIDS), "--cv-parameters"
+        ),
+        default=pipeline.DEFAULT_CV_PARAMETERS,
+        metavar=",".join(pipeline.DEFAULT_CV_PARAMETERS),
+        help="parameters included in the exhaustive CV grid",
+    )
+    parser.add_argument("--cv-epochs", type=int, default=pipeline.DEFAULT_CV_EPOCHS)
+    parser.add_argument("--cv-patience", type=int, default=pipeline.DEFAULT_CV_PATIENCE)
     parser.add_argument("--cv-samples-per-epoch", type=int,
                         default=pipeline.DEFAULT_CV_SAMPLES_PER_EPOCH)
     parser.add_argument("--output-dir", type=Path, default=None,
@@ -303,7 +318,7 @@ def main() -> int:
         parser.error("--epochs must be positive")
     if args.samples_per_epoch is not None and args.samples_per_epoch <= 0:
         parser.error("--samples-per-epoch must be positive")
-    for name in ("cv_trials", "cv_epochs", "cv_patience", "cv_samples_per_epoch"):
+    for name in ("cv_epochs", "cv_patience", "cv_samples_per_epoch"):
         if getattr(args, name) <= 0:
             parser.error(f"--{name.replace('_', '-')} must be positive")
     if args.cv_folds < 2:
@@ -318,7 +333,7 @@ def main() -> int:
 
     experiment_dir = (args.output_dir or (
         pipeline.OPT_OUTPUTS_ROOT / "POOLED" /
-        f"ts_{args.model}_{args.mode}_coordinate_frame_ablation"
+        f"ts_{args.model}_normalized_time_coordinate_frame_ablation"
     )).resolve()
     result_path = experiment_dir / RESULT_NAME
     if not args.dry_run:
@@ -330,8 +345,8 @@ def main() -> int:
         frame: pipeline.TrainingPlan(
             airports,
             args.model,
-            args.mode,
             training_mode="pooled",
+            n_segments=args.n_segments,
             epochs=args.epochs,
             seed=args.seed,
             device=args.device,
@@ -340,7 +355,7 @@ def main() -> int:
             batch_size=args.batch_size,
             samples_per_epoch=args.samples_per_epoch,
             cv_folds=args.cv_folds,
-            cv_trials=args.cv_trials,
+            cv_parameters=args.cv_parameters,
             cv_epochs=args.cv_epochs,
             cv_patience=args.cv_patience,
             cv_samples_per_epoch=args.cv_samples_per_epoch,
@@ -349,9 +364,10 @@ def main() -> int:
         for frame in FRAMES
     }
 
-    print(f"coordinate-frame ablation: model={args.model}, mode={args.mode}")
+    print(f"coordinate-frame ablation: model={args.model}, normalized time")
     print(f"airports (locked): {','.join(airports)}")
-    print(f"seed={args.seed}, folds={args.cv_folds}, trials={args.cv_trials}, "
+    print(f"seed={args.seed}, folds={args.cv_folds}, "
+          f"CV parameters={','.join(args.cv_parameters)}, "
           f"CV samples/epoch={args.cv_samples_per_epoch}")
     print(f"experiment: {experiment_dir}")
 
@@ -389,10 +405,11 @@ def main() -> int:
         "controls": {
             "airports": list(airports),
             "model": args.model,
-            "horizon_mode": args.mode,
+            "prediction_time": "normalized",
+            "base_n_segments": args.n_segments,
             "seed": args.seed,
             "folds": args.cv_folds,
-            "trials": args.cv_trials,
+            "cv_parameters": list(args.cv_parameters),
             "cv_epochs": args.cv_epochs,
             "cv_patience": args.cv_patience,
             "cv_samples_per_epoch": args.cv_samples_per_epoch,

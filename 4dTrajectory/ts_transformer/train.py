@@ -1,9 +1,9 @@
-"""Training loop: masked MSE, early stopping, one self-contained checkpoint.
+"""Training loop: normalized-progress state loss plus final-time loss.
 
 The checkpoint carries the config, the fitted normalizer and the flight ids of each split
 alongside the weights. That is what makes inference reproducible without re-deriving
-anything: ``forecast.py`` loads a checkpoint and knows the resample step, the channel
-order, the horizon mode, and which flights the model must not be evaluated on.
+anything: ``forecast.py`` loads a checkpoint and knows the resample step, channel order,
+normalized segment count, and which flights the model must not be evaluated on.
 """
 
 from __future__ import annotations
@@ -33,12 +33,14 @@ from dataset import (
     split_by_flight,
     window_anchors,
 )
-from metrics import error_by_horizon, trajectory_metrics
+from metrics import error_by_progress, trajectory_metrics
 from models import build_model, parameter_count, resolve_device
+from prediction_outputs import StatePrediction
 
 CHECKPOINT_NAME = "checkpoint.pt"
 CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
-CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v2-multi-airport"
+CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v4-runway-crossing"
+TARGET_CONTRACT = "normalized-time-runway-crossing-v1"
 HISTORY_NAME = "history.json"
 
 
@@ -59,20 +61,27 @@ def _split_sha256(series: Sequence[FlightSeries]) -> str:
 def masked_mse(predicted: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     """Weighted MSE over supervised channel values only.
 
-    Legacy ``[B,H]`` masks still broadcast across channels. New datasets pass ``[B,H,C]``:
-    measured rows weight all channels equally, while fitted rows weight position only.
+    All three tensors use ``[B,N,C]``. Measured rows weight all channels equally, while
+    fitted rows weight position only.
     """
-    if mask.ndim == predicted.ndim - 1:
-        weights = mask.unsqueeze(-1).expand_as(predicted)
-    elif mask.shape == predicted.shape:
-        weights = mask
-    else:
-        raise ValueError(
-            f"mask shape {tuple(mask.shape)} cannot weight prediction {tuple(predicted.shape)}"
-        )
-    error = (predicted - target) ** 2 * weights
-    denominator = weights.sum()
+    error = (predicted - target) ** 2 * mask
+    denominator = mask.sum()
     return error.sum() / denominator.clamp(min=1.0)
+
+
+def prediction_loss(
+    prediction: StatePrediction,
+    target_states: torch.Tensor,
+    state_weights: torch.Tensor,
+    target_final_time_s: torch.Tensor,
+    config: TSConfig,
+) -> torch.Tensor:
+    """Joint dimensionless objective used by training, validation and CV selection."""
+    state_loss = masked_mse(prediction.states, target_states, state_weights)
+    time_loss = (
+        (prediction.final_time_s - target_final_time_s) / config.final_time_scale_s
+    ).square().mean()
+    return state_loss + config.final_time_loss_weight * time_loss
 
 
 @dataclass
@@ -104,15 +113,19 @@ def _predict_split(
     normalizer: Normalizer,
     device: torch.device,
     batch_size: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Run a split through the model; return PHYSICAL-unit ``(predicted, truth, mask)``."""
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Return physical state arrays, state masks, predicted time and true time."""
     model.eval()
     predicted_chunks, truth_chunks, mask_chunks = [], [], []
+    predicted_time_chunks, truth_time_chunks = [], []
     with torch.no_grad():
-        for x, y, mask in iter_batches(dataset, batch_size, shuffle=False, seed=0):
-            out = model(x.to(device)).cpu().numpy()
-            # Decode in float64 (the normalizer stats' dtype), store float32: a full-mode
-            # split is tens of thousands of [H, C] windows held live at once, and float64
+        for x, y, mask, final_time_s in iter_batches(
+            dataset, batch_size, shuffle=False, seed=0
+        ):
+            output = model(x.to(device))
+            out = output.states.cpu().numpy()
+            # Decode in float64 (the normalizer stats' dtype), store float32: a pooled
+            # split is tens of thousands of [N, C] windows held live at once, and float64
             # doubled the peak for precision the metre-scale metrics cannot use — this
             # machine is 16 GB and frequently swap-bound.
             predicted_chunks.append(normalizer.decode(out.astype(np.float64)).astype(np.float32))
@@ -123,8 +136,14 @@ def _predict_split(
             if raw_mask.ndim == 3:
                 raw_mask = np.all(raw_mask > 0.0, axis=-1).astype(np.float32)
             mask_chunks.append(raw_mask)
+            predicted_time_chunks.append(output.final_time_s.cpu().numpy())
+            truth_time_chunks.append(final_time_s.numpy())
     return (
-        np.concatenate(predicted_chunks), np.concatenate(truth_chunks), np.concatenate(mask_chunks)
+        np.concatenate(predicted_chunks),
+        np.concatenate(truth_chunks),
+        np.concatenate(mask_chunks),
+        np.concatenate(predicted_time_chunks),
+        np.concatenate(truth_time_chunks),
     )
 
 
@@ -135,10 +154,18 @@ def evaluate_split(
     config: TSConfig,
     device: torch.device,
 ) -> dict[str, Any]:
-    """Physical-unit metrics for a split (ADE/FDE + the decomposed errors + the horizon curve)."""
-    predicted, truth, mask = _predict_split(model, dataset, normalizer, device, config.batch_size)
+    """Physical-unit state and final-time metrics for a split."""
+    predicted, truth, mask, predicted_time, truth_time = _predict_split(
+        model, dataset, normalizer, device, config.batch_size
+    )
     block = trajectory_metrics(predicted, truth, mask)
-    block["by_horizon"] = error_by_horizon(predicted, truth, mask, config.dt_s)
+    block["by_progress"] = error_by_progress(predicted, truth, mask)
+    time_error = predicted_time - truth_time
+    block["final_time_s"] = {
+        "mae": float(np.abs(time_error).mean()),
+        "rmse": float(np.sqrt(np.mean(time_error**2))),
+        "mean_signed": float(time_error.mean()),
+    }
     return block
 
 
@@ -148,7 +175,7 @@ def usable_series(
     """Drop flights that cannot yield one model window, once and with an audit count."""
     usable = [item for item in series if len(window_anchors(item, config)) > 0]
     if len(usable) < len(series) and verbose:
-        need = config.seq_len + config.pred_len
+        need = config.seq_len + 1
         print(f"  excluded   {len(series) - len(usable)} flight(s) too short to yield one "
               f"training window (need {need} samples = {need * config.dt_s:.0f}s)")
     return usable
@@ -176,14 +203,26 @@ def _dataset_loss(
 ) -> float:
     weighted_error = 0.0
     weight_total = 0.0
+    time_error = 0.0
+    time_count = 0
     with torch.no_grad():
-        for x, y, mask in iter_batches(dataset, batch_size, shuffle=False, seed=0):
+        for x, y, mask, final_time_s in iter_batches(
+            dataset, batch_size, shuffle=False, seed=0
+        ):
             x, y, mask = x.to(device), y.to(device), mask.to(device)
-            predicted = model(x)
-            weights = mask if mask.shape == predicted.shape else mask.unsqueeze(-1).expand_as(predicted)
-            weighted_error += float((((predicted - y) ** 2) * weights).sum())
-            weight_total += float(weights.sum())
-    return weighted_error / max(weight_total, 1.0)
+            final_time_s = final_time_s.to(device)
+            prediction = model(x)
+            weighted_error += float((((prediction.states - y) ** 2) * mask).sum())
+            weight_total += float(mask.sum())
+            time_error += float((
+                (prediction.final_time_s - final_time_s)
+                / dataset.config.final_time_scale_s
+            ).square().sum())
+            time_count += len(final_time_s)
+    return (
+        weighted_error / max(weight_total, 1.0)
+        + dataset.config.final_time_loss_weight * time_error / max(time_count, 1)
+    )
 
 
 def fit_model(
@@ -215,7 +254,7 @@ def fit_model(
     if not len(train_set) or not val_window_count:
         raise ValueError(
             f"empty window set (train={len(train_set)}, val={val_window_count}) — "
-            f"seq_len={config.seq_len} + pred_len={config.pred_len} may exceed the track lengths"
+            f"seq_len={config.seq_len} leaves no future remainder in these tracks"
         )
 
     model = build_model(config).to(device)
@@ -230,8 +269,8 @@ def fit_model(
     )
     if verbose:
         print(f"  model      {config.model} ({parameter_count(model):,} params) on {device}")
-        print(f"  horizon    {config.horizon_mode}: L={config.seq_len} "
-              f"({config.lookback_s:.0f}s) -> H={config.pred_len} ({config.horizon_s:.0f}s)")
+        print(f"  prediction L={config.seq_len} ({config.lookback_s:.0f}s history) -> "
+              f"N={config.n_segments} normalized progress segments + final_time_s")
         print(f"  flights    train {len(train_series)} / val {len(val_series)}")
         print(f"  windows    train {len(train_set)} / val {val_window_count} "
               f"(eval anchors: {config.eval_anchor_policy})")
@@ -248,7 +287,7 @@ def fit_model(
 
         model.train()
         train_total, train_steps = 0.0, 0
-        for x, y, mask in iter_batches(
+        for x, y, mask, final_time_s in iter_batches(
             train_set,
             config.batch_size,
             shuffle=not balanced,
@@ -257,8 +296,9 @@ def fit_model(
             num_samples=samples_per_epoch,
         ):
             x, y, mask = x.to(device), y.to(device), mask.to(device)
+            final_time_s = final_time_s.to(device)
             optimizer.zero_grad()
-            loss = masked_mse(model(x), y, mask)
+            loss = prediction_loss(model(x), y, mask, final_time_s, config)
             loss.backward()
             optimizer.step()
             train_total += float(loss.detach())
@@ -357,6 +397,7 @@ def train(
     split_metrics = {"val": evaluate_split(model, val_set, normalizer, config, device)}
 
     checkpoint_payload = {
+        "target_contract": TARGET_CONTRACT,
         "config": config.to_dict(),
         "model_state": model.state_dict(),
         "normalizer": normalizer.to_dict(),
@@ -412,7 +453,8 @@ def train(
         for split, block in split_metrics.items():
             print(f"  {split:5s}  ADE {block['ade_m']:7.1f} m   FDE {block['fde_m']:7.1f} m   "
                   f"cross-track p95 {block['cross_track_m']['p95_abs']:7.1f} m   "
-                  f"alt p95 {block['altitude_m']['p95_abs']:6.1f} m")
+                  f"alt p95 {block['altitude_m']['p95_abs']:6.1f} m   "
+                  f"time MAE {block['final_time_s']['mae']:5.1f} s")
         print(f"✓ wrote {out / CHECKPOINT_NAME} and {out / HISTORY_NAME}")
 
     return summary
@@ -423,6 +465,10 @@ def load_checkpoint(path: str | Path) -> tuple[nn.Module, TSConfig, Normalizer, 
     # weights_only=True: the payload is tensors + primitives only (config/normalizer are
     # plain dicts and lists), so nothing here needs — or should get — pickle execution.
     payload = torch.load(Path(path), map_location="cpu", weights_only=True)
+    if payload.get("target_contract") != TARGET_CONTRACT:
+        raise ValueError(
+            "checkpoint predates the runway-crossing target contract; retrain it"
+        )
     config = TSConfig.from_dict(payload["config"])
     if config.channels != CHANNELS:
         raise ValueError(

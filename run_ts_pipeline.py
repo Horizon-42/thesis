@@ -34,10 +34,18 @@ TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
 if str(TS_DIR) not in sys.path:
     sys.path.insert(0, str(TS_DIR))
 
-from config import config_for_mode  # noqa: E402
+from config import TSConfig  # noqa: E402
+from cross_validation import (  # noqa: E402
+    CV_PARAMETER_GRIDS,
+    DEFAULT_CV_EPOCHS,
+    DEFAULT_CV_PATIENCE,
+    DEFAULT_CV_PARAMETERS,
+    RESULTS_SCHEMA as CV_RESULTS_SCHEMA,
+    parameter_grid,
+    validate_cv_parameters,
+)
 
 MODELS = ("itransformer", "patchtst")
-HORIZON_MODES = ("window", "full")
 TRAINING_MODES = ("per-airport", "pooled")
 COORDINATE_FRAMES = ("enu", "runway-aligned")
 MODEL_SHORT = {"itransformer": "itr", "patchtst": "ptst"}
@@ -45,7 +53,7 @@ MODEL_LABEL = {"itransformer": "iTransformer", "patchtst": "PatchTST"}
 OUTPUT_KINDS = ("czml", "eval")
 
 CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
-CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v2-multi-airport"
+CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v4-runway-crossing"
 CV_RESULTS_NAME = "cv_results.json"
 BEST_CONFIG_NAME = "best_config.json"
 DEFAULT_POOLED_SAMPLES_PER_EPOCH = 250_000
@@ -91,9 +99,9 @@ class TrainingPlan:
         self,
         airports: tuple[str, ...],
         model: str,
-        mode: str,
         *,
         training_mode: str,
+        n_segments: int | None = None,
         epochs: int | None = None,
         seed: int | None = None,
         device: str | None = None,
@@ -102,9 +110,9 @@ class TrainingPlan:
         batch_size: str = "auto",
         samples_per_epoch: int | None = None,
         cv_folds: int = 3,
-        cv_trials: int = 4,
-        cv_epochs: int = 12,
-        cv_patience: int = 4,
+        cv_parameters: tuple[str, ...] = DEFAULT_CV_PARAMETERS,
+        cv_epochs: int = DEFAULT_CV_EPOCHS,
+        cv_patience: int = DEFAULT_CV_PATIENCE,
         cv_samples_per_epoch: int = DEFAULT_CV_SAMPLES_PER_EPOCH,
         output_dir: str | Path | None = None,
     ) -> None:
@@ -112,8 +120,8 @@ class TrainingPlan:
         if not self.airports:
             raise ValueError("TrainingPlan requires at least one airport")
         self.model = model
-        self.mode = mode
         self.training_mode = training_mode
+        self.n_segments = n_segments
         self.epochs = epochs
         self.seed = seed
         self.device = device
@@ -122,7 +130,7 @@ class TrainingPlan:
         self.batch_size = batch_size
         self.samples_per_epoch = samples_per_epoch
         self.cv_folds = cv_folds
-        self.cv_trials = cv_trials
+        self.cv_parameters = validate_cv_parameters(cv_parameters)
         self.cv_epochs = cv_epochs
         self.cv_patience = cv_patience
         self.cv_samples_per_epoch = cv_samples_per_epoch
@@ -133,7 +141,7 @@ class TrainingPlan:
         self.train_dir = (
             Path(output_dir)
             if output_dir is not None
-            else OPT_OUTPUTS_ROOT / scope / f"ts_{model}_{mode}{suffix}"
+            else OPT_OUTPUTS_ROOT / scope / f"ts_{model}_normalized_time{suffix}"
         )
         self.cv_dir = self.train_dir / "cross_validation"
         self.cv_results = self.cv_dir / CV_RESULTS_NAME
@@ -152,14 +160,15 @@ class TrainingPlan:
     def _data_args(self) -> list[str]:
         return [token for manifest in self.data_manifests for token in ("--data", str(manifest))]
 
-    def _recipe_args(self, *, cv: bool) -> list[str]:
+    def _recipe_args(self, *, cv: bool, include_base_n_segments: bool = True) -> list[str]:
         args = [
             "--model", self.model,
-            "--horizon-mode", self.mode,
             "--coordinate-frame", self.coordinate_frame,
             "--batch-size", self.batch_size,
             "--eval-anchor-policy", "first",
         ]
+        if self.n_segments is not None and include_base_n_segments:
+            args += ["--n-segments", str(self.n_segments)]
         if self.seed is not None:
             args += ["--seed", str(self.seed)]
         if self.device is not None:
@@ -210,7 +219,7 @@ class TrainingPlan:
             return f"unreadable cross-validation artifact: {exc}"
         if (
             not isinstance(results, dict)
-            or results.get("schema_version") != "ts-cross-validation-v1"
+            or results.get("schema_version") != CV_RESULTS_SCHEMA
             or not isinstance(best, dict)
         ):
             return "cross-validation artifact has the wrong schema"
@@ -232,7 +241,9 @@ class TrainingPlan:
             return f"cross-validation base_config {detail} does not match current recipe"
         expected_controls = {
             "n_splits": self.cv_folds,
-            "max_trials": self.cv_trials,
+            "search_strategy": "exhaustive_grid",
+            "tuned_parameters": list(self.cv_parameters),
+            "parameter_grid": parameter_grid(self.cv_parameters),
             "cv_epochs": self.cv_epochs,
             "cv_patience": self.cv_patience,
             "auto_batch_size": self.batch_size == "auto",
@@ -252,6 +263,8 @@ class TrainingPlan:
             "coordinate_frame": self.coordinate_frame,
             "eval_anchor_policy": "first",
         }
+        if self.n_segments is not None:
+            overrides["n_segments"] = self.n_segments
         if self.seed is not None:
             overrides["seed"] = self.seed
         if self.device is not None:
@@ -267,7 +280,7 @@ class TrainingPlan:
             })
         elif self.cv_samples_per_epoch:
             overrides["train_samples_per_epoch"] = self.cv_samples_per_epoch
-        return config_for_mode(self.mode, **overrides).to_dict()
+        return TSConfig(**overrides).to_dict()
 
     def cv_step(self) -> tuple[str, list[str]]:
         """The isolated outer-train CV command for this training cell."""
@@ -278,7 +291,7 @@ class TrainingPlan:
             "--output-dir", str(self.cv_dir),
             *self._recipe_args(cv=True),
             "--folds", str(self.cv_folds),
-            "--trials", str(self.cv_trials),
+            "--cv-parameters", ",".join(self.cv_parameters),
             "--cv-epochs", str(self.cv_epochs),
             "--cv-patience", str(self.cv_patience),
         ]
@@ -290,7 +303,12 @@ class TrainingPlan:
             py, str(TS_SCRIPT), "train",
             *self._data_args(),
             "--output-dir", str(self.train_dir),
-            *self._recipe_args(cv=False),
+            *self._recipe_args(
+                cv=False,
+                include_base_n_segments=(
+                    not use_best_config or "n_segments" not in self.cv_parameters
+                ),
+            ),
         ]
         if self.epochs is not None:
             train_command += ["--epochs", str(self.epochs)]
@@ -331,21 +349,21 @@ class PredictionPlan:
         scope = "pooled_" if training.pooled else ""
         frame = _frame_tag(training.coordinate_frame)
         tag = f"_{experiment_tag}" if experiment_tag else ""
-        stem = f"{scope}{training.model}_{training.mode}{frame}{tag}_{split}"
+        stem = f"{scope}{training.model}_normalized_time{frame}{tag}_{split}"
         self.pred_dir = OPT_OUTPUTS_ROOT / self.airport / f"ts_pred_{stem}"
         self.summary = self.pred_dir / "summary.json"
         self.report = self.pred_dir / "evaluation_report.json"
         self.report_html = self.pred_dir / "evaluation_report.html"
         category_scope = "pooled_" if training.pooled else ""
         self.category = (
-            f"ts_{category_scope}{MODEL_SHORT[training.model]}_{training.mode}"
+            f"ts_{category_scope}{MODEL_SHORT[training.model]}_normalized_time"
             f"{frame}{tag}_{split}"
         )
         model_label = MODEL_LABEL[training.model]
         pooled_label = "pooled, " if training.pooled else ""
         frame_label = "ENU" if training.coordinate_frame == "enu" else "runway-aligned"
         self.label = (
-            f"Predicted ({model_label}, {pooled_label}{training.mode}, "
+            f"Predicted ({model_label}, {pooled_label}normalized time, "
             f"{frame_label}, {split} split)"
         )
         self.comparison_dir = (
@@ -410,7 +428,7 @@ def run_training(
     reuse_error = plan.checkpoint_reuse_error() if skip_train else None
     reuse = skip_train and reuse_error is None
     mode = "reuse checkpoint" if reuse else "train final checkpoint"
-    print(f"\n━━ {plan.label} [{plan.model} · {plan.mode} · {plan.coordinate_frame}] · {mode}")
+    print(f"\n━━ {plan.label} [{plan.model} · normalized time · {plan.coordinate_frame}] · {mode}")
     print(f"   manifests : {len(plan.data_manifests)}")
     print(f"   CV        : {plan.cv_dir}")
     print(f"   training  : {plan.train_dir}")
@@ -419,7 +437,7 @@ def run_training(
     if skip_cv and not reuse and plan.cv_reuse_error() is not None:
         print("   (CV skipped and no reusable CV artifact → base hyperparameters)")
     _run_steps(
-        f"{plan.label} · {plan.model} · {plan.mode}",
+        f"{plan.label} · {plan.model} · normalized time",
         plan.steps(skip_cv=skip_cv, reuse_checkpoint=reuse),
         dry_run=dry_run,
     )
@@ -429,7 +447,7 @@ def run_training(
 def run_prediction(plan: PredictionPlan, *, dry_run: bool) -> None:
     print(f"\n  ━━ publish {plan.airport}: {plan.pred_dir}")
     _run_steps(
-        f"{plan.airport} · {plan.training.model} · {plan.training.mode}",
+        f"{plan.airport} · {plan.training.model} · normalized time",
         plan.steps(),
         dry_run=dry_run,
     )
@@ -450,8 +468,8 @@ def main() -> None:
                         help="optional single airport filter; otherwise discover every K-airport")
     parser.add_argument("--models", type=lambda raw: _parse_csv(raw, MODELS, "--models"),
                         default=MODELS, metavar=",".join(MODELS))
-    parser.add_argument("--modes", type=lambda raw: _parse_csv(raw, HORIZON_MODES, "--modes"),
-                        default=HORIZON_MODES, metavar=",".join(HORIZON_MODES))
+    parser.add_argument("--n-segments", type=int, default=None,
+                        help="base N for normalized progress; CV also tunes N")
     parser.add_argument("--outputs", type=lambda raw: _parse_csv(raw, OUTPUT_KINDS, "--outputs"),
                         default=OUTPUT_KINDS, metavar="czml,eval")
     parser.add_argument("--split", choices=("test", "val", "train", "all"), default="test")
@@ -465,9 +483,15 @@ def main() -> None:
     parser.add_argument("--samples-per-epoch", type=int, default=None,
                         help=f"pooled final-training budget (default: {DEFAULT_POOLED_SAMPLES_PER_EPOCH})")
     parser.add_argument("--cv-folds", type=int, default=3)
-    parser.add_argument("--cv-trials", type=int, default=4)
-    parser.add_argument("--cv-epochs", type=int, default=12)
-    parser.add_argument("--cv-patience", type=int, default=4)
+    parser.add_argument(
+        "--cv-parameters",
+        type=lambda raw: _parse_csv(raw, tuple(CV_PARAMETER_GRIDS), "--cv-parameters"),
+        default=DEFAULT_CV_PARAMETERS,
+        metavar=",".join(DEFAULT_CV_PARAMETERS),
+        help="parameters included in the exhaustive CV grid",
+    )
+    parser.add_argument("--cv-epochs", type=int, default=DEFAULT_CV_EPOCHS)
+    parser.add_argument("--cv-patience", type=int, default=DEFAULT_CV_PATIENCE)
     parser.add_argument("--cv-samples-per-epoch", type=int,
                         default=DEFAULT_CV_SAMPLES_PER_EPOCH)
     parser.add_argument("--skip-cv", action="store_true",
@@ -497,20 +521,19 @@ def main() -> None:
         else [(airport,) for airport in airports]
     )
     cells = [
-        (scope, model, mode)
+        (scope, model)
         for scope in scopes
         for model in args.models
-        for mode in args.modes
     ]
     print(f"{len(cells)} training cell(s), mode={args.training_mode}, airports={','.join(airports)}")
 
     completed = 0
-    for scope, model, mode in cells:
+    for scope, model in cells:
         training = TrainingPlan(
             scope,
             model,
-            mode,
             training_mode=args.training_mode,
+            n_segments=args.n_segments,
             epochs=args.epochs,
             seed=args.seed,
             device=args.device,
@@ -519,7 +542,7 @@ def main() -> None:
             batch_size=args.batch_size,
             samples_per_epoch=args.samples_per_epoch,
             cv_folds=args.cv_folds,
-            cv_trials=args.cv_trials,
+            cv_parameters=args.cv_parameters,
             cv_epochs=args.cv_epochs,
             cv_patience=args.cv_patience,
             cv_samples_per_epoch=args.cv_samples_per_epoch,

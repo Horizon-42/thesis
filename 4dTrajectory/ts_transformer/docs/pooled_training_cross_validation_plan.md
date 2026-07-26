@@ -31,6 +31,6 @@
 
 ## Open questions
 
-- 无阻塞问题；默认采用 3-fold、有限随机候选集和较短 CV epoch，全部通过 CLI 可覆盖。
+- 无阻塞问题；默认采用 3-fold、三个显式 CV 参数的完整固定网格和较短 CV epoch，全部通过 CLI 可覆盖。
 - leave-one-airport-out 作为独立泛化实验保留，不与默认“已知机场上的新航班”outer-test 混合。
 - 默认 pooled 训练启用机场/航班均衡采样；`per-airport` 保留原有 all-window 采样，便于与历史结果对照。
