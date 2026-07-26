@@ -37,7 +37,7 @@ class FullAttention(nn.Module):
     def __init__(self, mask_flag=True, factor=5, scale=None, attention_dropout=0.1, output_attention=False):
         super(FullAttention, self).__init__()
         self.scale = scale
-        self.mask_flag = mask_flag
+        self.mask_flag = mask_flag # Causal masking is not used in the iTransformer model, but the class is kept for fidelity to the upstream source.
         self.output_attention = output_attention
         self.dropout = nn.Dropout(attention_dropout)
 
