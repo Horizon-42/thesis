@@ -593,7 +593,12 @@ def _build_supervision(
 
 # ── Windowing ────────────────────────────────────────────────────────────────
 
-def window_anchors(series: FlightSeries, config: TSConfig) -> range:
+def window_anchors(
+    series: FlightSeries,
+    config: TSConfig,
+    *,
+    minimum_anchor_index: int | None = None,
+) -> range:
     """Valid anchor indices for ``series``.
 
     An anchor ``i`` is the index of the LAST observed sample: the model is shown
@@ -602,7 +607,9 @@ def window_anchors(series: FlightSeries, config: TSConfig) -> range:
     Every anchor must leave a non-empty remainder.  That remainder is resampled to the same
     N endpoints on normalized progress ``tau = 1/N, ..., 1`` regardless of wall-clock time.
     """
-    first = config.seq_len - 1
+    if minimum_anchor_index is not None and minimum_anchor_index < 0:
+        raise ValueError("minimum_anchor_index must be non-negative")
+    first = max(config.seq_len - 1, minimum_anchor_index or 0)
     # An anchor is always observed; fitted rows can be targets but never model inputs.
     last = min(series.n_samples - 1, series.n_supervision_samples - 2)
     return range(first, last + 1) if last >= first else range(0)
@@ -623,6 +630,7 @@ class TrajectoryWindows(Dataset):
         normalizer: Normalizer,
         *,
         anchor_policy: str = "all",
+        minimum_anchor_index: int | None = None,
     ):
         if anchor_policy not in ("all", "first"):
             raise ValueError(f"unknown anchor policy {anchor_policy!r}")
@@ -630,10 +638,13 @@ class TrajectoryWindows(Dataset):
         self.config = config
         self.normalizer = normalizer
         self.anchor_policy = anchor_policy
+        self.minimum_anchor_index = minimum_anchor_index
         self.index: list[tuple[int, int]] = []
         self.series_ranges: dict[int, tuple[int, int]] = {}
         for s_idx, item in enumerate(self.series):
-            anchors = window_anchors(item, config)
+            anchors = window_anchors(
+                item, config, minimum_anchor_index=minimum_anchor_index
+            )
             chosen = [anchors.start] if anchor_policy == "first" and len(anchors) else anchors
             start = len(self.index)
             self.index.extend((s_idx, anchor) for anchor in chosen)

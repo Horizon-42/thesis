@@ -17,6 +17,7 @@ import itertools
 import json
 import math
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -44,6 +45,7 @@ import coordinate_frames as frames  # noqa: E402
 import cross_validation as cv  # noqa: E402
 import dataset as dataset_module  # noqa: E402
 import detect_ts_best_batch as batch_probe  # noqa: E402
+import run_ts_history_ablation as history_ablation  # noqa: E402
 from aerodynamic_model.common import GeodeticState  # noqa: E402
 from batching import resolve_batch_size  # noqa: E402
 from config import TSConfig  # noqa: E402
@@ -675,6 +677,91 @@ def test_first_anchor_policy_keeps_one_validation_window_per_flight():
     )
     assert len(dataset) == len(series)
     assert all(anchor == config.seq_len - 1 for _series_index, anchor in dataset.index)
+
+
+def test_common_anchor_is_independent_of_history_length():
+    series, base = _series(n_flights=2)
+    normalizer = Normalizer.fit(series)
+    common_anchor = 89
+    datasets = [
+        TrajectoryWindows(
+            series,
+            replace(base, seq_len=seq_len),
+            normalizer,
+            anchor_policy="first",
+            minimum_anchor_index=common_anchor,
+        )
+        for seq_len in (30, 60, 90)
+    ]
+
+    assert all(dataset.index[0] == (0, common_anchor) for dataset in datasets)
+    samples = [dataset[0] for dataset in datasets]
+    assert [sample[0].shape[0] for sample in samples] == [30, 60, 90]
+    assert all(torch.equal(samples[0][1], sample[1]) for sample in samples[1:])
+    assert all(float(samples[0][3]) == pytest.approx(float(sample[3])) for sample in samples[1:])
+
+
+def test_history_ablation_runs_on_common_outer_train_anchors(tmp_path):
+    series, config = _series(
+        n_flights=20,
+        device="cpu",
+        seq_len=20,
+        n_segments=8,
+        d_model=16,
+        d_ff=32,
+        n_heads=4,
+        e_layers=1,
+        batch_size=32,
+        epochs=1,
+        patience=1,
+        train_samples_per_epoch=32,
+        sampling_strategy="airport-flight-balanced",
+        eval_anchor_policy="first",
+    )
+    provenance = {
+        "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
+        "manifests": [{
+            "airport": AIRPORT,
+            "arrival_manifest_sha256": "a" * 64,
+            "source_records": [],
+        }],
+    }
+
+    result = history_ablation.run_history_ablation(
+        series,
+        config,
+        seq_lens=(10, 20),
+        data_provenance=provenance,
+        output_dir=tmp_path,
+        n_splits=2,
+        epochs=1,
+        patience=1,
+        auto_batch_size=False,
+        verbose=False,
+    )
+
+    assert result["selected_seq_len"] in (10, 20)
+    assert result["common_anchor"]["index"] == 19
+    assert result["leakage_guard"]["outer_test_used"] is False
+    signatures = [
+        history_ablation.anchor_signature(
+            split_by_flight(series, replace(config, seq_len=20))[0],
+            replace(config, seq_len=seq_len),
+            19,
+        )
+        for seq_len in (10, 20)
+    ]
+    assert signatures[0] == signatures[1]
+    for name in (
+        "history_length_ablation.json",
+        "best_history_length.json",
+        "history_length_candidates.csv",
+        "history_length_folds.csv",
+        "plots/history_length_cv_loss.png",
+        "plots/history_length_metrics.svg",
+        "plots/index.md",
+    ):
+        assert (tmp_path / name).is_file(), name
 
 
 def test_balanced_sampler_weights_airports_before_flights():

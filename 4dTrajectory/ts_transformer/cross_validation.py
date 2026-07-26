@@ -48,7 +48,7 @@ DEFAULT_CV_PARAMETERS = (
     "learning_rate",
     "d_model",
 )
-DEFAULT_CV_EPOCHS = 30
+DEFAULT_CV_EPOCHS = 36
 DEFAULT_CV_PATIENCE = 6
 
 

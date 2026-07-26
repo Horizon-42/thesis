@@ -213,6 +213,20 @@ ts_<model>_normalized_time/
 After final training, refresh the same directory with
 `conda run -n aeroviz python plot_ts_results.py <run-directory>`.
 
+Run the controlled history-length ablation with:
+
+```bash
+conda run -n aeroviz python run_ts_history_ablation.py
+```
+
+The default candidates are `L=30,60,90`. All candidates use the same flight roster, outer-
+train folds, batch size, and anchor population. The common minimum anchor is fixed at
+`max(L)-1`, so changing L only changes how many samples before that anchor enter the model;
+the predicted remainder is identical. Results are written under
+`4dTrajectory/outputs/POOLED/ts_<model>_normalized_time_history_length_ablation/` as JSON,
+flat CSV tables, PNG/SVG plots, and `plots/index.md`. Use `--dry-run` to inspect the protocol
+and `--config-overrides <best_config.json>` to hold a previously selected architecture fixed.
+
 The runner defaults to `--batch-size auto`. It probes actual FP32 forward/backward/Adam steps
 for the selected architecture and normalized output grid, chooses a power of two, and backs off one doubling
 for allocator/display headroom; an explicit integer disables probing. The probe searches

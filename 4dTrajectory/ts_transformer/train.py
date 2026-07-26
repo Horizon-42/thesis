@@ -170,10 +170,19 @@ def evaluate_split(
 
 
 def usable_series(
-    series: Sequence[FlightSeries], config: TSConfig, *, verbose: bool = True
+    series: Sequence[FlightSeries],
+    config: TSConfig,
+    *,
+    minimum_anchor_index: int | None = None,
+    verbose: bool = True,
 ) -> list[FlightSeries]:
     """Drop flights that cannot yield one model window, once and with an audit count."""
-    usable = [item for item in series if len(window_anchors(item, config)) > 0]
+    usable = [
+        item for item in series
+        if len(window_anchors(
+            item, config, minimum_anchor_index=minimum_anchor_index
+        )) > 0
+    ]
     if len(usable) < len(series) and verbose:
         need = config.seq_len + 1
         print(f"  excluded   {len(series) - len(usable)} flight(s) too short to yield one "
@@ -182,14 +191,22 @@ def usable_series(
 
 
 def _validation_datasets(
-    series: Sequence[FlightSeries], config: TSConfig, normalizer: Normalizer
+    series: Sequence[FlightSeries],
+    config: TSConfig,
+    normalizer: Normalizer,
+    *,
+    minimum_anchor_index: int | None = None,
 ) -> dict[str, TrajectoryWindows]:
     by_airport: dict[str, list[FlightSeries]] = {}
     for item in series:
         by_airport.setdefault(item.airport or "<unknown>", []).append(item)
     return {
         airport: TrajectoryWindows(
-            group, config, normalizer, anchor_policy=config.eval_anchor_policy
+            group,
+            config,
+            normalizer,
+            anchor_policy=config.eval_anchor_policy,
+            minimum_anchor_index=minimum_anchor_index,
         )
         for airport, group in sorted(by_airport.items())
     }
@@ -231,6 +248,7 @@ def fit_model(
     config: TSConfig,
     *,
     auto_batch_size: bool = False,
+    minimum_anchor_index: int | None = None,
     verbose: bool = True,
 ) -> FitResult:
     """Fit one model against explicit train/validation flights, without touching test."""
@@ -248,13 +266,24 @@ def fit_model(
     normalizer = Normalizer.fit(
         train_series, balance_airports_and_flights=balanced
     )
-    train_set = TrajectoryWindows(train_series, config, normalizer)
-    val_sets = _validation_datasets(val_series, config, normalizer)
+    train_set = TrajectoryWindows(
+        train_series,
+        config,
+        normalizer,
+        minimum_anchor_index=minimum_anchor_index,
+    )
+    val_sets = _validation_datasets(
+        val_series,
+        config,
+        normalizer,
+        minimum_anchor_index=minimum_anchor_index,
+    )
     val_window_count = sum(len(dataset) for dataset in val_sets.values())
     if not len(train_set) or not val_window_count:
         raise ValueError(
             f"empty window set (train={len(train_set)}, val={val_window_count}) — "
-            f"seq_len={config.seq_len} leaves no future remainder in these tracks"
+            f"seq_len={config.seq_len}, minimum_anchor_index={minimum_anchor_index!r} "
+            "leaves no future remainder in these tracks"
         )
 
     model = build_model(config).to(device)
@@ -274,6 +303,9 @@ def fit_model(
         print(f"  flights    train {len(train_series)} / val {len(val_series)}")
         print(f"  windows    train {len(train_set)} / val {val_window_count} "
               f"(eval anchors: {config.eval_anchor_policy})")
+        if minimum_anchor_index is not None:
+            print(f"  anchor     common minimum index {minimum_anchor_index} "
+                  f"({minimum_anchor_index * config.dt_s:.0f}s after track entry)")
         sampling = "airport -> flight -> anchor" if balanced else "all windows"
         print(f"  sampling   {sampling}; {samples_per_epoch} sample(s)/epoch")
 
