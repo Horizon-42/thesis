@@ -41,11 +41,11 @@ class EncoderLayer(nn.Module):
             attn_mask=attn_mask,
             tau=tau, delta=delta
         )
-        x = x + self.dropout(new_x)
+        x = x + self.dropout(new_x) # residual connection
 
-        y = x = self.norm1(x)
-        y = self.dropout(self.activation(self.conv1(y.transpose(-1, 1))))
-        y = self.dropout(self.conv2(y).transpose(-1, 1))
+        y = x = self.norm1(x) # LayerNorm
+        y = self.dropout(self.activation(self.conv1(y.transpose(-1, 1)))) # 128 -> 256
+        y = self.dropout(self.conv2(y).transpose(-1, 1)) # 256 -> 128
 
         return self.norm2(x + y), attn
 
