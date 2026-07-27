@@ -307,8 +307,11 @@ def main() -> int:
                         help="experiment root; defaults under 4dTrajectory/outputs/POOLED")
     parser.add_argument("--reuse-cv", action="store_true",
                         help="reuse both CV artifacts only after the full contract check")
-    parser.add_argument("--skip-test", action="store_true",
-                        help="stop after selecting and training; outer-test remains untouched")
+    parser.add_argument(
+        "--release-test",
+        action="store_true",
+        help="irreversibly evaluate outer-test after selection; default leaves it sealed",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -446,10 +449,13 @@ def main() -> int:
     }
     _write_json_atomic(result_path, decision)
 
-    if args.skip_test:
+    if not args.release_test:
         print(f"✓ final model trained; outer-test remains untouched. Decision: {result_path}")
         return 0
 
+    # The shared checkpoint-bound ledger is the enforcement boundary used by every TS
+    # entrypoint; this experiment record adds ablation-specific selection provenance.
+    pipeline.freeze_test_release(selected, dry_run=False)
     decision["status"] = "testing"
     decision["test_started_at"] = _utc_now()
     decision["leakage_guard"]["outer_test_evaluation_started"] = True
