@@ -42,6 +42,8 @@ class Model(nn.Module):
     def forecast(self, x_enc, x_mark_enc, x_dec, x_mark_dec):
         if self.use_norm:
             # Normalization from Non-stationary Transformer
+            # The normalization apply on feature sequence, that means the position and speeds will become relative values;
+            # Default False by abliation experiment.
             means = x_enc.mean(1, keepdim=True).detach()
             x_enc = x_enc - means
             stdev = torch.sqrt(torch.var(x_enc, dim=1, keepdim=True, unbiased=False) + 1e-5)
@@ -54,7 +56,7 @@ class Model(nn.Module):
 
         # Embedding
         # B L N -> B N E                (B L N -> B L E in the vanilla Transformer)
-        enc_out = self.enc_embedding(x_enc, x_mark_enc) # covariates (e.g timestamp) can be also embedded as tokens
+        enc_out = self.enc_embedding(x_enc, x_mark_enc) # covariates (e.g timestamp) saved in x_mark_enc, can be also embedded as tokens
         
         # B N E -> B N E                (B L E -> B L E in the vanilla Transformer)
         # the dimensions of embedded time series has been inverted, and then processed by native attn, layernorm and ffn modules
