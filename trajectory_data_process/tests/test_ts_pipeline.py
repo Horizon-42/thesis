@@ -41,6 +41,30 @@ def test_per_airport_plan_runs_cv_then_final_train(tmp_path, monkeypatch):
     ) is True
 
 
+def test_final_training_prints_the_resolved_config_before_the_command(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(pipeline, "HARVEST_ROOT", tmp_path / "harvest")
+    monkeypatch.setattr(pipeline, "OPT_OUTPUTS_ROOT", tmp_path / "outputs")
+    _manifest(pipeline.HARVEST_ROOT, "KRDU")
+    plan = pipeline.TrainingPlan(
+        ("KRDU",), "itransformer", training_mode="pooled",
+        n_segments=32, epochs=7, seed=29, batch_size="2048",
+    )
+
+    assert pipeline.run_training(
+        plan, dry_run=True, skip_cv=True, skip_train=False
+    ) is True
+    output = capsys.readouterr().out
+
+    assert "config    : TSConfig defaults" in output
+    assert "trajectory: dt=2s, L=60, N=32, frame=enu, anchor=fixed L-1" in output
+    assert "network   : d_model=256, d_ff=512, heads=8, layers=3" in output
+    assert "optimizer : lr=0.0005" in output
+    assert "runtime   : batch=2048, device=auto, seed=29, aircraft=A320" in output
+    assert output.index("config    :") < output.index("[1/1 final train")
+
+
 def test_simple_cv_runner_uses_the_fixed_default_grid(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(pipeline, "HARVEST_ROOT", tmp_path / "harvest")
     monkeypatch.setattr(pipeline, "OPT_OUTPUTS_ROOT", tmp_path / "outputs")
@@ -54,9 +78,31 @@ def test_simple_cv_runner_uses_the_fixed_default_grid(tmp_path, monkeypatch, cap
     assert "--cv-parameters n_segments,learning_rate,d_model" in output
     assert f"--cv-epochs {pipeline.DEFAULT_CV_EPOCHS}" in output
     assert "--cv-patience 6" in output
+    assert "--batch-size 2048" in output
     assert "(27 candidates)" in output
     assert "--trials" not in output
     assert "after CV:" in output and "plot_ts_results.py" in output
+
+
+def test_pipeline_defaults_to_both_pooled_models_with_batch_2048(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(pipeline, "HARVEST_ROOT", tmp_path / "harvest")
+    monkeypatch.setattr(pipeline, "OPT_OUTPUTS_ROOT", tmp_path / "outputs")
+    _manifest(pipeline.HARVEST_ROOT, "KRDU")
+    _manifest(pipeline.HARVEST_ROOT, "KSTL")
+    monkeypatch.setattr(
+        "sys.argv",
+        ["run_ts_pipeline.py", "--dry-run", "--outputs", "eval"],
+    )
+
+    pipeline.main()
+    output = capsys.readouterr().out
+
+    assert "2 training cell(s), mode=pooled, airports=KRDU,KSTL" in output
+    assert "--model itransformer" in output
+    assert "--model patchtst" in output
+    assert "--batch-size 2048" in output
 
 
 def test_simple_cv_runner_forwards_explicit_batch_size(tmp_path, monkeypatch, capsys):

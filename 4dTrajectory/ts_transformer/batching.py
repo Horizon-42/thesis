@@ -3,7 +3,7 @@
 The auto path probes complete FP32 training steps (forward, backward, Adam update) on
 synthetic tensors with the run's real ``L/N/C`` and architecture.  That is more reliable
 than naming GPU models in a table: free memory, model width, layer count and output grid all
-matter.  The largest successful power of two is backed off once for runtime headroom.
+matter. The largest successful power of two is used directly.
 """
 
 from __future__ import annotations
@@ -80,15 +80,13 @@ def resolve_batch_size(
             "automatic batch-size probe could not fit batch_size=8; reduce model width/layers"
         )
     largest = successful[-1]
-    # Keep one doubling step of headroom for allocator fragmentation and concurrent display
-    # memory. At the lower bound there is nothing useful to back off to.
-    selected = largest if largest == _CANDIDATES[0] else largest // 2
+    selected = largest
     props = torch.cuda.get_device_properties(device)
     if verbose:
         memory_gib = props.total_memory / 1024**3
         cap = "+" if largest == _CANDIDATES[-1] else ""
         print(
             f"  batch      auto -> {selected} on {props.name} ({memory_gib:.1f} GiB; "
-            f"largest probe {largest}{cap}, one-step safety margin)"
+            f"largest successful probe {largest}{cap})"
         )
     return selected

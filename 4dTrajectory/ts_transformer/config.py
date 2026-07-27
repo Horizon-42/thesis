@@ -47,8 +47,9 @@ DEFAULT_SEQ_LEN = 60
 
 # Every remaining approach is mapped onto the same normalized progress domain [0, 1].
 # N is the number of equal progress segments (and therefore the number of future state
-# endpoints).  It is deliberately independent of ``dt_s`` and is tuned by cross-validation.
-DEFAULT_N_SEGMENTS = 128
+# endpoints).  It is deliberately independent of ``dt_s``. The pooled three-fold CV
+# selected N=64 from {64, 128, 256}; see the run's cross_validation/best_config.json.
+DEFAULT_N_SEGMENTS = 64
 
 # ``final_time_s`` is emitted in physical seconds.  The scale only nondimensionalizes its
 # loss; it is not a duration cap and does not change the value returned at inference.
@@ -83,9 +84,9 @@ class TSConfig:
     coordinate_frame: str = "enu"
 
     # ── architecture, shared by both models ─────────────────────────────────
-    d_model: int = 128
+    d_model: int = 256
     n_heads: int = 8
-    d_ff: int = 256 # dimension of feed-forward net; need to do ablate experiments
+    d_ff: int = 512
     e_layers: int = 3 #number of encoder layers; why 3? 
     dropout: float = 0.1
     activation: str = "gelu"
@@ -121,9 +122,9 @@ class TSConfig:
     head_dropout: float = 0.0
 
     # ── training ────────────────────────────────────────────────────────────
-    batch_size: int = 64
+    batch_size: int = 2048
     epochs: int = 50
-    learning_rate: float = 1e-4
+    learning_rate: float = 5e-4
     weight_decay: float = 0.0
     patience: int = 8               # early-stopping patience, in epochs without val improvement
     seed: int = 1337

@@ -1012,14 +1012,14 @@ def test_auto_batch_uses_config_default_without_cuda():
     ) == 37
 
 
-def test_auto_batch_selects_1024_when_2048_probe_succeeds(monkeypatch):
+def test_auto_batch_selects_2048_when_2048_probe_succeeds(monkeypatch):
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(torch.cuda, "get_device_properties", lambda _device: None)
     monkeypatch.setattr(batching, "_probe_training_step", lambda *_args: None)
 
     assert batching.resolve_batch_size(
         TSConfig(), torch.device("cuda"), auto=True, verbose=False
-    ) == 1024
+    ) == 2048
 
 
 def test_cross_validation_never_passes_outer_val_or_test_to_fit(tmp_path, monkeypatch):

@@ -41,7 +41,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="comma-separated airports; default: all discovered K-airports")
     parser.add_argument("--model", choices=pipeline.MODELS, default="itransformer")
     parser.add_argument("--frame", choices=pipeline.COORDINATE_FRAMES, default="enu")
-    parser.add_argument("--batch-size", type=_batch_size, default="auto")
+    parser.add_argument("--batch-size", type=_batch_size, default="2048",
+                        help="positive integer or auto (default: 2048)")
     parser.add_argument("--output-dir", type=Path, default=None,
                         help="run directory; CV artifacts go under cross_validation/")
     parser.add_argument(

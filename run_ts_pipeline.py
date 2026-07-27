@@ -22,6 +22,7 @@ import hashlib
 import json
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -109,7 +110,7 @@ class TrainingPlan:
         device: str | None = None,
         aircraft_type: str | None = None,
         coordinate_frame: str = "enu",
-        batch_size: str = "auto",
+        batch_size: str = "2048",
         cv_folds: int = 3,
         cv_parameters: tuple[str, ...] = DEFAULT_CV_PARAMETERS,
         cv_epochs: int = DEFAULT_CV_EPOCHS,
@@ -305,6 +306,35 @@ class TrainingPlan:
             train_command += ["--config-overrides", str(self.best_config)]
         return "final train (outer-val early stopping)", train_command
 
+    def resolved_train_config(self, *, use_best_config: bool) -> tuple[TSConfig, str]:
+        """Resolve the same final-training recipe encoded by :meth:`train_step`."""
+        overrides: dict[str, object] = {}
+        source = "TSConfig defaults"
+        if use_best_config:
+            overrides.update(json.loads(self.best_config.read_text(encoding="utf-8")))
+            source = str(self.best_config)
+
+        overrides.update({
+            "model": self.model,
+            "coordinate_frame": self.coordinate_frame,
+            "random_train_anchor": self.random_train_anchor,
+        })
+        if self.n_segments is not None and (
+            not use_best_config or "n_segments" not in self.cv_parameters
+        ):
+            overrides["n_segments"] = self.n_segments
+        if self.epochs is not None:
+            overrides["epochs"] = self.epochs
+        if self.seed is not None:
+            overrides["seed"] = self.seed
+        if self.device is not None:
+            overrides["device"] = self.device
+        if self.aircraft_type is not None:
+            overrides["aircraft_type"] = self.aircraft_type
+        if self.batch_size != "auto":
+            overrides["batch_size"] = int(self.batch_size)
+        return TSConfig(**overrides), source
+
     def steps(self, *, skip_cv: bool, reuse_checkpoint: bool) -> list[tuple[str, list[str]]]:
         if reuse_checkpoint:
             return []
@@ -398,10 +428,18 @@ class PredictionPlan:
         return named
 
 
-def _run_steps(context: str, steps: list[tuple[str, list[str]]], *, dry_run: bool) -> None:
+def _run_steps(
+    context: str,
+    steps: list[tuple[str, list[str]]],
+    *,
+    dry_run: bool,
+    before_step: Callable[[str, list[str]], None] | None = None,
+) -> None:
     total = len(steps)
     for index, (label, command) in enumerate(steps, 1):
         qualified = f"{index}/{total} {label}"
+        if before_step is not None:
+            before_step(label, command)
         if dry_run:
             print(f"   [{qualified}] {' '.join(command)}")
             continue
@@ -427,10 +465,40 @@ def run_training(
         print(f"   (checkpoint not reusable: {reuse_error} → rebuilding)")
     if skip_cv and not reuse and plan.cv_reuse_error() is not None:
         print("   (CV skipped and no reusable CV artifact → base hyperparameters)")
+
+    def print_final_config(label: str, command: list[str]) -> None:
+        if not label.startswith("final train"):
+            return
+        use_best_config = "--config-overrides" in command
+        if not skip_cv and dry_run:
+            print("   config    : pending CV selection")
+            return
+        config, source = plan.resolved_train_config(use_best_config=use_best_config)
+        batch = "auto (GPU probe)" if plan.batch_size == "auto" else str(config.batch_size)
+        anchor = "random" if config.random_train_anchor else "fixed L-1"
+        print(f"   config    : {source}")
+        print(
+            f"   trajectory: dt={config.dt_s:g}s, L={config.seq_len}, "
+            f"N={config.n_segments}, frame={config.coordinate_frame}, anchor={anchor}"
+        )
+        print(
+            f"   network   : d_model={config.d_model}, d_ff={config.d_ff}, "
+            f"heads={config.n_heads}, layers={config.e_layers}, dropout={config.dropout:g}"
+        )
+        print(
+            f"   optimizer : lr={config.learning_rate:g}, weight_decay={config.weight_decay:g}, "
+            f"epochs={config.epochs}, patience={config.patience}"
+        )
+        print(
+            f"   runtime   : batch={batch}, device={config.device}, seed={config.seed}, "
+            f"aircraft={config.aircraft_type}"
+        )
+
     _run_steps(
         f"{plan.label} · {plan.model} · normalized time",
         plan.steps(skip_cv=skip_cv, reuse_checkpoint=reuse),
         dry_run=dry_run,
+        before_step=print_final_config,
     )
     return True
 
@@ -454,11 +522,17 @@ def _parse_csv(raw: str, allowed: tuple[str, ...], flag: str) -> tuple[str, ...]
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--training-mode", choices=TRAINING_MODES, default="per-airport")
+    parser.add_argument(
+        "--training-mode",
+        choices=TRAINING_MODES,
+        default="pooled",
+        help="training scope (default: pooled)",
+    )
     parser.add_argument("--airport", default=None,
                         help="optional single airport filter; otherwise discover every K-airport")
     parser.add_argument("--models", type=lambda raw: _parse_csv(raw, MODELS, "--models"),
-                        default=MODELS, metavar=",".join(MODELS))
+                        default=MODELS, metavar=",".join(MODELS),
+                        help="models to train (default: itransformer,patchtst)")
     parser.add_argument("--n-segments", type=int, default=None,
                         help="base N for normalized progress; CV also tunes N")
     parser.add_argument("--outputs", type=lambda raw: _parse_csv(raw, OUTPUT_KINDS, "--outputs"),
@@ -469,8 +543,8 @@ def main() -> None:
     parser.add_argument("--device", default=None)
     parser.add_argument("--aircraft-type", default=None)
     parser.add_argument("--coordinate-frame", choices=COORDINATE_FRAMES, default="enu")
-    parser.add_argument("--batch-size", default="auto",
-                        help="positive integer or auto (default: actual CUDA training-step probe)")
+    parser.add_argument("--batch-size", default="2048",
+                        help="positive integer or auto (default: 2048)")
     parser.add_argument("--cv-folds", type=int, default=3)
     parser.add_argument(
         "--cv-parameters",
@@ -486,8 +560,12 @@ def main() -> None:
         action="store_true",
         help="train rolling forecasts from random anchors; default is fixed anchor L-1",
     )
-    parser.add_argument("--skip-cv", action="store_true",
-                        help="reuse matching CV artifacts when present, otherwise use base defaults")
+    parser.add_argument(
+        "--skip-cv",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="skip CV by default; use --no-skip-cv to run it",
+    )
     parser.add_argument("--skip-train", action="store_true",
                         help="reuse a checkpoint only when all selected manifest digests match")
     parser.add_argument("--dry-run", action="store_true")
