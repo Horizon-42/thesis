@@ -109,6 +109,13 @@ Static data follows a similar pattern: OurAirports CSV → `preprocess_airports.
 - Each turn must only make the changes explicitly requested by the user.
 - Do not modify additional files, modules, APIs, tests, or docs merely to make broader test suites pass or to synchronize adjacent code.
 - If a requested change exposes unrelated failures or stale interfaces, report them clearly instead of fixing them without explicit permission.
+- Refactoring may reorganize an implementation, but it must preserve every existing user-facing
+  feature and experiment mode unless the user explicitly requests that feature's removal.
+- Never infer permission to delete, replace, or retire functionality from a request to add a new
+  design, simplify an interface, drop backward compatibility, or clean up legacy code. If the new
+  design conflicts with an existing feature, stop and ask the user which behavior to keep.
+- Do not introduce a new architecture, mode, or public contract as an inferred substitute for an
+  ambiguous request. Clarify the intended design before implementing or running experiments.
 
 ## Compatibility and Risk Decisions
 
@@ -121,6 +128,20 @@ Static data follows a similar pattern: OurAirports CSV → `preprocess_airports.
 - If a change presents a meaningful compatibility, data-loss, architecture, or migration
   risk, stop and ask the user to choose. Do not make that product/design decision
   autonomously.
+
+## ML Experiment Isolation
+
+- Treat outer-test as a one-time final release, never as a routine pipeline output or a source
+  of debugging, model, loss, epoch, feature, or hyperparameter decisions.
+- Use train metrics to diagnose fitting and validation/CV metrics for every development choice.
+  Do not run or inspect test predictions until the user explicitly declares the experiment
+  frozen and requests the final test release.
+- TS development runs use `--split development` (train + validation). A final test must use
+  `--split test --release-test`; preserve the checkpoint-adjacent `test_release.json` audit
+  ledger and never delete, reset, or bypass it.
+- If any development decision occurs after test results were exposed, label that partition a
+  development test. A new later-time or otherwise untouched dataset is required for a new blind
+  final result; changing the split seed does not restore blindness.
 
 ## Domain Context
 

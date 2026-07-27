@@ -2,7 +2,7 @@
 
 ## 1. 当前实现结论
 
-`ts_transformer` 已从“固定预测若干秒/若干 step，再按空间最近点截断”改成：
+`ts_transformer` 现在保留三种可以独立切换的预测时域：
 
 1. 输入仍为最近 `L` 个等间隔观测点；
 2. 每个样本都预测从 anchor 到终点的完整剩余轨迹；
@@ -12,7 +12,15 @@
 6. 当前训练输出仍为 state，但输出层已经和预测契约分离；
 7. controls 输出与非均匀 `segment_durations` 的 head 已实现，等有控制监督和可微动力学后再接入训练。
 
-旧的 `window/full`、`pred_len`、递归预测、300-step 上限和 target 最近点截断均已删除。旧 checkpoint 需要重新训练。
+默认采用 `--horizon-mode normalized`：一次预测完整剩余航迹。`--horizon-mode full`
+恢复单次 `H_full=300`、`dt_s=2 s` 的物理时间输出；短航迹的最后一个 segment 缩短到
+真实终点，后续 padding 完全 mask。`--horizon-mode window` 恢复 `H_window=30` 的短时预测，
+推理时把输出追加到历史并递归到 `H_full`。full/window 都按到跑道入口的空间最近点截断，
+没有到达入口则显式标记 horizon-capped。
+
+三种模式共用 state/final-time 输出层、loss、anchor 策略和模型结构，但目标时间网格与
+推理策略分别在 `time_grids.py` 和 `forecast.py` 中独立分派。`final_time_s` 在 normalized
+模式下决定节点时间，在 full/window 下作为辅助剩余时间预测，不改变固定 `dt_s` 时钟。
 
 ## 2. 归一化时间监督
 
@@ -56,14 +64,38 @@ StatePrediction
 训练目标为：
 
 ```text
-L = L_state + lambda_t * L_time
+L = L_state
+    + lambda_t * L_time
+    + lambda_kin * L_kinematic
+    + lambda_terminal * L_terminal
 
 L_state = weighted_MSE(predicted_states, target_states)
 L_time  = mean(((predicted_final_time_s - true_final_time_s)
                 / final_time_scale_s)^2)
+delta_p_error = (p[i+1] - p[i])
+                - ((v[i+1] + v[i]) / 2) * Delta_t
+L_kinematic = MSE(delta_p_error / position_std)
+L_terminal = MSE(predicted_position[N], target_position[N])
 ```
 
-训练、validation early stopping 和 CV 候选选择使用同一个联合目标。评估另外输出 `final_time_s` 的 MAE、RMSE 和有符号均值误差。
+`L_kinematic` 在反归一化后的物理位置/速度上计算，把相邻位置位移与梯形积分得到的
+速度位移进行比较，再按训练集位置标准差无量纲化。不能先除以 `Delta_t` 再按速度
+标准差归一化；后一种写法会让位置梯度随 N 近似按 `N²` 放大。训练时
+`Delta_t=true_final_time_s/N`，避免时间预测头通过缩短时长来降低一致性损失。
+
+`L_terminal` 独立强调跑道入口节点，但默认权重为 `0.02`。在 iTransformer 当前
+`N=64, C=6` 时，该值使终点位置约为普通单个位置节点的 2.6 倍权重，而不是
+`1.0` 所造成的约 128 倍。held-out 消融后的模型级 N 默认值为 iTransformer 64、
+PatchTST 256；共享 `lambda_kin=3.0`、`lambda_terminal=0.02`。训练历史会
+分别保存 state、final-time、kinematic 和 terminal 四项加权贡献；训练、validation
+early stopping 和 CV 候选选择使用四项之和。评估另外输出 `final_time_s` 的 MAE、
+RMSE 和有符号均值误差。
+
+评估还直接在未经样条、滤波或 CZML 插值的输出节点上计算五项 raw kinematic
+指标：位置差分速度/状态速度 RMSE、航向一致性 p95、转弯率 p95、加速度 p95 和
+jerk p95。逐航班结果写入 prediction rows，批量结果写入 fleet
+`median/mean/p95/max`；消融使用 fleet p95 与同批 observed baseline 的比值，避免
+单个接近零的 `final_time_s` 将均值放大后支配选模。
 
 ## 4. N 如何参与交叉验证
 

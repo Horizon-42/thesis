@@ -40,10 +40,10 @@ gates (lateral ≤ 106.75 m, vertical ∈ [−3.05, +6.10] m).
 
 ## Status
 
-The current code uses normalized-time prediction and intentionally does not load the older
-window/full checkpoints. A new CV + training run is required before reporting current-model
-quality; the KRDU numbers later in this document are retained as explicitly historical
-pre-normalized-time baselines.
+The current code keeps three explicit prediction contracts: `normalized`, `full`, and
+`window`. They share channels, output heads, losses, split policy, and anchor policy, while
+their target clocks and inference strategies are dispatched independently. Checkpoints record
+the selected mode and output length; changing modes requires retraining.
 
 Trained and evaluated on **real harvested ADS-B** (KRDU, 995 arrivals). Checkpoints were
 retrained twice on 2026-07-20, both times on the reproducible `flight_key` split
@@ -73,7 +73,7 @@ The abbreviations and terms of art this README (and `metrics.py` / the summary J
 | **p95** | 95th percentile over the batch — the tail, where compounding error shows up before it moves the mean. |
 | **normalized progress `tau`** | Position in the predicted remainder, from anchor `tau=0` to endpoint `tau=1`, independent of physical duration. |
 | **anchor** | The last observed sample the model was conditioned on; records rebase time so the anchor is `t = 0`. |
-| **`L` / `N` / `dt`** | Observed lookback steps / normalized output segments / input resample step. Defaults `L=60, N=128, dt=2 s`; `N` is a CV parameter and does not fix the output duration. |
+| **`L` / `N` / `H` / `dt`** | Observed lookback / normalized output segments / fixed-time horizon steps / input resample step. Defaults: `L=60`, model-specific `N`, `H_window=30`, `H_full=300`, `dt=2 s`. |
 | **ENU** | Local **E**ast/**N**orth/**U**p Cartesian frame; here anchored at the runway threshold, so `(0,0,0)` is where an approach should end. |
 | **cross-track / along-track** | Horizontal error decomposed across / along the observed track's own course — "beside the path" vs "ahead/behind on it". |
 | **gates** | The evaluation thresholds every record is graded against: final lateral ≤ 106.75 m, vertical ∈ [−3.05, +6.10] m (FAA 8260.58D / 8260.3F derived; see `evaluation/thresholds.py`). |
@@ -89,11 +89,11 @@ The abbreviations and terms of art this README (and `metrics.py` / the summary J
 |---|---|
 | `config.py` | `TSConfig` — the one namespace both vendored models read, serialised into every checkpoint |
 | `channels.py` | the feature contract: geodetic states ⇄ threshold-anchored ENU channels |
-| `dataset.py` | track loading, input resampling, normalized-progress targets, by-flight split, normalisation |
+| `dataset.py` | track loading, input resampling, mode-dispatched targets, by-flight split, normalisation |
 | `models.py` | model construction over the two vendored state forecasters |
 | `prediction_outputs.py` | typed state/control outputs, final-time head, bounded controls and duration partition |
-| `train.py` | joint state/final-time loss, early stopping, self-contained checkpoints |
-| `forecast.py` | one-pass normalized-progress prediction and learned wall-clock reconstruction |
+| `train.py` | state/time/displacement-kinematic/terminal loss, early stopping, checkpoints |
+| `forecast.py` | independent normalized, one-pass full, and recursive-window inference strategies |
 | `metrics.py` | ADE / FDE plus the along-track / cross-track / altitude decomposition |
 | `export.py` | evaluation records + `summary.json` manifest, via the optimizer's own record emitters |
 | `flyability.py` | closed-form control inversion — what a predicted path would have required, vs the envelope |
@@ -120,6 +120,11 @@ python $TS train \
     --model itransformer --n-segments 128 \
     --output-dir 4dTrajectory/outputs/KRDU/ts_itr_normalized_time
 
+# independently replay the retained best checkpoint on fixed-anchor train + validation
+python $TS evaluate-fit \
+    --checkpoint 4dTrajectory/outputs/KRDU/ts_itr_normalized_time/checkpoint.pt \
+    --data trajectory_data_process/outputs/harvest/KRDU/arrivals/manifest.json
+
 # predict the held-out split, then grade it exactly like an optimizer batch
 python $TS predict --checkpoint 4dTrajectory/outputs/KRDU/ts_itr_normalized_time/checkpoint.pt \
     --data trajectory_data_process/outputs/harvest/KRDU/arrivals/manifest.json \
@@ -132,15 +137,25 @@ python -m evaluation --input 4dTrajectory/outputs/KRDU/ts_pred
 `--data` takes an airport harvest directory, its `arrivals/` directory, or the explicit
 `arrivals/manifest.json`; repeat the flag to train one model over multiple airports. Legacy
 flight arrays and arbitrary JSON directories are rejected.
-`predict` defaults to `--split test` — the only flights the model never saw. The split is
+`predict` defaults to `--split val`; routine development never opens outer-test. The split is
 recorded in the checkpoint and keyed by `flight_key`. The checkpoint also carries the exact
 arrival-manifest SHA-256 and every flight's canonical source SHA-256; prediction rejects a
 rebuilt or changed manifest instead of silently intersecting its roster with an old split.
 Retrain after rebuilding arrivals.
 
+Every completed `train` call automatically performs the same deterministic fit replay on
+both outer-train and outer-validation: the retained best checkpoint runs under
+`model.eval()`, dropout is disabled, every flight uses anchor `L-1`, batches are sequential,
+and no shuffle is involved. `evaluate-fit` exposes that exact operation independently for an
+existing checkpoint; it never evaluates outer-test.
+
 `run_ts_pipeline.py` namespaces prediction output and frontend categories by split
-(`..._normalized_time_<split>`). A diagnostic `--split train`, `val`, or `all` run therefore cannot
-overwrite or masquerade as the default held-out `test` publication.
+(`..._<horizon-mode>_<split>`). It defaults to `--split development`, which publishes separate
+train and validation artifacts. `--split test` is rejected unless the same command also carries
+`--release-test`. That release creates `test_release.json` beside the checkpoint before loading
+any test trajectory, binds it to the checkpoint/data/split hashes, and records each claimed
+flight. Started or completed flights cannot be evaluated again. The frontend manifest and
+comparison index also carry an explicit `datasetSplit` field.
 
 ### Pooled training and cross-validation
 
@@ -149,7 +164,7 @@ airport; `pooled` runs one CV search and one final fit over all selected manifes
 that checkpoint to publish each airport separately:
 
 ```bash
-# All discovered K-airports -> one checkpoint per model, then per-airport test outputs.
+# All discovered K-airports -> one checkpoint per model, then train/validation outputs.
 conda run -n aeroviz python run_ts_pipeline.py \
   --training-mode pooled \
   --models itransformer \
@@ -160,14 +175,24 @@ conda run -n aeroviz python run_ts_pipeline.py \
   --training-mode pooled --models itransformer --dry-run
 ```
 
-Each cell executes `cross-validate -> final train -> predict test -> evaluate/publish`.
+Each development cell executes `cross-validate -> final train -> predict train/val ->
+evaluate/publish`.
 The split boundary is deliberately nested:
 
 1. lock airport-qualified outer train/validation/test flights;
 2. construct K folds from **outer-train only** and select hyperparameters by mean
    airport-macro fold loss;
 3. fit the selected configuration on outer-train with outer-validation early stopping;
-4. expose outer-test only to `predict` after the final checkpoint is fixed.
+4. after every analysis and model decision is permanently frozen, explicitly release test once:
+
+   ```bash
+   conda run -n aeroviz python run_ts_pipeline.py \
+     --skip-train --models itransformer --split test --release-test
+   ```
+
+The release ledger is an experiment artifact and must not be deleted or reset. If development
+continues after seeing test, that partition becomes a development test and a new temporal
+holdout is required for the final claim.
 
 `cross_validation/cv_results.json` records split digests, every fold score and explicit
 `outer_validation_used: false` / `outer_test_used: false` guards. `best_config.json` contains
@@ -283,11 +308,11 @@ The script discovers the same fixed K-airport roster once, runs ENU and runway-a
 with the same seed, candidates, folds, sampling budget, and batch size, and rejects the
 comparison if their recorded split or fold digests differ. It selects the frame and that
 frame's hyperparameters using outer-train airport-macro CV loss, trains only the winner with
-outer-validation early stopping, and only then predicts each airport's outer-test flights.
+outer-validation early stopping, and leaves outer-test sealed by default. Pass `--release-test`
+only after the experiment is permanently frozen to perform the one-shot test prediction.
 The losing frame never sees outer-validation or outer-test. The auditable decision is written
 under `4dTrajectory/outputs/POOLED/ts_<model>_normalized_time_coordinate_frame_ablation/` as
-`coordinate_frame_ablation.json`. Use `--skip-test` to stop after the final fit and retain
-the test set for a later preregistered evaluation; use `--reuse-cv` only to reuse two
+`coordinate_frame_ablation.json`. Use `--reuse-cv` only to reuse two
 artifacts that pass the complete paired-run contract check. Immediately before the first
 test prediction, the decision file is marked `outer_test_evaluation_started`; the script
 then refuses to evaluate test again from the same experiment directory, including after a
@@ -348,14 +373,35 @@ together.) The rename `ve/vn/vu → edot/ndot/udot` is deliberate: the channel t
 serialised into every checkpoint and `load_checkpoint` refuses a mismatch, so pre-change
 checkpoints fail loudly instead of silently mis-scaling every velocity.
 
-### Normalized-time output (current)
+### Three horizon modes
 
-Each training anchor predicts the complete remaining approach on the same progress grid
-`tau_i = i/N, i=1..N`, together with a learned physical duration `final_time_s`.
-Training linearly interpolates each target remainder at
-`t_i = t_anchor + tau_i * true_final_time_s`; inference reconstructs timestamps with the
-same equation using the predicted duration. There is one forward pass, no padding, no
-recursive self-feeding, no fixed 300-step cap, and no closest-point truncation.
+Select one contract with `--horizon-mode normalized|full|window`. The modes coexist; none is
+an alias or compatibility branch.
+
+| mode | training target | inference |
+|---|---|---|
+| `normalized` (default) | Complete remainder at `tau_i=i/N`; no padding | One pass; `final_time_s` reconstructs physical timestamps; no geometric truncation or fixed cap |
+| `full` | `H_full=300` physical `dt=2 s` nodes; short remainders padded and loss-masked | One pass; fixed-dt timestamps; cut at closest threshold approach; cap at 600 s |
+| `window` | One complete `H_window=30` physical `dt=2 s` target per anchor | Recursively append each 60 s prediction, slide the history, and continue to `H_full`; then apply the same threshold/cap rule as `full` |
+
+The state and `final_time_s` heads remain shared. In `normalized`, the duration head defines
+the state-node clock. In `full/window`, state nodes retain their fixed `dt` clock and the head
+is an auxiliary remaining-time estimate. Target-grid construction lives in `time_grids.py`;
+mode-specific inference is dispatched in `forecast.py`; fixed/random anchor policy remains a
+separate dataset choice.
+
+```bash
+# normalized complete remainder
+conda run -n aeroviz python run_ts_pipeline.py --horizon-mode normalized
+
+# one-pass 600 s full horizon
+conda run -n aeroviz python run_ts_pipeline.py \
+  --horizon-mode full --full-horizon-steps 300
+
+# recursive 60 s windows, chained to the same 600 s cap
+conda run -n aeroviz python run_ts_pipeline.py \
+  --horizon-mode window --window-horizon-steps 30 --full-horizon-steps 300
+```
 
 The default anchor is fixed at `L-1`, so every flight contributes its earliest full-trajectory
 forecast once per epoch; flight order is reshuffled between epochs. Pass
@@ -364,23 +410,42 @@ approach phases as well. That mode selects one valid anchor per flight and epoch
 and exported prediction remain fixed at `L-1`.
 
 `N` controls output resolution, not forecast seconds. It is serialized in checkpoints and
-included in the default cross-validation grid (`64, 128, 256`). The objective is normalized
-state MSE plus scaled final-time MSE; validation and CV
-select on the same joint loss. See
+included in the default cross-validation grid (`64, 128, 256`). The objective combines
+normalized state MSE, scaled final-time MSE, position/velocity displacement consistency,
+and an explicit terminal-position term. Displacement consistency is normalized by position
+scale so its gradient does not grow with N. Held-out physics/accuracy ablations selected
+iTransformer `N=64` and PatchTST `N=256`; both use kinematic weight `3.0` and terminal
+weight `0.02`. The full pooled iTransformer CUDA validation curve selected epoch 161;
+training therefore uses a 180-epoch cap with patience 20 and always reloads the best epoch.
+Validation and CV select on the same joint loss. See
 [`docs/normalized_time_and_control_output.zh.md`](docs/normalized_time_and_control_output.zh.md)
 for the exact state and future-control contracts.
 
-### Historical horizon design (retired; results below use this older design)
+Validation history, CV folds and exported prediction summaries also persist raw-node
+position/velocity RMSE, heading-consistency p95, turn-rate p95, acceleration p95 and jerk
+p95. Prediction batches retain per-flight values plus fleet `median/mean/p95/max`; comparisons
+and the ablation selector use fleet p95 against the observed-track baseline. These metrics
+always consume the model's untouched nodes and explicit segment durations, so they remain
+valid for later non-uniform control rollouts. The complete experiment protocol and
+validation/test tables are in
+[`docs/2026-07-27_kinematic_weight_epoch_ablation.zh.md`](docs/2026-07-27_kinematic_weight_epoch_ablation.zh.md).
 
-The following section documents the pre-normalized-time experiments only. The `window/full`,
-`pred_len`, recursive forecast, fixed horizon and threshold-truncation code paths no longer
-exist and their checkpoints must be retrained.
+PatchTST remains enabled as a comparison model, but its selected `N=256` state-head run is
+not physically usable (outer-test flyability 0.0% and raw jerk fleet p95 about 2204 m/s³).
+`N=256` is only its best held-out ADE among the tested grids, not a claim of flyability.
+
+The validation-only comparison, future-dispersion analysis and deterministic/multi-candidate
+coverage report are generated by `run_ts_predictability_report.py`; the current illustrated
+HTML is at
+`4dTrajectory/outputs/POOLED/ts_time_parameterization_predictability_report/report.html`.
+
+### Full versus recursive window
 
 Both models are fixed lookback→horizon (`L → H`); `L` and `H` are baked into the layer
 shapes, so changing either means retraining.
 
 **`--horizon-mode window`** — short `H` (default 30 steps = 60 s). To cover a whole approach,
-`recursive_forecast` chains passes: predict 30, append them to the history, slide, predict
+the window forecaster chains passes: predict 30, append them to the history, slide, predict
 again. From the second pass on the model is reading its own output, so error compounds.
 
 **`--horizon-mode full`** — `H` covers the whole approach (default 300 steps = 10 min) in one
@@ -390,9 +455,10 @@ learns to reproduce its own zero padding and every forecast tail collapses.
 
 Having both is the point: the gap between them measures what chaining actually costs.
 
-⚠️ The two modes' headline ADE/FDE are **not** directly comparable — window mode averages over
-a 60 s horizon per pass, full mode over horizons up to 10 min. The honest comparison is error
-against **lead time** (same seconds-ahead for both), which the results section reports.
+Native training/validation ADE is not directly comparable across the two fixed-time modes:
+window loss covers one 60 s pass, while full loss covers up to 600 s. Exported whole-approach
+predictions are comparable because both are evaluated after window recursion on the same
+physical timestamps; the report also publishes error against lead time.
 
 > Naming: `4dTrajectory/optimization` already uses *rollout* for forward-integrating
 > optimizer controls through the true dynamics. That is a different operation, so the ML
@@ -757,8 +823,14 @@ Training writes:
     best_config.json         selected TSConfig overrides
   checkpoint.pt             weights, config, normalizer, split, and arrival-data provenance
   checkpoint_metadata.json  checkpoint/manifest/split hashes and anchor policy for audit/reuse
-  history.json              training history, validation metrics, manifests, and source count
+  history.json              training history, deterministic train+validation metrics, provenance
+  fit_evaluation.json       best-checkpoint fixed-anchor train/validation replay + fit gaps
 ```
+
+`fit_evaluation.json` is checkpoint-SHA-bound. Its native-grid ADE/FDE and TTA blocks compare
+train with validation under identical inference conditions. For recursive `window`, these
+native metrics describe one short prediction pass; whole-trajectory compounding remains a
+separate forecast/export metric.
 
 Prediction writes one split-specific batch:
 

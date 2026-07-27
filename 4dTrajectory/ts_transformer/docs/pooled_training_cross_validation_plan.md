@@ -29,6 +29,8 @@
 
 [x] 添加数据身份、分层 split、CV 无泄漏、均衡 sampler、provenance 子集校验、auto-batch 回退、命令规划与 pooled 产物路径测试；运行 `conda run -n aeroviz python -m pytest 4dTrajectory/ts_transformer/tests trajectory_data_process/tests/test_ts_pipeline.py -q`，并对两种模式执行 `run_ts_pipeline.py --dry-run`。
 
+[x] 增加 raw-output smoothness/kinematic metrics：持久化位置差分速度与预测速度的 RMSE、航向一致性 p95、转弯率 p95、加速度 p95 和 jerk p95；指标基于未经样条、滤波或 CZML 插值的模型原始输出，支持显式非均匀 segment durations，并已用于比较 N=64/128/256。逐航班指标及 fleet median/mean/p95/max 贯穿 validation history、CV、prediction summary 和正式消融报告；后续 controls rollout 复用同一接口。
+
 ## Open questions
 
 - 无阻塞问题；默认采用 3-fold、三个显式 CV 参数的完整固定网格和较短 CV epoch，全部通过 CLI 可覆盖。
