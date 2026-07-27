@@ -97,7 +97,7 @@ full geodetic RHS); it exists purely to condition the NLP. Consequences for the 
 - The **LTP/target is the origin**, so horizontal distance from the threshold is simply `‖(n, e)‖`,
   and along-/cross-track reduce to dot / perpendicular products against constant fix vectors (§4).
 - Heading `psi` and bearings are consistent with this frame: `+n` is north, `+e` is east, so a leg
-  bearing is `atan2(Δe, Δn)` and the intercept/alignment checks compare `psi` to it directly.
+  bearing is `atan2(Δn, Δe)` and the intercept/alignment checks compare `psi` to it directly.
 - **`FullTransport` is irrelevant to coordinates** — it only adds the exact `psi` cross-term to the
   *dynamics RHS*; it does not change the constraint frame. Only the **`Normalized`** part matters
   for geometry.
@@ -424,7 +424,7 @@ e = (lon − lon_t) · R · cos(lat_t)    # 东向米   （lat_t, lon_t = 优化
 - **直接在 `(n, e)` 上写约束**（即用归一化的决策变量），**不要**用重建出的弧度 lat/lon。这样约束 Jacobian 保持米制、
   良态——这正是 `Normalized` 方案存在的全部理由；若改用弧度算走廊，会重新引入该方案本要消除的病态。
 - **LTP/目标即原点**，所以"到入口的水平距离"就是 `‖(n, e)‖`，沿航迹/横向也退化为对常数定位点向量做点积/取垂直分量（§B4）。
-- 航向 `psi` 与各航道方位与本坐标系一致：`+n` 为北、`+e` 为东，故航段方位为 `atan2(Δe, Δn)`，切入/对准校验直接拿 `psi` 比。
+- 航向 `psi` 与各航道方位与本坐标系一致：`+n` 为北、`+e` 为东，故航段方位为 `atan2(Δn, Δe)`，切入/对准校验直接拿 `psi` 比。
 - **`FullTransport` 与坐标无关**——它只是给*动力学 RHS* 加上精确的 `psi` 交叉项，不改变约束坐标系。对几何而言只有
   **`Normalized`** 这部分有意义。
 
