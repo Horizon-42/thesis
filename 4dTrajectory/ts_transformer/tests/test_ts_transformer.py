@@ -45,10 +45,14 @@ import coordinate_frames as frames  # noqa: E402
 import cross_validation as cv  # noqa: E402
 import dataset as dataset_module  # noqa: E402
 import detect_ts_best_batch as batch_probe  # noqa: E402
+import evaluation_protocol  # noqa: E402
 import run_ts_history_ablation as history_ablation  # noqa: E402
+import train as train_module  # noqa: E402
 from aerodynamic_model.common import GeodeticState  # noqa: E402
 from batching import resolve_batch_size  # noqa: E402
-from config import TSConfig  # noqa: E402
+from config import (  # noqa: E402
+    HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW, TSConfig,
+)
 from dataset import (  # noqa: E402
     ARRIVAL_DATA_PROVENANCE_SCHEMA, FixedAnchorTrajectoryWindows, FlightEpochSampler,
     Normalizer, RandomAnchorTrajectoryWindows, arrival_data_provenance, build_series,
@@ -61,13 +65,133 @@ from export import (  # noqa: E402
     accuracy_block, build_prediction_record, observed_series_metrics, record_stem, write_batch,
 )
 from forecast import Forecast, forecast_approach  # noqa: E402
-from metrics import error_components, trajectory_metrics  # noqa: E402
+from metrics import (  # noqa: E402
+    RAW_KINEMATIC_METRIC_KEYS, error_components, raw_kinematic_metrics,
+    trajectory_metrics,
+)
 from models import build_model  # noqa: E402
 from prediction_outputs import ControlBounds, ControlOutputHead, StatePrediction  # noqa: E402
 from synthetic import synthetic_arrivals  # noqa: E402
-from train import load_checkpoint, masked_mse, prediction_loss, train  # noqa: E402
+from train import (  # noqa: E402
+    FIT_EVALUATION_NAME, FIT_EVALUATION_SCHEMA, evaluate_fit_splits,
+    load_checkpoint, masked_mse, position_velocity_consistency_loss,
+    prediction_loss, train,
+)
 
 AIRPORT, RUNWAY = "KRDU", "05L"
+
+
+def _fake_data_provenance(airport: str = AIRPORT):
+    return {
+        "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
+        "manifests": [{
+            "airport": airport,
+            "arrival_manifest_sha256": "a" * 64,
+            "source_records": [],
+        }],
+    }
+
+
+def test_test_release_is_checkpoint_bound_and_one_shot_per_flight(tmp_path):
+    checkpoint = tmp_path / "checkpoint.pt"
+    checkpoint.write_bytes(b"frozen checkpoint")
+    provenance = _fake_data_provenance()
+    payload = {
+        evaluation_protocol.TEST_RELEASE_PROTOCOL_FIELD:
+            evaluation_protocol.TEST_RELEASE_SCHEMA,
+        "data_provenance": provenance,
+        "split": {"test": ["KRDU:flight-1", "KRDU:flight-2"]},
+    }
+
+    release = evaluation_protocol.create_test_release(
+        checkpoint, payload, provenance
+    )
+    claim = evaluation_protocol.begin_test_evaluation(
+        checkpoint,
+        payload,
+        provenance,
+        ["KRDU:flight-1"],
+        output_dir=tmp_path / "prediction",
+    )
+    evaluation_protocol.complete_test_evaluation(checkpoint, claim)
+
+    recorded = json.loads(release.read_text(encoding="utf-8"))
+    assert recorded["status"] == "partially_evaluated"
+    assert recorded["claims"][0]["status"] == "complete"
+    with pytest.raises(evaluation_protocol.TestReleaseError, match="already exposed"):
+        evaluation_protocol.begin_test_evaluation(
+            checkpoint,
+            payload,
+            provenance,
+            ["KRDU:flight-1"],
+            output_dir=tmp_path / "repeat",
+        )
+
+    second_claim = evaluation_protocol.begin_test_evaluation(
+        checkpoint,
+        payload,
+        provenance,
+        ["KRDU:flight-2"],
+        output_dir=tmp_path / "second",
+    )
+    evaluation_protocol.complete_test_evaluation(checkpoint, second_claim)
+    recorded = json.loads(release.read_text(encoding="utf-8"))
+    assert recorded["status"] == "complete"
+
+    checkpoint.write_bytes(b"changed checkpoint")
+    with pytest.raises(evaluation_protocol.TestReleaseError, match="checkpoint"):
+        evaluation_protocol.begin_test_evaluation(
+            checkpoint,
+            payload,
+            provenance,
+            ["KRDU:flight-2"],
+            output_dir=tmp_path / "changed",
+        )
+
+
+def test_test_evaluation_requires_a_frozen_release(tmp_path):
+    checkpoint = tmp_path / "checkpoint.pt"
+    checkpoint.write_bytes(b"checkpoint")
+    provenance = _fake_data_provenance()
+    payload = {
+        evaluation_protocol.TEST_RELEASE_PROTOCOL_FIELD:
+            evaluation_protocol.TEST_RELEASE_SCHEMA,
+        "data_provenance": provenance,
+        "split": {"test": ["KRDU:flight-1"]},
+    }
+
+    with pytest.raises(evaluation_protocol.TestReleaseError, match="freeze-test"):
+        evaluation_protocol.begin_test_evaluation(
+            checkpoint,
+            payload,
+            provenance,
+            ["KRDU:flight-1"],
+            output_dir=tmp_path / "prediction",
+        )
+
+
+def test_legacy_checkpoint_cannot_be_released_as_a_fresh_blind_test(tmp_path):
+    checkpoint = tmp_path / "checkpoint.pt"
+    checkpoint.write_bytes(b"legacy checkpoint")
+    provenance = _fake_data_provenance()
+    payload = {
+        "data_provenance": provenance,
+        "split": {"test": ["KRDU:flight-1"]},
+    }
+
+    with pytest.raises(evaluation_protocol.TestReleaseError, match="predates"):
+        evaluation_protocol.create_test_release(checkpoint, payload, provenance)
+
+
+def test_predict_cli_refuses_test_without_explicit_release(tmp_path):
+    with pytest.raises(SystemExit):
+        ts_cli.main([
+            "predict",
+            "--checkpoint", str(tmp_path / "checkpoint.pt"),
+            "--data", str(tmp_path / "manifest.json"),
+            "--output-dir", str(tmp_path / "prediction"),
+            "--split", "test",
+        ])
 
 
 def _frame() -> frames.ENUFrame:
@@ -86,6 +210,13 @@ def _series(n_flights=8, **config_overrides):
     series, report = build_series(flights, config, airport=AIRPORT)
     assert report.built == n_flights, report.format()
     return series, config
+
+
+def _identity_normalizer() -> Normalizer:
+    return Normalizer(
+        mean=np.zeros(len(ch.CHANNELS), dtype=np.float64),
+        std=np.ones(len(ch.CHANNELS), dtype=np.float64),
+    )
 
 
 def _fitted_tail_flight():
@@ -333,6 +464,75 @@ def test_normalized_windows_interpolate_the_endpoint_without_padding():
     )
 
 
+def test_full_windows_use_physical_dt_and_mask_after_the_endpoint():
+    config = TSConfig(
+        seq_len=3,
+        n_segments=4,
+        horizon_mode=HORIZON_FULL,
+        full_horizon_steps=4,
+        dt_s=2.0,
+    )
+    series, report = build_series([_fitted_tail_flight()], config, airport="KFIT")
+    assert report.built == 1
+    s = series[0]
+    dataset = RandomAnchorTrajectoryWindows(series, config, Normalizer.fit(series))
+
+    _x, target, weights, final_time_s, _flight_weight = dataset[len(dataset) - 1]
+    assert config.pred_len == 4
+    assert target.shape == (4, len(config.channels))
+    assert float(final_time_s) == pytest.approx(6.0)
+    # Queries are +2, +4, +6 seconds, followed by one padded row.
+    assert torch.all(weights[:3, :3].sum(dim=-1) > 0.0)
+    assert torch.all(weights[3] == 0.0)
+    endpoint = dataset.normalizer.decode(target[2:3].numpy())[0]
+    assert endpoint[ch.IDX["e"]] == pytest.approx(25.0, abs=1e-4)
+
+
+def test_window_mode_requires_a_complete_short_horizon():
+    config = TSConfig(
+        seq_len=3,
+        horizon_mode=HORIZON_WINDOW,
+        window_horizon_steps=4,
+        dt_s=2.0,
+    )
+    series, report = build_series([_fitted_tail_flight()], config, airport="KFIT")
+    assert report.built == 1
+
+    anchors = window_anchors(series[0], config)
+    assert anchors.stop - 1 == series[0].n_supervision_samples - config.pred_len - 1
+    dataset = RandomAnchorTrajectoryWindows(series, config, Normalizer.fit(series))
+    _x, _target, weights, _final_time_s, _flight_weight = dataset[len(dataset) - 1]
+    assert torch.all(weights.sum(dim=-1) > 0.0)
+
+
+def test_window_anchor_requires_complete_physical_duration_for_fractional_endpoint():
+    config = TSConfig(
+        seq_len=3,
+        horizon_mode=HORIZON_WINDOW,
+        window_horizon_steps=4,
+        dt_s=2.0,
+    )
+    [source], _ = _series(n_flights=1, seq_len=3)
+    observed_times = np.arange(0.0, 12.0, 2.0)
+    observed_values = np.zeros((len(observed_times), len(ch.CHANNELS)))
+    series = dataset_module.FlightSeries(
+        flight_id=source.flight_id,
+        scenario=source.scenario,
+        frame=source.frame,
+        times=observed_times,
+        values=observed_values,
+        supervision_times=np.append(observed_times, 10.5),
+        supervision_values=np.zeros((len(observed_times) + 1, len(ch.CHANNELS))),
+        supervision_weights=np.ones(
+            (len(observed_times) + 1, len(ch.CHANNELS))
+        ) / len(ch.CHANNELS),
+    )
+
+    # Counting the four rows after index 2 would admit it, but 10.5 - 4.0 is only
+    # 6.5 seconds. Recursive inference always advances 4 * 2 = 8 seconds per pass.
+    assert list(window_anchors(series, config)) == []
+
+
 def test_vectorized_interpolation_matches_the_scalar_reference():
     series, config = _series(n_flights=2, n_segments=17)
     s = series[0]
@@ -450,22 +650,33 @@ def test_channel_weighted_mse_ignores_fitted_velocity_placeholders():
 
 
 def test_prediction_loss_adds_scaled_final_time_error():
-    config = TSConfig(final_time_scale_s=600.0, final_time_loss_weight=2.0)
+    config = TSConfig(
+        final_time_scale_s=600.0,
+        final_time_loss_weight=2.0,
+        kinematic_consistency_loss_weight=0.0,
+        terminal_loss_weight=0.0,
+    )
     states = torch.zeros((1, 2, len(ch.CHANNELS)))
     prediction = StatePrediction(states=states, final_time_s=torch.tensor([900.0]))
     loss = prediction_loss(
         prediction,
+        torch.zeros((1, len(ch.CHANNELS))),
         states,
         torch.ones_like(states),
         torch.tensor([600.0]),
         torch.ones(1),
         config,
+        _identity_normalizer(),
     )
     assert float(loss) == pytest.approx(0.5)
 
 
 def test_prediction_loss_applies_per_flight_airport_weights():
-    config = TSConfig(final_time_loss_weight=0.0)
+    config = TSConfig(
+        final_time_loss_weight=0.0,
+        kinematic_consistency_loss_weight=0.0,
+        terminal_loss_weight=0.0,
+    )
     target = torch.zeros((2, 1, len(ch.CHANNELS)))
     prediction = StatePrediction(
         states=torch.stack((torch.ones_like(target[0]), 3.0 * torch.ones_like(target[0]))),
@@ -473,14 +684,159 @@ def test_prediction_loss_applies_per_flight_airport_weights():
     )
     loss = prediction_loss(
         prediction,
+        torch.zeros((2, len(ch.CHANNELS))),
         target,
         torch.ones_like(target),
         torch.zeros(2),
         torch.tensor([1.5, 0.5]),
         config,
+        _identity_normalizer(),
     )
 
     assert float(loss) == pytest.approx((1.0 * 1.5 + 9.0 * 0.5) / 2.0)
+
+
+def test_position_velocity_consistency_loss_is_zero_for_integrated_motion():
+    anchor = torch.zeros((1, len(ch.CHANNELS)))
+    anchor[0, ch.IDX["edot"]] = 1.0
+    states = torch.zeros((1, 3, len(ch.CHANNELS)))
+    states[0, :, ch.IDX["e"]] = torch.tensor([1.0, 2.0, 3.0])
+    states[0, :, ch.IDX["edot"]] = 1.0
+
+    loss = position_velocity_consistency_loss(
+        anchor,
+        states,
+        torch.tensor([3.0]),
+        _identity_normalizer(),
+    )
+
+    assert loss.tolist() == pytest.approx([0.0])
+
+
+def test_position_velocity_consistency_loss_uses_physical_channel_scales():
+    normalizer = Normalizer(
+        mean=np.array([10.0, 20.0, 30.0, 5.0, 6.0, 7.0]),
+        std=np.array([2.0, 3.0, 4.0, 8.0, 9.0, 10.0]),
+    )
+    states = torch.zeros((1, 3, len(ch.CHANNELS)))
+    # One normalized e increment is 2 m. With dt=0.25 s it equals the decoded
+    # edot=8 m/s represented by (8 - mean 5) / std 8.
+    states[0, :, ch.IDX["e"]] = torch.tensor([0.0, 1.0, 2.0])
+    states[0, :, ch.IDX["edot"]] = (8.0 - 5.0) / 8.0
+    states[0, :, ch.IDX["ndot"]] = (0.0 - 6.0) / 9.0
+    states[0, :, ch.IDX["udot"]] = (0.0 - 7.0) / 10.0
+    anchor = states[:, 0].clone()
+    anchor[0, ch.IDX["e"]] = -1.0
+
+    loss = position_velocity_consistency_loss(
+        anchor,
+        states,
+        torch.tensor([0.75]),
+        normalizer,
+    )
+
+    assert loss.tolist() == pytest.approx([0.0], abs=1e-12)
+
+
+def test_position_velocity_consistency_normalizes_displacement_by_position_scale():
+    normalizer = Normalizer(
+        mean=np.zeros(len(ch.CHANNELS)),
+        std=np.array([100.0, 200.0, 300.0, 2.0, 4.0, 5.0]),
+    )
+    anchor = torch.zeros((1, len(ch.CHANNELS)))
+    states = torch.zeros((1, 1, len(ch.CHANNELS)))
+    states[0, 0, ch.IDX["e"]] = 0.1  # 10 m displacement, zero predicted velocity.
+
+    loss = position_velocity_consistency_loss(
+        anchor,
+        states,
+        torch.tensor([1.0]),
+        normalizer,
+    )
+
+    assert loss.tolist() == pytest.approx([(10.0 / 100.0) ** 2 / 3.0])
+
+
+def test_full_kinematic_loss_uses_dt_and_short_final_segment():
+    config = TSConfig(
+        horizon_mode=HORIZON_FULL,
+        full_horizon_steps=3,
+        dt_s=2.0,
+    )
+    normalizer = _identity_normalizer()
+    anchor = torch.zeros((1, len(ch.CHANNELS)))
+    states = torch.zeros((1, 3, len(ch.CHANNELS)))
+    states[0, :, ch.IDX["e"]] = torch.tensor([2.0, 3.0, 999.0])
+    states[0, :2, ch.IDX["edot"]] = 1.0
+    anchor[0, ch.IDX["edot"]] = 1.0
+    weights = torch.zeros_like(states)
+    weights[0, :2, list(ch.POSITION_IDX)] = 1.0
+
+    loss = position_velocity_consistency_loss(
+        anchor,
+        states,
+        torch.tensor([3.0]),
+        normalizer,
+        config=config,
+        state_weights=weights,
+    )
+
+    assert loss.tolist() == pytest.approx([0.0], abs=1e-12)
+
+
+def test_prediction_loss_adds_explicit_terminal_position_error():
+    config = TSConfig(
+        final_time_loss_weight=0.0,
+        kinematic_consistency_loss_weight=0.0,
+        terminal_loss_weight=3.0,
+    )
+    target = torch.zeros((1, 2, len(ch.CHANNELS)))
+    predicted = target.clone()
+    predicted[0, -1, ch.IDX["e"]] = 1.0
+
+    loss = prediction_loss(
+        StatePrediction(states=predicted, final_time_s=torch.tensor([2.0])),
+        torch.zeros((1, len(ch.CHANNELS))),
+        target,
+        torch.zeros_like(target),
+        torch.tensor([2.0]),
+        torch.ones(1),
+        config,
+        _identity_normalizer(),
+    )
+
+    assert float(loss) == pytest.approx(1.0)
+
+
+def test_full_terminal_loss_uses_last_unpadded_target():
+    config = TSConfig(
+        horizon_mode=HORIZON_FULL,
+        full_horizon_steps=3,
+        final_time_loss_weight=0.0,
+        kinematic_consistency_loss_weight=0.0,
+        terminal_loss_weight=3.0,
+    )
+    target = torch.zeros((1, 3, len(ch.CHANNELS)))
+    predicted = target.clone()
+    predicted[0, 1, ch.IDX["e"]] = 1.0
+    predicted[0, 2, ch.IDX["e"]] = 1000.0
+    weights = torch.zeros_like(target)
+    # Keep the rows identifiable as valid without also charging the e error to state MSE;
+    # this isolates the explicit terminal component in the total loss.
+    weights[0, :2, ch.IDX["n"]] = 1.0
+
+    loss = prediction_loss(
+        StatePrediction(states=predicted, final_time_s=torch.tensor([3.0])),
+        torch.zeros((1, len(ch.CHANNELS))),
+        target,
+        weights,
+        torch.tensor([3.0]),
+        torch.ones(1),
+        config,
+        _identity_normalizer(),
+    )
+
+    assert float(loss) == pytest.approx(1.0)
 
 
 def test_split_by_flight_is_disjoint_and_reproducible():
@@ -617,6 +973,48 @@ def test_ts_load_aggregates_multiple_airport_manifests(tmp_path):
     ]
 
 
+def test_ts_load_filters_qualified_keys_before_opening_source_tracks(tmp_path):
+    manifest_path = _write_arrival_manifest(tmp_path, ["A", "B"], airport="KRDU")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    selected_key = manifest["records"][0]["flight_key"]
+    excluded = manifest["records"][1]
+    (tmp_path / "tracks" / excluded["source_file"]).write_text(
+        "excluded source track must stay closed", encoding="utf-8"
+    )
+
+    flights = dataset_module.load_flight_dicts(
+        manifest_path,
+        include_flight_keys={f"KRDU:{selected_key}"},
+        verbose=False,
+    )
+
+    assert [flight["id"] for flight in flights] == ["A"]
+
+
+def test_manifest_split_keys_are_resolved_without_loading_trajectory_values():
+    config = TSConfig(seed=1337)
+    provenance = {
+        "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
+        "manifests": [{
+            "airport": "KRDU",
+            "source_records": [
+                {"flight_key": f"flight-{index}", "source_sha256": f"{index:064x}"}
+                for index in range(20)
+            ],
+        }],
+    }
+
+    resolved = dataset_module.flight_keys_by_split(provenance, config)
+
+    assert set(resolved) == {"train", "val", "test"}
+    assert sum(map(len, resolved.values())) == 20
+    assert all(
+        split_name_for_dataset_id(key, config) == split
+        for split, keys in resolved.items()
+        for key in keys
+    )
+
+
 def test_batch_probe_opens_outer_train_track_files_only(tmp_path):
     manifest_path = _write_arrival_manifest(
         tmp_path, [f"F{index:02d}" for index in range(40)]
@@ -648,6 +1046,37 @@ def test_batch_probe_candidate_grid_and_throughput_selection():
         {"batch_size": 256, "status": "oom"},
     ])
     assert best["batch_size"] == 128
+
+
+def test_batch_benchmark_executes_current_training_loss(monkeypatch):
+    series, config = _series(
+        n_flights=4,
+        device="cpu",
+        seq_len=20,
+        n_segments=8,
+        d_model=8,
+        d_ff=16,
+        n_heads=2,
+        e_layers=1,
+    )
+    normalizer = _identity_normalizer()
+    windows = FixedAnchorTrajectoryWindows(series, config, normalizer)
+    monkeypatch.setattr(torch.cuda, "reset_peak_memory_stats", lambda _device: None)
+    monkeypatch.setattr(torch.cuda, "synchronize", lambda _device: None)
+    monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda _device: 0)
+    monkeypatch.setattr(torch.cuda, "max_memory_reserved", lambda _device: 0)
+
+    result = batch_probe.benchmark_candidate(
+        windows,
+        config,
+        torch.device("cpu"),
+        batch_size=2,
+        warmup_steps=1,
+        measure_steps=1,
+        repeats=1,
+    )
+
+    assert result["status"] == "ok"
 
 
 def test_ts_load_rejects_duplicate_manifest_identity(tmp_path):
@@ -929,6 +1358,25 @@ def test_config_rejects_a_head_count_that_does_not_divide_d_model():
         TSConfig(d_model=100, n_heads=8)
 
 
+def test_default_config_uses_selected_normalized_output_and_physics_losses():
+    config = TSConfig()
+    assert config.n_segments == 64
+    assert TSConfig(model="patchtst").n_segments == 256
+    assert config.epochs == 180
+    assert config.patience == 20
+    assert config.kinematic_consistency_loss_weight == 3.0
+    assert config.terminal_loss_weight == 0.02
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["kinematic_consistency_loss_weight", "terminal_loss_weight"],
+)
+def test_negative_physics_loss_weights_are_rejected(field):
+    with pytest.raises(ValueError, match=field):
+        TSConfig(**{field: -0.1})
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -1022,6 +1470,33 @@ def test_auto_batch_selects_2048_when_2048_probe_succeeds(monkeypatch):
     ) == 2048
 
 
+def test_auto_batch_probe_executes_the_shared_physics_loss(monkeypatch):
+    config = TSConfig(
+        device="cpu",
+        seq_len=4,
+        n_segments=4,
+        d_model=8,
+        d_ff=16,
+        n_heads=2,
+        e_layers=1,
+    )
+    original_loss = train_module.prediction_loss
+    calls: list[tuple[torch.Size, torch.Size]] = []
+
+    def tracked_loss(prediction, anchor, target, *args):
+        calls.append((anchor.shape, target.shape))
+        return original_loss(prediction, anchor, target, *args)
+
+    monkeypatch.setattr(train_module, "prediction_loss", tracked_loss)
+    monkeypatch.setattr(torch.cuda, "synchronize", lambda _device: None)
+
+    batching._probe_training_step(config, 2, torch.device("cpu"))
+
+    assert calls == [
+        (torch.Size([2, len(ch.CHANNELS)]), torch.Size([2, 4, len(ch.CHANNELS)]))
+    ]
+
+
 def test_cross_validation_never_passes_outer_val_or_test_to_fit(tmp_path, monkeypatch):
     series, config = _series(
         n_flights=36, device="cpu", epochs=1, patience=1,
@@ -1039,10 +1514,19 @@ def test_cross_validation_never_passes_outer_val_or_test_to_fit(tmp_path, monkey
             epoch=1, val_loss=score, val_by_airport={AIRPORT: score}
         )
         return SimpleNamespace(
-            history=[row], best_val_loss=score, config=fold_config
+            history=[row], best_val_loss=score, config=fold_config,
+            model=object(), normalizer=Normalizer.fit(train_series),
+            device=torch.device("cpu"),
         )
 
     monkeypatch.setattr(cv, "fit_model", fake_fit)
+    monkeypatch.setattr(
+        cv, "evaluate_split",
+        lambda *_args, **_kwargs: {
+            "ade_m": 1.0,
+            "raw_kinematics": {key: 1.0 for key in RAW_KINEMATIC_METRIC_KEYS},
+        },
+    )
     provenance = {
         "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
         "manifests": [{
@@ -1066,6 +1550,14 @@ def test_cross_validation_never_passes_outer_val_or_test_to_fit(tmp_path, monkey
     assert all(not (identities & forbidden) for identities in observed)
     assert set.union(*observed) == {item.dataset_id for item in outer_train}
     assert result["leakage_guard"]["outer_test_used"] is False
+    assert result["schema_version"] == (
+        "ts-cross-validation-v10-raw-kinematic-metrics"
+    )
+    assert result["selection_metric"] == (
+        "mean outer-train-fold airport-macro weighted sum of normalized state MSE, "
+        "scaled final-time MSE, position/velocity displacement-consistency MSE, and "
+        "terminal-position MSE"
+    )
     assert (tmp_path / "best_config.json").is_file()
 
 
@@ -1096,6 +1588,11 @@ def test_cross_validation_runs_real_two_fold_search(tmp_path):
     )
     assert len(result["candidates"]) == 2
     assert all(len(candidate["folds"]) == 2 for candidate in result["candidates"])
+    assert all(
+        "raw_kinematics" in fold["validation_metrics"]
+        for candidate in result["candidates"]
+        for fold in candidate["folds"]
+    )
     assert result["base_config"]["n_segments"] == config.n_segments
     assert "n_segments" not in result["best_overrides"]
     assert json.loads((tmp_path / "best_config.json").read_text()) == result["best_overrides"]
@@ -1115,6 +1612,22 @@ def test_cross_validation_exhausts_the_default_three_parameter_grid():
         (64, 128, 256),
     ))
     assert all(candidate["d_ff"] == 2 * candidate["d_model"] for candidate in candidates)
+
+
+@pytest.mark.parametrize("horizon_mode", [HORIZON_FULL, HORIZON_WINDOW])
+def test_fixed_horizon_cv_does_not_repeat_inert_n_segment_candidates(horizon_mode):
+    config = TSConfig(horizon_mode=horizon_mode)
+    candidates = cv._candidate_overrides(config)
+
+    assert len(candidates) == 9
+    assert all("n_segments" not in candidate for candidate in candidates)
+    assert {
+        (candidate["learning_rate"], candidate["d_model"])
+        for candidate in candidates
+    } == set(itertools.product(
+        (1e-4, 3e-4, 5e-4),
+        (64, 128, 256),
+    ))
 
 
 # ── Metrics ──────────────────────────────────────────────────────────────────
@@ -1169,6 +1682,63 @@ def test_fde_reads_each_sample_own_last_valid_step():
     assert block["fde_m"] == pytest.approx((10.0 + 20.0) / 2)
 
 
+def test_raw_kinematic_metrics_use_nonuniform_segment_durations():
+    # Constant 1 m/s² eastward acceleration sampled at deliberately nonuniform node times.
+    # Trapezoidal velocity integration is exact here, acceleration is constant, and jerk is
+    # zero. A metric that silently assumes uniform N spacing fails this test.
+    node_times = np.array([0.0, 1.0, 3.0, 6.0])
+    nodes = np.zeros((1, len(node_times), len(ch.CHANNELS)), dtype=np.float64)
+    nodes[0, :, ch.IDX["e"]] = 0.5 * node_times**2
+    nodes[0, :, ch.IDX["edot"]] = node_times
+
+    block = raw_kinematic_metrics(
+        nodes[:, 0], nodes[:, 1:], np.diff(node_times)[None, :]
+    )
+
+    assert block["position_velocity_rmse_mps"] == pytest.approx(0.0, abs=1e-12)
+    assert block["heading_consistency_p95_deg"] == pytest.approx(0.0, abs=1e-12)
+    assert block["turn_rate_p95_deg_s"] == pytest.approx(0.0, abs=1e-12)
+    assert block["acceleration_p95_mps2"] == pytest.approx(1.0)
+    assert block["jerk_p95_mps3"] == pytest.approx(0.0, abs=1e-12)
+
+
+def test_raw_kinematic_metrics_measure_geometric_turn_acceleration_and_jerk():
+    # Three one-second position segments turn east -> north -> west. Node velocities are
+    # chosen so their trapezoidal midpoint exactly matches each geometric segment velocity;
+    # consistency and heading error must therefore be zero while the path still has a
+    # 90 deg/s turn rate, sqrt(200) m/s² acceleration and 20 m/s³ jerk.
+    nodes = np.zeros((1, 4, len(ch.CHANNELS)), dtype=np.float64)
+    nodes[0][:, [ch.IDX["e"], ch.IDX["n"]]] = np.array([
+        [0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0],
+    ])
+    nodes[0][:, [ch.IDX["edot"], ch.IDX["ndot"]]] = np.array([
+        [10.0, 0.0], [10.0, 0.0], [-10.0, 20.0], [-10.0, -20.0],
+    ])
+
+    block = raw_kinematic_metrics(
+        nodes[:, 0], nodes[:, 1:], np.ones((1, 3), dtype=np.float64)
+    )
+
+    assert block["position_velocity_rmse_mps"] == pytest.approx(0.0, abs=1e-12)
+    assert block["heading_consistency_p95_deg"] == pytest.approx(0.0, abs=1e-12)
+    assert block["turn_rate_p95_deg_s"] == pytest.approx(90.0)
+    assert block["acceleration_p95_mps2"] == pytest.approx(math.sqrt(200.0))
+    assert block["jerk_p95_mps3"] == pytest.approx(20.0)
+
+
+def test_raw_kinematic_metrics_detect_velocity_heading_disagreement():
+    nodes = np.zeros((1, 4, len(ch.CHANNELS)), dtype=np.float64)
+    nodes[0, :, ch.IDX["e"]] = np.arange(4) * 10.0
+    nodes[0, :, ch.IDX["ndot"]] = 10.0
+
+    block = raw_kinematic_metrics(
+        nodes[:, 0], nodes[:, 1:], np.ones((1, 3), dtype=np.float64)
+    )
+
+    assert block["position_velocity_rmse_mps"] == pytest.approx(math.sqrt(200.0 / 3.0))
+    assert block["heading_consistency_p95_deg"] == pytest.approx(90.0)
+
+
 # ── Forecast ─────────────────────────────────────────────────────────────────
 
 def test_forecast_uses_n_normalized_points_and_the_predicted_final_time():
@@ -1185,6 +1755,99 @@ def test_forecast_uses_n_normalized_points_and_the_predicted_final_time():
     assert np.diff(np.concatenate([[anchor_time], forecast.times])) == pytest.approx(
         np.full(config.n_segments, forecast.final_time_s / config.n_segments)
     )
+
+
+def test_full_forecast_uses_one_fixed_dt_pass_and_threshold_truncation():
+    series, config = _series(
+        n_flights=2,
+        seq_len=20,
+        horizon_mode=HORIZON_FULL,
+        full_horizon_steps=5,
+    )
+    normalizer = _identity_normalizer()
+
+    class FixedPrediction(torch.nn.Module):
+        def forward(self, history):
+            batch = len(history)
+            states = torch.zeros(
+                batch, config.pred_len, len(config.channels), device=history.device
+            )
+            states[:, :, ch.IDX["e"]] = torch.tensor(
+                [5.0, 2.0, 0.0, 3.0, 6.0], device=history.device
+            )
+            return StatePrediction(
+                states=states,
+                final_time_s=torch.full((batch,), 5.0, device=history.device),
+            )
+
+    forecast = forecast_approach(
+        FixedPrediction(), series[0], config, normalizer, device=torch.device("cpu")
+    )
+    anchor_time = series[0].times[forecast.anchor]
+
+    assert forecast.horizon_mode == HORIZON_FULL
+    assert forecast.n_steps == 3
+    assert forecast.times - anchor_time == pytest.approx([2.0, 4.0, 6.0])
+    assert forecast.final_time_s == pytest.approx(6.0)
+    assert forecast.passes == 1
+    assert forecast.truncated_at_threshold
+    assert not forecast.horizon_capped
+
+
+def test_window_forecast_recurses_to_the_full_horizon():
+    series, config = _series(
+        n_flights=2,
+        seq_len=20,
+        horizon_mode=HORIZON_WINDOW,
+        window_horizon_steps=2,
+        full_horizon_steps=6,
+    )
+    normalizer = Normalizer.fit(series)
+
+    class FixedPrediction(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.calls = 0
+
+        def forward(self, history):
+            self.calls += 1
+            states = torch.zeros(
+                len(history), config.pred_len, len(config.channels), device=history.device
+            )
+            states[:, :, ch.IDX["e"]] = 100.0 - self.calls
+            return StatePrediction(
+                states=states,
+                final_time_s=torch.full((len(history),), 12.0, device=history.device),
+            )
+
+    model = FixedPrediction()
+    forecast = forecast_approach(
+        model, series[0], config, normalizer, device=torch.device("cpu"), truncate=False
+    )
+
+    assert forecast.horizon_mode == HORIZON_WINDOW
+    assert forecast.n_steps == config.full_horizon_steps
+    assert forecast.passes == 3
+    assert model.calls == 3
+
+
+def test_config_keeps_three_horizon_output_lengths_separate():
+    normalized = TSConfig(model="itransformer")
+    full = TSConfig(
+        model="itransformer",
+        horizon_mode=HORIZON_FULL,
+        full_horizon_steps=300,
+    )
+    window = TSConfig(
+        model="itransformer",
+        horizon_mode=HORIZON_WINDOW,
+        window_horizon_steps=30,
+    )
+
+    assert normalized.horizon_mode == HORIZON_NORMALIZED
+    assert normalized.pred_len == normalized.n_segments == 64
+    assert full.pred_len == 300
+    assert window.pred_len == 30
 
 
 # ── Export seam ──────────────────────────────────────────────────────────────
@@ -1210,7 +1873,7 @@ def test_exported_record_satisfies_the_evaluation_contract():
     forecast = forecast_approach(model, series[0], config, normalizer,
                                  device=torch.device("cpu"))
     record = build_prediction_record(series[0], forecast, index=0,
-                                     model_name=config.model, n_segments=config.n_segments)
+                                     model_name=config.model, horizon_mode=config.horizon_mode)
 
     parsed = record_from_dict(record.eval_record)
     assert parsed.solved
@@ -1238,7 +1901,7 @@ def test_reference_covers_the_same_span_as_the_prediction():
     forecast = forecast_approach(model, series[0], config, normalizer,
                                  device=torch.device("cpu"))
     record = build_prediction_record(series[0], forecast, index=0,
-                                     model_name=config.model, n_segments=config.n_segments)
+                                     model_name=config.model, horizon_mode=config.horizon_mode)
 
     predicted = record_from_dict(record.eval_record)
     reference = record_from_dict(record.reference_record)
@@ -1261,7 +1924,7 @@ def test_batch_writes_a_manifest_that_evaluation_can_load_and_grade(tmp_path):
         forecast = forecast_approach(model, s, config, normalizer, device=torch.device("cpu"))
         records.append(build_prediction_record(s, forecast, index=index,
                                                model_name=config.model,
-                                               n_segments=config.n_segments))
+                                               horizon_mode=config.horizon_mode))
         overlap.append(observed_series_metrics(s, forecast))
     write_batch(records, output_dir=tmp_path, config_dict=config.to_dict(), overlap=overlap)
 
@@ -1291,7 +1954,7 @@ def test_manifest_carries_the_accuracy_the_run_printed(tmp_path):
         forecast = forecast_approach(model, s, config, normalizer, device=torch.device("cpu"))
         records.append(build_prediction_record(s, forecast, index=index,
                                                model_name=config.model,
-                                               n_segments=config.n_segments))
+                                               horizon_mode=config.horizon_mode))
         overlap.append(observed_series_metrics(s, forecast))
     write_batch(
         records,
@@ -1310,30 +1973,72 @@ def test_manifest_carries_the_accuracy_the_run_printed(tmp_path):
     assert summary["accuracy"]["flights"] == len(series)
     assert summary["accuracy"]["ade_m"]["mean"] > 0.0
     assert summary["accuracy"]["final_time_s"]["mae"] >= 0.0
+    assert set(summary["accuracy"]["raw_kinematics"]) == {
+        "predicted", "observed_baseline", "delta"
+    }
     # Per-flight too, so a batch can be re-aggregated (per runway, per capped/uncapped)
     # without re-running the forecast.
     for row, metrics in zip(summary["results"], overlap):
         assert row["ade_m"] == pytest.approx(metrics["ade_m"])
         assert row["overlap_steps"] == metrics["n_steps"]
         assert row["final_time_error_s"] == pytest.approx(metrics["final_time_error_s"])
+        assert row["raw_kinematics"] == metrics["raw_kinematics"]
 
 
 def test_accuracy_block_excludes_and_counts_flights_with_no_overlap():
     # A forecast that shares no samples with its observed track carries NaN errors. Averaging
     # those in would poison the batch mean; silently dropping them would overstate coverage.
+    raw = {
+        "predicted": {key: 2.0 for key in RAW_KINEMATIC_METRIC_KEYS},
+        "observed_baseline": {key: 1.0 for key in RAW_KINEMATIC_METRIC_KEYS},
+    }
     overlap = [{"ade_m": 100.0, "fde_m": 200.0, "cross_track_p95_m": 50.0,
                 "altitude_p95_m": 10.0, "n_steps": 30,
-                "true_final_time_s": 300.0, "final_time_error_s": 20.0},
+                "true_final_time_s": 300.0, "final_time_error_s": 20.0,
+                "raw_kinematics": raw},
                {"ade_m": float("nan"), "fde_m": float("nan"), "cross_track_p95_m": float("nan"),
                 "altitude_p95_m": float("nan"), "n_steps": 0,
-                "true_final_time_s": 400.0, "final_time_error_s": -10.0}]
+                "true_final_time_s": 400.0, "final_time_error_s": -10.0,
+                "raw_kinematics": raw}]
     block = accuracy_block(overlap)
     assert block["flights"] == 1 and block["flights_without_overlap"] == 1
     assert block["ade_m"]["mean"] == pytest.approx(100.0)
+    assert block["ade_m"]["median"] == pytest.approx(100.0)
     assert block["final_time_s"]["mae"] == pytest.approx(15.0)
+    raw_summary = block["raw_kinematics"]
+    assert raw_summary["predicted"][RAW_KINEMATIC_METRIC_KEYS[0]]["median"] == 2.0
+    assert raw_summary["delta"][RAW_KINEMATIC_METRIC_KEYS[0]] == 1.0
 
     empty = accuracy_block([overlap[1]])
     assert empty["flights"] == 0 and "ade_m" not in empty
+
+
+def test_accuracy_block_emits_empty_raw_metric_stats_when_all_values_are_nan():
+    raw = {
+        "predicted": {key: float("nan") for key in RAW_KINEMATIC_METRIC_KEYS},
+        "observed_baseline": {key: float("nan") for key in RAW_KINEMATIC_METRIC_KEYS},
+    }
+    row = {
+        "ade_m": 1.0,
+        "fde_m": 2.0,
+        "cross_track_p95_m": 1.0,
+        "altitude_p95_m": 1.0,
+        "n_steps": 1,
+        "true_final_time_s": 1.0,
+        "final_time_error_s": 0.0,
+        "raw_kinematics": raw,
+    }
+
+    block = accuracy_block([row])
+
+    for role in ("predicted", "observed_baseline"):
+        for key in RAW_KINEMATIC_METRIC_KEYS:
+            stats = block["raw_kinematics"][role][key]
+            assert stats["count"] == 0
+            assert all(math.isnan(stats[name]) for name in ("median", "mean", "p95", "max"))
+    assert all(
+        math.isnan(value) for value in block["raw_kinematics"]["delta"].values()
+    )
 
 
 def test_write_batch_rejects_overlap_that_does_not_line_up_with_the_records(tmp_path):
@@ -1345,7 +2050,7 @@ def test_write_batch_rejects_overlap_that_does_not_line_up_with_the_records(tmp_
     records = [
         build_prediction_record(
             s, forecast_approach(model, s, config, normalizer, device=torch.device("cpu")),
-            index=index, model_name=config.model, n_segments=config.n_segments)
+            index=index, model_name=config.model, horizon_mode=config.horizon_mode)
         for index, s in enumerate(series)
     ]
     with pytest.raises(ValueError, match="once per record"):
@@ -1364,7 +2069,7 @@ def test_stale_records_are_cleared_before_a_rerun(tmp_path):
                                          device=torch.device("cpu"))
             records.append(build_prediction_record(s, forecast, index=index,
                                                    model_name=config.model,
-                                                   n_segments=config.n_segments))
+                                                   horizon_mode=config.horizon_mode))
             overlap.append(observed_series_metrics(s, forecast))
         write_batch(records, output_dir=tmp_path, config_dict=config.to_dict(), overlap=overlap)
 
@@ -1375,6 +2080,191 @@ def test_stale_records_are_cleared_before_a_rerun(tmp_path):
 
 
 # ── End to end ───────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize(
+    ("horizon_mode", "contract", "expected_passes"),
+    (
+        (HORIZON_FULL, "full-horizon-fixed-time-displacement-kinematic-v2", 1),
+        (HORIZON_WINDOW, "recursive-window-fixed-time-displacement-kinematic-v2", 3),
+    ),
+)
+def test_fixed_time_modes_train_checkpoint_and_forecast(
+    tmp_path, horizon_mode, contract, expected_passes
+):
+    series, config = _series(
+        n_flights=12,
+        model="itransformer",
+        horizon_mode=horizon_mode,
+        full_horizon_steps=12,
+        window_horizon_steps=4,
+        epochs=1,
+        patience=1,
+        batch_size=32,
+        d_model=16,
+        n_heads=4,
+        d_ff=32,
+        e_layers=1,
+        seq_len=20,
+        device="cpu",
+    )
+    train(
+        series,
+        config,
+        output_dir=tmp_path,
+        data_provenance=_fake_data_provenance(),
+        verbose=False,
+    )
+
+    model, loaded_config, normalizer, payload = load_checkpoint(tmp_path / "checkpoint.pt")
+    forecast = forecast_approach(
+        model,
+        series[0],
+        loaded_config,
+        normalizer,
+        device=torch.device("cpu"),
+        truncate=False,
+    )
+
+    assert payload["target_contract"] == contract
+    assert loaded_config.horizon_mode == horizon_mode
+    assert forecast.passes == expected_passes
+    assert forecast.n_steps == loaded_config.full_horizon_steps
+
+
+def test_fit_evaluation_is_fixed_anchor_eval_mode_and_repeatable():
+    series, config = _series(
+        n_flights=12,
+        random_train_anchor=True,
+        dropout=0.5,
+        batch_size=32,
+        d_model=16,
+        n_heads=4,
+        d_ff=32,
+        e_layers=1,
+        seq_len=20,
+        n_segments=8,
+        device="cpu",
+    )
+    train_series, val_series, _test_series = split_by_flight(series, config)
+    normalizer = Normalizer.fit(train_series)
+    model = build_model(config).train()
+
+    first = evaluate_fit_splits(
+        model, train_series, val_series, normalizer, config, torch.device("cpu")
+    )
+    second = evaluate_fit_splits(
+        model, train_series, val_series, normalizer, config, torch.device("cpu")
+    )
+
+    assert not model.training
+    assert first == second
+    assert first["schema_version"] == FIT_EVALUATION_SCHEMA
+    assert first["evaluation_contract"] == {
+        "model_mode": "eval",
+        "dropout": "disabled",
+        "anchor": "fixed L-1",
+        "batch_order": "sequential (shuffle disabled)",
+        "splits": ["train", "val"],
+        "metric_grid": "native target grid; measured-data mask",
+    }
+    assert first["splits"]["train"]["flights"] == len(train_series)
+    assert first["splits"]["val"]["flights"] == len(val_series)
+    assert first["diagnostics"]["native_generalization"]["ade_m"]["ratio"] > 0.0
+
+
+def test_evaluate_fit_cli_runs_train_and_validation_together(tmp_path, monkeypatch):
+    series, config = _series(
+        n_flights=12,
+        batch_size=32,
+        d_model=16,
+        n_heads=4,
+        d_ff=32,
+        e_layers=1,
+        seq_len=20,
+        n_segments=8,
+        device="cpu",
+    )
+    train_series, val_series, test_series = split_by_flight(series, config)
+    normalizer = Normalizer.fit(train_series)
+    checkpoint = tmp_path / "checkpoint.pt"
+    checkpoint.write_bytes(b"checkpoint identity")
+    provenance = _fake_data_provenance()
+    payload = {
+        "split": {
+            "train": [item.dataset_id for item in train_series],
+            "val": [item.dataset_id for item in val_series],
+            "test": [item.dataset_id for item in test_series],
+        },
+        "data_provenance": provenance,
+    }
+    flights = [{"key": item.dataset_id} for item in (*train_series, *val_series)]
+    report = SimpleNamespace(format=lambda: "built synthetic fit replay")
+
+    monkeypatch.setattr(
+        ts_cli, "load_checkpoint",
+        lambda _path: (build_model(config), config, normalizer, payload),
+    )
+    monkeypatch.setattr(ts_cli, "arrival_data_provenance", lambda _data: provenance)
+    monkeypatch.setattr(ts_cli, "require_matching_data_provenance", lambda *_args: None)
+    loaded_keys = None
+
+    def load_selected(_data, *, include_flight_keys=None):
+        nonlocal loaded_keys
+        loaded_keys = include_flight_keys
+        return flights
+
+    monkeypatch.setattr(ts_cli, "load_flight_dicts", load_selected)
+    monkeypatch.setattr(ts_cli, "dataset_flight_key", lambda flight, _index: flight["key"])
+    monkeypatch.setattr(ts_cli, "build_series", lambda *_args, **_kwargs: (series, report))
+    monkeypatch.setattr(ts_cli, "resolve_device", lambda _device: torch.device("cpu"))
+
+    assert ts_cli.main([
+        "evaluate-fit",
+        "--checkpoint", str(checkpoint),
+        "--data", str(tmp_path / "manifest.json"),
+        "--output-dir", str(tmp_path / "fit"),
+        "--device", "cpu",
+    ]) == 0
+    replay = json.loads(
+        (tmp_path / "fit" / FIT_EVALUATION_NAME).read_text(encoding="utf-8")
+    )
+    assert set(replay["splits"]) == {"train", "val"}
+    assert loaded_keys == set(payload["split"]["train"] + payload["split"]["val"])
+
+
+def test_train_refuses_to_replace_a_checkpoint_with_a_test_release(tmp_path):
+    series, config = _series(
+        n_flights=12,
+        epochs=1,
+        patience=1,
+        batch_size=32,
+        d_model=16,
+        n_heads=4,
+        d_ff=32,
+        e_layers=1,
+        seq_len=20,
+        device="cpu",
+    )
+    output = tmp_path / "released"
+    output.mkdir()
+    checkpoint = output / "checkpoint.pt"
+    checkpoint.write_bytes(b"released checkpoint")
+    (output / evaluation_protocol.TEST_RELEASE_NAME).write_text(
+        json.dumps({"schema_version": evaluation_protocol.TEST_RELEASE_SCHEMA}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="test release"):
+        train(
+            series,
+            config,
+            output_dir=output,
+            data_provenance=_fake_data_provenance(),
+            verbose=False,
+        )
+
+    assert checkpoint.read_bytes() == b"released checkpoint"
+
 
 @pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
 def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
@@ -1405,11 +2295,28 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
         verbose=False,
     )
     assert summary["epochs_run"] == 2
+    assert set(summary["metrics"]) == {"train", "val"}
+    assert summary["metrics"]["train"]["ade_m"] > 0.0
     assert summary["metrics"]["val"]["ade_m"] > 0.0
+    assert "raw_kinematics" in summary["metrics"]["train"]
+    assert "raw_kinematics" in summary["metrics"]["val"]
+    fit_evaluation = json.loads(
+        (tmp_path / "run" / FIT_EVALUATION_NAME).read_text(encoding="utf-8")
+    )
+    assert fit_evaluation["schema_version"] == FIT_EVALUATION_SCHEMA
+    assert fit_evaluation["checkpoint"]["sha256"] == hashlib.sha256(
+        (tmp_path / "run" / "checkpoint.pt").read_bytes()
+    ).hexdigest()
+    assert set(fit_evaluation["splits"]) == {"train", "val"}
 
     model, loaded_config, normalizer, payload = load_checkpoint(tmp_path / "run" / "checkpoint.pt")
     assert loaded_config == config          # the config survives the round-trip verbatim
-    assert payload["target_contract"] == "normalized-time-runway-crossing-v1"
+    assert payload["target_contract"] == (
+        "normalized-time-runway-crossing-displacement-kinematic-v3"
+    )
+    assert payload[evaluation_protocol.TEST_RELEASE_PROTOCOL_FIELD] == (
+        evaluation_protocol.TEST_RELEASE_SCHEMA
+    )
     assert set(payload["split"]) == {"train", "val", "test"}
     assert payload["data_provenance"] == provenance
     checkpoint = tmp_path / "run" / "checkpoint.pt"
@@ -1417,14 +2324,25 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
         (tmp_path / "run" / "checkpoint_metadata.json").read_text(encoding="utf-8")
     )
     assert metadata == {
-        "schema_version": "ts-checkpoint-metadata-v7-anchor-policy",
+        "schema_version": "ts-checkpoint-metadata-v13-three-horizon-modes",
+        evaluation_protocol.TEST_RELEASE_PROTOCOL_FIELD:
+            evaluation_protocol.TEST_RELEASE_SCHEMA,
         "checkpoint_sha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
         "arrival_manifests": {AIRPORT: "a" * 64},
         "random_train_anchor": False,
+        "horizon_mode": HORIZON_NORMALIZED,
+        "pred_len": config.pred_len,
+        "full_horizon_steps": config.full_horizon_steps,
         "split_sha256": {
             split: hashlib.sha256("\n".join(sorted(payload["split"][split])).encode()).hexdigest()
             for split in ("train", "val", "test")
         },
+    }
+    assert set(summary["history"][0]["train_components"]) == {
+        "state", "final_time", "kinematic", "terminal"
+    }
+    assert set(summary["history"][0]["val_components"]) == {
+        "state", "final_time", "kinematic", "terminal"
     }
 
     records, overlap = [], []
@@ -1433,7 +2351,7 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
                                      device=torch.device("cpu"))
         records.append(build_prediction_record(s, forecast, index=index,
                                                model_name=loaded_config.model,
-                                               n_segments=loaded_config.n_segments))
+                                               horizon_mode=loaded_config.horizon_mode))
         overlap.append(observed_series_metrics(s, forecast))
     out = tmp_path / "pred"
     write_batch(records, output_dir=out, config_dict=loaded_config.to_dict(), overlap=overlap)

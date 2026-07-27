@@ -1,4 +1,4 @@
-"""Observed arrivals -> uniform histories -> normalized-progress trajectory targets.
+"""Observed arrivals -> uniform histories -> configured trajectory-time targets.
 
 Pipeline per flight::
 
@@ -56,8 +56,15 @@ from channels import (
     channels_from_states,
     resample_uniform,
 )
-from config import DEFAULT_AIRCRAFT_TYPE, TSConfig
+from config import (
+    DEFAULT_AIRCRAFT_TYPE,
+    HORIZON_FULL,
+    HORIZON_NORMALIZED,
+    HORIZON_WINDOW,
+    TSConfig,
+)
 from coordinate_frames import CoordinateFrame, frame_for_state
+from time_grids import output_time_grid
 
 ARRIVAL_DATA_PROVENANCE_SCHEMA = "ts-arrival-data-v2-multi-airport"
 
@@ -334,15 +341,55 @@ class Normalizer:
 # ── Loading ──────────────────────────────────────────────────────────────────
 
 def load_flight_dicts(
-    paths: str | Path | Sequence[str | Path], *, verbose: bool = True
+    paths: str | Path | Sequence[str | Path],
+    *,
+    include_flight_keys: set[str] | None = None,
+    verbose: bool = True,
 ) -> list[dict[str, Any]]:
-    """Model-ready flights from one or more authoritative arrival manifests."""
+    """Model-ready flights from authoritative manifests, optionally split-filtered.
+
+    ``include_flight_keys`` uses the airport-qualified checkpoint identity
+    ``AIRPORT:flight_key``. The set is reduced to each manifest's local keys before
+    :func:`load_arrival_flights` opens source tracks, so an excluded split's trajectory
+    values are never read merely to discard them later.
+    """
+    requested = None if include_flight_keys is None else set(include_flight_keys)
     flights: list[dict[str, Any]] = []
+    loaded_keys: set[str] = set()
     for manifest_path in _manifest_paths(paths):
-        manifest_flights = load_arrival_flights(manifest_path)
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        airport = str(manifest.get("airport") or "").strip().upper()
+        local_keys = None
+        if requested is not None:
+            prefix = f"{airport}:"
+            local_keys = {
+                key[len(prefix):] for key in requested if key.startswith(prefix)
+            }
+            if not local_keys:
+                if verbose:
+                    print(f"  {manifest_path}: 0 selected manifest-rostered arrival(s)")
+                continue
+        manifest_flights = load_arrival_flights(
+            manifest_path,
+            include_flight_keys=local_keys,
+        )
         flights.extend(manifest_flights)
+        loaded_keys.update(
+            dataset_flight_key(flight, index)
+            for index, flight in enumerate(manifest_flights)
+        )
         if verbose:
-            print(f"  {manifest_path}: {len(manifest_flights)} manifest-rostered arrival(s)")
+            qualifier = "selected " if requested is not None else ""
+            print(
+                f"  {manifest_path}: {len(manifest_flights)} "
+                f"{qualifier}manifest-rostered arrival(s)"
+            )
+    if requested is not None:
+        missing = requested - loaded_keys
+        if missing:
+            raise ValueError(
+                f"arrival manifests do not roster requested flight {min(missing)!r}"
+            )
     return flights
 
 
@@ -606,25 +653,39 @@ def window_anchors(
     An anchor ``i`` is the index of the LAST observed sample: the model is shown
     ``values[i - seq_len + 1 : i + 1]`` and must predict what follows.
 
-    Every anchor must leave a non-empty remainder.  That remainder is resampled to the same
-    N endpoints on normalized progress ``tau = 1/N, ..., 1`` regardless of wall-clock time.
+    Normalized and full modes accept any non-empty remainder; normalized resamples the
+    complete remainder and full masks a short padded suffix. Window mode requires a complete
+    fixed-dt short horizon because those targets train one recursive forecasting pass.
     """
     if minimum_anchor_index is not None and minimum_anchor_index < 0:
         raise ValueError("minimum_anchor_index must be non-negative")
     first = max(config.seq_len - 1, minimum_anchor_index or 0)
     # An anchor is always observed; fitted rows can be targets but never model inputs.
-    last = min(series.n_samples - 1, series.n_supervision_samples - 2)
+    last_with_remainder = series.n_supervision_samples - 2
+    required_window_s = config.pred_len * config.dt_s
+    complete_window_indices = np.flatnonzero(
+        series.supervision_times[-1] - series.times >= required_window_s - 1e-9
+    )
+    last_with_complete_window = (
+        int(complete_window_indices[-1]) if len(complete_window_indices) else -1
+    )
+    last_by_mode = {
+        HORIZON_NORMALIZED: last_with_remainder,
+        HORIZON_FULL: last_with_remainder,
+        HORIZON_WINDOW: last_with_complete_window,
+    }
+    last = min(series.n_samples - 1, last_by_mode[config.horizon_mode])
     return range(first, last + 1) if last >= first else range(0)
 
 
 class TrajectoryWindows(Dataset, ABC):
-    """Shared normalized-target and batch mechanics for an explicit anchor population.
+    """Shared target-grid and batch mechanics for an explicit anchor population.
 
     Measured rows supervise all six channels. Fitted rows supervise only ``e/n/u`` at lower
-    weight.  Linear interpolation maps the remainder of every approach to a fixed progress
-    grid, so there is no padding and N does not imply a fixed number of seconds. Concrete
-    subclasses own anchor population and per-epoch index selection; this class contains no
-    fixed-versus-random mode branch.
+    weight. Linear interpolation maps the remainder either to a complete normalized grid or
+    to a physical full/window grid with a masked suffix. Concrete subclasses own anchor
+    population and per-epoch index selection; this class contains no fixed-versus-random
+    anchor-policy branch.
     """
 
     anchor_description: str
@@ -665,8 +726,10 @@ class TrajectoryWindows(Dataset, ABC):
         self.encoded = [
             normalizer.encode(s.supervision_values).astype(np.float32) for s in self.series
         ]
+        # Public diagnostic for normalized-time experiments. Actual query times come from
+        # the shared clock below, which also defines fixed-time loss and inference timing.
         self.progress = (
-            np.arange(1, config.n_segments + 1, dtype=np.float64) / config.n_segments
+            np.arange(1, config.pred_len + 1, dtype=np.float64) / config.pred_len
         )
         self.kinematic_channels = np.array(
             [channel for channel in range(len(config.channels)) if channel not in POSITION_IDX]
@@ -725,7 +788,8 @@ class TrajectoryWindows(Dataset, ABC):
         x = values[anchor - L + 1 : anchor + 1]
         anchor_time = float(series.times[anchor])
         final_time_s = float(series.supervision_times[-1] - anchor_time)
-        query_times = anchor_time + self.progress * final_time_s
+        time_grid = output_time_grid(final_time_s, self.config)
+        query_times = anchor_time + time_grid.offsets_s
 
         # One search locates interpolation neighbours for every output time. The same
         # [N] neighbour arrays then interpolate all C state and weight channels together;
@@ -740,6 +804,7 @@ class TrajectoryWindows(Dataset, ABC):
         weights = source_weights[left] + fraction * (
             source_weights[right] - source_weights[left]
         )
+        weights[~time_grid.active] = 0.0
 
         # An observed crossing remains supervised even when it lies off the regular input
         # grid, but fitted-tail kinematics beyond the last measured velocity stay masked.
@@ -776,7 +841,7 @@ class TrajectoryWindows(Dataset, ABC):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Build one contiguous batch without per-sample Tensor creation and collation."""
         batch_size = len(indices)
-        L, N, C = self.config.seq_len, self.config.n_segments, len(self.config.channels)
+        L, N, C = self.config.seq_len, self.config.pred_len, len(self.config.channels)
         x = np.empty((batch_size, L, C), dtype=np.float32)
         y = np.empty((batch_size, N, C), dtype=np.float32)
         weights = np.empty_like(y)
@@ -852,6 +917,26 @@ def split_name_for_dataset_id(dataset_id: str, config: TSConfig) -> str:
     if fraction < config.test_fraction + config.val_fraction:
         return "val"
     return "train"
+
+
+def flight_keys_by_split(
+    data_provenance: dict[str, Any], config: TSConfig
+) -> dict[str, list[str]]:
+    """Resolve airport-qualified split identities from manifest metadata only.
+
+    Arrival provenance already carries the authoritative roster and source digests. This
+    helper deliberately does not open any source trajectory file; callers can pass the
+    returned keys to :func:`load_flight_dicts` before loading model inputs.
+    """
+    if data_provenance.get("schema_version") != ARRIVAL_DATA_PROVENANCE_SCHEMA:
+        raise ValueError("data_provenance is not a TS arrival-data fingerprint")
+    result: dict[str, list[str]] = {"train": [], "val": [], "test": []}
+    for manifest in data_provenance.get("manifests", []):
+        airport = str(manifest.get("airport") or "").strip().upper()
+        for record in manifest.get("source_records", []):
+            dataset_id = f"{airport}:{record['flight_key']}"
+            result[split_name_for_dataset_id(dataset_id, config)].append(dataset_id)
+    return result
 
 
 def split_by_flight(

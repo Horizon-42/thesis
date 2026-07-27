@@ -1,9 +1,9 @@
-"""Training loop: normalized-progress state loss plus final-time loss.
+"""Training loop: configured-time-grid state loss plus final-time/physics losses.
 
 The checkpoint carries the config, the fitted normalizer and the flight ids of each split
 alongside the weights. That is what makes inference reproducible without re-deriving
 anything: ``forecast.py`` loads a checkpoint and knows the resample step, channel order,
-normalized segment count, and which flights the model must not be evaluated on.
+output length/time mode, and which flights the model must not be evaluated on.
 """
 
 from __future__ import annotations
@@ -20,9 +20,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from channels import CHANNELS
+from channels import CHANNELS, IDX, POSITION_IDX
 from batching import resolve_batch_size
-from config import TSConfig
+from config import HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW, TSConfig
 from dataset import (
     ARRIVAL_DATA_PROVENANCE_SCHEMA,
     FixedAnchorTrajectoryWindows,
@@ -35,15 +35,28 @@ from dataset import (
     split_by_flight,
     window_anchors,
 )
-from metrics import error_by_progress, trajectory_metrics
+from evaluation_protocol import (
+    TEST_RELEASE_NAME,
+    TEST_RELEASE_PROTOCOL_FIELD,
+    TEST_RELEASE_SCHEMA,
+)
+from metrics import error_by_progress, raw_kinematic_metrics, trajectory_metrics
 from models import build_model, parameter_count, resolve_device
 from prediction_outputs import StatePrediction
+from time_grids import batch_time_grid, numpy_inference_time_grid
 
 CHECKPOINT_NAME = "checkpoint.pt"
 CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
-CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v7-anchor-policy"
-TARGET_CONTRACT = "normalized-time-runway-crossing-v1"
+CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v13-three-horizon-modes"
+TARGET_CONTRACTS = {
+    HORIZON_NORMALIZED: "normalized-time-runway-crossing-displacement-kinematic-v3",
+    HORIZON_FULL: "full-horizon-fixed-time-displacement-kinematic-v2",
+    HORIZON_WINDOW: "recursive-window-fixed-time-displacement-kinematic-v2",
+}
 HISTORY_NAME = "history.json"
+FIT_EVALUATION_NAME = "fit_evaluation.json"
+FIT_EVALUATION_SCHEMA = "ts-fit-evaluation-v1-best-checkpoint-fixed-anchor"
+LOSS_COMPONENT_NAMES = ("state", "final_time", "kinematic", "terminal")
 
 
 def _file_sha256(path: Path) -> str:
@@ -71,15 +84,101 @@ def masked_mse(predicted: torch.Tensor, target: torch.Tensor, mask: torch.Tensor
     return error.sum() / denominator.clamp(min=1.0)
 
 
-def prediction_loss(
+@dataclass(frozen=True)
+class LossComponents:
+    """Weighted scalar contributions whose sum is the optimization objective."""
+
+    state: torch.Tensor
+    final_time: torch.Tensor
+    kinematic: torch.Tensor
+    terminal: torch.Tensor
+
+    @property
+    def total(self) -> torch.Tensor:
+        return self.state + self.final_time + self.kinematic + self.terminal
+
+    def tensors(self) -> dict[str, torch.Tensor]:
+        return {
+            "state": self.state,
+            "final_time": self.final_time,
+            "kinematic": self.kinematic,
+            "terminal": self.terminal,
+        }
+
+
+def position_velocity_consistency_loss(
+    normalized_anchor_state: torch.Tensor,
+    normalized_states: torch.Tensor,
+    target_final_time_s: torch.Tensor,
+    normalizer: Normalizer,
+    *,
+    config: TSConfig | None = None,
+    state_weights: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Per-flight displacement implied by position versus integrated velocity.
+
+    State predictions are standardized channel-wise, so the positions and velocities are
+    decoded before differencing. The displacement residual is divided by each fitted
+    position scale. Unlike dividing finite-difference velocity by velocity scale, this does
+    not make the position gradient grow as ``1 / dt`` when N increases. Ground-truth
+    duration defines ``dt`` during training, so the time head cannot shrink this loss.
+    """
+    _batch_size, n_segments, _channels = normalized_states.shape
+    normalized_states = torch.cat(
+        (normalized_anchor_state.unsqueeze(1), normalized_states), dim=1
+    )
+    position_indices = list(POSITION_IDX)
+    velocity_indices = [IDX["edot"], IDX["ndot"], IDX["udot"]]
+    dtype, device = normalized_states.dtype, normalized_states.device
+    position_mean = torch.as_tensor(
+        normalizer.mean[position_indices], dtype=dtype, device=device
+    )
+    position_scale = torch.as_tensor(
+        normalizer.std[position_indices], dtype=dtype, device=device
+    )
+    velocity_mean = torch.as_tensor(
+        normalizer.mean[velocity_indices], dtype=dtype, device=device
+    )
+    velocity_scale = torch.as_tensor(
+        normalizer.std[velocity_indices], dtype=dtype, device=device
+    )
+
+    positions = (
+        normalized_states[..., position_indices] * position_scale + position_mean
+    )
+    velocities = (
+        normalized_states[..., velocity_indices] * velocity_scale + velocity_mean
+    )
+    if config is None:
+        durations = (target_final_time_s / n_segments).to(dtype=dtype).view(-1, 1)
+        durations = durations.expand(-1, n_segments)
+        active = torch.ones_like(durations, dtype=torch.bool)
+    else:
+        durations, active = batch_time_grid(target_final_time_s.to(dtype=dtype), config)
+    if state_weights is not None:
+        active = active & (state_weights.sum(dim=-1) > 0.0)
+    interval_velocity = 0.5 * (velocities[:, 1:] + velocities[:, :-1])
+    displacement_residual = (
+        positions[:, 1:] - positions[:, :-1]
+        - interval_velocity * durations.unsqueeze(-1)
+    )
+    normalized_residual = displacement_residual / position_scale
+    squared = normalized_residual.square() * active.unsqueeze(-1)
+    denominator = (active.sum(dim=1) * len(position_indices)).clamp(min=1)
+    return squared.sum(dim=(1, 2)) / denominator
+
+
+def prediction_loss_components(
     prediction: StatePrediction,
+    normalized_anchor_state: torch.Tensor,
     target_states: torch.Tensor,
     state_weights: torch.Tensor,
     target_final_time_s: torch.Tensor,
     flight_weights: torch.Tensor,
     config: TSConfig,
-) -> torch.Tensor:
-    """Airport-macro joint loss, with every flight represented once per epoch."""
+    normalizer: Normalizer,
+) -> LossComponents:
+    """Return the four weighted airport-macro loss contributions."""
     state_error = ((prediction.states - target_states) ** 2 * state_weights).sum(
         dim=(1, 2)
     )
@@ -88,11 +187,75 @@ def prediction_loss(
     time_loss = (
         (prediction.final_time_s - target_final_time_s) / config.final_time_scale_s
     ).square()
-    per_flight = state_loss + config.final_time_loss_weight * time_loss
+    if config.kinematic_consistency_loss_weight:
+        kinematic_loss = position_velocity_consistency_loss(
+            normalized_anchor_state,
+            prediction.states,
+            target_final_time_s,
+            normalizer,
+            config=config,
+            state_weights=state_weights,
+        )
+    else:
+        kinematic_loss = state_loss.new_zeros(state_loss.shape)
+    if config.terminal_loss_weight:
+        position_valid = state_weights[..., list(POSITION_IDX)].sum(dim=-1) > 0.0
+        terminal_index = {
+            HORIZON_NORMALIZED: lambda: torch.full(
+                (len(target_states),),
+                target_states.shape[1] - 1,
+                dtype=torch.long,
+                device=target_states.device,
+            ),
+            HORIZON_FULL: lambda: position_valid.long().sum(dim=1).clamp(min=1) - 1,
+            HORIZON_WINDOW: lambda: position_valid.long().sum(dim=1).clamp(min=1) - 1,
+        }[config.horizon_mode]()
+        rows = torch.arange(len(target_states), device=target_states.device)
+        terminal_delta = (
+            prediction.states[rows, terminal_index][:, list(POSITION_IDX)]
+            - target_states[rows, terminal_index][:, list(POSITION_IDX)]
+        )
+        terminal_loss = terminal_delta.square().mean(dim=1)
+    else:
+        terminal_loss = state_loss.new_zeros(state_loss.shape)
+
+    def weighted_mean(values: torch.Tensor) -> torch.Tensor:
+        return (values * flight_weights).mean()
+
+    return LossComponents(
+        state=weighted_mean(state_loss),
+        final_time=config.final_time_loss_weight * weighted_mean(time_loss),
+        kinematic=(
+            config.kinematic_consistency_loss_weight * weighted_mean(kinematic_loss)
+        ),
+        terminal=config.terminal_loss_weight * weighted_mean(terminal_loss),
+    )
+
+
+def prediction_loss(
+    prediction: StatePrediction,
+    normalized_anchor_state: torch.Tensor,
+    target_states: torch.Tensor,
+    state_weights: torch.Tensor,
+    target_final_time_s: torch.Tensor,
+    flight_weights: torch.Tensor,
+    config: TSConfig,
+    normalizer: Normalizer,
+) -> torch.Tensor:
+    """Airport-macro state/time/physics loss, one sample per flight and epoch."""
     # Weights are normalized to mean one across the complete epoch. Keeping the minibatch
     # denominator independent of its airport composition gives an unbiased stochastic
     # estimate of that fixed airport-macro objective.
-    return (per_flight * flight_weights).mean()
+    return prediction_loss_components(
+        prediction,
+        normalized_anchor_state,
+        target_states,
+        state_weights,
+        target_final_time_s,
+        flight_weights,
+        config,
+        normalizer,
+    ).total
 
 
 @dataclass
@@ -102,6 +265,8 @@ class EpochResult:
     val_loss: float
     seconds: float
     val_by_airport: dict[str, float]
+    train_components: dict[str, float]
+    val_components: dict[str, float]
 
 
 @dataclass
@@ -124,11 +289,11 @@ def _predict_split(
     normalizer: Normalizer,
     device: torch.device,
     batch_size: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Return physical state arrays, state masks, predicted time and true time."""
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Return physical anchor/output arrays, masks, predicted time and true time."""
     model.eval()
     predicted_chunks, truth_chunks, mask_chunks = [], [], []
-    predicted_time_chunks, truth_time_chunks = [], []
+    predicted_time_chunks, truth_time_chunks, anchor_chunks = [], [], []
     with torch.no_grad():
         for x, y, mask, final_time_s, _flight_weights in iter_batches(
             dataset, batch_size, shuffle=False, seed=0
@@ -141,6 +306,9 @@ def _predict_split(
             # machine is 16 GB and frequently swap-bound.
             predicted_chunks.append(normalizer.decode(out.astype(np.float64)).astype(np.float32))
             truth_chunks.append(normalizer.decode(y.numpy().astype(np.float64)).astype(np.float32))
+            anchor_chunks.append(
+                normalizer.decode(x[:, -1].numpy().astype(np.float64)).astype(np.float32)
+            )
             raw_mask = mask.numpy()
             # Headline ADE/FDE remain measured-data metrics. Position-only fitted rows are
             # training labels, not observations, and therefore stay out of this mask.
@@ -155,6 +323,7 @@ def _predict_split(
         np.concatenate(mask_chunks),
         np.concatenate(predicted_time_chunks),
         np.concatenate(truth_time_chunks),
+        np.concatenate(anchor_chunks),
     )
 
 
@@ -166,7 +335,7 @@ def evaluate_split(
     device: torch.device,
 ) -> dict[str, Any]:
     """Physical-unit state and final-time metrics for a split."""
-    predicted, truth, mask, predicted_time, truth_time = _predict_split(
+    predicted, truth, mask, predicted_time, truth_time, anchors = _predict_split(
         model, dataset, normalizer, device, config.batch_size
     )
     block = trajectory_metrics(predicted, truth, mask)
@@ -177,7 +346,134 @@ def evaluate_split(
         "rmse": float(np.sqrt(np.mean(time_error**2))),
         "mean_signed": float(time_error.mean()),
     }
+    # Raw model nodes on their own predicted clock: no measured-track interpolation,
+    # spline, filtering or CZML resampling. Durations are explicit [B,N] so this call site
+    # remains valid when the output layer moves from uniform to nonuniform segments.
+    segment_durations_s, active_segments = numpy_inference_time_grid(
+        predicted_time, config
+    )
+    block["raw_kinematics"] = raw_kinematic_metrics(
+        anchors, predicted, segment_durations_s, valid_segments=active_segments
+    )
     return block
+
+
+def _generalization_metric(train_value: float, val_value: float) -> dict[str, float | None]:
+    return {
+        "train": float(train_value),
+        "val": float(val_value),
+        "absolute_gap": float(val_value - train_value),
+        "ratio": float(val_value / train_value) if train_value != 0.0 else None,
+    }
+
+
+def _training_objective_diagnostics(
+    history: Sequence[EpochResult | dict[str, Any]], config: TSConfig
+) -> dict[str, Any] | None:
+    if not history:
+        return None
+    rows = [vars(row) if isinstance(row, EpochResult) else row for row in history]
+    best = min(rows, key=lambda row: row["val_loss"])
+    return {
+        "best_epoch": int(best["epoch"]),
+        "epochs_run": len(rows),
+        "reached_epoch_budget": len(rows) == config.epochs,
+        "train_loss_at_best_epoch": float(best["train_loss"]),
+        "val_loss_at_best_epoch": float(best["val_loss"]),
+        "absolute_gap": float(best["val_loss"] - best["train_loss"]),
+        "ratio": (
+            float(best["val_loss"] / best["train_loss"])
+            if best["train_loss"] != 0.0 else None
+        ),
+    }
+
+
+def evaluate_fit_splits(
+    model: nn.Module,
+    train_series: Sequence[FlightSeries],
+    val_series: Sequence[FlightSeries],
+    normalizer: Normalizer,
+    config: TSConfig,
+    device: torch.device,
+    *,
+    history: Sequence[EpochResult | dict[str, Any]] = (),
+) -> dict[str, Any]:
+    """Replay the best model deterministically on fixed-anchor train and validation.
+
+    This is the shared post-fit/standalone evaluation seam. It deliberately ignores the
+    training anchor policy: both splits use one fixed ``L-1`` anchor, sequential batches,
+    ``model.eval()`` and no gradients so train/validation metrics are directly comparable.
+    """
+    if not train_series or not val_series:
+        raise ValueError("fit evaluation requires non-empty train and validation splits")
+    model.to(device).eval()
+    split_series = {"train": train_series, "val": val_series}
+    splits: dict[str, dict[str, Any]] = {}
+    for split, group in split_series.items():
+        dataset = FixedAnchorTrajectoryWindows(group, config, normalizer)
+        if len(dataset) != len(group):
+            raise ValueError(
+                f"fixed-anchor {split} replay covers {len(dataset)}/{len(group)} flights"
+            )
+        splits[split] = {
+            "flights": len(group),
+            "windows": len(dataset),
+            "split_sha256": _split_sha256(group),
+            "metrics": evaluate_split(model, dataset, normalizer, config, device),
+        }
+
+    train_metrics = splits["train"]["metrics"]
+    val_metrics = splits["val"]["metrics"]
+    diagnostics: dict[str, Any] = {
+        "native_generalization": {
+            "ade_m": _generalization_metric(train_metrics["ade_m"], val_metrics["ade_m"]),
+            "fde_m": _generalization_metric(train_metrics["fde_m"], val_metrics["fde_m"]),
+            "final_time_mae_s": _generalization_metric(
+                train_metrics["final_time_s"]["mae"],
+                val_metrics["final_time_s"]["mae"],
+            ),
+        }
+    }
+    objective = _training_objective_diagnostics(history, config)
+    if objective is not None:
+        diagnostics["training_objective"] = objective
+
+    return {
+        "schema_version": FIT_EVALUATION_SCHEMA,
+        "evaluation_contract": {
+            "model_mode": "eval",
+            "dropout": "disabled",
+            "anchor": "fixed L-1",
+            "batch_order": "sequential (shuffle disabled)",
+            "splits": ["train", "val"],
+            "metric_grid": "native target grid; measured-data mask",
+        },
+        "config": config.to_dict(),
+        "splits": splits,
+        "diagnostics": diagnostics,
+    }
+
+
+def write_fit_evaluation(
+    evaluation: dict[str, Any],
+    *,
+    checkpoint_path: str | Path,
+    output_dir: str | Path,
+) -> dict[str, Any]:
+    """Bind a deterministic fit replay to its exact checkpoint and write it atomically."""
+    checkpoint = Path(checkpoint_path).resolve()
+    document = dict(evaluation)
+    document["checkpoint"] = {
+        "path": str(checkpoint),
+        "sha256": _file_sha256(checkpoint),
+    }
+    directory = Path(output_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    output = directory / FIT_EVALUATION_NAME
+    temporary = output.with_suffix(output.suffix + ".tmp")
+    temporary.write_text(json.dumps(document, indent=2), encoding="utf-8")
+    temporary.replace(output)
+    return document
 
 
 def usable_series(
@@ -222,13 +518,13 @@ def _validation_datasets(
     }
 
 
-def _dataset_loss(
+def _dataset_loss_components(
     model: nn.Module,
     dataset: TrajectoryWindows,
     device: torch.device,
     batch_size: int,
-) -> float:
-    loss_total = 0.0
+) -> dict[str, float]:
+    component_totals = {name: 0.0 for name in LOSS_COMPONENT_NAMES}
     flight_weight_total = 0.0
     with torch.no_grad():
         for x, y, mask, final_time_s, flight_weights in iter_batches(
@@ -238,16 +534,21 @@ def _dataset_loss(
             final_time_s = final_time_s.to(device)
             flight_weights = flight_weights.to(device)
             prediction = model(x)
-            state_error = (((prediction.states - y) ** 2) * mask).sum(dim=(1, 2))
-            state_loss = state_error / mask.sum(dim=(1, 2)).clamp(min=1.0)
-            time_loss = (
-                (prediction.final_time_s - final_time_s)
-                / dataset.config.final_time_scale_s
-            ).square()
-            per_flight = state_loss + dataset.config.final_time_loss_weight * time_loss
-            loss_total += float((per_flight * flight_weights).sum())
+            components = prediction_loss_components(
+                prediction,
+                x[:, -1],
+                y,
+                mask,
+                final_time_s,
+                flight_weights,
+                dataset.config,
+                dataset.normalizer,
+            )
+            for name, value in components.tensors().items():
+                component_totals[name] += float(value) * len(flight_weights)
             flight_weight_total += float(flight_weights.sum())
-    return loss_total / max(flight_weight_total, 1.0)
+    denominator = max(flight_weight_total, 1.0)
+    return {name: value / denominator for name, value in component_totals.items()}
 
 
 def fit_model(
@@ -306,8 +607,19 @@ def fit_model(
     )
     if verbose:
         print(f"  model      {config.model} ({parameter_count(model):,} params) on {device}")
-        print(f"  prediction L={config.seq_len} ({config.lookback_s:.0f}s history) -> "
-              f"N={config.n_segments} normalized progress segments + final_time_s")
+        output_grid = {
+            HORIZON_NORMALIZED: f"N={config.n_segments} normalized progress segments",
+            HORIZON_FULL: (
+                f"H={config.full_horizon_steps} physical {config.dt_s:g}s steps, one pass"
+            ),
+            HORIZON_WINDOW: (
+                f"H={config.window_horizon_steps} physical {config.dt_s:g}s steps per pass"
+            ),
+        }[config.horizon_mode]
+        print(
+            f"  prediction L={config.seq_len} ({config.lookback_s:.0f}s history) -> "
+            f"{output_grid} + final_time_s"
+        )
         print(f"  flights    train {len(train_series)} / val {len(val_series)}")
         print(f"  windows    train {len(train_set)} / val {val_window_count} "
               "(validation anchor: fixed L-1)")
@@ -329,7 +641,8 @@ def fit_model(
         started = time.perf_counter()
 
         model.train()
-        train_total, train_weight_total = 0.0, 0.0
+        train_component_totals = {name: 0.0 for name in LOSS_COMPONENT_NAMES}
+        train_weight_total = 0.0
         for x, y, mask, final_time_s, flight_weights in iter_batches(
             train_set,
             config.batch_size,
@@ -342,20 +655,36 @@ def fit_model(
             final_time_s = final_time_s.to(device)
             flight_weights = flight_weights.to(device)
             optimizer.zero_grad()
-            loss = prediction_loss(
-                model(x), y, mask, final_time_s, flight_weights, config
+            components = prediction_loss_components(
+                model(x), x[:, -1], y, mask, final_time_s, flight_weights, config, normalizer
             )
+            loss = components.total
             loss.backward()
             optimizer.step()
-            train_total += float(loss.detach()) * batch_count
+            for name, value in components.tensors().items():
+                train_component_totals[name] += float(value.detach()) * batch_count
             train_weight_total += batch_weight
 
         model.eval()
-        val_by_airport = {
-            airport: _dataset_loss(model, dataset, device, config.batch_size)
+        val_components_by_airport = {
+            airport: _dataset_loss_components(model, dataset, device, config.batch_size)
             for airport, dataset in val_sets.items()
         }
-        train_loss = train_total / max(train_weight_total, 1.0)
+        train_components = {
+            name: value / max(train_weight_total, 1.0)
+            for name, value in train_component_totals.items()
+        }
+        train_loss = sum(train_components.values())
+        val_by_airport = {
+            airport: sum(components.values())
+            for airport, components in val_components_by_airport.items()
+        }
+        val_components = {
+            name: float(np.mean([
+                components[name] for components in val_components_by_airport.values()
+            ]))
+            for name in LOSS_COMPONENT_NAMES
+        }
         # Equal airport weight: a large/long airport cannot control early stopping alone.
         val_loss = float(np.mean(list(val_by_airport.values())))
         if not (math.isfinite(train_loss) and math.isfinite(val_loss)):
@@ -365,7 +694,13 @@ def fit_model(
             )
         scheduler.step(val_loss)
         history.append(EpochResult(
-            epoch, train_loss, val_loss, time.perf_counter() - started, val_by_airport
+            epoch=epoch,
+            train_loss=train_loss,
+            val_loss=val_loss,
+            seconds=time.perf_counter() - started,
+            val_by_airport=val_by_airport,
+            train_components=train_components,
+            val_components=val_components,
         ))
 
         if val_loss < best_val - 1e-9:
@@ -380,6 +715,12 @@ def fit_model(
         if verbose:
             print(f"  epoch {epoch:3d}/{config.epochs}  train {train_loss:.6f}  "
                   f"val-macro {val_loss:.6f}  {history[-1].seconds:5.1f}s{marker}")
+            print(
+                "             val parts  "
+                + "  ".join(
+                    f"{name}={val_components[name]:.4f}" for name in LOSS_COMPONENT_NAMES
+                )
+            )
 
         if epochs_without_improvement >= config.patience:
             if verbose:
@@ -414,6 +755,12 @@ def train(
     Returns the run summary (also embedded in the history file).
     """
     out = Path(output_dir)
+    release_path = out / TEST_RELEASE_NAME
+    if release_path.exists():
+        raise RuntimeError(
+            f"refusing to train in {out}: test release ledger {release_path} protects "
+            "the checkpoint already published from this directory"
+        )
     out.mkdir(parents=True, exist_ok=True)
     if data_provenance.get("schema_version") != ARRIVAL_DATA_PROVENANCE_SCHEMA:
         raise ValueError("data_provenance is not a TS arrival-data fingerprint")
@@ -431,15 +778,27 @@ def train(
     model, config, normalizer, device = (
         fit.model, fit.config, fit.normalizer, fit.device
     )
-    val_set = FixedAnchorTrajectoryWindows(val_series, config, normalizer)
     test_window_count = sum(
         min(len(window_anchors(item, config)), 1)
         for item in test_series
     )
-    split_metrics = {"val": evaluate_split(model, val_set, normalizer, config, device)}
+    fit_evaluation = evaluate_fit_splits(
+        model,
+        train_series,
+        val_series,
+        normalizer,
+        config,
+        device,
+        history=fit.history,
+    )
+    split_metrics = {
+        split: block["metrics"]
+        for split, block in fit_evaluation["splits"].items()
+    }
 
     checkpoint_payload = {
-        "target_contract": TARGET_CONTRACT,
+        "target_contract": TARGET_CONTRACTS[config.horizon_mode],
+        TEST_RELEASE_PROTOCOL_FIELD: TEST_RELEASE_SCHEMA,
         "config": config.to_dict(),
         "model_state": model.state_dict(),
         "normalizer": normalizer.to_dict(),
@@ -453,14 +812,30 @@ def train(
     }
     checkpoint_path = out / CHECKPOINT_NAME
     checkpoint_tmp = out / f"{CHECKPOINT_NAME}.tmp"
+    # Freeze-test may be run by another process while fitting. Recheck immediately before
+    # the first checkpoint write so an already-bound checkpoint is never replaced.
+    if release_path.exists():
+        raise RuntimeError(
+            f"refusing to replace {checkpoint_path}: test release ledger {release_path} "
+            "was created while training"
+        )
     torch.save(checkpoint_payload, checkpoint_tmp)
     checkpoint_tmp.replace(checkpoint_path)
     checkpoint_sha256 = _file_sha256(checkpoint_path)
+    fit_evaluation = write_fit_evaluation(
+        fit_evaluation,
+        checkpoint_path=checkpoint_path,
+        output_dir=out,
+    )
     checkpoint_metadata = {
         "schema_version": CHECKPOINT_METADATA_SCHEMA,
+        TEST_RELEASE_PROTOCOL_FIELD: TEST_RELEASE_SCHEMA,
         "checkpoint_sha256": checkpoint_sha256,
         "arrival_manifests": manifest_digests,
         "random_train_anchor": config.random_train_anchor,
+        "horizon_mode": config.horizon_mode,
+        "pred_len": config.pred_len,
+        "full_horizon_steps": config.full_horizon_steps,
         "split_sha256": {
             "train": _split_sha256(train_series),
             "val": _split_sha256(val_series),
@@ -479,8 +854,13 @@ def train(
         "epochs_run": len(fit.history),
         "best_val_loss": fit.best_val_loss,
         "flights": {"train": len(train_series), "val": len(val_series), "test": len(test_series)},
-        "windows": {"train": fit.train_windows, "val": len(val_set), "test": test_window_count},
+        "windows": {
+            "train": fit.train_windows,
+            "val": fit_evaluation["splits"]["val"]["windows"],
+            "test": test_window_count,
+        },
         "metrics": split_metrics,
+        "fit_diagnostics": fit_evaluation["diagnostics"],
         "data_provenance": {
             "schema_version": data_provenance["schema_version"],
             "arrival_manifests": manifest_digests,
@@ -498,7 +878,19 @@ def train(
                   f"cross-track p95 {block['cross_track_m']['p95_abs']:7.1f} m   "
                   f"alt p95 {block['altitude_m']['p95_abs']:6.1f} m   "
                   f"time MAE {block['final_time_s']['mae']:5.1f} s")
-        print(f"✓ wrote {out / CHECKPOINT_NAME} and {out / HISTORY_NAME}")
+            raw = block["raw_kinematics"]
+            print(
+                "         raw kinematics  "
+                f"pos/vel RMSE {raw['position_velocity_rmse_mps']:.2f} m/s   "
+                f"heading p95 {raw['heading_consistency_p95_deg']:.2f} deg   "
+                f"turn {raw['turn_rate_p95_deg_s']:.2f} deg/s   "
+                f"accel {raw['acceleration_p95_mps2']:.2f} m/s²   "
+                f"jerk {raw['jerk_p95_mps3']:.2f} m/s³"
+            )
+        print(
+            f"✓ wrote {out / CHECKPOINT_NAME}, {out / HISTORY_NAME} and "
+            f"{out / FIT_EVALUATION_NAME}"
+        )
 
     return summary
 
@@ -508,11 +900,13 @@ def load_checkpoint(path: str | Path) -> tuple[nn.Module, TSConfig, Normalizer, 
     # weights_only=True: the payload is tensors + primitives only (config/normalizer are
     # plain dicts and lists), so nothing here needs — or should get — pickle execution.
     payload = torch.load(Path(path), map_location="cpu", weights_only=True)
-    if payload.get("target_contract") != TARGET_CONTRACT:
-        raise ValueError(
-            "checkpoint predates the runway-crossing target contract; retrain it"
-        )
     config = TSConfig.from_dict(payload["config"])
+    expected_contract = TARGET_CONTRACTS[config.horizon_mode]
+    if payload.get("target_contract") != expected_contract:
+        raise ValueError(
+            "checkpoint predates the displacement-normalized kinematic-loss contract; "
+            "retrain it"
+        )
     if config.channels != CHANNELS:
         raise ValueError(
             f"checkpoint channel contract {config.channels} != this build's "

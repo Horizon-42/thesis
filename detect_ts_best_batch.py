@@ -245,7 +245,14 @@ def benchmark_candidate(
             optimizer.zero_grad()
             prediction = model(x)
             loss = prediction_loss(
-                prediction, y, weights, final_time_s, flight_weights, config
+                prediction,
+                x[:, -1],
+                y,
+                weights,
+                final_time_s,
+                flight_weights,
+                config,
+                dataset.normalizer,
             )
             loss.backward()
             optimizer.step()

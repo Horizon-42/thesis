@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import gc
 
+import numpy as np
 import torch
 
 from config import TSConfig
@@ -23,8 +24,14 @@ def _is_cuda_oom(exc: BaseException) -> bool:
 
 
 def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device) -> None:
-    """Run one isolated optimizer step or raise CUDA OOM."""
-    model = optimizer = x = prediction = loss = None
+    """Run the real state/time/physics loss once or raise CUDA OOM."""
+    # Local imports avoid a module cycle: train imports resolve_batch_size, while the probe
+    # must share train's loss implementation so its retained CUDA graph cannot drift.
+    from dataset import Normalizer
+    from train import prediction_loss
+
+    model = optimizer = x = target = state_weights = None
+    target_final_time_s = flight_weights = prediction = loss = normalizer = None
     try:
         torch.manual_seed(config.seed)
         model = build_model(config).to(device)
@@ -36,15 +43,41 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
             dtype=torch.float32,
             device=device,
         )
+        target = torch.zeros(
+            (batch_size, config.pred_len, len(config.channels)),
+            dtype=torch.float32,
+            device=device,
+        )
+        state_weights = torch.ones_like(target)
+        target_final_time_s = torch.full(
+            (batch_size,),
+            config.final_time_scale_s,
+            dtype=torch.float32,
+            device=device,
+        )
+        flight_weights = torch.ones(batch_size, dtype=torch.float32, device=device)
+        normalizer = Normalizer(
+            mean=np.zeros(len(config.channels), dtype=np.float64),
+            std=np.ones(len(config.channels), dtype=np.float64),
+        )
+        optimizer.zero_grad()
         prediction = model(x)
-        loss = prediction.states.square().mean() + config.final_time_loss_weight * (
-            prediction.final_time_s / config.final_time_scale_s
-        ).square().mean()
+        loss = prediction_loss(
+            prediction,
+            x[:, -1],
+            target,
+            state_weights,
+            target_final_time_s,
+            flight_weights,
+            config,
+            normalizer,
+        )
         loss.backward()
         optimizer.step()
         torch.cuda.synchronize(device)
     finally:
-        del loss, prediction, x, optimizer, model
+        del loss, prediction, flight_weights, target_final_time_s, state_weights, target, x
+        del normalizer, optimizer, model
         gc.collect()
         torch.cuda.empty_cache()
 

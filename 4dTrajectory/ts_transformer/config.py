@@ -5,7 +5,7 @@ that is upstream's contract (they were driven by an argparse namespace), and thi
 dataclass is the drop-in. Keeping data, architecture and training knobs in ONE frozen
 object is deliberate: the whole thing is serialised into every checkpoint, so a trained
 artifact carries the exact recipe that produced it and inference never has to guess the
-resample step, the channel order, or the normalized prediction grid.
+resample step, the channel order, or the prediction-time grid.
 
 Fields are grouped by who reads them. The "read by both" and per-model groups are named
 exactly as upstream expects — do not rename them without editing the vendored code, which
@@ -23,6 +23,10 @@ from channels import CHANNELS
 
 MODELS = ("itransformer", "patchtst")
 COORDINATE_FRAMES = ("enu", "runway-aligned")
+HORIZON_NORMALIZED = "normalized"
+HORIZON_FULL = "full"
+HORIZON_WINDOW = "window"
+HORIZON_MODES = (HORIZON_NORMALIZED, HORIZON_FULL, HORIZON_WINDOW)
 
 # Time grid. ADS-B arrives at ~1 Hz but irregularly; 2 s is the resample step — fine enough
 # not to smooth away the turn onto final, coarse enough not to invent samples between
@@ -39,6 +43,8 @@ COORDINATE_FRAMES = ("enu", "runway-aligned")
 # is far longer than the straight-line distance to the ring. Sizing off the straight-line
 # guess made `full` mode cover barely half an approach.
 DEFAULT_DT_S = 2.0
+DEFAULT_PRED_LEN_FULL = 300
+DEFAULT_PRED_LEN_WINDOW = 30
 
 # Lookback. 60 steps x 2 s = 120 s of observed track — long enough to contain a vectoring
 # turn rather than just the straight segment before it. Raising it costs anchors twice
@@ -47,9 +53,16 @@ DEFAULT_SEQ_LEN = 60
 
 # Every remaining approach is mapped onto the same normalized progress domain [0, 1].
 # N is the number of equal progress segments (and therefore the number of future state
-# endpoints).  It is deliberately independent of ``dt_s``. The pooled three-fold CV
-# selected N=64 from {64, 128, 256}; see the run's cross_validation/best_config.json.
-DEFAULT_N_SEGMENTS = 64
+# endpoints). It is deliberately independent of ``dt_s``. Held-out N=64/128/256 ablations
+# selected 64 for iTransformer but 256 for PatchTST; model-specific defaults live in one
+# mapping so callers do not reproduce architecture branches. Display code may interpolate
+# these physical nodes, but the learner is scored on its untouched output grid.
+DEFAULT_N_SEGMENTS_BY_MODEL = {
+    "itransformer": 64,
+    "patchtst": 256,
+}
+# Public shorthand for the primary model; derived from the mapping so it cannot drift.
+DEFAULT_N_SEGMENTS = DEFAULT_N_SEGMENTS_BY_MODEL[MODELS[0]]
 
 # ``final_time_s`` is emitted in physical seconds.  The scale only nondimensionalizes its
 # loss; it is not a duration cap and does not change the value returned at inference.
@@ -69,10 +82,18 @@ class TSConfig:
 
     # ── what to train ────────────────────────────────────────────────────────
     model: str = MODELS[0]
+    horizon_mode: str = HORIZON_NORMALIZED
     # ── the time grid + windowing (read by the data build AND both models) ──
     dt_s: float = DEFAULT_DT_S
     seq_len: int = DEFAULT_SEQ_LEN                  # L
-    n_segments: int = DEFAULT_N_SEGMENTS            # N normalized progress segments
+    # None resolves once, during construction, through DEFAULT_N_SEGMENTS_BY_MODEL. After
+    # __post_init__ every serialized/runtime config carries a concrete integer.
+    n_segments: int | None = None                    # N normalized progress segments
+    # The two physical-time modes keep their own horizon sizes. ``full`` emits H_full
+    # fixed-dt states in one pass; ``window`` emits H_window states per pass and chains
+    # passes up to H_full at inference. The vendored networks only consume ``pred_len``.
+    full_horizon_steps: int = DEFAULT_PRED_LEN_FULL
+    window_horizon_steps: int = DEFAULT_PRED_LEN_WINDOW
     channels: tuple[str, ...] = CHANNELS
     # The aircraft-type fallback the series were built with (target Vref / TCH -> the ENU
     # frame and the gate target). In the config so the checkpoint records it and predict
@@ -123,10 +144,13 @@ class TSConfig:
 
     # ── training ────────────────────────────────────────────────────────────
     batch_size: int = 2048
-    epochs: int = 50
+    # Full pooled CUDA validation reached its minimum at epoch 161 and early-stopped at
+    # 181. A 180-epoch cap contains the useful region; the retained checkpoint is still
+    # the best epoch, not necessarily the last one.
+    epochs: int = 180
     learning_rate: float = 5e-4
     weight_decay: float = 0.0
-    patience: int = 8               # early-stopping patience, in epochs without val improvement
+    patience: int = 20              # early-stopping patience, in epochs without val improvement
     seed: int = 1337
     device: str = "auto"            # "auto" -> cuda when available, else cpu
     val_fraction: float = 0.15      # split is BY FLIGHT, never by window — see dataset.py
@@ -141,6 +165,12 @@ class TSConfig:
     fitted_tail_position_weight: float = 0.25
     fitted_terminal_position_weight: float = 1.0
     final_time_loss_weight: float = 1.0
+    # Position/velocity consistency is evaluated as a physical displacement residual and
+    # normalized by fitted position scales, so increasing N does not amplify its gradient.
+    # Held-out raw-physics/ADE ablation selected 3.0. A weight of 10 brought acceleration
+    # and jerk close to the observed p95 but degraded ADE by 13.6% and flyability by 13.9 pp.
+    kinematic_consistency_loss_weight: float = 3.0
+    terminal_loss_weight: float = 0.02
     final_time_scale_s: float = DEFAULT_FINAL_TIME_SCALE_S
 
     # ── provenance (free-form; recorded in the checkpoint) ──────────────────
@@ -149,6 +179,14 @@ class TSConfig:
     def __post_init__(self) -> None:
         if self.model not in MODELS:
             raise ValueError(f"unknown model {self.model!r}; expected one of {MODELS}")
+        if self.n_segments is None:
+            object.__setattr__(
+                self, "n_segments", DEFAULT_N_SEGMENTS_BY_MODEL[self.model]
+            )
+        if self.horizon_mode not in HORIZON_MODES:
+            raise ValueError(
+                f"unknown horizon_mode {self.horizon_mode!r}; expected one of {HORIZON_MODES}"
+            )
         if self.coordinate_frame not in COORDINATE_FRAMES:
             raise ValueError(
                 f"unknown coordinate_frame {self.coordinate_frame!r}; "
@@ -157,6 +195,8 @@ class TSConfig:
         for name in (
             "seq_len",
             "n_segments",
+            "full_horizon_steps",
+            "window_horizon_steps",
             "d_model",
             "n_heads",
             "d_ff",
@@ -188,6 +228,10 @@ class TSConfig:
             raise ValueError("fitted_terminal_position_weight must be non-negative")
         if self.final_time_loss_weight < 0.0:
             raise ValueError("final_time_loss_weight must be non-negative")
+        if self.kinematic_consistency_loss_weight < 0.0:
+            raise ValueError("kinematic_consistency_loss_weight must be non-negative")
+        if self.terminal_loss_weight < 0.0:
+            raise ValueError("terminal_loss_weight must be non-negative")
 
     # PatchTST reads configs.enc_in; iTransformer infers the count from the tensor.
     @property
@@ -196,8 +240,24 @@ class TSConfig:
 
     @property
     def pred_len(self) -> int:
-        """Vendored model name for the normalized output length ``N``."""
-        return self.n_segments
+        """Vendored model output length under the selected horizon contract."""
+        return {
+            HORIZON_NORMALIZED: int(self.n_segments),
+            HORIZON_FULL: self.full_horizon_steps,
+            HORIZON_WINDOW: self.window_horizon_steps,
+        }[self.horizon_mode]
+
+    @property
+    def horizon_s(self) -> float | None:
+        """Physical coverage of fixed-time modes; normalized time has no fixed cap."""
+        if self.horizon_mode == HORIZON_NORMALIZED:
+            return None
+        steps = (
+            self.full_horizon_steps
+            if self.horizon_mode == HORIZON_FULL
+            else self.window_horizon_steps
+        )
+        return steps * self.dt_s
 
     @property
     def lookback_s(self) -> float:

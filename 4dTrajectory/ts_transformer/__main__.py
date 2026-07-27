@@ -18,10 +18,15 @@ also lists the four routes for adding dynamics later) before changing that.
     # the same normalized-time target with PatchTST
     python $TS train --data ... --model patchtst --n-segments 128 ...
 
-    # predict, then grade with the same gates the optimizer is graded by
+    # development prediction (validation is the safe default)
     python $TS predict \
         --checkpoint 4dTrajectory/outputs/KRDU/ts_itransformer_normalized_time/checkpoint.pt \
         --data ... --airport KRDU --output-dir 4dTrajectory/outputs/KRDU/ts_pred
+
+    # outer-test is a separate, irreversible release after every decision is frozen
+    python $TS freeze-test --checkpoint ... --data ...
+    python $TS predict --checkpoint ... --data ... --output-dir ... \
+        --split test --test-release
     python -m evaluation --input 4dTrajectory/outputs/KRDU/ts_pred
 
 Invoked by script path, like ``4dTrajectory/optimization/scenario_optimization.py`` — the
@@ -50,6 +55,7 @@ if str(_TS_DIR) not in sys.path:
 from config import (  # noqa: E402
     COORDINATE_FRAMES,
     DEFAULT_AIRCRAFT_TYPE,
+    HORIZON_MODES,
     MODELS,
     TSConfig,
 )
@@ -71,10 +77,18 @@ from dataset import (  # noqa: E402
 from export import (  # noqa: E402
     accuracy_block, build_prediction_record, observed_series_metrics, write_batch,
 )
+from evaluation_protocol import (  # noqa: E402
+    TestReleaseError,
+    begin_test_evaluation,
+    complete_test_evaluation,
+    create_test_release,
+)
 from flyability import report_for_records  # noqa: E402
 from forecast import forecast_approach  # noqa: E402
 from models import resolve_device  # noqa: E402
-from train import load_checkpoint, train  # noqa: E402
+from train import (  # noqa: E402
+    HISTORY_NAME, evaluate_fit_splits, load_checkpoint, train, write_fit_evaluation,
+)
 
 
 def _add_data_args(parser: argparse.ArgumentParser) -> None:
@@ -119,6 +133,24 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--seq-len", type=int, default=None, help="lookback L, in steps")
     parser.add_argument("--n-segments", type=int, default=None,
                         help="N endpoints on the fixed normalized progress grid")
+    parser.add_argument(
+        "--horizon-mode",
+        choices=HORIZON_MODES,
+        default=None,
+        help="normalized complete trajectory, one-pass full horizon, or recursive window",
+    )
+    parser.add_argument(
+        "--full-horizon-steps",
+        type=int,
+        default=None,
+        help="H_full fixed-dt rows for full mode and window recursion cap (default: 300)",
+    )
+    parser.add_argument(
+        "--window-horizon-steps",
+        type=int,
+        default=None,
+        help="H_window fixed-dt rows emitted by each recursive window pass (default: 30)",
+    )
     parser.add_argument("--dt", type=float, default=None, help="resample step, seconds")
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--batch-size", type=_batch_size, default=None,
@@ -128,6 +160,10 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
                         help="position-only weight for fitted ADS-B tail rows (default: 0.25)")
     parser.add_argument("--fitted-terminal-weight", type=float, default=None,
                         help="additional position-only weight at the fitted crossing (default: 1.0)")
+    parser.add_argument("--kinematic-consistency-weight", type=float, default=None,
+                        help="position/velocity consistency loss weight (default: 3.0)")
+    parser.add_argument("--terminal-loss-weight", type=float, default=None,
+                        help="explicit final-position loss weight (default: 0.02)")
     parser.add_argument("--patience", type=int, default=None, help="early-stopping patience")
     parser.add_argument("--d-model", type=int, default=None)
     parser.add_argument("--e-layers", type=int, default=None)
@@ -165,11 +201,16 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
     cli_values = (
         ("model", args.model), ("seq_len", args.seq_len),
         ("n_segments", args.n_segments),
+        ("horizon_mode", args.horizon_mode),
+        ("full_horizon_steps", args.full_horizon_steps),
+        ("window_horizon_steps", args.window_horizon_steps),
         ("dt_s", args.dt), ("epochs", args.epochs),
         ("batch_size", args.batch_size if isinstance(args.batch_size, int) else None),
         ("learning_rate", args.learning_rate), ("patience", args.patience),
         ("fitted_tail_position_weight", args.fitted_tail_weight),
         ("fitted_terminal_position_weight", args.fitted_terminal_weight),
+        ("kinematic_consistency_loss_weight", args.kinematic_consistency_weight),
+        ("terminal_loss_weight", args.terminal_loss_weight),
         ("d_model", args.d_model), ("e_layers", args.e_layers), ("n_heads", args.n_heads),
         ("seed", args.seed), ("device", args.device),
         ("aircraft_type", args.aircraft_type), ("coordinate_frame", args.coordinate_frame),
@@ -244,14 +285,50 @@ def main(argv: list[str] | None = None) -> int:
     p_cv.add_argument("--cv-epochs", type=int, default=DEFAULT_CV_EPOCHS)
     p_cv.add_argument("--cv-patience", type=int, default=DEFAULT_CV_PATIENCE)
 
+    p_fit = sub.add_parser(
+        "evaluate-fit",
+        help="replay a best checkpoint deterministically on fixed-anchor train + validation",
+    )
+    p_fit.add_argument(
+        "--data", required=True, action="append",
+        help="the complete training arrival-manifest roster; repeat for pooled training",
+    )
+    p_fit.add_argument("--checkpoint", required=True)
+    p_fit.add_argument(
+        "--output-dir",
+        default=None,
+        help="destination for fit_evaluation.json (default: checkpoint directory)",
+    )
+    p_fit.add_argument("--device", default="auto", help='"auto", "cpu" or "cuda"')
+
+    # ── irreversible outer-test release ─────────────────────────────────────
+    p_freeze = sub.add_parser(
+        "freeze-test",
+        help="bind the one-shot outer-test ledger to a frozen checkpoint and data roster",
+    )
+    p_freeze.add_argument("--checkpoint", required=True)
+    p_freeze.add_argument(
+        "--data", required=True, action="append",
+        help="the complete training arrival-manifest roster; repeat for pooled training",
+    )
+
     # ── predict ──────────────────────────────────────────────────────────────
     p_predict = sub.add_parser(
         "predict", help="forecast approaches with a checkpoint; write evaluation records")
     _add_data_args(p_predict)
     p_predict.add_argument("--checkpoint", required=True)
-    p_predict.add_argument("--split", choices=("test", "val", "train", "all"), default="test",
-                           help="which of the checkpoint's flight splits to predict "
-                                "(default: test — the only one the model never saw)")
+    p_predict.add_argument(
+        "--no-truncate",
+        action="store_true",
+        help="keep full/window forecasts past closest threshold approach",
+    )
+    p_predict.add_argument("--split", choices=("test", "val", "train"), default="val",
+                           help="which checkpoint split to predict (default: validation)")
+    p_predict.add_argument(
+        "--test-release",
+        action="store_true",
+        help="consume the checkpoint's frozen one-shot test ledger; required for --split test",
+    )
     p_predict.add_argument("--device", default="auto",
                            help='"auto" (default: cuda when available), "cpu", "cuda". '
                                 "The device is a runtime property, deliberately NOT taken "
@@ -259,6 +336,94 @@ def main(argv: list[str] | None = None) -> int:
                                 "predictable on a CPU-only machine")
 
     args = parser.parse_args(argv)
+
+    if args.command == "freeze-test":
+        _model, _config, _normalizer, payload = load_checkpoint(args.checkpoint)
+        current_provenance = arrival_data_provenance(args.data)
+        try:
+            release_path = create_test_release(
+                args.checkpoint, payload, current_provenance
+            )
+        except TestReleaseError as exc:
+            parser.error(str(exc))
+        print(f"✓ outer-test frozen for one-shot evaluation: {release_path}")
+        return 0
+
+    if args.command == "evaluate-fit":
+        checkpoint_path = Path(args.checkpoint).resolve()
+        model, config, normalizer, payload = load_checkpoint(checkpoint_path)
+        current_provenance = arrival_data_provenance(args.data)
+        require_matching_data_provenance(payload, current_provenance)
+
+        wanted = payload["split"]["train"] + payload["split"]["val"]
+        flights = load_flight_dicts(
+            args.data,
+            include_flight_keys=set(wanted),
+        )
+        indexed_flights = {
+            dataset_flight_key(flight, index): flight
+            for index, flight in enumerate(flights)
+        }
+        missing = [key for key in wanted if key not in indexed_flights]
+        if missing:
+            parser.error(
+                f"{len(missing)} train/validation flight(s) from the checkpoint are absent; "
+                f"first missing key: {missing[0]!r}"
+            )
+        selected_flights = [indexed_flights[key] for key in wanted]
+        series, report = build_series(
+            selected_flights,
+            config,
+            aircraft_type=config.aircraft_type,
+        )
+        print(f"  aircraft   {config.aircraft_type} (checkpoint training fallback)")
+        print(report.format())
+        indexed_series = {item.dataset_id: item for item in series}
+        missing = [key for key in wanted if key not in indexed_series]
+        if missing:
+            parser.error(
+                f"{len(missing)} checkpoint train/validation flight(s) could not be rebuilt; "
+                f"first missing key: {missing[0]!r}"
+            )
+        train_series = [indexed_series[key] for key in payload["split"]["train"]]
+        val_series = [indexed_series[key] for key in payload["split"]["val"]]
+
+        history_path = checkpoint_path.parent / HISTORY_NAME
+        history = []
+        if history_path.is_file():
+            history = json.loads(history_path.read_text(encoding="utf-8")).get("history", [])
+        evaluation = evaluate_fit_splits(
+            model,
+            train_series,
+            val_series,
+            normalizer,
+            config,
+            resolve_device(args.device),
+            history=history,
+        )
+        output_dir = Path(args.output_dir) if args.output_dir else checkpoint_path.parent
+        document = write_fit_evaluation(
+            evaluation,
+            checkpoint_path=checkpoint_path,
+            output_dir=output_dir,
+        )
+        for split in ("train", "val"):
+            metrics = document["splits"][split]["metrics"]
+            print(
+                f"  {split:5s}  ADE {metrics['ade_m']:7.1f} m   "
+                f"FDE {metrics['fde_m']:7.1f} m   "
+                f"time MAE {metrics['final_time_s']['mae']:5.1f} s"
+            )
+        gap = document["diagnostics"]["native_generalization"]
+        print(
+            "  gap    "
+            f"ADE {gap['ade_m']['absolute_gap']:+.1f} m "
+            f"({gap['ade_m']['ratio']:.2f}×)   "
+            f"FDE {gap['fde_m']['absolute_gap']:+.1f} m "
+            f"({gap['fde_m']['ratio']:.2f}×)"
+        )
+        print(f"✓ wrote {output_dir / 'fit_evaluation.json'}")
+        return 0
 
     if args.command in ("train", "cross-validate"):
         if len(args.data) > 1 and args.airport:
@@ -289,6 +454,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     # ── predict ──────────────────────────────────────────────────────────────
+    if args.split == "test" and not args.test_release:
+        parser.error(
+            "--split test is sealed; first run freeze-test after all experiment decisions "
+            "are final, then pass --test-release"
+        )
+    if args.split != "test" and args.test_release:
+        parser.error("--test-release is valid only with --split test")
     model, config, normalizer, payload = load_checkpoint(args.checkpoint)
     current_provenance = arrival_data_provenance(args.data)
     require_matching_data_provenance(payload, current_provenance, allow_subset=True)
@@ -299,43 +471,64 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  WARNING: predicting with --aircraft-type {args.aircraft_type}, but the "
               f"checkpoint was trained with {config.aircraft_type} — the ENU frames and "
               f"gate targets will differ from the ones the normalizer was fit under")
-    flights = load_flight_dicts(args.data)
-    if args.split != "all":
-        # Filter the RAW dicts by the checkpoint's airport-qualified identity, before the
-        # expensive per-flight build (aircraft resolution +
-        # least-squares velocity fits) never runs for the ~85% of flights a default
-        # test-split predict would discard.
-        split_keys = split_keys_for_current_data(
-            payload["split"][args.split], current_provenance
-        )
-        indexed = {
-            dataset_flight_key(flight, index): flight for index, flight in enumerate(flights)
-        }
-        missing = [key for key in split_keys if key not in indexed]
-        if missing:
-            parser.error(
-                f"{len(missing)} flight(s) from the checkpoint's {args.split!r} split "
-                f"are absent from {args.data}; first missing key: {missing[0]!r}"
+    # Resolve the exact identities before reading any trajectory rows. For test this claim
+    # is deliberately written first: a crash or partial run still counts as exposure.
+    split_keys = split_keys_for_current_data(
+        payload["split"][args.split], current_provenance
+    )
+    test_claim: str | None = None
+    if args.split == "test":
+        try:
+            test_claim = begin_test_evaluation(
+                args.checkpoint,
+                payload,
+                current_provenance,
+                split_keys,
+                output_dir=args.output_dir,
             )
-        flights = [indexed[key] for key in split_keys]
+        except TestReleaseError as exc:
+            parser.error(str(exc))
+    flights = load_flight_dicts(
+        args.data,
+        include_flight_keys=set(split_keys),
+    )
+    indexed = {
+        dataset_flight_key(flight, index): flight for index, flight in enumerate(flights)
+    }
+    missing = [key for key in split_keys if key not in indexed]
+    if missing:
+        parser.error(
+            f"{len(missing)} flight(s) from the checkpoint's {args.split!r} split "
+            f"are absent from {args.data}; first missing key: {missing[0]!r}"
+        )
+    flights = [indexed[key] for key in split_keys]
     series = _build_series_or_exit(args, config, parser, flights)
     print(f"predicting {len(series)} flight(s) from the {args.split!r} split")
 
     records, overlap = [], []
     for index, s in enumerate(series):
-        forecast = forecast_approach(model, s, config, normalizer, device=device)
+        forecast = forecast_approach(
+            model, s, config, normalizer, device=device, truncate=not args.no_truncate
+        )
         records.append(build_prediction_record(
             s,
             forecast,
             index=index,
             model_name=config.model,
-            n_segments=config.n_segments,
+            horizon_mode=config.horizon_mode,
             split=args.split,
         ))
         overlap.append(observed_series_metrics(s, forecast))
 
     paths = write_batch(records, output_dir=args.output_dir, config_dict=config.to_dict(),
                         overlap=overlap, checkpoint=str(args.checkpoint), split=args.split)
+
+    capped = sum(record.source.get("horizonCapped", False) for record in records)
+    if capped:
+        print(
+            f"  WARNING: {capped} forecast(s) reached the fixed H_full cap before a "
+            "threshold closest-approach was detected; their final gate states are cap artifacts"
+        )
 
     # Printed from the block that was just persisted, so the terminal and summary.json
     # cannot report different numbers for the same run.
@@ -348,6 +541,19 @@ def main(argv: list[str] | None = None) -> int:
     timing = accuracy["final_time_s"]
     print(f"  final time: MAE {timing['mae']:.1f} s   "
           f"p95 {timing['p95_abs']:.1f} s   bias {timing['mean_signed']:+.1f} s")
+    raw = accuracy["raw_kinematics"]
+    predicted_raw, observed_raw = raw["predicted"], raw["observed_baseline"]
+    print(
+        "  raw kinematics fleet p95 (prediction vs observed): "
+        f"pos/vel RMSE {predicted_raw['position_velocity_rmse_mps']['p95']:.2f}/"
+        f"{observed_raw['position_velocity_rmse_mps']['p95']:.2f} m/s   "
+        f"turn {predicted_raw['turn_rate_p95_deg_s']['p95']:.2f}/"
+        f"{observed_raw['turn_rate_p95_deg_s']['p95']:.2f} deg/s   "
+        f"accel {predicted_raw['acceleration_p95_mps2']['p95']:.2f}/"
+        f"{observed_raw['acceleration_p95_mps2']['p95']:.2f} m/s²   "
+        f"jerk {predicted_raw['jerk_p95_mps3']['p95']:.2f}/"
+        f"{observed_raw['jerk_p95_mps3']['p95']:.2f} m/s³"
+    )
 
     # Flyability: what controls would these trajectories have REQUIRED, and does that sit
     # inside the airframe's envelope? Reported against the observed tracks measured the same
@@ -368,6 +574,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  flyability: {predicted['fully_flyable_rate'] * 100:.1f}% of predictions fully "
           f"flyable vs {observed['fully_flyable_rate'] * 100:.1f}% of the observed tracks "
           f"({flyability['delta']['fully_flyable_rate'] * 100:+.1f} pp)")
+
+    if test_claim is not None:
+        complete_test_evaluation(args.checkpoint, test_claim)
 
     print(f"✓ wrote {len(paths)} evaluation record(s) to {args.output_dir}")
     print(f"  grade them with:  python -m evaluation --input {args.output_dir}")

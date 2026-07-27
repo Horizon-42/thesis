@@ -20,19 +20,24 @@ from typing import Any, Sequence
 import torch
 
 from batching import resolve_batch_size
-from config import TSConfig
+from config import HORIZON_NORMALIZED, TSConfig
 from dataset import (
-    FlightSeries,
+    FixedAnchorTrajectoryWindows, FlightSeries,
     cross_validation_folds,
     provenance_manifest_digests,
     split_by_flight,
 )
 from models import resolve_device
-from train import fit_model, usable_series
+from train import evaluate_split, fit_model, usable_series
 
 RESULTS_NAME = "cv_results.json"
 BEST_CONFIG_NAME = "best_config.json"
-RESULTS_SCHEMA = "ts-cross-validation-v7-flight-epoch-airport-macro"
+RESULTS_SCHEMA = "ts-cross-validation-v10-raw-kinematic-metrics"
+SELECTION_METRIC = (
+    "mean outer-train-fold airport-macro weighted sum of normalized state MSE, "
+    "scaled final-time MSE, position/velocity displacement-consistency MSE, and "
+    "terminal-position MSE"
+)
 CV_PARAMETER_GRIDS: dict[str, tuple[Any, ...]] = {
     "n_segments": (64, 128, 256),
     "learning_rate": (1e-4, 3e-4, 5e-4),
@@ -67,6 +72,21 @@ def validate_cv_parameters(parameters: Sequence[str]) -> tuple[str, ...]:
     return selected
 
 
+def applicable_cv_parameters(
+    parameters: Sequence[str], horizon_mode: str
+) -> tuple[str, ...]:
+    """Return only parameters that affect the selected prediction contract."""
+    selected = validate_cv_parameters(parameters)
+    if horizon_mode != HORIZON_NORMALIZED:
+        selected = tuple(name for name in selected if name != "n_segments")
+    if not selected:
+        raise ValueError(
+            "n_segments only affects normalized-time output; fixed-horizon CV needs "
+            "at least one applicable parameter"
+        )
+    return selected
+
+
 def parameter_grid(parameters: Sequence[str]) -> dict[str, list[Any]]:
     selected = validate_cv_parameters(parameters)
     return {name: list(CV_PARAMETER_GRIDS[name]) for name in selected}
@@ -77,7 +97,7 @@ def _candidate_overrides(
     parameters: Sequence[str] = DEFAULT_CV_PARAMETERS,
 ) -> list[dict[str, Any]]:
     """Return the complete, architecture-valid grid for the selected parameters."""
-    selected = validate_cv_parameters(parameters)
+    selected = applicable_cv_parameters(parameters, base.horizon_mode)
     candidates: list[dict[str, Any]] = []
     value_grid = (CV_PARAMETER_GRIDS[name] for name in selected)
     for values in itertools.product(*value_grid):
@@ -129,7 +149,9 @@ def cross_validate(
     usable = usable_series(series, base_config, verbose=verbose)
     outer_train, outer_val, outer_test = split_by_flight(usable, base_config)
     folds = cross_validation_folds(outer_train, n_splits, seed=base_config.seed)
-    selected_parameters = validate_cv_parameters(cv_parameters)
+    selected_parameters = applicable_cv_parameters(
+        cv_parameters, base_config.horizon_mode
+    )
     candidates = _candidate_overrides(base_config, selected_parameters)
 
     if verbose:
@@ -174,6 +196,13 @@ def cross_validate(
                 verbose=verbose,
             )
             best_epoch = min(fit.history, key=lambda row: row.val_loss)
+            validation_metrics = evaluate_split(
+                fit.model,
+                FixedAnchorTrajectoryWindows(fold_val, fit.config, fit.normalizer),
+                fit.normalizer,
+                fit.config,
+                fit.device,
+            )
             fold_results.append({
                 "fold": fold_index,
                 "train_flights": len(fold_train),
@@ -184,6 +213,10 @@ def cross_validate(
                 "best_epoch": best_epoch.epoch,
                 "val_by_airport": best_epoch.val_by_airport,
                 "batch_size": fit.config.batch_size,
+                # Independent physical-unit diagnostics. Candidate selection remains the
+                # declared airport-macro objective above; these fields make accuracy and
+                # smoothness trade-offs auditable without changing that objective.
+                "validation_metrics": validation_metrics,
             })
             del fit
             gc.collect()
@@ -206,9 +239,7 @@ def cross_validate(
     best_overrides = dict(best["overrides"])
     results = {
         "schema_version": RESULTS_SCHEMA,
-        "selection_metric": (
-            "mean outer-train-fold airport-macro joint normalized state/time MSE"
-        ),
+        "selection_metric": SELECTION_METRIC,
         "leakage_guard": {
             "search_population": "outer_train_only",
             "outer_validation_used": False,

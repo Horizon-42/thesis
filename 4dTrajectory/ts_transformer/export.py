@@ -51,7 +51,9 @@ from evaluation_export import (  # noqa: E402
 from channels import states_from_channels  # noqa: E402
 from dataset import FlightSeries, flight_key  # noqa: E402
 from forecast import Forecast  # noqa: E402
-from metrics import trajectory_metrics  # noqa: E402
+from metrics import (  # noqa: E402
+    RAW_KINEMATIC_METRIC_KEYS, raw_kinematic_metrics, trajectory_metrics,
+)
 
 # The filename stem IS the flight identity — flight_scenarios.identity.flight_key, the
 # same function that keys the train/val/test split and the optimizer's record filenames;
@@ -86,7 +88,7 @@ def build_prediction_record(
     *,
     index: int,
     model_name: str,
-    n_segments: int,
+    horizon_mode: str,
     split: str = "test",
 ) -> PredictionRecord:
     """Assemble the record set for one predicted approach.
@@ -131,8 +133,12 @@ def build_prediction_record(
     source.update({
         "predictor": model_name,
         "predictionOutput": "state",
-        "normalizedTimeSegments": n_segments,
+        "horizonMode": horizon_mode,
+        "forecastPasses": forecast.passes,
         "predictedFinalTimeS": forecast.final_time_s,
+        "durationHeadFinalTimeS": forecast.predicted_final_time_s,
+        "truncatedAtThreshold": forecast.truncated_at_threshold,
+        "horizonCapped": forecast.horizon_capped,
         "anchorIndex": forecast.anchor,
         "anchorTimeS": anchor_time,
         "predictionSplit": split,
@@ -182,15 +188,16 @@ def clear_stale_records(output_dir: Path) -> None:
             path.unlink()
 
 
-def accuracy_block(overlap: Sequence[dict[str, float]]) -> dict[str, Any]:
+def accuracy_block(overlap: Sequence[dict[str, Any]]) -> dict[str, Any]:
     """Roll per-flight overlap errors up into the batch's headline accuracy numbers.
 
     Flights whose forecast and observed track do not overlap at all (``n_steps == 0``) carry
     NaN errors and are excluded from the statistics AND counted, rather than being quietly
     averaged in as zero.
 
-    Both a mean and a p95 are reported because they answer different questions: a mean alone
-    can hide a small set of badly predicted approaches.
+    Median, mean, p95 and max are reported because raw derivatives have a deliberately
+    unbounded physical scale: one catastrophically short predicted duration can dominate
+    the mean while the fleet p95 still describes the tail experienced by a typical batch.
     """
     time_errors = np.array([m["final_time_error_s"] for m in overlap], dtype=np.float64)
     time_block = {
@@ -198,17 +205,58 @@ def accuracy_block(overlap: Sequence[dict[str, float]]) -> dict[str, Any]:
         "p95_abs": float(np.percentile(np.abs(time_errors), 95)),
         "mean_signed": float(time_errors.mean()),
     }
+
+    def raw_role(role: str) -> dict[str, dict[str, float]]:
+        result = {}
+        for key in RAW_KINEMATIC_METRIC_KEYS:
+            values = np.array(
+                [row["raw_kinematics"][role][key] for row in overlap], dtype=np.float64
+            )
+            values = values[np.isfinite(values)]
+            if not len(values):
+                result[key] = {
+                    "count": 0,
+                    "median": float("nan"),
+                    "mean": float("nan"),
+                    "p95": float("nan"),
+                    "max": float("nan"),
+                }
+            else:
+                result[key] = {
+                    "count": int(len(values)),
+                    "median": float(np.median(values)),
+                    "mean": float(values.mean()),
+                    "p95": float(np.percentile(values, 95)),
+                    "max": float(values.max()),
+                }
+        return result
+
+    predicted_raw = raw_role("predicted")
+    observed_raw = raw_role("observed_baseline")
+    raw_block = {
+        "predicted": predicted_raw,
+        "observed_baseline": observed_raw,
+        # Signed difference of fleet p95 values. Positive means the prediction's physical
+        # tail is rougher or less self-consistent than the observed tracks under the same
+        # raw-node metric. Means remain available above for outlier audits.
+        "delta": {
+            key: predicted_raw[key]["p95"] - observed_raw[key]["p95"]
+            for key in RAW_KINEMATIC_METRIC_KEYS
+        },
+    }
     finite = [m for m in overlap if m["n_steps"]]
     if not finite:
         return {
             "flights": 0,
             "flights_without_overlap": len(overlap),
             "final_time_s": time_block,
+            "raw_kinematics": raw_block,
         }
 
     def stats(key: str) -> dict[str, float]:
         values = np.array([m[key] for m in finite], dtype=np.float64)
-        return {"mean": float(values.mean()), "p95": float(np.percentile(values, 95)),
+        return {"median": float(np.median(values)),
+                "mean": float(values.mean()), "p95": float(np.percentile(values, 95)),
                 "max": float(values.max())}
 
     return {
@@ -219,6 +267,7 @@ def accuracy_block(overlap: Sequence[dict[str, float]]) -> dict[str, Any]:
         "fde_m": stats("fde_m"),
         "cross_track_p95_m": stats("cross_track_p95_m"),
         "altitude_p95_m": stats("altitude_p95_m"),
+        "raw_kinematics": raw_block,
     }
 
 
@@ -283,7 +332,7 @@ def write_batch(
 
         row = summary_row(
             source,
-            # A state forecast always produces a complete normalized trajectory.
+        # A state forecast is solved in one forward pass under its checkpoint clock.
             status="solved",
             states_file=states_path.name,
             eval_file=eval_path.name,
@@ -296,7 +345,9 @@ def write_batch(
         row.update({
             "predictor": source.get("predictor"),
             "prediction_output": source.get("predictionOutput"),
-            "n_segments": source.get("normalizedTimeSegments"),
+            "horizon_mode": source.get("horizonMode"),
+            "forecast_passes": source.get("forecastPasses"),
+            "horizon_capped": source.get("horizonCapped"),
             "predicted_final_time_s": source.get("predictedFinalTimeS"),
             "true_final_time_s": metrics["true_final_time_s"],
             "final_time_error_s": metrics["final_time_error_s"],
@@ -304,6 +355,7 @@ def write_batch(
             "ade_m": metrics["ade_m"],
             "fde_m": metrics["fde_m"],
             "overlap_steps": metrics["n_steps"],
+            "raw_kinematics": metrics["raw_kinematics"],
         })
         rows.append(row)
 
@@ -311,7 +363,7 @@ def write_batch(
         "scenarios": None,
         "mode": (
             f"tsTransformer:{config_dict.get('model')}:"
-            f"normalized-time:state:{split}"
+            f"{config_dict.get('horizon_mode')}:state:{split}"
         ),
         "split": split,
         "checkpoint": checkpoint,
@@ -327,11 +379,12 @@ def write_batch(
     return written
 
 
-def observed_series_metrics(series: FlightSeries, forecast: Forecast) -> dict[str, float]:
+def observed_series_metrics(series: FlightSeries, forecast: Forecast) -> dict[str, Any]:
     """Error of one predicted approach against its own observed track, metres.
 
-    The forecast's physical step is learned (``final_time_s / N``), not the input ``dt``.
-    Observations are therefore interpolated at predicted timestamps over their overlap.
+    The forecast carries explicit physical timestamps reconstructed from its checkpoint's
+    normalized or fixed-horizon clock. Observations are interpolated at those timestamps over
+    their overlap.
     """
     valid = forecast.times <= series.times[-1]
     n = int(valid.sum())
@@ -342,11 +395,26 @@ def observed_series_metrics(series: FlightSeries, forecast: Forecast) -> dict[st
         "true_final_time_s": true_final_time_s,
         "final_time_error_s": forecast.final_time_s - true_final_time_s,
     }
+    anchor_values = series.values[forecast.anchor][None, ...]
+    predicted_durations = np.diff(
+        np.concatenate(([series.times[forecast.anchor]], forecast.times))
+    )[None, ...]
+    observed_values = series.values[forecast.anchor + 1 :]
+    observed_durations = np.diff(series.times[forecast.anchor:])[None, ...]
+    raw_metrics = {
+        "predicted": raw_kinematic_metrics(
+            anchor_values, forecast.values[None, ...], predicted_durations
+        ),
+        "observed_baseline": raw_kinematic_metrics(
+            anchor_values, observed_values[None, ...], observed_durations
+        ),
+    }
     if n == 0:
         return {
             "ade_m": float("nan"),
             "fde_m": float("nan"),
             "n_steps": 0,
+            "raw_kinematics": raw_metrics,
             **time_metrics,
         }
 
@@ -365,5 +433,6 @@ def observed_series_metrics(series: FlightSeries, forecast: Forecast) -> dict[st
         "cross_track_p95_m": block["cross_track_m"]["p95_abs"],
         "altitude_p95_m": block["altitude_m"]["p95_abs"],
         "n_steps": n,
+        "raw_kinematics": raw_metrics,
         **time_metrics,
     }
