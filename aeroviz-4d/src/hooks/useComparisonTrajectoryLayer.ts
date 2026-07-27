@@ -187,17 +187,23 @@ export function restoreObservedEntityStyle(
 }
 
 /**
- * An availability interval per entity, matching its own position samples, keyed by entity id.
+ * An availability interval per entity, keyed by entity id.
  *
  * The comparison packets bake in NO `availability`, and the position uses HOLD extrapolation, so a
  * short optimizer/simulator trajectory would otherwise FREEZE at its end and hang in the scene
  * while the clock runs on to the far-longer reference tracks. Giving each entity an availability =
  * [firstSample, lastSample] makes it simply DISAPPEAR when its trajectory ends. Derived from the
  * CZML `position.epoch` + first/last time offset (seconds).
+ *
+ * Predictor input (`look-{group}`) is the one exception: it and `pred-{group}` are two differently
+ * styled halves of one continuous path. Its availability therefore extends through the matching
+ * prediction, preventing Cesium from removing the whole input half on the frame after the shared
+ * anchor. Its path trail can then age out normally instead of disappearing as an entity boundary.
  */
 export function availabilityByEntityId(czml: unknown): Map<string, Cesium.TimeIntervalCollection> {
   const out = new Map<string, Cesium.TimeIntervalCollection>();
   if (!Array.isArray(czml)) return out;
+  const intervals = new Map<string, { start: Cesium.JulianDate; stop: Cesium.JulianDate }>();
   for (const raw of czml as unknown[]) {
     const packet = raw as { id?: unknown; position?: { epoch?: unknown; cartographicDegrees?: unknown } };
     const id = packet.id;
@@ -207,10 +213,24 @@ export function availabilityByEntityId(czml: unknown): Map<string, Cesium.TimeIn
     if (!Array.isArray(cd) || cd.length < 4) continue;
     const epoch = Cesium.JulianDate.fromIso8601(epochIso);
     const nums = cd as number[];
+    intervals.set(id, {
+      start: Cesium.JulianDate.addSeconds(epoch, nums[0], new Cesium.JulianDate()),
+      stop: Cesium.JulianDate.addSeconds(epoch, nums[nums.length - 4], new Cesium.JulianDate()),
+    });
+  }
+
+  for (const [id, interval] of intervals) {
+    let stop = interval.stop;
+    if (id.startsWith("look-")) {
+      const prediction = intervals.get(`pred-${id.slice("look-".length)}`);
+      if (prediction && Cesium.JulianDate.lessThan(stop, prediction.stop)) {
+        stop = prediction.stop;
+      }
+    }
     out.set(id, new Cesium.TimeIntervalCollection([
       new Cesium.TimeInterval({
-        start: Cesium.JulianDate.addSeconds(epoch, nums[0], new Cesium.JulianDate()),
-        stop: Cesium.JulianDate.addSeconds(epoch, nums[nums.length - 4], new Cesium.JulianDate()),
+        start: interval.start,
+        stop,
       }),
     ]));
   }

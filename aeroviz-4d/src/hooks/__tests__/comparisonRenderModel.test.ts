@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as Cesium from "cesium";
 import {
   applyComparisonRenderModel,
+  availabilityByEntityId,
   captureObservedEntityStyle,
   isComparisonEntity,
   kindOfEntityId,
@@ -120,6 +121,43 @@ describe("comparison entity ids", () => {
     expect(isComparisonEntity(new Cesium.Entity({ id: "AAL542_05L_a15c80_20260701T033111Z" })))
       .toBe(false);
     expect(isComparisonEntity(undefined)).toBe(false);
+  });
+});
+
+describe("comparison entity availability", () => {
+  it("keeps predictor input available through the matching forecast", () => {
+    const epoch = "2026-04-01T08:00:00Z";
+    const availability = availabilityByEntityId([
+      {
+        id: "look-X_05L",
+        position: {
+          epoch,
+          cartographicDegrees: [0, -78.4, 35.7, 900, 4, -78.3, 35.6, 800],
+        },
+      },
+      {
+        id: "pred-X_05L",
+        position: {
+          epoch,
+          cartographicDegrees: [4, -78.3, 35.6, 800, 9, -78.2, 35.5, 700],
+        },
+      },
+      {
+        id: "sim-Y_05L",
+        position: {
+          epoch,
+          cartographicDegrees: [0, -78.5, 35.8, 1000, 3, -78.4, 35.7, 900],
+        },
+      },
+    ]);
+
+    const start = Cesium.JulianDate.fromIso8601(epoch);
+    expect(Cesium.JulianDate.secondsDifference(availability.get("look-X_05L")!.stop, start))
+      .toBe(9);
+    expect(Cesium.JulianDate.secondsDifference(availability.get("pred-X_05L")!.stop, start))
+      .toBe(9);
+    expect(Cesium.JulianDate.secondsDifference(availability.get("sim-Y_05L")!.stop, start))
+      .toBe(3);
   });
 });
 
