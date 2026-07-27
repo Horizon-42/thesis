@@ -58,9 +58,14 @@ def test_final_training_prints_the_resolved_config_before_the_command(
     output = capsys.readouterr().out
 
     assert "config    : TSConfig defaults" in output
-    assert "trajectory: dt=2s, L=60, N=32, frame=enu, anchor=fixed L-1" in output
+    assert (
+        "trajectory: dt=2s, L=60, mode=normalized, output=32, N=32, "
+        "H_full=300, H_window=30, "
+        "frame=enu, anchor=fixed L-1"
+    ) in output
     assert "network   : d_model=256, d_ff=512, heads=8, layers=3" in output
     assert "optimizer : lr=0.0005" in output
+    assert "loss      : final_time=1, kinematic=3, terminal=0.02" in output
     assert "runtime   : batch=2048, device=auto, seed=29, aircraft=A320" in output
     assert output.index("config    :") < output.index("[1/1 final train")
 
@@ -103,6 +108,48 @@ def test_pipeline_defaults_to_both_pooled_models_with_batch_2048(
     assert "--model itransformer" in output
     assert "--model patchtst" in output
     assert "--batch-size 2048" in output
+    assert "--split train" in output
+    assert "--split val" in output
+    assert "--split test" not in output
+
+
+def test_pipeline_requires_explicit_release_before_test(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(pipeline, "HARVEST_ROOT", tmp_path / "harvest")
+    monkeypatch.setattr(pipeline, "OPT_OUTPUTS_ROOT", tmp_path / "outputs")
+    _manifest(pipeline.HARVEST_ROOT, "KRDU")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "run_ts_pipeline.py", "--dry-run", "--models", "itransformer",
+            "--split", "test",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        pipeline.main()
+
+
+def test_pipeline_test_release_is_an_explicit_audited_step(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(pipeline, "HARVEST_ROOT", tmp_path / "harvest")
+    monkeypatch.setattr(pipeline, "OPT_OUTPUTS_ROOT", tmp_path / "outputs")
+    _manifest(pipeline.HARVEST_ROOT, "KRDU")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "run_ts_pipeline.py", "--dry-run", "--models", "itransformer",
+            "--outputs", "eval", "--split", "test", "--release-test",
+        ],
+    )
+
+    pipeline.main()
+    output = capsys.readouterr().out
+
+    assert " freeze-test " in output
+    assert "--test-release" in output
 
 
 def test_simple_cv_runner_forwards_explicit_batch_size(tmp_path, monkeypatch, capsys):
@@ -287,6 +334,23 @@ def test_fixed_and_random_anchor_modes_use_distinct_artifact_paths(tmp_path, mon
     assert fixed_prediction.category != random_prediction.category
 
 
+def test_three_horizon_modes_use_distinct_commands_and_artifact_paths(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline, "HARVEST_ROOT", tmp_path / "harvest")
+    monkeypatch.setattr(pipeline, "OPT_OUTPUTS_ROOT", tmp_path / "outputs")
+    _manifest(pipeline.HARVEST_ROOT, "KRDU")
+    plans = {
+        mode: pipeline.TrainingPlan(
+            ("KRDU",), "itransformer", training_mode="pooled", horizon_mode=mode
+        )
+        for mode in ("normalized", "full", "window")
+    }
+
+    assert len({plan.train_dir for plan in plans.values()}) == 3
+    for mode, plan in plans.items():
+        command = plan.train_step(use_best_config=False)[1]
+        assert command[command.index("--horizon-mode") + 1] == mode
+
+
 def test_prediction_outputs_and_categories_are_split_specific(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "OPT_OUTPUTS_ROOT", tmp_path / "outputs")
     monkeypatch.setattr(pipeline, "COMPARISON_AIRPORTS_ROOT", tmp_path / "frontend")
@@ -299,6 +363,14 @@ def test_prediction_outputs_and_categories_are_split_specific(tmp_path, monkeypa
     assert test.category != train.category
     assert test.pred_dir.name.endswith("_test")
     assert train.category.endswith("_train")
+    assert test.label.startswith("Test split (held-out)")
+    assert train.label.startswith("Training split (in-sample)")
+    test_czml = test.steps()[-1][1]
+    train_czml = train.steps()[-1][1]
+    test_predict = test.steps()[0][1]
+    assert "--test-release" in test_predict
+    assert test_czml[test_czml.index("--dataset-split") + 1] == "test"
+    assert train_czml[train_czml.index("--dataset-split") + 1] == "train"
 
 
 def test_prediction_labels_distinguish_coordinate_frames(tmp_path, monkeypatch):
@@ -370,21 +442,107 @@ def test_skip_train_rejects_checkpoint_from_opposite_anchor_policy(
     trained.checkpoint_metadata.write_text(json.dumps({
         "schema_version": pipeline.CHECKPOINT_METADATA_SCHEMA,
         "checkpoint_sha256": hashlib.sha256(trained.checkpoint.read_bytes()).hexdigest(),
-        "arrival_manifests": {
-            "KRDU": hashlib.sha256(manifest.read_bytes()).hexdigest(),
-        },
-        "random_train_anchor": trained_policy,
-    }), encoding="utf-8")
+            "arrival_manifests": {
+                "KRDU": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+            },
+            "random_train_anchor": trained_policy,
+            "horizon_mode": trained.horizon_mode,
+            "pred_len": trained.resolved_train_config(use_best_config=False)[0].pred_len,
+        }), encoding="utf-8")
 
     assert trained.checkpoint_reuse_error() is None
     assert "random_train_anchor" in (requested.checkpoint_reuse_error() or "")
+
+
+def test_skip_train_rejects_checkpoint_from_opposite_horizon_mode(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(pipeline, "HARVEST_ROOT", tmp_path / "harvest")
+    manifest = _manifest(pipeline.HARVEST_ROOT, "KRDU")
+    shared_output = tmp_path / "shared-run"
+    trained = pipeline.TrainingPlan(
+        ("KRDU",), "itransformer", training_mode="pooled",
+        horizon_mode="normalized", output_dir=shared_output,
+    )
+    requested = pipeline.TrainingPlan(
+        ("KRDU",), "itransformer", training_mode="pooled",
+        horizon_mode="full", full_horizon_steps=300,
+        output_dir=shared_output,
+    )
+    trained.train_dir.mkdir(parents=True)
+    trained.checkpoint.write_bytes(b"checkpoint")
+    trained_config, _source = trained.resolved_train_config(use_best_config=False)
+    trained.checkpoint_metadata.write_text(json.dumps({
+        "schema_version": pipeline.CHECKPOINT_METADATA_SCHEMA,
+        "checkpoint_sha256": hashlib.sha256(trained.checkpoint.read_bytes()).hexdigest(),
+        "arrival_manifests": {
+            "KRDU": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+        },
+        "random_train_anchor": False,
+        "horizon_mode": trained_config.horizon_mode,
+        "pred_len": trained_config.pred_len,
+    }), encoding="utf-8")
+
+    assert trained.checkpoint_reuse_error() is None
+    assert "horizon mode" in (requested.checkpoint_reuse_error() or "")
+
+
+def test_skip_train_rejects_window_checkpoint_with_different_rollout_cap(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(pipeline, "HARVEST_ROOT", tmp_path / "harvest")
+    manifest = _manifest(pipeline.HARVEST_ROOT, "KRDU")
+    shared_output = tmp_path / "shared-window-run"
+    trained = pipeline.TrainingPlan(
+        ("KRDU",), "itransformer", training_mode="pooled",
+        horizon_mode="window", full_horizon_steps=300, window_horizon_steps=30,
+        output_dir=shared_output,
+    )
+    requested = pipeline.TrainingPlan(
+        ("KRDU",), "itransformer", training_mode="pooled",
+        horizon_mode="window", full_horizon_steps=600, window_horizon_steps=30,
+        output_dir=shared_output,
+    )
+    trained.train_dir.mkdir(parents=True)
+    trained.checkpoint.write_bytes(b"window checkpoint")
+    trained_config, _source = trained.resolved_train_config(use_best_config=False)
+    trained.checkpoint_metadata.write_text(json.dumps({
+        "schema_version": pipeline.CHECKPOINT_METADATA_SCHEMA,
+        "checkpoint_sha256": hashlib.sha256(trained.checkpoint.read_bytes()).hexdigest(),
+        "arrival_manifests": {
+            "KRDU": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+        },
+        "random_train_anchor": False,
+        "horizon_mode": trained_config.horizon_mode,
+        "pred_len": trained_config.pred_len,
+        "full_horizon_steps": trained_config.full_horizon_steps,
+    }), encoding="utf-8")
+
+    assert trained.checkpoint_reuse_error() is None
+    assert "rollout cap" in (requested.checkpoint_reuse_error() or "")
+
+
+def test_fixed_horizon_plan_drops_normalized_only_n_from_cv(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline, "HARVEST_ROOT", tmp_path / "harvest")
+    _manifest(pipeline.HARVEST_ROOT, "KRDU")
+
+    for mode in ("full", "window"):
+        plan = pipeline.TrainingPlan(
+            ("KRDU",), "itransformer", training_mode="pooled",
+            horizon_mode=mode, output_dir=tmp_path / mode,
+        )
+        assert plan.cv_parameters == ("learning_rate", "d_model")
+        command = plan.cv_step()[1]
+        assert command[command.index("--cv-parameters") + 1] == "learning_rate,d_model"
 
 
 def _ablation_cv_result(plan, manifest_digest, *, score):
     return {
         "schema_version": pipeline.CV_RESULTS_SCHEMA,
         "selection_metric": (
-            "mean outer-train-fold airport-macro joint normalized state/time MSE"
+            "mean outer-train-fold airport-macro weighted sum of normalized state MSE, "
+            "scaled final-time MSE, position/velocity displacement-consistency MSE, and "
+            "terminal-position MSE"
         ),
         "leakage_guard": {
             "search_population": "outer_train_only",
@@ -533,7 +691,7 @@ def test_coordinate_ablation_rejects_reused_cv_with_a_different_default_n(
         for frame, plan in plans.items()
     }
     for result in results.values():
-        result["base_config"]["n_segments"] = 64
+        result["base_config"]["n_segments"] = 128
 
     with pytest.raises(ablation.AblationContractError, match="base configuration"):
         ablation.assert_comparable(plans, results)

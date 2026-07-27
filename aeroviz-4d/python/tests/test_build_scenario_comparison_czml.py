@@ -782,6 +782,39 @@ def test_upsert_category_stamps_the_explicit_constrained_field(tmp_path):
     assert cats["runway_cons"]["constrained"] is True
 
 
+def test_upsert_prediction_category_stamps_dataset_split(tmp_path):
+    manifest = tmp_path / "categories.json"
+    _upsert_category(
+        manifest,
+        key="ts_pooled_itr_normalized_time_train",
+        label="Training split (in-sample)",
+        directory="ts_pooled_itr_normalized_time_train",
+        group_count=12,
+        constrained=False,
+        dataset_split="train",
+    )
+    category = json.loads(manifest.read_text())["categories"][0]
+    assert category["datasetSplit"] == "train"
+
+
+def test_cli_rejects_a_category_split_that_disagrees_with_the_summary(monkeypatch, tmp_path):
+    import pytest
+    import sys
+
+    summary = tmp_path / "summary.json"
+    summary.write_text(json.dumps({"split": "test"}), encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", [
+        "build_scenario_comparison_czml.py",
+        "--summary", str(summary),
+        "--output-dir", str(tmp_path / "comparison"),
+        "--evaluation-report", str(tmp_path / "evaluation_report.json"),
+        "--dataset-split", "train",
+    ])
+
+    with pytest.raises(SystemExit, match="2"):
+        comparison_builder.main()
+
+
 # ── Prediction schema (4dTrajectory/ts_transformer) ──────────────────────────
 
 # A prediction record rebases time so t=0 is the ANCHOR: `predicted_states` runs forward from

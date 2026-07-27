@@ -133,6 +133,8 @@ export interface ComparisonCategory {
    * naming convention, not a contract.
    */
   constrained: boolean;
+  /** Dataset partition for learned prediction categories; absent for optimization/baselines. */
+  datasetSplit?: "train" | "val" | "test";
 }
 
 /** Report-only categories have no comparison groups or CZML to draw. */
@@ -153,7 +155,11 @@ export function isComparisonCategory(value: unknown): value is ComparisonCategor
     typeof candidate.key === "string" &&
     typeof candidate.label === "string" &&
     typeof candidate.dir === "string" &&
-    typeof candidate.constrained === "boolean"
+    typeof candidate.constrained === "boolean" &&
+    (candidate.datasetSplit === undefined ||
+      candidate.datasetSplit === "train" ||
+      candidate.datasetSplit === "val" ||
+      candidate.datasetSplit === "test")
   );
 }
 
@@ -247,6 +253,8 @@ export interface ComparisonIndex {
   startHidden: boolean;
   /** References reuse the airport's canonical observed datasource. */
   referenceSource: "canonicalObserved";
+  /** Dataset partition for learned prediction categories. */
+  datasetSplit?: "train" | "val" | "test";
   groups: ComparisonGroup[];
   optimization?: OptimizationStats;
   /** Present only for data-driven prediction categories. */
@@ -280,6 +288,10 @@ export function isComparisonIndex(value: unknown): value is ComparisonIndex {
     typeof candidate.epoch === "string" &&
     typeof candidate.startHidden === "boolean" &&
     candidate.referenceSource === "canonicalObserved" &&
+    (candidate.datasetSplit === undefined ||
+      candidate.datasetSplit === "train" ||
+      candidate.datasetSplit === "val" ||
+      candidate.datasetSplit === "test") &&
     typeof candidate.evaluationReport === "string" &&
     Array.isArray(candidate.groups) &&
     candidate.groups.every(isComparisonGroup)

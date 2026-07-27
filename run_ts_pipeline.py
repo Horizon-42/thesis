@@ -11,8 +11,9 @@ Two training scopes are explicit:
     predictions and publications for each airport's locked split.
 
 The TS command locks outer train/validation/test before cross-validation. CV sees outer-train
-only; final training uses outer-validation for early stopping; outer-test is consumed only by
-the prediction stage after the final checkpoint exists.
+only; final training uses outer-validation for early stopping. Routine runs publish train and
+validation only. Outer-test requires a separate checkpoint-bound, one-shot release after every
+experimental decision is frozen.
 """
 
 from __future__ import annotations
@@ -35,7 +36,14 @@ TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
 if str(TS_DIR) not in sys.path:
     sys.path.insert(0, str(TS_DIR))
 
-from config import COORDINATE_FRAMES, MODELS, TSConfig  # noqa: E402
+from config import (  # noqa: E402
+    COORDINATE_FRAMES,
+    HORIZON_MODES,
+    HORIZON_NORMALIZED,
+    HORIZON_WINDOW,
+    MODELS,
+    TSConfig,
+)
 from cross_validation import (  # noqa: E402
     BEST_CONFIG_NAME,
     CV_PARAMETER_GRIDS,
@@ -44,9 +52,10 @@ from cross_validation import (  # noqa: E402
     DEFAULT_CV_PARAMETERS,
     RESULTS_NAME as CV_RESULTS_NAME,
     RESULTS_SCHEMA as CV_RESULTS_SCHEMA,
+    applicable_cv_parameters,
     parameter_grid,
-    validate_cv_parameters,
 )
+from evaluation_protocol import TEST_RELEASE_NAME  # noqa: E402
 from train import (  # noqa: E402
     CHECKPOINT_METADATA_NAME,
     CHECKPOINT_METADATA_SCHEMA,
@@ -57,6 +66,12 @@ TRAINING_MODES = ("per-airport", "pooled")
 MODEL_SHORT = {"itransformer": "itr", "patchtst": "ptst"}
 MODEL_LABEL = {"itransformer": "iTransformer", "patchtst": "PatchTST"}
 OUTPUT_KINDS = ("czml", "eval")
+PREDICTION_SPLITS = ("train", "val", "test")
+SPLIT_LABELS = {
+    "train": "Training split (in-sample)",
+    "val": "Validation split (model selection)",
+    "test": "Test split (held-out)",
+}
 
 
 def _file_sha256(path: Path) -> str:
@@ -95,6 +110,18 @@ def _anchor_tag(random_train_anchor: bool) -> str:
     return "_random_anchor" if random_train_anchor else ""
 
 
+HORIZON_TAGS = {
+    "normalized": "normalized_time",
+    "full": "full",
+    "window": "window",
+}
+HORIZON_LABELS = {
+    "normalized": "normalized time",
+    "full": "full horizon",
+    "window": "recursive window",
+}
+
+
 class TrainingPlan:
     """One CV/final-training cell, shared by one or more airport predictions."""
 
@@ -105,6 +132,9 @@ class TrainingPlan:
         *,
         training_mode: str,
         n_segments: int | None = None,
+        horizon_mode: str = HORIZON_NORMALIZED,
+        full_horizon_steps: int | None = None,
+        window_horizon_steps: int | None = None,
         epochs: int | None = None,
         seed: int | None = None,
         device: str | None = None,
@@ -124,6 +154,9 @@ class TrainingPlan:
         self.model = model
         self.training_mode = training_mode
         self.n_segments = n_segments
+        self.horizon_mode = horizon_mode
+        self.full_horizon_steps = full_horizon_steps
+        self.window_horizon_steps = window_horizon_steps
         self.epochs = epochs
         self.seed = seed
         self.device = device
@@ -131,7 +164,7 @@ class TrainingPlan:
         self.coordinate_frame = coordinate_frame
         self.batch_size = batch_size
         self.cv_folds = cv_folds
-        self.cv_parameters = validate_cv_parameters(cv_parameters)
+        self.cv_parameters = applicable_cv_parameters(cv_parameters, horizon_mode)
         self.cv_epochs = cv_epochs
         self.cv_patience = cv_patience
         self.random_train_anchor = random_train_anchor
@@ -142,13 +175,14 @@ class TrainingPlan:
         self.train_dir = (
             Path(output_dir)
             if output_dir is not None
-            else OPT_OUTPUTS_ROOT / scope / f"ts_{model}_normalized_time{suffix}"
+            else OPT_OUTPUTS_ROOT / scope / f"ts_{model}_{HORIZON_TAGS[horizon_mode]}{suffix}"
         )
         self.cv_dir = self.train_dir / "cross_validation"
         self.cv_results = self.cv_dir / CV_RESULTS_NAME
         self.best_config = self.cv_dir / BEST_CONFIG_NAME
         self.checkpoint = self.train_dir / CHECKPOINT_NAME
         self.checkpoint_metadata = self.train_dir / CHECKPOINT_METADATA_NAME
+        self.test_release = self.train_dir / TEST_RELEASE_NAME
 
     @property
     def pooled(self) -> bool:
@@ -166,7 +200,12 @@ class TrainingPlan:
             "--model", self.model,
             "--coordinate-frame", self.coordinate_frame,
             "--batch-size", self.batch_size,
+            "--horizon-mode", self.horizon_mode,
         ]
+        if self.full_horizon_steps is not None:
+            args += ["--full-horizon-steps", str(self.full_horizon_steps)]
+        if self.window_horizon_steps is not None:
+            args += ["--window-horizon-steps", str(self.window_horizon_steps)]
         if self.random_train_anchor:
             args.append("--random-train-anchor")
         if self.n_segments is not None and include_base_n_segments:
@@ -205,6 +244,18 @@ class TrainingPlan:
                 f"{metadata.get('random_train_anchor')!r} does not match requested "
                 f"{self.random_train_anchor!r}"
             )
+        expected_config, _source = self.resolved_train_config(
+            use_best_config=self.cv_reuse_error() is None
+        )
+        if metadata.get("horizon_mode") != expected_config.horizon_mode:
+            return "checkpoint horizon mode does not match the requested recipe"
+        if metadata.get("pred_len") != expected_config.pred_len:
+            return "checkpoint output length does not match the requested recipe"
+        if (
+            expected_config.horizon_mode == HORIZON_WINDOW
+            and metadata.get("full_horizon_steps") != expected_config.full_horizon_steps
+        ):
+            return "checkpoint window rollout cap does not match the requested recipe"
         return None
 
     def cv_reuse_error(self) -> str | None:
@@ -260,7 +311,12 @@ class TrainingPlan:
             "model": self.model,
             "coordinate_frame": self.coordinate_frame,
             "random_train_anchor": self.random_train_anchor,
+            "horizon_mode": self.horizon_mode,
         }
+        if self.full_horizon_steps is not None:
+            overrides["full_horizon_steps"] = self.full_horizon_steps
+        if self.window_horizon_steps is not None:
+            overrides["window_horizon_steps"] = self.window_horizon_steps
         if self.n_segments is not None:
             overrides["n_segments"] = self.n_segments
         if self.seed is not None:
@@ -318,7 +374,12 @@ class TrainingPlan:
             "model": self.model,
             "coordinate_frame": self.coordinate_frame,
             "random_train_anchor": self.random_train_anchor,
+            "horizon_mode": self.horizon_mode,
         })
+        if self.full_horizon_steps is not None:
+            overrides["full_horizon_steps"] = self.full_horizon_steps
+        if self.window_horizon_steps is not None:
+            overrides["window_horizon_steps"] = self.window_horizon_steps
         if self.n_segments is not None and (
             not use_best_config or "n_segments" not in self.cv_parameters
         ):
@@ -357,35 +418,39 @@ class PredictionPlan:
         airport: str,
         outputs: tuple[str, ...],
         *,
-        split: str = "test",
+        split: str = "val",
         experiment_tag: str | None = None,
     ) -> None:
         self.training = training
         self.airport = airport.upper()
         self.outputs = outputs
+        if split not in PREDICTION_SPLITS:
+            raise ValueError(f"unknown prediction split {split!r}")
         self.split = split
         self.data_manifest = arrival_manifest_path(self.airport)
         scope = "pooled_" if training.pooled else ""
         frame = _frame_tag(training.coordinate_frame)
         anchor = _anchor_tag(training.random_train_anchor)
         tag = f"_{experiment_tag}" if experiment_tag else ""
-        stem = f"{scope}{training.model}_normalized_time{frame}{anchor}{tag}_{split}"
+        horizon_tag = HORIZON_TAGS[training.horizon_mode]
+        stem = f"{scope}{training.model}_{horizon_tag}{frame}{anchor}{tag}_{split}"
         self.pred_dir = OPT_OUTPUTS_ROOT / self.airport / f"ts_pred_{stem}"
         self.summary = self.pred_dir / "summary.json"
         self.report = self.pred_dir / "evaluation_report.json"
         self.report_html = self.pred_dir / "evaluation_report.html"
         category_scope = "pooled_" if training.pooled else ""
         self.category = (
-            f"ts_{category_scope}{MODEL_SHORT[training.model]}_normalized_time"
+            f"ts_{category_scope}{MODEL_SHORT[training.model]}_{horizon_tag}"
             f"{frame}{anchor}{tag}_{split}"
         )
         model_label = MODEL_LABEL[training.model]
         pooled_label = "pooled, " if training.pooled else ""
         anchor_label = "random-anchor training, " if training.random_train_anchor else ""
         frame_label = "ENU" if training.coordinate_frame == "enu" else "runway-aligned"
+        horizon_label = HORIZON_LABELS[training.horizon_mode]
         self.label = (
-            f"Predicted ({model_label}, {pooled_label}{anchor_label}normalized time, "
-            f"{frame_label}, {split} split)"
+            f"{SPLIT_LABELS[split]} — Predicted ({model_label}, {pooled_label}"
+            f"{anchor_label}{horizon_label}, {frame_label})"
         )
         self.comparison_dir = (
             COMPARISON_AIRPORTS_ROOT / self.airport / "comparison" / self.category
@@ -401,6 +466,8 @@ class PredictionPlan:
             "--output-dir", str(self.pred_dir),
             "--split", self.split,
         ]
+        if self.split == "test":
+            predict.append("--test-release")
         if self.training.device is not None:
             predict += ["--device", self.training.device]
         named.append((f"predict ({self.split} split)", predict))
@@ -423,6 +490,7 @@ class PredictionPlan:
                 "--airport", self.airport,
                 "--category", self.category,
                 "--category-label", self.label,
+                "--dataset-split", self.split,
                 "--evaluation-report", str(self.report),
             ]))
         return named
@@ -457,7 +525,8 @@ def run_training(
     reuse_error = plan.checkpoint_reuse_error() if skip_train else None
     reuse = skip_train and reuse_error is None
     mode = "reuse checkpoint" if reuse else "train final checkpoint"
-    print(f"\n━━ {plan.label} [{plan.model} · normalized time · {plan.coordinate_frame}] · {mode}")
+    horizon_label = HORIZON_LABELS[plan.horizon_mode]
+    print(f"\n━━ {plan.label} [{plan.model} · {horizon_label} · {plan.coordinate_frame}] · {mode}")
     print(f"   manifests : {len(plan.data_manifests)}")
     print(f"   CV        : {plan.cv_dir}")
     print(f"   training  : {plan.train_dir}")
@@ -479,7 +548,10 @@ def run_training(
         print(f"   config    : {source}")
         print(
             f"   trajectory: dt={config.dt_s:g}s, L={config.seq_len}, "
-            f"N={config.n_segments}, frame={config.coordinate_frame}, anchor={anchor}"
+            f"mode={config.horizon_mode}, output={config.pred_len}, "
+            f"N={config.n_segments}, H_full={config.full_horizon_steps}, "
+            f"H_window={config.window_horizon_steps}, "
+            f"frame={config.coordinate_frame}, anchor={anchor}"
         )
         print(
             f"   network   : d_model={config.d_model}, d_ff={config.d_ff}, "
@@ -490,12 +562,17 @@ def run_training(
             f"epochs={config.epochs}, patience={config.patience}"
         )
         print(
+            f"   loss      : final_time={config.final_time_loss_weight:g}, "
+            f"kinematic={config.kinematic_consistency_loss_weight:g}, "
+            f"terminal={config.terminal_loss_weight:g}"
+        )
+        print(
             f"   runtime   : batch={batch}, device={config.device}, seed={config.seed}, "
             f"aircraft={config.aircraft_type}"
         )
 
     _run_steps(
-        f"{plan.label} · {plan.model} · normalized time",
+        f"{plan.label} · {plan.model} · {horizon_label}",
         plan.steps(skip_cv=skip_cv, reuse_checkpoint=reuse),
         dry_run=dry_run,
         before_step=print_final_config,
@@ -505,9 +582,26 @@ def run_training(
 
 def run_prediction(plan: PredictionPlan, *, dry_run: bool) -> None:
     print(f"\n  ━━ publish {plan.airport}: {plan.pred_dir}")
+    horizon_label = HORIZON_LABELS[plan.training.horizon_mode]
     _run_steps(
-        f"{plan.airport} · {plan.training.model} · normalized time",
+        f"{plan.airport} · {plan.training.model} · {horizon_label}",
         plan.steps(),
+        dry_run=dry_run,
+    )
+
+
+def freeze_test_release(plan: TrainingPlan, *, dry_run: bool) -> None:
+    """Make outer-test access explicit and bind it to this exact checkpoint/data roster."""
+    command = [
+        sys.executable,
+        str(TS_SCRIPT),
+        "freeze-test",
+        "--checkpoint", str(plan.checkpoint),
+        *plan._data_args(),
+    ]
+    _run_steps(
+        f"{plan.label} · {plan.model} · outer-test release",
+        [("freeze-test (irreversible)", command)],
         dry_run=dry_run,
     )
 
@@ -535,9 +629,35 @@ def main() -> None:
                         help="models to train (default: itransformer,patchtst)")
     parser.add_argument("--n-segments", type=int, default=None,
                         help="base N for normalized progress; CV also tunes N")
+    parser.add_argument(
+        "--horizon-mode",
+        choices=HORIZON_MODES,
+        default=HORIZON_NORMALIZED,
+        help="prediction horizon (default: normalized)",
+    )
+    parser.add_argument(
+        "--full-horizon-steps",
+        type=int,
+        default=None,
+        help="H_full physical-dt outputs and window recursion cap (default: 300)",
+    )
+    parser.add_argument(
+        "--window-horizon-steps",
+        type=int,
+        default=None,
+        help="H_window outputs per recursive pass (default: 30)",
+    )
     parser.add_argument("--outputs", type=lambda raw: _parse_csv(raw, OUTPUT_KINDS, "--outputs"),
                         default=OUTPUT_KINDS, metavar="czml,eval")
-    parser.add_argument("--split", choices=("test", "val", "train", "all"), default="test")
+    parser.add_argument(
+        "--split", choices=(*PREDICTION_SPLITS, "development"), default="development",
+        help="publication split; default development publishes train and validation only",
+    )
+    parser.add_argument(
+        "--release-test",
+        action="store_true",
+        help="irreversibly freeze and evaluate outer-test; required with --split test",
+    )
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--device", default=None)
@@ -577,6 +697,13 @@ def main() -> None:
                 raise ValueError
         except ValueError:
             parser.error("--batch-size must be a positive integer or 'auto'")
+    if args.split == "test" and not args.release_test:
+        parser.error(
+            "--split test requires --release-test after all model and hyperparameter "
+            "decisions are frozen"
+        )
+    if args.split != "test" and args.release_test:
+        parser.error("--release-test is valid only with --split test")
 
     if args.airport:
         airports = [args.airport.strip().upper()]
@@ -597,6 +724,7 @@ def main() -> None:
     ]
     print(f"{len(cells)} training cell(s), mode={args.training_mode}, airports={','.join(airports)}")
 
+    publish_splits = ("train", "val") if args.split == "development" else (args.split,)
     completed = 0
     for scope, model in cells:
         training = TrainingPlan(
@@ -604,6 +732,9 @@ def main() -> None:
             model,
             training_mode=args.training_mode,
             n_segments=args.n_segments,
+            horizon_mode=args.horizon_mode,
+            full_horizon_steps=args.full_horizon_steps,
+            window_horizon_steps=args.window_horizon_steps,
             epochs=args.epochs,
             seed=args.seed,
             device=args.device,
@@ -623,16 +754,19 @@ def main() -> None:
             skip_train=args.skip_train,
         ):
             continue
+        if args.split == "test":
+            freeze_test_release(training, dry_run=args.dry_run)
         for airport in scope:
-            run_prediction(
-                PredictionPlan(training, airport, tuple(args.outputs), split=args.split),
-                dry_run=args.dry_run,
-            )
+            for split in publish_splits:
+                run_prediction(
+                    PredictionPlan(training, airport, tuple(args.outputs), split=split),
+                    dry_run=args.dry_run,
+                )
         completed += 1
 
     verb = "previewed" if args.dry_run else "completed"
     print(f"\n✓ {verb} {completed}/{len(cells)} training cell(s) "
-          f"[CV={'skip/reuse' if args.skip_cv else 'run'}, split={args.split}]")
+          f"[CV={'skip/reuse' if args.skip_cv else 'run'}, splits={','.join(publish_splits)}]")
 
 
 if __name__ == "__main__":

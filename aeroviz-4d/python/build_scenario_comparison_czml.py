@@ -41,6 +41,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+DATASET_SPLITS = ("train", "val", "test")
+
 from data_layout import airport_data_path
 from flight_identity import flight_key
 from generate_czml import build_document_packet, build_position_property
@@ -818,6 +820,8 @@ def publish_comparison_batch(
         "referenceSource": "canonicalObserved",
         "groups": [],
     }
+    if summary.get("split") in DATASET_SPLITS:
+        index["datasetSplit"] = summary["split"]
     created: list[Path] = []
     try:
         for (group_airport, runway), results in sorted(groups.items()):
@@ -891,7 +895,7 @@ def _load_adsb(airport: str, override: str | None) -> list[dict[str, Any]]:
 
 def _upsert_category(
     manifest_path: Path, *, key: str, label: str, directory: str, group_count: int,
-    constrained: bool,
+    constrained: bool, dataset_split: str | None = None,
 ) -> int:
     """Add/replace one category in the shared ``categories.json`` manifest.
 
@@ -914,8 +918,11 @@ def _upsert_category(
     if key == "fitted_adsb":
         replaced.update({"adsb", "asdb", "adsb_cons", "asdb_cons"})
     kept = [c for c in manifest["categories"] if c.get("key") not in replaced]
-    kept.append({"key": key, "label": label, "dir": directory, "groups": group_count,
-                 "constrained": constrained})
+    entry = {"key": key, "label": label, "dir": directory, "groups": group_count,
+             "constrained": constrained}
+    if dataset_split is not None:
+        entry["datasetSplit"] = dataset_split
+    kept.append(entry)
     manifest["categories"] = sorted(kept, key=lambda c: c["key"])
     _write_json_atomic(manifest_path, manifest, pretty=True)
     return len(manifest["categories"])
@@ -945,6 +952,11 @@ def main() -> None:
     parser.add_argument(
         "--category-label", default=None,
         help="display label for --category (defaults to the key)",
+    )
+    parser.add_argument(
+        "--dataset-split", choices=DATASET_SPLITS, default=None,
+        help="dataset split represented by this prediction category; stored explicitly in "
+             "the frontend manifest",
     )
     parser.add_argument(
         "--constrained", action="store_true",
@@ -985,6 +997,11 @@ def main() -> None:
         parser.error("--summary batch requires --evaluation-report")
     summary_path = Path(args.summary)
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    if args.dataset_split is not None and summary.get("split") != args.dataset_split:
+        parser.error(
+            f"--dataset-split {args.dataset_split!r} does not match summary split "
+            f"{summary.get('split')!r}"
+        )
     states_dir = Path(args.states_dir) if args.states_dir else summary_path.parent
     out_dir = Path(args.output_dir)
 
@@ -1018,6 +1035,7 @@ def main() -> None:
             key=args.category, label=args.category_label or args.category,
             directory=out_dir.name, group_count=len(index["groups"]),
             constrained=args.constrained,
+            dataset_split=args.dataset_split,
         )
         print(f"✓ registered category {args.category!r} -> {out_dir.parent / 'categories.json'} "
               f"({total} categor{'y' if total == 1 else 'ies'})")

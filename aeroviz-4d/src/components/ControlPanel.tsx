@@ -71,6 +71,15 @@ export default function ControlPanel({ observedVerdicts = NO_VERDICTS }: Control
   const drawableComparisonCategories = comparisonCategories.filter(
     isDrawableComparisonCategory,
   );
+  const heldOutTestCategories = drawableComparisonCategories.filter(
+    (category) => category.datasetSplit === "test",
+  );
+  const trainingCategories = drawableComparisonCategories.filter(
+    (category) => category.datasetSplit === "train",
+  );
+  const otherComparisonCategories = drawableComparisonCategories.filter(
+    (category) => category.datasetSplit !== "train" && category.datasetSplit !== "test",
+  );
   const activeComparisonCategory =
     drawableComparisonCategories.find((c) => c.dir === trajectoryComparisonCategory) ?? null;
   const comparisonLegend = useComparisonLegend(
@@ -183,11 +192,33 @@ export default function ControlPanel({ observedVerdicts = NO_VERDICTS }: Control
                     value={trajectoryComparisonCategory ?? ""}
                     onChange={(event) => setTrajectoryComparisonCategory(event.target.value || null)}
                   >
-                    {drawableComparisonCategories.map((category) => (
-                      <option key={category.key} value={category.dir}>
-                        {category.label} ({category.groups})
-                      </option>
-                    ))}
+                    {heldOutTestCategories.length > 0 ? (
+                      <optgroup label="Held-out test results">
+                        {heldOutTestCategories.map((category) => (
+                          <option key={category.key} value={category.dir}>
+                            {category.label} ({category.groups})
+                          </option>
+                        ))}
+                      </optgroup>
+                    ) : null}
+                    {trainingCategories.length > 0 ? (
+                      <optgroup label="Training results (in-sample)">
+                        {trainingCategories.map((category) => (
+                          <option key={category.key} value={category.dir}>
+                            {category.label} ({category.groups})
+                          </option>
+                        ))}
+                      </optgroup>
+                    ) : null}
+                    {otherComparisonCategories.length > 0 ? (
+                      <optgroup label="Other evaluation results">
+                        {otherComparisonCategories.map((category) => (
+                          <option key={category.key} value={category.dir}>
+                            {category.label} ({category.groups})
+                          </option>
+                        ))}
+                      </optgroup>
+                    ) : null}
                   </select>
                 </label>
               ) : (

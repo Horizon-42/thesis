@@ -61,6 +61,20 @@ describe("airportData helpers", () => {
     ).toBe(false);
   });
 
+  it("accepts only explicit train/validation/test dataset split labels", () => {
+    const entry = {
+      key: "ts_model_train",
+      label: "Training split",
+      dir: "ts_model_train",
+      groups: 3,
+      constrained: false,
+    };
+    expect(isComparisonCategoriesManifest({ categories: [{ ...entry, datasetSplit: "train" }] }))
+      .toBe(true);
+    expect(isComparisonCategoriesManifest({ categories: [{ ...entry, datasetSplit: "training" }] }))
+      .toBe(false);
+  });
+
   it("distinguishes report-only evaluation categories from drawable comparisons", () => {
     expect(
       isDrawableComparisonCategory({

@@ -232,6 +232,38 @@ describe("ControlPanel", () => {
     );
   });
 
+  it("separates held-out test and in-sample training categories", () => {
+    appState.layers.trajectories = true;
+    appState.trajectoryComparison = true;
+    appState.trajectoryComparisonCategory = "ts_model_test";
+    appState.comparisonCategories = [
+      {
+        ...category("ts_model_train", false, 20),
+        label: "Training split (in-sample) — Predicted model",
+        datasetSplit: "train",
+      },
+      {
+        ...category("ts_model_test", false, 5),
+        label: "Test split (held-out) — Predicted model",
+        datasetSplit: "test",
+      },
+    ];
+
+    const { container } = render(<ControlPanel />);
+
+    const groups = [...container.querySelectorAll("optgroup")];
+    expect(groups.map((group) => group.label)).toEqual([
+      "Held-out test results",
+      "Training results (in-sample)",
+    ]);
+    expect([...groups[0].querySelectorAll("option")].map((option) => option.value)).toEqual([
+      "ts_model_test",
+    ]);
+    expect([...groups[1].querySelectorAll("option")].map((option) => option.value)).toEqual([
+      "ts_model_train",
+    ]);
+  });
+
   it("shows only optimizer-category paths, explains verdict overrides, and omits Optimize states", () => {
     appState.trajectoryComparison = true;
     appState.trajectoryComparisonCategory = "runway";
