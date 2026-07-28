@@ -3,22 +3,31 @@
 Orchestration only — it wires the pieces together:
 
     CZML-input flight ──► initial_state_from_track ──► GeodeticState
-    flight icao24     ──► aircraft_for_code (OpenAP) ──► Aircraft ──► aero_params_for_aircraft
-      (else --aircraft-type fallback)                                       └──► AeroParams
+    declared type / ICAO24 ──► ICAO Doc 8643 identity ─┐
+                                                      ├─► OpenAP/preset Aircraft ─► AeroParams
+      (else --aircraft-type dynamics fallback) ───────┘
     => FlightScenario(initial, aircraft, aero, source)
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from aircraft.aero_params import aero_params_for_aircraft
+from aircraft.aircraft_sets import Aircraft
+from aircraft.identity import AircraftIdentity, get_default_identity_resolver
 
 from .datum import flight_to_msl, flights_to_msl
 from .fitted_approach import fit_flight_final_approach
 from .runway_target import threshold_target_state
-from .scenario import FlightScenario, aircraft_for_code
+from .scenario import (
+    FlightScenario,
+    aircraft_dynamics_source,
+    aircraft_dynamics_surrogate_typecode,
+    aircraft_for_code,
+)
 from .start_state import DEFAULT_WINDOW_S, final_state_from_track, initial_state_from_track
 
 
@@ -31,14 +40,17 @@ def build_scenario(
     window_s: float = DEFAULT_WINDOW_S,
     target_from_threshold: bool = False,
     target_from_fitted_adsb: bool = False,
+    aircraft_provider: str = "auto",
 ) -> FlightScenario:
     """Build one :class:`FlightScenario` from a single CZML-input ``flight`` dict.
 
     ``flight`` is one element of a CZML-input file: ``{id, callsign, icao24, arr_airport,
-    runway, waypoints: [[t, lon, lat, alt], ...], ...}``. The aircraft is resolved from the
-    flight's transponder address (``icao24``) via the OpenAP lookup; ``aircraft_type`` (e.g.
-    ``"A320"``) is an explicit fallback, used only when the ``icao24`` can't be resolved.
-    ``mass_kg`` defaults to the aircraft's landing mass (these are approach scenarios).
+    runway, waypoints: [[t, lon, lat, alt], ...], ...}``. Identity is resolved separately
+    from performance: declared designators and registry results are validated against ICAO
+    Doc 8643, then OpenAP supplies type-level parameters. ``aircraft_type`` (for example
+    ``"A320"``) is an explicit *dynamics* fallback when identity is unknown or unsupported;
+    it never overwrites the audited real identity. ``mass_kg`` defaults to the selected
+    dynamics model's landing mass (these are approach scenarios).
 
     ``target_from_threshold`` chooses the published runway endpoint.  The mutually exclusive
     ``target_from_fitted_adsb`` chooses the OLS-extrapolated flown threshold crossing:
@@ -61,7 +73,10 @@ def build_scenario(
         if target_from_fitted_adsb else None
     )
     flight = flight_to_msl(flight)
-    aircraft = _resolve_aircraft(flight, aircraft_type)
+    aircraft_selection = _resolve_aircraft(
+        flight, aircraft_type, aircraft_provider=aircraft_provider
+    )
+    aircraft = aircraft_selection.aircraft
     mass = mass_kg if mass_kg is not None else aircraft.landing_mass
     arr_airport = airport or flight.get("arr_airport")
 
@@ -124,6 +139,7 @@ def build_scenario(
         "altitude_source": flight.get("altitude_source"),
         "hae_minus_msl_m": (flight.get("runway_target") or {}).get("hae_minus_msl_m"),
         "vertical_source": (flight.get("runway_target") or {}).get("vertical_source"),
+        **aircraft_selection.audit_fields(),
     }
     return FlightScenario(initial=initial, aircraft=aircraft, aero=aero, source=source, target=target)
 
@@ -137,14 +153,15 @@ def build_scenarios_from_arrivals(
     window_s: float = DEFAULT_WINDOW_S,
     target_from_threshold: bool = False,
     target_from_fitted_adsb: bool = False,
+    aircraft_provider: str = "auto",
 ) -> list[FlightScenario]:
     """Build a scenario per flight in an arrival manifest (or already-loaded list).
 
     ``arrivals`` may be an airport harvest root, ``arrivals/manifest.json``, or an
-    already-loaded list. Each flight's aircraft is resolved from its own
-    ``icao24`` (so a mixed-fleet file gets per-flight types); ``aircraft_type`` is the
-    fallback when an ``icao24`` can't be resolved. ``airport`` and ``target_from_threshold``
-    are forwarded to :func:`build_scenario`.
+    already-loaded list. Each flight's identity is resolved from its own declared type or
+    ``icao24`` (so a mixed-fleet file gets per-flight types); ``aircraft_type`` is only the
+    dynamics fallback. ``airport`` and ``target_from_threshold`` are forwarded to
+    :func:`build_scenario`.
     """
     flights = load_model_arrivals(arrivals)
     return [
@@ -152,36 +169,94 @@ def build_scenarios_from_arrivals(
             flight, aircraft_type, airport=airport, mass_kg=mass_kg, window_s=window_s,
             target_from_threshold=target_from_threshold,
             target_from_fitted_adsb=target_from_fitted_adsb,
+            aircraft_provider=aircraft_provider,
         )
         for flight in flights
     ]
 
 
-def _resolve_aircraft(flight: dict[str, Any], fallback_type: str | None):
-    """Resolve a flight's :class:`Aircraft`, preferring its transponder address.
+@dataclass(frozen=True, slots=True)
+class _AircraftSelection:
+    aircraft: Aircraft
+    identity: AircraftIdentity
+    fallback_used: bool
+    fallback_reason: str | None
+    provider: str
 
-    Order: the flight's declared ``type`` (if real — CZML-input writes ``"UNK"``), then its
-    ``icao24`` via the OpenAP lookup, then ``fallback_type`` (the CLI ``--aircraft-type``).
-    Raises if none resolve — fail loudly rather than guess a type.
-    """
-    candidates: list[str] = []
-    declared = (flight.get("type") or "").strip().upper()
-    if declared and declared != "UNK":
-        candidates.append(declared)
-    icao24 = (flight.get("icao24") or "").strip()
-    if icao24:
-        candidates.append(icao24)
-    if fallback_type:
-        candidates.append(fallback_type)
+    def audit_fields(self) -> dict[str, Any]:
+        identity = self.identity
+        return {
+            "resolved_typecode": identity.typecode,
+            "identity_source": identity.identity_source,
+            "identity_source_date": identity.identity_source_date,
+            "typecode_source": identity.typecode_source,
+            "typecode_standard": identity.typecode_standard,
+            "typecode_standard_date": identity.typecode_standard_date,
+            "typecode_method": identity.typecode_method,
+            "typecode_confidence": identity.confidence,
+            "registry_registration": identity.registration,
+            "registry_manufacturer": identity.manufacturer,
+            "registry_model": identity.model,
+            "faa_model_code": identity.faa_model_code,
+            "dynamics_typecode": self.aircraft.code,
+            "dynamics_source": aircraft_dynamics_source(
+                self.aircraft.code, provider=self.provider
+            ),
+            "dynamics_surrogate_typecode": aircraft_dynamics_surrogate_typecode(
+                self.aircraft.code, provider=self.provider
+            ),
+            "aircraft_fallback_used": self.fallback_used,
+            "aircraft_fallback_reason": self.fallback_reason,
+        }
 
-    for candidate in candidates:
+
+def _resolve_aircraft(
+    flight: dict[str, Any],
+    fallback_type: str | None,
+    *,
+    aircraft_provider: str = "auto",
+) -> _AircraftSelection:
+    """Resolve identity first, then obtain OpenAP/preset dynamics independently."""
+    resolver = get_default_identity_resolver()
+    identity = resolver.resolve(
+        declared_type=flight.get("type"),
+        icao24=flight.get("icao24"),
+    )
+    failure = identity.failure_reason
+    if identity.typecode is not None:
         try:
-            return aircraft_for_code(candidate)
-        except KeyError:
-            continue
-    raise KeyError(
-        f"could not resolve an aircraft for flight {flight.get('id')!r}: tried "
-        f"{candidates or ['<nothing>']}; pass --aircraft-type as a fallback"
+            aircraft = aircraft_for_code(identity.typecode, provider=aircraft_provider)
+        except KeyError as exc:
+            failure = str(exc)
+        else:
+            return _AircraftSelection(
+                aircraft=aircraft,
+                identity=identity,
+                fallback_used=False,
+                fallback_reason=None,
+                provider=aircraft_provider,
+            )
+
+    if not fallback_type:
+        detail = failure or "identity has no ICAO typecode"
+        raise KeyError(
+            f"could not resolve aircraft dynamics for flight {flight.get('id')!r}: {detail}; "
+            "pass --aircraft-type as a fallback"
+        )
+
+    fallback_code = resolver.catalog.normalize_typecode(fallback_type)
+    try:
+        aircraft = aircraft_for_code(fallback_code, provider=aircraft_provider)
+    except KeyError as exc:
+        raise KeyError(
+            f"fallback aircraft {fallback_code!r} has no usable dynamics: {exc}"
+        ) from None
+    return _AircraftSelection(
+        aircraft=aircraft,
+        identity=identity,
+        fallback_used=True,
+        fallback_reason=failure or "identity has no ICAO typecode",
+        provider=aircraft_provider,
     )
 
 

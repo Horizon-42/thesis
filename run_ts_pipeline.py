@@ -37,6 +37,8 @@ if str(TS_DIR) not in sys.path:
     sys.path.insert(0, str(TS_DIR))
 
 from config import (  # noqa: E402
+    AIRCRAFT_FILTER_ALL,
+    AIRCRAFT_FILTERS,
     COORDINATE_FRAMES,
     HORIZON_MODES,
     HORIZON_NORMALIZED,
@@ -117,6 +119,10 @@ def _prediction_output_tag(prediction_output: str) -> str:
     return "" if prediction_output == PREDICTION_STATE else f"_{prediction_output}"
 
 
+def _aircraft_filter_tag(aircraft_filter: str) -> str:
+    return "" if aircraft_filter == AIRCRAFT_FILTER_ALL else "_openap_direct"
+
+
 HORIZON_TAGS = {
     "normalized": "normalized_time",
     "full": "full",
@@ -148,6 +154,7 @@ class TrainingPlan:
         split_seed: int | None = None,
         device: str | None = None,
         aircraft_type: str | None = None,
+        aircraft_filter: str = AIRCRAFT_FILTER_ALL,
         coordinate_frame: str = "enu",
         batch_size: str = "2048",
         cv_folds: int = 3,
@@ -175,6 +182,7 @@ class TrainingPlan:
         self.split_seed = split_seed
         self.device = device
         self.aircraft_type = aircraft_type
+        self.aircraft_filter = aircraft_filter
         self.coordinate_frame = coordinate_frame
         self.batch_size = batch_size
         self.cv_folds = cv_folds
@@ -190,6 +198,7 @@ class TrainingPlan:
         scope = self.airports[0] if training_mode == "per-airport" else "POOLED"
         suffix = (
             _prediction_output_tag(prediction_output)
+            + _aircraft_filter_tag(aircraft_filter)
             + _frame_tag(coordinate_frame)
             + _anchor_tag(random_train_anchor)
         )
@@ -240,6 +249,7 @@ class TrainingPlan:
             args += ["--device", self.device]
         if self.aircraft_type is not None:
             args += ["--aircraft-type", self.aircraft_type]
+        args += ["--aircraft-filter", self.aircraft_filter]
         if self.control_effort_weight is not None:
             args += ["--control-effort-weight", str(self.control_effort_weight)]
         if self.control_smoothness_weight is not None:
@@ -279,6 +289,8 @@ class TrainingPlan:
         )
         if metadata.get("prediction_output") != expected_config.prediction_output:
             return "checkpoint prediction output does not match the requested recipe"
+        if metadata.get("aircraft_filter") != expected_config.aircraft_filter:
+            return "checkpoint aircraft filter does not match the requested recipe"
         if metadata.get("horizon_mode") != expected_config.horizon_mode:
             return "checkpoint horizon mode does not match the requested recipe"
         if metadata.get("pred_len") != expected_config.pred_len:
@@ -360,6 +372,7 @@ class TrainingPlan:
             "coordinate_frame": self.coordinate_frame,
             "random_train_anchor": self.random_train_anchor,
             "horizon_mode": self.horizon_mode,
+            "aircraft_filter": self.aircraft_filter,
         }
         if self.full_horizon_steps is not None:
             overrides["full_horizon_steps"] = self.full_horizon_steps
@@ -432,6 +445,7 @@ class TrainingPlan:
             "coordinate_frame": self.coordinate_frame,
             "random_train_anchor": self.random_train_anchor,
             "horizon_mode": self.horizon_mode,
+            "aircraft_filter": self.aircraft_filter,
         })
         if self.full_horizon_steps is not None:
             overrides["full_horizon_steps"] = self.full_horizon_steps
@@ -497,11 +511,12 @@ class PredictionPlan:
         frame = _frame_tag(training.coordinate_frame)
         anchor = _anchor_tag(training.random_train_anchor)
         prediction_output = _prediction_output_tag(training.prediction_output)
+        aircraft_filter = _aircraft_filter_tag(training.aircraft_filter)
         tag = f"_{experiment_tag}" if experiment_tag else ""
         horizon_tag = HORIZON_TAGS[training.horizon_mode]
         stem = (
             f"{scope}{training.model}{prediction_output}_{horizon_tag}"
-            f"{frame}{anchor}{tag}_{split}"
+            f"{aircraft_filter}{frame}{anchor}{tag}_{split}"
         )
         self.pred_dir = OPT_OUTPUTS_ROOT / self.airport / f"ts_pred_{stem}"
         self.summary = self.pred_dir / "summary.json"
@@ -510,7 +525,7 @@ class PredictionPlan:
         category_scope = "pooled_" if training.pooled else ""
         self.category = (
             f"ts_{category_scope}{MODEL_SHORT[training.model]}{prediction_output}_{horizon_tag}"
-            f"{frame}{anchor}{tag}_{split}"
+            f"{aircraft_filter}{frame}{anchor}{tag}_{split}"
         )
         model_label = MODEL_LABEL[training.model]
         pooled_label = "pooled, " if training.pooled else ""
@@ -648,7 +663,7 @@ def run_training(
             )
         print(
             f"   runtime   : batch={batch}, device={config.device}, seed={config.seed}, "
-            f"aircraft={config.aircraft_type}"
+            f"aircraft={config.aircraft_type}, aircraft_filter={config.aircraft_filter}"
         )
 
     _run_steps(
@@ -749,6 +764,12 @@ def main() -> None:
     parser.add_argument("--split-seed", type=int, default=None)
     parser.add_argument("--device", default=None)
     parser.add_argument("--aircraft-type", default=None)
+    parser.add_argument(
+        "--aircraft-filter",
+        choices=AIRCRAFT_FILTERS,
+        default=AIRCRAFT_FILTER_ALL,
+        help="fleet contract (openap-direct excludes synonyms, presets and fallbacks)",
+    )
     parser.add_argument("--coordinate-frame", choices=COORDINATE_FRAMES, default="enu")
     parser.add_argument("--batch-size", default="2048",
                         help="positive integer or auto (default: 2048)")
@@ -831,6 +852,7 @@ def main() -> None:
             split_seed=args.split_seed,
             device=args.device,
             aircraft_type=args.aircraft_type,
+            aircraft_filter=args.aircraft_filter,
             coordinate_frame=args.coordinate_frame,
             batch_size=args.batch_size,
             cv_folds=args.cv_folds,

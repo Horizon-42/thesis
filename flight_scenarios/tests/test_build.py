@@ -62,6 +62,50 @@ def test_build_scenario_falls_back_to_aircraft_type_when_icao24_unresolvable():
     assert scen.aircraft is A320
 
 
+def test_build_scenario_records_identity_and_dynamics_provenance():
+    # Present in the current FAA registry but absent from the stale OpenSky address map.
+    # FAA model 737-9GPER standardizes to ICAO B739 and is supported by OpenAP.
+    flight = {**FLIGHT, "id": "DAL1450", "callsign": "DAL1450", "icao24": "ad63f7"}
+
+    scen = build_scenario(flight)
+
+    assert scen.aircraft.code == "B739"
+    assert scen.source["resolved_typecode"] == "B739"
+    assert scen.source["identity_source"] == "faa_registry"
+    assert scen.source["typecode_source"] == "faa_registry+opensky_evidence"
+    assert scen.source["typecode_standard"] == "ICAO Doc 8643"
+    assert scen.source["dynamics_typecode"] == "B739"
+    assert scen.source["dynamics_source"].startswith("openap")
+    assert scen.source["aircraft_fallback_used"] is False
+    assert scen.source["aircraft_fallback_reason"] is None
+
+
+def test_build_scenario_keeps_real_identity_when_openap_needs_fallback():
+    flight = {**FLIGHT, "type": "BCS3", "icao24": None}
+
+    scen = build_scenario(flight, "A320")
+
+    assert scen.aircraft is A320
+    assert scen.source["resolved_typecode"] == "BCS3"
+    assert scen.source["identity_source"] == "declared_type"
+    assert scen.source["typecode_source"] == "declared_type"
+    assert scen.source["dynamics_typecode"] == "A320"
+    assert scen.source["aircraft_fallback_used"] is True
+    assert "BCS3" in scen.source["aircraft_fallback_reason"]
+
+
+def test_build_scenario_records_openap_surrogate_without_changing_identity():
+    flight = {**FLIGHT, "type": "A306", "icao24": None}
+
+    scen = build_scenario(flight, "A320")
+
+    assert scen.aircraft.code == "A306"
+    assert scen.source["resolved_typecode"] == "A306"
+    assert scen.source["dynamics_typecode"] == "A306"
+    assert scen.source["dynamics_surrogate_typecode"] == "A332"
+    assert scen.source["aircraft_fallback_used"] is False
+
+
 def test_build_scenario_raises_when_unresolvable_and_no_fallback():
     flight = {**FLIGHT, "icao24": None}
     with pytest.raises(KeyError):

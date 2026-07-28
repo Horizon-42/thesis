@@ -146,6 +146,53 @@ def get_aircraft_parameters(aircraft_id: str) -> Aircraft:
     )
 
 
+def openap_source_label() -> str:
+    """Stable audit label for the cached OpenAP performance provider."""
+    source = load_json(PARAMETERS_PATH).get("source", {})
+    version = source.get("openap_version") or "unknown"
+    return f"openap-{version}"
+
+
+def openap_performance_metadata(typecode: str) -> dict[str, Any]:
+    """Describe the direct or synonym performance model behind one ICAO typecode."""
+    normalized = normalize_id(typecode)
+    payload = load_json(PARAMETERS_PATH)
+    record = payload.get("typecodes", {}).get(normalized, {})
+    parameters = record.get("parameters", {})
+    return {
+        "source": openap_source_label(),
+        "performance_typecode": parameters.get("openap_performance_typecode", normalized),
+        "uses_synonym": parameters.get("openap_performance_typecode", normalized) != normalized,
+    }
+
+
+def openap_support_kind(typecode: str | None) -> str | None:
+    """Return ``direct``, ``synonym``, or ``None`` for one ICAO designator.
+
+    Identity resolution is deliberately kept outside this provider helper.  Callers first
+    standardize a flight to an ICAO Doc 8643 typecode, then use this function to state the
+    exact OpenAP performance policy they accept.  In particular, a strict experiment can
+    exclude both unsupported aircraft and OpenAP synonym/surrogate models without
+    maintaining a second hard-coded aircraft list.
+    """
+    normalized = normalize_id(typecode)
+    if not normalized:
+        return None
+    record = load_json(PARAMETERS_PATH).get("typecodes", {}).get(normalized, {})
+    if not record.get("openap_supported"):
+        return None
+    performance_typecode = normalize_id(
+        record.get("parameters", {}).get("openap_performance_typecode") or normalized
+    )
+    return "direct" if performance_typecode == normalized else "synonym"
+
+
+def openap_direct_typecodes() -> tuple[str, ...]:
+    """Sorted ICAO typecodes backed by their own OpenAP performance model."""
+    records = load_json(PARAMETERS_PATH).get("typecodes", {})
+    return tuple(sorted(code for code in records if openap_support_kind(code) == "direct"))
+
+
 def format_aircraft(aircraft: Aircraft) -> str:
     g, m, e = aircraft.geometry, aircraft.mass, aircraft.engine
     return "\n".join([

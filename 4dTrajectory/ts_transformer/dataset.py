@@ -34,6 +34,13 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset, Sampler
 
+from aircraft.identity import get_default_identity_resolver
+from aircraft.query_aircraft_parameters import (
+    openap_direct_typecodes,
+    openap_source_label,
+    openap_support_kind,
+)
+
 # flight_key is the identity ``id_runway_icao24_landingTime`` — single-sourced in
 # flight_scenarios.identity because the optimizer batch derives its record filenames from
 # the SAME function; the split key here and both writers' filename stems cannot drift.
@@ -59,6 +66,7 @@ from channels import (
     states_from_channels,
 )
 from config import (
+    AIRCRAFT_FILTER_OPENAP_DIRECT,
     DEFAULT_AIRCRAFT_TYPE,
     HORIZON_FULL,
     HORIZON_NORMALIZED,
@@ -70,6 +78,7 @@ from coordinate_frames import CoordinateFrame, frame_for_state
 from time_grids import output_time_grid
 
 ARRIVAL_DATA_PROVENANCE_SCHEMA = "ts-arrival-data-v2-multi-airport"
+DATA_SELECTION_SCHEMA = "ts-data-selection-v1-aircraft-filter"
 
 
 def dataset_flight_key(source: dict[str, Any], index: int) -> str:
@@ -475,9 +484,18 @@ class BuildReport:
 
     built: int = 0
     skipped: dict[str, int] = field(default_factory=dict)  # reason -> count
+    selected_typecodes: dict[str, int] = field(default_factory=dict)
+    rejected_aircraft: dict[str, int] = field(default_factory=dict)
 
     def skip(self, reason: str) -> None:
         self.skipped[reason] = self.skipped.get(reason, 0) + 1
+
+    def select_typecode(self, typecode: str) -> None:
+        self.selected_typecodes[typecode] = self.selected_typecodes.get(typecode, 0) + 1
+
+    def reject_aircraft(self, reason: str) -> None:
+        self.rejected_aircraft[reason] = self.rejected_aircraft.get(reason, 0) + 1
+        self.skip("aircraft filter rejected")
 
     @property
     def total(self) -> int:
@@ -487,7 +505,35 @@ class BuildReport:
         lines = [f"built {self.built}/{self.total} series"]
         for reason, count in sorted(self.skipped.items(), key=lambda kv: -kv[1]):
             lines.append(f"  skipped {count:5d}  {reason}")
+        if self.selected_typecodes:
+            selected = ", ".join(
+                f"{code}:{count}"
+                for code, count in sorted(
+                    self.selected_typecodes.items(), key=lambda item: (-item[1], item[0])
+                )
+            )
+            lines.append(f"  selected aircraft  {selected}")
+        rejected = sorted(
+            self.rejected_aircraft.items(), key=lambda item: (-item[1], item[0])
+        )
+        for reason, count in rejected[:20]:
+            lines.append(f"  rejected {count:5d}  {reason}")
+        if len(rejected) > 20:
+            omitted = sum(count for _reason, count in rejected[20:])
+            lines.append(
+                f"  rejected {omitted:5d}  {len(rejected) - 20} additional type reasons "
+                "(see data_selection.json)"
+            )
         return "\n".join(lines)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "built": self.built,
+            "total": self.total,
+            "skipped": dict(sorted(self.skipped.items())),
+            "selected_typecodes": dict(sorted(self.selected_typecodes.items())),
+            "rejected_aircraft": dict(sorted(self.rejected_aircraft.items())),
+        }
 
 
 def build_series(
@@ -541,6 +587,27 @@ def build_series(
             report.skip(f"track shorter than one window ({config.lookback_s:.0f}s)")
             continue
 
+        # Apply the strict fleet contract before geoid conversion, scenario construction,
+        # velocity fitting or resampling. Split identity is a per-flight hash assigned from
+        # manifest metadata, so rejecting a row here removes it *within* its original split;
+        # it cannot reshuffle any other flight between train/validation/test.
+        if config.aircraft_filter == AIRCRAFT_FILTER_OPENAP_DIRECT:
+            identity = get_default_identity_resolver().resolve(
+                declared_type=flight.get("type"),
+                icao24=flight.get("icao24"),
+            )
+            support_kind = openap_support_kind(identity.typecode)
+            if support_kind != "direct":
+                if identity.typecode is None:
+                    reason = "unresolved ICAO Doc 8643 typecode"
+                elif support_kind == "synonym":
+                    reason = f"OpenAP synonym model ({identity.typecode})"
+                else:
+                    reason = f"no native OpenAP model ({identity.typecode})"
+                report.reject_aircraft(reason)
+                continue
+            report.select_typecode(identity.typecode)
+
         # Into the modeling plane: harvested altitude is ellipsoidal (HAE) while the
         # threshold-anchored channels and the evaluation gates are MSL. Converted HERE, not
         # inside build_scenario alone, because state_samples_from_track below takes the bare
@@ -550,8 +617,17 @@ def build_series(
         flight = flight_to_msl(flight)
         waypoints = flight["waypoints"]
 
-        scenario = build_scenario(flight, aircraft_type, airport=airport,
-                                  target_from_threshold=True)
+        scenario = build_scenario(flight,
+            None if config.aircraft_filter == AIRCRAFT_FILTER_OPENAP_DIRECT
+            else aircraft_type,
+            airport=airport,
+            target_from_threshold=True,
+            aircraft_provider=(
+                "openap"
+                if config.aircraft_filter == AIRCRAFT_FILTER_OPENAP_DIRECT
+                else "auto"
+            ),
+        )
         if scenario.target is None:
             runway = flight.get("runway") or "?"
             report.skip(f"no published threshold for runway {runway}")
@@ -1026,6 +1102,66 @@ def flight_keys_by_split(
             dataset_id = f"{airport}:{record['flight_key']}"
             result[split_name_for_dataset_id(dataset_id, config)].append(dataset_id)
     return result
+
+
+def data_selection_audit(
+    series: Sequence[FlightSeries],
+    report: BuildReport,
+    config: TSConfig,
+    outer_split_keys: dict[str, list[str]],
+) -> dict[str, Any]:
+    """Describe the post-split fleet selection without opening outer-test tracks.
+
+    ``outer_split_keys`` comes from manifest metadata only. ``series`` must contain only
+    development rows loaded by the caller; the sealed test population is recorded by
+    identity/hash and its aircraft eligibility is intentionally deferred until release.
+    """
+    selected: dict[str, list[str]] = {"train": [], "val": [], "test": []}
+    for item in series:
+        selected[split_name_for_dataset_id(item.dataset_id, config)].append(item.dataset_id)
+    if selected["test"]:
+        raise ValueError(
+            "data-selection audit received outer-test trajectory series during development"
+        )
+
+    def digest(keys: Sequence[str]) -> str:
+        payload = "\n".join(sorted(keys)).encode()
+        return hashlib.sha256(payload).hexdigest()
+
+    direct_typecodes = openap_direct_typecodes()
+    direct_digest = hashlib.sha256("\n".join(direct_typecodes).encode()).hexdigest()
+    return {
+        "schema_version": DATA_SELECTION_SCHEMA,
+        "aircraft_filter": config.aircraft_filter,
+        "identity_standard": "ICAO Doc 8643",
+        "performance_provider": openap_source_label(),
+        "openap_direct_typecodes": {
+            "count": len(direct_typecodes),
+            "sha256": direct_digest,
+            "values": list(direct_typecodes),
+        },
+        "split_policy": {
+            "method": "sha256(seed:airport-qualified-flight-id)",
+            "split_seed": config.resolved_split_seed,
+            "filter_applied_after_split_assignment": True,
+            "outer_test_tracks_loaded": False,
+            "outer_test_aircraft_filter_status": "deferred_until_test_release",
+        },
+        "splits": {
+            name: {
+                "raw_manifest_flights": len(outer_split_keys[name]),
+                "raw_identity_sha256": digest(outer_split_keys[name]),
+                "selected_flights": (
+                    len(selected[name]) if name != "test" else None
+                ),
+                "selected_identity_sha256": (
+                    digest(selected[name]) if name != "test" else None
+                ),
+            }
+            for name in ("train", "val", "test")
+        },
+        "development_build": report.to_dict(),
+    }
 
 
 def split_by_flight(

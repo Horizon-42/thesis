@@ -46,6 +46,7 @@ import cross_validation as cv  # noqa: E402
 import dataset as dataset_module  # noqa: E402
 import detect_ts_best_batch as batch_probe  # noqa: E402
 import evaluation_protocol  # noqa: E402
+import experiment_index  # noqa: E402
 import run_ts_history_ablation as history_ablation  # noqa: E402
 import run_ts_pipeline as pipeline_module  # noqa: E402
 import run_ts_predictability_report as predictability_report  # noqa: E402
@@ -53,7 +54,8 @@ import train as train_module  # noqa: E402
 from aerodynamic_model.common import GeodeticState  # noqa: E402
 from batching import resolve_batch_size  # noqa: E402
 from config import (  # noqa: E402
-    HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW, PREDICTION_CONTROL, TSConfig,
+    AIRCRAFT_FILTER_OPENAP_DIRECT, HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW,
+    PREDICTION_CONTROL, TSConfig,
 )
 from dataset import (  # noqa: E402
     ARRIVAL_DATA_PROVENANCE_SCHEMA, FixedAnchorTrajectoryWindows, FlightEpochSampler,
@@ -214,6 +216,21 @@ def _series(n_flights=8, **config_overrides):
     series, report = build_series(flights, config, airport=AIRPORT)
     assert report.built == n_flights, report.format()
     return series, config
+
+
+def test_openap_direct_filter_rejects_synonym_before_scenario_fallback():
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=2, seed=3)
+    flights[1] = {**flights[1], "type": "A306"}
+    config = TSConfig(aircraft_filter=AIRCRAFT_FILTER_OPENAP_DIRECT)
+
+    series, report = build_series(flights, config, airport=AIRPORT)
+
+    assert [item.scenario.aircraft.code for item in series] == ["A320"]
+    assert series[0].scenario.source["dynamics_source"].startswith("openap-")
+    assert series[0].scenario.source["dynamics_surrogate_typecode"] == "A320"
+    assert report.selected_typecodes == {"A320": 1}
+    assert report.skipped["aircraft filter rejected"] == 1
+    assert report.rejected_aircraft == {"OpenAP synonym model (A306)": 1}
 
 
 def _identity_normalizer() -> Normalizer:
@@ -1768,6 +1785,7 @@ def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
         seed=2027,
         split_seed=1337,
         aircraft_type="A320",
+        aircraft_filter=AIRCRAFT_FILTER_OPENAP_DIRECT,
         batch_size="16",
         control_effort_weight=1e-4,
         control_smoothness_weight=1e-2,
@@ -1783,10 +1801,53 @@ def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
     assert recipe[recipe.index("--control-effort-weight") + 1] == "0.0001"
     assert recipe[recipe.index("--control-smoothness-weight") + 1] == "0.01"
     assert recipe[recipe.index("--control-rollout-dt") + 1] == "0.5"
+    assert recipe[recipe.index("--aircraft-filter") + 1] == "openap-direct"
     assert config.prediction_output == PREDICTION_CONTROL
+    assert config.aircraft_filter == AIRCRAFT_FILTER_OPENAP_DIRECT
     assert config.control_effort_loss_weight == pytest.approx(1e-4)
     assert "control" in prediction.pred_dir.name
     assert "control" in prediction.category
+    assert "openap_direct" in prediction.category
+
+
+def test_experiment_index_keeps_legacy_incomplete_and_formal_runs_distinct(tmp_path):
+    legacy_complete = tmp_path / "legacy" / "run_complete"
+    legacy_complete.mkdir(parents=True)
+    (legacy_complete / "checkpoint.pt").write_bytes(b"checkpoint")
+    (legacy_complete / "history.json").write_text(
+        json.dumps({"config": {"prediction_output": "state", "seed": 1337}}),
+        encoding="utf-8",
+    )
+    legacy_incomplete = tmp_path / "legacy" / "run_aborted"
+    legacy_incomplete.mkdir(parents=True)
+    (legacy_incomplete / "experiment_notes.md").write_text("aborted", encoding="utf-8")
+    formal = tmp_path / "openap_direct" / "control"
+    formal.mkdir(parents=True)
+    (formal / experiment_index.RUN_MANIFEST_NAME).write_text(
+        json.dumps({
+            "schema_version": experiment_index.RUN_MANIFEST_SCHEMA,
+            "campaign_id": "openap-direct-20260729",
+            "run_id": "control",
+            "status": "completed",
+            "config": {
+                "prediction_output": "control",
+                "aircraft_filter": "openap-direct",
+                "seed": 1337,
+            },
+            "artifacts": {"checkpoint.pt": {}},
+        }),
+        encoding="utf-8",
+    )
+
+    document = experiment_index.rebuild_index(tmp_path)
+    by_run = {entry["run_id"]: entry for entry in document["entries"]}
+
+    assert by_run["run_complete"]["status"] == "completed"
+    assert by_run["run_aborted"]["status"] == "incomplete"
+    assert by_run["control"]["campaign_id"] == "openap-direct-20260729"
+    assert by_run["control"]["aircraft_filter"] == "openap-direct"
+    assert (tmp_path / "index.json").is_file()
+    assert (tmp_path / "INDEX.md").is_file()
 
 
 def test_common_grid_resampling_uses_explicit_nonuniform_control_clock():
@@ -2822,7 +2883,7 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
         (tmp_path / "run" / "checkpoint_metadata.json").read_text(encoding="utf-8")
     )
     assert metadata == {
-        "schema_version": "ts-checkpoint-metadata-v13-three-horizon-modes",
+        "schema_version": "ts-checkpoint-metadata-v14-aircraft-filter-audit",
         evaluation_protocol.TEST_RELEASE_PROTOCOL_FIELD:
             evaluation_protocol.TEST_RELEASE_SCHEMA,
         "checkpoint_sha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
@@ -2830,6 +2891,7 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
         "random_train_anchor": False,
         "horizon_mode": HORIZON_NORMALIZED,
         "prediction_output": "state",
+        "aircraft_filter": "all",
         "pred_len": config.pred_len,
         "full_horizon_steps": config.full_horizon_steps,
         "lr_scheduler": {

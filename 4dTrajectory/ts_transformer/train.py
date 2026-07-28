@@ -14,7 +14,7 @@ import math
 import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Iterable, Sequence
 
 import numpy as np
 import torch
@@ -58,7 +58,7 @@ from aerodynamic_model.torch_dynamics import (
 
 CHECKPOINT_NAME = "checkpoint.pt"
 CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
-CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v13-three-horizon-modes"
+CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v14-aircraft-filter-audit"
 STATE_TARGET_CONTRACTS = {
     HORIZON_NORMALIZED: "normalized-time-runway-crossing-displacement-kinematic-v3",
     HORIZON_FULL: "full-horizon-fixed-time-displacement-kinematic-v2",
@@ -209,7 +209,11 @@ def _file_sha256(path: Path) -> str:
 
 def _split_sha256(series: Sequence[FlightSeries]) -> str:
     """Stable audit digest shared conceptually with cross-validation's split record."""
-    payload = "\n".join(sorted(item.dataset_id for item in series)).encode()
+    return _keys_sha256(item.dataset_id for item in series)
+
+
+def _keys_sha256(keys: Iterable[str]) -> str:
+    payload = "\n".join(sorted(keys)).encode()
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -1040,6 +1044,8 @@ def train(
     *,
     output_dir: str | Path,
     data_provenance: dict[str, Any],
+    reserved_test_keys: Sequence[str] | None = None,
+    data_selection: dict[str, Any] | None = None,
     auto_batch_size: bool = False,
     verbose: bool = True,
 ) -> dict[str, Any]:
@@ -1061,6 +1067,16 @@ def train(
 
     series = usable_series(series, config, verbose=verbose)
     train_series, val_series, test_series = split_by_flight(series, config)
+    if reserved_test_keys is not None and test_series:
+        raise ValueError(
+            "development training received outer-test series even though sealed test "
+            "identities were supplied separately"
+        )
+    checkpoint_test_keys = (
+        list(reserved_test_keys)
+        if reserved_test_keys is not None
+        else [s.dataset_id for s in test_series]
+    )
     fit = fit_model(
         train_series,
         val_series,
@@ -1071,9 +1087,10 @@ def train(
     model, config, normalizer, device = (
         fit.model, fit.config, fit.normalizer, fit.device
     )
-    test_window_count = sum(
-        min(len(window_anchors(item, config)), 1)
-        for item in test_series
+    test_window_count = (
+        None
+        if reserved_test_keys is not None
+        else sum(min(len(window_anchors(item, config)), 1) for item in test_series)
     )
     fit_evaluation = evaluate_fit_splits(
         model,
@@ -1098,10 +1115,11 @@ def train(
         "split": {
             "train": [s.dataset_id for s in train_series],
             "val": [s.dataset_id for s in val_series],
-            "test": [s.dataset_id for s in test_series],
+            "test": checkpoint_test_keys,
         },
         "best_val_loss": fit.best_val_loss,
         "data_provenance": data_provenance,
+        "data_selection": data_selection,
     }
     checkpoint_path = out / CHECKPOINT_NAME
     checkpoint_tmp = out / f"{CHECKPOINT_NAME}.tmp"
@@ -1128,6 +1146,7 @@ def train(
         "random_train_anchor": config.random_train_anchor,
         "horizon_mode": config.horizon_mode,
         "prediction_output": config.prediction_output,
+        "aircraft_filter": config.aircraft_filter,
         "pred_len": config.pred_len,
         "full_horizon_steps": config.full_horizon_steps,
         "lr_scheduler": {
@@ -1138,9 +1157,15 @@ def train(
         "split_sha256": {
             "train": _split_sha256(train_series),
             "val": _split_sha256(val_series),
-            "test": _split_sha256(test_series),
+            "test": _keys_sha256(checkpoint_test_keys),
         },
     }
+    if data_selection is not None:
+        selection_path = out / "data_selection.json"
+        selection_tmp = out / "data_selection.json.tmp"
+        selection_tmp.write_text(json.dumps(data_selection, indent=2), encoding="utf-8")
+        selection_tmp.replace(selection_path)
+        checkpoint_metadata["data_selection_sha256"] = _file_sha256(selection_path)
     if config.prediction_output == PREDICTION_CONTROL:
         checkpoint_metadata["control_recipe"] = {
             "effort_loss_weight": config.control_effort_loss_weight,
@@ -1160,7 +1185,11 @@ def train(
         "optimizer_updates": fit.history[-1].optimizer_updates,
         "final_learning_rate": fit.history[-1].learning_rate,
         "best_val_loss": fit.best_val_loss,
-        "flights": {"train": len(train_series), "val": len(val_series), "test": len(test_series)},
+        "flights": {
+            "train": len(train_series),
+            "val": len(val_series),
+            "test": len(checkpoint_test_keys),
+        },
         "windows": {
             "train": fit.train_windows,
             "val": fit_evaluation["splits"]["val"]["windows"],
@@ -1175,6 +1204,7 @@ def train(
                 len(entry["source_records"]) for entry in data_provenance["manifests"]
             ),
         },
+        "data_selection": data_selection,
         "history": [vars(h) for h in fit.history],
     }
     (out / HISTORY_NAME).write_text(json.dumps(summary, indent=2), encoding="utf-8")

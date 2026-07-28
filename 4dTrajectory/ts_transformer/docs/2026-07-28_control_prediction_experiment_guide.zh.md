@@ -116,13 +116,15 @@ effort 权重必须单独消融，不能假设默认值一定有利于进近轨�
 
 ### 3.2 飞机类型假设
 
-当前 harvested arrivals 的飞机类型通常不可解析，CLI 会使用 fallback aircraft。若本批数据
-仍全部为 `UNK`，即使 condition 向量按航班传入，所有样本实际仍采用同一架 fallback
-飞机的质量、推力和气动参数。
+2026-07-29 起，本轮实验使用 `--aircraft-filter openap-direct`：先通过 declared type、FAA
+registry 或 OpenSky identity 解析并用 ICAO Doc 8643 标准化 typecode，再只保留 OpenAP 在同一
+typecode 下拥有原生模型的航班。OpenAP synonym、手工 preset 和 `--aircraft-type` fallback 都
+被排除；即使 A320 同时存在 preset，本模式也显式选择 OpenAP provider。
 
-第一轮应显式固定 `--aircraft-type A320`，并把实验结论表述为“A320 fallback 假设下的
-control prediction”，不能写成“混合机型物理条件已经验证”。训练开头的 build report 必须
-归档；后续只有在来源中存在可信机型字段时，才单独开展 mixed-aircraft 实验。
+过滤在固定 split 身份分配之后分别作用于 train/validation，不重新洗牌。开发阶段只打开
+train/validation 源轨迹；outer-test 仅记录 manifest 身份与哈希，过滤和轨迹读取延迟到用户
+明确冻结并 release test 之后。每个 run 必须保存 `data_selection.json`，其中包含过滤策略、
+OpenAP 原生 typecode 集合哈希、过滤前后数量和 split 身份哈希。
 
 ## 4. 数据隔离与航迹安全
 
@@ -134,6 +136,10 @@ control prediction”，不能写成“混合机型物理条件已经验证”�
 | --- | ---: | --- |
 | Train | 13,807 | `32dd550dca616a1f85e8cde4012b3b262170c9df1f427f24ead5de8e687d2ea0` |
 | Validation | 2,951 | `4df9d067f78e576c604cf08656e654fdfebc85d65b99a3ff736beea3fbdfb4ce` |
+
+OpenAP-direct 过滤后的当前 development 构建为 train 10,239、validation 2,167，共
+12,406/16,758（74.03%）；最终以每个 run 的 `data_selection.json` 为准。这里的减少发生在
+各自既有 split 内，不能把过滤后的 12,406 条重新随机划分。
 
 受保护输入：
 
@@ -267,7 +273,7 @@ conda run -n aeroviz python \
   --control-effort-weight 0.001 \
   --control-smoothness-weight 0.01 \
   --control-rollout-dt 0.5 \
-  --aircraft-type A320 \
+  --aircraft-filter openap-direct \
   --seed 1337 \
   --split-seed 1337
 ```
@@ -390,7 +396,7 @@ control 统计；缺失项补齐前，不应只凭一个 ADE 数字定 winner。
 
 两种模式必须使用：
 
-- 同一代码 commit 和 manifest hashes；
+- 同一代码 commit、manifest hashes、`aircraft_filter` 和 `data_selection` hashes；
 - 相同 split 与 training seed；
 - 相同 history、anchor、backbone、坐标系和机场集合；
 - 相同 validation flight 顺序；
@@ -398,7 +404,8 @@ control 统计；缺失项补齐前，不应只凭一个 ADE 数字定 winner。
 - 未经 spline、滤波或 CZML 插值的 rollout/state 原始结果。
 
 不能直接把 control 的非均匀 native endpoint ADE 与 state 的均匀 native endpoint ADE
-并列。现有 seed-1337 state checkpoint 可作为只读参考：
+并列。旧 seed-1337 state checkpoint 使用不同的 A320 fallback 数据契约，只能作为历史只读
+参考，不能与 OpenAP-direct control 宣称公平胜负：
 
 [`itr_norm_b512_plateau_p8_seed1337`](../../outputs/POOLED/experiments/lr_schedule/itr_norm_b512_plateau_p8_seed1337/fit_evaluation.json)。
 
@@ -414,13 +421,13 @@ state 模式的 flyability 是从预测状态反演“所需控制”，control 
 | Train 好、Validation 差 | 泛化不足 | 做 dropout/weight decay 单变量实验或补 intent 输入 |
 | final-time MAE 仍约 70 s | duration head 仍是瓶颈 | 单独研究 time head；不要用 control smoothness 掩盖 |
 | duration 大量接近 0 | 非均匀时间退化 | 停止 N/weight 搜索，先明确时间监督和 duration 约束 |
-| controls 长期贴上下界 | 动力学假设、aircraft fallback 或 regularizer 有偏 | 先审计条件和 loss 定义，不宣布“物理可飞” |
+| controls 长期贴上下界 | OpenAP 动力学假设或 regularizer 有偏 | 先审计条件和 loss 定义，不宣布“物理可飞” |
 | common-grid 不改善但 native 改善 | 采样/时间索引效应 | 否决候选 |
 | 三种子排序不稳定 | 单 seed 信号不足 | 保留 baseline 或收集更多开发数据，不查看 test |
 
 若 batch、LR、control weights 和 `N={16,32,64}` 后，control 的 Train ADE 仍系统性差于
 state，应停止继续微调 scalar loss。下一步应检查 control 表达是否足以重建观测进近、
-fallback A320 是否造成模型失配，以及是否需要显式 approach intent；不要通过更多 epoch
+OpenAP 参数适用性，以及是否需要显式 approach intent；不要通过更多 epoch
 或查看 test 寻找偶然优势。
 
 ## 9. 每个 run 的数据索引模板
@@ -432,6 +439,8 @@ checkpoint.pt
 checkpoint_metadata.json
 history.json
 fit_evaluation.json
+data_selection.json          # 过滤、split 与 provider 的机器可读审计
+experiment_manifest.json     # run/campaign/commit/status/artifact SHA-256
 config-overrides.json        # 如果使用
 val_prediction/summary.json  # common-grid 支持完成后
 val_prediction/flyability_report.json
@@ -444,6 +453,11 @@ hash、split hash、selection rule 和输出路径；训练后再追加结果与
 | Candidate | Commit | Seed | Split SHA | Checkpoint SHA | History | Fit replay | Val report | Decision |
 | --- | --- | ---: | --- | --- | --- | --- | --- | --- |
 
+新一轮实验必须位于独立 campaign 根目录；不得复用旧候选目录。运行
+`experiment_index.py --root 4dTrajectory/outputs/POOLED/experiments` 会扫描新 manifest 与旧
+artifact，原子生成根目录 `index.json` 和 `INDEX.md`。旧的 notes-only 中止目录会标记为
+`incomplete`，不会与已完成 checkpoint 混为一类。
+
 ## 10. 代码与设计索引
 
 | 资源 | 用途 |
@@ -455,6 +469,7 @@ hash、split hash、selection rule 和输出路径；训练后再追加结果与
 | [models.py](../models.py) | encoder feature、condition fusion、control head |
 | [train.py](../train.py) | differentiable rollout loss 与 fit replay |
 | [forecast.py](../forecast.py) | control inference 与累计时间恢复 |
+| [experiment_index.py](../experiment_index.py) | 不可覆盖 run manifest 与新旧实验总索引 |
 | [torch_dynamics.py](../../../aerodynamic_model/torch_dynamics.py) | CasADi-equivalent Torch dynamics |
 | [动力学契约测试](../../../aerodynamic_model/tests/test_torch_dynamics.py) | 数值等价与梯度检查 |
 | [现有实验总结](2026-07-28_optimization_experiment_summary.zh.md) | state baseline、实验结果与数据索引 |

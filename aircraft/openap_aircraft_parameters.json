@@ -1,11 +1,15 @@
 {
-  "generated_at_utc": "2026-06-15T18:03:31.289581Z",
+  "generated_at_utc": "2026-07-28T21:37:16.706719Z",
   "schema_version": 1,
   "source": {
-    "aircraft_database_csv": "/Users/liudongxu/Desktop/studys/thesis/data/AIRCRAFT/aircraftDatabase.csv",
+    "aircraft_database_csv": "data/AIRCRAFT/aircraftDatabase.csv",
+    "aircraft_database_sha256": "d40c8a7b3825dfca896fe234de56040a70e7a215ee34a895468116e51e1afcae",
     "aircraft_database_unique_typecode_count": 1931,
-    "openap_supported_typecode_count": 37,
-    "openap_version": "2.5.0"
+    "openap_direct_typecode_count": 37,
+    "openap_supported_typecode_count": 58,
+    "openap_synonym_typecode_count": 21,
+    "openap_synonyms_enabled": true,
+    "openap_version": "2.4"
   },
   "typecodes": {
     "172S": {
@@ -177,8 +181,162 @@
       "typecode": "A119"
     },
     "A124": {
-      "error": "Typecode A124 is not supported by this OpenAP installation.",
-      "openap_supported": false,
+      "openap_supported": true,
+      "parameters": {
+        "aircraft_name": "Boeing 747-400",
+        "category": "unknown",
+        "cruise": {
+          "height_m": 11000,
+          "mach": 0.85
+        },
+        "drag": {
+          "cd0": 0.021,
+          "e": 0.816,
+          "k": 0.049,
+          "landing_gear_drag_increment": 0.015
+        },
+        "engine": {
+          "cruise_sfc": 0.016,
+          "cruise_thrust_n_each": 57026.0,
+          "default": "CF6-80C2B1F",
+          "lookup_error": null,
+          "max_thrust_n_each": 254260.0,
+          "mount": "wing",
+          "number": 4,
+          "type": "turbofan"
+        },
+        "flaps": {
+          "Sf/S": 0.15,
+          "area": 78.7,
+          "bf/b": 0.639,
+          "cf/c": 0.198,
+          "lambda_f": 0.9,
+          "type": "triple-slotted"
+        },
+        "geometry": {
+          "fuselage_height_m": 8.1,
+          "fuselage_length_m": 70.66,
+          "fuselage_width_m": 6.5,
+          "wing_area_m2": 525.6,
+          "wing_mac_m": 9.68,
+          "wing_span_m": 64.4,
+          "wing_sweep_deg": 37.5,
+          "wing_thickness_to_chord": 0.094
+        },
+        "limits": {
+          "ceiling_m": 13700,
+          "mmo": 0.92,
+          "vmo_kts": 365
+        },
+        "mass": {
+          "maximum_fuel_capacity_kg": 203500,
+          "mlw_kg": 260300,
+          "mtow_kg": 396800,
+          "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
+          "oew_kg": 182400
+        },
+        "openap_performance_typecode": "B744",
+        "raw_openap": {
+          "aircraft": {
+            "aircraft": "Boeing 747-400",
+            "ceiling": 13700,
+            "cruise": {
+              "height": 11000,
+              "mach": 0.85,
+              "range": 13400
+            },
+            "drag": {
+              "cd0": 0.021,
+              "e": 0.816,
+              "gears": 0.015,
+              "k": 0.049
+            },
+            "engine": {
+              "default": "CF6-80C2B1F",
+              "mount": "wing",
+              "number": 4,
+              "options": [
+                "PW4062",
+                "CF6-80C2B1F",
+                "RB211-524G"
+              ],
+              "type": "turbofan"
+            },
+            "flaps": {
+              "Sf/S": 0.15,
+              "area": 78.7,
+              "bf/b": 0.639,
+              "cf/c": 0.198,
+              "lambda_f": 0.9,
+              "type": "triple-slotted"
+            },
+            "fuselage": {
+              "height": 8.1,
+              "length": 70.66,
+              "width": 6.5
+            },
+            "limits": {
+              "MFC": 203500,
+              "MLW": 260300,
+              "MMO": 0.92,
+              "MTOW": 396800,
+              "OEW": 182400,
+              "VMO": 365,
+              "ceiling": 13700
+            },
+            "mfc": 203500,
+            "mlw": 260300,
+            "mmo": 0.92,
+            "mtow": 396800,
+            "oew": 182400,
+            "pax": {
+              "high": 570,
+              "low": 520,
+              "max": 660
+            },
+            "vmo": 365,
+            "wing": {
+              "area": 525.6,
+              "mac": 9.68,
+              "span": 64.4,
+              "sweep": 37.5,
+              "t/c": 0.094
+            }
+          },
+          "default_engine": {
+            "bpr": 5.1,
+            "cruise_alt": 35000.0,
+            "cruise_mach": 0.8,
+            "cruise_sfc": 0.016,
+            "cruise_thrust": 57026.0,
+            "ei_co_app": 2.13,
+            "ei_co_co": 0.04,
+            "ei_co_idl": 19.23,
+            "ei_co_to": 0.04,
+            "ei_hc_app": 0.11,
+            "ei_hc_co": 0.05,
+            "ei_hc_idl": 1.54,
+            "ei_hc_to": 0.05,
+            "ei_nox_app": 12.47,
+            "ei_nox_co": 19.72,
+            "ei_nox_idl": 4.73,
+            "ei_nox_to": 24.94,
+            "ff_app": 0.65,
+            "ff_co": 1.983,
+            "ff_idl": 0.199,
+            "ff_to": 2.422,
+            "fuel_ch": 6.1e-07,
+            "fuel_lto": 830.0,
+            "manufacturer": "GE Aircraft Engines",
+            "max_thrust": 254260.0,
+            "name": "CF6-80C2B1F",
+            "pr": 30.13,
+            "type": "TF",
+            "uid": "2GE045"
+          }
+        },
+        "typecode": "A124"
+      },
       "representative_metadata": {
         "built": null,
         "categoryDescription": null,
@@ -197,8 +355,7 @@
         "reguntil": null,
         "status": null,
         "typecode": "A124"
-      },
-      "typecode": "A124"
+      }
     },
     "A139": {
       "error": "Typecode A139 is not supported by this OpenAP installation.",
@@ -447,6 +604,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 42600
         },
+        "openap_performance_typecode": "A19N",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Airbus A319neo",
@@ -651,6 +809,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 44300
         },
+        "openap_performance_typecode": "A20N",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Airbus A320neo",
@@ -883,6 +1042,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 50000
         },
+        "openap_performance_typecode": "A21N",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Airbus A321neo",
@@ -1107,8 +1267,169 @@
       "typecode": "A3"
     },
     "A306": {
-      "error": "Typecode A306 is not supported by this OpenAP installation.",
-      "openap_supported": false,
+      "openap_supported": true,
+      "parameters": {
+        "aircraft_name": "Airbus A330-200",
+        "category": "transport_jet",
+        "cruise": {
+          "height_m": 11000,
+          "mach": 0.82
+        },
+        "drag": {
+          "cd0": 0.022,
+          "e": 0.774,
+          "k": 0.041,
+          "landing_gear_drag_increment": 0.014
+        },
+        "engine": {
+          "cruise_sfc": null,
+          "cruise_thrust_n_each": null,
+          "default": "Trent 772",
+          "lookup_error": null,
+          "max_thrust_n_each": 320300.0,
+          "mount": "wing",
+          "number": 2,
+          "type": "turbofan"
+        },
+        "flaps": {
+          "Sf/S": 0.15,
+          "area": null,
+          "bf/b": 0.665,
+          "cf/c": 0.15,
+          "lambda_f": 0.9,
+          "type": "double-slotted"
+        },
+        "geometry": {
+          "fuselage_height_m": 5.64,
+          "fuselage_length_m": 58.82,
+          "fuselage_width_m": 5.64,
+          "wing_area_m2": 361.6,
+          "wing_mac_m": 7.26,
+          "wing_span_m": 60.3,
+          "wing_sweep_deg": 29.7,
+          "wing_thickness_to_chord": 0.11
+        },
+        "limits": {
+          "ceiling_m": 12500,
+          "mmo": 0.86,
+          "vmo_kts": 330
+        },
+        "mass": {
+          "maximum_fuel_capacity_kg": 139000,
+          "mlw_kg": 182000,
+          "mtow_kg": 230000,
+          "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
+          "oew_kg": 120200
+        },
+        "openap_performance_typecode": "A332",
+        "raw_openap": {
+          "aircraft": {
+            "aircraft": "Airbus A330-200",
+            "ceiling": 12500,
+            "cruise": {
+              "height": 11000,
+              "mach": 0.82,
+              "range": 12500
+            },
+            "drag": {
+              "cd0": 0.022,
+              "e": 0.774,
+              "gears": 0.014,
+              "k": 0.041
+            },
+            "engine": {
+              "default": "Trent 772",
+              "mount": "wing",
+              "number": 2,
+              "options": {
+                "A330-201": "CF6-80E1A2",
+                "A330-202": "CF6-80E1A4",
+                "A330-203": "CF6-80E1A3",
+                "A330-223": "PW4168A",
+                "A330-223F": "PW4170",
+                "A330-243": "Trent 772"
+              },
+              "type": "turbofan"
+            },
+            "flaps": {
+              "Sf/S": 0.15,
+              "area": null,
+              "bf/b": 0.665,
+              "cf/c": 0.15,
+              "lambda_f": 0.9,
+              "type": "double-slotted"
+            },
+            "fuel": {
+              "engine": "Trent 772",
+              "fuel_coef": 6.0218489
+            },
+            "fuselage": {
+              "height": 5.64,
+              "length": 58.82,
+              "width": 5.64
+            },
+            "limits": {
+              "MFC": 139000,
+              "MLW": 182000,
+              "MMO": 0.86,
+              "MTOW": 230000,
+              "OEW": 120200,
+              "VMO": 330,
+              "ceiling": 12500
+            },
+            "mfc": 139000,
+            "mlw": 182000,
+            "mmo": 0.86,
+            "mtow": 230000,
+            "oew": 120200,
+            "pax": {
+              "high": 260,
+              "low": 220,
+              "max": 406
+            },
+            "vmo": 330,
+            "wing": {
+              "area": 361.6,
+              "mac": 7.26,
+              "span": 60.3,
+              "sweep": 29.7,
+              "t/c": 0.11
+            }
+          },
+          "default_engine": {
+            "bpr": 5.03,
+            "cruise_alt": null,
+            "cruise_mach": null,
+            "cruise_sfc": null,
+            "cruise_thrust": null,
+            "ei_co_app": 1.56,
+            "ei_co_co": 0.49,
+            "ei_co_idl": 23.97,
+            "ei_co_to": 0.21,
+            "ei_hc_app": 0.04,
+            "ei_hc_co": 0.01,
+            "ei_hc_idl": 2.46,
+            "ei_hc_to": 0.01,
+            "ei_nox_app": 10.42,
+            "ei_nox_co": 26.82,
+            "ei_nox_idl": 4.66,
+            "ei_nox_to": 35.56,
+            "ff_app": 0.821,
+            "ff_co": 2.53,
+            "ff_idl": 0.27,
+            "ff_to": 3.139,
+            "fuel_ch": 6.7e-07,
+            "fuel_lto": 1085.0,
+            "manufacturer": "Rolls-Royce plc",
+            "max_thrust": 320300.0,
+            "name": "Trent 772",
+            "pr": 36.3302939575395,
+            "type": "MTF",
+            "uid": "14RR071"
+          }
+        },
+        "typecode": "A306"
+      },
       "representative_metadata": {
         "built": "2006-01-01",
         "categoryDescription": null,
@@ -1127,8 +1448,7 @@
         "reguntil": "2028-05-31",
         "status": null,
         "typecode": "A306"
-      },
-      "typecode": "A306"
+      }
     },
     "A30B": {
       "error": "Typecode A30B is not supported by this OpenAP installation.",
@@ -1155,8 +1475,167 @@
       "typecode": "A30B"
     },
     "A310": {
-      "error": "Typecode A310 is not supported by this OpenAP installation.",
-      "openap_supported": false,
+      "openap_supported": true,
+      "parameters": {
+        "aircraft_name": "Airbus A318",
+        "category": "transport_jet",
+        "cruise": {
+          "height_m": 11000,
+          "mach": 0.78
+        },
+        "drag": {
+          "cd0": 0.02,
+          "e": 0.783,
+          "k": 0.039,
+          "landing_gear_drag_increment": 0.017
+        },
+        "engine": {
+          "cruise_sfc": null,
+          "cruise_thrust_n_each": null,
+          "default": "CFM56-5B9",
+          "lookup_error": null,
+          "max_thrust_n_each": 102200.0,
+          "mount": "wing",
+          "number": 2,
+          "type": "turbofan"
+        },
+        "flaps": {
+          "Sf/S": 0.17,
+          "area": 21.1,
+          "bf/b": 0.78,
+          "cf/c": 0.176,
+          "lambda_f": 0.9,
+          "type": "single-slotted"
+        },
+        "geometry": {
+          "fuselage_height_m": 4.14,
+          "fuselage_length_m": 31.44,
+          "fuselage_width_m": 3.95,
+          "wing_area_m2": 122.4,
+          "wing_mac_m": 4.1935,
+          "wing_span_m": 34.1,
+          "wing_sweep_deg": 25,
+          "wing_thickness_to_chord": null
+        },
+        "limits": {
+          "ceiling_m": 12500,
+          "mmo": 0.82,
+          "vmo_kts": 350
+        },
+        "mass": {
+          "maximum_fuel_capacity_kg": 24210,
+          "mlw_kg": 57500,
+          "mtow_kg": 68000,
+          "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
+          "oew_kg": 39500
+        },
+        "openap_performance_typecode": "A318",
+        "raw_openap": {
+          "aircraft": {
+            "aircraft": "Airbus A318",
+            "ceiling": 12500,
+            "cruise": {
+              "height": 11000,
+              "mach": 0.78,
+              "range": 2800
+            },
+            "drag": {
+              "cd0": 0.02,
+              "e": 0.783,
+              "gears": 0.017,
+              "k": 0.039
+            },
+            "engine": {
+              "default": "CFM56-5B9",
+              "mount": "wing",
+              "number": 2,
+              "options": {
+                "A318-111": "CFM56-5B8",
+                "A318-112": "CFM56-5B9",
+                "A318-121": "PW6122A",
+                "A318-122": "PW6124A"
+              },
+              "type": "turbofan"
+            },
+            "flaps": {
+              "Sf/S": 0.17,
+              "area": 21.1,
+              "bf/b": 0.78,
+              "cf/c": 0.176,
+              "lambda_f": 0.9,
+              "type": "single-slotted"
+            },
+            "fuel": {
+              "engine": "CFM56-5B9/3",
+              "fuel_coef": 2.03114004
+            },
+            "fuselage": {
+              "height": 4.14,
+              "length": 31.44,
+              "width": 3.95
+            },
+            "limits": {
+              "MFC": 24210,
+              "MLW": 57500,
+              "MMO": 0.82,
+              "MTOW": 68000,
+              "OEW": 39500,
+              "VMO": 350,
+              "ceiling": 12500
+            },
+            "mfc": 24210,
+            "mlw": 57500,
+            "mmo": 0.82,
+            "mtow": 68000,
+            "oew": 39500,
+            "pax": {
+              "high": 117,
+              "low": 107,
+              "max": 136
+            },
+            "vmo": 350,
+            "wing": {
+              "area": 122.4,
+              "mac": 4.1935,
+              "span": 34.1,
+              "sweep": 25,
+              "t/c": null
+            }
+          },
+          "default_engine": {
+            "bpr": 5.9,
+            "cruise_alt": null,
+            "cruise_mach": null,
+            "cruise_sfc": null,
+            "cruise_thrust": null,
+            "ei_co_app": 21.0,
+            "ei_co_co": 8.1,
+            "ei_co_idl": 44.1,
+            "ei_co_to": 2.9,
+            "ei_hc_app": 0.4,
+            "ei_hc_co": 0.3,
+            "ei_hc_idl": 4.4,
+            "ei_hc_to": 0.2,
+            "ei_nox_app": 7.6,
+            "ei_nox_co": 10.7,
+            "ei_nox_idl": 3.2,
+            "ei_nox_to": 13.9,
+            "ff_app": 0.296,
+            "ff_co": 0.799,
+            "ff_idl": 0.105,
+            "ff_to": 0.961,
+            "fuel_ch": 6.7e-07,
+            "fuel_lto": 381.0,
+            "manufacturer": "CFM International",
+            "max_thrust": 102200.0,
+            "name": "CFM56-5B9",
+            "pr": 24.4,
+            "type": "TF",
+            "uid": "7CM050"
+          }
+        },
+        "typecode": "A310"
+      },
       "representative_metadata": {
         "built": null,
         "categoryDescription": null,
@@ -1175,8 +1654,7 @@
         "reguntil": null,
         "status": null,
         "typecode": "A310"
-      },
-      "typecode": "A310"
+      }
     },
     "A318": {
       "openap_supported": true,
@@ -1233,6 +1711,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 39500
         },
+        "openap_performance_typecode": "A318",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Airbus A318",
@@ -1414,6 +1893,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 40800
         },
+        "openap_performance_typecode": "A319",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Airbus A319",
@@ -1599,6 +2079,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 42600
         },
+        "openap_performance_typecode": "A320",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Airbus A320",
@@ -1809,6 +2290,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 48500
         },
+        "openap_performance_typecode": "A321",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Airbus A321",
@@ -2066,6 +2548,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 120200
         },
+        "openap_performance_typecode": "A332",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Airbus A330-200",
@@ -2249,6 +2732,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 122780
         },
+        "openap_performance_typecode": "A333",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Airbus A330-300",
@@ -2555,6 +3039,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 130000
         },
+        "openap_performance_typecode": "A343",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Airbus A340-300",
@@ -2803,6 +3288,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 142400
         },
+        "openap_performance_typecode": "A359",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Airbus A350-900",
@@ -3025,6 +3511,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 277000
         },
+        "openap_performance_typecode": "A388",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Airbus A380-800",
@@ -6219,8 +6706,160 @@
       "typecode": "AT6T"
     },
     "AT72": {
-      "error": "Typecode AT72 is not supported by this OpenAP installation.",
-      "openap_supported": false,
+      "openap_supported": true,
+      "parameters": {
+        "aircraft_name": "Embraer ERJ145 (LR)",
+        "category": "unknown",
+        "cruise": {
+          "height_m": 11000,
+          "mach": 0.72
+        },
+        "drag": {
+          "cd0": 0.018,
+          "e": 0.809,
+          "k": 0.042,
+          "landing_gear_drag_increment": 0.017
+        },
+        "engine": {
+          "cruise_sfc": null,
+          "cruise_thrust_n_each": null,
+          "default": "AE3007A1",
+          "lookup_error": null,
+          "max_thrust_n_each": 34910.0,
+          "mount": "wing",
+          "number": 2,
+          "type": "turbofan"
+        },
+        "flaps": {
+          "Sf/S": 0.15,
+          "area": null,
+          "bf/b": null,
+          "cf/c": 0.15,
+          "lambda_f": 0.9,
+          "type": "double-slotted"
+        },
+        "geometry": {
+          "fuselage_height_m": 2.28,
+          "fuselage_length_m": 29.87,
+          "fuselage_width_m": 2.28,
+          "wing_area_m2": 51.2,
+          "wing_mac_m": 3.19,
+          "wing_span_m": 20.04,
+          "wing_sweep_deg": 23,
+          "wing_thickness_to_chord": null
+        },
+        "limits": {
+          "ceiling_m": 11300,
+          "mmo": 0.78,
+          "vmo_kts": 320
+        },
+        "mass": {
+          "maximum_fuel_capacity_kg": 5136,
+          "mlw_kg": 19300,
+          "mtow_kg": 22000,
+          "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
+          "oew_kg": 12110
+        },
+        "openap_performance_typecode": "E145",
+        "raw_openap": {
+          "aircraft": {
+            "aircraft": "Embraer ERJ145 (LR)",
+            "ceiling": 11300,
+            "cruise": {
+              "height": 11000,
+              "mach": 0.72,
+              "range": 2200
+            },
+            "drag": {
+              "cd0": 0.018,
+              "e": 0.809,
+              "gears": 0.017,
+              "k": 0.042
+            },
+            "engine": {
+              "default": "AE3007A1",
+              "mount": "wing",
+              "number": 2,
+              "options": [
+                "AE3007A1"
+              ],
+              "type": "turbofan"
+            },
+            "flaps": {
+              "Sf/S": 0.15,
+              "area": null,
+              "bf/b": null,
+              "cf/c": 0.15,
+              "lambda_f": 0.9,
+              "type": "double-slotted"
+            },
+            "fuselage": {
+              "height": 2.28,
+              "length": 29.87,
+              "width": 2.28
+            },
+            "limits": {
+              "MFC": 5136,
+              "MLW": 19300,
+              "MMO": 0.78,
+              "MTOW": 22000,
+              "OEW": 12110,
+              "VMO": 320,
+              "ceiling": 11300
+            },
+            "mfc": 5136,
+            "mlw": 19300,
+            "mmo": 0.78,
+            "mtow": 22000,
+            "oew": 12110,
+            "pax": {
+              "high": 50,
+              "low": 50,
+              "max": 50
+            },
+            "vmo": 320,
+            "wing": {
+              "area": 51.2,
+              "mac": 3.19,
+              "span": 20.04,
+              "sweep": 23,
+              "t/c": null
+            }
+          },
+          "default_engine": {
+            "bpr": 4.77,
+            "cruise_alt": null,
+            "cruise_mach": null,
+            "cruise_sfc": null,
+            "cruise_thrust": null,
+            "ei_co_app": 6.72,
+            "ei_co_co": 0.56,
+            "ei_co_idl": 39.91,
+            "ei_co_to": 0.75,
+            "ei_hc_app": 0.03,
+            "ei_hc_co": 0.03,
+            "ei_hc_idl": 3.85,
+            "ei_hc_to": 0.03,
+            "ei_nox_app": 7.13,
+            "ei_nox_co": 14.07,
+            "ei_nox_idl": 4.17,
+            "ei_nox_to": 16.17,
+            "ff_app": 0.113,
+            "ff_co": 0.318,
+            "ff_idl": 0.0461,
+            "ff_to": 0.3826,
+            "fuel_ch": 6.7e-07,
+            "fuel_lto": 157.0,
+            "manufacturer": "Rolls-Royce Corporation",
+            "max_thrust": 34910.0,
+            "name": "AE3007A1",
+            "pr": 17.97,
+            "type": "MTF",
+            "uid": "6AL007"
+          }
+        },
+        "typecode": "AT72"
+      },
       "representative_metadata": {
         "built": "1991-01-01",
         "categoryDescription": "Small (15500 to 75000 lbs)",
@@ -6239,8 +6878,7 @@
         "reguntil": null,
         "status": null,
         "typecode": "AT72"
-      },
-      "typecode": "AT72"
+      }
     },
     "AT73": {
       "error": "Typecode AT73 is not supported by this OpenAP installation.",
@@ -6267,8 +6905,160 @@
       "typecode": "AT73"
     },
     "AT75": {
-      "error": "Typecode AT75 is not supported by this OpenAP installation.",
-      "openap_supported": false,
+      "openap_supported": true,
+      "parameters": {
+        "aircraft_name": "Embraer ERJ145 (LR)",
+        "category": "unknown",
+        "cruise": {
+          "height_m": 11000,
+          "mach": 0.72
+        },
+        "drag": {
+          "cd0": 0.018,
+          "e": 0.809,
+          "k": 0.042,
+          "landing_gear_drag_increment": 0.017
+        },
+        "engine": {
+          "cruise_sfc": null,
+          "cruise_thrust_n_each": null,
+          "default": "AE3007A1",
+          "lookup_error": null,
+          "max_thrust_n_each": 34910.0,
+          "mount": "wing",
+          "number": 2,
+          "type": "turbofan"
+        },
+        "flaps": {
+          "Sf/S": 0.15,
+          "area": null,
+          "bf/b": null,
+          "cf/c": 0.15,
+          "lambda_f": 0.9,
+          "type": "double-slotted"
+        },
+        "geometry": {
+          "fuselage_height_m": 2.28,
+          "fuselage_length_m": 29.87,
+          "fuselage_width_m": 2.28,
+          "wing_area_m2": 51.2,
+          "wing_mac_m": 3.19,
+          "wing_span_m": 20.04,
+          "wing_sweep_deg": 23,
+          "wing_thickness_to_chord": null
+        },
+        "limits": {
+          "ceiling_m": 11300,
+          "mmo": 0.78,
+          "vmo_kts": 320
+        },
+        "mass": {
+          "maximum_fuel_capacity_kg": 5136,
+          "mlw_kg": 19300,
+          "mtow_kg": 22000,
+          "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
+          "oew_kg": 12110
+        },
+        "openap_performance_typecode": "E145",
+        "raw_openap": {
+          "aircraft": {
+            "aircraft": "Embraer ERJ145 (LR)",
+            "ceiling": 11300,
+            "cruise": {
+              "height": 11000,
+              "mach": 0.72,
+              "range": 2200
+            },
+            "drag": {
+              "cd0": 0.018,
+              "e": 0.809,
+              "gears": 0.017,
+              "k": 0.042
+            },
+            "engine": {
+              "default": "AE3007A1",
+              "mount": "wing",
+              "number": 2,
+              "options": [
+                "AE3007A1"
+              ],
+              "type": "turbofan"
+            },
+            "flaps": {
+              "Sf/S": 0.15,
+              "area": null,
+              "bf/b": null,
+              "cf/c": 0.15,
+              "lambda_f": 0.9,
+              "type": "double-slotted"
+            },
+            "fuselage": {
+              "height": 2.28,
+              "length": 29.87,
+              "width": 2.28
+            },
+            "limits": {
+              "MFC": 5136,
+              "MLW": 19300,
+              "MMO": 0.78,
+              "MTOW": 22000,
+              "OEW": 12110,
+              "VMO": 320,
+              "ceiling": 11300
+            },
+            "mfc": 5136,
+            "mlw": 19300,
+            "mmo": 0.78,
+            "mtow": 22000,
+            "oew": 12110,
+            "pax": {
+              "high": 50,
+              "low": 50,
+              "max": 50
+            },
+            "vmo": 320,
+            "wing": {
+              "area": 51.2,
+              "mac": 3.19,
+              "span": 20.04,
+              "sweep": 23,
+              "t/c": null
+            }
+          },
+          "default_engine": {
+            "bpr": 4.77,
+            "cruise_alt": null,
+            "cruise_mach": null,
+            "cruise_sfc": null,
+            "cruise_thrust": null,
+            "ei_co_app": 6.72,
+            "ei_co_co": 0.56,
+            "ei_co_idl": 39.91,
+            "ei_co_to": 0.75,
+            "ei_hc_app": 0.03,
+            "ei_hc_co": 0.03,
+            "ei_hc_idl": 3.85,
+            "ei_hc_to": 0.03,
+            "ei_nox_app": 7.13,
+            "ei_nox_co": 14.07,
+            "ei_nox_idl": 4.17,
+            "ei_nox_to": 16.17,
+            "ff_app": 0.113,
+            "ff_co": 0.318,
+            "ff_idl": 0.0461,
+            "ff_to": 0.3826,
+            "fuel_ch": 6.7e-07,
+            "fuel_lto": 157.0,
+            "manufacturer": "Rolls-Royce Corporation",
+            "max_thrust": 34910.0,
+            "name": "AE3007A1",
+            "pr": 17.97,
+            "type": "MTF",
+            "uid": "6AL007"
+          }
+        },
+        "typecode": "AT75"
+      },
       "representative_metadata": {
         "built": null,
         "categoryDescription": null,
@@ -6287,12 +7077,163 @@
         "reguntil": null,
         "status": null,
         "typecode": "AT75"
-      },
-      "typecode": "AT75"
+      }
     },
     "AT76": {
-      "error": "Typecode AT76 is not supported by this OpenAP installation.",
-      "openap_supported": false,
+      "openap_supported": true,
+      "parameters": {
+        "aircraft_name": "Embraer ERJ145 (LR)",
+        "category": "unknown",
+        "cruise": {
+          "height_m": 11000,
+          "mach": 0.72
+        },
+        "drag": {
+          "cd0": 0.018,
+          "e": 0.809,
+          "k": 0.042,
+          "landing_gear_drag_increment": 0.017
+        },
+        "engine": {
+          "cruise_sfc": null,
+          "cruise_thrust_n_each": null,
+          "default": "AE3007A1",
+          "lookup_error": null,
+          "max_thrust_n_each": 34910.0,
+          "mount": "wing",
+          "number": 2,
+          "type": "turbofan"
+        },
+        "flaps": {
+          "Sf/S": 0.15,
+          "area": null,
+          "bf/b": null,
+          "cf/c": 0.15,
+          "lambda_f": 0.9,
+          "type": "double-slotted"
+        },
+        "geometry": {
+          "fuselage_height_m": 2.28,
+          "fuselage_length_m": 29.87,
+          "fuselage_width_m": 2.28,
+          "wing_area_m2": 51.2,
+          "wing_mac_m": 3.19,
+          "wing_span_m": 20.04,
+          "wing_sweep_deg": 23,
+          "wing_thickness_to_chord": null
+        },
+        "limits": {
+          "ceiling_m": 11300,
+          "mmo": 0.78,
+          "vmo_kts": 320
+        },
+        "mass": {
+          "maximum_fuel_capacity_kg": 5136,
+          "mlw_kg": 19300,
+          "mtow_kg": 22000,
+          "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
+          "oew_kg": 12110
+        },
+        "openap_performance_typecode": "E145",
+        "raw_openap": {
+          "aircraft": {
+            "aircraft": "Embraer ERJ145 (LR)",
+            "ceiling": 11300,
+            "cruise": {
+              "height": 11000,
+              "mach": 0.72,
+              "range": 2200
+            },
+            "drag": {
+              "cd0": 0.018,
+              "e": 0.809,
+              "gears": 0.017,
+              "k": 0.042
+            },
+            "engine": {
+              "default": "AE3007A1",
+              "mount": "wing",
+              "number": 2,
+              "options": [
+                "AE3007A1"
+              ],
+              "type": "turbofan"
+            },
+            "flaps": {
+              "Sf/S": 0.15,
+              "area": null,
+              "bf/b": null,
+              "cf/c": 0.15,
+              "lambda_f": 0.9,
+              "type": "double-slotted"
+            },
+            "fuselage": {
+              "height": 2.28,
+              "length": 29.87,
+              "width": 2.28
+            },
+            "limits": {
+              "MFC": 5136,
+              "MLW": 19300,
+              "MMO": 0.78,
+              "MTOW": 22000,
+              "OEW": 12110,
+              "VMO": 320,
+              "ceiling": 11300
+            },
+            "mfc": 5136,
+            "mlw": 19300,
+            "mmo": 0.78,
+            "mtow": 22000,
+            "oew": 12110,
+            "pax": {
+              "high": 50,
+              "low": 50,
+              "max": 50
+            },
+            "vmo": 320,
+            "wing": {
+              "area": 51.2,
+              "mac": 3.19,
+              "span": 20.04,
+              "sweep": 23,
+              "t/c": null
+            }
+          },
+          "default_engine": {
+            "bpr": 4.77,
+            "cruise_alt": null,
+            "cruise_mach": null,
+            "cruise_sfc": null,
+            "cruise_thrust": null,
+            "ei_co_app": 6.72,
+            "ei_co_co": 0.56,
+            "ei_co_idl": 39.91,
+            "ei_co_to": 0.75,
+            "ei_hc_app": 0.03,
+            "ei_hc_co": 0.03,
+            "ei_hc_idl": 3.85,
+            "ei_hc_to": 0.03,
+            "ei_nox_app": 7.13,
+            "ei_nox_co": 14.07,
+            "ei_nox_idl": 4.17,
+            "ei_nox_to": 16.17,
+            "ff_app": 0.113,
+            "ff_co": 0.318,
+            "ff_idl": 0.0461,
+            "ff_to": 0.3826,
+            "fuel_ch": 6.7e-07,
+            "fuel_lto": 157.0,
+            "manufacturer": "Rolls-Royce Corporation",
+            "max_thrust": 34910.0,
+            "name": "AE3007A1",
+            "pr": 17.97,
+            "type": "MTF",
+            "uid": "6AL007"
+          }
+        },
+        "typecode": "AT76"
+      },
       "representative_metadata": {
         "built": null,
         "categoryDescription": null,
@@ -6311,8 +7252,7 @@
         "reguntil": null,
         "status": null,
         "typecode": "AT76"
-      },
-      "typecode": "AT76"
+      }
     },
     "AT8T": {
       "error": "Typecode AT8T is not supported by this OpenAP installation.",
@@ -7377,6 +8317,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 45000
         },
+        "openap_performance_typecode": "B37M",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Boeing 737 MAX 7",
@@ -7551,6 +8492,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 45000
         },
+        "openap_performance_typecode": "B38M",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Boeing 737 MAX 8",
@@ -7725,6 +8667,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 45000
         },
+        "openap_performance_typecode": "B39M",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Boeing 737 MAX 9",
@@ -7899,6 +8842,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 45000
         },
+        "openap_performance_typecode": "B3XM",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Boeing 737 MAX 10",
@@ -8619,8 +9563,165 @@
       "typecode": "B732"
     },
     "B733": {
-      "error": "Typecode B733 is not supported by this OpenAP installation.",
-      "openap_supported": false,
+      "openap_supported": true,
+      "parameters": {
+        "aircraft_name": "Boeing 737-400",
+        "category": "transport_jet",
+        "cruise": {
+          "height_m": 11000,
+          "mach": 0.78
+        },
+        "drag": {
+          "cd0": 0.02,
+          "e": 0.793,
+          "k": 0.044,
+          "landing_gear_drag_increment": 0.021
+        },
+        "engine": {
+          "cruise_sfc": null,
+          "cruise_thrust_n_each": null,
+          "default": "CFM56-3B-2",
+          "lookup_error": null,
+          "max_thrust_n_each": 98300.0,
+          "mount": "wing",
+          "number": 2,
+          "type": "turbofan"
+        },
+        "flaps": {
+          "Sf/S": 0.15,
+          "area": null,
+          "bf/b": 0.72,
+          "cf/c": 0.15,
+          "lambda_f": 0.9,
+          "type": "triple-slotted"
+        },
+        "geometry": {
+          "fuselage_height_m": 3.73,
+          "fuselage_length_m": 33.4,
+          "fuselage_width_m": 3.73,
+          "wing_area_m2": 91.04,
+          "wing_mac_m": 3.73,
+          "wing_span_m": 28.88,
+          "wing_sweep_deg": 25,
+          "wing_thickness_to_chord": 0.129
+        },
+        "limits": {
+          "ceiling_m": 12500,
+          "mmo": 0.82,
+          "vmo_kts": 340
+        },
+        "mass": {
+          "maximum_fuel_capacity_kg": 20000,
+          "mlw_kg": 56200,
+          "mtow_kg": 68000,
+          "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
+          "oew_kg": 33700
+        },
+        "openap_performance_typecode": "B734",
+        "raw_openap": {
+          "aircraft": {
+            "aircraft": "Boeing 737-400",
+            "ceiling": 12500,
+            "cruise": {
+              "height": 11000,
+              "mach": 0.78,
+              "range": 3900
+            },
+            "drag": {
+              "cd0": 0.02,
+              "e": 0.793,
+              "gears": 0.021,
+              "k": 0.044
+            },
+            "engine": {
+              "default": "CFM56-3B-2",
+              "mount": "wing",
+              "number": 2,
+              "options": [
+                "CFM56-3B-2",
+                "CFM56-3C-1"
+              ],
+              "type": "turbofan"
+            },
+            "flaps": {
+              "Sf/S": 0.15,
+              "area": null,
+              "bf/b": 0.72,
+              "cf/c": 0.15,
+              "lambda_f": 0.9,
+              "type": "triple-slotted"
+            },
+            "fuel": {
+              "engine": "CFM56-3C-1",
+              "fuel_coef": 2.60481253
+            },
+            "fuselage": {
+              "height": 3.73,
+              "length": 33.4,
+              "width": 3.73
+            },
+            "limits": {
+              "MFC": 20000,
+              "MLW": 56200,
+              "MMO": 0.82,
+              "MTOW": 68000,
+              "OEW": 33700,
+              "VMO": 340,
+              "ceiling": 12500
+            },
+            "mfc": 20000,
+            "mlw": 56200,
+            "mmo": 0.82,
+            "mtow": 68000,
+            "oew": 33700,
+            "pax": {
+              "high": 160,
+              "low": 145,
+              "max": 188
+            },
+            "vmo": 340,
+            "wing": {
+              "area": 91.04,
+              "mac": 3.73,
+              "span": 28.88,
+              "sweep": 25,
+              "t/c": 0.129
+            }
+          },
+          "default_engine": {
+            "bpr": 5.1,
+            "cruise_alt": null,
+            "cruise_mach": null,
+            "cruise_sfc": null,
+            "cruise_thrust": null,
+            "ei_co_app": 3.4,
+            "ei_co_co": 0.9,
+            "ei_co_idl": 30.1,
+            "ei_co_to": 0.9,
+            "ei_hc_app": 0.073,
+            "ei_hc_co": 0.047,
+            "ei_hc_idl": 1.75,
+            "ei_hc_to": 0.036,
+            "ei_nox_app": 8.7,
+            "ei_nox_co": 16.7,
+            "ei_nox_idl": 4.1,
+            "ei_nox_to": 19.4,
+            "ff_app": 0.314,
+            "ff_co": 0.878,
+            "ff_idl": 0.119,
+            "ff_to": 1.056,
+            "fuel_ch": 6.7e-07,
+            "fuel_lto": 421.0,
+            "manufacturer": "CFM International",
+            "max_thrust": 98300.0,
+            "name": "CFM56-3B-2",
+            "pr": 24.1,
+            "type": "TF",
+            "uid": "1CM005"
+          }
+        },
+        "typecode": "B733"
+      },
       "representative_metadata": {
         "built": null,
         "categoryDescription": null,
@@ -8639,8 +9740,7 @@
         "reguntil": null,
         "status": null,
         "typecode": "B733"
-      },
-      "typecode": "B733"
+      }
     },
     "B734": {
       "openap_supported": true,
@@ -8697,6 +9797,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 33700
         },
+        "openap_performance_typecode": "B734",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Boeing 737-400",
@@ -8822,8 +9923,165 @@
       }
     },
     "B735": {
-      "error": "Typecode B735 is not supported by this OpenAP installation.",
-      "openap_supported": false,
+      "openap_supported": true,
+      "parameters": {
+        "aircraft_name": "Boeing 737-400",
+        "category": "transport_jet",
+        "cruise": {
+          "height_m": 11000,
+          "mach": 0.78
+        },
+        "drag": {
+          "cd0": 0.02,
+          "e": 0.793,
+          "k": 0.044,
+          "landing_gear_drag_increment": 0.021
+        },
+        "engine": {
+          "cruise_sfc": null,
+          "cruise_thrust_n_each": null,
+          "default": "CFM56-3B-2",
+          "lookup_error": null,
+          "max_thrust_n_each": 98300.0,
+          "mount": "wing",
+          "number": 2,
+          "type": "turbofan"
+        },
+        "flaps": {
+          "Sf/S": 0.15,
+          "area": null,
+          "bf/b": 0.72,
+          "cf/c": 0.15,
+          "lambda_f": 0.9,
+          "type": "triple-slotted"
+        },
+        "geometry": {
+          "fuselage_height_m": 3.73,
+          "fuselage_length_m": 33.4,
+          "fuselage_width_m": 3.73,
+          "wing_area_m2": 91.04,
+          "wing_mac_m": 3.73,
+          "wing_span_m": 28.88,
+          "wing_sweep_deg": 25,
+          "wing_thickness_to_chord": 0.129
+        },
+        "limits": {
+          "ceiling_m": 12500,
+          "mmo": 0.82,
+          "vmo_kts": 340
+        },
+        "mass": {
+          "maximum_fuel_capacity_kg": 20000,
+          "mlw_kg": 56200,
+          "mtow_kg": 68000,
+          "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
+          "oew_kg": 33700
+        },
+        "openap_performance_typecode": "B734",
+        "raw_openap": {
+          "aircraft": {
+            "aircraft": "Boeing 737-400",
+            "ceiling": 12500,
+            "cruise": {
+              "height": 11000,
+              "mach": 0.78,
+              "range": 3900
+            },
+            "drag": {
+              "cd0": 0.02,
+              "e": 0.793,
+              "gears": 0.021,
+              "k": 0.044
+            },
+            "engine": {
+              "default": "CFM56-3B-2",
+              "mount": "wing",
+              "number": 2,
+              "options": [
+                "CFM56-3B-2",
+                "CFM56-3C-1"
+              ],
+              "type": "turbofan"
+            },
+            "flaps": {
+              "Sf/S": 0.15,
+              "area": null,
+              "bf/b": 0.72,
+              "cf/c": 0.15,
+              "lambda_f": 0.9,
+              "type": "triple-slotted"
+            },
+            "fuel": {
+              "engine": "CFM56-3C-1",
+              "fuel_coef": 2.60481253
+            },
+            "fuselage": {
+              "height": 3.73,
+              "length": 33.4,
+              "width": 3.73
+            },
+            "limits": {
+              "MFC": 20000,
+              "MLW": 56200,
+              "MMO": 0.82,
+              "MTOW": 68000,
+              "OEW": 33700,
+              "VMO": 340,
+              "ceiling": 12500
+            },
+            "mfc": 20000,
+            "mlw": 56200,
+            "mmo": 0.82,
+            "mtow": 68000,
+            "oew": 33700,
+            "pax": {
+              "high": 160,
+              "low": 145,
+              "max": 188
+            },
+            "vmo": 340,
+            "wing": {
+              "area": 91.04,
+              "mac": 3.73,
+              "span": 28.88,
+              "sweep": 25,
+              "t/c": 0.129
+            }
+          },
+          "default_engine": {
+            "bpr": 5.1,
+            "cruise_alt": null,
+            "cruise_mach": null,
+            "cruise_sfc": null,
+            "cruise_thrust": null,
+            "ei_co_app": 3.4,
+            "ei_co_co": 0.9,
+            "ei_co_idl": 30.1,
+            "ei_co_to": 0.9,
+            "ei_hc_app": 0.073,
+            "ei_hc_co": 0.047,
+            "ei_hc_idl": 1.75,
+            "ei_hc_to": 0.036,
+            "ei_nox_app": 8.7,
+            "ei_nox_co": 16.7,
+            "ei_nox_idl": 4.1,
+            "ei_nox_to": 19.4,
+            "ff_app": 0.314,
+            "ff_co": 0.878,
+            "ff_idl": 0.119,
+            "ff_to": 1.056,
+            "fuel_ch": 6.7e-07,
+            "fuel_lto": 421.0,
+            "manufacturer": "CFM International",
+            "max_thrust": 98300.0,
+            "name": "CFM56-3B-2",
+            "pr": 24.1,
+            "type": "TF",
+            "uid": "1CM005"
+          }
+        },
+        "typecode": "B735"
+      },
       "representative_metadata": {
         "built": null,
         "categoryDescription": null,
@@ -8842,8 +10100,7 @@
         "reguntil": null,
         "status": null,
         "typecode": "B735"
-      },
-      "typecode": "B735"
+      }
     },
     "B736": {
       "error": "Typecode B736 is not supported by this OpenAP installation.",
@@ -8924,6 +10181,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 37600
         },
+        "openap_performance_typecode": "B737",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Boeing 737-700",
@@ -9130,6 +10388,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 41400
         },
+        "openap_performance_typecode": "B738",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Boeing 737-800",
@@ -9310,6 +10569,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 44600
         },
+        "openap_performance_typecode": "B739",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Boeing 737-900",
@@ -9562,6 +10822,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 182400
         },
+        "openap_performance_typecode": "B744",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Boeing 747-400",
@@ -9738,6 +10999,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 220100
         },
+        "openap_performance_typecode": "B748",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Boeing 747-8",
@@ -9960,6 +11222,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 58400
         },
+        "openap_performance_typecode": "B752",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Boeing 757-200",
@@ -10105,8 +11368,162 @@
       "typecode": "B753"
     },
     "B762": {
-      "error": "Typecode B762 is not supported by this OpenAP installation.",
-      "openap_supported": false,
+      "openap_supported": true,
+      "parameters": {
+        "aircraft_name": "Boeing 767-300",
+        "category": "transport_jet",
+        "cruise": {
+          "height_m": 11000,
+          "mach": 0.8
+        },
+        "drag": {
+          "cd0": 0.021,
+          "e": 0.813,
+          "k": 0.049,
+          "landing_gear_drag_increment": 0.016
+        },
+        "engine": {
+          "cruise_sfc": 0.0163,
+          "cruise_thrust_n_each": 53378.0,
+          "default": "CF6-80C2B2",
+          "lookup_error": null,
+          "max_thrust_n_each": 231080.0,
+          "mount": "wing",
+          "number": 2,
+          "type": "turbofan"
+        },
+        "flaps": {
+          "Sf/S": 0.167,
+          "area": 36.88,
+          "bf/b": 0.75,
+          "cf/c": 0.187,
+          "lambda_f": 0.9,
+          "type": "double-slotted"
+        },
+        "geometry": {
+          "fuselage_height_m": 5.03,
+          "fuselage_length_m": 54.94,
+          "fuselage_width_m": 5.03,
+          "wing_area_m2": 283.3,
+          "wing_mac_m": 6.98,
+          "wing_span_m": 47.57,
+          "wing_sweep_deg": 31.5,
+          "wing_thickness_to_chord": 0.115
+        },
+        "limits": {
+          "ceiling_m": 13100,
+          "mmo": 0.86,
+          "vmo_kts": 360
+        },
+        "mass": {
+          "maximum_fuel_capacity_kg": 63200,
+          "mlw_kg": 136000,
+          "mtow_kg": 158700,
+          "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
+          "oew_kg": 90000
+        },
+        "openap_performance_typecode": "B763",
+        "raw_openap": {
+          "aircraft": {
+            "aircraft": "Boeing 767-300",
+            "ceiling": 13100,
+            "cruise": {
+              "height": 11000,
+              "mach": 0.8,
+              "range": 11400
+            },
+            "drag": {
+              "cd0": 0.021,
+              "e": 0.813,
+              "gears": 0.016,
+              "k": 0.049
+            },
+            "engine": {
+              "default": "CF6-80C2B2",
+              "mount": "wing",
+              "number": 2,
+              "options": [
+                "JT9D-7R4D",
+                "PW4056",
+                "CF6-80C2B2"
+              ],
+              "type": "turbofan"
+            },
+            "flaps": {
+              "Sf/S": 0.167,
+              "area": 36.88,
+              "bf/b": 0.75,
+              "cf/c": 0.187,
+              "lambda_f": 0.9,
+              "type": "double-slotted"
+            },
+            "fuselage": {
+              "height": 5.03,
+              "length": 54.94,
+              "width": 5.03
+            },
+            "limits": {
+              "MFC": 63200,
+              "MLW": 136000,
+              "MMO": 0.86,
+              "MTOW": 158700,
+              "OEW": 90000,
+              "VMO": 360,
+              "ceiling": 13100
+            },
+            "mfc": 63200,
+            "mlw": 136000,
+            "mmo": 0.86,
+            "mtow": 158700,
+            "oew": 90000,
+            "pax": {
+              "high": 290,
+              "low": 210,
+              "max": 350
+            },
+            "vmo": 360,
+            "wing": {
+              "area": 283.3,
+              "mac": 6.98,
+              "span": 47.57,
+              "sweep": 31.5,
+              "t/c": 0.115
+            }
+          },
+          "default_engine": {
+            "bpr": 5.1,
+            "cruise_alt": 35000.0,
+            "cruise_mach": 0.8,
+            "cruise_sfc": 0.0163,
+            "cruise_thrust": 53378.0,
+            "ei_co_app": 2.61,
+            "ei_co_co": 0.05,
+            "ei_co_idl": 22.41,
+            "ei_co_to": 0.04,
+            "ei_hc_app": 0.12,
+            "ei_hc_co": 0.05,
+            "ei_hc_idl": 1.97,
+            "ei_hc_to": 0.05,
+            "ei_nox_app": 11.79,
+            "ei_nox_co": 18.25,
+            "ei_nox_idl": 4.45,
+            "ei_nox_to": 22.02,
+            "ff_app": 0.585,
+            "ff_co": 1.756,
+            "ff_idl": 0.19,
+            "ff_to": 2.124,
+            "fuel_ch": 6.7e-07,
+            "fuel_lto": 758.0,
+            "manufacturer": "GE Aircraft Engines",
+            "max_thrust": 231080.0,
+            "name": "CF6-80C2B2",
+            "pr": 27.53,
+            "type": "TF",
+            "uid": "2GE042"
+          }
+        },
+        "typecode": "B762"
+      },
       "representative_metadata": {
         "built": null,
         "categoryDescription": null,
@@ -10125,8 +11542,7 @@
         "reguntil": null,
         "status": null,
         "typecode": "B762"
-      },
-      "typecode": "B762"
+      }
     },
     "B763": {
       "openap_supported": true,
@@ -10183,6 +11599,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 90000
         },
+        "openap_performance_typecode": "B763",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Boeing 767-300",
@@ -10383,6 +11800,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 138000
         },
+        "openap_performance_typecode": "B772",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Boeing 777-200/200ER",
@@ -10562,6 +11980,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 160500
         },
+        "openap_performance_typecode": "B773",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Boeing 777-300",
@@ -10708,8 +12127,160 @@
       "typecode": "B779"
     },
     "B77L": {
-      "error": "Typecode B77L is not supported by this OpenAP installation.",
-      "openap_supported": false,
+      "openap_supported": true,
+      "parameters": {
+        "aircraft_name": "Boeing 777-300ER",
+        "category": "transport_jet",
+        "cruise": {
+          "height_m": 11000,
+          "mach": 0.84
+        },
+        "drag": {
+          "cd0": 0.024,
+          "e": 0.765,
+          "k": 0.043,
+          "landing_gear_drag_increment": 0.016
+        },
+        "engine": {
+          "cruise_sfc": null,
+          "cruise_thrust_n_each": null,
+          "default": "GE90-115B",
+          "lookup_error": null,
+          "max_thrust_n_each": 513900.0,
+          "mount": "wing",
+          "number": 2,
+          "type": "turbofan"
+        },
+        "flaps": {
+          "Sf/S": 0.154,
+          "area": 67.13,
+          "bf/b": 0.758,
+          "cf/c": 0.156,
+          "lambda_f": 0.9,
+          "type": "double-slotted"
+        },
+        "geometry": {
+          "fuselage_height_m": 6.2,
+          "fuselage_length_m": 73.86,
+          "fuselage_width_m": 6.2,
+          "wing_area_m2": 436.8,
+          "wing_mac_m": 8.75,
+          "wing_span_m": 64.8,
+          "wing_sweep_deg": 31.6,
+          "wing_thickness_to_chord": null
+        },
+        "limits": {
+          "ceiling_m": 13100,
+          "mmo": 0.89,
+          "vmo_kts": 330
+        },
+        "mass": {
+          "maximum_fuel_capacity_kg": 181300,
+          "mlw_kg": 251300,
+          "mtow_kg": 351500,
+          "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
+          "oew_kg": 167800
+        },
+        "openap_performance_typecode": "B77W",
+        "raw_openap": {
+          "aircraft": {
+            "aircraft": "Boeing 777-300ER",
+            "ceiling": 13100,
+            "cruise": {
+              "height": 11000,
+              "mach": 0.84,
+              "range": 14700
+            },
+            "drag": {
+              "cd0": 0.024,
+              "e": 0.765,
+              "gears": 0.016,
+              "k": 0.043
+            },
+            "engine": {
+              "default": "GE90-115B",
+              "mount": "wing",
+              "number": 2,
+              "options": [
+                "GE90-115B"
+              ],
+              "type": "turbofan"
+            },
+            "flaps": {
+              "Sf/S": 0.154,
+              "area": 67.13,
+              "bf/b": 0.758,
+              "cf/c": 0.156,
+              "lambda_f": 0.9,
+              "type": "double-slotted"
+            },
+            "fuselage": {
+              "height": 6.2,
+              "length": 73.86,
+              "width": 6.2
+            },
+            "limits": {
+              "MFC": 181300,
+              "MLW": 251300,
+              "MMO": 0.89,
+              "MTOW": 351500,
+              "OEW": 167800,
+              "VMO": 330,
+              "ceiling": 13100
+            },
+            "mfc": 181300,
+            "mlw": 251300,
+            "mmo": 0.89,
+            "mtow": 351500,
+            "oew": 167800,
+            "pax": {
+              "high": 451,
+              "low": 365,
+              "max": 550
+            },
+            "vmo": 330,
+            "wing": {
+              "area": 436.8,
+              "mac": 8.75,
+              "span": 64.8,
+              "sweep": 31.6,
+              "t/c": null
+            }
+          },
+          "default_engine": {
+            "bpr": 7.1,
+            "cruise_alt": null,
+            "cruise_mach": null,
+            "cruise_sfc": null,
+            "cruise_thrust": null,
+            "ei_co_app": 2.16,
+            "ei_co_co": 0.137,
+            "ei_co_idl": 34.578,
+            "ei_co_to": 0.125,
+            "ei_hc_app": 0.048,
+            "ei_hc_co": 0.024,
+            "ei_hc_idl": 3.636,
+            "ei_hc_to": 0.032,
+            "ei_nox_app": 16.166,
+            "ei_nox_co": 36.44,
+            "ei_nox_idl": 5.511,
+            "ei_nox_to": 51.068,
+            "ff_app": 1.073,
+            "ff_co": 3.566,
+            "ff_idl": 0.341,
+            "ff_to": 4.6,
+            "fuel_ch": 6.7e-07,
+            "fuel_lto": 1453.392,
+            "manufacturer": "GE Aircraft Engines",
+            "max_thrust": 513900.0,
+            "name": "GE90-115B",
+            "pr": 42.94,
+            "type": "TF",
+            "uid": "21GE184"
+          }
+        },
+        "typecode": "B77L"
+      },
       "representative_metadata": {
         "built": "2019-01-01",
         "categoryDescription": null,
@@ -10728,8 +12299,7 @@
         "reguntil": "2029-08-31",
         "status": null,
         "typecode": "B77L"
-      },
-      "typecode": "B77L"
+      }
     },
     "B77W": {
       "openap_supported": true,
@@ -10786,6 +12356,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 167800
         },
+        "openap_performance_typecode": "B77W",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Boeing 777-300ER",
@@ -10984,6 +12555,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 119000
         },
+        "openap_performance_typecode": "B788",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Boeing 787-8",
@@ -11163,6 +12735,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 128000
         },
+        "openap_performance_typecode": "B789",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Boeing 787-9",
@@ -14119,8 +15692,160 @@
       "typecode": "C240"
     },
     "C25A": {
-      "error": "Typecode C25A is not supported by this OpenAP installation.",
-      "openap_supported": false,
+      "openap_supported": true,
+      "parameters": {
+        "aircraft_name": "Cessna Citation II",
+        "category": "business_or_general_aviation",
+        "cruise": {
+          "height_m": 11000,
+          "mach": 0.67
+        },
+        "drag": {
+          "cd0": 0.028,
+          "e": 0.818,
+          "k": 0.049,
+          "landing_gear_drag_increment": 0.02
+        },
+        "engine": {
+          "cruise_sfc": null,
+          "cruise_thrust_n_each": null,
+          "default": "JT15D-4",
+          "lookup_error": null,
+          "max_thrust_n_each": 11120.0,
+          "mount": "rear",
+          "number": 2,
+          "type": "turbofan"
+        },
+        "flaps": {
+          "Sf/S": 0.15,
+          "area": null,
+          "bf/b": null,
+          "cf/c": 0.15,
+          "lambda_f": 1.7,
+          "type": "single-slotted"
+        },
+        "geometry": {
+          "fuselage_height_m": 1.46,
+          "fuselage_length_m": 14.39,
+          "fuselage_width_m": 1.46,
+          "wing_area_m2": 31.83,
+          "wing_mac_m": 2.05,
+          "wing_span_m": 15.9,
+          "wing_sweep_deg": 0,
+          "wing_thickness_to_chord": 0.13
+        },
+        "limits": {
+          "ceiling_m": 13100,
+          "mmo": 0.7,
+          "vmo_kts": 270
+        },
+        "mass": {
+          "maximum_fuel_capacity_kg": 2204,
+          "mlw_kg": 6804,
+          "mtow_kg": 6849,
+          "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
+          "oew_kg": 3655
+        },
+        "openap_performance_typecode": "C550",
+        "raw_openap": {
+          "aircraft": {
+            "aircraft": "Cessna Citation II",
+            "ceiling": 13100,
+            "cruise": {
+              "height": 11000,
+              "mach": 0.67,
+              "range": 3500
+            },
+            "drag": {
+              "cd0": 0.028,
+              "e": 0.818,
+              "gears": 0.02,
+              "k": 0.049
+            },
+            "engine": {
+              "default": "JT15D-4",
+              "mount": "rear",
+              "number": 2,
+              "options": [
+                "JT15D-4"
+              ],
+              "type": "turbofan"
+            },
+            "flaps": {
+              "Sf/S": 0.15,
+              "area": null,
+              "bf/b": null,
+              "cf/c": 0.15,
+              "lambda_f": 1.7,
+              "type": "single-slotted"
+            },
+            "fuselage": {
+              "height": 1.46,
+              "length": 14.39,
+              "width": 1.46
+            },
+            "limits": {
+              "MFC": 2204,
+              "MLW": 6804,
+              "MMO": 0.7,
+              "MTOW": 6849,
+              "OEW": 3655,
+              "VMO": 270,
+              "ceiling": 13100
+            },
+            "mfc": 2204,
+            "mlw": 6804,
+            "mmo": 0.7,
+            "mtow": 6849,
+            "oew": 3655,
+            "pax": {
+              "high": 10,
+              "low": 5,
+              "max": 10
+            },
+            "vmo": 270,
+            "wing": {
+              "area": 31.83,
+              "mac": 2.05,
+              "span": 15.9,
+              "sweep": 0,
+              "t/c": 0.13
+            }
+          },
+          "default_engine": {
+            "bpr": 2.68,
+            "cruise_alt": null,
+            "cruise_mach": null,
+            "cruise_sfc": null,
+            "cruise_thrust": null,
+            "ei_co_app": 32.0,
+            "ei_co_co": 3.18,
+            "ei_co_idl": 97.0,
+            "ei_co_to": 2.1,
+            "ei_hc_app": 5.15,
+            "ei_hc_co": 0.19,
+            "ei_hc_idl": 40.0,
+            "ei_hc_to": 0.09,
+            "ei_nox_app": 5.29,
+            "ei_nox_co": 8.56,
+            "ei_nox_idl": 2.63,
+            "ei_nox_to": 9.23,
+            "ff_app": 0.059,
+            "ff_co": 0.143,
+            "ff_idl": 0.0261,
+            "ff_to": 0.1697,
+            "fuel_ch": 6.7e-07,
+            "fuel_lto": 81.0,
+            "manufacturer": "Pratt & Whitney Canada",
+            "max_thrust": 11120.0,
+            "name": "JT15D-4",
+            "pr": 10.1,
+            "type": "TF",
+            "uid": "1PW036"
+          }
+        },
+        "typecode": "C25A"
+      },
       "representative_metadata": {
         "built": null,
         "categoryDescription": null,
@@ -14139,8 +15864,7 @@
         "reguntil": null,
         "status": null,
         "typecode": "C25A"
-      },
-      "typecode": "C25A"
+      }
     },
     "C25B": {
       "error": "Typecode C25B is not supported by this OpenAP installation.",
@@ -14863,8 +16587,160 @@
       "typecode": "C510"
     },
     "C525": {
-      "error": "Typecode C525 is not supported by this OpenAP installation.",
-      "openap_supported": false,
+      "openap_supported": true,
+      "parameters": {
+        "aircraft_name": "Cessna Citation II",
+        "category": "business_or_general_aviation",
+        "cruise": {
+          "height_m": 11000,
+          "mach": 0.67
+        },
+        "drag": {
+          "cd0": 0.028,
+          "e": 0.818,
+          "k": 0.049,
+          "landing_gear_drag_increment": 0.02
+        },
+        "engine": {
+          "cruise_sfc": null,
+          "cruise_thrust_n_each": null,
+          "default": "JT15D-4",
+          "lookup_error": null,
+          "max_thrust_n_each": 11120.0,
+          "mount": "rear",
+          "number": 2,
+          "type": "turbofan"
+        },
+        "flaps": {
+          "Sf/S": 0.15,
+          "area": null,
+          "bf/b": null,
+          "cf/c": 0.15,
+          "lambda_f": 1.7,
+          "type": "single-slotted"
+        },
+        "geometry": {
+          "fuselage_height_m": 1.46,
+          "fuselage_length_m": 14.39,
+          "fuselage_width_m": 1.46,
+          "wing_area_m2": 31.83,
+          "wing_mac_m": 2.05,
+          "wing_span_m": 15.9,
+          "wing_sweep_deg": 0,
+          "wing_thickness_to_chord": 0.13
+        },
+        "limits": {
+          "ceiling_m": 13100,
+          "mmo": 0.7,
+          "vmo_kts": 270
+        },
+        "mass": {
+          "maximum_fuel_capacity_kg": 2204,
+          "mlw_kg": 6804,
+          "mtow_kg": 6849,
+          "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
+          "oew_kg": 3655
+        },
+        "openap_performance_typecode": "C550",
+        "raw_openap": {
+          "aircraft": {
+            "aircraft": "Cessna Citation II",
+            "ceiling": 13100,
+            "cruise": {
+              "height": 11000,
+              "mach": 0.67,
+              "range": 3500
+            },
+            "drag": {
+              "cd0": 0.028,
+              "e": 0.818,
+              "gears": 0.02,
+              "k": 0.049
+            },
+            "engine": {
+              "default": "JT15D-4",
+              "mount": "rear",
+              "number": 2,
+              "options": [
+                "JT15D-4"
+              ],
+              "type": "turbofan"
+            },
+            "flaps": {
+              "Sf/S": 0.15,
+              "area": null,
+              "bf/b": null,
+              "cf/c": 0.15,
+              "lambda_f": 1.7,
+              "type": "single-slotted"
+            },
+            "fuselage": {
+              "height": 1.46,
+              "length": 14.39,
+              "width": 1.46
+            },
+            "limits": {
+              "MFC": 2204,
+              "MLW": 6804,
+              "MMO": 0.7,
+              "MTOW": 6849,
+              "OEW": 3655,
+              "VMO": 270,
+              "ceiling": 13100
+            },
+            "mfc": 2204,
+            "mlw": 6804,
+            "mmo": 0.7,
+            "mtow": 6849,
+            "oew": 3655,
+            "pax": {
+              "high": 10,
+              "low": 5,
+              "max": 10
+            },
+            "vmo": 270,
+            "wing": {
+              "area": 31.83,
+              "mac": 2.05,
+              "span": 15.9,
+              "sweep": 0,
+              "t/c": 0.13
+            }
+          },
+          "default_engine": {
+            "bpr": 2.68,
+            "cruise_alt": null,
+            "cruise_mach": null,
+            "cruise_sfc": null,
+            "cruise_thrust": null,
+            "ei_co_app": 32.0,
+            "ei_co_co": 3.18,
+            "ei_co_idl": 97.0,
+            "ei_co_to": 2.1,
+            "ei_hc_app": 5.15,
+            "ei_hc_co": 0.19,
+            "ei_hc_idl": 40.0,
+            "ei_hc_to": 0.09,
+            "ei_nox_app": 5.29,
+            "ei_nox_co": 8.56,
+            "ei_nox_idl": 2.63,
+            "ei_nox_to": 9.23,
+            "ff_app": 0.059,
+            "ff_co": 0.143,
+            "ff_idl": 0.0261,
+            "ff_to": 0.1697,
+            "fuel_ch": 6.7e-07,
+            "fuel_lto": 81.0,
+            "manufacturer": "Pratt & Whitney Canada",
+            "max_thrust": 11120.0,
+            "name": "JT15D-4",
+            "pr": 10.1,
+            "type": "TF",
+            "uid": "1PW036"
+          }
+        },
+        "typecode": "C525"
+      },
       "representative_metadata": {
         "built": null,
         "categoryDescription": null,
@@ -14883,8 +16759,7 @@
         "reguntil": null,
         "status": null,
         "typecode": "C525"
-      },
-      "typecode": "C525"
+      }
     },
     "C550": {
       "openap_supported": true,
@@ -14941,6 +16816,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 3655
         },
+        "openap_performance_typecode": "C550",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Cessna Citation II",
@@ -15133,8 +17009,160 @@
       "typecode": "C560"
     },
     "C56X": {
-      "error": "Typecode C56X is not supported by this OpenAP installation.",
-      "openap_supported": false,
+      "openap_supported": true,
+      "parameters": {
+        "aircraft_name": "Cessna Citation II",
+        "category": "business_or_general_aviation",
+        "cruise": {
+          "height_m": 11000,
+          "mach": 0.67
+        },
+        "drag": {
+          "cd0": 0.028,
+          "e": 0.818,
+          "k": 0.049,
+          "landing_gear_drag_increment": 0.02
+        },
+        "engine": {
+          "cruise_sfc": null,
+          "cruise_thrust_n_each": null,
+          "default": "JT15D-4",
+          "lookup_error": null,
+          "max_thrust_n_each": 11120.0,
+          "mount": "rear",
+          "number": 2,
+          "type": "turbofan"
+        },
+        "flaps": {
+          "Sf/S": 0.15,
+          "area": null,
+          "bf/b": null,
+          "cf/c": 0.15,
+          "lambda_f": 1.7,
+          "type": "single-slotted"
+        },
+        "geometry": {
+          "fuselage_height_m": 1.46,
+          "fuselage_length_m": 14.39,
+          "fuselage_width_m": 1.46,
+          "wing_area_m2": 31.83,
+          "wing_mac_m": 2.05,
+          "wing_span_m": 15.9,
+          "wing_sweep_deg": 0,
+          "wing_thickness_to_chord": 0.13
+        },
+        "limits": {
+          "ceiling_m": 13100,
+          "mmo": 0.7,
+          "vmo_kts": 270
+        },
+        "mass": {
+          "maximum_fuel_capacity_kg": 2204,
+          "mlw_kg": 6804,
+          "mtow_kg": 6849,
+          "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
+          "oew_kg": 3655
+        },
+        "openap_performance_typecode": "C550",
+        "raw_openap": {
+          "aircraft": {
+            "aircraft": "Cessna Citation II",
+            "ceiling": 13100,
+            "cruise": {
+              "height": 11000,
+              "mach": 0.67,
+              "range": 3500
+            },
+            "drag": {
+              "cd0": 0.028,
+              "e": 0.818,
+              "gears": 0.02,
+              "k": 0.049
+            },
+            "engine": {
+              "default": "JT15D-4",
+              "mount": "rear",
+              "number": 2,
+              "options": [
+                "JT15D-4"
+              ],
+              "type": "turbofan"
+            },
+            "flaps": {
+              "Sf/S": 0.15,
+              "area": null,
+              "bf/b": null,
+              "cf/c": 0.15,
+              "lambda_f": 1.7,
+              "type": "single-slotted"
+            },
+            "fuselage": {
+              "height": 1.46,
+              "length": 14.39,
+              "width": 1.46
+            },
+            "limits": {
+              "MFC": 2204,
+              "MLW": 6804,
+              "MMO": 0.7,
+              "MTOW": 6849,
+              "OEW": 3655,
+              "VMO": 270,
+              "ceiling": 13100
+            },
+            "mfc": 2204,
+            "mlw": 6804,
+            "mmo": 0.7,
+            "mtow": 6849,
+            "oew": 3655,
+            "pax": {
+              "high": 10,
+              "low": 5,
+              "max": 10
+            },
+            "vmo": 270,
+            "wing": {
+              "area": 31.83,
+              "mac": 2.05,
+              "span": 15.9,
+              "sweep": 0,
+              "t/c": 0.13
+            }
+          },
+          "default_engine": {
+            "bpr": 2.68,
+            "cruise_alt": null,
+            "cruise_mach": null,
+            "cruise_sfc": null,
+            "cruise_thrust": null,
+            "ei_co_app": 32.0,
+            "ei_co_co": 3.18,
+            "ei_co_idl": 97.0,
+            "ei_co_to": 2.1,
+            "ei_hc_app": 5.15,
+            "ei_hc_co": 0.19,
+            "ei_hc_idl": 40.0,
+            "ei_hc_to": 0.09,
+            "ei_nox_app": 5.29,
+            "ei_nox_co": 8.56,
+            "ei_nox_idl": 2.63,
+            "ei_nox_to": 9.23,
+            "ff_app": 0.059,
+            "ff_co": 0.143,
+            "ff_idl": 0.0261,
+            "ff_to": 0.1697,
+            "fuel_ch": 6.7e-07,
+            "fuel_lto": 81.0,
+            "manufacturer": "Pratt & Whitney Canada",
+            "max_thrust": 11120.0,
+            "name": "JT15D-4",
+            "pr": 10.1,
+            "type": "TF",
+            "uid": "1PW036"
+          }
+        },
+        "typecode": "C56X"
+      },
       "representative_metadata": {
         "built": null,
         "categoryDescription": null,
@@ -15153,8 +17181,7 @@
         "reguntil": null,
         "status": null,
         "typecode": "C56X"
-      },
-      "typecode": "C56X"
+      }
     },
     "C5M": {
       "error": "Typecode C5M is not supported by this OpenAP installation.",
@@ -17869,8 +19896,160 @@
       "typecode": "CRJ1"
     },
     "CRJ2": {
-      "error": "Typecode CRJ2 is not supported by this OpenAP installation.",
-      "openap_supported": false,
+      "openap_supported": true,
+      "parameters": {
+        "aircraft_name": "Embraer ERJ145 (LR)",
+        "category": "business_or_general_aviation",
+        "cruise": {
+          "height_m": 11000,
+          "mach": 0.72
+        },
+        "drag": {
+          "cd0": 0.018,
+          "e": 0.809,
+          "k": 0.042,
+          "landing_gear_drag_increment": 0.017
+        },
+        "engine": {
+          "cruise_sfc": null,
+          "cruise_thrust_n_each": null,
+          "default": "AE3007A1",
+          "lookup_error": null,
+          "max_thrust_n_each": 34910.0,
+          "mount": "wing",
+          "number": 2,
+          "type": "turbofan"
+        },
+        "flaps": {
+          "Sf/S": 0.15,
+          "area": null,
+          "bf/b": null,
+          "cf/c": 0.15,
+          "lambda_f": 0.9,
+          "type": "double-slotted"
+        },
+        "geometry": {
+          "fuselage_height_m": 2.28,
+          "fuselage_length_m": 29.87,
+          "fuselage_width_m": 2.28,
+          "wing_area_m2": 51.2,
+          "wing_mac_m": 3.19,
+          "wing_span_m": 20.04,
+          "wing_sweep_deg": 23,
+          "wing_thickness_to_chord": null
+        },
+        "limits": {
+          "ceiling_m": 11300,
+          "mmo": 0.78,
+          "vmo_kts": 320
+        },
+        "mass": {
+          "maximum_fuel_capacity_kg": 5136,
+          "mlw_kg": 19300,
+          "mtow_kg": 22000,
+          "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
+          "oew_kg": 12110
+        },
+        "openap_performance_typecode": "E145",
+        "raw_openap": {
+          "aircraft": {
+            "aircraft": "Embraer ERJ145 (LR)",
+            "ceiling": 11300,
+            "cruise": {
+              "height": 11000,
+              "mach": 0.72,
+              "range": 2200
+            },
+            "drag": {
+              "cd0": 0.018,
+              "e": 0.809,
+              "gears": 0.017,
+              "k": 0.042
+            },
+            "engine": {
+              "default": "AE3007A1",
+              "mount": "wing",
+              "number": 2,
+              "options": [
+                "AE3007A1"
+              ],
+              "type": "turbofan"
+            },
+            "flaps": {
+              "Sf/S": 0.15,
+              "area": null,
+              "bf/b": null,
+              "cf/c": 0.15,
+              "lambda_f": 0.9,
+              "type": "double-slotted"
+            },
+            "fuselage": {
+              "height": 2.28,
+              "length": 29.87,
+              "width": 2.28
+            },
+            "limits": {
+              "MFC": 5136,
+              "MLW": 19300,
+              "MMO": 0.78,
+              "MTOW": 22000,
+              "OEW": 12110,
+              "VMO": 320,
+              "ceiling": 11300
+            },
+            "mfc": 5136,
+            "mlw": 19300,
+            "mmo": 0.78,
+            "mtow": 22000,
+            "oew": 12110,
+            "pax": {
+              "high": 50,
+              "low": 50,
+              "max": 50
+            },
+            "vmo": 320,
+            "wing": {
+              "area": 51.2,
+              "mac": 3.19,
+              "span": 20.04,
+              "sweep": 23,
+              "t/c": null
+            }
+          },
+          "default_engine": {
+            "bpr": 4.77,
+            "cruise_alt": null,
+            "cruise_mach": null,
+            "cruise_sfc": null,
+            "cruise_thrust": null,
+            "ei_co_app": 6.72,
+            "ei_co_co": 0.56,
+            "ei_co_idl": 39.91,
+            "ei_co_to": 0.75,
+            "ei_hc_app": 0.03,
+            "ei_hc_co": 0.03,
+            "ei_hc_idl": 3.85,
+            "ei_hc_to": 0.03,
+            "ei_nox_app": 7.13,
+            "ei_nox_co": 14.07,
+            "ei_nox_idl": 4.17,
+            "ei_nox_to": 16.17,
+            "ff_app": 0.113,
+            "ff_co": 0.318,
+            "ff_idl": 0.0461,
+            "ff_to": 0.3826,
+            "fuel_ch": 6.7e-07,
+            "fuel_lto": 157.0,
+            "manufacturer": "Rolls-Royce Corporation",
+            "max_thrust": 34910.0,
+            "name": "AE3007A1",
+            "pr": 17.97,
+            "type": "MTF",
+            "uid": "6AL007"
+          }
+        },
+        "typecode": "CRJ2"
+      },
       "representative_metadata": {
         "built": "2000-01-01",
         "categoryDescription": null,
@@ -17889,8 +20068,7 @@
         "reguntil": "2029-04-30",
         "status": null,
         "typecode": "CRJ2"
-      },
-      "typecode": "CRJ2"
+      }
     },
     "CRJ7": {
       "error": "Typecode CRJ7 is not supported by this OpenAP installation.",
@@ -17971,6 +20149,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 20412
         },
+        "openap_performance_typecode": "CRJ9",
         "raw_openap": {
           "aircraft": {
             "aircraft": "BOMBARDIER CRJ9",
@@ -21196,6 +23375,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 12110
         },
+        "openap_performance_typecode": "E145",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Embraer ERJ145 (LR)",
@@ -21370,6 +23550,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 21140
         },
+        "openap_performance_typecode": "E170",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Embraer E170",
@@ -21549,6 +23730,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 27753
         },
+        "openap_performance_typecode": "E190",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Embraer E190 (LR)",
@@ -21727,6 +23909,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 28583
         },
+        "openap_performance_typecode": "E195",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Embraer E195 (LR)",
@@ -21947,8 +24130,164 @@
       "typecode": "E275"
     },
     "E290": {
-      "error": "Typecode E290 is not supported by this OpenAP installation.",
-      "openap_supported": false,
+      "openap_supported": true,
+      "parameters": {
+        "aircraft_name": "Embraer E190 (LR)",
+        "category": "unknown",
+        "cruise": {
+          "height_m": 11000,
+          "mach": 0.78
+        },
+        "drag": {
+          "cd0": 0.018,
+          "e": 0.817,
+          "k": 0.044,
+          "landing_gear_drag_increment": 0.016
+        },
+        "engine": {
+          "cruise_sfc": null,
+          "cruise_thrust_n_each": null,
+          "default": "CF34-10E5",
+          "lookup_error": null,
+          "max_thrust_n_each": 77400.0,
+          "mount": "wing",
+          "number": 2,
+          "type": "turbofan"
+        },
+        "flaps": {
+          "Sf/S": 0.15,
+          "area": null,
+          "bf/b": null,
+          "cf/c": 0.15,
+          "lambda_f": 0.9,
+          "type": "double-slotted"
+        },
+        "geometry": {
+          "fuselage_height_m": 3.35,
+          "fuselage_length_m": 36.24,
+          "fuselage_width_m": 3.01,
+          "wing_area_m2": 92.5,
+          "wing_mac_m": 3.68,
+          "wing_span_m": 28.72,
+          "wing_sweep_deg": 23,
+          "wing_thickness_to_chord": null
+        },
+        "limits": {
+          "ceiling_m": 12500,
+          "mmo": 0.82,
+          "vmo_kts": 320
+        },
+        "mass": {
+          "maximum_fuel_capacity_kg": 16153,
+          "mlw_kg": 43000,
+          "mtow_kg": 50300,
+          "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
+          "oew_kg": 27753
+        },
+        "openap_performance_typecode": "E190",
+        "raw_openap": {
+          "aircraft": {
+            "aircraft": "Embraer E190 (LR)",
+            "ceiling": 12500,
+            "cruise": {
+              "height": 11000,
+              "mach": 0.78,
+              "range": 4400
+            },
+            "drag": {
+              "cd0": 0.018,
+              "e": 0.817,
+              "gears": 0.016,
+              "k": 0.044
+            },
+            "engine": {
+              "default": "CF34-10E5",
+              "mount": "wing",
+              "number": 2,
+              "options": [
+                "CF34-10E5"
+              ],
+              "type": "turbofan"
+            },
+            "flaps": {
+              "Sf/S": 0.15,
+              "area": null,
+              "bf/b": null,
+              "cf/c": 0.15,
+              "lambda_f": 0.9,
+              "type": "double-slotted"
+            },
+            "fuel": {
+              "engine": "CF34-10E5",
+              "fuel_coef": 1.78414985
+            },
+            "fuselage": {
+              "height": 3.35,
+              "length": 36.24,
+              "width": 3.01
+            },
+            "limits": {
+              "MFC": 16153,
+              "MLW": 43000,
+              "MMO": 0.82,
+              "MTOW": 50300,
+              "OEW": 27753,
+              "VMO": 320,
+              "ceiling": 12500
+            },
+            "mfc": 16153,
+            "mlw": 43000,
+            "mmo": 0.82,
+            "mtow": 50300,
+            "oew": 27753,
+            "pax": {
+              "high": 100,
+              "low": 88,
+              "max": 114
+            },
+            "vmo": 320,
+            "wing": {
+              "area": 92.5,
+              "mac": 3.68,
+              "span": 28.72,
+              "sweep": 23,
+              "t/c": null
+            }
+          },
+          "default_engine": {
+            "bpr": 5.09,
+            "cruise_alt": null,
+            "cruise_mach": null,
+            "cruise_sfc": null,
+            "cruise_thrust": null,
+            "ei_co_app": 4.18,
+            "ei_co_co": 0.38,
+            "ei_co_idl": 49.4,
+            "ei_co_to": 0.43,
+            "ei_hc_app": 0.09,
+            "ei_hc_co": 0.06,
+            "ei_hc_idl": 5.15,
+            "ei_hc_to": 0.04,
+            "ei_nox_app": 7.76,
+            "ei_nox_co": 15.62,
+            "ei_nox_idl": 3.59,
+            "ei_nox_to": 18.51,
+            "ff_app": 0.227,
+            "ff_co": 0.659,
+            "ff_idl": 0.085,
+            "ff_to": 0.792,
+            "fuel_ch": 6.7e-07,
+            "fuel_lto": 307.0,
+            "manufacturer": "GE Aircraft Engines",
+            "max_thrust": 77400.0,
+            "name": "CF34-10E5",
+            "pr": 25.6,
+            "type": "TF",
+            "uid": "8GE115"
+          }
+        },
+        "typecode": "E290"
+      },
       "representative_metadata": {
         "built": null,
         "categoryDescription": null,
@@ -21967,8 +24306,7 @@
         "reguntil": null,
         "status": null,
         "typecode": "E290"
-      },
-      "typecode": "E290"
+      }
     },
     "E295": {
       "error": "Typecode E295 is not supported by this OpenAP installation.",
@@ -22457,6 +24795,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 21890
         },
+        "openap_performance_typecode": "E75L",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Embraer E175 (LR)",
@@ -27262,8 +29601,161 @@
       "typecode": "GEMI"
     },
     "GL5T": {
-      "error": "Typecode GL5T is not supported by this OpenAP installation.",
-      "openap_supported": false,
+      "openap_supported": true,
+      "parameters": {
+        "aircraft_name": "Gulfstream G650 / 650ER",
+        "category": "unknown",
+        "cruise": {
+          "height_m": 12000,
+          "mach": 0.85
+        },
+        "drag": {
+          "cd0": 0.012,
+          "e": 0.881,
+          "k": 0.047,
+          "landing_gear_drag_increment": 0.012
+        },
+        "engine": {
+          "cruise_sfc": null,
+          "cruise_thrust_n_each": null,
+          "default": "BR700-725A1-12",
+          "lookup_error": null,
+          "max_thrust_n_each": 75700.0,
+          "mount": "rear",
+          "number": 2,
+          "type": "turbofan"
+        },
+        "flaps": {
+          "Sf/S": 0.15,
+          "area": null,
+          "bf/b": null,
+          "cf/c": 0.15,
+          "lambda_f": 0.9,
+          "type": "single-slotted"
+        },
+        "geometry": {
+          "fuselage_height_m": 7.82,
+          "fuselage_length_m": 30.41,
+          "fuselage_width_m": 2.49,
+          "wing_area_m2": 119.2,
+          "wing_mac_m": 4.76,
+          "wing_span_m": 30.36,
+          "wing_sweep_deg": 36,
+          "wing_thickness_to_chord": 0.1
+        },
+        "limits": {
+          "ceiling_m": 16000,
+          "mmo": 0.925,
+          "vmo_kts": null
+        },
+        "mass": {
+          "maximum_fuel_capacity_kg": 21000,
+          "mlw_kg": 37900,
+          "mtow_kg": 45200,
+          "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
+          "oew_kg": 24000
+        },
+        "openap_performance_typecode": "GLF6",
+        "raw_openap": {
+          "aircraft": {
+            "aircraft": "Gulfstream G650 / 650ER",
+            "ceiling": 16000,
+            "cruise": {
+              "height": 12000,
+              "mach": 0.85,
+              "range": 13000
+            },
+            "drag": {
+              "cd0": 0.012,
+              "e": 0.881,
+              "gears": 0.012,
+              "k": 0.047
+            },
+            "engine": {
+              "default": "BR700-725A1-12",
+              "mount": "rear",
+              "number": 2,
+              "options": [
+                "BR700-725A1-12"
+              ],
+              "type": "turbofan"
+            },
+            "flaps": {
+              "Sf/S": 0.15,
+              "area": null,
+              "bf/b": null,
+              "cf/c": 0.15,
+              "lambda_f": 0.9,
+              "type": "single-slotted"
+            },
+            "fuselage": {
+              "height": 7.82,
+              "length": 30.41,
+              "width": 2.49
+            },
+            "limits": {
+              "MFC": 21000,
+              "MLW": 37900,
+              "MMO": 0.925,
+              "MTOW": 45200,
+              "OEW": 24000,
+              "VMO": null,
+              "ceiling": 16000
+            },
+            "mfc": 21000,
+            "mlw": 37900,
+            "mmo": 0.925,
+            "mtow": 45200,
+            "oew": 24000,
+            "pax": {
+              "high": 18,
+              "low": 8,
+              "max": 18
+            },
+            "range": 13000,
+            "vmo": null,
+            "wing": {
+              "area": 119.2,
+              "mac": 4.76,
+              "span": 30.36,
+              "sweep": 36,
+              "t/c": 0.1
+            }
+          },
+          "default_engine": {
+            "bpr": 4.35,
+            "cruise_alt": null,
+            "cruise_mach": null,
+            "cruise_sfc": null,
+            "cruise_thrust": null,
+            "ei_co_app": 5.93,
+            "ei_co_co": 0.32,
+            "ei_co_idl": 41.9,
+            "ei_co_to": 0.4,
+            "ei_hc_app": 0.0,
+            "ei_hc_co": 0.0,
+            "ei_hc_idl": 3.0,
+            "ei_hc_to": 0.0,
+            "ei_nox_app": 7.81,
+            "ei_nox_co": 13.32,
+            "ei_nox_idl": 3.38,
+            "ei_nox_to": 16.92,
+            "ff_app": 0.221,
+            "ff_co": 0.65,
+            "ff_idl": 0.085,
+            "ff_to": 0.789,
+            "fuel_ch": 6.7e-07,
+            "fuel_lto": 304.578,
+            "manufacturer": "Rolls-Royce Deutschland",
+            "max_thrust": 75700.0,
+            "name": "BR700-725A1-12",
+            "pr": 26.16,
+            "type": "MTF",
+            "uid": "11BR011"
+          }
+        },
+        "typecode": "GL5T"
+      },
       "representative_metadata": {
         "built": null,
         "categoryDescription": null,
@@ -27282,8 +29774,7 @@
         "reguntil": null,
         "status": null,
         "typecode": "GL5T"
-      },
-      "typecode": "GL5T"
+      }
     },
     "GL6T": {
       "error": "Typecode GL6T is not supported by this OpenAP installation.",
@@ -27454,8 +29945,161 @@
       "typecode": "GLF4"
     },
     "GLF5": {
-      "error": "Typecode GLF5 is not supported by this OpenAP installation.",
-      "openap_supported": false,
+      "openap_supported": true,
+      "parameters": {
+        "aircraft_name": "Gulfstream G650 / 650ER",
+        "category": "business_or_general_aviation",
+        "cruise": {
+          "height_m": 12000,
+          "mach": 0.85
+        },
+        "drag": {
+          "cd0": 0.012,
+          "e": 0.881,
+          "k": 0.047,
+          "landing_gear_drag_increment": 0.012
+        },
+        "engine": {
+          "cruise_sfc": null,
+          "cruise_thrust_n_each": null,
+          "default": "BR700-725A1-12",
+          "lookup_error": null,
+          "max_thrust_n_each": 75700.0,
+          "mount": "rear",
+          "number": 2,
+          "type": "turbofan"
+        },
+        "flaps": {
+          "Sf/S": 0.15,
+          "area": null,
+          "bf/b": null,
+          "cf/c": 0.15,
+          "lambda_f": 0.9,
+          "type": "single-slotted"
+        },
+        "geometry": {
+          "fuselage_height_m": 7.82,
+          "fuselage_length_m": 30.41,
+          "fuselage_width_m": 2.49,
+          "wing_area_m2": 119.2,
+          "wing_mac_m": 4.76,
+          "wing_span_m": 30.36,
+          "wing_sweep_deg": 36,
+          "wing_thickness_to_chord": 0.1
+        },
+        "limits": {
+          "ceiling_m": 16000,
+          "mmo": 0.925,
+          "vmo_kts": null
+        },
+        "mass": {
+          "maximum_fuel_capacity_kg": 21000,
+          "mlw_kg": 37900,
+          "mtow_kg": 45200,
+          "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
+          "oew_kg": 24000
+        },
+        "openap_performance_typecode": "GLF6",
+        "raw_openap": {
+          "aircraft": {
+            "aircraft": "Gulfstream G650 / 650ER",
+            "ceiling": 16000,
+            "cruise": {
+              "height": 12000,
+              "mach": 0.85,
+              "range": 13000
+            },
+            "drag": {
+              "cd0": 0.012,
+              "e": 0.881,
+              "gears": 0.012,
+              "k": 0.047
+            },
+            "engine": {
+              "default": "BR700-725A1-12",
+              "mount": "rear",
+              "number": 2,
+              "options": [
+                "BR700-725A1-12"
+              ],
+              "type": "turbofan"
+            },
+            "flaps": {
+              "Sf/S": 0.15,
+              "area": null,
+              "bf/b": null,
+              "cf/c": 0.15,
+              "lambda_f": 0.9,
+              "type": "single-slotted"
+            },
+            "fuselage": {
+              "height": 7.82,
+              "length": 30.41,
+              "width": 2.49
+            },
+            "limits": {
+              "MFC": 21000,
+              "MLW": 37900,
+              "MMO": 0.925,
+              "MTOW": 45200,
+              "OEW": 24000,
+              "VMO": null,
+              "ceiling": 16000
+            },
+            "mfc": 21000,
+            "mlw": 37900,
+            "mmo": 0.925,
+            "mtow": 45200,
+            "oew": 24000,
+            "pax": {
+              "high": 18,
+              "low": 8,
+              "max": 18
+            },
+            "range": 13000,
+            "vmo": null,
+            "wing": {
+              "area": 119.2,
+              "mac": 4.76,
+              "span": 30.36,
+              "sweep": 36,
+              "t/c": 0.1
+            }
+          },
+          "default_engine": {
+            "bpr": 4.35,
+            "cruise_alt": null,
+            "cruise_mach": null,
+            "cruise_sfc": null,
+            "cruise_thrust": null,
+            "ei_co_app": 5.93,
+            "ei_co_co": 0.32,
+            "ei_co_idl": 41.9,
+            "ei_co_to": 0.4,
+            "ei_hc_app": 0.0,
+            "ei_hc_co": 0.0,
+            "ei_hc_idl": 3.0,
+            "ei_hc_to": 0.0,
+            "ei_nox_app": 7.81,
+            "ei_nox_co": 13.32,
+            "ei_nox_idl": 3.38,
+            "ei_nox_to": 16.92,
+            "ff_app": 0.221,
+            "ff_co": 0.65,
+            "ff_idl": 0.085,
+            "ff_to": 0.789,
+            "fuel_ch": 6.7e-07,
+            "fuel_lto": 304.578,
+            "manufacturer": "Rolls-Royce Deutschland",
+            "max_thrust": 75700.0,
+            "name": "BR700-725A1-12",
+            "pr": 26.16,
+            "type": "MTF",
+            "uid": "11BR011"
+          }
+        },
+        "typecode": "GLF5"
+      },
       "representative_metadata": {
         "built": null,
         "categoryDescription": null,
@@ -27474,8 +30118,7 @@
         "reguntil": null,
         "status": null,
         "typecode": "GLF5"
-      },
-      "typecode": "GLF5"
+      }
     },
     "GLF6": {
       "openap_supported": true,
@@ -27532,6 +30175,7 @@
           "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
           "oew_kg": 24000
         },
+        "openap_performance_typecode": "GLF6",
         "raw_openap": {
           "aircraft": {
             "aircraft": "Gulfstream G650 / 650ER",
@@ -33005,8 +35649,161 @@
       "typecode": "LJ40"
     },
     "LJ45": {
-      "error": "Typecode LJ45 is not supported by this OpenAP installation.",
-      "openap_supported": false,
+      "openap_supported": true,
+      "parameters": {
+        "aircraft_name": "Gulfstream G650 / 650ER",
+        "category": "unknown",
+        "cruise": {
+          "height_m": 12000,
+          "mach": 0.85
+        },
+        "drag": {
+          "cd0": 0.012,
+          "e": 0.881,
+          "k": 0.047,
+          "landing_gear_drag_increment": 0.012
+        },
+        "engine": {
+          "cruise_sfc": null,
+          "cruise_thrust_n_each": null,
+          "default": "BR700-725A1-12",
+          "lookup_error": null,
+          "max_thrust_n_each": 75700.0,
+          "mount": "rear",
+          "number": 2,
+          "type": "turbofan"
+        },
+        "flaps": {
+          "Sf/S": 0.15,
+          "area": null,
+          "bf/b": null,
+          "cf/c": 0.15,
+          "lambda_f": 0.9,
+          "type": "single-slotted"
+        },
+        "geometry": {
+          "fuselage_height_m": 7.82,
+          "fuselage_length_m": 30.41,
+          "fuselage_width_m": 2.49,
+          "wing_area_m2": 119.2,
+          "wing_mac_m": 4.76,
+          "wing_span_m": 30.36,
+          "wing_sweep_deg": 36,
+          "wing_thickness_to_chord": 0.1
+        },
+        "limits": {
+          "ceiling_m": 16000,
+          "mmo": 0.925,
+          "vmo_kts": null
+        },
+        "mass": {
+          "maximum_fuel_capacity_kg": 21000,
+          "mlw_kg": 37900,
+          "mtow_kg": 45200,
+          "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
+          "oew_kg": 24000
+        },
+        "openap_performance_typecode": "GLF6",
+        "raw_openap": {
+          "aircraft": {
+            "aircraft": "Gulfstream G650 / 650ER",
+            "ceiling": 16000,
+            "cruise": {
+              "height": 12000,
+              "mach": 0.85,
+              "range": 13000
+            },
+            "drag": {
+              "cd0": 0.012,
+              "e": 0.881,
+              "gears": 0.012,
+              "k": 0.047
+            },
+            "engine": {
+              "default": "BR700-725A1-12",
+              "mount": "rear",
+              "number": 2,
+              "options": [
+                "BR700-725A1-12"
+              ],
+              "type": "turbofan"
+            },
+            "flaps": {
+              "Sf/S": 0.15,
+              "area": null,
+              "bf/b": null,
+              "cf/c": 0.15,
+              "lambda_f": 0.9,
+              "type": "single-slotted"
+            },
+            "fuselage": {
+              "height": 7.82,
+              "length": 30.41,
+              "width": 2.49
+            },
+            "limits": {
+              "MFC": 21000,
+              "MLW": 37900,
+              "MMO": 0.925,
+              "MTOW": 45200,
+              "OEW": 24000,
+              "VMO": null,
+              "ceiling": 16000
+            },
+            "mfc": 21000,
+            "mlw": 37900,
+            "mmo": 0.925,
+            "mtow": 45200,
+            "oew": 24000,
+            "pax": {
+              "high": 18,
+              "low": 8,
+              "max": 18
+            },
+            "range": 13000,
+            "vmo": null,
+            "wing": {
+              "area": 119.2,
+              "mac": 4.76,
+              "span": 30.36,
+              "sweep": 36,
+              "t/c": 0.1
+            }
+          },
+          "default_engine": {
+            "bpr": 4.35,
+            "cruise_alt": null,
+            "cruise_mach": null,
+            "cruise_sfc": null,
+            "cruise_thrust": null,
+            "ei_co_app": 5.93,
+            "ei_co_co": 0.32,
+            "ei_co_idl": 41.9,
+            "ei_co_to": 0.4,
+            "ei_hc_app": 0.0,
+            "ei_hc_co": 0.0,
+            "ei_hc_idl": 3.0,
+            "ei_hc_to": 0.0,
+            "ei_nox_app": 7.81,
+            "ei_nox_co": 13.32,
+            "ei_nox_idl": 3.38,
+            "ei_nox_to": 16.92,
+            "ff_app": 0.221,
+            "ff_co": 0.65,
+            "ff_idl": 0.085,
+            "ff_to": 0.789,
+            "fuel_ch": 6.7e-07,
+            "fuel_lto": 304.578,
+            "manufacturer": "Rolls-Royce Deutschland",
+            "max_thrust": 75700.0,
+            "name": "BR700-725A1-12",
+            "pr": 26.16,
+            "type": "MTF",
+            "uid": "11BR011"
+          }
+        },
+        "typecode": "LJ45"
+      },
       "representative_metadata": {
         "built": "2008-01-01",
         "categoryDescription": null,
@@ -33025,8 +35822,7 @@
         "reguntil": "2029-12-31",
         "status": null,
         "typecode": "LJ45"
-      },
-      "typecode": "LJ45"
+      }
     },
     "LJ55": {
       "error": "Typecode LJ55 is not supported by this OpenAP installation.",
@@ -34661,8 +37457,162 @@
       "typecode": "MCRR"
     },
     "MD11": {
-      "error": "Typecode MD11 is not supported by this OpenAP installation.",
-      "openap_supported": false,
+      "openap_supported": true,
+      "parameters": {
+        "aircraft_name": "Boeing 777-300",
+        "category": "unknown",
+        "cruise": {
+          "height_m": 11000,
+          "mach": 0.84
+        },
+        "drag": {
+          "cd0": 0.024,
+          "e": 0.783,
+          "k": 0.047,
+          "landing_gear_drag_increment": 0.014
+        },
+        "engine": {
+          "cruise_sfc": null,
+          "cruise_thrust_n_each": null,
+          "default": "Trent 892",
+          "lookup_error": null,
+          "max_thrust_n_each": 411480.0,
+          "mount": "wing",
+          "number": 2,
+          "type": "turbofan"
+        },
+        "flaps": {
+          "Sf/S": 0.157,
+          "area": 67.13,
+          "bf/b": 0.758,
+          "cf/c": 0.166,
+          "lambda_f": 0.9,
+          "type": "double-slotted"
+        },
+        "geometry": {
+          "fuselage_height_m": 6.2,
+          "fuselage_length_m": 73.86,
+          "fuselage_width_m": 6.2,
+          "wing_area_m2": 427.8,
+          "wing_mac_m": 8.75,
+          "wing_span_m": 60.93,
+          "wing_sweep_deg": 31.6,
+          "wing_thickness_to_chord": null
+        },
+        "limits": {
+          "ceiling_m": 13100,
+          "mmo": 0.89,
+          "vmo_kts": 330
+        },
+        "mass": {
+          "maximum_fuel_capacity_kg": 171200,
+          "mlw_kg": 237600,
+          "mtow_kg": 299300,
+          "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
+          "oew_kg": 160500
+        },
+        "openap_performance_typecode": "B773",
+        "raw_openap": {
+          "aircraft": {
+            "aircraft": "Boeing 777-300",
+            "ceiling": 13100,
+            "cruise": {
+              "height": 11000,
+              "mach": 0.84,
+              "range": 11000
+            },
+            "drag": {
+              "cd0": 0.024,
+              "e": 0.783,
+              "gears": 0.014,
+              "k": 0.047
+            },
+            "engine": {
+              "default": "Trent 892",
+              "mount": "wing",
+              "number": 2,
+              "options": [
+                "GE90-110B1",
+                "PW4090",
+                "Trent 892"
+              ],
+              "type": "turbofan"
+            },
+            "flaps": {
+              "Sf/S": 0.157,
+              "area": 67.13,
+              "bf/b": 0.758,
+              "cf/c": 0.166,
+              "lambda_f": 0.9,
+              "type": "double-slotted"
+            },
+            "fuselage": {
+              "height": 6.2,
+              "length": 73.86,
+              "width": 6.2
+            },
+            "limits": {
+              "MFC": 171200,
+              "MLW": 237600,
+              "MMO": 0.89,
+              "MTOW": 299300,
+              "OEW": 160500,
+              "VMO": 330,
+              "ceiling": 13100
+            },
+            "mfc": 171200,
+            "mlw": 237600,
+            "mmo": 0.89,
+            "mtow": 299300,
+            "oew": 160500,
+            "pax": {
+              "high": 400,
+              "low": 360,
+              "max": 550
+            },
+            "vmo": 330,
+            "wing": {
+              "area": 427.8,
+              "mac": 8.75,
+              "span": 60.93,
+              "sweep": 31.6,
+              "t/c": null
+            }
+          },
+          "default_engine": {
+            "bpr": 5.7,
+            "cruise_alt": null,
+            "cruise_mach": null,
+            "cruise_sfc": null,
+            "cruise_thrust": null,
+            "ei_co_app": 0.57,
+            "ei_co_co": 0.2,
+            "ei_co_idl": 13.07,
+            "ei_co_to": 0.28,
+            "ei_hc_app": 0.0,
+            "ei_hc_co": 0.0,
+            "ei_hc_idl": 0.7,
+            "ei_hc_to": 0.01,
+            "ei_nox_app": 11.58,
+            "ei_nox_co": 33.3,
+            "ei_nox_idl": 5.33,
+            "ei_nox_to": 45.7,
+            "ff_app": 1.0,
+            "ff_co": 3.1,
+            "ff_idl": 0.3,
+            "ff_to": 3.91,
+            "fuel_ch": 6.7e-07,
+            "fuel_lto": 1281.0,
+            "manufacturer": "Rolls-Royce plc",
+            "max_thrust": 411480.0,
+            "name": "Trent 892",
+            "pr": 41.38,
+            "type": "TF",
+            "uid": "2RR027"
+          }
+        },
+        "typecode": "MD11"
+      },
       "representative_metadata": {
         "built": "1997-01-01",
         "categoryDescription": null,
@@ -34681,8 +37631,7 @@
         "reguntil": "2027-07-31",
         "status": null,
         "typecode": "MD11"
-      },
-      "typecode": "MD11"
+      }
     },
     "MD3": {
       "error": "Typecode MD3 is not supported by this OpenAP installation.",
@@ -39005,8 +41954,160 @@
       "typecode": "PC21"
     },
     "PC24": {
-      "error": "Typecode PC24 is not supported by this OpenAP installation.",
-      "openap_supported": false,
+      "openap_supported": true,
+      "parameters": {
+        "aircraft_name": "Cessna Citation II",
+        "category": "unknown",
+        "cruise": {
+          "height_m": 11000,
+          "mach": 0.67
+        },
+        "drag": {
+          "cd0": 0.028,
+          "e": 0.818,
+          "k": 0.049,
+          "landing_gear_drag_increment": 0.02
+        },
+        "engine": {
+          "cruise_sfc": null,
+          "cruise_thrust_n_each": null,
+          "default": "JT15D-4",
+          "lookup_error": null,
+          "max_thrust_n_each": 11120.0,
+          "mount": "rear",
+          "number": 2,
+          "type": "turbofan"
+        },
+        "flaps": {
+          "Sf/S": 0.15,
+          "area": null,
+          "bf/b": null,
+          "cf/c": 0.15,
+          "lambda_f": 1.7,
+          "type": "single-slotted"
+        },
+        "geometry": {
+          "fuselage_height_m": 1.46,
+          "fuselage_length_m": 14.39,
+          "fuselage_width_m": 1.46,
+          "wing_area_m2": 31.83,
+          "wing_mac_m": 2.05,
+          "wing_span_m": 15.9,
+          "wing_sweep_deg": 0,
+          "wing_thickness_to_chord": 0.13
+        },
+        "limits": {
+          "ceiling_m": 13100,
+          "mmo": 0.7,
+          "vmo_kts": 270
+        },
+        "mass": {
+          "maximum_fuel_capacity_kg": 2204,
+          "mlw_kg": 6804,
+          "mtow_kg": 6849,
+          "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
+          "oew_kg": 3655
+        },
+        "openap_performance_typecode": "C550",
+        "raw_openap": {
+          "aircraft": {
+            "aircraft": "Cessna Citation II",
+            "ceiling": 13100,
+            "cruise": {
+              "height": 11000,
+              "mach": 0.67,
+              "range": 3500
+            },
+            "drag": {
+              "cd0": 0.028,
+              "e": 0.818,
+              "gears": 0.02,
+              "k": 0.049
+            },
+            "engine": {
+              "default": "JT15D-4",
+              "mount": "rear",
+              "number": 2,
+              "options": [
+                "JT15D-4"
+              ],
+              "type": "turbofan"
+            },
+            "flaps": {
+              "Sf/S": 0.15,
+              "area": null,
+              "bf/b": null,
+              "cf/c": 0.15,
+              "lambda_f": 1.7,
+              "type": "single-slotted"
+            },
+            "fuselage": {
+              "height": 1.46,
+              "length": 14.39,
+              "width": 1.46
+            },
+            "limits": {
+              "MFC": 2204,
+              "MLW": 6804,
+              "MMO": 0.7,
+              "MTOW": 6849,
+              "OEW": 3655,
+              "VMO": 270,
+              "ceiling": 13100
+            },
+            "mfc": 2204,
+            "mlw": 6804,
+            "mmo": 0.7,
+            "mtow": 6849,
+            "oew": 3655,
+            "pax": {
+              "high": 10,
+              "low": 5,
+              "max": 10
+            },
+            "vmo": 270,
+            "wing": {
+              "area": 31.83,
+              "mac": 2.05,
+              "span": 15.9,
+              "sweep": 0,
+              "t/c": 0.13
+            }
+          },
+          "default_engine": {
+            "bpr": 2.68,
+            "cruise_alt": null,
+            "cruise_mach": null,
+            "cruise_sfc": null,
+            "cruise_thrust": null,
+            "ei_co_app": 32.0,
+            "ei_co_co": 3.18,
+            "ei_co_idl": 97.0,
+            "ei_co_to": 2.1,
+            "ei_hc_app": 5.15,
+            "ei_hc_co": 0.19,
+            "ei_hc_idl": 40.0,
+            "ei_hc_to": 0.09,
+            "ei_nox_app": 5.29,
+            "ei_nox_co": 8.56,
+            "ei_nox_idl": 2.63,
+            "ei_nox_to": 9.23,
+            "ff_app": 0.059,
+            "ff_co": 0.143,
+            "ff_idl": 0.0261,
+            "ff_to": 0.1697,
+            "fuel_ch": 6.7e-07,
+            "fuel_lto": 81.0,
+            "manufacturer": "Pratt & Whitney Canada",
+            "max_thrust": 11120.0,
+            "name": "JT15D-4",
+            "pr": 10.1,
+            "type": "TF",
+            "uid": "1PW036"
+          }
+        },
+        "typecode": "PC24"
+      },
       "representative_metadata": {
         "built": null,
         "categoryDescription": null,
@@ -39025,8 +42126,7 @@
         "reguntil": null,
         "status": null,
         "typecode": "PC24"
-      },
-      "typecode": "PC24"
+      }
     },
     "PC6P": {
       "error": "Typecode PC6P is not supported by this OpenAP installation.",
@@ -46373,8 +49473,165 @@
       "typecode": "SU57"
     },
     "SU95": {
-      "error": "Typecode SU95 is not supported by this OpenAP installation.",
-      "openap_supported": false,
+      "openap_supported": true,
+      "parameters": {
+        "aircraft_name": "Embraer E170",
+        "category": "unknown",
+        "cruise": {
+          "height_m": 11000,
+          "mach": 0.75
+        },
+        "drag": {
+          "cd0": 0.018,
+          "e": 0.809,
+          "k": 0.042,
+          "landing_gear_drag_increment": 0.017
+        },
+        "engine": {
+          "cruise_sfc": null,
+          "cruise_thrust_n_each": null,
+          "default": "CF34-8E5",
+          "lookup_error": null,
+          "max_thrust_n_each": 59680.0,
+          "mount": "wing",
+          "number": 2,
+          "type": "turbofan"
+        },
+        "flaps": {
+          "Sf/S": 0.15,
+          "area": null,
+          "bf/b": null,
+          "cf/c": 0.15,
+          "lambda_f": 0.9,
+          "type": "double-slotted"
+        },
+        "geometry": {
+          "fuselage_height_m": 3.35,
+          "fuselage_length_m": 29.9,
+          "fuselage_width_m": 3.01,
+          "wing_area_m2": 72.72,
+          "wing_mac_m": 3.19,
+          "wing_span_m": 26.0,
+          "wing_sweep_deg": 23,
+          "wing_thickness_to_chord": null
+        },
+        "limits": {
+          "ceiling_m": 12500,
+          "mmo": 0.82,
+          "vmo_kts": 320
+        },
+        "mass": {
+          "maximum_fuel_capacity_kg": 9335,
+          "mlw_kg": 32800,
+          "mtow_kg": 34200,
+          "note": "OpenAP provides type-level mass limits, not actual per-flight mass.",
+          "oew_kg": 21140
+        },
+        "openap_performance_typecode": "E170",
+        "raw_openap": {
+          "aircraft": {
+            "aircraft": "Embraer E170",
+            "ceiling": 12500,
+            "cruise": {
+              "height": 11000,
+              "mach": 0.75,
+              "range": 3900
+            },
+            "drag": {
+              "cd0": 0.018,
+              "e": 0.809,
+              "gears": 0.017,
+              "k": 0.042
+            },
+            "engine": {
+              "default": "CF34-8E5",
+              "mount": "wing",
+              "number": 2,
+              "options": [
+                "CF34-8E5",
+                "CF34-8E6"
+              ],
+              "type": "turbofan"
+            },
+            "flaps": {
+              "Sf/S": 0.15,
+              "area": null,
+              "bf/b": null,
+              "cf/c": 0.15,
+              "lambda_f": 0.9,
+              "type": "double-slotted"
+            },
+            "fuel": {
+              "engine": "CF34-8E5",
+              "fuel_coef": 1.61927756
+            },
+            "fuselage": {
+              "height": 3.35,
+              "length": 29.9,
+              "width": 3.01
+            },
+            "limits": {
+              "MFC": 9335,
+              "MLW": 32800,
+              "MMO": 0.82,
+              "MTOW": 34200,
+              "OEW": 21140,
+              "VMO": 320,
+              "ceiling": 12500
+            },
+            "mfc": 9335,
+            "mlw": 32800,
+            "mmo": 0.82,
+            "mtow": 34200,
+            "oew": 21140,
+            "pax": {
+              "high": 72,
+              "low": 60,
+              "max": 78
+            },
+            "vmo": 320,
+            "wing": {
+              "area": 72.72,
+              "mac": 3.19,
+              "span": 26.0,
+              "sweep": 23,
+              "t/c": null
+            }
+          },
+          "default_engine": {
+            "bpr": 5.13,
+            "cruise_alt": null,
+            "cruise_mach": null,
+            "cruise_sfc": null,
+            "cruise_thrust": null,
+            "ei_co_app": 4.23,
+            "ei_co_co": 0.57,
+            "ei_co_idl": 18.16,
+            "ei_co_to": 0.64,
+            "ei_hc_app": 0.06,
+            "ei_hc_co": 0.02,
+            "ei_hc_idl": 0.13,
+            "ei_hc_to": 0.02,
+            "ei_nox_app": 10.77,
+            "ei_nox_co": 12.65,
+            "ei_nox_idl": 4.61,
+            "ei_nox_to": 14.77,
+            "ff_app": 0.18,
+            "ff_co": 0.533,
+            "ff_idl": 0.064,
+            "ff_to": 0.652,
+            "fuel_ch": 6.7e-07,
+            "fuel_lto": 241.0,
+            "manufacturer": "GE Aircraft Engines",
+            "max_thrust": 59680.0,
+            "name": "CF34-8E5",
+            "pr": 23.18,
+            "type": "TF",
+            "uid": "8GE108"
+          }
+        },
+        "typecode": "SU95"
+      },
       "representative_metadata": {
         "built": null,
         "categoryDescription": null,
@@ -46393,8 +49650,7 @@
         "reguntil": null,
         "status": null,
         "typecode": "SU95"
-      },
-      "typecode": "SU95"
+      }
     },
     "SUBA": {
       "error": "Typecode SUBA is not supported by this OpenAP installation.",

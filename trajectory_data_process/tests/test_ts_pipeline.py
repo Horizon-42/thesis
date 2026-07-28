@@ -59,14 +59,18 @@ def test_final_training_prints_the_resolved_config_before_the_command(
 
     assert "config    : TSConfig defaults" in output
     assert (
-        "trajectory: dt=2s, L=60, mode=normalized, output=32, N=32, "
+        "trajectory: dt=2s, L=60, prediction_output=state, mode=normalized, "
+        "output=32, N=32, "
         "H_full=300, H_window=30, "
         "frame=enu, anchor=fixed L-1"
     ) in output
     assert "network   : d_model=256, d_ff=512, heads=8, layers=3" in output
     assert "optimizer : lr=0.0005" in output
     assert "loss      : final_time=1, kinematic=3, terminal=0.02" in output
-    assert "runtime   : batch=2048, device=auto, seed=29, aircraft=A320" in output
+    assert (
+        "runtime   : batch=2048, device=auto, seed=29, aircraft=A320, "
+        "aircraft_filter=all"
+    ) in output
     assert output.index("config    :") < output.index("[1/1 final train")
 
 
@@ -443,18 +447,20 @@ def test_skip_train_rejects_checkpoint_from_opposite_anchor_policy(
     trained.checkpoint_metadata.write_text(json.dumps({
         "schema_version": pipeline.CHECKPOINT_METADATA_SCHEMA,
         "checkpoint_sha256": hashlib.sha256(trained.checkpoint.read_bytes()).hexdigest(),
-            "arrival_manifests": {
-                "KRDU": hashlib.sha256(manifest.read_bytes()).hexdigest(),
-            },
-            "random_train_anchor": trained_policy,
-            "horizon_mode": trained.horizon_mode,
-            "pred_len": trained_config.pred_len,
-            "lr_scheduler": {
-                "name": "ReduceLROnPlateau",
-                "factor": trained_config.lr_plateau_factor,
-                "patience": trained_config.lr_plateau_patience,
-            },
-        }), encoding="utf-8")
+        "arrival_manifests": {
+            "KRDU": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+        },
+        "random_train_anchor": trained_policy,
+        "horizon_mode": trained.horizon_mode,
+        "prediction_output": trained_config.prediction_output,
+        "aircraft_filter": trained_config.aircraft_filter,
+        "pred_len": trained_config.pred_len,
+        "lr_scheduler": {
+            "name": "ReduceLROnPlateau",
+            "factor": trained_config.lr_plateau_factor,
+            "patience": trained_config.lr_plateau_patience,
+        },
+    }), encoding="utf-8")
 
     assert trained.checkpoint_reuse_error() is None
     assert "random_train_anchor" in (requested.checkpoint_reuse_error() or "")
@@ -486,6 +492,8 @@ def test_skip_train_rejects_checkpoint_from_opposite_horizon_mode(
         },
         "random_train_anchor": False,
         "horizon_mode": trained_config.horizon_mode,
+        "prediction_output": trained_config.prediction_output,
+        "aircraft_filter": trained_config.aircraft_filter,
         "pred_len": trained_config.pred_len,
         "lr_scheduler": {
             "name": "ReduceLROnPlateau",
@@ -525,6 +533,8 @@ def test_skip_train_rejects_window_checkpoint_with_different_rollout_cap(
         },
         "random_train_anchor": False,
         "horizon_mode": trained_config.horizon_mode,
+        "prediction_output": trained_config.prediction_output,
+        "aircraft_filter": trained_config.aircraft_filter,
         "pred_len": trained_config.pred_len,
         "full_horizon_steps": trained_config.full_horizon_steps,
         "lr_scheduler": {

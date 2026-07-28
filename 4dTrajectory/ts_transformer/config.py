@@ -23,6 +23,9 @@ from channels import CHANNELS
 
 MODELS = ("itransformer", "patchtst")
 COORDINATE_FRAMES = ("enu", "runway-aligned")
+AIRCRAFT_FILTER_ALL = "all"
+AIRCRAFT_FILTER_OPENAP_DIRECT = "openap-direct"
+AIRCRAFT_FILTERS = (AIRCRAFT_FILTER_ALL, AIRCRAFT_FILTER_OPENAP_DIRECT)
 PREDICTION_STATE = "state"
 PREDICTION_CONTROL = "control"
 PREDICTION_OUTPUTS = (PREDICTION_STATE, PREDICTION_CONTROL)
@@ -71,11 +74,12 @@ DEFAULT_N_SEGMENTS = DEFAULT_N_SEGMENTS_BY_MODEL[MODELS[0]]
 # loss; it is not a duration cap and does not change the value returned at inference.
 DEFAULT_FINAL_TIME_SCALE_S = 600.0
 
-# Fallback aircraft when a flight dict has no resolvable type. Every harvested arrival is
-# "UNK" today, so in practice this applies to ALL of them. Not cosmetic: it sets the target
-# state's Vref and threshold-crossing height — the ENU frame and the state the evaluation
-# gates judge — which is why the resolved value is a config field (serialised into every
-# checkpoint) and predict defaults to the checkpoint's value, not to this constant.
+# Fallback aircraft when a flight dict has no resolvable type or usable performance model.
+# Not cosmetic: it sets the target state's Vref and threshold-crossing height — the ENU
+# frame and the state the evaluation gates judge — which is why the resolved value is a
+# config field (serialised into every checkpoint) and predict defaults to the checkpoint's
+# value, not to this constant. Strict OpenAP-direct experiments reject those rows before
+# scenario construction and therefore never use this fallback.
 DEFAULT_AIRCRAFT_TYPE = "A320"
 
 
@@ -103,6 +107,10 @@ class TSConfig:
     # frame and the gate target). In the config so the checkpoint records it and predict
     # rebuilds series with the SAME frames the normalizer stats were fit under.
     aircraft_type: str = DEFAULT_AIRCRAFT_TYPE
+    # Data-selection contract. ``openap-direct`` means: resolve identity to an ICAO Doc
+    # 8643 designator, then retain it only when OpenAP has a native model under that exact
+    # designator. OpenAP synonyms, presets and the fallback above are excluded.
+    aircraft_filter: str = AIRCRAFT_FILTER_ALL
     # ``runway-aligned`` rotates the horizontal plane so every threshold course points
     # along the first axis. It keeps the six-channel tensor shape while removing a major
     # source of cross-airport orientation variance.
@@ -223,6 +231,11 @@ class TSConfig:
             raise ValueError(
                 f"unknown coordinate_frame {self.coordinate_frame!r}; "
                 f"expected one of {COORDINATE_FRAMES}"
+            )
+        if self.aircraft_filter not in AIRCRAFT_FILTERS:
+            raise ValueError(
+                f"unknown aircraft_filter {self.aircraft_filter!r}; "
+                f"expected one of {AIRCRAFT_FILTERS}"
             )
         for name in (
             "seq_len",

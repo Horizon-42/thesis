@@ -52,6 +52,8 @@ if str(_TS_DIR) not in sys.path:
     sys.path.insert(0, str(_TS_DIR))
 
 from config import (  # noqa: E402
+    AIRCRAFT_FILTER_OPENAP_DIRECT,
+    AIRCRAFT_FILTERS,
     COORDINATE_FRAMES,
     DEFAULT_AIRCRAFT_TYPE,
     HORIZON_MODES,
@@ -70,7 +72,9 @@ from cross_validation import (  # noqa: E402
 from dataset import (  # noqa: E402
     arrival_data_provenance,
     build_series,
+    data_selection_audit,
     dataset_flight_key,
+    flight_keys_by_split,
     load_flight_dicts,
     require_matching_data_provenance,
 )
@@ -83,6 +87,7 @@ from evaluation_protocol import (  # noqa: E402
     complete_test_evaluation,
     create_test_release,
 )
+from experiment_index import begin_run, finish_run  # noqa: E402
 from flyability import report_for_records  # noqa: E402
 from forecast import forecast_approach  # noqa: E402
 from models import resolve_device  # noqa: E402
@@ -101,9 +106,17 @@ def _add_data_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--aircraft-type", default=None,
                         help="fallback aircraft when the flight dict has no resolvable type "
                              f"(train default: {DEFAULT_AIRCRAFT_TYPE}; predict default: the "
-                             "checkpoint's train-time value). Every harvested arrival is "
-                             "currently 'UNK', so this applies to ALL of them and sets the "
+                             "checkpoint's train-time value). This sets the "
                              "target Vref / threshold-crossing height the gates measure against")
+    parser.add_argument(
+        "--aircraft-filter",
+        choices=AIRCRAFT_FILTERS,
+        default=None,
+        help=(
+            "fleet selection stored in the checkpoint; 'openap-direct' keeps only ICAO "
+            "Doc 8643 types with a native same-type OpenAP model (no synonym or fallback)"
+        ),
+    )
     parser.add_argument("--output-dir", required=True)
 
 
@@ -205,6 +218,16 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
                         help="per-window de/normalisation; OFF by default because absolute "
                              "threshold-relative position is signal")
     parser.add_argument("--no-instance-norm", dest="instance_norm", action="store_false")
+    parser.add_argument(
+        "--campaign-id",
+        default=None,
+        help="formal experiment campaign identity; requires --experiment-id",
+    )
+    parser.add_argument(
+        "--experiment-id",
+        default=None,
+        help="immutable formal run identity; refuses an occupied output directory",
+    )
 
 
 def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> tuple[TSConfig, bool]:
@@ -243,6 +266,7 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("d_model", args.d_model), ("e_layers", args.e_layers), ("n_heads", args.n_heads),
         ("seed", args.seed), ("split_seed", args.split_seed), ("device", args.device),
         ("aircraft_type", args.aircraft_type), ("coordinate_frame", args.coordinate_frame),
+        ("aircraft_filter", args.aircraft_filter),
         ("random_train_anchor", args.random_train_anchor),
         ("use_norm", args.instance_norm), ("revin", args.instance_norm),
     )
@@ -257,11 +281,14 @@ def _build_series_or_exit(args: argparse.Namespace, config: TSConfig,
     aircraft_type = args.aircraft_type or config.aircraft_type
     series, report = build_series(flights, config, airport=args.airport,
                                   aircraft_type=aircraft_type)
-    print(f"  aircraft   {aircraft_type} (fallback for unresolvable types)")
+    if config.aircraft_filter == AIRCRAFT_FILTER_OPENAP_DIRECT:
+        print("  aircraft   ICAO Doc 8643 identity + native same-type OpenAP model only")
+    else:
+        print(f"  aircraft   {aircraft_type} (fallback for unresolvable types)")
     print(report.format())
     if not series:
         parser.error(f"no usable series built from {args.data} — see the skip reasons above")
-    return series
+    return series, report
 
 
 def split_keys_for_current_data(
@@ -458,28 +485,83 @@ def main(argv: list[str] | None = None) -> int:
         if len(args.data) > 1 and args.airport:
             parser.error("--airport cannot override flights when multiple --data manifests are used")
         config, batch_auto = _config_from_args(args, parser)
+        if bool(args.campaign_id) != bool(args.experiment_id):
+            parser.error("--campaign-id and --experiment-id must be supplied together")
         data_provenance = arrival_data_provenance(args.data)
-        series = _build_series_or_exit(args, config, parser, load_flight_dicts(args.data))
+        outer_split_keys = flight_keys_by_split(data_provenance, config)
+        development_keys = set(outer_split_keys["train"] + outer_split_keys["val"])
+        print(
+            f"loading {len(development_keys)} train/validation arrivals; "
+            "outer-test source tracks stay closed"
+        )
+        series, build_report = _build_series_or_exit(
+            args,
+            config,
+            parser,
+            load_flight_dicts(args.data, include_flight_keys=development_keys),
+        )
+        data_selection = data_selection_audit(
+            series, build_report, config, outer_split_keys
+        )
+        experiment_manifest = None
+        if args.experiment_id:
+            experiment_manifest = begin_run(
+                args.output_dir,
+                repo_root=_REPO_ROOT,
+                campaign_id=args.campaign_id,
+                run_id=args.experiment_id,
+                config=config.to_dict(),
+                data_selection=data_selection,
+                command=sys.argv if argv is None else ["ts_transformer", *argv],
+            )
         if args.command == "cross-validate":
-            cross_validate(
+            output_dir = Path(args.output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            selection_path = output_dir / "data_selection.json"
+            selection_tmp = output_dir / "data_selection.json.tmp"
+            selection_tmp.write_text(json.dumps(data_selection, indent=2), encoding="utf-8")
+            selection_tmp.replace(selection_path)
+            try:
+                cross_validate(
+                    series,
+                    config,
+                    output_dir=args.output_dir,
+                    data_provenance=data_provenance,
+                    n_splits=args.folds,
+                    cv_parameters=args.cv_parameters,
+                    cv_epochs=args.cv_epochs,
+                    cv_patience=args.cv_patience,
+                    auto_batch_size=batch_auto,
+                )
+            except Exception as exc:
+                if experiment_manifest is not None:
+                    finish_run(
+                        experiment_manifest,
+                        failure=f"{type(exc).__name__}: {exc}",
+                    )
+                raise
+            if experiment_manifest is not None:
+                finish_run(experiment_manifest)
+            return 0
+        try:
+            train(
                 series,
                 config,
                 output_dir=args.output_dir,
                 data_provenance=data_provenance,
-                n_splits=args.folds,
-                cv_parameters=args.cv_parameters,
-                cv_epochs=args.cv_epochs,
-                cv_patience=args.cv_patience,
+                reserved_test_keys=outer_split_keys["test"],
+                data_selection=data_selection,
                 auto_batch_size=batch_auto,
             )
-            return 0
-        train(
-            series,
-            config,
-            output_dir=args.output_dir,
-            data_provenance=data_provenance,
-            auto_batch_size=batch_auto,
-        )
+        except Exception as exc:
+            if experiment_manifest is not None:
+                finish_run(
+                    experiment_manifest,
+                    failure=f"{type(exc).__name__}: {exc}",
+                )
+            raise
+        if experiment_manifest is not None:
+            finish_run(experiment_manifest)
         return 0
 
     # ── predict ──────────────────────────────────────────────────────────────
@@ -491,6 +573,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.split != "test" and args.test_release:
         parser.error("--test-release is valid only with --split test")
     model, config, normalizer, payload = load_checkpoint(args.checkpoint)
+    if args.aircraft_filter and args.aircraft_filter != config.aircraft_filter:
+        parser.error(
+            f"--aircraft-filter {args.aircraft_filter!r} differs from checkpoint policy "
+            f"{config.aircraft_filter!r}"
+        )
     current_provenance = arrival_data_provenance(args.data)
     require_matching_data_provenance(payload, current_provenance, allow_subset=True)
     device = resolve_device(args.device)
@@ -531,7 +618,7 @@ def main(argv: list[str] | None = None) -> int:
             f"are absent from {args.data}; first missing key: {missing[0]!r}"
         )
     flights = [indexed[key] for key in split_keys]
-    series = _build_series_or_exit(args, config, parser, flights)
+    series, _build_report = _build_series_or_exit(args, config, parser, flights)
     print(f"predicting {len(series)} flight(s) from the {args.split!r} split")
 
     records, overlap = [], []

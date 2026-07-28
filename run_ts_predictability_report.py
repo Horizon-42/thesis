@@ -1021,7 +1021,14 @@ def load_runs(specifications: Sequence[tuple[str, Path]]) -> list[LoadedRun]:
 
 def comparison_identity_error(reference: LoadedRun, candidate: LoadedRun) -> str | None:
     """Return why two checkpoints cannot share a validation-only report."""
-    for field in ("seq_len", "dt_s", "seed", "coordinate_frame", "aircraft_type"):
+    for field in (
+        "seq_len",
+        "dt_s",
+        "seed",
+        "coordinate_frame",
+        "aircraft_type",
+        "aircraft_filter",
+    ):
         if getattr(candidate.config, field) != getattr(reference.config, field):
             return f"checkpoint {candidate.label} differs in comparison field {field}"
     # Window mode may exclude a few train/test flights that cannot provide a
