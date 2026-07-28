@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 import torch
 
+import aerodynamic_model.torch_dynamics as torch_dynamics
 from aerodynamic_model.casadi_simulator import CasadiSimulator
 from aerodynamic_model.common import GeodeticState, LoadFactorControl
 from aerodynamic_model.rollout import rollout_piecewise_constant as casadi_rollout
@@ -216,6 +217,49 @@ def test_rollout_backpropagates_to_controls_and_nonuniform_durations():
     assert durations.grad is not None and torch.isfinite(durations.grad).all()
     assert torch.count_nonzero(controls.grad) > 0
     assert torch.count_nonzero(durations.grad) == durations.numel()
+
+
+def test_discrete_adjoint_uses_one_dense_state_layout(monkeypatch):
+    """Every reverse step must hit the same static compiled-kernel layout."""
+    observed_strides = []
+    original_step = torch_dynamics._rollout_step
+
+    def recording_step(state, controls, aero_params, dt_s):
+        if torch.is_grad_enabled():
+            observed_strides.append(state.stride())
+        return original_step(state, controls, aero_params, dt_s)
+
+    monkeypatch.setattr(torch_dynamics, "_rollout_step", recording_step)
+    initial = torch.tensor(
+        [
+            [35.88, -78.79, 900.0, 80.0, 2.2, -0.04, A320.landing_mass],
+            [38.74, -90.36, 1300.0, 95.0, 1.7, -0.03, A320.landing_mass],
+        ],
+        dtype=torch.float64,
+        requires_grad=True,
+    )
+    controls = torch.tensor(
+        [
+            [[45_000.0, 0.08, 1.02], [36_000.0, -0.04, 0.99]],
+            [[60_000.0, -0.06, 1.04], [48_000.0, 0.03, 1.00]],
+        ],
+        dtype=torch.float64,
+        requires_grad=True,
+    )
+    durations = torch.tensor(
+        [[1.1, 0.9], [0.6, 1.4]], dtype=torch.float64, requires_grad=True
+    )
+
+    rollout_piecewise_constant(
+        initial,
+        controls,
+        durations,
+        _aero_tensor(batch=2),
+        integrator_dt_s=0.5,
+    ).sum().backward()
+
+    assert len(observed_strides) > 1
+    assert set(observed_strides) == {(7, 1)}
 
 
 @pytest.mark.parametrize(

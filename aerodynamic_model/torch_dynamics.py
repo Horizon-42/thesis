@@ -501,7 +501,10 @@ class _PiecewiseRolloutAdjoint(torch.autograd.Function):
             segment = segment_schedule[:, step]
 
             with torch.enable_grad():
-                previous = previous_value.detach().requires_grad_(True)
+                # ``timeline[:, step]`` is a view whose batch stride depends on the
+                # rollout length. Normalize it before the compiled local VJP so every
+                # reverse step reuses the same static CUDA graph.
+                previous = previous_value.detach().contiguous().requires_grad_(True)
                 step_control = controls[rows, segment].detach().requires_grad_(
                     needs_controls
                 )
