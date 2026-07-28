@@ -47,6 +47,8 @@ import dataset as dataset_module  # noqa: E402
 import detect_ts_best_batch as batch_probe  # noqa: E402
 import evaluation_protocol  # noqa: E402
 import run_ts_history_ablation as history_ablation  # noqa: E402
+import run_ts_pipeline as pipeline_module  # noqa: E402
+import run_ts_predictability_report as predictability_report  # noqa: E402
 import train as train_module  # noqa: E402
 from aerodynamic_model.common import GeodeticState  # noqa: E402
 from batching import resolve_batch_size  # noqa: E402
@@ -1730,6 +1732,95 @@ def test_control_auto_batch_training_probe_applies_heterogeneous_partition(monke
     assert calls == [torch.Size([2, 2])]
 
 
+def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
+    plan = pipeline_module.TrainingPlan(
+        ("KMSY", "KRDU"),
+        "itransformer",
+        training_mode="pooled",
+        prediction_output=PREDICTION_CONTROL,
+        n_segments=32,
+        seed=2027,
+        split_seed=1337,
+        aircraft_type="A320",
+        batch_size="16",
+        control_effort_weight=1e-4,
+        control_smoothness_weight=1e-2,
+        control_rollout_dt=0.5,
+        output_dir=tmp_path,
+    )
+    recipe = plan._recipe_args()
+    config, _source = plan.resolved_train_config(use_best_config=False)
+    prediction = pipeline_module.PredictionPlan(plan, "KMSY", ("eval",), split="val")
+
+    assert recipe[recipe.index("--prediction-output") + 1] == PREDICTION_CONTROL
+    assert recipe[recipe.index("--split-seed") + 1] == "1337"
+    assert recipe[recipe.index("--control-effort-weight") + 1] == "0.0001"
+    assert recipe[recipe.index("--control-smoothness-weight") + 1] == "0.01"
+    assert recipe[recipe.index("--control-rollout-dt") + 1] == "0.5"
+    assert config.prediction_output == PREDICTION_CONTROL
+    assert config.control_effort_loss_weight == pytest.approx(1e-4)
+    assert "control" in prediction.pred_dir.name
+    assert "control" in prediction.category
+
+
+def test_common_grid_resampling_uses_explicit_nonuniform_control_clock():
+    config = TSConfig(
+        prediction_output=PREDICTION_CONTROL,
+        seq_len=2,
+        n_segments=2,
+        d_model=8,
+        n_heads=2,
+        d_ff=16,
+        e_layers=1,
+    )
+    anchor = np.zeros(config.enc_in)
+    values = np.zeros((2, config.enc_in))
+    values[:, 0] = [1.0, 3.0]
+
+    sampled, capped = predictability_report.resample_prediction(
+        anchor,
+        values,
+        3.0,
+        config,
+        np.array([1.0, 2.0, 3.0]),
+        segment_durations_s=np.array([1.0, 2.0]),
+    )
+
+    assert not capped
+    np.testing.assert_allclose(sampled[:, 0], [1.0, 2.0, 3.0])
+
+
+def test_common_grid_report_executes_control_model_with_flight_dynamics():
+    series, config = _series(
+        n_flights=2,
+        prediction_output=PREDICTION_CONTROL,
+        seq_len=8,
+        n_segments=2,
+        d_model=16,
+        n_heads=4,
+        d_ff=32,
+        e_layers=1,
+        final_time_scale_s=2.0,
+        control_rollout_integrator_dt_s=0.5,
+    )
+    normalizer = Normalizer.fit(series)
+    run = predictability_report.LoadedRun(
+        "control", Path("checkpoint.pt"), build_model(config), config, normalizer, {}
+    )
+    histories = torch.from_numpy(
+        predictability_report.history_tensor(series, config, normalizer)
+    )
+
+    with torch.no_grad():
+        values, final_time, durations = predictability_report.predict_batch_nodes(
+            run, histories, series, torch.device("cpu")
+        )
+
+    assert values.shape == (2, config.n_segments, config.enc_in)
+    assert durations.shape == (2, config.n_segments)
+    np.testing.assert_allclose(durations.sum(axis=1), final_time, rtol=1e-6)
+
+
 def test_auto_batch_probe_executes_the_shared_physics_loss(monkeypatch):
     config = TSConfig(
         device="cpu",
@@ -2239,6 +2330,11 @@ def test_control_training_checkpoint_round_trip_keeps_output_identity(tmp_path):
         "bounded-control-nonuniform-duration-casadi-rollout-clock-aligned-v2"
     )
     assert metadata["prediction_output"] == PREDICTION_CONTROL
+    assert metadata["control_recipe"] == {
+        "effort_loss_weight": config.control_effort_loss_weight,
+        "smoothness_loss_weight": config.control_smoothness_loss_weight,
+        "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
+    }
 
 
 def test_reference_covers_the_same_span_as_the_prediction():

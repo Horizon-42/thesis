@@ -42,6 +42,9 @@ from config import (  # noqa: E402
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
     MODELS,
+    PREDICTION_CONTROL,
+    PREDICTION_OUTPUTS,
+    PREDICTION_STATE,
     TSConfig,
 )
 from cross_validation import (  # noqa: E402
@@ -110,6 +113,10 @@ def _anchor_tag(random_train_anchor: bool) -> str:
     return "_random_anchor" if random_train_anchor else ""
 
 
+def _prediction_output_tag(prediction_output: str) -> str:
+    return "" if prediction_output == PREDICTION_STATE else f"_{prediction_output}"
+
+
 HORIZON_TAGS = {
     "normalized": "normalized_time",
     "full": "full",
@@ -131,12 +138,14 @@ class TrainingPlan:
         model: str,
         *,
         training_mode: str,
+        prediction_output: str = PREDICTION_STATE,
         n_segments: int | None = None,
         horizon_mode: str = HORIZON_NORMALIZED,
         full_horizon_steps: int | None = None,
         window_horizon_steps: int | None = None,
         epochs: int | None = None,
         seed: int | None = None,
+        split_seed: int | None = None,
         device: str | None = None,
         aircraft_type: str | None = None,
         coordinate_frame: str = "enu",
@@ -146,6 +155,9 @@ class TrainingPlan:
         cv_epochs: int = DEFAULT_CV_EPOCHS,
         cv_patience: int = DEFAULT_CV_PATIENCE,
         random_train_anchor: bool = False,
+        control_effort_weight: float | None = None,
+        control_smoothness_weight: float | None = None,
+        control_rollout_dt: float | None = None,
         output_dir: str | Path | None = None,
     ) -> None:
         self.airports = tuple(sorted(airport.strip().upper() for airport in airports))
@@ -153,12 +165,14 @@ class TrainingPlan:
             raise ValueError("TrainingPlan requires at least one airport")
         self.model = model
         self.training_mode = training_mode
+        self.prediction_output = prediction_output
         self.n_segments = n_segments
         self.horizon_mode = horizon_mode
         self.full_horizon_steps = full_horizon_steps
         self.window_horizon_steps = window_horizon_steps
         self.epochs = epochs
         self.seed = seed
+        self.split_seed = split_seed
         self.device = device
         self.aircraft_type = aircraft_type
         self.coordinate_frame = coordinate_frame
@@ -168,10 +182,17 @@ class TrainingPlan:
         self.cv_epochs = cv_epochs
         self.cv_patience = cv_patience
         self.random_train_anchor = random_train_anchor
+        self.control_effort_weight = control_effort_weight
+        self.control_smoothness_weight = control_smoothness_weight
+        self.control_rollout_dt = control_rollout_dt
 
         self.data_manifests = tuple(arrival_manifest_path(airport) for airport in self.airports)
         scope = self.airports[0] if training_mode == "per-airport" else "POOLED"
-        suffix = _frame_tag(coordinate_frame) + _anchor_tag(random_train_anchor)
+        suffix = (
+            _prediction_output_tag(prediction_output)
+            + _frame_tag(coordinate_frame)
+            + _anchor_tag(random_train_anchor)
+        )
         self.train_dir = (
             Path(output_dir)
             if output_dir is not None
@@ -198,6 +219,7 @@ class TrainingPlan:
     def _recipe_args(self, *, include_base_n_segments: bool = True) -> list[str]:
         args = [
             "--model", self.model,
+            "--prediction-output", self.prediction_output,
             "--coordinate-frame", self.coordinate_frame,
             "--batch-size", self.batch_size,
             "--horizon-mode", self.horizon_mode,
@@ -212,10 +234,18 @@ class TrainingPlan:
             args += ["--n-segments", str(self.n_segments)]
         if self.seed is not None:
             args += ["--seed", str(self.seed)]
+        if self.split_seed is not None:
+            args += ["--split-seed", str(self.split_seed)]
         if self.device is not None:
             args += ["--device", self.device]
         if self.aircraft_type is not None:
             args += ["--aircraft-type", self.aircraft_type]
+        if self.control_effort_weight is not None:
+            args += ["--control-effort-weight", str(self.control_effort_weight)]
+        if self.control_smoothness_weight is not None:
+            args += ["--control-smoothness-weight", str(self.control_smoothness_weight)]
+        if self.control_rollout_dt is not None:
+            args += ["--control-rollout-dt", str(self.control_rollout_dt)]
         return args
 
     def checkpoint_reuse_error(self) -> str | None:
@@ -247,6 +277,8 @@ class TrainingPlan:
         expected_config, _source = self.resolved_train_config(
             use_best_config=self.cv_reuse_error() is None
         )
+        if metadata.get("prediction_output") != expected_config.prediction_output:
+            return "checkpoint prediction output does not match the requested recipe"
         if metadata.get("horizon_mode") != expected_config.horizon_mode:
             return "checkpoint horizon mode does not match the requested recipe"
         if metadata.get("pred_len") != expected_config.pred_len:
@@ -263,6 +295,14 @@ class TrainingPlan:
             and metadata.get("full_horizon_steps") != expected_config.full_horizon_steps
         ):
             return "checkpoint window rollout cap does not match the requested recipe"
+        if expected_config.prediction_output == PREDICTION_CONTROL:
+            expected_control_recipe = {
+                "effort_loss_weight": expected_config.control_effort_loss_weight,
+                "smoothness_loss_weight": expected_config.control_smoothness_loss_weight,
+                "rollout_integrator_dt_s": expected_config.control_rollout_integrator_dt_s,
+            }
+            if metadata.get("control_recipe") != expected_control_recipe:
+                return "checkpoint control recipe does not match the requested recipe"
         return None
 
     def cv_reuse_error(self) -> str | None:
@@ -316,6 +356,7 @@ class TrainingPlan:
         """Rebuild the exact base TSConfig produced by this plan's CV command."""
         overrides: dict[str, object] = {
             "model": self.model,
+            "prediction_output": self.prediction_output,
             "coordinate_frame": self.coordinate_frame,
             "random_train_anchor": self.random_train_anchor,
             "horizon_mode": self.horizon_mode,
@@ -328,10 +369,18 @@ class TrainingPlan:
             overrides["n_segments"] = self.n_segments
         if self.seed is not None:
             overrides["seed"] = self.seed
+        if self.split_seed is not None:
+            overrides["split_seed"] = self.split_seed
         if self.device is not None:
             overrides["device"] = self.device
         if self.aircraft_type is not None:
             overrides["aircraft_type"] = self.aircraft_type
+        if self.control_effort_weight is not None:
+            overrides["control_effort_loss_weight"] = self.control_effort_weight
+        if self.control_smoothness_weight is not None:
+            overrides["control_smoothness_loss_weight"] = self.control_smoothness_weight
+        if self.control_rollout_dt is not None:
+            overrides["control_rollout_integrator_dt_s"] = self.control_rollout_dt
         if self.batch_size != "auto":
             overrides["batch_size"] = int(self.batch_size)
         return TSConfig(**overrides).to_dict()
@@ -379,6 +428,7 @@ class TrainingPlan:
 
         overrides.update({
             "model": self.model,
+            "prediction_output": self.prediction_output,
             "coordinate_frame": self.coordinate_frame,
             "random_train_anchor": self.random_train_anchor,
             "horizon_mode": self.horizon_mode,
@@ -395,10 +445,18 @@ class TrainingPlan:
             overrides["epochs"] = self.epochs
         if self.seed is not None:
             overrides["seed"] = self.seed
+        if self.split_seed is not None:
+            overrides["split_seed"] = self.split_seed
         if self.device is not None:
             overrides["device"] = self.device
         if self.aircraft_type is not None:
             overrides["aircraft_type"] = self.aircraft_type
+        if self.control_effort_weight is not None:
+            overrides["control_effort_loss_weight"] = self.control_effort_weight
+        if self.control_smoothness_weight is not None:
+            overrides["control_smoothness_loss_weight"] = self.control_smoothness_weight
+        if self.control_rollout_dt is not None:
+            overrides["control_rollout_integrator_dt_s"] = self.control_rollout_dt
         if self.batch_size != "auto":
             overrides["batch_size"] = int(self.batch_size)
         return TSConfig(**overrides), source
@@ -438,16 +496,20 @@ class PredictionPlan:
         scope = "pooled_" if training.pooled else ""
         frame = _frame_tag(training.coordinate_frame)
         anchor = _anchor_tag(training.random_train_anchor)
+        prediction_output = _prediction_output_tag(training.prediction_output)
         tag = f"_{experiment_tag}" if experiment_tag else ""
         horizon_tag = HORIZON_TAGS[training.horizon_mode]
-        stem = f"{scope}{training.model}_{horizon_tag}{frame}{anchor}{tag}_{split}"
+        stem = (
+            f"{scope}{training.model}{prediction_output}_{horizon_tag}"
+            f"{frame}{anchor}{tag}_{split}"
+        )
         self.pred_dir = OPT_OUTPUTS_ROOT / self.airport / f"ts_pred_{stem}"
         self.summary = self.pred_dir / "summary.json"
         self.report = self.pred_dir / "evaluation_report.json"
         self.report_html = self.pred_dir / "evaluation_report.html"
         category_scope = "pooled_" if training.pooled else ""
         self.category = (
-            f"ts_{category_scope}{MODEL_SHORT[training.model]}_{horizon_tag}"
+            f"ts_{category_scope}{MODEL_SHORT[training.model]}{prediction_output}_{horizon_tag}"
             f"{frame}{anchor}{tag}_{split}"
         )
         model_label = MODEL_LABEL[training.model]
@@ -455,9 +517,10 @@ class PredictionPlan:
         anchor_label = "random-anchor training, " if training.random_train_anchor else ""
         frame_label = "ENU" if training.coordinate_frame == "enu" else "runway-aligned"
         horizon_label = HORIZON_LABELS[training.horizon_mode]
+        output_label = f"{training.prediction_output} output, "
         self.label = (
             f"{SPLIT_LABELS[split]} — Predicted ({model_label}, {pooled_label}"
-            f"{anchor_label}{horizon_label}, {frame_label})"
+            f"{output_label}{anchor_label}{horizon_label}, {frame_label})"
         )
         self.comparison_dir = (
             COMPARISON_AIRPORTS_ROOT / self.airport / "comparison" / self.category
@@ -533,7 +596,10 @@ def run_training(
     reuse = skip_train and reuse_error is None
     mode = "reuse checkpoint" if reuse else "train final checkpoint"
     horizon_label = HORIZON_LABELS[plan.horizon_mode]
-    print(f"\n━━ {plan.label} [{plan.model} · {horizon_label} · {plan.coordinate_frame}] · {mode}")
+    print(
+        f"\n━━ {plan.label} [{plan.model} · {plan.prediction_output} · "
+        f"{horizon_label} · {plan.coordinate_frame}] · {mode}"
+    )
     print(f"   manifests : {len(plan.data_manifests)}")
     print(f"   CV        : {plan.cv_dir}")
     print(f"   training  : {plan.train_dir}")
@@ -555,7 +621,8 @@ def run_training(
         print(f"   config    : {source}")
         print(
             f"   trajectory: dt={config.dt_s:g}s, L={config.seq_len}, "
-            f"mode={config.horizon_mode}, output={config.pred_len}, "
+            f"prediction_output={config.prediction_output}, mode={config.horizon_mode}, "
+            f"output={config.pred_len}, "
             f"N={config.n_segments}, H_full={config.full_horizon_steps}, "
             f"H_window={config.window_horizon_steps}, "
             f"frame={config.coordinate_frame}, anchor={anchor}"
@@ -573,6 +640,12 @@ def run_training(
             f"kinematic={config.kinematic_consistency_loss_weight:g}, "
             f"terminal={config.terminal_loss_weight:g}"
         )
+        if config.prediction_output == PREDICTION_CONTROL:
+            print(
+                f"   control   : effort={config.control_effort_loss_weight:g}, "
+                f"smoothness={config.control_smoothness_loss_weight:g}, "
+                f"rollout_dt={config.control_rollout_integrator_dt_s:g}s"
+            )
         print(
             f"   runtime   : batch={batch}, device={config.device}, seed={config.seed}, "
             f"aircraft={config.aircraft_type}"
@@ -634,6 +707,12 @@ def main() -> None:
     parser.add_argument("--models", type=lambda raw: _parse_csv(raw, MODELS, "--models"),
                         default=MODELS, metavar=",".join(MODELS),
                         help="models to train (default: itransformer,patchtst)")
+    parser.add_argument(
+        "--prediction-output",
+        choices=PREDICTION_OUTPUTS,
+        default=PREDICTION_STATE,
+        help="state baseline or bounded controls with differentiable rollout",
+    )
     parser.add_argument("--n-segments", type=int, default=None,
                         help="base N for normalized progress; CV also tunes N")
     parser.add_argument(
@@ -667,11 +746,15 @@ def main() -> None:
     )
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--split-seed", type=int, default=None)
     parser.add_argument("--device", default=None)
     parser.add_argument("--aircraft-type", default=None)
     parser.add_argument("--coordinate-frame", choices=COORDINATE_FRAMES, default="enu")
     parser.add_argument("--batch-size", default="2048",
                         help="positive integer or auto (default: 2048)")
+    parser.add_argument("--control-effort-weight", type=float, default=None)
+    parser.add_argument("--control-smoothness-weight", type=float, default=None)
+    parser.add_argument("--control-rollout-dt", type=float, default=None)
     parser.add_argument("--cv-folds", type=int, default=3)
     parser.add_argument(
         "--cv-parameters",
@@ -738,12 +821,14 @@ def main() -> None:
             scope,
             model,
             training_mode=args.training_mode,
+            prediction_output=args.prediction_output,
             n_segments=args.n_segments,
             horizon_mode=args.horizon_mode,
             full_horizon_steps=args.full_horizon_steps,
             window_horizon_steps=args.window_horizon_steps,
             epochs=args.epochs,
             seed=args.seed,
+            split_seed=args.split_seed,
             device=args.device,
             aircraft_type=args.aircraft_type,
             coordinate_frame=args.coordinate_frame,
@@ -753,6 +838,9 @@ def main() -> None:
             cv_epochs=args.cv_epochs,
             cv_patience=args.cv_patience,
             random_train_anchor=args.random_train_anchor,
+            control_effort_weight=args.control_effort_weight,
+            control_smoothness_weight=args.control_smoothness_weight,
+            control_rollout_dt=args.control_rollout_dt,
         )
         if not run_training(
             training,

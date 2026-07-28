@@ -42,12 +42,13 @@ from sklearn.neighbors import NearestNeighbors  # noqa: E402
 import run_ts_pipeline as pipeline  # noqa: E402
 from channels import POSITION_IDX  # noqa: E402
 from config import (  # noqa: E402
-    HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW, TSConfig,
+    HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW, PREDICTION_CONTROL, TSConfig,
 )
 from dataset import (  # noqa: E402
     FlightSeries,
     arrival_data_provenance,
     build_series,
+    dynamics_arrays,
     load_flight_dicts,
     require_matching_data_provenance,
 )
@@ -55,7 +56,11 @@ from metrics import raw_kinematic_metrics  # noqa: E402
 from models import resolve_device  # noqa: E402
 from time_grids import output_time_grid  # noqa: E402
 from train import (  # noqa: E402
-    FIT_EVALUATION_NAME, FIT_EVALUATION_SCHEMA, load_checkpoint, usable_series,
+    FIT_EVALUATION_NAME,
+    FIT_EVALUATION_SCHEMA,
+    control_rollout_channels,
+    load_checkpoint,
+    usable_series,
 )
 
 REPORT_SCHEMA = "ts-pooled-predictability-report-v3-fit-replay-validation-only"
@@ -147,10 +152,14 @@ def resample_prediction(
     predicted_final_time_s: float,
     config: TSConfig,
     query_offsets_s: np.ndarray,
+    segment_durations_s: np.ndarray | None = None,
 ) -> tuple[np.ndarray, bool]:
     if config.horizon_mode == HORIZON_NORMALIZED:
-        grid = output_time_grid(predicted_final_time_s, config)
-        offsets = grid.offsets_s
+        offsets = (
+            np.cumsum(np.asarray(segment_durations_s, dtype=np.float64))
+            if segment_durations_s is not None
+            else output_time_grid(predicted_final_time_s, config).offsets_s
+        )
         values = predicted_values
         capped = False
     else:
@@ -204,6 +213,51 @@ _NODE_PREDICTORS = {
 }
 
 
+def batch_dynamics_tensors(
+    series: Sequence[FlightSeries], config: TSConfig, device: torch.device
+) -> dict[str, torch.Tensor]:
+    """Build the exact per-flight conditioning/rollout tensors used by training."""
+    anchor = config.seq_len - 1
+    rows = [dynamics_arrays(item, anchor) for item in series]
+    return {
+        name: torch.from_numpy(np.stack([row[name] for row in rows])).to(device)
+        for name in rows[0]
+    }
+
+
+def predict_batch_nodes(
+    run: LoadedRun,
+    histories: torch.Tensor,
+    series: Sequence[FlightSeries],
+    device: torch.device,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return physical channel nodes, final time and their explicit segment durations."""
+    if run.config.prediction_output == PREDICTION_CONTROL:
+        dynamics = batch_dynamics_tensors(series, run.config, device)
+        output = run.model(histories, dynamics)
+        channels, _geodetic = control_rollout_channels(output, dynamics, run.config)
+        return (
+            channels.detach().cpu().numpy().astype(np.float32),
+            output.final_time_s.detach().cpu().numpy().astype(np.float64),
+            output.segment_durations.detach().cpu().numpy().astype(np.float64),
+        )
+
+    states, final_time = _NODE_PREDICTORS[run.config.horizon_mode](
+        run.model, histories, run.config
+    )
+    physical = run.normalizer.decode(
+        states.detach().cpu().numpy().astype(np.float64)
+    ).astype(np.float32)
+    final_time_array = final_time.detach().cpu().numpy().astype(np.float64)
+    if run.config.horizon_mode == HORIZON_NORMALIZED:
+        durations = np.broadcast_to(
+            final_time_array[:, None] / physical.shape[1], physical.shape[:2]
+        ).copy()
+    else:
+        durations = np.full(physical.shape[:2], run.config.dt_s, dtype=np.float64)
+    return physical, final_time_array, durations
+
+
 def displacement_errors(predicted: np.ndarray, truth: np.ndarray) -> np.ndarray:
     delta = predicted[..., list(POSITION_IDX)] - truth[..., list(POSITION_IDX)]
     return np.linalg.norm(delta, axis=-1)
@@ -224,19 +278,20 @@ def run_deterministic(
     common: list[np.ndarray] = []
     raw_values: list[np.ndarray] = []
     final_times: list[np.ndarray] = []
+    raw_durations: list[np.ndarray] = []
     capped: list[bool] = []
     with torch.no_grad():
         for start in range(0, len(series), batch_size):
             stop = min(start + batch_size, len(series))
-            states, predicted_time_tensor = _NODE_PREDICTORS[run.config.horizon_mode](
-                run.model, torch.from_numpy(histories[start:stop]).to(device), run.config
+            decoded, predicted_time, durations = predict_batch_nodes(
+                run,
+                torch.from_numpy(histories[start:stop]).to(device),
+                series[start:stop],
+                device,
             )
-            decoded = run.normalizer.decode(
-                states.detach().cpu().numpy().astype(np.float64)
-            ).astype(np.float32)
-            predicted_time = predicted_time_tensor.detach().cpu().numpy().astype(np.float64)
             raw_values.append(decoded)
             final_times.append(predicted_time)
+            raw_durations.append(durations)
             for local, absolute in enumerate(range(start, stop)):
                 sampled, was_capped = resample_prediction(
                     anchors[absolute],
@@ -244,18 +299,14 @@ def run_deterministic(
                     float(predicted_time[local]),
                     run.config,
                     progress * true_duration_s[absolute],
+                    durations[local],
                 )
                 common.append(sampled)
                 capped.append(was_capped)
     common_array = np.stack(common).astype(np.float32)
     raw_array = np.concatenate(raw_values)
     final_time_array = np.concatenate(final_times)
-    if run.config.horizon_mode == HORIZON_NORMALIZED:
-        durations = np.broadcast_to(
-            final_time_array[:, None] / raw_array.shape[1], raw_array.shape[:2]
-        ).copy()
-    else:
-        durations = np.full(raw_array.shape[:2], run.config.dt_s, dtype=np.float64)
+    durations = np.concatenate(raw_durations)
     valid = np.ones_like(durations, dtype=bool)
     kinematics = raw_kinematic_metrics(
         anchors, raw_array, durations, valid_segments=valid
@@ -305,18 +356,14 @@ def mc_dropout_coverage(
             best_ade = np.full(stop - start, np.inf)
             best_fde = np.full(stop - start, np.inf)
             for draw in range(1, sample_count + 1):
-                states, predicted_time_tensor = _NODE_PREDICTORS[run.config.horizon_mode](
-                    run.model, tensor, run.config
+                decoded, predicted_time, durations = predict_batch_nodes(
+                    run, tensor, series[start:stop], device
                 )
-                decoded = run.normalizer.decode(
-                    states.detach().cpu().numpy().astype(np.float64)
-                )
-                predicted_time = predicted_time_tensor.detach().cpu().numpy()
                 sampled = []
                 for local, absolute in enumerate(range(start, stop)):
                     candidate, _capped = resample_prediction(
                         anchors[absolute], decoded[local], float(predicted_time[local]),
-                        run.config, progress * true_duration_s[absolute],
+                        run.config, progress * true_duration_s[absolute], durations[local],
                     )
                     sampled.append(candidate)
                 error = displacement_errors(np.stack(sampled), truth[start:stop])
@@ -795,7 +842,7 @@ th,td{{padding:9px 11px;border-bottom:1px solid #dfe5e8;text-align:right}} th:fi
 code{{background:#edf1f3;padding:.1em .3em}} .meta{{font-size:.9rem;color:var(--muted)}}
 </style></head><body><main>
 <h1>Pooled terminal-trajectory predictability report</h1>
-<p class="lead">A validation-only comparison of normalized, one-pass full-horizon, and recursive-window state predictors, plus conditional future dispersion and multi-candidate oracle coverage.</p>
+<p class="lead">A validation-only common-clock comparison of state and control-output trajectory predictors, plus conditional future dispersion and multi-candidate oracle coverage.</p>
 <p class="meta">Generated {html.escape(generated_at)} · schema <code>{REPORT_SCHEMA}</code> · split <code>validation</code></p>
 <div class="warning"><strong>Evaluation boundary.</strong> This report reads outer-train and outer-validation only. Outer-test identities and outputs are not loaded. Oracle minADE/minFDE choose the best candidate after seeing truth; they measure set coverage, not deployable candidate selection.</div>
 <div class="zh"><strong>重要说明：</strong>全文没有使用 test 数据。多候选的 minADE/minFDE 是“事后从 K 条候选中挑最好”的覆盖率上限，不能当作在线系统实际精度。</div>
@@ -987,6 +1034,7 @@ def main() -> None:
             runway = source.get("runway") or "?"
             flight_rows.append({
                 "model": run.label,
+                "prediction_output": run.config.prediction_output,
                 "dataset_id": item.dataset_id,
                 "airport": airport,
                 "runway": f"{airport}/{runway}",
@@ -1035,6 +1083,7 @@ def main() -> None:
         model_summary.append({
             "label": run.label,
             "model": run.config.model,
+            "prediction_output": run.config.prediction_output,
             "horizon_mode": run.config.horizon_mode,
             "pred_len": run.config.pred_len,
             "ade_m": float(block["ade_per_flight_m"].mean()),
@@ -1087,7 +1136,10 @@ def main() -> None:
         ],
         "model_summary": model_summary,
         "fit_replay": {
-            "metric_scope": "native target grid; fixed L-1 anchor; measured-data mask",
+            "metric_scope": (
+                "fixed L-1 anchor; measured-data mask; state uses its native clock; "
+                "control truth is interpolated to predicted cumulative segment time"
+            ),
             "summary": fit_summary,
         },
         "multi_candidate": {

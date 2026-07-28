@@ -1141,6 +1141,12 @@ def train(
             "test": _split_sha256(test_series),
         },
     }
+    if config.prediction_output == PREDICTION_CONTROL:
+        checkpoint_metadata["control_recipe"] = {
+            "effort_loss_weight": config.control_effort_loss_weight,
+            "smoothness_loss_weight": config.control_smoothness_loss_weight,
+            "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
+        }
     metadata_path = out / CHECKPOINT_METADATA_NAME
     metadata_tmp = out / f"{CHECKPOINT_METADATA_NAME}.tmp"
     metadata_tmp.write_text(json.dumps(checkpoint_metadata, indent=2), encoding="utf-8")

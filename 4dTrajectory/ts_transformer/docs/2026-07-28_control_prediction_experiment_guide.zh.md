@@ -31,10 +31,9 @@ checkpoint、预测和优化器形状的导出；还没有真实 control 训练�
 
 ## 2. 正式实验前必须通过的三个阶段门
 
-当前代码可以做合成测试和初步 smoke run，但在以下问题明确以前，不应发布 control 与
-state 的正式准确率优劣结论。
+以下三个阶段门现已在正式实验前关闭；这里保留问题定义和解决口径，作为结果审计依据。
 
-### 2.1 非均匀时间段与监督 target 的时间语义尚未对齐
+### 2.1 非均匀时间段与监督 target 的时间语义（已关闭）
 
 control head 预测：
 
@@ -42,21 +41,19 @@ control head 预测：
 Delta_t_i = softmax(duration_logits)_i * predicted_final_time_s
 ```
 
-rollout 第 `i` 个状态因此位于预测累计时间 `sum(Delta_t_1 ... Delta_t_i)`。但是当前
-dataset 的 `target_states[i]` 仍位于真实剩余时间的均匀位置
-`(i + 1) / N * true_final_time_s`，control loss 和 native ADE/FDE 直接按数组索引比较两者。
+rollout 第 `i` 个状态因此位于预测累计时间 `sum(Delta_t_1 ... Delta_t_i)`。原问题是
+dataset 的 `target_states[i]` 位于真实剩余时间的均匀位置
+`(i + 1) / N * true_final_time_s`，旧 control loss 曾直接按数组索引比较两者。
 
-如果设计目标确实是“非均匀物理时间控制段”，正式实验前必须统一这两个时钟，例如把
-rollout 重采样到固定监督时钟，或按预测累计时间取得对应 target；具体实现方案应单独确认，
-本指南不替项目作这个设计决定。否则 native ADE/FDE 同时混入轨迹误差和时间索引错位，
-而 duration head 也很难真正把更多控制段分配给转弯等局部阶段。
+当前实现按预测累计物理时间从 anchor+均匀真值折线取得对应 states/weights；control loss
+和 fit replay 使用同一 clock-aligned 口径。超过真实终点的查询 clamp 到 terminal，独立
+final-time loss 继续约束总时长。
 
-### 2.2 现有统一比较报告尚不支持 control 模型
+### 2.2 统一比较报告的 control 支持（已关闭）
 
-[`run_ts_predictability_report.py`](../../../run_ts_predictability_report.py) 当前直接调用
+[`run_ts_predictability_report.py`](../../../run_ts_predictability_report.py) 原先只会调用
 `model(history)` 并读取 `output.states`，没有传入 control 模型所需的 per-flight
-`dynamics`，也没有读取非均匀 `segment_durations`。因此现在不能把 control checkpoint
-交给该脚本生成 common-grid 报告。
+`dynamics`，也没有读取非均匀 `segment_durations`。
 
 正式比较前，报告路径至少要能够：
 
@@ -67,21 +64,22 @@ rollout 重采样到固定监督时钟，或按预测累计时间取得对应 ta
    `outer_test_loaded=false`；
 5. 在报告中记录 `prediction_output`，避免把两种输出契约误标成同一种 state forecaster。
 
-在这项支持完成前，`fit_evaluation.json` 可用于诊断训练是否发散，但不能作为 control 与
-state 的最终公平比较依据。
+报告现在构建与训练相同的逐航班 dynamics tensors，执行 control rollout，并用显式累计
+durations 将 state/control 输出重采样到同一物理时间 query grid；报告记录
+`prediction_output`，并继续强制 validation-only/train-retrieval/outer-test-closed 策略。
 
-### 2.3 顶层 development pipeline 尚未透传 control 配置
+### 2.3 顶层 development pipeline 的 control 配置（已关闭）
 
-[`run_ts_pipeline.py`](../../../run_ts_pipeline.py) 当前没有暴露或传递：
+[`run_ts_pipeline.py`](../../../run_ts_pipeline.py) 原先没有暴露或传递：
 
 - `--prediction-output control`；
 - control effort/smoothness 权重；
 - control rollout integration step；
 - control 专用输出目录身份。
 
-直接运行它会继续构造默认 state 模型，并可能落入既有 state 输出命名。正式实验前应先让
-pipeline 显式携带 control 身份，并确认 checkpoint reuse 校验包含 output strategy 和
-control recipe。之后开发运行统一使用 `--split development`，只发布 train 和 validation。
+pipeline 现已显式透传上述字段和 `split_seed`，control checkpoint/prediction/category 采用
+独立命名；checkpoint reuse 同时校验 output strategy、effort/smoothness 权重和 rollout dt。
+开发运行统一使用 `--split development`，只发布 train 和 validation。
 
 ## 3. 新模式的实际训练契约
 
@@ -274,8 +272,8 @@ conda run -n aeroviz python \
   --split-seed 1337
 ```
 
-训练会自动写 best-checkpoint 的固定-anchor train/validation `fit_evaluation.json`。在阶段
-2.1 的时间对齐问题处理前，这里的 native ADE/FDE 只用于发现明显发散，不能宣布胜负。
+训练会自动写 best-checkpoint 的固定-anchor train/validation `fit_evaluation.json`；control
+的真值已按预测累计时钟对齐。state/control 的正式横向胜负仍以统一 common-grid 报告为准。
 
 ### 6.3 阶段 B：学习率复核
 
