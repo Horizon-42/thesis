@@ -17,6 +17,8 @@ non-uniform time partition.
 
 from __future__ import annotations
 
+import math
+
 import torch
 import torch.nn as nn
 
@@ -144,6 +146,38 @@ class ControlOutputModel(nn.Module):
         )
         self.final_time_head = FinalTimeHead(config)
         self.control_head = ControlOutputHead(config.d_model, int(config.n_segments))
+        self._initialize_stable_rollout()
+
+    def _initialize_stable_rollout(self) -> None:
+        """Start from a neutral, finite long-horizon flight instead of random controls.
+
+        Random sigmoid logits put thrust at roughly half of installed maximum and load
+        factor near 1.25. Over a several-minute approach, that initial open-loop trajectory
+        can become dynamically extreme before the first optimizer step; the resulting
+        long-horizon adjoint has produced gradients above 1e28 and overflowed Adam's second
+        moment. The neutral starting point remains fully learnable: 20% thrust, zero bank,
+        unit load factor, uniform segment durations, and softplus(0) total time.
+        """
+        thrust_fraction = 0.2
+        bank_fraction = 0.5
+        load_fraction = (1.0 - 0.5) / (2.0 - 0.5)
+        unit_control_bias = torch.tensor(
+            (
+                math.log(thrust_fraction / (1.0 - thrust_fraction)),
+                math.log(bank_fraction / (1.0 - bank_fraction)),
+                math.log(load_fraction / (1.0 - load_fraction)),
+            ),
+            dtype=self.control_head.control_projection.bias.dtype,
+            device=self.control_head.control_projection.bias.device,
+        ).repeat(self.control_head.n_segments)
+        with torch.no_grad():
+            self.control_head.control_projection.weight.zero_()
+            self.control_head.control_projection.bias.copy_(unit_control_bias)
+            self.control_head.duration_projection.weight.zero_()
+            self.control_head.duration_projection.bias.zero_()
+            final_layer = self.final_time_head.network[-1]
+            final_layer.weight.zero_()
+            final_layer.bias.zero_()
 
     def forward(self, history: torch.Tensor, dynamics: dict[str, torch.Tensor]):
         encoded = self.feature_encoder.encode_features(history)

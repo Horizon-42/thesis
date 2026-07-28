@@ -1426,23 +1426,11 @@ def test_control_models_preserve_ordered_channel_identity(model_name):
     mirrored = history.clone()
     mirrored[:, :, [0, 1]] = history[:, :, [1, 0]]
     mirrored[:, :, [3, 4]] = history[:, :, [4, 3]]
-    lower = torch.tensor([[0.0, -0.7, 0.5]])
-    upper = torch.tensor([[240_000.0, 0.7, 2.0]])
-    dynamics = {
-        "condition": torch.ones(1, len(dataset_module.DYNAMICS_CONDITION_NAMES)),
-        "control_lower": lower,
-        "control_upper": upper,
-    }
+    original_features = model.feature_encoder.encode_features(history)
+    swapped_features = model.feature_encoder.encode_features(mirrored)
 
-    original = model(history, dynamics)
-    swapped = model(mirrored, dynamics)
-    original_unit = (original.controls - lower[:, None]) / (upper - lower)[:, None]
-    swapped_unit = (swapped.controls - lower[:, None]) / (upper - lower)[:, None]
-
-    assert model.feature_encoder.encode_features(history).shape == (
-        1, config.enc_in * config.d_model
-    )
-    assert torch.max(torch.abs(original_unit - swapped_unit)) > 1e-4
+    assert original_features.shape == (1, config.enc_in * config.d_model)
+    assert torch.max(torch.abs(original_features - swapped_features)) > 1e-4
 
 
 def test_control_loss_aligns_truth_to_predicted_cumulative_clock(monkeypatch):
@@ -1504,6 +1492,44 @@ def test_control_loss_aligns_truth_to_predicted_cumulative_clock(monkeypatch):
     )
 
     assert components.state.item() == pytest.approx(0.0, abs=1e-12)
+
+
+def test_control_model_starts_from_neutral_uniform_rollout():
+    config = TSConfig(
+        prediction_output=PREDICTION_CONTROL,
+        seq_len=8,
+        n_segments=4,
+        d_model=16,
+        n_heads=4,
+        d_ff=32,
+        e_layers=1,
+        final_time_scale_s=600.0,
+    )
+    model = build_model(config).eval()
+    history = torch.randn(2, config.seq_len, config.enc_in)
+    lower = torch.tensor([[0.0, -math.pi / 4.0, 0.5], [0.0, -0.5, 0.5]])
+    upper = torch.tensor([[240_000.0, math.pi / 4.0, 2.0], [200_000.0, 0.5, 2.0]])
+    dynamics = {
+        "condition": torch.randn(2, len(dataset_module.DYNAMICS_CONDITION_NAMES)),
+        "control_lower": lower,
+        "control_upper": upper,
+    }
+
+    prediction = model(history, dynamics)
+    unit_controls = (prediction.controls - lower[:, None]) / (upper - lower)[:, None]
+    expected_units = torch.tensor([0.2, 0.5, 1.0 / 3.0]).view(1, 1, 3)
+    expected_time = math.log(2.0) * config.final_time_scale_s
+
+    torch.testing.assert_close(unit_controls, expected_units.expand_as(unit_controls))
+    torch.testing.assert_close(
+        prediction.final_time_s,
+        torch.full_like(prediction.final_time_s, expected_time),
+    )
+    torch.testing.assert_close(
+        prediction.segment_durations,
+        prediction.final_time_s[:, None].expand(-1, config.n_segments)
+        / config.n_segments,
+    )
 
 
 def test_control_dataset_and_rollout_loss_form_one_differentiable_training_step():

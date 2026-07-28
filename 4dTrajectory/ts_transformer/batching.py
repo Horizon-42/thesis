@@ -138,6 +138,16 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
         )
         loss.backward()
         optimizer.step()
+        finite_model = all(torch.isfinite(parameter).all() for parameter in model.parameters())
+        finite_optimizer = all(
+            not isinstance(value, torch.Tensor) or torch.isfinite(value).all()
+            for state in optimizer.state.values()
+            for value in state.values()
+        )
+        if not finite_model or not finite_optimizer:
+            raise RuntimeError(
+                "automatic batch-size probe produced non-finite model/Adam state"
+            )
         torch.cuda.synchronize(device)
     finally:
         del loss, prediction, flight_weights, target_final_time_s, state_weights, target, x
