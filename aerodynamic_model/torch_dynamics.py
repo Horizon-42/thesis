@@ -249,6 +249,287 @@ def geodetic_step(
     return enu_state_to_geodetic(stepped, reference)
 
 
+_COMPILED_CUDA_STEP = None
+
+
+def _rollout_step(
+    state: torch.Tensor,
+    controls: torch.Tensor,
+    aero_params: torch.Tensor,
+    dt_s: torch.Tensor,
+) -> torch.Tensor:
+    """Use the eager reference on CPU and a fused, safe Inductor graph on CUDA."""
+    if not state.is_cuda:
+        return geodetic_step(state, controls, aero_params, dt_s)
+    global _COMPILED_CUDA_STEP
+    if _COMPILED_CUDA_STEP is None:
+        # ``dynamic=True, mode="reduce-overhead"`` reproducibly segfaults in backward
+        # with the project's Torch/CUDA stack. Static reduce-overhead passes isolated
+        # forward/backward probes; the smaller final batch receives its own static graph.
+        _COMPILED_CUDA_STEP = torch.compile(
+            geodetic_step,
+            fullgraph=True,
+            dynamic=False,
+            mode="reduce-overhead",
+        )
+    return _COMPILED_CUDA_STEP(state, controls, aero_params, dt_s)
+
+
+def _piecewise_schedule(
+    segment_durations_s: torch.Tensor,
+    integrator_dt_s: float,
+    max_steps_per_segment: int,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
+    """Detached integer routing plus differentiable per-step durations."""
+    batch, segments = segment_durations_s.shape
+    device, dtype = segment_durations_s.device, segment_durations_s.dtype
+    dt_cap = torch.as_tensor(integrator_dt_s, dtype=dtype, device=device)
+    step_counts = torch.ceil(
+        segment_durations_s.detach() / integrator_dt_s
+    ).to(torch.long)
+    endpoint_steps = torch.cumsum(step_counts, dim=1)
+    total_steps = endpoint_steps[:, -1]
+    max_segment_steps, max_total_steps = torch.stack(
+        (step_counts.max(), total_steps.max())
+    ).cpu().tolist()
+    if max_segment_steps > max_steps_per_segment:
+        row, segment = torch.nonzero(
+            step_counts == max_segment_steps, as_tuple=False
+        )[0].cpu().tolist()
+        raise ValueError(
+            f"segment {segment} in batch row {row} needs {max_segment_steps} "
+            f"integration steps; limit is {max_steps_per_segment}"
+        )
+
+    global_steps = torch.arange(max_total_steps, device=device)
+    expanded_steps = global_steps.unsqueeze(0).expand(batch, -1).contiguous()
+    segment_schedule = torch.searchsorted(
+        endpoint_steps.contiguous(), expanded_steps, right=True
+    ).clamp(max=segments - 1)
+    segment_starts = torch.cat(
+        (
+            torch.zeros((batch, 1), dtype=torch.long, device=device),
+            endpoint_steps[:, :-1],
+        ),
+        dim=1,
+    )
+    local_steps = expanded_steps - torch.gather(segment_starts, 1, segment_schedule)
+    active_schedule = expanded_steps < total_steps.unsqueeze(1)
+    return (
+        endpoint_steps,
+        segment_schedule,
+        local_steps,
+        active_schedule,
+        max_total_steps,
+    )
+
+
+def _scheduled_rollout_forward(
+    initial_states: torch.Tensor,
+    controls: torch.Tensor,
+    segment_durations_s: torch.Tensor,
+    aero_params: torch.Tensor,
+    *,
+    integrator_dt_s: float,
+    max_steps_per_segment: int,
+) -> tuple[torch.Tensor, torch.Tensor, tuple[torch.Tensor, ...]]:
+    """Execute the global schedule and retain only seven state values per step."""
+    (
+        endpoint_steps,
+        segment_schedule,
+        local_steps,
+        active_schedule,
+        max_total_steps,
+    ) = _piecewise_schedule(
+        segment_durations_s, integrator_dt_s, max_steps_per_segment
+    )
+    dt_cap = torch.as_tensor(
+        integrator_dt_s,
+        dtype=initial_states.dtype,
+        device=initial_states.device,
+    )
+    scheduled_controls = torch.gather(
+        controls,
+        1,
+        segment_schedule.unsqueeze(-1).expand(-1, -1, controls.shape[-1]),
+    )
+    scheduled_segment_durations = torch.gather(
+        segment_durations_s, 1, segment_schedule
+    )
+    remaining_schedule = (
+        scheduled_segment_durations
+        - local_steps.to(initial_states.dtype) * dt_cap
+    ).clamp(min=0.0)
+    step_duration_schedule = torch.minimum(remaining_schedule, dt_cap)
+
+    # Step-major contiguous storage gives every compiled call the same dense input strides,
+    # independent of this batch's total rollout length. Without it, slicing [B,S,*] at one
+    # step exposes an S-dependent leading stride and causes avoidable Inductor recompiles.
+    controls_by_step = scheduled_controls.transpose(0, 1).contiguous()
+    durations_by_step = step_duration_schedule.transpose(0, 1).contiguous()
+    active_by_step = active_schedule.transpose(0, 1).contiguous()
+
+    state = initial_states
+    states_by_step: list[torch.Tensor] = []
+    for step in range(max_total_steps):
+        stepped = _rollout_step(
+            state,
+            controls_by_step[step],
+            aero_params,
+            durations_by_step[step],
+        )
+        state = torch.where(active_by_step[step].unsqueeze(-1), stepped, state)
+        states_by_step.append(state)
+
+    timeline = torch.stack(states_by_step, dim=1)
+    gather_index = (endpoint_steps - 1).unsqueeze(-1).expand(
+        -1, -1, state.shape[-1]
+    )
+    endpoints = torch.gather(timeline, 1, gather_index)
+    schedule = (endpoint_steps, segment_schedule, local_steps, active_schedule)
+    return endpoints, timeline, schedule
+
+
+class _PiecewiseRolloutAdjoint(torch.autograd.Function):
+    """Memory-bounded discrete adjoint of the exact RK4/geodetic step sequence."""
+
+    @staticmethod
+    def forward(
+        ctx,
+        initial_states: torch.Tensor,
+        controls: torch.Tensor,
+        segment_durations_s: torch.Tensor,
+        aero_params: torch.Tensor,
+        integrator_dt_s: float,
+        max_steps_per_segment: int,
+    ) -> torch.Tensor:
+        # Custom Function.forward runs with grad recording disabled, but Inductor still
+        # selects an AOT-training wrapper when input flags carry requires_grad=True. Use
+        # detached value views for the numerical pass; the originals are saved below and
+        # receive the explicitly reconstructed discrete-adjoint gradients.
+        endpoints, timeline, schedule = _scheduled_rollout_forward(
+            initial_states.detach(),
+            controls.detach(),
+            segment_durations_s.detach(),
+            aero_params.detach(),
+            integrator_dt_s=integrator_dt_s,
+            max_steps_per_segment=max_steps_per_segment,
+        )
+        ctx.integrator_dt_s = integrator_dt_s
+        ctx.save_for_backward(
+            initial_states,
+            controls,
+            segment_durations_s,
+            aero_params,
+            timeline,
+            *schedule,
+        )
+        return endpoints
+
+    @staticmethod
+    def backward(ctx, endpoint_gradient: torch.Tensor):
+        (
+            initial_states,
+            controls,
+            segment_durations_s,
+            aero_params,
+            timeline,
+            endpoint_steps,
+            segment_schedule,
+            local_steps,
+            active_schedule,
+        ) = ctx.saved_tensors
+        batch, total_steps, state_size = timeline.shape
+        rows = torch.arange(batch, device=timeline.device)
+        gradient_by_step = torch.zeros_like(timeline)
+        gradient_by_step.scatter_add_(
+            1,
+            (endpoint_steps - 1).unsqueeze(-1).expand(-1, -1, state_size),
+            endpoint_gradient,
+        )
+
+        needs_initial, needs_controls, needs_durations, needs_aero = (
+            ctx.needs_input_grad[:4]
+        )
+        control_gradient = torch.zeros_like(controls) if needs_controls else None
+        duration_gradient = (
+            torch.zeros_like(segment_durations_s) if needs_durations else None
+        )
+        aero_gradient = torch.zeros_like(aero_params) if needs_aero else None
+        state_adjoint = torch.zeros_like(initial_states)
+        dt_cap = torch.as_tensor(
+            ctx.integrator_dt_s,
+            dtype=initial_states.dtype,
+            device=initial_states.device,
+        )
+
+        for step in range(total_steps - 1, -1, -1):
+            output_adjoint = state_adjoint + gradient_by_step[:, step]
+            previous_value = initial_states if step == 0 else timeline[:, step - 1]
+            segment = segment_schedule[:, step]
+
+            with torch.enable_grad():
+                previous = previous_value.detach().requires_grad_(True)
+                step_control = controls[rows, segment].detach().requires_grad_(
+                    needs_controls
+                )
+                step_duration = segment_durations_s[rows, segment].detach()
+                step_duration.requires_grad_(needs_durations)
+                step_aero = aero_params.detach().requires_grad_(needs_aero)
+                remaining = (
+                    step_duration
+                    - local_steps[:, step].to(initial_states.dtype) * dt_cap
+                ).clamp(min=0.0)
+                actual_dt = torch.minimum(remaining, dt_cap)
+                stepped = _rollout_step(
+                    previous, step_control, step_aero, actual_dt
+                )
+                next_state = torch.where(
+                    active_schedule[:, step].unsqueeze(-1), stepped, previous
+                )
+                differentiable_inputs = [previous]
+                if needs_controls:
+                    differentiable_inputs.append(step_control)
+                if needs_durations:
+                    differentiable_inputs.append(step_duration)
+                if needs_aero:
+                    differentiable_inputs.append(step_aero)
+                local_gradients = torch.autograd.grad(
+                    next_state,
+                    differentiable_inputs,
+                    grad_outputs=output_adjoint,
+                    allow_unused=False,
+                )
+
+            state_adjoint = local_gradients[0]
+            gradient_index = 1
+            if needs_controls:
+                control_gradient.index_put_(
+                    (rows, segment),
+                    local_gradients[gradient_index],
+                    accumulate=True,
+                )
+                gradient_index += 1
+            if needs_durations:
+                duration_gradient.index_put_(
+                    (rows, segment),
+                    local_gradients[gradient_index],
+                    accumulate=True,
+                )
+                gradient_index += 1
+            if needs_aero:
+                aero_gradient.add_(local_gradients[gradient_index])
+
+        return (
+            state_adjoint if needs_initial else None,
+            control_gradient,
+            duration_gradient,
+            aero_gradient,
+            None,
+            None,
+        )
+
+
 def rollout_piecewise_constant(
     initial_states: torch.Tensor,
     controls: torch.Tensor,
@@ -261,14 +542,18 @@ def rollout_piecewise_constant(
     """Roll batched non-uniform controls and return segment-end states ``[B,N,7]``.
 
     Each segment is subdivided exactly like the numeric rollout: steps are capped at
-    ``integrator_dt_s`` and the final step is clamped to the segment boundary.  The integer
-    loop count is chosen from detached durations, while every actual step duration remains a
-    tensor, so gradients flow through the active branch to duration logits.
+    ``integrator_dt_s`` and the final step is clamped to the segment boundary. Flights
+    advance through their own segment schedules independently inside one global batch loop;
+    a short segment in one row therefore does not wait for another row's long segment. The
+    integer schedule is chosen from detached durations, while every actual step duration
+    remains a tensor, so gradients flow through the active branch to duration logits.
     """
     _require_last_dim(initial_states, len(STATE_NAMES), "initial_states")
     _require_last_dim(controls, len(CONTROL_NAMES), "controls")
     if controls.ndim != 3 or segment_durations_s.shape != controls.shape[:2]:
         raise ValueError("controls must be [B,N,3] and segment_durations_s must be [B,N]")
+    if controls.shape[1] == 0:
+        raise ValueError("control rollout requires at least one segment")
     if initial_states.shape[0] != controls.shape[0] or aero_params.shape[0] != controls.shape[0]:
         raise ValueError("initial states, controls, and aero parameters must share batch size")
     if integrator_dt_s <= 0.0:
@@ -276,28 +561,28 @@ def rollout_piecewise_constant(
     if torch.any(segment_durations_s <= 0.0):
         raise ValueError("every segment duration must be positive")
 
-    state = initial_states
-    endpoints: list[torch.Tensor] = []
-    dt_cap = torch.as_tensor(
-        integrator_dt_s, dtype=initial_states.dtype, device=initial_states.device
+    requires_gradient = torch.is_grad_enabled() and any(
+        tensor.requires_grad
+        for tensor in (initial_states, controls, segment_durations_s, aero_params)
     )
-    for segment_index in range(controls.shape[1]):
-        remaining = segment_durations_s[:, segment_index]
-        steps = int(torch.ceil(remaining.detach().max() / integrator_dt_s).item())
-        if steps > max_steps_per_segment:
-            raise ValueError(
-                f"segment {segment_index} needs {steps} integration steps; "
-                f"limit is {max_steps_per_segment}"
-            )
-        segment_control = controls[:, segment_index]
-        for _ in range(steps):
-            step_dt = torch.minimum(remaining, dt_cap)
-            active = step_dt > 0.0
-            stepped = geodetic_step(state, segment_control, aero_params, step_dt)
-            state = torch.where(active.unsqueeze(-1), stepped, state)
-            remaining = (remaining - step_dt).clamp(min=0.0)
-        endpoints.append(state)
-    return torch.stack(endpoints, dim=1)
+    if requires_gradient:
+        return _PiecewiseRolloutAdjoint.apply(
+            initial_states,
+            controls,
+            segment_durations_s,
+            aero_params,
+            integrator_dt_s,
+            max_steps_per_segment,
+        )
+    endpoints, _timeline, _schedule = _scheduled_rollout_forward(
+        initial_states,
+        controls,
+        segment_durations_s,
+        aero_params,
+        integrator_dt_s=integrator_dt_s,
+        max_steps_per_segment=max_steps_per_segment,
+    )
+    return endpoints
 
 
 def geodetic_states_to_channels(

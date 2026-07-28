@@ -11,7 +11,10 @@ import torch
 from aerodynamic_model.casadi_simulator import CasadiSimulator
 from aerodynamic_model.common import GeodeticState, LoadFactorControl
 from aerodynamic_model.rollout import rollout_piecewise_constant as casadi_rollout
-from aerodynamic_model.torch_dynamics import geodetic_step, rollout_piecewise_constant
+from aerodynamic_model.torch_dynamics import (
+    geodetic_step,
+    rollout_piecewise_constant,
+)
 from aircraft.aero_params import aero_params_for_aircraft
 from aircraft.aircraft_sets import A320
 
@@ -35,6 +38,33 @@ def _state_array(state: GeodeticState) -> np.ndarray:
         state.latitude, state.longitude, state.altitude, state.V,
         state.psi, state.gamma, state.m,
     ])
+
+
+def _segment_barrier_rollout(
+    initial_states: torch.Tensor,
+    controls: torch.Tensor,
+    durations: torch.Tensor,
+    aero_params: torch.Tensor,
+    *,
+    integrator_dt_s: float,
+) -> torch.Tensor:
+    """Pre-optimization reference: all batch rows synchronize at every segment."""
+    state = initial_states
+    endpoints = []
+    dt_cap = torch.as_tensor(
+        integrator_dt_s, dtype=initial_states.dtype, device=initial_states.device
+    )
+    for segment in range(controls.shape[1]):
+        remaining = durations[:, segment]
+        steps = int(torch.ceil(remaining.detach().max() / integrator_dt_s).item())
+        for _ in range(steps):
+            step_dt = torch.minimum(remaining, dt_cap)
+            active = step_dt > 0.0
+            stepped = geodetic_step(state, controls[:, segment], aero_params, step_dt)
+            state = torch.where(active.unsqueeze(-1), stepped, state)
+            remaining = (remaining - step_dt).clamp(min=0.0)
+        endpoints.append(state)
+    return torch.stack(endpoints, dim=1)
 
 
 @pytest.mark.parametrize(
@@ -186,3 +216,72 @@ def test_rollout_backpropagates_to_controls_and_nonuniform_durations():
     assert durations.grad is not None and torch.isfinite(durations.grad).all()
     assert torch.count_nonzero(controls.grad) > 0
     assert torch.count_nonzero(durations.grad) == durations.numel()
+
+
+@pytest.mark.parametrize(
+    "device",
+    [
+        torch.device("cpu"),
+        pytest.param(
+            torch.device("cuda"),
+            marks=pytest.mark.skipif(
+                not torch.cuda.is_available(), reason="CUDA is not available"
+            ),
+        ),
+    ],
+)
+def test_global_schedule_matches_segment_barriers_in_outputs_and_gradients(device):
+    initial_rows = torch.tensor(
+        [
+            [35.88, -78.79, 900.0, 80.0, 2.2, -0.04, A320.landing_mass],
+            [38.74, -90.36, 1300.0, 95.0, 1.7, -0.03, A320.landing_mass],
+        ],
+        dtype=torch.float64,
+        device=device,
+    )
+    control_rows = torch.tensor(
+        [
+            [[45_000.0, 0.08, 1.02], [36_000.0, -0.04, 0.99], [30_000.0, 0.01, 1.01]],
+            [[60_000.0, -0.06, 1.04], [48_000.0, 0.03, 1.00], [33_000.0, -0.02, 0.98]],
+        ],
+        dtype=torch.float64,
+        device=device,
+    )
+    # Includes exact dt multiples and values immediately on either side of a boundary.
+    duration_rows = torch.tensor(
+        [[0.5, 1.0, 1.5000000001], [1.4999999999, 0.51, 1.0]],
+        dtype=torch.float64,
+        device=device,
+    )
+    weights = torch.linspace(
+        0.5, 1.5, 2 * 3 * 7, dtype=torch.float64, device=device
+    ).reshape(2, 3, 7)
+
+    def evaluated(rollout):
+        initial = initial_rows.clone().requires_grad_()
+        controls = control_rows.clone().requires_grad_()
+        durations = duration_rows.clone().requires_grad_()
+        aero = _aero_tensor(batch=2).to(device).requires_grad_()
+        states = rollout(
+            initial,
+            controls,
+            durations,
+            aero,
+            integrator_dt_s=0.5,
+        )
+        gradients = torch.autograd.grad(
+            (states * weights).sum(), (initial, controls, durations, aero)
+        )
+        return states.detach(), tuple(gradient.detach() for gradient in gradients)
+
+    expected_states, expected_gradients = evaluated(_segment_barrier_rollout)
+    actual_states, actual_gradients = evaluated(rollout_piecewise_constant)
+
+    state_tolerance = (
+        {"rtol": 3e-12, "atol": 3e-8}
+        if device.type == "cuda"
+        else {"rtol": 0.0, "atol": 0.0}
+    )
+    torch.testing.assert_close(actual_states, expected_states, **state_tolerance)
+    for actual, expected in zip(actual_gradients, expected_gradients):
+        torch.testing.assert_close(actual, expected, rtol=2e-9, atol=2e-8)
