@@ -854,6 +854,20 @@ def test_split_by_flight_is_disjoint_and_reproducible():
                    for item in group)
 
 
+def test_split_seed_locks_outer_split_across_training_seeds():
+    series, _config = _series(n_flights=100)
+    first = TSConfig(seed=1337, split_seed=1337)
+    repeated = TSConfig(seed=2027, split_seed=1337)
+
+    def split_ids(config):
+        return tuple(
+            tuple(item.dataset_id for item in group)
+            for group in split_by_flight(series, config)
+        )
+
+    assert split_ids(first) == split_ids(repeated)
+
+
 def test_pooled_prediction_filters_checkpoint_split_to_current_airport_subset():
     provenance = {
         "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
@@ -1364,6 +1378,8 @@ def test_default_config_uses_selected_normalized_output_and_physics_losses():
     assert TSConfig(model="patchtst").n_segments == 256
     assert config.epochs == 180
     assert config.patience == 20
+    assert config.lr_plateau_patience == 3
+    assert config.lr_plateau_factor == 0.5
     assert config.kinematic_consistency_loss_weight == 3.0
     assert config.terminal_loss_weight == 0.02
 
@@ -2333,6 +2349,11 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
         "horizon_mode": HORIZON_NORMALIZED,
         "pred_len": config.pred_len,
         "full_horizon_steps": config.full_horizon_steps,
+        "lr_scheduler": {
+            "name": "ReduceLROnPlateau",
+            "factor": config.lr_plateau_factor,
+            "patience": config.lr_plateau_patience,
+        },
         "split_sha256": {
             split: hashlib.sha256("\n".join(sorted(payload["split"][split])).encode()).hexdigest()
             for split in ("train", "val", "test")
@@ -2344,6 +2365,11 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
     assert set(summary["history"][0]["val_components"]) == {
         "state", "final_time", "kinematic", "terminal"
     }
+    assert summary["history"][0]["learning_rate"] == config.learning_rate
+    assert summary["history"][0]["optimizer_updates"] > 0
+    objective = fit_evaluation["diagnostics"]["training_objective"]
+    assert objective["total_optimizer_updates"] == summary["history"][-1]["optimizer_updates"]
+    assert objective["final_learning_rate"] == summary["history"][-1]["learning_rate"]
 
     records, overlap = [], []
     for index, s in enumerate(series[:4]):

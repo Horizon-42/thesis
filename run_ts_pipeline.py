@@ -251,6 +251,13 @@ class TrainingPlan:
             return "checkpoint horizon mode does not match the requested recipe"
         if metadata.get("pred_len") != expected_config.pred_len:
             return "checkpoint output length does not match the requested recipe"
+        expected_scheduler = {
+            "name": "ReduceLROnPlateau",
+            "factor": expected_config.lr_plateau_factor,
+            "patience": expected_config.lr_plateau_patience,
+        }
+        if metadata.get("lr_scheduler") != expected_scheduler:
+            return "checkpoint LR scheduler does not match the requested recipe"
         if (
             expected_config.horizon_mode == HORIZON_WINDOW
             and metadata.get("full_horizon_steps") != expected_config.full_horizon_steps

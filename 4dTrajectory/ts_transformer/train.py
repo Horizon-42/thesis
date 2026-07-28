@@ -263,6 +263,8 @@ class EpochResult:
     epoch: int
     train_loss: float
     val_loss: float
+    learning_rate: float
+    optimizer_updates: int
     seconds: float
     val_by_airport: dict[str, float]
     train_components: dict[str, float]
@@ -374,7 +376,7 @@ def _training_objective_diagnostics(
         return None
     rows = [vars(row) if isinstance(row, EpochResult) else row for row in history]
     best = min(rows, key=lambda row: row["val_loss"])
-    return {
+    result = {
         "best_epoch": int(best["epoch"]),
         "epochs_run": len(rows),
         "reached_epoch_budget": len(rows) == config.epochs,
@@ -386,6 +388,12 @@ def _training_objective_diagnostics(
             if best["train_loss"] != 0.0 else None
         ),
     }
+    last = rows[-1]
+    if "learning_rate" in last:
+        result["final_learning_rate"] = float(last["learning_rate"])
+    if "optimizer_updates" in last:
+        result["total_optimizer_updates"] = int(last["optimizer_updates"])
+    return result
 
 
 def evaluate_fit_splits(
@@ -600,7 +608,11 @@ def fit_model(
     optimizer = torch.optim.Adam(
         model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
     )
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=3)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        factor=config.lr_plateau_factor,
+        patience=config.lr_plateau_patience,
+    )
 
     flights_per_epoch = sum(
         count > 0 for _start, count in train_set.series_ranges.values()
@@ -636,9 +648,11 @@ def fit_model(
     best_val = math.inf
     best_state: dict[str, torch.Tensor] | None = None
     epochs_without_improvement = 0
+    optimizer_updates = 0
 
     for epoch in range(1, config.epochs + 1):
         started = time.perf_counter()
+        epoch_learning_rate = float(optimizer.param_groups[0]["lr"])
 
         model.train()
         train_component_totals = {name: 0.0 for name in LOSS_COMPONENT_NAMES}
@@ -661,6 +675,7 @@ def fit_model(
             loss = components.total
             loss.backward()
             optimizer.step()
+            optimizer_updates += 1
             for name, value in components.tensors().items():
                 train_component_totals[name] += float(value.detach()) * batch_count
             train_weight_total += batch_weight
@@ -697,6 +712,8 @@ def fit_model(
             epoch=epoch,
             train_loss=train_loss,
             val_loss=val_loss,
+            learning_rate=epoch_learning_rate,
+            optimizer_updates=optimizer_updates,
             seconds=time.perf_counter() - started,
             val_by_airport=val_by_airport,
             train_components=train_components,
@@ -714,7 +731,8 @@ def fit_model(
 
         if verbose:
             print(f"  epoch {epoch:3d}/{config.epochs}  train {train_loss:.6f}  "
-                  f"val-macro {val_loss:.6f}  {history[-1].seconds:5.1f}s{marker}")
+                  f"val-macro {val_loss:.6f}  lr {epoch_learning_rate:.2e}  "
+                  f"updates {optimizer_updates:5d}  {history[-1].seconds:5.1f}s{marker}")
             print(
                 "             val parts  "
                 + "  ".join(
@@ -836,6 +854,11 @@ def train(
         "horizon_mode": config.horizon_mode,
         "pred_len": config.pred_len,
         "full_horizon_steps": config.full_horizon_steps,
+        "lr_scheduler": {
+            "name": "ReduceLROnPlateau",
+            "factor": config.lr_plateau_factor,
+            "patience": config.lr_plateau_patience,
+        },
         "split_sha256": {
             "train": _split_sha256(train_series),
             "val": _split_sha256(val_series),
@@ -852,6 +875,8 @@ def train(
         "parameters": parameter_count(model),
         "device": str(device),
         "epochs_run": len(fit.history),
+        "optimizer_updates": fit.history[-1].optimizer_updates,
+        "final_learning_rate": fit.history[-1].learning_rate,
         "best_val_loss": fit.best_val_loss,
         "flights": {"train": len(train_series), "val": len(val_series), "test": len(test_series)},
         "windows": {

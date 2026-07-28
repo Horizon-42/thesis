@@ -150,8 +150,15 @@ class TSConfig:
     epochs: int = 180
     learning_rate: float = 5e-4
     weight_decay: float = 0.0
+    lr_plateau_factor: float = 0.5
+    lr_plateau_patience: int = 3
     patience: int = 20              # early-stopping patience, in epochs without val improvement
     seed: int = 1337
+    # ``seed`` controls model initialisation and epoch shuffling.  Leave this unset to
+    # preserve the historical behaviour where the same seed also assigns outer splits;
+    # set it explicitly when repeating an experiment with different training seeds so
+    # outer-train/validation/test identities remain locked.
+    split_seed: int | None = None
     device: str = "auto"            # "auto" -> cuda when available, else cpu
     val_fraction: float = 0.15      # split is BY FLIGHT, never by window — see dataset.py
     test_fraction: float = 0.15
@@ -206,6 +213,7 @@ class TSConfig:
             "kernel_size",
             "batch_size",
             "epochs",
+            "lr_plateau_patience",
             "patience",
         ):
             if getattr(self, name) <= 0:
@@ -213,6 +221,11 @@ class TSConfig:
         for name in ("dt_s", "learning_rate", "final_time_scale_s"):
             if getattr(self, name) <= 0.0:
                 raise ValueError(f"{name} must be positive, got {getattr(self, name)!r}")
+        if not 0.0 < self.lr_plateau_factor < 1.0:
+            raise ValueError(
+                "lr_plateau_factor must be between 0 and 1, got "
+                f"{self.lr_plateau_factor!r}"
+            )
         if self.d_model % self.n_heads:
             raise ValueError(
                 f"d_model={self.d_model} must divide evenly by n_heads={self.n_heads}"
@@ -263,6 +276,11 @@ class TSConfig:
     def lookback_s(self) -> float:
         """Wall-clock seconds of observed track the model is shown."""
         return self.seq_len * self.dt_s
+
+    @property
+    def resolved_split_seed(self) -> int:
+        """Seed used only for the locked outer train/validation/test assignment."""
+        return self.seed if self.split_seed is None else self.split_seed
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)

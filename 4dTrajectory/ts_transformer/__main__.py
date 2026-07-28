@@ -156,6 +156,8 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--batch-size", type=_batch_size, default=None,
                         help="positive integer, or 'auto' to probe the active CUDA GPU")
     parser.add_argument("--learning-rate", type=float, default=None)
+    parser.add_argument("--lr-plateau-factor", type=float, default=None)
+    parser.add_argument("--lr-plateau-patience", type=int, default=None)
     parser.add_argument("--fitted-tail-weight", type=float, default=None,
                         help="position-only weight for fitted ADS-B tail rows (default: 0.25)")
     parser.add_argument("--fitted-terminal-weight", type=float, default=None,
@@ -169,6 +171,12 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--e-layers", type=int, default=None)
     parser.add_argument("--n-heads", type=int, default=None)
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument(
+        "--split-seed",
+        type=int,
+        default=None,
+        help="lock outer train/validation/test identities independently of --seed",
+    )
     parser.add_argument("--device", default=None, help='"auto" (default), "cpu", "cuda"')
     parser.add_argument("--coordinate-frame", choices=COORDINATE_FRAMES, default=None)
     parser.add_argument(
@@ -206,13 +214,16 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("window_horizon_steps", args.window_horizon_steps),
         ("dt_s", args.dt), ("epochs", args.epochs),
         ("batch_size", args.batch_size if isinstance(args.batch_size, int) else None),
-        ("learning_rate", args.learning_rate), ("patience", args.patience),
+        ("learning_rate", args.learning_rate),
+        ("lr_plateau_factor", args.lr_plateau_factor),
+        ("lr_plateau_patience", args.lr_plateau_patience),
+        ("patience", args.patience),
         ("fitted_tail_position_weight", args.fitted_tail_weight),
         ("fitted_terminal_position_weight", args.fitted_terminal_weight),
         ("kinematic_consistency_loss_weight", args.kinematic_consistency_weight),
         ("terminal_loss_weight", args.terminal_loss_weight),
         ("d_model", args.d_model), ("e_layers", args.e_layers), ("n_heads", args.n_heads),
-        ("seed", args.seed), ("device", args.device),
+        ("seed", args.seed), ("split_seed", args.split_seed), ("device", args.device),
         ("aircraft_type", args.aircraft_type), ("coordinate_frame", args.coordinate_frame),
         ("random_train_anchor", args.random_train_anchor),
         ("use_norm", args.instance_norm), ("revin", args.instance_norm),

@@ -911,7 +911,7 @@ def _split_fraction(flight_id: str, seed: int) -> float:
 
 def split_name_for_dataset_id(dataset_id: str, config: TSConfig) -> str:
     """Return the locked outer split without reading any trajectory values."""
-    fraction = _split_fraction(dataset_id, config.seed)
+    fraction = _split_fraction(dataset_id, config.resolved_split_seed)
     if fraction < config.test_fraction:
         return "test"
     if fraction < config.test_fraction + config.val_fraction:
@@ -944,13 +944,14 @@ def split_by_flight(
 ) -> tuple[list[FlightSeries], list[FlightSeries], list[FlightSeries]]:
     """Deterministic train / val / test split at FLIGHT granularity.
 
-    Each flight's split is a pure function of ``(config.seed, airport:flight_id)`` — never of its
-    POSITION in the list. A positional shuffle looks deterministic but reshuffles the whole
-    assignment the moment one flight is added to or dropped from the harvest, silently
-    promoting old test flights into training on the next retrain. The cost of per-flight
-    hashing is that the realised fractions only approximate ``val_fraction`` /
-    ``test_fraction`` (exact in expectation); the win is that a flight, once in the test
-    set, stays there for every future harvest with the same seed.
+    Each flight's split is a pure function of ``(config.resolved_split_seed,
+    airport:flight_id)`` — never of its POSITION in the list or of the model-training seed.
+    A positional shuffle looks deterministic but reshuffles the whole assignment the moment
+    one flight is added to or dropped from the harvest, silently promoting old test flights
+    into training on the next retrain. The cost of per-flight hashing is that the realised
+    fractions only approximate ``val_fraction`` / ``test_fraction`` (exact in expectation);
+    the win is that a flight, once in the test set, stays there for every future harvest with
+    the same split seed.
     """
     train, val, test = [], [], []
     for s in series:

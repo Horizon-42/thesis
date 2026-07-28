@@ -439,6 +439,7 @@ def test_skip_train_rejects_checkpoint_from_opposite_anchor_policy(
     )
     trained.train_dir.mkdir(parents=True)
     trained.checkpoint.write_bytes(b"checkpoint")
+    trained_config, _source = trained.resolved_train_config(use_best_config=False)
     trained.checkpoint_metadata.write_text(json.dumps({
         "schema_version": pipeline.CHECKPOINT_METADATA_SCHEMA,
         "checkpoint_sha256": hashlib.sha256(trained.checkpoint.read_bytes()).hexdigest(),
@@ -447,7 +448,12 @@ def test_skip_train_rejects_checkpoint_from_opposite_anchor_policy(
             },
             "random_train_anchor": trained_policy,
             "horizon_mode": trained.horizon_mode,
-            "pred_len": trained.resolved_train_config(use_best_config=False)[0].pred_len,
+            "pred_len": trained_config.pred_len,
+            "lr_scheduler": {
+                "name": "ReduceLROnPlateau",
+                "factor": trained_config.lr_plateau_factor,
+                "patience": trained_config.lr_plateau_patience,
+            },
         }), encoding="utf-8")
 
     assert trained.checkpoint_reuse_error() is None
@@ -481,6 +487,11 @@ def test_skip_train_rejects_checkpoint_from_opposite_horizon_mode(
         "random_train_anchor": False,
         "horizon_mode": trained_config.horizon_mode,
         "pred_len": trained_config.pred_len,
+        "lr_scheduler": {
+            "name": "ReduceLROnPlateau",
+            "factor": trained_config.lr_plateau_factor,
+            "patience": trained_config.lr_plateau_patience,
+        },
     }), encoding="utf-8")
 
     assert trained.checkpoint_reuse_error() is None
@@ -516,6 +527,11 @@ def test_skip_train_rejects_window_checkpoint_with_different_rollout_cap(
         "horizon_mode": trained_config.horizon_mode,
         "pred_len": trained_config.pred_len,
         "full_horizon_steps": trained_config.full_horizon_steps,
+        "lr_scheduler": {
+            "name": "ReduceLROnPlateau",
+            "factor": trained_config.lr_plateau_factor,
+            "patience": trained_config.lr_plateau_patience,
+        },
     }), encoding="utf-8")
 
     assert trained.checkpoint_reuse_error() is None
