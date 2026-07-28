@@ -1838,13 +1838,36 @@ def test_common_grid_report_executes_control_model_with_flight_dynamics():
     )
 
     with torch.no_grad():
-        values, final_time, durations = predictability_report.predict_batch_nodes(
+        values, final_time, durations, controls = predictability_report.predict_batch_nodes(
             run, histories, series, torch.device("cpu")
         )
 
     assert values.shape == (2, config.n_segments, config.enc_in)
     assert durations.shape == (2, config.n_segments)
+    assert controls is not None and controls.shape == (2, config.n_segments, 3)
     np.testing.assert_allclose(durations.sum(axis=1), final_time, rtol=1e-6)
+
+
+def test_control_distribution_statistics_reports_bounds_changes_and_duration_tails():
+    controls = np.array([
+        [[0.0, -0.5, 0.5], [50.0, 0.0, 1.0], [100.0, 0.5, 2.0]],
+        [[0.0, -1.0, 0.5], [100.0, 0.0, 1.0], [200.0, 1.0, 2.0]],
+    ])
+    durations = np.array([[1.0, 2.0, 3.0], [0.5, 4.0, 8.0]])
+    lower = np.array([[0.0, -0.5, 0.5], [0.0, -1.0, 0.5]])
+    upper = np.array([[100.0, 0.5, 2.0], [200.0, 1.0, 2.0]])
+
+    result = predictability_report.control_distribution_statistics(
+        controls, durations, lower, upper
+    )
+
+    thrust = result["channels"]["thrust_N"]
+    assert thrust["median"] == pytest.approx(75.0)
+    assert thrust["near_lower_fraction"] == pytest.approx(2.0 / 6.0)
+    assert thrust["near_upper_fraction"] == pytest.approx(2.0 / 6.0)
+    assert thrust["adjacent_abs_change_median"] == pytest.approx(75.0)
+    assert result["durations_s"]["min"] == pytest.approx(0.5)
+    assert result["durations_s"]["max"] == pytest.approx(8.0)
 
 
 def test_auto_batch_probe_executes_the_shared_physics_loss(monkeypatch):

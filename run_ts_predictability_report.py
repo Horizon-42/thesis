@@ -63,7 +63,7 @@ from train import (  # noqa: E402
     usable_series,
 )
 
-REPORT_SCHEMA = "ts-pooled-predictability-report-v3-fit-replay-validation-only"
+REPORT_SCHEMA = "ts-pooled-predictability-report-v4-control-diagnostics-validation-only"
 DEFAULT_REMAINING_TIME_EDGES_S = (0.0, 30.0, 60.0, 120.0, 180.0, 300.0, 450.0, 600.0)
 ROUTE_TYPES = ("straight-in", "single-turn", "vectoring", "holding-like")
 
@@ -230,8 +230,8 @@ def predict_batch_nodes(
     histories: torch.Tensor,
     series: Sequence[FlightSeries],
     device: torch.device,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return physical channel nodes, final time and their explicit segment durations."""
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
+    """Return physical nodes, final time, explicit durations and optional controls."""
     if run.config.prediction_output == PREDICTION_CONTROL:
         dynamics = batch_dynamics_tensors(series, run.config, device)
         output = run.model(histories, dynamics)
@@ -240,6 +240,7 @@ def predict_batch_nodes(
             channels.detach().cpu().numpy().astype(np.float32),
             output.final_time_s.detach().cpu().numpy().astype(np.float64),
             output.segment_durations.detach().cpu().numpy().astype(np.float64),
+            output.controls.detach().cpu().numpy().astype(np.float64),
         )
 
     states, final_time = _NODE_PREDICTORS[run.config.horizon_mode](
@@ -255,7 +256,75 @@ def predict_batch_nodes(
         ).copy()
     else:
         durations = np.full(physical.shape[:2], run.config.dt_s, dtype=np.float64)
-    return physical, final_time_array, durations
+    return physical, final_time_array, durations, None
+
+
+def control_distribution_statistics(
+    controls: np.ndarray,
+    durations_s: np.ndarray,
+    lower: np.ndarray,
+    upper: np.ndarray,
+) -> dict[str, Any]:
+    """Unweighted validation distributions required by the control experiment guide.
+
+    Bounds may vary by flight. A value is considered near a bound when it lies within one
+    percent of that flight's allowed range; the threshold is recorded with the result.
+    """
+    controls = np.asarray(controls, dtype=np.float64)
+    durations_s = np.asarray(durations_s, dtype=np.float64)
+    lower = np.asarray(lower, dtype=np.float64)
+    upper = np.asarray(upper, dtype=np.float64)
+    if controls.ndim != 3 or controls.shape[-1] != 3:
+        raise ValueError("controls must be [B,N,3]")
+    if durations_s.shape != controls.shape[:2]:
+        raise ValueError("durations must align with control segments")
+    if lower.shape != (controls.shape[0], 3) or upper.shape != lower.shape:
+        raise ValueError("control bounds must be aligned [B,3] arrays")
+    if not (
+        np.isfinite(controls).all()
+        and np.isfinite(durations_s).all()
+        and np.isfinite(lower).all()
+        and np.isfinite(upper).all()
+    ):
+        raise ValueError("control diagnostics require finite values")
+    if np.any(upper <= lower) or np.any(durations_s <= 0.0):
+        raise ValueError("control bounds and durations must be strictly positive intervals")
+
+    bound_fraction = 0.01
+    ranges = upper - lower
+    changes = np.abs(np.diff(controls, axis=1))
+    units = ("N", "rad", "1")
+    names = ("thrust_N", "bank_rad", "load_factor")
+    channel_statistics: dict[str, dict[str, float | str]] = {}
+    for channel, (name, unit) in enumerate(zip(names, units)):
+        values = controls[..., channel].reshape(-1)
+        adjacent = changes[..., channel].reshape(-1)
+        low_distance = controls[..., channel] - lower[:, None, channel]
+        high_distance = upper[:, None, channel] - controls[..., channel]
+        tolerance = bound_fraction * ranges[:, None, channel]
+        channel_statistics[name] = {
+            "unit": unit,
+            "p5": float(np.percentile(values, 5)),
+            "median": float(np.median(values)),
+            "p95": float(np.percentile(values, 95)),
+            "near_lower_fraction": float(np.mean(low_distance <= tolerance)),
+            "near_upper_fraction": float(np.mean(high_distance <= tolerance)),
+            "adjacent_abs_change_median": float(np.median(adjacent)),
+            "adjacent_abs_change_p95": float(np.percentile(adjacent, 95)),
+            "adjacent_abs_change_max": float(np.max(adjacent)),
+        }
+    flat_durations = durations_s.reshape(-1)
+    return {
+        "near_bound_range_fraction": bound_fraction,
+        "channels": channel_statistics,
+        "durations_s": {
+            "min": float(np.min(flat_durations)),
+            "p1": float(np.percentile(flat_durations, 1)),
+            "median": float(np.median(flat_durations)),
+            "p99": float(np.percentile(flat_durations, 99)),
+            "max": float(np.max(flat_durations)),
+        },
+    }
 
 
 def displacement_errors(predicted: np.ndarray, truth: np.ndarray) -> np.ndarray:
@@ -279,11 +348,12 @@ def run_deterministic(
     raw_values: list[np.ndarray] = []
     final_times: list[np.ndarray] = []
     raw_durations: list[np.ndarray] = []
+    raw_controls: list[np.ndarray] = []
     capped: list[bool] = []
     with torch.no_grad():
         for start in range(0, len(series), batch_size):
             stop = min(start + batch_size, len(series))
-            decoded, predicted_time, durations = predict_batch_nodes(
+            decoded, predicted_time, durations, controls = predict_batch_nodes(
                 run,
                 torch.from_numpy(histories[start:stop]).to(device),
                 series[start:stop],
@@ -292,6 +362,8 @@ def run_deterministic(
             raw_values.append(decoded)
             final_times.append(predicted_time)
             raw_durations.append(durations)
+            if controls is not None:
+                raw_controls.append(controls)
             for local, absolute in enumerate(range(start, stop)):
                 sampled, was_capped = resample_prediction(
                     anchors[absolute],
@@ -311,6 +383,15 @@ def run_deterministic(
     kinematics = raw_kinematic_metrics(
         anchors, raw_array, durations, valid_segments=valid
     )
+    control_diagnostics = None
+    if raw_controls:
+        dynamics = [dynamics_arrays(item, run.config.seq_len - 1) for item in series]
+        control_diagnostics = control_distribution_statistics(
+            np.concatenate(raw_controls),
+            durations,
+            np.stack([row["control_lower"] for row in dynamics]),
+            np.stack([row["control_upper"] for row in dynamics]),
+        )
     error = displacement_errors(common_array, truth)
     return {
         "common_prediction": common_array,
@@ -320,6 +401,7 @@ def run_deterministic(
         "predicted_final_time_s": final_time_array,
         "horizon_capped": np.asarray(capped, dtype=bool),
         "raw_kinematics": kinematics,
+        "control_diagnostics": control_diagnostics,
     }
 
 
@@ -356,7 +438,7 @@ def mc_dropout_coverage(
             best_ade = np.full(stop - start, np.inf)
             best_fde = np.full(stop - start, np.inf)
             for draw in range(1, sample_count + 1):
-                decoded, predicted_time, durations = predict_batch_nodes(
+                decoded, predicted_time, durations, _controls = predict_batch_nodes(
                     run, tensor, series[start:stop], device
                 )
                 sampled = []
@@ -826,6 +908,39 @@ def write_html(
             for row in block["curve"]
         ],
     )
+    control_rows = []
+    duration_rows = []
+    for model_row in model_summary:
+        diagnostics = model_row.get("control_diagnostics")
+        if diagnostics is None:
+            continue
+        for name, statistics in diagnostics["channels"].items():
+            control_rows.append((
+                model_row["label"], name, statistics["unit"],
+                f"{statistics['p5']:.4g}", f"{statistics['median']:.4g}",
+                f"{statistics['p95']:.4g}",
+                f"{100 * statistics['near_lower_fraction']:.2f}%",
+                f"{100 * statistics['near_upper_fraction']:.2f}%",
+                f"{statistics['adjacent_abs_change_median']:.4g}",
+                f"{statistics['adjacent_abs_change_p95']:.4g}",
+            ))
+        duration = diagnostics["durations_s"]
+        duration_rows.append((
+            model_row["label"], f"{duration['min']:.4g}", f"{duration['p1']:.4g}",
+            f"{duration['median']:.4g}", f"{duration['p99']:.4g}",
+            f"{duration['max']:.4g}",
+        ))
+    control_table = table_html(
+        (
+            "Model", "Control", "Unit", "p5", "median", "p95", "near lower",
+            "near upper", "adjacent |Δ| median", "adjacent |Δ| p95",
+        ),
+        control_rows,
+    ) if control_rows else "<p>No control-output checkpoint was included.</p>"
+    duration_table = table_html(
+        ("Model", "min (s)", "p1 (s)", "median (s)", "p99 (s)", "max (s)"),
+        duration_rows,
+    ) if duration_rows else ""
     generated_at = result["generated_at_utc"]
     document = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -859,6 +974,10 @@ code{{background:#edf1f3;padding:.1em .3em}} .meta{{font-size:.9rem;color:var(--
 <h2>Raw-output kinematics</h2>{kinematic_table}
 <p>These metrics are computed before smoothing or terminal post-processing, on each model's native output clock. Lower is better. Position–velocity RMSE is a fleet-level RMS statistic and is deliberately sensitive to catastrophic timing failures; heading, turn, acceleration and jerk use p95 to describe typical tail behaviour.</p>
 <div class="zh"><strong>运动学解读：</strong>位置—速度一致性检查“相邻位置差分得到的速度”是否等于模型直接输出的速度。normalized 模式若把 final_time_s 预测得接近 0，会把固定空间位移压进极短时间，从而产生极大的离群值；因此这里不能只看平均 ADE。</div>
+
+<h2>Control and duration distributions</h2>{control_table}{duration_table}
+<p>Statistics are unweighted over validation flights and segments. “Near bound” means within 1% of each flight's physical control range. Adjacent changes are absolute segment-to-segment differences in the channel's displayed unit.</p>
+<div class="zh"><strong>控制诊断：</strong>这里报告未加权的控制量和分段时长分布，用来识别推力、坡度角、载荷因子贴边，以及大量接近零时长的退化；它们不能由加权 regularizer loss 替代。</div>
 
 <h2>1 — Error structure</h2>
 <p>Errors are stratified by true remaining time, airport, runway and a documented geometric route proxy. The proxy uses accumulated heading change and path tortuosity: straight-in, single-turn, vectoring and holding-like. It is not an operational ATC intent label.</p>
@@ -1092,6 +1211,7 @@ def main() -> None:
             "prediction_horizon_cap_rate": float(block["horizon_capped"].mean()),
             "true_horizon_exceed_rate": true_horizon_exceed_rate(true_duration, run.config),
             "raw_kinematics": block["raw_kinematics"],
+            "control_diagnostics": block["control_diagnostics"],
             "epochs_run": len(histories[run.label]),
         })
 
