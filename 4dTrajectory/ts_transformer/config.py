@@ -23,6 +23,9 @@ from channels import CHANNELS
 
 MODELS = ("itransformer", "patchtst")
 COORDINATE_FRAMES = ("enu", "runway-aligned")
+PREDICTION_STATE = "state"
+PREDICTION_CONTROL = "control"
+PREDICTION_OUTPUTS = (PREDICTION_STATE, PREDICTION_CONTROL)
 HORIZON_NORMALIZED = "normalized"
 HORIZON_FULL = "full"
 HORIZON_WINDOW = "window"
@@ -52,11 +55,11 @@ DEFAULT_PRED_LEN_WINDOW = 30
 DEFAULT_SEQ_LEN = 60
 
 # Every remaining approach is mapped onto the same normalized progress domain [0, 1].
-# N is the number of equal progress segments (and therefore the number of future state
-# endpoints). It is deliberately independent of ``dt_s``. Held-out N=64/128/256 ablations
-# selected 64 for iTransformer but 256 for PatchTST; model-specific defaults live in one
-# mapping so callers do not reproduce architecture branches. Display code may interpolate
-# these physical nodes, but the learner is scored on its untouched output grid.
+# For state output, N is the number of equal-progress future endpoints. For control output,
+# N is the number of learned non-uniform piecewise-constant control segments and the rollout
+# returns their endpoints. It is deliberately independent of ``dt_s``. Held-out state-output
+# N=64/128/256 ablations selected 64 for iTransformer but 256 for PatchTST; model-specific
+# defaults live in one mapping so callers do not reproduce architecture branches.
 DEFAULT_N_SEGMENTS_BY_MODEL = {
     "itransformer": 64,
     "patchtst": 256,
@@ -82,6 +85,7 @@ class TSConfig:
 
     # ── what to train ────────────────────────────────────────────────────────
     model: str = MODELS[0]
+    prediction_output: str = PREDICTION_STATE
     horizon_mode: str = HORIZON_NORMALIZED
     # ── the time grid + windowing (read by the data build AND both models) ──
     dt_s: float = DEFAULT_DT_S
@@ -179,6 +183,14 @@ class TSConfig:
     kinematic_consistency_loss_weight: float = 3.0
     terminal_loss_weight: float = 0.02
     final_time_scale_s: float = DEFAULT_FINAL_TIME_SCALE_S
+    # Control-output-only regularizers. Controls are scaled by each flight's own envelope
+    # before these are evaluated, so mixed-aircraft batches share one dimensionless loss.
+    control_effort_loss_weight: float = 1e-3
+    control_smoothness_loss_weight: float = 1e-2
+    # Must match the high-fidelity replay integration cap. The Torch rollout subdivides every
+    # learned non-uniform segment at this interval and is numerically contract-tested against
+    # CasadiSimulator, rather than training on a cheaper second dynamics model.
+    control_rollout_integrator_dt_s: float = 0.5
 
     # ── provenance (free-form; recorded in the checkpoint) ──────────────────
     notes: dict[str, Any] = field(default_factory=dict)
@@ -186,6 +198,11 @@ class TSConfig:
     def __post_init__(self) -> None:
         if self.model not in MODELS:
             raise ValueError(f"unknown model {self.model!r}; expected one of {MODELS}")
+        if self.prediction_output not in PREDICTION_OUTPUTS:
+            raise ValueError(
+                f"unknown prediction_output {self.prediction_output!r}; "
+                f"expected one of {PREDICTION_OUTPUTS}"
+            )
         if self.n_segments is None:
             object.__setattr__(
                 self, "n_segments", DEFAULT_N_SEGMENTS_BY_MODEL[self.model]
@@ -193,6 +210,14 @@ class TSConfig:
         if self.horizon_mode not in HORIZON_MODES:
             raise ValueError(
                 f"unknown horizon_mode {self.horizon_mode!r}; expected one of {HORIZON_MODES}"
+            )
+        if (
+            self.prediction_output == PREDICTION_CONTROL
+            and self.horizon_mode != HORIZON_NORMALIZED
+        ):
+            raise ValueError(
+                "control output uses learned non-uniform segments and currently requires "
+                "horizon_mode='normalized'; state output retains normalized/full/window"
             )
         if self.coordinate_frame not in COORDINATE_FRAMES:
             raise ValueError(
@@ -218,7 +243,12 @@ class TSConfig:
         ):
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name} must be positive, got {getattr(self, name)!r}")
-        for name in ("dt_s", "learning_rate", "final_time_scale_s"):
+        for name in (
+            "dt_s",
+            "learning_rate",
+            "final_time_scale_s",
+            "control_rollout_integrator_dt_s",
+        ):
             if getattr(self, name) <= 0.0:
                 raise ValueError(f"{name} must be positive, got {getattr(self, name)!r}")
         if not 0.0 < self.lr_plateau_factor < 1.0:
@@ -245,6 +275,10 @@ class TSConfig:
             raise ValueError("kinematic_consistency_loss_weight must be non-negative")
         if self.terminal_loss_weight < 0.0:
             raise ValueError("terminal_loss_weight must be non-negative")
+        if self.control_effort_loss_weight < 0.0:
+            raise ValueError("control_effort_loss_weight must be non-negative")
+        if self.control_smoothness_loss_weight < 0.0:
+            raise ValueError("control_smoothness_loss_weight must be non-negative")
 
     # PatchTST reads configs.enc_in; iTransformer infers the count from the tensor.
     @property

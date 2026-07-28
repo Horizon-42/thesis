@@ -10,9 +10,8 @@ gates (lateral <= 106.75 m, vertical in [-3.05, +6.10] m) that grade the optimiz
       references/<flight>_reference_eval.json  metadata + observed states_ref
       summary.json                             the manifest — load_records reads ONLY this
 
-The records are **reference-shaped**: ``controls == []``. That is not a shortcut, it is the
-contract — a learned predictor emits no control schedule, and ``evaluation.records`` treats
-an empty control list as exactly that case.
+State-output records are reference-shaped (``controls == []``). Control-output records use
+the optimizer-shaped contract: rollout states plus their aligned active controls.
 
 Record construction goes through ``4dTrajectory/optimization/evaluation_export.py`` rather
 than building the JSON here, so there is one definition of the record shape. That module is
@@ -28,6 +27,8 @@ from pathlib import Path
 from typing import Any, Sequence
 
 import numpy as np
+from aerodynamic_model.common import GeodeticState, LoadFactorControl
+from aerodynamic_model.rollout import RolloutSample
 
 # evaluation_export lives beside the optimizer; it is a pure mapping module with no casadi
 # dependency, so it imports cleanly into the torch env.
@@ -43,6 +44,7 @@ from evaluation_export import (  # noqa: E402
     REFERENCE_EVAL_SUFFIX as _REFERENCE_EVAL_SUFFIX,
     REFERENCES_DIR,
     STATES_SUFFIX as _STATES_SUFFIX,
+    evaluation_record,
     reference_evaluation_record,
     state_dict,
     summary_row,
@@ -124,15 +126,13 @@ def build_prediction_record(
     anchor_state = full_observed_states[forecast.anchor]
     initial_state = anchor_state[1]
 
-    predicted_states = [anchor_state] + states_from_channels(
-        forecast.times - anchor_time, forecast.values, series.frame, mass_kg=mass_kg
-    )
     observed_states = full_observed_states[forecast.anchor:]
 
     source = dict(scenario.source)
+    prediction_output = "control" if forecast.controls is not None else "state"
     source.update({
         "predictor": model_name,
-        "predictionOutput": "state",
+        "predictionOutput": prediction_output,
         "horizonMode": horizon_mode,
         "forecastPasses": forecast.passes,
         "predictedFinalTimeS": forecast.final_time_s,
@@ -144,9 +144,28 @@ def build_prediction_record(
         "predictionSplit": split,
     })
 
-    eval_record = reference_evaluation_record(
-        initial_state, scenario.target, predicted_states, source
-    )
+    if forecast.controls is None:
+        predicted_states = [anchor_state] + states_from_channels(
+            forecast.times - anchor_time, forecast.values, series.frame, mass_kg=mass_kg
+        )
+        eval_record = reference_evaluation_record(
+            initial_state, scenario.target, predicted_states, source
+        )
+        predicted_state_rows = [{"t": t, **state_dict(s)} for t, s in predicted_states]
+    else:
+        if forecast.geodetic_values is None or forecast.segment_durations_s is None:
+            raise ValueError("control forecast must carry geodetic states and segment durations")
+        controls = [LoadFactorControl(*map(float, row)) for row in forecast.controls]
+        endpoint_states = [GeodeticState(*map(float, row)) for row in forecast.geodetic_values]
+        offsets = np.cumsum(forecast.segment_durations_s)
+        samples = [RolloutSample(0.0, initial_state, controls[0], 0)] + [
+            RolloutSample(float(t), state, controls[index], index)
+            for index, (t, state) in enumerate(zip(offsets, endpoint_states))
+        ]
+        eval_record = evaluation_record(
+            initial_state, scenario.target, samples, source
+        )
+        predicted_state_rows = list(eval_record["states"])
     eval_record["reference_file"] = f"{REFERENCES_DIR}/{record_stem(scenario.source, index)}{_REFERENCE_EVAL_SUFFIX}"
 
     reference_record = reference_evaluation_record(
@@ -161,7 +180,7 @@ def build_prediction_record(
         # against the observed truth it is supposed to reproduce. observed_states is the
         # WHOLE track (negative t before the anchor) so a viewer can show the lookback the
         # model was given; the reference RECORD is span-matched instead.
-        "predicted_states": [{"t": t, **state_dict(s)} for t, s in predicted_states],
+        "predicted_states": predicted_state_rows,
         "observed_states": [{"t": t, **state_dict(s)} for t, s in full_observed_states],
     }
 
@@ -363,7 +382,8 @@ def write_batch(
         "scenarios": None,
         "mode": (
             f"tsTransformer:{config_dict.get('model')}:"
-            f"{config_dict.get('horizon_mode')}:state:{split}"
+            f"{config_dict.get('horizon_mode')}:"
+            f"{config_dict.get('prediction_output', 'state')}:{split}"
         ),
         "split": split,
         "checkpoint": checkpoint,

@@ -10,9 +10,17 @@ import torch
 import torch.nn as nn
 
 from channels import horizontal_distance_m
-from config import HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW, TSConfig
-from dataset import FlightSeries, Normalizer
+from config import (
+    HORIZON_FULL,
+    HORIZON_NORMALIZED,
+    HORIZON_WINDOW,
+    PREDICTION_CONTROL,
+    TSConfig,
+)
+from dataset import FlightSeries, Normalizer, dynamics_arrays
+from prediction_outputs import ControlPrediction
 from time_grids import output_time_grid
+from train import control_rollout_channels
 
 
 @dataclass(frozen=True)
@@ -29,6 +37,9 @@ class Forecast:
     passes: int
     truncated_at_threshold: bool
     horizon_capped: bool
+    controls: np.ndarray | None = None
+    segment_durations_s: np.ndarray | None = None
+    geodetic_values: np.ndarray | None = None
 
     @property
     def n_steps(self) -> int:
@@ -67,6 +78,47 @@ def _forward(
     return (
         prediction.states[0].cpu().numpy().astype(np.float64),
         float(prediction.final_time_s[0].cpu()),
+    )
+
+
+def _forecast_control(
+    model: nn.Module,
+    series: FlightSeries,
+    config: TSConfig,
+    normalizer: Normalizer,
+    anchor: int,
+    device: torch.device,
+) -> Forecast:
+    """Predict bounded controls, then obtain states only through the shared dynamics."""
+    history = _history_at_anchor(series, config, normalizer, anchor)
+    tensor = torch.from_numpy(history[None, ...].astype(np.float32)).to(device)
+    dynamics = {
+        name: torch.from_numpy(value[None, ...]).to(device)
+        for name, value in dynamics_arrays(series, anchor).items()
+    }
+    model.eval()
+    with torch.no_grad():
+        prediction = model(tensor, dynamics)
+        if not isinstance(prediction, ControlPrediction):
+            raise TypeError("control checkpoint did not return ControlPrediction")
+        channels, geodetic = control_rollout_channels(prediction, dynamics, config)
+    durations = prediction.segment_durations[0].cpu().numpy().astype(np.float64)
+    offsets = np.cumsum(durations)
+    final_time_s = float(offsets[-1])
+    return Forecast(
+        times=float(series.times[anchor]) + offsets,
+        values=channels[0].cpu().numpy().astype(np.float64),
+        normalized_progress=offsets / final_time_s,
+        anchor=anchor,
+        final_time_s=final_time_s,
+        predicted_final_time_s=float(prediction.final_time_s[0].cpu()),
+        horizon_mode=config.horizon_mode,
+        passes=1,
+        truncated_at_threshold=False,
+        horizon_capped=False,
+        controls=prediction.controls[0].cpu().numpy().astype(np.float64),
+        segment_durations_s=durations,
+        geodetic_values=geodetic[0].cpu().numpy().astype(np.float64),
     )
 
 
@@ -208,6 +260,8 @@ def forecast_approach(
     """Predict from one observed anchor using the configured, independently dispatched mode."""
     device = device or next(model.parameters()).device
     anchor = default_anchor(config) if anchor is None else anchor
+    if config.prediction_output == PREDICTION_CONTROL:
+        return _forecast_control(model, series, config, normalizer, anchor, device)
     forecast = _FORECASTERS[config.horizon_mode](
         model, series, config, normalizer, anchor, device
     )

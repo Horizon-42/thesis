@@ -51,7 +51,7 @@ import train as train_module  # noqa: E402
 from aerodynamic_model.common import GeodeticState  # noqa: E402
 from batching import resolve_batch_size  # noqa: E402
 from config import (  # noqa: E402
-    HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW, TSConfig,
+    HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW, PREDICTION_CONTROL, TSConfig,
 )
 from dataset import (  # noqa: E402
     ARRIVAL_DATA_PROVENANCE_SCHEMA, FixedAnchorTrajectoryWindows, FlightEpochSampler,
@@ -70,7 +70,9 @@ from metrics import (  # noqa: E402
     trajectory_metrics,
 )
 from models import build_model  # noqa: E402
-from prediction_outputs import ControlBounds, ControlOutputHead, StatePrediction  # noqa: E402
+from prediction_outputs import (  # noqa: E402
+    ControlBounds, ControlOutputHead, ControlPrediction, StatePrediction,
+)
 from synthetic import synthetic_arrivals  # noqa: E402
 from train import (  # noqa: E402
     FIT_EVALUATION_NAME, FIT_EVALUATION_SCHEMA, evaluate_fit_splits,
@@ -1367,6 +1369,184 @@ def test_control_bounds_require_one_bound_per_control(lower, upper):
         ControlBounds(lower=lower, upper=upper)
 
 
+def test_control_output_is_parallel_and_requires_normalized_horizon():
+    with pytest.raises(ValueError, match="requires horizon_mode='normalized'"):
+        TSConfig(prediction_output=PREDICTION_CONTROL, horizon_mode=HORIZON_FULL)
+
+
+@pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
+def test_control_models_use_per_sample_bounds_and_aircraft_condition(model_name):
+    config = TSConfig(
+        model=model_name,
+        prediction_output=PREDICTION_CONTROL,
+        seq_len=32,
+        n_segments=4,
+        d_model=32,
+        n_heads=4,
+        d_ff=64,
+        e_layers=1,
+    )
+    model = build_model(config)
+    lower = torch.tensor([[0.0, -0.5, 0.5], [0.0, -0.7, 0.6]])
+    upper = torch.tensor([[10_000.0, 0.5, 1.8], [250_000.0, 0.7, 2.0]])
+    dynamics = {
+        "condition": torch.rand(2, len(dataset_module.DYNAMICS_CONDITION_NAMES)),
+        "control_lower": lower,
+        "control_upper": upper,
+    }
+    result = model(torch.randn(2, config.seq_len, config.enc_in), dynamics)
+
+    assert isinstance(result, ControlPrediction)
+    assert result.controls.shape == (2, 4, 3)
+    assert torch.all(result.controls >= lower[:, None, :])
+    assert torch.all(result.controls <= upper[:, None, :])
+    assert torch.allclose(result.segment_durations.sum(dim=-1), result.final_time_s)
+
+
+@pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
+def test_control_models_preserve_ordered_channel_identity(model_name):
+    torch.manual_seed(7)
+    config = TSConfig(
+        model=model_name,
+        prediction_output=PREDICTION_CONTROL,
+        seq_len=32,
+        n_segments=4,
+        d_model=32,
+        n_heads=4,
+        d_ff=64,
+        e_layers=1,
+        dropout=0.0,
+        fc_dropout=0.0,
+        head_dropout=0.0,
+    )
+    model = build_model(config).eval()
+    history = torch.randn(1, config.seq_len, config.enc_in)
+    mirrored = history.clone()
+    mirrored[:, :, [0, 1]] = history[:, :, [1, 0]]
+    mirrored[:, :, [3, 4]] = history[:, :, [4, 3]]
+    lower = torch.tensor([[0.0, -0.7, 0.5]])
+    upper = torch.tensor([[240_000.0, 0.7, 2.0]])
+    dynamics = {
+        "condition": torch.ones(1, len(dataset_module.DYNAMICS_CONDITION_NAMES)),
+        "control_lower": lower,
+        "control_upper": upper,
+    }
+
+    original = model(history, dynamics)
+    swapped = model(mirrored, dynamics)
+    original_unit = (original.controls - lower[:, None]) / (upper - lower)[:, None]
+    swapped_unit = (swapped.controls - lower[:, None]) / (upper - lower)[:, None]
+
+    assert model.feature_encoder.encode_features(history).shape == (
+        1, config.enc_in * config.d_model
+    )
+    assert torch.max(torch.abs(original_unit - swapped_unit)) > 1e-4
+
+
+def test_control_loss_aligns_truth_to_predicted_cumulative_clock(monkeypatch):
+    config = TSConfig(
+        prediction_output=PREDICTION_CONTROL,
+        seq_len=2,
+        n_segments=2,
+        d_model=8,
+        n_heads=2,
+        d_ff=16,
+        e_layers=1,
+        terminal_loss_weight=0.0,
+        control_effort_loss_weight=0.0,
+        control_smoothness_loss_weight=0.0,
+    )
+    channel_count = config.enc_in
+    # Truth is linear in physical time and was sampled on the uniform true clock [5, 10].
+    target = torch.tensor(
+        [[[5.0] * channel_count, [10.0] * channel_count]], dtype=torch.float32
+    )
+    weights = torch.full_like(target, 1.0 / channel_count)
+    # The learned partition asks for endpoints at [1, 10]. A clock-aligned target is [1, 10],
+    # so this exact rollout must have zero state loss.
+    physical_rollout = torch.tensor(
+        [[[1.0] * channel_count, [10.0] * channel_count]], dtype=torch.float64
+    )
+    monkeypatch.setattr(
+        train_module,
+        "control_rollout_channels",
+        lambda _prediction, _dynamics, _config: (
+            physical_rollout,
+            torch.zeros(1, 2, 7, dtype=torch.float64),
+        ),
+    )
+    prediction = ControlPrediction(
+        controls=torch.zeros(1, 2, 3),
+        segment_durations=torch.tensor([[1.0, 9.0]]),
+        final_time_s=torch.tensor([10.0]),
+    )
+    normalizer = Normalizer(
+        mean=np.zeros(channel_count, dtype=np.float64),
+        std=np.ones(channel_count, dtype=np.float64),
+    )
+    dynamics = {
+        "control_lower": torch.tensor([[0.0, -0.7, 0.5]]),
+        "control_upper": torch.tensor([[240_000.0, 0.7, 2.0]]),
+    }
+
+    components = train_module.prediction_loss_components(
+        prediction,
+        torch.zeros(1, channel_count),
+        target,
+        weights,
+        torch.tensor([10.0]),
+        torch.ones(1),
+        config,
+        normalizer,
+        dynamics,
+    )
+
+    assert components.state.item() == pytest.approx(0.0, abs=1e-12)
+
+
+def test_control_dataset_and_rollout_loss_form_one_differentiable_training_step():
+    series, config = _series(
+        n_flights=2,
+        prediction_output=PREDICTION_CONTROL,
+        seq_len=8,
+        n_segments=2,
+        d_model=16,
+        n_heads=4,
+        d_ff=32,
+        e_layers=1,
+        final_time_scale_s=2.0,
+        control_rollout_integrator_dt_s=0.5,
+    )
+    normalizer = Normalizer.fit(series)
+    dataset = FixedAnchorTrajectoryWindows(series, config, normalizer)
+    batch = dataset.batch(np.array([0, 1]))
+    x, target, weights, final_time, flight_weights, dynamics = batch
+    model = build_model(config)
+    prediction = model(x, dynamics)
+    loss = prediction_loss(
+        prediction,
+        x[:, -1],
+        target,
+        weights,
+        final_time,
+        flight_weights,
+        config,
+        normalizer,
+        dynamics,
+    )
+    loss.backward()
+
+    assert torch.isfinite(loss)
+    assert set(dynamics) == {
+        "condition", "initial_state", "aero_params", "control_lower",
+        "control_upper", "frame_params",
+    }
+    assert any(
+        parameter.grad is not None and torch.count_nonzero(parameter.grad)
+        for parameter in model.parameters()
+    )
+
+
 def test_config_rejects_a_head_count_that_does_not_divide_d_model():
     with pytest.raises(ValueError, match="n_heads"):
         TSConfig(d_model=100, n_heads=8)
@@ -1484,6 +1664,70 @@ def test_auto_batch_selects_2048_when_2048_probe_succeeds(monkeypatch):
     assert batching.resolve_batch_size(
         TSConfig(), torch.device("cuda"), auto=True, verbose=False
     ) == 2048
+
+
+def test_control_auto_batch_probe_uses_heterogeneous_duration_partitions():
+    batch_size, n_segments = 8, 8
+    final_time = torch.full((batch_size,), 80.0)
+    prediction = ControlPrediction(
+        controls=torch.zeros(batch_size, n_segments, 3),
+        segment_durations=torch.full((batch_size, n_segments), 10.0),
+        final_time_s=final_time,
+    )
+
+    probed = batching._heterogeneous_control_probe_prediction(prediction)
+    fractions = probed.segment_durations / probed.final_time_s[:, None]
+    baseline_steps = int(torch.ceil(
+        prediction.segment_durations.max(dim=0).values / 0.5
+    ).sum())
+    heterogeneous_steps = int(torch.ceil(
+        probed.segment_durations.max(dim=0).values / 0.5
+    ).sum())
+
+    assert torch.allclose(probed.segment_durations.sum(dim=-1), final_time)
+    assert torch.unique(fractions, dim=0).shape[0] == batch_size
+    assert heterogeneous_steps >= 2 * baseline_steps
+
+
+def test_control_auto_batch_retains_one_power_of_two_safety_margin(monkeypatch):
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "get_device_properties", lambda _device: None)
+    monkeypatch.setattr(batching, "_probe_training_step", lambda *_args: None)
+
+    assert batching.resolve_batch_size(
+        TSConfig(prediction_output=PREDICTION_CONTROL),
+        torch.device("cuda"),
+        auto=True,
+        verbose=False,
+    ) == 1024
+
+
+def test_control_auto_batch_training_probe_applies_heterogeneous_partition(monkeypatch):
+    config = TSConfig(
+        prediction_output=PREDICTION_CONTROL,
+        device="cpu",
+        seq_len=4,
+        n_segments=2,
+        d_model=8,
+        d_ff=16,
+        n_heads=2,
+        e_layers=1,
+        final_time_scale_s=2.0,
+        control_rollout_integrator_dt_s=0.5,
+    )
+    original = batching._heterogeneous_control_probe_prediction
+    calls: list[torch.Size] = []
+
+    def tracked(prediction):
+        calls.append(prediction.segment_durations.shape)
+        return original(prediction)
+
+    monkeypatch.setattr(batching, "_heterogeneous_control_probe_prediction", tracked)
+    monkeypatch.setattr(torch.cuda, "synchronize", lambda _device: None)
+
+    batching._probe_training_step(config, 2, torch.device("cpu"))
+
+    assert calls == [torch.Size([2, 2])]
 
 
 def test_auto_batch_probe_executes_the_shared_physics_loss(monkeypatch):
@@ -1902,6 +2146,99 @@ def test_exported_record_satisfies_the_evaluation_contract():
     assert parsed.states[0]["t"] == pytest.approx(0.0)
     for key, value in parsed.initial_state.items():
         assert parsed.states[0][key] == pytest.approx(value)
+
+
+def test_control_forecast_exports_optimizer_shaped_states_and_aligned_controls():
+    series, config = _series(
+        n_flights=1,
+        prediction_output=PREDICTION_CONTROL,
+        n_segments=2,
+        control_rollout_integrator_dt_s=0.5,
+    )
+    normalizer = Normalizer.fit(series)
+
+    class FixedControlModel(torch.nn.Module):
+        def forward(self, history, dynamics):
+            batch = len(history)
+            controls = torch.tensor(
+                [[[40_000.0, 0.04, 1.01], [32_000.0, -0.02, 0.99]]],
+                dtype=history.dtype,
+                device=history.device,
+            ).expand(batch, -1, -1)
+            durations = torch.tensor(
+                [[0.75, 1.25]], dtype=history.dtype, device=history.device
+            ).expand(batch, -1)
+            return ControlPrediction(
+                controls=controls,
+                segment_durations=durations,
+                final_time_s=durations.sum(dim=-1),
+            )
+
+    forecast = forecast_approach(
+        FixedControlModel(),
+        series[0],
+        config,
+        normalizer,
+        device=torch.device("cpu"),
+    )
+    record = build_prediction_record(
+        series[0], forecast, index=0, model_name=config.model,
+        horizon_mode=config.horizon_mode,
+    )
+    parsed = record_from_dict(record.eval_record)
+
+    assert parsed.solved
+    assert len(parsed.states) == len(parsed.controls) == 3
+    assert record.source["predictionOutput"] == "control"
+    assert [state["t"] for state in parsed.states] == pytest.approx([0.0, 0.75, 2.0])
+    assert parsed.controls[0]["thrust"] == pytest.approx(40_000.0)
+    assert parsed.controls[-1]["thrust"] == pytest.approx(32_000.0)
+    assert parsed.final_time_s == pytest.approx(2.0)
+
+
+def test_control_training_checkpoint_round_trip_keeps_output_identity(tmp_path):
+    series, config = _series(
+        n_flights=12,
+        prediction_output=PREDICTION_CONTROL,
+        epochs=1,
+        patience=1,
+        batch_size=32,
+        d_model=16,
+        n_heads=4,
+        d_ff=32,
+        e_layers=1,
+        seq_len=20,
+        n_segments=2,
+        final_time_scale_s=2.0,
+        control_rollout_integrator_dt_s=0.5,
+        device="cpu",
+    )
+    provenance = {
+        "schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
+        "manifests": [{
+            "airport": AIRPORT,
+            "arrival_manifest_sha256": "b" * 64,
+            "source_records": [
+                {"flight_key": item.flight_id, "source_sha256": f"{index + 100:064x}"}
+                for index, item in enumerate(series)
+            ],
+        }],
+    }
+    train(series, config, output_dir=tmp_path, data_provenance=provenance, verbose=False)
+    model, loaded_config, _normalizer, payload = load_checkpoint(tmp_path / "checkpoint.pt")
+    metadata = json.loads((tmp_path / "checkpoint_metadata.json").read_text())
+
+    assert loaded_config == config
+    assert loaded_config.prediction_output == PREDICTION_CONTROL
+    assert isinstance(model(torch.zeros(1, config.seq_len, config.enc_in), {
+        "condition": torch.ones(1, len(dataset_module.DYNAMICS_CONDITION_NAMES)),
+        "control_lower": torch.tensor([[0.0, -0.5, 0.5]]),
+        "control_upper": torch.tensor([[100_000.0, 0.5, 2.0]]),
+    }), ControlPrediction)
+    assert payload["target_contract"] == (
+        "bounded-control-nonuniform-duration-casadi-rollout-clock-aligned-v2"
+    )
+    assert metadata["prediction_output"] == PREDICTION_CONTROL
 
 
 def test_reference_covers_the_same_span_as_the_prediction():
@@ -2347,6 +2684,7 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
         "arrival_manifests": {AIRPORT: "a" * 64},
         "random_train_anchor": False,
         "horizon_mode": HORIZON_NORMALIZED,
+        "prediction_output": "state",
         "pred_len": config.pred_len,
         "full_horizon_steps": config.full_horizon_steps,
         "lr_scheduler": {

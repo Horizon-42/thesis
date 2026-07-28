@@ -1,9 +1,10 @@
 """Resolve an efficient batch size against the actual model and CUDA device.
 
 The auto path probes complete FP32 training steps (forward, backward, Adam update) on
-synthetic tensors with the run's real ``L/N/C`` and architecture.  That is more reliable
-than naming GPU models in a table: free memory, model width, layer count and output grid all
-matter. The largest successful power of two is used directly.
+synthetic tensors with the run's real ``L/N/C`` and architecture. Control probes also use
+heterogeneous non-uniform duration partitions because their batched graph depth is governed
+by per-segment maxima. That is more reliable than naming GPU models in a table: free memory,
+model width, layer count and output grid all matter.
 """
 
 from __future__ import annotations
@@ -13,8 +14,9 @@ import gc
 import numpy as np
 import torch
 
-from config import TSConfig
+from config import PREDICTION_CONTROL, TSConfig
 from models import build_model
+from prediction_outputs import ControlPrediction
 
 _CANDIDATES = (8, 16, 32, 64, 128, 256, 512, 1024, 2048)
 
@@ -23,12 +25,43 @@ def _is_cuda_oom(exc: BaseException) -> bool:
     return isinstance(exc, torch.cuda.OutOfMemoryError) or "out of memory" in str(exc).lower()
 
 
+def _heterogeneous_control_probe_prediction(
+    prediction: ControlPrediction,
+) -> ControlPrediction:
+    """Replace identical probe partitions with deterministic heterogeneous schedules.
+
+    Batched rollout graph length is governed by the maximum duration in each segment, not
+    by one row's total duration. Zero histories otherwise make every probe row identical and
+    systematically understate that graph. A phase-shifted circular profile exercises about
+    three times the uniform graph depth while remaining smooth, positive, and connected to
+    the model's duration output for backward-memory fidelity.
+    """
+    batch, segments = prediction.segment_durations.shape
+    dtype, device = prediction.segment_durations.dtype, prediction.segment_durations.device
+    learned_fractions = prediction.segment_durations / prediction.final_time_s.unsqueeze(1)
+    segment_phase = (
+        torch.arange(segments, dtype=dtype, device=device) * (2.0 * torch.pi / segments)
+    ).unsqueeze(0)
+    row_phase = (
+        torch.arange(batch, dtype=dtype, device=device) * (2.0 * torch.pi / batch)
+    ).unsqueeze(1)
+    probe_profile = torch.softmax(2.0 * torch.cos(segment_phase - row_phase), dim=-1)
+    fractions = learned_fractions * probe_profile
+    fractions = fractions / fractions.sum(dim=-1, keepdim=True)
+    durations = fractions * prediction.final_time_s.unsqueeze(1)
+    return ControlPrediction(
+        controls=prediction.controls,
+        segment_durations=durations,
+        final_time_s=prediction.final_time_s,
+    )
+
+
 def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device) -> None:
     """Run the real state/time/physics loss once or raise CUDA OOM."""
     # Local imports avoid a module cycle: train imports resolve_batch_size, while the probe
     # must share train's loss implementation so its retained CUDA graph cannot drift.
     from dataset import Normalizer
-    from train import prediction_loss
+    from train import model_forward, prediction_loss
 
     model = optimizer = x = target = state_weights = None
     target_final_time_s = flight_weights = prediction = loss = normalizer = None
@@ -60,8 +93,38 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
             mean=np.zeros(len(config.channels), dtype=np.float64),
             std=np.ones(len(config.channels), dtype=np.float64),
         )
+        dynamics = None
+        if config.prediction_output == PREDICTION_CONTROL:
+            dynamics = {
+                "condition": torch.tensor(
+                    [[0.66, 0.24, 0.2452, 0.9, 0.2, 0.4, 0.9, 0.5]],
+                    dtype=torch.float32,
+                    device=device,
+                ).expand(batch_size, -1),
+                "initial_state": torch.tensor(
+                    [[35.9, -78.8, 1000.0, 80.0, 2.0, -0.05, 66_000.0]],
+                    dtype=torch.float32,
+                    device=device,
+                ).expand(batch_size, -1),
+                "aero_params": torch.tensor(
+                    [[122.6, 2.7, 0.02, 0.04, 0.9, 0.1]],
+                    dtype=torch.float32,
+                    device=device,
+                ).expand(batch_size, -1),
+                "control_lower": torch.tensor(
+                    [[0.0, -0.7853982, 0.5]], dtype=torch.float32, device=device
+                ).expand(batch_size, -1),
+                "control_upper": torch.tensor(
+                    [[240_000.0, 0.7853982, 2.0]], dtype=torch.float32, device=device
+                ).expand(batch_size, -1),
+                "frame_params": torch.tensor(
+                    [[35.9, -78.8, 100.0, 0.0]], dtype=torch.float32, device=device
+                ).expand(batch_size, -1),
+            }
         optimizer.zero_grad()
-        prediction = model(x)
+        prediction = model_forward(model, x, dynamics)
+        if isinstance(prediction, ControlPrediction):
+            prediction = _heterogeneous_control_probe_prediction(prediction)
         loss = prediction_loss(
             prediction,
             x[:, -1],
@@ -71,6 +134,7 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
             flight_weights,
             config,
             normalizer,
+            dynamics,
         )
         loss.backward()
         optimizer.step()
@@ -113,13 +177,21 @@ def resolve_batch_size(
             "automatic batch-size probe could not fit batch_size=8; reduce model width/layers"
         )
     largest = successful[-1]
-    selected = largest
+    # Control rollout depth can grow further as learned duration logits sharpen. Retain one
+    # tested power-of-two as a memory margin after the heterogeneous probe; the state path
+    # keeps its historical largest-successful behavior.
+    selected = (
+        successful[-2]
+        if config.prediction_output == PREDICTION_CONTROL and len(successful) > 1
+        else largest
+    )
     props = torch.cuda.get_device_properties(device)
     if verbose:
         memory_gib = props.total_memory / 1024**3
         cap = "+" if largest == _CANDIDATES[-1] else ""
         print(
             f"  batch      auto -> {selected} on {props.name} ({memory_gib:.1f} GiB; "
-            f"largest successful probe {largest}{cap})"
+            f"largest successful probe {largest}{cap}"
+            f"{' with one-step control safety margin' if selected != largest else ''})"
         )
     return selected

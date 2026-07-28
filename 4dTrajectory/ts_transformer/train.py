@@ -12,7 +12,7 @@ import hashlib
 import json
 import math
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -22,7 +22,14 @@ import torch.nn as nn
 
 from channels import CHANNELS, IDX, POSITION_IDX
 from batching import resolve_batch_size
-from config import HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW, TSConfig
+from config import (
+    HORIZON_FULL,
+    HORIZON_NORMALIZED,
+    HORIZON_WINDOW,
+    PREDICTION_CONTROL,
+    PREDICTION_STATE,
+    TSConfig,
+)
 from dataset import (
     ARRIVAL_DATA_PROVENANCE_SCHEMA,
     FixedAnchorTrajectoryWindows,
@@ -42,13 +49,17 @@ from evaluation_protocol import (
 )
 from metrics import error_by_progress, raw_kinematic_metrics, trajectory_metrics
 from models import build_model, parameter_count, resolve_device
-from prediction_outputs import StatePrediction
+from prediction_outputs import ControlPrediction, StatePrediction
 from time_grids import batch_time_grid, numpy_inference_time_grid
+from aerodynamic_model.torch_dynamics import (
+    geodetic_states_to_channels,
+    rollout_piecewise_constant as torch_control_rollout,
+)
 
 CHECKPOINT_NAME = "checkpoint.pt"
 CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
 CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v13-three-horizon-modes"
-TARGET_CONTRACTS = {
+STATE_TARGET_CONTRACTS = {
     HORIZON_NORMALIZED: "normalized-time-runway-crossing-displacement-kinematic-v3",
     HORIZON_FULL: "full-horizon-fixed-time-displacement-kinematic-v2",
     HORIZON_WINDOW: "recursive-window-fixed-time-displacement-kinematic-v2",
@@ -56,7 +67,136 @@ TARGET_CONTRACTS = {
 HISTORY_NAME = "history.json"
 FIT_EVALUATION_NAME = "fit_evaluation.json"
 FIT_EVALUATION_SCHEMA = "ts-fit-evaluation-v1-best-checkpoint-fixed-anchor"
-LOSS_COMPONENT_NAMES = ("state", "final_time", "kinematic", "terminal")
+STATE_LOSS_COMPONENT_NAMES = ("state", "final_time", "kinematic", "terminal")
+CONTROL_LOSS_COMPONENT_NAMES = (
+    "state", "final_time", "kinematic", "terminal", "control_effort", "control_smoothness"
+)
+
+
+def target_contract(config: TSConfig) -> str:
+    if config.prediction_output == PREDICTION_STATE:
+        return STATE_TARGET_CONTRACTS[config.horizon_mode]
+    return "bounded-control-nonuniform-duration-casadi-rollout-clock-aligned-v2"
+
+
+def loss_component_names(config: TSConfig) -> tuple[str, ...]:
+    return (
+        CONTROL_LOSS_COMPONENT_NAMES
+        if config.prediction_output == PREDICTION_CONTROL
+        else STATE_LOSS_COMPONENT_NAMES
+    )
+
+
+def move_dynamics(
+    dynamics: dict[str, torch.Tensor] | None, device: torch.device
+) -> dict[str, torch.Tensor] | None:
+    if dynamics is None:
+        return None
+    return {name: value.to(device) for name, value in dynamics.items()}
+
+
+def unpack_batch(batch: tuple) -> tuple:
+    if len(batch) == 5:
+        return (*batch, None)
+    if len(batch) == 6:
+        return batch
+    raise ValueError(f"unexpected trajectory batch with {len(batch)} fields")
+
+
+def model_forward(
+    model: nn.Module,
+    history: torch.Tensor,
+    dynamics: dict[str, torch.Tensor] | None,
+):
+    return model(history) if dynamics is None else model(history, dynamics)
+
+
+def control_rollout_channels(
+    prediction: ControlPrediction,
+    dynamics: dict[str, torch.Tensor],
+    config: TSConfig,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return physical chart channels and geodetic segment endpoints."""
+    # ECEF coordinates are O(6e6 m); float32 subtraction would quantize local offsets at
+    # roughly half-metre resolution and accumulate through a long rollout.  The dynamics
+    # contract therefore runs in float64 even when the network itself trains in float32;
+    # ``to(float64)`` remains differentiable and gradients return to the FP32 parameters.
+    rollout_dtype = torch.float64
+    geodetic = torch_control_rollout(
+        dynamics["initial_state"].to(rollout_dtype),
+        prediction.controls.to(rollout_dtype),
+        prediction.segment_durations.to(rollout_dtype),
+        dynamics["aero_params"].to(rollout_dtype),
+        integrator_dt_s=config.control_rollout_integrator_dt_s,
+    )
+    channels = geodetic_states_to_channels(
+        geodetic,
+        dynamics["frame_params"].to(rollout_dtype),
+        runway_aligned=config.coordinate_frame == "runway-aligned",
+    )
+    return channels, geodetic
+
+
+def align_control_targets_to_prediction_clock(
+    normalized_anchor_state: torch.Tensor,
+    target_states: torch.Tensor,
+    state_weights: torch.Tensor,
+    predicted_segment_durations_s: torch.Tensor,
+    target_final_time_s: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Interpolate normalized truth onto learned cumulative control timestamps.
+
+    Control targets arrive on the normalized true clock ``i * T_true / N``. A learned
+    non-uniform partition instead produces endpoints at ``cumsum(Delta_t_hat)``. Comparing
+    rows by index would therefore compare different physical times. Prepending the observed
+    anchor supplies the ``t=0`` node; queries after the true endpoint clamp to its terminal
+    state while the separate final-time loss continues to penalize their clock error.
+    """
+    if target_states.shape != state_weights.shape or target_states.ndim != 3:
+        raise ValueError("control targets and weights must be aligned [B,N,C] tensors")
+    batch, segments, channels = target_states.shape
+    if normalized_anchor_state.shape != (batch, channels):
+        raise ValueError("normalized control anchors must be [B,C]")
+    if predicted_segment_durations_s.shape != (batch, segments):
+        raise ValueError("predicted control durations must be [B,N]")
+    if target_final_time_s.shape != (batch,):
+        raise ValueError("target final time must be [B]")
+    if torch.any(target_final_time_s <= 0.0):
+        raise ValueError("control target final time must be positive")
+
+    dtype, device = target_states.dtype, target_states.device
+    anchor = normalized_anchor_state.to(dtype=dtype, device=device).unsqueeze(1)
+    source_states = torch.cat((anchor, target_states), dim=1)
+    # The anchor is always an observed input row, so all channels carry the measured-row
+    # weight used by dataset._build_supervision. Later fitted-tail masks come from targets.
+    anchor_weights = torch.full(
+        (batch, 1, channels),
+        1.0 / channels,
+        dtype=state_weights.dtype,
+        device=state_weights.device,
+    )
+    source_weights = torch.cat((anchor_weights, state_weights), dim=1)
+
+    query_progress = (
+        predicted_segment_durations_s.to(dtype=dtype, device=device).cumsum(dim=1)
+        / target_final_time_s.to(dtype=dtype, device=device).unsqueeze(1)
+    ).clamp(min=0.0, max=1.0)
+    source_coordinate = query_progress * segments
+    left_index = torch.floor(source_coordinate).to(torch.long).clamp(max=segments)
+    right_index = (left_index + 1).clamp(max=segments)
+    fraction = source_coordinate - left_index.to(dtype)
+
+    def interpolate(source: torch.Tensor) -> torch.Tensor:
+        gather_shape = left_index.unsqueeze(-1).expand(-1, -1, channels)
+        left = torch.gather(source, 1, gather_shape)
+        right = torch.gather(
+            source,
+            1,
+            right_index.unsqueeze(-1).expand(-1, -1, channels),
+        )
+        return left + fraction.unsqueeze(-1) * (right - left)
+
+    return interpolate(source_states), interpolate(source_weights)
 
 
 def _file_sha256(path: Path) -> str:
@@ -92,10 +232,14 @@ class LossComponents:
     final_time: torch.Tensor
     kinematic: torch.Tensor
     terminal: torch.Tensor
+    extras: dict[str, torch.Tensor] = field(default_factory=dict)
 
     @property
     def total(self) -> torch.Tensor:
-        return self.state + self.final_time + self.kinematic + self.terminal
+        return (
+            self.state + self.final_time + self.kinematic + self.terminal
+            + sum(self.extras.values(), self.state.new_zeros(()))
+        )
 
     def tensors(self) -> dict[str, torch.Tensor]:
         return {
@@ -103,6 +247,7 @@ class LossComponents:
             "final_time": self.final_time,
             "kinematic": self.kinematic,
             "terminal": self.terminal,
+            **self.extras,
         }
 
 
@@ -168,8 +313,8 @@ def position_velocity_consistency_loss(
     return squared.sum(dim=(1, 2)) / denominator
 
 
-def prediction_loss_components(
-    prediction: StatePrediction,
+def control_prediction_loss_components(
+    prediction: ControlPrediction,
     normalized_anchor_state: torch.Tensor,
     target_states: torch.Tensor,
     state_weights: torch.Tensor,
@@ -177,8 +322,92 @@ def prediction_loss_components(
     flight_weights: torch.Tensor,
     config: TSConfig,
     normalizer: Normalizer,
+    dynamics: dict[str, torch.Tensor],
 ) -> LossComponents:
-    """Return the four weighted airport-macro loss contributions."""
+    """State-space supervision through the differentiable control rollout."""
+    physical_channels, _geodetic = control_rollout_channels(prediction, dynamics, config)
+    dtype, device = physical_channels.dtype, physical_channels.device
+    mean = torch.as_tensor(normalizer.mean, dtype=dtype, device=device)
+    scale = torch.as_tensor(normalizer.std, dtype=dtype, device=device)
+    normalized_states = (physical_channels - mean) / scale
+    aligned_targets, aligned_weights = align_control_targets_to_prediction_clock(
+        normalized_anchor_state,
+        target_states,
+        state_weights,
+        prediction.segment_durations,
+        target_final_time_s,
+    )
+    state_error = (
+        (normalized_states - aligned_targets) ** 2 * aligned_weights
+    ).sum(dim=(1, 2))
+    state_loss = state_error / aligned_weights.sum(dim=(1, 2)).clamp(min=1.0)
+    time_loss = (
+        (prediction.final_time_s - target_final_time_s) / config.final_time_scale_s
+    ).square()
+    terminal_delta = normalized_states[:, -1, list(POSITION_IDX)] - target_states[
+        :, -1, list(POSITION_IDX)
+    ]
+    terminal_loss = terminal_delta.square().mean(dim=1)
+
+    lower = dynamics["control_lower"]
+    upper = dynamics["control_upper"]
+    effort_scale = torch.stack(
+        (upper[:, 0], torch.full_like(upper[:, 1], math.pi / 2.0), upper[:, 2]), dim=-1
+    )
+    scaled_controls = prediction.controls / effort_scale.unsqueeze(1)
+    effort = scaled_controls.square().mean(dim=(1, 2))
+    if prediction.controls.shape[1] > 1:
+        change_scale = (upper - lower).unsqueeze(1)
+        changes = torch.diff(prediction.controls, dim=1) / change_scale
+        smoothness = changes.square().mean(dim=(1, 2))
+    else:
+        smoothness = effort.new_zeros(effort.shape)
+
+    def weighted_mean(values: torch.Tensor) -> torch.Tensor:
+        return (values * flight_weights).mean()
+
+    zero = weighted_mean(state_loss.new_zeros(state_loss.shape))
+    return LossComponents(
+        state=weighted_mean(state_loss),
+        final_time=config.final_time_loss_weight * weighted_mean(time_loss),
+        # State/velocity consistency is structural because both come from one dynamics rollout.
+        kinematic=zero,
+        terminal=config.terminal_loss_weight * weighted_mean(terminal_loss),
+        extras={
+            "control_effort": config.control_effort_loss_weight * weighted_mean(effort),
+            "control_smoothness": (
+                config.control_smoothness_loss_weight * weighted_mean(smoothness)
+            ),
+        },
+    )
+
+
+def prediction_loss_components(
+    prediction: StatePrediction | ControlPrediction,
+    normalized_anchor_state: torch.Tensor,
+    target_states: torch.Tensor,
+    state_weights: torch.Tensor,
+    target_final_time_s: torch.Tensor,
+    flight_weights: torch.Tensor,
+    config: TSConfig,
+    normalizer: Normalizer,
+    dynamics: dict[str, torch.Tensor] | None = None,
+) -> LossComponents:
+    """Return the selected output strategy's airport-macro loss contributions."""
+    if isinstance(prediction, ControlPrediction):
+        if dynamics is None:
+            raise ValueError("control prediction loss requires per-flight dynamics")
+        return control_prediction_loss_components(
+            prediction,
+            normalized_anchor_state,
+            target_states,
+            state_weights,
+            target_final_time_s,
+            flight_weights,
+            config,
+            normalizer,
+            dynamics,
+        )
     state_error = ((prediction.states - target_states) ** 2 * state_weights).sum(
         dim=(1, 2)
     )
@@ -233,7 +462,7 @@ def prediction_loss_components(
 
 
 def prediction_loss(
-    prediction: StatePrediction,
+    prediction: StatePrediction | ControlPrediction,
     normalized_anchor_state: torch.Tensor,
     target_states: torch.Tensor,
     state_weights: torch.Tensor,
@@ -241,6 +470,7 @@ def prediction_loss(
     flight_weights: torch.Tensor,
     config: TSConfig,
     normalizer: Normalizer,
+    dynamics: dict[str, torch.Tensor] | None = None,
 ) -> torch.Tensor:
     """Airport-macro state/time/physics loss, one sample per flight and epoch."""
     # Weights are normalized to mean one across the complete epoch. Keeping the minibatch
@@ -255,6 +485,7 @@ def prediction_loss(
         flight_weights,
         config,
         normalizer,
+        dynamics,
     ).total
 
 
@@ -291,27 +522,59 @@ def _predict_split(
     normalizer: Normalizer,
     device: torch.device,
     batch_size: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Return physical anchor/output arrays, masks, predicted time and true time."""
     model.eval()
     predicted_chunks, truth_chunks, mask_chunks = [], [], []
-    predicted_time_chunks, truth_time_chunks, anchor_chunks = [], [], []
+    predicted_time_chunks, truth_time_chunks, anchor_chunks, duration_chunks = [], [], [], []
     with torch.no_grad():
-        for x, y, mask, final_time_s, _flight_weights in iter_batches(
-            dataset, batch_size, shuffle=False, seed=0
-        ):
-            output = model(x.to(device))
-            out = output.states.cpu().numpy()
+        for raw_batch in iter_batches(dataset, batch_size, shuffle=False, seed=0):
+            x, y, mask, final_time_s, _flight_weights, dynamics = unpack_batch(raw_batch)
+            x_device = x.to(device)
+            dynamics_device = move_dynamics(dynamics, device)
+            output = model_forward(model, x_device, dynamics_device)
+            metric_targets = y
+            metric_weights = mask
+            if isinstance(output, ControlPrediction):
+                physical, _geodetic = control_rollout_channels(
+                    output, dynamics_device, dataset.config
+                )
+                out = physical.cpu().numpy().astype(np.float32)
+                predicted_physical = out
+                metric_targets, metric_weights = align_control_targets_to_prediction_clock(
+                    x_device[:, -1],
+                    y.to(device),
+                    mask.to(device),
+                    output.segment_durations,
+                    final_time_s.to(device),
+                )
+                metric_targets = metric_targets.cpu()
+                metric_weights = metric_weights.cpu()
+                duration_chunks.append(output.segment_durations.cpu().numpy())
+            else:
+                out = output.states.cpu().numpy()
+                predicted_physical = normalizer.decode(out.astype(np.float64)).astype(
+                    np.float32
+                )
+                duration_chunks.append(
+                    numpy_inference_time_grid(
+                        output.final_time_s.cpu().numpy(), dataset.config
+                    )[0]
+                )
             # Decode in float64 (the normalizer stats' dtype), store float32: a pooled
             # split is tens of thousands of [N, C] windows held live at once, and float64
             # doubled the peak for precision the metre-scale metrics cannot use — this
             # machine is 16 GB and frequently swap-bound.
-            predicted_chunks.append(normalizer.decode(out.astype(np.float64)).astype(np.float32))
-            truth_chunks.append(normalizer.decode(y.numpy().astype(np.float64)).astype(np.float32))
+            predicted_chunks.append(predicted_physical)
+            truth_chunks.append(
+                normalizer.decode(metric_targets.numpy().astype(np.float64)).astype(
+                    np.float32
+                )
+            )
             anchor_chunks.append(
                 normalizer.decode(x[:, -1].numpy().astype(np.float64)).astype(np.float32)
             )
-            raw_mask = mask.numpy()
+            raw_mask = metric_weights.numpy()
             # Headline ADE/FDE remain measured-data metrics. Position-only fitted rows are
             # training labels, not observations, and therefore stay out of this mask.
             if raw_mask.ndim == 3:
@@ -326,6 +589,7 @@ def _predict_split(
         np.concatenate(predicted_time_chunks),
         np.concatenate(truth_time_chunks),
         np.concatenate(anchor_chunks),
+        np.concatenate(duration_chunks),
     )
 
 
@@ -337,7 +601,7 @@ def evaluate_split(
     device: torch.device,
 ) -> dict[str, Any]:
     """Physical-unit state and final-time metrics for a split."""
-    predicted, truth, mask, predicted_time, truth_time, anchors = _predict_split(
+    predicted, truth, mask, predicted_time, truth_time, anchors, segment_durations_s = _predict_split(
         model, dataset, normalizer, device, config.batch_size
     )
     block = trajectory_metrics(predicted, truth, mask)
@@ -351,9 +615,7 @@ def evaluate_split(
     # Raw model nodes on their own predicted clock: no measured-track interpolation,
     # spline, filtering or CZML resampling. Durations are explicit [B,N] so this call site
     # remains valid when the output layer moves from uniform to nonuniform segments.
-    segment_durations_s, active_segments = numpy_inference_time_grid(
-        predicted_time, config
-    )
+    active_segments = segment_durations_s > 0.0
     block["raw_kinematics"] = raw_kinematic_metrics(
         anchors, predicted, segment_durations_s, valid_segments=active_segments
     )
@@ -532,16 +794,17 @@ def _dataset_loss_components(
     device: torch.device,
     batch_size: int,
 ) -> dict[str, float]:
-    component_totals = {name: 0.0 for name in LOSS_COMPONENT_NAMES}
+    names = loss_component_names(dataset.config)
+    component_totals = {name: 0.0 for name in names}
     flight_weight_total = 0.0
     with torch.no_grad():
-        for x, y, mask, final_time_s, flight_weights in iter_batches(
-            dataset, batch_size, shuffle=False, seed=0
-        ):
+        for raw_batch in iter_batches(dataset, batch_size, shuffle=False, seed=0):
+            x, y, mask, final_time_s, flight_weights, dynamics = unpack_batch(raw_batch)
             x, y, mask = x.to(device), y.to(device), mask.to(device)
             final_time_s = final_time_s.to(device)
             flight_weights = flight_weights.to(device)
-            prediction = model(x)
+            dynamics = move_dynamics(dynamics, device)
+            prediction = model_forward(model, x, dynamics)
             components = prediction_loss_components(
                 prediction,
                 x[:, -1],
@@ -551,6 +814,7 @@ def _dataset_loss_components(
                 flight_weights,
                 dataset.config,
                 dataset.normalizer,
+                dynamics,
             )
             for name, value in components.tensors().items():
                 component_totals[name] += float(value) * len(flight_weights)
@@ -618,7 +882,10 @@ def fit_model(
         count > 0 for _start, count in train_set.series_ranges.values()
     )
     if verbose:
-        print(f"  model      {config.model} ({parameter_count(model):,} params) on {device}")
+        print(
+            f"  model      {config.model}/{config.prediction_output} "
+            f"({parameter_count(model):,} params) on {device}"
+        )
         output_grid = {
             HORIZON_NORMALIZED: f"N={config.n_segments} normalized progress segments",
             HORIZON_FULL: (
@@ -649,28 +916,36 @@ def fit_model(
     best_state: dict[str, torch.Tensor] | None = None
     epochs_without_improvement = 0
     optimizer_updates = 0
+    component_names = loss_component_names(config)
 
     for epoch in range(1, config.epochs + 1):
         started = time.perf_counter()
         epoch_learning_rate = float(optimizer.param_groups[0]["lr"])
 
         model.train()
-        train_component_totals = {name: 0.0 for name in LOSS_COMPONENT_NAMES}
+        train_component_totals = {name: 0.0 for name in component_names}
         train_weight_total = 0.0
-        for x, y, mask, final_time_s, flight_weights in iter_batches(
-            train_set,
-            config.batch_size,
-            shuffle=True,
-            seed=config.seed + epoch,
+        for raw_batch in iter_batches(
+            train_set, config.batch_size, shuffle=True, seed=config.seed + epoch
         ):
+            x, y, mask, final_time_s, flight_weights, dynamics = unpack_batch(raw_batch)
             batch_count = len(flight_weights)
             batch_weight = float(flight_weights.sum())
             x, y, mask = x.to(device), y.to(device), mask.to(device)
             final_time_s = final_time_s.to(device)
             flight_weights = flight_weights.to(device)
+            dynamics = move_dynamics(dynamics, device)
             optimizer.zero_grad()
             components = prediction_loss_components(
-                model(x), x[:, -1], y, mask, final_time_s, flight_weights, config, normalizer
+                model_forward(model, x, dynamics),
+                x[:, -1],
+                y,
+                mask,
+                final_time_s,
+                flight_weights,
+                config,
+                normalizer,
+                dynamics,
             )
             loss = components.total
             loss.backward()
@@ -698,7 +973,7 @@ def fit_model(
             name: float(np.mean([
                 components[name] for components in val_components_by_airport.values()
             ]))
-            for name in LOSS_COMPONENT_NAMES
+            for name in component_names
         }
         # Equal airport weight: a large/long airport cannot control early stopping alone.
         val_loss = float(np.mean(list(val_by_airport.values())))
@@ -736,7 +1011,7 @@ def fit_model(
             print(
                 "             val parts  "
                 + "  ".join(
-                    f"{name}={val_components[name]:.4f}" for name in LOSS_COMPONENT_NAMES
+                    f"{name}={val_components[name]:.4f}" for name in component_names
                 )
             )
 
@@ -815,7 +1090,7 @@ def train(
     }
 
     checkpoint_payload = {
-        "target_contract": TARGET_CONTRACTS[config.horizon_mode],
+        "target_contract": target_contract(config),
         TEST_RELEASE_PROTOCOL_FIELD: TEST_RELEASE_SCHEMA,
         "config": config.to_dict(),
         "model_state": model.state_dict(),
@@ -852,6 +1127,7 @@ def train(
         "arrival_manifests": manifest_digests,
         "random_train_anchor": config.random_train_anchor,
         "horizon_mode": config.horizon_mode,
+        "prediction_output": config.prediction_output,
         "pred_len": config.pred_len,
         "full_horizon_steps": config.full_horizon_steps,
         "lr_scheduler": {
@@ -926,11 +1202,12 @@ def load_checkpoint(path: str | Path) -> tuple[nn.Module, TSConfig, Normalizer, 
     # plain dicts and lists), so nothing here needs — or should get — pickle execution.
     payload = torch.load(Path(path), map_location="cpu", weights_only=True)
     config = TSConfig.from_dict(payload["config"])
-    expected_contract = TARGET_CONTRACTS[config.horizon_mode]
+    expected_contract = target_contract(config)
     if payload.get("target_contract") != expected_contract:
         raise ValueError(
-            "checkpoint predates the displacement-normalized kinematic-loss contract; "
-            "retrain it"
+            f"checkpoint target contract {payload.get('target_contract')!r} does not match "
+            f"the configured {config.prediction_output!r} output contract "
+            f"{expected_contract!r}; retrain it"
         )
     if config.channels != CHANNELS:
         raise ValueError(

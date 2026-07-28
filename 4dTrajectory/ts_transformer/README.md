@@ -5,8 +5,10 @@ integrated separately behind one data plane, one training harness, and one expor
 
 The sibling `4dTrajectory/optimization` computes trajectories by **optimization** — direct
 collocation over a point-mass dynamics model, with hard procedure constraints. This package
-computes them by **data-driven learning** — transformers trained on observed ADS-B
-arrivals, with no dynamics model at all. Both emit the **same evaluation records**, so
+computes them by **data-driven learning** — transformers trained on observed ADS-B arrivals.
+Its default state-output path is the original kinematic baseline; its opt-in control-output
+path integrates learned controls through a differentiable Torch twin of the same point-mass
+dynamics. Both emit the **same evaluation records**, so
 `python -m evaluation --input <dir>` grades either one against the identical regulatory
 gates (lateral ≤ 106.75 m, vertical ∈ [−3.05, +6.10] m).
 
@@ -57,10 +59,10 @@ generation is parked in `outputs/KRDU/_pre_b3_transport/`. Earlier synthetic num
 kept where they are labelled as such, because two design decisions were made on synthetic
 data and the real run either confirmed or corrected them.
 
-**Scope:** this is a purely kinematic, single-aircraft baseline. No aerodynamic or dynamics
-model is connected — by design, not by omission. See
-[the dynamics section](#inputs-outputs-and-the-deliberate-absence-of-dynamics)
-before changing anything here.
+**Scope:** `prediction_output=state` remains the purely kinematic, single-aircraft baseline
+used by the recorded experiments below. `prediction_output=control` is a separate,
+checkpointed architecture; it adds per-flight aircraft conditioning and a differentiable
+dynamics rollout. See [the output architecture](#state-baseline-and-dynamics-constrained-control-output).
 
 ## Glossary
 
@@ -90,9 +92,9 @@ The abbreviations and terms of art this README (and `metrics.py` / the summary J
 | `config.py` | `TSConfig` — the one namespace both vendored models read, serialised into every checkpoint |
 | `channels.py` | the feature contract: geodetic states ⇄ threshold-anchored ENU channels |
 | `dataset.py` | track loading, input resampling, mode-dispatched targets, by-flight split, normalisation |
-| `models.py` | model construction over the two vendored state forecasters |
+| `models.py` | model construction over the two vendored encoders and selected state/control head |
 | `prediction_outputs.py` | typed state/control outputs, final-time head, bounded controls and duration partition |
-| `train.py` | state/time/displacement-kinematic/terminal loss, early stopping, checkpoints |
+| `train.py` | state loss or differentiable control-rollout loss, early stopping, checkpoints |
 | `forecast.py` | independent normalized, one-pass full, and recursive-window inference strategies |
 | `metrics.py` | ADE / FDE plus the along-track / cross-track / altitude decomposition |
 | `export.py` | evaluation records + `summary.json` manifest, via the optimizer's own record emitters |
@@ -119,6 +121,14 @@ python $TS train \
     --airport KRDU \
     --model itransformer --n-segments 128 \
     --output-dir 4dTrajectory/outputs/KRDU/ts_itr_normalized_time
+
+# opt-in control output: bounded schedule -> differentiable CasADi-equivalent rollout
+python $TS train \
+    --data trajectory_data_process/outputs/harvest/KRDU/arrivals/manifest.json \
+    --airport KRDU --model itransformer \
+    --prediction-output control --horizon-mode normalized --n-segments 64 \
+    --batch-size auto \
+    --output-dir 4dTrajectory/outputs/KRDU/ts_itr_control
 
 # independently replay the retained best checkpoint on fixed-anchor train + validation
 python $TS evaluate-fit \
@@ -263,11 +273,12 @@ flat CSV tables, PNG/SVG plots, and `plots/index.md`. Use `--dry-run` to inspect
 and `--config-overrides <best_config.json>` to hold a previously selected architecture fixed.
 
 The runner defaults to `--batch-size auto`. It probes actual FP32 forward/backward/Adam steps
-for the selected architecture and normalized output grid, chooses a power of two, and backs off one doubling
-for allocator/display headroom; an explicit integer disables probing. The probe searches
-through batch 2048, so the current RTX 4060 8 GB workstation selects 1024 while retaining one
-doubling step of memory headroom. The result remains runtime-specific rather than a hard-coded
-GPU-name table.
+for the selected architecture and normalized output grid; an explicit integer disables
+probing. State output uses the largest successful power of two. Control output phase-shifts
+the duration partition across probe rows, exercising the per-segment maxima that determine
+batched rollout graph depth, then backs off one successful power of two as a safety margin
+for sharper partitions later in training. The result remains runtime-specific rather than a
+hard-coded GPU-name table.
 
 For a throughput-based batch measurement, run the standalone outer-train-only benchmark while
 the GPU is otherwise idle:
@@ -419,14 +430,14 @@ weight `0.02`. The full pooled iTransformer CUDA validation curve selected epoch
 training therefore uses a 180-epoch cap with patience 20 and always reloads the best epoch.
 Validation and CV select on the same joint loss. See
 [`docs/normalized_time_and_control_output.zh.md`](docs/normalized_time_and_control_output.zh.md)
-for the exact state and future-control contracts.
+for the exact state and control contracts.
 
 Validation history, CV folds and exported prediction summaries also persist raw-node
 position/velocity RMSE, heading-consistency p95, turn-rate p95, acceleration p95 and jerk
 p95. Prediction batches retain per-flight values plus fleet `median/mean/p95/max`; comparisons
 and the ablation selector use fleet p95 against the observed-track baseline. These metrics
-always consume the model's untouched nodes and explicit segment durations, so they remain
-valid for later non-uniform control rollouts. The complete experiment protocol and
+always consume the model's untouched nodes and explicit segment durations, so they are also
+valid for the non-uniform control rollout. The complete experiment protocol and
 validation/test tables are in
 [`docs/2026-07-27_kinematic_weight_epoch_ablation.zh.md`](docs/2026-07-27_kinematic_weight_epoch_ablation.zh.md).
 
@@ -494,64 +505,63 @@ least-squares window fit, so their bandwidth is unchanged by a denser grid. `--d
 a CLI knob if a future dataset (e.g. 1 Hz radar) justifies it; resizing `L`/`H` with it is
 mandatory, per the coverage math above.
 
-### Inputs, outputs, and the deliberate absence of dynamics
+### State baseline and dynamics-constrained control output
 
-> **Read this before "improving" anything here.** This package is a *kinematic baseline*.
-> No aerodynamic or dynamics model is connected, and that is a scope decision, not an
-> oversight or an unfinished TODO.
+The output strategy is explicit and serialized in every checkpoint:
 
-Both models consume and produce the same tensor shape — channels in, channels out:
+```text
+prediction_output=state (default)
+  observed channels [B,L,6] -> Transformer -> states [B,N,6] + final_time_s [B]
 
-```
-input   x : [B,  60, 6]         seq_len=60 (120 s of lookback @ dt=2 s), 6 channels
-output  states       : [B, N, 6]  state endpoints at tau=1/N,...,1
-        final_time_s : [B]        learned physical duration from anchor to tau=1
-```
-
-Same six channels on both sides (`e, n, u, edot, ndot, udot`). The two architectures differ only
-in how they read that tensor: iTransformer makes each **channel** a token (attention *across*
-variates), PatchTST patches each channel along **time** and runs them independently (no
-cross-channel coupling at all).
-
-**Not in the input:** timestamps (`x_mark = None` — the grid is uniform, so `t` is implicit),
-mass, aircraft type, aerodynamic parameters, wind/weather, other traffic, runway or procedure
-geometry (present only implicitly, as the frame origin).
-
-The active output is still state, so exported records carry `controls == []`. The output
-contract is now separated in `prediction_outputs.py`: a future controls model returns
-`controls[B,N,3]` in `(thrust_N, bank_rad, load_factor)` order plus positive non-uniform
-`segment_durations[B,N]` whose sum is exactly `final_time_s`. This design is implemented but
-not connected to training until the dataset has control labels and a differentiable rollout.
-
-**What "no dynamics" concretely means.** The only symbol this package imports from
-`aerodynamic_model` is `GeodeticState` (`channels.py`) — a plain dataclass holding seven
-floats, no equations. Compare what the optimizer imports from the same package:
-`CasadiSimulator` (the point-mass dynamics) and `rollout_piecewise_constant` (true-dynamics
-integration).
-
-```
-optimization/     initial state ─► NLP (point-mass dynamics + hard constraints)
-                                ─► controls ─► true-dynamics integration ─► states
-                                   ▲ every step is bound by the equations of motion
-
-ts_transformer/   observed channels ─► Transformer ─► predicted channels
-                                       ▲ curve fitting; no equations anywhere
+prediction_output=control
+  observed channels [B,L,6] -> Transformer encoder features ┐
+  per-flight mass/aero data -> condition encoder            ├-> bounded controls [B,N,3]
+                                                            └-> non-uniform durations [B,N]
+  anchor geodetic state + controls + durations -> Torch dynamics -> state endpoints [B,N,7]
 ```
 
-So **nothing here guarantees** a predicted trajectory is flyable: speeds may leave the
-envelope, turn rates may imply impossible bank angles, the implied thrust may exceed the
-engines, the implied lift coefficient may exceed `Cl_max` (stall). This is the
-"statistically plausible but physically unflyable" / *flyability* problem the survey in
-`4dTrajectory/docs` names explicitly.
+The six observed channels remain `(e, n, u, edot, ndot, udot)`. iTransformer makes each
+channel a token; PatchTST patches each channel along time. In control mode the state forecast
+projector is removed. Time/patches are pooled within each channel, but the ordered channel
+axis is retained and flattened as `[B,C*d_model]`; an unlabeled mean across channels is
+forbidden because both vendored encoders lack channel-index identity. A small MLP fuses this
+ordered representation with eight scaled per-flight quantities: mass, maximum thrust, wing
+area, `Cl_max`, `Cd0`, induced-drag `k`, stall threshold, and stall-drag coefficient.
 
-That is the correct shape for a baseline. The trajectory-prediction literature reports
-ADE/FDE on exactly this kind of purely kinematic, data-driven model, and mixing dynamics in
-now would make it impossible to say what the learned component contributes on its own.
+The control contract is:
 
-#### If dynamics is added later, these are the four routes
+```text
+controls[..., 0] = thrust_N       bounded by [0, aircraft max thrust]
+controls[..., 1] = bank_rad       bounded by [-pi/4, pi/4]
+controls[..., 2] = load_factor    bounded by [0.5, 2.0]
 
-Listed in increasing order of intrusiveness, so a future change can pick deliberately rather
-than drift into one:
+segment_durations_i = softmax(duration_logits)_i * final_time_s
+sum(segment_durations) = final_time_s
+```
+
+Control mode currently requires `--horizon-mode normalized`. It needs no inverse-control
+labels. Uniform truth nodes are interpolated onto `cumsum(segment_durations)` before the
+rollout-state loss is evaluated, so every predicted endpoint and target share one physical
+timestamp; fit metrics use the same alignment. Its loss contains rollout-state, final-time, terminal,
+dimensionless control-effort, and control-smoothness terms. Position/velocity consistency is
+structural because every output state comes from one dynamics integration.
+
+`aerodynamic_model/torch_dynamics.py` is deliberately a discrete twin of
+`CasadiSimulator`, not a cheaper training surrogate. Each substep creates the same moving
+local ENU frame, evaluates the same ISA density, drag polar, `Cl_max`/stall transition and
+realized-load limit, advances the same explicit RK4 equations, and converts position and
+velocity through WGS84 ECEF into the next local frame. Physical rollout tensors use float64
+because subtracting local offsets from Earth-scale ECEF coordinates in float32 loses
+sub-metre information. `control_rollout_integrator_dt_s` defaults to the replay value 0.5 s.
+
+This makes control-output trajectories dynamically generated, but does not reproduce the
+optimizer's hard procedure/path constraints; learned controls can still leave the intended
+operating envelope. The state-output path remains unchanged so its historical results remain
+an independently measurable kinematic baseline.
+
+#### Four physics integration routes
+
+The repository now contains routes 1 and 4; routes 2 and 3 remain distinct alternatives:
 
 1. **Post-hoc flyability check** — ✅ **DONE**, see
    [Flyability](#flyability--measuring-the-gap-this-baseline-deliberately-leaves-open)
@@ -565,10 +575,10 @@ than drift into one:
    as a second stage in the `aeroviz` env.
 3. **Soft physical constraints in the loss** — penalise out-of-envelope acceleration / turn
    rate during training. This is the "constrained LSTM" line (Shi, IEEE T-ITS) in the survey.
-4. **Predict controls and integrate them** — the output head and non-uniform duration contract
-   are now implemented; completing this route still needs control supervision and a
-   *differentiable* dynamics model. Casadi cannot backpropagate into torch, so the point-mass
-   model would have to be reimplemented in torch.
+4. **Predict controls and integrate them** — ✅ **DONE as an opt-in output strategy**. The
+   differentiable Torch rollout is numerically contract-tested against CasADi for normal and
+   stalled steps, non-uniform multi-segment endpoints, and gradients through controls and
+   durations.
 
 ## Historical results on real KRDU data (pre-normalized-time architecture)
 
@@ -848,11 +858,10 @@ filenames and the comparison-CZML group key, so learned and optimized records fo
 always share a stem. Summary rows carry the full identity too (`id`, `icao24`, `runway`,
 `landing_time_utc`).
 
-Records are **reference-shaped**: `controls == []`. That is the contract, not a shortcut — a
-learned predictor emits no control schedule, and `evaluation.records` reads an empty control
-list as exactly that. The two evaluation JSONs do not copy their state arrays: `states_ref`
-selects the appropriate key (and observed anchor slice) from the single states file. Records
-are built by
+State-output records are **reference-shaped** (`controls == []`). Control-output records use
+the optimizer shape: the anchor and every segment endpoint have a 1:1 aligned active control.
+The two evaluation JSONs do not copy their state arrays: `states_ref` selects the appropriate
+key (and observed anchor slice) from the single states file. Records are built by
 `4dTrajectory/optimization/evaluation_export.py` rather than hand-rolled here, so there is one
 definition of the record shape. (That module is casadi-free, which is why it imports into the
 torch env.)
@@ -886,16 +895,17 @@ and that a state sequence generated by the geodetic kinematics integrates its ve
 channels back into its position channels exactly), normalized-progress interpolation,
 final-time loss, non-uniform control-duration invariants, the by-flight split, and — the important one — that an exported record satisfies the real
 `evaluation.records.record_from_dict` validator and that a written batch is loadable by the
-real manifest-only `load_records`.
+real manifest-only `load_records`. `aerodynamic_model/tests/test_torch_dynamics.py` separately
+pins the differentiable rollout against `CasadiSimulator`, including its stalled branch and
+non-uniform segment endpoints, and checks gradients to both controls and durations.
 
 ## Deliberate scope — NOT bugs, do not "fix" without deciding to
 
-These are what make this a baseline. Each is a defensible starting point that later work may
-choose to extend, but none is an accident:
+These are what make the default state-output path a baseline. Each is a defensible starting
+point that later work may choose to extend, but none is an accident:
 
-- **No dynamics / aerodynamics.** Purely kinematic. See
-  [the dynamics section](#inputs-outputs-and-the-deliberate-absence-of-dynamics) for what that
-  means and the four routes if it is ever added.
+- **State output has no dynamics / aerodynamics.** It remains purely kinematic. Select the
+  separate `control` output architecture when dynamics-generated states are the experiment.
 - **Single aircraft, no interaction.** One track in, one track out — no traffic context. The
   survey in `4dTrajectory/docs` identifies multi-aircraft interaction and ATC intent as the
   central open problem in terminal-airspace prediction; this is deliberately the single-aircraft

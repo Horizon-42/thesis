@@ -1,11 +1,10 @@
 """CLI: train a trajectory predictor, or predict a batch of approaches with a trained one.
 
-SCOPE: this package is a purely kinematic, single-aircraft BASELINE. No aerodynamic or
-dynamics model is connected — channels in, channels out, no equations of motion anywhere.
-That is a deliberate decision, not an unfinished TODO: it is what lets the learned
-component be measured on its own. Predicted trajectories therefore carry no flyability
-guarantee. Read README "Inputs, outputs, and the deliberate absence of dynamics" (which
-also lists the four routes for adding dynamics later) before changing that.
+The default ``--prediction-output state`` remains the original purely kinematic baseline.
+The opt-in ``--prediction-output control`` predicts bounded per-flight controls and rolls
+them through a differentiable Torch twin of ``CasadiSimulator``; it currently uses the
+normalized complete-remainder horizon. The output strategy is checkpointed and cannot be
+changed at inference without retraining.
 
     TS=4dTrajectory/ts_transformer/__main__.py
 
@@ -57,6 +56,7 @@ from config import (  # noqa: E402
     DEFAULT_AIRCRAFT_TYPE,
     HORIZON_MODES,
     MODELS,
+    PREDICTION_OUTPUTS,
     TSConfig,
 )
 from cross_validation import (  # noqa: E402
@@ -130,9 +130,15 @@ def _cv_parameters(value: str) -> tuple[str, ...]:
 
 def _add_training_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--model", choices=MODELS, default=MODELS[0])
+    parser.add_argument(
+        "--prediction-output",
+        choices=PREDICTION_OUTPUTS,
+        default=None,
+        help="predict state endpoints (default) or bounded controls with dynamics rollout",
+    )
     parser.add_argument("--seq-len", type=int, default=None, help="lookback L, in steps")
     parser.add_argument("--n-segments", type=int, default=None,
-                        help="N endpoints on the fixed normalized progress grid")
+                        help="N normalized state endpoints or non-uniform control segments")
     parser.add_argument(
         "--horizon-mode",
         choices=HORIZON_MODES,
@@ -166,6 +172,14 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
                         help="position/velocity consistency loss weight (default: 3.0)")
     parser.add_argument("--terminal-loss-weight", type=float, default=None,
                         help="explicit final-position loss weight (default: 0.02)")
+    parser.add_argument("--control-effort-weight", type=float, default=None)
+    parser.add_argument("--control-smoothness-weight", type=float, default=None)
+    parser.add_argument(
+        "--control-rollout-dt",
+        type=float,
+        default=None,
+        help="maximum differentiable dynamics RK4 step in seconds (default: 0.5)",
+    )
     parser.add_argument("--patience", type=int, default=None, help="early-stopping patience")
     parser.add_argument("--d-model", type=int, default=None)
     parser.add_argument("--e-layers", type=int, default=None)
@@ -207,7 +221,8 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
 
     batch_auto = args.batch_size == "auto"
     cli_values = (
-        ("model", args.model), ("seq_len", args.seq_len),
+        ("model", args.model), ("prediction_output", args.prediction_output),
+        ("seq_len", args.seq_len),
         ("n_segments", args.n_segments),
         ("horizon_mode", args.horizon_mode),
         ("full_horizon_steps", args.full_horizon_steps),
@@ -222,6 +237,9 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("fitted_terminal_position_weight", args.fitted_terminal_weight),
         ("kinematic_consistency_loss_weight", args.kinematic_consistency_weight),
         ("terminal_loss_weight", args.terminal_loss_weight),
+        ("control_effort_loss_weight", args.control_effort_weight),
+        ("control_smoothness_loss_weight", args.control_smoothness_weight),
+        ("control_rollout_integrator_dt_s", args.control_rollout_dt),
         ("d_model", args.d_model), ("e_layers", args.e_layers), ("n_heads", args.n_heads),
         ("seed", args.seed), ("split_seed", args.split_seed), ("device", args.device),
         ("aircraft_type", args.aircraft_type), ("coordinate_frame", args.coordinate_frame),

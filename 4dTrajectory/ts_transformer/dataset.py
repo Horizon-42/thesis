@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from abc import ABC, abstractmethod
 from collections import Counter
 from dataclasses import dataclass, field
@@ -55,12 +56,14 @@ from channels import (
     POSITION_IDX,
     channels_from_states,
     resample_uniform,
+    states_from_channels,
 )
 from config import (
     DEFAULT_AIRCRAFT_TYPE,
     HORIZON_FULL,
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
+    PREDICTION_CONTROL,
     TSConfig,
 )
 from coordinate_frames import CoordinateFrame, frame_for_state
@@ -272,6 +275,74 @@ class FlightSeries:
     def dataset_id(self) -> str:
         """Cross-airport split/checkpoint identity; export stems remain ``flight_id``."""
         return f"{self.airport}:{self.flight_id}" if self.airport else self.flight_id
+
+
+# Control-output conditioning is dimensionless and deliberately small.  The model still sees
+# the full observed state history; these values supply only what ADS-B cannot identify:
+# aircraft mass, installed thrust, and the aerodynamic model used by the rollout.
+DYNAMICS_CONDITION_NAMES = (
+    "mass_100t",
+    "max_thrust_1MN",
+    "wing_area_500m2",
+    "cl_max_3",
+    "cd0_0p1",
+    "induced_k_0p1",
+    "stall_threshold",
+    "stall_k_0p2",
+)
+
+
+def dynamics_arrays(series: FlightSeries, anchor: int) -> dict[str, np.ndarray]:
+    """Physical per-flight tensors required by a control model and its rollout."""
+    scenario = series.scenario
+    mass_kg = float(scenario.initial.m)
+    initial = states_from_channels(
+        np.array([0.0], dtype=np.float64),
+        series.values[anchor : anchor + 1],
+        series.frame,
+        mass_kg=mass_kg,
+    )[0][1]
+    aero = scenario.aero
+    max_thrust = float(scenario.aircraft.engine.max_thrust_total_n)
+    condition = np.array(
+        [
+            mass_kg / 100_000.0,
+            max_thrust / 1_000_000.0,
+            aero.S / 500.0,
+            aero.Cl_max / 3.0,
+            aero.Cd0 / 0.1,
+            aero.k / 0.1,
+            aero.stall_threshold,
+            aero.k_stall / 0.2,
+        ],
+        dtype=np.float32,
+    )
+    heading = float(getattr(series.frame, "heading_rad", 0.0))
+    return {
+        "condition": condition,
+        "initial_state": np.array(
+            [
+                initial.latitude,
+                initial.longitude,
+                initial.altitude,
+                initial.V,
+                initial.psi,
+                initial.gamma,
+                initial.m,
+            ],
+            dtype=np.float64,
+        ),
+        "aero_params": np.array(
+            [aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall],
+            dtype=np.float64,
+        ),
+        "control_lower": np.array([0.0, -math.pi / 4.0, 0.5], dtype=np.float32),
+        "control_upper": np.array([max_thrust, math.pi / 4.0, 2.0], dtype=np.float32),
+        "frame_params": np.array(
+            [series.frame.lat0, series.frame.lon0, series.frame.alt0, heading],
+            dtype=np.float64,
+        ),
+    }
 
 
 @dataclass(frozen=True)
@@ -825,20 +896,27 @@ class TrajectoryWindows(Dataset, ABC):
 
     def __getitem__(
         self, i: int
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple:
         x, y, weights, final_time_s, flight_weight = self._sample_arrays(i)
-
-        return (
+        result = (
             torch.from_numpy(x.copy()),
             torch.from_numpy(y),
             torch.from_numpy(weights),
             torch.from_numpy(np.asarray(final_time_s)),
             torch.from_numpy(np.asarray(flight_weight)),
         )
+        if self.config.prediction_output != PREDICTION_CONTROL:
+            return result
+        s_idx, anchor = self.index[i]
+        dynamics = {
+            key: torch.from_numpy(value)
+            for key, value in dynamics_arrays(self.series[s_idx], anchor).items()
+        }
+        return (*result, dynamics)
 
     def batch(
         self, indices: Sequence[int] | np.ndarray
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple:
         """Build one contiguous batch without per-sample Tensor creation and collation."""
         batch_size = len(indices)
         L, N, C = self.config.seq_len, self.config.pred_len, len(self.config.channels)
@@ -861,10 +939,21 @@ class TrajectoryWindows(Dataset, ABC):
             final_time_s[row] = sample_time
             flight_weights[row] = flight_weight
 
-        return tuple(
+        result = tuple(
             torch.from_numpy(array)
             for array in (x, y, weights, final_time_s, flight_weights)
         )
+        if self.config.prediction_output != PREDICTION_CONTROL:
+            return result
+        dynamics_rows = [
+            dynamics_arrays(self.series[self.index[int(index)][0]], self.index[int(index)][1])
+            for index in indices
+        ]
+        dynamics = {
+            key: torch.from_numpy(np.stack([row[key] for row in dynamics_rows]))
+            for key in dynamics_rows[0]
+        }
+        return (*result, dynamics)
 
 
 class FixedAnchorTrajectoryWindows(TrajectoryWindows):
