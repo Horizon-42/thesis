@@ -249,7 +249,28 @@ def geodetic_step(
     return enu_state_to_geodetic(stepped, reference)
 
 
-_COMPILED_CUDA_STEP = None
+_COMPILED_CUDA_INFERENCE_STEP = None
+_COMPILED_CUDA_AUTOGRAD_STEP = None
+
+
+def _cuda_inference_step(
+    state: torch.Tensor,
+    controls: torch.Tensor,
+    aero_params: torch.Tensor,
+    dt_s: torch.Tensor,
+) -> torch.Tensor:
+    """Distinct code object so no-grad shape caches do not consume VJP entries."""
+    return geodetic_step(state, controls, aero_params, dt_s)
+
+
+def _cuda_autograd_step(
+    state: torch.Tensor,
+    controls: torch.Tensor,
+    aero_params: torch.Tensor,
+    dt_s: torch.Tensor,
+) -> torch.Tensor:
+    """Distinct code object for the grad-enabled local discrete-adjoint step."""
+    return geodetic_step(state, controls, aero_params, dt_s)
 
 
 def _rollout_step(
@@ -261,18 +282,29 @@ def _rollout_step(
     """Use the eager reference on CPU and a fused, safe Inductor graph on CUDA."""
     if not state.is_cuda:
         return geodetic_step(state, controls, aero_params, dt_s)
-    global _COMPILED_CUDA_STEP
-    if _COMPILED_CUDA_STEP is None:
+    global _COMPILED_CUDA_INFERENCE_STEP, _COMPILED_CUDA_AUTOGRAD_STEP
+    grad_enabled = torch.is_grad_enabled()
+    compiled = (
+        _COMPILED_CUDA_AUTOGRAD_STEP
+        if grad_enabled
+        else _COMPILED_CUDA_INFERENCE_STEP
+    )
+    if compiled is None:
         # ``dynamic=True, mode="reduce-overhead"`` reproducibly segfaults in backward
         # with the project's Torch/CUDA stack. Static reduce-overhead passes isolated
-        # forward/backward probes; the smaller final batch receives its own static graph.
-        _COMPILED_CUDA_STEP = torch.compile(
-            geodetic_step,
+        # forward/backward probes. Separate code objects keep inference-shape recompiles
+        # from sharing Dynamo's cache limit with grad-enabled local VJP shapes.
+        compiled = torch.compile(
+            _cuda_autograd_step if grad_enabled else _cuda_inference_step,
             fullgraph=True,
             dynamic=False,
             mode="reduce-overhead",
         )
-    return _COMPILED_CUDA_STEP(state, controls, aero_params, dt_s)
+        if grad_enabled:
+            _COMPILED_CUDA_AUTOGRAD_STEP = compiled
+        else:
+            _COMPILED_CUDA_INFERENCE_STEP = compiled
+    return compiled(state, controls, aero_params, dt_s)
 
 
 def _piecewise_schedule(
