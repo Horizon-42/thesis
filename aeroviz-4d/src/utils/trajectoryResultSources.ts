@@ -36,6 +36,7 @@ export interface ExperimentOption {
   label: string;
   model?: string | null;
   predictionOutput?: "state" | "control" | null;
+  horizonMode?: "normalized" | "full" | "window" | null;
   seed?: number | null;
 }
 
@@ -52,6 +53,7 @@ export function experimentOptions(categories: ComparisonCategory[]): ExperimentO
       label: runName,
       model: experiment.model,
       predictionOutput: experiment.predictionOutput,
+      horizonMode: experiment.horizonMode,
       seed: experiment.seed,
     });
   }

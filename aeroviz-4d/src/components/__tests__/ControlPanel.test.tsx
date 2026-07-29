@@ -277,6 +277,7 @@ describe("ControlPanel", () => {
           group: "campaign",
           checkpoint: "campaign/stage/run/checkpoint.pt",
           predictionOutput: "control",
+          horizonMode: "normalized",
           seed: 1337,
         },
       },
@@ -299,6 +300,7 @@ describe("ControlPanel", () => {
       checkpoint: "campaign/stage/run/checkpoint.pt",
       model: "itransformer",
       predictionOutput: "control",
+      horizonMode: "normalized" as const,
       seed: 1337,
     };
     appState.layers.trajectories = true;
@@ -324,6 +326,7 @@ describe("ControlPanel", () => {
     expect((screen.getByLabelText("Result source") as HTMLSelectElement).value).toBe("experiment");
     expect((screen.getByLabelText("Experiment model") as HTMLSelectElement).value)
       .toBe("campaign/stage/run");
+    expect(screen.getByLabelText("Experiment model").textContent).toContain("normalized time");
     const split = screen.getByLabelText("Dataset split") as HTMLSelectElement;
     expect([...split.options].map((option) => option.value)).toEqual([
       "experiment_run_train",

@@ -842,6 +842,7 @@ def test_upsert_experiment_category_stamps_grouped_checkpoint_metadata(tmp_path)
         "checkpoint": "4dTrajectory/outputs/POOLED/experiments/campaign/stage/run/checkpoint.pt",
         "model": "itransformer",
         "predictionOutput": "control",
+        "horizonMode": "normalized",
         "seed": 1337,
     }
     _upsert_category(

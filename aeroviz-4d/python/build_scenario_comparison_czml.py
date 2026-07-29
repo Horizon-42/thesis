@@ -1174,6 +1174,7 @@ def main() -> None:
                 "checkpoint": args.experiment_checkpoint,
                 "model": config.get("model"),
                 "predictionOutput": config.get("prediction_output", "state"),
+                "horizonMode": config.get("horizon_mode", "normalized"),
                 "seed": config.get("seed"),
             }
         total = _upsert_category(

@@ -94,12 +94,22 @@ describe("airportData helpers", () => {
         checkpoint: "campaign/stage/run/checkpoint.pt",
         model: "itransformer",
         predictionOutput: "control",
+        horizonMode: "normalized",
         seed: 1337,
       },
     }] })).toBe(true);
     expect(isComparisonCategoriesManifest({ categories: [{
       ...entry,
       experiment: { id: "run", group: "campaign" },
+    }] })).toBe(false);
+    expect(isComparisonCategoriesManifest({ categories: [{
+      ...entry,
+      experiment: {
+        id: "campaign/stage/run",
+        group: "campaign",
+        checkpoint: "campaign/stage/run/checkpoint.pt",
+        horizonMode: "unknown",
+      },
     }] })).toBe(false);
   });
 

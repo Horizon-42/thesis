@@ -29,6 +29,7 @@ def _indexed_checkpoint(tmp_path: Path) -> tuple[Path, Path]:
         "config": {
             "model": "itransformer",
             "prediction_output": "control",
+            "horizon_mode": "normalized",
             "seed": 1337,
         },
     })
@@ -94,6 +95,34 @@ def test_publication_plan_reuses_existing_prediction_evaluation_and_czml_contrac
         == "val"
     assert plan.category.endswith("_val")
     assert "comparison" in plan.comparison_dir.parts
+    assert "horizon: normalized time" in plan.category_label
+    assert plan.experiment_metadata["horizonMode"] == "normalized"
+
+
+def test_refreshes_horizon_metadata_for_an_archived_publication(monkeypatch, tmp_path):
+    index, _checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    plan = publisher.PublicationPlan(
+        experiment,
+        "KRDU",
+        "val",
+        raw_output_root=tmp_path / "published",
+        harvest_root=tmp_path / "harvest",
+        frontend_airports_root=tmp_path / "frontend",
+    )
+    manifest = plan.comparison_dir.parent / "categories.json"
+    _write_json(manifest, {"categories": [{
+        "key": plan.category,
+        "label": "legacy label",
+        "experiment": {"id": experiment.experiment_id},
+    }]})
+
+    assert publisher.refresh_category_metadata(plan)
+
+    category = json.loads(manifest.read_text())["categories"][0]
+    assert category["label"] == plan.category_label
+    assert category["experiment"] == plan.experiment_metadata
 
 
 def test_publication_plan_cannot_access_outer_test(tmp_path):

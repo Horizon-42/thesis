@@ -37,8 +37,8 @@ class Forecast:
     passes: int
     truncated_at_threshold: bool
     horizon_capped: bool
+    segment_durations_s: np.ndarray
     controls: np.ndarray | None = None
-    segment_durations_s: np.ndarray | None = None
     geodetic_values: np.ndarray | None = None
 
     @property
@@ -145,6 +145,7 @@ def _forecast_from_fixed_states(
         passes=passes,
         truncated_at_threshold=False,
         horizon_capped=False,
+        segment_durations_s=np.full(len(offsets), config.dt_s, dtype=np.float64),
     )
 
 
@@ -173,6 +174,7 @@ def _forecast_normalized(
         passes=1,
         truncated_at_threshold=False,
         horizon_capped=False,
+        segment_durations_s=time_grid.segment_durations_s,
     )
 
 
@@ -287,4 +289,5 @@ def truncate_at_threshold(forecast: Forecast) -> Forecast:
         normalized_progress=progress,
         final_time_s=final_time_s,
         truncated_at_threshold=True,
+        segment_durations_s=forecast.segment_durations_s[: closest + 1],
     )

@@ -300,6 +300,9 @@ export default function ControlPanel({ observedVerdicts = NO_VERDICTS }: Control
                             .map((experiment) => (
                               <option key={experiment.id} value={experiment.id}>
                                 {experiment.label} · {experiment.predictionOutput ?? "state"}
+                                {experiment.horizonMode === "normalized" ? " · normalized time" : ""}
+                                {experiment.horizonMode === "full" ? " · full horizon" : ""}
+                                {experiment.horizonMode === "window" ? " · recursive window" : ""}
                                 {experiment.seed == null ? "" : ` · seed ${experiment.seed}`}
                               </option>
                             ))}

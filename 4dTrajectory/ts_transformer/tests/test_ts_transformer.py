@@ -2349,6 +2349,52 @@ def test_exported_record_satisfies_the_evaluation_contract():
         assert parsed.states[0][key] == pytest.approx(value)
 
 
+def test_normalized_state_export_preserves_a_tiny_relative_clock():
+    """Relative offsets must not collapse when added to and subtracted from the anchor."""
+    series, config = _series(n_flights=1)
+    normalizer = Normalizer.fit(series)
+    tiny_final_time_s = 3.7044681016305814e-13
+
+    class TinyDurationStateModel(torch.nn.Module):
+        def forward(self, history):
+            batch = len(history)
+            return StatePrediction(
+                states=torch.zeros(
+                    (batch, config.pred_len, config.enc_in),
+                    dtype=history.dtype,
+                    device=history.device,
+                ),
+                final_time_s=torch.full(
+                    (batch,),
+                    tiny_final_time_s,
+                    dtype=history.dtype,
+                    device=history.device,
+                ),
+            )
+
+    forecast = forecast_approach(
+        TinyDurationStateModel(),
+        series[0],
+        config,
+        normalizer,
+        device=torch.device("cpu"),
+    )
+    metrics = observed_series_metrics(series[0], forecast)
+    record = build_prediction_record(
+        series[0],
+        forecast,
+        index=0,
+        model_name=config.model,
+        horizon_mode=config.horizon_mode,
+    )
+    parsed = record_from_dict(record.eval_record)
+    exported_times = np.array([state["t"] for state in parsed.states])
+
+    assert metrics["raw_kinematics"]["predicted"]["segments"] == config.pred_len
+    assert np.all(np.diff(exported_times) > 0.0)
+    assert parsed.final_time_s == pytest.approx(tiny_final_time_s, rel=1e-6)
+
+
 def test_control_forecast_exports_optimizer_shaped_states_and_aligned_controls():
     series, config = _series(
         n_flights=1,

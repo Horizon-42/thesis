@@ -127,6 +127,7 @@ export interface ExperimentCategoryMetadata {
   checkpoint: string;
   model?: string | null;
   predictionOutput?: "state" | "control" | null;
+  horizonMode?: "normalized" | "full" | "window" | null;
   seed?: number | null;
 }
 
@@ -181,6 +182,9 @@ export function isComparisonCategory(value: unknown): value is ComparisonCategor
         typeof experiment.model === "string") &&
       (experiment.predictionOutput === undefined || experiment.predictionOutput === null ||
         experiment.predictionOutput === "state" || experiment.predictionOutput === "control") &&
+      (experiment.horizonMode === undefined || experiment.horizonMode === null ||
+        experiment.horizonMode === "normalized" || experiment.horizonMode === "full" ||
+        experiment.horizonMode === "window") &&
       (experiment.seed === undefined || experiment.seed === null ||
         typeof experiment.seed === "number"));
   return (

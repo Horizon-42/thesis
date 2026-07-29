@@ -145,8 +145,9 @@ def build_prediction_record(
     })
 
     if forecast.controls is None:
+        relative_offsets = np.cumsum(forecast.segment_durations_s)
         predicted_states = [anchor_state] + states_from_channels(
-            forecast.times - anchor_time, forecast.values, series.frame, mass_kg=mass_kg
+            relative_offsets, forecast.values, series.frame, mass_kg=mass_kg
         )
         eval_record = reference_evaluation_record(
             initial_state, scenario.target, predicted_states, source
@@ -416,9 +417,7 @@ def observed_series_metrics(series: FlightSeries, forecast: Forecast) -> dict[st
         "final_time_error_s": forecast.final_time_s - true_final_time_s,
     }
     anchor_values = series.values[forecast.anchor][None, ...]
-    predicted_durations = np.diff(
-        np.concatenate(([series.times[forecast.anchor]], forecast.times))
-    )[None, ...]
+    predicted_durations = forecast.segment_durations_s[None, ...]
     observed_values = series.values[forecast.anchor + 1 :]
     observed_durations = np.diff(series.times[forecast.anchor:])[None, ...]
     raw_metrics = {

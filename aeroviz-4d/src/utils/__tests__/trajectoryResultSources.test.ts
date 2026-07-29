@@ -31,6 +31,7 @@ function experiment(split: "train" | "val"): ComparisonCategory {
       checkpoint: "campaign/stage/run_seed1337/checkpoint.pt",
       model: "itransformer",
       predictionOutput: "control",
+      horizonMode: "normalized",
       seed: 1337,
     },
   };
@@ -54,6 +55,7 @@ describe("trajectory result sources", () => {
       label: "run_seed1337",
       model: "itransformer",
       predictionOutput: "control",
+      horizonMode: "normalized",
       seed: 1337,
     }]);
     expect(categoryForExperimentSplit(categories, "campaign/stage/run_seed1337", "train")?.datasetSplit)

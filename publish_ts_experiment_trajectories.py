@@ -46,6 +46,11 @@ SPLIT_LABELS = {
     "train": "Training split (in-sample)",
     "val": "Validation split (model selection)",
 }
+HORIZON_LABELS = {
+    "normalized": "normalized time",
+    "full": "full horizon (one pass)",
+    "window": "recursive window",
+}
 
 
 def _utc_now() -> str:
@@ -248,10 +253,24 @@ class PublicationPlan:
     def category_label(self) -> str:
         model = self.experiment.config.get("model") or "model"
         output = self.experiment.config.get("prediction_output") or "state"
+        horizon = self.experiment.config.get("horizon_mode") or "normalized"
+        horizon_label = HORIZON_LABELS.get(str(horizon), str(horizon))
         return (
             f"{SPLIT_LABELS[self.split]} — Experiment {self.experiment.run_id} "
-            f"({model}, {output})"
+            f"({model}, {output}, horizon: {horizon_label})"
         )
+
+    @property
+    def experiment_metadata(self) -> dict[str, Any]:
+        return {
+            "id": self.experiment.experiment_id,
+            "group": self.experiment.campaign,
+            "checkpoint": self.experiment.checkpoint_relative,
+            "model": self.experiment.config.get("model"),
+            "predictionOutput": self.experiment.config.get("prediction_output", "state"),
+            "horizonMode": self.experiment.config.get("horizon_mode", "normalized"),
+            "seed": self.experiment.config.get("seed"),
+        }
 
     def commands(self) -> list[tuple[str, list[str]]]:
         py = sys.executable
@@ -317,6 +336,37 @@ class PublicationPlan:
             self.evaluation_report.is_file() and
             self.comparison_index.is_file()
         )
+
+
+def refresh_category_metadata(plan: PublicationPlan) -> bool:
+    """Refresh derived experiment labels/metadata without regenerating archived trajectories."""
+    manifest_path = plan.comparison_dir.parent / "categories.json"
+    if not manifest_path.is_file():
+        return False
+    document = _load_object(manifest_path)
+    categories = document.get("categories")
+    if not isinstance(categories, list):
+        raise ValueError(f"{manifest_path} must contain a categories array")
+    changed = False
+    found = False
+    updated_categories: list[Any] = []
+    for value in categories:
+        if not isinstance(value, dict) or value.get("key") != plan.category:
+            updated_categories.append(value)
+            continue
+        found = True
+        updated = dict(value)
+        if updated.get("label") != plan.category_label:
+            updated["label"] = plan.category_label
+            changed = True
+        if updated.get("experiment") != plan.experiment_metadata:
+            updated["experiment"] = plan.experiment_metadata
+            changed = True
+        updated_categories.append(updated)
+    if found and changed:
+        document["categories"] = updated_categories
+        _write_json_atomic(manifest_path, document)
+    return found
 
 
 def _publication_document(
@@ -456,8 +506,12 @@ def run_publication(
 ) -> str:
     context = f"{plan.experiment.experiment_id} · {plan.airport} · {plan.split}"
     if not force and plan.is_complete():
-        if not dry_run and plan.record_retention == "archive":
-            archived = archive_prediction_records(plan)
+        if not dry_run:
+            refresh_category_metadata(plan)
+            if plan.record_retention == "archive":
+                archived = archive_prediction_records(plan)
+            else:
+                archived = 0
             if archived:
                 _write_json_atomic(
                     plan.publication_manifest,
@@ -505,6 +559,7 @@ def run_publication(
             archived = archive_prediction_records(plan, replace=True)
             completed.append("archive-records")
             print(f"  ✓ archived {archived} per-flight records -> {plan.records_archive}")
+        refresh_category_metadata(plan)
         _write_json_atomic(
             plan.publication_manifest,
             _publication_document(plan, status="completed", completed_steps=completed),
