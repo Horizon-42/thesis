@@ -23,8 +23,10 @@ import {
   airportEvaluationReportUrl,
   isComparisonIndex,
   type ComparisonCategory,
+  type EvaluationBatchStats,
   type OptimizationStats,
   type PredictionAccuracyStats,
+  type PredictionErrorSpread,
 } from "../data/airportData";
 import { isEvaluationReport, type EvaluationReport } from "../data/evaluationReport";
 import { useComparisonCategories } from "../hooks/useComparisonCategories";
@@ -39,6 +41,7 @@ interface LoadedSummary {
   reportFile: string;
   stats: OptimizationStats | null;
   prediction: PredictionAccuracyStats | null;
+  evaluation: EvaluationBatchStats | null;
   report: EvaluationReport | null;
 }
 
@@ -66,7 +69,9 @@ function row(label: string, value: string, available: boolean): SummaryRow {
 
 function evaluationKind(category: ComparisonCategory): EvaluationKind {
   if (category.key === OBSERVED_CATEGORY_KEY) return "observed";
-  if (category.key.startsWith("ts_")) return "dataDriven";
+  if (category.resultSource === "experiment" || category.key.startsWith("ts_")) {
+    return "dataDriven";
+  }
   return "optimization";
 }
 
@@ -187,31 +192,137 @@ function predictionPresentation(
   category: ComparisonCategory,
   prediction: PredictionAccuracyStats | null,
   stats: OptimizationStats | null,
+  evaluation: EvaluationBatchStats | null,
 ): Presentation {
-  const targetPassRate = passRateAmongSolved(stats);
-  const adeMean = prediction?.adeM?.mean;
-  const adeP95 = prediction?.adeM?.p95;
-  const fdeMean = prediction?.fdeM?.mean;
-  const fdeP95 = prediction?.fdeM?.p95;
+  const targetPassRate = evaluation?.successRateAmongSolved ?? passRateAmongSolved(stats);
+  const formatCount = (value: number | null | undefined) =>
+    value == null || !Number.isFinite(value) ? "—" : Math.round(value).toLocaleString();
+  const formatScalar = (
+    value: number | null | undefined,
+    unit: string,
+    digits = 1,
+  ) => value == null || !Number.isFinite(value) ? "—" : `${value.toFixed(digits)} ${unit}`;
+  const optionalRow = (
+    label: string,
+    value: number | null | undefined,
+    formatted: string,
+  ): SummaryRow[] => value == null ? [] : [row(label, formatted, true)];
+  const spreadRows = (name: string, spread: PredictionErrorSpread | null | undefined) => [
+    ...optionalRow(`Median ${name}`, spread?.median, formatMetres(spread?.median)),
+    ...optionalRow(`Mean ${name}`, spread?.mean, formatMetres(spread?.mean)),
+    ...optionalRow(
+      `95th-percentile ${name}`,
+      spread?.p95,
+      formatMetres(spread?.p95),
+    ),
+    ...optionalRow(`Maximum ${name}`, spread?.max, formatMetres(spread?.max)),
+  ];
+  const raw = prediction?.rawKinematics?.predicted;
+  const lateral = evaluation?.lateralM;
+  const vertical = evaluation?.verticalM;
+  const evaluatedTime = evaluation?.finalTimeS;
 
   return {
-    title: "Data-Driven Model Evaluation",
+    title: category.resultSource === "experiment"
+      ? "Experiment Evaluation"
+      : "Data-Driven Model Evaluation",
     context: category.label,
     note:
       "ADE is the mean position error across the predicted trajectory; FDE is the position " +
       "error at the final predicted sample. Both compare the prediction with the observed " +
       "track over their overlapping samples. The runway-threshold pass rate grades the " +
-      "prediction's final state against both evaluation gates. A solver solve rate does not apply.",
+      "prediction's final state against both evaluation gates. Train results are in-sample; " +
+      "validation results are the development/model-selection partition. A solver solve rate " +
+      "does not apply.",
     rows: [
+      row("Trajectories", formatCount(prediction?.flights), prediction?.flights != null),
+      row(
+        "Without temporal overlap",
+        formatCount(prediction?.flightsWithoutOverlap),
+        prediction?.flightsWithoutOverlap != null,
+      ),
       row(
         "Runway-threshold pass rate",
         formatPercent(targetPassRate),
         targetPassRate != null,
       ),
-      row("Mean ADE", formatMetres(adeMean), adeMean != null),
-      row("95th-percentile ADE", formatMetres(adeP95), adeP95 != null),
-      row("Mean FDE", formatMetres(fdeMean), fdeMean != null),
-      row("95th-percentile FDE", formatMetres(fdeP95), fdeP95 != null),
+      ...spreadRows("ADE", prediction?.adeM),
+      ...spreadRows("FDE", prediction?.fdeM),
+      ...optionalRow(
+        "Final-time error MAE",
+        prediction?.finalTimeS?.mae,
+        formatScalar(prediction?.finalTimeS?.mae, "s"),
+      ),
+      ...optionalRow(
+        "Final-time error p95",
+        prediction?.finalTimeS?.p95Abs,
+        formatScalar(prediction?.finalTimeS?.p95Abs, "s"),
+      ),
+      ...optionalRow(
+        "Final-time signed bias",
+        prediction?.finalTimeS?.meanSigned,
+        formatScalar(prediction?.finalTimeS?.meanSigned, "s"),
+      ),
+      ...optionalRow(
+        "Mean per-flight cross-track p95",
+        prediction?.crossTrackP95M?.mean,
+        formatMetres(prediction?.crossTrackP95M?.mean),
+      ),
+      ...optionalRow(
+        "Mean per-flight altitude p95",
+        prediction?.altitudeP95M?.mean,
+        formatMetres(prediction?.altitudeP95M?.mean),
+      ),
+      ...optionalRow(
+        "Mean lateral deviation at threshold",
+        lateral?.mean,
+        formatMetres(lateral?.mean),
+      ),
+      ...optionalRow(
+        "Lateral deviation p95 at threshold",
+        lateral?.p95,
+        formatMetres(lateral?.p95),
+      ),
+      ...optionalRow(
+        "Mean absolute vertical deviation at threshold",
+        vertical?.mean_abs,
+        formatMetres(vertical?.mean_abs),
+      ),
+      ...optionalRow(
+        "Vertical deviation p95 at threshold",
+        vertical?.p95_abs,
+        formatMetres(vertical?.p95_abs),
+      ),
+      ...optionalRow(
+        "Mean predicted duration",
+        evaluatedTime?.mean,
+        formatScalar(evaluatedTime?.mean, "s"),
+      ),
+      ...optionalRow(
+        "Position–velocity consistency p95",
+        raw?.positionVelocityRmseMps?.p95,
+        formatScalar(raw?.positionVelocityRmseMps?.p95, "m/s"),
+      ),
+      ...optionalRow(
+        "Heading consistency p95",
+        raw?.headingConsistencyP95Deg?.p95,
+        formatScalar(raw?.headingConsistencyP95Deg?.p95, "deg"),
+      ),
+      ...optionalRow(
+        "Turn-rate p95",
+        raw?.turnRateP95DegS?.p95,
+        formatScalar(raw?.turnRateP95DegS?.p95, "deg/s"),
+      ),
+      ...optionalRow(
+        "Acceleration p95",
+        raw?.accelerationP95Mps2?.p95,
+        formatScalar(raw?.accelerationP95Mps2?.p95, "m/s²"),
+      ),
+      ...optionalRow(
+        "Jerk p95",
+        raw?.jerkP95Mps3?.p95,
+        formatScalar(raw?.jerkP95Mps3?.p95, "m/s³"),
+      ),
     ],
   };
 }
@@ -267,6 +378,7 @@ export default function EvaluationSummary() {
             reportFile: OBSERVED_EVALUATION_REPORT_FILE,
             stats: null,
             prediction: null,
+            evaluation: null,
             report: data,
           });
         })
@@ -297,6 +409,7 @@ export default function EvaluationSummary() {
             reportFile: data.evaluationReport,
             stats: data.optimization ?? null,
             prediction: data.prediction ?? null,
+            evaluation: data.evaluation ?? null,
             report: null,
           });
         })
@@ -336,6 +449,7 @@ export default function EvaluationSummary() {
         category,
         loaded?.key === sourceKey ? loaded.prediction : null,
         loaded?.key === sourceKey ? loaded.stats : null,
+        loaded?.key === sourceKey ? loaded.evaluation : null,
       );
     }
     return optimizationPresentation(
@@ -353,6 +467,7 @@ export default function EvaluationSummary() {
     currentLoaded?.report ??
     (cachedReport && cachedReport.key === reportKey ? cachedReport.report : null);
   const reportTitle = `${presentation.title} Report`;
+  const detailsAvailable = category?.resultSource !== "experiment";
 
   function openDetails() {
     if (
@@ -401,15 +516,19 @@ export default function EvaluationSummary() {
           <h4>{presentation.title}</h4>
           <p className="evaluation-summary-context">{presentation.context}</p>
         </div>
-        <button
-          type="button"
-          className="evaluation-summary-details"
-          onClick={openDetails}
-          disabled={!loaded || loaded.key !== sourceKey || loading}
-          title="Open the full evaluation report (per-flight results and charts)"
-        >
-          {loading ? "Loading…" : "Details"}
-        </button>
+        {detailsAvailable ? (
+          <button
+            type="button"
+            className="evaluation-summary-details"
+            onClick={openDetails}
+            disabled={!loaded || loaded.key !== sourceKey || loading}
+            title="Open the full evaluation report (per-flight results and charts)"
+          >
+            {loading ? "Loading…" : "Details"}
+          </button>
+        ) : (
+          <span className="evaluation-summary-summary-only">Aggregate statistics</span>
+        )}
       </div>
       <dl>
         {presentation.rows.map((summaryRow) => (

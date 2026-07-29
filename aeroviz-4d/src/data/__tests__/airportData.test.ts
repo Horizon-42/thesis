@@ -75,6 +75,34 @@ describe("airportData helpers", () => {
       .toBe(false);
   });
 
+  it("accepts experiment categories only with explicit checkpoint metadata", () => {
+    const entry = {
+      key: "experiment_run_val",
+      label: "Experiment run · validation",
+      dir: "experiment_run_val",
+      groups: 3,
+      constrained: false,
+      datasetSplit: "val",
+      resultSource: "experiment",
+    };
+    expect(isComparisonCategoriesManifest({ categories: [entry] })).toBe(false);
+    expect(isComparisonCategoriesManifest({ categories: [{
+      ...entry,
+      experiment: {
+        id: "campaign/stage/run",
+        group: "campaign",
+        checkpoint: "campaign/stage/run/checkpoint.pt",
+        model: "itransformer",
+        predictionOutput: "control",
+        seed: 1337,
+      },
+    }] })).toBe(true);
+    expect(isComparisonCategoriesManifest({ categories: [{
+      ...entry,
+      experiment: { id: "run", group: "campaign" },
+    }] })).toBe(false);
+  });
+
   it("distinguishes report-only evaluation categories from drawable comparisons", () => {
     expect(
       isDrawableComparisonCategory({
