@@ -23,6 +23,7 @@ import torch.nn as nn
 from channels import CHANNELS, IDX, POSITION_IDX
 from batching import resolve_batch_size
 from config import (
+    CONTROL_STATE_CLOCK_OBSERVED,
     HORIZON_FULL,
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
@@ -76,7 +77,8 @@ CONTROL_LOSS_COMPONENT_NAMES = (
 def target_contract(config: TSConfig) -> str:
     if config.prediction_output == PREDICTION_STATE:
         return STATE_TARGET_CONTRACTS[config.horizon_mode]
-    return "bounded-control-nonuniform-duration-casadi-rollout-clock-aligned-v2"
+    clock = config.control_state_supervision_clock
+    return f"bounded-control-nonuniform-duration-casadi-rollout-{clock}-clock-aligned-v3"
 
 
 def loss_component_names(config: TSConfig) -> tuple[str, ...]:
@@ -317,6 +319,31 @@ def position_velocity_consistency_loss(
     return squared.sum(dim=(1, 2)) / denominator
 
 
+def control_state_supervision_prediction(
+    prediction: ControlPrediction,
+    target_final_time_s: torch.Tensor,
+    config: TSConfig,
+) -> ControlPrediction:
+    """Select the training clock without changing the deployable model output.
+
+    The observed-clock candidate preserves the model's learned non-uniform duration
+    fractions but scales them to the known train/validation total for state supervision.
+    The original prediction remains available to the independent final-time loss and is
+    still the only clock used at inference.
+    """
+    if config.control_state_supervision_clock != CONTROL_STATE_CLOCK_OBSERVED:
+        return prediction
+    fractions = prediction.segment_durations / prediction.segment_durations.sum(
+        dim=1, keepdim=True
+    )
+    durations = fractions * target_final_time_s.unsqueeze(1)
+    return ControlPrediction(
+        controls=prediction.controls,
+        segment_durations=durations,
+        final_time_s=target_final_time_s,
+    )
+
+
 def control_prediction_loss_components(
     prediction: ControlPrediction,
     normalized_anchor_state: torch.Tensor,
@@ -329,7 +356,12 @@ def control_prediction_loss_components(
     dynamics: dict[str, torch.Tensor],
 ) -> LossComponents:
     """State-space supervision through the differentiable control rollout."""
-    physical_channels, _geodetic = control_rollout_channels(prediction, dynamics, config)
+    state_prediction = control_state_supervision_prediction(
+        prediction, target_final_time_s, config
+    )
+    physical_channels, _geodetic = control_rollout_channels(
+        state_prediction, dynamics, config
+    )
     dtype, device = physical_channels.dtype, physical_channels.device
     mean = torch.as_tensor(normalizer.mean, dtype=dtype, device=device)
     scale = torch.as_tensor(normalizer.std, dtype=dtype, device=device)
@@ -338,7 +370,7 @@ def control_prediction_loss_components(
         normalized_anchor_state,
         target_states,
         state_weights,
-        prediction.segment_durations,
+        state_prediction.segment_durations,
         target_final_time_s,
     )
     state_error = (
@@ -1171,6 +1203,7 @@ def train(
             "effort_loss_weight": config.control_effort_loss_weight,
             "smoothness_loss_weight": config.control_smoothness_loss_weight,
             "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
+            "state_supervision_clock": config.control_state_supervision_clock,
         }
     metadata_path = out / CHECKPOINT_METADATA_NAME
     metadata_tmp = out / f"{CHECKPOINT_METADATA_NAME}.tmp"

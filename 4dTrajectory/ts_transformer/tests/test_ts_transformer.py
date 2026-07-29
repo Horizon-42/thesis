@@ -55,7 +55,7 @@ from aerodynamic_model.common import GeodeticState  # noqa: E402
 from batching import resolve_batch_size  # noqa: E402
 from config import (  # noqa: E402
     AIRCRAFT_FILTER_OPENAP_DIRECT, HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW,
-    PREDICTION_CONTROL, TSConfig,
+    CONTROL_STATE_CLOCK_OBSERVED, PREDICTION_CONTROL, TSConfig,
 )
 from dataset import (  # noqa: E402
     ARRIVAL_DATA_PROVENANCE_SCHEMA, FixedAnchorTrajectoryWindows, FlightEpochSampler,
@@ -1393,6 +1393,48 @@ def test_control_output_is_parallel_and_requires_normalized_horizon():
         TSConfig(prediction_output=PREDICTION_CONTROL, horizon_mode=HORIZON_FULL)
 
 
+def test_control_state_supervision_clock_rejects_unknown_value():
+    with pytest.raises(ValueError, match="control_state_supervision_clock"):
+        TSConfig(control_state_supervision_clock="future")
+
+
+def test_observed_control_state_clock_preserves_partition_and_uses_true_total():
+    prediction = ControlPrediction(
+        controls=torch.randn(2, 2, 3),
+        segment_durations=torch.tensor([[1.0, 3.0], [3.0, 2.0]]),
+        final_time_s=torch.tensor([4.0, 5.0]),
+    )
+    config = TSConfig(
+        prediction_output=PREDICTION_CONTROL,
+        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
+    )
+
+    supervised = train_module.control_state_supervision_prediction(
+        prediction, torch.tensor([8.0, 10.0]), config
+    )
+
+    assert supervised.controls is prediction.controls
+    torch.testing.assert_close(
+        supervised.segment_durations,
+        torch.tensor([[2.0, 6.0], [6.0, 4.0]]),
+    )
+    torch.testing.assert_close(supervised.final_time_s, torch.tensor([8.0, 10.0]))
+    torch.testing.assert_close(prediction.final_time_s, torch.tensor([4.0, 5.0]))
+
+
+def test_predicted_control_state_clock_preserves_original_training_behavior():
+    prediction = ControlPrediction(
+        controls=torch.zeros(1, 2, 3),
+        segment_durations=torch.tensor([[1.0, 3.0]]),
+        final_time_s=torch.tensor([4.0]),
+    )
+    config = TSConfig(prediction_output=PREDICTION_CONTROL)
+
+    assert train_module.control_state_supervision_prediction(
+        prediction, torch.tensor([8.0]), config
+    ) is prediction
+
+
 @pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
 def test_control_models_use_per_sample_bounds_and_aircraft_condition(model_name):
     config = TSConfig(
@@ -1789,6 +1831,7 @@ def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
         batch_size="16",
         control_effort_weight=1e-4,
         control_smoothness_weight=1e-2,
+        control_state_clock=CONTROL_STATE_CLOCK_OBSERVED,
         control_rollout_dt=0.5,
         output_dir=tmp_path,
     )
@@ -1800,12 +1843,15 @@ def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
     assert recipe[recipe.index("--split-seed") + 1] == "1337"
     assert recipe[recipe.index("--control-effort-weight") + 1] == "0.0001"
     assert recipe[recipe.index("--control-smoothness-weight") + 1] == "0.01"
+    assert recipe[recipe.index("--control-state-clock") + 1] == "observed"
     assert recipe[recipe.index("--control-rollout-dt") + 1] == "0.5"
     assert recipe[recipe.index("--aircraft-filter") + 1] == "openap-direct"
     assert config.prediction_output == PREDICTION_CONTROL
     assert config.aircraft_filter == AIRCRAFT_FILTER_OPENAP_DIRECT
     assert config.control_effort_loss_weight == pytest.approx(1e-4)
+    assert config.control_state_supervision_clock == CONTROL_STATE_CLOCK_OBSERVED
     assert "control" in prediction.pred_dir.name
+    assert "observed_clock" in prediction.pred_dir.name
     assert "control" in prediction.category
     assert "openap_direct" in prediction.category
 
@@ -2483,13 +2529,14 @@ def test_control_training_checkpoint_round_trip_keeps_output_identity(tmp_path):
         "control_upper": torch.tensor([[100_000.0, 0.5, 2.0]]),
     }), ControlPrediction)
     assert payload["target_contract"] == (
-        "bounded-control-nonuniform-duration-casadi-rollout-clock-aligned-v2"
+        "bounded-control-nonuniform-duration-casadi-rollout-predicted-clock-aligned-v3"
     )
     assert metadata["prediction_output"] == PREDICTION_CONTROL
     assert metadata["control_recipe"] == {
         "effort_loss_weight": config.control_effort_loss_weight,
         "smoothness_loss_weight": config.control_smoothness_loss_weight,
         "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
+        "state_supervision_clock": config.control_state_supervision_clock,
     }
 
 

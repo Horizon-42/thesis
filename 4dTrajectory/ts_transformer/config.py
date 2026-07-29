@@ -29,6 +29,12 @@ AIRCRAFT_FILTERS = (AIRCRAFT_FILTER_ALL, AIRCRAFT_FILTER_OPENAP_DIRECT)
 PREDICTION_STATE = "state"
 PREDICTION_CONTROL = "control"
 PREDICTION_OUTPUTS = (PREDICTION_STATE, PREDICTION_CONTROL)
+CONTROL_STATE_CLOCK_PREDICTED = "predicted"
+CONTROL_STATE_CLOCK_OBSERVED = "observed"
+CONTROL_STATE_CLOCKS = (
+    CONTROL_STATE_CLOCK_PREDICTED,
+    CONTROL_STATE_CLOCK_OBSERVED,
+)
 HORIZON_NORMALIZED = "normalized"
 HORIZON_FULL = "full"
 HORIZON_WINDOW = "window"
@@ -195,6 +201,12 @@ class TSConfig:
     # before these are evaluated, so mixed-aircraft batches share one dimensionless loss.
     control_effort_loss_weight: float = 1e-3
     control_smoothness_loss_weight: float = 1e-2
+    # Which total duration drives the differentiable rollout used by control state loss.
+    # ``predicted`` preserves the original joint geometry/clock training. ``observed`` is
+    # an explicit development candidate: controls and duration fractions receive state
+    # supervision on the known training clock while the final-time head keeps its own loss.
+    # Inference always uses predicted time, regardless of this training-only choice.
+    control_state_supervision_clock: str = CONTROL_STATE_CLOCK_PREDICTED
     # Must match the high-fidelity replay integration cap. The Torch rollout subdivides every
     # learned non-uniform segment at this interval and is numerically contract-tested against
     # CasadiSimulator, rather than training on a cheaper second dynamics model.
@@ -236,6 +248,12 @@ class TSConfig:
             raise ValueError(
                 f"unknown aircraft_filter {self.aircraft_filter!r}; "
                 f"expected one of {AIRCRAFT_FILTERS}"
+            )
+        if self.control_state_supervision_clock not in CONTROL_STATE_CLOCKS:
+            raise ValueError(
+                "unknown control_state_supervision_clock "
+                f"{self.control_state_supervision_clock!r}; expected one of "
+                f"{CONTROL_STATE_CLOCKS}"
             )
         for name in (
             "seq_len",

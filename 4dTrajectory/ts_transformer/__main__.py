@@ -55,6 +55,7 @@ from config import (  # noqa: E402
     AIRCRAFT_FILTER_OPENAP_DIRECT,
     AIRCRAFT_FILTERS,
     COORDINATE_FRAMES,
+    CONTROL_STATE_CLOCKS,
     DEFAULT_AIRCRAFT_TYPE,
     HORIZON_MODES,
     MODELS,
@@ -188,6 +189,15 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--control-effort-weight", type=float, default=None)
     parser.add_argument("--control-smoothness-weight", type=float, default=None)
     parser.add_argument(
+        "--control-state-clock",
+        choices=CONTROL_STATE_CLOCKS,
+        default=None,
+        help=(
+            "total duration used for control state-loss rollout: model prediction "
+            "(default) or observed train/validation duration"
+        ),
+    )
+    parser.add_argument(
         "--control-rollout-dt",
         type=float,
         default=None,
@@ -262,6 +272,7 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("terminal_loss_weight", args.terminal_loss_weight),
         ("control_effort_loss_weight", args.control_effort_weight),
         ("control_smoothness_loss_weight", args.control_smoothness_weight),
+        ("control_state_supervision_clock", args.control_state_clock),
         ("control_rollout_integrator_dt_s", args.control_rollout_dt),
         ("d_model", args.d_model), ("e_layers", args.e_layers), ("n_heads", args.n_heads),
         ("seed", args.seed), ("split_seed", args.split_seed), ("device", args.device),

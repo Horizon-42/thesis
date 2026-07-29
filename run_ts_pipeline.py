@@ -40,6 +40,8 @@ from config import (  # noqa: E402
     AIRCRAFT_FILTER_ALL,
     AIRCRAFT_FILTERS,
     COORDINATE_FRAMES,
+    CONTROL_STATE_CLOCKS,
+    CONTROL_STATE_CLOCK_PREDICTED,
     HORIZON_MODES,
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
@@ -119,6 +121,15 @@ def _prediction_output_tag(prediction_output: str) -> str:
     return "" if prediction_output == PREDICTION_STATE else f"_{prediction_output}"
 
 
+def _control_clock_tag(prediction_output: str, state_clock: str) -> str:
+    if (
+        prediction_output != PREDICTION_CONTROL
+        or state_clock == CONTROL_STATE_CLOCK_PREDICTED
+    ):
+        return ""
+    return f"_{state_clock}_clock"
+
+
 def _aircraft_filter_tag(aircraft_filter: str) -> str:
     return "" if aircraft_filter == AIRCRAFT_FILTER_ALL else "_openap_direct"
 
@@ -164,6 +175,7 @@ class TrainingPlan:
         random_train_anchor: bool = False,
         control_effort_weight: float | None = None,
         control_smoothness_weight: float | None = None,
+        control_state_clock: str = CONTROL_STATE_CLOCK_PREDICTED,
         control_rollout_dt: float | None = None,
         output_dir: str | Path | None = None,
     ) -> None:
@@ -192,12 +204,14 @@ class TrainingPlan:
         self.random_train_anchor = random_train_anchor
         self.control_effort_weight = control_effort_weight
         self.control_smoothness_weight = control_smoothness_weight
+        self.control_state_clock = control_state_clock
         self.control_rollout_dt = control_rollout_dt
 
         self.data_manifests = tuple(arrival_manifest_path(airport) for airport in self.airports)
         scope = self.airports[0] if training_mode == "per-airport" else "POOLED"
         suffix = (
             _prediction_output_tag(prediction_output)
+            + _control_clock_tag(prediction_output, control_state_clock)
             + _aircraft_filter_tag(aircraft_filter)
             + _frame_tag(coordinate_frame)
             + _anchor_tag(random_train_anchor)
@@ -254,6 +268,7 @@ class TrainingPlan:
             args += ["--control-effort-weight", str(self.control_effort_weight)]
         if self.control_smoothness_weight is not None:
             args += ["--control-smoothness-weight", str(self.control_smoothness_weight)]
+        args += ["--control-state-clock", self.control_state_clock]
         if self.control_rollout_dt is not None:
             args += ["--control-rollout-dt", str(self.control_rollout_dt)]
         return args
@@ -312,6 +327,9 @@ class TrainingPlan:
                 "effort_loss_weight": expected_config.control_effort_loss_weight,
                 "smoothness_loss_weight": expected_config.control_smoothness_loss_weight,
                 "rollout_integrator_dt_s": expected_config.control_rollout_integrator_dt_s,
+                "state_supervision_clock": (
+                    expected_config.control_state_supervision_clock
+                ),
             }
             if metadata.get("control_recipe") != expected_control_recipe:
                 return "checkpoint control recipe does not match the requested recipe"
@@ -373,6 +391,7 @@ class TrainingPlan:
             "random_train_anchor": self.random_train_anchor,
             "horizon_mode": self.horizon_mode,
             "aircraft_filter": self.aircraft_filter,
+            "control_state_supervision_clock": self.control_state_clock,
         }
         if self.full_horizon_steps is not None:
             overrides["full_horizon_steps"] = self.full_horizon_steps
@@ -446,6 +465,7 @@ class TrainingPlan:
             "random_train_anchor": self.random_train_anchor,
             "horizon_mode": self.horizon_mode,
             "aircraft_filter": self.aircraft_filter,
+            "control_state_supervision_clock": self.control_state_clock,
         })
         if self.full_horizon_steps is not None:
             overrides["full_horizon_steps"] = self.full_horizon_steps
@@ -511,11 +531,14 @@ class PredictionPlan:
         frame = _frame_tag(training.coordinate_frame)
         anchor = _anchor_tag(training.random_train_anchor)
         prediction_output = _prediction_output_tag(training.prediction_output)
+        control_clock = _control_clock_tag(
+            training.prediction_output, training.control_state_clock
+        )
         aircraft_filter = _aircraft_filter_tag(training.aircraft_filter)
         tag = f"_{experiment_tag}" if experiment_tag else ""
         horizon_tag = HORIZON_TAGS[training.horizon_mode]
         stem = (
-            f"{scope}{training.model}{prediction_output}_{horizon_tag}"
+            f"{scope}{training.model}{prediction_output}{control_clock}_{horizon_tag}"
             f"{aircraft_filter}{frame}{anchor}{tag}_{split}"
         )
         self.pred_dir = OPT_OUTPUTS_ROOT / self.airport / f"ts_pred_{stem}"
@@ -659,6 +682,7 @@ def run_training(
             print(
                 f"   control   : effort={config.control_effort_loss_weight:g}, "
                 f"smoothness={config.control_smoothness_loss_weight:g}, "
+                f"state_clock={config.control_state_supervision_clock}, "
                 f"rollout_dt={config.control_rollout_integrator_dt_s:g}s"
             )
         print(
@@ -775,6 +799,11 @@ def main() -> None:
                         help="positive integer or auto (default: 2048)")
     parser.add_argument("--control-effort-weight", type=float, default=None)
     parser.add_argument("--control-smoothness-weight", type=float, default=None)
+    parser.add_argument(
+        "--control-state-clock",
+        choices=CONTROL_STATE_CLOCKS,
+        default=CONTROL_STATE_CLOCK_PREDICTED,
+    )
     parser.add_argument("--control-rollout-dt", type=float, default=None)
     parser.add_argument("--cv-folds", type=int, default=3)
     parser.add_argument(
@@ -862,6 +891,7 @@ def main() -> None:
             random_train_anchor=args.random_train_anchor,
             control_effort_weight=args.control_effort_weight,
             control_smoothness_weight=args.control_smoothness_weight,
+            control_state_clock=args.control_state_clock,
             control_rollout_dt=args.control_rollout_dt,
         )
         if not run_training(
