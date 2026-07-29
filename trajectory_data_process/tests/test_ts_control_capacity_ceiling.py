@@ -61,6 +61,23 @@ def test_uniform_oracle_uses_equal_positive_segments() -> None:
     )
 
 
+def test_nonfinite_gradient_diagnostics_reports_affected_rows() -> None:
+    first = torch.nn.Parameter(torch.zeros((3, 2)))
+    second = torch.nn.Parameter(torch.zeros((3, 2)))
+    first.grad = torch.tensor([
+        [0.0, 1.0],
+        [float("nan"), 0.0],
+        [0.0, float("inf")],
+    ])
+    second.grad = torch.ones_like(second)
+
+    assert ceiling.nonfinite_gradient_diagnostics([first, second]) == [{
+        "parameter_index": 0,
+        "nonfinite_values": 2,
+        "affected_batch_rows": [1, 2],
+    }]
+
+
 def test_balanced_key_sample_rejects_unqualified_identity() -> None:
     with pytest.raises(ValueError, match="airport-qualified"):
         ceiling.balanced_key_sample(["flight"], per_airport=1, seed=1, split="train")

@@ -137,6 +137,28 @@ def oracle_prediction(
     )
 
 
+def nonfinite_gradient_diagnostics(
+    parameters: Sequence[torch.nn.Parameter],
+) -> list[dict[str, Any]]:
+    """Locate non-finite oracle gradients without mutating the optimizer state."""
+    diagnostics = []
+    for parameter_index, parameter in enumerate(parameters):
+        if parameter.grad is None:
+            continue
+        nonfinite = ~torch.isfinite(parameter.grad)
+        if not torch.any(nonfinite):
+            continue
+        affected_rows = torch.nonzero(
+            nonfinite.reshape(nonfinite.shape[0], -1).any(dim=1), as_tuple=False
+        ).flatten()
+        diagnostics.append({
+            "parameter_index": parameter_index,
+            "nonfinite_values": int(nonfinite.sum().detach().cpu()),
+            "affected_batch_rows": affected_rows.detach().cpu().tolist(),
+        })
+    return diagnostics
+
+
 def _common_metrics(
     physical_nodes: np.ndarray,
     durations_s: np.ndarray,
@@ -238,6 +260,11 @@ def optimize_oracle(
     best_step = 0
     best_parameters: list[torch.Tensor] = []
     history: list[dict[str, float | int]] = []
+    termination: dict[str, Any] = {
+        "reason": "requested_steps_completed",
+        "step": steps,
+    }
+    steps_completed = 0
     started = time.perf_counter()
     for step in range(1, steps + 1):
         optimizer.zero_grad(set_to_none=True)
@@ -261,15 +288,44 @@ def optimize_oracle(
         )
         loss = components.total
         if not torch.isfinite(loss):
-            raise RuntimeError(f"non-finite oracle objective at step {step}")
-        loss.backward()
-        grad_norm = float(torch.nn.utils.clip_grad_norm_(parameters, max_grad_norm))
-        optimizer.step()
+            if not best_parameters:
+                raise RuntimeError(f"non-finite oracle objective at step {step}")
+            termination = {"reason": "nonfinite_objective", "step": step}
+            print(
+                f"{mode}: stopping before step {step} update because the objective "
+                "became non-finite; retaining the best finite parameters",
+                flush=True,
+            )
+            break
         value = float(loss.detach())
         if value < best_loss:
             best_loss = value
             best_step = step
+            # Retain the exact parameter values whose forward pass produced best_loss.
             best_parameters = [parameter.detach().clone() for parameter in parameters]
+        loss.backward()
+        gradient_diagnostics = nonfinite_gradient_diagnostics(parameters)
+        if gradient_diagnostics:
+            if not best_parameters:
+                raise RuntimeError(f"non-finite oracle gradient at step {step}")
+            termination = {
+                "reason": "nonfinite_gradient",
+                "step": step,
+                "parameters": gradient_diagnostics,
+            }
+            print(
+                f"{mode}: stopping before step {step} update because gradients became "
+                "non-finite; retaining the best finite parameters",
+                flush=True,
+            )
+            break
+        grad_norm = float(torch.nn.utils.clip_grad_norm_(parameters, max_grad_norm))
+        if not math.isfinite(grad_norm):
+            raise RuntimeError(
+                f"gradient norm became non-finite at step {step} despite finite values"
+            )
+        optimizer.step()
+        steps_completed = step
         if step == 1 or step % 10 == 0 or step == steps:
             durations = prediction.segment_durations.detach()
             history.append({
@@ -301,11 +357,13 @@ def optimize_oracle(
     return prediction, {
         "mode": mode,
         "steps_requested": steps,
+        "steps_completed": steps_completed,
         "best_step": best_step,
         "best_loss": best_loss,
         "learning_rate": learning_rate,
         "max_grad_norm": max_grad_norm,
         "elapsed_seconds": time.perf_counter() - started,
+        "termination": termination,
         "history": history,
     }
 
