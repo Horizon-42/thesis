@@ -159,6 +159,34 @@ def nonfinite_gradient_diagnostics(
     return diagnostics
 
 
+def clip_grad_norm_float64_(
+    parameters: Sequence[torch.nn.Parameter], max_norm: float
+) -> float:
+    """Clip finite FP32 gradients using a float64 norm accumulator.
+
+    Oracle reconstruction can transiently produce finite gradients whose squared FP32
+    sum overflows.  PyTorch's default clipper then reports ``inf`` and scales every value
+    to zero.  A float64 accumulator preserves the intended global-norm clipping rule.
+    """
+    gradients = [parameter.grad for parameter in parameters if parameter.grad is not None]
+    if not gradients:
+        return 0.0
+    total_square = torch.zeros(
+        (), dtype=torch.float64, device=gradients[0].device
+    )
+    for gradient in gradients:
+        total_square = total_square + gradient.detach().to(torch.float64).square().sum()
+    total_norm = total_square.sqrt()
+    if not torch.isfinite(total_norm):
+        return float(total_norm.detach().cpu())
+    coefficient = torch.clamp(
+        max_norm / (total_norm + 1e-12), max=1.0
+    )
+    for gradient in gradients:
+        gradient.mul_(coefficient.to(dtype=gradient.dtype))
+    return float(total_norm.detach().cpu())
+
+
 def _common_metrics(
     physical_nodes: np.ndarray,
     durations_s: np.ndarray,
@@ -319,7 +347,7 @@ def optimize_oracle(
                 flush=True,
             )
             break
-        grad_norm = float(torch.nn.utils.clip_grad_norm_(parameters, max_grad_norm))
+        grad_norm = clip_grad_norm_float64_(parameters, max_grad_norm)
         if not math.isfinite(grad_norm):
             raise RuntimeError(
                 f"gradient norm became non-finite at step {step} despite finite values"

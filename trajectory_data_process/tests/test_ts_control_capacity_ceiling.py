@@ -78,6 +78,17 @@ def test_nonfinite_gradient_diagnostics_reports_affected_rows() -> None:
     }]
 
 
+def test_float64_gradient_clipping_handles_finite_float32_overflow() -> None:
+    parameter = torch.nn.Parameter(torch.zeros(4))
+    parameter.grad = torch.full_like(parameter, 1e30)
+
+    norm = ceiling.clip_grad_norm_float64_([parameter], max_norm=10.0)
+
+    assert norm == pytest.approx(2e30)
+    assert torch.isfinite(parameter.grad).all()
+    assert torch.linalg.vector_norm(parameter.grad) == pytest.approx(10.0)
+
+
 def test_balanced_key_sample_rejects_unqualified_identity() -> None:
     with pytest.raises(ValueError, match="airport-qualified"):
         ceiling.balanced_key_sample(["flight"], per_airport=1, seed=1, split="train")
