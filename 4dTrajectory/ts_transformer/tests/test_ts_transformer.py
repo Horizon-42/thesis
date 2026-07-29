@@ -1420,6 +1420,9 @@ def test_observed_control_state_clock_preserves_partition_and_uses_true_total():
     )
     torch.testing.assert_close(supervised.final_time_s, torch.tensor([8.0, 10.0]))
     torch.testing.assert_close(prediction.final_time_s, torch.tensor([4.0, 5.0]))
+    assert train_module.target_contract(config) == (
+        "bounded-control-nonuniform-duration-casadi-rollout-observed-clock-aligned-v3"
+    )
 
 
 def test_predicted_control_state_clock_preserves_original_training_behavior():
@@ -2529,7 +2532,7 @@ def test_control_training_checkpoint_round_trip_keeps_output_identity(tmp_path):
         "control_upper": torch.tensor([[100_000.0, 0.5, 2.0]]),
     }), ControlPrediction)
     assert payload["target_contract"] == (
-        "bounded-control-nonuniform-duration-casadi-rollout-predicted-clock-aligned-v3"
+        "bounded-control-nonuniform-duration-casadi-rollout-clock-aligned-v2"
     )
     assert metadata["prediction_output"] == PREDICTION_CONTROL
     assert metadata["control_recipe"] == {
