@@ -394,12 +394,23 @@ def _scheduled_rollout_forward(
     ).clamp(min=0.0)
     step_duration_schedule = torch.minimum(remaining_schedule, dt_cap)
 
-    # Step-major contiguous storage gives every compiled call the same dense input strides,
-    # independent of this batch's total rollout length. Without it, slicing [B,S,*] at one
-    # step exposes an S-dependent leading stride and causes avoidable Inductor recompiles.
-    controls_by_step = scheduled_controls.transpose(0, 1).contiguous()
-    durations_by_step = step_duration_schedule.transpose(0, 1).contiguous()
-    active_by_step = active_schedule.transpose(0, 1).contiguous()
+    # Step-major storage gives every compiled call the same dense input strides, independent
+    # of this batch's total rollout length.  ``transpose(...).contiguous()`` is NOT sufficient
+    # for single-flight inference: [1,S,*] -> [S,1,*] is considered contiguous because the
+    # batch dimension has size one, so PyTorch may retain an S-dependent singleton stride.
+    # Allocate canonical C-order buffers explicitly; ``copy_`` remains differentiable for the
+    # controls/durations while removing S from every per-step view's stride guards.
+    def canonical_step_major(tensor: torch.Tensor) -> torch.Tensor:
+        transposed = tensor.transpose(0, 1)
+        return torch.empty(
+            transposed.shape,
+            dtype=transposed.dtype,
+            device=transposed.device,
+        ).copy_(transposed)
+
+    controls_by_step = canonical_step_major(scheduled_controls)
+    durations_by_step = canonical_step_major(step_duration_schedule)
+    active_by_step = canonical_step_major(active_schedule)
 
     state = initial_states
     states_by_step: list[torch.Tensor] = []

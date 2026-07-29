@@ -722,7 +722,7 @@ def optimization_stats(
 
 
 def prediction_accuracy_stats(summary: dict[str, Any]) -> dict[str, Any] | None:
-    """Frontend ADE/FDE summary for a ts_transformer batch.
+    """Frontend accuracy/clock/kinematic summary for a ts_transformer batch.
 
     The predictor already computes these aggregates against the observed overlap and writes
     them to ``summary.json.accuracy``. Publication only changes field casing; it must never
@@ -754,13 +754,117 @@ def prediction_accuracy_stats(summary: dict[str, Any]) -> dict[str, Any] | None:
             raise ValueError(
                 f"ts_transformer summary accuracy.{source_key} requires mean and p95"
             )
-        return {"mean": float(mean_value), "p95": float(p95_value)}
+        result = {"mean": float(mean_value), "p95": float(p95_value)}
+        for source_name, output_name in (("median", "median"), ("max", "max")):
+            value = source.get(source_name)
+            if isinstance(value, (int, float)):
+                result[output_name] = float(value)
+        return result
+
+    def final_time() -> dict[str, float] | None:
+        source = accuracy.get("final_time_s")
+        if source is None:
+            return None
+        if not isinstance(source, dict):
+            raise ValueError("ts_transformer summary accuracy.final_time_s is malformed")
+        mapping = (("mae", "mae"), ("p95_abs", "p95Abs"),
+                   ("mean_signed", "meanSigned"))
+        result = {
+            output_name: float(source[source_name])
+            for source_name, output_name in mapping
+            if isinstance(source.get(source_name), (int, float))
+        }
+        return result or None
+
+    raw_names = {
+        "position_velocity_rmse_mps": "positionVelocityRmseMps",
+        "heading_consistency_p95_deg": "headingConsistencyP95Deg",
+        "turn_rate_p95_deg_s": "turnRateP95DegS",
+        "acceleration_p95_mps2": "accelerationP95Mps2",
+        "jerk_p95_mps3": "jerkP95Mps3",
+    }
+
+    def raw_role(role: str) -> dict[str, dict[str, float]] | None:
+        raw = accuracy.get("raw_kinematics")
+        if not isinstance(raw, dict):
+            return None
+        source = raw.get(role)
+        if not isinstance(source, dict):
+            return None
+        result: dict[str, dict[str, float]] = {}
+        for source_name, output_name in raw_names.items():
+            values = source.get(source_name)
+            if not isinstance(values, dict):
+                continue
+            converted = {
+                key: float(values[key])
+                for key in ("median", "mean", "p95", "max")
+                if isinstance(values.get(key), (int, float))
+            }
+            if converted:
+                result[output_name] = converted
+        return result or None
+
+    def raw_delta() -> dict[str, float] | None:
+        raw = accuracy.get("raw_kinematics")
+        source = raw.get("delta") if isinstance(raw, dict) else None
+        if not isinstance(source, dict):
+            return None
+        result = {
+            output_name: float(source[source_name])
+            for source_name, output_name in raw_names.items()
+            if isinstance(source.get(source_name), (int, float))
+        }
+        return result or None
 
     return {
         "flights": accuracy.get("flights"),
         "flightsWithoutOverlap": accuracy.get("flights_without_overlap"),
+        "finalTimeS": final_time(),
         "adeM": spread("ade_m"),
         "fdeM": spread("fde_m"),
+        "crossTrackP95M": spread("cross_track_p95_m"),
+        "altitudeP95M": spread("altitude_p95_m"),
+        "rawKinematics": {
+            "predicted": raw_role("predicted"),
+            "observedBaseline": raw_role("observed_baseline"),
+            "delta": raw_delta(),
+        },
+    }
+
+
+def evaluation_batch_stats(report: dict[str, Any]) -> dict[str, Any]:
+    """Copy every batch-level evaluation statistic into the committed index.
+
+    The full, per-flight report remains an immutable sibling artifact.  This block deliberately
+    excludes ``trajectories`` so the Observe summary can render all aggregate statistics from the
+    index it already fetches without loading the details payload.
+    """
+    field_names = (
+        "thresholds",
+        "total",
+        "measured",
+        "solved",
+        "solve_rate",
+        "successful",
+        "success_rate",
+        "success_rate_among_solved",
+        "lateral_m",
+        "vertical_m",
+        "final_time_s",
+        "observed",
+    )
+    return {
+        {
+            "solve_rate": "solveRate",
+            "success_rate": "successRate",
+            "success_rate_among_solved": "successRateAmongSolved",
+            "lateral_m": "lateralM",
+            "vertical_m": "verticalM",
+            "final_time_s": "finalTimeS",
+        }.get(name, name): report[name]
+        for name in field_names
+        if name in report
     }
 
 
@@ -854,6 +958,7 @@ def publish_comparison_batch(
             )
 
         index["optimization"] = optimization_stats(summary, evaluation_report)
+        index["evaluation"] = evaluation_batch_stats(evaluation_report)
         prediction = prediction_accuracy_stats(summary)
         if prediction is not None:
             index["prediction"] = prediction
@@ -896,6 +1001,8 @@ def _load_adsb(airport: str, override: str | None) -> list[dict[str, Any]]:
 def _upsert_category(
     manifest_path: Path, *, key: str, label: str, directory: str, group_count: int,
     constrained: bool, dataset_split: str | None = None,
+    result_source: str | None = None,
+    experiment: dict[str, Any] | None = None,
 ) -> int:
     """Add/replace one category in the shared ``categories.json`` manifest.
 
@@ -922,6 +1029,10 @@ def _upsert_category(
              "constrained": constrained}
     if dataset_split is not None:
         entry["datasetSplit"] = dataset_split
+    if result_source is not None:
+        entry["resultSource"] = result_source
+    if experiment is not None:
+        entry["experiment"] = experiment
     kept.append(entry)
     manifest["categories"] = sorted(kept, key=lambda c: c["key"])
     _write_json_atomic(manifest_path, manifest, pretty=True)
@@ -957,6 +1068,23 @@ def main() -> None:
         "--dataset-split", choices=DATASET_SPLITS, default=None,
         help="dataset split represented by this prediction category; stored explicitly in "
              "the frontend manifest",
+    )
+    parser.add_argument(
+        "--result-source", choices=("prediction", "experiment"), default=None,
+        help="optional Observe result-source classification; legacy categories default to "
+             "prediction, while checkpoint sweeps use experiment",
+    )
+    parser.add_argument(
+        "--experiment-id", default=None,
+        help="stable repository-relative checkpoint identity (required for experiment source)",
+    )
+    parser.add_argument(
+        "--experiment-group", default=None,
+        help="campaign/collection label used to group experiment checkpoints in the frontend",
+    )
+    parser.add_argument(
+        "--experiment-checkpoint", default=None,
+        help="repository-relative checkpoint path shown in experiment metadata",
     )
     parser.add_argument(
         "--constrained", action="store_true",
@@ -1002,6 +1130,13 @@ def main() -> None:
             f"--dataset-split {args.dataset_split!r} does not match summary split "
             f"{summary.get('split')!r}"
         )
+    if args.result_source == "experiment" and (
+        not args.experiment_id or not args.experiment_group or not args.experiment_checkpoint
+    ):
+        parser.error(
+            "--result-source experiment requires --experiment-id, --experiment-group and "
+            "--experiment-checkpoint"
+        )
     states_dir = Path(args.states_dir) if args.states_dir else summary_path.parent
     out_dir = Path(args.output_dir)
 
@@ -1030,12 +1165,25 @@ def main() -> None:
           f"to {out_dir}; overall failure rate {rate_str}")
 
     if args.category:
+        config = summary.get("config") if isinstance(summary.get("config"), dict) else {}
+        experiment = None
+        if args.result_source == "experiment":
+            experiment = {
+                "id": args.experiment_id,
+                "group": args.experiment_group,
+                "checkpoint": args.experiment_checkpoint,
+                "model": config.get("model"),
+                "predictionOutput": config.get("prediction_output", "state"),
+                "seed": config.get("seed"),
+            }
         total = _upsert_category(
             out_dir.parent / "categories.json",
             key=args.category, label=args.category_label or args.category,
             directory=out_dir.name, group_count=len(index["groups"]),
             constrained=args.constrained,
             dataset_split=args.dataset_split,
+            result_source=args.result_source,
+            experiment=experiment,
         )
         print(f"✓ registered category {args.category!r} -> {out_dir.parent / 'categories.json'} "
               f"({total} categor{'y' if total == 1 else 'ies'})")

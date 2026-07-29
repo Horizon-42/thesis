@@ -262,6 +262,44 @@ def test_discrete_adjoint_uses_one_dense_state_layout(monkeypatch):
     assert set(observed_strides) == {(7, 1)}
 
 
+def test_single_flight_rollouts_do_not_leak_horizon_length_into_step_strides(monkeypatch):
+    """Sequential inference flights must reuse one compiled-kernel input layout.
+
+    A transpose of ``[1,S,*]`` can still report itself contiguous while retaining an
+    ``S``-dependent stride on the singleton batch dimension.  Different learned durations
+    then consume one Dynamo specialization per flight until inference hits its cache limit.
+    """
+    observed_strides = []
+    original_step = torch_dynamics._rollout_step
+
+    def recording_step(state, controls, aero_params, dt_s):
+        observed_strides.append((controls.stride(), dt_s.stride()))
+        return original_step(state, controls, aero_params, dt_s)
+
+    monkeypatch.setattr(torch_dynamics, "_rollout_step", recording_step)
+    initial = torch.tensor(
+        [[35.88, -78.79, 900.0, 80.0, 2.2, -0.04, A320.landing_mass]],
+        dtype=torch.float64,
+    )
+    controls = torch.tensor(
+        [[[45_000.0, 0.08, 1.02], [36_000.0, -0.04, 0.99]]],
+        dtype=torch.float64,
+    )
+
+    with torch.no_grad():
+        for durations in ([0.5, 1.0], [0.5, 1.5]):
+            rollout_piecewise_constant(
+                initial,
+                controls,
+                torch.tensor([durations], dtype=torch.float64),
+                _aero_tensor(),
+                integrator_dt_s=0.5,
+            )
+
+    assert observed_strides
+    assert set(observed_strides) == {((3, 1), (1,))}
+
+
 @pytest.mark.parametrize(
     "device",
     [

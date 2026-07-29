@@ -19,6 +19,7 @@ from build_scenario_comparison_czml import (
     _upsert_category,
     build_comparison_czml,
     build_runway_comparison,
+    evaluation_batch_stats,
     group_results_by_runway,
     load_verdicts,
     optimization_stats,
@@ -476,15 +477,22 @@ def test_prediction_accuracy_stats_publishes_existing_ade_and_fde():
         "accuracy": {
             "flights": 152,
             "flights_without_overlap": 0,
-            "ade_m": {"mean": 1755.6, "p95": 4656.2, "max": 9012.0},
-            "fde_m": {"mean": 2082.4, "p95": 6002.1, "max": 10024.0},
+            "final_time_s": {"mae": 58.1, "p95_abs": 120.0, "mean_signed": -4.0},
+            "ade_m": {"median": 1400.0, "mean": 1755.6, "p95": 4656.2, "max": 9012.0},
+            "fde_m": {"median": 1600.0, "mean": 2082.4, "p95": 6002.1, "max": 10024.0},
+            "cross_track_p95_m": {"mean": 700.0, "p95": 1800.0},
+            "altitude_p95_m": {"mean": 90.0, "p95": 210.0},
         },
     }
     assert prediction_accuracy_stats(summary) == {
         "flights": 152,
         "flightsWithoutOverlap": 0,
-        "adeM": {"mean": 1755.6, "p95": 4656.2},
-        "fdeM": {"mean": 2082.4, "p95": 6002.1},
+        "finalTimeS": {"mae": 58.1, "p95Abs": 120.0, "meanSigned": -4.0},
+        "adeM": {"median": 1400.0, "mean": 1755.6, "p95": 4656.2, "max": 9012.0},
+        "fdeM": {"median": 1600.0, "mean": 2082.4, "p95": 6002.1, "max": 10024.0},
+        "crossTrackP95M": {"mean": 700.0, "p95": 1800.0},
+        "altitudeP95M": {"mean": 90.0, "p95": 210.0},
+        "rawKinematics": {"predicted": None, "observedBaseline": None, "delta": None},
     }
     assert prediction_accuracy_stats({"mode": "runway", "total": 4}) is None
     assert prediction_accuracy_stats({
@@ -493,9 +501,34 @@ def test_prediction_accuracy_stats_publishes_existing_ade_and_fde():
     }) == {
         "flights": 0,
         "flightsWithoutOverlap": 3,
+        "finalTimeS": None,
         "adeM": None,
         "fdeM": None,
+        "crossTrackP95M": None,
+        "altitudeP95M": None,
+        "rawKinematics": {"predicted": None, "observedBaseline": None, "delta": None},
     }
+
+
+def test_evaluation_batch_stats_excludes_only_per_flight_details():
+    report = {
+        "thresholds": {"lateral_max_m": 106.75},
+        "total": 10,
+        "solved": 9,
+        "solve_rate": 0.9,
+        "successful": 4,
+        "success_rate": 0.4,
+        "success_rate_among_solved": 4 / 9,
+        "lateral_m": {"mean": 12.0, "p95": 30.0, "max": 42.0},
+        "vertical_m": {"mean_abs": 3.0, "p95_abs": 7.0},
+        "final_time_s": {"mean": 300.0, "min": 200.0, "max": 400.0},
+        "trajectories": [{"file": "one_eval.json"}],
+    }
+    stats = evaluation_batch_stats(report)
+    assert stats["solveRate"] == 0.9
+    assert stats["successRateAmongSolved"] == 4 / 9
+    assert stats["lateralM"]["p95"] == 30.0
+    assert "trajectories" not in stats
 
 
 def test_prediction_accuracy_stats_rejects_incomplete_predictor_summary():
@@ -552,8 +585,12 @@ def test_prediction_batch_commits_accuracy_to_comparison_index(monkeypatch, tmp_
     assert index["prediction"] == {
         "flights": 1,
         "flightsWithoutOverlap": 0,
+        "finalTimeS": None,
         "adeM": {"mean": 125.0, "p95": 125.0},
         "fdeM": {"mean": 240.0, "p95": 240.0},
+        "crossTrackP95M": None,
+        "altitudeP95M": None,
+        "rawKinematics": {"predicted": None, "observedBaseline": None, "delta": None},
     }
     assert json.loads((tmp_path / "comparison_index.json").read_text())["prediction"] \
         == index["prediction"]
@@ -795,6 +832,32 @@ def test_upsert_prediction_category_stamps_dataset_split(tmp_path):
     )
     category = json.loads(manifest.read_text())["categories"][0]
     assert category["datasetSplit"] == "train"
+
+
+def test_upsert_experiment_category_stamps_grouped_checkpoint_metadata(tmp_path):
+    manifest = tmp_path / "categories.json"
+    experiment = {
+        "id": "campaign/stage/run",
+        "group": "campaign",
+        "checkpoint": "4dTrajectory/outputs/POOLED/experiments/campaign/stage/run/checkpoint.pt",
+        "model": "itransformer",
+        "predictionOutput": "control",
+        "seed": 1337,
+    }
+    _upsert_category(
+        manifest,
+        key="experiment_run_abc_val",
+        label="Validation — Experiment run",
+        directory="experiment_run_abc_val",
+        group_count=12,
+        constrained=False,
+        dataset_split="val",
+        result_source="experiment",
+        experiment=experiment,
+    )
+    category = json.loads(manifest.read_text())["categories"][0]
+    assert category["resultSource"] == "experiment"
+    assert category["experiment"] == experiment
 
 
 def test_cli_rejects_a_category_split_that_disagrees_with_the_summary(monkeypatch, tmp_path):
