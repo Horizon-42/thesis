@@ -28,13 +28,28 @@ AIRCRAFT_FILTER_OPENAP_DIRECT = "openap-direct"
 AIRCRAFT_FILTERS = (AIRCRAFT_FILTER_ALL, AIRCRAFT_FILTER_OPENAP_DIRECT)
 PREDICTION_STATE = "state"
 PREDICTION_CONTROL = "control"
-PREDICTION_OUTPUTS = (PREDICTION_STATE, PREDICTION_CONTROL)
+PREDICTION_CONTROL_MIXTURE = "control-mixture"
+PREDICTION_OUTPUTS = (
+    PREDICTION_STATE,
+    PREDICTION_CONTROL,
+    PREDICTION_CONTROL_MIXTURE,
+)
+CONTROL_PREDICTION_OUTPUTS = frozenset(
+    (PREDICTION_CONTROL, PREDICTION_CONTROL_MIXTURE)
+)
 CONTROL_STATE_CLOCK_PREDICTED = "predicted"
 CONTROL_STATE_CLOCK_OBSERVED = "observed"
 CONTROL_STATE_CLOCKS = (
     CONTROL_STATE_CLOCK_PREDICTED,
     CONTROL_STATE_CLOCK_OBSERVED,
 )
+
+
+def uses_control_dynamics(prediction_output: str) -> bool:
+    """Whether an output strategy requires per-flight aircraft dynamics."""
+    return prediction_output in CONTROL_PREDICTION_OUTPUTS
+
+
 HORIZON_NORMALIZED = "normalized"
 HORIZON_FULL = "full"
 HORIZON_WINDOW = "window"
@@ -207,6 +222,11 @@ class TSConfig:
     # supervision on the known training clock while the final-time head keeps its own loss.
     # Inference always uses predicted time, regardless of this training-only choice.
     control_state_supervision_clock: str = CONTROL_STATE_CLOCK_PREDICTED
+    # Multi-expert control output is a separate opt-in strategy. The default K=3 keeps the
+    # first experiment small; these weights affect only ``control-mixture`` checkpoints.
+    control_expert_count: int = 3
+    control_mixture_selector_loss_weight: float = 0.1
+    control_mixture_diversity_loss_weight: float = 0.01
     # Must match the high-fidelity replay integration cap. The Torch rollout subdivides every
     # learned non-uniform segment at this interval and is numerically contract-tested against
     # CasadiSimulator, rather than training on a cheaper second dynamics model.
@@ -232,7 +252,7 @@ class TSConfig:
                 f"unknown horizon_mode {self.horizon_mode!r}; expected one of {HORIZON_MODES}"
             )
         if (
-            self.prediction_output == PREDICTION_CONTROL
+            uses_control_dynamics(self.prediction_output)
             and self.horizon_mode != HORIZON_NORMALIZED
         ):
             raise ValueError(
@@ -271,9 +291,15 @@ class TSConfig:
             "epochs",
             "lr_plateau_patience",
             "patience",
+            "control_expert_count",
         ):
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name} must be positive, got {getattr(self, name)!r}")
+        if (
+            self.prediction_output == PREDICTION_CONTROL_MIXTURE
+            and self.control_expert_count < 2
+        ):
+            raise ValueError("control-mixture requires control_expert_count >= 2")
         for name in (
             "dt_s",
             "learning_rate",
@@ -310,6 +336,10 @@ class TSConfig:
             raise ValueError("control_effort_loss_weight must be non-negative")
         if self.control_smoothness_loss_weight < 0.0:
             raise ValueError("control_smoothness_loss_weight must be non-negative")
+        if self.control_mixture_selector_loss_weight < 0.0:
+            raise ValueError("control_mixture_selector_loss_weight must be non-negative")
+        if self.control_mixture_diversity_loss_weight < 0.0:
+            raise ValueError("control_mixture_diversity_loss_weight must be non-negative")
 
     # PatchTST reads configs.enc_in; iTransformer infers the count from the tensor.
     @property
@@ -357,3 +387,25 @@ class TSConfig:
         data = dict(data)
         data["channels"] = tuple(data["channels"])
         return cls(**data)
+
+
+def control_recipe(config: TSConfig) -> dict[str, float | int | str]:
+    """Serialize the complete recipe for a control-output strategy."""
+    base: dict[str, float | int | str] = {
+        "effort_loss_weight": config.control_effort_loss_weight,
+        "smoothness_loss_weight": config.control_smoothness_loss_weight,
+        "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
+        "state_supervision_clock": config.control_state_supervision_clock,
+    }
+    extensions = {
+        PREDICTION_CONTROL: {},
+        PREDICTION_CONTROL_MIXTURE: {
+            "expert_count": config.control_expert_count,
+            "selector_loss_weight": config.control_mixture_selector_loss_weight,
+            "diversity_loss_weight": config.control_mixture_diversity_loss_weight,
+        },
+    }
+    try:
+        return {**base, **extensions[config.prediction_output]}
+    except KeyError as error:
+        raise ValueError("state output has no control recipe") from error

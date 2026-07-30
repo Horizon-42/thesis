@@ -15,10 +15,12 @@ from config import (
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
     PREDICTION_CONTROL,
+    PREDICTION_CONTROL_MIXTURE,
+    PREDICTION_STATE,
     TSConfig,
 )
+from control_prediction_adapters import deployable_control_prediction
 from dataset import FlightSeries, Normalizer, dynamics_arrays
-from prediction_outputs import ControlPrediction
 from time_grids import output_time_grid
 from train import control_rollout_channels
 
@@ -40,6 +42,7 @@ class Forecast:
     segment_durations_s: np.ndarray
     controls: np.ndarray | None = None
     geodetic_values: np.ndarray | None = None
+    prediction_output: str = PREDICTION_STATE
 
     @property
     def n_steps(self) -> int:
@@ -98,9 +101,7 @@ def _forecast_control(
     }
     model.eval()
     with torch.no_grad():
-        prediction = model(tensor, dynamics)
-        if not isinstance(prediction, ControlPrediction):
-            raise TypeError("control checkpoint did not return ControlPrediction")
+        prediction = deployable_control_prediction(model(tensor, dynamics))
         channels, geodetic = control_rollout_channels(prediction, dynamics, config)
     durations = prediction.segment_durations[0].cpu().numpy().astype(np.float64)
     offsets = np.cumsum(durations)
@@ -119,6 +120,7 @@ def _forecast_control(
         controls=prediction.controls[0].cpu().numpy().astype(np.float64),
         segment_durations_s=durations,
         geodetic_values=geodetic[0].cpu().numpy().astype(np.float64),
+        prediction_output=config.prediction_output,
     )
 
 
@@ -146,6 +148,7 @@ def _forecast_from_fixed_states(
         truncated_at_threshold=False,
         horizon_capped=False,
         segment_durations_s=np.full(len(offsets), config.dt_s, dtype=np.float64),
+        prediction_output=config.prediction_output,
     )
 
 
@@ -175,6 +178,7 @@ def _forecast_normalized(
         truncated_at_threshold=False,
         horizon_capped=False,
         segment_durations_s=time_grid.segment_durations_s,
+        prediction_output=config.prediction_output,
     )
 
 
@@ -249,6 +253,43 @@ _POSTPROCESSORS = {
 }
 
 
+def _forecast_state(
+    model: nn.Module,
+    series: FlightSeries,
+    config: TSConfig,
+    normalizer: Normalizer,
+    anchor: int,
+    device: torch.device,
+    truncate: bool,
+) -> Forecast:
+    forecast = _FORECASTERS[config.horizon_mode](
+        model, series, config, normalizer, anchor, device
+    )
+    if not truncate:
+        return forecast
+    return _POSTPROCESSORS[config.horizon_mode](forecast)
+
+
+def _forecast_control_strategy(
+    model: nn.Module,
+    series: FlightSeries,
+    config: TSConfig,
+    normalizer: Normalizer,
+    anchor: int,
+    device: torch.device,
+    truncate: bool,
+) -> Forecast:
+    del truncate
+    return _forecast_control(model, series, config, normalizer, anchor, device)
+
+
+_OUTPUT_FORECASTERS: dict[str, Callable[..., Forecast]] = {
+    PREDICTION_STATE: _forecast_state,
+    PREDICTION_CONTROL: _forecast_control_strategy,
+    PREDICTION_CONTROL_MIXTURE: _forecast_control_strategy,
+}
+
+
 def forecast_approach(
     model: nn.Module,
     series: FlightSeries,
@@ -259,17 +300,12 @@ def forecast_approach(
     device: torch.device | None = None,
     truncate: bool = True,
 ) -> Forecast:
-    """Predict from one observed anchor using the configured, independently dispatched mode."""
+    """Predict from one observed anchor using the configured output strategy."""
     device = device or next(model.parameters()).device
     anchor = default_anchor(config) if anchor is None else anchor
-    if config.prediction_output == PREDICTION_CONTROL:
-        return _forecast_control(model, series, config, normalizer, anchor, device)
-    forecast = _FORECASTERS[config.horizon_mode](
-        model, series, config, normalizer, anchor, device
+    return _OUTPUT_FORECASTERS[config.prediction_output](
+        model, series, config, normalizer, anchor, device, truncate
     )
-    if not truncate:
-        return forecast
-    return _POSTPROCESSORS[config.horizon_mode](forecast)
 
 
 def truncate_at_threshold(forecast: Forecast) -> Forecast:

@@ -118,6 +118,20 @@ export const OBSERVED_EVALUATION_REPORT_FILE = "evaluation_report.json";
 
 export type ComparisonResultSource = "prediction" | "experiment";
 
+export const EXPERIMENT_PREDICTION_OUTPUTS = [
+  "state",
+  "control",
+  "control-mixture",
+] as const;
+export type ExperimentPredictionOutput = typeof EXPERIMENT_PREDICTION_OUTPUTS[number];
+
+export function isExperimentPredictionOutput(
+  value: unknown,
+): value is ExperimentPredictionOutput {
+  return typeof value === "string" &&
+    (EXPERIMENT_PREDICTION_OUTPUTS as readonly string[]).includes(value);
+}
+
 export interface ExperimentCategoryMetadata {
   /** Stable repository-relative run identity (without the checkpoint filename). */
   id: string;
@@ -126,7 +140,7 @@ export interface ExperimentCategoryMetadata {
   /** Repository-relative checkpoint path; presentation/provenance only. */
   checkpoint: string;
   model?: string | null;
-  predictionOutput?: "state" | "control" | null;
+  predictionOutput?: ExperimentPredictionOutput | null;
   horizonMode?: "normalized" | "full" | "window" | null;
   seed?: number | null;
 }
@@ -181,7 +195,7 @@ export function isComparisonCategory(value: unknown): value is ComparisonCategor
       (experiment.model === undefined || experiment.model === null ||
         typeof experiment.model === "string") &&
       (experiment.predictionOutput === undefined || experiment.predictionOutput === null ||
-        experiment.predictionOutput === "state" || experiment.predictionOutput === "control") &&
+        isExperimentPredictionOutput(experiment.predictionOutput)) &&
       (experiment.horizonMode === undefined || experiment.horizonMode === null ||
         experiment.horizonMode === "normalized" || experiment.horizonMode === "full" ||
         experiment.horizonMode === "window") &&

@@ -46,10 +46,12 @@ from config import (  # noqa: E402
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
     MODELS,
-    PREDICTION_CONTROL,
+    PREDICTION_CONTROL_MIXTURE,
     PREDICTION_OUTPUTS,
     PREDICTION_STATE,
     TSConfig,
+    control_recipe,
+    uses_control_dynamics,
 )
 from cross_validation import (  # noqa: E402
     BEST_CONFIG_NAME,
@@ -123,7 +125,7 @@ def _prediction_output_tag(prediction_output: str) -> str:
 
 def _control_clock_tag(prediction_output: str, state_clock: str) -> str:
     if (
-        prediction_output != PREDICTION_CONTROL
+        not uses_control_dynamics(prediction_output)
         or state_clock == CONTROL_STATE_CLOCK_PREDICTED
     ):
         return ""
@@ -175,6 +177,9 @@ class TrainingPlan:
         random_train_anchor: bool = False,
         control_effort_weight: float | None = None,
         control_smoothness_weight: float | None = None,
+        control_experts: int | None = None,
+        control_selector_weight: float | None = None,
+        control_diversity_weight: float | None = None,
         control_state_clock: str = CONTROL_STATE_CLOCK_PREDICTED,
         control_rollout_dt: float | None = None,
         output_dir: str | Path | None = None,
@@ -204,6 +209,9 @@ class TrainingPlan:
         self.random_train_anchor = random_train_anchor
         self.control_effort_weight = control_effort_weight
         self.control_smoothness_weight = control_smoothness_weight
+        self.control_experts = control_experts
+        self.control_selector_weight = control_selector_weight
+        self.control_diversity_weight = control_diversity_weight
         self.control_state_clock = control_state_clock
         self.control_rollout_dt = control_rollout_dt
 
@@ -268,6 +276,12 @@ class TrainingPlan:
             args += ["--control-effort-weight", str(self.control_effort_weight)]
         if self.control_smoothness_weight is not None:
             args += ["--control-smoothness-weight", str(self.control_smoothness_weight)]
+        if self.control_experts is not None:
+            args += ["--control-experts", str(self.control_experts)]
+        if self.control_selector_weight is not None:
+            args += ["--control-selector-weight", str(self.control_selector_weight)]
+        if self.control_diversity_weight is not None:
+            args += ["--control-diversity-weight", str(self.control_diversity_weight)]
         args += ["--control-state-clock", self.control_state_clock]
         if self.control_rollout_dt is not None:
             args += ["--control-rollout-dt", str(self.control_rollout_dt)]
@@ -322,15 +336,8 @@ class TrainingPlan:
             and metadata.get("full_horizon_steps") != expected_config.full_horizon_steps
         ):
             return "checkpoint window rollout cap does not match the requested recipe"
-        if expected_config.prediction_output == PREDICTION_CONTROL:
-            expected_control_recipe = {
-                "effort_loss_weight": expected_config.control_effort_loss_weight,
-                "smoothness_loss_weight": expected_config.control_smoothness_loss_weight,
-                "rollout_integrator_dt_s": expected_config.control_rollout_integrator_dt_s,
-                "state_supervision_clock": (
-                    expected_config.control_state_supervision_clock
-                ),
-            }
+        if uses_control_dynamics(expected_config.prediction_output):
+            expected_control_recipe = control_recipe(expected_config)
             if metadata.get("control_recipe") != expected_control_recipe:
                 return "checkpoint control recipe does not match the requested recipe"
         return None
@@ -411,6 +418,16 @@ class TrainingPlan:
             overrides["control_effort_loss_weight"] = self.control_effort_weight
         if self.control_smoothness_weight is not None:
             overrides["control_smoothness_loss_weight"] = self.control_smoothness_weight
+        if self.control_experts is not None:
+            overrides["control_expert_count"] = self.control_experts
+        if self.control_selector_weight is not None:
+            overrides["control_mixture_selector_loss_weight"] = (
+                self.control_selector_weight
+            )
+        if self.control_diversity_weight is not None:
+            overrides["control_mixture_diversity_loss_weight"] = (
+                self.control_diversity_weight
+            )
         if self.control_rollout_dt is not None:
             overrides["control_rollout_integrator_dt_s"] = self.control_rollout_dt
         if self.batch_size != "auto":
@@ -489,6 +506,16 @@ class TrainingPlan:
             overrides["control_effort_loss_weight"] = self.control_effort_weight
         if self.control_smoothness_weight is not None:
             overrides["control_smoothness_loss_weight"] = self.control_smoothness_weight
+        if self.control_experts is not None:
+            overrides["control_expert_count"] = self.control_experts
+        if self.control_selector_weight is not None:
+            overrides["control_mixture_selector_loss_weight"] = (
+                self.control_selector_weight
+            )
+        if self.control_diversity_weight is not None:
+            overrides["control_mixture_diversity_loss_weight"] = (
+                self.control_diversity_weight
+            )
         if self.control_rollout_dt is not None:
             overrides["control_rollout_integrator_dt_s"] = self.control_rollout_dt
         if self.batch_size != "auto":
@@ -678,13 +705,19 @@ def run_training(
             f"kinematic={config.kinematic_consistency_loss_weight:g}, "
             f"terminal={config.terminal_loss_weight:g}"
         )
-        if config.prediction_output == PREDICTION_CONTROL:
+        if uses_control_dynamics(config.prediction_output):
             print(
                 f"   control   : effort={config.control_effort_loss_weight:g}, "
                 f"smoothness={config.control_smoothness_loss_weight:g}, "
                 f"state_clock={config.control_state_supervision_clock}, "
                 f"rollout_dt={config.control_rollout_integrator_dt_s:g}s"
             )
+            if config.prediction_output == PREDICTION_CONTROL_MIXTURE:
+                print(
+                    f"   mixture   : experts={config.control_expert_count}, "
+                    f"selector={config.control_mixture_selector_loss_weight:g}, "
+                    f"diversity={config.control_mixture_diversity_loss_weight:g}"
+                )
         print(
             f"   runtime   : batch={batch}, device={config.device}, seed={config.seed}, "
             f"aircraft={config.aircraft_type}, aircraft_filter={config.aircraft_filter}"
@@ -799,6 +832,9 @@ def main() -> None:
                         help="positive integer or auto (default: 2048)")
     parser.add_argument("--control-effort-weight", type=float, default=None)
     parser.add_argument("--control-smoothness-weight", type=float, default=None)
+    parser.add_argument("--control-experts", type=int, default=None)
+    parser.add_argument("--control-selector-weight", type=float, default=None)
+    parser.add_argument("--control-diversity-weight", type=float, default=None)
     parser.add_argument(
         "--control-state-clock",
         choices=CONTROL_STATE_CLOCKS,
@@ -891,6 +927,9 @@ def main() -> None:
             random_train_anchor=args.random_train_anchor,
             control_effort_weight=args.control_effort_weight,
             control_smoothness_weight=args.control_smoothness_weight,
+            control_experts=args.control_experts,
+            control_selector_weight=args.control_selector_weight,
+            control_diversity_weight=args.control_diversity_weight,
             control_state_clock=args.control_state_clock,
             control_rollout_dt=args.control_rollout_dt,
         )

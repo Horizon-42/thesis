@@ -61,4 +61,14 @@ describe("trajectory result sources", () => {
     expect(categoryForExperimentSplit(categories, "campaign/stage/run_seed1337", "train")?.datasetSplit)
       .toBe("train");
   });
+
+  it("preserves the control-mixture output identity in experiment options", () => {
+    const mixture = experiment("val");
+    mixture.experiment = {
+      ...mixture.experiment!,
+      predictionOutput: "control-mixture",
+    };
+
+    expect(experimentOptions([mixture])[0]?.predictionOutput).toBe("control-mixture");
+  });
 });

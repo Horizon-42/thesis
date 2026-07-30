@@ -17,14 +17,17 @@ non-uniform time partition.
 
 from __future__ import annotations
 
-import math
-
 import torch
 import torch.nn as nn
 
-from config import PREDICTION_CONTROL, PREDICTION_STATE, TSConfig
-from dataset import DYNAMICS_CONDITION_NAMES
-from prediction_outputs import ControlOutputHead, FinalTimeHead, StateOutputLayer
+from config import (
+    PREDICTION_CONTROL,
+    PREDICTION_CONTROL_MIXTURE,
+    PREDICTION_STATE,
+    TSConfig,
+)
+from control_models import ControlMixtureOutputModel, ControlOutputModel
+from prediction_outputs import StateOutputLayer
 from vendor.itransformer import Model as VendoredITransformer
 from vendor.patchtst import Model as VendoredPatchTST
 
@@ -125,80 +128,28 @@ def build_state_forecaster(config: TSConfig) -> nn.Module:
     return BUILDERS[config.model](config)
 
 
-class ControlOutputModel(nn.Module):
-    """Transformer features conditioned on per-flight physics, decoded as controls."""
+def _build_state_output(config: TSConfig) -> nn.Module:
+    return StateOutputLayer(build_state_forecaster(config), config)
 
-    def __init__(self, config: TSConfig):
-        super().__init__()
-        self.feature_encoder = build_state_forecaster(config)
-        # Keep unused state-output parameters out of this control-only optimizer and
-        # checkpoint without modifying either vendored source tree.
-        self.feature_encoder.discard_state_head()
-        self.condition_encoder = nn.Sequential(
-            nn.Linear(len(DYNAMICS_CONDITION_NAMES), config.d_model),
-            nn.GELU(),
-            nn.Dropout(config.dropout),
-        )
-        self.feature_fusion = nn.Sequential(
-            nn.Linear((config.enc_in + 1) * config.d_model, config.d_model),
-            nn.GELU(),
-            nn.LayerNorm(config.d_model),
-        )
-        self.final_time_head = FinalTimeHead(config)
-        self.control_head = ControlOutputHead(config.d_model, int(config.n_segments))
-        self._initialize_stable_rollout()
 
-    def _initialize_stable_rollout(self) -> None:
-        """Start from a neutral, finite long-horizon flight instead of random controls.
+def _build_control_output(config: TSConfig) -> nn.Module:
+    return ControlOutputModel(config, build_state_forecaster(config))
 
-        Random sigmoid logits put thrust at roughly half of installed maximum and load
-        factor near 1.25. Over a several-minute approach, that initial open-loop trajectory
-        can become dynamically extreme before the first optimizer step; the resulting
-        long-horizon adjoint has produced gradients above 1e28 and overflowed Adam's second
-        moment. The neutral starting point remains fully learnable: 20% thrust, zero bank,
-        unit load factor, uniform segment durations, and softplus(0) total time.
-        """
-        thrust_fraction = 0.2
-        bank_fraction = 0.5
-        load_fraction = (1.0 - 0.5) / (2.0 - 0.5)
-        unit_control_bias = torch.tensor(
-            (
-                math.log(thrust_fraction / (1.0 - thrust_fraction)),
-                math.log(bank_fraction / (1.0 - bank_fraction)),
-                math.log(load_fraction / (1.0 - load_fraction)),
-            ),
-            dtype=self.control_head.control_projection.bias.dtype,
-            device=self.control_head.control_projection.bias.device,
-        ).repeat(self.control_head.n_segments)
-        with torch.no_grad():
-            self.control_head.control_projection.weight.zero_()
-            self.control_head.control_projection.bias.copy_(unit_control_bias)
-            self.control_head.duration_projection.weight.zero_()
-            self.control_head.duration_projection.bias.zero_()
-            final_layer = self.final_time_head.network[-1]
-            final_layer.weight.zero_()
-            final_layer.bias.zero_()
 
-    def forward(self, history: torch.Tensor, dynamics: dict[str, torch.Tensor]):
-        encoded = self.feature_encoder.encode_features(history)
-        condition = self.condition_encoder(dynamics["condition"])
-        features = self.feature_fusion(torch.cat((encoded, condition), dim=-1))
-        final_time_s = self.final_time_head(history)
-        return self.control_head(
-            features,
-            final_time_s,
-            lower=dynamics["control_lower"],
-            upper=dynamics["control_upper"],
-        )
+def _build_control_mixture_output(config: TSConfig) -> nn.Module:
+    return ControlMixtureOutputModel(config, build_state_forecaster(config))
+
+
+OUTPUT_MODEL_BUILDERS = {
+    PREDICTION_STATE: _build_state_output,
+    PREDICTION_CONTROL: _build_control_output,
+    PREDICTION_CONTROL_MIXTURE: _build_control_mixture_output,
+}
 
 
 def build_model(config: TSConfig) -> nn.Module:
-    """Build the explicitly selected state or control output strategy."""
-    if config.prediction_output == PREDICTION_STATE:
-        return StateOutputLayer(build_state_forecaster(config), config)
-    if config.prediction_output == PREDICTION_CONTROL:
-        return ControlOutputModel(config)
-    raise ValueError(f"unknown prediction output {config.prediction_output!r}")
+    """Build an explicitly registered output strategy."""
+    return OUTPUT_MODEL_BUILDERS[config.prediction_output](config)
 
 
 def resolve_device(spec: str) -> torch.device:

@@ -129,7 +129,7 @@ def build_prediction_record(
     observed_states = full_observed_states[forecast.anchor:]
 
     source = dict(scenario.source)
-    prediction_output = "control" if forecast.controls is not None else "state"
+    prediction_output = forecast.prediction_output
     source.update({
         "predictor": model_name,
         "predictionOutput": prediction_output,

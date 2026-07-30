@@ -1,6 +1,7 @@
 import type {
   ComparisonCategory,
   ComparisonResultSource,
+  ExperimentPredictionOutput,
 } from "../data/airportData";
 
 export type TrajectoryResultSource = "baseline" | ComparisonResultSource;
@@ -35,7 +36,7 @@ export interface ExperimentOption {
   group: string;
   label: string;
   model?: string | null;
-  predictionOutput?: "state" | "control" | null;
+  predictionOutput?: ExperimentPredictionOutput | null;
   horizonMode?: "normalized" | "full" | "window" | null;
   seed?: number | null;
 }

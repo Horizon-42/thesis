@@ -71,8 +71,8 @@ from config import (
     HORIZON_FULL,
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
-    PREDICTION_CONTROL,
     TSConfig,
+    uses_control_dynamics,
 )
 from coordinate_frames import CoordinateFrame, frame_for_state
 from time_grids import output_time_grid
@@ -981,7 +981,7 @@ class TrajectoryWindows(Dataset, ABC):
             torch.from_numpy(np.asarray(final_time_s)),
             torch.from_numpy(np.asarray(flight_weight)),
         )
-        if self.config.prediction_output != PREDICTION_CONTROL:
+        if not uses_control_dynamics(self.config.prediction_output):
             return result
         s_idx, anchor = self.index[i]
         dynamics = {
@@ -1019,7 +1019,7 @@ class TrajectoryWindows(Dataset, ABC):
             torch.from_numpy(array)
             for array in (x, y, weights, final_time_s, flight_weights)
         )
-        if self.config.prediction_output != PREDICTION_CONTROL:
+        if not uses_control_dynamics(self.config.prediction_output):
             return result
         dynamics_rows = [
             dynamics_arrays(self.series[self.index[int(index)][0]], self.index[int(index)][1])

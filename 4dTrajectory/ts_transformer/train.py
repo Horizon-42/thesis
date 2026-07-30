@@ -14,7 +14,7 @@ import math
 import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 import numpy as np
 import torch
@@ -29,9 +29,14 @@ from config import (
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
     PREDICTION_CONTROL,
+    PREDICTION_CONTROL_MIXTURE,
     PREDICTION_STATE,
     TSConfig,
+    control_recipe,
+    uses_control_dynamics,
 )
+from control_mixture import ControlMixturePrediction
+from control_prediction_adapters import deployable_control_prediction
 from dataset import (
     ARRIVAL_DATA_PROVENANCE_SCHEMA,
     FixedAnchorTrajectoryWindows,
@@ -73,11 +78,18 @@ STATE_LOSS_COMPONENT_NAMES = ("state", "final_time", "kinematic", "terminal")
 CONTROL_LOSS_COMPONENT_NAMES = (
     "state", "final_time", "kinematic", "terminal", "control_effort", "control_smoothness"
 )
+CONTROL_MIXTURE_LOSS_COMPONENT_NAMES = (
+    *CONTROL_LOSS_COMPONENT_NAMES,
+    "mixture_selector",
+    "mixture_diversity",
+)
 
 
 def target_contract(config: TSConfig) -> str:
     if config.prediction_output == PREDICTION_STATE:
         return STATE_TARGET_CONTRACTS[config.horizon_mode]
+    if config.prediction_output == PREDICTION_CONTROL_MIXTURE:
+        return "bounded-control-mixture-best-of-k-selector-v1"
     if config.control_state_supervision_clock == CONTROL_STATE_CLOCK_PREDICTED:
         # The original behavior and serialized contract are unchanged, so historical
         # predicted-clock checkpoints remain exact members of this mode.
@@ -87,11 +99,11 @@ def target_contract(config: TSConfig) -> str:
 
 
 def loss_component_names(config: TSConfig) -> tuple[str, ...]:
-    return (
-        CONTROL_LOSS_COMPONENT_NAMES
-        if config.prediction_output == PREDICTION_CONTROL
-        else STATE_LOSS_COMPONENT_NAMES
-    )
+    return {
+        PREDICTION_STATE: STATE_LOSS_COMPONENT_NAMES,
+        PREDICTION_CONTROL: CONTROL_LOSS_COMPONENT_NAMES,
+        PREDICTION_CONTROL_MIXTURE: CONTROL_MIXTURE_LOSS_COMPONENT_NAMES,
+    }[config.prediction_output]
 
 
 def move_dynamics(
@@ -262,6 +274,21 @@ class LossComponents:
         }
 
 
+@dataclass(frozen=True)
+class ControlLossTerms:
+    """Per-flight weighted control objectives before airport-macro reduction."""
+
+    state: torch.Tensor
+    final_time: torch.Tensor
+    terminal: torch.Tensor
+    effort: torch.Tensor
+    smoothness: torch.Tensor
+
+    @property
+    def total(self) -> torch.Tensor:
+        return self.state + self.final_time + self.terminal + self.effort + self.smoothness
+
+
 def position_velocity_consistency_loss(
     normalized_anchor_state: torch.Tensor,
     normalized_states: torch.Tensor,
@@ -349,18 +376,17 @@ def control_state_supervision_prediction(
     )
 
 
-def control_prediction_loss_components(
+def control_prediction_loss_terms(
     prediction: ControlPrediction,
     normalized_anchor_state: torch.Tensor,
     target_states: torch.Tensor,
     state_weights: torch.Tensor,
     target_final_time_s: torch.Tensor,
-    flight_weights: torch.Tensor,
     config: TSConfig,
     normalizer: Normalizer,
     dynamics: dict[str, torch.Tensor],
-) -> LossComponents:
-    """State-space supervision through the differentiable control rollout."""
+) -> ControlLossTerms:
+    """Per-flight state/control terms through the differentiable dynamics rollout."""
     state_prediction = control_state_supervision_prediction(
         prediction, target_final_time_s, config
     )
@@ -404,27 +430,56 @@ def control_prediction_loss_components(
     else:
         smoothness = effort.new_zeros(effort.shape)
 
+    return ControlLossTerms(
+        state=state_loss,
+        final_time=config.final_time_loss_weight * time_loss,
+        terminal=config.terminal_loss_weight * terminal_loss,
+        effort=config.control_effort_loss_weight * effort,
+        smoothness=config.control_smoothness_loss_weight * smoothness,
+    )
+
+
+def control_prediction_loss_components(
+    prediction: ControlPrediction,
+    normalized_anchor_state: torch.Tensor,
+    target_states: torch.Tensor,
+    state_weights: torch.Tensor,
+    target_final_time_s: torch.Tensor,
+    flight_weights: torch.Tensor,
+    config: TSConfig,
+    normalizer: Normalizer,
+    dynamics: dict[str, torch.Tensor],
+) -> LossComponents:
+    terms = control_prediction_loss_terms(
+        prediction,
+        normalized_anchor_state,
+        target_states,
+        state_weights,
+        target_final_time_s,
+        config,
+        normalizer,
+        dynamics,
+    )
+
     def weighted_mean(values: torch.Tensor) -> torch.Tensor:
         return (values * flight_weights).mean()
 
-    zero = weighted_mean(state_loss.new_zeros(state_loss.shape))
+    zero = weighted_mean(terms.state.new_zeros(terms.state.shape))
     return LossComponents(
-        state=weighted_mean(state_loss),
-        final_time=config.final_time_loss_weight * weighted_mean(time_loss),
+        state=weighted_mean(terms.state),
+        final_time=weighted_mean(terms.final_time),
         # State/velocity consistency is structural because both come from one dynamics rollout.
         kinematic=zero,
-        terminal=config.terminal_loss_weight * weighted_mean(terminal_loss),
+        terminal=weighted_mean(terms.terminal),
         extras={
-            "control_effort": config.control_effort_loss_weight * weighted_mean(effort),
-            "control_smoothness": (
-                config.control_smoothness_loss_weight * weighted_mean(smoothness)
-            ),
+            "control_effort": weighted_mean(terms.effort),
+            "control_smoothness": weighted_mean(terms.smoothness),
         },
     )
 
 
-def prediction_loss_components(
-    prediction: StatePrediction | ControlPrediction,
+def state_prediction_loss_components(
+    prediction: StatePrediction,
     normalized_anchor_state: torch.Tensor,
     target_states: torch.Tensor,
     state_weights: torch.Tensor,
@@ -434,21 +489,7 @@ def prediction_loss_components(
     normalizer: Normalizer,
     dynamics: dict[str, torch.Tensor] | None = None,
 ) -> LossComponents:
-    """Return the selected output strategy's airport-macro loss contributions."""
-    if isinstance(prediction, ControlPrediction):
-        if dynamics is None:
-            raise ValueError("control prediction loss requires per-flight dynamics")
-        return control_prediction_loss_components(
-            prediction,
-            normalized_anchor_state,
-            target_states,
-            state_weights,
-            target_final_time_s,
-            flight_weights,
-            config,
-            normalizer,
-            dynamics,
-        )
+    """Return the direct-state strategy's airport-macro loss contributions."""
     state_error = ((prediction.states - target_states) ** 2 * state_weights).sum(
         dim=(1, 2)
     )
@@ -502,8 +543,101 @@ def prediction_loss_components(
     )
 
 
+def _control_loss_adapter(
+    prediction,
+    normalized_anchor_state,
+    target_states,
+    state_weights,
+    target_final_time_s,
+    flight_weights,
+    config,
+    normalizer,
+    dynamics,
+) -> LossComponents:
+    if dynamics is None:
+        raise ValueError("control prediction loss requires per-flight dynamics")
+    return control_prediction_loss_components(
+        prediction,
+        normalized_anchor_state,
+        target_states,
+        state_weights,
+        target_final_time_s,
+        flight_weights,
+        config,
+        normalizer,
+        dynamics,
+    )
+
+
+def _mixture_loss_adapter(
+    prediction,
+    normalized_anchor_state,
+    target_states,
+    state_weights,
+    target_final_time_s,
+    flight_weights,
+    config,
+    normalizer,
+    dynamics,
+) -> LossComponents:
+    if dynamics is None:
+        raise ValueError("control-mixture loss requires per-flight dynamics")
+    from control_mixture_loss import mixture_prediction_loss_components
+
+    return mixture_prediction_loss_components(
+        prediction,
+        normalized_anchor_state,
+        target_states,
+        state_weights,
+        target_final_time_s,
+        flight_weights,
+        config,
+        normalizer,
+        dynamics,
+    )
+
+
+PredictionLossHandler = Callable[..., LossComponents]
+PREDICTION_LOSS_HANDLERS: dict[type, PredictionLossHandler] = {
+    StatePrediction: state_prediction_loss_components,
+    ControlPrediction: _control_loss_adapter,
+    ControlMixturePrediction: _mixture_loss_adapter,
+}
+
+
+def prediction_loss_components(
+    prediction: StatePrediction | ControlPrediction | ControlMixturePrediction,
+    normalized_anchor_state: torch.Tensor,
+    target_states: torch.Tensor,
+    state_weights: torch.Tensor,
+    target_final_time_s: torch.Tensor,
+    flight_weights: torch.Tensor,
+    config: TSConfig,
+    normalizer: Normalizer,
+    dynamics: dict[str, torch.Tensor] | None = None,
+) -> LossComponents:
+    """Dispatch the configured output contract to its isolated objective."""
+    try:
+        handler = PREDICTION_LOSS_HANDLERS[type(prediction)]
+    except KeyError as error:
+        raise TypeError(
+            f"unsupported prediction type: {type(prediction).__name__}"
+        ) from error
+    return handler(
+        prediction,
+        normalized_anchor_state,
+        target_states,
+        state_weights,
+        target_final_time_s,
+        flight_weights,
+        config,
+        normalizer,
+        dynamics,
+    )
+
+
 def prediction_loss(
-    prediction: StatePrediction | ControlPrediction,
+    prediction: StatePrediction | ControlPrediction | ControlMixturePrediction,
     normalized_anchor_state: torch.Tensor,
     target_states: torch.Tensor,
     state_weights: torch.Tensor,
@@ -576,7 +710,8 @@ def _predict_split(
             output = model_forward(model, x_device, dynamics_device)
             metric_targets = y
             metric_weights = mask
-            if isinstance(output, ControlPrediction):
+            if uses_control_dynamics(dataset.config.prediction_output):
+                output = deployable_control_prediction(output)
                 physical, _geodetic = control_rollout_channels(
                     output, dynamics_device, dataset.config
                 )
@@ -1203,13 +1338,8 @@ def train(
         selection_tmp.write_text(json.dumps(data_selection, indent=2), encoding="utf-8")
         selection_tmp.replace(selection_path)
         checkpoint_metadata["data_selection_sha256"] = _file_sha256(selection_path)
-    if config.prediction_output == PREDICTION_CONTROL:
-        checkpoint_metadata["control_recipe"] = {
-            "effort_loss_weight": config.control_effort_loss_weight,
-            "smoothness_loss_weight": config.control_smoothness_loss_weight,
-            "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
-            "state_supervision_clock": config.control_state_supervision_clock,
-        }
+    if uses_control_dynamics(config.prediction_output):
+        checkpoint_metadata["control_recipe"] = control_recipe(config)
     metadata_path = out / CHECKPOINT_METADATA_NAME
     metadata_tmp = out / f"{CHECKPOINT_METADATA_NAME}.tmp"
     metadata_tmp.write_text(json.dumps(checkpoint_metadata, indent=2), encoding="utf-8")

@@ -55,8 +55,10 @@ from aerodynamic_model.common import GeodeticState  # noqa: E402
 from batching import resolve_batch_size  # noqa: E402
 from config import (  # noqa: E402
     AIRCRAFT_FILTER_OPENAP_DIRECT, HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW,
-    CONTROL_STATE_CLOCK_OBSERVED, PREDICTION_CONTROL, TSConfig,
+    CONTROL_STATE_CLOCK_OBSERVED, PREDICTION_CONTROL, PREDICTION_CONTROL_MIXTURE,
+    TSConfig, control_recipe,
 )
+from control_mixture import ControlMixturePrediction  # noqa: E402
 from dataset import (  # noqa: E402
     ARRIVAL_DATA_PROVENANCE_SCHEMA, FixedAnchorTrajectoryWindows, FlightEpochSampler,
     Normalizer, RandomAnchorTrajectoryWindows, arrival_data_provenance, build_series,
@@ -1393,6 +1395,89 @@ def test_control_output_is_parallel_and_requires_normalized_horizon():
         TSConfig(prediction_output=PREDICTION_CONTROL, horizon_mode=HORIZON_FULL)
 
 
+def test_control_mixture_is_an_explicit_validated_mode():
+    config = TSConfig(
+        prediction_output=PREDICTION_CONTROL_MIXTURE,
+        control_expert_count=3,
+    )
+
+    assert config.control_expert_count == 3
+    assert control_recipe(config) == {
+        "effort_loss_weight": config.control_effort_loss_weight,
+        "smoothness_loss_weight": config.control_smoothness_loss_weight,
+        "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
+        "state_supervision_clock": config.control_state_supervision_clock,
+        "expert_count": 3,
+        "selector_loss_weight": config.control_mixture_selector_loss_weight,
+        "diversity_loss_weight": config.control_mixture_diversity_loss_weight,
+    }
+    with pytest.raises(ValueError, match="expert_count >= 2"):
+        TSConfig(
+            prediction_output=PREDICTION_CONTROL_MIXTURE,
+            control_expert_count=1,
+        )
+
+
+def test_pipeline_preserves_control_mixture_recipe_in_commands_and_config(tmp_path):
+    plan = pipeline_module.TrainingPlan(
+        (AIRPORT,),
+        "itransformer",
+        training_mode="pooled",
+        prediction_output=PREDICTION_CONTROL_MIXTURE,
+        control_experts=4,
+        control_selector_weight=0.2,
+        control_diversity_weight=0.03,
+        output_dir=tmp_path / "mixture",
+    )
+    _label, command = plan.train_step(use_best_config=False)
+    config, _source = plan.resolved_train_config(use_best_config=False)
+
+    assert command[command.index("--control-experts") + 1] == "4"
+    assert command[command.index("--control-selector-weight") + 1] == "0.2"
+    assert command[command.index("--control-diversity-weight") + 1] == "0.03"
+    assert config.control_expert_count == 4
+    assert config.control_mixture_selector_loss_weight == pytest.approx(0.2)
+    assert config.control_mixture_diversity_loss_weight == pytest.approx(0.03)
+
+
+@pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
+def test_control_mixture_models_return_bounded_complete_candidates(model_name):
+    config = TSConfig(
+        model=model_name,
+        prediction_output=PREDICTION_CONTROL_MIXTURE,
+        control_expert_count=3,
+        seq_len=32,
+        n_segments=4,
+        d_model=32,
+        n_heads=4,
+        d_ff=64,
+        e_layers=1,
+    )
+    model = build_model(config)
+    lower = torch.tensor([[0.0, -0.5, 0.5], [0.0, -0.7, 0.6]])
+    upper = torch.tensor([[10_000.0, 0.5, 1.8], [250_000.0, 0.7, 2.0]])
+    dynamics = {
+        "condition": torch.rand(2, len(dataset_module.DYNAMICS_CONDITION_NAMES)),
+        "control_lower": lower,
+        "control_upper": upper,
+    }
+
+    result = model(torch.randn(2, config.seq_len, config.enc_in), dynamics)
+    selected = result.selected(torch.tensor([2, 0]))
+
+    assert isinstance(result, ControlMixturePrediction)
+    assert result.controls.shape == (2, 3, 4, 3)
+    assert result.segment_durations.shape == (2, 3, 4)
+    assert result.selection_logits.shape == (2, 3)
+    assert torch.all(result.controls >= lower[:, None, None, :])
+    assert torch.all(result.controls <= upper[:, None, None, :])
+    torch.testing.assert_close(
+        result.segment_durations.sum(dim=-1), result.final_time_s
+    )
+    torch.testing.assert_close(selected.controls[0], result.controls[0, 2])
+    torch.testing.assert_close(selected.controls[1], result.controls[1, 0])
+
+
 def test_control_state_supervision_clock_rejects_unknown_value():
     with pytest.raises(ValueError, match="control_state_supervision_clock"):
         TSConfig(control_state_supervision_clock="future")
@@ -1634,6 +1719,60 @@ def test_control_dataset_and_rollout_loss_form_one_differentiable_training_step(
     assert any(
         parameter.grad is not None and torch.count_nonzero(parameter.grad)
         for parameter in model.parameters()
+    )
+
+
+def test_control_mixture_dataset_and_best_of_k_loss_are_differentiable():
+    series, config = _series(
+        n_flights=2,
+        prediction_output=PREDICTION_CONTROL_MIXTURE,
+        control_expert_count=3,
+        seq_len=8,
+        n_segments=2,
+        d_model=16,
+        n_heads=4,
+        d_ff=32,
+        e_layers=1,
+        final_time_scale_s=2.0,
+        control_rollout_integrator_dt_s=0.5,
+    )
+    normalizer = Normalizer.fit(series)
+    dataset = FixedAnchorTrajectoryWindows(series, config, normalizer)
+    x, target, weights, final_time, flight_weights, dynamics = dataset.batch(
+        np.array([0, 1])
+    )
+    model = build_model(config)
+    prediction = model(x, dynamics)
+    components = train_module.prediction_loss_components(
+        prediction,
+        x[:, -1],
+        target,
+        weights,
+        final_time,
+        flight_weights,
+        config,
+        normalizer,
+        dynamics,
+    )
+    components.total.backward()
+
+    assert torch.isfinite(components.total)
+    assert set(components.extras) == {
+        "control_effort",
+        "control_smoothness",
+        "mixture_selector",
+        "mixture_diversity",
+    }
+    assert model.mixture_head.selector.weight.grad is not None
+    assert torch.count_nonzero(model.mixture_head.selector.weight.grad)
+    assert any(
+        expert.control_projection.weight.grad is not None
+        for expert in model.mixture_head.experts
+    )
+    assert all(
+        time_head.network[-1].bias.grad is not None
+        and torch.count_nonzero(time_head.network[-1].bias.grad)
+        for time_head in model.final_time_heads
     )
 
 
@@ -2490,6 +2629,62 @@ def test_control_forecast_exports_optimizer_shaped_states_and_aligned_controls()
     assert parsed.controls[0]["thrust"] == pytest.approx(40_000.0)
     assert parsed.controls[-1]["thrust"] == pytest.approx(32_000.0)
     assert parsed.final_time_s == pytest.approx(2.0)
+
+
+def test_control_mixture_forecast_uses_selector_without_truth_access():
+    series, config = _series(
+        n_flights=1,
+        prediction_output=PREDICTION_CONTROL_MIXTURE,
+        control_expert_count=2,
+        n_segments=2,
+        control_rollout_integrator_dt_s=0.5,
+    )
+    normalizer = Normalizer.fit(series)
+
+    class FixedMixtureModel(torch.nn.Module):
+        def forward(self, history, dynamics):
+            batch = len(history)
+            first = torch.tensor(
+                [[40_000.0, 0.04, 1.01], [32_000.0, -0.02, 0.99]],
+                dtype=history.dtype,
+                device=history.device,
+            )
+            second = torch.tensor(
+                [[50_000.0, -0.03, 1.02], [28_000.0, 0.01, 0.98]],
+                dtype=history.dtype,
+                device=history.device,
+            )
+            controls = torch.stack((first, second))[None].expand(batch, -1, -1, -1)
+            durations = torch.tensor(
+                [[[1.0, 1.0], [0.75, 1.25]]],
+                dtype=history.dtype,
+                device=history.device,
+            ).expand(batch, -1, -1)
+            return ControlMixturePrediction(
+                controls=controls,
+                segment_durations=durations,
+                final_time_s=durations.sum(dim=-1),
+                selection_logits=torch.tensor(
+                    [[-1.0, 2.0]], dtype=history.dtype, device=history.device
+                ).expand(batch, -1),
+            )
+
+    forecast = forecast_approach(
+        FixedMixtureModel(),
+        series[0],
+        config,
+        normalizer,
+        device=torch.device("cpu"),
+    )
+    record = build_prediction_record(
+        series[0], forecast, index=0, model_name=config.model,
+        horizon_mode=config.horizon_mode,
+    )
+
+    assert forecast.prediction_output == PREDICTION_CONTROL_MIXTURE
+    assert forecast.controls[:, 0].tolist() == pytest.approx([50_000.0, 28_000.0])
+    assert forecast.segment_durations_s.tolist() == pytest.approx([0.75, 1.25])
+    assert record.source["predictionOutput"] == PREDICTION_CONTROL_MIXTURE
 
 
 def test_control_training_checkpoint_round_trip_keeps_output_identity(tmp_path):

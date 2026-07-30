@@ -14,7 +14,8 @@ import gc
 import numpy as np
 import torch
 
-from config import PREDICTION_CONTROL, TSConfig
+from config import TSConfig, uses_control_dynamics
+from control_prediction_adapters import map_control_candidates
 from models import build_model
 from prediction_outputs import ControlPrediction
 
@@ -94,7 +95,7 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
             std=np.ones(len(config.channels), dtype=np.float64),
         )
         dynamics = None
-        if config.prediction_output == PREDICTION_CONTROL:
+        if uses_control_dynamics(config.prediction_output):
             dynamics = {
                 "condition": torch.tensor(
                     [[0.66, 0.24, 0.2452, 0.9, 0.2, 0.4, 0.9, 0.5]],
@@ -123,8 +124,10 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
             }
         optimizer.zero_grad()
         prediction = model_forward(model, x, dynamics)
-        if isinstance(prediction, ControlPrediction):
-            prediction = _heterogeneous_control_probe_prediction(prediction)
+        if uses_control_dynamics(config.prediction_output):
+            prediction = map_control_candidates(
+                prediction, _heterogeneous_control_probe_prediction
+            )
         loss = prediction_loss(
             prediction,
             x[:, -1],
@@ -192,7 +195,7 @@ def resolve_batch_size(
     # keeps its historical largest-successful behavior.
     selected = (
         successful[-2]
-        if config.prediction_output == PREDICTION_CONTROL and len(successful) > 1
+        if uses_control_dynamics(config.prediction_output) and len(successful) > 1
         else largest
     )
     props = torch.cuda.get_device_properties(device)

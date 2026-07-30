@@ -42,8 +42,10 @@ from sklearn.neighbors import NearestNeighbors  # noqa: E402
 import run_ts_pipeline as pipeline  # noqa: E402
 from channels import POSITION_IDX  # noqa: E402
 from config import (  # noqa: E402
-    HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW, PREDICTION_CONTROL, TSConfig,
+    HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW, TSConfig,
+    uses_control_dynamics,
 )
+from control_prediction_adapters import deployable_control_prediction  # noqa: E402
 from dataset import (  # noqa: E402
     FlightSeries,
     arrival_data_provenance,
@@ -232,9 +234,9 @@ def predict_batch_nodes(
     device: torch.device,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
     """Return physical nodes, final time, explicit durations and optional controls."""
-    if run.config.prediction_output == PREDICTION_CONTROL:
+    if uses_control_dynamics(run.config.prediction_output):
         dynamics = batch_dynamics_tensors(series, run.config, device)
-        output = run.model(histories, dynamics)
+        output = deployable_control_prediction(run.model(histories, dynamics))
         channels, _geodetic = control_rollout_channels(output, dynamics, run.config)
         return (
             channels.detach().cpu().numpy().astype(np.float32),
