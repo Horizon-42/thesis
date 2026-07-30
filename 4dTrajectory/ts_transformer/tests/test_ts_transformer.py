@@ -60,7 +60,8 @@ from config import (  # noqa: E402
     AIRCRAFT_FILTER_OPENAP_DIRECT, HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CONTROL_DURATION_DIRECT, CONTROL_DURATION_FACTORIZED,
-    CONTROL_STATE_CLOCK_OBSERVED, PREDICTION_CONTROL, PREDICTION_CONTROL_MIXTURE,
+    CONTROL_STATE_CLOCK_OBSERVED, CONTROL_STATE_LOSS_GRID_FIXED_DT,
+    PREDICTION_CONTROL, PREDICTION_CONTROL_MIXTURE,
     TSConfig, control_recipe,
 )
 from control_mixture import ControlMixturePrediction  # noqa: E402
@@ -1536,8 +1537,9 @@ def test_control_mixture_is_an_explicit_validated_mode():
         "effort_loss_weight": config.control_effort_loss_weight,
         "smoothness_loss_weight": config.control_smoothness_loss_weight,
         "duration_parameterization": CONTROL_DURATION_FACTORIZED,
-        "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
-        "state_supervision_clock": config.control_state_supervision_clock,
+            "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
+            "state_supervision_clock": config.control_state_supervision_clock,
+            "state_loss_grid": config.control_state_loss_grid,
         "expert_count": 3,
         "selector_loss_weight": config.control_mixture_selector_loss_weight,
         "diversity_loss_weight": config.control_mixture_diversity_loss_weight,
@@ -1643,6 +1645,20 @@ def test_control_state_supervision_clock_rejects_unknown_value():
         TSConfig(control_state_supervision_clock="future")
 
 
+def test_fixed_dt_control_state_loss_requires_observed_single_control_clock():
+    with pytest.raises(ValueError, match="requires.*observed"):
+        TSConfig(
+            prediction_output=PREDICTION_CONTROL,
+            control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
+        )
+    with pytest.raises(ValueError, match="only by prediction_output='control'"):
+        TSConfig(
+            prediction_output=PREDICTION_CONTROL_MIXTURE,
+            control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
+            control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
+        )
+
+
 @pytest.mark.parametrize("prediction_output", ["state", PREDICTION_CONTROL_MIXTURE])
 def test_direct_control_durations_reject_non_single_control_outputs(prediction_output):
     with pytest.raises(ValueError, match="only by prediction_output='control'"):
@@ -1660,6 +1676,14 @@ def test_legacy_control_config_without_duration_parameterization_is_rejected():
         ValueError,
         match="missing control_duration_parameterization.*regenerate",
     ):
+        TSConfig.from_dict(serialized)
+
+
+def test_legacy_control_config_without_state_loss_grid_is_rejected():
+    serialized = TSConfig(prediction_output=PREDICTION_CONTROL).to_dict()
+    serialized.pop("control_state_loss_grid")
+
+    with pytest.raises(ValueError, match="missing control_state_loss_grid.*regenerate"):
         TSConfig.from_dict(serialized)
 
 
@@ -2014,6 +2038,84 @@ def test_control_dataset_and_rollout_loss_form_one_differentiable_training_step(
     )
 
 
+def test_fixed_dt_control_targets_gather_existing_two_second_reference_rows():
+    series, config = _series(
+        n_flights=2,
+        prediction_output=PREDICTION_CONTROL,
+        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
+        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
+        seq_len=8,
+        n_segments=2,
+        d_model=16,
+        n_heads=4,
+        d_ff=32,
+        e_layers=1,
+    )
+    normalizer = Normalizer.fit(series)
+    dataset = FixedAnchorTrajectoryWindows(series, config, normalizer)
+    batch = dataset.batch(np.array([0, 1]))
+
+    assert len(batch) == 7
+    dense = batch[-1]
+    for row, item in enumerate(series):
+        valid = dense.valid[row]
+        offsets = dense.query_offsets_s[row, valid].numpy()
+        np.testing.assert_allclose(
+            offsets,
+            np.arange(1, len(offsets) + 1, dtype=np.float64) * config.dt_s,
+        )
+        query_times = item.times[config.seq_len - 1] + offsets
+        source = np.searchsorted(item.supervision_times, query_times)
+        expected = normalizer.encode(item.supervision_values[source]).astype(np.float32)
+        np.testing.assert_allclose(dense.states[row, valid].numpy(), expected)
+
+
+@pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
+def test_fixed_dt_control_loss_forms_one_differentiable_training_step(model_name):
+    series, config = _series(
+        n_flights=1,
+        model=model_name,
+        prediction_output=PREDICTION_CONTROL,
+        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
+        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
+        seq_len=8,
+        n_segments=2,
+        d_model=16,
+        n_heads=4,
+        d_ff=32,
+        e_layers=1,
+        patch_len=4,
+        stride=2,
+        final_time_scale_s=600.0,
+        control_rollout_integrator_dt_s=2.0,
+    )
+    normalizer = Normalizer.fit(series)
+    dataset = FixedAnchorTrajectoryWindows(series, config, normalizer)
+    x, target, weights, final_time, flight_weights, dynamics, dense = dataset.batch(
+        np.array([0])
+    )
+    model = build_model(config)
+    loss = prediction_loss(
+        model(x, dynamics),
+        x[:, -1],
+        target,
+        weights,
+        final_time,
+        flight_weights,
+        config,
+        normalizer,
+        dynamics,
+        dense,
+    )
+    loss.backward()
+
+    assert torch.isfinite(loss)
+    assert any(
+        parameter.grad is not None and torch.count_nonzero(parameter.grad)
+        for parameter in model.parameters()
+    )
+
+
 def test_control_mixture_dataset_and_best_of_k_loss_are_differentiable():
     series, config = _series(
         n_flights=2,
@@ -2267,6 +2369,7 @@ def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
         control_smoothness_weight=1e-2,
         control_duration_parameterization=CONTROL_DURATION_DIRECT,
         control_state_clock=CONTROL_STATE_CLOCK_OBSERVED,
+        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
         control_rollout_dt=0.5,
         output_dir=tmp_path,
     )
@@ -2280,6 +2383,7 @@ def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
     assert recipe[recipe.index("--control-smoothness-weight") + 1] == "0.01"
     assert recipe[recipe.index("--control-duration-parameterization") + 1] == "direct"
     assert recipe[recipe.index("--control-state-clock") + 1] == "observed"
+    assert recipe[recipe.index("--control-state-loss-grid") + 1] == "fixed-dt"
     assert recipe[recipe.index("--control-rollout-dt") + 1] == "0.5"
     assert recipe[recipe.index("--aircraft-filter") + 1] == "openap-direct"
     assert config.prediction_output == PREDICTION_CONTROL
@@ -2287,12 +2391,15 @@ def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
     assert config.control_effort_loss_weight == pytest.approx(1e-4)
     assert config.control_duration_parameterization == CONTROL_DURATION_DIRECT
     assert config.control_state_supervision_clock == CONTROL_STATE_CLOCK_OBSERVED
+    assert config.control_state_loss_grid == CONTROL_STATE_LOSS_GRID_FIXED_DT
     assert "control" in prediction.pred_dir.name
     assert "direct_duration" in prediction.pred_dir.name
     assert "observed_clock" in prediction.pred_dir.name
+    assert "fixed_dt_loss" in prediction.pred_dir.name
     assert "control" in prediction.category
     assert "openap_direct" in prediction.category
     assert "direct durations" in prediction.label
+    assert "fixed-dt state loss" in prediction.label
 
 
 def test_pipeline_rejects_control_checkpoint_metadata_without_duration_recipe(
@@ -3090,9 +3197,10 @@ def test_control_training_checkpoint_round_trip_keeps_output_identity(
         "effort_loss_weight": config.control_effort_loss_weight,
         "smoothness_loss_weight": config.control_smoothness_loss_weight,
         "duration_parameterization": duration_parameterization,
-        "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
-        "state_supervision_clock": config.control_state_supervision_clock,
-    }
+            "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
+            "state_supervision_clock": config.control_state_supervision_clock,
+            "state_loss_grid": config.control_state_loss_grid,
+        }
 
 
 def test_reference_covers_the_same_span_as_the_prediction():

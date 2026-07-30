@@ -57,6 +57,7 @@ from config import (  # noqa: E402
     COORDINATE_FRAMES,
     CHECKPOINT_SELECTION_METRICS,
     CONTROL_DURATION_PARAMETERIZATIONS,
+    CONTROL_STATE_LOSS_GRIDS,
     CONTROL_STATE_CLOCKS,
     DEFAULT_AIRCRAFT_TYPE,
     HORIZON_MODES,
@@ -217,6 +218,15 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--control-state-loss-grid",
+        choices=CONTROL_STATE_LOSS_GRIDS,
+        default=None,
+        help=(
+            "control state-loss queries: learned segment endpoints (default) or every "
+            "regular reference dt on the observed clock (fixed-dt)"
+        ),
+    )
+    parser.add_argument(
         "--control-rollout-dt",
         type=float,
         default=None,
@@ -323,6 +333,7 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("control_mixture_selector_loss_weight", args.control_selector_weight),
         ("control_mixture_diversity_loss_weight", args.control_diversity_weight),
         ("control_state_supervision_clock", args.control_state_clock),
+        ("control_state_loss_grid", args.control_state_loss_grid),
         ("control_rollout_integrator_dt_s", args.control_rollout_dt),
         ("d_model", args.d_model), ("e_layers", args.e_layers), ("n_heads", args.n_heads),
         ("seed", args.seed), ("split_seed", args.split_seed), ("device", args.device),

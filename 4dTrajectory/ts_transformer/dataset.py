@@ -71,6 +71,7 @@ from anchor_eligibility import (
 )
 from config import (
     AIRCRAFT_FILTER_OPENAP_DIRECT,
+    CONTROL_STATE_LOSS_GRID_FIXED_DT,
     DEFAULT_AIRCRAFT_TYPE,
     HORIZON_FULL,
     HORIZON_NORMALIZED,
@@ -79,6 +80,7 @@ from config import (
     uses_control_dynamics,
 )
 from coordinate_frames import CoordinateFrame, frame_for_state
+from fixed_dt_supervision import build_fixed_dt_supervision
 from time_grids import output_time_grid
 
 ARRIVAL_DATA_PROVENANCE_SCHEMA = "ts-arrival-data-v2-multi-airport"
@@ -1087,7 +1089,15 @@ class TrajectoryWindows(Dataset, ABC):
             key: torch.from_numpy(value)
             for key, value in dynamics_arrays(self.series[s_idx], anchor).items()
         }
-        return (*result, dynamics)
+        if self.config.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_FIXED_DT:
+            return (*result, dynamics)
+        dense = build_fixed_dt_supervision(
+            self.series,
+            self.encoded,
+            [(s_idx, anchor)],
+            dt_s=self.config.dt_s,
+        )
+        return (*result, dynamics, dense)
 
     def batch(
         self, indices: Sequence[int] | np.ndarray
@@ -1128,7 +1138,15 @@ class TrajectoryWindows(Dataset, ABC):
             key: torch.from_numpy(np.stack([row[key] for row in dynamics_rows]))
             for key in dynamics_rows[0]
         }
-        return (*result, dynamics)
+        if self.config.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_FIXED_DT:
+            return (*result, dynamics)
+        dense = build_fixed_dt_supervision(
+            self.series,
+            self.encoded,
+            [self.index[int(index)] for index in indices],
+            dt_s=self.config.dt_s,
+        )
+        return (*result, dynamics, dense)
 
 
 class FixedAnchorTrajectoryWindows(TrajectoryWindows):

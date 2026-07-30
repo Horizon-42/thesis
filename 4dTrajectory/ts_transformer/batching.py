@@ -14,7 +14,7 @@ import gc
 import numpy as np
 import torch
 
-from config import TSConfig, uses_control_dynamics
+from config import CONTROL_STATE_LOSS_GRID_FIXED_DT, TSConfig, uses_control_dynamics
 from control_prediction_adapters import map_control_candidates
 from models import build_model
 from prediction_outputs import ControlPrediction
@@ -62,6 +62,7 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
     # Local imports avoid a module cycle: train imports resolve_batch_size, while the probe
     # must share train's loss implementation so its retained CUDA graph cannot drift.
     from dataset import Normalizer
+    from fixed_dt_supervision import FixedDTControlSupervision
     from train import model_forward, prediction_loss
 
     model = optimizer = x = target = state_weights = None
@@ -95,6 +96,7 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
             std=np.ones(len(config.channels), dtype=np.float64),
         )
         dynamics = None
+        dense_supervision = None
         if uses_control_dynamics(config.prediction_output):
             dynamics = {
                 "condition": torch.tensor(
@@ -122,6 +124,25 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
                     [[35.9, -78.8, 100.0, 0.0]], dtype=torch.float32, device=device
                 ).expand(batch_size, -1),
             }
+            if config.control_state_loss_grid == CONTROL_STATE_LOSS_GRID_FIXED_DT:
+                points = int(config.final_time_scale_s // config.dt_s)
+                offsets = (
+                    torch.arange(1, points + 1, dtype=torch.float64, device=device)
+                    * config.dt_s
+                ).unsqueeze(0).expand(batch_size, -1)
+                dense_states = torch.zeros(
+                    (batch_size, points, len(config.channels)),
+                    dtype=torch.float32,
+                    device=device,
+                )
+                dense_supervision = FixedDTControlSupervision(
+                    query_offsets_s=offsets,
+                    states=dense_states,
+                    weights=torch.ones_like(dense_states),
+                    valid=torch.ones(
+                        (batch_size, points), dtype=torch.bool, device=device
+                    ),
+                )
         optimizer.zero_grad()
         prediction = model_forward(model, x, dynamics)
         if uses_control_dynamics(config.prediction_output):
@@ -138,6 +159,7 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
             config,
             normalizer,
             dynamics,
+            dense_supervision,
         )
         loss.backward()
         optimizer.step()

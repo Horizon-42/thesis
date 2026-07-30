@@ -43,6 +43,12 @@ CONTROL_STATE_CLOCKS = (
     CONTROL_STATE_CLOCK_PREDICTED,
     CONTROL_STATE_CLOCK_OBSERVED,
 )
+CONTROL_STATE_LOSS_GRID_NATIVE = "native-segment-endpoints"
+CONTROL_STATE_LOSS_GRID_FIXED_DT = "fixed-dt"
+CONTROL_STATE_LOSS_GRIDS = (
+    CONTROL_STATE_LOSS_GRID_NATIVE,
+    CONTROL_STATE_LOSS_GRID_FIXED_DT,
+)
 CONTROL_DURATION_FACTORIZED = "factorized"
 CONTROL_DURATION_DIRECT = "direct"
 CONTROL_DURATION_PARAMETERIZATIONS = (
@@ -254,6 +260,11 @@ class TSConfig:
     # supervision on the known training clock while the final-time head keeps its own loss.
     # Inference always uses predicted time, regardless of this training-only choice.
     control_state_supervision_clock: str = CONTROL_STATE_CLOCK_PREDICTED
+    # State supervision can remain on learned segment endpoints or use every regular
+    # reference-grid timestamp.  The fixed-dt strategy is isolated in its own data/loss
+    # modules: segment durations still choose control-switch times, while state error is
+    # evaluated independently every ``dt_s`` seconds on the observed training clock.
+    control_state_loss_grid: str = CONTROL_STATE_LOSS_GRID_NATIVE
     # Multi-expert control output is a separate opt-in strategy. The default K=3 keeps the
     # first experiment small; these weights affect only ``control-mixture`` checkpoints.
     control_expert_count: int = 3
@@ -307,6 +318,23 @@ class TSConfig:
                 f"{self.control_state_supervision_clock!r}; expected one of "
                 f"{CONTROL_STATE_CLOCKS}"
             )
+        if self.control_state_loss_grid not in CONTROL_STATE_LOSS_GRIDS:
+            raise ValueError(
+                "unknown control_state_loss_grid "
+                f"{self.control_state_loss_grid!r}; expected one of "
+                f"{CONTROL_STATE_LOSS_GRIDS}"
+            )
+        if self.control_state_loss_grid == CONTROL_STATE_LOSS_GRID_FIXED_DT:
+            if self.prediction_output != PREDICTION_CONTROL:
+                raise ValueError(
+                    "fixed-dt control state loss is supported only by "
+                    "prediction_output='control'"
+                )
+            if self.control_state_supervision_clock != CONTROL_STATE_CLOCK_OBSERVED:
+                raise ValueError(
+                    "fixed-dt control state loss requires "
+                    "control_state_supervision_clock='observed'"
+                )
         if self.control_duration_parameterization not in CONTROL_DURATION_PARAMETERIZATIONS:
             raise ValueError(
                 "unknown control_duration_parameterization "
@@ -451,6 +479,14 @@ class TSConfig:
                 "serialized control config is missing "
                 "control_duration_parameterization; regenerate the derived checkpoint"
             )
+        if (
+            uses_control_dynamics(data.get("prediction_output", PREDICTION_STATE))
+            and "control_state_loss_grid" not in data
+        ):
+            raise ValueError(
+                "serialized control config is missing control_state_loss_grid; "
+                "regenerate the derived checkpoint"
+            )
         data["channels"] = tuple(data["channels"])
         return cls(**data)
 
@@ -463,6 +499,7 @@ def control_recipe(config: TSConfig) -> dict[str, float | int | str]:
         "duration_parameterization": config.control_duration_parameterization,
         "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
         "state_supervision_clock": config.control_state_supervision_clock,
+        "state_loss_grid": config.control_state_loss_grid,
     }
     extensions = {
         PREDICTION_CONTROL: {},

@@ -29,6 +29,8 @@ from config import (
     CONTROL_DURATION_FACTORIZED,
     CONTROL_STATE_CLOCK_OBSERVED,
     CONTROL_STATE_CLOCK_PREDICTED,
+    CONTROL_STATE_LOSS_GRID_FIXED_DT,
+    CONTROL_STATE_LOSS_GRID_NATIVE,
     HORIZON_FULL,
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
@@ -59,6 +61,7 @@ from evaluation_protocol import (
     TEST_RELEASE_SCHEMA,
 )
 from fixed_anchor_validation import fixed_anchor_common_grid_metrics
+from fixed_dt_supervision import FixedDTControlSupervision
 from metrics import error_by_progress, raw_kinematic_metrics, trajectory_metrics
 from models import build_model, parameter_count, resolve_device
 from prediction_outputs import ControlPrediction, StatePrediction
@@ -70,7 +73,7 @@ from aerodynamic_model.torch_dynamics import (
 
 CHECKPOINT_NAME = "checkpoint.pt"
 CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
-CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v17-anchor-eligibility-audit"
+CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v18-control-state-loss-grid"
 STATE_TARGET_CONTRACTS = {
     HORIZON_NORMALIZED: "normalized-time-runway-crossing-displacement-kinematic-v3",
     HORIZON_FULL: "full-horizon-fixed-time-displacement-kinematic-v2",
@@ -90,18 +93,44 @@ CONTROL_MIXTURE_LOSS_COMPONENT_NAMES = (
 )
 
 CONTROL_TARGET_CONTRACTS = {
-    (CONTROL_DURATION_FACTORIZED, CONTROL_STATE_CLOCK_PREDICTED): (
+    (
+        CONTROL_DURATION_FACTORIZED,
+        CONTROL_STATE_CLOCK_PREDICTED,
+        CONTROL_STATE_LOSS_GRID_NATIVE,
+    ): (
         "bounded-control-nonuniform-duration-casadi-rollout-clock-aligned-v2"
     ),
-    (CONTROL_DURATION_FACTORIZED, CONTROL_STATE_CLOCK_OBSERVED): (
+    (
+        CONTROL_DURATION_FACTORIZED,
+        CONTROL_STATE_CLOCK_OBSERVED,
+        CONTROL_STATE_LOSS_GRID_NATIVE,
+    ): (
         "bounded-control-nonuniform-duration-casadi-rollout-observed-clock-aligned-v3"
     ),
-    (CONTROL_DURATION_DIRECT, CONTROL_STATE_CLOCK_PREDICTED): (
+    (
+        CONTROL_DURATION_DIRECT,
+        CONTROL_STATE_CLOCK_PREDICTED,
+        CONTROL_STATE_LOSS_GRID_NATIVE,
+    ): (
         "bounded-control-direct-duration-casadi-rollout-clock-aligned-v1"
     ),
-    (CONTROL_DURATION_DIRECT, CONTROL_STATE_CLOCK_OBSERVED): (
+    (
+        CONTROL_DURATION_DIRECT,
+        CONTROL_STATE_CLOCK_OBSERVED,
+        CONTROL_STATE_LOSS_GRID_NATIVE,
+    ): (
         "bounded-control-direct-duration-casadi-rollout-observed-clock-aligned-v1"
     ),
+    (
+        CONTROL_DURATION_FACTORIZED,
+        CONTROL_STATE_CLOCK_OBSERVED,
+        CONTROL_STATE_LOSS_GRID_FIXED_DT,
+    ): "bounded-control-nonuniform-duration-fixed-dt-state-loss-v1",
+    (
+        CONTROL_DURATION_DIRECT,
+        CONTROL_STATE_CLOCK_OBSERVED,
+        CONTROL_STATE_LOSS_GRID_FIXED_DT,
+    ): "bounded-control-direct-duration-fixed-dt-state-loss-v1",
 }
 
 
@@ -114,6 +143,7 @@ def target_contract(config: TSConfig) -> str:
         (
             config.control_duration_parameterization,
             config.control_state_supervision_clock,
+            config.control_state_loss_grid,
         )
     ]
 
@@ -134,10 +164,19 @@ def move_dynamics(
     return {name: value.to(device) for name, value in dynamics.items()}
 
 
+def move_fixed_dt_supervision(
+    supervision: FixedDTControlSupervision | None,
+    device: torch.device,
+) -> FixedDTControlSupervision | None:
+    return None if supervision is None else supervision.to(device)
+
+
 def unpack_batch(batch: tuple) -> tuple:
     if len(batch) == 5:
-        return (*batch, None)
+        return (*batch, None, None)
     if len(batch) == 6:
+        return (*batch, None)
+    if len(batch) == 7:
         return batch
     raise ValueError(f"unexpected trajectory batch with {len(batch)} fields")
 
@@ -396,7 +435,7 @@ def control_state_supervision_prediction(
     )
 
 
-def control_prediction_loss_terms(
+def _native_endpoint_control_state_loss(
     prediction: ControlPrediction,
     normalized_anchor_state: torch.Tensor,
     target_states: torch.Tensor,
@@ -405,13 +444,12 @@ def control_prediction_loss_terms(
     config: TSConfig,
     normalizer: Normalizer,
     dynamics: dict[str, torch.Tensor],
-) -> ControlLossTerms:
-    """Per-flight state/control terms through the differentiable dynamics rollout."""
-    state_prediction = control_state_supervision_prediction(
-        prediction, target_final_time_s, config
-    )
+    dense_supervision: FixedDTControlSupervision | None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Historical loss on learned segment endpoints, isolated from dense supervision."""
+    del dense_supervision
     physical_channels, _geodetic = control_rollout_channels(
-        state_prediction, dynamics, config
+        prediction, dynamics, config
     )
     dtype, device = physical_channels.dtype, physical_channels.device
     mean = torch.as_tensor(normalizer.mean, dtype=dtype, device=device)
@@ -421,13 +459,73 @@ def control_prediction_loss_terms(
         normalized_anchor_state,
         target_states,
         state_weights,
-        state_prediction.segment_durations,
+        prediction.segment_durations,
         target_final_time_s,
     )
     state_error = (
         (normalized_states - aligned_targets) ** 2 * aligned_weights
     ).sum(dim=(1, 2))
     state_loss = state_error / aligned_weights.sum(dim=(1, 2)).clamp(min=1.0)
+    return state_loss, normalized_states
+
+
+def _fixed_dt_control_state_loss(
+    prediction: ControlPrediction,
+    normalized_anchor_state: torch.Tensor,
+    target_states: torch.Tensor,
+    state_weights: torch.Tensor,
+    target_final_time_s: torch.Tensor,
+    config: TSConfig,
+    normalizer: Normalizer,
+    dynamics: dict[str, torch.Tensor],
+    dense_supervision: FixedDTControlSupervision | None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Dense regular-dt strategy; data preparation and rollout live in separate modules."""
+    del normalized_anchor_state, target_states, state_weights, target_final_time_s
+    if dense_supervision is None:
+        raise ValueError("fixed-dt control state loss requires dense supervision targets")
+    from fixed_dt_control_loss import fixed_dt_control_state_loss
+
+    result = fixed_dt_control_state_loss(
+        prediction, dense_supervision, config, normalizer, dynamics
+    )
+    return result.per_flight_loss, result.normalized_segment_end_states
+
+
+_CONTROL_STATE_LOSS_HANDLERS = {
+    CONTROL_STATE_LOSS_GRID_NATIVE: _native_endpoint_control_state_loss,
+    CONTROL_STATE_LOSS_GRID_FIXED_DT: _fixed_dt_control_state_loss,
+}
+
+
+def control_prediction_loss_terms(
+    prediction: ControlPrediction,
+    normalized_anchor_state: torch.Tensor,
+    target_states: torch.Tensor,
+    state_weights: torch.Tensor,
+    target_final_time_s: torch.Tensor,
+    config: TSConfig,
+    normalizer: Normalizer,
+    dynamics: dict[str, torch.Tensor],
+    dense_supervision: FixedDTControlSupervision | None = None,
+) -> ControlLossTerms:
+    """Per-flight state/control terms through the differentiable dynamics rollout."""
+    state_prediction = control_state_supervision_prediction(
+        prediction, target_final_time_s, config
+    )
+    state_loss, normalized_states = _CONTROL_STATE_LOSS_HANDLERS[
+        config.control_state_loss_grid
+    ](
+        state_prediction,
+        normalized_anchor_state,
+        target_states,
+        state_weights,
+        target_final_time_s,
+        config,
+        normalizer,
+        dynamics,
+        dense_supervision,
+    )
     time_loss = (
         (prediction.final_time_s - target_final_time_s) / config.final_time_scale_s
     ).square()
@@ -469,6 +567,7 @@ def control_prediction_loss_components(
     config: TSConfig,
     normalizer: Normalizer,
     dynamics: dict[str, torch.Tensor],
+    dense_supervision: FixedDTControlSupervision | None = None,
 ) -> LossComponents:
     terms = control_prediction_loss_terms(
         prediction,
@@ -479,6 +578,7 @@ def control_prediction_loss_components(
         config,
         normalizer,
         dynamics,
+        dense_supervision,
     )
 
     def weighted_mean(values: torch.Tensor) -> torch.Tensor:
@@ -508,8 +608,10 @@ def state_prediction_loss_components(
     config: TSConfig,
     normalizer: Normalizer,
     dynamics: dict[str, torch.Tensor] | None = None,
+    dense_supervision: FixedDTControlSupervision | None = None,
 ) -> LossComponents:
     """Return the direct-state strategy's airport-macro loss contributions."""
+    del dynamics, dense_supervision
     state_error = ((prediction.states - target_states) ** 2 * state_weights).sum(
         dim=(1, 2)
     )
@@ -573,6 +675,7 @@ def _control_loss_adapter(
     config,
     normalizer,
     dynamics,
+    dense_supervision,
 ) -> LossComponents:
     if dynamics is None:
         raise ValueError("control prediction loss requires per-flight dynamics")
@@ -586,6 +689,7 @@ def _control_loss_adapter(
         config,
         normalizer,
         dynamics,
+        dense_supervision,
     )
 
 
@@ -599,9 +703,12 @@ def _mixture_loss_adapter(
     config,
     normalizer,
     dynamics,
+    dense_supervision,
 ) -> LossComponents:
     if dynamics is None:
         raise ValueError("control-mixture loss requires per-flight dynamics")
+    if dense_supervision is not None:
+        raise ValueError("control-mixture does not support fixed-dt state supervision")
     from control_mixture_loss import mixture_prediction_loss_components
 
     return mixture_prediction_loss_components(
@@ -635,6 +742,7 @@ def prediction_loss_components(
     config: TSConfig,
     normalizer: Normalizer,
     dynamics: dict[str, torch.Tensor] | None = None,
+    dense_supervision: FixedDTControlSupervision | None = None,
 ) -> LossComponents:
     """Dispatch the configured output contract to its isolated objective."""
     try:
@@ -653,6 +761,7 @@ def prediction_loss_components(
         config,
         normalizer,
         dynamics,
+        dense_supervision,
     )
 
 
@@ -666,6 +775,7 @@ def prediction_loss(
     config: TSConfig,
     normalizer: Normalizer,
     dynamics: dict[str, torch.Tensor] | None = None,
+    dense_supervision: FixedDTControlSupervision | None = None,
 ) -> torch.Tensor:
     """Airport-macro state/time/physics loss, one sample per flight and epoch."""
     # Weights are normalized to mean one across the complete epoch. Keeping the minibatch
@@ -681,6 +791,7 @@ def prediction_loss(
         config,
         normalizer,
         dynamics,
+        dense_supervision,
     ).total
 
 
@@ -729,7 +840,15 @@ def _predict_split(
     predicted_time_chunks, truth_time_chunks, anchor_chunks, duration_chunks = [], [], [], []
     with torch.no_grad():
         for raw_batch in iter_batches(dataset, batch_size, shuffle=False, seed=0):
-            x, y, mask, final_time_s, _flight_weights, dynamics = unpack_batch(raw_batch)
+            (
+                x,
+                y,
+                mask,
+                final_time_s,
+                _flight_weights,
+                dynamics,
+                _dense_supervision,
+            ) = unpack_batch(raw_batch)
             x_device = x.to(device)
             dynamics_device = move_dynamics(dynamics, device)
             output = model_forward(model, x_device, dynamics_device)
@@ -1090,11 +1209,20 @@ def _dataset_loss_components(
     flight_weight_total = 0.0
     with torch.no_grad():
         for raw_batch in iter_batches(dataset, batch_size, shuffle=False, seed=0):
-            x, y, mask, final_time_s, flight_weights, dynamics = unpack_batch(raw_batch)
+            (
+                x,
+                y,
+                mask,
+                final_time_s,
+                flight_weights,
+                dynamics,
+                dense_supervision,
+            ) = unpack_batch(raw_batch)
             x, y, mask = x.to(device), y.to(device), mask.to(device)
             final_time_s = final_time_s.to(device)
             flight_weights = flight_weights.to(device)
             dynamics = move_dynamics(dynamics, device)
+            dense_supervision = move_fixed_dt_supervision(dense_supervision, device)
             prediction = model_forward(model, x, dynamics)
             components = prediction_loss_components(
                 prediction,
@@ -1106,6 +1234,7 @@ def _dataset_loss_components(
                 dataset.config,
                 dataset.normalizer,
                 dynamics,
+                dense_supervision,
             )
             for name, value in components.tensors().items():
                 component_totals[name] += float(value) * len(flight_weights)
@@ -1312,13 +1441,22 @@ def fit_model(
         for raw_batch in iter_batches(
             train_set, config.batch_size, shuffle=True, seed=config.seed + epoch
         ):
-            x, y, mask, final_time_s, flight_weights, dynamics = unpack_batch(raw_batch)
+            (
+                x,
+                y,
+                mask,
+                final_time_s,
+                flight_weights,
+                dynamics,
+                dense_supervision,
+            ) = unpack_batch(raw_batch)
             batch_count = len(flight_weights)
             batch_weight = float(flight_weights.sum())
             x, y, mask = x.to(device), y.to(device), mask.to(device)
             final_time_s = final_time_s.to(device)
             flight_weights = flight_weights.to(device)
             dynamics = move_dynamics(dynamics, device)
+            dense_supervision = move_fixed_dt_supervision(dense_supervision, device)
             optimizer.zero_grad()
             components = prediction_loss_components(
                 model_forward(model, x, dynamics),
@@ -1330,6 +1468,7 @@ def fit_model(
                 config,
                 normalizer,
                 dynamics,
+                dense_supervision,
             )
             loss = components.total
             loss.backward()

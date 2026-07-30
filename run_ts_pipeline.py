@@ -47,6 +47,8 @@ from config import (  # noqa: E402
     CONTROL_DURATION_PARAMETERIZATIONS,
     CONTROL_STATE_CLOCKS,
     CONTROL_STATE_CLOCK_PREDICTED,
+    CONTROL_STATE_LOSS_GRIDS,
+    CONTROL_STATE_LOSS_GRID_NATIVE,
     DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
     DEFAULT_VALIDATION_COMMON_GRID_POINTS,
     HORIZON_MODES,
@@ -150,6 +152,12 @@ def _control_clock_tag(prediction_output: str, state_clock: str) -> str:
     return f"_{state_clock}_clock"
 
 
+def _control_state_loss_grid_tag(prediction_output: str, loss_grid: str) -> str:
+    if not uses_control_dynamics(prediction_output) or loss_grid == CONTROL_STATE_LOSS_GRID_NATIVE:
+        return ""
+    return f"_{loss_grid.replace('-', '_')}_loss"
+
+
 def _control_duration_tag(prediction_output: str, parameterization: str) -> str:
     if (
         not uses_control_dynamics(prediction_output)
@@ -219,6 +227,7 @@ class TrainingPlan:
         control_selector_weight: float | None = None,
         control_diversity_weight: float | None = None,
         control_state_clock: str = CONTROL_STATE_CLOCK_PREDICTED,
+        control_state_loss_grid: str = CONTROL_STATE_LOSS_GRID_NATIVE,
         control_rollout_dt: float | None = None,
         output_dir: str | Path | None = None,
     ) -> None:
@@ -256,6 +265,7 @@ class TrainingPlan:
         self.control_selector_weight = control_selector_weight
         self.control_diversity_weight = control_diversity_weight
         self.control_state_clock = control_state_clock
+        self.control_state_loss_grid = control_state_loss_grid
         self.control_rollout_dt = control_rollout_dt
 
         self.data_manifests = tuple(arrival_manifest_path(airport) for airport in self.airports)
@@ -266,6 +276,7 @@ class TrainingPlan:
                 prediction_output, control_duration_parameterization
             )
             + _control_clock_tag(prediction_output, control_state_clock)
+            + _control_state_loss_grid_tag(prediction_output, control_state_loss_grid)
             + _aircraft_filter_tag(aircraft_filter)
             + _frame_tag(coordinate_frame)
             + _anchor_tag(random_train_anchor)
@@ -351,6 +362,7 @@ class TrainingPlan:
         if self.control_diversity_weight is not None:
             args += ["--control-diversity-weight", str(self.control_diversity_weight)]
         args += ["--control-state-clock", self.control_state_clock]
+        args += ["--control-state-loss-grid", self.control_state_loss_grid]
         if self.control_rollout_dt is not None:
             args += ["--control-rollout-dt", str(self.control_rollout_dt)]
         return args
@@ -485,6 +497,7 @@ class TrainingPlan:
             "horizon_mode": self.horizon_mode,
             "aircraft_filter": self.aircraft_filter,
             "control_state_supervision_clock": self.control_state_clock,
+            "control_state_loss_grid": self.control_state_loss_grid,
             "control_duration_parameterization": self.control_duration_parameterization,
         }
         if self.full_horizon_steps is not None:
@@ -574,6 +587,7 @@ class TrainingPlan:
             "horizon_mode": self.horizon_mode,
             "aircraft_filter": self.aircraft_filter,
             "control_state_supervision_clock": self.control_state_clock,
+            "control_state_loss_grid": self.control_state_loss_grid,
             "control_duration_parameterization": self.control_duration_parameterization,
         })
         if self.full_horizon_steps is not None:
@@ -662,12 +676,16 @@ class PredictionPlan:
         control_clock = _control_clock_tag(
             training.prediction_output, training.control_state_clock
         )
+        control_state_loss_grid = _control_state_loss_grid_tag(
+            training.prediction_output, training.control_state_loss_grid
+        )
         aircraft_filter = _aircraft_filter_tag(training.aircraft_filter)
         tag = f"_{experiment_tag}" if experiment_tag else ""
         horizon_tag = HORIZON_TAGS[training.horizon_mode]
         stem = (
             f"{scope}{training.model}{prediction_output}{control_duration}"
             f"{control_clock}_{horizon_tag}"
+            f"{control_state_loss_grid}"
             f"{aircraft_filter}{frame}{anchor}{training_cohort}"
             f"{validation_selection}{tag}_{split}"
         )
@@ -679,6 +697,7 @@ class PredictionPlan:
         self.category = (
             f"ts_{category_scope}{MODEL_SHORT[training.model]}{prediction_output}"
             f"{control_duration}_{horizon_tag}"
+            f"{control_state_loss_grid}"
             f"{aircraft_filter}{frame}{anchor}{training_cohort}"
             f"{validation_selection}{tag}_{split}"
         )
@@ -692,9 +711,14 @@ class PredictionPlan:
             training.control_duration_parameterization,
         )
         output_label = f"{training.prediction_output} output, {duration_label}"
+        state_loss_label = (
+            "fixed-dt state loss, "
+            if training.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_NATIVE
+            else ""
+        )
         self.label = (
             f"{SPLIT_LABELS[split]} — Predicted ({model_label}, {pooled_label}"
-            f"{output_label}{anchor_label}{horizon_label}, {frame_label})"
+            f"{output_label}{state_loss_label}{anchor_label}{horizon_label}, {frame_label})"
         )
         self.comparison_dir = (
             COMPARISON_AIRPORTS_ROOT / self.airport / "comparison" / self.category
@@ -955,6 +979,11 @@ def main() -> None:
         choices=CONTROL_STATE_CLOCKS,
         default=CONTROL_STATE_CLOCK_PREDICTED,
     )
+    parser.add_argument(
+        "--control-state-loss-grid",
+        choices=CONTROL_STATE_LOSS_GRIDS,
+        default=CONTROL_STATE_LOSS_GRID_NATIVE,
+    )
     parser.add_argument("--control-rollout-dt", type=float, default=None)
     parser.add_argument("--cv-folds", type=int, default=3)
     parser.add_argument(
@@ -1072,6 +1101,7 @@ def main() -> None:
             control_selector_weight=args.control_selector_weight,
             control_diversity_weight=args.control_diversity_weight,
             control_state_clock=args.control_state_clock,
+            control_state_loss_grid=args.control_state_loss_grid,
             control_rollout_dt=args.control_rollout_dt,
         )
         if not run_training(
