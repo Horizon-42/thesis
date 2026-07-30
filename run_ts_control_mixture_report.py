@@ -43,6 +43,19 @@ from run_ts_predictability_report import (
 REPORT_SCHEMA = "ts-control-mixture-validation-report-v1"
 
 
+def candidate_path_diversity(candidates: np.ndarray) -> np.ndarray:
+    """Mean pairwise 3D path separation for each flight in [B,K,P,C]."""
+    if candidates.ndim != 4 or candidates.shape[1] < 2:
+        raise ValueError("candidates must be [B,K,P,C] with at least two experts")
+    positions = np.take(candidates, POSITION_IDX, axis=-1)
+    pairwise = [
+        np.linalg.norm(positions[:, left] - positions[:, right], axis=-1).mean(axis=1)
+        for left in range(candidates.shape[1])
+        for right in range(left + 1, candidates.shape[1])
+    ]
+    return np.stack(pairwise, axis=1).mean(axis=1)
+
+
 def evaluate_candidates(
     run,
     series,
@@ -99,15 +112,7 @@ def evaluate_candidates(
             fde_rows.append(error[:, :, -1])
             time_rows.append(output.final_time_s.cpu().numpy())
             selector_rows.append(output.selection_logits.argmax(dim=1).cpu().numpy())
-            pairwise = []
-            for left in range(output.expert_count):
-                for right in range(left + 1, output.expert_count):
-                    delta = (
-                        candidates[:, left, :, list(POSITION_IDX)]
-                        - candidates[:, right, :, list(POSITION_IDX)]
-                    )
-                    pairwise.append(np.linalg.norm(delta, axis=-1).mean(axis=1))
-            path_diversity_rows.append(np.stack(pairwise, axis=1).mean(axis=1))
+            path_diversity_rows.append(candidate_path_diversity(candidates))
     return {
         "ade_m": np.concatenate(ade_rows),
         "fde_m": np.concatenate(fde_rows),

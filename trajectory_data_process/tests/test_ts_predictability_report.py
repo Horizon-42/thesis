@@ -16,6 +16,7 @@ for path in (REPO_ROOT, TS_DIR):
         sys.path.insert(0, str(path))
 
 import run_ts_predictability_report as report  # noqa: E402
+import run_ts_control_mixture_report as mixture_report  # noqa: E402
 from config import HORIZON_FULL, HORIZON_WINDOW, TSConfig  # noqa: E402
 from time_grids import output_time_grid  # noqa: E402
 
@@ -83,6 +84,17 @@ def test_remaining_time_report_uses_true_time_not_predicted_time():
 
     assert values["0–30"] == pytest.approx(20.0)
     assert values["30–60"] == pytest.approx(10.0)
+
+
+def test_control_mixture_path_diversity_returns_one_value_per_flight():
+    candidates = np.zeros((5, 3, 2, 6), dtype=np.float64)
+    candidates[:, 1, :, 0] = 10.0
+    candidates[:, 2, :, 0] = 20.0
+
+    diversity = mixture_report.candidate_path_diversity(candidates)
+
+    assert diversity.shape == (5,)
+    assert diversity == pytest.approx(np.full(5, 40.0 / 3.0))
 
 
 def test_validation_comparison_allows_non_evaluated_split_differences():
