@@ -55,6 +55,7 @@ from config import (  # noqa: E402
     AIRCRAFT_FILTER_OPENAP_DIRECT,
     AIRCRAFT_FILTERS,
     COORDINATE_FRAMES,
+    CHECKPOINT_SELECTION_METRICS,
     CONTROL_STATE_CLOCKS,
     DEFAULT_AIRCRAFT_TYPE,
     HORIZON_MODES,
@@ -230,6 +231,24 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="train from random valid anchors instead of the fixed full-trajectory anchor L-1",
     )
+    parser.add_argument(
+        "--random-train-anchor-min-future-s",
+        type=float,
+        default=None,
+        help="minimum future duration available after a random train anchor (default: 60 s)",
+    )
+    parser.add_argument(
+        "--checkpoint-selection-metric",
+        choices=CHECKPOINT_SELECTION_METRICS,
+        default=None,
+        help="fixed-anchor validation metric used for LR scheduling and early stopping",
+    )
+    parser.add_argument(
+        "--validation-common-grid-points",
+        type=int,
+        default=None,
+        help="physical-time query count for fixed-anchor common-grid selection (default: 64)",
+    )
     parser.add_argument("--config-overrides", default=None,
                         help="JSON object of TSConfig overrides, e.g. CV best_config.json")
     parser.add_argument("--instance-norm", dest="instance_norm", action="store_true", default=None,
@@ -290,6 +309,9 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("aircraft_type", args.aircraft_type), ("coordinate_frame", args.coordinate_frame),
         ("aircraft_filter", args.aircraft_filter),
         ("random_train_anchor", args.random_train_anchor),
+        ("random_train_anchor_min_future_s", args.random_train_anchor_min_future_s),
+        ("checkpoint_selection_metric", args.checkpoint_selection_metric),
+        ("validation_common_grid_points", args.validation_common_grid_points),
         ("use_norm", args.instance_norm), ("revin", args.instance_norm),
     )
     overrides.update({key: value for key, value in cli_values if value is not None})

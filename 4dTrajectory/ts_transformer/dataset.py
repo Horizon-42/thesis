@@ -794,6 +794,7 @@ def window_anchors(
     config: TSConfig,
     *,
     minimum_anchor_index: int | None = None,
+    minimum_future_s: float = 0.0,
 ) -> range:
     """Valid anchor indices for ``series``.
 
@@ -806,6 +807,8 @@ def window_anchors(
     """
     if minimum_anchor_index is not None and minimum_anchor_index < 0:
         raise ValueError("minimum_anchor_index must be non-negative")
+    if minimum_future_s < 0.0:
+        raise ValueError("minimum_future_s must be non-negative")
     first = max(config.seq_len - 1, minimum_anchor_index or 0)
     # An anchor is always observed; fitted rows can be targets but never model inputs.
     last_with_remainder = series.n_supervision_samples - 2
@@ -821,7 +824,17 @@ def window_anchors(
         HORIZON_FULL: last_with_remainder,
         HORIZON_WINDOW: last_with_complete_window,
     }
-    last = min(series.n_samples - 1, last_by_mode[config.horizon_mode])
+    future_eligible = np.flatnonzero(
+        series.supervision_times[-1] - series.times >= minimum_future_s - 1e-9
+    )
+    last_with_minimum_future = (
+        int(future_eligible[-1]) if len(future_eligible) else -1
+    )
+    last = min(
+        series.n_samples - 1,
+        last_by_mode[config.horizon_mode],
+        last_with_minimum_future,
+    )
     return range(first, last + 1) if last >= first else range(0)
 
 
@@ -836,6 +849,8 @@ class TrajectoryWindows(Dataset, ABC):
     """
 
     anchor_description: str
+    anchor_policy: str
+    sampling_version: str
 
     def __init__(
         self,
@@ -844,16 +859,21 @@ class TrajectoryWindows(Dataset, ABC):
         normalizer: Normalizer,
         *,
         minimum_anchor_index: int | None = None,
+        minimum_future_s: float = 0.0,
     ):
         self.series = list(series)
         self.config = config
         self.normalizer = normalizer
         self.minimum_anchor_index = minimum_anchor_index
+        self.minimum_future_s = float(minimum_future_s)
         self.index: list[tuple[int, int]] = []
         self.series_ranges: dict[int, tuple[int, int]] = {}
         for s_idx, item in enumerate(self.series):
             anchors = window_anchors(
-                item, config, minimum_anchor_index=minimum_anchor_index
+                item,
+                config,
+                minimum_anchor_index=minimum_anchor_index,
+                minimum_future_s=self.minimum_future_s,
             )
             chosen = self._select_anchors(anchors)
             start = len(self.index)
@@ -923,6 +943,54 @@ class TrajectoryWindows(Dataset, ABC):
     @abstractmethod
     def epoch_indices(self, seed: int) -> np.ndarray:
         """Return the concrete mode's one-flight-per-epoch sample indices."""
+
+    def anchor_statistics(self, seed: int) -> dict[str, Any]:
+        """Audit the exact one-window-per-flight sample selected for an epoch."""
+        indices = self.epoch_indices(seed)
+        anchors = np.array([self.index[int(index)][1] for index in indices], dtype=np.int64)
+        series_indices = np.array(
+            [self.index[int(index)][0] for index in indices], dtype=np.int64
+        )
+        if not len(indices):
+            return {
+                "policy": self.anchor_policy,
+                "sampling_version": self.sampling_version,
+                "minimum_future_s": self.minimum_future_s,
+                "samples": 0,
+            }
+        anchor_times = np.array([
+            self.series[int(series_index)].times[int(anchor)]
+            for series_index, anchor in zip(series_indices, anchors)
+        ])
+        remaining_times = np.array([
+            self.series[int(series_index)].supervision_times[-1]
+            - self.series[int(series_index)].times[int(anchor)]
+            for series_index, anchor in zip(series_indices, anchors)
+        ])
+        digest_rows = sorted(
+            f"{self.series[int(series_index)].dataset_id}:{int(anchor)}"
+            for series_index, anchor in zip(series_indices, anchors)
+        )
+        digest = hashlib.sha256("\n".join(digest_rows).encode()).hexdigest()
+
+        def distribution(values: np.ndarray) -> dict[str, float]:
+            return {
+                "min": float(np.min(values)),
+                "p50": float(np.median(values)),
+                "max": float(np.max(values)),
+            }
+
+        return {
+            "policy": self.anchor_policy,
+            "sampling_version": self.sampling_version,
+            "minimum_future_s": self.minimum_future_s,
+            "samples": len(indices),
+            "sample_sha256": digest,
+            "anchor_index": distribution(anchors),
+            "anchor_time_s": distribution(anchor_times),
+            "remaining_time_s": distribution(remaining_times),
+            "fixed_anchor_fraction": float(np.mean(anchors == self.config.seq_len - 1)),
+        }
 
     def _sample_arrays(
         self, i: int
@@ -1036,6 +1104,8 @@ class FixedAnchorTrajectoryWindows(TrajectoryWindows):
     """One deterministic `L-1` (or experiment-supplied common) anchor per flight."""
 
     anchor_description = "fixed train anchor L-1"
+    anchor_policy = "fixed"
+    sampling_version = "fixed-anchor-v1"
 
     def _select_anchors(self, anchors: range) -> Sequence[int]:
         return [anchors.start] if len(anchors) else []
@@ -1050,16 +1120,43 @@ class RandomAnchorTrajectoryWindows(TrajectoryWindows):
     """All valid anchors available; each epoch selects one uniformly per flight."""
 
     anchor_description = "one random valid train anchor per flight and epoch"
+    anchor_policy = "uniform-random"
+    sampling_version = "per-flight-hash-v1"
+
+    def __init__(
+        self,
+        series: Sequence[FlightSeries],
+        config: TSConfig,
+        normalizer: Normalizer,
+        *,
+        minimum_anchor_index: int | None = None,
+    ):
+        super().__init__(
+            series,
+            config,
+            normalizer,
+            minimum_anchor_index=minimum_anchor_index,
+            minimum_future_s=config.random_train_anchor_min_future_s,
+        )
 
     def _select_anchors(self, anchors: range) -> Sequence[int]:
         return anchors
 
     def epoch_indices(self, seed: int) -> np.ndarray:
-        rng = np.random.default_rng(seed)
         starts = self.range_starts[self.eligible_series]
         counts = self.range_counts[self.eligible_series]
-        offsets = np.floor(rng.random(len(starts)) * counts).astype(np.int64)
+        offsets = np.array([
+            int.from_bytes(
+                hashlib.sha256(
+                    f"{self.sampling_version}:{seed}:"
+                    f"{self.series[int(series_index)].dataset_id}".encode()
+                ).digest()[:8],
+                "big",
+            ) % int(count)
+            for series_index, count in zip(self.eligible_series, counts)
+        ], dtype=np.int64)
         indices = starts + offsets
+        rng = np.random.default_rng(seed)
         rng.shuffle(indices)
         return indices
 

@@ -54,9 +54,12 @@ from dataset import (  # noqa: E402
     load_flight_dicts,
     require_matching_data_provenance,
 )
+from fixed_anchor_validation import (  # noqa: E402
+    fixed_anchor_common_truth,
+    resample_prediction_to_physical_time,
+)
 from metrics import raw_kinematic_metrics  # noqa: E402
 from models import resolve_device  # noqa: E402
-from time_grids import output_time_grid  # noqa: E402
 from train import (  # noqa: E402
     FIT_EVALUATION_NAME,
     FIT_EVALUATION_SCHEMA,
@@ -121,20 +124,10 @@ def classify_trajectory(future_positions: np.ndarray) -> str:
 def common_truth(
     series: Sequence[FlightSeries], config: TSConfig, points: int
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str]]:
-    progress = np.arange(1, points + 1, dtype=np.float64) / points
-    truth = np.empty((len(series), points, len(config.channels)), dtype=np.float32)
-    durations = np.empty(len(series), dtype=np.float64)
-    route_types: list[str] = []
-    for row, item in enumerate(series):
-        anchor = config.seq_len - 1
-        duration = float(item.supervision_times[-1] - item.times[anchor])
-        durations[row] = duration
-        query = item.times[anchor] + progress * duration
-        truth[row] = np.column_stack([
-            np.interp(query, item.supervision_times, item.supervision_values[:, channel])
-            for channel in range(len(config.channels))
-        ])
-        route_types.append(classify_trajectory(truth[row][:, list(POSITION_IDX)]))
+    truth, durations, progress = fixed_anchor_common_truth(series, config, points)
+    route_types = [
+        classify_trajectory(row[:, list(POSITION_IDX)]) for row in truth
+    ]
     return truth, durations, progress, route_types
 
 
@@ -156,31 +149,14 @@ def resample_prediction(
     query_offsets_s: np.ndarray,
     segment_durations_s: np.ndarray | None = None,
 ) -> tuple[np.ndarray, bool]:
-    if config.horizon_mode == HORIZON_NORMALIZED:
-        offsets = (
-            np.cumsum(np.asarray(segment_durations_s, dtype=np.float64))
-            if segment_durations_s is not None
-            else output_time_grid(predicted_final_time_s, config).offsets_s
-        )
-        values = predicted_values
-        capped = False
-    else:
-        offsets = np.arange(1, len(predicted_values) + 1, dtype=np.float64) * config.dt_s
-        closest = int(np.argmin(np.linalg.norm(
-            predicted_values[:, list(POSITION_IDX[:2])], axis=-1
-        )))
-        capped = closest == len(predicted_values) - 1
-        offsets = offsets[: closest + 1]
-        values = predicted_values[: closest + 1]
-    if not len(offsets):
-        return np.broadcast_to(anchor_values, (len(query_offsets_s), len(anchor_values))).copy(), False
-    node_times = np.concatenate(([0.0], offsets))
-    nodes = np.concatenate((anchor_values[None, :], values), axis=0)
-    sampled = np.column_stack([
-        np.interp(query_offsets_s, node_times, nodes[:, channel])
-        for channel in range(nodes.shape[1])
-    ])
-    return sampled, capped
+    return resample_prediction_to_physical_time(
+        anchor_values,
+        predicted_values,
+        predicted_final_time_s,
+        config,
+        query_offsets_s,
+        segment_durations_s,
+    )
 
 
 def _one_pass_nodes(

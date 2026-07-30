@@ -23,6 +23,8 @@ import torch.nn as nn
 from channels import CHANNELS, IDX, POSITION_IDX
 from batching import resolve_batch_size
 from config import (
+    CHECKPOINT_SELECTION_COMMON_GRID_ADE,
+    CHECKPOINT_SELECTION_OBJECTIVE,
     CONTROL_STATE_CLOCK_OBSERVED,
     CONTROL_STATE_CLOCK_PREDICTED,
     HORIZON_FULL,
@@ -54,6 +56,7 @@ from evaluation_protocol import (
     TEST_RELEASE_PROTOCOL_FIELD,
     TEST_RELEASE_SCHEMA,
 )
+from fixed_anchor_validation import fixed_anchor_common_grid_metrics
 from metrics import error_by_progress, raw_kinematic_metrics, trajectory_metrics
 from models import build_model, parameter_count, resolve_device
 from prediction_outputs import ControlPrediction, StatePrediction
@@ -65,7 +68,7 @@ from aerodynamic_model.torch_dynamics import (
 
 CHECKPOINT_NAME = "checkpoint.pt"
 CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
-CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v14-aircraft-filter-audit"
+CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v15-anchor-validation-audit"
 STATE_TARGET_CONTRACTS = {
     HORIZON_NORMALIZED: "normalized-time-runway-crossing-displacement-kinematic-v3",
     HORIZON_FULL: "full-horizon-fixed-time-displacement-kinematic-v2",
@@ -675,6 +678,10 @@ class EpochResult:
     val_by_airport: dict[str, float]
     train_components: dict[str, float]
     val_components: dict[str, float]
+    validation_selection_metric: str = CHECKPOINT_SELECTION_OBJECTIVE
+    validation_selection_value: float | None = None
+    validation_selection_by_airport: dict[str, float] = field(default_factory=dict)
+    train_anchor_sampling: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -687,6 +694,7 @@ class FitResult:
     device: torch.device
     history: list[EpochResult]
     best_val_loss: float
+    best_validation_selection: float
     train_windows: int
     val_windows: int
 
@@ -798,6 +806,39 @@ def evaluate_split(
     return block
 
 
+def evaluate_fixed_anchor_common_grid(
+    model: nn.Module,
+    dataset: TrajectoryWindows,
+    normalizer: Normalizer,
+    config: TSConfig,
+    device: torch.device,
+) -> dict[str, Any]:
+    """Deployable fixed-anchor metrics on one shared physical-time grid."""
+    (
+        predicted,
+        _native_truth,
+        _native_mask,
+        predicted_time,
+        _truth_time,
+        anchors,
+        segment_durations_s,
+    ) = _predict_split(model, dataset, normalizer, device, config.batch_size)
+    block = fixed_anchor_common_grid_metrics(
+        dataset.series,
+        config,
+        anchors,
+        predicted,
+        predicted_time,
+        segment_durations_s,
+        points=config.validation_common_grid_points,
+    )
+    return {
+        key: value
+        for key, value in block.items()
+        if not isinstance(value, np.ndarray)
+    }
+
+
 def _generalization_metric(train_value: float, val_value: float) -> dict[str, float | None]:
     return {
         "train": float(train_value),
@@ -813,7 +854,14 @@ def _training_objective_diagnostics(
     if not history:
         return None
     rows = [vars(row) if isinstance(row, EpochResult) else row for row in history]
-    best = min(rows, key=lambda row: row["val_loss"])
+    best = min(
+        rows,
+        key=lambda row: (
+            row.get("validation_selection_value")
+            if row.get("validation_selection_value") is not None
+            else row["val_loss"]
+        ),
+    )
     result = {
         "best_epoch": int(best["epoch"]),
         "epochs_run": len(rows),
@@ -824,6 +872,14 @@ def _training_objective_diagnostics(
         "ratio": (
             float(best["val_loss"] / best["train_loss"])
             if best["train_loss"] != 0.0 else None
+        ),
+        "checkpoint_selection_metric": best.get(
+            "validation_selection_metric", CHECKPOINT_SELECTION_OBJECTIVE
+        ),
+        "checkpoint_selection_value": float(
+            best.get("validation_selection_value")
+            if best.get("validation_selection_value") is not None
+            else best["val_loss"]
         ),
     }
     last = rows[-1]
@@ -866,6 +922,9 @@ def evaluate_fit_splits(
             "windows": len(dataset),
             "split_sha256": _split_sha256(group),
             "metrics": evaluate_split(model, dataset, normalizer, config, device),
+            "common_grid_metrics": evaluate_fixed_anchor_common_grid(
+                model, dataset, normalizer, config, device
+            ),
         }
 
     train_metrics = splits["train"]["metrics"]
@@ -999,6 +1058,71 @@ def _dataset_loss_components(
     return {name: value / denominator for name, value in component_totals.items()}
 
 
+@dataclass(frozen=True)
+class ValidationSelection:
+    """One deterministic checkpoint-selection result over fixed-anchor validation."""
+
+    metric: str
+    value: float
+    by_airport: dict[str, float]
+    details_by_airport: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+
+def _objective_validation_selection(
+    *,
+    model: nn.Module,
+    val_sets: dict[str, TrajectoryWindows],
+    normalizer: Normalizer,
+    config: TSConfig,
+    device: torch.device,
+    val_by_airport: dict[str, float],
+) -> ValidationSelection:
+    del model, val_sets, normalizer, config, device
+    return ValidationSelection(
+        metric=CHECKPOINT_SELECTION_OBJECTIVE,
+        value=float(np.mean(list(val_by_airport.values()))),
+        by_airport=dict(val_by_airport),
+    )
+
+
+def _common_grid_validation_selection(
+    *,
+    model: nn.Module,
+    val_sets: dict[str, TrajectoryWindows],
+    normalizer: Normalizer,
+    config: TSConfig,
+    device: torch.device,
+    val_by_airport: dict[str, float],
+) -> ValidationSelection:
+    del val_by_airport
+    details: dict[str, dict[str, Any]] = {}
+    for airport, dataset in val_sets.items():
+        block = evaluate_fixed_anchor_common_grid(
+            model, dataset, normalizer, config, device
+        )
+        details[airport] = {
+            "ade_m": block["ade_m"],
+            "fde_m": block["fde_m"],
+            "final_time_mae_s": block["final_time_mae_s"],
+            "flights": block["flights"],
+        }
+    by_airport = {
+        airport: float(block["ade_m"]) for airport, block in details.items()
+    }
+    return ValidationSelection(
+        metric=CHECKPOINT_SELECTION_COMMON_GRID_ADE,
+        value=float(np.mean(list(by_airport.values()))),
+        by_airport=by_airport,
+        details_by_airport=details,
+    )
+
+
+_VALIDATION_SELECTIONS: dict[str, Callable[..., ValidationSelection]] = {
+    CHECKPOINT_SELECTION_OBJECTIVE: _objective_validation_selection,
+    CHECKPOINT_SELECTION_COMMON_GRID_ADE: _common_grid_validation_selection,
+}
+
+
 def fit_model(
     train_series: Sequence[FlightSeries],
     val_series: Sequence[FlightSeries],
@@ -1057,6 +1181,13 @@ def fit_model(
     flights_per_epoch = sum(
         count > 0 for _start, count in train_set.series_ranges.values()
     )
+    if config.random_train_anchor and flights_per_epoch != len(train_series):
+        raise ValueError(
+            f"random-anchor {config.random_train_anchor_min_future_s:g} s future contract "
+            f"covers {flights_per_epoch}/"
+            f"{len(train_series)} train flights; adjust the train roster explicitly "
+            "instead of silently changing experiment membership"
+        )
     if verbose:
         print(
             f"  model      {config.model}/{config.prediction_output} "
@@ -1079,6 +1210,14 @@ def fit_model(
         print(f"  windows    train {len(train_set)} / val {val_window_count} "
               "(validation anchor: fixed L-1)")
         print(f"  anchors    {train_set.anchor_description}")
+        if config.random_train_anchor:
+            print(
+                f"  anchor min {config.random_train_anchor_min_future_s:g}s future; "
+                f"eligible {flights_per_epoch}/{len(train_series)} train flights"
+            )
+        print(
+            f"  selection  {config.checkpoint_selection_metric} on fixed L-1 validation"
+        )
         if minimum_anchor_index is not None:
             print(f"  anchor     common minimum index {minimum_anchor_index} "
                   f"({minimum_anchor_index * config.dt_s:.0f}s after track entry)")
@@ -1089,6 +1228,7 @@ def fit_model(
 
     history: list[EpochResult] = []
     best_val = math.inf
+    best_val_loss_at_selection = math.inf
     best_state: dict[str, torch.Tensor] | None = None
     epochs_without_improvement = 0
     optimizer_updates = 0
@@ -1097,6 +1237,7 @@ def fit_model(
     for epoch in range(1, config.epochs + 1):
         started = time.perf_counter()
         epoch_learning_rate = float(optimizer.param_groups[0]["lr"])
+        train_anchor_sampling = train_set.anchor_statistics(config.seed + epoch)
 
         model.train()
         train_component_totals = {name: 0.0 for name in component_names}
@@ -1153,12 +1294,26 @@ def fit_model(
         }
         # Equal airport weight: a large/long airport cannot control early stopping alone.
         val_loss = float(np.mean(list(val_by_airport.values())))
+        validation_selection = _VALIDATION_SELECTIONS[
+            config.checkpoint_selection_metric
+        ](
+            model=model,
+            val_sets=val_sets,
+            normalizer=normalizer,
+            config=config,
+            device=device,
+            val_by_airport=val_by_airport,
+        )
         if not (math.isfinite(train_loss) and math.isfinite(val_loss)):
             raise RuntimeError(
                 f"training diverged at epoch {epoch} (train {train_loss}, val {val_loss}) "
                 f"— no checkpoint written; lower --learning-rate"
             )
-        scheduler.step(val_loss)
+        if not math.isfinite(validation_selection.value):
+            raise RuntimeError(
+                f"validation selection metric {validation_selection.metric} is not finite"
+            )
+        scheduler.step(validation_selection.value)
         history.append(EpochResult(
             epoch=epoch,
             train_loss=train_loss,
@@ -1169,10 +1324,15 @@ def fit_model(
             val_by_airport=val_by_airport,
             train_components=train_components,
             val_components=val_components,
+            validation_selection_metric=validation_selection.metric,
+            validation_selection_value=validation_selection.value,
+            validation_selection_by_airport=validation_selection.by_airport,
+            train_anchor_sampling=train_anchor_sampling,
         ))
 
-        if val_loss < best_val - 1e-9:
-            best_val = val_loss
+        if validation_selection.value < best_val - 1e-9:
+            best_val = validation_selection.value
+            best_val_loss_at_selection = val_loss
             best_state = {key: value.detach().clone() for key, value in model.state_dict().items()}
             epochs_without_improvement = 0
             marker = " *"
@@ -1184,6 +1344,11 @@ def fit_model(
             print(f"  epoch {epoch:3d}/{config.epochs}  train {train_loss:.6f}  "
                   f"val-macro {val_loss:.6f}  lr {epoch_learning_rate:.2e}  "
                   f"updates {optimizer_updates:5d}  {history[-1].seconds:5.1f}s{marker}")
+            if validation_selection.metric != CHECKPOINT_SELECTION_OBJECTIVE:
+                print(
+                    f"             checkpoint  {validation_selection.metric}="
+                    f"{validation_selection.value:.1f}"
+                )
             print(
                 "             val parts  "
                 + "  ".join(
@@ -1204,7 +1369,8 @@ def fit_model(
         normalizer=normalizer,
         device=device,
         history=history,
-        best_val_loss=best_val,
+        best_val_loss=best_val_loss_at_selection,
+        best_validation_selection=best_val,
         train_windows=len(train_set),
         val_windows=val_window_count,
     )
@@ -1277,6 +1443,10 @@ def train(
         split: block["metrics"]
         for split, block in fit_evaluation["splits"].items()
     }
+    common_grid_metrics = {
+        split: block["common_grid_metrics"]
+        for split, block in fit_evaluation["splits"].items()
+    }
 
     checkpoint_payload = {
         "target_contract": target_contract(config),
@@ -1290,6 +1460,12 @@ def train(
             "test": checkpoint_test_keys,
         },
         "best_val_loss": fit.best_val_loss,
+        "validation_selection": {
+            "metric": config.checkpoint_selection_metric,
+            "best_value": fit.best_validation_selection,
+            "anchor": "fixed L-1",
+            "common_grid_points": config.validation_common_grid_points,
+        },
         "data_provenance": data_provenance,
         "data_selection": data_selection,
     }
@@ -1316,6 +1492,9 @@ def train(
         "checkpoint_sha256": checkpoint_sha256,
         "arrival_manifests": manifest_digests,
         "random_train_anchor": config.random_train_anchor,
+        "random_train_anchor_min_future_s": config.random_train_anchor_min_future_s,
+        "checkpoint_selection_metric": config.checkpoint_selection_metric,
+        "validation_common_grid_points": config.validation_common_grid_points,
         "horizon_mode": config.horizon_mode,
         "prediction_output": config.prediction_output,
         "aircraft_filter": config.aircraft_filter,
@@ -1353,6 +1532,12 @@ def train(
         "optimizer_updates": fit.history[-1].optimizer_updates,
         "final_learning_rate": fit.history[-1].learning_rate,
         "best_val_loss": fit.best_val_loss,
+        "validation_selection": {
+            "metric": config.checkpoint_selection_metric,
+            "best_value": fit.best_validation_selection,
+            "anchor": "fixed L-1",
+            "common_grid_points": config.validation_common_grid_points,
+        },
         "flights": {
             "train": len(train_series),
             "val": len(val_series),
@@ -1364,6 +1549,7 @@ def train(
             "test": test_window_count,
         },
         "metrics": split_metrics,
+        "common_grid_metrics": common_grid_metrics,
         "fit_diagnostics": fit_evaluation["diagnostics"],
         "data_provenance": {
             "schema_version": data_provenance["schema_version"],

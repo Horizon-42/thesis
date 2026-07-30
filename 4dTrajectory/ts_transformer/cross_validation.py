@@ -20,7 +20,12 @@ from typing import Any, Sequence
 import torch
 
 from batching import resolve_batch_size
-from config import HORIZON_NORMALIZED, TSConfig
+from config import (
+    CHECKPOINT_SELECTION_COMMON_GRID_ADE,
+    CHECKPOINT_SELECTION_OBJECTIVE,
+    HORIZON_NORMALIZED,
+    TSConfig,
+)
 from dataset import (
     FixedAnchorTrajectoryWindows, FlightSeries,
     cross_validation_folds,
@@ -38,6 +43,12 @@ SELECTION_METRIC = (
     "scaled final-time MSE, position/velocity displacement-consistency MSE, and "
     "terminal-position MSE"
 )
+SELECTION_METRIC_DESCRIPTIONS = {
+    CHECKPOINT_SELECTION_OBJECTIVE: SELECTION_METRIC,
+    CHECKPOINT_SELECTION_COMMON_GRID_ADE: (
+        "mean outer-train-fold airport-macro fixed-anchor common physical-time ADE"
+    ),
+}
 CV_PARAMETER_GRIDS: dict[str, tuple[Any, ...]] = {
     "n_segments": (64, 128, 256),
     "learning_rate": (1e-4, 3e-4, 5e-4),
@@ -195,7 +206,17 @@ def cross_validate(
                 auto_batch_size=False,
                 verbose=verbose,
             )
-            best_epoch = min(fit.history, key=lambda row: row.val_loss)
+            best_epoch = min(
+                fit.history,
+                key=lambda row: (
+                    row.validation_selection_value
+                    if getattr(row, "validation_selection_value", None) is not None
+                    else row.val_loss
+                ),
+            )
+            best_selection = getattr(
+                fit, "best_validation_selection", fit.best_val_loss
+            )
             validation_metrics = evaluate_split(
                 fit.model,
                 FixedAnchorTrajectoryWindows(fold_val, fit.config, fit.normalizer),
@@ -210,6 +231,8 @@ def cross_validate(
                 "validation_by_airport": _airport_counts(fold_val),
                 "validation_split_sha256": _split_digest(fold_val),
                 "best_val_macro_loss": fit.best_val_loss,
+                "best_validation_selection": best_selection,
+                "validation_selection_metric": candidate_config.checkpoint_selection_metric,
                 "best_epoch": best_epoch.epoch,
                 "val_by_airport": best_epoch.val_by_airport,
                 "batch_size": fit.config.batch_size,
@@ -223,7 +246,7 @@ def cross_validate(
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-        scores = [row["best_val_macro_loss"] for row in fold_results]
+        scores = [row["best_validation_selection"] for row in fold_results]
         candidate_results.append({
             "candidate": candidate_index - 1,
             "overrides": overrides,
@@ -239,7 +262,9 @@ def cross_validate(
     best_overrides = dict(best["overrides"])
     results = {
         "schema_version": RESULTS_SCHEMA,
-        "selection_metric": SELECTION_METRIC,
+        "selection_metric": SELECTION_METRIC_DESCRIPTIONS[
+            base_config.checkpoint_selection_metric
+        ],
         "leakage_guard": {
             "search_population": "outer_train_only",
             "outer_validation_used": False,

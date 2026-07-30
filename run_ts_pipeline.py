@@ -40,8 +40,13 @@ from config import (  # noqa: E402
     AIRCRAFT_FILTER_ALL,
     AIRCRAFT_FILTERS,
     COORDINATE_FRAMES,
+    CHECKPOINT_SELECTION_COMMON_GRID_ADE,
+    CHECKPOINT_SELECTION_METRICS,
+    CHECKPOINT_SELECTION_OBJECTIVE,
     CONTROL_STATE_CLOCKS,
     CONTROL_STATE_CLOCK_PREDICTED,
+    DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
+    DEFAULT_VALIDATION_COMMON_GRID_POINTS,
     HORIZON_MODES,
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
@@ -119,6 +124,10 @@ def _anchor_tag(random_train_anchor: bool) -> str:
     return "_random_anchor" if random_train_anchor else ""
 
 
+def _validation_selection_tag(metric: str) -> str:
+    return "_common_grid_selection" if metric == CHECKPOINT_SELECTION_COMMON_GRID_ADE else ""
+
+
 def _prediction_output_tag(prediction_output: str) -> str:
     return "" if prediction_output == PREDICTION_STATE else f"_{prediction_output}"
 
@@ -175,6 +184,9 @@ class TrainingPlan:
         cv_epochs: int = DEFAULT_CV_EPOCHS,
         cv_patience: int = DEFAULT_CV_PATIENCE,
         random_train_anchor: bool = False,
+        random_train_anchor_min_future_s: float = DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
+        checkpoint_selection_metric: str = CHECKPOINT_SELECTION_OBJECTIVE,
+        validation_common_grid_points: int = DEFAULT_VALIDATION_COMMON_GRID_POINTS,
         control_effort_weight: float | None = None,
         control_smoothness_weight: float | None = None,
         control_experts: int | None = None,
@@ -207,6 +219,9 @@ class TrainingPlan:
         self.cv_epochs = cv_epochs
         self.cv_patience = cv_patience
         self.random_train_anchor = random_train_anchor
+        self.random_train_anchor_min_future_s = random_train_anchor_min_future_s
+        self.checkpoint_selection_metric = checkpoint_selection_metric
+        self.validation_common_grid_points = validation_common_grid_points
         self.control_effort_weight = control_effort_weight
         self.control_smoothness_weight = control_smoothness_weight
         self.control_experts = control_experts
@@ -223,6 +238,7 @@ class TrainingPlan:
             + _aircraft_filter_tag(aircraft_filter)
             + _frame_tag(coordinate_frame)
             + _anchor_tag(random_train_anchor)
+            + _validation_selection_tag(checkpoint_selection_metric)
         )
         self.train_dir = (
             Path(output_dir)
@@ -261,6 +277,17 @@ class TrainingPlan:
             args += ["--window-horizon-steps", str(self.window_horizon_steps)]
         if self.random_train_anchor:
             args.append("--random-train-anchor")
+            args += [
+                "--random-train-anchor-min-future-s",
+                str(self.random_train_anchor_min_future_s),
+            ]
+        if self.checkpoint_selection_metric != CHECKPOINT_SELECTION_OBJECTIVE:
+            args += ["--checkpoint-selection-metric", self.checkpoint_selection_metric]
+        if self.validation_common_grid_points != DEFAULT_VALIDATION_COMMON_GRID_POINTS:
+            args += [
+                "--validation-common-grid-points",
+                str(self.validation_common_grid_points),
+            ]
         if self.n_segments is not None and include_base_n_segments:
             args += ["--n-segments", str(self.n_segments)]
         if self.seed is not None:
@@ -313,6 +340,15 @@ class TrainingPlan:
                 f"{metadata.get('random_train_anchor')!r} does not match requested "
                 f"{self.random_train_anchor!r}"
             )
+        if (
+            metadata.get("random_train_anchor_min_future_s")
+            != self.random_train_anchor_min_future_s
+        ):
+            return "checkpoint random-anchor minimum future does not match the recipe"
+        if metadata.get("checkpoint_selection_metric") != self.checkpoint_selection_metric:
+            return "checkpoint validation selection metric does not match the recipe"
+        if metadata.get("validation_common_grid_points") != self.validation_common_grid_points:
+            return "checkpoint common-grid point count does not match the recipe"
         expected_config, _source = self.resolved_train_config(
             use_best_config=self.cv_reuse_error() is None
         )
@@ -396,6 +432,9 @@ class TrainingPlan:
             "prediction_output": self.prediction_output,
             "coordinate_frame": self.coordinate_frame,
             "random_train_anchor": self.random_train_anchor,
+            "random_train_anchor_min_future_s": self.random_train_anchor_min_future_s,
+            "checkpoint_selection_metric": self.checkpoint_selection_metric,
+            "validation_common_grid_points": self.validation_common_grid_points,
             "horizon_mode": self.horizon_mode,
             "aircraft_filter": self.aircraft_filter,
             "control_state_supervision_clock": self.control_state_clock,
@@ -480,6 +519,9 @@ class TrainingPlan:
             "prediction_output": self.prediction_output,
             "coordinate_frame": self.coordinate_frame,
             "random_train_anchor": self.random_train_anchor,
+            "random_train_anchor_min_future_s": self.random_train_anchor_min_future_s,
+            "checkpoint_selection_metric": self.checkpoint_selection_metric,
+            "validation_common_grid_points": self.validation_common_grid_points,
             "horizon_mode": self.horizon_mode,
             "aircraft_filter": self.aircraft_filter,
             "control_state_supervision_clock": self.control_state_clock,
@@ -557,6 +599,9 @@ class PredictionPlan:
         scope = "pooled_" if training.pooled else ""
         frame = _frame_tag(training.coordinate_frame)
         anchor = _anchor_tag(training.random_train_anchor)
+        validation_selection = _validation_selection_tag(
+            training.checkpoint_selection_metric
+        )
         prediction_output = _prediction_output_tag(training.prediction_output)
         control_clock = _control_clock_tag(
             training.prediction_output, training.control_state_clock
@@ -566,7 +611,7 @@ class PredictionPlan:
         horizon_tag = HORIZON_TAGS[training.horizon_mode]
         stem = (
             f"{scope}{training.model}{prediction_output}{control_clock}_{horizon_tag}"
-            f"{aircraft_filter}{frame}{anchor}{tag}_{split}"
+            f"{aircraft_filter}{frame}{anchor}{validation_selection}{tag}_{split}"
         )
         self.pred_dir = OPT_OUTPUTS_ROOT / self.airport / f"ts_pred_{stem}"
         self.summary = self.pred_dir / "summary.json"
@@ -575,7 +620,7 @@ class PredictionPlan:
         category_scope = "pooled_" if training.pooled else ""
         self.category = (
             f"ts_{category_scope}{MODEL_SHORT[training.model]}{prediction_output}_{horizon_tag}"
-            f"{aircraft_filter}{frame}{anchor}{tag}_{split}"
+            f"{aircraft_filter}{frame}{anchor}{validation_selection}{tag}_{split}"
         )
         model_label = MODEL_LABEL[training.model]
         pooled_label = "pooled, " if training.pooled else ""
@@ -857,6 +902,21 @@ def main() -> None:
         help="train rolling forecasts from random anchors; default is fixed anchor L-1",
     )
     parser.add_argument(
+        "--random-train-anchor-min-future-s",
+        type=float,
+        default=DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
+    )
+    parser.add_argument(
+        "--checkpoint-selection-metric",
+        choices=CHECKPOINT_SELECTION_METRICS,
+        default=CHECKPOINT_SELECTION_OBJECTIVE,
+    )
+    parser.add_argument(
+        "--validation-common-grid-points",
+        type=int,
+        default=DEFAULT_VALIDATION_COMMON_GRID_POINTS,
+    )
+    parser.add_argument(
         "--skip-cv",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -925,6 +985,9 @@ def main() -> None:
             cv_epochs=args.cv_epochs,
             cv_patience=args.cv_patience,
             random_train_anchor=args.random_train_anchor,
+            random_train_anchor_min_future_s=args.random_train_anchor_min_future_s,
+            checkpoint_selection_metric=args.checkpoint_selection_metric,
+            validation_common_grid_points=args.validation_common_grid_points,
             control_effort_weight=args.control_effort_weight,
             control_smoothness_weight=args.control_smoothness_weight,
             control_experts=args.control_experts,

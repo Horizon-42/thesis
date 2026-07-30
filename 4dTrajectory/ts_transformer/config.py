@@ -44,6 +44,13 @@ CONTROL_STATE_CLOCKS = (
     CONTROL_STATE_CLOCK_OBSERVED,
 )
 
+CHECKPOINT_SELECTION_OBJECTIVE = "fixed-anchor-objective"
+CHECKPOINT_SELECTION_COMMON_GRID_ADE = "fixed-anchor-common-grid-ade"
+CHECKPOINT_SELECTION_METRICS = (
+    CHECKPOINT_SELECTION_OBJECTIVE,
+    CHECKPOINT_SELECTION_COMMON_GRID_ADE,
+)
+
 
 def uses_control_dynamics(prediction_output: str) -> bool:
     """Whether an output strategy requires per-flight aircraft dynamics."""
@@ -94,6 +101,8 @@ DEFAULT_N_SEGMENTS = DEFAULT_N_SEGMENTS_BY_MODEL[MODELS[0]]
 # ``final_time_s`` is emitted in physical seconds.  The scale only nondimensionalizes its
 # loss; it is not a duration cap and does not change the value returned at inference.
 DEFAULT_FINAL_TIME_SCALE_S = 600.0
+DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S = 60.0
+DEFAULT_VALIDATION_COMMON_GRID_POINTS = 64
 
 # Fallback aircraft when a flight dict has no resolvable type or usable performance model.
 # Not cosmetic: it sets the target state's Vref and threshold-crossing height — the ENU
@@ -198,6 +207,15 @@ class TSConfig:
     # One full-trajectory example per flight is the default: observe L samples, then predict
     # from anchor L-1 to the runway. Rolling/replanning experiments opt into later anchors.
     random_train_anchor: bool = False
+    # Random anchors with only a few seconds of future create a nearly constant normalized
+    # target and do not represent the fixed-anchor deployment task. This train-only floor is
+    # frozen before validation; fixed-anchor train/validation windows do not use it.
+    random_train_anchor_min_future_s: float = DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S
+    # Checkpoint selection is an explicit validation policy. The historical normalized
+    # objective remains the default; control experiments may opt into the deployable
+    # fixed-anchor physical-time metric without changing their training loss.
+    checkpoint_selection_metric: str = CHECKPOINT_SELECTION_OBJECTIVE
+    validation_common_grid_points: int = DEFAULT_VALIDATION_COMMON_GRID_POINTS
     # Inferred final-approach geometry is weaker supervision than an observed ADS-B row.
     # These weights apply to POSITION channels only; fitted velocity channels are always
     # masked.  The terminal weight is added on the fitted crossing row so the endpoint is
@@ -275,6 +293,12 @@ class TSConfig:
                 f"{self.control_state_supervision_clock!r}; expected one of "
                 f"{CONTROL_STATE_CLOCKS}"
             )
+        if self.checkpoint_selection_metric not in CHECKPOINT_SELECTION_METRICS:
+            raise ValueError(
+                f"unknown checkpoint_selection_metric "
+                f"{self.checkpoint_selection_metric!r}; expected one of "
+                f"{CHECKPOINT_SELECTION_METRICS}"
+            )
         for name in (
             "seq_len",
             "n_segments",
@@ -292,9 +316,12 @@ class TSConfig:
             "lr_plateau_patience",
             "patience",
             "control_expert_count",
+            "validation_common_grid_points",
         ):
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name} must be positive, got {getattr(self, name)!r}")
+        if self.validation_common_grid_points <= 1:
+            raise ValueError("validation_common_grid_points must be greater than one")
         if (
             self.prediction_output == PREDICTION_CONTROL_MIXTURE
             and self.control_expert_count < 2
@@ -308,6 +335,8 @@ class TSConfig:
         ):
             if getattr(self, name) <= 0.0:
                 raise ValueError(f"{name} must be positive, got {getattr(self, name)!r}")
+        if self.random_train_anchor_min_future_s < 0.0:
+            raise ValueError("random_train_anchor_min_future_s must be non-negative")
         if not 0.0 < self.lr_plateau_factor < 1.0:
             raise ValueError(
                 "lr_plateau_factor must be between 0 and 1, got "

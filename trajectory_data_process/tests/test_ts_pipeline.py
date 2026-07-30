@@ -330,12 +330,27 @@ def test_fixed_and_random_anchor_modes_use_distinct_artifact_paths(tmp_path, mon
         ("KRDU",), "itransformer", training_mode="pooled",
         random_train_anchor=True,
     )
+    common_grid = pipeline.TrainingPlan(
+        ("KRDU",), "itransformer", training_mode="pooled",
+        checkpoint_selection_metric="fixed-anchor-common-grid-ade",
+    )
     fixed_prediction = pipeline.PredictionPlan(fixed, "KRDU", ("eval",))
     random_prediction = pipeline.PredictionPlan(random, "KRDU", ("eval",))
+    common_grid_prediction = pipeline.PredictionPlan(
+        common_grid, "KRDU", ("eval",)
+    )
 
     assert fixed.train_dir != random.train_dir
     assert fixed_prediction.pred_dir != random_prediction.pred_dir
     assert fixed_prediction.category != random_prediction.category
+    assert fixed.train_dir != common_grid.train_dir
+    assert fixed_prediction.pred_dir != common_grid_prediction.pred_dir
+    assert "--checkpoint-selection-metric" in common_grid.train_step(
+        use_best_config=False
+    )[1]
+    assert "--random-train-anchor-min-future-s" in random.train_step(
+        use_best_config=False
+    )[1]
 
 
 def test_three_horizon_modes_use_distinct_commands_and_artifact_paths(tmp_path, monkeypatch):
@@ -450,7 +465,10 @@ def test_skip_train_rejects_checkpoint_from_opposite_anchor_policy(
         "arrival_manifests": {
             "KRDU": hashlib.sha256(manifest.read_bytes()).hexdigest(),
         },
-        "random_train_anchor": trained_policy,
+            "random_train_anchor": trained_policy,
+            "random_train_anchor_min_future_s": trained_config.random_train_anchor_min_future_s,
+            "checkpoint_selection_metric": trained_config.checkpoint_selection_metric,
+            "validation_common_grid_points": trained_config.validation_common_grid_points,
         "horizon_mode": trained.horizon_mode,
         "prediction_output": trained_config.prediction_output,
         "aircraft_filter": trained_config.aircraft_filter,
@@ -490,7 +508,10 @@ def test_skip_train_rejects_checkpoint_from_opposite_horizon_mode(
         "arrival_manifests": {
             "KRDU": hashlib.sha256(manifest.read_bytes()).hexdigest(),
         },
-        "random_train_anchor": False,
+            "random_train_anchor": False,
+            "random_train_anchor_min_future_s": trained_config.random_train_anchor_min_future_s,
+            "checkpoint_selection_metric": trained_config.checkpoint_selection_metric,
+            "validation_common_grid_points": trained_config.validation_common_grid_points,
         "horizon_mode": trained_config.horizon_mode,
         "prediction_output": trained_config.prediction_output,
         "aircraft_filter": trained_config.aircraft_filter,
@@ -531,7 +552,10 @@ def test_skip_train_rejects_window_checkpoint_with_different_rollout_cap(
         "arrival_manifests": {
             "KRDU": hashlib.sha256(manifest.read_bytes()).hexdigest(),
         },
-        "random_train_anchor": False,
+            "random_train_anchor": False,
+            "random_train_anchor_min_future_s": trained_config.random_train_anchor_min_future_s,
+            "checkpoint_selection_metric": trained_config.checkpoint_selection_metric,
+            "validation_common_grid_points": trained_config.validation_common_grid_points,
         "horizon_mode": trained_config.horizon_mode,
         "prediction_output": trained_config.prediction_output,
         "aircraft_filter": trained_config.aircraft_filter,

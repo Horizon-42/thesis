@@ -55,6 +55,7 @@ from aerodynamic_model.common import GeodeticState  # noqa: E402
 from batching import resolve_batch_size  # noqa: E402
 from config import (  # noqa: E402
     AIRCRAFT_FILTER_OPENAP_DIRECT, HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW,
+    CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CONTROL_STATE_CLOCK_OBSERVED, PREDICTION_CONTROL, PREDICTION_CONTROL_MIXTURE,
     TSConfig, control_recipe,
 )
@@ -81,7 +82,8 @@ from prediction_outputs import (  # noqa: E402
 )
 from synthetic import synthetic_arrivals  # noqa: E402
 from train import (  # noqa: E402
-    FIT_EVALUATION_NAME, FIT_EVALUATION_SCHEMA, evaluate_fit_splits,
+    CHECKPOINT_METADATA_SCHEMA, FIT_EVALUATION_NAME, FIT_EVALUATION_SCHEMA,
+    evaluate_fit_splits,
     load_checkpoint, masked_mse, position_velocity_consistency_loss,
     prediction_loss, train,
 )
@@ -494,6 +496,7 @@ def test_full_windows_use_physical_dt_and_mask_after_the_endpoint():
         horizon_mode=HORIZON_FULL,
         full_horizon_steps=4,
         dt_s=2.0,
+        random_train_anchor_min_future_s=0.0,
     )
     series, report = build_series([_fitted_tail_flight()], config, airport="KFIT")
     assert report.built == 1
@@ -517,6 +520,7 @@ def test_window_mode_requires_a_complete_short_horizon():
         horizon_mode=HORIZON_WINDOW,
         window_horizon_steps=4,
         dt_s=2.0,
+        random_train_anchor_min_future_s=0.0,
     )
     series, report = build_series([_fitted_tail_flight()], config, airport="KFIT")
     assert report.built == 1
@@ -594,7 +598,10 @@ def test_masked_mse_ignores_padded_steps():
 
 
 def test_fitted_tail_supervises_position_only_and_keeps_observed_inputs_separate():
-    config = TSConfig(seq_len=3, n_segments=3, dt_s=2.0)
+    config = TSConfig(
+        seq_len=3, n_segments=3, dt_s=2.0,
+        random_train_anchor_min_future_s=0.0,
+    )
     series, report = build_series([_fitted_tail_flight()], config, airport="KFIT")
     assert report.built == 1
     s = series[0]
@@ -622,7 +629,10 @@ def test_fitted_tail_supervises_position_only_and_keeps_observed_inputs_separate
 
 
 def test_normalized_interpolation_never_supervises_fitted_velocity_placeholders():
-    config = TSConfig(seq_len=3, n_segments=4, dt_s=2.0)
+    config = TSConfig(
+        seq_len=3, n_segments=4, dt_s=2.0,
+        random_train_anchor_min_future_s=0.0,
+    )
     series, report = build_series([_fitted_tail_flight()], config, airport="KFIT")
     assert report.built == 1
     s = series[0]
@@ -636,7 +646,10 @@ def test_normalized_interpolation_never_supervises_fitted_velocity_placeholders(
 
 
 def test_normalized_target_interpolates_and_stops_at_observed_threshold_crossing():
-    config = TSConfig(seq_len=3, n_segments=4, dt_s=2.0)
+    config = TSConfig(
+        seq_len=3, n_segments=4, dt_s=2.0,
+        random_train_anchor_min_future_s=0.0,
+    )
     series, report = build_series([_post_threshold_flight()], config, airport="KFIT")
     assert report.built == 1
     s = series[0]
@@ -1304,6 +1317,63 @@ def test_random_epoch_sampler_selects_one_valid_anchor_per_flight():
     assert {dataset.index[index] for index in first} != {
         dataset.index[index] for index in second
     }
+
+
+def test_random_anchor_requires_sixty_seconds_of_future_by_default():
+    series, config = _series(n_flights=4)
+    dataset = RandomAnchorTrajectoryWindows(series, config, Normalizer.fit(series))
+
+    assert dataset.minimum_future_s == pytest.approx(60.0)
+    assert dataset.index
+    for series_index, anchor in dataset.index:
+        remaining = (
+            series[series_index].supervision_times[-1]
+            - series[series_index].times[anchor]
+        )
+        assert remaining >= 60.0 - 1e-9
+
+
+def test_random_anchor_choice_is_stable_per_flight_when_roster_order_changes():
+    series, config = _series(n_flights=8)
+
+    def selected(group):
+        dataset = RandomAnchorTrajectoryWindows(group, config, Normalizer.fit(group))
+        return {
+            dataset.series[dataset.index[index][0]].dataset_id: dataset.index[index][1]
+            for index in dataset.epoch_indices(seed=17)
+        }
+
+    assert selected(series) == selected(list(reversed(series)))
+
+
+def test_common_grid_checkpoint_selection_still_validates_fixed_anchor():
+    series, config = _series(
+        n_flights=12,
+        checkpoint_selection_metric=CHECKPOINT_SELECTION_COMMON_GRID_ADE,
+        epochs=1,
+        patience=1,
+        batch_size=32,
+        d_model=16,
+        d_ff=32,
+        n_heads=4,
+        e_layers=1,
+        seq_len=20,
+        n_segments=8,
+        device="cpu",
+    )
+    train_series, val_series, _test_series = split_by_flight(series, config)
+    fit = train_module.fit_model(
+        train_series, val_series, config, verbose=False
+    )
+
+    assert fit.best_validation_selection > 0.0
+    assert fit.history[0].validation_selection_metric == (
+        CHECKPOINT_SELECTION_COMMON_GRID_ADE
+    )
+    assert fit.history[0].validation_selection_value == pytest.approx(
+        fit.best_validation_selection
+    )
+    assert set(fit.history[0].validation_selection_by_airport) == {AIRPORT}
 
 
 def test_flight_loss_weights_give_every_airport_equal_epoch_weight():
@@ -3174,12 +3244,15 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
         (tmp_path / "run" / "checkpoint_metadata.json").read_text(encoding="utf-8")
     )
     assert metadata == {
-        "schema_version": "ts-checkpoint-metadata-v14-aircraft-filter-audit",
+            "schema_version": CHECKPOINT_METADATA_SCHEMA,
         evaluation_protocol.TEST_RELEASE_PROTOCOL_FIELD:
             evaluation_protocol.TEST_RELEASE_SCHEMA,
         "checkpoint_sha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
         "arrival_manifests": {AIRPORT: "a" * 64},
-        "random_train_anchor": False,
+            "random_train_anchor": False,
+            "random_train_anchor_min_future_s": 60.0,
+            "checkpoint_selection_metric": "fixed-anchor-objective",
+            "validation_common_grid_points": 64,
         "horizon_mode": HORIZON_NORMALIZED,
         "prediction_output": "state",
         "aircraft_filter": "all",

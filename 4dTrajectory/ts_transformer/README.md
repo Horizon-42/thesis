@@ -216,8 +216,11 @@ for the next epoch. The loss weights each flight by the inverse flight count of 
 normalized to mean one, so every airport has the same total epoch weight without oversampling
 smaller airports. `--random-train-anchor` switches to a separate rolling/replanning dataset:
 it still uses every flight once, but independently selects one uniformly random valid anchor
-for that flight on each epoch. The train-only normalizer uses the same airport-then-flight
-weighting rather than duration-weighted moments. Random-anchor training, CV, predictions and
+for that flight on each epoch. Random anchors require at least 60 s of remaining supervision
+by default (`--random-train-anchor-min-future-s`), and their per-flight choice is derived from
+the training seed, epoch and stable flight identity rather than roster order. The train-only
+normalizer uses the same airport-then-flight weighting rather than duration-weighted moments.
+Random-anchor training, CV, predictions and
 frontend categories receive a `_random_anchor` path suffix, so they cannot overwrite the
 fixed-anchor baseline. `--cv-folds`, `--cv-parameters`, and
 `--cv-epochs` expose the search dimensions and budgets. CV exhaustively evaluates the fixed
@@ -418,7 +421,12 @@ The default anchor is fixed at `L-1`, so every flight contributes its earliest f
 forecast once per epoch; flight order is reshuffled between epochs. Pass
 `--random-train-anchor` only when training a rolling predictor that must start from later
 approach phases as well. That mode selects one valid anchor per flight and epoch. Validation
-and exported prediction remain fixed at `L-1`.
+and exported prediction remain fixed at `L-1`. For control experiments whose deployment
+metric is physical-time accuracy, `--checkpoint-selection-metric
+fixed-anchor-common-grid-ade` also makes LR scheduling and early stopping use deterministic
+fixed-anchor common-grid validation ADE; the native model-clock loss remains a diagnostic.
+The frozen train/validation protocol is recorded in
+[`docs/2026-07-30_random_anchor_experiment_plan.zh.md`](docs/2026-07-30_random_anchor_experiment_plan.zh.md).
 
 `N` controls output resolution, not forecast seconds. It is serialized in checkpoints and
 included in the default cross-validation grid (`64, 128, 256`). The objective combines
