@@ -300,6 +300,35 @@ def test_single_flight_rollouts_do_not_leak_horizon_length_into_step_strides(mon
     assert set(observed_strides) == {((3, 1), (1,))}
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
+def test_cuda_inference_step_accepts_many_partial_batch_shapes():
+    """Validation replay must not exhaust Dynamo's static-shape recompile cache."""
+    torch.compiler.reset()
+    torch_dynamics._COMPILED_CUDA_INFERENCE_STEP = None
+    try:
+        state_row = torch.tensor(
+            [35.88, -78.79, 900.0, 80.0, 2.2, -0.04, A320.landing_mass],
+            dtype=torch.float64,
+            device="cuda",
+        )
+        control_row = torch.tensor(
+            [45_000.0, 0.08, 1.02], dtype=torch.float64, device="cuda"
+        )
+        with torch.no_grad():
+            for batch in range(1, 11):
+                stepped = torch_dynamics._rollout_step(
+                    state_row.expand(batch, -1).contiguous(),
+                    control_row.expand(batch, -1).contiguous(),
+                    _aero_tensor(batch).to("cuda"),
+                    torch.full((batch,), 0.5, dtype=torch.float64, device="cuda"),
+                )
+                assert stepped.shape == (batch, 7)
+                assert torch.isfinite(stepped).all()
+    finally:
+        torch.compiler.reset()
+        torch_dynamics._COMPILED_CUDA_INFERENCE_STEP = None
+
+
 @pytest.mark.parametrize(
     "device",
     [

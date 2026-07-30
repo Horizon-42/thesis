@@ -291,13 +291,13 @@ def _rollout_step(
     )
     if compiled is None:
         # ``dynamic=True, mode="reduce-overhead"`` reproducibly segfaults in backward
-        # with the project's Torch/CUDA stack. Static reduce-overhead passes isolated
-        # forward/backward probes. Separate code objects keep inference-shape recompiles
-        # from sharing Dynamo's cache limit with grad-enabled local VJP shapes.
+        # with the project's Torch/CUDA stack, so the autograd kernel remains static.
+        # Inference has no backward graph and must accept full and partial batches across
+        # train/validation replay without consuming Dynamo's finite recompile cache.
         compiled = torch.compile(
             _cuda_autograd_step if grad_enabled else _cuda_inference_step,
             fullgraph=True,
-            dynamic=False,
+            dynamic=not grad_enabled,
             mode="reduce-overhead",
         )
         if grad_enabled:
