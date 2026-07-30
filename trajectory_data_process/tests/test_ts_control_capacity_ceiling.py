@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -13,6 +14,7 @@ for path in (REPO_ROOT, TS_DIR):
         sys.path.insert(0, str(path))
 
 import run_ts_control_capacity_ceiling as ceiling  # noqa: E402
+from config import TSConfig  # noqa: E402
 
 
 def test_balanced_key_sample_is_deterministic_and_airport_balanced() -> None:
@@ -92,3 +94,68 @@ def test_float64_gradient_clipping_handles_finite_float32_overflow() -> None:
 def test_balanced_key_sample_rejects_unqualified_identity() -> None:
     with pytest.raises(ValueError, match="airport-qualified"):
         ceiling.balanced_key_sample(["flight"], per_airport=1, seed=1, split="train")
+
+
+def test_capacity_runner_accepts_historical_six_field_control_batch() -> None:
+    raw = (
+        torch.zeros(1, 2, 3),
+        torch.zeros(1, 2, 3),
+        torch.ones(1, 2, 3),
+        torch.ones(1),
+        torch.ones(1),
+        {"control_lower": torch.zeros(1, 3)},
+    )
+
+    prepared = ceiling.prepare_capacity_batch(raw, torch.device("cpu"))
+
+    assert len(prepared) == 7
+    assert prepared[-1] is None
+    assert prepared[-2]["control_lower"].device.type == "cpu"
+
+
+def test_oracle_optimizer_carries_dense_supervision_into_objective(monkeypatch) -> None:
+    captured = []
+
+    def fake_components(
+        prediction,
+        _anchor,
+        _target,
+        _mask,
+        _final_time,
+        _flight_weights,
+        _config,
+        _normalizer,
+        _dynamics,
+        dense_supervision,
+    ):
+        captured.append(dense_supervision)
+        state = prediction.controls.square().mean()
+        return SimpleNamespace(total=state, state=state, terminal=state.new_zeros(()))
+
+    monkeypatch.setattr(ceiling, "prediction_loss_components", fake_components)
+    dense = object()
+    lower = torch.tensor([[0.0, -1.0, 0.5]])
+    upper = torch.tensor([[100.0, 1.0, 2.0]])
+    initial = ceiling.oracle_prediction(
+        torch.zeros(1, 2, 3), None, torch.tensor([4.0]), lower, upper
+    )
+    dynamics = {"control_lower": lower, "control_upper": upper}
+
+    ceiling.optimize_oracle(
+        "uniform_partition",
+        initial,
+        torch.zeros(1, 2, 3),
+        torch.zeros(1, 2, 3),
+        torch.ones(1, 2, 3),
+        torch.tensor([4.0]),
+        torch.ones(1),
+        dynamics,
+        TSConfig(),
+        SimpleNamespace(),
+        dense,
+        steps=1,
+        learning_rate=1e-3,
+        max_grad_norm=10.0,
+    )
+
+    assert captured == [dense]

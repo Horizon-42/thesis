@@ -76,6 +76,7 @@ from evaluation.records import load_records, record_from_dict  # noqa: E402
 from export import (  # noqa: E402
     accuracy_block, build_prediction_record, observed_series_metrics, record_stem, write_batch,
 )
+from fixed_dt_supervision import build_fixed_dt_supervision  # noqa: E402
 from forecast import Forecast, forecast_approach  # noqa: E402
 from metrics import (  # noqa: E402
     RAW_KINEMATIC_METRIC_KEYS, error_components, raw_kinematic_metrics,
@@ -2070,8 +2071,28 @@ def test_fixed_dt_control_targets_gather_existing_two_second_reference_rows():
         np.testing.assert_allclose(dense.states[row, valid].numpy(), expected)
 
 
+def test_fixed_dt_control_targets_choose_nearest_row_across_float_ulp():
+    times = np.array([0.0, 0.1, 0.2, 0.3, 0.4], dtype=np.float64)
+    values = np.arange(10, dtype=np.float32).reshape(5, 2)
+    series = SimpleNamespace(
+        times=times,
+        supervision_times=times,
+        supervision_weights=np.ones_like(values),
+    )
+
+    dense = build_fixed_dt_supervision(
+        [series], [values], [(0, 2)], dt_s=0.1
+    )
+
+    assert dense.query_offsets_s[0].tolist() == pytest.approx([0.1, 0.2])
+    np.testing.assert_array_equal(dense.states[0].numpy(), values[[3, 4]])
+
+
 @pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
-def test_fixed_dt_control_loss_forms_one_differentiable_training_step(model_name):
+@pytest.mark.parametrize("integrator_dt_s", [2.0, 0.3])
+def test_fixed_dt_control_loss_forms_one_differentiable_training_step(
+    model_name, integrator_dt_s
+):
     series, config = _series(
         n_flights=1,
         model=model_name,
@@ -2087,7 +2108,7 @@ def test_fixed_dt_control_loss_forms_one_differentiable_training_step(model_name
         patch_len=4,
         stride=2,
         final_time_scale_s=600.0,
-        control_rollout_integrator_dt_s=2.0,
+        control_rollout_integrator_dt_s=integrator_dt_s,
     )
     normalizer = Normalizer.fit(series)
     dataset = FixedAnchorTrajectoryWindows(series, config, normalizer)

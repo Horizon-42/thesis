@@ -290,6 +290,65 @@ def test_dense_rollout_records_fixed_queries_and_backpropagates_through_switch_t
     assert durations.grad[0, 0] != 0.0
 
 
+def test_dense_rollout_schedules_queries_not_aligned_to_integrator_grid():
+    initial_state = GeodeticState(
+        35.88, -78.79, 900.0, 80.0, 2.2, -0.04, A320.landing_mass
+    )
+    numeric_controls = [
+        LoadFactorControl(45_000.0, 0.08, 1.02),
+        LoadFactorControl(36_000.0, -0.04, 0.99),
+    ]
+    controls = torch.tensor(
+        [[
+            [control.thrust, control.bank_rad, control.load_factor]
+            for control in numeric_controls
+        ]],
+        dtype=torch.float64,
+        requires_grad=True,
+    )
+    durations = torch.tensor([[1.3, 2.7]], dtype=torch.float64, requires_grad=True)
+
+    result = rollout_piecewise_constant_at_times(
+        _state_tensor(initial_state),
+        controls,
+        durations,
+        _aero_tensor(),
+        torch.tensor([[2.0, 4.0]], dtype=torch.float64),
+        torch.tensor([[True, True]]),
+        integrator_dt_s=0.3,
+    )
+
+    simulator = CasadiSimulator(A320, 0.3)
+    state = initial_state
+    previous = 0.0
+    expected_queries = []
+    expected_endpoints = []
+    fixed = np.arange(0.3, 4.0 + 0.3, 0.3)
+    for event in sorted({*fixed[fixed <= 4.0], 1.3, 2.0, 4.0}):
+        control = numeric_controls[0 if 0.5 * (previous + event) < 1.3 else 1]
+        state = simulator.step(state, control, event - previous)
+        previous = event
+        if event in (2.0, 4.0):
+            expected_queries.append(_state_array(state))
+        if event in (1.3, 4.0):
+            expected_endpoints.append(_state_array(state))
+    np.testing.assert_allclose(
+        result.query_states[0].detach().numpy(),
+        np.stack(expected_queries),
+        rtol=3e-12,
+        atol=3e-8,
+    )
+    np.testing.assert_allclose(
+        result.segment_end_states[0].detach().numpy(),
+        np.stack(expected_endpoints),
+        rtol=3e-12,
+        atol=3e-8,
+    )
+    result.query_states[..., 2:6].square().mean().backward()
+    assert controls.grad is not None and torch.isfinite(controls.grad).all()
+    assert durations.grad is not None and torch.isfinite(durations.grad).all()
+
+
 def test_discrete_adjoint_uses_one_dense_state_layout(monkeypatch):
     """Every reverse step must hit the same static compiled-kernel layout."""
     observed_strides = []

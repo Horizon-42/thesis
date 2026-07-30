@@ -55,9 +55,11 @@ def _build_event_schedule(
     boundaries = segment_durations_s.cumsum(dim=1)
     total_duration = boundaries[:, -1]
     fixed_count = int(torch.ceil(total_duration.detach().max() / dt_cap).cpu())
-    if fixed_count + segments > max_total_steps:
+    query_count = query_offsets_s.shape[1]
+    scheduled_count = fixed_count + segments + query_count
+    if scheduled_count > max_total_steps:
         raise ValueError(
-            f"dense control rollout needs {fixed_count + segments} scheduled events; "
+            f"dense control rollout needs {scheduled_count} scheduled events; "
             f"limit is {max_total_steps}"
         )
 
@@ -66,12 +68,27 @@ def _build_event_schedule(
     ).unsqueeze(0).expand(batch, -1)
     tolerance = torch.finfo(dtype).eps * total_duration.detach().abs().clamp(min=1.0) * 16
     fixed_valid = fixed_times <= total_duration.detach().unsqueeze(1) + tolerance.unsqueeze(1)
+    query_times = query_offsets_s.to(dtype=dtype, device=device)
+    query_in_range = (
+        torch.isfinite(query_times)
+        & (query_times > 0.0)
+        & (query_times <= total_duration.detach().unsqueeze(1) + tolerance.unsqueeze(1))
+    )
+    if torch.any(query_valid & ~query_in_range):
+        raise ValueError(
+            "every valid dense query timestamp must be finite, positive, and no later "
+            "than its trajectory duration"
+        )
 
-    event_times = torch.cat((fixed_times, boundaries), dim=1)
+    # Queries are first-class events. They need not divide the integration-step cap: adding
+    # them to the sorted union creates shorter RK4 steps on either side while preserving
+    # ``integrator_dt_s`` as an upper bound.
+    event_times = torch.cat((fixed_times, boundaries, query_times), dim=1)
     event_valid = torch.cat(
         (
             fixed_valid,
             torch.ones((batch, segments), dtype=torch.bool, device=device),
+            query_valid,
         ),
         dim=1,
     )
@@ -109,25 +126,14 @@ def _build_event_schedule(
     inverse_order = torch.empty_like(order)
     inverse_order.scatter_(1, order, positions)
 
-    if query_offsets_s.shape[1]:
-        fixed_indices_float = query_offsets_s.to(dtype=dtype, device=device) / dt_cap - 1.0
-        fixed_indices = torch.round(fixed_indices_float).to(torch.long)
-        aligned = torch.isclose(
-            fixed_indices_float,
-            fixed_indices.to(dtype),
-            rtol=0.0,
-            atol=1e-7,
-        )
-        if torch.any(query_valid & ~aligned):
-            raise ValueError(
-                "dense query timestamps must be integer multiples of integrator_dt_s"
-            )
-        if torch.any(query_valid & ((fixed_indices < 0) | (fixed_indices >= fixed_count))):
-            raise ValueError("dense query timestamp lies outside the fixed integration grid")
+    if query_count:
+        query_original = fixed_count + segments + torch.arange(
+            query_count, dtype=torch.long, device=device
+        ).unsqueeze(0).expand(batch, -1)
         query_steps = torch.gather(
             inverse_order,
             1,
-            fixed_indices.clamp(min=0, max=max(fixed_count - 1, 0)),
+            query_original,
         )
     else:
         query_steps = torch.empty(

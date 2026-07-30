@@ -49,6 +49,7 @@ from train import (  # noqa: E402
     control_rollout_channels,
     load_checkpoint,
     move_dynamics,
+    move_fixed_dt_supervision,
     prediction_loss_components,
     unpack_batch,
     usable_series,
@@ -187,6 +188,38 @@ def clip_grad_norm_float64_(
     return float(total_norm.detach().cpu())
 
 
+def prepare_capacity_batch(
+    raw_batch: tuple, device: torch.device
+) -> tuple[
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    dict[str, torch.Tensor],
+    Any,
+]:
+    """Normalize the shared 5/6/7-field batch contract for this experiment runner."""
+    (
+        x,
+        y,
+        mask,
+        final_time_s,
+        flight_weights,
+        dynamics,
+        dense_supervision,
+    ) = unpack_batch(raw_batch)
+    return (
+        x.to(device),
+        y.to(device),
+        mask.to(device),
+        final_time_s.to(device),
+        flight_weights.to(device),
+        move_dynamics(dynamics, device),
+        move_fixed_dt_supervision(dense_supervision, device),
+    )
+
+
 def _common_metrics(
     physical_nodes: np.ndarray,
     durations_s: np.ndarray,
@@ -254,6 +287,7 @@ def optimize_oracle(
     dynamics: dict[str, torch.Tensor],
     config: Any,
     normalizer: Any,
+    dense_supervision: Any,
     *,
     steps: int,
     learning_rate: float,
@@ -313,6 +347,7 @@ def optimize_oracle(
             ceiling_config,
             normalizer,
             dynamics,
+            dense_supervision,
         )
         loss = components.total
         if not torch.isfinite(loss):
@@ -487,12 +522,16 @@ def main() -> None:
     if len(dataset) != len(selected_series):
         raise ValueError("capacity sample must provide exactly one fixed anchor per flight")
     raw_batch = dataset.batch(np.arange(len(dataset)))
-    x, y, mask, final_time_s, flight_weights, dynamics = unpack_batch(raw_batch)
     device = resolve_device(args.device)
-    x, y, mask = x.to(device), y.to(device), mask.to(device)
-    final_time_s = final_time_s.to(device)
-    flight_weights = flight_weights.to(device)
-    dynamics = move_dynamics(dynamics, device)
+    (
+        x,
+        y,
+        mask,
+        final_time_s,
+        flight_weights,
+        dynamics,
+        dense_supervision,
+    ) = prepare_capacity_batch(raw_batch, device)
     control_run.model.to(device).eval()
     with torch.no_grad():
         initial = control_run.model(x, dynamics)
@@ -538,6 +577,7 @@ def main() -> None:
             dynamics,
             config,
             normalizer,
+            dense_supervision,
             steps=args.steps,
             learning_rate=args.learning_rate,
             max_grad_norm=args.max_grad_norm,

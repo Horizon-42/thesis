@@ -52,10 +52,18 @@ def _sample(
         )
 
     query_times = anchor_time + offsets
-    source_indices = np.searchsorted(series.supervision_times, query_times, side="left")
-    if np.any(source_indices >= len(series.supervision_times)):
-        raise ValueError("fixed-dt control target extends beyond supervision data")
-    source_times = series.supervision_times[source_indices]
+    source_times_all = np.asarray(series.supervision_times, dtype=np.float64)
+    if not len(source_times_all):
+        raise ValueError("fixed-dt control supervision has no reference rows")
+    insertion = np.searchsorted(source_times_all, query_times, side="left")
+    left = np.clip(insertion - 1, 0, len(source_times_all) - 1)
+    right = np.clip(insertion, 0, len(source_times_all) - 1)
+    choose_right = (
+        np.abs(source_times_all[right] - query_times)
+        < np.abs(source_times_all[left] - query_times)
+    )
+    source_indices = np.where(choose_right, right, left)
+    source_times = source_times_all[source_indices]
     tolerance = max(1e-6, abs(dt_s) * 1e-6)
     if not np.allclose(source_times, query_times, rtol=0.0, atol=tolerance):
         mismatch = int(np.flatnonzero(np.abs(source_times - query_times) > tolerance)[0])
