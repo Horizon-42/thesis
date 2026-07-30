@@ -124,6 +124,13 @@ def _anchor_tag(random_train_anchor: bool) -> str:
     return "_random_anchor" if random_train_anchor else ""
 
 
+def _training_cohort_tag(minimum_future_s: float) -> str:
+    if minimum_future_s <= 0.0:
+        return ""
+    compact = f"{minimum_future_s:g}".replace(".", "p")
+    return f"_cohort_min{compact}"
+
+
 def _validation_selection_tag(metric: str) -> str:
     return "_common_grid_selection" if metric == CHECKPOINT_SELECTION_COMMON_GRID_ADE else ""
 
@@ -184,6 +191,7 @@ class TrainingPlan:
         cv_epochs: int = DEFAULT_CV_EPOCHS,
         cv_patience: int = DEFAULT_CV_PATIENCE,
         random_train_anchor: bool = False,
+        training_cohort_min_future_s: float = 0.0,
         random_train_anchor_min_future_s: float = DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
         checkpoint_selection_metric: str = CHECKPOINT_SELECTION_OBJECTIVE,
         validation_common_grid_points: int = DEFAULT_VALIDATION_COMMON_GRID_POINTS,
@@ -219,6 +227,7 @@ class TrainingPlan:
         self.cv_epochs = cv_epochs
         self.cv_patience = cv_patience
         self.random_train_anchor = random_train_anchor
+        self.training_cohort_min_future_s = training_cohort_min_future_s
         self.random_train_anchor_min_future_s = random_train_anchor_min_future_s
         self.checkpoint_selection_metric = checkpoint_selection_metric
         self.validation_common_grid_points = validation_common_grid_points
@@ -238,6 +247,7 @@ class TrainingPlan:
             + _aircraft_filter_tag(aircraft_filter)
             + _frame_tag(coordinate_frame)
             + _anchor_tag(random_train_anchor)
+            + _training_cohort_tag(training_cohort_min_future_s)
             + _validation_selection_tag(checkpoint_selection_metric)
         )
         self.train_dir = (
@@ -280,6 +290,11 @@ class TrainingPlan:
             args += [
                 "--random-train-anchor-min-future-s",
                 str(self.random_train_anchor_min_future_s),
+            ]
+        if self.training_cohort_min_future_s > 0.0:
+            args += [
+                "--training-cohort-min-future-s",
+                str(self.training_cohort_min_future_s),
             ]
         if self.checkpoint_selection_metric != CHECKPOINT_SELECTION_OBJECTIVE:
             args += ["--checkpoint-selection-metric", self.checkpoint_selection_metric]
@@ -340,6 +355,11 @@ class TrainingPlan:
                 f"{metadata.get('random_train_anchor')!r} does not match requested "
                 f"{self.random_train_anchor!r}"
             )
+        if (
+            metadata.get("training_cohort_min_future_s")
+            != self.training_cohort_min_future_s
+        ):
+            return "checkpoint training-cohort minimum future does not match the recipe"
         if (
             metadata.get("random_train_anchor_min_future_s")
             != self.random_train_anchor_min_future_s
@@ -432,6 +452,7 @@ class TrainingPlan:
             "prediction_output": self.prediction_output,
             "coordinate_frame": self.coordinate_frame,
             "random_train_anchor": self.random_train_anchor,
+            "training_cohort_min_future_s": self.training_cohort_min_future_s,
             "random_train_anchor_min_future_s": self.random_train_anchor_min_future_s,
             "checkpoint_selection_metric": self.checkpoint_selection_metric,
             "validation_common_grid_points": self.validation_common_grid_points,
@@ -519,6 +540,7 @@ class TrainingPlan:
             "prediction_output": self.prediction_output,
             "coordinate_frame": self.coordinate_frame,
             "random_train_anchor": self.random_train_anchor,
+            "training_cohort_min_future_s": self.training_cohort_min_future_s,
             "random_train_anchor_min_future_s": self.random_train_anchor_min_future_s,
             "checkpoint_selection_metric": self.checkpoint_selection_metric,
             "validation_common_grid_points": self.validation_common_grid_points,
@@ -599,6 +621,9 @@ class PredictionPlan:
         scope = "pooled_" if training.pooled else ""
         frame = _frame_tag(training.coordinate_frame)
         anchor = _anchor_tag(training.random_train_anchor)
+        training_cohort = _training_cohort_tag(
+            training.training_cohort_min_future_s
+        )
         validation_selection = _validation_selection_tag(
             training.checkpoint_selection_metric
         )
@@ -611,7 +636,8 @@ class PredictionPlan:
         horizon_tag = HORIZON_TAGS[training.horizon_mode]
         stem = (
             f"{scope}{training.model}{prediction_output}{control_clock}_{horizon_tag}"
-            f"{aircraft_filter}{frame}{anchor}{validation_selection}{tag}_{split}"
+            f"{aircraft_filter}{frame}{anchor}{training_cohort}"
+            f"{validation_selection}{tag}_{split}"
         )
         self.pred_dir = OPT_OUTPUTS_ROOT / self.airport / f"ts_pred_{stem}"
         self.summary = self.pred_dir / "summary.json"
@@ -620,7 +646,8 @@ class PredictionPlan:
         category_scope = "pooled_" if training.pooled else ""
         self.category = (
             f"ts_{category_scope}{MODEL_SHORT[training.model]}{prediction_output}_{horizon_tag}"
-            f"{aircraft_filter}{frame}{anchor}{validation_selection}{tag}_{split}"
+            f"{aircraft_filter}{frame}{anchor}{training_cohort}"
+            f"{validation_selection}{tag}_{split}"
         )
         model_label = MODEL_LABEL[training.model]
         pooled_label = "pooled, " if training.pooled else ""
@@ -902,6 +929,12 @@ def main() -> None:
         help="train rolling forecasts from random anchors; default is fixed anchor L-1",
     )
     parser.add_argument(
+        "--training-cohort-min-future-s",
+        type=float,
+        default=0.0,
+        help="train-only fixed-L-1 future-duration floor for controlled comparisons",
+    )
+    parser.add_argument(
         "--random-train-anchor-min-future-s",
         type=float,
         default=DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
@@ -985,6 +1018,7 @@ def main() -> None:
             cv_epochs=args.cv_epochs,
             cv_patience=args.cv_patience,
             random_train_anchor=args.random_train_anchor,
+            training_cohort_min_future_s=args.training_cohort_min_future_s,
             random_train_anchor_min_future_s=args.random_train_anchor_min_future_s,
             checkpoint_selection_metric=args.checkpoint_selection_metric,
             validation_common_grid_points=args.validation_common_grid_points,

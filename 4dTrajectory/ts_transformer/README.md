@@ -220,6 +220,11 @@ for that flight on each epoch. Random anchors require at least 60 s of remaining
 by default (`--random-train-anchor-min-future-s`), and their per-flight choice is derived from
 the training seed, epoch and stable flight identity rather than roster order. The train-only
 normalizer uses the same airport-then-flight weighting rather than duration-weighted moments.
+Controlled fixed-vs-random comparisons can additionally set
+`--training-cohort-min-future-s 60` on both arms. This independent floor is applied only to
+the outer-training roster at fixed anchor `L-1`; validation remains complete and fixed-anchor.
+The checkpoint, metadata, summary and artifact path record the filtered cohort separately from
+the random-anchor eligibility rule.
 Random-anchor training, CV, predictions and
 frontend categories receive a `_random_anchor` path suffix, so they cannot overwrite the
 fixed-anchor baseline. `--cv-folds`, `--cv-parameters`, and
@@ -425,6 +430,8 @@ and exported prediction remain fixed at `L-1`. For control experiments whose dep
 metric is physical-time accuracy, `--checkpoint-selection-metric
 fixed-anchor-common-grid-ade` also makes LR scheduling and early stopping use deterministic
 fixed-anchor common-grid validation ADE; the native model-clock loss remains a diagnostic.
+When fixed and random arms must use an identical 60-second-capable training roster, pass
+`--training-cohort-min-future-s 60` to both arms; it never filters validation.
 The frozen train/validation protocol is recorded in
 [`docs/2026-07-30_random_anchor_experiment_plan.zh.md`](docs/2026-07-30_random_anchor_experiment_plan.zh.md).
 

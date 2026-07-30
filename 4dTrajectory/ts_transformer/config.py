@@ -207,6 +207,9 @@ class TSConfig:
     # One full-trajectory example per flight is the default: observe L samples, then predict
     # from anchor L-1 to the runway. Rolling/replanning experiments opt into later anchors.
     random_train_anchor: bool = False
+    # Optional common train-roster floor used by controlled fixed-vs-random comparisons.
+    # It is applied only after the by-flight split, so validation membership stays intact.
+    training_cohort_min_future_s: float = 0.0
     # Random anchors with only a few seconds of future create a nearly constant normalized
     # target and do not represent the fixed-anchor deployment task. This train-only floor is
     # frozen before validation; fixed-anchor train/validation windows do not use it.
@@ -337,6 +340,8 @@ class TSConfig:
                 raise ValueError(f"{name} must be positive, got {getattr(self, name)!r}")
         if self.random_train_anchor_min_future_s < 0.0:
             raise ValueError("random_train_anchor_min_future_s must be non-negative")
+        if self.training_cohort_min_future_s < 0.0:
+            raise ValueError("training_cohort_min_future_s must be non-negative")
         if not 0.0 < self.lr_plateau_factor < 1.0:
             raise ValueError(
                 "lr_plateau_factor must be between 0 and 1, got "

@@ -1346,6 +1346,38 @@ def test_random_anchor_choice_is_stable_per_flight_when_roster_order_changes():
     assert selected(series) == selected(list(reversed(series)))
 
 
+def test_training_cohort_floor_filters_only_the_supplied_train_roster():
+    config = TSConfig(seq_len=3, training_cohort_min_future_s=60.0)
+    short = SimpleNamespace(
+        dataset_id="KAAA:SHORT",
+        times=np.array([0.0, 2.0, 4.0]),
+        supervision_times=np.array([0.0, 2.0, 4.0, 54.0]),
+    )
+    eligible = SimpleNamespace(
+        dataset_id="KAAA:ELIGIBLE",
+        times=np.array([0.0, 2.0, 4.0]),
+        supervision_times=np.array([0.0, 2.0, 4.0, 64.0]),
+    )
+
+    retained, audit = train_module.filter_training_cohort(
+        [short, eligible], config, verbose=False
+    )
+
+    assert retained == [eligible]
+    assert audit == {
+        "scope": "train only after by-flight split",
+        "anchor": "fixed L-1",
+        "minimum_future_s": 60.0,
+        "input_flights": 2,
+        "retained_flights": 1,
+        "excluded_flights": 1,
+        "excluded": [{
+            "dataset_id": "KAAA:SHORT",
+            "fixed_anchor_remaining_s": 50.0,
+        }],
+    }
+
+
 def test_common_grid_checkpoint_selection_still_validates_fixed_anchor():
     series, config = _series(
         n_flights=12,
@@ -1508,6 +1540,35 @@ def test_pipeline_preserves_control_mixture_recipe_in_commands_and_config(tmp_pa
     assert config.control_expert_count == 4
     assert config.control_mixture_selector_loss_weight == pytest.approx(0.2)
     assert config.control_mixture_diversity_loss_weight == pytest.approx(0.03)
+
+
+def test_pipeline_carries_and_names_common_training_cohort():
+    fixed = pipeline_module.TrainingPlan(
+        (AIRPORT,),
+        "itransformer",
+        training_mode="pooled",
+        training_cohort_min_future_s=60.0,
+    )
+    random = pipeline_module.TrainingPlan(
+        (AIRPORT,),
+        "itransformer",
+        training_mode="pooled",
+        random_train_anchor=True,
+        training_cohort_min_future_s=60.0,
+    )
+    recipe = fixed._recipe_args()
+    config, _source = fixed.resolved_train_config(use_best_config=False)
+    prediction = pipeline_module.PredictionPlan(
+        fixed, AIRPORT, ("eval",), split="val"
+    )
+
+    assert recipe[recipe.index("--training-cohort-min-future-s") + 1] == "60.0"
+    assert config.training_cohort_min_future_s == pytest.approx(60.0)
+    assert "cohort_min60" in fixed.train_dir.name
+    assert "cohort_min60" in random.train_dir.name
+    assert fixed.train_dir != random.train_dir
+    assert "cohort_min60" in prediction.pred_dir.name
+    assert "cohort_min60" in prediction.category
 
 
 @pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
@@ -2269,9 +2330,7 @@ def test_cross_validation_never_passes_outer_val_or_test_to_fit(tmp_path, monkey
     assert all(not (identities & forbidden) for identities in observed)
     assert set.union(*observed) == {item.dataset_id for item in outer_train}
     assert result["leakage_guard"]["outer_test_used"] is False
-    assert result["schema_version"] == (
-        "ts-cross-validation-v10-raw-kinematic-metrics"
-    )
+    assert result["schema_version"] == cv.RESULTS_SCHEMA
     assert result["selection_metric"] == (
         "mean outer-train-fold airport-macro weighted sum of normalized state MSE, "
         "scaled final-time MSE, position/velocity displacement-consistency MSE, and "
@@ -3238,6 +3297,8 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
         evaluation_protocol.TEST_RELEASE_SCHEMA
     )
     assert set(payload["split"]) == {"train", "val", "test"}
+    assert payload["training_cohort"] == summary["training_cohort"]
+    assert payload["training_cohort"]["scope"] == "train only after by-flight split"
     assert payload["data_provenance"] == provenance
     checkpoint = tmp_path / "run" / "checkpoint.pt"
     metadata = json.loads(
@@ -3250,6 +3311,8 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
         "checkpoint_sha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
         "arrival_manifests": {AIRPORT: "a" * 64},
             "random_train_anchor": False,
+            "training_cohort_min_future_s": 0.0,
+            "training_cohort_excluded_flights": 0,
             "random_train_anchor_min_future_s": 60.0,
             "checkpoint_selection_metric": "fixed-anchor-objective",
             "validation_common_grid_points": 64,

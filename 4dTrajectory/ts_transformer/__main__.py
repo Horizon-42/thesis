@@ -232,6 +232,15 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
         help="train from random valid anchors instead of the fixed full-trajectory anchor L-1",
     )
     parser.add_argument(
+        "--training-cohort-min-future-s",
+        type=float,
+        default=None,
+        help=(
+            "train-only fixed-L-1 future-duration floor used to lock a common "
+            "comparison cohort (default: disabled)"
+        ),
+    )
+    parser.add_argument(
         "--random-train-anchor-min-future-s",
         type=float,
         default=None,
@@ -309,6 +318,7 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("aircraft_type", args.aircraft_type), ("coordinate_frame", args.coordinate_frame),
         ("aircraft_filter", args.aircraft_filter),
         ("random_train_anchor", args.random_train_anchor),
+        ("training_cohort_min_future_s", args.training_cohort_min_future_s),
         ("random_train_anchor_min_future_s", args.random_train_anchor_min_future_s),
         ("checkpoint_selection_metric", args.checkpoint_selection_metric),
         ("validation_common_grid_points", args.validation_common_grid_points),

@@ -68,7 +68,7 @@ from aerodynamic_model.torch_dynamics import (
 
 CHECKPOINT_NAME = "checkpoint.pt"
 CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
-CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v15-anchor-validation-audit"
+CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v16-training-cohort-audit"
 STATE_TARGET_CONTRACTS = {
     HORIZON_NORMALIZED: "normalized-time-runway-crossing-displacement-kinematic-v3",
     HORIZON_FULL: "full-horizon-fixed-time-displacement-kinematic-v2",
@@ -1002,6 +1002,45 @@ def usable_series(
     return usable
 
 
+def filter_training_cohort(
+    series: Sequence[FlightSeries],
+    config: TSConfig,
+    *,
+    verbose: bool = True,
+) -> tuple[list[FlightSeries], dict[str, Any]]:
+    """Apply a predeclared future-duration floor to train flights only."""
+    minimum = float(config.training_cohort_min_future_s)
+    anchor = config.seq_len - 1
+    retained: list[FlightSeries] = []
+    excluded: list[dict[str, Any]] = []
+    for item in series:
+        remaining = float(item.supervision_times[-1] - item.times[anchor])
+        if remaining >= minimum - 1e-9:
+            retained.append(item)
+        else:
+            excluded.append({
+                "dataset_id": item.dataset_id,
+                "fixed_anchor_remaining_s": remaining,
+            })
+    audit = {
+        "scope": "train only after by-flight split",
+        "anchor": "fixed L-1",
+        "minimum_future_s": minimum,
+        "input_flights": len(series),
+        "retained_flights": len(retained),
+        "excluded_flights": len(excluded),
+        "excluded": excluded,
+    }
+    if verbose and excluded:
+        print(
+            f"  cohort     retained {len(retained)}/{len(series)} train flights with "
+            f">= {minimum:g}s after fixed L-1 anchor; excluded {len(excluded)}"
+        )
+    if not retained:
+        raise ValueError("training cohort future-duration floor removed every train flight")
+    return retained, audit
+
+
 def _validation_datasets(
     series: Sequence[FlightSeries],
     config: TSConfig,
@@ -1135,6 +1174,17 @@ def fit_model(
     """Fit one model against explicit train/validation flights, without touching test."""
     if not train_series or not val_series:
         raise ValueError("fit_model requires non-empty train and validation flights")
+    cohort_floor = config.training_cohort_min_future_s
+    cohort_anchor = config.seq_len - 1
+    cohort_ineligible = [
+        item for item in train_series
+        if item.supervision_times[-1] - item.times[cohort_anchor] < cohort_floor - 1e-9
+    ]
+    if cohort_ineligible:
+        raise ValueError(
+            f"fit_model received {len(cohort_ineligible)} train flight(s) below the "
+            f"predeclared {cohort_floor:g} s cohort floor; filter the train cohort before fit"
+        )
 
     device = resolve_device(config.device)
     batch_size = resolve_batch_size(config, device, auto=auto_batch_size, verbose=verbose)
@@ -1415,6 +1465,9 @@ def train(
         if reserved_test_keys is not None
         else [s.dataset_id for s in test_series]
     )
+    train_series, training_cohort = filter_training_cohort(
+        train_series, config, verbose=verbose
+    )
     fit = fit_model(
         train_series,
         val_series,
@@ -1466,6 +1519,7 @@ def train(
             "anchor": "fixed L-1",
             "common_grid_points": config.validation_common_grid_points,
         },
+        "training_cohort": training_cohort,
         "data_provenance": data_provenance,
         "data_selection": data_selection,
     }
@@ -1492,6 +1546,8 @@ def train(
         "checkpoint_sha256": checkpoint_sha256,
         "arrival_manifests": manifest_digests,
         "random_train_anchor": config.random_train_anchor,
+        "training_cohort_min_future_s": config.training_cohort_min_future_s,
+        "training_cohort_excluded_flights": training_cohort["excluded_flights"],
         "random_train_anchor_min_future_s": config.random_train_anchor_min_future_s,
         "checkpoint_selection_metric": config.checkpoint_selection_metric,
         "validation_common_grid_points": config.validation_common_grid_points,
@@ -1538,6 +1594,7 @@ def train(
             "anchor": "fixed L-1",
             "common_grid_points": config.validation_common_grid_points,
         },
+        "training_cohort": training_cohort,
         "flights": {
             "train": len(train_series),
             "val": len(val_series),

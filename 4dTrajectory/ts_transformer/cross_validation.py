@@ -33,11 +33,11 @@ from dataset import (
     split_by_flight,
 )
 from models import resolve_device
-from train import evaluate_split, fit_model, usable_series
+from train import evaluate_split, filter_training_cohort, fit_model, usable_series
 
 RESULTS_NAME = "cv_results.json"
 BEST_CONFIG_NAME = "best_config.json"
-RESULTS_SCHEMA = "ts-cross-validation-v10-raw-kinematic-metrics"
+RESULTS_SCHEMA = "ts-cross-validation-v11-training-cohort-audit"
 SELECTION_METRIC = (
     "mean outer-train-fold airport-macro weighted sum of normalized state MSE, "
     "scaled final-time MSE, position/velocity displacement-consistency MSE, and "
@@ -159,6 +159,9 @@ def cross_validate(
 
     usable = usable_series(series, base_config, verbose=verbose)
     outer_train, outer_val, outer_test = split_by_flight(usable, base_config)
+    outer_train, training_cohort = filter_training_cohort(
+        outer_train, base_config, verbose=verbose
+    )
     folds = cross_validation_folds(outer_train, n_splits, seed=base_config.seed)
     selected_parameters = applicable_cv_parameters(
         cv_parameters, base_config.horizon_mode
@@ -281,6 +284,7 @@ def cross_validate(
             "validation_by_airport": _airport_counts(outer_val),
             "test_by_airport": _airport_counts(outer_test),
         },
+        "training_cohort": training_cohort,
         "n_splits": n_splits,
         "search_strategy": "exhaustive_grid",
         "tuned_parameters": list(selected_parameters),
