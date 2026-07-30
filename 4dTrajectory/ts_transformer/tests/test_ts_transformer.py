@@ -51,6 +51,9 @@ import run_ts_history_ablation as history_ablation  # noqa: E402
 import run_ts_pipeline as pipeline_module  # noqa: E402
 import run_ts_predictability_report as predictability_report  # noqa: E402
 import train as train_module  # noqa: E402
+from anchor_eligibility import (  # noqa: E402
+    CONTROL_ANCHOR_STALL_MARGIN, eligible_random_train_anchors,
+)
 from aerodynamic_model.common import GeodeticState  # noqa: E402
 from batching import resolve_batch_size  # noqa: E402
 from config import (  # noqa: E402
@@ -1344,6 +1347,30 @@ def test_random_anchor_choice_is_stable_per_flight_when_roster_order_changes():
         }
 
     assert selected(series) == selected(list(reversed(series)))
+
+
+def test_control_random_anchor_candidates_require_airborne_stall_margin():
+    config = TSConfig(prediction_output=PREDICTION_CONTROL)
+    stall_speed = math.sqrt(
+        2.0 * 60_000.0 * 9.81 / (1.225 * 100.0 * 2.0)
+    )
+    values = np.zeros((4, len(ch.CHANNELS)))
+    values[:, ch.IDX["edot"]] = [
+        0.0, stall_speed, 1.11 * stall_speed, 2.0 * stall_speed,
+    ]
+    series = SimpleNamespace(
+        values=values,
+        scenario=SimpleNamespace(
+            initial=SimpleNamespace(m=60_000.0),
+            aero=SimpleNamespace(S=100.0, Cl_max=2.0),
+        ),
+    )
+
+    assert CONTROL_ANCHOR_STALL_MARGIN == pytest.approx(1.10)
+    assert eligible_random_train_anchors(series, range(4), config) == [2, 3]
+    assert eligible_random_train_anchors(
+        series, range(4), replace(config, prediction_output="state")
+    ) == [0, 1, 2, 3]
 
 
 def test_training_cohort_floor_filters_only_the_supplied_train_roster():
@@ -3297,6 +3324,7 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
         evaluation_protocol.TEST_RELEASE_SCHEMA
     )
     assert set(payload["split"]) == {"train", "val", "test"}
+    assert payload["training_anchor_contract"] == summary["training_anchor_contract"]
     assert payload["training_cohort"] == summary["training_cohort"]
     assert payload["training_cohort"]["scope"] == "train only after by-flight split"
     assert payload["data_provenance"] == provenance
@@ -3311,6 +3339,7 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
         "checkpoint_sha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
         "arrival_manifests": {AIRPORT: "a" * 64},
             "random_train_anchor": False,
+            "training_anchor_contract": summary["training_anchor_contract"],
             "training_cohort_min_future_s": 0.0,
             "training_cohort_excluded_flights": 0,
             "random_train_anchor_min_future_s": 60.0,

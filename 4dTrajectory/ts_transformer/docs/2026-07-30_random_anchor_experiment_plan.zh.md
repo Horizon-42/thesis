@@ -21,6 +21,13 @@ epoch 为每个航班随机选择一个较晚 anchor，能否通过增加历史/
 随机 anchor 的输入严格为 `values[anchor-seq_len+1 : anchor+1]`；拟合尾迹只能用于 target，
 不能进入历史输入。
 
+single-control 的随机候选还必须满足 anchor 处观测速度
+`V >= 1.10 × Vstall`（与现有轨迹优化器相同的海平面失速裕度），因为机载点质量 ODE
+含 `1/V`，不定义于已停止的地面报告。train-only 审计发现 1279634 个时间合法候选中
+202367 个速度为零、208548 个低于该裕度；10236 架 train 航班均仍至少有一个可飞候选，
+且所有固定 `L-1` anchor 均满足此条件。该规则是 control 随机-anchor 的输入域约束，
+不筛 validation；state-output 随机模式仍只使用时间条件。
+
 为保证唯一变量确实只有 anchor 策略，两臂在 split 完成后、训练开始前共同应用
 `training_cohort_min_future_s=60`。该规则只检查 train 航班在固定 `L-1` 后是否仍有至少
 60 s 监督未来；不筛 validation。当前 seed 1337 的原始 train 10239 架中有 3 架不满足，
@@ -78,8 +85,8 @@ control/duration/运动学诊断，不使用随机 validation 或 native clock-a
 ```text
 4dTrajectory/outputs/POOLED/experiments/openap_direct_20260730_random_anchor/
   stage_a/
-    itr_control_fixed_anchor_cohort60_n64_b512_lr3e-4_seed1337_retry1/
-    itr_control_random_anchor_min60_n64_b512_lr3e-4_seed1337_retry1/
+    itr_control_fixed_anchor_cohort60_n64_b512_lr3e-4_seed1337_retry2/
+    itr_control_random_anchor_min60_n64_b512_lr3e-4_seed1337_retry2/
   comparisons/
     stage_a_seed1337_cohort60/
 ```
@@ -88,8 +95,10 @@ control/duration/运动学诊断，不使用随机 validation 或 native clock-a
 `experiment_manifest.json`，并保存 config、split SHA-256、checkpoint SHA-256、每 epoch
 anchor 分布摘要和 60 s 有效性审计。首次训练前代码必须已提交且工作树干净。
 
-首个未应用共同队列的 A0 目录和因 3 架短航班触发 60 s 合约而在 optimizer update 前失败
-的 A1 目录保留为审计产物，但不进入横向比较，也不得覆盖或删除。
+首个未应用共同队列的 A0、因 3 架短航班触发 60 s 合约而失败的首个 A1，以及共同队列
+修复后的 `retry1` 产物均保留审计但不进入横向比较。`retry1` A1 暴露了停止地面 anchor
+导致的 `1/V` 动力学奇点；对应 A0 虽完成，也因早于可飞候选契约提交而只作 preliminary。
+正式横向比较只使用同一新源码提交下的 `retry2` 两臂，任何旧目录均不得覆盖或删除。
 
 ## 6. 数据隔离
 

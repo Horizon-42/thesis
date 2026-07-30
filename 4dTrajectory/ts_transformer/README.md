@@ -220,6 +220,10 @@ for that flight on each epoch. Random anchors require at least 60 s of remaining
 by default (`--random-train-anchor-min-future-s`), and their per-flight choice is derived from
 the training seed, epoch and stable flight identity rather than roster order. The train-only
 normalizer uses the same airport-then-flight weighting rather than duration-weighted moments.
+For control-output models, the independent anchor-eligibility policy also requires observed
+speed at the anchor to be at least `1.10 ×` the aircraft's sea-level stall speed. This keeps
+stopped/ground reports outside the airborne point-mass ODE; state-output random anchors retain
+the temporal-only policy. Per-epoch audit rows record the policy and excluded-candidate count.
 Controlled fixed-vs-random comparisons can additionally set
 `--training-cohort-min-future-s 60` on both arms. This independent floor is applied only to
 the outer-training roster at fixed anchor `L-1`; validation remains complete and fixed-anchor.

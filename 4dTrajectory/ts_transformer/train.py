@@ -68,7 +68,7 @@ from aerodynamic_model.torch_dynamics import (
 
 CHECKPOINT_NAME = "checkpoint.pt"
 CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
-CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v16-training-cohort-audit"
+CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v17-anchor-eligibility-audit"
 STATE_TARGET_CONTRACTS = {
     HORIZON_NORMALIZED: "normalized-time-runway-crossing-displacement-kinematic-v3",
     HORIZON_FULL: "full-horizon-fixed-time-displacement-kinematic-v2",
@@ -1500,6 +1500,19 @@ def train(
         split: block["common_grid_metrics"]
         for split, block in fit_evaluation["splits"].items()
     }
+    anchor_audit = fit.history[0].train_anchor_sampling
+    training_anchor_contract = {
+        key: anchor_audit[key]
+        for key in (
+            "policy",
+            "sampling_version",
+            "minimum_future_s",
+            "eligibility_policy",
+            "temporal_candidate_anchors",
+            "eligible_candidate_anchors",
+            "excluded_candidate_anchors",
+        )
+    }
 
     checkpoint_payload = {
         "target_contract": target_contract(config),
@@ -1519,6 +1532,7 @@ def train(
             "anchor": "fixed L-1",
             "common_grid_points": config.validation_common_grid_points,
         },
+        "training_anchor_contract": training_anchor_contract,
         "training_cohort": training_cohort,
         "data_provenance": data_provenance,
         "data_selection": data_selection,
@@ -1546,6 +1560,7 @@ def train(
         "checkpoint_sha256": checkpoint_sha256,
         "arrival_manifests": manifest_digests,
         "random_train_anchor": config.random_train_anchor,
+        "training_anchor_contract": training_anchor_contract,
         "training_cohort_min_future_s": config.training_cohort_min_future_s,
         "training_cohort_excluded_flights": training_cohort["excluded_flights"],
         "random_train_anchor_min_future_s": config.random_train_anchor_min_future_s,
@@ -1594,6 +1609,7 @@ def train(
             "anchor": "fixed L-1",
             "common_grid_points": config.validation_common_grid_points,
         },
+        "training_anchor_contract": training_anchor_contract,
         "training_cohort": training_cohort,
         "flights": {
             "train": len(train_series),

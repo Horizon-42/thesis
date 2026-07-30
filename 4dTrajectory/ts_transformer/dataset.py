@@ -65,6 +65,10 @@ from channels import (
     resample_uniform,
     states_from_channels,
 )
+from anchor_eligibility import (
+    eligible_random_train_anchors,
+    random_train_anchor_eligibility_policy,
+)
 from config import (
     AIRCRAFT_FILTER_OPENAP_DIRECT,
     DEFAULT_AIRCRAFT_TYPE,
@@ -868,6 +872,8 @@ class TrajectoryWindows(Dataset, ABC):
         self.minimum_future_s = float(minimum_future_s)
         self.index: list[tuple[int, int]] = []
         self.series_ranges: dict[int, tuple[int, int]] = {}
+        self.temporal_candidate_anchors = 0
+        self.eligible_candidate_anchors = 0
         for s_idx, item in enumerate(self.series):
             anchors = window_anchors(
                 item,
@@ -875,6 +881,9 @@ class TrajectoryWindows(Dataset, ABC):
                 minimum_anchor_index=minimum_anchor_index,
                 minimum_future_s=self.minimum_future_s,
             )
+            self.temporal_candidate_anchors += len(anchors)
+            anchors = self._eligible_anchors(item, anchors)
+            self.eligible_candidate_anchors += len(anchors)
             chosen = self._select_anchors(anchors)
             start = len(self.index)
             self.index.extend((s_idx, anchor) for anchor in chosen)
@@ -937,8 +946,14 @@ class TrajectoryWindows(Dataset, ABC):
         return len(self.index)
 
     @abstractmethod
-    def _select_anchors(self, anchors: range) -> Sequence[int]:
+    def _select_anchors(self, anchors: Sequence[int]) -> Sequence[int]:
         """Return the concrete mode's stored anchor population for one flight."""
+
+    def _eligible_anchors(
+        self, _series: FlightSeries, anchors: Sequence[int]
+    ) -> Sequence[int]:
+        """Apply mode-specific non-temporal eligibility before anchor sampling."""
+        return anchors
 
     @abstractmethod
     def epoch_indices(self, seed: int) -> np.ndarray:
@@ -956,6 +971,14 @@ class TrajectoryWindows(Dataset, ABC):
                 "policy": self.anchor_policy,
                 "sampling_version": self.sampling_version,
                 "minimum_future_s": self.minimum_future_s,
+                "eligibility_policy": getattr(
+                    self, "anchor_eligibility_policy", "temporal-only-v1"
+                ),
+                "temporal_candidate_anchors": self.temporal_candidate_anchors,
+                "eligible_candidate_anchors": self.eligible_candidate_anchors,
+                "excluded_candidate_anchors": (
+                    self.temporal_candidate_anchors - self.eligible_candidate_anchors
+                ),
                 "samples": 0,
             }
         anchor_times = np.array([
@@ -984,6 +1007,14 @@ class TrajectoryWindows(Dataset, ABC):
             "policy": self.anchor_policy,
             "sampling_version": self.sampling_version,
             "minimum_future_s": self.minimum_future_s,
+            "eligibility_policy": getattr(
+                self, "anchor_eligibility_policy", "temporal-only-v1"
+            ),
+            "temporal_candidate_anchors": self.temporal_candidate_anchors,
+            "eligible_candidate_anchors": self.eligible_candidate_anchors,
+            "excluded_candidate_anchors": (
+                self.temporal_candidate_anchors - self.eligible_candidate_anchors
+            ),
             "samples": len(indices),
             "sample_sha256": digest,
             "anchor_index": distribution(anchors),
@@ -1107,8 +1138,8 @@ class FixedAnchorTrajectoryWindows(TrajectoryWindows):
     anchor_policy = "fixed"
     sampling_version = "fixed-anchor-v1"
 
-    def _select_anchors(self, anchors: range) -> Sequence[int]:
-        return [anchors.start] if len(anchors) else []
+    def _select_anchors(self, anchors: Sequence[int]) -> Sequence[int]:
+        return [anchors[0]] if len(anchors) else []
 
     def epoch_indices(self, seed: int) -> np.ndarray:
         indices = self.range_starts[self.eligible_series].copy()
@@ -1121,7 +1152,7 @@ class RandomAnchorTrajectoryWindows(TrajectoryWindows):
 
     anchor_description = "one random valid train anchor per flight and epoch"
     anchor_policy = "uniform-random"
-    sampling_version = "per-flight-hash-v1"
+    sampling_version = "per-flight-hash-v2-output-eligibility"
 
     def __init__(
         self,
@@ -1131,6 +1162,7 @@ class RandomAnchorTrajectoryWindows(TrajectoryWindows):
         *,
         minimum_anchor_index: int | None = None,
     ):
+        self.anchor_eligibility_policy = random_train_anchor_eligibility_policy(config)
         super().__init__(
             series,
             config,
@@ -1139,8 +1171,13 @@ class RandomAnchorTrajectoryWindows(TrajectoryWindows):
             minimum_future_s=config.random_train_anchor_min_future_s,
         )
 
-    def _select_anchors(self, anchors: range) -> Sequence[int]:
+    def _select_anchors(self, anchors: Sequence[int]) -> Sequence[int]:
         return anchors
+
+    def _eligible_anchors(
+        self, series: FlightSeries, anchors: Sequence[int]
+    ) -> Sequence[int]:
+        return eligible_random_train_anchors(series, anchors, self.config)
 
     def epoch_indices(self, seed: int) -> np.ndarray:
         starts = self.range_starts[self.eligible_series]
