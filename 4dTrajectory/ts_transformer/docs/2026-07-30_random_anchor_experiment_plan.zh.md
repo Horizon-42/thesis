@@ -106,3 +106,30 @@ anchor 分布摘要和 60 s 有效性审计。首次训练前代码必须已提�
 - outer-test 身份可进入 checkpoint 审计 roster，但不得加载其轨迹值。
 - 本阶段禁止 `--split test`、`--release-test`，禁止创建或删除 `test_release.json`。
 - 若后续根据 validation 结果做任何选择，outer-test 仍保持未暴露状态。
+
+## 7. Seed 1337 执行结果
+
+正式 `retry2` 两臂均绑定源码提交 `b6935b5`、`dirty=false`，使用相同 train roster
+10236、完整 validation roster 2167 和相同 split SHA-256。A0 在 29 epoch early-stop，
+best 为 epoch 9；A1 在 22 epoch early-stop，best 为 epoch 2。
+
+统一 validation-only、固定 `L-1`、64 点物理时间网格报告结果如下：
+
+| 指标 | A0 fixed | A1 random-60s | A1 相对变化 | 阶段门 |
+| --- | ---: | ---: | ---: | --- |
+| ADE | 2618.3 m | 4286.5 m | +63.71% | 失败（要求至少改善 2%） |
+| FDE | 4842.1 m | 6705.3 m | +38.48% | 失败（恶化不得超过 5%） |
+| final-time MAE | 117.2 s | 141.8 s | +20.97% | 失败（恶化不得超过 5%） |
+
+分机场 ADE 也全部失败：KMSY +72.86%、KRDU +41.68%、KSJC +42.31%、KSMF
++106.92%、KSTL +83.24%。A1 的 train/validation common-grid ADE 分别为 4208.3 /
+4286.5 m，二者同时较差，不像是单纯 validation 过拟合；固定部署任务与随机较晚阶段训练
+分布之间的目标错配是更符合证据的解释。A1 的 validation acceleration p95 从 1.02 增至
+3.58 m/s²、turn-rate p95 从 0.78 增至 1.65 deg/s，也没有出现以明显更平滑动力学换取
+精度下降的正向权衡。3-candidate MC-dropout oracle minADE 仍为 4160.7 m，未挽回结论。
+
+阶段门结论：**停止该方向，不追加 seed 2027/4242，不调 60 s 下限、候选数量或其他超参
+进行补救。** 报告记录 `outer_test_loaded=false`，实验树中没有 `test_release.json`；outer-test
+继续封存。正式报告位于
+`outputs/POOLED/experiments/openap_direct_20260730_random_anchor/comparisons/
+stage_a_seed1337_cohort60/report.html`。
