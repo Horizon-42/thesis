@@ -9,7 +9,6 @@ generalization, and never reads outer-test trajectory values.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 from pathlib import Path
@@ -35,16 +34,12 @@ from config import (  # noqa: E402
 )
 from dataset import (  # noqa: E402
     FixedAnchorTrajectoryWindows,
-    arrival_data_provenance,
-    build_series,
-    flight_keys_by_split,
-    load_flight_dicts,
     provenance_manifest_digests,
-    split_name_for_dataset_id,
 )
 from fixed_dt_control_loss import fixed_dt_control_state_loss  # noqa: E402
 from models import parameter_count  # noqa: E402
 from metrics import raw_kinematic_metrics  # noqa: E402
+from train_only_diagnostics import select_outer_train_series  # noqa: E402
 from train import (  # noqa: E402
     control_state_supervision_prediction,
     evaluate_fixed_anchor_common_grid,
@@ -56,53 +51,6 @@ from train import (  # noqa: E402
 )
 
 RESULT_SCHEMA = "ts-control-fixed-dt-single-flight-overfit-v1"
-
-
-def _select_train_series(
-    manifest: Path,
-    config: TSConfig,
-    *,
-    airport: str,
-    requested_id: str | None,
-):
-    provenance = arrival_data_provenance([manifest])
-    split_keys = flight_keys_by_split(provenance, config)
-    train_keys = split_keys["train"]
-    if requested_id is not None:
-        requested_id = (
-            requested_id
-            if requested_id.startswith(f"{airport}:")
-            else f"{airport}:{requested_id}"
-        )
-        if requested_id not in train_keys:
-            raise ValueError(f"requested flight {requested_id!r} is not in outer-train")
-        candidates = [requested_id]
-    else:
-        candidates = sorted(
-            train_keys,
-            key=lambda key: hashlib.sha256(
-                f"fixed-dt-overfit:{config.seed}:{key}".encode()
-            ).digest(),
-        )
-
-    for dataset_id in candidates:
-        flights = load_flight_dicts([manifest], include_flight_keys={dataset_id})
-        series, report = build_series(
-            flights,
-            config,
-            airport=airport,
-            aircraft_type=config.aircraft_type,
-        )
-        if series:
-            item = series[0]
-            if split_name_for_dataset_id(item.dataset_id, config) != "train":
-                raise RuntimeError("selected overfit trajectory escaped the outer-train split")
-            return item, report, provenance, split_keys
-        if requested_id is not None:
-            raise ValueError(
-                f"requested outer-train flight {requested_id!r} is unusable: {report.format()}"
-            )
-    raise ValueError("no usable outer-train flight found for the overfit diagnostic")
 
 
 def _dense_replay_metrics(fit, series) -> dict[str, object]:
@@ -276,14 +224,19 @@ def main(argv: list[str] | None = None) -> int:
         device=args.device,
     )
     try:
-        series, report, provenance, split_keys = _select_train_series(
+        selection = select_outer_train_series(
             manifest,
             config,
             airport=airport,
             requested_id=args.flight_id,
+            ranking_namespace="fixed-dt-overfit",
         )
     except ValueError as exc:
         parser.error(str(exc))
+    series = selection.series
+    report = selection.report
+    provenance = selection.provenance
+    split_keys = selection.split_keys
     print(report.format())
     print(
         f"outer roster identities: train={len(split_keys['train'])}, "
