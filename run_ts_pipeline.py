@@ -43,6 +43,8 @@ from config import (  # noqa: E402
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CHECKPOINT_SELECTION_METRICS,
     CHECKPOINT_SELECTION_OBJECTIVE,
+    CONTROL_DURATION_FACTORIZED,
+    CONTROL_DURATION_PARAMETERIZATIONS,
     CONTROL_STATE_CLOCKS,
     CONTROL_STATE_CLOCK_PREDICTED,
     DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
@@ -148,6 +150,21 @@ def _control_clock_tag(prediction_output: str, state_clock: str) -> str:
     return f"_{state_clock}_clock"
 
 
+def _control_duration_tag(prediction_output: str, parameterization: str) -> str:
+    if (
+        not uses_control_dynamics(prediction_output)
+        or parameterization == CONTROL_DURATION_FACTORIZED
+    ):
+        return ""
+    return f"_{parameterization}_duration"
+
+
+def _control_duration_label(prediction_output: str, parameterization: str) -> str:
+    if not uses_control_dynamics(prediction_output):
+        return ""
+    return f"{parameterization} durations, "
+
+
 def _aircraft_filter_tag(aircraft_filter: str) -> str:
     return "" if aircraft_filter == AIRCRAFT_FILTER_ALL else "_openap_direct"
 
@@ -197,6 +214,7 @@ class TrainingPlan:
         validation_common_grid_points: int = DEFAULT_VALIDATION_COMMON_GRID_POINTS,
         control_effort_weight: float | None = None,
         control_smoothness_weight: float | None = None,
+        control_duration_parameterization: str = CONTROL_DURATION_FACTORIZED,
         control_experts: int | None = None,
         control_selector_weight: float | None = None,
         control_diversity_weight: float | None = None,
@@ -233,6 +251,7 @@ class TrainingPlan:
         self.validation_common_grid_points = validation_common_grid_points
         self.control_effort_weight = control_effort_weight
         self.control_smoothness_weight = control_smoothness_weight
+        self.control_duration_parameterization = control_duration_parameterization
         self.control_experts = control_experts
         self.control_selector_weight = control_selector_weight
         self.control_diversity_weight = control_diversity_weight
@@ -243,6 +262,9 @@ class TrainingPlan:
         scope = self.airports[0] if training_mode == "per-airport" else "POOLED"
         suffix = (
             _prediction_output_tag(prediction_output)
+            + _control_duration_tag(
+                prediction_output, control_duration_parameterization
+            )
             + _control_clock_tag(prediction_output, control_state_clock)
             + _aircraft_filter_tag(aircraft_filter)
             + _frame_tag(coordinate_frame)
@@ -318,6 +340,10 @@ class TrainingPlan:
             args += ["--control-effort-weight", str(self.control_effort_weight)]
         if self.control_smoothness_weight is not None:
             args += ["--control-smoothness-weight", str(self.control_smoothness_weight)]
+        args += [
+            "--control-duration-parameterization",
+            self.control_duration_parameterization,
+        ]
         if self.control_experts is not None:
             args += ["--control-experts", str(self.control_experts)]
         if self.control_selector_weight is not None:
@@ -459,6 +485,7 @@ class TrainingPlan:
             "horizon_mode": self.horizon_mode,
             "aircraft_filter": self.aircraft_filter,
             "control_state_supervision_clock": self.control_state_clock,
+            "control_duration_parameterization": self.control_duration_parameterization,
         }
         if self.full_horizon_steps is not None:
             overrides["full_horizon_steps"] = self.full_horizon_steps
@@ -547,6 +574,7 @@ class TrainingPlan:
             "horizon_mode": self.horizon_mode,
             "aircraft_filter": self.aircraft_filter,
             "control_state_supervision_clock": self.control_state_clock,
+            "control_duration_parameterization": self.control_duration_parameterization,
         })
         if self.full_horizon_steps is not None:
             overrides["full_horizon_steps"] = self.full_horizon_steps
@@ -628,6 +656,9 @@ class PredictionPlan:
             training.checkpoint_selection_metric
         )
         prediction_output = _prediction_output_tag(training.prediction_output)
+        control_duration = _control_duration_tag(
+            training.prediction_output, training.control_duration_parameterization
+        )
         control_clock = _control_clock_tag(
             training.prediction_output, training.control_state_clock
         )
@@ -635,7 +666,8 @@ class PredictionPlan:
         tag = f"_{experiment_tag}" if experiment_tag else ""
         horizon_tag = HORIZON_TAGS[training.horizon_mode]
         stem = (
-            f"{scope}{training.model}{prediction_output}{control_clock}_{horizon_tag}"
+            f"{scope}{training.model}{prediction_output}{control_duration}"
+            f"{control_clock}_{horizon_tag}"
             f"{aircraft_filter}{frame}{anchor}{training_cohort}"
             f"{validation_selection}{tag}_{split}"
         )
@@ -645,7 +677,8 @@ class PredictionPlan:
         self.report_html = self.pred_dir / "evaluation_report.html"
         category_scope = "pooled_" if training.pooled else ""
         self.category = (
-            f"ts_{category_scope}{MODEL_SHORT[training.model]}{prediction_output}_{horizon_tag}"
+            f"ts_{category_scope}{MODEL_SHORT[training.model]}{prediction_output}"
+            f"{control_duration}_{horizon_tag}"
             f"{aircraft_filter}{frame}{anchor}{training_cohort}"
             f"{validation_selection}{tag}_{split}"
         )
@@ -654,7 +687,11 @@ class PredictionPlan:
         anchor_label = "random-anchor training, " if training.random_train_anchor else ""
         frame_label = "ENU" if training.coordinate_frame == "enu" else "runway-aligned"
         horizon_label = HORIZON_LABELS[training.horizon_mode]
-        output_label = f"{training.prediction_output} output, "
+        duration_label = _control_duration_label(
+            training.prediction_output,
+            training.control_duration_parameterization,
+        )
+        output_label = f"{training.prediction_output} output, {duration_label}"
         self.label = (
             f"{SPLIT_LABELS[split]} — Predicted ({model_label}, {pooled_label}"
             f"{output_label}{anchor_label}{horizon_label}, {frame_label})"
@@ -781,6 +818,7 @@ def run_training(
             print(
                 f"   control   : effort={config.control_effort_loss_weight:g}, "
                 f"smoothness={config.control_smoothness_loss_weight:g}, "
+                f"duration={config.control_duration_parameterization}, "
                 f"state_clock={config.control_state_supervision_clock}, "
                 f"rollout_dt={config.control_rollout_integrator_dt_s:g}s"
             )
@@ -904,6 +942,11 @@ def main() -> None:
                         help="positive integer or auto (default: 2048)")
     parser.add_argument("--control-effort-weight", type=float, default=None)
     parser.add_argument("--control-smoothness-weight", type=float, default=None)
+    parser.add_argument(
+        "--control-duration-parameterization",
+        choices=CONTROL_DURATION_PARAMETERIZATIONS,
+        default=CONTROL_DURATION_FACTORIZED,
+    )
     parser.add_argument("--control-experts", type=int, default=None)
     parser.add_argument("--control-selector-weight", type=float, default=None)
     parser.add_argument("--control-diversity-weight", type=float, default=None)
@@ -1024,6 +1067,7 @@ def main() -> None:
             validation_common_grid_points=args.validation_common_grid_points,
             control_effort_weight=args.control_effort_weight,
             control_smoothness_weight=args.control_smoothness_weight,
+            control_duration_parameterization=args.control_duration_parameterization,
             control_experts=args.control_experts,
             control_selector_weight=args.control_selector_weight,
             control_diversity_weight=args.control_diversity_weight,

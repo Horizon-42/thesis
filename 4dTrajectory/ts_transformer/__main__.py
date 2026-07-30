@@ -56,6 +56,7 @@ from config import (  # noqa: E402
     AIRCRAFT_FILTERS,
     COORDINATE_FRAMES,
     CHECKPOINT_SELECTION_METRICS,
+    CONTROL_DURATION_PARAMETERIZATIONS,
     CONTROL_STATE_CLOCKS,
     DEFAULT_AIRCRAFT_TYPE,
     HORIZON_MODES,
@@ -190,6 +191,15 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--control-effort-weight", type=float, default=None)
     parser.add_argument("--control-smoothness-weight", type=float, default=None)
     parser.add_argument(
+        "--control-duration-parameterization",
+        choices=CONTROL_DURATION_PARAMETERIZATIONS,
+        default=None,
+        help=(
+            "control duration head: total-time plus softmax fractions (factorized) "
+            "or direct positive segment seconds (direct)"
+        ),
+    )
+    parser.add_argument(
         "--control-experts",
         type=int,
         default=None,
@@ -308,6 +318,7 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("terminal_loss_weight", args.terminal_loss_weight),
         ("control_effort_loss_weight", args.control_effort_weight),
         ("control_smoothness_loss_weight", args.control_smoothness_weight),
+        ("control_duration_parameterization", args.control_duration_parameterization),
         ("control_expert_count", args.control_experts),
         ("control_mixture_selector_loss_weight", args.control_selector_weight),
         ("control_mixture_diversity_loss_weight", args.control_diversity_weight),

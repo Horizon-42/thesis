@@ -59,6 +59,7 @@ from batching import resolve_batch_size  # noqa: E402
 from config import (  # noqa: E402
     AIRCRAFT_FILTER_OPENAP_DIRECT, HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
+    CONTROL_DURATION_DIRECT, CONTROL_DURATION_FACTORIZED,
     CONTROL_STATE_CLOCK_OBSERVED, PREDICTION_CONTROL, PREDICTION_CONTROL_MIXTURE,
     TSConfig, control_recipe,
 )
@@ -79,7 +80,7 @@ from metrics import (  # noqa: E402
     RAW_KINEMATIC_METRIC_KEYS, error_components, raw_kinematic_metrics,
     trajectory_metrics,
 )
-from models import build_model  # noqa: E402
+from models import build_model, parameter_count  # noqa: E402
 from prediction_outputs import (  # noqa: E402
     ControlBounds, ControlOutputHead, ControlPrediction, StatePrediction,
 )
@@ -1534,6 +1535,7 @@ def test_control_mixture_is_an_explicit_validated_mode():
     assert control_recipe(config) == {
         "effort_loss_weight": config.control_effort_loss_weight,
         "smoothness_loss_weight": config.control_smoothness_loss_weight,
+        "duration_parameterization": CONTROL_DURATION_FACTORIZED,
         "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
         "state_supervision_clock": config.control_state_supervision_clock,
         "expert_count": 3,
@@ -1641,6 +1643,35 @@ def test_control_state_supervision_clock_rejects_unknown_value():
         TSConfig(control_state_supervision_clock="future")
 
 
+@pytest.mark.parametrize("prediction_output", ["state", PREDICTION_CONTROL_MIXTURE])
+def test_direct_control_durations_reject_non_single_control_outputs(prediction_output):
+    with pytest.raises(ValueError, match="only by prediction_output='control'"):
+        TSConfig(
+            prediction_output=prediction_output,
+            control_duration_parameterization=CONTROL_DURATION_DIRECT,
+        )
+
+
+def test_legacy_control_config_without_duration_parameterization_is_rejected():
+    serialized = TSConfig(prediction_output=PREDICTION_CONTROL).to_dict()
+    serialized.pop("control_duration_parameterization")
+
+    with pytest.raises(
+        ValueError,
+        match="missing control_duration_parameterization.*regenerate",
+    ):
+        TSConfig.from_dict(serialized)
+
+
+def test_state_config_without_duration_parameterization_remains_loadable():
+    serialized = TSConfig().to_dict()
+    serialized.pop("control_duration_parameterization")
+
+    restored = TSConfig.from_dict(serialized)
+
+    assert restored.control_duration_parameterization == CONTROL_DURATION_FACTORIZED
+
+
 def test_observed_control_state_clock_preserves_partition_and_uses_true_total():
     prediction = ControlPrediction(
         controls=torch.randn(2, 2, 3),
@@ -1682,10 +1713,17 @@ def test_predicted_control_state_clock_preserves_original_training_behavior():
 
 
 @pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
-def test_control_models_use_per_sample_bounds_and_aircraft_condition(model_name):
+@pytest.mark.parametrize(
+    "duration_parameterization",
+    [CONTROL_DURATION_FACTORIZED, CONTROL_DURATION_DIRECT],
+)
+def test_control_models_use_per_sample_bounds_and_aircraft_condition(
+    model_name, duration_parameterization
+):
     config = TSConfig(
         model=model_name,
         prediction_output=PREDICTION_CONTROL,
+        control_duration_parameterization=duration_parameterization,
         seq_len=32,
         n_segments=4,
         d_model=32,
@@ -1835,6 +1873,102 @@ def test_control_model_starts_from_neutral_uniform_rollout():
         prediction.final_time_s[:, None].expand(-1, config.n_segments)
         / config.n_segments,
     )
+
+
+@pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
+def test_direct_duration_control_matches_factorized_initial_clock(model_name):
+    config = TSConfig(
+        model=model_name,
+        prediction_output=PREDICTION_CONTROL,
+        control_duration_parameterization=CONTROL_DURATION_DIRECT,
+        seq_len=32,
+        n_segments=8,
+        d_model=32,
+        n_heads=4,
+        d_ff=64,
+        e_layers=1,
+        final_time_scale_s=600.0,
+    )
+    model = build_model(config).eval()
+    history = torch.randn(2, config.seq_len, config.enc_in)
+    dynamics = {
+        "condition": torch.randn(2, len(dataset_module.DYNAMICS_CONDITION_NAMES)),
+        "control_lower": torch.tensor(
+            [[0.0, -0.7, 0.5], [0.0, -0.5, 0.5]]
+        ),
+        "control_upper": torch.tensor(
+            [[240_000.0, 0.7, 2.0], [200_000.0, 0.5, 2.0]]
+        ),
+    }
+
+    prediction = model(history, dynamics)
+    expected_total = math.log(2.0) * config.final_time_scale_s
+
+    torch.testing.assert_close(
+        prediction.final_time_s,
+        torch.full_like(prediction.final_time_s, expected_total),
+    )
+    torch.testing.assert_close(
+        prediction.segment_durations,
+        torch.full_like(
+            prediction.segment_durations, expected_total / config.n_segments
+        ),
+    )
+
+
+@pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
+def test_direct_duration_is_a_parameter_count_matched_head_ablation(model_name):
+    common = dict(
+        model=model_name,
+        prediction_output=PREDICTION_CONTROL,
+        seq_len=32,
+        n_segments=8,
+        d_model=32,
+        n_heads=4,
+        d_ff=64,
+        e_layers=1,
+    )
+    factorized = build_model(TSConfig(
+        **common,
+        control_duration_parameterization=CONTROL_DURATION_FACTORIZED,
+    ))
+    direct = build_model(TSConfig(
+        **common,
+        control_duration_parameterization=CONTROL_DURATION_DIRECT,
+    ))
+
+    assert parameter_count(direct) == parameter_count(factorized)
+
+
+def test_direct_duration_total_time_backpropagates_to_every_segment_logit():
+    config = TSConfig(
+        prediction_output=PREDICTION_CONTROL,
+        control_duration_parameterization=CONTROL_DURATION_DIRECT,
+        seq_len=8,
+        n_segments=4,
+        d_model=16,
+        n_heads=4,
+        d_ff=32,
+        e_layers=1,
+    )
+    model = build_model(config)
+    history = torch.randn(2, config.seq_len, config.enc_in)
+    dynamics = {
+        "condition": torch.randn(2, len(dataset_module.DYNAMICS_CONDITION_NAMES)),
+        "control_lower": torch.tensor(
+            [[0.0, -0.7, 0.5], [0.0, -0.5, 0.5]]
+        ),
+        "control_upper": torch.tensor(
+            [[240_000.0, 0.7, 2.0], [200_000.0, 0.5, 2.0]]
+        ),
+    }
+
+    model(history, dynamics).final_time_s.sum().backward()
+
+    gradient = model.control_head.duration_projection.bias.grad
+    assert gradient is not None
+    assert torch.isfinite(gradient).all()
+    assert torch.count_nonzero(gradient) == config.n_segments
 
 
 def test_control_dataset_and_rollout_loss_form_one_differentiable_training_step():
@@ -2131,6 +2265,7 @@ def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
         batch_size="16",
         control_effort_weight=1e-4,
         control_smoothness_weight=1e-2,
+        control_duration_parameterization=CONTROL_DURATION_DIRECT,
         control_state_clock=CONTROL_STATE_CLOCK_OBSERVED,
         control_rollout_dt=0.5,
         output_dir=tmp_path,
@@ -2143,17 +2278,68 @@ def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
     assert recipe[recipe.index("--split-seed") + 1] == "1337"
     assert recipe[recipe.index("--control-effort-weight") + 1] == "0.0001"
     assert recipe[recipe.index("--control-smoothness-weight") + 1] == "0.01"
+    assert recipe[recipe.index("--control-duration-parameterization") + 1] == "direct"
     assert recipe[recipe.index("--control-state-clock") + 1] == "observed"
     assert recipe[recipe.index("--control-rollout-dt") + 1] == "0.5"
     assert recipe[recipe.index("--aircraft-filter") + 1] == "openap-direct"
     assert config.prediction_output == PREDICTION_CONTROL
     assert config.aircraft_filter == AIRCRAFT_FILTER_OPENAP_DIRECT
     assert config.control_effort_loss_weight == pytest.approx(1e-4)
+    assert config.control_duration_parameterization == CONTROL_DURATION_DIRECT
     assert config.control_state_supervision_clock == CONTROL_STATE_CLOCK_OBSERVED
     assert "control" in prediction.pred_dir.name
+    assert "direct_duration" in prediction.pred_dir.name
     assert "observed_clock" in prediction.pred_dir.name
     assert "control" in prediction.category
     assert "openap_direct" in prediction.category
+    assert "direct durations" in prediction.label
+
+
+def test_pipeline_rejects_control_checkpoint_metadata_without_duration_recipe(
+    tmp_path, monkeypatch
+):
+    plan = pipeline_module.TrainingPlan(
+        (AIRPORT,),
+        "itransformer",
+        training_mode="per-airport",
+        prediction_output=PREDICTION_CONTROL,
+        output_dir=tmp_path / "run",
+    )
+    plan.train_dir.mkdir(parents=True)
+    plan.checkpoint.write_bytes(b"checkpoint")
+    manifest = tmp_path / "arrivals.json"
+    manifest.write_text("{}", encoding="utf-8")
+    plan.data_manifests = (manifest,)
+    monkeypatch.setattr(pipeline_module, "_manifest_digests", lambda _airports: [])
+
+    config, _source = plan.resolved_train_config(use_best_config=False)
+    legacy_recipe = control_recipe(config)
+    legacy_recipe.pop("duration_parameterization")
+    metadata = {
+        "schema_version": CHECKPOINT_METADATA_SCHEMA,
+        "checkpoint_sha256": hashlib.sha256(b"checkpoint").hexdigest(),
+        "arrival_manifests": [],
+        "random_train_anchor": plan.random_train_anchor,
+        "training_cohort_min_future_s": plan.training_cohort_min_future_s,
+        "random_train_anchor_min_future_s": plan.random_train_anchor_min_future_s,
+        "checkpoint_selection_metric": plan.checkpoint_selection_metric,
+        "validation_common_grid_points": plan.validation_common_grid_points,
+        "prediction_output": config.prediction_output,
+        "aircraft_filter": config.aircraft_filter,
+        "horizon_mode": config.horizon_mode,
+        "pred_len": config.pred_len,
+        "lr_scheduler": {
+            "name": "ReduceLROnPlateau",
+            "factor": config.lr_plateau_factor,
+            "patience": config.lr_plateau_patience,
+        },
+        "control_recipe": legacy_recipe,
+    }
+    plan.checkpoint_metadata.write_text(json.dumps(metadata), encoding="utf-8")
+
+    assert plan.checkpoint_reuse_error() == (
+        "checkpoint control recipe does not match the requested recipe"
+    )
 
 
 def test_experiment_index_keeps_legacy_incomplete_and_formal_runs_distinct(tmp_path):
@@ -2843,10 +3029,26 @@ def test_control_mixture_forecast_uses_selector_without_truth_access():
     assert record.source["predictionOutput"] == PREDICTION_CONTROL_MIXTURE
 
 
-def test_control_training_checkpoint_round_trip_keeps_output_identity(tmp_path):
+@pytest.mark.parametrize(
+    ("duration_parameterization", "expected_contract"),
+    [
+        (
+            CONTROL_DURATION_FACTORIZED,
+            "bounded-control-nonuniform-duration-casadi-rollout-clock-aligned-v2",
+        ),
+        (
+            CONTROL_DURATION_DIRECT,
+            "bounded-control-direct-duration-casadi-rollout-clock-aligned-v1",
+        ),
+    ],
+)
+def test_control_training_checkpoint_round_trip_keeps_output_identity(
+    tmp_path, duration_parameterization, expected_contract
+):
     series, config = _series(
         n_flights=12,
         prediction_output=PREDICTION_CONTROL,
+        control_duration_parameterization=duration_parameterization,
         epochs=1,
         patience=1,
         batch_size=32,
@@ -2882,13 +3084,12 @@ def test_control_training_checkpoint_round_trip_keeps_output_identity(tmp_path):
         "control_lower": torch.tensor([[0.0, -0.5, 0.5]]),
         "control_upper": torch.tensor([[100_000.0, 0.5, 2.0]]),
     }), ControlPrediction)
-    assert payload["target_contract"] == (
-        "bounded-control-nonuniform-duration-casadi-rollout-clock-aligned-v2"
-    )
+    assert payload["target_contract"] == expected_contract
     assert metadata["prediction_output"] == PREDICTION_CONTROL
     assert metadata["control_recipe"] == {
         "effort_loss_weight": config.control_effort_loss_weight,
         "smoothness_loss_weight": config.control_smoothness_loss_weight,
+        "duration_parameterization": duration_parameterization,
         "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
         "state_supervision_clock": config.control_state_supervision_clock,
     }

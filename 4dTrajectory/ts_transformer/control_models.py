@@ -13,7 +13,7 @@ from dataset import DYNAMICS_CONDITION_NAMES
 from prediction_outputs import ControlOutputHead, FinalTimeHead
 
 
-class _ControlFeatureModel(nn.Module):
+class ControlFeatureModel(nn.Module):
     """Shared history/aircraft feature path; output strategies own only their heads."""
 
     def __init__(self, config: TSConfig, feature_encoder: nn.Module):
@@ -75,7 +75,7 @@ def _initialize_final_time_head(head: FinalTimeHead, raw_bias: float = 0.0) -> N
         final_layer.bias.fill_(raw_bias)
 
 
-class ControlOutputModel(_ControlFeatureModel):
+class ControlOutputModel(ControlFeatureModel):
     """Original single deterministic control strategy, state-dict compatible."""
 
     def __init__(self, config: TSConfig, feature_encoder: nn.Module):
@@ -95,7 +95,7 @@ class ControlOutputModel(_ControlFeatureModel):
         )
 
 
-class ControlMixtureOutputModel(_ControlFeatureModel):
+class ControlMixtureOutputModel(ControlFeatureModel):
     """K independent control/duration heads with one history-only selector."""
 
     def __init__(self, config: TSConfig, feature_encoder: nn.Module):

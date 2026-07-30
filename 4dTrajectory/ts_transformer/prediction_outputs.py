@@ -60,8 +60,12 @@ class FinalTimeHead(nn.Module):
             nn.Linear(config.d_model, 1),
         )
 
+    def raw(self, history: torch.Tensor) -> torch.Tensor:
+        """Return the shared unconstrained global duration logit."""
+        return self.network(history).squeeze(-1)
+
     def forward(self, history: torch.Tensor) -> torch.Tensor:
-        return F.softplus(self.network(history).squeeze(-1)) * self.scale_s
+        return F.softplus(self.raw(history)) * self.scale_s
 
 
 class StateOutputLayer(nn.Module):
@@ -111,6 +115,23 @@ class ControlOutputHead(nn.Module):
         lower: torch.Tensor | None = None,
         upper: torch.Tensor | None = None,
     ) -> ControlPrediction:
+        controls = self.bounded_controls(features, lower=lower, upper=upper)
+        fractions = torch.softmax(self.duration_projection(features), dim=-1)
+        segment_durations = fractions * final_time_s.unsqueeze(-1)
+        return ControlPrediction(
+            controls=controls,
+            segment_durations=segment_durations,
+            final_time_s=final_time_s,
+        )
+
+    def bounded_controls(
+        self,
+        features: torch.Tensor,
+        *,
+        lower: torch.Tensor | None = None,
+        upper: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Map logits to per-flight physical bounds for reusable control heads."""
         batch = features.shape[0]
         lower = self.lower if lower is None else lower
         upper = self.upper if upper is None else upper
@@ -128,13 +149,6 @@ class ControlOutputHead(nn.Module):
         unit_controls = torch.sigmoid(self.control_projection(features)).view(
             batch, self.n_segments, len(CONTROL_NAMES)
         )
-        controls = lower.unsqueeze(1) + unit_controls * (
+        return lower.unsqueeze(1) + unit_controls * (
             upper - lower
         ).unsqueeze(1)
-        fractions = torch.softmax(self.duration_projection(features), dim=-1)
-        segment_durations = fractions * final_time_s.unsqueeze(-1)
-        return ControlPrediction(
-            controls=controls,
-            segment_durations=segment_durations,
-            final_time_s=final_time_s,
-        )

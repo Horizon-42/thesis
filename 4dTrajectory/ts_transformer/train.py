@@ -25,6 +25,8 @@ from batching import resolve_batch_size
 from config import (
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CHECKPOINT_SELECTION_OBJECTIVE,
+    CONTROL_DURATION_DIRECT,
+    CONTROL_DURATION_FACTORIZED,
     CONTROL_STATE_CLOCK_OBSERVED,
     CONTROL_STATE_CLOCK_PREDICTED,
     HORIZON_FULL,
@@ -87,18 +89,33 @@ CONTROL_MIXTURE_LOSS_COMPONENT_NAMES = (
     "mixture_diversity",
 )
 
+CONTROL_TARGET_CONTRACTS = {
+    (CONTROL_DURATION_FACTORIZED, CONTROL_STATE_CLOCK_PREDICTED): (
+        "bounded-control-nonuniform-duration-casadi-rollout-clock-aligned-v2"
+    ),
+    (CONTROL_DURATION_FACTORIZED, CONTROL_STATE_CLOCK_OBSERVED): (
+        "bounded-control-nonuniform-duration-casadi-rollout-observed-clock-aligned-v3"
+    ),
+    (CONTROL_DURATION_DIRECT, CONTROL_STATE_CLOCK_PREDICTED): (
+        "bounded-control-direct-duration-casadi-rollout-clock-aligned-v1"
+    ),
+    (CONTROL_DURATION_DIRECT, CONTROL_STATE_CLOCK_OBSERVED): (
+        "bounded-control-direct-duration-casadi-rollout-observed-clock-aligned-v1"
+    ),
+}
+
 
 def target_contract(config: TSConfig) -> str:
     if config.prediction_output == PREDICTION_STATE:
         return STATE_TARGET_CONTRACTS[config.horizon_mode]
     if config.prediction_output == PREDICTION_CONTROL_MIXTURE:
         return "bounded-control-mixture-best-of-k-selector-v1"
-    if config.control_state_supervision_clock == CONTROL_STATE_CLOCK_PREDICTED:
-        # The original behavior and serialized contract are unchanged, so historical
-        # predicted-clock checkpoints remain exact members of this mode.
-        return "bounded-control-nonuniform-duration-casadi-rollout-clock-aligned-v2"
-    clock = config.control_state_supervision_clock
-    return f"bounded-control-nonuniform-duration-casadi-rollout-{clock}-clock-aligned-v3"
+    return CONTROL_TARGET_CONTRACTS[
+        (
+            config.control_duration_parameterization,
+            config.control_state_supervision_clock,
+        )
+    ]
 
 
 def loss_component_names(config: TSConfig) -> tuple[str, ...]:

@@ -43,6 +43,12 @@ CONTROL_STATE_CLOCKS = (
     CONTROL_STATE_CLOCK_PREDICTED,
     CONTROL_STATE_CLOCK_OBSERVED,
 )
+CONTROL_DURATION_FACTORIZED = "factorized"
+CONTROL_DURATION_DIRECT = "direct"
+CONTROL_DURATION_PARAMETERIZATIONS = (
+    CONTROL_DURATION_FACTORIZED,
+    CONTROL_DURATION_DIRECT,
+)
 
 CHECKPOINT_SELECTION_OBJECTIVE = "fixed-anchor-objective"
 CHECKPOINT_SELECTION_COMMON_GRID_ADE = "fixed-anchor-common-grid-ade"
@@ -237,6 +243,11 @@ class TSConfig:
     # before these are evaluated, so mixed-aircraft batches share one dimensionless loss.
     control_effort_loss_weight: float = 1e-3
     control_smoothness_loss_weight: float = 1e-2
+    # Duration-head ablation for the deterministic single-control strategy. ``factorized``
+    # predicts one positive total time plus a softmax partition; ``direct`` predicts each
+    # positive segment duration and derives total time by summation. Both emit the same
+    # ControlPrediction contract, so rollout/loss/inference remain strategy-agnostic.
+    control_duration_parameterization: str = CONTROL_DURATION_FACTORIZED
     # Which total duration drives the differentiable rollout used by control state loss.
     # ``predicted`` preserves the original joint geometry/clock training. ``observed`` is
     # an explicit development candidate: controls and duration fractions receive state
@@ -295,6 +306,19 @@ class TSConfig:
                 "unknown control_state_supervision_clock "
                 f"{self.control_state_supervision_clock!r}; expected one of "
                 f"{CONTROL_STATE_CLOCKS}"
+            )
+        if self.control_duration_parameterization not in CONTROL_DURATION_PARAMETERIZATIONS:
+            raise ValueError(
+                "unknown control_duration_parameterization "
+                f"{self.control_duration_parameterization!r}; expected one of "
+                f"{CONTROL_DURATION_PARAMETERIZATIONS}"
+            )
+        if (
+            self.control_duration_parameterization == CONTROL_DURATION_DIRECT
+            and self.prediction_output != PREDICTION_CONTROL
+        ):
+            raise ValueError(
+                "direct control durations are supported only by prediction_output='control'"
             )
         if self.checkpoint_selection_metric not in CHECKPOINT_SELECTION_METRICS:
             raise ValueError(
@@ -419,6 +443,14 @@ class TSConfig:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TSConfig:
         data = dict(data)
+        if (
+            uses_control_dynamics(data.get("prediction_output", PREDICTION_STATE))
+            and "control_duration_parameterization" not in data
+        ):
+            raise ValueError(
+                "serialized control config is missing "
+                "control_duration_parameterization; regenerate the derived checkpoint"
+            )
         data["channels"] = tuple(data["channels"])
         return cls(**data)
 
@@ -428,6 +460,7 @@ def control_recipe(config: TSConfig) -> dict[str, float | int | str]:
     base: dict[str, float | int | str] = {
         "effort_loss_weight": config.control_effort_loss_weight,
         "smoothness_loss_weight": config.control_smoothness_loss_weight,
+        "duration_parameterization": config.control_duration_parameterization,
         "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
         "state_supervision_clock": config.control_state_supervision_clock,
     }

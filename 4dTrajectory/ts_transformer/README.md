@@ -130,6 +130,15 @@ python $TS train \
     --batch-size auto \
     --output-dir 4dTrajectory/outputs/KRDU/ts_itr_control
 
+# duration-head ablation: predict every positive segment duration directly and derive
+# final_time_s from their sum; the default remains factorized total-time + softmax fractions
+python $TS train \
+    --data trajectory_data_process/outputs/harvest/KRDU/arrivals/manifest.json \
+    --airport KRDU --model patchtst \
+    --prediction-output control --control-duration-parameterization direct \
+    --horizon-mode normalized --n-segments 16 \
+    --output-dir 4dTrajectory/outputs/KRDU/ts_ptst_control_direct_duration
+
 # independently replay the retained best checkpoint on fixed-anchor train + validation
 python $TS evaluate-fit \
     --checkpoint 4dTrajectory/outputs/KRDU/ts_itr_normalized_time/checkpoint.pt \
@@ -557,6 +566,27 @@ controls[..., 2] = load_factor    bounded by [0.5, 2.0]
 segment_durations_i = softmax(duration_logits)_i * final_time_s
 sum(segment_durations) = final_time_s
 ```
+
+The serialized `control_duration_parameterization` selects one of two isolated duration
+heads while retaining the same encoder, bounded-control head, parameter count, rollout and
+loss contract:
+
+```text
+factorized (default)
+  total_time = softplus(global_logit) * final_time_scale_s
+  duration_i = softmax(local_logits)_i * total_time
+
+direct
+  duration_i = softplus(global_logit + local_logit_i)
+               * final_time_scale_s / N
+  total_time = sum(duration_i)
+```
+
+Both initialize to uniform segments with total time `softplus(0) * final_time_scale_s`.
+Serialized control checkpoints must carry `control_duration_parameterization`; checkpoints
+that omit it are rejected and must be regenerated. Direct duration is a
+head-parameterization ablation, not a different public prediction output; both publish
+`predictionOutput=control`.
 
 Control mode currently requires `--horizon-mode normalized`. It needs no inverse-control
 labels. Uniform truth nodes are interpolated onto `cumsum(segment_durations)` before the
