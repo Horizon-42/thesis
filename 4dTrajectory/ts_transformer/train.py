@@ -28,6 +28,7 @@ from config import (
     CHECKPOINT_SELECTION_OBJECTIVE,
     CONTROL_DURATION_DIRECT,
     CONTROL_DURATION_FACTORIZED,
+    CONTROL_VALUE_TRIM_RESIDUAL,
     CONTROL_STATE_CLOCK_OBSERVED,
     CONTROL_STATE_CLOCK_PREDICTED,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
@@ -46,12 +47,14 @@ from config import (
 )
 from control_mixture import ControlMixturePrediction
 from control_prediction_adapters import deployable_control_prediction
+from control_regularization import control_regularization_signals
 from control_training_curriculum import (
     ControlTrainingStage,
     build_control_training_stage_view,
     build_control_training_stages,
     control_training_stage_for_epoch,
 )
+from control_training_diagnostics import ControlTrainingDiagnosticsAccumulator
 from dataset import (
     ARRIVAL_DATA_PROVENANCE_SCHEMA,
     FixedAnchorTrajectoryWindows,
@@ -87,7 +90,7 @@ from aerodynamic_model.torch_dynamics import (
 
 CHECKPOINT_NAME = "checkpoint.pt"
 CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
-CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v20-control-horizon-curriculum"
+CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v23-trim-residual-control"
 STATE_TARGET_CONTRACTS = {
     HORIZON_NORMALIZED: "normalized-time-runway-crossing-displacement-kinematic-v3",
     HORIZON_FULL: "full-horizon-fixed-time-displacement-kinematic-v2",
@@ -160,6 +163,8 @@ def target_contract(config: TSConfig) -> str:
             config.control_state_loss_grid,
         )
     ]
+    if config.control_value_parameterization == CONTROL_VALUE_TRIM_RESIDUAL:
+        base += "+trim-residual-control-v1"
     if (
         config.control_state_objective == CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE
         and config.control_state_duration_gradient
@@ -649,26 +654,22 @@ def control_prediction_loss_terms(
         config.control_state_objective
     ](rollout_loss, terminal_target, config, normalizer, dense_supervision)
 
-    lower = dynamics["control_lower"]
-    upper = dynamics["control_upper"]
-    effort_scale = torch.stack(
-        (upper[:, 0], torch.full_like(upper[:, 1], math.pi / 2.0), upper[:, 2]), dim=-1
+    effort_signal, smoothness_signal = control_regularization_signals(
+        prediction, dynamics, config
     )
-    scaled_controls = prediction.controls / effort_scale.unsqueeze(1)
     active_segments = (
         torch.ones_like(prediction.segment_durations, dtype=torch.bool)
         if segment_valid is None
         else segment_valid
     )
-    active_float = active_segments.to(dtype=scaled_controls.dtype)
+    active_float = active_segments.to(dtype=effort_signal.dtype)
     effort = (
-        scaled_controls.square() * active_float.unsqueeze(-1)
+        effort_signal.square() * active_float.unsqueeze(-1)
     ).sum(dim=(1, 2)) / (
-        active_float.sum(dim=1) * scaled_controls.shape[-1]
+        active_float.sum(dim=1) * effort_signal.shape[-1]
     ).clamp(min=1.0)
     if prediction.controls.shape[1] > 1:
-        change_scale = (upper - lower).unsqueeze(1)
-        changes = torch.diff(prediction.controls, dim=1) / change_scale
+        changes = torch.diff(smoothness_signal, dim=1)
         active_pairs = active_segments[:, 1:] & active_segments[:, :-1]
         pair_float = active_pairs.to(dtype=changes.dtype)
         smoothness = (
@@ -956,6 +957,7 @@ class EpochResult:
     validation_selection_by_airport: dict[str, float] = field(default_factory=dict)
     train_anchor_sampling: dict[str, Any] = field(default_factory=dict)
     training_stage: dict[str, Any] = field(default_factory=dict)
+    control_training_diagnostics: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -1372,7 +1374,6 @@ def _dataset_loss_components(
                 flight_weights,
                 dynamics,
                 dense_supervision,
-                training_stage,
             ) = unpack_batch(raw_batch)
             x, y, mask = x.to(device), y.to(device), mask.to(device)
             final_time_s = final_time_s.to(device)
@@ -1391,6 +1392,7 @@ def _dataset_loss_components(
                 dataset.normalizer,
                 dynamics,
                 dense_supervision,
+                training_stage,
             )
             for name, value in components.tensors().items():
                 component_totals[name] += float(value) * len(flight_weights)
@@ -1681,6 +1683,14 @@ def fit_model(
         model.train()
         train_component_totals = {name: 0.0 for name in component_names}
         train_weight_total = 0.0
+        control_diagnostics = (
+            ControlTrainingDiagnosticsAccumulator(
+                config.control_gradient_clip_norm,
+                policy=config.control_gradient_clip_policy,
+            )
+            if config.control_gradient_clip_norm > 0.0
+            else None
+        )
         for raw_batch in iter_batches(
             train_set, config.batch_size, shuffle=True, seed=config.seed + epoch
         ):
@@ -1692,7 +1702,6 @@ def fit_model(
                 flight_weights,
                 dynamics,
                 dense_supervision,
-                training_stage,
             ) = unpack_batch(raw_batch)
             batch_count = len(flight_weights)
             batch_weight = float(flight_weights.sum())
@@ -1702,8 +1711,15 @@ def fit_model(
             dynamics = move_dynamics(dynamics, device)
             dense_supervision = move_fixed_dt_supervision(dense_supervision, device)
             optimizer.zero_grad()
+            prediction = model_forward(model, x, dynamics)
+            if control_diagnostics is not None:
+                if not isinstance(prediction, ControlPrediction) or dynamics is None:
+                    raise RuntimeError(
+                        "control gradient diagnostics require deterministic control output"
+                    )
+                control_diagnostics.record_prediction(prediction, dynamics)
             components = prediction_loss_components(
-                model_forward(model, x, dynamics),
+                prediction,
                 x[:, -1],
                 y,
                 mask,
@@ -1713,9 +1729,12 @@ def fit_model(
                 normalizer,
                 dynamics,
                 dense_supervision,
+                training_stage,
             )
             loss = components.total
             loss.backward()
+            if control_diagnostics is not None:
+                control_diagnostics.record_gradients_and_clip(model)
             optimizer.step()
             optimizer_updates += 1
             for name, value in components.tensors().items():
@@ -1750,6 +1769,9 @@ def fit_model(
         }
         # Equal airport weight: a large/long airport cannot control early stopping alone.
         val_loss = float(np.mean(list(val_by_airport.values())))
+        control_training_diagnostics = (
+            control_diagnostics.summary() if control_diagnostics is not None else {}
+        )
         if curriculum_stage.is_full_horizon:
             validation_selection = _VALIDATION_SELECTIONS[
                 config.checkpoint_selection_metric
@@ -1801,6 +1823,7 @@ def fit_model(
                 if config.control_horizon_curriculum_s
                 else {}
             ),
+            control_training_diagnostics=control_training_diagnostics,
         ))
 
         if (
@@ -1829,8 +1852,14 @@ def fit_model(
                   f"updates {optimizer_updates:5d}  {history[-1].seconds:5.1f}s"
                   f"{stage_suffix}{marker}")
             if validation_selection.metric != CHECKPOINT_SELECTION_OBJECTIVE:
+                selection_label = (
+                    "checkpoint"
+                    if curriculum_stage.is_full_horizon
+                    else "prefix val"
+                )
                 print(
-                    f"             checkpoint  {validation_selection.metric}="
+                    f"             {selection_label:10s}  "
+                    f"{validation_selection.metric}="
                     f"{validation_selection.value:.1f}"
                 )
             print(
@@ -1839,6 +1868,24 @@ def fit_model(
                     f"{name}={val_components[name]:.4f}" for name in component_names
                 )
             )
+            if control_training_diagnostics:
+                gradients = control_training_diagnostics["gradient_norm_pre_clip"]
+                clip = control_training_diagnostics["clip"]
+                saturation = control_training_diagnostics["control_saturation"]
+                print(
+                    "             gradients  "
+                    f"total mean/max={gradients['mean']['total']:.2f}/"
+                    f"{gradients['max']['total']:.2f}  "
+                    f"backbone={gradients['max']['backbone']:.2f}  "
+                    f"control={gradients['max']['control_head']:.2f}  "
+                    f"time={gradients['max']['final_time_head']:.2f}"
+                )
+                print(
+                    "             stability "
+                    f"clip={clip['policy']} "
+                    f"{clip['triggered_batches']}/{clip['batches']}  "
+                    f"saturation={saturation['overall_rate']:.3%}"
+                )
 
         if (
             curriculum_stage.is_full_horizon

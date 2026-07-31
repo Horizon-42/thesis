@@ -61,13 +61,29 @@ from config import (  # noqa: E402
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
     CONTROL_DURATION_DIRECT, CONTROL_DURATION_FACTORIZED,
-    CONTROL_STATE_CLOCK_OBSERVED, CONTROL_STATE_LOSS_GRID_FIXED_DT,
+    CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED,
+    CONTROL_GRADIENT_CLIP_GLOBAL,
+    CONTROL_VALUE_ABSOLUTE, CONTROL_VALUE_TRIM_RESIDUAL,
+    CONTROL_STATE_CLOCK_OBSERVED, CONTROL_STATE_CLOCK_PREDICTED,
+    CONTROL_STATE_LOSS_GRID_FIXED_DT,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
     PREDICTION_CONTROL, PREDICTION_CONTROL_MIXTURE,
     TSConfig, control_recipe,
 )
 from control_mixture import ControlMixturePrediction  # noqa: E402
+from control_training_curriculum import (  # noqa: E402
+    ControlTrainingStage,
+    build_control_training_stage_view,
+    build_control_training_stages,
+)
+from control_training_diagnostics import (  # noqa: E402
+    ControlTrainingDiagnosticsAccumulator,
+    clip_gradients_by_policy,
+    clip_gradients_by_global_norm,
+    gradient_norms,
+)
+from control_regularization import control_regularization_signals  # noqa: E402
 from dataset import (  # noqa: E402
     ARRIVAL_DATA_PROVENANCE_SCHEMA, FixedAnchorTrajectoryWindows, FlightEpochSampler,
     Normalizer, RandomAnchorTrajectoryWindows, arrival_data_provenance, build_series,
@@ -79,7 +95,10 @@ from evaluation.records import load_records, record_from_dict  # noqa: E402
 from export import (  # noqa: E402
     accuracy_block, build_prediction_record, observed_series_metrics, record_stem, write_batch,
 )
-from fixed_dt_supervision import build_fixed_dt_supervision  # noqa: E402
+from fixed_dt_supervision import (  # noqa: E402
+    FixedDTControlSupervision,
+    build_fixed_dt_supervision,
+)
 from forecast import Forecast, forecast_approach  # noqa: E402
 from metrics import (  # noqa: E402
     RAW_KINEMATIC_METRIC_KEYS, error_components, raw_kinematic_metrics,
@@ -89,6 +108,12 @@ from models import build_model, parameter_count  # noqa: E402
 from prediction_outputs import (  # noqa: E402
     ControlBounds, ControlOutputHead, ControlPrediction, StatePrediction,
 )
+from trim_residual_control import (  # noqa: E402
+    bounded_trim_residual_controls,
+    interior_trim_controls,
+    trim_control_baseline,
+)
+from aerodynamic_model.torch_dynamics import enu_rhs  # noqa: E402
 from synthetic import synthetic_arrivals  # noqa: E402
 from train import (  # noqa: E402
     CHECKPOINT_METADATA_SCHEMA, FIT_EVALUATION_NAME, FIT_EVALUATION_SCHEMA,
@@ -1541,6 +1566,7 @@ def test_control_mixture_is_an_explicit_validated_mode():
         "effort_loss_weight": config.control_effort_loss_weight,
         "smoothness_loss_weight": config.control_smoothness_loss_weight,
         "duration_parameterization": CONTROL_DURATION_FACTORIZED,
+        "value_parameterization": CONTROL_VALUE_ABSOLUTE,
         "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
         "state_supervision_clock": config.control_state_supervision_clock,
         "state_loss_grid": config.control_state_loss_grid,
@@ -1550,6 +1576,8 @@ def test_control_mixture_is_an_explicit_validated_mode():
         "horizon_curriculum_stage_epochs": (
             config.control_horizon_curriculum_stage_epochs
         ),
+        "gradient_clip_norm": 0.0,
+        "gradient_clip_policy": CONTROL_GRADIENT_CLIP_GLOBAL,
         "expert_count": 3,
         "selector_loss_weight": config.control_mixture_selector_loss_weight,
         "diversity_loss_weight": config.control_mixture_diversity_loss_weight,
@@ -1699,7 +1727,15 @@ def test_legacy_control_config_without_state_loss_grid_is_rejected():
 
 @pytest.mark.parametrize(
     "field",
-    ["control_state_objective", "control_state_duration_gradient"],
+    [
+        "control_state_objective",
+        "control_state_duration_gradient",
+        "control_horizon_curriculum_s",
+        "control_horizon_curriculum_stage_epochs",
+        "control_gradient_clip_norm",
+        "control_gradient_clip_policy",
+        "control_value_parameterization",
+    ],
 )
 def test_legacy_control_config_without_physical_criteria_recipe_is_rejected(field):
     serialized = TSConfig(prediction_output=PREDICTION_CONTROL).to_dict()
@@ -1727,6 +1763,391 @@ def test_physical_criteria_requires_observed_fixed_dt_single_control():
     assert config.control_state_duration_gradient is False
     assert "physical-criteria" in train_module.target_contract(config)
     assert "detached-duration-gradient" in train_module.target_contract(config)
+
+
+def test_control_horizon_curriculum_is_a_strict_physical_training_mode():
+    config = TSConfig(
+        prediction_output=PREDICTION_CONTROL,
+        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
+        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
+        control_state_objective=CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
+        control_state_duration_gradient=False,
+        control_horizon_curriculum_s=(60.0, 120.0, 240.0),
+        control_horizon_curriculum_stage_epochs=10,
+        epochs=31,
+    )
+
+    assert config.control_horizon_curriculum_s == (60.0, 120.0, 240.0)
+    assert "horizon-curriculum=60,120,240s" in train_module.target_contract(config)
+    assert "x10epochs" in train_module.target_contract(config)
+    assert control_recipe(config)["horizon_curriculum_s"] == [60.0, 120.0, 240.0]
+
+    with pytest.raises(ValueError, match="strictly increasing"):
+        replace(config, control_horizon_curriculum_s=(120.0, 60.0))
+    with pytest.raises(ValueError, match="align with the fixed-dt grid"):
+        replace(config, control_horizon_curriculum_s=(61.0,))
+    with pytest.raises(ValueError, match="leave at least one full-horizon epoch"):
+        replace(config, epochs=30)
+    with pytest.raises(ValueError, match="fixed train anchors"):
+        replace(config, random_train_anchor=True)
+
+
+def test_control_gradient_clip_is_explicit_and_control_only():
+    config = TSConfig(
+        prediction_output=PREDICTION_CONTROL,
+        control_gradient_clip_norm=20.0,
+    )
+
+    assert control_recipe(config)["gradient_clip_norm"] == pytest.approx(20.0)
+    assert control_recipe(config)["gradient_clip_policy"] == CONTROL_GRADIENT_CLIP_GLOBAL
+    with pytest.raises(ValueError, match="finite and non-negative"):
+        replace(config, control_gradient_clip_norm=-1.0)
+    with pytest.raises(ValueError, match="only by prediction_output='control'"):
+        TSConfig(control_gradient_clip_norm=20.0)
+    with pytest.raises(ValueError, match="requires a positive clip norm"):
+        TSConfig(
+            prediction_output=PREDICTION_CONTROL,
+            control_gradient_clip_policy=CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED,
+        )
+
+
+def test_final_time_decoupled_clip_requires_isolated_clock_gradients():
+    config = TSConfig(
+        prediction_output=PREDICTION_CONTROL,
+        control_duration_parameterization=CONTROL_DURATION_FACTORIZED,
+        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
+        control_state_duration_gradient=False,
+        control_gradient_clip_norm=20.0,
+        control_gradient_clip_policy=CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED,
+    )
+
+    assert config.control_gradient_clip_policy == CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED
+    with pytest.raises(ValueError, match="requires factorized durations"):
+        replace(config, control_duration_parameterization=CONTROL_DURATION_DIRECT)
+    with pytest.raises(ValueError, match="requires observed state clock"):
+        replace(
+            config,
+            control_state_supervision_clock=CONTROL_STATE_CLOCK_PREDICTED,
+            control_state_duration_gradient=True,
+        )
+    with pytest.raises(ValueError, match="requires detached state-duration gradients"):
+        replace(config, control_state_duration_gradient=True)
+
+
+def test_control_gradient_clip_records_preclip_module_norms_and_caps_global_norm():
+    class GradientGroups(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.feature_encoder = torch.nn.Linear(1, 1, bias=False)
+            self.control_head = torch.nn.Linear(1, 1, bias=False)
+            self.final_time_head = torch.nn.Linear(1, 1, bias=False)
+
+    model = GradientGroups()
+    x = torch.ones(1, 1)
+    loss = (
+        3.0 * model.feature_encoder(x)
+        + 4.0 * model.control_head(x)
+        + 0.0 * model.final_time_head(x)
+    ).sum()
+    loss.backward()
+
+    preclip, clipped = clip_gradients_by_global_norm(model, 1.0)
+    postclip = gradient_norms(model)
+
+    assert clipped is True
+    assert preclip == pytest.approx(
+        {
+            "backbone": 3.0,
+            "control_head": 4.0,
+            "final_time_head": 0.0,
+            "total": 5.0,
+        }
+    )
+    assert postclip["total"] == pytest.approx(1.0)
+
+
+def test_final_time_decoupled_clip_caps_control_backbone_only():
+    class GradientGroups(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.feature_encoder = torch.nn.Linear(1, 1, bias=False)
+            self.control_head = torch.nn.Linear(1, 1, bias=False)
+            self.final_time_head = torch.nn.Linear(1, 1, bias=False)
+
+    model = GradientGroups()
+    x = torch.ones(1, 1)
+    loss = (
+        3.0 * model.feature_encoder(x)
+        + 4.0 * model.control_head(x)
+        + 12.0 * model.final_time_head(x)
+    ).sum()
+    loss.backward()
+
+    preclip, scopes = clip_gradients_by_policy(
+        model,
+        max_norm=1.0,
+        policy=CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED,
+    )
+    postclip = gradient_norms(model)
+
+    assert preclip["total"] == pytest.approx(13.0)
+    assert scopes["control_backbone"]["pre_clip_norm"] == pytest.approx(5.0)
+    assert scopes["control_backbone"]["coefficient"] == pytest.approx(0.2)
+    assert scopes["control_backbone"]["triggered"] is True
+    assert scopes["control_backbone"]["groups"] == ["backbone", "control_head"]
+    assert scopes["control_backbone"]["capped"] is True
+    assert scopes["final_time_head"]["pre_clip_norm"] == pytest.approx(12.0)
+    assert scopes["final_time_head"]["triggered"] is False
+    assert scopes["final_time_head"]["capped"] is False
+    assert postclip["backbone"] == pytest.approx(0.6)
+    assert postclip["control_head"] == pytest.approx(0.8)
+    assert postclip["final_time_head"] == pytest.approx(12.0)
+
+
+def test_trim_baseline_locally_holds_speed_heading_and_flight_path_angle():
+    state = torch.tensor(
+        [[35.8, -78.8, 1000.0, 100.0, 0.3, 0.0, 60_000.0]],
+        dtype=torch.float64,
+    )
+    aero = torch.tensor(
+        [[122.6, 1.5, 0.02, 0.04, 0.8, 0.1]], dtype=torch.float64
+    )
+    lower = torch.tensor([[0.0, -0.7, 0.5]], dtype=torch.float64)
+    upper = torch.tensor([[300_000.0, 0.7, 2.0]], dtype=torch.float64)
+
+    baseline = trim_control_baseline(state, aero, lower, upper)
+    enu_state = torch.stack(
+        (
+            torch.zeros(1, dtype=torch.float64),
+            torch.zeros(1, dtype=torch.float64),
+            state[:, 2],
+            state[:, 3],
+            state[:, 4],
+            state[:, 5],
+            state[:, 6],
+        ),
+        dim=-1,
+    )
+    derivative = enu_rhs(enu_state, baseline.controls, aero)
+
+    assert not baseline.stalled.any()
+    assert not baseline.clamped.any()
+    torch.testing.assert_close(
+        derivative[:, 3:6], torch.zeros_like(derivative[:, 3:6]), atol=1e-12, rtol=0
+    )
+
+
+def test_zero_trim_residual_reproduces_trim_and_has_zero_regularization_effort():
+    state = torch.tensor(
+        [[35.8, -78.8, 1000.0, 100.0, 0.3, 0.0, 60_000.0]],
+        dtype=torch.float32,
+    )
+    aero = torch.tensor(
+        [[122.6, 1.5, 0.02, 0.04, 0.8, 0.1]], dtype=torch.float32
+    )
+    lower = torch.tensor([[0.0, -0.7, 0.5]])
+    upper = torch.tensor([[300_000.0, 0.7, 2.0]])
+    baseline = trim_control_baseline(state, aero, lower, upper)
+    expected, _unit = interior_trim_controls(baseline.controls, lower, upper)
+    controls = bounded_trim_residual_controls(
+        torch.zeros(1, 4, 3), baseline.controls, lower, upper
+    )
+    prediction = ControlPrediction(
+        controls=controls,
+        segment_durations=torch.ones(1, 4),
+        final_time_s=torch.tensor([4.0]),
+    )
+    config = TSConfig(
+        prediction_output=PREDICTION_CONTROL,
+        control_value_parameterization=CONTROL_VALUE_TRIM_RESIDUAL,
+    )
+    effort, smoothness = control_regularization_signals(
+        prediction,
+        {
+            "initial_state": state,
+            "aero_params": aero,
+            "control_lower": lower,
+            "control_upper": upper,
+        },
+        config,
+    )
+
+    torch.testing.assert_close(
+        controls, expected.unsqueeze(1).expand_as(controls), atol=1e-5, rtol=1e-6
+    )
+    torch.testing.assert_close(effort, torch.zeros_like(effort), atol=1e-6, rtol=0)
+    torch.testing.assert_close(smoothness, effort)
+
+
+def test_control_horizon_curriculum_builds_exact_batched_prefix_views():
+    controls = torch.zeros(2, 4, 3)
+    prediction = ControlPrediction(
+        controls=controls,
+        segment_durations=torch.tensor(
+            [[25.0, 25.0, 25.0, 25.0], [10.0, 10.0, 10.0, 10.0]]
+        ),
+        final_time_s=torch.tensor([100.0, 40.0]),
+    )
+    offsets = torch.arange(2.0, 102.0, 2.0).repeat(2, 1)
+    valid = torch.zeros(2, 50, dtype=torch.bool)
+    valid[0, :50] = True
+    valid[1, :20] = True
+    states = torch.zeros(2, 50, len(ch.CHANNELS))
+    states[0, :, 0] = torch.arange(50)
+    states[1, :, 0] = 100.0 + torch.arange(50)
+    supervision = FixedDTControlSupervision(
+        query_offsets_s=offsets,
+        states=states,
+        weights=torch.ones_like(states),
+        valid=valid,
+    )
+    terminal = torch.stack((states[0, 49], states[1, 19]))
+    stage = ControlTrainingStage("60s", 60.0, 1, 10)
+
+    view = build_control_training_stage_view(
+        prediction,
+        supervision,
+        terminal,
+        prediction.final_time_s,
+        stage,
+    )
+
+    torch.testing.assert_close(
+        view.prediction.segment_durations,
+        torch.tensor([[25.0, 25.0, 10.0, 0.0], [10.0, 10.0, 10.0, 10.0]]),
+    )
+    torch.testing.assert_close(
+        view.segment_valid,
+        torch.tensor([[True, True, True, False], [True, True, True, True]]),
+    )
+    assert view.supervision.query_offsets_s.shape == (2, 30)
+    assert view.supervision.valid.sum(dim=1).tolist() == [30, 20]
+    assert view.terminal_target[:, 0].tolist() == pytest.approx([29.0, 119.0])
+
+
+def test_control_horizon_curriculum_keeps_exact_float64_query_boundary():
+    fractions = torch.softmax(torch.linspace(-1.0, 1.0, 64), dim=0)
+    prediction = ControlPrediction(
+        controls=torch.zeros(1, 64, 3),
+        segment_durations=(fractions * 328.0).unsqueeze(0),
+        final_time_s=torch.tensor([328.0]),
+    )
+    offsets = torch.arange(2.0, 62.0, 2.0, dtype=torch.float64).unsqueeze(0)
+    states = torch.zeros(1, 30, len(ch.CHANNELS))
+    supervision = FixedDTControlSupervision(
+        query_offsets_s=offsets,
+        states=states,
+        weights=torch.ones_like(states),
+        valid=torch.ones(1, 30, dtype=torch.bool),
+    )
+
+    view = build_control_training_stage_view(
+        prediction,
+        supervision,
+        states[:, -1],
+        prediction.final_time_s,
+        ControlTrainingStage("60s", 60.0, 1, 10),
+    )
+
+    assert view.prediction.segment_durations.dtype == torch.float64
+    torch.testing.assert_close(
+        view.prediction.segment_durations.sum(dim=1),
+        torch.tensor([60.0], dtype=torch.float64),
+        rtol=0.0,
+        atol=1e-12,
+    )
+    assert view.supervision.query_offsets_s[0, -1] <= (
+        view.prediction.segment_durations.sum(dim=1)[0]
+    )
+
+
+def test_control_horizon_curriculum_repairs_float32_duration_total_before_boundary():
+    prediction = ControlPrediction(
+        controls=torch.zeros(1, 64, 3),
+        segment_durations=torch.full((1, 64), 0.93749994, dtype=torch.float32),
+        final_time_s=torch.tensor([60.0], dtype=torch.float32),
+    )
+    offsets = torch.arange(2.0, 62.0, 2.0, dtype=torch.float64).unsqueeze(0)
+    states = torch.zeros(1, 30, len(ch.CHANNELS))
+    supervision = FixedDTControlSupervision(
+        query_offsets_s=offsets,
+        states=states,
+        weights=torch.ones_like(states),
+        valid=torch.ones(1, 30, dtype=torch.bool),
+    )
+
+    assert prediction.segment_durations.to(torch.float64).sum() < 60.0
+    view = build_control_training_stage_view(
+        prediction,
+        supervision,
+        states[:, -1],
+        prediction.final_time_s,
+        ControlTrainingStage("60s", 60.0, 1, 10),
+    )
+
+    # Dense rollout validates against the last cumulative segment boundary, so protect that
+    # exact path rather than a separately reduced sum.
+    total = view.prediction.segment_durations.cumsum(dim=1)[0, -1]
+    torch.testing.assert_close(
+        total, torch.tensor(60.0, dtype=torch.float64), rtol=0.0, atol=1e-12
+    )
+    assert view.supervision.query_offsets_s[0, -1] <= total
+
+
+def test_control_horizon_curriculum_schedule_reserves_full_training():
+    stages = build_control_training_stages(
+        (60.0, 120.0, 240.0), epochs_per_stage=10, total_epochs=35
+    )
+
+    assert [(stage.label, stage.start_epoch, stage.end_epoch) for stage in stages] == [
+        ("60s", 1, 10),
+        ("120s", 11, 20),
+        ("240s", 21, 30),
+        ("full", 31, None),
+    ]
+
+
+def test_control_horizon_curriculum_selects_checkpoint_only_after_full_stage():
+    series, config = _series(
+        n_flights=2,
+        prediction_output=PREDICTION_CONTROL,
+        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
+        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
+        control_state_objective=CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
+        control_state_duration_gradient=False,
+        control_horizon_curriculum_s=(2.0,),
+        control_horizon_curriculum_stage_epochs=1,
+        control_gradient_clip_norm=20.0,
+        checkpoint_selection_metric=CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
+        epochs=2,
+        patience=1,
+        seq_len=8,
+        n_segments=2,
+        d_model=8,
+        d_ff=16,
+        n_heads=2,
+        e_layers=1,
+        batch_size=2,
+        control_rollout_integrator_dt_s=2.0,
+        device="cpu",
+    )
+
+    fit = train_module.fit_model(series[:1], series[1:], config, verbose=False)
+
+    assert [row.training_stage["label"] for row in fit.history] == ["2s", "full"]
+    assert fit.history[0].validation_selection_metric == "curriculum-prefix-objective"
+    assert (
+        fit.history[1].validation_selection_metric
+        == CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA
+    )
+    assert fit.best_validation_selection == pytest.approx(
+        fit.history[1].validation_selection_value
+    )
+    for row in fit.history:
+        diagnostics = row.control_training_diagnostics
+        assert diagnostics["clip"]["max_norm"] == pytest.approx(20.0)
+        assert diagnostics["clip"]["batches"] == 1
+        assert 0.0 <= diagnostics["control_saturation"]["overall_rate"] <= 1.0
 
 
 def test_state_config_without_duration_parameterization_remains_loadable():
@@ -1811,6 +2232,76 @@ def test_control_models_use_per_sample_bounds_and_aircraft_condition(
     assert result.controls.shape == (2, 4, 3)
     assert torch.all(result.controls >= lower[:, None, :])
     assert torch.all(result.controls <= upper[:, None, :])
+    assert torch.allclose(result.segment_durations.sum(dim=-1), result.final_time_s)
+
+
+def test_trim_residual_mode_is_explicit_factorized_single_control_only():
+    config = TSConfig(
+        prediction_output=PREDICTION_CONTROL,
+        control_value_parameterization=CONTROL_VALUE_TRIM_RESIDUAL,
+    )
+
+    assert control_recipe(config)["value_parameterization"] == CONTROL_VALUE_TRIM_RESIDUAL
+    assert "trim-residual-control-v1" in train_module.target_contract(config)
+    with pytest.raises(ValueError, match="only by prediction_output='control'"):
+        TSConfig(control_value_parameterization=CONTROL_VALUE_TRIM_RESIDUAL)
+    with pytest.raises(ValueError, match="require factorized durations"):
+        replace(config, control_duration_parameterization=CONTROL_DURATION_DIRECT)
+
+
+@pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
+def test_trim_residual_head_is_backbone_agnostic_and_starts_at_trim(model_name):
+    config = TSConfig(
+        model=model_name,
+        prediction_output=PREDICTION_CONTROL,
+        control_value_parameterization=CONTROL_VALUE_TRIM_RESIDUAL,
+        seq_len=32,
+        n_segments=4,
+        d_model=32,
+        n_heads=4,
+        d_ff=64,
+        e_layers=1,
+        dropout=0.0,
+        fc_dropout=0.0,
+    )
+    model = build_model(config).eval()
+    lower = torch.tensor([[0.0, -0.7, 0.5], [0.0, -0.7, 0.5]])
+    upper = torch.tensor([[300_000.0, 0.7, 2.0], [250_000.0, 0.7, 2.0]])
+    state = torch.tensor(
+        [
+            [35.8, -78.8, 1000.0, 100.0, 0.3, 0.0, 60_000.0],
+            [38.7, -121.6, 1500.0, 110.0, -0.2, -0.01, 70_000.0],
+        ],
+        dtype=torch.float64,
+    )
+    aero = torch.tensor(
+        [
+            [122.6, 1.5, 0.02, 0.04, 0.8, 0.1],
+            [124.0, 1.6, 0.022, 0.045, 0.8, 0.1],
+        ],
+        dtype=torch.float64,
+    )
+    dynamics = {
+        "condition": torch.rand(2, len(dataset_module.DYNAMICS_CONDITION_NAMES)),
+        "initial_state": state,
+        "aero_params": aero,
+        "control_lower": lower,
+        "control_upper": upper,
+    }
+
+    result = model(torch.randn(2, config.seq_len, config.enc_in), dynamics)
+    baseline = trim_control_baseline(
+        state.float(), aero.float(), lower, upper
+    )
+    expected, _unit = interior_trim_controls(baseline.controls, lower, upper)
+
+    assert isinstance(result, ControlPrediction)
+    torch.testing.assert_close(
+        result.controls,
+        expected.unsqueeze(1).expand_as(result.controls),
+        atol=1e-4,
+        rtol=1e-6,
+    )
     assert torch.allclose(result.segment_durations.sum(dim=-1), result.final_time_s)
 
 
@@ -2075,6 +2566,7 @@ def test_physical_criteria_trains_both_backbones_without_duration_state_gradient
         normalizer,
         dynamics,
         dense,
+        ControlTrainingStage("2s", 2.0, 1, 1),
     )
     loss.backward()
 
@@ -2462,6 +2954,45 @@ def test_control_auto_batch_training_probe_applies_heterogeneous_partition(monke
     assert calls == [torch.Size([2, 2])]
 
 
+def test_control_auto_batch_training_probe_executes_clip_diagnostics(monkeypatch):
+    config = TSConfig(
+        prediction_output=PREDICTION_CONTROL,
+        device="cpu",
+        seq_len=4,
+        n_segments=2,
+        d_model=8,
+        d_ff=16,
+        n_heads=2,
+        e_layers=1,
+        final_time_scale_s=2.0,
+        control_rollout_integrator_dt_s=0.5,
+        control_gradient_clip_norm=20.0,
+    )
+    events: list[str] = []
+
+    class TrackedDiagnostics(ControlTrainingDiagnosticsAccumulator):
+        def record_prediction(self, prediction, dynamics):
+            events.append("prediction")
+            return super().record_prediction(prediction, dynamics)
+
+        def record_gradients_and_clip(self, model):
+            assert any(parameter.grad is not None for parameter in model.parameters())
+            events.append("gradients")
+            return super().record_gradients_and_clip(model)
+
+    monkeypatch.setattr(
+        batching,
+        "ControlTrainingDiagnosticsAccumulator",
+        TrackedDiagnostics,
+        raising=False,
+    )
+    monkeypatch.setattr(torch.cuda, "synchronize", lambda _device: None)
+
+    batching._probe_training_step(config, 2, torch.device("cpu"))
+
+    assert events == ["prediction", "gradients"]
+
+
 def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
     plan = pipeline_module.TrainingPlan(
         ("KMSY", "KRDU"),
@@ -2519,6 +3050,59 @@ def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
     assert "fixed-dt state loss" in prediction.label
     assert "physical ADE/FDE criterion" in prediction.label
     assert "detached duration-state gradient" in prediction.label
+
+
+def test_pipeline_carries_and_names_control_horizon_curriculum():
+    plan = pipeline_module.TrainingPlan(
+        (AIRPORT,),
+        "itransformer",
+        training_mode="pooled",
+        prediction_output=PREDICTION_CONTROL,
+        epochs=4,
+        control_state_clock=CONTROL_STATE_CLOCK_OBSERVED,
+        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
+        control_state_objective=CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
+        control_state_duration_gradient=False,
+        control_horizon_curriculum_s=(2.0, 4.0),
+        control_horizon_curriculum_stage_epochs=1,
+        control_gradient_clip_norm=20.0,
+        control_gradient_clip_policy=CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED,
+        control_value_parameterization=CONTROL_VALUE_TRIM_RESIDUAL,
+    )
+    recipe = plan._recipe_args()
+    config, _source = plan.resolved_train_config(use_best_config=False)
+    prediction = pipeline_module.PredictionPlan(
+        plan, AIRPORT, ("eval",), split="val"
+    )
+
+    assert recipe[recipe.index("--control-horizon-curriculum") + 1] == "2,4"
+    assert recipe[recipe.index("--control-horizon-stage-epochs") + 1] == "1"
+    assert config.control_horizon_curriculum_s == (2.0, 4.0)
+    assert config.control_horizon_curriculum_stage_epochs == 1
+    assert config.control_gradient_clip_norm == pytest.approx(20.0)
+    assert (
+        config.control_gradient_clip_policy
+        == CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED
+    )
+    assert config.control_value_parameterization == CONTROL_VALUE_TRIM_RESIDUAL
+    assert recipe[recipe.index("--control-gradient-clip-norm") + 1] == "20"
+    assert (
+        recipe[recipe.index("--control-gradient-clip-policy") + 1]
+        == CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED
+    )
+    assert (
+        recipe[recipe.index("--control-value-parameterization") + 1]
+        == CONTROL_VALUE_TRIM_RESIDUAL
+    )
+    assert "horizon_curriculum_2_4s_x1" in plan.train_dir.name
+    assert "gradient_clip20_final_time_decoupled" in plan.train_dir.name
+    assert "trim_residual" in plan.train_dir.name
+    assert "horizon_curriculum_2_4s_x1" in prediction.category
+    assert "gradient_clip20_final_time_decoupled" in prediction.category
+    assert "trim_residual" in prediction.category
+    assert "horizon curriculum 2→4 s × 1 epochs" in prediction.label
+    assert "gradient clip 20 (final-time head decoupled)" in prediction.label
+    assert "trim-residual controls" in prediction.label
 
 
 def test_pipeline_rejects_control_checkpoint_metadata_without_duration_recipe(
@@ -3325,6 +3909,7 @@ def test_control_training_checkpoint_round_trip_keeps_output_identity(
         "effort_loss_weight": config.control_effort_loss_weight,
         "smoothness_loss_weight": config.control_smoothness_loss_weight,
         "duration_parameterization": duration_parameterization,
+        "value_parameterization": CONTROL_VALUE_ABSOLUTE,
         "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
         "state_supervision_clock": config.control_state_supervision_clock,
         "state_loss_grid": config.control_state_loss_grid,
@@ -3334,6 +3919,8 @@ def test_control_training_checkpoint_round_trip_keeps_output_identity(
         "horizon_curriculum_stage_epochs": (
             config.control_horizon_curriculum_stage_epochs
         ),
+        "gradient_clip_norm": 0.0,
+        "gradient_clip_policy": CONTROL_GRADIENT_CLIP_GLOBAL,
     }
 
 

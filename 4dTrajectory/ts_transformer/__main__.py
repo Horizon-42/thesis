@@ -57,6 +57,8 @@ from config import (  # noqa: E402
     COORDINATE_FRAMES,
     CHECKPOINT_SELECTION_METRICS,
     CONTROL_DURATION_PARAMETERIZATIONS,
+    CONTROL_GRADIENT_CLIP_POLICIES,
+    CONTROL_VALUE_PARAMETERIZATIONS,
     CONTROL_STATE_LOSS_GRIDS,
     CONTROL_STATE_CLOCKS,
     CONTROL_STATE_OBJECTIVES,
@@ -216,6 +218,15 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--control-value-parameterization",
+        choices=CONTROL_VALUE_PARAMETERIZATIONS,
+        default=None,
+        help=(
+            "predict absolute bounded controls (default) or bounded residuals around an "
+            "anchor-state aerodynamic trim baseline"
+        ),
+    )
+    parser.add_argument(
         "--control-experts",
         type=int,
         default=None,
@@ -274,6 +285,24 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=None,
         help="epochs per numeric control-horizon curriculum stage (default: 10)",
+    )
+    parser.add_argument(
+        "--control-gradient-clip-norm",
+        type=float,
+        default=None,
+        help=(
+            "global L2 gradient cap for deterministic control training; positive values "
+            "also record gradient and control-saturation diagnostics"
+        ),
+    )
+    parser.add_argument(
+        "--control-gradient-clip-policy",
+        choices=CONTROL_GRADIENT_CLIP_POLICIES,
+        default=None,
+        help=(
+            "gradient clipping scope: one global cap (default) or leave only the "
+            "final-time head outside the combined backbone/control cap"
+        ),
     )
     parser.add_argument(
         "--control-rollout-dt",
@@ -378,6 +407,7 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("control_effort_loss_weight", args.control_effort_weight),
         ("control_smoothness_loss_weight", args.control_smoothness_weight),
         ("control_duration_parameterization", args.control_duration_parameterization),
+        ("control_value_parameterization", args.control_value_parameterization),
         ("control_expert_count", args.control_experts),
         ("control_mixture_selector_loss_weight", args.control_selector_weight),
         ("control_mixture_diversity_loss_weight", args.control_diversity_weight),
@@ -390,6 +420,8 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
             "control_horizon_curriculum_stage_epochs",
             args.control_horizon_stage_epochs,
         ),
+        ("control_gradient_clip_norm", args.control_gradient_clip_norm),
+        ("control_gradient_clip_policy", args.control_gradient_clip_policy),
         ("control_rollout_integrator_dt_s", args.control_rollout_dt),
         ("d_model", args.d_model), ("e_layers", args.e_layers), ("n_heads", args.n_heads),
         ("seed", args.seed), ("split_seed", args.split_seed), ("device", args.device),

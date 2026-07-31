@@ -16,11 +16,12 @@ checkpoint 由固定-anchor validation common-grid criteria 选择。
 
 | 优先级 | 优化 | 可部署方式 | 当前状态 |
 |---:|---|---|---|
-| 1 | Horizon curriculum | 同一模型逐步延长 single-shooting 训练链 | 本轮实现与实验 |
-| 2 | 低初始 LR + 梯度裁剪 | 从训练开始限制不稳定更新 | 待 curriculum 单变量结论后实验 |
-| 3 | Trim baseline + residual control | 只用 anchor 状态和飞机参数计算基准控制 | 待设计实现 |
-| 4 | Train-only oracle teacher | control imitation 预训练后 rollout 微调 | 待小样本可行性验证 |
-| 5 | Progressive N refinement | N=16→32→64，复制控制并平分时长 | 低优先级 |
+| 1 | Horizon curriculum | 同一模型逐步延长 single-shooting 训练链 | 在 `3e-5 + clip20` 下已通过 clip-only 对照；空间指标改善、时间 MAE 退化 |
+| 2 | 低初始 LR + 梯度裁剪 | 从训练开始限制不稳定更新 | iTransformer 组合消融完成；`3e-5` 的预注册准则最好 |
+| 3 | Final-time clip 解耦 | final-time head 不随巨大 control 梯度一起缩放 | 已完成；形成时间/ADE Pareto 点，未替代预注册 selection 胜者 |
+| 4 | Trim baseline + residual control | 只用 anchor 状态和飞机参数计算基准控制 | iTransformer 首轮完成；ADE 略好但 selection/FDE/时间退化，未迁移 PatchTST |
+| 5 | Train-only oracle teacher | control imitation 预训练后 rollout 微调 | 待小样本可行性验证 |
+| 6 | Progressive N refinement | N=16→32→64，复制控制并平分时长 | 低优先级 |
 
 已冻结为后续基础配置、无需作为新方向重复声明的两项是：
 
@@ -62,10 +63,45 @@ common-grid criteria 选择。这保证开发任务仍对齐真正部署的 full
 common-grid ADE/FDE=`2424.69/2688.55 m`，等权机场 criteria=`27.6909`。首轮不同时降低 LR，
 避免无法判断改善来自 curriculum 还是优化器。
 
+### 首轮结果：未形成可用 checkpoint
+
+五机场 roster、split、模型、LR 和损失均与基线一致，且全程只使用 train/validation。短阶段
+本身都能下降：
+
+| 阶段末 | train objective | validation prefix objective |
+|---:|---:|---:|
+| 60 s / epoch 10 | 4.2409 | 4.1346 |
+| 120 s / epoch 20 | 8.8534 | 8.9917 |
+| 240 s / epoch 30 | 28.5255 | 27.3842 |
+
+但进入 full horizon 后发生剧烈不连续：
+
+| epoch | train full objective | validation full objective | validation common-grid criteria |
+|---:|---:|---:|---:|
+| 31 | 506.5842 | 603.5438 | 561.4 |
+| 32 | 323.9715 | 320.6297 | 317.9 |
+
+epoch 33 的某个 optimizer update 后，共享 backbone 输出非有限值，继而
+`segment_durations` 变为 NaN，训练终止。由于 `fit_model` 只在完整训练结束后写最佳权重，本次
+没有生成 checkpoint；没有进行 prediction，更没有读取 outer-test。
+
+结论是：`60→120→240→full` 的 prefix-cropping curriculum 在当前 `LR=3e-4` 下没有提高
+可部署 full-horizon 模型。短阶段只约束给定物理时间内的控制；对长航迹而言，240 s 之后的控制
+没有获得相同条件下的状态监督，进入 full 后同时暴露长尾控制和更长的 single-shooting 梯度链，
+objective 放大约 22 倍并最终梯度爆炸。这是当前 curriculum 配方的负结果，不能用短阶段较低的
+objective 宣称改善。
+
+实现过程中还发现并修复了一项独立数值问题：短阶段裁剪原先在 float32 中求和，转换为 float64
+积分时可能让精确的 60 s query 超出总时长数微秒。现在裁剪统一使用 fixed-dt supervision 的
+float64 时钟，并有 64 段分数时长回归测试。该修复只保证边界语义正确，不改变上述优化结论。
+
+按本清单的预注册顺序，下一项应单独测试“低 LR＋梯度裁剪”。如果保留 curriculum 再加入它，
+实验名称必须明确写成组合消融，不能再称为 curriculum-only。
+
 ## 2. 低初始 LR 与梯度裁剪
 
 两个 backbone 都在约 epoch 20 从较好 basin 突然发散，事后 ReduceLROnPlateau 无法恢复。
-若 curriculum-only 仍发生同类失稳，再固定 curriculum 比较：
+curriculum-only 发生同类失稳后，固定 curriculum 比较：
 
 ```text
 LR=1e-4, clip_norm=20
@@ -74,7 +110,136 @@ LR=3e-5, clip_norm=20
 
 必须记录裁剪前总梯度、backbone/control head 分模块梯度、control 饱和率及分机场 validation。
 
-## 3. Trim baseline + residual control
+### 实现与实验约束
+
+梯度稳定功能是独立训练模块，不嵌入 backbone 或预测头：
+
+- `control_training_diagnostics.py` 负责 float64 全局/分组梯度范数、全局 L2 clip 和控制饱和率；
+- `control_gradient_clip_norm=0` 保持原训练路径，正值仅允许 deterministic control 输出；
+- checkpoint recipe 必须显式带该字段，旧派生 checkpoint 不做兼容升级，必须重训；
+- 历史记录保存每 epoch 的裁剪前 backbone/control/final-time/total 梯度、clip 触发率和三类控制饱和率。
+
+两组组合消融使用完全相同的五机场 OpenAP-direct roster、split、N=64、batch=512、
+`60→120→240→full` curriculum、clip norm=20、seed/split seed=1337。train/validation
+分别为 10239/2167 条固定身份航迹；outer-test source tracks 始终关闭。比较表中的 ADE/FDE
+均来自最佳 checkpoint 的固定-anchor、64 点 common physical-time grid，不是 native grid：
+
+| 配方 | best / run epoch | updates | 机场宏平均 criteria | common ADE (m) | common FDE (m) | time MAE (s) |
+|---|---:|---:|---:|---:|---:|---:|
+| 无 curriculum 基线，LR=`3e-4`，无 clip | 15 / 35 | 700 | 27.6909 | 2424.69 | 2688.55 | 63.64 |
+| 无 curriculum，LR=`3e-5` + clip20 | 146 / 166 | 3320 | 23.9121 | 2127.77 | 2323.65 | **63.39** |
+| curriculum + LR=`1e-4` + clip20 | 144 / 164 | 3280 | 21.6476 | **1706.44** | 2128.25 | **63.67** |
+| curriculum + LR=`3e-5` + clip20 | 165 / 180 | 3600 | **20.8005** | 1852.05 | **2055.70** | 69.51 |
+
+相对无 curriculum、无 clip 的旧基线，两组组合都显著改善：
+
+- `1e-4`：criteria -21.82%，ADE -29.62%，FDE -20.84%，时间 MAE 基本不变；
+- `3e-5`：criteria -24.88%，ADE -23.62%，FDE -23.54%，时间 MAE +9.22%。
+
+但两个组合不是简单的“低 LR 全面更好”。与 `1e-4` 组合相比，`3e-5` 的预注册机场宏平均
+criteria 低 3.91%，common FDE 低 3.41%，而 pooled common ADE 高 8.53%、时间 MAE 高
+9.17%。这是指标定义导致的真实 Pareto 权衡：checkpoint criteria 对每个机场计算
+`smooth-max(ADE/100m, FDE/100m)` 后再机场等权平均；当前 FDE 通常是较差的一项，因而
+`3e-5` 的终点改善压过了 ADE 退化。`3e-5` 在五个机场上的 criteria 均低于 `1e-4`：
+
+| 机场 | LR=`1e-4` | LR=`3e-5` |
+|---|---:|---:|
+| KMSY | 30.3679 | 27.9611 |
+| KRDU | 27.5793 | 27.1583 |
+| KSJC | 10.6518 | 9.9965 |
+| KSMF | 17.5680 | 17.2834 |
+| KSTL | 22.0711 | 21.6031 |
+
+因此按实验前已声明的 selection contract，`3e-5` 是组合消融胜者；若论文另行声明 ADE 为
+唯一主指标，则 `1e-4` 是 ADE Pareto 点，不能事后把二者混写成一个“全面最优”模型。
+
+clip20 成功把 curriculum-only 的 NaN 失败变为可完成训练，但没有消除病态梯度：
+
+- `1e-4` 全程最大裁剪前总梯度约 `4.17e17`，epoch 平均 clip 触发率 99.94%；
+- `3e-5` 最大裁剪前总梯度仍约 `1.37e13`，epoch 平均 clip 触发率 98.83%；
+- 两个最佳 epoch 都是 20/20 batch 触发 clip；`1e-4` 最佳 epoch 的总体控制饱和率
+  约 0.336%，`3e-5` 为 0。
+
+所以降低 LR 不是梯度爆炸的根治手段；长时 single-shooting rollout 的局部敏感度仍是根因。
+同时训练成本由旧基线 700 updates 增至 3280/3600 updates，组合收益伴随明显计算开销。
+
+### Clip-only 因果对照：curriculum 的空间收益成立
+
+保持 `LR=3e-5 + clip20`、模型、roster、split、epoch budget 与所有 loss 不变，只去掉
+curriculum。clip-only 在 epoch 146 达到最佳 criteria=`23.9121`，epoch 166 早停；curriculum
+组合在 epoch 165 达到 `20.8005` 并跑满 180 epoch。相对 clip-only，curriculum：
+
+- 机场宏平均 criteria 降低 13.01%；
+- pooled common-grid ADE/FDE 分别降低 12.96%/11.53%；
+- 时间 MAE 从 63.39 s 增至 69.51 s，退化 9.65%；
+- optimizer updates 多 8.43%（3600 vs 3320），但训练墙钟少 6.30%（5879 s vs 6274 s），
+  因为 30 个 prefix epoch 远比 full rollout 便宜；
+- 五机场中 KMSY/KRDU/KSJC/KSMF criteria 更好，KSTL 更差，收益不是每机场一致。
+
+因此在数值已由 clip20 稳定的 `LR=3e-5` 配方下，可以独立确认 horizon curriculum 改善了
+固定-anchor 空间轨迹和预注册 selection criteria；它也更快到达较好的 full-horizon basin。
+这个结论不能外推成“任何 LR 下 curriculum 都有效”：`LR=3e-4` 的 curriculum-only 仍然是
+NaN 失败。当前部署候选按预注册 selection contract 选 `LR=3e-5 + curriculum + clip20`，但若
+4D 时间误差与空间误差同等重要，该候选尚未结束优化，因为时间 MAE 明显退化。
+
+检查实现后确认，短阶段的 final-time loss 始终比较原始 `prediction.final_time_s` 与完整真实总时长，
+没有把 clock head 错教成 60/120/240 s；时间退化不是 crop label bug。当前最可能的下一项最小
+消融是 final-time clip 解耦：control/backbone 路径继续使用 clip20，final-time head 独立裁剪或
+不参与该全局缩放。其动机来自诊断而非既成结论：最佳 epoch 的 final-time-head 梯度最大值仅约
+0.15--0.16，而 control-head 为约 990--1380；全局 clip 会把小的 clock 梯度一起缩小。该消融
+必须继续用同一 train/validation roster 验证，不能用 test 决策。
+
+输出目录：
+
+- `outputs/POOLED/experiments/openap_direct_20260731_horizon_curriculum_lr_clip/itransformer_n64_b512_lr1e4_clip20_seed1337/`
+- `outputs/POOLED/experiments/openap_direct_20260731_horizon_curriculum_lr_clip/itransformer_n64_b512_lr3e5_clip20_seed1337/`
+- `outputs/POOLED/experiments/openap_direct_20260731_horizon_curriculum_lr_clip/itransformer_n64_b512_lr3e5_clip20_no_curriculum_seed1337/`
+
+## 3. Final-time clip 解耦
+
+当前 `clip_norm=20` 是所有参数共享的全局 L2 cap。控制 rollout 梯度比 final-time head 梯度高
+数千到数万倍时，后者也被同一缩放系数压低。最小实现应放在独立 gradient policy 模块中，而非
+向 backbone 或预测头加入模式分支；先只比较“全局 clip20”与“control/backbone clip20、
+final-time head 独立”的 validation 空间/时间 Pareto，不改变推理结构。
+
+### 实现边界
+
+新增的 `final-time-decoupled` 策略只把模型参数分成两个裁剪 scope：
+
+- `backbone + control_head` 作为一个向量继续做 global L2 clip20；
+- `final_time_head` 参数不参与上述缩放。
+
+共享 backbone 中来自空间 loss 和时间 loss 的梯度在一次反向传播后已经相加，本消融不尝试拆分
+它们；否则需要分别 backward 或改变优化目标，便不再是最小单变量实验。模型 forward、loss、
+optimizer、推理结构和数据完全不变。
+
+### Train/validation 结果
+
+实验保持上一轮预注册胜者的五机场 roster、iTransformer、N=64、batch=512、LR=`3e-5`、
+`60→120→240→full` curriculum、clip20、seed/split seed=1337，只把 clip policy 从
+`global` 改为 `final-time-decoupled`。outer-test source tracks 始终关闭。
+
+| clip policy | best / run epoch | criteria | common ADE (m) | common FDE (m) | time MAE (s) |
+|---|---:|---:|---:|---:|---:|
+| global | 165 / 180 | **20.8005** | 1852.05 | **2055.70** | 69.51 |
+| final-time-decoupled | 144 / 164 | 21.0431 | **1813.11** | 2067.91 | **63.63** |
+
+相对 global clip，解耦策略的 common ADE 改善 2.10%、时间 MAE 改善 8.46%，但预注册机场
+宏平均 criteria 退化 1.17%、FDE 退化 0.59%。分机场 criteria 也不一致：KSTL 改善 9.29%，
+KMSY/KRDU/KSJC 分别退化 5.66%/3.13%/7.67%，KSMF 基本持平（+0.10%）。因此这是一个
+真实 Pareto 点，不能称为全面优于 global clip；按预注册 selection contract，global clip20
+仍是下一项空间模型消融的基础配置。
+
+机制假设得到部分支持：解耦模型最佳 epoch 的 final-time validation loss 为 0.02132，而 global
+clip 为 0.02489；时间 MAE也恢复到与旧基线相近的 63.63 s。但它没有解决长时 rollout 梯度：
+control/backbone 的 epoch 平均 clip 触发率仍为 98.75%，全程最大裁剪前范数约 `8.71e18`。
+最佳 epoch 的 control/backbone clip 系数均值仅 0.0689，而 final-time head 始终保持 1.0。
+
+输出目录：
+
+- `outputs/POOLED/experiments/openap_direct_20260731_final_time_clip_decoupling/itransformer_n64_b512_lr3e5_clip20_final_time_decoupled_seed1337/`
+
+## 4. Trim baseline + residual control
 
 用历史末状态和飞机气动参数计算保持当前 `V/psi/gamma` 的基准控制：
 
@@ -84,17 +249,74 @@ n_trim = cos(gamma)
 T_trim = D + m*g*sin(gamma)
 ```
 
-模型在有界 logit 空间只预测 residual；零 residual 精确返回每架飞机自己的 trim control。该方法
+模型在有界 logit 空间只预测 residual；零 residual 返回每架飞机自己的 trim control。该方法
 不读取未来，可同时服务 iTransformer/PatchTST。Residual 模式的 effort/smoothness 应作用于
 residual，而不是惩罚维持飞行所必需的绝对推力和载荷因子。
 
-## 4. Train-only oracle teacher
+### 已实现的独立模式与首轮协议
+
+`trim-residual` 是 control value parameterization，不是新 backbone，也不改变 duration head。
+独立模块使用共享 Torch 动力学中的 ISA 密度、升阻模型和飞机参数计算 anchor baseline；预测头
+通过 `sigmoid(logit(trim_fraction) + residual_logit)` 保持每架飞机自己的物理上下界；为避免
+边界 logit 无穷，trim fraction 仅在数值上内缩 `1e-6`，所有
+residual 权重/偏置初始化为零。effort 惩罚 `(control-trim)/(upper-lower)`，smoothness 对同一
+residual 做相邻段差分。训练和推理都只需要历史最后状态与随航班提供的飞机参数。
+
+对固定 development roster 的 12,406 条航迹做了不读取 outer-test 的 anchor 审计：没有 baseline
+失速或 load-factor 裁剪，平均 `n_trim=0.9987`；但 16.65% 的下降状态按上述公式会要求负推力，
+因此被物理约束裁到 0。对这部分样本，零 residual 是 idle-thrust constrained baseline，不能精确
+维持速度。该限制预先保留，不使用真实 future 修正 trim。
+
+首轮是相对当前预注册 selection 胜者的单变量消融：五机场 iTransformer、N=64、batch=512、
+LR=`3e-5`、global clip20、`60→120→240→full` curriculum 及全部 split/seed/loss 保持不变，
+只把 absolute control head/absolute effort 改为 trim-residual head/residual effort。先按相同的
+固定-anchor validation criteria 判断；只有通过后再迁移到 PatchTST，outer-test 始终封存。
+
+### 首轮 train/validation 结果：未通过迁移门槛
+
+实验使用与 absolute-control 胜者完全相同的 10,239/2,167 条 train/validation 航迹、固定 anchor、
+split seed 和训练预算；outer-test source tracks 始终关闭。trim-residual 跑满 180 epoch，最佳
+checkpoint 位于 epoch 175，selection criteria 精确值为 `21.9754557`：
+
+| control value 参数化 | best / run epoch | criteria | common ADE (m) | common FDE (m) | time MAE (s) |
+|---|---:|---:|---:|---:|---:|
+| absolute | 165 / 180 | **20.8005** | 1852.05 | **2055.70** | **69.51** |
+| trim-residual | 175 / 180 | 21.9755 | **1818.94** | 2242.58 | 72.29 |
+
+相对 absolute，trim-residual 的 pooled common-grid ADE 改善 1.79%，但 FDE 退化 9.09%、时间
+MAE 退化 4.00%，预注册机场宏平均 criteria 最终退化 5.65%。分机场结果揭示了宏平均退化的主要
+来源：四个机场有小幅改善，KRDU 则明显恶化。
+
+| 机场 | absolute criteria | trim-residual criteria | 相对变化 |
+|---|---:|---:|---:|
+| KMSY | 27.9611 | 27.3158 | -2.31% |
+| KRDU | **27.1583** | 34.4850 | **+26.98%** |
+| KSJC | 9.9965 | 9.7272 | -2.69% |
+| KSMF | 17.2834 | 16.8847 | -2.31% |
+| KSTL | 21.6031 | 21.4646 | -0.64% |
+
+优化难度也没有被 trim 消除。全程 epoch 平均 clip 触发率为 99.86%，最大裁剪前总梯度约
+`3.87e11`；虽然低于 absolute 对照的 `1.37e13`，但最佳 epoch 的平均裁剪前总梯度为 948.0，
+高于 absolute 最佳 epoch 的 331.5。trim 最佳 checkpoint 的总体饱和率为 11.45%，全部来自
+推力，约 34.36% 的推力控制点落在上下界 1% 内；这与 16.65% anchor 需要 idle-thrust constrained
+baseline 的先验审计一致，不应解释为所有控制维度的路由或输出坍缩。
+
+结论：当前 trim baseline 改善了平均路径贴合，但牺牲终点和 KRDU 泛化，未通过预先声明的
+`criteria < 20.8005` 迁移门槛。依照实验协议不启动 PatchTST，不因看到结果而修改门槛，也不查看
+outer-test。后续若重新研究 trim，应作为新的独立实验定位 KRDU/下降状态的 constrained-trim
+失配，而不能把本轮结果称为 backbone 无关的有效优化。
+
+输出目录：
+
+- `outputs/POOLED/experiments/openap_direct_20260731_trim_residual/itransformer_n64_b512_lr3e5_clip20_seed1337/`
+
+## 5. Train-only oracle teacher
 
 仅在 outer-train 航迹上离线生成确定性 oracle schedule，先做 control imitation，再切换到可微
 rollout physical criteria。Inverse dynamics 在这里是 teacher 构建工具，不进入部署前向。由于
 control 解不唯一且生成成本高，先限制为每机场 20--50 条 train 航迹。
 
-## 5. Progressive N refinement
+## 6. Progressive N refinement
 
 从较低 N 开始训练，升级时复制每段 control 并平分 duration，使升级瞬间的 rollout 等价。
 此前 absolute/factorized 模型中 N=4/8 表达不足、N=32 出现时钟坍缩；固定均匀 duration 消除了

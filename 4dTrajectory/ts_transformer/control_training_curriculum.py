@@ -161,8 +161,12 @@ def build_control_training_stage_view(
     if stage.horizon_s is None or not math.isfinite(stage.horizon_s):
         raise ValueError("numeric curriculum stage requires a finite horizon")
 
-    durations = prediction.segment_durations
-    dtype, device = durations.dtype, durations.device
+    # Curriculum boundaries belong to the fixed-dt reference clock (float64). Cropping
+    # float32 duration fractions and only then promoting them can leave an exact 60 s
+    # query a few microseconds beyond the reconstructed total.
+    device = prediction.segment_durations.device
+    dtype = supervision.query_offsets_s.dtype
+    durations = prediction.segment_durations.to(dtype=dtype, device=device)
     target_total = target_final_time_s.to(dtype=dtype, device=device)
     horizon = torch.full_like(target_total, stage.horizon_s)
     effective_horizon = torch.minimum(target_total, horizon)
@@ -179,6 +183,24 @@ def build_control_training_stage_view(
         raise RuntimeError("curriculum control mask must be a valid prefix")
     stage_durations = torch.where(
         segment_valid, stage_durations, torch.zeros_like(stage_durations)
+    )
+    # Close the prefix on the float64 reference clock. Merely promoting float32 model
+    # durations preserves their accumulated rounding error; for a flight ending exactly on
+    # a fixed-dt query, that can leave the query a few microseconds beyond the rollout.
+    # Recompute the last valid duration from the preceding float64 cumulative boundary so
+    # the dense scheduler sees the intended effective horizon exactly.
+    last_valid = segment_valid.sum(dim=1, dtype=torch.long) - 1
+    cumulative = stage_durations.cumsum(dim=1)
+    previous_index = (last_valid - 1).clamp(min=0)
+    previous_total = torch.gather(
+        cumulative, 1, previous_index.unsqueeze(1)
+    ).squeeze(1)
+    previous_total = torch.where(
+        last_valid > 0, previous_total, torch.zeros_like(previous_total)
+    )
+    corrected_last = effective_horizon - previous_total
+    stage_durations = stage_durations.scatter(
+        1, last_valid.unsqueeze(1), corrected_last.unsqueeze(1)
     )
     if not torch.allclose(
         stage_durations.sum(dim=1), effective_horizon, rtol=1e-6, atol=1e-6

@@ -62,6 +62,18 @@ CONTROL_DURATION_PARAMETERIZATIONS = (
     CONTROL_DURATION_FACTORIZED,
     CONTROL_DURATION_DIRECT,
 )
+CONTROL_VALUE_ABSOLUTE = "absolute"
+CONTROL_VALUE_TRIM_RESIDUAL = "trim-residual"
+CONTROL_VALUE_PARAMETERIZATIONS = (
+    CONTROL_VALUE_ABSOLUTE,
+    CONTROL_VALUE_TRIM_RESIDUAL,
+)
+CONTROL_GRADIENT_CLIP_GLOBAL = "global"
+CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED = "final-time-decoupled"
+CONTROL_GRADIENT_CLIP_POLICIES = (
+    CONTROL_GRADIENT_CLIP_GLOBAL,
+    CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED,
+)
 
 CHECKPOINT_SELECTION_OBJECTIVE = "fixed-anchor-objective"
 CHECKPOINT_SELECTION_COMMON_GRID_ADE = "fixed-anchor-common-grid-ade"
@@ -264,6 +276,10 @@ class TSConfig:
     # positive segment duration and derives total time by summation. Both emit the same
     # ControlPrediction contract, so rollout/loss/inference remain strategy-agnostic.
     control_duration_parameterization: str = CONTROL_DURATION_FACTORIZED
+    # Absolute controls preserve the original head. Trim-residual controls use only the
+    # observed anchor state and aircraft parameters to construct a deployable zero-residual
+    # baseline, then learn bounded corrections with the same backbone features.
+    control_value_parameterization: str = CONTROL_VALUE_ABSOLUTE
     # Which total duration drives the differentiable rollout used by control state loss.
     # ``predicted`` preserves the original joint geometry/clock training. ``observed`` is
     # an explicit development candidate: controls and duration fractions receive state
@@ -288,6 +304,12 @@ class TSConfig:
     control_horizon_curriculum_stage_epochs: int = (
         DEFAULT_CONTROL_HORIZON_CURRICULUM_STAGE_EPOCHS
     )
+    # Optional gradient-norm cap for deterministic control training. The default policy
+    # applies one global cap. The opt-in ablation leaves only an isolated factorized
+    # final-time head outside the combined backbone/control cap, so it requires observed
+    # state clock and detached state-duration gradients. Zero keeps historical behavior.
+    control_gradient_clip_norm: float = 0.0
+    control_gradient_clip_policy: str = CONTROL_GRADIENT_CLIP_GLOBAL
     # Multi-expert control output is a separate opt-in strategy. The default K=3 keeps the
     # first experiment small; these weights affect only ``control-mixture`` checkpoints.
     control_expert_count: int = 3
@@ -436,12 +458,67 @@ class TSConfig:
                 raise ValueError(
                     "control horizon curriculum must leave at least one full-horizon epoch"
                 )
+        if (
+            not math.isfinite(self.control_gradient_clip_norm)
+            or self.control_gradient_clip_norm < 0.0
+        ):
+            raise ValueError("control_gradient_clip_norm must be finite and non-negative")
+        if self.control_gradient_clip_policy not in CONTROL_GRADIENT_CLIP_POLICIES:
+            raise ValueError(
+                "unknown control_gradient_clip_policy "
+                f"{self.control_gradient_clip_policy!r}; expected one of "
+                f"{CONTROL_GRADIENT_CLIP_POLICIES}"
+            )
+        if (
+            self.control_gradient_clip_norm > 0.0
+            and self.prediction_output != PREDICTION_CONTROL
+        ):
+            raise ValueError(
+                "control gradient clipping is supported only by "
+                "prediction_output='control'"
+            )
+        if (
+            self.control_gradient_clip_policy != CONTROL_GRADIENT_CLIP_GLOBAL
+            and self.control_gradient_clip_norm <= 0.0
+        ):
+            raise ValueError(
+                "non-global control gradient clip policy requires a positive clip norm"
+            )
         if self.control_duration_parameterization not in CONTROL_DURATION_PARAMETERIZATIONS:
             raise ValueError(
                 "unknown control_duration_parameterization "
                 f"{self.control_duration_parameterization!r}; expected one of "
                 f"{CONTROL_DURATION_PARAMETERIZATIONS}"
             )
+        if self.control_gradient_clip_policy == CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED:
+            if self.control_duration_parameterization != CONTROL_DURATION_FACTORIZED:
+                raise ValueError(
+                    "final-time-decoupled clipping requires factorized durations"
+                )
+            if self.control_state_supervision_clock != CONTROL_STATE_CLOCK_OBSERVED:
+                raise ValueError(
+                    "final-time-decoupled clipping requires observed state clock"
+                )
+            if self.control_state_duration_gradient:
+                raise ValueError(
+                    "final-time-decoupled clipping requires detached state-duration gradients"
+                )
+        if self.control_value_parameterization not in CONTROL_VALUE_PARAMETERIZATIONS:
+            raise ValueError(
+                "unknown control_value_parameterization "
+                f"{self.control_value_parameterization!r}; expected one of "
+                f"{CONTROL_VALUE_PARAMETERIZATIONS}"
+            )
+        if self.control_value_parameterization == CONTROL_VALUE_TRIM_RESIDUAL:
+            if self.prediction_output != PREDICTION_CONTROL:
+                raise ValueError(
+                    "trim-residual controls are supported only by "
+                    "prediction_output='control'"
+                )
+            if self.control_duration_parameterization != CONTROL_DURATION_FACTORIZED:
+                raise ValueError(
+                    "trim-residual controls currently require factorized durations"
+                )
         if (
             self.control_duration_parameterization == CONTROL_DURATION_DIRECT
             and self.prediction_output != PREDICTION_CONTROL
@@ -608,6 +685,9 @@ class TSConfig:
         for field_name in (
             "control_horizon_curriculum_s",
             "control_horizon_curriculum_stage_epochs",
+            "control_gradient_clip_norm",
+            "control_gradient_clip_policy",
+            "control_value_parameterization",
         ):
             if (
                 uses_control_dynamics(data.get("prediction_output", PREDICTION_STATE))
@@ -631,6 +711,7 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
         "effort_loss_weight": config.control_effort_loss_weight,
         "smoothness_loss_weight": config.control_smoothness_loss_weight,
         "duration_parameterization": config.control_duration_parameterization,
+        "value_parameterization": config.control_value_parameterization,
         "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
         "state_supervision_clock": config.control_state_supervision_clock,
         "state_loss_grid": config.control_state_loss_grid,
@@ -640,6 +721,8 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
         "horizon_curriculum_stage_epochs": (
             config.control_horizon_curriculum_stage_epochs
         ),
+        "gradient_clip_norm": config.control_gradient_clip_norm,
+        "gradient_clip_policy": config.control_gradient_clip_policy,
     }
     extensions = {
         PREDICTION_CONTROL: {},

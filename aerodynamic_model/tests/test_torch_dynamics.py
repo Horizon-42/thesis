@@ -291,6 +291,64 @@ def test_dense_rollout_records_fixed_queries_and_backpropagates_through_switch_t
     assert durations.grad[0, 0] != 0.0
 
 
+def test_dense_rollout_masks_inactive_control_suffix_and_its_gradients():
+    initial = _state_tensor(
+        GeodeticState(
+            35.88, -78.79, 900.0, 80.0, 2.2, -0.04, A320.landing_mass
+        )
+    )
+    controls = torch.tensor(
+        [[
+            [45_000.0, 0.08, 1.02],
+            [36_000.0, -0.04, 0.99],
+            [120_000.0, 0.60, 1.80],
+            [5_000.0, -0.60, 0.60],
+        ]],
+        dtype=torch.float64,
+        requires_grad=True,
+    )
+    durations = torch.tensor(
+        [[1.0, 1.0, 0.0, 0.0]], dtype=torch.float64, requires_grad=True
+    )
+    queries = torch.tensor([[1.0, 2.0]], dtype=torch.float64)
+    query_valid = torch.ones_like(queries, dtype=torch.bool)
+    segment_valid = torch.tensor([[True, True, False, False]])
+
+    masked = rollout_piecewise_constant_at_times(
+        initial,
+        controls,
+        durations,
+        _aero_tensor(),
+        queries,
+        query_valid,
+        segment_valid=segment_valid,
+        integrator_dt_s=0.5,
+    )
+    reference = rollout_piecewise_constant_at_times(
+        initial,
+        controls[:, :2].detach(),
+        torch.tensor([[1.0, 1.0]], dtype=torch.float64),
+        _aero_tensor(),
+        queries,
+        query_valid,
+        integrator_dt_s=0.5,
+    )
+
+    torch.testing.assert_close(masked.query_states, reference.query_states)
+    torch.testing.assert_close(
+        masked.segment_end_states[:, :2], reference.segment_end_states
+    )
+    torch.testing.assert_close(
+        masked.segment_end_states[:, 2:],
+        reference.segment_end_states[:, -1:].expand(-1, 2, -1),
+    )
+    masked.query_states[..., 2:6].square().mean().backward()
+
+    assert torch.count_nonzero(controls.grad[:, :2]) > 0
+    assert torch.count_nonzero(controls.grad[:, 2:]) == 0
+    assert torch.count_nonzero(durations.grad[:, 2:]) == 0
+
+
 def test_single_flight_dense_adjoint_canonicalizes_horizon_dependent_state_stride(
     monkeypatch,
 ):

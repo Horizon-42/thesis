@@ -1,10 +1,11 @@
 """Resolve an efficient batch size against the actual model and CUDA device.
 
-The auto path probes complete FP32 training steps (forward, backward, Adam update) on
-synthetic tensors with the run's real ``L/N/C`` and architecture. Control probes also use
-heterogeneous non-uniform duration partitions because their batched graph depth is governed
-by per-segment maxima. That is more reliable than naming GPU models in a table: free memory,
-model width, layer count and output grid all matter.
+The auto path probes complete training steps (forward, backward, configured gradient
+diagnostics/clipping, Adam update) on synthetic tensors with the run's real ``L/N/C`` and
+architecture. Control probes also use heterogeneous non-uniform duration partitions because
+their batched graph depth is governed by per-segment maxima. That is more reliable than
+naming GPU models in a table: free memory, model width, layer count and output grid all
+matter.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ import torch
 
 from config import CONTROL_STATE_LOSS_GRID_FIXED_DT, TSConfig, uses_control_dynamics
 from control_prediction_adapters import map_control_candidates
+from control_training_diagnostics import ControlTrainingDiagnosticsAccumulator
 from models import build_model
 from prediction_outputs import ControlPrediction
 
@@ -65,7 +67,7 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
     from fixed_dt_supervision import FixedDTControlSupervision
     from train import model_forward, prediction_loss
 
-    model = optimizer = x = target = state_weights = None
+    model = optimizer = x = target = state_weights = control_diagnostics = None
     target_final_time_s = flight_weights = prediction = loss = normalizer = None
     try:
         torch.manual_seed(config.seed)
@@ -149,6 +151,16 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
             prediction = map_control_candidates(
                 prediction, _heterogeneous_control_probe_prediction
             )
+            if config.control_gradient_clip_norm > 0.0:
+                if not isinstance(prediction, ControlPrediction) or dynamics is None:
+                    raise RuntimeError(
+                        "control gradient diagnostics require deterministic control output"
+                    )
+                control_diagnostics = ControlTrainingDiagnosticsAccumulator(
+                    config.control_gradient_clip_norm,
+                    policy=config.control_gradient_clip_policy,
+                )
+                control_diagnostics.record_prediction(prediction, dynamics)
         loss = prediction_loss(
             prediction,
             x[:, -1],
@@ -162,6 +174,8 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
             dense_supervision,
         )
         loss.backward()
+        if control_diagnostics is not None:
+            control_diagnostics.record_gradients_and_clip(model)
         optimizer.step()
         finite_model = all(torch.isfinite(parameter).all() for parameter in model.parameters())
         finite_optimizer = all(
@@ -176,7 +190,7 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
         torch.cuda.synchronize(device)
     finally:
         del loss, prediction, flight_weights, target_final_time_s, state_weights, target, x
-        del normalizer, optimizer, model
+        del control_diagnostics, normalizer, optimizer, model
         gc.collect()
         torch.cuda.empty_cache()
 

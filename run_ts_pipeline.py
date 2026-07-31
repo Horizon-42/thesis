@@ -46,6 +46,10 @@ from config import (  # noqa: E402
     CHECKPOINT_SELECTION_OBJECTIVE,
     CONTROL_DURATION_FACTORIZED,
     CONTROL_DURATION_PARAMETERIZATIONS,
+    CONTROL_GRADIENT_CLIP_GLOBAL,
+    CONTROL_GRADIENT_CLIP_POLICIES,
+    CONTROL_VALUE_ABSOLUTE,
+    CONTROL_VALUE_PARAMETERIZATIONS,
     CONTROL_STATE_CLOCKS,
     CONTROL_STATE_CLOCK_PREDICTED,
     CONTROL_STATE_LOSS_GRIDS,
@@ -174,6 +178,15 @@ def _control_duration_tag(prediction_output: str, parameterization: str) -> str:
     return f"_{parameterization}_duration"
 
 
+def _control_value_tag(prediction_output: str, parameterization: str) -> str:
+    if (
+        not uses_control_dynamics(prediction_output)
+        or parameterization == CONTROL_VALUE_ABSOLUTE
+    ):
+        return ""
+    return f"_{parameterization.replace('-', '_')}"
+
+
 def _control_objective_tag(prediction_output: str, objective: str) -> str:
     if (
         not uses_control_dynamics(prediction_output)
@@ -207,6 +220,29 @@ def _control_horizon_curriculum_label(
         return ""
     horizons = "→".join(f"{value:g}" for value in horizons_s)
     return f"horizon curriculum {horizons} s × {stage_epochs} epochs, "
+
+
+def _control_gradient_clip_tag(max_norm: float, policy: str) -> str:
+    if max_norm <= 0.0:
+        return ""
+    compact = f"{max_norm:g}".replace(".", "p")
+    policy_tag = (
+        ""
+        if policy == CONTROL_GRADIENT_CLIP_GLOBAL
+        else f"_{policy.replace('-', '_')}"
+    )
+    return f"_gradient_clip{compact}{policy_tag}"
+
+
+def _control_gradient_clip_label(max_norm: float, policy: str) -> str:
+    if max_norm <= 0.0:
+        return ""
+    policy_label = (
+        ""
+        if policy == CONTROL_GRADIENT_CLIP_GLOBAL
+        else " (final-time head decoupled)"
+    )
+    return f"gradient clip {max_norm:g}{policy_label}, "
 
 
 def _control_duration_label(prediction_output: str, parameterization: str) -> str:
@@ -265,6 +301,7 @@ class TrainingPlan:
         control_effort_weight: float | None = None,
         control_smoothness_weight: float | None = None,
         control_duration_parameterization: str = CONTROL_DURATION_FACTORIZED,
+        control_value_parameterization: str = CONTROL_VALUE_ABSOLUTE,
         control_experts: int | None = None,
         control_selector_weight: float | None = None,
         control_diversity_weight: float | None = None,
@@ -276,6 +313,8 @@ class TrainingPlan:
         control_horizon_curriculum_stage_epochs: int = (
             DEFAULT_CONTROL_HORIZON_CURRICULUM_STAGE_EPOCHS
         ),
+        control_gradient_clip_norm: float = 0.0,
+        control_gradient_clip_policy: str = CONTROL_GRADIENT_CLIP_GLOBAL,
         control_rollout_dt: float | None = None,
         output_dir: str | Path | None = None,
     ) -> None:
@@ -309,6 +348,7 @@ class TrainingPlan:
         self.control_effort_weight = control_effort_weight
         self.control_smoothness_weight = control_smoothness_weight
         self.control_duration_parameterization = control_duration_parameterization
+        self.control_value_parameterization = control_value_parameterization
         self.control_experts = control_experts
         self.control_selector_weight = control_selector_weight
         self.control_diversity_weight = control_diversity_weight
@@ -320,6 +360,8 @@ class TrainingPlan:
         self.control_horizon_curriculum_stage_epochs = (
             control_horizon_curriculum_stage_epochs
         )
+        self.control_gradient_clip_norm = control_gradient_clip_norm
+        self.control_gradient_clip_policy = control_gradient_clip_policy
         self.control_rollout_dt = control_rollout_dt
 
         self.data_manifests = tuple(arrival_manifest_path(airport) for airport in self.airports)
@@ -328,6 +370,9 @@ class TrainingPlan:
             _prediction_output_tag(prediction_output)
             + _control_duration_tag(
                 prediction_output, control_duration_parameterization
+            )
+            + _control_value_tag(
+                prediction_output, control_value_parameterization
             )
             + _control_clock_tag(prediction_output, control_state_clock)
             + _control_state_loss_grid_tag(prediction_output, control_state_loss_grid)
@@ -338,6 +383,9 @@ class TrainingPlan:
             + _control_horizon_curriculum_tag(
                 control_horizon_curriculum_s,
                 control_horizon_curriculum_stage_epochs,
+            )
+            + _control_gradient_clip_tag(
+                control_gradient_clip_norm, control_gradient_clip_policy
             )
             + _aircraft_filter_tag(aircraft_filter)
             + _frame_tag(coordinate_frame)
@@ -416,6 +464,8 @@ class TrainingPlan:
         args += [
             "--control-duration-parameterization",
             self.control_duration_parameterization,
+            "--control-value-parameterization",
+            self.control_value_parameterization,
         ]
         if self.control_experts is not None:
             args += ["--control-experts", str(self.control_experts)]
@@ -434,6 +484,13 @@ class TrainingPlan:
                 ",".join(f"{value:g}" for value in self.control_horizon_curriculum_s),
                 "--control-horizon-stage-epochs",
                 str(self.control_horizon_curriculum_stage_epochs),
+            ]
+        if self.control_gradient_clip_norm > 0.0:
+            args += [
+                "--control-gradient-clip-norm",
+                f"{self.control_gradient_clip_norm:g}",
+                "--control-gradient-clip-policy",
+                self.control_gradient_clip_policy,
             ]
         if self.control_rollout_dt is not None:
             args += ["--control-rollout-dt", str(self.control_rollout_dt)]
@@ -576,7 +633,10 @@ class TrainingPlan:
             "control_horizon_curriculum_stage_epochs": (
                 self.control_horizon_curriculum_stage_epochs
             ),
+            "control_gradient_clip_norm": self.control_gradient_clip_norm,
+            "control_gradient_clip_policy": self.control_gradient_clip_policy,
             "control_duration_parameterization": self.control_duration_parameterization,
+            "control_value_parameterization": self.control_value_parameterization,
         }
         if self.full_horizon_steps is not None:
             overrides["full_horizon_steps"] = self.full_horizon_steps
@@ -672,7 +732,10 @@ class TrainingPlan:
             "control_horizon_curriculum_stage_epochs": (
                 self.control_horizon_curriculum_stage_epochs
             ),
+            "control_gradient_clip_norm": self.control_gradient_clip_norm,
+            "control_gradient_clip_policy": self.control_gradient_clip_policy,
             "control_duration_parameterization": self.control_duration_parameterization,
+            "control_value_parameterization": self.control_value_parameterization,
         })
         if self.full_horizon_steps is not None:
             overrides["full_horizon_steps"] = self.full_horizon_steps
@@ -757,6 +820,9 @@ class PredictionPlan:
         control_duration = _control_duration_tag(
             training.prediction_output, training.control_duration_parameterization
         )
+        control_value = _control_value_tag(
+            training.prediction_output, training.control_value_parameterization
+        )
         control_clock = _control_clock_tag(
             training.prediction_output, training.control_state_clock
         )
@@ -773,14 +839,18 @@ class PredictionPlan:
             training.control_horizon_curriculum_s,
             training.control_horizon_curriculum_stage_epochs,
         )
+        gradient_clip = _control_gradient_clip_tag(
+            training.control_gradient_clip_norm,
+            training.control_gradient_clip_policy,
+        )
         aircraft_filter = _aircraft_filter_tag(training.aircraft_filter)
         tag = f"_{experiment_tag}" if experiment_tag else ""
         horizon_tag = HORIZON_TAGS[training.horizon_mode]
         stem = (
-            f"{scope}{training.model}{prediction_output}{control_duration}"
+            f"{scope}{training.model}{prediction_output}{control_duration}{control_value}"
             f"{control_clock}_{horizon_tag}"
             f"{control_state_loss_grid}{control_objective}{duration_gradient}"
-            f"{horizon_curriculum}"
+            f"{horizon_curriculum}{gradient_clip}"
             f"{aircraft_filter}{frame}{anchor}{training_cohort}"
             f"{validation_selection}{tag}_{split}"
         )
@@ -791,9 +861,9 @@ class PredictionPlan:
         category_scope = "pooled_" if training.pooled else ""
         self.category = (
             f"ts_{category_scope}{MODEL_SHORT[training.model]}{prediction_output}"
-            f"{control_duration}_{horizon_tag}"
+            f"{control_duration}{control_value}_{horizon_tag}"
             f"{control_state_loss_grid}{control_objective}{duration_gradient}"
-            f"{horizon_curriculum}"
+            f"{horizon_curriculum}{gradient_clip}"
             f"{aircraft_filter}{frame}{anchor}{training_cohort}"
             f"{validation_selection}{tag}_{split}"
         )
@@ -807,6 +877,11 @@ class PredictionPlan:
             training.control_duration_parameterization,
         )
         output_label = f"{training.prediction_output} output, {duration_label}"
+        value_label = (
+            "trim-residual controls, "
+            if training.control_value_parameterization != CONTROL_VALUE_ABSOLUTE
+            else ""
+        )
         state_loss_label = (
             "fixed-dt state loss, "
             if training.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_NATIVE
@@ -826,10 +901,15 @@ class PredictionPlan:
             training.control_horizon_curriculum_s,
             training.control_horizon_curriculum_stage_epochs,
         )
+        gradient_clip_label = _control_gradient_clip_label(
+            training.control_gradient_clip_norm,
+            training.control_gradient_clip_policy,
+        )
         self.label = (
             f"{SPLIT_LABELS[split]} — Predicted ({model_label}, {pooled_label}"
-            f"{output_label}{state_loss_label}{objective_label}{duration_gradient_label}"
-            f"{curriculum_label}"
+            f"{output_label}{value_label}{state_loss_label}{objective_label}"
+            f"{duration_gradient_label}"
+            f"{curriculum_label}{gradient_clip_label}"
             f"{anchor_label}{horizon_label}, {frame_label})"
         )
         self.comparison_dir = (
@@ -955,6 +1035,7 @@ def run_training(
                 f"   control   : effort={config.control_effort_loss_weight:g}, "
                 f"smoothness={config.control_smoothness_loss_weight:g}, "
                 f"duration={config.control_duration_parameterization}, "
+                f"values={config.control_value_parameterization}, "
                 f"state_clock={config.control_state_supervision_clock}, "
                 f"rollout_dt={config.control_rollout_integrator_dt_s:g}s"
             )
@@ -965,6 +1046,11 @@ def run_training(
                 print(
                     f"   curriculum: {horizons} × "
                     f"{config.control_horizon_curriculum_stage_epochs} epochs -> full"
+                )
+            if config.control_gradient_clip_norm > 0.0:
+                print(
+                    f"   stability : gradient clip={config.control_gradient_clip_norm:g}, "
+                    f"policy={config.control_gradient_clip_policy}"
                 )
             if config.prediction_output == PREDICTION_CONTROL_MIXTURE:
                 print(
@@ -1105,6 +1191,11 @@ def main() -> None:
         choices=CONTROL_DURATION_PARAMETERIZATIONS,
         default=CONTROL_DURATION_FACTORIZED,
     )
+    parser.add_argument(
+        "--control-value-parameterization",
+        choices=CONTROL_VALUE_PARAMETERIZATIONS,
+        default=CONTROL_VALUE_ABSOLUTE,
+    )
     parser.add_argument("--control-experts", type=int, default=None)
     parser.add_argument("--control-selector-weight", type=float, default=None)
     parser.add_argument("--control-diversity-weight", type=float, default=None)
@@ -1138,6 +1229,16 @@ def main() -> None:
         "--control-horizon-stage-epochs",
         type=int,
         default=DEFAULT_CONTROL_HORIZON_CURRICULUM_STAGE_EPOCHS,
+    )
+    parser.add_argument(
+        "--control-gradient-clip-norm",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--control-gradient-clip-policy",
+        choices=CONTROL_GRADIENT_CLIP_POLICIES,
+        default=CONTROL_GRADIENT_CLIP_GLOBAL,
     )
     parser.add_argument("--control-rollout-dt", type=float, default=None)
     parser.add_argument("--cv-folds", type=int, default=3)
@@ -1252,6 +1353,7 @@ def main() -> None:
             control_effort_weight=args.control_effort_weight,
             control_smoothness_weight=args.control_smoothness_weight,
             control_duration_parameterization=args.control_duration_parameterization,
+            control_value_parameterization=args.control_value_parameterization,
             control_experts=args.control_experts,
             control_selector_weight=args.control_selector_weight,
             control_diversity_weight=args.control_diversity_weight,
@@ -1263,6 +1365,8 @@ def main() -> None:
             control_horizon_curriculum_stage_epochs=(
                 args.control_horizon_stage_epochs
             ),
+            control_gradient_clip_norm=args.control_gradient_clip_norm,
+            control_gradient_clip_policy=args.control_gradient_clip_policy,
             control_rollout_dt=args.control_rollout_dt,
         )
         if not run_training(
