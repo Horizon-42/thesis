@@ -26,6 +26,7 @@ def fixed_dt_rollout_channels(
     supervision: FixedDTControlSupervision,
     dynamics: dict[str, torch.Tensor],
     config: TSConfig,
+    segment_valid: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Return query and segment-end channels from one event-aligned RK4 rollout."""
     rollout_dtype = torch.float64
@@ -36,6 +37,7 @@ def fixed_dt_rollout_channels(
         dynamics["aero_params"].to(rollout_dtype),
         supervision.query_offsets_s.to(rollout_dtype),
         supervision.valid,
+        segment_valid=segment_valid,
         integrator_dt_s=config.control_rollout_integrator_dt_s,
     )
     frame = dynamics["frame_params"].to(rollout_dtype)
@@ -59,10 +61,11 @@ def fixed_dt_control_state_loss(
     config: TSConfig,
     normalizer: Normalizer,
     dynamics: dict[str, torch.Tensor],
+    segment_valid: torch.Tensor | None = None,
 ) -> FixedDTStateLossResult:
     """Average each flight over its complete regular-dt reference prefix."""
     query_channels, endpoint_channels = fixed_dt_rollout_channels(
-        prediction, supervision, dynamics, config
+        prediction, supervision, dynamics, config, segment_valid
     )
     dtype, device = query_channels.dtype, query_channels.device
     mean = torch.as_tensor(normalizer.mean, dtype=dtype, device=device)

@@ -59,8 +59,11 @@ from batching import resolve_batch_size  # noqa: E402
 from config import (  # noqa: E402
     AIRCRAFT_FILTER_OPENAP_DIRECT, HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
+    CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
     CONTROL_DURATION_DIRECT, CONTROL_DURATION_FACTORIZED,
     CONTROL_STATE_CLOCK_OBSERVED, CONTROL_STATE_LOSS_GRID_FIXED_DT,
+    CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
+    CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
     PREDICTION_CONTROL, PREDICTION_CONTROL_MIXTURE,
     TSConfig, control_recipe,
 )
@@ -1538,9 +1541,15 @@ def test_control_mixture_is_an_explicit_validated_mode():
         "effort_loss_weight": config.control_effort_loss_weight,
         "smoothness_loss_weight": config.control_smoothness_loss_weight,
         "duration_parameterization": CONTROL_DURATION_FACTORIZED,
-            "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
-            "state_supervision_clock": config.control_state_supervision_clock,
-            "state_loss_grid": config.control_state_loss_grid,
+        "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
+        "state_supervision_clock": config.control_state_supervision_clock,
+        "state_loss_grid": config.control_state_loss_grid,
+        "state_objective": CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
+        "state_duration_gradient": True,
+        "horizon_curriculum_s": [],
+        "horizon_curriculum_stage_epochs": (
+            config.control_horizon_curriculum_stage_epochs
+        ),
         "expert_count": 3,
         "selector_loss_weight": config.control_mixture_selector_loss_weight,
         "diversity_loss_weight": config.control_mixture_diversity_loss_weight,
@@ -1686,6 +1695,38 @@ def test_legacy_control_config_without_state_loss_grid_is_rejected():
 
     with pytest.raises(ValueError, match="missing control_state_loss_grid.*regenerate"):
         TSConfig.from_dict(serialized)
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["control_state_objective", "control_state_duration_gradient"],
+)
+def test_legacy_control_config_without_physical_criteria_recipe_is_rejected(field):
+    serialized = TSConfig(prediction_output=PREDICTION_CONTROL).to_dict()
+    serialized.pop(field)
+
+    with pytest.raises(ValueError, match=f"missing {field}.*regenerate"):
+        TSConfig.from_dict(serialized)
+
+
+def test_physical_criteria_requires_observed_fixed_dt_single_control():
+    with pytest.raises(ValueError, match="requires.*fixed-dt"):
+        TSConfig(
+            prediction_output=PREDICTION_CONTROL,
+            control_state_objective=CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
+        )
+    config = TSConfig(
+        prediction_output=PREDICTION_CONTROL,
+        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
+        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
+        control_state_objective=CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
+        control_state_duration_gradient=False,
+        checkpoint_selection_metric=CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
+    )
+
+    assert config.control_state_duration_gradient is False
+    assert "physical-criteria" in train_module.target_contract(config)
+    assert "detached-duration-gradient" in train_module.target_contract(config)
 
 
 def test_state_config_without_duration_parameterization_remains_loadable():
@@ -1994,6 +2035,53 @@ def test_direct_duration_total_time_backpropagates_to_every_segment_logit():
     assert gradient is not None
     assert torch.isfinite(gradient).all()
     assert torch.count_nonzero(gradient) == config.n_segments
+
+
+@pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
+def test_physical_criteria_trains_both_backbones_without_duration_state_gradient(
+    model_name,
+):
+    series, config = _series(
+        n_flights=2,
+        model=model_name,
+        prediction_output=PREDICTION_CONTROL,
+        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
+        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
+        control_state_objective=CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
+        control_state_duration_gradient=False,
+        seq_len=8,
+        n_segments=2,
+        d_model=16,
+        n_heads=4,
+        d_ff=32,
+        e_layers=1,
+        final_time_scale_s=2.0,
+        control_rollout_integrator_dt_s=0.5,
+    )
+    normalizer = Normalizer.fit(series)
+    dataset = FixedAnchorTrajectoryWindows(series, config, normalizer)
+    x, target, weights, final_time, flight_weights, dynamics, dense = dataset.batch(
+        np.array([0, 1])
+    )
+    model = build_model(config)
+    loss = prediction_loss(
+        model(x, dynamics),
+        x[:, -1],
+        target,
+        weights,
+        final_time,
+        flight_weights,
+        config,
+        normalizer,
+        dynamics,
+        dense,
+    )
+    loss.backward()
+
+    assert torch.isfinite(loss)
+    assert model.control_head.duration_projection.weight.grad is None
+    assert model.control_head.control_projection.weight.grad is not None
+    assert model.final_time_head.network[-1].bias.grad is not None
 
 
 def test_control_dataset_and_rollout_loss_form_one_differentiable_training_step():
@@ -2391,6 +2479,8 @@ def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
         control_duration_parameterization=CONTROL_DURATION_DIRECT,
         control_state_clock=CONTROL_STATE_CLOCK_OBSERVED,
         control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
+        control_state_objective=CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
+        control_state_duration_gradient=False,
         control_rollout_dt=0.5,
         output_dir=tmp_path,
     )
@@ -2405,6 +2495,8 @@ def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
     assert recipe[recipe.index("--control-duration-parameterization") + 1] == "direct"
     assert recipe[recipe.index("--control-state-clock") + 1] == "observed"
     assert recipe[recipe.index("--control-state-loss-grid") + 1] == "fixed-dt"
+    assert recipe[recipe.index("--control-state-objective") + 1] == "physical-criteria"
+    assert "--no-control-state-duration-gradient" in recipe
     assert recipe[recipe.index("--control-rollout-dt") + 1] == "0.5"
     assert recipe[recipe.index("--aircraft-filter") + 1] == "openap-direct"
     assert config.prediction_output == PREDICTION_CONTROL
@@ -2413,14 +2505,20 @@ def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
     assert config.control_duration_parameterization == CONTROL_DURATION_DIRECT
     assert config.control_state_supervision_clock == CONTROL_STATE_CLOCK_OBSERVED
     assert config.control_state_loss_grid == CONTROL_STATE_LOSS_GRID_FIXED_DT
+    assert config.control_state_objective == CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA
+    assert config.control_state_duration_gradient is False
     assert "control" in prediction.pred_dir.name
     assert "direct_duration" in prediction.pred_dir.name
     assert "observed_clock" in prediction.pred_dir.name
     assert "fixed_dt_loss" in prediction.pred_dir.name
+    assert "physical_criteria" in prediction.pred_dir.name
+    assert "detached_duration_gradient" in prediction.pred_dir.name
     assert "control" in prediction.category
     assert "openap_direct" in prediction.category
     assert "direct durations" in prediction.label
     assert "fixed-dt state loss" in prediction.label
+    assert "physical ADE/FDE criterion" in prediction.label
+    assert "detached duration-state gradient" in prediction.label
 
 
 def test_pipeline_rejects_control_checkpoint_metadata_without_duration_recipe(
@@ -2678,6 +2776,15 @@ def test_cross_validation_never_passes_outer_val_or_test_to_fit(tmp_path, monkey
         "terminal-position MSE"
     )
     assert (tmp_path / "best_config.json").is_file()
+
+
+def test_cross_validation_describes_common_grid_criteria_selection():
+    assert cv.SELECTION_METRIC_DESCRIPTIONS[
+        CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA
+    ] == (
+        "mean outer-train-fold airport-macro smooth maximum of fixed-anchor "
+        "common physical-time ADE/100 m and FDE/100 m"
+    )
 
 
 def test_cross_validation_runs_real_two_fold_search(tmp_path):
@@ -3218,10 +3325,16 @@ def test_control_training_checkpoint_round_trip_keeps_output_identity(
         "effort_loss_weight": config.control_effort_loss_weight,
         "smoothness_loss_weight": config.control_smoothness_loss_weight,
         "duration_parameterization": duration_parameterization,
-            "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
-            "state_supervision_clock": config.control_state_supervision_clock,
-            "state_loss_grid": config.control_state_loss_grid,
-        }
+        "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
+        "state_supervision_clock": config.control_state_supervision_clock,
+        "state_loss_grid": config.control_state_loss_grid,
+        "state_objective": CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
+        "state_duration_gradient": True,
+        "horizon_curriculum_s": [],
+        "horizon_curriculum_stage_epochs": (
+            config.control_horizon_curriculum_stage_epochs
+        ),
+    }
 
 
 def test_reference_covers_the_same_span_as_the_prediction():

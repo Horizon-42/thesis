@@ -22,6 +22,12 @@ from fixed_dt_control_loss import (
     fixed_dt_control_state_loss,
 )
 from fixed_dt_supervision import FixedDTControlSupervision
+from physical_criteria import (
+    PHYSICAL_CRITERIA_DISTANCE_SCALE_M,
+    fixed_dt_position_ade_m,
+    physical_criteria_loss,
+    smooth_maximum,
+)
 from prediction_outputs import ControlPrediction
 
 
@@ -39,23 +45,7 @@ ORACLE_OBJECTIVE_MODES = (
     ORACLE_OBJECTIVE_PHYSICAL_CRITERIA,
 )
 ORACLE_PHYSICAL_DISTANCE_SCALE_M = 1_000.0
-ORACLE_SUCCESS_DISTANCE_SCALE_M = 100.0
-ORACLE_CRITERIA_SMOOTH_MAX_TEMPERATURE = 0.1
-
-
-def smooth_maximum(
-    first: torch.Tensor,
-    second: torch.Tensor,
-    *,
-    temperature: float = ORACLE_CRITERIA_SMOOTH_MAX_TEMPERATURE,
-) -> torch.Tensor:
-    """Differentiable maximum used to align optimization with two hard thresholds."""
-    if temperature <= 0.0:
-        raise ValueError("smooth-maximum temperature must be positive")
-    return temperature * torch.logsumexp(
-        torch.stack((first, second), dim=0) / temperature,
-        dim=0,
-    )
+ORACLE_SUCCESS_DISTANCE_SCALE_M = PHYSICAL_CRITERIA_DISTANCE_SCALE_M
 
 
 def _logit(value: torch.Tensor) -> torch.Tensor:
@@ -242,16 +232,8 @@ def oracle_state_loss(
         ORACLE_OBJECTIVE_PHYSICAL_ADE,
         ORACLE_OBJECTIVE_PHYSICAL_CRITERIA,
     ):
-        physical_targets = targets * scale + mean
-        component_active = weights > 0.0
-        delta = (rollout.physical_query_states[..., indices] - physical_targets) * (
-            component_active
-        )
-        distance = torch.sqrt(delta.square().sum(dim=-1) + 1e-12)
-        row_active = component_active.any(dim=-1)
-        return (
-            (distance * row_active).sum(dim=1)
-            / row_active.sum(dim=1).clamp(min=1)
+        return fixed_dt_position_ade_m(
+            rollout.physical_query_states, supervision, normalizer
         ).mean() / ORACLE_PHYSICAL_DISTANCE_SCALE_M
     squared = (predicted - targets).square() * weights
     denominator = weights.sum(dim=(1, 2)).clamp(min=1.0)
@@ -303,13 +285,15 @@ def evaluate_control_prediction(
             terminal_distance / ORACLE_PHYSICAL_DISTANCE_SCALE_M
         )
         if objective_mode == ORACLE_OBJECTIVE_PHYSICAL_CRITERIA:
-            threshold_km = (
-                ORACLE_SUCCESS_DISTANCE_SCALE_M
-                / ORACLE_PHYSICAL_DISTANCE_SCALE_M
+            state = state * (
+                ORACLE_PHYSICAL_DISTANCE_SCALE_M
+                / ORACLE_SUCCESS_DISTANCE_SCALE_M
             )
-            state = state / threshold_km
-            terminal = terminal_distance_scaled / threshold_km
-            total = smooth_maximum(state, terminal)
+            terminal = terminal_distance / ORACLE_SUCCESS_DISTANCE_SCALE_M
+            total = physical_criteria_loss(
+                state * ORACLE_SUCCESS_DISTANCE_SCALE_M,
+                terminal_distance,
+            )
             objective = OracleObjective(
                 total=total,
                 state=state,

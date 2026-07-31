@@ -41,6 +41,7 @@ from config import (  # noqa: E402
     AIRCRAFT_FILTERS,
     COORDINATE_FRAMES,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
+    CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
     CHECKPOINT_SELECTION_METRICS,
     CHECKPOINT_SELECTION_OBJECTIVE,
     CONTROL_DURATION_FACTORIZED,
@@ -49,6 +50,9 @@ from config import (  # noqa: E402
     CONTROL_STATE_CLOCK_PREDICTED,
     CONTROL_STATE_LOSS_GRIDS,
     CONTROL_STATE_LOSS_GRID_NATIVE,
+    CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
+    CONTROL_STATE_OBJECTIVES,
+    DEFAULT_CONTROL_HORIZON_CURRICULUM_STAGE_EPOCHS,
     DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
     DEFAULT_VALIDATION_COMMON_GRID_POINTS,
     HORIZON_MODES,
@@ -136,7 +140,10 @@ def _training_cohort_tag(minimum_future_s: float) -> str:
 
 
 def _validation_selection_tag(metric: str) -> str:
-    return "_common_grid_selection" if metric == CHECKPOINT_SELECTION_COMMON_GRID_ADE else ""
+    return {
+        CHECKPOINT_SELECTION_COMMON_GRID_ADE: "_common_grid_selection",
+        CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA: "_common_grid_criteria_selection",
+    }.get(metric, "")
 
 
 def _prediction_output_tag(prediction_output: str) -> str:
@@ -165,6 +172,41 @@ def _control_duration_tag(prediction_output: str, parameterization: str) -> str:
     ):
         return ""
     return f"_{parameterization}_duration"
+
+
+def _control_objective_tag(prediction_output: str, objective: str) -> str:
+    if (
+        not uses_control_dynamics(prediction_output)
+        or objective == CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE
+    ):
+        return ""
+    return f"_{objective.replace('-', '_')}"
+
+
+def _control_duration_gradient_tag(
+    prediction_output: str, state_duration_gradient: bool
+) -> str:
+    if not uses_control_dynamics(prediction_output) or state_duration_gradient:
+        return ""
+    return "_detached_duration_gradient"
+
+
+def _control_horizon_curriculum_tag(
+    horizons_s: tuple[float, ...], stage_epochs: int
+) -> str:
+    if not horizons_s:
+        return ""
+    horizons = "_".join(f"{value:g}".replace(".", "p") for value in horizons_s)
+    return f"_horizon_curriculum_{horizons}s_x{stage_epochs}"
+
+
+def _control_horizon_curriculum_label(
+    horizons_s: tuple[float, ...], stage_epochs: int
+) -> str:
+    if not horizons_s:
+        return ""
+    horizons = "→".join(f"{value:g}" for value in horizons_s)
+    return f"horizon curriculum {horizons} s × {stage_epochs} epochs, "
 
 
 def _control_duration_label(prediction_output: str, parameterization: str) -> str:
@@ -228,6 +270,12 @@ class TrainingPlan:
         control_diversity_weight: float | None = None,
         control_state_clock: str = CONTROL_STATE_CLOCK_PREDICTED,
         control_state_loss_grid: str = CONTROL_STATE_LOSS_GRID_NATIVE,
+        control_state_objective: str = CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
+        control_state_duration_gradient: bool = True,
+        control_horizon_curriculum_s: tuple[float, ...] = (),
+        control_horizon_curriculum_stage_epochs: int = (
+            DEFAULT_CONTROL_HORIZON_CURRICULUM_STAGE_EPOCHS
+        ),
         control_rollout_dt: float | None = None,
         output_dir: str | Path | None = None,
     ) -> None:
@@ -266,6 +314,12 @@ class TrainingPlan:
         self.control_diversity_weight = control_diversity_weight
         self.control_state_clock = control_state_clock
         self.control_state_loss_grid = control_state_loss_grid
+        self.control_state_objective = control_state_objective
+        self.control_state_duration_gradient = control_state_duration_gradient
+        self.control_horizon_curriculum_s = tuple(control_horizon_curriculum_s)
+        self.control_horizon_curriculum_stage_epochs = (
+            control_horizon_curriculum_stage_epochs
+        )
         self.control_rollout_dt = control_rollout_dt
 
         self.data_manifests = tuple(arrival_manifest_path(airport) for airport in self.airports)
@@ -277,6 +331,14 @@ class TrainingPlan:
             )
             + _control_clock_tag(prediction_output, control_state_clock)
             + _control_state_loss_grid_tag(prediction_output, control_state_loss_grid)
+            + _control_objective_tag(prediction_output, control_state_objective)
+            + _control_duration_gradient_tag(
+                prediction_output, control_state_duration_gradient
+            )
+            + _control_horizon_curriculum_tag(
+                control_horizon_curriculum_s,
+                control_horizon_curriculum_stage_epochs,
+            )
             + _aircraft_filter_tag(aircraft_filter)
             + _frame_tag(coordinate_frame)
             + _anchor_tag(random_train_anchor)
@@ -363,6 +425,16 @@ class TrainingPlan:
             args += ["--control-diversity-weight", str(self.control_diversity_weight)]
         args += ["--control-state-clock", self.control_state_clock]
         args += ["--control-state-loss-grid", self.control_state_loss_grid]
+        args += ["--control-state-objective", self.control_state_objective]
+        if not self.control_state_duration_gradient:
+            args.append("--no-control-state-duration-gradient")
+        if self.control_horizon_curriculum_s:
+            args += [
+                "--control-horizon-curriculum",
+                ",".join(f"{value:g}" for value in self.control_horizon_curriculum_s),
+                "--control-horizon-stage-epochs",
+                str(self.control_horizon_curriculum_stage_epochs),
+            ]
         if self.control_rollout_dt is not None:
             args += ["--control-rollout-dt", str(self.control_rollout_dt)]
         return args
@@ -498,6 +570,12 @@ class TrainingPlan:
             "aircraft_filter": self.aircraft_filter,
             "control_state_supervision_clock": self.control_state_clock,
             "control_state_loss_grid": self.control_state_loss_grid,
+            "control_state_objective": self.control_state_objective,
+            "control_state_duration_gradient": self.control_state_duration_gradient,
+            "control_horizon_curriculum_s": self.control_horizon_curriculum_s,
+            "control_horizon_curriculum_stage_epochs": (
+                self.control_horizon_curriculum_stage_epochs
+            ),
             "control_duration_parameterization": self.control_duration_parameterization,
         }
         if self.full_horizon_steps is not None:
@@ -588,6 +666,12 @@ class TrainingPlan:
             "aircraft_filter": self.aircraft_filter,
             "control_state_supervision_clock": self.control_state_clock,
             "control_state_loss_grid": self.control_state_loss_grid,
+            "control_state_objective": self.control_state_objective,
+            "control_state_duration_gradient": self.control_state_duration_gradient,
+            "control_horizon_curriculum_s": self.control_horizon_curriculum_s,
+            "control_horizon_curriculum_stage_epochs": (
+                self.control_horizon_curriculum_stage_epochs
+            ),
             "control_duration_parameterization": self.control_duration_parameterization,
         })
         if self.full_horizon_steps is not None:
@@ -679,13 +763,24 @@ class PredictionPlan:
         control_state_loss_grid = _control_state_loss_grid_tag(
             training.prediction_output, training.control_state_loss_grid
         )
+        control_objective = _control_objective_tag(
+            training.prediction_output, training.control_state_objective
+        )
+        duration_gradient = _control_duration_gradient_tag(
+            training.prediction_output, training.control_state_duration_gradient
+        )
+        horizon_curriculum = _control_horizon_curriculum_tag(
+            training.control_horizon_curriculum_s,
+            training.control_horizon_curriculum_stage_epochs,
+        )
         aircraft_filter = _aircraft_filter_tag(training.aircraft_filter)
         tag = f"_{experiment_tag}" if experiment_tag else ""
         horizon_tag = HORIZON_TAGS[training.horizon_mode]
         stem = (
             f"{scope}{training.model}{prediction_output}{control_duration}"
             f"{control_clock}_{horizon_tag}"
-            f"{control_state_loss_grid}"
+            f"{control_state_loss_grid}{control_objective}{duration_gradient}"
+            f"{horizon_curriculum}"
             f"{aircraft_filter}{frame}{anchor}{training_cohort}"
             f"{validation_selection}{tag}_{split}"
         )
@@ -697,7 +792,8 @@ class PredictionPlan:
         self.category = (
             f"ts_{category_scope}{MODEL_SHORT[training.model]}{prediction_output}"
             f"{control_duration}_{horizon_tag}"
-            f"{control_state_loss_grid}"
+            f"{control_state_loss_grid}{control_objective}{duration_gradient}"
+            f"{horizon_curriculum}"
             f"{aircraft_filter}{frame}{anchor}{training_cohort}"
             f"{validation_selection}{tag}_{split}"
         )
@@ -716,9 +812,25 @@ class PredictionPlan:
             if training.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_NATIVE
             else ""
         )
+        objective_label = (
+            "physical ADE/FDE criterion, "
+            if training.control_state_objective != CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE
+            else ""
+        )
+        duration_gradient_label = (
+            "detached duration-state gradient, "
+            if not training.control_state_duration_gradient
+            else ""
+        )
+        curriculum_label = _control_horizon_curriculum_label(
+            training.control_horizon_curriculum_s,
+            training.control_horizon_curriculum_stage_epochs,
+        )
         self.label = (
             f"{SPLIT_LABELS[split]} — Predicted ({model_label}, {pooled_label}"
-            f"{output_label}{state_loss_label}{anchor_label}{horizon_label}, {frame_label})"
+            f"{output_label}{state_loss_label}{objective_label}{duration_gradient_label}"
+            f"{curriculum_label}"
+            f"{anchor_label}{horizon_label}, {frame_label})"
         )
         self.comparison_dir = (
             COMPARISON_AIRPORTS_ROOT / self.airport / "comparison" / self.category
@@ -846,6 +958,14 @@ def run_training(
                 f"state_clock={config.control_state_supervision_clock}, "
                 f"rollout_dt={config.control_rollout_integrator_dt_s:g}s"
             )
+            if config.control_horizon_curriculum_s:
+                horizons = "→".join(
+                    f"{value:g}s" for value in config.control_horizon_curriculum_s
+                )
+                print(
+                    f"   curriculum: {horizons} × "
+                    f"{config.control_horizon_curriculum_stage_epochs} epochs -> full"
+                )
             if config.prediction_output == PREDICTION_CONTROL_MIXTURE:
                 print(
                     f"   mixture   : experts={config.control_expert_count}, "
@@ -898,6 +1018,20 @@ def _parse_csv(raw: str, allowed: tuple[str, ...], flag: str) -> tuple[str, ...]
     if unknown or not tokens:
         raise argparse.ArgumentTypeError(f"{flag} takes a comma list from {allowed}, got {raw!r}")
     return tokens
+
+
+def _parse_positive_float_csv(raw: str) -> tuple[float, ...]:
+    try:
+        values = tuple(float(token.strip()) for token in raw.split(",") if token.strip())
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "--control-horizon-curriculum takes comma-separated seconds"
+        ) from exc
+    if not values or any(value <= 0.0 for value in values):
+        raise argparse.ArgumentTypeError(
+            "--control-horizon-curriculum requires positive seconds"
+        )
+    return values
 
 
 def main() -> None:
@@ -983,6 +1117,27 @@ def main() -> None:
         "--control-state-loss-grid",
         choices=CONTROL_STATE_LOSS_GRIDS,
         default=CONTROL_STATE_LOSS_GRID_NATIVE,
+    )
+    parser.add_argument(
+        "--control-state-objective",
+        choices=CONTROL_STATE_OBJECTIVES,
+        default=CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
+    )
+    parser.add_argument(
+        "--control-state-duration-gradient",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument(
+        "--control-horizon-curriculum",
+        type=_parse_positive_float_csv,
+        default=(),
+        metavar="SECONDS,...",
+    )
+    parser.add_argument(
+        "--control-horizon-stage-epochs",
+        type=int,
+        default=DEFAULT_CONTROL_HORIZON_CURRICULUM_STAGE_EPOCHS,
     )
     parser.add_argument("--control-rollout-dt", type=float, default=None)
     parser.add_argument("--cv-folds", type=int, default=3)
@@ -1102,6 +1257,12 @@ def main() -> None:
             control_diversity_weight=args.control_diversity_weight,
             control_state_clock=args.control_state_clock,
             control_state_loss_grid=args.control_state_loss_grid,
+            control_state_objective=args.control_state_objective,
+            control_state_duration_gradient=args.control_state_duration_gradient,
+            control_horizon_curriculum_s=args.control_horizon_curriculum,
+            control_horizon_curriculum_stage_epochs=(
+                args.control_horizon_stage_epochs
+            ),
             control_rollout_dt=args.control_rollout_dt,
         )
         if not run_training(

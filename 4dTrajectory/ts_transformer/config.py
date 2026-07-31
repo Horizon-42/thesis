@@ -15,6 +15,7 @@ would break the byte-identical property PROVENANCE.md promises.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+import math
 from typing import Any
 
 # Channel order is a hard contract between the data build, the model, and the export.
@@ -49,6 +50,12 @@ CONTROL_STATE_LOSS_GRIDS = (
     CONTROL_STATE_LOSS_GRID_NATIVE,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
 )
+CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE = "normalized-mse"
+CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA = "physical-criteria"
+CONTROL_STATE_OBJECTIVES = (
+    CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
+    CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
+)
 CONTROL_DURATION_FACTORIZED = "factorized"
 CONTROL_DURATION_DIRECT = "direct"
 CONTROL_DURATION_PARAMETERIZATIONS = (
@@ -58,9 +65,11 @@ CONTROL_DURATION_PARAMETERIZATIONS = (
 
 CHECKPOINT_SELECTION_OBJECTIVE = "fixed-anchor-objective"
 CHECKPOINT_SELECTION_COMMON_GRID_ADE = "fixed-anchor-common-grid-ade"
+CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA = "fixed-anchor-common-grid-criteria"
 CHECKPOINT_SELECTION_METRICS = (
     CHECKPOINT_SELECTION_OBJECTIVE,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
+    CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
 )
 
 
@@ -115,6 +124,7 @@ DEFAULT_N_SEGMENTS = DEFAULT_N_SEGMENTS_BY_MODEL[MODELS[0]]
 DEFAULT_FINAL_TIME_SCALE_S = 600.0
 DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S = 60.0
 DEFAULT_VALIDATION_COMMON_GRID_POINTS = 64
+DEFAULT_CONTROL_HORIZON_CURRICULUM_STAGE_EPOCHS = 10
 
 # Fallback aircraft when a flight dict has no resolvable type or usable performance model.
 # Not cosmetic: it sets the target state's Vref and threshold-crossing height — the ENU
@@ -265,6 +275,19 @@ class TSConfig:
     # modules: segment durations still choose control-switch times, while state error is
     # evaluated independently every ``dt_s`` seconds on the observed training clock.
     control_state_loss_grid: str = CONTROL_STATE_LOSS_GRID_NATIVE
+    # The default keeps the historical normalized-channel MSE. ``physical-criteria``
+    # optimizes the smooth worst of fixed-dt 3-D ADE/100 m and terminal error/100 m.
+    control_state_objective: str = CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE
+    # Whether state-rollout gradients may update the learned duration partition. Turning
+    # this off leaves the final-time loss trainable while controls own geometry fitting.
+    control_state_duration_gradient: bool = True
+    # Optional physical-time single-shooting curriculum. Numeric stages are trained for
+    # ``control_horizon_curriculum_stage_epochs`` each, followed by the full horizon for
+    # the remaining epoch budget. Empty preserves the historical full-horizon training.
+    control_horizon_curriculum_s: tuple[float, ...] = ()
+    control_horizon_curriculum_stage_epochs: int = (
+        DEFAULT_CONTROL_HORIZON_CURRICULUM_STAGE_EPOCHS
+    )
     # Multi-expert control output is a separate opt-in strategy. The default K=3 keeps the
     # first experiment small; these weights affect only ``control-mixture`` checkpoints.
     control_expert_count: int = 3
@@ -324,6 +347,12 @@ class TSConfig:
                 f"{self.control_state_loss_grid!r}; expected one of "
                 f"{CONTROL_STATE_LOSS_GRIDS}"
             )
+        if self.control_state_objective not in CONTROL_STATE_OBJECTIVES:
+            raise ValueError(
+                "unknown control_state_objective "
+                f"{self.control_state_objective!r}; expected one of "
+                f"{CONTROL_STATE_OBJECTIVES}"
+            )
         if self.control_state_loss_grid == CONTROL_STATE_LOSS_GRID_FIXED_DT:
             if self.prediction_output != PREDICTION_CONTROL:
                 raise ValueError(
@@ -334,6 +363,78 @@ class TSConfig:
                 raise ValueError(
                     "fixed-dt control state loss requires "
                     "control_state_supervision_clock='observed'"
+                )
+        if self.control_state_objective == CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA:
+            if self.prediction_output != PREDICTION_CONTROL:
+                raise ValueError(
+                    "physical-criteria control objective is supported only by "
+                    "prediction_output='control'"
+                )
+            if self.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_FIXED_DT:
+                raise ValueError(
+                    "physical-criteria control objective requires "
+                    "control_state_loss_grid='fixed-dt'"
+                )
+        if not self.control_state_duration_gradient:
+            if self.prediction_output != PREDICTION_CONTROL:
+                raise ValueError(
+                    "detached control-state duration gradients are supported only by "
+                    "prediction_output='control'"
+                )
+            if self.control_state_supervision_clock != CONTROL_STATE_CLOCK_OBSERVED:
+                raise ValueError(
+                    "detached control-state duration gradients require "
+                    "control_state_supervision_clock='observed'"
+                )
+        if self.control_horizon_curriculum_s:
+            if self.prediction_output != PREDICTION_CONTROL:
+                raise ValueError(
+                    "control horizon curriculum is supported only by "
+                    "prediction_output='control'"
+                )
+            if self.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_FIXED_DT:
+                raise ValueError(
+                    "control horizon curriculum requires "
+                    "control_state_loss_grid='fixed-dt'"
+                )
+            if self.control_state_objective != CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA:
+                raise ValueError(
+                    "control horizon curriculum requires the physical-criteria objective"
+                )
+            if self.control_state_duration_gradient:
+                raise ValueError(
+                    "control horizon curriculum requires detached state-duration gradients"
+                )
+            if self.control_duration_parameterization != CONTROL_DURATION_FACTORIZED:
+                raise ValueError(
+                    "control horizon curriculum currently requires factorized durations"
+                )
+            if self.random_train_anchor:
+                raise ValueError("control horizon curriculum requires fixed train anchors")
+            previous_horizon = 0.0
+            for horizon_s in self.control_horizon_curriculum_s:
+                if (
+                    not isinstance(horizon_s, (int, float))
+                    or not math.isfinite(horizon_s)
+                    or not 0.0 < horizon_s
+                ):
+                    raise ValueError("control curriculum horizons must be positive seconds")
+                if horizon_s <= previous_horizon:
+                    raise ValueError(
+                        "control curriculum horizons must be strictly increasing"
+                    )
+                grid_steps = round(horizon_s / self.dt_s)
+                if abs(horizon_s - grid_steps * self.dt_s) > self.dt_s * 1e-7:
+                    raise ValueError(
+                        "control curriculum horizons must align with the fixed-dt grid"
+                    )
+                previous_horizon = float(horizon_s)
+            if self.epochs <= (
+                len(self.control_horizon_curriculum_s)
+                * self.control_horizon_curriculum_stage_epochs
+            ):
+                raise ValueError(
+                    "control horizon curriculum must leave at least one full-horizon epoch"
                 )
         if self.control_duration_parameterization not in CONTROL_DURATION_PARAMETERIZATIONS:
             raise ValueError(
@@ -372,6 +473,7 @@ class TSConfig:
             "patience",
             "control_expert_count",
             "validation_common_grid_points",
+            "control_horizon_curriculum_stage_epochs",
         ):
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name} must be positive, got {getattr(self, name)!r}")
@@ -487,19 +589,57 @@ class TSConfig:
                 "serialized control config is missing control_state_loss_grid; "
                 "regenerate the derived checkpoint"
             )
+        if (
+            uses_control_dynamics(data.get("prediction_output", PREDICTION_STATE))
+            and "control_state_objective" not in data
+        ):
+            raise ValueError(
+                "serialized control config is missing control_state_objective; "
+                "regenerate the derived checkpoint"
+            )
+        if (
+            uses_control_dynamics(data.get("prediction_output", PREDICTION_STATE))
+            and "control_state_duration_gradient" not in data
+        ):
+            raise ValueError(
+                "serialized control config is missing control_state_duration_gradient; "
+                "regenerate the derived checkpoint"
+            )
+        for field_name in (
+            "control_horizon_curriculum_s",
+            "control_horizon_curriculum_stage_epochs",
+        ):
+            if (
+                uses_control_dynamics(data.get("prediction_output", PREDICTION_STATE))
+                and field_name not in data
+            ):
+                raise ValueError(
+                    f"serialized control config is missing {field_name}; "
+                    "regenerate the derived checkpoint"
+                )
         data["channels"] = tuple(data["channels"])
+        if "control_horizon_curriculum_s" in data:
+            data["control_horizon_curriculum_s"] = tuple(
+                data["control_horizon_curriculum_s"]
+            )
         return cls(**data)
 
 
-def control_recipe(config: TSConfig) -> dict[str, float | int | str]:
+def control_recipe(config: TSConfig) -> dict[str, Any]:
     """Serialize the complete recipe for a control-output strategy."""
-    base: dict[str, float | int | str] = {
+    base: dict[str, Any] = {
         "effort_loss_weight": config.control_effort_loss_weight,
         "smoothness_loss_weight": config.control_smoothness_loss_weight,
         "duration_parameterization": config.control_duration_parameterization,
         "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
         "state_supervision_clock": config.control_state_supervision_clock,
         "state_loss_grid": config.control_state_loss_grid,
+        "state_objective": config.control_state_objective,
+        "state_duration_gradient": config.control_state_duration_gradient,
+        "horizon_curriculum_s": list(config.control_horizon_curriculum_s),
+        "horizon_curriculum_stage_epochs": (
+            config.control_horizon_curriculum_stage_epochs
+        ),
     }
     extensions = {
         PREDICTION_CONTROL: {},

@@ -185,3 +185,125 @@ full-horizon ADE 降到 966.08 m；它不是无效方向。但最终 `239.67 m /
 `oracle-fit-above-capacity-threshold`，不能把 239.67 m 当作严格动力学表达下界。
 
 按照事先约定，此处停止并先报告：没有运行 multiple shooting、CasADi、validation 或 test。
+
+## 后续四项 oracle 优化
+
+按照预先约定的顺序继续做完以下四项；即使中途改善也没有提前停止。第 5 项 L-BFGS 未做，
+multiple shooting 与 CasADi 仍未使用。所有数值仍只来自同一条 outer-train 航迹。
+
+### 1. 冻结 duration，低学习率精修 controls
+
+从此前分阶段 N=64 schedule 继续，但固定其 64 个 duration，只优化 controls：
+
+| control LR / steps | fixed-2s ADE | 真实终点 3D 误差 |
+|---|---:|---:|
+| `2e-5 / 1000` | 226.91 m | 241.46 m |
+| `5e-6 / 1000` | **224.66 m** | **236.40 m** |
+
+duration 精确保持输入 schedule 的 `6.0132--6.0572 s`。这些值不是整数，因为它们来自此前
+softmax duration 分配；真实总时长 `386.6847 s` 本身也不是整数。冻结的含义是保持这些已学值，
+不是重新量化为整数秒。
+
+### 2. 固定均匀 duration 的 N=16 → 32 → 64 → 128 分辨率链
+
+每一级都把上一级的 piecewise-constant controls 精确二分到下一级；总时长固定为真实总时长，
+所以每段时长为 `386.6847 / N`。每一级优化 500 步：
+
+| N | 每段 duration | fixed-2s ADE | 真实终点 3D 误差 |
+|---:|---:|---:|---:|
+| 16 | 24.1678 s | 554.36 m | 162.23 m |
+| 32 | 12.0839 s | 460.51 m | 136.37 m |
+| 64 | 6.0419 s | 432.00 m | 101.78 m |
+| 128 | 3.0210 s | 418.58 m | **67.29 m** |
+
+提高 N 持续改善终点，但该链所在 basin 的平均误差明显差于 N=64 的 224.66 m warm-start。
+因此它证明了更细控制分辨率对终点表达有帮助，却没有证明提高 N 本身能解决长时域优化。
+
+### 3. 更密的 horizon curriculum
+
+使用 `60/120/180/240/300/340/full s`，每个 prefix 200 步，full 再 1000 步；duration 全程固定
+为均匀 `386.6847/64 = 6.0419 s`：
+
+- fixed-2s ADE：`224.05 m`；
+- 真实终点 3D 误差：`269.49 m`。
+
+它把 ADE 略微改善到四项实验中的最低值，但终点明显退化。按“两个 100 m 条件必须同时满足”
+的目标，不能只依据 ADE 选择它。
+
+### 4. 可迁移的 physical-criteria
+
+把成功条件直接写成逐航迹可微目标：
+
+```text
+ade_ratio      = fixed_dt_3d_ADE / 100 m
+terminal_ratio = terminal_3d_error / 100 m
+loss           = 0.1 * logsumexp([ade_ratio, terminal_ratio] / 0.1)
+```
+
+即用平滑 maximum 逼近两个条件中较差的一个。它从冻结 duration 的 N=64 schedule 继续 1000 步，
+得到：
+
+- fixed-2s ADE：`224.98 m`；
+- 真实终点 3D 误差：`206.63 m`；
+- physical-criteria：`2.2646`。
+
+对比冻结低 LR 的最坏误差 `236.40 m`、dense curriculum 的 `269.49 m`，该模式的最坏误差
+`224.98 m` 最低，因此被选为向模型训练迁移的模式。它仍未达到 100 m representability 条件，
+结论仍是 oracle 数值求解未完全成功。
+
+## 迁移到共享模型训练
+
+迁移只包含可部署部分，没有把 oracle 的未来控制或真实未来状态输入模型：
+
+1. `physical_criteria.py` 统一拥有米制 ADE、终点距离与 smooth-max；oracle 和正式训练调用同一实现。
+2. 状态 rollout 在已存在的 observed training clock 上训练；duration fractions 在这条状态梯度路径
+   `detach`，让 controls 负责几何拟合。
+3. factorized final-time head 仍用真实总时长的独立 loss 训练；推理始终使用模型预测总时长。
+4. duration projection 没有其他梯度且初始化为 0，因此本次两个 checkpoint 都严格保持均匀分配；
+   检查到其 weight/bias 最大绝对值均为 `0.0`。
+5. checkpoint 选择使用固定 anchor validation 上的
+   `fixed-anchor-common-grid-criteria`，按机场等权平均；训练和选择均不接触 test 指标。
+
+新配置字段是公开 checkpoint recipe 的一部分：
+
+- `control_state_objective=physical-criteria`；
+- `control_state_duration_gradient=false`；
+- `checkpoint_selection_metric=fixed-anchor-common-grid-criteria`。
+
+旧 control checkpoint 若缺少新字段会被拒绝并要求重建，不做静默兼容升级。
+
+## 两种 backbone 的 train/validation 实验
+
+共同配方：KMSY/KRDU/KSJC/KSMF/KSTL pooled、OpenAP-direct、固定 train anchor、L=60、N=64、
+batch 512、LR `3e-4`、scheduler factor `0.5` / patience 8、early-stop patience 20、seed 与 split seed
+均为 1337。训练 10,239 条航迹，validation 2,167 条航迹。没有生成或读取 test 预测。
+
+由于代码按要求尚未提交，正式 experiment index 拒绝登记 dirty-worktree run；本轮因此是待 review 的
+development artifact，不作为最终发布结果。
+
+| backbone | 最优 epoch / 实际 epochs | val 等权机场 criteria | val common-grid ADE | val common-grid FDE | val 时间 MAE |
+|---|---:|---:|---:|---:|---:|
+| iTransformer | 15 / 35 | **27.6909** | **2,424.69 m** | **2,688.55 m** | 63.64 s |
+| PatchTST | 18 / 38 | 30.5592 | 2,754.61 m | 3,029.34 m | 63.99 s |
+
+iTransformer 最优 epoch 的分机场 criteria 为 KMSY 36.4040、KRDU 37.6559、KSJC 12.7531、
+KSMF 25.6463、KSTL 25.9954；PatchTST 分别为 39.6356、45.1880、15.0914、26.1748、
+26.7064。两者在 KMSY/KRDU 明显更差，不能只报告 pooled aggregate。
+
+两种模型都在约 epoch 20 附近从较好 basin 突然发散。ReduceLROnPlateau 随后降到 `1.5e-4`、
+再降到 `7.5e-5` 也无法返回原 basin；早停最终正确恢复发散前的最佳权重。训练与 validation
+common-grid 误差接近（iTransformer 2368/2425 m，PatchTST 2739/2755 m），所以主要问题不是典型的
+train/val 泛化间隙，而是共享控制映射在大样本训练上仍停留在公里级拟合能力。
+
+结果目录：
+
+- `4dTrajectory/outputs/POOLED/experiments/openap_direct_20260731_physical_criteria/itransformer_n64_b512_lr3e4_seed1337/`
+- `4dTrajectory/outputs/POOLED/experiments/openap_direct_20260731_physical_criteria/patchtst_n64_b512_lr3e4_seed1337/`
+
+### 当前结论
+
+oracle 中最优的“固定 duration + success-aligned physical criterion”已成功、等价地迁移到两个
+backbone 的共同控制头训练路径，但没有带来可用精度；iTransformer 略优于 PatchTST，二者都在
+约 2.4--3.0 km。相同失稳模式出现在两个 backbone，说明当前瓶颈更可能位于长时域 control
+single-shooting 的优化条件、全局共享控制映射和学习率稳定性，而非某一个 Transformer encoder。
+该结论只基于 train/validation，test 仍保持盲态。

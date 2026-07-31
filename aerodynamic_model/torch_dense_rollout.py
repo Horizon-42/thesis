@@ -34,6 +34,7 @@ def _require_shape(tensor: torch.Tensor, shape: tuple[int, ...], name: str) -> N
 
 def _build_event_schedule(
     segment_durations_s: torch.Tensor,
+    segment_valid: torch.Tensor,
     query_offsets_s: torch.Tensor,
     query_valid: torch.Tensor,
     *,
@@ -47,8 +48,18 @@ def _build_event_schedule(
     _require_shape(query_valid, tuple(query_offsets_s.shape), "dense query mask")
     if query_valid.dtype != torch.bool:
         raise ValueError("dense query mask must be boolean")
-    if torch.any(segment_durations_s <= 0.0):
-        raise ValueError("every control segment duration must be positive")
+    _require_shape(segment_valid, tuple(segment_durations_s.shape), "segment mask")
+    if segment_valid.dtype != torch.bool:
+        raise ValueError("segment mask must be boolean")
+    if not torch.all(segment_valid.any(dim=1)):
+        raise ValueError("every trajectory must retain at least one control segment")
+    if torch.any(segment_valid[:, 1:] & ~segment_valid[:, :-1]):
+        raise ValueError("valid control segments must form a prefix")
+    if torch.any(segment_durations_s[segment_valid] <= 0.0):
+        raise ValueError("every valid control segment duration must be positive")
+    segment_durations_s = torch.where(
+        segment_valid, segment_durations_s, torch.zeros_like(segment_durations_s)
+    )
 
     device, dtype = segment_durations_s.device, segment_durations_s.dtype
     dt_cap = torch.as_tensor(integrator_dt_s, dtype=dtype, device=device)
@@ -87,7 +98,7 @@ def _build_event_schedule(
     event_valid = torch.cat(
         (
             fixed_valid,
-            torch.ones((batch, segments), dtype=torch.bool, device=device),
+            segment_valid,
             query_valid,
         ),
         dim=1,
@@ -284,7 +295,12 @@ class _DenseScheduledRolloutAdjoint(torch.autograd.Function):
             previous_value = initial_states if step == 0 else timeline[:, step - 1]
             segment = control_schedule[:, step]
             with torch.enable_grad():
-                previous = previous_value.detach().contiguous().requires_grad_(True)
+                # For batch size one, ``contiguous()`` may retain the timeline's
+                # horizon-dependent singleton stride.  A fresh canonical allocation keeps
+                # the static CUDA VJP kernel reusable across curriculum horizons.
+                previous = previous_value.detach().clone(
+                    memory_format=torch.contiguous_format
+                ).requires_grad_(True)
                 variables = [previous]
                 labels = ["state"]
                 step_control = controls[rows, segment].detach()
@@ -292,7 +308,9 @@ class _DenseScheduledRolloutAdjoint(torch.autograd.Function):
                     step_control.requires_grad_(True)
                     variables.append(step_control)
                     labels.append("control")
-                step_duration = step_durations[:, step].detach()
+                step_duration = step_durations[:, step].detach().clone(
+                    memory_format=torch.contiguous_format
+                )
                 if needs_durations:
                     step_duration.requires_grad_(True)
                     variables.append(step_duration)
@@ -348,6 +366,7 @@ def rollout_piecewise_constant_at_times(
     query_offsets_s: torch.Tensor,
     query_valid: torch.Tensor,
     *,
+    segment_valid: torch.Tensor | None = None,
     integrator_dt_s: float = 0.5,
     max_total_steps: int = 65536,
 ) -> DenseControlRollout:
@@ -362,6 +381,10 @@ def rollout_piecewise_constant_at_times(
         raise ValueError("aero parameters must be [B,6]")
     if len(initial_states) != len(controls):
         raise ValueError("dense rollout inputs must share batch size")
+    if segment_valid is None:
+        segment_valid = torch.ones_like(segment_durations_s, dtype=torch.bool)
+    else:
+        segment_valid = segment_valid.to(device=segment_durations_s.device)
     if integrator_dt_s <= 0.0:
         raise ValueError("integrator_dt_s must be positive")
     if max_total_steps <= 0:
@@ -373,6 +396,7 @@ def rollout_piecewise_constant_at_times(
     query_valid = query_valid.to(device=segment_durations_s.device)
     schedule = _build_event_schedule(
         segment_durations_s,
+        segment_valid,
         query_offsets_s,
         query_valid,
         integrator_dt_s=integrator_dt_s,

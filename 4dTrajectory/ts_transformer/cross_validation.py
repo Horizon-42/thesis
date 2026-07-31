@@ -22,6 +22,7 @@ import torch
 from batching import resolve_batch_size
 from config import (
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
+    CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
     CHECKPOINT_SELECTION_OBJECTIVE,
     HORIZON_NORMALIZED,
     TSConfig,
@@ -47,6 +48,10 @@ SELECTION_METRIC_DESCRIPTIONS = {
     CHECKPOINT_SELECTION_OBJECTIVE: SELECTION_METRIC,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE: (
         "mean outer-train-fold airport-macro fixed-anchor common physical-time ADE"
+    ),
+    CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA: (
+        "mean outer-train-fold airport-macro smooth maximum of fixed-anchor "
+        "common physical-time ADE/100 m and FDE/100 m"
     ),
 }
 CV_PARAMETER_GRIDS: dict[str, tuple[Any, ...]] = {

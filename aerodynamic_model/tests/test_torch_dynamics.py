@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 import torch
 
+import aerodynamic_model.torch_dense_rollout as torch_dense_rollout
 import aerodynamic_model.torch_dynamics as torch_dynamics
 from aerodynamic_model.torch_dense_rollout import rollout_piecewise_constant_at_times
 from aerodynamic_model.casadi_simulator import CasadiSimulator
@@ -288,6 +289,100 @@ def test_dense_rollout_records_fixed_queries_and_backpropagates_through_switch_t
     # Fixed queries depend on switch boundaries, not on unused slack after the final query.
     # The first duration moves the 1.3 s switch and must therefore receive state gradient.
     assert durations.grad[0, 0] != 0.0
+
+
+def test_single_flight_dense_adjoint_canonicalizes_horizon_dependent_state_stride(
+    monkeypatch,
+):
+    """Different dense horizons must reuse one static autograd-kernel state layout."""
+    observed_strides = []
+    original_step = torch_dense_rollout._rollout_step
+
+    def recording_step(state, controls, aero_params, dt_s):
+        if torch.is_grad_enabled():
+            observed_strides.append(
+                (
+                    state.stride(),
+                    controls.stride(),
+                    aero_params.stride(),
+                    dt_s.stride(),
+                )
+            )
+        return original_step(state, controls, aero_params, dt_s)
+
+    monkeypatch.setattr(torch_dense_rollout, "_rollout_step", recording_step)
+    initial_state = GeodeticState(
+        35.88, -78.79, 900.0, 80.0, 2.2, -0.04, A320.landing_mass
+    )
+    for total_s in (2.0, 3.0):
+        controls = torch.tensor(
+            [[[45_000.0, 0.08, 1.02], [36_000.0, -0.04, 0.99]]],
+            dtype=torch.float64,
+            requires_grad=True,
+        )
+        durations = torch.full(
+            (1, 2), total_s / 2.0, dtype=torch.float64, requires_grad=True
+        )
+        queries = torch.arange(
+            0.5, total_s + 0.1, 0.5, dtype=torch.float64
+        ).unsqueeze(0)
+        rollout_piecewise_constant_at_times(
+            _state_tensor(initial_state),
+            controls,
+            durations,
+            _aero_tensor(),
+            queries,
+            torch.ones_like(queries, dtype=torch.bool),
+            integrator_dt_s=0.5,
+        ).query_states.sum().backward()
+
+    assert observed_strides
+    assert set(observed_strides) == {((7, 1), (3, 1), (6, 1), (1,))}
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
+def test_cuda_single_flight_dense_adjoint_accepts_many_horizons():
+    """A curriculum must not exhaust Dynamo's static autograd recompile cache."""
+    torch.compiler.reset()
+    torch_dynamics._COMPILED_CUDA_AUTOGRAD_STEP = None
+    try:
+        initial_state = GeodeticState(
+            35.88, -78.79, 900.0, 80.0, 2.2, -0.04, A320.landing_mass
+        )
+        for query_count in range(2, 12):
+            total_s = query_count * 0.5
+            controls = torch.tensor(
+                [[[45_000.0, 0.08, 1.02], [36_000.0, -0.04, 0.99]]],
+                dtype=torch.float64,
+                device="cuda",
+                requires_grad=True,
+            )
+            durations = torch.full(
+                (1, 2),
+                total_s / 2.0,
+                dtype=torch.float64,
+                device="cuda",
+                requires_grad=True,
+            )
+            queries = torch.arange(
+                0.5,
+                total_s + 0.1,
+                0.5,
+                dtype=torch.float64,
+                device="cuda",
+            ).unsqueeze(0)
+            rollout_piecewise_constant_at_times(
+                _state_tensor(initial_state).to("cuda"),
+                controls,
+                durations,
+                _aero_tensor().to("cuda"),
+                queries,
+                torch.ones_like(queries, dtype=torch.bool),
+                integrator_dt_s=0.5,
+            ).query_states.sum().backward()
+    finally:
+        torch.compiler.reset()
+        torch_dynamics._COMPILED_CUDA_AUTOGRAD_STEP = None
 
 
 def test_dense_rollout_schedules_queries_not_aligned_to_integrator_grid():

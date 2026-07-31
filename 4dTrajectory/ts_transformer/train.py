@@ -24,6 +24,7 @@ from channels import CHANNELS, IDX, POSITION_IDX
 from batching import resolve_batch_size
 from config import (
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
+    CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
     CHECKPOINT_SELECTION_OBJECTIVE,
     CONTROL_DURATION_DIRECT,
     CONTROL_DURATION_FACTORIZED,
@@ -31,6 +32,8 @@ from config import (
     CONTROL_STATE_CLOCK_PREDICTED,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
     CONTROL_STATE_LOSS_GRID_NATIVE,
+    CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
+    CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
     HORIZON_FULL,
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
@@ -43,6 +46,12 @@ from config import (
 )
 from control_mixture import ControlMixturePrediction
 from control_prediction_adapters import deployable_control_prediction
+from control_training_curriculum import (
+    ControlTrainingStage,
+    build_control_training_stage_view,
+    build_control_training_stages,
+    control_training_stage_for_epoch,
+)
 from dataset import (
     ARRIVAL_DATA_PROVENANCE_SCHEMA,
     FixedAnchorTrajectoryWindows,
@@ -65,6 +74,11 @@ from fixed_dt_supervision import FixedDTControlSupervision
 from metrics import error_by_progress, raw_kinematic_metrics, trajectory_metrics
 from models import build_model, parameter_count, resolve_device
 from prediction_outputs import ControlPrediction, StatePrediction
+from physical_criteria import (
+    fixed_dt_position_ade_m,
+    physical_criteria_loss,
+    terminal_position_error_m,
+)
 from time_grids import batch_time_grid, numpy_inference_time_grid
 from aerodynamic_model.torch_dynamics import (
     geodetic_states_to_channels,
@@ -73,7 +87,7 @@ from aerodynamic_model.torch_dynamics import (
 
 CHECKPOINT_NAME = "checkpoint.pt"
 CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
-CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v18-control-state-loss-grid"
+CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v20-control-horizon-curriculum"
 STATE_TARGET_CONTRACTS = {
     HORIZON_NORMALIZED: "normalized-time-runway-crossing-displacement-kinematic-v3",
     HORIZON_FULL: "full-horizon-fixed-time-displacement-kinematic-v2",
@@ -139,13 +153,31 @@ def target_contract(config: TSConfig) -> str:
         return STATE_TARGET_CONTRACTS[config.horizon_mode]
     if config.prediction_output == PREDICTION_CONTROL_MIXTURE:
         return "bounded-control-mixture-best-of-k-selector-v1"
-    return CONTROL_TARGET_CONTRACTS[
+    base = CONTROL_TARGET_CONTRACTS[
         (
             config.control_duration_parameterization,
             config.control_state_supervision_clock,
             config.control_state_loss_grid,
         )
     ]
+    if (
+        config.control_state_objective == CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE
+        and config.control_state_duration_gradient
+    ):
+        return base
+    gradient_contract = (
+        "joint-duration-gradient"
+        if config.control_state_duration_gradient
+        else "detached-duration-gradient"
+    )
+    contract = f"{base}+{config.control_state_objective}+{gradient_contract}"
+    if config.control_horizon_curriculum_s:
+        horizons = ",".join(f"{value:g}" for value in config.control_horizon_curriculum_s)
+        contract += (
+            f"+horizon-curriculum={horizons}s"
+            f"x{config.control_horizon_curriculum_stage_epochs}epochs"
+        )
+    return contract
 
 
 def loss_component_names(config: TSConfig) -> tuple[str, ...]:
@@ -427,12 +459,21 @@ def control_state_supervision_prediction(
     fractions = prediction.segment_durations / prediction.segment_durations.sum(
         dim=1, keepdim=True
     )
+    if not config.control_state_duration_gradient:
+        fractions = fractions.detach()
     durations = fractions * target_final_time_s.unsqueeze(1)
     return ControlPrediction(
         controls=prediction.controls,
         segment_durations=durations,
         final_time_s=target_final_time_s,
     )
+
+
+@dataclass(frozen=True)
+class ControlStateLossResult:
+    normalized_mse: torch.Tensor
+    normalized_segment_end_states: torch.Tensor
+    physical_query_states: torch.Tensor | None = None
 
 
 def _native_endpoint_control_state_loss(
@@ -445,9 +486,12 @@ def _native_endpoint_control_state_loss(
     normalizer: Normalizer,
     dynamics: dict[str, torch.Tensor],
     dense_supervision: FixedDTControlSupervision | None,
-) -> tuple[torch.Tensor, torch.Tensor]:
+    segment_valid: torch.Tensor | None,
+) -> ControlStateLossResult:
     """Historical loss on learned segment endpoints, isolated from dense supervision."""
     del dense_supervision
+    if segment_valid is not None:
+        raise ValueError("native endpoint state loss does not support horizon curriculum")
     physical_channels, _geodetic = control_rollout_channels(
         prediction, dynamics, config
     )
@@ -466,7 +510,7 @@ def _native_endpoint_control_state_loss(
         (normalized_states - aligned_targets) ** 2 * aligned_weights
     ).sum(dim=(1, 2))
     state_loss = state_error / aligned_weights.sum(dim=(1, 2)).clamp(min=1.0)
-    return state_loss, normalized_states
+    return ControlStateLossResult(state_loss, normalized_states)
 
 
 def _fixed_dt_control_state_loss(
@@ -479,7 +523,8 @@ def _fixed_dt_control_state_loss(
     normalizer: Normalizer,
     dynamics: dict[str, torch.Tensor],
     dense_supervision: FixedDTControlSupervision | None,
-) -> tuple[torch.Tensor, torch.Tensor]:
+    segment_valid: torch.Tensor | None,
+) -> ControlStateLossResult:
     """Dense regular-dt strategy; data preparation and rollout live in separate modules."""
     del normalized_anchor_state, target_states, state_weights, target_final_time_s
     if dense_supervision is None:
@@ -487,14 +532,67 @@ def _fixed_dt_control_state_loss(
     from fixed_dt_control_loss import fixed_dt_control_state_loss
 
     result = fixed_dt_control_state_loss(
-        prediction, dense_supervision, config, normalizer, dynamics
+        prediction,
+        dense_supervision,
+        config,
+        normalizer,
+        dynamics,
+        segment_valid=segment_valid,
     )
-    return result.per_flight_loss, result.normalized_segment_end_states
+    return ControlStateLossResult(
+        result.per_flight_loss,
+        result.normalized_segment_end_states,
+        result.physical_query_states,
+    )
 
 
 _CONTROL_STATE_LOSS_HANDLERS = {
     CONTROL_STATE_LOSS_GRID_NATIVE: _native_endpoint_control_state_loss,
     CONTROL_STATE_LOSS_GRID_FIXED_DT: _fixed_dt_control_state_loss,
+}
+
+
+def _normalized_mse_tracking_terms(
+    result: ControlStateLossResult,
+    terminal_target: torch.Tensor,
+    config: TSConfig,
+    normalizer: Normalizer,
+    dense_supervision: FixedDTControlSupervision | None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    del normalizer, dense_supervision
+    terminal_delta = result.normalized_segment_end_states[
+        :, -1, list(POSITION_IDX)
+    ] - terminal_target[:, list(POSITION_IDX)]
+    terminal = config.terminal_loss_weight * terminal_delta.square().mean(dim=1)
+    return result.normalized_mse, terminal
+
+
+def _physical_criteria_tracking_terms(
+    result: ControlStateLossResult,
+    terminal_target: torch.Tensor,
+    config: TSConfig,
+    normalizer: Normalizer,
+    dense_supervision: FixedDTControlSupervision | None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    del config
+    if result.physical_query_states is None or dense_supervision is None:
+        raise ValueError("physical-criteria requires fixed-dt control supervision")
+    ade_m = fixed_dt_position_ade_m(
+        result.physical_query_states, dense_supervision, normalizer
+    )
+    terminal_m = terminal_position_error_m(
+        result.normalized_segment_end_states, terminal_target, normalizer
+    )
+    # The criterion already contains terminal error; keep the additive terminal slot zero.
+    return (
+        physical_criteria_loss(ade_m, terminal_m),
+        terminal_m.new_zeros(terminal_m.shape),
+    )
+
+
+_CONTROL_TRACKING_OBJECTIVES = {
+    CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE: _normalized_mse_tracking_terms,
+    CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA: _physical_criteria_tracking_terms,
 }
 
 
@@ -508,12 +606,29 @@ def control_prediction_loss_terms(
     normalizer: Normalizer,
     dynamics: dict[str, torch.Tensor],
     dense_supervision: FixedDTControlSupervision | None = None,
+    training_stage: ControlTrainingStage | None = None,
 ) -> ControlLossTerms:
     """Per-flight state/control terms through the differentiable dynamics rollout."""
     state_prediction = control_state_supervision_prediction(
         prediction, target_final_time_s, config
     )
-    state_loss, normalized_states = _CONTROL_STATE_LOSS_HANDLERS[
+    terminal_target = target_states[:, -1]
+    segment_valid = None
+    if training_stage is not None:
+        if dense_supervision is None:
+            raise ValueError("control horizon curriculum requires dense supervision")
+        stage_view = build_control_training_stage_view(
+            state_prediction,
+            dense_supervision,
+            terminal_target,
+            target_final_time_s,
+            training_stage,
+        )
+        state_prediction = stage_view.prediction
+        dense_supervision = stage_view.supervision
+        terminal_target = stage_view.terminal_target
+        segment_valid = stage_view.segment_valid
+    rollout_loss = _CONTROL_STATE_LOSS_HANDLERS[
         config.control_state_loss_grid
     ](
         state_prediction,
@@ -525,14 +640,14 @@ def control_prediction_loss_terms(
         normalizer,
         dynamics,
         dense_supervision,
+        segment_valid,
     )
     time_loss = (
         (prediction.final_time_s - target_final_time_s) / config.final_time_scale_s
     ).square()
-    terminal_delta = normalized_states[:, -1, list(POSITION_IDX)] - target_states[
-        :, -1, list(POSITION_IDX)
-    ]
-    terminal_loss = terminal_delta.square().mean(dim=1)
+    state_loss, terminal_loss = _CONTROL_TRACKING_OBJECTIVES[
+        config.control_state_objective
+    ](rollout_loss, terminal_target, config, normalizer, dense_supervision)
 
     lower = dynamics["control_lower"]
     upper = dynamics["control_upper"]
@@ -540,18 +655,34 @@ def control_prediction_loss_terms(
         (upper[:, 0], torch.full_like(upper[:, 1], math.pi / 2.0), upper[:, 2]), dim=-1
     )
     scaled_controls = prediction.controls / effort_scale.unsqueeze(1)
-    effort = scaled_controls.square().mean(dim=(1, 2))
+    active_segments = (
+        torch.ones_like(prediction.segment_durations, dtype=torch.bool)
+        if segment_valid is None
+        else segment_valid
+    )
+    active_float = active_segments.to(dtype=scaled_controls.dtype)
+    effort = (
+        scaled_controls.square() * active_float.unsqueeze(-1)
+    ).sum(dim=(1, 2)) / (
+        active_float.sum(dim=1) * scaled_controls.shape[-1]
+    ).clamp(min=1.0)
     if prediction.controls.shape[1] > 1:
         change_scale = (upper - lower).unsqueeze(1)
         changes = torch.diff(prediction.controls, dim=1) / change_scale
-        smoothness = changes.square().mean(dim=(1, 2))
+        active_pairs = active_segments[:, 1:] & active_segments[:, :-1]
+        pair_float = active_pairs.to(dtype=changes.dtype)
+        smoothness = (
+            changes.square() * pair_float.unsqueeze(-1)
+        ).sum(dim=(1, 2)) / (
+            pair_float.sum(dim=1) * changes.shape[-1]
+        ).clamp(min=1.0)
     else:
         smoothness = effort.new_zeros(effort.shape)
 
     return ControlLossTerms(
         state=state_loss,
         final_time=config.final_time_loss_weight * time_loss,
-        terminal=config.terminal_loss_weight * terminal_loss,
+        terminal=terminal_loss,
         effort=config.control_effort_loss_weight * effort,
         smoothness=config.control_smoothness_loss_weight * smoothness,
     )
@@ -568,6 +699,7 @@ def control_prediction_loss_components(
     normalizer: Normalizer,
     dynamics: dict[str, torch.Tensor],
     dense_supervision: FixedDTControlSupervision | None = None,
+    training_stage: ControlTrainingStage | None = None,
 ) -> LossComponents:
     terms = control_prediction_loss_terms(
         prediction,
@@ -579,6 +711,7 @@ def control_prediction_loss_components(
         normalizer,
         dynamics,
         dense_supervision,
+        training_stage,
     )
 
     def weighted_mean(values: torch.Tensor) -> torch.Tensor:
@@ -609,9 +742,12 @@ def state_prediction_loss_components(
     normalizer: Normalizer,
     dynamics: dict[str, torch.Tensor] | None = None,
     dense_supervision: FixedDTControlSupervision | None = None,
+    training_stage: ControlTrainingStage | None = None,
 ) -> LossComponents:
     """Return the direct-state strategy's airport-macro loss contributions."""
     del dynamics, dense_supervision
+    if training_stage is not None:
+        raise ValueError("horizon curriculum is not supported by state prediction")
     state_error = ((prediction.states - target_states) ** 2 * state_weights).sum(
         dim=(1, 2)
     )
@@ -676,6 +812,7 @@ def _control_loss_adapter(
     normalizer,
     dynamics,
     dense_supervision,
+    training_stage,
 ) -> LossComponents:
     if dynamics is None:
         raise ValueError("control prediction loss requires per-flight dynamics")
@@ -690,6 +827,7 @@ def _control_loss_adapter(
         normalizer,
         dynamics,
         dense_supervision,
+        training_stage,
     )
 
 
@@ -704,11 +842,14 @@ def _mixture_loss_adapter(
     normalizer,
     dynamics,
     dense_supervision,
+    training_stage,
 ) -> LossComponents:
     if dynamics is None:
         raise ValueError("control-mixture loss requires per-flight dynamics")
     if dense_supervision is not None:
         raise ValueError("control-mixture does not support fixed-dt state supervision")
+    if training_stage is not None:
+        raise ValueError("horizon curriculum is not supported by control-mixture")
     from control_mixture_loss import mixture_prediction_loss_components
 
     return mixture_prediction_loss_components(
@@ -743,6 +884,7 @@ def prediction_loss_components(
     normalizer: Normalizer,
     dynamics: dict[str, torch.Tensor] | None = None,
     dense_supervision: FixedDTControlSupervision | None = None,
+    training_stage: ControlTrainingStage | None = None,
 ) -> LossComponents:
     """Dispatch the configured output contract to its isolated objective."""
     try:
@@ -762,6 +904,7 @@ def prediction_loss_components(
         normalizer,
         dynamics,
         dense_supervision,
+        training_stage,
     )
 
 
@@ -776,6 +919,7 @@ def prediction_loss(
     normalizer: Normalizer,
     dynamics: dict[str, torch.Tensor] | None = None,
     dense_supervision: FixedDTControlSupervision | None = None,
+    training_stage: ControlTrainingStage | None = None,
 ) -> torch.Tensor:
     """Airport-macro state/time/physics loss, one sample per flight and epoch."""
     # Weights are normalized to mean one across the complete epoch. Keeping the minibatch
@@ -792,6 +936,7 @@ def prediction_loss(
         normalizer,
         dynamics,
         dense_supervision,
+        training_stage,
     ).total
 
 
@@ -810,6 +955,7 @@ class EpochResult:
     validation_selection_value: float | None = None
     validation_selection_by_airport: dict[str, float] = field(default_factory=dict)
     train_anchor_sampling: dict[str, Any] = field(default_factory=dict)
+    training_stage: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -990,8 +1136,16 @@ def _training_objective_diagnostics(
     if not history:
         return None
     rows = [vars(row) if isinstance(row, EpochResult) else row for row in history]
+    eligible_rows = [
+        row
+        for row in rows
+        if not row.get("training_stage")
+        or row["training_stage"].get("is_full_horizon", True)
+    ]
+    if not eligible_rows:
+        raise ValueError("training history contains no full-horizon epoch")
     best = min(
-        rows,
+        eligible_rows,
         key=lambda row: (
             row.get("validation_selection_value")
             if row.get("validation_selection_value") is not None
@@ -1203,6 +1357,7 @@ def _dataset_loss_components(
     dataset: TrajectoryWindows,
     device: torch.device,
     batch_size: int,
+    training_stage: ControlTrainingStage | None = None,
 ) -> dict[str, float]:
     names = loss_component_names(dataset.config)
     component_totals = {name: 0.0 for name in names}
@@ -1217,6 +1372,7 @@ def _dataset_loss_components(
                 flight_weights,
                 dynamics,
                 dense_supervision,
+                training_stage,
             ) = unpack_batch(raw_batch)
             x, y, mask = x.to(device), y.to(device), mask.to(device)
             final_time_s = final_time_s.to(device)
@@ -1270,7 +1426,7 @@ def _objective_validation_selection(
     )
 
 
-def _common_grid_validation_selection(
+def _common_grid_validation_details(
     *,
     model: nn.Module,
     val_sets: dict[str, TrajectoryWindows],
@@ -1278,7 +1434,7 @@ def _common_grid_validation_selection(
     config: TSConfig,
     device: torch.device,
     val_by_airport: dict[str, float],
-) -> ValidationSelection:
+) -> dict[str, dict[str, Any]]:
     del val_by_airport
     details: dict[str, dict[str, Any]] = {}
     for airport, dataset in val_sets.items():
@@ -1291,6 +1447,22 @@ def _common_grid_validation_selection(
             "final_time_mae_s": block["final_time_mae_s"],
             "flights": block["flights"],
         }
+    return details
+
+
+def _common_grid_validation_selection(
+    *,
+    model: nn.Module,
+    val_sets: dict[str, TrajectoryWindows],
+    normalizer: Normalizer,
+    config: TSConfig,
+    device: torch.device,
+    val_by_airport: dict[str, float],
+) -> ValidationSelection:
+    details = _common_grid_validation_details(
+        model=model, val_sets=val_sets, normalizer=normalizer, config=config,
+        device=device, val_by_airport=val_by_airport,
+    )
     by_airport = {
         airport: float(block["ade_m"]) for airport, block in details.items()
     }
@@ -1302,9 +1474,40 @@ def _common_grid_validation_selection(
     )
 
 
+def _common_grid_criteria_validation_selection(
+    *,
+    model: nn.Module,
+    val_sets: dict[str, TrajectoryWindows],
+    normalizer: Normalizer,
+    config: TSConfig,
+    device: torch.device,
+    val_by_airport: dict[str, float],
+) -> ValidationSelection:
+    details = _common_grid_validation_details(
+        model=model, val_sets=val_sets, normalizer=normalizer, config=config,
+        device=device, val_by_airport=val_by_airport,
+    )
+    by_airport: dict[str, float] = {}
+    for airport, block in details.items():
+        criterion = physical_criteria_loss(
+            torch.tensor(float(block["ade_m"])),
+            torch.tensor(float(block["fde_m"])),
+        )
+        value = float(criterion)
+        by_airport[airport] = value
+        block["physical_criteria"] = value
+    return ValidationSelection(
+        metric=CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
+        value=float(np.mean(list(by_airport.values()))),
+        by_airport=by_airport,
+        details_by_airport=details,
+    )
+
+
 _VALIDATION_SELECTIONS: dict[str, Callable[..., ValidationSelection]] = {
     CHECKPOINT_SELECTION_OBJECTIVE: _objective_validation_selection,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE: _common_grid_validation_selection,
+    CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA: _common_grid_criteria_validation_selection,
 }
 
 
@@ -1373,6 +1576,11 @@ def fit_model(
         factor=config.lr_plateau_factor,
         patience=config.lr_plateau_patience,
     )
+    curriculum_stages = build_control_training_stages(
+        config.control_horizon_curriculum_s,
+        epochs_per_stage=config.control_horizon_curriculum_stage_epochs,
+        total_epochs=config.epochs,
+    )
 
     flights_per_epoch = sum(
         count > 0 for _start, count in train_set.series_ranges.values()
@@ -1421,6 +1629,17 @@ def fit_model(
             f"  sampling   one shuffled sample/flight; {flights_per_epoch} flight(s)/epoch; "
             "airport-macro loss weights"
         )
+        if config.control_horizon_curriculum_s:
+            schedule = " -> ".join(
+                (
+                    f"{stage.label} (epochs {stage.start_epoch}-{stage.end_epoch})"
+                    if stage.end_epoch is not None
+                    else f"{stage.label} (epochs {stage.start_epoch}+ )"
+                )
+                for stage in curriculum_stages
+            )
+            print(f"  curriculum {schedule}")
+            print("             short stages select nothing; checkpoint selection starts at full")
 
     history: list[EpochResult] = []
     best_val = math.inf
@@ -1429,8 +1648,32 @@ def fit_model(
     epochs_without_improvement = 0
     optimizer_updates = 0
     component_names = loss_component_names(config)
+    full_stage_started = not bool(config.control_horizon_curriculum_s)
+    previous_stage_label: str | None = None
 
     for epoch in range(1, config.epochs + 1):
+        curriculum_stage = control_training_stage_for_epoch(curriculum_stages, epoch)
+        training_stage = (
+            curriculum_stage if config.control_horizon_curriculum_s else None
+        )
+        if curriculum_stage.is_full_horizon and not full_stage_started:
+            # Prefix stages are initialization only. Their easier objective must not set
+            # the LR schedule, early-stop counter, or deployable checkpoint baseline.
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer,
+                factor=config.lr_plateau_factor,
+                patience=config.lr_plateau_patience,
+            )
+            best_val = math.inf
+            best_val_loss_at_selection = math.inf
+            best_state = None
+            epochs_without_improvement = 0
+            full_stage_started = True
+        if verbose and curriculum_stage.label != previous_stage_label:
+            print(
+                f"  curriculum stage {curriculum_stage.label} starts at epoch {epoch}"
+            )
+        previous_stage_label = curriculum_stage.label
         started = time.perf_counter()
         epoch_learning_rate = float(optimizer.param_groups[0]["lr"])
         train_anchor_sampling = train_set.anchor_statistics(config.seed + epoch)
@@ -1449,6 +1692,7 @@ def fit_model(
                 flight_weights,
                 dynamics,
                 dense_supervision,
+                training_stage,
             ) = unpack_batch(raw_batch)
             batch_count = len(flight_weights)
             batch_weight = float(flight_weights.sum())
@@ -1480,7 +1724,13 @@ def fit_model(
 
         model.eval()
         val_components_by_airport = {
-            airport: _dataset_loss_components(model, dataset, device, config.batch_size)
+            airport: _dataset_loss_components(
+                model,
+                dataset,
+                device,
+                config.batch_size,
+                training_stage,
+            )
             for airport, dataset in val_sets.items()
         }
         train_components = {
@@ -1500,16 +1750,23 @@ def fit_model(
         }
         # Equal airport weight: a large/long airport cannot control early stopping alone.
         val_loss = float(np.mean(list(val_by_airport.values())))
-        validation_selection = _VALIDATION_SELECTIONS[
-            config.checkpoint_selection_metric
-        ](
-            model=model,
-            val_sets=val_sets,
-            normalizer=normalizer,
-            config=config,
-            device=device,
-            val_by_airport=val_by_airport,
-        )
+        if curriculum_stage.is_full_horizon:
+            validation_selection = _VALIDATION_SELECTIONS[
+                config.checkpoint_selection_metric
+            ](
+                model=model,
+                val_sets=val_sets,
+                normalizer=normalizer,
+                config=config,
+                device=device,
+                val_by_airport=val_by_airport,
+            )
+        else:
+            validation_selection = ValidationSelection(
+                metric="curriculum-prefix-objective",
+                value=val_loss,
+                by_airport=dict(val_by_airport),
+            )
         if not (math.isfinite(train_loss) and math.isfinite(val_loss)):
             raise RuntimeError(
                 f"training diverged at epoch {epoch} (train {train_loss}, val {val_loss}) "
@@ -1519,7 +1776,8 @@ def fit_model(
             raise RuntimeError(
                 f"validation selection metric {validation_selection.metric} is not finite"
             )
-        scheduler.step(validation_selection.value)
+        if curriculum_stage.is_full_horizon:
+            scheduler.step(validation_selection.value)
         history.append(EpochResult(
             epoch=epoch,
             train_loss=train_loss,
@@ -1534,22 +1792,42 @@ def fit_model(
             validation_selection_value=validation_selection.value,
             validation_selection_by_airport=validation_selection.by_airport,
             train_anchor_sampling=train_anchor_sampling,
+            training_stage=(
+                {
+                    "label": curriculum_stage.label,
+                    "horizon_s": curriculum_stage.horizon_s,
+                    "is_full_horizon": curriculum_stage.is_full_horizon,
+                }
+                if config.control_horizon_curriculum_s
+                else {}
+            ),
         ))
 
-        if validation_selection.value < best_val - 1e-9:
+        if (
+            curriculum_stage.is_full_horizon
+            and validation_selection.value < best_val - 1e-9
+        ):
             best_val = validation_selection.value
             best_val_loss_at_selection = val_loss
             best_state = {key: value.detach().clone() for key, value in model.state_dict().items()}
             epochs_without_improvement = 0
             marker = " *"
-        else:
+        elif curriculum_stage.is_full_horizon:
             epochs_without_improvement += 1
+            marker = ""
+        else:
             marker = ""
 
         if verbose:
+            stage_suffix = (
+                f"  stage {curriculum_stage.label}"
+                if config.control_horizon_curriculum_s
+                else ""
+            )
             print(f"  epoch {epoch:3d}/{config.epochs}  train {train_loss:.6f}  "
                   f"val-macro {val_loss:.6f}  lr {epoch_learning_rate:.2e}  "
-                  f"updates {optimizer_updates:5d}  {history[-1].seconds:5.1f}s{marker}")
+                  f"updates {optimizer_updates:5d}  {history[-1].seconds:5.1f}s"
+                  f"{stage_suffix}{marker}")
             if validation_selection.metric != CHECKPOINT_SELECTION_OBJECTIVE:
                 print(
                     f"             checkpoint  {validation_selection.metric}="
@@ -1562,13 +1840,17 @@ def fit_model(
                 )
             )
 
-        if epochs_without_improvement >= config.patience:
+        if (
+            curriculum_stage.is_full_horizon
+            and epochs_without_improvement >= config.patience
+        ):
             if verbose:
                 print(f"  early stop: {config.patience} epochs without improvement")
             break
 
-    if best_state is not None:
-        model.load_state_dict(best_state)
+    if best_state is None:
+        raise RuntimeError("training completed without a full-horizon checkpoint")
+    model.load_state_dict(best_state)
     return FitResult(
         model=model,
         config=config,

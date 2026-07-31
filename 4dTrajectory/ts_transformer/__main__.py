@@ -59,6 +59,7 @@ from config import (  # noqa: E402
     CONTROL_DURATION_PARAMETERIZATIONS,
     CONTROL_STATE_LOSS_GRIDS,
     CONTROL_STATE_CLOCKS,
+    CONTROL_STATE_OBJECTIVES,
     DEFAULT_AIRCRAFT_TYPE,
     HORIZON_MODES,
     MODELS,
@@ -145,6 +146,20 @@ def _cv_parameters(value: str) -> tuple[str, ...]:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
+def _positive_float_csv(value: str) -> tuple[float, ...]:
+    try:
+        parsed = tuple(float(token.strip()) for token in value.split(",") if token.strip())
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "horizon curriculum must be a comma-separated list of seconds"
+        ) from exc
+    if not parsed or any(item <= 0.0 for item in parsed):
+        raise argparse.ArgumentTypeError(
+            "horizon curriculum must contain positive seconds"
+        )
+    return parsed
+
+
 def _add_training_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--model", choices=MODELS, default=MODELS[0])
     parser.add_argument(
@@ -225,6 +240,40 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
             "control state-loss queries: learned segment endpoints (default) or every "
             "regular reference dt on the observed clock (fixed-dt)"
         ),
+    )
+    parser.add_argument(
+        "--control-state-objective",
+        choices=CONTROL_STATE_OBJECTIVES,
+        default=None,
+        help=(
+            "control tracking objective: normalized-channel MSE (default) or the "
+            "smooth worst of physical fixed-dt ADE and terminal error"
+        ),
+    )
+    parser.add_argument(
+        "--control-state-duration-gradient",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "allow state-rollout loss to update duration fractions; use --no-control-"
+            "state-duration-gradient to train the final-time clock independently"
+        ),
+    )
+    parser.add_argument(
+        "--control-horizon-curriculum",
+        type=_positive_float_csv,
+        default=None,
+        metavar="SECONDS,...",
+        help=(
+            "physical-time control prefixes trained before the full horizon, e.g. "
+            "60,120,240; train/validation only"
+        ),
+    )
+    parser.add_argument(
+        "--control-horizon-stage-epochs",
+        type=int,
+        default=None,
+        help="epochs per numeric control-horizon curriculum stage (default: 10)",
     )
     parser.add_argument(
         "--control-rollout-dt",
@@ -334,6 +383,13 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("control_mixture_diversity_loss_weight", args.control_diversity_weight),
         ("control_state_supervision_clock", args.control_state_clock),
         ("control_state_loss_grid", args.control_state_loss_grid),
+        ("control_state_objective", args.control_state_objective),
+        ("control_state_duration_gradient", args.control_state_duration_gradient),
+        ("control_horizon_curriculum_s", args.control_horizon_curriculum),
+        (
+            "control_horizon_curriculum_stage_epochs",
+            args.control_horizon_stage_epochs,
+        ),
         ("control_rollout_integrator_dt_s", args.control_rollout_dt),
         ("d_model", args.d_model), ("e_layers", args.e_layers), ("n_heads", args.n_heads),
         ("seed", args.seed), ("split_seed", args.split_seed), ("device", args.device),
