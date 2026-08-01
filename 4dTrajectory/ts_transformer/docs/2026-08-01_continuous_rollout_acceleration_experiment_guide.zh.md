@@ -493,3 +493,53 @@ outer-test 未打开；端到端 median/p90 和 peak VRAM 有完整记录。若�
 
 P0--P4 完成后即停止本轮速度优化。即使速度仍不理想，也不得自动转向 validation 降频、compiled、
 AMP、RK4 `1.0 s`、RK2 或其他近似；这些方向需要新的明确授权。
+
+### 12.7 P0--P4 实施与筛选结果
+
+本轮实现保持 RK4 `0.5 s`、float64 dynamics、loss、validation 频率、train batch 顺序和 optimizer
+update 序列不变：
+
+- fixed-anchor 数据集缓存固定 target、dynamics 参数和 ragged fixed-dt supervision；组 batch 时只做
+  padding/stack，不再重复插值和 reference gather；缓存与原 builder 已做逐位一致测试；
+- validation 每个 batch 只做一次 backbone/control-head forward，同一 `ControlPrediction` 分别送入
+  observed-supervision-clock loss rollout 和 deployable predicted-clock selection rollout；两个时钟的
+  states、durations 和 timestamps 仍由独立 rollout 生成，不混配；
+- final fit evaluation 每个 split 只生成一次 deployable prediction replay，native/common-grid
+  metrics 共享该不可变结果；
+- checkpoint 在派生 fit report 之前原子写入；报告失败后可用 checkpoint 独立 replay，无需重训；
+- `EpochResult` 新增 train data/forward/rollout-loss/backward-step、validation objective/selection、
+  epoch total、peak VRAM、updates/s 和逐机场 validation 航迹/query/wall-time 记录。
+
+在 RTX 4060 上，以当前 2+4、N=64、batch=512、五机场完整 development validation（2167 条）
+执行 3 次 warm-up 和 10 次正式交替顺序计时：
+
+| backbone | 路径 | median | p90 | speedup | 240 个标量最大差 | peak VRAM |
+|---|---|---:|---:|---:|---:|---:|
+| iTransformer | 旧双 forward | 3.888 s | 3.950 s | 1.000x | -- | 346.5 MiB |
+| iTransformer | 共享 forward（同一缓存） | 3.820 s | 3.832 s | **1.018x** | **0** | 346.5 MiB |
+| PatchTST | 旧双 forward | 4.049 s | 4.118 s | 1.000x | -- | 346.5 MiB |
+| PatchTST | 共享 forward（同一缓存） | 3.891 s | 3.948 s | **1.040x** | **0** | 346.5 MiB |
+
+收益低于原 5%--15% 预估，说明当前 validation 的绝对瓶颈是两次不可省略的 float64 RK4 rollout，
+不是 Transformer forward。尽管收益有限，两个 backbone 的 median/p90 都稳定下降且指标逐位一致，
+因此默认采用不分桶的缓存 + shared-forward 路径。上表让新旧 validation 都使用相同固定输入缓存，
+只隔离测量 shared-forward；缓存本身由 epoch 分段计时记录，不把它的收益混入该 speedup。
+
+时域分桶在完整 validation screening 中失败：shared-forward 分桶路径 median 6.468 s，而同轮旧路径
+为 3.840 s，即 `0.594x`；虽然 peak VRAM 从 346.5 MiB 降到 122.0 MiB，且最大标量差仅
+`8.55e-9`，但更多小 batch/动态 shape 的调度开销压倒了 rollout padding 收益。因此 P3 不进入
+默认训练；实现只作为 benchmark 的显式 `--duration-bucketed` 候选保留，不能自动启用。
+
+完整 development 的一 epoch GPU smoke（iTransformer、2+4、无 curriculum，因而第一 epoch 即
+执行完整 checkpoint selection）记录到：train forward 0.39 s、train rollout/loss 11.80 s、
+backward/optimizer 44.77 s、validation objective 1.89 s、validation selection 2.00 s，epoch total
+61.06 s。该单次结果只用于定位，不作为稳定性能结论；它说明约 92.7% 的 epoch 时间位于保持不变
+的精确 RK4 train rollout/backward 中，输入准备仅 0.17 s。P0--P4 已穷尽当前获准的明显执行重复，
+不能为了继续提速而绕过本节硬约束。
+
+完整结果：
+
+- `4dTrajectory/outputs/POOLED/experiments/openap_direct_20260801_arc24_execution_optimization/validation_unbucketed_3warmup_10runs.json`
+- `4dTrajectory/outputs/POOLED/experiments/openap_direct_20260801_arc24_execution_optimization/validation_patchtst_unbucketed_3warmup_10runs.json`
+- `4dTrajectory/outputs/POOLED/experiments/openap_direct_20260801_arc24_execution_optimization/validation_bucketed_screening.json`
+- `4dTrajectory/outputs/POOLED/experiments/openap_direct_20260801_arc24_execution_optimization/smoke_itransformer_epoch1/history.json`

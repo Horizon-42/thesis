@@ -1502,6 +1502,183 @@ def test_common_grid_checkpoint_selection_still_validates_fixed_anchor():
         fit.best_validation_selection
     )
     assert set(fit.history[0].validation_selection_by_airport) == {AIRPORT}
+    timing = fit.history[0].timing
+    assert timing["epoch_total_s"] > 0.0
+    assert timing["train_forward_s"] > 0.0
+    assert timing["train_rollout_loss_s"] > 0.0
+    assert timing["train_backward_step_s"] > 0.0
+    assert timing["val_objective_s"] > 0.0
+    assert timing["val_checkpoint_selection_s"] > 0.0
+    assert timing["optimizer_updates_per_s"] > 0.0
+    profile = fit.history[0].validation_profile_by_airport[AIRPORT]
+    assert profile["flights"] == len(val_series)
+    assert profile["query_points"] > 0
+    assert sum(profile["duration_bucket_flights"].values()) == len(val_series)
+
+
+def test_shared_validation_forward_matches_two_pass_control_metrics(monkeypatch):
+    series, config = _series(
+        n_flights=4,
+        prediction_output=PREDICTION_CONTROL,
+        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
+        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
+        control_state_objective=CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
+        checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
+        seq_len=8,
+        n_segments=2,
+        batch_size=2,
+        d_model=16,
+        n_heads=4,
+        d_ff=32,
+        e_layers=1,
+        device="cpu",
+    )
+    normalizer = Normalizer.fit(series)
+    dataset = FixedAnchorTrajectoryWindows(series, config, normalizer)
+    model = build_model(config).eval()
+    legacy_components = train_module._dataset_loss_components(
+        model, dataset, torch.device("cpu"), config.batch_size
+    )
+    legacy_common = train_module.evaluate_fixed_anchor_common_grid(
+        model, dataset, normalizer, config, torch.device("cpu")
+    )
+
+    calls = 0
+    original_forward = train_module.model_forward
+
+    def counted_forward(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original_forward(*args, **kwargs)
+
+    monkeypatch.setattr(train_module, "model_forward", counted_forward)
+    plan = train_module.build_validation_batch_plan(dataset, config.batch_size)
+    shared = train_module._evaluate_validation_airport(
+        model,
+        plan,
+        torch.device("cpu"),
+        None,
+        include_deployable_replay=True,
+    )
+    shared_common = train_module.evaluate_fixed_anchor_common_grid(
+        model,
+        dataset,
+        normalizer,
+        config,
+        torch.device("cpu"),
+        replay=shared.replay,
+    )
+
+    assert calls == len(plan.batches)
+    assert shared.components == pytest.approx(legacy_components, rel=1e-6, abs=1e-7)
+    for key in (
+        "ade_m",
+        "fde_m",
+        "final_time_mae_s",
+        "terminal_velocity_error_mps",
+        "arc_length_geometry_loss",
+    ):
+        assert shared_common[key] == pytest.approx(
+            legacy_common[key], rel=1e-6, abs=1e-6
+        )
+
+
+def test_fixed_anchor_cache_is_bitwise_identical_to_uncached_builders():
+    series, config = _series(
+        n_flights=3,
+        prediction_output=PREDICTION_CONTROL,
+        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
+        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
+        seq_len=8,
+        n_segments=2,
+    )
+    dataset = FixedAnchorTrajectoryWindows(series, config, Normalizer.fit(series))
+
+    for index in range(len(dataset)):
+        cached = dataset._sample_arrays(index)
+        uncached = dataset_module.TrajectoryWindows._sample_arrays(dataset, index)
+        for cached_array, uncached_array in zip(cached, uncached):
+            assert np.array_equal(cached_array, uncached_array)
+        cached_dynamics = dataset._dynamics_arrays(index)
+        uncached_dynamics = dataset_module.TrajectoryWindows._dynamics_arrays(
+            dataset, index
+        )
+        for key in cached_dynamics:
+            assert np.array_equal(cached_dynamics[key], uncached_dynamics[key])
+
+    indices = np.arange(len(dataset), dtype=np.int64)
+    cached_dense = dataset._fixed_dt_supervision(indices)
+    uncached_dense = build_fixed_dt_supervision(
+        dataset.series,
+        dataset.encoded,
+        dataset.index,
+        dt_s=config.dt_s,
+    )
+    for field in ("query_offsets_s", "states", "weights", "valid"):
+        assert torch.equal(getattr(cached_dense, field), getattr(uncached_dense, field))
+
+
+def test_fit_evaluation_reuses_one_prediction_pass_per_split(monkeypatch):
+    series, config = _series(
+        n_flights=12,
+        batch_size=32,
+        d_model=16,
+        n_heads=4,
+        d_ff=32,
+        e_layers=1,
+        seq_len=20,
+        n_segments=8,
+        device="cpu",
+    )
+    train_series, val_series, _test_series = split_by_flight(series, config)
+    normalizer = Normalizer.fit(train_series)
+    model = build_model(config)
+    calls = 0
+    original_forward = train_module.model_forward
+
+    def counted_forward(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original_forward(*args, **kwargs)
+
+    monkeypatch.setattr(train_module, "model_forward", counted_forward)
+    evaluate_fit_splits(
+        model, train_series, val_series, normalizer, config, torch.device("cpu")
+    )
+
+    assert calls == 2
+
+
+def test_training_saves_checkpoint_before_derived_fit_replay(tmp_path, monkeypatch):
+    series, config = _series(
+        n_flights=12,
+        epochs=1,
+        patience=1,
+        batch_size=32,
+        d_model=16,
+        n_heads=4,
+        d_ff=32,
+        e_layers=1,
+        seq_len=20,
+        n_segments=8,
+        device="cpu",
+    )
+
+    def fail_replay(*_args, **_kwargs):
+        raise RuntimeError("derived report failed")
+
+    monkeypatch.setattr(train_module, "evaluate_fit_splits", fail_replay)
+    with pytest.raises(RuntimeError, match="derived report failed"):
+        train(
+            series,
+            config,
+            output_dir=tmp_path,
+            data_provenance=_fake_data_provenance(),
+            verbose=False,
+        )
+
+    assert (tmp_path / "checkpoint.pt").is_file()
+    assert not (tmp_path / FIT_EVALUATION_NAME).exists()
 
 
 def test_flight_loss_weights_give_every_airport_equal_epoch_weight():

@@ -79,23 +79,33 @@ def _sample(
     )
 
 
-def build_fixed_dt_supervision(
+FixedDTSupervisionRow = tuple[np.ndarray, np.ndarray, np.ndarray]
+
+
+def cache_fixed_dt_supervision_rows(
     series: Sequence,
     normalized_values: Sequence[np.ndarray],
     sample_indices: Sequence[tuple[int, int]],
     *,
     dt_s: float,
-) -> FixedDTControlSupervision:
-    """Gather and pad a batch without imposing a semantic trajectory-length cap."""
-    rows = [
+) -> tuple[FixedDTSupervisionRow, ...]:
+    """Gather immutable ragged rows once for a fixed anchor population."""
+    return tuple(
         _sample(series[series_index], normalized_values[series_index], anchor, dt_s)
         for series_index, anchor in sample_indices
-    ]
+    )
+
+
+def pack_fixed_dt_supervision_rows(
+    rows: Sequence[FixedDTSupervisionRow],
+    *,
+    channels: int,
+) -> FixedDTControlSupervision:
+    """Pad cached ragged rows into one batch without changing their values."""
     if not rows:
         raise ValueError("fixed-dt control supervision requires a non-empty batch")
     batch = len(rows)
     max_points = max(len(offsets) for offsets, _states, _weights in rows)
-    channels = normalized_values[0].shape[1]
     offsets = np.zeros((batch, max_points), dtype=np.float64)
     states = np.zeros((batch, max_points, channels), dtype=np.float32)
     weights = np.zeros_like(states)
@@ -111,4 +121,24 @@ def build_fixed_dt_supervision(
         states=torch.from_numpy(states),
         weights=torch.from_numpy(weights),
         valid=torch.from_numpy(valid),
+    )
+
+
+def build_fixed_dt_supervision(
+    series: Sequence,
+    normalized_values: Sequence[np.ndarray],
+    sample_indices: Sequence[tuple[int, int]],
+    *,
+    dt_s: float,
+) -> FixedDTControlSupervision:
+    """Gather and pad a batch without imposing a semantic trajectory-length cap."""
+    rows = cache_fixed_dt_supervision_rows(
+        series,
+        normalized_values,
+        sample_indices,
+        dt_s=dt_s,
+    )
+    return pack_fixed_dt_supervision_rows(
+        rows,
+        channels=normalized_values[0].shape[1],
     )

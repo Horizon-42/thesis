@@ -80,7 +80,13 @@ from config import (
     uses_control_dynamics,
 )
 from coordinate_frames import CoordinateFrame, frame_for_state
-from fixed_dt_supervision import build_fixed_dt_supervision
+from fixed_dt_supervision import (
+    FixedDTControlSupervision,
+    FixedDTSupervisionRow,
+    build_fixed_dt_supervision,
+    cache_fixed_dt_supervision_rows,
+    pack_fixed_dt_supervision_rows,
+)
 from time_grids import output_time_grid
 
 ARRIVAL_DATA_PROVENANCE_SCHEMA = "ts-arrival-data-v2-multi-airport"
@@ -1075,6 +1081,20 @@ class TrajectoryWindows(Dataset, ABC):
             self.flight_weights[s_idx],
         )
 
+    def _dynamics_arrays(self, i: int) -> dict[str, np.ndarray]:
+        s_idx, anchor = self.index[i]
+        return dynamics_arrays(self.series[s_idx], anchor)
+
+    def _fixed_dt_supervision(
+        self, indices: Sequence[int] | np.ndarray
+    ) -> FixedDTControlSupervision:
+        return build_fixed_dt_supervision(
+            self.series,
+            self.encoded,
+            [self.index[int(index)] for index in indices],
+            dt_s=self.config.dt_s,
+        )
+
     def __getitem__(
         self, i: int
     ) -> tuple:
@@ -1088,19 +1108,13 @@ class TrajectoryWindows(Dataset, ABC):
         )
         if not uses_control_dynamics(self.config.prediction_output):
             return result
-        s_idx, anchor = self.index[i]
         dynamics = {
             key: torch.from_numpy(value)
-            for key, value in dynamics_arrays(self.series[s_idx], anchor).items()
+            for key, value in self._dynamics_arrays(i).items()
         }
         if self.config.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_FIXED_DT:
             return (*result, dynamics)
-        dense = build_fixed_dt_supervision(
-            self.series,
-            self.encoded,
-            [(s_idx, anchor)],
-            dt_s=self.config.dt_s,
-        )
+        dense = self._fixed_dt_supervision([i])
         return (*result, dynamics, dense)
 
     def batch(
@@ -1134,22 +1148,14 @@ class TrajectoryWindows(Dataset, ABC):
         )
         if not uses_control_dynamics(self.config.prediction_output):
             return result
-        dynamics_rows = [
-            dynamics_arrays(self.series[self.index[int(index)][0]], self.index[int(index)][1])
-            for index in indices
-        ]
+        dynamics_rows = [self._dynamics_arrays(int(index)) for index in indices]
         dynamics = {
             key: torch.from_numpy(np.stack([row[key] for row in dynamics_rows]))
             for key in dynamics_rows[0]
         }
         if self.config.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_FIXED_DT:
             return (*result, dynamics)
-        dense = build_fixed_dt_supervision(
-            self.series,
-            self.encoded,
-            [self.index[int(index)] for index in indices],
-            dt_s=self.config.dt_s,
-        )
+        dense = self._fixed_dt_supervision(indices)
         return (*result, dynamics, dense)
 
 
@@ -1159,6 +1165,48 @@ class FixedAnchorTrajectoryWindows(TrajectoryWindows):
     anchor_description = "fixed train anchor L-1"
     anchor_policy = "fixed"
     sampling_version = "fixed-anchor-v1"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Every fixed-anchor row is reused on every validation epoch and on final replay.
+        # Cache the ragged source rows, not padded batches, so duration bucketing remains a
+        # pure batching decision and cannot change any target or dynamics value.
+        self._sample_cache = [
+            TrajectoryWindows._sample_arrays(self, index)
+            for index in range(len(self.index))
+        ]
+        self._dynamics_cache: list[dict[str, np.ndarray]] | None = None
+        self._fixed_dt_cache: tuple[FixedDTSupervisionRow, ...] | None = None
+        if uses_control_dynamics(self.config.prediction_output):
+            self._dynamics_cache = [
+                TrajectoryWindows._dynamics_arrays(self, index)
+                for index in range(len(self.index))
+            ]
+            if self.config.control_state_loss_grid == CONTROL_STATE_LOSS_GRID_FIXED_DT:
+                self._fixed_dt_cache = cache_fixed_dt_supervision_rows(
+                    self.series,
+                    self.encoded,
+                    self.index,
+                    dt_s=self.config.dt_s,
+                )
+
+    def _sample_arrays(self, i: int):
+        return self._sample_cache[i]
+
+    def _dynamics_arrays(self, i: int) -> dict[str, np.ndarray]:
+        if self._dynamics_cache is None:
+            return super()._dynamics_arrays(i)
+        return self._dynamics_cache[i]
+
+    def _fixed_dt_supervision(
+        self, indices: Sequence[int] | np.ndarray
+    ) -> FixedDTControlSupervision:
+        if self._fixed_dt_cache is None:
+            return super()._fixed_dt_supervision(indices)
+        return pack_fixed_dt_supervision_rows(
+            [self._fixed_dt_cache[int(index)] for index in indices],
+            channels=len(self.config.channels),
+        )
 
     def _select_anchors(self, anchors: Sequence[int]) -> Sequence[int]:
         return [anchors[0]] if len(anchors) else []
