@@ -26,6 +26,7 @@ from config import (
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
     CHECKPOINT_SELECTION_OBJECTIVE,
+    CHECKPOINT_SELECTION_TERMINAL_STATE,
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DURATION_DIRECT,
     CONTROL_DURATION_FACTORIZED,
@@ -35,7 +36,7 @@ from config import (
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
     CONTROL_STATE_LOSS_GRID_NATIVE,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
-    CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
+    CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
     HORIZON_FULL,
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
@@ -48,6 +49,10 @@ from config import (
 )
 from control_mixture import ControlMixturePrediction
 from control_dynamics_backends import control_dynamics_backend
+from control_loss_components import (
+    ControlStateLossResult,
+    control_tracking_loss_terms,
+)
 from control_prediction_adapters import deployable_control_prediction
 from control_regularization import control_regularization_signals
 from control_training_curriculum import (
@@ -79,16 +84,12 @@ from fixed_dt_supervision import FixedDTControlSupervision
 from metrics import error_by_progress, raw_kinematic_metrics, trajectory_metrics
 from models import build_model, parameter_count, resolve_device
 from prediction_outputs import ControlPrediction, StatePrediction
-from physical_criteria import (
-    fixed_dt_position_ade_m,
-    physical_criteria_loss,
-    terminal_position_error_m,
-)
+from physical_criteria import physical_criteria_loss
 from time_grids import batch_time_grid, numpy_inference_time_grid
 
 CHECKPOINT_NAME = "checkpoint.pt"
 CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
-CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v24-control-dynamics-backend"
+CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v25-terminal-state-loss"
 STATE_TARGET_CONTRACTS = {
     HORIZON_NORMALIZED: "normalized-time-runway-crossing-displacement-kinematic-v3",
     HORIZON_FULL: "full-horizon-fixed-time-displacement-kinematic-v2",
@@ -189,11 +190,17 @@ def target_contract(config: TSConfig) -> str:
 
 
 def loss_component_names(config: TSConfig) -> tuple[str, ...]:
-    return {
+    names = {
         PREDICTION_STATE: STATE_LOSS_COMPONENT_NAMES,
         PREDICTION_CONTROL: CONTROL_LOSS_COMPONENT_NAMES,
         PREDICTION_CONTROL_MIXTURE: CONTROL_MIXTURE_LOSS_COMPONENT_NAMES,
     }[config.prediction_output]
+    if (
+        config.prediction_output == PREDICTION_CONTROL
+        and config.control_state_objective == CONTROL_STATE_OBJECTIVE_TERMINAL_STATE
+    ):
+        return (*names, "terminal_velocity")
+    return names
 
 
 def move_dynamics(
@@ -378,10 +385,18 @@ class ControlLossTerms:
     terminal: torch.Tensor
     effort: torch.Tensor
     smoothness: torch.Tensor
+    extras: dict[str, torch.Tensor] = field(default_factory=dict)
 
     @property
     def total(self) -> torch.Tensor:
-        return self.state + self.final_time + self.terminal + self.effort + self.smoothness
+        return (
+            self.state
+            + self.final_time
+            + self.terminal
+            + self.effort
+            + self.smoothness
+            + sum(self.extras.values(), self.state.new_zeros(()))
+        )
 
 
 def position_velocity_consistency_loss(
@@ -473,13 +488,6 @@ def control_state_supervision_prediction(
     )
 
 
-@dataclass(frozen=True)
-class ControlStateLossResult:
-    normalized_mse: torch.Tensor
-    normalized_segment_end_states: torch.Tensor
-    physical_query_states: torch.Tensor | None = None
-
-
 def _native_endpoint_control_state_loss(
     prediction: ControlPrediction,
     normalized_anchor_state: torch.Tensor,
@@ -556,50 +564,6 @@ _CONTROL_STATE_LOSS_HANDLERS = {
 }
 
 
-def _normalized_mse_tracking_terms(
-    result: ControlStateLossResult,
-    terminal_target: torch.Tensor,
-    config: TSConfig,
-    normalizer: Normalizer,
-    dense_supervision: FixedDTControlSupervision | None,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    del normalizer, dense_supervision
-    terminal_delta = result.normalized_segment_end_states[
-        :, -1, list(POSITION_IDX)
-    ] - terminal_target[:, list(POSITION_IDX)]
-    terminal = config.terminal_loss_weight * terminal_delta.square().mean(dim=1)
-    return result.normalized_mse, terminal
-
-
-def _physical_criteria_tracking_terms(
-    result: ControlStateLossResult,
-    terminal_target: torch.Tensor,
-    config: TSConfig,
-    normalizer: Normalizer,
-    dense_supervision: FixedDTControlSupervision | None,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    del config
-    if result.physical_query_states is None or dense_supervision is None:
-        raise ValueError("physical-criteria requires fixed-dt control supervision")
-    ade_m = fixed_dt_position_ade_m(
-        result.physical_query_states, dense_supervision, normalizer
-    )
-    terminal_m = terminal_position_error_m(
-        result.normalized_segment_end_states, terminal_target, normalizer
-    )
-    # The criterion already contains terminal error; keep the additive terminal slot zero.
-    return (
-        physical_criteria_loss(ade_m, terminal_m),
-        terminal_m.new_zeros(terminal_m.shape),
-    )
-
-
-_CONTROL_TRACKING_OBJECTIVES = {
-    CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE: _normalized_mse_tracking_terms,
-    CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA: _physical_criteria_tracking_terms,
-}
-
-
 def control_prediction_loss_terms(
     prediction: ControlPrediction,
     normalized_anchor_state: torch.Tensor,
@@ -649,9 +613,14 @@ def control_prediction_loss_terms(
     time_loss = (
         (prediction.final_time_s - target_final_time_s) / config.final_time_scale_s
     ).square()
-    state_loss, terminal_loss = _CONTROL_TRACKING_OBJECTIVES[
-        config.control_state_objective
-    ](rollout_loss, terminal_target, config, normalizer, dense_supervision)
+    tracking = control_tracking_loss_terms(
+        rollout_loss,
+        normalized_anchor_state,
+        terminal_target,
+        config,
+        normalizer,
+        dense_supervision,
+    )
 
     effort_signal, smoothness_signal = control_regularization_signals(
         prediction, dynamics, config
@@ -680,11 +649,12 @@ def control_prediction_loss_terms(
         smoothness = effort.new_zeros(effort.shape)
 
     return ControlLossTerms(
-        state=state_loss,
+        state=tracking.state,
         final_time=config.final_time_loss_weight * time_loss,
-        terminal=terminal_loss,
+        terminal=tracking.terminal_position,
         effort=config.control_effort_loss_weight * effort,
         smoothness=config.control_smoothness_loss_weight * smoothness,
+        extras=tracking.extras,
     )
 
 
@@ -727,6 +697,10 @@ def control_prediction_loss_components(
         extras={
             "control_effort": weighted_mean(terms.effort),
             "control_smoothness": weighted_mean(terms.smoothness),
+            **{
+                name: weighted_mean(value)
+                for name, value in terms.extras.items()
+            },
         },
     )
 
@@ -1114,6 +1088,7 @@ def evaluate_fixed_anchor_common_grid(
         predicted_time,
         segment_durations_s,
         points=config.validation_common_grid_points,
+        normalizer=normalizer,
     )
     return {
         key: value
@@ -1445,6 +1420,10 @@ def _common_grid_validation_details(
         details[airport] = {
             "ade_m": block["ade_m"],
             "fde_m": block["fde_m"],
+            "dense_state_loss": block["dense_state_loss"],
+            "terminal_velocity_error_mps": block[
+                "terminal_velocity_error_mps"
+            ],
             "final_time_mae_s": block["final_time_mae_s"],
             "flights": block["flights"],
         }
@@ -1505,10 +1484,49 @@ def _common_grid_criteria_validation_selection(
     )
 
 
+def _terminal_state_validation_selection(
+    *,
+    model: nn.Module,
+    val_sets: dict[str, TrajectoryWindows],
+    normalizer: Normalizer,
+    config: TSConfig,
+    device: torch.device,
+    val_by_airport: dict[str, float],
+) -> ValidationSelection:
+    details = _common_grid_validation_details(
+        model=model,
+        val_sets=val_sets,
+        normalizer=normalizer,
+        config=config,
+        device=device,
+        val_by_airport=val_by_airport,
+    )
+    by_airport: dict[str, float] = {}
+    for airport, block in details.items():
+        value = (
+            config.control_dense_state_loss_weight * block["dense_state_loss"]
+            + config.control_terminal_position_loss_weight
+            * block["fde_m"]
+            / config.control_terminal_position_scale_m
+            + config.control_terminal_velocity_loss_weight
+            * block["terminal_velocity_error_mps"]
+            / config.control_terminal_velocity_scale_mps
+        )
+        by_airport[airport] = float(value)
+        block["terminal_state_criterion"] = float(value)
+    return ValidationSelection(
+        metric=CHECKPOINT_SELECTION_TERMINAL_STATE,
+        value=float(np.mean(list(by_airport.values()))),
+        by_airport=by_airport,
+        details_by_airport=details,
+    )
+
+
 _VALIDATION_SELECTIONS: dict[str, Callable[..., ValidationSelection]] = {
     CHECKPOINT_SELECTION_OBJECTIVE: _objective_validation_selection,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE: _common_grid_validation_selection,
     CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA: _common_grid_criteria_validation_selection,
+    CHECKPOINT_SELECTION_TERMINAL_STATE: _terminal_state_validation_selection,
 }
 
 

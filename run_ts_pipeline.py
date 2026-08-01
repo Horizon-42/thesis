@@ -42,6 +42,7 @@ from config import (  # noqa: E402
     COORDINATE_FRAMES,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
+    CHECKPOINT_SELECTION_TERMINAL_STATE,
     CHECKPOINT_SELECTION_METRICS,
     CHECKPOINT_SELECTION_OBJECTIVE,
     CONTROL_DYNAMICS_BACKENDS,
@@ -58,6 +59,8 @@ from config import (  # noqa: E402
     CONTROL_STATE_LOSS_GRIDS,
     CONTROL_STATE_LOSS_GRID_NATIVE,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
+    CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
+    CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
     CONTROL_STATE_OBJECTIVES,
     DEFAULT_CONTROL_HORIZON_CURRICULUM_STAGE_EPOCHS,
     DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
@@ -67,6 +70,7 @@ from config import (  # noqa: E402
     HORIZON_WINDOW,
     MODELS,
     PREDICTION_CONTROL_MIXTURE,
+    PREDICTION_CONTROL,
     PREDICTION_OUTPUTS,
     PREDICTION_STATE,
     TSConfig,
@@ -150,6 +154,7 @@ def _validation_selection_tag(metric: str) -> str:
     return {
         CHECKPOINT_SELECTION_COMMON_GRID_ADE: "_common_grid_selection",
         CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA: "_common_grid_criteria_selection",
+        CHECKPOINT_SELECTION_TERMINAL_STATE: "_terminal_state_selection",
     }.get(metric, "")
 
 
@@ -227,6 +232,33 @@ def _control_objective_tag(prediction_output: str, objective: str) -> str:
     ):
         return ""
     return f"_{objective.replace('-', '_')}"
+
+
+def _terminal_state_recipe_tag(
+    prediction_output: str,
+    objective: str,
+    dense_weight: float,
+    terminal_position_weight: float,
+    terminal_velocity_weight: float,
+    terminal_position_scale_m: float,
+    terminal_velocity_scale_mps: float,
+) -> str:
+    if (
+        prediction_output != PREDICTION_CONTROL
+        or objective != CONTROL_STATE_OBJECTIVE_TERMINAL_STATE
+    ):
+        return ""
+
+    def compact(value: float) -> str:
+        return f"{value:g}".replace(".", "p")
+
+    return (
+        f"_d{compact(dense_weight)}"
+        f"_tp{compact(terminal_position_weight)}"
+        f"_tv{compact(terminal_velocity_weight)}"
+        f"_ps{compact(terminal_position_scale_m)}m"
+        f"_vs{compact(terminal_velocity_scale_mps)}mps"
+    )
 
 
 def _control_duration_gradient_tag(
@@ -333,6 +365,11 @@ class TrainingPlan:
         validation_common_grid_points: int = DEFAULT_VALIDATION_COMMON_GRID_POINTS,
         control_effort_weight: float | None = None,
         control_smoothness_weight: float | None = None,
+        control_dense_state_weight: float = 0.25,
+        control_terminal_position_weight: float = 1.0,
+        control_terminal_velocity_weight: float = 1.0,
+        control_terminal_position_scale_m: float = 100.0,
+        control_terminal_velocity_scale_mps: float = 10.0,
         control_duration_parameterization: str = CONTROL_DURATION_FACTORIZED,
         control_value_parameterization: str = CONTROL_VALUE_ABSOLUTE,
         control_dynamics_backend: str = CONTROL_DYNAMICS_REANCHORED_RK4,
@@ -381,6 +418,11 @@ class TrainingPlan:
         self.validation_common_grid_points = validation_common_grid_points
         self.control_effort_weight = control_effort_weight
         self.control_smoothness_weight = control_smoothness_weight
+        self.control_dense_state_weight = control_dense_state_weight
+        self.control_terminal_position_weight = control_terminal_position_weight
+        self.control_terminal_velocity_weight = control_terminal_velocity_weight
+        self.control_terminal_position_scale_m = control_terminal_position_scale_m
+        self.control_terminal_velocity_scale_mps = control_terminal_velocity_scale_mps
         self.control_duration_parameterization = control_duration_parameterization
         self.control_value_parameterization = control_value_parameterization
         self.control_dynamics_backend = control_dynamics_backend
@@ -415,6 +457,15 @@ class TrainingPlan:
             + _control_clock_tag(prediction_output, control_state_clock)
             + _control_state_loss_grid_tag(prediction_output, control_state_loss_grid)
             + _control_objective_tag(prediction_output, control_state_objective)
+            + _terminal_state_recipe_tag(
+                prediction_output,
+                control_state_objective,
+                control_dense_state_weight,
+                control_terminal_position_weight,
+                control_terminal_velocity_weight,
+                control_terminal_position_scale_m,
+                control_terminal_velocity_scale_mps,
+            )
             + _control_duration_gradient_tag(
                 prediction_output, control_state_duration_gradient
             )
@@ -499,6 +550,18 @@ class TrainingPlan:
             args += ["--control-effort-weight", str(self.control_effort_weight)]
         if self.control_smoothness_weight is not None:
             args += ["--control-smoothness-weight", str(self.control_smoothness_weight)]
+        args += [
+            "--control-dense-state-weight",
+            str(self.control_dense_state_weight),
+            "--control-terminal-position-weight",
+            str(self.control_terminal_position_weight),
+            "--control-terminal-velocity-weight",
+            str(self.control_terminal_velocity_weight),
+            "--control-terminal-position-scale-m",
+            str(self.control_terminal_position_scale_m),
+            "--control-terminal-velocity-scale-mps",
+            str(self.control_terminal_velocity_scale_mps),
+        ]
         args += [
             "--control-duration-parameterization",
             self.control_duration_parameterization,
@@ -668,6 +731,19 @@ class TrainingPlan:
             "control_state_supervision_clock": self.control_state_clock,
             "control_state_loss_grid": self.control_state_loss_grid,
             "control_state_objective": self.control_state_objective,
+            "control_dense_state_loss_weight": self.control_dense_state_weight,
+            "control_terminal_position_loss_weight": (
+                self.control_terminal_position_weight
+            ),
+            "control_terminal_velocity_loss_weight": (
+                self.control_terminal_velocity_weight
+            ),
+            "control_terminal_position_scale_m": (
+                self.control_terminal_position_scale_m
+            ),
+            "control_terminal_velocity_scale_mps": (
+                self.control_terminal_velocity_scale_mps
+            ),
             "control_state_duration_gradient": self.control_state_duration_gradient,
             "control_horizon_curriculum_s": self.control_horizon_curriculum_s,
             "control_horizon_curriculum_stage_epochs": (
@@ -768,6 +844,19 @@ class TrainingPlan:
             "control_state_supervision_clock": self.control_state_clock,
             "control_state_loss_grid": self.control_state_loss_grid,
             "control_state_objective": self.control_state_objective,
+            "control_dense_state_loss_weight": self.control_dense_state_weight,
+            "control_terminal_position_loss_weight": (
+                self.control_terminal_position_weight
+            ),
+            "control_terminal_velocity_loss_weight": (
+                self.control_terminal_velocity_weight
+            ),
+            "control_terminal_position_scale_m": (
+                self.control_terminal_position_scale_m
+            ),
+            "control_terminal_velocity_scale_mps": (
+                self.control_terminal_velocity_scale_mps
+            ),
             "control_state_duration_gradient": self.control_state_duration_gradient,
             "control_horizon_curriculum_s": self.control_horizon_curriculum_s,
             "control_horizon_curriculum_stage_epochs": (
@@ -939,11 +1028,18 @@ class PredictionPlan:
             if training.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_NATIVE
             else ""
         )
-        objective_label = (
-            "physical ADE/FDE criterion, "
-            if training.control_state_objective != CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE
-            else ""
-        )
+        objective_label = {
+            CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE: "",
+            CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA: (
+                "physical ADE/FDE criterion, "
+            ),
+            CONTROL_STATE_OBJECTIVE_TERMINAL_STATE: (
+                "dense state + terminal position/velocity criterion "
+                f"({training.control_dense_state_weight:g}/"
+                f"{training.control_terminal_position_weight:g}/"
+                f"{training.control_terminal_velocity_weight:g}), "
+            ),
+        }[training.control_state_objective]
         duration_gradient_label = (
             "detached duration-state gradient, "
             if not training.control_state_duration_gradient
@@ -1092,6 +1188,15 @@ def run_training(
                 f"state_clock={config.control_state_supervision_clock}, "
                 f"rollout_dt={config.control_rollout_integrator_dt_s:g}s"
             )
+            if config.control_state_objective == CONTROL_STATE_OBJECTIVE_TERMINAL_STATE:
+                print(
+                    "   terminal-state: "
+                    f"dense={config.control_dense_state_loss_weight:g}, "
+                    f"position={config.control_terminal_position_loss_weight:g}/"
+                    f"{config.control_terminal_position_scale_m:g}m, "
+                    f"velocity={config.control_terminal_velocity_loss_weight:g}/"
+                    f"{config.control_terminal_velocity_scale_mps:g}mps"
+                )
             if config.control_horizon_curriculum_s:
                 horizons = "→".join(
                     f"{value:g}s" for value in config.control_horizon_curriculum_s
@@ -1239,6 +1344,11 @@ def main() -> None:
                         help="positive integer or auto (default: 2048)")
     parser.add_argument("--control-effort-weight", type=float, default=None)
     parser.add_argument("--control-smoothness-weight", type=float, default=None)
+    parser.add_argument("--control-dense-state-weight", type=float, default=0.25)
+    parser.add_argument("--control-terminal-position-weight", type=float, default=1.0)
+    parser.add_argument("--control-terminal-velocity-weight", type=float, default=1.0)
+    parser.add_argument("--control-terminal-position-scale-m", type=float, default=100.0)
+    parser.add_argument("--control-terminal-velocity-scale-mps", type=float, default=10.0)
     parser.add_argument(
         "--control-duration-parameterization",
         choices=CONTROL_DURATION_PARAMETERIZATIONS,
@@ -1410,6 +1520,13 @@ def main() -> None:
             validation_common_grid_points=args.validation_common_grid_points,
             control_effort_weight=args.control_effort_weight,
             control_smoothness_weight=args.control_smoothness_weight,
+            control_dense_state_weight=args.control_dense_state_weight,
+            control_terminal_position_weight=args.control_terminal_position_weight,
+            control_terminal_velocity_weight=args.control_terminal_velocity_weight,
+            control_terminal_position_scale_m=args.control_terminal_position_scale_m,
+            control_terminal_velocity_scale_mps=(
+                args.control_terminal_velocity_scale_mps
+            ),
             control_duration_parameterization=args.control_duration_parameterization,
             control_value_parameterization=args.control_value_parameterization,
             control_dynamics_backend=args.control_dynamics_backend,

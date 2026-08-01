@@ -52,9 +52,11 @@ CONTROL_STATE_LOSS_GRIDS = (
 )
 CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE = "normalized-mse"
 CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA = "physical-criteria"
+CONTROL_STATE_OBJECTIVE_TERMINAL_STATE = "terminal-state"
 CONTROL_STATE_OBJECTIVES = (
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
+    CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
 )
 CONTROL_DURATION_FACTORIZED = "factorized"
 CONTROL_DURATION_DIRECT = "direct"
@@ -84,10 +86,12 @@ CONTROL_GRADIENT_CLIP_POLICIES = (
 CHECKPOINT_SELECTION_OBJECTIVE = "fixed-anchor-objective"
 CHECKPOINT_SELECTION_COMMON_GRID_ADE = "fixed-anchor-common-grid-ade"
 CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA = "fixed-anchor-common-grid-criteria"
+CHECKPOINT_SELECTION_TERMINAL_STATE = "fixed-anchor-terminal-state"
 CHECKPOINT_SELECTION_METRICS = (
     CHECKPOINT_SELECTION_OBJECTIVE,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
+    CHECKPOINT_SELECTION_TERMINAL_STATE,
 )
 
 
@@ -299,7 +303,14 @@ class TSConfig:
     control_state_loss_grid: str = CONTROL_STATE_LOSS_GRID_NATIVE
     # The default keeps the historical normalized-channel MSE. ``physical-criteria``
     # optimizes the smooth worst of fixed-dt 3-D ADE/100 m and terminal error/100 m.
+    # ``terminal-state`` composes independently replaceable dense-state, terminal-position
+    # and terminal-velocity terms. Terminal weights intentionally exceed the dense weight.
     control_state_objective: str = CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE
+    control_dense_state_loss_weight: float = 0.25
+    control_terminal_position_loss_weight: float = 1.0
+    control_terminal_velocity_loss_weight: float = 1.0
+    control_terminal_position_scale_m: float = 100.0
+    control_terminal_velocity_scale_mps: float = 10.0
     # Whether state-rollout gradients may update the learned duration partition. Turning
     # this off leaves the final-time loss trainable while controls own geometry fitting.
     control_state_duration_gradient: bool = True
@@ -409,17 +420,36 @@ class TSConfig:
                     "fixed-dt control state loss requires "
                     "control_state_supervision_clock='observed'"
                 )
-        if self.control_state_objective == CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA:
+        if self.control_state_objective in (
+            CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
+            CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
+        ):
             if self.prediction_output != PREDICTION_CONTROL:
                 raise ValueError(
-                    "physical-criteria control objective is supported only by "
+                    f"{self.control_state_objective} control objective is supported only by "
                     "prediction_output='control'"
                 )
             if self.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_FIXED_DT:
                 raise ValueError(
-                    "physical-criteria control objective requires "
+                    f"{self.control_state_objective} control objective requires "
                     "control_state_loss_grid='fixed-dt'"
                 )
+        if (
+            self.control_state_objective == CONTROL_STATE_OBJECTIVE_TERMINAL_STATE
+            and self.checkpoint_selection_metric != CHECKPOINT_SELECTION_TERMINAL_STATE
+        ):
+            raise ValueError(
+                "terminal-state control objective requires "
+                "checkpoint_selection_metric='fixed-anchor-terminal-state'"
+            )
+        if (
+            self.checkpoint_selection_metric == CHECKPOINT_SELECTION_TERMINAL_STATE
+            and self.control_state_objective != CONTROL_STATE_OBJECTIVE_TERMINAL_STATE
+        ):
+            raise ValueError(
+                "fixed-anchor-terminal-state checkpoint selection requires the "
+                "terminal-state control objective"
+            )
         if not self.control_state_duration_gradient:
             if self.prediction_output != PREDICTION_CONTROL:
                 raise ValueError(
@@ -442,9 +472,12 @@ class TSConfig:
                     "control horizon curriculum requires "
                     "control_state_loss_grid='fixed-dt'"
                 )
-            if self.control_state_objective != CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA:
+            if self.control_state_objective not in (
+                CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
+                CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
+            ):
                 raise ValueError(
-                    "control horizon curriculum requires the physical-criteria objective"
+                    "control horizon curriculum requires a fixed-dt physical objective"
                 )
             if self.control_state_duration_gradient:
                 raise ValueError(
@@ -624,6 +657,48 @@ class TSConfig:
             raise ValueError("control_effort_loss_weight must be non-negative")
         if self.control_smoothness_loss_weight < 0.0:
             raise ValueError("control_smoothness_loss_weight must be non-negative")
+        for name, value in (
+            ("control_dense_state_loss_weight", self.control_dense_state_loss_weight),
+            (
+                "control_terminal_position_loss_weight",
+                self.control_terminal_position_loss_weight,
+            ),
+            (
+                "control_terminal_velocity_loss_weight",
+                self.control_terminal_velocity_loss_weight,
+            ),
+        ):
+            if not math.isfinite(value) or value < 0.0:
+                raise ValueError(f"{name} must be finite and non-negative")
+        for name, value in (
+            (
+                "control_terminal_position_scale_m",
+                self.control_terminal_position_scale_m,
+            ),
+            (
+                "control_terminal_velocity_scale_mps",
+                self.control_terminal_velocity_scale_mps,
+            ),
+        ):
+            if not math.isfinite(value) or value <= 0.0:
+                raise ValueError(f"{name} must be finite and positive")
+        if self.control_state_objective == CONTROL_STATE_OBJECTIVE_TERMINAL_STATE:
+            if (
+                self.control_terminal_position_loss_weight
+                <= self.control_dense_state_loss_weight
+            ):
+                raise ValueError(
+                    "terminal-state requires terminal position weight greater than "
+                    "dense state weight"
+                )
+            if (
+                self.control_terminal_velocity_loss_weight
+                <= self.control_dense_state_loss_weight
+            ):
+                raise ValueError(
+                    "terminal-state requires terminal velocity weight greater than "
+                    "dense state weight"
+                )
         if self.control_mixture_selector_loss_weight < 0.0:
             raise ValueError("control_mixture_selector_loss_weight must be non-negative")
         if self.control_mixture_diversity_loss_weight < 0.0:
@@ -712,6 +787,11 @@ class TSConfig:
             "control_gradient_clip_policy",
             "control_value_parameterization",
             "control_dynamics_backend",
+            "control_dense_state_loss_weight",
+            "control_terminal_position_loss_weight",
+            "control_terminal_velocity_loss_weight",
+            "control_terminal_position_scale_m",
+            "control_terminal_velocity_scale_mps",
         ):
             if (
                 uses_control_dynamics(data.get("prediction_output", PREDICTION_STATE))
@@ -741,6 +821,11 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
         "state_supervision_clock": config.control_state_supervision_clock,
         "state_loss_grid": config.control_state_loss_grid,
         "state_objective": config.control_state_objective,
+        "dense_state_loss_weight": config.control_dense_state_loss_weight,
+        "terminal_position_loss_weight": config.control_terminal_position_loss_weight,
+        "terminal_velocity_loss_weight": config.control_terminal_velocity_loss_weight,
+        "terminal_position_scale_m": config.control_terminal_position_scale_m,
+        "terminal_velocity_scale_mps": config.control_terminal_velocity_scale_mps,
         "state_duration_gradient": config.control_state_duration_gradient,
         "horizon_curriculum_s": list(config.control_horizon_curriculum_s),
         "horizon_curriculum_stage_epochs": (

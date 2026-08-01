@@ -25,12 +25,17 @@ import torch  # noqa: E402
 import run_ts_pipeline as pipeline  # noqa: E402
 from channels import POSITION_IDX  # noqa: E402
 from config import (  # noqa: E402
+    CHECKPOINT_SELECTION_OBJECTIVE,
+    CHECKPOINT_SELECTION_TERMINAL_STATE,
     CONTROL_DYNAMICS_BACKENDS,
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DURATION_FACTORIZED,
     CONTROL_DURATION_PARAMETERIZATIONS,
     CONTROL_STATE_CLOCK_OBSERVED,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
+    CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
+    CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
+    CONTROL_STATE_OBJECTIVES,
     PREDICTION_CONTROL,
     TSConfig,
 )
@@ -53,6 +58,21 @@ from train import (  # noqa: E402
 )
 
 RESULT_SCHEMA = "ts-control-fixed-dt-single-flight-overfit-v1"
+
+
+def _selected_checkpoint_history_row(fit):
+    metric = fit.config.checkpoint_selection_metric
+    eligible = [
+        row
+        for row in fit.history
+        if row.validation_selection_metric == metric
+        and row.validation_selection_value is not None
+    ]
+    if not eligible:
+        raise RuntimeError(
+            f"training history has no row for checkpoint criterion {metric!r}"
+        )
+    return min(eligible, key=lambda row: row.validation_selection_value)
 
 
 def _dense_replay_metrics(fit, series) -> dict[str, object]:
@@ -164,6 +184,7 @@ def _write_report(output_dir: Path, result: dict[str, object]) -> None:
         "This is a train-only memorization diagnostic; no outer-test trajectory was opened.\n\n"
         f"- Flight: `{result['flight']['dataset_id']}`\n"
         f"- Dynamics backend: `{result['config']['control_dynamics_backend']}`\n"
+        f"- Tracking objective: `{result['config']['control_state_objective']}`\n"
         f"- Best epoch: {loss['best_epoch']} / {loss['epochs_run']}\n"
         f"- Replay loss: {loss['first_replay_loss']:.8g} → "
         f"{loss['best_replay_loss']:.8g}\n"
@@ -195,6 +216,16 @@ def main(argv: list[str] | None = None) -> int:
         choices=CONTROL_DYNAMICS_BACKENDS,
         default=CONTROL_DYNAMICS_REANCHORED_RK4,
     )
+    parser.add_argument(
+        "--control-state-objective",
+        choices=CONTROL_STATE_OBJECTIVES,
+        default=CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
+    )
+    parser.add_argument("--control-dense-state-weight", type=float, default=0.25)
+    parser.add_argument("--control-terminal-position-weight", type=float, default=1.0)
+    parser.add_argument("--control-terminal-velocity-weight", type=float, default=1.0)
+    parser.add_argument("--control-terminal-position-scale-m", type=float, default=100.0)
+    parser.add_argument("--control-terminal-velocity-scale-mps", type=float, default=10.0)
     parser.add_argument("--control-effort-weight", type=float, default=0.0)
     parser.add_argument("--control-smoothness-weight", type=float, default=0.0)
     parser.add_argument("--device", default="auto")
@@ -219,6 +250,17 @@ def main(argv: list[str] | None = None) -> int:
         control_duration_parameterization=args.duration_parameterization,
         control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
         control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
+        control_state_objective=args.control_state_objective,
+        checkpoint_selection_metric=(
+            CHECKPOINT_SELECTION_TERMINAL_STATE
+            if args.control_state_objective == CONTROL_STATE_OBJECTIVE_TERMINAL_STATE
+            else CHECKPOINT_SELECTION_OBJECTIVE
+        ),
+        control_dense_state_loss_weight=args.control_dense_state_weight,
+        control_terminal_position_loss_weight=args.control_terminal_position_weight,
+        control_terminal_velocity_loss_weight=args.control_terminal_velocity_weight,
+        control_terminal_position_scale_m=args.control_terminal_position_scale_m,
+        control_terminal_velocity_scale_mps=args.control_terminal_velocity_scale_mps,
         n_segments=args.n_segments,
         epochs=args.epochs,
         patience=min(args.patience, args.epochs),
@@ -255,7 +297,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"memorizing {series.dataset_id}; remaining reference={series.supervision_times[-1] - series.times[config.seq_len - 1]:.1f}s")
     fit = fit_model([series], [series], config, verbose=not args.quiet)
     metrics = _dense_replay_metrics(fit, series)
-    best = min(fit.history, key=lambda row: row.val_loss)
+    best = _selected_checkpoint_history_row(fit)
     first = fit.history[0].val_loss
     result = {
         "schema_version": RESULT_SCHEMA,

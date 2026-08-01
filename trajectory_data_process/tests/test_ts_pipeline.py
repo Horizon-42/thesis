@@ -353,6 +353,45 @@ def test_fixed_and_random_anchor_modes_use_distinct_artifact_paths(tmp_path, mon
     )[1]
 
 
+def test_terminal_state_loss_recipe_is_explicit_and_has_distinct_identity(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(pipeline, "HARVEST_ROOT", tmp_path / "harvest")
+    monkeypatch.setattr(pipeline, "OPT_OUTPUTS_ROOT", tmp_path / "outputs")
+    monkeypatch.setattr(pipeline, "COMPARISON_AIRPORTS_ROOT", tmp_path / "frontend")
+    _manifest(pipeline.HARVEST_ROOT, "KRDU")
+    common = {
+        "training_mode": "pooled",
+        "prediction_output": "control",
+        "control_dynamics_backend": "transport-chart-velocity",
+        "control_state_clock": "observed",
+        "control_state_loss_grid": "fixed-dt",
+        "control_state_objective": "terminal-state",
+        "checkpoint_selection_metric": "fixed-anchor-terminal-state",
+    }
+    initial = pipeline.TrainingPlan(("KRDU",), "itransformer", **common)
+    stronger_velocity = pipeline.TrainingPlan(
+        ("KRDU",),
+        "itransformer",
+        **common,
+        control_terminal_velocity_weight=2.0,
+    )
+
+    command = initial.train_step(use_best_config=False)[1]
+    config, _source = initial.resolved_train_config(use_best_config=False)
+    prediction = pipeline.PredictionPlan(initial, "KRDU", ("eval",))
+
+    assert initial.train_dir != stronger_velocity.train_dir
+    assert command[command.index("--control-dense-state-weight") + 1] == "0.25"
+    assert command[command.index("--control-terminal-position-weight") + 1] == "1.0"
+    assert command[command.index("--control-terminal-velocity-weight") + 1] == "1.0"
+    assert config.control_dense_state_loss_weight == pytest.approx(0.25)
+    assert config.control_terminal_position_loss_weight == pytest.approx(1.0)
+    assert config.control_terminal_velocity_loss_weight == pytest.approx(1.0)
+    assert "terminal position/velocity" in prediction.label
+    assert "(0.25/1/1)" in prediction.label
+
+
 def test_three_horizon_modes_use_distinct_commands_and_artifact_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "HARVEST_ROOT", tmp_path / "harvest")
     monkeypatch.setattr(pipeline, "OPT_OUTPUTS_ROOT", tmp_path / "outputs")

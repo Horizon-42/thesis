@@ -209,6 +209,11 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
                         help="explicit final-position loss weight (default: 0.02)")
     parser.add_argument("--control-effort-weight", type=float, default=None)
     parser.add_argument("--control-smoothness-weight", type=float, default=None)
+    parser.add_argument("--control-dense-state-weight", type=float, default=None)
+    parser.add_argument("--control-terminal-position-weight", type=float, default=None)
+    parser.add_argument("--control-terminal-velocity-weight", type=float, default=None)
+    parser.add_argument("--control-terminal-position-scale-m", type=float, default=None)
+    parser.add_argument("--control-terminal-velocity-scale-mps", type=float, default=None)
     parser.add_argument(
         "--control-duration-parameterization",
         choices=CONTROL_DURATION_PARAMETERIZATIONS,
@@ -267,8 +272,9 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
         choices=CONTROL_STATE_OBJECTIVES,
         default=None,
         help=(
-            "control tracking objective: normalized-channel MSE (default) or the "
-            "smooth worst of physical fixed-dt ADE and terminal error"
+            "control tracking objective: normalized-channel MSE (default), the smooth "
+            "worst of physical fixed-dt ADE and terminal error, or separately weighted "
+            "dense state / terminal position / terminal velocity"
         ),
     )
     parser.add_argument(
@@ -416,6 +422,23 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("terminal_loss_weight", args.terminal_loss_weight),
         ("control_effort_loss_weight", args.control_effort_weight),
         ("control_smoothness_loss_weight", args.control_smoothness_weight),
+        ("control_dense_state_loss_weight", args.control_dense_state_weight),
+        (
+            "control_terminal_position_loss_weight",
+            args.control_terminal_position_weight,
+        ),
+        (
+            "control_terminal_velocity_loss_weight",
+            args.control_terminal_velocity_weight,
+        ),
+        (
+            "control_terminal_position_scale_m",
+            args.control_terminal_position_scale_m,
+        ),
+        (
+            "control_terminal_velocity_scale_mps",
+            args.control_terminal_velocity_scale_mps,
+        ),
         ("control_duration_parameterization", args.control_duration_parameterization),
         ("control_value_parameterization", args.control_value_parameterization),
         ("control_dynamics_backend", args.control_dynamics_backend),

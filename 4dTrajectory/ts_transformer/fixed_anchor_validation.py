@@ -12,10 +12,13 @@ from __future__ import annotations
 from typing import Any, Sequence
 
 import numpy as np
+import torch
 
-from channels import POSITION_IDX
+from channels import POSITION_IDX, VELOCITY_IDX
 from config import HORIZON_NORMALIZED, TSConfig
-from dataset import FlightSeries
+from control_loss_components import last_reliable_terminal_velocity_target
+from dataset import FlightSeries, Normalizer
+from fixed_dt_supervision import build_fixed_dt_supervision
 from time_grids import output_time_grid
 
 
@@ -52,6 +55,51 @@ def fixed_anchor_common_truth(
             for channel in range(len(config.channels))
         ])
     return truth, durations, progress
+
+
+def fixed_anchor_common_weights_and_terminal_velocity(
+    series: Sequence[FlightSeries],
+    config: TSConfig,
+    progress: np.ndarray,
+    durations: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return reliable common-grid weights and last observed terminal velocities."""
+
+    points = len(progress)
+    weights = np.empty((len(series), points, len(config.channels)), dtype=np.float32)
+    anchor = config.seq_len - 1
+    for row, item in enumerate(series):
+        anchor_time = float(item.times[anchor])
+        query_times = anchor_time + progress * durations[row]
+        weights[row] = np.column_stack([
+            np.interp(
+                query_times,
+                item.supervision_times,
+                item.supervision_weights[:, channel],
+            )
+            for channel in range(len(config.channels))
+        ])
+        for channel in VELOCITY_IDX:
+            valid = np.flatnonzero(item.supervision_weights[:, channel] > 0.0)
+            if not len(valid):
+                raise ValueError(
+                    f"flight {item.dataset_id!r} has no reliable velocity supervision"
+                )
+            last = int(valid[-1])
+            weights[row, query_times > item.supervision_times[last], channel] = 0.0
+    fixed_dt = build_fixed_dt_supervision(
+        series,
+        [item.supervision_values for item in series],
+        [(row, anchor) for row in range(len(series))],
+        dt_s=config.dt_s,
+    )
+    anchor_states = torch.from_numpy(np.stack([
+        item.values[anchor] for item in series
+    ]).astype(np.float32, copy=False))
+    terminal_velocity = last_reliable_terminal_velocity_target(
+        anchor_states, fixed_dt
+    ).numpy()
+    return weights, terminal_velocity
 
 
 def resample_prediction_to_physical_time(
@@ -107,6 +155,7 @@ def fixed_anchor_common_grid_metrics(
     segment_durations_s: np.ndarray,
     *,
     points: int,
+    normalizer: Normalizer | None = None,
 ) -> dict[str, Any]:
     """Evaluate aligned fixed-anchor predictions in physical metres and seconds."""
     count = len(series)
@@ -139,18 +188,39 @@ def fixed_anchor_common_grid_metrics(
         )
     delta = common[..., list(POSITION_IDX)] - truth[..., list(POSITION_IDX)]
     error = np.linalg.norm(delta, axis=-1)
+    weights, terminal_velocity_target = (
+        fixed_anchor_common_weights_and_terminal_velocity(
+            series, config, progress, true_duration_s
+        )
+    )
+    terminal_velocity_error = np.linalg.norm(
+        common[:, -1, list(VELOCITY_IDX)] - terminal_velocity_target,
+        axis=-1,
+    )
     time_error = predicted_final_time_s - true_duration_s
-    return {
+    result = {
         "anchor": "fixed L-1",
         "metric_grid": "common physical-time grid",
         "points": points,
         "flights": count,
         "ade_m": float(error.mean()),
         "fde_m": float(error[:, -1].mean()),
+        "terminal_velocity_error_mps": float(terminal_velocity_error.mean()),
         "final_time_mae_s": float(np.abs(time_error).mean()),
         "prediction_horizon_cap_rate": float(capped.mean()),
         "ade_per_flight_m": error.mean(axis=1),
         "fde_per_flight_m": error[:, -1],
+        "terminal_velocity_error_per_flight_mps": terminal_velocity_error,
         "predicted_final_time_s": predicted_final_time_s,
         "true_final_time_s": true_duration_s,
     }
+    if normalizer is not None:
+        normalized_delta = (
+            common.astype(np.float64) - truth.astype(np.float64)
+        ) / np.asarray(normalizer.std, dtype=np.float64)
+        weighted_squared = normalized_delta**2 * weights
+        denominator = weights.sum(axis=(1, 2)).clip(min=1.0)
+        dense_state = weighted_squared.sum(axis=(1, 2)) / denominator
+        result["dense_state_loss"] = float(dense_state.mean())
+        result["dense_state_loss_per_flight"] = dense_state
+    return result

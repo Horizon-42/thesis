@@ -96,6 +96,7 @@ CHANNELS: tuple[str, ...] = ("e", "n", "u", "edot", "ndot", "udot")
 # Column indices, so nothing downstream hard-codes a number.
 IDX = {name: i for i, name in enumerate(CHANNELS)}
 POSITION_IDX = (IDX["e"], IDX["n"], IDX["u"])
+VELOCITY_IDX = (IDX["edot"], IDX["ndot"], IDX["udot"])
 
 
 def channels_from_states(

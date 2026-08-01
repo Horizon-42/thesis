@@ -50,6 +50,7 @@ import experiment_index  # noqa: E402
 import run_ts_history_ablation as history_ablation  # noqa: E402
 import run_ts_pipeline as pipeline_module  # noqa: E402
 import run_ts_predictability_report as predictability_report  # noqa: E402
+import run_ts_control_fixed_dt_overfit as fixed_dt_overfit  # noqa: E402
 import train as train_module  # noqa: E402
 from anchor_eligibility import (  # noqa: E402
     CONTROL_ANCHOR_STALL_MARGIN, eligible_random_train_anchors,
@@ -60,6 +61,7 @@ from config import (  # noqa: E402
     AIRCRAFT_FILTER_OPENAP_DIRECT, HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
+    CHECKPOINT_SELECTION_TERMINAL_STATE,
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
     CONTROL_DURATION_DIRECT, CONTROL_DURATION_FACTORIZED,
@@ -70,10 +72,16 @@ from config import (  # noqa: E402
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
+    CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
     PREDICTION_CONTROL, PREDICTION_CONTROL_MIXTURE,
     TSConfig, control_recipe,
 )
 from control_mixture import ControlMixturePrediction  # noqa: E402
+from control_loss_components import (  # noqa: E402
+    ControlStateLossResult,
+    control_tracking_loss_terms,
+    last_reliable_terminal_velocity_target,
+)
 from control_training_curriculum import (  # noqa: E402
     ControlTrainingStage,
     build_control_training_stage_view,
@@ -100,6 +108,10 @@ from export import (  # noqa: E402
 from fixed_dt_supervision import (  # noqa: E402
     FixedDTControlSupervision,
     build_fixed_dt_supervision,
+)
+from fixed_anchor_validation import (  # noqa: E402
+    fixed_anchor_common_grid_metrics,
+    fixed_anchor_common_weights_and_terminal_velocity,
 )
 from forecast import Forecast, forecast_approach  # noqa: E402
 from metrics import (  # noqa: E402
@@ -1592,7 +1604,18 @@ def test_control_mixture_is_an_explicit_validated_mode():
         "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
         "state_supervision_clock": config.control_state_supervision_clock,
         "state_loss_grid": config.control_state_loss_grid,
-        "state_objective": CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
+            "state_objective": CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
+            "dense_state_loss_weight": config.control_dense_state_loss_weight,
+            "terminal_position_loss_weight": (
+                config.control_terminal_position_loss_weight
+            ),
+            "terminal_velocity_loss_weight": (
+                config.control_terminal_velocity_loss_weight
+            ),
+            "terminal_position_scale_m": config.control_terminal_position_scale_m,
+            "terminal_velocity_scale_mps": (
+                config.control_terminal_velocity_scale_mps
+            ),
         "state_duration_gradient": True,
         "horizon_curriculum_s": [],
         "horizon_curriculum_stage_epochs": (
@@ -1758,6 +1781,11 @@ def test_legacy_control_config_without_state_loss_grid_is_rejected():
         "control_gradient_clip_policy",
         "control_value_parameterization",
         "control_dynamics_backend",
+        "control_dense_state_loss_weight",
+        "control_terminal_position_loss_weight",
+        "control_terminal_velocity_loss_weight",
+        "control_terminal_position_scale_m",
+        "control_terminal_velocity_scale_mps",
     ],
 )
 def test_legacy_control_config_without_physical_criteria_recipe_is_rejected(field):
@@ -1786,6 +1814,34 @@ def test_physical_criteria_requires_observed_fixed_dt_single_control():
     assert config.control_state_duration_gradient is False
     assert "physical-criteria" in train_module.target_contract(config)
     assert "detached-duration-gradient" in train_module.target_contract(config)
+
+
+def test_terminal_state_objective_requires_aligned_selection_and_terminal_weights():
+    common = {
+        "prediction_output": PREDICTION_CONTROL,
+        "control_state_supervision_clock": CONTROL_STATE_CLOCK_OBSERVED,
+        "control_state_loss_grid": CONTROL_STATE_LOSS_GRID_FIXED_DT,
+        "control_state_objective": CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
+    }
+    with pytest.raises(ValueError, match="fixed-anchor-terminal-state"):
+        TSConfig(**common)
+    with pytest.raises(ValueError, match="velocity weight greater"):
+        TSConfig(
+            **common,
+            checkpoint_selection_metric=CHECKPOINT_SELECTION_TERMINAL_STATE,
+            control_dense_state_loss_weight=1.0,
+            control_terminal_position_loss_weight=2.0,
+            control_terminal_velocity_loss_weight=1.0,
+        )
+
+    config = TSConfig(
+        **common,
+        checkpoint_selection_metric=CHECKPOINT_SELECTION_TERMINAL_STATE,
+    )
+
+    assert config.control_terminal_position_loss_weight > config.control_dense_state_loss_weight
+    assert config.control_terminal_velocity_loss_weight > config.control_dense_state_loss_weight
+    assert "terminal-state" in train_module.target_contract(config)
 
 
 def test_control_horizon_curriculum_is_a_strict_physical_training_mode():
@@ -2758,6 +2814,188 @@ def test_fixed_dt_control_targets_choose_nearest_row_across_float_ulp():
     np.testing.assert_array_equal(dense.states[0].numpy(), values[[3, 4]])
 
 
+def test_terminal_state_components_use_last_reliable_velocity_and_explicit_weights():
+    config = TSConfig(
+        prediction_output=PREDICTION_CONTROL,
+        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
+        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
+        control_state_objective=CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
+        checkpoint_selection_metric=CHECKPOINT_SELECTION_TERMINAL_STATE,
+    )
+    states = torch.zeros(1, 3, len(ch.CHANNELS))
+    states[0, 0, list(ch.VELOCITY_IDX)] = torch.tensor([1.0, 2.0, 3.0])
+    states[0, 1, list(ch.VELOCITY_IDX)] = torch.tensor([4.0, 5.0, 6.0])
+    states[0, 2, list(ch.VELOCITY_IDX)] = 999.0
+    weights = torch.full_like(states, 1.0 / len(ch.CHANNELS))
+    weights[0, 2, list(ch.VELOCITY_IDX)] = 0.0
+    supervision = FixedDTControlSupervision(
+        query_offsets_s=torch.tensor([[2.0, 4.0, 6.0]], dtype=torch.float64),
+        states=states,
+        weights=weights,
+        valid=torch.ones(1, 3, dtype=torch.bool),
+    )
+    anchor = torch.zeros(1, len(ch.CHANNELS))
+    anchor[0, list(ch.VELOCITY_IDX)] = torch.tensor([-1.0, -2.0, -3.0])
+    endpoints = torch.zeros(1, 2, len(ch.CHANNELS))
+    endpoints[0, -1, list(ch.POSITION_IDX)] = torch.tensor([300.0, 400.0, 0.0])
+    endpoints[0, -1, list(ch.VELOCITY_IDX)] = torch.tensor([7.0, 9.0, 6.0])
+    endpoints.requires_grad_()
+    rollout = ControlStateLossResult(
+        normalized_mse=torch.tensor([2.0]),
+        normalized_segment_end_states=endpoints,
+        physical_query_states=torch.zeros(1, 3, len(ch.CHANNELS)),
+    )
+    normalizer = Normalizer(
+        mean=np.zeros(len(ch.CHANNELS)),
+        std=np.ones(len(ch.CHANNELS)),
+    )
+
+    target_velocity = last_reliable_terminal_velocity_target(anchor, supervision)
+    terms = control_tracking_loss_terms(
+        rollout,
+        anchor,
+        torch.zeros(1, len(ch.CHANNELS)),
+        config,
+        normalizer,
+        supervision,
+    )
+    total = terms.state + terms.terminal_position + terms.extras["terminal_velocity"]
+    total.backward()
+
+    torch.testing.assert_close(target_velocity, torch.tensor([[4.0, 5.0, 6.0]]))
+    assert terms.state.item() == pytest.approx(0.5)
+    assert terms.terminal_position.item() == pytest.approx(5.0)
+    assert terms.extras["terminal_velocity"].item() == pytest.approx(0.5)
+    assert torch.count_nonzero(
+        endpoints.grad[0, -1, list(ch.POSITION_IDX)]
+    ).item() > 0
+    assert torch.count_nonzero(
+        endpoints.grad[0, -1, list(ch.VELOCITY_IDX)]
+    ).item() > 0
+
+
+def test_terminal_velocity_target_falls_back_to_observed_anchor():
+    states = torch.full((1, 2, len(ch.CHANNELS)), 999.0)
+    weights = torch.zeros_like(states)
+    supervision = FixedDTControlSupervision(
+        query_offsets_s=torch.tensor([[2.0, 4.0]], dtype=torch.float64),
+        states=states,
+        weights=weights,
+        valid=torch.ones(1, 2, dtype=torch.bool),
+    )
+    anchor = torch.zeros(1, len(ch.CHANNELS))
+    anchor[0, list(ch.VELOCITY_IDX)] = torch.tensor([80.0, 2.0, -3.0])
+
+    target = last_reliable_terminal_velocity_target(anchor, supervision)
+
+    torch.testing.assert_close(target, torch.tensor([[80.0, 2.0, -3.0]]))
+
+
+def test_validation_terminal_velocity_matches_fixed_dt_training_before_off_grid_crossing():
+    config = TSConfig(seq_len=2, dt_s=2.0)
+    supervision_values = np.zeros((4, len(ch.CHANNELS)), dtype=np.float32)
+    supervision_values[2, list(ch.VELOCITY_IDX)] = [10.0, 20.0, 30.0]
+    supervision_values[3, list(ch.VELOCITY_IDX)] = [100.0, 200.0, 300.0]
+    item = SimpleNamespace(
+        dataset_id="KAAA:OFFGRID",
+        times=np.array([0.0, 2.0, 4.0]),
+        values=supervision_values[:3],
+        supervision_times=np.array([0.0, 2.0, 4.0, 5.0]),
+        supervision_values=supervision_values,
+        supervision_weights=np.full_like(
+            supervision_values, 1.0 / len(ch.CHANNELS)
+        ),
+    )
+    dense = build_fixed_dt_supervision(
+        [item], [supervision_values], [(0, config.seq_len - 1)], dt_s=config.dt_s
+    )
+    training_target = last_reliable_terminal_velocity_target(
+        torch.from_numpy(item.values[-1:]), dense
+    )
+    _weights, validation_target = fixed_anchor_common_weights_and_terminal_velocity(
+        [item], config, np.array([1.0]), np.array([3.0])
+    )
+
+    np.testing.assert_allclose(
+        validation_target, training_target.numpy(), rtol=0.0, atol=0.0
+    )
+    np.testing.assert_array_equal(validation_target[0], [10.0, 20.0, 30.0])
+
+
+def test_overfit_history_selection_uses_configured_checkpoint_metric():
+    terminal_metric = CHECKPOINT_SELECTION_TERMINAL_STATE
+    fit = SimpleNamespace(
+        config=SimpleNamespace(checkpoint_selection_metric=terminal_metric),
+        history=[
+            SimpleNamespace(
+                epoch=1,
+                val_loss=1.0,
+                validation_selection_metric=terminal_metric,
+                validation_selection_value=5.0,
+            ),
+            SimpleNamespace(
+                epoch=2,
+                val_loss=2.0,
+                validation_selection_metric=terminal_metric,
+                validation_selection_value=1.0,
+            ),
+        ],
+    )
+
+    assert fixed_dt_overfit._selected_checkpoint_history_row(fit).epoch == 2
+
+
+def test_terminal_state_common_grid_metrics_use_fixed_dt_terminal_velocity_target():
+    series, config = _series(
+        n_flights=1,
+        prediction_output=PREDICTION_CONTROL,
+        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
+        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
+        control_state_objective=CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
+        checkpoint_selection_metric=CHECKPOINT_SELECTION_TERMINAL_STATE,
+        seq_len=8,
+        n_segments=2,
+    )
+    item = series[0]
+    anchor = config.seq_len - 1
+    duration = float(item.supervision_times[-1] - item.times[anchor])
+    offsets = np.array([duration / 2.0, duration])
+    query_times = item.times[anchor] + offsets
+    predicted = np.column_stack([
+        np.interp(query_times, item.supervision_times, item.supervision_values[:, channel])
+        for channel in range(len(ch.CHANNELS))
+    ])[None, ...]
+
+    metrics = fixed_anchor_common_grid_metrics(
+        series,
+        config,
+        item.values[anchor][None, :],
+        predicted,
+        np.array([duration]),
+        np.diff(np.concatenate(([0.0], offsets)))[None, :],
+        points=2,
+        normalizer=Normalizer.fit(series),
+    )
+    fixed_dt = build_fixed_dt_supervision(
+        series,
+        [item.supervision_values],
+        [(0, anchor)],
+        dt_s=config.dt_s,
+    )
+    training_velocity_target = last_reliable_terminal_velocity_target(
+        torch.from_numpy(item.values[anchor][None].astype(np.float32)), fixed_dt
+    ).numpy()[0]
+    expected_terminal_velocity_error = np.linalg.norm(
+        predicted[0, -1, list(ch.VELOCITY_IDX)] - training_velocity_target
+    )
+
+    assert metrics["dense_state_loss"] == pytest.approx(0.0, abs=1e-10)
+    assert metrics["fde_m"] == pytest.approx(0.0, abs=1e-7)
+    assert metrics["terminal_velocity_error_mps"] == pytest.approx(
+        expected_terminal_velocity_error
+    )
+
+
 @pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
 @pytest.mark.parametrize("integrator_dt_s", [2.0, 0.3])
 def test_fixed_dt_control_loss_forms_one_differentiable_training_step(
@@ -2805,6 +3043,106 @@ def test_fixed_dt_control_loss_forms_one_differentiable_training_step(
         parameter.grad is not None and torch.count_nonzero(parameter.grad)
         for parameter in model.parameters()
     )
+
+
+@pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
+def test_terminal_state_loss_is_differentiable_with_transport_dynamics(model_name):
+    series, config = _series(
+        n_flights=1,
+        model=model_name,
+        prediction_output=PREDICTION_CONTROL,
+        control_dynamics_backend=CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
+        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
+        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
+        control_state_objective=CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
+        control_state_duration_gradient=False,
+        checkpoint_selection_metric=CHECKPOINT_SELECTION_TERMINAL_STATE,
+        seq_len=8,
+        n_segments=2,
+        d_model=16,
+        n_heads=4,
+        d_ff=32,
+        e_layers=1,
+        patch_len=4,
+        stride=2,
+        final_time_scale_s=600.0,
+        control_rollout_integrator_dt_s=0.5,
+    )
+    normalizer = Normalizer.fit(series)
+    dataset = FixedAnchorTrajectoryWindows(series, config, normalizer)
+    x, target, weights, final_time, flight_weights, dynamics, dense = dataset.batch(
+        np.array([0])
+    )
+    model = build_model(config)
+    components = train_module.prediction_loss_components(
+        model(x, dynamics),
+        x[:, -1],
+        target,
+        weights,
+        final_time,
+        flight_weights,
+        config,
+        normalizer,
+        dynamics,
+        dense,
+    )
+    components.total.backward()
+
+    assert torch.isfinite(components.total)
+    assert components.state.item() >= 0.0
+    assert components.terminal.item() >= 0.0
+    assert components.extras["terminal_velocity"].item() >= 0.0
+    assert any(
+        parameter.grad is not None and torch.count_nonzero(parameter.grad)
+        for parameter in model.parameters()
+    )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
+def test_terminal_state_loss_cuda_transport_smoke():
+    series, config = _series(
+        n_flights=1,
+        model="itransformer",
+        prediction_output=PREDICTION_CONTROL,
+        control_dynamics_backend=CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
+        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
+        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
+        control_state_objective=CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
+        control_state_duration_gradient=False,
+        checkpoint_selection_metric=CHECKPOINT_SELECTION_TERMINAL_STATE,
+        seq_len=8,
+        n_segments=2,
+        d_model=16,
+        n_heads=4,
+        d_ff=32,
+        e_layers=1,
+        final_time_scale_s=600.0,
+        control_rollout_integrator_dt_s=0.5,
+    )
+    normalizer = Normalizer.fit(series)
+    dataset = FixedAnchorTrajectoryWindows(series, config, normalizer)
+    x, target, weights, final_time, flight_weights, dynamics, dense = dataset.batch(
+        np.array([0])
+    )
+    device = torch.device("cuda")
+    model = build_model(config).to(device)
+    dynamics = {name: value.to(device) for name, value in dynamics.items()}
+    components = train_module.prediction_loss_components(
+        model(x.to(device), dynamics),
+        x[:, -1].to(device),
+        target.to(device),
+        weights.to(device),
+        final_time.to(device),
+        flight_weights.to(device),
+        config,
+        normalizer,
+        dynamics,
+        dense.to(device),
+    )
+    components.total.backward()
+
+    assert torch.isfinite(components.total)
+    assert torch.isfinite(components.extras["terminal_velocity"])
 
 
 def test_control_mixture_dataset_and_best_of_k_loss_are_differentiable():
@@ -4004,7 +4342,18 @@ def test_control_training_checkpoint_round_trip_keeps_output_identity(
         "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
         "state_supervision_clock": config.control_state_supervision_clock,
         "state_loss_grid": config.control_state_loss_grid,
-        "state_objective": CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
+            "state_objective": CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
+            "dense_state_loss_weight": config.control_dense_state_loss_weight,
+            "terminal_position_loss_weight": (
+                config.control_terminal_position_loss_weight
+            ),
+            "terminal_velocity_loss_weight": (
+                config.control_terminal_velocity_loss_weight
+            ),
+            "terminal_position_scale_m": config.control_terminal_position_scale_m,
+            "terminal_velocity_scale_mps": (
+                config.control_terminal_velocity_scale_mps
+            ),
         "state_duration_gradient": True,
         "horizon_curriculum_s": [],
         "horizon_curriculum_stage_epochs": (
