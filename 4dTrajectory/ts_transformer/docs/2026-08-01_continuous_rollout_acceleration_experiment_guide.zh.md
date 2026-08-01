@@ -11,6 +11,23 @@
 本文不修改 backbone、control head、duration parameterization、loss 权重或数据划分。所有开发
 决策只使用 outer-train 和 validation；不得打开、生成或查看 outer-test 航迹与预测。
 
+### 1.1 当前阶段的硬约束：加速不得改变模型质量语义
+
+当前获准实施的加速仅限于**计算复用、固定输入缓存、等价批处理和性能观测**。优化前后必须执行
+完全相同的浮点运算语义与训练协议；“验证结果接近”不能替代这一要求。具体禁止通过以下方式
+换取速度：
+
+- 修改 RK4 最大内部步长（包括 `0.5 -> 1.0/2.0 s`）；
+- 更换积分器、使用训练期近似积分器，或改变 event-aligned control 边界；
+- 修改 dynamics/state dtype、loss、control segments、horizon curriculum 或模型结构；
+- 降低 validation/checkpoint-selection 频率、抽样 validation 航迹；
+- 改变 train batch 的组成、顺序或 SGD optimizer-update 序列；
+- 使用会改变结果数值语义的 compiled/AMP 路径，除非以后单独获得明确授权。
+
+因此，本轮只实施第 12.3 节和第 12.6 节的 P0--P4 等价优化。第 2--11 节记录的是早期候选与
+审计方法，保留作历史研究备忘，**不属于当前实施计划，也不得据此启动实验**。若未来考虑其中
+任何会改变数值方法或训练协议的方案，必须先由用户明确授权，并使用独立 recipe/artifact。
+
 当前数值基线是：
 
 - dynamics backend：`transport-chart-velocity`；
@@ -23,6 +40,8 @@ RK4 每个积分步调用 4 次 dynamics。对 600 s 航迹，`0.5 s` 上限约�
 4800 次 dynamics 调用；时间递推具有前后依赖，不能简单把所有时间步并行化。
 
 ## 2. 首轮候选及优先级
+
+> 历史候选，当前禁用：本节及第 3--11 节不属于当前等价加速实施范围。
 
 | 优先级 | 候选 | 是否改变数值方法 | 预期收益 | 主要风险 |
 |---:|---|---|---|---|
@@ -295,3 +314,182 @@ compiled 输出/梯度一致且 steady-state 加速？
 
 最终采用条件：没有 rollout failure；RK4 `0.5 s` validation replay 质量非劣；端到端训练时间有
 稳定、可复现的下降。outer-test 在模型、loss、integrator 和所有超参数完全冻结前始终保持未打开。
+
+## 12. 完整 train/validation 流程优化
+
+前面各阶段主要优化单次 continuous rollout。本节补充完整 development training 的执行层分析，
+涵盖一个 epoch 内的训练、validation loss、checkpoint selection 和训练结束后的 fit evaluation。
+这些优化必须先于新的积分器近似进行，否则无法判断收益来自流水线消重还是数值语义改变。
+
+### 12.1 当前一个 epoch 实际执行什么
+
+`fit_model()` 当前包含三条主要计算路径：
+
+```text
+train batch
+  -> model forward
+  -> observed-supervision-clock rollout
+  -> loss backward + optimizer step
+
+validation objective
+  -> model forward
+  -> observed-supervision-clock rollout
+  -> validation loss components
+
+checkpoint selection: arc/common-grid metrics
+  -> model forward
+  -> deployable predicted-clock rollout
+  -> fixed-anchor common-grid metrics
+```
+
+因此，使用 common-grid、terminal-state 或 arc-length checkpoint selection 时，每条 validation
+航迹每个 epoch 会经过两次 model forward 和两种 clock 的 dynamics rollout。两个 rollout 的
+物理时钟不同，不能直接把其中一个删除：validation objective 监督已知真实时长，deployable
+metric 必须使用模型实际预测时长。但同一个 batch 的数据准备、Host→Device 传输和 model forward
+可以共享。
+
+训练结束后的 `evaluate_fit_splits()` 还有一处确定性重复：`evaluate_split()` 与
+`evaluate_fixed_anchor_common_grid()` 分别调用同一份 `_predict_split()`。这两个报告可以从一次
+deployable prediction 缓存分别计算，不需要重新 forward 和 rollout。
+
+### 12.2 已观测的单航迹成本
+
+在 RTX 4060、iTransformer、N=64、transport continuous dynamics、RK4 `0.5 s` 下，既有五条
+train-only 容量实验的稳定 epoch 中位时间为：
+
+| 剩余时域 | epoch 中位时间 | 每 1000 epoch 纯 epoch 时间 |
+|---:|---:|---:|
+| 107.7 s | 0.266 s | 4.4 min |
+| 154.5 s | 0.352 s | 5.9 min |
+| 179.9 s | 0.397 s | 6.6 min |
+| 428.0 s | 0.866 s | 14.4 min |
+| 580.0 s | 1.168 s | 19.5 min |
+
+首个 epoch 另有约 4--5 s 的 CUDA、数据与 kernel 初始化开销。单航迹结果表明成本随时域近似
+线性增加，但不能用上表直接外推 pooled epoch：完整训练每 epoch 覆盖全部 train flights，且
+batch 中最长航迹、batch size、validation 双 rollout 和机场拆分都会影响实际利用率。
+
+### 12.3 第一优先级：不改变科学实验定义
+
+#### A. 分段计时后再优化
+
+当前 `EpochResult.seconds` 只记录整个 epoch。至少应独立记录：
+
+- `train_data_s`：组 batch 与 Host→Device；
+- `train_forward_s`、`train_rollout_loss_s`、`train_backward_step_s`；
+- `val_objective_s`；
+- `val_checkpoint_selection_s`；
+- epoch 总时间、peak VRAM、optimizer updates/s；
+- 每个 validation airport 的航迹数、总 query 点数和 wall time。
+
+CUDA 计时必须在边界同步。先用完整配置运行 3 个 warm-up epoch 和至少 10 个正式 epoch，报告
+median/p90；不能依据首个 epoch 或单个最快值决定架构。
+
+#### B. 一次 validation model forward 服务两个 clock
+
+建立独立的 validation batch evaluator：每个 batch 只执行一次 backbone/control head，然后把同一
+份 `ControlPrediction` 分发给：
+
+1. observed-clock state-loss evaluator；
+2. deployable-clock common-grid/checkpoint evaluator。
+
+两次 dynamics rollout 保持独立，不能把 observed durations 与 deployable endpoints 混配。该优化
+不改变模型输出、loss、checkpoint selection 或积分器，只消除重复 model forward、数据解包和
+设备传输。预期端到端 epoch 收益约 5%--15%，实际值以分段计时为准。
+
+#### C. 复用最终 fit-evaluation prediction
+
+将 `_predict_split()` 的物理预测、truth、mask、predicted/true time、anchor 和 segment durations
+视为一次不可变 replay 结果。native metrics 与 common-grid metrics 从同一结果计算。该改动主要
+把训练结束后的 train/validation 报告阶段缩短约一半，不改变 epoch 时间。
+
+#### D. Validation 按剩余时域分桶
+
+建议先只对无梯度 validation 使用少量固定 bucket，例如：
+
+```text
+(0, 180] s
+(180, 360] s
+(360, 600] s
+```
+
+每个 bucket 分别探测最大安全 batch size。这样短航迹不必受最长航迹的调度 shape 和显存上限
+约束，compiled 模式也更容易保持少量固定 shape。validation 没有 SGD 顺序问题；仍需确认分桶
+前后 airport-macro metric 在既定浮点容差内一致。预期 validation 收益约 15%--35%。
+
+#### E. 缓存固定输入并减少同步传输
+
+以下 train/validation 固定数据应在 dataset 构建阶段生成一次：
+
+- fixed-dt offsets、reference states、weights、valid masks；
+- aero/frame/control bounds；
+- fixed-anchor validation indices；
+- normalizer 与机场/航班采样权重。
+
+若 profiling 表明数据时间不可忽略，再引入 pinned host memory、non-blocking transfer 和双缓冲
+prefetch。不要在未测得 Host→Device 瓶颈前增加多进程 DataLoader；continuous rollout 很可能仍是
+主耗时。
+
+#### F. 保存可独立 replay 的 checkpoint
+
+单航迹和 pooled runner 都应先保存完整 checkpoint，再从 checkpoint 生成诊断、HTML 和派生
+metrics。报告 schema、展示或 metric 实现变化时，只重新 replay，不重新训练。checkpoint 必须
+绑定完整 config、normalizer、split identities 和 manifest hashes；旧 schema 派生产物要求重建，
+不添加兼容 fallback。
+
+### 12.4 第二优先级：改变执行协议，必须成为显式 recipe
+
+> 当前禁用：这些候选会改变 validation 或 SGD 协议，本轮不得实施。
+
+| 候选 | 预期收益 | 会改变什么 | 必须记录 |
+|---|---:|---|---|
+| common-grid checkpoint metric 每 5 epoch 一次 | 总时间约 10%--25% | checkpoint/LR scheduler 观察频率 | selection interval、patience 单位 |
+| 完整 validation 每 2--5 epoch 一次 | 总时间约 15%--35% | early stop 与 scheduler 更新点 | validation interval、实际 validation 次数 |
+| train 按时域分桶 | 约 20%--50%，需实测 | batch 组成与 SGD 更新顺序 | bucket 边界、bucket sampler 版本 |
+| 训练阶段仅抽样 validation 航迹 | 依抽样率 | checkpoint 目标总体 | 抽样身份、seed；只可用于 screening |
+
+降低 validation 频率时，`patience` 必须按“validation 次数”而非 epoch 解释。例如每 5 epoch 验证
+一次、patience=60，等价于最多等待约 300 个训练 epoch。LR scheduler 也只能在获得新 selection
+metric 时更新。禁止沿用旧字段含义却静默改变实际等待预算。
+
+若 2+4 配方、backbone、N、LR 和其他超参数已经冻结，正式 baseline 可以跳过新的 CV 搜索，只做
+development train/validation。若仍需调参，CV 是独立实验，其 candidate/fold 成本不能混入单次
+最终训练 wall time；outer-test 始终不参与筛选。
+
+### 12.5 第三优先级：改变数值或优化问题
+
+> 当前禁用：这些候选可能改变数值结果或优化路径，本轮不得实施；尤其不得修改 RK4 `0.5 s`
+> 步长、积分器或 dynamics dtype。
+
+只有完成 12.3 的无损消重并取得端到端 profile 后，才按前文阶段 A--E 测试：
+
+- RK4 step `0.5 -> 1.0 s`；
+- compiled rollout；
+- train-only 近似积分器、exact validation；
+- dynamics float32；
+- 更少 control segments 或 horizon curriculum。
+
+这些候选不能称为纯提速：它们会改变积分误差、Jacobian、控制表达分辨率或优化路径。必须使用
+独立 artifact identity，并在 RK4 `0.5 s`、fixed-anchor validation replay 上比较质量。
+
+只对 Transformer 使用 AMP、dynamics 保持 float64 的风险较低，但 control 训练的主要成本在
+dynamics，预期收益有限。减少 `validation_common_grid_points` 同样不是高优先级：它只减少 rollout
+后的插值/metric 计算，不能减少 RK4 步数。
+
+### 12.6 推荐实施顺序与验收
+
+```text
+P0  分解 epoch 计时，建立 eager 端到端 baseline
+P1  合并 validation batch/model forward
+P2  复用最终 fit-evaluation prediction
+P3  validation 时域分桶 + 每 bucket batch-size probe
+P4  checkpoint-first、报告独立 replay
+```
+
+P1--P4 的验收条件：相同输入、相同 model state 下，loss components、checkpoint selection、native
+metrics 和 common-grid metrics 在冻结容差内一致；split identities 与 manifest hashes 完全相同；
+outer-test 未打开；端到端 median/p90 和 peak VRAM 有完整记录。若加速只改善 microbenchmark、却
+没有降低完整 development wall time，则不进入正式训练默认路径。
+
+P0--P4 完成后即停止本轮速度优化。即使速度仍不理想，也不得自动转向 validation 降频、compiled、
+AMP、RK4 `1.0 s`、RK2 或其他近似；这些方向需要新的明确授权。
