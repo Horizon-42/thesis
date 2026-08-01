@@ -6,9 +6,8 @@ from dataclasses import dataclass
 
 import torch
 
-from aerodynamic_model.torch_dense_rollout import rollout_piecewise_constant_at_times
-from aerodynamic_model.torch_dynamics import geodetic_states_to_channels
 from config import TSConfig
+from control_dynamics_backends import control_dynamics_backend
 from dataset import Normalizer
 from fixed_dt_supervision import FixedDTControlSupervision
 from prediction_outputs import ControlPrediction
@@ -30,29 +29,18 @@ def fixed_dt_rollout_channels(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Return query and segment-end channels from one event-aligned RK4 rollout."""
     rollout_dtype = torch.float64
-    rollout = rollout_piecewise_constant_at_times(
+    rollout = control_dynamics_backend(config).dense_rollout(
         dynamics["initial_state"].to(rollout_dtype),
         prediction.controls.to(rollout_dtype),
         prediction.segment_durations.to(rollout_dtype),
         dynamics["aero_params"].to(rollout_dtype),
+        dynamics["frame_params"].to(rollout_dtype),
         supervision.query_offsets_s.to(rollout_dtype),
         supervision.valid,
+        config,
         segment_valid=segment_valid,
-        integrator_dt_s=config.control_rollout_integrator_dt_s,
     )
-    frame = dynamics["frame_params"].to(rollout_dtype)
-    runway_aligned = config.coordinate_frame == "runway-aligned"
-    query_channels = geodetic_states_to_channels(
-        rollout.query_states,
-        frame,
-        runway_aligned=runway_aligned,
-    )
-    endpoint_channels = geodetic_states_to_channels(
-        rollout.segment_end_states,
-        frame,
-        runway_aligned=runway_aligned,
-    )
-    return query_channels, endpoint_channels
+    return rollout.query_channels, rollout.segment_end_channels
 
 
 def fixed_dt_control_state_loss(

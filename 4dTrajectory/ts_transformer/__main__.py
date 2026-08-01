@@ -56,6 +56,7 @@ from config import (  # noqa: E402
     AIRCRAFT_FILTERS,
     COORDINATE_FRAMES,
     CHECKPOINT_SELECTION_METRICS,
+    CONTROL_DYNAMICS_BACKENDS,
     CONTROL_DURATION_PARAMETERIZATIONS,
     CONTROL_GRADIENT_CLIP_POLICIES,
     CONTROL_VALUE_PARAMETERIZATIONS,
@@ -224,6 +225,15 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
         help=(
             "predict absolute bounded controls (default) or bounded residuals around an "
             "anchor-state aerodynamic trim baseline"
+        ),
+    )
+    parser.add_argument(
+        "--control-dynamics-backend",
+        choices=CONTROL_DYNAMICS_BACKENDS,
+        default=None,
+        help=(
+            "control rollout state representation: re-anchored RK4 baseline or "
+            "continuous full-transport chart/ENU-velocity dynamics"
         ),
     )
     parser.add_argument(
@@ -408,6 +418,7 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("control_smoothness_loss_weight", args.control_smoothness_weight),
         ("control_duration_parameterization", args.control_duration_parameterization),
         ("control_value_parameterization", args.control_value_parameterization),
+        ("control_dynamics_backend", args.control_dynamics_backend),
         ("control_expert_count", args.control_experts),
         ("control_mixture_selector_loss_weight", args.control_selector_weight),
         ("control_mixture_diversity_loss_weight", args.control_diversity_weight),

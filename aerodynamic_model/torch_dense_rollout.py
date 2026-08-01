@@ -19,6 +19,7 @@ from aerodynamic_model.torch_dynamics import (
     STATE_NAMES,
     _rollout_step,
 )
+from aerodynamic_model.torch_piecewise_rollout import RolloutStep
 
 
 @dataclass(frozen=True)
@@ -168,8 +169,10 @@ def _scheduled_forward(
     controls: torch.Tensor,
     step_durations: torch.Tensor,
     aero_params: torch.Tensor,
+    step_context: torch.Tensor,
     control_schedule: torch.Tensor,
     active_schedule: torch.Tensor,
+    step_function: RolloutStep,
 ) -> torch.Tensor:
     """Execute a prebuilt event schedule and retain its complete discrete timeline."""
     scheduled_controls = torch.gather(
@@ -190,11 +193,12 @@ def _scheduled_forward(
     state = initial_states
     timeline = []
     for step in range(step_durations.shape[1]):
-        stepped = _rollout_step(
+        stepped = step_function(
             state,
             controls_by_step[step],
             aero_params,
             durations_by_step[step],
+            step_context,
         )
         state = torch.where(active_by_step[step].unsqueeze(-1), stepped, state)
         timeline.append(state)
@@ -211,19 +215,23 @@ class _DenseScheduledRolloutAdjoint(torch.autograd.Function):
         controls,
         step_durations,
         aero_params,
+        step_context,
         control_schedule,
         active_schedule,
         query_steps,
         query_valid,
         endpoint_steps,
+        step_function,
     ):
         timeline = _scheduled_forward(
             initial_states.detach(),
             controls.detach(),
             step_durations.detach(),
             aero_params.detach(),
+            step_context.detach(),
             control_schedule,
             active_schedule,
+            step_function,
         )
         state_size = timeline.shape[-1]
         query_states = torch.gather(
@@ -236,11 +244,13 @@ class _DenseScheduledRolloutAdjoint(torch.autograd.Function):
             1,
             endpoint_steps.unsqueeze(-1).expand(-1, -1, state_size),
         )
+        ctx.step_function = step_function
         ctx.save_for_backward(
             initial_states,
             controls,
             step_durations,
             aero_params,
+            step_context,
             timeline,
             control_schedule,
             active_schedule,
@@ -257,6 +267,7 @@ class _DenseScheduledRolloutAdjoint(torch.autograd.Function):
             controls,
             step_durations,
             aero_params,
+            step_context,
             timeline,
             control_schedule,
             active_schedule,
@@ -320,8 +331,12 @@ class _DenseScheduledRolloutAdjoint(torch.autograd.Function):
                     step_aero.requires_grad_(True)
                     variables.append(step_aero)
                     labels.append("aero")
-                stepped = _rollout_step(
-                    previous, step_control, step_aero, step_duration
+                stepped = ctx.step_function(
+                    previous,
+                    step_control,
+                    step_aero,
+                    step_duration,
+                    step_context,
                 )
                 next_state = torch.where(
                     active_schedule[:, step].unsqueeze(-1), stepped, previous
@@ -355,14 +370,18 @@ class _DenseScheduledRolloutAdjoint(torch.autograd.Function):
             None,
             None,
             None,
+            None,
+            None,
         )
 
 
-def rollout_piecewise_constant_at_times(
+def rollout_piecewise_constant_at_times_with_step(
     initial_states: torch.Tensor,
     controls: torch.Tensor,
     segment_durations_s: torch.Tensor,
     aero_params: torch.Tensor,
+    step_context: torch.Tensor,
+    step_function: RolloutStep,
     query_offsets_s: torch.Tensor,
     query_valid: torch.Tensor,
     *,
@@ -381,6 +400,10 @@ def rollout_piecewise_constant_at_times(
         raise ValueError("aero parameters must be [B,6]")
     if len(initial_states) != len(controls):
         raise ValueError("dense rollout inputs must share batch size")
+    if len(step_context) != len(initial_states):
+        raise ValueError("dense rollout step context must share batch size")
+    if step_context.requires_grad:
+        raise ValueError("dense rollout step context must be constant")
     if segment_valid is None:
         segment_valid = torch.ones_like(segment_durations_s, dtype=torch.bool)
     else:
@@ -413,11 +436,13 @@ def rollout_piecewise_constant_at_times(
             controls,
             step_durations,
             aero_params,
+            step_context,
             control_schedule,
             active,
             query_steps,
             query_valid,
             endpoint_steps,
+            step_function,
         )
     else:
         timeline = _scheduled_forward(
@@ -425,8 +450,10 @@ def rollout_piecewise_constant_at_times(
             controls,
             step_durations,
             aero_params,
+            step_context,
             control_schedule,
             active,
+            step_function,
         )
         query_states = torch.gather(
             timeline,
@@ -439,3 +466,43 @@ def rollout_piecewise_constant_at_times(
             endpoint_steps.unsqueeze(-1).expand(-1, -1, timeline.shape[-1]),
         )
     return DenseControlRollout(query_states, endpoint_states)
+
+
+def _baseline_dense_step(
+    state: torch.Tensor,
+    controls: torch.Tensor,
+    aero_params: torch.Tensor,
+    dt_s: torch.Tensor,
+    step_context: torch.Tensor,
+) -> torch.Tensor:
+    del step_context
+    return _rollout_step(state, controls, aero_params, dt_s)
+
+
+def rollout_piecewise_constant_at_times(
+    initial_states: torch.Tensor,
+    controls: torch.Tensor,
+    segment_durations_s: torch.Tensor,
+    aero_params: torch.Tensor,
+    query_offsets_s: torch.Tensor,
+    query_valid: torch.Tensor,
+    *,
+    segment_valid: torch.Tensor | None = None,
+    integrator_dt_s: float = 0.5,
+    max_total_steps: int = 65536,
+) -> DenseControlRollout:
+    """Backward-compatible re-anchored baseline wrapper around the generic engine."""
+    step_context = initial_states.new_empty((len(initial_states), 0))
+    return rollout_piecewise_constant_at_times_with_step(
+        initial_states,
+        controls,
+        segment_durations_s,
+        aero_params,
+        step_context,
+        _baseline_dense_step,
+        query_offsets_s,
+        query_valid,
+        segment_valid=segment_valid,
+        integrator_dt_s=integrator_dt_s,
+        max_total_steps=max_total_steps,
+    )

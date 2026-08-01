@@ -327,3 +327,104 @@ control 解不唯一且生成成本高，先限制为每机场 20--50 条 train 
 以下 oracle 特权不能直接迁移为部署模型能力：推理时 inverse dynamics、用真实 future schedule
 初始化单航班、逐航班直接优化 control tensor、推理时使用真实总时长。随机 anchor 已在固定部署
 任务上显著失败；在单专家尚未学好前也不恢复无监督 WTA mixture。
+
+## 7. Transport chart + ENU velocity dynamics
+
+### 动机与状态定义
+
+旧 `reanchored-rk4` backend 持久化
+`(lat, lon, alt, V, psi, gamma, mass)`：每个 RK4 子步先在当前局部 ENU 中积分，再把结果经
+ECEF 转回大地坐标并重建下一步局部坐标系。新 `transport-chart-velocity` backend 持久化
+
+```text
+(E, N, U, V_E, V_N, V_U, mass)
+```
+
+其中 `E/N/U` 始终是 runway threshold 对应的固定 chart；速度仍表示在随飞机位置移动的局部
+地理 ENU 基底中。因此速度微分显式包含 WGS84 的完整 transport rate：
+
+```text
+v_dot_ENU = a_force_ENU - omega_transport × v_ENU
+omega_transport = (-V_N/(R_M+h), V_E/(R_N+h),
+                   V_E*tan(lat)/(R_N+h))
+```
+
+位置微分同时带 `R_M/R_N`、高度和纬度比例。这里没有加入地球自转/Coriolis，因为当前 CasADi
+和 re-anchored baseline 都不包含它；本项是同一个三自由度点质量模型的连续坐标表达，不是增加
+第二套飞机物理。模型输入/监督输出的 `coordinate_frame=enu|runway-aligned` 仍只是边界旋转，
+没有把内部 transport state 与 Transformer 的输入 frame 混为一谈。
+
+### 解耦实现
+
+- endpoint 和 fixed-dt dense rollout 共用 backend-neutral 的分段调度/离散 adjoint；
+- 两个 backend 各自拥有初始状态转换、RK4 step、CUDA compile cache 和输出转换；
+- 训练 loss、iTransformer、PatchTST、control head 和数据集只依赖统一 rollout contract，不含
+  dynamics 模式分支；
+- 配置、checkpoint recipe、target contract、输出目录与前端标签显式记录 backend；旧 control
+  checkpoint 缺少该字段时必须重训，不做兼容升级。
+
+### 数值一致性门槛
+
+正式训练前固定了三层 contract：
+
+1. chart/geodetic 往返与既有 ENU、runway-aligned channel adapter 在 float64 下逐值一致；
+2. 对 300 s、`dt=0.5 s` 的 full-transport CasADi 连续模型，新 backend 的终点位置差约
+   `1.9e-4 m`，速度差约 `2.7e-6 m/s`；heading 仅有等价的 `2π` wrap；
+3. 对 600 s 变控制 rollout，新 backend 与生产 `reanchored-rk4` baseline 在 `dt=0.5 s` 的终点
+   位置差为 `2.62 m`，缩小到 `dt=0.25 s` 后降为 `1.23 m`，说明两个有限步实现向同一连续
+   动力学收敛，而不是靠放宽单点 tolerance 掩盖结构差异。
+
+CPU 的 endpoint/dense 梯度测试、两个 backend × 两个 backbone 的完整可微训练步，以及宿主
+GPU 的 endpoint forward + dense adjoint smoke test均通过。
+
+### Train/validation 单变量对照
+
+正式对照保持当前预注册胜者的五机场 OpenAP-direct roster、固定 anchor、iTransformer、N=64、
+batch=512、LR=`3e-5`、global clip20、`60→120→240→full` curriculum、factorized/absolute
+control、fixed-2s physical criteria、seed/split seed=1337 和 180 epoch 预算不变。唯一变量是：
+
+```text
+reanchored-rk4 -> transport-chart-velocity
+```
+
+outer-test source tracks 始终关闭。实验输出目录：
+
+- `outputs/POOLED/experiments/openap_direct_20260731_transport_chart_velocity/itransformer_n64_b512_lr3e5_clip20_seed1337/`
+
+### Train/validation 结果：数值更平滑，但预测全面退化
+
+新 backend 在 epoch 148 达到最佳 validation criteria=`24.6380163`，epoch 168 因连续 20 epoch
+没有改善而早停；baseline 在 epoch 165 达到 `20.8004671` 并跑满 180 epoch。两者的 checkpoint
+使用同一 10,239/2,167 train/validation 航迹和完全相同的 split digest。
+
+| dynamics backend | best / run epoch | criteria | common ADE (m) | common FDE (m) | time MAE (s) |
+|---|---:|---:|---:|---:|---:|
+| reanchored-rk4 | **165 / 180** | **20.8005** | **1852.05** | **2055.70** | **69.51** |
+| transport-chart-velocity | 148 / 168 | 24.6380 | 2038.52 | 2419.56 | 75.71 |
+
+相对 baseline，新 backend 的预注册 criteria 退化 18.45%，common ADE 退化 10.07%，FDE 退化
+17.70%，时间 MAE 退化 8.93%。这不是单一机场造成的；五机场 criteria 全部变差：
+
+| 机场 | reanchored-rk4 | transport-chart-velocity | 相对变化 |
+|---|---:|---:|---:|
+| KMSY | 27.9611 | 35.4158 | +26.66% |
+| KRDU | 27.1583 | 33.5870 | +23.67% |
+| KSJC | 9.9965 | 11.2845 | +12.88% |
+| KSMF | 17.2834 | 18.3869 | +6.38% |
+| KSTL | 21.6031 | 24.5159 | +13.48% |
+
+新表示确实削弱了最极端的数值爆炸：全程最大裁剪前总梯度由 baseline 的约 `1.37e13` 降到
+`1.10e8`。但 epoch 平均 clip 触发率几乎没变（98.75% vs 98.83%）；新 backend 最佳 epoch
+的裁剪前总梯度均值/最大值反而为 `592/4322`，高于 baseline 最佳 epoch 的 `331/1008`。
+两个模型的控制饱和率均为 0。full 阶段第 31 epoch 的 validation criteria 也很接近
+（67.72 vs 66.95），说明退化不是 curriculum 切换时发生的简单坐标 bug，而是之后在同一
+clip/LR 配方下进入了更差的优化路径。
+
+新 backend 运行 168 epoch、3360 updates、训练 epoch 墙钟合计约 5445 s；baseline 为 180 epoch、
+3600 updates、约 5879 s。总时间少 7.39%主要来自早停，单个 full epoch 都约 37--38 s，不能
+宣称 dynamics 本身显著加速。
+
+结论：`transport-chart-velocity` 的物理与数值 contract 成立，但在当前训练配方下没有提高模型
+能力，不能替代 `reanchored-rk4` 默认 backend，也不因实现完成而启动 outer-test。由于五机场均
+退化，本轮不迁移 PatchTST；如继续研究，应作为新的优化实验针对 transport state 的尺度/Jacobian
+或 LR/clip 配方，而不能复用本轮结果声称 backbone 无关收益。

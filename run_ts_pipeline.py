@@ -44,6 +44,9 @@ from config import (  # noqa: E402
     CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
     CHECKPOINT_SELECTION_METRICS,
     CHECKPOINT_SELECTION_OBJECTIVE,
+    CONTROL_DYNAMICS_BACKENDS,
+    CONTROL_DYNAMICS_REANCHORED_RK4,
+    CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
     CONTROL_DURATION_FACTORIZED,
     CONTROL_DURATION_PARAMETERIZATIONS,
     CONTROL_GRADIENT_CLIP_GLOBAL,
@@ -187,6 +190,36 @@ def _control_value_tag(prediction_output: str, parameterization: str) -> str:
     return f"_{parameterization.replace('-', '_')}"
 
 
+def _control_dynamics_tag(prediction_output: str, backend: str) -> str:
+    if (
+        not uses_control_dynamics(prediction_output)
+        or backend == CONTROL_DYNAMICS_REANCHORED_RK4
+    ):
+        return ""
+    return f"_{backend.replace('-', '_')}"
+
+
+_CONTROL_DYNAMICS_FILESYSTEM_TAGS = {
+    CONTROL_DYNAMICS_REANCHORED_RK4: "",
+    CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY: "_tcv",
+}
+
+
+def _control_dynamics_filesystem_tag(prediction_output: str, backend: str) -> str:
+    if not uses_control_dynamics(prediction_output):
+        return ""
+    return _CONTROL_DYNAMICS_FILESYSTEM_TAGS[backend]
+
+
+def _control_dynamics_label(prediction_output: str, backend: str) -> str:
+    if (
+        not uses_control_dynamics(prediction_output)
+        or backend == CONTROL_DYNAMICS_REANCHORED_RK4
+    ):
+        return ""
+    return f"{backend} dynamics, "
+
+
 def _control_objective_tag(prediction_output: str, objective: str) -> str:
     if (
         not uses_control_dynamics(prediction_output)
@@ -302,6 +335,7 @@ class TrainingPlan:
         control_smoothness_weight: float | None = None,
         control_duration_parameterization: str = CONTROL_DURATION_FACTORIZED,
         control_value_parameterization: str = CONTROL_VALUE_ABSOLUTE,
+        control_dynamics_backend: str = CONTROL_DYNAMICS_REANCHORED_RK4,
         control_experts: int | None = None,
         control_selector_weight: float | None = None,
         control_diversity_weight: float | None = None,
@@ -349,6 +383,7 @@ class TrainingPlan:
         self.control_smoothness_weight = control_smoothness_weight
         self.control_duration_parameterization = control_duration_parameterization
         self.control_value_parameterization = control_value_parameterization
+        self.control_dynamics_backend = control_dynamics_backend
         self.control_experts = control_experts
         self.control_selector_weight = control_selector_weight
         self.control_diversity_weight = control_diversity_weight
@@ -373,6 +408,9 @@ class TrainingPlan:
             )
             + _control_value_tag(
                 prediction_output, control_value_parameterization
+            )
+            + _control_dynamics_filesystem_tag(
+                prediction_output, control_dynamics_backend
             )
             + _control_clock_tag(prediction_output, control_state_clock)
             + _control_state_loss_grid_tag(prediction_output, control_state_loss_grid)
@@ -466,6 +504,8 @@ class TrainingPlan:
             self.control_duration_parameterization,
             "--control-value-parameterization",
             self.control_value_parameterization,
+            "--control-dynamics-backend",
+            self.control_dynamics_backend,
         ]
         if self.control_experts is not None:
             args += ["--control-experts", str(self.control_experts)]
@@ -637,6 +677,7 @@ class TrainingPlan:
             "control_gradient_clip_policy": self.control_gradient_clip_policy,
             "control_duration_parameterization": self.control_duration_parameterization,
             "control_value_parameterization": self.control_value_parameterization,
+            "control_dynamics_backend": self.control_dynamics_backend,
         }
         if self.full_horizon_steps is not None:
             overrides["full_horizon_steps"] = self.full_horizon_steps
@@ -736,6 +777,7 @@ class TrainingPlan:
             "control_gradient_clip_policy": self.control_gradient_clip_policy,
             "control_duration_parameterization": self.control_duration_parameterization,
             "control_value_parameterization": self.control_value_parameterization,
+            "control_dynamics_backend": self.control_dynamics_backend,
         })
         if self.full_horizon_steps is not None:
             overrides["full_horizon_steps"] = self.full_horizon_steps
@@ -823,6 +865,12 @@ class PredictionPlan:
         control_value = _control_value_tag(
             training.prediction_output, training.control_value_parameterization
         )
+        control_dynamics_filesystem = _control_dynamics_filesystem_tag(
+            training.prediction_output, training.control_dynamics_backend
+        )
+        control_dynamics = _control_dynamics_tag(
+            training.prediction_output, training.control_dynamics_backend
+        )
         control_clock = _control_clock_tag(
             training.prediction_output, training.control_state_clock
         )
@@ -848,6 +896,7 @@ class PredictionPlan:
         horizon_tag = HORIZON_TAGS[training.horizon_mode]
         stem = (
             f"{scope}{training.model}{prediction_output}{control_duration}{control_value}"
+            f"{control_dynamics_filesystem}"
             f"{control_clock}_{horizon_tag}"
             f"{control_state_loss_grid}{control_objective}{duration_gradient}"
             f"{horizon_curriculum}{gradient_clip}"
@@ -861,7 +910,7 @@ class PredictionPlan:
         category_scope = "pooled_" if training.pooled else ""
         self.category = (
             f"ts_{category_scope}{MODEL_SHORT[training.model]}{prediction_output}"
-            f"{control_duration}{control_value}_{horizon_tag}"
+            f"{control_duration}{control_value}{control_dynamics}_{horizon_tag}"
             f"{control_state_loss_grid}{control_objective}{duration_gradient}"
             f"{horizon_curriculum}{gradient_clip}"
             f"{aircraft_filter}{frame}{anchor}{training_cohort}"
@@ -877,6 +926,9 @@ class PredictionPlan:
             training.control_duration_parameterization,
         )
         output_label = f"{training.prediction_output} output, {duration_label}"
+        dynamics_label = _control_dynamics_label(
+            training.prediction_output, training.control_dynamics_backend
+        )
         value_label = (
             "trim-residual controls, "
             if training.control_value_parameterization != CONTROL_VALUE_ABSOLUTE
@@ -907,7 +959,7 @@ class PredictionPlan:
         )
         self.label = (
             f"{SPLIT_LABELS[split]} — Predicted ({model_label}, {pooled_label}"
-            f"{output_label}{value_label}{state_loss_label}{objective_label}"
+            f"{output_label}{value_label}{dynamics_label}{state_loss_label}{objective_label}"
             f"{duration_gradient_label}"
             f"{curriculum_label}{gradient_clip_label}"
             f"{anchor_label}{horizon_label}, {frame_label})"
@@ -1036,6 +1088,7 @@ def run_training(
                 f"smoothness={config.control_smoothness_loss_weight:g}, "
                 f"duration={config.control_duration_parameterization}, "
                 f"values={config.control_value_parameterization}, "
+                f"dynamics={config.control_dynamics_backend}, "
                 f"state_clock={config.control_state_supervision_clock}, "
                 f"rollout_dt={config.control_rollout_integrator_dt_s:g}s"
             )
@@ -1196,6 +1249,11 @@ def main() -> None:
         choices=CONTROL_VALUE_PARAMETERIZATIONS,
         default=CONTROL_VALUE_ABSOLUTE,
     )
+    parser.add_argument(
+        "--control-dynamics-backend",
+        choices=CONTROL_DYNAMICS_BACKENDS,
+        default=CONTROL_DYNAMICS_REANCHORED_RK4,
+    )
     parser.add_argument("--control-experts", type=int, default=None)
     parser.add_argument("--control-selector-weight", type=float, default=None)
     parser.add_argument("--control-diversity-weight", type=float, default=None)
@@ -1354,6 +1412,7 @@ def main() -> None:
             control_smoothness_weight=args.control_smoothness_weight,
             control_duration_parameterization=args.control_duration_parameterization,
             control_value_parameterization=args.control_value_parameterization,
+            control_dynamics_backend=args.control_dynamics_backend,
             control_experts=args.control_experts,
             control_selector_weight=args.control_selector_weight,
             control_diversity_weight=args.control_diversity_weight,

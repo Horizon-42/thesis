@@ -60,6 +60,8 @@ from config import (  # noqa: E402
     AIRCRAFT_FILTER_OPENAP_DIRECT, HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
+    CONTROL_DYNAMICS_REANCHORED_RK4,
+    CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
     CONTROL_DURATION_DIRECT, CONTROL_DURATION_FACTORIZED,
     CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED,
     CONTROL_GRADIENT_CLIP_GLOBAL,
@@ -1555,6 +1557,25 @@ def test_control_output_is_parallel_and_requires_normalized_horizon():
         TSConfig(prediction_output=PREDICTION_CONTROL, horizon_mode=HORIZON_FULL)
 
 
+def test_transport_chart_dynamics_is_an_explicit_control_only_contract():
+    config = TSConfig(
+        prediction_output=PREDICTION_CONTROL,
+        control_dynamics_backend=CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
+    )
+
+    assert control_recipe(config)["dynamics_backend"] == (
+        CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY
+    )
+    assert (
+        "+dynamics=transport-chart-velocity-v1"
+        in train_module.target_contract(config)
+    )
+    with pytest.raises(ValueError, match="requires a control prediction output"):
+        TSConfig(
+            control_dynamics_backend=CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY
+        )
+
+
 def test_control_mixture_is_an_explicit_validated_mode():
     config = TSConfig(
         prediction_output=PREDICTION_CONTROL_MIXTURE,
@@ -1567,6 +1588,7 @@ def test_control_mixture_is_an_explicit_validated_mode():
         "smoothness_loss_weight": config.control_smoothness_loss_weight,
         "duration_parameterization": CONTROL_DURATION_FACTORIZED,
         "value_parameterization": CONTROL_VALUE_ABSOLUTE,
+        "dynamics_backend": CONTROL_DYNAMICS_REANCHORED_RK4,
         "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
         "state_supervision_clock": config.control_state_supervision_clock,
         "state_loss_grid": config.control_state_loss_grid,
@@ -1735,6 +1757,7 @@ def test_legacy_control_config_without_state_loss_grid_is_rejected():
         "control_gradient_clip_norm",
         "control_gradient_clip_policy",
         "control_value_parameterization",
+        "control_dynamics_backend",
     ],
 )
 def test_legacy_control_config_without_physical_criteria_recipe_is_rejected(field):
@@ -2576,10 +2599,22 @@ def test_physical_criteria_trains_both_backbones_without_duration_state_gradient
     assert model.final_time_head.network[-1].bias.grad is not None
 
 
-def test_control_dataset_and_rollout_loss_form_one_differentiable_training_step():
+@pytest.mark.parametrize(
+    "dynamics_backend",
+    [
+        CONTROL_DYNAMICS_REANCHORED_RK4,
+        CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
+    ],
+)
+@pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
+def test_control_dataset_and_rollout_loss_form_one_differentiable_training_step(
+    dynamics_backend, model_name,
+):
     series, config = _series(
         n_flights=2,
+        model=model_name,
         prediction_output=PREDICTION_CONTROL,
+        control_dynamics_backend=dynamics_backend,
         seq_len=8,
         n_segments=2,
         d_model=16,
@@ -2617,6 +2652,61 @@ def test_control_dataset_and_rollout_loss_form_one_differentiable_training_step(
         parameter.grad is not None and torch.count_nonzero(parameter.grad)
         for parameter in model.parameters()
     )
+
+
+def test_pipeline_carries_and_names_transport_chart_dynamics():
+    plan = pipeline_module.TrainingPlan(
+        (AIRPORT,),
+        "itransformer",
+        training_mode="pooled",
+        prediction_output=PREDICTION_CONTROL,
+        control_dynamics_backend=CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
+    )
+    recipe = plan._recipe_args()
+    config, _source = plan.resolved_train_config(use_best_config=False)
+    prediction = pipeline_module.PredictionPlan(
+        plan, AIRPORT, ("eval",), split="val"
+    )
+
+    assert recipe[recipe.index("--control-dynamics-backend") + 1] == (
+        CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY
+    )
+    assert config.control_dynamics_backend == (
+        CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY
+    )
+    assert plan.train_dir.name.endswith("_tcv")
+    assert "transport_chart_velocity" not in plan.train_dir.name
+    assert "transport_chart_velocity" in prediction.category
+    assert "transport-chart-velocity dynamics" in prediction.label
+
+
+def test_transport_chart_prediction_directory_stays_within_component_limit():
+    plan = pipeline_module.TrainingPlan(
+        (AIRPORT,),
+        "itransformer",
+        training_mode="pooled",
+        prediction_output=PREDICTION_CONTROL,
+        control_value_parameterization=CONTROL_VALUE_TRIM_RESIDUAL,
+        control_dynamics_backend=CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
+        control_state_clock=CONTROL_STATE_CLOCK_OBSERVED,
+        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
+        control_state_objective=CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
+        control_state_duration_gradient=False,
+        control_horizon_curriculum_s=(60.0, 120.0, 240.0),
+        control_horizon_curriculum_stage_epochs=1,
+        control_gradient_clip_norm=20.0,
+        control_gradient_clip_policy=CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED,
+        aircraft_filter=AIRCRAFT_FILTER_OPENAP_DIRECT,
+        coordinate_frame="runway-aligned",
+    )
+    prediction = pipeline_module.PredictionPlan(
+        plan, AIRPORT, ("eval",), split="val"
+    )
+
+    assert len(plan.train_dir.name.encode("utf-8")) <= 255
+    assert len(prediction.pred_dir.name.encode("utf-8")) <= 255
+    assert "transport_chart_velocity" in prediction.category
+    assert "transport-chart-velocity dynamics" in prediction.label
 
 
 def test_fixed_dt_control_targets_gather_existing_two_second_reference_rows():
@@ -3910,6 +4000,7 @@ def test_control_training_checkpoint_round_trip_keeps_output_identity(
         "smoothness_loss_weight": config.control_smoothness_loss_weight,
         "duration_parameterization": duration_parameterization,
         "value_parameterization": CONTROL_VALUE_ABSOLUTE,
+        "dynamics_backend": CONTROL_DYNAMICS_REANCHORED_RK4,
         "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
         "state_supervision_clock": config.control_state_supervision_clock,
         "state_loss_grid": config.control_state_loss_grid,

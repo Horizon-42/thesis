@@ -26,6 +26,7 @@ from config import (
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
     CHECKPOINT_SELECTION_OBJECTIVE,
+    CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DURATION_DIRECT,
     CONTROL_DURATION_FACTORIZED,
     CONTROL_VALUE_TRIM_RESIDUAL,
@@ -46,6 +47,7 @@ from config import (
     uses_control_dynamics,
 )
 from control_mixture import ControlMixturePrediction
+from control_dynamics_backends import control_dynamics_backend
 from control_prediction_adapters import deployable_control_prediction
 from control_regularization import control_regularization_signals
 from control_training_curriculum import (
@@ -83,14 +85,10 @@ from physical_criteria import (
     terminal_position_error_m,
 )
 from time_grids import batch_time_grid, numpy_inference_time_grid
-from aerodynamic_model.torch_dynamics import (
-    geodetic_states_to_channels,
-    rollout_piecewise_constant as torch_control_rollout,
-)
 
 CHECKPOINT_NAME = "checkpoint.pt"
 CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
-CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v23-trim-residual-control"
+CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v24-control-dynamics-backend"
 STATE_TARGET_CONTRACTS = {
     HORIZON_NORMALIZED: "normalized-time-runway-crossing-displacement-kinematic-v3",
     HORIZON_FULL: "full-horizon-fixed-time-displacement-kinematic-v2",
@@ -155,7 +153,10 @@ def target_contract(config: TSConfig) -> str:
     if config.prediction_output == PREDICTION_STATE:
         return STATE_TARGET_CONTRACTS[config.horizon_mode]
     if config.prediction_output == PREDICTION_CONTROL_MIXTURE:
-        return "bounded-control-mixture-best-of-k-selector-v1"
+        base = "bounded-control-mixture-best-of-k-selector-v1"
+        if config.control_dynamics_backend != CONTROL_DYNAMICS_REANCHORED_RK4:
+            base += f"+dynamics={config.control_dynamics_backend}-v1"
+        return base
     base = CONTROL_TARGET_CONTRACTS[
         (
             config.control_duration_parameterization,
@@ -165,6 +166,8 @@ def target_contract(config: TSConfig) -> str:
     ]
     if config.control_value_parameterization == CONTROL_VALUE_TRIM_RESIDUAL:
         base += "+trim-residual-control-v1"
+    if config.control_dynamics_backend != CONTROL_DYNAMICS_REANCHORED_RK4:
+        base += f"+dynamics={config.control_dynamics_backend}-v1"
     if (
         config.control_state_objective == CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE
         and config.control_state_duration_gradient
@@ -237,19 +240,15 @@ def control_rollout_channels(
     # contract therefore runs in float64 even when the network itself trains in float32;
     # ``to(float64)`` remains differentiable and gradients return to the FP32 parameters.
     rollout_dtype = torch.float64
-    geodetic = torch_control_rollout(
+    rollout = control_dynamics_backend(config).endpoint_rollout(
         dynamics["initial_state"].to(rollout_dtype),
         prediction.controls.to(rollout_dtype),
         prediction.segment_durations.to(rollout_dtype),
         dynamics["aero_params"].to(rollout_dtype),
-        integrator_dt_s=config.control_rollout_integrator_dt_s,
-    )
-    channels = geodetic_states_to_channels(
-        geodetic,
         dynamics["frame_params"].to(rollout_dtype),
-        runway_aligned=config.coordinate_frame == "runway-aligned",
+        config,
     )
-    return channels, geodetic
+    return rollout.channels, rollout.geodetic_states
 
 
 def align_control_targets_to_prediction_clock(

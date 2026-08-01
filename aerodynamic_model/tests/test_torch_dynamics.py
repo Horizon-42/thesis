@@ -11,12 +11,24 @@ import torch
 import aerodynamic_model.torch_dense_rollout as torch_dense_rollout
 import aerodynamic_model.torch_dynamics as torch_dynamics
 from aerodynamic_model.torch_dense_rollout import rollout_piecewise_constant_at_times
-from aerodynamic_model.casadi_simulator import CasadiSimulator
+from aerodynamic_model.casadi_simulator import (
+    CasadiSimulator,
+    make_geodetic_step_integrator,
+)
 from aerodynamic_model.common import GeodeticState, LoadFactorControl
 from aerodynamic_model.rollout import rollout_piecewise_constant as casadi_rollout
 from aerodynamic_model.torch_dynamics import (
+    geodetic_states_to_channels,
     geodetic_step,
     rollout_piecewise_constant,
+)
+from aerodynamic_model.torch_transport_chart_dynamics import (
+    geodetic_to_transport_chart_state,
+    rk4_transport_chart_step,
+    rollout_piecewise_constant as transport_chart_rollout,
+    rollout_piecewise_constant_at_times as transport_chart_dense_rollout,
+    transport_chart_state_to_channels,
+    transport_chart_state_to_geodetic,
 )
 from aircraft.aero_params import aero_params_for_aircraft
 from aircraft.aircraft_sets import A320
@@ -41,6 +53,32 @@ def _state_array(state: GeodeticState) -> np.ndarray:
         state.latitude, state.longitude, state.altitude, state.V,
         state.psi, state.gamma, state.m,
     ])
+
+
+def _frame_tensor(
+    *, lat0: float = 35.9, lon0: float = -78.8, alt0: float = 100.0,
+    heading: float = 0.0,
+) -> torch.Tensor:
+    return torch.tensor(
+        [[lat0, lon0, alt0, heading]], dtype=torch.float64
+    )
+
+
+def _wrapped_angle_delta(first: float, second: float) -> float:
+    return math.atan2(math.sin(first - second), math.cos(first - second))
+
+
+def _geodetic_position_delta_m(
+    first: torch.Tensor, second: torch.Tensor
+) -> float:
+    mean_lat = torch.deg2rad(0.5 * (first[0] + second[0]))
+    north = torch.deg2rad(first[0] - second[0]) * torch_dynamics.WGS84_A
+    east = (
+        torch.deg2rad(first[1] - second[1])
+        * torch_dynamics.WGS84_A
+        * torch.cos(mean_lat)
+    )
+    return float(torch.sqrt(east.square() + north.square() + (first[2] - second[2]).square()))
 
 
 def _segment_barrier_rollout(
@@ -97,6 +135,190 @@ def test_torch_step_matches_casadi_simulator_including_stall(control):
     )[0].detach().numpy()
 
     np.testing.assert_allclose(actual, _state_array(expected), rtol=2e-12, atol=2e-9)
+
+
+def test_transport_chart_boundary_round_trip_and_channels_match_geodetic_adapter():
+    states = torch.tensor(
+        [
+            [35.8801, -78.7880, 940.0, 78.0, 2.5656, -0.0541, A320.landing_mass],
+            [35.9050, -78.8200, 1250.0, 91.0, -2.9000, 0.0120, A320.landing_mass],
+        ],
+        dtype=torch.float64,
+    )
+    frame = _frame_tensor(heading=math.radians(52.0)).expand(2, -1)
+    chart = geodetic_to_transport_chart_state(states, frame)
+    restored = transport_chart_state_to_geodetic(chart, frame)
+    torch.testing.assert_close(restored, states, rtol=2e-13, atol=2e-9)
+
+    for runway_aligned in (False, True):
+        expected = geodetic_states_to_channels(
+            states, frame, runway_aligned=runway_aligned
+        )
+        actual = transport_chart_state_to_channels(
+            chart, frame, runway_aligned=runway_aligned
+        )
+        torch.testing.assert_close(actual, expected, rtol=2e-13, atol=2e-9)
+
+
+def test_transport_chart_rk4_matches_full_transport_casadi_continuous_model():
+    """The velocity-vector ODE is a coordinate change, not a new flight model."""
+    initial = torch.tensor(
+        [[51.10, -114.02, 1800.0, 82.0, 2.3, -0.04, 62_000.0]],
+        dtype=torch.float64,
+    )
+    frame = _frame_tensor(lat0=51.0, lon0=-114.0, alt0=1080.0)
+    controls = torch.tensor([[35_000.0, 0.12, 1.02]], dtype=torch.float64)
+    aero = torch.tensor(
+        [[92.0, 2.2, 0.022, 0.045, 0.9, 0.12]], dtype=torch.float64
+    )
+    chart = geodetic_to_transport_chart_state(initial, frame)
+    casadi_step = make_geodetic_step_integrator(transport="full")["step_func"]
+    casadi_state = initial.numpy().reshape(-1)
+    for _ in range(600):
+        chart = rk4_transport_chart_step(chart, controls, aero, 0.5, frame)
+        casadi_state = np.asarray(
+            casadi_step(
+                x_geo=casadi_state,
+                u=controls.numpy().reshape(-1),
+                aero_params=aero.numpy().reshape(-1),
+                dt=0.5,
+            )["x_geo_next"]
+        ).reshape(-1)
+
+    actual = transport_chart_state_to_geodetic(chart, frame)[0]
+    expected = torch.from_numpy(casadi_state)
+    assert _geodetic_position_delta_m(actual, expected) < 1e-3
+    assert abs(float(actual[3] - expected[3])) < 1e-4
+    assert abs(_wrapped_angle_delta(float(actual[4]), float(expected[4]))) < 1e-6
+    assert abs(float(actual[5] - expected[5])) < 1e-6
+    assert actual[6] == expected[6]
+
+
+def test_transport_chart_and_reanchored_rk4_baseline_agree_and_converge():
+    """Finite-step forms stay metre-close and approach the same continuous limit."""
+    initial = torch.tensor(
+        [[51.10, -114.02, 1800.0, 82.0, 2.3, -0.04, 62_000.0]],
+        dtype=torch.float64,
+    )
+    frame = _frame_tensor(lat0=51.0, lon0=-114.0, alt0=1080.0)
+    aero = torch.tensor(
+        [[92.0, 2.2, 0.022, 0.045, 0.9, 0.12]], dtype=torch.float64
+    )
+    controls = torch.tensor(
+        [[[35_000.0, 0.12, 1.02], [30_000.0, -0.08, 1.0], [22_000.0, 0.03, 0.98]]],
+        dtype=torch.float64,
+    )
+    durations = torch.tensor([[200.0, 200.0, 200.0]], dtype=torch.float64)
+
+    errors = []
+    production_actual = None
+    production_expected = None
+    for dt_s in (0.5, 0.25):
+        expected = rollout_piecewise_constant(
+            initial, controls, durations, aero, integrator_dt_s=dt_s
+        )[:, -1]
+        chart = transport_chart_rollout(
+            initial,
+            controls,
+            durations,
+            aero,
+            frame,
+            integrator_dt_s=dt_s,
+        )
+        actual = transport_chart_state_to_geodetic(chart, frame)[:, -1]
+        errors.append(_geodetic_position_delta_m(actual[0], expected[0]))
+        if dt_s == 0.5:
+            production_actual, production_expected = actual[0], expected[0]
+
+    assert errors[0] < 5.0
+    assert errors[1] < errors[0] * 0.7
+    assert abs(float(production_actual[3] - production_expected[3])) < 0.02
+    assert abs(
+        _wrapped_angle_delta(
+            float(production_actual[4]), float(production_expected[4])
+        )
+    ) < 1e-3
+    assert abs(float(production_actual[5] - production_expected[5])) < 1e-4
+
+
+def test_transport_chart_dense_rollout_backpropagates_controls_and_switch_time():
+    initial = _state_tensor(
+        GeodeticState(
+            35.88, -78.79, 900.0, 80.0, 2.2, -0.04, A320.landing_mass
+        )
+    )
+    frame = _frame_tensor(heading=math.radians(52.0))
+    controls = torch.tensor(
+        [[[45_000.0, 0.08, 1.02], [36_000.0, -0.04, 0.99]]],
+        dtype=torch.float64,
+        requires_grad=True,
+    )
+    durations = torch.tensor(
+        [[1.3, 2.7]], dtype=torch.float64, requires_grad=True
+    )
+    queries = torch.tensor([[2.0, 4.0]], dtype=torch.float64)
+    rollout = transport_chart_dense_rollout(
+        initial,
+        controls,
+        durations,
+        _aero_tensor(),
+        frame,
+        queries,
+        torch.ones_like(queries, dtype=torch.bool),
+        integrator_dt_s=0.5,
+    )
+    query_channels = transport_chart_state_to_channels(
+        rollout.query_states, frame, runway_aligned=True
+    )
+    query_channels.square().mean().backward()
+
+    assert controls.grad is not None and torch.isfinite(controls.grad).all()
+    assert durations.grad is not None and torch.isfinite(durations.grad).all()
+    assert torch.count_nonzero(controls.grad) > 0
+    assert durations.grad[0, 0] != 0.0
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
+def test_transport_chart_cuda_endpoint_and_dense_adjoint_smoke():
+    initial = _state_tensor(
+        GeodeticState(
+            35.88, -78.79, 900.0, 80.0, 2.2, -0.04, A320.landing_mass
+        )
+    ).cuda()
+    frame = _frame_tensor(heading=math.radians(52.0)).cuda()
+    aero = _aero_tensor().cuda()
+    controls = torch.tensor(
+        [[[45_000.0, 0.08, 1.02], [36_000.0, -0.04, 0.99]]],
+        dtype=torch.float64,
+        device="cuda",
+        requires_grad=True,
+    )
+    durations = torch.tensor(
+        [[1.3, 2.7]], dtype=torch.float64, device="cuda", requires_grad=True
+    )
+
+    with torch.no_grad():
+        endpoints = transport_chart_rollout(
+            initial, controls, durations, aero, frame, integrator_dt_s=0.5
+        )
+    assert endpoints.shape == (1, 2, 7)
+    assert torch.isfinite(endpoints).all()
+
+    queries = torch.tensor([[2.0, 4.0]], dtype=torch.float64, device="cuda")
+    dense = transport_chart_dense_rollout(
+        initial,
+        controls,
+        durations,
+        aero,
+        frame,
+        queries,
+        torch.ones_like(queries, dtype=torch.bool),
+        integrator_dt_s=0.5,
+    )
+    dense.query_states.square().mean().backward()
+
+    assert controls.grad is not None and torch.isfinite(controls.grad).all()
+    assert durations.grad is not None and torch.isfinite(durations.grad).all()
 
 
 def test_nonuniform_torch_rollout_matches_casadi_segment_endpoints():

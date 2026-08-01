@@ -68,6 +68,12 @@ CONTROL_VALUE_PARAMETERIZATIONS = (
     CONTROL_VALUE_ABSOLUTE,
     CONTROL_VALUE_TRIM_RESIDUAL,
 )
+CONTROL_DYNAMICS_REANCHORED_RK4 = "reanchored-rk4"
+CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY = "transport-chart-velocity"
+CONTROL_DYNAMICS_BACKENDS = (
+    CONTROL_DYNAMICS_REANCHORED_RK4,
+    CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
+)
 CONTROL_GRADIENT_CLIP_GLOBAL = "global"
 CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED = "final-time-decoupled"
 CONTROL_GRADIENT_CLIP_POLICIES = (
@@ -315,6 +321,11 @@ class TSConfig:
     control_expert_count: int = 3
     control_mixture_selector_loss_weight: float = 0.1
     control_mixture_diversity_loss_weight: float = 0.01
+    # Rollout state representation is independent of the model/data coordinate frame.
+    # The baseline re-anchors a local ENU RK4 step into geodetic state every sub-step;
+    # transport-chart-velocity integrates threshold-chart position plus moving-local-ENU
+    # physical velocity with the full WGS84 transport rate.
+    control_dynamics_backend: str = CONTROL_DYNAMICS_REANCHORED_RK4
     # Must match the high-fidelity replay integration cap. The Torch rollout subdivides every
     # learned non-uniform segment at this interval and is numerically contract-tested against
     # CasadiSimulator, rather than training on a cheaper second dynamics model.
@@ -356,6 +367,18 @@ class TSConfig:
             raise ValueError(
                 f"unknown aircraft_filter {self.aircraft_filter!r}; "
                 f"expected one of {AIRCRAFT_FILTERS}"
+            )
+        if self.control_dynamics_backend not in CONTROL_DYNAMICS_BACKENDS:
+            raise ValueError(
+                f"unknown control_dynamics_backend {self.control_dynamics_backend!r}; "
+                f"expected one of {CONTROL_DYNAMICS_BACKENDS}"
+            )
+        if (
+            not uses_control_dynamics(self.prediction_output)
+            and self.control_dynamics_backend != CONTROL_DYNAMICS_REANCHORED_RK4
+        ):
+            raise ValueError(
+                "non-default control dynamics backend requires a control prediction output"
             )
         if self.control_state_supervision_clock not in CONTROL_STATE_CLOCKS:
             raise ValueError(
@@ -688,6 +711,7 @@ class TSConfig:
             "control_gradient_clip_norm",
             "control_gradient_clip_policy",
             "control_value_parameterization",
+            "control_dynamics_backend",
         ):
             if (
                 uses_control_dynamics(data.get("prediction_output", PREDICTION_STATE))
@@ -712,6 +736,7 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
         "smoothness_loss_weight": config.control_smoothness_loss_weight,
         "duration_parameterization": config.control_duration_parameterization,
         "value_parameterization": config.control_value_parameterization,
+        "dynamics_backend": config.control_dynamics_backend,
         "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
         "state_supervision_clock": config.control_state_supervision_clock,
         "state_loss_grid": config.control_state_loss_grid,
