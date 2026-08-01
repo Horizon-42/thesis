@@ -210,6 +210,19 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--control-effort-weight", type=float, default=None)
     parser.add_argument("--control-smoothness-weight", type=float, default=None)
     parser.add_argument("--control-dense-state-weight", type=float, default=None)
+    parser.add_argument("--control-geometry-weight", type=float, default=None)
+    parser.add_argument(
+        "--control-arc-horizontal-velocity-weight", type=float, default=None
+    )
+    parser.add_argument(
+        "--control-arc-vertical-velocity-weight", type=float, default=None
+    )
+    parser.add_argument(
+        "--control-arc-horizontal-velocity-scale-mps", type=float, default=None
+    )
+    parser.add_argument(
+        "--control-arc-vertical-velocity-scale-mps", type=float, default=None
+    )
     parser.add_argument("--control-terminal-position-weight", type=float, default=None)
     parser.add_argument("--control-terminal-velocity-weight", type=float, default=None)
     parser.add_argument("--control-terminal-position-scale-m", type=float, default=None)
@@ -423,6 +436,23 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("control_effort_loss_weight", args.control_effort_weight),
         ("control_smoothness_loss_weight", args.control_smoothness_weight),
         ("control_dense_state_loss_weight", args.control_dense_state_weight),
+        ("control_geometry_loss_weight", args.control_geometry_weight),
+        (
+            "control_arc_horizontal_velocity_loss_weight",
+            args.control_arc_horizontal_velocity_weight,
+        ),
+        (
+            "control_arc_vertical_velocity_loss_weight",
+            args.control_arc_vertical_velocity_weight,
+        ),
+        (
+            "control_arc_horizontal_velocity_scale_mps",
+            args.control_arc_horizontal_velocity_scale_mps,
+        ),
+        (
+            "control_arc_vertical_velocity_scale_mps",
+            args.control_arc_vertical_velocity_scale_mps,
+        ),
         (
             "control_terminal_position_loss_weight",
             args.control_terminal_position_weight,

@@ -23,6 +23,7 @@ import torch.nn as nn
 from channels import CHANNELS, IDX, POSITION_IDX
 from batching import resolve_batch_size
 from config import (
+    CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
     CHECKPOINT_SELECTION_OBJECTIVE,
@@ -35,6 +36,7 @@ from config import (
     CONTROL_STATE_CLOCK_PREDICTED,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
     CONTROL_STATE_LOSS_GRID_NATIVE,
+    CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
     HORIZON_FULL,
@@ -89,7 +91,7 @@ from time_grids import batch_time_grid, numpy_inference_time_grid
 
 CHECKPOINT_NAME = "checkpoint.pt"
 CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
-CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v25-terminal-state-loss"
+CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v29-arc-length-state"
 STATE_TARGET_CONTRACTS = {
     HORIZON_NORMALIZED: "normalized-time-runway-crossing-displacement-kinematic-v3",
     HORIZON_FULL: "full-horizon-fixed-time-displacement-kinematic-v2",
@@ -195,12 +197,17 @@ def loss_component_names(config: TSConfig) -> tuple[str, ...]:
         PREDICTION_CONTROL: CONTROL_LOSS_COMPONENT_NAMES,
         PREDICTION_CONTROL_MIXTURE: CONTROL_MIXTURE_LOSS_COMPONENT_NAMES,
     }[config.prediction_output]
-    if (
-        config.prediction_output == PREDICTION_CONTROL
-        and config.control_state_objective == CONTROL_STATE_OBJECTIVE_TERMINAL_STATE
-    ):
-        return (*names, "terminal_velocity")
-    return names
+    if config.prediction_output != PREDICTION_CONTROL:
+        return names
+    extensions = {
+        CONTROL_STATE_OBJECTIVE_TERMINAL_STATE: ("terminal_velocity",),
+        CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY: (
+            "terminal_velocity",
+            "arc_horizontal_velocity",
+            "arc_vertical_velocity",
+        ),
+    }
+    return (*names, *extensions.get(config.control_state_objective, ()))
 
 
 def move_dynamics(
@@ -1426,6 +1433,40 @@ def _common_grid_validation_details(
             ],
             "final_time_mae_s": block["final_time_mae_s"],
             "flights": block["flights"],
+            "arc_length_geometry_loss": block["arc_length_geometry_loss"],
+            "arc_length_distance_mean_m": block["arc_length_distance_mean_m"],
+            "arc_length_path_length_ratio": block[
+                "arc_length_path_length_ratio"
+            ],
+            "arc_length_path_length_log_error": block[
+                "arc_length_path_length_log_error"
+            ],
+            "arc_length_horizontal_velocity_mae_mps": block[
+                "arc_length_horizontal_velocity_mae_mps"
+            ],
+            "arc_length_horizontal_velocity_p95_mps": block[
+                "arc_length_horizontal_velocity_p95_mps"
+            ],
+            "arc_length_vertical_velocity_mae_mps": block[
+                "arc_length_vertical_velocity_mae_mps"
+            ],
+            "arc_length_vertical_velocity_p95_mps": block[
+                "arc_length_vertical_velocity_p95_mps"
+            ],
+            "arc_length_horizontal_mean_m": block[
+                "arc_length_horizontal_mean_m"
+            ],
+            "arc_length_horizontal_p95_m": block[
+                "arc_length_horizontal_p95_m"
+            ],
+            "arc_length_vertical_mae_m": block["arc_length_vertical_mae_m"],
+            "arc_length_vertical_p95_m": block["arc_length_vertical_p95_m"],
+            "arc_length_terminal_position_m": block[
+                "arc_length_terminal_position_m"
+            ],
+            "arc_length_terminal_velocity_error_mps": block[
+                "arc_length_terminal_velocity_error_mps"
+            ],
         }
     return details
 
@@ -1522,11 +1563,59 @@ def _terminal_state_validation_selection(
     )
 
 
+def _arc_length_geometry_validation_selection(
+    *,
+    model: nn.Module,
+    val_sets: dict[str, TrajectoryWindows],
+    normalizer: Normalizer,
+    config: TSConfig,
+    device: torch.device,
+    val_by_airport: dict[str, float],
+) -> ValidationSelection:
+    details = _common_grid_validation_details(
+        model=model,
+        val_sets=val_sets,
+        normalizer=normalizer,
+        config=config,
+        device=device,
+        val_by_airport=val_by_airport,
+    )
+    by_airport: dict[str, float] = {}
+    for airport, block in details.items():
+        value = (
+            config.control_geometry_loss_weight
+            * block["arc_length_geometry_loss"]
+            + config.control_arc_horizontal_velocity_loss_weight
+            * block["arc_length_horizontal_velocity_mae_mps"]
+            / config.control_arc_horizontal_velocity_scale_mps
+            + config.control_arc_vertical_velocity_loss_weight
+            * block["arc_length_vertical_velocity_mae_mps"]
+            / config.control_arc_vertical_velocity_scale_mps
+            + config.control_terminal_position_loss_weight
+            * block["arc_length_terminal_position_m"]
+            / config.control_terminal_position_scale_m
+            + config.control_terminal_velocity_loss_weight
+            * block["arc_length_terminal_velocity_error_mps"]
+            / config.control_terminal_velocity_scale_mps
+        )
+        by_airport[airport] = float(value)
+        block["arc_length_geometry_criterion"] = float(value)
+    return ValidationSelection(
+        metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
+        value=float(np.mean(list(by_airport.values()))),
+        by_airport=by_airport,
+        details_by_airport=details,
+    )
+
+
 _VALIDATION_SELECTIONS: dict[str, Callable[..., ValidationSelection]] = {
     CHECKPOINT_SELECTION_OBJECTIVE: _objective_validation_selection,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE: _common_grid_validation_selection,
     CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA: _common_grid_criteria_validation_selection,
     CHECKPOINT_SELECTION_TERMINAL_STATE: _terminal_state_validation_selection,
+    CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY: (
+        _arc_length_geometry_validation_selection
+    ),
 }
 
 

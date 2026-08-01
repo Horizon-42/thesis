@@ -52,6 +52,13 @@ import run_ts_pipeline as pipeline_module  # noqa: E402
 import run_ts_predictability_report as predictability_report  # noqa: E402
 import run_ts_control_fixed_dt_overfit as fixed_dt_overfit  # noqa: E402
 import train as train_module  # noqa: E402
+from arc_length_geometry import (  # noqa: E402
+    arc_length_geometry_metrics,
+    arc_length_state_loss_terms,
+    arc_length_velocity_metrics,
+    resample_horizontal_arc_length_numpy,
+    resample_horizontal_arc_length_torch,
+)
 from anchor_eligibility import (  # noqa: E402
     CONTROL_ANCHOR_STALL_MARGIN, eligible_random_train_anchors,
 )
@@ -61,6 +68,8 @@ from config import (  # noqa: E402
     AIRCRAFT_FILTER_OPENAP_DIRECT, HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
+    CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
+    CHECKPOINT_SELECTION_METRICS,
     CHECKPOINT_SELECTION_TERMINAL_STATE,
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
@@ -70,6 +79,7 @@ from config import (  # noqa: E402
     CONTROL_VALUE_ABSOLUTE, CONTROL_VALUE_TRIM_RESIDUAL,
     CONTROL_STATE_CLOCK_OBSERVED, CONTROL_STATE_CLOCK_PREDICTED,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
+    CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
     CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
@@ -110,6 +120,7 @@ from fixed_dt_supervision import (  # noqa: E402
     build_fixed_dt_supervision,
 )
 from fixed_anchor_validation import (  # noqa: E402
+    fixed_anchor_arc_length_geometry_metrics,
     fixed_anchor_common_grid_metrics,
     fixed_anchor_common_weights_and_terminal_velocity,
 )
@@ -1606,6 +1617,19 @@ def test_control_mixture_is_an_explicit_validated_mode():
         "state_loss_grid": config.control_state_loss_grid,
             "state_objective": CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
             "dense_state_loss_weight": config.control_dense_state_loss_weight,
+            "geometry_loss_weight": config.control_geometry_loss_weight,
+            "arc_horizontal_velocity_loss_weight": (
+                config.control_arc_horizontal_velocity_loss_weight
+            ),
+            "arc_vertical_velocity_loss_weight": (
+                config.control_arc_vertical_velocity_loss_weight
+            ),
+            "arc_horizontal_velocity_scale_mps": (
+                config.control_arc_horizontal_velocity_scale_mps
+            ),
+            "arc_vertical_velocity_scale_mps": (
+                config.control_arc_vertical_velocity_scale_mps
+            ),
             "terminal_position_loss_weight": (
                 config.control_terminal_position_loss_weight
             ),
@@ -1782,6 +1806,11 @@ def test_legacy_control_config_without_state_loss_grid_is_rejected():
         "control_value_parameterization",
         "control_dynamics_backend",
         "control_dense_state_loss_weight",
+        "control_geometry_loss_weight",
+        "control_arc_horizontal_velocity_loss_weight",
+        "control_arc_vertical_velocity_loss_weight",
+        "control_arc_horizontal_velocity_scale_mps",
+        "control_arc_vertical_velocity_scale_mps",
         "control_terminal_position_loss_weight",
         "control_terminal_velocity_loss_weight",
         "control_terminal_position_scale_m",
@@ -1833,7 +1862,6 @@ def test_terminal_state_objective_requires_aligned_selection_and_terminal_weight
             control_terminal_position_loss_weight=2.0,
             control_terminal_velocity_loss_weight=1.0,
         )
-
     config = TSConfig(
         **common,
         checkpoint_selection_metric=CHECKPOINT_SELECTION_TERMINAL_STATE,
@@ -1842,6 +1870,65 @@ def test_terminal_state_objective_requires_aligned_selection_and_terminal_weight
     assert config.control_terminal_position_loss_weight > config.control_dense_state_loss_weight
     assert config.control_terminal_velocity_loss_weight > config.control_dense_state_loss_weight
     assert "terminal-state" in train_module.target_contract(config)
+
+
+def test_arc_length_geometry_objective_requires_aligned_selection_and_weights():
+    common = {
+        "prediction_output": PREDICTION_CONTROL,
+        "control_state_supervision_clock": CONTROL_STATE_CLOCK_OBSERVED,
+        "control_state_loss_grid": CONTROL_STATE_LOSS_GRID_FIXED_DT,
+        "control_state_objective": CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
+    }
+    with pytest.raises(ValueError, match="fixed-anchor-arc-length-geometry"):
+        TSConfig(**common)
+    with pytest.raises(ValueError, match="velocity weight greater"):
+        TSConfig(
+            **common,
+            checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
+            control_geometry_loss_weight=1.0,
+            control_terminal_position_loss_weight=2.0,
+            control_terminal_velocity_loss_weight=1.0,
+        )
+    with pytest.raises(ValueError, match="local velocity weights"):
+        TSConfig(
+            **common,
+            checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
+            control_arc_horizontal_velocity_loss_weight=1.0,
+        )
+    with pytest.raises(
+        ValueError, match="control_arc_vertical_velocity_scale_mps"
+    ):
+        TSConfig(
+            **common,
+            checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
+            control_arc_vertical_velocity_scale_mps=0.0,
+        )
+    with pytest.raises(ValueError, match="arc-length-geometry requires n_segments >= 2"):
+        TSConfig(
+            **common,
+            checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
+            n_segments=1,
+        )
+    assert TSConfig(n_segments=1).n_segments == 1
+
+    config = TSConfig(
+        **common,
+        checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
+    )
+
+    assert config.control_terminal_position_loss_weight > config.control_geometry_loss_weight
+    assert config.control_terminal_velocity_loss_weight > config.control_geometry_loss_weight
+    assert control_recipe(config)["geometry_loss_weight"] == pytest.approx(0.25)
+    assert control_recipe(config)[
+        "arc_horizontal_velocity_loss_weight"
+    ] == pytest.approx(0.25)
+    assert control_recipe(config)["arc_vertical_velocity_scale_mps"] == pytest.approx(2.0)
+    assert train_module.loss_component_names(config)[-3:] == (
+        "terminal_velocity",
+        "arc_horizontal_velocity",
+        "arc_vertical_velocity",
+    )
+    assert "arc-length-geometry" in train_module.target_contract(config)
 
 
 def test_control_horizon_curriculum_is_a_strict_physical_training_mode():
@@ -2814,6 +2901,203 @@ def test_fixed_dt_control_targets_choose_nearest_row_across_float_ulp():
     np.testing.assert_array_equal(dense.states[0].numpy(), values[[3, 4]])
 
 
+def test_horizontal_arc_resampling_is_independent_of_node_spacing():
+    sparse = np.array(
+        [[0.0, 0.0, 0.0], [3.0, 0.0, 3.0]], dtype=np.float64
+    )
+    uneven = np.array(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 1.0], [3.0, 0.0, 3.0]],
+        dtype=np.float64,
+    )
+    expected = np.array(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 1.0], [2.0, 0.0, 2.0], [3.0, 0.0, 3.0]],
+        dtype=np.float64,
+    )
+
+    np.testing.assert_allclose(
+        resample_horizontal_arc_length_numpy(sparse, points=4), expected
+    )
+    torch.testing.assert_close(
+        resample_horizontal_arc_length_torch(
+            torch.from_numpy(uneven)[None],
+            torch.ones(1, len(uneven), dtype=torch.bool),
+            points=4,
+        )[0],
+        torch.from_numpy(expected),
+    )
+    metrics = arc_length_geometry_metrics(
+        uneven, sparse, _identity_normalizer(), points=4
+    )
+    assert metrics["loss"] == pytest.approx(0.0, abs=1e-12)
+    assert metrics["distance_mean_m"] == pytest.approx(0.0, abs=1e-12)
+    assert metrics["path_length_ratio"] == pytest.approx(1.0, abs=1e-12)
+    assert metrics["path_length_log_error"] == pytest.approx(0.0, abs=1e-12)
+    assert metrics["horizontal_mean_m"] == pytest.approx(0.0, abs=1e-12)
+
+
+def test_arc_length_geometry_detects_shape_error_with_matching_endpoints():
+    straight = np.array(
+        [[0.0, 0.0, 0.0], [3.0, 0.0, 0.0]], dtype=np.float64
+    )
+    dogleg = np.array(
+        [[0.0, 0.0, 0.0], [1.5, 1.0, 0.0], [3.0, 0.0, 0.0]],
+        dtype=np.float64,
+    )
+
+    metrics = arc_length_geometry_metrics(
+        straight, dogleg, _identity_normalizer(), points=9
+    )
+
+    assert metrics["horizontal_mean_m"] > 0.25
+    assert metrics["terminal_position_m"] == pytest.approx(0.0)
+    assert metrics["path_length_log_error"] > 0.0
+
+
+def test_arc_length_geometry_loss_has_position_and_reliable_velocity_gradients():
+    channels = len(ch.CHANNELS)
+    anchor = torch.zeros(1, channels)
+    anchor[0, list(ch.VELOCITY_IDX)] = torch.tensor([1.0, 0.0, -1.0])
+    endpoints = torch.zeros(1, 3, channels)
+    endpoints[0, :, ch.POSITION_IDX[0]] = torch.tensor([1.0, 2.0, 3.0])
+    endpoints[0, :2, ch.POSITION_IDX[1]] = 0.25
+    endpoints[0, :, list(ch.VELOCITY_IDX)] = torch.tensor([0.0, 1.0, 1.0])
+    endpoints.requires_grad_()
+    states = torch.zeros(1, 2, channels)
+    states[0, :, ch.POSITION_IDX[0]] = torch.tensor([1.0, 2.0])
+    states[0, 0, list(ch.VELOCITY_IDX)] = torch.tensor([1.0, 0.0, -1.0])
+    states[0, 1, list(ch.VELOCITY_IDX)] = 999.0
+    weights = torch.full_like(states, 1.0 / channels)
+    weights[0, 1, list(ch.VELOCITY_IDX)] = 0.0
+    supervision = FixedDTControlSupervision(
+        query_offsets_s=torch.tensor([[2.0, 4.0]], dtype=torch.float64),
+        states=states,
+        weights=weights,
+        valid=torch.ones(1, 2, dtype=torch.bool),
+    )
+    terminal = torch.zeros(1, channels)
+    terminal[0, ch.POSITION_IDX[0]] = 3.0
+
+    terms = arc_length_state_loss_terms(
+        anchor,
+        endpoints,
+        terminal,
+        supervision,
+        _identity_normalizer(),
+        points=8,
+    )
+    loss = (
+        terms.position
+        + terms.horizontal_velocity_mps
+        + terms.vertical_velocity_mps
+    ).mean()
+    loss.backward()
+
+    assert terms.position.item() > 0.0
+    assert terms.horizontal_velocity_mps.item() > 0.0
+    assert terms.vertical_velocity_mps.item() > 0.0
+    assert 0 < terms.velocity_valid_points.item() < 8
+    assert torch.count_nonzero(endpoints.grad[..., list(ch.POSITION_IDX)]).item() > 0
+    assert torch.count_nonzero(
+        endpoints.grad[..., list(ch.VELOCITY_IDX[:2])]
+    ).item() > 0
+    assert torch.count_nonzero(
+        endpoints.grad[..., ch.VELOCITY_IDX[2]]
+    ).item() > 0
+
+
+def test_arc_length_geometry_compacts_sparse_position_supervision_rows():
+    channels = len(ch.CHANNELS)
+    anchor = torch.zeros(1, channels)
+    endpoints = torch.zeros(1, 3, channels)
+    endpoints[0, :, ch.POSITION_IDX[0]] = torch.tensor([1.0, 3.0, 4.0])
+    states = torch.zeros(1, 4, channels)
+    states[0, :, ch.POSITION_IDX[0]] = torch.tensor([1.0, 999.0, 999.0, 3.0])
+    weights = torch.zeros_like(states)
+    weights[0, 0] = 1.0 / channels
+    weights[0, 3, list(ch.POSITION_IDX)] = 1.0 / channels
+    supervision = FixedDTControlSupervision(
+        query_offsets_s=torch.tensor([[2.0, 4.0, 6.0, 8.0]], dtype=torch.float64),
+        states=states,
+        weights=weights,
+        valid=torch.ones(1, 4, dtype=torch.bool),
+    )
+    terminal = torch.zeros(1, channels)
+    terminal[0, ch.POSITION_IDX[0]] = 4.0
+
+    terms = arc_length_state_loss_terms(
+        anchor,
+        endpoints,
+        terminal,
+        supervision,
+        _identity_normalizer(),
+        points=4,
+    )
+
+    assert terms.position.item() == pytest.approx(0.0, abs=1e-12)
+
+
+def test_fixed_anchor_arc_geometry_filters_the_same_sparse_reference_rows():
+    channels = len(ch.CHANNELS)
+    config = TSConfig(seq_len=1, n_segments=2)
+    anchor = np.zeros((1, channels), dtype=np.float32)
+    predicted = np.zeros((1, 2, channels), dtype=np.float32)
+    predicted[0, :, ch.POSITION_IDX[0]] = [1.0, 4.0]
+    reference = np.zeros((5, channels), dtype=np.float32)
+    reference[:, ch.POSITION_IDX[0]] = [0.0, 1.0, 999.0, 999.0, 4.0]
+    weights = np.zeros_like(reference)
+    weights[:2] = 1.0 / channels
+    weights[-1, list(ch.POSITION_IDX)] = 1.0 / channels
+    item = SimpleNamespace(
+        dataset_id="KAAA:SPARSE",
+        times=np.array([0.0]),
+        values=reference[:1],
+        supervision_times=np.arange(5, dtype=np.float64),
+        supervision_values=reference,
+        supervision_weights=weights,
+    )
+
+    metrics = fixed_anchor_arc_length_geometry_metrics(
+        [item],
+        config,
+        anchor,
+        predicted,
+        np.zeros((1, len(ch.VELOCITY_IDX)), dtype=np.float32),
+        _identity_normalizer(),
+        points=3,
+    )
+
+    assert metrics["arc_length_geometry_loss"] == pytest.approx(0.0, abs=1e-12)
+    assert metrics["arc_length_distance_mean_m"] == pytest.approx(0.0, abs=1e-12)
+
+
+def test_arc_length_velocity_metrics_follow_position_alignment_and_mask_tail():
+    predicted_positions = np.array(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [3.0, 0.0, 0.0]]
+    )
+    reference_positions = np.array(
+        [[0.0, 0.0, 0.0], [3.0, 0.0, 0.0]]
+    )
+    predicted_velocity = np.array(
+        [[10.0, 2.0, -1.0], [10.0, 2.0, -1.0], [99.0, 99.0, 99.0]]
+    )
+    reference_velocity = np.array(
+        [[10.0, 0.0, -2.0], [999.0, 999.0, 999.0]]
+    )
+
+    metrics = arc_length_velocity_metrics(
+        predicted_positions,
+        predicted_velocity,
+        reference_positions,
+        reference_velocity,
+        np.array([True, False]),
+        points=4,
+    )
+
+    assert metrics["velocity_valid_points"] == 1
+    assert metrics["horizontal_velocity_mae_mps"] == pytest.approx(2.0)
+    assert metrics["vertical_velocity_mae_mps"] == pytest.approx(1.0)
+
+
 def test_terminal_state_components_use_last_reliable_velocity_and_explicit_weights():
     config = TSConfig(
         prediction_output=PREDICTION_CONTROL,
@@ -3046,7 +3330,19 @@ def test_fixed_dt_control_loss_forms_one_differentiable_training_step(
 
 
 @pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
-def test_terminal_state_loss_is_differentiable_with_transport_dynamics(model_name):
+@pytest.mark.parametrize(
+    ("objective", "selection"),
+    [
+        (CONTROL_STATE_OBJECTIVE_TERMINAL_STATE, CHECKPOINT_SELECTION_TERMINAL_STATE),
+        (
+            CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
+            CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
+        ),
+    ],
+)
+def test_terminal_tracking_losses_are_differentiable_with_transport_dynamics(
+    model_name, objective, selection
+):
     series, config = _series(
         n_flights=1,
         model=model_name,
@@ -3054,9 +3350,9 @@ def test_terminal_state_loss_is_differentiable_with_transport_dynamics(model_nam
         control_dynamics_backend=CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
         control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
         control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
+        control_state_objective=objective,
         control_state_duration_gradient=False,
-        checkpoint_selection_metric=CHECKPOINT_SELECTION_TERMINAL_STATE,
+        checkpoint_selection_metric=selection,
         seq_len=8,
         n_segments=2,
         d_model=16,
@@ -3099,7 +3395,17 @@ def test_terminal_state_loss_is_differentiable_with_transport_dynamics(model_nam
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
-def test_terminal_state_loss_cuda_transport_smoke():
+@pytest.mark.parametrize(
+    ("objective", "selection"),
+    [
+        (CONTROL_STATE_OBJECTIVE_TERMINAL_STATE, CHECKPOINT_SELECTION_TERMINAL_STATE),
+        (
+            CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
+            CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
+        ),
+    ],
+)
+def test_terminal_tracking_loss_cuda_transport_smoke(objective, selection):
     series, config = _series(
         n_flights=1,
         model="itransformer",
@@ -3107,9 +3413,9 @@ def test_terminal_state_loss_cuda_transport_smoke():
         control_dynamics_backend=CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
         control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
         control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
-        control_state_objective=CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
+        control_state_objective=objective,
         control_state_duration_gradient=False,
-        checkpoint_selection_metric=CHECKPOINT_SELECTION_TERMINAL_STATE,
+        checkpoint_selection_metric=selection,
         seq_len=8,
         n_segments=2,
         d_model=16,
@@ -3799,6 +4105,10 @@ def test_cross_validation_describes_common_grid_criteria_selection():
     )
 
 
+def test_cross_validation_describes_every_checkpoint_selection_metric():
+    assert set(cv.SELECTION_METRIC_DESCRIPTIONS) == set(CHECKPOINT_SELECTION_METRICS)
+
+
 def test_cross_validation_runs_real_two_fold_search(tmp_path):
     series, config = _series(
         n_flights=20, device="cpu", epochs=1, patience=1,
@@ -4344,6 +4654,19 @@ def test_control_training_checkpoint_round_trip_keeps_output_identity(
         "state_loss_grid": config.control_state_loss_grid,
             "state_objective": CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
             "dense_state_loss_weight": config.control_dense_state_loss_weight,
+            "geometry_loss_weight": config.control_geometry_loss_weight,
+            "arc_horizontal_velocity_loss_weight": (
+                config.control_arc_horizontal_velocity_loss_weight
+            ),
+            "arc_vertical_velocity_loss_weight": (
+                config.control_arc_vertical_velocity_loss_weight
+            ),
+            "arc_horizontal_velocity_scale_mps": (
+                config.control_arc_horizontal_velocity_scale_mps
+            ),
+            "arc_vertical_velocity_scale_mps": (
+                config.control_arc_vertical_velocity_scale_mps
+            ),
             "terminal_position_loss_weight": (
                 config.control_terminal_position_loss_weight
             ),

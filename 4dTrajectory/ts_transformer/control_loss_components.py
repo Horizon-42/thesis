@@ -13,8 +13,10 @@ from typing import Callable
 
 import torch
 
+from arc_length_geometry import arc_length_state_loss_terms
 from channels import POSITION_IDX, VELOCITY_IDX
 from config import (
+    CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
     CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
@@ -205,10 +207,65 @@ def _terminal_state_objective(
     )
 
 
+def _arc_length_geometry_objective(
+    result: ControlStateLossResult,
+    normalized_anchor_state: torch.Tensor,
+    terminal_target: torch.Tensor,
+    config: TSConfig,
+    normalizer: Normalizer,
+    dense_supervision: FixedDTControlSupervision | None,
+) -> ControlTrackingLossTerms:
+    if dense_supervision is None:
+        raise ValueError("arc-length-geometry requires fixed-dt control supervision")
+    arc = arc_length_state_loss_terms(
+        normalized_anchor_state,
+        result.normalized_segment_end_states,
+        terminal_target,
+        dense_supervision,
+        normalizer,
+        points=config.n_segments,
+    )
+    terminal_position_m = terminal_position_error_m(
+        result.normalized_segment_end_states, terminal_target, normalizer
+    )
+    terminal_velocity_mps = terminal_velocity_error_mps(
+        result.normalized_segment_end_states,
+        normalized_anchor_state,
+        dense_supervision,
+        normalizer,
+    )
+    return ControlTrackingLossTerms(
+        state=config.control_geometry_loss_weight * arc.position,
+        terminal_position=(
+            config.control_terminal_position_loss_weight
+            * terminal_position_m
+            / config.control_terminal_position_scale_m
+        ),
+        extras={
+            "terminal_velocity": (
+                config.control_terminal_velocity_loss_weight
+                * terminal_velocity_mps
+                / config.control_terminal_velocity_scale_mps
+            ),
+            "arc_horizontal_velocity": (
+                config.control_arc_horizontal_velocity_loss_weight
+                * arc.horizontal_velocity_mps
+                / config.control_arc_horizontal_velocity_scale_mps
+            ),
+            "arc_vertical_velocity": (
+                config.control_arc_vertical_velocity_loss_weight
+                * arc.vertical_velocity_mps
+                / config.control_arc_vertical_velocity_scale_mps
+            ),
+        },
+    )
+
+
 _TRACKING_OBJECTIVES: dict[str, TrackingObjective] = {
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE: _normalized_mse_objective,
     CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA: _physical_criteria_objective,
     CONTROL_STATE_OBJECTIVE_TERMINAL_STATE: _terminal_state_objective,
+    CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY: _arc_length_geometry_objective,
 }
 
 

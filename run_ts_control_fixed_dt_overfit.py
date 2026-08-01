@@ -25,6 +25,7 @@ import torch  # noqa: E402
 import run_ts_pipeline as pipeline  # noqa: E402
 from channels import POSITION_IDX  # noqa: E402
 from config import (  # noqa: E402
+    CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
     CHECKPOINT_SELECTION_OBJECTIVE,
     CHECKPOINT_SELECTION_TERMINAL_STATE,
     CONTROL_DYNAMICS_BACKENDS,
@@ -33,6 +34,7 @@ from config import (  # noqa: E402
     CONTROL_DURATION_PARAMETERIZATIONS,
     CONTROL_STATE_CLOCK_OBSERVED,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
+    CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
     CONTROL_STATE_OBJECTIVES,
@@ -158,6 +160,42 @@ def _dense_replay_metrics(fit, series) -> dict[str, object]:
             "common_grid_fde_m": common["fde_m"],
             "native_endpoint_ade_m": native["ade_m"],
             "native_endpoint_fde_m": native["fde_m"],
+            "arc_length_geometry_loss": common["arc_length_geometry_loss"],
+            "arc_length_distance_mean_m": common[
+                "arc_length_distance_mean_m"
+            ],
+            "arc_length_path_length_ratio": common[
+                "arc_length_path_length_ratio"
+            ],
+            "arc_length_path_length_log_error": common[
+                "arc_length_path_length_log_error"
+            ],
+            "arc_length_horizontal_velocity_mae_mps": common[
+                "arc_length_horizontal_velocity_mae_mps"
+            ],
+            "arc_length_horizontal_velocity_p95_mps": common[
+                "arc_length_horizontal_velocity_p95_mps"
+            ],
+            "arc_length_vertical_velocity_mae_mps": common[
+                "arc_length_vertical_velocity_mae_mps"
+            ],
+            "arc_length_vertical_velocity_p95_mps": common[
+                "arc_length_vertical_velocity_p95_mps"
+            ],
+            "arc_length_horizontal_mean_m": common[
+                "arc_length_horizontal_mean_m"
+            ],
+            "arc_length_horizontal_p95_m": common[
+                "arc_length_horizontal_p95_m"
+            ],
+            "arc_length_vertical_mae_m": common["arc_length_vertical_mae_m"],
+            "arc_length_vertical_p95_m": common["arc_length_vertical_p95_m"],
+            "arc_length_terminal_position_m": common[
+                "arc_length_terminal_position_m"
+            ],
+            "arc_length_terminal_velocity_error_mps": common[
+                "arc_length_terminal_velocity_error_mps"
+            ],
         },
         "duration_partition": {
             "segments": len(fractions),
@@ -222,6 +260,19 @@ def main(argv: list[str] | None = None) -> int:
         default=CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     )
     parser.add_argument("--control-dense-state-weight", type=float, default=0.25)
+    parser.add_argument("--control-geometry-weight", type=float, default=0.25)
+    parser.add_argument(
+        "--control-arc-horizontal-velocity-weight", type=float, default=0.25
+    )
+    parser.add_argument(
+        "--control-arc-vertical-velocity-weight", type=float, default=0.25
+    )
+    parser.add_argument(
+        "--control-arc-horizontal-velocity-scale-mps", type=float, default=10.0
+    )
+    parser.add_argument(
+        "--control-arc-vertical-velocity-scale-mps", type=float, default=2.0
+    )
     parser.add_argument("--control-terminal-position-weight", type=float, default=1.0)
     parser.add_argument("--control-terminal-velocity-weight", type=float, default=1.0)
     parser.add_argument("--control-terminal-position-scale-m", type=float, default=100.0)
@@ -251,12 +302,26 @@ def main(argv: list[str] | None = None) -> int:
         control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
         control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
         control_state_objective=args.control_state_objective,
-        checkpoint_selection_metric=(
-            CHECKPOINT_SELECTION_TERMINAL_STATE
-            if args.control_state_objective == CONTROL_STATE_OBJECTIVE_TERMINAL_STATE
-            else CHECKPOINT_SELECTION_OBJECTIVE
-        ),
+        checkpoint_selection_metric={
+            CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY: (
+                CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY
+            ),
+            CONTROL_STATE_OBJECTIVE_TERMINAL_STATE: CHECKPOINT_SELECTION_TERMINAL_STATE,
+        }.get(args.control_state_objective, CHECKPOINT_SELECTION_OBJECTIVE),
         control_dense_state_loss_weight=args.control_dense_state_weight,
+        control_geometry_loss_weight=args.control_geometry_weight,
+        control_arc_horizontal_velocity_loss_weight=(
+            args.control_arc_horizontal_velocity_weight
+        ),
+        control_arc_vertical_velocity_loss_weight=(
+            args.control_arc_vertical_velocity_weight
+        ),
+        control_arc_horizontal_velocity_scale_mps=(
+            args.control_arc_horizontal_velocity_scale_mps
+        ),
+        control_arc_vertical_velocity_scale_mps=(
+            args.control_arc_vertical_velocity_scale_mps
+        ),
         control_terminal_position_loss_weight=args.control_terminal_position_weight,
         control_terminal_velocity_loss_weight=args.control_terminal_velocity_weight,
         control_terminal_position_scale_m=args.control_terminal_position_scale_m,

@@ -53,10 +53,12 @@ CONTROL_STATE_LOSS_GRIDS = (
 CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE = "normalized-mse"
 CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA = "physical-criteria"
 CONTROL_STATE_OBJECTIVE_TERMINAL_STATE = "terminal-state"
+CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY = "arc-length-geometry"
 CONTROL_STATE_OBJECTIVES = (
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
     CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
+    CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
 )
 CONTROL_DURATION_FACTORIZED = "factorized"
 CONTROL_DURATION_DIRECT = "direct"
@@ -87,11 +89,13 @@ CHECKPOINT_SELECTION_OBJECTIVE = "fixed-anchor-objective"
 CHECKPOINT_SELECTION_COMMON_GRID_ADE = "fixed-anchor-common-grid-ade"
 CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA = "fixed-anchor-common-grid-criteria"
 CHECKPOINT_SELECTION_TERMINAL_STATE = "fixed-anchor-terminal-state"
+CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY = "fixed-anchor-arc-length-geometry"
 CHECKPOINT_SELECTION_METRICS = (
     CHECKPOINT_SELECTION_OBJECTIVE,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
     CHECKPOINT_SELECTION_TERMINAL_STATE,
+    CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
 )
 
 
@@ -304,9 +308,16 @@ class TSConfig:
     # The default keeps the historical normalized-channel MSE. ``physical-criteria``
     # optimizes the smooth worst of fixed-dt 3-D ADE/100 m and terminal error/100 m.
     # ``terminal-state`` composes independently replaceable dense-state, terminal-position
-    # and terminal-velocity terms. Terminal weights intentionally exceed the dense weight.
+    # and terminal-velocity terms. ``arc-length-geometry`` replaces only the dense term with
+    # position SmoothL1 plus reliable local chart-velocity errors on one normalized
+    # horizontal-arc grid. It intentionally adds no corridor, tangent, path-length or DTW.
     control_state_objective: str = CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE
     control_dense_state_loss_weight: float = 0.25
+    control_geometry_loss_weight: float = 0.25
+    control_arc_horizontal_velocity_loss_weight: float = 0.25
+    control_arc_vertical_velocity_loss_weight: float = 0.25
+    control_arc_horizontal_velocity_scale_mps: float = 10.0
+    control_arc_vertical_velocity_scale_mps: float = 2.0
     control_terminal_position_loss_weight: float = 1.0
     control_terminal_velocity_loss_weight: float = 1.0
     control_terminal_position_scale_m: float = 100.0
@@ -423,6 +434,7 @@ class TSConfig:
         if self.control_state_objective in (
             CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
             CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
+            CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
         ):
             if self.prediction_output != PREDICTION_CONTROL:
                 raise ValueError(
@@ -450,6 +462,29 @@ class TSConfig:
                 "fixed-anchor-terminal-state checkpoint selection requires the "
                 "terminal-state control objective"
             )
+        if (
+            self.control_state_objective == CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY
+            and self.checkpoint_selection_metric
+            != CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY
+        ):
+            raise ValueError(
+                "arc-length-geometry control objective requires "
+                "checkpoint_selection_metric='fixed-anchor-arc-length-geometry'"
+            )
+        if (
+            self.control_state_objective == CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY
+            and self.n_segments < 2
+        ):
+            raise ValueError("arc-length-geometry requires n_segments >= 2")
+        if (
+            self.checkpoint_selection_metric == CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY
+            and self.control_state_objective
+            != CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY
+        ):
+            raise ValueError(
+                "fixed-anchor-arc-length-geometry checkpoint selection requires the "
+                "arc-length-geometry control objective"
+            )
         if not self.control_state_duration_gradient:
             if self.prediction_output != PREDICTION_CONTROL:
                 raise ValueError(
@@ -475,6 +510,7 @@ class TSConfig:
             if self.control_state_objective not in (
                 CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
                 CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
+                CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
             ):
                 raise ValueError(
                     "control horizon curriculum requires a fixed-dt physical objective"
@@ -659,6 +695,15 @@ class TSConfig:
             raise ValueError("control_smoothness_loss_weight must be non-negative")
         for name, value in (
             ("control_dense_state_loss_weight", self.control_dense_state_loss_weight),
+            ("control_geometry_loss_weight", self.control_geometry_loss_weight),
+            (
+                "control_arc_horizontal_velocity_loss_weight",
+                self.control_arc_horizontal_velocity_loss_weight,
+            ),
+            (
+                "control_arc_vertical_velocity_loss_weight",
+                self.control_arc_vertical_velocity_loss_weight,
+            ),
             (
                 "control_terminal_position_loss_weight",
                 self.control_terminal_position_loss_weight,
@@ -671,6 +716,14 @@ class TSConfig:
             if not math.isfinite(value) or value < 0.0:
                 raise ValueError(f"{name} must be finite and non-negative")
         for name, value in (
+            (
+                "control_arc_horizontal_velocity_scale_mps",
+                self.control_arc_horizontal_velocity_scale_mps,
+            ),
+            (
+                "control_arc_vertical_velocity_scale_mps",
+                self.control_arc_vertical_velocity_scale_mps,
+            ),
             (
                 "control_terminal_position_scale_m",
                 self.control_terminal_position_scale_m,
@@ -698,6 +751,33 @@ class TSConfig:
                 raise ValueError(
                     "terminal-state requires terminal velocity weight greater than "
                     "dense state weight"
+                )
+        if self.control_state_objective == CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY:
+            if (
+                self.control_terminal_position_loss_weight
+                <= self.control_geometry_loss_weight
+            ):
+                raise ValueError(
+                    f"{self.control_state_objective} requires terminal position weight "
+                    "greater than "
+                    "geometry weight"
+                )
+            if (
+                self.control_terminal_velocity_loss_weight
+                <= self.control_geometry_loss_weight
+            ):
+                raise ValueError(
+                    f"{self.control_state_objective} requires terminal velocity weight "
+                    "greater than "
+                    "geometry weight"
+                )
+            if self.control_terminal_velocity_loss_weight <= max(
+                self.control_arc_horizontal_velocity_loss_weight,
+                self.control_arc_vertical_velocity_loss_weight,
+            ):
+                raise ValueError(
+                    "arc-length-geometry requires terminal velocity weight greater "
+                    "than local velocity weights"
                 )
         if self.control_mixture_selector_loss_weight < 0.0:
             raise ValueError("control_mixture_selector_loss_weight must be non-negative")
@@ -788,6 +868,11 @@ class TSConfig:
             "control_value_parameterization",
             "control_dynamics_backend",
             "control_dense_state_loss_weight",
+            "control_geometry_loss_weight",
+            "control_arc_horizontal_velocity_loss_weight",
+            "control_arc_vertical_velocity_loss_weight",
+            "control_arc_horizontal_velocity_scale_mps",
+            "control_arc_vertical_velocity_scale_mps",
             "control_terminal_position_loss_weight",
             "control_terminal_velocity_loss_weight",
             "control_terminal_position_scale_m",
@@ -822,6 +907,19 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
         "state_loss_grid": config.control_state_loss_grid,
         "state_objective": config.control_state_objective,
         "dense_state_loss_weight": config.control_dense_state_loss_weight,
+        "geometry_loss_weight": config.control_geometry_loss_weight,
+        "arc_horizontal_velocity_loss_weight": (
+            config.control_arc_horizontal_velocity_loss_weight
+        ),
+        "arc_vertical_velocity_loss_weight": (
+            config.control_arc_vertical_velocity_loss_weight
+        ),
+        "arc_horizontal_velocity_scale_mps": (
+            config.control_arc_horizontal_velocity_scale_mps
+        ),
+        "arc_vertical_velocity_scale_mps": (
+            config.control_arc_vertical_velocity_scale_mps
+        ),
         "terminal_position_loss_weight": config.control_terminal_position_loss_weight,
         "terminal_velocity_loss_weight": config.control_terminal_velocity_loss_weight,
         "terminal_position_scale_m": config.control_terminal_position_scale_m,

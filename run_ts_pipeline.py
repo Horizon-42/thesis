@@ -58,6 +58,7 @@ from config import (  # noqa: E402
     CONTROL_STATE_CLOCK_PREDICTED,
     CONTROL_STATE_LOSS_GRIDS,
     CONTROL_STATE_LOSS_GRID_NATIVE,
+    CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
     CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
@@ -234,26 +235,41 @@ def _control_objective_tag(prediction_output: str, objective: str) -> str:
     return f"_{objective.replace('-', '_')}"
 
 
-def _terminal_state_recipe_tag(
+def _terminal_tracking_recipe_tag(
     prediction_output: str,
     objective: str,
     dense_weight: float,
+    geometry_weight: float,
+    arc_horizontal_velocity_weight: float,
+    arc_vertical_velocity_weight: float,
+    arc_horizontal_velocity_scale_mps: float,
+    arc_vertical_velocity_scale_mps: float,
     terminal_position_weight: float,
     terminal_velocity_weight: float,
     terminal_position_scale_m: float,
     terminal_velocity_scale_mps: float,
 ) -> str:
-    if (
-        prediction_output != PREDICTION_CONTROL
-        or objective != CONTROL_STATE_OBJECTIVE_TERMINAL_STATE
+    if prediction_output != PREDICTION_CONTROL or objective not in (
+        CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
+        CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
     ):
         return ""
 
     def compact(value: float) -> str:
         return f"{value:g}".replace(".", "p")
 
+    tracking = {
+        CONTROL_STATE_OBJECTIVE_TERMINAL_STATE: f"_d{compact(dense_weight)}",
+        CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY: (
+            f"_g{compact(geometry_weight)}"
+            f"_ahv{compact(arc_horizontal_velocity_weight)}"
+            f"_avv{compact(arc_vertical_velocity_weight)}"
+            f"_ahvs{compact(arc_horizontal_velocity_scale_mps)}mps"
+            f"_avvs{compact(arc_vertical_velocity_scale_mps)}mps"
+        ),
+    }[objective]
     return (
-        f"_d{compact(dense_weight)}"
+        f"{tracking}"
         f"_tp{compact(terminal_position_weight)}"
         f"_tv{compact(terminal_velocity_weight)}"
         f"_ps{compact(terminal_position_scale_m)}m"
@@ -366,6 +382,11 @@ class TrainingPlan:
         control_effort_weight: float | None = None,
         control_smoothness_weight: float | None = None,
         control_dense_state_weight: float = 0.25,
+        control_geometry_weight: float = 0.25,
+        control_arc_horizontal_velocity_weight: float = 0.25,
+        control_arc_vertical_velocity_weight: float = 0.25,
+        control_arc_horizontal_velocity_scale_mps: float = 10.0,
+        control_arc_vertical_velocity_scale_mps: float = 2.0,
         control_terminal_position_weight: float = 1.0,
         control_terminal_velocity_weight: float = 1.0,
         control_terminal_position_scale_m: float = 100.0,
@@ -419,6 +440,19 @@ class TrainingPlan:
         self.control_effort_weight = control_effort_weight
         self.control_smoothness_weight = control_smoothness_weight
         self.control_dense_state_weight = control_dense_state_weight
+        self.control_geometry_weight = control_geometry_weight
+        self.control_arc_horizontal_velocity_weight = (
+            control_arc_horizontal_velocity_weight
+        )
+        self.control_arc_vertical_velocity_weight = (
+            control_arc_vertical_velocity_weight
+        )
+        self.control_arc_horizontal_velocity_scale_mps = (
+            control_arc_horizontal_velocity_scale_mps
+        )
+        self.control_arc_vertical_velocity_scale_mps = (
+            control_arc_vertical_velocity_scale_mps
+        )
         self.control_terminal_position_weight = control_terminal_position_weight
         self.control_terminal_velocity_weight = control_terminal_velocity_weight
         self.control_terminal_position_scale_m = control_terminal_position_scale_m
@@ -457,10 +491,15 @@ class TrainingPlan:
             + _control_clock_tag(prediction_output, control_state_clock)
             + _control_state_loss_grid_tag(prediction_output, control_state_loss_grid)
             + _control_objective_tag(prediction_output, control_state_objective)
-            + _terminal_state_recipe_tag(
+            + _terminal_tracking_recipe_tag(
                 prediction_output,
                 control_state_objective,
                 control_dense_state_weight,
+                control_geometry_weight,
+                control_arc_horizontal_velocity_weight,
+                control_arc_vertical_velocity_weight,
+                control_arc_horizontal_velocity_scale_mps,
+                control_arc_vertical_velocity_scale_mps,
                 control_terminal_position_weight,
                 control_terminal_velocity_weight,
                 control_terminal_position_scale_m,
@@ -553,6 +592,16 @@ class TrainingPlan:
         args += [
             "--control-dense-state-weight",
             str(self.control_dense_state_weight),
+            "--control-geometry-weight",
+            str(self.control_geometry_weight),
+            "--control-arc-horizontal-velocity-weight",
+            str(self.control_arc_horizontal_velocity_weight),
+            "--control-arc-vertical-velocity-weight",
+            str(self.control_arc_vertical_velocity_weight),
+            "--control-arc-horizontal-velocity-scale-mps",
+            str(self.control_arc_horizontal_velocity_scale_mps),
+            "--control-arc-vertical-velocity-scale-mps",
+            str(self.control_arc_vertical_velocity_scale_mps),
             "--control-terminal-position-weight",
             str(self.control_terminal_position_weight),
             "--control-terminal-velocity-weight",
@@ -732,6 +781,19 @@ class TrainingPlan:
             "control_state_loss_grid": self.control_state_loss_grid,
             "control_state_objective": self.control_state_objective,
             "control_dense_state_loss_weight": self.control_dense_state_weight,
+            "control_geometry_loss_weight": self.control_geometry_weight,
+            "control_arc_horizontal_velocity_loss_weight": (
+                self.control_arc_horizontal_velocity_weight
+            ),
+            "control_arc_vertical_velocity_loss_weight": (
+                self.control_arc_vertical_velocity_weight
+            ),
+            "control_arc_horizontal_velocity_scale_mps": (
+                self.control_arc_horizontal_velocity_scale_mps
+            ),
+            "control_arc_vertical_velocity_scale_mps": (
+                self.control_arc_vertical_velocity_scale_mps
+            ),
             "control_terminal_position_loss_weight": (
                 self.control_terminal_position_weight
             ),
@@ -845,6 +907,19 @@ class TrainingPlan:
             "control_state_loss_grid": self.control_state_loss_grid,
             "control_state_objective": self.control_state_objective,
             "control_dense_state_loss_weight": self.control_dense_state_weight,
+            "control_geometry_loss_weight": self.control_geometry_weight,
+            "control_arc_horizontal_velocity_loss_weight": (
+                self.control_arc_horizontal_velocity_weight
+            ),
+            "control_arc_vertical_velocity_loss_weight": (
+                self.control_arc_vertical_velocity_weight
+            ),
+            "control_arc_horizontal_velocity_scale_mps": (
+                self.control_arc_horizontal_velocity_scale_mps
+            ),
+            "control_arc_vertical_velocity_scale_mps": (
+                self.control_arc_vertical_velocity_scale_mps
+            ),
             "control_terminal_position_loss_weight": (
                 self.control_terminal_position_weight
             ),
@@ -1039,6 +1114,14 @@ class PredictionPlan:
                 f"{training.control_terminal_position_weight:g}/"
                 f"{training.control_terminal_velocity_weight:g}), "
             ),
+            CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY: (
+                "horizontal-arc position/local-velocity + terminal criterion "
+                f"({training.control_geometry_weight:g}/"
+                f"{training.control_arc_horizontal_velocity_weight:g}/"
+                f"{training.control_arc_vertical_velocity_weight:g}/"
+                f"{training.control_terminal_position_weight:g}/"
+                f"{training.control_terminal_velocity_weight:g}), "
+            ),
         }[training.control_state_objective]
         duration_gradient_label = (
             "detached duration-state gradient, "
@@ -1197,6 +1280,23 @@ def run_training(
                     f"velocity={config.control_terminal_velocity_loss_weight:g}/"
                     f"{config.control_terminal_velocity_scale_mps:g}mps"
                 )
+            if (
+                config.control_state_objective
+                == CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY
+            ):
+                print(
+                    "   arc-geometry: "
+                    f"geometry={config.control_geometry_loss_weight:g}, "
+                    "local_velocity="
+                    f"{config.control_arc_horizontal_velocity_loss_weight:g}/"
+                    f"{config.control_arc_horizontal_velocity_scale_mps:g}mps horiz, "
+                    f"{config.control_arc_vertical_velocity_loss_weight:g}/"
+                    f"{config.control_arc_vertical_velocity_scale_mps:g}mps vertical, "
+                    f"position={config.control_terminal_position_loss_weight:g}/"
+                    f"{config.control_terminal_position_scale_m:g}m, "
+                    f"velocity={config.control_terminal_velocity_loss_weight:g}/"
+                    f"{config.control_terminal_velocity_scale_mps:g}mps"
+                )
             if config.control_horizon_curriculum_s:
                 horizons = "→".join(
                     f"{value:g}s" for value in config.control_horizon_curriculum_s
@@ -1345,6 +1445,19 @@ def main() -> None:
     parser.add_argument("--control-effort-weight", type=float, default=None)
     parser.add_argument("--control-smoothness-weight", type=float, default=None)
     parser.add_argument("--control-dense-state-weight", type=float, default=0.25)
+    parser.add_argument("--control-geometry-weight", type=float, default=0.25)
+    parser.add_argument(
+        "--control-arc-horizontal-velocity-weight", type=float, default=0.25
+    )
+    parser.add_argument(
+        "--control-arc-vertical-velocity-weight", type=float, default=0.25
+    )
+    parser.add_argument(
+        "--control-arc-horizontal-velocity-scale-mps", type=float, default=10.0
+    )
+    parser.add_argument(
+        "--control-arc-vertical-velocity-scale-mps", type=float, default=2.0
+    )
     parser.add_argument("--control-terminal-position-weight", type=float, default=1.0)
     parser.add_argument("--control-terminal-velocity-weight", type=float, default=1.0)
     parser.add_argument("--control-terminal-position-scale-m", type=float, default=100.0)
@@ -1521,6 +1634,19 @@ def main() -> None:
             control_effort_weight=args.control_effort_weight,
             control_smoothness_weight=args.control_smoothness_weight,
             control_dense_state_weight=args.control_dense_state_weight,
+            control_geometry_weight=args.control_geometry_weight,
+            control_arc_horizontal_velocity_weight=(
+                args.control_arc_horizontal_velocity_weight
+            ),
+            control_arc_vertical_velocity_weight=(
+                args.control_arc_vertical_velocity_weight
+            ),
+            control_arc_horizontal_velocity_scale_mps=(
+                args.control_arc_horizontal_velocity_scale_mps
+            ),
+            control_arc_vertical_velocity_scale_mps=(
+                args.control_arc_vertical_velocity_scale_mps
+            ),
             control_terminal_position_weight=args.control_terminal_position_weight,
             control_terminal_velocity_weight=args.control_terminal_velocity_weight,
             control_terminal_position_scale_m=args.control_terminal_position_scale_m,
