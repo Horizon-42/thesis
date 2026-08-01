@@ -23,11 +23,13 @@ if str(TS_DIR) not in sys.path:
 import torch  # noqa: E402
 
 import run_ts_pipeline as pipeline  # noqa: E402
-from channels import POSITION_IDX  # noqa: E402
+from channels import CHANNELS, POSITION_IDX  # noqa: E402
 from config import (  # noqa: E402
     CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
     CHECKPOINT_SELECTION_OBJECTIVE,
     CHECKPOINT_SELECTION_TERMINAL_STATE,
+    CONTROL_ARC_LOCAL_VELOCITY_PARAMETERIZATIONS,
+    CONTROL_ARC_TERMINAL_PARAMETERIZATIONS,
     CONTROL_DYNAMICS_BACKENDS,
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DURATION_FACTORIZED,
@@ -59,7 +61,7 @@ from train import (  # noqa: E402
     move_fixed_dt_supervision,
 )
 
-RESULT_SCHEMA = "ts-control-fixed-dt-single-flight-overfit-v1"
+RESULT_SCHEMA = "ts-control-fixed-dt-single-flight-overfit-v3-clock-aligned-diagnostics"
 
 
 def _selected_checkpoint_history_row(fit):
@@ -77,7 +79,7 @@ def _selected_checkpoint_history_row(fit):
     return min(eligible, key=lambda row: row.validation_selection_value)
 
 
-def _dense_replay_metrics(fit, series) -> dict[str, object]:
+def _dense_replay(fit, series) -> tuple[dict[str, object], dict[str, object]]:
     dataset = FixedAnchorTrajectoryWindows([series], fit.config, fit.normalizer)
     x, target, weights, final_time, flight_weights, dynamics, dense = dataset.batch(
         np.array([0])
@@ -132,6 +134,13 @@ def _dense_replay_metrics(fit, series) -> dict[str, object]:
     fractions = (
         deployable.segment_durations[0] / deployable.final_time_s[0]
     ).cpu().numpy()
+    # Keep timestamps on the exact clock that produced ``predicted_endpoints``.  The
+    # fixed-dt loss uses the observed supervision horizon and may rescale deployable
+    # durations, so combining these states with deployable offsets is invalid.
+    segment_durations = (
+        dense_result.physical_segment_durations_s[0].cpu().numpy()
+    )
+    controls = deployable.controls[0].cpu().numpy()
     dense_loss = float(dense_result.per_flight_loss[0].cpu())
     common = evaluate_fixed_anchor_common_grid(
         fit.model, dataset, fit.normalizer, fit.config, fit.device
@@ -139,7 +148,7 @@ def _dense_replay_metrics(fit, series) -> dict[str, object]:
     native = evaluate_split(
         fit.model, dataset, fit.normalizer, fit.config, fit.device
     )
-    return {
+    metrics = {
         "fixed_dt_training_clock": {
             "dt_s": fit.config.dt_s,
             "points": int(valid.sum()),
@@ -161,6 +170,9 @@ def _dense_replay_metrics(fit, series) -> dict[str, object]:
             "native_endpoint_ade_m": native["ade_m"],
             "native_endpoint_fde_m": native["fde_m"],
             "arc_length_geometry_loss": common["arc_length_geometry_loss"],
+            "arc_length_geometry_unweighted_loss": common[
+                "arc_length_geometry_unweighted_loss"
+            ],
             "arc_length_distance_mean_m": common[
                 "arc_length_distance_mean_m"
             ],
@@ -175,6 +187,18 @@ def _dense_replay_metrics(fit, series) -> dict[str, object]:
             ],
             "arc_length_horizontal_velocity_p95_mps": common[
                 "arc_length_horizontal_velocity_p95_mps"
+            ],
+            "arc_length_horizontal_tangent_mean": common[
+                "arc_length_horizontal_tangent_mean"
+            ],
+            "arc_length_horizontal_tangent_p95": common[
+                "arc_length_horizontal_tangent_p95"
+            ],
+            "arc_length_horizontal_speed_mae_mps": common[
+                "arc_length_horizontal_speed_mae_mps"
+            ],
+            "arc_length_horizontal_speed_p95_mps": common[
+                "arc_length_horizontal_speed_p95_mps"
             ],
             "arc_length_vertical_velocity_mae_mps": common[
                 "arc_length_vertical_velocity_mae_mps"
@@ -196,6 +220,22 @@ def _dense_replay_metrics(fit, series) -> dict[str, object]:
             "arc_length_terminal_velocity_error_mps": common[
                 "arc_length_terminal_velocity_error_mps"
             ],
+            "arc_length_terminal_position_runway_components_m": common[
+                "arc_length_terminal_position_runway_components_m"
+            ],
+            "arc_length_terminal_velocity_runway_components_mps": common[
+                "arc_length_terminal_velocity_runway_components_mps"
+            ],
+            **{
+                key: value
+                for key, value in common.items()
+                if key.startswith("arc_length_terminal_")
+                and key not in {
+                    "arc_length_terminal_position_per_flight_m",
+                    "arc_length_terminal_velocity_error_per_flight_mps",
+                }
+                and np.isscalar(value)
+            },
         },
         "duration_partition": {
             "segments": len(fractions),
@@ -207,6 +247,31 @@ def _dense_replay_metrics(fit, series) -> dict[str, object]:
         },
         "reference_kinematics": reference_kinematics,
     }
+    diagnostics = {
+        "channel_names": list(CHANNELS),
+        "control_names": ["thrust_n", "bank_rad", "load_factor"],
+        "runway": str(series.scenario.source.get("runway") or ""),
+        "runway_heading_rad": float(series.scenario.target.psi),
+        "anchor_state": anchor_physical.tolist(),
+        "terminal_reference_state": terminal_truth.tolist(),
+        "fixed_dt": {
+            "offset_s": dense.query_offsets_s[0, valid].numpy().tolist(),
+            "reference_state": truth_dense.tolist(),
+            "predicted_state": predicted_dense.tolist(),
+            "reference_fully_measured": reference_fully_measured.tolist(),
+            "position_error_m": distance.tolist(),
+        },
+        "segments": {
+            "clock": "observed-supervision",
+            "offset_s": np.cumsum(segment_durations).tolist(),
+            "duration_s": segment_durations.tolist(),
+            "state": predicted_endpoints.tolist(),
+            "controls": controls.tolist(),
+            "control_lower": dynamics["control_lower"][0].numpy().tolist(),
+            "control_upper": dynamics["control_upper"][0].numpy().tolist(),
+        },
+    }
+    return metrics, diagnostics
 
 
 def _write_report(output_dir: Path, result: dict[str, object]) -> None:
@@ -260,7 +325,7 @@ def main(argv: list[str] | None = None) -> int:
         default=CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     )
     parser.add_argument("--control-dense-state-weight", type=float, default=0.25)
-    parser.add_argument("--control-geometry-weight", type=float, default=0.25)
+    parser.add_argument("--control-geometry-weight", type=float, default=0.75)
     parser.add_argument(
         "--control-arc-horizontal-velocity-weight", type=float, default=0.25
     )
@@ -272,6 +337,24 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--control-arc-vertical-velocity-scale-mps", type=float, default=2.0
+    )
+    parser.add_argument(
+        "--control-arc-local-velocity",
+        choices=CONTROL_ARC_LOCAL_VELOCITY_PARAMETERIZATIONS,
+        default="vector-components",
+    )
+    parser.add_argument("--control-arc-tangent-weight", type=float, default=0.25)
+    parser.add_argument("--control-arc-position-end-weight", type=float, default=4.0)
+    parser.add_argument(
+        "--control-arc-terminal",
+        choices=CONTROL_ARC_TERMINAL_PARAMETERIZATIONS,
+        default="runway-components",
+    )
+    parser.add_argument(
+        "--control-arc-terminal-cross-track-emphasis", type=float, default=3.0
+    )
+    parser.add_argument(
+        "--control-arc-terminal-vertical-emphasis", type=float, default=5.0
     )
     parser.add_argument("--control-terminal-position-weight", type=float, default=1.0)
     parser.add_argument("--control-terminal-velocity-weight", type=float, default=1.0)
@@ -322,6 +405,16 @@ def main(argv: list[str] | None = None) -> int:
         control_arc_vertical_velocity_scale_mps=(
             args.control_arc_vertical_velocity_scale_mps
         ),
+        control_arc_local_velocity_parameterization=args.control_arc_local_velocity,
+        control_arc_tangent_loss_weight=args.control_arc_tangent_weight,
+        control_arc_position_end_weight=args.control_arc_position_end_weight,
+        control_arc_terminal_parameterization=args.control_arc_terminal,
+        control_arc_terminal_cross_track_emphasis=(
+            args.control_arc_terminal_cross_track_emphasis
+        ),
+        control_arc_terminal_vertical_emphasis=(
+            args.control_arc_terminal_vertical_emphasis
+        ),
         control_terminal_position_loss_weight=args.control_terminal_position_weight,
         control_terminal_velocity_loss_weight=args.control_terminal_velocity_weight,
         control_terminal_position_scale_m=args.control_terminal_position_scale_m,
@@ -361,7 +454,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"memorizing {series.dataset_id}; remaining reference={series.supervision_times[-1] - series.times[config.seq_len - 1]:.1f}s")
     fit = fit_model([series], [series], config, verbose=not args.quiet)
-    metrics = _dense_replay_metrics(fit, series)
+    metrics, diagnostics = _dense_replay(fit, series)
     best = _selected_checkpoint_history_row(fit)
     first = fit.history[0].val_loss
     result = {
@@ -394,6 +487,7 @@ def main(argv: list[str] | None = None) -> int:
             "best_components": best.val_components,
         },
         "metrics": metrics,
+        "diagnostics": diagnostics,
         "history": [vars(row) for row in fit.history],
     }
     output_dir = args.output_dir or (

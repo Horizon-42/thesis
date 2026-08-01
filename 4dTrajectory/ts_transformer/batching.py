@@ -125,6 +125,9 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
                 "frame_params": torch.tensor(
                     [[35.9, -78.8, 100.0, 0.0]], dtype=torch.float32, device=device
                 ).expand(batch_size, -1),
+                "runway_heading_rad": torch.zeros(
+                    batch_size, dtype=torch.float32, device=device
+                ),
             }
             if config.control_state_loss_grid == CONTROL_STATE_LOSS_GRID_FIXED_DT:
                 points = int(config.final_time_scale_s // config.dt_s)

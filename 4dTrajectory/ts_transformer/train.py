@@ -28,6 +28,10 @@ from config import (
     CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
     CHECKPOINT_SELECTION_OBJECTIVE,
     CHECKPOINT_SELECTION_TERMINAL_STATE,
+    CONTROL_ARC_LOCAL_VELOCITY_TANGENT_SPEED,
+    CONTROL_ARC_LOCAL_VELOCITY_VECTOR,
+    CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS,
+    CONTROL_ARC_TERMINAL_VECTOR_NORM,
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DURATION_DIRECT,
     CONTROL_DURATION_FACTORIZED,
@@ -91,7 +95,7 @@ from time_grids import batch_time_grid, numpy_inference_time_grid
 
 CHECKPOINT_NAME = "checkpoint.pt"
 CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
-CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v29-arc-length-state"
+CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v30-arc-loss-ablations"
 STATE_TARGET_CONTRACTS = {
     HORIZON_NORMALIZED: "normalized-time-runway-crossing-displacement-kinematic-v3",
     HORIZON_FULL: "full-horizon-fixed-time-displacement-kinematic-v2",
@@ -199,12 +203,24 @@ def loss_component_names(config: TSConfig) -> tuple[str, ...]:
     }[config.prediction_output]
     if config.prediction_output != PREDICTION_CONTROL:
         return names
+    arc_velocity_extensions = {
+        CONTROL_ARC_LOCAL_VELOCITY_VECTOR: (
+            "arc_horizontal_velocity",
+            "arc_vertical_velocity",
+        ),
+        CONTROL_ARC_LOCAL_VELOCITY_TANGENT_SPEED: (
+            "arc_horizontal_tangent",
+            "arc_horizontal_speed",
+            "arc_vertical_velocity",
+        ),
+    }
     extensions = {
         CONTROL_STATE_OBJECTIVE_TERMINAL_STATE: ("terminal_velocity",),
         CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY: (
             "terminal_velocity",
-            "arc_horizontal_velocity",
-            "arc_vertical_velocity",
+            *arc_velocity_extensions[
+                config.control_arc_local_velocity_parameterization
+            ],
         ),
     }
     return (*names, *extensions.get(config.control_state_objective, ()))
@@ -589,20 +605,21 @@ def control_prediction_loss_terms(
     )
     terminal_target = target_states[:, -1]
     segment_valid = None
-    if training_stage is not None:
-        if dense_supervision is None:
-            raise ValueError("control horizon curriculum requires dense supervision")
+    if dense_supervision is not None:
+        stage = training_stage or ControlTrainingStage("full", None, 1, None)
         stage_view = build_control_training_stage_view(
             state_prediction,
             dense_supervision,
             terminal_target,
             target_final_time_s,
-            training_stage,
+            stage,
         )
         state_prediction = stage_view.prediction
         dense_supervision = stage_view.supervision
         terminal_target = stage_view.terminal_target
         segment_valid = stage_view.segment_valid
+    elif training_stage is not None:
+        raise ValueError("control horizon curriculum requires dense supervision")
     rollout_loss = _CONTROL_STATE_LOSS_HANDLERS[
         config.control_state_loss_grid
     ](
@@ -620,6 +637,12 @@ def control_prediction_loss_terms(
     time_loss = (
         (prediction.final_time_s - target_final_time_s) / config.final_time_scale_s
     ).square()
+    runway_heading_rad = (
+        dynamics["runway_heading_rad"]
+        if config.control_state_objective
+        == CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY
+        else normalized_anchor_state.new_zeros(len(normalized_anchor_state))
+    )
     tracking = control_tracking_loss_terms(
         rollout_loss,
         normalized_anchor_state,
@@ -627,6 +650,7 @@ def control_prediction_loss_terms(
         config,
         normalizer,
         dense_supervision,
+        runway_heading_rad,
     )
 
     effort_signal, smoothness_signal = control_regularization_signals(
@@ -1434,6 +1458,9 @@ def _common_grid_validation_details(
             "final_time_mae_s": block["final_time_mae_s"],
             "flights": block["flights"],
             "arc_length_geometry_loss": block["arc_length_geometry_loss"],
+            "arc_length_geometry_unweighted_loss": block[
+                "arc_length_geometry_unweighted_loss"
+            ],
             "arc_length_distance_mean_m": block["arc_length_distance_mean_m"],
             "arc_length_path_length_ratio": block[
                 "arc_length_path_length_ratio"
@@ -1446,6 +1473,18 @@ def _common_grid_validation_details(
             ],
             "arc_length_horizontal_velocity_p95_mps": block[
                 "arc_length_horizontal_velocity_p95_mps"
+            ],
+            "arc_length_horizontal_tangent_mean": block[
+                "arc_length_horizontal_tangent_mean"
+            ],
+            "arc_length_horizontal_tangent_p95": block[
+                "arc_length_horizontal_tangent_p95"
+            ],
+            "arc_length_horizontal_speed_mae_mps": block[
+                "arc_length_horizontal_speed_mae_mps"
+            ],
+            "arc_length_horizontal_speed_p95_mps": block[
+                "arc_length_horizontal_speed_p95_mps"
             ],
             "arc_length_vertical_velocity_mae_mps": block[
                 "arc_length_vertical_velocity_mae_mps"
@@ -1466,6 +1505,12 @@ def _common_grid_validation_details(
             ],
             "arc_length_terminal_velocity_error_mps": block[
                 "arc_length_terminal_velocity_error_mps"
+            ],
+            "arc_length_terminal_position_runway_components_m": block[
+                "arc_length_terminal_position_runway_components_m"
+            ],
+            "arc_length_terminal_velocity_runway_components_mps": block[
+                "arc_length_terminal_velocity_runway_components_mps"
             ],
         }
     return details
@@ -1581,21 +1626,46 @@ def _arc_length_geometry_validation_selection(
         val_by_airport=val_by_airport,
     )
     by_airport: dict[str, float] = {}
-    for airport, block in details.items():
-        value = (
-            config.control_geometry_loss_weight
-            * block["arc_length_geometry_loss"]
-            + config.control_arc_horizontal_velocity_loss_weight
+    velocity_value = {
+        CONTROL_ARC_LOCAL_VELOCITY_VECTOR: lambda block: (
+            config.control_arc_horizontal_velocity_loss_weight
             * block["arc_length_horizontal_velocity_mae_mps"]
             / config.control_arc_horizontal_velocity_scale_mps
             + config.control_arc_vertical_velocity_loss_weight
             * block["arc_length_vertical_velocity_mae_mps"]
             / config.control_arc_vertical_velocity_scale_mps
+        ),
+        CONTROL_ARC_LOCAL_VELOCITY_TANGENT_SPEED: lambda block: (
+            config.control_arc_tangent_loss_weight
+            * block["arc_length_horizontal_tangent_mean"]
+            + config.control_arc_horizontal_velocity_loss_weight
+            * block["arc_length_horizontal_speed_mae_mps"]
+            / config.control_arc_horizontal_velocity_scale_mps
+            + config.control_arc_vertical_velocity_loss_weight
+            * block["arc_length_vertical_velocity_mae_mps"]
+            / config.control_arc_vertical_velocity_scale_mps
+        ),
+    }[config.control_arc_local_velocity_parameterization]
+    terminal_position_key, terminal_velocity_key = {
+        CONTROL_ARC_TERMINAL_VECTOR_NORM: (
+            "arc_length_terminal_position_m",
+            "arc_length_terminal_velocity_error_mps",
+        ),
+        CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS: (
+            "arc_length_terminal_position_runway_components_m",
+            "arc_length_terminal_velocity_runway_components_mps",
+        ),
+    }[config.control_arc_terminal_parameterization]
+    for airport, block in details.items():
+        value = (
+            config.control_geometry_loss_weight
+            * block["arc_length_geometry_loss"]
+            + velocity_value(block)
             + config.control_terminal_position_loss_weight
-            * block["arc_length_terminal_position_m"]
+            * block[terminal_position_key]
             / config.control_terminal_position_scale_m
             + config.control_terminal_velocity_loss_weight
-            * block["arc_length_terminal_velocity_error_mps"]
+            * block[terminal_velocity_key]
             / config.control_terminal_velocity_scale_mps
         )
         by_airport[airport] = float(value)

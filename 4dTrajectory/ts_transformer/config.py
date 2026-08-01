@@ -60,6 +60,18 @@ CONTROL_STATE_OBJECTIVES = (
     CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
     CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
 )
+CONTROL_ARC_TERMINAL_VECTOR_NORM = "vector-norm"
+CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS = "runway-components"
+CONTROL_ARC_TERMINAL_PARAMETERIZATIONS = (
+    CONTROL_ARC_TERMINAL_VECTOR_NORM,
+    CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS,
+)
+CONTROL_ARC_LOCAL_VELOCITY_VECTOR = "vector-components"
+CONTROL_ARC_LOCAL_VELOCITY_TANGENT_SPEED = "tangent-speed"
+CONTROL_ARC_LOCAL_VELOCITY_PARAMETERIZATIONS = (
+    CONTROL_ARC_LOCAL_VELOCITY_VECTOR,
+    CONTROL_ARC_LOCAL_VELOCITY_TANGENT_SPEED,
+)
 CONTROL_DURATION_FACTORIZED = "factorized"
 CONTROL_DURATION_DIRECT = "direct"
 CONTROL_DURATION_PARAMETERIZATIONS = (
@@ -310,14 +322,25 @@ class TSConfig:
     # ``terminal-state`` composes independently replaceable dense-state, terminal-position
     # and terminal-velocity terms. ``arc-length-geometry`` replaces only the dense term with
     # position SmoothL1 plus reliable local chart-velocity errors on one normalized
-    # horizontal-arc grid. It intentionally adds no corridor, tangent, path-length or DTW.
+    # horizontal-arc grid. Orthogonal ablation fields below change terminal decomposition,
+    # local-velocity decomposition or progress weighting without creating more objectives.
     control_state_objective: str = CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE
     control_dense_state_loss_weight: float = 0.25
-    control_geometry_loss_weight: float = 0.25
+    control_geometry_loss_weight: float = 0.75
     control_arc_horizontal_velocity_loss_weight: float = 0.25
     control_arc_vertical_velocity_loss_weight: float = 0.25
     control_arc_horizontal_velocity_scale_mps: float = 10.0
     control_arc_vertical_velocity_scale_mps: float = 2.0
+    control_arc_local_velocity_parameterization: str = (
+        CONTROL_ARC_LOCAL_VELOCITY_VECTOR
+    )
+    control_arc_tangent_loss_weight: float = 0.25
+    control_arc_position_end_weight: float = 4.0
+    control_arc_terminal_parameterization: str = (
+        CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS
+    )
+    control_arc_terminal_cross_track_emphasis: float = 3.0
+    control_arc_terminal_vertical_emphasis: float = 5.0
     control_terminal_position_loss_weight: float = 1.0
     control_terminal_velocity_loss_weight: float = 1.0
     control_terminal_position_scale_m: float = 100.0
@@ -419,6 +442,24 @@ class TSConfig:
                 "unknown control_state_objective "
                 f"{self.control_state_objective!r}; expected one of "
                 f"{CONTROL_STATE_OBJECTIVES}"
+            )
+        if (
+            self.control_arc_terminal_parameterization
+            not in CONTROL_ARC_TERMINAL_PARAMETERIZATIONS
+        ):
+            raise ValueError(
+                "unknown control_arc_terminal_parameterization "
+                f"{self.control_arc_terminal_parameterization!r}; expected one of "
+                f"{CONTROL_ARC_TERMINAL_PARAMETERIZATIONS}"
+            )
+        if (
+            self.control_arc_local_velocity_parameterization
+            not in CONTROL_ARC_LOCAL_VELOCITY_PARAMETERIZATIONS
+        ):
+            raise ValueError(
+                "unknown control_arc_local_velocity_parameterization "
+                f"{self.control_arc_local_velocity_parameterization!r}; expected one of "
+                f"{CONTROL_ARC_LOCAL_VELOCITY_PARAMETERIZATIONS}"
             )
         if self.control_state_loss_grid == CONTROL_STATE_LOSS_GRID_FIXED_DT:
             if self.prediction_output != PREDICTION_CONTROL:
@@ -704,6 +745,7 @@ class TSConfig:
                 "control_arc_vertical_velocity_loss_weight",
                 self.control_arc_vertical_velocity_loss_weight,
             ),
+            ("control_arc_tangent_loss_weight", self.control_arc_tangent_loss_weight),
             (
                 "control_terminal_position_loss_weight",
                 self.control_terminal_position_loss_weight,
@@ -732,9 +774,22 @@ class TSConfig:
                 "control_terminal_velocity_scale_mps",
                 self.control_terminal_velocity_scale_mps,
             ),
+            (
+                "control_arc_terminal_cross_track_emphasis",
+                self.control_arc_terminal_cross_track_emphasis,
+            ),
+            (
+                "control_arc_terminal_vertical_emphasis",
+                self.control_arc_terminal_vertical_emphasis,
+            ),
         ):
             if not math.isfinite(value) or value <= 0.0:
                 raise ValueError(f"{name} must be finite and positive")
+        if (
+            not math.isfinite(self.control_arc_position_end_weight)
+            or self.control_arc_position_end_weight < 1.0
+        ):
+            raise ValueError("control_arc_position_end_weight must be finite and >= 1")
         if self.control_state_objective == CONTROL_STATE_OBJECTIVE_TERMINAL_STATE:
             if (
                 self.control_terminal_position_loss_weight
@@ -774,6 +829,7 @@ class TSConfig:
             if self.control_terminal_velocity_loss_weight <= max(
                 self.control_arc_horizontal_velocity_loss_weight,
                 self.control_arc_vertical_velocity_loss_weight,
+                self.control_arc_tangent_loss_weight,
             ):
                 raise ValueError(
                     "arc-length-geometry requires terminal velocity weight greater "
@@ -873,6 +929,12 @@ class TSConfig:
             "control_arc_vertical_velocity_loss_weight",
             "control_arc_horizontal_velocity_scale_mps",
             "control_arc_vertical_velocity_scale_mps",
+            "control_arc_local_velocity_parameterization",
+            "control_arc_tangent_loss_weight",
+            "control_arc_position_end_weight",
+            "control_arc_terminal_parameterization",
+            "control_arc_terminal_cross_track_emphasis",
+            "control_arc_terminal_vertical_emphasis",
             "control_terminal_position_loss_weight",
             "control_terminal_velocity_loss_weight",
             "control_terminal_position_scale_m",
@@ -919,6 +981,18 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
         ),
         "arc_vertical_velocity_scale_mps": (
             config.control_arc_vertical_velocity_scale_mps
+        ),
+        "arc_local_velocity_parameterization": (
+            config.control_arc_local_velocity_parameterization
+        ),
+        "arc_tangent_loss_weight": config.control_arc_tangent_loss_weight,
+        "arc_position_end_weight": config.control_arc_position_end_weight,
+        "arc_terminal_parameterization": config.control_arc_terminal_parameterization,
+        "arc_terminal_cross_track_emphasis": (
+            config.control_arc_terminal_cross_track_emphasis
+        ),
+        "arc_terminal_vertical_emphasis": (
+            config.control_arc_terminal_vertical_emphasis
         ),
         "terminal_position_loss_weight": config.control_terminal_position_loss_weight,
         "terminal_velocity_loss_weight": config.control_terminal_velocity_loss_weight,

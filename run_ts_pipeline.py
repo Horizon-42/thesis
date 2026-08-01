@@ -43,6 +43,10 @@ from config import (  # noqa: E402
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
     CHECKPOINT_SELECTION_COMMON_GRID_CRITERIA,
     CHECKPOINT_SELECTION_TERMINAL_STATE,
+    CONTROL_ARC_LOCAL_VELOCITY_PARAMETERIZATIONS,
+    CONTROL_ARC_LOCAL_VELOCITY_VECTOR,
+    CONTROL_ARC_TERMINAL_PARAMETERIZATIONS,
+    CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS,
     CHECKPOINT_SELECTION_METRICS,
     CHECKPOINT_SELECTION_OBJECTIVE,
     CONTROL_DYNAMICS_BACKENDS,
@@ -244,6 +248,12 @@ def _terminal_tracking_recipe_tag(
     arc_vertical_velocity_weight: float,
     arc_horizontal_velocity_scale_mps: float,
     arc_vertical_velocity_scale_mps: float,
+    arc_local_velocity: str,
+    arc_tangent_weight: float,
+    arc_position_end_weight: float,
+    arc_terminal: str,
+    arc_terminal_cross_track_emphasis: float,
+    arc_terminal_vertical_emphasis: float,
     terminal_position_weight: float,
     terminal_velocity_weight: float,
     terminal_position_scale_m: float,
@@ -266,6 +276,12 @@ def _terminal_tracking_recipe_tag(
             f"_avv{compact(arc_vertical_velocity_weight)}"
             f"_ahvs{compact(arc_horizontal_velocity_scale_mps)}mps"
             f"_avvs{compact(arc_vertical_velocity_scale_mps)}mps"
+            f"_lv{arc_local_velocity.replace('-', '_')}"
+            f"_at{compact(arc_tangent_weight)}"
+            f"_pe{compact(arc_position_end_weight)}"
+            f"_term{arc_terminal.replace('-', '_')}"
+            f"_tc{compact(arc_terminal_cross_track_emphasis)}"
+            f"_tu{compact(arc_terminal_vertical_emphasis)}"
         ),
     }[objective]
     return (
@@ -382,11 +398,17 @@ class TrainingPlan:
         control_effort_weight: float | None = None,
         control_smoothness_weight: float | None = None,
         control_dense_state_weight: float = 0.25,
-        control_geometry_weight: float = 0.25,
+        control_geometry_weight: float = 0.75,
         control_arc_horizontal_velocity_weight: float = 0.25,
         control_arc_vertical_velocity_weight: float = 0.25,
         control_arc_horizontal_velocity_scale_mps: float = 10.0,
         control_arc_vertical_velocity_scale_mps: float = 2.0,
+        control_arc_local_velocity: str = CONTROL_ARC_LOCAL_VELOCITY_VECTOR,
+        control_arc_tangent_weight: float = 0.25,
+        control_arc_position_end_weight: float = 4.0,
+        control_arc_terminal: str = CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS,
+        control_arc_terminal_cross_track_emphasis: float = 3.0,
+        control_arc_terminal_vertical_emphasis: float = 5.0,
         control_terminal_position_weight: float = 1.0,
         control_terminal_velocity_weight: float = 1.0,
         control_terminal_position_scale_m: float = 100.0,
@@ -453,6 +475,16 @@ class TrainingPlan:
         self.control_arc_vertical_velocity_scale_mps = (
             control_arc_vertical_velocity_scale_mps
         )
+        self.control_arc_local_velocity = control_arc_local_velocity
+        self.control_arc_tangent_weight = control_arc_tangent_weight
+        self.control_arc_position_end_weight = control_arc_position_end_weight
+        self.control_arc_terminal = control_arc_terminal
+        self.control_arc_terminal_cross_track_emphasis = (
+            control_arc_terminal_cross_track_emphasis
+        )
+        self.control_arc_terminal_vertical_emphasis = (
+            control_arc_terminal_vertical_emphasis
+        )
         self.control_terminal_position_weight = control_terminal_position_weight
         self.control_terminal_velocity_weight = control_terminal_velocity_weight
         self.control_terminal_position_scale_m = control_terminal_position_scale_m
@@ -500,6 +532,12 @@ class TrainingPlan:
                 control_arc_vertical_velocity_weight,
                 control_arc_horizontal_velocity_scale_mps,
                 control_arc_vertical_velocity_scale_mps,
+                control_arc_local_velocity,
+                control_arc_tangent_weight,
+                control_arc_position_end_weight,
+                control_arc_terminal,
+                control_arc_terminal_cross_track_emphasis,
+                control_arc_terminal_vertical_emphasis,
                 control_terminal_position_weight,
                 control_terminal_velocity_weight,
                 control_terminal_position_scale_m,
@@ -602,6 +640,18 @@ class TrainingPlan:
             str(self.control_arc_horizontal_velocity_scale_mps),
             "--control-arc-vertical-velocity-scale-mps",
             str(self.control_arc_vertical_velocity_scale_mps),
+            "--control-arc-local-velocity",
+            self.control_arc_local_velocity,
+            "--control-arc-tangent-weight",
+            str(self.control_arc_tangent_weight),
+            "--control-arc-position-end-weight",
+            str(self.control_arc_position_end_weight),
+            "--control-arc-terminal",
+            self.control_arc_terminal,
+            "--control-arc-terminal-cross-track-emphasis",
+            str(self.control_arc_terminal_cross_track_emphasis),
+            "--control-arc-terminal-vertical-emphasis",
+            str(self.control_arc_terminal_vertical_emphasis),
             "--control-terminal-position-weight",
             str(self.control_terminal_position_weight),
             "--control-terminal-velocity-weight",
@@ -794,6 +844,18 @@ class TrainingPlan:
             "control_arc_vertical_velocity_scale_mps": (
                 self.control_arc_vertical_velocity_scale_mps
             ),
+            "control_arc_local_velocity_parameterization": (
+                self.control_arc_local_velocity
+            ),
+            "control_arc_tangent_loss_weight": self.control_arc_tangent_weight,
+            "control_arc_position_end_weight": self.control_arc_position_end_weight,
+            "control_arc_terminal_parameterization": self.control_arc_terminal,
+            "control_arc_terminal_cross_track_emphasis": (
+                self.control_arc_terminal_cross_track_emphasis
+            ),
+            "control_arc_terminal_vertical_emphasis": (
+                self.control_arc_terminal_vertical_emphasis
+            ),
             "control_terminal_position_loss_weight": (
                 self.control_terminal_position_weight
             ),
@@ -919,6 +981,18 @@ class TrainingPlan:
             ),
             "control_arc_vertical_velocity_scale_mps": (
                 self.control_arc_vertical_velocity_scale_mps
+            ),
+            "control_arc_local_velocity_parameterization": (
+                self.control_arc_local_velocity
+            ),
+            "control_arc_tangent_loss_weight": self.control_arc_tangent_weight,
+            "control_arc_position_end_weight": self.control_arc_position_end_weight,
+            "control_arc_terminal_parameterization": self.control_arc_terminal,
+            "control_arc_terminal_cross_track_emphasis": (
+                self.control_arc_terminal_cross_track_emphasis
+            ),
+            "control_arc_terminal_vertical_emphasis": (
+                self.control_arc_terminal_vertical_emphasis
             ),
             "control_terminal_position_loss_weight": (
                 self.control_terminal_position_weight
@@ -1121,6 +1195,13 @@ class PredictionPlan:
                 f"{training.control_arc_vertical_velocity_weight:g}/"
                 f"{training.control_terminal_position_weight:g}/"
                 f"{training.control_terminal_velocity_weight:g}), "
+                f"local={training.control_arc_local_velocity}, "
+                f"tangent={training.control_arc_tangent_weight:g}, "
+                f"position-end={training.control_arc_position_end_weight:g}, "
+                f"terminal={training.control_arc_terminal}, "
+                "terminal-emphasis="
+                f"cross×{training.control_arc_terminal_cross_track_emphasis:g}/"
+                f"vertical×{training.control_arc_terminal_vertical_emphasis:g}, "
             ),
         }[training.control_state_objective]
         duration_gradient_label = (
@@ -1292,6 +1373,13 @@ def run_training(
                     f"{config.control_arc_horizontal_velocity_scale_mps:g}mps horiz, "
                     f"{config.control_arc_vertical_velocity_loss_weight:g}/"
                     f"{config.control_arc_vertical_velocity_scale_mps:g}mps vertical, "
+                    f"local={config.control_arc_local_velocity_parameterization}, "
+                    f"tangent={config.control_arc_tangent_loss_weight:g}, "
+                    f"position_end={config.control_arc_position_end_weight:g}, "
+                    f"terminal_mode={config.control_arc_terminal_parameterization}, "
+                    "terminal_emphasis="
+                    f"cross×{config.control_arc_terminal_cross_track_emphasis:g}/"
+                    f"vertical×{config.control_arc_terminal_vertical_emphasis:g}, "
                     f"position={config.control_terminal_position_loss_weight:g}/"
                     f"{config.control_terminal_position_scale_m:g}m, "
                     f"velocity={config.control_terminal_velocity_loss_weight:g}/"
@@ -1445,7 +1533,7 @@ def main() -> None:
     parser.add_argument("--control-effort-weight", type=float, default=None)
     parser.add_argument("--control-smoothness-weight", type=float, default=None)
     parser.add_argument("--control-dense-state-weight", type=float, default=0.25)
-    parser.add_argument("--control-geometry-weight", type=float, default=0.25)
+    parser.add_argument("--control-geometry-weight", type=float, default=0.75)
     parser.add_argument(
         "--control-arc-horizontal-velocity-weight", type=float, default=0.25
     )
@@ -1457,6 +1545,24 @@ def main() -> None:
     )
     parser.add_argument(
         "--control-arc-vertical-velocity-scale-mps", type=float, default=2.0
+    )
+    parser.add_argument(
+        "--control-arc-local-velocity",
+        choices=CONTROL_ARC_LOCAL_VELOCITY_PARAMETERIZATIONS,
+        default=CONTROL_ARC_LOCAL_VELOCITY_VECTOR,
+    )
+    parser.add_argument("--control-arc-tangent-weight", type=float, default=0.25)
+    parser.add_argument("--control-arc-position-end-weight", type=float, default=4.0)
+    parser.add_argument(
+        "--control-arc-terminal",
+        choices=CONTROL_ARC_TERMINAL_PARAMETERIZATIONS,
+        default=CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS,
+    )
+    parser.add_argument(
+        "--control-arc-terminal-cross-track-emphasis", type=float, default=3.0
+    )
+    parser.add_argument(
+        "--control-arc-terminal-vertical-emphasis", type=float, default=5.0
     )
     parser.add_argument("--control-terminal-position-weight", type=float, default=1.0)
     parser.add_argument("--control-terminal-velocity-weight", type=float, default=1.0)
@@ -1646,6 +1752,16 @@ def main() -> None:
             ),
             control_arc_vertical_velocity_scale_mps=(
                 args.control_arc_vertical_velocity_scale_mps
+            ),
+            control_arc_local_velocity=args.control_arc_local_velocity,
+            control_arc_tangent_weight=args.control_arc_tangent_weight,
+            control_arc_position_end_weight=args.control_arc_position_end_weight,
+            control_arc_terminal=args.control_arc_terminal,
+            control_arc_terminal_cross_track_emphasis=(
+                args.control_arc_terminal_cross_track_emphasis
+            ),
+            control_arc_terminal_vertical_emphasis=(
+                args.control_arc_terminal_vertical_emphasis
             ),
             control_terminal_position_weight=args.control_terminal_position_weight,
             control_terminal_velocity_weight=args.control_terminal_velocity_weight,

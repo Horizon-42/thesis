@@ -415,24 +415,57 @@ def test_arc_length_geometry_recipe_is_explicit_and_has_distinct_identity(
         **common,
         control_arc_horizontal_velocity_weight=0.5,
     )
+    vector_terminal = pipeline.TrainingPlan(
+        ("KRDU",), "itransformer", **common,
+        control_arc_terminal="vector-norm",
+    )
+    tangent_speed = pipeline.TrainingPlan(
+        ("KRDU",), "itransformer", **common,
+        control_arc_local_velocity="tangent-speed",
+    )
+    uniform_progress = pipeline.TrainingPlan(
+        ("KRDU",), "itransformer", **common,
+        control_arc_position_end_weight=1.0,
+    )
 
     command = initial.train_step(use_best_config=False)[1]
     config, _source = initial.resolved_train_config(use_best_config=False)
     prediction = pipeline.PredictionPlan(initial, "KRDU", ("eval",))
 
-    assert initial.train_dir != stronger_local_velocity.train_dir
-    assert command[command.index("--control-geometry-weight") + 1] == "0.25"
+    assert len({
+        initial.train_dir,
+        stronger_local_velocity.train_dir,
+        vector_terminal.train_dir,
+        tangent_speed.train_dir,
+        uniform_progress.train_dir,
+    }) == 5
+    assert command[command.index("--control-geometry-weight") + 1] == "0.75"
     assert command[
         command.index("--control-arc-horizontal-velocity-weight") + 1
     ] == "0.25"
     assert command[
         command.index("--control-arc-vertical-velocity-scale-mps") + 1
     ] == "2.0"
-    assert config.control_geometry_loss_weight == pytest.approx(0.25)
+    assert command[command.index("--control-arc-local-velocity") + 1] == (
+        "vector-components"
+    )
+    assert command[command.index("--control-arc-position-end-weight") + 1] == "4.0"
+    assert command[command.index("--control-arc-terminal") + 1] == (
+        "runway-components"
+    )
+    assert config.control_geometry_loss_weight == pytest.approx(0.75)
     assert config.control_arc_horizontal_velocity_loss_weight == pytest.approx(0.25)
     assert config.control_arc_vertical_velocity_scale_mps == pytest.approx(2.0)
+    assert config.control_arc_local_velocity_parameterization == "vector-components"
+    assert config.control_arc_position_end_weight == pytest.approx(4.0)
+    assert config.control_arc_terminal_parameterization == "runway-components"
     assert "position/local-velocity" in prediction.label
-    assert "(0.25/0.25/0.25/1/1)" in prediction.label
+    assert "(0.75/0.25/0.25/1/1)" in prediction.label
+    assert "local=vector-components" in prediction.label
+    assert "tangent=0.25" in prediction.label
+    assert "position-end=4" in prediction.label
+    assert "terminal=runway-components" in prediction.label
+    assert "terminal-emphasis=cross×3/vertical×5" in prediction.label
 
 
 def test_three_horizon_modes_use_distinct_commands_and_artifact_paths(tmp_path, monkeypatch):

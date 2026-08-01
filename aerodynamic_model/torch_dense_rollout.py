@@ -87,9 +87,17 @@ def _build_event_schedule(
         & (query_times <= total_duration.detach().unsqueeze(1) + tolerance.unsqueeze(1))
     )
     if torch.any(query_valid & ~query_in_range):
+        invalid = query_valid & ~query_in_range
+        invalid_row, invalid_column = torch.nonzero(invalid, as_tuple=True)
+        row = int(invalid_row[0].detach().cpu())
+        column = int(invalid_column[0].detach().cpu())
         raise ValueError(
             "every valid dense query timestamp must be finite, positive, and no later "
-            "than its trajectory duration"
+            "than its trajectory duration; "
+            f"first invalid query[{row},{column}]="
+            f"{float(query_times[row, column].detach().cpu()):.17g}s, "
+            f"duration={float(total_duration[row].detach().cpu()):.17g}s, "
+            f"tolerance={float(tolerance[row].detach().cpu()):.17g}s"
         )
 
     # Queries are first-class events. They need not divide the integration-step cap: adding

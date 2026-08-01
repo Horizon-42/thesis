@@ -24,6 +24,8 @@ class ArcLengthStateLossTerms:
 
     position: torch.Tensor
     horizontal_velocity_mps: torch.Tensor
+    horizontal_tangent: torch.Tensor
+    horizontal_speed_mps: torch.Tensor
     vertical_velocity_mps: torch.Tensor
     velocity_valid_points: torch.Tensor
 
@@ -185,6 +187,7 @@ def arc_length_state_loss_terms(
     normalizer: Normalizer,
     *,
     points: int,
+    position_end_weight: float = 1.0,
 ) -> ArcLengthStateLossTerms:
     """Return position and reliable local-velocity terms on one arc grid."""
 
@@ -262,12 +265,16 @@ def arc_length_state_loss_terms(
     normalized_delta = (
         predicted_position_grid - reference_position_grid
     ) / position_scale
-    position_loss = F.smooth_l1_loss(
+    position_point_loss = F.smooth_l1_loss(
         normalized_delta,
         torch.zeros_like(normalized_delta),
         reduction="none",
         beta=1.0,
-    ).mean(dim=(1, 2))
+    ).mean(dim=2)
+    progress = torch.linspace(0.0, 1.0, points, dtype=dtype, device=device)
+    progress_weight = 1.0 + (position_end_weight - 1.0) * progress
+    progress_weight = progress_weight / progress_weight.mean()
+    position_loss = (position_point_loss * progress_weight.unsqueeze(0)).mean(dim=1)
 
     predicted_velocity_grid = _interpolate_torch(
         predicted_physical[..., velocity_indices], predicted_plan
@@ -286,12 +293,29 @@ def arc_length_state_loss_terms(
     horizontal_velocity_mps = (
         torch.linalg.vector_norm(velocity_delta[..., :2], dim=-1) * valid_float
     ).sum(dim=1) / valid_count.to(dtype=dtype)
+    predicted_horizontal = predicted_velocity_grid[..., :2]
+    reference_horizontal = reference_velocity_grid[..., :2]
+    tangent_error = 1.0 - F.cosine_similarity(
+        predicted_horizontal, reference_horizontal, dim=-1, eps=1e-8
+    )
+    horizontal_tangent = (tangent_error * valid_float).sum(dim=1) / valid_count.to(
+        dtype=dtype
+    )
+    horizontal_speed_mps = (
+        torch.abs(
+            torch.linalg.vector_norm(predicted_horizontal, dim=-1)
+            - torch.linalg.vector_norm(reference_horizontal, dim=-1)
+        )
+        * valid_float
+    ).sum(dim=1) / valid_count.to(dtype=dtype)
     vertical_velocity_mps = (
         torch.abs(velocity_delta[..., 2]) * valid_float
     ).sum(dim=1) / valid_count.to(dtype=dtype)
     return ArcLengthStateLossTerms(
         position=position_loss,
         horizontal_velocity_mps=horizontal_velocity_mps,
+        horizontal_tangent=horizontal_tangent,
+        horizontal_speed_mps=horizontal_speed_mps,
         vertical_velocity_mps=vertical_velocity_mps,
         velocity_valid_points=valid_count,
     )
@@ -303,6 +327,7 @@ def arc_length_geometry_metrics(
     normalizer: Normalizer,
     *,
     points: int,
+    position_end_weight: float = 1.0,
 ) -> dict[str, float]:
     """Physical and normalized position metrics for one ordered curve pair."""
 
@@ -318,6 +343,11 @@ def arc_length_geometry_metrics(
     )
     absolute = np.abs(normalized)
     smooth_l1 = np.where(absolute < 1.0, 0.5 * absolute**2, absolute - 0.5)
+    unweighted_loss = float(smooth_l1.mean())
+    progress = np.linspace(0.0, 1.0, points, dtype=np.float64)
+    progress_weight = 1.0 + (position_end_weight - 1.0) * progress
+    progress_weight /= progress_weight.mean()
+    weighted_loss = float((smooth_l1.mean(axis=1) * progress_weight).mean())
     horizontal = np.linalg.norm(delta[:, :2], axis=1)
     vertical = np.abs(delta[:, 2])
     distance = np.linalg.norm(delta, axis=1)
@@ -340,7 +370,8 @@ def arc_length_geometry_metrics(
         - np.asarray(reference_positions_m)[-1]
     )
     return {
-        "loss": float(smooth_l1.mean()),
+        "loss": weighted_loss,
+        "unweighted_loss": unweighted_loss,
         "distance_mean_m": float(distance.mean()),
         "predicted_horizontal_length_m": predicted_length_m,
         "reference_horizontal_length_m": reference_length_m,
@@ -374,10 +405,27 @@ def arc_length_velocity_metrics(
         raise ValueError("arc-length velocity metrics have no reliable reference points")
     delta = predicted_grid[valid] - reference_grid[valid]
     horizontal = np.linalg.norm(delta[:, :2], axis=1)
+    predicted_horizontal = predicted_grid[valid, :2]
+    reference_horizontal = reference_grid[valid, :2]
+    predicted_speed = np.linalg.norm(predicted_horizontal, axis=1)
+    reference_speed = np.linalg.norm(reference_horizontal, axis=1)
+    denominator = np.maximum(
+        predicted_speed * reference_speed, np.finfo(np.float64).eps
+    )
+    tangent = 1.0 - np.clip(
+        np.sum(predicted_horizontal * reference_horizontal, axis=1) / denominator,
+        -1.0,
+        1.0,
+    )
+    speed = np.abs(predicted_speed - reference_speed)
     vertical = np.abs(delta[:, 2])
     return {
         "horizontal_velocity_mae_mps": float(horizontal.mean()),
         "horizontal_velocity_p95_mps": float(np.percentile(horizontal, 95)),
+        "horizontal_tangent_mean": float(tangent.mean()),
+        "horizontal_tangent_p95": float(np.percentile(tangent, 95)),
+        "horizontal_speed_mae_mps": float(speed.mean()),
+        "horizontal_speed_p95_mps": float(np.percentile(speed, 95)),
         "vertical_velocity_mae_mps": float(vertical.mean()),
         "vertical_velocity_p95_mps": float(np.percentile(vertical, 95)),
         "velocity_valid_points": int(valid.sum()),

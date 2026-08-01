@@ -20,6 +20,7 @@ from config import HORIZON_NORMALIZED, TSConfig
 from control_loss_components import last_reliable_terminal_velocity_target
 from dataset import FlightSeries, Normalizer
 from fixed_dt_supervision import build_fixed_dt_supervision
+from terminal_state_loss import terminal_state_metrics_numpy
 from time_grids import output_time_grid
 
 
@@ -118,6 +119,7 @@ def fixed_anchor_arc_length_geometry_metrics(
     count = len(series)
     per_flight: list[dict[str, float]] = []
     per_flight_velocity: list[dict[str, float]] = []
+    per_flight_terminal: list[dict[str, float]] = []
     terminal_velocity_error = np.empty(count, dtype=np.float64)
     anchor_index = config.seq_len - 1
     for row, item in enumerate(series):
@@ -149,6 +151,7 @@ def fixed_anchor_arc_length_geometry_metrics(
                 reference_positions,
                 normalizer,
                 points=points,
+                position_end_weight=config.control_arc_position_end_weight,
             )
         )
         reference_velocity_valid = np.concatenate((
@@ -170,6 +173,19 @@ def fixed_anchor_arc_length_geometry_metrics(
                 points=points,
             )
         )
+        per_flight_terminal.append(
+            terminal_state_metrics_numpy(
+                predicted_values[row, -1],
+                reference_values[-1],
+                terminal_velocity_target[row],
+                float(item.scenario.target.psi),
+                coordinate_frame=config.coordinate_frame,
+                cross_track_emphasis=(
+                    config.control_arc_terminal_cross_track_emphasis
+                ),
+                vertical_emphasis=config.control_arc_terminal_vertical_emphasis,
+            )
+        )
         terminal_velocity_error[row] = np.linalg.norm(
             predicted_values[row, -1, list(VELOCITY_IDX)]
             - terminal_velocity_target[row]
@@ -180,6 +196,9 @@ def fixed_anchor_arc_length_geometry_metrics(
         "arc_length_points": points,
         "arc_length_geometry_loss": float(
             np.mean([block["loss"] for block in per_flight])
+        ),
+        "arc_length_geometry_unweighted_loss": float(
+            np.mean([block["unweighted_loss"] for block in per_flight])
         ),
         "arc_length_distance_mean_m": float(
             np.mean([block["distance_mean_m"] for block in per_flight])
@@ -201,6 +220,18 @@ def fixed_anchor_arc_length_geometry_metrics(
         ])),
         "arc_length_horizontal_velocity_p95_mps": float(np.mean([
             block["horizontal_velocity_p95_mps"] for block in per_flight_velocity
+        ])),
+        "arc_length_horizontal_tangent_mean": float(np.mean([
+            block["horizontal_tangent_mean"] for block in per_flight_velocity
+        ])),
+        "arc_length_horizontal_tangent_p95": float(np.mean([
+            block["horizontal_tangent_p95"] for block in per_flight_velocity
+        ])),
+        "arc_length_horizontal_speed_mae_mps": float(np.mean([
+            block["horizontal_speed_mae_mps"] for block in per_flight_velocity
+        ])),
+        "arc_length_horizontal_speed_p95_mps": float(np.mean([
+            block["horizontal_speed_p95_mps"] for block in per_flight_velocity
         ])),
         "arc_length_vertical_velocity_mae_mps": float(np.mean([
             block["vertical_velocity_mae_mps"] for block in per_flight_velocity
@@ -229,6 +260,12 @@ def fixed_anchor_arc_length_geometry_metrics(
         "arc_length_terminal_velocity_error_mps": float(
             terminal_velocity_error.mean()
         ),
+        "arc_length_terminal_position_runway_components_m": float(np.mean([
+            block["position_runway_components_m"] for block in per_flight_terminal
+        ])),
+        "arc_length_terminal_velocity_runway_components_mps": float(np.mean([
+            block["velocity_runway_components_mps"] for block in per_flight_terminal
+        ])),
         "arc_length_geometry_loss_per_flight": np.asarray(
             [block["loss"] for block in per_flight], dtype=np.float64
         ),
@@ -258,6 +295,17 @@ def fixed_anchor_arc_length_geometry_metrics(
         ),
         "arc_length_terminal_velocity_error_per_flight_mps": terminal_velocity_error,
     }
+    for key in (
+        "along_position_abs_m",
+        "cross_position_abs_m",
+        "vertical_position_abs_m",
+        "along_velocity_abs_mps",
+        "cross_velocity_abs_mps",
+        "vertical_velocity_abs_mps",
+    ):
+        result[f"arc_length_terminal_{key}"] = float(np.mean([
+            block[key] for block in per_flight_terminal
+        ]))
     return result
 
 

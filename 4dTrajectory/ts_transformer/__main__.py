@@ -56,6 +56,8 @@ from config import (  # noqa: E402
     AIRCRAFT_FILTERS,
     COORDINATE_FRAMES,
     CHECKPOINT_SELECTION_METRICS,
+    CONTROL_ARC_LOCAL_VELOCITY_PARAMETERIZATIONS,
+    CONTROL_ARC_TERMINAL_PARAMETERIZATIONS,
     CONTROL_DYNAMICS_BACKENDS,
     CONTROL_DURATION_PARAMETERIZATIONS,
     CONTROL_GRADIENT_CLIP_POLICIES,
@@ -222,6 +224,24 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--control-arc-vertical-velocity-scale-mps", type=float, default=None
+    )
+    parser.add_argument(
+        "--control-arc-local-velocity",
+        choices=CONTROL_ARC_LOCAL_VELOCITY_PARAMETERIZATIONS,
+        default=None,
+    )
+    parser.add_argument("--control-arc-tangent-weight", type=float, default=None)
+    parser.add_argument("--control-arc-position-end-weight", type=float, default=None)
+    parser.add_argument(
+        "--control-arc-terminal",
+        choices=CONTROL_ARC_TERMINAL_PARAMETERIZATIONS,
+        default=None,
+    )
+    parser.add_argument(
+        "--control-arc-terminal-cross-track-emphasis", type=float, default=None
+    )
+    parser.add_argument(
+        "--control-arc-terminal-vertical-emphasis", type=float, default=None
     )
     parser.add_argument("--control-terminal-position-weight", type=float, default=None)
     parser.add_argument("--control-terminal-velocity-weight", type=float, default=None)
@@ -452,6 +472,21 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         (
             "control_arc_vertical_velocity_scale_mps",
             args.control_arc_vertical_velocity_scale_mps,
+        ),
+        (
+            "control_arc_local_velocity_parameterization",
+            args.control_arc_local_velocity,
+        ),
+        ("control_arc_tangent_loss_weight", args.control_arc_tangent_weight),
+        ("control_arc_position_end_weight", args.control_arc_position_end_weight),
+        ("control_arc_terminal_parameterization", args.control_arc_terminal),
+        (
+            "control_arc_terminal_cross_track_emphasis",
+            args.control_arc_terminal_cross_track_emphasis,
+        ),
+        (
+            "control_arc_terminal_vertical_emphasis",
+            args.control_arc_terminal_vertical_emphasis,
         ),
         (
             "control_terminal_position_loss_weight",

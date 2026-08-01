@@ -143,6 +143,43 @@ def _stage_terminal_target(
     )
 
 
+def close_duration_prefix(
+    durations: torch.Tensor,
+    segment_valid: torch.Tensor,
+    total_duration: torch.Tensor,
+) -> torch.Tensor:
+    """Close the final valid segment on the caller's exact physical-time clock."""
+
+    if durations.ndim != 2 or segment_valid.shape != durations.shape:
+        raise ValueError("durations and segment_valid must be matching [batch, segment] tensors")
+    if total_duration.shape != durations.shape[:1]:
+        raise ValueError("total_duration must contain one value per trajectory")
+    if not torch.all(segment_valid.any(dim=1)):
+        raise ValueError("every trajectory must contain at least one valid segment")
+    if torch.any(segment_valid[:, 1:] & ~segment_valid[:, :-1]):
+        raise ValueError("valid control segments must form a prefix")
+
+    durations = torch.where(segment_valid, durations, torch.zeros_like(durations))
+    last_valid = segment_valid.sum(dim=1, dtype=torch.long) - 1
+    cumulative = durations.cumsum(dim=1)
+    previous_index = (last_valid - 1).clamp(min=0)
+    previous_total = torch.gather(
+        cumulative, 1, previous_index.unsqueeze(1)
+    ).squeeze(1)
+    previous_total = torch.where(
+        last_valid > 0, previous_total, torch.zeros_like(previous_total)
+    )
+    corrected_last = total_duration - previous_total
+    closed = durations.scatter(
+        1, last_valid.unsqueeze(1), corrected_last.unsqueeze(1)
+    )
+    if not torch.allclose(
+        closed.sum(dim=1), total_duration, rtol=1e-6, atol=1e-6
+    ):
+        raise RuntimeError("control durations do not sum to the physical-time horizon")
+    return closed
+
+
 def build_control_training_stage_view(
     prediction: ControlPrediction,
     supervision: FixedDTControlSupervision,
@@ -152,8 +189,20 @@ def build_control_training_stage_view(
 ) -> ControlTrainingStageView:
     """Build a batched exact-prefix view without changing model output dimensions."""
     if stage.is_full_horizon:
+        dtype = supervision.query_offsets_s.dtype
+        device = prediction.segment_durations.device
+        durations = prediction.segment_durations.to(dtype=dtype, device=device)
+        segment_valid = torch.ones_like(durations, dtype=torch.bool)
+        total_duration = prediction.final_time_s.to(dtype=dtype, device=device)
+        durations = close_duration_prefix(
+            durations, segment_valid, total_duration
+        )
         return ControlTrainingStageView(
-            prediction=prediction,
+            prediction=ControlPrediction(
+                controls=prediction.controls,
+                segment_durations=durations,
+                final_time_s=prediction.final_time_s,
+            ),
             supervision=supervision,
             terminal_target=full_terminal_target,
             segment_valid=None,
@@ -189,23 +238,9 @@ def build_control_training_stage_view(
     # a fixed-dt query, that can leave the query a few microseconds beyond the rollout.
     # Recompute the last valid duration from the preceding float64 cumulative boundary so
     # the dense scheduler sees the intended effective horizon exactly.
-    last_valid = segment_valid.sum(dim=1, dtype=torch.long) - 1
-    cumulative = stage_durations.cumsum(dim=1)
-    previous_index = (last_valid - 1).clamp(min=0)
-    previous_total = torch.gather(
-        cumulative, 1, previous_index.unsqueeze(1)
-    ).squeeze(1)
-    previous_total = torch.where(
-        last_valid > 0, previous_total, torch.zeros_like(previous_total)
+    stage_durations = close_duration_prefix(
+        stage_durations, segment_valid, effective_horizon
     )
-    corrected_last = effective_horizon - previous_total
-    stage_durations = stage_durations.scatter(
-        1, last_valid.unsqueeze(1), corrected_last.unsqueeze(1)
-    )
-    if not torch.allclose(
-        stage_durations.sum(dim=1), effective_horizon, rtol=1e-6, atol=1e-6
-    ):
-        raise RuntimeError("curriculum durations do not sum to the effective horizon")
 
     stage_prediction = ControlPrediction(
         controls=prediction.controls,

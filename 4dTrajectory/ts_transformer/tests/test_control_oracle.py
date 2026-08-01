@@ -339,6 +339,9 @@ def test_oracle_position_objective_excludes_velocity_channels():
             [[[10.0, 20.0, 30.0, 999.0, 999.0, 999.0]]],
             dtype=torch.float64,
         ),
+        physical_segment_durations_s=torch.tensor(
+            [[2.0]], dtype=torch.float64
+        ),
     )
     supervision = FixedDTControlSupervision(
         query_offsets_s=torch.tensor([[2.0]], dtype=torch.float64),

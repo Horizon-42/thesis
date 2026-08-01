@@ -357,6 +357,10 @@ def dynamics_arrays(series: FlightSeries, anchor: int) -> dict[str, np.ndarray]:
             [series.frame.lat0, series.frame.lon0, series.frame.alt0, heading],
             dtype=np.float64,
         ),
+        # The rollout frame rotation and the runway heading coincide only for the
+        # runway-aligned coordinate frame.  Keep the terminal-loss reference separate
+        # so ENU rollouts are decomposed along/across the actual runway, not east/north.
+        "runway_heading_rad": np.array(float(scenario.target.psi), dtype=np.float64),
     }
 
 

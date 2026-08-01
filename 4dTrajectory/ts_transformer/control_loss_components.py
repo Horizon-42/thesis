@@ -16,6 +16,10 @@ import torch
 from arc_length_geometry import arc_length_state_loss_terms
 from channels import POSITION_IDX, VELOCITY_IDX
 from config import (
+    CONTROL_ARC_LOCAL_VELOCITY_TANGENT_SPEED,
+    CONTROL_ARC_LOCAL_VELOCITY_VECTOR,
+    CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS,
+    CONTROL_ARC_TERMINAL_VECTOR_NORM,
     CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
@@ -28,6 +32,11 @@ from physical_criteria import (
     fixed_dt_position_ade_m,
     physical_criteria_loss,
     terminal_position_error_m,
+)
+from terminal_state_loss import (
+    TerminalStateErrors,
+    last_reliable_terminal_velocity_target,
+    terminal_state_errors,
 )
 
 
@@ -47,40 +56,6 @@ class ControlTrackingLossTerms:
     state: torch.Tensor
     terminal_position: torch.Tensor
     extras: dict[str, torch.Tensor] = field(default_factory=dict)
-
-
-def last_reliable_terminal_velocity_target(
-    normalized_anchor_state: torch.Tensor,
-    supervision: FixedDTControlSupervision,
-) -> torch.Tensor:
-    """Return the last measured velocity target, never a fitted-tail placeholder.
-
-    Fitted approach rows keep velocity-shaped placeholders but give them zero weights.  A
-    flight whose fixed-dt future contains no measured velocity row explicitly falls back to
-    its observed anchor velocity, which is the last reliable measurement available to the
-    deployable model.
-    """
-
-    indices = list(VELOCITY_IDX)
-    weights = supervision.weights[..., indices].to(
-        device=normalized_anchor_state.device
-    )
-    row_valid = supervision.valid.to(device=weights.device) & torch.all(
-        weights > 0.0, dim=-1
-    )
-    row_numbers = torch.arange(
-        row_valid.shape[1], device=row_valid.device, dtype=torch.long
-    ).unsqueeze(0).expand_as(row_valid)
-    last = torch.where(row_valid, row_numbers, -torch.ones_like(row_numbers)).amax(dim=1)
-    safe_last = last.clamp(min=0)
-    states = supervision.states.to(
-        dtype=normalized_anchor_state.dtype,
-        device=normalized_anchor_state.device,
-    )
-    rows = torch.arange(len(states), device=states.device)
-    future_target = states[rows, safe_last][:, indices]
-    anchor_target = normalized_anchor_state[:, indices]
-    return torch.where((last >= 0).unsqueeze(1), future_target, anchor_target)
 
 
 def terminal_velocity_error_mps(
@@ -128,6 +103,7 @@ TrackingObjective = Callable[
         TSConfig,
         Normalizer,
         FixedDTControlSupervision | None,
+        torch.Tensor,
     ],
     ControlTrackingLossTerms,
 ]
@@ -140,8 +116,9 @@ def _normalized_mse_objective(
     config: TSConfig,
     normalizer: Normalizer,
     dense_supervision: FixedDTControlSupervision | None,
+    runway_heading_rad: torch.Tensor,
 ) -> ControlTrackingLossTerms:
-    del normalized_anchor_state, normalizer, dense_supervision
+    del normalized_anchor_state, normalizer, dense_supervision, runway_heading_rad
     terminal = config.terminal_loss_weight * normalized_terminal_position_mse(
         result.normalized_segment_end_states, terminal_target
     )
@@ -155,8 +132,9 @@ def _physical_criteria_objective(
     config: TSConfig,
     normalizer: Normalizer,
     dense_supervision: FixedDTControlSupervision | None,
+    runway_heading_rad: torch.Tensor,
 ) -> ControlTrackingLossTerms:
-    del normalized_anchor_state, config
+    del normalized_anchor_state, config, runway_heading_rad
     if result.physical_query_states is None or dense_supervision is None:
         raise ValueError("physical-criteria requires fixed-dt control supervision")
     ade_m = fixed_dt_position_ade_m(
@@ -178,7 +156,9 @@ def _terminal_state_objective(
     config: TSConfig,
     normalizer: Normalizer,
     dense_supervision: FixedDTControlSupervision | None,
+    runway_heading_rad: torch.Tensor,
 ) -> ControlTrackingLossTerms:
+    del runway_heading_rad
     if dense_supervision is None:
         raise ValueError("terminal-state requires fixed-dt control supervision")
     terminal_position_m = terminal_position_error_m(
@@ -207,6 +187,64 @@ def _terminal_state_objective(
     )
 
 
+def _vector_arc_velocity_terms(
+    arc,
+    config: TSConfig,
+) -> dict[str, torch.Tensor]:
+    return {
+        "arc_horizontal_velocity": (
+            config.control_arc_horizontal_velocity_loss_weight
+            * arc.horizontal_velocity_mps
+            / config.control_arc_horizontal_velocity_scale_mps
+        ),
+        "arc_vertical_velocity": (
+            config.control_arc_vertical_velocity_loss_weight
+            * arc.vertical_velocity_mps
+            / config.control_arc_vertical_velocity_scale_mps
+        ),
+    }
+
+
+def _tangent_speed_arc_velocity_terms(
+    arc,
+    config: TSConfig,
+) -> dict[str, torch.Tensor]:
+    return {
+        "arc_horizontal_tangent": (
+            config.control_arc_tangent_loss_weight * arc.horizontal_tangent
+        ),
+        "arc_horizontal_speed": (
+            config.control_arc_horizontal_velocity_loss_weight
+            * arc.horizontal_speed_mps
+            / config.control_arc_horizontal_velocity_scale_mps
+        ),
+        "arc_vertical_velocity": (
+            config.control_arc_vertical_velocity_loss_weight
+            * arc.vertical_velocity_mps
+            / config.control_arc_vertical_velocity_scale_mps
+        ),
+    }
+
+
+_ARC_VELOCITY_TERMS = {
+    CONTROL_ARC_LOCAL_VELOCITY_VECTOR: _vector_arc_velocity_terms,
+    CONTROL_ARC_LOCAL_VELOCITY_TANGENT_SPEED: _tangent_speed_arc_velocity_terms,
+}
+
+_TERMINAL_POSITION_ERRORS: dict[str, Callable[[TerminalStateErrors], torch.Tensor]] = {
+    CONTROL_ARC_TERMINAL_VECTOR_NORM: lambda errors: errors.position_vector_m,
+    CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS: (
+        lambda errors: errors.position_runway_components_m
+    ),
+}
+_TERMINAL_VELOCITY_ERRORS: dict[str, Callable[[TerminalStateErrors], torch.Tensor]] = {
+    CONTROL_ARC_TERMINAL_VECTOR_NORM: lambda errors: errors.velocity_vector_mps,
+    CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS: (
+        lambda errors: errors.velocity_runway_components_mps
+    ),
+}
+
+
 def _arc_length_geometry_objective(
     result: ControlStateLossResult,
     normalized_anchor_state: torch.Tensor,
@@ -214,6 +252,7 @@ def _arc_length_geometry_objective(
     config: TSConfig,
     normalizer: Normalizer,
     dense_supervision: FixedDTControlSupervision | None,
+    runway_heading_rad: torch.Tensor,
 ) -> ControlTrackingLossTerms:
     if dense_supervision is None:
         raise ValueError("arc-length-geometry requires fixed-dt control supervision")
@@ -224,16 +263,28 @@ def _arc_length_geometry_objective(
         dense_supervision,
         normalizer,
         points=config.n_segments,
+        position_end_weight=config.control_arc_position_end_weight,
     )
-    terminal_position_m = terminal_position_error_m(
-        result.normalized_segment_end_states, terminal_target, normalizer
-    )
-    terminal_velocity_mps = terminal_velocity_error_mps(
+    terminal = terminal_state_errors(
         result.normalized_segment_end_states,
+        terminal_target,
         normalized_anchor_state,
         dense_supervision,
         normalizer,
+        runway_heading_rad,
+        coordinate_frame=config.coordinate_frame,
+        cross_track_emphasis=config.control_arc_terminal_cross_track_emphasis,
+        vertical_emphasis=config.control_arc_terminal_vertical_emphasis,
     )
+    terminal_position_m = _TERMINAL_POSITION_ERRORS[
+        config.control_arc_terminal_parameterization
+    ](terminal)
+    terminal_velocity_mps = _TERMINAL_VELOCITY_ERRORS[
+        config.control_arc_terminal_parameterization
+    ](terminal)
+    velocity_terms = _ARC_VELOCITY_TERMS[
+        config.control_arc_local_velocity_parameterization
+    ](arc, config)
     return ControlTrackingLossTerms(
         state=config.control_geometry_loss_weight * arc.position,
         terminal_position=(
@@ -247,16 +298,7 @@ def _arc_length_geometry_objective(
                 * terminal_velocity_mps
                 / config.control_terminal_velocity_scale_mps
             ),
-            "arc_horizontal_velocity": (
-                config.control_arc_horizontal_velocity_loss_weight
-                * arc.horizontal_velocity_mps
-                / config.control_arc_horizontal_velocity_scale_mps
-            ),
-            "arc_vertical_velocity": (
-                config.control_arc_vertical_velocity_loss_weight
-                * arc.vertical_velocity_mps
-                / config.control_arc_vertical_velocity_scale_mps
-            ),
+            **velocity_terms,
         },
     )
 
@@ -276,6 +318,7 @@ def control_tracking_loss_terms(
     config: TSConfig,
     normalizer: Normalizer,
     dense_supervision: FixedDTControlSupervision | None,
+    runway_heading_rad: torch.Tensor,
 ) -> ControlTrackingLossTerms:
     """Compose the configured tracking recipe from independently testable terms."""
 
@@ -286,4 +329,5 @@ def control_tracking_loss_terms(
         config,
         normalizer,
         dense_supervision,
+        runway_heading_rad,
     )
