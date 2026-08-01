@@ -25,6 +25,8 @@ import torch  # noqa: E402
 import run_ts_pipeline as pipeline  # noqa: E402
 from channels import POSITION_IDX  # noqa: E402
 from config import (  # noqa: E402
+    CONTROL_DYNAMICS_BACKENDS,
+    CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DURATION_FACTORIZED,
     CONTROL_DURATION_PARAMETERIZATIONS,
     CONTROL_STATE_CLOCK_OBSERVED,
@@ -161,6 +163,7 @@ def _write_report(output_dir: Path, result: dict[str, object]) -> None:
         "# Fixed-dt control single-flight overfit\n\n"
         "This is a train-only memorization diagnostic; no outer-test trajectory was opened.\n\n"
         f"- Flight: `{result['flight']['dataset_id']}`\n"
+        f"- Dynamics backend: `{result['config']['control_dynamics_backend']}`\n"
         f"- Best epoch: {loss['best_epoch']} / {loss['epochs_run']}\n"
         f"- Replay loss: {loss['first_replay_loss']:.8g} → "
         f"{loss['best_replay_loss']:.8g}\n"
@@ -187,6 +190,11 @@ def main(argv: list[str] | None = None) -> int:
         choices=CONTROL_DURATION_PARAMETERIZATIONS,
         default=CONTROL_DURATION_FACTORIZED,
     )
+    parser.add_argument(
+        "--control-dynamics-backend",
+        choices=CONTROL_DYNAMICS_BACKENDS,
+        default=CONTROL_DYNAMICS_REANCHORED_RK4,
+    )
     parser.add_argument("--control-effort-weight", type=float, default=0.0)
     parser.add_argument("--control-smoothness-weight", type=float, default=0.0)
     parser.add_argument("--device", default="auto")
@@ -207,6 +215,7 @@ def main(argv: list[str] | None = None) -> int:
     config = TSConfig(
         model="itransformer",
         prediction_output=PREDICTION_CONTROL,
+        control_dynamics_backend=args.control_dynamics_backend,
         control_duration_parameterization=args.duration_parameterization,
         control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
         control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,

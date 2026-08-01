@@ -112,3 +112,49 @@ control bounds、piecewise-constant N=64 表示和六通道监督。自由 state
 证明同一轨迹在该动力学可行域内。因此当前最重要的下一项诊断不是立即做多航迹正式训练，而是
 直接优化单航迹 control/duration tensor（绕过 Transformer）得到动力学 oracle 下界；若 oracle
 仍为公里级，应先处理 reference 动力学一致性或提高 control 时间分辨率。
+
+## Transport chart-velocity 同航迹对照（2026-08-01）
+
+为单独检验新动力学是否改变模型容量上限，复用完全相同的 outer-train 航迹、模型、损失、
+`N=64`、随机种子和优化超参数，仅把动力学后端从 `reanchored-rk4` 切换为
+`transport-chart-velocity`。本次没有加入无量纲化，也没有打开 validation 或 outer-test 航迹。
+
+命令：
+
+```bash
+conda run -n aeroviz python run_ts_control_fixed_dt_overfit.py \
+  --airport KSJC \
+  --flight-id KSJC:ASA956_30L_a1f7fb_20260719T014743Z \
+  --epochs 1000 --patience 300 --lr-plateau-patience 150 \
+  --learning-rate 1e-4 --n-segments 64 \
+  --control-dynamics-backend transport-chart-velocity \
+  --device cuda \
+  --output-dir \
+    4dTrajectory/outputs/KSJC/ts_control_fixed_dt_ASA956_transport_chart_velocity_single_flight_overfit_1000
+```
+
+训练在 epoch 617 early-stop，最佳 checkpoint 位于 epoch 317。与上述同航迹 RK4 baseline
+相比：
+
+| 指标 | reanchored RK4 | transport chart-velocity | 相对变化 |
+|---|---:|---:|---:|
+| best replay loss | 0.18313 | 0.16738 | -8.60% |
+| fixed-2s normalized state loss | 0.17366 | 0.15860 | -8.67% |
+| fixed-2s dense ADE | 1849.4 m | 1764.6 m | -4.59% |
+| fixed-2s 最后完整 dt 误差 | 7087.5 m | 6679.5 m | -5.76% |
+| 真实终点 3D 误差 | 7131.0 m | 6714.1 m | -5.85% |
+| predicted-clock common-grid ADE | 1896.3 m | 1808.5 m | -4.63% |
+| predicted-clock common-grid FDE | 7130.8 m | 6714.1 m | -5.84% |
+| predicted-clock native endpoint ADE | 1833.2 m | 1664.2 m | -9.22% |
+
+duration 仍接近均匀分配：64 段 fraction 范围为 `0.01315–0.01996`，entropy 为
+`4.14633`（均匀上限约 `4.15888`）；总时长误差为 0。因此改善不是由 duration lock 或
+总时长偏差造成的。
+
+结论：新动力学把这次同航迹实验的**经验拟合上限小幅提高**，说明它不是完全等价的数值替换，
+但没有带来数量级变化。ADE 仍为 1.76 km、终点误差仍为 6.71 km，远未达到“正确降落”；
+所以它没有消除当前主要容量/可优化性瓶颈。该结论仅针对同一 seed 的一次受 early stopping
+约束的训练结果，不把它表述为数学上的全局最优上限。
+
+完整 JSON：
+`4dTrajectory/outputs/KSJC/ts_control_fixed_dt_ASA956_transport_chart_velocity_single_flight_overfit_1000/overfit_result.json`。
