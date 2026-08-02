@@ -64,6 +64,19 @@ def _flight_keys(payload: dict[str, Any]) -> list[str]:
     return keys
 
 
+def _require_test_releasable(checkpoint_payload: dict[str, Any]) -> None:
+    data_selection = checkpoint_payload.get("data_selection")
+    if (
+        isinstance(data_selection, dict)
+        and data_selection.get("development_cohort") is not None
+    ):
+        raise TestReleaseError(
+            "checkpoint was trained on a development-only cohort with no outer-test "
+            "selection policy; retrain without --development-cohort before final-test "
+            "release"
+        )
+
+
 def _write_atomic(path: Path, value: dict[str, Any]) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(value, indent=2), encoding="utf-8")
@@ -126,6 +139,7 @@ def create_test_release(
             "checkpoint predates the sealed-test protocol; retrain it before claiming a "
             "new blind test release"
         )
+    _require_test_releasable(checkpoint_payload)
     try:
         require_matching_data_provenance(
             checkpoint_payload, current_provenance, allow_subset=False
@@ -166,6 +180,7 @@ def begin_test_evaluation(
 ) -> str:
     """Irreversibly claim test flights before loading or predicting them."""
     checkpoint_path = Path(checkpoint).resolve()
+    _require_test_releasable(checkpoint_payload)
     try:
         require_matching_data_provenance(
             checkpoint_payload, current_provenance, allow_subset=True

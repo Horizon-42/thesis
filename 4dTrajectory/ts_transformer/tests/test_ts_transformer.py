@@ -114,6 +114,7 @@ from dataset import (  # noqa: E402
     cross_validation_folds, require_matching_data_provenance, split_by_flight,
     split_name_for_dataset_id, window_anchors,
 )
+from development_cohorts import DevelopmentCohort  # noqa: E402
 from evaluation.metrics import evaluate_batch  # noqa: E402
 from evaluation.records import load_records, record_from_dict  # noqa: E402
 from export import (  # noqa: E402
@@ -255,6 +256,101 @@ def test_legacy_checkpoint_cannot_be_released_as_a_fresh_blind_test(tmp_path):
 
     with pytest.raises(evaluation_protocol.TestReleaseError, match="predates"):
         evaluation_protocol.create_test_release(checkpoint, payload, provenance)
+
+
+def test_development_cohort_checkpoint_cannot_be_frozen_for_test(tmp_path):
+    checkpoint = tmp_path / "checkpoint.pt"
+    checkpoint.write_bytes(b"development-only checkpoint")
+    provenance = _fake_data_provenance()
+    payload = {
+        evaluation_protocol.TEST_RELEASE_PROTOCOL_FIELD:
+            evaluation_protocol.TEST_RELEASE_SCHEMA,
+        "data_provenance": provenance,
+        "data_selection": {
+            "development_cohort": {
+                "schema_version": "ts-development-cohort-v1",
+                "name": "KRDU-05L-cluster-0",
+            },
+        },
+        "split": {"test": ["KRDU:flight-1"]},
+    }
+
+    with pytest.raises(
+        evaluation_protocol.TestReleaseError, match="development-only cohort"
+    ):
+        evaluation_protocol.create_test_release(checkpoint, payload, provenance)
+
+
+def _run_development_cohort_train_cli(
+    monkeypatch, tmp_path, *, built_ids
+):
+    cohort = DevelopmentCohort(
+        name="KRDU-05L-cluster-0",
+        train_flight_ids=("KRDU:train",),
+        val_flight_ids=("KRDU:val",),
+        selection={"kind": "approach-cluster"},
+    )
+    outer_splits = {
+        "train": ["KRDU:train"],
+        "val": ["KRDU:val"],
+        "test": ["KRDU:test"],
+    }
+    captured = {}
+    monkeypatch.setattr(ts_cli, "load_development_cohort", lambda _path: cohort)
+    monkeypatch.setattr(
+        ts_cli, "arrival_data_provenance", lambda _data: _fake_data_provenance()
+    )
+    monkeypatch.setattr(
+        ts_cli, "flight_keys_by_split", lambda _provenance, _config: outer_splits
+    )
+    monkeypatch.setattr(
+        ts_cli, "load_flight_dicts", lambda _data, include_flight_keys: [{}]
+    )
+    monkeypatch.setattr(
+        ts_cli,
+        "_build_series_or_exit",
+        lambda *_args: (
+            [SimpleNamespace(dataset_id=dataset_id) for dataset_id in built_ids],
+            SimpleNamespace(to_dict=lambda: {"built": len(built_ids)}),
+        ),
+    )
+    monkeypatch.setattr(ts_cli, "data_selection_audit", lambda *_args: {})
+    monkeypatch.setattr(ts_cli, "development_cohort_audit", lambda *_args: {})
+
+    def capture_train(_series, _config, **kwargs):
+        captured.update(kwargs)
+        return {}
+
+    monkeypatch.setattr(ts_cli, "train", capture_train)
+    result = ts_cli.main([
+        "train",
+        "--data", str(tmp_path / "manifest.json"),
+        "--output-dir", str(tmp_path / "run"),
+        "--development-cohort", str(tmp_path / "cohort.json"),
+    ])
+    return result, captured
+
+
+def test_development_cohort_checkpoint_has_no_outer_test_roster(
+    monkeypatch, tmp_path
+):
+    result, captured = _run_development_cohort_train_cli(
+        monkeypatch,
+        tmp_path,
+        built_ids=("KRDU:train", "KRDU:val"),
+    )
+
+    assert result == 0
+    assert captured["reserved_test_keys"] == []
+
+
+def test_development_cohort_rejects_incomplete_rebuild(monkeypatch, tmp_path):
+    with pytest.raises(SystemExit):
+        _run_development_cohort_train_cli(
+            monkeypatch,
+            tmp_path,
+            built_ids=("KRDU:train",),
+        )
 
 
 def test_predict_cli_refuses_test_without_explicit_release(tmp_path):

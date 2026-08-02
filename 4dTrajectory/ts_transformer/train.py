@@ -1318,25 +1318,9 @@ def evaluate_fit_splits(
     split_series = {"train": train_series, "val": val_series}
     splits: dict[str, dict[str, Any]] = {}
     for split, group in split_series.items():
-        dataset = FixedAnchorTrajectoryWindows(group, config, normalizer)
-        if len(dataset) != len(group):
-            raise ValueError(
-                f"fixed-anchor {split} replay covers {len(dataset)}/{len(group)} flights"
-            )
-        replay = _predict_split(
-            model, dataset, normalizer, device, config.batch_size
+        splits[split] = evaluate_fixed_anchor_series(
+            model, group, normalizer, config, device, split_name=split
         )
-        splits[split] = {
-            "flights": len(group),
-            "windows": len(dataset),
-            "split_sha256": _split_sha256(group),
-            "metrics": evaluate_split(
-                model, dataset, normalizer, config, device, replay=replay
-            ),
-            "common_grid_metrics": evaluate_fixed_anchor_common_grid(
-                model, dataset, normalizer, config, device, replay=replay
-            ),
-        }
 
     train_metrics = splits["train"]["metrics"]
     val_metrics = splits["val"]["metrics"]
@@ -1367,6 +1351,35 @@ def evaluate_fit_splits(
         "config": config.to_dict(),
         "splits": splits,
         "diagnostics": diagnostics,
+    }
+
+
+def evaluate_fixed_anchor_series(
+    model: nn.Module,
+    series: Sequence[FlightSeries],
+    normalizer: Normalizer,
+    config: TSConfig,
+    device: torch.device,
+    *,
+    split_name: str = "cohort",
+) -> dict[str, Any]:
+    """Evaluate one explicit flight cohort once on both native and common grids."""
+    dataset = FixedAnchorTrajectoryWindows(series, config, normalizer)
+    if len(dataset) != len(series):
+        raise ValueError(
+            f"fixed-anchor {split_name} replay covers {len(dataset)}/{len(series)} flights"
+        )
+    replay = _predict_split(model, dataset, normalizer, device, config.batch_size)
+    return {
+        "flights": len(series),
+        "windows": len(dataset),
+        "split_sha256": _split_sha256(series),
+        "metrics": evaluate_split(
+            model, dataset, normalizer, config, device, replay=replay
+        ),
+        "common_grid_metrics": evaluate_fixed_anchor_common_grid(
+            model, dataset, normalizer, config, device, replay=replay
+        ),
     }
 
 

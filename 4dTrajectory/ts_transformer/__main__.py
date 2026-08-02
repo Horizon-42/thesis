@@ -88,6 +88,10 @@ from dataset import (  # noqa: E402
     load_flight_dicts,
     require_matching_data_provenance,
 )
+from development_cohorts import (  # noqa: E402
+    development_cohort_audit,
+    load_development_cohort,
+)
 from export import (  # noqa: E402
     accuracy_block, build_prediction_record, observed_series_metrics, write_batch,
 )
@@ -584,12 +588,28 @@ def main(argv: list[str] | None = None) -> int:
     p_train = sub.add_parser("train", help="train a predictor and write a checkpoint")
     _add_data_args(p_train)
     _add_training_args(p_train)
+    p_train.add_argument(
+        "--development-cohort",
+        default=None,
+        help=(
+            "explicit train/validation flight roster; the resulting checkpoint is "
+            "development-only and cannot release outer-test"
+        ),
+    )
 
     p_cv = sub.add_parser(
         "cross-validate", help="select hyperparameters using outer-train folds only"
     )
     _add_data_args(p_cv)
     _add_training_args(p_cv)
+    p_cv.add_argument(
+        "--development-cohort",
+        default=None,
+        help=(
+            "explicit train/validation flight roster; the run is development-only and "
+            "defines no outer-test population"
+        ),
+    )
     p_cv.add_argument("--folds", type=int, default=3)
     p_cv.add_argument(
         "--cv-parameters",
@@ -752,7 +772,16 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--campaign-id and --experiment-id must be supplied together")
         data_provenance = arrival_data_provenance(args.data)
         outer_split_keys = flight_keys_by_split(data_provenance, config)
-        development_keys = set(outer_split_keys["train"] + outer_split_keys["val"])
+        development_cohort = None
+        if args.development_cohort:
+            development_cohort = load_development_cohort(args.development_cohort)
+            development_keys = development_cohort.development_flight_ids(
+                outer_split_keys
+            )
+        else:
+            development_keys = set(
+                outer_split_keys["train"] + outer_split_keys["val"]
+            )
         print(
             f"loading {len(development_keys)} train/validation arrivals; "
             "outer-test source tracks stay closed"
@@ -763,9 +792,31 @@ def main(argv: list[str] | None = None) -> int:
             parser,
             load_flight_dicts(args.data, include_flight_keys=development_keys),
         )
+        if development_cohort is not None:
+            rebuilt_keys = {item.dataset_id for item in series}
+            if rebuilt_keys != development_keys:
+                missing = sorted(development_keys - rebuilt_keys)
+                unexpected = sorted(rebuilt_keys - development_keys)
+                details = []
+                if missing:
+                    details.append(
+                        f"missing {len(missing)} (first: {missing[0]!r})"
+                    )
+                if unexpected:
+                    details.append(
+                        f"unexpected {len(unexpected)} (first: {unexpected[0]!r})"
+                    )
+                parser.error(
+                    "development cohort could not be rebuilt exactly: "
+                    + "; ".join(details)
+                )
         data_selection = data_selection_audit(
             series, build_report, config, outer_split_keys
         )
+        if development_cohort is not None:
+            data_selection["development_cohort"] = development_cohort_audit(
+                args.development_cohort, development_cohort
+            )
         experiment_manifest = None
         if args.experiment_id:
             experiment_manifest = begin_run(
@@ -812,7 +863,9 @@ def main(argv: list[str] | None = None) -> int:
                 config,
                 output_dir=args.output_dir,
                 data_provenance=data_provenance,
-                reserved_test_keys=outer_split_keys["test"],
+                reserved_test_keys=(
+                    [] if development_cohort is not None else outer_split_keys["test"]
+                ),
                 data_selection=data_selection,
                 auto_batch_size=batch_auto,
             )
