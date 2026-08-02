@@ -47,6 +47,14 @@ class ControlStateLossResult:
     normalized_mse: torch.Tensor
     normalized_segment_end_states: torch.Tensor
     physical_query_states: torch.Tensor | None = None
+    normalized_terminal_end_states: torch.Tensor | None = None
+
+    @property
+    def terminal_end_states(self) -> torch.Tensor:
+        """Endpoint rollout selected by the terminal-clock strategy."""
+        if self.normalized_terminal_end_states is not None:
+            return self.normalized_terminal_end_states
+        return self.normalized_segment_end_states
 
 
 @dataclass(frozen=True)
@@ -120,7 +128,7 @@ def _normalized_mse_objective(
 ) -> ControlTrackingLossTerms:
     del normalized_anchor_state, normalizer, dense_supervision, runway_heading_rad
     terminal = config.terminal_loss_weight * normalized_terminal_position_mse(
-        result.normalized_segment_end_states, terminal_target
+        result.terminal_end_states, terminal_target
     )
     return ControlTrackingLossTerms(result.normalized_mse, terminal)
 
@@ -141,7 +149,7 @@ def _physical_criteria_objective(
         result.physical_query_states, dense_supervision, normalizer
     )
     terminal_m = terminal_position_error_m(
-        result.normalized_segment_end_states, terminal_target, normalizer
+        result.terminal_end_states, terminal_target, normalizer
     )
     zero = terminal_m.new_zeros(terminal_m.shape)
     return ControlTrackingLossTerms(
@@ -162,10 +170,10 @@ def _terminal_state_objective(
     if dense_supervision is None:
         raise ValueError("terminal-state requires fixed-dt control supervision")
     terminal_position_m = terminal_position_error_m(
-        result.normalized_segment_end_states, terminal_target, normalizer
+        result.terminal_end_states, terminal_target, normalizer
     )
     terminal_velocity_mps = terminal_velocity_error_mps(
-        result.normalized_segment_end_states,
+        result.terminal_end_states,
         normalized_anchor_state,
         dense_supervision,
         normalizer,
@@ -266,7 +274,7 @@ def _arc_length_geometry_objective(
         position_end_weight=config.control_arc_position_end_weight,
     )
     terminal = terminal_state_errors(
-        result.normalized_segment_end_states,
+        result.terminal_end_states,
         terminal_target,
         normalized_anchor_state,
         dense_supervision,

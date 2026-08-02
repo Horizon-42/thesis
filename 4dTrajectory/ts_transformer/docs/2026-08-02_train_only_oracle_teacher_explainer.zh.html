@@ -1,0 +1,1440 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>Train-only Oracle Teacher：从诊断性优化到可部署模型</title>
+  <style>
+    :root {
+      --bg: #07111d;
+      --panel: rgba(13, 29, 45, 0.86);
+      --panel-2: rgba(18, 40, 59, 0.72);
+      --line: rgba(148, 180, 205, 0.20);
+      --text: #e9f3fa;
+      --muted: #9db2c2;
+      --cyan: #50d8e8;
+      --blue: #69a9ff;
+      --green: #71e0a3;
+      --amber: #ffc66d;
+      --red: #ff7b7b;
+      --violet: #b9a2ff;
+      --radius: 18px;
+      --shadow: 0 22px 60px rgba(0, 0, 0, 0.28);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--text);
+      font-family: Inter, "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+      line-height: 1.68;
+      background:
+        radial-gradient(circle at 12% 4%, rgba(80, 216, 232, 0.12), transparent 28rem),
+        radial-gradient(circle at 88% 14%, rgba(185, 162, 255, 0.11), transparent 30rem),
+        linear-gradient(180deg, #07111d 0%, #091522 45%, #07111d 100%);
+    }
+
+    a { color: var(--cyan); }
+
+    button { font: inherit; }
+
+    .shell {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 70px 0 34px;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: 26px 7% auto auto;
+      width: 330px;
+      height: 330px;
+      border: 1px solid rgba(80, 216, 232, 0.13);
+      border-radius: 50%;
+      box-shadow: 0 0 0 55px rgba(80, 216, 232, 0.025), 0 0 0 110px rgba(80, 216, 232, 0.015);
+      pointer-events: none;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      color: var(--cyan);
+      font-size: 0.82rem;
+      font-weight: 750;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before {
+      content: "";
+      width: 24px;
+      height: 2px;
+      background: var(--cyan);
+    }
+
+    h1 {
+      position: relative;
+      z-index: 1;
+      max-width: 900px;
+      margin: 17px 0 18px;
+      font-size: clamp(2.35rem, 6vw, 5.3rem);
+      line-height: 1.05;
+      letter-spacing: -0.052em;
+    }
+
+    h1 span {
+      color: transparent;
+      background: linear-gradient(95deg, var(--cyan), var(--blue), var(--violet));
+      -webkit-background-clip: text;
+      background-clip: text;
+    }
+
+    .lead {
+      position: relative;
+      z-index: 1;
+      max-width: 820px;
+      margin: 0;
+      color: #c1d3df;
+      font-size: clamp(1.02rem, 2vw, 1.25rem);
+    }
+
+    .hero-grid,
+    .grid-2,
+    .grid-3,
+    .grid-4 {
+      display: grid;
+      gap: 16px;
+    }
+
+    .hero-grid {
+      grid-template-columns: repeat(3, 1fr);
+      margin-top: 34px;
+    }
+
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+    .card,
+    .metric-card,
+    .callout {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+
+    .hero-stat {
+      min-height: 142px;
+      padding: 22px;
+    }
+
+    .hero-stat strong {
+      display: block;
+      color: var(--cyan);
+      font-size: 1.85rem;
+      line-height: 1.1;
+    }
+
+    .hero-stat span {
+      display: block;
+      margin-top: 9px;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .nav {
+      position: sticky;
+      z-index: 20;
+      top: 0;
+      border-block: 1px solid var(--line);
+      background: rgba(7, 17, 29, 0.88);
+      backdrop-filter: blur(16px);
+    }
+
+    .nav .shell {
+      display: flex;
+      gap: 8px;
+      padding: 9px 0;
+      overflow-x: auto;
+      scrollbar-width: thin;
+    }
+
+    .nav a {
+      flex: 0 0 auto;
+      padding: 7px 12px;
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: 0.84rem;
+      text-decoration: none;
+    }
+
+    .nav a:hover { color: var(--text); background: var(--panel-2); }
+
+    section {
+      padding: 68px 0 8px;
+      scroll-margin-top: 68px;
+    }
+
+    .section-kicker {
+      margin: 0 0 8px;
+      color: var(--cyan);
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: clamp(1.75rem, 4vw, 2.8rem);
+      line-height: 1.2;
+      letter-spacing: -0.035em;
+    }
+
+    h3 {
+      margin: 0 0 10px;
+      font-size: 1.08rem;
+      line-height: 1.35;
+    }
+
+    .section-intro {
+      max-width: 850px;
+      margin: 13px 0 28px;
+      color: var(--muted);
+    }
+
+    .callout {
+      padding: 24px;
+      border-left: 4px solid var(--cyan);
+    }
+
+    .callout strong { color: var(--cyan); }
+
+    .formula {
+      display: block;
+      margin: 15px 0 0;
+      padding: 14px 16px;
+      overflow-x: auto;
+      border: 1px solid rgba(105, 169, 255, 0.22);
+      border-radius: 12px;
+      background: rgba(3, 10, 17, 0.62);
+      color: #d8e9f7;
+      font: 0.92rem/1.7 ui-monospace, SFMono-Regular, Consolas, monospace;
+      white-space: nowrap;
+    }
+
+    .tabs,
+    .domain-tabs,
+    .metric-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 20px 0;
+    }
+
+    .tab {
+      padding: 9px 14px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      background: rgba(10, 24, 37, 0.8);
+      cursor: pointer;
+      transition: 160ms ease;
+    }
+
+    .tab:hover,
+    .tab.active {
+      color: #04131c;
+      border-color: var(--cyan);
+      background: var(--cyan);
+      transform: translateY(-1px);
+    }
+
+    .pipeline {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      align-items: stretch;
+      gap: 12px;
+      margin-top: 24px;
+    }
+
+    .pipe-node {
+      position: relative;
+      min-height: 148px;
+      padding: 18px 15px;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: rgba(13, 30, 45, 0.78);
+      opacity: 0.38;
+      transform: translateY(0);
+      transition: 180ms ease;
+    }
+
+    .pipe-node::after {
+      content: "→";
+      position: absolute;
+      top: 50%;
+      right: -13px;
+      z-index: 3;
+      color: #5c829a;
+      transform: translateY(-50%);
+    }
+
+    .pipe-node:last-child::after { display: none; }
+
+    .pipe-node.active {
+      opacity: 1;
+      border-color: rgba(80, 216, 232, 0.58);
+      box-shadow: 0 14px 38px rgba(36, 177, 194, 0.10);
+      transform: translateY(-3px);
+    }
+
+    .pipe-node .num {
+      display: inline-grid;
+      width: 27px;
+      height: 27px;
+      place-items: center;
+      margin-bottom: 12px;
+      border-radius: 50%;
+      color: #07111d;
+      background: var(--cyan);
+      font-size: 0.77rem;
+      font-weight: 900;
+    }
+
+    .pipe-node p { margin: 0; color: var(--muted); font-size: 0.82rem; }
+
+    .phase-note {
+      min-height: 86px;
+      padding: 18px 20px;
+      border: 1px dashed rgba(80, 216, 232, 0.34);
+      border-radius: 14px;
+      background: rgba(80, 216, 232, 0.045);
+      color: #c6dae7;
+    }
+
+    .phase-note strong { color: var(--cyan); }
+
+    .boundary {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr 1fr;
+      gap: 14px;
+      margin-top: 22px;
+    }
+
+    .split {
+      position: relative;
+      min-height: 236px;
+      padding: 22px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(13, 30, 45, 0.8);
+    }
+
+    .split::before {
+      content: "";
+      position: absolute;
+      inset: 0 0 auto;
+      height: 4px;
+      background: var(--split-color);
+    }
+
+    .split.train { --split-color: var(--green); }
+    .split.val { --split-color: var(--amber); }
+    .split.test { --split-color: var(--red); }
+
+    .split .label {
+      color: var(--split-color);
+      font-weight: 800;
+      letter-spacing: 0.06em;
+    }
+
+    .split ul {
+      margin: 13px 0 0;
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .lock {
+      display: grid;
+      width: 52px;
+      height: 52px;
+      place-items: center;
+      margin: 18px 0 8px;
+      border: 1px solid rgba(255, 123, 123, 0.38);
+      border-radius: 50%;
+      color: var(--red);
+      font-size: 1.5rem;
+    }
+
+    .story {
+      position: relative;
+      display: grid;
+      gap: 14px;
+      margin-top: 25px;
+      padding-left: 34px;
+    }
+
+    .story::before {
+      content: "";
+      position: absolute;
+      top: 20px;
+      bottom: 20px;
+      left: 12px;
+      width: 2px;
+      background: linear-gradient(var(--red), var(--amber), var(--cyan), var(--green));
+    }
+
+    .story-step {
+      position: relative;
+      display: grid;
+      grid-template-columns: 145px 1fr;
+      gap: 18px;
+      padding: 18px 20px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(13, 30, 45, 0.72);
+    }
+
+    .story-step::before {
+      content: "";
+      position: absolute;
+      top: 26px;
+      left: -29px;
+      width: 13px;
+      height: 13px;
+      border: 3px solid #07111d;
+      border-radius: 50%;
+      background: var(--cyan);
+    }
+
+    .story-step .question { color: var(--cyan); font-weight: 800; }
+    .story-step p { margin: 0; color: var(--muted); }
+
+    .chart-card { padding: 22px; }
+
+    .chart-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 20px;
+    }
+
+    .chart-head p { max-width: 670px; margin: 6px 0 0; color: var(--muted); font-size: 0.9rem; }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 13px;
+      margin-top: 13px;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
+    .legend i {
+      display: inline-block;
+      width: 9px;
+      height: 9px;
+      margin-right: 5px;
+      border-radius: 50%;
+    }
+
+    .chart {
+      width: 100%;
+      min-height: 330px;
+      margin-top: 8px;
+      overflow: visible;
+    }
+
+    .chart text { font-family: inherit; }
+
+    .chart-note {
+      margin-top: 4px;
+      padding: 12px 14px;
+      border-radius: 10px;
+      color: var(--muted);
+      background: rgba(3, 10, 17, 0.46);
+      font-size: 0.84rem;
+    }
+
+    .landscape {
+      min-height: 360px;
+      padding: 14px;
+    }
+
+    .landscape svg { display: block; width: 100%; height: 330px; }
+
+    .contour {
+      fill: none;
+      stroke: rgba(105, 169, 255, 0.24);
+      stroke-width: 1.3;
+    }
+
+    .route-random { stroke: var(--red); }
+    .route-teacher { stroke: var(--green); }
+    .route-random,
+    .route-teacher {
+      fill: none;
+      stroke-width: 3;
+      stroke-linecap: round;
+      stroke-dasharray: 8 7;
+    }
+
+    .mini-card {
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: var(--panel-2);
+    }
+
+    .mini-card .icon {
+      display: grid;
+      width: 38px;
+      height: 38px;
+      place-items: center;
+      margin-bottom: 13px;
+      border-radius: 11px;
+      color: #06131d;
+      background: var(--cyan);
+      font-weight: 900;
+    }
+
+    .mini-card p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+
+    .transfer {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      gap: 18px;
+      margin-top: 22px;
+    }
+
+    .domain-tabs {
+      align-content: start;
+      flex-direction: column;
+      margin: 0;
+    }
+
+    .domain-tabs .tab {
+      width: 100%;
+      border-radius: 12px;
+      text-align: left;
+    }
+
+    .transfer-canvas {
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(13, 30, 45, 0.78);
+    }
+
+    .transfer-flow {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 11px;
+      margin: 18px 0;
+    }
+
+    .transfer-node {
+      position: relative;
+      min-height: 128px;
+      padding: 14px;
+      border: 1px solid rgba(105, 169, 255, 0.22);
+      border-radius: 12px;
+      background: rgba(6, 17, 28, 0.68);
+    }
+
+    .transfer-node::after {
+      content: "→";
+      position: absolute;
+      top: 50%;
+      right: -12px;
+      z-index: 2;
+      color: var(--cyan);
+      transform: translateY(-50%);
+    }
+
+    .transfer-node:last-child::after { display: none; }
+    .transfer-node small { display: block; color: var(--cyan); font-weight: 800; }
+    .transfer-node p { margin: 8px 0 0; color: var(--muted); font-size: 0.84rem; }
+
+    .comparison {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(13, 30, 45, 0.7);
+    }
+
+    .comparison th,
+    .comparison td {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .comparison th { color: var(--cyan); background: rgba(80, 216, 232, 0.04); }
+    .comparison td { color: var(--muted); }
+    .comparison tr:last-child td { border-bottom: 0; }
+
+    .checklist {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+
+    .checklist .card { padding: 22px; }
+
+    .checklist ul {
+      margin: 14px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .checklist li {
+      position: relative;
+      margin: 10px 0;
+      padding-left: 28px;
+      color: var(--muted);
+    }
+
+    .checklist li::before {
+      position: absolute;
+      top: 0;
+      left: 0;
+      font-weight: 900;
+    }
+
+    .checklist .good li::before { content: "✓"; color: var(--green); }
+    .checklist .risk li::before { content: "!"; color: var(--red); }
+
+    .source-list {
+      margin: 13px 0 0;
+      padding-left: 20px;
+      color: var(--muted);
+    }
+
+    footer {
+      margin-top: 70px;
+      padding: 28px 0 45px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.84rem;
+    }
+
+    .tag {
+      display: inline-block;
+      margin: 2px 5px 2px 0;
+      padding: 3px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: 0.74rem;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    @media (max-width: 920px) {
+      .hero-grid, .grid-3, .grid-4 { grid-template-columns: 1fr 1fr; }
+      .pipeline { grid-template-columns: repeat(3, 1fr); }
+      .pipe-node:nth-child(3)::after { display: none; }
+      .boundary { grid-template-columns: 1fr; }
+      .transfer { grid-template-columns: 1fr; }
+      .domain-tabs { flex-direction: row; }
+      .domain-tabs .tab { width: auto; }
+    }
+
+    @media (max-width: 640px) {
+      .shell { width: min(100% - 22px, 1180px); }
+      .hero { padding-top: 46px; }
+      .hero-grid, .grid-2, .grid-3, .grid-4, .checklist { grid-template-columns: 1fr; }
+      .pipeline { grid-template-columns: 1fr 1fr; }
+      .pipe-node:nth-child(3)::after { display: block; }
+      .pipe-node:nth-child(even)::after { display: none; }
+      .story-step { grid-template-columns: 1fr; gap: 5px; }
+      .transfer-flow { grid-template-columns: 1fr 1fr; }
+      .transfer-node:nth-child(2)::after { display: none; }
+      .chart-card { padding: 15px; }
+      .comparison { font-size: 0.82rem; }
+      .comparison th, .comparison td { padding: 10px; }
+    }
+
+    @media print {
+      :root { --bg: #fff; --text: #12212c; --muted: #526572; --panel: #fff; --panel-2: #f5f8fa; --line: #d4dde3; }
+      body { background: #fff; }
+      .nav { display: none; }
+      .card, .metric-card, .callout { box-shadow: none; }
+      section { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="shell">
+      <div class="eyebrow">Visual explainer · 2026-08-02</div>
+      <h1>Train-only <span>Oracle Teacher</span></h1>
+      <p class="lead">
+        先在训练航迹上用“看得到完整未来”的离线优化器，为每条样本求出一份高质量控制方案；
+        再让只看历史的模型模仿并通过真实 rollout 损失微调。Teacher 只负责训练时搭桥，部署时完全退出。
+      </p>
+      <div class="hero-grid">
+        <article class="card hero-stat">
+          <strong>Train-only</strong>
+          <span>32 条 teacher 航迹全部来自 outer-train；与 validation 航班交集为 0，本文不展示或使用 test 结果。</span>
+        </article>
+        <article class="card hero-stat">
+          <strong>不是标签泄漏</strong>
+          <span>训练标签的未来本来就可用于监督；关键约束是不能用 validation/test 的未来构造 teacher 或调参。</span>
+        </article>
+        <article class="card hero-stat">
+          <strong>部署无额外成本</strong>
+          <span>最终模型仍只接收历史序列，一次前向输出控制与时长；不需要优化器，也看不到真实未来。</span>
+        </article>
+      </div>
+    </div>
+  </header>
+
+  <nav class="nav" aria-label="文档导航">
+    <div class="shell">
+      <a href="#definition">一句话原理</a>
+      <a href="#pipeline">完整流程</a>
+      <a href="#boundary">数据边界</a>
+      <a href="#origin">如何提出</a>
+      <a href="#evidence">实验信号</a>
+      <a href="#why">为什么有效</a>
+      <a href="#generalize">如何泛化</a>
+      <a href="#limits">适用边界</a>
+    </div>
+  </nav>
+
+  <main>
+    <section id="definition">
+      <div class="shell">
+        <p class="section-kicker">01 · Definition</p>
+        <h2>它不是一个新 backbone，而是一种训练路径</h2>
+        <p class="section-intro">
+          设 x 是部署时可见的历史，y 是训练集中已知的未来，z 是控制参数，R 是可微动力学 rollout。
+          Teacher 对每条训练样本直接优化 z；Student 学习从 x 预测这份 z，最后再回到任务本身的轨迹损失。
+        </p>
+
+        <div class="callout">
+          <strong>核心定义：</strong>“Oracle”指 teacher 在离线求解时拥有训练样本的完整未来和逐样本优化权限；
+          它不是理论最优真值，也不是线上可调用的神谕。“Train-only”则规定这种特权严格止于训练分区。
+          <code class="formula">Teacher: z* ≈ argmin_z L_task(R(anchor, z), y_future)
+Student warm-up: min_θ D(f_θ(x_history), z*)
+Rollout fine-tune: min_θ L_task(R(anchor, f_θ(x_history)), y_future)
+Deploy: z_hat = f_θ(x_history)  // 无 y_future，无 teacher optimizer</code>
+        </div>
+
+        <div class="grid-3" style="margin-top: 18px;">
+          <article class="mini-card">
+            <div class="icon">T</div>
+            <h3>Teacher 是求解过程</h3>
+            <p>每条训练航迹单独优化，直接把控制张量和时长当变量。它回答“什么输出能解释这条已知未来”。</p>
+          </article>
+          <article class="mini-card">
+            <div class="icon" style="background: var(--violet);">S</div>
+            <h3>Student 是部署模型</h3>
+            <p>iTransformer 或 PatchTST 仍只看历史。Teacher 产物改变初始化路径，不改变部署接口。</p>
+          </article>
+          <article class="mini-card">
+            <div class="icon" style="background: var(--green);">R</div>
+            <h3>Rollout 负责纠偏</h3>
+            <p>模仿控制不等于轨迹正确；最终用真实动力学和任务损失微调，修复 teacher 误差与参数多解性。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="pipeline">
+      <div class="shell">
+        <p class="section-kicker">02 · Interactive pipeline</p>
+        <h2>训练、微调、部署：特权信息在哪里消失？</h2>
+        <p class="section-intro">点击阶段查看当时允许使用的信息。高亮节点是该阶段真正参与的组件。</p>
+
+        <div class="tabs" role="tablist" aria-label="流程阶段">
+          <button class="tab active" type="button" data-phase="teacher" role="tab" aria-selected="true">① 构造 teacher</button>
+          <button class="tab" type="button" data-phase="imitate" role="tab" aria-selected="false">② Student 模仿</button>
+          <button class="tab" type="button" data-phase="rollout" role="tab" aria-selected="false">③ Rollout 微调</button>
+          <button class="tab" type="button" data-phase="deploy" role="tab" aria-selected="false">④ 部署推理</button>
+        </div>
+
+        <div class="pipeline" aria-label="oracle teacher 流程图">
+          <article class="pipe-node" data-active="teacher">
+            <span class="num">1</span>
+            <h3>训练历史 + 未来</h3>
+            <p>完整训练航迹；未来仅在此分区可见。</p>
+          </article>
+          <article class="pipe-node" data-active="teacher">
+            <span class="num">2</span>
+            <h3>逆动力学初始化</h3>
+            <p>由平滑速度变化估计结构化初值，避开中性控制起点。</p>
+          </article>
+          <article class="pipe-node" data-active="teacher">
+            <span class="num">3</span>
+            <h3>逐航迹直接优化</h3>
+            <p>分阶段延长 horizon，优化 64 段控制；总时长使用真值并冻结。</p>
+          </article>
+          <article class="pipe-node" data-active="imitate">
+            <span class="num">4</span>
+            <h3>Teacher schedule</h3>
+            <p>缓存控制、时长及元数据，作为可审计的训练派生物。</p>
+          </article>
+          <article class="pipe-node" data-active="imitate rollout">
+            <span class="num">5</span>
+            <h3>Student 网络</h3>
+            <p>先模仿 schedule，再用轨迹任务损失反向传播。</p>
+          </article>
+          <article class="pipe-node" data-active="rollout deploy">
+            <span class="num">6</span>
+            <h3>可部署 rollout</h3>
+            <p>只看历史预测控制与时长，并由相同动力学生成未来状态。</p>
+          </article>
+        </div>
+        <p class="phase-note" id="phase-note" aria-live="polite"></p>
+      </div>
+    </section>
+
+    <section id="boundary">
+      <div class="shell">
+        <p class="section-kicker">03 · Data firewall</p>
+        <h2>为什么它仍然遵守“不偷看 test”原则</h2>
+        <p class="section-intro">
+          判断泄漏的关键不是“是否看未来”，而是“看了哪个分区的未来，以及看完后用它做了什么”。
+          监督学习本来就使用训练标签；oracle teacher 只是用优化器把训练标签变成更适合学习的中间监督。
+        </p>
+
+        <div class="boundary">
+          <article class="split train">
+            <div class="label">OUTER-TRAIN · 可构造</div>
+            <h3>Teacher 的唯一数据来源</h3>
+            <ul>
+              <li>允许读取训练航迹完整未来</li>
+              <li>允许逐航迹优化控制和时长参数</li>
+              <li>允许模仿学习与 rollout 训练</li>
+              <li>本实验 teacher cohort：32 条，均属 outer-train</li>
+            </ul>
+          </article>
+          <article class="split val">
+            <div class="label">VALIDATION · 只评价</div>
+            <h3>用于开发选择，不生成 teacher</h3>
+            <ul>
+              <li>模型只接收 validation 历史</li>
+              <li>未来只用于计算 validation 指标</li>
+              <li>不可按单条 validation 航迹反推控制</li>
+              <li>与 teacher cohort 航班交集：0</li>
+            </ul>
+          </article>
+          <article class="split test">
+            <div class="label">OUTER-TEST · 封存</div>
+            <div class="lock" aria-hidden="true">⌁</div>
+            <h3>本轮不运行、不查看</h3>
+            <ul>
+              <li>不产生 teacher artifact</li>
+              <li>不参与 loss、超参或 epoch 决策</li>
+              <li>仅在实验冻结并明确 release 后一次性使用</li>
+            </ul>
+          </article>
+        </div>
+
+        <div class="callout" style="margin-top: 18px; border-left-color: var(--amber);">
+          <strong style="color: var(--amber);">一条实用审计规则：</strong>
+          如果删除 validation/test 的所有未来文件，teacher 构造与模型训练仍应能完整执行；
+          如果删除 teacher 优化器，部署推理仍应能完整执行。两者同时成立，数据边界和部署边界才算清楚。
+        </div>
+      </div>
+    </section>
+
+    <section id="origin">
+      <div class="shell">
+        <p class="section-kicker">04 · How the idea emerged</p>
+        <h2>它不是凭空套用“知识蒸馏”，而是沿诊断链推出来的</h2>
+        <p class="section-intro">
+          最初问题是：控制 rollout 表现差，究竟是表示能力不够，还是网络难以在长时域动力学中找到好解？
+          于是逐层移除不确定因素，最终发现“可行解存在，但从随机网络输出走到那里很难”。
+        </p>
+
+        <div class="story">
+          <article class="story-step">
+            <div class="question">① 模型为何落不准？</div>
+            <p>训练 loss 能下降，但 ADE/FDE 仍大。仅看端到端结果无法区分 backbone、控制表示、动力学和优化条件谁是瓶颈。</p>
+          </article>
+          <article class="story-step">
+            <div class="question">② 暂时拿掉模型</div>
+            <p>直接把一条已知训练航迹的控制参数当作待优化变量，用梯度法拟合完整未来。这是诊断“表示 + 动力学是否有能力”的 direct-control oracle。</p>
+          </article>
+          <article class="story-step">
+            <div class="question">③ 中性初值仍失败</div>
+            <p>最初 direct shooting 的 ADE 约 17.4 km。这没有证明表示无能，反而暴露了长 rollout、强耦合 Jacobian 和坏初值造成的优化困难。</p>
+          </article>
+          <article class="story-step">
+            <div class="question">④ 逆动力学给出方向</div>
+            <p>由已知状态变化反推近似控制作为 warm start，再用分阶段 horizon 优化，单航迹可达到数百米量级。说明好控制解是存在的。</p>
+          </article>
+          <article class="story-step">
+            <div class="question">⑤ 把“解”变成“老师”</div>
+            <p>既然逐航迹优化能找到网络难以自行发现的区域，就把这些 outer-train 解缓存成 schedule，让网络先学会站到正确的优化盆地附近。</p>
+          </article>
+          <article class="story-step">
+            <div class="question">⑥ 模仿后回到任务</div>
+            <p>控制参数可能多解，teacher 也不完美，因此模仿只是初始化；最终必须用可微动力学下的真实几何、速度、终端和时间损失继续训练。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="evidence">
+      <div class="shell">
+        <p class="section-kicker">05 · Evidence, not promise</p>
+        <h2>数据说明了什么，也说明不了什么</h2>
+        <p class="section-intro">
+          下图分开显示 teacher 构造/训练诊断与正式 validation。前者证明优化路径改善，后者才回答“是否泛化”。
+          所有数字均来自 train/validation 记录，不包含 test。
+        </p>
+
+        <article class="card chart-card">
+          <div class="chart-head">
+            <div>
+              <h3>训练路径诊断：32 条 outer-train teacher cohort 的中位数</h3>
+              <p>这是机制诊断，不能当作未见航迹的泛化结果。按钮可切换位置 ADE、终端误差和总时长误差。</p>
+            </div>
+          </div>
+          <div class="metric-tabs" role="tablist" aria-label="训练诊断指标">
+            <button class="tab active" type="button" data-train-metric="ade">ADE</button>
+            <button class="tab" type="button" data-train-metric="fde">终端位置误差</button>
+            <button class="tab" type="button" data-train-metric="time">总时长误差</button>
+          </div>
+          <svg id="train-chart" class="chart" role="img" aria-label="teacher 和 student 各阶段训练诊断柱状图"></svg>
+          <div class="chart-note" id="train-chart-note"></div>
+        </article>
+
+        <article class="card chart-card" style="margin-top: 18px;">
+          <div class="chart-head">
+            <div>
+              <h3>正式 KSJC validation：原始训练 vs teacher-only 初始化</h3>
+              <p>相同开发边界下比较；teacher-only 运行关闭 control effort 和 smoothness，避免把正则项变化误归因于 teacher。</p>
+            </div>
+          </div>
+          <svg id="validation-chart" class="chart" role="img" aria-label="teacher-only 相对原始训练的验证指标变化"></svg>
+          <div class="legend">
+            <span><i style="background: var(--blue);"></i>原始训练</span>
+            <span><i style="background: var(--green);"></i>Train-only oracle teacher</span>
+          </div>
+          <div class="chart-note">
+            结果：selection 31.413 → 27.628；ADE 1130.7 m → 771.0 m；FDE 1202.9 m → 1040.4 m；
+            cross-track p95 3313.2 m → 2039.6 m；altitude p95 692.6 m → 364.7 m；time MAE 20.84 s → 14.19 s。
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section id="why">
+      <div class="shell">
+        <p class="section-kicker">06 · Optimization view</p>
+        <h2>为什么先模仿，再 rollout 微调</h2>
+        <p class="section-intro">
+          长时域控制训练的困难不只是“预测错一点”，而是早期控制会改变后续全部状态，使梯度经过长链传播。
+          Teacher 的主要价值是缩短搜索距离，而不是替代任务目标。
+        </p>
+
+        <div class="grid-2">
+          <article class="card landscape">
+            <svg viewBox="0 0 560 330" role="img" aria-label="概念性优化地形：随机初始化和 teacher 初始化">
+              <defs>
+                <radialGradient id="basin" cx="65%" cy="56%" r="60%">
+                  <stop offset="0%" stop-color="#71e0a3" stop-opacity="0.24" />
+                  <stop offset="100%" stop-color="#07111d" stop-opacity="0" />
+                </radialGradient>
+                <marker id="arrow-red" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                  <path d="M0,0 L8,4 L0,8 z" fill="#ff7b7b" />
+                </marker>
+                <marker id="arrow-green" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                  <path d="M0,0 L8,4 L0,8 z" fill="#71e0a3" />
+                </marker>
+              </defs>
+              <rect x="0" y="0" width="560" height="330" rx="16" fill="url(#basin)" />
+              <ellipse class="contour" cx="370" cy="185" rx="158" ry="112" />
+              <ellipse class="contour" cx="370" cy="185" rx="122" ry="82" />
+              <ellipse class="contour" cx="370" cy="185" rx="86" ry="55" />
+              <ellipse class="contour" cx="370" cy="185" rx="49" ry="29" />
+              <path class="route-random" marker-end="url(#arrow-red)" d="M62 64 C122 110, 106 255, 192 260 S260 119, 316 145" />
+              <path class="route-teacher" marker-end="url(#arrow-green)" d="M450 86 C432 117, 416 150, 390 174" />
+              <circle cx="62" cy="64" r="7" fill="#ff7b7b" />
+              <circle cx="450" cy="86" r="7" fill="#71e0a3" />
+              <circle cx="370" cy="185" r="10" fill="#50d8e8" />
+              <text x="31" y="42" fill="#ff9c9c" font-size="14">随机/中性输出</text>
+              <text x="428" y="60" fill="#9bf0bd" font-size="14">teacher 初始化</text>
+              <text x="337" y="216" fill="#9beaf2" font-size="14">低任务损失区域</text>
+              <text x="24" y="312" fill="#7892a4" font-size="12">概念图：曲线不代表实测 loss surface</text>
+            </svg>
+          </article>
+
+          <div class="grid-2">
+            <article class="mini-card">
+              <div class="icon">1</div>
+              <h3>结构化 warm start</h3>
+              <p>把网络输出从“几乎任意控制”拉到能产生合理进近形状的区域，降低长时域搜索难度。</p>
+            </article>
+            <article class="mini-card">
+              <div class="icon" style="background: var(--amber);">2</div>
+              <h3>把稀疏梯度变稠密</h3>
+              <p>轨迹终端误差要穿过完整 rollout；teacher schedule 则为每个控制段提供直接监督。</p>
+            </article>
+            <article class="mini-card">
+              <div class="icon" style="background: var(--violet);">3</div>
+              <h3>避免只复制 teacher</h3>
+              <p>不同控制可能生成相似轨迹。纯参数 MSE 会惩罚等价解，因此需要任务损失解除这种约束。</p>
+            </article>
+            <article class="mini-card">
+              <div class="icon" style="background: var(--green);">4</div>
+              <h3>恢复部署时钟</h3>
+              <p>teacher 构造可冻结真实总时长以稳定优化；rollout 微调让 student 重新学习可部署的时长预测。</p>
+            </article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="generalize">
+      <div class="shell">
+        <p class="section-kicker">07 · Generalization pattern</p>
+        <h2>可泛化的不是“飞机控制”，而是特权求解器蒸馏</h2>
+        <p class="section-intro">
+          抽象后，这个思路适用于：训练时能获得更完整信息或调用昂贵求解器，部署时却只能快速、部分观测地决策的问题。
+          点击领域，观察四个角色如何替换，而训练逻辑保持不变。
+        </p>
+
+        <div class="callout">
+          <strong>通用模板：</strong>
+          在训练样本上让昂贵 teacher 使用特权信息求出中间决策 z*；训练 student 从部署输入 x 预测 z*；
+          再用最终任务损失校正 teacher 偏差。泛化对象是“求解过程的结果与搜索偏置”，而非 teacher 的运行时依赖。
+        </div>
+
+        <div class="transfer">
+          <div class="domain-tabs" role="tablist" aria-label="应用领域">
+            <button class="tab active" type="button" data-domain="trajectory">航空轨迹控制</button>
+            <button class="tab" type="button" data-domain="robotics">机器人运动控制</button>
+            <button class="tab" type="button" data-domain="inverse">成像 / 逆问题</button>
+            <button class="tab" type="button" data-domain="routing">调度与路径规划</button>
+            <button class="tab" type="button" data-domain="perception">特权传感器感知</button>
+            <button class="tab" type="button" data-domain="science">科学计算代理模型</button>
+          </div>
+          <article class="transfer-canvas">
+            <h3 id="domain-title">航空轨迹控制</h3>
+            <p id="domain-summary" style="color: var(--muted); margin-top: 0;"></p>
+            <div class="transfer-flow">
+              <div class="transfer-node">
+                <small>TRAIN-ONLY 特权</small>
+                <p id="domain-privilege"></p>
+              </div>
+              <div class="transfer-node">
+                <small>昂贵 TEACHER</small>
+                <p id="domain-teacher"></p>
+              </div>
+              <div class="transfer-node">
+                <small>中间监督 z*</small>
+                <p id="domain-target"></p>
+              </div>
+              <div class="transfer-node">
+                <small>部署 STUDENT</small>
+                <p id="domain-student"></p>
+              </div>
+            </div>
+            <div class="chart-note" id="domain-correction"></div>
+          </article>
+        </div>
+
+        <div class="grid-4" style="margin-top: 20px;">
+          <article class="mini-card">
+            <div class="icon">A</div>
+            <h3>先定义部署输入</h3>
+            <p>从 x 开始设计：线上真正能看到什么？Teacher 再强，也不能让 student 永久依赖缺失变量。</p>
+          </article>
+          <article class="mini-card">
+            <div class="icon" style="background: var(--blue);">B</div>
+            <h3>选择可学习中间量</h3>
+            <p>z* 应比最终结果更有结构，如动作序列、路径、隐状态或求解器迭代，而不是任意内部缓存。</p>
+          </article>
+          <article class="mini-card">
+            <div class="icon" style="background: var(--amber);">C</div>
+            <h3>保留任务闭环</h3>
+            <p>验证 z* 经真实系统后是否完成任务；如果不可微，可用仿真、强化学习或可微代理做纠偏。</p>
+          </article>
+          <article class="mini-card">
+            <div class="icon" style="background: var(--green);">D</div>
+            <h3>按最终分区评价</h3>
+            <p>Teacher 拟合度只说明可教性；未见 validation 的任务指标才说明 student 是否学会泛化。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="limits">
+      <div class="shell">
+        <p class="section-kicker">08 · Applicability & failure modes</p>
+        <h2>什么时候值得用，什么时候会失败</h2>
+        <p class="section-intro">这不是保证提升的技巧。它最擅长解决“好解可离线求得，但端到端训练很难自行到达”的问题。</p>
+
+        <div class="checklist">
+          <article class="card good">
+            <h3 style="color: var(--green);">适合使用的信号</h3>
+            <ul>
+              <li>直接优化或规划器在训练样本上明显优于当前模型</li>
+              <li>昂贵求解只需离线执行，产物可缓存、可版本化</li>
+              <li>Student 的部署输入包含足以推断 teacher 决策的信号</li>
+              <li>中间量有稳定语义，或可用任务损失处理多解</li>
+              <li>存在可微仿真、评价器或其他闭环微调手段</li>
+            </ul>
+          </article>
+          <article class="card risk">
+            <h3 style="color: var(--red);">主要失败模式</h3>
+            <ul>
+              <li>用 validation/test 未来生成 teacher，形成数据泄漏</li>
+              <li>未来具有不可由历史判断的多种意图，单一 MSE 把模式平均</li>
+              <li>Teacher 优化的是代理目标，Student 忠实复制了错误偏好</li>
+              <li>Teacher cohort 太小或选择偏置，初始化只覆盖狭窄区域</li>
+              <li>把“oracle”误当理论上界，忽略局部最优与求解失败</li>
+            </ul>
+          </article>
+        </div>
+
+        <h3 style="margin-top: 30px;">与相邻概念的区别</h3>
+        <div style="overflow-x: auto; margin-top: 12px;">
+          <table class="comparison">
+            <thead>
+              <tr>
+                <th>方法</th>
+                <th>Teacher 从哪里来</th>
+                <th>部署时是否需要 teacher</th>
+                <th>本方法的关键区别</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>普通监督学习</td>
+                <td>数据集原始标签</td>
+                <td>否</td>
+                <td>Oracle teacher 先用物理/优化把原始未来转为结构化控制监督。</td>
+              </tr>
+              <tr>
+                <td>经典知识蒸馏</td>
+                <td>更大的已训练网络</td>
+                <td>否</td>
+                <td>这里的 teacher 可以没有网络，而是逐样本运行的求解器。</td>
+              </tr>
+              <tr>
+                <td>在线 MPC / 规划</td>
+                <td>运行时反复求解</td>
+                <td>是</td>
+                <td>这里把昂贵计算前移到训练期，线上只有 Student 前向计算。</td>
+              </tr>
+              <tr>
+                <td>理论 oracle / 真值控制</td>
+                <td>假设完美信息或解析最优解</td>
+                <td>通常用于上界分析</td>
+                <td>当前 teacher 只是数值局部解；“oracle”描述信息权限，不保证全局最优。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout" style="margin-top: 22px;">
+          <strong>最终判断：</strong>
+          Train-only oracle teacher 的本质是“用训练期可用但部署期不可用的计算与信息，塑造一个更容易学习的起点；
+          再让模型回到真实任务目标”。它解决的是优化路径和监督结构，不会自动补上历史中根本不存在的意图信息。
+        </div>
+      </div>
+    </section>
+
+    <section id="sources">
+      <div class="shell">
+        <p class="section-kicker">09 · Local provenance</p>
+        <h2>本页依据与复现实验边界</h2>
+        <p class="section-intro">页面为自包含 HTML，无外部脚本、字体或网络依赖。实验数字取自仓库内记录。</p>
+        <article class="card" style="padding: 22px;">
+          <ul class="source-list">
+            <li><code>docs/2026-08-02_oracle_teacher_experiment.zh.md</code>：teacher 构造、模仿、rollout gate 与正式 validation 对比。</li>
+            <li><code>docs/2026-07-30_direct_control_oracle.zh.md</code>：direct-control oracle、逆动力学 warm start 与 staged horizon 的提出过程。</li>
+            <li>Teacher schedule SHA-256：<code>a67ea14e...4938</code>（页面仅展示缩写；完整值见实验记录）。</li>
+            <li><span class="tag">32 teacher flights</span><span class="tag">outer-train only</span><span class="tag">validation intersection = 0</span><span class="tag">no test inspection</span></li>
+          </ul>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell">
+      AeroViz-4D · TS Transformer experiment note · 本页区分训练诊断、validation 泛化与封存 test，避免把 teacher 拟合能力误报为部署性能。
+    </div>
+  </footer>
+
+  <script>
+    const phaseCopy = {
+      teacher: {
+        title: "构造 teacher",
+        text: "只有这一阶段读取 outer-train 的完整未来。逆动力学给初值，逐航迹优化器用任务损失求出控制 schedule；validation/test 不参与。"
+      },
+      imitate: {
+        title: "Student 模仿",
+        text: "网络输入仍是历史，监督目标变为缓存的控制、时长分配和总时长。它获得密集、结构化的梯度，但尚未保证 rollout 最优。"
+      },
+      rollout: {
+        title: "Rollout 微调",
+        text: "Teacher 目标退出，Student 的输出进入可微动力学，用几何、速度、终端和时间任务损失训练，修复控制多解与 teacher 偏差。"
+      },
+      deploy: {
+        title: "部署推理",
+        text: "只保留 Student 与动力学：输入观测历史，输出控制与时长，再 rollout 未来。真实未来、teacher schedule 和逐航迹优化器全部不可用。"
+      }
+    };
+
+    const phaseButtons = document.querySelectorAll("[data-phase]");
+    const pipelineNodes = document.querySelectorAll(".pipe-node");
+    const phaseNote = document.getElementById("phase-note");
+
+    function setPhase(phase) {
+      phaseButtons.forEach((button) => {
+        const selected = button.dataset.phase === phase;
+        button.classList.toggle("active", selected);
+        button.setAttribute("aria-selected", String(selected));
+      });
+      pipelineNodes.forEach((node) => {
+        const activePhases = (node.dataset.active || "").split(" ");
+        node.classList.toggle("active", activePhases.includes(phase));
+      });
+      phaseNote.innerHTML = `<strong>${phaseCopy[phase].title}：</strong>${phaseCopy[phase].text}`;
+    }
+
+    phaseButtons.forEach((button) => button.addEventListener("click", () => setPhase(button.dataset.phase)));
+    setPhase("teacher");
+
+    const trainMetrics = {
+      ade: {
+        unit: "m",
+        values: [3983.2, 2310.3, 1568.9, 1909.2, 383.4],
+        labels: ["中性/未训练", "逆动力学初值", "优化后 teacher", "Student 模仿", "Rollout gate"],
+        note: "ADE 路径：逆动力学和逐航迹优化改善 teacher；Student 模仿接近 teacher；短 cohort rollout 进一步降至 383.4 m。最后一步是训练 cohort 诊断，不是 validation。"
+      },
+      fde: {
+        unit: "m",
+        values: [10912.8, 6991.9, 3476.7, 5374.9, 558.1],
+        labels: ["中性/未训练", "逆动力学初值", "优化后 teacher", "Student 模仿", "Rollout gate"],
+        note: "终端误差对长时域误差累积最敏感。模仿已明显改善，但 rollout 任务损失仍是把终点拉回来的关键。"
+      },
+      time: {
+        unit: "s",
+        values: [248.89, null, null, 3.62, 2.91],
+        labels: ["中性/未训练", "逆动力学初值", "优化后 teacher", "Student 模仿", "Rollout gate"],
+        note: "Teacher 构造阶段冻结真实总时长，因此该阶段没有可比较的 deployable 时间误差；Student 必须自行预测，模仿后为 3.62 s，rollout 后为 2.91 s。"
+      }
+    };
+
+    const stageColors = ["#ff7b7b", "#ffc66d", "#50d8e8", "#b9a2ff", "#71e0a3"];
+
+    function renderTrainChart(metricKey) {
+      const svg = document.getElementById("train-chart");
+      const metric = trainMetrics[metricKey];
+      const width = 980;
+      const height = 330;
+      const pad = { top: 28, right: 28, bottom: 82, left: 78 };
+      const plotW = width - pad.left - pad.right;
+      const plotH = height - pad.top - pad.bottom;
+      const validValues = metric.values.filter((value) => value !== null);
+      const maxValue = Math.max(...validValues) * 1.12;
+      const slot = plotW / metric.values.length;
+      const barWidth = Math.min(92, slot * 0.58);
+      let content = "";
+
+      for (let i = 0; i <= 4; i += 1) {
+        const y = pad.top + plotH * i / 4;
+        const tick = maxValue * (1 - i / 4);
+        content += `<line x1="${pad.left}" y1="${y}" x2="${width - pad.right}" y2="${y}" stroke="rgba(148,180,205,.13)" />`;
+        content += `<text x="${pad.left - 12}" y="${y + 4}" text-anchor="end" fill="#7892a4" font-size="12">${Math.round(tick).toLocaleString()} ${metric.unit}</text>`;
+      }
+
+      metric.values.forEach((value, index) => {
+        const x = pad.left + slot * index + (slot - barWidth) / 2;
+        if (value === null) {
+          content += `<rect x="${x}" y="${pad.top + 20}" width="${barWidth}" height="${plotH - 20}" rx="9" fill="none" stroke="rgba(148,180,205,.28)" stroke-dasharray="6 6" />`;
+          content += `<text x="${x + barWidth / 2}" y="${pad.top + plotH / 2}" text-anchor="middle" fill="#7892a4" font-size="13">冻结真值</text>`;
+        } else {
+          const barH = value / maxValue * plotH;
+          const y = pad.top + plotH - barH;
+          content += `<rect x="${x}" y="${y}" width="${barWidth}" height="${barH}" rx="9" fill="${stageColors[index]}" opacity=".86"><title>${metric.labels[index]}：${value.toLocaleString()} ${metric.unit}</title></rect>`;
+          content += `<text x="${x + barWidth / 2}" y="${Math.max(18, y - 9)}" text-anchor="middle" fill="#e9f3fa" font-size="13" font-weight="700">${value.toLocaleString()}</text>`;
+        }
+        const labelX = x + barWidth / 2;
+        const words = metric.labels[index].split(" ");
+        content += `<text x="${labelX}" y="${height - 47}" text-anchor="middle" fill="#9db2c2" font-size="12">${words[0]}</text>`;
+        if (words.length > 1) {
+          content += `<text x="${labelX}" y="${height - 29}" text-anchor="middle" fill="#9db2c2" font-size="12">${words.slice(1).join(" ")}</text>`;
+        }
+      });
+
+      svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+      svg.innerHTML = content;
+      document.getElementById("train-chart-note").textContent = metric.note;
+    }
+
+    const trainMetricButtons = document.querySelectorAll("[data-train-metric]");
+    trainMetricButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        trainMetricButtons.forEach((item) => item.classList.toggle("active", item === button));
+        renderTrainChart(button.dataset.trainMetric);
+      });
+    });
+    renderTrainChart("ade");
+
+    const validationMetrics = [
+      { name: "Selection", base: 31.413, teacher: 27.628, unit: "" },
+      { name: "ADE", base: 1130.7, teacher: 771.0, unit: "m" },
+      { name: "FDE", base: 1202.9, teacher: 1040.4, unit: "m" },
+      { name: "Cross p95", base: 3313.2, teacher: 2039.6, unit: "m" },
+      { name: "Altitude p95", base: 692.6, teacher: 364.7, unit: "m" },
+      { name: "Time MAE", base: 20.84, teacher: 14.19, unit: "s" }
+    ];
+
+    function renderValidationChart() {
+      const svg = document.getElementById("validation-chart");
+      const width = 980;
+      const height = 355;
+      const pad = { top: 42, right: 25, bottom: 72, left: 28 };
+      const plotW = width - pad.left - pad.right;
+      const plotH = height - pad.top - pad.bottom;
+      const slot = plotW / validationMetrics.length;
+      const barWidth = Math.min(52, slot * 0.32);
+      let content = "";
+
+      [0, 25, 50, 75, 100].forEach((tick) => {
+        const y = pad.top + plotH * (1 - tick / 100);
+        content += `<line x1="${pad.left}" y1="${y}" x2="${width - pad.right}" y2="${y}" stroke="rgba(148,180,205,.13)" />`;
+        content += `<text x="${pad.left}" y="${y - 5}" fill="#7892a4" font-size="11">${tick}% of baseline</text>`;
+      });
+
+      validationMetrics.forEach((metric, index) => {
+        const center = pad.left + slot * index + slot / 2;
+        const teacherPct = metric.teacher / metric.base * 100;
+        const reduction = (1 - metric.teacher / metric.base) * 100;
+        const baseH = plotH;
+        const teacherH = plotH * teacherPct / 100;
+        const baseX = center - barWidth - 3;
+        const teacherX = center + 3;
+        content += `<rect x="${baseX}" y="${pad.top}" width="${barWidth}" height="${baseH}" rx="7" fill="#69a9ff" opacity=".68"><title>${metric.name} baseline: ${metric.base} ${metric.unit}</title></rect>`;
+        content += `<rect x="${teacherX}" y="${pad.top + plotH - teacherH}" width="${barWidth}" height="${teacherH}" rx="7" fill="#71e0a3" opacity=".9"><title>${metric.name} teacher: ${metric.teacher} ${metric.unit}</title></rect>`;
+        content += `<text x="${center}" y="25" text-anchor="middle" fill="#71e0a3" font-size="13" font-weight="800">−${reduction.toFixed(1)}%</text>`;
+        content += `<text x="${center}" y="${height - 42}" text-anchor="middle" fill="#9db2c2" font-size="12">${metric.name}</text>`;
+        content += `<text x="${center}" y="${height - 24}" text-anchor="middle" fill="#7892a4" font-size="11">${metric.teacher} ${metric.unit}</text>`;
+      });
+
+      svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+      svg.innerHTML = content;
+    }
+    renderValidationChart();
+
+    const domains = {
+      trajectory: {
+        title: "航空轨迹控制",
+        summary: "用已知训练未来求出每条航迹的可行控制，再让历史编码器学习快速预测。",
+        privilege: "完整训练未来、真实终止时刻与状态轨迹",
+        teacher: "逆动力学初始化 + 可微动力学直接优化",
+        target: "分段控制、时长分配与总时长",
+        student: "历史序列 → 控制与时长 → rollout",
+        correction: "闭环纠偏：几何、速度、终端位置/速度和时间任务损失。"
+      },
+      robotics: {
+        title: "机器人运动控制",
+        summary: "离线规划器可看完整地图和目标轨迹，线上策略只能看传感器与当前状态。",
+        privilege: "完整环境地图、未来参考轨迹、精确接触状态",
+        teacher: "轨迹优化、MPC、采样规划或最优控制",
+        target: "动作序列、路点、接触计划或 value target",
+        student: "局部观测 → 实时动作 / 短期计划",
+        correction: "闭环纠偏：仿真 rollout、行为约束与成功率目标；注意 sim-to-real 偏差。"
+      },
+      inverse: {
+        title: "成像 / 逆问题",
+        summary: "昂贵迭代重建在训练期产生高质量解，轻量网络学习 warm start 或近似求解。",
+        privilege: "高采样观测、长迭代预算或训练期真值图像",
+        teacher: "变分优化、稀疏重建、迭代物理求解器",
+        target: "重建结果、潜变量或优化迭代轨迹",
+        student: "欠采样观测 → 快速重建 / 初始解",
+        correction: "任务纠偏：数据一致性层和前向测量模型，避免只追求感知相似。"
+      },
+      routing: {
+        title: "调度与路径规划",
+        summary: "精确或高预算求解器离线解训练实例，模型学习快速构造可行方案。",
+        privilege: "训练实例全部订单、未来需求或更长求解时间",
+        teacher: "MIP、CP-SAT、分支定界或大规模搜索",
+        target: "访问顺序、分配决策、变量边际或搜索提示",
+        student: "当前实例特征 → 快速调度 / 路由决策",
+        correction: "任务纠偏：可行性修复器与真实成本；多最优解时避免逐位置硬 MSE。"
+      },
+      perception: {
+        title: "特权传感器感知",
+        summary: "训练时用更丰富传感器或多视角构造监督，部署时只保留低成本传感器。",
+        privilege: "LiDAR、多视角、深度相机或高精标注",
+        teacher: "多模态融合模型、离线几何重建或跟踪器",
+        target: "深度、占据、目标轨迹或中间特征",
+        student: "单目 / 稀疏传感器 → 部署感知结果",
+        correction: "任务纠偏：可见性建模与不确定性；不可从部署输入恢复的信息不能被强行蒸馏。"
+      },
+      science: {
+        title: "科学计算代理模型",
+        summary: "高保真数值求解器生成训练解场，代理模型学习低延迟预测。",
+        privilege: "高分辨率网格、完整边界条件和大计算预算",
+        teacher: "PDE 求解器、伴随优化或高保真仿真",
+        target: "解场、通量、隐式算子或校正量",
+        student: "参数与低分辨率状态 → 快速代理解",
+        correction: "任务纠偏：守恒残差、边界条件和少量高保真 validation，而非仅做点值回归。"
+      }
+    };
+
+    const domainButtons = document.querySelectorAll("[data-domain]");
+    function setDomain(key) {
+      const domain = domains[key];
+      document.getElementById("domain-title").textContent = domain.title;
+      document.getElementById("domain-summary").textContent = domain.summary;
+      document.getElementById("domain-privilege").textContent = domain.privilege;
+      document.getElementById("domain-teacher").textContent = domain.teacher;
+      document.getElementById("domain-target").textContent = domain.target;
+      document.getElementById("domain-student").textContent = domain.student;
+      document.getElementById("domain-correction").textContent = domain.correction;
+      domainButtons.forEach((button) => {
+        const selected = button.dataset.domain === key;
+        button.classList.toggle("active", selected);
+        button.setAttribute("aria-selected", String(selected));
+      });
+    }
+
+    domainButtons.forEach((button) => button.addEventListener("click", () => setDomain(button.dataset.domain)));
+    setDomain("trajectory");
+  </script>
+</body>
+</html>

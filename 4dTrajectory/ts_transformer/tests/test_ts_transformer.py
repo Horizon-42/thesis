@@ -76,6 +76,7 @@ from config import (  # noqa: E402
     CONTROL_ARC_LOCAL_VELOCITY_TANGENT_SPEED,
     CONTROL_ARC_TERMINAL_RUNWAY_COMPONENTS,
     CONTROL_DYNAMICS_REANCHORED_RK4,
+    CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
     CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
     CONTROL_DURATION_DIRECT, CONTROL_DURATION_FACTORIZED,
     CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED,
@@ -87,6 +88,9 @@ from config import (  # noqa: E402
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
     CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
+    CONTROL_TERMINAL_CLOCK_PREDICTED,
+    CONTROL_TERMINAL_CLOCK_PREDICTED_DETACHED_TIME,
+    CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
     PREDICTION_CONTROL, PREDICTION_CONTROL_MIXTURE,
     TSConfig, control_recipe,
 )
@@ -1866,23 +1870,23 @@ def test_control_output_is_parallel_and_requires_normalized_horizon():
         TSConfig(prediction_output=PREDICTION_CONTROL, horizon_mode=HORIZON_FULL)
 
 
-def test_transport_chart_dynamics_is_an_explicit_control_only_contract():
+@pytest.mark.parametrize(
+    "backend",
+    [
+        CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
+        CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
+    ],
+)
+def test_transport_chart_dynamics_is_an_explicit_control_only_contract(backend):
     config = TSConfig(
         prediction_output=PREDICTION_CONTROL,
-        control_dynamics_backend=CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
+        control_dynamics_backend=backend,
     )
 
-    assert control_recipe(config)["dynamics_backend"] == (
-        CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY
-    )
-    assert (
-        "+dynamics=transport-chart-velocity-v1"
-        in train_module.target_contract(config)
-    )
+    assert control_recipe(config)["dynamics_backend"] == backend
+    assert f"+dynamics={backend}-v1" in train_module.target_contract(config)
     with pytest.raises(ValueError, match="requires a control prediction output"):
-        TSConfig(
-            control_dynamics_backend=CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY
-        )
+        TSConfig(control_dynamics_backend=backend)
 
 
 def test_control_mixture_is_an_explicit_validated_mode():
@@ -1898,6 +1902,7 @@ def test_control_mixture_is_an_explicit_validated_mode():
         "duration_parameterization": CONTROL_DURATION_FACTORIZED,
         "value_parameterization": CONTROL_VALUE_ABSOLUTE,
         "dynamics_backend": CONTROL_DYNAMICS_REANCHORED_RK4,
+        "reference_velocity_source": config.reference_velocity_source,
         "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
         "state_supervision_clock": config.control_state_supervision_clock,
         "state_loss_grid": config.control_state_loss_grid,
@@ -1937,6 +1942,9 @@ def test_control_mixture_is_an_explicit_validated_mode():
             "terminal_position_scale_m": config.control_terminal_position_scale_m,
             "terminal_velocity_scale_mps": (
                 config.control_terminal_velocity_scale_mps
+            ),
+            "terminal_supervision_clock": (
+                config.control_terminal_supervision_clock
             ),
         "state_duration_gradient": True,
         "horizon_curriculum_s": [],
@@ -2119,6 +2127,7 @@ def test_legacy_control_config_without_state_loss_grid_is_rejected():
         "control_terminal_velocity_loss_weight",
         "control_terminal_position_scale_m",
         "control_terminal_velocity_scale_mps",
+        "control_terminal_supervision_clock",
     ],
 )
 def test_legacy_control_config_without_physical_criteria_recipe_is_rejected(field):
@@ -2233,6 +2242,36 @@ def test_arc_length_geometry_objective_requires_aligned_selection_and_weights():
         "arc_vertical_velocity",
     )
     assert "arc-length-geometry" in train_module.target_contract(config)
+
+
+def test_predicted_terminal_clock_requires_dual_clock_physical_objective():
+    common = {
+        "prediction_output": PREDICTION_CONTROL,
+        "control_terminal_supervision_clock": CONTROL_TERMINAL_CLOCK_PREDICTED,
+    }
+    with pytest.raises(ValueError, match="observed dense-state"):
+        TSConfig(**common)
+    with pytest.raises(ValueError, match="fixed-dt state loss"):
+        TSConfig(
+            **common,
+            control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
+        )
+    with pytest.raises(ValueError, match="terminal-state or arc-length-geometry"):
+        TSConfig(
+            **common,
+            control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
+            control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
+        )
+    config = TSConfig(
+        **common,
+        control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
+        control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
+        control_state_objective=CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
+        checkpoint_selection_metric=CHECKPOINT_SELECTION_ARC_LENGTH_GEOMETRY,
+    )
+
+    assert control_recipe(config)["terminal_supervision_clock"] == "predicted"
+    assert "terminal-clock=predicted" in train_module.target_contract(config)
 
 
 def test_arc_loss_ablation_components_share_one_objective_and_recipe():
@@ -3234,6 +3273,7 @@ def test_physical_criteria_trains_both_backbones_without_duration_state_gradient
     [
         CONTROL_DYNAMICS_REANCHORED_RK4,
         CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
+        CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
     ],
 )
 @pytest.mark.parametrize("model_name", ["itransformer", "patchtst"])
@@ -3310,6 +3350,33 @@ def test_pipeline_carries_and_names_transport_chart_dynamics():
     assert "transport-chart-velocity dynamics" in prediction.label
 
 
+def test_pipeline_carries_and_names_scaled_transport_chart_dynamics():
+    plan = pipeline_module.TrainingPlan(
+        (AIRPORT,),
+        "itransformer",
+        training_mode="pooled",
+        prediction_output=PREDICTION_CONTROL,
+        control_dynamics_backend=(
+            CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY
+        ),
+    )
+    recipe = plan._recipe_args()
+    config, _source = plan.resolved_train_config(use_best_config=False)
+    prediction = pipeline_module.PredictionPlan(
+        plan, AIRPORT, ("eval",), split="val"
+    )
+
+    assert recipe[recipe.index("--control-dynamics-backend") + 1] == (
+        CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY
+    )
+    assert config.control_dynamics_backend == (
+        CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY
+    )
+    assert plan.train_dir.name.endswith("_stcv")
+    assert "scaled_transport_chart_velocity" in prediction.category
+    assert "scaled-transport-chart-velocity dynamics" in prediction.label
+
+
 def test_transport_chart_prediction_directory_stays_within_component_limit():
     plan = pipeline_module.TrainingPlan(
         (AIRPORT,),
@@ -3337,6 +3404,48 @@ def test_transport_chart_prediction_directory_stays_within_component_limit():
     assert len(prediction.pred_dir.name.encode("utf-8")) <= 255
     assert "transport_chart_velocity" in prediction.category
     assert "transport-chart-velocity dynamics" in prediction.label
+
+
+def test_terminal_clock_artifact_keys_are_compact_and_collision_free():
+    modes = (
+        (CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION, ""),
+        (CONTROL_TERMINAL_CLOCK_PREDICTED, "_tcp"),
+        (CONTROL_TERMINAL_CLOCK_PREDICTED_DETACHED_TIME, "_tcpdt"),
+    )
+    train_dirs = []
+    prediction_dirs = []
+    categories = []
+
+    for terminal_clock, filesystem_tag in modes:
+        plan = pipeline_module.TrainingPlan(
+            (AIRPORT,),
+            "itransformer",
+            training_mode="pooled",
+            prediction_output=PREDICTION_CONTROL,
+            control_state_clock=CONTROL_STATE_CLOCK_OBSERVED,
+            control_terminal_clock=terminal_clock,
+            control_state_loss_grid=CONTROL_STATE_LOSS_GRID_FIXED_DT,
+            control_state_objective=CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
+            control_state_duration_gradient=False,
+        )
+        prediction = pipeline_module.PredictionPlan(
+            plan, AIRPORT, ("eval",), split="val"
+        )
+
+        assert len(plan.train_dir.name.encode("utf-8")) <= 255
+        assert len(prediction.pred_dir.name.encode("utf-8")) <= 255
+        if filesystem_tag:
+            assert filesystem_tag in plan.train_dir.name
+            assert filesystem_tag in prediction.pred_dir.name
+        train_dirs.append(plan.train_dir)
+        prediction_dirs.append(prediction.pred_dir)
+        categories.append(prediction.category)
+
+    assert len(set(train_dirs)) == len(modes)
+    assert len(set(prediction_dirs)) == len(modes)
+    assert len(set(categories)) == len(modes)
+    assert "terminal_predicted_clock" in categories[1]
+    assert "terminal_predicted_detached_time_clock" in categories[2]
 
 
 def test_fixed_dt_control_targets_gather_existing_two_second_reference_rows():
@@ -5225,6 +5334,7 @@ def test_control_training_checkpoint_round_trip_keeps_output_identity(
         "duration_parameterization": duration_parameterization,
         "value_parameterization": CONTROL_VALUE_ABSOLUTE,
         "dynamics_backend": CONTROL_DYNAMICS_REANCHORED_RK4,
+        "reference_velocity_source": config.reference_velocity_source,
         "rollout_integrator_dt_s": config.control_rollout_integrator_dt_s,
         "state_supervision_clock": config.control_state_supervision_clock,
         "state_loss_grid": config.control_state_loss_grid,
@@ -5264,6 +5374,9 @@ def test_control_training_checkpoint_round_trip_keeps_output_identity(
             "terminal_position_scale_m": config.control_terminal_position_scale_m,
             "terminal_velocity_scale_mps": (
                 config.control_terminal_velocity_scale_mps
+            ),
+            "terminal_supervision_clock": (
+                config.control_terminal_supervision_clock
             ),
         "state_duration_gradient": True,
         "horizon_curriculum_s": [],

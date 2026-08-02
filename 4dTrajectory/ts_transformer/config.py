@@ -21,6 +21,10 @@ from typing import Any
 # Channel order is a hard contract between the data build, the model, and the export.
 # It lives in channels.py; imported here so the default cannot drift from it.
 from channels import CHANNELS
+from reference_velocity import (
+    REFERENCE_VELOCITY_SOURCES,
+    REFERENCE_VELOCITY_TRACK_FIT,
+)
 
 MODELS = ("itransformer", "patchtst")
 COORDINATE_FRAMES = ("enu", "runway-aligned")
@@ -43,6 +47,14 @@ CONTROL_STATE_CLOCK_OBSERVED = "observed"
 CONTROL_STATE_CLOCKS = (
     CONTROL_STATE_CLOCK_PREDICTED,
     CONTROL_STATE_CLOCK_OBSERVED,
+)
+CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION = "state-supervision"
+CONTROL_TERMINAL_CLOCK_PREDICTED = "predicted"
+CONTROL_TERMINAL_CLOCK_PREDICTED_DETACHED_TIME = "predicted-detached-time"
+CONTROL_TERMINAL_CLOCKS = (
+    CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
+    CONTROL_TERMINAL_CLOCK_PREDICTED,
+    CONTROL_TERMINAL_CLOCK_PREDICTED_DETACHED_TIME,
 )
 CONTROL_STATE_LOSS_GRID_NATIVE = "native-segment-endpoints"
 CONTROL_STATE_LOSS_GRID_FIXED_DT = "fixed-dt"
@@ -86,9 +98,13 @@ CONTROL_VALUE_PARAMETERIZATIONS = (
 )
 CONTROL_DYNAMICS_REANCHORED_RK4 = "reanchored-rk4"
 CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY = "transport-chart-velocity"
+CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY = (
+    "scaled-transport-chart-velocity"
+)
 CONTROL_DYNAMICS_BACKENDS = (
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
+    CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
 )
 CONTROL_GRADIENT_CLIP_GLOBAL = "global"
 CONTROL_GRADIENT_CLIP_FINAL_TIME_DECOUPLED = "final-time-decoupled"
@@ -205,6 +221,10 @@ class TSConfig:
     # along the first axis. It keeps the six-channel tensor shape while removing a major
     # source of cross-airport orientation variance.
     coordinate_frame: str = "enu"
+    # Velocity-state supervision may retain the upstream centred track fit or be rebuilt
+    # causally from the uniform chart positions.  This changes both model inputs and
+    # measured velocity targets, so it is an explicit checkpoint recipe field.
+    reference_velocity_source: str = REFERENCE_VELOCITY_TRACK_FIT
 
     # ── architecture, shared by both models ─────────────────────────────────
     d_model: int = 256
@@ -345,6 +365,12 @@ class TSConfig:
     control_terminal_velocity_loss_weight: float = 1.0
     control_terminal_position_scale_m: float = 100.0
     control_terminal_velocity_scale_mps: float = 10.0
+    # Terminal state may share the state-supervision rollout or use a second deployable
+    # predicted-clock rollout. The latter keeps dense geometry on the observed clock while
+    # full-horizon terminal errors train the inference clock.
+    control_terminal_supervision_clock: str = (
+        CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION
+    )
     # Whether state-rollout gradients may update the learned duration partition. Turning
     # this off leaves the final-time loss trainable while controls own geometry fitting.
     control_state_duration_gradient: bool = True
@@ -408,6 +434,11 @@ class TSConfig:
                 f"unknown coordinate_frame {self.coordinate_frame!r}; "
                 f"expected one of {COORDINATE_FRAMES}"
             )
+        if self.reference_velocity_source not in REFERENCE_VELOCITY_SOURCES:
+            raise ValueError(
+                f"unknown reference_velocity_source {self.reference_velocity_source!r}; "
+                f"expected one of {REFERENCE_VELOCITY_SOURCES}"
+            )
         if self.aircraft_filter not in AIRCRAFT_FILTERS:
             raise ValueError(
                 f"unknown aircraft_filter {self.aircraft_filter!r}; "
@@ -430,6 +461,12 @@ class TSConfig:
                 "unknown control_state_supervision_clock "
                 f"{self.control_state_supervision_clock!r}; expected one of "
                 f"{CONTROL_STATE_CLOCKS}"
+            )
+        if self.control_terminal_supervision_clock not in CONTROL_TERMINAL_CLOCKS:
+            raise ValueError(
+                "unknown control_terminal_supervision_clock "
+                f"{self.control_terminal_supervision_clock!r}; expected one of "
+                f"{CONTROL_TERMINAL_CLOCKS}"
             )
         if self.control_state_loss_grid not in CONTROL_STATE_LOSS_GRIDS:
             raise ValueError(
@@ -487,6 +524,44 @@ class TSConfig:
                     f"{self.control_state_objective} control objective requires "
                     "control_state_loss_grid='fixed-dt'"
                 )
+        if (
+            self.control_terminal_supervision_clock
+            in (
+                CONTROL_TERMINAL_CLOCK_PREDICTED,
+                CONTROL_TERMINAL_CLOCK_PREDICTED_DETACHED_TIME,
+            )
+        ):
+            if self.prediction_output != PREDICTION_CONTROL:
+                raise ValueError(
+                    "predicted terminal supervision clock requires "
+                    "prediction_output='control'"
+                )
+            if self.control_state_supervision_clock != CONTROL_STATE_CLOCK_OBSERVED:
+                raise ValueError(
+                    "predicted terminal supervision clock requires observed dense-state "
+                    "supervision"
+                )
+            if self.control_state_loss_grid != CONTROL_STATE_LOSS_GRID_FIXED_DT:
+                raise ValueError(
+                    "predicted terminal supervision clock requires fixed-dt state loss"
+                )
+            if self.control_state_objective not in (
+                CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
+                CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
+            ):
+                raise ValueError(
+                    "predicted terminal supervision clock requires a terminal-state or "
+                    "arc-length-geometry objective"
+                )
+        if (
+            self.control_terminal_supervision_clock
+            == CONTROL_TERMINAL_CLOCK_PREDICTED_DETACHED_TIME
+            and self.control_duration_parameterization != CONTROL_DURATION_FACTORIZED
+        ):
+            raise ValueError(
+                "predicted-detached-time terminal supervision requires factorized "
+                "durations"
+            )
         if (
             self.control_state_objective == CONTROL_STATE_OBJECTIVE_TERMINAL_STATE
             and self.checkpoint_selection_metric != CHECKPOINT_SELECTION_TERMINAL_STATE
@@ -939,6 +1014,7 @@ class TSConfig:
             "control_terminal_velocity_loss_weight",
             "control_terminal_position_scale_m",
             "control_terminal_velocity_scale_mps",
+            "control_terminal_supervision_clock",
         ):
             if (
                 uses_control_dynamics(data.get("prediction_output", PREDICTION_STATE))
@@ -948,6 +1024,11 @@ class TSConfig:
                     f"serialized control config is missing {field_name}; "
                     "regenerate the derived checkpoint"
                 )
+        if "reference_velocity_source" not in data:
+            raise ValueError(
+                "serialized config is missing reference_velocity_source; "
+                "regenerate the derived checkpoint"
+            )
         data["channels"] = tuple(data["channels"])
         if "control_horizon_curriculum_s" in data:
             data["control_horizon_curriculum_s"] = tuple(
@@ -959,6 +1040,7 @@ class TSConfig:
 def control_recipe(config: TSConfig) -> dict[str, Any]:
     """Serialize the complete recipe for a control-output strategy."""
     base: dict[str, Any] = {
+        "reference_velocity_source": config.reference_velocity_source,
         "effort_loss_weight": config.control_effort_loss_weight,
         "smoothness_loss_weight": config.control_smoothness_loss_weight,
         "duration_parameterization": config.control_duration_parameterization,
@@ -998,6 +1080,7 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
         "terminal_velocity_loss_weight": config.control_terminal_velocity_loss_weight,
         "terminal_position_scale_m": config.control_terminal_position_scale_m,
         "terminal_velocity_scale_mps": config.control_terminal_velocity_scale_mps,
+        "terminal_supervision_clock": config.control_terminal_supervision_clock,
         "state_duration_gradient": config.control_state_duration_gradient,
         "horizon_curriculum_s": list(config.control_horizon_curriculum_s),
         "horizon_curriculum_stage_epochs": (

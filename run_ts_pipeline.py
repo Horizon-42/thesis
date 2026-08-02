@@ -51,6 +51,7 @@ from config import (  # noqa: E402
     CHECKPOINT_SELECTION_OBJECTIVE,
     CONTROL_DYNAMICS_BACKENDS,
     CONTROL_DYNAMICS_REANCHORED_RK4,
+    CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
     CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
     CONTROL_DURATION_FACTORIZED,
     CONTROL_DURATION_PARAMETERIZATIONS,
@@ -67,6 +68,10 @@ from config import (  # noqa: E402
     CONTROL_STATE_OBJECTIVE_PHYSICAL_CRITERIA,
     CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
     CONTROL_STATE_OBJECTIVES,
+    CONTROL_TERMINAL_CLOCKS,
+    CONTROL_TERMINAL_CLOCK_PREDICTED,
+    CONTROL_TERMINAL_CLOCK_PREDICTED_DETACHED_TIME,
+    CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
     DEFAULT_CONTROL_HORIZON_CURRICULUM_STAGE_EPOCHS,
     DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S,
     DEFAULT_VALIDATION_COMMON_GRID_POINTS,
@@ -176,6 +181,42 @@ def _control_clock_tag(prediction_output: str, state_clock: str) -> str:
     return f"_{state_clock}_clock"
 
 
+def _control_terminal_clock_tag(
+    prediction_output: str, terminal_clock: str
+) -> str:
+    if (
+        prediction_output != PREDICTION_CONTROL
+        or terminal_clock == CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION
+    ):
+        return ""
+    return f"_terminal_{terminal_clock.replace('-', '_')}_clock"
+
+
+_CONTROL_TERMINAL_CLOCK_FILESYSTEM_TAGS = {
+    CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION: "",
+    CONTROL_TERMINAL_CLOCK_PREDICTED: "_tcp",
+    CONTROL_TERMINAL_CLOCK_PREDICTED_DETACHED_TIME: "_tcpdt",
+}
+
+
+def _control_terminal_clock_filesystem_tag(
+    prediction_output: str, terminal_clock: str
+) -> str:
+    if prediction_output != PREDICTION_CONTROL:
+        return ""
+    return _CONTROL_TERMINAL_CLOCK_FILESYSTEM_TAGS[terminal_clock]
+
+
+def _control_terminal_clock_label(terminal_clock: str) -> str:
+    if terminal_clock == CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION:
+        return ""
+    if terminal_clock == CONTROL_TERMINAL_CLOCK_PREDICTED:
+        return "deployable predicted-clock terminal (joint time gradient), "
+    if terminal_clock == CONTROL_TERMINAL_CLOCK_PREDICTED_DETACHED_TIME:
+        return "deployable predicted-clock terminal (detached total-time gradient), "
+    raise ValueError(f"unknown control terminal clock {terminal_clock!r}")
+
+
 def _control_state_loss_grid_tag(prediction_output: str, loss_grid: str) -> str:
     if not uses_control_dynamics(prediction_output) or loss_grid == CONTROL_STATE_LOSS_GRID_NATIVE:
         return ""
@@ -212,6 +253,7 @@ def _control_dynamics_tag(prediction_output: str, backend: str) -> str:
 _CONTROL_DYNAMICS_FILESYSTEM_TAGS = {
     CONTROL_DYNAMICS_REANCHORED_RK4: "",
     CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY: "_tcv",
+    CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY: "_stcv",
 }
 
 
@@ -413,6 +455,7 @@ class TrainingPlan:
         control_terminal_velocity_weight: float = 1.0,
         control_terminal_position_scale_m: float = 100.0,
         control_terminal_velocity_scale_mps: float = 10.0,
+        control_terminal_clock: str = CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
         control_duration_parameterization: str = CONTROL_DURATION_FACTORIZED,
         control_value_parameterization: str = CONTROL_VALUE_ABSOLUTE,
         control_dynamics_backend: str = CONTROL_DYNAMICS_REANCHORED_RK4,
@@ -489,6 +532,7 @@ class TrainingPlan:
         self.control_terminal_velocity_weight = control_terminal_velocity_weight
         self.control_terminal_position_scale_m = control_terminal_position_scale_m
         self.control_terminal_velocity_scale_mps = control_terminal_velocity_scale_mps
+        self.control_terminal_clock = control_terminal_clock
         self.control_duration_parameterization = control_duration_parameterization
         self.control_value_parameterization = control_value_parameterization
         self.control_dynamics_backend = control_dynamics_backend
@@ -521,6 +565,9 @@ class TrainingPlan:
                 prediction_output, control_dynamics_backend
             )
             + _control_clock_tag(prediction_output, control_state_clock)
+            + _control_terminal_clock_filesystem_tag(
+                prediction_output, control_terminal_clock
+            )
             + _control_state_loss_grid_tag(prediction_output, control_state_loss_grid)
             + _control_objective_tag(prediction_output, control_state_objective)
             + _terminal_tracking_recipe_tag(
@@ -660,6 +707,8 @@ class TrainingPlan:
             str(self.control_terminal_position_scale_m),
             "--control-terminal-velocity-scale-mps",
             str(self.control_terminal_velocity_scale_mps),
+            "--control-terminal-clock",
+            self.control_terminal_clock,
         ]
         args += [
             "--control-duration-parameterization",
@@ -868,6 +917,7 @@ class TrainingPlan:
             "control_terminal_velocity_scale_mps": (
                 self.control_terminal_velocity_scale_mps
             ),
+            "control_terminal_supervision_clock": self.control_terminal_clock,
             "control_state_duration_gradient": self.control_state_duration_gradient,
             "control_horizon_curriculum_s": self.control_horizon_curriculum_s,
             "control_horizon_curriculum_stage_epochs": (
@@ -1006,6 +1056,7 @@ class TrainingPlan:
             "control_terminal_velocity_scale_mps": (
                 self.control_terminal_velocity_scale_mps
             ),
+            "control_terminal_supervision_clock": self.control_terminal_clock,
             "control_state_duration_gradient": self.control_state_duration_gradient,
             "control_horizon_curriculum_s": self.control_horizon_curriculum_s,
             "control_horizon_curriculum_stage_epochs": (
@@ -1112,6 +1163,14 @@ class PredictionPlan:
         control_clock = _control_clock_tag(
             training.prediction_output, training.control_state_clock
         )
+        control_terminal_clock_filesystem = (
+            _control_terminal_clock_filesystem_tag(
+                training.prediction_output, training.control_terminal_clock
+            )
+        )
+        control_terminal_clock = _control_terminal_clock_tag(
+            training.prediction_output, training.control_terminal_clock
+        )
         control_state_loss_grid = _control_state_loss_grid_tag(
             training.prediction_output, training.control_state_loss_grid
         )
@@ -1135,7 +1194,7 @@ class PredictionPlan:
         stem = (
             f"{scope}{training.model}{prediction_output}{control_duration}{control_value}"
             f"{control_dynamics_filesystem}"
-            f"{control_clock}_{horizon_tag}"
+            f"{control_clock}{control_terminal_clock_filesystem}_{horizon_tag}"
             f"{control_state_loss_grid}{control_objective}{duration_gradient}"
             f"{horizon_curriculum}{gradient_clip}"
             f"{aircraft_filter}{frame}{anchor}{training_cohort}"
@@ -1148,7 +1207,8 @@ class PredictionPlan:
         category_scope = "pooled_" if training.pooled else ""
         self.category = (
             f"ts_{category_scope}{MODEL_SHORT[training.model]}{prediction_output}"
-            f"{control_duration}{control_value}{control_dynamics}_{horizon_tag}"
+            f"{control_duration}{control_value}{control_dynamics}"
+            f"{control_terminal_clock}_{horizon_tag}"
             f"{control_state_loss_grid}{control_objective}{duration_gradient}"
             f"{horizon_curriculum}{gradient_clip}"
             f"{aircraft_filter}{frame}{anchor}{training_cohort}"
@@ -1209,6 +1269,9 @@ class PredictionPlan:
             if not training.control_state_duration_gradient
             else ""
         )
+        terminal_clock_label = _control_terminal_clock_label(
+            training.control_terminal_clock
+        )
         curriculum_label = _control_horizon_curriculum_label(
             training.control_horizon_curriculum_s,
             training.control_horizon_curriculum_stage_epochs,
@@ -1220,7 +1283,7 @@ class PredictionPlan:
         self.label = (
             f"{SPLIT_LABELS[split]} — Predicted ({model_label}, {pooled_label}"
             f"{output_label}{value_label}{dynamics_label}{state_loss_label}{objective_label}"
-            f"{duration_gradient_label}"
+            f"{duration_gradient_label}{terminal_clock_label}"
             f"{curriculum_label}{gradient_clip_label}"
             f"{anchor_label}{horizon_label}, {frame_label})"
         )
@@ -1569,6 +1632,11 @@ def main() -> None:
     parser.add_argument("--control-terminal-position-scale-m", type=float, default=100.0)
     parser.add_argument("--control-terminal-velocity-scale-mps", type=float, default=10.0)
     parser.add_argument(
+        "--control-terminal-clock",
+        choices=CONTROL_TERMINAL_CLOCKS,
+        default=CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
+    )
+    parser.add_argument(
         "--control-duration-parameterization",
         choices=CONTROL_DURATION_PARAMETERIZATIONS,
         default=CONTROL_DURATION_FACTORIZED,
@@ -1769,6 +1837,7 @@ def main() -> None:
             control_terminal_velocity_scale_mps=(
                 args.control_terminal_velocity_scale_mps
             ),
+            control_terminal_clock=args.control_terminal_clock,
             control_duration_parameterization=args.control_duration_parameterization,
             control_value_parameterization=args.control_value_parameterization,
             control_dynamics_backend=args.control_dynamics_backend,

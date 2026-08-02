@@ -40,6 +40,7 @@ from config import (  # noqa: E402
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
     CONTROL_STATE_OBJECTIVES,
+    CONTROL_TERMINAL_CLOCKS,
     PREDICTION_CONTROL,
     TSConfig,
 )
@@ -50,6 +51,7 @@ from dataset import (  # noqa: E402
 from fixed_dt_control_loss import fixed_dt_control_state_loss  # noqa: E402
 from models import parameter_count  # noqa: E402
 from metrics import raw_kinematic_metrics  # noqa: E402
+from reference_velocity import REFERENCE_VELOCITY_SOURCES  # noqa: E402
 from train_only_diagnostics import select_outer_train_series  # noqa: E402
 from train import (  # noqa: E402
     control_state_supervision_prediction,
@@ -308,6 +310,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--patience", type=int, default=150)
     parser.add_argument("--n-segments", type=int, default=64)
     parser.add_argument("--learning-rate", type=float, default=5e-4)
+    parser.add_argument(
+        "--reference-velocity-source",
+        choices=REFERENCE_VELOCITY_SOURCES,
+        default="track-fit",
+    )
     parser.add_argument("--lr-plateau-patience", type=int, default=100)
     parser.add_argument(
         "--duration-parameterization",
@@ -360,6 +367,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--control-terminal-velocity-weight", type=float, default=1.0)
     parser.add_argument("--control-terminal-position-scale-m", type=float, default=100.0)
     parser.add_argument("--control-terminal-velocity-scale-mps", type=float, default=10.0)
+    parser.add_argument(
+        "--control-terminal-clock",
+        choices=CONTROL_TERMINAL_CLOCKS,
+        default="state-supervision",
+    )
     parser.add_argument("--control-effort-weight", type=float, default=0.0)
     parser.add_argument("--control-smoothness-weight", type=float, default=0.0)
     parser.add_argument("--device", default="auto")
@@ -380,6 +392,7 @@ def main(argv: list[str] | None = None) -> int:
     config = TSConfig(
         model="itransformer",
         prediction_output=PREDICTION_CONTROL,
+        reference_velocity_source=args.reference_velocity_source,
         control_dynamics_backend=args.control_dynamics_backend,
         control_duration_parameterization=args.duration_parameterization,
         control_state_supervision_clock=CONTROL_STATE_CLOCK_OBSERVED,
@@ -419,6 +432,7 @@ def main(argv: list[str] | None = None) -> int:
         control_terminal_velocity_loss_weight=args.control_terminal_velocity_weight,
         control_terminal_position_scale_m=args.control_terminal_position_scale_m,
         control_terminal_velocity_scale_mps=args.control_terminal_velocity_scale_mps,
+        control_terminal_supervision_clock=args.control_terminal_clock,
         n_segments=args.n_segments,
         epochs=args.epochs,
         patience=min(args.patience, args.epochs),

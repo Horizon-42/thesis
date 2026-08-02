@@ -25,8 +25,14 @@ from aerodynamic_model.torch_transport_chart_dynamics import (
     transport_chart_state_to_channels,
     transport_chart_state_to_geodetic,
 )
+from aerodynamic_model.torch_scaled_transport_chart_dynamics import (
+    rollout_piecewise_constant as scaled_transport_endpoint_rollout,
+    rollout_piecewise_constant_at_times as scaled_transport_dense_rollout,
+    scaled_to_physical_transport_chart_state,
+)
 from config import (
     CONTROL_DYNAMICS_REANCHORED_RK4,
+    CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
     CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY,
     TSConfig,
 )
@@ -202,9 +208,83 @@ class TransportChartVelocityBackend(ControlDynamicsBackend):
         )
 
 
+class ScaledTransportChartVelocityBackend(ControlDynamicsBackend):
+    """Order-one internal state with the existing physical public contract."""
+
+    def endpoint_rollout(
+        self,
+        initial_geodetic_states: torch.Tensor,
+        controls: torch.Tensor,
+        segment_durations_s: torch.Tensor,
+        aero_params: torch.Tensor,
+        frame_params: torch.Tensor,
+        config: TSConfig,
+    ) -> EndpointControlRollout:
+        scaled_states = scaled_transport_endpoint_rollout(
+            initial_geodetic_states,
+            controls,
+            segment_durations_s,
+            aero_params,
+            frame_params,
+            integrator_dt_s=config.control_rollout_integrator_dt_s,
+        )
+        physical_states = scaled_to_physical_transport_chart_state(scaled_states)
+        return EndpointControlRollout(
+            transport_chart_state_to_channels(
+                physical_states,
+                frame_params,
+                runway_aligned=config.coordinate_frame == "runway-aligned",
+            ),
+            transport_chart_state_to_geodetic(physical_states, frame_params),
+        )
+
+    def dense_rollout(
+        self,
+        initial_geodetic_states: torch.Tensor,
+        controls: torch.Tensor,
+        segment_durations_s: torch.Tensor,
+        aero_params: torch.Tensor,
+        frame_params: torch.Tensor,
+        query_offsets_s: torch.Tensor,
+        query_valid: torch.Tensor,
+        config: TSConfig,
+        *,
+        segment_valid: torch.Tensor | None,
+    ) -> DenseControlRolloutChannels:
+        rollout = scaled_transport_dense_rollout(
+            initial_geodetic_states,
+            controls,
+            segment_durations_s,
+            aero_params,
+            frame_params,
+            query_offsets_s,
+            query_valid,
+            segment_valid=segment_valid,
+            integrator_dt_s=config.control_rollout_integrator_dt_s,
+        )
+        query_states = scaled_to_physical_transport_chart_state(
+            rollout.query_states
+        )
+        endpoint_states = scaled_to_physical_transport_chart_state(
+            rollout.segment_end_states
+        )
+        runway_aligned = config.coordinate_frame == "runway-aligned"
+        return DenseControlRolloutChannels(
+            transport_chart_state_to_channels(
+                query_states, frame_params, runway_aligned=runway_aligned
+            ),
+            transport_chart_state_to_channels(
+                endpoint_states, frame_params, runway_aligned=runway_aligned
+            ),
+        )
+
+
 _BACKENDS: dict[str, ControlDynamicsBackend] = {
     CONTROL_DYNAMICS_REANCHORED_RK4: ReanchoredRK4Backend(),
     CONTROL_DYNAMICS_TRANSPORT_CHART_VELOCITY: TransportChartVelocityBackend(),
+    CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY: (
+        ScaledTransportChartVelocityBackend()
+    ),
 }
 
 

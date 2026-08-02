@@ -30,6 +30,12 @@ from aerodynamic_model.torch_transport_chart_dynamics import (
     transport_chart_state_to_channels,
     transport_chart_state_to_geodetic,
 )
+from aerodynamic_model.torch_scaled_transport_chart_dynamics import (
+    physical_to_scaled_transport_chart_state,
+    rk4_scaled_transport_chart_step,
+    rollout_piecewise_constant_at_times as scaled_transport_chart_dense_rollout,
+    scaled_to_physical_transport_chart_state,
+)
 from aircraft.aero_params import aero_params_for_aircraft
 from aircraft.aircraft_sets import A320
 
@@ -158,6 +164,99 @@ def test_transport_chart_boundary_round_trip_and_channels_match_geodetic_adapter
             chart, frame, runway_aligned=runway_aligned
         )
         torch.testing.assert_close(actual, expected, rtol=2e-13, atol=2e-9)
+
+
+def test_scaled_transport_chart_is_only_a_linear_coordinate_change():
+    initial = torch.tensor(
+        [[51.10, -114.02, 1800.0, 82.0, 2.3, -0.04, 62_000.0]],
+        dtype=torch.float64,
+    )
+    frame = _frame_tensor(lat0=51.0, lon0=-114.0, alt0=1080.0)
+    controls = torch.tensor([[35_000.0, 0.12, 1.02]], dtype=torch.float64)
+    aero = torch.tensor(
+        [[92.0, 2.2, 0.022, 0.045, 0.9, 0.12]], dtype=torch.float64
+    )
+    physical = geodetic_to_transport_chart_state(initial, frame)
+    scaled = physical_to_scaled_transport_chart_state(physical)
+    torch.testing.assert_close(
+        scaled_to_physical_transport_chart_state(scaled),
+        physical,
+        rtol=0.0,
+        atol=2e-12,
+    )
+
+    for _ in range(40):
+        physical = rk4_transport_chart_step(
+            physical, controls, aero, 0.5, frame
+        )
+        scaled = rk4_scaled_transport_chart_step(
+            scaled, controls, aero, 0.5, frame
+        )
+    restored = scaled_to_physical_transport_chart_state(scaled)
+    torch.testing.assert_close(restored, physical, rtol=2e-13, atol=2e-9)
+
+
+def test_scaled_transport_chart_preserves_dense_rollout_control_gradients():
+    initial = _state_tensor(
+        GeodeticState(
+            35.88, -78.79, 900.0, 80.0, 2.2, -0.04, A320.landing_mass
+        )
+    )
+    frame = _frame_tensor(heading=math.radians(52.0))
+    controls_physical = torch.tensor(
+        [[[45_000.0, 0.08, 1.02], [36_000.0, -0.04, 0.99]]],
+        dtype=torch.float64,
+        requires_grad=True,
+    )
+    durations_physical = torch.tensor(
+        [[1.3, 2.7]], dtype=torch.float64, requires_grad=True
+    )
+    controls_scaled = controls_physical.detach().clone().requires_grad_(True)
+    durations_scaled = durations_physical.detach().clone().requires_grad_(True)
+    queries = torch.tensor([[2.0, 4.0]], dtype=torch.float64)
+    valid = torch.ones_like(queries, dtype=torch.bool)
+
+    physical_rollout = transport_chart_dense_rollout(
+        initial,
+        controls_physical,
+        durations_physical,
+        _aero_tensor(),
+        frame,
+        queries,
+        valid,
+        integrator_dt_s=0.5,
+    )
+    scaled_rollout = scaled_transport_chart_dense_rollout(
+        initial,
+        controls_scaled,
+        durations_scaled,
+        _aero_tensor(),
+        frame,
+        queries,
+        valid,
+        integrator_dt_s=0.5,
+    )
+    restored_queries = scaled_to_physical_transport_chart_state(
+        scaled_rollout.query_states
+    )
+    torch.testing.assert_close(
+        restored_queries, physical_rollout.query_states, rtol=2e-13, atol=2e-9
+    )
+
+    physical_loss = transport_chart_state_to_channels(
+        physical_rollout.query_states, frame, runway_aligned=True
+    ).square().mean()
+    scaled_loss = transport_chart_state_to_channels(
+        restored_queries, frame, runway_aligned=True
+    ).square().mean()
+    physical_loss.backward()
+    scaled_loss.backward()
+    torch.testing.assert_close(
+        controls_scaled.grad, controls_physical.grad, rtol=2e-11, atol=2e-9
+    )
+    torch.testing.assert_close(
+        durations_scaled.grad, durations_physical.grad, rtol=2e-11, atol=2e-9
+    )
 
 
 def test_transport_chart_rk4_matches_full_transport_casadi_continuous_model():
@@ -764,6 +863,43 @@ def test_discrete_adjoint_uses_one_dense_state_layout(monkeypatch):
     ).sum().backward()
 
     assert len(observed_strides) > 1
+    assert set(observed_strides) == {(7, 1)}
+
+
+def test_single_flight_endpoint_adjoint_canonicalizes_horizon_dependent_state_stride(
+    monkeypatch,
+):
+    """Endpoint reverse steps must not specialize on each flight's horizon length."""
+    observed_strides = []
+    original_step = torch_dynamics._rollout_step
+
+    def recording_step(state, controls, aero_params, dt_s):
+        if torch.is_grad_enabled():
+            observed_strides.append(state.stride())
+        return original_step(state, controls, aero_params, dt_s)
+
+    monkeypatch.setattr(torch_dynamics, "_rollout_step", recording_step)
+    initial_state = GeodeticState(
+        35.88, -78.79, 900.0, 80.0, 2.2, -0.04, A320.landing_mass
+    )
+    for total_s in (2.0, 3.0):
+        controls = torch.tensor(
+            [[[45_000.0, 0.08, 1.02], [36_000.0, -0.04, 0.99]]],
+            dtype=torch.float64,
+            requires_grad=True,
+        )
+        durations = torch.full(
+            (1, 2), total_s / 2.0, dtype=torch.float64, requires_grad=True
+        )
+        rollout_piecewise_constant(
+            _state_tensor(initial_state),
+            controls,
+            durations,
+            _aero_tensor(),
+            integrator_dt_s=0.5,
+        ).sum().backward()
+
+    assert observed_strides
     assert set(observed_strides) == {(7, 1)}
 
 

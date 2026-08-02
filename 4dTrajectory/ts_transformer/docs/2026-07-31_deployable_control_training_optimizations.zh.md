@@ -20,8 +20,8 @@ checkpoint 由固定-anchor validation common-grid criteria 选择。
 | 2 | 低初始 LR + 梯度裁剪 | 从训练开始限制不稳定更新 | iTransformer 组合消融完成；`3e-5` 的预注册准则最好 |
 | 3 | Final-time clip 解耦 | final-time head 不随巨大 control 梯度一起缩放 | 已完成；形成时间/ADE Pareto 点，未替代预注册 selection 胜者 |
 | 4 | Trim baseline + residual control | 只用 anchor 状态和飞机参数计算基准控制 | iTransformer 首轮完成；ADE 略好但 selection/FDE/时间退化，未迁移 PatchTST |
-| 5 | Train-only oracle teacher | control imitation 预训练后 rollout 微调 | 待小样本可行性验证 |
-| 6 | Progressive N refinement | N=16→32→64，复制控制并平分时长 | 低优先级 |
+| 5 | Train-only oracle teacher | control imitation 预训练后 rollout 微调 | 已通过正式 KSJC train/validation，成为新基线 |
+| 6 | Progressive N refinement | N=16→32→64，复制控制并平分时长 | 已完成；正式 validation 明显退化，不采用 |
 
 已冻结为后续基础配置、无需作为新方向重复声明的两项是：
 
@@ -316,11 +316,35 @@ outer-test。后续若重新研究 trim，应作为新的独立实验定位 KRDU
 rollout physical criteria。Inverse dynamics 在这里是 teacher 构建工具，不进入部署前向。由于
 control 解不唯一且生成成本高，先限制为每机场 20--50 条 train 航迹。
 
+### 2026-08-02 结果
+
+32 条 outer-train 航迹的 inverse-dynamics schedule 经单航迹直接优化后，用于 1000 步 N=64
+imitation，再进入普通全量 rollout 训练。Teacher-only 正式 KSJC validation 相对此前同配方基线：
+
+- selection `31.4126 -> 27.6277`；
+- ADE `1130.7 -> 771.0 m`；
+- FDE `1202.9 -> 1040.4 m`；
+- cross-track p95 `3313.2 -> 2039.6 m`；
+- altitude p95 `692.6 -> 364.7 m`；
+- time MAE `20.84 -> 14.19 s`。
+
+Teacher ID 审计为 32/32 outer-train、与 validation 交集为 0；部署前向不读取 future。完整链路、一次
+正则混杂 run 和修正后的单因素结果见
+[`2026-08-02_oracle_teacher_experiment.zh.md`](2026-08-02_oracle_teacher_experiment.zh.md)。
+
 ## 6. Progressive N refinement
 
 从较低 N 开始训练，升级时复制每段 control 并平分 duration，使升级瞬间的 rollout 等价。
 此前 absolute/factorized 模型中 N=4/8 表达不足、N=32 出现时钟坍缩；固定均匀 duration 消除了
 后一机制，但 oracle 分辨率链只改善终点、没有改善最佳平均 ADE，因此本方向排在最后。
+
+### 2026-08-02 结果
+
+已完成 `N=16 × 300 -> N=32 × 300 -> N=64 × 400` 的同预算 teacher pretraining。Head 升级
+通过复制 control logits 和等分 softmax duration 保证瞬间 rollout 等价。尽管最终 imitation loss
+优于 direct N=64，正式 validation selection 从 `27.5097` 退化到 `33.7088`，ADE/FDE 从
+`751.7/1039.2 m` 退化到 `863.1/1239.2 m`，并出现更高推力饱和。因此不进入基线。详见
+[`2026-08-02_progressive_n_experiment.zh.md`](2026-08-02_progressive_n_experiment.zh.md)。
 
 ## 明确排除
 

@@ -61,6 +61,7 @@ from trajectory_data_process.harvest.arrivals import (
 from channels import (
     CHANNELS,
     POSITION_IDX,
+    VELOCITY_IDX,
     channels_from_states,
     resample_uniform,
     states_from_channels,
@@ -88,6 +89,7 @@ from fixed_dt_supervision import (
     pack_fixed_dt_supervision_rows,
 )
 from time_grids import output_time_grid
+from reference_velocity import rebuild_reference_velocities
 
 ARRIVAL_DATA_PROVENANCE_SCHEMA = "ts-arrival-data-v2-multi-airport"
 DATA_SELECTION_SCHEMA = "ts-data-selection-v1-aircraft-filter"
@@ -685,6 +687,18 @@ def build_series(
             fitted=fitted,
             observed_crossing=observed_crossing,
         )
+        measured_velocity_rows = (
+            np.arange(len(supervision_times)) < len(grid)
+        ) & np.all(
+            supervision_weights[:, list(VELOCITY_IDX)] > 0.0, axis=1
+        )
+        supervision_values = rebuild_reference_velocities(
+            supervision_times,
+            supervision_values,
+            source=config.reference_velocity_source,
+            valid_rows=measured_velocity_rows,
+        )
+        resampled = supervision_values[: len(grid)].copy()
         series.append(FlightSeries(
             flight_id=flight_key(scenario.source, index), scenario=scenario, frame=frame,
             times=grid, values=resampled,

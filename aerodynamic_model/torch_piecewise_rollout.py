@@ -226,7 +226,12 @@ class _PiecewiseRolloutAdjoint(torch.autograd.Function):
             segment = segment_schedule[:, step]
 
             with torch.enable_grad():
-                previous = previous_value.detach().contiguous().requires_grad_(True)
+                # A batch-size-one timeline view can report contiguous while retaining a
+                # horizon-dependent singleton stride. A fresh canonical clone keeps the
+                # compiled local VJP reusable across endpoint rollouts of different lengths.
+                previous = previous_value.detach().clone(
+                    memory_format=torch.contiguous_format
+                ).requires_grad_(True)
                 step_control = controls[rows, segment].detach().requires_grad_(
                     needs_controls
                 )

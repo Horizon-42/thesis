@@ -44,6 +44,7 @@ from config import (
     CONTROL_STATE_OBJECTIVE_ARC_LENGTH_GEOMETRY,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_TERMINAL_STATE,
+    CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION,
     HORIZON_FULL,
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
@@ -69,6 +70,7 @@ from control_training_curriculum import (
     control_training_stage_for_epoch,
 )
 from control_training_diagnostics import ControlTrainingDiagnosticsAccumulator
+from control_terminal_clock import apply_control_terminal_clock
 from dataset import (
     ARRIVAL_DATA_PROVENANCE_SCHEMA,
     FixedAnchorTrajectoryWindows,
@@ -97,7 +99,7 @@ from training_performance import EpochProfiler
 
 CHECKPOINT_NAME = "checkpoint.pt"
 CHECKPOINT_METADATA_NAME = "checkpoint_metadata.json"
-CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v30-arc-loss-ablations"
+CHECKPOINT_METADATA_SCHEMA = "ts-checkpoint-metadata-v31-dual-terminal-clock"
 STATE_TARGET_CONTRACTS = {
     HORIZON_NORMALIZED: "normalized-time-runway-crossing-displacement-kinematic-v3",
     HORIZON_FULL: "full-horizon-fixed-time-displacement-kinematic-v2",
@@ -193,6 +195,13 @@ def target_contract(config: TSConfig) -> str:
         contract += (
             f"+horizon-curriculum={horizons}s"
             f"x{config.control_horizon_curriculum_stage_epochs}epochs"
+        )
+    if (
+        config.control_terminal_supervision_clock
+        != CONTROL_TERMINAL_CLOCK_STATE_SUPERVISION
+    ):
+        contract += (
+            f"+terminal-clock={config.control_terminal_supervision_clock}-v1"
         )
     return contract
 
@@ -607,14 +616,14 @@ def control_prediction_loss_terms(
     )
     terminal_target = target_states[:, -1]
     segment_valid = None
+    active_stage = training_stage or ControlTrainingStage("full", None, 1, None)
     if dense_supervision is not None:
-        stage = training_stage or ControlTrainingStage("full", None, 1, None)
         stage_view = build_control_training_stage_view(
             state_prediction,
             dense_supervision,
             terminal_target,
             target_final_time_s,
-            stage,
+            active_stage,
         )
         state_prediction = stage_view.prediction
         dense_supervision = stage_view.supervision
@@ -635,6 +644,14 @@ def control_prediction_loss_terms(
         dynamics,
         dense_supervision,
         segment_valid,
+    )
+    rollout_loss = apply_control_terminal_clock(
+        rollout_loss,
+        prediction,
+        dynamics,
+        config,
+        normalizer,
+        active_stage,
     )
     time_loss = (
         (prediction.final_time_s - target_final_time_s) / config.final_time_scale_s
@@ -983,6 +1000,13 @@ class FitResult:
     best_validation_selection: float
     train_windows: int
     val_windows: int
+    model_pretraining: dict[str, Any] | None = None
+
+
+ModelPretrainer = Callable[
+    [nn.Module, Sequence[FlightSeries], Normalizer, TSConfig, torch.device],
+    dict[str, Any],
+]
 
 
 @dataclass(frozen=True)
@@ -2051,6 +2075,7 @@ def fit_model(
     auto_batch_size: bool = False,
     minimum_anchor_index: int | None = None,
     verbose: bool = True,
+    model_pretrainer: ModelPretrainer | None = None,
 ) -> FitResult:
     """Fit one model against explicit train/validation flights, without touching test."""
     if not train_series or not val_series:
@@ -2104,6 +2129,11 @@ def fit_model(
         )
 
     model = build_model(config).to(device)
+    model_pretraining = (
+        model_pretrainer(model, train_series, normalizer, config, device)
+        if model_pretrainer is not None
+        else None
+    )
     optimizer = torch.optim.Adam(
         model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
     )
@@ -2491,6 +2521,7 @@ def fit_model(
         best_validation_selection=best_val,
         train_windows=len(train_set),
         val_windows=val_window_count,
+        model_pretraining=model_pretraining,
     )
 
 
@@ -2504,6 +2535,7 @@ def train(
     data_selection: dict[str, Any] | None = None,
     auto_batch_size: bool = False,
     verbose: bool = True,
+    model_pretrainer: ModelPretrainer | None = None,
 ) -> dict[str, Any]:
     """Train one model on ``series``; write ``checkpoint.pt`` + ``history.json``.
 
@@ -2542,6 +2574,7 @@ def train(
         config,
         auto_batch_size=auto_batch_size,
         verbose=verbose,
+        model_pretrainer=model_pretrainer,
     )
     model, config, normalizer, device = (
         fit.model, fit.config, fit.normalizer, fit.device
@@ -2588,6 +2621,8 @@ def train(
         "data_provenance": data_provenance,
         "data_selection": data_selection,
     }
+    if fit.model_pretraining is not None:
+        checkpoint_payload["model_pretraining"] = fit.model_pretraining
     checkpoint_path = out / CHECKPOINT_NAME
     checkpoint_tmp = out / f"{CHECKPOINT_NAME}.tmp"
     # Freeze-test may be run by another process while fitting. Recheck immediately before
@@ -2652,6 +2687,8 @@ def train(
             "test": _keys_sha256(checkpoint_test_keys),
         },
     }
+    if fit.model_pretraining is not None:
+        checkpoint_metadata["model_pretraining"] = fit.model_pretraining
     if data_selection is not None:
         selection_path = out / "data_selection.json"
         selection_tmp = out / "data_selection.json.tmp"
@@ -2705,6 +2742,8 @@ def train(
         "data_selection": data_selection,
         "history": [vars(h) for h in fit.history],
     }
+    if fit.model_pretraining is not None:
+        summary["model_pretraining"] = fit.model_pretraining
     (out / HISTORY_NAME).write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     if verbose:

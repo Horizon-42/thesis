@@ -65,6 +65,7 @@ from config import (  # noqa: E402
     CONTROL_STATE_LOSS_GRIDS,
     CONTROL_STATE_CLOCKS,
     CONTROL_STATE_OBJECTIVES,
+    CONTROL_TERMINAL_CLOCKS,
     DEFAULT_AIRCRAFT_TYPE,
     HORIZON_MODES,
     MODELS,
@@ -105,6 +106,7 @@ from experiment_index import begin_run, finish_run  # noqa: E402
 from flyability import report_for_records  # noqa: E402
 from forecast import forecast_approach  # noqa: E402
 from models import resolve_device  # noqa: E402
+from reference_velocity import REFERENCE_VELOCITY_SOURCES  # noqa: E402
 from train import (  # noqa: E402
     HISTORY_NAME, evaluate_fit_splits, load_checkpoint, train, write_fit_evaluation,
 )
@@ -199,6 +201,12 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
         help="H_window fixed-dt rows emitted by each recursive window pass (default: 30)",
     )
     parser.add_argument("--dt", type=float, default=None, help="resample step, seconds")
+    parser.add_argument(
+        "--reference-velocity-source",
+        choices=REFERENCE_VELOCITY_SOURCES,
+        default=None,
+        help="velocity-state source: upstream track fit or causal position differences",
+    )
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--batch-size", type=_batch_size, default=None,
                         help="positive integer, or 'auto' to probe the active CUDA GPU")
@@ -251,6 +259,15 @@ def _add_training_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--control-terminal-velocity-weight", type=float, default=None)
     parser.add_argument("--control-terminal-position-scale-m", type=float, default=None)
     parser.add_argument("--control-terminal-velocity-scale-mps", type=float, default=None)
+    parser.add_argument(
+        "--control-terminal-clock",
+        choices=CONTROL_TERMINAL_CLOCKS,
+        default=None,
+        help=(
+            "terminal-state rollout clock: share dense supervision or use the deployable "
+            "predicted clock"
+        ),
+    )
     parser.add_argument(
         "--control-duration-parameterization",
         choices=CONTROL_DURATION_PARAMETERIZATIONS,
@@ -448,6 +465,7 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
         ("full_horizon_steps", args.full_horizon_steps),
         ("window_horizon_steps", args.window_horizon_steps),
         ("dt_s", args.dt), ("epochs", args.epochs),
+        ("reference_velocity_source", args.reference_velocity_source),
         ("batch_size", args.batch_size if isinstance(args.batch_size, int) else None),
         ("learning_rate", args.learning_rate),
         ("lr_plateau_factor", args.lr_plateau_factor),
@@ -508,6 +526,7 @@ def _config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser)
             "control_terminal_velocity_scale_mps",
             args.control_terminal_velocity_scale_mps,
         ),
+        ("control_terminal_supervision_clock", args.control_terminal_clock),
         ("control_duration_parameterization", args.control_duration_parameterization),
         ("control_value_parameterization", args.control_value_parameterization),
         ("control_dynamics_backend", args.control_dynamics_backend),
