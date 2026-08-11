@@ -68,10 +68,26 @@ interface PilotErrorResponse {
   error: string;
 }
 
-const DEFAULT_AEROVIZ_BACKEND_URL = "http://127.0.0.1:8765";
+const DEFAULT_AEROVIZ_BACKEND_PORT = "8765";
+
+function defaultAeroVizBackendUrl(): string {
+  const browserHostname = typeof window === "undefined"
+    ? ""
+    : window.location.hostname;
+  const backendHostname = !browserHostname || browserHostname === "localhost"
+    ? "127.0.0.1"
+    : browserHostname;
+  const urlHostname = backendHostname.includes(":") && !backendHostname.startsWith("[")
+    ? `[${backendHostname}]`
+    : backendHostname;
+  const backendPort = import.meta.env.VITE_AEROVIZ_BACKEND_PORT
+    || DEFAULT_AEROVIZ_BACKEND_PORT;
+
+  return `http://${urlHostname}:${backendPort}`;
+}
 
 export const AEROVIZ_BACKEND_URL =
-  import.meta.env.VITE_AEROVIZ_BACKEND_URL || DEFAULT_AEROVIZ_BACKEND_URL;
+  import.meta.env.VITE_AEROVIZ_BACKEND_URL || defaultAeroVizBackendUrl();
 
 export async function resetPilotSimulation(
   state: PilotResetState,

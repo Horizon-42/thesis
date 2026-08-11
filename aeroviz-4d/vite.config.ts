@@ -48,6 +48,10 @@ export default defineConfig({
   },
 
   server: {
+    // Listen on every interface so the dev site is reachable from other
+    // devices on the same network. The full-stack launcher can still override
+    // this with --host when a narrower bind address is required.
+    host: "0.0.0.0",
     watch: {
       // public/data is ~40k files (mostly local-terrain .f32 heightmap tiles), and
       // chokidar takes one inotify watch per file. Two dev servers at once exceeded

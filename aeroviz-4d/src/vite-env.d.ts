@@ -7,6 +7,7 @@ interface ImportMetaEnv
 {
     readonly VITE_CESIUM_ION_TOKEN:string;
     readonly VITE_AEROVIZ_BACKEND_URL?:string;
+    readonly VITE_AEROVIZ_BACKEND_PORT?:string;
 }
 
 interface ImportMeta {

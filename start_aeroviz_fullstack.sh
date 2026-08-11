@@ -18,9 +18,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AEROVIZ_APP_DIR="${AEROVIZ_APP_DIR:-$ROOT_DIR/aeroviz-4d}"
 AEROVIZ_PUBLIC_DATA_DIR="$AEROVIZ_APP_DIR/public/data"
 AEROVIZ_DIST_DATA_PATH="$AEROVIZ_APP_DIR/dist/data"
-AEROVIZ_BACKEND_HOST="${AEROVIZ_BACKEND_HOST:-127.0.0.1}"
+AEROVIZ_BACKEND_HOST="${AEROVIZ_BACKEND_HOST:-0.0.0.0}"
 AEROVIZ_BACKEND_PORT="${AEROVIZ_BACKEND_PORT:-8765}"
-VITE_HOST="${VITE_HOST:-127.0.0.1}"
+VITE_HOST="${VITE_HOST:-0.0.0.0}"
 VITE_PORT="${VITE_PORT:-5173}"
 # Resolve the backend interpreter. PYTHON_BIN wins when set; otherwise ACTIVATE the
 # thesis conda env via the shared helper and take its python. Activation — not a direct
@@ -76,7 +76,7 @@ start_backend() {
 
 start_frontend() {
   ( cd "$AEROVIZ_APP_DIR" && \
-    VITE_AEROVIZ_BACKEND_URL="${VITE_AEROVIZ_BACKEND_URL:-http://${AEROVIZ_BACKEND_HOST}:${AEROVIZ_BACKEND_PORT}}" \
+    VITE_AEROVIZ_BACKEND_PORT="${VITE_AEROVIZ_BACKEND_PORT:-$AEROVIZ_BACKEND_PORT}" \
     exec npm run dev -- --host "$VITE_HOST" --port "$VITE_PORT" ) &
   VITE_PID=$!
   VITE_STARTED_AT=$SECONDS
@@ -117,8 +117,19 @@ fi
 start_backend
 start_frontend
 
-echo "AeroViz backend: http://${AEROVIZ_BACKEND_HOST}:${AEROVIZ_BACKEND_PORT}"
-echo "Frontend: http://${VITE_HOST}:${VITE_PORT}"
+echo "AeroViz backend listener: http://${AEROVIZ_BACKEND_HOST}:${AEROVIZ_BACKEND_PORT}"
+if [[ "$VITE_HOST" == "0.0.0.0" || "$VITE_HOST" == "::" ]]; then
+  echo "Frontend (this computer): http://127.0.0.1:${VITE_PORT}"
+  if command -v hostname >/dev/null 2>&1; then
+    for address in $(hostname -I 2>/dev/null); do
+      if [[ "$address" == *.* && "$address" != 127.* ]]; then
+        echo "Frontend (local network): http://${address}:${VITE_PORT}"
+      fi
+    done
+  fi
+else
+  echo "Frontend: http://${VITE_HOST}:${VITE_PORT}"
+fi
 echo "AeroViz data: $AEROVIZ_PUBLIC_DATA_DIR"
 
 # Supervise: poll each child; restart whichever exited, keep the other running.
