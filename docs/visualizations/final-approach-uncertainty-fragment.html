@@ -1,0 +1,405 @@
+<div id="final-approach-uncertainty-lab">
+  <div class="viz-controls" aria-label="Uncertainty model controls">
+    <label class="form-label">Observed crossing <strong data-value="estimate">−2.00 m</strong>
+      <input class="form-range" data-control="estimate" type="range" min="-8" max="11" step="0.05" value="-2">
+    </label>
+    <label class="form-label">Samples <strong data-value="samples">80</strong>
+      <input class="form-range" data-control="samples" type="range" min="8" max="220" step="1" value="80">
+    </label>
+    <label class="form-label">Residual noise s <strong data-value="noise">3.8 m</strong>
+      <input class="form-range" data-control="noise" type="range" min="0.2" max="8" step="0.1" value="3.8">
+    </label>
+    <label class="form-label">Lag-1 correlation <strong data-value="rho">0.43</strong>
+      <input class="form-range" data-control="rho" type="range" min="0" max="0.9" step="0.01" value="0.43">
+    </label>
+    <label class="form-label">Nearest sample <strong data-value="nearest">−325 m</strong>
+      <input class="form-range" data-control="nearest" type="range" min="-1200" max="-50" step="25" value="-325">
+    </label>
+  </div>
+
+  <div class="viz-grid uncertainty-stats" aria-live="polite">
+    <div class="card viz-stat"><span>Effective samples / 有效样本</span><strong class="viz-stat-value" data-value="neff">31.9</strong><span data-value="neff-note">80 measured</span></div>
+    <div class="card viz-stat"><span>Threshold sigma / 阈值标准误差</span><strong class="viz-stat-value" data-value="sigma">1.49 m</strong><span>calculated from this track</span></div>
+    <div class="card viz-stat"><span>95% interval</span><strong class="viz-stat-value" data-value="interval">[−4.92, +0.92] m</strong><span data-value="verdict-note">crosses a gate</span></div>
+  </div>
+
+  <section class="viz-explainer" aria-labelledby="residual-heading">
+    <h2 id="residual-heading">Step 1 · Residuals become <em>s</em> <span>残差如何变成 s</span></h2>
+    <p>Each stem is one point’s signed distance from the fitted line. Squaring, summing, and dividing by the remaining degrees of freedom gives the typical single-point scatter.</p>
+    <svg data-chart="residual" role="img" aria-labelledby="residual-title residual-desc" viewBox="0 0 900 300">
+      <title id="residual-title">Residuals and residual standard deviation</title>
+      <desc id="residual-desc">A residual strip and formula card explain how individual deviations become SSE and residual scatter s.</desc>
+      <g data-layer="residual-grid"></g>
+      <g data-layer="residual-marks"></g>
+    </svg>
+  </section>
+
+  <section class="viz-explainer" aria-labelledby="effective-heading">
+    <h2 id="effective-heading">Step 2 · Correlation reduces independent information <span>相关性会压缩有效样本</span></h2>
+    <p>The top ribbon is every recorded point. The lower ribbon is the independent-equivalent amount after consecutive residuals are found to repeat the same pattern.</p>
+    <svg data-chart="effective" role="img" aria-labelledby="effective-title effective-desc" viewBox="0 0 900 285">
+      <title id="effective-title">Recorded samples compared with effective samples</title>
+      <desc id="effective-desc">Two dot ribbons and a residual sequence show how lag-one autocorrelation reduces effective sample count.</desc>
+      <g data-layer="effective-grid"></g>
+      <g data-layer="effective-marks"></g>
+    </svg>
+  </section>
+
+  <section class="viz-explainer" aria-labelledby="assembly-heading">
+    <h2 id="assembly-heading">Step 3 · Assemble threshold sigma <span>把各因素合成为 σ₀</span></h2>
+    <p><em>s</em> measures point scatter; <em>n</em><sub>eff</sub> measures usable information; the leverage term measures how far the line must be extended.</p>
+
+  <svg data-chart="sigma" role="img" aria-labelledby="sigma-title sigma-desc" viewBox="0 0 900 285">
+    <title id="sigma-title">How the threshold sigma is assembled</title>
+    <desc id="sigma-desc">A bilingual flow diagram shows how recorded sample count, autocorrelation, residual noise and extrapolation geometry combine into effective sample count and threshold sigma.</desc>
+    <g data-layer="sigma-grid"></g>
+    <g data-layer="sigma-marks"></g>
+  </svg>
+  </section>
+
+  <section class="viz-explainer" aria-labelledby="fit-heading">
+    <h2 id="fit-heading">Step 4 · Extrapolate to the threshold <span>把拟合线延长到跑道入口</span></h2>
+    <p>The solid segment is supported by samples. The dashed segment has no observations beneath it, so a longer dashed segment increases crossing uncertainty.</p>
+
+  <svg data-chart="fit" role="img" aria-labelledby="fit-title fit-desc" viewBox="0 0 900 330">
+    <title id="fit-title">Final-approach line fit and extrapolation</title>
+    <desc id="fit-desc">Synthetic samples between five kilometres and the last observation are fitted with a straight line and extrapolated to the runway threshold.</desc>
+    <g data-layer="fit-grid"></g>
+    <g data-layer="fit-marks"></g>
+  </svg>
+  </section>
+
+  <section class="viz-explainer" aria-labelledby="confidence-heading">
+    <h2 id="confidence-heading">Step 5 · 1.96 turns sigma into a 95% interval <span>1.96 如何形成置信区间</span></h2>
+    <p>The curve represents repeated fitted-crossing errors under the model—not the vertical positions of one aircraft. The middle 95% lies between estimate ± 1.96σ₀; the two tails contain 2.5% each.</p>
+
+  <svg data-chart="gate" role="img" aria-labelledby="gate-title gate-desc" viewBox="0 0 900 345">
+    <title id="gate-title">Vertical gate and confidence interval</title>
+    <desc id="gate-desc">The accepted vertical interval is minus 3.05 to plus 6.10 metres. The estimated crossing and its 95 percent interval determine the displayed verdict.</desc>
+    <g data-layer="gate-grid"></g>
+    <g data-layer="gate-marks"></g>
+  </svg>
+  </section>
+
+  <section class="viz-explainer" aria-labelledby="sensitivity-heading">
+    <h2 id="sensitivity-heading">Step 6 · See what changes sigma <span>观察哪些因素让 σ₀ 变大</span></h2>
+    <p>Each mini-chart varies only one input while holding the others at their current slider values. The dot is the current setting.</p>
+    <svg data-chart="sensitivity" role="img" aria-labelledby="sensitivity-title sensitivity-desc" viewBox="0 0 900 430">
+      <title id="sensitivity-title">Sensitivity of threshold sigma to four inputs</title>
+      <desc id="sensitivity-desc">Four line charts show sigma versus residual scatter, recorded sample count, autocorrelation, and distance of the nearest sample.</desc>
+      <g data-layer="sensitivity-grid"></g>
+      <g data-layer="sensitivity-marks"></g>
+    </svg>
+  </section>
+
+  <div class="viz-row uncertainty-legend" aria-label="Verdict legend">
+    <span><i class="legend-mark pass"></i> Green: interval supports inside</span>
+    <span><i class="legend-mark fail"></i> Red: interval supports outside</span>
+    <span><i class="legend-mark undecided"></i> Grey: interval crosses a boundary</span>
+  </div>
+</div>
+
+<style>
+  #final-approach-uncertainty-lab { color: var(--foreground); }
+  #final-approach-uncertainty-lab .viz-controls { align-items: end; }
+  #final-approach-uncertainty-lab .form-label { min-width: 145px; flex: 1 1 145px; }
+  #final-approach-uncertainty-lab .uncertainty-stats { margin-block: 1rem; }
+  #final-approach-uncertainty-lab .viz-explainer { margin-block: 1.35rem 1.8rem; padding-top: 0.25rem; border-top: 1px solid var(--border); }
+  #final-approach-uncertainty-lab .viz-explainer h2 { margin: 1rem 0 0.2rem; color: var(--foreground); font: 650 18px/1.3 system-ui, sans-serif; }
+  #final-approach-uncertainty-lab .viz-explainer h2 span { color: var(--muted-foreground); font-weight: 500; }
+  #final-approach-uncertainty-lab .viz-explainer p { margin: 0.2rem 0 0.75rem; color: var(--muted-foreground); font-size: 0.94rem; line-height: 1.55; }
+  #final-approach-uncertainty-lab svg { display: block; width: 100%; height: auto; overflow: visible; margin-block: 0.75rem; }
+  #final-approach-uncertainty-lab svg text { fill: var(--muted-foreground); font: 12px system-ui, sans-serif; }
+  #final-approach-uncertainty-lab .axis { stroke: var(--border); stroke-width: 1.5; }
+  #final-approach-uncertainty-lab .grid { stroke: var(--border); stroke-width: 1; opacity: 0.55; }
+  #final-approach-uncertainty-lab .fit-line { stroke: var(--viz-series-1); stroke-width: 3; fill: none; }
+  #final-approach-uncertainty-lab .extension { stroke: var(--viz-series-1); stroke-width: 3; stroke-dasharray: 8 6; fill: none; }
+  #final-approach-uncertainty-lab .sample { fill: var(--viz-series-2); opacity: 0.72; }
+  #final-approach-uncertainty-lab .threshold { stroke: var(--foreground); stroke-width: 2; }
+  #final-approach-uncertainty-lab .gate-zone { fill: var(--viz-series-2); opacity: 0.16; }
+  #final-approach-uncertainty-lab .outside-zone { fill: var(--destructive); opacity: 0.08; }
+  #final-approach-uncertainty-lab .ci { stroke: var(--viz-series-3); stroke-width: 7; stroke-linecap: round; }
+  #final-approach-uncertainty-lab .ci-cap { stroke: var(--viz-series-3); stroke-width: 2; }
+  #final-approach-uncertainty-lab .estimate { fill: var(--viz-series-1); stroke: var(--card); stroke-width: 2; }
+  #final-approach-uncertainty-lab .flow-box { fill: var(--card); stroke: var(--border); stroke-width: 1.5; }
+  #final-approach-uncertainty-lab .flow-arrow { stroke: var(--muted-foreground); stroke-width: 2; fill: none; marker-end: url(#sigma-arrow); }
+  #final-approach-uncertainty-lab .flow-main { fill: var(--foreground); font-weight: 500; }
+  #final-approach-uncertainty-lab .flow-sub { fill: var(--muted-foreground); }
+  #final-approach-uncertainty-lab .residual { stroke: var(--viz-series-4); stroke-width: 1.4; opacity: 0.65; }
+  #final-approach-uncertainty-lab .residual-dot { fill: var(--viz-series-4); }
+  #final-approach-uncertainty-lab .formula-card { fill: var(--card); stroke: var(--border); stroke-width: 1.5; }
+  #final-approach-uncertainty-lab .sample-cell { fill: var(--viz-series-1); opacity: 0.82; }
+  #final-approach-uncertainty-lab .sample-cell-muted { fill: var(--muted); opacity: 0.32; }
+  #final-approach-uncertainty-lab .correlation-line { fill: none; stroke: var(--viz-series-4); stroke-width: 2.4; }
+  #final-approach-uncertainty-lab .normal-fill { fill: var(--viz-series-3); opacity: 0.18; }
+  #final-approach-uncertainty-lab .normal-core { fill: var(--viz-series-1); opacity: 0.28; }
+  #final-approach-uncertainty-lab .normal-tail { fill: var(--destructive); opacity: 0.14; }
+  #final-approach-uncertainty-lab .normal-line { fill: none; stroke: var(--viz-series-3); stroke-width: 3; }
+  #final-approach-uncertainty-lab .sigma-marker { stroke: var(--viz-series-1); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  #final-approach-uncertainty-lab .ci-marker { stroke: var(--viz-series-3); stroke-width: 2; }
+  #final-approach-uncertainty-lab .sensitivity-line { fill: none; stroke: var(--viz-series-1); stroke-width: 2.5; }
+  #final-approach-uncertainty-lab .sensitivity-point { fill: var(--viz-series-4); stroke: var(--card); stroke-width: 2; }
+  #final-approach-uncertainty-lab .legend-mark { display: inline-block; width: 0.8rem; height: 0.8rem; border-radius: 50%; margin-right: 0.35rem; vertical-align: -0.05rem; }
+  #final-approach-uncertainty-lab .legend-mark.pass { background: var(--viz-series-2); }
+  #final-approach-uncertainty-lab .legend-mark.fail { background: var(--destructive); }
+  #final-approach-uncertainty-lab .legend-mark.undecided { background: var(--muted-foreground); }
+  #final-approach-uncertainty-lab .verdict-pass { color: var(--viz-series-2); }
+  #final-approach-uncertainty-lab .verdict-fail { color: var(--destructive); }
+  #final-approach-uncertainty-lab .verdict-undecided { color: var(--muted-foreground); }
+  @media (max-width: 520px) {
+    #final-approach-uncertainty-lab .form-label { flex-basis: 100%; }
+  }
+</style>
+
+<script>
+(() => {
+  const root = document.getElementById('final-approach-uncertainty-lab');
+  if (!root) return;
+  const controls = Object.fromEntries([...root.querySelectorAll('[data-control]')].map(el => [el.dataset.control, el]));
+  const out = name => root.querySelector(`[data-value="${name}"]`);
+  const residualGrid = root.querySelector('[data-layer="residual-grid"]');
+  const residualMarks = root.querySelector('[data-layer="residual-marks"]');
+  const effectiveGrid = root.querySelector('[data-layer="effective-grid"]');
+  const effectiveMarks = root.querySelector('[data-layer="effective-marks"]');
+  const fitGrid = root.querySelector('[data-layer="fit-grid"]');
+  const fitMarks = root.querySelector('[data-layer="fit-marks"]');
+  const sigmaGrid = root.querySelector('[data-layer="sigma-grid"]');
+  const sigmaMarks = root.querySelector('[data-layer="sigma-marks"]');
+  const gateGrid = root.querySelector('[data-layer="gate-grid"]');
+  const gateMarks = root.querySelector('[data-layer="gate-marks"]');
+  const sensitivityGrid = root.querySelector('[data-layer="sensitivity-grid"]');
+  const sensitivityMarks = root.querySelector('[data-layer="sensitivity-marks"]');
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const el = (name, attrs = {}, text = '') => {
+    const node = document.createElementNS(svgNS, name);
+    for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
+    if (text) node.textContent = text;
+    return node;
+  };
+  const fmt = (v, digits = 2) => `${v < 0 ? '−' : v > 0 ? '+' : ''}${Math.abs(v).toFixed(digits)}`;
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  const seededNoise = i => Math.sin(i * 12.9898 + 4.1414) * 0.58 + Math.sin(i * 3.731) * 0.42;
+
+  function sigmaParts(n, rho, noise, nearest) {
+    const neff = Math.max(3, n * (1 - rho) / (1 + rho));
+    const xStart = -5000;
+    const xbar = (xStart + nearest) / 2;
+    const span = nearest - xStart;
+    const sxx = n * span * span / 12;
+    const sxxEff = sxx * (neff / n);
+    const leverage = 1 / neff + (xbar * xbar) / sxxEff;
+    return { neff, xbar, sxx, sxxEff, leverage, sigma: noise * Math.sqrt(leverage) };
+  }
+
+  function correlatedResiduals(count, rho, noise) {
+    const values = [];
+    let previous = seededNoise(0);
+    for (let i = 0; i < count; i++) {
+      const innovation = seededNoise(i + 1);
+      previous = rho * previous + Math.sqrt(Math.max(0.01, 1 - rho * rho)) * innovation;
+      values.push(previous);
+    }
+    const rms = Math.sqrt(values.reduce((sum, value) => sum + value * value, 0) / Math.max(1, count));
+    return values.map(value => value * noise / Math.max(0.001, rms));
+  }
+
+  function drawResiduals(n, rho, noise) {
+    residualGrid.replaceChildren(); residualMarks.replaceChildren();
+    const x0 = 58, x1 = 590, baseline = 151;
+    const shown = Math.min(36, n);
+    const residuals = correlatedResiduals(shown, rho, noise);
+    const amplitude = Math.max(noise * 2.4, ...residuals.map(Math.abs), 0.5);
+    const sy = value => baseline - value / amplitude * 92;
+    [-noise, 0, noise].forEach(value => {
+      residualGrid.append(el('line',{x1:x0,y1:sy(value),x2:x1,y2:sy(value),class:value === 0 ? 'axis' : 'grid'}));
+      residualGrid.append(el('text',{x:x0-9,y:sy(value)+4,'text-anchor':'end'},value === 0 ? 'fit line' : `${value > 0 ? '+' : '−'}s`));
+    });
+    residualGrid.append(el('text',{x:x0,y:25},`${shown} illustrative residuals, scaled to the selected s`));
+    residuals.forEach((value, index) => {
+      const x = x0 + index / Math.max(1, shown - 1) * (x1 - x0);
+      residualMarks.append(el('line',{x1:x,y1:baseline,x2:x,y2:sy(value),class:'residual'}));
+      residualMarks.append(el('circle',{cx:x,cy:sy(value),r:3.5,class:'residual-dot'}));
+    });
+    const sse = noise * noise * Math.max(1, n - 2);
+    residualMarks.append(el('rect',{x:630,y:34,width:242,height:224,rx:12,class:'formula-card'}));
+    residualMarks.append(el('text',{x:650,y:65,class:'flow-main'},'From stems to one number'));
+    residualMarks.append(el('text',{x:650,y:91},'① rᵢ = point − fitted line'));
+    residualMarks.append(el('text',{x:650,y:119},`② SSE = Σrᵢ² = ${sse.toFixed(1)} m²`));
+    residualMarks.append(el('text',{x:650,y:147},`③ degrees of freedom = n−2 = ${Math.max(1,n-2)}`));
+    residualMarks.append(el('text',{x:650,y:184,class:'flow-main'},`s = √(SSE/(n−2))`));
+    residualMarks.append(el('text',{x:650,y:217,class:'flow-main'},`s = ${noise.toFixed(1)} m`));
+    residualMarks.append(el('text',{x:650,y:244},'单个点的典型散乱程度'));
+  }
+
+  function drawEffective(n, rho, neff, noise) {
+    effectiveGrid.replaceChildren(); effectiveMarks.replaceChildren();
+    const cells = 50, x0 = 60, cellW = 9.5, gap = 1.5;
+    effectiveGrid.append(el('text',{x:x0,y:36,class:'flow-main'},`Recorded: n = ${n} points / 实际记录`));
+    effectiveGrid.append(el('text',{x:x0,y:122,class:'flow-main'},`Independent-equivalent: n_eff = ${neff.toFixed(1)} / 有效信息`));
+    for (let i = 0; i < cells; i++) {
+      effectiveMarks.append(el('rect',{x:x0+i*(cellW+gap),y:52,width:cellW,height:24,rx:3,class:'sample-cell'}));
+      const active = (i + 0.5) / cells <= neff / n;
+      effectiveMarks.append(el('rect',{x:x0+i*(cellW+gap),y:138,width:cellW,height:24,rx:3,class:active?'sample-cell':'sample-cell-muted'}));
+    }
+    effectiveMarks.append(el('path',{d:`M60 91 L605 91`,class:'flow-arrow'}));
+    effectiveMarks.append(el('text',{x:332,y:106,'text-anchor':'middle'},`keep ${(100*neff/n).toFixed(0)}% of nominal information`));
+    const seq = correlatedResiduals(22, rho, noise);
+    const seqMax = Math.max(...seq.map(Math.abs), 0.5);
+    const points = seq.map((value,index) => `${650+index*9.7},${109-value/seqMax*57}`).join(' ');
+    effectiveGrid.append(el('rect',{x:632,y:34,width:240,height:160,rx:10,class:'formula-card'}));
+    effectiveGrid.append(el('line',{x1:650,y1:109,x2:855,y2:109,class:'grid'}));
+    effectiveMarks.append(el('polyline',{points,class:'correlation-line'}));
+    effectiveMarks.append(el('text',{x:752,y:215,'text-anchor':'middle',class:'flow-main'},`ρ = ${rho.toFixed(2)}`));
+    effectiveMarks.append(el('text',{x:752,y:238,'text-anchor':'middle'},rho < .2 ? 'weak repetition / 重复较弱' : rho < .6 ? 'visible repetition / 有明显重复' : 'strong repetition / 重复很强'));
+    effectiveMarks.append(el('text',{x:450,y:274,'text-anchor':'middle'},`n_eff = n × (1−ρ)/(1+ρ) = ${n} × ${(1-rho).toFixed(2)}/${(1+rho).toFixed(2)} = ${neff.toFixed(1)}`));
+  }
+
+  function drawSigma(n, rho, neff, noise, xbar, leverage, sigma) {
+    sigmaGrid.replaceChildren(); sigmaMarks.replaceChildren();
+    const defs=el('defs'); const marker=el('marker',{id:'sigma-arrow',viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:6,markerHeight:6,orient:'auto-start-reverse'}); marker.append(el('path',{d:'M 0 0 L 10 5 L 0 10 z',fill:'var(--muted-foreground)'})); defs.append(marker); sigmaGrid.append(defs);
+    const boxes=[
+      {x:28,y:35,w:180,h:78,a:`n = ${n} recorded`,b:'原始样本数量'},
+      {x:250,y:35,w:180,h:78,a:`ρ = ${rho.toFixed(2)}`,b:'相邻残差重复程度'},
+      {x:472,y:35,w:180,h:78,a:`n_eff = ${neff.toFixed(1)}`,b:'真正独立的信息量'},
+      {x:28,y:167,w:180,h:78,a:`s = ${noise.toFixed(1)} m`,b:'点围绕拟合线的散乱'},
+      {x:250,y:167,w:180,h:78,a:`x̄ = ${Math.round(xbar)} m`,b:`外推杠杆项 ${leverage.toFixed(3)}`},
+      {x:618,y:151,w:250,h:94,a:`σ₀ = ${sigma.toFixed(2)} m`,b:'阈值交点有多不确定'}
+    ];
+    boxes.forEach(b=>{sigmaMarks.append(el('rect',{x:b.x,y:b.y,width:b.w,height:b.h,rx:10,class:'flow-box'})); sigmaMarks.append(el('text',{x:b.x+14,y:b.y+31,class:'flow-main'},b.a)); sigmaMarks.append(el('text',{x:b.x+14,y:b.y+56,class:'flow-sub'},b.b));});
+    [[208,74,250,74],[430,74,472,74],[562,113,700,151],[208,206,250,206],[430,206,618,194]].forEach(a=>sigmaMarks.append(el('path',{d:`M${a[0]} ${a[1]} L${a[2]} ${a[3]}`,class:'flow-arrow'})));
+    sigmaMarks.append(el('text',{x:450,y:140,'text-anchor':'middle'},'more independent data ↓ sigma / 独立信息越多，sigma 越小'));
+    sigmaMarks.append(el('text',{x:450,y:274,'text-anchor':'middle'},'more scatter or farther extrapolation ↑ sigma / 越散、外推越远，sigma 越大'));
+  }
+
+  function drawFit(n, noise, rho, nearest, estimate, sigma) {
+    fitGrid.replaceChildren(); fitMarks.replaceChildren();
+    const x0 = 72, x1 = 858, y0 = 28, y1 = 278;
+    const sx = x => x0 + ((x + 5200) / 5400) * (x1 - x0);
+    const sy = y => y1 - ((y + 15) / 330) * (y1 - y0);
+    [-5000,-4000,-3000,-2000,-1000,0].forEach(x => {
+      fitGrid.append(el('line',{x1:sx(x),y1:y0,x2:sx(x),y2:y1,class:'grid'}));
+      fitGrid.append(el('text',{x:sx(x),y:301,'text-anchor':'middle'},x === 0 ? 'threshold' : `${x/1000} km`));
+    });
+    [0,100,200,300].forEach(y => {
+      fitGrid.append(el('line',{x1:x0,y1:sy(y),x2:x1,y2:sy(y),class:'grid'}));
+      fitGrid.append(el('text',{x:60,y:sy(y)+4,'text-anchor':'end'},`${y} m`));
+    });
+    fitGrid.append(el('line',{x1:sx(0),y1:y0,x2:sx(0),y2:y1,class:'threshold'}));
+    fitGrid.append(el('text',{x:72,y:18},'Height above target versus distance to threshold'));
+    const slope = -0.0524;
+    const lineY = x => estimate + slope * x;
+    fitMarks.append(el('line',{x1:sx(-5000),y1:sy(lineY(-5000)),x2:sx(nearest),y2:sy(lineY(nearest)),class:'fit-line'}));
+    fitMarks.append(el('line',{x1:sx(nearest),y1:sy(lineY(nearest)),x2:sx(0),y2:sy(estimate),class:'extension'}));
+    const visibleN = Math.min(n, 120);
+    const residuals = correlatedResiduals(visibleN, rho, noise);
+    for (let i=0;i<visibleN;i++) {
+      const x = -5000 + (i/(visibleN-1)) * (5000 + nearest);
+      const measured=lineY(x)+residuals[i];
+      fitMarks.append(el('line',{x1:sx(x),y1:sy(lineY(x)),x2:sx(x),y2:sy(measured),class:'residual'}));
+      fitMarks.append(el('circle',{cx:sx(x),cy:sy(measured),r:2.8,class:'sample'}));
+    }
+    fitMarks.append(el('circle',{cx:sx(0),cy:sy(estimate),r:6,class:'estimate'}));
+    fitMarks.append(el('line',{x1:sx(0)-8,y1:sy(estimate-1.96*sigma),x2:sx(0)-8,y2:sy(estimate+1.96*sigma),class:'ci'}));
+    fitMarks.append(el('text',{x:sx(nearest)-5,y:sy(lineY(nearest))-12,'text-anchor':'end'},'last usable sample'));
+    fitMarks.append(el('text',{x:sx(nearest)+18,y:sy(lineY(nearest))+20},'dashed = extrapolation / 虚线是外推'));
+  }
+
+  function drawGate(estimate, sigma, verdict) {
+    gateGrid.replaceChildren(); gateMarks.replaceChildren();
+    const lo = estimate - 1.96 * sigma, hi = estimate + 1.96 * sigma;
+    const min = Math.min(-4.2, estimate - 4.1 * sigma);
+    const max = Math.max(7.25, estimate + 4.1 * sigma);
+    const x0 = 66, x1 = 858, top = 42, baseline = 248;
+    const sx = x => x0 + (x - min) / (max - min) * (x1 - x0);
+    const pdf = x => Math.exp(-0.5 * Math.pow((x - estimate) / Math.max(0.001, sigma), 2));
+    const sy = x => baseline - pdf(x) * (baseline - top);
+    const curvePoints = (a, b, count = 90) => Array.from({length:count+1},(_,i) => {
+      const x = a + i / count * (b - a);
+      return [sx(x), sy(x)];
+    });
+    const areaPath = (a,b) => {
+      const left = clamp(a,min,max), right = clamp(b,min,max);
+      if (right <= left) return '';
+      const points = curvePoints(left,right);
+      return `M${sx(left)} ${baseline} ` + points.map(point=>`L${point[0]} ${point[1]}`).join(' ') + ` L${sx(right)} ${baseline} Z`;
+    };
+    gateGrid.append(el('rect',{x:sx(clamp(-3.05,min,max)),y:top-8,width:Math.max(0,sx(clamp(6.1,min,max))-sx(clamp(-3.05,min,max))),height:baseline-top+8,class:'gate-zone'}));
+    gateGrid.append(el('text',{x:(sx(clamp(-3.05,min,max))+sx(clamp(6.1,min,max)))/2,y:28,'text-anchor':'middle'},'accepted vertical gate / 允许范围'));
+    gateMarks.append(el('path',{d:areaPath(min,lo),class:'normal-tail'}));
+    gateMarks.append(el('path',{d:areaPath(lo,hi),class:'normal-fill'}));
+    gateMarks.append(el('path',{d:areaPath(estimate-sigma,estimate+sigma),class:'normal-core'}));
+    gateMarks.append(el('path',{d:areaPath(hi,max),class:'normal-tail'}));
+    gateMarks.append(el('path',{d:'M'+curvePoints(min,max).map(point=>`${point[0]} ${point[1]}`).join(' L'),class:'normal-line'}));
+    gateGrid.append(el('line',{x1:x0,y1:baseline,x2:x1,y2:baseline,class:'axis'}));
+    [-3.05,6.1].forEach(value=>{
+      if (value >= min && value <= max) gateGrid.append(el('line',{x1:sx(value),y1:top-8,x2:sx(value),y2:baseline+8,class:'threshold'}));
+    });
+    [estimate-sigma,estimate+sigma].forEach(value=>gateMarks.append(el('line',{x1:sx(value),y1:sy(value),x2:sx(value),y2:baseline,class:'sigma-marker'})));
+    [lo,hi].forEach(value=>gateMarks.append(el('line',{x1:sx(value),y1:sy(value),x2:sx(value),y2:baseline+13,class:'ci-marker'})));
+    gateMarks.append(el('line',{x1:sx(estimate),y1:top-4,x2:sx(estimate),y2:baseline+8,class:'threshold'}));
+    gateMarks.append(el('circle',{cx:sx(estimate),cy:top-4,r:6,class:'estimate'}));
+    const axisValues = [min,-3.05,estimate,6.1,max].filter((value,index,array)=>array.findIndex(other=>Math.abs(other-value)<0.15)===index).sort((a,b)=>a-b);
+    axisValues.forEach(value=>gateGrid.append(el('text',{x:sx(value),y:276,'text-anchor':'middle'},`${fmt(value,1)} m`)));
+    gateMarks.append(el('text',{x:sx(estimate),y:61,'text-anchor':'middle',class:'flow-main'},`estimate ${fmt(estimate)} m`));
+    gateMarks.append(el('text',{x:sx(estimate),y:93,'text-anchor':'middle'},'68% within ±1σ'));
+    gateMarks.append(el('text',{x:(sx(lo)+sx(hi))/2,y:220,'text-anchor':'middle',class:'flow-main'},`95%: ${fmt(lo)} to ${fmt(hi)} m`));
+    gateMarks.append(el('text',{x:sx(clamp(lo-(max-min)*.035,min,max)),y:238,'text-anchor':'end'},'2.5% tail'));
+    gateMarks.append(el('text',{x:sx(clamp(hi+(max-min)*.035,min,max)),y:238},'2.5% tail'));
+    gateMarks.append(el('text',{x:450,y:314,'text-anchor':'middle',class:`verdict-${verdict}`},`${verdict.toUpperCase()} · interval ${verdict==='undecided'?'crosses a gate boundary':verdict==='pass'?'stays inside the gate':'stays outside a gate limit'}`));
+    gateMarks.append(el('text',{x:450,y:338,'text-anchor':'middle'},'95% describes repeated fits under the model—not a 95% guarantee for this one flight'));
+  }
+
+  function drawSensitivity(n, rho, noise, nearest) {
+    sensitivityGrid.replaceChildren(); sensitivityMarks.replaceChildren();
+    const panels = [
+      {x:48,y:34,w:365,h:145,title:'Residual scatter s / 点有多散',min:.2,max:8,current:noise,label:v=>`${v.toFixed(1)} m`,sigma:v=>sigmaParts(n,rho,v,nearest).sigma},
+      {x:487,y:34,w:365,h:145,title:'Recorded samples n / 点的数量',min:8,max:220,current:n,label:v=>`${Math.round(v)}`,sigma:v=>sigmaParts(v,rho,noise,nearest).sigma},
+      {x:48,y:236,w:365,h:145,title:'Correlation ρ / 相邻点重复度',min:0,max:.9,current:rho,label:v=>v.toFixed(2),sigma:v=>sigmaParts(n,v,noise,nearest).sigma},
+      {x:487,y:236,w:365,h:145,title:'Nearest sample / 最后一点位置',min:-1200,max:-50,current:nearest,label:v=>`${Math.round(v)} m`,sigma:v=>sigmaParts(n,rho,noise,v).sigma}
+    ];
+    panels.forEach(panel=>{
+      const values = Array.from({length:61},(_,i)=>{
+        const input = panel.min + i/60*(panel.max-panel.min);
+        return {input,sigma:panel.sigma(input)};
+      });
+      const yMax = Math.max(...values.map(value=>value.sigma))*1.08;
+      const left=panel.x+48,right=panel.x+panel.w-12,top=panel.y+28,bottom=panel.y+panel.h-28;
+      const sx=value=>left+(value-panel.min)/(panel.max-panel.min)*(right-left);
+      const sy=value=>bottom-value/yMax*(bottom-top);
+      sensitivityGrid.append(el('rect',{x:panel.x,y:panel.y,width:panel.w,height:panel.h,rx:10,class:'formula-card'}));
+      sensitivityGrid.append(el('text',{x:panel.x+12,y:panel.y+20,class:'flow-main'},panel.title));
+      sensitivityGrid.append(el('line',{x1:left,y1:bottom,x2:right,y2:bottom,class:'axis'}));
+      sensitivityGrid.append(el('line',{x1:left,y1:top,x2:left,y2:bottom,class:'axis'}));
+      sensitivityGrid.append(el('text',{x:left,y:bottom+19,'text-anchor':'middle'},panel.label(panel.min)));
+      sensitivityGrid.append(el('text',{x:right,y:bottom+19,'text-anchor':'middle'},panel.label(panel.max)));
+      sensitivityGrid.append(el('text',{x:left-6,y:top+4,'text-anchor':'end'},`${yMax.toFixed(1)} m`));
+      sensitivityGrid.append(el('text',{x:left-6,y:bottom+4,'text-anchor':'end'},'0'));
+      sensitivityMarks.append(el('path',{d:'M'+values.map(value=>`${sx(value.input)} ${sy(value.sigma)}`).join(' L'),class:'sensitivity-line'}));
+      const currentSigma=panel.sigma(panel.current);
+      sensitivityMarks.append(el('circle',{cx:sx(panel.current),cy:sy(currentSigma),r:6,class:'sensitivity-point'}));
+      sensitivityMarks.append(el('text',{x:clamp(sx(panel.current),left+32,right-32),y:Math.max(top+13,sy(currentSigma)-10),'text-anchor':'middle',class:'flow-main'},`σ₀ ${currentSigma.toFixed(2)} m`));
+    });
+    sensitivityMarks.append(el('text',{x:450,y:419,'text-anchor':'middle'},'Rising line = this input increases uncertainty · 下降线 = 这个输入会降低不确定性'));
+  }
+
+  function update() {
+    const estimate=Number(controls.estimate.value), n=Number(controls.samples.value), noise=Number(controls.noise.value), rho=Number(controls.rho.value), nearest=Number(controls.nearest.value);
+    const {neff,xbar,leverage,sigma}=sigmaParts(n,rho,noise,nearest);
+    const lo=estimate-1.96*sigma, hi=estimate+1.96*sigma;
+    const inside=estimate>=-3.05&&estimate<=6.1;
+    const crosses=(lo<=-3.05&&hi>=-3.05)||(lo<=6.1&&hi>=6.1);
+    const verdict=crosses?'undecided':inside?'pass':'fail';
+    out('estimate').textContent=`${fmt(estimate)} m`; out('samples').textContent=n; out('noise').textContent=`${noise.toFixed(1)} m`; out('rho').textContent=rho.toFixed(2); out('nearest').textContent=`${nearest} m`;
+    out('neff').textContent=neff.toFixed(1); out('neff-note').textContent=`${n} measured`; out('sigma').textContent=`${sigma.toFixed(2)} m`; out('interval').textContent=`[${fmt(lo)}, ${fmt(hi)}] m`; out('verdict-note').textContent=verdict==='undecided'?'crosses a gate':verdict==='pass'?'fully inside both limits':'fully outside a limit';
+    out('interval').className=`viz-stat-value verdict-${verdict}`;
+    drawResiduals(n,rho,noise);
+    drawEffective(n,rho,neff,noise);
+    drawSigma(n,rho,neff,noise,xbar,leverage,sigma);
+    drawFit(n,noise,rho,nearest,estimate,sigma);
+    drawGate(estimate,sigma,verdict);
+    drawSensitivity(n,rho,noise,nearest);
+  }
+  Object.values(controls).forEach(control=>control.addEventListener('input',update));
+  update();
+})();
+</script>

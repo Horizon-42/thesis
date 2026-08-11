@@ -17,3 +17,5 @@ landing
 
 tmp ignore
 departure? wait 
+
+local rador data

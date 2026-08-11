@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>From ADS-B Samples to a Gate Verdict</title>
+  <style>
+    :root { color-scheme: light dark; --bg:#f7f8fa; --paper:#fff; --text:#20242a; --muted:#5d6672; --line:#d9dee5; --accent:#1769aa; --soft:#eaf3fb; --warn:#9a4e00; --good:#16733d; --bad:#b52b32; }
+    @media (prefers-color-scheme:dark) { :root { --bg:#15181c; --paper:#20242a; --text:#f2f4f7; --muted:#b5bdc8; --line:#3b424c; --accent:#86c5ff; --soft:#1d3448; --warn:#ffc273; --good:#75d99a; --bad:#ff8c91; } }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font:16px/1.65 system-ui,-apple-system,"Segoe UI",sans-serif; }
+    main { max-width:940px; margin:auto; padding:40px 24px 72px; }
+    article { background:var(--paper); padding:clamp(24px,5vw,58px); border:1px solid var(--line); border-radius:18px; }
+    h1,h2,h3 { line-height:1.22; }
+    h1 { font-size:clamp(2rem,5vw,3.4rem); margin:0 0 12px; letter-spacing:-.035em; }
+    h2 { margin-top:2.8em; padding-top:.35em; border-top:1px solid var(--line); }
+    h3 { margin-top:1.8em; }
+    p,li { max-width:76ch; }
+    .lead { color:var(--muted); font-size:1.15rem; }
+    .note,.zh-note { background:var(--soft); border-left:4px solid var(--accent); padding:14px 18px; margin:20px 0; }
+    .zh-note { font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
+    .zh-note::before { content:"中文直觉解释"; display:block; color:var(--accent); font-weight:700; margin-bottom:6px; }
+    .formula { overflow:auto; padding:16px 18px; background:var(--bg); border:1px solid var(--line); border-radius:10px; font:1.03rem/1.55 ui-monospace,SFMono-Regular,Menlo,monospace; }
+    code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+    table { width:100%; border-collapse:collapse; margin:18px 0; }
+    th,td { text-align:left; vertical-align:top; padding:10px 12px; border-bottom:1px solid var(--line); }
+    th { color:var(--muted); }
+    .good { color:var(--good); } .bad { color:var(--bad); } .warn { color:var(--warn); }
+    iframe { display:block; width:100%; height:3300px; border:1px solid var(--line); border-radius:12px; background:var(--paper); margin:24px 0; }
+    .calc-flow { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:20px 0; }
+    .calc-step { position:relative; padding:14px; border:1px solid var(--line); border-radius:10px; background:var(--bg); min-height:128px; }
+    .calc-step:not(:last-child)::after { content:"→"; position:absolute; right:-12px; top:45%; z-index:1; color:var(--accent); font-weight:800; }
+    .calc-step strong { display:block; color:var(--accent); margin-bottom:6px; }
+    .calc-step code { display:block; margin-top:7px; font-size:.9rem; overflow-wrap:anywhere; }
+    .toc a { color:var(--accent); text-decoration:none; }
+    .toc li { margin:.25rem 0; }
+    .small { color:var(--muted); font-size:.92rem; }
+    @media (max-width:600px) { main{padding:0} article{border:0;border-radius:0;padding:24px 18px} iframe{height:3900px} th,td{padding:8px 6px;font-size:.9rem} .calc-flow{grid-template-columns:1fr 1fr}.calc-step::after{display:none} }
+    @media print { body{background:white;color:black} main{max-width:none;padding:0} article{border:0} iframe{display:none} .interactive-only{display:none} }
+  </style>
+</head>
+<body>
+<main>
+<article>
+  <header>
+    <p class="small">AeroViz-4D · Observed baseline evaluation</p>
+    <h1>From ADS-B Samples to a Gate Verdict</h1>
+    <p class="lead">Why a trajectory that looks aligned with the runway can still be outside the gate—and why uncertainty sometimes makes “undecidable” more honest than pass or fail.</p>
+    <p class="zh-note">这篇文档不要求你预先懂统计学。英文是论文式主体，蓝色中文框负责回答“这个数字到底表示什么”和“为什么要这样算”。阅读时可以先只看图和中文框，再回头看公式。</p>
+  </header>
+
+  <nav class="toc" aria-label="Contents">
+    <ol>
+      <li><a href="#question">What is being estimated?</a></li>
+      <li><a href="#fit">The final-approach fit</a></li>
+      <li><a href="#sigma">How sigma is obtained</a></li>
+      <li><a href="#correlation">Why effective sample size is used</a></li>
+      <li><a href="#interval">From sigma to a 95% interval</a></li>
+      <li><a href="#verdict">Green, red, and grey</a></li>
+      <li><a href="#lab">Interactive demonstration</a></li>
+      <li><a href="#assessment">Reliability and necessity</a></li>
+    </ol>
+  </nav>
+
+  <section id="question">
+    <h2>1. What is being estimated?</h2>
+    <p>Observed ADS-B tracks usually stop before the runway threshold. Receiver coverage often disappears while the aircraft is still hundreds of metres from touchdown. The evaluation therefore must not grade the final received point as if it were the landing point.</p>
+    <p>Instead, AeroViz identifies the stable inbound segment, represents it in a runway-aligned coordinate frame, fits the flown path, and extrapolates that fitted path to the threshold. Two quantities are estimated there:</p>
+    <ul>
+      <li><strong>Lateral crossing offset:</strong> distance left or right of the extended centreline.</li>
+      <li><strong>Vertical crossing offset:</strong> height relative to the published target crossing height.</li>
+    </ul>
+    <div class="note"><strong>Plain-English note.</strong> The system is not predicting the whole landing. It is extending the last stable straight segment just far enough to answer: “Where would this fitted line cross the runway threshold plane?”</div>
+    <div class="zh-note">接收器通常在飞机真正到达跑道前就丢失信号。因此系统看到的是一条“没有画到终点的直线”。拟合所做的事情就是拿尺子沿这段稳定直线继续延长，估计它在跑道入口处会落在哪里。</div>
+  </section>
+
+  <section id="fit">
+    <h2>2. The final-approach fit</h2>
+    <p>The selected fitting window is 5,000 m to 300 m before the threshold. This avoids two problematic regions: aircraft may still be intercepting the glidepath farther out, while flare and round-out begin close to the runway.</p>
+    <p>For the same set of time-ordered samples, two ordinary least-squares lines are fitted:</p>
+    <div class="formula">cross-track(x) = a + b·x<br>height(x) = c + d·x</div>
+    <p>Here, <code>x = 0</code> is the threshold. Therefore <code>a</code> is the estimated lateral crossing and <code>c</code> is the estimated vertical crossing. The slopes describe centreline convergence and glidepath angle.</p>
+    <div class="zh-note"><code>x</code> 表示飞机距离跑道入口还有多远；跑道入口定义为 <code>x=0</code>。直线公式中的截距，就是把直线延长到 <code>x=0</code> 后读出的高度或横向偏移。这里不需要手算，只需要知道：<strong>截距就是我们最终拿去和 gate 比较的数值</strong>。</div>
+    <p>A fit is considered measurable only when it has at least eight samples spanning at least 500 m. It must also satisfy the established-final checks: median cross-track no more than 400 m, glidepath angle between 2.0° and 4.5°, and vertical RMS residual no more than 6.0 m.</p>
+  </section>
+
+    <section id="sigma">
+    <h2>3. How sigma is obtained</h2>
+    <p>Sigma is <strong>not a fixed value configured for all flights</strong>. Each trajectory receives its own lateral and vertical sigma, computed from its samples.</p>
+    <table>
+      <thead><tr><th>Symbol</th><th>Everyday meaning</th><th>中文含义</th></tr></thead>
+      <tbody>
+        <tr><td><code>rᵢ</code></td><td>One point’s distance from the fitted line</td><td>第 i 个点离拟合直线有多远</td></tr>
+        <tr><td><code>SSE</code></td><td>Total squared mismatch of all points</td><td>所有点偏差平方后的总和</td></tr>
+        <tr><td><code>s</code></td><td>Typical scatter of individual points</td><td>单个 ADS-B 点通常有多“散”</td></tr>
+        <tr><td><code>n</code></td><td>Number of recorded samples</td><td>实际记录到多少个点</td></tr>
+        <tr><td><code>n_eff</code></td><td>Independent information equivalent</td><td>这些点相当于多少个真正独立的点</td></tr>
+        <tr><td><code>σ₀</code></td><td>Uncertainty of the fitted crossing at the threshold</td><td>最终阈值交点有多不确定</td></tr>
+      </tbody>
+    </table>
+    <p>After fitting a line, every sample has a residual—the difference between the measured point and the fitted line. Their sum of squared errors is:</p>
+    <div class="formula">SSE = Σ rᵢ²<br>s = √(SSE / (n − 2))</div>
+    <p>The quantity <code>s</code> estimates the scatter of individual observations around the line. The divisor is <code>n − 2</code> because the line estimated two parameters: slope and intercept.</p>
+    <div class="zh-note">先不要把 <code>s</code> 和 sigma 混在一起。<code>s</code> 看的是<strong>原始点围绕直线散得多不多</strong>；sigma 看的是<strong>综合很多点以后，那条直线在跑道入口处的位置还剩多少不确定性</strong>。例如单个点可能上下跳动 3.8 m，但 100 个点共同确定的交点可能只不确定 1 m 左右。</div>
+    <p>The standard error of the fitted mean at the threshold is:</p>
+    <div class="formula">σ₀ = s · √( 1/n_eff + x̄²/Sxx_eff )</div>
+    <p>The first term rewards more effective observations. The second term is the extrapolation penalty: the farther the threshold lies from the centre of the observed sample window, the less precisely the intercept is known.</p>
+    <div class="zh-note">这个公式只有两个直觉：① 独立信息越多，大家一起“投票”，sigma 越小；② 数据离跑道入口越远，直线需要延长得越长，一点点斜率误差就会在终点被放大，所以 sigma 越大。交互图中的五个滑块就是在控制这两类因素。</div>
+    <div class="note"><strong>Plain-English note.</strong> Residual RMS describes how noisy the points are. Sigma at the threshold describes how uncertain the fitted crossing is. They are related, but they are not the same quantity.</div>
+
+    <h3>One complete numerical example</h3>
+    <p>The interactive lab opens with the following values. Read the boxes from left to right; each box supplies one ingredient to the next.</p>
+    <div class="calc-flow" aria-label="Worked sigma calculation">
+      <div class="calc-step"><strong>1 · Point scatter</strong>80 samples leave 78 degrees of freedom.<code>s = √(1126.3/78) = 3.80 m</code></div>
+      <div class="calc-step"><strong>2 · Repeated data</strong>With ρ = 0.43, only 31.9 independent-equivalent samples remain.<code>n_eff = 80×0.57/1.43 = 31.9</code></div>
+      <div class="calc-step"><strong>3 · Extrapolation</strong>The sample window and last point produce a leverage factor of 0.153.<code>1/n_eff + x̄²/Sxx_eff = 0.153</code></div>
+      <div class="calc-step"><strong>4 · Crossing sigma</strong>Multiply point scatter by the square root of leverage.<code>σ₀ = 3.80×√0.153 = 1.49 m</code></div>
+    </div>
+    <p>The estimated crossing is −2.00 m, so the model-based 95% interval is <code>−2.00 ± 1.96×1.49 = [−4.92, +0.92] m</code>. It crosses the lower vertical gate at −3.05 m, so this example is grey.</p>
+    <div class="zh-note">把 sigma 的计算想成四关：先看点本身有多散；再扣掉“重复测量”造成的虚假样本数；然后惩罚从最后观测点到跑道入口的外推距离；最后才得到交点的不确定性。默认示例中，单点散乱是 3.80 m，但许多点共同确定直线以后，交点 sigma 降为 1.49 m。它不是程序员指定的常数，而是这条航迹算出来的结果。</div>
+  </section>
+
+  <section id="correlation">
+    <h2>4. Why effective sample size is used</h2>
+    <p>Textbook OLS treats observations as independent. One-hertz ADS-B samples on a smooth descent are not independent: consecutive altitude reports often repeat the same 25 ft quantised value, so neighbouring residuals tend to resemble one another.</p>
+    <p>AeroViz estimates lag-1 residual autocorrelation <code>ρ</code> and converts the recorded sample count into an effective sample count:</p>
+    <div class="formula">n_eff = n · (1 − ρ) / (1 + ρ)</div>
+    <p>For example, 100 recorded samples with <code>ρ = 0.43</code> provide roughly 40 independent samples’ worth of information. Both the sample-count and leverage terms are corrected. Negative correlation is conservatively clamped to zero, positive correlation is capped at 0.95, and effective sample size is never allowed below three.</p>
+    <div class="note"><strong>Plain-English note.</strong> Repeating nearly the same measurement many times should not create the same confidence as collecting many independent measurements. The correction prevents false precision.</div>
+    <div class="zh-note">假设相机连续拍了 100 张同一个温度计的照片，这不等于用 100 个独立温度计测量。ADS-B 连续秒的数据也会重复或相似。<code>ρ</code> 越大，说明相邻点越像“重复照片”；所以程序会把 100 个记录点折算成更少的有效样本。</div>
+  </section>
+
+  <section id="interval">
+    <h2>5. From sigma to a 95% interval</h2>
+    <p>Assuming the fitted intercept error is approximately normal, a two-sided 95% confidence interval is:</p>
+    <div class="formula">estimated crossing ± 1.96·σ₀</div>
+    <p>The coefficient 1.96 is the 97.5th percentile of the standard normal distribution. About 95% of that distribution lies between −1.96 and +1.96.</p>
+    <div class="zh-note">sigma 可以理解为误差范围的一把“基础尺子”。为了画出较保守的 95% 范围，把这把尺子向左右各放 1.96 次。1.96 不是项目随意指定的，而是正态分布中标准的 95% 双侧系数。</div>
+    <p>Strictly speaking, “95% confidence” describes the long-run behaviour of the procedure: if comparable flights and measurement errors were repeatedly sampled, about 95% of intervals constructed this way would cover their corresponding true fitted crossing, provided the model assumptions hold. It is not a guarantee that this one interval has a literal 95% probability of containing a fixed truth.</p>
+    <div class="zh-note">“95% 置信”最容易被误解。它不是说“这一次真实值有 95% 概率躲在蓝线里面”。更接近的说法是：如果能把同样条件的测量过程重复很多次，每次都重新拟合和画区间，那么在模型成立时，大约 100 个区间里有 95 个能盖住各自的真实交点。对当前这一条航迹，我们只看到其中一个区间，所以应把它理解为<strong>模型给出的可信范围</strong>，而不是绝对保证。</div>
+    <p>This is a confidence interval for the <em>mean fitted path at the threshold</em>, not a prediction interval for a hypothetical new ADS-B point. Adding per-sample measurement scatter again would answer a different question and would make the interval unnecessarily wide.</p>
+  </section>
+
+  <section id="verdict">
+    <h2>6. Green, red, and grey</h2>
+    <p>The threshold gates are lateral offset ≤ 106.75 m and vertical offset between −3.05 m and +6.10 m. Speed and heading are reported for context but are not gated.</p>
+    <table>
+      <thead><tr><th>Colour</th><th>Meaning</th><th>Decision rule</th></tr></thead>
+      <tbody>
+        <tr><td class="good"><strong>Green</strong></td><td>Within both gates</td><td>The estimated crossing passes, and its confidence interval does not cross a boundary.</td></tr>
+        <tr><td class="bad"><strong>Red</strong></td><td>Outside at least one gate</td><td>The estimated crossing fails, and its confidence interval remains on the failed side.</td></tr>
+        <tr><td><strong>Grey</strong></td><td>Undecidable</td><td>The 95% interval crosses a gate boundary, or no stable final approach could be fitted.</td></tr>
+      </tbody>
+    </table>
+    <p>A red and a green trajectory may appear to overlap on the globe. The gate is evaluated only at the fitted threshold crossing, and a vertical miss of a few tenths of a metre is invisible at normal Cesium viewing scales.</p>
+    <div class="zh-note">颜色不是根据“两条线在屏幕上像不像”决定的。每条航迹都单独延长到跑道入口，再读取一个横向数值和一个高度数值。即使整条线几乎重合，只要入口处高度比边界多出 0.2 m，也可能得到不同颜色。</div>
+  </section>
+
+  <section id="lab" class="interactive-only">
+    <h2>7. Interactive demonstration</h2>
+    <p>Adjust the crossing estimate, sample count, residual noise, autocorrelation, and last-observation distance. Six linked diagrams now expose every stage: residuals → <em>s</em>, correlation → <em>n</em><sub>eff</sub>, sigma assembly, extrapolation, the normal-curve interval, and one-factor sensitivity.</p>
+    <div class="zh-note">建议按这个顺序试：先固定其他参数，只增加 Residual noise，观察 sigma 变大；再增加 Samples，观察 sigma 变小；然后提高 Correlation，观察记录点虽然没减少，有效样本却减少；最后把 Nearest sample 向 −1200 m 移动，观察外推距离增加后 sigma 变大。</div>
+    <iframe src="visualizations/final-approach-uncertainty-lab.html" title="Interactive final-approach uncertainty demonstration"></iframe>
+  </section>
+
+  <section id="assessment">
+    <h2>8. Reliability and necessity</h2>
+    <h3>What makes the method defensible</h3>
+    <ul>
+      <li><strong>The model form follows approach geometry.</strong> A stabilised final approach is approximately straight in the runway-aligned lateral and vertical planes.</li>
+      <li><strong>Uncertainty is flight-specific.</strong> Sigma responds to actual residual scatter, sample geometry, extrapolation distance, and serial correlation.</li>
+      <li><strong>The method refuses unsupported precision.</strong> Non-established approaches and boundary-straddling intervals are not forced into pass/fail.</li>
+      <li><strong>The autocorrelation correction is conservative.</strong> Repeated or correlated measurements cannot artificially drive uncertainty toward zero as quickly as naïve OLS would.</li>
+      <li><strong>Results are auditable.</strong> The report preserves crossing offsets, both sigmas, glidepath, extrapolation distance, marginal status, and the explicit reason for non-establishment.</li>
+    </ul>
+
+    <h3>Important limitations</h3>
+    <ul>
+      <li>The 95% interpretation depends on an approximately linear path, approximately normal intercept error, and a reasonable residual model.</li>
+      <li>The lag-1 effective-sample formula is an approximation; it does not model every temporal correlation pattern or heteroscedastic error.</li>
+      <li>Ordinary least squares remains sensitive to outliers. RMS and established checks reject poor fits, but robust regression or residual diagnostics could improve protection.</li>
+      <li>ADS-B error includes quantisation, receiver geometry, filtering, and possible systematic bias. A small statistical sigma does not prove the absence of systematic error.</li>
+      <li>The fixed fit window and established thresholds are empirically motivated project choices. Reliability should be tested across airports, runway geometries, weather regimes, and data providers.</li>
+    </ul>
+
+    <h3>Overall assessment</h3>
+    <p><strong>Necessary:</strong> yes. Raw ADS-B tracks commonly end before the threshold, and 25 ft altitude quantisation is comparable to the entire 9.15 m vertical gate. Judging the last sample or using a binary point estimate would create systematically misleading results. Some form of fitted crossing and uncertainty-aware classification is therefore necessary.</p>
+    <p><strong>Reliable enough for thesis evaluation:</strong> conditionally yes. The method is transparent, physically motivated, conservative, and materially better than naïve alternatives. It is suitable for comparative research and visualization when its assumptions and undecidable category are reported.</p>
+    <p><strong>Not yet a certified operational decision rule:</strong> the nominal 95% interval should be validated empirically. Recommended evidence includes residual normality and autocorrelation diagnostics, bootstrap or blocked-bootstrap coverage tests, sensitivity analysis for the fit window and thresholds, and comparison against higher-quality surveillance or surveyed threshold-crossing data.</p>
+    <div class="note"><strong>Bottom line.</strong> The complexity is justified by the mismatch between coarse, correlated ADS-B measurements and a very narrow vertical gate. The method should be retained, but its confidence interval should be described as a model-based 95% interval until coverage has been independently calibrated.</div>
+    <div class="zh-note">最终判断：这套方法不是为了“把数学做复杂”，而是为了避免把粗糙且重复的 ADS-B 数据假装成精确真值。对论文比较和可视化来说，它比直接看最后一个点可靠得多，也确实有必要；但在没有用更高精度真值验证覆盖率之前，应该称它为<strong>基于模型的 95% 区间</strong>，不要宣称它已经达到航空认证级别。</div>
+  </section>
+
+  <footer class="small">
+    <p>Implementation references: <code>final_approach/fit.py</code>, <code>evaluation/arrival.py</code>, <code>evaluation/metrics.py</code>, and <code>evaluation/thresholds.py</code>.</p>
+  </footer>
+</article>
+</main>
+</body>
+</html>
