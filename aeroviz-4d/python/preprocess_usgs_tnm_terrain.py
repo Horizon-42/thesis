@@ -14,8 +14,9 @@ heightmap package.
 
 Supported source kinds:
 - DEM GeoTIFF: cropped to the airport footprint, values used directly as metres.
-- DSM LAZ: rasterized with PDAL to a DSM GeoTIFF, XY reprojected to UTM metres,
-  Z scaled from feet to metres for the inspected KRDU USGS LPC source.
+- DSM LAZ: rasterized with PDAL in a temporary UTM metre grid, Z scaled from
+  feet to metres for the inspected KRDU USGS LPC source, then normalized to a
+  WGS 84 (EPSG:4326) GeoTIFF for the shared terrain builder.
 
 Usage:
   # Bare-earth terrain.
@@ -34,6 +35,7 @@ import argparse
 import csv
 import json
 import math
+import os
 import shlex
 import shutil
 import subprocess
@@ -276,6 +278,7 @@ def run_command(
     dry_run: bool,
     label: str,
     heartbeat_seconds: float = COMMAND_HEARTBEAT_SECONDS,
+    env_overrides: dict[str, str] | None = None,
 ) -> None:
     print(f"[command] {label}: {shlex.join(command)}", flush=True)
     if dry_run:
@@ -283,7 +286,10 @@ def run_command(
         return
 
     start = time.monotonic()
-    process = subprocess.Popen(command)
+    process = subprocess.Popen(
+        command,
+        env={**os.environ, **env_overrides} if env_overrides else None,
+    )
     next_heartbeat = start + heartbeat_seconds
 
     while True:
@@ -680,6 +686,127 @@ def build_laz_to_dsm_pipeline(
     return stages
 
 
+def raster_dimensions_for_bounds(
+    bounds: tuple[float, float, float, float],
+    resolution_m: float,
+) -> tuple[int, int]:
+    min_x, min_y, max_x, max_y = bounds
+    return (
+        max(1, math.ceil((max_x - min_x) / resolution_m)),
+        max(1, math.ceil((max_y - min_y) / resolution_m)),
+    )
+
+
+def build_wgs84_warp_command(
+    *,
+    source_tif: Path,
+    output_tif: Path,
+    bbox: GeoBBox,
+    width: int,
+    height: int,
+) -> list[str]:
+    return [
+        "gdalwarp",
+        "-overwrite",
+        "-multi",
+        "-wo",
+        "NUM_THREADS=ALL_CPUS",
+        "-t_srs",
+        "EPSG:4326",
+        "-te_srs",
+        "EPSG:4326",
+        "-te",
+        *bbox.as_gdal_te(),
+        "-ts",
+        str(width),
+        str(height),
+        "-r",
+        "bilinear",
+        "-srcnodata",
+        str(DEFAULT_NODATA),
+        "-dstnodata",
+        str(DEFAULT_NODATA),
+        "-ot",
+        "Float32",
+        "-of",
+        "GTiff",
+        "-co",
+        "COMPRESS=LZW",
+        "-co",
+        "TILED=YES",
+        "-co",
+        "BIGTIFF=IF_SAFER",
+        str(source_tif),
+        str(output_tif),
+    ]
+
+
+def validate_wgs84_gdalinfo_metadata(
+    metadata: dict[str, Any],
+    geotiff_path: Path,
+    *,
+    expected_size: tuple[int, int],
+) -> None:
+    epsg = (metadata.get("stac") or {}).get("proj:epsg")
+    if epsg != 4326:
+        raise RuntimeError(
+            f"Normalized DSM {geotiff_path} is not EPSG:4326 (reported EPSG:{epsg})"
+        )
+
+    size = metadata.get("size")
+    if size != list(expected_size):
+        raise RuntimeError(
+            f"Normalized DSM {geotiff_path} has raster size {size}; "
+            f"expected {list(expected_size)}"
+        )
+
+    bands = metadata.get("bands") or []
+    band = bands[0] if bands else {}
+    band_metadata = band.get("metadata") or {}
+    statistics = band_metadata.get("") or {}
+    try:
+        valid_percent = float(statistics.get("STATISTICS_VALID_PERCENT", 0))
+    except (TypeError, ValueError):
+        valid_percent = 0.0
+
+    minimum = band.get("minimum")
+    maximum = band.get("maximum")
+    if (
+        valid_percent <= 0
+        or not isinstance(minimum, (int, float))
+        or not math.isfinite(minimum)
+        or not isinstance(maximum, (int, float))
+        or not math.isfinite(maximum)
+    ):
+        raise RuntimeError(f"Normalized DSM {geotiff_path} contains no valid elevation pixels")
+
+
+def validate_wgs84_geotiff(
+    geotiff_path: Path,
+    *,
+    expected_size: tuple[int, int],
+) -> None:
+    result = subprocess.run(
+        ["gdalinfo", "-json", "-stats", str(geotiff_path)],
+        text=True,
+        capture_output=True,
+        check=False,
+        env={**os.environ, "PROJ_NETWORK": "OFF"},
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        raise RuntimeError(
+            f"Could not validate normalized DSM {geotiff_path}: "
+            f"{detail or f'gdalinfo exited with status {result.returncode}'}"
+        )
+
+    validate_wgs84_gdalinfo_metadata(
+        json.loads(result.stdout),
+        geotiff_path,
+        expected_size=expected_size,
+    )
+
+
 def stage_laz_dsm(
     *,
     airport_code: str,
@@ -692,6 +819,7 @@ def stage_laz_dsm(
     dry_run: bool,
 ) -> StagedTerrainSource:
     require_tool("pdal")
+    require_tool("gdalwarp")
 
     normalized_airport = normalize_airport_code(airport_code)
     source_dir = source_root_for_airport(usgs_root, airport_code) / "dsm" / "source_laz"
@@ -708,16 +836,25 @@ def stage_laz_dsm(
 
     resolved_target_srs = target_srs or default_target_srs_for_bbox(bbox)
     target_bounds = transform_bbox_to_srs(bbox, resolved_target_srs)
+    raster_width, raster_height = raster_dimensions_for_bounds(
+        target_bounds,
+        dsm_resolution_m,
+    )
 
     output_dir = staging_dir_for_source(airport_code, "dsm")
     grid_label = numeric_label(dsm_resolution_m)
     output_tif = output_dir / f"usgs_tnm_lpc_dsm_grid_{grid_label}m_elevation_m.tif"
     pipeline_path = output_dir / f"usgs_tnm_lpc_dsm_grid_{grid_label}m_pipeline.json"
+    projected_work_dir = output_dir / ".projected"
+    projected_tif = projected_work_dir / f"dsm_grid_{grid_label}m.tif"
+    normalized_tif = projected_work_dir / f"dsm_grid_{grid_label}m_wgs84.tif"
     output_dir.mkdir(parents=True, exist_ok=True)
+    if not dry_run:
+        projected_work_dir.mkdir(parents=True, exist_ok=True)
 
     pipeline = build_laz_to_dsm_pipeline(
         laz_paths=laz_paths,
-        output_tif=output_tif,
+        output_tif=projected_tif,
         source_srs=resolved_source_srs,
         target_srs=resolved_target_srs,
         target_bounds=target_bounds,
@@ -731,10 +868,38 @@ def stage_laz_dsm(
         pipeline_path.write_text(pipeline_json, encoding="utf-8")
 
     run_command(["pdal", "pipeline", str(pipeline_path)], dry_run=dry_run, label="Rasterize LAZ DSM")
+    run_command(
+        build_wgs84_warp_command(
+            source_tif=projected_tif,
+            output_tif=normalized_tif,
+            bbox=bbox,
+            width=raster_width,
+            height=raster_height,
+        ),
+        dry_run=dry_run,
+        label="Normalize DSM GeoTIFF to WGS 84",
+        # Some Conda installations enable PROJ's remote-grid lookup. If the
+        # NAD83 HPGN grid is absent and the machine is offline, that lookup can
+        # make GDAL emit a successful but entirely no-data raster. Disabling
+        # remote lookup selects the installed grid or PROJ's local NAD83/WGS84
+        # fallback instead.
+        env_overrides={"PROJ_NETWORK": "OFF"},
+    )
+    if not dry_run:
+        validate_wgs84_geotiff(
+            normalized_tif,
+            expected_size=(raster_width, raster_height),
+        )
+        normalized_tif.replace(output_tif)
+        shutil.rmtree(projected_work_dir)
+
     return write_terrain_source_metadata(
         source=StagedTerrainSource(source_kind="dsm", source_dir=output_dir, output_tif=output_tif),
         horizontal_resolution_m=dsm_resolution_m,
-        note="Configured PDAL writers.gdal raster resolution.",
+        note=(
+            "Configured PDAL writers.gdal raster resolution; the staged GeoTIFF "
+            "is normalized to WGS 84 (EPSG:4326) at the same raster dimensions."
+        ),
         dry_run=dry_run,
     )
 

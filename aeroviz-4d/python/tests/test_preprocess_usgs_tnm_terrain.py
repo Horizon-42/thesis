@@ -1,10 +1,13 @@
 import json
 
+import pytest
+
 from preprocess_usgs_tnm_terrain import (
     DEFAULT_LAZ_SOURCE_SRS_BY_AIRPORT,
     GeoBBox,
     StagedTerrainSource,
     build_laz_to_dsm_pipeline,
+    build_wgs84_warp_command,
     default_target_srs_for_bbox,
     ensure_readable_source_files,
     pdal_bounds_string,
@@ -17,6 +20,7 @@ from preprocess_usgs_tnm_terrain import (
     transform_bbox_with_gdaltransform,
     transformation_matrix_for_z_scale,
     union_bboxes,
+    validate_wgs84_gdalinfo_metadata,
 )
 
 
@@ -215,6 +219,67 @@ def test_pipeline_json_is_serializable(tmp_path):
     encoded = json.dumps({"pipeline": pipeline})
 
     assert "writers.gdal" in encoded
+
+
+def test_build_wgs84_warp_command_normalizes_projected_dsm_to_geographic_grid(tmp_path):
+    source_tif = tmp_path / "dsm_projected.tif"
+    output_tif = tmp_path / "dsm_wgs84.tif"
+    bbox = GeoBBox(west=-79.0, south=35.7, east=-78.5, north=36.1)
+
+    command = build_wgs84_warp_command(
+        source_tif=source_tif,
+        output_tif=output_tif,
+        bbox=bbox,
+        width=20471,
+        height=20385,
+    )
+
+    assert command[:2] == ["gdalwarp", "-overwrite"]
+    assert command[command.index("-t_srs") + 1] == "EPSG:4326"
+    assert command[command.index("-te_srs") + 1] == "EPSG:4326"
+    assert command[command.index("-te") + 1 : command.index("-te") + 5] == bbox.as_gdal_te()
+    assert command[command.index("-ts") + 1 : command.index("-ts") + 3] == [
+        "20471",
+        "20385",
+    ]
+    assert command[-2:] == [str(source_tif), str(output_tif)]
+
+
+def test_validate_wgs84_gdalinfo_metadata_requires_crs_and_valid_elevations(tmp_path):
+    valid_metadata = {
+        "size": [20471, 20385],
+        "stac": {"proj:epsg": 4326},
+        "bands": [
+            {
+                "minimum": 24.8,
+                "maximum": 223.6,
+                "metadata": {"": {"STATISTICS_VALID_PERCENT": "12.57"}},
+            }
+        ],
+    }
+
+    validate_wgs84_gdalinfo_metadata(
+        valid_metadata,
+        tmp_path / "dsm.tif",
+        expected_size=(20471, 20385),
+    )
+
+    with pytest.raises(RuntimeError, match="EPSG:4326"):
+        validate_wgs84_gdalinfo_metadata(
+            {**valid_metadata, "stac": {"proj:epsg": 26917}},
+            tmp_path / "dsm.tif",
+            expected_size=(20471, 20385),
+        )
+
+    with pytest.raises(RuntimeError, match="no valid elevation pixels"):
+        validate_wgs84_gdalinfo_metadata(
+            {
+                **valid_metadata,
+                "bands": [{"metadata": {"": {"STATISTICS_VALID_PERCENT": "0"}}}],
+            },
+            tmp_path / "dsm.tif",
+            expected_size=(20471, 20385),
+        )
 
 
 def test_source_kinds_to_stage_supports_both():

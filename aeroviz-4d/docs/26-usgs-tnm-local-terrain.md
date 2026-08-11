@@ -45,6 +45,11 @@ there means elevation values are in metres, not metre-level horizontal
 resolution. DSM raster outputs include the grid spacing explicitly, for example
 `usgs_tnm_lpc_dsm_grid_2m_elevation_m.tif`.
 
+All staged GeoTIFFs use WGS 84 geographic coordinates (`EPSG:4326`). DSM
+processing still uses a temporary projected grid so `2 m` has a meaningful
+linear resolution, but that intermediate raster is removed after the WGS 84
+normalization step.
+
 ## Output Contract
 
 Both source kinds are normalized to GeoTIFF staging data, then converted to the
@@ -111,12 +116,17 @@ DSM path:
 
 1. Read the LAZ files with PDAL using `override_srs=EPSG:2264` for KRDU.
 2. Merge the point views.
-3. Reproject XY to NAD83 UTM zone 17N (`EPSG:26917`).
+3. Reproject XY to a temporary NAD83 UTM zone 17N (`EPSG:26917`) work grid.
 4. Scale Z from feet to metres.
 5. Rasterize with `writers.gdal` using `output_type=max` at 2 m resolution.
-6. Write `terrain-source.json` beside the staged GeoTIFF with
+6. Reproject the raster to WGS 84 geographic coordinates (`EPSG:4326`) with
+   GDAL, retaining the projected grid dimensions so its ground sampling stays
+   approximately 2 m.
+7. Remove the temporary projected raster.
+8. Write `terrain-source.json` beside the staged GeoTIFF with
    `precision.horizontalResolutionM`.
-7. Run `scripts/build_local_terrain_heightmap.mjs` against the staged DSM GeoTIFF.
+9. Run `scripts/build_local_terrain_heightmap.mjs` against the WGS 84 DSM
+   GeoTIFF.
 
 The final heightmap tiles use the same
 `float32-little-endian-heightmap` contract documented in
