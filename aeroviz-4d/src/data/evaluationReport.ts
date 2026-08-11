@@ -56,8 +56,10 @@ export interface EvaluationRow {
   solved: boolean;
   success: boolean;
   violations: string[];
-  lateral_m?: number;
-  vertical_m?: number;
+  /** Missing/null when no arrival could be measured; consumers must not coerce it to zero. */
+  lateral_m?: number | null;
+  /** Missing/null when no arrival could be measured; consumers must not coerce it to zero. */
+  vertical_m?: number | null;
   speed_ms?: number;
   heading_rad?: number;
   final_time_s?: number;

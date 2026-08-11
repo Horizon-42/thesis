@@ -542,8 +542,60 @@ function rowWhy(row: EvaluationRow): string {
   return row.reason ?? row.violations.join("; ");
 }
 
+type FiniteDeviationRow = EvaluationRow & { lateral_m: number; vertical_m: number };
+type DeviationStatus =
+  | "measured"
+  | "not established"
+  | "not measured"
+  | "invalid (non-finite)"
+  | "not solved";
+
+function hasFiniteDeviations(row: EvaluationRow): row is FiniteDeviationRow {
+  return (
+    typeof row.lateral_m === "number" &&
+    Number.isFinite(row.lateral_m) &&
+    typeof row.vertical_m === "number" &&
+    Number.isFinite(row.vertical_m)
+  );
+}
+
+function deviationStatus(row: EvaluationRow): DeviationStatus {
+  if (!row.solved) return "not solved";
+  if (hasFiniteDeviations(row)) return "measured";
+
+  const values: unknown[] = [row.lateral_m, row.vertical_m];
+  if (
+    values.some(
+      (value) => value != null && (typeof value !== "number" || !Number.isFinite(value)),
+    )
+  ) {
+    return "invalid (non-finite)";
+  }
+  return row.established === false ? "not established" : "not measured";
+}
+
+function deviationStatusClass(status: DeviationStatus): string {
+  if (status === "measured") return "is-measured";
+  if (status === "invalid (non-finite)") return "is-invalid";
+  return "is-unavailable";
+}
+
 export default function EvaluationReportWindow({ report, title, subtitle, onClose }: Props) {
   const solvedRows = useMemo(() => report.trajectories.filter((r) => r.solved), [report]);
+  const measuredRows = useMemo(
+    () => solvedRows.filter(hasFiniteDeviations),
+    [solvedRows],
+  );
+  const deviationAvailability = useMemo(() => {
+    let notMeasured = 0;
+    let invalid = 0;
+    for (const row of solvedRows) {
+      const status = deviationStatus(row);
+      if (status === "invalid (non-finite)") invalid += 1;
+      else if (status !== "measured") notMeasured += 1;
+    }
+    return { notMeasured, invalid, excluded: notMeasured + invalid };
+  }, [solvedRows]);
   const referenceRows = useMemo(
     () => solvedRows.filter((r) => r.reference?.flight_time_delta_s !== undefined),
     [solvedRows],
@@ -552,23 +604,23 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
   const th = report.thresholds;
   const lateralValues = useMemo(
     () =>
-      solvedRows.map((r) => ({
+      measuredRows.map((r) => ({
         label: r.id,
-        value: r.lateral_m ?? 0,
-        pass: (r.lateral_m ?? 0) <= th.lateral_max_m,
+        value: r.lateral_m,
+        pass: r.lateral_m <= th.lateral_max_m,
       })),
-    [solvedRows, th],
+    [measuredRows, th],
   );
   const verticalValues = useMemo(
     () =>
-      solvedRows.map((r) => ({
+      measuredRows.map((r) => ({
         label: r.id,
-        value: r.vertical_m ?? 0,
+        value: r.vertical_m,
         pass:
-          (r.vertical_m ?? 0) >= -th.vertical_below_max_m &&
-          (r.vertical_m ?? 0) <= th.vertical_above_max_m,
+          r.vertical_m >= -th.vertical_below_max_m &&
+          r.vertical_m <= th.vertical_above_max_m,
       })),
-    [solvedRows, th],
+    [measuredRows, th],
   );
   const timePoints = useMemo(
     () =>
@@ -582,24 +634,16 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
   );
   const deviation3DPoints = useMemo(
     () =>
-      solvedRows
-        .filter(
-          (row) =>
-            typeof row.lateral_m === "number" &&
-            Number.isFinite(row.lateral_m) &&
-            typeof row.vertical_m === "number" &&
-            Number.isFinite(row.vertical_m),
-        )
-        .map((row) => ({
-          label: row.id,
-          lateral: row.lateral_m!,
-          vertical: row.vertical_m!,
-          pass:
-            row.lateral_m! <= th.lateral_max_m &&
-            row.vertical_m! >= -th.vertical_below_max_m &&
-            row.vertical_m! <= th.vertical_above_max_m,
-        })),
-    [solvedRows, th],
+      measuredRows.map((row) => ({
+        label: row.id,
+        lateral: row.lateral_m,
+        vertical: row.vertical_m,
+        pass:
+          row.lateral_m <= th.lateral_max_m &&
+          row.vertical_m >= -th.vertical_below_max_m &&
+          row.vertical_m <= th.vertical_above_max_m,
+      })),
+    [measuredRows, th],
   );
 
   // Draggable floating window (same pattern as DynamicsComparisonCharts):
@@ -722,8 +766,18 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
           — the WCH (Wheel Crossing Height) window about the published TCH (Threshold Crossing Height).
         </p>
 
+        {deviationAvailability.excluded > 0 ? (
+          <p className="eval-report-deviation-warning" role="status">
+            {deviationAvailability.excluded} solved{" "}
+            {deviationAvailability.excluded === 1 ? "flight" : "flights"}
+            {" "}excluded from deviation charts: {deviationAvailability.notMeasured} not measured;{" "}
+            {deviationAvailability.invalid} invalid/non-finite. They remain listed below with their
+            deviation status and reason.
+          </p>
+        ) : null}
+
         <table className="dyncmp-final-table eval-report-aggregates">
-          <caption>Aggregates (over solved flights)</caption>
+          <caption>Aggregates (over {observed ? "measured arrivals" : "solved flights"})</caption>
           <thead>
             <tr>
               <th scope="col">metric</th>
@@ -796,20 +850,24 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
           </tbody>
         </table>
 
-        {solvedRows.length > 0 ? (
+        {measuredRows.length > 0 || timePoints.length > 0 ? (
           <div className="dyncmp-charts-grid">
-            <DeviationProfile
-              title="Final lateral deviation, worst → best"
-              points={lateralValues}
-              scale="log"
-              gate={th.lateral_max_m}
-            />
-            <DeviationProfile
-              title="Final vertical deviation, low → high"
-              points={verticalValues}
-              scale="symlog"
-              band={[-th.vertical_below_max_m, th.vertical_above_max_m]}
-            />
+            {measuredRows.length > 0 ? (
+              <>
+                <DeviationProfile
+                  title="Final lateral deviation, worst → best"
+                  points={lateralValues}
+                  scale="log"
+                  gate={th.lateral_max_m}
+                />
+                <DeviationProfile
+                  title="Final vertical deviation, low → high"
+                  points={verticalValues}
+                  scale="symlog"
+                  band={[-th.vertical_below_max_m, th.vertical_above_max_m]}
+                />
+              </>
+            ) : null}
             {deviation3DPoints.length > 0 ? (
               <DeviationScatter3D
                 points={deviation3DPoints}
@@ -820,7 +878,11 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
             {timePoints.length > 0 ? <TimeScatter points={timePoints} /> : null}
           </div>
         ) : (
-          <p className="eval-report-empty">No solved trajectories to chart.</p>
+          <p className="eval-report-empty">
+            {solvedRows.length > 0
+              ? "No finite deviation measurements to chart."
+              : "No solved trajectories to chart."}
+          </p>
         )}
 
         <div className="eval-report-rows">
@@ -831,6 +893,7 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
                 <th scope="col">flight</th>
                 <th scope="col">solved</th>
                 <th scope="col">success</th>
+                <th scope="col">deviation status</th>
                 <th scope="col">lateral (m)</th>
                 <th scope="col">vertical (m)</th>
                 <th scope="col">T (s)</th>
@@ -847,6 +910,9 @@ export default function EvaluationReportWindow({ report, title, subtitle, onClos
                   <th scope="row">{row.id}</th>
                   <td>{row.solved ? "✓" : "✗"}</td>
                   <td>{row.success ? "✓" : "✗"}</td>
+                  <td className={`eval-deviation-status ${deviationStatusClass(deviationStatus(row))}`}>
+                    {deviationStatus(row)}
+                  </td>
                   <td>{formatNum(row.lateral_m, 2)}</td>
                   <td>{formatNum(row.vertical_m, 2)}</td>
                   <td>{formatNum(row.final_time_s)}</td>

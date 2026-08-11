@@ -168,4 +168,73 @@ describe("EvaluationReportWindow", () => {
     expect(screen.getByText("No solved trajectories to chart.")).toBeTruthy();
     expect(screen.queryByText(/mean Δt vs observed/)).toBeNull();
   });
+
+  it("excludes missing and non-finite deviations from plots and identifies them", () => {
+    const observed: EvaluationReport = {
+      ...REPORT,
+      subject: "observed",
+      total: 3,
+      measured: 1,
+      solved: 3,
+      solve_rate: 1,
+      successful: 1,
+      success_rate: 1 / 3,
+      success_rate_among_solved: 1 / 3,
+      observed: {
+        established: 1,
+        not_established: 2,
+        established_rate: 1 / 3,
+        marginal: 0,
+      },
+      reference: null,
+      trajectories: [
+        {
+          id: "MEASURED", file: "measured.json", solved: true, success: true,
+          subject: "observed", established: true, violations: [],
+          lateral_m: 12.5, vertical_m: 1.25, final_time_s: 320,
+        },
+        {
+          id: "NO_CROSSING", file: "missing.json", solved: true, success: false,
+          subject: "observed", established: false, violations: ["not_established"],
+          lateral_m: null, vertical_m: null,
+          reason: "vertical RMS 8.0 m > 6.0 m",
+        },
+        {
+          id: "NON_FINITE", file: "invalid.json", solved: true, success: false,
+          subject: "observed", established: false, violations: ["not_established"],
+          lateral_m: Number.POSITIVE_INFINITY, vertical_m: 2, final_time_s: 315,
+          reason: "invalid derived deviation",
+        },
+      ],
+    };
+
+    render(
+      <EvaluationReportWindow
+        report={observed}
+        title="Observed Baseline Evaluation Report"
+        subtitle="KRDU"
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/2 solved flights excluded from deviation charts/i).textContent)
+      .toContain("1 not measured; 1 invalid/non-finite");
+
+    const lateralChart = screen.getByRole("img", {
+      name: "Final lateral deviation, worst → best",
+    });
+    const verticalChart = screen.getByRole("img", {
+      name: "Final vertical deviation, low → high",
+    });
+    expect(lateralChart.querySelectorAll("circle")).toHaveLength(1);
+    expect(verticalChart.querySelectorAll("circle")).toHaveLength(1);
+    expect(lateralChart.textContent).toContain("MEASURED: 12.50 m");
+    expect(lateralChart.textContent).not.toContain("NO_CROSSING");
+    expect(lateralChart.textContent).not.toContain("NON_FINITE");
+
+    const missingRow = screen.getByText("NO_CROSSING").closest("tr")!;
+    const invalidRow = screen.getByText("NON_FINITE").closest("tr")!;
+    expect(within(missingRow).getByText("not established")).toBeTruthy();
+    expect(within(invalidRow).getByText("invalid (non-finite)")).toBeTruthy();
+  });
 });

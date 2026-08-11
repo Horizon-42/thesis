@@ -3168,6 +3168,17 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   margin: 0 0 10px;
 }
 
+.eval-report-deviation-warning {
+  margin: 0 0 10px;
+  padding: 7px 9px;
+  border: 1px solid rgba(245, 158, 11, 0.38);
+  border-radius: 5px;
+  background: rgba(245, 158, 11, 0.09);
+  color: #f6c76b;
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
 .eval-report-aggregates {
   margin-bottom: 12px;
 }
@@ -3215,6 +3226,24 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   white-space: normal;
   max-width: 260px;
   font-size: 10px;
+}
+
+.eval-report-table td.eval-deviation-status {
+  white-space: nowrap;
+  font-size: 10px;
+}
+
+.eval-report-table td.eval-deviation-status.is-measured {
+  color: #72d99a;
+}
+
+.eval-report-table td.eval-deviation-status.is-unavailable {
+  color: #f6c76b;
+}
+
+.eval-report-table td.eval-deviation-status.is-invalid {
+  color: #ff8f78;
+  font-weight: 600;
 }
 
 /* ── Evaluation summary (below the flight list) ───────────────────────────── */
