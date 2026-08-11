@@ -72,6 +72,14 @@ from config import (  # noqa: E402
     PREDICTION_OUTPUTS,
     TSConfig,
 )
+from approach_clustering.cli import (  # noqa: E402
+    add_cli_arguments as add_approach_cohort_arguments,
+    run_cli as run_approach_cohort_cli,
+)
+from batch_benchmark import (  # noqa: E402
+    add_cli_arguments as add_batch_benchmark_arguments,
+    run_cli as run_batch_benchmark_cli,
+)
 from cross_validation import (  # noqa: E402
     CV_PARAMETER_GRIDS,
     DEFAULT_CV_EPOCHS,
@@ -643,6 +651,18 @@ def main(argv: list[str] | None = None) -> int:
     p_cv.add_argument("--cv-epochs", type=int, default=DEFAULT_CV_EPOCHS)
     p_cv.add_argument("--cv-patience", type=int, default=DEFAULT_CV_PATIENCE)
 
+    p_approach = sub.add_parser(
+        "approach-cohorts",
+        help="build approach clusters or compare checkpoints on a frozen cohort",
+    )
+    add_approach_cohort_arguments(p_approach)
+
+    p_batch_benchmark = sub.add_parser(
+        "benchmark-batch",
+        help="benchmark outer-train CUDA batch throughput",
+    )
+    add_batch_benchmark_arguments(p_batch_benchmark)
+
     p_fit = sub.add_parser(
         "evaluate-fit",
         help="replay a best checkpoint deterministically on fixed-anchor train + validation",
@@ -694,6 +714,12 @@ def main(argv: list[str] | None = None) -> int:
                                 "predictable on a CPU-only machine")
 
     args = parser.parse_args(argv)
+
+    if args.command == "approach-cohorts":
+        return run_approach_cohort_cli(args, parser)
+
+    if args.command == "benchmark-batch":
+        return run_batch_benchmark_cli(args, parser)
 
     if args.command == "freeze-test":
         _model, _config, _normalizer, payload = load_checkpoint(args.checkpoint)

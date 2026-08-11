@@ -99,6 +99,8 @@ The abbreviations and terms of art this README (and `metrics.py` / the summary J
 | `metrics.py` | ADE / FDE plus the along-track / cross-track / altitude decomposition |
 | `export.py` | evaluation records + `summary.json` manifest, via the optimizer's own record emitters |
 | `flyability.py` | closed-form control inversion — what a predicted path would have required, vs the envelope |
+| `approach_clustering/` | train-only approach geometry clustering and shared-cohort comparison CLI |
+| `batch_benchmark.py` | outer-train-only CUDA throughput benchmark used by `benchmark-batch` |
 | `synthetic.py` | synthetic arrivals, so the pipeline is runnable before real data lands |
 | `vendor/` | upstream model code, byte-identical, with `LICENSE` + `PROVENANCE.md` each |
 
@@ -301,18 +303,18 @@ batched rollout graph depth, then backs off one successful power of two as a saf
 for sharper partitions later in training. The result remains runtime-specific rather than a
 hard-coded GPU-name table.
 
-For a throughput-based batch measurement, run the standalone outer-train-only benchmark while
+For a throughput-based batch measurement, run the outer-train-only benchmark subcommand while
 the GPU is otherwise idle:
 
 ```bash
 conda run --no-capture-output -n aeroviz \
-  python -u detect_ts_best_batch.py \
+  python -u 4dTrajectory/ts_transformer/__main__.py benchmark-batch \
   --model itransformer \
   --n-segments 128 \
   --coordinate-frame enu
 ```
 
-Unlike `--batch-size auto`, this script doubles candidates through the configured maximum,
+Unlike `--batch-size auto`, this benchmark doubles candidates through the configured maximum,
 executes repeated real in-memory batch construction + FP32 forward/backward/Adam steps, and selects the highest
 median samples/second rather than the largest allocation that fits. Split membership is
 computed from manifest `flight_key` values before track files are opened: only outer-train

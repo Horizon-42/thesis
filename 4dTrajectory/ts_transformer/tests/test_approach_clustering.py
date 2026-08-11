@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,6 +23,23 @@ from approach_clustering.model import (
     fit_cluster_candidates,
 )
 from development_cohorts import DevelopmentCohort
+
+
+def test_module_cli_bootstraps_repository_dependencies() -> None:
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+
+    result = subprocess.run(
+        [sys.executable, "-m", "approach_clustering", "--help"],
+        cwd=TS_ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "{build,compare}" in result.stdout
 
 
 def test_horizontal_arc_feature_removes_sampling_speed() -> None:

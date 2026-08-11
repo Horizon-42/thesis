@@ -1,12 +1,10 @@
-"""Command-line construction of train-only approach clusters."""
+"""CLI for building approach cohorts and comparing cohort checkpoints."""
 
 from __future__ import annotations
 
 import argparse
 import json
 from pathlib import Path
-
-import numpy as np
 
 from config import TSConfig
 from dataset import (
@@ -18,6 +16,7 @@ from dataset import (
 )
 
 from .artifacts import write_clustering_artifacts
+from .evaluation import compare_checkpoints
 from .features import horizontal_arc_features
 from .model import fit_cluster_candidates
 
@@ -26,19 +25,36 @@ def _cluster_counts(value: str) -> tuple[int, ...]:
     return tuple(int(token) for token in value.split(","))
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Build train-only approach-path clusters and development cohorts"
+def add_cli_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add approach-cohort actions to a CLI parser."""
+    actions = parser.add_subparsers(dest="approach_action", required=True)
+
+    build = actions.add_parser(
+        "build",
+        help="build train-only approach clusters and development cohorts",
     )
-    parser.add_argument("--data", required=True)
-    parser.add_argument("--recipe", required=True, help="history.json carrying TSConfig")
-    parser.add_argument("--runway", required=True)
-    parser.add_argument("--output-dir", required=True)
-    parser.add_argument("--feature-points", type=int, default=32)
-    parser.add_argument("--pca-components", type=int, default=8)
-    parser.add_argument("--clusters", type=_cluster_counts, default=(2, 3, 4))
-    parser.add_argument("--seed", type=int, default=1337)
-    args = parser.parse_args(argv)
+    build.add_argument("--data", required=True)
+    build.add_argument("--recipe", required=True, help="history.json carrying TSConfig")
+    build.add_argument("--runway", required=True)
+    build.add_argument("--output-dir", required=True)
+    build.add_argument("--feature-points", type=int, default=32)
+    build.add_argument("--pca-components", type=int, default=8)
+    build.add_argument("--clusters", type=_cluster_counts, default=(2, 3, 4))
+    build.add_argument("--seed", type=int, default=1337)
+
+    compare = actions.add_parser(
+        "compare",
+        help="compare checkpoints on one frozen validation approach cohort",
+    )
+    compare.add_argument("--data", required=True)
+    compare.add_argument("--cohort", required=True)
+    compare.add_argument("--checkpoint", action="append", required=True)
+    compare.add_argument("--label", action="append", required=True)
+    compare.add_argument("--output", required=True)
+    compare.add_argument("--device", default="cuda")
+
+
+def _build_clusters(args: argparse.Namespace) -> int:
 
     recipe = json.loads(Path(args.recipe).read_text(encoding="utf-8"))
     config = TSConfig.from_dict(recipe["config"])
@@ -96,3 +112,49 @@ def main(argv: list[str] | None = None) -> int:
     for name, path in paths.items():
         print(f"  {name}: {path}")
     return 0
+
+
+def _compare_cohorts(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+) -> int:
+    if len(args.checkpoint) != len(args.label):
+        parser.error("repeat --checkpoint and --label the same number of times")
+    document = compare_checkpoints(
+        data=args.data,
+        cohort_path=args.cohort,
+        checkpoints=args.checkpoint,
+        labels=args.label,
+        output_path=args.output,
+        device_name=args.device,
+    )
+    for experiment in document["experiments"]:
+        metrics = experiment["shared_validation"]["common_grid_metrics"]
+        print(
+            f"{experiment['label']}: ADE={metrics['ade_m']:.1f} m "
+            f"FDE={metrics['fde_m']:.1f} m "
+            f"terminal velocity={metrics['terminal_velocity_error_mps']:.2f} m/s"
+        )
+    print(f"wrote {args.output}")
+    return 0
+
+
+def run_cli(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+) -> int:
+    """Dispatch one parsed approach-cohort action."""
+    if args.approach_action == "build":
+        return _build_clusters(args)
+    if args.approach_action == "compare":
+        return _compare_cohorts(args, parser)
+    parser.error(f"unknown approach-cohort action: {args.approach_action}")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="approach_clustering",
+        description="Approach-path clustering and frozen-cohort comparison",
+    )
+    add_cli_arguments(parser)
+    return run_cli(parser.parse_args(argv), parser)

@@ -82,7 +82,34 @@ RWY 30L cohort 包含 1810 条 train 和 411 条 validation 航迹。PCA 和 K-m
 
 因此，当前不应把单 QFU 或单簇硬筛选替换为新基线。若继续研究意图，优先保留全部训练数据，再把 QFU/进近簇作为条件输入、辅助分类目标或解耦路由信号；先验证“共享 backbone + 条件化”的收益，再考虑独立 expert。聚类仍可作为 train-only 标签生成器复用。
 
-## 7. 可复现实验产物
+## 7. 当前 CLI
+
+聚类构建与同 cohort 比较现已统一到 TS CLI：
+
+```bash
+TS=4dTrajectory/ts_transformer/__main__.py
+DATA=trajectory_data_process/outputs/harvest/KSJC/arrivals/manifest.json
+EXP=4dTrajectory/outputs/KSJC/experiments/approach_intent_20260802
+
+conda run -n aeroviz python "$TS" approach-cohorts build \
+  --data "$DATA" \
+  --recipe "$EXP/a_all_qfu/history.json" \
+  --runway 30L \
+  --output-dir "$EXP/clustering"
+
+conda run -n aeroviz python "$TS" approach-cohorts compare \
+  --data "$DATA" \
+  --cohort "$EXP/clustering/dominant_cluster_cohort.json" \
+  --checkpoint "$EXP/a_all_qfu/checkpoint.pt" --label A-all-QFU \
+  --checkpoint "$EXP/b_qfu_30l/checkpoint.pt" --label B-QFU-30L \
+  --checkpoint "$EXP/c_dominant_cluster/checkpoint.pt" --label C-dominant-cluster \
+  --output "$EXP/comparison.json"
+```
+
+开发 cohort 仍通过训练命令的 `--development-cohort` 参数使用。若只处理聚类子包，亦可在
+`4dTrajectory/ts_transformer/` 下运行 `python -m approach_clustering build|compare`。
+
+## 8. 可复现实验产物
 
 - 聚类摘要：`4dTrajectory/outputs/KSJC/experiments/approach_intent_20260802/clustering/summary.json`
 - 冻结聚类模型与分配：`4dTrajectory/outputs/KSJC/experiments/approach_intent_20260802/clustering/approach_clusters.json`

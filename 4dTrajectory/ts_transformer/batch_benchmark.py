@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """Benchmark the fastest TS training batch using outer-train trajectory data only.
 
 This is a performance probe, not model fitting: every candidate rebuilds the same model,
@@ -22,8 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
-REPO_ROOT = Path(__file__).resolve().parent
-TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+TS_DIR = Path(__file__).resolve().parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 if str(TS_DIR) not in sys.path:
@@ -311,8 +310,8 @@ def select_best_batch(results: Sequence[dict[str, Any]]) -> dict[str, Any]:
     )
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+def add_cli_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add throughput-benchmark options to a CLI parser."""
     parser.add_argument("--airports", type=_parse_airports, default=None,
                         help="comma-separated airport roster; default: all discovered K-airports")
     parser.add_argument("--model", choices=MODELS, default="itransformer")
@@ -336,7 +335,10 @@ def main() -> int:
     parser.add_argument("--measure-steps", type=int, default=10)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--output", type=Path, default=None)
-    args = parser.parse_args()
+
+
+def run_cli(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    """Execute a parsed throughput benchmark command."""
 
     if args.max_batch < args.min_batch:
         parser.error("--max-batch must be >= --min-batch")
@@ -487,6 +489,12 @@ def main() -> int:
     }, indent=2), flush=True)
     print(f"BEST_BATCH_SIZE={best['batch_size']}", flush=True)
     return 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    add_cli_arguments(parser)
+    return run_cli(parser.parse_args(argv), parser)
 
 
 if __name__ == "__main__":

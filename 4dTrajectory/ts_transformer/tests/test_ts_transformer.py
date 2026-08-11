@@ -45,7 +45,7 @@ import build_multiflight_capacity_report as capacity_report  # noqa: E402
 import coordinate_frames as frames  # noqa: E402
 import cross_validation as cv  # noqa: E402
 import dataset as dataset_module  # noqa: E402
-import detect_ts_best_batch as batch_probe  # noqa: E402
+import batch_benchmark as batch_probe  # noqa: E402
 import evaluation_protocol  # noqa: E402
 import experiment_index  # noqa: E402
 import fixed_dt_control_loss as fixed_dt_loss_module  # noqa: E402
@@ -1258,47 +1258,6 @@ def test_batch_probe_opens_outer_train_track_files_only(tmp_path):
     assert audit["loaded_source_tracks"] == {
         "train": counts["train"], "validation": 0, "test": 0,
     }
-
-
-def test_batch_probe_candidate_grid_and_throughput_selection():
-    assert batch_probe.candidate_batch_sizes(32, 256) == [32, 64, 128, 256]
-    best = batch_probe.select_best_batch([
-        {"batch_size": 64, "status": "ok", "median_samples_per_second": 1000.0},
-        {"batch_size": 128, "status": "ok", "median_samples_per_second": 1400.0},
-        {"batch_size": 256, "status": "oom"},
-    ])
-    assert best["batch_size"] == 128
-
-
-def test_batch_benchmark_executes_current_training_loss(monkeypatch):
-    series, config = _series(
-        n_flights=4,
-        device="cpu",
-        seq_len=20,
-        n_segments=8,
-        d_model=8,
-        d_ff=16,
-        n_heads=2,
-        e_layers=1,
-    )
-    normalizer = _identity_normalizer()
-    windows = FixedAnchorTrajectoryWindows(series, config, normalizer)
-    monkeypatch.setattr(torch.cuda, "reset_peak_memory_stats", lambda _device: None)
-    monkeypatch.setattr(torch.cuda, "synchronize", lambda _device: None)
-    monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda _device: 0)
-    monkeypatch.setattr(torch.cuda, "max_memory_reserved", lambda _device: 0)
-
-    result = batch_probe.benchmark_candidate(
-        windows,
-        config,
-        torch.device("cpu"),
-        batch_size=2,
-        warmup_steps=1,
-        measure_steps=1,
-        repeats=1,
-    )
-
-    assert result["status"] == "ok"
 
 
 def test_ts_load_rejects_duplicate_manifest_identity(tmp_path):
