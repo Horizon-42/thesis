@@ -48,8 +48,11 @@ whether the trajectory looks plausible in the runway/approach context.
   AeroViz browser assets.
 - `generate_aeroviz_airport_procedure_data.sh`: RNAV/RNP procedure asset
   generation shortcut.
-- `bc_lidar_downloader/`, `usgs_lidar_downloader/`, `opentopography_downloader/`:
-  standalone terrain/DSM/DEM acquisition helpers.
+- `tnm_elevation_downloader/`: terrain acquisition used by the full airport
+  preprocessing pipeline.
+- `bc_lidar_downloader/`, `usgs_lidar_downloader/`: standalone regional
+  LiDAR/DSM acquisition helpers whose GeoTIFF outputs can be passed to the
+  local-terrain builder.
 - `aerodrome_model/`, `aerodynamic_model/`, `runway_schedule/`,
   `flight_procedure_design/`, `4dTrajectory/`, `models/`: research notes,
   literature, model explorations, and supporting aviation material.
@@ -94,15 +97,22 @@ FAA RNAV chart PDFs
   -> procedure preprocessing publishes chart manifests/assets
 ```
 
-Terrain path:
+Current terrain path:
 
 ```text
-OpenTopography DEM or LiDAR-derived DSM/DEM
-  -> data/opentopography, data/usgs_lidar, or data/bc_lidar
-  -> aeroviz-4d/scripts/build_dsm_heightmap_terrain.mjs
-  -> public/data/airports/<ICAO>/dsm/heightmap-terrain/**
-  -> aeroviz-4d/src/hooks/useDsmTerrainLayer.ts
+USGS TNM DEM or LiDAR-derived DSM
+  -> tnm_elevation_downloader/download_tnm_elevation.py
+  -> data/usgs_tnm_elevation/<ICAO>/
+  -> aeroviz-4d/python/preprocess_usgs_tnm_terrain.py
+  -> public/data/airports/<ICAO>/local-terrain/sources/**
+  -> aeroviz-4d/scripts/build_local_terrain_heightmap.mjs
+  -> public/data/airports/<ICAO>/local-terrain/heightmap/**
+  -> aeroviz-4d/src/hooks/useAirportLocalTerrainLayer.ts
 ```
+
+Existing GeoTIFFs under
+`public/data/airports/<ICAO>/local-terrain/sources/` remain valid inputs and let
+the full pipeline skip terrain acquisition.
 
 ## AeroViz-4D Frontend Architecture
 
@@ -117,8 +127,9 @@ context plus `useState`; there is no Redux/Zustand. Important state includes:
   `public/data/airports/index.json`; default airport is currently `KRDU`.
 - `selectedFlightId`: selected/tracked aircraft.
 - `trajectoryDataSource`: loaded CZML data source.
-- `layers`: visibility flags for terrain, DSM terrain, runways, waypoints,
-  OCS surfaces, trajectories, obstacles, obstacle labels, and procedures.
+- `layers`: visibility flags for world and airport-local terrain, local terrain
+  visual aids, runways, waypoints, OCS surfaces, trajectories, obstacles,
+  obstacle labels, and procedures.
 - Procedure UI state: branch visibility, annotations, width measurement, display
   level, selected annotation.
 - Runway profile UI state.
@@ -126,7 +137,7 @@ context plus `useState`; there is no Redux/Zustand. Important state includes:
 `aeroviz-4d/src/App.tsx` routes between:
 
 - main flight view,
-- `/dsm-terrain-demo` or `#dsm-terrain-demo`,
+- `/local-terrain-demo` or `#local-terrain-demo`,
 - `/procedure-details` or `#procedure-details`.
 
 Cesium integration is mostly in hooks:
@@ -134,7 +145,8 @@ Cesium integration is mostly in hooks:
 - `useCesiumViewer`: initialize viewer, load airport config, set camera.
 - `useCzmlLoader`: load trajectory CZML and synchronize clock/data source.
 - `useRunwayLayer`, `useWaypointLayer`, `useObstacleLayer`, `useTerrainLayer`,
-  `useDsmTerrainLayer`, `useOcsLayer`, `useProcedureSegmentLayer`: layer
+  `useAirportLocalTerrainLayer`, `useTerrainHillshadeLayer`,
+  `useTerrainHeightTintLayer`, `useOcsLayer`, `useProcedureSegmentLayer`: layer
   lifecycle and Cesium entity/data source management.
 
 Pure geometry and assessment logic lives under `aeroviz-4d/src/utils/` and
@@ -206,7 +218,7 @@ npm run dev
 npm run build
 npm test -- --run
 npm run test:coverage
-npm run build:dsm-heightmap-terrain -- --airport KRDU
+npm run build:local-terrain -- --airport KRDU
 ```
 
 Python environment note from `aeroviz-4d/agent.md`: use the conda `aviation`

@@ -27,8 +27,8 @@ npm test                             # Vitest (watch mode)
 npx vitest run                       # Single run, no watch
 npx vitest run src/utils/__tests__/ocsGeometry.test.ts  # Single test file
 npm run test:coverage                # Coverage report
-npm run build:dsm-tiles              # Build 3D Tiles from GeoTIFF
-npm run build:dsm-heightmap-terrain  # Generate heightmap terrain tiles
+npm run build:local-terrain          # Generate airport-local heightmap terrain
+npm run build:local-terrain:visual-assets  # Regenerate terrain visual aids only
 ```
 
 ### Python (aeroviz-4d/python/)
@@ -65,7 +65,11 @@ Components read context via `useApp()` hook. CesiumJS logic is encapsulated in c
 - `useCesiumViewer` — initializes Viewer, loads airport.json, sets camera
 - `useCzmlLoader` — loads CZML data source, syncs Cesium clock
 - `useRunwayLayer` / `useTerrainLayer` — data layer management
-- `useDsmTerrainLayer` — loads preprocessed `.f32` heightmap tiles via `terrain/dsmHeightmapTerrain.ts`; returns `{ status, metadata, provider, error }` so consumers can display terrain info or manage toggling; controlled by `layers.dsmTerrain` toggle in the main app
+- `useAirportLocalTerrainLayer` — loads airport-scoped `.f32` heightmap tiles
+  via `terrain/airportLocalTerrain.ts`; controlled by the
+  `layers.airportLocalTerrain` toggle in the main app
+- `useTerrainHillshadeLayer` / `useTerrainHeightTintLayer` — drape generated
+  local-terrain visual aids over the active airport
 
 UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via CSS grid with `pointer-events: none`.
 

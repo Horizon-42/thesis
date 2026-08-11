@@ -1,8 +1,9 @@
 # USGS LiDAR DSM Downloader
 
 This subpackage downloads USGS 3DEP LiDAR point cloud source around US airports
-and derives DSM GeoTIFFs with PDAL. DEM rasters for the full AeroViz airport
-pipeline are handled by `opentopography_downloader`.
+and derives DSM GeoTIFFs with PDAL. The full AeroViz airport pipeline acquires
+its DEM or DSM source through `tnm_elevation_downloader`; this subpackage is a
+standalone alternative for producing DSM GeoTIFF inputs.
 
 ## Sources
 
@@ -23,19 +24,19 @@ into DSM GeoTIFFs.
 Dry-run around an airport:
 
 ```bash
-python usgs_lidar_downloader/download_usgs_lidar.py KSFO --dry-run
+conda run -n aeroviz python usgs_lidar_downloader/download_usgs_lidar.py KSFO --dry-run
 ```
 
 Download DSM source LAZ files and derived DSM GeoTIFFs:
 
 ```bash
-python usgs_lidar_downloader/download_usgs_lidar.py KSFO
+conda run -n aeroviz python usgs_lidar_downloader/download_usgs_lidar.py KSFO
 ```
 
 Multiple airports:
 
 ```bash
-python usgs_lidar_downloader/download_usgs_lidar.py KSFO KLAX KJFK
+conda run -n aeroviz python usgs_lidar_downloader/download_usgs_lidar.py KSFO KLAX KJFK
 ```
 
 By default the script downloads DSM inputs only. DSM for CONUS is downloaded as
@@ -89,14 +90,14 @@ After deriving DSM GeoTIFFs, run the existing heightmap builder:
 
 ```bash
 cd aeroviz-4d
-npm run build:dsm-heightmap-terrain -- --airport KSFO
+npm run build:local-terrain -- --airport KSFO
 ```
 
-The builder now checks `../data/usgs_lidar/<AIRPORT>/dsm` after
-`../data/bc_lidar/<AIRPORT>/dsm`. You can also point it explicitly:
+The generic builder can discover `../data/usgs_lidar/<AIRPORT>/dsm`, or you can
+point it explicitly:
 
 ```bash
-npm run build:dsm-heightmap-terrain -- \
+npm run build:local-terrain -- \
   --airport KSFO \
   --input-dir ../data/usgs_lidar/KSFO/dsm
 ```

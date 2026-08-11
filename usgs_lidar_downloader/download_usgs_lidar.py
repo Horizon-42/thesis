@@ -8,11 +8,11 @@ The output layout intentionally mirrors the BC LiDAR downloader:
     <out>/<AIRPORT>/dsm/source_laz/*.laz
     <out>/<AIRPORT>/download_manifest.csv
 
-The full AeroViz preprocessing pipeline downloads DEM rasters through
-opentopography_downloader. For DSM in the conterminous United States, USGS
-normally publishes LiDAR point cloud tiles rather than ready-made DSM rasters.
-This script therefore downloads LPC LAZ files as the DSM source and can
-optionally derive DSM GeoTIFFs with PDAL.
+The full AeroViz preprocessing pipeline acquires DEM or DSM source through
+tnm_elevation_downloader. This standalone helper focuses on DSM in the
+conterminous United States, where USGS normally publishes LiDAR point cloud
+tiles rather than ready-made DSM rasters. It downloads LPC LAZ files as the DSM
+source and can optionally derive DSM GeoTIFFs with PDAL.
 """
 
 from __future__ import annotations
@@ -70,8 +70,9 @@ DSM_SOURCES: dict[str, dict[str, str]] = {
 }
 
 # Default workflow configuration. The command line is intentionally small.
-# DEM is handled by opentopography_downloader in the full airport pipeline, so
-# this USGS downloader stays focused on LPC DSM source and DSM GeoTIFF derivation.
+# DEM and DSM acquisition for the full airport pipeline is handled by
+# tnm_elevation_downloader, so this standalone helper stays focused on LPC DSM
+# source and DSM GeoTIFF derivation.
 DEFAULT_PRODUCT = "dsm"
 DEFAULT_DEM_DATASET = "1m"
 DEFAULT_DSM_SOURCE = "lpc"
